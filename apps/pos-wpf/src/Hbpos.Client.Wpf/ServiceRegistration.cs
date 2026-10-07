@@ -150,7 +150,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<ClientLogOutboxStore>(),
             sp.GetRequiredService<ApplicationLogOptions>(),
             sp.GetRequiredService<IHttpClientFactory>().CreateClient(ApplicationLogUploadClientName),
-            TimeProvider.System));
+            TimeProvider.System,
+            () => sp.GetRequiredService<ClientLogOutboxWriter>().RuntimeQueueDroppedCount));
         services.AddSingleton(sp => new OperationAuditUploadService(
             sp.GetRequiredService<ClientLogOutboxStore>(),
             sp.GetRequiredService<IHttpClientFactory>().CreateClient(OperationAuditUploadClientName),

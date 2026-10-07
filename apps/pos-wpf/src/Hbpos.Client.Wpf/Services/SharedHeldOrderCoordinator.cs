@@ -544,6 +544,26 @@ public sealed class SharedHeldOrderCoordinator(
             }
         }
 
+        if (mismatches.Count > 0)
+        {
+            // 对账发现无法恢复的 claim：本地/服务端事实都保留，需要人工核对，每条单独留痕（登录时一次，不会刷屏）。
+            foreach (var mismatch in mismatches)
+            {
+                ConsoleLog.WriteWarning(
+                    "HeldOrder",
+                    $"shared held order reconcile mismatch claimGuid={mismatch.ClaimId:D} holdGuid={mismatch.HoldGuid?.ToString("D") ?? "<none>"} " +
+                    $"reason={mismatch.Reason}",
+                    new ApplicationLogContext(
+                        TraceId: mismatch.ClaimId.ToString("D"),
+                        Properties: new Dictionary<string, object?>
+                        {
+                            ["storeCode"] = session.StoreCode,
+                            ["deviceCode"] = session.DeviceCode,
+                            ["operation"] = "reconcile"
+                        }));
+            }
+        }
+
         return new SharedHeldOrderReconcileResult(restored, reconciledPrepared, mismatches);
     }
 

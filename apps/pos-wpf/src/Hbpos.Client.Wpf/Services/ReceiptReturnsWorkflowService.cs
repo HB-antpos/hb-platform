@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Http;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Contracts.Catalog;
@@ -149,17 +150,26 @@ public sealed class ReceiptReturnsWorkflowService(
                     }
                 }
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
                 var result = new ReceiptReturnLookupResult(
                     null,
                     false,
                     false,
                     T("returns.status.lookupTimedOut", "Online order lookup timed out. Please retry."));
-                ConsoleLog.Write(
+                // 自建 2 秒超时触发（收银员未取消）：Warning 并写明 reason=timeout。
+                ConsoleLog.WriteWarning(
                     "ReceiptReturns",
-                    $"lookup timed-out queryType={queryType} queryLength={query.Length} " +
-                    $"elapsedMs={stopwatch.ElapsedMilliseconds}");
+                    $"lookup timed-out queryType={queryType} queryLength={query.Length} reason=timeout " +
+                    $"elapsedMs={stopwatch.ElapsedMilliseconds}",
+                    new ApplicationLogContext(Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = session.StoreCode,
+                        ["deviceCode"] = session.DeviceCode,
+                        ["reason"] = "timeout",
+                        ["elapsedMs"] = stopwatch.ElapsedMilliseconds
+                    }),
+                    ex);
                 return result;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -172,11 +182,31 @@ public sealed class ReceiptReturnsWorkflowService(
                         ReturnRecordsMayBeStale = true,
                         StatusMessage = Format("returns.status.loadedLocalStaleWithError", "Loaded local order; online return records may be stale. {0}", ex.Message)
                     };
-                ConsoleLog.Write(
-                    "ReceiptReturns",
-                    $"lookup remote-failed queryType={queryType} queryLength={query.Length} " +
-                    $"fallbackFound={result.Order is not null} error={ex.GetType().Name} " +
-                    $"elapsedMs={stopwatch.ElapsedMilliseconds}");
+                // 联网失败（API/断网）已由订单历史客户端记 Warning，这里只记明走了本地降级路径（Information）；
+                // 其它异常（映射、本地故障）客户端看不到，升级为 Warning 并带异常。
+                var fallbackMessage =
+                    $"lookup remote-failed fallback=local queryType={queryType} queryLength={query.Length} " +
+                    $"fallbackFound={result.Order is not null} error={ex.GetType().Name} message={ex.Message} " +
+                    $"elapsedMs={stopwatch.ElapsedMilliseconds}";
+                var fallbackContext = new ApplicationLogContext(
+                        StatusCode: ex is CatalogApiException { StatusCode: { } status } ? (int)status : null,
+                        Properties: new Dictionary<string, object?>
+                        {
+                            ["storeCode"] = session.StoreCode,
+                            ["deviceCode"] = session.DeviceCode,
+                            ["mode"] = "local-fallback",
+                            ["errorCode"] = (ex as CatalogApiException)?.ErrorCode,
+                            ["elapsedMs"] = stopwatch.ElapsedMilliseconds
+                        });
+                if (ex is CatalogApiException or HttpRequestException)
+                {
+                    ConsoleLog.WriteInformation("ReceiptReturns", fallbackMessage, fallbackContext);
+                }
+                else
+                {
+                    ConsoleLog.WriteWarning("ReceiptReturns", fallbackMessage, fallbackContext, ex);
+                }
+
                 return result;
             }
         }

@@ -366,7 +366,25 @@ public sealed class AppUpdateCoordinator(
                 state.SetStatus("settings.status.appUpdateCheckFailed");
             }
 
-            return (null, AppUpdateCoordinatorResult.CheckFailed());
+            // 中文注释：把失败原因带进结果（调用方仅用于日志），并单独记 Warning；检查频率低，无需节流。
+            var statusCode = ex is HttpRequestException { StatusCode: { } status } ? (int)status : (int?)null;
+            var errorCode = statusCode is { } code
+                ? $"HTTP_{code}"
+                : ex is TaskCanceledException ? "TIMEOUT" : ex.GetType().Name;
+            ConsoleLog.WriteWarning(
+                "AppUpdate",
+                $"app update check failed errorCode={errorCode} manual={manual} background={background} error={ex.GetType().Name}",
+                new ApplicationLogContext(
+                    RequestPath: "api/app-update/check",
+                    RequestMethod: "GET",
+                    StatusCode: statusCode,
+                    Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["errorCode"] = errorCode,
+                        ["mode"] = manual ? "manual" : background ? "background" : "startup"
+                    }),
+                ex);
+            return (null, AppUpdateCoordinatorResult.CheckFailed(errorCode, ex.Message));
         }
 
         if (update.CheckFailed)

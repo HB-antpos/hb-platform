@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
@@ -171,13 +172,28 @@ public sealed class OrderHistoryApiClient(HttpClient httpClient) : IOrderHistory
             ("take", request.Take.ToString(CultureInfo.InvariantCulture)));
             using var queryTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         queryTimeout.CancelAfter(QueryTimeout);
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            using var response = await httpClient.GetAsync(requestUri, queryTimeout.Token);
-            return await ReadApiResultAsync<OrderHistoryQueryResponse>(response, queryTimeout.Token);
+            return await SendAsync<OrderHistoryQueryResponse>(
+                token => httpClient.GetAsync(requestUri, token),
+                "GET",
+                "api/v1/orders/history",
+                traceId: null,
+                queryTimeout.Token);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            // 自建 2 秒超时（调用方未取消）：单独记 Warning，便于区分慢查询与断网。
+            LogFailure(
+                "GET",
+                "api/v1/orders/history",
+                traceId: null,
+                statusCode: null,
+                errorCode: "ORDER_HISTORY_QUERY_TIMEOUT",
+                stopwatch.ElapsedMilliseconds,
+                ex,
+                reason: "timeout");
             throw new CatalogApiException(
                 "在线订单查询超过 2 秒，请缩小日期范围后重试。 / Online order search exceeded 2 seconds. Narrow the date range and retry.",
                 HttpStatusCode.RequestTimeout,
@@ -190,30 +206,97 @@ public sealed class OrderHistoryApiClient(HttpClient httpClient) : IOrderHistory
         Guid orderGuid,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.GetAsync(
-            $"api/v1/orders/history/{Uri.EscapeDataString(orderGuid.ToString("D"))}",
+        var path = $"api/v1/orders/history/{Uri.EscapeDataString(orderGuid.ToString("D"))}";
+        return await SendAsync<OrderHistoryDetailsDto?>(
+            token => httpClient.GetAsync(path, token),
+            "GET",
+            path,
+            orderGuid.ToString("D"),
             cancellationToken);
-
-        return await ReadApiResultAsync<OrderHistoryDetailsDto?>(response, cancellationToken);
     }
 
     public async Task<OrderReturnContextDto?> GetReturnContextAsync(
         Guid orderGuid,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.GetAsync(
-            $"api/v1/orders/history/{Uri.EscapeDataString(orderGuid.ToString("D"))}/return-context",
+        var path = $"api/v1/orders/history/{Uri.EscapeDataString(orderGuid.ToString("D"))}/return-context";
+        return await SendAsync<OrderReturnContextDto?>(
+            token => httpClient.GetAsync(path, token),
+            "GET",
+            path,
+            orderGuid.ToString("D"),
             cancellationToken);
-
-        return await ReadApiResultAsync<OrderReturnContextDto?>(response, cancellationToken);
     }
 
     public async Task<OrderReturnRecordCreateResponse> CreateReturnRecordsAsync(
         OrderReturnRecordCreateRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var response = await httpClient.PostAsJsonAsync("api/v1/orders/returns", request, JsonOptions, cancellationToken);
-        return await ReadApiResultAsync<OrderReturnRecordCreateResponse>(response, cancellationToken);
+        return await SendAsync<OrderReturnRecordCreateResponse>(
+            token => httpClient.PostAsJsonAsync("api/v1/orders/returns", request, JsonOptions, token),
+            "POST",
+            "api/v1/orders/returns",
+            request.ReturnOrderGuid.ToString("D"),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// 发送并解析；失败（断网、非 2xx、非法 JSON、success=false）统一记一条 Warning 后原样抛出。
+    /// 查询类接口成功不记，避免历史页翻查刷屏；超时与取消由调用方处理。
+    /// </summary>
+    private static async Task<T> SendAsync<T>(
+        Func<CancellationToken, Task<HttpResponseMessage>> send,
+        string method,
+        string requestPath,
+        string? traceId,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            using var response = await send(cancellationToken);
+            return await ReadApiResultAsync<T>(response, cancellationToken);
+        }
+        catch (CatalogApiException ex)
+        {
+            LogFailure(method, requestPath, traceId, ex.StatusCode is { } status ? (int)status : null, ex.ErrorCode, stopwatch.ElapsedMilliseconds, ex, reason: null);
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            LogFailure(method, requestPath, traceId, statusCode: null, errorCode: null, stopwatch.ElapsedMilliseconds, ex, reason: "network");
+            throw;
+        }
+    }
+
+    private static void LogFailure(
+        string method,
+        string requestPath,
+        string? traceId,
+        int? statusCode,
+        string? errorCode,
+        long elapsedMs,
+        Exception exception,
+        string? reason)
+    {
+        ConsoleLog.WriteWarning(
+            "OrderHistory",
+            $"order history api failed method={method} path={requestPath} " +
+            $"http={statusCode?.ToString(CultureInfo.InvariantCulture) ?? "<none>"} errorCode={errorCode ?? "<null>"} " +
+            (reason is null ? string.Empty : $"reason={reason} ") +
+            $"message={exception.Message} elapsedMs={elapsedMs}",
+            new ApplicationLogContext(
+                TraceId: traceId,
+                RequestPath: requestPath,
+                RequestMethod: method,
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = errorCode,
+                    ["reason"] = reason,
+                    ["elapsedMs"] = elapsedMs
+                }),
+            exception);
     }
 
     private static async Task<T> ReadApiResultAsync<T>(

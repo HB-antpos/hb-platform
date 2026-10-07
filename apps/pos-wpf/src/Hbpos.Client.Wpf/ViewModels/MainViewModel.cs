@@ -115,6 +115,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _catalogDownloadHideTimer = new();
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly object _connectivityRefreshSync = new();
+    // 运行状态上报每 15 秒一次：失败/恢复只在切换时记日志，定时器与关机路径可能并发，用独立锁保护。
+    private readonly object _runtimeStatusLogSync = new();
+    private bool _runtimeStatusFailing;
+    private DateTimeOffset _runtimeStatusFailingSinceUtc;
+    private int _runtimeStatusFailedAttempts;
 
     private bool _isApplyingCulture;
     private bool _schemaReady;
@@ -3234,16 +3239,88 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     cashier?.CashierId,
                     cashier?.CashierName),
                 cancellationToken);
+            RecordRuntimeStatusReportSucceeded();
         }
         catch (OperationCanceledException) when (
             throwOnCancellation && cancellationToken.IsCancellationRequested)
         {
             throw;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 关机/刷新被取消属于预期，不算上报失败。
+        }
         catch (Exception ex)
         {
-            ConsoleLog.Write("RuntimeStatus", $"runtime status report failed error={ex.Message}");
+            RecordRuntimeStatusReportFailed(ex);
         }
+    }
+
+    private void RecordRuntimeStatusReportFailed(Exception exception)
+    {
+        lock (_runtimeStatusLogSync)
+        {
+            if (_runtimeStatusFailing)
+            {
+                _runtimeStatusFailedAttempts++;
+                return;
+            }
+
+            _runtimeStatusFailing = true;
+            _runtimeStatusFailingSinceUtc = DateTimeOffset.UtcNow;
+            _runtimeStatusFailedAttempts = 1;
+        }
+
+        var statusCode = exception is System.Net.Http.HttpRequestException { StatusCode: { } status } ? (int)status : (int?)null;
+        var reason = exception switch
+        {
+            TaskCanceledException => "timeout",
+            System.Net.Http.HttpRequestException { StatusCode: not null } => "http-status",
+            System.Net.Http.HttpRequestException => "network",
+            _ => "unexpected"
+        };
+        ConsoleLog.WriteWarning(
+            "RuntimeStatus",
+            $"runtime status report failing reason={reason} status={statusCode?.ToString() ?? "-"} error={exception.GetType().Name}",
+            new ApplicationLogContext(
+                RequestPath: "api/v1/devices/runtime-status",
+                RequestMethod: "POST",
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["reason"] = reason
+                }),
+            exception);
+    }
+
+    private void RecordRuntimeStatusReportSucceeded()
+    {
+        long offlineSeconds;
+        int failedAttempts;
+        lock (_runtimeStatusLogSync)
+        {
+            if (!_runtimeStatusFailing)
+            {
+                return;
+            }
+
+            offlineSeconds = (long)(DateTimeOffset.UtcNow - _runtimeStatusFailingSinceUtc).TotalSeconds;
+            failedAttempts = _runtimeStatusFailedAttempts;
+            _runtimeStatusFailing = false;
+            _runtimeStatusFailedAttempts = 0;
+        }
+
+        ConsoleLog.WriteInformation(
+            "RuntimeStatus",
+            $"runtime status report recovered offlineSeconds={offlineSeconds} failedAttempts={failedAttempts}",
+            new ApplicationLogContext(
+                RequestPath: "api/v1/devices/runtime-status",
+                RequestMethod: "POST",
+                Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["offlineSeconds"] = offlineSeconds,
+                    ["attemptCount"] = failedAttempts
+                }));
     }
 
     private static Task CancelForShutdownAsync(

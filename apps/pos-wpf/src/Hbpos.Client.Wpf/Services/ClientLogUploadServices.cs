@@ -44,6 +44,7 @@ internal abstract class ClientLogUploadServiceBase : BackgroundService
     private readonly int _batchSize;
     private readonly SemaphoreSlim _uploadGate = new(1, 1);
     private readonly SemaphoreSlim _wakeSignal = new(0, 1);
+    private bool _authorizationFailureReported;
 
     protected ClientLogUploadServiceBase(
         ClientLogOutboxStore store,
@@ -100,6 +101,7 @@ internal abstract class ClientLogUploadServiceBase : BackgroundService
         {
             await _store.InitializeAsync(cancellationToken);
             await _store.DeleteExpiredRejectedAsync(nowUtc, cancellationToken);
+            ReportChannelHealth();
             if (!IsEnabled)
             {
                 return;
@@ -186,6 +188,7 @@ internal abstract class ClientLogUploadServiceBase : BackgroundService
                 try
                 {
                     await ApplyAcknowledgementsAsync(response, records, nowUtc, cancellationToken);
+                    _authorizationFailureReported = false;
                     if (wakeAfterSuccessfulFullAuditBatch &&
                         _kind == ClientLogOutboxKind.OperationAudit &&
                         records.Count == _batchSize)
@@ -370,6 +373,21 @@ internal abstract class ClientLogUploadServiceBase : BackgroundService
             delay = TimeSpan.FromMinutes(30);
             // 鉴权配置错误直接写本地诊断通道，明确绕开 ConsoleLog sink。
             WriteInternalDiagnostic($"CRITICAL configuration failure kind={_kind} http={(int)response.StatusCode}");
+            if (_kind == ClientLogOutboxKind.OperationAudit && !_authorizationFailureReported)
+            {
+                // 审计上传被拒时运行日志通道通常仍可用，只在状态切换时记一次，恢复成功后才允许再次记录。
+                _authorizationFailureReported = true;
+                ConsoleLog.WriteWarning(
+                    "LogUpload",
+                    $"operation audit upload unauthorized http={(int)response.StatusCode} pending={records.Count} retryInMinutes={delay.TotalMinutes:0}",
+                    new ApplicationLogContext(
+                        RequestMethod: "POST",
+                        StatusCode: (int)response.StatusCode,
+                        Properties: new Dictionary<string, object?>
+                        {
+                            ["itemCount"] = records.Count
+                        }));
+            }
         }
         else if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
@@ -500,6 +518,13 @@ internal abstract class ClientLogUploadServiceBase : BackgroundService
         SignalWake();
     }
 
+    /// <summary>
+    /// 运行日志通道的自检：本轮以前被丢弃（内存队列溢出或本地 outbox 超上限裁剪）的条数有增量时记一次 Warning。
+    /// </summary>
+    protected virtual void ReportChannelHealth()
+    {
+    }
+
     protected static void WriteInternalDiagnostic(string message)
     {
         var line = $"[HBPOS][Client][LogUpload] {DateTimeOffset.Now:O} {message}";
@@ -513,14 +538,41 @@ internal sealed class ApplicationLogUploadService(
     ClientLogOutboxStore store,
     ApplicationLogOptions options,
     HttpClient httpClient,
-    TimeProvider timeProvider) : ClientLogUploadServiceBase(
+    TimeProvider timeProvider,
+    Func<long>? queueDroppedCount = null) : ClientLogUploadServiceBase(
         store,
         httpClient,
         ClientLogOutboxKind.Runtime,
         timeProvider,
         batchSize: options.BatchSize)
 {
+    private long _reportedStoreDropped;
+    private long _reportedQueueDropped;
+
     protected override bool IsEnabled => options.IsConfigured;
+
+    protected override void ReportChannelHealth()
+    {
+        var storeDropped = Store.RuntimeDroppedCount;
+        var queueDropped = queueDroppedCount?.Invoke() ?? 0;
+        var delta = (storeDropped - _reportedStoreDropped) + (queueDropped - _reportedQueueDropped);
+        if (delta <= 0)
+        {
+            return;
+        }
+
+        _reportedStoreDropped = storeDropped;
+        _reportedQueueDropped = queueDropped;
+        // 只报增量：每轮上传最多一条，不会因自身写入形成刷屏；离线积压被裁剪时能在恢复后看到丢了多少。
+        ConsoleLog.WriteWarning(
+            "LogOutbox",
+            $"runtime logs dropped delta={delta} storeTrimmedTotal={storeDropped} queueDroppedTotal={queueDropped}",
+            new ApplicationLogContext(
+                Properties: new Dictionary<string, object?>
+                {
+                    ["droppedCount"] = delta
+                }));
+    }
 
     protected override string EventIdPropertyName => "clientEventId";
 

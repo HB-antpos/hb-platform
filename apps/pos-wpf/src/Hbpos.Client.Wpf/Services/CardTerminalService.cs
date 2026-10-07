@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -1303,6 +1304,11 @@ public sealed class ConfiguredCardTerminalClient :
             if (!response.IsSuccessStatusCode)
             {
                 // 后端 502/超时前 Square 可能已经受理退款；结果未知时必须保留同一个幂等键供下次重试。
+                LogSquareOutcome(
+                    warning: true,
+                    $"refund request failed attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} paymentId={paymentId} " +
+                    $"http={(int)response.StatusCode} detail={LogValue(TruncateLog(ReadSquareErrorMessage(body)))}",
+                    squareAttempt?.AttemptGuid.ToString("D") ?? paymentId);
                 return FailSquareRefundRequest(response.StatusCode, body);
             }
 
@@ -1311,6 +1317,10 @@ public sealed class ConfiguredCardTerminalClient :
             var status = refund.Status ?? string.Empty;
             if (!IsExpectedSquareRefund(refund, refundId, paymentId, minorAmount))
             {
+                LogSquareOutcome(
+                    warning: true,
+                    $"refund response did not match request attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} paymentId={paymentId} refundId={LogValue(refundId)} -> ResultUnknown",
+                    squareAttempt?.AttemptGuid.ToString("D") ?? paymentId);
                 return new PaymentAuthorizationResult(
                     false,
                     null,
@@ -1373,6 +1383,11 @@ public sealed class ConfiguredCardTerminalClient :
                 }
                 catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
                 {
+                    LogSquareOutcome(
+                        warning: true,
+                        $"refund status refresh failed attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} refundId={refundId} error={ex.GetType().Name} -> pending",
+                        squareAttempt?.AttemptGuid.ToString("D") ?? refundId,
+                        ex);
                     return CreateSquareRefundPendingResult(
                         refundId,
                         status,
@@ -1380,6 +1395,15 @@ public sealed class ConfiguredCardTerminalClient :
                         T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
                 }
             }
+
+            // 退款是低频人工操作，最终状态各记一条：完成/处理中 Information，失败或未知 Warning。
+            var refundStatusIsKnown =
+                string.Equals(status, "COMPLETED", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase);
+            LogSquareOutcome(
+                warning: !refundStatusIsKnown,
+                $"refund result attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} paymentId={paymentId} refundId={refundId} status={LogValue(status)} minorAmount={minorAmount}",
+                squareAttempt?.AttemptGuid.ToString("D") ?? refundId);
 
             if (string.Equals(status, "FAILED", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(status, "REJECTED", StringComparison.OrdinalIgnoreCase))
@@ -1443,12 +1467,22 @@ public sealed class ConfiguredCardTerminalClient :
                         null)
                 ]);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            LogSquareOutcome(
+                warning: true,
+                $"refund network failure attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} paymentId={paymentId} -> ResultUnknown",
+                squareAttempt?.AttemptGuid.ToString("D") ?? paymentId,
+                ex);
             return new PaymentAuthorizationResult(false, null, T("payment.card.squareCommunicationFailed", "Square terminal communication failed."), ResultUnknown: true);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            LogSquareOutcome(
+                warning: true,
+                $"refund invalid response attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} paymentId={paymentId} -> ResultUnknown",
+                squareAttempt?.AttemptGuid.ToString("D") ?? paymentId,
+                ex);
             return new PaymentAuthorizationResult(false, null, T("payment.card.squareInvalidResponse", "Square terminal returned an invalid response."), ResultUnknown: true);
         }
     }
@@ -1585,12 +1619,24 @@ public sealed class ConfiguredCardTerminalClient :
 
             return UnknownRecovery("Linkly backend result is not final.");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            LogSquareOrLinklyRecoveryFailure(
+                "LinklyBackend",
+                $"Linkly recovery query cancelled attemptGuid={attempt.AttemptGuid:D} sessionId={LogValue(attempt.SessionId)} mode={mode} callerCancelled={cancellationToken.IsCancellationRequested}",
+                attempt.SessionId ?? attempt.AttemptGuid.ToString("D"),
+                ex,
+                warning: !cancellationToken.IsCancellationRequested);
             return UnknownRecovery("Linkly recovery query was cancelled.");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            LogSquareOrLinklyRecoveryFailure(
+                "LinklyBackend",
+                $"Linkly recovery query failed attemptGuid={attempt.AttemptGuid:D} sessionId={LogValue(attempt.SessionId)} mode={mode} error={ex.GetType().Name}",
+                attempt.SessionId ?? attempt.AttemptGuid.ToString("D"),
+                ex,
+                warning: true);
             return UnknownRecovery("Linkly recovery query failed.");
         }
     }
@@ -1639,6 +1685,10 @@ public sealed class ConfiguredCardTerminalClient :
                         DateTimeOffset.UtcNow,
                         CancellationToken.None);
                 }
+                LogSquareOutcome(
+                    warning: true,
+                    $"Square recovery checkout mismatch attemptGuid={attempt.AttemptGuid:D} checkoutId={attempt.CheckoutId} actualCheckoutId={LogValue(checkout.CheckoutId)} -> ResultUnknown",
+                    attempt.AttemptGuid.ToString("D"));
                 return UnknownRecovery("Square checkout does not match the persisted attempt.");
             }
 
@@ -1686,17 +1736,30 @@ public sealed class ConfiguredCardTerminalClient :
                         DateTimeOffset.UtcNow,
                         CancellationToken.None);
                 }
+                LogSquareOutcome(
+                    warning: true,
+                    $"Square recovery payment mismatch attemptGuid={attempt.AttemptGuid:D} paymentId={paymentId} actualPaymentId={LogValue(payment.PaymentId)} -> ResultUnknown",
+                    attempt.AttemptGuid.ToString("D"));
                 return UnknownRecovery("Square payment does not match the queried payment.");
             }
             var money = payment.ApprovedMoney ?? payment.TotalMoney;
             if (money is null || money.Amount != attempt.AmountCents ||
                 !string.Equals(money.Currency, attempt.Currency, StringComparison.OrdinalIgnoreCase))
             {
+                LogSquareOutcome(
+                    warning: true,
+                    $"Square recovery amount mismatch attemptGuid={attempt.AttemptGuid:D} paymentId={paymentId} expectedMinor={attempt.AmountCents} " +
+                    $"actualMinor={money?.Amount.ToString(CultureInfo.InvariantCulture) ?? "<null>"} -> ResultUnknown",
+                    attempt.AttemptGuid.ToString("D"));
                 return UnknownRecovery("Square payment amount or currency did not match the attempt.");
             }
 
             if (string.Equals(payment.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase))
             {
+                LogSquareOutcome(
+                    warning: false,
+                    $"Square recovery found completed payment attemptGuid={attempt.AttemptGuid:D} checkoutId={attempt.CheckoutId} paymentId={paymentId}",
+                    attempt.AttemptGuid.ToString("D"));
                 return new PaymentAuthorizationResult(
                     true,
                     Reference: $"SQ:{paymentId}",
@@ -1714,13 +1777,46 @@ public sealed class ConfiguredCardTerminalClient :
 
             return UnknownRecovery("Square payment result is not final.");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            LogSquareOrLinklyRecoveryFailure(
+                "Square",
+                $"Square recovery query cancelled attemptGuid={attempt.AttemptGuid:D} checkoutId={LogValue(attempt.CheckoutId)} callerCancelled={cancellationToken.IsCancellationRequested}",
+                attempt.AttemptGuid.ToString("D"),
+                ex,
+                warning: !cancellationToken.IsCancellationRequested);
             return UnknownRecovery("Square recovery query was cancelled.");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            LogSquareOrLinklyRecoveryFailure(
+                "Square",
+                $"Square recovery query failed attemptGuid={attempt.AttemptGuid:D} checkoutId={LogValue(attempt.CheckoutId)} error={ex.GetType().Name}",
+                attempt.AttemptGuid.ToString("D"),
+                ex,
+                warning: true);
             return UnknownRecovery("Square recovery query failed.");
+        }
+    }
+
+    /// <summary>
+    /// 恢复查询异常原先被吞掉只返回"结果未知"；这里补一条带异常的日志。调用方主动取消只记 Information。
+    /// </summary>
+    private static void LogSquareOrLinklyRecoveryFailure(
+        string category,
+        string message,
+        string traceId,
+        Exception exception,
+        bool warning)
+    {
+        var context = new ApplicationLogContext(TraceId: traceId);
+        if (warning)
+        {
+            ConsoleLog.WriteWarning(category, message, context, exception);
+        }
+        else
+        {
+            ConsoleLog.WriteInformation(category, message, context);
         }
     }
 
@@ -1772,7 +1868,94 @@ public sealed class ConfiguredCardTerminalClient :
             request.Content = JsonContent.Create(body, options: JsonOptions);
         }
 
-        return await _httpClient.SendAsync(request, cancellationToken);
+        // Square 所有后端调用的统一出口：失败（非 2xx、断网、HttpClient 超时）记 Warning；
+        // 成功只记非 GET（创建/取消/退款等低频写操作），GET 轮询成功不记以免刷屏。
+        var requestPath = StripQuery(relativeUrl);
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var response = await _httpClient.SendAsync(request, cancellationToken);
+            stopwatch.Stop();
+            if (!response.IsSuccessStatusCode)
+            {
+                ConsoleLog.WriteWarning(
+                    "Square",
+                    $"Square API {method.Method} {requestPath} failed http={(int)response.StatusCode} elapsedMs={stopwatch.ElapsedMilliseconds}",
+                    BuildSquareApiContext(method, requestPath, (int)response.StatusCode, stopwatch.ElapsedMilliseconds, "failed"));
+            }
+            else if (method != HttpMethod.Get)
+            {
+                ConsoleLog.WriteInformation(
+                    "Square",
+                    $"Square API {method.Method} {requestPath} http={(int)response.StatusCode} elapsedMs={stopwatch.ElapsedMilliseconds}",
+                    BuildSquareApiContext(method, requestPath, (int)response.StatusCode, stopwatch.ElapsedMilliseconds, "succeeded"));
+            }
+
+            return response;
+        }
+        catch (HttpRequestException ex)
+        {
+            ConsoleLog.WriteWarning(
+                "Square",
+                $"Square API {method.Method} {requestPath} network failure elapsedMs={stopwatch.ElapsedMilliseconds}",
+                BuildSquareApiContext(method, requestPath, statusCode: null, stopwatch.ElapsedMilliseconds, "network-error"),
+                ex);
+            throw;
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // 令牌未取消却抛取消 = HttpClient 自身超时；令牌已取消（调用方/本地轮询超时）由上层分支记录。
+            ConsoleLog.WriteWarning(
+                "Square",
+                $"Square API {method.Method} {requestPath} timed out elapsedMs={stopwatch.ElapsedMilliseconds}",
+                BuildSquareApiContext(method, requestPath, statusCode: null, stopwatch.ElapsedMilliseconds, "timeout"),
+                ex);
+            throw;
+        }
+    }
+
+    private static ApplicationLogContext BuildSquareApiContext(
+        HttpMethod method,
+        string requestPath,
+        int? statusCode,
+        long elapsedMs,
+        string status)
+    {
+        return new ApplicationLogContext(
+            RequestPath: requestPath,
+            RequestMethod: method.Method,
+            StatusCode: statusCode,
+            Properties: new Dictionary<string, object?>
+            {
+                ["elapsedMs"] = elapsedMs,
+                ["status"] = status
+            });
+    }
+
+    private static string StripQuery(string relativeUrl)
+    {
+        var index = relativeUrl.IndexOf('?', StringComparison.Ordinal);
+        return index < 0 ? relativeUrl : relativeUrl[..index];
+    }
+
+    /// <summary>
+    /// Square 退款/恢复的业务结论日志：以 attemptGuid（无则 checkoutId/refundId）作 TraceId 串联同一笔交易。
+    /// </summary>
+    private static void LogSquareOutcome(
+        bool warning,
+        string message,
+        string? traceId,
+        Exception? exception = null)
+    {
+        var context = new ApplicationLogContext(TraceId: string.IsNullOrWhiteSpace(traceId) ? null : traceId);
+        if (warning)
+        {
+            ConsoleLog.WriteWarning("Square", message, context, exception);
+        }
+        else
+        {
+            ConsoleLog.WriteInformation("Square", message, context);
+        }
     }
 
     private static async Task<string> ReadResponseBodyAsync(
@@ -2248,6 +2431,11 @@ public sealed class ConfiguredCardTerminalClient :
     private static string LogValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? "<null>" : value;
+    }
+
+    private static string? TruncateLog(string? value)
+    {
+        return value is null || value.Length <= 256 ? value : value[..256];
     }
 
     private sealed record SquareRefundAttemptKey(

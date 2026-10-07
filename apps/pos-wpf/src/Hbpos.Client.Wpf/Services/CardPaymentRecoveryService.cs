@@ -643,7 +643,10 @@ public sealed class CardPaymentRecoveryService(
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                 {
                     TryWriteRecoveryLog(
-                        $"recover finalize-pending existing-order query failed attemptGuid={attempt.AttemptGuid} orderGuid={pendingDraft.OrderGuid} error={ex.GetType().Name}");
+                        $"recover finalize-pending existing-order query failed attemptGuid={attempt.AttemptGuid} orderGuid={pendingDraft.OrderGuid} error={ex.GetType().Name}",
+                        ex,
+                        attempt.AttemptGuid,
+                        error: false);
                     return new CardPaymentRecoveryResult(
                         CardPaymentRecoveryOutcome.Unknown,
                         T("cardRecovery.linkly.approvedRecoveryRequiresReview", "The previous card payment was approved, but POS could not safely rebuild the order. Ask a supervisor to confirm the payment before continuing."),
@@ -884,9 +887,11 @@ public sealed class CardPaymentRecoveryService(
         // 未知结果异常自带 session/txn 明细，不能再被通用失败文案覆盖。
         catch (LinklyBackendResultUnknownException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} txnRef={LogValue(status?.TxnRef ?? attempt.TxnRef)} error={ex.GetType().Name}");
+                $"recover result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} txnRef={LogValue(status?.TxnRef ?? attempt.TxnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             LogRecoveryResult(settings, attempt, status, CardPaymentRecoveryOutcome.Unknown, "result-unknown", ex.GetType().Name);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
@@ -897,9 +902,11 @@ public sealed class CardPaymentRecoveryService(
         // 本地停止等待后仍要保留未知结果语义，提醒人工确认 Linkly 后端状态。
         catch (LinklyBackendLocalCancelException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover local-cancel-result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} txnRef={LogValue(status?.TxnRef ?? attempt.TxnRef)} error={ex.GetType().Name}");
+                $"recover local-cancel-result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} txnRef={LogValue(status?.TxnRef ?? attempt.TxnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             LogRecoveryResult(settings, attempt, status, CardPaymentRecoveryOutcome.Unknown, "local-cancel-result-unknown", ex.GetType().Name);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
@@ -909,9 +916,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover status failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(attempt.SessionId)} error={ex.GetType().Name}");
+                $"recover status failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(attempt.SessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             LogRecoveryResult(settings, attempt, status, CardPaymentRecoveryOutcome.Unknown, "status-query-failed", ex.GetType().Name);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
@@ -1335,9 +1344,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (LinklyBackendResultUnknownException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover targeted active-session result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} error={ex.GetType().Name}");
+                $"recover targeted active-session result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ex.Message,
@@ -1346,9 +1357,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (LinklyBackendLocalCancelException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover targeted active-session local-cancel-result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} error={ex.GetType().Name}");
+                $"recover targeted active-session local-cancel-result-unknown attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.linkly.activeSessionLocalCancelUnknown", "Stopped waiting for the previous Linkly session locally, so the final result is still unknown. Ask a supervisor to confirm Linkly before charging again."),
@@ -1357,9 +1370,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover targeted active-session failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} error={ex.GetType().Name}");
+                $"recover targeted active-session failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(status?.SessionId ?? attempt.SessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.linkly.activeSessionUnknown", "The previous Linkly session cannot be confirmed. Ask a supervisor to check Linkly before charging again."),
@@ -1539,9 +1554,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover local-ip get-last failed attemptGuid={attempt.AttemptGuid} txnRef={LogValue(txnRef)} error={ex.GetType().Name}");
+                $"recover local-ip get-last failed attemptGuid={attempt.AttemptGuid} txnRef={LogValue(txnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             LogRecoveryResult(settings, attempt, null, CardPaymentRecoveryOutcome.Unknown, "local-get-last-failed", ex.GetType().Name);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
@@ -1771,7 +1788,10 @@ public sealed class CardPaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor refund audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"supervisor refund audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
             }
         }
 
@@ -1785,7 +1805,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"supervisor refund post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"supervisor refund post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardRefundSupervisorResolutionResult(
                 false,
                 ResolutionPendingMessage(),
@@ -2010,7 +2033,10 @@ public sealed class CardPaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor payment audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"supervisor payment audit replay failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
             }
         }
 
@@ -2024,7 +2050,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"supervisor payment post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"supervisor payment post-commit read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentSupervisorResolutionResult(
                 false,
                 ResolutionPendingMessage(),
@@ -2180,9 +2209,11 @@ public sealed class CardPaymentRecoveryService(
         // 未知结果异常自带 session/txn 明细，不能再被付款页的兜底文案覆盖。
         catch (LinklyBackendResultUnknownException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover active-session result-unknown sessionId={LogValue(status?.SessionId)} txnRef={LogValue(status?.TxnRef)} error={ex.GetType().Name}");
+                $"recover active-session result-unknown sessionId={LogValue(status?.SessionId)} txnRef={LogValue(status?.TxnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(status?.SessionId),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ex.Message,
@@ -2192,9 +2223,11 @@ public sealed class CardPaymentRecoveryService(
         // 本地停止等待后要明确告诉收银员结果未知，而不是落回通用 active-session 失败文案。
         catch (LinklyBackendLocalCancelException ex)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover active-session local-cancel-result-unknown sessionId={LogValue(status?.SessionId)} txnRef={LogValue(status?.TxnRef)} error={ex.GetType().Name}");
+                $"recover active-session local-cancel-result-unknown sessionId={LogValue(status?.SessionId)} txnRef={LogValue(status?.TxnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(status?.SessionId),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.linkly.activeSessionLocalCancelUnknown", "Stopped waiting for the previous Linkly session locally, so the final result is still unknown. Ask a supervisor to confirm Linkly before charging again."),
@@ -2203,9 +2236,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover active-session failed sessionId={LogValue(status?.SessionId)} error={ex.GetType().Name}");
+                $"recover active-session failed sessionId={LogValue(status?.SessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(status?.SessionId),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.linkly.activeSessionUnknown", "The previous Linkly session cannot be confirmed. Ask a supervisor to check Linkly before charging again."),
@@ -2329,7 +2364,10 @@ public sealed class CardPaymentRecoveryService(
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                 {
                     TryWriteRecoveryLog(
-                        $"supervisor not-paid cart publication failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                        $"supervisor not-paid cart publication failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                        ex,
+                        attempt.AttemptGuid,
+                        error: false);
                     return BuildUnresolvedActiveSessionResult(
                         attempt,
                         T("cardRecovery.linkly.currentCartNotEmpty", "The previous card result needs handling, but the current cart already contains items. Complete or clear the current cart before recovering the previous order."));
@@ -2371,7 +2409,10 @@ public sealed class CardPaymentRecoveryService(
                 {
                     markerPersisted = false;
                     TryWriteRecoveryLog(
-                        $"supervisor not-paid acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                        $"supervisor not-paid acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                        ex,
+                        attempt.AttemptGuid,
+                        error: false);
                 }
 
                 return new CardPaymentRecoveryResult(
@@ -2405,7 +2446,10 @@ public sealed class CardPaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor not-paid atomic finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"supervisor not-paid atomic finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: true);
             }
 
             if (!finalized)
@@ -2538,9 +2582,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover active-session manual-clear failed sessionId={LogValue(normalizedSessionId)} error={ex.GetType().Name}");
+                $"recover active-session manual-clear failed sessionId={LogValue(normalizedSessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(normalizedSessionId),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.linkly.activeSessionManualClearFailed", "POS could not clear the previous Linkly session. Try recovery again or check Linkly before charging again."),
@@ -2579,9 +2625,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"confirmed refund draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund draft invalid attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.refund.confirmedDraftInvalid", "The refund is confirmed, but POS could not rebuild the original return. Do not refund again; contact support."),
@@ -2607,7 +2655,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"confirmed refund existing-order query failed attemptGuid={attempt.AttemptGuid} orderGuid={draft.OrderGuid} error={ex.GetType().Name}");
+                $"confirmed refund existing-order query failed attemptGuid={attempt.AttemptGuid} orderGuid={draft.OrderGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage(),
@@ -2656,7 +2707,10 @@ public sealed class CardPaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"confirmed partial refund publication failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"confirmed partial refund publication failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
                 return new CardPaymentRecoveryResult(
                     CardPaymentRecoveryOutcome.Unknown,
                     T("cardRecovery.refund.confirmedDraftInvalid", "The refund is confirmed, but POS could not rebuild the original return. Do not refund again; contact support."),
@@ -2693,7 +2747,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"confirmed refund checkout rebuild failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund checkout rebuild failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.refund.confirmedDraftInvalid", "The refund is confirmed, but POS could not rebuild the original return. Do not refund again; contact support."),
@@ -2728,7 +2785,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"confirmed refund order save failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund order save failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: true);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage(),
@@ -2755,7 +2815,10 @@ public sealed class CardPaymentRecoveryService(
         {
             hasPostCommitWarning = true;
             TryWriteRecoveryLog(
-                $"confirmed refund sync count refresh failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"confirmed refund sync count refresh failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
         }
         return new CardPaymentRecoveryResult(
             CardPaymentRecoveryOutcome.OrderCompleted,
@@ -2830,7 +2893,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"linkly draft handoff read failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"linkly draft handoff read failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                ex,
+                attemptGuid,
+                error: false);
             return false;
         }
 
@@ -2883,7 +2949,10 @@ public sealed class CardPaymentRecoveryService(
                     catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                     {
                         TryWriteRecoveryLog(
-                            $"linkly draft handoff winner read failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                            $"linkly draft handoff winner read failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                            ex,
+                            attemptGuid,
+                            error: false);
                         return false;
                     }
 
@@ -2914,7 +2983,10 @@ public sealed class CardPaymentRecoveryService(
                     catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                     {
                         TryWriteRecoveryLog(
-                            $"linkly sale draft handoff winner read failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                            $"linkly sale draft handoff winner read failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                            ex,
+                            attemptGuid,
+                            error: false);
                         return false;
                     }
 
@@ -2936,7 +3008,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"linkly draft handoff verification failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"linkly draft handoff verification failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                ex,
+                attemptGuid,
+                error: false);
             return false;
         }
 
@@ -3260,9 +3335,11 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "CardRecovery",
-                $"approved order saved but attempt finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"approved order saved but attempt finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
         }
 
         var pendingSyncCount = currentSession.PendingSyncCount;
@@ -3275,9 +3352,11 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"approved order saved but pending sync refresh failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"approved order saved but pending sync refresh failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
         }
         return new CardPaymentRecoveryResult(
             CardPaymentRecoveryOutcome.OrderCompleted,
@@ -3445,9 +3524,11 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "CardRecovery",
-                $"approved local order saved but attempt finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"approved local order saved but attempt finalization failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
         }
 
         var pendingSyncCount = currentSession.PendingSyncCount;
@@ -3460,9 +3541,11 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"approved local order saved but pending sync refresh failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"approved local order saved but pending sync refresh failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
         }
         return new CardPaymentRecoveryResult(
             CardPaymentRecoveryOutcome.OrderCompleted,
@@ -3505,9 +3588,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "CardRecovery",
-                $"recover persist recovery outcome failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"recover persist recovery outcome failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return false;
         }
     }
@@ -3573,9 +3658,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "CardRecovery",
-                $"recover finalize recovery outcome failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"recover finalize recovery outcome failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return false;
         }
     }
@@ -3678,7 +3765,10 @@ public sealed class CardPaymentRecoveryService(
             {
                 markerPersisted = false;
                 TryWriteRecoveryLog(
-                    $"declined recovery acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"declined recovery acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
             }
         }
 
@@ -3801,7 +3891,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"approved outcome persistence failed before order save attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"approved outcome persistence failed before order save attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: true);
             return false;
         }
     }
@@ -3945,7 +4038,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"recover approved tender publication failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"recover approved tender publication failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 T("cardRecovery.linkly.approvedRecoveryRequiresReview", "The previous card payment was approved, but POS could not safely rebuild the order. Ask a supervisor to confirm the payment before continuing."),
@@ -3989,7 +4085,10 @@ public sealed class CardPaymentRecoveryService(
         // Approved 已是不可覆盖的金融事实；订单重建失败只记录诊断并保持开放，
         // 不能把状态降级成 RequiresReview，也不能让日志订阅者替换恢复结果。
         TryWriteRecoveryLog(
-            $"recover approved draft rebuild failed attemptGuid={attempt.AttemptGuid} error={exception.GetType().Name} message={exception.Message}");
+            $"recover approved draft rebuild failed attemptGuid={attempt.AttemptGuid} error={exception.GetType().Name} message={exception.Message}",
+            exception,
+            attempt.AttemptGuid,
+            error: true);
 
         return Task.FromResult(new CardPaymentRecoveryResult(
             CardPaymentRecoveryOutcome.Unknown,
@@ -3998,11 +4097,28 @@ public sealed class CardPaymentRecoveryService(
             PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt)));
     }
 
-    private static void TryWriteRecoveryLog(string message)
+    private static void TryWriteRecoveryLog(
+        string message,
+        Exception? exception = null,
+        Guid? attemptGuid = null,
+        bool error = false)
     {
         try
         {
-            ConsoleLog.Write("CardRecovery", message);
+            // 带异常的失败记 Warning（订单/金额需人工处理时记 Error），并以 attemptGuid 作 TraceId；其余保持 Information。
+            var context = RecoveryLogContext(attemptGuid?.ToString("D"));
+            if (exception is null)
+            {
+                ConsoleLog.Write("CardRecovery", message);
+            }
+            else if (error)
+            {
+                ConsoleLog.WriteError("CardRecovery", message, context, exception);
+            }
+            else
+            {
+                ConsoleLog.WriteWarning("CardRecovery", message, context, exception);
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
@@ -4218,9 +4334,11 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
             // 鏈湴璁㈠崟/鑽夌鎭㈠宸茬粡瀹屾垚锛宎ck 澶辫触鍙奖鍝?backend 娓呯悊锛屼笉鑳介樆鏂惎鍔ㄤ綋楠屻€?
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover acknowledge failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} txnRef={LogValue(txnRef)} error={ex.GetType().Name}");
+                $"recover acknowledge failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} txnRef={LogValue(txnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return false;
         }
     }
@@ -4257,9 +4375,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"recover active-session acknowledge failed sessionId={LogValue(status.SessionId)} txnRef={LogValue(status.TxnRef)} error={ex.GetType().Name}");
+                $"recover active-session acknowledge failed sessionId={LogValue(status.SessionId)} txnRef={LogValue(status.TxnRef)} error={ex.GetType().Name}",
+                RecoveryLogContext(status.SessionId),
+                ex);
             return false;
         }
     }
@@ -4332,9 +4452,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteError(
                 "CardRecovery",
-                $"active-session outcome persistence failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"active-session outcome persistence failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return false;
         }
     }
@@ -4366,13 +4488,19 @@ public sealed class CardPaymentRecoveryService(
             catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor payment backend acknowledge canceled without caller cancellation attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} error={ex.GetType().Name}");
+                    $"supervisor payment backend acknowledge canceled without caller cancellation attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
                 return false;
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"supervisor payment backend acknowledge failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} error={ex.GetType().Name}");
+                    $"supervisor payment backend acknowledge failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
                 return false;
             }
         }
@@ -4395,9 +4523,11 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            ConsoleLog.Write(
+            ConsoleLog.WriteWarning(
                 "CardRecovery",
-                $"supervisor-approved local payment saved but acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"supervisor-approved local payment saved but acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
             return result with { HasPostCommitWarning = true };
         }
     }
@@ -4418,7 +4548,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"persisted supervisor resolution recovery failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"persisted supervisor resolution recovery failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                ex,
+                attemptGuid,
+                error: false);
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
                 ResolutionPendingMessage());
@@ -4449,7 +4582,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"supervisor resolution lock check failed attemptGuid={attemptGuid} error={ex.GetType().Name}");
+                $"supervisor resolution lock check failed attemptGuid={attemptGuid} error={ex.GetType().Name}",
+                ex,
+                attemptGuid,
+                error: false);
             return true;
         }
     }
@@ -4553,7 +4689,10 @@ public sealed class CardPaymentRecoveryService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             TryWriteRecoveryLog(
-                $"historical supervisor not-paid acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                $"historical supervisor not-paid acknowledge marker failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                ex,
+                attempt.AttemptGuid,
+                error: false);
             return BuildUnresolvedActiveSessionResult(
                 attempt,
                 T("cardRecovery.linkly.activeSessionAcknowledgeFailed", "The previous Linkly result was confirmed, but POS could not finalize its local acknowledge marker. Run recovery again before charging again."));
@@ -4588,7 +4727,10 @@ public sealed class CardPaymentRecoveryService(
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 TryWriteRecoveryLog(
-                    $"recover finalize-pending winner read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}");
+                    $"recover finalize-pending winner read failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                    ex,
+                    attempt.AttemptGuid,
+                    error: false);
                 winner = null;
             }
 
@@ -5354,6 +5496,14 @@ public sealed class CardPaymentRecoveryService(
             status.ReceiptText);
     }
 
+    /// <summary>
+    /// 恢复流程失败日志的上下文：以 attemptGuid（无则 sessionId）作 TraceId，便于与支付/终端日志串联。
+    /// </summary>
+    private static ApplicationLogContext RecoveryLogContext(string? traceId)
+    {
+        return new ApplicationLogContext(TraceId: string.IsNullOrWhiteSpace(traceId) ? null : traceId);
+    }
+
     private static void LogRecoveryScan(
         CardTerminalSettings settings,
         PosSessionState session,
@@ -5388,7 +5538,9 @@ public sealed class CardPaymentRecoveryService(
                 amount = attempt?.Amount,
                 createdAt = attempt?.CreatedAt,
                 updatedAt = attempt?.UpdatedAt
-            });
+            },
+            // 启动扫描没找到待恢复记录是常态，不能因 success=false 被自动升为 Warning。
+            level: LinklyLogLevel.Information);
     }
 
     private static void LogRecoveryMarkedRecovering(
@@ -5474,7 +5626,9 @@ public sealed class CardPaymentRecoveryService(
                 cashierId = attempt?.CashierId,
                 responseCode = status?.ResponseCode,
                 responseText = status?.ResponseText
-            });
+            },
+            // 只有"结果未知"需要人工对账记 Warning；无待恢复/仍在查询/拒付等正常结论保持 Information。
+            level: outcome == CardPaymentRecoveryOutcome.Unknown ? LinklyLogLevel.Warning : LinklyLogLevel.Information);
     }
 
     private static string GetRecoveryCertificationCase(CardPaymentRecoveryOutcome outcome, string reason)

@@ -32,7 +32,9 @@ internal sealed class ClientLogOutboxWriter : BackgroundService, IApplicationLog
     private static readonly HashSet<string> AllowedRuntimeProperties = new(StringComparer.OrdinalIgnoreCase)
     {
         "category", "storeCode", "deviceCode", "errorCode", "elapsedMs", "source", "action",
-        "status", "screen", "mode", "reason", "result", "itemCount"
+        "status", "screen", "mode", "reason", "result", "itemCount",
+        // 联网重试与日志通道自检用到的计数字段，只允许数值/短文本，不承载业务原文。
+        "attemptCount", "nextRetrySeconds", "operation", "phase", "droppedCount", "offlineSeconds"
     };
     private static readonly HashSet<string> AllowedOperationProperties = new(StringComparer.OrdinalIgnoreCase)
     {

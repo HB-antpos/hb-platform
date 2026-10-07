@@ -19,6 +19,15 @@ public sealed record CashierSessionRefreshAttempt(
     public static CashierSessionRefreshAttempt ApiUnavailable() => new(null, true, false);
 
     public static CashierSessionRefreshAttempt OnlineRejected() => new(null, false, true);
+
+    /// <summary>仅用于日志的诊断信息（HTTP 状态码、服务端 errorCode、失败原因、异常），不参与业务判定。</summary>
+    public int? StatusCode { get; init; }
+
+    public string? ErrorCode { get; init; }
+
+    public string? Reason { get; init; }
+
+    public Exception? Error { get; init; }
 }
 
 public interface ICashierSessionRefreshApiClient
@@ -39,14 +48,22 @@ public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
     public async Task<CashierSessionRefreshAttempt> RefreshAsync(
         CancellationToken cancellationToken = default)
     {
+        int? statusCode = null;
         try
         {
-            var response = await httpClient.GetAsync("api/v1/cashiers/session", cancellationToken);
+            using var response = await httpClient.GetAsync("api/v1/cashiers/session", cancellationToken);
+            statusCode = (int)response.StatusCode;
             if (!response.IsSuccessStatusCode)
             {
+                // 判定口径保持不变；只把状态码带出去供日志使用。
                 return IsServiceUnavailable(response.StatusCode)
-                    ? CashierSessionRefreshAttempt.ApiUnavailable()
-                    : CashierSessionRefreshAttempt.OnlineRejected();
+                    ? CashierSessionRefreshAttempt.ApiUnavailable() with { StatusCode = statusCode, Reason = "http-status" }
+                    : CashierSessionRefreshAttempt.OnlineRejected() with
+                    {
+                        StatusCode = statusCode,
+                        ErrorCode = await TryReadErrorCodeAsync(response, cancellationToken),
+                        Reason = "http-status"
+                    };
             }
 
             // 2xx 只有带 ApiResult 信封才是服务端结论：空对象、null、Wi-Fi 认证页 JSON 等不是 POS API 的响应，
@@ -55,27 +72,68 @@ public sealed class CashierSessionRefreshApiClient(HttpClient httpClient)
             using var document = JsonDocument.Parse(content);
             if (!DeviceApiClient.IsApiResultEnvelope(document.RootElement))
             {
-                return CashierSessionRefreshAttempt.ApiUnavailable();
+                return CashierSessionRefreshAttempt.ApiUnavailable() with
+                {
+                    StatusCode = statusCode,
+                    Reason = "not-api-envelope"
+                };
             }
 
             var result = document.RootElement.Deserialize<ApiResult<CashierSessionDto>>(JsonOptions)!;
             if (!result.Success)
             {
-                return CashierSessionRefreshAttempt.OnlineRejected();
+                return CashierSessionRefreshAttempt.OnlineRejected() with
+                {
+                    StatusCode = statusCode,
+                    ErrorCode = result.ErrorCode,
+                    Reason = "success-false"
+                };
             }
 
             // success=true 却没有会话数据属于形状异常，不是拒绝。
             return result.Data is not null
                 ? CashierSessionRefreshAttempt.Refreshed(result.Data)
-                : CashierSessionRefreshAttempt.ApiUnavailable();
+                : CashierSessionRefreshAttempt.ApiUnavailable() with
+                {
+                    StatusCode = statusCode,
+                    Reason = "missing-session-data"
+                };
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return CashierSessionRefreshAttempt.ApiUnavailable();
+            return CashierSessionRefreshAttempt.ApiUnavailable() with
+            {
+                StatusCode = statusCode,
+                Reason = "unparsable-response",
+                Error = ex
+            };
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            return CashierSessionRefreshAttempt.ApiUnavailable();
+            return CashierSessionRefreshAttempt.ApiUnavailable() with
+            {
+                StatusCode = statusCode,
+                Reason = ex is TaskCanceledException
+                    ? cancellationToken.IsCancellationRequested ? "canceled" : "timeout"
+                    : "network",
+                Error = ex
+            };
+        }
+    }
+
+    /// <summary>被拒响应尽力读取 errorCode；正文不是 ApiResult、读取失败或被取消都忽略，确保被拒判定不变。</summary>
+    private static async Task<string?> TryReadErrorCodeAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var failed = await response.Content.ReadFromJsonAsync<ApiResult<CashierSessionDto>>(cancellationToken);
+            return failed?.ErrorCode;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException or InvalidOperationException or OperationCanceledException)
+        {
+            return null;
         }
     }
 
@@ -100,6 +158,12 @@ public sealed class CashierSessionRefreshService(
     ICashierSessionContext sessionContext,
     ICashierSessionCacheUpdater cacheUpdater)
 {
+    // 服务是单例，60 秒刷新一次：不可用状态只在切换时记日志，用 lock 保护（刷新循环与界面触发可能并发）。
+    private readonly object _availabilityLogGate = new();
+    private bool _isUnavailableLogged;
+    private int _unavailableAttempts;
+    private DateTimeOffset _unavailableSinceUtc;
+
     public event EventHandler<CashierSessionRejectedEventArgs>? SessionRejected;
 
     public async Task RefreshOnceAsync(CancellationToken cancellationToken = default)
@@ -111,6 +175,7 @@ public sealed class CashierSessionRefreshService(
         }
 
         var attempt = await apiClient.RefreshAsync(cancellationToken);
+        LogAvailabilityTransition(attempt, currentSession);
         if (attempt.Session is not null)
         {
             if (!ReferenceEquals(sessionContext.CurrentSession, currentSession))
@@ -138,6 +203,16 @@ public sealed class CashierSessionRefreshService(
         {
             // CAS 只清除被拒会话；缓存清理按票据版本执行，不会误删同身份的新登录缓存。
             var sessionCleared = sessionContext.TryClear(currentSession);
+            // 被拒会踢下线并删除离线缓存，属于用户可感知的强动作，必须留痕（状态码写清楚，便于区分 401/403/404）。
+            ConsoleLog.WriteWarning(
+                "CashierSession",
+                $"cashier session rejected by server; signing out and removing offline cache status={attempt.StatusCode?.ToString() ?? "-"} errorCode={attempt.ErrorCode ?? "-"} reason={attempt.Reason ?? "-"} cashierId={currentSession.CashierId} store={currentSession.StoreCode} device={currentSession.DeviceCode} sessionCleared={sessionCleared}",
+                new ApplicationLogContext(
+                    RequestPath: "api/v1/cashiers/session",
+                    RequestMethod: "GET",
+                    StatusCode: attempt.StatusCode,
+                    UserId: currentSession.CashierId,
+                    Properties: CreateLogProperties(currentSession, attempt.ErrorCode, attempt.Reason)));
             try
             {
                 await cacheUpdater.RemoveCachedSessionAsync(currentSession, cancellationToken);
@@ -150,6 +225,102 @@ public sealed class CashierSessionRefreshService(
                 }
             }
         }
+    }
+
+    private void LogAvailabilityTransition(CashierSessionRefreshAttempt attempt, CashierSessionDto currentSession)
+    {
+        // 调用方取消不算服务不可用。
+        if (attempt.IsApiUnavailable && string.Equals(attempt.Reason, "canceled", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string? message = null;
+        var isWarning = false;
+        long offlineSeconds = 0;
+        int failedAttempts = 0;
+        lock (_availabilityLogGate)
+        {
+            if (attempt.IsApiUnavailable)
+            {
+                _unavailableAttempts++;
+                if (!_isUnavailableLogged)
+                {
+                    _isUnavailableLogged = true;
+                    _unavailableSinceUtc = DateTimeOffset.UtcNow;
+                    isWarning = true;
+                    message = $"cashier session refresh unavailable; keeping last session snapshot status={attempt.StatusCode?.ToString() ?? "-"} reason={attempt.Reason ?? "-"} cashierId={currentSession.CashierId}";
+                }
+            }
+            else if (_isUnavailableLogged)
+            {
+                // 恢复（刷新成功或得到明确拒绝）时记一次恢复日志，带离线时长与失败次数。
+                offlineSeconds = (long)(DateTimeOffset.UtcNow - _unavailableSinceUtc).TotalSeconds;
+                failedAttempts = _unavailableAttempts;
+                _isUnavailableLogged = false;
+                _unavailableAttempts = 0;
+                message = $"cashier session refresh reachable again offlineSeconds={offlineSeconds} failedAttempts={failedAttempts} cashierId={currentSession.CashierId}";
+            }
+            else
+            {
+                _unavailableAttempts = 0;
+            }
+        }
+
+        if (message is null)
+        {
+            return;
+        }
+
+        if (isWarning)
+        {
+            ConsoleLog.WriteWarning(
+                "CashierSession",
+                message,
+                new ApplicationLogContext(
+                    RequestPath: "api/v1/cashiers/session",
+                    RequestMethod: "GET",
+                    StatusCode: attempt.StatusCode,
+                    UserId: currentSession.CashierId,
+                    Properties: CreateLogProperties(currentSession, attempt.ErrorCode, attempt.Reason)),
+                attempt.Error);
+            return;
+        }
+
+        var properties = CreateLogProperties(currentSession, errorCode: null, reason: "recovered");
+        properties["offlineSeconds"] = offlineSeconds;
+        properties["attemptCount"] = failedAttempts;
+        ConsoleLog.WriteInformation(
+            "CashierSession",
+            message,
+            new ApplicationLogContext(
+                RequestPath: "api/v1/cashiers/session",
+                RequestMethod: "GET",
+                UserId: currentSession.CashierId,
+                Properties: properties));
+    }
+
+    private static Dictionary<string, object?> CreateLogProperties(
+        CashierSessionDto session,
+        string? errorCode,
+        string? reason)
+    {
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["storeCode"] = session.StoreCode,
+            ["deviceCode"] = session.DeviceCode
+        };
+        if (!string.IsNullOrWhiteSpace(errorCode))
+        {
+            properties["errorCode"] = errorCode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            properties["reason"] = reason;
+        }
+
+        return properties;
     }
 
     private void NotifySessionRejected(CashierSessionDto rejectedSession)

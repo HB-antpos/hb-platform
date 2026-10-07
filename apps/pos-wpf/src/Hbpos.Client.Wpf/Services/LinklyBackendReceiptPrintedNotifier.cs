@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -50,11 +51,40 @@ public sealed class LinklyBackendReceiptPrintedNotifier(IHttpClientFactory httpC
                 responseJson = (string?)null
             });
 
-        using var response = await httpClient.PostAsJsonAsync(
-            relativeUrl,
-            request,
-            cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        HttpResponseMessage sentResponse;
+        try
+        {
+            sentResponse = await httpClient.PostAsJsonAsync(
+                relativeUrl,
+                request,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            // 调用方（小票打印）会对异常再记一条 Warning；这里只补发送阶段的耗时与原因，记 Information 避免重复告警。
+            LinklyJsonLog.Write(
+                "LinklyBackend",
+                "backend-terminal",
+                operation,
+                "failed",
+                direction: "response",
+                environment: evidenceEnvironment,
+                sessionId: sessionId,
+                success: false,
+                reason: ex is HttpRequestException
+                    ? "network-error"
+                    : cancellationToken.IsCancellationRequested ? "cancelled" : "timeout",
+                elapsedMs: stopwatch.ElapsedMilliseconds,
+                details: new { method = HttpMethod.Post.Method, url = absoluteUrl },
+                exception: ex,
+                level: LinklyLogLevel.Information);
+            throw;
+        }
+
+        using var response = sentResponse;
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        stopwatch.Stop();
         LinklyJsonLog.Write(
             "LinklyBackend",
             "backend-terminal",
@@ -66,6 +96,7 @@ public sealed class LinklyBackendReceiptPrintedNotifier(IHttpClientFactory httpC
             httpStatus: response.StatusCode,
             success: response.IsSuccessStatusCode,
             reason: response.IsSuccessStatusCode ? null : "receipt-printed-marker-failed",
+            elapsedMs: stopwatch.ElapsedMilliseconds,
             response: new
             {
                 method = HttpMethod.Post.Method,

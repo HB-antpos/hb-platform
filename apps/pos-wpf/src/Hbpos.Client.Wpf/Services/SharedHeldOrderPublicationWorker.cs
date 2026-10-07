@@ -264,7 +264,8 @@ public sealed class SharedHeldOrderPublicationWorker(
                     nowIso,
                     exception.ErrorCode,
                     exception.Message,
-                    cancellationToken);
+                    cancellationToken,
+                    exception);
                 failedPublish++;
             }
             catch (Exception exception) when (
@@ -348,7 +349,8 @@ public sealed class SharedHeldOrderPublicationWorker(
                     nowIso,
                     exception.ErrorCode,
                     exception.Message,
-                    cancellationToken);
+                    cancellationToken,
+                    exception);
             }
 
             return new CapabilityReadResult(CapabilityGate.NotReady, SharedSaleCartV1Constants.PayloadVersion);
@@ -361,7 +363,8 @@ public sealed class SharedHeldOrderPublicationWorker(
         string nowIso,
         string? errorCode,
         string? errorMessage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SharedHeldOrderApiException? exception = null)
     {
         await repository.TryAdvancePublicationAsync(
             publication.LocalHoldGuid,
@@ -373,6 +376,46 @@ public sealed class SharedHeldOrderPublicationWorker(
             errorMessage: errorMessage,
             lastAttemptAtIso: nowIso,
             cancellationToken: cancellationToken);
+        LogBackoff(publication, errorCode, errorMessage, exception);
+    }
+
+    /// <summary>
+    /// 发布退避日志按本条挂单的累计失败次数节流：第 1、2、4、8… 次失败记 Warning，其余不记，
+    /// 避免服务端长时间不可用时后台 10 秒一轮刷屏。功能未启用属于配置状态，不升级为 Warning。
+    /// </summary>
+    private static void LogBackoff(
+        SharedHeldOrderPublication publication,
+        string? errorCode,
+        string? errorMessage,
+        SharedHeldOrderApiException? exception)
+    {
+        var attempt = publication.RetryCount + 1;
+        if (attempt <= 0 || (attempt & (attempt - 1)) != 0 ||
+            exception?.Kind == SharedHeldOrderApiErrorKind.Disabled)
+        {
+            return;
+        }
+
+        ConsoleLog.WriteWarning(
+            "HeldOrder",
+            $"shared held order publish deferred localHoldGuid={publication.LocalHoldGuid:D} " +
+            $"errorCode={errorCode ?? "<null>"} kind={exception?.Kind.ToString() ?? "<local>"} " +
+            $"http={(exception is null ? "<none>" : ((int)exception.StatusCode).ToString(CultureInfo.InvariantCulture))} " +
+            $"attempt={attempt} message={errorMessage ?? "<null>"}",
+            new ApplicationLogContext(
+                TraceId: publication.LocalHoldGuid.ToString("D"),
+                RequestPath: "api/v1/held-orders",
+                RequestMethod: "POST",
+                StatusCode: exception is null ? null : (int)exception.StatusCode,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = publication.StoreCode,
+                    ["deviceCode"] = publication.DeviceCode,
+                    ["errorCode"] = errorCode,
+                    ["attemptCount"] = attempt,
+                    ["operation"] = "publish"
+                }),
+            exception?.InnerException ?? exception);
     }
 
     /// <summary>本地 canonical -> 服务端首选 wire 版本（显式字段映射）。</summary>

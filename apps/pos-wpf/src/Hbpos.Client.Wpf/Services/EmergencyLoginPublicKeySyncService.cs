@@ -149,7 +149,11 @@ public sealed class EmergencyLoginPublicKeySyncService(
     IEmergencyLoginPublicKeyCache cache,
     ILogger<EmergencyLoginPublicKeySyncService>? logger = null) : IEmergencyLoginPublicKeySyncService
 {
+    private const string LogCategory = "EmergencyLogin";
     private readonly SemaphoreSlim _syncGate = new(1, 1);
+    // 后台失败时每分钟重试：同一失败原因连续出现只记一次。字段只在 _syncGate 内读写（服务为单例且同步串行），无需额外锁。
+    private string? _lastFailureKey;
+    private int _consecutiveFailures;
 
     public async Task<bool> SyncAsync(CancellationToken cancellationToken = default)
     {
@@ -166,10 +170,10 @@ public sealed class EmergencyLoginPublicKeySyncService(
             {
                 if (validCurrent is null)
                 {
-                    return false;
+                    return RecordFailure("not-modified-without-valid-cache");
                 }
 
-                return await AcknowledgeWithSingleRetryAsync(validCurrent.Version, cancellationToken);
+                return RecordOutcome(await AcknowledgeWithSingleRetryAsync(validCurrent.Version, cancellationToken));
             }
 
             var package = fetched.Package;
@@ -177,7 +181,11 @@ public sealed class EmergencyLoginPublicKeySyncService(
                 !EmergencyLoginPublicKeyValidator.TryValidate(package) ||
                 validCurrent is not null && package.Version < validCurrent.Version)
             {
-                return false;
+                return RecordFailure(
+                    package is null ? "empty-package"
+                    : validCurrent is not null && package.Version < validCurrent.Version
+                        ? $"version-downgrade serverVersion={package.Version} cachedVersion={validCurrent.Version}"
+                        : "invalid-package");
             }
 
             if (validCurrent is null || package.Version > validCurrent.Version)
@@ -186,7 +194,7 @@ public sealed class EmergencyLoginPublicKeySyncService(
                 await cache.ReplaceAsync(package, cancellationToken);
             }
 
-            return await AcknowledgeWithSingleRetryAsync(package.Version, cancellationToken);
+            return RecordOutcome(await AcknowledgeWithSingleRetryAsync(package.Version, cancellationToken));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -195,7 +203,7 @@ public sealed class EmergencyLoginPublicKeySyncService(
         catch (Exception ex)
         {
             logger?.LogWarning(ex, "同步紧急登录公钥失败，继续保留本地旧缓存");
-            return false;
+            return RecordFailure("exception", ex);
         }
         finally
         {
@@ -220,12 +228,92 @@ public sealed class EmergencyLoginPublicKeySyncService(
             !EmergencyLoginPublicKeyValidator.TryValidate(refreshed.Package) ||
             refreshed.Package.Version < Math.Max(version, acknowledgement.Version))
         {
+            _pendingAckFailureReason =
+                $"ack-mismatch-refetch-unusable version={version} ackVersion={acknowledgement.Version} acknowledged={acknowledgement.Acknowledged}";
             return false;
         }
 
         await cache.ReplaceAsync(refreshed.Package, cancellationToken);
         var retried = await apiClient.AcknowledgeAsync(refreshed.Package.Version, cancellationToken);
-        return retried.Acknowledged && retried.Version == refreshed.Package.Version;
+        var acknowledged = retried.Acknowledged && retried.Version == refreshed.Package.Version;
+        if (!acknowledged)
+        {
+            _pendingAckFailureReason =
+                $"ack-retry-mismatch version={refreshed.Package.Version} ackVersion={retried.Version} acknowledged={retried.Acknowledged}";
+        }
+
+        return acknowledged;
+    }
+
+    // ACK 失败的具体原因由 AcknowledgeWithSingleRetryAsync 写入，RecordOutcome 统一记日志（同样只在 _syncGate 内访问）。
+    private string? _pendingAckFailureReason;
+
+    private bool RecordOutcome(bool succeeded)
+    {
+        var ackReason = _pendingAckFailureReason;
+        _pendingAckFailureReason = null;
+        if (!succeeded)
+        {
+            return RecordFailure(ackReason ?? "ack-failed");
+        }
+
+        if (_lastFailureKey is not null)
+        {
+            ConsoleLog.WriteInformation(
+                LogCategory,
+                $"emergency login public key sync recovered failedAttempts={_consecutiveFailures}",
+                new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["attemptCount"] = _consecutiveFailures
+                }));
+        }
+
+        _lastFailureKey = null;
+        _consecutiveFailures = 0;
+        return true;
+    }
+
+    /// <summary>
+    /// 记录同步失败并返回 false：业务性失败（无效包/版本回退/ACK 不一致）记 Information，异常记 Warning；
+    /// 同一原因连续出现只记第一次。公钥包内容不入日志。
+    /// </summary>
+    private bool RecordFailure(string reason, Exception? exception = null)
+    {
+        _consecutiveFailures++;
+        var statusCode = exception is HttpRequestException { StatusCode: { } status } ? (int)status : (int?)null;
+        var failureKey = exception is null
+            ? reason
+            : $"{reason}|{exception.GetType().Name}|{statusCode}";
+        if (string.Equals(_lastFailureKey, failureKey, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _lastFailureKey = failureKey;
+        var context = new ApplicationLogContext(
+            StatusCode: statusCode,
+            Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["reason"] = exception is null ? reason.Split(' ')[0] : reason,
+                ["attemptCount"] = _consecutiveFailures
+            });
+        if (exception is null)
+        {
+            ConsoleLog.WriteInformation(
+                LogCategory,
+                $"emergency login public key sync not completed; keeping local cache reason={reason}",
+                context);
+        }
+        else
+        {
+            ConsoleLog.WriteWarning(
+                LogCategory,
+                $"emergency login public key sync failed; keeping local cache error={exception.GetType().Name} status={statusCode?.ToString() ?? "-"}",
+                context,
+                exception);
+        }
+
+        return false;
     }
 }
 

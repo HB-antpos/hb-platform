@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -37,11 +38,17 @@ public sealed class LinklyCloudCredentialApiClient(HttpClient httpClient) : ILin
         CancellationToken cancellationToken = default)
     {
         Log($"backend credential request start environment={environment}");
-        using var response = await httpClient.GetAsync(
-            $"api/v1/linkly/cloud-credential?environment={Uri.EscapeDataString(environment.ToString())}",
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await SendWithFailureLogAsync(
+            "backend credential request",
+            environment,
+            stopwatch,
+            () => httpClient.GetAsync(
+                $"api/v1/linkly/cloud-credential?environment={Uri.EscapeDataString(environment.ToString())}",
+                cancellationToken),
             cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        Log($"backend credential response environment={environment} http={(int)response.StatusCode}");
+        Log($"backend credential response environment={environment} http={(int)response.StatusCode} elapsedMs={stopwatch.ElapsedMilliseconds}");
         ApiResult<LinklyCloudCredentialResponse>? result = null;
         if (!string.IsNullOrWhiteSpace(content))
         {
@@ -103,12 +110,19 @@ public sealed class LinklyCloudCredentialApiClient(HttpClient httpClient) : ILin
     {
         Log(
             $"backend credential upsert start environment={environment} hasUsername={!string.IsNullOrWhiteSpace(username)} hasPassword=REDACTED");
-        using var response = await httpClient.PutAsJsonAsync(
-            "api/v1/linkly/cloud-credential",
-            new LinklyCloudCredentialUpsertRequest(environment.ToString(), username, password),
-            JsonOptions,
+        var stopwatch = Stopwatch.StartNew();
+        // 请求体含用户名/密码，只记是否填写与耗时，正文不进日志。
+        using var response = await SendWithFailureLogAsync(
+            "backend credential upsert",
+            environment,
+            stopwatch,
+            () => httpClient.PutAsJsonAsync(
+                "api/v1/linkly/cloud-credential",
+                new LinklyCloudCredentialUpsertRequest(environment.ToString(), username, password),
+                JsonOptions,
+                cancellationToken),
             cancellationToken);
-        var result = await ReadApiResultAsync<LinklyCloudCredentialUpsertResponse>(response, cancellationToken);
+        var result = await ReadApiResultAsync<LinklyCloudCredentialUpsertResponse>(response, stopwatch, cancellationToken);
         var payload = EnsureSuccess(
             result,
             response.StatusCode,
@@ -127,12 +141,18 @@ public sealed class LinklyCloudCredentialApiClient(HttpClient httpClient) : ILin
     {
         Log(
             $"backend terminal credential upsert start environment={environment} hasSecret={!string.IsNullOrWhiteSpace(secret)} posId={LogValue(posId)}");
-        using var response = await httpClient.PutAsJsonAsync(
-            "api/v1/linkly/cloud-backend/terminal",
-            new LinklyCloudBackendTerminalCredentialUpsertRequest(environment.ToString(), secret, posId),
-            JsonOptions,
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await SendWithFailureLogAsync(
+            "backend terminal credential upsert",
+            environment,
+            stopwatch,
+            () => httpClient.PutAsJsonAsync(
+                "api/v1/linkly/cloud-backend/terminal",
+                new LinklyCloudBackendTerminalCredentialUpsertRequest(environment.ToString(), secret, posId),
+                JsonOptions,
+                cancellationToken),
             cancellationToken);
-        var result = await ReadApiResultAsync<LinklyCloudBackendTerminalCredentialResponse>(response, cancellationToken);
+        var result = await ReadApiResultAsync<LinklyCloudBackendTerminalCredentialResponse>(response, stopwatch, cancellationToken);
         var payload = EnsureSuccess(
             result,
             response.StatusCode,
@@ -143,12 +163,45 @@ public sealed class LinklyCloudCredentialApiClient(HttpClient httpClient) : ILin
         return payload;
     }
 
+    /// <summary>
+    /// 发送阶段断网/超时原先没有任何日志；记下操作、环境、耗时与异常后原样抛出（调用方取消只记 Information）。
+    /// </summary>
+    private static async Task<HttpResponseMessage> SendWithFailureLogAsync(
+        string operation,
+        CardTerminalEnvironment environment,
+        Stopwatch stopwatch,
+        Func<Task<HttpResponseMessage>> send,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await send();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            var callerCancelled = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            LinklyJsonLog.Write(
+                "LinklyCloud",
+                "cloud-credential-api",
+                operation,
+                callerCancelled ? "cancelled" : "failed",
+                environment: environment,
+                success: false,
+                reason: ex is HttpRequestException ? "network-error" : callerCancelled ? "cancelled" : "timeout",
+                elapsedMs: stopwatch.ElapsedMilliseconds,
+                exception: ex,
+                level: callerCancelled ? LinklyLogLevel.Information : null);
+            throw;
+        }
+    }
+
     private static async Task<ApiResult<T>?> ReadApiResultAsync<T>(
         HttpResponseMessage response,
+        Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        Log($"backend credential response http={(int)response.StatusCode}");
+        Log($"backend credential response http={(int)response.StatusCode} elapsedMs={stopwatch.ElapsedMilliseconds}");
         if (string.IsNullOrWhiteSpace(content))
         {
             return null;

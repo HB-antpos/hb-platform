@@ -50,6 +50,15 @@ public sealed class ProductThumbnailImageSourceConverter : IValueConverter
     private static int failedCacheCapacity = DefaultFailedCacheCapacity;
     private static int loggedDiagnosticCapacity = DefaultLoggedDiagnosticCapacity;
     private static int imageInputByteLimit = DefaultImageInputByteLimit;
+    // 远程下载结果只做周期汇总（一屏可能几百张图），状态由 DownloadStatsLock 保护，任何线程都可能完成下载。
+    private static readonly TimeSpan DownloadSummaryInterval = TimeSpan.FromMinutes(5);
+    private static readonly object DownloadStatsLock = new();
+    private static Func<DateTimeOffset> DownloadStatsClock = () => DateTimeOffset.UtcNow;
+    private static DateTimeOffset? downloadStatsWindowStartUtc;
+    private static int downloadSuccessCount;
+    private static int downloadFailureCount;
+    private static long downloadElapsedTotalMs;
+    private static long downloadBytesTotal;
 
     public int DecodePixelWidth { get; set; } = 72;
 
@@ -1642,6 +1651,11 @@ public sealed class ProductThumbnailImageSourceConverter : IValueConverter
         var containsUnescapedHash = sourceText.Contains('#', StringComparison.Ordinal);
         var containsSpace = sourceText.Contains(' ', StringComparison.Ordinal);
         var hasFragment = !string.IsNullOrEmpty(originalUri?.Fragment);
+        if (!containsUnescapedHash && !containsSpace && !hasFragment)
+        {
+            // 普通 URL 不再逐张记录"已解析"，只有需要转义/含片段的异常 URL 才值得留痕。
+            return;
+        }
 
         LogImageDiagnosticOnce(
             $"remote-uri|{sourceText}",
@@ -1784,13 +1798,8 @@ public sealed class ProductThumbnailImageSourceConverter : IValueConverter
 
     private static void LogRemoteDownloadSuccess(ImageRequest imageRequest, int byteCount, long elapsedMilliseconds)
     {
-        LogImageDiagnosticOnce(
-            $"download-success|{imageRequest.CacheKey}",
-            "image downloaded " +
-            $"sourceKind={imageRequest.SourceKind} " +
-            $"uri={FormatLogValue(imageRequest.CacheKey)} " +
-            $"bytes={byteCount} " +
-            $"elapsedMs={elapsedMilliseconds}");
+        // 逐张成功不再单独记日志，只计入 5 分钟汇总。
+        RecordRemoteDownloadOutcome(succeeded: true, byteCount, elapsedMilliseconds);
     }
 
     private static void LogRemoteDownloadFailure(
@@ -1799,14 +1808,100 @@ public sealed class ProductThumbnailImageSourceConverter : IValueConverter
         Exception? exception,
         long elapsedMilliseconds)
     {
-        LogImageDiagnosticOnce(
-            $"download-failed|{reason}|{imageRequest.CacheKey}|{exception?.GetType().Name}|{exception?.Message}",
+        RecordRemoteDownloadOutcome(succeeded: false, byteCount: 0, elapsedMilliseconds);
+        // 去重键用 reason + host：同一 CDN 同一原因只记一次，避免每张图一条；URL 只记路径部分，不主动带查询串（COS 签名）。
+        var host = imageRequest.Uri?.Host ?? "<none>";
+        var uriWithoutQuery = imageRequest.Uri is null
+            ? imageRequest.CacheKey
+            : imageRequest.Uri.GetLeftPart(UriPartial.Path);
+        if (!TryRememberDiagnostic($"download-failed|{reason}|{host}"))
+        {
+            return;
+        }
+
+        ConsoleLog.WriteWarning(
+            "ProductImage",
             "image download failed " +
             $"sourceKind={imageRequest.SourceKind} " +
             $"reason={reason} " +
-            $"uri={FormatLogValue(imageRequest.CacheKey)} " +
+            $"host={host} " +
+            $"uri={FormatLogValue(uriWithoutQuery)} " +
             $"elapsedMs={elapsedMilliseconds} " +
-            $"exception={FormatLogValue(exception is null ? "<none>" : $"{exception.GetType().Name}: {exception.Message}")}");
+            $"error={exception?.GetType().Name ?? "<none>"}",
+            new ApplicationLogContext(
+                StatusCode: exception is HttpRequestException { StatusCode: { } status } ? (int)status : null,
+                Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["reason"] = reason,
+                    ["elapsedMs"] = elapsedMilliseconds
+                }),
+            exception);
+    }
+
+    private static void RecordRemoteDownloadOutcome(bool succeeded, int byteCount, long elapsedMilliseconds)
+    {
+        int successCount;
+        int failureCount;
+        long elapsedTotal;
+        long bytesTotal;
+        long windowSeconds;
+        lock (DownloadStatsLock)
+        {
+            var now = DownloadStatsClock();
+            downloadStatsWindowStartUtc ??= now;
+            if (succeeded)
+            {
+                downloadSuccessCount++;
+                downloadBytesTotal += byteCount;
+            }
+            else
+            {
+                downloadFailureCount++;
+            }
+
+            downloadElapsedTotalMs += elapsedMilliseconds;
+            if (now - downloadStatsWindowStartUtc.Value < DownloadSummaryInterval)
+            {
+                return;
+            }
+
+            successCount = downloadSuccessCount;
+            failureCount = downloadFailureCount;
+            elapsedTotal = downloadElapsedTotalMs;
+            bytesTotal = downloadBytesTotal;
+            windowSeconds = (long)(now - downloadStatsWindowStartUtc.Value).TotalSeconds;
+            downloadStatsWindowStartUtc = now;
+            downloadSuccessCount = 0;
+            downloadFailureCount = 0;
+            downloadElapsedTotalMs = 0;
+            downloadBytesTotal = 0;
+        }
+
+        var totalCount = successCount + failureCount;
+        var averageElapsedMs = totalCount == 0 ? 0 : elapsedTotal / totalCount;
+        ConsoleLog.WriteInformation(
+            "ProductImage",
+            $"image download summary windowSeconds={windowSeconds} succeeded={successCount} failed={failureCount} avgElapsedMs={averageElapsedMs} bytes={bytesTotal}",
+            new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["itemCount"] = totalCount,
+                ["elapsedMs"] = averageElapsedMs
+            }));
+    }
+
+    internal static IDisposable UseDownloadStatsClockForTests(Func<DateTimeOffset> clock)
+    {
+        lock (DownloadStatsLock)
+        {
+            var previous = DownloadStatsClock;
+            DownloadStatsClock = clock;
+            downloadStatsWindowStartUtc = null;
+            downloadSuccessCount = 0;
+            downloadFailureCount = 0;
+            downloadElapsedTotalMs = 0;
+            downloadBytesTotal = 0;
+            return new DownloadStatsClockScope(previous);
+        }
     }
 
     private static void LogRejectedRequest(string sourceText, string reason, string sourceKind)
@@ -2024,6 +2119,29 @@ public sealed class ProductThumbnailImageSourceConverter : IValueConverter
             lock (RemoteImageLoaderLock)
             {
                 CacheKeyUtf8ChunkForTests = previous;
+            }
+        }
+    }
+
+    private sealed class DownloadStatsClockScope(Func<DateTimeOffset> previous) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            lock (DownloadStatsLock)
+            {
+                DownloadStatsClock = previous;
+                downloadStatsWindowStartUtc = null;
+                downloadSuccessCount = 0;
+                downloadFailureCount = 0;
+                downloadElapsedTotalMs = 0;
+                downloadBytesTotal = 0;
             }
         }
     }

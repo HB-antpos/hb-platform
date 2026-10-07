@@ -629,8 +629,9 @@ public sealed class CardTerminalSetupService(
                 request,
                 cancellationToken);
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            LogAssignmentAmbiguous(terminal.TerminalId, "timeout", ex);
             return await ReconcileAmbiguousAssignmentAsync(
                 linklyBackendTerminalClient, environment, terminal, targetSnapshot, devices, cancellationToken);
         }
@@ -640,11 +641,13 @@ public sealed class CardTerminalSetupService(
             (int)ex.StatusCode >= 500 ||
             (int)ex.StatusCode is >= 200 and <= 299)
         {
+            LogAssignmentAmbiguous(terminal.TerminalId, ex.StatusCode is null ? "network-error" : "http-error", ex);
             return await ReconcileAmbiguousAssignmentAsync(
                 linklyBackendTerminalClient, environment, terminal, targetSnapshot, devices, cancellationToken);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            LogAssignmentAmbiguous(terminal.TerminalId, "invalid-response", ex);
             return await ReconcileAmbiguousAssignmentAsync(
                 linklyBackendTerminalClient, environment, terminal, targetSnapshot, devices, cancellationToken);
         }
@@ -657,6 +660,7 @@ public sealed class CardTerminalSetupService(
         }
 
         // 2xx 也必须核验完整后置条件；回包不完整时只读一次权威目录，绝不重放 PUT。
+        LogAssignmentAmbiguous(terminal.TerminalId, "postcondition-unconfirmed", exception: null);
         return await ReconcileAmbiguousAssignmentAsync(
             linklyBackendTerminalClient, environment, terminal, targetSnapshot, devices, cancellationToken);
     }
@@ -674,6 +678,20 @@ public sealed class CardTerminalSetupService(
         {
             var directory = await backendClient.GetTerminalsAsync(environment, cancellationToken);
             var applied = AssignmentConfirmed(directory, submittedTerminal, targetDevice, submittedDevices);
+            // 对账确认已生效记 Information；仍无法确认则需要人工核对当前归属，记 Warning。
+            LinklyJsonLog.Write(
+                "LinklyCloud",
+                "settings-service",
+                "terminal-assignment",
+                applied ? "reconciled" : "unknown",
+                success: applied,
+                reason: applied ? "directory-confirms-binding" : "directory-does-not-confirm-binding",
+                details: new
+                {
+                    terminalId = submittedTerminal.TerminalId,
+                    environment = environment.ToString(),
+                    targetDeviceCode = targetDevice?.DeviceCode
+                });
             return new LinklyTerminalAssignmentResult(
                 applied,
                 applied
@@ -684,11 +702,41 @@ public sealed class CardTerminalSetupService(
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            LinklyJsonLog.Write(
+                "LinklyCloud",
+                "settings-service",
+                "terminal-assignment",
+                "unknown",
+                success: false,
+                reason: "reconcile-failed",
+                details: new
+                {
+                    terminalId = submittedTerminal.TerminalId,
+                    environment = environment.ToString()
+                },
+                exception: ex);
             return new LinklyTerminalAssignmentResult(
                 false,
                 T("settings.linkly.cloudBackend.assignmentReconcileFailed", "The write result is unknown and the directory could not be refreshed. Check the current binding before trying again."),
                 Reconciled: true);
         }
+    }
+
+    /// <summary>
+    /// 分配写请求结果不确定（超时/5xx/解析失败/后置条件不符），随后只读对账；先记一条 Warning 便于追溯。
+    /// </summary>
+    private static void LogAssignmentAmbiguous(Guid terminalId, string reason, Exception? exception)
+    {
+        LinklyJsonLog.Write(
+            "LinklyCloud",
+            "settings-service",
+            "terminal-assignment",
+            "unknown",
+            httpStatus: (exception as HttpRequestException)?.StatusCode,
+            success: false,
+            reason: reason,
+            details: new { terminalId },
+            exception: exception);
     }
 
     private static bool AssignmentConfirmed(

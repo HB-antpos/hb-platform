@@ -115,7 +115,7 @@ public sealed class LinklySettingsCoordinator
                 _setStatusOverride(ex.Message);
                 throw;
             }
-        }, null);
+        }, "linkly test");
     }
 
     public async Task LogonAsync(LinklySettingsState s)
@@ -157,7 +157,7 @@ public sealed class LinklySettingsCoordinator
                 _setStatusOverride(ex.Message);
                 throw;
             }
-        }, null);
+        }, "linkly logon");
     }
 
     public async Task TestTransactionStatusAsync(LinklySettingsState s)
@@ -183,7 +183,7 @@ public sealed class LinklySettingsCoordinator
                 _setStatusOverride(ex.Message);
                 throw;
             }
-        }, null);
+        }, "linkly transaction status test");
     }
 
     // ── Cloud pairing ──
@@ -226,7 +226,7 @@ public sealed class LinklySettingsCoordinator
                 _setStatusOverride(ex.Message);
                 throw;
             }
-        }, null);
+        }, "pair linkly cloud");
     }
 
     public bool ValidatePairingInput(string password, LinklySettingsState s)
@@ -322,7 +322,7 @@ public sealed class LinklySettingsCoordinator
 
             s.LoadedConfiguration = config;
             St("settings.status.linklySaved");
-        }, null);
+        }, "save linkly settings");
     }
 
     // ── Priority ──

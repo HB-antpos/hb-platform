@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using Hbpos.Contracts.Common;
@@ -158,10 +159,27 @@ public sealed class SquareTerminalPaymentClient(HttpClient httpClient) : ISquare
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(method, relativeUrl);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var requestPath = StripQuery(relativeUrl);
+        var stopwatch = Stopwatch.StartNew();
+        HttpResponseMessage sentResponse;
+        try
+        {
+            sentResponse = await httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException ||
+            (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            // 断网或 HttpClient 自身超时；调用方取消不记，由上层处理。
+            LogFailure(method, requestPath, operationName, statusCode: null, stopwatch.ElapsedMilliseconds,
+                ex is HttpRequestException ? "network-error" : "timeout", detail: null, ex);
+            throw;
+        }
+
+        using var response = sentResponse;
         var content = response.Content is null
             ? string.Empty
             : await response.Content.ReadAsStringAsync(cancellationToken);
+        stopwatch.Stop();
 
         ApiResult<T>? result = null;
         if (!string.IsNullOrWhiteSpace(content))
@@ -172,12 +190,16 @@ public sealed class SquareTerminalPaymentClient(HttpClient httpClient) : ISquare
             }
             catch (JsonException ex)
             {
+                LogFailure(method, requestPath, operationName, (int)response.StatusCode, stopwatch.ElapsedMilliseconds,
+                    "invalid-json", response.IsSuccessStatusCode ? null : Truncate(content), ex);
                 throw new JsonException($"Square {operationName} API returned invalid JSON.", ex);
             }
         }
 
         if (!response.IsSuccessStatusCode)
         {
+            LogFailure(method, requestPath, operationName, (int)response.StatusCode, stopwatch.ElapsedMilliseconds,
+                "http-error", result?.Message ?? Truncate(content), exception: null);
             throw new InvalidOperationException(
                 string.IsNullOrWhiteSpace(result?.Message)
                     ? $"Square {operationName} request failed with HTTP {(int)response.StatusCode}."
@@ -191,6 +213,8 @@ public sealed class SquareTerminalPaymentClient(HttpClient httpClient) : ISquare
 
         if (!result.Success)
         {
+            LogFailure(method, requestPath, operationName, (int)response.StatusCode, stopwatch.ElapsedMilliseconds,
+                "failure-response", result.Message, exception: null);
             throw new InvalidOperationException(
                 string.IsNullOrWhiteSpace(result.Message)
                     ? $"Square {operationName} API returned a failure response."
@@ -198,6 +222,54 @@ public sealed class SquareTerminalPaymentClient(HttpClient httpClient) : ISquare
         }
 
         return result.Data!;
+    }
+
+    /// <summary>
+    /// Square 查询（checkout/payment/refund）失败统一记 Warning：方法、路径、状态码、耗时与服务端说明（截断 256 字符）。
+    /// 只记失败；查询成功属于恢复流程的高频读取，不记。
+    /// </summary>
+    private static void LogFailure(
+        HttpMethod method,
+        string requestPath,
+        string operationName,
+        int? statusCode,
+        long elapsedMs,
+        string reason,
+        string? detail,
+        Exception? exception)
+    {
+        ConsoleLog.WriteWarning(
+            "Square",
+            $"Square {operationName} query failed {method.Method} {requestPath} http={statusCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<none>"} " +
+            $"reason={reason} elapsedMs={elapsedMs}{(string.IsNullOrWhiteSpace(detail) ? string.Empty : $" detail={Truncate(detail)}")}",
+            new ApplicationLogContext(
+                RequestPath: requestPath,
+                RequestMethod: method.Method,
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["operation"] = operationName,
+                    ["reason"] = reason,
+                    ["elapsedMs"] = elapsedMs
+                }),
+            exception);
+    }
+
+    private static string StripQuery(string relativeUrl)
+    {
+        var index = relativeUrl.IndexOf('?', StringComparison.Ordinal);
+        return index < 0 ? relativeUrl : relativeUrl[..index];
+    }
+
+    private static string? Truncate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= 256 ? trimmed : trimmed[..256];
     }
 
     private static void AddPaymentId(List<string> paymentIds, string? paymentId)

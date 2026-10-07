@@ -48,7 +48,7 @@ internal sealed class CatalogStartupCoordinator
 
         _startupCatalogIndexLoadCts ??= new CancellationTokenSource();
         _startupCatalogIndexLoadCts.CancelAfter(StartupCatalogIndexLoadTimeout);
-        _startupCatalogIndexLoadTask ??= LoadLocalCatalogCoreAsync(storeCode, _startupCatalogIndexLoadCts.Token, onLoaded, onCartRefresh);
+        _startupCatalogIndexLoadTask ??= LoadLocalCatalogCoreAsync(storeCode, _startupCatalogIndexLoadCts.Token, onLoaded, onCartRefresh, hasStartupTimeout: true);
         var cts = _startupCatalogIndexLoadCts;
         var loadTask = _startupCatalogIndexLoadTask;
         try
@@ -79,13 +79,14 @@ internal sealed class CatalogStartupCoordinator
         CancellationToken cancellationToken,
         Action<IReadOnlyList<SellableItemDto>>? onLoaded = null,
         Action? onCartRefresh = null)
-        => await LoadLocalCatalogCoreAsync(storeCode, cancellationToken, onLoaded, onCartRefresh);
+        => await LoadLocalCatalogCoreAsync(storeCode, cancellationToken, onLoaded, onCartRefresh, hasStartupTimeout: false);
 
     private async Task<IReadOnlyList<SellableItemDto>> LoadLocalCatalogCoreAsync(
         string storeCode,
         CancellationToken cancellationToken,
         Action<IReadOnlyList<SellableItemDto>>? onLoaded,
-        Action? onCartRefresh)
+        Action? onCartRefresh,
+        bool hasStartupTimeout)
     {
         var stopwatch = Stopwatch.StartNew();
         ConsoleLog.Write("CatalogStartup", $"local catalog load start store={storeCode}");
@@ -99,16 +100,43 @@ internal sealed class CatalogStartupCoordinator
             ConsoleLog.Write("CatalogStartup", $"local catalog load completed store={storeCode} items={cachedItems.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
             return cachedItems;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
             stopwatch.Stop();
-            ConsoleLog.Write("CatalogStartup", $"local catalog load canceled store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            // 启动加载与 CancelStartupLoad 共用同一个 CTS（CancelAfter 30 秒），只能按耗时区分：
+            // 启动路径耗时已接近 30 秒视为超时（记 Warning），否则是调用方取消（保持 Information）。
+            if (hasStartupTimeout && stopwatch.Elapsed >= StartupCatalogIndexLoadTimeout - TimeSpan.FromSeconds(1))
+            {
+                ConsoleLog.WriteWarning(
+                    "CatalogStartup",
+                    $"local catalog load timed out store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds} timeoutSeconds={StartupCatalogIndexLoadTimeout.TotalSeconds:0}",
+                    new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["storeCode"] = storeCode,
+                        ["elapsedMs"] = stopwatch.ElapsedMilliseconds,
+                        ["reason"] = "timeout"
+                    }),
+                    ex);
+            }
+            else
+            {
+                ConsoleLog.Write("CatalogStartup", $"local catalog load canceled store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            }
+
             return [];
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            ConsoleLog.Write("CatalogStartup", $"local catalog load failed store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            ConsoleLog.WriteError(
+                "CatalogStartup",
+                $"local catalog load failed store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}",
+                new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["storeCode"] = storeCode,
+                    ["elapsedMs"] = stopwatch.ElapsedMilliseconds
+                }),
+                ex);
             _setStatusMessage(ex.Message);
             return [];
         }

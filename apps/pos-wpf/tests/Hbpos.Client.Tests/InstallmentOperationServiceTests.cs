@@ -6,8 +6,60 @@ using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
+// 部分用例截获 ConsoleLog 中心日志（全局静态），因此整个类加入 ConsoleLog 全局状态集合串行执行。
+[Collection(ConsoleLogGlobalStateTestCollection.Name)]
 public sealed class InstallmentOperationServiceTests
 {
+    [Fact]
+    public async Task Pickup_api_failure_marked_result_unknown_writes_traceable_warning()
+    {
+        var path = CreateTempDatabasePath();
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            var repository = await CreateRepositoryAsync(path);
+            var installmentGuid = Guid.NewGuid();
+            var request = new InstallmentConfirmPickupRequest(
+                installmentGuid,
+                Session.StoreCode,
+                Session.DeviceCode,
+                Session.CashierId,
+                Session.CashierName,
+                DateTimeOffset.UtcNow,
+                OperationGuid: installmentGuid,
+                IdempotencyKey: $"{installmentGuid:D}:pickup");
+            var api = new RecordingInstallmentApi
+            {
+                PickupException = new CatalogApiException(
+                    "gateway failed",
+                    System.Net.HttpStatusCode.BadGateway,
+                    "INSTALLMENT_UPSTREAM_FAILED")
+            };
+            var service = CreateService(repository, api, new CountingTerminal(approve: true));
+
+            var result = await service.ExecutePickupAsync(Session, request);
+
+            Assert.True(result.RequiresReview);
+            var unknown = Assert.Single(await repository.GetRecoverableAsync(Session.StoreCode));
+            Assert.Equal(LocalInstallmentOperationState.ResultUnknown, unknown.State);
+            // 此前 MarkApiUnknownAsync 只写本地库；现在必须有一条以 operationGuid 为 TraceId 的 Warning。
+            var entry = Assert.Single(sink.Entries, item =>
+                item.Category == "Installment" && item.TraceId == unknown.OperationGuid.ToString("D"));
+            Assert.Equal("Warning", entry.Level);
+            Assert.Equal(502, entry.StatusCode);
+            Assert.Equal("INSTALLMENT_UPSTREAM_FAILED", entry.Properties!["errorCode"]);
+            Assert.Equal("pickup", entry.Properties["operation"]);
+            Assert.Contains("ResultUnknown", entry.Message);
+            Assert.Equal(nameof(CatalogApiException), entry.ExceptionType);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+            DeleteTempDatabase(path);
+        }
+    }
+
     [Fact]
     public async Task Create_is_blocked_when_terminal_has_another_recoverable_create()
     {

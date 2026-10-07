@@ -306,19 +306,25 @@ public interface ICashierLoginApiClient
 
 public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLoginApiClient
 {
+    private const string LoginPath = "api/v1/cashiers/barcode-login";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<CashierLoginAttempt> LoginAsync(
         CashierBarcodeLoginRequest request,
         CancellationToken cancellationToken = default)
     {
+        // 日志只带门店/设备、状态码与 errorCode；收银员条码（request.UserBarcode）绝不入日志。
+        var stopwatch = Stopwatch.StartNew();
+        int? statusCode = null;
         try
         {
-            var response = await httpClient.PostAsJsonAsync("api/v1/cashiers/barcode-login", request, cancellationToken);
+            using var response = await httpClient.PostAsJsonAsync(LoginPath, request, cancellationToken);
+            statusCode = (int)response.StatusCode;
             if (!response.IsSuccessStatusCode)
             {
                 if (IsServiceUnavailable(response.StatusCode))
                 {
+                    LogUnavailable(request, "http-status", statusCode, stopwatch.ElapsedMilliseconds);
                     return CashierLoginAttempt.ApiUnavailable();
                 }
 
@@ -327,11 +333,13 @@ public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLogin
                 {
                     failed = await response.Content.ReadFromJsonAsync<ApiResult<CashierSessionDto>>(cancellationToken);
                 }
-                catch (JsonException)
+                catch (JsonException ex)
                 {
+                    LogRejected(request, statusCode, errorCode: null, stopwatch.ElapsedMilliseconds, "unparsable-error-body", ex);
                     return CashierLoginAttempt.OnlineRejected("收银员条码无效或已停用");
                 }
 
+                LogRejected(request, statusCode, failed?.ErrorCode, stopwatch.ElapsedMilliseconds, "http-status");
                 return CashierLoginAttempt.OnlineRejected(
                     failed?.Message ?? "收银员条码无效或已停用",
                     failed?.ErrorCode);
@@ -343,31 +351,109 @@ public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLogin
             using var document = JsonDocument.Parse(content);
             if (!DeviceApiClient.IsApiResultEnvelope(document.RootElement))
             {
+                LogUnavailable(request, "not-api-envelope", statusCode, stopwatch.ElapsedMilliseconds);
                 return CashierLoginAttempt.ApiUnavailable();
             }
 
             var result = document.RootElement.Deserialize<ApiResult<CashierSessionDto>>(JsonOptions)!;
             if (!result.Success)
             {
+                LogRejected(request, statusCode, result.ErrorCode, stopwatch.ElapsedMilliseconds, "success-false");
                 return CashierLoginAttempt.OnlineRejected(
                     result.Message ?? "收银员条码无效或已停用",
                     result.ErrorCode);
             }
 
             // success=true 却没有会话数据属于形状异常，不是拒绝。
-            return result.Data is not null
-                ? CashierLoginAttempt.OnlineAccepted(result.Data)
-                : CashierLoginAttempt.ApiUnavailable();
+            if (result.Data is null)
+            {
+                LogUnavailable(request, "missing-session-data", statusCode, stopwatch.ElapsedMilliseconds);
+                return CashierLoginAttempt.ApiUnavailable();
+            }
+
+            return CashierLoginAttempt.OnlineAccepted(result.Data);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
             // 关键逻辑：服务端 5xx/网关错误常返回 HTML 或空响应，这不是在线拒绝，应允许离线缓存兜底。
+            LogUnavailable(request, "unparsable-response", statusCode, stopwatch.ElapsedMilliseconds, ex);
             return CashierLoginAttempt.ApiUnavailable();
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
+            // 行为保持不变（一律按服务不可用处理），日志里区分调用方取消与 HttpClient 超时。
+            var reason = ex is TaskCanceledException
+                ? cancellationToken.IsCancellationRequested ? "canceled" : "timeout"
+                : "network";
+            if (reason == "canceled")
+            {
+                ConsoleLog.WriteInformation(
+                    "CashierLogin",
+                    $"cashier login request canceled by caller store={request.StoreCode} device={request.DeviceCode} elapsedMs={stopwatch.ElapsedMilliseconds}",
+                    CreateLogContext(request, statusCode, errorCode: null, stopwatch.ElapsedMilliseconds, reason));
+            }
+            else
+            {
+                LogUnavailable(request, reason, statusCode, stopwatch.ElapsedMilliseconds, ex);
+            }
+
             return CashierLoginAttempt.ApiUnavailable();
         }
+    }
+
+    private static void LogUnavailable(
+        CashierBarcodeLoginRequest request,
+        string reason,
+        int? statusCode,
+        long elapsedMs,
+        Exception? exception = null)
+    {
+        ConsoleLog.WriteWarning(
+            "CashierLogin",
+            $"cashier login api unavailable; falling back to offline cache reason={reason} status={statusCode?.ToString() ?? "-"} store={request.StoreCode} device={request.DeviceCode} elapsedMs={elapsedMs}",
+            CreateLogContext(request, statusCode, errorCode: null, elapsedMs, reason),
+            exception);
+    }
+
+    private static void LogRejected(
+        CashierBarcodeLoginRequest request,
+        int? statusCode,
+        string? errorCode,
+        long elapsedMs,
+        string reason,
+        Exception? exception = null)
+    {
+        ConsoleLog.WriteWarning(
+            "CashierLogin",
+            $"cashier login rejected online reason={reason} status={statusCode?.ToString() ?? "-"} errorCode={errorCode ?? "-"} store={request.StoreCode} device={request.DeviceCode} elapsedMs={elapsedMs}",
+            CreateLogContext(request, statusCode, errorCode, elapsedMs, reason),
+            exception);
+    }
+
+    private static ApplicationLogContext CreateLogContext(
+        CashierBarcodeLoginRequest request,
+        int? statusCode,
+        string? errorCode,
+        long elapsedMs,
+        string reason)
+    {
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["storeCode"] = request.StoreCode,
+            ["deviceCode"] = request.DeviceCode,
+            ["elapsedMs"] = elapsedMs,
+            ["reason"] = reason
+        };
+        if (!string.IsNullOrWhiteSpace(errorCode))
+        {
+            properties["errorCode"] = errorCode;
+        }
+
+        return new ApplicationLogContext(
+            RequestPath: LoginPath,
+            RequestMethod: "POST",
+            StatusCode: statusCode,
+            Properties: properties);
     }
 
     /// <summary>
@@ -497,6 +583,18 @@ public sealed class CashierLoginService(
         ConsoleLog.Write(
             "CashierLoginTiming",
             $"cacheReadMs={cacheFallbackStopwatch.ElapsedMilliseconds} cacheHit={cached is not null} attemptOnline=true");
+        // 走离线缓存降级路径：原因已由 CashierLoginApiClient 记 Warning，这里补记降级结果（不含条码）。
+        ConsoleLog.WriteInformation(
+            "CashierLogin",
+            $"cashier login degraded to offline cache reason=api-unavailable errorCode={attempt.ErrorCode ?? "-"} cacheHit={cached is not null} store={storeCode} device={deviceCode}",
+            new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["storeCode"] = storeCode,
+                ["deviceCode"] = deviceCode,
+                ["reason"] = "api-unavailable",
+                ["mode"] = "offline-cache",
+                ["result"] = cached is not null ? "cache-hit" : "cache-miss"
+            }));
         return cached is null
             ? CashierLoginResult.Fail(attempt.Message, attempt.ErrorCode)
             : CashierLoginResult.Success(cached);

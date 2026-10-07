@@ -132,7 +132,7 @@ internal static partial class ClientLogSanitizer
     [GeneratedRegex("(?i)(Bearer\\s+)[^\\s,;\\\"']+", RegexOptions.CultureInvariant)]
     private static partial Regex BearerRegex();
 
-    [GeneratedRegex("(?i)((?:authorization|password|pin|secret|api[_-]?key|token|credential|authorization[_-]?code|pan|cvv|voucher[_-]?code|employee[_-]?barcode)\\s*[:=]\\s*)[^\\s,;\\\"']+", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("(?i)((?:authorization|password|pin|secret|api[_-]?key|token|credential|authorization[_-]?code|pan|cvv|voucher(?:[_-]?code)?|employee[_-]?barcode)\\s*[:=]\\s*)[^\\s,;\\\"']+", RegexOptions.CultureInvariant)]
     private static partial Regex InlineSecretRegex();
 
     [GeneratedRegex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)", RegexOptions.CultureInvariant)]

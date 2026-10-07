@@ -200,7 +200,43 @@ public sealed class SquareTerminalSetupClient(HttpClient httpClient) : ISquareTe
             request.Content = JsonContent.Create(body, options: JsonOptions);
         }
 
-        return await _httpClient.SendAsync(request, cancellationToken);
+        try
+        {
+            return await _httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException ||
+            (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            // 设置页 Square 接口断网或 HttpClient 超时（调用方取消不记）。
+            var queryIndex = relativeUrl.IndexOf('?', StringComparison.Ordinal);
+            var requestPath = queryIndex < 0 ? relativeUrl : relativeUrl[..queryIndex];
+            ConsoleLog.WriteWarning(
+                "Square",
+                $"settings Square API {method.Method} {requestPath} {(ex is HttpRequestException ? "network failure" : "timed out")}",
+                new ApplicationLogContext(RequestPath: requestPath, RequestMethod: method.Method),
+                ex);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 设置页 Square 接口返回失败时记 Warning（只记操作名、状态码与服务端说明，不记正文：设备配对码在响应体里）。
+    /// </summary>
+    private static void LogApiFailure(string operationName, int statusCode, string reason, string? serverMessage, Exception? exception = null)
+    {
+        var message = serverMessage is null || serverMessage.Length <= 256 ? serverMessage : serverMessage[..256];
+        ConsoleLog.WriteWarning(
+            "Square",
+            $"settings Square {operationName} request failed http={statusCode} reason={reason}" +
+            (string.IsNullOrWhiteSpace(message) ? string.Empty : $" message={message}"),
+            new ApplicationLogContext(
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["operation"] = operationName,
+                    ["reason"] = reason
+                }),
+            exception);
     }
 
     private static async Task<T> ReadApiResultAsync<T>(
@@ -221,12 +257,14 @@ public sealed class SquareTerminalSetupClient(HttpClient httpClient) : ISquareTe
             }
             catch (JsonException ex)
             {
+                LogApiFailure(operationName, (int)response.StatusCode, "invalid-json", serverMessage: null, ex);
                 throw new InvalidOperationException($"Square {operationName} API returned invalid JSON.", ex);
             }
         }
 
         if (!response.IsSuccessStatusCode)
         {
+            LogApiFailure(operationName, (int)response.StatusCode, "http-error", result?.Message);
             throw new SquareApiException(
                 string.IsNullOrWhiteSpace(result?.Message)
                     ? $"Square {operationName} request failed with HTTP {(int)response.StatusCode}."
@@ -236,11 +274,13 @@ public sealed class SquareTerminalSetupClient(HttpClient httpClient) : ISquareTe
 
         if (result is null)
         {
+            LogApiFailure(operationName, (int)response.StatusCode, "empty-response", serverMessage: null);
             throw new InvalidOperationException($"Square {operationName} API returned an empty response.");
         }
 
         if (!result.Success)
         {
+            LogApiFailure(operationName, (int)response.StatusCode, "failure-response", result.Message);
             throw new SquareApiException(
                 string.IsNullOrWhiteSpace(result.Message)
                     ? $"Square {operationName} API returned a failure response."
@@ -250,6 +290,7 @@ public sealed class SquareTerminalSetupClient(HttpClient httpClient) : ISquareTe
 
         if (result.Data is null)
         {
+            LogApiFailure(operationName, (int)response.StatusCode, "missing-data", result.Message);
             throw new InvalidOperationException($"Square {operationName} API returned no data.");
         }
 

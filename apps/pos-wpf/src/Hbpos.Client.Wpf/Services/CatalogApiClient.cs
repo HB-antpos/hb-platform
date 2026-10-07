@@ -169,7 +169,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -203,7 +203,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"POST {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("POST", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -229,7 +229,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -259,7 +259,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -285,7 +285,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -322,13 +322,22 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (OperationCanceledException ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} canceled storeCode={storeCode} lookupCode={lookupCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            if (cancellationToken.IsCancellationRequested)
+            {
+                Log($"GET {requestUri} canceled storeCode={storeCode} lookupCode={lookupCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            }
+            else
+            {
+                // 调用方未取消：HttpClient 超时，按失败记 Warning。
+                LogFailed("GET", requestUri, $"storeCode={storeCode} lookupCode={lookupCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
+            }
+
             throw;
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed storeCode={storeCode} lookupCode={lookupCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"storeCode={storeCode} lookupCode={lookupCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -356,7 +365,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"POST {requestUri} failed store={request.StoreCode} product={request.ProductCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("POST", requestUri, $"store={request.StoreCode} product={request.ProductCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -392,7 +401,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -437,7 +446,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -484,7 +493,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -520,7 +529,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {requestUri} failed elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -609,7 +618,7 @@ public sealed class CatalogApiClient : ICatalogApiClient
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log($"GET {relativePath} failed offset={offset} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            LogFailed("GET", relativePath, $"offset={offset} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }
@@ -898,6 +907,62 @@ public sealed class CatalogApiClient : ICatalogApiClient
     private static void Log(string message)
     {
         ConsoleLog.Write("CatalogApi", message);
+    }
+
+    /// <summary>
+    /// 失败日志：保留原文案（"{method} {uri} failed ..."），升级为 Warning 并带结构化路径/状态码/errorCode/耗时与异常对象。
+    /// 调用方主动取消不算失败，仍记 Information。
+    /// </summary>
+    private static void LogFailed(
+        string method,
+        string requestUri,
+        string details,
+        long elapsedMs,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var message = $"{method} {requestUri} failed {details}";
+        if (exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
+        {
+            Log(message);
+            return;
+        }
+
+        var (statusCode, errorCode) = exception switch
+        {
+            CatalogApiException apiException => (
+                apiException.StatusCode is { } apiStatus ? (int)apiStatus : (int?)null,
+                apiException.ErrorCode),
+            HttpRequestException httpException => (
+                httpException.StatusCode is { } httpStatus ? (int)httpStatus : (int?)null,
+                (string?)null),
+            _ => ((int?)null, (string?)null)
+        };
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["elapsedMs"] = elapsedMs
+        };
+        if (!string.IsNullOrWhiteSpace(errorCode))
+        {
+            properties["errorCode"] = errorCode;
+        }
+
+        if (exception is OperationCanceledException)
+        {
+            // 调用方未取消却收到取消：HttpClient 超时。
+            properties["reason"] = "timeout";
+        }
+
+        var queryIndex = requestUri.IndexOf('?', StringComparison.Ordinal);
+        ConsoleLog.WriteWarning(
+            "CatalogApi",
+            $"{message} status={statusCode?.ToString(CultureInfo.InvariantCulture) ?? "-"} errorCode={errorCode ?? "-"}",
+            new ApplicationLogContext(
+                RequestPath: queryIndex < 0 ? requestUri : requestUri[..queryIndex],
+                RequestMethod: method,
+                StatusCode: statusCode,
+                Properties: properties),
+            exception);
     }
 }
 

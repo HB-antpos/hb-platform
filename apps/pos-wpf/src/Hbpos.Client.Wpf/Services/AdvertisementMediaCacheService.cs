@@ -112,6 +112,8 @@ public sealed class AdvertisementMediaCacheService(
             if (response.Content.Headers.ContentLength is long contentLength &&
                 contentLength != advertisement.FileSize)
             {
+                // 广告每 5 分钟刷新一次，长度不符时直接记 Warning（会回退为远程播放）。
+                LogCacheItemSkipped(advertisement, mediaUri, $"content-length-mismatch contentLength={contentLength} expectedBytes={advertisement.FileSize}");
                 return advertisement;
             }
 
@@ -132,6 +134,7 @@ public sealed class AdvertisementMediaCacheService(
                 if (copiedBytes != advertisement.FileSize)
                 {
                     DeleteIfExists(tempFilePath);
+                    LogCacheItemSkipped(advertisement, mediaUri, $"size-mismatch copiedBytes={copiedBytes} expectedBytes={advertisement.FileSize}");
                     return advertisement;
                 }
             }
@@ -148,12 +151,34 @@ public sealed class AdvertisementMediaCacheService(
         catch (Exception ex) when (ex is IOException or HttpRequestException or UnauthorizedAccessException or OperationCanceledException)
         {
             DeleteIfExists(tempFilePath);
-            ConsoleLog.Write(
+            var statusCode = ex is HttpRequestException { StatusCode: { } status } ? (int)status : (int?)null;
+            ConsoleLog.WriteWarning(
                 "CustomerDisplay",
-                $"advertisement media cache item failed id={advertisement.Id} uri={mediaUri} error={ex.GetType().Name}: {ex.Message}");
+                $"advertisement media cache item failed id={advertisement.Id} uri={FormatUriWithoutQuery(mediaUri)} status={statusCode?.ToString() ?? "-"} error={ex.GetType().Name}: {ex.Message}",
+                new ApplicationLogContext(
+                    StatusCode: statusCode,
+                    Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["reason"] = ex is OperationCanceledException ? "timeout" : "download-failed"
+                    }),
+                ex);
             return advertisement;
         }
     }
+
+    private static void LogCacheItemSkipped(AdvertisementPlaybackItemDto advertisement, Uri mediaUri, string reason)
+    {
+        ConsoleLog.WriteWarning(
+            "CustomerDisplay",
+            $"advertisement media cache item skipped id={advertisement.Id} uri={FormatUriWithoutQuery(mediaUri)} reason={reason}",
+            new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["reason"] = reason.Split(' ')[0]
+            }));
+    }
+
+    // 素材地址可能是带签名查询串的 COS 链接，日志只记 scheme://host/path。
+    private static string FormatUriWithoutQuery(Uri uri) => uri.GetLeftPart(UriPartial.Path);
 
     private static bool TryCreateRemoteUri(string mediaUrl, out Uri uri)
     {

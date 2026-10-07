@@ -1735,6 +1735,49 @@ public sealed class LinklyBackendTerminalClientTests
     }
 
     [Fact]
+    public async Task PurchaseAsync_logs_result_unknown_warning_with_session_trace_when_status_poll_loses_network()
+    {
+        var sink = new RecordingApplicationLogSink();
+        var handler = new StubHttpMessageHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/linkly/cloud-backend/transactions/active" => new HttpResponseMessage(HttpStatusCode.NotFound),
+            "/api/v1/linkly/cloud-backend/transactions" => JsonResponse(PendingSessionJson("net-session", "TXN-NET")),
+            "/api/v1/linkly/cloud-backend/transactions/net-session/status" => throw new HttpRequestException("network down"),
+            _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        PaymentAuthorizationResult result;
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        Assert.True(result.ResultUnknown);
+        // 交易已提交后通信中断：原先只更新弹窗，中心日志里没有任何记录；现在要有按 sessionId 串联、带异常的 Warning。
+        var entry = Assert.Single(
+            sink.Entries,
+            item => item.Level == "Warning" &&
+                item.TraceId == "net-session" &&
+                item.Message.Contains("\"operation\":\"transaction\"", StringComparison.Ordinal));
+        Assert.Equal("LinklyBackend", entry.Category);
+        Assert.Equal(nameof(HttpRequestException), entry.ExceptionType);
+        Assert.Contains("\"phase\":\"unknown\"", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("\"transactionSubmitted\":true", entry.Message, StringComparison.Ordinal);
+        // 发送阶段的网络失败也要单独留下带耗时的记录。
+        Assert.Contains(
+            sink.Entries,
+            item => item.Level == "Warning" &&
+                item.Message.Contains("\"operation\":\"status\"", StringComparison.Ordinal) &&
+                item.Message.Contains("\"reason\":\"network-error\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task PurchaseAsync_allows_fallback_when_active_session_read_is_cancelled_before_backend_submit()
     {
         using var logs = new ConsoleLogCapture();

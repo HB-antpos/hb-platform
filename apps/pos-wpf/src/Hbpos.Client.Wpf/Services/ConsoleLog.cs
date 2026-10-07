@@ -44,6 +44,17 @@ internal static class ConsoleLog
     }
 
     /// <summary>
+    /// 带结构化上下文的 Information，用于联网请求完成、离线降级等需要在中心日志按状态码/TraceId 检索的正常事件。
+    /// </summary>
+    internal static void WriteInformation(
+        string category,
+        string message,
+        ApplicationLogContext? context = null)
+    {
+        Write(category, message, "Information", context);
+    }
+
+    /// <summary>
     /// 需要人工跟进但不影响收银主流程的情况（例如上传记录被服务端永久拒绝、不再自动重试）。
     /// </summary>
     internal static void WriteWarning(

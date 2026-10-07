@@ -359,7 +359,8 @@ public sealed class LinklyTerminalClient(
                 details: new
                 {
                     ex.Message
-                });
+                },
+                exception: ex);
             return new LinklyConnectionTestResult(
                 false,
                 string.Format(
@@ -564,7 +565,8 @@ public sealed class LinklyTerminalClient(
                 "response",
                 success: false,
                 reason: ex.GetType().Name,
-                details: new { ex.Message });
+                details: new { ex.Message },
+                exception: ex);
             if (requestMayHaveBeenSent)
             {
                 return CreateUnknownLogonResult(receipts);
@@ -733,7 +735,7 @@ public sealed class LinklyTerminalClient(
         }
         catch (Exception ex) when (requestSent)
         {
-            LogJson("settlement", "unknown", "response", settings.Environment, operationId, success: false, reason: ex.GetType().Name, request: request, details: new { ex.Message });
+            LogJson("settlement", "unknown", "response", settings.Environment, operationId, success: false, reason: ex.GetType().Name, request: request, details: new { ex.Message }, exception: ex);
             return new LinklySettlementResult(
                 false,
                 T("linkly.local.settlementOutcomeUnknown", "ANZ Linkly settlement outcome could not be confirmed."),
@@ -750,7 +752,7 @@ public sealed class LinklyTerminalClient(
         }
         catch (Exception ex)
         {
-            LogJson("settlement", "failed", "response", settings.Environment, operationId, success: false, reason: ex.GetType().Name, request: request, details: new { ex.Message });
+            LogJson("settlement", "failed", "response", settings.Environment, operationId, success: false, reason: ex.GetType().Name, request: request, details: new { ex.Message }, exception: ex);
             return new LinklySettlementResult(false, string.Format(
                 CultureInfo.CurrentCulture,
                 T("linkly.local.transactionFailed", "ANZ Linkly settlement failed: {0}"),
@@ -966,7 +968,8 @@ public sealed class LinklyTerminalClient(
                 {
                     exception = ex.GetType().Name,
                     ex.Message
-                });
+                },
+                exception: ex);
 
             if (!transactionRequestSent)
             {
@@ -1006,7 +1009,8 @@ public sealed class LinklyTerminalClient(
                 details: new
                 {
                     ex.Message
-                });
+                },
+                exception: ex);
             if (transactionRequestSent)
             {
                 return await TryRecoverLastTransactionAsync(
@@ -1088,7 +1092,8 @@ public sealed class LinklyTerminalClient(
                 {
                     exception = ex.GetType().Name,
                     ex.Message
-                });
+                },
+                exception: ex);
             return await TryRecoverLastTransactionAsync(
                 settings,
                 amount,
@@ -1112,7 +1117,8 @@ public sealed class LinklyTerminalClient(
                 details: new
                 {
                     ex.Message
-                });
+                },
+                exception: ex);
             return await TryRecoverLastTransactionAsync(
                 settings,
                 amount,
@@ -1289,7 +1295,8 @@ public sealed class LinklyTerminalClient(
                 {
                     exception = ex.GetType().Name,
                     ex.Message
-                });
+                },
+                exception: ex);
             return new PaymentAuthorizationResult(false, null, fallbackMessage, TxnType: ToResultTxnType(transactionType), ResultUnknown: true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1305,7 +1312,8 @@ public sealed class LinklyTerminalClient(
                 details: new
                 {
                     ex.Message
-                });
+                },
+                exception: ex);
             return new PaymentAuthorizationResult(false, null, fallbackMessage, TxnType: ToResultTxnType(transactionType), ResultUnknown: true);
         }
         finally
@@ -1619,7 +1627,8 @@ public sealed class LinklyTerminalClient(
                 success: false,
                 reason: ex.GetType().Name,
                 request: cancelRequest,
-                details: new { ex.Message });
+                details: new { ex.Message },
+                exception: ex);
         }
     }
 
@@ -1734,7 +1743,8 @@ public sealed class LinklyTerminalClient(
         string? reason = null,
         object? request = null,
         object? response = null,
-        object? details = null)
+        object? details = null,
+        Exception? exception = null)
     {
         try
         {
@@ -1750,7 +1760,8 @@ public sealed class LinklyTerminalClient(
                 reason: reason,
                 request: NormalizeLogPayload(request),
                 response: NormalizeLogPayload(response),
-                details: details);
+                details: details,
+                exception: exception);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1908,7 +1919,8 @@ public sealed class LinklyTerminalClient(
                 details: new
                 {
                     ex.Message
-                });
+                },
+                exception: ex);
         }
     }
 }

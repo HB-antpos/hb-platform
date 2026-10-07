@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Globalization;
@@ -43,41 +44,77 @@ public sealed class VoucherApiClient(HttpClient httpClient, ILocalizationService
         CancellationToken cancellationToken = default)
     {
         var path = $"api/v1/vouchers/{Uri.EscapeDataString(voucherCode)}?storeCode={Uri.EscapeDataString(storeCode)}";
-        return GetAsync<StoreVoucherQueryResponse>(path, cancellationToken);
+        // 券号在路径里：日志只用模板路径，券号只留后 4 位。
+        return GetAsync<StoreVoucherQueryResponse>(
+            path,
+            new VoucherRequestLog("query", "api/v1/vouchers/{voucherCode}", storeCode, voucherCode),
+            cancellationToken);
     }
 
-    public Task<StoreVoucherLockResponse> LockAsync(
+    public async Task<StoreVoucherLockResponse> LockAsync(
         StoreVoucherLockRequest request,
         CancellationToken cancellationToken = default)
     {
-        return PostAsync<StoreVoucherLockRequest, StoreVoucherLockResponse>("api/v1/vouchers/lock", request, cancellationToken);
+        var log = new VoucherRequestLog("lock", "api/v1/vouchers/lock", request.StoreCode, request.VoucherCode);
+        var stopwatch = Stopwatch.StartNew();
+        var response = await PostAsync<StoreVoucherLockRequest, StoreVoucherLockResponse>(
+            "api/v1/vouchers/lock",
+            request,
+            log,
+            cancellationToken);
+        LogSucceeded(
+            log,
+            $"requestedAmount={request.RequestedAmount:0.00} lockedAmount={response.LockedAmount:0.00} " +
+            $"remainingAfterLock={response.RemainingAmountAfterLock?.ToString("0.00") ?? "<null>"}",
+            stopwatch);
+        return response;
     }
 
     public Task<StoreVoucherReleaseResponse> ReleaseAsync(
         StoreVoucherReleaseRequest request,
         CancellationToken cancellationToken = default)
     {
-        return PostAsync<StoreVoucherReleaseRequest, StoreVoucherReleaseResponse>("api/v1/vouchers/release", request, cancellationToken);
+        return PostAsync<StoreVoucherReleaseRequest, StoreVoucherReleaseResponse>(
+            "api/v1/vouchers/release",
+            request,
+            new VoucherRequestLog("release", "api/v1/vouchers/release", request.StoreCode, request.VoucherCode),
+            cancellationToken);
     }
 
-    public Task<StoreVoucherIssueRefundResponse> IssueRefundVoucherAsync(
+    public async Task<StoreVoucherIssueRefundResponse> IssueRefundVoucherAsync(
         StoreVoucherIssueRefundRequest request,
         CancellationToken cancellationToken = default)
     {
-        return PostAsync<StoreVoucherIssueRefundRequest, StoreVoucherIssueRefundResponse>(
+        var log = new VoucherRequestLog("refund-issue", "api/v1/vouchers/refund", request.StoreCode, null, request.OrderReference);
+        var stopwatch = Stopwatch.StartNew();
+        var response = await PostAsync<StoreVoucherIssueRefundRequest, StoreVoucherIssueRefundResponse>(
             "api/v1/vouchers/refund",
             request,
+            log,
             cancellationToken);
+        LogSucceeded(
+            log,
+            $"amount={response.Amount:0.00} newVoucherTail={VoucherCodeLogFormat.Tail(response.VoucherCode)}",
+            stopwatch);
+        return response;
     }
 
-    public Task<StoreVoucherIssueResponse> IssueVoucherAsync(
+    public async Task<StoreVoucherIssueResponse> IssueVoucherAsync(
         StoreVoucherIssueRequest request,
         CancellationToken cancellationToken = default)
     {
-        return PostAsync<StoreVoucherIssueRequest, StoreVoucherIssueResponse>(
+        var log = new VoucherRequestLog("issue", "api/v1/vouchers/issue", request.StoreCode, null);
+        var stopwatch = Stopwatch.StartNew();
+        var response = await PostAsync<StoreVoucherIssueRequest, StoreVoucherIssueResponse>(
             "api/v1/vouchers/issue",
             request,
+            log,
             cancellationToken);
+        LogSucceeded(
+            log,
+            $"amount={response.Amount:0.00} newVoucherTail={VoucherCodeLogFormat.Tail(response.VoucherCode)}",
+            stopwatch);
+        return response;
     }
 
     public async Task<PaymentAuthorizationResult> RedeemAsync(
@@ -171,34 +208,83 @@ public sealed class VoucherApiClient(HttpClient httpClient, ILocalizationService
             issued.Amount);
     }
 
-    private async Task<TResponse> GetAsync<TResponse>(
+    private Task<TResponse> GetAsync<TResponse>(
         string path,
+        VoucherRequestLog log,
         CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync(path, cancellationToken);
-        return await ReadAsync<TResponse>(response, cancellationToken);
+        return SendAsync<TResponse>(() => httpClient.GetAsync(path, cancellationToken), "GET", log, cancellationToken);
     }
 
-    private async Task<TResponse> PostAsync<TRequest, TResponse>(
+    private Task<TResponse> PostAsync<TRequest, TResponse>(
         string path,
         TRequest request,
+        VoucherRequestLog log,
         CancellationToken cancellationToken)
     {
-        using var response = await httpClient.PostAsJsonAsync(path, request, JsonOptions, cancellationToken);
-        return await ReadAsync<TResponse>(response, cancellationToken);
+        return SendAsync<TResponse>(
+            () => httpClient.PostAsJsonAsync(path, request, JsonOptions, cancellationToken),
+            "POST",
+            log,
+            cancellationToken);
+    }
+
+    private static async Task<TResponse> SendAsync<TResponse>(
+        Func<Task<HttpResponseMessage>> send,
+        string method,
+        VoucherRequestLog log,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        HttpResponseMessage response;
+        try
+        {
+            response = await send();
+        }
+        catch (HttpRequestException ex)
+        {
+            LogFailed(log, method, null, null, null, stopwatch, ex, "network");
+            throw;
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // HttpClient 自身超时（调用方未取消）：收银员会看到失败并重试。
+            LogFailed(log, method, null, null, null, stopwatch, ex, "timeout");
+            throw;
+        }
+
+        using (response)
+        {
+            return await ReadAsync<TResponse>(response, method, log, stopwatch, cancellationToken);
+        }
     }
 
     private static async Task<TResponse> ReadAsync<TResponse>(
         HttpResponseMessage response,
+        string method,
+        VoucherRequestLog log,
+        Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        ApiResult<TResponse>? result = string.IsNullOrWhiteSpace(content)
-            ? null
-            : JsonSerializer.Deserialize<ApiResult<TResponse>>(content, JsonOptions);
+        ApiResult<TResponse>? result = null;
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            try
+            {
+                result = JsonSerializer.Deserialize<ApiResult<TResponse>>(content, JsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                // 网关 HTML 等非 JSON：先把状态码记进日志，再按原样抛出 JsonException，调用方的异常分支保持不变。
+                LogFailed(log, method, (int)response.StatusCode, null, null, stopwatch, ex, "invalid-json");
+                throw;
+            }
+        }
 
         if (!response.IsSuccessStatusCode || result is null || !result.Success || result.Data is null)
         {
+            LogFailed(log, method, (int)response.StatusCode, result?.ErrorCode, result?.Message, stopwatch, null, null);
             throw new CatalogApiException(
                 result?.Message ?? $"Voucher API request failed with HTTP {(int)response.StatusCode}.",
                 response.StatusCode,
@@ -208,8 +294,93 @@ public sealed class VoucherApiClient(HttpClient httpClient, ILocalizationService
         return result.Data;
     }
 
+    private static void LogFailed(
+        VoucherRequestLog log,
+        string method,
+        int? statusCode,
+        string? errorCode,
+        string? serverMessage,
+        Stopwatch stopwatch,
+        Exception? exception,
+        string? reason)
+    {
+        // 券相关失败会直接显示给收银员并由其重试，不涉及资金丢失：统一 Warning。
+        // 服务端文案可能回显券号，这里不写 message 原文，只记 errorCode。
+        ConsoleLog.WriteWarning(
+            "Voucher",
+            $"voucher api failed op={log.Operation} method={method} path={log.LogPath} " +
+            $"http={statusCode?.ToString(CultureInfo.InvariantCulture) ?? "<none>"} errorCode={errorCode ?? "<null>"} " +
+            $"voucherTail={VoucherCodeLogFormat.Tail(log.VoucherCode)} " +
+            (log.OrderReference is null ? string.Empty : $"orderReference={log.OrderReference} ") +
+            (reason is null ? string.Empty : $"reason={reason} ") +
+            $"hasServerMessage={!string.IsNullOrWhiteSpace(serverMessage)} elapsedMs={stopwatch.ElapsedMilliseconds}",
+            CreateContext(log, method, statusCode, errorCode, stopwatch, reason),
+            exception);
+    }
+
+    private static void LogSucceeded(VoucherRequestLog log, string detail, Stopwatch stopwatch)
+    {
+        // 锁券/发券/退款券都是低频人工操作，成功也记 Information，便于与服务端券流水对账。
+        ConsoleLog.WriteInformation(
+            "Voucher",
+            $"voucher api succeeded op={log.Operation} voucherTail={VoucherCodeLogFormat.Tail(log.VoucherCode)} " +
+            (log.OrderReference is null ? string.Empty : $"orderReference={log.OrderReference} ") +
+            $"{detail} elapsedMs={stopwatch.ElapsedMilliseconds}",
+            CreateContext(log, "POST", null, null, stopwatch, null));
+    }
+
+    private static ApplicationLogContext CreateContext(
+        VoucherRequestLog log,
+        string method,
+        int? statusCode,
+        string? errorCode,
+        Stopwatch stopwatch,
+        string? reason)
+    {
+        return new ApplicationLogContext(
+            // 退款券以订单号串联；锁券/查券没有业务 Guid。
+            TraceId: log.OrderReference,
+            RequestPath: log.LogPath,
+            RequestMethod: method,
+            StatusCode: statusCode,
+            Properties: new Dictionary<string, object?>
+            {
+                ["storeCode"] = log.StoreCode,
+                ["operation"] = log.Operation,
+                ["errorCode"] = errorCode,
+                ["reason"] = reason,
+                ["elapsedMs"] = stopwatch.ElapsedMilliseconds
+            });
+    }
+
+    private sealed record VoucherRequestLog(
+        string Operation,
+        string LogPath,
+        string? StoreCode,
+        string? VoucherCode,
+        string? OrderReference = null);
+
     private string T(string key, string fallback)
     {
         return localization?.T(key) ?? fallback;
+    }
+}
+
+/// <summary>
+/// 券号可直接兑付，日志里只允许出现后 4 位，并使用 <c>voucherTail=</c> 前缀
+/// （<c>voucher=</c> 前缀会被中心脱敏器整段遮盖）。
+/// </summary>
+internal static class VoucherCodeLogFormat
+{
+    internal static string Tail(string? voucherCode)
+    {
+        var trimmed = voucherCode?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return "<none>";
+        }
+
+        // 不足 5 位的券号整段都算敏感，不输出任何字符。
+        return trimmed.Length > 4 ? trimmed[^4..] : "<short>";
     }
 }

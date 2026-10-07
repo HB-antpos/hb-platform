@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -94,13 +95,17 @@ public sealed class AppUpdateDownloadService(
     {
         if (!TryValidateDownloadContract(update, out var downloadUri, out var expectedSize, out var errorMessage))
         {
+            LogDownloadFailed(update, null, "invalid-contract", errorMessage, 0, null);
             return AppUpdateDownloadResult.Fail(null, errorMessage);
         }
 
         if (!TryResolveInstallerFileName(update, out var fileName, out _, out errorMessage))
         {
+            LogDownloadFailed(update, downloadUri, "invalid-file-name", errorMessage, 0, null);
             return AppUpdateDownloadResult.Fail(null, errorMessage);
         }
+
+        var stopwatch = Stopwatch.StartNew();
 
         var directory = directoryProvider.GetDownloadDirectory();
         Directory.CreateDirectory(directory);
@@ -116,9 +121,13 @@ public sealed class AppUpdateDownloadService(
                 // 中文注释：本地同名安装包的大小和 SHA256 都与本次发布合同一致时直接复用，避免后台定时检查和每次启动都重新下载整包。
                 PruneCachedInstallers(directory, filePath);
                 ReportProgress(progress, expectedSize, expectedSize);
+                LogDownloadCompleted(update, downloadUri, expectedSize, stopwatch.ElapsedMilliseconds, cacheHit: true);
                 return AppUpdateDownloadResult.Succeeded(filePath);
             }
 
+            ConsoleLog.WriteInformation(
+                "AppUpdate",
+                $"app update download start targetVersion={update.TargetVersion} expectedBytes={expectedSize} uri={FormatUriWithoutQuery(downloadUri)}");
             using var response = await httpClient.GetAsync(
                 downloadUri,
                 HttpCompletionOption.ResponseHeadersRead,
@@ -129,6 +138,7 @@ public sealed class AppUpdateDownloadService(
             // 中文注释：部分下载源不会返回 Content-Length，此时放行并依赖后续实际字节数与 SHA256 校验兜底。
             if (contentLength is long actualContentLength && actualContentLength != expectedSize)
             {
+                LogDownloadFailed(update, downloadUri, "content-length-mismatch", $"contentLength={actualContentLength} expectedBytes={expectedSize}", stopwatch.ElapsedMilliseconds, null);
                 return AppUpdateDownloadResult.Fail(filePath, "Update package size does not match the release contract.");
             }
 
@@ -151,6 +161,7 @@ public sealed class AppUpdateDownloadService(
                 if (copiedBytes != expectedSize)
                 {
                     DeleteIfExists(tempFilePath);
+                    LogDownloadFailed(update, downloadUri, "size-mismatch", $"copiedBytes={copiedBytes} expectedBytes={expectedSize}", stopwatch.ElapsedMilliseconds, null);
                     return AppUpdateDownloadResult.Fail(filePath, "Update package size does not match the release contract.");
                 }
             }
@@ -159,12 +170,14 @@ public sealed class AppUpdateDownloadService(
             {
                 // 中文注释：校验失败只删除临时文件，避免误覆盖或误复用损坏安装包。
                 DeleteIfExists(tempFilePath);
+                LogDownloadFailed(update, downloadUri, "sha256-mismatch", null, stopwatch.ElapsedMilliseconds, null);
                 return AppUpdateDownloadResult.Fail(filePath, "Update package verification failed.");
             }
 
             File.Move(tempFilePath, filePath, overwrite: true);
             PruneCachedInstallers(directory, filePath);
             ReportProgress(progress, expectedSize, expectedSize);
+            LogDownloadCompleted(update, downloadUri, expectedSize, stopwatch.ElapsedMilliseconds, cacheHit: false);
             return AppUpdateDownloadResult.Succeeded(filePath);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -172,17 +185,68 @@ public sealed class AppUpdateDownloadService(
             DeleteIfExists(tempFilePath);
             throw;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             DeleteIfExists(tempFilePath);
+            LogDownloadFailed(update, downloadUri, "timeout", null, stopwatch.ElapsedMilliseconds, ex);
             // 中文注释：HttpClient 超时也会表现为取消异常；这里转为失败结果，避免强制更新遮罩停在下载中。
             return AppUpdateDownloadResult.Fail(filePath, "Update download timeout. Check the network and retry.");
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or UnauthorizedAccessException)
         {
             DeleteIfExists(tempFilePath);
+            LogDownloadFailed(
+                update,
+                downloadUri,
+                ex is HttpRequestException ? "http" : "io",
+                null,
+                stopwatch.ElapsedMilliseconds,
+                ex);
             return AppUpdateDownloadResult.Fail(filePath, ex.Message);
         }
+    }
+
+    // 中文注释：下载地址可能是带签名查询串的 COS 链接，日志只记 scheme://host/path。
+    private static string FormatUriWithoutQuery(Uri? uri) =>
+        uri is null ? "-" : uri.IsAbsoluteUri ? uri.GetLeftPart(UriPartial.Path) : uri.OriginalString.Split('?')[0];
+
+    private static void LogDownloadCompleted(
+        AppUpdateCheckResponse update,
+        Uri downloadUri,
+        long bytes,
+        long elapsedMs,
+        bool cacheHit)
+    {
+        ConsoleLog.WriteInformation(
+            "AppUpdate",
+            $"app update download completed targetVersion={update.TargetVersion} bytes={bytes} elapsedMs={elapsedMs} cacheHit={cacheHit} uri={FormatUriWithoutQuery(downloadUri)}",
+            new ApplicationLogContext(Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["elapsedMs"] = elapsedMs,
+                ["result"] = cacheHit ? "cache-hit" : "downloaded"
+            }));
+    }
+
+    private static void LogDownloadFailed(
+        AppUpdateCheckResponse update,
+        Uri? downloadUri,
+        string reason,
+        string? detail,
+        long elapsedMs,
+        Exception? exception)
+    {
+        var statusCode = exception is HttpRequestException { StatusCode: { } status } ? (int)status : (int?)null;
+        ConsoleLog.WriteWarning(
+            "AppUpdate",
+            $"app update download failed reason={reason} targetVersion={update.TargetVersion} status={statusCode?.ToString() ?? "-"} elapsedMs={elapsedMs} uri={FormatUriWithoutQuery(downloadUri)}{(detail is null ? string.Empty : " " + detail)}",
+            new ApplicationLogContext(
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["reason"] = reason,
+                    ["elapsedMs"] = elapsedMs
+                }),
+            exception);
     }
 
     public async Task<string?> TryGetVerifiedCachedInstallerAsync(

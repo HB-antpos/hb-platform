@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Diagnostics;
 using Hbpos.Client.Wpf.Models;
@@ -69,6 +71,8 @@ public sealed class OrderUploadService(
         Log($"upload start orderGuid={orderGuid:D}");
         var order = await orderRepository.GetOrderAsync(orderGuid, cancellationToken)
             ?? throw new InvalidOperationException("Order was not found for upload.");
+        // 服务端 200 但 Accepted=false 时已在抛出前记过 Warning，catch 里不再重复记。
+        var notAcceptedLogged = false;
         try
         {
             await uploadRepository.MarkSyncingAsync(orderGuid, cancellationToken);
@@ -79,10 +83,23 @@ public sealed class OrderUploadService(
             var response = await apiClient.SyncAsync(request, cancellationToken);
             if (!response.Accepted)
             {
+                // 服务端 200 却明确不收：这是业务拒绝，按订单节流记 Warning，下面的 catch 负责标 Failed。
+                var notAcceptedAttempt = OrderUploadFailureLogThrottle.RecordFailure(orderGuid);
+                if (OrderUploadFailureLogThrottle.ShouldReport(notAcceptedAttempt))
+                {
+                    ConsoleLog.WriteWarning(
+                        "OrderSync",
+                        $"upload not accepted orderGuid={orderGuid:D} attempt={notAcceptedAttempt} " +
+                        $"message={response.Message ?? "<null>"} elapsedMs={stopwatch.ElapsedMilliseconds}",
+                        CreateUploadLogContext(order, notAcceptedAttempt, stopwatch.ElapsedMilliseconds, "not-accepted"));
+                }
+
+                notAcceptedLogged = true;
                 throw new InvalidOperationException(response.Message ?? "Order sync was not accepted.");
             }
 
             await uploadRepository.MarkSyncedAsync(orderGuid, cancellationToken);
+            OrderUploadFailureLogThrottle.RecordSuccess(orderGuid);
             Log(
                 $"upload completed orderGuid={orderGuid:D} accepted={response.Accepted} alreadySynced={response.AlreadySynced} " +
                 $"heldOrderDisposition={response.HeldOrderDisposition} " +
@@ -105,6 +122,17 @@ public sealed class OrderUploadService(
             // 改抛非取消异常，让批量上传按"未完成"计数并继续下一笔，不再当作端点切换中断整批。
             await uploadRepository.MarkPendingAsync(orderGuid, UploadTimedOutMessage, CancellationToken.None);
             Log($"upload timed out orderGuid={orderGuid:D} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            var timeoutAttempt = OrderUploadFailureLogThrottle.RecordFailure(orderGuid);
+            if (OrderUploadFailureLogThrottle.ShouldReport(timeoutAttempt))
+            {
+                ConsoleLog.WriteWarning(
+                    "OrderSync",
+                    $"upload timed out orderGuid={orderGuid:D} attempt={timeoutAttempt} reason=timeout " +
+                    $"elapsedMs={stopwatch.ElapsedMilliseconds}",
+                    CreateUploadLogContext(order, timeoutAttempt, stopwatch.ElapsedMilliseconds, "timeout"),
+                    ex);
+            }
+
             throw new OrderUploadTimeoutException(UploadTimedOutMessage, ex);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -120,6 +148,26 @@ public sealed class OrderUploadService(
             Log(
                 $"upload failed orderGuid={orderGuid:D} error={ex.GetType().Name} message={ex.Message} " +
                 $"elapsedMs={stopwatch.ElapsedMilliseconds}");
+            // CatalogApiException 与响应解析失败（JsonException）已由 HTTP 客户端按状态码分级记录；Accepted=false 已在上面记录。
+            // 这里只补断网、本地异常等客户端看不到的失败，同样按订单节流。
+            if (ex is not (CatalogApiException or JsonException) && !notAcceptedLogged)
+            {
+                var attempt = OrderUploadFailureLogThrottle.RecordFailure(orderGuid);
+                if (OrderUploadFailureLogThrottle.ShouldReport(attempt))
+                {
+                    ConsoleLog.WriteWarning(
+                        "OrderSync",
+                        $"upload failed orderGuid={orderGuid:D} attempt={attempt} error={ex.GetType().Name} " +
+                        $"message={ex.Message} elapsedMs={stopwatch.ElapsedMilliseconds}",
+                        CreateUploadLogContext(
+                            order,
+                            attempt,
+                            stopwatch.ElapsedMilliseconds,
+                            ex is HttpRequestException ? "network" : null),
+                        ex);
+                }
+            }
+
             throw;
         }
     }
@@ -191,6 +239,26 @@ public sealed class OrderUploadService(
     private static void Log(string message)
     {
         ConsoleLog.Write("OrderSync", message);
+    }
+
+    private static ApplicationLogContext CreateUploadLogContext(
+        LocalOrder order,
+        int attempt,
+        long elapsedMs,
+        string? reason)
+    {
+        return new ApplicationLogContext(
+            TraceId: order.OrderGuid.ToString("D"),
+            RequestPath: OrderSyncApiClient.RequestPath,
+            RequestMethod: "POST",
+            Properties: new Dictionary<string, object?>
+            {
+                ["storeCode"] = order.StoreCode,
+                ["deviceCode"] = order.DeviceCode,
+                ["attemptCount"] = attempt,
+                ["elapsedMs"] = elapsedMs,
+                ["reason"] = reason
+            });
     }
 
     private static void WarnWhenHeldOrderUnmatched(
@@ -491,50 +559,91 @@ public interface IOrderSyncApiClient
 
 public sealed class OrderSyncApiClient(HttpClient httpClient) : IOrderSyncApiClient
 {
+    internal const string RequestPath = "/api/v1/orders/sync";
+    private const int MaxLoggedBodyLength = 256;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<OrderSyncResponse> SyncAsync(OrderSyncRequest request, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        const string requestPath = "/api/v1/orders/sync";
+        const string requestPath = RequestPath;
         Log(
             $"http sync start orderGuid={request.OrderGuid:D} store={request.StoreCode} device={request.DeviceCode} " +
             $"lines={request.Lines.Count} payments={request.Payments.Count}");
         using var response = await httpClient.PostAsJsonAsync(requestPath.TrimStart('/'), request, JsonOptions, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         ApiResult<OrderSyncResponse>? result = null;
+        JsonException? parseException = null;
         if (!string.IsNullOrWhiteSpace(content))
         {
-            result = JsonSerializer.Deserialize<ApiResult<OrderSyncResponse>>(content, JsonOptions);
+            try
+            {
+                result = JsonSerializer.Deserialize<ApiResult<OrderSyncResponse>>(content, JsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                // 网关 502 HTML 等非 JSON 响应：先记下状态码与失败日志，再在下面按原样抛出 JsonException。
+                parseException = ex;
+            }
         }
 
-        if (!response.IsSuccessStatusCode || result is null || !result.Success || result.Data is null)
+        if (parseException is not null ||
+            !response.IsSuccessStatusCode || result is null || !result.Success || result.Data is null)
         {
+            var statusCode = (int)response.StatusCode;
+            // 服务端错误正文只在非 2xx 时截断 256 字符写入日志，2xx 正文可能含订单数据。
+            var bodySnippet = response.IsSuccessStatusCode ? null : TruncateForLog(content);
+            var attempt = OrderUploadFailureLogThrottle.RecordFailure(request.OrderGuid);
             Log(
-                $"http sync failed orderGuid={request.OrderGuid:D} http={(int)response.StatusCode} " +
+                $"http sync failed orderGuid={request.OrderGuid:D} http={statusCode} " +
                 $"success={result?.Success.ToString() ?? "<null>"} errorCode={result?.ErrorCode ?? "<null>"} " +
-                $"message={result?.Message ?? "<null>"} elapsedMs={stopwatch.ElapsedMilliseconds}");
-            ConsoleLog.WriteError(
-                "OrderSync",
-                "Order sync request failed.",
-                new ApplicationLogContext(
+                $"message={result?.Message ?? "<null>"} attempt={attempt} " +
+                $"invalidJson={parseException is not null} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            // 同一订单每 15 秒重试一次：只在第 1、2、4、8… 次失败写中心告警，其余只留上面的 Information。
+            if (OrderUploadFailureLogThrottle.ShouldReport(attempt))
+            {
+                var message =
+                    $"Order sync request failed. orderGuid={request.OrderGuid:D} http={statusCode} " +
+                    $"errorCode={result?.ErrorCode ?? "<null>"} message={result?.Message ?? "<null>"} attempt={attempt}" +
+                    (parseException is null ? string.Empty : " reason=invalid-json") +
+                    (bodySnippet is null ? string.Empty : $" body={bodySnippet}");
+                var context = new ApplicationLogContext(
                     TraceId: request.OrderGuid.ToString("D"),
                     RequestPath: requestPath,
                     RequestMethod: "POST",
-                    StatusCode: (int)response.StatusCode,
+                    StatusCode: statusCode,
                     Properties: new Dictionary<string, object?>
                     {
                         ["storeCode"] = request.StoreCode,
                         ["deviceCode"] = request.DeviceCode,
                         ["errorCode"] = result?.ErrorCode,
+                        ["attemptCount"] = attempt,
                         ["elapsedMs"] = stopwatch.ElapsedMilliseconds
-                    }));
+                    });
+                // 5xx 与 2xx 解析失败是本应成功的确定性失败（Error）；401/403 是授权状态、其余 4xx 与业务拒绝为 Warning。
+                if (statusCode >= 500 || (parseException is not null && response.IsSuccessStatusCode))
+                {
+                    ConsoleLog.WriteError("OrderSync", message, context, parseException);
+                }
+                else
+                {
+                    ConsoleLog.WriteWarning("OrderSync", message, context, parseException);
+                }
+            }
+
+            if (parseException is not null)
+            {
+                // 日志已带状态码；异常形状保持原来的 JsonException，上传状态流转（Failed / 待授权）不随日志改动变化。
+                ExceptionDispatchInfo.Throw(parseException);
+            }
+
             throw new CatalogApiException(
-                result?.Message ?? $"Order sync failed with HTTP {(int)response.StatusCode}.",
+                result?.Message ?? $"Order sync failed with HTTP {statusCode}.",
                 response.StatusCode,
                 result?.ErrorCode);
         }
 
+        OrderUploadFailureLogThrottle.RecordSuccess(request.OrderGuid);
         Log(
             $"http sync completed orderGuid={request.OrderGuid:D} http={(int)response.StatusCode} accepted={result.Data.Accepted} " +
             $"alreadySynced={result.Data.AlreadySynced} message={result.Data.Message ?? "<null>"} elapsedMs={stopwatch.ElapsedMilliseconds}");
@@ -545,6 +654,48 @@ public sealed class OrderSyncApiClient(HttpClient httpClient) : IOrderSyncApiCli
     {
         ConsoleLog.Write("OrderSync", message);
     }
+
+    private static string? TruncateForLog(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        var text = content.Trim();
+        return text.Length <= MaxLoggedBodyLength ? text : text[..MaxLoggedBodyLength];
+    }
+}
+
+/// <summary>
+/// 订单上传失败日志节流（只影响日志，不影响重试节奏）：Failed 订单会被 15 秒一轮的上传队列反复重试，
+/// 同一 orderGuid 在本进程内只在第 1、2、4、8、16… 次连续失败时写 Warning/Error，成功后清零。
+/// </summary>
+internal static class OrderUploadFailureLogThrottle
+{
+    // 防止长期失败的订单无限增长：超过上限直接清空，最坏情况只是多记几条日志。
+    private const int MaxTrackedOrders = 2000;
+    private static readonly ConcurrentDictionary<Guid, int> ConsecutiveFailures = new();
+
+    internal static int RecordFailure(Guid orderGuid)
+    {
+        if (ConsecutiveFailures.Count >= MaxTrackedOrders && !ConsecutiveFailures.ContainsKey(orderGuid))
+        {
+            ConsecutiveFailures.Clear();
+        }
+
+        return ConsecutiveFailures.AddOrUpdate(
+            orderGuid,
+            1,
+            (_, count) => count == int.MaxValue ? count : count + 1);
+    }
+
+    internal static void RecordSuccess(Guid orderGuid)
+    {
+        ConsecutiveFailures.TryRemove(orderGuid, out _);
+    }
+
+    internal static bool ShouldReport(int attempt) => attempt > 0 && (attempt & (attempt - 1)) == 0;
 }
 
 public interface ILocalOrderUploadRepository

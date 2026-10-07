@@ -6,6 +6,13 @@ using Hbpos.Contracts.Linkly;
 
 namespace Hbpos.Client.Wpf.Services;
 
+internal enum LinklyLogLevel
+{
+    Information,
+    Warning,
+    Error
+}
+
 internal static class LinklyJsonLog
 {
     private static readonly HashSet<string> SensitivePropertyNames = new(StringComparer.OrdinalIgnoreCase)
@@ -108,24 +115,67 @@ internal static class LinklyJsonLog
         long? elapsedMs = null,
         object? request = null,
         object? response = null,
-        object? details = null)
+        object? details = null,
+        Exception? exception = null,
+        LinklyLogLevel? level = null)
     {
-        ConsoleLog.Write(
-            category,
-            Build(
-                source,
-                operation,
-                phase,
-                direction,
-                environment,
-                sessionId,
-                httpStatus.HasValue ? (int)httpStatus.Value : null,
-                success,
-                reason,
-                elapsedMs,
-                request,
-                response,
-                details));
+        var statusCode = httpStatus.HasValue ? (int)httpStatus.Value : (int?)null;
+        var message = Build(
+            source,
+            operation,
+            phase,
+            direction,
+            environment,
+            sessionId,
+            statusCode,
+            success,
+            reason,
+            elapsedMs,
+            request,
+            response,
+            details);
+        // sessionId 进 TraceId、HTTP 状态进 StatusCode，中心日志才能按会话串联并按级别筛出支付/结算失败。
+        var context = new ApplicationLogContext(
+            TraceId: string.IsNullOrWhiteSpace(sessionId) ? null : sessionId,
+            StatusCode: statusCode,
+            Properties: new Dictionary<string, object?>
+            {
+                ["source"] = source,
+                ["operation"] = operation,
+                ["phase"] = phase,
+                ["elapsedMs"] = elapsedMs
+            });
+        switch (level ?? ResolveLevel(phase, success))
+        {
+            case LinklyLogLevel.Error:
+                ConsoleLog.WriteError(category, message, context, exception);
+                break;
+            case LinklyLogLevel.Warning:
+                ConsoleLog.WriteWarning(category, message, context, exception);
+                break;
+            default:
+                ConsoleLog.WriteInformation(category, message, context);
+                break;
+        }
+    }
+
+    private static readonly HashSet<string> FailurePhases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "failed",
+        "unknown",
+        "error",
+        "timeout",
+        "rejected"
+    };
+
+    /// <summary>
+    /// 未显式指定级别时：明确失败或结果未知升为 Warning，其余保持 Information，避免正常轮询快照刷成告警。
+    /// </summary>
+    internal static LinklyLogLevel ResolveLevel(string? phase, bool? success)
+    {
+        return success == false || (!string.IsNullOrWhiteSpace(phase) && FailurePhases.Contains(phase))
+            ? LinklyLogLevel.Warning
+            : LinklyLogLevel.Information;
     }
 
     public static void WriteMessage(string category, string source, string message)

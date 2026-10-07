@@ -1307,14 +1307,31 @@ public sealed class ReceiptPrintService(
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Console.WriteLine($"[HBPOS][Client][Receipt] {DateTimeOffset.Now:O} card receipt printed marker failed session={marker.SessionId} error={ex.GetType().Name}");
+                    LogCardReceiptMarkerFailure(marker.SessionId, "failed", ex);
                 }
                 catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
                 {
-                    Console.WriteLine($"[HBPOS][Client][Receipt] {DateTimeOffset.Now:O} card receipt printed marker timed out session={marker.SessionId} error={ex.GetType().Name}");
+                    LogCardReceiptMarkerFailure(marker.SessionId, "timeout", ex);
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 小票已打印成功但后端 printed marker 写入失败/超时：不影响打印结果，记 Warning 并以 sessionId 作 TraceId 便于对账。
+    /// </summary>
+    internal static void LogCardReceiptMarkerFailure(string sessionId, string reason, Exception exception)
+    {
+        ConsoleLog.WriteWarning(
+            "Receipt",
+            $"card receipt printed marker {(reason == "timeout" ? "timed out" : "failed")} sessionId={sessionId} reason={reason} error={exception.GetType().Name}",
+            new ApplicationLogContext(
+                TraceId: sessionId,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["reason"] = reason
+                }),
+            exception);
     }
 
     public async Task<ReceiptPrintResult> TestPrinterAsync(CancellationToken cancellationToken = default)
@@ -1473,9 +1490,12 @@ public sealed class LinklyBankReceiptPrinter(
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        // 打印已成功，标记失败只影响后端去重，记录后继续。
+                        ReceiptPrintService.LogCardReceiptMarkerFailure(sessionId, "failed", ex);
                     }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
                     {
+                        ReceiptPrintService.LogCardReceiptMarkerFailure(sessionId, "timeout", ex);
                     }
                 }
             }
