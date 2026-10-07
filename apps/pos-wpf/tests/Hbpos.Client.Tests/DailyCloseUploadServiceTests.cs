@@ -7,9 +7,63 @@ using Microsoft.Data.Sqlite;
 namespace Hbpos.Client.Tests;
 
 /// <summary>日结上传服务与 Worker：真实 SQLite 仓储 + 假 API 客户端，参照 Linkly 结算上传测试的风格。</summary>
+[Collection(ConsoleLogGlobalStateTestCollection.Name)]
 public sealed class DailyCloseUploadServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 7, 3, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task ExecutePendingAsync_logs_a_warning_with_code_when_the_server_rejects_permanently()
+    {
+        await using var fixture = await DailyCloseUploadFixture.CreateAsync();
+        var guid = await fixture.InsertDailyCloseAsync();
+        var client = new FakeDailyCloseSyncApiClient(_ =>
+            FakeDailyCloseSyncApiClient.Fail(HttpStatusCode.Conflict, "DAILY_CLOSE_CONTENT_CONFLICT", "server said no"));
+        var service = fixture.CreateService(client, new MutableTimeProvider(Now));
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 永久拒绝后不再自动重试，中心日志必须有一条可按日结 GUID 追溯的 Warning。
+        var entry = Assert.Single(sink.Entries, item => item.Level == "Warning" && item.TraceId == guid.ToString("D"));
+        Assert.Equal("DailyCloseUpload", entry.Category);
+        Assert.Equal(409, entry.StatusCode);
+        Assert.Equal("DAILY_CLOSE_CONTENT_CONFLICT", entry.Properties!["errorCode"]);
+        Assert.Equal("S001", entry.Properties["storeCode"]);
+        Assert.Equal("POS-01", entry.Properties["deviceCode"]);
+        Assert.Contains("errorCode=DAILY_CLOSE_CONTENT_CONFLICT http=409 message=server said no", entry.Message);
+    }
+
+    [Fact]
+    public async Task ExecutePendingAsync_does_not_warn_for_retryable_conflicts()
+    {
+        await using var fixture = await DailyCloseUploadFixture.CreateAsync();
+        var guid = await fixture.InsertDailyCloseAsync();
+        var client = new FakeDailyCloseSyncApiClient(_ => FakeDailyCloseSyncApiClient.Fail(
+            HttpStatusCode.Conflict,
+            "DAILY_CLOSE_SYNC_CONCURRENT_UPDATE"));
+        var service = fixture.CreateService(client, new MutableTimeProvider(Now));
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            await service.ExecutePendingAsync();
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 可重试的冲突会自动退避重试，不该刷 Warning。
+        Assert.DoesNotContain(sink.Entries, item => item.Level == "Warning" && item.TraceId == guid.ToString("D"));
+    }
 
     [Fact]
     public async Task ExecutePendingAsync_uploads_a_new_daily_close_and_marks_it_synced()

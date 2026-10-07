@@ -196,6 +196,7 @@ public sealed class LinklySettlementUploadService(
                     "SYNC_NOT_ACCEPTED",
                     "The server did not accept the Linkly settlement sync request.",
                     CancellationToken.None);
+                LogRejected(lease, "SYNC_NOT_ACCEPTED", "The server did not accept the Linkly settlement sync request.", statusCode: 200);
                 return new LinklySettlementUploadExecutionResult(1, 0, 1, 0, false);
             }
 
@@ -209,6 +210,11 @@ public sealed class LinklySettlementUploadService(
                     "SYNC_REVISION_MISMATCH",
                     "The server accepted a different Linkly settlement revision.",
                     CancellationToken.None);
+                LogRejected(
+                    lease,
+                    "SYNC_REVISION_MISMATCH",
+                    $"The server accepted revision {response.AcceptedRevision} instead.",
+                    statusCode: 200);
                 return new LinklySettlementUploadExecutionResult(1, 0, 1, 0, false);
             }
 
@@ -243,6 +249,7 @@ public sealed class LinklySettlementUploadService(
                 ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}",
                 TrimError(ex.Message),
                 CancellationToken.None);
+            LogRejected(lease, ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}", TrimError(ex.Message), (int)ex.StatusCode);
             return new LinklySettlementUploadExecutionResult(1, 0, 1, 0, false);
         }
         catch (LinklySettlementUploadApiException ex) when (
@@ -267,6 +274,35 @@ public sealed class LinklySettlementUploadService(
             await MarkPendingAsync(lease, "UPLOAD_EXCEPTION", TrimError(ex.Message));
             return new LinklySettlementUploadExecutionResult(1, 0, 0, 1, false);
         }
+    }
+
+    /// <summary>
+    /// 被标成 Rejected 的结算不会再自动重试（只能在 Sync Center 手动重试），必须在中心日志留下 Warning，
+    /// 否则只有到设备上看 Sync Center 才会发现。GUID 放 TraceId、修订号写进消息（属性有白名单，放不进去）。
+    /// </summary>
+    private static void LogRejected(
+        LocalLinklySettlementUploadLease lease,
+        string errorCode,
+        string errorMessage,
+        int statusCode)
+    {
+        var settlement = lease.Settlement;
+        ConsoleLog.WriteWarning(
+            "LinklySettlementUpload",
+            $"Linkly settlement upload rejected settlementGuid={settlement.SettlementGuid:D} revision={lease.PayloadRevision} " +
+            $"errorCode={errorCode} http={statusCode} message={errorMessage}",
+            new ApplicationLogContext(
+                TraceId: settlement.SettlementGuid.ToString("D"),
+                RequestPath: "api/v1/linkly/settlements/sync",
+                RequestMethod: "POST",
+                StatusCode: statusCode,
+                Properties: new Dictionary<string, object?>
+                {
+                    ["storeCode"] = settlement.StoreCode,
+                    ["deviceCode"] = settlement.DeviceCode,
+                    ["errorCode"] = errorCode,
+                    ["status"] = settlement.Status.ToString()
+                }));
     }
 
     private async Task MarkPendingAsync(

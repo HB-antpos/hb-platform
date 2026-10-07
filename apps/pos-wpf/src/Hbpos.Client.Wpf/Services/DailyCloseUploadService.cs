@@ -326,11 +326,28 @@ public sealed class DailyCloseUploadService(
                 HttpStatusCode.UnprocessableEntity)
         {
             // 数据本身被服务端判定无效或冲突：重试不会改变结果，永久拒绝并记录原因。
+            var errorCode = ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}";
             await repository.MarkUploadRejectedAsync(
                 dailyCloseGuid,
-                ex.ErrorCode ?? $"HTTP_{(int)ex.StatusCode}",
+                errorCode,
                 TrimError(ex.Message),
                 CancellationToken.None);
+            // 永久拒绝后不再自动重试，必须在中心日志留下 Warning；日结 GUID 放 TraceId，便于与服务端日志对照。
+            ConsoleLog.WriteWarning(
+                "DailyCloseUpload",
+                $"daily close upload rejected dailyCloseGuid={dailyCloseGuid:D} errorCode={errorCode} " +
+                $"http={(int)ex.StatusCode} message={TrimError(ex.Message)}",
+                new ApplicationLogContext(
+                    TraceId: dailyCloseGuid.ToString("D"),
+                    RequestPath: "api/v1/daily-closes/sync",
+                    RequestMethod: "POST",
+                    StatusCode: (int)ex.StatusCode,
+                    Properties: new Dictionary<string, object?>
+                    {
+                        ["storeCode"] = scope.StoreCode,
+                        ["deviceCode"] = scope.DeviceCode,
+                        ["errorCode"] = errorCode
+                    }));
             return new DailyCloseUploadExecutionResult(1, 0, 1, 0, false);
         }
         catch (DailyCloseUploadApiException ex) when (
