@@ -73,6 +73,7 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         await EnsureSharedHeldOrderConsumptionColumnsAsync(connection, cancellationToken);
         await EnsureSharedHeldOrderSchemaAsync(connection, cancellationToken);
         await EnsureLinklySettlementUploadColumnsAsync(connection, cancellationToken);
+        await EnsureLocalDailyCloseUploadColumnsAsync(connection, cancellationToken);
 
         foreach (var sql in IndexStatements)
         {
@@ -451,6 +452,54 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
               AND UploadErrorCode = 'PROVIDER_SESSION_REQUIRED';
             """,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// 日结记录上传状态补列。旧库的历史日结行没有这些列：ADD COLUMN 的 DEFAULT 让所有历史行自动成为
+    /// UploadStatus='Pending'、NextUploadAt 为 NULL（立即到期），上传 Worker 因此会把它们逐条补传到服务端，
+    /// 覆盖服务端按审计事件回填的占位记录。不写任何回填 UPDATE：补列幂等，重复执行不会把已 Synced/Rejected 的行重置。
+    /// 租约沿用 Linkly 结算上传的做法：UploadStatus='Uploading' + LastUploadAttemptAt 即租约，过期后由仓储回收。
+    /// 日结存档落库后内容不可变，所以不需要 PayloadRevision 这类快照版本列。
+    /// </summary>
+    private static async Task EnsureLocalDailyCloseUploadColumnsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var columns = await ReadColumnNamesAsync(connection, "LocalDailyCloses", cancellationToken);
+        if (!columns.Contains("UploadStatus"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadStatus TEXT NOT NULL DEFAULT 'Pending';", cancellationToken);
+        }
+
+        if (!columns.Contains("UploadAttemptCount"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadAttemptCount INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+        }
+
+        if (!columns.Contains("NextUploadAt"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN NextUploadAt TEXT NULL;", cancellationToken);
+        }
+
+        if (!columns.Contains("LastUploadAttemptAt"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN LastUploadAttemptAt TEXT NULL;", cancellationToken);
+        }
+
+        if (!columns.Contains("UploadErrorCode"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadErrorCode TEXT NULL;", cancellationToken);
+        }
+
+        if (!columns.Contains("UploadErrorMessage"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadErrorMessage TEXT NULL;", cancellationToken);
+        }
+
+        if (!columns.Contains("UploadedAt"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadedAt TEXT NULL;", cancellationToken);
+        }
     }
 
     private static async Task EnsureSuspendedOrderColumnsAsync(
@@ -1457,7 +1506,14 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             NoteSubtotal TEXT NOT NULL,
             CoinSubtotal TEXT NOT NULL,
             CountedCashAmount TEXT NOT NULL,
-            CashDifference TEXT NOT NULL
+            CashDifference TEXT NOT NULL,
+            UploadStatus TEXT NOT NULL DEFAULT 'Pending',
+            UploadAttemptCount INTEGER NOT NULL DEFAULT 0,
+            NextUploadAt TEXT NULL,
+            LastUploadAttemptAt TEXT NULL,
+            UploadErrorCode TEXT NULL,
+            UploadErrorMessage TEXT NULL,
+            UploadedAt TEXT NULL
         );
         """,
         """
@@ -1821,6 +1877,10 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         """
         CREATE INDEX IF NOT EXISTS IX_LocalDailyCloseCashCounts_DailyCloseGuid
         ON LocalDailyCloseCashCounts (DailyCloseGuid);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS IX_LocalDailyCloses_UploadDue
+        ON LocalDailyCloses (UploadStatus, StoreCode, DeviceCode, NextUploadAt);
         """,
         """
         CREATE UNIQUE INDEX IF NOT EXISTS UX_LinklySettlementRecords_ProviderSessionId

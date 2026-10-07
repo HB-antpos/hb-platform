@@ -268,6 +268,126 @@ public sealed class DailyCloseServiceTests
         }
     }
 
+    [Fact]
+    public async Task SaveAsync_wakes_the_upload_scheduler_only_after_the_archive_is_committed()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var scheduler = new RecordingUploadScheduler(() => CountDailyCloses(databasePath));
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store), uploadScheduler: scheduler);
+
+            var archive = await service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), [Count(50m, 1)]);
+
+            // 唤醒恰好一次，且唤醒时本地日结已经可见（说明是在提交之后才唤醒，Worker 一定读得到这条记录）。
+            Assert.Equal(1, scheduler.WakeUpCount);
+            Assert.Equal([1], scheduler.RowsVisibleAtWakeUp);
+            Assert.NotEqual(Guid.Empty, archive.DailyCloseGuid);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_still_succeeds_when_waking_the_upload_scheduler_throws()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var scheduler = new RecordingUploadScheduler(() => 0) { ThrowOnWakeUp = true };
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store), uploadScheduler: scheduler);
+
+            // 唤醒抛异常（例如 Worker 已被释放）绝不能让"日结已保存"变成失败。
+            var archive = await service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), [Count(50m, 1)]);
+
+            Assert.Equal(1, scheduler.WakeUpCount);
+            Assert.Equal(50m, archive.CountedCashAmount);
+            Assert.Equal(1, CountDailyCloses(databasePath));
+            var archives = await service.GetArchivesAsync(CreateSession(), new DateTime(2026, 5, 28));
+            Assert.Equal(archive.DailyCloseGuid, Assert.Single(archives).DailyCloseGuid);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_does_not_wake_the_upload_scheduler_when_the_local_save_fails()
+    {
+        var scheduler = new RecordingUploadScheduler(() => 0);
+        var service = new DailyCloseService(new FailingSaveDailyCloseRepository(), uploadScheduler: scheduler);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), []));
+
+        Assert.Equal(0, scheduler.WakeUpCount);
+    }
+
+    [Fact]
+    public async Task SaveAsync_works_without_an_upload_scheduler()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            // 既有调用方（不传调度器）保持可用。
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store));
+
+            var archive = await service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), []);
+
+            Assert.NotEqual(Guid.Empty, archive.DailyCloseGuid);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    /// <summary>新保存的日结默认是待上传（Pending、尚未尝试、立即到期），不需要额外入队动作。</summary>
+    [Fact]
+    public async Task SaveAsync_stores_the_new_daily_close_as_pending_upload()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var service = new DailyCloseService(new LocalDailyCloseRepository(store));
+
+            var archive = await service.SaveAsync(CreateSession(), new DateTime(2026, 5, 28), [Count(100m, 1)]);
+
+            await using var connection = await store.OpenConnectionAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT UploadStatus, UploadAttemptCount, NextUploadAt IS NULL
+                FROM LocalDailyCloses
+                WHERE DailyCloseGuid = $DailyCloseGuid;
+                """;
+            command.Parameters.AddWithValue("$DailyCloseGuid", archive.DailyCloseGuid.ToString());
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("Pending", reader.GetString(0));
+            Assert.Equal(0, reader.GetInt32(1));
+            Assert.Equal(1, reader.GetInt32(2));
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
     private static CashDenominationCount Count(decimal value, int quantity)
     {
         var denomination = DailyCloseService.AustralianDenominations.Single(item => item.Value == value);
@@ -447,6 +567,76 @@ public sealed class DailyCloseServiceTests
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<DailyCloseArchive>> GetArchivesAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    /// <summary>用独立的同步连接数日结行：在唤醒回调里（同步上下文）确认记录已经提交可见。</summary>
+    private static int CountDailyCloses(string databasePath)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM LocalDailyCloses;";
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private sealed class RecordingUploadScheduler(Func<int> countVisibleRows) : IDailyCloseUploadScheduler
+    {
+        private int wakeUpCount;
+
+        public int WakeUpCount => Volatile.Read(ref wakeUpCount);
+
+        public List<int> RowsVisibleAtWakeUp { get; } = [];
+
+        public bool ThrowOnWakeUp { get; init; }
+
+        public void RequestUpload()
+        {
+            Interlocked.Increment(ref wakeUpCount);
+            RowsVisibleAtWakeUp.Add(countVisibleRows());
+            if (ThrowOnWakeUp)
+            {
+                throw new ObjectDisposedException("worker", "simulated disposed upload worker");
+            }
+        }
+    }
+
+    /// <summary>本地保存失败的仓储：用来证明保存失败时不会唤醒上传。</summary>
+    private sealed class FailingSaveDailyCloseRepository : ILocalDailyCloseRepository
+    {
+        public Task<DailyCloseReport> LoadReportAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new DailyCloseReport(
+                businessDate,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                session.StoreCode,
+                session.DeviceCode,
+                session.CashierId,
+                session.CashierName,
+                0,
+                [],
+                0m,
+                0m));
+        }
+
+        public Task<DailyCloseArchive> SaveAsync(
+            DailyCloseReport report,
+            IReadOnlyList<CashDenominationCount> cashCounts,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("simulated local save failure");
         }
 
         public Task<IReadOnlyList<DailyCloseArchive>> GetArchivesAsync(
