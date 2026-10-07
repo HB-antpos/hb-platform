@@ -96,6 +96,8 @@
     <Compile Include="StoreUserCashierBarcodeServiceTests.cs" />
     <Compile Include="UserStoreManagementRelationTests.cs" />
     <Compile Include="AttendanceReactServiceTests.cs" />
+    <Compile Include="AttendanceReactServiceMealBreakTests.cs" />
+    <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />
     <Compile Include="PricingCurveTests.cs" />
     <Compile Include="AttendanceWorkSessionCalculatorTests.cs" />

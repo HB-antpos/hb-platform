@@ -1001,6 +1001,106 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 考勤用餐休息两张表_可重复执行且过滤唯一索引与签名门禁生效()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.AttendanceMealBreak (BreakGuid, UserGuid, StoreCode, WorkDate, ScheduleGuid, StartUtc, EndUtc, CreatedAtUtc)
+            VALUES (N'b1', N'u1', N'S001', '2026-05-18', N'sch-1', SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+            INSERT dbo.AttendanceMealClaim
+                (ClaimGuid, ScheduleGuid, UserGuid, StoreCode, WorkDate, ClockOutPunchGuid,
+                 ExpectedCount, RecordedCount, MissingCount, NotTakenCount, ClaimedMinutes, Status, CreatedAtUtc)
+            VALUES (N'c1', N'sch-1', N'u1', N'S001', '2026-05-18', N'out-1', 1, 0, 1, 1, 30, N'Pending', SYSUTCDATETIME());
+            """);
+        // 重复执行不得丢失已有休息记录与声明。
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.AttendanceMealBreak WHERE BreakGuid = N'b1') <> 1
+                THROW 52110, 'Existing meal break row was lost.', 1;
+            IF (SELECT COUNT(*) FROM dbo.AttendanceMealClaim WHERE ClaimGuid = N'c1') <> 1
+                THROW 52111, 'Existing meal claim row was lost.', 1;
+            """);
+
+        // 每个员工同一时刻最多一条进行中的休息：第二条被过滤唯一索引拒绝，结束后可以再开，其他员工互不影响。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.AttendanceMealBreak (BreakGuid, UserGuid, StoreCode, WorkDate, ScheduleGuid, StartUtc, EndUtc, CreatedAtUtc)
+            VALUES (N'b2', N'u1', N'S001', '2026-05-18', N'sch-1', SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+            """));
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.AttendanceMealBreak SET EndUtc = SYSUTCDATETIME() WHERE BreakGuid = N'b1';
+            INSERT dbo.AttendanceMealBreak (BreakGuid, UserGuid, StoreCode, WorkDate, ScheduleGuid, StartUtc, EndUtc, CreatedAtUtc)
+            VALUES (N'b2', N'u1', N'S001', '2026-05-18', N'sch-1', SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+            INSERT dbo.AttendanceMealBreak (BreakGuid, UserGuid, StoreCode, WorkDate, ScheduleGuid, StartUtc, EndUtc, CreatedAtUtc)
+            VALUES (N'b3', N'u2', N'S001', '2026-05-18', N'sch-2', SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+            """);
+        // 一次下班打卡最多一条声明（也是重复提交的幂等键）。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.AttendanceMealClaim
+                (ClaimGuid, ScheduleGuid, UserGuid, StoreCode, WorkDate, ClockOutPunchGuid,
+                 ExpectedCount, RecordedCount, MissingCount, NotTakenCount, ClaimedMinutes, Status, CreatedAtUtc)
+            VALUES (N'c2', N'sch-1', N'u1', N'S001', '2026-05-18', N'out-1', 1, 0, 1, 0, 0, N'None', SYSUTCDATETIME());
+            """));
+
+        // 休息表列宽漂移。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceMealBreak ALTER COLUMN StoreCode nvarchar(60) NOT NULL;");
+        var breakColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql));
+        Assert.Equal(52101, breakColumns.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceMealBreak ALTER COLUMN StoreCode nvarchar(50) NOT NULL;");
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql);
+
+        // 进行中休息的过滤唯一索引缺失：Verify 报错，重新 Apply 后补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX [UX_AttendanceMealBreak_OpenPerUser] ON dbo.AttendanceMealBreak;");
+        var openIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql));
+        Assert.Equal(52103, openIndex.Number);
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql);
+
+        // 过滤唯一索引被改成不带过滤条件：同样识别为不兼容。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [UX_AttendanceMealBreak_OpenPerUser] ON dbo.AttendanceMealBreak;
+            CREATE UNIQUE NONCLUSTERED INDEX [UX_AttendanceMealBreak_OpenPerUser]
+                ON dbo.AttendanceMealBreak ([UserGuid], [BreakGuid]);
+            """);
+        var unfilteredIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql));
+        Assert.Equal(52103, unfilteredIndex.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [UX_AttendanceMealBreak_OpenPerUser] ON dbo.AttendanceMealBreak;
+            CREATE UNIQUE NONCLUSTERED INDEX [UX_AttendanceMealBreak_OpenPerUser]
+                ON dbo.AttendanceMealBreak ([UserGuid]) WHERE [EndUtc] IS NULL;
+            """);
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql);
+
+        // 声明表列宽漂移。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceMealClaim ALTER COLUMN Reason nvarchar(600) NULL;");
+        var claimColumns = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql));
+        Assert.Equal(52105, claimColumns.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceMealClaim ALTER COLUMN Reason nvarchar(500) NULL;");
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql);
+
+        // 声明的下班打卡唯一索引缺失。
+        await ExecuteNonQueryAsync(main, "DROP INDEX [UX_AttendanceMealClaim_ClockOutPunch] ON dbo.AttendanceMealClaim;");
+        var claimIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql));
+        Assert.Equal(52107, claimIndex.Number);
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql);
+
+        // 任一张表缺失：门禁报 52100。
+        await ExecuteNonQueryAsync(main, "DROP TABLE dbo.AttendanceMealClaim;");
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceMealBreakSchema.VerifySql));
+        Assert.Equal(52100, missing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发服务_真实SQLServer下发_并发同店只产生一个版本且冲突映射409()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

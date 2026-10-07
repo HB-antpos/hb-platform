@@ -116,6 +116,17 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> Punch([FromBody] AttendancePunchRequestDto request) =>
             Ok(await _service.PunchAsync(request));
 
+        // 当班期间一键开始/结束休息：不扫码、不要求定位，只在进行中的班段里有效；与打卡同一权限。
+        [HttpPost("my/meal-breaks/start")]
+        [Authorize(Policy = Permissions.Attendance.Punch.Self)]
+        public async Task<IActionResult> StartMyMealBreak([FromBody] AttendanceMealBreakRequestDto request) =>
+            Ok(await _service.StartMyMealBreakAsync(request));
+
+        [HttpPost("my/meal-breaks/end")]
+        [Authorize(Policy = Permissions.Attendance.Punch.Self)]
+        public async Task<IActionResult> EndMyMealBreak([FromBody] AttendanceMealBreakRequestDto request) =>
+            Ok(await _service.EndMyMealBreakAsync(request));
+
         [HttpPost("my/punch-adjustments/preview")]
         [Authorize(Policy = Permissions.Attendance.Punch.Self)]
         public async Task<IActionResult> PreviewMyPunchAdjustment(

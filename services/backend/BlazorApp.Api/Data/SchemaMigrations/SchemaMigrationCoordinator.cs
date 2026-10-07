@@ -55,6 +55,8 @@ internal sealed class SchemaMigrationCoordinator
         "20261005.002-mobile-android-native-update-policy";
     internal const string StoreReceiptProfileReleaseMigrationId =
         "20261007.001-store-receipt-profile-release";
+    internal const string AttendanceMealBreakMigrationId =
+        "20261007.002-attendance-meal-break";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -185,6 +187,11 @@ internal sealed class SchemaMigrationCoordinator
             StoreReceiptProfileReleaseMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyStoreReceiptProfileReleaseAsync(cancellationToken)
+        ),
+        new(
+            AttendanceMealBreakMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendanceMealBreakAsync(cancellationToken)
         ),
     ];
 

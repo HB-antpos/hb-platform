@@ -30,7 +30,8 @@ using Xunit;
 
 namespace BlazorApp.Api.Tests
 {
-    public sealed class AttendanceReactServiceTests : IDisposable
+    // partial：用餐休息相关用例在 AttendanceReactServiceMealBreakTests.cs，共用这里的夹具与造数方法。
+    public sealed partial class AttendanceReactServiceTests : IDisposable
     {
         private readonly string _dbPath;
         private readonly SqliteConnection _sqliteConnection;
@@ -80,7 +81,16 @@ namespace BlazorApp.Api.Tests
                 typeof(AttendancePosQrKey)
                 ,typeof(Role)
                 ,typeof(UserRole)
+                // 用餐休息两张表生产由迁移 20261007.002 创建；测试库用 CodeFirst 建同样的表。
+                ,typeof(AttendanceMealBreak)
+                ,typeof(AttendanceMealClaim)
             );
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendanceMealBreak_OpenPerUser "
+                + "ON AttendanceMealBreak(UserGuid) WHERE EndUtc IS NULL");
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendanceMealClaim_ClockOutPunch "
+                + "ON AttendanceMealClaim(ClockOutPunchGuid)");
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AttendanceApproval_Pending_Source "
                 + "ON AttendanceApproval(SourceType, SourceGuid) "

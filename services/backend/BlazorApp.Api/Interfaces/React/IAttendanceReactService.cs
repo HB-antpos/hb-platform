@@ -20,6 +20,8 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendanceAvailabilityDto>> UpdateMyAvailabilityAsync(string availabilityGuid, UpdateAttendanceAvailabilityDto request);
         Task<ApiResponse<bool>> CancelMyAvailabilityAsync(string availabilityGuid);
         Task<ApiResponse<AttendancePunchDto>> PunchAsync(AttendancePunchRequestDto request);
+        Task<ApiResponse<AttendanceMealStateDto>> StartMyMealBreakAsync(AttendanceMealBreakRequestDto request);
+        Task<ApiResponse<AttendanceMealStateDto>> EndMyMealBreakAsync(AttendanceMealBreakRequestDto request);
         Task<ApiResponse<AttendancePunchAdjustmentPreviewDto>> PreviewMyPunchAdjustmentAsync(CreateAttendancePunchAdjustmentDto request);
         Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateMyPunchAdjustmentAsync(CreateAttendancePunchAdjustmentDto request);
         Task<ApiResponse<List<AttendancePunchAdjustmentDto>>> GetMyPunchAdjustmentsAsync();
