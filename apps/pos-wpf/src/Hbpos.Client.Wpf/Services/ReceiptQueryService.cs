@@ -130,6 +130,30 @@ internal static class ReceiptRefundVoucherMapper
 
 public sealed record RefundVoucherReceipt(string VoucherCode, decimal Amount);
 
+internal static class ReceiptRefundVoucherDocuments
+{
+    private const string Prefix = "VOUCHER_REFUND:";
+
+    /// <summary>
+    /// 混合退款（刷卡/现金 + 退款代金券）中已签发的每张退款券各生成一张独立凭证；
+    /// 凭证只保留该券付款行，避免打印成功后把同单刷卡回单误标为已打印。待签发（无券码）的不出票。
+    /// </summary>
+    public static IReadOnlyList<ReceiptDetails> Create(ReceiptDetails receipt) =>
+        receipt.Payments
+            .Where(payment => payment.Method == PaymentMethodKind.Voucher && payment.Amount < 0m)
+            .Select(payment => (Payment: payment, Reference: payment.Reference?.Trim()))
+            .Where(item => item.Reference?.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) == true &&
+                item.Reference.Length > Prefix.Length)
+            .Select(item => receipt with
+            {
+                Payments = [item.Payment],
+                RefundVoucher = new RefundVoucherReceipt(item.Reference![Prefix.Length..].Trim(), decimal.Abs(item.Payment.Amount)),
+                VoucherBalance = null
+            })
+            .Where(document => document.RefundVoucher!.VoucherCode.Length > 0)
+            .ToList();
+}
+
 public sealed record VoucherBalanceReceipt(string VoucherCode, decimal RemainingBalance);
 
 public sealed record ReceiptDetails(

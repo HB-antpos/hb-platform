@@ -3403,6 +3403,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 () => PrintReceiptWithShellPermissionAsync(
                     ReceiptQueryService.CreateReceipt(e.Order),
                     ReceiptPrintReason.CardAuto));
+        }
+
+        if (e.Order.ActualAmount < 0m)
+        {
+            // 代金券买的商品须退代金券后，刷卡/现金 + 退款券的混合退款变得常见；每张退款券都要能扫码使用。
+            await ExecutePaymentCompletionFollowUpAsync(
+                "mixed-voucher-refund-print",
+                async () =>
+                {
+                    foreach (var document in ReceiptRefundVoucherDocuments.Create(ReceiptQueryService.CreateReceipt(e.Order)))
+                    {
+                        await PrintReceiptWithShellPermissionAsync(document, ReceiptPrintReason.VoucherRefundAuto);
+                    }
+                });
             return;
         }
 

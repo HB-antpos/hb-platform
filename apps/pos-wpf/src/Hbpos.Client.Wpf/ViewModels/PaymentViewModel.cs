@@ -945,6 +945,11 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             SetStatus(_requiresAlternativeRefundMethod
                 ? "payment.refund.status.alternativeMethodRequired"
                 : GetReadyStatusKey());
+            if (!_requiresAlternativeRefundMethod && GetRequiredVoucherRefundAmount() > 0m)
+            {
+                // 退货里含代金券买的商品：进入退款页就提示至少多少须退代金券，现金/刷卡按钮按上限置灰。
+                SetVoucherFundedRefundRequiredStatus();
+            }
         }
 
         OnPropertyChanged(nameof(StatusMessage));
@@ -1532,6 +1537,15 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (IsRefundMode &&
+            _workflowService.TryParseTenderedAmount(amountText, out var plannedRefundAmount) &&
+            !IsNonVoucherRefundAmountAllowed(method, plannedRefundAmount))
+        {
+            SetVoucherFundedRefundRequiredStatus();
+            NotifyPaymentCommandStates();
+            return;
+        }
+
         var attemptedPaymentAmount = ResolveAttemptedPaymentAmount(amountText);
         using var tenderPermissionGrant = await AuthorizeAsync(
             GetTenderPermission(method),
@@ -2113,6 +2127,12 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
 
         if (TrySetOfflineVoucherRefundTenderStatus())
+        {
+            return;
+        }
+
+        // 兜底：恢复出的付款明细等路径若让现金/刷卡挤占了代金券应退部分，完成前必须拦下。
+        if (TrySetVoucherFundedRefundShortfallStatus())
         {
             return;
         }
@@ -2835,6 +2855,11 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             return false;
         }
 
+        if (IsRefundMode && !IsNonVoucherRefundAmountAllowed(method, amount))
+        {
+            return false;
+        }
+
         return IsInstallmentPaymentEnabled
             ? IsInstallmentTenderAmountAllowed(method, amount, remainingAmount)
             : method == PaymentMethodKind.Cash || amount <= remainingAmount;
@@ -2862,7 +2887,8 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             !_cart.HasNonIntegerQuantity &&
             !_cart.HasZeroPriceLine &&
             (IsZeroSettlementMode || PaymentTenders.Count > 0) &&
-            IsSettlementComplete();
+            IsSettlementComplete() &&
+            GetVoucherRefundShortfall() <= 0m;
     }
 
     private void RefreshCartValidationStatus()
@@ -2969,6 +2995,12 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             GetCashRemainingAmount,
             GetExternalRemainingAmount,
             GetRefundRemainingAmount);
+        if (method == PaymentMethodKind.Voucher && GetVoucherRefundShortfall() is var shortfall && shortfall > 0m)
+        {
+            // 代金券默认只退须退代金券的部分，其余留给刷卡/现金；收银员仍可手动输入全额退代金券。
+            amount = Math.Min(amount, shortfall);
+        }
+
         return amount > 0m ? amount.ToString("0.00") : string.Empty;
     }
 
@@ -3295,9 +3327,69 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     private decimal GetRefundRemainingAmount(PaymentMethodKind method)
     {
-        return PaymentStrategies[method].GetRefundRemainingAmount(
+        var remaining = PaymentStrategies[method].GetRefundRemainingAmount(
             _workflowRemainingAmount,
             _ => GetNextCardRefundCapacity()?.RemainingAmount) ?? 0m;
+        // 代金券买的部分只能退代金券：现金/刷卡的默认金额不超过非代金券可退上限。
+        return GetNonVoucherRefundCap(method) is { } cap ? Math.Min(remaining, cap) : remaining;
+    }
+
+    private decimal GetRequiredVoucherRefundAmount() =>
+        IsRefundMode
+            ? VoucherFundedRefundPolicy.GetRequiredVoucherRefundAmount(
+                _cart.ReturnPaymentCapacities,
+                _cart.Lines,
+                GetPaymentTargetAmount())
+            : 0m;
+
+    // 只有本次退款确实含代金券应退部分时才限额；不含代金券原付款的退款保持原有行为。
+    private decimal? GetNonVoucherRefundCap(PaymentMethodKind method) =>
+        GetRequiredVoucherRefundAmount() is var required && required > 0m
+            ? VoucherFundedRefundPolicy.GetNonVoucherRefundCap(
+                method,
+                GetPaymentTargetAmount(),
+                required,
+                PaymentTenders.ToList(),
+                _workflowRemainingAmount)
+            : null;
+
+    private bool IsNonVoucherRefundAmountAllowed(PaymentMethodKind method, decimal amount) =>
+        GetNonVoucherRefundCap(method) is not { } cap || Math.Abs(amount) <= cap;
+
+    private decimal GetVoucherRefundShortfall() =>
+        IsRefundMode
+            ? VoucherFundedRefundPolicy.GetVoucherRefundShortfall(GetRequiredVoucherRefundAmount(), PaymentTenders.ToList())
+            : 0m;
+
+    private static string FormatRefundMoney(decimal amount) =>
+        amount.ToString("C2", CultureInfo.GetCultureInfo("en-AU"));
+
+    private void SetVoucherFundedRefundRequiredStatus()
+    {
+        SetStatus(
+            "payment.refund.status.voucherFundedRequiresVoucher",
+            string.Format(
+                CultureInfo.CurrentCulture,
+                T("payment.refund.status.voucherFundedRequiresVoucher"),
+                FormatRefundMoney(GetRequiredVoucherRefundAmount())));
+    }
+
+    private bool TrySetVoucherFundedRefundShortfallStatus()
+    {
+        var shortfall = GetVoucherRefundShortfall();
+        if (shortfall <= 0m)
+        {
+            return false;
+        }
+
+        SetStatus(
+            "payment.refund.status.voucherFundedShortfall",
+            string.Format(
+                CultureInfo.CurrentCulture,
+                T("payment.refund.status.voucherFundedShortfall"),
+                FormatRefundMoney(shortfall)));
+        NotifyPaymentCommandStates();
+        return true;
     }
 
     private string? GetRefundReference(PaymentMethodKind method)
