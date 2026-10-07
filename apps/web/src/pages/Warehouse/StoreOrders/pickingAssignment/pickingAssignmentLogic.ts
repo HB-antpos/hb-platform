@@ -49,6 +49,15 @@ export function segmentCountsValid(counts: readonly number[], pickerCount: numbe
   )
 }
 
+/**
+ * 订单详情里「拣货分配」卡片是否显示。
+ * 只读订单（已完成、已取消等不能再派单）且没有任何分配时，卡片里既没有数据也没有可做的操作，整块隐藏；
+ * 能派单的订单（已提交、配货中）即使还没分配也要显示，因为订货明细里只有这张卡片能发起「分配拣货」。
+ */
+export function shouldShowPickingAssignmentSection(input: { assigneeCount: number; assignable: boolean }): boolean {
+  return input.assignable || input.assigneeCount > 0
+}
+
 export const MAX_SEGMENTS = 10
 
 /**

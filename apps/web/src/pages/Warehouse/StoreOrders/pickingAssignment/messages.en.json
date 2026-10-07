@@ -29,7 +29,6 @@
       "clearConfirm": "Removing the assignment invalidates all printed slips. Continue?",
       "clear": "Remove assignment",
       "empty": "No picking assignment yet. Split the order into segments and print slips — staff scan a slip to claim their segment. You can also name pickers directly.",
-      "emptyReadonly": "No picking assignment",
       "unassigned": "{{count}} items are not assigned (lines added after assigning)",
       "previewFailed": "Preview failed",
       "saved": "Picking assignment saved",

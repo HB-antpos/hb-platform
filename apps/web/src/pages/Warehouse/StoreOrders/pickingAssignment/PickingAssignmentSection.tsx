@@ -17,7 +17,7 @@ import {
 } from '../../../../services/warehousePickingAssignmentService'
 
 import AssignPickingModal from './AssignPickingModal'
-import { assigneeStatus, formatUtcShort, segmentColor } from './pickingAssignmentLogic'
+import { assigneeStatus, formatUtcShort, segmentColor, shouldShowPickingAssignmentSection } from './pickingAssignmentLogic'
 import './messages'
 import './pickingAssignment.css'
 
@@ -301,6 +301,10 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
   const unassignedLineCount = summary?.unassignedLineCount ?? 0
   const sectionTitle = t('storeOrders.pickingAssignment.sectionTitle', '拣货分配')
 
+  // 只读订单没有任何分配时整块隐藏（首次加载中也不先闪一张空卡片）。
+  // 数据仍照常加载并通过 onAssignmentChange 交给明细表；所有 hooks 都在上面，提前返回不会改变 hooks 顺序。
+  if (!shouldShowPickingAssignmentSection({ assigneeCount: assignees.length, assignable })) return null
+
   return (
     <section className="picking-assign-section" aria-label={sectionTitle}>
       <div className="picking-assign-section-head">
@@ -377,11 +381,11 @@ export default function PickingAssignmentSection({ orderGuid, orderNo, storeName
         ) : assignees.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={
-              assignable
-                ? t('storeOrders.pickingAssignment.empty', '还没有分配拣货。分成几份后打印分单，员工扫码领取自己那一段；也可以直接指定员工。')
-                : t('storeOrders.pickingAssignment.emptyReadonly', '没有拣货分配')
-            }
+            // 走到这里说明订单还能派单（只读且无分配时整块已隐藏）。
+            description={t(
+              'storeOrders.pickingAssignment.empty',
+              '还没有分配拣货。分成几份后打印分单，员工扫码领取自己那一段；也可以直接指定员工。',
+            )}
           />
         ) : (
           <MeasuredTable<Assignee>

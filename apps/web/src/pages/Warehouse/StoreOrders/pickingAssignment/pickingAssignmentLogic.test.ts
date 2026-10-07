@@ -11,6 +11,7 @@ import {
   resizeSegmentPickers,
   segmentColor,
   segmentCountsValid,
+  shouldShowPickingAssignmentSection,
   slipTurnMarkers,
 } from './pickingAssignmentLogic'
 
@@ -128,5 +129,11 @@ const isMarker = (row: string) => row.startsWith('#')
 assertDeepEqual(paginateSlipRows(['#A', '1', '2', '#B', '3', '4'], 4, 3, isMarker), [['#A', '1', '2'], ['#B', '3', '4']], '提示行不落在页尾')
 assertDeepEqual(paginateSlipRows(['1', '2', '3', '4', '5'], 2, 2, isMarker), [['1', '2'], ['3', '4'], ['5']], '按容量分页')
 assertDeepEqual(paginateSlipRows([], 20, 30, isMarker), [[]], '空段也有一页')
+
+// 拣货分配卡片显隐：只读订单没有任何分配时隐藏；能派单的订单即使没分配也要显示（唯一的派单入口）。
+assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 0, assignable: false }), false, '只读且没有分配时隐藏')
+assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 0, assignable: true }), true, '能派单但还没分配时保留入口')
+assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 3, assignable: false }), true, '只读但有分配时仍展示记录与重新打印')
+assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 3, assignable: true }), true, '能派单且有分配时展示')
 
 console.log('picking assignment logic tests passed')
