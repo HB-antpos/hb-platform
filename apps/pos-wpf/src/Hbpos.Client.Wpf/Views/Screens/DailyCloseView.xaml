@@ -1837,9 +1837,21 @@
                                     Padding="20,0"
                                     AutomationProperties.Name="{loc:Loc dailyClose.saveFinalize}"
                                     Style="{StaticResource PosPrimaryButtonStyle}">
-                                <StackPanel Orientation="Horizontal">
-                                    <materialDesign:PackIcon Kind="ContentSaveCheck" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" VerticalAlignment="Center" />
-                                    <TextBlock Text="{loc:Loc dailyClose.saveFinalize}" Foreground="White" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                                <StackPanel VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="ContentSaveCheck" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc dailyClose.saveFinalize}" Foreground="White" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <!-- 保存即会向刷卡机发送结算：把后果写在按钮上，按下前就能看到，不占底栏高度。 -->
+                                    <TextBlock x:Name="DailyCloseAutoLinklySettlementHint"
+                                               Margin="0,1,0,0"
+                                               HorizontalAlignment="Center"
+                                               Text="{loc:Loc dailyClose.saveFinalize.autoLinklySettlement}"
+                                               Foreground="White"
+                                               Opacity="0.88"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Visibility="{Binding WillAutoSendLinklySettlement, Converter={StaticResource BoolToVis}}" />
                                 </StackPanel>
                             </Button>
                         </Grid>

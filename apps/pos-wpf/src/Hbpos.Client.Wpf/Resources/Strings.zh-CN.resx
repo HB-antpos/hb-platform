@@ -2368,6 +2368,9 @@
   <data name="dailyClose.saveFinalize" xml:space="preserve">
     <value>保存并完成</value>
   </data>
+  <data name="dailyClose.saveFinalize.autoLinklySettlement" xml:space="preserve">
+    <value>同时发送 Linkly 结算</value>
+  </data>
   <data name="dailyClose.cashCounter" xml:space="preserve">
     <value>现金盘点</value>
   </data>

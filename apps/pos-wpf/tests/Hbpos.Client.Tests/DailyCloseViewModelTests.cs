@@ -823,6 +823,106 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
+    public async Task SaveAndPrintCommand_auto_sends_linkly_settlement_without_second_confirmation()
+    {
+        var service = new FakeDailyCloseService();
+        var settlementService = new FakeLinklySettlementService { AutoSettleAfterDailyClose = true };
+        var logger = new RecordingOperationAuditLogger();
+        var returnedToPos = false;
+        var confirmCalls = 0;
+        var viewModel = new DailyCloseViewModel(
+            service,
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => returnedToPos = true,
+            operationAuditLogger: logger,
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ =>
+            {
+                confirmCalls++;
+                return Task.FromResult(true);
+            });
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        // 打开点钞工作区时保存按钮上就提示会同时结算。
+        Assert.True(viewModel.WillAutoSendLinklySettlement);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.WillAutoSendLinklySettlement);
+        Assert.Equal(1, settlementService.SettleCallCount);
+        Assert.Equal(0, confirmCalls);
+        // 结算结果要让收银员看到：停在结算页签，不自动回收银台。
+        Assert.False(returnedToPos);
+        Assert.True(viewModel.IsLinklySettlementTabSelected);
+        Assert.Single(viewModel.Settlements);
+        // 日结存档列表已刷新并选中刚保存的那条，切回历史页签即可看到。
+        Assert.Equal(service.LastSavedArchive?.DailyCloseGuid, viewModel.SelectedArchive?.DailyCloseGuid);
+        Assert.False(viewModel.IsBusy);
+        Assert.Equal(
+            "Daily close saved and sent to printer. Settlement saved and sent to the POS printer.",
+            viewModel.StatusMessage);
+        Assert.Contains(logger.Events, auditEvent =>
+            auditEvent.OperationType == "LINKLY_SETTLEMENT" && auditEvent.Outcome == "Succeeded");
+    }
+
+    [Fact]
+    public async Task SaveAndPrintCommand_auto_settlement_failure_keeps_daily_close_saved_message()
+    {
+        var settlementService = new FakeLinklySettlementService
+        {
+            AutoSettleAfterDailyClose = true,
+            SettleException = new InvalidOperationException("Terminal offline.")
+        };
+        var printService = new FakeDailyClosePrintService
+        {
+            PrintResult = new ReceiptPrintResult(false, "Printer offline.")
+        };
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            printService,
+            CreateSession(),
+            returnToPos: () => { },
+            linklySettlementService: settlementService);
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, settlementService.SettleCallCount);
+        Assert.True(viewModel.IsLinklySettlementTabSelected);
+        Assert.False(viewModel.HasDailyCloseDraft);
+        Assert.Equal(
+            "Daily close saved, but printing failed: Printer offline. Terminal offline.",
+            viewModel.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveAndPrintCommand_skips_linkly_settlement_when_not_eligible_or_check_fails(bool checkThrows)
+    {
+        var settlementService = new FakeLinklySettlementService
+        {
+            AutoSettleAfterDailyClose = false,
+            AutoSettleCheckException = checkThrows ? new InvalidOperationException("settings unavailable") : null
+        };
+        var returnedToPos = false;
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => returnedToPos = true,
+            linklySettlementService: settlementService);
+
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        Assert.False(viewModel.WillAutoSendLinklySettlement);
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, settlementService.SettleCallCount);
+        Assert.True(returnedToPos);
+        Assert.Equal("Daily close saved and sent to printer.", viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task Linkly_settlement_and_reprint_commands_use_persisted_record_without_resubmitting()
     {
         var settlementService = new FakeLinklySettlementService();
@@ -1245,6 +1345,18 @@ public sealed class DailyCloseViewModelTests
         public int SettleCallCount { get; private set; }
 
         public int ReprintCallCount { get; private set; }
+
+        public bool AutoSettleAfterDailyClose { get; init; }
+
+        public Exception? AutoSettleCheckException { get; init; }
+
+        public Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default) =>
+            AutoSettleCheckException is not null
+                ? Task.FromException<bool>(AutoSettleCheckException)
+                : Task.FromResult(AutoSettleAfterDailyClose);
 
         public int ResolveCallCount { get; private set; }
 

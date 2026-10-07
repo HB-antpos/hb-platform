@@ -61,6 +61,10 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isDiscardDailyCloseDraftConfirmationOpen;
 
+    // 保存日结后会自动发送 Linkly 结算时，在保存按钮上提示收银员。
+    [ObservableProperty]
+    private bool _willAutoSendLinklySettlement;
+
     [ObservableProperty]
     private decimal _expectedCashAmount;
 
@@ -379,6 +383,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             IsDiscardDailyCloseDraftConfirmationOpen = false;
             IsCashCountWorkspaceOpen = true;
             StatusMessage = T("dailyClose.status.draftResumed", "Daily close draft resumed.");
+            await RefreshAutoSettlementHintAsync(cancellationToken);
             return;
         }
 
@@ -404,6 +409,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             _dailyCloseDraftScope = CreateDraftScope(Session, BusinessDate);
             HasDailyCloseDraft = true;
             draftPrepared = true;
+            await RefreshAutoSettlementHintAsync(cancellationToken);
             StatusMessage = T("dailyClose.status.draftReady", "New daily close ready for cash counting.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -513,6 +519,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         IsDiscardDailyCloseDraftConfirmationOpen = false;
         IsCashCountWorkspaceOpen = false;
         HasDailyCloseDraft = false;
+        WillAutoSendLinklySettlement = false;
         ClearCashCounts();
 
         if (clearReportSnapshot)
@@ -625,9 +632,27 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 printResult = new ReceiptPrintResult(false, ex.Message);
             }
 
+            var dailyCloseStatus = printResult.Succeeded
+                ? T("dailyClose.status.savedPrinted", "Daily close saved and sent to printer.")
+                : Format(
+                    "dailyClose.status.savedPrintFailed",
+                    "Daily close saved, but printing failed: {0}",
+                    printResult.Message);
+            if (await ShouldAutoSettleAfterDailyCloseAsync(correlation.TraceId, cancellationToken))
+            {
+                // 集成 Linkly 刷卡（未开手动刷卡）时，保存日结即视为收银员确认结算，不再二次弹窗；
+                // 结算较慢且结果须让收银员看到，所以留在结算页签而不是回收银台。
+                await RefreshArchivesAsync(cancellationToken, archive.DailyCloseGuid);
+                SelectedTabIndex = LinklySettlementTabIndex;
+                StatusMessage = $"{dailyCloseStatus} {T("dailyClose.linklySettlement.sending", "Sending Linkly settlement...")}";
+                var settlementStatus = await RunLinklySettlementAsync(cancellationToken);
+                StatusMessage = $"{dailyCloseStatus} {settlementStatus}";
+                return;
+            }
+
             if (printResult.Succeeded)
             {
-                StatusMessage = T("dailyClose.status.savedPrinted", "Daily close saved and sent to printer.");
+                StatusMessage = dailyCloseStatus;
                 if (_returnToPos is null)
                 {
                     await RefreshArchivesAsync(cancellationToken, archive.DailyCloseGuid);
@@ -642,10 +667,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
             SelectedTabIndex = HistoryTabIndex;
             await RefreshArchivesAsync(cancellationToken, archive.DailyCloseGuid);
-            StatusMessage = Format(
-                "dailyClose.status.savedPrintFailed",
-                "Daily close saved, but printing failed: {0}",
-                printResult.Message);
+            StatusMessage = dailyCloseStatus;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -823,6 +845,20 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
         IsBusy = true;
         StatusMessage = T("dailyClose.linklySettlement.sending", "Sending Linkly settlement...");
+        try
+        {
+            StatusMessage = await RunLinklySettlementAsync(cancellationToken);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // 手动结算与日结后自动结算共用：调用终端、记审计、刷新列表，返回给收银员看的结果文案。
+    // 不负责授权与 IsBusy，由调用方在各自流程里处理。
+    private async Task<string> RunLinklySettlementAsync(CancellationToken cancellationToken)
+    {
         var correlation = OperationAuditEvents.CreateCorrelation();
         var auditRecorded = false;
         try
@@ -853,7 +889,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             auditRecorded = true;
             await RefreshSettlementsAsync(cancellationToken, execution.Settlement.SettlementGuid);
 
-            StatusMessage = execution.ResultUnknown
+            return execution.ResultUnknown
                 ? T(
                     "dailyClose.linklySettlement.unknown",
                     "Settlement result is unknown. Do not submit it again.")
@@ -907,11 +943,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                     correlationId: correlation.CorrelationId,
                     traceId: correlation.TraceId);
             }
-            StatusMessage = ex.Message;
-        }
-        finally
-        {
-            IsBusy = false;
+            return ex.Message;
         }
     }
 
@@ -1310,6 +1342,35 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     private bool CanReprintSelectedArchive()
     {
         return !IsBusy && SelectedArchive is not null;
+    }
+
+    private async Task RefreshAutoSettlementHintAsync(CancellationToken cancellationToken)
+    {
+        // 只是提示；保存时会按当时的设置与结算记录重新判断，以保存那一刻为准。
+        WillAutoSendLinklySettlement = await ShouldAutoSettleAfterDailyCloseAsync(traceId: null, cancellationToken);
+    }
+
+    private async Task<bool> ShouldAutoSettleAfterDailyCloseAsync(string? traceId, CancellationToken cancellationToken)
+    {
+        if (_linklySettlementService is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await _linklySettlementService.ShouldAutoSettleAfterDailyCloseAsync(Session, BusinessDate, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 读设置失败不能影响已保存的日结；跳过自动结算，收银员仍可在结算页签手动结算。
+            ConsoleLog.WriteError(
+                "DailyCloseAudit",
+                $"linkly auto settlement check failed error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: traceId),
+                ex);
+            return false;
+        }
     }
 
     private bool CanSettleAndPrint()

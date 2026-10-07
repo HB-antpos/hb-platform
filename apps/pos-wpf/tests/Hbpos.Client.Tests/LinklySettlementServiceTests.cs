@@ -1217,6 +1217,146 @@ public sealed class LinklySettlementServiceTests
         }
     }
 
+    [Fact]
+    public async Task Auto_settle_after_daily_close_only_for_integrated_linkly_today()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        await WithAutoSettleServiceAsync(new PaymentMethodSettings(UseManualCard: false), CardProcessorKind.Linkly, async (service, _) =>
+        {
+            Assert.True(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today));
+            // 补做昨天的日结不能结掉今天的终端批次。
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today.AddDays(-1)));
+        });
+        await WithAutoSettleServiceAsync(new PaymentMethodSettings(UseManualCard: true), CardProcessorKind.Linkly, async (service, _) =>
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today)));
+        await WithAutoSettleServiceAsync(new PaymentMethodSettings(UseManualCard: false), CardProcessorKind.Square, async (service, _) =>
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today)));
+        await WithAutoSettleServiceAsync((IPaymentMethodSettingsService?)null, CardProcessorKind.Linkly, async (service, _) =>
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today)));
+    }
+
+    [Fact]
+    public async Task Auto_settle_after_daily_close_reads_persisted_manual_card_setting()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        // 内存里是默认值（集成刷卡），但本地设置已开启手动刷卡：必须以持久化设置为准。
+        var paymentMethods = new MutablePaymentMethodSettingsService(new PaymentMethodSettings(UseManualCard: false))
+        {
+            LoadHandler = _ => Task.FromResult(new PaymentMethodSettings(UseManualCard: true))
+        };
+        await WithAutoSettleServiceAsync(paymentMethods, CardProcessorKind.Linkly, async (service, _) =>
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today)));
+    }
+
+    [Fact]
+    public async Task Auto_settle_after_daily_close_skips_when_today_already_succeeded_or_unresolved()
+    {
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var integrated = new PaymentMethodSettings(UseManualCard: false);
+
+        // 之前失败的结算允许在日结时自动重试。
+        await WithAutoSettleServiceAsync(integrated, CardProcessorKind.Linkly, async (service, repository) =>
+        {
+            await CreateCompletedSettlementAsync(repository, session, LocalLinklySettlementStatus.Failed);
+            Assert.True(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today));
+        });
+
+        // 一天保存多次日结时，已有成功结算就不能重复结算。
+        await WithAutoSettleServiceAsync(integrated, CardProcessorKind.Linkly, async (service, repository) =>
+        {
+            await CreateCompletedSettlementAsync(repository, session, LocalLinklySettlementStatus.Succeeded);
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today));
+        });
+
+        // 结果未知的结算必须由收银员在结算页处理，自动流程不能再发一次。
+        await WithAutoSettleServiceAsync(integrated, CardProcessorKind.Linkly, async (service, repository) =>
+        {
+            await CreateUnknownSettlementAsync(repository, session, DateTime.Today, providerSessionId: null);
+            Assert.False(await service.ShouldAutoSettleAfterDailyCloseAsync(session, DateTime.Today));
+        });
+    }
+
+    private static Task WithAutoSettleServiceAsync(
+        PaymentMethodSettings? paymentMethods,
+        CardProcessorKind processor,
+        Func<LinklySettlementService, ILocalLinklySettlementRepository, Task> assert) =>
+        WithAutoSettleServiceAsync(
+            paymentMethods is null ? null : new MutablePaymentMethodSettingsService(paymentMethods),
+            processor,
+            assert);
+
+    private static async Task WithAutoSettleServiceAsync(
+        IPaymentMethodSettingsService? paymentMethods,
+        CardProcessorKind processor,
+        Func<LinklySettlementService, ILocalLinklySettlementRepository, Task> assert)
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-linkly-auto-settle-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalLinklySettlementRepository(store);
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "done"));
+            var service = new LinklySettlementService(
+                terminal,
+                new FixedCardTerminalSettingsProvider(CardTerminalSettings.FromEnvironment() with { Processor = processor }),
+                repository,
+                new FakeLinklyBankReceiptPrinter(),
+                paymentMethodSettingsService: paymentMethods);
+
+            await assert(service, repository);
+
+            // 判断本身绝不能触发终端结算。
+            Assert.Equal(0, terminal.SettlementCallCount);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var path in new[] { databasePath, $"{databasePath}-wal", $"{databasePath}-shm" })
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+    }
+
+    private static async Task CreateCompletedSettlementAsync(
+        ILocalLinklySettlementRepository repository,
+        PosSessionState session,
+        LocalLinklySettlementStatus status)
+    {
+        var requestedAt = DateTimeOffset.UtcNow;
+        var settlement = new LocalLinklySettlementRecord(
+            Guid.NewGuid(),
+            session.StoreCode,
+            session.DeviceCode,
+            DateTime.Today,
+            LinklyConnectionMode.LocalIp.ToString(),
+            CardTerminalEnvironment.Production.ToString(),
+            ProviderSessionId: null,
+            LocalLinklySettlementStatus.Pending,
+            ResponseCode: null,
+            ResponseText: null,
+            SettlementData: null,
+            ReceiptTexts: [],
+            requestedAt,
+            CompletedAt: null,
+            FirstPrintedAt: null,
+            LastPrintedAt: null,
+            PrintCount: 0,
+            LastPrintError: null);
+        await repository.CreatePendingAsync(settlement);
+        await repository.CompleteAsync(
+            settlement.SettlementGuid,
+            new LocalLinklySettlementCompletion(
+                status,
+                ResponseCode: status == LocalLinklySettlementStatus.Succeeded ? "00" : "XX",
+                ResponseText: status.ToString(),
+                SettlementData: null,
+                ReceiptTexts: [],
+                requestedAt.AddSeconds(10),
+                ProviderSubmissionState.Submitted));
+    }
+
     private static async Task<LocalLinklySettlementRecord> CreateUnknownSettlementAsync(
         ILocalLinklySettlementRepository repository,
         PosSessionState session,
