@@ -19,7 +19,9 @@ export type PrinterLinkEventKind =
   | "link.lost"
   | "native.status"
   | "app.state"
-  | "auto.reconnect";
+  | "auto.reconnect"
+  /** 安卓原生层缓冲的蓝牙事件（ACL / 配对 / GATT 状态码 / 连接尝试现场），具体类型在字段 ev 里。 */
+  | "native.diag";
 
 type Scalar = string | number | boolean | null;
 export type PrinterLinkFields = Record<string, Scalar | undefined>;
@@ -32,13 +34,13 @@ export interface PrinterLinkEvent {
 }
 
 /** 内存环形缓冲容量：足够覆盖一次故障的上下文，又不会在长时间失败时无限增长。 */
-export const LINK_RING_CAP = 40;
+export const LINK_RING_CAP = 60;
 /** 故障开始前带上的上下文事件数（通常是触发重连的那次 connect.start / 断线前状态）。 */
 export const LINK_CONTEXT_BEFORE = 5;
 /** 每次故障完整保留开头的事件数，长时间失败后仍能看到“最初是怎么断的”。 */
 export const LINK_HEAD_CAP = 12;
 /** 快照里附带的最近事件数。 */
-export const LINK_SNAPSHOT_TAIL = 25;
+export const LINK_SNAPSHOT_TAIL = 30;
 /** 连续失败达到这些次数时各上报一次“仍在失败”。 */
 export const FAILURE_MILESTONES: readonly number[] = [3, 10, 30, 100, 300];
 /** 恢复时只上报“有意义的”故障：失败至少 2 次，或从断线到恢复超过 60 秒。 */
@@ -108,7 +110,8 @@ export interface NativePrinterLinkStatus {
 }
 
 export interface PrinterLinkRecorder {
-  record: (kind: PrinterLinkEventKind, fields?: PrinterLinkFields) => void;
+  /** atMs 可选：事件实际发生的时刻（原生事件在之后才被取走，须保留原始时间）；缺省为当前时间。 */
+  record: (kind: PrinterLinkEventKind, fields?: PrinterLinkFields, atMs?: number) => void;
   recordNativeStatus: (status: NativePrinterLinkStatus, savedAddress: string | null) => void;
 }
 
@@ -154,7 +157,7 @@ export function createPrinterLinkRecorder(deps: PrinterLinkRecorderDeps): Printe
     const bySeq = new Map<number, PrinterLinkEvent>();
     for (const event of [...current.head, ...ring.slice(-LINK_SNAPSHOT_TAIL)]) bySeq.set(event.seq, event);
     return [...bySeq.values()]
-      .sort((a, b) => a.seq - b.seq)
+      .sort((a, b) => a.atMs - b.atMs || a.seq - b.seq)
       .map((event) => ({ t: event.atMs - current.startedAtMs, kind: event.kind, ...event.fields }));
   }
 
@@ -244,11 +247,11 @@ export function createPrinterLinkRecorder(deps: PrinterLinkRecorderDeps): Printe
     }
   }
 
-  function record(kind: PrinterLinkEventKind, fields?: PrinterLinkFields) {
+  function record(kind: PrinterLinkEventKind, fields?: PrinterLinkFields, atMs?: number) {
     try {
       const event: PrinterLinkEvent = {
         seq: (seq += 1),
-        atMs: deps.now(),
+        atMs: typeof atMs === "number" && Number.isFinite(atMs) ? atMs : deps.now(),
         kind,
         fields: sanitizeFields(fields),
       };
@@ -317,8 +320,8 @@ export function installPrinterLinkRecorder(deps: PrinterLinkRecorderDeps | null)
   activeRecorder = deps ? createPrinterLinkRecorder(deps) : null;
 }
 
-export function recordPrinterLink(kind: PrinterLinkEventKind, fields?: PrinterLinkFields) {
-  activeRecorder?.record(kind, fields);
+export function recordPrinterLink(kind: PrinterLinkEventKind, fields?: PrinterLinkFields, atMs?: number) {
+  activeRecorder?.record(kind, fields, atMs);
 }
 
 export function recordPrinterNativeStatus(status: NativePrinterLinkStatus, savedAddress: string | null) {

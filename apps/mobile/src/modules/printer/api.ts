@@ -8,6 +8,7 @@ import {
 import {
   connectPrinter,
   disconnectPrinter,
+  drainNativeLinkDiagnostics,
   getPrinterStatus as getNativePrinterStatus,
   isBlePrintingSupported,
   printNativeBigDiscountLabel,
@@ -76,6 +77,22 @@ function isPrinterConnectionError(error: unknown) {
 }
 
 /**
+ * 把安卓原生层缓冲的蓝牙事件（ACL 断开/连上、配对、GATT 状态码、每次连接尝试的现场与耗时）并入链路诊断。
+ * 必须在记录 connect.ok / connect.fail 之前调用，原生事件按它们真实的发生时间排进事件序列。
+ * 旧原生包与 iOS 没有这个接口（返回空）；任何异常都吞掉，不能影响连接与打印。
+ */
+async function recordNativeLinkEvents() {
+  try {
+    const events = await drainNativeLinkDiagnostics();
+    for (const { ev, atMs, ...fields } of events) {
+      recordPrinterLink("native.diag", { ev, ...fields }, atMs);
+    }
+  } catch {
+    // 诊断只是旁路。
+  }
+}
+
+/**
  * 所有蓝牙连接尝试的统一出口：记录开始、结果与耗时，供蓝牙链路诊断（link-diagnostics）使用。
  * 只做旁路记录，原样返回结果或抛出原错误，不改变任何连接行为。
  */
@@ -98,23 +115,28 @@ async function connectPrinterLogged(
   });
   try {
     const connected = await connectPrinter(printer.address, printer.transport);
+    // 耗时在连接结束的那一刻取，不能把随后取走原生事件的时间算进去。
+    const elapsedMs = Date.now() - startedAtMs;
+    await recordNativeLinkEvents();
     recordPrinterLink(connected ? "connect.ok" : "connect.fail", {
       role,
       trigger,
       address: printer.address,
       transport: printer.transport ?? null,
-      elapsedMs: Date.now() - startedAtMs,
+      elapsedMs,
       ...(connected ? {} : { code: "NOT_CONNECTED", message: "connect returned false" }),
     });
     return connected;
   } catch (error) {
+    const elapsedMs = Date.now() - startedAtMs;
     const { code, message } = describeLinkError(error);
+    await recordNativeLinkEvents();
     recordPrinterLink("connect.fail", {
       role,
       trigger,
       address: printer.address,
       transport: printer.transport ?? null,
-      elapsedMs: Date.now() - startedAtMs,
+      elapsedMs,
       code,
       message,
     });

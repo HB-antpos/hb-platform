@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { beforeEach, test } from "node:test";
 import { installPrinterLinkRecorder, type PrinterLinkLogItem } from "./link-diagnostics";
-import type { PrinterStatus, SavedPrinter } from "./types";
+import type { NativeLinkEvent, PrinterStatus, SavedPrinter } from "./types";
 
 function mockModule(name: string, exports: object) {
   const filename = require.resolve(name);
@@ -33,6 +33,9 @@ async function run() {
   let storageReads: number;
   let printGate: ReturnType<typeof deferred> | null;
   let connectGate: ReturnType<typeof deferred> | null;
+  let nativeLinkEvents: NativeLinkEvent[] = [];
+  let drainError: Error | null = null;
+  let drainCalls = 0;
   let reviewMode = false;
   const platform = { OS: "android" };
   const receipt = { name: "Receipt", address: "receipt" };
@@ -55,6 +58,14 @@ async function run() {
       if (connectError) throw connectError;
       nativeStatus = { ...nativeStatus, connected: true, address };
       return true;
+    },
+    // 新安卓原生包才有：取走原生层缓冲的蓝牙事件（取走即清空）；旧包返回空。
+    drainNativeLinkDiagnostics: async () => {
+      drainCalls += 1;
+      if (drainError) throw drainError;
+      const events = nativeLinkEvents;
+      nativeLinkEvents = [];
+      return events;
     },
     // 新安卓原生包有 BLE GATT 通道；iOS 恒为 BLE。
     isBlePrintingSupported: () => platform.OS === "ios" || bleSupported,
@@ -100,6 +111,9 @@ async function run() {
     storageReads = 0;
     printGate = null;
     connectGate = null;
+    nativeLinkEvents = [];
+    drainError = null;
+    drainCalls = 0;
     reviewMode = false;
     platform.OS = "android";
     usePrinterStore.setState({ savedPrinter: saved, status: "connected", autoReconnectPaused: false, lastError: null, hydrated: true });
@@ -477,6 +491,81 @@ async function run() {
     assert.deepEqual(events, ["connect:label"]);
     assert.equal(usePrinterStore.getState().status, "connected");
   });
+  test("蓝牙链路诊断：原生层事件在连接失败时并入快照，按原始时间排在失败之前", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      connectError = Object.assign(new Error("read failed, socket might closed or timeout, read ret: -1"), { code: "CONNECT_ERROR" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        // 每次失败前原生层都缓冲了这次尝试的现场；第一次还带着更早发生的 ACL 断开。
+        nativeLinkEvents = [
+          ...(attempt === 0 ? [{ ev: "acl.disconnected", atMs: 500_000, address: "label", tracked: true, socketConnected: true }] : []),
+          { ev: "connect.error", atMs: 1_000_000 + attempt, address: "label", elapsedMs: 5_450, error: "IOException: read failed", acl: null },
+        ] as NativeLinkEvent[];
+        await assert.rejects(api.connectSavedPrinter({ status: "reconnecting" }), /read failed/);
+      }
+      assert.equal(emitted.length, 1);
+      const events = emitted[0].properties.events as (LoggedEvent & { t: number; ev?: string; elapsedMs?: number })[];
+      const times = events.map((event) => event.t);
+      assert.deepEqual(times, [...times].sort((a, b) => a - b), "必须按真实发生时间升序");
+      const diag = events.filter((event) => event.kind === "native.diag");
+      assert.ok(diag.length >= 3, "三次失败的原生事件都应并入");
+      assert.equal(diag[0].ev, "acl.disconnected", "更早发生的 ACL 断开排在最前");
+      assert.ok(diag.some((event) => event.ev === "connect.error" && event.elapsedMs === 5_450));
+      assert.equal(emitted[0].properties.failures, 3, "原生事件不计入失败次数");
+      assert.ok(drainCalls >= 3, "每次连接结束都要取走原生缓冲");
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
+
+  test("蓝牙链路诊断：取原生事件失败不影响连接结果与原始错误", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      drainError = new Error("native bridge exploded");
+      connectError = Object.assign(new Error("Connection timed out"), { code: "CONNECT_ERROR" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(api.connectSavedPrinter({ status: "reconnecting" }), (error) => error === connectError);
+      }
+      assert.equal(emitted.length, 1, "原生事件取不到，日志照常上报");
+      assert.equal(
+        (emitted[0].properties.events as LoggedEvent[]).filter((event) => event.kind === "native.diag").length,
+        0,
+      );
+
+      drainError = null;
+      connectError = null;
+      await api.connectSavedPrinter({ status: "reconnecting" });
+      assert.equal(usePrinterStore.getState().status, "connected", "诊断异常不能让连接失败");
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
+
+  test("蓝牙链路诊断：连接成功时也取走原生事件，恢复快照带上完整经过", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      connectError = Object.assign(new Error("read failed, socket might closed or timeout, read ret: -1"), { code: "CONNECT_ERROR" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(api.connectSavedPrinter({ status: "reconnecting" }), /read failed/);
+      }
+      connectError = null;
+      nativeLinkEvents = [{ ev: "acl.connected", atMs: 1_500_000, address: "label", tracked: false, socketConnected: null }] as NativeLinkEvent[];
+      await api.connectSavedPrinter({ status: "reconnecting" });
+      assert.equal(emitted.length, 2);
+      assert.equal(emitted[1].properties.phase, "recovered");
+      const events = emitted[1].properties.events as (LoggedEvent & { ev?: string })[];
+      assert.ok(events.some((event) => event.kind === "native.diag" && event.ev === "acl.connected"), "恢复前的 ACL 连上要在快照里");
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
+
 }
 
 void run();

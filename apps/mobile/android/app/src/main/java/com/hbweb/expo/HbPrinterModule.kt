@@ -75,6 +75,12 @@ class HbPrinterModule(
   private var pendingPairingPromise: Promise? = null
   private var pendingPairingTimeout: Runnable? = null
 
+  // 链路诊断（只被动记录，由 JS 经 drainLinkDiagnostics 取走）；diagAddress 是最近一次要连接的打印机地址，
+  // 只有它（或当前已连接的地址）的 ACL / 配对广播才记录，免得被周边别的蓝牙设备刷屏。
+  private val linkDiag = PrinterLinkDiagnostics()
+  @Volatile
+  private var diagAddress: String? = null
+
   private val statusReceiver = object : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -87,6 +93,7 @@ class HbPrinterModule(
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
           }
           val disconnectedAddress = device?.address
+          diagAclEvent("acl.disconnected", device)
           // BLE 断线由 GATT 回调负责，这里只处理 RFCOMM，避免两条路径重复清理。
           val activeSocket = synchronized(connectionLock) {
             if (disconnectedAddress == connectedAddress) connection as? RfcommPrinterConnection else null
@@ -98,6 +105,7 @@ class HbPrinterModule(
               pendingAclDisconnectAddress = null
               // 延后一轮等候同设备 ACL_CONNECTED；仍校验 socket 身份，避免过期广播清新连接。
               if (clearConnection(activeSocket)) {
+                linkDiag.record("connection.cleared", "reason" to "acl_disconnected", "address" to disconnectedAddress)
                 emitStatusChanged()
               }
             }
@@ -113,6 +121,7 @@ class HbPrinterModule(
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
           }
+          diagAclEvent("acl.connected", device)
           if (device?.address == pendingAclDisconnectAddress) {
             pendingAclDisconnect?.let(handler::removeCallbacks)
             pendingAclDisconnect = null
@@ -133,6 +142,14 @@ class HbPrinterModule(
               BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE,
               BluetoothDevice.ERROR,
             )
+            if (isDiagTarget(address)) {
+              linkDiag.record(
+                "bond.changed",
+                "address" to address,
+                "from" to bondStateName(previousBondState),
+                "to" to bondStateName(bondState),
+              )
+            }
             when {
               bondState == BluetoothDevice.BOND_BONDED -> completePendingPairing(address)
               bondState == BluetoothDevice.BOND_NONE && previousBondState == BluetoothDevice.BOND_BONDING -> {
@@ -147,6 +164,7 @@ class HbPrinterModule(
         }
         BluetoothAdapter.ACTION_STATE_CHANGED -> {
           val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+          linkDiag.record("adapter.state", "state" to adapterStateName(state))
           if (state == BluetoothAdapter.STATE_OFF || state == BluetoothAdapter.STATE_TURNING_OFF) {
             failPendingPairing(
               "BLUETOOTH_DISABLED",
@@ -413,6 +431,8 @@ class HbPrinterModule(
   @SuppressLint("MissingPermission")
   @ReactMethod
   fun connectWithTransport(address: String, transport: String?, promise: Promise) {
+    // 之后这个地址的 ACL / 配对广播才会被链路诊断记录。
+    diagAddress = address
     val adapter = bluetoothAdapter
     if (adapter == null) {
       promise.reject("BLUETOOTH_UNSUPPORTED", "Bluetooth is not supported on this device.")
@@ -420,6 +440,7 @@ class HbPrinterModule(
     }
 
     if (!adapter.isEnabled) {
+      linkDiag.record("connect.rejected", "code" to "BLUETOOTH_DISABLED", "address" to address)
       promise.reject("BLUETOOTH_DISABLED", "Bluetooth is turned off.")
       return
     }
@@ -440,6 +461,12 @@ class HbPrinterModule(
     // RFCOMM connect() 会隐式触发配对并一直阻塞到 socket 超时；经典蓝牙必须先在系统蓝牙设置中配对。
     // BLE 走 GATT 直连，不要求绑定。
     if (!useBle && device.bondState != BluetoothDevice.BOND_BONDED) {
+      linkDiag.record(
+        "connect.rejected",
+        "code" to "PRINTER_PAIRING_REQUIRED",
+        "address" to address,
+        "bond" to bondStateName(device.bondState),
+      )
       promise.reject(
         "PRINTER_PAIRING_REQUIRED",
         "Pair the Bluetooth printer before starting the RFCOMM connection.",
@@ -449,6 +476,10 @@ class HbPrinterModule(
 
     Thread {
       var nextConnection: PrinterConnection? = null
+      // 链路诊断：记录这次尝试开始时的状态与总耗时。放在 beginConnectionAttempt 之前，
+      // 才能看到“旧连接是否还没清理”这类开始前的现场。
+      val attemptStartedAt = SystemClock.elapsedRealtime()
+      diagConnectBegin(adapter, device, address, useBle)
       try {
         val attemptGeneration = beginConnectionAttempt()
         if (adapter.isDiscovering) {
@@ -456,11 +487,19 @@ class HbPrinterModule(
         }
 
         nextConnection = if (useBle) {
-          BlePrinterConnection.open(appContext, device, BLE_CONNECT_TIMEOUT_MS) { lost ->
-            if (clearConnection(lost)) {
-              emitStatusChanged()
-            }
-          }
+          // onDiag 排在 onConnectionLost 之后，必须用具名参数，不能再用尾随 lambda（会绑到 onDiag 上）。
+          BlePrinterConnection.open(
+            appContext,
+            device,
+            BLE_CONNECT_TIMEOUT_MS,
+            onConnectionLost = { lost ->
+              if (clearConnection(lost)) {
+                linkDiag.record("connection.cleared", "reason" to "ble_lost", "address" to address)
+                emitStatusChanged()
+              }
+            },
+            onDiag = { type, fields -> linkDiag.record(type, fields) },
+          )
         } else {
           val socket = device.createRfcommSocketToServiceRecord(printerUuid)
           try {
@@ -484,11 +523,19 @@ class HbPrinterModule(
           throw IllegalStateException("Bluetooth printer connection was cancelled.")
         }
         nextConnection = null
+        // 先记录再通知 JS：JS 在 resolve/reject 之后立刻取走缓冲，顺序反了会漏掉这次结果。
+        linkDiag.record(
+          "connect.ok",
+          "address" to address,
+          "transport" to (if (useBle) "ble" else "classic"),
+          "elapsedMs" to (SystemClock.elapsedRealtime() - attemptStartedAt),
+        )
         emitStatusChanged()
         promise.resolve(true)
       } catch (error: Exception) {
         // 连接未写入共享状态时必须单独关闭，避免 RFCOMM/GATT 资源泄漏。
         nextConnection?.close()
+        diagConnectFailure(device, address, useBle, error, SystemClock.elapsedRealtime() - attemptStartedAt)
         promise.reject("CONNECT_ERROR", error.message, error)
       }
     }.start()
@@ -1499,6 +1546,84 @@ class HbPrinterModule(
     reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit(STATUS_EVENT, Arguments.createMap())
+  }
+
+  /** 连接尝试开始时的现场：配对状态、系统是否仍认为有 ACL 链路、本模块是否还握着旧连接。 */
+  @SuppressLint("MissingPermission")
+  private fun diagConnectBegin(adapter: BluetoothAdapter, device: BluetoothDevice, address: String, useBle: Boolean) {
+    try {
+      val held = synchronized(connectionLock) { connection to connectedAddress }
+      linkDiag.record(
+        "connect.begin",
+        "address" to address,
+        "transport" to (if (useBle) "ble" else "classic"),
+        "deviceType" to deviceTypeName(device.type),
+        "bond" to bondStateName(device.bondState),
+        "adapter" to adapterStateName(adapter.state),
+        "discovering" to adapter.isDiscovering,
+        "acl" to aclConnectedOrNull(device),
+        "heldAddress" to held.second,
+        "heldConnected" to held.first?.isConnected,
+      )
+    } catch (_: Throwable) {
+    }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun diagConnectFailure(
+    device: BluetoothDevice,
+    address: String,
+    useBle: Boolean,
+    error: Throwable,
+    elapsedMs: Long,
+  ) {
+    try {
+      linkDiag.record(
+        "connect.error",
+        "address" to address,
+        "transport" to (if (useBle) "ble" else "classic"),
+        "elapsedMs" to elapsedMs,
+        "error" to describeThrowable(error),
+        "bond" to bondStateName(device.bondState),
+        "acl" to aclConnectedOrNull(device),
+      )
+    } catch (_: Throwable) {
+    }
+  }
+
+  /** 只有最近要连接的地址或当前已连接的地址才记录 ACL / 配对广播，避免周边别的蓝牙设备刷屏。 */
+  private fun isDiagTarget(address: String?): Boolean =
+    address != null && (address == diagAddress || address == connectedAddress)
+
+  @SuppressLint("MissingPermission")
+  private fun diagAclEvent(type: String, device: BluetoothDevice?) {
+    try {
+      val target = device ?: return
+      val address = target.address
+      if (!isDiagTarget(address)) {
+        return
+      }
+      val held = synchronized(connectionLock) { connection to connectedAddress }
+      linkDiag.record(
+        type,
+        "address" to address,
+        "bond" to bondStateName(target.bondState),
+        // 事件到来时本模块（也就是 JS）所认为的连接：与系统 ACL 事件对照能看出谁先谁后。
+        "tracked" to (address == held.second),
+        "socketConnected" to (if (address == held.second) held.first?.isConnected else null),
+      )
+    } catch (_: Throwable) {
+    }
+  }
+
+  /** 取走链路诊断缓冲（按发生顺序）；永不 reject，取不到就返回空数组，诊断不能影响业务。 */
+  @ReactMethod
+  fun drainLinkDiagnostics(promise: Promise) {
+    try {
+      promise.resolve(linkDiag.drain().toWritableArray())
+    } catch (_: Throwable) {
+      promise.resolve(Arguments.createArray())
+    }
   }
 
   companion object {
