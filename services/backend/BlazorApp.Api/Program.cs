@@ -1165,6 +1165,12 @@ builder.Services.AddScoped<IAttendancePosDeviceStatusProvider, AttendancePosDevi
 builder.Services.AddScoped<ITaxInvoiceService, TaxInvoiceService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
 builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
+// 分店现金管理（存银行 / 现金支出 / 现金池）。日结取数口在后端日结接入前用「未接入」占位实现，
+// 接入时只需把 ICashDailyCloseSource 换成真实实现，其余服务与接口不用改。
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashAccessResolver, BlazorApp.Api.Services.StoreCash.CashAccessResolver>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashDailyCloseSource, BlazorApp.Api.Services.StoreCash.NotConnectedCashDailyCloseSource>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashAttachmentService, BlazorApp.Api.Services.StoreCash.StoreCashAttachmentService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashService, BlazorApp.Api.Services.StoreCash.StoreCashService>();
 builder.Services.AddScoped<ISalesDashboardCacheWarmer, SalesDashboardCacheWarmer>();
 builder.Services.AddScoped<IProductMovementReportService, ProductMovementReportService>();
 builder.Services.AddScoped<IBatchProductSalesAnalysisService, BatchProductSalesAnalysisService>();

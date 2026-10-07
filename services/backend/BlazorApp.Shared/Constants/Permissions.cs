@@ -257,6 +257,28 @@ namespace BlazorApp.Shared.Constants
             public const string View = "StoreVouchers.View";
         }
 
+        /// <summary>
+        /// 分店现金管理：店长把现金存银行、记现金支出，管理员与财务查看统计并对账。
+        /// 新码不写入角色模板，上线后由管理员在角色管理里显式授予。
+        /// </summary>
+        public static class Cash
+        {
+            /// <summary>查看现金池总览、按日明细、存款与支出记录；店长只限自己关联的分店。</summary>
+            public const string OverviewView = "Cash.Overview.View";
+
+            /// <summary>登记存银行、上传存单、选择纳入现金池的日结、录入期初与盘点。</summary>
+            public const string DepositCreate = "Cash.Deposit.Create";
+
+            /// <summary>录入现金支出（现金工资、现金购物、T2、其他），店长录入即生效。</summary>
+            public const string ExpenseCreate = "Cash.Expense.Create";
+
+            /// <summary>作废范围内任何存款、支出与期初盘点记录；没有它的店长只能在时限内作废自己录入的。</summary>
+            public const string Void = "Cash.Void";
+
+            /// <summary>查看全部分店与全部历史 T2；没有它的店长只能看自己关联分店最近 14 天的 T2。</summary>
+            public const string AllStoresView = "Cash.AllStores.View";
+        }
+
         public static class Container
         {
             public const string View = "Container.View";

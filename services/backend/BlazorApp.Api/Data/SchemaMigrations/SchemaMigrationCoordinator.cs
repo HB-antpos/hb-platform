@@ -57,6 +57,8 @@ internal sealed class SchemaMigrationCoordinator
         "20261007.001-store-receipt-profile-release";
     internal const string AttendanceMealBreakMigrationId =
         "20261007.002-attendance-meal-break";
+    internal const string StoreCashManagementMigrationId =
+        "20261008.001-store-cash-management";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -192,6 +194,11 @@ internal sealed class SchemaMigrationCoordinator
             AttendanceMealBreakMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAttendanceMealBreakAsync(cancellationToken)
+        ),
+        new(
+            StoreCashManagementMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyStoreCashManagementAsync(cancellationToken)
         ),
     ];
 

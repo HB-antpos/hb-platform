@@ -112,6 +112,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifyStoreReceiptProfileReleaseAsync", runtimeMethods);
         Assert.Contains("ApplyAttendanceMealBreakAsync", runtimeMethods);
         Assert.Contains("VerifyAttendanceMealBreakAsync", runtimeMethods);
+        Assert.Contains("ApplyStoreCashManagementAsync", runtimeMethods);
+        Assert.Contains("VerifyStoreCashManagementAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -514,6 +516,10 @@ public sealed class SchemaMigrationCoordinatorTests
         runtime.MarkApplied(
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.AttendanceMealBreakMigrationId
+        );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.StoreCashManagementMigrationId
         );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
@@ -968,6 +974,7 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20261005.002-mobile-android-native-update-policy",
                 "Check:Main:20261007.001-store-receipt-profile-release",
                 "Check:Main:20261007.002-attendance-meal-break",
+                "Check:Main:20261008.001-store-cash-management",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1202,66 +1209,71 @@ public sealed class SchemaMigrationCoordinatorTests
         // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、敏感申请生日列与须改密标记表（10-04），未成年用工合规（10-04），然后是找回密码验证码表（10-04），然后是验证码表的新邮箱列（10-05），然后是 Mobile 安卓原生最低构建号策略表（10-05），然后是门店小票资料下发的两张新表（10-07），最后是考勤用餐休息的两张新表（10-07）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^15].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^16].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^15].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceAvailabilityUnavailableMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeProfileSensitiveBirthdayMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordChangeRequirementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeTargetEmailMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceMealBreakMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.StoreCashManagementMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.Equal("20261007.001-store-receipt-profile-release", SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId);
         Assert.Equal("20261007.002-attendance-meal-break", SchemaMigrationCoordinator.AttendanceMealBreakMigrationId);
+        Assert.Equal("20261008.001-store-cash-management", SchemaMigrationCoordinator.StoreCashManagementMigrationId);
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
         foreach (var migrationId in new[]
         {
@@ -1280,6 +1292,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId,
             SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
             SchemaMigrationCoordinator.AttendanceMealBreakMigrationId,
+            SchemaMigrationCoordinator.StoreCashManagementMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -1357,6 +1370,13 @@ public sealed class SchemaMigrationCoordinatorTests
         var mealBreakTablesRecord = runtime.Events.IndexOf(
             $"Record:Main:{SchemaMigrationCoordinator.AttendanceMealBreakMigrationId}");
         Assert.True(mealBreakTablesApply >= 0 && mealBreakTablesApply < mealBreakTablesVerify && mealBreakTablesVerify < mealBreakTablesRecord);
+        // 分店现金管理六张新表（10-08）同样 Apply → 签名校验 → 登记。
+        var storeCashApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.StoreCashManagementMigrationId}");
+        var storeCashVerify = runtime.Events.IndexOf("VerifyStoreCashManagement", storeCashApply);
+        var storeCashRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.StoreCashManagementMigrationId}");
+        Assert.True(storeCashApply >= 0 && storeCashApply < storeCashVerify && storeCashVerify < storeCashRecord);
     }
 
     [Fact]
@@ -1944,6 +1964,23 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Events.Add("VerifyAttendanceMealBreak");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplyStoreCashManagementAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.StoreCashManagementMigrationId,
+                cancellationToken
+            );
+            await VerifyStoreCashManagementAsync(cancellationToken);
+        }
+
+        public Task VerifyStoreCashManagementAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifyStoreCashManagement");
             return Task.CompletedTask;
         }
 

@@ -1101,6 +1101,163 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 分店现金管理六张表_可重复执行_权限码幂等入库且唯一索引与签名门禁生效()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 隔离库里没有基线建出的权限表，放一张同列的最小桩表，验证迁移内的权限码入库。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions
+            (
+                Id nvarchar(50) NOT NULL PRIMARY KEY,
+                Code nvarchar(100) NOT NULL,
+                Name nvarchar(100) NOT NULL,
+                Category nvarchar(100) NOT NULL,
+                Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL,
+                UpdatedAt datetime2 NULL,
+                UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL
+            );
+            """);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql);
+        // 重复执行：权限码不重复入库，也不丢已有数据。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashBalanceEntry
+                (EntryGuid, StoreCode, EntryType, EntryDate, Amount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'e1', N'S001', N'Opening', '2026-10-08', 100.00, N'Active', N'r1', N'u1', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code LIKE N'Cash.%') <> 5
+                THROW 52210, 'Cash permissions should be inserted exactly once.', 1;
+            IF (SELECT COUNT(*) FROM dbo.StoreCashBalanceEntry WHERE EntryGuid = N'e1') <> 1
+                THROW 52211, 'Existing balance entry row was lost.', 1;
+            """);
+
+        // 每店至多一条有效期初：第二条有效期初被过滤唯一索引拒绝；作废后可以重录；盘点不受限。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashBalanceEntry
+                (EntryGuid, StoreCode, EntryType, EntryDate, Amount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'e2', N'S001', N'Opening', '2026-10-08', 50.00, N'Active', N'r2', N'u1', SYSUTCDATETIME());
+            """));
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashBalanceEntry
+                (EntryGuid, StoreCode, EntryType, EntryDate, Amount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'e3', N'S001', N'Count', '2026-10-08', 80.00, N'Active', N'r3', N'u1', SYSUTCDATETIME());
+            INSERT dbo.StoreCashBalanceEntry
+                (EntryGuid, StoreCode, EntryType, EntryDate, Amount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'e4', N'S002', N'Opening', '2026-10-08', 60.00, N'Active', N'r4', N'u1', SYSUTCDATETIME());
+            UPDATE dbo.StoreCashBalanceEntry SET Status = N'Voided' WHERE EntryGuid = N'e1';
+            INSERT dbo.StoreCashBalanceEntry
+                (EntryGuid, StoreCode, EntryType, EntryDate, Amount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'e5', N'S001', N'Opening', '2026-10-08', 90.00, N'Active', N'r5', N'u1', SYSUTCDATETIME());
+            """);
+        // 客户端请求号全局唯一，是幂等键。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashBalanceEntry
+                (EntryGuid, StoreCode, EntryType, EntryDate, Amount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'e6', N'S003', N'Count', '2026-10-08', 1.00, N'Active', N'r3', N'u1', SYSUTCDATETIME());
+            """));
+
+        // 每个（分店、营业日、设备）至多一条当前的日结选择记录；历史（非当前）记录不受限。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashCloseSelection
+                (SelectionGuid, StoreCode, BusinessDate, DeviceCode, Mode, CloseIdsJson, OverlapWarning, Reason, IsCurrent, SelectedByUserGuid, SelectedAtUtc)
+            VALUES (N's1', N'S001', '2026-10-07', N'POS_1', N'Manual', N'["c1","c2"]', 1, N'两次班结', 1, N'u1', SYSUTCDATETIME());
+            """);
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashCloseSelection
+                (SelectionGuid, StoreCode, BusinessDate, DeviceCode, Mode, CloseIdsJson, OverlapWarning, Reason, IsCurrent, SelectedByUserGuid, SelectedAtUtc)
+            VALUES (N's2', N'S001', '2026-10-07', N'POS_1', N'Manual', N'["c1"]', 0, N'重复', 1, N'u1', SYSUTCDATETIME());
+            """));
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.StoreCashCloseSelection SET IsCurrent = 0 WHERE SelectionGuid = N's1';
+            INSERT dbo.StoreCashCloseSelection
+                (SelectionGuid, StoreCode, BusinessDate, DeviceCode, Mode, CloseIdsJson, OverlapWarning, Reason, IsCurrent, SelectedByUserGuid, SelectedAtUtc)
+            VALUES (N's2', N'S001', '2026-10-07', N'POS_1', N'Default', N'[]', 0, N'恢复默认', 1, N'u1', SYSUTCDATETIME());
+            """);
+
+        // 存款与支出的客户端请求号同样是幂等键。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashDeposit
+                (DepositGuid, StoreCode, DepositDate, TotalAmount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'd1', N'S001', '2026-10-08', 120.50, N'Active', N'dep-1', N'u1', SYSUTCDATETIME());
+            """);
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreCashDeposit
+                (DepositGuid, StoreCode, DepositDate, TotalAmount, Status, ClientRequestId, CreatedByUserGuid, CreatedAtUtc)
+            VALUES (N'd2', N'S001', '2026-10-08', 10.00, N'Active', N'dep-1', N'u1', SYSUTCDATETIME());
+            """));
+
+        // 金额列漂移成别的精度：签名门禁报 52201；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreCashDeposit ALTER COLUMN TotalAmount decimal(18,4) NOT NULL;");
+        var amountColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql));
+        Assert.Equal(52201, amountColumn.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreCashDeposit ALTER COLUMN TotalAmount decimal(18,2) NOT NULL;");
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql);
+
+        // 列宽漂移（选未建索引的列，建了索引的列 SQL Server 不允许直接改宽）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreCashExpense ALTER COLUMN PayeeName nvarchar(120) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql));
+        Assert.Equal(52201, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreCashExpense ALTER COLUMN PayeeName nvarchar(100) NULL;");
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql);
+
+        // 期初的过滤唯一索引缺失：Verify 报 52203，重新 Apply 后补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX [UX_StoreCashBalanceEntry_Opening] ON dbo.StoreCashBalanceEntry;");
+        var openingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql));
+        Assert.Equal(52203, openingIndex.Number);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql);
+
+        // 当前选择的过滤唯一索引被换成同名的普通索引（不唯一、不带过滤；表里已有同键的历史行，建不出无过滤的唯一索引）：
+        // 同样识别为不兼容。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [UX_StoreCashCloseSelection_Current] ON dbo.StoreCashCloseSelection;
+            CREATE NONCLUSTERED INDEX [UX_StoreCashCloseSelection_Current]
+                ON dbo.StoreCashCloseSelection ([StoreCode], [BusinessDate], [DeviceCode]);
+            """);
+        var unfiltered = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql));
+        Assert.Equal(52203, unfiltered.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [UX_StoreCashCloseSelection_Current] ON dbo.StoreCashCloseSelection;
+            CREATE UNIQUE NONCLUSTERED INDEX [UX_StoreCashCloseSelection_Current]
+                ON dbo.StoreCashCloseSelection ([StoreCode], [BusinessDate], [DeviceCode]) WHERE [IsCurrent] = 1;
+            """);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql);
+
+        // 复合索引键列顺序颠倒：报 52204。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [IX_StoreCashDeposit_Store_Date] ON dbo.StoreCashDeposit;
+            CREATE NONCLUSTERED INDEX [IX_StoreCashDeposit_Store_Date]
+                ON dbo.StoreCashDeposit ([DepositDate], [StoreCode]);
+            """);
+        var keyOrder = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql));
+        Assert.Equal(52204, keyOrder.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [IX_StoreCashDeposit_Store_Date] ON dbo.StoreCashDeposit;
+            CREATE NONCLUSTERED INDEX [IX_StoreCashDeposit_Store_Date]
+                ON dbo.StoreCashDeposit ([StoreCode], [DepositDate]);
+            """);
+        await ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql);
+
+        // 任一张表缺失：门禁报 52200。
+        await ExecuteNonQueryAsync(main, "DROP TABLE dbo.StoreCashAttachment;");
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreCashManagementSchema.VerifySql));
+        Assert.Equal(52200, missing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发服务_真实SQLServer下发_并发同店只产生一个版本且冲突映射409()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

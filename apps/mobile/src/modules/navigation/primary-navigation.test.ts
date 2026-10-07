@@ -407,6 +407,16 @@ assert.deepEqual(
   "HB新品必须在工作台商品进货分区显示"
 );
 assert.deepEqual(
+  buildWorkbenchSections(["store-vouchers", "store-cash"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [{ key: "product-sales", itemRouteNames: ["store-vouchers", "store-cash"] }],
+  "现金必须在工作台商品销售分区显示，并紧跟门店代金券"
+);
+assert.equal(zhWorkbench.routes.storeCash, "现金", "中文工作台必须显示现金");
+assert.equal(enWorkbench.routes.storeCash, "Cash", "英文工作台必须显示 Cash");
+assert.deepEqual(
   buildWorkbenchSections(["app-install", "app-downloads"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),

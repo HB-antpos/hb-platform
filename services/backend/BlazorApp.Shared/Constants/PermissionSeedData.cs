@@ -267,6 +267,12 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.SalesOrders.View, "查看销售订单", "分店订货", "移动端「销售订单」- 按分店、日期与订单类型查看销售订单、明细及发票"),
                 new(Permissions.InstallmentOrders.View, "查看分期付款订单", "分店财务", "移动端「分期订单」- 查看分店分期付款订单与支付记录"),
                 new(Permissions.StoreVouchers.View, "查看分店代金券", "分店财务", "移动端「分店代金券」- 查看分店代金券使用情况与关联订单"),
+                // 现金管理五个码仅注册，不写入角色模板：涉及现金流水，由管理员显式授予；入库由版本号迁移 20261008.001 幂等完成。
+                new(Permissions.Cash.OverviewView, "查看现金管理", "分店财务", "移动端「现金」- 查看分店现金池余额、按日明细、存款与现金支出记录；店长只限自己关联的分店"),
+                new(Permissions.Cash.DepositCreate, "登记存银行", "分店财务", "移动端「现金」- 登记现金存银行并上传存单、选择纳入现金池的日结、录入期初现金与盘点"),
+                new(Permissions.Cash.ExpenseCreate, "录入现金支出", "分店财务", "移动端「现金」- 录入现金工资、现金购物、T2 与其他现金支出，录入即生效"),
+                new(Permissions.Cash.Void, "作废现金记录", "分店财务", "现金管理 - 作废范围内任何存款、现金支出与期初盘点记录；没有该权限的店长只能在 24 小时内作废自己录入的记录"),
+                new(Permissions.Cash.AllStoresView, "查看全部分店现金与 T2", "分店财务", "现金管理 - 查看全部分店的现金数据与全部历史 T2，补录不受回溯天数限制；没有该权限的店长只能看自己关联分店最近 14 天的 T2"),
                 new(Permissions.Container.View, "查看货柜", "货柜管理", "Web 页面 /warehouse/containers 与移动端「仓库」- 查看货柜列表与明细"),
                 new(Permissions.Container.Create, "创建货柜", "货柜管理", "Web 页面 /warehouse/containers - 创建货柜"),
                 new(Permissions.Container.Edit, "编辑货柜", "货柜管理", "Web 页面 /warehouse/containers - 编辑货柜"),

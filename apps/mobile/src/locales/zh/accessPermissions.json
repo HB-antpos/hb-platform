@@ -125,6 +125,26 @@
       "name": "查看澳洲供应商",
       "description": "Web 页面 /pos-admin/suppliers - 查看澳洲供应商分页列表"
     },
+    "Cash.AllStores.View": {
+      "name": "查看全部分店现金与 T2",
+      "description": "现金管理 - 查看全部分店的现金数据与全部历史 T2，补录不受回溯天数限制；没有该权限的店长只能看自己关联分店最近 14 天的 T2"
+    },
+    "Cash.Deposit.Create": {
+      "name": "登记存银行",
+      "description": "移动端「现金」- 登记现金存银行并上传存单、选择纳入现金池的日结、录入期初现金与盘点"
+    },
+    "Cash.Expense.Create": {
+      "name": "录入现金支出",
+      "description": "移动端「现金」- 录入现金工资、现金购物、T2 与其他现金支出，录入即生效"
+    },
+    "Cash.Overview.View": {
+      "name": "查看现金管理",
+      "description": "移动端「现金」- 查看分店现金池余额、按日明细、存款与现金支出记录；店长只限自己关联的分店"
+    },
+    "Cash.Void": {
+      "name": "作废现金记录",
+      "description": "现金管理 - 作废范围内任何存款、现金支出与期初盘点记录；没有该权限的店长只能在 24 小时内作废自己录入的记录"
+    },
     "Container.Create": {
       "name": "创建货柜",
       "description": "Web 页面 /warehouse/containers - 创建货柜"
