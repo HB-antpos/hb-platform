@@ -38,6 +38,13 @@ interface CodeTableCardProps {
   readOnly?: boolean;
 }
 
+/** 单行可容纳的条码最大长度：16 位在 PDA 放大字号下缩到约 80% 仍清晰，更长的改两行。 */
+const BARCODE_SINGLE_LINE_MAX_LENGTH = 16;
+
+function getBarcodeLineCount(barcode?: string | null): 1 | 2 {
+  return (barcode?.length ?? 0) > BARCODE_SINGLE_LINE_MAX_LENGTH ? 2 : 1;
+}
+
 /** 套装 / 多码共用的「条码 | 价格 | 操作」表格卡。 */
 export function CodeTableCard({
   title,
@@ -111,7 +118,21 @@ export function CodeTableCard({
               onPress={readOnly ? undefined : () => onEditItemBarcode(row.id)}
               style={[styles.cell, styles.barcodeColumn, row.dirty ? styles.cellDirty : null]}
             >
-              <Text style={styles.barcodeText} numberOfLines={1}>{row.barcode ?? "--"}</Text>
+              {/*
+                条码任何情况下都要完整显示（不出现省略号）：斑马 PDA（360dp 宽、系统字号放大）上
+                13 位 EAN 曾被尾部省略成「9527815000…」，而同一商品的多个码往往只差最后几位。
+                常规长度单行 + 自动缩字号放下整串；超长码直接两行原字号显示。
+                Android 的 adjustsFontSizeToFit 只在行数超过 numberOfLines 时才缩字号，
+                若统一给 2 行会先折行而不是先缩字号，所以按码长分档。
+              */}
+              <Text
+                style={styles.barcodeText}
+                numberOfLines={getBarcodeLineCount(row.barcode)}
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
+              >
+                {row.barcode ?? "--"}
+              </Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -127,6 +148,8 @@ export function CodeTableCard({
               <Text
                 style={[styles.priceText, row.followsMain ? styles.followText : null]}
                 numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
               >
                 {row.followsMain ? t("codes.follow") : row.price != null ? `$${row.price}` : "--"}
               </Text>
@@ -230,8 +253,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  // 价格列收窄让位给条码列；「$123.99」这类长价格靠 adjustsFontSizeToFit 缩字号放下。
   priceColumn: {
-    width: 84,
+    width: 72,
   },
   actionsColumn: {
     width: 76,
@@ -262,7 +286,7 @@ const styles = StyleSheet.create({
   cell: {
     minHeight: 36,
     justifyContent: "center",
-    paddingHorizontal: HB_SPACING.xs,
+    paddingHorizontal: 6,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: HB_COLORS.outline,
@@ -275,7 +299,8 @@ const styles = StyleSheet.create({
   cellDirty: {
     borderWidth: 2,
     borderColor: HB_COLORS.brand,
-    paddingHorizontal: 7,
+    // 边框 1→2 时内边距同步减 1，保持文字位置不跳动。
+    paddingHorizontal: 5,
   },
   barcodeText: {
     fontSize: 14,
