@@ -33,6 +33,7 @@
   },
   "orders": {
     "title": "Select order",
+    "savedExit": "Progress saved — pick up where you left off any time",
     "searchLabel": "Search orders",
     "searchPlaceholder": "Order no. or store",
     "scanHint": "Or scan the barcode on the picking list",
@@ -96,6 +97,8 @@
     "notePickerHere": "{{name}} is here",
     "allLines": "All lines",
     "finish": "Finish picking",
+    "saveExit": "Save & exit",
+    "exitSaving": "Saving… try again in a moment",
     "feedbackAdded": "+{{pieces}} pcs",
     "feedbackAddedSet": "+1 min order · +{{pieces}} pcs (counted as the set)",
     "feedbackScannedChild": "Scanned child “{{name}}”",

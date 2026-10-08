@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 import { ActivityIndicator, Snackbar, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, type Href } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -51,6 +51,7 @@ export function PickOrderListView({
 }) {
   const { t, language } = useAppTranslation("warehousePicking");
   const router = useRouter();
+  const params = useLocalSearchParams<{ saved?: string }>();
   const focused = useIsFocused();
   const [filter, setFilter] = useState<PickOrderFilter>("all");
   // 第一次拿到“派给我”的数量且大于 0 时默认切过去；拣货员手动选过筛选后不再自动切换。
@@ -67,6 +68,13 @@ export function PickOrderListView({
   useEffect(() => {
     preloadScanFeedbackSounds();
   }, []);
+  // 从拣货页「暂存并退出」回来：提示进度已保存，并清掉参数，避免之后回到本页重复提示。
+  const savedFlag = params.saved;
+  useEffect(() => {
+    if (savedFlag !== "1") return;
+    setSnackbar(t("orders.savedExit"));
+    router.setParams({ saved: undefined });
+  }, [savedFlag, router, t]);
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword.trim()), 300);
     return () => clearTimeout(timer);

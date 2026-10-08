@@ -33,6 +33,7 @@
   },
   "orders": {
     "title": "选择订单",
+    "savedExit": "进度已保存，随时可以回来接着拣",
     "searchLabel": "搜索订单",
     "searchPlaceholder": "订单号 / 分店",
     "scanHint": "可直接扫配货单右上角的条码",
@@ -96,6 +97,8 @@
     "notePickerHere": "{{name}} 在这",
     "allLines": "全部明细",
     "finish": "完成拣货",
+    "saveExit": "暂存并退出",
+    "exitSaving": "正在保存，请稍候再退出",
     "feedbackAdded": "+{{pieces}} 件",
     "feedbackAddedSet": "+1 中包 · +{{pieces}} 件（按套装主码计）",
     "feedbackScannedChild": "扫到子项“{{name}}”",
