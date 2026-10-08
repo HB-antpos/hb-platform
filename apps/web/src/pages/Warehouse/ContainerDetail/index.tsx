@@ -173,7 +173,6 @@ import {
   countSuccessfullySavedContainerDetailRows,
   extractPushToHqErrorResult,
   findContainerDetailRowsMissingCreateProductRetailPrice,
-  findContainerDetailRowsMissingProductName,
   getContainerDetailEditableColumnKeysInOrder,
   getContainerDetailExportColumns,
   applyContainerDetailLocalExportValues,
@@ -5225,15 +5224,8 @@ export default function ContainerDetailPage() {
       message.error(error instanceof Error ? error.message : t('containers.messages.detailSaveFailed', '货柜明细保存失败，请稍后重试'))
       return
     }
-    const missingProductNameRows = findContainerDetailRowsMissingProductName(scopedRows)
-    if (missingProductNameRows.length) {
-      message.warning(t(
-        'containers.messages.createProductsMissingProductName',
-        '请填写商品名称后再创建新商品：{{items}}',
-        { items: missingProductNameRows.map((row) => row.label).join('、') },
-      ))
-      return
-    }
+    // 商品名称为空不在前端拦截：后端会用英文名称兜底；中英文名称都为空的行由后端单独跳过，
+    // 并在任务结果的「跳过明细」里列出货号/商品编码与原因，不影响同批其它行创建。
     const missingRetailPriceRows = findContainerDetailRowsMissingCreateProductRetailPrice(scopedRows)
     if (missingRetailPriceRows.length) {
       message.warning(t(

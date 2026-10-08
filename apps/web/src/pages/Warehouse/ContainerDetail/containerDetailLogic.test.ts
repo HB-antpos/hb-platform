@@ -53,7 +53,6 @@ import {
   moveContainerDetailColumnOrder,
   getContainerDetailRemoteQueryResetState,
   findContainerDetailRowsMissingCreateProductRetailPrice,
-  findContainerDetailRowsMissingProductName,
   buildContainerDetailTagStats,
   buildContainerDetailFloatRateUpdates,
   buildContainerDetailExportRow,
@@ -2410,19 +2409,6 @@ assertEqual(
   '创建新商品中文名提示在缺少货号和商品编码时应使用明细 GUID 定位行',
 )
 assertDeepEqual(
-  findContainerDetailRowsMissingProductName([
-    { id: 314, hguid: 'name-314', 是否新商品: true, 商品名称: '皮带', 商品信息: { 货号: 'HB308-030' } },
-    { id: 315, hguid: 'name-315', 是否新商品: true, 商品名称: 'belt', 商品信息: { 货号: 'HB308-031' } },
-    { id: 318, hguid: 'name-318', 是否新商品: true, 商品名称: '22-36,3PCS', 商品信息: { 货号: 'HB137-480' } },
-    { id: 316, hguid: 'name-316', 是否新商品: true, 商品名称: '   ', 商品信息: { 货号: 'HB308-032' } },
-    { id: 317, hguid: 'name-317', 是否新商品: false, 商品名称: 'belt', 商品信息: { 货号: 'HB308-033' } },
-  ]),
-  [
-    { hguid: 'name-316', label: 'HB308-032', productName: '' },
-  ],
-  '创建新商品前应只拦截新商品中商品名称为空的明细，非中文名称也应通过',
-)
-assertDeepEqual(
   findContainerDetailRowsMissingCreateProductRetailPrice([
     { id: 319, hguid: 'price-319', 是否新商品: true, 贴牌价格: 25, 商品信息: { 货号: 'HB137-480' } },
     { id: 320, hguid: 'price-320', 是否新商品: true, 贴牌价格: 0, 商品信息: { 货号: 'HB137-481' } },
@@ -3258,12 +3244,35 @@ assertEqual(
   true,
   '页面应调用匹配国内数据 helper，未勾选时按当前筛选结果全量处理',
 )
+// 创建新商品不再因商品名称为空在前端提前返回：中文名称为空由后端用英文名称兜底，
+// 中英文都为空的行由后端单独跳过并在任务结果里列出，不能拦住整批。
+const createNewProductsBodySource = pageSource.slice(
+  pageSource.indexOf('const createNewProducts = async () => {'),
+  pageSource.indexOf('const updateExistingPurchase = async () => {'),
+)
 assertEqual(
-  pageSource.includes('findContainerDetailRowsMissingProductName(scopedRows)') &&
-    pageSource.includes("'containers.messages.createProductsMissingProductName'") &&
-    pageSource.includes('missingProductNameRows.map((row) => row.label).join'),
+  createNewProductsBodySource.length > 0 &&
+    !createNewProductsBodySource.includes('findContainerDetailRowsMissingProductName') &&
+    !createNewProductsBodySource.includes('createProductsMissingProductName') &&
+    !createNewProductsBodySource.includes('missingProductNameRows') &&
+    !pageSource.includes('findContainerDetailRowsMissingProductName') &&
+    !pageSource.includes('createProductsMissingProductName'),
   true,
-  '创建新商品前应拦截商品名称为空的新商品，并在提示中带出可定位的货号或编码',
+  '创建新商品不应再因商品名称为空而在前端拦截或提前返回',
+)
+assertEqual(
+  createNewProductsBodySource.includes('findContainerDetailRowsMissingCreateProductRetailPrice(scopedRows)') &&
+    createNewProductsBodySource.includes("'containers.messages.createProductsMissingRetailPrice'") &&
+    createNewProductsBodySource.includes('missingRetailPriceRows.map((row) => row.label).join'),
+  true,
+  '创建新商品前仍应拦截零售价不大于 0 的新商品，并在提示中带出可定位的货号或编码',
+)
+assertEqual(
+  createNewProductsBodySource.includes('await createContainerProductCreationJob({') &&
+    createNewProductsBodySource.includes('showCreateProductsJobResult(finalJob)') &&
+    pageSource.includes("[item.productCode, item.itemNumber, item.reasonCode, item.message].filter(Boolean).join(' / ')"),
+  true,
+  '后端跳过的明细（如中英文名称均为空）应通过任务结果的跳过明细展示商品编码、货号和原因',
 )
 assertEqual(
   pageSource.includes('editingProductNameRowKey') &&
@@ -3886,7 +3895,6 @@ assertEqual(
     pageSource.includes('flushPendingDetailSaves') &&
     pageSource.includes('failedDetailSaveKeysRef.current.size > 0') &&
     pageSource.indexOf('blurActiveContainerDetailEditableCell()') < pageSource.indexOf('await flushPendingDetailSaves()') &&
-    pageSource.indexOf('await flushPendingDetailSaves()') < pageSource.indexOf('const missingProductNameRows = findContainerDetailRowsMissingProductName(scopedRows)') &&
     pageSource.indexOf('await flushPendingDetailSaves()') < pageSource.indexOf('const missingRetailPriceRows = findContainerDetailRowsMissingCreateProductRetailPrice(scopedRows)') &&
     pageSource.indexOf('await flushPendingDetailSaves()') < pageSource.indexOf('const job = await createContainerProductCreationJob({'),
   true,

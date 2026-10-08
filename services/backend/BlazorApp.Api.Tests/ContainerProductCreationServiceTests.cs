@@ -1937,6 +1937,202 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         Assert.Contains(result.Skipped, item => item.DetailHguid == "D-SET-CHILD" && item.ReasonCode == "MISSING_SET_RELATION");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ExecuteAsync_中文名称为空或纯空白且英文名称有值时用英文名称兜底创建(string? chineseName)
+    {
+        await InsertContainerDetailAsync("D-NAME-FB", "C-NAME-FB", "P-NAME-FB", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-NAME-FB", "HB-NAME-FB", chineseName, "Fallback Belt", 0);
+        List<CreateItemDto>? capturedItems = null;
+        var warehouseService = new Mock<IProductWarehouseReactService>();
+        warehouseService
+            .Setup(service => service.BatchCreateAsync(
+                It.IsAny<List<CreateItemDto>>(),
+                false,
+                It.IsAny<string?>(),
+                "ContainerSubmit",
+                "C-NAME-FB",
+                It.IsAny<Guid?>(),
+                It.IsAny<string?>()
+            ))
+            .Callback<List<CreateItemDto>, bool, string?, string, string?, Guid?, string?>(
+                (items, _, _, _, _, _, _) => capturedItems = items.ToList()
+            )
+            .ReturnsAsync(new BatchOperationResultDto { Success = true });
+
+        var result = await CreateService(warehouseService: warehouseService.Object).ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-name-fb",
+                ContainerGuid = "C-NAME-FB",
+                DetailHguids = new List<string> { "D-NAME-FB" },
+            }
+        );
+
+        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(0, result.SkippedCount);
+        Assert.Equal(0, result.FailedCount);
+        Assert.Contains(result.Created, item => item.ProductCode == "P-NAME-FB" && item.DetailHguid == "D-NAME-FB");
+        // 传给仓库建档的商品名称必须是英文名称兜底值，不能是货号或空串。
+        var createItem = Assert.Single(Assert.IsType<List<CreateItemDto>>(capturedItems));
+        Assert.Equal("Fallback Belt", createItem.ChineseName);
+        Assert.Equal("Fallback Belt", createItem.EnglishName);
+        Assert.NotEqual("HB-NAME-FB", createItem.ChineseName);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_中文有值时仍以中文名称建档不被英文名称覆盖()
+    {
+        await InsertContainerDetailAsync("D-NAME-CN", "C-NAME-CN", "P-NAME-CN", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-NAME-CN", "HB-NAME-CN", "中文皮带", "Chinese Belt", 0);
+        List<CreateItemDto>? capturedItems = null;
+        var warehouseService = new Mock<IProductWarehouseReactService>();
+        warehouseService
+            .Setup(service => service.BatchCreateAsync(
+                It.IsAny<List<CreateItemDto>>(),
+                false,
+                It.IsAny<string?>(),
+                "ContainerSubmit",
+                "C-NAME-CN",
+                It.IsAny<Guid?>(),
+                It.IsAny<string?>()
+            ))
+            .Callback<List<CreateItemDto>, bool, string?, string, string?, Guid?, string?>(
+                (items, _, _, _, _, _, _) => capturedItems = items.ToList()
+            )
+            .ReturnsAsync(new BatchOperationResultDto { Success = true });
+
+        var result = await CreateService(warehouseService: warehouseService.Object).ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-name-cn",
+                ContainerGuid = "C-NAME-CN",
+                DetailHguids = new List<string> { "D-NAME-CN" },
+            }
+        );
+
+        Assert.Equal(1, result.CreatedCount);
+        var createItem = Assert.Single(Assert.IsType<List<CreateItemDto>>(capturedItems));
+        Assert.Equal("中文皮带", createItem.ChineseName);
+        Assert.Equal("Chinese Belt", createItem.EnglishName);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_中文与英文名称均为空时只跳过该行且其他行照常创建()
+    {
+        await InsertActiveStoreAsync("S001");
+        // 正常行、中文空英文有、中文纯空白英文有：都应创建成功。
+        await InsertContainerDetailAsync("D-MIX-OK", "C-MIX", "P-MIX-OK", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-MIX-OK", "HB-MIX-OK", "正常商品", "Normal Product", 0);
+        await InsertContainerDetailAsync("D-MIX-FB", "C-MIX", "P-MIX-FB", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-MIX-FB", "HB-MIX-FB", null, "English Only", 0);
+        await InsertContainerDetailAsync("D-MIX-BLANK-CN", "C-MIX", "P-MIX-BLANK-CN", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-MIX-BLANK-CN", "HB-MIX-BLANK-CN", "   ", "Blank Chinese", 0);
+        // 中文、英文都为空（含纯空白）：只跳过这两行，不得拦住整批。
+        await InsertContainerDetailAsync("D-MIX-NONE", "C-MIX", "P-MIX-NONE", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-MIX-NONE", "HB-MIX-NONE", null, null, 0);
+        await InsertContainerDetailAsync("D-MIX-BLANK-ALL", "C-MIX", "P-MIX-BLANK-ALL", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-MIX-BLANK-ALL", "HB-MIX-BLANK-ALL", "  ", "  ", 0);
+        // 中文有英文空：沿用原口径，仍按 MISSING_ENGLISH_NAME 跳过。
+        await InsertContainerDetailAsync("D-MIX-NO-EN", "C-MIX", "P-MIX-NO-EN", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-MIX-NO-EN", "HB-MIX-NO-EN", "只有中文", null, 0);
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-mix",
+                ContainerGuid = "C-MIX",
+                DetailHguids = new List<string>
+                {
+                    "D-MIX-OK",
+                    "D-MIX-FB",
+                    "D-MIX-BLANK-CN",
+                    "D-MIX-NONE",
+                    "D-MIX-BLANK-ALL",
+                    "D-MIX-NO-EN",
+                },
+            }
+        );
+
+        Assert.Equal(3, result.CreatedCount);
+        Assert.Equal(3, result.SkippedCount);
+        Assert.Equal(0, result.FailedCount);
+        Assert.Empty(result.Errors);
+        Assert.Contains(result.Created, item => item.DetailHguid == "D-MIX-OK");
+        Assert.Contains(result.Created, item => item.DetailHguid == "D-MIX-FB");
+        Assert.Contains(result.Created, item => item.DetailHguid == "D-MIX-BLANK-CN");
+
+        // 两个名称都空的行：结果里要带货号与商品编码，原因码沿用 MISSING_CHINESE_NAME，文案说明两个名称均为空。
+        const string bothEmptyMessage = "商品名称与英文名称均为空，已跳过";
+        Assert.Contains(result.Skipped, item =>
+            item.DetailHguid == "D-MIX-NONE"
+            && item.ProductCode == "P-MIX-NONE"
+            && item.ItemNumber == "HB-MIX-NONE"
+            && item.ReasonCode == "MISSING_CHINESE_NAME"
+            && item.Message == bothEmptyMessage
+        );
+        Assert.Contains(result.Skipped, item =>
+            item.DetailHguid == "D-MIX-BLANK-ALL"
+            && item.ProductCode == "P-MIX-BLANK-ALL"
+            && item.ItemNumber == "HB-MIX-BLANK-ALL"
+            && item.ReasonCode == "MISSING_CHINESE_NAME"
+            && item.Message == bothEmptyMessage
+        );
+        Assert.Contains(result.Skipped, item =>
+            item.DetailHguid == "D-MIX-NO-EN"
+            && item.ReasonCode == "MISSING_ENGLISH_NAME"
+            && item.Message == "英文名称不能为空"
+        );
+
+        // 被跳过的行不得往商品主档、仓库商品、分店价写任何记录（尤其不能拿货号/编码当临时名称）。
+        var createdCodes = new[] { "P-MIX-OK", "P-MIX-FB", "P-MIX-BLANK-CN" };
+        var products = await _db.Queryable<Product>().ToListAsync();
+        Assert.Equal(createdCodes.OrderBy(code => code), products.Select(p => p.ProductCode!).OrderBy(code => code));
+        Assert.DoesNotContain(products, p => p.ProductName == "HB-MIX-NONE" || p.ProductName == "HB-MIX-BLANK-ALL");
+        Assert.Equal(3, await _db.Queryable<WarehouseProduct>().CountAsync());
+        Assert.Equal(3, await _db.Queryable<StoreRetailPrice>().CountAsync());
+        // 国内商品源数据不被改写：中文名称仍为空。
+        var domesticNone = await _db.Queryable<DomesticProduct>().SingleAsync(p => p.ProductCode == "P-MIX-NONE");
+        Assert.Null(domesticNone.ProductName);
+        var domesticFallback = await _db.Queryable<DomesticProduct>().SingleAsync(p => p.ProductCode == "P-MIX-FB");
+        Assert.Null(domesticFallback.ProductName);
+        // 兜底建档的商品主档名称就是英文名称。
+        var fallbackProduct = products.Single(p => p.ProductCode == "P-MIX-FB");
+        Assert.Equal("English Only", fallbackProduct.ProductName);
+        Assert.Equal("English Only", fallbackProduct.EnglishName);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SubmitContainer_中文名称为空时仍按原口径阻止提交不启用英文兜底()
+    {
+        // 英文兜底只属于「创建新商品」任务；整柜提交的口径不变，名称缺失仍作为阻断错误、货柜不推进完成。
+        await InsertContainerAsync("C-SUBMIT-NAME", status: 1);
+        await InsertActiveStoreAsync("S001");
+        await InsertContainerDetailAsync("D-SUBMIT-NAME", "C-SUBMIT-NAME", "P-SUBMIT-NAME", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-SUBMIT-NAME", "HB-SUBMIT-NAME", null, "English Only", 0);
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "submit-container:C-SUBMIT-NAME",
+                ContainerGuid = "C-SUBMIT-NAME",
+                SubmitContainer = true,
+            }
+        );
+
+        Assert.False(result.ContainerCompleted);
+        Assert.Contains(result.Errors, item =>
+            item.DetailHguid == "D-SUBMIT-NAME"
+            && item.ReasonCode == "MISSING_CHINESE_NAME"
+            && item.Message == "商品名称不能为空"
+        );
+        Assert.Null(await _db.Queryable<Product>().FirstAsync(item => item.ProductCode == "P-SUBMIT-NAME"));
+        var container = await _db.Queryable<Container>().SingleAsync(item => item.ContainerCode == "C-SUBMIT-NAME");
+        Assert.Equal(1, container.Status);
+    }
+
     [Fact]
     public async Task ExecuteAsync_UsesChineseNameWrittenByBatchUpdateDetails()
     {
@@ -2563,6 +2759,146 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         Assert.Equal(1, executor.CallCount);
     }
 
+    [Fact]
+    public async Task JobService_创建新商品任务成功但有跳过明细时再次提交应重新执行()
+    {
+        // 第一次执行成功但有跳过明细（如商品名称与英文名称均为空）：用户补全数据后再点「创建新商品」，
+        // 同一货柜 + 同一组明细在保留期内必须真的重跑，不能拿到旧的“已跳过”结果。
+        var executor = new SequencedContainerProductCreationExecutor(
+            failedCountByCall: new[] { 0, 0, 0 },
+            skippedCountByCall: new[] { 1, 0, 0 }
+        );
+        var jobService = CreateJobService(executor);
+        var request = new ContainerProductCreationJobRequestDto
+        {
+            OperationId = "op-skipped",
+            ContainerGuid = "C001",
+            DetailHguids = new List<string> { "D-1", "D-2" },
+            SubmitContainer = false,
+        };
+
+        var first = await jobService.StartJobAsync("user-1", request);
+        var firstDone = await WaitForJobAsync(jobService, "user-1", first.JobId);
+        Assert.Equal(ContainerProductCreationJobStatusConstants.Succeeded, firstDone.Status);
+        Assert.Equal(1, firstDone.Result.SkippedCount);
+
+        var second = await jobService.StartJobAsync("user-1", request);
+        var secondDone = await WaitForJobAsync(jobService, "user-1", second.JobId);
+
+        Assert.NotEqual(first.JobId, second.JobId);
+        Assert.False(second.IsDuplicateRequest);
+        Assert.Equal(ContainerProductCreationJobStatusConstants.Succeeded, secondDone.Status);
+        Assert.Equal(0, secondDone.Result.SkippedCount);
+        Assert.Equal(2, executor.CallCount);
+
+        // 第二次已无跳过明细：之后再次提交回到“成功任务复用”的原口径，不再重复执行。
+        var third = await jobService.StartJobAsync("user-1", request);
+        Assert.Equal(second.JobId, third.JobId);
+        Assert.True(third.IsDuplicateRequest);
+        Assert.Equal(2, executor.CallCount);
+    }
+
+    [Fact]
+    public async Task JobService_创建新商品任务成功且无跳过明细时再次提交仍复用结果()
+    {
+        var executor = new SequencedContainerProductCreationExecutor(
+            failedCountByCall: new[] { 0, 0 },
+            skippedCountByCall: new[] { 0, 0 }
+        );
+        var jobService = CreateJobService(executor);
+        var request = new ContainerProductCreationJobRequestDto
+        {
+            OperationId = "op-no-skip",
+            ContainerGuid = "C001",
+            DetailHguids = new List<string> { "D-1" },
+            SubmitContainer = false,
+        };
+
+        var first = await jobService.StartJobAsync("user-1", request);
+        await WaitForJobAsync(jobService, "user-1", first.JobId);
+        var second = await jobService.StartJobAsync("user-1", request);
+
+        Assert.Equal(first.JobId, second.JobId);
+        Assert.True(second.IsDuplicateRequest);
+        Assert.Equal(1, executor.CallCount);
+    }
+
+    [Fact]
+    public async Task JobService_整柜提交成功即使有跳过明细再次提交仍复用结果()
+    {
+        // 整柜提交可能已推进货柜状态，重跑有风险，所以“有跳过明细不复用”的规则只适用于创建新商品任务。
+        var executor = new SequencedContainerProductCreationExecutor(
+            failedCountByCall: new[] { 0, 0 },
+            skippedCountByCall: new[] { 1, 0 }
+        );
+        var jobService = CreateJobService(executor);
+        var request = new ContainerProductCreationJobRequestDto
+        {
+            OperationId = "op-submit-skipped",
+            ContainerGuid = "C001",
+            SubmitContainer = true,
+        };
+
+        var first = await jobService.StartJobAsync("user-1", request);
+        var firstDone = await WaitForJobAsync(jobService, "user-1", first.JobId);
+        Assert.Equal(ContainerProductCreationJobStatusConstants.Succeeded, firstDone.Status);
+        Assert.Equal(1, firstDone.Result.SkippedCount);
+
+        var second = await jobService.StartJobAsync("user-1", request);
+
+        Assert.Equal(first.JobId, second.JobId);
+        Assert.True(second.IsDuplicateRequest);
+        Assert.Equal(1, executor.CallCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_补全名称后重跑同一组明细时已建档行按已存在跳过且不重复建档()
+    {
+        // 重跑安全性证据：第一次有一行名称全空被跳过；用户补全名称后用同一组明细再执行一次，
+        // 已建档的行必须按 DUPLICATE_PRODUCT_CODE 跳过，只补建刚修正的行，不产生重复数据。
+        await InsertActiveStoreAsync("S001");
+        await InsertContainerDetailAsync("D-RERUN-OK", "C-RERUN", "P-RERUN-OK", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-RERUN-OK", "HB-RERUN-OK", "正常商品", "Normal Product", 0);
+        await InsertContainerDetailAsync("D-RERUN-FIX", "C-RERUN", "P-RERUN-FIX", "普通商品", 1.2m, 3.4m);
+        await InsertDomesticProductAsync("P-RERUN-FIX", "HB-RERUN-FIX", null, null, 0);
+        var request = new ContainerProductCreationJobRequestDto
+        {
+            OperationId = "op-rerun",
+            ContainerGuid = "C-RERUN",
+            DetailHguids = new List<string> { "D-RERUN-OK", "D-RERUN-FIX" },
+        };
+
+        var first = await CreateService().ExecuteAsync(request);
+
+        Assert.Equal(1, first.CreatedCount);
+        Assert.Equal(1, first.SkippedCount);
+        Assert.Contains(first.Skipped, item =>
+            item.DetailHguid == "D-RERUN-FIX" && item.ReasonCode == "MISSING_CHINESE_NAME"
+        );
+        Assert.Equal(1, await _db.Queryable<Product>().CountAsync());
+
+        // 用户补全了英文名称（中文名称仍为空，创建时用英文名称兜底）。
+        await _db.Updateable<DomesticProduct>()
+            .SetColumns(p => p.EnglishProductName == "Fixed English Name")
+            .Where(p => p.ProductCode == "P-RERUN-FIX")
+            .ExecuteCommandAsync();
+
+        var second = await CreateService().ExecuteAsync(request);
+
+        Assert.Equal(1, second.CreatedCount);
+        Assert.Equal(1, second.SkippedCount);
+        Assert.Equal(0, second.FailedCount);
+        Assert.Contains(second.Created, item => item.DetailHguid == "D-RERUN-FIX");
+        Assert.Contains(second.Skipped, item =>
+            item.DetailHguid == "D-RERUN-OK" && item.ReasonCode == "DUPLICATE_PRODUCT_CODE"
+        );
+        // 每个商品编码在三张表里各只有一行，没有重复建档或写坏。
+        Assert.Equal(2, await _db.Queryable<Product>().CountAsync());
+        Assert.Equal(1, await _db.Queryable<Product>().Where(p => p.ProductCode == "P-RERUN-OK").CountAsync());
+        Assert.Equal(2, await _db.Queryable<WarehouseProduct>().CountAsync());
+        Assert.Equal(2, await _db.Queryable<StoreRetailPrice>().CountAsync());
+    }
+
     private static ContainerProductCreationJobService CreateJobService(IContainerProductCreationExecutorService executor)
     {
         var services = new ServiceCollection();
@@ -2599,11 +2935,14 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
     private sealed class SequencedContainerProductCreationExecutor : IContainerProductCreationExecutorService
     {
         private readonly int[] _failedCountByCall;
+        private readonly int[] _skippedCountByCall;
         private int _callCount;
 
-        public SequencedContainerProductCreationExecutor(int[] failedCountByCall)
+        // skippedCountByCall 为空时每次调用都不带跳过明细（沿用原有用例的行为）。
+        public SequencedContainerProductCreationExecutor(int[] failedCountByCall, int[]? skippedCountByCall = null)
         {
             _failedCountByCall = failedCountByCall;
+            _skippedCountByCall = skippedCountByCall ?? new[] { 0 };
         }
 
         public int CallCount => Volatile.Read(ref _callCount);
@@ -2628,7 +2967,23 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         {
             var call = Interlocked.Increment(ref _callCount) - 1;
             var failed = _failedCountByCall[Math.Min(call, _failedCountByCall.Length - 1)];
-            return Task.FromResult(new ContainerProductCreationResultDto { FailedCount = failed });
+            var skipped = _skippedCountByCall[Math.Min(call, _skippedCountByCall.Length - 1)];
+            var result = new ContainerProductCreationResultDto
+            {
+                FailedCount = failed,
+                SkippedCount = skipped,
+            };
+            for (var i = 0; i < skipped; i++)
+            {
+                result.Skipped.Add(new ContainerProductCreationResultItemDto
+                {
+                    DetailHguid = $"D-SKIPPED-{i + 1}",
+                    ReasonCode = "MISSING_CHINESE_NAME",
+                    Message = "商品名称与英文名称均为空，已跳过",
+                });
+            }
+
+            return Task.FromResult(result);
         }
     }
 

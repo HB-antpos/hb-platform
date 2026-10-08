@@ -515,7 +515,6 @@
       "hqTranslationFailed": "翻译 HQ 数据失败",
       "hqTranslationResultSummary": "候选 {{candidates}} 条，已翻译 {{translated}} 条，跳过 {{skipped}} 条，失败 {{failed}} 条",
       "noEligibleNewProducts": "没有符合条件的新商品",
-      "createProductsMissingProductName": "请填写商品名称后再创建新商品：{{items}}",
       "createProductsMissingRetailPrice": "请填写大于 0 的零售价后再创建新商品：{{items}}",
       "newProductsCreated": "已创建 {{count}} 个新商品",
       "noExistingProductsToUpdate": "没有可更新的已存在商品",

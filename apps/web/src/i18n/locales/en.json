@@ -515,7 +515,6 @@
       "hqTranslationFailed": "Failed to translate HQ data",
       "hqTranslationResultSummary": "{{candidates}} candidates, {{translated}} translated, {{skipped}} skipped, {{failed}} failed",
       "noEligibleNewProducts": "No eligible new products",
-      "createProductsMissingProductName": "Enter a product name before creating new products: {{items}}",
       "createProductsMissingRetailPrice": "Enter a retail price greater than 0 before creating new products: {{items}}",
       "newProductsCreated": "Created {{count}} new products",
       "noExistingProductsToUpdate": "No existing products to update",
