@@ -107,7 +107,7 @@ interface ContainerColumnFilters {
 interface LoadDataOptions {
   dateType?: string
   dateRange?: RangeValue
-  itemNumberFilter?: string
+  productKeyword?: string
   columnFilters?: ContainerColumnFilters
   statusTab?: ContainerStatusTabKey
 }
@@ -120,7 +120,7 @@ interface PendingFirstPageRequest {
 interface AppliedContainerFilters {
   dateType: string
   dateRange: RangeValue
-  itemNumberFilter: string
+  productKeyword: string
   columnFilters: ContainerColumnFilters
 }
 
@@ -207,7 +207,7 @@ function buildContainerListQuery(filters: AppliedContainerFilters): ContainerQue
     dateType: filters.dateType,
     startDate: filters.dateRange?.[0]?.format('YYYY-MM-DD'),
     endDate: filters.dateRange?.[1]?.format('YYYY-MM-DD'),
-    itemNumberFilter: filters.itemNumberFilter || undefined,
+    productKeyword: filters.productKeyword || undefined,
     ...filters.columnFilters,
   }
 }
@@ -332,7 +332,7 @@ export default function ContainersPage() {
   const [dateRange, setDateRange] = useState<RangeValue>(null)
   // 输入框草稿与已生效货号分开：输入时防抖 300ms 再生效，计数请求只跟随已生效条件。
   const [keywordDraft, setKeywordDraft] = useState('')
-  const [itemNumberFilter, setItemNumberFilter] = useState('')
+  const [productKeyword, setProductKeyword] = useState('')
   const [columnFilters, setColumnFilters] = useState<ContainerColumnFilters>({})
   const [statusTab, setStatusTab] = useState<ContainerStatusTabKey>(DEFAULT_CONTAINER_STATUS_TAB)
   const [tabCounts, setTabCounts] = useState<Record<ContainerStatusTabKey, number> | null>(null)
@@ -368,7 +368,7 @@ export default function ContainersPage() {
 
     const activeDateType = options.dateType ?? dateType
     const activeDateRange = Object.prototype.hasOwnProperty.call(options, 'dateRange') ? options.dateRange : dateRange
-    const activeItemNumberFilter = options.itemNumberFilter ?? itemNumberFilter
+    const activeProductKeyword = options.productKeyword ?? productKeyword
     const activeColumnFilters = options.columnFilters ?? columnFilters
     const activeStatusTab = options.statusTab ?? statusTab
 
@@ -379,7 +379,7 @@ export default function ContainersPage() {
           ...buildContainerListQuery({
             dateType: activeDateType,
             dateRange: activeDateRange ?? null,
-            itemNumberFilter: activeItemNumberFilter,
+            productKeyword: activeProductKeyword,
             columnFilters: activeColumnFilters,
           }),
           // 状态由页签决定：「未完成」= 已装柜 + 运输中，「全部」不过滤。
@@ -452,9 +452,9 @@ export default function ContainersPage() {
   const applyKeyword = (value: string) => {
     window.clearTimeout(keywordTimerRef.current)
     const nextKeyword = value.trim()
-    if (nextKeyword === itemNumberFilter) return
-    setItemNumberFilter(nextKeyword)
-    void requestFirstPage({ itemNumberFilter: nextKeyword })
+    if (nextKeyword === productKeyword) return
+    setProductKeyword(nextKeyword)
+    void requestFirstPage({ productKeyword: nextKeyword })
   }
 
   useLayoutEffect(() => {
@@ -509,7 +509,7 @@ export default function ContainersPage() {
 
   // 计数请求：每个状态发一次 pageSize=1 的请求取 total（带同样的其他筛选条件），
   // 只采纳最新一轮结果；任一失败则不显示计数，页签照常可用。
-  const countsQuery = buildContainerListQuery({ dateType, dateRange, itemNumberFilter, columnFilters })
+  const countsQuery = buildContainerListQuery({ dateType, dateRange, productKeyword, columnFilters })
   // 没有日期区间时日期类型只影响排序，不影响计数，避免切换日期类型时白发计数请求。
   const countsQueryKey = JSON.stringify({ ...countsQuery, dateType: countsQuery.startDate ? countsQuery.dateType : undefined })
 
@@ -699,12 +699,12 @@ export default function ContainersPage() {
   const clearAllFilters = () => {
     window.clearTimeout(keywordTimerRef.current)
     setKeywordDraft('')
-    setItemNumberFilter('')
+    setProductKeyword('')
     setDateRange(null)
     setColumnFilters({})
     setMoreDraft({})
     // 清空全部同时清掉「更多筛选」里的原列头条件，避免界面已清空但请求仍带旧条件。
-    void requestFirstPage({ dateRange: null, itemNumberFilter: '', columnFilters: {} })
+    void requestFirstPage({ dateRange: null, productKeyword: '', columnFilters: {} })
   }
 
   const formatRangeValue = (min?: string | number, max?: string | number) => {
@@ -716,11 +716,11 @@ export default function ContainersPage() {
   }
 
   const activeFilterItems: ActiveFilterItem[] = []
-  if (itemNumberFilter) {
+  if (productKeyword) {
     activeFilterItems.push({
-      key: 'itemNumber',
-      label: t('warehouseUi.containers.chipItemNumber'),
-      value: itemNumberFilter,
+      key: 'productKeyword',
+      label: t('warehouseUi.containers.chipProductKeyword'),
+      value: productKeyword,
       source: 'toolbar',
       onRemove: () => {
         setKeywordDraft('')

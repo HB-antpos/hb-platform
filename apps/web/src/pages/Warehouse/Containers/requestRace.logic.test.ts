@@ -399,7 +399,7 @@ async function main() {
     // 但仍必须统一走 first-page 入口，不能绕过竞态守卫直接请求。
     assert(pageSource.includes('void requestFirstPage({ columnFilters: nextFilters })'), '更多筛选未统一走 first-page 入口')
     const applyKeywordSection = extractSection(pageSource, 'const applyKeyword = (value: string) => {', 'useLayoutEffect(() => {', 'containers applyKeyword')
-    assert(applyKeywordSection.includes('void requestFirstPage({ itemNumberFilter: nextKeyword })'), '关键字未统一走 first-page 入口')
+    assert(applyKeywordSection.includes('void requestFirstPage({ productKeyword: nextKeyword })'), '关键字未统一走 first-page 入口')
     assert(pageSource.includes('onPressEnter={() => applyKeyword(keywordDraft)}'), '回车查询未走关键字入口')
     assert(
       pageSource.includes('window.setTimeout(() => latestApplyKeywordRef.current(value), 300)'),
@@ -410,7 +410,7 @@ async function main() {
     assert(pageSource.includes('void requestFirstPage({ dateType: value })'), '日期类型未统一走 first-page 入口')
     assert(pageSource.includes('void requestFirstPage({ dateRange: value })'), '日期区间未统一走 first-page 入口')
     assert(
-      pageSource.includes("void requestFirstPage({ dateRange: null, itemNumberFilter: '', columnFilters: {} })"),
+      pageSource.includes("void requestFirstPage({ dateRange: null, productKeyword: '', columnFilters: {} })"),
       '清空全部未统一走 first-page 入口',
     )
     assert(!pageSource.includes('loadData(1, pageSize'), '页面仍存在绕过单一入口的第一页请求')

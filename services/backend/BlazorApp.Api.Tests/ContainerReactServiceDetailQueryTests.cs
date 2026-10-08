@@ -256,6 +256,52 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
         Assert.Equal("CSGU7035442", Assert.Single(result.Containers).货柜编号);
     }
 
+    [Theory]
+    [InlineData("KW101", "C-KW-1")] // 货号
+    [InlineData("商品 KW2", "C-KW-2")] // 商品名称
+    [InlineData("Product KW101", "C-KW-1")] // 国内英文名
+    [InlineData("9300000000KW2", "C-KW-2")] // 条码
+    [InlineData("本地商品 KW2", "C-KW-2")] // 本地主档名称（明细页英文名列）
+    public async Task GetContainersAsync_商品关键字应按货号名称条码匹配柜内明细(string keyword, string expectedContainerCode)
+    {
+        await SeedContainerAsync("C-KW-1", "KWAU0000001", status: 1);
+        await SeedContainerAsync("C-KW-2", "KWAU0000002", status: 1);
+        await SeedContainerAsync("C-KW-3", "KWAU0000003", status: 1);
+        await SeedDetailAsync("D-KW-1", "C-KW-1", "P-KW-1", "KW101", localExists: false);
+        // 同柜两行都命中「KW2」前缀，列表仍只应出现一次该货柜
+        await SeedDetailAsync("D-KW-2A", "C-KW-2", "P-KW-2A", "KW201");
+        await SeedDetailAsync("D-KW-2B", "C-KW-2", "P-KW-2B", "KW202");
+        await SeedDetailAsync("D-KW-3", "C-KW-3", "P-KW-3", "ZZ301");
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest
+            {
+                Page = 1,
+                PageSize = 20,
+                ProductKeyword = $"  {keyword}  ",
+            }
+        );
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal(expectedContainerCode, Assert.Single(result.Containers).HGUID);
+    }
+
+    [Fact]
+    public async Task GetContainersAsync_商品关键字无命中应返回空列表()
+    {
+        await SeedContainerAsync("C-KW-NONE", "KWAU0000009", status: 1);
+        await SeedDetailAsync("D-KW-NONE", "C-KW-NONE", "P-KW-NONE", "KW901");
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest { Page = 1, PageSize = 20, ProductKeyword = "不存在的商品" }
+        );
+
+        Assert.Equal(0, result.TotalCount);
+        Assert.Empty(result.Containers);
+    }
+
     [Fact]
     public async Task GetContainersAsync_实际到货日期结束日应包含整天()
     {

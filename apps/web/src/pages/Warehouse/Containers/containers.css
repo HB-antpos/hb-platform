@@ -213,7 +213,8 @@ a.wh-containers-chip:focus-visible {
 }
 
 .wh-containers-search {
-  width: 260px;
+  /* 占位文案含「货号 / 名称 / 条码」，260px 时中文会被截断 */
+  width: 300px;
   max-width: 100%;
 }
 
