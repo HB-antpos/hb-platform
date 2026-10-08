@@ -1,0 +1,12 @@
+{
+  "posAdmin": {
+    "advertisements": {
+      "adTitle": "广告标题",
+      "brandFilter": "按品牌",
+      "allBrands": "全部品牌",
+      "unbrandedStores": "未设置品牌",
+      "selectAllBrandStores": "全选「{{brand}}」分店（{{count}}）",
+      "selectAllStoresWithCount": "全选分店（{{count}}）"
+    }
+  }
+}

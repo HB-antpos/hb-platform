@@ -1,0 +1,12 @@
+{
+  "posAdmin": {
+    "advertisements": {
+      "adTitle": "Title",
+      "brandFilter": "Brand",
+      "allBrands": "All brands",
+      "unbrandedStores": "No brand",
+      "selectAllBrandStores": "Select all {{brand}} stores ({{count}})",
+      "selectAllStoresWithCount": "Select all stores ({{count}})"
+    }
+  }
+}

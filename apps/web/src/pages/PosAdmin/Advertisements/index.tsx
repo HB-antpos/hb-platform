@@ -18,6 +18,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Segmented,
   Select,
   Space,
   Switch,
@@ -44,7 +45,12 @@ import {
   updateAdvertisement,
   uploadAdvertisementFile,
 } from '../../../services/advertisementService'
-import { getActiveStores, type StoreOption } from '../../../services/storeService'
+import {
+  getActiveStoresWithBrand,
+  type BrandedStoreOption,
+  type StoreOption,
+} from '../../../services/storeService'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { useAuthStore } from '../../../store/auth'
 import type {
   AdvertisementDetailDto,
@@ -57,6 +63,21 @@ import {
 } from '../../../utils/latestRequestGuard'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import { getAdvertisementStoreTagLabels } from './storeTagDisplay'
+import {
+  UNBRANDED_STORE_KEY,
+  applyScopeSelection,
+  buildStoreBrandGroups,
+  filterStoresByBrand,
+  getScopeSelectionState,
+} from './storeBrandFilter'
+import advertisementsMessagesEn from './advertisementsMessages.en.json'
+import advertisementsMessagesZh from './advertisementsMessages.zh.json'
+
+// 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
+registerPageMessages({ zh: advertisementsMessagesZh, en: advertisementsMessagesEn })
+
+/** 品牌筛选里「全部品牌」的取值；品牌键都是小写品牌名或 UNBRANDED_STORE_KEY，不会与之冲突。 */
+const ALL_STORE_BRANDS = '__all__'
 
 type AdvertisementRow = AdvertisementListDto & { key: string }
 
@@ -163,7 +184,9 @@ export default function AdvertisementsPage() {
   const [pageSize, setPageSize] = useState(20)
   const [sortField, setSortField] = useState<string | undefined>('sortOrder')
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | undefined>('ascend')
-  const [storeOptions, setStoreOptions] = useState<StoreOption[]>([])
+  const [storeOptions, setStoreOptions] = useState<BrandedStoreOption[]>([])
+  // 编辑弹窗里分店范围的品牌筛选；null 表示全部品牌。只影响下拉可选项与全选范围，不改已选分店。
+  const [storeBrandKey, setStoreBrandKey] = useState<string | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -182,7 +205,21 @@ export default function AdvertisementsPage() {
   const currentOriginalFileName = Form.useWatch('originalFileName', editorForm)
   const currentContentType = Form.useWatch('contentType', editorForm)
   const currentFileSize = Form.useWatch('fileSize', editorForm)
-  const allStoresSelected = storeOptions.length > 0 && selectedStores.length === storeOptions.length
+  const storeBrandGroups = useMemo(() => buildStoreBrandGroups(storeOptions), [storeOptions])
+  const brandFilteredStoreOptions = useMemo(
+    () => filterStoresByBrand(storeOptions, storeBrandKey),
+    [storeOptions, storeBrandKey],
+  )
+  const activeStoreBrandGroup = storeBrandGroups.find((group) => group.key === storeBrandKey)
+  const storeScopeSelection = getScopeSelectionState(
+    selectedStores,
+    brandFilteredStoreOptions.map((item) => item.value),
+  )
+  // 下拉只列出当前品牌的分店，范围外已选的分店仍要显示店名而不是分店代码。
+  const storeLabelByCode = useMemo(
+    () => new Map(storeOptions.map((item) => [item.value, item.label])),
+    [storeOptions],
+  )
 
   const mediaTypeOptions = useMemo(
     () => [
@@ -194,7 +231,7 @@ export default function AdvertisementsPage() {
 
   const loadStoreOptions = async () => {
     try {
-      const stores = await getActiveStores()
+      const stores = await getActiveStoresWithBrand()
       setStoreOptions(stores)
     } catch (error) {
       console.error(t('posAdmin.advertisements.loadStoresFailed'), error)
@@ -277,6 +314,7 @@ export default function AdvertisementsPage() {
 
   const resetEditor = () => {
     setEditingId(null)
+    setStoreBrandKey(null)
     editorForm.resetFields()
     editorForm.setFieldsValue({
       mediaType: 'Image',
@@ -303,6 +341,7 @@ export default function AdvertisementsPage() {
     try {
       const detail: AdvertisementDetailDto = await getAdvertisementById(id)
       setEditingId(id)
+      setStoreBrandKey(null)
       editorForm.setFieldsValue({
         title: detail.title,
         description: detail.description,
@@ -463,7 +502,7 @@ export default function AdvertisementsPage() {
       render: (_, record) => renderMediaThumb(record),
     },
     {
-      title: t('posAdmin.advertisements.title'),
+      title: t('posAdmin.advertisements.adTitle'),
       dataIndex: 'title',
       key: 'title',
       sorter: true,
@@ -673,7 +712,7 @@ export default function AdvertisementsPage() {
           <Space style={{ width: '100%' }} wrap>
             <Form.Item
               name="title"
-              label={t('posAdmin.advertisements.title')}
+              label={t('posAdmin.advertisements.adTitle')}
               rules={[{ required: true, message: t('posAdmin.advertisements.titleRequired') }]}
               style={{ minWidth: 260, flex: 1 }}
             >
@@ -716,15 +755,50 @@ export default function AdvertisementsPage() {
             required
           >
             <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              {storeBrandGroups.length > 1 && (
+                <Space size={8} wrap>
+                  <Typography.Text type="secondary">{t('posAdmin.advertisements.brandFilter')}</Typography.Text>
+                  <Segmented
+                    size="small"
+                    aria-label={t('posAdmin.advertisements.brandFilter')}
+                    value={storeBrandKey ?? ALL_STORE_BRANDS}
+                    onChange={(value) => setStoreBrandKey(value === ALL_STORE_BRANDS ? null : String(value))}
+                    options={[
+                      {
+                        value: ALL_STORE_BRANDS,
+                        label: `${t('posAdmin.advertisements.allBrands')} · ${storeOptions.length}`,
+                      },
+                      ...storeBrandGroups.map((group) => ({
+                        value: group.key,
+                        label: `${group.brandName ?? t('posAdmin.advertisements.unbrandedStores')} · ${group.count}`,
+                      })),
+                    ]}
+                  />
+                </Space>
+              )}
               <Checkbox
-                checked={allStoresSelected}
+                checked={storeScopeSelection.checked}
+                indeterminate={storeScopeSelection.indeterminate}
+                disabled={brandFilteredStoreOptions.length === 0}
                 onChange={(event) =>
                   editorForm.setFieldsValue({
-                    stores: event.target.checked ? storeOptions.map((item) => item.value) : [],
+                    stores: applyScopeSelection(
+                      editorForm.getFieldValue('stores') ?? [],
+                      brandFilteredStoreOptions.map((item) => item.value),
+                      event.target.checked,
+                    ),
                   })
                 }
               >
-                {t('posAdmin.advertisements.selectAllStores')}
+                {activeStoreBrandGroup
+                  ? t('posAdmin.advertisements.selectAllBrandStores', {
+                      brand:
+                        activeStoreBrandGroup.key === UNBRANDED_STORE_KEY
+                          ? t('posAdmin.advertisements.unbrandedStores')
+                          : activeStoreBrandGroup.brandName,
+                      count: activeStoreBrandGroup.count,
+                    })
+                  : t('posAdmin.advertisements.selectAllStoresWithCount', { count: storeOptions.length })}
               </Checkbox>
               <Form.Item
                 name="stores"
@@ -736,7 +810,8 @@ export default function AdvertisementsPage() {
                   allowClear
                   showSearch
                   optionFilterProp="label"
-                  options={storeOptions}
+                  options={brandFilteredStoreOptions}
+                  labelRender={(option) => storeLabelByCode.get(String(option.value)) ?? option.label}
                   placeholder={t('posAdmin.advertisements.storesPlaceholder')}
                 />
               </Form.Item>

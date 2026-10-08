@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// 分店管理 / 员工个人信息维护 / 分店进货单（列表与明细）/ 设备管理 / 支付终端配置等页面的文案被拆成两处：既有键在全局 zh.json / en.json，
+// 分店管理 / 员工个人信息维护 / 分店进货单（列表与明细）/ 设备管理 / 支付终端配置 / 广告管理等页面的文案被拆成两处：既有键在全局 zh.json / en.json，
 // 重设计新增的键在页面级消息文件里（随页面懒加载，不占首屏 i18n 包）。
 // 拆开后键名写错不会有任何报错，界面会直接显示原始键名，所以在这里做静态核对。
 
@@ -128,6 +128,17 @@ const pages = [
     },
     registerImport: "from './paymentTerminalSettingsMessages.zh.json'",
     registerSource: 'src/pages/System/PaymentTerminalSettings/index.tsx',
+  },
+  {
+    name: '广告管理',
+    keyPattern: /['"`](posAdmin\.advertisements\.[A-Za-z0-9_.]+)['"`]/g,
+    sources: ['src/pages/PosAdmin/Advertisements/index.tsx'],
+    messages: {
+      zh: 'src/pages/PosAdmin/Advertisements/advertisementsMessages.zh.json',
+      en: 'src/pages/PosAdmin/Advertisements/advertisementsMessages.en.json',
+    },
+    registerImport: "from './advertisementsMessages.zh.json'",
+    registerSource: 'src/pages/PosAdmin/Advertisements/index.tsx',
   },
 ]
 
