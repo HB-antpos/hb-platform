@@ -353,13 +353,6 @@ export default function PickingSlipsPage() {
                 <tbody>{page.rows.map(renderRow)}</tbody>
               </table>
               <div className="picking-slip-footer">
-                {page.pageNo === page.pageCount ? (
-                  <div className="picking-slip-sign">
-                    <span>{t('storeOrders.pickingSlips.signPicker', '拣货人签字')} ____________________</span>
-                    <span>{t('storeOrders.pickingSlips.signTime', '完成时间')} ______________</span>
-                    <span>{t('storeOrders.pickingSlips.signCheck', '复核')} ______________</span>
-                  </div>
-                ) : null}
                 <div className="picking-slip-note">
                   {t('storeOrders.pickingSlips.note', '实拣数量以 PDA 扫码记录为准。订单重新分配后本单条码失效，请以新打印的分单为准。')}
                   {' '}

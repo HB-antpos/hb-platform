@@ -171,15 +171,15 @@ export function buildSlipRows<T extends SlipLineLocation>(lines: readonly T[]): 
 
 /**
  * A4 分单的版面常量（毫米）。页面容器是固定 297mm 且 overflow: hidden，放多了会被直接裁掉，所以按真实高度分页：
- * 商品行与提示行的高度由页面用同一组常量写进 CSS；两个“可放行数”是扣掉页头、汇总框、表头、页脚与签字栏后的余量，
+ * 商品行与提示行的高度由页面用同一组常量写进 CSS；两个“可放行数”是扣掉页头、汇总框、表头、页脚后的余量，
  * 页面渲染后还会实测溢出并自动收紧（见 PickingSlipsPage）。
  */
 export const SLIP_LINE_ROW_MM = 8
 export const SLIP_MARKER_ROW_MM = 6
 /** 第一页放明细的可用高度（有页头、条码、汇总框，汇总框里“其他段”只占一行时）。 */
-export const SLIP_FIRST_PAGE_BODY_MM = 192
+export const SLIP_FIRST_PAGE_BODY_MM = 200
 /** 续页放明细的可用高度（只有一行订单页头）。 */
-export const SLIP_NEXT_PAGE_BODY_MM = 234
+export const SLIP_NEXT_PAGE_BODY_MM = 242
 
 /** “其他段”文字超过一行时汇总框会变高，第一页相应少放行：按每行约 60 个字符估算，每多一行扣 5mm。 */
 export function slipFirstPageBodyMm(otherSegmentsText: string, shrinkMm = 0): number {

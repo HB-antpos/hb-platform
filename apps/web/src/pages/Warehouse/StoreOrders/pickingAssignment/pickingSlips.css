@@ -227,11 +227,6 @@
   font-size: 12.5px;
 }
 
-.picking-slip-sign {
-  display: flex;
-  gap: 10mm;
-}
-
 .picking-slip-note {
   font-size: 10.5px;
   color: #434343;
