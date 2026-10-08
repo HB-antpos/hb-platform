@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -20,7 +21,13 @@ public partial class CustomerDisplayView : UserControl
     internal const double MaxDesignCanvasWidth = 1366d;
     private static readonly GridLength VisibleSummaryRowHeight = new(152);
     private static readonly GridLength HiddenSummaryRowHeight = new(0);
-    private readonly DispatcherTimer _imageAdvanceTimer = new() { Interval = TimeSpan.FromSeconds(8) };
+    private static readonly TimeSpan DefaultImageDisplayDuration = TimeSpan.FromSeconds(8);
+    // 动图至少完整播一轮再切走，但和视频一样不超过 30 秒。
+    private static readonly TimeSpan MaxAnimatedImageDisplayDuration = TimeSpan.FromSeconds(30);
+    private readonly DispatcherTimer _imageAdvanceTimer = new() { Interval = DefaultImageDisplayDuration };
+    private readonly DispatcherTimer _gifFrameTimer = new(DispatcherPriority.Render);
+    private AnimatedGifRenderer? _activeGif;
+    private int _activeGifFrameIndex;
     private readonly DispatcherTimer _videoTimeoutTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     // 打开耗时超过这个值的视频即使不是首次播放也记日志，用来发现解码器卡顿。
     private static readonly TimeSpan SlowVideoOpenThreshold = TimeSpan.FromSeconds(3);
@@ -37,11 +44,16 @@ public partial class CustomerDisplayView : UserControl
     private bool _activeVideoOpened;
     // 超时已重试过一次的广告 Id；换到别的广告或这条正常播完后清空。
     private string? _videoTimeoutRetriedAdvertisementId;
+    // 为播放视频临时切成软件渲染的宿主窗口；不播视频时恢复硬件渲染。
+    private HwndSource? _softwareRenderedVideoHost;
+    // 图片、视频混播时每轮都会切换渲染模式，只记第一次。
+    private bool _softwareVideoRenderingLogged;
 
     public CustomerDisplayView()
     {
         InitializeComponent();
         _imageAdvanceTimer.Tick += (_, _) => AdvanceAdvertisementPlayback();
+        _gifFrameTimer.Tick += (_, _) => AdvanceGifFrame();
         _videoTimeoutTimer.Tick += (_, _) => HandleVideoTimeout();
         Loaded += CustomerDisplayViewLoaded;
         DataContextChanged += CustomerDisplayViewDataContextChanged;
@@ -115,6 +127,7 @@ public partial class CustomerDisplayView : UserControl
     private void CustomerDisplayViewUnloaded(object sender, RoutedEventArgs e)
     {
         StopAdvertisementPlayback();
+        RestoreHardwareVideoRendering();
         UnsubscribeFromViewModel();
     }
 
@@ -188,18 +201,21 @@ public partial class CustomerDisplayView : UserControl
         if (_viewModel?.CurrentAdvertisementMediaUrl is not { Length: > 0 } mediaUrl)
         {
             StopAdvertisementPlayback();
-            return;
-        }
-
-        if (_viewModel.IsCurrentAdvertisementImage)
-        {
-            ShowImageAdvertisement(mediaUrl);
+            RestoreHardwareVideoRendering();
             return;
         }
 
         if (_viewModel.IsCurrentAdvertisementVideo)
         {
             ShowVideoAdvertisement(mediaUrl);
+            return;
+        }
+
+        // 视频之间切换时保持软件渲染，避免每条都来回切换渲染模式；只有轮到图片或没有广告才恢复。
+        RestoreHardwareVideoRendering();
+        if (_viewModel.IsCurrentAdvertisementImage)
+        {
+            ShowImageAdvertisement(mediaUrl);
             return;
         }
 
@@ -213,6 +229,11 @@ public partial class CustomerDisplayView : UserControl
         if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var mediaUri))
         {
             SkipCurrentAdvertisementPlayback();
+            return;
+        }
+
+        if (TryShowAnimatedGif(mediaUri))
+        {
             return;
         }
 
@@ -233,12 +254,100 @@ public partial class CustomerDisplayView : UserControl
             AdvertisementVideoHost.Visibility = Visibility.Collapsed;
             AdvertisementImage.Source = bitmap;
             AdvertisementImage.Visibility = Visibility.Visible;
+            _imageAdvanceTimer.Interval = DefaultImageDisplayDuration;
             _imageAdvanceTimer.Start();
         }
         catch
         {
             SkipCurrentAdvertisementPlayback();
         }
+    }
+
+    private bool TryShowAnimatedGif(Uri mediaUri)
+    {
+        // 只处理已缓存到本地的 GIF；远程地址（缓存失败的回退）仍按静态图片显示第一帧。
+        if (!mediaUri.IsFile
+            || !string.Equals(Path.GetExtension(mediaUri.LocalPath), ".gif", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        AnimatedGifRenderer? renderer;
+        try
+        {
+            renderer = AnimatedGifRenderer.TryCreate(File.ReadAllBytes(mediaUri.LocalPath));
+            renderer?.RenderFrame(0);
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteWarning(
+                LogCategory,
+                $"advertisement gif animation unavailable, showing first frame {DescribeAdvertisement(_viewModel?.CurrentAdvertisement, mediaUri)}",
+                exception: ex);
+            return false;
+        }
+
+        if (renderer is null)
+        {
+            // 单帧 GIF 走普通图片路径即可。
+            return false;
+        }
+
+        _activeGif = renderer;
+        _activeGifFrameIndex = 0;
+        AdvertisementVideoHost.Visibility = Visibility.Collapsed;
+        AdvertisementImage.Source = renderer.Bitmap;
+        AdvertisementImage.Visibility = Visibility.Visible;
+        _gifFrameTimer.Interval = renderer.GetFrameDelay(0);
+        _gifFrameTimer.Start();
+        _imageAdvanceTimer.Interval = ResolveImageDisplayDuration(renderer.LoopDuration);
+        _imageAdvanceTimer.Start();
+        return true;
+    }
+
+    private void AdvanceGifFrame()
+    {
+        if (_activeGif is not { } renderer)
+        {
+            _gifFrameTimer.Stop();
+            return;
+        }
+
+        _activeGifFrameIndex = (_activeGifFrameIndex + 1) % renderer.FrameCount;
+        try
+        {
+            renderer.RenderFrame(_activeGifFrameIndex);
+        }
+        catch (Exception ex)
+        {
+            // 个别帧解码失败时停在当前画面，到点照常轮换，不影响后续广告。
+            StopAnimatedGif();
+            ConsoleLog.WriteWarning(
+                LogCategory,
+                $"advertisement gif frame failed frame={_activeGifFrameIndex} {DescribeAdvertisement(_viewModel?.CurrentAdvertisement, null)}",
+                exception: ex);
+            return;
+        }
+
+        _gifFrameTimer.Interval = renderer.GetFrameDelay(_activeGifFrameIndex);
+    }
+
+    private void StopAnimatedGif()
+    {
+        _gifFrameTimer.Stop();
+        _activeGif = null;
+    }
+
+    internal static TimeSpan ResolveImageDisplayDuration(TimeSpan animationLoopDuration)
+    {
+        if (animationLoopDuration <= DefaultImageDisplayDuration)
+        {
+            return DefaultImageDisplayDuration;
+        }
+
+        return animationLoopDuration < MaxAnimatedImageDisplayDuration
+            ? animationLoopDuration
+            : MaxAnimatedImageDisplayDuration;
     }
 
     private void ShowVideoAdvertisement(string mediaUrl)
@@ -288,6 +397,7 @@ public partial class CustomerDisplayView : UserControl
 
         try
         {
+            ApplyVideoRenderMode(advertisement);
             AdvertisementImage.Visibility = Visibility.Collapsed;
             AdvertisementVideoHost.Child = player;
             AdvertisementVideoHost.Visibility = Visibility.Visible;
@@ -306,10 +416,79 @@ public partial class CustomerDisplayView : UserControl
         }
     }
 
+    private void ApplyVideoRenderMode(AdvertisementPlaybackItemDto? advertisement)
+    {
+        if (PresentationSource.FromVisual(this) is not HwndSource { CompositionTarget: { } compositionTarget } source)
+        {
+            return;
+        }
+
+        var window = Window.GetWindow(this);
+        var display = window is null ? null : DisplayTopologyService.FindDisplayForWindow(window);
+        if (!ShouldUseSoftwareVideoRendering(display))
+        {
+            RestoreHardwareVideoRendering();
+            return;
+        }
+
+        if (ReferenceEquals(_softwareRenderedVideoHost, source))
+        {
+            return;
+        }
+
+        RestoreHardwareVideoRendering();
+        if (compositionTarget.RenderMode == RenderMode.SoftwareOnly)
+        {
+            // 窗口本来就是软件渲染（不是这里切的），不接管恢复。
+            return;
+        }
+
+        compositionTarget.RenderMode = RenderMode.SoftwareOnly;
+        _softwareRenderedVideoHost = source;
+        if (_softwareVideoRenderingLogged)
+        {
+            return;
+        }
+
+        _softwareVideoRenderingLogged = true;
+        ConsoleLog.Write(
+            LogCategory,
+            $"advertisement video render mode=software reason=non-primary-monitor "
+            + $"monitor={display!.MonitorLeft},{display.MonitorTop},{display.MonitorWidth}x{display.MonitorHeight} "
+            + DescribeAdvertisement(advertisement, null));
+    }
+
+    /// <summary>
+    /// WPF 的视频表面建在主显示器对应的 D3D9 适配器上，窗口在副屏时硬件合成拿不到新帧：
+    /// 播放进度和 MediaEnded 都正常，画面却停在第一帧（淡入类视频第一帧多为黑屏）。
+    /// 客显几乎总在副屏，这时改由软件渲染，主屏保持硬件渲染不受影响。
+    /// </summary>
+    internal static bool ShouldUseSoftwareVideoRendering(DisplayBounds? display)
+    {
+        // 主显示器的左上角固定是虚拟屏幕原点；拿不到显示器信息时保持硬件渲染。
+        return display is not null && (display.MonitorLeft != 0 || display.MonitorTop != 0);
+    }
+
+    private void RestoreHardwareVideoRendering()
+    {
+        if (_softwareRenderedVideoHost is not { } source)
+        {
+            return;
+        }
+
+        _softwareRenderedVideoHost = null;
+        if (!source.IsDisposed && source.CompositionTarget is { } compositionTarget)
+        {
+            // 软件渲染整窗 CPU 开销明显，没有视频在播时切回硬件渲染。
+            compositionTarget.RenderMode = RenderMode.Default;
+        }
+    }
+
     private void StopAdvertisementPlayback(bool clearImageSource = true)
     {
         _imageAdvanceTimer.Stop();
         _videoTimeoutTimer.Stop();
+        StopAnimatedGif();
 
         DisposeActiveVideoPlayer();
         AdvertisementVideoHost.Visibility = Visibility.Collapsed;
