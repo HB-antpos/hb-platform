@@ -112,7 +112,12 @@ import type {
   ScanLabelPrintTarget,
   ScanLabelResult,
 } from "@/modules/product-maintenance/types";
-import { getVerifiedScanPrintTarget } from "@/modules/product-maintenance/scan-label";
+import {
+  getVerifiedScanPrintTarget,
+  resolveMultiCodeLabelPrice,
+  resolveScannedCodeLabel,
+  type CodeLabelTarget,
+} from "@/modules/product-maintenance/scan-label";
 import {
   createProductDetailRequestCoordinator,
   createProductHqSyncMutationCoordinator,
@@ -337,6 +342,9 @@ interface AutoPricingDialogState {
   detail: ProductDetail;
   evaluation: EvaluateAutoPricingResult;
   scanSource: ScanSource | null;
+  /** 本次扫到的码：确认调价后要按它打子项标签，而不是一律打主档标签。手动查询为 null。 */
+  scanKeyword?: string | null;
+  printTarget?: ScanLabelPrintTarget | null;
 }
 
 interface AutoPricingDialogResolution {
@@ -1859,6 +1867,76 @@ function ProductQueryContent() {
     ],
   );
 
+  /** 打印套装 / 多码子项标签；子项没有可用价格时拒绝打印，避免打印层回退成主档价。 */
+  const sendCodeLabel = useCallback(
+    async (targetDetail: ProductDetail, target: CodeLabelTarget, printType: string | null) => {
+      if (target.retailPrice == null || !Number.isFinite(target.retailPrice)) {
+        setSnackbarMessage(t(target.kind === "set"
+          ? "messages.setCodeRetailRequired"
+          : "warehousePriceSync.currentPriceUnavailable"));
+        playQueryFeedback("error");
+        return false;
+      }
+      return sendProductLabel(targetDetail, {
+        barcode: target.barcode,
+        retailPrice: target.retailPrice,
+        discountRate: target.discountRate,
+        action: `${target.kind}:${target.codeId}`,
+        printType,
+      });
+    },
+    [playQueryFeedback, sendProductLabel, t],
+  );
+
+  /**
+   * 自动调价确认后的打印：扫的是套装 / 多码子项时打子项标签，不能一律打主档条码和价格。
+   * 多码价跟随主档，必须用保存后的新主档价，不能用调价前服务器给的 printTarget 价格。
+   */
+  const sendAutoPricingLabel = useCallback(
+    async (savedDetail: ProductDetail, dialog: AutoPricingDialogState) => {
+      const printType = smallLabel ? "small" : null;
+      const target = dialog.printTarget;
+      if (target?.kind === "set" && target.codeId) {
+        return sendCodeLabel(savedDetail, {
+          kind: "set",
+          codeId: target.codeId,
+          barcode: target.barcode,
+          retailPrice: target.retailPrice,
+          discountRate: 0,
+        }, printType);
+      }
+      if (target?.kind === "multi" && target.codeId) {
+        return sendCodeLabel(savedDetail, {
+          kind: "multi",
+          codeId: target.codeId,
+          barcode: target.barcode,
+          ...resolveMultiCodeLabelPrice(savedDetail),
+        }, printType);
+      }
+      const keyword = dialog.scanKeyword?.trim();
+      if (!target && keyword) {
+        // 保存价格不改码表：码表取调价前详情（保存结果可能不含码表），主档价取保存后的新价。
+        const resolved = resolveScannedCodeLabel(
+          {
+            ...savedDetail,
+            setCodes: dialog.detail.setCodes,
+            multiCodes: dialog.detail.multiCodes,
+          },
+          keyword,
+        );
+        if (resolved?.kind === "set" || resolved?.kind === "multi") {
+          return sendCodeLabel(savedDetail, resolved, printType);
+        }
+        if (!resolved) {
+          setSnackbarMessage(t("messages.codesLoadFailed"));
+          return false;
+        }
+      }
+      return sendProductLabel(savedDetail);
+    },
+    [sendCodeLabel, sendProductLabel, smallLabel, t],
+  );
+
   const smartAutoPrint = useCallback(
     async (
       scanKeyword: string,
@@ -1880,31 +1958,16 @@ function ProductQueryContent() {
         });
       }
 
-      const setMatch = printTarget ? undefined : targetDetail.setCodes.find(
-        (item) => item.setBarcode?.trim() === kw,
-      );
-      if (setMatch?.setBarcode?.trim()) {
-        return sendProductLabel(targetDetail, {
-          barcode: setMatch.setBarcode.trim(),
-          retailPrice: setMatch.setRetailPrice,
-          action: `set:${setMatch.setCodeId}`,
-          printType: smallLabel ? "small" : null,
-        });
+      // 无服务器 printTarget（离线、普通查询）时按扫到的码本地匹配：
+      // 套装子项打套装条码 + 套装价（不印折扣），多码打多码条码 + 主档价 + 主档折扣。
+      const resolved = printTarget ? null : resolveScannedCodeLabel(targetDetail, kw);
+      if (resolved?.kind === "set" || resolved?.kind === "multi") {
+        return sendCodeLabel(targetDetail, resolved, smallLabel ? "small" : null);
       }
-
-      const multiMatch = printTarget ? undefined : targetDetail.multiCodes.find(
-        (item) => item.barcode?.trim() === kw,
-      );
-      if (multiMatch?.barcode?.trim()) {
-        return sendProductLabel(targetDetail, {
-          barcode: multiMatch.barcode.trim(),
-          retailPrice:
-            multiMatch.retailPrice ??
-            targetDetail.storePrice?.retailPrice ??
-            null,
-          action: `multi:${getMultiCodeItemId(multiMatch)}`,
-          printType: smallLabel ? "small" : null,
-        });
+      if (!printTarget && !resolved) {
+        // 扫到的码不在已加载的码表里（如码表分页未加载到）时，不能回退打印主档条码和价格。
+        setSnackbarMessage(t("messages.codesLoadFailed"));
+        return false;
       }
 
       if (targetDetail.clearancePrice?.clearanceBarcode?.trim() === kw) {
@@ -1926,13 +1989,14 @@ function ProductQueryContent() {
         }
       }
 
-      // 离线或无 printTarget 时按主条码兜底打印，同样要带上小标签开关。
+      // 扫到的是主条码 / 货号等主档码：打主档标签，同样要带上小标签开关。
       return sendProductLabel(targetDetail, { printType: smallLabel ? "small" : null });
     },
     [
       getErrorMessage,
       printQuantity,
       quantitySingleUse,
+      sendCodeLabel,
       sendProductLabel,
       smallLabel,
       t,
@@ -1945,6 +2009,8 @@ function ProductQueryContent() {
       options?: {
         forceAutoPricing?: boolean;
         scanSource?: ScanSource | null;
+        scanKeyword?: string | null;
+        printTarget?: ScanLabelPrintTarget | null;
       },
     ): Promise<LookupFlowResult> => {
       const storePrice = targetDetail.storePrice;
@@ -1975,6 +2041,9 @@ function ProductQueryContent() {
             detail: targetDetail,
             evaluation,
             scanSource,
+            // 只有扫码才按扫到的码打子项标签；手动查询的关键字可能是商品名，仍打主档标签。
+            scanKeyword: scanSource ? options?.scanKeyword ?? null : null,
+            printTarget: options?.printTarget ?? null,
           });
 
           return {
@@ -2057,6 +2126,8 @@ function ProductQueryContent() {
       if (targetDetail.localSupplierCode?.trim() !== "200") {
         const autoPricingResult = await maybeHandleAutoPricing(targetDetail, {
           scanSource: options.scanSource,
+          scanKeyword: options.scanKeyword,
+          printTarget: options.printTarget,
         });
         if (autoPricingResult.autoPricingStatus === "no_action") {
           playQueryFeedback("found");
@@ -3736,6 +3807,8 @@ function ProductQueryContent() {
       await sendProductLabel(detail, {
         barcode: target.setBarcode.trim(),
         retailPrice: target.setRetailPrice,
+        // 套装标签不印折扣；必须显式传 0，否则打印层会回退到主档折扣。
+        discountRate: 0,
         action: `set:${setCodeId}`,
         printType: smallLabel ? "small" : null,
       });
@@ -3757,15 +3830,19 @@ function ProductQueryContent() {
         return;
       }
 
-      await sendProductLabel(detail, {
-        barcode: target.barcode.trim(),
-        retailPrice:
-          target.retailPrice ?? detail.storePrice?.retailPrice ?? null,
-        action: `multi:${itemId}`,
-        printType: smallLabel ? "small" : null,
-      });
+      // 多码与主条码同一商品：多码条码 + 主档门店价 + 主档折扣。
+      await sendCodeLabel(
+        detail,
+        {
+          kind: "multi",
+          codeId: itemId,
+          barcode: target.barcode.trim(),
+          ...resolveMultiCodeLabelPrice(detail),
+        },
+        smallLabel ? "small" : null,
+      );
     },
-    [detail, sendProductLabel, smallLabel, t],
+    [detail, sendCodeLabel, smallLabel, t],
   );
 
   const handlePrint = useCallback(
@@ -4862,7 +4939,7 @@ function ProductQueryContent() {
                         }
 
                         const labelPrinted =
-                          await sendProductLabel(savedDetail);
+                          await sendAutoPricingLabel(savedDetail, autoPricingDialog);
                         restoreScanAbility(autoPricingDialog.scanSource);
                         finishAutoPricingDialog({
                           status: "confirmed",

@@ -19,6 +19,7 @@ import {
   resolveWarehousePriceConfirmationFeedback,
   shouldAutoPrintWarehousePrice,
 } from "./warehouse-price-sync";
+import { resolveScannedCodeLabel } from "./scan-label";
 
 // 执行页面真实详情后处理及扫码打印回调，只替换网络与打印机边界。
 const pageSource = readFileSync(resolve(__dirname, "../../../app/(shell)/product-query.tsx"), "utf8");
@@ -34,6 +35,7 @@ function callbackStatement(name: string): ts.VariableStatement {
 }
 const processLoadedDetailStatement = callbackStatement("processLoadedDetail");
 const smartAutoPrintStatement = callbackStatement("smartAutoPrint");
+const sendCodeLabelStatement = callbackStatement("sendCodeLabel");
 
 function compileCallback<T>(statement: ts.VariableStatement, name: string, deps: Record<string, unknown>): T {
   const source = `const { ${Object.keys(deps).join(", ")} } = deps;\n${statement.getText(pageAst)}\nreturn ${name};`;
@@ -515,11 +517,12 @@ const currentDetail = {
   localSupplierCode: "200",
   storePrice: { uuid: "price-1", retailPrice: 5, storeProductCode: "STORE-1", discountRate: 0.2 },
   setCodes: [{ setCodeId: "set-id", setBarcode: "SET-1", setRetailPrice: 10 }],
-  multiCodes: [{ multiCodeId: "multi-id", barcode: "MULTI-1", retailPrice: 4 }],
+  // 多码行自身价 4 / 折扣 0.5 与主档不同步：标签必须取主档价 5 与主档折扣 0.2。
+  multiCodes: [{ uuid: "multi-uuid", setCodeId: "multi-id", barcode: "MULTI-1", retailPrice: 4, discountRate: 0.5 }],
 };
 type Detail = typeof currentDetail;
 type FlowResult = { labelPrinted: boolean; autoPricingStatus: string };
-type PrintOptions = { barcode?: string; retailPrice?: number; action?: string; printType?: string | null };
+type PrintOptions = { barcode?: string; retailPrice?: number; discountRate?: number; action?: string; printType?: string | null };
 
 function createPageFlow(options: {
   scanKeyword?: string;
@@ -536,14 +539,25 @@ function createPageFlow(options: {
   const messages: string[] = [];
   const feedback: string[] = [];
   let autoPricingCalls = 0;
+  const sendProductLabel = async (value: Detail, printOptions?: PrintOptions) => {
+    prints.push({ detail: value, options: printOptions });
+    return options.print ? options.print() : true;
+  };
+  const sendCodeLabel = compileCallback<(value: Detail, target: Record<string, unknown>, printType: string | null) => Promise<boolean>>(
+    sendCodeLabelStatement, "sendCodeLabel", {
+      useCallback: (callback: unknown) => callback,
+      sendProductLabel,
+      playQueryFeedback: (value: string) => feedback.push(value),
+      setSnackbarMessage: (message: string) => messages.push(message),
+      t: (key: string) => key,
+    },
+  );
   const smartAutoPrint = compileCallback<(keyword: string, value: Detail, target?: Record<string, unknown> | null) => Promise<boolean>>(
     smartAutoPrintStatement, "smartAutoPrint", {
       useCallback: (callback: unknown) => callback,
-      sendProductLabel: async (value: Detail, printOptions?: PrintOptions) => {
-        prints.push({ detail: value, options: printOptions });
-        return options.print ? options.print() : true;
-      },
-      getMultiCodeItemId: (code: Detail["multiCodes"][number]) => code.multiCodeId,
+      sendProductLabel,
+      sendCodeLabel,
+      resolveScannedCodeLabel,
       smallLabel: options.smallLabel === true,
       printQuantity: 1,
       quantitySingleUse: false,
@@ -585,8 +599,10 @@ async function runPageRegression() {
   for (const [scanKeyword, expectedOptions] of [
     ["MAIN-1", { printType: null }],
     ["PRODUCT-1", { printType: null }],
-    ["SET-1", { barcode: "SET-1", retailPrice: 10, action: "set:set-id", printType: null }],
-    ["MULTI-1", { barcode: "MULTI-1", retailPrice: 4, action: "multi:multi-id", printType: null }],
+    // 套装子项：套装条码 + 套装价，不印折扣（显式 0，避免打印层回退到主档折扣）。
+    ["SET-1", { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null }],
+    // 多码：多码条码 + 主档门店价 + 主档折扣。
+    ["MULTI-1", { barcode: "MULTI-1", retailPrice: 5, discountRate: 0.2, action: "multi:multi-id", printType: null }],
   ] as const) {
     const flow = createPageFlow({ scanKeyword });
     assert.equal((await flow.run()).labelPrinted, true, `${scanKeyword} 扫码打印本店价`);
@@ -646,6 +662,14 @@ async function runPageRegression() {
   assert.equal(otherSupplier.autoPricingCalls, 1);
   const offline = createPageFlow({ offline: true });
   assert.equal((await offline.run()).labelPrinted, true, "离线路径保持现有打印行为");
+  // 离线 / 非 200 供应商（无服务器 printTarget）扫到未加载的码：不能回退打印主档条码和价格。
+  const offlineMissing = createPageFlow({ offline: true, scanKeyword: "SET-ON-PAGE-2" });
+  assert.equal((await offlineMissing.run()).labelPrinted, false);
+  assert.equal(offlineMissing.prints.length, 0, "离线未匹配的码不能回退打印主档");
+  assert.deepEqual(offlineMissing.messages, ["messages.codesLoadFailed"]);
+  const offlineSet = createPageFlow({ offline: true, scanKeyword: "SET-1" });
+  assert.equal((await offlineSet.run()).labelPrinted, true);
+  assert.deepEqual(offlineSet.prints[0].options, { barcode: "SET-1", retailPrice: 10, discountRate: 0, action: "set:set-id", printType: null });
   const staleStore = createPageFlow({ scopeCurrent: false });
   assert.equal((await staleStore.run()).labelPrinted, false, "切店后的旧详情不打印");
   for (const print of [async () => false, async () => { throw new Error("printer disconnected"); }]) {
