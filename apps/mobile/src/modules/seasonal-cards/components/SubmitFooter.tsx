@@ -9,6 +9,7 @@ import { SEASONAL_CARD_COLORS } from "./palette";
 /** 底部固定栏：组合 + 合计张数与金额；按钮三态 提交填报 / 覆盖提交 / 未修改。 */
 export function SubmitFooter({
   summaryLine,
+  changedLabel,
   totalLine,
   state,
   buttonLabel,
@@ -16,6 +17,8 @@ export function SubmitFooter({
   onPress,
 }: {
   summaryLine: string;
+  /** 「改了 N 项」单独一行，避免英文长供应商名换行时把数字和单位拆开。 */
+  changedLabel?: string;
   totalLine: string;
   state: SeasonalCardSubmitState;
   buttonLabel: string;
@@ -35,6 +38,7 @@ export function SubmitFooter({
     >
       <View style={styles.summary}>
         <Text style={styles.summaryLine}>{summaryLine}</Text>
+        {changedLabel ? <Text style={styles.changedLine}>{changedLabel}</Text> : null}
         <Text style={styles.totalLine}>{totalLine}</Text>
       </View>
       <Button
@@ -56,6 +60,12 @@ const styles = StyleSheet.create({
   footer: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm },
   summary: { flex: 1, gap: 2 },
   summaryLine: { fontSize: 12, lineHeight: 17, color: SEASONAL_CARD_COLORS.mutedText },
+  changedLine: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "600",
+    color: SEASONAL_CARD_COLORS.selectedText,
+  },
   totalLine: {
     fontSize: 18,
     lineHeight: 24,
@@ -63,7 +73,7 @@ const styles = StyleSheet.create({
     color: HB_COLORS.textPrimary,
     fontVariant: ["tabular-nums"],
   },
-  button: { borderRadius: 10, flexShrink: 0, maxWidth: "50%" },
+  button: { borderRadius: 10, flexShrink: 0, minWidth: 120 },
   buttonContent: { minHeight: 48, paddingHorizontal: 6 },
   buttonLabel: { fontSize: 16, lineHeight: 22, fontWeight: "600" },
 });

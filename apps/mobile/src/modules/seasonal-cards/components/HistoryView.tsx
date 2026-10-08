@@ -197,7 +197,7 @@ export function SeasonalCardHistoryView({
       </View>
       <Text style={styles.entryTotal}>
         {t("history.total", {
-          quantity: entry.totalQuantity,
+          count: entry.totalQuantity,
           amount: formatSeasonalCardMoney(entry.totalAmount),
         })}
       </Text>
@@ -209,7 +209,7 @@ export function SeasonalCardHistoryView({
       </Text>
       {entry.remark ? (
         <Text style={styles.entryMeta}>
-          {t("labels.remark")}：{entry.remark}
+          {t("history.remark", { remark: entry.remark })}
         </Text>
       ) : null}
       {!entry.isBatch ? (

@@ -63,7 +63,8 @@
     "retry": "Retry"
   },
   "footer": {
-    "total": "{{quantity}} cards · {{amount}}",
+    "total_one": "{{count}} card · {{amount}}",
+    "total_other": "{{count}} cards · {{amount}}",
     "changedCount": "{{count}} changed",
     "submit": "Submit",
     "overwrite": "Overwrite",
@@ -97,8 +98,10 @@
     "nextPage": "Next",
     "unassignedSupplier": "No supplier",
     "superseded": "Replaced",
-    "total": "Total {{quantity}} cards · {{amount}}",
-    "submittedBy": "{{name}} · {{time}}"
+    "total_one": "Total {{count}} card · {{amount}}",
+    "total_other": "Total {{count}} cards · {{amount}}",
+    "submittedBy": "{{name}} · {{time}}",
+    "remark": "Remark: {{remark}}"
   },
   "labels": {
     "storeCode": "Store",
