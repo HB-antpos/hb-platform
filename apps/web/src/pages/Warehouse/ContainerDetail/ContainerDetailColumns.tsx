@@ -19,13 +19,12 @@ import type { WarehouseCategoryNode } from '../../../services/warehouseCategoryS
 import {
   CONTAINER_DETAIL_ALL_CATEGORY_FILTER_KEY,
   CONTAINER_DETAIL_UNCATEGORIZED_FILTER_KEY,
-  getContainerDetailCategoryName,
   getContainerDetailCategoryTooltipRecord,
   getContainerDetailImportPriceTrend,
-  getContainerDetailReadonlyOemPrice,
   getContainerDetailVisibleOemPrice,
   type ContainerDetailSortField,
 } from './containerDetailLogic'
+import { resolveContainerDetailCategoryEnglishName } from './containerDetailViewLogic'
 
 // ---- 格式化辅助 ----
 
@@ -54,17 +53,6 @@ export function renderOemPriceCell(row: ContainerDetail) {
   ].filter(Boolean).join(' ')
 
   return <span className={className}>{formatCurrency(getContainerDetailVisibleOemPrice(row), '$')}</span>
-}
-
-/** 只读零售价快览：显示后端按新/已有商品分流后的来源价。 */
-export function renderReadonlyOemPriceCell(row: ContainerDetail) {
-  const className = [
-    'container-detail-nowrap',
-    'container-detail-numeric-cell',
-    'container-detail-oem-price-cell',
-  ].filter(Boolean).join(' ')
-
-  return <span className={className}>{formatCurrency(getContainerDetailReadonlyOemPrice(row), '$')}</span>
 }
 
 /** 进口价格趋势图标（只读指示器，不参与业务逻辑）。 */
@@ -131,10 +119,11 @@ export function buildContainerDetailCategoryOptions(
   ])
 }
 
-/** 分类列单元格渲染：显示名称 + Tooltip 完整路径。 */
-export function renderContainerDetailCategoryCell(record: ContainerDetail, categoryLookup: WarehouseCategoryLookup, language?: string) {
-  const displayName = getContainerDetailCategoryName(record) || '--'
-  const tooltipTitle = getWarehouseProductCategoryTooltip(getContainerDetailCategoryTooltipRecord(record), categoryLookup, language)
+/** 分类列单元格渲染：显示名称 + Tooltip 完整路径；不随界面语言切换，一律显示英文。 */
+export function renderContainerDetailCategoryCell(record: ContainerDetail, categoryLookup: WarehouseCategoryLookup) {
+  const tooltipRecord = getContainerDetailCategoryTooltipRecord(record)
+  const displayName = resolveContainerDetailCategoryEnglishName(tooltipRecord, categoryLookup) || '--'
+  const tooltipTitle = getWarehouseProductCategoryTooltip(tooltipRecord, categoryLookup, 'en')
 
   return (
     <Tooltip title={tooltipTitle || displayName}>

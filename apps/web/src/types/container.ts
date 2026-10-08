@@ -85,8 +85,6 @@ export interface ContainerDetail {
   WarehouseImportPrice?: number
   warehouseOEMPrice?: number
   WarehouseOEMPrice?: number
-  readonlyOemPrice?: number
-  ReadonlyOemPrice?: number
   warehouseIsActive?: boolean
   categoryName?: string
   CategoryName?: string
@@ -115,7 +113,7 @@ export interface ContainerDetail {
 }
 
 export type ContainerDetailQueryProductType = 'normal' | 'set' | 'multi' | 'setChild'
-export type ContainerDetailQueryTag = 'all' | 'new' | 'existing' | 'noOemPrice' | 'abnormalImport' | 'active' | 'inactive' | ContainerDetailQueryProductType
+export type ContainerDetailQueryTag = 'all' | 'new' | 'existing' | 'noOemPrice' | 'abnormalImport' | 'active' | 'inactive' | 'priceUp' | 'priceDown' | ContainerDetailQueryProductType
 export type ContainerDetailQueryNewProductState = 'new' | 'existing'
 export type ContainerDetailQueryMatchType = 'productCode' | 'supplierItem' | 'unmatched'
 export type ContainerDetailQueryWarehouseStatus = 'active' | 'inactive'
@@ -176,6 +174,9 @@ export interface ContainerDetailTagStats {
   abnormalImport: number
   active: number
   inactive: number
+  /** 本次进口价格高于 / 低于仓库实时进货价的明细数 */
+  priceUp: number
+  priceDown: number
   normal: number
   set: number
   multi: number

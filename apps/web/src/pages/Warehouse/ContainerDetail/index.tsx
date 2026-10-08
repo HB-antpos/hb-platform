@@ -143,6 +143,7 @@ import {
   applyContainerDetailColumnState,
   applyContainerDetailWarehouseStatusByProductCodes,
   buildContainerDetailQuery,
+  buildContainerDetailWarehouseImportPriceUpdates,
   buildContainerDetailClearEnglishNameUpdates,
   buildContainerDetailDetectionItems,
   buildContainerDetailEnglishNameUpdates,
@@ -271,6 +272,7 @@ import {
   CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY,
   CONTAINER_DETAIL_COLUMN_VIEWS,
   CONTAINER_DETAIL_NEW_STATE_TAGS,
+  CONTAINER_DETAIL_PRICE_TREND_TAGS,
   CONTAINER_DETAIL_PRODUCT_TYPE_TAGS,
   CONTAINER_DETAIL_SEARCH_FIELDS,
   applyContainerDetailSearchText,
@@ -283,6 +285,8 @@ import {
   removeContainerDetailColumnFilter,
   resolveContainerDetailOverviewStats,
   resolveContainerDetailViewColumnKeys,
+  alignContainerDetailColumnOrderToView,
+  sortContainerDetailColumnKeysByDefaultOrder,
   summarizeContainerDetailManualDraft,
   switchContainerDetailSearchField,
   toggleContainerDetailMatchPendingFilter,
@@ -352,7 +356,6 @@ import {
   renderImportPriceCell,
   renderNumericCell,
   renderOemPriceCell,
-  renderReadonlyOemPriceCell,
 } from './ContainerDetailColumns'
 import './index.css'
 import { MeasuredTable } from '../../../components/MeasuredTable'
@@ -726,7 +729,9 @@ const CONTAINER_DETAIL_TABLE_SCROLL_X = 2440
 const CONTAINER_DETAIL_VIEW_TABLE_MIN_SCROLL_X = 1100
 const CONTAINER_DETAIL_TABLE_SCROLL_Y = 620
 const CONTAINER_DETAIL_SELECTION_COLUMN_WIDTH = 56
-const CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.containerDetail.columnOrder.v3'
+// v4：默认列顺序改为 编号/图片/货号/英文名称/中文名称/分类/国内价格/仓库状态/运输成本/调整浮率/实时进货价/进口价格/实时零售价/零售价/其他列，
+// 升级 key 让所有人都按新默认顺序显示（旧 v3 记录的拖拽顺序不再沿用）。
+const CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.containerDetail.columnOrder.v4'
 const CONTAINER_DETAIL_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.containerDetail.columnWidths.v1'
 const CONTAINER_DETAIL_MIN_COLUMN_WIDTH = 48
 const CONTAINER_DETAIL_MAX_COLUMN_WIDTH = 420
@@ -757,6 +762,8 @@ const EMPTY_CONTAINER_DETAIL_TAG_STATS = {
   abnormalImport: 0,
   active: 0,
   inactive: 0,
+  priceUp: 0,
+  priceDown: 0,
   normal: 0,
   set: 0,
   multi: 0,
@@ -975,7 +982,6 @@ export default function ContainerDetailPage() {
   const [sortState, setSortState] = useState<ContainerDetailSortState>(DEFAULT_CONTAINER_DETAIL_SORT)
   const [columnOrder, setColumnOrder] = useState<ContainerDetailTableColumnKey[]>([])
   const [columnWidths, setColumnWidths] = useState<ContainerDetailColumnWidthMap>({})
-  const [showReadonlyOemPrice, setShowReadonlyOemPrice] = useState(false)
   // 列视图只控制哪些列可见，记在本机；列顺序与列宽仍各自沿用原有的 localStorage 设置。
   const [columnView, setColumnViewState] = useState<ContainerDetailColumnView>(() => {
     try {
@@ -2352,6 +2358,8 @@ export default function ContainerDetailPage() {
     { value: 'abnormalImport', label: t('warehouseUi.containerDetail.checkMissingImport') },
     { value: 'active', label: t('common.activeUpper') },
     { value: 'inactive', label: t('common.inactiveUpper') },
+    { value: 'priceUp', label: t('warehouseUi.containerDetail.priceUp') },
+    { value: 'priceDown', label: t('warehouseUi.containerDetail.priceDown') },
   ], [t])
 
   const selectedTagOptions = useMemo(
@@ -5531,6 +5539,50 @@ export default function ContainerDetailPage() {
     }
   }
 
+  // 用本次货柜进口价格覆盖仓库进货价；只写仓库主表，不联动分店进货价（后端默认会联动，这里显式关闭）。
+  const updateWarehouseImportPrice = async () => {
+    if (!ensureNoPendingDetails()) return
+    if (!ensureTargetRowsVisible()) return
+    const actionName = t('warehouseUi.containerDetail.actionUpdateWarehouseImportPrice')
+    const scopedRows = await resolveBatchActionTargetRows()
+    if (scopedRows == null) return
+    if (!scopedRows.length) {
+      message.warning(t('containers.messages.selectBatchProducts', '请先选择要批量操作的商品'))
+      return
+    }
+    const updates = buildContainerDetailWarehouseImportPriceUpdates(scopedRows)
+    if (!updates.length) {
+      message.info(t('warehouseUi.containerDetail.noWarehouseImportPriceChanges'))
+      return
+    }
+    // 确认数量按实际会写入的商品数显示，并说明范围内被跳过的明细数。
+    const confirmed = await confirmBatchAction(actionName, updates.length, {
+      extra: (
+        <Typography.Text type="secondary">
+          {t('warehouseUi.containerDetail.updateWarehouseImportPriceHint', { skipped: scopedRows.length - updates.length })}
+        </Typography.Text>
+      ),
+    })
+    if (!confirmed) return
+    if (!await drainAutoSavesBeforeAction()) return
+    try {
+      const result = await batchUpdateWarehouseProducts(
+        updates.map((item): WarehouseProductBatchUpdateItem => ({ ProductCode: item.productCode, ImportPrice: item.importPrice })),
+        { syncStorePurchasePrice: false },
+      )
+      const failedCount = Number(result.failedCount ?? result.FailedCount ?? result.failed ?? result.Failed ?? 0)
+      if (failedCount > 0) {
+        const errors = result.errors ?? result.Errors ?? []
+        throw new Error(errors.join('；') || result.message || t('warehouseUi.containerDetail.warehouseImportPriceUpdateFailed'))
+      }
+      message.success(t('warehouseUi.containerDetail.warehouseImportPriceUpdated', { count: updates.length }))
+      // 刷新明细，让实时进货价与涨跌箭头/筛选计数立即反映新值。
+      await loadData(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('warehouseUi.containerDetail.warehouseImportPriceUpdateFailed'))
+    }
+  }
+
   /**
    * 删除明细后后端已按剩余明细重算货柜总体积，但其余明细的运输成本（= 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积）
    * 仍按删除前的总体积计算。这里复用整柜重算成本的预览确认，用户确认后才写库；
@@ -6158,15 +6210,6 @@ export default function ContainerDetailPage() {
     render: (_, row) => renderRowIssues(row),
   }
 
-  const readonlyOemPriceColumn: ColumnsType<ContainerDetail>[number] = {
-    // 只读快览列只展示后端按新/已有商品分流后的来源价。
-    key: 'readonlyOemPrice',
-    title: renderCompactHeader(t('containers.actions.showReadonlyOemPrice', '只读零售价')),
-    width: 96,
-    align: 'right',
-    render: (_, row) => renderReadonlyOemPriceCell(row),
-  }
-
   const baseColumns: ColumnsType<ContainerDetail> = [
     productColumn,
     { key: 'index', title: renderCompactHeader(t('containers.columns.index')), width: 56, fixed: 'left', render: (_v, _r, index) => renderNumericCell(detailRowNumberOffset + index + 1) },
@@ -6231,7 +6274,7 @@ export default function ContainerDetailPage() {
       title: renderCompactHeader(t('containers.fields.category', '分类')),
       width: 120,
       render: (_, row) => {
-        const categoryCell = renderContainerDetailCategoryCell(row, categoryLookup, i18n.language)
+        const categoryCell = renderContainerDetailCategoryCell(row, categoryLookup)
         if (!canBatchSetCategory) return renderConcurrentEditableField(row, 'ProductCategoryGUID', categoryCell)
 
         return renderConcurrentEditableField(row, 'ProductCategoryGUID', (
@@ -6624,7 +6667,6 @@ export default function ContainerDetailPage() {
         ) : '--'
       },
     },
-    ...(showReadonlyOemPrice ? [readonlyOemPriceColumn] : []),
     {
       title: renderColumnTitle('productName', t('containers.fields.productName')),
       width: 180,
@@ -6700,7 +6742,10 @@ export default function ContainerDetailPage() {
     issuesColumn,
   ]
 
-  const draggableColumnKeys = baseColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey)
+  // 列定义的书写顺序不等于展示顺序：默认展示顺序统一由 CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER 决定。
+  const draggableColumnKeys = sortContainerDetailColumnKeysByDefaultOrder(
+    baseColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey),
+  )
   const isColumnOrderCustomized = isContainerDetailColumnOrderCustomized(columnOrder, draggableColumnKeys)
   const isColumnWidthCustomized = Object.keys(columnWidths).length > 0
   const isColumnSettingsCustomized = isColumnOrderCustomized || isColumnWidthCustomized
@@ -6750,7 +6795,12 @@ export default function ContainerDetailPage() {
   const handleColumnDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
     setColumnOrder((current) => {
-      const nextOrder = moveContainerDetailColumnOrder(current, active.id, over.id)
+      // 成本核算 / 上架定价可能按视图自身顺序显示，先把全局顺序对齐到当前显示顺序再移动。
+      const activeOrder = current.length ? current : draggableColumnKeys
+      const baseOrder = columnView === 'all'
+        ? activeOrder
+        : alignContainerDetailColumnOrderToView(activeOrder, resolveContainerDetailViewColumnKeys(columnView, activeOrder))
+      const nextOrder = moveContainerDetailColumnOrder(baseOrder, active.id, over.id)
       try {
         localStorage.setItem(CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY, JSON.stringify(nextOrder))
       } catch {
@@ -6987,6 +7037,7 @@ export default function ContainerDetailPage() {
     if ((CONTAINER_DETAIL_NEW_STATE_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('warehouseUi.containerDetail.chipGroupProduct')
     if ((CONTAINER_DETAIL_PRODUCT_TYPE_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('containers.fields.productType')
     if ((CONTAINER_DETAIL_CHECK_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('warehouseUi.containerDetail.checksTitle')
+    if ((CONTAINER_DETAIL_PRICE_TREND_TAGS as readonly ContainerDetailTagFilter[]).includes(tag)) return t('warehouseUi.containerDetail.chipGroupPriceTrend')
     return t('warehouseUi.containerDetail.chipGroupShelf')
   }
 
@@ -7214,6 +7265,7 @@ export default function ContainerDetailPage() {
   const priceSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
     { key: 'batchPrices', label: t('containers.actions.batchUpdatePrices', '批量修改价格'), disabled: batchPricesSaving, onClick: () => void openBatchPricesModal() },
     { key: 'batchFloatRate', label: t('containers.actions.batchUpdateFloatRate', '批量修改浮率'), disabled: batchFloatRateSaving, onClick: () => void openBatchFloatRateModal() },
+    { key: 'updateWarehouseImportPrice', label: t('warehouseUi.containerDetail.actionUpdateWarehouseImportPrice'), onClick: () => void updateWarehouseImportPrice() },
   ] : []
   const englishNameSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
     { key: 'translate', label: t('containers.actions.batchTranslate'), onClick: () => void translateNames() },
@@ -7770,18 +7822,6 @@ export default function ContainerDetailPage() {
                           <div className="wh-cdetail-colset">
                             <div className="wh-cdetail-colset-title">{t('common.listToolbar.columnSettings')}</div>
                             <div className="wh-cdetail-colset-hint">{t('warehouseUi.containerDetail.columnSettingsHint')}</div>
-                            <div className="container-detail-readonly-toggle">
-                              <span>{t('containers.actions.showReadonlyOemPrice', '只读零售价')}</span>
-                              <Switch
-                                size="small"
-                                checked={showReadonlyOemPrice}
-                                disabled={columnView !== 'all'}
-                                onChange={setShowReadonlyOemPrice}
-                              />
-                            </div>
-                            {columnView !== 'all' ? (
-                              <div className="wh-cdetail-colset-hint">{t('warehouseUi.containerDetail.readonlyRetailAllOnly')}</div>
-                            ) : null}
                             {isColumnSettingsCustomized ? (
                               <Button size="small" icon={<ReloadOutlined />} onClick={resetColumnOrder}>
                                 {t('containers.actions.resetColumns', '重置列')}

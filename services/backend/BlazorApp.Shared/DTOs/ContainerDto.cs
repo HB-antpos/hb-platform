@@ -501,6 +501,10 @@ namespace BlazorApp.Shared.DTOs
         public int AbnormalImport { get; set; }
         public int Active { get; set; }
         public int Inactive { get; set; }
+        /// <summary>本次进口价格高于仓库实时进货价的明细数</summary>
+        public int PriceUp { get; set; }
+        /// <summary>本次进口价格低于仓库实时进货价的明细数</summary>
+        public int PriceDown { get; set; }
         public int ProductCodeMatched { get; set; }
         public int SupplierItemMatched { get; set; }
         public int Unmatched { get; set; }

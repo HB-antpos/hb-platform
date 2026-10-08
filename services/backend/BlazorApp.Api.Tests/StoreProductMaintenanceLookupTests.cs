@@ -249,7 +249,16 @@ public sealed class StoreProductMaintenanceLookupTests : IDisposable
             MultiCodeRetailPrice = 3.20m, DiscountRate = 0.75m, IsActive = true,
         }).ExecuteCommandAsync();
 
-        var detail = new StoreProductDetailDto { ProductCode = "product-2", ProductType = 2 };
+        // 多码标签取主档门店价与主档折扣，不取投影行的 MultiCodeRetailPrice / DiscountRate。
+        var detail = new StoreProductDetailDto
+        {
+            ProductCode = "product-2",
+            ProductType = 2,
+            StorePrice = new StoreProductStorePriceDto
+            {
+                Uuid = "price-2", StoreCode = "allowed", RetailPrice = 5.00m, DiscountRate = 0.10m,
+            },
+        };
         var method = typeof(StoreProductMaintenanceReactService).GetMethod(
             "BuildScanLabelPrintTargetAsync", BindingFlags.Instance | BindingFlags.NonPublic
         );
@@ -262,8 +271,8 @@ public sealed class StoreProductMaintenanceLookupTests : IDisposable
         Assert.NotNull(target);
         Assert.Equal("multi", target!.Kind);
         Assert.Equal("multi-1", target.CodeId);
-        Assert.Equal(3.20m, target.RetailPrice);
-        Assert.Equal(0.75m, target.DiscountRate);
+        Assert.Equal(5.00m, target.RetailPrice);
+        Assert.Equal(0.10m, target.DiscountRate);
 
         await _db.Updateable<StoreMultiCodeProduct>()
             .SetColumns(x => new StoreMultiCodeProduct { IsActive = false })
@@ -284,6 +293,55 @@ public sealed class StoreProductMaintenanceLookupTests : IDisposable
             new object?[] { "set-barcode", "SetBarcode", detail, "allowed", new List<string> { "allowed" } }
         )!;
         Assert.Null(await oldBarcodeTask);
+    }
+
+    [Fact]
+    public async Task ScanLabel_套装子项打印门店套装价且不带折扣()
+    {
+        await _db.Insertable(new ProductSetCode
+        {
+            SetCodeId = "set-9", ProductCode = "product-3", SetProductCode = "set-product-9",
+            SetBarcode = "set-barcode-9", SetRetailPrice = 4m, IsActive = true,
+        }).ExecuteCommandAsync();
+
+        var detail = new StoreProductDetailDto
+        {
+            ProductCode = "product-3",
+            ProductType = 1,
+            StorePrice = new StoreProductStorePriceDto
+            {
+                Uuid = "price-3", StoreCode = "allowed", RetailPrice = 9.99m, DiscountRate = 0.30m,
+            },
+        };
+        var method = typeof(StoreProductMaintenanceReactService).GetMethod(
+            "BuildScanLabelPrintTargetAsync", BindingFlags.Instance | BindingFlags.NonPublic
+        );
+        Task<StoreProductPrintTargetDto?> Build() => (Task<StoreProductPrintTargetDto?>)method!.Invoke(
+            _service,
+            new object?[] { "set-barcode-9", "SetBarcode", detail, "allowed", new List<string> { "allowed" } }
+        )!;
+
+        // 无门店套装行：全局套装价，不带主档折扣。
+        var globalTarget = await Build();
+        Assert.NotNull(globalTarget);
+        Assert.Equal("set", globalTarget!.Kind);
+        Assert.Equal("set-barcode-9", globalTarget.Barcode);
+        Assert.Equal("set-9", globalTarget.CodeId);
+        Assert.Equal(4m, globalTarget.RetailPrice);
+        Assert.Null(globalTarget.DiscountRate);
+
+        // 有门店套装行：用门店套装价（与收银端一致），仍不带折扣。
+        await _db.Insertable(new StoreMultiCodeProduct
+        {
+            UUID = "store-set-9", StoreCode = "allowed", ProductCode = "product-3",
+            MultiCodeProductCode = "set-product-9", MultiBarcode = "set-barcode-9",
+            MultiCodeRetailPrice = 3.50m, DiscountRate = 0.20m, IsActive = true,
+        }).ExecuteCommandAsync();
+        var storeTarget = await Build();
+        Assert.NotNull(storeTarget);
+        Assert.Equal("set", storeTarget!.Kind);
+        Assert.Equal(3.50m, storeTarget.RetailPrice);
+        Assert.Null(storeTarget.DiscountRate);
     }
 
     private Task<int> SeedProduct(string code, string itemNumber, string? barcode = null, bool deleted = false) =>
