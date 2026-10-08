@@ -5067,11 +5067,20 @@ assertEqual(
     '.container-detail-table .ant-table-tbody-virtual-holder-inner .ant-table-row {\n  align-items: center;\n}',
   ) &&
   pageStyleSource.includes(
-    '.container-detail-table .ant-table-tbody-virtual-holder-inner .ant-table-row > .ant-table-cell-fix-left {\n  align-self: stretch;\n  align-content: center;\n}',
+    '.container-detail-table .ant-table-tbody-virtual-holder-inner .ant-table-row > .ant-table-cell {\n  align-self: stretch;\n  align-content: center;\n}',
   ) &&
   !pageStyleSource.includes('.ant-table-tbody > tr > td .ant-input-number-input'),
   true,
-  '虚拟表格行应垂直居中单元格，且固定列必须拉伸到完整行高以遮挡横向滚动内容',
+  '虚拟表格行应垂直居中单元格，且所有单元格（含固定列）必须拉伸到完整行高：固定列遮挡横向滚动内容，非固定列让选中/斑马纹/悬停底色铺满整行',
+)
+assertEqual(
+  pageStyleSource.includes(
+    '.container-detail-table .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell {\n  background: #f0f6ff;',
+  ) &&
+  pageStyleSource.includes('.ant-table-row-selected:not(:has(+ .ant-table-row-selected)) > .ant-table-cell {\n  border-bottom-color: #9ec5ff;') &&
+  !pageStyleSource.includes('background: #bae0ff'),
+  true,
+  '选中行应为极浅蓝底且连续选区上下沿描边，不得回到 AntD 默认的饱和蓝悬停色',
 )
 assertEqual(
   pageSource.includes('handleWarehouseStatusChange'),
