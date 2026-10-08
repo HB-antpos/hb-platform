@@ -64,6 +64,32 @@ export async function getActiveStores(): Promise<StoreOption[]> {
   )
 }
 
+export interface BrandedStoreOption extends StoreOption {
+  /** 分店品牌（Hot Bargain / Discount General 等），未设置时为 undefined。 */
+  brandName?: string
+}
+
+/**
+ * 与 getActiveStores 同源，但额外带上品牌名，供需要按品牌筛选分店的页面使用。
+ * 单独成函数而不是给 getActiveStores 加字段：后者有十几个调用方，且部分测试做整对象比较。
+ */
+export async function getActiveStoresWithBrand(): Promise<BrandedStoreOption[]> {
+  const response = await request.get<ApiResponse<StoreDto[]> | StoreDto[]>('/api/stores/active')
+  const stores = Array.isArray(response)
+    ? response
+    : Array.isArray(response.data)
+      ? response.data
+      : []
+
+  return sortStoreOptionsByName(
+    stores.map((store) => ({
+      label: store.storeName || store.storeCode,
+      value: store.storeCode,
+      brandName: store.brandName?.trim() || undefined,
+    })),
+  )
+}
+
 export async function getStoreByGuid(guid: string): Promise<StoreDetailDto> {
   const response = await request.get<ApiResponse<StoreDetailApiDto>>(`/api/stores/guid/${guid}`)
   return mapStoreDetail(unwrapApiData(response))
