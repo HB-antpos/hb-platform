@@ -352,6 +352,14 @@
   <data name="history.finalTotal" xml:space="preserve"><value>Final total</value></data>
   <data name="history.paidAmount" xml:space="preserve"><value>Paid</value></data>
   <data name="history.outstandingAmount" xml:space="preserve"><value>Outstanding</value></data>
+  <data name="history.orderDetailsOrderTotal" xml:space="preserve"><value>Order total</value></data>
+  <data name="history.orderDetailsItemsTitle" xml:space="preserve"><value>Items</value></data>
+  <data name="history.orderDetailsLineSummary" xml:space="preserve"><value>{0} lines · {1} pcs</value></data>
+  <data name="history.orderDetailsPaymentsTitle" xml:space="preserve"><value>Payment history</value></data>
+  <data name="history.orderDetailsPaymentCount" xml:space="preserve"><value>{0} payments</value></data>
+  <data name="history.orderDetailsPaidPercent" xml:space="preserve"><value>Paid {0}%</value></data>
+  <data name="history.installment.downPayment" xml:space="preserve"><value>Down payment</value></data>
+  <data name="history.installment.repaymentN" xml:space="preserve"><value>Repayment {0}</value></data>
   <data name="history.reprint" xml:space="preserve"><value>Reprint</value></data>
   <data name="history.detailsLoadTimeout" xml:space="preserve"><value>Order details load timed out. Please try again.</value></data>
   <data name="history.refund" xml:space="preserve"><value>Refund</value></data>

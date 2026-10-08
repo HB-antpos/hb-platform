@@ -2324,9 +2324,100 @@ public sealed class TransactionHistoryViewModelTests
             order.OrderId.ToString("D"),
             Assert.Single(viewModel.ReceiptPreviewRows, preview => preview.IsQrCode).QrCodeValue);
 
+        // 付款记录时间线：首付 + 末尾虚线"待付"节点；进度 = 已付 /（已付 + 未付）。
+        Assert.Equal(2, viewModel.OrderDetailPaymentsForTests.Count);
+        var downPayment = viewModel.OrderDetailPaymentsForTests[0];
+        Assert.Equal("Down payment", downPayment.Title);
+        Assert.Equal(30m, downPayment.Amount);
+        Assert.Contains("Cash", downPayment.Detail, StringComparison.Ordinal);
+        Assert.False(downPayment.IsPending);
+        Assert.False(downPayment.IsLast);
+        var pendingNode = viewModel.OrderDetailPaymentsForTests[1];
+        Assert.True(pendingNode.IsPending);
+        Assert.True(pendingNode.IsLast);
+        Assert.Equal(90m, pendingNode.Amount);
+        Assert.Equal(25d, viewModel.OrderDetailsPaidPercent, 3);
+        Assert.Equal("Paid 25%", viewModel.OrderDetailsPaidPercentText);
+        Assert.Equal("1 lines · 1 pcs", viewModel.OrderDetailsLineSummary);
+        Assert.Equal("1 payments", viewModel.OrderDetailsPaymentCountLabel);
+
+        // 从订单明细弹窗点"继续付款"：先关闭弹窗再进入补款流程。
+        viewModel.IsOrderDetailsOpen = true;
         await viewModel.ContinueInstallmentPaymentCommand.ExecuteAsync(row);
 
         Assert.Same(order, continuedOrder);
+        Assert.False(viewModel.IsOrderDetailsOpen);
+    }
+
+    [Fact]
+    public async Task Installment_order_details_timeline_numbers_repayments_by_time_and_skips_voided_payments()
+    {
+        var order = CreateInstallmentOrder("IO-20260703-TIMELINE", "张三", "0400111222", paidAmount: 60m, outstandingAmount: 60m);
+        var baseTime = new DateTimeOffset(2026, 7, 1, 10, 0, 0, TimeSpan.Zero);
+        var localOrder = CreateLocalInstallmentOrder(order) with
+        {
+            // 故意乱序并混入一笔已作废付款：时间线应按入账时间排序、不展示作废项。
+            Payments =
+            [
+                new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Cash, 10m, null, InstallmentPaymentStatus.Recorded, baseTime.AddDays(14), "C001", order.DeviceCode),
+                new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Cash, 30m, null, InstallmentPaymentStatus.Recorded, baseTime, "C001", order.DeviceCode),
+                new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Cash, 99m, null, InstallmentPaymentStatus.Voided, baseTime.AddDays(3), "C001", order.DeviceCode),
+                new InstallmentPaymentDto(Guid.NewGuid(), PaymentMethodKind.Cash, 20m, null, InstallmentPaymentStatus.Recorded, baseTime.AddDays(7), "C001", order.DeviceCode)
+            ]
+        };
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession(),
+            installmentOrderService: new CapturingInstallmentOrderService
+            {
+                Orders = [order],
+                LocalOrders = { [order.OrderId] = localOrder }
+            });
+
+        viewModel.IsInstallmentSourceSelected = true;
+        await viewModel.LoadAsync();
+
+        var entries = viewModel.OrderDetailPaymentsForTests;
+        Assert.Equal(
+            ["Down payment", "Repayment 1", "Repayment 2", "Outstanding"],
+            entries.Select(entry => entry.Title).ToArray());
+        Assert.Equal([30m, 20m, 10m, 60m], entries.Select(entry => entry.Amount).ToArray());
+        Assert.All(entries.Take(3), entry => Assert.False(entry.IsPending || entry.IsLast));
+        Assert.True(entries[^1].IsPending && entries[^1].IsLast);
+        Assert.Equal("3 payments", viewModel.OrderDetailsPaymentCountLabel);
+    }
+
+    [Fact]
+    public void Regular_order_details_list_payments_by_method_without_timeline_extras()
+    {
+        var orderGuid = Guid.NewGuid();
+        var soldAt = new DateTimeOffset(2026, 8, 26, 9, 30, 0, TimeSpan.Zero);
+        using var viewModel = new TransactionHistoryViewModel();
+        viewModel.SelectedReceipt = new ReceiptDetails(
+            orderGuid,
+            "S001",
+            "POS-01",
+            "Alice",
+            soldAt,
+            20m,
+            0m,
+            20m,
+            [new ReceiptPreviewLine("Tea", "930001", 2m, 10m, 0m, 20m)],
+            [
+                new ReceiptPaymentLine(PaymentMethodKind.Cash, 15m, null),
+                new ReceiptPaymentLine(PaymentMethodKind.Voucher, 5m, null)
+            ]);
+
+        Assert.Equal(["Cash", "Voucher"], viewModel.OrderDetailPaymentsForTests.Select(entry => entry.Title).ToArray());
+        Assert.All(viewModel.OrderDetailPaymentsForTests, entry =>
+        {
+            Assert.False(entry.IsPending);
+            Assert.True(string.IsNullOrEmpty(entry.Detail));
+        });
+        Assert.True(viewModel.OrderDetailPaymentsForTests[^1].IsLast);
+        Assert.Equal("1 lines · 2 pcs", viewModel.OrderDetailsLineSummary);
     }
 
     [Fact]
