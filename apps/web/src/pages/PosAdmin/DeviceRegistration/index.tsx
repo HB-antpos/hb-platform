@@ -489,10 +489,18 @@ export default function DeviceRegistrationPage() {
         key: 'typeSystem',
         width: 170,
         render: (_value, record) => (
-          <span className="dev-mgmt-inline">
-            <DeviceTypeTag value={record.deviceType} />
-            <span className="dev-mgmt-sub">{record.deviceSystem || EMPTY_VALUE}</span>
-          </span>
+          <div className="dev-mgmt-two">
+            <span className="dev-mgmt-inline">
+              <DeviceTypeTag value={record.deviceType} />
+              <span className="dev-mgmt-sub">{record.deviceSystem || EMPTY_VALUE}</span>
+            </span>
+            {/* 客户端版本随心跳上报；没上报的设备不占第二行，避免全表出现一排空占位。 */}
+            {record.appVersion ? (
+              <span className="dev-mgmt-sub dev-mgmt-mono dev-mgmt-ellipsis" title={record.appVersion}>
+                {record.appVersion}
+              </span>
+            ) : null}
+          </div>
         ),
       },
       {

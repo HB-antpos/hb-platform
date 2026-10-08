@@ -6056,6 +6056,7 @@ export interface components {
             isOnline?: boolean;
             currentCashierId?: string | null;
             currentCashierName?: string | null;
+            appVersion?: string | null;
         };
         DeviceVerifyRequest: {
             deviceCode?: string | null;

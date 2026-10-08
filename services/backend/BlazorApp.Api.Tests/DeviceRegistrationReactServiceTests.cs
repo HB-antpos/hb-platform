@@ -79,6 +79,30 @@ public sealed class DeviceRegistrationReactServiceTests : IDisposable
     }
 
     [Fact]
+    public void DeviceMappingProfile_MapsReportedClientVersionAndLeavesUnreportedEmpty()
+    {
+        var mapper = new MapperConfiguration(
+            config => config.AddProfile<DeviceMappingProfile>(),
+            NullLoggerFactory.Instance
+        ).CreateMapper();
+
+        var reported = mapper.Map<DeviceListItemDto>(new POSM_设备注册信息表 { 应用版本 = "1.0.51" });
+        var unreported = mapper.Map<DeviceListItemDto>(new POSM_设备注册信息表());
+
+        Assert.Equal("1.0.51", reported.AppVersion);
+        Assert.Null(unreported.AppVersion);
+    }
+
+    [Fact]
+    public void DeviceRuntimeStatusSchemaMigrator_AddsNullableAppVersionColumn()
+    {
+        var sql = string.Join("\n", DeviceRuntimeStatusSchemaMigrator.SqlScriptsForTests);
+
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'应用版本') IS NULL", sql);
+        Assert.Contains("ADD [应用版本] NVARCHAR(50) NULL", sql);
+    }
+
+    [Fact]
     public void DeviceRuntimeStatusSchemaMigrator_AddsTransactionPermissionWithAllowedDefault()
     {
         var sql = string.Join("\n", DeviceRuntimeStatusSchemaMigrator.SqlScriptsForTests);

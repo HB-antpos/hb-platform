@@ -15,7 +15,9 @@ public interface IPosRuntimeStatusApiClient
         CancellationToken cancellationToken = default);
 }
 
-public sealed class PosRuntimeStatusApiClient(HttpClient httpClient) : IPosRuntimeStatusApiClient
+public sealed class PosRuntimeStatusApiClient(
+    HttpClient httpClient,
+    IAppVersionProvider? appVersionProvider = null) : IPosRuntimeStatusApiClient
 {
     public async Task ReportAsync(
         PosRuntimeStatusReport report,
@@ -28,6 +30,9 @@ public sealed class PosRuntimeStatusApiClient(HttpClient httpClient) : IPosRunti
                 isOnline = report.IsOnline,
                 currentCashierId = report.CashierId,
                 currentCashierName = report.CashierName,
+                // 中文注释：版本号是进程内常量，随每次心跳一起上报，后台设备列表据此显示 WPF 当前版本。
+                // 未注册版本提供器时不带该字段，服务端会保留库里上次上报的版本。
+                appVersion = appVersionProvider?.CurrentVersion,
             },
             cancellationToken);
         response.EnsureSuccessStatusCode();

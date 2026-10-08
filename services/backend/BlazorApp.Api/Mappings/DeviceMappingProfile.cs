@@ -63,7 +63,8 @@ namespace BlazorApp.Api.Mappings
                 .ForMember(dest => dest.LastHeartbeatAt, opt => opt.MapFrom(src => src.最后心跳时间))
                 .ForMember(dest => dest.CurrentCashierId, opt => opt.MapFrom(src => src.当前收银员ID))
                 .ForMember(dest => dest.CurrentCashierName, opt => opt.MapFrom(src => src.当前收银员姓名))
-                .ForMember(dest => dest.CashierLoginAt, opt => opt.MapFrom(src => src.收银员登录时间));
+                .ForMember(dest => dest.CashierLoginAt, opt => opt.MapFrom(src => src.收银员登录时间))
+                .ForMember(dest => dest.AppVersion, opt => opt.MapFrom(src => src.应用版本));
         }
 
         /// <summary>

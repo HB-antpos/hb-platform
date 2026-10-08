@@ -188,6 +188,11 @@ namespace BlazorApp.Shared.DTOs
         /// 收银员登录时间
         /// </summary>
         public DateTime? CashierLoginAt { get; set; }
+
+        /// <summary>
+        /// 客户端程序版本（WPF 随心跳上报），未上报时为空
+        /// </summary>
+        public string? AppVersion { get; set; }
     }
 
     /// <summary>

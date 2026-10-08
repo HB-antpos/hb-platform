@@ -283,6 +283,52 @@ public sealed class DevicesControllerTests
     }
 
     [Fact]
+    public async Task ReportRuntimeStatus_PassesClientAppVersionToService()
+    {
+        var service = new FakeDeviceService();
+        var controller = CreateRuntimeStatusController(service);
+
+        var result = await controller.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(true, "CASHIER-1", "Alice", "1.0.51"),
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal("1.0.51", service.LastRuntimeStatusAppVersion);
+    }
+
+    [Fact]
+    public async Task ReportRuntimeStatus_AcceptsOldClientPayloadWithoutAppVersion()
+    {
+        // 旧版客户端的请求体里没有 appVersion：必须照常成功，并把 null 交给服务层（服务端据此保留旧版本）。
+        var service = new FakeDeviceService();
+        var controller = CreateRuntimeStatusController(service);
+
+        var result = await controller.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(true, null, null),
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Null(service.LastRuntimeStatusAppVersion);
+    }
+
+    private static DevicesController CreateRuntimeStatusController(FakeDeviceService service) =>
+        new(service)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(DeviceAuthConstants.DeviceCodeClaim, "POS_1042_0247"),
+                        new Claim(DeviceAuthConstants.StoreCodeClaim, "1042"),
+                        new Claim(DeviceAuthConstants.HardwareIdClaim, "INSTALL-1042"),
+                    ], DeviceAuthConstants.Scheme)),
+                }
+            }
+        };
+
+    [Fact]
     public void CreateDeviceCode_UsesStoreCodeAndLocalHourMinute()
     {
         var deviceCode = DeviceService.CreateDeviceCode(
@@ -335,6 +381,8 @@ public sealed class DevicesControllerTests
 
         public DeviceRegistrationResetContext? LastResetContext { get; private set; }
 
+        public string? LastRuntimeStatusAppVersion { get; private set; }
+
         public Task<bool> UpdateRuntimeStatusAsync(
             string hardwareId,
             string deviceCode,
@@ -342,8 +390,10 @@ public sealed class DevicesControllerTests
             bool isOnline,
             string? cashierId,
             string? cashierName,
+            string? appVersion,
             CancellationToken cancellationToken)
         {
+            LastRuntimeStatusAppVersion = appVersion;
             return Task.FromResult(true);
         }
 

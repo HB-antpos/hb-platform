@@ -107,6 +107,12 @@ namespace BlazorApp.Shared.Models.POSM
         /// </summary>
         [SugarColumn(IsNullable = true)]
         public DateTime? 收银员登录时间 { get; set; }
+
+        /// <summary>
+        /// 客户端程序版本（WPF 随心跳上报，如 1.0.51）；老版本客户端不上报时为空
+        /// </summary>
+        [SugarColumn(Length = 50, IsNullable = true)]
+        public string? 应用版本 { get; set; }
         #endregion
 
         #region 审计字段
