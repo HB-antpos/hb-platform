@@ -5,6 +5,7 @@ import {
   assigneeStatus,
   formatUtcShort,
   buildSlipRows,
+  otherSegmentLabels,
   evenSegmentCounts,
   paginateSlipRows,
   parseUtcMs,
@@ -135,5 +136,15 @@ assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 0, assignable: f
 assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 0, assignable: true }), true, '能派单但还没分配时保留入口')
 assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 3, assignable: false }), true, '只读但有分配时仍展示记录与重新打印')
 assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 3, assignable: true }), true, '能派单且有分配时展示')
+
+// 分单“同单其他段”：待领取按界面语言渲染；旧后端没有结构化字段时回退原占位串。
+const unclaimed = (no: number) => `Segment ${no} unclaimed`
+assertDeepEqual(
+  otherSegmentLabels({ otherPickerNames: ['第1段待领取', 'Li Na'], otherSegments: [{ segmentNo: 1, pickerName: null }, { segmentNo: 3, pickerName: ' Li Na ' }] }, unclaimed),
+  ['Segment 1 unclaimed', 'Li Na'],
+  '待领取用本地化文案、有姓名直接写姓名',
+)
+assertDeepEqual(otherSegmentLabels({ otherPickerNames: ['第2段待领取'] }, unclaimed), ['第2段待领取'], '旧后端无结构化字段时原样回退')
+assertDeepEqual(otherSegmentLabels({ otherPickerNames: [], otherSegments: [] }, unclaimed), [], '只有一段时为空')
 
 console.log('picking assignment logic tests passed')

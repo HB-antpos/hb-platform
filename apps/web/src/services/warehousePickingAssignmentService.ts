@@ -100,6 +100,8 @@ export interface PickingSlip {
   firstLocation?: string | null
   lastLocation?: string | null
   otherPickerNames: string[]
+  /** 同单其他段（负责人为空=待领取）；旧后端没有该字段，回退 otherPickerNames。 */
+  otherSegments?: { segmentNo: number; pickerName?: string | null }[]
   lines: PickingSlipLine[]
 }
 

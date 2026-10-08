@@ -726,6 +726,14 @@ internal sealed class WarehousePickingAssignmentService(
                     .Where(item => item.SegmentNo != number)
                     .Select(item => item.First.PickerName ?? $"第{item.SegmentNo}段待领取")
                     .ToList(),
+                OtherSegments = segments
+                    .Where(item => item.SegmentNo != number)
+                    .Select(item => new WarehousePickingSlipOtherSegmentDto
+                    {
+                        SegmentNo = item.SegmentNo,
+                        PickerName = item.First.PickerName,
+                    })
+                    .ToList(),
                 Lines = lines
                     .Select(line =>
                     {
