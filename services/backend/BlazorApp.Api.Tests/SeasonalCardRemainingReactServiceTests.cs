@@ -24,6 +24,9 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
     private readonly SqliteConnection _sqliteConnection;
     private readonly SqlSugarClient _db;
 
+    // 服务按门店本地日期判断开放窗口；默认落在 2026 圣诞节窗口内（悉尼 2026-12-28 12:00）。
+    private DateTimeOffset _now = new(2026, 12, 28, 1, 0, 0, TimeSpan.Zero);
+
     public SeasonalCardRemainingReactServiceTests()
     {
         _dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -81,6 +84,7 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
     [Fact]
     public async Task CreateSubmissionAsync_WhenCatalogUsesOtherPrice_RequiresPositiveCustomUnitPrice()
     {
+        _now = new DateTimeOffset(2026, 4, 6, 1, 0, 0, TimeSpan.Zero); // 2026 复活节 4/5 之后一天
         await SeedStoreScopeAsync();
         await SeedCatalogAsync(
             "catalog-other",
@@ -123,6 +127,7 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
     [Fact]
     public async Task CreateSubmissionAsync_WhenOtherPriceRoundsToZero_ReturnsErrorAndDoesNotInsert()
     {
+        _now = new DateTimeOffset(2026, 2, 15, 1, 0, 0, TimeSpan.Zero); // 情人节窗口内
         await SeedStoreScopeAsync();
         await SeedCatalogAsync(
             "catalog-other",
@@ -248,6 +253,7 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
     [Fact]
     public async Task CreateBatchAsync_其他价格数量为零可不填单价_有数量必须填单价()
     {
+        _now = new DateTimeOffset(2026, 4, 6, 1, 0, 0, TimeSpan.Zero); // 复活节窗口内
         await SeedStoreScopeAsync();
         await SeedFullCatalogAsync(SeasonalCardType.Easter);
         await SeedSupplierAsync("SUP-A", "Supplier A");
@@ -343,6 +349,119 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
         Assert.Equal("FORBIDDEN_STORE", (await service.CreateBatchAsync(request)).ErrorCode);
     }
 
+    [Theory]
+    [InlineData(SeasonalCardType.Easter, 2026, "2026-04-05")]
+    [InlineData(SeasonalCardType.Easter, 2027, "2027-03-28")]
+    [InlineData(SeasonalCardType.MothersDay, 2026, "2026-05-10")]
+    [InlineData(SeasonalCardType.FathersDay, 2026, "2026-09-06")]
+    [InlineData(SeasonalCardType.Christmas, 2026, "2026-12-25")]
+    [InlineData(SeasonalCardType.ValentinesDay, 2027, "2027-02-14")]
+    public void HolidayCalendar_澳洲节日日期(SeasonalCardType cardType, int year, string expected)
+    {
+        Assert.Equal(DateOnly.Parse(expected), SeasonalCardHolidayCalendar.GetHolidayDate(cardType, year));
+    }
+
+    [Theory]
+    [InlineData("2026-12-24", false, 2026, "2026-12-25")] // 节日前一天未开放，给出本次节日
+    [InlineData("2026-12-25", true, 2026, "2026-12-25")]  // 当天开放
+    [InlineData("2027-01-22", true, 2026, "2026-12-25")]  // 第 28 天仍开放，跨年仍归 2026
+    [InlineData("2027-01-23", false, 2027, "2027-12-25")] // 超过 4 周关闭，给出下一次
+    public void HolidayCalendar_圣诞节窗口为节日当天起4周且跨年归属上一年(
+        string today, bool isOpen, int seasonYear, string holiday)
+    {
+        var window = SeasonalCardHolidayCalendar.Resolve(SeasonalCardType.Christmas, DateOnly.Parse(today));
+
+        Assert.Equal(isOpen, window.IsOpen);
+        Assert.Equal(seasonYear, window.SeasonYear);
+        Assert.Equal(DateOnly.Parse(holiday), window.HolidayDate);
+        Assert.Equal(DateOnly.Parse(holiday).AddDays(28), window.ClosesOn);
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_开放窗口外_拒绝且不写入()
+    {
+        _now = new DateTimeOffset(2026, 12, 1, 1, 0, 0, TimeSpan.Zero); // 圣诞节前，未开放
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var result = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 0, 0, 0));
+
+        Assert.Equal("SEASONAL_CARD_WINDOW_CLOSED", result.ErrorCode);
+        Assert.Contains("2026-12-25", result.Message);
+        Assert.Equal(0, await _db.Queryable<SeasonalCardRemainingSubmission>().CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_一月补填圣诞节_只能填上一年()
+    {
+        _now = new DateTimeOffset(2027, 1, 10, 1, 0, 0, TimeSpan.Zero);
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var wrongYear = BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 0, 0, 0);
+        wrongYear.SeasonYear = 2027;
+        Assert.Equal("SEASONAL_CARD_WINDOW_CLOSED", (await service.CreateBatchAsync(wrongYear)).ErrorCode);
+
+        var result = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 0, 0, 0));
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2026, result.Data!.SeasonYear);
+
+        var overview = await service.GetOverviewAsync(new SeasonalCardOverviewQueryDto { StoreCode = "BRI", LocalSupplierCode = "SUP-A" });
+        var christmas = overview.Data!.Holidays.Single(item => item.CardType == SeasonalCardType.Christmas);
+        Assert.True(christmas.IsOpen);
+        Assert.Equal(2026, christmas.SeasonYear);
+        Assert.Equal("2027-01-22", christmas.ClosesOn);
+        Assert.Equal(result.Data.BatchGuid, christmas.CurrentBatch!.BatchGuid);
+        Assert.Equal(2027, overview.Data.SeasonYear);
+        Assert.Equal("2027-01-10", overview.Data.Today);
+        var valentine = overview.Data.Holidays.Single(item => item.CardType == SeasonalCardType.ValentinesDay);
+        Assert.False(valentine.IsOpen);
+        Assert.Equal("2027-02-14", valentine.OpensOn);
+        Assert.Null(valentine.CurrentBatch);
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_按门店本地日期判断_悉尼零点后即开放()
+    {
+        // UTC 12/24 13:30 = 悉尼（夏令时 UTC+11）12/25 00:30，此时已是圣诞节当天。
+        _now = new DateTimeOffset(2026, 12, 24, 13, 30, 0, TimeSpan.Zero);
+        await SeedStoreScopeAsync();
+        await _db.Updateable<Store>()
+            .SetColumns(item => item.TimeZoneId == "Australia/Sydney")
+            .Where(item => item.StoreCode == "BRI")
+            .ExecuteCommandAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var result = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 0, 0, 0));
+
+        Assert.True(result.Success, result.Message);
+    }
+
+    [Fact]
+    public async Task CreateSubmissionAsync_旧单条接口同样受开放窗口限制()
+    {
+        _now = new DateTimeOffset(2026, 6, 1, 1, 0, 0, TimeSpan.Zero);
+        await SeedStoreScopeAsync();
+        await SeedCatalogAsync("catalog-fixed-1", SeasonalCardType.Christmas, "$1", false, 1m, 1);
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var result = await service.CreateSubmissionAsync(new CreateSeasonalCardRemainingSubmissionDto
+        {
+            StoreCode = "BRI",
+            CatalogGuid = "catalog-fixed-1",
+            SeasonYear = 2026,
+            RemainingQuantity = 3,
+        });
+
+        Assert.Equal("SEASONAL_CARD_WINDOW_CLOSED", result.ErrorCode);
+    }
+
     public void Dispose()
     {
         _db.Dispose();
@@ -381,8 +500,14 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
             context,
             currentUserService,
             scopeService,
-            NullLogger<SeasonalCardRemainingReactService>.Instance
+            NullLogger<SeasonalCardRemainingReactService>.Instance,
+            new FixedTimeProvider(_now)
         );
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private async Task SeedStoreScopeAsync()

@@ -135,7 +135,10 @@ namespace BlazorApp.Shared.DTOs
     public class SeasonalCardOverviewQueryDto
     {
         public string StoreCode { get; set; } = string.Empty;
+
+        /// <summary>已不参与计算（保留兼容旧客户端）：各节日的填报年份由开放窗口决定，见 Holidays[].SeasonYear。</summary>
         public int SeasonYear { get; set; }
+
         public string LocalSupplierCode { get; set; } = string.Empty;
     }
 
@@ -144,14 +147,35 @@ namespace BlazorApp.Shared.DTOs
         public SeasonalCardType CardType { get; set; }
         public string CardTypeName { get; set; } = string.Empty;
 
-        /// <summary>该节日 + 供应商当前生效的批次；没填过为 null。</summary>
+        /// <summary>今天（门店本地日期）是否在开放窗口内：节日当天起 4 周。</summary>
+        public bool IsOpen { get; set; }
+
+        /// <summary>开放时为本次填报归属的年份（圣诞节窗口跨年时是上一年）；未开放时为下一次节日的年份。</summary>
+        public int SeasonYear { get; set; }
+
+        /// <summary>节日日期，yyyy-MM-dd；未开放时是下一次节日。</summary>
+        public string HolidayDate { get; set; } = string.Empty;
+
+        /// <summary>开放首日（= 节日当天），yyyy-MM-dd。</summary>
+        public string OpensOn { get; set; } = string.Empty;
+
+        /// <summary>开放末日（含），yyyy-MM-dd。</summary>
+        public string ClosesOn { get; set; } = string.Empty;
+
+        /// <summary>开放时该节日 + 供应商当前生效的批次；没填过或未开放为 null。</summary>
         public SeasonalCardBatchDto? CurrentBatch { get; set; }
     }
 
     public class SeasonalCardOverviewDto
     {
         public string StoreCode { get; set; } = string.Empty;
+
+        /// <summary>门店本地今天所在的年份（仅作展示兜底；提交以 Holidays[].SeasonYear 为准）。</summary>
         public int SeasonYear { get; set; }
+
+        /// <summary>门店本地今天，yyyy-MM-dd。</summary>
+        public string Today { get; set; } = string.Empty;
+
         public string LocalSupplierCode { get; set; } = string.Empty;
         public string? SupplierName { get; set; }
         public List<SeasonalCardOverviewHolidayDto> Holidays { get; set; } = new();

@@ -1,6 +1,7 @@
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Api.Services.StoreCash;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -15,18 +16,21 @@ namespace BlazorApp.Api.Services.React
         private readonly ICurrentUserService _currentUserService;
         private readonly ICurrentUserManageableStoreScopeService _scopeService;
         private readonly ILogger<SeasonalCardRemainingReactService> _logger;
+        private readonly TimeProvider _timeProvider;
 
         public SeasonalCardRemainingReactService(
             SqlSugarContext context,
             ICurrentUserService currentUserService,
             ICurrentUserManageableStoreScopeService scopeService,
-            ILogger<SeasonalCardRemainingReactService> logger
+            ILogger<SeasonalCardRemainingReactService> logger,
+            TimeProvider? timeProvider = null
         )
         {
             _db = context.Db;
             _currentUserService = currentUserService;
             _scopeService = scopeService;
             _logger = logger;
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
         public async Task<ApiResponse<List<SeasonalCardCatalogDto>>> GetCatalogAsync()
@@ -91,6 +95,15 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<SeasonalCardRemainingSubmissionDto>.Error(
                     "季节卡目录未启用",
                     "CATALOG_DISABLED"
+                );
+            }
+
+            var windowError = CheckOpenWindow(store, catalog.CardType, request.SeasonYear);
+            if (windowError != null)
+            {
+                return ApiResponse<SeasonalCardRemainingSubmissionDto>.Error(
+                    windowError,
+                    "SEASONAL_CARD_WINDOW_CLOSED"
                 );
             }
 
@@ -167,6 +180,13 @@ namespace BlazorApp.Api.Services.React
             if (store == null)
             {
                 return ApiResponse<SeasonalCardBatchDto>.Error("分店不存在", "STORE_NOT_FOUND");
+            }
+
+            // 只在节日当天起 4 周内开放，且只能填报开放窗口对应的年份（年份只读，由窗口决定）。
+            var windowError = CheckOpenWindow(store, request.CardType, request.SeasonYear);
+            if (windowError != null)
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(windowError, "SEASONAL_CARD_WINDOW_CLOSED");
             }
 
             // 名称快照以服务端查到的启用供应商为准，不信任客户端传入。
@@ -344,11 +364,6 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<SeasonalCardOverviewDto>.Error("分店代码不能为空", "STORE_CODE_REQUIRED");
             }
 
-            if (query.SeasonYear <= 0)
-            {
-                return ApiResponse<SeasonalCardOverviewDto>.Error("季节年份必须大于 0", "INVALID_SEASON_YEAR");
-            }
-
             if (string.IsNullOrWhiteSpace(query.LocalSupplierCode))
             {
                 return ApiResponse<SeasonalCardOverviewDto>.Error("请选择供应商", "SUPPLIER_REQUIRED");
@@ -362,41 +377,60 @@ namespace BlazorApp.Api.Services.React
                 return ApiResponse<SeasonalCardOverviewDto>.Error(access.Message, access.ErrorCode);
             }
 
-            var storeName = await _db.Queryable<Store>()
-                .Where(item => !item.IsDeleted && item.StoreCode == storeCode)
-                .Select(item => item.StoreName)
-                .FirstAsync();
+            var store = await _db.Queryable<Store>()
+                .FirstAsync(item => !item.IsDeleted && item.StoreCode == storeCode);
+            if (store == null)
+            {
+                return ApiResponse<SeasonalCardOverviewDto>.Error("分店不存在", "STORE_NOT_FOUND");
+            }
+
+            var today = StoreCashClock.GetStoreToday(store, _timeProvider.GetUtcNow());
+            var windows = Enum.GetValues<SeasonalCardType>()
+                .Select(cardType => SeasonalCardHolidayCalendar.Resolve(cardType, today))
+                .ToList();
+            // 开放中的节日只可能属于今年或去年（圣诞节跨年），只取这两年的记录。
+            var openYears = windows.Where(item => item.IsOpen).Select(item => item.SeasonYear).Distinct().ToList();
             var supplierName = await _db.Queryable<HBLocalSupplier>()
                 .Where(item => !item.IsDeleted && item.LocalSupplierCode == supplierCode)
                 .Select(item => item.Name)
                 .FirstAsync();
-            var rows = await _db.Queryable<SeasonalCardRemainingSubmission>()
-                .Where(item =>
-                    !item.IsDeleted
-                    && item.StoreCode == storeCode
-                    && item.SeasonYear == query.SeasonYear
-                    && item.LocalSupplierCode == supplierCode
-                )
-                .ToListAsync();
+            var rows = openYears.Count == 0
+                ? new List<SeasonalCardRemainingSubmission>()
+                : await _db.Queryable<SeasonalCardRemainingSubmission>()
+                    .Where(item =>
+                        !item.IsDeleted
+                        && item.StoreCode == storeCode
+                        && openYears.Contains(item.SeasonYear)
+                        && item.LocalSupplierCode == supplierCode
+                    )
+                    .ToListAsync();
 
-            var rowsByType = rows.ToLookup(item => item.CardType);
             return ApiResponse<SeasonalCardOverviewDto>.OK(new SeasonalCardOverviewDto
             {
                 StoreCode = storeCode,
-                SeasonYear = query.SeasonYear,
+                SeasonYear = today.Year,
+                Today = FormatDate(today),
                 LocalSupplierCode = supplierCode,
                 SupplierName = supplierName,
-                Holidays = Enum.GetValues<SeasonalCardType>()
-                    .Select(cardType =>
+                Holidays = windows
+                    .Select(window =>
                     {
-                        var latest = SeasonalCardBatchResolver.FindLatestBatch(rowsByType[cardType]);
+                        var latest = window.IsOpen
+                            ? SeasonalCardBatchResolver.FindLatestBatch(rows.Where(item =>
+                                item.CardType == window.CardType && item.SeasonYear == window.SeasonYear))
+                            : null;
                         return new SeasonalCardOverviewHolidayDto
                         {
-                            CardType = cardType,
-                            CardTypeName = SeasonalCardCatalogSeedData.GetCardTypeName(cardType),
+                            CardType = window.CardType,
+                            CardTypeName = SeasonalCardCatalogSeedData.GetCardTypeName(window.CardType),
+                            IsOpen = window.IsOpen,
+                            SeasonYear = window.SeasonYear,
+                            HolidayDate = FormatDate(window.HolidayDate),
+                            OpensOn = FormatDate(window.OpensOn),
+                            ClosesOn = FormatDate(window.ClosesOn),
                             CurrentBatch = latest == null
                                 ? null
-                                : SeasonalCardBatchResolver.ToBatchDto(latest, storeName, true),
+                                : SeasonalCardBatchResolver.ToBatchDto(latest, store.StoreName, true),
                         };
                     })
                     .ToList(),
@@ -663,6 +697,25 @@ namespace BlazorApp.Api.Services.React
             SupplierName = item.SupplierName,
             BatchGuid = item.BatchGuid,
         };
+
+        /// <summary>不在开放窗口内或年份不是窗口对应年份时返回错误文案；可以提交返回 null。</summary>
+        private string? CheckOpenWindow(Store store, SeasonalCardType cardType, int seasonYear)
+        {
+            var today = StoreCashClock.GetStoreToday(store, _timeProvider.GetUtcNow());
+            var window = SeasonalCardHolidayCalendar.Resolve(cardType, today);
+            var name = SeasonalCardCatalogSeedData.GetCardTypeName(cardType);
+            if (!window.IsOpen)
+            {
+                return $"{name}还未开放填报，开放时间 {FormatDate(window.OpensOn)} 至 {FormatDate(window.ClosesOn)}";
+            }
+
+            return seasonYear == window.SeasonYear
+                ? null
+                : $"当前只能填报 {window.SeasonYear} 年{name}（开放至 {FormatDate(window.ClosesOn)}）";
+        }
+
+        private static string FormatDate(DateOnly date) =>
+            date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
         private static bool IsSameAsBatch(
             IReadOnlyCollection<SeasonalCardRemainingSubmission> currentBatch,
