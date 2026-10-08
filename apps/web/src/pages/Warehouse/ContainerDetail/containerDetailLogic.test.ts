@@ -84,7 +84,6 @@ import {
   getContainerDetailCreateProductRowLabel,
   getContainerDetailProductType,
   getContainerDetailProductTypeFilterKey,
-  getContainerDetailReadonlyOemPrice,
   getContainerDetailImageUrl,
   getContainerDetailImportPriceTrend,
   getContainerDetailRealtimeImportPrice,
@@ -863,21 +862,6 @@ assertEqual(
   getContainerDetailOemPriceSource({ id: 108, hguid: 'oem-source-none' }),
   'none',
   '零售价来源应识别无价格状态',
-)
-assertEqual(
-  getContainerDetailReadonlyOemPrice({ id: 109, hguid: 'readonly-oem-camel', readonlyOemPrice: 6.6, 贴牌价格: 2.2 }),
-  6.6,
-  '只读零售价应读取后端 camelCase 字段',
-)
-assertEqual(
-  getContainerDetailReadonlyOemPrice({ id: 110, hguid: 'readonly-oem-pascal', ReadonlyOemPrice: 7.7, 贴牌价格: 2.2 }),
-  7.7,
-  '只读零售价应兼容后端 PascalCase 字段',
-)
-assertEqual(
-  getContainerDetailReadonlyOemPrice({ id: 111, hguid: 'readonly-oem-none', 贴牌价格: 2.2 }),
-  undefined,
-  '只读零售价缺字段时不应回退货柜明细业务价',
 )
 
 assertDeepEqual(
@@ -1791,6 +1775,8 @@ assertDeepEqual(
     abnormalImport: 2,
     active: 2,
     inactive: 2,
+    priceUp: 0,
+    priceDown: 0,
     normal: 1,
     set: 1,
     multi: 1,
@@ -2576,7 +2562,6 @@ const requiredContainerI18nKeys = [
   'containers.freightCalculator.refreshFailed',
   'containers.actions.batchUpdateFloatRate',
   'containers.actions.batchUpdatePrices',
-  'containers.actions.showReadonlyOemPrice',
   'containers.actions.pushToHq',
   'containers.actions.saveDetails',
   'containers.actions.matchDomesticData',
@@ -2769,14 +2754,9 @@ assertEqual(
   '清空表格排序或列状态时应恢复货号升序默认排序',
 )
 assertEqual(
-  pageSource.includes('const [showReadonlyOemPrice, setShowReadonlyOemPrice] = useState(false)'),
+  !pageSource.includes('showReadonlyOemPrice') && !pageSource.includes('readonlyOemPriceColumn') && !columnsSource.includes('renderReadonlyOemPriceCell'),
   true,
-  '只读零售价快览列应默认关闭',
-)
-assertEqual(
-  pageSource.includes('showReadonlyOemPrice ? [readonlyOemPriceColumn] : []'),
-  true,
-  '只读零售价快览列应只在开关打开时插入表格列',
+  '只读零售价开关与快览列已取消',
 )
 
 assertEqual(
@@ -5327,10 +5307,11 @@ const categoryColumnSource = pageSource.slice(
 assertEqual(
   categoryColumnSource.includes("title: renderCompactHeader(t('containers.fields.category'") &&
     categoryColumnSource.includes('openRowCategoryModal(row)') &&
-    categoryColumnSource.includes('renderContainerDetailCategoryCell(row, categoryLookup, i18n.language') &&
-    columnsSource.includes("const displayName = getContainerDetailCategoryName(record) || '--'"),
+    categoryColumnSource.includes('renderContainerDetailCategoryCell(row, categoryLookup)') &&
+    columnsSource.includes("const displayName = resolveContainerDetailCategoryEnglishName(tooltipRecord, categoryLookup) || '--'") &&
+    columnsSource.includes("getWarehouseProductCategoryTooltip(tooltipRecord, categoryLookup, 'en')"),
   true,
-  '分类列应显示分类名称，Tooltip 使用完整路径 helper，缺失时显示 --，且有权限时可打开单行目标分类修改弹窗',
+  '分类列应一律显示分类英文名，Tooltip 使用英文完整路径，缺失时显示 --，且有权限时可打开单行目标分类修改弹窗',
 )
 const barcodeColumnSource = pageSource.slice(
   pageSource.indexOf("renderColumnTitle('barcode', t('containers.fields.barcode'))"),
@@ -5340,16 +5321,6 @@ assertEqual(
   barcodeColumnSource.includes("fixed: 'left'"),
   false,
   '条码列应按截图移动到后段，不再固定在左侧',
-)
-assertEqual(
-  barcodeColumnSource.includes('showReadonlyOemPrice ? [readonlyOemPriceColumn] : []') &&
-    pageSource.includes("const readonlyOemPriceColumn: ColumnsType<ContainerDetail>[number]") &&
-    pageSource.includes('render: (_, row) => renderReadonlyOemPriceCell(row)') &&
-    columnsSource.includes('function renderReadonlyOemPriceCell(row: ContainerDetail)') &&
-    !pageSource.slice(pageSource.indexOf('const readonlyOemPriceColumn'), pageSource.indexOf('const baseColumns')).includes("fixed: 'left'") &&
-    !pageSource.slice(pageSource.indexOf('const readonlyOemPriceColumn'), pageSource.indexOf('const baseColumns')).includes('<InputNumber'),
-  true,
-  '条码列后应按开关插入只读零售价列，便于横向滚动前快速核价',
 )
 assertEqual(
   pageSource.includes('rowSelection={{') &&
@@ -5388,11 +5359,11 @@ assertEqual(
   '货柜明细表格应接入可拖拽表头 cell 与横向 SortableContext',
 )
 assertEqual(
-  pageSource.includes("const CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.containerDetail.columnOrder.v3'") &&
+  pageSource.includes("const CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.containerDetail.columnOrder.v4'") &&
     pageSource.includes('localStorage.setItem(CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY') &&
     pageSource.includes('mergeContainerDetailColumnOrder('),
   true,
-  '货柜明细列顺序应保存到 v3 localStorage key，覆盖旧默认顺序并兼容新增列',
+  '货柜明细列顺序应保存到 v4 localStorage key，覆盖旧默认顺序并兼容新增列',
 )
 assertEqual(
   pageSource.includes("const CONTAINER_DETAIL_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.containerDetail.columnWidths.v1'") &&
@@ -5437,7 +5408,7 @@ assertEqual(
   '货柜明细手动拖拽列或列宽后应提供重置列按钮并清除本地列设置',
 )
 assertEqual(
-  pageSource.includes('const draggableColumnKeys = baseColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey)') &&
+  pageSource.includes('const draggableColumnKeys = sortContainerDetailColumnKeysByDefaultOrder(\n    baseColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey),\n  )') &&
     pageSource.includes('rowSelection={{') &&
     !pageSource.includes("columnOrder.includes('selection')"),
   true,
@@ -6177,12 +6148,6 @@ assertEqual(
     !pageSource.includes('renderNumericCell(index + 1)'),
   true,
   '分页模式的编号应接续前页，全量模式从 1 开始',
-)
-assertEqual(
-  pageSource.slice(pageSource.indexOf('const readonlyOemPriceColumn'), pageSource.indexOf('const baseColumns'))
-    .includes("title: renderCompactHeader(t('containers.actions.showReadonlyOemPrice', '只读零售价'))"),
-  true,
-  '只读零售价列标题应与开关同名，不能与可编辑的零售价列重名',
 )
 assertEqual(
   pageSource.includes('const [remoteTagStats, setRemoteTagStats] = useState<ContainerDetailTagStats | null>(null)') &&

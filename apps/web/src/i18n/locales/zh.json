@@ -228,7 +228,6 @@
       "selectAllExportColumns": "全选",
       "resetDefaultExportColumns": "恢复默认",
       "backfillLastPrices": "回填上次价格",
-      "showReadonlyOemPrice": "只读零售价",
       "pushToHq": "发送到 HQ",
       "saveDetails": "保存明细",
       "pasteColumn": "粘贴列",

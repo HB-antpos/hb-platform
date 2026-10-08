@@ -1,7 +1,19 @@
 import dayjs from 'dayjs'
 import type { ContainerDetail } from '../../../types/container'
-import type { ContainerDetailTableColumnKey, ContainerDetailTagStats } from './containerDetailLogic'
+import { buildWarehouseCategoryLookup } from '../Products/categoryPath'
 import {
+  buildContainerDetailTagStats,
+  buildContainerDetailWarehouseImportPriceUpdates,
+  matchesContainerDetailSelectedTags,
+  moveContainerDetailColumnOrder,
+  type ContainerDetailTableColumnKey,
+  type ContainerDetailTagStats,
+} from './containerDetailLogic'
+import {
+  CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER,
+  alignContainerDetailColumnOrderToView,
+  resolveContainerDetailCategoryEnglishName,
+  sortContainerDetailColumnKeysByDefaultOrder,
   CONTAINER_DETAIL_VIEW_DEFAULT_COLUMN_WIDTHS,
   getContainerDetailViewDefaultColumnWidth,
   CONTAINER_DETAIL_NEW_STATE_TAGS,
@@ -43,30 +55,59 @@ function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
 
 assertEqual(normalizeContainerDetailColumnView('pricing'), 'pricing', '已知视图应原样保留')
 assertEqual(normalizeContainerDetailColumnView('unknown'), DEFAULT_CONTAINER_DETAIL_COLUMN_VIEW, '未知视图应回退默认视图')
-assertEqual(normalizeContainerDetailColumnView(null), 'cost', '本机没记过视图时默认成本核算')
+assertEqual(normalizeContainerDetailColumnView(null), 'all', '本机没记过视图时默认显示全部列')
 
-const defaultOrder: ContainerDetailTableColumnKey[] = [
+// 列定义的书写顺序（调整前的默认顺序），排序后应得到新的默认顺序。
+const declaredOrder: ContainerDetailTableColumnKey[] = [
   'product', 'index', 'image', 'itemNumber', 'englishName', 'categoryName', 'containerPieces', 'packingQuantity',
   'containerQuantity', 'unitVolume', 'domesticPrice', 'transportCost', 'unitTransportCost', 'floatRate',
   'middlePackQuantity', 'warehouseImportPrice', 'importPrice', 'oemPrice', 'lastOEMPrice', 'newProduct',
   'productType', 'matchType', 'barcode', 'productName', 'warehouseStatus', 'remark', 'issues',
 ]
+const defaultOrder = sortContainerDetailColumnKeysByDefaultOrder(declaredOrder)
+assertDeepEqual(defaultOrder, CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER, '列定义按默认列顺序排序')
+assertDeepEqual(
+  sortContainerDetailColumnKeysByDefaultOrder(['remark', 'futureColumn' as ContainerDetailTableColumnKey, 'index']),
+  ['index', 'remark', 'futureColumn'],
+  '默认清单外的新列排在已知列之后',
+)
 const fixedLeft = new Set<ContainerDetailTableColumnKey>(['product', 'index', 'image', 'itemNumber'])
 
 const allViewKeys = resolveContainerDetailViewColumnKeys('all', defaultOrder, fixedLeft)
 assertEqual(allViewKeys.includes('product') || allViewKeys.includes('issues'), false, '全部列不显示视图专用的合成列')
 assertEqual(allViewKeys.length, defaultOrder.length - 2, '全部列保留原有全部业务列')
-assertEqual(allViewKeys[0], 'index', '全部列沿用原列顺序')
+assertDeepEqual(
+  allViewKeys.slice(0, 14),
+  [
+    'index', 'image', 'itemNumber', 'englishName', 'productName', 'categoryName', 'domesticPrice', 'warehouseStatus',
+    'transportCost', 'floatRate', 'warehouseImportPrice', 'importPrice', 'lastOEMPrice', 'oemPrice',
+  ],
+  '全部列前 14 列按指定顺序：编号/图片/货号/英文名称/中文名称/分类/国内价格/仓库状态/运输成本/调整浮率/实时进货价/进口价格/实时零售价/零售价',
+)
+assertDeepEqual(
+  allViewKeys.slice(14),
+  [
+    'containerPieces', 'packingQuantity', 'containerQuantity', 'unitVolume', 'unitTransportCost', 'middlePackQuantity',
+    'newProduct', 'productType', 'matchType', 'barcode', 'remark',
+  ],
+  '其他列按原有相对顺序排在后面',
+)
 
+const costViewKeys = ['product', 'containerPieces', 'packingQuantity', 'containerQuantity', 'unitVolume', 'domesticPrice', 'unitTransportCost', 'floatRate', 'importPrice', 'issues']
 assertDeepEqual(
   resolveContainerDetailViewColumnKeys('cost', defaultOrder, fixedLeft),
-  ['product', 'containerPieces', 'packingQuantity', 'containerQuantity', 'unitVolume', 'domesticPrice', 'unitTransportCost', 'floatRate', 'importPrice', 'issues'],
-  '成本核算视图按设计列出成本相关列',
+  costViewKeys,
+  '成本核算视图没拖拽过时按视图自身清单顺序，不跟随全部列的新默认顺序',
 )
 assertDeepEqual(
   resolveContainerDetailViewColumnKeys('pricing', defaultOrder, fixedLeft),
   ['product', 'englishName', 'categoryName', 'warehouseImportPrice', 'importPrice', 'oemPrice', 'matchType', 'warehouseStatus'],
-  '上架定价视图按当前列顺序列出定价相关列',
+  '上架定价视图没拖拽过时保持原来的显示顺序',
+)
+assertDeepEqual(
+  resolveContainerDetailViewColumnKeys('cost', [...defaultOrder.filter((key) => key !== 'remark'), 'remark'], fixedLeft),
+  costViewKeys,
+  '其他列（本视图不显示的列）调整顺序时，不应被当成拖拽过而打乱成本核算视图',
 )
 // 用户把合成商品列拖到了后面：左固定列仍要挪到最前，其余列保持拖拽后的相对顺序。
 const draggedOrder: ContainerDetailTableColumnKey[] = ['containerPieces', 'floatRate', 'product', 'importPrice', 'issues']
@@ -75,6 +116,101 @@ assertDeepEqual(
   ['product', 'containerPieces', 'floatRate', 'importPrice', 'issues'],
   '视图里左固定列必须排在最前，其余列沿用拖拽顺序',
 )
+// 成本核算里把进口价格拖到装柜件数前：先对齐到显示顺序再移动，结果应与用户看到的一致。
+const alignedCostOrder = alignContainerDetailColumnOrderToView(defaultOrder, resolveContainerDetailViewColumnKeys('cost', defaultOrder))
+assertDeepEqual(
+  resolveContainerDetailViewColumnKeys('cost', alignedCostOrder, fixedLeft),
+  costViewKeys,
+  '对齐到视图显示顺序后，视图展示不变',
+)
+assertDeepEqual(
+  resolveContainerDetailViewColumnKeys('cost', moveContainerDetailColumnOrder(alignedCostOrder, 'importPrice', 'containerPieces'), fixedLeft),
+  ['product', 'importPrice', 'containerPieces', 'packingQuantity', 'containerQuantity', 'unitVolume', 'domesticPrice', 'unitTransportCost', 'floatRate', 'issues'],
+  '视图内拖拽后的顺序与拖拽动作一致',
+)
+assertDeepEqual(
+  resolveContainerDetailViewColumnKeys('all', alignedCostOrder, fixedLeft).filter((key) => !costViewKeys.includes(key)),
+  allViewKeys.filter((key) => !costViewKeys.includes(key)),
+  '对齐只重排本视图的列，其他列位置不动',
+)
+
+// ---- 涨跌筛选与更新仓库进货价 ----
+
+const trendRows: ContainerDetail[] = [
+  { id: 1, hguid: 'up', 商品编码: 'P-UP', 进口价格: 1.37, warehouseImportPrice: 1.19 },
+  { id: 2, hguid: 'down', 商品编码: 'P-DOWN', 进口价格: 1.66, warehouseImportPrice: 1.96 },
+  { id: 3, hguid: 'same', 商品编码: 'P-SAME', 进口价格: 0.89, warehouseImportPrice: 0.89 },
+  { id: 4, hguid: 'no-warehouse', 商品编码: 'P-NEW', 进口价格: 2, 是否新商品: true },
+  { id: 5, hguid: 'no-import', 商品编码: 'P-NO-IMPORT', warehouseImportPrice: 1 },
+]
+const trendStats = buildContainerDetailTagStats(trendRows)
+assertEqual(trendStats.priceUp, 1, '进口价高于实时进货价计为涨价')
+assertEqual(trendStats.priceDown, 1, '进口价低于实时进货价计为降价；持平或任一价格缺失都不计')
+assertDeepEqual(
+  trendRows.filter((row) => matchesContainerDetailSelectedTags(row, ['priceUp'])).map((row) => row.hguid),
+  ['up'],
+  '涨价筛选只留涨价明细',
+)
+assertDeepEqual(
+  trendRows.filter((row) => matchesContainerDetailSelectedTags(row, ['priceUp', 'priceDown'])).map((row) => row.hguid),
+  ['up', 'down'],
+  '涨价、降价同组取并集',
+)
+assertDeepEqual(
+  trendRows.filter((row) => matchesContainerDetailSelectedTags(row, ['priceDown', 'existing'])).map((row) => row.hguid),
+  ['down'],
+  '涨跌组与其他标签组取交集',
+)
+assertDeepEqual(
+  buildContainerDetailWarehouseImportPriceUpdates([
+    ...trendRows,
+    { id: 6, hguid: 'up-dup', 商品编码: 'P-UP', 进口价格: 9, warehouseImportPrice: 1.19 },
+    { id: 7, hguid: 'nested-code', 商品信息: { 商品编码: ' P-NESTED ' }, 进口价格: 3 },
+    { id: 8, hguid: 'zero', 商品编码: 'P-ZERO', 进口价格: 0, warehouseImportPrice: 1 },
+  ]),
+  [
+    { productCode: 'P-UP', importPrice: 1.37 },
+    { productCode: 'P-DOWN', importPrice: 1.66 },
+    { productCode: 'P-NESTED', importPrice: 3 },
+  ],
+  '更新仓库进货价只取已有商品、进口价 > 0 且与实时进货价不同的行，同一商品只取第一行',
+)
+
+// ---- 分类列一律显示英文名 ----
+
+const categoryLookup = buildWarehouseCategoryLookup([
+  {
+    categoryGUID: 'cat-toys',
+    categoryName: 'Toys',
+    chineseName: '玩具',
+    isActive: true,
+    children: [
+      { categoryGUID: 'cat-toys-general', categoryName: 'Toys General', chineseName: '综合玩具', isActive: true, children: [] },
+      { categoryGUID: 'cat-toys-no-en', categoryName: '', chineseName: '无英文', isActive: true, children: [] },
+    ],
+  },
+])
+assertEqual(
+  resolveContainerDetailCategoryEnglishName({ categoryName: '综合玩具', warehouseCategoryGUID: 'cat-toys-general' }, categoryLookup),
+  'Toys General',
+  '有分类 GUID 时按分类树取英文名，后端给中文名也显示英文',
+)
+assertEqual(
+  resolveContainerDetailCategoryEnglishName({ categoryName: '综合玩具' }, categoryLookup),
+  'Toys General',
+  '只有中文分类名时按名称反查英文名',
+)
+assertEqual(
+  resolveContainerDetailCategoryEnglishName({ categoryName: 'Unknown 分类' }, categoryLookup),
+  'Unknown 分类',
+  '分类树里查不到时原样显示后端返回的名称',
+)
+assertEqual(
+  resolveContainerDetailCategoryEnglishName({ warehouseCategoryGUID: 'cat-toys-no-en' }, categoryLookup),
+  '无英文',
+  '分类没有英文名时回退中文名',
+)
+assertEqual(resolveContainerDetailCategoryEnglishName({}, categoryLookup), undefined, '没有分类时返回空，由单元格显示 --')
 
 // ---- 标签分组 ----
 
