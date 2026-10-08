@@ -3773,7 +3773,34 @@ const createProductsJobSource = pageSource.slice(
   pageSource.indexOf('const showCreateProductsJobResult = (job: ContainerProductCreationJob) => {'),
   pageSource.indexOf('const updateExistingPurchase = async () => {'),
 )
-assertEqual(createProductsJobSource.includes('loadData()'), false, '批量创建新商品后台任务终态不应自动刷新货柜明细表格')
+// 创建新商品任务正常结束后要重新加载明细（已建好的行不再显示为「新商品」），但不走 loadData：
+// loadData 会连带整页 loading 刷货柜头，并且使用发起任务那次 render 的旧筛选/排序闭包。
+assertEqual(
+  createProductsJobSource.includes('loadData()') || createNewProductsHandlerSource.includes('loadData('),
+  false,
+  '批量创建新商品终态后不应使用 loadData（整页 loading 闪动，且旧闭包会覆盖任务期间改过的筛选）',
+)
+assertEqual(
+  createNewProductsHandlerSource.split('await reloadCurrentDetailRef.current()').length - 1,
+  1,
+  '批量创建新商品终态后应只重新加载一次货柜明细，并经 ref 使用最新 render 的查询闭包',
+)
+{
+  const showResultIndex = createNewProductsHandlerSource.indexOf('showCreateProductsJobResult(finalJob)')
+  const clearSelectionIndex = createNewProductsHandlerSource.indexOf('setSelectedRowKeys([])', showResultIndex)
+  const reloadIndex = createNewProductsHandlerSource.indexOf('await reloadCurrentDetailRef.current()')
+  const catchIndex = createNewProductsHandlerSource.indexOf("t('containers.messages.createProductFailed'")
+  assertEqual(
+    showResultIndex >= 0 &&
+      showResultIndex < clearSelectionIndex &&
+      clearSelectionIndex < reloadIndex &&
+      reloadIndex < catchIndex &&
+      // 重新加载只出现在 try 分支（任务正常结束）；任务提交/轮询抛异常的 catch 分支不刷新。
+      createNewProductsHandlerSource.indexOf('reloadCurrentDetailRef', catchIndex) === -1,
+    true,
+    '创建新商品任务正常结束（含部分完成、带失败明细）后应展示结果、清空勾选并重新加载明细；抛异常的 catch 分支不刷新',
+  )
+}
 assertEqual(createProductsJobSource.includes('Modal.'), false, '批量创建新商品后台任务终态只使用右上角通知，不应再弹结果 Modal')
 assertEqual(
   pageSource.includes("createPushProductsToHqJob") && pageSource.includes("getPushProductsToHqJob"),

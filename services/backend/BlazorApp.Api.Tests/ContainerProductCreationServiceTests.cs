@@ -1913,6 +1913,268 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_已存在套装关系价为空时重跑保留已有零售价且重算通过()
+    {
+        // 复现线上现象：套装首次创建成功后，页面没刷新又点一次「创建新商品」。
+        // 套装里有一行垃圾关系（DomesticSetProduct.OEMPrice 为空），已有行的零售价来自首次创建时的父商品兜底价；
+        // 旧逻辑把已有行价格覆盖成空，导致「子项零售价为空或0」重算失败并回滚。
+        const string productCode = "P-SET-KEEP-PRICE";
+        await SeedExistingSetWithTwoChildrenAsync(
+            productCode,
+            "C-SET-KEEP-PRICE",
+            "D-SET-KEEP-PRICE",
+            relationPriceA: 20m,
+            relationPriceB: null,
+            activeStoreCodes: new[] { "S001", "S002" }
+        );
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-set-keep-price",
+                ContainerGuid = "C-SET-KEEP-PRICE",
+                DetailHguids = new List<string> { "D-SET-KEEP-PRICE" },
+            }
+        );
+
+        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(0, result.SkippedCount);
+        Assert.Equal(0, result.FailedCount);
+        // 关系价为空 + 其余字段都没变：没有任何需要刷新的内容，应判定为“已完整”。
+        Assert.Contains(result.Created, item =>
+            item.ProductCode == productCode && item.Message == "套装子码已完整"
+        );
+        var setCodes = await _db.Queryable<ProductSetCode>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.Equal(20m, setCodes.Single(p => p.SetProductCode == $"{productCode}-A").SetRetailPrice);
+        Assert.Equal(50m, setCodes.Single(p => p.SetProductCode == $"{productCode}-B").SetRetailPrice);
+        Assert.Equal(10m, setCodes.Sum(p => p.SetPurchasePrice));
+        var storeRows = await _db.Queryable<StoreMultiCodeProduct>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.Equal(4, storeRows.Count);
+        Assert.All(storeRows.Where(p => p.MultiCodeProductCode == $"{productCode}-B"), row => Assert.Equal(50m, row.MultiCodeRetailPrice));
+        Assert.All(storeRows.Where(p => p.MultiCodeProductCode == $"{productCode}-A"), row => Assert.Equal(20m, row.MultiCodeRetailPrice));
+        foreach (var storeCode in new[] { "S001", "S002" })
+        {
+            Assert.Equal(10m, storeRows.Where(p => p.StoreCode == storeCode).Sum(p => p.PurchasePrice));
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_已存在套装关系价为0时同样保留已有零售价()
+    {
+        // 关系价为 0 与为空同样不可用，不能把已有的有效零售价覆盖成 0。
+        const string productCode = "P-SET-KEEP-ZERO";
+        await SeedExistingSetWithTwoChildrenAsync(
+            productCode,
+            "C-SET-KEEP-ZERO",
+            "D-SET-KEEP-ZERO",
+            relationPriceA: 0m,
+            relationPriceB: 0m,
+            activeStoreCodes: new[] { "S001" }
+        );
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-set-keep-zero",
+                ContainerGuid = "C-SET-KEEP-ZERO",
+                DetailHguids = new List<string> { "D-SET-KEEP-ZERO" },
+            }
+        );
+
+        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(0, result.FailedCount);
+        Assert.Contains(result.Created, item => item.Message == "套装子码已完整");
+        var setCodes = await _db.Queryable<ProductSetCode>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.Equal(20m, setCodes.Single(p => p.SetProductCode == $"{productCode}-A").SetRetailPrice);
+        Assert.Equal(50m, setCodes.Single(p => p.SetProductCode == $"{productCode}-B").SetRetailPrice);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_已存在套装关系价大于0且不同时仍刷新为新价()
+    {
+        // 关系价可用（> 0）时保持原行为：已有行价格跟随关系价刷新，总部与所有启用门店一致。
+        const string productCode = "P-SET-REFRESH-PRICE";
+        await SeedExistingSetWithTwoChildrenAsync(
+            productCode,
+            "C-SET-REFRESH-PRICE",
+            "D-SET-REFRESH-PRICE",
+            relationPriceA: 25m,
+            relationPriceB: 50m,
+            activeStoreCodes: new[] { "S001", "S002" }
+        );
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-set-refresh-price",
+                ContainerGuid = "C-SET-REFRESH-PRICE",
+                DetailHguids = new List<string> { "D-SET-REFRESH-PRICE" },
+            }
+        );
+
+        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(0, result.FailedCount);
+        Assert.Contains(result.Created, item => item.Message == "套装子码已补齐");
+        var setCodes = await _db.Queryable<ProductSetCode>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.Equal(25m, setCodes.Single(p => p.SetProductCode == $"{productCode}-A").SetRetailPrice);
+        Assert.Equal(50m, setCodes.Single(p => p.SetProductCode == $"{productCode}-B").SetRetailPrice);
+        Assert.Equal(10m, setCodes.Sum(p => p.SetPurchasePrice));
+        var storeRows = await _db.Queryable<StoreMultiCodeProduct>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.All(storeRows.Where(p => p.MultiCodeProductCode == $"{productCode}-A"), row => Assert.Equal(25m, row.MultiCodeRetailPrice));
+        Assert.All(storeRows.Where(p => p.MultiCodeProductCode == $"{productCode}-B"), row => Assert.Equal(50m, row.MultiCodeRetailPrice));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_缺少总部与门店行的套装带空价关系时仍被校验拒绝且整体回滚()
+    {
+        // 防止放过真正的坏数据：保留已有价只针对“已有行”；新建分支（已有商品缺 ProductSetCode/门店多码行）
+        // 带着空价关系去新建时，零售价仍为空，重算校验必须拒绝并回滚，不能落下半成品。
+        const string productCode = "P-SET-NEW-NULL-PRICE";
+        const string childCode = "P-SET-NEW-NULL-PRICE-CHILD";
+        await PrepareExistingSetCompletionAsync(productCode, childCode, "D-SET-NEW-NULL-PRICE", productType: 1);
+        await _db.Updateable<DomesticSetProduct>()
+            .SetColumns(p => p.OEMPrice == null)
+            .Where(p => p.ProductCode == productCode)
+            .ExecuteCommandAsync();
+
+        var exception = await Assert.ThrowsAnyAsync<Exception>(() => CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-set-new-null-price",
+                ContainerGuid = "C001",
+                DetailHguids = new List<string> { "D-SET-NEW-NULL-PRICE" },
+            }
+        ));
+
+        Assert.Contains("子项零售价为空或0", exception.Message);
+        Assert.Equal(0, await _db.Queryable<ProductSetCode>().Where(p => p.ProductCode == productCode).CountAsync());
+        Assert.Equal(0, await _db.Queryable<StoreMultiCodeProduct>().Where(p => p.ProductCode == productCode).CountAsync());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_未启用门店存在空价或0价多码行时不影响套装重跑且不被改动()
+    {
+        // 校验与重算只覆盖启用门店（Store.IsActive && !IsDeleted）；未启用门店上的脏多码行既不参与校验，也不被刷新。
+        const string productCode = "P-SET-INACTIVE-STORE";
+        await SeedExistingSetWithTwoChildrenAsync(
+            productCode,
+            "C-SET-INACTIVE-STORE",
+            "D-SET-INACTIVE-STORE",
+            relationPriceA: 25m,
+            relationPriceB: null,
+            activeStoreCodes: new[] { "S001" }
+        );
+        await InsertStoreAsync("S-OFF", isActive: false, isDeleted: false);
+        await InsertStoreAsync("S-DEL", isActive: true, isDeleted: true);
+        foreach (var storeCode in new[] { "S-OFF", "S-DEL" })
+        {
+            await InsertStoreMultiCodeAsync(storeCode, productCode, $"{productCode}-A", "BAR-OLD-A", purchasePrice: null, retailPrice: null);
+            await InsertStoreMultiCodeAsync(storeCode, productCode, $"{productCode}-B", "BAR-OLD-B", purchasePrice: 99m, retailPrice: 0m);
+        }
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = "op-set-inactive-store",
+                ContainerGuid = "C-SET-INACTIVE-STORE",
+                DetailHguids = new List<string> { "D-SET-INACTIVE-STORE" },
+            }
+        );
+
+        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(0, result.FailedCount);
+        // 启用门店正常刷新：A 跟随关系价 25，B 关系价为空保留 50。
+        var activeRows = await _db.Queryable<StoreMultiCodeProduct>()
+            .Where(p => p.ProductCode == productCode && p.StoreCode == "S001")
+            .ToListAsync();
+        Assert.Equal(25m, activeRows.Single(p => p.MultiCodeProductCode == $"{productCode}-A").MultiCodeRetailPrice);
+        Assert.Equal(50m, activeRows.Single(p => p.MultiCodeProductCode == $"{productCode}-B").MultiCodeRetailPrice);
+        Assert.Equal(10m, activeRows.Sum(p => p.PurchasePrice));
+        // 未启用/已删除门店的行原样保留：不新增、不刷新、不重算成本。
+        foreach (var storeCode in new[] { "S-OFF", "S-DEL" })
+        {
+            var rows = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(p => p.ProductCode == productCode && p.StoreCode == storeCode)
+                .ToListAsync();
+            Assert.Equal(2, rows.Count);
+            var rowA = rows.Single(p => p.MultiCodeProductCode == $"{productCode}-A");
+            Assert.Null(rowA.MultiCodeRetailPrice);
+            Assert.Null(rowA.PurchasePrice);
+            Assert.Equal("BAR-OLD-A", rowA.MultiBarcode);
+            var rowB = rows.Single(p => p.MultiCodeProductCode == $"{productCode}-B");
+            Assert.Equal(0m, rowB.MultiCodeRetailPrice);
+            Assert.Equal(99m, rowB.PurchasePrice);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SubmitContainer_已存在套装关系价大于0且不同时仍刷新并完成货柜()
+    {
+        // 整柜提交口径不变：关系价可用时照旧刷新已有行，其余校验与货柜完成逻辑不受影响。
+        const string productCode = "P-SET-SUBMIT-REFRESH";
+        const string containerCode = "C-SET-SUBMIT-REFRESH";
+        await SeedExistingSetWithTwoChildrenAsync(
+            productCode,
+            containerCode,
+            "D-SET-SUBMIT-REFRESH",
+            relationPriceA: 25m,
+            relationPriceB: 50m,
+            activeStoreCodes: new[] { "S001" },
+            insertContainer: true
+        );
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = $"submit-container:{containerCode}",
+                ContainerGuid = containerCode,
+                SubmitContainer = true,
+            }
+        );
+
+        Assert.Equal(0, result.FailedCount);
+        Assert.True(result.ContainerCompleted);
+        var setCodes = await _db.Queryable<ProductSetCode>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.Equal(25m, setCodes.Single(p => p.SetProductCode == $"{productCode}-A").SetRetailPrice);
+        Assert.Equal(50m, setCodes.Single(p => p.SetProductCode == $"{productCode}-B").SetRetailPrice);
+        var container = await _db.Queryable<Container>().SingleAsync(item => item.ContainerCode == containerCode);
+        Assert.Equal(2, container.Status);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SubmitContainer_已存在套装关系价为空时保留已有价并完成货柜()
+    {
+        // 补码刷新逻辑被整柜提交与创建新商品共用，同一个“关系价为空不覆盖已有价”的修正对两者都生效。
+        const string productCode = "P-SET-SUBMIT-KEEP";
+        const string containerCode = "C-SET-SUBMIT-KEEP";
+        await SeedExistingSetWithTwoChildrenAsync(
+            productCode,
+            containerCode,
+            "D-SET-SUBMIT-KEEP",
+            relationPriceA: 20m,
+            relationPriceB: null,
+            activeStoreCodes: new[] { "S001" },
+            insertContainer: true
+        );
+
+        var result = await CreateService().ExecuteAsync(
+            new ContainerProductCreationJobRequestDto
+            {
+                OperationId = $"submit-container:{containerCode}",
+                ContainerGuid = containerCode,
+                SubmitContainer = true,
+            }
+        );
+
+        Assert.Equal(0, result.FailedCount);
+        Assert.True(result.ContainerCompleted);
+        var setCodes = await _db.Queryable<ProductSetCode>().Where(p => p.ProductCode == productCode).ToListAsync();
+        Assert.Equal(50m, setCodes.Single(p => p.SetProductCode == $"{productCode}-B").SetRetailPrice);
+        var container = await _db.Queryable<Container>().SingleAsync(item => item.ContainerCode == containerCode);
+        Assert.Equal(2, container.Status);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_SkipsRowsWithMissingEnglishNameAndSetChild()
     {
         await InsertContainerDetailAsync("D-MISSING-EN", "C001", "P-MISSING-EN", "普通商品", 1.2m, 3.4m);
@@ -3014,6 +3276,75 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         }).ExecuteCommandAsync();
     }
 
+    private async Task InsertStoreAsync(string storeCode, bool isActive, bool isDeleted)
+    {
+        await _db.Insertable(new Store
+        {
+            StoreCode = storeCode,
+            StoreName = storeCode,
+            IsActive = isActive,
+            IsDeleted = isDeleted,
+        }).ExecuteCommandAsync();
+    }
+
+    /// <summary>
+    /// 造一个“已经创建成功”的两子项套装：A 为正常子项，B 模拟线上的垃圾关系（关系价可为空）。
+    /// 已有 ProductSetCode / 各启用门店多码行的零售价为：A=20、B=50（B 的 50 即首次创建时的父商品兜底价），
+    /// 成本已按零售价占比分摊（A=4、B=6，合计 10），与父商品进货价 10 一致。
+    /// </summary>
+    private async Task SeedExistingSetWithTwoChildrenAsync(
+        string productCode,
+        string containerCode,
+        string detailCode,
+        decimal? relationPriceA,
+        decimal? relationPriceB,
+        string[] activeStoreCodes,
+        bool insertContainer = false
+    )
+    {
+        if (insertContainer)
+        {
+            await InsertContainerAsync(containerCode, status: 1);
+        }
+        foreach (var storeCode in activeStoreCodes)
+        {
+            await InsertActiveStoreAsync(storeCode);
+        }
+        await InsertExistingProductAsync(productCode, $"HB-{productCode}", 10m, 50m, productType: 1);
+        await InsertExistingWarehouseProductAsync(productCode, 1.1m, 10m, 50m);
+        await InsertContainerDetailAsync(detailCode, containerCode, productCode, "套装商品", 10m, 50m);
+        await InsertDomesticProductAsync(productCode, $"HB-{productCode}", "套装商品", "Set Product", 1);
+
+        var children = new[]
+        {
+            (Code: $"{productCode}-A", Retail: 20m, Purchase: 4m, RelationPrice: relationPriceA),
+            (Code: $"{productCode}-B", Retail: 50m, Purchase: 6m, RelationPrice: relationPriceB),
+        };
+        foreach (var child in children)
+        {
+            var itemNumber = $"ITEM-{child.Code}";
+            await InsertDomesticSetProductAsync(productCode, child.Code, itemNumber, oemPrice: child.RelationPrice);
+            await InsertProductSetCodeAsync(
+                productCode,
+                child.Code,
+                itemNumber,
+                purchasePrice: child.Purchase,
+                retailPrice: child.Retail
+            );
+            foreach (var storeCode in activeStoreCodes)
+            {
+                await InsertStoreMultiCodeAsync(
+                    storeCode,
+                    productCode,
+                    child.Code,
+                    $"BAR-{itemNumber}",
+                    purchasePrice: child.Purchase,
+                    retailPrice: child.Retail
+                );
+            }
+        }
+    }
+
     private async Task InsertContainerAsync(string containerCode, int status)
     {
         await _db.Insertable(new Container
@@ -3080,7 +3411,7 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         string setProductCode,
         string setProductNo,
         decimal importPrice = 2.2m,
-        decimal oemPrice = 5.5m
+        decimal? oemPrice = 5.5m
     )
     {
         await _db.Insertable(new DomesticSetProduct
@@ -3165,7 +3496,7 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         string setProductCode,
         string setItemNumber,
         decimal purchasePrice = 2.2m,
-        decimal retailPrice = 5.5m
+        decimal? retailPrice = 5.5m
     )
     {
         await _db.Insertable(new ProductSetCode
@@ -3189,8 +3520,8 @@ public sealed class ContainerProductCreationServiceTests : IDisposable
         string productCode,
         string multiCodeProductCode,
         string multiBarcode,
-        decimal purchasePrice = 2.2m,
-        decimal retailPrice = 5.5m
+        decimal? purchasePrice = 2.2m,
+        decimal? retailPrice = 5.5m
     )
     {
         await _db.Insertable(new StoreMultiCodeProduct

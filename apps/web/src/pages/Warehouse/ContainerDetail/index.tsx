@@ -5252,6 +5252,12 @@ export default function ContainerDetailPage() {
         : job
       showCreateProductsJobResult(finalJob)
       setSelectedRowKeys([])
+      // 任务正常结束（成功、部分完成或带失败明细）后重新加载明细：已建好的行要从「新商品」变成已建档，
+      // 否则页面不刷新时它们仍可被再次勾选，重复点「创建新商品」会对已建好的商品再跑一遍。
+      // 经 ref 调用最新 render 的查询闭包：任务可能跑了较久，期间用户改过筛选/排序，不能用旧闭包的条件覆盖当前视图；
+      // 只刷明细、不刷货柜头：创建商品不改货柜头数据，也避免整页 loading 闪动。
+      // 抛异常（任务提交/轮询失败）走下面的 catch，不刷新。
+      await reloadCurrentDetailRef.current()
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('containers.messages.createProductFailed', '创建新商品失败'))
     } finally {
