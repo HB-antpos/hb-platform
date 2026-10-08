@@ -87,49 +87,76 @@
   color: #434343;
 }
 
+/* 汇总框：品种、件数在左，路线与“同单其他段”在右侧上下排列，每项一行，减少高度。 */
 .picking-slip-facts {
-  display: flex;
+  display: grid;
+  grid-template-columns: 22mm 26mm 1fr;
   border: 1.5px solid #000;
   border-radius: 6px;
 }
 
-.picking-slip-facts > div {
-  flex: 1;
+.picking-slip-fact {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 2mm 3mm;
+  justify-content: center;
+  gap: 1px;
+  padding: 1.5mm 3mm;
   border-right: 1.5px solid #000;
 }
 
-.picking-slip-facts > div:last-child {
-  border-right: 0;
+.picking-slip-fact-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.picking-slip-facts > div.is-wide {
-  flex: 2.4;
+.picking-slip-fact-line {
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+  padding: 1.5mm 3mm;
+}
+
+.picking-slip-fact-line + .picking-slip-fact-line {
+  border-top: 1.5px solid #000;
 }
 
 .picking-slip-facts span {
   font-size: 11px;
   color: #262626;
+  white-space: nowrap;
 }
 
 .picking-slip-facts b {
   font-size: 18px;
-  line-height: 24px;
+  line-height: 1.25;
 }
 
-.picking-slip-facts b.is-small {
-  font-size: 13px;
-  font-weight: 600;
+.picking-slip-fact-line b {
+  font-size: 15px;
 }
 
+.picking-slip-fact-line b.is-small {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* 续页页头：订单号 · 门店（加粗）· 订货日期，右侧是段号；每页都有，不依赖首页。 */
 .picking-slip-continued {
-  font-size: 13px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4mm;
+  font-size: 14px;
   border-bottom: 1.5px solid #000;
   padding-bottom: 2mm;
+}
+
+.picking-slip-continued .picking-slip-segment {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 7px;
 }
 
 .picking-slip-table {
@@ -139,15 +166,20 @@
 }
 
 .picking-slip-table th {
+  height: var(--slip-row-h, 8mm);
   border-bottom: 1.5px solid #000;
   text-align: left;
-  padding: 5px 5px;
+  padding: 0 5px;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .picking-slip-table td {
+  height: var(--slip-row-h, 8mm);
   border-bottom: 1px solid #bfbfbf;
-  padding: 6px 5px;
+  line-height: 1.2;
+  padding: 0 5px;
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -159,14 +191,24 @@
 }
 
 .picking-slip-table tr.picking-slip-turn td {
+  height: var(--slip-marker-h, 6mm);
   background: #f0f0f0;
   font-size: 11.5px;
   font-weight: 600;
-  padding: 3px 5px;
+  padding: 0 5px;
 }
 
 .picking-slip-mono {
   font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+.picking-slip-table .picking-slip-mono {
+  font-size: 12px;
+}
+
+/* 货位加粗：拣货员沿走位按货位找货，最先看的就是这一列。 */
+.picking-slip-table td.picking-slip-location {
+  font-weight: 700;
 }
 
 .picking-slip-box {
