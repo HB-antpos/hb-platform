@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
@@ -73,6 +74,7 @@ namespace BlazorApp.Api.Tests
         [Theory]
         [InlineData(nameof(UsersController.AssignStoresToUser))]
         [InlineData(nameof(UsersController.RemoveStoreFromUser))]
+        [InlineData(nameof(UsersController.BatchManageUserStores))]
         public void UserStoreWriteRoutes_RequireManageStoresPermission(string methodName)
         {
             // 分配 / 移除用户分店都必须持有 Users.ManageStores；服务层的角色与范围校验是第二道防线。
@@ -671,6 +673,224 @@ namespace BlazorApp.Api.Tests
             Assert.False(items["session-active"].IsExpired);
             Assert.True(items["session-revoked"].IsRevoked);
             Assert.True(items["session-expired"].IsExpired);
+        }
+
+        [Fact]
+        public async Task BatchManageUserStoresAsync_AdminAddAsManageableInsertsUpgradesAndSyncsRole()
+        {
+            await SeedUsersAndStoresAsync();
+            await _db.Insertable(CreateUser("user-2", "user2@example.com")).ExecuteCommandAsync();
+            // user-1 已有 store-1 普通关联（应升级），user-2 已是 store-1 可管理（应不变）。
+            await _db.Insertable(new[]
+            {
+                CreateUserStore("user-1", "store-1", false),
+                CreateUserStore("user-2", "store-1", true),
+            }).ExecuteCommandAsync();
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var result = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "add",
+                UserGuids = new List<string> { "user-1", "user-2" },
+                StoreGuids = new List<string> { "store-1", "store-2" },
+                AsManageable = true,
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(2, result.Data!.AddedCount);
+            Assert.Equal(1, result.Data.UpgradedCount);
+            Assert.Equal(1, result.Data.UnchangedCount);
+            Assert.Equal(2, result.Data.AffectedUserCount);
+            Assert.Equal(new[] { "user_1" }, result.Data.UsersGainingStoreManagerRole);
+            Assert.True((await FindUserStoreAsync("user-1", "store-1")).IsPrimary);
+            Assert.True((await FindUserStoreAsync("user-1", "store-2")).IsPrimary);
+            Assert.True((await FindUserStoreAsync("user-2", "store-2")).IsPrimary);
+            Assert.Equal(1, await _db.Queryable<UserStore>().CountAsync(item =>
+                item.UserGUID == "user-1" && item.StoreGUID == "store-1"));
+            Assert.True(await _db.Queryable<UserRole>().AnyAsync(item =>
+                item.UserGUID == "user-1" && item.RoleGUID == "role-store-manager"));
+        }
+
+        [Fact]
+        public async Task BatchManageUserStoresAsync_DryRunReportsImpactWithoutWriting()
+        {
+            await SeedUsersAndStoresAsync();
+            await _db.Insertable(CreateUserStore("user-1", "store-1", true)).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserRole("user-1", "role-store-manager")).ExecuteCommandAsync();
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var result = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "remove",
+                UserGuids = new List<string> { "user-1" },
+                StoreGuids = new List<string> { "store-1", "store-2" },
+                DryRun = true,
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.True(result.Data!.DryRun);
+            Assert.Equal(1, result.Data.RemovedCount);
+            Assert.Equal(1, result.Data.RemovedManageableCount);
+            Assert.Equal(1, result.Data.UnchangedCount);
+            Assert.Equal(new[] { "user_1" }, result.Data.UsersLosingStoreManagerRole);
+            Assert.True((await FindUserStoreAsync("user-1", "store-1")).IsPrimary);
+            Assert.True(await _db.Queryable<UserRole>().AnyAsync(item =>
+                item.UserGUID == "user-1" && item.RoleGUID == "role-store-manager"));
+        }
+
+        [Fact]
+        public async Task BatchManageUserStoresAsync_AdminRemovingLastManageableStoreDropsStoreManagerRole()
+        {
+            await SeedUsersAndStoresAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserStore("user-1", "store-1", true),
+                CreateUserStore("user-1", "store-2", false),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserRole("user-1", "role-store-manager")).ExecuteCommandAsync();
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var result = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "remove",
+                UserGuids = new List<string> { "user-1" },
+                StoreGuids = new List<string> { "store-1" },
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(1, result.Data!.RemovedCount);
+            Assert.False(await _db.Queryable<UserStore>().AnyAsync(item =>
+                item.UserGUID == "user-1" && item.StoreGUID == "store-1"));
+            Assert.True(await _db.Queryable<UserStore>().AnyAsync(item =>
+                item.UserGUID == "user-1" && item.StoreGUID == "store-2"));
+            Assert.False(await _db.Queryable<UserRole>().AnyAsync(item =>
+                item.UserGUID == "user-1" && item.RoleGUID == "role-store-manager"));
+        }
+
+        [Fact]
+        public async Task BatchManageUserStoresAsync_StoreManagerChangesOnlyInScopeViewRelationships()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-3",
+                StoreCode = "S003",
+                StoreName = "Store 3",
+                IsActive = true,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserStore("manager-1", "store-3", true),
+                // dual-user 在 store-3 是可管理关联：店长不能撤销，应原样保留。
+                CreateUserStore("dual-user", "store-3", true),
+            }).ExecuteCommandAsync();
+            var scope = new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true, IsAuthenticated = true, UserGuid = "manager-1", StoreGuids = new[] { "store-1", "store-3" },
+            });
+            var service = CreateUserService(scope);
+
+            var add = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "add",
+                UserGuids = new List<string> { "scoped-user", "dual-user" },
+                StoreGuids = new List<string> { "store-3" },
+            });
+            Assert.True(add.Success, add.Message);
+            Assert.Equal(1, add.Data!.AddedCount);
+            Assert.Equal(1, add.Data.UnchangedCount);
+            Assert.False((await FindUserStoreAsync("scoped-user", "store-3")).IsPrimary);
+
+            var remove = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "remove",
+                UserGuids = new List<string> { "scoped-user", "dual-user" },
+                StoreGuids = new List<string> { "store-3" },
+            });
+            Assert.True(remove.Success, remove.Message);
+            Assert.Equal(1, remove.Data!.RemovedCount);
+            Assert.Equal(1, remove.Data.ProtectedManageableCount);
+            Assert.False(await _db.Queryable<UserStore>().AnyAsync(item =>
+                item.UserGUID == "scoped-user" && item.StoreGUID == "store-3"));
+            Assert.True((await FindUserStoreAsync("dual-user", "store-3")).IsPrimary);
+        }
+
+        [Theory]
+        [InlineData("store-2", false, "STORE_SCOPE_DENIED")]
+        [InlineData("store-1", true, "MANAGEABLE_STORE_GRANT_DENIED")]
+        public async Task BatchManageUserStoresAsync_StoreManagerCannotExceedScopeOrGrantManagement(
+            string storeGuid,
+            bool asManageable,
+            string expectedErrorCode
+        )
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            var service = CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true, IsAuthenticated = true, UserGuid = "manager-1", StoreGuids = new[] { "store-1" },
+            }));
+
+            var result = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "add",
+                UserGuids = new List<string> { "scoped-user" },
+                StoreGuids = new List<string> { storeGuid },
+                AsManageable = asManageable,
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal(expectedErrorCode, result.ErrorCode);
+            Assert.False(await _db.Queryable<UserStore>().AnyAsync(item =>
+                item.UserGUID == "scoped-user" && item.StoreGUID == "store-2"));
+            Assert.False((await FindUserStoreAsync("scoped-user", "store-1")).IsPrimary);
+        }
+
+        [Fact]
+        public async Task BatchManageUserStoresAsync_RejectedTargetRollsBackWholeBatch()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            var service = CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true, IsAuthenticated = true, UserGuid = "manager-1", StoreGuids = new[] { "store-1" },
+            }));
+
+            // foreign-user 不在店长范围内：整批拒绝，scoped-user 的移除也不能生效。
+            var result = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = "remove",
+                UserGuids = new List<string> { "scoped-user", "foreign-user" },
+                StoreGuids = new List<string> { "store-1" },
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal("USER_SCOPE_DENIED", result.ErrorCode);
+            Assert.Contains("foreign-user", result.Message);
+            Assert.True(await _db.Queryable<UserStore>().AnyAsync(item =>
+                item.UserGUID == "scoped-user" && item.StoreGUID == "store-1"));
+        }
+
+        [Theory]
+        [InlineData("move", "UNSUPPORTED_OPERATION")]
+        [InlineData("add", "BATCH_LIMIT_EXCEEDED")]
+        public async Task BatchManageUserStoresAsync_RejectsInvalidRequestBeforeTouchingDatabase(
+            string operation,
+            string expectedErrorCode
+        )
+        {
+            var service = CreateUserService();
+            var userGuids = expectedErrorCode == "BATCH_LIMIT_EXCEEDED"
+                ? Enumerable.Range(0, BatchUserStoreOperationDto.MaxUserCount + 1).Select(i => $"u-{i}").ToList()
+                : new List<string> { "user-1" };
+
+            var result = await service.BatchManageUserStoresAsync(new BatchUserStoreOperationDto
+            {
+                Operation = operation,
+                UserGuids = userGuids,
+                StoreGuids = new List<string> { "store-1" },
+            });
+
+            Assert.False(result.Success);
+            Assert.Equal(expectedErrorCode, result.ErrorCode);
         }
 
         [Fact]

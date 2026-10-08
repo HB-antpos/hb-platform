@@ -162,6 +162,13 @@ namespace BlazorApp.Api.Interfaces
         Task<ApiResponse<bool>> BatchManageUsersAsync(BatchUserOperationDto dto);
 
         /// <summary>
+        /// 批量为多个用户添加 / 移除分店关联；DryRun 时只返回影响、不写入
+        /// </summary>
+        Task<ApiResponse<BatchUserStoreOperationResultDto>> BatchManageUserStoresAsync(
+            BatchUserStoreOperationDto dto
+        );
+
+        /// <summary>
         /// 导入用户
         /// </summary>
         /// <param name="users">用户导入数据</param>

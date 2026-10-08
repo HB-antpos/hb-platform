@@ -294,7 +294,8 @@ export default function SystemUsersPage() {
   const canResetUserPassword = access.hasPermission(P.Users.ResetPassword)
   // 后端只允许管理员维护用户角色（ADMIN_REQUIRED），接口本身还要求 Roles.ManageUsers。
   const canBatchManageRoles = access.isAdmin && access.hasPermission(P.Roles.ManageUsers)
-  const canBatchSelectUsers = canEditUsers || canBatchManageRoles
+  const canBatchManageStores = access.hasPermission(P.Users.ManageStores)
+  const canBatchSelectUsers = canEditUsers || canBatchManageRoles || canBatchManageStores
   const canEditUserPermissions = canManageUserPermissions || (
     isCurrentUserScoped && canManagePosTerminalPermissions
   )
@@ -2787,6 +2788,9 @@ export default function SystemUsersPage() {
               canEditStatus={canEditUsers}
               canManageRoles={canBatchManageRoles}
               roleOptions={roleOptions}
+              canManageStores={canBatchManageStores}
+              canGrantManageableStores={access.isAdmin}
+              storeOptions={visibleStoreOptions}
               isOutOfScope={(user) => isCurrentUserScoped && hasForbiddenRoleForScopedManager(user)}
               onClearSelection={() => setSelectedUsers([])}
               onCompleted={() => {

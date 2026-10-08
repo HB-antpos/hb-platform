@@ -396,6 +396,69 @@ namespace BlazorApp.Shared.DTOs
     }
 
     /// <summary>
+    /// 批量为多个用户添加 / 移除分店关联（一个事务内完成，任一目标不合法则整批不写入）。
+    /// </summary>
+    public class BatchUserStoreOperationDto
+    {
+        /// <summary>最多一次处理的用户数。</summary>
+        public const int MaxUserCount = 100;
+
+        /// <summary>最多一次处理的分店数。</summary>
+        public const int MaxStoreCount = 50;
+
+        [Required(ErrorMessage = "用户GUID列表不能为空")]
+        public List<string> UserGuids { get; set; } = new();
+
+        [Required(ErrorMessage = "分店GUID列表不能为空")]
+        public List<string> StoreGuids { get; set; } = new();
+
+        /// <summary>add 或 remove。</summary>
+        [Required(ErrorMessage = "操作类型不能为空")]
+        public string Operation { get; set; } = string.Empty;
+
+        /// <summary>仅 add：同时设为可管理分店（只有管理员可以授予）；已有的普通关联会升级为可管理。</summary>
+        public bool AsManageable { get; set; }
+
+        /// <summary>只计算影响、不写入，用于确认前预览。</summary>
+        public bool DryRun { get; set; }
+    }
+
+    /// <summary>
+    /// 批量分店操作的结果（预演与正式执行返回同一结构）。
+    /// </summary>
+    public class BatchUserStoreOperationResultDto
+    {
+        public bool DryRun { get; set; }
+
+        /// <summary>新建的分店关联数。</summary>
+        public int AddedCount { get; set; }
+
+        /// <summary>由普通关联升级为可管理的关联数。</summary>
+        public int UpgradedCount { get; set; }
+
+        /// <summary>删除的分店关联数（含可管理关联）。</summary>
+        public int RemovedCount { get; set; }
+
+        /// <summary>删除的关联中属于可管理关联的数量。</summary>
+        public int RemovedManageableCount { get; set; }
+
+        /// <summary>已经是目标状态、无需变动的用户×分店组合数。</summary>
+        public int UnchangedCount { get; set; }
+
+        /// <summary>店长无权移除的可管理关联数（原样保留）。</summary>
+        public int ProtectedManageableCount { get; set; }
+
+        /// <summary>至少有一处变动的用户数。</summary>
+        public int AffectedUserCount { get; set; }
+
+        /// <summary>因移除最后一个可管理分店而失去店长角色的用户名。</summary>
+        public List<string> UsersLosingStoreManagerRole { get; set; } = new();
+
+        /// <summary>因获得首个可管理分店而新获得店长角色的用户名。</summary>
+        public List<string> UsersGainingStoreManagerRole { get; set; } = new();
+    }
+
+    /// <summary>
     /// 用户导入DTO
     /// </summary>
     public class ImportUserDto
