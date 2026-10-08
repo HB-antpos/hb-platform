@@ -467,8 +467,19 @@ public sealed class WarehousePickingSlipDto
     public decimal Pieces { get; set; }
     public string? FirstLocation { get; set; }
     public string? LastLocation { get; set; }
+    /// <summary>同单其他段的展示名；待领取的段是中文占位串，仅为兼容旧前端，新前端读 <see cref="OtherSegments"/> 自行按语言渲染。</summary>
     public List<string> OtherPickerNames { get; set; } = new();
+
+    /// <summary>同单其他段（按段号）：负责人为空表示待领取，由前端按界面语言写“待领取”。</summary>
+    public List<WarehousePickingSlipOtherSegmentDto> OtherSegments { get; set; } = new();
     public List<WarehousePickingSlipLineDto> Lines { get; set; } = new();
+}
+
+/// <summary>分单上“同单其他段”一项：段号与负责人姓名（待领取为 null）。</summary>
+public sealed class WarehousePickingSlipOtherSegmentDto
+{
+    public int SegmentNo { get; set; }
+    public string? PickerName { get; set; }
 }
 
 public sealed class WarehousePickingSlipsDto

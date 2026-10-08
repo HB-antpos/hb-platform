@@ -9,7 +9,7 @@ import { getPickingSlips, type PickingSlip, type PickingSlipLine, type PickingSl
 import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../../../utils/barcode'
 import { printElementPagesAsPdf } from '../printUtils'
 
-import { buildSlipRows, formatUtcShort, paginateSlipRows, type SlipRow } from './pickingAssignmentLogic'
+import { buildSlipRows, formatUtcShort, otherSegmentLabels, paginateSlipRows, type SlipRow } from './pickingAssignmentLogic'
 import '../print.css'
 import './messages'
 import './pickingSlips.css'
@@ -247,7 +247,7 @@ export default function PickingSlipsPage() {
                     </div>
                     <div>
                       <span>{t('storeOrders.pickingSlips.others', '同单其他段')}</span>
-                      <b className="is-small">{page.slip.otherPickerNames.join(' · ') || '—'}</b>
+                      <b className="is-small">{otherSegmentLabels(page.slip, (no) => t('storeOrders.pickingSlips.otherUnclaimed', '第 {{no}} 段待领取', { no })).join(' · ') || '—'}</b>
                     </div>
                   </div>
                 </Fragment>
@@ -268,8 +268,8 @@ export default function PickingSlipsPage() {
                     <th style={{ width: 76 }}>{t('storeOrders.pickingSlips.itemNumber', '货号')}</th>
                     <th>{t('storeOrders.pickingSlips.product', '商品')}</th>
                     <th style={{ width: 112 }}>{t('storeOrders.pickingSlips.barcode', '条码')}</th>
-                    <th style={{ width: 44 }} className="picking-slip-number">{t('storeOrders.pickingSlips.ordered', '订货')}</th>
-                    <th style={{ width: 40 }} className="picking-slip-number">{t('storeOrders.pickingSlips.pack', '中包')}</th>
+                    <th style={{ width: 64 }} className="picking-slip-number">{t('storeOrders.pickingSlips.ordered', '订货')}</th>
+                    <th style={{ width: 48 }} className="picking-slip-number">{t('storeOrders.pickingSlips.pack', '中包')}</th>
                     <th style={{ width: 56 }}>{t('storeOrders.pickingSlips.picked', '实拣')}</th>
                   </tr>
                 </thead>

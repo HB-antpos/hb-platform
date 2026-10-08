@@ -189,3 +189,15 @@ export function paginateSlipRows<T>(rows: readonly T[], firstPageRows: number, n
   }
   return pages.length > 0 ? pages : [[]]
 }
+
+/**
+ * 分单“同单其他段”文案：有负责人写姓名，待领取的段用调用方按界面语言给的文案。
+ * 新后端给结构化的 otherSegments；旧后端只有 otherPickerNames（待领取是后端拼的中文占位串），回退原样输出。
+ */
+export function otherSegmentLabels(
+  slip: { otherPickerNames: readonly string[]; otherSegments?: readonly { segmentNo: number; pickerName?: string | null }[] },
+  unclaimedLabel: (segmentNo: number) => string,
+): string[] {
+  if (!slip.otherSegments) return [...slip.otherPickerNames]
+  return slip.otherSegments.map((segment) => segment.pickerName?.trim() || unclaimedLabel(segment.segmentNo))
+}

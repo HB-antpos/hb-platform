@@ -108,6 +108,7 @@
       "route": "Route (M route)",
       "noLocation": "No location",
       "others": "Other segments",
+      "otherUnclaimed": "Segment {{no}} unclaimed",
       "continued": "{{orderNo}} · segment {{no}} {{name}} (cont.)",
       "location": "Location",
       "itemNumber": "Item no.",

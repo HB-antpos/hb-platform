@@ -270,6 +270,7 @@ public sealed class WarehousePickingAssignmentServiceTests : IDisposable
         Assert.Equal(("A", "04"), (first.Lines[2].Zone, first.Lines[2].RowLabel));
         Assert.Equal(("A-03-12-02", "A-04-18-03"), (first.FirstLocation, first.LastLocation));
         Assert.Equal(new[] { "Li Na" }, first.OtherPickerNames);
+        Assert.Equal(new[] { (2, "Li Na") }, first.OtherSegments.Select(item => (item.SegmentNo, item.PickerName)));
         var second = Assert.Single(single.Data!.Slips);
         Assert.Equal(new[] { "d-b1-02", "d-old", "d-none" }, second.Lines.Select(line => line.DetailGuid));
         Assert.Null(second.Lines[1].Zone);
@@ -326,6 +327,8 @@ public sealed class WarehousePickingAssignmentServiceTests : IDisposable
         var slips = (await service.GetSlipsAsync(OrderGuid, 2)).Data!.Slips.Single();
         Assert.Null(slips.PickerName);
         Assert.Equal(new[] { "第1段待领取", "第3段待领取" }, slips.OtherPickerNames);
+        // 结构化字段不带语言：待领取的段负责人为 null，前端按界面语言渲染。
+        Assert.Equal(new (int, string?)[] { (1, null), (3, null) }, slips.OtherSegments.Select(item => (item.SegmentNo, item.PickerName)));
         var code = saved.Data.Assignees[1].SlipCode!;
 
         var alex = new WarehousePickerContext("u-chen", "Chen Wei", false, "u-chen", null);

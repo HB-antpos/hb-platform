@@ -108,6 +108,7 @@
       "route": "路线（M 型走位）",
       "noLocation": "无货位",
       "others": "同单其他段",
+      "otherUnclaimed": "第 {{no}} 段待领取",
       "continued": "{{orderNo}} · 第 {{no}} 段 {{name}}（续）",
       "location": "货位",
       "itemNumber": "货号",
