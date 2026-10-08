@@ -92,12 +92,32 @@
   background: #f5faff;
 }
 
-.container-detail-table .ant-table-row-selected > .ant-table-cell-fix-left {
-  background: #e6f4ff;
+/* 选中行：极浅蓝底（全部为不透明实色，固定列同样适用），不再用 AntD 默认的饱和蓝。
+   单元格底色统一在这里覆盖，固定列与滚动列不会出现色差。 */
+.container-detail-table .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell {
+  background: #f0f6ff;
+  /* 连续选中的行之间不画分隔线，让多行看起来是一整块选区 */
+  border-bottom-color: #f0f6ff;
 }
 
-.container-detail-table .ant-table-row-selected:hover > .ant-table-cell-fix-left {
-  background: #bae0ff;
+.container-detail-table .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell.ant-table-cell-row-hover,
+.container-detail-table .ant-table-tbody .ant-table-row.ant-table-row-selected:hover > .ant-table-cell {
+  background: #e6f0ff;
+}
+
+/* 选区上沿：连续选中的第一行画 1px 描边（inset 阴影不占布局高度） */
+.container-detail-table .ant-table-tbody .ant-table-row.ant-table-row-selected:not(.ant-table-row-selected + .ant-table-row-selected) > .ant-table-cell {
+  box-shadow: inset 0 1px 0 #9ec5ff;
+}
+
+/* 选区下沿：连续选中的最后一行把已有的 1px 下边框换成描边色 */
+.container-detail-table .ant-table-tbody .ant-table-row.ant-table-row-selected:not(:has(+ .ant-table-row-selected)) > .ant-table-cell {
+  border-bottom-color: #9ec5ff;
+}
+
+/* 选中行里的草稿输入框：白底保留，边框改成与选区同色系的浅蓝，避免在蓝底上显得突兀（已改未存的琥珀色规则优先级更高，不受影响） */
+.container-detail-table .ant-table-row-selected .container-detail-draft-input:not(.container-detail-draft-input-dirty):not(.ant-input-number-status-error):not(.ant-input-status-error) {
+  border-color: #c9dcf7;
 }
 
 .container-detail-table .ant-table-tbody > tr > td .ant-space {
@@ -116,8 +136,9 @@
   align-items: center;
 }
 
-/* 固定单元格需覆盖完整虚拟行高度，避免上下空隙透出横向滚动内容。 */
-.container-detail-table .ant-table-tbody-virtual-holder-inner .ant-table-row > .ant-table-cell-fix-left {
+/* 所有单元格都需覆盖完整虚拟行高度：固定列避免上下空隙透出横向滚动内容；
+   非固定列避免选中/斑马纹/悬停底色只铺到内容高度，行间露出白条。 */
+.container-detail-table .ant-table-tbody-virtual-holder-inner .ant-table-row > .ant-table-cell {
   align-self: stretch;
   align-content: center;
 }
