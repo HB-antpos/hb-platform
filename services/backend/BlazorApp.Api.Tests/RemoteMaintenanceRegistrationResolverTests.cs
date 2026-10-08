@@ -181,6 +181,7 @@ public sealed class RemoteMaintenanceRegistrationResolverTests
                     "当前收银员ID" TEXT NULL,
                     "当前收银员姓名" TEXT NULL,
                     "收银员登录时间" TEXT NULL,
+                    "应用版本" TEXT NULL,
                     "创建时间" TEXT NOT NULL,
                     "最后修改时间" TEXT NULL,
                     "创建人" TEXT NULL,
