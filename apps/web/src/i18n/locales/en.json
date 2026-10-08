@@ -228,7 +228,6 @@
       "selectAllExportColumns": "Select All",
       "resetDefaultExportColumns": "Reset Default",
       "backfillLastPrices": "Backfill Last Prices",
-      "showReadonlyOemPrice": "Read-only RRP",
       "pushToHq": "Send to HQ",
       "saveDetails": "Save Details",
       "pasteColumn": "Paste Column",

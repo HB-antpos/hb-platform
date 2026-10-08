@@ -58,7 +58,6 @@
       "legendAutoSave": "Saves when you leave the cell",
       "legendDraft": "Needs “Save Details”",
       "columnSettingsHint": "Drag a header to reorder columns; drag its right edge to resize.",
-      "readonlyRetailAllOnly": "The read-only RRP column only shows in the All columns view.",
       "chipGroupProduct": "Product",
       "chipGroupShelf": "Shelf status",
       "chipSort": "Sort",
@@ -78,7 +77,17 @@
       "actionShelf": "On / off shelf",
       "columnProduct": "Product",
       "columnIssues": "Issues",
-      "footerFilteredFull": "{{filtered}} filtered · all {{loaded}} loaded"
+      "footerFilteredFull": "{{filtered}} filtered · all {{loaded}} loaded",
+      "priceTrendAll": "Any change",
+      "priceUp": "Price up",
+      "priceDown": "Price down",
+      "priceTrendFilterAria": "Filter by import price vs. current purchase price",
+      "chipGroupPriceTrend": "Price change",
+      "actionUpdateWarehouseImportPrice": "Update warehouse purchase price",
+      "updateWarehouseImportPriceHint": "Overwrite the warehouse purchase price (current purchase price) with this container's import price. Only the warehouse master is updated; store purchase prices are unchanged. Only existing products whose import price differs are included; {{skipped}} line(s) skipped.",
+      "noWarehouseImportPriceChanges": "Nothing to update: the lines are new products, have no import price, or already match the current purchase price.",
+      "warehouseImportPriceUpdated": "Updated the warehouse purchase price for {{count}} product(s)",
+      "warehouseImportPriceUpdateFailed": "Failed to update the warehouse purchase price"
     }
   }
 }

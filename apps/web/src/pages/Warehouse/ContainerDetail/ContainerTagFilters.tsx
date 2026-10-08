@@ -2,7 +2,7 @@
  * ContainerTagFilters — 货柜明细工具栏里的紧凑标签筛选
  *
  * 职责边界：
- * - 渲染三组紧凑控件：商品类型（多选下拉）、新商品/已有商品（分段）、上架/下架（分段），每项带统计数
+ * - 渲染四组紧凑控件：商品类型（多选下拉）、新商品/已有商品（分段）、上架/下架（分段）、涨价/降价（分段），每项带统计数
  * - 「缺零售价 / 进口价缺失」两个价格标签放在页面的「提交前检查」条，不在这里重复
  * - 组内并集、组间交集的筛选口径不变（由 matchesContainerDetailSelectedTags 与后端统计负责），这里只替换组内选择
  * - 纯展示组件，所有状态和回调由父组件注入，不接管数据加载或统计计算
@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import type { ContainerDetailTagFilter, ContainerDetailTagStats } from './containerDetailLogic'
 import {
   CONTAINER_DETAIL_NEW_STATE_TAGS,
+  CONTAINER_DETAIL_PRICE_TREND_TAGS,
   CONTAINER_DETAIL_PRODUCT_TYPE_TAGS,
   CONTAINER_DETAIL_WAREHOUSE_STATUS_TAGS,
   getContainerDetailTagGroupSelection,
@@ -132,6 +133,19 @@ export default function ContainerTagFilters({
           { value: 'all', label: t('warehouseUi.containerDetail.warehouseStatusAll') },
           { value: 'active', label: t('common.activeUpper') },
           { value: 'inactive', label: t('common.inactiveUpper') },
+        ]}
+        tagStats={tagStats}
+        selectedTagFilters={selectedTagFilters}
+        onSetTagFilters={onSetTagFilters}
+      />
+      {/* 进口价格 vs 实时进货价：先筛出涨价/降价的明细，再用「更新进货价」写回仓库进货价 */}
+      <TagSegment
+        ariaLabel={t('warehouseUi.containerDetail.priceTrendFilterAria')}
+        group={CONTAINER_DETAIL_PRICE_TREND_TAGS}
+        options={[
+          { value: 'all', label: t('warehouseUi.containerDetail.priceTrendAll') },
+          { value: 'priceUp', label: t('warehouseUi.containerDetail.priceUp') },
+          { value: 'priceDown', label: t('warehouseUi.containerDetail.priceDown') },
         ]}
         tagStats={tagStats}
         selectedTagFilters={selectedTagFilters}

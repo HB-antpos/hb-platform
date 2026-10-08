@@ -524,6 +524,60 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task QueryContainerDetailsAsync_进口价对比实时进货价的涨跌应可统计和筛选()
+    {
+        await SeedContainerAsync("C-TREND", "CSLU6099490");
+        await SeedDetailAsync("D-TREND-UP", "C-TREND", "P-TREND-UP", "HB701", importPrice: 2m, warehouseImportPrice: 1.5m);
+        await SeedDetailAsync("D-TREND-DOWN", "C-TREND", "P-TREND-DOWN", "HB702", importPrice: 1m, warehouseImportPrice: 1.2m);
+        await SeedDetailAsync("D-TREND-SAME", "C-TREND", "P-TREND-SAME", "HB703", importPrice: 1m, warehouseImportPrice: 1m);
+        // 进口价缺失（仓库进货价也为空）不算涨跌。
+        await SeedDetailAsync("D-TREND-NULL", "C-TREND", "P-TREND-NULL", "HB704", importPrice: null);
+        var service = CreateService();
+
+        var all = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto { ContainerGuid = "C-TREND", PageSize = 50 }
+        );
+        Assert.Equal(1, all.TagStats.PriceUp);
+        Assert.Equal(1, all.TagStats.PriceDown);
+
+        var up = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-TREND",
+                PageSize = 50,
+                SelectedTags = new List<string> { "priceUp" },
+            }
+        );
+        Assert.Equal("D-TREND-UP", Assert.Single(up.Items).HGUID);
+
+        var both = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-TREND",
+                PageSize = 50,
+                SortBy = "itemNumber",
+                SortOrder = "ascend",
+                SelectedTags = new List<string> { "priceUp", "priceDown" },
+            }
+        );
+        Assert.Equal(new[] { "D-TREND-UP", "D-TREND-DOWN" }, both.Items.Select(x => x.HGUID).ToArray());
+
+        // 带匹配方式筛选时走全局窄投影的内存筛选与统计，口径须与 SQL 路径一致。
+        var matchScoped = await service.QueryContainerDetailsAsync(
+            new ContainerDetailQueryDto
+            {
+                ContainerGuid = "C-TREND",
+                PageSize = 50,
+                MatchTypes = new List<string> { "productCode", "supplierItem", "unmatched" },
+                SelectedTags = new List<string> { "priceDown" },
+            }
+        );
+        Assert.Equal(1, matchScoped.TagStats.PriceUp);
+        Assert.Equal(1, matchScoped.TagStats.PriceDown);
+        Assert.Equal("D-TREND-DOWN", Assert.Single(matchScoped.Items).HGUID);
+    }
+
+    [Fact]
     public async Task QueryContainerDetailsAsync_禁用标签统计时应保留总数但标记未计算统计()
     {
         await SeedContainerAsync("C-NO-STATS", "CSLU6099488");
