@@ -1,6 +1,12 @@
 import type {
   PagedResult,
+  SeasonalCardBatch,
+  SeasonalCardBatchLine,
+  SeasonalCardBatchPayload,
   SeasonalCardCatalogItem,
+  SeasonalCardOverview,
+  SeasonalCardOverviewHoliday,
+  SeasonalCardOverviewQuery,
   SeasonalCardPriceOption,
   SeasonalCardSubmissionPayload,
   SeasonalCardSubmissionQuery,
@@ -87,6 +93,20 @@ function trimText(value: unknown) {
   return trimmed ? trimmed : undefined;
 }
 
+/**
+ * 服务端时间统一按 UTC 解读：从数据库读出的 DateTime 序列化时没有时区后缀（Kind=Unspecified），
+ * 直接 new Date() 会被当成手机本地时间，这里补上 Z，显示时再按本地时区格式化。
+ */
+export function normalizeServerUtcTimestamp(value: unknown): string {
+  const text = asString(value).trim();
+  if (!text) {
+    return "";
+  }
+  const isIsoWithoutZone =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(text);
+  return isIsoWithoutZone ? `${text}Z` : text;
+}
+
 function normalizePage(value?: number) {
   return value && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 1;
 }
@@ -152,10 +172,12 @@ export function buildSeasonalCardSubmissionPayload(
 export function buildSeasonalCardSubmissionQuery(
   query: SeasonalCardSubmissionQuery
 ) {
+  const localSupplierCode = trimText(query.localSupplierCode ?? undefined);
   return {
     storeCode: trimText(query.storeCode),
     cardType: asSeasonalCardType(query.cardType),
     seasonYear: asNullableInt(query.seasonYear),
+    ...(localSupplierCode ? { localSupplierCode } : {}),
     pageNumber: normalizePage(query.pageNumber),
     pageSize: normalizePageSize(query.pageSize),
   };
@@ -212,9 +234,13 @@ export function normalizeSeasonalCardSubmission(
     submittedByName: asString(
       pick(item, "submittedByName", "SubmittedByName", "createUser", "CreateUser")
     ),
-    submittedAt: asString(
+    submittedAt: normalizeServerUtcTimestamp(
       pick(item, "submittedAt", "SubmittedAt", "createTime", "CreateTime")
     ),
+    priceOption: asSeasonalCardPriceOption(pick(item, "priceOption", "PriceOption")),
+    localSupplierCode: asString(pick(item, "localSupplierCode", "LocalSupplierCode")).trim(),
+    supplierName: asString(pick(item, "supplierName", "SupplierName")).trim(),
+    batchGuid: asString(pick(item, "batchGuid", "BatchGuid", "BatchGUID")).trim(),
   };
 }
 
@@ -244,6 +270,128 @@ export function normalizeSeasonalCardSubmissionDetail(
     return null;
   }
   return normalizeSeasonalCardSubmission(record);
+}
+
+export function normalizeSeasonalCardBatchLine(raw: unknown): SeasonalCardBatchLine {
+  const item = asRecord(raw) ?? {};
+  return {
+    submissionGuid: asString(
+      pick(item, "submissionGuid", "SubmissionGuid", "SubmissionGUID")
+    ),
+    catalogGuid: asString(pick(item, "catalogGuid", "CatalogGuid", "CatalogGUID")),
+    priceOption: asSeasonalCardPriceOption(pick(item, "priceOption", "PriceOption")),
+    priceLabel: asString(pick(item, "priceLabel", "PriceLabel")),
+    unitPrice: asNumber(pick(item, "unitPrice", "UnitPrice"), 0),
+    remainingQuantity: Math.max(
+      0,
+      Math.trunc(asNumber(pick(item, "remainingQuantity", "RemainingQuantity"), 0))
+    ),
+  };
+}
+
+/** 批次 DTO；不是对象（含 null）时返回 null，表示该组合还没填过。 */
+export function normalizeSeasonalCardBatch(raw: unknown): SeasonalCardBatch | null {
+  const item = asRecord(raw);
+  if (!item) {
+    return null;
+  }
+  return {
+    batchGuid: asString(pick(item, "batchGuid", "BatchGuid", "BatchGUID")).trim(),
+    storeCode: asString(pick(item, "storeCode", "StoreCode")),
+    storeName: asString(pick(item, "storeName", "StoreName")),
+    seasonYear: asNullableInt(pick(item, "seasonYear", "SeasonYear")),
+    cardType: asSeasonalCardType(pick(item, "cardType", "CardType")),
+    cardTypeName: asString(pick(item, "cardTypeName", "CardTypeName")),
+    localSupplierCode: asString(pick(item, "localSupplierCode", "LocalSupplierCode")).trim(),
+    supplierName: asString(pick(item, "supplierName", "SupplierName")).trim(),
+    remark: asString(pick(item, "remark", "Remark")),
+    submittedByName: asString(pick(item, "submittedByName", "SubmittedByName")),
+    submittedAt: normalizeServerUtcTimestamp(pick(item, "submittedAt", "SubmittedAt")),
+    totalQuantity: asNumber(pick(item, "totalQuantity", "TotalQuantity"), 0),
+    totalAmount: asNumber(pick(item, "totalAmount", "TotalAmount"), 0),
+    isCurrent: asBoolean(pick(item, "isCurrent", "IsCurrent")),
+    lines: getArray(item, "lines", "Lines").map(normalizeSeasonalCardBatchLine),
+  };
+}
+
+/** 节日固定 1-5 五项；服务端缺项时补成「没填过」，保证节日网格始终完整。 */
+export function normalizeSeasonalCardOverviewResponse(payload: unknown): SeasonalCardOverview {
+  const data = asRecord(unwrapPayload(payload)) ?? {};
+  const holidaysByType = new Map<SeasonalCardType, SeasonalCardOverviewHoliday>();
+  getArray(data, "holidays", "Holidays").forEach((raw) => {
+    const item = asRecord(raw) ?? {};
+    const cardType = asSeasonalCardType(pick(item, "cardType", "CardType"));
+    if (cardType == null || holidaysByType.has(cardType)) {
+      return;
+    }
+    holidaysByType.set(cardType, {
+      cardType,
+      cardTypeName: asString(pick(item, "cardTypeName", "CardTypeName")),
+      currentBatch: normalizeSeasonalCardBatch(pick(item, "currentBatch", "CurrentBatch")),
+    });
+  });
+
+  return {
+    storeCode: asString(pick(data, "storeCode", "StoreCode")),
+    seasonYear: asNullableInt(pick(data, "seasonYear", "SeasonYear")),
+    localSupplierCode: asString(pick(data, "localSupplierCode", "LocalSupplierCode")).trim(),
+    supplierName: asString(pick(data, "supplierName", "SupplierName")).trim(),
+    holidays: ([1, 2, 3, 4, 5] as SeasonalCardType[]).map(
+      (cardType) =>
+        holidaysByType.get(cardType) ?? { cardType, cardTypeName: "", currentBatch: null }
+    ),
+  };
+}
+
+export function normalizeSeasonalCardBatchResponse(payload: unknown) {
+  return payload == null ? null : normalizeSeasonalCardBatch(unwrapPayload(payload));
+}
+
+export function buildSeasonalCardOverviewQuery(query: SeasonalCardOverviewQuery) {
+  return {
+    storeCode: trimText(query.storeCode) ?? "",
+    seasonYear: asNullableInt(query.seasonYear) ?? 0,
+    localSupplierCode: trimText(query.localSupplierCode) ?? "",
+  };
+}
+
+export function buildSeasonalCardBatchRequest(payload: SeasonalCardBatchPayload) {
+  const remark = trimText(payload.remark);
+  const expectedPreviousBatchGuid = trimText(payload.expectedPreviousBatchGuid ?? undefined);
+  return {
+    storeCode: trimText(payload.storeCode) ?? "",
+    seasonYear: asNullableInt(payload.seasonYear) ?? 0,
+    cardType: payload.cardType,
+    localSupplierCode: trimText(payload.localSupplierCode) ?? "",
+    // 没填过时必须显式传 null，服务端据此判断「预填后有没有人抢先提交」。
+    expectedPreviousBatchGuid: expectedPreviousBatchGuid ?? null,
+    ...(remark ? { remark } : {}),
+    items: payload.items.map((item) => {
+      const customUnitPrice = asNullableNumber(item.customUnitPrice);
+      return {
+        catalogGuid: trimText(item.catalogGuid) ?? "",
+        remainingQuantity: Math.max(0, asNullableInt(item.remainingQuantity) ?? 0),
+        ...(customUnitPrice == null ? {} : { customUnitPrice }),
+      };
+    }),
+  };
+}
+
+export async function fetchSeasonalCardOverview(query: SeasonalCardOverviewQuery) {
+  const client = await getApiClient();
+  const response = await client.get(`${BASE_PATH}/overview`, {
+    params: buildSeasonalCardOverviewQuery(query),
+  });
+  return normalizeSeasonalCardOverviewResponse(response.data);
+}
+
+export async function submitSeasonalCardBatch(payload: SeasonalCardBatchPayload) {
+  const client = await getApiClient();
+  const response = await client.post(
+    `${BASE_PATH}/submissions/batch`,
+    buildSeasonalCardBatchRequest(payload)
+  );
+  return normalizeSeasonalCardBatchResponse(response.data);
 }
 
 export async function fetchSeasonalCardCatalog() {
