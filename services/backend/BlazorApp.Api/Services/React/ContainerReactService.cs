@@ -1,4 +1,5 @@
 using AutoMapper;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using BlazorApp.Api.Data;
@@ -2431,7 +2432,123 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
-        public async Task<AlignDomesticProductCodeResultDto> AlignDomesticProductCodeAsync(
+        private const string AlignDomesticProductCodeRenameMode = "Rename";
+        private const string AlignDomesticProductCodeMergeMode = "Merge";
+
+        /// <summary>
+        /// 对齐编码的前置数据：货柜明细、原国内商品、目标澳洲主档，以及（若存在）目标编码对应的已有国内商品。
+        /// </summary>
+        private sealed record AlignDomesticProductCodeContext(
+            string DetailHguid,
+            string OldProductCode,
+            string TargetProductCode,
+            ContainerDetail Detail,
+            DomesticProduct OldDomesticProduct,
+            Product LocalProduct,
+            DomesticProduct? TargetDomesticProduct
+        );
+
+        /// <summary>
+        /// 合并时参与「以目标为准、目标为空用原记录补」的国内商品字段。
+        /// </summary>
+        private static readonly (string Field, string Label, Func<DomesticProduct, object?> Read, Action<DomesticProduct, object?> Write)[] DomesticProductMergeFields =
+        {
+            ("ProductName", "商品名称", p => p.ProductName, (p, v) => p.ProductName = (string?)v),
+            ("EnglishProductName", "商品英文名称", p => p.EnglishProductName, (p, v) => p.EnglishProductName = (string?)v),
+            ("Barcode", "条形码", p => p.Barcode, (p, v) => p.Barcode = (string?)v),
+            ("ProductSpecification", "商品规格", p => p.ProductSpecification, (p, v) => p.ProductSpecification = (string?)v),
+            ("DomesticPrice", "国内价格", p => p.DomesticPrice, (p, v) => p.DomesticPrice = (decimal?)v),
+            ("ImportPrice", "进口价格", p => p.ImportPrice, (p, v) => p.ImportPrice = (decimal?)v),
+            ("OEMPrice", "零售价", p => p.OEMPrice, (p, v) => p.OEMPrice = (decimal?)v),
+            ("PackingQuantity", "单件装箱数", p => p.PackingQuantity, (p, v) => p.PackingQuantity = (int?)v),
+            ("UnitVolume", "单件体积", p => p.UnitVolume, (p, v) => p.UnitVolume = (decimal?)v),
+            ("MiddlePackQuantity", "中包数量", p => p.MiddlePackQuantity, (p, v) => p.MiddlePackQuantity = (int?)v),
+            ("ProductImage", "商品图片", p => p.ProductImage, (p, v) => p.ProductImage = (string?)v),
+        };
+
+        private static string DescribeDomesticProductType(int productType) =>
+            productType switch
+            {
+                1 => "套装商品",
+                2 => "多码商品",
+                _ => "普通商品",
+            };
+
+        /// <summary>
+        /// 合并口径的「空值」：字符串为空白、数值为 null 或 0（价格/装箱数/体积为 0 视为未填）。
+        /// </summary>
+        private static bool IsDomesticMergeValueEmpty(object? value) =>
+            value switch
+            {
+                null => true,
+                string text => string.IsNullOrWhiteSpace(text),
+                decimal number => number == 0m,
+                int number => number == 0,
+                _ => false,
+            };
+
+        private static string? FormatDomesticMergeValue(object? value) =>
+            value switch
+            {
+                null => null,
+                string text => string.IsNullOrWhiteSpace(text) ? null : text.Trim(),
+                decimal number => number.ToString("0.####", CultureInfo.InvariantCulture),
+                int number => number.ToString(CultureInfo.InvariantCulture),
+                _ => Convert.ToString(value, CultureInfo.InvariantCulture),
+            };
+
+        private static bool AreDomesticMergeValuesEqual(object? left, object? right)
+        {
+            if (IsDomesticMergeValueEmpty(left) && IsDomesticMergeValueEmpty(right))
+            {
+                return true;
+            }
+            return string.Equals(
+                FormatDomesticMergeValue(left),
+                FormatDomesticMergeValue(right),
+                StringComparison.Ordinal
+            );
+        }
+
+        /// <summary>
+        /// 计算合并结果：目标（澳洲编码那条）为准，目标为空的字段用原记录补；只返回两边不一致的字段。
+        /// </summary>
+        private static List<AlignDomesticProductFieldDiffDto> BuildDomesticProductMergeDiffs(
+            DomesticProduct target,
+            DomesticProduct old
+        )
+        {
+            var diffs = new List<AlignDomesticProductFieldDiffDto>();
+            foreach (var field in DomesticProductMergeFields)
+            {
+                var targetValue = field.Read(target);
+                var oldValue = field.Read(old);
+                if (AreDomesticMergeValuesEqual(targetValue, oldValue))
+                {
+                    continue;
+                }
+
+                var fillFromOld = IsDomesticMergeValueEmpty(targetValue) && !IsDomesticMergeValueEmpty(oldValue);
+                diffs.Add(
+                    new AlignDomesticProductFieldDiffDto
+                    {
+                        Field = field.Field,
+                        Label = field.Label,
+                        ExistingValue = FormatDomesticMergeValue(targetValue),
+                        OldValue = FormatDomesticMergeValue(oldValue),
+                        MergedValue = FormatDomesticMergeValue(fillFromOld ? oldValue : targetValue),
+                        FilledFromOld = fillFromOld,
+                    }
+                );
+            }
+            return diffs;
+        }
+
+        /// <summary>
+        /// 读取并校验对齐编码的公共前置条件（预览、事务前、事务内三处共用，报错文案保持一致）。
+        /// 目标国内编码是否已存在不在这里拒绝，而是返回给调用方决定走改码还是合并。
+        /// </summary>
+        private async Task<AlignDomesticProductCodeContext> LoadAlignDomesticProductCodeContextAsync(
             AlignDomesticProductCodeRequestDto request
         )
         {
@@ -2509,14 +2626,6 @@ namespace BlazorApp.Api.Services.React
                 throw new InvalidOperationException("国内商品货号与本地主档货号不一致，不能对齐编码");
             }
 
-            var targetDomesticExists = await _context
-                .Db.Queryable<DomesticProduct>()
-                .AnyAsync(p => p.ProductCode == targetProductCode && !p.IsDeleted);
-            if (targetDomesticExists)
-            {
-                throw new InvalidOperationException("目标国内商品编码已存在，不能自动合并");
-            }
-
             var oldLocalCodeExists = await _context
                 .Db.Queryable<Product>()
                 .AnyAsync(p => p.ProductCode == oldProductCode && !p.IsDeleted);
@@ -2527,6 +2636,161 @@ namespace BlazorApp.Api.Services.React
             {
                 throw new InvalidOperationException("原国内商品编码已存在本地主档或仓库商品，不能自动改码");
             }
+
+            var targetDomesticProduct = await _context
+                .Db.Queryable<DomesticProduct>()
+                .FirstAsync(p => p.ProductCode == targetProductCode && !p.IsDeleted);
+
+            return new AlignDomesticProductCodeContext(
+                detailHguid,
+                oldProductCode,
+                targetProductCode,
+                detail,
+                domesticProduct,
+                localProduct,
+                targetDomesticProduct
+            );
+        }
+
+        /// <summary>
+        /// 目标国内编码已存在时的合并前置校验：只合并同货号、同中国供应商的两条普通商品，
+        /// 且不能让同一货柜出现两行相同编码的明细。
+        /// </summary>
+        private async Task EnsureDomesticProductMergeAllowedAsync(AlignDomesticProductCodeContext context)
+        {
+            var target = context.TargetDomesticProduct
+                ?? throw new InvalidOperationException("目标国内商品不存在，请刷新后重试");
+            var old = context.OldDomesticProduct;
+
+            // 只合并两条普通商品：类型不一致（如澳洲编码那条是套装）说明可能不是同一个商品，须人工先确认类型。
+            if (old.ProductType != target.ProductType)
+            {
+                throw new InvalidOperationException(
+                    $"两条国内商品类型不一致（原记录：{DescribeDomesticProductType(old.ProductType)}，已有记录：{DescribeDomesticProductType(target.ProductType)}），不能自动合并，请先确认商品类型"
+                );
+            }
+            if (old.ProductType != 0)
+            {
+                throw new InvalidOperationException("套装/多码商品暂不支持自动合并");
+            }
+            if (
+                !string.Equals(
+                    target.HBProductNo?.Trim(),
+                    old.HBProductNo?.Trim(),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                throw new InvalidOperationException("两条国内商品的货号不一致，不能合并");
+            }
+            // 两条都是国内商品，这里比较的是同一套中国供应商代码。
+            if (
+                !string.Equals(
+                    target.SupplierCode?.Trim() ?? string.Empty,
+                    old.SupplierCode?.Trim() ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                throw new InvalidOperationException("两条国内商品的供应商不一致，不能合并");
+            }
+
+            var oldSetRowsExist = await _context
+                .Db.Queryable<DomesticSetProduct>()
+                .AnyAsync(p => p.ProductCode == context.OldProductCode && !p.IsDeleted);
+            if (oldSetRowsExist)
+            {
+                throw new InvalidOperationException("原国内商品带有套装结构，暂不支持自动合并");
+            }
+
+            var oldContainerCodes = await _context
+                .Db.Queryable<ContainerDetail>()
+                .Where(d => d.ProductCode == context.OldProductCode && !d.IsDeleted)
+                .Select(d => d.ContainerCode)
+                .Distinct()
+                .ToListAsync();
+            if (oldContainerCodes.Count > 0)
+            {
+                var overlappedContainers = await _context
+                    .Db.Queryable<ContainerDetail>()
+                    .Where(d =>
+                        d.ProductCode == context.TargetProductCode
+                        && !d.IsDeleted
+                        && oldContainerCodes.Contains(d.ContainerCode)
+                    )
+                    .Select(d => d.ContainerCode)
+                    .Distinct()
+                    .ToListAsync();
+                if (overlappedContainers.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"有 {overlappedContainers.Count} 个货柜同时含原编码和目标编码的明细，请先处理重复明细再合并"
+                    );
+                }
+            }
+        }
+
+        /// <summary>
+        /// 对齐编码确认前的预览：判断是直接改码还是合并到已有国内商品，合并时列出两边不一致的字段。
+        /// 只读，不加锁；真正执行时会在事务内重新校验。
+        /// </summary>
+        public async Task<AlignDomesticProductCodePreviewDto> PreviewAlignDomesticProductCodeAsync(
+            AlignDomesticProductCodeRequestDto request
+        )
+        {
+            var context = await LoadAlignDomesticProductCodeContextAsync(request);
+            var affectedContainerCodes = await _context
+                .Db.Queryable<ContainerDetail>()
+                .Where(d => d.ProductCode == context.OldProductCode && !d.IsDeleted)
+                .Select(d => d.ContainerCode)
+                .ToListAsync();
+
+            var preview = new AlignDomesticProductCodePreviewDto
+            {
+                Mode = AlignDomesticProductCodeRenameMode,
+                OldProductCode = context.OldProductCode,
+                NewProductCode = context.TargetProductCode,
+                AffectedContainerDetails = affectedContainerCodes.Count,
+                AffectedContainers = affectedContainerCodes
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count(),
+            };
+            if (context.TargetDomesticProduct == null)
+            {
+                return preview;
+            }
+
+            await EnsureDomesticProductMergeAllowedAsync(context);
+            preview.Mode = AlignDomesticProductCodeMergeMode;
+            preview.Fields = BuildDomesticProductMergeDiffs(
+                context.TargetDomesticProduct,
+                context.OldDomesticProduct
+            );
+            return preview;
+        }
+
+        public async Task<AlignDomesticProductCodeResultDto> AlignDomesticProductCodeAsync(
+            AlignDomesticProductCodeRequestDto request
+        )
+        {
+            var precheck = await LoadAlignDomesticProductCodeContextAsync(request);
+            var mergeRequested = request.MergeIntoExistingDomesticProduct;
+            if (precheck.TargetDomesticProduct != null && !mergeRequested)
+            {
+                throw new InvalidOperationException("目标国内商品编码已存在，不能自动合并");
+            }
+            if (precheck.TargetDomesticProduct == null && mergeRequested)
+            {
+                throw new InvalidOperationException("目标国内商品已变化，请刷新后重试");
+            }
+            if (mergeRequested)
+            {
+                await EnsureDomesticProductMergeAllowedAsync(precheck);
+            }
+
+            var detailHguid = precheck.DetailHguid;
+            var oldProductCode = precheck.OldProductCode;
+            var targetProductCode = precheck.TargetProductCode;
 
             await _context.Db.Ado.BeginTranAsync();
             try
@@ -2541,85 +2805,18 @@ namespace BlazorApp.Api.Services.React
                 mutationLock.EnsureCovers(_context.Db, transactionalContainerCodes);
 
                 // 事务内复查核心前置条件，避免确认弹窗打开后数据被并发改动仍继续级联改码。
-                var transactionalDetail = await _context
-                    .Db.Queryable<ContainerDetail>()
-                    .FirstAsync(d => d.DetailCode == detailHguid && !d.IsDeleted);
-                if (transactionalDetail == null)
-                {
-                    throw new InvalidOperationException("货柜明细不存在或已删除");
-                }
-                if (
-                    !string.Equals(
-                        transactionalDetail.ProductCode?.Trim(),
-                        oldProductCode,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    throw new InvalidOperationException("明细商品编码已变化，请刷新后重试");
-                }
-                if (string.Equals(transactionalDetail.ProductType?.Trim(), "套装子商品", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException("套装子商品关联套装结构，暂不支持单独对齐编码");
-                }
-
-                var transactionalDomesticProduct = await _context
-                    .Db.Queryable<DomesticProduct>()
-                    .FirstAsync(p => p.ProductCode == oldProductCode && !p.IsDeleted);
-                if (transactionalDomesticProduct == null)
-                {
-                    throw new InvalidOperationException("原国内商品不存在或已删除");
-                }
-
-                var transactionalLocalProduct = await _context
-                    .Db.Queryable<Product>()
-                    .FirstAsync(p => p.ProductCode == targetProductCode && !p.IsDeleted);
-                if (transactionalLocalProduct == null)
-                {
-                    throw new InvalidOperationException("本地主档商品不存在或已删除");
-                }
-                if (
-                    !string.Equals(
-                        transactionalLocalProduct.LocalSupplierCode?.Trim(),
-                        supplierCode,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    throw new InvalidOperationException("供应商代码与本地主档不一致，不能对齐编码");
-                }
-
-                var transactionalDomesticItemNumber = transactionalDomesticProduct.HBProductNo?.Trim();
-                var transactionalLocalItemNumber = transactionalLocalProduct.ItemNumber?.Trim();
-                if (
-                    string.IsNullOrWhiteSpace(transactionalDomesticItemNumber)
-                    || string.IsNullOrWhiteSpace(transactionalLocalItemNumber)
-                    || !string.Equals(
-                        transactionalDomesticItemNumber,
-                        transactionalLocalItemNumber,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    throw new InvalidOperationException("国内商品货号与本地主档货号不一致，不能对齐编码");
-                }
-
-                var targetDomesticExistsInTransaction = await _context
-                    .Db.Queryable<DomesticProduct>()
-                    .AnyAsync(p => p.ProductCode == targetProductCode && !p.IsDeleted);
-                if (targetDomesticExistsInTransaction)
+                var transactional = await LoadAlignDomesticProductCodeContextAsync(request);
+                if (transactional.TargetDomesticProduct != null && !mergeRequested)
                 {
                     throw new InvalidOperationException("目标国内商品编码已存在，不能自动合并");
                 }
-                var oldLocalCodeExistsInTransaction = await _context
-                    .Db.Queryable<Product>()
-                    .AnyAsync(p => p.ProductCode == oldProductCode && !p.IsDeleted);
-                var oldWarehouseCodeExistsInTransaction = await _context
-                    .Db.Queryable<WarehouseProduct>()
-                    .AnyAsync(p => p.ProductCode == oldProductCode && !p.IsDeleted);
-                if (oldLocalCodeExistsInTransaction || oldWarehouseCodeExistsInTransaction)
+                if (transactional.TargetDomesticProduct == null && mergeRequested)
                 {
-                    throw new InvalidOperationException("原国内商品编码已存在本地主档或仓库商品，不能自动改码");
+                    throw new InvalidOperationException("目标国内商品已变化，请刷新后重试");
+                }
+                if (mergeRequested)
+                {
+                    await EnsureDomesticProductMergeAllowedAsync(transactional);
                 }
 
                 var beforeSnapshots = await _changeHistoryService.CaptureSnapshotsAsync(
@@ -2630,33 +2827,103 @@ namespace BlazorApp.Api.Services.React
                     throw new InvalidOperationException("无法读取本地主档审计快照，请刷新后重试");
                 }
 
-                // Product.ProductCode 是权威主键；确认后只把国内侧引用从旧编码迁到本地主档编码。
-                // 不按 SupplierCode 过滤：国内表存的是中国供应商代码，与请求中的澳洲供应商代码不同体系。
-                var updatedDomesticProducts = await _context.Db.Ado.ExecuteCommandAsync(
-                    "UPDATE DomesticProduct SET ProductCode = @TargetProductCode WHERE ProductCode = @OldProductCode AND IsDeleted = 0",
-                    new List<SugarParameter>
-                    {
-                        new("@TargetProductCode", targetProductCode),
-                        new("@OldProductCode", oldProductCode),
-                    }
-                );
-                if (updatedDomesticProducts != 1)
+                var auditActorName = _currentUserService.GetCurrentUsername();
+                auditActorName = string.IsNullOrWhiteSpace(auditActorName)
+                    ? "System"
+                    : auditActorName.Trim();
+
+                var updatedDomesticProducts = 0;
+                var deletedDomesticProducts = 0;
+                var updatedProductGrades = 0;
+                var filledFields = new List<string>();
+                if (mergeRequested)
                 {
-                    throw new InvalidOperationException("原国内商品编码已变化，请刷新后重试");
+                    // 合并：保留目标（澳洲编码那条）国内商品，目标为空的字段用原记录补齐，原记录软删除。
+                    var target = transactional.TargetDomesticProduct!;
+                    var old = transactional.OldDomesticProduct;
+                    var fillColumns = new List<string>();
+                    foreach (var field in DomesticProductMergeFields)
+                    {
+                        var targetValue = field.Read(target);
+                        var oldValue = field.Read(old);
+                        if (IsDomesticMergeValueEmpty(targetValue) && !IsDomesticMergeValueEmpty(oldValue))
+                        {
+                            field.Write(target, oldValue);
+                            fillColumns.Add(field.Field);
+                            filledFields.Add(field.Label);
+                        }
+                    }
+                    if (fillColumns.Count > 0)
+                    {
+                        target.UpdatedAt = DateTime.Now;
+                        target.UpdatedBy = auditActorName;
+                        fillColumns.Add(nameof(DomesticProduct.UpdatedAt));
+                        fillColumns.Add(nameof(DomesticProduct.UpdatedBy));
+                        updatedDomesticProducts = await _context
+                            .Db.Updateable(target)
+                            .UpdateColumns(fillColumns.ToArray())
+                            .ExecuteCommandAsync();
+                    }
+
+                    deletedDomesticProducts = await _context.Db.Ado.ExecuteCommandAsync(
+                        "UPDATE DomesticProduct SET IsDeleted = 1, UpdatedAt = @UpdatedAt, UpdatedBy = @UpdatedBy WHERE ProductCode = @OldProductCode AND IsDeleted = 0",
+                        new List<SugarParameter>
+                        {
+                            new("@UpdatedAt", DateTime.Now),
+                            new("@UpdatedBy", auditActorName),
+                            new("@OldProductCode", oldProductCode),
+                        }
+                    );
+                    if (deletedDomesticProducts != 1)
+                    {
+                        throw new InvalidOperationException("原国内商品编码已变化，请刷新后重试");
+                    }
+
+                    // ProductGrade.ProductCode 有唯一索引（含已删除行）：目标已有等级时保留目标的，原等级留在旧编码上不动。
+                    var targetGradeExists = await _context
+                        .Db.Queryable<ProductGrade>()
+                        .AnyAsync(p => p.ProductCode == targetProductCode);
+                    if (!targetGradeExists)
+                    {
+                        updatedProductGrades = await _context
+                            .Db.Updateable<ProductGrade>()
+                            .SetColumns(p => p.ProductCode == targetProductCode)
+                            .Where(p => p.ProductCode == oldProductCode && !p.IsDeleted)
+                            .ExecuteCommandAsync();
+                    }
+                }
+                else
+                {
+                    // Product.ProductCode 是权威主键；确认后只把国内侧引用从旧编码迁到本地主档编码。
+                    // 不按 SupplierCode 过滤：国内表存的是中国供应商代码，与请求中的澳洲供应商代码不同体系。
+                    updatedDomesticProducts = await _context.Db.Ado.ExecuteCommandAsync(
+                        "UPDATE DomesticProduct SET ProductCode = @TargetProductCode WHERE ProductCode = @OldProductCode AND IsDeleted = 0",
+                        new List<SugarParameter>
+                        {
+                            new("@TargetProductCode", targetProductCode),
+                            new("@OldProductCode", oldProductCode),
+                        }
+                    );
+                    if (updatedDomesticProducts != 1)
+                    {
+                        throw new InvalidOperationException("原国内商品编码已变化，请刷新后重试");
+                    }
+                    updatedProductGrades = await _context
+                        .Db.Updateable<ProductGrade>()
+                        .SetColumns(p => p.ProductCode == targetProductCode)
+                        .Where(p => p.ProductCode == oldProductCode && !p.IsDeleted)
+                        .ExecuteCommandAsync();
                 }
 
+                // 货柜明细自己存了价格/装箱数，这里只改它指向的编码，行上的数值不动。
                 var updatedContainerDetails = await _context
                     .Db.Updateable<ContainerDetail>()
                     .SetColumns(d => d.ProductCode == targetProductCode)
                     .Where(d => d.ProductCode == oldProductCode && !d.IsDeleted)
                     .ExecuteCommandAsync();
+                // 合并时已校验原记录没有套装结构，这里对合并恒为 0。
                 var updatedDomesticSetProducts = await _context
                     .Db.Updateable<DomesticSetProduct>()
-                    .SetColumns(p => p.ProductCode == targetProductCode)
-                    .Where(p => p.ProductCode == oldProductCode && !p.IsDeleted)
-                    .ExecuteCommandAsync();
-                var updatedProductGrades = await _context
-                    .Db.Updateable<ProductGrade>()
                     .SetColumns(p => p.ProductCode == targetProductCode)
                     .Where(p => p.ProductCode == oldProductCode && !p.IsDeleted)
                     .ExecuteCommandAsync();
@@ -2669,10 +2936,6 @@ namespace BlazorApp.Api.Services.React
                 var afterSnapshots = await _changeHistoryService.CaptureSnapshotsAsync(
                     new[] { targetProductCode }
                 );
-                var auditActorName = _currentUserService.GetCurrentUsername();
-                auditActorName = string.IsNullOrWhiteSpace(auditActorName)
-                    ? "System"
-                    : auditActorName.Trim();
                 var isSystemActor = string.Equals(
                     auditActorName,
                     "System",
@@ -2681,6 +2944,7 @@ namespace BlazorApp.Api.Services.React
                 var auditActorUserGuid = _currentUserService.GetCurrentUserGuid();
                 isSystemActor = string.IsNullOrWhiteSpace(auditActorUserGuid) && isSystemActor;
                 // 事件挂在仍然有效的新编码下；旧编码保留在 before 快照中形成单条编码差异。
+                // 合并时原国内商品是软删除，其字段原样保留在旧编码那行，可追溯、可回滚。
                 await _changeHistoryService.RecordChangesAsync(
                     new Dictionary<string, WarehouseProductChangeSnapshotDto>(
                         StringComparer.OrdinalIgnoreCase
@@ -2696,9 +2960,9 @@ namespace BlazorApp.Api.Services.React
                     {
                         Action = "Update",
                         Source = "ContainerDetail",
-                        SourceReference = string.IsNullOrWhiteSpace(transactionalDetail.ContainerCode)
+                        SourceReference = string.IsNullOrWhiteSpace(transactional.Detail.ContainerCode)
                             ? detailHguid
-                            : transactionalDetail.ContainerCode,
+                            : transactional.Detail.ContainerCode,
                         ActorUserGuid = string.IsNullOrWhiteSpace(auditActorUserGuid)
                             ? null
                             : auditActorUserGuid,
@@ -2710,15 +2974,32 @@ namespace BlazorApp.Api.Services.React
 
                 await _context.Db.Ado.CommitTranAsync();
 
+                if (mergeRequested)
+                {
+                    _logger.LogInformation(
+                        "国内商品已合并: {OldProductCode} -> {NewProductCode}, 补齐字段 {FilledFields}, 改指向明细 {UpdatedContainerDetails} 行, 操作人 {Actor}",
+                        oldProductCode,
+                        targetProductCode,
+                        filledFields.Count == 0 ? "无" : string.Join("、", filledFields),
+                        updatedContainerDetails,
+                        auditActorName
+                    );
+                }
+
                 return new AlignDomesticProductCodeResultDto
                 {
+                    Mode = mergeRequested
+                        ? AlignDomesticProductCodeMergeMode
+                        : AlignDomesticProductCodeRenameMode,
                     OldProductCode = oldProductCode,
                     NewProductCode = targetProductCode,
                     UpdatedDomesticProducts = updatedDomesticProducts,
+                    DeletedDomesticProducts = deletedDomesticProducts,
                     UpdatedContainerDetails = updatedContainerDetails,
                     UpdatedDomesticSetProducts = updatedDomesticSetProducts,
                     UpdatedProductGrades = updatedProductGrades,
                     UpdatedDomesticProductCreationLogs = updatedDomesticProductCreationLogs,
+                    FilledFields = filledFields,
                 };
             }
             catch (ContainerMutationScopeChangedException exception)

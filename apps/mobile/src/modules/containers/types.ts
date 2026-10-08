@@ -448,9 +448,34 @@ export interface AlignDomesticProductCodeRequest {
   expectedDomesticProductCode: string;
   targetProductCode: string;
   supplierCode?: string;
+  /** 预览为 Merge 且用户确认后才传 true：合并到已有国内商品 */
+  mergeIntoExistingDomesticProduct?: boolean;
+}
+
+/** Rename：直接改码；Merge：目标编码已存在，合并到已有国内商品 */
+export type AlignDomesticProductCodeMode = "Rename" | "Merge";
+
+export interface AlignDomesticProductFieldDiff {
+  field: string;
+  label: string;
+  existingValue: string | null;
+  oldValue: string | null;
+  mergedValue: string | null;
+  filledFromOld: boolean;
+}
+
+export interface AlignDomesticProductCodePreview {
+  mode: AlignDomesticProductCodeMode;
+  oldProductCode: string;
+  newProductCode: string;
+  affectedContainerDetails: number;
+  affectedContainers: number;
+  fields: AlignDomesticProductFieldDiff[];
 }
 
 export interface AlignDomesticProductCodeResult {
+  mode: AlignDomesticProductCodeMode;
+  filledFields: string[];
   oldProductCode: string;
   OldProductCode?: string;
   newProductCode: string;

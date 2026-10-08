@@ -86,6 +86,10 @@ namespace BlazorApp.Api.Interfaces.React
         /// <summary>
         /// 人工确认后，将国内商品编码反向对齐到本地主档商品编码。
         /// </summary>
+        Task<AlignDomesticProductCodePreviewDto> PreviewAlignDomesticProductCodeAsync(
+            AlignDomesticProductCodeRequestDto request
+        );
+
         Task<AlignDomesticProductCodeResultDto> AlignDomesticProductCodeAsync(
             AlignDomesticProductCodeRequestDto request
         );

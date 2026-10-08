@@ -1,6 +1,7 @@
 import type { SupplyNoticeInput } from '../types/supplyNotice'
 import type { ApiResponse } from '../types/api'
 import type {
+  AlignDomesticProductCodePreview,
   AlignDomesticProductCodeRequest,
   AlignDomesticProductCodeResult,
   ComingSoonHomeContainer,
@@ -670,6 +671,8 @@ function normalizeAlignDomesticProductCodeResult(
   result?: Partial<AlignDomesticProductCodeResult>,
 ): AlignDomesticProductCodeResult {
   return {
+    mode: result?.mode === 'Merge' ? 'Merge' : 'Rename',
+    filledFields: Array.isArray(result?.filledFields) ? result.filledFields : [],
     oldProductCode: result?.oldProductCode ?? result?.OldProductCode ?? '',
     OldProductCode: result?.OldProductCode,
     newProductCode: result?.newProductCode ?? result?.NewProductCode ?? '',
@@ -699,12 +702,54 @@ export async function alignDomesticProductCode(
         ExpectedDomesticProductCode: payload.expectedDomesticProductCode,
         TargetProductCode: payload.targetProductCode,
         SupplierCode: payload.supplierCode,
+        // 只有用户在预览里确认合并时才带上，兼容旧接口的请求体
+        ...(payload.mergeIntoExistingDomesticProduct ? { MergeIntoExistingDomesticProduct: true } : {}),
       },
     },
   )
 
   ensureSuccess(response.success ?? response.isSuccess, response.message, '对齐国内商品编码失败')
   return normalizeAlignDomesticProductCodeResult(response.data)
+}
+
+type RawAlignDomesticProductCodePreview = Partial<AlignDomesticProductCodePreview> & {
+  fields?: Array<Partial<AlignDomesticProductCodePreview['fields'][number]>>
+}
+
+/** 对齐编码确认前预览：直接改码，或目标编码已存在时合并到已有国内商品（附差异字段） */
+export async function previewAlignDomesticProductCode(
+  payload: AlignDomesticProductCodeRequest,
+): Promise<AlignDomesticProductCodePreview> {
+  const response = await request<{ success?: boolean; isSuccess?: boolean; message?: string; data?: RawAlignDomesticProductCodePreview }>(
+    `${API_BASE}/details/align-domestic-product-code/preview`,
+    {
+      method: 'POST',
+      data: {
+        DetailHguid: payload.detailHguid,
+        ExpectedDomesticProductCode: payload.expectedDomesticProductCode,
+        TargetProductCode: payload.targetProductCode,
+        SupplierCode: payload.supplierCode,
+      },
+    },
+  )
+
+  ensureSuccess(response.success ?? response.isSuccess, response.message, '读取对齐预览失败')
+  const data = response.data ?? {}
+  return {
+    mode: data.mode === 'Merge' ? 'Merge' : 'Rename',
+    oldProductCode: data.oldProductCode ?? '',
+    newProductCode: data.newProductCode ?? '',
+    affectedContainerDetails: data.affectedContainerDetails ?? 0,
+    affectedContainers: data.affectedContainers ?? 0,
+    fields: (data.fields ?? []).map((field) => ({
+      field: field.field ?? '',
+      label: field.label ?? field.field ?? '',
+      existingValue: field.existingValue ?? null,
+      oldValue: field.oldValue ?? null,
+      mergedValue: field.mergedValue ?? null,
+      filledFromOld: Boolean(field.filledFromOld),
+    })),
+  }
 }
 
 export async function batchDeleteDetails(hguids: string[]): Promise<{ totalDeleted: number; totalRequested: number }> {

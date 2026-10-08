@@ -25,6 +25,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { useAuthStore } from "@/store/auth-store";
 import {
   alignDomesticProductCode,
+  previewAlignDomesticProductCode,
   applyFloatRate,
   applyPrices,
   backfill,
@@ -84,6 +85,7 @@ import {
   type ContainerDetailEditForm,
 } from "./container-detail-edit-state";
 import type {
+  AlignDomesticProductCodePreview,
   ContainerDetail,
   ContainerDetailBatchPreview,
   ContainerDetailConcurrentConflict,
@@ -385,6 +387,8 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
   const [rangeFilters, setRangeFilters] = useState<DetailRangeFilterForm>(EMPTY_DETAIL_RANGE_FILTERS);
   const [appliedRangeFilters, setAppliedRangeFilters] = useState<DetailRangeFilterForm>(EMPTY_DETAIL_RANGE_FILTERS);
   const [aligningDetailHguid, setAligningDetailHguid] = useState("");
+  // 对齐前读取预览期间的行，用于按钮转圈和防重复点击
+  const [previewingAlignDetailHguid, setPreviewingAlignDetailHguid] = useState("");
   const [snackbar, setSnackbar] = useState("");
   const clientSessionIdRef = useRef(createClientSessionId());
   const editSessionIdRef = useRef("");
@@ -774,7 +778,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
   });
 
   const alignDomesticProductCodeMutation = useMutation({
-    mutationFn: (detail: ContainerDetail) => {
+    mutationFn: ({ detail, merge }: { detail: ContainerDetail; merge: boolean }) => {
       const detailHguid = getDetailGuid(detail).trim();
       const localProductCode = getDetailLocalProductCode(detail);
       const domesticProductCode = getDetailDomesticProductCode(detail);
@@ -786,10 +790,16 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
         expectedDomesticProductCode: domesticProductCode,
         targetProductCode: localProductCode,
         supplierCode: getDetailLocalSupplierCode(detail),
+        mergeIntoExistingDomesticProduct: merge,
       });
     },
     onSuccess: (result) => {
       invalidateDetail();
+      if (result.mode === "Merge") {
+        const filled = result.filledFields.length ? `，补齐：${result.filledFields.join("、")}` : "";
+        setSnackbar(`已合并到已有国内商品 ${result.newProductCode || ""}${filled}`);
+        return;
+      }
       setSnackbar(`已对齐国内商品编码 ${result.oldProductCode || ""} -> ${result.newProductCode || ""}`);
     },
     onError: (error) => setSnackbar(error instanceof Error ? error.message : "对齐国内商品编码失败"),
@@ -815,7 +825,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
     const detailHguid = getDetailGuid(detail).trim();
     const localProductCode = getDetailLocalProductCode(detail);
     const domesticProductCode = getDetailDomesticProductCode(detail);
-    if (alignDomesticProductCodeMutation.isPending) {
+    if (alignDomesticProductCodeMutation.isPending || previewingAlignDetailHguid) {
       return;
     }
     if (!detailHguid || !localProductCode || !domesticProductCode) {
@@ -825,25 +835,56 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
 
     const itemNumber = getDetailItemNumber(detail) || "--";
     const productName = getDetailProductName(detail) || "--";
-    Alert.alert(
-      "对齐国内商品编码",
-      [
-        `确认把国内商品和货柜中的编码 ${domesticProductCode} 改为澳洲的商品编码 ${localProductCode}？`,
-        `货号：${itemNumber}`,
-        `商品：${productName}`,
-        "如果目标国内编码已存在，后端会拒绝本次对齐，不会自动合并或覆盖。",
-      ].join("\n"),
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "对齐编码",
-          onPress: () => {
-            setAligningDetailHguid(detailHguid);
-            alignDomesticProductCodeMutation.mutate(detail);
+    const confirmAlign = (preview: AlignDomesticProductCodePreview) => {
+      // 目标编码在国内商品表已存在 → 合并模式：保留已有记录、空字段用原记录补、原记录软删
+      const isMerge = preview.mode === "Merge";
+      const lines = isMerge
+        ? [
+            `国内商品表里已有澳洲编码 ${localProductCode} 的记录。确认把国内商品和货柜中的编码 ${domesticProductCode} 改为澳洲的商品编码 ${localProductCode}，并把原记录合并进去？`,
+            `货号：${itemNumber}`,
+            `商品：${productName}`,
+            `将改指向 ${preview.affectedContainers} 个货柜的 ${preview.affectedContainerDetails} 行明细，明细自己的价格和装箱数不变。`,
+            "",
+            ...(preview.fields.length
+              ? preview.fields.map((field) =>
+                  `${field.label}：已有 ${field.existingValue ?? "--"}｜原 ${field.oldValue ?? "--"} → ${field.mergedValue ?? "--"}${field.filledFromOld ? "（用原记录补）" : ""}`,
+                )
+              : ["两条记录的字段一致，无需补齐。"]),
+            "",
+            "以已有记录为准，已有为空的字段用原记录补；原记录标记为已删除，可恢复。",
+          ]
+        : [
+            `确认把国内商品和货柜中的编码 ${domesticProductCode} 改为澳洲的商品编码 ${localProductCode}？`,
+            `货号：${itemNumber}`,
+            `商品：${productName}`,
+          ];
+      Alert.alert(
+        isMerge ? "合并到已有国内商品" : "对齐国内商品编码",
+        lines.join("\n"),
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: isMerge ? "合并编码" : "对齐编码",
+            onPress: () => {
+              setAligningDetailHguid(detailHguid);
+              alignDomesticProductCodeMutation.mutate({ detail, merge: isMerge });
+            },
           },
-        },
-      ],
-    );
+        ],
+      );
+    };
+
+    // 先预览：后端判断是直接改码还是合并，并在合并前做完全部校验（不能合并时直接报原因，不弹确认框）
+    setPreviewingAlignDetailHguid(detailHguid);
+    void previewAlignDomesticProductCode({
+      detailHguid,
+      expectedDomesticProductCode: domesticProductCode,
+      targetProductCode: localProductCode,
+      supplierCode: getDetailLocalSupplierCode(detail),
+    })
+      .then(confirmAlign)
+      .catch((error: unknown) => setSnackbar(error instanceof Error ? error.message : "读取对齐预览失败"))
+      .finally(() => setPreviewingAlignDetailHguid(""));
   };
 
   const requestBatchPreview = (action: "delete" | "float" | "prices" | "recalculate" | "backfill", title: string) => {
@@ -1163,8 +1204,11 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
                 canEditContainer={canEditContainer}
                 canAlignDomesticProductCode={canAlignDomesticProductCode}
                 showReadonlyOemPrice={showReadonlyOemPrice}
-                aligning={aligningDetailHguid === hguid && alignDomesticProductCodeMutation.isPending}
-                alignDisabled={alignDomesticProductCodeMutation.isPending}
+                aligning={
+                  previewingAlignDetailHguid === hguid
+                  || (aligningDetailHguid === hguid && alignDomesticProductCodeMutation.isPending)
+                }
+                alignDisabled={alignDomesticProductCodeMutation.isPending || Boolean(previewingAlignDetailHguid)}
                 onToggle={() => toggleSelection(hguid)}
                 onAlign={() => handleAlignDomesticProductCode(detail)}
                 onEdit={() => openEditModal(detail)}

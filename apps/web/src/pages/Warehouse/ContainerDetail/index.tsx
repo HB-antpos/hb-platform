@@ -81,6 +81,7 @@ import StatusPill, { type StatusPillTone } from '../../../components/listToolbar
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import {
   alignDomesticProductCode,
+  previewAlignDomesticProductCode,
   applyContainerFloatRateByScope,
   applyContainerPricesByScope,
   assignContainerDetailCategoryByScope,
@@ -132,7 +133,7 @@ import {
 import { useAuthStore } from '../../../store/auth'
 import { useTabsStore } from '../../../store/tabs'
 import { P } from '../../../types/permissions'
-import type { ContainerDetail, ContainerDetailBatchScope, ContainerDetailEditingPresence, ContainerDomesticSetCodeItem, ContainerMain, HqTranslationResult, UpdateContainerDetailRequest, UpdateContainerRequest } from '../../../types/container'
+import type { AlignDomesticProductCodePreview, ContainerDetail, ContainerDetailBatchScope, ContainerDetailEditingPresence, ContainerDomesticSetCodeItem, ContainerMain, HqTranslationResult, UpdateContainerDetailRequest, UpdateContainerRequest } from '../../../types/container'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import { shouldShowDetailInitialLoading, shouldSkipDetailAutoReload } from '../../../utils/detailLoadState'
 import {
@@ -4323,58 +4324,151 @@ export default function ContainerDetailPage() {
       return
     }
 
-    Modal.confirm({
-      title: t('containers.modals.alignDomesticProductCodeTitle', '对齐国内商品编码'),
-      content: (
-        <Space direction="vertical" size={6}>
-          <Typography.Text>
-            {t(
-              'containers.modals.alignDomesticProductCodeContent',
-              '确认把国内商品和货柜中的编码 {{oldCode}} 改为澳洲的商品编码 {{newCode}}？',
-              { oldCode: domesticProductCode, newCode: localProductCode },
-            )}
-          </Typography.Text>
-          <Typography.Text type="secondary">
-            {[
-              getContainerDetailItemNumber(row),
-              getContainerDetailProductName(row),
-            ].filter(Boolean).join(' / ')}
-          </Typography.Text>
-          <Typography.Text type="warning">
-            {t(
-              'containers.modals.alignDomesticProductCodeConflictHint',
-              '如果目标国内编码已存在，后端会拒绝本次对齐，不会自动合并或覆盖。',
-            )}
-          </Typography.Text>
-        </Space>
-      ),
-      okText: t('containers.actions.alignDomesticProductCode', '对齐编码'),
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        if (!await drainAutoSavesBeforeAction()) return
-        setAligningDomesticProductDetailHguid(detailHguid)
-        try {
-          const result = await alignDomesticProductCode({
-            detailHguid,
-            expectedDomesticProductCode: domesticProductCode,
-            targetProductCode: localProductCode,
-            supplierCode,
-          })
-          message.success(
-            t('containers.messages.domesticProductCodeAligned', '已对齐国内商品编码 {{oldCode}} -> {{newCode}}', {
-              oldCode: result.oldProductCode || domesticProductCode,
-              newCode: result.newProductCode || localProductCode,
-            }),
-          )
-          await reloadCurrentDetailRef.current()
-        } catch (error) {
-          message.error(error instanceof Error ? error.message : t('containers.messages.alignDomesticProductCodeFailed', '对齐国内商品编码失败'))
-          throw error
-        } finally {
-          setAligningDomesticProductDetailHguid(null)
-        }
-      },
-    })
+    const alignRequest = {
+      detailHguid,
+      expectedDomesticProductCode: domesticProductCode,
+      targetProductCode: localProductCode,
+      supplierCode,
+    }
+    const productLabel = [
+      getContainerDetailItemNumber(row),
+      getContainerDetailProductName(row),
+    ].filter(Boolean).join(' / ')
+
+    const confirmAlign = (preview: AlignDomesticProductCodePreview) => {
+      // 目标编码在国内商品表已存在 → 合并模式：保留已有记录、空字段用原记录补、原记录软删
+      const isMerge = preview.mode === 'Merge'
+      const renderValue = (value: string | null) => value ?? <Typography.Text type="secondary">--</Typography.Text>
+      Modal.confirm({
+        width: isMerge ? 640 : undefined,
+        title: isMerge
+          ? t('containers.modals.mergeDomesticProductTitle', '合并到已有国内商品')
+          : t('containers.modals.alignDomesticProductCodeTitle', '对齐国内商品编码'),
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Typography.Text>
+              {isMerge
+                ? t(
+                  'containers.modals.mergeDomesticProductContent',
+                  '国内商品表里已有澳洲编码 {{newCode}} 的记录。确认把国内商品和货柜中的编码 {{oldCode}} 改为澳洲的商品编码 {{newCode}}，并把原记录合并进去？',
+                  { oldCode: domesticProductCode, newCode: localProductCode },
+                )
+                : t(
+                  'containers.modals.alignDomesticProductCodeContent',
+                  '确认把国内商品和货柜中的编码 {{oldCode}} 改为澳洲的商品编码 {{newCode}}？',
+                  { oldCode: domesticProductCode, newCode: localProductCode },
+                )}
+            </Typography.Text>
+            {productLabel ? <Typography.Text type="secondary">{productLabel}</Typography.Text> : null}
+            {isMerge ? (
+              <>
+                <Typography.Text type="secondary">
+                  {t(
+                    'containers.modals.mergeDomesticProductScope',
+                    '将改指向 {{containers}} 个货柜的 {{details}} 行明细，明细自己的价格和装箱数不变。',
+                    { containers: preview.affectedContainers, details: preview.affectedContainerDetails },
+                  )}
+                </Typography.Text>
+                {preview.fields.length ? (
+                  <MeasuredTable
+                    metricId="warehouse.container-detail.merge-domestic-product-diff"
+                    size="small"
+                    pagination={false}
+                    rowKey="field"
+                    dataSource={preview.fields}
+                    columns={[
+                      {
+                        title: t('containers.modals.mergeDomesticProductFieldColumn', '字段'),
+                        dataIndex: 'label',
+                        width: 110,
+                      },
+                      {
+                        title: t('containers.modals.mergeDomesticProductExistingColumn', '已有记录'),
+                        dataIndex: 'existingValue',
+                        render: renderValue,
+                      },
+                      {
+                        title: t('containers.modals.mergeDomesticProductOldColumn', '原记录'),
+                        dataIndex: 'oldValue',
+                        render: renderValue,
+                      },
+                      {
+                        title: t('containers.modals.mergeDomesticProductMergedColumn', '合并后'),
+                        dataIndex: 'mergedValue',
+                        render: (value: string | null, field) => (
+                          <Space size={4} wrap>
+                            <Typography.Text strong>{renderValue(value)}</Typography.Text>
+                            {field.filledFromOld ? (
+                              <Tag color="orange">{t('containers.modals.mergeDomesticProductFilledTag', '用原记录补')}</Tag>
+                            ) : null}
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                ) : (
+                  <Typography.Text type="secondary">
+                    {t('containers.modals.mergeDomesticProductNoDiff', '两条记录的字段一致，无需补齐。')}
+                  </Typography.Text>
+                )}
+                <Typography.Text type="warning">
+                  {t(
+                    'containers.modals.mergeDomesticProductRule',
+                    '以已有记录为准，已有为空的字段用原记录补；原记录标记为已删除，可恢复。',
+                  )}
+                </Typography.Text>
+              </>
+            ) : null}
+          </Space>
+        ),
+        okText: isMerge
+          ? t('containers.actions.mergeDomesticProduct', '合并编码')
+          : t('containers.actions.alignDomesticProductCode', '对齐编码'),
+        cancelText: t('common.cancel'),
+        onOk: async () => {
+          if (!await drainAutoSavesBeforeAction()) return
+          setAligningDomesticProductDetailHguid(detailHguid)
+          try {
+            const result = await alignDomesticProductCode({
+              ...alignRequest,
+              mergeIntoExistingDomesticProduct: isMerge,
+            })
+            const newCode = result.newProductCode || localProductCode
+            if (result.mode === 'Merge') {
+              const filledFields = result.filledFields ?? []
+              message.success(filledFields.length
+                ? t('containers.messages.domesticProductMergedFilled', '已合并到已有国内商品 {{newCode}}，补齐：{{fields}}', {
+                  newCode,
+                  fields: filledFields.join('、'),
+                })
+                : t('containers.messages.domesticProductMerged', '已合并到已有国内商品 {{newCode}}', { newCode }))
+            } else {
+              message.success(
+                t('containers.messages.domesticProductCodeAligned', '已对齐国内商品编码 {{oldCode}} -> {{newCode}}', {
+                  oldCode: result.oldProductCode || domesticProductCode,
+                  newCode,
+                }),
+              )
+            }
+            await reloadCurrentDetailRef.current()
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : t('containers.messages.alignDomesticProductCodeFailed', '对齐国内商品编码失败'))
+            throw error
+          } finally {
+            setAligningDomesticProductDetailHguid(null)
+          }
+        },
+      })
+    }
+
+    // 先预览：后端判断是直接改码还是合并，并在合并前做完全部校验（不能合并时直接报原因，不弹确认框）
+    setAligningDomesticProductDetailHguid(detailHguid)
+    void previewAlignDomesticProductCode(alignRequest)
+      .then(confirmAlign)
+      .catch((error: unknown) => {
+        message.error(error instanceof Error ? error.message : t('containers.messages.alignDomesticProductPreviewFailed', '读取对齐预览失败'))
+      })
+      .finally(() => setAligningDomesticProductDetailHguid(null))
   }
 
   const openBatchPricesModal = async () => {

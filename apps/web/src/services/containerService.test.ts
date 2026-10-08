@@ -1,5 +1,6 @@
 import {
   alignDomesticProductCode,
+  previewAlignDomesticProductCode,
   assignContainerDetailCategoryByScope,
   batchUpdateDetails,
   deleteContainerDetailsByScope,
@@ -465,6 +466,62 @@ try {
       updatedContainerDetails: 2,
     },
     'alignDomesticProductCode should normalize response counts',
+  )
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capturedUrl = String(input)
+    capturedInit = init
+    return new Response(JSON.stringify({
+      success: true,
+      data: {
+        mode: 'Merge',
+        oldProductCode: 'DOM-OLD',
+        newProductCode: 'LOCAL-NEW',
+        affectedContainerDetails: 3,
+        affectedContainers: 2,
+        fields: [{ field: 'Barcode', label: '条形码', existingValue: null, oldValue: '952', mergedValue: '952', filledFromOld: true }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+
+  const alignPreview = await previewAlignDomesticProductCode({
+    detailHguid: 'D-ALIGN',
+    expectedDomesticProductCode: 'DOM-OLD',
+    targetProductCode: 'LOCAL-NEW',
+    supplierCode: '200',
+  })
+  assertEqual(
+    capturedUrl,
+    '/api/react/v1/containers/details/align-domestic-product-code/preview',
+    'previewAlignDomesticProductCode should call the preview endpoint',
+  )
+  assertDeepEqual(
+    {
+      mode: alignPreview.mode,
+      affectedContainerDetails: alignPreview.affectedContainerDetails,
+      affectedContainers: alignPreview.affectedContainers,
+      firstField: alignPreview.fields[0],
+    },
+    {
+      mode: 'Merge',
+      affectedContainerDetails: 3,
+      affectedContainers: 2,
+      firstField: { field: 'Barcode', label: '条形码', existingValue: null, oldValue: '952', mergedValue: '952', filledFromOld: true },
+    },
+    'previewAlignDomesticProductCode should normalize merge preview fields',
+  )
+
+  await alignDomesticProductCode({
+    detailHguid: 'D-ALIGN',
+    expectedDomesticProductCode: 'DOM-OLD',
+    targetProductCode: 'LOCAL-NEW',
+    supplierCode: '200',
+    mergeIntoExistingDomesticProduct: true,
+  })
+  assertEqual(
+    JSON.parse(String(capturedInit?.body)).MergeIntoExistingDomesticProduct,
+    true,
+    'alignDomesticProductCode should send the merge flag only when merging',
   )
 
   const abortController = new AbortController()

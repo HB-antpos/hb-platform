@@ -6,17 +6,33 @@
     },
     "modals": {
       "recalculateCostsAfterDeleteNote": "Deleting details changed the container total volume. Transport cost and import price of the remaining details need to be recalculated with the new total volume.",
-      "translateHqDataContent": "Products in HQ container {{containerNumber}} whose English name is empty or contains Chinese will be machine-translated and written directly to the HQ product dictionary (valid English names are kept). Continue?"
+      "translateHqDataContent": "Products in HQ container {{containerNumber}} whose English name is empty or contains Chinese will be machine-translated and written directly to the HQ product dictionary (valid English names are kept). Continue?",
+      "mergeDomesticProductTitle": "Merge into Existing Domestic Product",
+      "mergeDomesticProductContent": "A domestic product with Australian code {{newCode}} already exists. Change code {{oldCode}} in domestic products and containers to {{newCode}} and merge the old record into it?",
+      "mergeDomesticProductScope": "{{details}} detail line(s) in {{containers}} container(s) will be re-pointed. Their own prices and packing quantities stay unchanged.",
+      "mergeDomesticProductRule": "The existing record wins; its empty fields are filled from the old record. The old record is marked deleted and can be restored.",
+      "mergeDomesticProductNoDiff": "Both records have the same values. Nothing to fill.",
+      "mergeDomesticProductFieldColumn": "Field",
+      "mergeDomesticProductExistingColumn": "Existing",
+      "mergeDomesticProductOldColumn": "Old",
+      "mergeDomesticProductMergedColumn": "Merged",
+      "mergeDomesticProductFilledTag": "From old"
     },
     "messages": {
       "detailsDeletedCostsRecalculated": "Recalculated costs for {{count}} remaining details",
       "detailsDeletedCostsRecalculateCancelled": "Recalculation cancelled. Remaining details still use the pre-deletion total volume for transport cost",
       "detailsDeletedCostsRecalculateFailed": "Details deleted, but cost recalculation failed: {{message}}",
       "createProductsPushHqUnsent": "{{count}} newly created product(s) could not be sent to HQ automatically (no sendable detail found). Please use \"Send to HQ\" manually",
-      "createProductsPushHqBusy": "Another Send to HQ job is being submitted, so HQ was not updated automatically. Please use \"Send to HQ\" later"
+      "createProductsPushHqBusy": "Another Send to HQ job is being submitted, so HQ was not updated automatically. Please use \"Send to HQ\" later",
+      "domesticProductMerged": "Merged into existing domestic product {{newCode}}",
+      "domesticProductMergedFilled": "Merged into existing domestic product {{newCode}}. Filled: {{fields}}",
+      "alignDomesticProductPreviewFailed": "Failed to load alignment preview"
     },
     "text": {
       "createProductsPushToHqAfterCreate": "Also update the HQ database after creation"
+    },
+    "actions": {
+      "mergeDomesticProduct": "Merge Code"
     }
   }
 }

@@ -370,9 +370,37 @@ export interface AlignDomesticProductCodeRequest {
   expectedDomesticProductCode: string
   targetProductCode: string
   supplierCode?: string
+  /** 预览为 Merge 且用户确认后才传 true：合并到已有国内商品 */
+  mergeIntoExistingDomesticProduct?: boolean
+}
+
+/** Rename：直接改码；Merge：目标编码已存在，合并到已有国内商品 */
+export type AlignDomesticProductCodeMode = 'Rename' | 'Merge'
+
+export interface AlignDomesticProductFieldDiff {
+  field: string
+  label: string
+  /** 已有国内商品（澳洲编码那条）的值 */
+  existingValue: string | null
+  /** 原国内商品（旧编码那条）的值 */
+  oldValue: string | null
+  /** 合并后：已有为准，已有为空时用原记录补 */
+  mergedValue: string | null
+  filledFromOld: boolean
+}
+
+export interface AlignDomesticProductCodePreview {
+  mode: AlignDomesticProductCodeMode
+  oldProductCode: string
+  newProductCode: string
+  affectedContainerDetails: number
+  affectedContainers: number
+  fields: AlignDomesticProductFieldDiff[]
 }
 
 export interface AlignDomesticProductCodeResult {
+  mode?: AlignDomesticProductCodeMode
+  filledFields?: string[]
   oldProductCode: string
   OldProductCode?: string
   newProductCode: string
