@@ -29,10 +29,10 @@ try {
       JSON.stringify({
         success: true,
         data: [
-          { productCode: 'P-1', salesQuantitySinceLastArrival: 8 },
-          { productCode: 'P-2', salesQuantitySinceLastArrival: 0 },
-          { productCode: 'P-3', salesQuantitySinceLastArrival: -2 },
-          { productCode: 'P-4', salesQuantitySinceLastArrival: null },
+          { productCode: 'P-1', salesQuantitySinceLastArrival: 8, lastArrivalDate: '2026-09-30T00:00:00' },
+          { productCode: 'P-2', salesQuantitySinceLastArrival: 0, lastArrivalDate: '2024-06-10T00:00:00' },
+          { productCode: 'P-3', salesQuantitySinceLastArrival: -2, lastArrivalDate: 20260901 },
+          { productCode: 'P-4', salesQuantitySinceLastArrival: null, lastArrivalDate: null },
         ],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -48,12 +48,12 @@ try {
   assertDeepEqual(
     result,
     [
-      { productCode: 'P-1', salesQuantitySinceLastArrival: 8 },
-      { productCode: 'P-2', salesQuantitySinceLastArrival: 0 },
-      { productCode: 'P-3', salesQuantitySinceLastArrival: -2 },
-      { productCode: 'P-4', salesQuantitySinceLastArrival: null },
+      { productCode: 'P-1', salesQuantitySinceLastArrival: 8, lastArrivalDate: '2026-09-30T00:00:00' },
+      { productCode: 'P-2', salesQuantitySinceLastArrival: 0, lastArrivalDate: '2024-06-10T00:00:00' },
+      { productCode: 'P-3', salesQuantitySinceLastArrival: -2, lastArrivalDate: null },
+      { productCode: 'P-4', salesQuantitySinceLastArrival: null, lastArrivalDate: null },
     ],
-    'summary 应保留正数、0、负数与 null',
+    'summary 应保留正数、0、负数与 null，来货日期非字符串归一为 null',
   )
 
   console.log('storeOrderService.salesSummary.test: ok')

@@ -507,6 +507,8 @@ export interface StoreOrderDynamicData {
   cartQuantity: number
   // 最近来货日至今的销量；后端未返回或不可用时为 null/undefined，卡片据此隐藏 Sales 入口。
   salesQuantitySinceLastArrival?: number | null
+  // 来货后销量的起算日（最近来货出库日期）；与 Sales 同批从 summary 接口回填。
+  lastArrivalDate?: string | null
 }
 
 export interface StoreOrderDynamicDataRequest {
@@ -523,6 +525,7 @@ export interface StoreOrderProductSalesSummaryQuery {
 export interface StoreOrderProductSalesSummaryItem {
   productCode: string
   salesQuantitySinceLastArrival: number | null
+  lastArrivalDate: string | null
 }
 
 export interface StoreOrderCartItem {

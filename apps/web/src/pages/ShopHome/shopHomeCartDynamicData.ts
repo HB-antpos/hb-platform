@@ -302,13 +302,14 @@ export function mergeShopHomeBaseDynamicDataMap(
   const nextMap = { ...previousMap }
   Object.entries(nextBaseMap).forEach(([productCode, nextBaseData]) => {
     const previousData = previousMap[productCode]
-    // 局部刷新只更新购物车与最近订单等基础字段；已经异步加载的 Sales 不得被 undefined 覆盖。
+    // 局部刷新只更新购物车与最近订单等基础字段；已经异步加载的 Sales 与来货日期不得被 undefined 覆盖。
     nextMap[productCode] =
       previousData?.salesQuantitySinceLastArrival === undefined
         ? nextBaseData
         : {
             ...nextBaseData,
             salesQuantitySinceLastArrival: previousData.salesQuantitySinceLastArrival,
+            lastArrivalDate: previousData.lastArrivalDate,
           }
   })
 

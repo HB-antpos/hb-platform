@@ -4686,9 +4686,9 @@ public sealed class StoreOrderProductListTests : IDisposable
         Assert.True(result.Success, result.Message);
         Assert.Collection(
             result.Data!,
-            item => { Assert.Equal("P-ZERO", item.ProductCode); Assert.Equal(0, item.SalesQuantitySinceLastArrival); },
-            item => { Assert.Equal("P-NEGATIVE", item.ProductCode); Assert.Equal(-3, item.SalesQuantitySinceLastArrival); },
-            item => { Assert.Equal("P-NO-ARRIVAL", item.ProductCode); Assert.Null(item.SalesQuantitySinceLastArrival); }
+            item => { Assert.Equal("P-ZERO", item.ProductCode); Assert.Equal(0, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); },
+            item => { Assert.Equal("P-NEGATIVE", item.ProductCode); Assert.Equal(-3, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); },
+            item => { Assert.Equal("P-NO-ARRIVAL", item.ProductCode); Assert.Null(item.SalesQuantitySinceLastArrival); Assert.Null(item.LastArrivalDate); }
         );
     }
 
