@@ -1698,7 +1698,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         await _printerLock.WaitAsync(cancellationToken);
         try
         {
-            return await Task.Run(() => PrintCore(document, settings), cancellationToken);
+            // trace 在 Core 里逐步更新卡住的步骤与 SDK 返回码，失败时一并上报中心日志。
+            var trace = new PrinterCallTrace("print", ResolvePort(settings), document.Elements.Count);
+            return await PrinterLinkLogState.RunAsync(trace, () => PrintCore(document, settings, trace), cancellationToken);
         }
         finally
         {
@@ -1727,7 +1729,8 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         await _printerLock.WaitAsync(cancellationToken);
         try
         {
-            return await Task.Run(() => OpenCashDrawerCore(settings), cancellationToken);
+            var trace = new PrinterCallTrace("cash-drawer", ResolvePort(settings));
+            return await PrinterLinkLogState.RunAsync(trace, () => OpenCashDrawerCore(settings, trace), cancellationToken);
         }
         finally
         {
@@ -1746,8 +1749,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         _disposed = true;
     }
 
-    private ReceiptPrinterDriverResult PrintCore(ReceiptPrintDocument document, ReceiptPrinterSettings settings)
+    private ReceiptPrinterDriverResult PrintCore(ReceiptPrintDocument document, ReceiptPrinterSettings settings, PrinterCallTrace trace)
     {
+        trace.Stage = PrinterStages.InitSdk;
         var printer = InitPrinter(string.Empty);
         if (printer == IntPtr.Zero)
         {
@@ -1757,28 +1761,30 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         var opened = false;
         try
         {
-            var openResult = OpenPort(printer, string.IsNullOrWhiteSpace(settings.PrinterPort)
-                ? ReceiptPrinterSettings.DefaultPrinterPort
-                : settings.PrinterPort.Trim());
+            trace.Stage = PrinterStages.OpenPort;
+            var openResult = OpenPort(printer, ResolvePort(settings));
             if (openResult != 0)
             {
+                trace.SdkResult = openResult;
                 return new ReceiptPrinterDriverResult(false, T("receipt.printer.portOpenFailed", "Printer port could not be opened."));
             }
 
             opened = true;
-            var initializeResult = GetSdkFailure(PrinterInitialize(printer), T("receipt.printer.initFailed", "Printer could not be initialized."));
+            trace.Stage = PrinterStages.Initialize;
+            var initializeResult = GetSdkFailure(trace, PrinterInitialize(printer), T("receipt.printer.initFailed", "Printer could not be initialized."));
             if (initializeResult is not null)
             {
                 return initializeResult;
             }
 
-            var lineSpaceResult = GetSdkFailure(SetTextLineSpace(printer, 30), T("receipt.printer.lineSpacingFailed", "Printer line spacing could not be set."));
+            trace.Stage = PrinterStages.LineSpace;
+            var lineSpaceResult = GetSdkFailure(trace, SetTextLineSpace(printer, 30), T("receipt.printer.lineSpacingFailed", "Printer line spacing could not be set."));
             if (lineSpaceResult is not null)
             {
                 return lineSpaceResult;
             }
 
-            var statusResult = GetPrinterNotReadyResult(printer);
+            var statusResult = GetPrinterNotReadyResult(printer, trace);
             if (statusResult is not null)
             {
                 return statusResult;
@@ -1789,7 +1795,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
                 switch (element.Kind)
                 {
                     case ReceiptPrintElementKind.Barcode:
+                        trace.Stage = PrinterStages.Barcode;
                         var barcodeResult = GetSdkFailure(
+                            trace,
                             PrintBarCode(printer, 8, element.Text, 2, 100, (int)ReceiptPrintAlignment.Center, 2),
                             T("receipt.printer.barcodeFailed", "Printer barcode could not be printed."));
                         if (barcodeResult is not null)
@@ -1799,7 +1807,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
 
                         break;
                     case ReceiptPrintElementKind.QrCode:
+                        trace.Stage = PrinterStages.QrCode;
                         var qrResult = GetSdkFailure(
+                            trace,
                             PrintSymbol(printer, 49, element.Text, 48, 7, 7, (int)ReceiptPrintAlignment.Center),
                             T("receipt.printer.qrCodeFailed", "Printer QR code could not be printed."));
                         if (qrResult is not null)
@@ -1809,7 +1819,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
 
                         break;
                     default:
+                        trace.Stage = PrinterStages.Text;
                         var textResult = GetSdkFailure(
+                            trace,
                             PrintText(printer, element.Text + "\r\n", (int)element.Alignment, element.IsEmphasized ? 1 : 0),
                             T("receipt.printer.textFailed", "Printer text could not be printed."));
                         if (textResult is not null)
@@ -1821,7 +1833,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
                 }
             }
 
+            trace.Stage = PrinterStages.Cut;
             var cutResult = GetSdkFailure(
+                trace,
                 CutPaperWithDistance(printer, Math.Max(1, settings.CutDistance)),
                 T("receipt.printer.cutPaperFailed", "Printer paper could not be cut."));
             if (cutResult is not null)
@@ -1842,8 +1856,9 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         }
     }
 
-    private ReceiptPrinterDriverResult OpenCashDrawerCore(ReceiptPrinterSettings settings)
+    private ReceiptPrinterDriverResult OpenCashDrawerCore(ReceiptPrinterSettings settings, PrinterCallTrace trace)
     {
+        trace.Stage = PrinterStages.InitSdk;
         var printer = InitPrinter(string.Empty);
         if (printer == IntPtr.Zero)
         {
@@ -1853,29 +1868,32 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         var opened = false;
         try
         {
-            var openResult = OpenPort(printer, string.IsNullOrWhiteSpace(settings.PrinterPort)
-                ? ReceiptPrinterSettings.DefaultPrinterPort
-                : settings.PrinterPort.Trim());
+            trace.Stage = PrinterStages.OpenPort;
+            var openResult = OpenPort(printer, ResolvePort(settings));
             if (openResult != 0)
             {
+                trace.SdkResult = openResult;
                 return new ReceiptPrinterDriverResult(false, T("receipt.printer.portOpenFailed", "Printer port could not be opened."));
             }
 
             opened = true;
-            var initializeResult = GetSdkFailure(PrinterInitialize(printer), T("receipt.printer.initFailed", "Printer could not be initialized."));
+            trace.Stage = PrinterStages.Initialize;
+            var initializeResult = GetSdkFailure(trace, PrinterInitialize(printer), T("receipt.printer.initFailed", "Printer could not be initialized."));
             if (initializeResult is not null)
             {
                 return initializeResult;
             }
 
-            var statusResult = GetPrinterNotReadyResult(printer);
+            var statusResult = GetPrinterNotReadyResult(printer, trace);
             if (statusResult is not null)
             {
                 return statusResult;
             }
 
             // 通过打印机 DK 钱箱口发送脉冲，不打印小票。
+            trace.Stage = PrinterStages.DrawerPulse;
             var drawerResult = GetSdkFailure(
+                trace,
                 OpenCashDrawer(printer, CashDrawerPinMode, CashDrawerOnTime, CashDrawerOffTime),
                 T("receipt.drawer.openFailed", "Cash drawer could not be opened."));
             if (drawerResult is not null)
@@ -1896,17 +1914,33 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
         }
     }
 
-    private ReceiptPrinterDriverResult? GetSdkFailure(int result, string message)
+    private static string ResolvePort(ReceiptPrinterSettings settings)
     {
-        return result == 0 ? null : new ReceiptPrinterDriverResult(false, $"{message} SDK result: {result}.");
+        return string.IsNullOrWhiteSpace(settings.PrinterPort)
+            ? ReceiptPrinterSettings.DefaultPrinterPort
+            : settings.PrinterPort.Trim();
     }
 
-    private ReceiptPrinterDriverResult? GetPrinterNotReadyResult(IntPtr printer)
+    private ReceiptPrinterDriverResult? GetSdkFailure(PrinterCallTrace trace, int result, string message)
     {
+        if (result == 0)
+        {
+            return null;
+        }
+
+        trace.SdkResult = result;
+        return new ReceiptPrinterDriverResult(false, $"{message} SDK result: {result}.");
+    }
+
+    private ReceiptPrinterDriverResult? GetPrinterNotReadyResult(IntPtr printer, PrinterCallTrace trace)
+    {
+        // 状态读取失败（端口能开却读不到状态）与“读到了但未就绪”要分开记：前者多是线缆松动或打印机断电。
+        trace.Stage = PrinterStages.StatusRead;
         var status = 2;
         var result = GetPrinterState(printer, ref status);
         if (result != 0)
         {
+            trace.SdkResult = result;
             return new ReceiptPrinterDriverResult(false, T("receipt.printer.statusReadFailed", "Printer status could not be read."));
         }
 
@@ -1915,6 +1949,8 @@ public sealed class XpReceiptPrinterDriver(ILocalizationService? localization = 
             return null;
         }
 
+        trace.Stage = PrinterStages.StatusFlags;
+        trace.PrinterStatus = status;
         if ((status & 0b100) > 0)
         {
             return new ReceiptPrinterDriverResult(false, T("receipt.printer.coverOpen", "Printer cover is open."));
