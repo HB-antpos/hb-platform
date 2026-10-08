@@ -764,6 +764,10 @@ namespace BlazorApp.Shared.DTOs
         public string DetailHguid { get; set; } = string.Empty;
         public string ExpectedDomesticProductCode { get; set; } = string.Empty;
         public string TargetProductCode { get; set; } = string.Empty;
+        /// <summary>
+        /// 澳洲本地供应商代码（Product.LocalSupplierCode，如 200），只用于校验本地主档；
+        /// 不是 DomesticProduct.SupplierCode（中国供应商代码）。
+        /// </summary>
         public string SupplierCode { get; set; } = string.Empty;
     }
 
