@@ -168,7 +168,10 @@ public sealed class DailyClosePrintingTests
         Assert.Equal("Warning", entry.Level);
         Assert.Contains("part=cash-slip", entry.Message, StringComparison.Ordinal);
         Assert.Contains("reason=Manual", entry.Message, StringComparison.Ordinal);
-        Assert.Equal("paper out", entry.Properties!["error"]);
+        // 结构化属性是中心日志按条件检索用的，不能只断言 message。
+        Assert.Equal("cash-slip", entry.Properties!["part"]);
+        Assert.Equal("Manual", entry.Properties["reason"]);
+        Assert.Equal("paper out", entry.Properties["error"]);
     }
 
     [Fact]
