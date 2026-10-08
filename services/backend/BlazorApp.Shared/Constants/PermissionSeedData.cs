@@ -186,6 +186,7 @@ namespace BlazorApp.Shared.Constants
                 Permissions.PosTerminal.Installments.AddRepayment,
                 Permissions.PosTerminal.Installments.Cancel,
                 Permissions.PosTerminal.Installments.ConfirmPickup,
+                Permissions.PosTerminal.Installments.AmendLines,
                 Permissions.PosTerminal.CashDrawer.Open,
                 Permissions.PosTerminal.Receipt.PrintLast,
             }
@@ -354,6 +355,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.PosTerminal.Installments.AddRepayment, "添加分期还款", "POS 分期", "收银端分期页 - 添加还款按钮"),
                 new(Permissions.PosTerminal.Installments.Cancel, "取消分期", "POS 分期", "收银端分期页 - 取消分期按钮"),
                 new(Permissions.PosTerminal.Installments.ConfirmPickup, "确认分期取货", "POS 分期", "收银端分期页 - 确认取货按钮"),
+                new(Permissions.PosTerminal.Installments.AmendLines, "修改分期商品列表", "POS 分期", "收银端历史订单 - 分期订单明细修改商品列表按钮"),
                 new(Permissions.PosTerminal.Settings.View, "查看设置页", "POS 设置", "收银端设置页 - 进入设置页面"),
                 new(Permissions.PosTerminal.Settings.PaymentTerminal, "设置支付终端", "POS 设置", "收银端设置页 - 支付终端设置按钮"),
                 new(Permissions.PosTerminal.Settings.ReceiptPrinter, "设置小票打印机", "POS 设置", "收银端设置页 - 小票打印机设置按钮"),

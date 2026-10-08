@@ -2359,6 +2359,65 @@
         }
       }
     },
+    "/api/v1/installments/{installmentGuid}/amend-lines": {
+      "post": {
+        "tags": [
+          "Installments"
+        ],
+        "parameters": [
+          {
+            "name": "installmentGuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallmentAmendLinesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallmentAmendLinesRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallmentAmendLinesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentAmendLinesResponseApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentAmendLinesResponseApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallmentAmendLinesResponseApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/installments/history": {
       "get": {
         "tags": [
@@ -8743,6 +8802,95 @@
         "type": "integer",
         "format": "int32"
       },
+      "InstallmentAmendLinesRequest": {
+        "type": "object",
+        "properties": {
+          "installmentGuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "deviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "cashierId": {
+            "type": "string",
+            "nullable": true
+          },
+          "cashierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstallmentLineDto"
+            },
+            "nullable": true
+          },
+          "expectedUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "InstallmentAmendLinesResponse": {
+        "type": "object",
+        "properties": {
+          "installmentGuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InstallmentStatus"
+          },
+          "totalAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "paidAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "balanceAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "details": {
+            "$ref": "#/components/schemas/InstallmentDetailsDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "InstallmentAmendLinesResponseApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/InstallmentAmendLinesResponse"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "InstallmentAppendPaymentRequest": {
         "type": "object",
         "properties": {
@@ -9729,6 +9877,9 @@
             "type": "boolean"
           },
           "repaymentClaimPrepareProviderV1": {
+            "type": "boolean"
+          },
+          "amendLinesSupported": {
             "type": "boolean"
           }
         },

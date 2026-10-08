@@ -12,6 +12,7 @@ export const ALL_POS_TERMINAL_PERMISSIONS = Object.freeze([
   "Permissions.PosTerminal.History.Reprint",
   "Permissions.PosTerminal.History.View",
   "Permissions.PosTerminal.Installments.AddRepayment",
+  "Permissions.PosTerminal.Installments.AmendLines",
   "Permissions.PosTerminal.Installments.Cancel",
   "Permissions.PosTerminal.Installments.ConfirmPickup",
   "Permissions.PosTerminal.Installments.Create",

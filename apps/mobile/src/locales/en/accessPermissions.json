@@ -313,6 +313,10 @@
       "name": "Permissions Pos Terminal Installments Add Repayment",
       "description": "Allows access to Permissions Pos Terminal Installments Add Repayment."
     },
+    "Permissions.PosTerminal.Installments.AmendLines": {
+      "name": "Permissions Pos Terminal Installments Amend Lines",
+      "description": "Allows access to Permissions Pos Terminal Installments Amend Lines."
+    },
     "Permissions.PosTerminal.Installments.Cancel": {
       "name": "Permissions Pos Terminal Installments Cancel",
       "description": "Allows access to Permissions Pos Terminal Installments Cancel."

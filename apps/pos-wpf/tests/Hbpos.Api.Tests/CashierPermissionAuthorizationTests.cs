@@ -675,6 +675,10 @@ public sealed class CashierPermissionAuthorizationTests
             Permissions.PosTerminal.Installments.View);
         AssertPolicyPermissions(
             options,
+            CashierAuthorizationPolicies.InstallmentAmendLines,
+            Permissions.PosTerminal.Installments.AmendLines);
+        AssertPolicyPermissions(
+            options,
             CashierAuthorizationPolicies.DeviceRegistration,
             Permissions.PosTerminal.Settings.DeviceRegistration);
         AssertPolicyPermissions(

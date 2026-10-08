@@ -324,6 +324,7 @@
     <Compile Include="OperationAuditQueryServiceTests.cs" />
     <Compile Include="OperationAuditRiskQueryTests.cs" />
     <Compile Include="DailyCloseRecordsTests.cs" />
+    <Compile Include="InstallmentAmendLinesPermissionTests.cs" />
     <Compile Include="PosOperationAuditRiskEvaluatorTests.cs" />
     <Compile Include="PosOperationAuditRiskSqlServerIntegrationTests.cs" />
     <Compile Include="LinklySettlementManagementTests.cs" />

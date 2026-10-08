@@ -101,6 +101,7 @@ const CANONICAL_ACTION_ORDER = [
   "installments.addrepayment",
   "installments.cancel",
   "installments.confirmpickup",
+  "installments.amendlines",
   "cashdrawer.open",
   "receipt.printlast",
 ];

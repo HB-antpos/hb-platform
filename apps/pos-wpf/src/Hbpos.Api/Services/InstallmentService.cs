@@ -30,6 +30,12 @@ public interface IInstallmentService
     Task<InstallmentVoidResponse> VoidAsync(
         InstallmentVoidRequest request,
         CancellationToken cancellationToken);
+
+    // 默认实现抛 NotSupportedException，保证既有测试替身无需改动即可继续编译。
+    Task<InstallmentAmendLinesResponse> AmendLinesAsync(
+        InstallmentAmendLinesRequest request,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }
 
 public interface IInstallmentHistoryService
@@ -482,6 +488,46 @@ public sealed class InstallmentService(
             Message: alreadyVoided ? existing : null);
     }
 
+    public async Task<InstallmentAmendLinesResponse> AmendLinesAsync(
+        InstallmentAmendLinesRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeAmendLinesRequest(request);
+        var details = await repository.GetDetailsAsync(normalized.InstallmentGuid, cancellationToken)
+            ?? throw new InvalidOperationException("Installment was not found.");
+        // 修改商品列表按“本店”范围放行（与历史页、跨设备提货 / 作废一致），不要求同一台设备。
+        ValidateInstallmentStoreScope(details, normalized.StoreCode);
+        logger?.LogInformation(
+            "Installment amend lines start installmentGuid={InstallmentGuid} store={StoreCode} device={DeviceCode} cashier={CashierId} lines={LineCount} reason={Reason}",
+            normalized.InstallmentGuid,
+            normalized.StoreCode,
+            normalized.DeviceCode,
+            normalized.CashierId,
+            normalized.Lines.Count,
+            normalized.Reason);
+
+        // 状态、乐观并发令牌、新总额与已付款的比较都依赖加锁后的最新订单，统一在仓储事务内完成。
+        var updated = await repository.AmendLinesAsync(
+            normalized.InstallmentGuid,
+            normalized.Lines,
+            normalized.ExpectedUpdatedAt,
+            cancellationToken);
+        logger?.LogInformation(
+            "Installment amend lines completed installmentGuid={InstallmentGuid} status={Status} total={TotalAmount} paid={PaidAmount} balance={BalanceAmount}",
+            updated.InstallmentGuid,
+            updated.Status,
+            updated.TotalAmount,
+            updated.PaidAmount,
+            updated.BalanceAmount);
+        return new InstallmentAmendLinesResponse(
+            updated.InstallmentGuid,
+            updated.Status,
+            updated.TotalAmount,
+            updated.PaidAmount,
+            updated.BalanceAmount,
+            updated);
+    }
+
     public Task<InstallmentHistoryQueryResponse> QueryAsync(
         InstallmentHistoryQueryRequest request,
         CancellationToken cancellationToken)
@@ -675,6 +721,62 @@ public sealed class InstallmentService(
             ReservationToken = NormalizeOptional(request.ReservationToken),
             IdempotencyKey = NormalizeOptional(request.IdempotencyKey),
             Amount = RoundCurrency(request.Amount)
+        };
+    }
+
+    private static InstallmentAmendLinesRequest NormalizeAmendLinesRequest(InstallmentAmendLinesRequest request)
+    {
+        if (request.Lines is null || request.Lines.Any(line => line is null))
+        {
+            throw new InstallmentAmendLinesException(
+                InstallmentAmendLinesErrorCodes.InvalidLines,
+                "Installment lines are required.");
+        }
+
+        var lines = request.Lines.Select(line => line with
+        {
+            ProductCode = line.ProductCode?.Trim() ?? string.Empty,
+            DisplayName = line.DisplayName?.Trim() ?? string.Empty,
+            LookupCode = line.LookupCode?.Trim() ?? string.Empty,
+            ReferenceCode = NormalizeOptional(line.ReferenceCode),
+            ItemNumber = NormalizeOptional(line.ItemNumber),
+            UnitPrice = RoundCurrency(line.UnitPrice),
+            DiscountAmount = RoundCurrency(line.DiscountAmount),
+            ActualAmount = RoundCurrency(line.ActualAmount)
+        }).ToList();
+
+        // 共享规则覆盖数量 / 单价 / 折扣 / 行金额 / 重复 GUID / 必填文本，客户端与服务端口径一致。
+        var validation = InstallmentAmendRules.ValidateLines(lines);
+        if (validation != InstallmentAmendLinesValidation.Valid)
+        {
+            throw new InstallmentAmendLinesException(
+                InstallmentAmendLinesErrorCodes.InvalidLines,
+                $"Installment lines are invalid: {validation}.");
+        }
+
+        // 共享规则不管列长度；超长会在落库时被 SQL Server 截断报错，这里提前按 400 拒绝。
+        foreach (var line in lines)
+        {
+            if (line.ProductCode.Length > 50 ||
+                line.LookupCode.Length > 50 ||
+                (line.ReferenceCode?.Length ?? 0) > 50 ||
+                (line.ItemNumber?.Length ?? 0) > 50 ||
+                line.DisplayName.Length > 255)
+            {
+                throw new InstallmentAmendLinesException(
+                    InstallmentAmendLinesErrorCodes.InvalidLines,
+                    "Installment line text exceeds the maximum length.");
+            }
+        }
+
+        return request with
+        {
+            StoreCode = NormalizeRequired(request.StoreCode, "Store code is required."),
+            DeviceCode = NormalizeRequired(request.DeviceCode, "Device code is required."),
+            CashierId = NormalizeRequired(request.CashierId, "Cashier id is required."),
+            CashierName = NormalizeRequired(request.CashierName, "Cashier name is required."),
+            Reason = NormalizeOptional(request.Reason),
+            Lines = lines
         };
     }
 
@@ -945,6 +1047,16 @@ public sealed record InstallmentLifecycleOperationFacts(
     string ExecutingDeviceCode,
     string CashierId);
 
+/// <summary>
+/// 修改分期商品列表的业务失败；Code 取自 <see cref="InstallmentAmendLinesErrorCodes"/>，控制器据此映射 HTTP 状态。
+/// 继承 InvalidOperationException，未专门捕获的调用方仍按通用 400 处理。
+/// </summary>
+public sealed class InstallmentAmendLinesException(string code, string message)
+    : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
+
 public interface IInstallmentRepository
 {
     Task CreateAsync(InstallmentDetailsDto details, CancellationToken cancellationToken);
@@ -987,6 +1099,14 @@ public interface IInstallmentRepository
         InstallmentLifecycleOperationFacts operation,
         CancellationToken cancellationToken) =>
         VoidAsync(installmentGuid, cancellationInfo, cancellationToken);
+
+    // 整体替换商品行；默认抛 NotSupportedException，保证既有测试替身无需改动即可继续编译。
+    Task<InstallmentDetailsDto> AmendLinesAsync(
+        Guid installmentGuid,
+        IReadOnlyList<InstallmentLineDto> lines,
+        DateTimeOffset expectedUpdatedAt,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 
     Task<InstallmentPaymentLookup?> FindPaymentAsync(
         Guid paymentGuid,
@@ -1136,6 +1256,95 @@ public sealed class SqlSugarInstallmentRepository(HbposSqlSugarContext dbContext
             await db.Ado.RollbackTranAsync();
             throw;
         }
+    }
+
+    public async Task<InstallmentDetailsDto> AmendLinesAsync(
+        Guid installmentGuid,
+        IReadOnlyList<InstallmentLineDto> lines,
+        DateTimeOffset expectedUpdatedAt,
+        CancellationToken cancellationToken)
+    {
+        var db = dbContext.PosmDb;
+        await using var processLock = await InstallmentMutationLock.AcquireProcessAsync(
+            installmentGuid,
+            cancellationToken);
+        var installmentGuidText = installmentGuid.ToString("D");
+        await db.Ado.BeginTranAsync(System.Data.IsolationLevel.Serializable);
+        try
+        {
+            await InstallmentMutationLock.AcquireDatabaseAsync(db, installmentGuid);
+            var lockedOrder = await InstallmentMutationLock.LockOrderAsync(db, installmentGuid, cancellationToken)
+                ?? throw new InvalidOperationException("Installment was not found.");
+            // 有进行中的补款 / 取消 claim 时订单金额不能变，抛 Busy（控制器映射 409）。
+            await InstallmentMutationLock.EnsureNoBlockingClaimAsync(db, installmentGuid, cancellationToken);
+            if (!InstallmentAmendRules.CanAmend((InstallmentStatus)lockedOrder.Status))
+            {
+                throw new InstallmentAmendLinesException(
+                    InstallmentAmendLinesErrorCodes.StatusNotAllowed,
+                    "Only active or paid-off installments can be amended.");
+            }
+
+            // 乐观并发：客户端必须基于最新的 UpdatedAt 修改；毫秒级容差吸收 JSON / 数据库精度差异。
+            var storedUpdatedAt = ToDateTimeOffset(lockedOrder.UpdatedAt);
+            if (Math.Abs((storedUpdatedAt - expectedUpdatedAt.ToUniversalTime()).TotalMilliseconds) > 1d)
+            {
+                throw new InstallmentAmendLinesException(
+                    InstallmentAmendLinesErrorCodes.Stale,
+                    "Installment was changed by another operation. Reload and try again.");
+            }
+
+            var newTotal = InstallmentAmendRules.CalculateTotal(lines);
+            var totalValidation = InstallmentAmendRules.ValidateTotal(newTotal, lockedOrder.PaidAmount);
+            if (totalValidation != InstallmentAmendLinesValidation.Valid)
+            {
+                throw new InstallmentAmendLinesException(
+                    totalValidation == InstallmentAmendLinesValidation.TotalBelowPaid
+                        ? InstallmentAmendLinesErrorCodes.TotalBelowPaid
+                        : InstallmentAmendLinesErrorCodes.TotalBelowMinimum,
+                    totalValidation == InstallmentAmendLinesValidation.TotalBelowPaid
+                        ? "New total cannot be less than the amount already paid."
+                        : "New installment total must be at least $50.");
+            }
+
+            // InstallmentLineGuid 是全局主键：本单已有的行 GUID 可沿用，属于其他分期单的必须拒绝，避免主键冲突。
+            var lineGuidTexts = lines.Select(line => line.InstallmentLineGuid.ToString("D")).ToList();
+            var foreignLineExists = await db.Queryable<InstallmentOrderLineEntity>()
+                .AnyAsync(
+                    x => lineGuidTexts.Contains(x.InstallmentLineGuid) && x.InstallmentGuid != installmentGuidText,
+                    cancellationToken);
+            if (foreignLineExists)
+            {
+                throw new InstallmentAmendLinesException(
+                    InstallmentAmendLinesErrorCodes.InvalidLines,
+                    "Installment line id already belongs to another installment.");
+            }
+
+            await db.Deleteable<InstallmentOrderLineEntity>()
+                .Where(x => x.InstallmentGuid == installmentGuidText)
+                .ExecuteCommandAsync(cancellationToken);
+            await db.Insertable(lines.Select(line => MapLine(installmentGuid, line)).ToList())
+                .ExecuteCommandAsync(cancellationToken);
+
+            // 余额与状态按新总额重算：已付清的单总额上调会回到进行中，下调到恰好等于已付则保持已付清。
+            var balanceAmount = InstallmentAmendRules.CalculateBalance(newTotal, lockedOrder.PaidAmount);
+            var status = InstallmentAmendRules.ResolveStatus(newTotal, lockedOrder.PaidAmount);
+            await db.Updateable<InstallmentOrderEntity>()
+                .SetColumns(x => x.TotalAmount == newTotal)
+                .SetColumns(x => x.BalanceAmount == balanceAmount)
+                .SetColumns(x => x.Status == (int)status)
+                .SetColumns(x => x.UpdatedAt == DateTime.UtcNow)
+                .Where(x => x.InstallmentGuid == installmentGuidText)
+                .ExecuteCommandAsync(cancellationToken);
+            await db.Ado.CommitTranAsync();
+        }
+        catch
+        {
+            await db.Ado.RollbackTranAsync();
+            throw;
+        }
+
+        return await GetDetailsAsync(installmentGuid, cancellationToken)
+            ?? throw new InvalidOperationException("Installment was not found.");
     }
 
     public Task<InstallmentDetailsDto> ConfirmPickupAsync(

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Models;
+using Hbpos.Contracts.Installments;
 
 namespace Hbpos.Client.Wpf.Services;
 
@@ -37,6 +38,7 @@ internal static class OperationAuditTypes
     public const string LinklySettlementReprint = "LINKLY_SETTLEMENT_REPRINT";
     public const string PermissionOverride = "PERMISSION_OVERRIDE";
     public const string InstallmentPickupConfirm = "INSTALLMENT_PICKUP_CONFIRM";
+    public const string InstallmentLinesAmend = "INSTALLMENT_LINES_AMEND";
     public const string CatalogReset = "CATALOG_RESET";
     public const string TestSalesDataReset = "TEST_SALES_DATA_RESET";
     public const string DeviceReregister = "DEVICE_REREGISTER";
@@ -158,6 +160,52 @@ internal static class OperationAuditEvents
             RoundMoney(order.DiscountAmount),
             RoundMoney(order.ActualAmount),
             snapshots);
+    }
+
+    /// <summary>
+    /// 把分期单商品行转成审计快照。行键用分期行 Guid（跨“改前 / 改后”稳定），
+    /// 这样同一行改数量 / 改单价会被 <see cref="RecordCartChange"/> 识别为变更，而不是“删一行加一行”。
+    /// </summary>
+    public static OperationAuditCartSnapshot CaptureInstallmentLines(IReadOnlyList<InstallmentLineDto> lines)
+    {
+        var snapshots = lines
+            .Select(line => new OperationAuditCartLineSnapshot(
+                line.InstallmentLineGuid.ToString("D"),
+                line.ProductCode,
+                line.ItemNumber,
+                line.ReferenceCode,
+                line.LookupCode,
+                line.DisplayName,
+                CartLineKind.Sale.ToString(),
+                RoundQuantity(line.Quantity),
+                RoundMoney(line.UnitPrice),
+                RoundMoney(line.DiscountAmount),
+                RoundMoney(line.Quantity * line.UnitPrice),
+                RoundMoney(line.ActualAmount)))
+            .ToList();
+        return new OperationAuditCartSnapshot(
+            RoundMoney(snapshots.Sum(line => line.Gross)),
+            RoundMoney(snapshots.Sum(line => line.Discount)),
+            RoundMoney(snapshots.Sum(line => line.Actual)),
+            snapshots);
+    }
+
+    /// <summary>分期单修改商品成功：记录逐行改前 / 改后差异与总额变化，订单 Guid 写入 OrderGuid 便于后台串联。</summary>
+    public static void RecordInstallmentLinesAmend(
+        IOperationAuditLogger? logger,
+        PosSessionState session,
+        Guid installmentGuid,
+        IReadOnlyList<InstallmentLineDto> beforeLines,
+        IReadOnlyList<InstallmentLineDto> afterLines)
+    {
+        RecordCartChange(
+            logger,
+            OperationAuditTypes.InstallmentLinesAmend,
+            session,
+            CaptureInstallmentLines(beforeLines),
+            CaptureInstallmentLines(afterLines),
+            reasonCode: "AMEND_LINES",
+            orderGuid: installmentGuid.ToString("D"));
     }
 
     public static bool HasChanged(OperationAuditCartSnapshot before, OperationAuditCartSnapshot after)

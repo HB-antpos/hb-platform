@@ -203,6 +203,7 @@ namespace BlazorApp.Shared.Constants
                 public const string AddRepayment = "Permissions.PosTerminal.Installments.AddRepayment";
                 public const string Cancel = "Permissions.PosTerminal.Installments.Cancel";
                 public const string ConfirmPickup = "Permissions.PosTerminal.Installments.ConfirmPickup";
+                public const string AmendLines = "Permissions.PosTerminal.Installments.AmendLines";
             }
 
             public static class Settings
