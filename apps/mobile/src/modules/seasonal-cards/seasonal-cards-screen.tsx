@@ -142,7 +142,12 @@ export function SeasonalCardsScreen() {
         }}
       />
 
-      <Snackbar visible={Boolean(snackbar)} onDismiss={() => setSnackbar("")}>
+      {/* 填报页底部有固定栏，提示条抬高到固定栏上方，避免挡住合计和按钮。 */}
+      <Snackbar
+        visible={Boolean(snackbar)}
+        onDismiss={() => setSnackbar("")}
+        wrapperStyle={showSubmit ? styles.snackbarAboveFooter : undefined}
+      >
         {snackbar}
       </Snackbar>
     </SafeAreaView>
@@ -167,6 +172,7 @@ const styles = StyleSheet.create({
   },
   title: { ...BUSINESS_UI.title },
   pane: { flex: 1 },
+  snackbarAboveFooter: { bottom: 84 },
   paneHidden: { display: "none" },
   storeChip: {
     minHeight: 44,

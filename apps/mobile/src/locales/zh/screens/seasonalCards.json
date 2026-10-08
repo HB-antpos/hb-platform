@@ -63,7 +63,8 @@
     "retry": "重试"
   },
   "footer": {
-    "total": "{{quantity}} 张 · {{amount}}",
+    "total_one": "{{count}} 张 · {{amount}}",
+    "total_other": "{{count}} 张 · {{amount}}",
     "changedCount": "改了 {{count}} 项",
     "submit": "提交填报",
     "overwrite": "覆盖提交",
@@ -97,8 +98,10 @@
     "nextPage": "下一页",
     "unassignedSupplier": "未指定供应商",
     "superseded": "已被更新",
-    "total": "合计 {{quantity}} 张 · {{amount}}",
-    "submittedBy": "{{name}} · {{time}}"
+    "total_one": "合计 {{count}} 张 · {{amount}}",
+    "total_other": "合计 {{count}} 张 · {{amount}}",
+    "submittedBy": "{{name}} · {{time}}",
+    "remark": "备注：{{remark}}"
   },
   "labels": {
     "storeCode": "分店",

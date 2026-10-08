@@ -511,12 +511,18 @@ export function SeasonalCardSubmitView({
       })
     : [];
 
+  // 底部固定栏只放供应商编码：供应商全名可能很长，换行后会把固定栏撑高、挤占填写区域；
+  // 全名在上方供应商框、覆盖确认弹窗和提交提示里完整显示。
   const summaryLine = [
-    comboText || t("form.selectSupplier"),
-    baseline && summary?.changedCount ? t("footer.changedCount", { count: summary.changedCount }) : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    String(seasonYear),
+    getCardTypeLabel(cardType),
+    // 编码里的连字符换成不换行连字符，避免「SUP-」与「A01」被拆到两行。
+    supplierCode ? supplierCode.replace(/-/g, "\u2011") : t("form.selectSupplier"),
+  ].join(" · ");
+  const changedLabel =
+    baseline && summary?.changedCount
+      ? t("footer.changedCount", { count: summary.changedCount })
+      : undefined;
   const buttonLabel =
     submitState === "overwrite"
       ? t("footer.overwrite")
@@ -610,8 +616,9 @@ export function SeasonalCardSubmitView({
 
       <SubmitFooter
         summaryLine={summaryLine}
+        changedLabel={changedLabel}
         totalLine={t("footer.total", {
-          quantity: summary?.totalQuantity ?? 0,
+          count: summary?.totalQuantity ?? 0,
           amount: formatSeasonalCardMoney(summary?.totalAmount ?? 0),
         })}
         state={submitState}

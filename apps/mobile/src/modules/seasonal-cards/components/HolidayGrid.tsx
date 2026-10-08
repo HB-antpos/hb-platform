@@ -47,39 +47,48 @@ export function HolidayGrid({
         <View key={rowIndex} style={styles.row}>
           {row.map((item, columnIndex) => {
             if (!item) {
-              return <View key={`empty-${columnIndex}`} style={styles.placeholder} />;
+              return (
+                <View key={`empty-${columnIndex}`} style={styles.placeholder} />
+              );
             }
             const isSelected = item.cardType === selected;
+            // 外层等宽格子不带边框和内边距，选中加粗边框也不会让各列宽度不一致。
             return (
-              <Pressable
-                key={item.cardType}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: isSelected, disabled }}
-                accessibilityLabel={`${item.label} ${statusLabels[item.status]}`}
-                disabled={disabled}
-                onPress={() => onSelect(item.cardType)}
-                style={({ pressed }) => [
-                  styles.cell,
-                  isSelected ? styles.cellSelected : null,
-                  pressed ? styles.cellPressed : null,
-                ]}
-              >
-                <Text style={[styles.label, isSelected ? styles.labelSelected : null]}>
-                  {item.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.badge,
-                    item.status === "filled"
-                      ? styles.badgeFilled
-                      : item.status === "pending"
-                        ? styles.badgePending
-                        : styles.badgeUnknown,
+              <View key={item.cardType} style={styles.slot}>
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected, disabled }}
+                  accessibilityLabel={`${item.label} ${statusLabels[item.status]}`}
+                  disabled={disabled}
+                  onPress={() => onSelect(item.cardType)}
+                  style={({ pressed }) => [
+                    styles.cell,
+                    isSelected ? styles.cellSelected : null,
+                    pressed ? styles.cellPressed : null,
                   ]}
                 >
-                  {statusLabels[item.status]}
-                </Text>
-              </Pressable>
+                  <Text
+                    style={[
+                      styles.label,
+                      isSelected ? styles.labelSelected : null,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.badge,
+                      item.status === "filled"
+                        ? styles.badgeFilled
+                        : item.status === "pending"
+                          ? styles.badgePending
+                          : styles.badgeUnknown,
+                    ]}
+                  >
+                    {statusLabels[item.status]}
+                  </Text>
+                </Pressable>
+              </View>
             );
           })}
         </View>
@@ -90,11 +99,17 @@ export function HolidayGrid({
 
 const styles = StyleSheet.create({
   block: { gap: HB_SPACING.xs },
-  title: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: HB_COLORS.textSecondary },
+  title: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: HB_COLORS.textSecondary,
+  },
   row: { flexDirection: "row", gap: HB_SPACING.xs },
   placeholder: { flex: 1 },
+  slot: { flex: 1 },
   cell: {
-    flex: 1,
+    flexGrow: 1,
     minHeight: 60,
     paddingHorizontal: 4,
     paddingVertical: 8,
@@ -112,8 +127,16 @@ const styles = StyleSheet.create({
     backgroundColor: SEASONAL_CARD_COLORS.selectedBackground,
   },
   cellPressed: { opacity: 0.8 },
-  label: { fontSize: 15, lineHeight: 20, color: "#344054", textAlign: "center" },
-  labelSelected: { color: SEASONAL_CARD_COLORS.selectedText, fontWeight: "600" },
+  label: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: "#344054",
+    textAlign: "center",
+  },
+  labelSelected: {
+    color: SEASONAL_CARD_COLORS.selectedText,
+    fontWeight: "600",
+  },
   badge: { fontSize: 11, lineHeight: 15, textAlign: "center" },
   badgeFilled: { color: HB_COLORS.success },
   badgePending: { color: HB_COLORS.warning },
