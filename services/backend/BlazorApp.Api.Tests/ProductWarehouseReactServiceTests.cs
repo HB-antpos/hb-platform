@@ -2205,6 +2205,53 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchCreateAsync_新建套装时清理无主商品的门店多码残留行后创建成功()
+        {
+            const string productCode = "P-BATCH-SET-STALE-STORE-ROWS";
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            // 总部关系主键是 UUID，门店残留行用的是文本货号（生产 HB121-091 / 门店 2010 的真实形态）。
+            await _db.Insertable(new[]
+            {
+                new DomesticSetProduct { ProductCode = productCode, SetProductCode = "uuid-child-a", SetProductNo = "STALE-ITEM-01", SetBarcode = "STALE-BAR-01", OEMPrice = 20m, IsDeleted = false },
+                new DomesticSetProduct { ProductCode = productCode, SetProductCode = "uuid-child-b", SetProductNo = "STALE-ITEM-02", SetBarcode = "STALE-BAR-02", OEMPrice = 30m, IsDeleted = false },
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                new StoreMultiCodeProduct { StoreCode = "S01", ProductCode = productCode, MultiCodeProductCode = "STALE-ITEM-01", StoreMultiCodeProductCode = "S01STALE-ITEM-01", MultiBarcode = "STALE-BAR-01", MultiCodeRetailPrice = 20m, PurchasePrice = 0m, IsActive = true, IsDeleted = false },
+                new StoreMultiCodeProduct { StoreCode = "S01", ProductCode = productCode, MultiCodeProductCode = "STALE-ITEM-02", StoreMultiCodeProductCode = "S01STALE-ITEM-02", MultiBarcode = "STALE-BAR-02", MultiCodeRetailPrice = 30m, PurchasePrice = 0m, IsActive = true, IsDeleted = false },
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchCreateAsync(
+                new List<CreateItemDto>
+                {
+                    new()
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-BATCH-SET-STALE",
+                        ChineseName = "残留多码套装",
+                        OEMPrice = 50m,
+                        ImportPrice = 10m,
+                        IsSetProduct = true,
+                    },
+                },
+                useTransaction: true,
+                updatedBy: "仓库员H"
+            );
+
+            Assert.True(result.Success, string.Join("；", result.Errors));
+            Assert.Equal(1, result.SuccessCount);
+            // 活跃行只剩按关系主键写入的 2 条，旧文本货号行被软删除。
+            var activeRows = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == productCode && !x.IsDeleted)
+                .OrderBy(x => x.MultiCodeProductCode)
+                .ToListAsync();
+            Assert.Equal(new[] { "uuid-child-a", "uuid-child-b" }, activeRows.Select(x => x.MultiCodeProductCode));
+            Assert.Equal(2, await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == productCode && x.IsDeleted)
+                .CountAsync());
+        }
+
+        [Fact]
         public async Task UpdatedBy_国内导入新建与更新仓库商品都写入操作人()
         {
             const string productCode = "P-UPDATED-BY-DOMESTIC-IMPORT";

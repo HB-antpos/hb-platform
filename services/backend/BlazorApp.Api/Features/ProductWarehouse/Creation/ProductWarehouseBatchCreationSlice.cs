@@ -471,6 +471,38 @@ internal sealed class ProductWarehouseBatchCreationSlice
                 await _context.Db.Insertable(toCreateSetCodes).ExecuteCommandAsync();
             }
 
+            // 本批刚新建的主商品在 Product 表里原本不存在，门店多码表里挂在这些编码下的活跃行
+            // 必然是历史残留（如门店开业批量导入后主商品被删，且子项编码是文本货号而非关系 UUID）。
+            // 不清掉的话会与本次按关系主键写入的子项并存，套装成本重算校验会判「门店子项不完整」而整体回滚。
+            // 软删除并保留行，可追溯；校验与查询都只看未删除行。
+            var newProductCodes = toCreateProducts
+                .Select(p => p.ProductCode)
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c!)
+                .Distinct()
+                .ToList();
+            if (newProductCodes.Count > 0)
+            {
+                var cleaned = await _context
+                    .Db.Updateable<StoreMultiCodeProduct>()
+                    .SetColumns(x => new StoreMultiCodeProduct
+                    {
+                        IsDeleted = true,
+                        IsActive = false,
+                        UpdatedAt = now,
+                    })
+                    .Where(x => newProductCodes.Contains(x.ProductCode!) && !x.IsDeleted)
+                    .ExecuteCommandAsync();
+                if (cleaned > 0)
+                {
+                    _logger.LogWarning(
+                        "新建商品前清理了 {Count} 条无主商品的门店多码残留行，商品编码: {Codes}",
+                        cleaned,
+                        string.Join(",", newProductCodes)
+                    );
+                }
+            }
+
             // 同步到门店零售价和多码商品表
             var activeStores = (
                 await _context
