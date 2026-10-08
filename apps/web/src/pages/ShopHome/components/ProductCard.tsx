@@ -10,6 +10,7 @@ import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { PRODUCT_GRADE_CONFIG } from '../../../types/productGrade'
 import type { StoreOrderDynamicData, StoreOrderProductItem } from '../../../types/storeOrder'
 import { formatOrderHistoryQuantity } from '../orderHistoryQuantity'
+import { formatShopCardDate } from '../shopCardDate'
 
 import productCardMessagesEn from './productCardMessages.en.json'
 import productCardMessagesZh from './productCardMessages.zh.json'
@@ -18,17 +19,6 @@ import productCardMessagesZh from './productCardMessages.zh.json'
 registerPageMessages({ zh: productCardMessagesZh, en: productCardMessagesEn })
 
 const { Paragraph, Text, Title } = Typography
-
-// 订货/送货日期只取 YYYY-MM-DD 按本地日期构造（来货日期是后端按分店时区截好的纯日期），
-// 避免 new Date 按 UTC 解析后跨时区差一天。
-function formatDateOnly(value?: string | null): string | null {
-  const dateOnly = value?.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!dateOnly) {
-    return null
-  }
-
-  return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])).toLocaleDateString()
-}
 
 interface ProductCardProps {
   product: StoreOrderProductItem
@@ -72,12 +62,13 @@ function ProductCard({
   const salesQuantity = dynamicData?.salesQuantitySinceLastArrival
   const hasSalesQuantity = typeof salesQuantity === 'number'
   // 最近来货日即「来货后销量」的起算日，与销量同批回填。
-  const formattedLastArrivalDate = formatDateOnly(dynamicData?.lastArrivalDate)
+  const formattedLastArrivalDate = formatShopCardDate(dynamicData?.lastArrivalDate)
+  const formattedSalesStartDate = formatShopCardDate(dynamicData?.salesStartDate)
   const lastOrderDate = dynamicData?.lastOrderDate
   const hasLastOrder = Boolean(lastOrderDate)
     || dynamicData?.lastQuantity != null
     || dynamicData?.lastAllocQuantity != null
-  const formattedLastOrderDate = formatDateOnly(lastOrderDate) ?? '—'
+  const formattedLastOrderDate = formatShopCardDate(lastOrderDate) ?? '—'
   // 不比较日期：最新订单的送货数量不为 0 说明它已送货，就是「上次来货」那张单，不重复显示；
   // 送货为 0 才在来货下面额外列出「最新订单 · 未送货」。没有来货记录时照常显示最新订单。
   const isLastOrderUndelivered = (dynamicData?.lastAllocQuantity ?? 0) === 0
@@ -90,7 +81,7 @@ function ProductCard({
   // 旧后端不返回这些字段时显示「—」，不把缺失误显示为 0。
   const formatOptionalQuantity = (value?: number | null) =>
     typeof value === 'number' ? formatOrderHistoryQuantity(value) : '—'
-  const formattedLastArrivalOrderDate = formatDateOnly(dynamicData?.lastArrivalOrderDate) ?? '—'
+  const formattedLastArrivalOrderDate = formatShopCardDate(dynamicData?.lastArrivalOrderDate) ?? '—'
   const formattedLastArrivalOrderQuantity = formatOptionalQuantity(dynamicData?.lastArrivalOrderQuantity)
   const formattedLastArrivalQuantity = formatOptionalQuantity(dynamicData?.lastArrivalQuantity)
 
@@ -272,8 +263,16 @@ function ProductCard({
                 ) : null}
                 {hasSalesQuantity ? (
                   <div className="shop-product-activity-sales">
-                    <span className="shop-product-activity-label">
-                      {t('shop.productActivityHistory.cardSalesSinceArrival')}
+                    {/* 统计起点写在标题下方：来货早于日统计数据起点时它晚于来货日，提醒更早的销量没有统计。 */}
+                    <span className="shop-product-activity-sales-heading">
+                      <span className="shop-product-activity-label">
+                        {t('shop.productActivityHistory.cardSalesSinceArrival')}
+                      </span>
+                      {formattedSalesStartDate ? (
+                        <span className="shop-product-activity-sales-since">
+                          {t('shop.productActivityHistory.cardSalesSince', { date: formattedSalesStartDate })}
+                        </span>
+                      ) : null}
                     </span>
                     <strong className="shop-product-activity-sales-value">{salesQuantity}</strong>
                   </div>

@@ -5,7 +5,8 @@
       "cardPendingOrder": "Latest order · not delivered",
       "cardOrdered": "Ordered",
       "cardDelivered": "Delivered",
-      "cardSalesSinceArrival": "Sold since arrival"
+      "cardSalesSinceArrival": "Sold since arrival",
+      "cardSalesSince": "since {{date}}"
     }
   }
 }

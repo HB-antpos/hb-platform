@@ -5,7 +5,8 @@
       "cardPendingOrder": "最新订单 · 未送货",
       "cardOrdered": "订货",
       "cardDelivered": "送货",
-      "cardSalesSinceArrival": "来货后累计销量"
+      "cardSalesSinceArrival": "来货后累计销量",
+      "cardSalesSince": "自 {{date}} 起"
     }
   }
 }

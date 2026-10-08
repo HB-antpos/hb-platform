@@ -858,6 +858,7 @@ export async function getStoreOrderProductSalesSummary(query: StoreOrderProductS
       lastArrivalOrderQuantity:
         typeof item.lastArrivalOrderQuantity === 'number' ? item.lastArrivalOrderQuantity : null,
       lastArrivalOrderDate: typeof item.lastArrivalOrderDate === 'string' ? item.lastArrivalOrderDate : null,
+      salesStartDate: typeof item.salesStartDate === 'string' ? item.salesStartDate : null,
     })
     return items
   }, [])
