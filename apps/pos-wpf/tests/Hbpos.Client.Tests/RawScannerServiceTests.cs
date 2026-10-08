@@ -255,6 +255,58 @@ public sealed class RawScannerServiceTests
         Assert.True(diagnostics.RecordRegistrationState(true));
     }
 
+    [Fact]
+    public void Foreground_scan_with_focused_text_input_is_left_to_the_input_and_not_learned()
+    {
+        using var logs = new ConsoleLogCapture();
+        var binding = new FakeScannerBindingService();
+        var service = new RawScannerService(binding, new RawScannerInputProcessor());
+        var deliveries = 0;
+        service.Subscribe("pos", _ => deliveries++);
+        service.SetActivePage("pos");
+        service.ConfigureForegroundState(() => true, () => true);
+
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("930110", "scanner-device", RawScannerCompletionKind.Enter));
+
+        // 同一串按键已经进了输入框（商品搜索框回车即加购），Raw Input 再投递会重复加购物车。
+        Assert.Equal(0, deliveries);
+        Assert.Null(binding.BoundDevicePath);
+        Assert.Contains(logs.Lines, line => line.Contains("raw scan left to focused text input", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Background_scan_is_ignored_until_scanner_is_learned_then_delivered_from_bound_device()
+    {
+        using var logs = new ConsoleLogCapture();
+        var binding = new FakeScannerBindingService();
+        var service = new RawScannerService(binding, new RawScannerInputProcessor());
+        var delivered = new List<string>();
+        var active = false;
+        service.Subscribe("login", args => delivered.Add(args.Barcode));
+        service.SetActivePage("login");
+        service.ConfigureForegroundState(() => active, () => false);
+
+        // 后台且尚未学习扫码枪：别的程序里的打字不能投递，也不能被学成扫码枪。
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("TYPED-TEXT", "keyboard-device", RawScannerCompletionKind.Enter));
+        Assert.Empty(delivered);
+        Assert.Null(binding.BoundDevicePath);
+        Assert.Contains(logs.Lines, line => line.Contains("background raw scan ignored until scanner is learned", StringComparison.Ordinal));
+
+        // 前台焦点不在输入框时学习绑定并投递。
+        active = true;
+        service.DispatchResultForDiagnostics(new RawScannerInputResult("EMP-0001", "scanner-device", RawScannerCompletionKind.Enter));
+        Assert.Equal("scanner-device", binding.BoundDevicePath);
+
+        // 学习后切到后台，来自已绑定扫码枪的扫码照常投递（窗口不在前台也能扫码登录）。
+        active = false;
+        service.DispatchResultForDiagnostics(new RawScannerInputResult(
+            "EMP-0002",
+            "scanner-device",
+            RawScannerCompletionKind.Enter,
+            DateTimeOffset.Now.AddSeconds(1)));
+        Assert.Equal(["EMP-0001", "EMP-0002"], delivered);
+    }
+
     private sealed class FakeScannerBindingService : IScannerBindingService
     {
         public string? BoundDevicePath { get; set; }
