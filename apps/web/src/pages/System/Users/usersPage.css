@@ -8,6 +8,11 @@
   margin-bottom: 16px;
 }
 
+/* 勾选后才出现的批量操作条，紧贴在筛选栏与表格之间 */
+.users-ws-batch-bar {
+  margin-bottom: 12px;
+}
+
 .users-ws-search {
   width: 300px;
   max-width: 100%;

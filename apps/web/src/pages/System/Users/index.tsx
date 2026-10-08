@@ -113,12 +113,14 @@ import { getCreateUserErrorFeedback } from './createUserFeedback'
 import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
 import {
   STALE_LOGIN_DAYS,
+  USER_BATCH_SELECTION_LIMIT,
   describeLastLogin,
   diffAssignmentKeys,
   diffStoreAssignment,
   getUserDisplayName,
   getUserInitial,
   getUserSecondaryLine,
+  mergeSelectedUsers,
   splitVisibleStores,
   toIsActiveQuery,
 } from './usersPageLogic'
@@ -132,6 +134,7 @@ import {
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import UserMobileMenuPermissionManager from './UserMobileMenuPermissionManager'
 import UserCashierBarcodeModal from './UserCashierBarcodeModal'
+import UserBatchActions from './UserBatchActions'
 import { NeutralChip, PendingChangesBar, RoleChip, StatusDot } from '../accessAdminUi'
 import usersPageMessagesEn from './usersPageMessages.en.json'
 import usersPageMessagesZh from './usersPageMessages.zh.json'
@@ -171,6 +174,8 @@ export default function SystemUsersPage() {
   const [selectedStoreGuid, setSelectedStoreGuid] = useState<string | undefined>(undefined)
   const [selectedRoleGuid, setSelectedRoleGuid] = useState<string | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<UserStatusFilter>('all')
+  // 批量操作的勾选：跨页保留，筛选条件或关键字变化时清空，避免对看不见的账号误操作。
+  const [selectedUsers, setSelectedUsers] = useState<UserDto[]>([])
 
   const [sortBy, setSortBy] = useState<string | undefined>(undefined)
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | null>(null)
@@ -287,6 +292,9 @@ export default function SystemUsersPage() {
   // 有编辑权的操作者打开可编辑抽屉；否则同一抽屉以只读资料 + 登录记录呈现。
   const canEditUsers = access.hasPermission(P.Users.Edit)
   const canResetUserPassword = access.hasPermission(P.Users.ResetPassword)
+  // 后端只允许管理员维护用户角色（ADMIN_REQUIRED），接口本身还要求 Roles.ManageUsers。
+  const canBatchManageRoles = access.isAdmin && access.hasPermission(P.Roles.ManageUsers)
+  const canBatchSelectUsers = canEditUsers || canBatchManageRoles
   const canEditUserPermissions = canManageUserPermissions || (
     isCurrentUserScoped && canManagePosTerminalPermissions
   )
@@ -576,6 +584,7 @@ export default function SystemUsersPage() {
   useEffect(() => {
     if (lastFilterQueryKeyRef.current === filterQueryKey) return
     lastFilterQueryKeyRef.current = filterQueryKey
+    setSelectedUsers([])
     void loadData(1, pageSize, sortBy, sortOrder)
   }, [filterQueryKey])
 
@@ -583,6 +592,7 @@ export default function SystemUsersPage() {
     if (lastKeywordRef.current === keyword) return
     const timer = window.setTimeout(() => {
       lastKeywordRef.current = keyword
+      setSelectedUsers([])
       void loadData(1, pageSize, sortBy, sortOrder)
     }, 300)
     return () => window.clearTimeout(timer)
@@ -2769,17 +2779,48 @@ export default function SystemUsersPage() {
           </Tooltip>
         </div>
 
+        {canBatchSelectUsers && selectedUsers.length > 0 ? (
+          <div className="users-ws-batch-bar">
+            <UserBatchActions
+              selectedUsers={selectedUsers}
+              currentUserGuid={currentUser?.userGUID}
+              canEditStatus={canEditUsers}
+              canManageRoles={canBatchManageRoles}
+              roleOptions={roleOptions}
+              isOutOfScope={(user) => isCurrentUserScoped && hasForbiddenRoleForScopedManager(user)}
+              onClearSelection={() => setSelectedUsers([])}
+              onCompleted={() => {
+                setSelectedUsers([])
+                void loadData(page, pageSize, sortBy, sortOrder)
+              }}
+            />
+          </div>
+        ) : null}
+
         <MeasuredTable metricId="system.users.table-1"
           rowKey="userGUID"
           className="users-ws-table"
           loading={loading}
           columns={columns}
           dataSource={data}
-          scroll={{ x: 1070 }}
+          scroll={{ x: canBatchSelectUsers ? 1114 : 1070 }}
+          rowSelection={canBatchSelectUsers ? {
+            selectedRowKeys: selectedUsers.map((user) => user.userGUID),
+            preserveSelectedRowKeys: true,
+            fixed: true,
+            columnWidth: 44,
+            onChange: (selectedRowKeys, selectedRows) => {
+              if (selectedRowKeys.length > USER_BATCH_SELECTION_LIMIT) {
+                message.warning(t('system.usersBatch.selectionLimit', '一次最多勾选 {{count}} 位用户', { count: USER_BATCH_SELECTION_LIMIT }))
+                return
+              }
+              setSelectedUsers((previous) => mergeSelectedUsers(previous, selectedRowKeys, selectedRows))
+            },
+          } : undefined}
           onRow={(record) => ({
             onClick: (event) => {
-              // 整行点击打开抽屉；操作区按钮与其下拉菜单自己处理点击。
-              if ((event.target as HTMLElement).closest('.users-ws-row-actions, .ant-dropdown')) return
+              // 整行点击打开抽屉；操作区按钮、下拉菜单与勾选框自己处理点击。
+              if ((event.target as HTMLElement).closest('.users-ws-row-actions, .ant-dropdown, .ant-table-selection-column, .ant-checkbox-wrapper')) return
               openUserDrawer(record)
             },
           })}

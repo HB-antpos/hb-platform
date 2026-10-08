@@ -103,6 +103,18 @@ export async function updateUser(guid: string, payload: UpdateUserDto): Promise<
   return unwrapApiData(response)
 }
 
+/**
+ * 批量启用 / 停用：后端在一个事务里逐个校验目标（不存在、无权编辑、当前账号都会让整批回滚），
+ * 所以要么全部生效、要么全部不变。
+ */
+export async function batchSetUsersActive(userGuids: string[], isActive: boolean): Promise<boolean> {
+  const response = await request.post<ApiResponse<boolean>>('/api/Users/batch', {
+    userGuids,
+    operation: isActive ? 'activate' : 'deactivate',
+  })
+  return unwrapApiData(response)
+}
+
 export async function getUserRoles(guid: string): Promise<RoleOptionDto[]> {
   const response = await request.get<ApiResponse<RoleOptionDto[]>>(`/api/Users/guid/${guid}/roles`)
   return unwrapApiData(response) ?? []
