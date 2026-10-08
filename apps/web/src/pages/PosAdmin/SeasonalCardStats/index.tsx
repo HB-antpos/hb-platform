@@ -1,5 +1,5 @@
 import { CopyOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Button, Segmented, Select, Tooltip, message } from 'antd'
+import { Button, Grid, Segmented, Select, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -44,6 +44,7 @@ import {
   formatCount,
   formatLocalTime,
   formatMoney,
+  OTHER_PRICE_OPTION,
   formatSupplierList,
   getPriceLabel,
   getPriceQuantity,
@@ -80,13 +81,16 @@ const STATUS_LABEL_KEYS: Record<FillStatusFilter, string> = {
 }
 
 /** 各列宽度之和：容器比它窄时表格在卡片内横向滚动，「操作」列固定在右侧。 */
-const TABLE_MIN_WIDTH = 1180
+const TABLE_MIN_WIDTH = 1296
 
 export default function SeasonalCardStatsPage() {
   const { t } = useTranslation()
   const idPrefix = useId()
   // keepAlive：页面被缓存（切到别的标签页）时 active 为 false，此时地址栏属于别的页面，不能再按它改本页状态。
   const { active } = useKeepAliveContext()
+  // 窄屏（< md）不固定左右列：分店列 + 操作列会占满 390px 宽的手机屏，中间的数量列被挤得看不见。
+  const screens = Grid.useBreakpoint()
+  const pinColumns = screens.md !== false
   const [searchParams, setSearchParams] = useSearchParams()
 
   // 「今年」取悉尼日历年（门店都在澳洲），不按浏览器时区。
@@ -300,7 +304,8 @@ export default function SeasonalCardStatsPage() {
   const priceColumns: ColumnsType<SeasonalCardStatsStoreRow> = PRICE_OPTIONS.map((option) => ({
     key: `price-${option}`,
     title: priceLabel(option),
-    width: 76,
+    // 「其他价格 / Other price」比 $1 长：单独放宽，英文表头不折行
+    width: option === OTHER_PRICE_OPTION ? 104 : 76,
     align: 'right' as const,
     render: (_: unknown, record: SeasonalCardStatsStoreRow) =>
       record.isFilled ? formatCount(getPriceQuantity(record.prices, option)) : EMPTY_VALUE,
@@ -310,19 +315,23 @@ export default function SeasonalCardStatsPage() {
     {
       key: 'store',
       title: t('seasonalCardStats.columns.store'),
-      width: 180,
-      fixed: 'left',
+      width: 200,
+      fixed: pinColumns ? 'left' : undefined,
       render: (_, record) => (
         <div className="seasonal-card-stats-store">
           <span className="seasonal-card-stats-code">{record.storeCode}</span>
-          <span>{record.storeName || EMPTY_VALUE}</span>
+          {/* 店名过长时单行省略，悬停看全名，避免固定列里折成两行把行高撑得参差不齐 */}
+          <span className="seasonal-card-stats-store-name" title={record.storeName || undefined}>
+            {record.storeName || EMPTY_VALUE}
+          </span>
         </div>
       ),
     },
     {
       key: 'status',
       title: t('seasonalCardStats.columns.status'),
-      width: 92,
+      // 英文「Not submitted」标签与合计行「21 submitted」都要一行放下
+      width: 120,
       render: (_, record) => (
         <span className={`seasonal-card-stats-tag ${record.isFilled ? 'is-filled' : 'is-unfilled'}`}>
           {record.isFilled ? t('seasonalCardStats.status.filled') : t('seasonalCardStats.status.unfilled')}
@@ -347,7 +356,9 @@ export default function SeasonalCardStatsPage() {
     {
       key: 'suppliers',
       title: t('seasonalCardStats.columns.suppliers'),
-      width: 180,
+      // 紧跟右对齐的金额列：加左内边距，避免「$197.00 示例供应商」挤在一起
+      className: 'seasonal-card-stats-col-gap',
+      width: 220,
       ellipsis: { showTitle: true },
       render: (_, record) => (record.isFilled ? formatSupplierList(record.suppliers, supplierSeparator) : EMPTY_VALUE),
     },
@@ -369,7 +380,7 @@ export default function SeasonalCardStatsPage() {
       key: 'action',
       title: t('seasonalCardStats.columns.action'),
       width: 92,
-      fixed: 'right',
+      fixed: pinColumns ? 'right' : undefined,
       render: (_, record) => (
         <Button
           type="link"
@@ -610,7 +621,7 @@ export default function SeasonalCardStatsPage() {
           onRow={(record) => ({ onClick: () => openDetail(record.storeCode) })}
           summary={() =>
             visibleRows.length ? (
-              <MeasuredTable.Summary fixed="bottom">
+              <MeasuredTable.Summary>
                 <MeasuredTable.Summary.Row className="seasonal-card-stats-total">
                   <MeasuredTable.Summary.Cell index={0}>{t('seasonalCardStats.table.total')}</MeasuredTable.Summary.Cell>
                   <MeasuredTable.Summary.Cell index={1}>

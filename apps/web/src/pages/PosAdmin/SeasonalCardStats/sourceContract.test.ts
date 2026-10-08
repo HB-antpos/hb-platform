@@ -89,7 +89,10 @@ assert(exporter.includes('fillStoreSheet(') && exporter.includes('fillUnfilledSh
 assert(page.includes("import './seasonalCardStats.css'"), '页面引入普通 CSS')
 assert(!readdirSync(resolve(directory)).some((name) => name.endsWith('.module.css')), '不能使用 CSS Modules')
 assert(
-  !/^\.(?!seasonal-card-stats-|ant-|is-)[a-z]/m.test(css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\.ant-[\w-]+/g, '')),
+  // 唯一例外：用 :has(> .seasonal-card-stats-filter) 限定到本页的页头副标题换行规则
+  !/^\.(?!seasonal-card-stats-|ant-|is-|page-container:has\(> \.seasonal-card-stats-)[a-z]/m.test(
+    css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\.ant-[\w-]+/g, ''),
+  ),
   '自定义类名都必须带 seasonal-card-stats- 前缀',
 )
 assert(css.includes('font-variant-numeric: tabular-nums'), '数量与金额必须用等宽数字')

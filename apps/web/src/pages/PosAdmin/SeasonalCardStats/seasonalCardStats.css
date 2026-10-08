@@ -20,6 +20,23 @@
   --scs-head: #fafafa;
 }
 
+/*
+ * 本页的副标题是一句口径说明，比其他页的「共 N 条」长：全局紧凑页头把副标题设成 nowrap，
+ * 窄屏会把整页撑出横向滚动、标题被挤成一字一行。只对本页（含本页筛选栏的页面容器）放开换行。
+ */
+.page-container:has(> .seasonal-card-stats-filter) .page-header-compact-title {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.page-container:has(> .seasonal-card-stats-filter) .page-header-compact-title > h4 {
+  flex: none;
+}
+
+.page-container:has(> .seasonal-card-stats-filter) .page-header-compact-subtitle {
+  white-space: normal;
+}
+
 .seasonal-card-stats-actions {
   display: flex;
   flex-wrap: wrap;
@@ -96,7 +113,8 @@
 }
 
 .seasonal-card-stats-field.is-year {
-  width: 140px;
+  /* 英文「2026 (this year)」要完整显示 */
+  width: 168px;
 }
 
 .seasonal-card-stats-field.is-holiday {
@@ -275,6 +293,11 @@
 .seasonal-card-stats-table .seasonal-card-stats-total > td {
   background: var(--scs-head);
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-table .ant-table-thead > tr > th {
+  white-space: nowrap;
 }
 
 .seasonal-card-stats-store {
@@ -284,7 +307,19 @@
   min-width: 0;
 }
 
+.seasonal-card-stats-store-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-table .seasonal-card-stats-col-gap {
+  padding-left: 24px !important;
+}
+
 .seasonal-card-stats-code {
+  flex: 0 0 auto;
   color: var(--scs-sub);
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 12.5px;
@@ -383,6 +418,10 @@
 
 .seasonal-card-stats-compare {
   row-gap: 8px;
+}
+
+.seasonal-card-stats-compare-delta {
+  margin-top: 10px;
 }
 
 .seasonal-card-stats-bar-label {

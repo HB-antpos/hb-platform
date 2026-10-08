@@ -174,7 +174,7 @@ function DetailBody({
           </span>
         </div>
         {comparison.delta !== null && detail.isFilled ? (
-          <p className="seasonal-card-stats-muted">
+          <p className="seasonal-card-stats-muted seasonal-card-stats-compare-delta">
             {t('seasonalCardStats.drawer.compareDelta', { delta: formatSignedCount(comparison.delta) })}
           </p>
         ) : null}
