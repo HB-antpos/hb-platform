@@ -1,10 +1,15 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
+using Hbpos.Contracts.Advertisements;
 
 namespace Hbpos.Client.Wpf.Views.Screens;
 
@@ -17,14 +22,27 @@ public partial class CustomerDisplayView : UserControl
     private static readonly GridLength HiddenSummaryRowHeight = new(0);
     private readonly DispatcherTimer _imageAdvanceTimer = new() { Interval = TimeSpan.FromSeconds(8) };
     private readonly DispatcherTimer _videoTimeoutTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    // 打开耗时超过这个值的视频即使不是首次播放也记日志，用来发现解码器卡顿。
+    private static readonly TimeSpan SlowVideoOpenThreshold = TimeSpan.FromSeconds(3);
+    private const int MaxLoggedOpenedVideoKeys = 200;
+    private const string LogCategory = "CustomerDisplay";
+    // 空闲客显每几秒就切一条视频，MediaOpened 每次都记会刷爆中心日志；只记每个素材第一次打开（以及打开慢的）。
+    private readonly HashSet<string> _loggedOpenedVideoKeys = new(StringComparer.Ordinal);
     private CustomerDisplayViewModel? _viewModel;
     private DispatcherOperation? _pendingScrollOperation;
+    private MediaElement? _activeVideoPlayer;
+    private Uri? _activeVideoUri;
+    private AdvertisementPlaybackItemDto? _activeVideoAdvertisement;
+    private long _activeVideoStartTimestamp;
+    private bool _activeVideoOpened;
+    // 超时已重试过一次的广告 Id；换到别的广告或这条正常播完后清空。
+    private string? _videoTimeoutRetriedAdvertisementId;
 
     public CustomerDisplayView()
     {
         InitializeComponent();
         _imageAdvanceTimer.Tick += (_, _) => AdvanceAdvertisementPlayback();
-        _videoTimeoutTimer.Tick += (_, _) => SkipCurrentAdvertisementPlayback();
+        _videoTimeoutTimer.Tick += (_, _) => HandleVideoTimeout();
         Loaded += CustomerDisplayViewLoaded;
         DataContextChanged += CustomerDisplayViewDataContextChanged;
         Unloaded += CustomerDisplayViewUnloaded;
@@ -212,7 +230,7 @@ public partial class CustomerDisplayView : UserControl
             // 冻结后可跨线程访问，并省去后续的变更通知开销。
             bitmap.Freeze();
 
-            AdvertisementVideo.Visibility = Visibility.Collapsed;
+            AdvertisementVideoHost.Visibility = Visibility.Collapsed;
             AdvertisementImage.Source = bitmap;
             AdvertisementImage.Visibility = Visibility.Visible;
             _imageAdvanceTimer.Start();
@@ -226,26 +244,64 @@ public partial class CustomerDisplayView : UserControl
     private void ShowVideoAdvertisement(string mediaUrl)
     {
         StopAdvertisementPlayback();
+        var advertisement = _viewModel?.CurrentAdvertisement;
 
         if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var mediaUri))
         {
+            ConsoleLog.WriteWarning(
+                LogCategory,
+                $"advertisement video skipped reason=invalid-url {DescribeAdvertisement(advertisement, null)}");
             SkipCurrentAdvertisementPlayback();
             return;
         }
 
+        if (!string.Equals(advertisement?.Id, _videoTimeoutRetriedAdvertisementId, StringComparison.Ordinal))
+        {
+            _videoTimeoutRetriedAdvertisementId = null;
+        }
+
+        StartVideoPlayer(mediaUri, advertisement);
+    }
+
+    private void StartVideoPlayer(Uri mediaUri, AdvertisementPlaybackItemDto? advertisement)
+    {
+        // 每条视频新建一个 MediaElement、播完销毁：复用同一个控件换源时，显卡硬解码器可能残留上一条视频的状态，
+        // 实测多条视频轮播会花屏或卡住打不开，而单独播任意一条都正常。
+        var player = new MediaElement
+        {
+            Stretch = Stretch.Uniform,
+            LoadedBehavior = MediaState.Manual,
+            UnloadedBehavior = MediaState.Manual,
+            // 视频始终静音，避免干扰收银。
+            IsMuted = true,
+            Volume = 0,
+        };
+        player.MediaOpened += AdvertisementVideo_MediaOpened;
+        player.MediaEnded += AdvertisementVideo_MediaEnded;
+        player.MediaFailed += AdvertisementVideo_MediaFailed;
+
+        _activeVideoPlayer = player;
+        _activeVideoUri = mediaUri;
+        _activeVideoAdvertisement = advertisement;
+        _activeVideoOpened = false;
+        _activeVideoStartTimestamp = Stopwatch.GetTimestamp();
+
         try
         {
             AdvertisementImage.Visibility = Visibility.Collapsed;
-            AdvertisementVideo.Source = mediaUri;
-            AdvertisementVideo.Visibility = Visibility.Visible;
-            // 视频始终静音，避免干扰收银。
-            AdvertisementVideo.IsMuted = true;
-            AdvertisementVideo.Volume = 0;
-            AdvertisementVideo.Play();
+            AdvertisementVideoHost.Child = player;
+            AdvertisementVideoHost.Visibility = Visibility.Visible;
+            // 两种 Behavior 都是 Manual，Play 不依赖控件是否已 Loaded。
+            player.Source = mediaUri;
+            player.Play();
             _videoTimeoutTimer.Start();
         }
-        catch
+        catch (Exception ex)
         {
+            ConsoleLog.WriteWarning(
+                LogCategory,
+                $"advertisement video skipped reason=start-failed {DescribeAdvertisement(advertisement, mediaUri)}",
+                exception: ex);
             SkipCurrentAdvertisementPlayback();
         }
     }
@@ -255,14 +311,44 @@ public partial class CustomerDisplayView : UserControl
         _imageAdvanceTimer.Stop();
         _videoTimeoutTimer.Stop();
 
-        AdvertisementVideo.Stop();
-        AdvertisementVideo.Visibility = Visibility.Collapsed;
-        AdvertisementVideo.Source = null;
+        DisposeActiveVideoPlayer();
+        AdvertisementVideoHost.Visibility = Visibility.Collapsed;
 
         AdvertisementImage.Visibility = Visibility.Collapsed;
         if (clearImageSource)
         {
             AdvertisementImage.Source = null;
+        }
+    }
+
+    private void DisposeActiveVideoPlayer()
+    {
+        if (_activeVideoPlayer is not { } player)
+        {
+            return;
+        }
+
+        _activeVideoPlayer = null;
+        _activeVideoUri = null;
+        _activeVideoAdvertisement = null;
+        player.MediaOpened -= AdvertisementVideo_MediaOpened;
+        player.MediaEnded -= AdvertisementVideo_MediaEnded;
+        player.MediaFailed -= AdvertisementVideo_MediaFailed;
+
+        try
+        {
+            player.Stop();
+            // Close 释放底层媒体会话与解码器，下一条视频用全新的播放器打开。
+            player.Close();
+            player.Source = null;
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteWarning(LogCategory, "advertisement video player dispose failed", exception: ex);
+        }
+        finally
+        {
+            AdvertisementVideoHost.Child = null;
         }
     }
 
@@ -280,14 +366,149 @@ public partial class CustomerDisplayView : UserControl
         _viewModel?.SkipCurrentAdvertisement();
     }
 
-    private void AdvertisementVideo_MediaEnded(object sender, RoutedEventArgs e)
+    private void AdvertisementVideo_MediaOpened(object sender, RoutedEventArgs e)
     {
-        AdvanceAdvertisementPlayback();
+        if (!ReferenceEquals(sender, _activeVideoPlayer) || _activeVideoPlayer is not { } player)
+        {
+            return;
+        }
+
+        _activeVideoOpened = true;
+        var openElapsed = Stopwatch.GetElapsedTime(_activeVideoStartTimestamp);
+        var key = $"{_activeVideoAdvertisement?.Id}|{_activeVideoUri}";
+        var isFirstOpen = _loggedOpenedVideoKeys.Add(key);
+        if (_loggedOpenedVideoKeys.Count > MaxLoggedOpenedVideoKeys)
+        {
+            _loggedOpenedVideoKeys.Clear();
+        }
+
+        if (!isFirstOpen && openElapsed < SlowVideoOpenThreshold)
+        {
+            return;
+        }
+
+        var duration = player.NaturalDuration.HasTimeSpan
+            ? player.NaturalDuration.TimeSpan.TotalMilliseconds.ToString("0")
+            : "unknown";
+        ConsoleLog.Write(
+            LogCategory,
+            $"advertisement video opened reason={(isFirstOpen ? "first-open" : "slow-open")} openMs={openElapsed.TotalMilliseconds:0} "
+            + $"size={player.NaturalVideoWidth}x{player.NaturalVideoHeight} durationMs={duration} "
+            + DescribeAdvertisement(_activeVideoAdvertisement, _activeVideoUri));
     }
 
-    private void AdvertisementVideo_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+    private void AdvertisementVideo_MediaEnded(object sender, RoutedEventArgs e)
     {
+        if (!ReferenceEquals(sender, _activeVideoPlayer))
+        {
+            return;
+        }
+
+        _videoTimeoutTimer.Stop();
+        // 这条完整播完，超时重试标记作废。
+        _videoTimeoutRetriedAdvertisementId = null;
+        // 延后到 MediaEnded 处理完之后再切换：在事件里同步停止并换源，播放器还没收尾就开始打开下一条。
+        RunAfterCurrentVideoEvent(AdvanceAdvertisementPlayback);
+    }
+
+    private void AdvertisementVideo_MediaFailed(object? sender, ExceptionRoutedEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _activeVideoPlayer))
+        {
+            return;
+        }
+
+        _videoTimeoutTimer.Stop();
+        ConsoleLog.WriteWarning(
+            LogCategory,
+            $"advertisement video skipped reason=media-failed opened={_activeVideoOpened} "
+            + $"elapsedMs={Stopwatch.GetElapsedTime(_activeVideoStartTimestamp).TotalMilliseconds:0} "
+            + DescribeAdvertisement(_activeVideoAdvertisement, _activeVideoUri),
+            exception: e.ErrorException);
+        RunAfterCurrentVideoEvent(SkipCurrentAdvertisementPlayback);
+    }
+
+    private void RunAfterCurrentVideoEvent(Action action)
+    {
+        var player = _activeVideoPlayer;
+        Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                // 排队期间如果已经换了播放器（订单行变化、广告列表刷新等），这个事件就过时了，不能再推进轮播。
+                if (ReferenceEquals(player, _activeVideoPlayer))
+                {
+                    action();
+                }
+            }),
+            DispatcherPriority.Background);
+    }
+
+    private void HandleVideoTimeout()
+    {
+        _videoTimeoutTimer.Stop();
+        if (_activeVideoPlayer is not { } player || _activeVideoUri is not { } mediaUri)
+        {
+            SkipCurrentAdvertisementPlayback();
+            return;
+        }
+
+        var advertisement = _activeVideoAdvertisement;
+        TimeSpan? naturalDuration = player.NaturalDuration.HasTimeSpan ? player.NaturalDuration.TimeSpan : null;
+        var alreadyRetried = advertisement is not null
+            && string.Equals(advertisement.Id, _videoTimeoutRetriedAdvertisementId, StringComparison.Ordinal);
+        var action = ResolveVideoTimeoutAction(
+            _activeVideoOpened,
+            naturalDuration,
+            _videoTimeoutTimer.Interval,
+            alreadyRetried,
+            canRetry: advertisement is not null);
+
+        ConsoleLog.WriteWarning(
+            LogCategory,
+            $"advertisement video timeout action={action} opened={_activeVideoOpened} "
+            + $"positionMs={player.Position.TotalMilliseconds:0} "
+            + $"durationMs={(naturalDuration is { } duration ? duration.TotalMilliseconds.ToString("0") : "unknown")} "
+            + DescribeAdvertisement(advertisement, mediaUri));
+
+        if (action == VideoTimeoutAction.RetryOnce)
+        {
+            _videoTimeoutRetriedAdvertisementId = advertisement!.Id;
+            StopAdvertisementPlayback();
+            StartVideoPlayer(mediaUri, advertisement);
+            return;
+        }
+
         SkipCurrentAdvertisementPlayback();
+    }
+
+    internal enum VideoTimeoutAction
+    {
+        RetryOnce,
+        Skip,
+    }
+
+    internal static VideoTimeoutAction ResolveVideoTimeoutAction(
+        bool opened,
+        TimeSpan? naturalDuration,
+        TimeSpan timeout,
+        bool alreadyRetried,
+        bool canRetry)
+    {
+        // 素材本身就超过单条时长上限：重试也播不完，沿用原来的处理，直接移出本轮。
+        if (opened && naturalDuration is { } duration && duration >= timeout)
+        {
+            return VideoTimeoutAction.Skip;
+        }
+
+        // 卡住（没打开或停在中途）先换一个全新的播放器重试一次，还不行再移出本轮，等下次定时刷新重新加载。
+        return canRetry && !alreadyRetried ? VideoTimeoutAction.RetryOnce : VideoTimeoutAction.Skip;
+    }
+
+    private static string DescribeAdvertisement(AdvertisementPlaybackItemDto? advertisement, Uri? mediaUri)
+    {
+        // 只记文件名，不记完整地址，避免把可能带签名参数的 URL 写进中心日志。
+        var fileName = mediaUri is null ? string.Empty : Path.GetFileName(mediaUri.IsFile ? mediaUri.LocalPath : mediaUri.AbsolutePath);
+        return $"advertisementId={advertisement?.Id} title={advertisement?.Title} file={fileName}";
     }
 
     private void AdvertisementImage_ImageFailed(object sender, ExceptionRoutedEventArgs e)
