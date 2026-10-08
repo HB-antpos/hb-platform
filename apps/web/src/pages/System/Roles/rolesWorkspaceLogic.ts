@@ -150,3 +150,27 @@ export function collectWebMenuVisibility(nodes: WebMenuPreviewNode[], target = n
   }
   return target
 }
+
+/** 与后端 Permissions.StoreManagerRoleNames 保持一致（大小写不敏感）。 */
+const STORE_MANAGER_ROLE_NAMES = ['storemanager', '店长', '经理']
+
+/**
+ * 店长角色是派生角色：后端按用户是否持有「可管理分店」自动同步，
+ * 直接在角色上添加 / 移除成员会被拒绝（DERIVED_STORE_MANAGER_ROLE）。
+ */
+export function isDerivedStoreManagerRole(roleName: string | null | undefined): boolean {
+  const normalized = roleName?.trim().toLowerCase()
+  return !!normalized && STORE_MANAGER_ROLE_NAMES.includes(normalized)
+}
+
+/** 取服务端业务消息（RequestError.payload.message），没有时退回通用文案。 */
+export function getRoleMutationErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object' && 'payload' in error) {
+    const payload = (error as { payload?: unknown }).payload
+    if (payload && typeof payload === 'object' && 'message' in payload) {
+      const message = (payload as { message?: unknown }).message
+      if (typeof message === 'string' && message.trim()) return message
+    }
+  }
+  return fallback
+}

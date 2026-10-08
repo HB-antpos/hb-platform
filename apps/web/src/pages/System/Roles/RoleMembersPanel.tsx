@@ -1,5 +1,5 @@
 import { DeleteOutlined, SearchOutlined, UserAddOutlined } from '@ant-design/icons'
-import { Button, Input, Modal, Popconfirm, Select, Space, Typography, message } from 'antd'
+import { Alert, Button, Input, Modal, Popconfirm, Select, Space, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -11,6 +11,7 @@ import type { RoleDto, RoleUserDto } from '../../../types/role'
 import type { UserDto } from '../../../types/user'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
 import { StatusDot } from '../accessAdminUi'
+import { getRoleMutationErrorMessage, isDerivedStoreManagerRole } from './rolesWorkspaceLogic'
 
 interface RoleMembersPanelProps {
   role: RoleDto
@@ -23,6 +24,9 @@ interface RoleMembersPanelProps {
 /** 角色工作区「成员」标签：成员列表 + 添加 / 移除，原独立抽屉内嵌到工作区。 */
 export default function RoleMembersPanel({ role, canManage, onChanged }: RoleMembersPanelProps) {
   const { t } = useTranslation()
+  // 店长角色由「可管理分店」自动派生，后端拒绝直接增删成员，这里不再提供入口。
+  const derivedStoreManagerRole = isDerivedStoreManagerRole(role.roleName)
+  const canEditMembers = canManage && !derivedStoreManagerRole
   const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState<RoleUserDto[]>([])
   const [keyword, setKeyword] = useState('')
@@ -103,7 +107,7 @@ export default function RoleMembersPanel({ role, canManage, onChanged }: RoleMem
       onChanged?.()
     } catch (error) {
       console.error(error)
-      message.error(t('system.roles.addUserFailed'))
+      message.error(getRoleMutationErrorMessage(error, t('system.roles.addUserFailed')))
     } finally {
       setSubmitting(false)
     }
@@ -117,7 +121,7 @@ export default function RoleMembersPanel({ role, canManage, onChanged }: RoleMem
       onChanged?.()
     } catch (error) {
       console.error(error)
-      message.error(t('system.roles.removeUserFailed'))
+      message.error(getRoleMutationErrorMessage(error, t('system.roles.removeUserFailed')))
     }
   }
 
@@ -151,7 +155,7 @@ export default function RoleMembersPanel({ role, canManage, onChanged }: RoleMem
         return parsed?.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : (value || '--')
       },
     },
-    ...(canManage ? [{
+    ...(canEditMembers ? [{
       title: t('column.action'),
       key: 'action',
       width: 100,
@@ -186,7 +190,7 @@ export default function RoleMembersPanel({ role, canManage, onChanged }: RoleMem
         <Typography.Text type="secondary">
           {t('system.rolesWorkspace.membersCount', '共 {{count}} 位成员', { count: users.length })}
         </Typography.Text>
-        {canManage ? (
+        {canEditMembers ? (
           <span className="roles-ws-toolbar-end">
             <Button type="primary" icon={<UserAddOutlined />} onClick={() => void handleOpenAdd()}>
               {t('system.roles.addUser')}
@@ -194,6 +198,18 @@ export default function RoleMembersPanel({ role, canManage, onChanged }: RoleMem
           </span>
         ) : null}
       </div>
+
+      {derivedStoreManagerRole ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t(
+            'system.rolesWorkspace.derivedStoreManagerHint',
+            '店长角色由用户的「可管理分店」自动决定，不能在这里添加或移除成员。如需调整，请到「用户管理」打开该用户，在分店里勾选或取消「可管理」。',
+          )}
+        />
+      ) : null}
 
       <MeasuredTable metricId="system.roles.role-user-management.table-1"
         rowKey="userGUID"
