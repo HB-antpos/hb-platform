@@ -12,6 +12,16 @@ import { formatOrderHistoryQuantity } from '../orderHistoryQuantity'
 
 const { Paragraph, Text, Title } = Typography
 
+// 来货日期是后端按分店时区截好的纯日期；只取 YYYY-MM-DD 按本地日期构造，避免 new Date 按 UTC 解析后跨时区差一天。
+function formatArrivalDate(value?: string | null): string | null {
+  const dateOnly = value?.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!dateOnly) {
+    return null
+  }
+
+  return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])).toLocaleDateString()
+}
+
 interface ProductCardProps {
   product: StoreOrderProductItem
   dynamicData?: StoreOrderDynamicData
@@ -53,10 +63,15 @@ function ProductCard({
   // Sales 只在后端返回数字时显示，0 与负数也显示；null/undefined 隐藏入口。
   const salesQuantity = dynamicData?.salesQuantitySinceLastArrival
   const hasSalesQuantity = typeof salesQuantity === 'number'
+  // 最近来货日即「来货后销量」的起算日，与销量同批回填。
+  const formattedLastArrivalDate = formatArrivalDate(dynamicData?.lastArrivalDate)
   const lastOrderDate = dynamicData?.lastOrderDate
   const hasLastOrder = Boolean(lastOrderDate)
     || dynamicData?.lastQuantity != null
     || dynamicData?.lastAllocQuantity != null
+  const formattedLastOrderDate = lastOrderDate ? new Date(lastOrderDate).toLocaleDateString() : '-'
+  // 上次订货与上次来货落在同一天时合并成一个日期，避免同一日期在卡片上重复出现。
+  const isSameOrderAndArrivalDate = hasLastOrder && formattedLastArrivalDate === formattedLastOrderDate
   const lastQuantity = dynamicData?.lastQuantity ?? 0
   const lastAllocQuantity = dynamicData?.lastAllocQuantity ?? 0
   const formattedLastQuantity = formatOrderHistoryQuantity(lastQuantity)
@@ -199,11 +214,23 @@ function ProductCard({
                 })}
                 title={t('shop.productActivityHistory.entryTitle')}
               >
-                {hasLastOrder ? (
-                  <Text type="secondary" className="shop-product-activity-date">
-                    <ClockCircleOutlined /> {t('shop.productActivityHistory.lastOrder')}:{' '}
-                    {lastOrderDate ? new Date(lastOrderDate).toLocaleDateString() : '-'}
-                  </Text>
+                {(hasLastOrder || formattedLastArrivalDate) ? (
+                  <div className="shop-product-activity-dates">
+                    {hasLastOrder ? (
+                      <Text type="secondary" className="shop-product-activity-date">
+                        <ClockCircleOutlined />{' '}
+                        {t(isSameOrderAndArrivalDate
+                          ? 'shop.productActivityHistory.cardLastOrderAndArrival'
+                          : 'shop.productActivityHistory.lastOrder')}:{' '}
+                        {formattedLastOrderDate}
+                      </Text>
+                    ) : null}
+                    {formattedLastArrivalDate && !isSameOrderAndArrivalDate ? (
+                      <Text type="secondary" className="shop-product-activity-date">
+                        {t('shop.productActivityHistory.cardLastArrival')}: {formattedLastArrivalDate}
+                      </Text>
+                    ) : null}
+                  </div>
                 ) : null}
                 <div className="shop-product-sales-row">
                   {hasLastOrder ? (
@@ -214,7 +241,7 @@ function ProductCard({
                   ) : null}
                   {hasSalesQuantity ? (
                     <span className="shop-product-activity-sales">
-                      {t('shop.productActivityHistory.salesLabel')} <strong>{salesQuantity}</strong>
+                      {t('shop.productActivityHistory.salesSinceArrival')} <strong>{salesQuantity}</strong>
                     </span>
                   ) : null}
                 </div>

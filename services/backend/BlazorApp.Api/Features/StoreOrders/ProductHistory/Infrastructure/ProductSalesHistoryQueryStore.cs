@@ -119,6 +119,13 @@ internal sealed class ProductSalesHistoryQueryStore(
             )
                 ? salesQuantity
                 : null;
+            // 起点日期与销量同源，前端用它提示「自某日来货起」；没有来货记录时两者都为 null。
+            item.LastArrivalDate = salesQuantityResult.ArrivalDateMap.TryGetValue(
+                item.ProductCode,
+                out var lastArrivalDate
+            )
+                ? lastArrivalDate
+                : null;
         }
 
         return result;
@@ -317,6 +324,7 @@ internal sealed class ProductSalesHistoryQueryStore(
             };
             foreach (var pair in arrivalDateMap)
             {
+                mapResult.ArrivalDateMap[pair.Key] = pair.Value;
                 mapResult.SalesQuantityMap[pair.Key] = statisticQuantityMap.TryGetValue(
                     pair.Key,
                     out var salesQuantity

@@ -49,6 +49,7 @@ import { useShopStore } from '../../store/shop'
 import type {
   StoreOrderDynamicData,
   StoreOrderProductItem,
+  StoreOrderProductSalesSummaryItem,
   StoreOrderScanStatus,
 } from '../../types/storeOrder'
 import {
@@ -348,8 +349,8 @@ export default function ShopHomePage() {
         storeCode: selectedStore.storeCode,
         productCodes,
       })
-      return result.reduce<Record<string, number | null>>((salesMap, item) => {
-        salesMap[item.productCode] = item.salesQuantitySinceLastArrival
+      return result.reduce<Record<string, StoreOrderProductSalesSummaryItem>>((salesMap, item) => {
+        salesMap[item.productCode] = item
         return salesMap
       }, {})
     },
@@ -514,18 +515,23 @@ export default function ShopHomePage() {
         })
 
         const salesCoordinator = salesSummaryRequestCoordinatorRef.current
-        const mergeSalesSummary = (salesMap: Record<string, number | null>) => {
+        const mergeSalesSummary = (salesMap: Record<string, StoreOrderProductSalesSummaryItem>) => {
           setDynamicDataMap((previousMap) => {
             let hasChanged = false
             const nextMap = { ...previousMap }
-            Object.entries(salesMap).forEach(([productCode, salesQuantitySinceLastArrival]) => {
+            Object.entries(salesMap).forEach(([productCode, { salesQuantitySinceLastArrival, lastArrivalDate }]) => {
               const previousData = previousMap[productCode]
-              if (!previousData || previousData.salesQuantitySinceLastArrival === salesQuantitySinceLastArrival) {
+              // 销量与来货日期同批回填；两者都没变时保留原引用，商品卡才能跳过重渲染。
+              if (
+                !previousData
+                || (previousData.salesQuantitySinceLastArrival === salesQuantitySinceLastArrival
+                  && previousData.lastArrivalDate === lastArrivalDate)
+              ) {
                 return
               }
 
               hasChanged = true
-              nextMap[productCode] = { ...previousData, salesQuantitySinceLastArrival }
+              nextMap[productCode] = { ...previousData, salesQuantitySinceLastArrival, lastArrivalDate }
             })
             return hasChanged ? nextMap : previousMap
           })

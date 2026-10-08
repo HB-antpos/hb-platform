@@ -853,6 +853,7 @@ export async function getStoreOrderProductSalesSummary(query: StoreOrderProductS
       // 0 与负数是有效业务值；只有缺失或非法值归一为隐藏所用的 null。
       salesQuantitySinceLastArrival:
         typeof salesQuantity === 'number' || salesQuantity === null ? salesQuantity : null,
+      lastArrivalDate: typeof item.lastArrivalDate === 'string' ? item.lastArrivalDate : null,
     })
     return items
   }, [])

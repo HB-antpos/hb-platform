@@ -885,6 +885,11 @@ namespace BlazorApp.Shared.DTOs
   {
     public string ProductCode { get; set; } = string.Empty;
     public int? SalesQuantitySinceLastArrival { get; set; }
+
+    /// <summary>
+    /// 销量统计起点：最近一次来货的出库日期（仅日期）；没有来货记录或分店不可用时为 null。
+    /// </summary>
+    public DateTime? LastArrivalDate { get; set; }
   }
 
   /// <summary>

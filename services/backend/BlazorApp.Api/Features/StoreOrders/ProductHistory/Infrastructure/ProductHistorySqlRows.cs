@@ -85,6 +85,10 @@ internal sealed class ProductHistorySalesQuantityMapResult
     public Dictionary<string, int> SalesQuantityMap { get; } = new(
         StringComparer.OrdinalIgnoreCase
     );
+    // 与 SalesQuantityMap 同键：销量统计的起点（最近来货出库日期，已截到日期）。
+    public Dictionary<string, DateTime> ArrivalDateMap { get; } = new(
+        StringComparer.OrdinalIgnoreCase
+    );
     public int ArrivalRows { get; init; }
     public int CutoffGroupCount { get; init; }
     public int StatsQueryCount { get; init; }
