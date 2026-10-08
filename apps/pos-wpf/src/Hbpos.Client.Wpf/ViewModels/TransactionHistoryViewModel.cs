@@ -143,6 +143,19 @@ internal sealed record HistoryOrderDetailLine(
     public string QuantityDisplay => Quantity.ToString("0.##");
 }
 
+/// <summary>
+/// 订单明细弹窗右侧"付款记录"时间线的一个节点。分期单带标题（首付/还款 N）和入账时间，
+/// 普通订单只有付款方式；<see cref="IsPending"/> 表示尚未支付的待付余额节点。
+/// </summary>
+internal sealed record HistoryOrderPaymentEntry(
+    string Title,
+    string? Detail,
+    string? DisplayReference,
+    string? CardSummary,
+    decimal Amount,
+    bool IsPending = false,
+    bool IsLast = false);
+
 public sealed partial class TransactionHistoryViewModel : ObservableObject, IScannerInputTarget, IDisposable
 {
     public const string PageId = "TransactionHistory";
@@ -174,6 +187,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private readonly IRawScannerService? _rawScannerService;
     private readonly TimeProvider _timeProvider;
     private readonly ObservableCollection<HistoryOrderDetailLine> _orderDetailLines = [];
+    private readonly ObservableCollection<HistoryOrderPaymentEntry> _orderDetailPayments = [];
     private LocalInstallmentOrder? _selectedInstallmentDetails;
     private bool _suppressSelectedOrderLoad;
     private bool _suppressSourceAutoLoad;
@@ -550,6 +564,39 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     public System.Collections.IEnumerable OrderDetailLines => _orderDetailLines;
 
     internal IReadOnlyList<HistoryOrderDetailLine> OrderDetailLinesForTests => _orderDetailLines;
+
+    public System.Collections.IEnumerable OrderDetailPayments => _orderDetailPayments;
+
+    internal IReadOnlyList<HistoryOrderPaymentEntry> OrderDetailPaymentsForTests => _orderDetailPayments;
+
+    // 商品区标题旁的统计："N 行 · M 件"。数量允许小数（称重商品），按 0.## 显示。
+    public string OrderDetailsLineSummary => string.Format(
+        CurrentDisplayCulture,
+        TOrFallback("history.orderDetailsLineSummary", "{0} lines · {1} pcs"),
+        _orderDetailLines.Count,
+        _orderDetailLines.Sum(line => line.Quantity).ToString("0.##", CurrentDisplayCulture));
+
+    // 付款记录标题旁的笔数，待付余额节点不计入。
+    public string OrderDetailsPaymentCountLabel => string.Format(
+        CurrentDisplayCulture,
+        TOrFallback("history.orderDetailsPaymentCount", "{0} payments"),
+        _orderDetailPayments.Count(entry => !entry.IsPending));
+
+    // 分期进度条：已付 /（已付 + 未付）。分母取两个已展示的金额，保证进度与摘要数字一致。
+    public double OrderDetailsPaidPercent
+    {
+        get
+        {
+            var paid = OrderDetailsPaidAmount;
+            var total = paid + OrderDetailsOutstandingAmount;
+            return total <= 0m ? 0d : (double)Math.Clamp(paid / total * 100m, 0m, 100m);
+        }
+    }
+
+    public string OrderDetailsPaidPercentText => string.Format(
+        CurrentDisplayCulture,
+        TOrFallback("history.orderDetailsPaidPercent", "Paid {0}%"),
+        OrderDetailsPaidPercent.ToString("0.#", CurrentDisplayCulture));
 
     public IAsyncRelayCommand LoadCommand { get; }
 
@@ -3063,6 +3110,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             return;
         }
 
+        // 订单明细弹窗里的"继续付款"也走这个命令：先关弹窗，免得返回历史页时弹窗还盖在上面。
+        IsOrderDetailsOpen = false;
         await _continueInstallmentPaymentAsync(order!.InstallmentOrder!);
     }
 
@@ -3351,6 +3400,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         Payments.Clear();
         ReceiptPreviewRows.Clear();
         _orderDetailLines.Clear();
+        _orderDetailPayments.Clear();
         HasOrderDetailsPayments = false;
         IsOrderDetailsEmpty = false;
         OrderDetailsErrorMessage = string.Empty;
@@ -3372,12 +3422,15 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private void RefreshOrderDetailLines(ReceiptDetails? receipt)
     {
         _orderDetailLines.Clear();
+        _orderDetailPayments.Clear();
         HasOrderDetailsPayments = receipt?.Payments.Count > 0;
         IsOrderDetailsEmpty = receipt is not null && receipt.Lines.Count == 0;
         if (receipt is null)
         {
             return;
         }
+
+        RefreshOrderDetailPayments(receipt);
 
         OrderDetailsErrorMessage = string.Empty;
         foreach (var line in receipt.Lines)
@@ -3394,6 +3447,71 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
                 line.ActualAmount));
         }
     }
+
+    private void RefreshOrderDetailPayments(ReceiptDetails receipt)
+    {
+        var entries = new List<HistoryOrderPaymentEntry>();
+        if (CurrentOrderInstallmentDetails is { } details)
+        {
+            // 分期单按入账时间排序：第一笔视为首付，其余依次为"还款 N"；已作废的付款不展示。
+            var recorded = details.Payments
+                .Where(payment => payment.Status == InstallmentPaymentStatus.Recorded)
+                .OrderBy(payment => payment.RecordedAt)
+                .ToList();
+            for (var index = 0; index < recorded.Count; index++)
+            {
+                var payment = recorded[index];
+                var line = new ReceiptPaymentLine(payment.Method, payment.Amount, payment.Reference, payment.CardTransactions);
+                var title = index == 0
+                    ? TOrFallback("history.installment.downPayment", "Down payment")
+                    : string.Format(
+                        CurrentDisplayCulture,
+                        TOrFallback("history.installment.repaymentN", "Repayment {0}"),
+                        index);
+                var recordedAt = payment.RecordedAt.ToLocalTime().ToString("MMM dd, yyyy HH:mm", CurrentDisplayCulture);
+                entries.Add(new HistoryOrderPaymentEntry(
+                    title,
+                    $"{ResolvePaymentMethodLabel(line)} · {recordedAt}",
+                    line.DisplayReference,
+                    line.CardSummary,
+                    payment.Amount));
+            }
+
+            // 进行中且仍有余额：末尾追加虚线"待付"节点，提示还差多少。
+            if (details.Status == InstallmentStatus.Active && details.BalanceAmount > 0m)
+            {
+                entries.Add(new HistoryOrderPaymentEntry(
+                    TOrFallback("history.outstandingAmount", "Outstanding"),
+                    null,
+                    null,
+                    null,
+                    details.BalanceAmount,
+                    IsPending: true));
+            }
+        }
+        else
+        {
+            foreach (var payment in receipt.Payments)
+            {
+                entries.Add(new HistoryOrderPaymentEntry(
+                    ResolvePaymentMethodLabel(payment),
+                    null,
+                    payment.DisplayReference,
+                    payment.CardSummary,
+                    payment.Amount));
+            }
+        }
+
+        // 时间线的连接线只画到倒数第二个节点，末节点标记 IsLast 让模板隐藏它的连接线。
+        for (var index = 0; index < entries.Count; index++)
+        {
+            _orderDetailPayments.Add(index == entries.Count - 1 ? entries[index] with { IsLast = true } : entries[index]);
+        }
+    }
+
+    // 刷卡保留 Square / ANZ Linkly 等通道名，其余方式用本地化名称。
+    private string ResolvePaymentMethodLabel(ReceiptPaymentLine payment) =>
+        payment.Method == PaymentMethodKind.Card ? payment.MethodLabel : GetPaymentMethodLabel(payment.Method);
 
     private string? ResolveProductImage(string storeCode, ReceiptPreviewLine line)
     {
@@ -3488,6 +3606,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         OnPropertyChanged(nameof(HasOrderDetailsInstallmentAmounts));
         OnPropertyChanged(nameof(OrderDetailsPaidAmount));
         OnPropertyChanged(nameof(OrderDetailsOutstandingAmount));
+        OnPropertyChanged(nameof(OrderDetailsPaidPercent));
+        OnPropertyChanged(nameof(OrderDetailsPaidPercentText));
+        OnPropertyChanged(nameof(OrderDetailsLineSummary));
+        OnPropertyChanged(nameof(OrderDetailsPaymentCountLabel));
         OnPropertyChanged(nameof(IsOrderDetailsFinancialContentVisible));
     }
 

@@ -343,14 +343,14 @@ public sealed class TransactionHistoryViewLayoutTests
         var itemsGrid = Assert.Single(dialog.Descendants(presentation + "DataGrid").Where(element =>
             (string?)element.Attribute(x + "Name") == "OrderDetailsItemsGrid"));
         Assert.Equal("{Binding OrderDetailLines}", (string?)itemsGrid.Attribute("ItemsSource"));
-        Assert.Equal("76", (string?)itemsGrid.Attribute("RowHeight"));
-        Assert.Equal("76", (string?)itemsGrid.Attribute("MinRowHeight"));
+        Assert.Equal("48", (string?)itemsGrid.Attribute("RowHeight"));
+        Assert.Equal("48", (string?)itemsGrid.Attribute("MinRowHeight"));
         Assert.Equal("Disabled", (string?)itemsGrid.Attribute("ScrollViewer.HorizontalScrollBarVisibility"));
 
         var productImage = Assert.Single(itemsGrid.Descendants(presentation + "Border").Where(element =>
             (string?)element.Attribute(x + "Name") == "OrderDetailProductImage"));
-        Assert.Equal("64", (string?)productImage.Attribute("Width"));
-        Assert.Equal("64", (string?)productImage.Attribute("Height"));
+        Assert.Equal("36", (string?)productImage.Attribute("Width"));
+        Assert.Equal("36", (string?)productImage.Attribute("Height"));
         var imageBrush = Assert.Single(productImage.Descendants(presentation + "ImageBrush"));
         Assert.Contains(imageBrush.Attributes(), attribute =>
             attribute.Name.LocalName.EndsWith(".AsyncSourceText", StringComparison.Ordinal) &&
@@ -395,6 +395,25 @@ public sealed class TransactionHistoryViewLayoutTests
 
         Assert.Equal(2, dialog.Descendants(presentation + "Button").Count(element =>
             (string?)element.Attribute("Command") == "{Binding CloseOrderDetailsCommand}"));
+
+        // 底栏的"继续付款"：复用历史行同一条命令，参数是当前选中单，仅分期单可补款时可见。
+        var continuePayment = Assert.Single(dialog.Descendants(presentation + "Button"), element =>
+            (string?)element.Attribute(x + "Name") == "OrderDetailsContinuePaymentButton");
+        Assert.Equal("{Binding ContinueInstallmentPaymentCommand}", (string?)continuePayment.Attribute("Command"));
+        Assert.Equal("{Binding SelectedOrder}", (string?)continuePayment.Attribute("CommandParameter"));
+        Assert.Equal(
+            "{Binding IsContinueInstallmentPaymentVisible, Converter={StaticResource BoolToVis}}",
+            (string?)continuePayment.Attribute("Visibility"));
+
+        // 付款记录改为独立滚动的时间线，商品明细不再被付款卡片挤压。
+        var paymentItems = Assert.Single(dialog.Descendants(presentation + "ItemsControl"), element =>
+            (string?)element.Attribute("ItemsSource") == "{Binding OrderDetailPayments}");
+        Assert.Equal("ScrollViewer", paymentItems.Parent?.Name.LocalName);
+        Assert.Contains("{Binding OrderDetailsLineSummary}", detailTextBindings);
+        Assert.Contains("{Binding OrderDetailsPaymentCountLabel}", detailTextBindings);
+        Assert.Contains("{Binding OrderDetailsPaidPercentText}", detailTextBindings);
+        Assert.Single(dialog.Descendants(presentation + "ProgressBar"), element =>
+            (string?)element.Attribute("Value") == "{Binding OrderDetailsPaidPercent, Mode=OneWay}");
         Assert.Single(dialog.Descendants(presentation + "Button").Where(element =>
             (string?)element.Attribute("Command") == "{Binding RetryOrderDetailsCommand}"));
         var escapeBinding = Assert.Single(overlay.Descendants(presentation + "KeyBinding").Where(element =>
@@ -414,6 +433,15 @@ public sealed class TransactionHistoryViewLayoutTests
                      "history.finalTotal",
                      "history.paidAmount",
                      "history.outstandingAmount",
+                     "history.orderDetailsOrderTotal",
+                     "history.orderDetailsItemsTitle",
+                     "history.orderDetailsLineSummary",
+                     "history.orderDetailsPaymentsTitle",
+                     "history.orderDetailsPaymentCount",
+                     "history.orderDetailsPaidPercent",
+                     "history.installment.downPayment",
+                     "history.installment.repaymentN",
+                     "history.installment.continuePayment",
                  })
         {
             AssertLocalizationKey(repoRoot, "Strings.resx", key);

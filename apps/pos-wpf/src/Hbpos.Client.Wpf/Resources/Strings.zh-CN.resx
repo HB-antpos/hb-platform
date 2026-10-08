@@ -987,6 +987,30 @@
   <data name="history.outstandingAmount" xml:space="preserve">
     <value>未付</value>
   </data>
+  <data name="history.orderDetailsOrderTotal" xml:space="preserve">
+    <value>订单总额</value>
+  </data>
+  <data name="history.orderDetailsItemsTitle" xml:space="preserve">
+    <value>商品明细</value>
+  </data>
+  <data name="history.orderDetailsLineSummary" xml:space="preserve">
+    <value>{0} 行 · {1} 件</value>
+  </data>
+  <data name="history.orderDetailsPaymentsTitle" xml:space="preserve">
+    <value>付款记录</value>
+  </data>
+  <data name="history.orderDetailsPaymentCount" xml:space="preserve">
+    <value>{0} 笔</value>
+  </data>
+  <data name="history.orderDetailsPaidPercent" xml:space="preserve">
+    <value>已付 {0}%</value>
+  </data>
+  <data name="history.installment.downPayment" xml:space="preserve">
+    <value>首付</value>
+  </data>
+  <data name="history.installment.repaymentN" xml:space="preserve">
+    <value>还款 {0}</value>
+  </data>
   <data name="history.reprint" xml:space="preserve">
     <value>重打</value>
   </data>

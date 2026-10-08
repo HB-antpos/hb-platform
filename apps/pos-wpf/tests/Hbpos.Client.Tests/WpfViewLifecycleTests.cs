@@ -432,11 +432,11 @@ public sealed class WpfViewLifecycleTests
             Assert.Equal(Visibility.Collapsed, scrollViewer.ComputedHorizontalScrollBarVisibility);
 
             var detailRow = Assert.IsType<DataGridRow>(itemsGrid.ItemContainerGenerator.ContainerFromIndex(0));
-            Assert.InRange(detailRow.ActualHeight, 75.5, 76.5);
+            Assert.InRange(detailRow.ActualHeight, 47.5, 48.5);
             var productImage = Assert.Single(FindVisualDescendants<Border>(detailRow).Where(border =>
                 border.Name == "OrderDetailProductImage"));
-            Assert.InRange(productImage.ActualWidth, 63.5, 64.5);
-            Assert.InRange(productImage.ActualHeight, 63.5, 64.5);
+            Assert.InRange(productImage.ActualWidth, 35.5, 36.5);
+            Assert.InRange(productImage.ActualHeight, 35.5, 36.5);
             AssertFullyContained(productImage, detailRow);
 
             var historyGrid = Assert.IsType<DataGrid>(view.FindName("HistoryOrdersGrid"));
