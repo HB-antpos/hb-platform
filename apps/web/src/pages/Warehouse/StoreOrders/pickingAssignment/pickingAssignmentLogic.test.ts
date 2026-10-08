@@ -7,7 +7,11 @@ import {
   buildSlipRows,
   otherSegmentLabels,
   evenSegmentCounts,
-  paginateSlipRows,
+  paginateSlipRowsByHeight,
+  resolveSlipsSearch,
+  slipFirstPageBodyMm,
+  SLIP_FIRST_PAGE_BODY_MM,
+  SLIP_NEXT_PAGE_BODY_MM,
   parseUtcMs,
   resizeSegmentPickers,
   segmentColor,
@@ -63,7 +67,7 @@ assertDeepEqual(assignSegmentPicker(['u-chen', 'u-li'], 1, null), ['u-chen', nul
 assertEqual(segmentColor(1), PICKER_SEGMENT_COLORS[0], '第 1 段蓝色')
 assertEqual(segmentColor(PICKER_SEGMENT_COLORS.length + 2), PICKER_SEGMENT_COLORS[1], '超过色板长度时循环')
 
-// 分单换排提示：同排不重复提示，无货位/编码不规范的行只提示一次。
+// 分单提示行：只在首行有货位时提示起始排，换排处不再插折返行；无货位/编码不规范的行只提示一次。
 assertDeepEqual(
   slipTurnMarkers([
     { zone: 'A', rowLabel: '01' },
@@ -73,14 +77,15 @@ assertDeepEqual(
     { zone: null, rowLabel: null },
   ]),
   [
-    { kind: 'row', zone: 'A', rowLabel: '01', first: true },
+    { kind: 'start', zone: 'A', rowLabel: '01' },
     null,
-    { kind: 'row', zone: 'A', rowLabel: '02', first: false },
+    null,
     { kind: 'unlocated' },
     null,
   ],
-  '换排提示',
+  '只留起始排提示，不再有折返行',
 )
+assertDeepEqual(slipTurnMarkers([{ zone: null, rowLabel: null }, { zone: 'A', rowLabel: '01' }]), [{ kind: 'unlocated' }, null], '首行无货位时不提示起始排')
 
 // 每人进度状态。
 const now = Date.parse('2026-10-01T02:00:00Z')
@@ -123,13 +128,37 @@ const slipRows = buildSlipRows([
 ])
 assertDeepEqual(
   slipRows.map((row) => (row.kind === 'line' ? `${row.index}:${row.line.id}` : row.kind)),
-  ['turn', '1:a', 'turn', '2:b', 'unlocated', '3:c'],
-  '换排与无货位提示行插在对应商品前',
+  ['start', '1:a', '2:b', 'unlocated', '3:c'],
+  '起始排与无货位提示行插在对应商品前，折返行不再出现',
 )
 const isMarker = (row: string) => row.startsWith('#')
-assertDeepEqual(paginateSlipRows(['#A', '1', '2', '#B', '3', '4'], 4, 3, isMarker), [['#A', '1', '2'], ['#B', '3', '4']], '提示行不落在页尾')
-assertDeepEqual(paginateSlipRows(['1', '2', '3', '4', '5'], 2, 2, isMarker), [['1', '2'], ['3', '4'], ['5']], '按容量分页')
-assertDeepEqual(paginateSlipRows([], 20, 30, isMarker), [[]], '空段也有一页')
+const rowMm = (row: string) => (isMarker(row) ? 6 : 8)
+assertDeepEqual(paginateSlipRowsByHeight(['#A', '1', '2', '3', '4'], 6 + 16, 24, rowMm, isMarker), [['#A', '1', '2'], ['3', '4']], '首页 22mm：提示行 6 + 两个商品行 16')
+assertDeepEqual(paginateSlipRowsByHeight(['#A', '1', '2', '#B', '3', '4'], 6 + 16 + 6, 100, rowMm, isMarker), [['#A', '1', '2'], ['#B', '3', '4']], '提示行不落在页尾')
+assertDeepEqual(paginateSlipRowsByHeight(['1', '2', '3', '4', '5'], 16, 16, rowMm, isMarker), [['1', '2'], ['3', '4'], ['5']], '按高度整行分页，不让一行跨页')
+assertDeepEqual(paginateSlipRowsByHeight(['1', '2', '3'], 15.9, 100, rowMm, isMarker), [['1'], ['2', '3']], '差一点放不下的行整行挪到下一页')
+assertDeepEqual(paginateSlipRowsByHeight([], 20, 30, rowMm, isMarker), [[]], '空段也有一页')
+assertDeepEqual(paginateSlipRowsByHeight(['1', '2'], 3, 3, rowMm, isMarker), [['1'], ['2']], '单行比整页还高也独占一页，不死循环')
+// 每页行数不超过版面预算：200 个商品行逐页累计高度都不超过各自页的可用高度。
+const many = Array.from({ length: 200 }, (_, index) => String(index + 1))
+const manyPages = paginateSlipRowsByHeight(many, SLIP_FIRST_PAGE_BODY_MM, SLIP_NEXT_PAGE_BODY_MM, rowMm, isMarker)
+manyPages.forEach((page, index) => {
+  const used = page.reduce((sum, row) => sum + rowMm(row), 0)
+  assertEqual(used <= (index === 0 ? SLIP_FIRST_PAGE_BODY_MM : SLIP_NEXT_PAGE_BODY_MM), true, `第 ${index + 1} 页高度 ${used}mm 在预算内`)
+})
+assertEqual(manyPages.flat().length, 200, '分页后一行不丢')
+// “其他段”文字超过一行时首页预算每多一行少 5mm，实测溢出的收紧量也要扣掉。
+assertEqual(slipFirstPageBodyMm('x'.repeat(60)), SLIP_FIRST_PAGE_BODY_MM, '一行以内不扣')
+assertEqual(slipFirstPageBodyMm('x'.repeat(61)), SLIP_FIRST_PAGE_BODY_MM - 5, '两行扣 5mm')
+assertEqual(slipFirstPageBodyMm('x'.repeat(130), 8), SLIP_FIRST_PAGE_BODY_MM - 10 - 8, '三行再加收紧量')
+
+// 分单页地址里没有订单时（页签只记路径）改用上次的查询串；地址有订单就以地址为准。
+assertEqual(resolveSlipsSearch('?orders=a,b&segment=2', '?orders=z'), '?orders=a,b&segment=2', '地址有订单以地址为准')
+assertEqual(resolveSlipsSearch('', '?orders=z&segment=1'), '?orders=z&segment=1', '地址为空时恢复上次')
+assertEqual(resolveSlipsSearch('?segment=3', '?orders=z'), '?orders=z', '地址只剩无关参数也恢复')
+assertEqual(resolveSlipsSearch('', null), null, '都没有时为空')
+assertEqual(resolveSlipsSearch('', '?foo=1'), null, '上次记的也没有订单时不恢复')
+assertEqual(resolveSlipsSearch('?orders=,', '?orders=z'), '?orders=z', '空订单号按没有处理')
 
 // 拣货分配卡片显隐：只读订单没有任何分配时隐藏；能派单的订单即使没分配也要显示（唯一的派单入口）。
 assertEqual(shouldShowPickingAssignmentSection({ assigneeCount: 0, assignable: false }), false, '只读且没有分配时隐藏')

@@ -1,15 +1,27 @@
 import { PrinterOutlined, RollbackOutlined } from '@ant-design/icons'
 import { Button, Empty, Space, Spin, message } from 'antd'
 import dayjs from 'dayjs'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { getPickingSlips, type PickingSlip, type PickingSlipLine, type PickingSlips } from '../../../../services/warehousePickingAssignmentService'
 import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../../../utils/barcode'
+import { formatInnerPackCount } from '../pickingListLogic'
 import { printElementPagesAsPdf } from '../printUtils'
 
-import { buildSlipRows, formatUtcShort, otherSegmentLabels, paginateSlipRows, type SlipRow } from './pickingAssignmentLogic'
+import {
+  SLIP_LINE_ROW_MM,
+  SLIP_MARKER_ROW_MM,
+  SLIP_NEXT_PAGE_BODY_MM,
+  buildSlipRows,
+  formatUtcShort,
+  otherSegmentLabels,
+  paginateSlipRowsByHeight,
+  resolveSlipsSearch,
+  slipFirstPageBodyMm,
+  type SlipRow,
+} from './pickingAssignmentLogic'
 import '../print.css'
 import './messages'
 import './pickingSlips.css'
@@ -17,9 +29,26 @@ import './pickingSlips.css'
 // 1px 模块 ≈ 0.26mm，常见扫描枪可读；24 个字符的分单条码约 300px，放得进 90mm 条码区。
 const SLIP_BARCODE_MODULE_WIDTH = 1
 const SLIP_BARCODE_HEIGHT = 56
-/** 第一页有页头、条码和汇总，放 24 行；之后每页 34 行。 */
-const FIRST_PAGE_ROWS = 24
-const NEXT_PAGE_ROWS = 34
+/** 页签只记路径、丢了 ?orders=，从别的页签点回来时用它找回上次打开的订单。 */
+const REMEMBERED_SEARCH_KEY = 'hb.pickingSlips.lastSearch'
+/** 实测溢出时最多收紧这么多行（每次一行），防止异常内容让页面反复重排。 */
+const MAX_SHRINK_ROWS = 6
+
+function readRememberedSearch(): string | null {
+  try {
+    return window.sessionStorage.getItem(REMEMBERED_SEARCH_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeRememberedSearch(search: string) {
+  try {
+    window.sessionStorage.setItem(REMEMBERED_SEARCH_KEY, search)
+  } catch {
+    // 隐私模式等拿不到 sessionStorage 时只是不记，不影响打印。
+  }
+}
 
 interface SlipPage {
   key: string
@@ -71,11 +100,21 @@ export default function PickingSlipsPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const pagesRootRef = useRef<HTMLDivElement | null>(null)
-  const { orderGuids, segmentNo } = useMemo(() => parsePickingSlipsQuery(location.search), [location.search])
+  // 地址里没有订单时（从订货明细等页签点回来）改用上次的查询串，并把地址补回去。
+  const effectiveSearch = useMemo(() => resolveSlipsSearch(location.search, readRememberedSearch()), [location.search])
+  const { orderGuids, segmentNo } = useMemo(() => parsePickingSlipsQuery(effectiveSearch ?? ''), [effectiveSearch])
   const [orders, setOrders] = useState<PickingSlips[]>([])
+  // 渲染后实测某页溢出时逐行收紧每页容量（见下面的 useLayoutEffect）。
+  const [shrinkMm, setShrinkMm] = useState(0)
   const [failures, setFailures] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [printing, setPrinting] = useState(false)
+
+  useEffect(() => {
+    if (!effectiveSearch) return
+    if (effectiveSearch !== location.search) navigate({ pathname: location.pathname, search: effectiveSearch }, { replace: true })
+    else writeRememberedSearch(effectiveSearch)
+  }, [effectiveSearch, location.pathname, location.search, navigate])
 
   useEffect(() => {
     if (orderGuids.length === 0) return
@@ -92,6 +131,7 @@ export default function PickingSlipsPage() {
           else failed.push(orderGuids[index])
         })
         setOrders(loaded)
+        setShrinkMm(0)
         setFailures(failed)
       })
       .finally(() => {
@@ -100,11 +140,21 @@ export default function PickingSlipsPage() {
     return () => controller.abort()
   }, [orderGuids, segmentNo])
 
+  const unclaimedLabel = useCallback((no: number) => t('storeOrders.pickingSlips.otherUnclaimed', '第 {{no}} 段待领取', { no }), [t])
+
+  // 按真实行高（毫米）分页：整行放得下才放，绝不让一行被页边裁掉；“其他段”文字变长时首页相应少放。
   const pages = useMemo<SlipPage[]>(
     () =>
       orders.flatMap((order) =>
         order.slips.flatMap((slip) => {
-          const chunks = paginateSlipRows(buildSlipRows(slip.lines), FIRST_PAGE_ROWS, NEXT_PAGE_ROWS, (row) => row.kind !== 'line')
+          const firstPageMm = slipFirstPageBodyMm(otherSegmentLabels(slip, unclaimedLabel).join(' · '), shrinkMm)
+          const chunks = paginateSlipRowsByHeight(
+            buildSlipRows(slip.lines),
+            firstPageMm,
+            SLIP_NEXT_PAGE_BODY_MM - shrinkMm,
+            (row) => (row.kind === 'line' ? SLIP_LINE_ROW_MM : SLIP_MARKER_ROW_MM),
+            (row) => row.kind !== 'line',
+          )
           return chunks.map((rows, index) => ({
             key: `${order.orderGuid}-${slip.segmentNo}-${index}`,
             order,
@@ -115,8 +165,16 @@ export default function PickingSlipsPage() {
           }))
         }),
       ),
-    [orders],
+    [orders, shrinkMm, unclaimedLabel],
   )
+
+  // 兜底：估算的页头高度与真实渲染总会有出入，渲染后量一次，哪页内容超出 A4 就整体少放一行再排，直到都放得下。
+  useLayoutEffect(() => {
+    const root = pagesRootRef.current
+    if (!root || loading) return
+    const overflowed = Array.from(root.querySelectorAll<HTMLElement>('.picking-slip-page')).some((page) => page.scrollHeight > page.clientHeight + 1)
+    if (overflowed && shrinkMm < SLIP_LINE_ROW_MM * MAX_SHRINK_ROWS) setShrinkMm((value) => value + SLIP_LINE_ROW_MM)
+  }, [pages, loading, shrinkMm])
 
   const print = async () => {
     if (!pagesRootRef.current || pages.length === 0) return
@@ -134,22 +192,29 @@ export default function PickingSlipsPage() {
     }
   }
 
+  // 订单号与门店加粗，每页（含续页）页头都要有；订货日期用常规字重跟在后面。
+  const orderTitle = (page: SlipPage) =>
+    t('storeOrders.pickingSlips.orderTitle', '订单 {{orderNo}} · {{store}}', {
+      orderNo: page.order.orderNo ?? '—',
+      store: page.order.storeName || page.order.storeCode || '—',
+    })
+  const orderedOn = (page: SlipPage) =>
+    t('storeOrders.pickingSlips.orderedOn', '订货 {{date}}', {
+      date: page.order.orderDate ? dayjs(page.order.orderDate).format('YYYY-MM-DD') : '—',
+    })
+
   const renderRow = (row: SlipRow<PickingSlipLine>, index: number) => {
-    if (row.kind === 'turn') {
+    if (row.kind === 'start') {
       return (
-        <tr key={`turn-${index}`} className="picking-slip-turn">
-          <td colSpan={8}>
-            {row.first
-              ? t('storeOrders.pickingSlips.startRow', '{{zone}} 区 {{row}} 排 · 列号从小到大', { zone: row.zone, row: row.rowLabel })
-              : t('storeOrders.pickingSlips.turnRow', '折返 · 转入 {{zone}} 区 {{row}} 排', { zone: row.zone, row: row.rowLabel })}
-          </td>
+        <tr key={`start-${index}`} className="picking-slip-turn">
+          <td colSpan={7}>{t('storeOrders.pickingSlips.startRow', '{{zone}} 区 {{row}} 排 · 列号从小到大', { zone: row.zone, row: row.rowLabel })}</td>
         </tr>
       )
     }
     if (row.kind === 'unlocated') {
       return (
         <tr key={`unlocated-${index}`} className="picking-slip-turn">
-          <td colSpan={8}>{t('storeOrders.pickingSlips.unlocatedRow', '无货位 / 编码不规范 · 按商品找货')}</td>
+          <td colSpan={7}>{t('storeOrders.pickingSlips.unlocatedRow', '无货位 / 编码不规范 · 按商品找货')}</td>
         </tr>
       )
     }
@@ -157,12 +222,12 @@ export default function PickingSlipsPage() {
     return (
       <tr key={line.detailGuid}>
         <td>{row.index}</td>
-        <td className="picking-slip-mono">{line.locationCode || '—'}</td>
-        <td>{line.itemNumber || '—'}</td>
+        <td className="picking-slip-mono">{line.itemNumber || '—'}</td>
+        <td className="picking-slip-mono picking-slip-location">{line.locationCode || '—'}</td>
         <td>{line.productName || '—'}</td>
-        <td className="picking-slip-mono">{line.barcode || '—'}</td>
+        {/* INNER Pack 与配货单同口径：订货数 ÷ 每包数量，每包数量不大于 1 时留空。 */}
+        <td className="picking-slip-number">{formatInnerPackCount(line.orderedQuantity, null, line.minOrderQuantity ?? undefined)}</td>
         <td className="picking-slip-number">{line.orderedQuantity}</td>
-        <td className="picking-slip-number">{line.minOrderQuantity || '—'}</td>
         <td><span className="picking-slip-box" /></td>
       </tr>
     )
@@ -194,7 +259,11 @@ export default function PickingSlipsPage() {
       ) : pages.length === 0 ? (
         <Empty description={t('storeOrders.pickingSlips.empty', '没有可打印的分单')} style={{ marginTop: 120 }} />
       ) : (
-        <div ref={pagesRootRef} className="picking-slip-pages">
+        <div
+          ref={pagesRootRef}
+          className="picking-slip-pages"
+          style={{ '--slip-row-h': `${SLIP_LINE_ROW_MM}mm`, '--slip-marker-h': `${SLIP_MARKER_ROW_MM}mm` } as CSSProperties}
+        >
           {pages.map((page) => (
             <div key={page.key} className="store-order-pdf-page picking-slip-page">
               {page.pageNo === 1 ? (
@@ -213,11 +282,7 @@ export default function PickingSlipsPage() {
                         )}
                       </div>
                       <div className="picking-slip-meta">
-                        {t('storeOrders.pickingSlips.orderLine', '订单 {{orderNo}} · {{store}} · 订货 {{date}}', {
-                          orderNo: page.order.orderNo ?? '—',
-                          store: page.order.storeName || page.order.storeCode || '—',
-                          date: page.order.orderDate ? dayjs(page.order.orderDate).format('YYYY-MM-DD') : '—',
-                        })}
+                        <b>{orderTitle(page)}</b> · {orderedOn(page)}
                         <br />
                         {t('storeOrders.pickingSlips.assignedLine', '{{name}} 分配于 {{assignedAt}} · 打印 {{printedAt}}', {
                           name: page.order.assignedByName ?? '—',
@@ -237,40 +302,52 @@ export default function PickingSlipsPage() {
                     </div>
                   </div>
                   <div className="picking-slip-facts">
-                    <div><span>{t('storeOrders.pickingSlips.lines', '品种')}</span><b>{page.slip.lineCount}</b></div>
-                    <div><span>{t('storeOrders.pickingSlips.pieces', '件数')}</span><b>{page.slip.pieces}</b></div>
-                    <div className="is-wide">
-                      <span>{t('storeOrders.pickingSlips.route', '路线（M 型走位）')}</span>
-                      <b className="picking-slip-mono">
-                        {page.slip.firstLocation ? `${page.slip.firstLocation} → ${page.slip.lastLocation}` : t('storeOrders.pickingSlips.noLocation', '无货位')}
-                      </b>
-                    </div>
-                    <div>
-                      <span>{t('storeOrders.pickingSlips.others', '同单其他段')}</span>
-                      <b className="is-small">{otherSegmentLabels(page.slip, (no) => t('storeOrders.pickingSlips.otherUnclaimed', '第 {{no}} 段待领取', { no })).join(' · ') || '—'}</b>
+                    <div className="picking-slip-fact"><span>{t('storeOrders.pickingSlips.lines', '品种')}</span><b>{page.slip.lineCount}</b></div>
+                    <div className="picking-slip-fact"><span>{t('storeOrders.pickingSlips.pieces', '件数')}</span><b>{page.slip.pieces}</b></div>
+                    <div className="picking-slip-fact-stack">
+                      <div className="picking-slip-fact-line">
+                        <span>{t('storeOrders.pickingSlips.route', '路线（M 型走位）')}</span>
+                        <b className="picking-slip-mono">
+                          {page.slip.firstLocation ? `${page.slip.firstLocation} → ${page.slip.lastLocation}` : t('storeOrders.pickingSlips.noLocation', '无货位')}
+                        </b>
+                      </div>
+                      <div className="picking-slip-fact-line">
+                        <span>{t('storeOrders.pickingSlips.others', '同单其他段')}</span>
+                        <b className="is-small">{otherSegmentLabels(page.slip, unclaimedLabel).join(' · ') || '—'}</b>
+                      </div>
                     </div>
                   </div>
                 </Fragment>
               ) : (
                 <div className="picking-slip-continued">
-                  {t('storeOrders.pickingSlips.continued', '{{orderNo}} · 第 {{no}} 段 {{name}}（续）', {
-                    orderNo: page.order.orderNo ?? '—',
-                    no: page.slip.segmentNo,
-                    name: page.slip.pickerName ?? '',
-                  })}
+                  <span>
+                    <b>{orderTitle(page)}</b> · {orderedOn(page)}
+                  </span>
+                  <span className="picking-slip-segment">
+                    {t('storeOrders.pickingSlips.segmentCont', '第 {{no}} / {{count}} 段（续）', { no: page.slip.segmentNo, count: page.slip.segmentCount })}
+                  </span>
                 </div>
               )}
               <table className="picking-slip-table">
+                <colgroup>
+                  {/* 行号列要放得下 4 位数，长单行号过百不能被截成 1… */}
+                  <col style={{ width: 40 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 108 }} />
+                  <col />
+                  <col style={{ width: 86 }} />
+                  <col style={{ width: 68 }} />
+                  <col style={{ width: 58 }} />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th style={{ width: 28 }}>#</th>
-                    <th style={{ width: 104 }}>{t('storeOrders.pickingSlips.location', '货位')}</th>
-                    <th style={{ width: 76 }}>{t('storeOrders.pickingSlips.itemNumber', '货号')}</th>
+                    <th>#</th>
+                    <th>{t('storeOrders.pickingSlips.itemNumber', '货号')}</th>
+                    <th>{t('storeOrders.pickingSlips.location', '货位')}</th>
                     <th>{t('storeOrders.pickingSlips.product', '商品')}</th>
-                    <th style={{ width: 112 }}>{t('storeOrders.pickingSlips.barcode', '条码')}</th>
-                    <th style={{ width: 64 }} className="picking-slip-number">{t('storeOrders.pickingSlips.ordered', '订货')}</th>
-                    <th style={{ width: 48 }} className="picking-slip-number">{t('storeOrders.pickingSlips.pack', '中包')}</th>
-                    <th style={{ width: 56 }}>{t('storeOrders.pickingSlips.picked', '实拣')}</th>
+                    <th className="picking-slip-number">{t('warehouse.pickingList.innerPackShort')}</th>
+                    <th className="picking-slip-number">{t('storeOrders.pickingSlips.ordered', '订货')}</th>
+                    <th>{t('storeOrders.pickingSlips.picked', '实拣')}</th>
                   </tr>
                 </thead>
                 <tbody>{page.rows.map(renderRow)}</tbody>

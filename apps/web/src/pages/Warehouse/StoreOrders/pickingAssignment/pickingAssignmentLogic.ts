@@ -83,20 +83,16 @@ export interface SlipLineLocation {
 }
 
 /**
- * 分单打印的换排提示：返回每一行之前要不要插一行“转入 X 区 NN 排”。
- * 第一行有货位时也提示；无货位或编码不规范（没有区排）的行不提示，第一次出现时插一行“无货位 · 按商品找”。
+ * 分单打印的提示行：返回每一行之前要不要插一行。
+ * 只在第一行有货位时提示起始排（“X 区 NN 排 · 列号从小到大”）；换排处不再插“折返”行。
+ * 无货位或编码不规范（没有区排）的行第一次出现时插一行“无货位 · 按商品找”。
  */
-export function slipTurnMarkers(lines: readonly SlipLineLocation[]): ({ kind: 'row'; zone: string; rowLabel: string; first: boolean } | { kind: 'unlocated' } | null)[] {
-  let previousKey: string | null = null
+export function slipTurnMarkers(lines: readonly SlipLineLocation[]): ({ kind: 'start'; zone: string; rowLabel: string } | { kind: 'unlocated' } | null)[] {
   let unlocatedShown = false
   return lines.map((line, index) => {
     if (line.zone && line.rowLabel) {
-      const key = `${line.zone}-${line.rowLabel}`
-      if (key === previousKey) return null
-      previousKey = key
-      return { kind: 'row', zone: line.zone, rowLabel: line.rowLabel, first: index === 0 }
+      return index === 0 ? { kind: 'start', zone: line.zone, rowLabel: line.rowLabel } : null
     }
-    previousKey = null
     if (unlocatedShown) return null
     unlocatedShown = true
     return { kind: 'unlocated' }
@@ -156,17 +152,17 @@ export function assigneeStatus(assignee: AssigneeProgressInput, nowMs: number): 
 }
 
 export type SlipRow<T extends SlipLineLocation> =
-  | { kind: 'turn'; zone: string; rowLabel: string; first: boolean }
+  | { kind: 'start'; zone: string; rowLabel: string }
   | { kind: 'unlocated' }
   | { kind: 'line'; index: number; line: T }
 
-/** 分单明细行：在换排处与无货位段开头插入提示行，行号按商品从 1 起。 */
+/** 分单明细行：首行前插起始排提示、无货位段开头插提示，行号按商品从 1 起。 */
 export function buildSlipRows<T extends SlipLineLocation>(lines: readonly T[]): SlipRow<T>[] {
   const markers = slipTurnMarkers(lines)
   const rows: SlipRow<T>[] = []
   lines.forEach((line, index) => {
     const marker = markers[index]
-    if (marker?.kind === 'row') rows.push({ kind: 'turn', zone: marker.zone, rowLabel: marker.rowLabel, first: marker.first })
+    if (marker?.kind === 'start') rows.push({ kind: 'start', zone: marker.zone, rowLabel: marker.rowLabel })
     else if (marker?.kind === 'unlocated') rows.push({ kind: 'unlocated' })
     rows.push({ kind: 'line', index: index + 1, line })
   })
@@ -174,20 +170,59 @@ export function buildSlipRows<T extends SlipLineLocation>(lines: readonly T[]): 
 }
 
 /**
- * 分单分页：第一页有页头与条码，放得少；之后每页放得多。提示行不单独落在页尾（挪到下一页开头）。
- * 至少返回一页（空段也打一页，方便员工知道没有要拣的）。
+ * A4 分单的版面常量（毫米）。页面容器是固定 297mm 且 overflow: hidden，放多了会被直接裁掉，所以按真实高度分页：
+ * 商品行与提示行的高度由页面用同一组常量写进 CSS；两个“可放行数”是扣掉页头、汇总框、表头、页脚与签字栏后的余量，
+ * 页面渲染后还会实测溢出并自动收紧（见 PickingSlipsPage）。
  */
-export function paginateSlipRows<T>(rows: readonly T[], firstPageRows: number, nextPageRows: number, isMarker: (row: T) => boolean): T[][] {
+export const SLIP_LINE_ROW_MM = 8
+export const SLIP_MARKER_ROW_MM = 6
+/** 第一页放明细的可用高度（有页头、条码、汇总框，汇总框里“其他段”只占一行时）。 */
+export const SLIP_FIRST_PAGE_BODY_MM = 192
+/** 续页放明细的可用高度（只有一行订单页头）。 */
+export const SLIP_NEXT_PAGE_BODY_MM = 234
+
+/** “其他段”文字超过一行时汇总框会变高，第一页相应少放行：按每行约 60 个字符估算，每多一行扣 5mm。 */
+export function slipFirstPageBodyMm(otherSegmentsText: string, shrinkMm = 0): number {
+  const extraLines = Math.max(0, Math.ceil(otherSegmentsText.length / 60) - 1)
+  return SLIP_FIRST_PAGE_BODY_MM - extraLines * 5 - shrinkMm
+}
+
+/**
+ * 分单按高度分页：整行放得下才放，绝不让一行跨页或被页边切掉；提示行不单独落在页尾（挪到下一页开头）。
+ * 至少返回一页（空段也打一页，方便员工知道没有要拣的）；单行比整页还高时也独占一页，避免死循环。
+ */
+export function paginateSlipRowsByHeight<T>(
+  rows: readonly T[],
+  firstPageMm: number,
+  nextPageMm: number,
+  rowMm: (row: T) => number,
+  isMarker: (row: T) => boolean,
+): T[][] {
   const pages: T[][] = []
   let cursor = 0
   while (cursor < rows.length) {
-    const capacity = pages.length === 0 ? firstPageRows : nextPageRows
-    let end = Math.min(rows.length, cursor + Math.max(1, capacity))
+    const capacity = pages.length === 0 ? firstPageMm : nextPageMm
+    let end = cursor
+    let used = 0
+    while (end < rows.length && (end === cursor || used + rowMm(rows[end]) <= capacity + 1e-6)) {
+      used += rowMm(rows[end])
+      end += 1
+    }
     if (end < rows.length && end - 1 > cursor && isMarker(rows[end - 1])) end -= 1
     pages.push(rows.slice(cursor, end))
     cursor = end
   }
   return pages.length > 0 ? pages : [[]]
+}
+
+/**
+ * 分单页地址里没有订单（从别的页签点回来时，页签只记路径、丢了 ?orders=）时，改用上次打开过的查询串。
+ * 地址里有订单就以地址为准；两边都没有返回 null。
+ */
+export function resolveSlipsSearch(currentSearch: string, remembered: string | null | undefined): string | null {
+  const hasOrders = (search: string) => new URLSearchParams(search).get('orders')?.split(',').some((guid) => guid.trim()) ?? false
+  if (hasOrders(currentSearch)) return currentSearch
+  return remembered && hasOrders(remembered) ? remembered : null
 }
 
 /**
