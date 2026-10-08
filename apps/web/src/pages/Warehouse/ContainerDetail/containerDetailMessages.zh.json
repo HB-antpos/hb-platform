@@ -11,7 +11,12 @@
     "messages": {
       "detailsDeletedCostsRecalculated": "已按剩余明细重算 {{count}} 条成本",
       "detailsDeletedCostsRecalculateCancelled": "已取消重算，其余明细的运输成本仍按删除前的总体积计算",
-      "detailsDeletedCostsRecalculateFailed": "明细已删除，但成本重算失败：{{message}}"
+      "detailsDeletedCostsRecalculateFailed": "明细已删除，但成本重算失败：{{message}}",
+      "createProductsPushHqUnsent": "{{count}} 个新建商品未能自动发送到 HQ（未找到可发送的明细），请手动「发送到 HQ」",
+      "createProductsPushHqBusy": "已有发送到 HQ 的任务正在提交，本次未自动更新 HQ，请稍后手动「发送到 HQ」"
+    },
+    "text": {
+      "createProductsPushToHqAfterCreate": "创建完成后同时更新 HQ 数据库"
     }
   }
 }

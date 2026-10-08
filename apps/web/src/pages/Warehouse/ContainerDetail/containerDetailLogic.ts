@@ -2705,3 +2705,65 @@ export function buildContainerDetailHqPushSelection(rows: ContainerDetail[]): Co
     missingProductCodeCount,
   }
 }
+
+export interface CreatedProductsHqPushPlan {
+  selection: ContainerDetailHqPushSelection
+  /** 本次创建成功、但没能变成发送候选的数量（找不到对应明细，或明细上没有商品编码/供应商+货号） */
+  unsentCreatedCount: number
+}
+
+/**
+ * 「创建新商品」完成后同时更新 HQ：只从本次结果的 created 里挑商品，构造与手动「发送到 HQ」相同的发送选择。
+ * - 先按明细 GUID、再按商品编码（都忽略大小写与首尾空白）在重载后的最新行里找；
+ * - 找不到（分页只加载了部分行，或重载后被当前筛选隐藏，例如筛的是「新商品」）时回退到确认创建时的行；
+ * - 不因行仍被标成新商品而跳过：后端只信任本地 Product 的实时匹配结果，前端标记可能滞后；
+ * - 同一明细或同一商品编码只发送一次（buildContainerDetailHqPushSelection 内按编码去重）。
+ */
+export function buildCreatedProductsHqPushPlan(
+  createdItems: ReadonlyArray<{ detailHguid?: string; productCode?: string }>,
+  latestRows: readonly ContainerDetail[],
+  confirmedRows: readonly ContainerDetail[] = [],
+): CreatedProductsHqPushPlan {
+  const normalizeKey = (value: string | undefined) => value?.trim().toUpperCase() || undefined
+  const buildIndexes = (rows: readonly ContainerDetail[]) => {
+    const byHguid = new Map<string, ContainerDetail>()
+    const byProductCode = new Map<string, ContainerDetail>()
+    rows.forEach((row) => {
+      const hguidKey = normalizeKey(row.hguid)
+      if (hguidKey && !byHguid.has(hguidKey)) byHguid.set(hguidKey, row)
+      const codeKey = normalizeKey(getContainerDetailProductCode(row))
+      if (codeKey && !byProductCode.has(codeKey)) byProductCode.set(codeKey, row)
+    })
+    return { byHguid, byProductCode }
+  }
+  // 最新行优先，确认时的行只作兜底。
+  const sources = [buildIndexes(latestRows), buildIndexes(confirmedRows)]
+
+  const matchedRows: ContainerDetail[] = []
+  const matchedRowSet = new Set<ContainerDetail>()
+  let unmatchedCount = 0
+  createdItems.forEach((item) => {
+    const hguidKey = normalizeKey(item.detailHguid)
+    const codeKey = normalizeKey(item.productCode)
+    let row: ContainerDetail | undefined
+    for (const source of sources) {
+      row = (hguidKey ? source.byHguid.get(hguidKey) : undefined)
+        ?? (codeKey ? source.byProductCode.get(codeKey) : undefined)
+      if (row) break
+    }
+    if (!row) {
+      unmatchedCount += 1
+      return
+    }
+    if (!matchedRowSet.has(row)) {
+      matchedRowSet.add(row)
+      matchedRows.push(row)
+    }
+  })
+
+  const selection = buildContainerDetailHqPushSelection(matchedRows)
+  return {
+    selection,
+    unsentCreatedCount: unmatchedCount + selection.missingProductCodeCount,
+  }
+}

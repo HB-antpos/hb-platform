@@ -151,6 +151,7 @@ import {
   buildPendingContainerDetailSavePlan,
   buildContainerDetailTagStats,
   buildContainerDetailHqPushSelection,
+  buildCreatedProductsHqPushPlan,
   calculateContainerFreight,
   calculateContainerDetailImportPrice,
   calculateContainerDetailTotalAmount,
@@ -4967,6 +4968,53 @@ export default function ContainerDetailPage() {
       })
   }
 
+  /**
+   * 发送到 HQ 的「提交 + 通知 + 轮询」公共部分：手动「发送到 HQ」与「创建新商品后同时更新 HQ」共用。
+   * 调用方负责范围挑选、字段选择与并发判断；这里只负责加锁提交、提交通知、后台轮询与提交失败提示。
+   * onSubmitted 在任务提交成功、解锁之前调用（手动发送用它清空勾选，保持原有顺序）。
+   */
+  const submitPushToHqJob = async (
+    selection: ReturnType<typeof buildContainerDetailHqPushSelection>,
+    updateFields: PushProductsToHqUpdateField[],
+    onSubmitted?: () => void,
+  ) => {
+    try {
+      // 写 HQ 是跨库操作，使用即时锁防止连续点击造成重复提交。
+      pushToHqLoadingRef.current = true
+      setPushToHqLoading(true)
+      const job = await createPushProductsToHqJob({
+        operationId: buildPushProductsToHqOperationId(containerGuid, selection.productCodes, selection.items.length, updateFields),
+        productCodes: selection.productCodes,
+        items: selection.items,
+        updateFields,
+      })
+      const pushToHqNotificationKey = `container-push-to-hq:${job.jobId}`
+      notification.info({
+        key: pushToHqNotificationKey,
+        message: t('containers.messages.pushToHqJobSubmitted', '发送到 HQ 任务已提交'),
+        description: t('containers.messages.pushToHqJobRunning', '后台正在写入 HQ，完成后会显示各表新增/更新数量和错误摘要。'),
+        duration: 0,
+      })
+      onSubmitted?.()
+      releasePushToHqLoading()
+      pollPushToHqJob(job, selection, pushToHqNotificationKey)
+    } catch (error) {
+      const errorResult = extractPushToHqErrorResult(error)
+      if (errorResult) {
+        // 发送 HQ 的结果统一收敛到右上角通知，避免弹窗打断表格编辑状态。
+        notification.error({
+          message: t('posAdmin.products.pushToHqFailed', '发送到 HQ 失败'),
+          description: renderPushToHqResultContent(errorResult, selection),
+          duration: 0,
+        })
+      } else {
+        message.error(error instanceof Error ? error.message : t('posAdmin.products.pushToHqFailed', '发送到 HQ 失败'))
+      }
+    } finally {
+      releasePushToHqLoading()
+    }
+  }
+
   const handlePushSelectedProductsToHq = async () => {
     if (pushToHqLoadingRef.current) return
     if (!access.canManagePosProducts) {
@@ -4989,41 +5037,7 @@ export default function ContainerDetailPage() {
     if (!updateFields) return
     if (!await drainAutoSavesBeforeAction()) return
 
-    try {
-      // 写 HQ 是跨库操作，使用即时锁防止连续点击造成重复提交。
-      pushToHqLoadingRef.current = true
-      setPushToHqLoading(true)
-      const job = await createPushProductsToHqJob({
-        operationId: buildPushProductsToHqOperationId(containerGuid, selection.productCodes, selection.items.length, updateFields),
-        productCodes: selection.productCodes,
-        items: selection.items,
-        updateFields,
-      })
-      const pushToHqNotificationKey = `container-push-to-hq:${job.jobId}`
-      notification.info({
-        key: pushToHqNotificationKey,
-        message: t('containers.messages.pushToHqJobSubmitted', '发送到 HQ 任务已提交'),
-        description: t('containers.messages.pushToHqJobRunning', '后台正在写入 HQ，完成后会显示各表新增/更新数量和错误摘要。'),
-        duration: 0,
-      })
-      setSelectedRowKeys([])
-      releasePushToHqLoading()
-      pollPushToHqJob(job, selection, pushToHqNotificationKey)
-    } catch (error) {
-      const errorResult = extractPushToHqErrorResult(error)
-      if (errorResult) {
-        // 发送 HQ 的结果统一收敛到右上角通知，避免弹窗打断表格编辑状态。
-        notification.error({
-          message: t('posAdmin.products.pushToHqFailed', '发送到 HQ 失败'),
-          description: renderPushToHqResultContent(errorResult, selection),
-          duration: 0,
-        })
-      } else {
-        message.error(error instanceof Error ? error.message : t('posAdmin.products.pushToHqFailed', '发送到 HQ 失败'))
-      }
-    } finally {
-      releasePushToHqLoading()
-    }
+    await submitPushToHqJob(selection, updateFields, () => setSelectedRowKeys([]))
   }
 
   const renderCreateProductResultItems = (items: ContainerProductCreationResultItem[]) => {
@@ -5203,6 +5217,39 @@ export default function ContainerDetailPage() {
     }
   }
 
+  /**
+   * 「创建新商品」确认框勾选了「同时更新 HQ 数据库」时，在创建任务结束、明细重载之后调用：
+   * 只发送本次结果 created 的商品，用默认更新字段（不再弹字段选择框），与手动「发送到 HQ」共用提交函数；
+   * 发送的提交与结果走独立通知，失败不影响已展示的创建结果。
+   */
+  const pushCreatedProductsToHq = async (
+    createdItems: ContainerProductCreationResultItem[],
+    confirmedRows: ContainerDetail[],
+  ) => {
+    // 本次没有创建成功的商品（全部跳过或失败）：不发送，也不额外提示，创建结果通知已经说明原因。
+    if (!createdItems.length) return
+    // 候选优先取重载后的最新行；分页/筛选导致不在已加载行里时，回退到确认创建时的行。
+    const plan = buildCreatedProductsHqPushPlan(createdItems, rowsRef.current, confirmedRows)
+    if (plan.unsentCreatedCount > 0 || !plan.selection.items.length) {
+      // 找不到对应明细的商品不能静默丢掉，提示用户手动「发送到 HQ」补发。
+      message.warning(t(
+        'containers.messages.createProductsPushHqUnsent',
+        '{{count}} 个新建商品未能自动发送到 HQ（未找到可发送的明细），请手动「发送到 HQ」',
+        { count: plan.selection.items.length ? plan.unsentCreatedCount : createdItems.length },
+      ))
+    }
+    if (!plan.selection.items.length) return
+    // 已有一个发送到 HQ 正在提交：不并发提交，提示用户稍后手动发送。
+    if (pushToHqLoadingRef.current) {
+      message.warning(t(
+        'containers.messages.createProductsPushHqBusy',
+        '已有发送到 HQ 的任务正在提交，本次未自动更新 HQ，请稍后手动「发送到 HQ」',
+      ))
+      return
+    }
+    await submitPushToHqJob(plan.selection, [...defaultPushProductsToHqUpdateFields])
+  }
+
   const createNewProducts = async () => {
     if (createProductsLoadingRef.current) return
     if (!access.canEditContainer || !access.canManagePosProducts) {
@@ -5210,7 +5257,20 @@ export default function ContainerDetailPage() {
       return
     }
     if (!ensureNoPendingDetails()) return
-    const scopedRows = await confirmBatchRows(t('containers.actions.createNewProducts'))
+    // 「同时更新 HQ 数据库」每次打开确认框都默认勾选，不持久化；取消勾选时行为与原来完全一致。
+    let pushToHqAfterCreate = true
+    const scopedRows = await confirmBatchRows(t('containers.actions.createNewProducts'), {
+      extra: (
+        <Checkbox
+          defaultChecked
+          onChange={(event) => {
+            pushToHqAfterCreate = event.target.checked
+          }}
+        >
+          {t('containers.text.createProductsPushToHqAfterCreate', '创建完成后同时更新 HQ 数据库')}
+        </Checkbox>
+      ),
+    })
     if (!scopedRows) return
     const detailHguids = scopedRows.map((row) => row.hguid).filter((value): value is string => Boolean(value))
     if (!detailHguids.length) {
@@ -5258,6 +5318,10 @@ export default function ContainerDetailPage() {
       // 只刷明细、不刷货柜头：创建商品不改货柜头数据，也避免整页 loading 闪动。
       // 抛异常（任务提交/轮询失败）走下面的 catch，不刷新。
       await reloadCurrentDetailRef.current()
+      // 勾选了「同时更新 HQ 数据库」：明细重载之后再把本次 created 的商品发送到 HQ（catch 分支不会走到这里）。
+      if (pushToHqAfterCreate) {
+        await pushCreatedProductsToHq(finalJob.result.created, scopedRows)
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('containers.messages.createProductFailed', '创建新商品失败'))
     } finally {
