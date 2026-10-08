@@ -4330,7 +4330,7 @@ export default function ContainerDetailPage() {
           <Typography.Text>
             {t(
               'containers.modals.alignDomesticProductCodeContent',
-              '确认把国内商品编码 {{oldCode}} 改为本地主档编码 {{newCode}}？',
+              '确认把国内商品和货柜中的编码 {{oldCode}} 改为澳洲的商品编码 {{newCode}}？',
               { oldCode: domesticProductCode, newCode: localProductCode },
             )}
           </Typography.Text>

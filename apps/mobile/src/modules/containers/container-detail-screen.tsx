@@ -828,7 +828,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
     Alert.alert(
       "对齐国内商品编码",
       [
-        `确认将国内商品编码 ${domesticProductCode} 对齐为 ${localProductCode}？`,
+        `确认把国内商品和货柜中的编码 ${domesticProductCode} 改为澳洲的商品编码 ${localProductCode}？`,
         `货号：${itemNumber}`,
         `商品：${productName}`,
         "如果目标国内编码已存在，后端会拒绝本次对齐，不会自动合并或覆盖。",

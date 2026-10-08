@@ -405,7 +405,7 @@
       "savePendingDetailsInvalidEnglishHint": "{{count}} English names are blank or contain Chinese. They will remain pending and will not be saved.",
       "savePendingDetailsRetryHint": "If saving fails, pending changes remain available for retry.",
       "alignDomesticProductCodeTitle": "Align Domestic Product Code",
-      "alignDomesticProductCodeContent": "Change domestic product code {{oldCode}} to local master code {{newCode}}?",
+      "alignDomesticProductCodeContent": "Change code {{oldCode}} in domestic products and containers to the Australian product code {{newCode}}?",
       "alignDomesticProductCodeConflictHint": "If the target domestic code already exists, the backend will reject this alignment without merging or overwriting.",
       "batchCategoryTitle": "Batch Set Category",
       "batchCategoryContent": "Choose a target category. The warehouse products linked to the current target details will be assigned to it.",

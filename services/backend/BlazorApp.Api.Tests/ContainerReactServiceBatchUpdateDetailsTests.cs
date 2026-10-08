@@ -280,11 +280,12 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
     {
         await SeedDetailAsync("D-ALIGN-1", "DOM-OLD");
         await SeedDetailAsync("D-ALIGN-2", "DOM-OLD");
+        // 生产形态：国内商品存中国供应商代码（HB196），本地主档存澳洲供应商代码（200），两者不同也应能对齐。
         await _localDb.Insertable(new DomesticProduct
         {
             ProductCode = "DOM-OLD",
             HBProductNo = "ITEM-ALIGN",
-            SupplierCode = "200",
+            SupplierCode = "HB196",
             ProductName = "国内旧编码商品",
             IsDeleted = false,
         }).ExecuteCommandAsync();
@@ -493,35 +494,6 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
         );
 
         Assert.Equal("国内商品货号与本地主档货号不一致，不能对齐编码", ex.Message);
-    }
-
-    [Fact]
-    public async Task AlignDomesticProductCodeAsync_国内商品供应商不一致_应拒绝()
-    {
-        await SeedDetailAsync("D-ALIGN-DOM-SUPPLIER", "DOM-DOM-SUPPLIER-OLD");
-        await _localDb.Insertable(new DomesticProduct
-        {
-            ProductCode = "DOM-DOM-SUPPLIER-OLD",
-            HBProductNo = "ITEM-DOM-SUPPLIER",
-            SupplierCode = "999",
-            IsDeleted = false,
-        }).ExecuteCommandAsync();
-        await SeedLocalProductAsync("LOCAL-DOM-SUPPLIER-NEW", "本地主档商品", null, "ITEM-DOM-SUPPLIER", "200");
-        var service = CreateService();
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.AlignDomesticProductCodeAsync(
-                new AlignDomesticProductCodeRequestDto
-                {
-                    DetailHguid = "D-ALIGN-DOM-SUPPLIER",
-                    ExpectedDomesticProductCode = "DOM-DOM-SUPPLIER-OLD",
-                    TargetProductCode = "LOCAL-DOM-SUPPLIER-NEW",
-                    SupplierCode = "200",
-                }
-            )
-        );
-
-        Assert.Equal("国内商品供应商代码与候选供应商不一致，不能对齐编码", ex.Message);
     }
 
     [Fact]

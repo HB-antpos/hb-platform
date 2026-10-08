@@ -2476,16 +2476,9 @@ namespace BlazorApp.Api.Services.React
             {
                 throw new InvalidOperationException("原国内商品不存在或已删除");
             }
-            if (
-                !string.Equals(
-                    domesticProduct.SupplierCode?.Trim(),
-                    supplierCode,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            {
-                throw new InvalidOperationException("国内商品供应商代码与候选供应商不一致，不能对齐编码");
-            }
+            // 注意：DomesticProduct.SupplierCode 是中国供应商代码（如 HB196），请求里的 SupplierCode
+            // 是澳洲本地供应商代码（如 200），两套编码体系不同，不能互相比较；同一商品由下方
+            // 「本地主档供应商 + 货号一致」来确认。
 
             var localProduct = await _context
                 .Db.Queryable<Product>()
@@ -2577,16 +2570,6 @@ namespace BlazorApp.Api.Services.React
                 {
                     throw new InvalidOperationException("原国内商品不存在或已删除");
                 }
-                if (
-                    !string.Equals(
-                        transactionalDomesticProduct.SupplierCode?.Trim(),
-                        supplierCode,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    throw new InvalidOperationException("国内商品供应商代码与候选供应商不一致，不能对齐编码");
-                }
 
                 var transactionalLocalProduct = await _context
                     .Db.Queryable<Product>()
@@ -2648,13 +2631,13 @@ namespace BlazorApp.Api.Services.React
                 }
 
                 // Product.ProductCode 是权威主键；确认后只把国内侧引用从旧编码迁到本地主档编码。
+                // 不按 SupplierCode 过滤：国内表存的是中国供应商代码，与请求中的澳洲供应商代码不同体系。
                 var updatedDomesticProducts = await _context.Db.Ado.ExecuteCommandAsync(
-                    "UPDATE DomesticProduct SET ProductCode = @TargetProductCode WHERE ProductCode = @OldProductCode AND SupplierCode = @SupplierCode AND IsDeleted = 0",
+                    "UPDATE DomesticProduct SET ProductCode = @TargetProductCode WHERE ProductCode = @OldProductCode AND IsDeleted = 0",
                     new List<SugarParameter>
                     {
                         new("@TargetProductCode", targetProductCode),
                         new("@OldProductCode", oldProductCode),
-                        new("@SupplierCode", supplierCode),
                     }
                 );
                 if (updatedDomesticProducts != 1)
