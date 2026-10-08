@@ -54,7 +54,6 @@ import {
   Space,
   Spin,
   Switch,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -4371,7 +4370,8 @@ export default function ContainerDetailPage() {
                   )}
                 </Typography.Text>
                 {preview.fields.length ? (
-                  <Table
+                  <MeasuredTable
+                    metricId="warehouse.container-detail.merge-domestic-product-diff"
                     size="small"
                     pagination={false}
                     rowKey="field"
