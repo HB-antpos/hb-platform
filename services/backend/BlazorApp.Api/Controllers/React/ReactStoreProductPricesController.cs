@@ -242,15 +242,11 @@ namespace BlazorApp.Api.Controllers.React
             return result.Success ? Ok(result) : BadRequest(result);
         }
 
-        // 分店价格同步兼容两个方向：本地 → HQ 继续可用；HQ → 本地（含未传方向，DTO 与 job 都会默认成 HqToLocal）
-        // 属于 HQ → HBweb 方向，2026-09-29 起返回 410。
+        // HQ ⇄ 本地分店价格同步整体取消：HQ → 本地方向 2026-09-29 已停用；本地 → HQ 方向随功能一并取消，
+        // 任何方向（含未传方向）一律返回 410。服务代码暂留，状态查询入口保留以便查看历史任务。
         [HttpPost("store-price-transfer-jobs")]
         [Authorize(Roles = "Admin,管理员")]
-        [HqToHbwebSyncDisabled(
-            ArgumentName = nameof(request),
-            DirectionProperty = nameof(StorePriceTransferRequest.Direction),
-            AllowedDirection = StorePriceTransferDirectionConstants.LocalToHq
-        )]
+        [HqToHbwebSyncDisabled]
         public async Task<IActionResult> StartStorePriceTransferJob(
             [FromBody] StorePriceTransferRequest? request,
             CancellationToken cancellationToken = default

@@ -97,6 +97,7 @@ public class HqToHbwebSyncDisabledContractTests
         "POST api/react/v1/product-warehouse/sync-from-hq/jobs",
         "POST api/react/v1/containers/sync-from-hq",
         "POST api/react/v1/store-product-prices/sync-from-hq",
+        "POST api/react/v1/store-product-prices/store-price-transfer-jobs",
         "POST api/react/v1/local-supplier-invoices/sync-from-hq",
         "POST api/react/v1/local-suppliers/sync",
         "POST api/Stores/sync",
@@ -105,12 +106,6 @@ public class HqToHbwebSyncDisabledContractTests
         "POST api/react/v1/store-order/hq-sync/full/jobs",
         "POST api/react/v1/store-order/hq-sync/incremental/jobs",
     ];
-
-    /// <summary>
-    /// 兼容两个方向的入口：只停用 HQ → HBweb 方向，本地 → HQ 继续放行。
-    /// </summary>
-    private const string StorePriceTransferJobRoute =
-        "POST api/react/v1/store-product-prices/store-price-transfer-jobs";
 
     /// <summary>
     /// 必须保持可用的反方向（HBweb → HQ / HBSales）、HBweb → POSM、HBweb 内部与只读查询入口。
@@ -157,7 +152,6 @@ public class HqToHbwebSyncDisabledContractTests
     public void 带停用特性的Action集合必须与HQ到HBweb停用清单完全一致()
     {
         var expected = FullyDisabledRoutes
-            .Append(StorePriceTransferJobRoute)
             .OrderBy(route => route, StringComparer.Ordinal)
             .ToArray();
         var actual = EnumerateActionRoutes()
@@ -185,27 +179,6 @@ public class HqToHbwebSyncDisabledContractTests
                 $"{route} 应整体停用，不应配置方向放行条件"
             );
         }
-    }
-
-    [Fact]
-    public void 分店价格同步Job只放行本地到HQ方向()
-    {
-        var action = Assert.Single(
-            EnumerateActionRoutes(),
-            route => route.Route == StorePriceTransferJobRoute
-        );
-        var attribute = Assert.IsType<HqToHbwebSyncDisabledAttribute>(action.DisabledAttribute);
-
-        Assert.True(attribute.IsConditional);
-        Assert.Equal(StorePriceTransferDirectionConstants.LocalToHq, attribute.AllowedDirection);
-
-        // 条件里引用的参数与属性必须真实存在，避免改名后过滤器静默失效（按「参数缺失」一律放行）。
-        var parameter = Assert.Single(
-            action.Method.GetParameters(),
-            item => item.Name == attribute.ArgumentName
-        );
-        Assert.Equal(typeof(StorePriceTransferRequest), parameter.ParameterType);
-        Assert.NotNull(parameter.ParameterType.GetProperty(attribute.DirectionProperty!));
     }
 
     [Fact]
