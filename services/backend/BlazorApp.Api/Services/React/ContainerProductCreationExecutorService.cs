@@ -1182,7 +1182,12 @@ namespace BlazorApp.Api.Services.React
         {
             setCode.SetItemNumber = relation.SetProductNo;
             setCode.SetBarcode = relation.SetBarcode;
-            setCode.SetRetailPrice = relation.OEMPrice;
+            // 关系价为空或 <= 0 时保留已有行的零售价：已有行的价格可能来自首次创建时的兜底价，
+            // 覆盖成空会让后面的成本重算校验（子项零售价为空或0）失败并回滚整个补码。
+            if (HasUsableRelationRetailPrice(relation))
+            {
+                setCode.SetRetailPrice = relation.OEMPrice;
+            }
             setCode.SetQuantity = 1;
             setCode.UpdatedAt = now;
             setCode.UpdatedBy = updatedBy;
@@ -1229,7 +1234,11 @@ namespace BlazorApp.Api.Services.React
         {
             storeMultiCode.StoreMultiCodeProductCode = storeCode + relation.SetProductCode;
             storeMultiCode.MultiBarcode = relation.SetBarcode;
-            storeMultiCode.MultiCodeRetailPrice = relation.OEMPrice;
+            // 与总部行同理：关系价不可用时保留门店多码行已有的零售价，不覆盖成空。
+            if (HasUsableRelationRetailPrice(relation))
+            {
+                storeMultiCode.MultiCodeRetailPrice = relation.OEMPrice;
+            }
             storeMultiCode.UpdatedAt = now;
             storeMultiCode.UpdatedBy = updatedBy;
         }
@@ -1239,9 +1248,11 @@ namespace BlazorApp.Api.Services.React
             DomesticSetProduct relation
         )
         {
+            // 零售价只有在关系价可用（> 0）且与已有价不同时才算需要刷新；
+            // 关系价为空/0 不能仅因“与已有价不同”就触发刷新（刷新也不会覆盖价格，反而会产生无意义的审计更新）。
             return setCode.SetItemNumber != relation.SetProductNo
                 || setCode.SetBarcode != relation.SetBarcode
-                || setCode.SetRetailPrice != relation.OEMPrice
+                || (HasUsableRelationRetailPrice(relation) && setCode.SetRetailPrice != relation.OEMPrice)
                 || setCode.SetQuantity != 1;
         }
 
@@ -1253,7 +1264,17 @@ namespace BlazorApp.Api.Services.React
         {
             return storeMultiCode.StoreMultiCodeProductCode != storeCode + relation.SetProductCode
                 || storeMultiCode.MultiBarcode != relation.SetBarcode
-                || storeMultiCode.MultiCodeRetailPrice != relation.OEMPrice;
+                || (HasUsableRelationRetailPrice(relation) && storeMultiCode.MultiCodeRetailPrice != relation.OEMPrice);
+        }
+
+        /// <summary>
+        /// 关系行（DomesticSetProduct）的零售价是否可用于覆盖已有行：只有 > 0 才可用。
+        /// 仅用于“已有行刷新”分支；新建分支（BuildProductSetCode / BuildStoreMultiCode）保持原样，
+        /// 全新套装带空价关系仍会在成本重算校验处被拒绝，不会因此放过真正的坏数据。
+        /// </summary>
+        private static bool HasUsableRelationRetailPrice(DomesticSetProduct relation)
+        {
+            return relation.OEMPrice is > 0;
         }
 
         private static string BuildStoreMultiCodeKey(string? storeCode, string? multiCodeProductCode)
