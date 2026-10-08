@@ -18,6 +18,7 @@ import type { ClipboardEvent as ReactClipboardEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MeasuredTable } from '../../../../components/MeasuredTable'
+import { useSnapshotSort } from '../../../../hooks/useSnapshotSort'
 import {
   getStoreProductCodePage,
   getStoreProductMaintenanceDetail,
@@ -128,7 +129,7 @@ export default function ProductSetCodeMaintenanceModal({
   const normalizedStoreCode = storeCode?.trim() ?? ''
   const [product, setProduct] = useState<StoreProductMaintenanceDetail | null>(null)
   const [mode, setMode] = useState<ProductCodeMode>(2)
-  const [rows, setRows] = useState<MaintenanceSetCodeDraftRow[]>([])
+  const [draftRows, setRows] = useState<MaintenanceSetCodeDraftRow[]>([])
   const [baselineProductType, setBaselineProductType] = useState<number | null>(null)
   const [baselineRows, setBaselineRows] = useState<MaintenanceSetCodeDraftRow[]>([])
   const [edits, setEdits] = useState<SetCodeDraftEdits>({})
@@ -142,12 +143,34 @@ export default function ProductSetCodeMaintenanceModal({
   const [saving, setSaving] = useState(false)
   const requestSequenceRef = useRef(0)
   const saveInFlightRef = useRef(false)
+  // 点列头排一次（输入时不会实时重排）；按「编辑后的值」排，和屏幕上看到的一致。
+  // 粘贴、保存、校验和「第 N 行」提示都基于排序后的 rows，保证与屏幕上的序号一致。
+  const {
+    displayItems: rows,
+    sortOrderOf,
+    onTableChange,
+    resetSort,
+  } = useSnapshotSort({
+    items: draftRows,
+    getId: getRowId,
+    getValue: (row, field) => {
+      const rowId = getRowId(row)
+      if (field === 'setBarcode') return edits[rowId]?.setBarcode ?? row.setBarcode
+      if (field === 'setRetailPrice') {
+        return Object.prototype.hasOwnProperty.call(edits[rowId] ?? {}, 'setRetailPrice')
+          ? edits[rowId].setRetailPrice
+          : row.setRetailPrice
+      }
+      return (row as unknown as Record<string, unknown>)[field]
+    },
+  })
 
   const loadLatestData = useCallback(async (showErrorMessage = true) => {
     const requestSequence = requestSequenceRef.current + 1
     requestSequenceRef.current = requestSequence
     setLoading(true)
     setReady(false)
+    resetSort()
     setLoadError(null)
     setIntegrityError(null)
     setRepairMultiCodeCount(0)
@@ -220,7 +243,7 @@ export default function ProductSetCodeMaintenanceModal({
     } finally {
       if (requestSequence === requestSequenceRef.current) setLoading(false)
     }
-  }, [normalizedProductCode, normalizedStoreCode, t])
+  }, [normalizedProductCode, normalizedStoreCode, resetSort, t])
 
   useEffect(() => {
     if (!open) {
@@ -312,7 +335,11 @@ export default function ProductSetCodeMaintenanceModal({
         aria-pressed={selected}
         aria-label={t('posAdmin.invoiceDetail.selectExcelPasteColumn', '选择 {{column}} Excel 粘贴列', { column: label })}
         disabled={!ready || loading || saving}
-        onClick={() => setSelectedPasteField(field)}
+        // 点列头文字是选中粘贴列，不能冒泡成排序；排序由列头空白处/箭头触发。
+        onClick={(event) => {
+          event.stopPropagation()
+          setSelectedPasteField(field)
+        }}
         onPaste={(event) => handlePaste(event, field)}
         style={{
           appearance: 'none',
@@ -527,6 +554,8 @@ export default function ProductSetCodeMaintenanceModal({
         'setBarcode',
       ),
       dataIndex: 'setBarcode',
+      sorter: true,
+      sortOrder: sortOrderOf('setBarcode'),
       width: 260,
       render: (_value, row) => {
         const rowId = getRowId(row)
@@ -561,6 +590,9 @@ export default function ProductSetCodeMaintenanceModal({
     {
       title: t('posAdmin.invoiceDetail.purchasePrice', '进货价'),
       dataIndex: 'setPurchasePrice',
+      // 多码模式下进货价是「跟随主条码」文字，没有可排序的值。
+      sorter: mode === 1,
+      sortOrder: sortOrderOf('setPurchasePrice'),
       width: 150,
       render: (_value, row) => mode === 2
         ? t('posAdmin.invoiceDetail.followMainBarcodePrice', '跟随主条码')
@@ -571,6 +603,8 @@ export default function ProductSetCodeMaintenanceModal({
     {
       title: renderPasteHeader(t('posAdmin.invoiceDetail.retailPrice', '零售价'), 'setRetailPrice', mode === 1),
       dataIndex: 'setRetailPrice',
+      sorter: mode === 1,
+      sortOrder: sortOrderOf('setRetailPrice'),
       width: 150,
       render: (_value, row) => {
         if (mode === 2) return t('posAdmin.invoiceDetail.followMainBarcodePrice', '跟随主条码')
@@ -613,7 +647,7 @@ export default function ProductSetCodeMaintenanceModal({
         </Popconfirm>
       ),
     },
-  ], [edits, loading, mode, ready, rows, saving, selectedPasteField, t, token.colorPrimaryBg])
+  ], [edits, loading, mode, ready, rows, saving, selectedPasteField, sortOrderOf, t, token.colorPrimaryBg])
 
   const isChangingNormalProduct = product != null && product.productType !== 1 && product.productType !== 2
 
@@ -689,6 +723,8 @@ export default function ProductSetCodeMaintenanceModal({
             rowKey={getRowId}
             loading={loading}
             dataSource={rows}
+            onChange={onTableChange}
+            showSorterTooltip={false}
             columns={columns}
             pagination={false}
             size="small"

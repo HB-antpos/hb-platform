@@ -12,9 +12,10 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { message } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
+import type { ColumnsType, TableProps } from 'antd/es/table'
 import { InputNumber } from 'antd'
 import { useTranslation } from 'react-i18next'
+import { useSnapshotSort } from '../../../hooks/useSnapshotSort'
 import type { ContainerDetail } from '../../../types/container'
 import type { ContainerDomesticSetCodeItem } from '../../../types/container'
 import { getContainerDomesticSetCodes, updateContainerDomesticSetCodePrices } from '../../../services/containerService'
@@ -40,6 +41,10 @@ interface UseContainerSetCodeReturn {
   setCodeModalRow: ContainerDetail | null
   /** 套装码明细列表 */
   setCodeItems: ContainerDomesticSetCodeItem[]
+  /** 套装码明细按列头排序后的展示顺序（表格 dataSource 用它，而不是 setCodeItems） */
+  setCodeDisplayItems: ContainerDomesticSetCodeItem[]
+  /** 表格 onChange：处理列头排序 */
+  onSetCodeTableChange: NonNullable<TableProps<ContainerDomesticSetCodeItem>['onChange']>
   /** 是否正在加载套装码数据 */
   setCodeLoading: boolean
   /** 是否正在保存套装码价格 */
@@ -129,6 +134,22 @@ export default function useContainerSetCode({
   const [setCodePriceEdits, setSetCodePriceEdits] = useState<ContainerSetCodePriceEdits>({})
   const [setCodeManualPurchasePriceKeys, setSetCodeManualPurchasePriceKeys] = useState<Set<string>>(() => new Set())
   const setCodeAbortControllerRef = useRef<AbortController | null>(null)
+  // 点列头排一次，价格编辑不会实时重排；价格列按「编辑后的值」排，和屏幕上看到的一致。
+  const {
+    displayItems: setCodeDisplayItems,
+    sortOrderOf,
+    onTableChange: onSetCodeTableChange,
+    resetSort: resetSetCodeSort,
+  } = useSnapshotSort({
+    items: setCodeItems,
+    getId: getSetCodeRowKey,
+    getValue: (item, field) => {
+      const edit = setCodePriceEdits[getSetCodeRowKey(item)]
+      if (field === 'retailPrice' && edit?.retailPrice !== undefined) return edit.retailPrice
+      if (field === 'purchasePrice' && edit?.purchasePrice !== undefined) return edit.purchasePrice
+      return (item as unknown as Record<string, unknown>)[field]
+    },
+  })
 
   // ---- 加载套装码数据 ----
 
@@ -167,6 +188,7 @@ export default function useContainerSetCode({
     setSetCodeModalRow(row)
     setSetCodeModalOpen(true)
     setSetCodeItems([])
+    resetSetCodeSort()
     void loadSetCodeItems(row)
   }
 
@@ -176,6 +198,7 @@ export default function useContainerSetCode({
     setSetCodeModalOpen(false)
     setSetCodeModalRow(null)
     setSetCodeItems([])
+    resetSetCodeSort()
     setSetCodePriceEdits({})
     setSetCodeManualPurchasePriceKeys(new Set())
     setSetCodeLoading(false)
@@ -259,18 +282,24 @@ export default function useContainerSetCode({
     {
       title: t('containers.setCode.itemNumber'),
       dataIndex: 'setItemNumber',
+      sorter: true,
+      sortOrder: sortOrderOf('setItemNumber'),
       width: 140,
       render: (value) => value || '--',
     },
     {
       title: t('containers.setCode.barcode'),
       dataIndex: 'barcode',
+      sorter: true,
+      sortOrder: sortOrderOf('barcode'),
       width: 170,
       render: (value) => value || '--',
     },
     {
       title: t('containers.setCode.retailPrice'),
       dataIndex: 'retailPrice',
+      sorter: true,
+      sortOrder: sortOrderOf('retailPrice'),
       width: 120,
       align: 'right',
       render: (_, item) => {
@@ -292,6 +321,8 @@ export default function useContainerSetCode({
     {
       title: t('containers.setCode.purchasePrice'),
       dataIndex: 'purchasePrice',
+      sorter: true,
+      sortOrder: sortOrderOf('purchasePrice'),
       width: 120,
       align: 'right',
       render: (_, item) => {
@@ -310,12 +341,14 @@ export default function useContainerSetCode({
         )
       },
     },
-  ], [canEditContainer, setCodePriceEdits, t])
+  ], [canEditContainer, setCodePriceEdits, sortOrderOf, t])
 
   return {
     setCodeModalOpen,
     setCodeModalRow,
     setCodeItems,
+    setCodeDisplayItems,
+    onSetCodeTableChange,
     setCodeLoading,
     setCodeSaving,
     setCodePriceEdits,
