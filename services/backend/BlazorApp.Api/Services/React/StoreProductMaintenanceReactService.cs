@@ -1770,6 +1770,9 @@ namespace BlazorApp.Api.Services.React
             catch (Exception ex)
             {
                 _logger.LogError(ex, "更新商品类型失败: {ProductCode}", productCode);
+                // 与本服务其他写入口一致：成本锁繁忙返回 BUSY，由控制器转 409 友好提示。
+                if (SetChildPurchasePriceMutationLock.TryResolveConflict(ex, out _))
+                    return BuildSetChildPurchasePriceBusyResponse<StoreProductTypeUpdateResultDto>();
                 return ApiResponse<StoreProductTypeUpdateResultDto>.Error(
                     ResolveSafeMutationFailureMessage(ex, "更新商品类型失败，请稍后重试")
                 );

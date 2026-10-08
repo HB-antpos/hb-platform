@@ -230,6 +230,43 @@ namespace BlazorApp.Api.Controllers.React
             );
         }
 
+        /// <summary>
+        /// 只认异常链上真实的套装子项成本锁异常；普通 SQL 1205/1222 仍归货柜锁冲突处理。
+        /// </summary>
+        private static bool IsSetChildPurchasePriceBusy(Exception exception)
+        {
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (current is SetChildPurchasePriceLockException)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 套装子项成本锁繁忙（服务端已自动重试仍未拿到）时返回 409 与可操作的提示，而不是 500。
+        /// </summary>
+        private IActionResult CreateSetChildPurchasePriceBusyResponse(
+            Exception exception,
+            string operation
+        )
+        {
+            Response.Headers.RetryAfter = "30";
+            _logger.LogWarning(exception, "{Operation}遇到套装子项成本锁繁忙", operation);
+            return StatusCode(
+                StatusCodes.Status409Conflict,
+                new
+                {
+                    success = false,
+                    code = SetChildPurchasePriceMutationLock.BusyErrorCode,
+                    message = $"{operation}未执行：相关商品成本正在被后台统计或其他操作更新，已自动重试仍未完成，请约 1 分钟后再试",
+                }
+            );
+        }
+
         private bool IsContainerDetailTokenRequired() =>
             HttpContext.RequestServices.GetRequiredService<IConfiguration>()
                 .GetValue<bool>("ContainerDetailConcurrency:RequireTokens");
@@ -414,6 +451,10 @@ namespace BlazorApp.Api.Controllers.React
                 {
                     return NotFound(new { success = false, message = "货柜不存在或更新失败" });
                 }
+            }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "更新货柜信息");
             }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
@@ -1047,6 +1088,10 @@ namespace BlazorApp.Api.Controllers.React
                     }
                 );
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "批量更新货柜明细");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "批量更新货柜明细");
@@ -1100,6 +1145,10 @@ namespace BlazorApp.Api.Controllers.React
                     }
                 );
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "批量更新货柜明细");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "批量更新货柜明细");
@@ -1136,6 +1185,10 @@ namespace BlazorApp.Api.Controllers.React
                         data = result,
                     }
                 );
+            }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "对齐国内商品编码");
             }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
@@ -1238,6 +1291,10 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return CreateBatchPreviewConflictResponse(ex);
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "按筛选范围批量调浮率");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "按筛选范围批量调浮率");
@@ -1291,6 +1348,10 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return CreateBatchPreviewConflictResponse(ex);
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "按筛选范围批量改价");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "按筛选范围批量改价");
@@ -1329,6 +1390,10 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return CreateBatchPreviewConflictResponse(ex);
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "按筛选范围批量上下架");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "按筛选范围批量上下架");
@@ -1363,6 +1428,10 @@ namespace BlazorApp.Api.Controllers.React
             catch (ContainerDetailBatchPreviewConflictException ex)
             {
                 return CreateBatchPreviewConflictResponse(ex);
+            }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "按筛选范围批量分类");
             }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
@@ -1413,6 +1482,10 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return CreateBatchPreviewConflictResponse(ex);
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "按筛选范围重算成本");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "按筛选范围重算成本");
@@ -1462,6 +1535,10 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return CreateBatchPreviewConflictResponse(ex);
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "按筛选范围回填上次价格");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "按筛选范围回填上次价格");
@@ -1509,6 +1586,10 @@ namespace BlazorApp.Api.Controllers.React
                     }
                 );
             }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "批量删除货柜明细");
+            }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
                 return CreateContainerMutationConflictResponse(ex, "批量删除货柜明细");
@@ -1540,6 +1621,10 @@ namespace BlazorApp.Api.Controllers.React
             catch (ContainerDetailBatchPreviewConflictException ex)
             {
                 return Conflict(new { success = false, code = ContainerDetailBatchPreviewConflictException.ErrorCode, message = ex.Message });
+            }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "批量删除货柜明细");
             }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
@@ -1613,6 +1698,10 @@ namespace BlazorApp.Api.Controllers.React
                         data = new { containerGuid },
                     }
                 );
+            }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "创建货柜");
             }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {
@@ -1719,6 +1808,10 @@ namespace BlazorApp.Api.Controllers.React
                         message = "分配完成",
                     }
                 );
+            }
+            catch (Exception ex) when (IsSetChildPurchasePriceBusy(ex))
+            {
+                return CreateSetChildPurchasePriceBusyResponse(ex, "批量分配商品到货柜");
             }
             catch (Exception ex) when (ContainerMutationLock.TryResolveConflict(ex, out _))
             {

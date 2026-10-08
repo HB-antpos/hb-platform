@@ -363,7 +363,7 @@ namespace BlazorApp.Api.Controllers.React
                 access.ActorLabel,
                 access.StoreCodes
             );
-            return Ok(result);
+            return BuildMutationResult(result);
         }
 
         [HttpPut("multi-codes/{uuid}")]

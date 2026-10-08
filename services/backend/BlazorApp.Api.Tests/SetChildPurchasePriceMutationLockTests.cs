@@ -73,6 +73,60 @@ public sealed class SetChildPurchasePriceMutationLockTests
     }
 
     [Fact]
+    public void ShouldRetryLockTimeout_只重试业务锁等待超时且受次数上限约束()
+    {
+        var timeout = new SetChildPurchasePriceLockException("HB:SetChildPurchasePrice:Product:A", -1);
+
+        Assert.True(SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(timeout, 0, 4));
+        Assert.True(SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(timeout, 3, 4));
+        Assert.False(SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(timeout, 4, 4));
+        // 服务层或 ORM 再包一层时仍应识别为可重试的锁超时。
+        Assert.True(
+            SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(
+                new InvalidOperationException("包装", timeout),
+                0,
+                4
+            )
+        );
+        // 死锁交给 1205 重试、取消保持原语义，都不能走锁超时重试。
+        Assert.False(
+            SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(
+                new SetChildPurchasePriceLockException("deadlock", -3),
+                0,
+                4
+            )
+        );
+        Assert.False(
+            SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(
+                new SetChildPurchasePriceLockException("cancelled", -2),
+                0,
+                4
+            )
+        );
+        Assert.False(
+            SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(
+                new InvalidOperationException("普通业务错误"),
+                0,
+                4
+            )
+        );
+        Assert.False(SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(null, 0, 4));
+    }
+
+    [Fact]
+    public void ScopedBatchSetChildLockRetryDelays_总等待约一分钟且远低于网关超时()
+    {
+        var delays = ContainerReactService.ScopedBatchSetChildLockRetryDelays;
+        // 每次尝试最多等锁 10 秒：总时长 = (重试次数 + 1) × 10 秒 + 退避间隔之和。
+        var worstCase = TimeSpan.FromSeconds(10 * (delays.Length + 1))
+            + TimeSpan.FromTicks(delays.Sum(delay => delay.Ticks));
+
+        Assert.NotEmpty(delays);
+        Assert.All(delays, delay => Assert.True(delay > TimeSpan.Zero));
+        Assert.InRange(worstCase, TimeSpan.FromSeconds(45), TimeSpan.FromSeconds(90));
+    }
+
+    [Fact]
     public void CanContinuePartialLockFailure_仅安全的锁请求失败可在原事务继续()
     {
         Assert.True(

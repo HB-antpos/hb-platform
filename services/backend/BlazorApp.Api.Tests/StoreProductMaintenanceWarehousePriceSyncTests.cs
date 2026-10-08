@@ -210,6 +210,48 @@ public sealed class StoreProductMaintenanceWarehousePriceSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task Controller_更新商品类型遇成本锁繁忙返回409而非200失败()
+    {
+        // 移动端「商品查询」切换类型：与多码/条码等写入口一致，BUSY 必须走 409，客户端才能给出可重试提示。
+        var service = new Mock<IStoreProductMaintenanceReactService>(MockBehavior.Strict);
+        service.Setup(value => value.UpdateProductTypeAsync(
+                "P-1",
+                It.IsAny<UpdateStoreProductTypeDto>(),
+                It.IsAny<string>(),
+                It.IsAny<List<string>?>()
+            ))
+            .ReturnsAsync(ApiResponse<StoreProductTypeUpdateResultDto>.Error(
+                "套装商品正在被其他操作修改，请稍后重试",
+                SetChildPurchasePriceMutationLock.BusyErrorCode
+            ));
+        var controller = new ReactStoreProductMaintenanceController(
+            service.Object, Mock.Of<IDeviceRegistrationService>(), Mock.Of<IMapper>(),
+            CreateSqlSugarContext(_db), NullLogger<ReactStoreProductMaintenanceController>.Instance,
+            CreateSuccessfulAuthorizationService()
+        )
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                    {
+                        new Claim(ClaimTypes.Name, "super-admin"),
+                        new Claim(ClaimTypes.Role, "SuperAdmin"),
+                    }, "test")),
+                },
+            },
+        };
+
+        var result = await controller.UpdateProductType("P-1", new UpdateStoreProductTypeDto());
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<StoreProductTypeUpdateResultDto>>(conflict.Value);
+        Assert.Equal(SetChildPurchasePriceMutationLock.BusyErrorCode, body.ErrorCode);
+        service.VerifyAll();
+    }
+
+    [Fact]
     public async Task Controller_登录编辑缺少StoreProductsEdit权限时拒绝且不调用服务()
     {
         var service = new Mock<IStoreProductMaintenanceReactService>(MockBehavior.Strict);
