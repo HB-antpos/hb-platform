@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: PICK_COLORS.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24, backgroundColor: PICK_COLORS.background },
   centerText: { textAlign: "center", color: PICK_COLORS.ink },
-  content: { padding: 12, paddingBottom: 88, gap: 10 },
+  content: { padding: 12, gap: 10 },
   notice: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: PICK_COLORS.infoBg, borderWidth: 1, borderColor: PICK_COLORS.infoBorder, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   noticeText: { flex: 1, fontSize: 13, lineHeight: 18, color: PICK_COLORS.infoText },
   noticeWarning: { backgroundColor: PICK_COLORS.warningBg, borderColor: PICK_COLORS.warningBorder },
@@ -403,7 +403,9 @@ const styles = StyleSheet.create({
   badgeShort: { backgroundColor: PICK_COLORS.dangerBg, borderColor: PICK_COLORS.dangerBorder, color: PICK_COLORS.danger },
   badgeOver: { backgroundColor: PICK_COLORS.warningBg, borderColor: PICK_COLORS.warningBorder, color: PICK_COLORS.warning },
   note: { fontSize: 12, lineHeight: 18, color: PICK_COLORS.textSecondary },
-  footer: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: PICK_COLORS.white, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: PICK_COLORS.outlineMuted },
+  // 底栏必须留在文档流里：Android edge-to-edge 下 SafeAreaView 靠 padding 避开系统导航栏，
+  // position: absolute 的子节点不吃父级 padding，会贴到屏幕最底被导航栏盖住、点不到。
+  footer: { flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: PICK_COLORS.white, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: PICK_COLORS.outlineMuted },
   secondaryButton: { flex: 1, height: 48, borderRadius: 8, borderWidth: 1, borderColor: PICK_COLORS.outline, backgroundColor: PICK_COLORS.white, alignItems: "center", justifyContent: "center" },
   secondaryText: { fontSize: 15, fontWeight: "600", color: PICK_COLORS.ink },
   primaryButton: { flex: 1.6, height: 48, borderRadius: 8, backgroundColor: PICK_COLORS.ink, alignItems: "center", justifyContent: "center" },
