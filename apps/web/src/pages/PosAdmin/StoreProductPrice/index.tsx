@@ -25,27 +25,17 @@ import PageContainer from '../../../components/PageContainer'
 import { getActiveLocalSuppliers } from '../../../services/localSupplierService'
 import {
   batchUpdateStoreRetailPrices,
-  getStorePriceTransferJob,
   getStoreProductPriceGrid,
-  startStorePriceTransferJob,
   syncToOtherStores,
 } from '../../../services/storeProductPriceService'
-import {
-  createHqSyncJobPoller,
-  HqProductSyncPollingCancelledError,
-  HqProductSyncPollingTimeoutError,
-} from '../../../services/productHqSyncPolling'
 import { getActiveStores } from '../../../services/storeService'
 import type {
   BatchUpdateStoreRetailPriceDto,
   CopyProgressDto,
   StoreProductPriceQueryDto,
-  StorePriceTransferJobDto,
-  StorePriceTransferRequest,
-  StorePriceTransferResult,
   SyncToOtherStoresDto,
 } from '../../../types/storeProductPrice'
-import { CopyOutlined, PrinterOutlined, SwapOutlined } from '@ant-design/icons'
+import { CopyOutlined, PrinterOutlined } from '@ant-design/icons'
 import { copyTextToClipboard } from '../../../utils/clipboard'
 import { discountRateToDecimal, formatDiscountRate } from '../../../utils/discountRate'
 import { useAuthStore } from '../../../store/auth'
@@ -72,36 +62,11 @@ import multiStoreMessagesZh from './multiStoreMessages.zh.json'
 registerPageMessages({ zh: multiStoreMessagesZh, en: multiStoreMessagesEn })
 
 type DataType = StoreProductPriceRow
-const PRICE_TRANSFER_POLL_TIMEOUT_MS = 45 * 60 * 1000
 
 const productTypeMap: Record<number, { labelKey: string; color: string }> = {
   0: { labelKey: 'posAdmin.productPrice.normalProduct', color: 'default' },
   1: { labelKey: 'posAdmin.productPrice.weighProduct', color: 'blue' },
   2: { labelKey: 'posAdmin.productPrice.multiCodeProductType', color: 'purple' },
-}
-
-function isFormValidationError(error: unknown): error is { errorFields: unknown[] } {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    Array.isArray((error as { errorFields?: unknown }).errorFields)
-  )
-}
-
-function getPriceTransferErrors(job: StorePriceTransferJobDto) {
-  return Array.from(new Set([...(job.errors ?? []), ...(job.result?.errors ?? [])]))
-}
-
-function getPriceTransferHandledCount(result?: StorePriceTransferResult) {
-  return result ? result.totalProcessed + result.skippedCount : 0
-}
-
-function getPriceTransferProgressPercent(job: StorePriceTransferJobDto) {
-  if (job.status === 'Succeeded' || job.status === 'Failed') return 100
-  const totalCount = job.result?.totalCount ?? 0
-  if (totalCount <= 0) return 0
-  const percent = Math.floor((getPriceTransferHandledCount(job.result) / totalCount) * 100)
-  return Math.max(0, Math.min(99, percent))
 }
 
 export default function StoreProductPricePage() {
@@ -137,22 +102,11 @@ export default function StoreProductPricePage() {
   const [copying, setCopying] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
 
-  const [priceTransferModalOpen, setPriceTransferModalOpen] = useState(false)
-  const [priceTransferForm] = Form.useForm()
-  const [priceTransferSubmitting, setPriceTransferSubmitting] = useState(false)
-  const [priceTransferJob, setPriceTransferJob] = useState<StorePriceTransferJobDto | null>(null)
-  const priceTransferPollerRef = useRef<{ stop: () => void } | null>(null)
-
   // 促销海报弹窗：打开时对「分店 + 选中商品」取快照，关闭动画结束后置空卸载
   const [promoPosterSession, setPromoPosterSession] = useState<{ storeCode: string; products: PromoPosterProduct[] } | null>(null)
 
   // 只采用最后一次查询的结果：多选分店、翻页等连续变化时，晚到的旧响应不会覆盖新结果
   const [loadGate] = useState(createLatestRequestGate)
-
-  const stopPriceTransferPolling = useCallback(() => {
-    priceTransferPollerRef.current?.stop()
-    priceTransferPollerRef.current = null
-  }, [])
 
   const loadData = useCallback(async () => {
     const seq = loadGate.begin()
@@ -246,10 +200,6 @@ export default function StoreProductPricePage() {
   useEffect(() => {
     loadData()
   }, [loadData])
-
-  useEffect(() => () => {
-    stopPriceTransferPolling()
-  }, [stopPriceTransferPolling])
 
   const onTableChange = (pagination: any, _filters: any, sorter: any) => {
     if (sorter?.field) {
@@ -457,113 +407,6 @@ export default function StoreProductPricePage() {
     })
   }
 
-  const openPriceTransferModal = () => {
-    stopPriceTransferPolling()
-    priceTransferForm.resetFields()
-    priceTransferForm.setFieldsValue({
-      // HQ → 本地方向已于 2026-09-29 停用（后端返回 410），这里只保留本地 → HQ。
-      direction: 'LocalToHq',
-      sourceStoreCode: undefined,
-      targetStoreCode: selectedStoreCodes.length === 1 ? selectedStoreCodes[0] : undefined,
-      syncRetailPrices: true,
-      syncMultiCodePrices: true,
-      syncPurchasePrice: true,
-      syncRetailPrice: true,
-      syncDiscountRate: false,
-      syncIsAutoPricing: false,
-      syncIsSpecialProduct: false,
-    })
-    setPriceTransferJob(null)
-    setPriceTransferSubmitting(false)
-    setPriceTransferModalOpen(true)
-  }
-
-  const handlePriceTransferCancel = () => {
-    stopPriceTransferPolling()
-    setPriceTransferSubmitting(false)
-    setPriceTransferModalOpen(false)
-  }
-
-  const handleStorePriceTransfer = async () => {
-    if (priceTransferSubmitting) return
-    let activePoller: { stop: () => void } | null = null
-
-    try {
-      const values = await priceTransferForm.validateFields()
-      const hasSelectedTable = !!values.syncRetailPrices || !!values.syncMultiCodePrices
-      const hasSelectedField = !!values.syncPurchasePrice || !!values.syncRetailPrice || !!values.syncDiscountRate || !!values.syncIsAutoPricing || !!values.syncIsSpecialProduct
-
-      if (!hasSelectedTable) {
-        message.warning(t('posAdmin.productPrice.selectSyncTable', '请至少选择一个同步表'))
-        return
-      }
-
-      if (!hasSelectedField) {
-        message.warning(t('posAdmin.productPrice.selectSyncField', '请至少选择一个同步字段'))
-        return
-      }
-
-      const dto: StorePriceTransferRequest = {
-        direction: values.direction,
-        sourceStoreCode: values.sourceStoreCode,
-        targetStoreCode: values.targetStoreCode,
-        syncRetailPrices: !!values.syncRetailPrices,
-        syncMultiCodePrices: !!values.syncMultiCodePrices,
-        syncPurchasePrice: !!values.syncPurchasePrice,
-        syncRetailPrice: !!values.syncRetailPrice,
-        syncDiscountRate: !!values.syncDiscountRate,
-        syncIsAutoPricing: !!values.syncIsAutoPricing,
-        syncIsSpecialProduct: !!values.syncIsSpecialProduct,
-      }
-
-      setPriceTransferSubmitting(true)
-      const job = await startStorePriceTransferJob(dto)
-      setPriceTransferJob(job)
-      if (job.isDuplicateRequest) {
-        message.info(t('posAdmin.productPrice.priceTransferDuplicate', '目标分店同步任务正在执行，已切换到已有任务'))
-      }
-
-      const poller = createHqSyncJobPoller<StorePriceTransferJobDto>({
-        jobId: job.jobId,
-        getJob: async (jobId) => {
-          const nextJob = await getStorePriceTransferJob(jobId)
-          setPriceTransferJob(nextJob)
-          return nextJob
-        },
-        timeoutMs: PRICE_TRANSFER_POLL_TIMEOUT_MS,
-      })
-      activePoller = poller
-      priceTransferPollerRef.current = poller
-      const completedJob = await poller.promise
-      setPriceTransferJob(completedJob)
-
-      if (completedJob.status === 'Failed') {
-        const errorMessage = completedJob.message || completedJob.errors?.[0] || t('posAdmin.productPrice.priceTransferFailed', '分店价格同步失败')
-        message.error(errorMessage)
-        return
-      }
-
-      const totalProcessed = getPriceTransferHandledCount(completedJob.result)
-      message.success(t('posAdmin.productPrice.priceTransferComplete', '分店价格同步完成，处理 {{count}} 条', { count: totalProcessed }))
-      if (dto.targetStoreCode && selectedStoreCodes.includes(dto.targetStoreCode)) {
-        await loadData()
-      }
-    } catch (error) {
-      if (isFormValidationError(error)) return
-      if (error instanceof HqProductSyncPollingCancelledError) return
-      if (error instanceof HqProductSyncPollingTimeoutError) {
-        message.error(t('posAdmin.productPrice.priceTransferTimeout', '分店价格同步任务轮询超时，任务可能仍在后台执行，请稍后刷新或重新查询'))
-        return
-      }
-      message.error(error instanceof Error ? error.message : t('posAdmin.productPrice.priceTransferFailed', '分店价格同步失败'))
-    } finally {
-      if (priceTransferPollerRef.current === activePoller) {
-        priceTransferPollerRef.current = null
-      }
-      setPriceTransferSubmitting(false)
-    }
-  }
-
   // 表头排序箭头受控于实际查询的排序字段（切到多分店清掉价格排序时箭头同步消失）
   const sortOrderFor = useCallback(
     (field: string) => (sortField === field ? sortOrder ?? null : null),
@@ -758,7 +601,6 @@ export default function StoreProductPricePage() {
   ], [t, isMultiStore, formatStoreName, sortOrderFor])
 
   const selectedCount = selectedRowKeys.length
-  const priceTransferErrors = priceTransferJob ? getPriceTransferErrors(priceTransferJob) : []
 
   return (
     <PageContainer
@@ -842,11 +684,6 @@ export default function StoreProductPricePage() {
             </Button>
             {access.isAdmin && (
               <Button onClick={openCopyModal}>{t('posAdmin.productPrice.copyStoreData', '复制分店数据')}</Button>
-            )}
-            {access.isAdmin && (
-              <Button icon={<SwapOutlined />} onClick={openPriceTransferModal}>
-                {t('posAdmin.productPrice.priceTransfer', 'HQ/本地价格同步')}
-              </Button>
             )}
           </Space>
         </div>
@@ -1091,115 +928,6 @@ export default function StoreProductPricePage() {
               <div style={{ color: '#666', fontSize: 12 }}>
                 {t('posAdmin.productPrice.copyProgress', '零售价已复制：{{retailCount}} | 多码已复制：{{multiCodeCount}}', { retailCount: copyProgress.retailPriceCopied, multiCodeCount: copyProgress.multiCodeCopied })}
               </div>
-            </Space>
-          </Card>
-        )}
-      </Modal>
-
-      <Modal
-        open={priceTransferModalOpen}
-        title={t('posAdmin.productPrice.priceTransferTitle', 'HQ/本地价格同步')}
-        onCancel={handlePriceTransferCancel}
-        onOk={handleStorePriceTransfer}
-        width={650}
-        confirmLoading={priceTransferSubmitting}
-        forceRender
-      >
-        <Form form={priceTransferForm} layout="vertical" disabled={priceTransferSubmitting}>
-          <Form.Item name="direction" label={t('posAdmin.productPrice.transferDirection', '同步方向')} rules={[{ required: true }]}>
-            <Select
-              options={[
-                { value: 'LocalToHq', label: t('posAdmin.productPrice.localToHq', '本地 -> HQ') },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="sourceStoreCode" label={t('posAdmin.productPrice.sourceStore', '源分店')} rules={[{ required: true, message: t('posAdmin.productPrice.selectSourceStore', '请选择源分店') }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={storeOptions}
-              placeholder={t('posAdmin.productPrice.selectSourceStore', '请选择源分店')}
-            />
-          </Form.Item>
-          <Form.Item name="targetStoreCode" label={t('posAdmin.productPrice.targetStore', '目标分店')} rules={[{ required: true, message: t('posAdmin.productPrice.selectTargetStore', '请选择目标分店') }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={storeOptions}
-              placeholder={t('posAdmin.productPrice.selectTargetStore', '请选择目标分店')}
-            />
-          </Form.Item>
-          <Form.Item label={t('posAdmin.productPrice.syncTables', '同步表')}>
-            <Space wrap>
-              <Form.Item name="syncRetailPrices" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.storeRetailPriceTable', '分店零售价表')}</Checkbox>
-              </Form.Item>
-              <Form.Item name="syncMultiCodePrices" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.storeMultiCodePriceTable', '分店多码表')}</Checkbox>
-              </Form.Item>
-            </Space>
-          </Form.Item>
-          <Form.Item label={t('posAdmin.productPrice.syncFields', '同步字段')}>
-            <Space wrap>
-              <Form.Item name="syncPurchasePrice" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.purchasePrice', '采购价')}</Checkbox>
-              </Form.Item>
-              <Form.Item name="syncRetailPrice" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.retailPrice', '零售价')}</Checkbox>
-              </Form.Item>
-              <Form.Item name="syncDiscountRate" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.discountRate', '折扣率')}</Checkbox>
-              </Form.Item>
-              <Form.Item name="syncIsAutoPricing" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.autoPricing', '自动定价')}</Checkbox>
-              </Form.Item>
-              <Form.Item name="syncIsSpecialProduct" valuePropName="checked" noStyle>
-                <Checkbox>{t('posAdmin.productPrice.specialProduct', '特殊商品')}</Checkbox>
-              </Form.Item>
-            </Space>
-          </Form.Item>
-        </Form>
-
-        {priceTransferJob && (
-          <Card size="small" style={{ marginTop: 16 }}>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Space>
-                <Tag color={priceTransferJob.status === 'Succeeded' ? 'success' : priceTransferJob.status === 'Failed' ? 'error' : 'processing'}>
-                  {priceTransferJob.status}
-                </Tag>
-                <span>{priceTransferJob.message || t('posAdmin.productPrice.priceTransferRunning', '分店价格同步任务处理中')}</span>
-              </Space>
-              <Progress
-                percent={getPriceTransferProgressPercent(priceTransferJob)}
-                status={priceTransferJob.status === 'Failed' ? 'exception' : priceTransferJob.status === 'Succeeded' ? 'success' : 'active'}
-              />
-              {priceTransferJob.result && (
-                <div style={{ color: '#666', fontSize: 12 }}>
-                  <div>
-                    {t('posAdmin.productPrice.processedProgress', '已处理')}：
-                    {getPriceTransferHandledCount(priceTransferJob.result)}
-                    {priceTransferJob.result.totalCount > 0 ? ` / ${priceTransferJob.result.totalCount}` : ''}，
-                    {t('posAdmin.productPrice.added', '新增')}：{priceTransferJob.result.insertedCount}，
-                    {t('posAdmin.productPrice.updated', '更新')}：{priceTransferJob.result.updatedCount}，
-                    {t('posAdmin.productPrice.skipped', '跳过')}：{priceTransferJob.result.skippedCount}
-                  </div>
-                  <div>
-                    {t('posAdmin.productPrice.storeRetailPriceTable', '分店零售价表')}：
-                    {priceTransferJob.result.retailPriceInserted}/{priceTransferJob.result.retailPriceUpdated}/{priceTransferJob.result.retailPriceSkipped}
-                  </div>
-                  <div>
-                    {t('posAdmin.productPrice.storeMultiCodePriceTable', '分店多码表')}：
-                    {priceTransferJob.result.multiCodeInserted}/{priceTransferJob.result.multiCodeUpdated}/{priceTransferJob.result.multiCodeSkipped}
-                  </div>
-                </div>
-              )}
-              {priceTransferErrors.length > 0 ? (
-                <div style={{ color: '#cf1322', fontSize: 12 }}>
-                  {priceTransferErrors.map((error, index) => (
-                    <div key={`${error}-${index}`}>{error}</div>
-                  ))}
-                </div>
-              ) : null}
             </Space>
           </Card>
         )}

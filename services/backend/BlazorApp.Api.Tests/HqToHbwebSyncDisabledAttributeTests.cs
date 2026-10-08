@@ -179,8 +179,9 @@ public class HqToHbwebSyncDisabledAttributeTests
 
     [Theory]
     [InlineData("{\"direction\":\"HqToLocal\",\"sourceStoreCode\":\"1001\",\"targetStoreCode\":\"1002\"}")]
+    [InlineData("{\"direction\":\"LocalToHq\",\"sourceStoreCode\":\"1001\",\"targetStoreCode\":\"1002\"}")]
     [InlineData("{\"sourceStoreCode\":\"1001\",\"targetStoreCode\":\"1002\"}")]
-    public async Task Mvc管道中分店价格同步的HQ到本地方向返回410(string body)
+    public async Task Mvc管道中分店价格同步任何方向都返回410(string body)
     {
         var fixture = new PipelineFixture();
         using var server = fixture.CreateServer();
@@ -195,45 +196,9 @@ public class HqToHbwebSyncDisabledAttributeTests
         fixture.StorePriceTransferJobService.VerifyNoOtherCalls();
     }
 
-    [Fact]
-    public async Task Mvc管道中分店价格同步的本地到HQ方向仍然提交任务()
-    {
-        var fixture = new PipelineFixture();
-        fixture.StorePriceTransferJobService
-            .Setup(service => service.StartJobAsync(
-                It.Is<StorePriceTransferRequest>(request =>
-                    request.Direction == StorePriceTransferDirectionConstants.LocalToHq
-                ),
-                "tester",
-                It.IsAny<CancellationToken>()
-            ))
-            .ReturnsAsync(new StorePriceTransferJobDto { JobId = "job-001", Message = "已提交" });
-        using var server = fixture.CreateServer();
-        using var client = server.CreateClient();
-
-        using var response = await client.PostAsync(
-            "/api/react/v1/store-product-prices/store-price-transfer-jobs",
-            new StringContent(
-                "{\"direction\":\"LocalToHq\",\"sourceStoreCode\":\"1001\",\"targetStoreCode\":\"1002\"}",
-                Encoding.UTF8,
-                "application/json"
-            )
-        );
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        fixture.StorePriceTransferJobService.Verify(
-            service => service.StartJobAsync(
-                It.IsAny<StorePriceTransferRequest>(),
-                "tester",
-                It.IsAny<CancellationToken>()
-            ),
-            Times.Once
-        );
-    }
-
     private static HqToHbwebSyncDisabledAttribute CreateStorePriceTransferAttribute()
     {
-        // 与 ReactStoreProductPricesController.StartStorePriceTransferJob 上的配置保持一致
+        // 方向放行是过滤器的通用能力（分店价格同步已整体取消，控制器不再使用），此处仅用于验证该能力本身
         return new HqToHbwebSyncDisabledAttribute
         {
             ArgumentName = "request",
