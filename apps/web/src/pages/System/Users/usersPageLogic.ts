@@ -1,4 +1,8 @@
 import dayjs from 'dayjs'
+import type { Key } from 'react'
+
+import type { UserDto } from '../../../types/user'
+
 import { parseUserUtcTimestamp } from './time'
 
 export type UserStatusFilter = 'all' | 'active' | 'inactive'
@@ -118,4 +122,80 @@ export function diffStoreAssignment({
     baselineManageableSet.has(storeGuid) !== draftManageableSet.has(storeGuid),
   )
   return { added, removed, manageableChanged }
+}
+
+/** 一次批量操作最多勾选的用户数：后端启停用在单个可串行化事务里逐个校验，过多会长时间持锁。 */
+export const USER_BATCH_SELECTION_LIMIT = 100
+
+/**
+ * 合并跨页勾选：antd 在 preserveSelectedRowKeys 下只回传当前页可见的行对象，
+ * 其他页已勾选的行需要从上一次的选择里补回，才能继续按角色、状态做批量判断。
+ */
+export function mergeSelectedUsers(
+  previous: UserDto[],
+  selectedKeys: readonly Key[],
+  visibleRows: readonly (UserDto | undefined)[],
+): UserDto[] {
+  const byGuid = new Map(previous.map((user) => [user.userGUID, user]))
+  for (const row of visibleRows) {
+    if (row) byGuid.set(row.userGUID, row)
+  }
+  return selectedKeys
+    .map((key) => byGuid.get(String(key)))
+    .filter((user): user is UserDto => !!user)
+}
+
+export interface BatchStatusPlan {
+  targets: UserDto[]
+  /** 当前登录账号：不允许批量停用 / 启用自己，避免把自己锁在系统外（后端同样拒绝）。 */
+  skippedSelf: UserDto[]
+  /** 已经处于目标状态的账号，无需提交。 */
+  skippedUnchanged: UserDto[]
+  /** 范围受限的店长无权编辑的账号（例如持有高权限角色）。 */
+  skippedOutOfScope: UserDto[]
+}
+
+export function planBatchStatusChange(
+  users: readonly UserDto[],
+  nextActive: boolean,
+  currentUserGuid: string | undefined,
+  isOutOfScope: (user: UserDto) => boolean = () => false,
+): BatchStatusPlan {
+  const plan: BatchStatusPlan = { targets: [], skippedSelf: [], skippedUnchanged: [], skippedOutOfScope: [] }
+  for (const user of users) {
+    if (currentUserGuid && user.userGUID === currentUserGuid) plan.skippedSelf.push(user)
+    else if (user.isActive === nextActive) plan.skippedUnchanged.push(user)
+    else if (isOutOfScope(user)) plan.skippedOutOfScope.push(user)
+    else plan.targets.push(user)
+  }
+  return plan
+}
+
+/** 与后端 Permissions.StoreManagerRoleNames 保持一致（大小写不敏感）。 */
+const STORE_MANAGER_ROLE_NAMES = ['storemanager', '店长', '经理']
+
+/** 店长角色由「可管理分店」自动派生，后端拒绝直接在角色上增删成员，批量角色操作不提供它。 */
+export function isDerivedStoreManagerRoleName(roleName: string | null | undefined): boolean {
+  const normalized = roleName?.trim().toLowerCase()
+  return !!normalized && STORE_MANAGER_ROLE_NAMES.includes(normalized)
+}
+
+export type BatchRoleMode = 'add' | 'remove'
+
+export interface BatchRolePlan {
+  targets: UserDto[]
+  /** 添加时已持有该角色、移除时本就没有该角色的账号。 */
+  skipped: UserDto[]
+}
+
+/** 按列表行上的角色名判断是否已持有角色；角色名比较大小写不敏感，与后端一致。 */
+export function planBatchRoleChange(users: readonly UserDto[], roleName: string, mode: BatchRoleMode): BatchRolePlan {
+  const normalized = roleName.trim().toLowerCase()
+  const plan: BatchRolePlan = { targets: [], skipped: [] }
+  for (const user of users) {
+    const hasRole = (user.roleNames ?? []).some((name) => name.trim().toLowerCase() === normalized)
+    if (hasRole === (mode === 'add')) plan.skipped.push(user)
+    else plan.targets.push(user)
+  }
+  return plan
 }

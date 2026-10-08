@@ -8,9 +8,14 @@ import {
   getUserDisplayName,
   getUserInitial,
   getUserSecondaryLine,
+  isDerivedStoreManagerRoleName,
+  mergeSelectedUsers,
+  planBatchRoleChange,
+  planBatchStatusChange,
   splitVisibleStores,
   toIsActiveQuery,
 } from './usersPageLogic'
+import type { UserDto } from '../../../types/user'
 
 assert.equal(toIsActiveQuery('all'), undefined, '「全部」不应向后端传 isActive')
 assert.equal(toIsActiveQuery('active'), true, '「启用」应查询 isActive=true')
@@ -104,3 +109,52 @@ assert.deepEqual(
   { added: ['s3'], removed: [], manageableChanged: ['s1', 's2'] },
   '新增分店的可管理状态随新增保存，不重复计入可管理变更',
 )
+
+const batchUser = (userGUID: string, isActive: boolean, roleNames: string[] = []): UserDto => ({
+  userGUID,
+  username: userGUID,
+  email: `${userGUID}@example.test`,
+  isActive,
+  createdAt: '2026-10-01T00:00:00Z',
+  updatedAt: '2026-10-01T00:00:00Z',
+  roleNames,
+  storeNames: [],
+})
+
+// 跨页勾选：其他页的行对象从上一次选择补回，取消勾选的行被丢弃，顺序跟随 keys。
+{
+  const a = batchUser('a', true)
+  const b = batchUser('b', true)
+  const c = batchUser('c', false)
+  const merged = mergeSelectedUsers([a, b], ['a', 'c'], [undefined, c])
+  assert.deepEqual(merged.map((user) => user.userGUID), ['a', 'c'], '保留跨页的 a，加入本页的 c，去掉已取消的 b')
+  const refreshed = { ...a, isActive: false }
+  assert.equal(mergeSelectedUsers([a], ['a'], [refreshed])[0].isActive, false, '本页回传的新行对象覆盖旧快照')
+}
+
+// 批量启停用：跳过自己、已是目标状态、范围外账号。
+{
+  const users = [batchUser('me', true), batchUser('on', true), batchUser('off', false), batchUser('boss', true)]
+  const plan = planBatchStatusChange(users, false, 'me', (user) => user.userGUID === 'boss')
+  assert.deepEqual(plan.targets.map((user) => user.userGUID), ['on'])
+  assert.deepEqual(plan.skippedSelf.map((user) => user.userGUID), ['me'])
+  assert.deepEqual(plan.skippedUnchanged.map((user) => user.userGUID), ['off'])
+  assert.deepEqual(plan.skippedOutOfScope.map((user) => user.userGUID), ['boss'])
+  assert.deepEqual(
+    planBatchStatusChange(users, true, 'me').targets.map((user) => user.userGUID),
+    ['off'],
+    '批量启用只提交当前停用的账号',
+  )
+}
+
+// 批量角色：添加跳过已持有者，移除跳过未持有者，角色名大小写不敏感。
+{
+  const users = [batchUser('x', true, ['Staff']), batchUser('y', true, ['staff ', 'Admin']), batchUser('z', true, [])]
+  assert.deepEqual(planBatchRoleChange(users, 'Staff', 'add').targets.map((user) => user.userGUID), ['z'])
+  assert.deepEqual(planBatchRoleChange(users, 'STAFF', 'remove').targets.map((user) => user.userGUID), ['x', 'y'])
+  assert.deepEqual(planBatchRoleChange(users, 'Staff', 'remove').skipped.map((user) => user.userGUID), ['z'])
+}
+
+assert.equal(isDerivedStoreManagerRoleName('StoreManager'), true)
+assert.equal(isDerivedStoreManagerRoleName('店长'), true)
+assert.equal(isDerivedStoreManagerRoleName('WarehouseManager'), false, '仓库经理可以批量增删')
