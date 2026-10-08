@@ -979,14 +979,46 @@ async function run() {
     [null, null, null, null, null],
     "审核模式初始没有任何整组填报",
   );
-  const christmasOptions = getSeasonalCardOptionsForType(seasonalCatalog, 1);
+  // 开放窗口：2026-07-16 按真实规则没有开放节日，审核 mock 会把下一个节日（父亲节）提前开放。
+  assert.equal(emptyOverview.today, "2026-07-16");
+  const openHoliday = emptyOverview.holidays.find((holiday) => holiday.isOpen);
+  assert.ok(openHoliday, "审核模式任何时候都至少有一个开放中的节日");
+  assert.equal(openHoliday.cardType, 5);
+  assert.equal(openHoliday.seasonYear, 2026);
+  assert.equal(openHoliday.opensOn, "2026-07-16");
+  assert.equal(openHoliday.closesOn, "2026-08-13");
+  const closedHoliday = emptyOverview.holidays.find((holiday) => !holiday.isOpen)!;
+  assert.equal(closedHoliday.cardType, 1);
+  assert.equal(closedHoliday.opensOn, "2026-12-25", "未开放的节日带下一次开放日期");
+  const christmasOptions = getSeasonalCardOptionsForType(seasonalCatalog, openHoliday.cardType);
   assert.equal(christmasOptions.length, 4, "审核目录每个节日 4 个价格");
   const seasonalCombo = {
     storeCode: "REV001",
-    seasonYear: 2026,
-    cardType: 1 as const,
+    seasonYear: openHoliday.seasonYear!,
+    cardType: openHoliday.cardType,
     localSupplierCode: reviewSupplier.supplierCode,
   };
+  const closedResponse = await request(
+    "POST",
+    "/react/v1/seasonal-card-remaining/submissions/batch",
+    buildSeasonalCardBatchRequest(
+      buildSeasonalCardBatchPayload(
+        { ...seasonalCombo, cardType: closedHoliday.cardType },
+        createSeasonalCardDraft(
+          "review-closed",
+          getSeasonalCardOptionsForType(seasonalCatalog, closedHoliday.cardType),
+          null,
+        ),
+        getSeasonalCardOptionsForType(seasonalCatalog, closedHoliday.cardType),
+      ),
+    ),
+  );
+  assert.equal(closedResponse.success, false);
+  assert.equal(
+    closedResponse.errorCode,
+    "SEASONAL_CARD_WINDOW_CLOSED",
+    "未开放的节日提交被拒",
+  );
   const seasonalDraft = createSeasonalCardDraft("review", christmasOptions, null);
   seasonalDraft.quantities[christmasOptions[0]!.catalogGuid] = "12";
   seasonalDraft.quantities[christmasOptions[3]!.catalogGuid] = "2";
@@ -1011,8 +1043,11 @@ async function run() {
       seasonalOverviewQuery,
     ),
   );
+  const filledHoliday = filledOverview.holidays.find(
+    (holiday) => holiday.cardType === openHoliday.cardType,
+  );
   assert.equal(
-    filledOverview.holidays[0]?.currentBatch?.batchGuid,
+    filledHoliday?.currentBatch?.batchGuid,
     createdBatch?.batchGuid,
     "提交后 overview 返回该批次为当前生效",
   );
@@ -1020,7 +1055,7 @@ async function run() {
   const prefilledDraft = createSeasonalCardDraft(
     "review",
     christmasOptions,
-    filledOverview.holidays[0]?.currentBatch ?? null,
+    filledHoliday?.currentBatch ?? null,
   );
   const unchangedResponse = await request(
     "POST",

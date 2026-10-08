@@ -315,8 +315,15 @@ export function normalizeSeasonalCardBatch(raw: unknown): SeasonalCardBatch | nu
 }
 
 /** 节日固定 1-5 五项；服务端缺项时补成「没填过」，保证节日网格始终完整。 */
+/** 日期字段只保留 yyyy-MM-dd；带时间的 ISO 字符串截掉时间部分，格式不对返回空字符串。 */
+function asIsoDay(value: unknown) {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(asString(value).trim());
+  return match ? match[1] : "";
+}
+
 export function normalizeSeasonalCardOverviewResponse(payload: unknown): SeasonalCardOverview {
   const data = asRecord(unwrapPayload(payload)) ?? {};
+  const topSeasonYear = asNullableInt(pick(data, "seasonYear", "SeasonYear"));
   const holidaysByType = new Map<SeasonalCardType, SeasonalCardOverviewHoliday>();
   getArray(data, "holidays", "Holidays").forEach((raw) => {
     const item = asRecord(raw) ?? {};
@@ -324,21 +331,38 @@ export function normalizeSeasonalCardOverviewResponse(payload: unknown): Seasona
     if (cardType == null || holidaysByType.has(cardType)) {
       return;
     }
+    const rawIsOpen = pick(item, "isOpen", "IsOpen");
     holidaysByType.set(cardType, {
       cardType,
       cardTypeName: asString(pick(item, "cardTypeName", "CardTypeName")),
+      // 旧后端没有开放窗口字段：按开放处理，年份沿用顶层 seasonYear（旧后端回显请求年份）。
+      isOpen: rawIsOpen === undefined ? true : asBoolean(rawIsOpen),
+      seasonYear: asNullableInt(pick(item, "seasonYear", "SeasonYear")) ?? topSeasonYear,
+      holidayDate: asIsoDay(pick(item, "holidayDate", "HolidayDate")),
+      opensOn: asIsoDay(pick(item, "opensOn", "OpensOn")),
+      closesOn: asIsoDay(pick(item, "closesOn", "ClosesOn")),
       currentBatch: normalizeSeasonalCardBatch(pick(item, "currentBatch", "CurrentBatch")),
     });
   });
 
   return {
     storeCode: asString(pick(data, "storeCode", "StoreCode")),
-    seasonYear: asNullableInt(pick(data, "seasonYear", "SeasonYear")),
+    seasonYear: topSeasonYear,
+    today: asIsoDay(pick(data, "today", "Today")),
     localSupplierCode: asString(pick(data, "localSupplierCode", "LocalSupplierCode")).trim(),
     supplierName: asString(pick(data, "supplierName", "SupplierName")).trim(),
     holidays: ([1, 2, 3, 4, 5] as SeasonalCardType[]).map(
       (cardType) =>
-        holidaysByType.get(cardType) ?? { cardType, cardTypeName: "", currentBatch: null }
+        holidaysByType.get(cardType) ?? {
+          cardType,
+          cardTypeName: "",
+          isOpen: true,
+          seasonYear: topSeasonYear,
+          holidayDate: "",
+          opensOn: "",
+          closesOn: "",
+          currentBatch: null,
+        }
     ),
   };
 }

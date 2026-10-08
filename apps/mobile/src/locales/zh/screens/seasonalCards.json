@@ -18,8 +18,7 @@
   },
   "form": {
     "seasonYear": "年份",
-    "seasonYearHint": "默认今年",
-    "thisYear": "今年",
+    "seasonYearAuto": "按开放中的节日自动确定",
     "cardType": "节日",
     "supplier": "供应商",
     "selectSupplier": "选择供应商",
@@ -39,7 +38,9 @@
   "status": {
     "filled": "已填报",
     "pending": "待填报",
-    "unknown": "—"
+    "unknown": "—",
+    "closesOn": "截止 {{date}}",
+    "opensOn": "{{date}} 开放"
   },
   "rows": {
     "fixedPrice": "固定价",
@@ -60,7 +61,10 @@
     "staleTitle": "已被 {{name}} 于 {{time}} 更新",
     "staleBody": "已保留你填写的数量，「上次」已换成最新数据，请核对后再提交。",
     "loadFailedTitle": "填报状态加载失败",
-    "retry": "重试"
+    "retry": "重试",
+    "noOpenTitle": "当前没有开放填报的节日",
+    "noOpenNext": "下一个：{{holiday}} {{date}} 开放",
+    "noOpenRule": "每个节日从当天起开放 4 周（共 29 天）填报，其余时间只能查看历史记录。"
   },
   "footer": {
     "total_one": "{{count}} 张 · {{amount}}",
@@ -121,7 +125,8 @@
     "catalogChanged": "价格目录已更新，请下拉刷新后重新填写",
     "supplierNotFound": "该供应商不存在或已停用，请重新选择",
     "supplierRequired": "请先选择供应商",
-    "forbiddenStore": "没有该分店的填报权限"
+    "forbiddenStore": "没有该分店的填报权限",
+    "windowClosed": "该节日已不在填报开放时间"
   },
   "messages": {
     "noAccessTitle": "没有权限",

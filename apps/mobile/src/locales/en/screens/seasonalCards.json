@@ -18,8 +18,7 @@
   },
   "form": {
     "seasonYear": "Year",
-    "seasonYearHint": "Defaults to this year",
-    "thisYear": "This year",
+    "seasonYearAuto": "Set automatically by the open festival",
     "cardType": "Festival",
     "supplier": "Supplier",
     "selectSupplier": "Select supplier",
@@ -39,7 +38,9 @@
   "status": {
     "filled": "Submitted",
     "pending": "Pending",
-    "unknown": "—"
+    "unknown": "—",
+    "closesOn": "Closes {{date}}",
+    "opensOn": "Opens {{date}}"
   },
   "rows": {
     "fixedPrice": "Fixed price",
@@ -60,7 +61,10 @@
     "staleTitle": "Updated by {{name}} at {{time}}",
     "staleBody": "Your quantities are kept and \"Last\" now shows the newest figures. Please check before submitting.",
     "loadFailedTitle": "Could not load submission status",
-    "retry": "Retry"
+    "retry": "Retry",
+    "noOpenTitle": "No festival is open for submission now",
+    "noOpenNext": "Next: {{holiday}} opens {{date}}",
+    "noOpenRule": "Each festival opens for 4 weeks from the day itself (29 days in total). Outside that window you can only view history."
   },
   "footer": {
     "total_one": "{{count}} card · {{amount}}",
@@ -121,7 +125,8 @@
     "catalogChanged": "The price list has changed. Pull to refresh and fill it in again",
     "supplierNotFound": "This supplier no longer exists or is disabled. Please choose another",
     "supplierRequired": "Select a supplier first",
-    "forbiddenStore": "You can't submit for this store"
+    "forbiddenStore": "You can't submit for this store",
+    "windowClosed": "This festival is no longer open for submission"
   },
   "messages": {
     "noAccessTitle": "No access",
