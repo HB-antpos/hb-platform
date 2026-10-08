@@ -231,6 +231,8 @@ public sealed class OperationAuditIngestServiceTests
 
     [Theory]
     [InlineData("INSTALLMENT_PICKUP_CONFIRM", "Succeeded", "PICKUP")]
+    [InlineData("INSTALLMENT_LINES_AMEND", "Succeeded", "AMEND")]
+    [InlineData("INSTALLMENT_LINES_AMEND", "Denied", "PERMISSION")]
     [InlineData("CATALOG_RESET", "Succeeded", "SETTINGS")]
     [InlineData("TEST_SALES_DATA_RESET", "Failed", "SETTINGS")]
     [InlineData("DEVICE_REREGISTER", "Succeeded", "ACTIVATION_REBIND")]

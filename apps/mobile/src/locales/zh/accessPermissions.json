@@ -313,6 +313,10 @@
       "name": "添加分期还款",
       "description": "收银端分期页 - 添加还款按钮"
     },
+    "Permissions.PosTerminal.Installments.AmendLines": {
+      "name": "修改分期商品列表",
+      "description": "收银端历史订单 - 分期订单明细修改商品列表按钮"
+    },
     "Permissions.PosTerminal.Installments.Cancel": {
       "name": "取消分期",
       "description": "收银端分期页 - 取消分期按钮"

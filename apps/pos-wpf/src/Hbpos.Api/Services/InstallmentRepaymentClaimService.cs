@@ -122,7 +122,8 @@ public sealed class InstallmentRepaymentClaimService(
             CrossDeviceCancelRefundEnabled: _lifecycleOptions.CancelRefundEnabled,
             CrossDeviceVoidEnabled: _lifecycleOptions.VoidEnabled,
             CrossDevicePickupEnabled: _lifecycleOptions.PickupEnabled,
-            RepaymentClaimPrepareProviderV1: true);
+            RepaymentClaimPrepareProviderV1: true,
+            AmendLinesSupported: true);
     }
 
     public async Task<InstallmentRepaymentClaimDto> CreateAsync(

@@ -237,6 +237,7 @@ public sealed class CashierSessionContext(TimeProvider? timeProvider = null) : I
             Permissions.PosTerminal.Installments.AddRepayment => "当前收银员没有添加分期还款权限",
             Permissions.PosTerminal.Installments.Cancel => "当前收银员没有取消分期权限",
             Permissions.PosTerminal.Installments.ConfirmPickup => "当前收银员没有确认分期取货权限",
+            Permissions.PosTerminal.Installments.AmendLines => "当前收银员没有修改分期商品权限",
             Permissions.PosTerminal.CustomerDisplay.Manage => "当前收银员没有管理客显权限",
             Permissions.PosTerminal.System.Sync => "当前收银员没有手动同步权限",
             _ => "当前收银员没有权限"

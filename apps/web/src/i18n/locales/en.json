@@ -4006,6 +4006,7 @@
       "cardPaymentSupervisorResolution": "Card Payment Supervisor Resolution",
       "permissionOverride": "Supervisor Authorization",
       "installmentPickupConfirm": "Installment Pickup Confirmed",
+      "installmentLinesAmend": "Installment Items Amended",
       "catalogReset": "Catalog Reset",
       "testSalesDataReset": "Test Sales Data Reset",
       "deviceReregister": "Device Reregistered",

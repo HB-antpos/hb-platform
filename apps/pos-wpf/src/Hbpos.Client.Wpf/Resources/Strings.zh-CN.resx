@@ -1961,6 +1961,102 @@
   <data name="history.installment.continuePayment" xml:space="preserve">
     <value>继续支付</value>
   </data>
+  <data name="history.installment.editItems" xml:space="preserve">
+    <value>修改商品</value>
+  </data>
+  <data name="history.installment.editCancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="history.installment.editSave" xml:space="preserve">
+    <value>保存修改</value>
+  </data>
+  <data name="history.installment.editSaving" xml:space="preserve">
+    <value>保存中…</value>
+  </data>
+  <data name="history.installment.editSearchHint" xml:space="preserve">
+    <value>扫描或输入商品编码 / 名称添加商品</value>
+  </data>
+  <data name="history.installment.editSearch" xml:space="preserve">
+    <value>搜索商品</value>
+  </data>
+  <data name="history.installment.editNoResults" xml:space="preserve">
+    <value>未找到匹配的商品。</value>
+  </data>
+  <data name="history.installment.editSearchFailed" xml:space="preserve">
+    <value>商品检索失败：{0}</value>
+  </data>
+  <data name="history.installment.editNewTotal" xml:space="preserve">
+    <value>新总额</value>
+  </data>
+  <data name="history.installment.editNewBalance" xml:space="preserve">
+    <value>新余额</value>
+  </data>
+  <data name="history.installment.editDelta" xml:space="preserve">
+    <value>较原总额</value>
+  </data>
+  <data name="history.installment.editRemoveLine" xml:space="preserve">
+    <value>删除商品</value>
+  </data>
+  <data name="history.installment.editIncrease" xml:space="preserve">
+    <value>增加数量</value>
+  </data>
+  <data name="history.installment.editDecrease" xml:space="preserve">
+    <value>减少数量</value>
+  </data>
+  <data name="history.installment.editNewBadge" xml:space="preserve">
+    <value>新增</value>
+  </data>
+  <data name="history.installment.editInvalidInput" xml:space="preserve">
+    <value>请检查数量（不小于 1 的整数）和单价（须大于 0）。</value>
+  </data>
+  <data name="history.installment.editNoLines" xml:space="preserve">
+    <value>至少需要保留一件商品。</value>
+  </data>
+  <data name="history.installment.editInvalidLines" xml:space="preserve">
+    <value>部分商品信息不完整，无法保存。</value>
+  </data>
+  <data name="history.installment.editTotalBelowPaid" xml:space="preserve">
+    <value>新总额 {0} 不得低于已付 {1}。</value>
+  </data>
+  <data name="history.installment.editTotalBelowMinimum" xml:space="preserve">
+    <value>新总额 {0} 不得低于最低总额 {1}。</value>
+  </data>
+  <data name="history.installment.editWillBePaidOff" xml:space="preserve">
+    <value>新余额为 $0.00，保存后订单将变为已付清，可确认提货。</value>
+  </data>
+  <data name="history.installment.editSaved" xml:space="preserve">
+    <value>商品已修改。</value>
+  </data>
+  <data name="history.installment.editSavedPaidOff" xml:space="preserve">
+    <value>已保存；订单已付清，可确认提货。</value>
+  </data>
+  <data name="history.installment.editSavedOutstanding" xml:space="preserve">
+    <value>已保存；待补款 {0}。</value>
+  </data>
+  <data name="history.installment.editStale" xml:space="preserve">
+    <value>订单已被其他设备修改，已刷新，请重新修改。</value>
+  </data>
+  <data name="history.installment.editStatusNotAllowed" xml:space="preserve">
+    <value>订单状态已不允许修改商品，已刷新。</value>
+  </data>
+  <data name="history.installment.editOnlineRequired" xml:space="preserve">
+    <value>修改商品需要联网。</value>
+  </data>
+  <data name="history.installment.editUnsupported" xml:space="preserve">
+    <value>服务端暂不支持修改商品，或无法确认，请稍后再试。</value>
+  </data>
+  <data name="history.installment.editUnknown" xml:space="preserve">
+    <value>保存结果未能确认。请核对订单后按需再次保存；重复保存不会重复生效。</value>
+  </data>
+  <data name="history.installment.editFailed" xml:space="preserve">
+    <value>保存失败：{0}</value>
+  </data>
+  <data name="history.installment.editDiscardHint" xml:space="preserve">
+    <value>有未保存的修改。请先保存，或点击“取消”放弃修改。</value>
+  </data>
+  <data name="history.installment.editStateChanged" xml:space="preserve">
+    <value>等待授权期间订单或网络状态已变化，请重试。</value>
+  </data>
   <data name="history.installment.status.paymentDue" xml:space="preserve">
     <value>待补款</value>
   </data>

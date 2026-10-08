@@ -56,6 +56,23 @@ public interface IInstallmentOrderService
 
     Task<InstallmentWriteResult<InstallmentConfirmPickupResponse>> ConfirmPickupAsync(PosSessionState session, InstallmentConfirmPickupRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 修改分期单商品列表（仅在线）。<paramref name="baseline"/> 是编辑器加载时的订单详情：
+    /// 其 UpdatedAt 作为乐观并发令牌，PaidAmount / Status 用于客户端预校验。默认实现表示“不支持”。
+    /// </summary>
+    Task<InstallmentAmendLinesResult> AmendLinesAsync(
+        PosSessionState session,
+        LocalInstallmentOrder baseline,
+        IReadOnlyList<InstallmentLineDto> lines,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(InstallmentAmendLinesResult.Create(
+            session.IsOnline ? InstallmentAmendLinesOutcome.Rejected : InstallmentAmendLinesOutcome.OnlineRequired,
+            session.IsOnline ? "分期服务尚未接入修改商品。" : "OnlineRequired"));
+
+    /// <summary>服务端是否声明支持修改商品（capabilities.AmendLinesSupported）；无法确认一律按不支持处理。</summary>
+    Task<bool> IsAmendLinesSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+
     Task<InstallmentWriteResult<InstallmentCancelResponse>> CancelWithRefundAsync(PosSessionState session, InstallmentCancelRequest request, CancellationToken cancellationToken = default);
 
     Task<InstallmentWriteResult<InstallmentVoidResponse>> VoidCancelAsync(PosSessionState session, InstallmentVoidRequest request, CancellationToken cancellationToken = default);
@@ -115,6 +132,9 @@ public interface IInstallmentApiClient
 
     Task<InstallmentCancelClaimDto> CommitCancelClaimAsync(Guid installmentGuid, Guid operationGuid, InstallmentCancelClaimCommitRequest request, CancellationToken cancellationToken = default) =>
         Task.FromException<InstallmentCancelClaimDto>(new NotSupportedException("当前分期 API 客户端未实现取消 claim 协议。"));
+
+    Task<InstallmentAmendLinesResponse> AmendLinesAsync(InstallmentAmendLinesRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromException<InstallmentAmendLinesResponse>(new NotSupportedException("当前分期 API 客户端未实现修改商品。"));
 
     Task<InstallmentCreateResponse> CreateAsync(InstallmentCreateRequest request, CancellationToken cancellationToken = default);
 
@@ -301,6 +321,233 @@ public sealed class InstallmentOrderService(
         var response = await apiClient.ConfirmPickupAsync(request, cancellationToken);
         var localOrder = await SaveSnapshotAsync(response.Details, cancellationToken);
         return InstallmentWriteResult<InstallmentConfirmPickupResponse>.Success(response, localOrder);
+    }
+
+    public async Task<bool> IsAmendLinesSupportedAsync(PosSessionState session, CancellationToken cancellationToken = default)
+    {
+        if (!session.IsOnline)
+        {
+            return false;
+        }
+
+        try
+        {
+            var capabilities = await apiClient.GetRepaymentCapabilitiesAsync(cancellationToken);
+            return capabilities.AmendLinesSupported;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // 旧服务端没有该能力位或网络不通：一律按“不支持”处理，不放行写操作。
+            ConsoleLog.WriteWarning(
+                "Installment",
+                $"installment amend capability check failed error={ex.GetType().Name} message={ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<InstallmentAmendLinesResult> AmendLinesAsync(
+        PosSessionState session,
+        LocalInstallmentOrder baseline,
+        IReadOnlyList<InstallmentLineDto> lines,
+        CancellationToken cancellationToken = default)
+    {
+        // 仅在线：没有 durable 队列，离线时不允许改单。
+        if (!session.IsOnline)
+        {
+            return InstallmentAmendLinesResult.Create(InstallmentAmendLinesOutcome.OnlineRequired, "OnlineRequired");
+        }
+
+        // 客户端预校验与服务端共用同一份规则，能在发请求前挡住的错误不打扰服务端。
+        if (!InstallmentAmendRules.CanAmend(baseline.Status))
+        {
+            return InstallmentAmendLinesResult.Create(
+                InstallmentAmendLinesOutcome.Rejected,
+                "当前订单状态不允许修改商品。",
+                InstallmentAmendLinesErrorCodes.StatusNotAllowed);
+        }
+
+        if (InstallmentAmendRules.ValidateLines(lines) != InstallmentAmendLinesValidation.Valid)
+        {
+            return InstallmentAmendLinesResult.Create(
+                InstallmentAmendLinesOutcome.Rejected,
+                "商品明细不完整或金额不合法。",
+                InstallmentAmendLinesErrorCodes.InvalidLines);
+        }
+
+        var newTotal = InstallmentAmendRules.CalculateTotal(lines);
+        var totalValidation = InstallmentAmendRules.ValidateTotal(newTotal, baseline.PaidAmount);
+        if (totalValidation != InstallmentAmendLinesValidation.Valid)
+        {
+            return InstallmentAmendLinesResult.Create(
+                InstallmentAmendLinesOutcome.Rejected,
+                totalValidation == InstallmentAmendLinesValidation.TotalBelowPaid
+                    ? "新总额不得低于已付金额。"
+                    : "新总额低于分期订单最低总额。",
+                totalValidation == InstallmentAmendLinesValidation.TotalBelowPaid
+                    ? InstallmentAmendLinesErrorCodes.TotalBelowPaid
+                    : InstallmentAmendLinesErrorCodes.TotalBelowMinimum);
+        }
+
+        var installmentGuid = baseline.InstallmentGuid;
+        var request = new InstallmentAmendLinesRequest(
+            installmentGuid,
+            session.StoreCode,
+            session.DeviceCode,
+            session.CashierId,
+            session.CashierName,
+            lines,
+            // 乐观并发令牌：必须是编辑器加载时看到的订单版本，服务端不一致即返回 409。
+            baseline.UpdatedAt);
+
+        try
+        {
+            var response = await apiClient.AmendLinesAsync(request, cancellationToken);
+            if (response.Details.InstallmentGuid != installmentGuid)
+            {
+                // 响应与请求订单不一致时不能写快照，按结果未知处理并交给对账。
+                return await ReconcileAmendLinesAsync(baseline, lines, "修改商品响应与订单不一致。", cancellationToken);
+            }
+
+            var localOrder = await SaveSnapshotAsync(response.Details, cancellationToken);
+            return InstallmentAmendLinesResult.Success(localOrder, MapSummary(localOrder));
+        }
+        catch (CatalogApiException ex) when (string.Equals(ex.ErrorCode, InstallmentAmendLinesErrorCodes.Stale, StringComparison.Ordinal))
+        {
+            return await RefreshAfterStaleAsync(installmentGuid, cancellationToken);
+        }
+        catch (CatalogApiException ex) when (IsAmendBusinessErrorCode(ex.ErrorCode))
+        {
+            if (string.Equals(ex.ErrorCode, InstallmentAmendLinesErrorCodes.StatusNotAllowed, StringComparison.Ordinal))
+            {
+                // 状态已变（如被取消 / 已提货）：刷新快照，让界面反映真实状态。
+                var refreshed = await TryRefreshSnapshotAsync(installmentGuid, cancellationToken);
+                return InstallmentAmendLinesResult.Create(
+                    InstallmentAmendLinesOutcome.Rejected,
+                    ex.Message,
+                    ex.ErrorCode,
+                    refreshed,
+                    refreshed is null ? null : MapSummary(refreshed));
+            }
+
+            return InstallmentAmendLinesResult.Create(InstallmentAmendLinesOutcome.Rejected, ex.Message, ex.ErrorCode);
+        }
+        catch (CatalogApiException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+        {
+            // 409 但不是 Stale（如订单正忙于其他操作）：服务端明确未执行，保留编辑稍后重试。
+            return InstallmentAmendLinesResult.Create(InstallmentAmendLinesOutcome.Rejected, ex.Message, ex.ErrorCode ?? "CONFLICT");
+        }
+        catch (CatalogApiException ex) when (ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest or HttpStatusCode.NotFound)
+        {
+            return InstallmentAmendLinesResult.Create(
+                InstallmentAmendLinesOutcome.Rejected,
+                ex.Message,
+                ex.StatusCode == HttpStatusCode.Forbidden ? "FORBIDDEN" : ex.ErrorCode);
+        }
+        catch (Exception ex) when (
+            ex is not OutOfMemoryException &&
+            (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
+        {
+            // 超时 / 断网 / 5xx / 响应无法解析：服务端可能已经落库，必须先对账再下结论。
+            ConsoleLog.WriteWarning(
+                "Installment",
+                $"installment amend lines outcome unknown installmentGuid={installmentGuid:D} error={ex.GetType().Name} message={ex.Message}");
+            return await ReconcileAmendLinesAsync(baseline, lines, ex.Message, cancellationToken);
+        }
+    }
+
+    private static bool IsAmendBusinessErrorCode(string? errorCode) =>
+        errorCode is InstallmentAmendLinesErrorCodes.InvalidLines or
+            InstallmentAmendLinesErrorCodes.TotalBelowPaid or
+            InstallmentAmendLinesErrorCodes.TotalBelowMinimum or
+            InstallmentAmendLinesErrorCodes.StatusNotAllowed;
+
+    // 409 Stale：别的设备已改过订单。拉最新详情写进快照并交给界面提示“已刷新”。
+    private async Task<InstallmentAmendLinesResult> RefreshAfterStaleAsync(
+        Guid installmentGuid,
+        CancellationToken cancellationToken)
+    {
+        var refreshed = await TryRefreshSnapshotAsync(installmentGuid, cancellationToken);
+        return InstallmentAmendLinesResult.Create(
+            InstallmentAmendLinesOutcome.Stale,
+            "订单已被其他设备修改，已刷新，请重新修改。",
+            InstallmentAmendLinesErrorCodes.Stale,
+            refreshed,
+            refreshed is null ? null : MapSummary(refreshed));
+    }
+
+    private async Task<LocalInstallmentOrder?> TryRefreshSnapshotAsync(Guid installmentGuid, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var details = await apiClient.GetDetailsAsync(installmentGuid, cancellationToken);
+            return details.InstallmentGuid == installmentGuid
+                ? await SaveSnapshotAsync(details, cancellationToken)
+                : null;
+        }
+        catch (Exception ex) when (
+            ex is not OutOfMemoryException &&
+            (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 结果未知时的对账：重新读取服务端详情。商品内容与目标一致 = 已生效；订单版本变了且内容不同 = 被他人改过；
+    /// 版本未变 = 本次没有生效，可以放心重试（重试带同一个 ExpectedUpdatedAt，不会重复生效）。
+    /// </summary>
+    private async Task<InstallmentAmendLinesResult> ReconcileAmendLinesAsync(
+        LocalInstallmentOrder baseline,
+        IReadOnlyList<InstallmentLineDto> targetLines,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var refreshed = await TryRefreshSnapshotAsync(baseline.InstallmentGuid, cancellationToken);
+        if (refreshed is null)
+        {
+            return InstallmentAmendLinesResult.Create(
+                InstallmentAmendLinesOutcome.Unknown,
+                $"保存结果未能确认（{reason}）。请核对订单后再保存；重复保存不会重复生效。");
+        }
+
+        if (AmendLinesContentEqual(refreshed.Lines, targetLines))
+        {
+            return InstallmentAmendLinesResult.Success(refreshed, MapSummary(refreshed));
+        }
+
+        if (refreshed.UpdatedAt != baseline.UpdatedAt)
+        {
+            return InstallmentAmendLinesResult.Create(
+                InstallmentAmendLinesOutcome.Stale,
+                "订单已被其他设备修改，已刷新，请重新修改。",
+                InstallmentAmendLinesErrorCodes.Stale,
+                refreshed,
+                MapSummary(refreshed));
+        }
+
+        return InstallmentAmendLinesResult.Create(
+            InstallmentAmendLinesOutcome.Failed,
+            $"保存未成功（{reason}），订单未被修改，请重试。",
+            order: refreshed,
+            summary: MapSummary(refreshed));
+    }
+
+    // 内容比较忽略行 Guid 与顺序，只比较商品、数量、单价、折扣、实收（服务端可能重排或重发行 Guid）。
+    private static bool AmendLinesContentEqual(IReadOnlyList<InstallmentLineDto> left, IReadOnlyList<InstallmentLineDto> right)
+    {
+        static string Key(InstallmentLineDto line) =>
+            string.Join(
+                '|',
+                line.ProductCode,
+                line.ReferenceCode ?? string.Empty,
+                line.LookupCode,
+                line.Quantity.ToString("0.###", CultureInfo.InvariantCulture),
+                line.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture),
+                line.DiscountAmount.ToString("0.00", CultureInfo.InvariantCulture),
+                line.ActualAmount.ToString("0.00", CultureInfo.InvariantCulture));
+
+        return left.Count == right.Count &&
+            left.Select(Key).Order(StringComparer.Ordinal).SequenceEqual(right.Select(Key).Order(StringComparer.Ordinal));
     }
 
     public Task<InstallmentWriteResult<InstallmentCancelResponse>> CancelWithRefundAsync(PosSessionState session, InstallmentCancelRequest request, CancellationToken cancellationToken = default)
@@ -669,6 +916,46 @@ public sealed class InstallmentOrderService(
     }
 }
 
+public enum InstallmentAmendLinesOutcome
+{
+    /// <summary>已生效（含对账确认已生效）。</summary>
+    Succeeded = 1,
+    /// <summary>当前离线，修改商品只能在线进行。</summary>
+    OnlineRequired,
+    /// <summary>服务端或客户端预校验明确拒绝，订单未改动。</summary>
+    Rejected,
+    /// <summary>订单已被其他设备修改（409），服务层已刷新快照。</summary>
+    Stale,
+    /// <summary>对账确认本次没有生效，订单未改动，可重试。</summary>
+    Failed,
+    /// <summary>结果无法确认（网络中断且对账也失败）；重试安全（乐观并发）。</summary>
+    Unknown
+}
+
+/// <summary>
+/// 修改商品的结果。<see cref="ErrorCode"/> 供界面映射本地化文案，<see cref="Message"/> 是中文兜底文案（仅用于日志 / 兜底显示）。
+/// </summary>
+public sealed record InstallmentAmendLinesResult(
+    InstallmentAmendLinesOutcome Outcome,
+    string Message,
+    string? ErrorCode = null,
+    LocalInstallmentOrder? Order = null,
+    InstallmentOrderSummary? Summary = null)
+{
+    public bool Succeeded => Outcome == InstallmentAmendLinesOutcome.Succeeded;
+
+    public static InstallmentAmendLinesResult Create(
+        InstallmentAmendLinesOutcome outcome,
+        string message,
+        string? errorCode = null,
+        LocalInstallmentOrder? order = null,
+        InstallmentOrderSummary? summary = null) =>
+        new(outcome, message, errorCode, order, summary);
+
+    public static InstallmentAmendLinesResult Success(LocalInstallmentOrder order, InstallmentOrderSummary summary) =>
+        new(InstallmentAmendLinesOutcome.Succeeded, "商品已修改。", null, order, summary);
+}
+
 public sealed record InstallmentHistorySearchQuery(
     DateTimeOffset? UpdatedFrom = null,
     DateTimeOffset? UpdatedTo = null,
@@ -813,6 +1100,8 @@ public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentAp
     public Task<InstallmentAppendPaymentResponse> AppendPaymentAsync(InstallmentAppendPaymentRequest request, CancellationToken cancellationToken = default) => PostAsync<InstallmentAppendPaymentRequest, InstallmentAppendPaymentResponse>($"api/v1/installments/{request.InstallmentGuid:D}/payments", request, cancellationToken);
 
     public Task<InstallmentConfirmPickupResponse> ConfirmPickupAsync(InstallmentConfirmPickupRequest request, CancellationToken cancellationToken = default) => PostAsync<InstallmentConfirmPickupRequest, InstallmentConfirmPickupResponse>($"api/v1/installments/{request.InstallmentGuid:D}/pickup", request, cancellationToken);
+
+    public Task<InstallmentAmendLinesResponse> AmendLinesAsync(InstallmentAmendLinesRequest request, CancellationToken cancellationToken = default) => PostAsync<InstallmentAmendLinesRequest, InstallmentAmendLinesResponse>($"api/v1/installments/{request.InstallmentGuid:D}/amend-lines", request, cancellationToken);
 
     public Task<InstallmentCancelResponse> CancelAsync(InstallmentCancelRequest request, CancellationToken cancellationToken = default) => PostAsync<InstallmentCancelRequest, InstallmentCancelResponse>($"api/v1/installments/{request.InstallmentGuid:D}/cancel", request, cancellationToken);
 

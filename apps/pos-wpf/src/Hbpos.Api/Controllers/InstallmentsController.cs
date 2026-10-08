@@ -265,6 +265,82 @@ public sealed class InstallmentsController(
         }
     }
 
+    /// <summary>
+    /// 修改分期订单商品列表（整体替换）。仅在线可用；服务端强制校验 AmendLines 权限，
+    /// 因为 Audit 模式下策略不会因缺票据而拒绝，必须再以验证过的收银员身份兜底。
+    /// </summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.InstallmentAmendLines)]
+    [HttpPost("{installmentGuid:guid}/amend-lines")]
+    public async Task<ActionResult<ApiResult<InstallmentAmendLinesResponse>>> AmendLines(
+        Guid installmentGuid,
+        [FromBody] InstallmentAmendLinesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (installmentGuid != request.InstallmentGuid)
+        {
+            return BadRequest(ApiResult<InstallmentAmendLinesResponse>.Fail("INSTALLMENT_GUID_MISMATCH", "Installment id does not match the route."));
+        }
+
+        if (!this.IsDeviceScopeAllowed(request.StoreCode, request.DeviceCode))
+        {
+            return DeviceAuthorizationExtensions.DeviceScopeForbidden<InstallmentAmendLinesResponse>("Device is not authorized for this store.");
+        }
+
+        try
+        {
+            var identity = await ResolveRepaymentClaimIdentityAsync(cancellationToken);
+            if (identity is null)
+            {
+                return CashierIdentityRequired<InstallmentAmendLinesResponse>();
+            }
+
+            if (!HasPermission(identity, Permissions.PosTerminal.Installments.AmendLines))
+            {
+                return CashierPermissionRequired<InstallmentAmendLinesResponse>(
+                    "Verified cashier lacks installment amend lines permission.");
+            }
+
+            // 门店 / 设备 / 收银员一律以票据身份为准，忽略请求体里可伪造的值。
+            request = request with
+            {
+                StoreCode = identity.StoreCode,
+                DeviceCode = identity.DeviceCode,
+                CashierId = identity.CashierId,
+                CashierName = identity.CashierName
+            };
+
+            await EnsureNoBlockingCancelClaimAsync(installmentGuid, cancellationToken);
+            await RequireRepaymentClaimService().EnsureNoBlockingClaimAsync(installmentGuid, cancellationToken);
+            var details = await historyService.GetDetailsAsync(installmentGuid, cancellationToken);
+            if (details is not null &&
+                !string.Equals(details.StoreCode, request.StoreCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return DeviceAuthorizationExtensions.DeviceScopeForbidden<InstallmentAmendLinesResponse>(
+                    "Installment does not belong to this store.");
+            }
+
+            var response = await installmentService.AmendLinesAsync(request, cancellationToken);
+            return Ok(ApiResult<InstallmentAmendLinesResponse>.Ok(response));
+        }
+        catch (InstallmentAmendLinesException ex)
+        {
+            return AmendLinesError<InstallmentAmendLinesResponse>(ex);
+        }
+        // 以下两个 claim 异常都派生自 InvalidOperationException，必须排在通用处理之前。
+        catch (InstallmentRepaymentClaimException ex)
+        {
+            return ClaimError<InstallmentAmendLinesResponse>(ex);
+        }
+        catch (InstallmentCancelClaimException ex)
+        {
+            return CancelClaimError<InstallmentAmendLinesResponse>(ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ApiResult<InstallmentAmendLinesResponse>.Fail("INSTALLMENT_AMEND_INVALID", ex.Message));
+        }
+    }
+
     [Authorize(Policy = CashierAuthorizationPolicies.InstallmentView)]
     [HttpGet("history")]
     public async Task<ActionResult<ApiResult<InstallmentHistoryQueryResponse>>> History(
@@ -711,6 +787,18 @@ public sealed class InstallmentsController(
             message))
         {
             StatusCode = StatusCodes.Status403Forbidden
+        };
+    }
+
+    private static ActionResult<ApiResult<T>> AmendLinesError<T>(InstallmentAmendLinesException exception)
+    {
+        // 过期令牌是并发冲突（409）；其余均为请求本身不满足规则（400）。
+        var statusCode = exception.Code == InstallmentAmendLinesErrorCodes.Stale
+            ? StatusCodes.Status409Conflict
+            : StatusCodes.Status400BadRequest;
+        return new ObjectResult(ApiResult<T>.Fail(exception.Code, exception.Message))
+        {
+            StatusCode = statusCode
         };
     }
 

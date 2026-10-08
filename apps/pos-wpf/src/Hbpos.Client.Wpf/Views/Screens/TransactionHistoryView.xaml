@@ -325,6 +325,36 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
+
+        <!-- 修改商品：候选商品行按钮。基础按钮模板把内容居中，这里要整行铺满，所以单独给一个轻量模板。 -->
+        <Style x:Key="HistoryEditCandidateButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="48" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                BorderThickness="0,0,0,1"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftStrongBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid x:Name="HistoryPageLayout" Background="{DynamicResource PosSurfaceAltBrush}">
@@ -1579,6 +1609,7 @@
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="40" />
+                                        <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
                                     <StackPanel Orientation="Horizontal" Margin="14,0" VerticalAlignment="Center">
@@ -1592,136 +1623,496 @@
                                                    VerticalAlignment="Center" />
                                     </StackPanel>
 
-                                    <DataGrid x:Name="OrderDetailsItemsGrid"
-                                              Grid.Row="1"
-                                              ItemsSource="{Binding OrderDetailLines}"
-                                              AutoGenerateColumns="False"
-                                              IsReadOnly="True"
-                                              CanUserAddRows="False"
-                                              CanUserDeleteRows="False"
-                                              CanUserReorderColumns="False"
-                                              CanUserResizeColumns="False"
-                                              CanUserSortColumns="False"
-                                              HeadersVisibility="Column"
-                                              RowHeaderWidth="0"
-                                              RowHeight="48"
-                                              MinRowHeight="48"
-                                              GridLinesVisibility="Horizontal"
-                                              HorizontalGridLinesBrush="{DynamicResource PosDividerBrush}"
-                                              VerticalGridLinesBrush="Transparent"
-                                              Background="{DynamicResource PosSurfaceBrush}"
-                                              BorderBrush="{DynamicResource PosDividerBrush}"
-                                              BorderThickness="0,1,0,0"
-                                              ColumnHeaderStyle="{StaticResource HistoryColumnHeaderStyle}"
-                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                              ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                              EnableRowVirtualization="True"
-                                              AutomationProperties.AutomationId="TransactionHistoryOrderDetailsItemsGrid"
-                                              Style="{StaticResource PosCartDataGridStyle}">
-                                        <DataGrid.CellStyle>
-                                            <Style TargetType="DataGridCell" BasedOn="{StaticResource HistoryGridCellStyle}">
-                                                <Setter Property="Padding" Value="8,0" />
+                                    <!-- 结果横幅：保存成功 / 订单已被刷新 / 服务端暂不支持等，只在只读模式出现 -->
+                                    <Border x:Name="OrderDetailsEditNotice"
+                                            Grid.Row="1"
+                                            Margin="12,0,12,8"
+                                            Padding="10,8"
+                                            CornerRadius="6"
+                                            BorderThickness="1"
+                                            Visibility="{Binding HasInstallmentEditorNotice, Converter={StaticResource BoolToVis}}"
+                                            AutomationProperties.AutomationId="TransactionHistoryOrderDetailsEditNotice">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsInstallmentEditorNoticeError}" Value="True">
+                                                        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
                                             </Style>
-                                        </DataGrid.CellStyle>
-                                        <DataGrid.RowStyle>
-                                            <Style TargetType="DataGridRow">
-                                                <Setter Property="Height" Value="48" />
-                                                <Setter Property="MinHeight" Value="48" />
-                                                <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
-                                            </Style>
-                                        </DataGrid.RowStyle>
-                                        <DataGrid.Columns>
-                                            <DataGridTemplateColumn Header="{loc:Loc Item}" Width="*">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <Grid>
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="36" />
-                                                                <ColumnDefinition Width="*" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <Border x:Name="OrderDetailProductImage"
-                                                                    Width="36"
-                                                                    Height="36"
-                                                                    Background="{DynamicResource PosPrimarySoftBrush}"
-                                                                    CornerRadius="6"
-                                                                    ClipToBounds="True"
-                                                                    SnapsToDevicePixels="True">
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding InstallmentEditorNotice}"
+                                                   FontSize="13"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource PosTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                    </Border>
+
+                                    <!-- 主体：只读商品表 / 修改商品编辑区二选一 -->
+                                    <Grid Grid.Row="2">
+                                        <Grid x:Name="OrderDetailsReadOnlyItemsHost"
+                                              Visibility="{Binding IsInstallmentLinesReadOnlyMode, Converter={StaticResource BoolToVis}}">
+                                            <DataGrid x:Name="OrderDetailsItemsGrid"
+                                                      ItemsSource="{Binding OrderDetailLines}"
+                                                      AutoGenerateColumns="False"
+                                                      IsReadOnly="True"
+                                                      CanUserAddRows="False"
+                                                      CanUserDeleteRows="False"
+                                                      CanUserReorderColumns="False"
+                                                      CanUserResizeColumns="False"
+                                                      CanUserSortColumns="False"
+                                                      HeadersVisibility="Column"
+                                                      RowHeaderWidth="0"
+                                                      RowHeight="48"
+                                                      MinRowHeight="48"
+                                                      GridLinesVisibility="Horizontal"
+                                                      HorizontalGridLinesBrush="{DynamicResource PosDividerBrush}"
+                                                      VerticalGridLinesBrush="Transparent"
+                                                      Background="{DynamicResource PosSurfaceBrush}"
+                                                      BorderBrush="{DynamicResource PosDividerBrush}"
+                                                      BorderThickness="0,1,0,0"
+                                                      ColumnHeaderStyle="{StaticResource HistoryColumnHeaderStyle}"
+                                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                      EnableRowVirtualization="True"
+                                                      AutomationProperties.AutomationId="TransactionHistoryOrderDetailsItemsGrid"
+                                                      Style="{StaticResource PosCartDataGridStyle}">
+                                                <DataGrid.CellStyle>
+                                                    <Style TargetType="DataGridCell" BasedOn="{StaticResource HistoryGridCellStyle}">
+                                                        <Setter Property="Padding" Value="8,0" />
+                                                    </Style>
+                                                </DataGrid.CellStyle>
+                                                <DataGrid.RowStyle>
+                                                    <Style TargetType="DataGridRow">
+                                                        <Setter Property="Height" Value="48" />
+                                                        <Setter Property="MinHeight" Value="48" />
+                                                        <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+                                                    </Style>
+                                                </DataGrid.RowStyle>
+                                                <DataGrid.Columns>
+                                                    <DataGridTemplateColumn Header="{loc:Loc Item}" Width="*">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate>
                                                                 <Grid>
-                                                                    <materialDesign:PackIcon Kind="Shopping"
-                                                                                             Width="18"
-                                                                                             Height="18"
-                                                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                                             HorizontalAlignment="Center"
-                                                                                             VerticalAlignment="Center"
-                                                                                             Panel.ZIndex="0" />
-                                                                    <Rectangle Margin="1"
-                                                                               RadiusX="5"
-                                                                               RadiusY="5"
-                                                                               SnapsToDevicePixels="True"
-                                                                               RenderOptions.BitmapScalingMode="HighQuality"
-                                                                               Panel.ZIndex="1">
-                                                                        <Rectangle.Fill>
-                                                                            <ImageBrush converters:ProductThumbnailImageSourceConverter.AsyncSourceText="{Binding ProductImage}"
-                                                                                        converters:ProductThumbnailImageSourceConverter.AsyncDecodePixelWidth="72"
-                                                                                        Stretch="Uniform" />
-                                                                        </Rectangle.Fill>
-                                                                    </Rectangle>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="36" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <Border x:Name="OrderDetailProductImage"
+                                                                            Width="36"
+                                                                            Height="36"
+                                                                            Background="{DynamicResource PosPrimarySoftBrush}"
+                                                                            CornerRadius="6"
+                                                                            ClipToBounds="True"
+                                                                            SnapsToDevicePixels="True">
+                                                                        <Grid>
+                                                                            <materialDesign:PackIcon Kind="Shopping"
+                                                                                                     Width="18"
+                                                                                                     Height="18"
+                                                                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                                                     HorizontalAlignment="Center"
+                                                                                                     VerticalAlignment="Center"
+                                                                                                     Panel.ZIndex="0" />
+                                                                            <Rectangle Margin="1"
+                                                                                       RadiusX="5"
+                                                                                       RadiusY="5"
+                                                                                       SnapsToDevicePixels="True"
+                                                                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                                                                       Panel.ZIndex="1">
+                                                                                <Rectangle.Fill>
+                                                                                    <ImageBrush converters:ProductThumbnailImageSourceConverter.AsyncSourceText="{Binding ProductImage}"
+                                                                                                converters:ProductThumbnailImageSourceConverter.AsyncDecodePixelWidth="72"
+                                                                                                Stretch="Uniform" />
+                                                                                </Rectangle.Fill>
+                                                                            </Rectangle>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                    <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                                   FontSize="14"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="{DynamicResource PosTextBrush}"
+                                                                                   TextWrapping="NoWrap"
+                                                                                   TextTrimming="CharacterEllipsis"
+                                                                                   ToolTip="{Binding DisplayName}" />
+                                                                        <TextBlock x:Name="OrderDetailItemMetadata"
+                                                                                   Margin="0,2,0,0"
+                                                                                   FontSize="12"
+                                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                                   TextWrapping="NoWrap"
+                                                                                   TextTrimming="CharacterEllipsis">
+                                                                            <TextBlock.ToolTip>
+                                                                                <ToolTip>
+                                                                                    <TextBlock TextWrapping="NoWrap">
+                                                                                        <Run Text="{loc:Loc ItemNumber}" />
+                                                                                        <Run Text=": " />
+                                                                                        <Run Text="{Binding ItemNumberDisplay, Mode=OneWay}" />
+                                                                                        <Run Text="  " />
+                                                                                        <Run Text="{Binding LookupCodeDisplay, Mode=OneWay}" />
+                                                                                    </TextBlock>
+                                                                                </ToolTip>
+                                                                            </TextBlock.ToolTip>
+                                                                            <Run Text="{loc:Loc ItemNumber}" />
+                                                                            <Run Text=": " />
+                                                                            <Run Text="{Binding ItemNumberDisplay, Mode=OneWay}" />
+                                                                            <Run Text="  " />
+                                                                            <Run Text="{Binding LookupCodeDisplay, Mode=OneWay}" />
+                                                                        </TextBlock>
+                                                                    </StackPanel>
                                                                 </Grid>
-                                                            </Border>
-                                                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                                                                <TextBlock Text="{Binding DisplayName}"
-                                                                           FontSize="14"
-                                                                           FontWeight="SemiBold"
-                                                                           Foreground="{DynamicResource PosTextBrush}"
-                                                                           TextWrapping="NoWrap"
-                                                                           TextTrimming="CharacterEllipsis"
-                                                                           ToolTip="{Binding DisplayName}" />
-                                                                <TextBlock x:Name="OrderDetailItemMetadata"
-                                                                           Margin="0,2,0,0"
-                                                                           FontSize="12"
-                                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                                           TextWrapping="NoWrap"
-                                                                           TextTrimming="CharacterEllipsis">
-                                                                    <TextBlock.ToolTip>
-                                                                        <ToolTip>
-                                                                            <TextBlock TextWrapping="NoWrap">
-                                                                                <Run Text="{loc:Loc ItemNumber}" />
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                    <DataGridTextColumn Header="{loc:Loc Quantity}"
+                                                                        Width="64"
+                                                                        Binding="{Binding QuantityDisplay}"
+                                                                        ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
+                                                    <DataGridTextColumn Header="{loc:Loc UnitPrice}"
+                                                                        Width="90"
+                                                                        Binding="{Binding UnitPrice, StringFormat={}{0:C2}}"
+                                                                        ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
+                                                    <DataGridTextColumn Header="{loc:Loc Discount}"
+                                                                        Width="90"
+                                                                        Binding="{Binding DiscountAmount, StringFormat={}{0:C2}}"
+                                                                        ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
+                                                    <DataGridTextColumn Header="{loc:Loc LineTotal}"
+                                                                        Width="100"
+                                                                        Binding="{Binding ActualAmount, StringFormat={}{0:C2}}"
+                                                                        ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+
+                                        <!-- 修改商品：加商品检索 / 可编辑行 / 新旧金额汇总；保存中整体禁用 -->
+                                        <Grid x:Name="OrderDetailsEditPanel"
+                                              Visibility="{Binding IsEditingInstallmentLines, Converter={StaticResource BoolToVis}}"
+                                              IsEnabled="{Binding IsInstallmentEditorInputEnabled}"
+                                              AutomationProperties.AutomationId="TransactionHistoryOrderDetailsEditPanel">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <Grid Grid.Row="0" Margin="12,2,12,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="OrderDetailsEditSearchBox"
+                                                         Height="44"
+                                                         FontSize="13"
+                                                         Padding="12,0"
+                                                         VerticalContentAlignment="Center"
+                                                         Text="{Binding InstallmentLineSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                                         materialDesign:HintAssist.Hint="{loc:Loc history.installment.editSearchHint}"
+                                                         AutomationProperties.AutomationId="TransactionHistoryEditItemsSearchBox"
+                                                         AutomationProperties.Name="{loc:Loc history.installment.editSearchHint}"
+                                                         Style="{StaticResource PosSearchTextBoxStyle}">
+                                                    <TextBox.InputBindings>
+                                                        <KeyBinding Key="Return" Command="{Binding SearchInstallmentLineProductsCommand}" />
+                                                    </TextBox.InputBindings>
+                                                </TextBox>
+                                                <Button Grid.Column="1"
+                                                        Margin="8,0,0,0"
+                                                        Command="{Binding SearchInstallmentLineProductsCommand}"
+                                                        ToolTip="{loc:Loc history.installment.editSearch}"
+                                                        AutomationProperties.AutomationId="TransactionHistoryEditItemsSearchButton"
+                                                        AutomationProperties.Name="{loc:Loc history.installment.editSearch}"
+                                                        Style="{StaticResource HistoryPrimaryIconButtonStyle}">
+                                                    <materialDesign:PackIcon Kind="Magnify" Width="20" Height="20" />
+                                                </Button>
+                                            </Grid>
+
+                                            <StackPanel Grid.Row="1" Margin="12,0,12,8">
+                                                <TextBlock Text="{Binding InstallmentLineSearchMessage}"
+                                                           FontSize="12"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                           TextWrapping="Wrap"
+                                                           Visibility="{Binding InstallmentLineSearchMessage, Converter={StaticResource StringHasValueToVis}}" />
+                                                <Border BorderBrush="{DynamicResource PosDividerBrush}"
+                                                        BorderThickness="1,1,1,0"
+                                                        CornerRadius="6"
+                                                        ClipToBounds="True"
+                                                        Visibility="{Binding HasInstallmentLineSearchResults, Converter={StaticResource BoolToVis}}"
+                                                        AutomationProperties.AutomationId="TransactionHistoryEditItemsCandidates">
+                                                    <ScrollViewer MaxHeight="192"
+                                                                  Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                                                  VerticalScrollBarVisibility="Auto"
+                                                                  HorizontalScrollBarVisibility="Disabled">
+                                                        <ItemsControl ItemsSource="{Binding InstallmentLineSearchResults}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Button Command="{Binding DataContext.AddInstallmentLineProductCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                            CommandParameter="{Binding}"
+                                                                            AutomationProperties.AutomationId="TransactionHistoryEditItemsCandidateButton"
+                                                                            AutomationProperties.Name="{Binding DisplayName}"
+                                                                            Style="{StaticResource HistoryEditCandidateButtonStyle}">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <StackPanel VerticalAlignment="Center">
+                                                                                <TextBlock Text="{Binding DisplayName}"
+                                                                                           FontSize="14"
+                                                                                           FontWeight="SemiBold"
+                                                                                           Foreground="{DynamicResource PosTextBrush}"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                                <TextBlock Text="{Binding LookupCode}"
+                                                                                           Margin="0,2,0,0"
+                                                                                           FontSize="12"
+                                                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                            </StackPanel>
+                                                                            <TextBlock Grid.Column="1"
+                                                                                       Margin="12,0,0,0"
+                                                                                       Text="{Binding RetailPrice, StringFormat={}{0:C2}}"
+                                                                                       FontSize="14"
+                                                                                       FontWeight="Bold"
+                                                                                       Foreground="{DynamicResource PosTextBrush}"
+                                                                                       VerticalAlignment="Center" />
+                                                                        </Grid>
+                                                                    </Button>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </ScrollViewer>
+                                                </Border>
+                                            </StackPanel>
+
+                                            <!-- 列头：与行模板共用同一组列宽 -->
+                                            <Grid Grid.Row="2" Margin="12,0,12,0" Height="28">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="96" />
+                                                    <ColumnDefinition Width="84" />
+                                                    <ColumnDefinition Width="52" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{loc:Loc Item}" Style="{StaticResource HistoryPreviewLabelStyle}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="{loc:Loc Quantity}" Style="{StaticResource HistoryPreviewLabelStyle}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{loc:Loc UnitPrice}" Style="{StaticResource HistoryPreviewLabelStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                                <TextBlock Grid.Column="3" Text="{loc:Loc LineTotal}" Style="{StaticResource HistoryPreviewLabelStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+
+                                            <Border Grid.Row="3"
+                                                    BorderBrush="{DynamicResource PosDividerBrush}"
+                                                    BorderThickness="0,1,0,0">
+                                                <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              HorizontalScrollBarVisibility="Disabled">
+                                                    <ItemsControl ItemsSource="{Binding InstallmentEditor.Rows}"
+                                                                  AutomationProperties.AutomationId="TransactionHistoryEditItemsRows">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border BorderBrush="{DynamicResource PosDividerBrush}"
+                                                                        BorderThickness="0,0,0,1"
+                                                                        MinHeight="64">
+                                                                    <Grid Margin="12,6">
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="*" />
+                                                                            <ColumnDefinition Width="150" />
+                                                                            <ColumnDefinition Width="96" />
+                                                                            <ColumnDefinition Width="84" />
+                                                                            <ColumnDefinition Width="52" />
+                                                                        </Grid.ColumnDefinitions>
+
+                                                                        <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                                                            <Grid>
+                                                                                <Grid.ColumnDefinitions>
+                                                                                    <ColumnDefinition Width="*" />
+                                                                                    <ColumnDefinition Width="Auto" />
+                                                                                </Grid.ColumnDefinitions>
+                                                                                <TextBlock Text="{Binding DisplayName}"
+                                                                                           FontSize="14"
+                                                                                           FontWeight="SemiBold"
+                                                                                           Foreground="{DynamicResource PosTextBrush}"
+                                                                                           TextTrimming="CharacterEllipsis"
+                                                                                           ToolTip="{Binding DisplayName}" />
+                                                                                <Border Grid.Column="1"
+                                                                                        Margin="6,0,0,0"
+                                                                                        Padding="6,1"
+                                                                                        CornerRadius="4"
+                                                                                        Background="{DynamicResource PosPrimarySoftBrush}"
+                                                                                        Visibility="{Binding IsNew, Converter={StaticResource BoolToVis}}">
+                                                                                    <TextBlock Text="{loc:Loc history.installment.editNewBadge}"
+                                                                                               FontSize="11"
+                                                                                               FontWeight="SemiBold"
+                                                                                               Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                                                                </Border>
+                                                                            </Grid>
+                                                                            <TextBlock Text="{Binding MetadataDisplay}"
+                                                                                       Margin="0,2,0,0"
+                                                                                       FontSize="12"
+                                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                                       TextTrimming="CharacterEllipsis" />
+                                                                            <TextBlock Margin="0,2,0,0"
+                                                                                       FontSize="12"
+                                                                                       Foreground="{DynamicResource PosWarningTextBrush}"
+                                                                                       Visibility="{Binding HasDiscount, Converter={StaticResource BoolToVis}}">
+                                                                                <Run Text="{loc:Loc Discount}" />
                                                                                 <Run Text=": " />
-                                                                                <Run Text="{Binding ItemNumberDisplay, Mode=OneWay}" />
-                                                                                <Run Text="  " />
-                                                                                <Run Text="{Binding LookupCodeDisplay, Mode=OneWay}" />
+                                                                                <Run Text="{Binding DiscountAmount, Mode=OneWay, StringFormat={}{0:C2}}" />
                                                                             </TextBlock>
-                                                                        </ToolTip>
-                                                                    </TextBlock.ToolTip>
-                                                                    <Run Text="{loc:Loc ItemNumber}" />
-                                                                    <Run Text=": " />
-                                                                    <Run Text="{Binding ItemNumberDisplay, Mode=OneWay}" />
-                                                                    <Run Text="  " />
-                                                                    <Run Text="{Binding LookupCodeDisplay, Mode=OneWay}" />
-                                                                </TextBlock>
-                                                            </StackPanel>
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTextColumn Header="{loc:Loc Quantity}"
-                                                                Width="64"
-                                                                Binding="{Binding QuantityDisplay}"
-                                                                ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
-                                            <DataGridTextColumn Header="{loc:Loc UnitPrice}"
-                                                                Width="90"
-                                                                Binding="{Binding UnitPrice, StringFormat={}{0:C2}}"
-                                                                ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
-                                            <DataGridTextColumn Header="{loc:Loc Discount}"
-                                                                Width="90"
-                                                                Binding="{Binding DiscountAmount, StringFormat={}{0:C2}}"
-                                                                ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
-                                            <DataGridTextColumn Header="{loc:Loc LineTotal}"
-                                                                Width="100"
-                                                                Binding="{Binding ActualAmount, StringFormat={}{0:C2}}"
-                                                                ElementStyle="{StaticResource HistoryPrimaryTextStyle}" />
-                                        </DataGrid.Columns>
-                                    </DataGrid>
+                                                                        </StackPanel>
+
+                                                                        <!-- 数量步进：− [数量] +，均为 44px 触控目标 -->
+                                                                        <StackPanel Grid.Column="1"
+                                                                                    Orientation="Horizontal"
+                                                                                    HorizontalAlignment="Center"
+                                                                                    VerticalAlignment="Center">
+                                                                            <Button Command="{Binding DecrementCommand}"
+                                                                                    ToolTip="{loc:Loc history.installment.editDecrease}"
+                                                                                    AutomationProperties.AutomationId="TransactionHistoryEditItemsDecrease"
+                                                                                    AutomationProperties.Name="{loc:Loc history.installment.editDecrease}"
+                                                                                    Style="{StaticResource HistoryIconButtonStyle}">
+                                                                                <materialDesign:PackIcon Kind="Minus" Width="18" Height="18" />
+                                                                            </Button>
+                                                                            <TextBox Width="54"
+                                                                                     Height="44"
+                                                                                     Margin="4,0"
+                                                                                     Padding="2,0"
+                                                                                     FontSize="14"
+                                                                                     TextAlignment="Center"
+                                                                                     VerticalContentAlignment="Center"
+                                                                                     InputScope="Number"
+                                                                                     Text="{Binding QuantityText, UpdateSourceTrigger=PropertyChanged}"
+                                                                                     AutomationProperties.AutomationId="TransactionHistoryEditItemsQuantity"
+                                                                                     AutomationProperties.Name="{loc:Loc Quantity}">
+                                                                                <TextBox.Style>
+                                                                                    <Style TargetType="TextBox" BasedOn="{StaticResource PosSearchTextBoxStyle}">
+                                                                                        <Style.Triggers>
+                                                                                            <DataTrigger Binding="{Binding IsQuantityInvalid}" Value="True">
+                                                                                                <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
+                                                                                                <Setter Property="BorderThickness" Value="2" />
+                                                                                            </DataTrigger>
+                                                                                        </Style.Triggers>
+                                                                                    </Style>
+                                                                                </TextBox.Style>
+                                                                            </TextBox>
+                                                                            <Button Command="{Binding IncrementCommand}"
+                                                                                    ToolTip="{loc:Loc history.installment.editIncrease}"
+                                                                                    AutomationProperties.AutomationId="TransactionHistoryEditItemsIncrease"
+                                                                                    AutomationProperties.Name="{loc:Loc history.installment.editIncrease}"
+                                                                                    Style="{StaticResource HistoryIconButtonStyle}">
+                                                                                <materialDesign:PackIcon Kind="Plus" Width="18" Height="18" />
+                                                                            </Button>
+                                                                        </StackPanel>
+
+                                                                        <TextBox Grid.Column="2"
+                                                                                 Width="88"
+                                                                                 Height="44"
+                                                                                 HorizontalAlignment="Right"
+                                                                                 VerticalAlignment="Center"
+                                                                                 Padding="6,0"
+                                                                                 FontSize="14"
+                                                                                 TextAlignment="Right"
+                                                                                 VerticalContentAlignment="Center"
+                                                                                 InputScope="Number"
+                                                                                 Text="{Binding UnitPriceText, UpdateSourceTrigger=PropertyChanged}"
+                                                                                 AutomationProperties.AutomationId="TransactionHistoryEditItemsUnitPrice"
+                                                                                 AutomationProperties.Name="{loc:Loc UnitPrice}">
+                                                                            <TextBox.Style>
+                                                                                <Style TargetType="TextBox" BasedOn="{StaticResource PosAmountTextBoxStyle}">
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding IsUnitPriceInvalid}" Value="True">
+                                                                                            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
+                                                                                            <Setter Property="BorderThickness" Value="2" />
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </TextBox.Style>
+                                                                        </TextBox>
+
+                                                                        <TextBlock Grid.Column="3"
+                                                                                   Text="{Binding ActualAmount, StringFormat={}{0:C2}}"
+                                                                                   FontSize="14"
+                                                                                   FontWeight="Bold"
+                                                                                   Foreground="{DynamicResource PosTextBrush}"
+                                                                                   HorizontalAlignment="Right"
+                                                                                   VerticalAlignment="Center" />
+
+                                                                        <Button Grid.Column="4"
+                                                                                HorizontalAlignment="Right"
+                                                                                VerticalAlignment="Center"
+                                                                                Command="{Binding RemoveCommand}"
+                                                                                ToolTip="{loc:Loc history.installment.editRemoveLine}"
+                                                                                AutomationProperties.AutomationId="TransactionHistoryEditItemsRemove"
+                                                                                AutomationProperties.Name="{loc:Loc history.installment.editRemoveLine}"
+                                                                                Style="{StaticResource HistoryIconButtonStyle}">
+                                                                            <materialDesign:PackIcon Kind="TrashCanOutline" Width="19" Height="19" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                                                        </Button>
+                                                                    </Grid>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </ScrollViewer>
+                                            </Border>
+
+                                            <!-- 汇总条：新总额 / 已付 / 新余额 / 差额，下方是实时校验提示 -->
+                                            <Border Grid.Row="4"
+                                                    Padding="14,8"
+                                                    Background="{DynamicResource PosSurfaceAltBrush}"
+                                                    BorderBrush="{DynamicResource PosDividerBrush}"
+                                                    BorderThickness="0,1,0,0"
+                                                    AutomationProperties.AutomationId="TransactionHistoryEditItemsSummary">
+                                                <StackPanel>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <StackPanel Margin="0,0,24,0">
+                                                            <TextBlock Text="{loc:Loc history.installment.editNewTotal}" Style="{StaticResource HistoryPreviewLabelStyle}" />
+                                                            <TextBlock Text="{Binding InstallmentEditor.NewTotal, StringFormat={}{0:C2}}"
+                                                                       FontSize="18"
+                                                                       FontWeight="Black"
+                                                                       Foreground="{DynamicResource PosTextBrush}" />
+                                                        </StackPanel>
+                                                        <StackPanel Margin="0,0,24,0">
+                                                            <TextBlock Text="{loc:Loc history.paidAmount}" Style="{StaticResource HistoryPreviewLabelStyle}" />
+                                                            <TextBlock Text="{Binding InstallmentEditor.PaidAmount, StringFormat={}{0:C2}}"
+                                                                       FontSize="18"
+                                                                       FontWeight="Bold"
+                                                                       Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                                        </StackPanel>
+                                                        <StackPanel Margin="0,0,24,0">
+                                                            <TextBlock Text="{loc:Loc history.installment.editNewBalance}" Style="{StaticResource HistoryPreviewLabelStyle}" />
+                                                            <TextBlock Text="{Binding InstallmentEditor.NewBalance, StringFormat={}{0:C2}}"
+                                                                       FontSize="18"
+                                                                       FontWeight="Bold"
+                                                                       Foreground="{DynamicResource PosWarningTextBrush}" />
+                                                        </StackPanel>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{loc:Loc history.installment.editDelta}" Style="{StaticResource HistoryPreviewLabelStyle}" />
+                                                            <TextBlock Text="{Binding InstallmentEditor.Delta, StringFormat={}{0:+0.00;-0.00;0.00}}"
+                                                                       FontSize="18"
+                                                                       FontWeight="Bold"
+                                                                       Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                    <TextBlock x:Name="OrderDetailsEditMessageText"
+                                                               Margin="0,6,0,0"
+                                                               Text="{Binding InstallmentEditorMessage}"
+                                                               FontSize="13"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource PosDangerTextBrush}"
+                                                               TextWrapping="Wrap"
+                                                               Visibility="{Binding InstallmentEditorMessage, Converter={StaticResource StringHasValueToVis}}" />
+                                                    <TextBlock Margin="0,6,0,0"
+                                                               Text="{Binding InstallmentEditorHint}"
+                                                               FontSize="13"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource PosSuccessTextBrush}"
+                                                               TextWrapping="Wrap"
+                                                               Visibility="{Binding InstallmentEditorHint, Converter={StaticResource StringHasValueToVis}}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </Grid>
                                 </Grid>
                             </Border>
 
@@ -1973,6 +2364,21 @@
                             <StackPanel Grid.Column="1"
                                         Orientation="Horizontal"
                                         VerticalAlignment="Center">
+                                <!-- 仅分期单、状态允许、在线且未被恢复锁定时出现；点击后进入商品编辑态 -->
+                                <Button x:Name="OrderDetailsEditItemsButton"
+                                        Command="{Binding BeginEditInstallmentLinesCommand}"
+                                        Visibility="{Binding IsEditInstallmentLinesVisible, Converter={StaticResource BoolToVis}}"
+                                        Height="44"
+                                        MinWidth="132"
+                                        Margin="0,0,10,0"
+                                        AutomationProperties.AutomationId="TransactionHistoryOrderDetailsEditItemsButton"
+                                        AutomationProperties.Name="{loc:Loc history.installment.editItems}"
+                                        Style="{StaticResource PosSecondaryButtonStyle}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="PencilOutline" Width="18" Height="18" VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc history.installment.editItems}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
                                 <!-- 仅分期单且仍可补款时出现；点击后先关弹窗再进入继续支付页 -->
                                 <Button x:Name="OrderDetailsContinuePaymentButton"
                                         Command="{Binding ContinueInstallmentPaymentCommand}"
@@ -1991,10 +2397,31 @@
                                 </Button>
                                 <Button Command="{Binding CloseOrderDetailsCommand}"
                                         Content="{loc:Loc history.closeOrderDetails}"
+                                        Visibility="{Binding IsInstallmentLinesReadOnlyMode, Converter={StaticResource BoolToVis}}"
                                         Height="44"
                                         MinWidth="108"
                                         AutomationProperties.Name="{loc:Loc history.closeOrderDetails}"
                                         Style="{StaticResource PosSecondaryButtonStyle}" />
+                                <!-- 编辑态：取消（放弃修改）/ 保存（先主管授权再提交） -->
+                                <Button x:Name="OrderDetailsEditCancelButton"
+                                        Command="{Binding CancelInstallmentLinesEditCommand}"
+                                        Content="{loc:Loc history.installment.editCancel}"
+                                        Visibility="{Binding IsEditingInstallmentLines, Converter={StaticResource BoolToVis}}"
+                                        Height="44"
+                                        MinWidth="108"
+                                        Margin="0,0,10,0"
+                                        AutomationProperties.AutomationId="TransactionHistoryOrderDetailsEditCancelButton"
+                                        AutomationProperties.Name="{loc:Loc history.installment.editCancel}"
+                                        Style="{StaticResource PosSecondaryButtonStyle}" />
+                                <Button x:Name="OrderDetailsEditSaveButton"
+                                        Command="{Binding SaveInstallmentLinesCommand}"
+                                        Content="{Binding InstallmentEditorSaveButtonText}"
+                                        Visibility="{Binding IsEditingInstallmentLines, Converter={StaticResource BoolToVis}}"
+                                        Height="44"
+                                        MinWidth="132"
+                                        AutomationProperties.AutomationId="TransactionHistoryOrderDetailsEditSaveButton"
+                                        AutomationProperties.Name="{loc:Loc history.installment.editSave}"
+                                        Style="{StaticResource PosPrimaryButtonStyle}" />
                             </StackPanel>
                         </Grid>
                     </Border>

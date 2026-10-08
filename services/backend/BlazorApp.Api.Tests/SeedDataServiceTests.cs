@@ -199,6 +199,7 @@ namespace BlazorApp.Api.Tests
             Assert.Contains(Permissions.PosTerminal.Payment.Confirm, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.Contains(Permissions.PosTerminal.Returns.Confirm, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.Contains(Permissions.PosTerminal.Installments.AddRepayment, PermissionSeedData.PosTerminalBusinessPermissionCodes);
+            Assert.Contains(Permissions.PosTerminal.Installments.AmendLines, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.DoesNotContain(Permissions.PosTerminal.Settings.AppUpdate, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.DoesNotContain(Permissions.PosTerminal.Settings.TestDataReset, PermissionSeedData.PosTerminalBusinessPermissionCodes);
             Assert.DoesNotContain(Permissions.PosTerminal.SpecialProducts.Manage, PermissionSeedData.PosTerminalBusinessPermissionCodes);

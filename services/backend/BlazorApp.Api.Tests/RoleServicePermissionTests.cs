@@ -120,6 +120,7 @@ public sealed class RoleServicePermissionTests : IDisposable
             Permissions.PosTerminal.Installments.AddRepayment,
             Permissions.PosTerminal.Installments.Cancel,
             Permissions.PosTerminal.Installments.ConfirmPickup,
+            Permissions.PosTerminal.Installments.AmendLines,
             Permissions.PosTerminal.Settings.View,
             Permissions.PosTerminal.Settings.PaymentTerminal,
             Permissions.PosTerminal.Settings.ReceiptPrinter,

@@ -2010,6 +2010,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/installments/{installmentGuid}/amend-lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    installmentGuid: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["InstallmentAmendLinesRequest"];
+                    "text/json": components["schemas"]["InstallmentAmendLinesRequest"];
+                    "application/*+json": components["schemas"]["InstallmentAmendLinesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["InstallmentAmendLinesResponseApiResult"];
+                        "application/json": components["schemas"]["InstallmentAmendLinesResponseApiResult"];
+                        "text/json": components["schemas"]["InstallmentAmendLinesResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/installments/history": {
         parameters: {
             query?: never;
@@ -6135,6 +6180,36 @@ export interface components {
          * @enum {integer}
          */
         HeldOrderSourceKind: 1 | 2;
+        InstallmentAmendLinesRequest: {
+            /** Format: uuid */
+            installmentGuid?: string;
+            storeCode?: string | null;
+            deviceCode?: string | null;
+            cashierId?: string | null;
+            cashierName?: string | null;
+            lines?: components["schemas"]["InstallmentLineDto"][] | null;
+            /** Format: date-time */
+            expectedUpdatedAt?: string;
+            reason?: string | null;
+        };
+        InstallmentAmendLinesResponse: {
+            /** Format: uuid */
+            installmentGuid?: string;
+            status?: components["schemas"]["InstallmentStatus"];
+            /** Format: double */
+            totalAmount?: number;
+            /** Format: double */
+            paidAmount?: number;
+            /** Format: double */
+            balanceAmount?: number;
+            details?: components["schemas"]["InstallmentDetailsDto"];
+        };
+        InstallmentAmendLinesResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["InstallmentAmendLinesResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
         InstallmentAppendPaymentRequest: {
             /** Format: uuid */
             installmentGuid?: string;
@@ -6468,6 +6543,7 @@ export interface components {
             crossDevicePickupEnabled?: boolean;
             cardRepaymentSupported?: boolean;
             repaymentClaimPrepareProviderV1?: boolean;
+            amendLinesSupported?: boolean;
         };
         InstallmentRepaymentCapabilitiesResponseApiResult: {
             success?: boolean;

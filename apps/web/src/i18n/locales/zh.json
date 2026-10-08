@@ -4006,6 +4006,7 @@
       "cardPaymentSupervisorResolution": "主管付款结案",
       "permissionOverride": "主管授权",
       "installmentPickupConfirm": "分期确认提货",
+      "installmentLinesAmend": "分期修改商品列表",
       "catalogReset": "重置商品目录",
       "testSalesDataReset": "重置测试销售数据",
       "deviceReregister": "设备换绑门店",

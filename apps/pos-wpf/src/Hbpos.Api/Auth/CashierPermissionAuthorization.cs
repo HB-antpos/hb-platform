@@ -20,6 +20,7 @@ public static class CashierAuthorizationPolicies
     public const string InstallmentPayment = "Cashier.InstallmentPayment";
     public const string InstallmentPickup = "Cashier.InstallmentPickup";
     public const string InstallmentCancel = "Cashier.InstallmentCancel";
+    public const string InstallmentAmendLines = "Cashier.InstallmentAmendLines";
     public const string TakeCard = "Cashier.TakeCard";
     public const string DailyCloseSave = "Cashier.DailyCloseSave";
     public const string DailyClosePrint = "Cashier.DailyClosePrint";
@@ -50,6 +51,7 @@ public static class CashierAuthorizationPolicies
         Add(options, InstallmentPayment, Permissions.PosTerminal.Installments.AddRepayment);
         Add(options, InstallmentPickup, Permissions.PosTerminal.Installments.ConfirmPickup);
         Add(options, InstallmentCancel, Permissions.PosTerminal.Installments.Cancel);
+        Add(options, InstallmentAmendLines, Permissions.PosTerminal.Installments.AmendLines);
         AddAll(options, TakeCard,
             Permissions.PosTerminal.Payment.TakeCard,
             Permissions.PosTerminal.Payment.Confirm);

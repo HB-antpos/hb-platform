@@ -684,6 +684,38 @@
   <data name="history.held.unavailable" xml:space="preserve"><value>Shared held orders are not configured on this terminal.</value></data>
   <data name="history.installment.paid" xml:space="preserve"><value>Paid</value></data>
   <data name="history.installment.continuePayment" xml:space="preserve"><value>Continue Payment</value></data>
+  <data name="history.installment.editItems" xml:space="preserve"><value>Edit items</value></data>
+  <data name="history.installment.editCancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="history.installment.editSave" xml:space="preserve"><value>Save changes</value></data>
+  <data name="history.installment.editSaving" xml:space="preserve"><value>Saving...</value></data>
+  <data name="history.installment.editSearchHint" xml:space="preserve"><value>Scan or type an item code / name to add</value></data>
+  <data name="history.installment.editSearch" xml:space="preserve"><value>Search item</value></data>
+  <data name="history.installment.editNoResults" xml:space="preserve"><value>No matching product was found.</value></data>
+  <data name="history.installment.editSearchFailed" xml:space="preserve"><value>Product search failed: {0}</value></data>
+  <data name="history.installment.editNewTotal" xml:space="preserve"><value>New total</value></data>
+  <data name="history.installment.editNewBalance" xml:space="preserve"><value>New balance</value></data>
+  <data name="history.installment.editDelta" xml:space="preserve"><value>vs. original</value></data>
+  <data name="history.installment.editRemoveLine" xml:space="preserve"><value>Remove item</value></data>
+  <data name="history.installment.editIncrease" xml:space="preserve"><value>Increase quantity</value></data>
+  <data name="history.installment.editDecrease" xml:space="preserve"><value>Decrease quantity</value></data>
+  <data name="history.installment.editNewBadge" xml:space="preserve"><value>New</value></data>
+  <data name="history.installment.editInvalidInput" xml:space="preserve"><value>Check the quantity (a whole number of 1 or more) and the unit price (greater than 0).</value></data>
+  <data name="history.installment.editNoLines" xml:space="preserve"><value>At least one item is required.</value></data>
+  <data name="history.installment.editInvalidLines" xml:space="preserve"><value>Some items are incomplete and cannot be saved.</value></data>
+  <data name="history.installment.editTotalBelowPaid" xml:space="preserve"><value>New total {0} cannot be lower than the paid amount {1}.</value></data>
+  <data name="history.installment.editTotalBelowMinimum" xml:space="preserve"><value>New total {0} cannot be lower than the minimum {1}.</value></data>
+  <data name="history.installment.editWillBePaidOff" xml:space="preserve"><value>The balance will be $0.00. After saving, the order is paid off and ready for pickup.</value></data>
+  <data name="history.installment.editSaved" xml:space="preserve"><value>Items updated.</value></data>
+  <data name="history.installment.editSavedPaidOff" xml:space="preserve"><value>Saved. The order is paid off and ready for pickup.</value></data>
+  <data name="history.installment.editSavedOutstanding" xml:space="preserve"><value>Saved. Outstanding balance {0}.</value></data>
+  <data name="history.installment.editStale" xml:space="preserve"><value>This order was changed on another device and has been refreshed. Please edit again.</value></data>
+  <data name="history.installment.editStatusNotAllowed" xml:space="preserve"><value>This order's status no longer allows editing items. It has been refreshed.</value></data>
+  <data name="history.installment.editOnlineRequired" xml:space="preserve"><value>Editing items requires an online connection.</value></data>
+  <data name="history.installment.editUnsupported" xml:space="preserve"><value>The server does not support editing items yet, or support could not be confirmed. Please try again later.</value></data>
+  <data name="history.installment.editUnknown" xml:space="preserve"><value>The result could not be confirmed. Check the order, then save again if needed. Saving again will not apply the change twice.</value></data>
+  <data name="history.installment.editFailed" xml:space="preserve"><value>Save failed: {0}</value></data>
+  <data name="history.installment.editDiscardHint" xml:space="preserve"><value>You have unsaved changes. Save them, or tap Cancel to discard them.</value></data>
+  <data name="history.installment.editStateChanged" xml:space="preserve"><value>The order or connection changed while waiting for authorization. Please try again.</value></data>
   <data name="history.installment.status.paymentDue" xml:space="preserve"><value>Payment due</value></data>
   <data name="history.installment.status.readyForPickup" xml:space="preserve"><value>Ready for pickup</value></data>
   <data name="history.installment.status.pickedUp" xml:space="preserve"><value>Picked up</value></data>

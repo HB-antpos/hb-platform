@@ -144,6 +144,7 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   CARD_PAYMENT_SUPERVISOR_RESOLUTION: 'operationLogs.operations.cardPaymentSupervisorResolution',
   PERMISSION_OVERRIDE: 'operationLogs.operations.permissionOverride',
   INSTALLMENT_PICKUP_CONFIRM: 'operationLogs.operations.installmentPickupConfirm',
+  INSTALLMENT_LINES_AMEND: 'operationLogs.operations.installmentLinesAmend',
   CATALOG_RESET: 'operationLogs.operations.catalogReset',
   TEST_SALES_DATA_RESET: 'operationLogs.operations.testSalesDataReset',
   DEVICE_REREGISTER: 'operationLogs.operations.deviceReregister',

@@ -184,11 +184,16 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private readonly IOrderUploadExecutionService _orderUploadExecutionService;
     private readonly IConfirmationDialogService? _confirmationDialogService;
     private readonly LocalSellableItemIndex? _localSellableItemIndex;
+    private readonly IInstallmentLineProductSearch _installmentLineProductSearch;
     private readonly IRawScannerService? _rawScannerService;
     private readonly TimeProvider _timeProvider;
     private readonly ObservableCollection<HistoryOrderDetailLine> _orderDetailLines = [];
     private readonly ObservableCollection<HistoryOrderPaymentEntry> _orderDetailPayments = [];
     private LocalInstallmentOrder? _selectedInstallmentDetails;
+    // “修改商品”编辑态：基线是编辑器加载时的订单详情（乐观并发令牌与已付金额都取自它）。
+    private LocalInstallmentOrder? _installmentEditBaseline;
+    private CancellationTokenSource? _installmentProductSearchCancellation;
+    private long _installmentProductSearchGeneration;
     private bool _suppressSelectedOrderLoad;
     private bool _suppressSourceAutoLoad;
     private bool _disposed;
@@ -339,8 +344,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         TimeProvider? timeProvider = null,
         ISharedHeldOrderPublicationWorker? sharedHeldOrderPublicationWorker = null,
         LocalSellableItemIndex? localSellableItemIndex = null,
-        IRawScannerService? rawScannerService = null)
-        : this(receiptQueryService, suspendedOrderService, remoteOrderHistoryService, session, onSuspendedOrderRecalledAsync, returnToPos, localization, receiptTextFormatter, receiptPrinterSettingsStore, cashierSessionContext, enforcePermissionsWhenNoCashier, installmentOrderService, continueInstallmentPaymentAsync, operationAuditLogger, operationAuthorizationService, orderUploadExecutionService, confirmationDialogService, sharedHeldOrderCoordinator, sharedHeldOrderApiClient, sharedHeldOrderRepository, timeProvider, sharedHeldOrderPublicationWorker, localSellableItemIndex, rawScannerService, initialize: true)
+        IRawScannerService? rawScannerService = null,
+        IInstallmentLineProductSearch? installmentLineProductSearch = null)
+        : this(receiptQueryService, suspendedOrderService, remoteOrderHistoryService, session, onSuspendedOrderRecalledAsync, returnToPos, localization, receiptTextFormatter, receiptPrinterSettingsStore, cashierSessionContext, enforcePermissionsWhenNoCashier, installmentOrderService, continueInstallmentPaymentAsync, operationAuditLogger, operationAuthorizationService, orderUploadExecutionService, confirmationDialogService, sharedHeldOrderCoordinator, sharedHeldOrderApiClient, sharedHeldOrderRepository, timeProvider, sharedHeldOrderPublicationWorker, localSellableItemIndex, rawScannerService, initialize: true, installmentLineProductSearch: installmentLineProductSearch)
     {
     }
 
@@ -369,7 +375,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         ISharedHeldOrderPublicationWorker? sharedHeldOrderPublicationWorker,
         LocalSellableItemIndex? localSellableItemIndex,
         IRawScannerService? rawScannerService,
-        bool initialize)
+        bool initialize,
+        IInstallmentLineProductSearch? installmentLineProductSearch = null)
     {
         _receiptQueryService = receiptQueryService;
         _suspendedOrderService = suspendedOrderService;
@@ -392,6 +399,11 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         _orderUploadExecutionService = orderUploadExecutionService ?? NoopOrderUploadExecutionService.Instance;
         _confirmationDialogService = confirmationDialogService;
         _localSellableItemIndex = localSellableItemIndex;
+        // 修改商品的加商品检索：显式注入优先，否则复用已有的本机商品索引，都没有则查不到商品。
+        _installmentLineProductSearch = installmentLineProductSearch ??
+            (localSellableItemIndex is null
+                ? NoopInstallmentLineProductSearch.Instance
+                : new LocalInstallmentLineProductSearch(localSellableItemIndex));
         _rawScannerService = rawScannerService;
         _timeProvider = timeProvider ?? TimeProvider.System;
         if (_localization is not null)
@@ -465,6 +477,17 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             ConsoleLog.Write(
                 "TransactionHistory",
                 $"scanner consumed source={source} device={devicePath} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(normalizedBarcode)} searched=false reason=disposed");
+            return true;
+        }
+
+        if (IsOrderDetailsOpen && IsEditingInstallmentLines && !IsSavingInstallmentLines)
+        {
+            // 关键逻辑：修改分期商品时，扫码等同于“按编码加商品”，不触碰历史查询条件与订单选择。
+            ConsoleLog.Write(
+                "TransactionHistory",
+                $"scanner consumed source={source} device={devicePath} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(normalizedBarcode)} searched=false reason=installment-amend-add");
+            InstallmentLineSearchText = normalizedBarcode;
+            _ = RunInstallmentProductSearchAsync(normalizedBarcode);
             return true;
         }
 
@@ -639,7 +662,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
 
     public bool IsReprintVisible => CanReprintSelected();
 
-    public bool IsContinueInstallmentPaymentVisible => CanContinueInstallmentPayment(SelectedOrder);
+    // 编辑商品期间隐藏“继续付款”：订单金额随时会变，不能在编辑中途跳去收款。
+    public bool IsContinueInstallmentPaymentVisible =>
+        !IsEditingInstallmentLines && CanContinueInstallmentPayment(SelectedOrder);
 
     public bool IsConfirmInstallmentPickupVisible => CanConfirmInstallmentPickup(SelectedOrder);
 
@@ -1037,6 +1062,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         OnPropertyChanged(nameof(IsForceReleaseVisible));
         OnPropertyChanged(nameof(IsContinueInstallmentPaymentVisible));
         OnPropertyChanged(nameof(IsConfirmInstallmentPickupVisible));
+        NotifyInstallmentEditAvailabilityChanged();
         ForceReleaseHeldOrderCommand?.NotifyCanExecuteChanged();
         DeleteHeldOrderCommand?.NotifyCanExecuteChanged();
         ShareHeldOrderCommand?.NotifyCanExecuteChanged();
@@ -1057,6 +1083,18 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
 
     partial void OnSelectedOrderChanged(HistoryOrderListItem? value)
     {
+        // 切到别的订单：编辑态与结果横幅都属于旧订单，必须丢弃；同一订单换行对象（如刷新）则保留。
+        if (_installmentEditBaseline is { } editBaseline &&
+            (value is null || value.OrderGuid != editBaseline.InstallmentGuid))
+        {
+            ExitInstallmentLinesEdit();
+        }
+
+        if (!string.IsNullOrEmpty(InstallmentEditorNotice))
+        {
+            InstallmentEditorNotice = string.Empty;
+        }
+
         ReprintCommand?.NotifyCanExecuteChanged();
         OpenOrderDetailsCommand.NotifyCanExecuteChanged();
         RetryOrderDetailsCommand.NotifyCanExecuteChanged();
@@ -1173,14 +1211,28 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     {
         RetryOrderDetailsCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsOrderDetailsFinancialContentVisible));
+        NotifyInstallmentEditAvailabilityChanged();
     }
 
-    partial void OnOrderDetailsErrorMessageChanged(string value) =>
+    partial void OnOrderDetailsErrorMessageChanged(string value)
+    {
         OnPropertyChanged(nameof(IsOrderDetailsFinancialContentVisible));
+        NotifyInstallmentEditAvailabilityChanged();
+    }
 
     partial void OnIsOrderDetailsOpenChanged(bool value)
     {
         RetryOrderDetailsCommand.NotifyCanExecuteChanged();
+        if (!value)
+        {
+            // 弹窗关闭（含继续付款 / 打开小票预览等路径）即丢弃未保存的编辑与结果横幅。
+            if (IsEditingInstallmentLines)
+            {
+                ExitInstallmentLinesEdit();
+            }
+
+            InstallmentEditorNotice = string.Empty;
+        }
     }
 
     partial void OnSessionChanged(PosSessionState value)
@@ -1202,6 +1254,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         RefreshTerminalOptions(SelectedTerminalOption?.DeviceCode is null);
         ConfirmInstallmentPickupCommand?.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsConfirmInstallmentPickupVisible));
+        NotifyInstallmentEditAvailabilityChanged();
     }
 
     partial void OnSelectedTerminalOptionChanged(TerminalFilterOption? value)
@@ -2103,6 +2156,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         _isInstallmentRecoveryStateUnknown = true;
         ConfirmInstallmentPickupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsConfirmInstallmentPickupVisible));
+        NotifyInstallmentEditAvailabilityChanged();
         var from = ParseDateFrom(DateFrom);
         var to = ParseDateTo(DateTo);
         var historyTask = _installmentOrderService.QueryHistoryAsync(
@@ -2128,6 +2182,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         _isInstallmentRecoveryStateUnknown = !recoveryLockState.IsKnown;
         ConfirmInstallmentPickupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsConfirmInstallmentPickupVisible));
+        NotifyInstallmentEditAvailabilityChanged();
         return orders
             .Where(order => SelectedTerminalDeviceCode is null ||
                 string.Equals(order.DeviceCode, SelectedTerminalDeviceCode, StringComparison.OrdinalIgnoreCase))
@@ -3207,6 +3262,651 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         _lockedInstallmentGuids.Add(installmentGuid);
         ConfirmInstallmentPickupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsConfirmInstallmentPickupVisible));
+        NotifyInstallmentEditAvailabilityChanged();
+    }
+
+    // ───────── 分期单“修改商品”（仅历史页订单明细弹窗；仅在线） ─────────
+
+    [ObservableProperty]
+    private InstallmentLinesEditor? _installmentEditor;
+
+    [ObservableProperty]
+    private bool _isEditingInstallmentLines;
+
+    [ObservableProperty]
+    private bool _isSavingInstallmentLines;
+
+    [ObservableProperty]
+    private string _installmentLineSearchText = string.Empty;
+
+    [ObservableProperty]
+    private string _installmentLineSearchMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _isSearchingInstallmentProducts;
+
+    // 保存 / 授权失败等需要停留在编辑界面的错误；任何后续编辑都会清掉它。
+    [ObservableProperty]
+    private string _installmentEditorErrorMessage = string.Empty;
+
+    // 只读模式下商品卡片顶部的结果横幅（保存成功 / 订单已被刷新等）。
+    [ObservableProperty]
+    private string _installmentEditorNotice = string.Empty;
+
+    [ObservableProperty]
+    private bool _isInstallmentEditorNoticeError;
+
+    /// <summary>加商品检索的候选列表（最多 8 条）。</summary>
+    public ObservableCollection<SellableItemDto> InstallmentLineSearchResults { get; } = [];
+
+    public bool HasInstallmentLineSearchResults => InstallmentLineSearchResults.Count > 0;
+
+    public bool IsInstallmentLinesReadOnlyMode => !IsEditingInstallmentLines;
+
+    public bool IsInstallmentEditorInputEnabled => !IsSavingInstallmentLines;
+
+    public bool HasInstallmentEditorNotice => !string.IsNullOrWhiteSpace(InstallmentEditorNotice);
+
+    /// <summary>底栏“修改商品”按钮：分期单、状态允许、在线、未被恢复锁定、详情已加载且当前不在编辑中。</summary>
+    public bool IsEditInstallmentLinesVisible => CanEditInstallmentLines();
+
+    public string InstallmentEditorSaveButtonText => IsSavingInstallmentLines
+        ? TOrFallback("history.installment.editSaving", "Saving...")
+        : TOrFallback("history.installment.editSave", "Save changes");
+
+    /// <summary>编辑区底部的红色提示：服务端 / 授权错误优先，其次是编辑器的实时校验结论。</summary>
+    public string InstallmentEditorMessage
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(InstallmentEditorErrorMessage))
+            {
+                return InstallmentEditorErrorMessage;
+            }
+
+            return InstallmentEditor is { } editor ? BuildInstallmentEditorValidationText(editor) : string.Empty;
+        }
+    }
+
+    /// <summary>编辑区底部的绿色提示：校验通过且新余额为 0 时说明保存后订单会变为待提货。</summary>
+    public string InstallmentEditorHint => InstallmentEditor is { WillBePaidOff: true, IsDirty: true } &&
+        _installmentEditBaseline is { Status: not InstallmentStatus.PaidOff }
+            ? TOrFallback(
+                "history.installment.editWillBePaidOff",
+                "The balance will be $0.00. After saving, the order is paid off and ready for pickup.")
+            : string.Empty;
+
+    private bool CanEditInstallmentLines()
+    {
+        return !IsEditingInstallmentLines &&
+            !IsSavingInstallmentLines &&
+            Session.IsOnline &&
+            !_isInstallmentRecoveryStateUnknown &&
+            !IsReceiptPreviewLoading &&
+            string.IsNullOrWhiteSpace(OrderDetailsErrorMessage) &&
+            SelectedOrder is { IsInstallmentOrder: true } order &&
+            !_lockedInstallmentGuids.Contains(order.OrderGuid) &&
+            CurrentOrderInstallmentDetails is { } details &&
+            InstallmentAmendRules.CanAmend(details.Status);
+    }
+
+    private bool CanSaveInstallmentLines() =>
+        IsEditingInstallmentLines && !IsSavingInstallmentLines && InstallmentEditor?.CanSave == true;
+
+    private bool CanCancelInstallmentLinesEdit() => IsEditingInstallmentLines && !IsSavingInstallmentLines;
+
+    private void NotifyInstallmentEditAvailabilityChanged()
+    {
+        OnPropertyChanged(nameof(IsEditInstallmentLinesVisible));
+        OnPropertyChanged(nameof(IsContinueInstallmentPaymentVisible));
+        BeginEditInstallmentLinesCommand.NotifyCanExecuteChanged();
+    }
+
+    private void NotifyInstallmentEditorStateChanged()
+    {
+        OnPropertyChanged(nameof(InstallmentEditorMessage));
+        OnPropertyChanged(nameof(InstallmentEditorHint));
+        SaveInstallmentLinesCommand.NotifyCanExecuteChanged();
+        CancelInstallmentLinesEditCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsEditingInstallmentLinesChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsInstallmentLinesReadOnlyMode));
+        NotifyInstallmentEditAvailabilityChanged();
+        NotifyInstallmentEditorStateChanged();
+    }
+
+    partial void OnIsSavingInstallmentLinesChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsInstallmentEditorInputEnabled));
+        OnPropertyChanged(nameof(InstallmentEditorSaveButtonText));
+        NotifyInstallmentEditAvailabilityChanged();
+        NotifyInstallmentEditorStateChanged();
+    }
+
+    partial void OnInstallmentEditorErrorMessageChanged(string value) =>
+        OnPropertyChanged(nameof(InstallmentEditorMessage));
+
+    partial void OnInstallmentEditorNoticeChanged(string value) =>
+        OnPropertyChanged(nameof(HasInstallmentEditorNotice));
+
+    partial void OnInstallmentLineSearchTextChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            // 清空输入即关闭候选列表与“未找到”提示。
+            CancelInstallmentProductSearch();
+            SetInstallmentLineSearchResults([]);
+            InstallmentLineSearchMessage = string.Empty;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanEditInstallmentLines))]
+    private async Task BeginEditInstallmentLinesAsync()
+    {
+        if (!CanEditInstallmentLines() ||
+            SelectedOrder is not { } order ||
+            CurrentOrderInstallmentDetails is not { } details)
+        {
+            return;
+        }
+
+        InstallmentEditorNotice = string.Empty;
+        bool supported;
+        try
+        {
+            supported = await _installmentOrderService.IsAmendLinesSupportedAsync(Session);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            LogHistoryWarning(
+                $"installment amend capability check failed error={ex.GetType().Name} message={ex.Message}",
+                order.OrderGuid.ToString("D"),
+                ex);
+            supported = false;
+        }
+
+        // 能力探测期间订单 / 会话可能已变化：不再满足入口条件就静默放弃，不进入编辑态。
+        if (SelectedOrder?.OrderGuid != order.OrderGuid ||
+            !ReferenceEquals(CurrentOrderInstallmentDetails, details) ||
+            !CanEditInstallmentLines())
+        {
+            return;
+        }
+
+        if (!supported)
+        {
+            ShowInstallmentEditorNotice(
+                TOrFallback(
+                    "history.installment.editUnsupported",
+                    "The server does not support editing items yet, or support could not be confirmed. Please try again later."),
+                isError: true);
+            return;
+        }
+
+        _installmentEditBaseline = details;
+        var editor = new InstallmentLinesEditor(details.Lines, details.PaidAmount, details.TotalAmount);
+        editor.PropertyChanged += OnInstallmentEditorPropertyChanged;
+        InstallmentEditorErrorMessage = string.Empty;
+        InstallmentLineSearchText = string.Empty;
+        InstallmentLineSearchMessage = string.Empty;
+        SetInstallmentLineSearchResults([]);
+        InstallmentEditor = editor;
+        IsEditingInstallmentLines = true;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCancelInstallmentLinesEdit))]
+    private void CancelInstallmentLinesEdit() => ExitInstallmentLinesEdit();
+
+    private void ExitInstallmentLinesEdit()
+    {
+        CancelInstallmentProductSearch();
+        if (InstallmentEditor is { } editor)
+        {
+            editor.PropertyChanged -= OnInstallmentEditorPropertyChanged;
+        }
+
+        InstallmentEditor = null;
+        _installmentEditBaseline = null;
+        InstallmentLineSearchText = string.Empty;
+        InstallmentLineSearchMessage = string.Empty;
+        SetInstallmentLineSearchResults([]);
+        InstallmentEditorErrorMessage = string.Empty;
+        IsEditingInstallmentLines = false;
+        NotifyInstallmentEditorStateChanged();
+    }
+
+    private void OnInstallmentEditorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        // 收银员继续编辑即视为已看到上一次的错误，清掉它让实时校验文案重新生效。
+        if (!string.IsNullOrWhiteSpace(InstallmentEditorErrorMessage) && !IsSavingInstallmentLines)
+        {
+            InstallmentEditorErrorMessage = string.Empty;
+        }
+
+        NotifyInstallmentEditorStateChanged();
+    }
+
+    private void ShowInstallmentEditorNotice(string message, bool isError)
+    {
+        IsInstallmentEditorNoticeError = isError;
+        InstallmentEditorNotice = message;
+    }
+
+    private string BuildInstallmentEditorValidationText(InstallmentLinesEditor editor)
+    {
+        return editor.Issue switch
+        {
+            InstallmentLinesEditorIssue.InvalidInput => TOrFallback(
+                "history.installment.editInvalidInput",
+                "Check the quantity (a whole number of 1 or more) and the unit price (greater than 0)."),
+            InstallmentLinesEditorIssue.NoLines => TOrFallback(
+                "history.installment.editNoLines",
+                "At least one item is required."),
+            InstallmentLinesEditorIssue.InvalidLines => TOrFallback(
+                "history.installment.editInvalidLines",
+                "Some items are incomplete and cannot be saved."),
+            InstallmentLinesEditorIssue.TotalBelowPaid => string.Format(
+                CurrentDisplayCulture,
+                TOrFallback(
+                    "history.installment.editTotalBelowPaid",
+                    "New total {0} cannot be lower than the paid amount {1}."),
+                FormatMoney(editor.NewTotal),
+                FormatMoney(editor.RequiredMinimum)),
+            InstallmentLinesEditorIssue.TotalBelowMinimum => string.Format(
+                CurrentDisplayCulture,
+                TOrFallback(
+                    "history.installment.editTotalBelowMinimum",
+                    "New total {0} cannot be lower than the minimum {1}."),
+                FormatMoney(editor.NewTotal),
+                FormatMoney(editor.RequiredMinimum)),
+            _ => string.Empty
+        };
+    }
+
+    private void SetInstallmentLineSearchResults(IReadOnlyList<SellableItemDto> items)
+    {
+        InstallmentLineSearchResults.ReplaceWith(items);
+        OnPropertyChanged(nameof(HasInstallmentLineSearchResults));
+    }
+
+    private void CancelInstallmentProductSearch()
+    {
+        Interlocked.Increment(ref _installmentProductSearchGeneration);
+        _installmentProductSearchCancellation?.Cancel();
+        _installmentProductSearchCancellation = null;
+        IsSearchingInstallmentProducts = false;
+    }
+
+    [RelayCommand]
+    private async Task SearchInstallmentLineProductsAsync()
+    {
+        if (!IsEditingInstallmentLines || IsSavingInstallmentLines)
+        {
+            return;
+        }
+
+        var query = InstallmentLineSearchText?.Trim() ?? string.Empty;
+        if (query.Length > 0 &&
+            _rawScannerService is IScannerInputDeduplicator deduplicator &&
+            !deduplicator.TryAcceptScanDelivery(query, "history-amend-search", _timeProvider.GetUtcNow()))
+        {
+            // 键盘楔入式扫码枪会同时触发 Raw 输入与输入框 Enter，同一次扫码只加一次商品。
+            return;
+        }
+
+        await RunInstallmentProductSearchAsync(query);
+    }
+
+    /// <summary>
+    /// 检索并加商品：编码精确命中且只有一条时直接加入；其余情况（名称模糊、同码多商品）列出候选让收银员点选，
+    /// 避免模糊词悄悄加错商品。过期的检索结果（用户又输入了新内容）一律丢弃。
+    /// </summary>
+    private async Task RunInstallmentProductSearchAsync(string rawQuery)
+    {
+        var query = rawQuery?.Trim() ?? string.Empty;
+        if (query.Length == 0)
+        {
+            SetInstallmentLineSearchResults([]);
+            InstallmentLineSearchMessage = string.Empty;
+            return;
+        }
+
+        CancelInstallmentProductSearch();
+        var generation = Volatile.Read(ref _installmentProductSearchGeneration);
+        // 不 using：CancelInstallmentProductSearch 可能在方法结束后才调用 Cancel，释放过的 CTS 会抛 ObjectDisposedException。
+        var cancellation = new CancellationTokenSource();
+        _installmentProductSearchCancellation = cancellation;
+        IsSearchingInstallmentProducts = true;
+        InstallmentLineProductSearchResult result;
+        try
+        {
+            result = await _installmentLineProductSearch.SearchAsync(Session.StoreCode, query, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            LogHistoryWarning(
+                $"installment amend product search failed error={ex.GetType().Name} message={ex.Message}",
+                _installmentEditBaseline?.InstallmentGuid.ToString("D"),
+                ex);
+            if (generation == Volatile.Read(ref _installmentProductSearchGeneration))
+            {
+                IsSearchingInstallmentProducts = false;
+                InstallmentLineSearchMessage = string.Format(
+                    CurrentDisplayCulture,
+                    TOrFallback("history.installment.editSearchFailed", "Product search failed: {0}"),
+                    ex.Message);
+            }
+
+            return;
+        }
+
+        if (generation != Volatile.Read(ref _installmentProductSearchGeneration) ||
+            !IsEditingInstallmentLines ||
+            IsSavingInstallmentLines)
+        {
+            return;
+        }
+
+        _installmentProductSearchCancellation = null;
+        IsSearchingInstallmentProducts = false;
+        if (result.Items.Count == 0)
+        {
+            SetInstallmentLineSearchResults([]);
+            InstallmentLineSearchMessage = TOrFallback("history.installment.editNoResults", "No matching product was found.");
+            return;
+        }
+
+        if (result.IsExactMatch && result.Items.Count == 1)
+        {
+            AddInstallmentLineProduct(result.Items[0]);
+            return;
+        }
+
+        InstallmentLineSearchMessage = string.Empty;
+        SetInstallmentLineSearchResults(result.Items);
+    }
+
+    [RelayCommand]
+    private void AddInstallmentLineProduct(SellableItemDto? item)
+    {
+        if (item is null || !IsEditingInstallmentLines || IsSavingInstallmentLines || InstallmentEditor is not { } editor)
+        {
+            return;
+        }
+
+        editor.AddProduct(item);
+        CancelInstallmentProductSearch();
+        SetInstallmentLineSearchResults([]);
+        InstallmentLineSearchMessage = string.Empty;
+        InstallmentLineSearchText = string.Empty;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSaveInstallmentLines))]
+    private async Task SaveInstallmentLinesAsync()
+    {
+        if (!CanSaveInstallmentLines() ||
+            InstallmentEditor is not { } editor ||
+            _installmentEditBaseline is not { } baseline ||
+            SelectedOrder is not { } orderSnapshot)
+        {
+            return;
+        }
+
+        // 保存期间锁定整个编辑界面，授权弹窗 / 网络请求等待时不允许再改动行。
+        IsSavingInstallmentLines = true;
+        InstallmentEditorErrorMessage = string.Empty;
+        try
+        {
+            StatusMessage = string.Empty;
+            using var authorization = await AuthorizeAsync(
+                Permissions.PosTerminal.Installments.AmendLines,
+                "amend-installment-lines");
+            if (authorization is null)
+            {
+                // 无权限：TryRequirePermission 已写状态栏与审计，这里把原因带回编辑界面。
+                if (!string.IsNullOrWhiteSpace(StatusMessage))
+                {
+                    InstallmentEditorErrorMessage = StatusMessage;
+                }
+
+                return;
+            }
+            using var authorizationActivation = authorization.Activate();
+
+            // 授权等待期间订单 / 编辑器 / 联网状态可能已变；任何一项不再成立都不得继续提交。
+            // 编辑会话本身已被丢弃（切单、关弹窗）时静默放弃，不再弹错误。
+            var installmentGuid = baseline.InstallmentGuid;
+            if (!ReferenceEquals(InstallmentEditor, editor) ||
+                !IsEditingInstallmentLines ||
+                !ReferenceEquals(_installmentEditBaseline, baseline) ||
+                SelectedOrder?.OrderGuid != installmentGuid)
+            {
+                return;
+            }
+
+            if (!Session.IsOnline ||
+                _isInstallmentRecoveryStateUnknown ||
+                _lockedInstallmentGuids.Contains(installmentGuid) ||
+                !editor.CanSave ||
+                editor.BuildLines() is not { } lines)
+            {
+                InstallmentEditorErrorMessage = TOrFallback(
+                    "history.installment.editStateChanged",
+                    "The order or connection changed while waiting for authorization. Please try again.");
+                return;
+            }
+
+            InstallmentAmendLinesResult result;
+            try
+            {
+                result = await _installmentOrderService.AmendLinesAsync(Session, baseline, lines);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                LogHistoryWarning(
+                    $"installment amend lines failed installmentGuid={installmentGuid:D} error={ex.GetType().Name} message={ex.Message}",
+                    installmentGuid.ToString("D"),
+                    ex);
+                RecordInstallmentAmendFailureAudit(installmentGuid, ex.GetType().Name, ex.GetType().Name);
+                InstallmentEditorErrorMessage = string.Format(
+                    CurrentDisplayCulture,
+                    TOrFallback("history.installment.editFailed", "Save failed: {0}"),
+                    ex.Message);
+                return;
+            }
+
+            await ApplyInstallmentAmendResultAsync(orderSnapshot, baseline, lines, result);
+        }
+        finally
+        {
+            IsSavingInstallmentLines = false;
+        }
+    }
+
+    private async Task ApplyInstallmentAmendResultAsync(
+        HistoryOrderListItem orderSnapshot,
+        LocalInstallmentOrder baseline,
+        IReadOnlyList<InstallmentLineDto> submittedLines,
+        InstallmentAmendLinesResult result)
+    {
+        var installmentGuid = baseline.InstallmentGuid;
+        switch (result.Outcome)
+        {
+            case InstallmentAmendLinesOutcome.Succeeded:
+            {
+                OperationAuditEvents.RecordInstallmentLinesAmend(
+                    _operationAuditLogger,
+                    Session,
+                    installmentGuid,
+                    baseline.Lines,
+                    result.Order?.Lines ?? submittedLines);
+                var message = BuildInstallmentAmendSavedMessage(result.Order);
+                ExitInstallmentLinesEdit();
+                await RefreshOrderAfterAmendAsync(orderSnapshot, result.Summary);
+                ShowInstallmentEditorNotice(message, isError: false);
+                StatusMessage = message;
+                return;
+            }
+
+            case InstallmentAmendLinesOutcome.Stale:
+            {
+                // 订单已被别处改过：编辑基线作废，退出编辑并用刷新后的订单重载，提示重新修改。
+                RecordInstallmentAmendFailureAudit(installmentGuid, "STALE", result.Message);
+                ExitInstallmentLinesEdit();
+                await RefreshOrderAfterAmendAsync(orderSnapshot, result.Summary);
+                ShowInstallmentEditorNotice(
+                    TOrFallback(
+                        "history.installment.editStale",
+                        "This order was changed on another device and has been refreshed. Please edit again."),
+                    isError: true);
+                return;
+            }
+
+            case InstallmentAmendLinesOutcome.Rejected
+                when string.Equals(result.ErrorCode, InstallmentAmendLinesErrorCodes.StatusNotAllowed, StringComparison.Ordinal):
+            {
+                RecordInstallmentAmendFailureAudit(installmentGuid, result.ErrorCode, result.Message);
+                ExitInstallmentLinesEdit();
+                await RefreshOrderAfterAmendAsync(orderSnapshot, result.Summary);
+                ShowInstallmentEditorNotice(
+                    TOrFallback(
+                        "history.installment.editStatusNotAllowed",
+                        "This order's status no longer allows editing items. It has been refreshed."),
+                    isError: true);
+                return;
+            }
+
+            default:
+                RecordInstallmentAmendFailureAudit(
+                    installmentGuid,
+                    result.ErrorCode ?? result.Outcome.ToString().ToUpperInvariant(),
+                    result.Message);
+                InstallmentEditorErrorMessage = BuildInstallmentAmendFailureMessage(result, baseline);
+                return;
+        }
+    }
+
+    private string BuildInstallmentAmendSavedMessage(LocalInstallmentOrder? order)
+    {
+        if (order is { Status: InstallmentStatus.PaidOff })
+        {
+            return TOrFallback(
+                "history.installment.editSavedPaidOff",
+                "Saved. The order is paid off and ready for pickup.");
+        }
+
+        return order is null
+            ? TOrFallback("history.installment.editSaved", "Items updated.")
+            : string.Format(
+                CurrentDisplayCulture,
+                TOrFallback("history.installment.editSavedOutstanding", "Saved. Outstanding balance {0}."),
+                FormatMoney(order.BalanceAmount));
+    }
+
+    // 把结果映射为本地化文案；服务端未知错误码时回落到服务层 / 服务端给出的消息。
+    private string BuildInstallmentAmendFailureMessage(InstallmentAmendLinesResult result, LocalInstallmentOrder baseline)
+    {
+        if (result.Outcome == InstallmentAmendLinesOutcome.OnlineRequired)
+        {
+            return TOrFallback("history.installment.editOnlineRequired", "Editing items requires an online connection.");
+        }
+
+        if (result.Outcome == InstallmentAmendLinesOutcome.Unknown)
+        {
+            return TOrFallback(
+                "history.installment.editUnknown",
+                "The result could not be confirmed. Check the order, then save again if needed. Saving again will not apply the change twice.");
+        }
+
+        switch (result.ErrorCode)
+        {
+            case InstallmentAmendLinesErrorCodes.TotalBelowPaid:
+                return string.Format(
+                    CurrentDisplayCulture,
+                    TOrFallback(
+                        "history.installment.editTotalBelowPaid",
+                        "New total {0} cannot be lower than the paid amount {1}."),
+                    FormatMoney(InstallmentEditor?.NewTotal ?? 0m),
+                    FormatMoney(baseline.PaidAmount));
+            case InstallmentAmendLinesErrorCodes.TotalBelowMinimum:
+                return string.Format(
+                    CurrentDisplayCulture,
+                    TOrFallback(
+                        "history.installment.editTotalBelowMinimum",
+                        "New total {0} cannot be lower than the minimum {1}."),
+                    FormatMoney(InstallmentEditor?.NewTotal ?? 0m),
+                    FormatMoney(Math.Max(baseline.PaidAmount, InstallmentAmendRules.MinimumTotalAmount)));
+            case InstallmentAmendLinesErrorCodes.InvalidLines:
+                return TOrFallback("history.installment.editInvalidLines", "Some items are incomplete and cannot be saved.");
+            default:
+                return string.Format(
+                    CurrentDisplayCulture,
+                    TOrFallback("history.installment.editFailed", "Save failed: {0}"),
+                    result.Message);
+        }
+    }
+
+    private void RecordInstallmentAmendFailureAudit(Guid installmentGuid, string? reasonCode, string? safeMessage)
+    {
+        OperationAuditEvents.RecordAction(
+            _operationAuditLogger,
+            OperationAuditTypes.InstallmentLinesAmend,
+            "Failed",
+            Session,
+            reasonCode: reasonCode,
+            safeMessage: safeMessage,
+            orderGuid: installmentGuid.ToString("D"));
+    }
+
+    /// <summary>
+    /// 保存成功 / 订单被刷新后：用最新摘要替换列表行（金额、状态、可用动作随之更新），再重载右侧详情与小票预览。
+    /// 先挂起选中变更触发的自动加载，行替换完成后显式 await 一次重载，保证调用方返回时界面已是最新状态。
+    /// </summary>
+    private async Task RefreshOrderAfterAmendAsync(HistoryOrderListItem orderSnapshot, InstallmentOrderSummary? summary)
+    {
+        var installmentGuid = orderSnapshot.OrderGuid;
+        var previousSelectedGuid = SelectedOrder?.OrderGuid;
+        _suppressSelectedOrderLoad = true;
+        try
+        {
+            if (summary is not null)
+            {
+                var rows = Orders
+                    .Select(row => row.OrderGuid == installmentGuid && row.IsInstallmentOrder
+                        ? row with
+                        {
+                            OccurredAt = summary.UpdatedAt,
+                            TotalAmount = summary.TotalAmount,
+                            ActualAmount = summary.OutstandingAmount,
+                            PaymentSummary = FormatMoney(summary.PaidAmount),
+                            StatusLabel = LocalizeInstallmentStatus(summary.Status),
+                            InstallmentOrder = summary,
+                            CanContinueInstallmentPayment = summary.CanAddRepayment,
+                            CanConfirmInstallmentPickup = summary.CanConfirmPickup && !_lockedInstallmentGuids.Contains(installmentGuid)
+                        }
+                        : row)
+                    .ToList();
+                Orders.ReplaceWith(rows);
+                SelectedOrder = previousSelectedGuid is null
+                    ? null
+                    : Orders.FirstOrDefault(row => row.OrderGuid == previousSelectedGuid.Value);
+            }
+        }
+        finally
+        {
+            _suppressSelectedOrderLoad = false;
+        }
+
+        if (SelectedOrder is { } selected && selected.OrderGuid == installmentGuid)
+        {
+            await LoadSelectedReceiptSafelyAsync(selected);
+        }
     }
 
     private async Task ReprintSelectedAsync()
@@ -3257,6 +3957,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         {
             Permissions.PosTerminal.History.Recall => OperationAuditTypes.OrderRecall,
             Permissions.PosTerminal.History.Reprint => OperationAuditTypes.ReceiptReprint,
+            Permissions.PosTerminal.Installments.AmendLines => OperationAuditTypes.InstallmentLinesAmend,
             _ => null
         };
         if (operationType is not null)
@@ -3360,6 +4061,27 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     [RelayCommand]
     private void CloseOrderDetails()
     {
+        // 修改商品的关闭语义：保存中不可关；编辑中先退出编辑态（Esc / 关闭按钮不直接关弹窗），
+        // 有未保存修改时拒绝并提示，避免误触 Esc 丢掉整单改动，收银员需显式点“取消”放弃。
+        if (IsSavingInstallmentLines)
+        {
+            return;
+        }
+
+        if (IsEditingInstallmentLines)
+        {
+            if (InstallmentEditor?.IsDirty == true)
+            {
+                InstallmentEditorErrorMessage = TOrFallback(
+                    "history.installment.editDiscardHint",
+                    "You have unsaved changes. Save them, or tap Cancel to discard them.");
+                return;
+            }
+
+            ExitInstallmentLinesEdit();
+            return;
+        }
+
         IsOrderDetailsOpen = false;
     }
 
@@ -3611,6 +4333,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         OnPropertyChanged(nameof(OrderDetailsLineSummary));
         OnPropertyChanged(nameof(OrderDetailsPaymentCountLabel));
         OnPropertyChanged(nameof(IsOrderDetailsFinancialContentVisible));
+        NotifyInstallmentEditAvailabilityChanged();
     }
 
     private static string ValueOrDash(params string?[] values)
@@ -4035,6 +4758,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         }
 
         _disposed = true;
+        _installmentProductSearchCancellation?.Cancel();
         CancelHeldLoad();
         IsHeldRemoteRefreshing = false;
         StopHeldAutoRefresh();

@@ -129,7 +129,8 @@ public sealed record InstallmentRepaymentCapabilitiesResponse(
     bool CrossDevicePickupEnabled = false,
     bool CardRepaymentSupported = false,
     [property: JsonPropertyName("repaymentClaimPrepareProviderV1")]
-    bool RepaymentClaimPrepareProviderV1 = false);
+    bool RepaymentClaimPrepareProviderV1 = false,
+    bool AmendLinesSupported = false);
 
 public sealed record InstallmentRepaymentClaimCreateRequest(
     Guid OperationGuid,
@@ -296,6 +297,143 @@ public sealed record InstallmentConfirmPickupResponse(
     DateTimeOffset PickedUpAt,
     InstallmentDetailsDto Details,
     bool AlreadyConfirmed = false);
+
+/// <summary>
+/// 修改分期单商品列表：用 <see cref="Lines"/> 整体替换原有商品行（可增行、改数量 / 单价、删行）。
+/// 仅在线可用；<see cref="ExpectedUpdatedAt"/> 是乐观并发令牌，必须等于客户端看到的订单 UpdatedAt，
+/// 否则服务端返回 409，避免两台设备基于旧快照互相覆盖。门店 / 设备 / 收银员字段由服务端按票据覆盖。
+/// </summary>
+public sealed record InstallmentAmendLinesRequest(
+    Guid InstallmentGuid,
+    string StoreCode,
+    string DeviceCode,
+    string CashierId,
+    string CashierName,
+    IReadOnlyList<InstallmentLineDto> Lines,
+    DateTimeOffset ExpectedUpdatedAt,
+    string? Reason = null);
+
+public sealed record InstallmentAmendLinesResponse(
+    Guid InstallmentGuid,
+    InstallmentStatus Status,
+    decimal TotalAmount,
+    decimal PaidAmount,
+    decimal BalanceAmount,
+    InstallmentDetailsDto Details);
+
+/// <summary>修改商品列表失败时 API 返回的业务错误码，客户端据此给出明确提示。</summary>
+public static class InstallmentAmendLinesErrorCodes
+{
+    public const string InvalidLines = "INSTALLMENT_AMEND_INVALID_LINES";
+    public const string TotalBelowPaid = "INSTALLMENT_AMEND_TOTAL_BELOW_PAID";
+    public const string TotalBelowMinimum = "INSTALLMENT_AMEND_TOTAL_BELOW_MINIMUM";
+    public const string StatusNotAllowed = "INSTALLMENT_AMEND_STATUS_NOT_ALLOWED";
+    public const string Stale = "INSTALLMENT_AMEND_STALE";
+}
+
+public enum InstallmentAmendLinesValidation
+{
+    Valid = 0,
+    NoLines,
+    InvalidQuantity,
+    InvalidUnitPrice,
+    InvalidDiscount,
+    InvalidActualAmount,
+    DuplicateLine,
+    MissingText,
+    TotalBelowPaid,
+    TotalBelowMinimum
+}
+
+/// <summary>
+/// 修改分期商品列表的共享规则。服务端落库校验与客户端编辑界面必须用同一份，避免口径漂移。
+/// 金额一律按 2 位小数、AwayFromZero 舍入，与购物车行金额算法一致。
+/// </summary>
+public static class InstallmentAmendRules
+{
+    /// <summary>分期订单总额下限，与创建分期时的下限相同。</summary>
+    public const decimal MinimumTotalAmount = 50m;
+
+    public static bool CanAmend(InstallmentStatus status) =>
+        status is InstallmentStatus.Active or InstallmentStatus.PaidOff;
+
+    /// <summary>行实收 = 数量 × 单价 − 折扣。</summary>
+    public static decimal CalculateActualAmount(decimal quantity, decimal unitPrice, decimal discountAmount) =>
+        Round(quantity * unitPrice - discountAmount);
+
+    public static decimal CalculateTotal(IEnumerable<InstallmentLineDto> lines) =>
+        Round(lines.Sum(line => line.ActualAmount));
+
+    /// <summary>改后余额 = max(0, 新总额 − 已付)；余额为 0 即视为已付清待提货。</summary>
+    public static decimal CalculateBalance(decimal newTotal, decimal paidAmount) =>
+        Math.Max(0m, Round(newTotal - paidAmount));
+
+    public static InstallmentStatus ResolveStatus(decimal newTotal, decimal paidAmount) =>
+        CalculateBalance(newTotal, paidAmount) <= 0m ? InstallmentStatus.PaidOff : InstallmentStatus.Active;
+
+    public static InstallmentAmendLinesValidation ValidateLines(IReadOnlyList<InstallmentLineDto>? lines)
+    {
+        if (lines is null || lines.Count == 0)
+        {
+            return InstallmentAmendLinesValidation.NoLines;
+        }
+
+        var seen = new HashSet<Guid>();
+        foreach (var line in lines)
+        {
+            if (line.InstallmentLineGuid == Guid.Empty || !seen.Add(line.InstallmentLineGuid))
+            {
+                return InstallmentAmendLinesValidation.DuplicateLine;
+            }
+
+            if (string.IsNullOrWhiteSpace(line.ProductCode) ||
+                string.IsNullOrWhiteSpace(line.DisplayName) ||
+                string.IsNullOrWhiteSpace(line.LookupCode))
+            {
+                return InstallmentAmendLinesValidation.MissingText;
+            }
+
+            if (line.Quantity <= 0m)
+            {
+                return InstallmentAmendLinesValidation.InvalidQuantity;
+            }
+
+            if (line.UnitPrice <= 0m)
+            {
+                return InstallmentAmendLinesValidation.InvalidUnitPrice;
+            }
+
+            var gross = Round(line.Quantity * line.UnitPrice);
+            if (line.DiscountAmount < 0m || line.DiscountAmount >= gross)
+            {
+                return InstallmentAmendLinesValidation.InvalidDiscount;
+            }
+
+            if (line.ActualAmount <= 0m ||
+                line.ActualAmount != CalculateActualAmount(line.Quantity, line.UnitPrice, line.DiscountAmount))
+            {
+                return InstallmentAmendLinesValidation.InvalidActualAmount;
+            }
+        }
+
+        return InstallmentAmendLinesValidation.Valid;
+    }
+
+    /// <summary>新总额不得低于已付款，也不得低于分期订单总额下限。</summary>
+    public static InstallmentAmendLinesValidation ValidateTotal(decimal newTotal, decimal paidAmount)
+    {
+        if (newTotal < Round(paidAmount))
+        {
+            return InstallmentAmendLinesValidation.TotalBelowPaid;
+        }
+
+        return newTotal < MinimumTotalAmount
+            ? InstallmentAmendLinesValidation.TotalBelowMinimum
+            : InstallmentAmendLinesValidation.Valid;
+    }
+
+    private static decimal Round(decimal amount) => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+}
 
 public sealed record InstallmentRefundPaymentCommandDto(
     Guid PaymentGuid,

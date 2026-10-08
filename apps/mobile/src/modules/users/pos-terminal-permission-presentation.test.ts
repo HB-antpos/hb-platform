@@ -26,7 +26,7 @@ import type { PosTerminalPermissionOption, StoreUserListItem } from "./types";
 
 const P = (suffix: string) => `Permissions.PosTerminal.${suffix}`;
 
-// 与后端 PermissionSeedData.PosTerminalBusinessPermissionCodes 对齐的 44 项可分配权限（顺序故意打乱）。
+// 与后端 PermissionSeedData.PosTerminalBusinessPermissionCodes 对齐的 45 项可分配权限（顺序故意打乱）。
 const BACKEND_CODES: [string, string, string][] = [
   ["Receipt.PrintLast", "打印上一张小票", "POS 小票"],
   ["Sales.View", "查看销售页", "POS 销售"],
@@ -59,6 +59,7 @@ const BACKEND_CODES: [string, string, string][] = [
   ["Installments.AddRepayment", "添加分期还款", "POS 分期"],
   ["Installments.Cancel", "取消分期", "POS 分期"],
   ["Installments.ConfirmPickup", "确认分期取货", "POS 分期"],
+  ["Installments.AmendLines", "修改分期商品列表", "POS 分期"],
   ["CashDrawer.Open", "打开钱箱", "POS 钱箱"],
   ["Sales.OrderManualDiscount", "整单手工折扣", "POS 销售"],
   ["Sales.LineManualDiscount", "单行手工折扣", "POS 销售"],
@@ -75,7 +76,7 @@ const assignable: PosTerminalPermissionOption[] = BACKEND_CODES.map(([suffix, na
   description: `${name}说明`,
 }));
 
-assert.equal(assignable.length, 44, "测试夹具应覆盖后端 44 项可分配权限");
+assert.equal(assignable.length, 45, "测试夹具应覆盖后端 45 项可分配权限");
 
 // ---------- 前端分组 ----------
 const groups = buildPosPermissionDisplayGroups(assignable);
@@ -87,12 +88,12 @@ assert.deepEqual(
 );
 assert.deepEqual(
   groupSizes,
-  { sales: 9, discount: 12, payment: 6, returns: 4, history: 3, dailyClose: 3, installments: 5, drawerReceipt: 2 },
+  { sales: 9, discount: 12, payment: 6, returns: 4, history: 3, dailyClose: 3, installments: 6, drawerReceipt: 2 },
   "按 code 前缀映射：折扣 12 项独立成组，钱箱与小票合并"
 );
 assert.equal(
   groups.reduce((sum, group) => sum + group.items.length, 0),
-  44,
+  45,
   "分组不丢项"
 );
 
@@ -150,7 +151,7 @@ assert.equal(otherGroup.entryCode, null, "未知模块的 View 不当作入口")
 assert.equal(withUnknown.at(-1)?.key, "other", "其他组排在最后");
 assert.equal(
   withUnknown.reduce((sum, group) => sum + group.items.length, 0),
-  46,
+  47,
   "重复 code 去重"
 );
 
@@ -230,7 +231,7 @@ assert.ok(!senior.includes(P("Returns.AddNoReceiptItem")), "资深收银不含�
 assert.ok(senior.includes(P("Sales.OrderQuickDiscount20Percent")));
 assert.ok(!senior.includes(P("Sales.LineQuickDiscount30Percent")));
 assert.equal(senior.filter(isHighRiskPosPermission).length, 0, "两个收银模板都不含高风险项");
-assert.equal(buildPosPermissionPresetCodes("all", assignable).length, 44);
+assert.equal(buildPosPermissionPresetCodes("all", assignable).length, 45);
 assert.deepEqual(buildPosPermissionPresetCodes("none", assignable), []);
 
 // 店长可分配范围更小时，模板与 assignable 取交集，且保留后端原始 code 写法。
@@ -345,7 +346,7 @@ assert.deepEqual(getPosPermissionGroupSummary(salesGroup, new Set()).previewName
 
 const stats = getPosPermissionStats(groups, new Set([...basic, P("CashDrawer.Open"), "Unknown.Permission"]));
 assert.equal(stats.enabledCount, 18, "统计只计可分配项");
-assert.equal(stats.total, 44);
+assert.equal(stats.total, 45);
 assert.equal(stats.highRiskTotal, 9);
 assert.equal(stats.highRiskEnabledCount, 1);
 assert.deepEqual(
@@ -357,7 +358,7 @@ assert.deepEqual(
     ["returns", 0, 4],
     ["history", 3, 3],
     ["dailyClose", 0, 3],
-    ["installments", 0, 5],
+    ["installments", 0, 6],
     ["drawerReceipt", 2, 2],
   ],
   "分段进度条按分组统计"
