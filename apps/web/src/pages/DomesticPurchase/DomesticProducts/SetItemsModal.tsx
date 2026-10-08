@@ -3,6 +3,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { ClipboardEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSnapshotSort } from '../../../hooks/useSnapshotSort'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import {
   getDomesticProductSetItems,
@@ -51,10 +52,13 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState<DomesticProductSetItem[]>([])
   const productId = product?.id
+  // 排序只在点列头时排一次，编辑价格不会实时重排；粘贴以排序后的展示顺序为准。
+  const { displayItems, sortOrderOf, onTableChange, resetSort } = useSnapshotSort({ items: draft, getId: (item) => item.id })
 
   useEffect(() => {
     if (!open || !productId) {
       setDraft([])
+      resetSort()
       return undefined
     }
 
@@ -62,6 +66,7 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     let cancelled = false
     setLoading(true)
     setDraft([])
+    resetSort()
     getDomesticProductSetItems(productId)
       .then((items) => {
         if (!cancelled) {
@@ -84,7 +89,7 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     return () => {
       cancelled = true
     }
-    // onClose / t 的引用不稳定，不应因它们重新请求。
+    // onClose / t / resetSort 的引用不稳定，不应因它们重新请求。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, productId])
 
@@ -96,7 +101,7 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
 
   const pasteColumn = (rowId: string | undefined, field: PasteablePriceField, clipboardText: string) => {
     const result = applySetItemColumnPaste({
-      items: draft,
+      items: displayItems,
       startRowId: rowId,
       field,
       clipboardText,
@@ -126,8 +131,12 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     <span
       className="dp-paste-head"
       tabIndex={canEdit ? 0 : -1}
-      onClick={(event) => event.currentTarget.focus()}
-      onPaste={(event) => handlePaste(event, draft[0]?.id, field)}
+      // 文字用于聚焦粘贴，不能冒泡成排序；排序由列头空白处/箭头触发。
+      onClick={(event) => {
+        event.stopPropagation()
+        event.currentTarget.focus()
+      }}
+      onPaste={(event) => handlePaste(event, displayItems[0]?.id, field)}
     >
       {label}
     </span>
@@ -137,12 +146,16 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     {
       title: t('domesticProducts.subItemName'),
       dataIndex: 'productName',
+      sorter: true,
+      sortOrder: sortOrderOf('productName'),
       ellipsis: true,
       render: (value?: string) => value || <span className="dp-faint">--</span>,
     },
     {
       title: t('domesticProducts.setProductNo', '套装货号'),
       dataIndex: 'setProductNo',
+      sorter: true,
+      sortOrder: sortOrderOf('setProductNo'),
       width: 170,
       render: (_, record) => (
         <Input
@@ -156,6 +169,8 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     {
       title: t('domesticProducts.barcode', '条码'),
       dataIndex: 'setBarcode',
+      sorter: true,
+      sortOrder: sortOrderOf('setBarcode'),
       width: 170,
       render: (_, record) => (
         <Input
@@ -169,6 +184,8 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     {
       title: createPasteTitle(t('domesticProducts.domesticPrice', '国内价'), 'domesticPrice'),
       dataIndex: 'domesticPrice',
+      sorter: true,
+      sortOrder: sortOrderOf('domesticPrice'),
       width: 120,
       render: (_, record) => (
         <div onPaste={(event) => handlePaste(event, record.id, 'domesticPrice')}>
@@ -186,6 +203,8 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     {
       title: t('domesticProducts.importPrice', '进口价'),
       dataIndex: 'importPrice',
+      sorter: true,
+      sortOrder: sortOrderOf('importPrice'),
       width: 120,
       render: (_, record) => (
         <InputNumber
@@ -201,6 +220,8 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
     {
       title: createPasteTitle(t('domesticProducts.oemPrice', '零售价'), 'oemPrice'),
       dataIndex: 'oemPrice',
+      sorter: true,
+      sortOrder: sortOrderOf('oemPrice'),
       width: 120,
       render: (_, record) => (
         <div onPaste={(event) => handlePaste(event, record.id, 'oemPrice')}>
@@ -317,7 +338,9 @@ export default function SetItemsModal({ open, product, canEdit, onClose, onSaved
         rowKey="id"
         loading={loading}
         columns={columns}
-        dataSource={draft}
+        dataSource={displayItems}
+        onChange={onTableChange}
+        showSorterTooltip={false}
         pagination={false}
         scroll={{ x: 980, y: 420 }}
       />

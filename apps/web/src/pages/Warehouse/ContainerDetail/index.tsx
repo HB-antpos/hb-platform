@@ -1044,7 +1044,8 @@ export default function ContainerDetailPage() {
   const {
     setCodeModalOpen,
     setCodeModalRow,
-    setCodeItems,
+    setCodeDisplayItems,
+    onSetCodeTableChange,
     setCodeLoading,
     setCodeSaving,
     changedSetCodePriceItems,
@@ -8170,7 +8171,9 @@ export default function ContainerDetailPage() {
             rowKey={getSetCodeRowKey}
             size="small"
             columns={setCodeColumns}
-            dataSource={setCodeItems}
+            dataSource={setCodeDisplayItems}
+            onChange={onSetCodeTableChange}
+            showSorterTooltip={false}
             loading={setCodeLoading}
             pagination={false}
             scroll={{ x: 520 }}

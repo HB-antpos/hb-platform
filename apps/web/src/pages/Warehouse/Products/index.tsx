@@ -38,6 +38,7 @@ import type { SupplierOption, } from '../../../types/domesticProduct';
 import { ProductType, ProductTypeLabels } from '../../../types/domesticProduct';
 import type { MulticodeSetItem } from '../../../types/multiCodeSet';
 import type { PushProductsToHqResult, PushProductsToHqStoreOption, PushProductsToHqUpdateField, } from '../../../types/posProduct';
+import { useSnapshotSort } from '../../../hooks/useSnapshotSort';
 import { copyTextToClipboard } from '../../../utils/clipboard';
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard';
 import { RequestError } from '../../../utils/request';
@@ -594,34 +595,52 @@ function SetItemsModal({ open, loading, saving, product, items, canEdit, onCance
 }) {
     const { t } = useTranslation();
     const isNewSetCode = (record: MulticodeSetItem) => record.id?.startsWith('new_') ?? false;
+    // 点列头排一次（编辑价格不会实时重排）；状态为空按「上架」处理，与开关显示一致。
+    const { displayItems, sortOrderOf, onTableChange, resetSort } = useSnapshotSort({
+        items,
+        getId: (item: MulticodeSetItem) => item.id ?? '',
+        getValue: (item: MulticodeSetItem, field: string) => (field === 'isActive' ? (item.isActive ?? true) : (item as unknown as Record<string, unknown>)[field]),
+    });
+    // 弹窗组件本身不会卸载，关闭或换商品时要清掉上一次的排序。
+    useEffect(() => { resetSort(); }, [open, product?.productCode, resetSort]);
     const columns: ColumnsType<MulticodeSetItem> = [
         {
             title: t('warehouse.setProductNo'),
             dataIndex: 'setItemNumber',
+            sorter: true,
+            sortOrder: sortOrderOf('setItemNumber'),
             width: 180,
             render: (_, record) => (<Input value={record.setItemNumber} disabled={!canEdit || !isNewSetCode(record)} onChange={(event) => onChangeField(record.id!, 'setItemNumber', event.target.value)}/>),
         },
         {
             title: t('domesticProducts.barcode'),
             dataIndex: 'setBarcode',
+            sorter: true,
+            sortOrder: sortOrderOf('setBarcode'),
             width: 180,
             render: (_, record) => (<Input value={record.setBarcode} disabled={!canEdit} onChange={(event) => onChangeField(record.id!, 'setBarcode', event.target.value)}/>),
         },
         {
             title: t('posAdmin.invoiceDetail.purchasePrice', '进货价'),
             dataIndex: 'setPurchasePrice',
+            sorter: true,
+            sortOrder: sortOrderOf('setPurchasePrice'),
             width: 120,
             render: (_, record) => (<InputNumber min={0} precision={2} value={record.setPurchasePrice} disabled={!canEdit} style={{ width: '100%' }} onChange={(value) => onChangeField(record.id!, 'setPurchasePrice', value ?? undefined)}/>),
         },
         {
             title: t('posAdmin.invoiceDetail.retailPrice', '零售价'),
             dataIndex: 'setRetailPrice',
+            sorter: true,
+            sortOrder: sortOrderOf('setRetailPrice'),
             width: 120,
             render: (_, record) => (<InputNumber min={0} precision={2} value={record.setRetailPrice} disabled={!canEdit} style={{ width: '100%' }} onChange={(value) => onChangeField(record.id!, 'setRetailPrice', value ?? undefined)}/>),
         },
         {
             title: t('column.status', '状态'),
             dataIndex: 'isActive',
+            sorter: true,
+            sortOrder: sortOrderOf('isActive'),
             width: 120,
             render: (_, record) => (<Switch checked={record.isActive ?? true} disabled={!canEdit} checkedChildren={getShelfStatusLabel(true, t)} unCheckedChildren={getShelfStatusLabel(false, t)} onChange={(checked) => onChangeField(record.id!, 'isActive', checked)}/>),
         },
@@ -643,7 +662,7 @@ function SetItemsModal({ open, loading, saving, product, items, canEdit, onCance
             {product?.productType === ProductType.MULTICODE ? t('warehouse.addMultiCodeDetail', '新增多码') : t('warehouse.addSubItem')}
           </Button>) : null}
       </Space>
-      <MeasuredTable metricId="warehouse.products.table-1" rowKey="id" loading={loading} columns={columns} dataSource={items} pagination={false} scroll={{ x: 980, y: 420 }}/>
+      <MeasuredTable metricId="warehouse.products.table-1" rowKey="id" loading={loading} columns={columns} dataSource={displayItems} onChange={onTableChange} showSorterTooltip={false} pagination={false} scroll={{ x: 980, y: 420 }}/>
     </Modal>);
 }
 export default function WarehouseProductsPage() {
