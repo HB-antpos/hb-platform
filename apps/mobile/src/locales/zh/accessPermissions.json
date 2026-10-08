@@ -633,6 +633,10 @@
       "name": "查看管理分店季节卡剩余",
       "description": "移动端「季节卡」- 查看管理分店季节卡剩余上报记录"
     },
+    "SeasonalCards.Remaining.ViewAllStores": {
+      "name": "查看全部分店季节卡填报统计",
+      "description": "Web 后台「节日贺卡填报统计」- 查看全部分店的贺卡剩余填报汇总、未填报分店与单店提交历史"
+    },
     "Store.ManageOperations": {
       "name": "管理分店运营",
       "description": "Web 页面 /pos-admin/cash-register-users - 管理收银用户条码"
