@@ -9,12 +9,19 @@ export type HolidayFillStatus = "filled" | "pending" | "unknown";
 export interface HolidayGridItem {
   cardType: SeasonalCardType;
   label: string;
+  /** 开放中：已填报 / 待填报（未选供应商时为 unknown）；未开放不显示填报状态。 */
+  isOpen: boolean;
   status: HolidayFillStatus;
+  /** 开放中为「截止 M/D」，未开放为「M/D 开放」；日期未知时为空。 */
+  detail: string;
 }
 
 const COLUMNS = 3;
 
-/** 5 个节日按 3 列排；每格显示当前 年份 + 供应商 下「已填报 / 待填报」。 */
+/**
+ * 5 个节日按 3 列排。开放中的节日可选，显示填报状态和截止日；
+ * 未开放的节日灰显、不可点，显示开放日期。
+ */
 export function HolidayGrid({
   title,
   items,
@@ -25,7 +32,7 @@ export function HolidayGrid({
 }: {
   title: string;
   items: HolidayGridItem[];
-  selected: SeasonalCardType;
+  selected: SeasonalCardType | null;
   statusLabels: Record<HolidayFillStatus, string>;
   disabled?: boolean;
   onSelect: (cardType: SeasonalCardType) => void;
@@ -51,18 +58,23 @@ export function HolidayGrid({
                 <View key={`empty-${columnIndex}`} style={styles.placeholder} />
               );
             }
-            const isSelected = item.cardType === selected;
+            const isSelected = item.isOpen && item.cardType === selected;
+            const itemDisabled = disabled || !item.isOpen;
+            const statusText = item.isOpen ? statusLabels[item.status] : "";
             // 外层等宽格子不带边框和内边距，选中加粗边框也不会让各列宽度不一致。
             return (
               <View key={item.cardType} style={styles.slot}>
                 <Pressable
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: isSelected, disabled }}
-                  accessibilityLabel={`${item.label} ${statusLabels[item.status]}`}
-                  disabled={disabled}
+                  accessibilityState={{ selected: isSelected, disabled: itemDisabled }}
+                  accessibilityLabel={[item.label, statusText, item.detail]
+                    .filter(Boolean)
+                    .join(" ")}
+                  disabled={itemDisabled}
                   onPress={() => onSelect(item.cardType)}
                   style={({ pressed }) => [
                     styles.cell,
+                    item.isOpen ? null : styles.cellClosed,
                     isSelected ? styles.cellSelected : null,
                     pressed ? styles.cellPressed : null,
                   ]}
@@ -70,23 +82,31 @@ export function HolidayGrid({
                   <Text
                     style={[
                       styles.label,
+                      item.isOpen ? null : styles.labelClosed,
                       isSelected ? styles.labelSelected : null,
                     ]}
                   >
                     {item.label}
                   </Text>
-                  <Text
-                    style={[
-                      styles.badge,
-                      item.status === "filled"
-                        ? styles.badgeFilled
-                        : item.status === "pending"
-                          ? styles.badgePending
-                          : styles.badgeUnknown,
-                    ]}
-                  >
-                    {statusLabels[item.status]}
-                  </Text>
+                  {statusText ? (
+                    <Text
+                      style={[
+                        styles.badge,
+                        item.status === "filled"
+                          ? styles.badgeFilled
+                          : item.status === "pending"
+                            ? styles.badgePending
+                            : styles.badgeUnknown,
+                      ]}
+                    >
+                      {statusText}
+                    </Text>
+                  ) : null}
+                  {item.detail ? (
+                    <Text style={[styles.detail, item.isOpen ? null : styles.detailClosed]}>
+                      {item.detail}
+                    </Text>
+                  ) : null}
                 </Pressable>
               </View>
             );
@@ -121,6 +141,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 2,
   },
+  cellClosed: {
+    borderColor: HB_COLORS.outlineMuted,
+    backgroundColor: SEASONAL_CARD_COLORS.disabledBackground,
+  },
   cellSelected: {
     borderWidth: 1.5,
     borderColor: SEASONAL_CARD_COLORS.selectedBorder,
@@ -133,6 +157,7 @@ const styles = StyleSheet.create({
     color: "#344054",
     textAlign: "center",
   },
+  labelClosed: { color: SEASONAL_CARD_COLORS.disabledText },
   labelSelected: {
     color: SEASONAL_CARD_COLORS.selectedText,
     fontWeight: "600",
@@ -141,4 +166,11 @@ const styles = StyleSheet.create({
   badgeFilled: { color: HB_COLORS.success },
   badgePending: { color: HB_COLORS.warning },
   badgeUnknown: { color: SEASONAL_CARD_COLORS.disabledText },
+  detail: {
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: "center",
+    color: SEASONAL_CARD_COLORS.mutedText,
+  },
+  detailClosed: { color: SEASONAL_CARD_COLORS.mutedText },
 });

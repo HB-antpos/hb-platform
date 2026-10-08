@@ -6,10 +6,13 @@
  */
 export const SEASONAL_CARD_STALE = "SEASONAL_CARD_STALE";
 export const SEASONAL_CARD_NO_CHANGES = "SEASONAL_CARD_NO_CHANGES";
+/** 节日不在开放窗口内（节日当天起 4 周）或年份不是窗口对应年份。 */
+export const SEASONAL_CARD_WINDOW_CLOSED = "SEASONAL_CARD_WINDOW_CLOSED";
 
 const ERROR_KEY_BY_CODE: Record<string, string> = {
   [SEASONAL_CARD_STALE]: "messages.staleSnackbar",
   [SEASONAL_CARD_NO_CHANGES]: "errors.noChanges",
+  [SEASONAL_CARD_WINDOW_CLOSED]: "errors.windowClosed",
   BATCH_ITEMS_MISMATCH: "errors.catalogChanged",
   BATCH_ITEMS_REQUIRED: "errors.catalogChanged",
   SUPPLIER_NOT_FOUND: "errors.supplierNotFound",

@@ -323,6 +323,11 @@ assertEqual(
   "unknown codes fall back to the generic error handling"
 );
 assertEqual(getSeasonalCardErrorCode("oops"), null, "non-object errors have no code");
+assertEqual(
+  getSeasonalCardSubmitErrorKey(Object.assign(new Error("x"), { code: "SEASONAL_CARD_WINDOW_CLOSED" })),
+  "errors.windowClosed",
+  "closed window maps to its local message"
+);
 
 // ---- 价格标签 ----
 assertEqual(getSeasonalCardPriceDisplayLabel(4, "其他", "Other"), "Other", "other price uses the localized label");

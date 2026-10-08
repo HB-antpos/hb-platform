@@ -126,6 +126,35 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
         Assert.False(result.HasMore);
     }
 
+    [ContainerDetailTagStatsSqlServerFact]
+    public async Task SQLServer_进口价对比实时进货价的涨跌统计与筛选()
+    {
+        await using var database = await IsolatedDatabase.CreateAsync();
+        using var db = database.CreateClient();
+        await SeedOwnContainerScenarioAsync(db);
+        await SeedDetailAsync(db, "D-TREND-UP", "P-TREND-UP", "HB401", importPrice: 1.37m, warehouseImportPrice: 1.19m);
+        await SeedDetailAsync(db, "D-TREND-DOWN", "P-TREND-DOWN", "HB402", importPrice: 1.66m, warehouseImportPrice: 1.96m);
+        using var hbSalesDb = database.CreateScope();
+        var service = CreateService(db, hbSalesDb);
+
+        // 分页模式的统计请求：统计不受选中标签影响，总数按涨价筛选结果（明细行筛选由 SQLite 用例覆盖）。
+        var result = await service.QueryContainerDetailsAsync(new ContainerDetailQueryDto
+        {
+            ContainerGuid = ContainerCode,
+            PageNumber = 1,
+            PageSize = 100,
+            IncludeItems = false,
+            IncludeTotal = true,
+            IncludeStats = true,
+            SelectedTags = new List<string> { "priceUp" },
+        });
+
+        // 场景里其余 5 条进口价与仓库进货价相同或缺失，不计涨跌。
+        Assert.Equal(1, result.TagStats.PriceUp);
+        Assert.Equal(1, result.TagStats.PriceDown);
+        Assert.Equal(1, result.ItemsTotal);
+    }
+
     /// <summary>
     /// 同一货柜内的四种新旧口径：本柜建档、未建档、其它货柜建档、本柜只更新；
     /// 另有一条仓库未到货（无仓库商品记录）的新品。
@@ -162,7 +191,8 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
         decimal? importPrice = 1m,
         bool localExists = true,
         bool isActive = true,
-        bool warehouseExists = true
+        bool warehouseExists = true,
+        decimal? warehouseImportPrice = null
     )
     {
         await db.Insertable(new ContainerDetail
@@ -196,7 +226,7 @@ public sealed class ContainerDetailTagStatsSqlServerIntegrationTests
             await db.Insertable(new WarehouseProduct
             {
                 ProductCode = productCode,
-                ImportPrice = importPrice,
+                ImportPrice = warehouseImportPrice ?? importPrice,
                 OEMPrice = oemPrice,
                 IsActive = isActive,
             }).ExecuteCommandAsync();

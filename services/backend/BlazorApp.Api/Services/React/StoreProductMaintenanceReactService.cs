@@ -312,35 +312,58 @@ namespace BlazorApp.Api.Services.React
                 return null;
             }
 
-            decimal? retailPrice = set.SetRetailPrice;
-            decimal? discountRate = null;
-            string? codeId = set.SetCodeId;
-            var kind = "set";
-            var resolvedBarcode = set.SetBarcode!;
+            // 套装 / 多码子项都存放在 ProductSetCode，扫码都命中 SetBarcode，只能按主档 ProductType 区分。
+            var resolvedSetProductCode = ResolveSetProductCode(set.SetProductCode, set.SetCodeId);
+            var projectionQuery = _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => !x.IsDeleted
+                    && x.IsActive
+                    && x.ProductCode == detail.ProductCode
+                    && x.MultiCodeProductCode == resolvedSetProductCode);
+            if (!string.IsNullOrWhiteSpace(storeCode))
+            {
+                projectionQuery = projectionQuery.Where(x => x.StoreCode == storeCode);
+            }
+            var projections = await projectionQuery.ToListAsync();
+            // 多行投影无法判断以哪行为准：多码不做快速打印，套装退回全局套装价（与改动前一致）。
+            var projection = projections.Count == 1 ? projections[0] : null;
+
+            decimal? retailPrice;
+            decimal? discountRate;
+            string? codeId;
+            string kind;
+            string resolvedBarcode;
             if (detail.ProductType == 2)
             {
-                var resolvedSetProductCode = ResolveSetProductCode(set.SetProductCode, set.SetCodeId);
-                var projectionQuery = _db.Queryable<StoreMultiCodeProduct>()
-                    .Where(x => !x.IsDeleted
-                        && x.IsActive
-                        && x.ProductCode == detail.ProductCode
-                        && x.MultiCodeProductCode == resolvedSetProductCode);
-                if (!string.IsNullOrWhiteSpace(storeCode))
-                {
-                    projectionQuery = projectionQuery.Where(x => x.StoreCode == storeCode);
-                }
-                var projections = await projectionQuery.ToListAsync();
-                var projection = projections.Count == 1 ? projections[0] : null;
                 if (projection == null
                     || !string.Equals(projection.MultiBarcode, keyword, StringComparison.Ordinal))
                 {
                     return null;
                 }
-                retailPrice = projection.MultiCodeRetailPrice;
-                discountRate = projection.DiscountRate;
+                // 多码与主条码是同一商品：标签打多码条码 + 主档门店价 + 主档折扣。
+                // 不用投影行的 MultiCodeRetailPrice，它可能未与主档门店价同步。
+                var mainPrice = detail.StorePrice;
+                if (mainPrice == null
+                    || (!string.IsNullOrWhiteSpace(storeCode)
+                        && !string.Equals(mainPrice.StoreCode, storeCode, StringComparison.Ordinal)))
+                {
+                    return null;
+                }
+                retailPrice = mainPrice.RetailPrice;
+                discountRate = mainPrice.DiscountRate;
                 codeId = projection.UUID;
                 kind = "multi";
                 resolvedBarcode = projection.MultiBarcode!;
+            }
+            else
+            {
+                // 套装子项：子项条码 + 门店套装价（无门店行时用全局套装价），与详情页及收银端取价一致；
+                // 按业务规则套装标签不印折扣，DiscountRate 留空，客户端按 0 处理。
+                var storeSetPrice = string.IsNullOrWhiteSpace(storeCode) ? null : projection?.MultiCodeRetailPrice;
+                retailPrice = storeSetPrice ?? set.SetRetailPrice;
+                discountRate = null;
+                codeId = set.SetCodeId;
+                kind = "set";
+                resolvedBarcode = set.SetBarcode!;
             }
 
             return retailPrice is > 0

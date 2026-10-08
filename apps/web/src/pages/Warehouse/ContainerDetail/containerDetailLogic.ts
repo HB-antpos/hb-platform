@@ -2,7 +2,8 @@ import type { ContainerDetail, ContainerDetailQuery, ContainerDetailQueryResult,
 import type { PushProductsToHqItem, PushProductsToHqResult } from '../../../types/posProduct'
 
 export type ContainerDetailProductTypeFilter = 'normal' | 'set' | 'multi' | 'setChild'
-export type ContainerDetailTagFilter = 'all' | 'new' | 'existing' | 'noOemPrice' | 'abnormalImport' | 'active' | 'inactive' | ContainerDetailProductTypeFilter
+// priceUp / priceDown：本次进口价格相对仓库实时进货价涨价 / 降价，与进口价格列的涨跌箭头同一口径。
+export type ContainerDetailTagFilter = 'all' | 'new' | 'existing' | 'noOemPrice' | 'abnormalImport' | 'active' | 'inactive' | 'priceUp' | 'priceDown' | ContainerDetailProductTypeFilter
 
 export type ContainerDetailTagStats = Record<ContainerDetailTagFilter, number> & {
   productCodeMatched: number
@@ -629,7 +630,6 @@ export type ContainerDetailTableColumnKey =
   | 'index'
   | 'image'
   | 'categoryName'
-  | 'readonlyOemPrice'
   // 「成本核算 / 上架定价」视图专用的合成列：商品（图+货号+标签+名称）与问题标签，「全部列」不显示。
   | 'product'
   | 'issues'
@@ -1235,11 +1235,6 @@ export function resolveContainerDetailOemPrice(row: ContainerDetail): number | u
   return row.贴牌价格
 }
 
-export function getContainerDetailReadonlyOemPrice(row: ContainerDetail): number | undefined {
-  // 只读快览价由后端按新商品/已有商品分流；缺字段时不回退明细业务价。
-  return row.readonlyOemPrice ?? row.ReadonlyOemPrice
-}
-
 export function getContainerDetailOemPriceSource(row: ContainerDetail): 'detail' | 'none' {
   return row.贴牌价格 == null ? 'none' : 'detail'
 }
@@ -1268,6 +1263,33 @@ export function getContainerDetailImportPriceTrend(row: ContainerDetail): 'up' |
 
   // 趋势以本次进口价格相对实时仓库进货价判断，用于表格箭头和颜色。
   return currentImportPrice > realtimeImportPrice ? 'up' : 'down'
+}
+
+export interface ContainerDetailWarehouseImportPriceUpdate {
+  productCode: string
+  importPrice: number
+}
+
+/**
+ * 「更新仓库进货价」：用本次货柜进口价格覆盖仓库进货价（WarehouseProduct.ImportPrice，即表格里的实时进货价）。
+ * - 只处理已有商品（新商品还没有仓库记录，由「创建新商品」负责写入）
+ * - 进口价格必须 > 0，且与实时进货价不同（相同的不必再写）
+ * - 同一商品在柜内出现多行时只取第一行，避免同一批次里互相覆盖
+ */
+export function buildContainerDetailWarehouseImportPriceUpdates(rows: readonly ContainerDetail[]): ContainerDetailWarehouseImportPriceUpdate[] {
+  const seen = new Set<string>()
+  const updates: ContainerDetailWarehouseImportPriceUpdate[] = []
+  rows.forEach((row) => {
+    if (row.是否新商品) return
+    const productCode = (row.商品编码 || row.商品信息?.商品编码 || '').trim()
+    if (!productCode || seen.has(productCode)) return
+    const importPrice = row.进口价格
+    if (typeof importPrice !== 'number' || !Number.isFinite(importPrice) || importPrice <= 0) return
+    seen.add(productCode)
+    if (getContainerDetailRealtimeImportPrice(row) === importPrice) return
+    updates.push({ productCode, importPrice })
+  })
+  return updates
 }
 
 export function getContainerDetailRealtimeRetailPrice(row: ContainerDetail): number | undefined {
@@ -1440,6 +1462,8 @@ export function matchesContainerDetailTagFilter(row: ContainerDetail, filter: Co
   if (filter === 'abnormalImport') return !row.进口价格 || row.进口价格 <= 0
   if (filter === 'active') return row.warehouseIsActive === true
   if (filter === 'inactive') return row.warehouseIsActive !== true
+  if (filter === 'priceUp') return getContainerDetailImportPriceTrend(row) === 'up'
+  if (filter === 'priceDown') return getContainerDetailImportPriceTrend(row) === 'down'
   return true
 }
 
@@ -1448,6 +1472,7 @@ const containerDetailTagFilterGroups: ContainerDetailSelectableTagFilter[][] = [
   ['normal', 'set', 'multi', 'setChild'],
   ['noOemPrice', 'abnormalImport'],
   ['active', 'inactive'],
+  ['priceUp', 'priceDown'],
 ]
 
 const containerDetailProductTypeTags: ContainerDetailProductTypeFilter[] = ['normal', 'set', 'multi', 'setChild']
@@ -1505,6 +1530,8 @@ export function buildContainerDetailTagStats(rows: ContainerDetail[]): Container
     abnormalImport: 0,
     active: 0,
     inactive: 0,
+    priceUp: 0,
+    priceDown: 0,
     normal: 0,
     set: 0,
     multi: 0,
@@ -1522,6 +1549,8 @@ export function buildContainerDetailTagStats(rows: ContainerDetail[]): Container
     if (matchesContainerDetailTagFilter(row, 'abnormalImport')) stats.abnormalImport += 1
     if (matchesContainerDetailTagFilter(row, 'active')) stats.active += 1
     if (matchesContainerDetailTagFilter(row, 'inactive')) stats.inactive += 1
+    if (matchesContainerDetailTagFilter(row, 'priceUp')) stats.priceUp += 1
+    if (matchesContainerDetailTagFilter(row, 'priceDown')) stats.priceDown += 1
     const productType = getContainerDetailProductTypeFilterKey(row)
     stats[productType] += 1
     const matchType = getContainerDetailMatchType(row)

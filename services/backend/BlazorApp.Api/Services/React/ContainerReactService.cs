@@ -373,6 +373,19 @@ namespace BlazorApp.Api.Services.React
                         || (tags.Contains("inactive") && (wp.ProductCode == null || wp.IsActive != true))
                     );
                 }
+                if (tags.Contains("priceUp") || tags.Contains("priceDown"))
+                {
+                    // 涨跌 = 本次进口价格对比仓库实时进货价（WarehouseProduct.ImportPrice），与前端进口价格列的涨跌箭头同一口径；
+                    // 任一价格为空或两者相等都不算涨跌。
+                    query = query.Where((cd, wp, dp, lp) =>
+                        cd.ImportPrice != null
+                        && wp.ImportPrice != null
+                        && (
+                            (tags.Contains("priceUp") && cd.ImportPrice > wp.ImportPrice)
+                            || (tags.Contains("priceDown") && cd.ImportPrice < wp.ImportPrice)
+                        )
+                    );
+                }
             }
 
             var containerPiecesMin = request.ContainerPiecesMin ?? request.ContainerPieces?.Min;
@@ -566,6 +579,7 @@ namespace BlazorApp.Api.Services.React
             public string? DetailProductType { get; set; }
             public decimal? DetailOemPrice { get; set; }
             public decimal? DetailImportPrice { get; set; }
+            public decimal? WarehouseImportPrice { get; set; }
             public bool? WarehouseIsActive { get; set; }
             public string MatchType { get; set; } = ContainerDetailUnmatched;
             public string? LocalProductCode { get; set; }
@@ -650,6 +664,7 @@ namespace BlazorApp.Api.Services.React
                     DetailProductType = cd.ProductType,
                     DetailOemPrice = cd.OEMPrice,
                     DetailImportPrice = cd.ImportPrice,
+                    WarehouseImportPrice = wp.ImportPrice,
                     WarehouseIsActive = wp.IsActive,
                 })
                 .ToListAsync(cancellationToken);
@@ -890,10 +905,29 @@ namespace BlazorApp.Api.Services.React
                 !(tags.Contains("active") || tags.Contains("inactive"))
                 || (tags.Contains("active") && seed.WarehouseIsActive == true)
                 || (tags.Contains("inactive") && seed.WarehouseIsActive != true);
+            var priceTrend = ResolveContainerDetailImportPriceTrend(seed);
+            var matchesPriceTrend =
+                !(tags.Contains("priceUp") || tags.Contains("priceDown"))
+                || (tags.Contains("priceUp") && priceTrend > 0)
+                || (tags.Contains("priceDown") && priceTrend < 0);
             return matchesNewState
                 && matchesProductType
                 && matchesPriceState
-                && matchesWarehouseStatus;
+                && matchesWarehouseStatus
+                && matchesPriceTrend;
+        }
+
+        /// <summary>
+        /// 本次进口价格相对仓库实时进货价的涨跌：1 涨、-1 跌、0 持平或任一价格缺失（与 SQL 筛选、前端箭头同口径）。
+        /// </summary>
+        private static int ResolveContainerDetailImportPriceTrend(ContainerDetailMatchSeed seed)
+        {
+            if (!seed.DetailImportPrice.HasValue || !seed.WarehouseImportPrice.HasValue)
+            {
+                return 0;
+            }
+
+            return seed.DetailImportPrice.Value.CompareTo(seed.WarehouseImportPrice.Value);
         }
 
         private static ContainerDetailTagStatsDto BuildContainerDetailTagStats(
@@ -919,6 +953,8 @@ namespace BlazorApp.Api.Services.React
                 ),
                 Active = seeds.Count(seed => seed.WarehouseIsActive == true),
                 Inactive = seeds.Count(seed => seed.WarehouseIsActive != true),
+                PriceUp = seeds.Count(seed => ResolveContainerDetailImportPriceTrend(seed) > 0),
+                PriceDown = seeds.Count(seed => ResolveContainerDetailImportPriceTrend(seed) < 0),
                 ProductCodeMatched = seeds.Count(seed =>
                     seed.MatchType == ContainerDetailProductCodeMatch
                 ),
@@ -1876,6 +1912,7 @@ namespace BlazorApp.Api.Services.React
                     LocalProductCode = lp.ProductCode,
                     cd.OEMPrice,
                     cd.ImportPrice,
+                    WarehouseImportPrice = wp.ImportPrice,
                     WarehouseProductCode = wp.ProductCode,
                     WarehouseIsActive = wp.IsActive,
                     // 新商品/已有商品统计按「本柜新品」口径，与筛选、列表字段一致。
@@ -1907,6 +1944,9 @@ namespace BlazorApp.Api.Services.React
                     Active = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseIsActive == true, row.DetailCode, null)),
                     // 没有仓库记录的新品（仓库未到货）算下架，与筛选、前端本地统计一致。
                     Inactive = SqlFunc.AggregateCount(SqlFunc.IIF(row.WarehouseProductCode == null || row.WarehouseIsActive != true, row.DetailCode, null)),
+                    // 涨跌口径同筛选：两个价格都有值且不相等才计入。
+                    PriceUp = SqlFunc.AggregateCount(SqlFunc.IIF(row.ImportPrice != null && row.WarehouseImportPrice != null && row.ImportPrice > row.WarehouseImportPrice, row.DetailCode, null)),
+                    PriceDown = SqlFunc.AggregateCount(SqlFunc.IIF(row.ImportPrice != null && row.WarehouseImportPrice != null && row.ImportPrice < row.WarehouseImportPrice, row.DetailCode, null)),
                 })
                 .FirstAsync(cancellationToken);
 
@@ -1925,6 +1965,8 @@ namespace BlazorApp.Api.Services.React
                     AbnormalImport = stats.AbnormalImport,
                     Active = stats.Active,
                     Inactive = stats.Inactive,
+                    PriceUp = stats.PriceUp,
+                    PriceDown = stats.PriceDown,
                 };
         }
 
@@ -2434,16 +2476,9 @@ namespace BlazorApp.Api.Services.React
             {
                 throw new InvalidOperationException("原国内商品不存在或已删除");
             }
-            if (
-                !string.Equals(
-                    domesticProduct.SupplierCode?.Trim(),
-                    supplierCode,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            {
-                throw new InvalidOperationException("国内商品供应商代码与候选供应商不一致，不能对齐编码");
-            }
+            // 注意：DomesticProduct.SupplierCode 是中国供应商代码（如 HB196），请求里的 SupplierCode
+            // 是澳洲本地供应商代码（如 200），两套编码体系不同，不能互相比较；同一商品由下方
+            // 「本地主档供应商 + 货号一致」来确认。
 
             var localProduct = await _context
                 .Db.Queryable<Product>()
@@ -2535,16 +2570,6 @@ namespace BlazorApp.Api.Services.React
                 {
                     throw new InvalidOperationException("原国内商品不存在或已删除");
                 }
-                if (
-                    !string.Equals(
-                        transactionalDomesticProduct.SupplierCode?.Trim(),
-                        supplierCode,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                {
-                    throw new InvalidOperationException("国内商品供应商代码与候选供应商不一致，不能对齐编码");
-                }
 
                 var transactionalLocalProduct = await _context
                     .Db.Queryable<Product>()
@@ -2606,13 +2631,13 @@ namespace BlazorApp.Api.Services.React
                 }
 
                 // Product.ProductCode 是权威主键；确认后只把国内侧引用从旧编码迁到本地主档编码。
+                // 不按 SupplierCode 过滤：国内表存的是中国供应商代码，与请求中的澳洲供应商代码不同体系。
                 var updatedDomesticProducts = await _context.Db.Ado.ExecuteCommandAsync(
-                    "UPDATE DomesticProduct SET ProductCode = @TargetProductCode WHERE ProductCode = @OldProductCode AND SupplierCode = @SupplierCode AND IsDeleted = 0",
+                    "UPDATE DomesticProduct SET ProductCode = @TargetProductCode WHERE ProductCode = @OldProductCode AND IsDeleted = 0",
                     new List<SugarParameter>
                     {
                         new("@TargetProductCode", targetProductCode),
                         new("@OldProductCode", oldProductCode),
-                        new("@SupplierCode", supplierCode),
                     }
                 );
                 if (updatedDomesticProducts != 1)

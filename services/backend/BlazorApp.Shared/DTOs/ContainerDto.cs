@@ -501,6 +501,10 @@ namespace BlazorApp.Shared.DTOs
         public int AbnormalImport { get; set; }
         public int Active { get; set; }
         public int Inactive { get; set; }
+        /// <summary>本次进口价格高于仓库实时进货价的明细数</summary>
+        public int PriceUp { get; set; }
+        /// <summary>本次进口价格低于仓库实时进货价的明细数</summary>
+        public int PriceDown { get; set; }
         public int ProductCodeMatched { get; set; }
         public int SupplierItemMatched { get; set; }
         public int Unmatched { get; set; }
@@ -764,6 +768,10 @@ namespace BlazorApp.Shared.DTOs
         public string DetailHguid { get; set; } = string.Empty;
         public string ExpectedDomesticProductCode { get; set; } = string.Empty;
         public string TargetProductCode { get; set; } = string.Empty;
+        /// <summary>
+        /// 澳洲本地供应商代码（Product.LocalSupplierCode，如 200），只用于校验本地主档；
+        /// 不是 DomesticProduct.SupplierCode（中国供应商代码）。
+        /// </summary>
         public string SupplierCode { get; set; } = string.Empty;
     }
 

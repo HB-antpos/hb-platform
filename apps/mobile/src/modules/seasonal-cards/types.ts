@@ -79,13 +79,25 @@ export interface SeasonalCardBatch {
 export interface SeasonalCardOverviewHoliday {
   cardType: SeasonalCardType;
   cardTypeName: string;
-  /** 当前生效批次；没填过为 null。 */
+  /** 今天（门店本地日期）是否在开放窗口内；旧后端没有该字段时按开放处理。 */
+  isOpen: boolean;
+  /** 开放时为本次填报归属年份（圣诞节跨年时是上一年）；未开放时为下一次节日的年份。 */
+  seasonYear: number | null;
+  /** yyyy-MM-dd；旧后端没有时为空字符串。 */
+  holidayDate: string;
+  opensOn: string;
+  /** 开放末日（含当天）。 */
+  closesOn: string;
+  /** 开放中节日的当前生效批次；没填过或未开放为 null。 */
   currentBatch: SeasonalCardBatch | null;
 }
 
 export interface SeasonalCardOverview {
   storeCode: string;
+  /** 门店本地今天所在年份（仅作兜底；提交以节日自己的 seasonYear 为准）。 */
   seasonYear: number | null;
+  /** 门店本地今天，yyyy-MM-dd；旧后端没有时为空字符串。 */
+  today: string;
   localSupplierCode: string;
   supplierName: string;
   holidays: SeasonalCardOverviewHoliday[];
@@ -93,6 +105,7 @@ export interface SeasonalCardOverview {
 
 export interface SeasonalCardOverviewQuery {
   storeCode: string;
+  /** 新后端忽略该参数（年份由开放窗口决定）；仍按手机本地今年传，兼容旧后端。 */
   seasonYear: number;
   localSupplierCode: string;
 }

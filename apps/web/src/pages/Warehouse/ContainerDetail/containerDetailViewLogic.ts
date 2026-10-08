@@ -14,6 +14,7 @@ import {
   parseContainerDate,
   type EtaHint,
 } from '../Containers/containersLogic'
+import type { WarehouseCategoryLookup } from '../Products/categoryPath'
 import { CONTAINER_DETAIL_AUTO_SAVE_FIELDS, type ContainerDetailAutoSavePatchMap } from './containerDetailAutoSaveQueue'
 import {
   deriveContainerFreightInput,
@@ -37,8 +38,57 @@ import {
 export type ContainerDetailColumnView = 'cost' | 'pricing' | 'all'
 
 export const CONTAINER_DETAIL_COLUMN_VIEWS: readonly ContainerDetailColumnView[] = ['cost', 'pricing', 'all']
-export const DEFAULT_CONTAINER_DETAIL_COLUMN_VIEW: ContainerDetailColumnView = 'cost'
-export const CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY = 'hbweb_rv.containerDetail.columnView.v1'
+// 默认打开「全部列」。存储 key 升到 v2：旧 v1 里多半记着原默认的「成本核算」，不升级的话老用户看不到新默认。
+export const DEFAULT_CONTAINER_DETAIL_COLUMN_VIEW: ContainerDetailColumnView = 'all'
+export const CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY = 'hbweb_rv.containerDetail.columnView.v2'
+
+/**
+ * 业务列的默认顺序（「全部列」视图看到的就是这个顺序，「重置列」也恢复到这里）：
+ * 编号、图片、货号、英文名称、中文名称、分类、国内价格、仓库状态、运输成本、调整浮率、
+ * 实时进货价、进口价格、实时零售价、零售价，其余列按原有相对顺序排在后面。
+ * 合成列 product 固定在最前（左固定列），issues 放最后；它们只在「成本核算 / 上架定价」出现。
+ */
+export const CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER: readonly ContainerDetailTableColumnKey[] = [
+  'product',
+  'index',
+  'image',
+  'itemNumber',
+  'englishName',
+  'productName',
+  'categoryName',
+  'domesticPrice',
+  'warehouseStatus',
+  'transportCost',
+  'floatRate',
+  'warehouseImportPrice',
+  'importPrice',
+  'lastOEMPrice',
+  'oemPrice',
+  // 以下为「其他列」
+  'containerPieces',
+  'packingQuantity',
+  'containerQuantity',
+  'unitVolume',
+  'unitTransportCost',
+  'middlePackQuantity',
+  'newProduct',
+  'productType',
+  'matchType',
+  'barcode',
+  'remark',
+  'issues',
+]
+
+/** 按默认列顺序排列列 key；不在默认清单里的列（将来新增）保持原相对顺序，排在已知列之后。 */
+export function sortContainerDetailColumnKeysByDefaultOrder(
+  keys: readonly ContainerDetailTableColumnKey[],
+): ContainerDetailTableColumnKey[] {
+  const rank = new Map(CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER.map((key, index) => [key, index]))
+  return keys
+    .map((key, index) => ({ key, index, rank: rank.get(key) ?? Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ key }) => key)
+}
 
 /** 只在「成本核算 / 上架定价」出现的合成列；「全部列」保持原 26 列不变。 */
 export const CONTAINER_DETAIL_VIEW_ONLY_COLUMN_KEYS: readonly ContainerDetailTableColumnKey[] = ['product', 'issues']
@@ -56,13 +106,14 @@ const CONTAINER_DETAIL_VIEW_COLUMN_KEYS: Record<Exclude<ContainerDetailColumnVie
     'importPrice',
     'issues',
   ],
+  // 未拖拽过列时按这里的顺序展示，与调整默认列顺序之前该视图的显示顺序一致。
   pricing: [
     'product',
     'englishName',
     'categoryName',
+    'warehouseImportPrice',
     'importPrice',
     'oemPrice',
-    'warehouseImportPrice',
     'matchType',
     'warehouseStatus',
   ],
@@ -116,7 +167,10 @@ export function normalizeContainerDetailColumnView(value: unknown): ContainerDet
 /**
  * 按视图从「当前列顺序」里挑出可见列。
  * - 全部列：原列顺序原样保留，只去掉视图专用的合成列
- * - 其他视图：按当前列顺序过滤，再把固定在左侧的列挪到最前（AntD 要求左固定列必须在最左边）
+ * - 其他视图：本视图的列被拖拽调过相对顺序时按当前列顺序过滤；没调过时按视图自身的列清单顺序
+ *   （默认列顺序是按「全部列」排的，成本核算若跟着它走，装柜件数等会被挤到进口价之后）。
+ *   只比较本视图的列：其他列（含将来追加到末尾的新列）怎么排都不影响本视图。
+ *   最后都把固定在左侧的列挪到最前（AntD 要求左固定列必须在最左边）
  */
 export function resolveContainerDetailViewColumnKeys(
   view: ContainerDetailColumnView,
@@ -126,12 +180,58 @@ export function resolveContainerDetailViewColumnKeys(
   if (view === 'all') {
     return orderedKeys.filter((key) => !CONTAINER_DETAIL_VIEW_ONLY_COLUMN_KEYS.includes(key))
   }
-  const visible = new Set(CONTAINER_DETAIL_VIEW_COLUMN_KEYS[view])
-  const keys = orderedKeys.filter((key) => visible.has(key))
+  const viewKeys = CONTAINER_DETAIL_VIEW_COLUMN_KEYS[view]
+  const visible = new Set(viewKeys)
+  const orderedViewKeys = orderedKeys.filter((key) => visible.has(key))
+  const defaultViewKeys = sortContainerDetailColumnKeysByDefaultOrder(orderedViewKeys)
+  const isReordered = orderedViewKeys.some((key, index) => key !== defaultViewKeys[index])
+  const available = new Set(orderedViewKeys)
+  const keys = isReordered ? orderedViewKeys : viewKeys.filter((key) => available.has(key))
   return [
     ...keys.filter((key) => fixedLeftKeys.has(key)),
     ...keys.filter((key) => !fixedLeftKeys.has(key)),
   ]
+}
+
+/**
+ * 在「成本核算 / 上架定价」里拖拽前，先把全局列顺序里本视图各列占的位置按当前显示顺序重新填一遍，
+ * 再做移动；否则视图按自身清单顺序显示时，拖拽结果会和用户看到的顺序对不上。其他列的位置不动。
+ */
+export function alignContainerDetailColumnOrderToView(
+  order: readonly ContainerDetailTableColumnKey[],
+  displayedKeys: readonly ContainerDetailTableColumnKey[],
+): ContainerDetailTableColumnKey[] {
+  const present = new Set(order)
+  const queue = displayedKeys.filter((key) => present.has(key))
+  const displayed = new Set(queue)
+  let cursor = 0
+  return order.map((key) => (displayed.has(key) ? queue[cursor++] : key))
+}
+
+// ---------------------------------------------------------------------------
+// 分类列：无论界面语言，表格里一律显示分类英文名
+// ---------------------------------------------------------------------------
+
+function getLastCategoryPathSegment(path: string | undefined) {
+  return path?.split(' > ').pop()?.trim() || undefined
+}
+
+/**
+ * 分类英文名：优先按分类 GUID 从分类树取，其次按名称（中英文名都能反查）取；
+ * 分类树里没有英文名时 formatWarehouseCategoryNodeName 会回退中文名，分类树也查不到就原样显示后端返回的名称。
+ */
+export function resolveContainerDetailCategoryEnglishName(
+  record: { categoryName?: string; warehouseCategoryGUID?: string },
+  lookup: Pick<WarehouseCategoryLookup, 'displayByGuid' | 'displayByName'>,
+): string | undefined {
+  if (record.warehouseCategoryGUID) {
+    const byGuid = getLastCategoryPathSegment(lookup.displayByGuid.get(record.warehouseCategoryGUID)?.en)
+    if (byGuid) return byGuid
+  }
+  const name = record.categoryName?.trim()
+  if (!name) return undefined
+  // 同名分类可能挂在不同父级下，但末级名称一致，取第一条路径即可。
+  return getLastCategoryPathSegment(lookup.displayByName.get(name)?.en?.[0]) || name
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +242,8 @@ export const CONTAINER_DETAIL_NEW_STATE_TAGS = ['new', 'existing'] as const sati
 export const CONTAINER_DETAIL_PRODUCT_TYPE_TAGS = ['normal', 'set', 'multi', 'setChild'] as const satisfies readonly ContainerDetailTagFilter[]
 export const CONTAINER_DETAIL_WAREHOUSE_STATUS_TAGS = ['active', 'inactive'] as const satisfies readonly ContainerDetailTagFilter[]
 export const CONTAINER_DETAIL_CHECK_TAGS = ['noOemPrice', 'abnormalImport'] as const satisfies readonly ContainerDetailTagFilter[]
+/** 涨跌：本次进口价格对比仓库实时进货价，口径同进口价格列的涨跌箭头（任一价格缺失或相等都不算涨跌）。 */
+export const CONTAINER_DETAIL_PRICE_TREND_TAGS = ['priceUp', 'priceDown'] as const satisfies readonly ContainerDetailTagFilter[]
 
 export type ContainerDetailTagGroup = readonly ContainerDetailTagFilter[]
 
@@ -345,29 +447,29 @@ export type ContainerDetailColumnFilterDescriptor =
   | { key: ContainerDetailColumnFilterKey; kind: 'range'; min?: number; max?: number }
   | { key: ContainerDetailColumnFilterKey; kind: 'enum'; values: string[] }
 
-/** 条目顺序跟表格默认列顺序一致，便于对照列头。 */
+/** 条目顺序跟表格默认列顺序（CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER）一致，便于对照列头。 */
 export const CONTAINER_DETAIL_COLUMN_FILTER_ORDER: readonly ContainerDetailColumnFilterKey[] = [
   'itemNumber',
   'englishName',
+  'productName',
+  'domesticPrice',
+  'warehouseStatus',
+  'transportCost',
+  'floatRate',
+  'warehouseImportPrice',
+  'importPrice',
+  'lastOEMPrice',
+  'oemPrice',
   'containerPieces',
   'packingQuantity',
   'containerQuantity',
   'unitVolume',
-  'domesticPrice',
-  'transportCost',
   'unitTransportCost',
-  'floatRate',
   'middlePackQuantity',
-  'warehouseImportPrice',
-  'importPrice',
-  'oemPrice',
-  'lastOEMPrice',
   'newProductStates',
   'productTypes',
   'matchTypes',
   'barcode',
-  'productName',
-  'warehouseStatus',
   'remark',
 ]
 

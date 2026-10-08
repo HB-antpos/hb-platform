@@ -306,6 +306,56 @@ assertEqual(overviewBatch?.totalAmount, 640, "overview batch amount is numeric")
 assertEqual(overviewBatch?.lines[1]?.unitPrice, 4.5, "overview batch lines keep unit price");
 assertEqual(overviewBatch?.lines[1]?.remainingQuantity, 12, "overview batch lines keep quantity");
 assertEqual(normalizeSeasonalCardBatchResponse(null), null, "null batch stays null");
+// 旧后端没有开放窗口字段：按开放兜底，年份沿用顶层 seasonYear。
+assertEqual(overview.holidays[0]?.isOpen, true, "missing isOpen counts as open (legacy backend)");
+assertEqual(overview.holidays[0]?.seasonYear, 2026, "missing holiday seasonYear falls back to the top level");
+assertEqual(overview.holidays[2]?.isOpen, true, "holidays missing from the response count as open");
+assertEqual(overview.holidays[0]?.closesOn, "", "missing window dates normalize to empty");
+assertEqual(overview.today, "", "missing today normalizes to empty");
+
+const windowOverview = normalizeSeasonalCardOverviewResponse({
+  StoreCode: "1013",
+  SeasonYear: "2027",
+  Today: "2027-01-10",
+  Holidays: [
+    {
+      CardType: 1,
+      IsOpen: true,
+      SeasonYear: 2026,
+      HolidayDate: "2026-12-25",
+      OpensOn: "2026-12-25T00:00:00",
+      ClosesOn: "2027-01-22",
+      CurrentBatch: null,
+    },
+    {
+      CardType: 3,
+      IsOpen: false,
+      SeasonYear: "2027",
+      HolidayDate: "2027-05-09",
+      OpensOn: "2027-05-09",
+      ClosesOn: "2027-06-06",
+    },
+    { cardType: 2, isOpen: "false", seasonYear: 2027, opensOn: "bad-date" },
+  ],
+});
+assertEqual(windowOverview.today, "2027-01-10", "overview keeps the store-local today");
+assertDeepEqual(
+  windowOverview.holidays.map((holiday) => [
+    holiday.cardType,
+    holiday.isOpen,
+    holiday.seasonYear,
+    holiday.opensOn,
+    holiday.closesOn,
+  ]),
+  [
+    [1, true, 2026, "2026-12-25", "2027-01-22"],
+    [2, false, 2027, "", ""],
+    [3, false, 2027, "2027-05-09", "2027-06-06"],
+    [4, true, 2027, "", ""],
+    [5, true, 2027, "", ""],
+  ],
+  "overview window fields are parsed leniently (PascalCase, string booleans/years, date-times trimmed to days)"
+);
 
 assertDeepEqual(
   buildSeasonalCardOverviewQuery({
