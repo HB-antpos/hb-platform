@@ -336,6 +336,8 @@ namespace BlazorApp.Api.Services.React
                     setRelationsByProductCode,
                     linkedSetChildDetailHguids,
                     result,
+                    // 仅「创建新商品」任务允许中文名称为空时用英文名称兜底；整柜提交沿用原口径。
+                    allowEnglishNameFallback: !isSubmitContainer,
                     out var createItem
                 ))
                 {
@@ -1510,6 +1512,7 @@ namespace BlazorApp.Api.Services.React
             Dictionary<string, List<DomesticSetProduct>> setRelationsByProductCode,
             HashSet<string> linkedSetChildDetailHguids,
             ContainerProductCreationResultDto result,
+            bool allowEnglishNameFallback,
             out CreateItemDto createItem
         )
         {
@@ -1544,12 +1547,33 @@ namespace BlazorApp.Api.Services.React
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(row.ChineseName))
+            // 有效商品名称：中文名称非空白用中文；「创建新商品」任务下中文为空/纯空白时用英文名称兜底。
+            // 两者都为空只跳过本行（原因码沿用 MISSING_CHINESE_NAME，不阻断同批其它行），
+            // 并且绝不拿货号/商品编码当名称写入商品主档。
+            // 整柜提交（allowEnglishNameFallback=false）保持原口径：中文名称为空即作为阻断项，不启用兜底。
+            string productName;
+            if (!string.IsNullOrWhiteSpace(row.ChineseName))
             {
-                AddSkipped(result, productCode, itemNumber, row.DetailHguid, "MISSING_CHINESE_NAME", "商品名称不能为空");
+                productName = row.ChineseName;
+            }
+            else if (allowEnglishNameFallback && !string.IsNullOrWhiteSpace(row.EnglishName))
+            {
+                productName = row.EnglishName;
+            }
+            else
+            {
+                AddSkipped(
+                    result,
+                    productCode,
+                    itemNumber,
+                    row.DetailHguid,
+                    "MISSING_CHINESE_NAME",
+                    allowEnglishNameFallback ? "商品名称与英文名称均为空，已跳过" : "商品名称不能为空"
+                );
                 return false;
             }
 
+            // 中文有、英文空：保持原口径，仍按英文名称缺失跳过（此处英文名称不参与兜底）。
             if (string.IsNullOrWhiteSpace(row.EnglishName))
             {
                 AddSkipped(result, productCode, itemNumber, row.DetailHguid, "MISSING_ENGLISH_NAME", "英文名称不能为空");
@@ -1612,7 +1636,8 @@ namespace BlazorApp.Api.Services.React
                 ProductCode = productCode,
                 ItemNumber = itemNumber,
                 Barcode = row.Barcode,
-                ChineseName = row.ChineseName ?? itemNumber,
+                // 上面已保证有效商品名称非空，这里不再用货号兜底，避免把货号当名称写进商品主档。
+                ChineseName = productName,
                 EnglishName = row.EnglishName,
                 DomesticPrice = row.DomesticPrice,
                 OEMPrice = row.OEMPrice.Value,
@@ -2124,6 +2149,7 @@ namespace BlazorApp.Api.Services.React
             {
                 "MISSING_PRODUCT_CODE",
                 "MISSING_ITEM_NUMBER",
+                // 仅整柜提交会走到这里；「创建新商品」任务里两个名称均为空的行只作为 Skipped 返回，不会被升级为错误。
                 "MISSING_CHINESE_NAME",
                 "MISSING_ENGLISH_NAME",
                 "INVALID_IMPORT_PRICE",

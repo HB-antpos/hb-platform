@@ -1017,22 +1017,6 @@ export function getContainerDetailCreateProductRowLabel(row: ContainerDetail) {
   return getContainerDetailItemNumber(row) ?? getContainerDetailProductCode(row) ?? row.hguid
 }
 
-export function findContainerDetailRowsMissingProductName(rows: ContainerDetail[]) {
-  return rows
-    .filter((row) => row.是否新商品)
-    .map((row) => {
-      const productName = getContainerDetailProductName(row)?.trim() ?? ''
-      return {
-        hguid: row.hguid,
-        label: getContainerDetailCreateProductRowLabel(row),
-        productName,
-      }
-    })
-    // 创建仓库新商品只要求商品名称非空，英文、数字和规格组合也允许创建。
-    .filter((row) => !row.productName)
-    .map(({ hguid, label, productName }) => ({ hguid, label, productName }))
-}
-
 export function findContainerDetailRowsMissingCreateProductRetailPrice(rows: ContainerDetail[]) {
   return rows
     .filter((row) => row.是否新商品)

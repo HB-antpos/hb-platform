@@ -72,11 +72,20 @@ namespace BlazorApp.Api.Services.React
                         existingJobId,
                         isDuplicateRequest: true
                     );
-                    // 排队/运行中与已成功的任务继续复用，防止重复提交；已失败的任务不复用，
-                    // 否则用户修正数据（如补英文名）后再次提交会在保留期内一直拿到旧的失败结果。
+                    // 复用规则：
+                    // 1. 排队/运行中的任务继续复用，防止重复提交；
+                    // 2. 已失败的任务不复用，否则用户修正数据（如补英文名）后再次提交
+                    //    会在保留期内一直拿到旧的失败结果；
+                    // 3. 「创建新商品」任务已成功但带有跳过明细（如商品名称与英文名称均为空）时也不复用：
+                    //    跳过本身就是在提示用户补数据，补完后同一货柜 + 同一组明细再次提交必须真的重跑。
+                    //    重跑是安全的：已建档的明细会被执行器按 DUPLICATE_PRODUCT_CODE 等原因跳过，
+                    //    套装补码只补缺失层级，不会重复创建；
+                    // 4. 整柜提交（SubmitContainer）保持原口径，成功后仍复用：
+                    //    提交可能已推进货柜状态，不能因为有跳过明细就重跑。
                     if (
                         existingJob != null
                         && existingJob.Status != ContainerProductCreationJobStatusConstants.Failed
+                        && !ShouldRerunCreateNewProductsJobWithSkippedRows(normalizedRequest, existingJob)
                     )
                     {
                         return Task.FromResult(existingJob);
@@ -319,6 +328,21 @@ namespace BlazorApp.Api.Services.React
                     .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
                     .ToList(),
             };
+        }
+
+        /// <summary>
+        /// 「创建新商品」任务已成功完成但带有跳过明细时返回 true，表示不应复用旧结果、需要重新执行。
+        /// 只看已完成（Succeeded）的任务：排队/运行中的任务结果还是空的，必须继续复用；
+        /// 失败任务由调用方单独处理；整柜提交永远返回 false（保持原口径）。
+        /// </summary>
+        private static bool ShouldRerunCreateNewProductsJobWithSkippedRows(
+            ContainerProductCreationJobRequestDto request,
+            ContainerProductCreationJobDto existingJob
+        )
+        {
+            return !request.SubmitContainer
+                && existingJob.Status == ContainerProductCreationJobStatusConstants.Succeeded
+                && existingJob.Result.SkippedCount > 0;
         }
 
         private static string BuildOperationKey(ContainerProductCreationJobRequestDto request)
