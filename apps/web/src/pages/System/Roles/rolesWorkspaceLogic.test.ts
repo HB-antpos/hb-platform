@@ -7,6 +7,8 @@ import {
   diffPermissionCodes,
   expandRolePermissionCodes,
   filterRoles,
+  getRoleMutationErrorMessage,
+  isDerivedStoreManagerRole,
 } from './rolesWorkspaceLogic'
 
 const aliases = [
@@ -129,3 +131,19 @@ assert.deepEqual(
   [...collectWebMenuVisibility([node('system', true, [node('users', false), node('roles', true)]), node('home', true)])],
   [['system', true], ['users', false], ['roles', true], ['home', true]],
 )
+
+// 店长是派生角色：与后端 Permissions.StoreManagerRoleNames 对齐，大小写不敏感。
+assert.equal(isDerivedStoreManagerRole('StoreManager'), true)
+assert.equal(isDerivedStoreManagerRole(' storemanager '), true)
+assert.equal(isDerivedStoreManagerRole('店长'), true)
+assert.equal(isDerivedStoreManagerRole('经理'), true)
+assert.equal(isDerivedStoreManagerRole('WarehouseManager'), false, '仓库经理不是派生角色')
+assert.equal(isDerivedStoreManagerRole(undefined), false)
+
+// 失败提示优先展示服务端业务消息，缺失时退回通用文案。
+assert.equal(
+  getRoleMutationErrorMessage({ payload: { message: '店长角色由可管理分店关系维护' } }, '移除用户失败'),
+  '店长角色由可管理分店关系维护',
+)
+assert.equal(getRoleMutationErrorMessage({ payload: { message: ' ' } }, '移除用户失败'), '移除用户失败')
+assert.equal(getRoleMutationErrorMessage(new Error('Network Error'), '移除用户失败'), '移除用户失败')

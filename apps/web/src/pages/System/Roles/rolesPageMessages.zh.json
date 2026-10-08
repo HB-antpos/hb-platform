@@ -52,7 +52,8 @@
       "createdAt": "创建时间",
       "updatedAtLabel": "更新时间",
       "loadWorkspaceFailed": "加载角色数据失败",
-      "retry": "重试"
+      "retry": "重试",
+      "derivedStoreManagerHint": "店长角色由用户的「可管理分店」自动决定，不能在这里添加或移除成员。如需调整，请到「用户管理」打开该用户，在分店里勾选或取消「可管理」。"
     }
   }
 }

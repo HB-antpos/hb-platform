@@ -52,7 +52,8 @@
       "createdAt": "Created",
       "updatedAtLabel": "Updated",
       "loadWorkspaceFailed": "Failed to load role data",
-      "retry": "Retry"
+      "retry": "Retry",
+      "derivedStoreManagerHint": "The Store Manager role is derived from each user's manageable stores, so members cannot be added or removed here. To change it, open the user in User Management and toggle \"Manageable\" on their stores."
     }
   }
 }
