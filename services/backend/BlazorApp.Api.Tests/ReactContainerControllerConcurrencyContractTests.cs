@@ -131,6 +131,65 @@ public sealed class ReactContainerControllerConcurrencyContractTests
     }
 
     [Fact]
+    public async Task 套装子项成本锁繁忙_所有批量执行入口返回409友好提示而非500()
+    {
+        // 生产 10-08：半点统计持有商品成本锁，批量改价等锁超时被兜底 catch 成 500「服务器内部错误」。
+        var busy = new SetChildPurchasePriceLockException("HB:SetChildPurchasePrice:Product:A", -1);
+        var service = new Mock<IContainerReactService>();
+        service
+            .Setup(item => item.ApplyFloatRateByScopeAsync("C-1", It.IsAny<ContainerDetailApplyFloatRateRequestDto>()))
+            .ThrowsAsync(busy);
+        service
+            .Setup(item => item.ApplyPricesByScopeAsync("C-1", It.IsAny<ContainerDetailApplyPricesRequestDto>()))
+            .ThrowsAsync(busy);
+        service
+            .Setup(item => item.RecalculateCostsByScopeAsync("C-1", It.IsAny<ContainerDetailBatchScopeDto>()))
+            .ThrowsAsync(busy);
+        service
+            .Setup(item => item.BackfillLastPricesByScopeAsync("C-1", It.IsAny<ContainerDetailBatchScopeDto>()))
+            .ThrowsAsync(busy);
+        service
+            .Setup(item => item.BatchDeleteDetailsScopedAsync("C-1", It.IsAny<ContainerDetailBatchScopeDto>()))
+            .ThrowsAsync(busy);
+        service
+            .Setup(item => item.SetStatusByScopeAsync("C-1", It.IsAny<ContainerDetailSetStatusRequestDto>()))
+            .ThrowsAsync(busy);
+        // 带 SQL 死锁包装的锁异常也应提示成本锁繁忙，而不是“同一货柜正在保存”。
+        service
+            .Setup(item => item.AssignCategoryByScopeAsync("C-1", It.IsAny<ContainerDetailAssignCategoryRequestDto>()))
+            .ThrowsAsync(new SetChildPurchasePriceLockException(
+                "HB:SetChildPurchasePrice:Product:A",
+                -3,
+                new InvalidOperationException("模拟 SqlException 1205 包装")
+            ));
+        var controller = CreateController(service.Object);
+
+        var responses = new IActionResult[]
+        {
+            await controller.ApplyFloatRateByScope("C-1", new ContainerDetailApplyFloatRateRequestDto { FloatRate = 1.3m }),
+            await controller.ApplyPricesByScope("C-1", new ContainerDetailApplyPricesRequestDto { ImportPrice = 1m }),
+            await controller.RecalculateCostsByScope("C-1", new ContainerDetailBatchScopeDto()),
+            await controller.BackfillLastPricesByScope("C-1", new ContainerDetailBatchScopeDto()),
+            await controller.BatchDeleteDetailsScoped("C-1", new ContainerDetailBatchScopeDto()),
+            await controller.SetStatusByScope("C-1", new ContainerDetailSetStatusRequestDto { IsActive = true }),
+            await controller.AssignCategoryByScope("C-1", new ContainerDetailAssignCategoryRequestDto()),
+        };
+
+        foreach (var response in responses)
+        {
+            var result = Assert.IsAssignableFrom<ObjectResult>(response);
+            Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
+            Assert.Equal(
+                SetChildPurchasePriceMutationLock.BusyErrorCode,
+                ReadProperty<string>(result.Value!, "code")
+            );
+            var message = ReadProperty<string>(result.Value!, "message");
+            Assert.Contains("请约 1 分钟后再试", message);
+            Assert.DoesNotContain("服务器内部错误", message);
+        }
+    }
+
+    [Fact]
     public async Task 旧版明细写入缺少字段令牌_返回稳定428错误码()
     {
         var service = new Mock<IContainerReactService>();

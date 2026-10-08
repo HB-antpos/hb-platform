@@ -5961,6 +5961,7 @@ namespace BlazorApp.Api.Services.React
         )
         {
             var deadlockRetryCount = 0;
+            var setChildLockTimeoutRetryCount = 0;
             while (true)
             {
                 await _context.Db.Ado.BeginTranAsync();
@@ -6068,6 +6069,30 @@ namespace BlazorApp.Api.Services.React
                 catch (Exception exception)
                 {
                     await RollbackContainerMutationTransactionSafelyAsync(exception);
+                    // 套装子项成本锁等待超时多半是半点统计正在持有大批商品锁（单次持锁可达数十秒）；
+                    // 事务已整体回滚、货柜锁已释放，退避后完整重跑一次即可，不必让用户手动重试。
+                    if (
+                        SetChildPurchasePriceMutationLock.ShouldRetryLockTimeout(
+                            exception,
+                            setChildLockTimeoutRetryCount,
+                            ScopedBatchSetChildLockRetryDelays.Length
+                        )
+                    )
+                    {
+                        var retryDelay = ScopedBatchSetChildLockRetryDelays[setChildLockTimeoutRetryCount];
+                        setChildLockTimeoutRetryCount++;
+                        _logger.LogWarning(
+                            exception,
+                            "[React] {Operation}等待套装子项成本锁超时，事务已回滚，{DelayMilliseconds}ms 后第 {Attempt}/{MaxRetries} 次重试",
+                            operation,
+                            retryDelay.TotalMilliseconds,
+                            setChildLockTimeoutRetryCount,
+                            ScopedBatchSetChildLockRetryDelays.Length
+                        );
+                        await Task.Delay(retryDelay);
+                        continue;
+                    }
+
                     if (
                         !ContainerMutationLock.ShouldRetryDeadlock(
                             exception,
@@ -6075,7 +6100,15 @@ namespace BlazorApp.Api.Services.React
                         )
                     )
                     {
-                        _logger.LogError(exception, "[React] {Operation}失败", operation);
+                        if (SetChildPurchasePriceMutationLock.TryResolveConflict(exception, out _))
+                        {
+                            // 重试用尽仍拿不到锁属于可预期的繁忙，由控制器返回 409 友好提示，不记 Error。
+                            _logger.LogWarning(exception, "[React] {Operation}重试后仍等不到套装子项成本锁", operation);
+                        }
+                        else
+                        {
+                            _logger.LogError(exception, "[React] {Operation}失败", operation);
+                        }
                         throw;
                     }
 
@@ -6091,6 +6124,18 @@ namespace BlazorApp.Api.Services.React
                 }
             }
         }
+
+        /// <summary>
+        /// 按范围批量写入等待套装子项成本锁超时后的退避间隔。每次尝试本身最多等锁 10 秒，
+        /// 4 次重试合计约 1 分钟，覆盖半点统计常见的持锁时长，同时远低于网关 300 秒超时。
+        /// </summary>
+        internal static readonly TimeSpan[] ScopedBatchSetChildLockRetryDelays =
+        [
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromSeconds(3),
+        ];
 
         private static bool HaveSameNormalizedKeys(
             IEnumerable<string> first,

@@ -519,6 +519,32 @@ internal static class SetChildPurchasePriceMutationLock
         return false;
     }
 
+    /// <summary>
+    /// 交互式写入在整笔事务回滚后是否可以重试：只认业务锁本身的等待超时（-1）。
+    /// 死锁（-3）交给 1205 重试逻辑，取消（-2）和普通 SQL 1222 行锁超时保留原语义。
+    /// </summary>
+    internal static bool ShouldRetryLockTimeout(
+        Exception? exception,
+        int completedRetryCount,
+        int maxRetryCount
+    )
+    {
+        if (completedRetryCount >= maxRetryCount)
+        {
+            return false;
+        }
+
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is SetChildPurchasePriceLockException lockException)
+            {
+                return lockException.ResultCode == -1;
+            }
+        }
+
+        return false;
+    }
+
     internal static List<string> NormalizeProductCodes(IEnumerable<string?> productCodes) =>
         productCodes
             .Where(code => !string.IsNullOrWhiteSpace(code))
