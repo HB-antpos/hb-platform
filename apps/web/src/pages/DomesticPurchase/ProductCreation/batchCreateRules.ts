@@ -68,6 +68,28 @@ export function getValidSetSubItems(subItems?: DraftSetSubItem[]): DraftSetSubIt
   return (subItems || []).filter(isMeaningfulSetSubItem)
 }
 
+/**
+ * 套装子项零售价之和（保留两位小数）。只累计填了价格的有效子项；
+ * 没有任何子项填价格时返回 undefined，表示「没有可用的默认值」，不能当成 0 提交。
+ */
+export function sumSetSubItemPrices(subItems?: DraftSetSubItem[]): number | undefined {
+  const prices = getValidSetSubItems(subItems)
+    .map((subItem) => subItem.privateLabelPrice)
+    .filter((price): price is number => price != null)
+  if (prices.length === 0) return undefined
+  return Math.round((prices.reduce((sum, price) => sum + price, 0) + Number.EPSILON) * 100) / 100
+}
+
+/**
+ * 商品行实际生效的零售价：用户手填的优先；套装主档没填时默认取子项零售价之和。
+ * 默认值是派生出来的而不是写回草稿，所以子项价格增删改、粘贴、套用模板后都会自动跟随。
+ */
+export function resolveProductPrice(product: DraftProductItem): number | undefined {
+  if (product.privateLabelPrice != null) return product.privateLabelPrice
+  if (product.productType !== ProductCreationType.SET) return undefined
+  return sumSetSubItemPrices(product.subItems)
+}
+
 export function findInvalidSetProduct(products: DraftProductItem[]): InvalidSetProduct | undefined {
   const invalidIndex = products.findIndex((product) => (
     product.productType === ProductCreationType.SET && getValidSetSubItems(product.subItems).length === 0
@@ -93,7 +115,7 @@ export function buildPreviewItems(products: DraftProductItem[], prefixCode: stri
     const validSubItems = getValidSetSubItems(product.subItems)
     for (let i = 0; i < createCount; i++) {
       const parentPreviewKey = `${product.key}_${i}`
-      expandedRows.push({ ...product, key: parentPreviewKey, itemNumber: `${prefixCode}${String(itemIndex++).padStart(4, '0')}` })
+      expandedRows.push({ ...product, privateLabelPrice: resolveProductPrice(product), key: parentPreviewKey, itemNumber: `${prefixCode}${String(itemIndex++).padStart(4, '0')}` })
       validSubItems.forEach((subItem) => {
         expandedRows.push({
           ...subItem,
@@ -154,7 +176,7 @@ export function buildCreateBatchItems(products: DraftProductItem[]): CreateBatch
   return products.map((product) => ({
     productName: product.productName?.trim() || undefined,
     productType: product.productType,
-    privateLabelPrice: product.privateLabelPrice ?? undefined,
+    privateLabelPrice: resolveProductPrice(product),
     setQuantity: product.setQuantity ?? undefined,
     setPrice: product.setPrice ?? undefined,
     createCount: product.productType === ProductCreationType.SET ? normalizeCreateCount(product.createCount) : undefined,

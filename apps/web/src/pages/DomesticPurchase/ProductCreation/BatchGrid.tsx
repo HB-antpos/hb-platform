@@ -21,6 +21,7 @@ import {
   createDraftSetSubItem,
   getValidSetSubItems,
   normalizeCreateCount,
+  resolveProductPrice,
 } from './batchCreateRules'
 import type { DraftProductItem, DraftSetSubItem } from './batchCreateRules'
 import {
@@ -356,7 +357,8 @@ const BatchGrid = forwardRef<BatchGridHandle, BatchGridProps>(function BatchGrid
           controls={false}
           ref={(cell: FocusableCell | null) => setCellRef(record.key, 'privateLabelPrice', cell)}
           className={isSamePasteTarget(pasteTarget, priceTarget) ? 'pc-cell pc-cell-num pc-cell-selected' : 'pc-cell pc-cell-num'}
-          value={record.privateLabelPrice}
+          // 套装主档没手填时显示子项零售价之和（与提交口径一致，见 resolveProductPrice）。
+          value={resolveProductPrice(record)}
           min={0}
           precision={2}
           aria-label={t('productCreation.privateLabelPrice')}
