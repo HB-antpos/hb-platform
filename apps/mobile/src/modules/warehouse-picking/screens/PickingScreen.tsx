@@ -923,12 +923,10 @@ const styles = StyleSheet.create({
   fillStockout: { height: 6, backgroundColor: PICK_COLORS.danger },
   progressMain: { flexShrink: 1 },
   stockoutText: { color: PICK_COLORS.danger, fontWeight: "600" },
-  content: { padding: 12, paddingBottom: 88, gap: 10 },
+  content: { padding: 12, gap: 10 },
+  // 底栏必须留在文档流里：Android edge-to-edge 下 SafeAreaView 靠 padding 避开系统导航栏，
+  // position: absolute 的子节点不吃父级 padding，会贴到屏幕最底被导航栏盖住、点不到。
   footer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 12,
