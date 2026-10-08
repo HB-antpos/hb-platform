@@ -94,6 +94,53 @@ public sealed class DeviceRegistrationReactServiceTests : IDisposable
     }
 
     [Fact]
+    public void DeviceMappingProfile_MarksRuntimeTimesAsUtcSoJsonCarriesZ()
+    {
+        var mapper = new MapperConfiguration(
+            config => config.AddProfile<DeviceMappingProfile>(),
+            NullLoggerFactory.Instance
+        ).CreateMapper();
+
+        // 库里读出来的 DateTime Kind 是 Unspecified，但存的是 UTC（容器时区为 UTC）
+        var dto = mapper.Map<DeviceListItemDto>(new POSM_设备注册信息表
+        {
+            最后心跳时间 = new DateTime(2026, 10, 8, 2, 0, 33, DateTimeKind.Unspecified),
+            收银员登录时间 = new DateTime(2026, 10, 8, 1, 55, 0, DateTimeKind.Unspecified),
+        });
+
+        Assert.Equal(DateTimeKind.Utc, dto.LastHeartbeatAt!.Value.Kind);
+        Assert.Equal(DateTimeKind.Utc, dto.CashierLoginAt!.Value.Kind);
+        // 只改 Kind，不能改数值
+        Assert.Equal(new DateTime(2026, 10, 8, 2, 0, 33), dto.LastHeartbeatAt);
+        Assert.Equal(new DateTime(2026, 10, 8, 1, 55, 0), dto.CashierLoginAt);
+
+        // 与接口一致的序列化（camelCase）必须带 Z，否则浏览器会把它当本地时间（悉尼偏差 10–11 小时）
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            dto,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            }
+        );
+        Assert.Contains("\"lastHeartbeatAt\":\"2026-10-08T02:00:33Z\"", json);
+        Assert.Contains("\"cashierLoginAt\":\"2026-10-08T01:55:00Z\"", json);
+    }
+
+    [Fact]
+    public void DeviceMappingProfile_KeepsUnreportedRuntimeTimesNull()
+    {
+        var mapper = new MapperConfiguration(
+            config => config.AddProfile<DeviceMappingProfile>(),
+            NullLoggerFactory.Instance
+        ).CreateMapper();
+
+        var dto = mapper.Map<DeviceListItemDto>(new POSM_设备注册信息表());
+
+        Assert.Null(dto.LastHeartbeatAt);
+        Assert.Null(dto.CashierLoginAt);
+    }
+
+    [Fact]
     public void DeviceRuntimeStatusSchemaMigrator_AddsNullableAppVersionColumn()
     {
         var sql = string.Join("\n", DeviceRuntimeStatusSchemaMigrator.SqlScriptsForTests);
