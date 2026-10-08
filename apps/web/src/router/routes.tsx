@@ -81,6 +81,8 @@ const LinklySettlementDetailPage = lazy(() => import('../pages/PosAdmin/LinklySe
 const DailyClosesPage = lazy(() => import('../pages/PosAdmin/DailyCloses'))
 // 分店现金管理：多店现金池总览、按日日结、存款与现金支出（页面文案随页面懒加载）。
 const PosAdminStoreCashPage = lazy(() => import('../pages/PosAdmin/StoreCash'))
+// 节日贺卡分店填报统计（后台只读，页面文案与 exceljs 都随页面懒加载）。
+const SeasonalCardStatsPage = lazy(() => import('../pages/PosAdmin/SeasonalCardStats'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
 const LocalSupplierInvoiceSalesAnalysisPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceSalesAnalysis'))
 const InvoiceEditPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit'))
@@ -895,6 +897,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canViewStoreCash',
         },
         element: <PosAdminStoreCashPage />,
+      },
+      {
+        // 节日贺卡分店填报统计：表格 + 单店明细抽屉（抽屉用 ?store=<分店编码> 保持，可深链）；独立权限 SeasonalCards.Remaining.ViewAllStores。
+        path: '/pos-admin/seasonal-card-stats',
+        meta: {
+          title: 'menu.seasonalCardStats',
+          icon: 'GiftOutlined',
+          keepAlive: true,
+          accessKey: 'canViewSeasonalCardStats',
+        },
+        element: <SeasonalCardStatsPage />,
       },
       {
         path: '/pos-admin/sales-orders',

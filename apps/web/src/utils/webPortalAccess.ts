@@ -144,6 +144,12 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.hasPermission(P.Cash.OverviewView),
   },
   {
+    // 节日贺卡分店填报统计：只有 ViewAllStores 的总部账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/pos-admin/seasonal-card-stats',
+    targetPrefixes: ['/pos-admin/seasonal-card-stats'],
+    canAccess: (access) => access.hasPermission(P.SeasonalCards.Remaining.ViewAllStores),
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline'],

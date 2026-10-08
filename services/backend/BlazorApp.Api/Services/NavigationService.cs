@@ -159,6 +159,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/daily-closes",          TitleKey = "menu.dailyCloses",            Icon = "MoneyCollectOutlined",       Permission = Permissions.DailyCloseRecords.View },
                     // 分店现金管理：多店现金池总览、按日日结、存款与现金支出；店长只见关联分店，T2 受 14 天窗口限制。
                     new() { Path = "/pos-admin/store-cash",           TitleKey = "menu.storeCash",              Icon = "AccountBookOutlined",        Permission = Permissions.Cash.OverviewView },
+                    // 节日贺卡分店填报统计：总部查看全部分店的剩余贺卡填报；独立权限码，店长的填报 / 本店查看权限不能打开。
+                    new() { Path = "/pos-admin/seasonal-card-stats",  TitleKey = "menu.seasonalCardStats",      Icon = "GiftOutlined",               Permission = Permissions.SeasonalCards.Remaining.ViewAllStores },
                     new() { Path = "/pos-admin/schedule-attendance",   TitleKey = "menu.scheduleAttendance",     Icon = "CalendarOutlined",           Permission = Permissions.Attendance.Schedule.ViewStore },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
@@ -758,6 +760,8 @@ namespace BlazorApp.Api.Services
                 Permissions.DailyCloseRecords.View,
                 // 现金管理页：只有该权限的店长 / 财务也要能拿到后台菜单，否则前端只能退回本地菜单。
                 Permissions.Cash.OverviewView,
+                // 节日贺卡分店填报统计：只有该权限的总部账号也要能拿到后台菜单。
+                Permissions.SeasonalCards.Remaining.ViewAllStores,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage
             );

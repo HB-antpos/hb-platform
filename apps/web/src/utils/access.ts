@@ -120,6 +120,7 @@ function createEmptyAccess(): AccessControl {
     canViewEmployeeOperationLogs: false,
     canReviewLegacyEmployeeLogs: false,
     canViewDailyCloseRecords: false,
+    canViewSeasonalCardStats: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
     canViewAppDownloads: false,
@@ -366,6 +367,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canReviewLegacyEmployeeLogs = isAdmin || hasPermission(P.LegacyEmployeeLogs.Review)
   // 日结记录只认独立的 DailyCloseRecords.View；收银机上的日结权限与员工操作日志权限都不能打开它。
   const canViewDailyCloseRecords = isAdmin || hasPermission(P.DailyCloseRecords.View)
+  // 节日贺卡分店填报统计只认 ViewAllStores；店长的 ViewManagedStore / SubmitManagedStore（移动端填报）不能打开它。
+  const canViewSeasonalCardStats = isAdmin || hasPermission(P.SeasonalCards.Remaining.ViewAllStores)
   // 合并页只要能看其中一个来源即可进入，页内只显示有权限的来源。
   const canViewEmployeeOperationLogs = canViewOperationAudits || canViewLegacyEmployeeLogs
   const canManageScheduledTasks = isAdmin || hasPermission(P.System.ManageScheduledTasks)
@@ -501,6 +504,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewEmployeeOperationLogs,
     canReviewLegacyEmployeeLogs,
     canViewDailyCloseRecords,
+    canViewSeasonalCardStats,
     canManageScheduledTasks,
     canManageSystemSettings,
     canViewAppDownloads,

@@ -1,0 +1,149 @@
+{
+  "seasonalCardStats": {
+    "title": "分店填报统计",
+    "subtitle": "节日贺卡剩余数量；同一分店 + 供应商 + 价格类型以最新一次提交为准",
+    "refresh": "刷新",
+    "listSeparator": "、",
+    "unassignedSupplier": "未指定供应商",
+    "cardTypes": {
+      "christmas": "圣诞节",
+      "valentines": "情人节",
+      "mothersDay": "母亲节",
+      "easter": "复活节",
+      "fathersDay": "父亲节"
+    },
+    "status": {
+      "all": "全部",
+      "filled": "已填报",
+      "unfilled": "未填报"
+    },
+    "price": {
+      "other": "其他价格"
+    },
+    "filters": {
+      "year": "年份",
+      "currentYear": "{{year}}（今年）",
+      "holiday": "节日",
+      "supplier": "供应商",
+      "allSuppliers": "全部供应商",
+      "price": "卡片价格类型",
+      "allPrices": "全部价格",
+      "store": "分店",
+      "allStores": "全部分店",
+      "status": "填报状态",
+      "quantityOnlyNote": "供应商 / 价格筛选只影响数量与金额；填报状态仍按该节日任一供应商是否提交判断。"
+    },
+    "kpi": {
+      "filled": "已填报分店",
+      "ofStores": "/ {{count}} 家",
+      "progress": "填报进度 {{percent}}%",
+      "unfilled": "未填报分店",
+      "storeUnit": "家",
+      "unfilledHint": "名单见下方「未填报分店」",
+      "totalQuantity": "剩余数量合计",
+      "cardUnit": "张",
+      "average": "平均每店 {{count}} 张",
+      "averageNone": "暂无已填报分店",
+      "totalAmount": "剩余金额合计",
+      "amountHint": "按单价 × 数量估算"
+    },
+    "table": {
+      "title": "分店明细",
+      "caption": "共 {{count}} 家 · {{year}} {{holiday}}",
+      "total": "合计",
+      "totalFilled": "已填报 {{count}} 家"
+    },
+    "columns": {
+      "store": "分店",
+      "status": "状态",
+      "totalQuantity": "合计数量",
+      "totalAmount": "合计金额",
+      "suppliers": "供应商",
+      "lastSubmitted": "最后提交",
+      "action": "操作"
+    },
+    "actions": {
+      "view": "查看明细",
+      "viewHistory": "查看历史",
+      "viewLabel": "查看 {{store}} 的贺卡填报明细"
+    },
+    "empty": {
+      "title": "没有应填报的分店",
+      "hint": "检查分店筛选，或确认分店是否已启用。",
+      "filteredTitle": "当前状态下没有分店",
+      "filteredHint": "切换「填报状态」查看其他分店。"
+    },
+    "errors": {
+      "forbidden": "没有查看全部分店贺卡填报的权限，请联系管理员授权。",
+      "loadFailed": "统计加载失败，请稍后重试。",
+      "invalidQuery": "年份或节日不正确，请重新选择。",
+      "retry": "重试",
+      "loadSuppliersFailed": "供应商列表加载失败，供应商筛选暂不可用。",
+      "storeNotFound": "分店不存在或已删除。",
+      "detailFailed": "分店明细加载失败，请稍后重试。"
+    },
+    "byPrice": {
+      "title": "按价格类型分布",
+      "quantity": "{{count}} 张"
+    },
+    "bySupplier": {
+      "title": "按供应商汇总",
+      "stores": "{{count}} 家分店",
+      "empty": "暂无填报数据"
+    },
+    "unfilled": {
+      "title": "未填报分店",
+      "copy": "复制名单",
+      "none": "全部分店都已填报",
+      "copied": "已复制 {{count}} 家未填报分店",
+      "copyFailed": "复制失败，请手动选择名单复制",
+      "hint": "{{year}} {{holiday}}仍未填报的分店；可复制后发到店长群提醒。"
+    },
+    "notes": {
+      "title": "口径说明",
+      "latest": "同一分店 + 供应商 + 价格类型以最新一次提交为准，旧提交保留为历史。",
+      "excluded": "应填报分店为启用中的分店，不含：{{stores}}。",
+      "excludedNone": "应填报分店为启用中的分店。",
+      "filter": "供应商 / 价格筛选只影响数量与金额，不改变填报状态。",
+      "amount": "金额按单价 × 数量估算；「其他价格」单价各异，表格只列数量，金额计入合计。",
+      "time": "提交时间按本机时区显示。"
+    },
+    "export": {
+      "button": "导出 Excel",
+      "done": "已导出 {{fileName}}",
+      "failed": "导出失败，请稍后重试。",
+      "fileNamePrefix": "贺卡分店填报统计",
+      "storeSheet": "分店明细",
+      "unfilledSheet": "未填报分店",
+      "title": "{{year}} {{holiday}} · 分店贺卡填报统计",
+      "subtitle": "供应商：{{supplier}} · 价格：{{price}} · 已填报 {{filled}} / {{total}} 家",
+      "unfilledTitle": "{{year}} {{holiday}} · 未填报分店（{{count}} 家）",
+      "columns": {
+        "storeCode": "分店编码",
+        "storeName": "分店名称",
+        "lastSubmittedAt": "最后提交时间",
+        "lastSubmittedBy": "提交人"
+      }
+    },
+    "drawer": {
+      "title": "{{name}}（{{code}}）",
+      "close": "关闭",
+      "remainingQuantity": "剩余数量",
+      "remainingAmount": "剩余金额",
+      "matrixTitle": "供应商 × 价格类型（当前生效）",
+      "supplier": "供应商",
+      "rowTotal": "合计",
+      "atPrice": "@ {{price}}",
+      "notFilled": "本节日尚未填报。",
+      "historyTitle": "提交记录",
+      "current": "当前生效",
+      "replaced": "已被新记录取代",
+      "remark": "备注：{{remark}}",
+      "noHistory": "暂无提交记录。",
+      "unitPriceSuffix": "（{{price}}）",
+      "compareTitle": "与去年同节日对比",
+      "previousNone": "去年未填报",
+      "compareDelta": "比去年 {{delta}} 张"
+    }
+  }
+}

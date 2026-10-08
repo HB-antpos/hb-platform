@@ -95,6 +95,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   // 合并页任一权限可见；从菜单授予时只补第一个（老收银查看），移除时两个来源权限一并撤销。
   canViewEmployeeOperationLogs: [P.LegacyEmployeeLogs.View, P.PosTerminal.AuditView],
   canViewDailyCloseRecords: [P.DailyCloseRecords.View],
+  canViewSeasonalCardStats: [P.SeasonalCards.Remaining.ViewAllStores],
   canReadOrder: [P.Orders.View],
   canManageLocalPurchase: [P.LocalPurchase.View, 'LocalInvocie.View'],
   canEditLocalPurchase: [P.LocalPurchase.Edit, 'LocalInvocie.Edit'],
@@ -177,6 +178,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/pos-admin/linkly-settlements', title: 'menu.linklySettlements', accessKey: 'isAdmin' },
       { path: '/pos-admin/daily-closes', title: 'menu.dailyCloses', accessKey: 'canViewDailyCloseRecords' },
       { path: '/pos-admin/store-cash', title: 'menu.storeCash', accessKey: 'canViewStoreCash' },
+      { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },
       { path: '/pos-admin/local-supplier-invoices', title: 'menu.localSupplierInvoices', accessKey: 'canManageLocalPurchase' },
     ],
