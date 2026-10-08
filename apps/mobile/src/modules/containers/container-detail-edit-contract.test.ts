@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const directory = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(directory, "container-detail-screen.tsx"), "utf8");
 const compact = (value: string) => value.replace(/\s+/g, " ").trim();
+const zh = JSON.parse(readFileSync(join(directory, "../../locales/zh/screens/containerDetail.json"), "utf8")) as { messages: Record<string, string>; edit: Record<string, string>; actions: Record<string, string> };
 
 function extract(startMarker: string, endMarker: string) {
   const start = source.indexOf(startMarker);
@@ -19,8 +20,9 @@ const updateMutation = compact(extract(
   "const bulkMutation = useMutation({",
 ));
 const editModal = compact(extract(
-  '<Modal visible={Boolean(editingDetail && editForm)}',
-  '<Modal visible={Boolean(bulkModalType)}',
+  // 编辑弹窗已由 Paper Modal 改为 BusinessSheet（键盘避让 + 可滚动），结构与保护逻辑不变
+  "<BusinessSheet visible={Boolean(editingDetail && editForm)}",
+  "<BusinessSheet visible={Boolean(bulkModalType)}",
 ));
 
 assert.match(source, /const \[editEnglishNameError, setEditEnglishNameError\] = useState\(""\)/);
@@ -55,7 +57,7 @@ assert.ok(
 );
 assert.match(
   updateMutation,
-  /if \(validationErrors\.length \|\| conflicts\.length\) \{[\s\S]*return;[\s\S]*\}[\s\S]*closeEditModal\(\);[\s\S]*setSnackbar\("明细已保存"\);/,
+  /if \(validationErrors\.length \|\| conflicts\.length\) \{[\s\S]*return;[\s\S]*\}[\s\S]*closeEditModal\(\);[\s\S]*setSnackbar\(t\("messages\.detailSaved"\)\);/,
   "任意字段错误必须保留弹窗和草稿；无错误时才关闭并显示全成功",
 );
 
@@ -64,9 +66,10 @@ assert.ok(
   "保存期间禁止关闭编辑弹窗，空闲时才统一清理旧字段错误",
 );
 assert.ok(
-  editModal.includes('label="英文名称"'),
+  editModal.includes('label={t("edit.englishName")}') && zh.edit.englishName === "英文名称",
   "编辑弹窗必须保留英文名称输入",
 );
+assert.equal(zh.messages.detailSaved, "明细已保存", "全部保存成功的提示文案不能变");
 assert.ok(
   editModal.includes("error={Boolean(editEnglishNameError)}"),
   "英文名称输入必须进入 react-native-paper 错误态",
@@ -87,10 +90,12 @@ assert.ok(
   editModal.includes("onChangeText={handleEditEnglishNameChange}"),
   "修改英文名称时必须经过清错处理",
 );
-assert.ok(
-  editModal.includes("<Button disabled={updateMutation.isPending} onPress={closeEditModal}>取消</Button>"),
+assert.match(
+  editModal,
+  /<Button [^>]*disabled=\{updateMutation\.isPending\} onPress=\{closeEditModal\}>\{t\("actions\.cancel"\)\}<\/Button>/,
   "取消编辑必须统一清理旧字段错误，保存期间必须禁用",
 );
+assert.equal(zh.actions.cancel, "取消");
 assert.match(
   source,
   /function closeEditModal\(\) \{[\s\S]*setEditEnglishNameError\(""\);[\s\S]*setEditingDetail\(null\);[\s\S]*setEditForm\(null\);[\s\S]*\}/,
@@ -106,10 +111,12 @@ assert.match(
   /function handleEditEnglishNameChange\(value: string\) \{[\s\S]*setEditEnglishNameError\(""\);[\s\S]*englishName: value[\s\S]*\}/,
   "用户修改英文名称时必须立即清理旧服务端错误并保留新输入",
 );
+// 表格行点击：只有具备编辑权限（resolveRowPressAction）才进入编辑，且必须经统一的清错入口 openEditModal
 assert.match(
   source,
-  /onEdit=\{\(\) => openEditModal\(detail\)\}/,
-  "每次打开编辑必须使用统一的清错入口",
+  /function handleRowPress\(detail: ContainerDetail\) \{[\s\S]*resolveRowPressAction\(canEditContainer\) === "edit"[\s\S]*openEditModal\(detail\)/,
+  "每次打开编辑必须使用统一的清错入口，并受编辑权限约束",
 );
+assert.match(source, /onRowPress=\{handleRowPress\}/, "表格行点击必须接到 handleRowPress");
 
 console.log("container-detail-edit-contract.test.ts: ok");

@@ -136,6 +136,118 @@ export type ContainerDetailQueryWarehouseStatus = "active" | "inactive";
 export type ContainerDetailQuerySortOrder = "ascend" | "descend";
 export type ContainerExportFormat = "excel" | "pdf";
 
+/** 搜索框可选字段：与 Web 货柜明细工具栏一致，后端只支持按单列文字筛选。 */
+export type ContainerDetailSearchField = "itemNumber" | "productName" | "barcode" | "englishName";
+
+/**
+ * 移动端货柜明细提供的排序字段，均为后端 ApplyContainerDetailSort 白名单内的 key
+ * （未识别的 key 后端会静默回退到货号排序，所以必须与白名单一致）。
+ */
+export type ContainerDetailSortField =
+  | "itemNumber"
+  | "productName"
+  | "englishName"
+  | "barcode"
+  | "containerQuantity"
+  | "containerPieces"
+  | "packingQuantity"
+  | "unitVolume"
+  | "domesticPrice"
+  | "importPrice"
+  | "warehouseImportPrice"
+  | "oemPrice"
+  | "newProduct"
+  | "warehouseStatus";
+
+export interface ContainerDetailSort {
+  field: ContainerDetailSortField;
+  order: ContainerDetailQuerySortOrder;
+}
+
+/** 区间筛选的 8 个输入框（界面用字符串，空串表示未填）。 */
+export type ContainerDetailRangeFilterKey =
+  | "containerQuantityMin"
+  | "containerQuantityMax"
+  | "middlePackQuantityMin"
+  | "middlePackQuantityMax"
+  | "warehouseImportPriceMin"
+  | "warehouseImportPriceMax"
+  | "oemPriceMin"
+  | "oemPriceMax";
+
+/** 筛选面板的完整状态：区间 + 商品类型 + 仓库上下架 + 匹配方式（标签 chips 与搜索词另管）。 */
+export interface ContainerDetailFilterState {
+  ranges: Record<ContainerDetailRangeFilterKey, string>;
+  productTypes: ContainerDetailQueryProductType[];
+  warehouseStatus: ContainerDetailQueryWarehouseStatus[];
+  matchTypes: ContainerDetailQueryMatchType[];
+}
+
+export type ContainerDetailPageSize = 50 | 100 | 200 | 500;
+
+/** 货柜头部概览卡所需数据；取不到的字段为 undefined，界面显示 "--"。 */
+export interface ContainerDetailOverview {
+  /** 装柜金额（货柜主表合计金额，国内价格口径） */
+  totalAmount?: number;
+  totalVolume?: number;
+  /** 装载率（%），按 68m3 标准柜折算，可超过 100 */
+  loadRatePercent?: number;
+  totalPieces?: number;
+  totalQuantity?: number;
+  freight?: number;
+  exchangeRate?: number;
+  loadingDate?: string;
+  etaDate?: string;
+  actualArrivalDate?: string;
+  /** 传入 today 时才有：逾期/今天/N 天后/晚到/早到 提示 */
+  arrivalInsight: { text: string; tone: "warning" | "muted" | "accent"; target: "estimated" | "actual" } | null;
+  /** 本柜新品数（tagStats.new） */
+  newCount?: number;
+  /** 已有商品数（tagStats.existing） */
+  existingCount?: number;
+  /** 明细行总数（tagStats.all） */
+  rowCount?: number;
+  /** 统计缺失（未传 tagStats）时为 true，对应 newCount/existingCount/rowCount 为 undefined */
+  statsMissing: boolean;
+}
+
+export interface MissingRetailPriceDetail {
+  hguid: string;
+  /** 提示用名称：货号 > 商品编码 > 明细 GUID */
+  label: string;
+  retailPrice?: number;
+}
+
+export type CreatedProductsHqPushWarning =
+  /** 部分新建商品没能变成发送候选（找不到对应明细或缺编码/供应商+货号），count 为个数 */
+  | { code: "UNSENT_CREATED"; count: number }
+  /** 已有发送到 HQ 的任务正在提交，本次不自动发送 */
+  | { code: "PUSH_BUSY" };
+
+export interface CreatedProductsHqPushPlan {
+  selection: ContainerDetailHqPushSelection;
+  /** 本次创建成功、但没能变成发送候选的数量 */
+  unsentCreatedCount: number;
+  /** 是否应当提交推送任务（有候选且没有在途推送） */
+  shouldPush: boolean;
+  warnings: CreatedProductsHqPushWarning[];
+}
+
+export type CreateNewProductsHqPushOutcome =
+  | { status: "skipped"; reason: "not-run" | "sync-disabled" | "nothing-created" | "no-candidates" | "push-busy" }
+  | { status: "succeeded" | "failed"; job: PushProductsToHqJob }
+  | { status: "error"; message: string };
+
+export interface CreateNewProductsRunResult {
+  /** 被前置校验拦下时为 blocked，此时没有调用任何接口 */
+  status: "blocked" | "completed";
+  blockedReason?: "NO_DETAILS" | "MISSING_RETAIL_PRICE";
+  missingRetailPrice: MissingRetailPriceDetail[];
+  job?: ContainerJob;
+  plan?: CreatedProductsHqPushPlan;
+  push: CreateNewProductsHqPushOutcome;
+}
+
 export interface ContainerQueryRequest {
   dateType?: string;
   startDate?: string;
@@ -385,6 +497,7 @@ export type PushProductsToHqUpdateField =
   | "barcode"
   | "productName"
   | "englishName"
+  | "productType"
   | "image"
   | "purchasePrice"
   | "retailPrice"

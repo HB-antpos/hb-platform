@@ -11,6 +11,8 @@ import type {
   ContainerDetailConcurrentConflict,
   ContainerDetailPresence,
   ContainerDetailSaveValidationError,
+  ContainerDetail,
+  ContainerDetailHqPushSelection,
   ContainerDetailQuery,
   ContainerDetailQueryResult,
   ContainerExportRequest,
@@ -20,18 +22,24 @@ import type {
   ContainerMain,
   ContainerQueryRequest,
   CreateContainerRequest,
-  DetectionItem,
-  DetectionResult,
+  CreateNewProductsHqPushOutcome,
+  CreateNewProductsRunResult,
   PushProductsToHqJob,
   PushProductsToHqJobRequest,
+  PushProductsToHqUpdateField,
   SyncResult,
   UpdateContainerDetailRequest,
   UpdateContainerRequest,
 } from "./types";
 import {
+  DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS,
   buildAlignDomesticProductCodePayload,
-  buildDetailDetectionItems,
   buildContainerListPayload,
+  buildCreatedProductsHqPushPlan,
+  buildCreateProductsOperationId,
+  buildPushProductsToHqOperationId,
+  findContainerDetailsMissingRetailPrice,
+  getDetailGuid,
   normalizeCreateContainerResponse,
   normalizeAlignDomesticProductCodePreview,
   normalizeAlignDomesticProductCodeResult,
@@ -39,8 +47,6 @@ import {
   normalizeContainerDetailQueryResult,
   normalizeContainerJob,
   normalizeContainerListResponse,
-  mergeDetailDetectionResults,
-  normalizeDetectionResults,
   normalizePushProductsToHqJob,
   normalizeSyncResult,
   unwrapData,
@@ -48,7 +54,6 @@ import {
 
 const CONTAINERS_PATH = "/react/v1/containers";
 const CONTAINER_PRODUCTS_PATH = "/react/v1/container-products";
-const PRODUCT_WAREHOUSE_PATH = "/react/v1/product-warehouse";
 const PRODUCTS_PATH = "/react/v1/products";
 
 type ExportData = ArrayBuffer | ArrayBufferView | Blob | string;
@@ -310,25 +315,9 @@ export async function queryContainerProducts(
     },
   );
   ensureSuccess(response.data, "查询货柜明细失败");
-  const result = normalizeContainerDetailQueryResult(response.data, query);
-  if (!result.items.length) return result;
-
-  try {
-    const detectionResults = await detectProducts(buildDetailDetectionItems(result.items));
-    return {
-      ...result,
-      items: mergeDetailDetectionResults(result.items, detectionResults),
-    };
-  } catch {
-    // 检测只用于候选提示，不能因为辅助接口失败阻断明细列表加载。
-    return result;
-  }
-}
-
-export async function detectProducts(items: DetectionItem[]): Promise<DetectionResult[]> {
-  const response = await apiClient.post(`${PRODUCT_WAREHOUSE_PATH}/detect`, { Items: items });
-  ensureSuccess(response.data, "检测商品匹配失败");
-  return normalizeDetectionResults(response.data);
+  // 后端已在每行直接返回 MatchType / LocalProductCode / DomesticProductCode / HasProductCodeConflict，
+  // 不再额外调用 product-warehouse/detect，避免每次翻页多一次请求（且该接口对部分角色 403）。
+  return normalizeContainerDetailQueryResult(response.data, query);
 }
 
 export async function createContainer(data: CreateContainerRequest): Promise<string> {
@@ -568,4 +557,137 @@ export async function exportContainerDetails(
     `${request.fileNameHint || "container-details"}.${extension}`,
     contentType,
   );
+}
+
+const FINAL_JOB_STATUSES = new Set(["Succeeded", "Failed"]);
+
+/** 创建新商品：提交任务并等到结束（任务提交时已结束则不再轮询）。 */
+export async function runCreateNewProductsJob(params: {
+  containerGuid: string;
+  detailHguids: string[];
+  operationId?: string;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}): Promise<ContainerJob> {
+  const operationId = params.operationId
+    ?? buildCreateProductsOperationId(params.containerGuid, params.detailHguids);
+  const job = await createProductCreationJob({
+    operationId,
+    containerGuid: params.containerGuid,
+    detailHguids: params.detailHguids,
+  });
+  if (FINAL_JOB_STATUSES.has(job.status)) return job;
+  return wait(job.jobId, { pollIntervalMs: params.pollIntervalMs, timeoutMs: params.timeoutMs });
+}
+
+/** 发送到 HQ：按发送选择提交任务并等到结束；updateFields 默认全部 17 项（与 Web 默认一致）。 */
+export async function runPushProductsToHqJob(params: {
+  containerGuid: string;
+  selection: ContainerDetailHqPushSelection;
+  updateFields?: readonly PushProductsToHqUpdateField[];
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}): Promise<PushProductsToHqJob> {
+  const updateFields = [...(params.updateFields ?? DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS)];
+  const job = await createPushProductsToHqJob({
+    productCodes: params.selection.productCodes,
+    items: params.selection.items,
+    updateFields,
+    operationId: buildPushProductsToHqOperationId(
+      params.containerGuid,
+      params.selection.productCodes,
+      params.selection.items.length,
+      updateFields,
+    ),
+  });
+  if (FINAL_JOB_STATUSES.has(job.status)) return job;
+  return waitPushProductsToHqJob(job.jobId, {
+    pollIntervalMs: params.pollIntervalMs,
+    timeoutMs: params.timeoutMs,
+  });
+}
+
+/**
+ * 「创建新商品」完整流程（对齐 Web createNewProducts）：
+ * 1. 前置校验：新品行零售价必须 > 0，否则返回 blocked，不调用任何接口；
+ * 2. 创建任务并等待结束（失败/超时直接抛出，由界面提示，不会继续推送）；
+ * 3. syncToHq（默认 true，与 Web 确认框默认勾选一致）时，重载明细后只把本次 created 的商品发送到 HQ。
+ *    推送阶段的任何失败都收敛成 push 结果，不影响已完成的创建结果。
+ */
+export async function createNewProductsAndSyncHq(params: {
+  containerGuid: string;
+  /** 用户确认创建的明细（提交范围、缺价校验、HQ 候选回退都用它） */
+  details: readonly ContainerDetail[];
+  syncToHq?: boolean;
+  /** 创建结束后重载当前页明细，让已建档状态进入「最新行」；抛错时回退到 details */
+  reloadDetails?: () => Promise<readonly ContainerDetail[]> | readonly ContainerDetail[];
+  /** 已有发送到 HQ 的任务在提交时返回 true，则本次不并发推送 */
+  isPushInFlight?: () => boolean;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}): Promise<CreateNewProductsRunResult> {
+  const notRun: CreateNewProductsHqPushOutcome = { status: "skipped", reason: "not-run" };
+  const detailHguids = Array.from(new Set(params.details.map((detail) => getDetailGuid(detail).trim()).filter(Boolean)));
+  if (!detailHguids.length) {
+    return { status: "blocked", blockedReason: "NO_DETAILS", missingRetailPrice: [], push: notRun };
+  }
+  const missingRetailPrice = findContainerDetailsMissingRetailPrice(params.details);
+  if (missingRetailPrice.length) {
+    return { status: "blocked", blockedReason: "MISSING_RETAIL_PRICE", missingRetailPrice, push: notRun };
+  }
+
+  const job = await runCreateNewProductsJob({
+    containerGuid: params.containerGuid,
+    detailHguids,
+    pollIntervalMs: params.pollIntervalMs,
+    timeoutMs: params.timeoutMs,
+  });
+
+  const created = job.result.created;
+  if (params.syncToHq === false) {
+    return { status: "completed", missingRetailPrice: [], job, push: { status: "skipped", reason: "sync-disabled" } };
+  }
+  if (!created.length) {
+    return { status: "completed", missingRetailPrice: [], job, push: { status: "skipped", reason: "nothing-created" } };
+  }
+
+  let latestDetails: readonly ContainerDetail[] = [];
+  try {
+    latestDetails = (await params.reloadDetails?.()) ?? [];
+  } catch {
+    // 重载失败时只用确认创建时的行兜底，创建结果仍然有效。
+  }
+  const plan = buildCreatedProductsHqPushPlan(created, latestDetails, params.details, {
+    pushInFlight: params.isPushInFlight?.() ?? false,
+  });
+  if (!plan.selection.items.length) {
+    return { status: "completed", missingRetailPrice: [], job, plan, push: { status: "skipped", reason: "no-candidates" } };
+  }
+  if (!plan.shouldPush) {
+    return { status: "completed", missingRetailPrice: [], job, plan, push: { status: "skipped", reason: "push-busy" } };
+  }
+
+  try {
+    const pushJob = await runPushProductsToHqJob({
+      containerGuid: params.containerGuid,
+      selection: plan.selection,
+      pollIntervalMs: params.pollIntervalMs,
+      timeoutMs: params.timeoutMs,
+    });
+    return {
+      status: "completed",
+      missingRetailPrice: [],
+      job,
+      plan,
+      push: { status: pushJob.status === "Succeeded" ? "succeeded" : "failed", job: pushJob },
+    };
+  } catch (error) {
+    return {
+      status: "completed",
+      missingRetailPrice: [],
+      job,
+      plan,
+      push: { status: "error", message: error instanceof Error ? error.message : "发送到 HQ 失败" },
+    };
+  }
 }

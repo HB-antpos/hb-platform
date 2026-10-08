@@ -1,0 +1,332 @@
+{
+  "title": "货柜明细",
+  "common": {
+    "none": "--",
+    "listSeparator": "、"
+  },
+  "access": {
+    "deniedTitle": "无权访问货柜",
+    "deniedDescription": "请联系管理员开通货柜查看权限"
+  },
+  "actions": {
+    "back": "返回",
+    "retry": "重试",
+    "cancel": "取消",
+    "done": "完成",
+    "apply": "应用",
+    "reset": "重置",
+    "close": "关闭",
+    "save": "保存"
+  },
+  "header": {
+    "estimatedArrival": "预计到库",
+    "actualArrival": "实际到库",
+    "rows": "{{count}} 行"
+  },
+  "status": {
+    "0": "已装柜",
+    "1": "在途",
+    "2": "已完成",
+    "7": "已取消",
+    "unknown": "状态 {{status}}"
+  },
+  "overview": {
+    "amount": "装柜金额",
+    "volume": "体积 / 装载率",
+    "products": "新品 / 已有"
+  },
+  "presence": {
+    "editing": "正在编辑：{{names}}",
+    "viewing": "正在查看：{{names}}",
+    "justNow": "刚刚"
+  },
+  "search": {
+    "fieldTitle": "搜索字段",
+    "fieldLabel": "搜索字段：{{field}}，点按切换",
+    "placeholder": "搜索{{field}}",
+    "clear": "清除搜索词",
+    "submit": "搜索"
+  },
+  "searchField": {
+    "itemNumber": "货号",
+    "productName": "商品名",
+    "barcode": "条码",
+    "englishName": "英文名"
+  },
+  "sort": {
+    "title": "排序",
+    "current": "当前：{{label}} · {{direction}}",
+    "hint": "点选排序字段；再次点选当前字段可切换升序 / 降序",
+    "ascend": "升序",
+    "descend": "降序",
+    "button": "排序：{{label}}（{{direction}}）",
+    "options": {
+      "itemNumber": "货号",
+      "productName": "商品名",
+      "englishName": "英文名",
+      "barcode": "条码",
+      "containerQuantity": "装柜数量",
+      "containerPieces": "装柜件数",
+      "packingQuantity": "单件装箱数",
+      "unitVolume": "单件体积",
+      "domesticPrice": "国内价",
+      "importPrice": "进口价",
+      "warehouseImportPrice": "实时进货价",
+      "oemPrice": "零售价",
+      "newProduct": "新品优先",
+      "warehouseStatus": "上下架"
+    }
+  },
+  "filter": {
+    "title": "筛选",
+    "button": "筛选，已启用 {{count}} 项",
+    "min": "最小值",
+    "max": "最大值",
+    "invalidRange": "请输入有效数字，且下限不能大于上限",
+    "ranges": {
+      "containerQuantity": "装柜数量",
+      "middlePackQuantity": "中包数",
+      "warehouseImportPrice": "实时进货价",
+      "oemPrice": "零售价"
+    },
+    "productTypes": "商品类型",
+    "productTypeOptions": {
+      "normal": "普通商品",
+      "set": "套装商品",
+      "multi": "多码商品",
+      "setChild": "套装子商品"
+    },
+    "warehouseStatus": "上下架",
+    "warehouseStatusOptions": {
+      "active": "上架",
+      "inactive": "下架"
+    },
+    "matchTypes": "匹配方式",
+    "showReadonlyOemPrice": "显示只读零售价",
+    "showReadonlyOemPriceHint": "在明细信息里额外显示后端分流的只读零售价，不属于筛选条件"
+  },
+  "tags": {
+    "chip": "{{label}} {{count}}",
+    "all": "全部",
+    "new": "新商品",
+    "existing": "已有",
+    "noOemPrice": "缺零售价",
+    "abnormalImport": "进口异常",
+    "active": "启用",
+    "inactive": "停用"
+  },
+  "pageSizeHint": "修改后回到第 1 页，本机会记住你的选择",
+  "table": {
+    "columns": {
+      "product": "货号 / 名称",
+      "status": "状态",
+      "containerQuantity": "装柜数量",
+      "middlePack": "中包",
+      "domesticPrice": "国内价(¥)",
+      "warehouseImportPrice": "实时进货价",
+      "importPrice": "进口价",
+      "retailPrice": "零售价"
+    },
+    "tags": {
+      "new": "新品",
+      "existing": "已有",
+      "active": "启用",
+      "inactive": "停用",
+      "attention": "编码需确认"
+    },
+    "retailMissing": "零售价缺失",
+    "selectRow": "勾选此行",
+    "selectAllOnPage": "勾选本页全部"
+  },
+  "states": {
+    "loading": "正在加载明细…",
+    "loadFailed": "明细加载失败",
+    "empty": "没有明细",
+    "emptyHint": "调整搜索或筛选后再试",
+    "clearFilters": "清除搜索和筛选"
+  },
+  "selection": {
+    "summary": "已选 {{selected}} 条 / 本页 {{page}}",
+    "clear": "清除"
+  },
+  "info": {
+    "viewTitle": "明细信息",
+    "noImage": "无图",
+    "barcode": "条码",
+    "realtimeRetailPrice": "实时零售价",
+    "readonlyOemPrice": "只读零售价",
+    "matchType": "匹配",
+    "match": {
+      "productCode": "商品编码匹配",
+      "supplierItem": "候选需确认",
+      "unmatched": "未匹配"
+    },
+    "conflictCandidate": "候选：本地主档编码 {{local}}，国内编码 {{domestic}}",
+    "align": "对齐编码",
+    "remarkLine": "备注：{{value}}"
+  },
+  "edit": {
+    "title": "编辑明细",
+    "productName": "中文名称",
+    "englishName": "英文名称",
+    "domesticPrice": "国内价",
+    "importPrice": "进口价",
+    "oemPrice": "零售价",
+    "floatRate": "浮率",
+    "containerQuantity": "装柜数量",
+    "middlePackQuantity": "中包数",
+    "active": "启用",
+    "validationTitle": "以下字段未保存",
+    "conflictTitle": "服务器已更新（{{count}}）",
+    "useAllServer": "全部采用服务器值",
+    "keepAllMine": "全部保留我的值",
+    "serverValue": "服务器：",
+    "myValue": "我的值：",
+    "useServer": "采用服务器值",
+    "keepMine": "保留我的值",
+    "overrideConfirmTitle": "确认覆盖服务器值",
+    "overrideConfirmMessage": "将覆盖 {{count}} 个服务器已更新字段。若服务器再次变化，仍会要求重新确认。",
+    "overrideConfirmAction": "确认保留我的值",
+    "wholeRow": "本行",
+    "fields": {
+      "productName": "中文名称",
+      "englishName": "英文名称",
+      "domesticPrice": "国内价",
+      "importPrice": "进口价",
+      "oemPrice": "零售价",
+      "floatRate": "浮率",
+      "containerQuantity": "装柜数量",
+      "middlePackQuantity": "中包数",
+      "isActive": "启用状态"
+    },
+    "validationLine": "{{field}}：{{message}}"
+  },
+  "bulk": {
+    "title": "批量操作",
+    "button": "批量操作",
+    "scopeSelected": "作用于已选 {{count}} 条",
+    "scopeFiltered": "未选择：作用于当前筛选结果（共 {{count}} 条）",
+    "needsSelection": "需先勾选明细",
+    "submitContainerHint": "整柜操作，不受勾选和筛选影响，提交前会再次确认",
+    "groups": {
+      "edit": "批量编辑",
+      "hq": "HQ",
+      "container": "整柜",
+      "export": "导出",
+      "danger": "危险操作"
+    },
+    "actions": {
+      "float": "批量调浮率",
+      "prices": "批量改价",
+      "recalculate": "重算成本",
+      "backfill": "回填上次价格",
+      "pushHq": "推送已选到 HQ",
+      "submitContainer": "提交整柜",
+      "delete": "删除所选",
+      "exportExcel": "导出 Excel",
+      "exportPdf": "导出 PDF"
+    },
+    "deleteTitle": "删除所选明细",
+    "previewMessage": "服务器预览：影响 {{count}} 条。{{summary}}",
+    "previewAffected": "服务器预览：影响 {{count}} 条",
+    "confirmExecute": "确认执行",
+    "preview": "预览"
+  },
+  "pushHq": {
+    "confirmMessage": "将把已选 {{count}} 条明细发送到 HQ 数据库（更新全部可更新字段）。",
+    "confirm": "确认发送"
+  },
+  "createProducts": {
+    "button": "创建新商品",
+    "title": "创建新商品",
+    "warning": "将为已选的 {{count}} 个新商品创建商品档案并上架，创建后不可撤销。",
+    "syncToHq": "创建完成后同时更新 HQ 数据库",
+    "missingTitle": "{{count}} 个新商品的零售价为 0",
+    "missingHint": "零售价必须大于 0 才能创建商品档案，请补价后再创建。",
+    "missingMore": "另有 {{count}} 个未列出",
+    "retailPrice": "零售价 {{price}}",
+    "locate": "定位到该行",
+    "confirmDisabledCaption": "补价后此按钮可用",
+    "confirm": "确认创建",
+    "running": "正在创建新商品，请勿关闭…",
+    "runningWithHq": "正在创建新商品并同步 HQ，请勿关闭…",
+    "result": {
+      "blockedNoDetails": "没有可创建的新商品",
+      "blockedMissingPrice": "有新商品零售价为 0，已拦截，未创建任何商品",
+      "creationFailed": "创建任务失败，未能完成建档",
+      "creationPartial": "创建完成：新建 {{created}}，跳过 {{skipped}}，失败 {{failed}}",
+      "creationNothing": "创建任务已完成，但没有新建任何商品",
+      "creationSuccess": "已创建 {{created}} 个新商品",
+      "creationError": "创建任务未能确认完成，请先刷新明细确认结果，再决定是否重试",
+      "hq": {
+        "unsentCreated": "有 {{count}} 个新建商品没能进入 HQ 发送候选，请稍后在「批量操作 → 推送已选到 HQ」手动发送",
+        "syncDisabled": "未勾选同步 HQ，已跳过",
+        "nothingCreated": "没有新建商品，未发送 HQ",
+        "noCandidates": "新建商品缺少商品编码或供应商货号，未能发送到 HQ",
+        "pushBusy": "已有发送到 HQ 的任务在进行，本次未自动发送，请稍后手动推送",
+        "succeeded": "已同步 HQ：成功 {{success}} / 共 {{total}}",
+        "failed": "商品已创建，但同步 HQ 失败，可稍后在批量操作里重试",
+        "error": "商品已创建，但同步 HQ 出错，可稍后在批量操作里重试"
+      }
+    }
+  },
+  "submitContainer": {
+    "title": "提交整柜",
+    "scope": "将提交整个货柜 {{container}}，范围是整柜全部明细，不受当前搜索、筛选和勾选影响。",
+    "scopeNote": "请确认明细已核对完毕后再提交。",
+    "scopeNoteWithRows": "共 {{count}} 行明细。请确认明细已核对完毕后再提交。",
+    "confirm": "确认提交",
+    "running": "正在提交整柜，请勿关闭…",
+    "result": {
+      "success": "整柜提交完成",
+      "partial": "整柜提交完成，但有 {{failed}} 行失败",
+      "failed": "整柜提交失败",
+      "error": "提交整柜时出错，任务状态未知，请刷新明细后确认"
+    }
+  },
+  "align": {
+    "missingCodes": "缺少可对齐的商品编码",
+    "filledFields": "，补齐：{{fields}}",
+    "merged": "已合并到已有国内商品 {{code}}{{filled}}",
+    "renamed": "已对齐国内商品编码 {{from}} -> {{to}}",
+    "failed": "对齐国内商品编码失败",
+    "previewFailed": "读取对齐预览失败",
+    "mergeIntro": "国内商品表里已有澳洲编码 {{local}} 的记录。确认把国内商品和货柜中的编码 {{domestic}} 改为澳洲的商品编码 {{local}}，并把原记录合并进去？",
+    "itemNumber": "货号：{{value}}",
+    "product": "商品：{{value}}",
+    "mergeImpact": "将改指向 {{containers}} 个货柜的 {{rows}} 行明细，明细自己的价格和装箱数不变。",
+    "mergeField": "{{label}}：已有 {{existing}}｜原 {{old}} → {{merged}}{{filled}}",
+    "filledFromOld": "（用原记录补）",
+    "mergeNoDiff": "两条记录的字段一致，无需补齐。",
+    "mergeNote": "以已有记录为准，已有为空的字段用原记录补；原记录标记为已删除，可恢复。",
+    "renameIntro": "确认把国内商品和货柜中的编码 {{domestic}} 改为澳洲的商品编码 {{local}}？",
+    "mergeTitle": "合并到已有国内商品",
+    "renameTitle": "对齐国内商品编码",
+    "mergeAction": "合并编码",
+    "renameAction": "对齐编码"
+  },
+  "messages": {
+    "foregroundConflicts": "服务器已更新 {{count}} 个正在编辑的字段",
+    "nothingToSave": "没有可保存的明细",
+    "unsavedFields": "有 {{count}} 个字段未保存，请处理后重试",
+    "detailSaved": "明细已保存",
+    "upgradeToEdit": "当前应用版本仅可查看，请升级后再编辑货柜明细",
+    "saveFailed": "保存明细失败",
+    "selectToDelete": "请先选择要删除的明细",
+    "invalidFloatRate": "请输入有效浮率",
+    "invalidPrices": "请输入有效进口价或零售价",
+    "bulkDone": "批量操作已完成",
+    "previewRefreshed": "批量数据已变化，已刷新预览（影响 {{count}} 条），请重新确认执行",
+    "bulkFailed": "批量操作失败",
+    "previewFailed": "批量预览失败",
+    "selectToPushHq": "请先选择要推送 HQ 的明细",
+    "pushHqNoCandidates": "已选明细缺少商品编码或供应商货号候选",
+    "pushHqFailed": "推送 HQ 失败：{{message}}",
+    "pushHqDone": "推送 HQ 任务已完成",
+    "pushHqError": "推送 HQ 失败",
+    "selectNewProducts": "请先勾选要创建的新商品（已建档的商品不能再次创建）",
+    "locateNotOnPage": "该行不在当前页，请清除搜索和筛选后再定位",
+    "exported": "已导出 {{name}}",
+    "exportFailed": "导出失败"
+  }
+}

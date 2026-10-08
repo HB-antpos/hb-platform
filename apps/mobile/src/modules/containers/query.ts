@@ -3,12 +3,25 @@ import type {
   AlignDomesticProductCodeRequest,
   AlignDomesticProductCodeResult,
   ContainerDetail,
+  ContainerDetailFilterState,
   ContainerDetailHqPushSelection,
+  ContainerDetailOverview,
+  ContainerDetailPageSize,
   ContainerDetailQuery,
   ContainerDetailQueryMatchType,
+  ContainerDetailQueryProductType,
   ContainerDetailQueryResult,
+  ContainerDetailQuerySortOrder,
   ContainerDetailQueryTag,
+  ContainerDetailQueryWarehouseStatus,
+  ContainerDetailRangeFilterKey,
+  ContainerDetailSearchField,
+  ContainerDetailSort,
+  ContainerDetailSortField,
   ContainerDetailTagStats,
+  CreatedProductsHqPushPlan,
+  CreatedProductsHqPushWarning,
+  MissingRetailPriceDetail,
   DetectionItem,
   DetectionResult,
   ContainerJob,
@@ -23,9 +36,224 @@ import type {
   PushProductsToHqResult,
   PushProductsToHqUpdateField,
 } from "./types";
+import { getArrivalInsight, toDateOnly } from "./container-list-logic";
 
 export const CONTAINER_LIST_PAGE_SIZE = 20;
-export const CONTAINER_DETAIL_PAGE_SIZE = 30;
+
+/** 明细每页条数可选项；后端 pageSize 上限 1000，这里取常用档位。 */
+export const CONTAINER_DETAIL_PAGE_SIZE_OPTIONS = [50, 100, 200, 500] as const;
+export const CONTAINER_DETAIL_DEFAULT_PAGE_SIZE: ContainerDetailPageSize = 50;
+/** @deprecated 旧名，等同默认每页条数（已由 30 改为 50）；新代码请用 CONTAINER_DETAIL_DEFAULT_PAGE_SIZE。 */
+export const CONTAINER_DETAIL_PAGE_SIZE = CONTAINER_DETAIL_DEFAULT_PAGE_SIZE;
+
+// 本地记住的每页条数可能来自旧版本或被篡改，不在可选项里就回到默认 50
+export function normalizeContainerDetailPageSize(value: unknown): ContainerDetailPageSize {
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return (
+    CONTAINER_DETAIL_PAGE_SIZE_OPTIONS.find((option) => option === parsed) ?? CONTAINER_DETAIL_DEFAULT_PAGE_SIZE
+  );
+}
+
+/** 页数（至少 1 页）。 */
+export function getContainerDetailPageCount(total: number, pageSize: number) {
+  if (!Number.isFinite(total) || !Number.isFinite(pageSize) || pageSize <= 0) return 1;
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+/** 搜索字段：keyword 会写入后端对应的单列文字筛选，默认按货号。 */
+export const CONTAINER_DETAIL_SEARCH_FIELDS: readonly {
+  field: ContainerDetailSearchField;
+  label: string;
+  labelKey: string;
+}[] = [
+  { field: "itemNumber", label: "货号", labelKey: "containerDetail.searchField.itemNumber" },
+  { field: "productName", label: "中文名", labelKey: "containerDetail.searchField.productName" },
+  { field: "barcode", label: "条码", labelKey: "containerDetail.searchField.barcode" },
+  { field: "englishName", label: "英文名", labelKey: "containerDetail.searchField.englishName" },
+];
+export const DEFAULT_CONTAINER_DETAIL_SEARCH_FIELD: ContainerDetailSearchField = "itemNumber";
+
+export function normalizeContainerDetailSearchField(value: unknown): ContainerDetailSearchField {
+  return CONTAINER_DETAIL_SEARCH_FIELDS.find((item) => item.field === value)?.field ?? DEFAULT_CONTAINER_DETAIL_SEARCH_FIELD;
+}
+
+/**
+ * 移动端提供的排序项。field 全部取自后端 ApplyContainerDetailSort 白名单；
+ * defaultOrder 是首次点选该字段时的方向（文字升序、数值/价格降序，方便先看大的）。
+ * 后端没有「最近更新」排序，因此不提供。
+ */
+export const CONTAINER_DETAIL_SORT_OPTIONS: readonly {
+  field: ContainerDetailSortField;
+  label: string;
+  labelKey: string;
+  defaultOrder: ContainerDetailQuerySortOrder;
+}[] = [
+  { field: "itemNumber", label: "货号", labelKey: "containerDetail.sort.itemNumber", defaultOrder: "ascend" },
+  { field: "productName", label: "中文名", labelKey: "containerDetail.sort.productName", defaultOrder: "ascend" },
+  { field: "englishName", label: "英文名", labelKey: "containerDetail.sort.englishName", defaultOrder: "ascend" },
+  { field: "barcode", label: "条码", labelKey: "containerDetail.sort.barcode", defaultOrder: "ascend" },
+  { field: "containerQuantity", label: "装柜数量", labelKey: "containerDetail.sort.containerQuantity", defaultOrder: "descend" },
+  { field: "containerPieces", label: "装柜件数", labelKey: "containerDetail.sort.containerPieces", defaultOrder: "descend" },
+  { field: "packingQuantity", label: "单件装箱数", labelKey: "containerDetail.sort.packingQuantity", defaultOrder: "descend" },
+  { field: "unitVolume", label: "单件体积", labelKey: "containerDetail.sort.unitVolume", defaultOrder: "descend" },
+  { field: "domesticPrice", label: "国内价", labelKey: "containerDetail.sort.domesticPrice", defaultOrder: "descend" },
+  { field: "importPrice", label: "进口价", labelKey: "containerDetail.sort.importPrice", defaultOrder: "descend" },
+  { field: "warehouseImportPrice", label: "实时进货价", labelKey: "containerDetail.sort.warehouseImportPrice", defaultOrder: "descend" },
+  { field: "oemPrice", label: "零售价", labelKey: "containerDetail.sort.oemPrice", defaultOrder: "descend" },
+  { field: "newProduct", label: "新品优先", labelKey: "containerDetail.sort.newProduct", defaultOrder: "descend" },
+  { field: "warehouseStatus", label: "上下架", labelKey: "containerDetail.sort.warehouseStatus", defaultOrder: "descend" },
+];
+
+/** 默认按货号升序，和 web 货柜明细当前业务核对顺序保持一致。 */
+export const DEFAULT_CONTAINER_DETAIL_SORT: ContainerDetailSort = { field: "itemNumber", order: "ascend" };
+
+export function isContainerDetailSortField(value: unknown): value is ContainerDetailSortField {
+  return CONTAINER_DETAIL_SORT_OPTIONS.some((item) => item.field === value);
+}
+
+/** 不认识的字段回退默认（后端对未知 key 也会静默回退货号排序，这里提前显式化）。 */
+export function normalizeContainerDetailSort(sort?: Partial<ContainerDetailSort> | null): ContainerDetailSort {
+  const requestedField = sort?.field;
+  const field = isContainerDetailSortField(requestedField) ? requestedField : DEFAULT_CONTAINER_DETAIL_SORT.field;
+  const order: ContainerDetailQuerySortOrder = sort?.order === "descend" || sort?.order === "ascend"
+    ? sort.order
+    : DEFAULT_CONTAINER_DETAIL_SORT.order;
+  return { field, order };
+}
+
+/** 点选排序项：同一字段再次点选翻转方向，换字段则用该字段的默认方向。 */
+export function toggleContainerDetailSort(current: ContainerDetailSort, field: ContainerDetailSortField): ContainerDetailSort {
+  if (current.field === field) {
+    return { field, order: current.order === "ascend" ? "descend" : "ascend" };
+  }
+  const option = CONTAINER_DETAIL_SORT_OPTIONS.find((item) => item.field === field);
+  return { field, order: option?.defaultOrder ?? "ascend" };
+}
+
+export function isDefaultContainerDetailSort(sort: ContainerDetailSort) {
+  return sort.field === DEFAULT_CONTAINER_DETAIL_SORT.field && sort.order === DEFAULT_CONTAINER_DETAIL_SORT.order;
+}
+
+// ---------------------------------------------------------------------------
+// 筛选面板状态：区间 + 商品类型 + 仓库上下架 + 匹配方式
+// ---------------------------------------------------------------------------
+
+/** 区间筛选对（顺序即界面展示顺序），min/max 为 ContainerDetailQuery 里的同名字段。 */
+export const CONTAINER_DETAIL_RANGE_FILTER_PAIRS: readonly {
+  key: "containerQuantity" | "middlePackQuantity" | "warehouseImportPrice" | "oemPrice";
+  label: string;
+  minKey: ContainerDetailRangeFilterKey;
+  maxKey: ContainerDetailRangeFilterKey;
+}[] = [
+  { key: "containerQuantity", label: "装柜数量", minKey: "containerQuantityMin", maxKey: "containerQuantityMax" },
+  { key: "middlePackQuantity", label: "中包数", minKey: "middlePackQuantityMin", maxKey: "middlePackQuantityMax" },
+  { key: "warehouseImportPrice", label: "实时进货价", minKey: "warehouseImportPriceMin", maxKey: "warehouseImportPriceMax" },
+  { key: "oemPrice", label: "零售价", minKey: "oemPriceMin", maxKey: "oemPriceMax" },
+];
+
+export const CONTAINER_DETAIL_PRODUCT_TYPE_OPTIONS: readonly { value: ContainerDetailQueryProductType; label: string }[] = [
+  { value: "normal", label: "普通商品" },
+  { value: "set", label: "套装商品" },
+  { value: "multi", label: "多码商品" },
+  { value: "setChild", label: "套装子商品" },
+];
+
+export const CONTAINER_DETAIL_WAREHOUSE_STATUS_OPTIONS: readonly { value: ContainerDetailQueryWarehouseStatus; label: string }[] = [
+  { value: "active", label: "上架" },
+  { value: "inactive", label: "下架" },
+];
+
+export const CONTAINER_DETAIL_MATCH_TYPE_OPTIONS: readonly { value: ContainerDetailQueryMatchType; label: string }[] = [
+  { value: "productCode", label: "商品编码匹配" },
+  { value: "supplierItem", label: "候选需确认" },
+  { value: "unmatched", label: "未匹配" },
+];
+
+export function createEmptyContainerDetailFilters(): ContainerDetailFilterState {
+  return {
+    ranges: {
+      containerQuantityMin: "",
+      containerQuantityMax: "",
+      middlePackQuantityMin: "",
+      middlePackQuantityMax: "",
+      warehouseImportPriceMin: "",
+      warehouseImportPriceMax: "",
+      oemPriceMin: "",
+      oemPriceMax: "",
+    },
+    productTypes: [],
+    warehouseStatus: [],
+    matchTypes: [],
+  };
+}
+
+/** 重置：返回一份全新的空状态（不共享引用，避免被 setState 误改）。 */
+export function resetContainerDetailFilters(): ContainerDetailFilterState {
+  return createEmptyContainerDetailFilters();
+}
+
+/** 空串或空白 -> undefined；非法数字 -> NaN，由校验函数统一报错。 */
+function parseFilterNumber(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+/**
+ * 已生效的筛选条件个数（用于筛选按钮角标）：
+ * 每个区间对（只要填了 min 或 max）算 1 个，三组多选各算 1 个；标签 chips 与搜索词不计入。
+ */
+export function countActiveContainerDetailFilters(state: ContainerDetailFilterState): number {
+  const rangeCount = CONTAINER_DETAIL_RANGE_FILTER_PAIRS.filter(
+    (pair) => Boolean(state.ranges[pair.minKey]?.trim()) || Boolean(state.ranges[pair.maxKey]?.trim()),
+  ).length;
+  return (
+    rangeCount
+    + (state.productTypes.length > 0 ? 1 : 0)
+    + (state.warehouseStatus.length > 0 ? 1 : 0)
+    + (state.matchTypes.length > 0 ? 1 : 0)
+  );
+}
+
+/**
+ * 校验区间输入：返回有问题的区间对 key（填了非数字，或 min 大于 max）。
+ * 为空数组才允许应用筛选。
+ */
+export function findInvalidContainerDetailRangePairs(state: ContainerDetailFilterState) {
+  return CONTAINER_DETAIL_RANGE_FILTER_PAIRS.filter((pair) => {
+    const min = parseFilterNumber(state.ranges[pair.minKey]);
+    const max = parseFilterNumber(state.ranges[pair.maxKey]);
+    if (Number.isNaN(min) || Number.isNaN(max)) return true;
+    return min !== undefined && max !== undefined && min > max;
+  }).map((pair) => pair.key);
+}
+
+/** 把筛选状态转成 ContainerDetailQuery 字段；非法数字一律丢弃（界面应先用校验函数拦截）。 */
+export function buildContainerDetailFilterQuery(state: ContainerDetailFilterState): Partial<ContainerDetailQuery> {
+  const numberOrUndefined = (key: ContainerDetailRangeFilterKey) => {
+    const parsed = parseFilterNumber(state.ranges[key]);
+    return parsed === undefined || Number.isNaN(parsed) ? undefined : parsed;
+  };
+  return {
+    containerQuantityMin: numberOrUndefined("containerQuantityMin"),
+    containerQuantityMax: numberOrUndefined("containerQuantityMax"),
+    middlePackQuantityMin: numberOrUndefined("middlePackQuantityMin"),
+    middlePackQuantityMax: numberOrUndefined("middlePackQuantityMax"),
+    warehouseImportPriceMin: numberOrUndefined("warehouseImportPriceMin"),
+    warehouseImportPriceMax: numberOrUndefined("warehouseImportPriceMax"),
+    oemPriceMin: numberOrUndefined("oemPriceMin"),
+    oemPriceMax: numberOrUndefined("oemPriceMax"),
+    productTypes: state.productTypes.length ? [...state.productTypes] : undefined,
+    warehouseStatus: state.warehouseStatus.length ? [...state.warehouseStatus] : undefined,
+    matchTypes: state.matchTypes.length ? [...state.matchTypes] : undefined,
+  };
+}
+
+/** 多选项开关（商品类型 / 上下架 / 匹配方式共用）。 */
+export function toggleContainerDetailFilterOption<T extends string>(selected: readonly T[], value: T): T[] {
+  return selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+}
 
 export const DEFAULT_CONTAINER_DETAIL_EXPORT_COLUMNS = [
   "index",
@@ -378,30 +606,54 @@ export function buildContainerListPayload(query: ContainerQueryRequest = {}) {
   };
 }
 
+export type BuildContainerDetailQueryInput = Partial<ContainerDetailQuery> & {
+  /** 搜索词，写入 searchField 对应的后端字段（默认货号）；该字段已显式传值时以显式值为准 */
+  keyword?: string;
+  searchField?: ContainerDetailSearchField;
+  /** 排序；优先于 sortBy/sortOrder */
+  sort?: Partial<ContainerDetailSort> | null;
+  /** 筛选面板状态（区间 + 商品类型 + 上下架 + 匹配方式）；同名显式字段优先 */
+  filters?: ContainerDetailFilterState;
+};
+
 export function buildContainerDetailQuery(
   containerGuid: string,
-  query: Partial<ContainerDetailQuery> & { keyword?: string } = {},
+  query: BuildContainerDetailQueryInput = {},
 ): ContainerDetailQuery {
   const keyword = trimToUndefined(query.keyword);
+  const searchField = normalizeContainerDetailSearchField(query.searchField);
+  // 后端按单列文字筛选，搜索词只落到当前选中的字段，其余字段不受影响。
+  const textFilter = (field: ContainerDetailSearchField) =>
+    trimToUndefined(query[field]) ?? (searchField === field ? keyword : undefined);
+  const filterQuery = query.filters ? buildContainerDetailFilterQuery(query.filters) : {};
+  const sort = query.sort
+    ? normalizeContainerDetailSort(query.sort)
+    : {
+        field: query.sortBy || DEFAULT_CONTAINER_DETAIL_SORT.field,
+        order: query.sortOrder || DEFAULT_CONTAINER_DETAIL_SORT.order,
+      };
+  // 显式字段优先于 filters 展开值（只在显式字段不是 undefined 时覆盖）。
+  const fromQueryOrFilters = <K extends keyof ContainerDetailQuery>(key: K): ContainerDetailQuery[K] =>
+    (query[key] !== undefined ? query[key] : filterQuery[key]) as ContainerDetailQuery[K];
   return {
     containerGuid,
     pageNumber: query.pageNumber ?? 1,
-    pageSize: query.pageSize ?? CONTAINER_DETAIL_PAGE_SIZE,
-    itemNumber: trimToUndefined(query.itemNumber) ?? keyword,
-    barcode: trimToUndefined(query.barcode),
-    productName: trimToUndefined(query.productName),
-    englishName: trimToUndefined(query.englishName),
+    pageSize: query.pageSize ?? CONTAINER_DETAIL_DEFAULT_PAGE_SIZE,
+    itemNumber: textFilter("itemNumber"),
+    barcode: textFilter("barcode"),
+    productName: textFilter("productName"),
+    englishName: textFilter("englishName"),
     remark: trimToUndefined(query.remark),
-    productTypes: query.productTypes,
+    productTypes: fromQueryOrFilters("productTypes"),
     newProductStates: query.newProductStates,
-    matchTypes: query.matchTypes,
-    warehouseStatus: query.warehouseStatus,
+    matchTypes: fromQueryOrFilters("matchTypes"),
+    warehouseStatus: fromQueryOrFilters("warehouseStatus"),
     containerPiecesMin: query.containerPiecesMin,
     containerPiecesMax: query.containerPiecesMax,
-    middlePackQuantityMin: query.middlePackQuantityMin,
-    middlePackQuantityMax: query.middlePackQuantityMax,
-    containerQuantityMin: query.containerQuantityMin,
-    containerQuantityMax: query.containerQuantityMax,
+    middlePackQuantityMin: fromQueryOrFilters("middlePackQuantityMin"),
+    middlePackQuantityMax: fromQueryOrFilters("middlePackQuantityMax"),
+    containerQuantityMin: fromQueryOrFilters("containerQuantityMin"),
+    containerQuantityMax: fromQueryOrFilters("containerQuantityMax"),
     packingQuantityMin: query.packingQuantityMin,
     packingQuantityMax: query.packingQuantityMax,
     unitVolumeMin: query.unitVolumeMin,
@@ -414,18 +666,18 @@ export function buildContainerDetailQuery(
     transportCostMax: query.transportCostMax,
     unitTransportCostMin: query.unitTransportCostMin,
     unitTransportCostMax: query.unitTransportCostMax,
-    warehouseImportPriceMin: query.warehouseImportPriceMin,
-    warehouseImportPriceMax: query.warehouseImportPriceMax,
+    warehouseImportPriceMin: fromQueryOrFilters("warehouseImportPriceMin"),
+    warehouseImportPriceMax: fromQueryOrFilters("warehouseImportPriceMax"),
     lastOEMPriceMin: query.lastOEMPriceMin,
     lastOEMPriceMax: query.lastOEMPriceMax,
     importPriceMin: query.importPriceMin,
     importPriceMax: query.importPriceMax,
-    oemPriceMin: query.oemPriceMin,
-    oemPriceMax: query.oemPriceMax,
+    oemPriceMin: fromQueryOrFilters("oemPriceMin"),
+    oemPriceMax: fromQueryOrFilters("oemPriceMax"),
     selectedTags: query.selectedTags?.filter((item) => item !== "all"),
-    // 默认按货号升序，和 web 货柜明细当前业务核对顺序保持一致。
-    sortBy: query.sortBy || "itemNumber",
-    sortOrder: query.sortOrder || "ascend",
+    sortBy: sort.field,
+    sortOrder: sort.order,
+    // 分页请求必须带总数与标签统计，页数和概览卡都依赖它们。
     includeTotal: query.includeTotal ?? true,
     includeStats: query.includeStats ?? true,
   };
@@ -678,4 +930,204 @@ export function toggleSelectedTag(
   return selectedTags.includes(tag)
     ? selectedTags.filter((item) => item !== tag)
     : [...selectedTags, tag];
+}
+
+// ---------------------------------------------------------------------------
+// 创建新商品：零售价前置校验 + 「创建后同步 HQ」发送计划
+// ---------------------------------------------------------------------------
+
+/** 发送到 HQ 的全部可更新字段（与 Web defaultPushProductsToHqUpdateFields 同序，共 17 项）。 */
+export const DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS: readonly PushProductsToHqUpdateField[] = [
+  "itemNumber",
+  "barcode",
+  "productName",
+  "englishName",
+  "productType",
+  "image",
+  "purchasePrice",
+  "retailPrice",
+  "middlePackQuantity",
+  "supplierCode",
+  "storePurchasePrice",
+  "storeRetailPrice",
+  "inventoryDomesticPrice",
+  "inventoryImportPrice",
+  "inventoryOemPrice",
+  "productSetCodes",
+  "storeMultiCodes",
+];
+
+/**
+ * 找出「新商品但零售价无效」的明细。
+ * 创建仓库新商品会把明细零售价（贴牌价格）写入商品主表、仓库商品和分店零售价，所以必须是有限正数；
+ * 已有商品不参与（它们不会被创建）。与 Web findContainerDetailRowsMissingCreateProductRetailPrice 同口径。
+ */
+export function findContainerDetailsMissingRetailPrice(details: readonly ContainerDetail[]): MissingRetailPriceDetail[] {
+  return details
+    .filter((detail) => Boolean(detail.是否新商品))
+    .map((detail) => ({
+      hguid: getDetailGuid(detail),
+      label:
+        trimToUndefined(getDetailItemNumber(detail))
+        ?? trimToUndefined(getDetailProductCode(detail))
+        ?? getDetailGuid(detail),
+      retailPrice: detail.贴牌价格,
+    }))
+    .filter((row) => !(typeof row.retailPrice === "number" && Number.isFinite(row.retailPrice) && row.retailPrice > 0));
+}
+
+function normalizeLookupKey(value?: string) {
+  return value?.trim().toUpperCase() || undefined;
+}
+
+function buildDetailLookupIndexes(details: readonly ContainerDetail[]) {
+  const byHguid = new Map<string, ContainerDetail>();
+  const byProductCode = new Map<string, ContainerDetail>();
+  details.forEach((detail) => {
+    const hguidKey = normalizeLookupKey(getDetailGuid(detail));
+    if (hguidKey && !byHguid.has(hguidKey)) byHguid.set(hguidKey, detail);
+    const codeKey = normalizeLookupKey(getDetailProductCode(detail));
+    if (codeKey && !byProductCode.has(codeKey)) byProductCode.set(codeKey, detail);
+  });
+  return { byHguid, byProductCode };
+}
+
+/**
+ * 「创建新商品」完成后同步 HQ：只从本次结果 created 里挑商品，构造与手动「发送到 HQ」相同的发送选择。
+ * - 先按明细 GUID、再按商品编码（忽略大小写与首尾空白）在重载后的最新行里找；
+ * - 找不到（分页只加载了部分行、被当前筛选隐藏）时回退到确认创建时的行；
+ * - 不因行仍被标成新商品而跳过：后端只信任本地 Product 的实时匹配结果，前端标记可能滞后；
+ * - 同一明细或同一商品编码只发送一次（buildContainerDetailHqPushSelection 内按编码去重）。
+ * warnings：存在没能进入候选的新建商品，或已有推送任务在途时返回，由界面翻译成提示。
+ */
+export function buildCreatedProductsHqPushPlan(
+  createdItems: readonly { detailHguid?: string; productCode?: string }[],
+  latestDetails: readonly ContainerDetail[],
+  confirmedDetails: readonly ContainerDetail[] = [],
+  options: { pushInFlight?: boolean } = {},
+): CreatedProductsHqPushPlan {
+  // 最新行优先，确认创建时的行只作兜底。
+  const sources = [buildDetailLookupIndexes(latestDetails), buildDetailLookupIndexes(confirmedDetails)];
+  const matchedDetails: ContainerDetail[] = [];
+  const matchedSet = new Set<ContainerDetail>();
+  let unmatchedCount = 0;
+
+  createdItems.forEach((item) => {
+    const hguidKey = normalizeLookupKey(item.detailHguid);
+    const codeKey = normalizeLookupKey(item.productCode);
+    let detail: ContainerDetail | undefined;
+    for (const source of sources) {
+      detail = (hguidKey ? source.byHguid.get(hguidKey) : undefined)
+        ?? (codeKey ? source.byProductCode.get(codeKey) : undefined);
+      if (detail) break;
+    }
+    if (!detail) {
+      unmatchedCount += 1;
+      return;
+    }
+    if (!matchedSet.has(detail)) {
+      matchedSet.add(detail);
+      matchedDetails.push(detail);
+    }
+  });
+
+  const selection = buildContainerDetailHqPushSelection(matchedDetails);
+  // 既没有商品编码、又缺供应商+货号的行，selection 里一条候选都不会产生，要计入「未能发送」。
+  const withoutCandidateCount = matchedDetails.filter(
+    (detail) => buildContainerDetailHqPushSelection([detail]).items.length === 0,
+  ).length;
+  const unsentCreatedCount = unmatchedCount + withoutCandidateCount;
+
+  const warnings: CreatedProductsHqPushWarning[] = [];
+  if (createdItems.length > 0 && (unsentCreatedCount > 0 || !selection.items.length)) {
+    warnings.push({
+      code: "UNSENT_CREATED",
+      count: selection.items.length ? unsentCreatedCount : createdItems.length,
+    });
+  }
+  const hasCandidates = selection.items.length > 0;
+  if (hasCandidates && options.pushInFlight) {
+    warnings.push({ code: "PUSH_BUSY" });
+  }
+
+  return {
+    selection,
+    unsentCreatedCount,
+    shouldPush: hasCandidates && !options.pushInFlight,
+    warnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 货柜头部概览
+// ---------------------------------------------------------------------------
+
+/** 标准柜体积（m3），与 Web containersLogic.STANDARD_CONTAINER_VOLUME_CBM 一致。 */
+export const STANDARD_CONTAINER_VOLUME_CBM = 68;
+
+function finiteOrUndefined(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** 装载率（%）：体积缺失/为负返回 undefined；超过 100 照实返回，进度条由界面封顶。 */
+export function getContainerLoadRatePercent(volume?: number | null) {
+  const value = finiteOrUndefined(volume);
+  if (value === undefined || value < 0) return undefined;
+  return Math.round((value / STANDARD_CONTAINER_VOLUME_CBM) * 100);
+}
+
+/**
+ * 概览卡数据：来自 GET /containers/{guid}（金额/体积/日期）和明细 tagStats（新品/已有/行数）。
+ * today 为 YYYY-MM-DD，传入才计算到库提示。没有数据的字段保持 undefined，由界面显示 "--"。
+ * 注意：后端没有「货柜容量」字段，装载率只能按 68m3 标准柜折算。
+ */
+export function buildContainerDetailOverview(
+  container: ContainerMain | null | undefined,
+  tagStats: ContainerDetailTagStats | null | undefined,
+  options: { today?: string } = {},
+): ContainerDetailOverview {
+  const loadingDate = toDateOnly(container?.装柜日期) || undefined;
+  const etaDate = toDateOnly(container?.预计到岸日期) || undefined;
+  const actualArrivalDate = toDateOnly(container?.实际到货日期) || undefined;
+  const totalVolume = finiteOrUndefined(container?.总体积);
+
+  return {
+    totalAmount: finiteOrUndefined(container?.合计金额),
+    totalVolume,
+    loadRatePercent: getContainerLoadRatePercent(totalVolume),
+    totalPieces: finiteOrUndefined(container?.合计件数),
+    totalQuantity: finiteOrUndefined(container?.合计数量),
+    freight: finiteOrUndefined(container?.运费),
+    exchangeRate: finiteOrUndefined(container?.汇率),
+    loadingDate,
+    etaDate,
+    actualArrivalDate,
+    arrivalInsight: container && options.today ? getArrivalInsight(container, options.today) : null,
+    newCount: tagStats ? tagStats.new : undefined,
+    existingCount: tagStats ? tagStats.existing : undefined,
+    rowCount: tagStats ? tagStats.all : undefined,
+    statsMissing: !tagStats,
+  };
+}
+
+/**
+ * 概览卡展示的是整柜构成，不能随搜索词/筛选面板变化：
+ * 后端 tagStats 基于当前搜索与筛选范围（不含标签 chips），所以只有「无搜索词且无筛选」时它才等于整柜口径。
+ * 其他时刻沿用上一次拿到的整柜统计；cacheable=true 时调用方应把 stats 记为该货柜的整柜统计缓存。
+ */
+export function resolveContainerDetailOverviewStats({
+  remoteStats,
+  statsComputed,
+  hasScopeFilters,
+  cachedStats,
+}: {
+  remoteStats: ContainerDetailTagStats | null | undefined;
+  statsComputed?: boolean;
+  hasScopeFilters: boolean;
+  cachedStats: ContainerDetailTagStats | null | undefined;
+}): { stats: ContainerDetailTagStats | null; cacheable: boolean } {
+  if (remoteStats && statsComputed !== false && !hasScopeFilters) {
+    return { stats: remoteStats, cacheable: true };
+  }
+  return { stats: cachedStats ?? null, cacheable: false };
 }

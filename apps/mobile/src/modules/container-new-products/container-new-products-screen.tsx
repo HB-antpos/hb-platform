@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ProductBarcodeImage } from "@/components/product-maintenance/ProductBarcodeImage";
+import { normalizePageSize } from "@/components/ui/pagination/pagination-logic";
+import { PaginationBar } from "@/components/ui/pagination/PaginationBar";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import { useStores } from "@/modules/shop/use-stores";
 import { useAuthStore } from "@/store/auth-store";
@@ -14,10 +16,10 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { canViewContainerNewProducts } from "./access";
 import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, formatArrivalDateRange, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "./api";
-import { ContainerFilterSheet, PageSheet, ProductFilterSheet } from "./container-new-products-sheets";
+import { ContainerFilterSheet, ProductFilterSheet } from "./container-new-products-sheets";
 import { countActiveFilters, DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS, matchesFilters, pruneSelectedContainers, summarizeContainers, type ContainerNewProductFilters } from "./filters";
 import { compareByArrivalThenProductNo } from "./ordering";
-import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE, paginate, type ContainerNewProductsPageSize } from "./pagination";
+import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE, CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS, paginate, type ContainerNewProductsPageSize } from "./pagination";
 import { peekRememberedPageSize, readRememberedPageSize, rememberPageSize } from "./page-size-storage";
 import { countNewProductKinds } from "./summary";
 import type { ContainerNewProductItem } from "./types";
@@ -26,7 +28,7 @@ const ACCENT_SOFT = "#EAF2FF";
 const SUCCESS_SOFT = "#ECFDF3";
 const WARNING_SOFT = "#FFFAEB";
 
-type OpenSheet = "product" | "containers" | "pages" | "stores" | null;
+type OpenSheet = "product" | "containers" | "stores" | null;
 
 function ScreenMessage({ message, onBack, retry }: { message: string; onBack: () => void; retry?: () => void }) {
   const { t } = useAppTranslation("containerNewProducts");
@@ -46,12 +48,6 @@ function FilterChip({ icon, label, active, onPress }: { icon: keyof typeof Mater
     <MaterialCommunityIcons name={icon} size={16} color={active ? HB_COLORS.action : HB_COLORS.textSecondary} />
     <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>{label}</Text>
     <MaterialCommunityIcons name="chevron-down" size={16} color={active ? HB_COLORS.action : HB_COLORS.textSecondary} />
-  </Pressable>;
-}
-
-function PagerButton({ icon, label, disabled, onPress }: { icon: "chevron-left" | "chevron-right"; label: string; disabled: boolean; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.pagerIcon, disabled && styles.pagerDisabled]}>
-    <MaterialCommunityIcons name={icon} size={22} color={disabled ? HB_COLORS.outline : HB_COLORS.action} />
   </Pressable>;
 }
 
@@ -135,9 +131,15 @@ export function ContainerNewProductsScreen() {
   // 换门店、切换筛选、改每页条数都回到第 1 页；刷新后条数变少由 paginate 夹回有效页
   useEffect(() => setRequestedPage(1), [storeCode, rangeFilter, filters, pageSize]);
   const pageSlice = useMemo(() => paginate(filteredItems, requestedPage, pageSize), [filteredItems, requestedPage, pageSize]);
-  const filteredKinds = countNewProductKinds(filteredItems);
   const goToPage = (page: number) => {
     setRequestedPage(page);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
+  // 改每页条数：记住选择（下次进入沿用），页码由上面的 effect 回到第 1 页
+  const changePageSize = (value: number) => {
+    const next = normalizePageSize(value, CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS, CONTAINER_NEW_PRODUCTS_PAGE_SIZE);
+    rememberPageSize(next);
+    setPageSize(next);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
   const activeFilterCount = countActiveFilters(effectiveFilters);
@@ -157,22 +159,20 @@ export function ContainerNewProductsScreen() {
   if (!selectedStore) return <ScreenMessage message={t(stores.length > 0 ? "messages.selectStore" : "messages.noStores")} onBack={goBack} />;
 
   const hasData = query.isSuccess && orderedItems.length > 0;
-  const pager = (position: "top" | "bottom") => <View style={styles.pager}>
-    <View style={styles.pagerGroup}>
-      <PagerButton icon="chevron-left" label={t("pagination.previous")} disabled={pageSlice.page <= 1} onPress={() => goToPage(pageSlice.page - 1)} />
-      <Pressable accessibilityRole="button" accessibilityLabel={t("pagination.jumpLabel", { page: pageSlice.page, pageCount: pageSlice.pageCount })} onPress={() => setOpenSheet("pages")} style={styles.pagerSelect}>
-        <Text style={styles.pagerSelectText}>{t("pagination.compact", { page: pageSlice.page, pageCount: pageSlice.pageCount })}</Text>
-        <MaterialCommunityIcons name="chevron-down" size={16} color={HB_COLORS.textSecondary} />
-      </Pressable>
-      <PagerButton icon="chevron-right" label={t("pagination.next")} disabled={pageSlice.page >= pageSlice.pageCount} onPress={() => goToPage(pageSlice.page + 1)} />
-    </View>
-    {position === "top"
-      ? <Pressable accessibilityRole="button" onPress={() => setOpenSheet("pages")} style={styles.pagerSelect}>
-        <Text style={styles.pagerSelectText}>{t("pagination.perPage", { count: pageSize })}</Text>
-        <MaterialCommunityIcons name="chevron-down" size={16} color={HB_COLORS.textSecondary} />
-      </Pressable>
-      : <Text variant="bodySmall" style={styles.pageText}>{t("pagination.page", { page: pageSlice.page, pageCount: pageSlice.pageCount, total: filteredKinds })}</Text>}
-  </View>;
+  // 分页条：列表上方放完整条（含总数、每页条数），底部只放翻页行，翻到底不用滚回顶部。
+  // 总数按列表行数（与分页口径一致），不是去重后的品种数。
+  const pager = (compact: boolean) => <PaginationBar
+    compact={compact}
+    testID={compact ? "container-new-products-pagination-bottom" : "container-new-products-pagination"}
+    page={pageSlice.page}
+    pageCount={pageSlice.pageCount}
+    total={filteredItems.length}
+    pageSize={pageSize}
+    pageSizeOptions={CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS}
+    pageSizeHint={t("pageSizeHint")}
+    onPageChange={goToPage}
+    onPageSizeChange={changePageSize}
+  />;
 
   return <SafeAreaView style={styles.safe} edges={["top"]}>
     <View style={styles.header}><Button compact onPress={goBack} icon="chevron-left" labelStyle={styles.backLabel}>{t("actions.back")}</Button><Text variant="headlineSmall" style={styles.title}>{t("title")}</Text><View style={styles.headerSpacer} /></View>
@@ -204,14 +204,14 @@ export function ContainerNewProductsScreen() {
         <FilterChip icon="train-car-container" label={containerChipLabel} active={effectiveFilters.containerCodes.length > 0} onPress={() => setOpenSheet("containers")} />
         {activeFilterCount > 0 ? <Button compact textColor={HB_COLORS.danger} onPress={() => setFilters(DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS)}>{t("chips.clearAll")}</Button> : null}
       </ScrollView> : null}
-      {hasData && filteredItems.length > 0 ? pager("top") : null}
+      {hasData && filteredItems.length > 0 ? pager(false) : null}
       {query.isLoading ? <View style={styles.center}><ActivityIndicator /><Text>{t("states.loading")}</Text></View>
         : query.isError ? <View style={styles.center}><Text>{(query.error as { code?: string })?.code === "STORE_STATE_UNKNOWN" ? t("states.stateUnknown") : t("states.loadFailed")}</Text><Button onPress={() => void query.refetch()}>{t("actions.retry")}</Button></View>
         : orderedItems.length === 0 ? <View style={styles.center}><Text>{t("states.empty")}</Text></View>
         : itemsMatchingFilters.length === 0 ? <View style={styles.center}><Text>{t("states.emptyFiltered")}</Text><Button onPress={() => setFilters(DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS)}>{t("actions.clearFilters")}</Button></View>
         : filteredItems.length === 0 ? <View style={styles.center}><Text>{t(rangeFilter === "past" ? "states.emptyPast" : "states.emptyUpcoming")}</Text></View>
         : pageSlice.items.map((item, index) => <ProductCard key={`${item.containerCode}:${item.productCode}:${item.estimatedStoreArrivalDate}:${index}`} item={item} imageSize={imageSize} dateWidth={dateWidth} />)}
-      {hasData && filteredItems.length > 0 ? pager("bottom") : null}
+      {hasData && filteredItems.length > 0 ? pager(true) : null}
     </ScrollView>
 
     <ProductFilterSheet
@@ -242,16 +242,6 @@ export function ContainerNewProductsScreen() {
         await selectStore(store).catch(() => undefined);
       }}
     />
-    <PageSheet
-      visible={openSheet === "pages"}
-      page={pageSlice.page}
-      pageCount={pageSlice.pageCount}
-      total={filteredKinds}
-      pageSize={pageSize}
-      onJump={(page) => { setOpenSheet(null); goToPage(page); }}
-      onPageSizeChange={(value) => { rememberPageSize(value); setPageSize(value); setOpenSheet(null); scrollRef.current?.scrollTo({ y: 0, animated: false }); }}
-      onDismiss={() => setOpenSheet(null)}
-    />
   </SafeAreaView>;
 }
 
@@ -281,12 +271,6 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: HB_COLORS.action, backgroundColor: ACCENT_SOFT },
   chipText: { color: HB_COLORS.textPrimary, fontSize: 14, flexShrink: 1 },
   chipTextActive: { color: HB_COLORS.action, fontWeight: "600" },
-  pager: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: HB_SPACING.xs },
-  pagerGroup: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xxs },
-  pagerIcon: { width: 40, height: 40, borderRadius: HB_RADIUS.control, borderWidth: 1, borderColor: HB_COLORS.outline, backgroundColor: HB_COLORS.white, alignItems: "center", justifyContent: "center" },
-  pagerDisabled: { borderColor: HB_COLORS.outlineMuted, backgroundColor: HB_COLORS.surfaceMuted },
-  pagerSelect: { height: 40, paddingHorizontal: HB_SPACING.sm, borderRadius: HB_RADIUS.control, borderWidth: 1, borderColor: HB_COLORS.outline, backgroundColor: HB_COLORS.white, flexDirection: "row", alignItems: "center", gap: 4 },
-  pagerSelectText: { color: HB_COLORS.textPrimary, fontSize: 14, fontWeight: "600" },
   card: { backgroundColor: HB_COLORS.white, borderRadius: HB_RADIUS.surface },
   cardContent: { padding: HB_SPACING.sm, gap: HB_SPACING.sm },
   cardRow: { flexDirection: "row", alignItems: "center", minHeight: 96 },
@@ -314,7 +298,6 @@ const styles = StyleSheet.create({
   date: { color: HB_COLORS.action, fontWeight: "700", marginTop: 4 },
   dateEnd: { color: HB_COLORS.action, fontWeight: "700" },
   dateYear: { color: HB_COLORS.textSecondary, marginTop: 2 },
-  pageText: { color: HB_COLORS.textSecondary, flex: 1, textAlign: "right" },
   center: { alignItems: "center", justifyContent: "center", padding: 48, gap: 12 },
   message: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
 });
