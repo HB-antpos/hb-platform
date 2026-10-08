@@ -100,6 +100,13 @@ public partial class MainWindow : Window, IDisplayMovableWindow
             ColorThemeSwitcher.DataContext = colorThemeSwitcher;
         }
         SourceInitialized += MainWindowSourceInitialized;
+        _rawScannerService.ConfigureForegroundState(
+            () => IsActive,
+            () =>
+            {
+                var focusedElement = Keyboard.FocusedElement;
+                return IsTextInputElement(focusedElement) && IsFocusedElementVisible(focusedElement);
+            });
         Loaded += MainWindowLoaded;
         ContentRendered += MainWindowContentRendered;
         PreviewKeyDown += MainWindowPreviewKeyDown;
@@ -478,8 +485,12 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         ApplyRememberedMainMonitor();
         WindowsShellIdentityService.ApplyWindowIdentity(this);
         WindowsShellIdentityService.ApplyWindowIcon(this);
-        _hwndSource = (HwndSource?)PresentationSource.FromVisual(this);
+        // 关键逻辑：启动时为扫码初始化提前 EnsureHandle，WPF 在设置 RootVisual 之前就触发 SourceInitialized，
+        // 此时 PresentationSource.FromVisual(this) 恒为 null，钩子会被静默跳过（Raw Input 扫码、显示器拓扑检测一直没生效的根因）。
+        // 按句柄取 HwndSource 不依赖 RootVisual。
+        _hwndSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
         _hwndSource?.AddHook(MainWindowMessageHook);
+        ConsoleLog.Write("Startup", $"main window message hook attached={_hwndSource is not null}");
     }
 
     private void MainWindowClosed(object? sender, EventArgs e)

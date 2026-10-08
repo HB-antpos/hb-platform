@@ -21,6 +21,13 @@ public interface IRawScannerService : IDisposable
     {
     }
 
+    /// <summary>
+    /// 告诉扫码服务窗口是否在前台、焦点是否在可见的文本输入框：前台输入框由键盘通道处理，后台只接受已学习的扫码枪。
+    /// </summary>
+    void ConfigureForegroundState(Func<bool>? isWindowActive, Func<bool>? isTextInputFocused)
+    {
+    }
+
     void Start(IntPtr hwnd);
 
     void Stop();
@@ -104,6 +111,8 @@ public sealed class RawScannerService(
     private IntPtr _registeredHwnd;
     private string? _activePageId;
     private Func<RawBarcodeScannedEventArgs, bool>? _globalBarcodeInterceptor;
+    private Func<bool>? _isWindowActive;
+    private Func<bool>? _isTextInputFocused;
     private string? _boundDevicePath;
     private string? _lastRejectedDevicePath;
     private Key? _lastUnmappedKey;
@@ -170,6 +179,12 @@ public sealed class RawScannerService(
     public void SetGlobalBarcodeInterceptor(Func<RawBarcodeScannedEventArgs, bool>? interceptor)
     {
         _globalBarcodeInterceptor = interceptor;
+    }
+
+    public void ConfigureForegroundState(Func<bool>? isWindowActive, Func<bool>? isTextInputFocused)
+    {
+        _isWindowActive = isWindowActive;
+        _isTextInputFocused = isTextInputFocused;
     }
 
     public void Start(IntPtr hwnd)
@@ -376,6 +391,25 @@ public sealed class RawScannerService(
             ConsoleLog.Write(
                 "RawScanner",
                 $"reserved scan suppressed before active handler barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} activePage={_activePageId}");
+            return;
+        }
+
+        var windowActive = _isWindowActive?.Invoke() ?? true;
+        if (!windowActive && string.IsNullOrWhiteSpace(_boundDevicePath))
+        {
+            // 后台（INPUTSINK）会收到所有键盘的输入：扫码枪未在前台学习绑定前，别的程序里的打字不能当扫码投递或被学成扫码枪。
+            ConsoleLog.Write(
+                "RawScanner",
+                $"background raw scan ignored until scanner is learned in foreground barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} activePage={_activePageId}");
+            return;
+        }
+
+        if (windowActive && _isTextInputFocused?.Invoke() == true)
+        {
+            // 前台焦点在输入框时，同一串按键已经进了输入框（如商品搜索框回车即加购）；Raw Input 不再重复投递，也不据此学习绑定。
+            ConsoleLog.Write(
+                "RawScanner",
+                $"raw scan left to focused text input barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} activePage={_activePageId}");
             return;
         }
 
