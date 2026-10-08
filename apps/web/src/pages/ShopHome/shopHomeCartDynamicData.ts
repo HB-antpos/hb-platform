@@ -310,6 +310,9 @@ export function mergeShopHomeBaseDynamicDataMap(
             ...nextBaseData,
             salesQuantitySinceLastArrival: previousData.salesQuantitySinceLastArrival,
             lastArrivalDate: previousData.lastArrivalDate,
+            lastArrivalQuantity: previousData.lastArrivalQuantity,
+            lastArrivalOrderQuantity: previousData.lastArrivalOrderQuantity,
+            lastArrivalOrderDate: previousData.lastArrivalOrderDate,
           }
   })
 

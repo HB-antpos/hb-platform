@@ -509,6 +509,10 @@ export interface StoreOrderDynamicData {
   salesQuantitySinceLastArrival?: number | null
   // 来货后销量的起算日（最近来货出库日期）；与 Sales 同批从 summary 接口回填。
   lastArrivalDate?: string | null
+  // 最近一次送货的订单（出库最晚的那张）：送货数量、订货数量（仓库主动配送时为 0）、订货日期；与来货日期同批回填。
+  lastArrivalQuantity?: number | null
+  lastArrivalOrderQuantity?: number | null
+  lastArrivalOrderDate?: string | null
 }
 
 export interface StoreOrderDynamicDataRequest {
@@ -526,6 +530,9 @@ export interface StoreOrderProductSalesSummaryItem {
   productCode: string
   salesQuantitySinceLastArrival: number | null
   lastArrivalDate: string | null
+  lastArrivalQuantity: number | null
+  lastArrivalOrderQuantity: number | null
+  lastArrivalOrderDate: string | null
 }
 
 export interface StoreOrderCartItem {

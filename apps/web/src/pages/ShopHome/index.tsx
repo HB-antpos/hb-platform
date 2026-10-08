@@ -519,19 +519,38 @@ export default function ShopHomePage() {
           setDynamicDataMap((previousMap) => {
             let hasChanged = false
             const nextMap = { ...previousMap }
-            Object.entries(salesMap).forEach(([productCode, { salesQuantitySinceLastArrival, lastArrivalDate }]) => {
+            Object.entries(salesMap).forEach(([
+              productCode,
+              {
+                salesQuantitySinceLastArrival,
+                lastArrivalDate,
+                lastArrivalQuantity,
+                lastArrivalOrderQuantity,
+                lastArrivalOrderDate,
+              },
+            ]) => {
               const previousData = previousMap[productCode]
-              // 销量与来货日期同批回填；两者都没变时保留原引用，商品卡才能跳过重渲染。
+              // 销量与来货日期、来货数量同批回填；都没变时保留原引用，商品卡才能跳过重渲染。
               if (
                 !previousData
                 || (previousData.salesQuantitySinceLastArrival === salesQuantitySinceLastArrival
-                  && previousData.lastArrivalDate === lastArrivalDate)
+                  && previousData.lastArrivalDate === lastArrivalDate
+                  && previousData.lastArrivalQuantity === lastArrivalQuantity
+                  && previousData.lastArrivalOrderQuantity === lastArrivalOrderQuantity
+                  && previousData.lastArrivalOrderDate === lastArrivalOrderDate)
               ) {
                 return
               }
 
               hasChanged = true
-              nextMap[productCode] = { ...previousData, salesQuantitySinceLastArrival, lastArrivalDate }
+              nextMap[productCode] = {
+                ...previousData,
+                salesQuantitySinceLastArrival,
+                lastArrivalDate,
+                lastArrivalQuantity,
+                lastArrivalOrderQuantity,
+                lastArrivalOrderDate,
+              }
             })
             return hasChanged ? nextMap : previousMap
           })

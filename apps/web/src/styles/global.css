@@ -1973,20 +1973,6 @@ body {
   background: #fffbe6;
 }
 
-.shop-product-activity-dates {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 10px;
-}
-
-.shop-product-sales-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px 6px;
-  min-height: 24px;
-}
-
 .shop-product-sales-button.ant-btn-link {
   min-height: 24px;
   height: 24px;
@@ -2075,11 +2061,6 @@ body {
   outline: 2px solid #1677ff;
   outline-offset: -2px;
   background: #fffbe6;
-}
-
-.shop-product-activity-order-send,
-.shop-product-activity-sales {
-  font-size: 12px;
 }
 
 .shop-product-activity-modal {
@@ -4629,10 +4610,71 @@ body {
   background: #f4f8fc;
 }
 
-.shop-product-activity-date,
-.shop-product-activity-order-send,
+/* 上次来货 / 最新订单：小标题 + 「类型 | 日期 | 数量」小表，日期列与数量列上下对齐，数量靠右与下方销量数字对齐。 */
+.shop-product-activity-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* 小标题用正文色加粗，表格里的「订货 / 送货」用浅色，形成「标题 → 明细」两级。 */
+.shop-product-activity-title,
+.shop-product-activity-label {
+  color: var(--shop-text);
+  font-weight: 700;
+}
+
+.shop-product-activity-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 1px 8px;
+  align-items: baseline;
+}
+
+.shop-product-activity-kind {
+  color: var(--shop-muted);
+  white-space: nowrap;
+}
+
+.shop-product-activity-date {
+  overflow: hidden;
+  color: var(--shop-text);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shop-product-activity-qty {
+  color: var(--shop-text);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .shop-product-activity-sales {
-  font-size: 10px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.shop-product-activity-ledger + .shop-product-activity-sales {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #d8e7f4;
+}
+
+.shop-product-activity-sales-value {
+  color: var(--shop-text);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .shop-product-card-purchase {

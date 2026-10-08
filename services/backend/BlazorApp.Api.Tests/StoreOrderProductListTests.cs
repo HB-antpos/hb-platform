@@ -4686,9 +4686,55 @@ public sealed class StoreOrderProductListTests : IDisposable
         Assert.True(result.Success, result.Message);
         Assert.Collection(
             result.Data!,
-            item => { Assert.Equal("P-ZERO", item.ProductCode); Assert.Equal(0, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); },
-            item => { Assert.Equal("P-NEGATIVE", item.ProductCode); Assert.Equal(-3, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); },
-            item => { Assert.Equal("P-NO-ARRIVAL", item.ProductCode); Assert.Null(item.SalesQuantitySinceLastArrival); Assert.Null(item.LastArrivalDate); }
+            item => { Assert.Equal("P-ZERO", item.ProductCode); Assert.Equal(0, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); Assert.Equal(1m, item.LastArrivalQuantity); },
+            item => { Assert.Equal("P-NEGATIVE", item.ProductCode); Assert.Equal(-3, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); Assert.Equal(1m, item.LastArrivalQuantity); },
+            item => { Assert.Equal("P-NO-ARRIVAL", item.ProductCode); Assert.Null(item.SalesQuantitySinceLastArrival); Assert.Null(item.LastArrivalDate); Assert.Null(item.LastArrivalQuantity); }
+        );
+    }
+
+    [Fact]
+    public async Task GetSalesSinceLastArrivalSummaryAsync_来货单取出库最晚的那张订单()
+    {
+        var today = new DateTime(2026, 8, 18);
+        // 更早一次来货不算；最近来货当天两张出库单取出库最晚（下午）那张；未来出库与未发货明细忽略。
+        await SeedStoreOrderAsync("ORDER-EARLY", flowStatus: 2, outboundDate: today.AddDays(-10));
+        await SeedOrderDetailOnlyAsync("ORDER-EARLY", "P-MULTI", quantity: 50m, allocQuantity: 50m);
+        await SeedStoreOrderAsync("ORDER-LATEST-AM", flowStatus: 2, insertStore: false, orderDate: today.AddDays(-6), outboundDate: today.AddDays(-2).AddHours(9));
+        await SeedOrderDetailOnlyAsync("ORDER-LATEST-AM", "P-MULTI", quantity: 12m, allocQuantity: 12m);
+        await SeedStoreOrderAsync("ORDER-LATEST-PM", flowStatus: 2, insertStore: false, orderDate: today.AddDays(-4), outboundDate: today.AddDays(-2).AddHours(16));
+        // 订 10 实发 6：订货数量与送货数量分别取这张单的值
+        await SeedOrderDetailOnlyAsync("ORDER-LATEST-PM", "P-MULTI", quantity: 10m, allocQuantity: 6m);
+        await SeedOrderDetailOnlyAsync("ORDER-LATEST-PM", "P-SHORT", quantity: 6m, allocQuantity: 0m);
+        await SeedStoreOrderAsync("ORDER-FUTURE", flowStatus: 2, insertStore: false, outboundDate: today.AddDays(1));
+        await SeedOrderDetailOnlyAsync("ORDER-FUTURE", "P-MULTI", quantity: 99m, allocQuantity: 99m);
+
+        var result = await CreateServiceForSalesDate(today).GetSalesSinceLastArrivalSummaryAsync(
+            new StoreOrderSalesSinceLastArrivalSummaryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCodes = new List<string> { "P-MULTI", "P-SHORT" },
+            }
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.Collection(
+            result.Data!,
+            item =>
+            {
+                Assert.Equal("P-MULTI", item.ProductCode);
+                Assert.Equal(today.AddDays(-2), item.LastArrivalDate);
+                Assert.Equal(6m, item.LastArrivalQuantity);
+                Assert.Equal(10m, item.LastArrivalOrderQuantity);
+                Assert.Equal(today.AddDays(-4), item.LastArrivalOrderDate);
+            },
+            item =>
+            {
+                Assert.Equal("P-SHORT", item.ProductCode);
+                Assert.Null(item.LastArrivalDate);
+                Assert.Null(item.LastArrivalQuantity);
+                Assert.Null(item.LastArrivalOrderQuantity);
+                Assert.Null(item.LastArrivalOrderDate);
+            }
         );
     }
 

@@ -109,7 +109,8 @@ internal sealed class ProductSalesHistoryQueryStore(
         var salesQuantityResult = await GetSalesQuantitySinceLastArrivalMapAsync(
             salesContext.StoreCode,
             input.ProductCodes,
-            salesContext.EndDate
+            salesContext.EndDate,
+            includeArrivalOrder: true
         );
         foreach (var item in result)
         {
@@ -125,6 +126,24 @@ internal sealed class ProductSalesHistoryQueryStore(
                 out var lastArrivalDate
             )
                 ? lastArrivalDate
+                : null;
+            item.LastArrivalQuantity = salesQuantityResult.ArrivalQuantityMap.TryGetValue(
+                item.ProductCode,
+                out var lastArrivalQuantity
+            )
+                ? lastArrivalQuantity
+                : null;
+            item.LastArrivalOrderQuantity = salesQuantityResult.ArrivalOrderQuantityMap.TryGetValue(
+                item.ProductCode,
+                out var lastArrivalOrderQuantity
+            )
+                ? lastArrivalOrderQuantity
+                : null;
+            item.LastArrivalOrderDate = salesQuantityResult.ArrivalOrderDateMap.TryGetValue(
+                item.ProductCode,
+                out var lastArrivalOrderDate
+            )
+                ? lastArrivalOrderDate
                 : null;
         }
 
@@ -200,10 +219,15 @@ internal sealed class ProductSalesHistoryQueryStore(
         return row?.OutboundDate;
     }
 
+    /// <param name="includeArrivalOrder">
+    /// 是否同时查出「最近一次送货的订单」（订货日期、订货数量、送货数量）。只有商品卡片用的 summary 接口需要；
+    /// dynamic-data 接口不需要，关掉以保持它固定的查询次数。
+    /// </param>
     internal async Task<ProductHistorySalesQuantityMapResult> GetSalesQuantitySinceLastArrivalMapAsync(
         string storeCode,
         List<string> productCodes,
-        DateTime endDate
+        DateTime endDate,
+        bool includeArrivalOrder = false
     )
     {
         var salesSw = Stopwatch.StartNew();
@@ -282,8 +306,57 @@ internal sealed class ProductSalesHistoryQueryStore(
                 .ToList();
             cutoffGroupCount = cutoffGroups.Count;
             var statisticRows = new List<ProductHistoryProductSalesStatisticRow>();
+            var arrivalQuantityRows = new List<ProductHistoryArrivalQuantityRow>();
             foreach (var queryGroups in PackSalesStatisticCutoffGroups(cutoffGroups))
             {
+                // 来货单与销量共用同一批「商品 + 来货日」分组：来货日是该商品出库日期最大值截到天，
+                // 所以「出库日期 >= 来货日」只会命中最近来货当天的出库单；按订单分组后在内存里挑出库最晚的一张。
+                if (includeArrivalOrder)
+                {
+                    var arrivalExpressionable = Expressionable.Create<WareHouseOrderDetails, WareHouseOrder>();
+                    foreach (var queryGroup in queryGroups)
+                    {
+                        var groupCodes = queryGroup.ProductCodes;
+                        var arrivalDate = queryGroup.ArrivalDate;
+                        arrivalExpressionable = arrivalExpressionable.Or((detail, order) =>
+                            groupCodes.Contains(detail.ProductCode) && order.OutboundDate >= arrivalDate
+                        );
+                    }
+
+                    var queryArrivalQuantityRows = await _db.Queryable<WareHouseOrderDetails>()
+                        .InnerJoin<WareHouseOrder>((detail, order) =>
+                            detail.OrderGUID == order.OrderGUID
+                        )
+                        .Where((detail, order) =>
+                            order.StoreCode == storeCode
+                            && order.FlowStatus > 0
+                            && !order.IsDeleted
+                            && !detail.IsDeleted
+                            && order.OutboundDate != null
+                            && order.OutboundDate < exclusiveEndDate
+                            && detail.AllocQuantity > 0
+                        )
+                        .Where(arrivalExpressionable.ToExpression())
+                        .GroupBy((detail, order) => new
+                        {
+                            detail.ProductCode,
+                            order.OrderGUID,
+                            order.OrderDate,
+                            order.OutboundDate,
+                        })
+                        .Select((detail, order) => new ProductHistoryArrivalQuantityRow
+                        {
+                            ProductCode = detail.ProductCode,
+                            OrderGUID = order.OrderGUID,
+                            OrderDate = order.OrderDate,
+                            OutboundDate = order.OutboundDate,
+                            AllocQuantity = SqlFunc.AggregateSum(detail.AllocQuantity),
+                            OrderQuantity = SqlFunc.AggregateSum(detail.Quantity),
+                        })
+                        .ToListAsync();
+                    arrivalQuantityRows.AddRange(queryArrivalQuantityRows);
+                }
+
                 var expressionable = Expressionable.Create<ProductStoreDailySalesStatistic>();
                 foreach (var queryGroup in queryGroups)
                 {
@@ -316,6 +389,19 @@ internal sealed class ProductSalesHistoryQueryStore(
                     group => group.Sum(item => item.TotalQuantity),
                     StringComparer.OrdinalIgnoreCase
                 );
+            // 每个商品取「最近一次送货的订单」：出库时间最晚，同一时刻再按订货日期、订单号取最新，结果稳定。
+            var arrivalOrderMap = arrivalQuantityRows
+                .Where(item => !string.IsNullOrWhiteSpace(item.ProductCode))
+                .GroupBy(item => item.ProductCode!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderByDescending(item => item.OutboundDate)
+                        .ThenByDescending(item => item.OrderDate)
+                        .ThenByDescending(item => item.OrderGUID, StringComparer.Ordinal)
+                        .First(),
+                    StringComparer.OrdinalIgnoreCase
+                );
             var mapResult = new ProductHistorySalesQuantityMapResult
             {
                 ArrivalRows = arrivalRowCount,
@@ -325,6 +411,13 @@ internal sealed class ProductSalesHistoryQueryStore(
             foreach (var pair in arrivalDateMap)
             {
                 mapResult.ArrivalDateMap[pair.Key] = pair.Value;
+                arrivalOrderMap.TryGetValue(pair.Key, out var arrivalOrder);
+                mapResult.ArrivalQuantityMap[pair.Key] = arrivalOrder?.AllocQuantity ?? 0m;
+                mapResult.ArrivalOrderQuantityMap[pair.Key] = arrivalOrder?.OrderQuantity ?? 0m;
+                if (arrivalOrder?.OrderDate is { } arrivalOrderDate)
+                {
+                    mapResult.ArrivalOrderDateMap[pair.Key] = arrivalOrderDate;
+                }
                 mapResult.SalesQuantityMap[pair.Key] = statisticQuantityMap.TryGetValue(
                     pair.Key,
                     out var salesQuantity

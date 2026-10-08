@@ -1,0 +1,11 @@
+{
+  "shop": {
+    "productActivityHistory": {
+      "cardLastArrival": "Last arrival",
+      "cardPendingOrder": "Latest order · not delivered",
+      "cardOrdered": "Ordered",
+      "cardDelivered": "Delivered",
+      "cardSalesSinceArrival": "Sold since arrival"
+    }
+  }
+}

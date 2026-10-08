@@ -1,0 +1,11 @@
+{
+  "shop": {
+    "productActivityHistory": {
+      "cardLastArrival": "上次来货",
+      "cardPendingOrder": "最新订单 · 未送货",
+      "cardOrdered": "订货",
+      "cardDelivered": "送货",
+      "cardSalesSinceArrival": "来货后累计销量"
+    }
+  }
+}

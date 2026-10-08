@@ -68,6 +68,16 @@ internal sealed class ProductHistoryLastArrivalRow
     public DateTime? OutboundDate { get; set; }
 }
 
+internal sealed class ProductHistoryArrivalQuantityRow
+{
+    public string? ProductCode { get; set; }
+    public string? OrderGUID { get; set; }
+    public DateTime? OrderDate { get; set; }
+    public DateTime? OutboundDate { get; set; }
+    public decimal? AllocQuantity { get; set; }
+    public decimal? OrderQuantity { get; set; }
+}
+
 internal sealed class ProductHistoryProductSalesStatisticRow
 {
     public string ProductCode { get; set; } = string.Empty;
@@ -87,6 +97,16 @@ internal sealed class ProductHistorySalesQuantityMapResult
     );
     // 与 SalesQuantityMap 同键：销量统计的起点（最近来货出库日期，已截到日期）。
     public Dictionary<string, DateTime> ArrivalDateMap { get; } = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    // 以下三项都取自「最近一次送货的订单」（出库时间最晚的那张单）：送货数量、订货数量（可为 0）、订货日期。
+    public Dictionary<string, decimal> ArrivalQuantityMap { get; } = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    public Dictionary<string, decimal> ArrivalOrderQuantityMap { get; } = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    public Dictionary<string, DateTime> ArrivalOrderDateMap { get; } = new(
         StringComparer.OrdinalIgnoreCase
     );
     public int ArrivalRows { get; init; }
