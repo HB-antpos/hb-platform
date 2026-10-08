@@ -1,4 +1,4 @@
-import type { DeviceRegistrationItem } from '../../../types/deviceRegistration'
+import type { DeviceRegistrationDetail, DeviceRegistrationItem } from '../../../types/deviceRegistration'
 
 /** 设备状态码，与后端 POSM_设备注册信息表.设备状态 一致。 */
 export const DEVICE_STATUS = {
@@ -319,4 +319,29 @@ export function buildCountedOptions(
   return [...groups.values()].sort(
     (left, right) => right.count - left.count || left.value.localeCompare(right.value),
   )
+}
+
+/**
+ * 抽屉展示用的设备视图：列表行打底，详情接口的表单字段覆盖其上。
+ *
+ * 关键逻辑：详情接口（DeviceRegistrationDetailDto）不带任何运行态字段，归一化后在线、心跳、收银员、
+ * 客户端版本都是 false/null；若直接展开会盖掉列表行里的真实值，抽屉就永远显示「离线 / 从未上报 / 版本 --」。
+ * 所以状态与运行态字段一律以列表行为准（列表会随状态动作和刷新更新），详情只负责表单字段。
+ */
+export function mergeDeviceDetailView(
+  device: DeviceRegistrationItem,
+  detail: DeviceRegistrationDetail | null,
+): DeviceRegistrationItem {
+  return {
+    ...device,
+    ...(detail ?? {}),
+    status: device.status,
+    statusDescription: device.statusDescription,
+    isOnline: device.isOnline,
+    lastHeartbeatAt: device.lastHeartbeatAt,
+    currentCashierId: device.currentCashierId,
+    currentCashierName: device.currentCashierName,
+    cashierLoginAt: device.cashierLoginAt,
+    appVersion: device.appVersion,
+  }
 }
