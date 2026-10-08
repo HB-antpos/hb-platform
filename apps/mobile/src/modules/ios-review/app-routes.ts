@@ -13,6 +13,11 @@ import {
 } from "./transport";
 import { normalizeAttendanceToday } from "../attendance/attendance-today-normalization";
 import {
+  computeSeasonalCardHolidayWindows,
+  findNextSeasonalCardOpening,
+  SEASONAL_CARD_OPEN_DAYS_AFTER_HOLIDAY,
+} from "../seasonal-cards/holiday-window";
+import {
   sortReportRows,
   type ReportSort,
   type ReportSortValues,
@@ -3209,26 +3214,34 @@ export function registerIosReviewAppRoutes(
     ({ query }) => {
       const current = state();
       const storeCode = query.get("storeCode")?.trim() || "REV001";
-      const seasonYear = Number(query.get("seasonYear")) || new Date(current.now).getUTCFullYear();
       const supplierCode = query.get("localSupplierCode")?.trim() ?? "";
+      const today = reviewSeasonalToday(current, storeCode);
       return {
         data: {
           storeCode,
-          seasonYear,
+          seasonYear: Number(today.slice(0, 4)),
+          today,
           localSupplierCode: supplierCode,
           supplierName: reviewSeasonalSupplierName(supplierCode),
-          holidays: [1, 2, 3, 4, 5].map((cardType) => ({
-            cardType,
+          holidays: reviewSeasonalWindows(today).map((window) => ({
+            cardType: window.cardType,
             cardTypeName:
-              current.seasonalCatalog.find((item) => item.cardType === cardType)
+              current.seasonalCatalog.find((item) => item.cardType === window.cardType)
                 ?.cardTypeName ?? "",
-            currentBatch: reviewSeasonalLatestBatch(
-              current.seasonalSubmissions,
-              storeCode,
-              seasonYear,
-              cardType,
-              supplierCode,
-            ),
+            isOpen: window.isOpen,
+            seasonYear: window.seasonYear,
+            holidayDate: window.holidayDate,
+            opensOn: window.opensOn,
+            closesOn: window.closesOn,
+            currentBatch: window.isOpen
+              ? reviewSeasonalLatestBatch(
+                  current.seasonalSubmissions,
+                  storeCode,
+                  window.seasonYear ?? 0,
+                  window.cardType,
+                  supplierCode,
+                )
+              : null,
           })),
         },
       };
@@ -3253,6 +3266,13 @@ export function registerIosReviewAppRoutes(
       const fail = (message: string, errorCode: string, details: unknown = null) => ({
         data: { success: false, message, errorCode, details, data: null },
       });
+      // 与服务端一致：只能填报开放中的节日，且年份必须是开放窗口对应的年份。
+      const openWindow = reviewSeasonalWindows(reviewSeasonalToday(current, storeCode)).find(
+        (window) => window.cardType === cardType,
+      );
+      if (!openWindow?.isOpen || openWindow.seasonYear !== seasonYear) {
+        return fail("Festival is not open for submission", "SEASONAL_CARD_WINDOW_CLOSED");
+      }
       if (!supplierCode || !reviewSeasonalSupplierName(supplierCode)) {
         return fail("Supplier not found", "SUPPLIER_NOT_FOUND");
       }
@@ -3355,6 +3375,32 @@ const REVIEW_SEASONAL_SUPPLIERS: Record<string, string> = {
 
 function reviewSeasonalSupplierName(supplierCode: string) {
   return REVIEW_SEASONAL_SUPPLIERS[supplierCode] ?? "";
+}
+
+function reviewSeasonalToday(state: AppRouteState, storeCode: string) {
+  return toStoreLocalDateOnly(state.now, storeCode) || state.now.slice(0, 10);
+}
+
+/**
+ * 审核模式的开放窗口：按真实规则推算；当天恰好没有开放节日时，把下一个开放的节日提前到今天开放，
+ * 保证审核人员任何时候都能走完填报流程（与生产口径不同，仅限离线演示数据）。
+ */
+function reviewSeasonalWindows(today: string) {
+  const windows = computeSeasonalCardHolidayWindows(today);
+  if (windows.some((window) => window.isOpen)) return windows;
+  const next = findNextSeasonalCardOpening(windows);
+  if (!next) return windows;
+  const todayTime = Date.parse(`${today}T00:00:00Z`);
+  const closesOn = new Date(
+    todayTime + SEASONAL_CARD_OPEN_DAYS_AFTER_HOLIDAY * 24 * 60 * 60 * 1000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  return windows.map((window) =>
+    window.cardType === next.cardType
+      ? { ...window, isOpen: true, opensOn: today, closesOn }
+      : window,
+  );
 }
 
 function reviewSeasonalBatchDto(rows: JsonRecord[]) {
