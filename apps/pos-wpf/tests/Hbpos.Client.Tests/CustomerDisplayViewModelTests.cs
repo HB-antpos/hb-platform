@@ -224,6 +224,30 @@ public sealed class CustomerDisplayViewModelTests
             action);
     }
 
+    [Theory]
+    // 主显示器（左上角在虚拟屏幕原点）：硬件渲染视频正常
+    [InlineData(0, 0, false)]
+    // 副屏在上方 / 右侧 / 左侧：硬件合成拿不到新帧，改软件渲染
+    [InlineData(0, -1440, true)]
+    [InlineData(1920, 0, true)]
+    [InlineData(-1366, 0, true)]
+    public void CustomerDisplayView_uses_software_video_rendering_only_off_primary_monitor(
+        int monitorLeft,
+        int monitorTop,
+        bool expectSoftware)
+    {
+        var display = new Hbpos.Client.Wpf.Services.DisplayBounds(
+            IntPtr.Zero, monitorLeft, monitorTop, 1920, 1080, monitorLeft, monitorTop, 1920, 1040);
+
+        Assert.Equal(expectSoftware, CustomerDisplayView.ShouldUseSoftwareVideoRendering(display));
+    }
+
+    [Fact]
+    public void CustomerDisplayView_keeps_hardware_video_rendering_when_monitor_is_unknown()
+    {
+        Assert.False(CustomerDisplayView.ShouldUseSoftwareVideoRendering(null));
+    }
+
     [Fact]
     public void CustomerDisplayView_shows_discount_rate_and_original_total_for_discounted_lines()
     {
