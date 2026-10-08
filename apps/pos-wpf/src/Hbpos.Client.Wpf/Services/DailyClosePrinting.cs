@@ -48,6 +48,7 @@ public sealed class DailyClosePrintService(
                 cancellationToken);
             if (!reportResult.Succeeded)
             {
+                LogPrintFailure(archive, reason, "report", reportResult.Message);
                 return new ReceiptPrintResult(false, reportResult.Message);
             }
 
@@ -56,17 +57,57 @@ public sealed class DailyClosePrintService(
                 DailyCloseTextFormatter.BuildCashSlip(archive, settings, reason),
                 settings,
                 cancellationToken);
+            if (!cashSlipResult.Succeeded)
+            {
+                LogPrintFailure(archive, reason, "cash-slip", cashSlipResult.Message);
+            }
+
             return cashSlipResult.Succeeded
                 ? new ReceiptPrintResult(true, "Daily close report and cash slip printed.")
                 : new ReceiptPrintResult(false, $"Daily close report printed, but the cash slip failed: {cashSlipResult.Message}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            LogPrintFailure(archive, reason, "exception", ex.Message, ex);
             return new ReceiptPrintResult(false, ex.Message);
         }
         finally
         {
             _printLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 日结单打印失败进中心日志：保存日结时随带的打印失败没有单独审计，重打失败虽有审计却不带存档与是哪一张失败。
+    /// 驱动层另有一条 Printer 日志给出卡住的步骤和 SDK 返回码，两条按时间对照即可。
+    /// </summary>
+    private static void LogPrintFailure(
+        DailyCloseArchive archive,
+        ReceiptPrintReason reason,
+        string part,
+        string error,
+        Exception? exception = null)
+    {
+        var businessDate = archive.Report.BusinessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var dailyCloseGuid = archive.DailyCloseGuid.ToString("D");
+        var message =
+            $"daily close print failed part={part} reason={reason} archive={dailyCloseGuid} businessDate={businessDate}";
+        var context = new ApplicationLogContext(
+            Properties: new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["part"] = part,
+                ["reason"] = reason.ToString(),
+                ["dailyCloseGuid"] = dailyCloseGuid,
+                ["businessDate"] = businessDate,
+                ["error"] = error
+            });
+        if (exception is null)
+        {
+            ConsoleLog.WriteWarning("DailyClosePrint", message, context);
+        }
+        else
+        {
+            ConsoleLog.WriteError("DailyClosePrint", message, context, exception);
         }
     }
 

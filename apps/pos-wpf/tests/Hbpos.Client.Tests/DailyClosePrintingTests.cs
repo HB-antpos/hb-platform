@@ -3,6 +3,8 @@ using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
+// 新增的中心日志用例会替换 ConsoleLog 的全局出口，整个类必须独占运行。
+[Collection(ConsoleLogGlobalStateTestCollection.Name)]
 public sealed class DailyClosePrintingTests
 {
     [Fact]
@@ -102,6 +104,118 @@ public sealed class DailyClosePrintingTests
         Assert.Equal("Daily close report printed, but the cash slip failed: paper out", result.Message);
         Assert.Equal(2, driver.Documents.Count);
         Assert.Contains(driver.Documents[1].PreviewRows, row => row.Text == "==== CASH COUNT REPRINT ====");
+    }
+
+    [Fact]
+    public async Task Daily_close_report_failure_is_logged_with_part_reason_and_archive()
+    {
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        var archive = CreateArchive();
+        try
+        {
+            var driver = new RecordingReceiptPrinterDriver
+            {
+                PrintResult = new ReceiptPrinterDriverResult(false, "Printer status could not be read.")
+            };
+            var service = new DailyClosePrintService(new FakeReceiptPrinterSettingsStore(), driver);
+
+            await service.PrintAsync(archive, ReceiptPrintReason.Reprint);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        var entry = Assert.Single(sink.Entries, logged => logged.Category == "DailyClosePrint");
+        Assert.Equal("Warning", entry.Level);
+        Assert.Contains("part=report", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("reason=Reprint", entry.Message, StringComparison.Ordinal);
+        Assert.Contains(archive.DailyCloseGuid.ToString("D"), entry.Message, StringComparison.Ordinal);
+        Assert.Equal("report", entry.Properties!["part"]);
+        Assert.Equal(archive.DailyCloseGuid.ToString("D"), entry.Properties["dailyCloseGuid"]);
+        Assert.Equal(
+            archive.Report.BusinessDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            entry.Properties["businessDate"]);
+        Assert.Equal("Printer status could not be read.", entry.Properties["error"]);
+    }
+
+    [Fact]
+    public async Task Daily_close_cash_slip_failure_is_logged_as_the_cash_slip_part()
+    {
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            var driver = new RecordingReceiptPrinterDriver
+            {
+                PrintResults = new Queue<ReceiptPrinterDriverResult>(
+                [
+                    new ReceiptPrinterDriverResult(true, "printed"),
+                    new ReceiptPrinterDriverResult(false, "paper out")
+                ])
+            };
+            var service = new DailyClosePrintService(new FakeReceiptPrinterSettingsStore(), driver);
+
+            await service.PrintAsync(CreateArchive(), ReceiptPrintReason.Manual);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        var entry = Assert.Single(sink.Entries, logged => logged.Category == "DailyClosePrint");
+        Assert.Equal("Warning", entry.Level);
+        Assert.Contains("part=cash-slip", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("reason=Manual", entry.Message, StringComparison.Ordinal);
+        Assert.Equal("paper out", entry.Properties!["error"]);
+    }
+
+    [Fact]
+    public async Task Daily_close_driver_exception_is_logged_as_error_with_the_exception()
+    {
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        ReceiptPrintResult result;
+        try
+        {
+            var service = new DailyClosePrintService(new FakeReceiptPrinterSettingsStore(), new ThrowingReceiptPrinterDriver());
+
+            result = await service.PrintAsync(CreateArchive(), ReceiptPrintReason.Manual);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        // 失败结果与原来一致：异常信息原样交给界面。
+        Assert.False(result.Succeeded);
+        Assert.Equal("printer.sdk.dll missing", result.Message);
+        var entry = Assert.Single(sink.Entries, logged => logged.Category == "DailyClosePrint");
+        Assert.Equal("Error", entry.Level);
+        Assert.Equal(nameof(InvalidOperationException), entry.ExceptionType);
+        Assert.Contains("part=exception", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Successful_daily_close_print_writes_no_print_failure_log()
+    {
+        var sink = new RecordingApplicationLogSink();
+        ConsoleLog.ConfigureCenterSink(sink);
+        try
+        {
+            var service = new DailyClosePrintService(new FakeReceiptPrinterSettingsStore(), new RecordingReceiptPrinterDriver());
+
+            var result = await service.PrintAsync(CreateArchive(), ReceiptPrintReason.Manual);
+
+            Assert.True(result.Succeeded);
+        }
+        finally
+        {
+            ConsoleLog.ConfigureCenterSink(null);
+        }
+
+        Assert.DoesNotContain(sink.Entries, entry => entry.Category == "DailyClosePrint");
     }
 
     [Fact]
@@ -263,6 +377,25 @@ public sealed class DailyClosePrintingTests
         {
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class ThrowingReceiptPrinterDriver : IReceiptPrinterDriver
+    {
+        public Task<ReceiptPrinterDriverResult> PrintAsync(
+            ReceiptPrintDocument document,
+            ReceiptPrinterSettings settings,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("printer.sdk.dll missing");
+
+        public Task<ReceiptPrinterDriverResult> TestAsync(
+            ReceiptPrinterSettings settings,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("printer.sdk.dll missing");
+
+        public Task<ReceiptPrinterDriverResult> OpenCashDrawerAsync(
+            ReceiptPrinterSettings settings,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("printer.sdk.dll missing");
     }
 
     private sealed class RecordingReceiptPrinterDriver : IReceiptPrinterDriver
