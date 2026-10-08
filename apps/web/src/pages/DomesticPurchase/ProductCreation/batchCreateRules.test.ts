@@ -7,6 +7,8 @@ import {
   createDraftProduct,
   findInvalidSetProduct,
   normalizeCreateCount,
+  resolveProductPrice,
+  sumSetSubItemPrices,
 } from './batchCreateRules'
 import type { DraftProductItem } from './batchCreateRules'
 import {
@@ -283,3 +285,32 @@ assert.equal(getNextBatchCreateEditableCell({
   current: { rowKey: 'set-a-2', field: 'privateLabelPrice' },
   direction: 'down',
 }), undefined)
+
+// ---- 套装主档零售价默认 = 子项零售价之和 ----
+const setWithPricedSubs: DraftProductItem = {
+  key: 'set-price',
+  productName: '套装',
+  productType: ProductCreationType.SET,
+  subItems: [
+    { key: 'p1', productName: 'A', privateLabelPrice: 0.1 },
+    { key: 'p2', productName: 'B', privateLabelPrice: 0.2 },
+    { key: 'p3', productName: '无价', privateLabelPrice: null },
+    { key: 'p4', productName: ' ', privateLabelPrice: null },
+  ],
+}
+// 浮点误差要被收口到两位小数：0.1 + 0.2 提交 0.3，而不是 0.30000000000000004
+assert.equal(sumSetSubItemPrices(setWithPricedSubs.subItems), 0.3)
+assert.equal(resolveProductPrice(setWithPricedSubs), 0.3)
+assert.equal(buildCreateBatchItems([setWithPricedSubs])[0].privateLabelPrice, 0.3)
+assert.equal(buildPreviewItems([setWithPricedSubs], 'HB')[0].privateLabelPrice, 0.3)
+
+// 手填的主档价优先于默认值
+assert.equal(resolveProductPrice({ ...setWithPricedSubs, privateLabelPrice: 9.9 }), 9.9)
+assert.equal(buildCreateBatchItems([{ ...setWithPricedSubs, privateLabelPrice: 9.9 }])[0].privateLabelPrice, 9.9)
+
+// 子项都没填价格时没有默认值，保持留空而不是提交 0
+assert.equal(sumSetSubItemPrices([{ key: 'n', productName: '只有名称' }]), undefined)
+assert.equal(resolveProductPrice({ ...setWithPricedSubs, subItems: [{ key: 'n', productName: '只有名称' }] }), undefined)
+
+// 普通商品不受影响
+assert.equal(resolveProductPrice({ key: 'n1', productType: ProductCreationType.NORMAL }), undefined)
