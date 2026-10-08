@@ -54,6 +54,13 @@ public static class DeviceRuntimeStatusSchemaMigrator
                 ALTER TABLE [dbo].[POSM_设备注册信息表]
                     ADD [收银员登录时间] DATETIME2(7) NULL;
             END;
+
+            -- 客户端（WPF）随心跳上报的程序版本；与 Hbpos.Api 的运行态初始化器保持同一定义。
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'应用版本') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [应用版本] NVARCHAR(50) NULL;
+            END;
         END;
         """;
 

@@ -231,6 +231,16 @@ export default function DeviceDetailDrawer({
               <dd>
                 <RelativeTime value={view.lastHeartbeatAt} t={t} empty={t('posAdmin.devices.mgmt.heartbeatNever')} />
               </dd>
+              {view.appVersion || view.deviceSystem === 'Windows' ? (
+                <>
+                  <dt>{t('posAdmin.devices.mgmt.columns.version')}</dt>
+                  <dd>
+                    {view.appVersion
+                      ? <span className="dev-mgmt-mono">{view.appVersion}</span>
+                      : <span className="dev-mgmt-faint">{EMPTY_VALUE}</span>}
+                  </dd>
+                </>
+              ) : null}
               <dt>{t('posAdmin.devices.currentCashier')}</dt>
               <dd>
                 {online && view.currentCashierName

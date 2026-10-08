@@ -8509,6 +8509,10 @@
           "currentCashierName": {
             "type": "string",
             "nullable": true
+          },
+          "appVersion": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

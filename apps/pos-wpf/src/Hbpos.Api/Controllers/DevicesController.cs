@@ -17,10 +17,12 @@ public sealed class DevicesController(
     IDeviceService deviceService,
     IOptions<DeviceActivationOptions>? deviceActivationOptions = null) : ControllerBase
 {
+    // AppVersion 可选：旧版客户端不带该字段，服务端保留库里上次上报的版本，不会被清空。
     public sealed record DeviceRuntimeStatusRequest(
         bool IsOnline,
         string? CurrentCashierId,
-        string? CurrentCashierName);
+        string? CurrentCashierName,
+        string? AppVersion = null);
 
     [AllowAnonymous]
     [HttpPost("register")]
@@ -167,6 +169,7 @@ public sealed class DevicesController(
             request.IsOnline,
             request.CurrentCashierId,
             request.CurrentCashierName,
+            request.AppVersion,
             cancellationToken);
         if (!updated)
         {

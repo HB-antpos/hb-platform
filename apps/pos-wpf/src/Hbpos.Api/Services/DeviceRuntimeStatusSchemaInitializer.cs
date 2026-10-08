@@ -66,6 +66,13 @@ public sealed class SqlSugarDeviceRuntimeStatusSchemaInitializer(
                     ADD [收银员登录时间] DATETIME2(7) NULL;
             END;
 
+            -- 客户端（WPF）随心跳上报的程序版本；可空，老客户端不上报时保持 NULL。
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'应用版本') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [应用版本] NVARCHAR(50) NULL;
+            END;
+
             BEGIN TRY
                 IF NOT EXISTS (
                     SELECT 1

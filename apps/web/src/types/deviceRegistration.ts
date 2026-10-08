@@ -19,6 +19,8 @@ export interface DeviceRegistrationItem {
   currentCashierId?: string | null
   currentCashierName?: string | null
   cashierLoginAt?: string | null
+  /** 客户端程序版本（WPF 随心跳上报）；老版本客户端未上报时为空 */
+  appVersion?: string | null
 }
 
 export interface DeviceRegistrationDetail extends DeviceRegistrationItem {}

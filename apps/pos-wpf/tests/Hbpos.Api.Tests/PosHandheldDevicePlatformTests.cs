@@ -538,6 +538,7 @@ public sealed class PosHandheldDevicePlatformTests
             bool isOnline,
             string? cashierId,
             string? cashierName,
+            string? appVersion,
             CancellationToken cancellationToken) =>
             Task.FromResult(true);
     }

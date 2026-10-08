@@ -182,6 +182,7 @@ function normalizeItem(raw: Record<string, unknown>): DeviceRegistrationItem {
       '当前收银员姓名'
     ),
     cashierLoginAt: getNullableString(raw, 'cashierLoginAt', 'CashierLoginAt', '收银员登录时间'),
+    appVersion: getNullableString(raw, 'appVersion', 'AppVersion', '应用版本'),
   }
 }
 
@@ -344,6 +345,7 @@ export function normalizeDeviceRegistrationDetail(
       'CurrentCashierName'
     ),
     cashierLoginAt: getNullableString(raw, 'cashierLoginAt', '收银员登录时间', 'CashierLoginAt'),
+    appVersion: getNullableString(raw, 'appVersion', '应用版本', 'AppVersion'),
   }
 }
 

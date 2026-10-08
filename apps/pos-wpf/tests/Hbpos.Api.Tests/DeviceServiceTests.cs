@@ -1629,6 +1629,7 @@ public sealed class DeviceServiceTests
             true,
             "CASHIER-1",
             "Alice",
+            null,
             CancellationToken.None);
         var secondResult = await new DeviceService(repository, LoadStoreAsync, () => secondNow)
             .UpdateRuntimeStatusAsync(
@@ -1638,6 +1639,7 @@ public sealed class DeviceServiceTests
                 true,
                 "CASHIER-1",
                 "Alice",
+                null,
                 CancellationToken.None);
 
         Assert.True(firstResult);
@@ -1654,6 +1656,7 @@ public sealed class DeviceServiceTests
                 false,
                 null,
                 null,
+                null,
                 CancellationToken.None);
 
         Assert.True(clearResult);
@@ -1661,6 +1664,46 @@ public sealed class DeviceServiceTests
         Assert.Null(repository.LastRuntimeStatus.CashierId);
         Assert.Null(repository.LastRuntimeStatus.CashierName);
         Assert.Null(repository.LastRuntimeStatus.CashierLoginAt);
+    }
+
+    [Fact]
+    public async Task UpdateRuntimeStatusAsync_StoresTrimmedAppVersionAndKeepsItWhenLaterReportOmitsIt()
+    {
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(repository, LoadStoreAsync, () => new DateTime(2026, 10, 8, 10, 0, 0));
+
+        await service.UpdateRuntimeStatusAsync(
+            "HW-001", "POS-001", "1002", true, null, null, "  1.0.51  ", CancellationToken.None);
+        Assert.Equal("1.0.51", repository.LastRuntimeStatus!.AppVersion);
+
+        // 旧版客户端的心跳不带版本：库里已有的版本必须保留，不能被清空。
+        await service.UpdateRuntimeStatusAsync(
+            "HW-001", "POS-001", "1002", true, null, null, null, CancellationToken.None);
+        Assert.Equal("1.0.51", repository.LastRuntimeStatus!.AppVersion);
+
+        // 升级后上报新版本：覆盖旧值。
+        await service.UpdateRuntimeStatusAsync(
+            "HW-001", "POS-001", "1002", true, null, null, "1.0.52", CancellationToken.None);
+        Assert.Equal("1.0.52", repository.LastRuntimeStatus!.AppVersion);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void NormalizeAppVersion_TreatsBlankAsNotReported(string? value)
+    {
+        Assert.Null(DeviceService.NormalizeAppVersion(value));
+    }
+
+    [Fact]
+    public void NormalizeAppVersion_AcceptsFiftyCharactersAndDropsLongerValues()
+    {
+        var fifty = new string('1', 50);
+
+        Assert.Equal(fifty, DeviceService.NormalizeAppVersion(fifty));
+        // 超出列宽的值直接丢弃，不截断成半截版本号。
+        Assert.Null(DeviceService.NormalizeAppVersion(fifty + "1"));
     }
 
     [Fact]
@@ -2120,7 +2163,8 @@ public sealed class DeviceServiceTests
                 request.ReportedAt,
                 nextCashierId,
                 nextCashierName,
-                cashierLoginAt);
+                cashierLoginAt,
+                request.AppVersion ?? LastRuntimeStatus?.AppVersion);
             return Task.FromResult(1);
         }
 
@@ -2157,5 +2201,6 @@ public sealed class DeviceServiceTests
         DateTime LastHeartbeatAt,
         string? CashierId,
         string? CashierName,
-        DateTime? CashierLoginAt);
+        DateTime? CashierLoginAt,
+        string? AppVersion = null);
 }

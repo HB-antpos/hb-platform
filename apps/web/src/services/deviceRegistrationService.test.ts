@@ -139,9 +139,20 @@ const normalizedRuntimeDetail = normalizeDeviceRegistrationDetail({
   currentCashierId: 'CASHIER-1',
   currentCashierName: 'Alice',
   cashierLoginAt: '2026-07-01T09:55:00Z',
+  appVersion: '1.0.51',
 })
 
 assertEqual(normalizedRuntimeDetail.isOnline, true, 'Should normalize runtime online status')
+assertEqual(
+  normalizedRuntimeDetail.appVersion,
+  '1.0.51',
+  'Should normalize the client app version reported with heartbeats',
+)
+assertEqual(
+  normalizedCamelDetail.appVersion ?? null,
+  null,
+  'Should leave the app version empty when the client never reported one',
+)
 assertEqual(
   normalizedRuntimeDetail.lastHeartbeatAt,
   '2026-07-01T10:00:00Z',
@@ -355,7 +366,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     success: true,
     data: {
       devices: [
-        { id: 21, hardwareId: 'HW-LEGACY', deviceSystem: '', AllowTransactions: false },
+        { id: 21, hardwareId: 'HW-LEGACY', deviceSystem: '', AllowTransactions: false, AppVersion: '1.0.51' },
         { id: 22, hardwareId: 'HW-UNKNOWN', deviceSystem: 'VisionOS' },
       ],
       pagination: {
@@ -424,6 +435,16 @@ try {
     registeredDevices.devices[1]?.allowTransactions,
     true,
     'Device registration list should default missing transaction permission to allowed',
+  )
+  assertEqual(
+    registeredDevices.devices[0]?.appVersion,
+    '1.0.51',
+    'Device registration list should expose the reported client app version',
+  )
+  assertEqual(
+    registeredDevices.devices[1]?.appVersion ?? null,
+    null,
+    'Device registration list should leave the app version empty for devices that never reported one',
   )
   assertEqual(
     calls[1]?.url,

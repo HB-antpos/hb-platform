@@ -34,6 +34,7 @@ public interface IDeviceService
         bool isOnline,
         string? cashierId,
         string? cashierName,
+        string? appVersion,
         CancellationToken cancellationToken);
 }
 
@@ -296,11 +297,14 @@ public sealed record DeviceRuntimeStatusUpdateRequest(
     bool IsOnline,
     string? CashierId,
     string? CashierName,
-    DateTime ReportedAt);
+    DateTime ReportedAt,
+    string? AppVersion = null);
 
 public sealed class DeviceService : IDeviceService
 {
     private const int MinimumProvisioningCodeLength = 16;
+    // 与 POSM_设备注册信息表.应用版本 的列宽（NVARCHAR(50)）保持一致。
+    private const int MaxAppVersionLength = 50;
     private const int PendingStatus = -1;
     private const int DisabledStatus = 0;
     private const int EnabledStatus = 1;
@@ -999,6 +1003,7 @@ public sealed class DeviceService : IDeviceService
         bool isOnline,
         string? cashierId,
         string? cashierName,
+        string? appVersion,
         CancellationToken cancellationToken)
     {
         var normalizedHardwareId = Normalize(hardwareId);
@@ -1019,9 +1024,21 @@ public sealed class DeviceService : IDeviceService
                 isOnline,
                 NormalizeOptional(cashierId),
                 NormalizeOptional(cashierName),
-                nowProvider()),
+                nowProvider(),
+                NormalizeAppVersion(appVersion)),
             cancellationToken);
         return rows > 0;
+    }
+
+    /// <summary>
+    /// 客户端版本号：去空白，空值或超过列宽（50）一律视为未上报。
+    /// 关键逻辑：超长直接丢弃而不是截断，避免半截版本号被当成真实版本展示；
+    /// 未上报时仓储层保留库里已有的版本，不会因为一次异常上报把版本清空。
+    /// </summary>
+    internal static string? NormalizeAppVersion(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        return normalized is { Length: <= MaxAppVersionLength } ? normalized : null;
     }
 
     internal static string CreateDeviceCode(string storeCode, DateTime localTime)
@@ -1782,10 +1799,12 @@ public sealed class SqlSugarDeviceRegistrationRepository(HbposSqlSugarContext db
         CancellationToken cancellationToken)
     {
         // 关键逻辑：心跳只更新当前授权设备的运行态字段；同一收银员连续上报时保留原登录时间。
+        // 应用版本用 COALESCE：旧版客户端不带版本时保留库里已有值，只有新上报的非空版本才覆盖。
         const string sql = """
             UPDATE [POSM_设备注册信息表]
             SET [是否在线] = @IsOnline,
                 [最后心跳时间] = @ReportedAt,
+                [应用版本] = COALESCE(@AppVersion, [应用版本]),
                 [收银员登录时间] = CASE
                     WHEN @HasCashier = 0 THEN NULL
                     WHEN ISNULL([当前收银员ID], '') = ISNULL(@CashierId, '')
@@ -1807,6 +1826,7 @@ public sealed class SqlSugarDeviceRegistrationRepository(HbposSqlSugarContext db
             new SugarParameter("@HasCashier", hasCashier ? 1 : 0),
             new SugarParameter("@CashierId", request.CashierId),
             new SugarParameter("@CashierName", request.CashierName),
+            new SugarParameter("@AppVersion", request.AppVersion),
             new SugarParameter("@HardwareId", request.HardwareId),
             new SugarParameter("@DeviceCode", request.DeviceCode),
             new SugarParameter("@StoreCode", request.StoreCode));
