@@ -1045,20 +1045,40 @@ namespace BlazorApp.Api.Services.React
                     query = query.Where(x => x.Status.HasValue && statuses.Contains(x.Status.Value));
                 }
 
-                // 货号筛选：查找包含指定货号的货柜
-                if (!string.IsNullOrEmpty(request.ItemNumberFilter))
+                // 柜内商品筛选：货号（ItemNumberFilter，移动端沿用）与商品关键字（ProductKeyword）同时给出时按「且」处理
+                var productKeyword = NormalizeKeyword(request.ProductKeyword);
+                if (!string.IsNullOrEmpty(request.ItemNumberFilter) || productKeyword != null)
                 {
-                    // 通过明细表关联商品表，查找匹配的货柜编码
-                    var containerCodesWithItem = await _context
+                    // 通过明细表关联国内商品与本地主档，查找匹配的货柜编码；字段口径与货柜明细页展示一致
+                    var detailQuery = _context
                         .Db.Queryable<ContainerDetail>()
                         .LeftJoin<DomesticProduct>((cd, p) => cd.ProductCode == p.ProductCode)
-                        .Where(
-                            (cd, p) =>
-                                !cd.IsDeleted
-                                && p.HBProductNo != null
-                                && p.HBProductNo.Contains(request.ItemNumberFilter)
-                        )
-                        .Select((cd, p) => cd.ContainerCode)
+                        .LeftJoin<Product>((cd, p, lp) => cd.ProductCode == lp.ProductCode)
+                        .Where((cd, p, lp) => !cd.IsDeleted);
+
+                    if (!string.IsNullOrEmpty(request.ItemNumberFilter))
+                    {
+                        detailQuery = detailQuery.Where(
+                            (cd, p, lp) => p.HBProductNo != null && p.HBProductNo.Contains(request.ItemNumberFilter)
+                        );
+                    }
+                    if (productKeyword != null)
+                    {
+                        // 明细页英文名列 = 本地主档名称 ?? 国内英文名，这里两者都匹配，避免列表搜得到明细页却看不到（或反之）
+                        detailQuery = detailQuery.Where(
+                            (cd, p, lp) =>
+                                (p.HBProductNo != null && p.HBProductNo.Contains(productKeyword))
+                                || (p.ProductName != null && p.ProductName.Contains(productKeyword))
+                                || (p.EnglishProductName != null && p.EnglishProductName.Contains(productKeyword))
+                                || (p.Barcode != null && p.Barcode.Contains(productKeyword))
+                                || (lp.ProductName != null && lp.ProductName.Contains(productKeyword))
+                        );
+                    }
+
+                    // 名称关键字可能命中同柜上千行明细，先去重再拼 IN 条件，控制参数数量
+                    var containerCodesWithItem = await detailQuery
+                        .Select((cd, p, lp) => cd.ContainerCode)
+                        .Distinct()
                         .ToListAsync();
 
                     if (containerCodesWithItem.Any())

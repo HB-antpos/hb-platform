@@ -850,6 +850,11 @@ namespace BlazorApp.Shared.DTOs
         public string? ItemNumberFilter { get; set; }
 
         /// <summary>
+        /// 柜内商品关键字：货号、商品名称、英文名称或条码任一包含即命中该货柜
+        /// </summary>
+        public string? ProductKeyword { get; set; }
+
+        /// <summary>
         /// 货柜编号列头过滤
         /// </summary>
         public string? ContainerNumberFilter { get; set; }

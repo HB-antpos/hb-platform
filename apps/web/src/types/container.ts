@@ -284,6 +284,8 @@ export interface ContainerQueryRequest {
   page?: number
   pageSize?: number
   itemNumberFilter?: string
+  /** 柜内商品关键字：货号、商品名称、英文名称或条码 */
+  productKeyword?: string
   containerNumberFilter?: string
   loadingDateStart?: string
   loadingDateEnd?: string

@@ -131,6 +131,7 @@ export async function getContainerList(query: ContainerQueryRequest): Promise<Co
       Page: query.page || 1,
       PageSize: query.pageSize || 1000,
       ItemNumberFilter: query.itemNumberFilter,
+      ProductKeyword: query.productKeyword,
       ContainerNumberFilter: query.containerNumberFilter,
       LoadingDateStart: query.loadingDateStart,
       LoadingDateEnd: query.loadingDateEnd,
