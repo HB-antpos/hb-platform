@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { normalizePickMutation, normalizePickOrderList, normalizePickSheet, normalizePickSlipClaim, readPickingError } from "./api-normalization";
+import { settleWritesBeforeExit } from "./exit-guard";
 import { buildPickCodeIndex, isSlipCode, normalizeScanCode, resolvePickScan } from "./code-resolver";
 import {
   firstOpenLine,
@@ -420,4 +421,35 @@ test("接口数据校验：缺字段报错而不是补零，省略的空字段�
     readPickingError({ response: { status: 409, data: { success: false, errorCode: "PICKED_TOTAL_CHANGED", data: { line: 1 } } } }),
     { code: "PICKED_TOTAL_CHANGED", status: 409, data: { line: 1 } },
   );
+});
+
+test("暂存并退出：等写入队列清空，期间有写入失败就不退出", async () => {
+  // 没有在途写入：直接放行。
+  // 注意 getChain 要返回稳定引用（真实代码里是 writeChainRef.current）；每次新建 Promise 会让“队列没变化”永远不成立。
+  const idle = Promise.resolve();
+  assert.equal(await settleWritesBeforeExit(() => idle, () => 0), "ok");
+
+  // 有在途写入：等它收尾再放行，且等待期间队列又追加了一条也要一并等完。
+  const order: string[] = [];
+  let chain: Promise<unknown> = new Promise((resolve) => setTimeout(() => (order.push("first"), resolve(null)), 10));
+  const settled = settleWritesBeforeExit(() => chain, () => 0);
+  const first = chain;
+  setTimeout(() => {
+    chain = first.then(() => new Promise((resolve) => setTimeout(() => (order.push("second"), resolve(null)), 10)));
+  }, 5);
+  assert.equal(await settled, "ok");
+  assert.deepEqual(order, ["first", "second"]);
+
+  // 等待期间有写入失败：返回 failed，不退出。
+  let failures = 0;
+  const failing = new Promise((resolve) => setTimeout(() => (failures += 1, resolve(null)), 5));
+  assert.equal(await settleWritesBeforeExit(() => failing, () => failures), "failed");
+
+  // 进入时就已存在的旧失败（已由服务端进度重新同步）不算数。
+  failures = 3;
+  assert.equal(await settleWritesBeforeExit(() => idle, () => failures), "ok");
+
+  // 队列里的 Promise 自身 reject 也不能让退出卡住。
+  const rejected = Promise.reject(new Error("boom"));
+  assert.equal(await settleWritesBeforeExit(() => rejected, () => 0), "ok");
 });

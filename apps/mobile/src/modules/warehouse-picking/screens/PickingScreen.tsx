@@ -21,6 +21,7 @@ import {
   resolvePickOrder,
 } from "../api";
 import { readPickingError } from "../api-normalization";
+import { settleWritesBeforeExit } from "../exit-guard";
 import { buildPickCodeIndex, resolvePickScan } from "../code-resolver";
 import {
   firstOpenLine,
@@ -132,12 +133,16 @@ export function PickingScreen({
   const [stockoutGuid, setStockoutGuid] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingWrites, setPendingWrites] = useState(0);
+  // 「暂存并退出」进行中：等在途写入落库期间按钮转圈、不可重复点。
+  const [exiting, setExiting] = useState(false);
   const [snackbar, setSnackbar] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const linesRef = useRef<PickSheetLine[]>([]);
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const pendingWritesRef = useRef(0);
+  // 写入失败累计次数：退出前后对比，等待期间有失败就留在页面（失败提示已由写入队列弹出）。
+  const writeFailuresRef = useRef(0);
   const lastWriteAtRef = useRef(0);
   linesRef.current = lines;
 
@@ -251,6 +256,7 @@ export function PickingScreen({
           applyLine(result.line);
           return result;
         } catch (error) {
+          writeFailuresRef.current += 1;
           if (!handleAuthError(error)) {
             const info = readPickingError(error);
             const conflictLine = (info.data as { line?: PickProgressLine } | null)?.line;
@@ -655,6 +661,23 @@ export function PickingScreen({
   };
 
   const goBack = () => (router.canGoBack() ? router.back() : router.replace(PICKING_HOME));
+  // 暂存并退出：拣货数据每次扫码都已即时写服务器，这里只负责确认在途写入都落库，再回订单列表并提示“进度已保存”。
+  // 与完成拣货不同，不提交、不锁定订单，随时可以回来接着拣。
+  const saveAndExit = async () => {
+    if (exiting) return;
+    if (saving) {
+      setSnackbar(t("picking.exitSaving"));
+      return;
+    }
+    setExiting(true);
+    const result = await settleWritesBeforeExit(() => writeChainRef.current, () => writeFailuresRef.current);
+    if (result === "failed") {
+      setExiting(false);
+      return;
+    }
+    router.dismissTo({ pathname: PICKING_HOME, params: { saved: "1" } } as Parameters<typeof router.dismissTo>[0]);
+  };
+
   const switchPicker = () => {
     clearPicker();
     router.replace(PICKING_HOME);
@@ -808,8 +831,24 @@ export function PickingScreen({
       </ScrollView>
 
       <View style={styles.footer}>
+        <Pressable
+          accessibilityRole="button"
+          disabled={exiting}
+          onPress={() => void saveAndExit()}
+          style={[styles.secondaryButton, exiting ? styles.disabled : null]}
+        >
+          {exiting ? (
+            <ActivityIndicator size="small" color={PICK_COLORS.ink} />
+          ) : (
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.secondaryText}>
+              {t("picking.saveExit")}
+            </Text>
+          )}
+        </Pressable>
         <Pressable accessibilityRole="button" onPress={() => setAllLinesVisible(true)} style={styles.secondaryButton}>
-          <Text style={styles.secondaryText}>{t("picking.allLines")}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.secondaryText}>
+            {t("picking.allLines")}
+          </Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -936,6 +975,7 @@ const styles = StyleSheet.create({
     borderTopColor: PICK_COLORS.outlineMuted,
   },
   secondaryButton: { flex: 1, height: 48, borderRadius: 8, borderWidth: 1, borderColor: PICK_COLORS.outline, backgroundColor: PICK_COLORS.white, alignItems: "center", justifyContent: "center" },
+  disabled: { opacity: 0.45 },
   secondaryText: { fontSize: 15, fontWeight: "600", color: PICK_COLORS.ink },
   primaryButton: { flex: 1.6, height: 48, borderRadius: 8, backgroundColor: PICK_COLORS.ink, alignItems: "center", justifyContent: "center" },
   primaryText: { fontSize: 15, fontWeight: "700", color: PICK_COLORS.white },
