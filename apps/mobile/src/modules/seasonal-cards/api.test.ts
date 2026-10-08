@@ -1,8 +1,13 @@
 import {
+  buildSeasonalCardBatchRequest,
+  buildSeasonalCardOverviewQuery,
   buildSeasonalCardSubmissionPayload,
   buildSeasonalCardSubmissionQuery,
+  normalizeSeasonalCardBatchResponse,
   normalizeSeasonalCardCatalogResponse,
+  normalizeSeasonalCardOverviewResponse,
   normalizeSeasonalCardSubmissionsResponse,
+  normalizeServerUtcTimestamp,
 } from "./api";
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
@@ -174,3 +179,167 @@ assertEqual(submissions.items[0]?.remainingQuantity, 8, "history response normal
 assertEqual(submissions.total, 3, "history response normalizes total count");
 assertEqual(submissions.pageNumber, 2, "history response normalizes page from data.page");
 assertEqual(submissions.pageSize, 50, "history response normalizes page size");
+assertEqual(submissions.items[0]?.batchGuid, "", "legacy history rows have no batch");
+assertEqual(submissions.items[0]?.localSupplierCode, "", "legacy history rows have no supplier");
+
+const batchedSubmissions = normalizeSeasonalCardSubmissionsResponse({
+  items: [
+    {
+      submissionGuid: "submission-2",
+      catalogGuid: "catalog-1",
+      cardType: 1,
+      priceOption: 1,
+      seasonYear: 2026,
+      remainingQuantity: 3,
+      submittedAt: "2026-10-02T09:10:00.123",
+      localSupplierCode: " SUP-A01 ",
+      supplierName: "示例供应商 A",
+      batchGuid: "batch-1",
+    },
+  ],
+  total: 1,
+});
+assertEqual(batchedSubmissions.items[0]?.batchGuid, "batch-1", "history rows keep the batch id");
+assertEqual(
+  batchedSubmissions.items[0]?.localSupplierCode,
+  "SUP-A01",
+  "history rows keep the supplier code"
+);
+assertEqual(
+  batchedSubmissions.items[0]?.supplierName,
+  "示例供应商 A",
+  "history rows keep the supplier name"
+);
+assertEqual(batchedSubmissions.items[0]?.priceOption, 1, "history rows keep the price option");
+assertEqual(
+  batchedSubmissions.items[0]?.submittedAt,
+  "2026-10-02T09:10:00.123Z",
+  "server timestamps without zone are read as UTC"
+);
+
+assertEqual(
+  normalizeServerUtcTimestamp("2026-10-02T09:10:00Z"),
+  "2026-10-02T09:10:00Z",
+  "UTC timestamps stay as-is"
+);
+assertEqual(
+  normalizeServerUtcTimestamp("2026-10-02T19:10:00+10:00"),
+  "2026-10-02T19:10:00+10:00",
+  "timestamps with offsets stay as-is"
+);
+assertEqual(normalizeServerUtcTimestamp(null), "", "missing timestamps normalize to empty");
+
+assertEqual(
+  buildSeasonalCardSubmissionQuery({ storeCode: "1013", localSupplierCode: " SUP-A01 " })
+    .localSupplierCode,
+  "SUP-A01",
+  "history query can filter by supplier"
+);
+assertEqual(
+  "localSupplierCode" in
+    buildSeasonalCardSubmissionQuery({ storeCode: "1013", localSupplierCode: " " }),
+  false,
+  "blank supplier filter is omitted"
+);
+
+const overview = normalizeSeasonalCardOverviewResponse({
+  storeCode: "1013",
+  seasonYear: 2026,
+  localSupplierCode: "SUP-A01",
+  supplierName: "示例供应商 A",
+  holidays: [
+    {
+      cardType: 1,
+      cardTypeName: "圣诞节",
+      currentBatch: {
+        batchGuid: "batch-1",
+        storeCode: "1013",
+        seasonYear: 2026,
+        cardType: 1,
+        localSupplierCode: "SUP-A01",
+        supplierName: "示例供应商 A",
+        remark: null,
+        submittedByName: "店长 王",
+        submittedAt: "2026-10-02T09:10:00",
+        totalQuantity: 298,
+        totalAmount: "640.00",
+        isCurrent: true,
+        lines: [
+          {
+            submissionGuid: "s1",
+            catalogGuid: "c1",
+            priceOption: 1,
+            priceLabel: "$1",
+            unitPrice: 1,
+            remainingQuantity: 150,
+          },
+          {
+            submissionGuid: "s4",
+            catalogGuid: "c4",
+            priceOption: 4,
+            priceLabel: "其他",
+            unitPrice: "4.50",
+            remainingQuantity: "12",
+          },
+        ],
+      },
+    },
+    { cardType: 2, cardTypeName: "情人节", currentBatch: null },
+    { cardType: 9, cardTypeName: "unknown", currentBatch: null },
+  ],
+});
+assertDeepEqual(
+  overview.holidays.map((holiday) => [holiday.cardType, holiday.currentBatch?.batchGuid ?? null]),
+  [
+    [1, "batch-1"],
+    [2, null],
+    [3, null],
+    [4, null],
+    [5, null],
+  ],
+  "overview always has holidays 1-5; missing or unknown entries count as not submitted"
+);
+const overviewBatch = overview.holidays[0]?.currentBatch;
+assertEqual(overviewBatch?.submittedAt, "2026-10-02T09:10:00Z", "overview batch timestamp is UTC");
+assertEqual(overviewBatch?.remark, "", "null remark normalizes to empty");
+assertEqual(overviewBatch?.totalAmount, 640, "overview batch amount is numeric");
+assertEqual(overviewBatch?.lines[1]?.unitPrice, 4.5, "overview batch lines keep unit price");
+assertEqual(overviewBatch?.lines[1]?.remainingQuantity, 12, "overview batch lines keep quantity");
+assertEqual(normalizeSeasonalCardBatchResponse(null), null, "null batch stays null");
+
+assertDeepEqual(
+  buildSeasonalCardOverviewQuery({
+    storeCode: " 1013 ",
+    seasonYear: 2026,
+    localSupplierCode: " SUP-A01 ",
+  }),
+  { storeCode: "1013", seasonYear: 2026, localSupplierCode: "SUP-A01" },
+  "overview query trims store and supplier"
+);
+
+assertDeepEqual(
+  buildSeasonalCardBatchRequest({
+    storeCode: " 1013 ",
+    seasonYear: 2026,
+    cardType: 1,
+    localSupplierCode: " SUP-A01 ",
+    expectedPreviousBatchGuid: null,
+    remark: "  ",
+    items: [
+      { catalogGuid: " c1 ", remainingQuantity: 3 },
+      { catalogGuid: "c4", remainingQuantity: 2, customUnitPrice: 4.5 },
+    ],
+  }),
+  {
+    storeCode: "1013",
+    seasonYear: 2026,
+    cardType: 1,
+    localSupplierCode: "SUP-A01",
+    expectedPreviousBatchGuid: null,
+    items: [
+      { catalogGuid: "c1", remainingQuantity: 3 },
+      { catalogGuid: "c4", remainingQuantity: 2, customUnitPrice: 4.5 },
+    ],
+  },
+  "batch request sends an explicit null previous batch and omits a blank remark"
+);

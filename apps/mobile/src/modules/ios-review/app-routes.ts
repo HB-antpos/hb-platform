@@ -578,20 +578,31 @@ function createInitialState(now = new Date()): AppRouteState {
       ],
     },
   ];
-  const seasonalCatalog = [
-    {
-      catalogGuid: "review-seasonal-catalog-001",
-      cardType: 1,
-      cardTypeName: "Christmas Card",
-      priceOption: 1,
-      priceOptionName: "Fixed price",
-      priceLabel: "$2.00",
-      fixedUnitPrice: 2,
-      allowsCustomUnitPrice: false,
-      isEnabled: true,
-      sortOrder: 1,
-    },
+  // 与生产目录同构：5 个节日 × 4 个价格（$1/$2/$3/其他），批量填报要求一次覆盖一个节日的全部价格。
+  const seasonalCardTypeNames = [
+    "Christmas Card",
+    "Valentine's Day Card",
+    "Mother's Day Card",
+    "Easter Card",
+    "Father's Day Card",
   ];
+  const seasonalCatalog = [1, 2, 3, 4, 5].flatMap((cardType) =>
+    [1, 2, 3, 4].map((priceOption) => ({
+      catalogGuid:
+        cardType === 1 && priceOption === 1
+          ? "review-seasonal-catalog-001"
+          : `review-seasonal-catalog-${cardType}-${priceOption}`,
+      cardType,
+      cardTypeName: seasonalCardTypeNames[cardType - 1],
+      priceOption,
+      priceOptionName: priceOption === 4 ? "Other" : "Fixed price",
+      priceLabel: priceOption === 4 ? "Other" : `$${priceOption}`,
+      fixedUnitPrice: priceOption === 4 ? null : priceOption,
+      allowsCustomUnitPrice: priceOption === 4,
+      isEnabled: true,
+      sortOrder: priceOption,
+    })),
+  );
   const seasonalSubmissions = [
     {
       submissionGuid: "review-seasonal-submission-001",
@@ -599,9 +610,13 @@ function createInitialState(now = new Date()): AppRouteState {
       catalogGuid: "review-seasonal-catalog-001",
       cardType: 1,
       cardTypeName: "Christmas Card",
+      priceOption: 1,
       seasonYear: now.getUTCFullYear(),
-      unitPrice: 2,
-      priceLabel: "$2.00",
+      unitPrice: 1,
+      priceLabel: "$1",
+      localSupplierCode: null,
+      supplierName: null,
+      batchGuid: null,
       remainingQuantity: 36,
       remark: "Synthetic stock count",
       submittedByName: "App Review Demo",
@@ -3187,12 +3202,215 @@ export function registerIosReviewAppRoutes(
       return { data: clone(submission) };
     },
   );
+  register(
+    transport,
+    ["GET"],
+    "/react/v1/seasonal-card-remaining/overview",
+    ({ query }) => {
+      const current = state();
+      const storeCode = query.get("storeCode")?.trim() || "REV001";
+      const seasonYear = Number(query.get("seasonYear")) || new Date(current.now).getUTCFullYear();
+      const supplierCode = query.get("localSupplierCode")?.trim() ?? "";
+      return {
+        data: {
+          storeCode,
+          seasonYear,
+          localSupplierCode: supplierCode,
+          supplierName: reviewSeasonalSupplierName(supplierCode),
+          holidays: [1, 2, 3, 4, 5].map((cardType) => ({
+            cardType,
+            cardTypeName:
+              current.seasonalCatalog.find((item) => item.cardType === cardType)
+                ?.cardTypeName ?? "",
+            currentBatch: reviewSeasonalLatestBatch(
+              current.seasonalSubmissions,
+              storeCode,
+              seasonYear,
+              cardType,
+              supplierCode,
+            ),
+          })),
+        },
+      };
+    },
+  );
+  register(
+    transport,
+    ["POST"],
+    "/react/v1/seasonal-card-remaining/submissions/batch",
+    ({ body }) => {
+      const current = state();
+      const payload = asRecord(body);
+      const storeCode = String(payload.storeCode ?? "").trim() || "REV001";
+      const seasonYear = Number(payload.seasonYear);
+      const cardType = Number(payload.cardType);
+      const supplierCode = String(payload.localSupplierCode ?? "").trim();
+      const items = Array.isArray(payload.items) ? payload.items.map(asRecord) : [];
+      const catalogs = current.seasonalCatalog.filter(
+        (item) => item.isEnabled && item.cardType === cardType,
+      );
+      // 与服务端一致：业务失败走 HTTP 200 + success=false 信封，由 apiClient 抛出带 errorCode 的错误。
+      const fail = (message: string, errorCode: string, details: unknown = null) => ({
+        data: { success: false, message, errorCode, details, data: null },
+      });
+      if (!supplierCode || !reviewSeasonalSupplierName(supplierCode)) {
+        return fail("Supplier not found", "SUPPLIER_NOT_FOUND");
+      }
+      const itemGuids = new Set(items.map((item) => String(item.catalogGuid ?? "")));
+      if (
+        !catalogs.length ||
+        itemGuids.size !== items.length ||
+        itemGuids.size !== catalogs.length ||
+        catalogs.some((item) => !itemGuids.has(String(item.catalogGuid)))
+      ) {
+        return fail("Batch items mismatch", "BATCH_ITEMS_MISMATCH");
+      }
+
+      const previous = reviewSeasonalLatestBatch(
+        current.seasonalSubmissions,
+        storeCode,
+        seasonYear,
+        cardType,
+        supplierCode,
+      );
+      const expected = String(payload.expectedPreviousBatchGuid ?? "").trim();
+      if ((previous?.batchGuid ?? "") !== expected) {
+        return fail("Updated by someone else", "SEASONAL_CARD_STALE", previous);
+      }
+
+      const lines = catalogs.map((catalog) => {
+        const item = items.find(
+          (entry) => String(entry.catalogGuid) === catalog.catalogGuid,
+        )!;
+        const quantity = Math.max(0, Math.trunc(Number(item.remainingQuantity) || 0));
+        const unitPrice = catalog.allowsCustomUnitPrice
+          ? Number(item.customUnitPrice ?? 0) || 0
+          : Number(catalog.fixedUnitPrice ?? 0);
+        return { catalog, quantity, unitPrice };
+      });
+      if (
+        lines.some(
+          (line) =>
+            line.catalog.allowsCustomUnitPrice && line.quantity > 0 && line.unitPrice <= 0,
+        )
+      ) {
+        return fail("Custom price required", "CUSTOM_PRICE_REQUIRED");
+      }
+      if (
+        previous &&
+        lines.every((line) => {
+          const before = previous.lines.find(
+            (entry: JsonRecord) => entry.catalogGuid === line.catalog.catalogGuid,
+          );
+          return (
+            before &&
+            before.remainingQuantity === line.quantity &&
+            Number(before.unitPrice) === line.unitPrice
+          );
+        })
+      ) {
+        return fail("No changes", "SEASONAL_CARD_NO_CHANGES");
+      }
+
+      const batchGuid = nextId(current, "review-seasonal-batch");
+      const supplierName = reviewSeasonalSupplierName(supplierCode);
+      const remark = typeof payload.remark === "string" ? payload.remark : null;
+      const rows = lines.map((line) => ({
+        submissionGuid: nextId(current, "review-seasonal-submission"),
+        storeCode,
+        catalogGuid: line.catalog.catalogGuid,
+        cardType,
+        cardTypeName: line.catalog.cardTypeName,
+        priceOption: line.catalog.priceOption,
+        seasonYear,
+        unitPrice: line.unitPrice,
+        priceLabel: line.catalog.priceLabel,
+        remainingQuantity: line.quantity,
+        remark,
+        submittedByName: "App Review Demo",
+        submittedAt: current.now,
+        localSupplierCode: supplierCode,
+        supplierName,
+        batchGuid,
+      }));
+      current.seasonalSubmissions.unshift(...rows);
+      mirrorCreate(current, dataStore, "seasonalCards", batchGuid, "Seasonal card batch");
+      return {
+        data: reviewSeasonalBatchDto(rows),
+      };
+    },
+  );
 
   registerAttendanceRoutes(transport, dataStore, holder);
   registerUserRoutes(transport, dataStore, holder);
   registerEmployeeProfileRoutes(transport, dataStore, holder);
   registerDeviceRoutes(transport, dataStore, holder);
   registerReportRoutes(transport, holder);
+}
+
+// 审核模式供应商只有 /local-suppliers/active 里那一家。
+const REVIEW_SEASONAL_SUPPLIERS: Record<string, string> = {
+  "REV-SUP-001": "Demo Local Supplier",
+};
+
+function reviewSeasonalSupplierName(supplierCode: string) {
+  return REVIEW_SEASONAL_SUPPLIERS[supplierCode] ?? "";
+}
+
+function reviewSeasonalBatchDto(rows: JsonRecord[]) {
+  const first = rows[0];
+  return {
+    batchGuid: first.batchGuid,
+    storeCode: first.storeCode,
+    storeName: first.storeCode,
+    seasonYear: first.seasonYear,
+    cardType: first.cardType,
+    cardTypeName: first.cardTypeName,
+    localSupplierCode: first.localSupplierCode,
+    supplierName: first.supplierName,
+    remark: first.remark ?? null,
+    submittedByName: first.submittedByName,
+    submittedAt: first.submittedAt,
+    totalQuantity: rows.reduce((sum, row) => sum + Number(row.remainingQuantity), 0),
+    totalAmount: rows.reduce(
+      (sum, row) => sum + Number(row.remainingQuantity) * Number(row.unitPrice),
+      0,
+    ),
+    isCurrent: true,
+    lines: rows
+      .slice()
+      .sort((left, right) => Number(left.priceOption) - Number(right.priceOption))
+      .map((row) => ({
+        submissionGuid: row.submissionGuid,
+        catalogGuid: row.catalogGuid,
+        priceOption: row.priceOption,
+        priceLabel: row.priceLabel,
+        unitPrice: row.unitPrice,
+        remainingQuantity: row.remainingQuantity,
+      })),
+  };
+}
+
+/** 某 分店 + 年份 + 节日 + 供应商 的最新批次；只看带批次号的记录（历史单条记录没有供应商）。 */
+function reviewSeasonalLatestBatch(
+  submissions: JsonRecord[],
+  storeCode: string,
+  seasonYear: number,
+  cardType: number,
+  supplierCode: string,
+) {
+  const matching = submissions.filter(
+    (row) =>
+      row.batchGuid &&
+      row.storeCode === storeCode &&
+      Number(row.seasonYear) === seasonYear &&
+      Number(row.cardType) === cardType &&
+      row.localSupplierCode === supplierCode,
+  );
+  if (!matching.length) return null;
+  // 新批次总是 unshift 到最前，第一行即最新批次。
+  const latestGuid = matching[0].batchGuid;
+  return reviewSeasonalBatchDto(matching.filter((row) => row.batchGuid === latestGuid));
 }
 
 function reviewPunchTimestamp(punch: JsonRecord | undefined) {

@@ -1,8 +1,5 @@
 {
   "title": "Seasonal Cards",
-  "submitSubtitle": "Submit remaining seasonal cards by managed store, year, and card type",
-  "historyTitle": "Submission History",
-  "historySubtitle": "Review submitted records by store, year, and card type",
   "detailTitle": "Seasonal Card Detail",
   "viewModes": {
     "submit": "Submit",
@@ -15,39 +12,102 @@
     "4": "Easter",
     "5": "Father's Day"
   },
+  "store": {
+    "select": "Select store",
+    "pickerTitle": "Select store"
+  },
   "form": {
-    "storeCode": "Store",
     "seasonYear": "Year",
+    "seasonYearHint": "Defaults to this year",
+    "thisYear": "This year",
     "cardType": "Festival",
-    "priceOption": "Catalog price",
-    "customPriceOption": "Other",
-    "customUnitPrice": "Actual amount",
-    "remainingQuantity": "Remaining quantity",
-    "remark": "Remark",
-    "selectStore": "Select store",
-    "selectSeasonYear": "Select year",
-    "selectCardType": "Select festival",
-    "selectPriceOption": "Select price option",
-    "storePickerTitle": "Select store",
-    "yearPickerTitle": "Select year",
-    "cardTypePickerTitle": "Select festival",
-    "priceOptionPickerTitle": "Select price option"
+    "supplier": "Supplier",
+    "selectSupplier": "Select supplier",
+    "supplierPickerTitle": "Select supplier",
+    "supplierSearchPlaceholder": "Search supplier name or code",
+    "recentSuppliers": "Recent",
+    "priceSectionTitle": "Card price · Remaining quantity",
+    "priceSectionHint": "Blank counts as 0",
+    "customPriceOption": "Other price",
+    "customUnitPrice": "Actual unit price",
+    "remark": "Remark (optional)",
+    "remarkPlaceholder": "e.g. some damaged cards removed from shelf",
+    "decrease": "Decrease",
+    "increase": "Increase",
+    "quantityA11y": "{{label}} quantity"
+  },
+  "status": {
+    "filled": "Submitted",
+    "pending": "Pending",
+    "unknown": "—"
+  },
+  "rows": {
+    "fixedPrice": "Fixed price",
+    "fixedPriceSubtotal": "Fixed price · Subtotal {{amount}}",
+    "customPriceHint": "Enter the actual unit price",
+    "customPriceSubtotal": "Actual price · Subtotal {{amount}}",
+    "previousUnchanged": "Last {{previous}} · Unchanged",
+    "previousChanged": "Last {{previous}} → Now {{current}}",
+    "priceChanged": "Unit price {{previous}} → {{current}}"
+  },
+  "banner": {
+    "noSupplierTitle": "Select a supplier first",
+    "noSupplierBody": "Choose a supplier to see each festival's status and enter quantities.",
+    "filledTitle": "Submitted by {{name}} at {{time}}",
+    "filledBody": "Last quantities are filled in. Change only the rows that differ, then tap Overwrite; this submission becomes the current figure.",
+    "pendingTitle": "{{holiday}} {{year}} not submitted yet",
+    "pendingBody": "Enter the remaining quantity for each price and submit them all at once.",
+    "staleTitle": "Updated by {{name}} at {{time}}",
+    "staleBody": "Your quantities are kept and \"Last\" now shows the newest figures. Please check before submitting.",
+    "loadFailedTitle": "Could not load submission status",
+    "retry": "Retry"
+  },
+  "footer": {
+    "total_one": "{{count}} card · {{amount}}",
+    "total_other": "{{count}} cards · {{amount}}",
+    "changedCount": "{{count}} changed",
+    "submit": "Submit",
+    "overwrite": "Overwrite",
+    "unchanged": "Unchanged"
+  },
+  "confirm": {
+    "title": "Overwrite the last submission?",
+    "last": "Last: {{time}} · {{name}}",
+    "priceType": "Price",
+    "previous": "Last",
+    "current": "Now",
+    "diff": "Change",
+    "unchanged": "Same",
+    "priceChanged": "Price",
+    "total": "Total",
+    "note": "The last submission stays in History; reports use this one. Blank prices count as 0.",
+    "back": "Keep editing",
+    "confirm": "Overwrite"
   },
   "history": {
-    "storeCode": "Store",
     "seasonYear": "Year",
     "cardType": "Festival",
     "allCardTypes": "All festivals",
     "allYears": "All years",
+    "yearPickerTitle": "Select year",
+    "cardTypePickerTitle": "Select festival",
     "displayList": "List",
     "displayTable": "Table",
+    "tableHint": "The table adds up each supplier's latest submission.",
     "priceTypeHeader": "Price type",
-    "nextPage": "Next"
+    "nextPage": "Next",
+    "unassignedSupplier": "No supplier",
+    "superseded": "Replaced",
+    "total_one": "Total {{count}} card · {{amount}}",
+    "total_other": "Total {{count}} cards · {{amount}}",
+    "submittedBy": "{{name}} · {{time}}",
+    "remark": "Remark: {{remark}}"
   },
   "labels": {
     "storeCode": "Store",
     "seasonYear": "Year",
     "cardType": "Festival",
+    "supplier": "Supplier",
     "unitPrice": "Price",
     "remainingQuantity": "Remaining quantity",
     "submittedByName": "Submitted by",
@@ -55,25 +115,29 @@
     "remark": "Remark"
   },
   "errors": {
-    "storeCode": "Please select a store",
-    "seasonYear": "Please select a valid year",
-    "catalogGuid": "Please select a catalog price option",
-    "customUnitPrice": "Please enter an amount greater than 0",
-    "remainingQuantity": "Please enter a non-negative whole quantity"
+    "customUnitPrice": "Other price has a quantity; enter an actual unit price above 0",
+    "remainingQuantity": "Remaining quantity must be a whole number of 0 or more",
+    "noChanges": "Quantities match the last submission; nothing to submit",
+    "catalogChanged": "The price list has changed. Pull to refresh and fill it in again",
+    "supplierNotFound": "This supplier no longer exists or is disabled. Please choose another",
+    "supplierRequired": "Select a supplier first",
+    "forbiddenStore": "You can't submit for this store"
   },
   "messages": {
     "noAccessTitle": "No access",
-    "noAccessDescription": "This account cannot view or submit seasonal card remaining records.",
-    "formFixErrors": "Please fix the form errors first",
-    "submitSuccess": "Submitted successfully",
-    "submitFailed": "Failed to submit",
+    "noAccessDescription": "Your account does not have permission to view or submit seasonal cards.",
+    "selectStoreFirst": "Select a store first",
+    "submitSuccess": "Submitted {{combo}}",
+    "overwriteSuccess": "Last submission overwritten; reports now use this one",
+    "staleSnackbar": "Someone just updated this submission. The comparison is refreshed; please check before submitting",
+    "submitFailed": "Submit failed",
+    "supplierLoadFailed": "Could not load suppliers. Pull to refresh and try again",
     "historyLoadFailed": "Failed to load history",
     "detailLoadFailed": "Failed to load details",
-    "detailLoadFailedDescription": "Unable to load the selected submission details right now.",
-    "emptyHistory": "No history records",
+    "detailLoadFailedDescription": "The record details are unavailable right now.",
+    "emptyHistory": "No submissions yet",
     "emptyHistoryDescription": "There are no seasonal card submissions for the current filters.",
     "emptyOptions": "No options available",
-    "selectCardTypeFirst": "Select a festival first",
-    "catalogEmpty": "No seasonal card catalog is available for submission"
+    "catalogEmpty": "No seasonal card catalog is available right now"
   }
 }

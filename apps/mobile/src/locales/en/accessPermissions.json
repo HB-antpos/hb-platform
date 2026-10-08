@@ -637,6 +637,10 @@
       "name": "Seasonal Cards Remaining View Managed Store",
       "description": "Allows access to Seasonal Cards Remaining View Managed Store."
     },
+    "SeasonalCards.Remaining.ViewAllStores": {
+      "name": "View seasonal card stats for all stores",
+      "description": "Web admin seasonal card stats: remaining-card totals, stores not yet submitted and each store's submission history."
+    },
     "Store.ManageOperations": {
       "name": "Store Manage Operations",
       "description": "Allows access to Store Manage Operations."

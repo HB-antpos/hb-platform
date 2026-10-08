@@ -43,7 +43,8 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
             typeof(Store),
             typeof(UserStore),
             typeof(SeasonalCardCatalog),
-            typeof(SeasonalCardRemainingSubmission)
+            typeof(SeasonalCardRemainingSubmission),
+            typeof(HBLocalSupplier)
         );
     }
 
@@ -182,6 +183,166 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
         Assert.Equal("FORBIDDEN_STORE", result.ErrorCode);
     }
 
+    [Fact]
+    public async Task CreateBatchAsync_首次整组提交_四行共用批次号并由服务端写入供应商名称快照()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var result = await service.CreateBatchAsync(BatchRequest(
+            SeasonalCardType.Christmas, "SUP-A", null, 120, 80, 36, 12, otherPrice: 4.5m));
+
+        Assert.True(result.Success, result.Message);
+        var rows = await _db.Queryable<SeasonalCardRemainingSubmission>().ToListAsync();
+        Assert.Equal(4, rows.Count);
+        Assert.Single(rows.Select(row => row.BatchGuid).Distinct());
+        Assert.All(rows, row =>
+        {
+            Assert.Equal("SUP-A", row.LocalSupplierCode);
+            Assert.Equal("Supplier A", row.SupplierName);
+            Assert.Equal(2026, row.SeasonYear);
+        });
+        Assert.Equal(248, result.Data!.TotalQuantity);
+        Assert.Equal(120m + 160m + 108m + 54m, result.Data.TotalAmount);
+        Assert.Equal(result.Data.BatchGuid, rows[0].BatchGuid);
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_价格项缺失或重复_整批拒绝不写入()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var missing = BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 2, 3, 0);
+        missing.Items.RemoveAt(3);
+        var duplicated = BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 2, 3, 0);
+        duplicated.Items[3] = new SeasonalCardBatchItemDto { CatalogGuid = duplicated.Items[0].CatalogGuid, RemainingQuantity = 1 };
+
+        Assert.Equal("BATCH_ITEMS_MISMATCH", (await service.CreateBatchAsync(missing)).ErrorCode);
+        Assert.Equal("BATCH_ITEMS_MISMATCH", (await service.CreateBatchAsync(duplicated)).ErrorCode);
+        Assert.Equal(0, await _db.Queryable<SeasonalCardRemainingSubmission>().CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_供应商停用或不存在_拒绝()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-OFF", "Disabled", status: 0);
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        Assert.Equal(
+            "SUPPLIER_NOT_FOUND",
+            (await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-OFF", null, 1, 0, 0, 0))).ErrorCode
+        );
+        Assert.Equal(
+            "SUPPLIER_NOT_FOUND",
+            (await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-NONE", null, 1, 0, 0, 0))).ErrorCode
+        );
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_其他价格数量为零可不填单价_有数量必须填单价()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Easter);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+
+        var needsPrice = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Easter, "SUP-A", null, 1, 2, 3, 5));
+        Assert.Equal("CUSTOM_PRICE_REQUIRED", needsPrice.ErrorCode);
+
+        var zeroOther = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Easter, "SUP-A", null, 1, 2, 3, 0));
+        Assert.True(zeroOther.Success, zeroOther.Message);
+        var other = await _db.Queryable<SeasonalCardRemainingSubmission>()
+            .FirstAsync(row => row.PriceOption == SeasonalCardPriceOptionType.Other);
+        Assert.Equal(0, other.RemainingQuantity);
+        Assert.Equal(0m, other.UnitPrice);
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_覆盖须带上当前批次号_过期返回最新批次_相同数量拒绝重复提交()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+        var first = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 150, 96, 40, 0));
+        Assert.True(first.Success, first.Message);
+        var firstBatch = first.Data!.BatchGuid;
+
+        // 没带上次批次号（客户端以为没填过）：判定为已被更新，并把当前批次带回去。
+        var stale = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 120, 80, 36, 0));
+        Assert.Equal("SEASONAL_CARD_STALE", stale.ErrorCode);
+        var staleDetails = Assert.IsType<SeasonalCardBatchDto>(stale.Details);
+        Assert.Equal(firstBatch, staleDetails.BatchGuid);
+
+        // 数量与上次完全相同：不生成新记录。
+        var unchanged = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", firstBatch, 150, 96, 40, 0));
+        Assert.Equal("SEASONAL_CARD_NO_CHANGES", unchanged.ErrorCode);
+        Assert.Equal(4, await _db.Queryable<SeasonalCardRemainingSubmission>().CountAsync());
+
+        // 正常覆盖：新批次生效，旧批次保留为历史。
+        var overwrite = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", firstBatch, 120, 80, 36, 0));
+        Assert.True(overwrite.Success, overwrite.Message);
+        Assert.Equal("已覆盖上次填报", overwrite.Message);
+        Assert.Equal(8, await _db.Queryable<SeasonalCardRemainingSubmission>().CountAsync());
+
+        var overview = await service.GetOverviewAsync(new SeasonalCardOverviewQueryDto
+        {
+            StoreCode = "BRI",
+            SeasonYear = 2026,
+            LocalSupplierCode = "SUP-A",
+        });
+        Assert.True(overview.Success, overview.Message);
+        var christmas = overview.Data!.Holidays.Single(item => item.CardType == SeasonalCardType.Christmas);
+        Assert.Equal(overwrite.Data!.BatchGuid, christmas.CurrentBatch!.BatchGuid);
+        Assert.Equal(236, christmas.CurrentBatch.TotalQuantity);
+        Assert.Null(overview.Data.Holidays.Single(item => item.CardType == SeasonalCardType.Easter).CurrentBatch);
+        Assert.Equal(5, overview.Data.Holidays.Count);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_不同供应商的批次互不影响()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        await SeedSupplierAsync("SUP-B", "Supplier B");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+        Assert.True((await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 10, 0, 0, 0))).Success);
+
+        // 供应商 B 没填过：首次提交不需要批次号，也不受 A 的批次影响。
+        var supplierB = await service.CreateBatchAsync(BatchRequest(SeasonalCardType.Christmas, "SUP-B", null, 5, 0, 0, 0));
+        Assert.True(supplierB.Success, supplierB.Message);
+
+        var overviewB = await service.GetOverviewAsync(new SeasonalCardOverviewQueryDto
+        {
+            StoreCode = "BRI",
+            SeasonYear = 2026,
+            LocalSupplierCode = "SUP-B",
+        });
+        Assert.Equal(5, overviewB.Data!.Holidays.Single(item => item.CardType == SeasonalCardType.Christmas).CurrentBatch!.TotalQuantity);
+        Assert.Equal("Supplier B", overviewB.Data.SupplierName);
+    }
+
+    [Fact]
+    public async Task CreateBatchAsync_店长提交非主分店_拒绝()
+    {
+        await SeedStoreScopeAsync();
+        await SeedFullCatalogAsync(SeasonalCardType.Christmas);
+        await SeedSupplierAsync("SUP-A", "Supplier A");
+        var service = CreateService("manager-user", "manager", "StoreManager");
+        var request = BatchRequest(SeasonalCardType.Christmas, "SUP-A", null, 1, 0, 0, 0);
+        request.StoreCode = "OTHER";
+
+        Assert.Equal("FORBIDDEN_STORE", (await service.CreateBatchAsync(request)).ErrorCode);
+    }
+
     public void Dispose()
     {
         _db.Dispose();
@@ -284,7 +445,8 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
         string priceLabel,
         bool allowsCustomUnitPrice,
         decimal? fixedUnitPrice,
-        int sortOrder
+        int sortOrder,
+        SeasonalCardPriceOptionType priceOption = SeasonalCardPriceOptionType.FixedOneDollar
     )
     {
         await _db.Insertable(new SeasonalCardCatalog
@@ -292,6 +454,7 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
             CatalogGuid = catalogGuid,
             CatalogCode = $"{cardType}-{priceLabel}",
             CardType = cardType,
+            PriceOption = priceOption,
             PriceLabel = priceLabel,
             AllowsCustomUnitPrice = allowsCustomUnitPrice,
             FixedUnitPrice = fixedUnitPrice,
@@ -300,6 +463,51 @@ public sealed class SeasonalCardRemainingReactServiceTests : IDisposable
             CreatedAt = DateTime.UtcNow,
         }).ExecuteCommandAsync();
     }
+
+    private async Task SeedFullCatalogAsync(SeasonalCardType cardType)
+    {
+        await SeedCatalogAsync($"{cardType}-1", cardType, "$1", false, 1m, 1, SeasonalCardPriceOptionType.FixedOneDollar);
+        await SeedCatalogAsync($"{cardType}-2", cardType, "$2", false, 2m, 2, SeasonalCardPriceOptionType.FixedTwoDollars);
+        await SeedCatalogAsync($"{cardType}-3", cardType, "$3", false, 3m, 3, SeasonalCardPriceOptionType.FixedThreeDollars);
+        await SeedCatalogAsync($"{cardType}-other", cardType, "其他", true, null, 4, SeasonalCardPriceOptionType.Other);
+    }
+
+    private async Task SeedSupplierAsync(string code, string name, int status = 1)
+    {
+        await _db.Insertable(new HBLocalSupplier
+        {
+            Guid = Guid.NewGuid().ToString(),
+            LocalSupplierCode = code,
+            Name = name,
+            Status = status,
+            CreatedAt = DateTime.UtcNow,
+        }).ExecuteCommandAsync();
+    }
+
+    private static CreateSeasonalCardRemainingBatchDto BatchRequest(
+        SeasonalCardType cardType,
+        string supplierCode,
+        string? expectedBatchGuid,
+        int one,
+        int two,
+        int three,
+        int other,
+        decimal? otherPrice = null
+    ) => new()
+    {
+        StoreCode = "BRI",
+        SeasonYear = 2026,
+        CardType = cardType,
+        LocalSupplierCode = supplierCode,
+        ExpectedPreviousBatchGuid = expectedBatchGuid,
+        Items = new List<SeasonalCardBatchItemDto>
+        {
+            new() { CatalogGuid = $"{cardType}-1", RemainingQuantity = one },
+            new() { CatalogGuid = $"{cardType}-2", RemainingQuantity = two },
+            new() { CatalogGuid = $"{cardType}-3", RemainingQuantity = three },
+            new() { CatalogGuid = $"{cardType}-other", RemainingQuantity = other, CustomUnitPrice = otherPrice },
+        },
+    };
 
     private async Task SeedSubmissionAsync(
         string submissionGuid,

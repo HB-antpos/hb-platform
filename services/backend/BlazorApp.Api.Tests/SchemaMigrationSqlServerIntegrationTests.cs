@@ -1340,6 +1340,97 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 贺卡填报供应商与批次三列_依赖原表_可重复执行_权限码只入库一次且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表不存在：拒绝执行，提示先跑基线。
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.ApplySql));
+        Assert.Equal(52400, missingTable.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql));
+        Assert.Equal(52400, missingVerify.Number);
+
+        // 迁移前形态：基线建出的旧表（含一行历史数据）与同列的权限表桩。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.SeasonalCardRemainingSubmission
+            (
+                SubmissionGuid nvarchar(50) NOT NULL PRIMARY KEY,
+                StoreCode nvarchar(50) NOT NULL,
+                CatalogGuid nvarchar(50) NOT NULL,
+                CardType int NOT NULL,
+                PriceOption int NOT NULL,
+                UnitPrice decimal(18,2) NOT NULL,
+                SeasonYear int NOT NULL,
+                RemainingQuantity int NOT NULL,
+                SubmittedAt datetime2 NOT NULL,
+                IsDeleted bit NOT NULL
+            );
+            INSERT dbo.SeasonalCardRemainingSubmission
+                (SubmissionGuid, StoreCode, CatalogGuid, CardType, PriceOption, UnitPrice, SeasonYear, RemainingQuantity, SubmittedAt, IsDeleted)
+            VALUES (N's-1', N'1013', N'c-1', 1, 1, 1.00, 2026, 30, SYSUTCDATETIME(), 0);
+            CREATE TABLE dbo.HbwebSysPermissions
+            (
+                Id nvarchar(50) NOT NULL PRIMARY KEY,
+                Code nvarchar(100) NOT NULL,
+                Name nvarchar(100) NOT NULL,
+                Category nvarchar(100) NOT NULL,
+                Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL,
+                UpdatedAt datetime2 NULL,
+                UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL
+            );
+            """);
+        // 缺列时门禁报 52401。
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql));
+        Assert.Equal(52401, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql);
+        // 重复执行是空操作：权限码只入库一次，历史行保留且新列为 NULL。
+        await ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'SeasonalCards.Remaining.ViewAllStores') <> 1
+                THROW 52410, 'ViewAllStores permission should be inserted exactly once.', 1;
+            IF (SELECT COUNT(*) FROM dbo.SeasonalCardRemainingSubmission WHERE SubmissionGuid = N's-1' AND RemainingQuantity = 30
+                AND LocalSupplierCode IS NULL AND SupplierName IS NULL AND BatchGuid IS NULL) <> 1
+                THROW 52411, 'Existing submission row was changed.', 1;
+            """);
+
+        // 索引缺失被门禁识别（被索引覆盖的列也只有先删索引才能改，下面的漂移用例依赖这一步）。
+        await ExecuteNonQueryAsync(main,
+            "DROP INDEX IX_SeasonalCardRemainingSubmission_Year_Type_Store ON dbo.SeasonalCardRemainingSubmission;");
+        var missingIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql));
+        Assert.Equal(52401, missingIndex.Number);
+
+        // 列宽漂移（LocalSupplierCode 64 → 50）与可空性漂移（BatchGuid → NOT NULL）都被门禁识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SeasonalCardRemainingSubmission ALTER COLUMN LocalSupplierCode nvarchar(50) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql));
+        Assert.Equal(52401, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SeasonalCardRemainingSubmission ALTER COLUMN LocalSupplierCode nvarchar(64) NULL;");
+
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.SeasonalCardRemainingSubmission SET BatchGuid = N'b' WHERE BatchGuid IS NULL;
+            ALTER TABLE dbo.SeasonalCardRemainingSubmission ALTER COLUMN BatchGuid nvarchar(50) NOT NULL;
+            """);
+        var nullable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql));
+        Assert.Equal(52401, nullable.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SeasonalCardRemainingSubmission ALTER COLUMN BatchGuid nvarchar(50) NULL;");
+
+        // 列改回后重跑迁移把索引补回来，门禁通过。
+        await ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SeasonalCardSupplierBatchSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发服务_真实SQLServer下发_并发同店只产生一个版本且冲突映射409()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

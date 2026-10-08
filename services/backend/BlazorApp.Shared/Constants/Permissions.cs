@@ -519,6 +519,7 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string ViewManagedStore = "SeasonalCards.Remaining.ViewManagedStore";
                 public const string SubmitManagedStore = "SeasonalCards.Remaining.SubmitManagedStore";
+                public const string ViewAllStores = "SeasonalCards.Remaining.ViewAllStores";
             }
         }
 
