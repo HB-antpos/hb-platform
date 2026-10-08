@@ -1,0 +1,149 @@
+{
+  "seasonalCardStats": {
+    "title": "Seasonal card stats by store",
+    "subtitle": "Remaining seasonal cards; the latest submission per store + supplier + price type counts",
+    "refresh": "Refresh",
+    "listSeparator": ", ",
+    "unassignedSupplier": "No supplier",
+    "cardTypes": {
+      "christmas": "Christmas",
+      "valentines": "Valentine's Day",
+      "mothersDay": "Mother's Day",
+      "easter": "Easter",
+      "fathersDay": "Father's Day"
+    },
+    "status": {
+      "all": "All",
+      "filled": "Submitted",
+      "unfilled": "Not submitted"
+    },
+    "price": {
+      "other": "Other price"
+    },
+    "filters": {
+      "year": "Year",
+      "currentYear": "{{year}} (this year)",
+      "holiday": "Holiday",
+      "supplier": "Supplier",
+      "allSuppliers": "All suppliers",
+      "price": "Card price type",
+      "allPrices": "All prices",
+      "store": "Store",
+      "allStores": "All stores",
+      "status": "Submission status",
+      "quantityOnlyNote": "Supplier / price filters only change quantities and values; a store counts as submitted if any supplier was submitted for this holiday."
+    },
+    "kpi": {
+      "filled": "Stores submitted",
+      "ofStores": "/ {{count}} stores",
+      "progress": "Submission progress {{percent}}%",
+      "unfilled": "Stores not submitted",
+      "storeUnit": "stores",
+      "unfilledHint": "See \"Stores not submitted\" below",
+      "totalQuantity": "Total remaining",
+      "cardUnit": "cards",
+      "average": "Average {{count}} cards per store",
+      "averageNone": "No submitted stores yet",
+      "totalAmount": "Total remaining value",
+      "amountHint": "Estimated as unit price × quantity"
+    },
+    "table": {
+      "title": "Stores",
+      "caption": "{{count}} stores · {{year}} {{holiday}}",
+      "total": "Total",
+      "totalFilled": "{{count}} submitted"
+    },
+    "columns": {
+      "store": "Store",
+      "status": "Status",
+      "totalQuantity": "Total qty",
+      "totalAmount": "Total value",
+      "suppliers": "Suppliers",
+      "lastSubmitted": "Last submitted",
+      "action": "Action"
+    },
+    "actions": {
+      "view": "View details",
+      "viewHistory": "View history",
+      "viewLabel": "View seasonal card details for {{store}}"
+    },
+    "empty": {
+      "title": "No stores to report",
+      "hint": "Check the store filter, or confirm the stores are active.",
+      "filteredTitle": "No stores with this status",
+      "filteredHint": "Switch \"Submission status\" to see other stores."
+    },
+    "errors": {
+      "forbidden": "You don't have permission to view all stores' seasonal card reports. Ask an administrator.",
+      "loadFailed": "Failed to load stats. Please try again later.",
+      "invalidQuery": "The year or holiday is invalid. Please choose again.",
+      "retry": "Retry",
+      "loadSuppliersFailed": "Failed to load suppliers; the supplier filter is unavailable.",
+      "storeNotFound": "The store doesn't exist or has been deleted.",
+      "detailFailed": "Failed to load store details. Please try again later."
+    },
+    "byPrice": {
+      "title": "By price type",
+      "quantity": "{{count}} cards"
+    },
+    "bySupplier": {
+      "title": "By supplier",
+      "stores": "{{count}} stores",
+      "empty": "No submissions yet"
+    },
+    "unfilled": {
+      "title": "Stores not submitted",
+      "copy": "Copy list",
+      "none": "All stores have submitted",
+      "copied": "Copied {{count}} stores not submitted",
+      "copyFailed": "Copy failed. Please select and copy the list manually.",
+      "hint": "Stores that haven't submitted for {{year}} {{holiday}}; copy the list to remind store managers."
+    },
+    "notes": {
+      "title": "How it's counted",
+      "latest": "The latest submission per store + supplier + price type counts; earlier ones are kept as history.",
+      "excluded": "Stores to report are active stores, excluding: {{stores}}.",
+      "excludedNone": "Stores to report are all active stores.",
+      "filter": "Supplier / price filters only change quantities and values, not submission status.",
+      "amount": "Values are unit price × quantity; \"Other price\" unit prices vary, so the table shows quantity only and the value is included in totals.",
+      "time": "Submission times are shown in this computer's time zone."
+    },
+    "export": {
+      "button": "Export Excel",
+      "done": "Exported {{fileName}}",
+      "failed": "Export failed. Please try again later.",
+      "fileNamePrefix": "SeasonalCardStats",
+      "storeSheet": "Stores",
+      "unfilledSheet": "Not submitted",
+      "title": "{{year}} {{holiday}} · Seasonal card stats by store",
+      "subtitle": "Supplier: {{supplier}} · Price: {{price}} · {{filled}} / {{total}} stores submitted",
+      "unfilledTitle": "{{year}} {{holiday}} · Stores not submitted ({{count}})",
+      "columns": {
+        "storeCode": "Store code",
+        "storeName": "Store name",
+        "lastSubmittedAt": "Last submitted at",
+        "lastSubmittedBy": "Submitted by"
+      }
+    },
+    "drawer": {
+      "title": "{{name}} ({{code}})",
+      "close": "Close",
+      "remainingQuantity": "Remaining quantity",
+      "remainingAmount": "Remaining value",
+      "matrixTitle": "Supplier × price type (current)",
+      "supplier": "Supplier",
+      "rowTotal": "Total",
+      "atPrice": "@ {{price}}",
+      "notFilled": "Not submitted for this holiday yet.",
+      "historyTitle": "Submission history",
+      "current": "Current",
+      "replaced": "Replaced by a newer submission",
+      "remark": "Note: {{remark}}",
+      "noHistory": "No submissions yet.",
+      "unitPriceSuffix": " ({{price}})",
+      "compareTitle": "Compared with last year's holiday",
+      "previousNone": "Not submitted last year",
+      "compareDelta": "{{delta}} cards vs last year"
+    }
+  }
+}

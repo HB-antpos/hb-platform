@@ -651,6 +651,55 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_贺卡填报统计仅凭查看全部分店权限可见且位于收银管理分组()
+    {
+        // 只有 ViewAllStores 的总部账号也要拿到后台菜单（HasBackendNavigationAccess），且只看到这一页。
+        var user = CreateUser(new Claim("permission", Permissions.SeasonalCards.Remaining.ViewAllStores));
+
+        var menu = _service.BuildMenu(user);
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        var stats = Assert.Single(posAdmin.Children!);
+        Assert.Equal("/pos-admin/seasonal-card-stats", stats.Path);
+        Assert.Equal("menu.seasonalCardStats", stats.TitleKey);
+        Assert.Equal("GiftOutlined", stats.Icon);
+        Assert.Equal(Permissions.SeasonalCards.Remaining.ViewAllStores, stats.Permission);
+        Assert.False(stats.RequireAdmin);
+    }
+
+    [Theory]
+    [InlineData("Admin")]
+    [InlineData("管理员")]
+    [InlineData("SuperAdmin")]
+    [InlineData("超级管理员")]
+    public void BuildMenu_系统管理员别名均显示贺卡填报统计(string roleName)
+    {
+        var user = CreateUser(new Claim(ClaimTypes.Role, roleName));
+
+        var menu = _service.BuildMenu(user);
+
+        var posAdmin = Assert.Single(menu, item => item.Path == "/pos-admin");
+        Assert.Single(posAdmin.Children!, child => child.Path == "/pos-admin/seasonal-card-stats");
+    }
+
+    [Theory]
+    [InlineData(Permissions.Dashboard.View)]
+    // 店长在移动端填报 / 查看本店的权限，不能打开全部分店统计。
+    [InlineData(Permissions.SeasonalCards.Remaining.ViewManagedStore)]
+    [InlineData(Permissions.SeasonalCards.Remaining.SubmitManagedStore)]
+    public void BuildMenu_没有查看全部分店权限的用户不显示贺卡填报统计(string permission)
+    {
+        var user = CreateUser(new Claim("permission", permission));
+
+        var menu = _service.BuildMenu(user);
+
+        Assert.DoesNotContain(
+            menu.SelectMany(item => item.Children ?? new List<NavigationMenuDto>()),
+            child => child.Path == "/pos-admin/seasonal-card-stats"
+        );
+    }
+
+    [Fact]
     public void BuildMenu_不再单列老系统操作日志入口()
     {
         var user = CreateUser(

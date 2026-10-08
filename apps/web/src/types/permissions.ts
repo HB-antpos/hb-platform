@@ -189,6 +189,12 @@ export const P = {
   DailyCloseRecords: {
     View: 'DailyCloseRecords.View',
   },
+  // 节日贺卡：后台「分店填报统计」查看全部分店（与后端 Permissions.SeasonalCards.Remaining.ViewAllStores 一致）。
+  SeasonalCards: {
+    Remaining: {
+      ViewAllStores: 'SeasonalCards.Remaining.ViewAllStores',
+    },
+  },
   Dashboard: {
     View: 'Dashboard',
   },

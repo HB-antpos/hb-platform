@@ -1,0 +1,778 @@
+/*
+ * 节日贺卡分店填报统计页（普通 CSS + seasonal-card-stats- 前缀全局类名：CI 测试打包把 .css 当空模块，不能用 CSS Modules）。
+ * 视觉沿用日结记录页的后台体系：antd 默认算法 · 主色 #1677ff · 圆角 10/14 · 与页头同款的卡片阴影。
+ * 「未填报」用琥珀色（文字 #ad4e00，比设计稿略深一档保证小字号对比度），「已填报」用绿色。
+ */
+
+:root {
+  --scs-ok: #237804;
+  --scs-ok-bg: #f6ffed;
+  --scs-ok-border: #b7eb8f;
+  --scs-warn: #ad4e00;
+  --scs-warn-bg: #fffbe6;
+  --scs-warn-border: #ffe58f;
+  --scs-warn-row: #fffcf5;
+  --scs-accent: #1677ff;
+  --scs-text: rgba(0, 0, 0, 0.88);
+  --scs-sub: rgba(0, 0, 0, 0.6);
+  --scs-faint: rgba(0, 0, 0, 0.38);
+  --scs-line: #f0f0f0;
+  --scs-head: #fafafa;
+}
+
+/*
+ * 本页的副标题是一句口径说明，比其他页的「共 N 条」长：全局紧凑页头把副标题设成 nowrap，
+ * 窄屏会把整页撑出横向滚动、标题被挤成一字一行。只对本页（含本页筛选栏的页面容器）放开换行。
+ */
+.page-container:has(> .seasonal-card-stats-filter) .page-header-compact-title {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.page-container:has(> .seasonal-card-stats-filter) .page-header-compact-title > h4 {
+  flex: none;
+}
+
+.page-container:has(> .seasonal-card-stats-filter) .page-header-compact-subtitle {
+  white-space: normal;
+}
+
+.seasonal-card-stats-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.seasonal-card-stats-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.seasonal-card-stats-muted {
+  margin: 0;
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+/* ───────── 标签 ───────── */
+
+.seasonal-card-stats-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: var(--scs-head);
+  color: var(--scs-sub);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-tag.is-filled {
+  color: var(--scs-ok);
+  background: var(--scs-ok-bg);
+  border-color: var(--scs-ok-border);
+}
+
+.seasonal-card-stats-tag.is-unfilled {
+  color: var(--scs-warn);
+  background: var(--scs-warn-bg);
+  border-color: var(--scs-warn-border);
+}
+
+.seasonal-card-stats-tag.is-holiday {
+  color: #0958d9;
+  background: #e6f4ff;
+  border-color: #91caff;
+}
+
+/* ───────── 筛选栏 ───────── */
+
+.seasonal-card-stats-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  padding: 14px 16px;
+}
+
+.seasonal-card-stats-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.seasonal-card-stats-field > label,
+.seasonal-card-stats-field > span {
+  font-size: 12px;
+  color: var(--scs-sub);
+}
+
+.seasonal-card-stats-field.is-year {
+  /* 英文「2026 (this year)」要完整显示 */
+  width: 168px;
+}
+
+.seasonal-card-stats-field.is-holiday {
+  width: 120px;
+}
+
+.seasonal-card-stats-field.is-supplier {
+  width: 220px;
+}
+
+.seasonal-card-stats-field.is-price {
+  width: 140px;
+}
+
+.seasonal-card-stats-field.is-store {
+  width: 220px;
+}
+
+.seasonal-card-stats-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.seasonal-card-stats-option small {
+  color: var(--scs-faint);
+  font-size: 12px;
+}
+
+.seasonal-card-stats-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seasonal-card-stats-count {
+  padding: 0 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seasonal-card-stats-segment.is-unfilled .seasonal-card-stats-count {
+  background: var(--scs-warn-bg);
+  color: var(--scs-warn);
+}
+
+.seasonal-card-stats-filter-note {
+  margin: 8px 4px 0;
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+/* ───────── 指标卡 ───────── */
+
+.seasonal-card-stats-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.seasonal-card-stats-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seasonal-card-stats-kpi > span {
+  color: var(--scs-sub);
+  font-size: 13px;
+}
+
+.seasonal-card-stats-kpi > small {
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+.seasonal-card-stats-kpi-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.seasonal-card-stats-kpi-value b {
+  color: var(--scs-text);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-kpi-value b.is-warn {
+  color: var(--scs-warn);
+}
+
+.seasonal-card-stats-kpi-value small {
+  color: var(--scs-sub);
+  font-size: 13px;
+}
+
+.seasonal-card-stats-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: #f0f0f0;
+  overflow: hidden;
+}
+
+.seasonal-card-stats-progress > div {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--scs-ok);
+  transition: width 0.3s ease;
+}
+
+/* ───────── 分店明细表 ───────── */
+
+.seasonal-card-stats-results {
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.seasonal-card-stats-results-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--scs-line);
+}
+
+.seasonal-card-stats-results-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.seasonal-card-stats-results-head span {
+  color: var(--scs-sub);
+  font-size: 13px;
+}
+
+.seasonal-card-stats-table {
+  font-variant-numeric: tabular-nums;
+}
+
+.seasonal-card-stats-table .ant-table-thead > tr > th {
+  background: var(--scs-head);
+}
+
+.seasonal-card-stats-table .ant-table-tbody > tr {
+  cursor: pointer;
+}
+
+/* 未填报行浅黄底（含固定列），数量列显示「—」 */
+.seasonal-card-stats-table .ant-table-tbody > tr.is-unfilled > td {
+  background: var(--scs-warn-row);
+  color: var(--scs-sub);
+}
+
+.seasonal-card-stats-table .ant-table-tbody > tr.is-selected > td {
+  background: #e6f4ff;
+}
+
+.seasonal-card-stats-table .ant-table-placeholder .ant-table-cell {
+  height: 180px;
+}
+
+.seasonal-card-stats-table .seasonal-card-stats-total > td {
+  background: var(--scs-head);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-table .ant-table-thead > tr > th {
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-store {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.seasonal-card-stats-store-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-table .seasonal-card-stats-col-gap {
+  padding-left: 24px !important;
+}
+
+.seasonal-card-stats-code {
+  flex: 0 0 auto;
+  color: var(--scs-sub);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.seasonal-card-stats-two-line {
+  display: flex;
+  flex-direction: column;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-two-line small {
+  color: var(--scs-sub);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.seasonal-card-stats-view {
+  padding: 0;
+}
+
+.seasonal-card-stats-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--scs-sub);
+  font-size: 13px;
+  text-align: center;
+}
+
+.seasonal-card-stats-state strong {
+  color: var(--scs-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.seasonal-card-stats-state.is-error strong {
+  color: #cf1322;
+}
+
+/* ───────── 底部三块 ───────── */
+
+.seasonal-card-stats-panels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.seasonal-card-stats-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seasonal-card-stats-panel h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.seasonal-card-stats-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.seasonal-card-stats-bars,
+.seasonal-card-stats-suppliers,
+.seasonal-card-stats-chips {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seasonal-card-stats-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.seasonal-card-stats-bars li,
+.seasonal-card-stats-compare {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.seasonal-card-stats-compare {
+  row-gap: 8px;
+}
+
+.seasonal-card-stats-compare-delta {
+  margin-top: 10px;
+}
+
+.seasonal-card-stats-bar-label {
+  color: var(--scs-sub);
+}
+
+.seasonal-card-stats-bar-track {
+  height: 10px;
+  border-radius: 5px;
+  background: #f0f0f0;
+  overflow: hidden;
+}
+
+.seasonal-card-stats-bar-track > span {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--scs-accent);
+}
+
+.seasonal-card-stats-bar-track.is-previous > span {
+  background: #bfbfbf;
+}
+
+.seasonal-card-stats-bar-value {
+  min-width: 64px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-suppliers {
+  display: flex;
+  flex-direction: column;
+}
+
+.seasonal-card-stats-suppliers li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--scs-line);
+  font-size: 13px;
+}
+
+.seasonal-card-stats-suppliers li:last-child {
+  border-bottom: 0;
+}
+
+.seasonal-card-stats-suppliers li > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.seasonal-card-stats-suppliers small {
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+.seasonal-card-stats-supplier-figures {
+  align-items: flex-end;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seasonal-card-stats-chips button {
+  padding: 2px 8px;
+  border: 1px solid var(--scs-warn-border);
+  border-radius: 6px;
+  background: var(--scs-warn-bg);
+  color: var(--scs-warn);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.seasonal-card-stats-chips button:hover,
+.seasonal-card-stats-chips button:focus-visible {
+  border-color: var(--scs-warn);
+}
+
+.seasonal-card-stats-footnote {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 10px;
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+.seasonal-card-stats-footnote strong {
+  color: var(--scs-text);
+  font-weight: 600;
+}
+
+.seasonal-card-stats-footnote ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+/* ───────── 单店明细抽屉 ───────── */
+
+.seasonal-card-stats-drawer .ant-drawer-content-wrapper {
+  max-width: 100vw;
+}
+
+.seasonal-card-stats-drawer .ant-drawer-body {
+  padding: 18px 20px 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seasonal-card-stats-drawer-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seasonal-card-stats-drawer-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seasonal-card-stats-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.seasonal-card-stats-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.seasonal-card-stats-detail-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.seasonal-card-stats-detail-totals > div {
+  padding: 12px 14px;
+  border: 1px solid var(--scs-line);
+  border-radius: 10px;
+}
+
+.seasonal-card-stats-detail-totals small {
+  display: block;
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+.seasonal-card-stats-detail-totals strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 20px;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-section h5 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.seasonal-card-stats-mini-scroll {
+  overflow-x: auto;
+}
+
+.seasonal-card-stats-mini-table {
+  width: 100%;
+  border: 1px solid var(--scs-line);
+  border-radius: 10px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.seasonal-card-stats-mini-table th,
+.seasonal-card-stats-mini-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--scs-line);
+  vertical-align: top;
+}
+
+.seasonal-card-stats-mini-table thead th {
+  background: var(--scs-head);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-mini-table tbody th {
+  font-weight: 500;
+  text-align: left;
+}
+
+.seasonal-card-stats-mini-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.seasonal-card-stats-mini-table .is-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.seasonal-card-stats-mini-table td.is-zero {
+  color: var(--scs-faint);
+}
+
+.seasonal-card-stats-unit {
+  display: block;
+  color: var(--scs-sub);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.seasonal-card-stats-placeholder {
+  padding: 14px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 10px;
+  background: #fcfcfc;
+  color: var(--scs-sub);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 提交记录时间线：当前生效实心蓝点，被取代的空心灰点、文字变淡 */
+.seasonal-card-stats-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seasonal-card-stats-timeline li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 14px 20px;
+  font-size: 13px;
+}
+
+.seasonal-card-stats-timeline li::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 2px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--scs-accent);
+  border-radius: 50%;
+  background: var(--scs-accent);
+}
+
+.seasonal-card-stats-timeline li::after {
+  content: '';
+  position: absolute;
+  top: 19px;
+  bottom: 0;
+  left: 7px;
+  width: 1px;
+  background: var(--scs-line);
+}
+
+.seasonal-card-stats-timeline li:last-child::after {
+  display: none;
+}
+
+.seasonal-card-stats-timeline li.is-replaced::before {
+  border-color: #bfbfbf;
+  background: #fff;
+}
+
+.seasonal-card-stats-timeline li.is-replaced {
+  color: var(--scs-sub);
+}
+
+.seasonal-card-stats-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.seasonal-card-stats-timeline-meta {
+  color: var(--scs-sub);
+  font-size: 12px;
+}
+
+.seasonal-card-stats-timeline-lines {
+  word-break: break-word;
+}
+
+/* ───────── 较窄宽度 ───────── */
+
+@media (max-width: 1199px) {
+  .seasonal-card-stats-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .seasonal-card-stats-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .seasonal-card-stats-filter {
+    padding: 12px;
+  }
+
+  .seasonal-card-stats-field,
+  .seasonal-card-stats-field.is-year,
+  .seasonal-card-stats-field.is-holiday,
+  .seasonal-card-stats-field.is-supplier,
+  .seasonal-card-stats-field.is-price,
+  .seasonal-card-stats-field.is-store {
+    width: calc(50% - 8px);
+  }
+
+  .seasonal-card-stats-field.is-status {
+    width: 100%;
+  }
+
+  .seasonal-card-stats-kpi-value b {
+    font-size: 22px;
+  }
+
+  .seasonal-card-stats-detail-totals {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 479px) {
+  .seasonal-card-stats-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .seasonal-card-stats-field,
+  .seasonal-card-stats-field.is-year,
+  .seasonal-card-stats-field.is-holiday,
+  .seasonal-card-stats-field.is-supplier,
+  .seasonal-card-stats-field.is-price,
+  .seasonal-card-stats-field.is-store {
+    width: 100%;
+  }
+}

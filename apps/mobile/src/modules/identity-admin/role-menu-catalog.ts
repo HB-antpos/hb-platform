@@ -54,6 +54,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/daily-closes", "Daily closes", "日结记录", ["DailyCloseRecords.View"]],
   // 分店现金管理（多店现金池、按日日结、存款、现金支出）：与移动端「现金」入口同一个 Cash.Overview.View。
   ["/pos-admin/store-cash", "Cash management", "现金管理", ["Cash.Overview.View"]],
+  // 与后端 FullMenu 一致：节日贺卡分店填报统计只认 SeasonalCards.Remaining.ViewAllStores（店长的填报权限不能打开）。
+  ["/pos-admin/seasonal-card-stats", "Seasonal card stats", "节日贺卡填报统计", ["SeasonalCards.Remaining.ViewAllStores"]],
   ["/pos-admin/schedule-attendance", "Schedule and attendance", "排班考勤", ["Attendance.Schedule.ViewStore"]],
   ["/pos-admin/sales-orders", "Sales orders", "销售订单", ["Orders.View"]],
   ["/pos-admin/local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.View"]],
