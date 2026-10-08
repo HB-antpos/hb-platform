@@ -24,7 +24,11 @@
       "allCategories": "All categories",
       "review": "Review status",
       "allReview": "All",
-      "includeVoided": "Include voided"
+      "includeVoided": "Include voided",
+      "register": "POS system",
+      "registerOn": "Enabled",
+      "registerOff": "Disabled",
+      "registerAll": "All"
     },
     "actions": {
       "refresh": "Refresh",
@@ -81,6 +85,7 @@
       "rangeNote": "Range {{from}} ~ {{to}}; cash pool balance and days not banked are as of each store's today",
       "rowHint": "Click a store to open its daily breakdown",
       "empty": "No data for the selected stores in this range",
+      "emptyRegister": "No stores match the POS system filter",
       "totalRow": "Total ({{count}} stores)",
       "columns": {
         "store": "Store",

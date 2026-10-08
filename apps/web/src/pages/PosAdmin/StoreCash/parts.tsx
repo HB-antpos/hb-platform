@@ -3,7 +3,14 @@ import { Alert, Button, DatePicker, Select, Tooltip } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ReactNode } from 'react'
 import type { CashStoreOption } from '../../../types/storeCash'
-import { formatAud, formatSignedAud, isDateDisabled, isNegativeAmount, MAX_RANGE_DAYS } from './logic'
+import {
+  formatAud,
+  formatSignedAud,
+  isDateDisabled,
+  isNegativeAmount,
+  MAX_RANGE_DAYS,
+  type CashRegisterFilter,
+} from './logic'
 
 export type Tr = (key: string, params?: Record<string, string | number>) => string
 
@@ -119,6 +126,31 @@ export function StoreSelect({ stores, value, disabled, tr, onChange }: {
         aria-label={tr('filters.store')}
         filterOption={matchStore}
         options={stores.map((store) => ({ value: store.storeCode, label: storeOptionLabel(store) }))}
+        onChange={onChange}
+      />
+    </label>
+  )
+}
+
+/** 收银系统筛选（所有页签共用）：缺省只看启用收银系统的分店。 */
+export function RegisterSelect({ value, tr, onChange }: {
+  value: CashRegisterFilter | undefined
+  tr: Tr
+  onChange: (value: CashRegisterFilter) => void
+}) {
+  return (
+    <label className="store-cash-field">
+      <span className="store-cash-field-label">{tr('filters.register')}</span>
+      <Select
+        className="store-cash-small-select"
+        value={value ?? 'on'}
+        aria-label={tr('filters.register')}
+        // 文案键写成字面量，契约测试靠静态扫描核对键名。
+        options={[
+          { value: 'on', label: tr('filters.registerOn') },
+          { value: 'off', label: tr('filters.registerOff') },
+          { value: 'all', label: tr('filters.registerAll') },
+        ] satisfies { value: CashRegisterFilter; label: string }[]}
         onChange={onChange}
       />
     </label>

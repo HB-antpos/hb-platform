@@ -44,6 +44,8 @@ export interface CashStoreOption {
   timeZoneId: string
   /** 该店当前的本地日期，日期选择以它为准，不用浏览器时区。 */
   storeToday: string
+  /** 该店是否启用收银系统；旧后端没有这个字段时按启用处理（服务层兜底）。 */
+  cashRegisterEnabled: boolean
 }
 
 export interface CashCapabilities {

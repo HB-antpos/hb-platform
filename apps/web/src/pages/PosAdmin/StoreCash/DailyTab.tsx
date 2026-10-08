@@ -18,7 +18,7 @@ import {
   timeZoneOf,
   weekdayKeyOf,
 } from './logic'
-import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, StoreSelect, type Tr } from './parts'
+import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, StoreSelect, type Tr } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -27,7 +27,7 @@ import { useCsvExport } from './useCsvExport'
  * 按日明细：单店逐日一行（日结现金、有无日结、是否已被存款覆盖、当天支出），
  * 展开看每台设备的日结存档与纳入情况。Web 端只读，纳入哪几份日结在员工 App 里手选。
  */
-export default function DailyTab({ context, filters, active, tr, tf, errorText, onQueryChange }: CashTabProps) {
+export default function DailyTab({ context, filters, query, active, tr, tf, errorText, onQueryChange }: CashTabProps) {
   const storeCode = filters.storeCode
   const timeZone = timeZoneOf(context.stores, storeCode)
   const requestKey = storeCode ? JSON.stringify(['daily', storeCode, filters.from, filters.to]) : null
@@ -130,7 +130,10 @@ export default function DailyTab({ context, filters, active, tr, tf, errorText, 
   return (
     <div className="store-cash-stack">
       <div className="store-cash-toolbar">
-        <StoreSelect stores={context.stores} value={storeCode} tr={tr} onChange={(code) => onQueryChange({ store: code })} />
+        {context.stores.length > 1 ? (
+          <RegisterSelect value={query.register} tr={tr} onChange={(register) => onQueryChange({ register })} />
+        ) : null}
+        <StoreSelect stores={filters.storeOptions} value={storeCode} tr={tr} onChange={(code) => onQueryChange({ store: code })} />
         <RangeFilter from={filters.from} to={filters.to} today={filters.today} tr={tr} onChange={(range) => onQueryChange(range)} />
         <div className="store-cash-toolbar-actions">
           <RefreshButton loading={loading} tr={tr} onClick={dailyRequest.reload} />

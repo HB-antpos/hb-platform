@@ -9,6 +9,7 @@ import {
   chooseCashErrorText,
   compareNullableNumber,
   dailyInflow,
+  filterStoresByRegister,
   defaultRange,
   formatAud,
   formatSignedAud,
@@ -63,8 +64,8 @@ assert.equal(isDateDisabled(addDays('2026-06-01', 93), '2026-10-07', '2026-06-01
 
 // 页面「今天」取各店最晚的门店本地日期；没有分店时用兜底。
 const stores: CashStoreOption[] = [
-  { storeCode: 'S001', storeName: 'Sydney', timeZoneId: 'Australia/Sydney', storeToday: '2026-10-08' },
-  { storeCode: 'S002', storeName: 'Perth', timeZoneId: 'Australia/Perth', storeToday: '2026-10-07' },
+  { storeCode: 'S001', storeName: 'Sydney', timeZoneId: 'Australia/Sydney', storeToday: '2026-10-08', cashRegisterEnabled: true },
+  { storeCode: 'S002', storeName: 'Perth', timeZoneId: 'Australia/Perth', storeToday: '2026-10-07', cashRegisterEnabled: true },
 ]
 assert.equal(referenceToday(stores, '2026-01-01'), '2026-10-08')
 assert.equal(referenceToday([], '2026-01-01'), '2026-01-01')
@@ -112,7 +113,9 @@ assert.deepEqual(resolvedDefault, {
   today: '2026-10-08',
   from: '2026-10-01',
   to: '2026-10-08',
+  storeOptions: stores,
   storeCodes: ['S002'],
+  selectedStoreCodes: ['S002'],
   storeCode: 'S001',
 })
 const explicit: CashPageQuery = { tab: 'daily', from: '2026-09-01', to: '2026-09-30', stores: [], store: 'S002', voided: false }
@@ -125,6 +128,35 @@ const perthDefault = resolveCashFilters({ tab: 'deposits', stores: [], store: 'S
 assert.deepEqual([perthDefault.today, perthDefault.from, perthDefault.to], ['2026-10-07', '2026-10-01', '2026-10-07'])
 const overviewDefault = resolveCashFilters({ tab: 'overview', stores: [], store: 'S002', voided: false }, stores, '2026-01-01')
 assert.equal(overviewDefault.to, '2026-10-08', '总览仍取各店最晚的今天')
+
+// 收银系统筛选：缺省只看启用；收窄范围时总览显式列出筛选后的分店，单店缺省取筛选后的第一家。
+const mixedStores: CashStoreOption[] = [
+  { ...stores[0], storeCode: 'S001', cashRegisterEnabled: false },
+  { ...stores[0], storeCode: 'S002', cashRegisterEnabled: true },
+  { ...stores[0], storeCode: 'S003', cashRegisterEnabled: true },
+]
+const codesOf = (list: readonly CashStoreOption[]) => list.map((store) => store.storeCode)
+assert.deepEqual(codesOf(filterStoresByRegister(mixedStores, undefined)), ['S002', 'S003'], '缺省只看启用')
+assert.deepEqual(codesOf(filterStoresByRegister(mixedStores, 'off')), ['S001'])
+assert.deepEqual(codesOf(filterStoresByRegister(mixedStores, 'all')), ['S001', 'S002', 'S003'])
+assert.deepEqual(codesOf(filterStoresByRegister([mixedStores[0]], undefined)), ['S001'], '只有一家可见分店时不筛')
+const onDefault = resolveCashFilters({ tab: 'overview', stores: [], voided: false }, mixedStores, '2026-01-01')
+assert.deepEqual(onDefault.storeCodes, ['S002', 'S003'], '收窄后没选分店：显式列出筛选后的分店')
+assert.deepEqual(onDefault.selectedStoreCodes, [], '多选框不显示补全的分店')
+const onPicked = resolveCashFilters({ tab: 'overview', stores: ['S001', 'S003'], voided: false }, mixedStores, '2026-01-01')
+assert.deepEqual([onPicked.storeCodes, onPicked.selectedStoreCodes], [['S003'], ['S003']], '筛选范围外的已选分店被丢弃')
+const allMode = resolveCashFilters({ tab: 'overview', stores: [], voided: false, register: 'all' }, mixedStores, '2026-01-01')
+assert.deepEqual(allMode.storeCodes, [], '全部：空数组 = 全部可见分店')
+assert.equal(resolveCashFilters({ tab: 'daily', stores: [], voided: false }, mixedStores, '2026-01-01').storeCode, 'S002', '单店缺省取第一家启用的')
+assert.equal(resolveCashFilters({ tab: 'daily', stores: [], store: 'S001', voided: false }, mixedStores, '2026-01-01').storeCode, 'S002', '筛选范围外的单店回到筛选后第一家')
+const noneMatch = resolveCashFilters({ tab: 'overview', stores: [], voided: false, register: 'off' }, [mixedStores[1], mixedStores[2]], '2026-01-01')
+assert.deepEqual([noneMatch.storeOptions, noneMatch.storeCode], [[], null], '筛选后没有分店')
+// 地址栏：缺省「只看启用」省略；off / all 往返；非法值回到缺省。
+assert.equal(parseCashSearch('register=on').register, undefined)
+assert.equal(parseCashSearch('register=bogus').register, undefined)
+assert.equal(parseCashSearch(serializeCashQuery({ tab: 'overview', stores: [], voided: false, register: 'off' })).register, 'off')
+assert.equal(serializeCashQuery({ tab: 'overview', stores: [], voided: false, register: 'all' }), 'tab=overview&register=all')
+assert.equal(serializeCashQuery({ tab: 'overview', stores: [], voided: false, register: 'on' }), 'tab=overview')
 
 // ---------------------------------------------------------------------------
 // 金额：千分位、澳元符号、负数、空值「—」

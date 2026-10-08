@@ -149,6 +149,29 @@ export interface CashPageQuery {
   review?: CashReviewStatus
   /** 存款、支出是否包含已作废记录。 */
   voided: boolean
+  /** 收银系统筛选：缺省 = 只看启用收银系统的分店；off = 只看未启用；all = 全部。所有页签共用。 */
+  register?: CashRegisterFilter
+}
+
+export const CASH_REGISTER_FILTERS = ['on', 'off', 'all'] as const
+export type CashRegisterFilter = (typeof CASH_REGISTER_FILTERS)[number]
+
+function isRegisterFilter(value: unknown): value is CashRegisterFilter {
+  return typeof value === 'string' && (CASH_REGISTER_FILTERS as readonly string[]).includes(value)
+}
+
+/**
+ * 按收银系统状态筛出页面可选的分店（保持原顺序）。
+ * 只有一家可见分店时不筛：此时页面不显示分店与收银系统筛选，筛掉就再也选不回来。
+ */
+export function filterStoresByRegister(
+  stores: readonly CashStoreOption[],
+  register: CashRegisterFilter | undefined,
+): CashStoreOption[] {
+  const mode = register ?? 'on'
+  if (mode === 'all' || stores.length <= 1) return [...stores]
+  const wantEnabled = mode === 'on'
+  return stores.filter((store) => store.cashRegisterEnabled === wantEnabled)
 }
 
 export const DEFAULT_CASH_QUERY: CashPageQuery = Object.freeze({ tab: 'overview', stores: [], voided: false }) as CashPageQuery
@@ -182,6 +205,7 @@ export function parseCashSearch(search: string): CashPageQuery {
   const category = params.get('category')
   const review = params.get('review')
   const voided = params.get('voided')
+  const register = params.get('register')
   return {
     tab: isCashTab(tabParam) ? tabParam : 'overview',
     ...(rangeOk ? { from, to } : {}),
@@ -190,6 +214,8 @@ export function parseCashSearch(search: string): CashPageQuery {
     ...(isExpenseCategory(category) ? { category } : {}),
     ...(isReviewStatus(review) ? { review } : {}),
     voided: voided === '1' || voided === 'true',
+    // 缺省「只看启用」不写进对象，与默认值省略的其它参数一致。
+    ...(isRegisterFilter(register) && register !== 'on' ? { register } : {}),
   }
 }
 
@@ -206,6 +232,7 @@ export function serializeCashQuery(query: CashPageQuery): string {
   if (query.category) params.set('category', query.category)
   if (query.review) params.set('review', query.review)
   if (query.voided) params.set('voided', '1')
+  if (query.register && query.register !== 'on') params.set('register', query.register)
   return params.toString()
 }
 
@@ -214,8 +241,15 @@ export interface ResolvedCashFilters {
   today: string
   from: string
   to: string
-  /** 总览实际查询的分店：只保留当前账号可见的；空数组 = 全部可见分店。 */
+  /** 按收银系统筛选后可选的分店：分店下拉只列这些；为空时总览不取数、单店页签无分店。 */
+  storeOptions: CashStoreOption[]
+  /**
+   * 总览实际查询的分店：只保留筛选后可选的；空数组 = 全部可见分店。
+   * 收银系统筛选收窄了范围而又没选具体分店时，显式列出筛选后的全部分店（后端空数组表示全部）。
+   */
   storeCodes: string[]
+  /** 总览分店多选框显示的值：只是用户选中且仍在筛选范围内的分店，不含上面为收窄而补全的列表。 */
+  selectedStoreCodes: string[]
   /** 单店页签实际查询的分店：地址里的分店不可见时回到第一家；没有可见分店时为 null。 */
   storeCode: string | null
 }
@@ -226,9 +260,12 @@ export function resolveCashFilters(
   stores: readonly CashStoreOption[],
   fallbackToday: string,
 ): ResolvedCashFilters {
-  const visible = new Set(stores.map((store) => store.storeCode))
-  const storeCodes = query.stores.filter((code) => visible.has(code))
-  const storeCode = query.store && visible.has(query.store) ? query.store : stores[0]?.storeCode ?? null
+  const storeOptions = filterStoresByRegister(stores, query.register)
+  const visible = new Set(storeOptions.map((store) => store.storeCode))
+  const picked = query.stores.filter((code) => visible.has(code))
+  const narrowed = storeOptions.length < stores.length
+  const storeCodes = picked.length > 0 || !narrowed ? picked : storeOptions.map((store) => store.storeCode)
+  const storeCode = query.store && visible.has(query.store) ? query.store : storeOptions[0]?.storeCode ?? null
   // 「今天」：总览取各店最晚的门店日期（与后端总览默认区间一致）；单店页签取该店自己的今天，
   // 避免珀斯等时区较晚的分店默认区间里出现还没到的日子。
   const ownStore = query.tab === 'overview' ? undefined : stores.find((store) => store.storeCode === storeCode)
@@ -236,7 +273,7 @@ export function resolveCashFilters(
   const range = checkRange(query.from, query.to) === null
     ? { from: query.from as string, to: query.to as string }
     : defaultRange(today)
-  return { today, ...range, storeCodes, storeCode }
+  return { today, ...range, storeOptions, storeCodes, selectedStoreCodes: picked, storeCode }
 }
 
 // ---------------------------------------------------------------------------

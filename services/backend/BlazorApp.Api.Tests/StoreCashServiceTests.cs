@@ -49,7 +49,7 @@ public sealed class StoreCashServiceTests : IDisposable
         _db.Insertable(new List<Store>
         {
             new() { StoreGUID = "g-1", StoreCode = "S001", StoreName = "一号店", TimeZoneId = "Australia/Sydney" },
-            new() { StoreGUID = "g-2", StoreCode = "S002", StoreName = "二号店", TimeZoneId = "Australia/Sydney" },
+            new() { StoreGUID = "g-2", StoreCode = "S002", StoreName = "二号店", TimeZoneId = "Australia/Sydney", IsActive = false },
         }).ExecuteCommand();
     }
 
@@ -353,6 +353,18 @@ public sealed class StoreCashServiceTests : IDisposable
         var context = (await service.GetContextAsync(Manager(), default)).Data!;
         Assert.Equal(new[] { "S001" }, context.Stores.Select(store => store.StoreCode));
         Assert.Equal(Today, context.Stores.Single().StoreToday);
+    }
+
+    [Fact]
+    public async Task Context_分店带出是否启用收银系统()
+    {
+        var service = CreateService();
+        // 未启用收银系统的分店照样列出（由页面筛选决定是否显示），只是标记为未启用。
+        var context = (await service.GetContextAsync(Finance(), default)).Data!;
+        Assert.Equal(
+            new[] { ("S001", true), ("S002", false) },
+            context.Stores.Select(store => (store.StoreCode, store.CashRegisterEnabled))
+        );
     }
 
     // ───────────────────────── 支出与 T2 ─────────────────────────

@@ -15,7 +15,7 @@ import {
   EMPTY_CELL,
   formatCount,
 } from './logic'
-import { Amount, ExportButton, KpiTile, LoadErrorAlert, RangeFilter, RefreshButton, storeOptionLabel } from './parts'
+import { Amount, ExportButton, KpiTile, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, storeOptionLabel } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -32,16 +32,19 @@ const CATEGORY_COLUMNS: { category: CashExpenseCategory; titleKey: string }[] = 
  * 「现金池余额、未存天数、最近存款日」截止各店今天；「日结现金、存款、支出」只统计所选区间。
  * 日结未接入时现金池余额、日结现金、日结差异为 null，显示「—」，合计同样不可算。
  */
-export default function OverviewTab({ context, filters, active, tr, tf, errorText, onQueryChange }: CashTabProps) {
+export default function OverviewTab({ context, filters, query, active, tr, tf, errorText, onQueryChange }: CashTabProps) {
   const t2Days = context.t2VisibleDays || DEFAULT_T2_VISIBLE_DAYS
   const storeCodes = useMemo(() => [...filters.storeCodes].sort(), [filters.storeCodes])
-  const requestKey = JSON.stringify(['overview', filters.from, filters.to, storeCodes])
+  // 收银系统筛选后一家分店都没有：不取数（后端空数组表示全部分店），表格显示筛选为空。
+  const noStoreInScope = filters.storeOptions.length === 0
+  const requestKey = noStoreInScope ? null : JSON.stringify(['overview', filters.from, filters.to, storeCodes])
   const overviewRequest = useCashRequest<CashOverview>(
     requestKey,
     (signal) => getCashOverview({ from: filters.from, to: filters.to, storeCodes }, signal),
     active,
   )
-  const overview = overviewRequest.data
+  // 不取数时 useCashRequest 会留着上一次的结果，这里显式清空，避免显示筛选前的分店。
+  const overview = noStoreInScope ? null : overviewRequest.data
   const loading = overviewRequest.loading
   const loadError = overviewRequest.error ? errorText(overviewRequest.error) : null
   const exporter = useCsvExport(tr, errorText)
@@ -237,6 +240,9 @@ export default function OverviewTab({ context, filters, active, tr, tf, errorTex
           onChange={(range) => onQueryChange(range)}
         />
         {showStorePicker ? (
+          <RegisterSelect value={query.register} tr={tr} onChange={(register) => onQueryChange({ register })} />
+        ) : null}
+        {showStorePicker ? (
           <label className="store-cash-field">
             <span className="store-cash-field-label">{tr('filters.stores')}</span>
             <Select
@@ -246,9 +252,9 @@ export default function OverviewTab({ context, filters, active, tr, tf, errorTex
               maxTagCount="responsive"
               aria-label={tr('filters.stores')}
               placeholder={tr('filters.allStores')}
-              value={filters.storeCodes}
+              value={filters.selectedStoreCodes}
               optionFilterProp="label"
-              options={context.stores.map((store) => ({ value: store.storeCode, label: storeOptionLabel(store) }))}
+              options={filters.storeOptions.map((store) => ({ value: store.storeCode, label: storeOptionLabel(store) }))}
               onChange={(codes: string[]) => onQueryChange({ stores: codes })}
             />
           </label>
@@ -343,7 +349,14 @@ export default function OverviewTab({ context, filters, active, tr, tf, errorTex
           dataSource={overview?.rows ?? []}
           pagination={false}
           scroll={{ x: 1640 }}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tr('overview.empty')} /> }}
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={noStoreInScope ? tr('overview.emptyRegister') : tr('overview.empty')}
+              />
+            ),
+          }}
           rowClassName={() => 'store-cash-row-clickable'}
           onRow={(row) => ({ onClick: () => openDaily(row.storeCode) })}
           summary={() => (totals && overview && overview.rows.length > 1 ? (

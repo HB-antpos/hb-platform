@@ -42,7 +42,8 @@ function arrayOf<T>(value: T[] | null | undefined): T[] {
 function normalizeContext(raw: CashContext): CashContext {
   return {
     ...raw,
-    stores: arrayOf(raw?.stores),
+    // 旧后端不返回 cashRegisterEnabled：按启用处理，避免先发前端时分店被「只看启用」筛掉。
+    stores: arrayOf(raw?.stores).map((store) => ({ ...store, cashRegisterEnabled: store?.cashRegisterEnabled !== false })),
     capabilities: {
       canCreateDeposit: raw?.capabilities?.canCreateDeposit === true,
       canCreateExpense: raw?.capabilities?.canCreateExpense === true,

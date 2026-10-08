@@ -24,7 +24,11 @@
       "allCategories": "全部类别",
       "review": "核对状态",
       "allReview": "全部",
-      "includeVoided": "含已作废"
+      "includeVoided": "含已作废",
+      "register": "收银系统",
+      "registerOn": "已启用",
+      "registerOff": "未启用",
+      "registerAll": "全部"
     },
     "actions": {
       "refresh": "刷新",
@@ -81,6 +85,7 @@
       "rangeNote": "区间 {{from}} ~ {{to}}；现金池余额与未存天数截止各店今天",
       "rowHint": "点分店查看按日明细",
       "empty": "所选分店在该区间没有数据",
+      "emptyRegister": "没有符合「收银系统」筛选的分店",
       "totalRow": "合计（{{count}} 家）",
       "columns": {
         "store": "分店",
