@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Features.StoreOrders.ProductHistory.Domain;
+using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.Attendance;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -126,6 +127,12 @@ internal sealed class ProductSalesHistoryQueryStore(
                 out var lastArrivalDate
             )
                 ? lastArrivalDate
+                : null;
+            // 销量实际统计起点：日统计只有 2024-09-14 起的数据，来货早于它时从数据起点算，避免把缺数据误读成没卖出。
+            item.SalesStartDate = item.LastArrivalDate is { } arrivalDay
+                ? (arrivalDay.Date > SalesStatisticsHBSalesHistoryWindow.StartDate
+                    ? arrivalDay.Date
+                    : SalesStatisticsHBSalesHistoryWindow.StartDate)
                 : null;
             item.LastArrivalQuantity = salesQuantityResult.ArrivalQuantityMap.TryGetValue(
                 item.ProductCode,

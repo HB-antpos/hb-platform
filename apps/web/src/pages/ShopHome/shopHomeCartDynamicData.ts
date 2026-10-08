@@ -313,6 +313,7 @@ export function mergeShopHomeBaseDynamicDataMap(
             lastArrivalQuantity: previousData.lastArrivalQuantity,
             lastArrivalOrderQuantity: previousData.lastArrivalOrderQuantity,
             lastArrivalOrderDate: previousData.lastArrivalOrderDate,
+            salesStartDate: previousData.salesStartDate,
           }
   })
 

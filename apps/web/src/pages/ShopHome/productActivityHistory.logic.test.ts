@@ -5,6 +5,7 @@ import {
   runProductActivityHistoryRequest,
 } from './productActivityHistoryRequestCoordinator'
 import { buildProductActivityTableRows } from './productActivityHistoryRows'
+import { formatShopCardDate } from './shopCardDate'
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -254,6 +255,14 @@ async function main() {
   assertEqual(abortController.signal.aborted, true, 'AbortController 必须已取消')
   assertEqual(committed.length, beforeAbortCommitted, 'AbortError 不得提交成功结果')
   assertEqual(errors.length, beforeAbortErrors, 'AbortError 不得进入错误状态')
+
+  // 商品卡片日期：澳洲习惯「日 月份缩写 年」，与浏览器地区无关；只认开头的 YYYY-MM-DD，不做时区换算。
+  assertEqual(formatShopCardDate('2024-06-04T00:00:00'), '4 Jun 2024', '6 月 4 日不能显示成易误读的 6/4')
+  assertEqual(formatShopCardDate('2026-12-31T23:30:00'), '31 Dec 2026', '墙钟时间不得因时区换算跨到下一天')
+  assertEqual(formatShopCardDate('2026-01-09'), '9 Jan 2026', '纯日期字符串')
+  assertEqual(formatShopCardDate(null), null, '缺失日期返回 null')
+  assertEqual(formatShopCardDate('2026-13-01'), null, '非法月份返回 null')
+  assertEqual(formatShopCardDate('20260901'), null, '非 YYYY-MM-DD 开头返回 null')
 
   console.log('productActivityHistory.logic.test: ok')
 }

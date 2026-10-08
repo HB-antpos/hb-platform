@@ -905,6 +905,11 @@ namespace BlazorApp.Shared.DTOs
     /// 最近一次送货的订单的订货日期；无来货时为 null。
     /// </summary>
     public DateTime? LastArrivalOrderDate { get; set; }
+
+    /// <summary>
+    /// 来货后销量的实际统计起点：来货日期与日统计数据起点（2024-09-14）取较晚者；无来货时为 null。
+    /// </summary>
+    public DateTime? SalesStartDate { get; set; }
   }
 
   /// <summary>

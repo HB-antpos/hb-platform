@@ -527,6 +527,7 @@ export default function ShopHomePage() {
                 lastArrivalQuantity,
                 lastArrivalOrderQuantity,
                 lastArrivalOrderDate,
+                salesStartDate,
               },
             ]) => {
               const previousData = previousMap[productCode]
@@ -537,7 +538,8 @@ export default function ShopHomePage() {
                   && previousData.lastArrivalDate === lastArrivalDate
                   && previousData.lastArrivalQuantity === lastArrivalQuantity
                   && previousData.lastArrivalOrderQuantity === lastArrivalOrderQuantity
-                  && previousData.lastArrivalOrderDate === lastArrivalOrderDate)
+                  && previousData.lastArrivalOrderDate === lastArrivalOrderDate
+                  && previousData.salesStartDate === salesStartDate)
               ) {
                 return
               }
@@ -550,6 +552,7 @@ export default function ShopHomePage() {
                 lastArrivalQuantity,
                 lastArrivalOrderQuantity,
                 lastArrivalOrderDate,
+                salesStartDate,
               }
             })
             return hasChanged ? nextMap : previousMap

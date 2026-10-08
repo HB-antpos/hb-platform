@@ -4669,6 +4669,18 @@ body {
   border-top: 1px solid #d8e7f4;
 }
 
+.shop-product-activity-sales-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shop-product-activity-sales-since {
+  color: var(--shop-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .shop-product-activity-sales-value {
   color: var(--shop-text);
   font-size: 15px;

@@ -513,6 +513,8 @@ export interface StoreOrderDynamicData {
   lastArrivalQuantity?: number | null
   lastArrivalOrderQuantity?: number | null
   lastArrivalOrderDate?: string | null
+  // 来货后销量的实际统计起点（来货日与日统计数据起点 2024-09-14 取较晚者）。
+  salesStartDate?: string | null
 }
 
 export interface StoreOrderDynamicDataRequest {
@@ -533,6 +535,7 @@ export interface StoreOrderProductSalesSummaryItem {
   lastArrivalQuantity: number | null
   lastArrivalOrderQuantity: number | null
   lastArrivalOrderDate: string | null
+  salesStartDate: string | null
 }
 
 export interface StoreOrderCartItem {

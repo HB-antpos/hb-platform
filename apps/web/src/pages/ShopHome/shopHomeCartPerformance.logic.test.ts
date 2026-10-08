@@ -76,6 +76,7 @@ async function main() {
           lastArrivalQuantity: 24,
           lastArrivalOrderQuantity: 0,
           lastArrivalOrderDate: '2026-09-10T09:00:00',
+          salesStartDate: '2026-09-15T00:00:00',
         },
         P2: {
           productCode: 'P2',
@@ -94,6 +95,7 @@ async function main() {
       assert(nextMap.P1.lastArrivalQuantity === 24, '来货数量必须与 Sales 一起在局部刷新后保留')
       assert(nextMap.P1.lastArrivalOrderQuantity === 0, '来货对应订货数量（含 0）必须在局部刷新后保留')
       assert(nextMap.P1.lastArrivalOrderDate === '2026-09-10T09:00:00', '来货订单的订货日期必须在局部刷新后保留')
+      assert(nextMap.P1.salesStartDate === '2026-09-15T00:00:00', '销量统计起点必须在局部刷新后保留')
       assert(nextMap.P2.salesQuantitySinceLastArrival === null, '不可用 Sales 的 null 语义必须保留')
       assert(
         shopHomeSource.includes('mergeShopHomeBaseDynamicDataMap(prev, nextMap)'),

@@ -4686,10 +4686,32 @@ public sealed class StoreOrderProductListTests : IDisposable
         Assert.True(result.Success, result.Message);
         Assert.Collection(
             result.Data!,
-            item => { Assert.Equal("P-ZERO", item.ProductCode); Assert.Equal(0, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); Assert.Equal(1m, item.LastArrivalQuantity); },
+            item => { Assert.Equal("P-ZERO", item.ProductCode); Assert.Equal(0, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); Assert.Equal(1m, item.LastArrivalQuantity); Assert.Equal(today.AddDays(-1), item.SalesStartDate); },
             item => { Assert.Equal("P-NEGATIVE", item.ProductCode); Assert.Equal(-3, item.SalesQuantitySinceLastArrival); Assert.Equal(today.AddDays(-1), item.LastArrivalDate); Assert.Equal(1m, item.LastArrivalQuantity); },
-            item => { Assert.Equal("P-NO-ARRIVAL", item.ProductCode); Assert.Null(item.SalesQuantitySinceLastArrival); Assert.Null(item.LastArrivalDate); Assert.Null(item.LastArrivalQuantity); }
+            item => { Assert.Equal("P-NO-ARRIVAL", item.ProductCode); Assert.Null(item.SalesQuantitySinceLastArrival); Assert.Null(item.LastArrivalDate); Assert.Null(item.LastArrivalQuantity); Assert.Null(item.SalesStartDate); }
         );
+    }
+
+    [Fact]
+    public async Task GetSalesSinceLastArrivalSummaryAsync_来货早于日统计数据起点时统计起点取数据起点()
+    {
+        var today = new DateTime(2026, 8, 18);
+        await SeedStoreOrderAsync("ORDER-OLD-ARRIVAL", flowStatus: 2, orderDate: new DateTime(2024, 6, 4), outboundDate: new DateTime(2024, 6, 4));
+        await SeedOrderDetailOnlyAsync("ORDER-OLD-ARRIVAL", "P-OLD", quantity: 12m, allocQuantity: 12m);
+
+        var result = await CreateServiceForSalesDate(today).GetSalesSinceLastArrivalSummaryAsync(
+            new StoreOrderSalesSinceLastArrivalSummaryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCodes = new List<string> { "P-OLD" },
+            }
+        );
+
+        Assert.True(result.Success, result.Message);
+        var item = Assert.Single(result.Data!);
+        Assert.Equal(new DateTime(2024, 6, 4), item.LastArrivalDate);
+        Assert.Equal(new DateTime(2024, 9, 14), item.SalesStartDate);
+        Assert.Equal(0, item.SalesQuantitySinceLastArrival);
     }
 
     [Fact]
