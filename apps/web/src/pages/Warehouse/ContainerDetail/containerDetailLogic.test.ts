@@ -58,6 +58,7 @@ import {
   buildContainerDetailExportRow,
   buildContainerDetailExportRows,
   buildContainerDetailHqPushSelection,
+  buildCreatedProductsHqPushPlan,
   buildContainerDetailTranslationUpdates,
   calculateContainerDetailImportPrice,
   calculateContainerFreight,
@@ -3657,6 +3658,85 @@ assertDeepEqual(
   '发送到 HQ 的候选项应保留图片和价格，但不得携带仓库上下架状态',
 )
 
+// ---- 创建新商品后同时更新 HQ：从结果 created + 重载后的行挑发送选择 ----
+{
+  const latestRows: ContainerDetail[] = [
+    // 重载后已建档：是否新商品变为 false，价格以重载后的行为准
+    { id: 30, hguid: 'D-30', 商品编码: 'HB030', 是否新商品: false, 进口价格: 3.3, 贴牌价格: 6.6 },
+    // 重载后仍被标成新商品（例如标记滞后）：仍应发送，最终由后端按本地 Product 实时判定
+    { id: 31, hguid: 'd-31', 商品编码: 'HB031', 是否新商品: true },
+    // 本次未创建的行：即使在当前视图里也不应被发送
+    { id: 32, hguid: 'D-32', 商品编码: 'HB032', 是否新商品: false },
+    // 同一商品编码的另一条明细
+    { id: 33, hguid: 'D-33', 商品编码: 'HB030', 是否新商品: false },
+    // 无编码也无供应商+货号：无法作为候选
+    { id: 34, hguid: 'D-34', 是否新商品: false },
+    // 只能按商品编码对应的行
+    { id: 36, hguid: 'D-36', 商品编码: 'HB036', 是否新商品: false },
+  ]
+  const confirmedRows: ContainerDetail[] = [
+    { id: 30, hguid: 'D-30', 商品编码: 'HB030', 是否新商品: true, 进口价格: 1.1, 贴牌价格: 2.2 },
+    // 分页/筛选导致重载后不在当前已加载行里：回退用确认时的行
+    { id: 35, hguid: 'D-35', 商品编码: 'HB035', 是否新商品: true, 进口价格: 5.5 },
+  ]
+
+  const emptyPlan = buildCreatedProductsHqPushPlan([], latestRows, confirmedRows)
+  assertDeepEqual(
+    { codes: emptyPlan.selection.productCodes, items: emptyPlan.selection.items.length, unsent: emptyPlan.unsentCreatedCount },
+    { codes: [], items: 0, unsent: 0 },
+    '本次没有创建成功的商品时不应产生任何发送候选',
+  )
+
+  const plan = buildCreatedProductsHqPushPlan(
+    [
+      // 明细 GUID 大小写与空白不同也应命中重载后的行
+      { detailHguid: ' d-30 ', productCode: 'HB030' },
+      { detailHguid: 'D-31', productCode: 'HB031' },
+      // 没有明细 GUID 时按商品编码（忽略大小写与空白）对应
+      { productCode: ' hb036 ' },
+      // 不在重载后的行里：回退确认时的行
+      { detailHguid: 'D-35', productCode: 'HB035' },
+      // 哪里都找不到：计入未发送
+      { detailHguid: 'D-99', productCode: 'HB099' },
+      // 找到了行但行上没有编码/供应商+货号：同样计入未发送
+      { detailHguid: 'D-34' },
+    ],
+    latestRows,
+    confirmedRows,
+  )
+  assertDeepEqual(
+    plan.selection.productCodes,
+    ['HB030', 'HB031', 'HB036', 'HB035'],
+    '只应发送本次 created 的商品，按编码去重，且不因行仍是新商品而跳过',
+  )
+  assertDeepEqual(
+    plan.selection.items.map((item) => ({ code: item.productCode, importPrice: item.importPrice, isNewProduct: item.isNewProduct })),
+    [
+      { code: 'HB030', importPrice: 3.3, isNewProduct: false },
+      { code: 'HB031', importPrice: undefined, isNewProduct: true },
+      { code: 'HB036', importPrice: undefined, isNewProduct: false },
+      { code: 'HB035', importPrice: 5.5, isNewProduct: true },
+    ],
+    '候选数据应优先取重载后的最新行，找不到时才回退确认时的行',
+  )
+  assertEqual(plan.unsentCreatedCount, 2, '找不到对应明细或行上缺商品编码的新建商品应计入未发送，不能静默吞掉')
+
+  const duplicatePlan = buildCreatedProductsHqPushPlan(
+    [
+      { detailHguid: 'D-30', productCode: 'HB030' },
+      { detailHguid: 'D-30', productCode: 'HB030' },
+      { detailHguid: 'D-33', productCode: 'hb030' },
+    ],
+    latestRows,
+    confirmedRows,
+  )
+  assertDeepEqual(
+    { codes: duplicatePlan.selection.productCodes, items: duplicatePlan.selection.items.length, unsent: duplicatePlan.unsentCreatedCount },
+    { codes: ['HB030'], items: 1, unsent: 0 },
+    '重复的 created 项与同编码的多条明细只应发送一次',
+  )
+}
+
 assertEqual(
   getContainerDetailImageUrl({
     id: 24,
@@ -3802,6 +3882,70 @@ assertEqual(
   )
 }
 assertEqual(createProductsJobSource.includes('Modal.'), false, '批量创建新商品后台任务终态只使用右上角通知，不应再弹结果 Modal')
+
+// ---- 创建新商品确认框「同时更新 HQ 数据库」 ----
+{
+  const pushCreatedStart = pageSource.indexOf('const pushCreatedProductsToHq = async (')
+  const pushCreatedSource = pageSource.slice(pushCreatedStart, pageSource.indexOf('const createNewProducts = async () => {'))
+  const submitStart = pageSource.indexOf('const submitPushToHqJob = async (')
+  const submitSource = pageSource.slice(submitStart, pageSource.indexOf('const handlePushSelectedProductsToHq = async () => {'))
+  const manualPushSource = pageSource.slice(
+    pageSource.indexOf('const handlePushSelectedProductsToHq = async () => {'),
+    pageSource.indexOf('const renderCreateProductResultItems = (items: ContainerProductCreationResultItem[]) => {'),
+  )
+  assertEqual(
+    createNewProductsHandlerSource.includes('let pushToHqAfterCreate = true') &&
+      createNewProductsHandlerSource.includes('<Checkbox') &&
+      createNewProductsHandlerSource.includes('defaultChecked') &&
+      createNewProductsHandlerSource.includes('pushToHqAfterCreate = event.target.checked') &&
+      createNewProductsHandlerSource.includes("t('containers.text.createProductsPushToHqAfterCreate'") &&
+      createNewProductsHandlerSource.indexOf('let pushToHqAfterCreate = true') < createNewProductsHandlerSource.indexOf('const scopedRows = await confirmBatchRows'),
+    true,
+    '创建新商品确认框应带「同时更新 HQ 数据库」复选框，每次打开默认勾选且不持久化',
+  )
+  {
+    const reloadIndex = createNewProductsHandlerSource.indexOf('await reloadCurrentDetailRef.current()')
+    const guardIndex = createNewProductsHandlerSource.indexOf('if (pushToHqAfterCreate) {')
+    const pushIndex = createNewProductsHandlerSource.indexOf('await pushCreatedProductsToHq(finalJob.result.created, scopedRows)')
+    const catchIndex = createNewProductsHandlerSource.indexOf("t('containers.messages.createProductFailed'")
+    assertEqual(
+      reloadIndex >= 0 &&
+        reloadIndex < guardIndex &&
+        guardIndex < pushIndex &&
+        pushIndex < catchIndex &&
+        createNewProductsHandlerSource.split('pushCreatedProductsToHq(').length - 1 === 1 &&
+        createNewProductsHandlerSource.indexOf('pushCreatedProductsToHq', catchIndex) === -1,
+      true,
+      '只在勾选时、且在明细重载之后发送本次 created 的商品；抛异常的 catch 分支不发送',
+    )
+  }
+  assertEqual(
+    pushCreatedStart >= 0 &&
+      pushCreatedSource.includes('if (!createdItems.length) return') &&
+      pushCreatedSource.includes('buildCreatedProductsHqPushPlan(createdItems, rowsRef.current, confirmedRows)') &&
+      pushCreatedSource.includes("'containers.messages.createProductsPushHqUnsent'") &&
+      pushCreatedSource.includes('if (pushToHqLoadingRef.current) {') &&
+      pushCreatedSource.includes("'containers.messages.createProductsPushHqBusy'") &&
+      // 并发判断必须在真正提交之前
+      pushCreatedSource.indexOf('if (pushToHqLoadingRef.current) {') < pushCreatedSource.indexOf('await submitPushToHqJob(') &&
+      pushCreatedSource.includes('await submitPushToHqJob(plan.selection, [...defaultPushProductsToHqUpdateFields])') &&
+      !pushCreatedSource.includes('confirmPushToHqUpdateFields'),
+    true,
+    '自动发送只取 created、用重载后的行构造候选、用默认字段不弹选择框，未找到对应明细或已有发送在提交时给 warning',
+  )
+  assertEqual(
+    submitStart >= 0 &&
+      submitSource.includes('pushToHqLoadingRef.current = true') &&
+      submitSource.includes('createPushProductsToHqJob({') &&
+      submitSource.includes('pollPushToHqJob(job, selection, pushToHqNotificationKey)') &&
+      submitSource.includes('releasePushToHqLoading()') &&
+      manualPushSource.includes('await submitPushToHqJob(selection, updateFields, () => setSelectedRowKeys([]))') &&
+      !manualPushSource.includes('createPushProductsToHqJob(') &&
+      pageSource.split('createPushProductsToHqJob({').length - 1 === 1,
+    true,
+    '手动「发送到 HQ」与创建后自动发送应复用同一个提交 + 通知 + 轮询函数',
+  )
+}
 assertEqual(
   pageSource.includes("createPushProductsToHqJob") && pageSource.includes("getPushProductsToHqJob"),
   true,
@@ -5025,7 +5169,7 @@ assertDeepEqual(
     "const scopedRows = await confirmBatchRows(t(isActive ? 'containers.actions.batchActivate' : 'containers.actions.batchDeactivate'))",
     "const scopedRows = await confirmBatchRows(t('containers.actions.batchTranslate'))",
     "const scopedRows = await confirmBatchRows(t('containers.actions.clearEnglishNames'), { danger: true })",
-    "const scopedRows = await confirmBatchRows(t('containers.actions.createNewProducts'))",
+    "const scopedRows = await confirmBatchRows(t('containers.actions.createNewProducts'), {",
     "const confirmed = await confirmBatchRowsWithUpdateFields(",
     "title={t('containers.modals.batchUpdateFloatRateTitle'",
     "title={t('containers.modals.batchUpdatePricesTitle'",

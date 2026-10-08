@@ -11,7 +11,12 @@
     "messages": {
       "detailsDeletedCostsRecalculated": "Recalculated costs for {{count}} remaining details",
       "detailsDeletedCostsRecalculateCancelled": "Recalculation cancelled. Remaining details still use the pre-deletion total volume for transport cost",
-      "detailsDeletedCostsRecalculateFailed": "Details deleted, but cost recalculation failed: {{message}}"
+      "detailsDeletedCostsRecalculateFailed": "Details deleted, but cost recalculation failed: {{message}}",
+      "createProductsPushHqUnsent": "{{count}} newly created product(s) could not be sent to HQ automatically (no sendable detail found). Please use \"Send to HQ\" manually",
+      "createProductsPushHqBusy": "Another Send to HQ job is being submitted, so HQ was not updated automatically. Please use \"Send to HQ\" later"
+    },
+    "text": {
+      "createProductsPushToHqAfterCreate": "Also update the HQ database after creation"
     }
   }
 }
