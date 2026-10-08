@@ -890,6 +890,21 @@ namespace BlazorApp.Shared.DTOs
     /// 销量统计起点：最近一次来货的出库日期（仅日期）；没有来货记录或分店不可用时为 null。
     /// </summary>
     public DateTime? LastArrivalDate { get; set; }
+
+    /// <summary>
+    /// 最近一次送货的订单（出库时间最晚的那张单）上该商品的送货数量；无来货时为 null。
+    /// </summary>
+    public decimal? LastArrivalQuantity { get; set; }
+
+    /// <summary>
+    /// 最近一次送货的订单上该商品的订货数量（仓库主动配送时为 0）；无来货时为 null。
+    /// </summary>
+    public decimal? LastArrivalOrderQuantity { get; set; }
+
+    /// <summary>
+    /// 最近一次送货的订单的订货日期；无来货时为 null。
+    /// </summary>
+    public DateTime? LastArrivalOrderDate { get; set; }
   }
 
   /// <summary>

@@ -29,10 +29,10 @@ try {
       JSON.stringify({
         success: true,
         data: [
-          { productCode: 'P-1', salesQuantitySinceLastArrival: 8, lastArrivalDate: '2026-09-30T00:00:00' },
-          { productCode: 'P-2', salesQuantitySinceLastArrival: 0, lastArrivalDate: '2024-06-10T00:00:00' },
-          { productCode: 'P-3', salesQuantitySinceLastArrival: -2, lastArrivalDate: 20260901 },
-          { productCode: 'P-4', salesQuantitySinceLastArrival: null, lastArrivalDate: null },
+          { productCode: 'P-1', salesQuantitySinceLastArrival: 8, lastArrivalDate: '2026-09-30T00:00:00', lastArrivalQuantity: 24, lastArrivalOrderQuantity: 0, lastArrivalOrderDate: '2026-09-28T09:00:00' },
+          { productCode: 'P-2', salesQuantitySinceLastArrival: 0, lastArrivalDate: '2024-06-10T00:00:00', lastArrivalQuantity: 1.5, lastArrivalOrderQuantity: 0, lastArrivalOrderDate: null },
+          { productCode: 'P-3', salesQuantitySinceLastArrival: -2, lastArrivalDate: 20260901, lastArrivalQuantity: '12', lastArrivalOrderQuantity: '3', lastArrivalOrderDate: 20260901 },
+          { productCode: 'P-4', salesQuantitySinceLastArrival: null, lastArrivalDate: null, lastArrivalQuantity: null, lastArrivalOrderQuantity: null, lastArrivalOrderDate: null },
         ],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -48,12 +48,12 @@ try {
   assertDeepEqual(
     result,
     [
-      { productCode: 'P-1', salesQuantitySinceLastArrival: 8, lastArrivalDate: '2026-09-30T00:00:00' },
-      { productCode: 'P-2', salesQuantitySinceLastArrival: 0, lastArrivalDate: '2024-06-10T00:00:00' },
-      { productCode: 'P-3', salesQuantitySinceLastArrival: -2, lastArrivalDate: null },
-      { productCode: 'P-4', salesQuantitySinceLastArrival: null, lastArrivalDate: null },
+      { productCode: 'P-1', salesQuantitySinceLastArrival: 8, lastArrivalDate: '2026-09-30T00:00:00', lastArrivalQuantity: 24, lastArrivalOrderQuantity: 0, lastArrivalOrderDate: '2026-09-28T09:00:00' },
+      { productCode: 'P-2', salesQuantitySinceLastArrival: 0, lastArrivalDate: '2024-06-10T00:00:00', lastArrivalQuantity: 1.5, lastArrivalOrderQuantity: 0, lastArrivalOrderDate: null },
+      { productCode: 'P-3', salesQuantitySinceLastArrival: -2, lastArrivalDate: null, lastArrivalQuantity: null, lastArrivalOrderQuantity: null, lastArrivalOrderDate: null },
+      { productCode: 'P-4', salesQuantitySinceLastArrival: null, lastArrivalDate: null, lastArrivalQuantity: null, lastArrivalOrderQuantity: null, lastArrivalOrderDate: null },
     ],
-    'summary 应保留正数、0、负数与 null，来货日期非字符串归一为 null',
+    'summary 应保留正数、0、负数与 null，来货日期/数量类型不对时归一为 null',
   )
 
   console.log('storeOrderService.salesSummary.test: ok')
