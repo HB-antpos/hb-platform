@@ -7,9 +7,17 @@ import { createIosReviewTransport } from "./transport";
 import { resetIosReviewAppRouteState } from "./app-routes";
 import { normalizeInvoiceGridResponse } from "../local-supplier-invoices/api";
 import {
+  buildSeasonalCardBatchRequest,
+  normalizeSeasonalCardBatchResponse,
   normalizeSeasonalCardCatalogResponse,
+  normalizeSeasonalCardOverviewResponse,
   normalizeSeasonalCardSubmissionsResponse,
 } from "../seasonal-cards/api";
+import {
+  buildSeasonalCardBatchPayload,
+  createSeasonalCardDraft,
+  getSeasonalCardOptionsForType,
+} from "../seasonal-cards/submit-draft";
 import { normalizeDeviceManagementListResponse } from "../device-management/api";
 import {
   normalizeChinaSupplierBranchTotalsSnapshot,
@@ -942,6 +950,110 @@ async function run() {
     await request("GET", "/react/v1/seasonal-card-remaining/submissions"),
   );
   assert.equal(seasonalSubmissions.items[0]?.cardType, 1);
+  assert.equal(
+    seasonalSubmissions.items[0]?.batchGuid,
+    "",
+    "审核 fixture 的历史单条记录没有批次号，历史页按「未指定供应商」显示",
+  );
+
+  // 整组填报：overview → batch 提交 → 再查 overview 已填报 → 未修改 / 抢先提交被拒。
+  const reviewSupplier = (
+    await request("GET", "/react/v1/local-suppliers/active")
+  )[0];
+  assert.equal(reviewSupplier?.supplierCode, "REV-SUP-001");
+  const seasonalOverviewQuery = {
+    storeCode: "REV001",
+    seasonYear: 2026,
+    localSupplierCode: reviewSupplier.supplierCode,
+  };
+  const emptyOverview = normalizeSeasonalCardOverviewResponse(
+    await request(
+      "GET",
+      "/react/v1/seasonal-card-remaining/overview",
+      undefined,
+      seasonalOverviewQuery,
+    ),
+  );
+  assert.deepEqual(
+    emptyOverview.holidays.map((holiday) => holiday.currentBatch),
+    [null, null, null, null, null],
+    "审核模式初始没有任何整组填报",
+  );
+  const christmasOptions = getSeasonalCardOptionsForType(seasonalCatalog, 1);
+  assert.equal(christmasOptions.length, 4, "审核目录每个节日 4 个价格");
+  const seasonalCombo = {
+    storeCode: "REV001",
+    seasonYear: 2026,
+    cardType: 1 as const,
+    localSupplierCode: reviewSupplier.supplierCode,
+  };
+  const seasonalDraft = createSeasonalCardDraft("review", christmasOptions, null);
+  seasonalDraft.quantities[christmasOptions[0]!.catalogGuid] = "12";
+  seasonalDraft.quantities[christmasOptions[3]!.catalogGuid] = "2";
+  seasonalDraft.customUnitPrice = "4.5";
+  const createdBatch = normalizeSeasonalCardBatchResponse(
+    await request(
+      "POST",
+      "/react/v1/seasonal-card-remaining/submissions/batch",
+      buildSeasonalCardBatchRequest(
+        buildSeasonalCardBatchPayload(seasonalCombo, seasonalDraft, christmasOptions),
+      ),
+    ),
+  );
+  assert.ok(createdBatch?.batchGuid, "批量提交返回新批次号");
+  assert.equal(createdBatch?.totalQuantity, 14);
+  assert.equal(createdBatch?.lines.length, 4);
+  const filledOverview = normalizeSeasonalCardOverviewResponse(
+    await request(
+      "GET",
+      "/react/v1/seasonal-card-remaining/overview",
+      undefined,
+      seasonalOverviewQuery,
+    ),
+  );
+  assert.equal(
+    filledOverview.holidays[0]?.currentBatch?.batchGuid,
+    createdBatch?.batchGuid,
+    "提交后 overview 返回该批次为当前生效",
+  );
+  assert.equal(filledOverview.holidays[1]?.currentBatch, null);
+  const prefilledDraft = createSeasonalCardDraft(
+    "review",
+    christmasOptions,
+    filledOverview.holidays[0]?.currentBatch ?? null,
+  );
+  const unchangedResponse = await request(
+    "POST",
+    "/react/v1/seasonal-card-remaining/submissions/batch",
+    buildSeasonalCardBatchRequest(
+      buildSeasonalCardBatchPayload(seasonalCombo, prefilledDraft, christmasOptions),
+    ),
+  );
+  assert.equal(unchangedResponse.success, false);
+  assert.equal(unchangedResponse.errorCode, "SEASONAL_CARD_NO_CHANGES");
+  const staleResponse = await request(
+    "POST",
+    "/react/v1/seasonal-card-remaining/submissions/batch",
+    buildSeasonalCardBatchRequest(
+      buildSeasonalCardBatchPayload(seasonalCombo, seasonalDraft, christmasOptions),
+    ),
+  );
+  assert.equal(staleResponse.success, false);
+  assert.equal(
+    staleResponse.errorCode,
+    "SEASONAL_CARD_STALE",
+    "预填后被抢先提交（expectedPreviousBatchGuid 过期）返回 STALE",
+  );
+  assert.equal(staleResponse.details?.batchGuid, createdBatch?.batchGuid);
+  const batchedHistory = normalizeSeasonalCardSubmissionsResponse(
+    await request("GET", "/react/v1/seasonal-card-remaining/submissions"),
+  );
+  assert.equal(
+    batchedHistory.items.filter((item) => item.batchGuid === createdBatch?.batchGuid).length,
+    4,
+    "历史列表带批次号，4 行可合并成一张卡片",
+  );
+  assert.equal(batchedHistory.items[0]?.supplierName, "Demo Local Supplier");
 
   const secondStoreSchedule = await request(
     "POST",

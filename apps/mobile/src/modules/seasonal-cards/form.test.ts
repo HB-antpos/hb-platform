@@ -4,7 +4,6 @@ import {
   getSeasonalCardCatalogGroups,
   getSeasonalCardLocalizedTypeLabel,
   isSeasonalCardCustomPriceOption,
-  validateSeasonalCardSubmissionDraft,
 } from "./form";
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
@@ -140,64 +139,3 @@ assertEqual(
   "后端中文名称",
   "unknown card types should fall back to backend cardTypeName when available"
 );
-
-const missingFieldErrors = validateSeasonalCardSubmissionDraft(
-  {
-    storeCode: "",
-    seasonYear: "",
-    cardType: "1",
-    catalogGuid: "",
-    remainingQuantity: "",
-    customUnitPrice: "",
-    remark: "",
-  },
-  null
-);
-
-assertDeepEqual(
-  missingFieldErrors,
-  {
-    storeCode: "storeCode",
-    seasonYear: "seasonYear",
-    catalogGuid: "catalogGuid",
-    remainingQuantity: "remainingQuantity",
-  },
-  "validation reports required fields before a catalog option is selected"
-);
-
-const customPriceErrors = validateSeasonalCardSubmissionDraft(
-  {
-    storeCode: "STO01",
-    seasonYear: "2026",
-    cardType: "1",
-    catalogGuid: "catalog-3",
-    remainingQuantity: "-1",
-    customUnitPrice: "0",
-    remark: "ok",
-  },
-  catalogGroups[0]?.options[1] ?? null
-);
-
-assertDeepEqual(
-  customPriceErrors,
-  {
-    remainingQuantity: "remainingQuantity",
-    customUnitPrice: "customUnitPrice",
-  },
-  "validation requires a non-negative integer quantity and positive custom price for other options"
-);
-
-const validDraftErrors = validateSeasonalCardSubmissionDraft(
-  {
-    storeCode: "STO01",
-    seasonYear: "2026",
-    cardType: "1",
-    catalogGuid: "catalog-1",
-    remainingQuantity: "0",
-    customUnitPrice: "",
-    remark: "memo",
-  },
-  catalogGroups[0]?.options[0] ?? null
-);
-
-assertDeepEqual(validDraftErrors, {}, "validation accepts zero quantity with a fixed-price catalog option");

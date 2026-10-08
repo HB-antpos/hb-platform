@@ -1,7 +1,6 @@
 import type {
   SeasonalCardCatalogItem,
   SeasonalCardPriceOption,
-  SeasonalCardSubmissionDraft,
   SeasonalCardType,
 } from "@/modules/seasonal-cards/types";
 
@@ -10,17 +9,6 @@ export interface SeasonalCardCatalogGroup {
   cardTypeName: string;
   options: SeasonalCardCatalogItem[];
 }
-
-export type SeasonalCardSubmissionDraftErrors = Partial<
-  Record<
-    | "storeCode"
-    | "seasonYear"
-    | "catalogGuid"
-    | "remainingQuantity"
-    | "customUnitPrice",
-    string
-  >
->;
 
 const SEASONAL_CARD_TYPE_FALLBACK_LABELS: Record<SeasonalCardType, string> = {
   1: "Christmas",
@@ -36,30 +24,6 @@ const SEASONAL_CARD_PRICE_OPTION_LABELS: Record<Exclude<SeasonalCardPriceOption,
   2: "$2",
   3: "$3",
 };
-
-function asTrimmedText(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : "";
-}
-
-function asPositiveInt(value: string) {
-  if (!value.trim()) {
-    return null;
-  }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-    return null;
-  }
-  return parsed;
-}
-
-function asPositiveNumber(value: string) {
-  if (!value.trim()) {
-    return null;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function isSeasonalCardType(value: number): value is SeasonalCardType {
   return value >= 1 && value <= 5;
@@ -187,38 +151,4 @@ export function buildSeasonalCardYearOptions(
     years.push(year);
   }
   return years;
-}
-
-export function validateSeasonalCardSubmissionDraft(
-  draft: SeasonalCardSubmissionDraft,
-  selectedCatalogOption: SeasonalCardCatalogItem | null
-): SeasonalCardSubmissionDraftErrors {
-  const errors: SeasonalCardSubmissionDraftErrors = {};
-
-  if (!asTrimmedText(draft.storeCode)) {
-    errors.storeCode = "storeCode";
-  }
-
-  const seasonYear = asPositiveInt(draft.seasonYear);
-  if (seasonYear == null || seasonYear <= 0) {
-    errors.seasonYear = "seasonYear";
-  }
-
-  if (!asTrimmedText(draft.catalogGuid)) {
-    errors.catalogGuid = "catalogGuid";
-  }
-
-  const remainingQuantity = asPositiveInt(draft.remainingQuantity);
-  if (remainingQuantity == null || remainingQuantity < 0) {
-    errors.remainingQuantity = "remainingQuantity";
-  }
-
-  if (
-    isSeasonalCardCustomPriceOption(selectedCatalogOption) &&
-    ((asPositiveNumber(draft.customUnitPrice) ?? 0) <= 0)
-  ) {
-    errors.customUnitPrice = "customUnitPrice";
-  }
-
-  return errors;
 }

@@ -1,12 +1,9 @@
 {
   "title": "季节卡片",
-  "submitSubtitle": "按管理分店、年度和节日填报季节卡剩余数量",
-  "historyTitle": "填报历史",
-  "historySubtitle": "按分店、年度和节日查看已提交记录",
   "detailTitle": "季节卡详情",
   "viewModes": {
     "submit": "填报",
-    "history": "历史"
+    "history": "历史记录"
   },
   "cardTypes": {
     "1": "圣诞节",
@@ -15,39 +12,99 @@
     "4": "复活节",
     "5": "父亲节"
   },
+  "store": {
+    "select": "选择分店",
+    "pickerTitle": "选择分店"
+  },
   "form": {
-    "storeCode": "分店",
-    "seasonYear": "年度",
+    "seasonYear": "年份",
+    "seasonYearHint": "默认今年",
+    "thisYear": "今年",
     "cardType": "节日",
-    "priceOption": "目录价格项",
-    "customPriceOption": "其他",
-    "customUnitPrice": "实际金额",
-    "remainingQuantity": "剩余数量",
-    "remark": "备注",
-    "selectStore": "选择分店",
-    "selectSeasonYear": "选择年度",
-    "selectCardType": "选择节日",
-    "selectPriceOption": "选择价格项",
-    "storePickerTitle": "选择分店",
-    "yearPickerTitle": "选择年度",
-    "cardTypePickerTitle": "选择节日",
-    "priceOptionPickerTitle": "选择价格项"
+    "supplier": "供应商",
+    "selectSupplier": "选择供应商",
+    "supplierPickerTitle": "选择供应商",
+    "supplierSearchPlaceholder": "搜索供应商名称或编码",
+    "recentSuppliers": "最近使用",
+    "priceSectionTitle": "卡片价格类型 · 剩余数量",
+    "priceSectionHint": "空着按 0 记录",
+    "customPriceOption": "其他价格",
+    "customUnitPrice": "实际单价",
+    "remark": "备注（选填）",
+    "remarkPlaceholder": "如：部分卡片破损已下架",
+    "decrease": "减少",
+    "increase": "增加",
+    "quantityA11y": "{{label}} 数量"
+  },
+  "status": {
+    "filled": "已填报",
+    "pending": "待填报",
+    "unknown": "—"
+  },
+  "rows": {
+    "fixedPrice": "固定价",
+    "fixedPriceSubtotal": "固定价 · 小计 {{amount}}",
+    "customPriceHint": "需填写实际单价",
+    "customPriceSubtotal": "实际单价 · 小计 {{amount}}",
+    "previousUnchanged": "上次 {{previous}} · 未修改",
+    "previousChanged": "上次 {{previous}} → 本次 {{current}}",
+    "priceChanged": "单价 {{previous}} → {{current}}"
+  },
+  "banner": {
+    "noSupplierTitle": "请先选择供应商",
+    "noSupplierBody": "选好供应商后，才能看到各节日的填报状态并填写数量。",
+    "filledTitle": "已于 {{time}} 由 {{name}} 填报",
+    "filledBody": "已带出上次数量，只改有变化的行，点「覆盖提交」后以本次为准。",
+    "pendingTitle": "{{year}} {{holiday}} 尚未填报",
+    "pendingBody": "按价格类型填写剩余数量，一次提交全部价格。",
+    "staleTitle": "已被 {{name}} 于 {{time}} 更新",
+    "staleBody": "已保留你填写的数量，「上次」已换成最新数据，请核对后再提交。",
+    "loadFailedTitle": "填报状态加载失败",
+    "retry": "重试"
+  },
+  "footer": {
+    "total": "{{quantity}} 张 · {{amount}}",
+    "changedCount": "改了 {{count}} 项",
+    "submit": "提交填报",
+    "overwrite": "覆盖提交",
+    "unchanged": "未修改"
+  },
+  "confirm": {
+    "title": "覆盖上次填报？",
+    "last": "上次：{{time}} · {{name}}",
+    "priceType": "价格类型",
+    "previous": "上次",
+    "current": "本次",
+    "diff": "变化",
+    "unchanged": "不变",
+    "priceChanged": "改单价",
+    "total": "合计",
+    "note": "上次的记录会保留在「历史记录」里，后台统计以本次为准；空着的价格按 0 记录。",
+    "back": "返回修改",
+    "confirm": "确认覆盖"
   },
   "history": {
-    "storeCode": "分店",
     "seasonYear": "年度",
     "cardType": "节日",
     "allCardTypes": "全部节日",
     "allYears": "全部年度",
+    "yearPickerTitle": "选择年度",
+    "cardTypePickerTitle": "选择节日",
     "displayList": "列表",
     "displayTable": "表格",
+    "tableHint": "表格按每个供应商最新一次填报相加。",
     "priceTypeHeader": "价格类型",
-    "nextPage": "下一页"
+    "nextPage": "下一页",
+    "unassignedSupplier": "未指定供应商",
+    "superseded": "已被更新",
+    "total": "合计 {{quantity}} 张 · {{amount}}",
+    "submittedBy": "{{name}} · {{time}}"
   },
   "labels": {
     "storeCode": "分店",
     "seasonYear": "年度",
     "cardType": "节日",
+    "supplier": "供应商",
     "unitPrice": "价格",
     "remainingQuantity": "剩余数量",
     "submittedByName": "提交人",
@@ -55,25 +112,29 @@
     "remark": "备注"
   },
   "errors": {
-    "storeCode": "请选择分店",
-    "seasonYear": "请选择有效年度",
-    "catalogGuid": "请选择目录价格项",
-    "customUnitPrice": "请输入大于 0 的实际金额",
-    "remainingQuantity": "请输入非负整数数量"
+    "customUnitPrice": "「其他价格」有数量时，请填写大于 0 的实际单价",
+    "remainingQuantity": "剩余数量必须是不小于 0 的整数",
+    "noChanges": "数量与上次填报相同，无需重复提交",
+    "catalogChanged": "价格目录已更新，请下拉刷新后重新填写",
+    "supplierNotFound": "该供应商不存在或已停用，请重新选择",
+    "supplierRequired": "请先选择供应商",
+    "forbiddenStore": "没有该分店的填报权限"
   },
   "messages": {
     "noAccessTitle": "没有权限",
     "noAccessDescription": "当前账号没有季节卡片查看或填报权限。",
-    "formFixErrors": "请先修正表单错误",
-    "submitSuccess": "提交成功",
+    "selectStoreFirst": "请先选择分店",
+    "submitSuccess": "已提交 {{combo}}",
+    "overwriteSuccess": "已覆盖上次填报，统计以本次为准",
+    "staleSnackbar": "这组填报刚被其他人更新，已刷新对比，请核对后再提交",
     "submitFailed": "提交失败",
+    "supplierLoadFailed": "供应商列表加载失败，请下拉刷新重试",
     "historyLoadFailed": "加载历史失败",
     "detailLoadFailed": "加载详情失败",
     "detailLoadFailedDescription": "暂时无法获取该条记录详情。",
     "emptyHistory": "暂无历史记录",
     "emptyHistoryDescription": "当前筛选条件下还没有季节卡填报记录。",
     "emptyOptions": "暂无可选项",
-    "selectCardTypeFirst": "请先选择节日",
     "catalogEmpty": "当前没有可填报的季节卡目录"
   }
 }
