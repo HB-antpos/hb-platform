@@ -60,6 +60,11 @@ import {
   type BatchUpdateStoreFormValues,
 } from './batchUpdateLogic'
 import {
+  DEFAULT_INSTALLMENT_TERMS_TEXT,
+  DEFAULT_VOUCHER_TERMS_TEXT,
+  RECEIPT_TERMS_MAX_LENGTH,
+} from './receiptTermsDefaults'
+import {
   KNOWN_STORE_BRANDS,
   cashRegisterFilterFromValue,
   cashRegisterFilterToValue,
@@ -213,6 +218,8 @@ export default function SystemStoresPage() {
   const applyIsActive = Form.useWatch('applyIsActive', batchEditForm)
   const batchIsActive = Form.useWatch('isActive', batchEditForm)
   const applyReturnPolicy = Form.useWatch('applyReturnPolicy', batchEditForm)
+  const applyVoucherTerms = Form.useWatch('applyVoucherTerms', batchEditForm)
+  const applyInstallmentTerms = Form.useWatch('applyInstallmentTerms', batchEditForm)
 
   const loadData = async (overrides: Partial<StoreListQuery> = {}) => {
     const query: StoreListQuery = {
@@ -390,6 +397,8 @@ export default function SystemStoresPage() {
         brandName: detail.brandName,
         timeZoneId: detail.timeZoneId,
         returnPolicy: detail.returnPolicy,
+        voucherTerms: detail.voucherTerms,
+        installmentTerms: detail.installmentTerms,
         isActive: detail.isActive,
       })
     } catch (error) {
@@ -443,6 +452,8 @@ export default function SystemStoresPage() {
       applyIsActive: false,
       isActive: false,
       applyReturnPolicy: false,
+      applyVoucherTerms: false,
+      applyInstallmentTerms: false,
     })
     setBatchEditOpen(true)
   }
@@ -933,6 +944,7 @@ export default function SystemStoresPage() {
         keyboard={!batchEditSaving}
         maskClosable={!batchEditSaving}
         width={680}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         destroyOnHidden
       >
         <Form
@@ -945,6 +957,8 @@ export default function SystemStoresPage() {
             applyIsActive: false,
             isActive: false,
             applyReturnPolicy: false,
+            applyVoucherTerms: false,
+            applyInstallmentTerms: false,
           }}
           autoComplete="off"
         >
@@ -1028,7 +1042,7 @@ export default function SystemStoresPage() {
               </Form.Item>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, alignItems: 'start', paddingBlock: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, alignItems: 'start', paddingBlock: 12, borderBottom: '1px solid #f5f5f5' }}>
               <Form.Item name="applyReturnPolicy" valuePropName="checked" noStyle>
                 <Checkbox>
                   {t('system.stores.batchModifyField', { field: t('system.stores.returnPolicy') })}
@@ -1040,6 +1054,39 @@ export default function SystemStoresPage() {
                 style={{ marginBottom: 0 }}
               >
                 <Input.TextArea disabled={!applyReturnPolicy} rows={3} allowClear />
+              </Form.Item>
+            </div>
+
+            {/* 留空并勾选＝清除定制，下发后收银端回到内置默认文案；placeholder 展示默认英文稿供参考。 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, alignItems: 'start', paddingBlock: 12, borderBottom: '1px solid #f5f5f5' }}>
+              <Form.Item name="applyVoucherTerms" valuePropName="checked" noStyle>
+                <Checkbox>
+                  {t('system.stores.batchModifyField', { field: t('system.stores.voucherTerms') })}
+                </Checkbox>
+              </Form.Item>
+              <Form.Item
+                name="voucherTerms"
+                extra={t('system.stores.batchTermsHint')}
+                rules={applyVoucherTerms ? [{ max: RECEIPT_TERMS_MAX_LENGTH, message: t('system.stores.voucherTermsMaxLength') }] : []}
+                style={{ marginBottom: 0 }}
+              >
+                <Input.TextArea disabled={!applyVoucherTerms} rows={4} allowClear placeholder={DEFAULT_VOUCHER_TERMS_TEXT} />
+              </Form.Item>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, alignItems: 'start', paddingBlock: 12 }}>
+              <Form.Item name="applyInstallmentTerms" valuePropName="checked" noStyle>
+                <Checkbox>
+                  {t('system.stores.batchModifyField', { field: t('system.stores.installmentTerms') })}
+                </Checkbox>
+              </Form.Item>
+              <Form.Item
+                name="installmentTerms"
+                extra={t('system.stores.batchTermsHint')}
+                rules={applyInstallmentTerms ? [{ max: RECEIPT_TERMS_MAX_LENGTH, message: t('system.stores.installmentTermsMaxLength') }] : []}
+                style={{ marginBottom: 0 }}
+              >
+                <Input.TextArea disabled={!applyInstallmentTerms} rows={3} allowClear placeholder={DEFAULT_INSTALLMENT_TERMS_TEXT} />
               </Form.Item>
             </div>
           </div>
@@ -1156,6 +1203,25 @@ export default function SystemStoresPage() {
             <section className="sys-store-detail-section">
               <h4 className="sys-store-section-title">{t('system.stores.returnPolicy')}</h4>
               <div className="sys-store-panel" style={{ whiteSpace: 'pre-wrap' }}>{detailStore.returnPolicy || '--'}</div>
+            </section>
+
+            {/* 未定制时收银端按内置默认文案打印，所以显示「收银端默认文案」而不是「--」。 */}
+            <section className="sys-store-detail-section">
+              <h4 className="sys-store-section-title">{t('system.stores.voucherTerms')}</h4>
+              {detailStore.voucherTerms ? (
+                <div className="sys-store-panel" style={{ whiteSpace: 'pre-wrap' }}>{detailStore.voucherTerms}</div>
+              ) : (
+                <div className="sys-store-panel sys-store-faint">{t('system.stores.termsUsingDefault')}</div>
+              )}
+            </section>
+
+            <section className="sys-store-detail-section">
+              <h4 className="sys-store-section-title">{t('system.stores.installmentTerms')}</h4>
+              {detailStore.installmentTerms ? (
+                <div className="sys-store-panel" style={{ whiteSpace: 'pre-wrap' }}>{detailStore.installmentTerms}</div>
+              ) : (
+                <div className="sys-store-panel sys-store-faint">{t('system.stores.termsUsingDefault')}</div>
+              )}
             </section>
           </>
         )}

@@ -1258,6 +1258,88 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 门店小票资料代金券说明与分期条款两列_依赖原表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 两张表都不存在：拒绝执行，提示先跑 20261007.001。
+        var missingTables = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.ApplySql));
+        Assert.Equal(52300, missingTables.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql));
+        Assert.Equal(52300, missingVerify.Number);
+
+        // 迁移前形态：Store 只有旧列（桩表，含已有数据），Release 由 20261007.001 建出（无新列）。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.Store
+            (
+                StoreGUID nvarchar(50) NOT NULL PRIMARY KEY,
+                StoreCode nvarchar(50) NOT NULL,
+                ReturnPolicy nvarchar(500) NULL
+            );
+            INSERT dbo.Store (StoreGUID, StoreCode, ReturnPolicy) VALUES (N'g-1', N'S001', N'7 days');
+            """);
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreReceiptProfileRelease (StoreCode, Version, StoreName, PublishedAtUtc, PublishedBy)
+            VALUES (N'S001', 1, N'Store 1', SYSUTCDATETIME(), N'alice');
+            """);
+        // 缺列时门禁报 52301。
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql));
+        Assert.Equal(52301, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql);
+        // 重复执行是空操作；旧数据保留，四个新列对旧行是 NULL（旧快照因此仍与未定制的门店一致）。
+        await ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.Store WHERE StoreGUID = N'g-1' AND ReturnPolicy = N'7 days'
+                AND VoucherTerms IS NULL AND InstallmentTerms IS NULL) <> 1
+                THROW 52310, 'Existing store row was changed.', 1;
+            IF (SELECT COUNT(*) FROM dbo.StoreReceiptProfileRelease WHERE StoreCode = N'S001' AND Version = 1
+                AND VoucherTerms IS NULL AND InstallmentTerms IS NULL) <> 1
+                THROW 52311, 'Existing release row was changed.', 1;
+            """);
+        // 600 个字符能写入、601 个会被列宽截断拦下（UTF-16 码元口径）。
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.Store SET VoucherTerms = REPLICATE(N'v', 600), InstallmentTerms = REPLICATE(N'i', 600) WHERE StoreGUID = N'g-1';
+            INSERT dbo.StoreReceiptProfileRelease (StoreCode, Version, StoreName, PublishedAtUtc, VoucherTerms, InstallmentTerms)
+            VALUES (N'S001', 2, N'Store 1', SYSUTCDATETIME(), REPLICATE(N'v', 600), REPLICATE(N'i', 600));
+            """);
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(
+            main, "UPDATE dbo.Store SET VoucherTerms = REPLICATE(N'v', 601) WHERE StoreGUID = N'g-1';"));
+
+        // 列宽漂移（Store.VoucherTerms 600 → 500）、类型漂移（Release.InstallmentTerms → varchar）、
+        // 可空性漂移（Release.VoucherTerms → NOT NULL）都被门禁识别；改回后通过。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.Store SET VoucherTerms = NULL; ALTER TABLE dbo.Store ALTER COLUMN VoucherTerms nvarchar(500) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql));
+        Assert.Equal(52301, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Store ALTER COLUMN VoucherTerms nvarchar(600) NULL;");
+        await ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.StoreReceiptProfileRelease SET InstallmentTerms = NULL; ALTER TABLE dbo.StoreReceiptProfileRelease ALTER COLUMN InstallmentTerms varchar(600) NULL;");
+        var type = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql));
+        Assert.Equal(52301, type.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreReceiptProfileRelease ALTER COLUMN InstallmentTerms nvarchar(600) NULL;");
+        await ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.StoreReceiptProfileRelease SET VoucherTerms = N'x' WHERE VoucherTerms IS NULL; ALTER TABLE dbo.StoreReceiptProfileRelease ALTER COLUMN VoucherTerms nvarchar(600) NOT NULL;");
+        var nullable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql));
+        Assert.Equal(52301, nullable.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreReceiptProfileRelease ALTER COLUMN VoucherTerms nvarchar(600) NULL;");
+        await ExecuteNonQueryAsync(main, StoreReceiptTermsSchema.VerifySql);
+
+        // 20261007.001 的门禁只查「期望列存在」，多出的两列不影响它。
+        await ExecuteNonQueryAsync(main, StoreReceiptProfileReleaseSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发服务_真实SQLServer下发_并发同店只产生一个版本且冲突映射409()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
@@ -1267,6 +1349,8 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         mainContext.Db.CodeFirst.InitTables<Store>();
         posmContext.Db.CodeFirst.InitTables<POSM_设备注册信息表>();
         await ExecuteNonQueryAsync(databases.MainConnectionString, StoreReceiptProfileReleaseSchema.ApplySql);
+        // 快照表的 VoucherTerms / InstallmentTerms 两列由 20261008.002 迁移补上（Store 表由 CodeFirst 直接带出）。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, StoreReceiptTermsSchema.ApplySql);
         foreach (var (guid, code, name) in new[]
         {
             ("g-1", "S001", "Store 1"), ("g-2", "S002", "Store 2"), ("g-3", "S003", "Store 3"),

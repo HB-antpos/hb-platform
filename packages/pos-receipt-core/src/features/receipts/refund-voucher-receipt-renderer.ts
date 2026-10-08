@@ -2,16 +2,34 @@ import {
   appendEscPosInitialize,
   encodeEscPosText,
 } from "./esc-pos-text-encoding";
-import { receiptStoreHeading } from "./receipt-document";
+import { receiptStoreHeading, type ReceiptTermsBlock } from "./receipt-document";
+import {
+  resolveReceiptTermsBlock,
+  type ReceiptCustomTermsText,
+} from "./receipt-terms-text";
 import { REFUND_VOUCHER_TERMS } from "./refund-voucher-terms";
 import type {
   FrozenReturnReceiptSettings,
   RenderedReturnReceipt,
-  ReturnReceiptSettingsPort,
 } from "./return-receipt-renderer";
 
 import type { LocalOrder } from "@hb/pos-domain/core/contracts/order";
 import type { OrderRepositoryPort } from "@hb/pos-domain/core/contracts/repositories";
+
+/**
+ * 退款券面用的冻结设置：在退货冻结设置之外，多带总部下发的「券使用说明」自定义正文（可选）。
+ * 缺省、空白或不合规时券面按内置默认文案打印（见 resolveReceiptTermsBlock）。
+ */
+export type FrozenRefundVoucherReceiptSettings = FrozenReturnReceiptSettings &
+  Pick<ReceiptCustomTermsText, "voucherTerms">;
+
+/**
+ * 退款券面读取冻结设置的端口。普通的 ReturnReceiptSettingsPort（不带 voucherTerms）同样满足它，
+ * 因此不关心自定义说明的调用方与旧测试无需改动。
+ */
+export interface RefundVoucherReceiptSettingsPort {
+  getFrozenReturnReceiptSettings(): Promise<FrozenRefundVoucherReceiptSettings | null>;
+}
 
 export type ProtectedRefundVoucherPrintMaterial = Readonly<{
   returnOrderGuid: string;
@@ -57,7 +75,7 @@ export class ProtectedRefundVoucherReceiptRenderer {
   public constructor(
     private readonly orders: Pick<OrderRepositoryPort, "getByGuid">,
     private readonly materials: ProtectedRefundVoucherPrintMaterialPort,
-    private readonly settings: ReturnReceiptSettingsPort,
+    private readonly settings: RefundVoucherReceiptSettingsPort,
     private readonly now: () => Date,
     /**
      * 到期日按此业务时区取日历日（IANA 名，如 Australia/Brisbane）；缺失或空白时沿用
@@ -127,7 +145,7 @@ export class ProtectedRefundVoucherReceiptRenderer {
  * 退货与取消分期共用；券码必须是可打印 ASCII，金额为正整数分。
  */
 export function encodeRefundVoucherDocuments(input: Readonly<{
-  settings: FrozenReturnReceiptSettings | null;
+  settings: FrozenRefundVoucherReceiptSettings | null;
   storeCode: string;
   orderLabel: string;
   vouchers: readonly Readonly<{
@@ -152,6 +170,9 @@ export function encodeRefundVoucherDocuments(input: Readonly<{
     input.storeCode,
   );
   const returnPolicy = normalizedReturnPolicy(settings.store.returnPolicy);
+  // 券使用说明正文：总部下发了可打印的自定义正文就用它，否则（含不合规被丢弃）逐字打印内置默认文案。
+  // 标题固定为默认块标题；一次出票内所有券面共用同一份解析结果。
+  const termsBlock = resolveReceiptTermsBlock(REFUND_VOUCHER_TERMS, settings.voucherTerms);
   const businessTimeZone = resolveBusinessTimeZone(input.businessTimeZone);
   const documents = input.vouchers.map((voucher) => {
     const voucherCode = normalizeVoucherCode(voucher.voucherCode);
@@ -172,6 +193,7 @@ export function encodeRefundVoucherDocuments(input: Readonly<{
       printedAt,
       heading,
       returnPolicy,
+      termsBlock,
     });
   });
   return {
@@ -269,8 +291,8 @@ function normalizeVoucherCode(value: unknown): string {
 }
 
 function normalizeSettings(
-  settings: FrozenReturnReceiptSettings | null,
-): FrozenReturnReceiptSettings {
+  settings: FrozenRefundVoucherReceiptSettings | null,
+): FrozenRefundVoucherReceiptSettings {
   if (
     !settings ||
     !/^[A-Za-z0-9._:-]{1,128}$/u.test(settings.printerId) ||
@@ -295,6 +317,8 @@ function encodeRefundVoucher(input: Readonly<{
   printedAt: string;
   heading: string;
   returnPolicy: string | null;
+  /** 已解析好的券使用说明块（默认文案或总部下发的自定义正文）。 */
+  termsBlock: ReceiptTermsBlock;
 }>): Uint8Array {
   const bytes: number[] = [];
   appendEscPosInitialize(bytes);
@@ -345,7 +369,7 @@ function encodeRefundVoucher(input: Readonly<{
   appendCode128(bytes, input.voucherCode);
   appendQrCode(bytes, input.voucherCode);
   // 使用说明放在 QR 之后、走纸切纸之前，顾客拿券时能直接看到；每张券面都带，与到期日有无无关。
-  appendVoucherTerms(bytes, width);
+  appendVoucherTerms(bytes, width, input.termsBlock);
   bytes.push(0x1b, 0x64, 0x03);
   // 芯烨 ESC/POS 全切；每个冻结 print job 只包含一次切纸，避免 adapter 猜测。
   bytes.push(0x1d, 0x56, 0x00);
@@ -410,11 +434,15 @@ function appendReturnPolicy(
  * 券使用说明块：空行、分隔线、居中加粗标题、左对齐条款行。条款按本渲染器自己的纸宽
  * （58mm=32 / 80mm=48）在单词边界换行，单词本身超宽时才硬切，保证每行不超过纸宽。
  */
-function appendVoucherTerms(output: number[], width: number): void {
+function appendVoucherTerms(
+  output: number[],
+  width: number,
+  termsBlock: ReceiptTermsBlock,
+): void {
   appendText(output, "", "left", false);
   appendText(output, "-".repeat(width), "left", false);
-  appendText(output, REFUND_VOUCHER_TERMS.title, "center", true);
-  for (const termsLine of REFUND_VOUCHER_TERMS.lines) {
+  appendText(output, termsBlock.title, "center", true);
+  for (const termsLine of termsBlock.lines) {
     for (const wrapped of wrapByWord(termsLine, width)) {
       appendText(output, wrapped, "left", false);
     }

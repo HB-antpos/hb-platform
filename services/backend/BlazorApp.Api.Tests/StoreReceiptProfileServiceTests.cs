@@ -493,6 +493,10 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
     [InlineData("address", "地址\u007f")]
     [InlineData("returnPolicy", "政策\u001b")]
     [InlineData("returnPolicy", "政策\u0085")]
+    [InlineData("voucherTerms", "说明\u001b")]
+    [InlineData("voucherTerms", "说明\u0085")]
+    [InlineData("installmentTerms", "条款\u0001")]
+    [InlineData("installmentTerms", "条款\u007f")]
     public async Task Publish_含控制字符被拒绝_口径与Hbpos守卫一致(string field, string value)
     {
         await SeedStoreAsync("g-1", "S001", "门店", configure: store =>
@@ -505,6 +509,8 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
                 case "abn": store.ABN = value; break;
                 case "address": store.Address = value; break;
                 case "returnPolicy": store.ReturnPolicy = value; break;
+                case "voucherTerms": store.VoucherTerms = value; break;
+                case "installmentTerms": store.InstallmentTerms = value; break;
             }
         });
 
@@ -527,6 +533,27 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
         Assert.True(result.Success, result.Message);
         var row = await _mainDb.Queryable<StoreReceiptProfileRelease>().SingleAsync();
         Assert.Equal("1 Main St\r\nSydney\tNSW", row.Address);
+    }
+
+    [Fact]
+    public async Task Publish_代金券使用说明与分期条款允许换行与制表符_且按多行原文写入快照()
+    {
+        await SeedStoreAsync(
+            "g-1",
+            "S001",
+            "门店",
+            configure: store =>
+            {
+                store.VoucherTerms = "Use at the issuing store only.\r\nNot redeemable for cash.\tThanks";
+                store.InstallmentTerms = "Order total: $50.00 minimum.\nFirst payment: $20.00 minimum.";
+            });
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        Assert.True(result.Success, result.Message);
+        var row = await _mainDb.Queryable<StoreReceiptProfileRelease>().SingleAsync();
+        Assert.Equal("Use at the issuing store only.\r\nNot redeemable for cash.\tThanks", row.VoucherTerms);
+        Assert.Equal("Order total: $50.00 minimum.\nFirst payment: $20.00 minimum.", row.InstallmentTerms);
     }
 
     [Theory]
@@ -647,6 +674,10 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
     [InlineData("abn", 33, false)]
     [InlineData("returnPolicy", 500, true)]
     [InlineData("returnPolicy", 501, false)]
+    [InlineData("voucherTerms", 600, true)]
+    [InlineData("voucherTerms", 601, false)]
+    [InlineData("installmentTerms", 600, true)]
+    [InlineData("installmentTerms", 601, false)]
     public async Task Publish_各字段长度边界_恰好上限通过_多1个字符拒绝(string field, int length, bool expectPass)
     {
         var value = new string('x', length);
@@ -827,6 +858,8 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
         Assert.Equal(60, StoreReceiptProfileGuard.MaxPhoneLength);
         Assert.Equal(32, StoreReceiptProfileGuard.MaxAbnLength);
         Assert.Equal(500, StoreReceiptProfileGuard.MaxReturnPolicyLength);
+        Assert.Equal(600, StoreReceiptProfileGuard.MaxVoucherTermsLength);
+        Assert.Equal(600, StoreReceiptProfileGuard.MaxInstallmentTermsLength);
     }
 
     [Theory]
@@ -851,6 +884,39 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
     }
 
     [Fact]
+    public void Guard_代金券使用说明与分期条款上限_等于收银端共享常量()
+    {
+        // 手持/iPad/共享渲染层都引用 pos-receipt-core 的 RECEIPT_TERMS_TEXT_MAX_LENGTH，它必须等于 HBweb 发布前校验的 600；
+        // 否则总部放行的文案会在设备端校验失败、整份丢弃且永远不更新。
+        var source = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "packages/pos-receipt-core/src/features/receipts/receipt-terms-text.ts"));
+        var match = System.Text.RegularExpressions.Regex.Match(
+            source, @"export const RECEIPT_TERMS_TEXT_MAX_LENGTH\s*=\s*(\d+)\s*;");
+
+        Assert.True(match.Success, "找不到 RECEIPT_TERMS_TEXT_MAX_LENGTH 的声明，请同步更新本漂移守卫");
+        var limit = int.Parse(match.Groups[1].Value);
+        Assert.Equal(StoreReceiptProfileGuard.MaxVoucherTermsLength, limit);
+        Assert.Equal(StoreReceiptProfileGuard.MaxInstallmentTermsLength, limit);
+    }
+
+    [Theory]
+    [InlineData("apps/pos-handheld/src/core/db/pos-settings-repository.ts")]
+    [InlineData("apps/pos-ipad/src/core/db/pos-settings-repository.ts")]
+    public void Guard_代金券使用说明与分期条款_收银端本机校验必须使用共享上限常量(string relativePath)
+    {
+        // 强制检查：两个字段都必须用共享常量声明长度。不能写成别的数字（会与 HBweb 的 600 漂移），
+        // 也不能漏声明（漏了就等于设备端不校验长度）。
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), relativePath));
+        foreach (var field in new[] { "voucherTerms", "installmentTerms" })
+        {
+            var pattern = $@"optionalMultilineText\(\s*record\.{field},\s*RECEIPT_TERMS_TEXT_MAX_LENGTH,";
+            Assert.True(
+                System.Text.RegularExpressions.Regex.IsMatch(source, pattern),
+                $"{relativePath} 没有用 RECEIPT_TERMS_TEXT_MAX_LENGTH 声明 {field} 的长度上限");
+        }
+    }
+
+    [Fact]
     public void Guard_FindTooLongFields_返回全部超限字段_固定顺序_null与合法值不报()
     {
         var all = StoreReceiptProfileGuard.FindTooLongFields(
@@ -859,18 +925,235 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
             new string('a', 241),
             new string('p', 61),
             new string('1', 33),
-            new string('r', 501));
+            new string('r', 501),
+            new string('v', 601),
+            new string('i', 601));
 
         Assert.Equal(
             new[]
             {
                 ("品牌", 120, 121), ("店名", 120, 121), ("地址", 240, 241),
                 ("电话", 60, 61), ("ABN", 32, 33), ("退货政策", 500, 501),
+                ("代金券使用说明", 600, 601), ("分期条款", 600, 601),
             },
             all.Select(field => (field.DisplayName, field.Limit, field.Length)).ToArray());
-        Assert.Empty(StoreReceiptProfileGuard.FindTooLongFields(null, "店", null, null, null, null));
+        Assert.Empty(StoreReceiptProfileGuard.FindTooLongFields(null, "店", null, null, null, null, null, null));
         Assert.Empty(StoreReceiptProfileGuard.FindTooLongFields(
-            new string('b', 120), new string('n', 120), new string('a', 240), new string('p', 60), new string('1', 32), new string('r', 500)));
+            new string('b', 120), new string('n', 120), new string('a', 240), new string('p', 60), new string('1', 32), new string('r', 500),
+            new string('v', 600), new string('i', 600)));
+    }
+
+    // ───────────────────────── 代金券使用说明 / 分期条款（迁移 20261008.002） ─────────────────────────
+
+    [Fact]
+    public async Task 代金券使用说明与分期条款_透传到快照_首尾空白去掉_纯空白存null()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店甲", voucherTerms: "  Use at the issuing store only.\nNot redeemable for cash.  ", installmentTerms: "\t Order total: $50.00 minimum. \n");
+        await SeedStoreAsync("g-2", "S002", "门店乙", voucherTerms: "   ", installmentTerms: "");
+        await SeedStoreAsync("g-3", "S003", "门店丙");
+
+        var result = await CreateService().PublishAsync(new[] { "g-1", "g-2", "g-3" }, "alice");
+
+        Assert.True(result.Success, result.Message);
+        var rows = (await _mainDb.Queryable<StoreReceiptProfileRelease>().ToListAsync()).ToDictionary(row => row.StoreCode);
+        Assert.Equal("Use at the issuing store only.\nNot redeemable for cash.", rows["S001"].VoucherTerms);
+        Assert.Equal("Order total: $50.00 minimum.", rows["S001"].InstallmentTerms);
+        // 未定制（空串 / 纯空白 / null）一律存 NULL，收银端据此回落到内置默认文案。
+        Assert.Null(rows["S002"].VoucherTerms);
+        Assert.Null(rows["S002"].InstallmentTerms);
+        Assert.Null(rows["S003"].VoucherTerms);
+        Assert.Null(rows["S003"].InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Status_仅新字段变化也是pending_确认框current与latest带出新字段_下发后升到新版本()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店");
+        await PublishAsync("g-1");
+        var store = await _mainDb.Queryable<Store>().FirstAsync(row => row.StoreGUID == "g-1");
+        var service = CreateService();
+
+        // 只改代金券使用说明 → pending，其余 6 个字段完全不动。
+        store.VoucherTerms = "Use at the issuing store only.";
+        await _mainDb.Updateable(store).ExecuteCommandAsync();
+        var voucherPending = (await service.GetStatusAsync(new[] { "g-1" })).Data!.Single();
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, voucherPending.Status);
+        Assert.Equal("Use at the issuing store only.", voucherPending.Current.VoucherTerms);
+        Assert.Null(voucherPending.Latest!.VoucherTerms);
+        Assert.Null(voucherPending.Current.InstallmentTerms);
+
+        var published = await service.PublishAsync(new[] { "g-1" }, "alice");
+        Assert.Equal(("published", 2), (published.Data!.Items[0].Outcome, published.Data.Items[0].Version));
+        var synced = (await service.GetStatusAsync(new[] { "g-1" })).Data!.Single();
+        Assert.Equal(StoreReceiptProfileStatuses.Synced, synced.Status);
+        Assert.Equal("Use at the issuing store only.", synced.Latest!.VoucherTerms);
+
+        // 只改分期条款 → 同样 pending 并升 v3。
+        store.InstallmentTerms = "Order total: $50.00 minimum.";
+        await _mainDb.Updateable(store).ExecuteCommandAsync();
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, (await service.GetStatusAsync(new[] { "g-1" })).Data!.Single().Status);
+        var third = await service.PublishAsync(new[] { "g-1" }, "alice");
+        Assert.Equal(("published", 3), (third.Data!.Items[0].Outcome, third.Data.Items[0].Version));
+
+        // 清空（改回未定制）也是实质修改：快照存 NULL，收银端据此恢复默认文案。
+        store.VoucherTerms = "  ";
+        await _mainDb.Updateable(store).ExecuteCommandAsync();
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, (await service.GetStatusAsync(new[] { "g-1" })).Data!.Single().Status);
+        await service.PublishAsync(new[] { "g-1" }, "alice");
+        var latest = await _mainDb.Queryable<StoreReceiptProfileRelease>().OrderBy(row => row.Version, OrderByType.Desc).FirstAsync();
+        Assert.Equal(4, latest.Version);
+        Assert.Null(latest.VoucherTerms);
+        Assert.Equal("Order total: $50.00 minimum.", latest.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Status_迁移前的旧快照两列为NULL_门店也未定制时仍是synced_重复下发为unchanged()
+    {
+        // 直接按迁移前的形态写入 v1/v2 快照（两个新列为 NULL），门店两个新字段也是 NULL / 纯空白。
+        await SeedStoreAsync("g-null", "S001", "门店甲", voucherTerms: null, installmentTerms: null);
+        await SeedStoreAsync("g-blank", "S002", "门店乙", voucherTerms: "  \t ", installmentTerms: "");
+        foreach (var code in new[] { "S001", "S002" })
+        {
+            await _mainDb.Insertable(new StoreReceiptProfileRelease
+            {
+                StoreCode = code,
+                Version = 2,
+                StoreName = code == "S001" ? "门店甲" : "门店乙",
+                PublishedAtUtc = new DateTime(2026, 10, 6, 1, 0, 0),
+                PublishedBy = "legacy",
+                VoucherTerms = null,
+                InstallmentTerms = null,
+            }).ExecuteCommandAsync();
+        }
+
+        var service = CreateService();
+        var statuses = (await service.GetStatusAsync(new[] { "g-null", "g-blank" })).Data!;
+
+        // 不能因为多了两个字段就把全部老门店判成 pending。
+        Assert.All(statuses, item => Assert.Equal(StoreReceiptProfileStatuses.Synced, item.Status));
+        Assert.All(statuses, item => Assert.Equal(2, item.LatestVersion));
+        var again = await service.PublishAsync(new[] { "g-null", "g-blank" }, "alice");
+        Assert.Equal(0, again.Data!.PublishedCount);
+        Assert.Equal(2, again.Data.UnchangedCount);
+        Assert.Equal(2, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+    }
+
+    [Fact]
+    public async Task Status_旧快照两列为NULL而门店已填写_判为pending()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店", voucherTerms: "Use at the issuing store only.");
+        await _mainDb.Insertable(new StoreReceiptProfileRelease
+        {
+            StoreCode = "S001",
+            Version = 1,
+            StoreName = "门店",
+            PublishedAtUtc = new DateTime(2026, 10, 6, 1, 0, 0),
+        }).ExecuteCommandAsync();
+
+        var item = (await CreateService().GetStatusAsync(new[] { "g-1" })).Data!.Single();
+
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, item.Status);
+        Assert.Equal(1, item.LatestVersion);
+        Assert.Null(item.Latest!.VoucherTerms);
+    }
+
+    [Fact]
+    public async Task Status_新字段比较区分大小写与行内实质差异_首尾空白不算()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店", voucherTerms: "Line A\nLine B", installmentTerms: "Pay 1");
+        await PublishAsync("g-1");
+        var store = await _mainDb.Queryable<Store>().FirstAsync(row => row.StoreGUID == "g-1");
+        var service = CreateService();
+
+        async Task<string> StatusAfterAsync(Action<Store> change)
+        {
+            change(store);
+            await _mainDb.Updateable(store).ExecuteCommandAsync();
+            return (await service.GetStatusAsync(new[] { "g-1" })).Data!.Single().Status;
+        }
+
+        Assert.Equal(StoreReceiptProfileStatuses.Synced, await StatusAfterAsync(s => s.VoucherTerms = "  Line A\nLine B \n"));
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, await StatusAfterAsync(s => s.VoucherTerms = "line A\nLine B"));
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, await StatusAfterAsync(s => s.VoucherTerms = "Line A\r\nLine B")); // 换行风格不同也是实质差异
+        Assert.Equal(StoreReceiptProfileStatuses.Synced, await StatusAfterAsync(s => s.VoucherTerms = "Line A\nLine B"));
+        Assert.Equal(StoreReceiptProfileStatuses.Pending, await StatusAfterAsync(s => s.InstallmentTerms = "Pay 2"));
+    }
+
+    [Fact]
+    public async Task Publish_代金券使用说明与分期条款同时超限_合并在一条message里_顺序在退货政策之后()
+    {
+        await SeedStoreAsync(
+            "g-1",
+            "S001",
+            "门店",
+            returnPolicy: new string('r', 501),
+            voucherTerms: new string('v', 601),
+            installmentTerms: new string('i', 602));
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details));
+        Assert.Equal(StoreReceiptProfileErrorCodes.TooLong, detail.ErrorCode);
+        Assert.Equal(
+            "退货政策超过收银端上限 500 个字符（当前 501）；代金券使用说明超过收银端上限 600 个字符（当前 601）；分期条款超过收银端上限 600 个字符（当前 602），请先在分店资料里缩短再下发",
+            detail.Message);
+        Assert.Equal(0, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+    }
+
+    [Fact]
+    public async Task Publish_新字段长度按归一后的值计算_纯空白超长归一为null不触发超限()
+    {
+        // 恰好 600 个有效字符，前后带空白与换行：trim 后正好 600，通过；快照存 trim 后的 600 字符。
+        var terms = new string('t', 600);
+        await SeedStoreAsync(
+            "g-ok",
+            "S001",
+            "门店甲",
+            voucherTerms: "  \r\n" + terms + "\t \n",
+            installmentTerms: new string(' ', 600));
+
+        var result = await CreateService().PublishAsync(new[] { "g-ok" }, "alice");
+
+        Assert.True(result.Success, result.Message);
+        var row = await _mainDb.Queryable<StoreReceiptProfileRelease>().SingleAsync();
+        Assert.Equal(terms, row.VoucherTerms);
+        Assert.Null(row.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Publish_新字段控制字符先于长度检查_且InvalidCharacters文案带字段名()
+    {
+        await SeedStoreAsync("g-1", "S001", "门店", voucherTerms: new string('v', 700) + "\u0001");
+
+        var result = await CreateService().PublishAsync(new[] { "g-1" }, "alice");
+
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(result.Details));
+        Assert.Equal(StoreReceiptProfileErrorCodes.InvalidCharacters, detail.ErrorCode);
+        Assert.StartsWith("VoucherTerms ", detail.Message);
+    }
+
+    [Fact]
+    public async Task Publish_一批里仅一家新字段超限_整批不写入_缩短后整批可下发()
+    {
+        await SeedStoreAsync("g-ok", "S001", "好店", voucherTerms: "Use at the issuing store only.");
+        await SeedStoreAsync("g-long", "S002", "超限店", installmentTerms: new string('i', 601));
+        var service = CreateService();
+
+        var rejected = await service.PublishAsync(new[] { "g-ok", "g-long" }, "alice");
+
+        Assert.False(rejected.Success);
+        Assert.Equal(StoreReceiptProfileErrorCodes.NotPublishable, rejected.ErrorCode);
+        var detail = Assert.Single(Assert.IsType<List<StoreReceiptProfilePublishErrorDetailDto>>(rejected.Details));
+        Assert.Equal(("g-long", "S002", StoreReceiptProfileErrorCodes.TooLong), (detail.StoreGuid, detail.StoreCode, detail.ErrorCode));
+        Assert.Equal("分期条款超过收银端上限 600 个字符（当前 601），请先在分店资料里缩短再下发", detail.Message);
+        Assert.Equal(0, await _mainDb.Queryable<StoreReceiptProfileRelease>().CountAsync());
+
+        var store = await _mainDb.Queryable<Store>().FirstAsync(row => row.StoreGUID == "g-long");
+        store.InstallmentTerms = new string('i', 600);
+        await _mainDb.Updateable(store).ExecuteCommandAsync();
+        var retry = await service.PublishAsync(new[] { "g-ok", "g-long" }, "alice");
+        Assert.True(retry.Success, retry.Message);
+        Assert.Equal(2, retry.Data!.PublishedCount);
     }
 
     // ───────────────────────── 请求参数校验 ─────────────────────────
@@ -929,15 +1212,17 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
     // ───────────────────────── 守卫 ─────────────────────────
 
     [Theory]
-    [InlineData("S001", "门店", "HB", "1 Main\r\nSt\t2", "02 1234", "12345678901", "7 days\nreturn", null)]
-    [InlineData("S001", "门店", null, null, null, null, null, null)]
-    [InlineData("S\u0001", "门店", null, null, null, null, null, "StoreCode")]
-    [InlineData("S001", "门\t店", null, null, null, null, null, "StoreName")]
-    [InlineData("S001", "门店", "品\r牌", null, null, null, null, "BrandName")]
-    [InlineData("S001", "门店", null, null, "02\n12", null, null, "Phone")]
-    [InlineData("S001", "门店", null, null, null, "12\t34", null, "ABN")]
-    [InlineData("S001", "门店", null, "地\u0000址", null, null, null, "Address")]
-    [InlineData("S001", "门店", null, null, null, null, "政\u009f策", "ReturnPolicy")]
+    [InlineData("S001", "门店", "HB", "1 Main\r\nSt\t2", "02 1234", "12345678901", "7 days\nreturn", "Use at store\r\nNo cash\t.", "Order total\nFirst payment", null)]
+    [InlineData("S001", "门店", null, null, null, null, null, null, null, null)]
+    [InlineData("S\u0001", "门店", null, null, null, null, null, null, null, "StoreCode")]
+    [InlineData("S001", "门\t店", null, null, null, null, null, null, null, "StoreName")]
+    [InlineData("S001", "门店", "品\r牌", null, null, null, null, null, null, "BrandName")]
+    [InlineData("S001", "门店", null, null, "02\n12", null, null, null, null, "Phone")]
+    [InlineData("S001", "门店", null, null, null, "12\t34", null, null, null, "ABN")]
+    [InlineData("S001", "门店", null, "地\u0000址", null, null, null, null, null, "Address")]
+    [InlineData("S001", "门店", null, null, null, null, "政\u009f策", null, null, "ReturnPolicy")]
+    [InlineData("S001", "门店", null, null, null, null, null, "说\u0000明", null, "VoucherTerms")]
+    [InlineData("S001", "门店", null, null, null, null, null, null, "条\u009f款", "InstallmentTerms")]
     public void Guard_口径与Hbpos的StoreReceiptProfileGuard一致(
         string storeCode,
         string storeName,
@@ -946,11 +1231,14 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
         string? phone,
         string? abn,
         string? returnPolicy,
+        string? voucherTerms,
+        string? installmentTerms,
         string? expectedInvalidField)
     {
         Assert.Equal(
             expectedInvalidField,
-            StoreReceiptProfileGuard.FindInvalidField(storeCode, storeName, brandName, address, phone, abn, returnPolicy)
+            StoreReceiptProfileGuard.FindInvalidField(
+                storeCode, storeName, brandName, address, phone, abn, returnPolicy, voucherTerms, installmentTerms)
         );
     }
 
@@ -991,6 +1279,8 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
             case "phone": store.Phone = value; break;
             case "abn": store.ABN = value; break;
             case "returnPolicy": store.ReturnPolicy = value; break;
+            case "voucherTerms": store.VoucherTerms = value; break;
+            case "installmentTerms": store.InstallmentTerms = value; break;
             default: throw new ArgumentOutOfRangeException(nameof(field), field, null);
         }
     }
@@ -1027,6 +1317,8 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
         string? phone = null,
         string? abn = null,
         string? returnPolicy = null,
+        string? voucherTerms = null,
+        string? installmentTerms = null,
         bool isActive = true,
         bool isDeleted = false,
         Action<Store>? configure = null)
@@ -1041,6 +1333,8 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
             Phone = phone,
             ABN = abn,
             ReturnPolicy = returnPolicy,
+            VoucherTerms = voucherTerms,
+            InstallmentTerms = installmentTerms,
             IsActive = isActive,
             IsDeleted = isDeleted,
         };

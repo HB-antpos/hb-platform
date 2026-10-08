@@ -225,6 +225,10 @@ export type StoreReceiptProfile = Readonly<{
   phone: string;
   abn: string;
   returnPolicy: string;
+  /** 退款券「VOUCHER TERMS」自定义正文；服务端 null / 缺失（旧服务端）归一为空串 = 未定制。 */
+  voucherTerms: string;
+  /** 分期小票「INSTALLMENT TERMS」自定义正文；同上。 */
+  installmentTerms: string;
 }>;
 
 export class HbposStoreApi {
@@ -250,6 +254,8 @@ export class HbposStoreApi {
       phone: data.phone ?? "",
       abn: data.abn ?? "",
       returnPolicy: data.returnPolicy ?? "",
+      voucherTerms: data.voucherTerms ?? "",
+      installmentTerms: data.installmentTerms ?? "",
     });
   }
 
@@ -285,6 +291,8 @@ export class HbposStoreApi {
             phone: profile.phone ?? "",
             abn: profile.abn ?? "",
             returnPolicy: profile.returnPolicy ?? "",
+            voucherTerms: profile.voucherTerms ?? "",
+            installmentTerms: profile.installmentTerms ?? "",
           })
         : null,
     });

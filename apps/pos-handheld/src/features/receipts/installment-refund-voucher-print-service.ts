@@ -1,8 +1,8 @@
-import { encodeRefundVoucherDocuments } from "@hb/pos-receipt-core/features/receipts/refund-voucher-receipt-renderer";
-import type {
-  RenderedReturnReceipt,
-  ReturnReceiptSettingsPort,
-} from "@hb/pos-receipt-core/features/receipts/return-receipt-renderer";
+import {
+  encodeRefundVoucherDocuments,
+  type RefundVoucherReceiptSettingsPort,
+} from "@hb/pos-receipt-core/features/receipts/refund-voucher-receipt-renderer";
+import type { RenderedReturnReceipt } from "@hb/pos-receipt-core/features/receipts/return-receipt-renderer";
 
 import type { InstallmentRefundVoucherPrintMaterialPort } from "@/core/db/sqlite-installment-refund-voucher-print-material";
 
@@ -20,7 +20,8 @@ export type InstallmentRefundVoucherPrintQueuePort = Readonly<{
 
 export type InstallmentRefundVoucherPrintServiceOptions = Readonly<{
   materials: InstallmentRefundVoucherPrintMaterialPort;
-  settings: ReturnReceiptSettingsPort;
+  /** 冻结设置里带 voucherTerms 时，券面「VOUCHER TERMS」按总部下发的正文打印；缺省走内置默认文案。 */
+  settings: RefundVoucherReceiptSettingsPort;
   printQueue: InstallmentRefundVoucherPrintQueuePort;
   trustedStoreCode: string;
   now(): Date;

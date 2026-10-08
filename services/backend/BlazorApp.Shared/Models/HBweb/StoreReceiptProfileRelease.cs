@@ -38,6 +38,14 @@ public sealed class StoreReceiptProfileRelease
     [SugarColumn(IsNullable = true, Length = 500)]
     public string? ReturnPolicy { get; set; }
 
+    /// <summary>代金券使用说明快照；NULL＝按收银端内置默认文案打印（迁移前已有的旧快照也是 NULL）。迁移 20261008.002 新增。</summary>
+    [SugarColumn(IsNullable = true, Length = 600)]
+    public string? VoucherTerms { get; set; }
+
+    /// <summary>分期条款快照；NULL＝按收银端内置默认文案打印。迁移 20261008.002 新增。</summary>
+    [SugarColumn(IsNullable = true, Length = 600)]
+    public string? InstallmentTerms { get; set; }
+
     [SugarColumn(IsNullable = false, ColumnDataType = "datetime2")]
     public DateTime PublishedAtUtc { get; set; }
 

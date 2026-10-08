@@ -17,6 +17,8 @@ const settings: ReceiptPrinterSettings = {
   phone: "0712345678",
   abn: "12 345 678 901",
   returnPolicy: "Refunds within 14 days.",
+  voucherTerms: "Valid at all stores.",
+  installmentTerms: "Deposit $30 minimum.",
   profileStoreCode: "1042",
   profileVersion: 0,
   profileAckedVersion: 0,
@@ -124,6 +126,8 @@ test("legacy 绑定落盘失败时不采用无 scope 旧资料，返回保留硬
   assert.equal(resolved.phone, "");
   assert.equal(resolved.abn, "");
   assert.equal(resolved.returnPolicy, "");
+  assert.equal(resolved.voucherTerms, "");
+  assert.equal(resolved.installmentTerms, "");
   assert.equal(resolved.peripheralId, settings.peripheralId);
   assert.equal(resolved.printEnabled, settings.printEnabled);
   assert.equal(resolved.drawerEnabled, settings.drawerEnabled);
@@ -147,6 +151,8 @@ test("profileStoreCode 与当前店不匹配时清空资料但保留硬件设置
   assert.equal(resolved.phone, "");
   assert.equal(resolved.abn, "");
   assert.equal(resolved.returnPolicy, "");
+  assert.equal(resolved.voucherTerms, "");
+  assert.equal(resolved.installmentTerms, "");
   assert.equal(resolved.peripheralId, settings.peripheralId);
   assert.equal(resolved.printEnabled, settings.printEnabled);
   assert.equal(resolved.drawerEnabled, settings.drawerEnabled);
@@ -160,6 +166,9 @@ test("profileStoreCode 与当前店不匹配时清空资料但保留硬件设置
   assert.equal(persisted.value?.phone, "");
   assert.equal(persisted.value?.abn, "");
   assert.equal(persisted.value?.returnPolicy, "");
+  // 旧店的券使用说明 / 分期条款同样作废，不能串到新店小票上。
+  assert.equal(persisted.value?.voucherTerms, "");
+  assert.equal(persisted.value?.installmentTerms, "");
 });
 
 test("换店清空资料时同时清空下发版本与已回执版本，新店下一轮同步重新拉取", async () => {
@@ -217,7 +226,36 @@ test("当前店已应用的下发资料与版本原样保留，不触发清理�
   assert.equal(resolved.profileVersion, 7);
   assert.equal(resolved.profileAckedVersion, 6);
   assert.equal(resolved.brandName, "Hot Bargain");
+  assert.equal(resolved.voucherTerms, "Valid at all stores.");
+  assert.equal(resolved.installmentTerms, "Deposit $30 minimum.");
   assert.equal(persistCalls, 0);
+});
+
+test("无 scope 的旧设置只有券使用说明 / 分期条款非空时也视为旧资料，首次读取绑定当前店", async () => {
+  const onlyTerms: ReceiptPrinterSettings = {
+    ...settings,
+    brandName: "",
+    storeName: "",
+    address: "",
+    phone: "",
+    abn: "",
+    returnPolicy: "",
+    profileStoreCode: "",
+  };
+  const persisted: { value: ReceiptPrinterSettings | null } = { value: null };
+
+  const resolved = await resolveTrustedReceiptPrinterSettings(
+    onlyTerms,
+    "1042",
+    undefined,
+    async (next) => { persisted.value = next; },
+  );
+
+  assert.equal(resolved.profileStoreCode, "1042");
+  assert.equal(persisted.value?.profileStoreCode, "1042");
+  // 绑定成功时本机条款原样保留。
+  assert.equal(resolved.voucherTerms, "Valid at all stores.");
+  assert.equal(persisted.value?.installmentTerms, "Deposit $30 minimum.");
 });
 
 test("全新空 profile 不误绑定 legacy，设备店名仅在本机为空时兜底", async () => {
@@ -230,6 +268,8 @@ test("全新空 profile 不误绑定 legacy，设备店名仅在本机为空时�
     phone: "",
     abn: "",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
     profileStoreCode: "",
   };
   const fresh = await resolveTrustedReceiptPrinterSettings(

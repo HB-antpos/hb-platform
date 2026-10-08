@@ -33,6 +33,33 @@ public sealed class StoreReceiptProfileApiClientTests
     }
 
     [Fact]
+    public async Task Sync_parses_voucher_and_installment_terms_and_treats_missing_terms_as_null()
+    {
+        var withTerms = CreateClient(new RecordingHandler(_ => Json("""
+            {"success":true,"data":{"changed":true,"version":5,"profile":{
+              "storeCode":"S001","storeName":"Sunnybank","brandName":"HB","address":null,
+              "phone":null,"abn":null,"returnPolicy":null,"version":5,
+              "voucherTerms":"Use at the issuing store only.\nNot redeemable for cash.",
+              "installmentTerms":"Order total: $50.00 minimum."}}}
+            """)));
+        // 旧服务端 / 旧快照：JSON 里根本没有这两个字段。
+        var withoutTerms = CreateClient(new RecordingHandler(_ => Json("""
+            {"success":true,"data":{"changed":true,"version":4,"profile":{
+              "storeCode":"S001","storeName":"Sunnybank","brandName":"HB","address":null,
+              "phone":null,"abn":null,"returnPolicy":"7 days","version":4}}}
+            """)));
+
+        var parsed = (await withTerms.GetSyncAsync(4)).Profile!;
+        var legacy = (await withoutTerms.GetSyncAsync(3)).Profile!;
+
+        Assert.Equal("Use at the issuing store only.\nNot redeemable for cash.", parsed.VoucherTerms);
+        Assert.Equal("Order total: $50.00 minimum.", parsed.InstallmentTerms);
+        Assert.Null(legacy.VoucherTerms);
+        Assert.Null(legacy.InstallmentTerms);
+        Assert.Equal("7 days", legacy.ReturnPolicy);
+    }
+
+    [Fact]
     public async Task Sync_unchanged_response_has_no_profile()
     {
         var client = CreateClient(new RecordingHandler(_ => Json(

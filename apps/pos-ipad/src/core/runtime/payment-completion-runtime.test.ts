@@ -197,6 +197,8 @@ function receiptSettings() {
     phone: "0712345678",
     abn: "12 345 678 901",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
     profileStoreCode: "S001",
     profileVersion: 0,
     profileAckedVersion: 0,

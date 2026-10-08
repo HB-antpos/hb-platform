@@ -5,7 +5,7 @@ using Hbpos.Client.Wpf.Services;
 namespace Hbpos.Client.Wpf.ViewModels;
 
 /// <summary>
-/// 设置页中「总部下发的小票资料」相关状态：本机已应用过下发（版本 &gt; 0）后六个资料字段只读，
+/// 设置页中「总部下发的小票资料」相关状态：本机已应用过下发（版本 &gt; 0）后资料字段（含代金券使用说明、分期条款）只读，
 /// 载入按钮改为「立即同步」。下发版本的读写与校验都在服务层，这里只负责界面状态。
 /// </summary>
 public sealed partial class SettingsViewModel
@@ -56,7 +56,7 @@ public sealed partial class SettingsViewModel
 
     private void OnReceiptProfileApplied(object? sender, ReceiptProfileAppliedEventArgs e)
     {
-        // 设置页正开着时后台恰好写入了新版本：刷新六个字段和只读状态，避免界面停在旧内容上。
+        // 设置页正开着时后台恰好写入了新版本：刷新所有资料字段和只读状态，避免界面停在旧内容上。
         if (_receiptProfileSyncDispatcher is { } dispatcher && !dispatcher.CheckAccess())
         {
             dispatcher.BeginInvoke(new Action(() => _ = ReloadReceiptProfileFromStoreAsync()));
@@ -119,7 +119,7 @@ public sealed partial class SettingsViewModel
     }
 
     /// <summary>
-    /// 只刷新六个资料字段和下发版本；端口、银行收据开关等硬件设置可能有未保存的草稿，不能被覆盖。
+    /// 只刷新资料字段（六个资料 + 代金券使用说明 + 分期条款）和下发版本；端口、银行收据开关等硬件设置可能有未保存的草稿，不能被覆盖。
     /// </summary>
     private void ApplyReceiptProfileFields(ReceiptPrinterSettings settings)
     {
@@ -129,6 +129,8 @@ public sealed partial class SettingsViewModel
         ReceiptStorePhoneText = settings.StorePhone;
         ReceiptAbnText = settings.Abn;
         ReceiptReturnPolicyText = settings.ReturnPolicy;
+        ReceiptVoucherTermsText = settings.VoucherTerms;
+        ReceiptInstallmentTermsText = settings.InstallmentTerms;
         ReceiptProfileVersion = settings.ProfileVersion;
     }
 }

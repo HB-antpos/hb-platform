@@ -109,6 +109,58 @@ public sealed class StoreReceiptProfileReleaseTests
     }
 
     [Fact]
+    public async Task GetSync_carries_voucher_and_installment_terms_in_the_snapshot()
+    {
+        var snapshot = Snapshot(2) with
+        {
+            VoucherTerms = "Use at the issuing store only.\nNot redeemable for cash.",
+            InstallmentTerms = "Order total: $50.00 minimum."
+        };
+        var service = new StoreReceiptProfileReleaseService(
+            new FakeRepository { LatestVersion = 2, Latest = snapshot });
+
+        var result = await service.GetSyncAsync("S001", 1, CancellationToken.None);
+
+        var profile = Assert.IsType<StoreReceiptProfileSyncDto>(result.Sync).Profile!;
+        Assert.Equal(snapshot.VoucherTerms, profile.VoucherTerms);
+        Assert.Equal(snapshot.InstallmentTerms, profile.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task GetSync_old_snapshot_without_terms_is_still_valid_and_has_null_terms()
+    {
+        var service = new StoreReceiptProfileReleaseService(
+            new FakeRepository { LatestVersion = 2, Latest = Snapshot(2) });
+
+        var result = await service.GetSyncAsync("S001", 1, CancellationToken.None);
+
+        var profile = Assert.IsType<StoreReceiptProfileSyncDto>(result.Sync).Profile!;
+        Assert.Null(profile.VoucherTerms);
+        Assert.Null(profile.InstallmentTerms);
+    }
+
+    [Theory]
+    [InlineData("VoucherTerms")]
+    [InlineData("InstallmentTerms")]
+    public async Task GetSync_snapshot_terms_may_use_crlf_tab_but_reject_other_control_characters(string field)
+    {
+        StoreReceiptProfileDto With(string value) => field == "VoucherTerms"
+            ? Snapshot(2) with { VoucherTerms = value }
+            : Snapshot(2) with { InstallmentTerms = value };
+
+        var allowed = await new StoreReceiptProfileReleaseService(
+                new FakeRepository { LatestVersion = 2, Latest = With("第一行\r\n第二行\t结束") })
+            .GetSyncAsync("S001", 0, CancellationToken.None);
+        var rejected = await new StoreReceiptProfileReleaseService(
+                new FakeRepository { LatestVersion = 2, Latest = With("第一行\u0007第二行") })
+            .GetSyncAsync("S001", 0, CancellationToken.None);
+
+        Assert.True(Assert.IsType<StoreReceiptProfileSyncDto>(allowed.Sync).Changed);
+        Assert.Null(rejected.Sync);
+        Assert.Equal(StoreReceiptProfileReleaseService.InvalidCharactersCode, rejected.ErrorCode);
+    }
+
+    [Fact]
     public async Task GetSync_snapshot_vanishing_between_queries_is_treated_as_unchanged()
     {
         var repository = new FakeRepository { LatestVersion = 4, Latest = null };
@@ -393,6 +445,38 @@ public sealed class StoreReceiptProfileReleaseTests
         Assert.NotNull(dto);
         Assert.Equal(0, dto.Version);
         Assert.Null(dto.PublishedAt);
+    }
+
+    [Fact]
+    public void Dto_serializes_terms_in_camel_case_and_null_terms_stay_explicit()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        var withTerms = JsonSerializer.Serialize(
+            Snapshot(3) with { VoucherTerms = "a\nb", InstallmentTerms = "c" },
+            options);
+        var withoutTerms = JsonSerializer.Serialize(Snapshot(3), options);
+
+        Assert.Contains("\"voucherTerms\":\"a\\nb\"", withTerms, StringComparison.Ordinal);
+        Assert.Contains("\"installmentTerms\":\"c\"", withTerms, StringComparison.Ordinal);
+        Assert.Contains("\"voucherTerms\":null", withoutTerms, StringComparison.Ordinal);
+        Assert.Contains("\"installmentTerms\":null", withoutTerms, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Dto_from_an_old_server_without_terms_deserializes_with_null_terms()
+    {
+        // 新客户端连旧服务端（或旧快照）：JSON 里没有 voucherTerms/installmentTerms，必须读成 null 而不是报错。
+        const string json =
+            """{"storeCode":"S001","storeName":"Store One","brandName":"HB","address":null,"phone":null,"abn":null,"returnPolicy":null,"version":3}""";
+
+        var dto = JsonSerializer.Deserialize<StoreReceiptProfileDto>(
+            json,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.NotNull(dto);
+        Assert.Null(dto.VoucherTerms);
+        Assert.Null(dto.InstallmentTerms);
     }
 
     [Fact]

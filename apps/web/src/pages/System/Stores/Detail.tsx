@@ -4,9 +4,15 @@ import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import PageContainer from '../../../components/PageContainer'
 import { useDynamicTabTitle } from '../../../hooks/useDynamicTabTitle'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getStoreByGuid } from '../../../services/storeService'
 import type { StoreDto } from '../../../types/store'
+import storesMessagesEn from './storesMessages.en.json'
+import storesMessagesZh from './storesMessages.zh.json'
 import { formatStoreTimeZoneId } from './timeZoneOptions'
+
+// 代金券使用说明 / 分期条款的文案在页面级消息文件里；本页独立于分店列表页加载时也要能取到。
+registerPageMessages({ zh: storesMessagesZh, en: storesMessagesEn })
 
 export default function StoreDetailPage() {
   const { t } = useTranslation()
@@ -62,6 +68,16 @@ export default function StoreDetailPage() {
           </Descriptions.Item>
           <Descriptions.Item label={t('system.stores.returnPolicy')} span={2}>
             <div style={{ whiteSpace: 'pre-wrap' }}>{store.returnPolicy || '--'}</div>
+          </Descriptions.Item>
+          <Descriptions.Item label={t('system.stores.voucherTerms')} span={2}>
+            {store.voucherTerms
+              ? <div style={{ whiteSpace: 'pre-wrap' }}>{store.voucherTerms}</div>
+              : <Typography.Text type="secondary">{t('system.stores.termsUsingDefault')}</Typography.Text>}
+          </Descriptions.Item>
+          <Descriptions.Item label={t('system.stores.installmentTerms')} span={2}>
+            {store.installmentTerms
+              ? <div style={{ whiteSpace: 'pre-wrap' }}>{store.installmentTerms}</div>
+              : <Typography.Text type="secondary">{t('system.stores.termsUsingDefault')}</Typography.Text>}
           </Descriptions.Item>
           <Descriptions.Item label={t('column.createTime')}>{store.createdAt}</Descriptions.Item>
           <Descriptions.Item label={t('system.users.updatedAt')}>{store.updatedAt}</Descriptions.Item>

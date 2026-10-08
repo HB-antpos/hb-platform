@@ -55,6 +55,8 @@ const SNAPSHOT: SettingsSnapshot = {
     phone: "",
     abn: "",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
     profileStoreCode: "S1",
     profileVersion: 0,
     profileAckedVersion: 0,
@@ -206,6 +208,8 @@ test("门店小票资料读取经可信 session 前后复核并原样进入 pres
           phone: "07 3000 0000",
           abn: "12 345 678 901",
           returnPolicy: "Refunds within 14 days.",
+          voucherTerms: "",
+          installmentTerms: "",
         };
       },
     }),

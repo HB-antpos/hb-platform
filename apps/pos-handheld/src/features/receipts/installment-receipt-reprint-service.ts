@@ -3,10 +3,11 @@ import {
   buildSaleReceiptDocument,
   documentToEscPosBytes,
 } from "@hb/pos-receipt-core/features/receipts/receipt-document";
-import type {
-  FrozenReceiptReprintSettings,
-  ReceiptReprintSettingsSource,
-} from "@hb/pos-receipt-core/features/receipts/receipt-reprint-service";
+import {
+  resolveReceiptTermsBlock,
+  type ReceiptCustomTermsText,
+} from "@hb/pos-receipt-core/features/receipts/receipt-terms-text";
+import type { FrozenReceiptReprintSettings } from "@hb/pos-receipt-core/features/receipts/receipt-reprint-service";
 
 import type { RenderedReturnReceipt } from "@hb/pos-receipt-core/features/receipts/return-receipt-renderer";
 
@@ -17,9 +18,21 @@ import type {
   InstallmentsRemotePort,
 } from "@/features/installments/installment-models";
 
+/**
+ * 分期小票用的冻结设置：在重打冻结设置之外，多带总部下发的「分期条款」自定义正文（可选）。
+ * 缺省、空白或不合规时按内置默认文案打印（见 resolveReceiptTermsBlock）。
+ */
+export type FrozenInstallmentReceiptSettings = FrozenReceiptReprintSettings &
+  Pick<ReceiptCustomTermsText, "installmentTerms">;
+
+/** 分期补打读取冻结设置的端口；普通的 ReceiptReprintSettingsSource（不带 installmentTerms）同样满足它。 */
+export interface InstallmentReceiptSettingsSource {
+  getFrozenReceiptSettings(): Promise<FrozenInstallmentReceiptSettings | null>;
+}
+
 export type InstallmentReceiptReprintPreparationServiceOptions = Readonly<{
   installments: Pick<InstallmentsRemotePort, "getDetails">;
-  settings: ReceiptReprintSettingsSource;
+  settings: InstallmentReceiptSettingsSource;
   trustedStoreCode: string;
   trustedDeviceCode: string;
   nowIso(): string;
@@ -104,7 +117,16 @@ export class InstallmentReceiptReprintPreparationService {
         printedAtIso: this.options.nowIso(),
         extraInfoLines: installmentInfoLines(details, recordedPayments),
         // 中文注释：分期条款只印在进行中的分期上；未带条款时与原小票字节一致。
-        ...(shouldPrintInstallmentTerms(details) ? { termsBlock: INSTALLMENT_RECEIPT_TERMS } : {}),
+        // 条款正文：总部下发了可打印的自定义正文就用它（标题固定为 INSTALLMENT TERMS），
+        // 否则（未定制、全空白、不合规被丢弃）逐字打印内置默认文案。
+        ...(shouldPrintInstallmentTerms(details)
+          ? {
+              termsBlock: resolveReceiptTermsBlock(
+                INSTALLMENT_RECEIPT_TERMS,
+                settings.installmentTerms,
+              ),
+            }
+          : {}),
       });
 
       const receiptBytes = documentToEscPosBytes(document);
@@ -395,8 +417,8 @@ function isSafeOptionalText(value: unknown): value is string | null {
 }
 
 function isValidSettings(
-  value: FrozenReceiptReprintSettings | null,
-): value is FrozenReceiptReprintSettings {
+  value: FrozenInstallmentReceiptSettings | null,
+): value is FrozenInstallmentReceiptSettings {
   if (!value || !isExactText(value.printerId)) return false;
   if (value.paper !== "58mm" && value.paper !== "80mm") return false;
   if (value.locale !== "en" && value.locale !== "zh-CN") return false;

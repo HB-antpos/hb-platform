@@ -26,7 +26,7 @@ function item(storeGuid: string, latestVersion: number) {
     latestVersion,
     publishedAtUtc: null,
     publishedBy: null,
-    current: { brandName: null, storeName: `示例分店 ${storeGuid}`, address: null, phone: null, abn: null, returnPolicy: null },
+    current: { brandName: null, storeName: `示例分店 ${storeGuid}`, address: null, phone: null, abn: null, returnPolicy: null, voucherTerms: null, installmentTerms: null },
     latest: null,
     deviceTotal: 0,
     deviceApplied: 0,

@@ -21,6 +21,8 @@ function snapshot(overrides: Partial<ReceiptProfileSnapshot> = {}): ReceiptProfi
     phone: "02 1234 5678",
     abn: "12 345 678 901",
     returnPolicy: "Returns within 14 days.",
+    voucherTerms: "",
+    installmentTerms: "",
     ...overrides,
   };
 }
@@ -118,6 +120,64 @@ test("changed=true：校验通过后原子写入、回执并记录已回执版�
   for (const secret of ["Main Street", "1234 5678", "345 678", "Bankstown", "Returns within"]) {
     assert.equal(serialized.includes(secret), false, `日志不得包含资料内容：${secret}`);
   }
+});
+
+test("券使用说明与分期条款随资料一起原子写入并回执；正文原样透传，日志不含正文内容", async () => {
+  const h = new Harness();
+  const voucherTerms = "Use at the issuing store only.\r\n\r\n  Valid for 90 days.  ";
+  const installmentTerms = "Minimum deposit $30.\nLater payments from $10.";
+  h.syncImpl = async () => ({
+    changed: true,
+    version: 5,
+    profile: snapshot({ version: 5, voucherTerms, installmentTerms }),
+  });
+
+  const result = await h.controller.requestSync("startup");
+
+  assert.deepEqual(result, { status: "updated", version: 5 });
+  assert.equal(h.applied.length, 1);
+  // 控制器只透传，不改写正文（拆行、trim、回落默认由打印层统一处理）。
+  assert.equal(h.applied[0]?.voucherTerms, voucherTerms);
+  assert.equal(h.applied[0]?.installmentTerms, installmentTerms);
+  assert.deepEqual(h.ackCalls, [5]);
+  assert.deepEqual(h.local, { profileVersion: 5, profileAckedVersion: 5 });
+  const serialized = JSON.stringify(h.logs);
+  for (const secret of ["issuing store", "Valid for 90", "Minimum deposit", "Later payments"]) {
+    assert.equal(serialized.includes(secret), false, `日志不得包含条款正文：${secret}`);
+  }
+});
+
+test("未定制的旧快照（两个条款字段为空串）照常写入并回执，不影响其它字段", async () => {
+  const h = new Harness();
+  h.syncImpl = async () => ({ changed: true, version: 2, profile: snapshot({ version: 2 }) });
+
+  const result = await h.controller.requestSync("timer");
+
+  assert.deepEqual(result, { status: "updated", version: 2 });
+  assert.equal(h.applied[0]?.voucherTerms, "");
+  assert.equal(h.applied[0]?.installmentTerms, "");
+  assert.equal(h.applied[0]?.returnPolicy, "Returns within 14 days.");
+  assert.deepEqual(h.ackCalls, [2]);
+});
+
+test("条款字段本机校验不通过（rejected）时整份不写入不回执，同一版本不再重试", async () => {
+  const h = new Harness();
+  h.applyOutcome = "rejected";
+  h.syncImpl = async () => ({
+    changed: true,
+    version: 6,
+    profile: snapshot({ version: 6, voucherTerms: "x".repeat(601) }),
+  });
+
+  assert.deepEqual(await h.controller.requestSync("startup"), {
+    status: "failed",
+    reason: "invalid-profile",
+  });
+  assert.deepEqual(h.ackCalls, []);
+  assert.deepEqual(h.local, { profileVersion: 0, profileAckedVersion: 0 });
+  // 同一版本第二次返回：本进程内直接判定不合规，不再写入。
+  assert.deepEqual(await h.controller.syncNow(), { status: "failed", reason: "invalid-profile" });
+  assert.equal(h.applied.length, 0);
 });
 
 test("落盘时统一使用本机绑定门店代码（大小写不同也视为同店）", async () => {

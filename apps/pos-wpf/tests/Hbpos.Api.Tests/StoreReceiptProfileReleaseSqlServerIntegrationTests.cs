@@ -25,6 +25,8 @@ public sealed class StoreReceiptProfileReleaseSqlServerIntegrationTests(
             [Phone] nvarchar(200) NULL,
             [ABN] nvarchar(20) NULL,
             [ReturnPolicy] nvarchar(500) NULL,
+            [VoucherTerms] nvarchar(600) NULL,
+            [InstallmentTerms] nvarchar(600) NULL,
             [PublishedAtUtc] datetime2 NOT NULL,
             [PublishedBy] nvarchar(100) NULL,
             CONSTRAINT [PK_StoreReceiptProfileRelease] PRIMARY KEY CLUSTERED ([StoreCode], [Version])
@@ -128,6 +130,116 @@ public sealed class StoreReceiptProfileReleaseSqlServerIntegrationTests(
             var same = await release.GetSyncAsync("S001", 2, CancellationToken.None);
             Assert.False(same.Sync!.Changed);
             Assert.Null(same.Sync.Profile);
+        });
+    }
+
+    [DeviceActivationSqlServerFact]
+    public async Task Latest_snapshot_carries_voucher_and_installment_terms_end_to_end()
+    {
+        await WithTablesAsync(async () =>
+        {
+            const string voucherTerms = "Use at the issuing store only.\r\nNot redeemable for cash.";
+            const string installmentTerms = "Order total: $50.00 minimum.";
+            await InsertReleaseAsync("S001", 1, "抬头", "1 Queen St", voucherTerms, installmentTerms);
+            var context = fixture.CreateContext();
+
+            var latest = await new SqlSugarStoreReceiptProfileReleaseRepository(context)
+                .GetLatestAsync("S001", CancellationToken.None);
+            var profile = await new StoreReceiptProfileService(context)
+                .GetCurrentAsync("S001", CancellationToken.None);
+
+            Assert.Equal(voucherTerms, latest!.VoucherTerms);
+            Assert.Equal(installmentTerms, latest.InstallmentTerms);
+            Assert.Equal(voucherTerms, profile.Profile!.VoucherTerms);
+            Assert.Equal(installmentTerms, profile.Profile.InstallmentTerms);
+        });
+    }
+
+    [DeviceActivationSqlServerFact]
+    public async Task Old_snapshot_rows_with_null_terms_read_back_as_null()
+    {
+        await WithTablesAsync(async () =>
+        {
+            await InsertReleaseAsync("S001", 1, "抬头", "1 Queen St");
+
+            var latest = await new SqlSugarStoreReceiptProfileReleaseRepository(fixture.CreateContext())
+                .GetLatestAsync("S001", CancellationToken.None);
+
+            Assert.Null(latest!.VoucherTerms);
+            Assert.Null(latest.InstallmentTerms);
+        });
+    }
+
+    [DeviceActivationSqlServerFact]
+    public async Task Never_published_store_falls_back_to_current_store_terms()
+    {
+        await WithTablesAsync(async () =>
+        {
+            await fixture.ExecuteMainAsync(
+                "UPDATE [dbo].[Store] SET [VoucherTerms] = N'Store voucher terms', [InstallmentTerms] = N'Store installment terms' WHERE [StoreCode] = 'S001';");
+
+            var profile = await new StoreReceiptProfileService(fixture.CreateContext())
+                .GetCurrentAsync("S001", CancellationToken.None);
+
+            Assert.Equal(0, profile.Profile!.Version);
+            Assert.Equal("Store voucher terms", profile.Profile.VoucherTerms);
+            Assert.Equal("Store installment terms", profile.Profile.InstallmentTerms);
+        });
+    }
+
+    [DeviceActivationSqlServerFact]
+    public async Task Release_table_without_the_new_columns_falls_back_to_the_legacy_read_instead_of_failing()
+    {
+        await WithTablesAsync(async () =>
+        {
+            // 部署顺序出错：先发了 Hbpos.Api，HBweb 迁移还没给 Release 表加两列。
+            await InsertReleaseAsync("S001", 1, "抬头", "1 Queen St");
+            await fixture.ExecuteMainAsync(
+                "ALTER TABLE [dbo].[StoreReceiptProfileRelease] DROP COLUMN [VoucherTerms], [InstallmentTerms];");
+            var context = fixture.CreateContext();
+            var repository = new SqlSugarStoreReceiptProfileReleaseRepository(context);
+
+            var latest = await repository.GetLatestAsync("S001", CancellationToken.None);
+            var sync = await new StoreReceiptProfileReleaseService(repository)
+                .GetSyncAsync("S001", 0, CancellationToken.None);
+            var profile = await new StoreReceiptProfileService(context)
+                .GetCurrentAsync("S001", CancellationToken.None);
+
+            // 老字段照常读出（退货政策同步不受影响），新字段为 null＝收银端走默认文案。
+            Assert.Equal("抬头", latest!.StoreName);
+            Assert.Equal("30 天无理由退换", latest.ReturnPolicy);
+            Assert.Null(latest.VoucherTerms);
+            Assert.Null(latest.InstallmentTerms);
+            Assert.True(sync.Sync!.Changed);
+            Assert.Equal("抬头", sync.Sync.Profile!.StoreName);
+            Assert.Equal("抬头", profile.Profile!.StoreName);
+            Assert.Null(profile.Profile.VoucherTerms);
+        });
+    }
+
+    [DeviceActivationSqlServerFact]
+    public async Task Store_table_without_the_new_columns_falls_back_to_the_legacy_read_instead_of_failing()
+    {
+        await WithTablesAsync(async () =>
+        {
+            await fixture.ExecuteMainAsync(
+                "ALTER TABLE [dbo].[Store] DROP COLUMN [VoucherTerms], [InstallmentTerms];");
+            try
+            {
+                // 从未下发：沿用门店当前值，门店表读取点也要能降级。
+                var profile = await new StoreReceiptProfileService(fixture.CreateContext())
+                    .GetCurrentAsync("S001", CancellationToken.None);
+
+                Assert.Equal("Source store", profile.Profile!.StoreName);
+                Assert.Equal("30 天无理由退换", profile.Profile.ReturnPolicy);
+                Assert.Null(profile.Profile.VoucherTerms);
+                Assert.Null(profile.Profile.InstallmentTerms);
+            }
+            finally
+            {
+                await fixture.ExecuteMainAsync(
+                    "ALTER TABLE [dbo].[Store] ADD [VoucherTerms] nvarchar(600) NULL, [InstallmentTerms] nvarchar(600) NULL;");
+            }
         });
     }
 
@@ -250,18 +362,26 @@ public sealed class StoreReceiptProfileReleaseSqlServerIntegrationTests(
         }
     }
 
-    private Task InsertReleaseAsync(string storeCode, int version, string storeName, string address) =>
+    private Task InsertReleaseAsync(
+        string storeCode,
+        int version,
+        string storeName,
+        string address,
+        string? voucherTerms = null,
+        string? installmentTerms = null) =>
         fixture.ExecuteMainAsync(
             """
             INSERT INTO [dbo].[StoreReceiptProfileRelease]
-                ([StoreCode], [Version], [StoreName], [BrandName], [Address], [Phone], [ABN], [ReturnPolicy], [PublishedAtUtc], [PublishedBy])
+                ([StoreCode], [Version], [StoreName], [BrandName], [Address], [Phone], [ABN], [ReturnPolicy], [VoucherTerms], [InstallmentTerms], [PublishedAtUtc], [PublishedBy])
             VALUES
-                (@StoreCode, @Version, @StoreName, N'Hot Bargain', @Address, N'07 3000 0000', N'12 345 678 901', N'30 天无理由退换', @PublishedAtUtc, N'tester');
+                (@StoreCode, @Version, @StoreName, N'Hot Bargain', @Address, N'07 3000 0000', N'12 345 678 901', N'30 天无理由退换', @VoucherTerms, @InstallmentTerms, @PublishedAtUtc, N'tester');
             """,
             new Microsoft.Data.SqlClient.SqlParameter("@StoreCode", storeCode),
             new Microsoft.Data.SqlClient.SqlParameter("@Version", version),
             new Microsoft.Data.SqlClient.SqlParameter("@StoreName", storeName),
             new Microsoft.Data.SqlClient.SqlParameter("@Address", address),
+            new Microsoft.Data.SqlClient.SqlParameter("@VoucherTerms", (object?)voucherTerms ?? DBNull.Value),
+            new Microsoft.Data.SqlClient.SqlParameter("@InstallmentTerms", (object?)installmentTerms ?? DBNull.Value),
             new Microsoft.Data.SqlClient.SqlParameter("@PublishedAtUtc", FixedPublishedAtUtc));
 
     private async Task<int> CountAckRowsAsync() =>

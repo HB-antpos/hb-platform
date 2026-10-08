@@ -2,7 +2,7 @@ namespace BlazorApp.Api.Services.StoreReceiptProfiles;
 
 /// <summary>
 /// 下发前的字符守卫，口径与 Hbpos.Api 的 StoreReceiptProfileGuard 完全一致（HBweb 不能引用 Hbpos.Api，故在此保留一份等价实现）：
-/// 仅 Address 与 ReturnPolicy 需要 CR/LF/TAB 排版；其余字段（含 StoreCode/StoreName/BrandName/Phone/Abn）
+/// 仅 Address、ReturnPolicy、VoucherTerms、InstallmentTerms 需要 CR/LF/TAB 排版；其余字段（含 StoreCode/StoreName/BrandName/Phone/Abn）
 /// 任何控制字符都会污染小票草稿。如果这里放行了 Hbpos.Api 会拒绝的内容，下发后收银端的资料接口会整体 400，
 /// 所以两边口径必须同步修改。
 /// </summary>
@@ -16,7 +16,9 @@ public static class StoreReceiptProfileGuard
         string? address,
         string? phone,
         string? abn,
-        string? returnPolicy)
+        string? returnPolicy,
+        string? voucherTerms,
+        string? installmentTerms)
     {
         if (!NoControlCharacters(storeCode)) return "StoreCode";
         if (!NoControlCharacters(storeName)) return "StoreName";
@@ -25,6 +27,9 @@ public static class StoreReceiptProfileGuard
         if (!NoControlCharacters(abn)) return "ABN";
         if (!AllowedMultiline(address)) return "Address";
         if (!AllowedMultiline(returnPolicy)) return "ReturnPolicy";
+        // 代金券使用说明 / 分期条款与退货政策同口径：一行一条，允许 CR/LF/TAB，其余控制字符整份拒绝。
+        if (!AllowedMultiline(voucherTerms)) return "VoucherTerms";
+        if (!AllowedMultiline(installmentTerms)) return "InstallmentTerms";
         return null;
     }
 
@@ -37,14 +42,16 @@ public static class StoreReceiptProfileGuard
     public const int MaxPhoneLength = 60;
     public const int MaxAbnLength = 32;
     public const int MaxReturnPolicyLength = 500;
+    public const int MaxVoucherTermsLength = 600;
+    public const int MaxInstallmentTermsLength = 600;
 
     /// <summary>某个字段超过收银端上限：中文字段名、上限与当前长度。</summary>
     public readonly record struct TooLongField(string DisplayName, int Limit, int Length);
 
     /// <summary>
-    /// 按收银端上限检查 6 个字段，返回全部超限的字段（按「品牌、店名、地址、电话、ABN、退货政策」固定顺序）；全部合法返回空列表。
+    /// 按收银端上限检查 8 个字段，返回全部超限的字段（按「品牌、店名、地址、电话、ABN、退货政策、代金券使用说明、分期条款」固定顺序）；全部合法返回空列表。
     /// 传入的必须是归一后的值（trim、空白变 null，与快照写入口径相同）：首尾空白不会被写进快照，也就不该计入长度。
-    /// 品牌/店名/ABN/退货政策在现有列宽下不可能超限，仍统一检查，防止以后 HBweb 列宽改大后悄悄放行。
+    /// 品牌/店名/ABN/退货政策/代金券使用说明/分期条款在现有列宽下不可能超限，仍统一检查，防止以后 HBweb 列宽改大后悄悄放行。
     /// </summary>
     public static IReadOnlyList<TooLongField> FindTooLongFields(
         string? brandName,
@@ -52,7 +59,9 @@ public static class StoreReceiptProfileGuard
         string? address,
         string? phone,
         string? abn,
-        string? returnPolicy)
+        string? returnPolicy,
+        string? voucherTerms,
+        string? installmentTerms)
     {
         var result = new List<TooLongField>();
         Check(result, "品牌", brandName, MaxBrandNameLength);
@@ -61,6 +70,8 @@ public static class StoreReceiptProfileGuard
         Check(result, "电话", phone, MaxPhoneLength);
         Check(result, "ABN", abn, MaxAbnLength);
         Check(result, "退货政策", returnPolicy, MaxReturnPolicyLength);
+        Check(result, "代金券使用说明", voucherTerms, MaxVoucherTermsLength);
+        Check(result, "分期条款", installmentTerms, MaxInstallmentTermsLength);
         return result;
     }
 

@@ -1,6 +1,6 @@
 // 门店小票资料「下发」接口类型。字段名与路由严格对应契约（HBweb 后端 StoreReceiptProfilesController，路由前缀 api/stores/receipt-profile），不得自行改名。
 
-/** 参与下发的 6 个小票字段（Store 当前值或某次下发快照）。 */
+/** 参与下发的 8 个小票字段（Store 当前值或某次下发快照）；voucherTerms / installmentTerms 为 null 表示未定制（收银端按内置默认文案打印）。 */
 export interface StoreReceiptProfileFields {
   brandName: string | null
   storeName: string
@@ -8,6 +8,8 @@ export interface StoreReceiptProfileFields {
   phone: string | null
   abn: string | null
   returnPolicy: string | null
+  voucherTerms: string | null
+  installmentTerms: string | null
 }
 
 /** never=从未下发；synced=Store 当前值与最新快照一致；pending=有未下发的修改。 */

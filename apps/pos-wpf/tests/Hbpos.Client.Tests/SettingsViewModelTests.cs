@@ -367,7 +367,10 @@ public sealed class SettingsViewModelTests
 
             Assert.Equal("None", panningModeSetter.Attribute("Value")?.Value);
         });
-        Assert.Equal(2, multilineTextBoxes.Length);
+        // 中文注释：设置页共 4 个多行文本框——小票地址、退货政策，以及总部可下发的代金券使用说明、分期条款。
+        // 每个都必须是 VerticalFirst：触屏拖动文本框内部时优先滚文本，滚到头再带动外层设置页；
+        // 以后再加多行文本框要同步更新这个数量，同时保证新框也带这个属性。
+        Assert.Equal(4, multilineTextBoxes.Length);
         Assert.All(multilineTextBoxes, textBox =>
             Assert.Equal("VerticalFirst", textBox.Attribute("ScrollViewer.PanningMode")?.Value));
     }
@@ -4786,6 +4789,8 @@ public sealed class SettingsViewModelTests
             StorePhone = "07 3000 0000",
             Abn = "12 345 678 901",
             ReturnPolicy = "Return within 7 days",
+            VoucherTerms = "HQ voucher terms",
+            InstallmentTerms = "HQ installment terms",
             ProfileVersion = version
         };
 
@@ -5036,6 +5041,171 @@ public sealed class SettingsViewModelTests
         Assert.Equal("Pushed Brand", viewModel.ReceiptBrandNameText);
         Assert.Equal(1, viewModel.ReceiptProfileVersion);
         Assert.Equal("USB,COM7", viewModel.ReceiptPrinterPortText);
+    }
+
+    [Fact]
+    public async Task Receipt_terms_are_shown_from_local_settings_and_saved_with_the_printer_settings()
+    {
+        var store = new FakeReceiptPrinterSettingsStore
+        {
+            Settings = ReceiptPrinterSettings.Default with
+            {
+                VoucherTerms = "Saved voucher terms",
+                InstallmentTerms = "Saved installment\nterms"
+            }
+        };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptPrintService: new FakeReceiptPrintService());
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal("Saved voucher terms", viewModel.ReceiptVoucherTermsText);
+        Assert.Equal("Saved installment\nterms", viewModel.ReceiptInstallmentTermsText);
+
+        // 未下发时本机可编辑；保存把两段正文带进设置（存储层负责 trim / 空白归一）。
+        viewModel.ReceiptVoucherTermsText = "Edited voucher terms";
+        viewModel.ReceiptInstallmentTermsText = string.Empty;
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        Assert.NotNull(store.SavedSettings);
+        Assert.Equal("Edited voucher terms", store.SavedSettings!.VoucherTerms);
+        Assert.Equal(string.Empty, store.SavedSettings.InstallmentTerms);
+    }
+
+    [Fact]
+    public async Task Receipt_terms_from_headquarters_are_shown_and_managed_together_with_the_other_fields()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(3));
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store);
+
+        await viewModel.LoadAsync();
+
+        // 下发后只读由 IsReceiptProfileManaged 驱动（XAML 契约测试保证两个文本框绑定了它）。
+        Assert.True(viewModel.IsReceiptProfileManaged);
+        Assert.Equal("HQ voucher terms", viewModel.ReceiptVoucherTermsText);
+        Assert.Equal("HQ installment terms", viewModel.ReceiptInstallmentTermsText);
+    }
+
+    [Fact]
+    public async Task Sync_now_that_applies_a_new_version_refreshes_the_terms_text()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(3));
+        var sync = new FakeReceiptProfileSyncService();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptProfileSyncService: sync);
+        await viewModel.LoadAsync();
+        sync.OnSyncNow = () =>
+        {
+            store.Settings = ManagedSettings(4) with { VoucherTerms = "v4 voucher", InstallmentTerms = string.Empty };
+            return Task.FromResult(new ReceiptProfileSyncResult(ReceiptProfileSyncOutcome.Applied, 4));
+        };
+
+        await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+        // 立即同步后两段正文刷新；总部清空的那段回到空串（＝界面提示的「留空使用默认文案」）。
+        Assert.Equal("v4 voucher", viewModel.ReceiptVoucherTermsText);
+        Assert.Equal(string.Empty, viewModel.ReceiptInstallmentTermsText);
+    }
+
+    [Fact]
+    public async Task Applied_event_refreshes_the_terms_text_on_an_open_settings_page()
+    {
+        var store = new ManagedProfileSettingsStore(ManagedSettings(0) with { VoucherTerms = string.Empty, InstallmentTerms = string.Empty });
+        var sync = new FakeReceiptProfileSyncService();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptProfileSyncService: sync);
+        await viewModel.LoadAsync();
+        Assert.Equal(string.Empty, viewModel.ReceiptVoucherTermsText);
+
+        store.Settings = ManagedSettings(1) with { VoucherTerms = "Pushed voucher", InstallmentTerms = "Pushed installment" };
+        sync.RaiseApplied("S001", 1);
+
+        await WaitUntilAsync(() => viewModel.IsReceiptProfileManaged);
+        Assert.Equal("Pushed voucher", viewModel.ReceiptVoucherTermsText);
+        Assert.Equal("Pushed installment", viewModel.ReceiptInstallmentTermsText);
+    }
+
+    [Fact]
+    public async Task Load_receipt_profile_copies_the_terms_text_into_the_draft_and_does_not_save()
+    {
+        var apiClient = new FakeStoreReceiptProfileApiClient(new StoreReceiptProfileDto(
+            "S001",
+            "Sunnybank",
+            "HB",
+            null,
+            null,
+            null,
+            null,
+            VoucherTerms: "Store voucher terms",
+            InstallmentTerms: "Store installment terms"));
+        var settingsStore = new FakeReceiptPrinterSettingsStore();
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: settingsStore,
+            storeReceiptProfileApiClient: apiClient);
+        viewModel.ReceiptVoucherTermsText = "Old draft";
+
+        await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+        Assert.Equal("Store voucher terms", viewModel.ReceiptVoucherTermsText);
+        Assert.Equal("Store installment terms", viewModel.ReceiptInstallmentTermsText);
+        Assert.Null(settingsStore.SavedSettings);
+    }
+
+    [Fact]
+    public async Task Load_receipt_profile_without_terms_clears_the_terms_draft_back_to_default()
+    {
+        var apiClient = new FakeStoreReceiptProfileApiClient(new StoreReceiptProfileDto(
+            "S001", "Sunnybank", "HB", null, null, null, null));
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: new FakeReceiptPrinterSettingsStore(),
+            storeReceiptProfileApiClient: apiClient);
+        viewModel.ReceiptVoucherTermsText = "Old draft";
+        viewModel.ReceiptInstallmentTermsText = "Old draft";
+
+        await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+        Assert.Equal(string.Empty, viewModel.ReceiptVoucherTermsText);
+        Assert.Equal(string.Empty, viewModel.ReceiptInstallmentTermsText);
+    }
+
+    [Theory]
+    [InlineData("voucher-too-long")]
+    [InlineData("installment-too-long")]
+    [InlineData("voucher-control-char")]
+    [InlineData("installment-control-char")]
+    public async Task Load_receipt_profile_rejects_invalid_terms_and_keeps_the_draft(string scenario)
+    {
+        var profile = scenario switch
+        {
+            "voucher-too-long" => new StoreReceiptProfileDto("S001", "Sunnybank", "HB", null, null, null, null, VoucherTerms: new string('x', 601)),
+            "installment-too-long" => new StoreReceiptProfileDto("S001", "Sunnybank", "HB", null, null, null, null, InstallmentTerms: new string('x', 601)),
+            "voucher-control-char" => new StoreReceiptProfileDto("S001", "Sunnybank", "HB", null, null, null, null, VoucherTerms: "Bad\u0001Line"),
+            _ => new StoreReceiptProfileDto("S001", "Sunnybank", "HB", null, null, null, null, InstallmentTerms: "Bad\u0001Line")
+        };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: new FakeReceiptPrinterSettingsStore(),
+            storeReceiptProfileApiClient: new FakeStoreReceiptProfileApiClient(profile));
+        viewModel.ReceiptBrandNameText = "Draft Brand";
+        viewModel.ReceiptVoucherTermsText = "Draft voucher";
+
+        await viewModel.LoadReceiptProfileCommand.ExecuteAsync(null);
+
+        Assert.Equal("Draft Brand", viewModel.ReceiptBrandNameText);
+        Assert.Equal("Draft voucher", viewModel.ReceiptVoucherTermsText);
+        Assert.NotEqual("Loaded — save to apply", viewModel.ReceiptPrinterTestStatusMessage);
+        // 错误信息只说明哪个字段不合格，不回显内容。
+        Assert.DoesNotContain("xxxx", viewModel.ReceiptPrinterTestStatusMessage, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -11,7 +11,7 @@ public sealed class StoreReceiptProfileRequestDto
     public List<string>? StoreGuids { get; set; }
 }
 
-/// <summary>小票资料 6 个字段；Store 当前值与下发快照共用。</summary>
+/// <summary>小票资料 8 个字段（含代金券使用说明、分期条款）；Store 当前值与下发快照共用。</summary>
 public sealed class StoreReceiptProfileFieldsDto
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
@@ -30,6 +30,14 @@ public sealed class StoreReceiptProfileFieldsDto
 
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? ReturnPolicy { get; set; }
+
+    /// <summary>代金券使用说明（券面「VOUCHER TERMS」下方正文）；null＝收银端按内置默认文案打印。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? VoucherTerms { get; set; }
+
+    /// <summary>分期条款（分期小票「INSTALLMENT TERMS」下方正文）；null＝收银端按内置默认文案打印。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? InstallmentTerms { get; set; }
 }
 
 public sealed class StoreReceiptProfileStatusItemDto

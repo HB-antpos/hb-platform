@@ -49,6 +49,8 @@ export async function resolveTrustedReceiptPrinterSettings(
       phone: "",
       abn: "",
       returnPolicy: "",
+      voucherTerms: "",
+      installmentTerms: "",
       profileVersion: 0,
       profileAckedVersion: 0,
     });
@@ -77,6 +79,8 @@ export async function resolveTrustedReceiptPrinterSettings(
         phone: "",
         abn: "",
         returnPolicy: "",
+        voucherTerms: "",
+        installmentTerms: "",
         profileVersion: 0,
         profileAckedVersion: 0,
       });
@@ -101,7 +105,9 @@ function hasProfileData(settings: ReceiptPrinterSettings): boolean {
     settings.address.trim() !== "" ||
     settings.phone.trim() !== "" ||
     settings.abn.trim() !== "" ||
-    settings.returnPolicy.trim() !== ""
+    settings.returnPolicy.trim() !== "" ||
+    settings.voucherTerms.trim() !== "" ||
+    settings.installmentTerms.trim() !== ""
   );
 }
 

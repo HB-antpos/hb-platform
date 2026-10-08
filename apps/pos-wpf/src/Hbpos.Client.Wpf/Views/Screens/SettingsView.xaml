@@ -2094,6 +2094,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <DockPanel Grid.Row="0" Margin="0,0,0,18">
@@ -2219,8 +2220,52 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <!-- 中文注释：退款代金券「VOUCHER TERMS」与分期小票「INSTALLMENT TERMS」下面的正文，一行一条；
+                                     留空＝使用内置默认文案。与退货政策一样，总部下发后只读（请在 Web 分店管理修改）。 -->
+                                <Grid Grid.Row="4" Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.voucherTerms}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <TextBox Text="{Binding ReceiptVoucherTermsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                 Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                 Height="110"
+                                                 MaxLength="600"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 ScrollViewer.PanningMode="VerticalFirst"
+                                                 VerticalScrollBarVisibility="Auto" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.termsHelp}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.installmentTerms}" Style="{StaticResource SettingsLabelStyle}" />
+                                        <TextBox Text="{Binding ReceiptInstallmentTermsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReceiptProfileManaged, Mode=OneWay}"
+                                                 Style="{StaticResource SettingsFieldTextBoxStyle}"
+                                                 Height="110"
+                                                 MaxLength="600"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 ScrollViewer.PanningMode="VerticalFirst"
+                                                 VerticalScrollBarVisibility="Auto" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.termsHelp}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Grid>
+
                                 <!-- 中文注释：客人小票是否附带银行收据原文；与其他小票字段一样点“保存”后生效。 -->
-                                <Border Grid.Row="4"
+                                <Border Grid.Row="5"
                                         Background="{DynamicResource PosSurfaceAltBrush}"
                                         BorderBrush="{DynamicResource PosDividerBrush}"
                                         BorderThickness="1"
@@ -2254,7 +2299,7 @@
                                     </Grid>
                                 </Border>
 
-                                <DockPanel Grid.Row="5">
+                                <DockPanel Grid.Row="6">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="18,0,0,0">
                                         <Button Command="{Binding TestReceiptPrinterCommand}"
                                                 Style="{StaticResource PosSecondaryButtonStyle}"

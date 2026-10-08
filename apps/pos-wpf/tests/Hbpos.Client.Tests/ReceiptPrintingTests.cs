@@ -305,6 +305,276 @@ public sealed class ReceiptPrintingTests
         Assert.DoesNotContain("INSTALLMENT TERMS", regularDocument.PlainText, StringComparison.Ordinal);
     }
 
+    // ------------------------------------------------------------------ 总部定制的条款正文
+
+    private static readonly string[] DefaultInstallmentTermLines =
+    [
+        "Order total: $50.00 minimum.",
+        "First payment: $20.00 minimum.",
+        "Each later payment: $5.00 minimum, or the remaining balance if it is lower."
+    ];
+
+    private static readonly string[] DefaultVoucherTermLines =
+    [
+        "Use at the issuing store only.",
+        "Pay with it at checkout by scanning the barcode or QR code.",
+        "Can be used across several purchases until the balance is $0.00.",
+        "Not redeemable for cash."
+    ];
+
+    /// <summary>取出某个条款块的正文：标题之后到下一条分隔线（或文档结束）之间的所有文本行。</summary>
+    private static List<string> TermBodyLines(ReceiptPrintDocument document, string title)
+    {
+        var elements = document.Elements;
+        var titleAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == title);
+        Assert.True(titleAt >= 0, $"小票里没有条款标题 {title}");
+        var end = IndexOfElement(
+            elements,
+            element => element.Kind is ReceiptPrintElementKind.Separator or ReceiptPrintElementKind.Barcode or ReceiptPrintElementKind.QrCode,
+            titleAt + 1);
+        var stop = end < 0 ? elements.Count : end;
+        return elements.Skip(titleAt + 1).Take(stop - titleAt - 1)
+            .Where(element => element.Kind == ReceiptPrintElementKind.Text && element.Text.Length > 0)
+            .Select(element => element.Text)
+            .ToList();
+    }
+
+    private static ReceiptDetails ActiveInstallmentReceipt() =>
+        InstallmentReceiptMapper.CreateReceipt(
+            CreateInstallmentOrder(InstallmentStatus.Active, paidAmount: 20m, balanceAmount: 60m));
+
+    private static ReceiptDetails RefundVoucherReceipt(string code = "RF123")
+    {
+        return CreateReceipt(Guid.NewGuid(), paymentReference: $"VOUCHER_REFUND:{code}", paymentMethod: PaymentMethodKind.Voucher) with
+        {
+            Payments = [new ReceiptPaymentLine(PaymentMethodKind.Voucher, -8m, $"VOUCHER_REFUND:{code}")],
+            RefundVoucher = new RefundVoucherReceipt(code, 8m)
+        };
+    }
+
+    [Fact]
+    public void Installment_terms_without_customization_print_the_exact_default_wording()
+    {
+        var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), ReceiptPrinterSettings.Default);
+
+        var body = TermBodyLines(document, "INSTALLMENT TERMS");
+        // 默认文案（含自动换行）与改动前逐字一致：折叠空白后能拼回三条原句。
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(string.Join(" ", body), @"\s+", " ");
+        Assert.Equal(string.Join(" ", DefaultInstallmentTermLines), collapsed);
+    }
+
+    [Fact]
+    public void Installment_terms_print_the_customized_body_line_by_line_and_drop_blank_lines()
+    {
+        var settings = ReceiptPrinterSettings.Default with
+        {
+            InstallmentTerms = "  Deposit is non-refundable.  \r\n\r\n   \nBalance due within 30 days.\rPick up with this slip."
+        };
+
+        var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), settings);
+
+        Assert.Equal(
+            ["Deposit is non-refundable.", "Balance due within 30 days.", "Pick up with this slip."],
+            TermBodyLines(document, "INSTALLMENT TERMS"));
+        // 定制后默认英文稿不再出现，标题仍由收银端固定印。
+        Assert.DoesNotContain("Order total: $50.00 minimum.", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installment_terms_keep_their_position_after_return_policy_and_before_the_barcode_when_customized()
+    {
+        var settings = ReceiptPrinterSettings.Default with
+        {
+            ReturnPolicy = "Return within 7 days",
+            InstallmentTerms = "Custom installment line."
+        };
+
+        var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), settings);
+
+        var elements = document.Elements;
+        var policyAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Refunds and returns");
+        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "INSTALLMENT TERMS");
+        var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
+        Assert.True(policyAt >= 0 && policyAt < termsAt && termsAt < barcodeAt);
+        Assert.Equal(ReceiptPrintElementKind.Separator, elements[termsAt - 1].Kind);
+        Assert.Equal(ReceiptPrintAlignment.Center, elements[termsAt].Alignment);
+        Assert.True(elements[termsAt].IsEmphasized);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\r\n \n\t\r")]
+    public void Blank_installment_terms_fall_back_to_the_default_wording(string custom)
+    {
+        var settings = ReceiptPrinterSettings.Default with { InstallmentTerms = custom };
+
+        var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), settings);
+
+        Assert.Contains("Order total: $50.00 minimum.", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("First payment: $20.00 minimum.", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Customized_installment_terms_wrap_long_and_chinese_lines_within_paper_width()
+    {
+        var settings = ReceiptPrinterSettings.Default with
+        {
+            InstallmentTerms = "This is a rather long customised sentence that must be wrapped to the paper width by words.\n"
+                + "定金不可退还，请在三十天内付清余款并凭此小票提货，逾期视为放弃，门店不另行通知顾客本人。"
+        };
+
+        var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), settings);
+
+        var body = TermBodyLines(document, "INSTALLMENT TERMS");
+        Assert.True(body.Count > 2, "两条长句都应被拆成多行");
+        // 显示宽度按「中日韩字符占两列」计，每一行都不能超过 42 列纸宽。
+        Assert.All(body, line => Assert.True(DisplayColumns(line) <= 42, line));
+    }
+
+    private static int DisplayColumns(string line) =>
+        line.EnumerateRunes().Sum(rune => rune.Value is >= 0x2E80 and <= 0xA4CF or >= 0xFF00 and <= 0xFF60 ? 2 : 1);
+
+    [Fact]
+    public void Customized_installment_terms_do_not_change_finished_or_regular_receipts()
+    {
+        var settings = ReceiptPrinterSettings.Default with
+        {
+            InstallmentTerms = "Custom installment line.",
+            VoucherTerms = "Custom voucher line."
+        };
+        var finished = InstallmentReceiptMapper.CreateReceipt(
+            CreateInstallmentOrder(InstallmentStatus.PaidOff, paidAmount: 0m, balanceAmount: 0m));
+        var formatter = new ReceiptTextFormatter();
+
+        var finishedDocument = formatter.Build(finished, settings);
+        var regularDocument = formatter.Build(CreateReceipt(Guid.NewGuid()), settings);
+
+        // 已付清 / 普通小票本来就没有条款块，定制正文不能凭空多印出来。
+        Assert.DoesNotContain("INSTALLMENT TERMS", finishedDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Custom installment line.", finishedDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Custom installment line.", regularDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Custom voucher line.", regularDocument.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Refund_voucher_terms_without_customization_print_the_exact_default_wording()
+    {
+        var document = new ReceiptTextFormatter().Build(RefundVoucherReceipt(), ReceiptPrinterSettings.Default);
+
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(
+            string.Join(" ", TermBodyLines(document, "VOUCHER TERMS")), @"\s+", " ");
+        Assert.Equal(string.Join(" ", DefaultVoucherTermLines), collapsed);
+    }
+
+    [Fact]
+    public void Refund_voucher_terms_print_the_customized_body_below_the_codes()
+    {
+        var settings = ReceiptPrinterSettings.Default with
+        {
+            VoucherTerms = "Valid at any store.\n\n  No cash back.  \r\nShow this slip at checkout."
+        };
+
+        var document = new ReceiptTextFormatter().Build(RefundVoucherReceipt(), settings);
+
+        Assert.Equal(
+            ["Valid at any store.", "No cash back.", "Show this slip at checkout."],
+            TermBodyLines(document, "VOUCHER TERMS"));
+        Assert.DoesNotContain("Use at the issuing store only.", document.PlainText, StringComparison.Ordinal);
+        // 位置不变：使用说明仍在条码 / 二维码之后。
+        var elements = document.Elements;
+        var qrAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "VOUCHER TERMS");
+        Assert.True(qrAt >= 0 && qrAt < termsAt);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  \r\n ")]
+    public void Blank_voucher_terms_fall_back_to_the_default_wording(string custom)
+    {
+        var settings = ReceiptPrinterSettings.Default with { VoucherTerms = custom };
+
+        var document = new ReceiptTextFormatter().Build(RefundVoucherReceipt(), settings);
+
+        Assert.Contains("Not redeemable for cash.", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Customized_voucher_terms_and_installment_terms_do_not_bleed_into_each_other()
+    {
+        var formatter = new ReceiptTextFormatter();
+        var onlyVoucher = ReceiptPrinterSettings.Default with { VoucherTerms = "Voucher only line." };
+        var onlyInstallment = ReceiptPrinterSettings.Default with { InstallmentTerms = "Installment only line." };
+
+        var installmentWithVoucherCustom = formatter.Build(ActiveInstallmentReceipt(), onlyVoucher);
+        var voucherWithInstallmentCustom = formatter.Build(RefundVoucherReceipt(), onlyInstallment);
+        var balanceDocument = formatter.Build(
+            CreateReceipt(Guid.NewGuid()) with { VoucherBalance = new VoucherBalanceReceipt("VC200", 12.34m) },
+            onlyVoucher with { InstallmentTerms = "Installment only line." });
+
+        Assert.Contains("Order total: $50.00 minimum.", installmentWithVoucherCustom.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Voucher only line.", installmentWithVoucherCustom.PlainText, StringComparison.Ordinal);
+        Assert.Contains("Not redeemable for cash.", voucherWithInstallmentCustom.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Installment only line.", voucherWithInstallmentCustom.PlainText, StringComparison.Ordinal);
+        // 余额凭证一直没有使用说明块，定制正文也不能让它多出来。
+        Assert.DoesNotContain("VOUCHER TERMS", balanceDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Voucher only line.", balanceDocument.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Receipt_print_service_applies_customized_terms_on_every_render_path()
+    {
+        var settings = ReceiptPrinterSettings.Default with
+        {
+            VoucherTerms = "Printed voucher custom.",
+            InstallmentTerms = "Printed installment custom."
+        };
+        var driver = new RecordingReceiptPrinterDriver();
+        var service = new ReceiptPrintService(
+            new FakeReceiptQueryService(),
+            new FakeReceiptPrinterSettingsStore { Settings = settings },
+            new ReceiptTextFormatter(),
+            driver);
+
+        // 现场出票与重打印 / 远程历史补打都是「拿到 ReceiptDetails 再交给同一个格式化器」，取值逻辑只有一份。
+        await service.PrintReceiptAsync(RefundVoucherReceipt(), ReceiptPrintReason.VoucherRefundAuto);
+        Assert.Contains("Printed voucher custom.", driver.LastDocument!.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Use at the issuing store only.", driver.LastDocument.PlainText, StringComparison.Ordinal);
+
+        await service.PrintReceiptAsync(ActiveInstallmentReceipt(), ReceiptPrintReason.Reprint);
+        Assert.Contains("Printed installment custom.", driver.LastDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Order total: $50.00 minimum.", driver.LastDocument.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Store_with_old_snapshot_without_terms_prints_default_wording_end_to_end()
+    {
+        // 旧快照 / 升级前的本机库：设置里没有这两个键，从存储读出再打印，必须与改动前的小票逐字一致。
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository);
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { ReturnPolicy = "Return within 7 days" });
+        var settings = await store.LoadAsync();
+        var formatter = new ReceiptTextFormatter();
+        // 固定打印时间并复用同一张小票：避免 Print Time / 随机订单号让两次渲染天然不同。
+        var printTime = new DateTimeOffset(2026, 10, 8, 10, 0, 0, TimeSpan.Zero);
+        var installment = ActiveInstallmentReceipt();
+        var voucher = RefundVoucherReceipt("RF9");
+
+        var withLoaded = formatter.Build(installment, settings, printTime);
+        var withDefault = formatter.Build(
+            installment,
+            ReceiptPrinterSettings.Default with { ReturnPolicy = "Return within 7 days" },
+            printTime);
+
+        Assert.Equal(string.Empty, settings.InstallmentTerms);
+        Assert.Equal(string.Empty, settings.VoucherTerms);
+        Assert.Equal(withDefault.PlainText, withLoaded.PlainText);
+        Assert.Equal(
+            formatter.Build(voucher, ReceiptPrinterSettings.Default, printTime).PlainText,
+            formatter.Build(voucher, settings, printTime).PlainText);
+    }
+
     [Fact]
     public void Receipt_text_formatter_builds_print_commands_and_preview_from_same_document()
     {

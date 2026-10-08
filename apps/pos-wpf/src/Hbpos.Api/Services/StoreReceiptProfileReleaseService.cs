@@ -180,7 +180,8 @@ public sealed class StoreReceiptProfileReleaseService(
 
 /// <summary>仓储的 SQL Server 实现：原生 SQL，读前先判断表是否存在。</summary>
 public sealed class SqlSugarStoreReceiptProfileReleaseRepository(
-    HbposSqlSugarContext dbContext) : IStoreReceiptProfileReleaseRepository
+    HbposSqlSugarContext dbContext,
+    ILogger<SqlSugarStoreReceiptProfileReleaseRepository>? logger = null) : IStoreReceiptProfileReleaseRepository
 {
     public async Task<int> GetLatestVersionAsync(string storeCode, CancellationToken cancellationToken)
     {
@@ -193,7 +194,7 @@ public sealed class SqlSugarStoreReceiptProfileReleaseRepository(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return await StoreReceiptProfileReleaseQueries.GetLatestAsync(dbContext.MainDb, storeCode);
+        return await StoreReceiptProfileReleaseQueries.GetLatestAsync(dbContext.MainDb, storeCode, logger);
     }
 
     public async Task<int> UpsertAckAsync(
@@ -254,7 +255,29 @@ internal static class StoreReceiptProfileReleaseQueries
             SELECT 0
         """;
 
-    private const string LatestReleaseSql = """
+    // 含新列 VoucherTerms / InstallmentTerms：Release 表的新列由 HBweb 迁移 20261008.002 添加，
+    // 先发 Hbpos.Api、后跑迁移时读这两列会抛 207，GetLatestAsync 会回退到下面不含新列的旧 SQL。
+    internal const string LatestReleaseSql = """
+        IF OBJECT_ID(N'[dbo].[StoreReceiptProfileRelease]', N'U') IS NOT NULL
+            SELECT TOP (1)
+                [StoreCode],
+                [Version],
+                [StoreName],
+                [BrandName],
+                [Address],
+                [Phone],
+                [ABN] AS Abn,
+                [ReturnPolicy],
+                [VoucherTerms],
+                [InstallmentTerms],
+                [PublishedAtUtc]
+            FROM [dbo].[StoreReceiptProfileRelease]
+            WHERE [StoreCode] = @StoreCode
+            ORDER BY [Version] DESC
+        """;
+
+    // 降级兜底：不含新列的旧 SQL，新字段读出为 null（旧快照同样如此），收银端按默认文案打印。
+    internal const string LatestReleaseLegacySql = """
         IF OBJECT_ID(N'[dbo].[StoreReceiptProfileRelease]', N'U') IS NOT NULL
             SELECT TOP (1)
                 [StoreCode],
@@ -278,11 +301,21 @@ internal static class StoreReceiptProfileReleaseQueries
             new SugarParameter("@StoreCode", storeCode));
     }
 
-    public static async Task<StoreReceiptProfileDto?> GetLatestAsync(ISqlSugarClient db, string storeCode)
+    public static async Task<StoreReceiptProfileDto?> GetLatestAsync(
+        ISqlSugarClient db,
+        string storeCode,
+        ILogger? logger = null)
     {
-        var row = await db.Ado.SqlQuerySingleAsync<StoreReceiptProfileReleaseRow>(
-            LatestReleaseSql,
-            new SugarParameter("@StoreCode", storeCode));
+        // 先读含新列的 SQL，列还不存在（207）时回退旧 SQL；这条读取被 60 秒轮询的同步接口复用，不能因此 500。
+        var row = await StoreReceiptProfileColumnFallback.QueryAsync(
+            () => db.Ado.SqlQuerySingleAsync<StoreReceiptProfileReleaseRow>(
+                LatestReleaseSql,
+                new SugarParameter("@StoreCode", storeCode)),
+            () => db.Ado.SqlQuerySingleAsync<StoreReceiptProfileReleaseRow>(
+                LatestReleaseLegacySql,
+                new SugarParameter("@StoreCode", storeCode)),
+            "Release",
+            logger);
 
         return row is null
             ? null
@@ -296,7 +329,9 @@ internal static class StoreReceiptProfileReleaseQueries
                 row.ReturnPolicy,
                 row.Version,
                 // 库里存的是 UTC 墙钟时间（datetime2，无时区），显式标成 UTC 再对外。
-                new DateTimeOffset(DateTime.SpecifyKind(row.PublishedAtUtc, DateTimeKind.Utc)));
+                new DateTimeOffset(DateTime.SpecifyKind(row.PublishedAtUtc, DateTimeKind.Utc)),
+                row.VoucherTerms,
+                row.InstallmentTerms);
     }
 }
 
@@ -317,6 +352,10 @@ public sealed class StoreReceiptProfileReleaseRow
     public string? Abn { get; set; }
 
     public string? ReturnPolicy { get; set; }
+
+    public string? VoucherTerms { get; set; }
+
+    public string? InstallmentTerms { get; set; }
 
     public DateTime PublishedAtUtc { get; set; }
 }

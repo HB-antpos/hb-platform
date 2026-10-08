@@ -80,9 +80,9 @@ import {
   RemoteHistoryReceiptReprintPreparationService,
   isInstallmentReceiptReprintEligible,
   isRemoteHistoryReceiptReprintEligible,
+  type InstallmentReceiptSettingsSource,
   type ReceiptCompletionSettlementSource,
   type ReceiptPreviewSettingsSource,
-  type ReceiptReprintSettingsSource,
 } from "../../features/receipts";
 import {
   buildDailyCloseReceipt,
@@ -91,11 +91,9 @@ import {
 import {
   hasRefundVoucherTender,
   ProtectedRefundVoucherReceiptRenderer,
+  type RefundVoucherReceiptSettingsPort,
 } from "@hb/pos-receipt-core/features/receipts/refund-voucher-receipt-renderer";
-import {
-  OrderRepositoryReturnReceiptRenderer,
-  type ReturnReceiptSettingsPort,
-} from "@hb/pos-receipt-core/features/receipts/return-receipt-renderer";
+import { OrderRepositoryReturnReceiptRenderer } from "@hb/pos-receipt-core/features/receipts/return-receipt-renderer";
 import {
   PostSyncVoucherLatestBalanceApi,
   VoucherBalancePostSyncService,
@@ -3522,10 +3520,11 @@ function receiptSettingsService(
 /**
  * 重打在一次准备动作中只读一次持久化设置，并冻结该次实际使用的外设与抬头。
  * 配置缺失时由 receipt domain 返回 not-found，不能从当前 UI 或旧打印作业猜测。
+ * 同时带出总部下发的分期条款正文（空串 = 未定制）；导出仅供测试核对冻结设置的字段映射。
  */
-function receiptReprintSettings(
+export function receiptReprintSettings(
   settings: Pick<PosReceiptSettingsService, "get">,
-): ReceiptReprintSettingsSource {
+): InstallmentReceiptSettingsSource {
   return {
     async getFrozenReceiptSettings() {
       const current = await settings.get();
@@ -3544,6 +3543,8 @@ function receiptReprintSettings(
           abn: current.abn,
           returnPolicy: current.returnPolicy,
         },
+        // 分期小票底部「INSTALLMENT TERMS」的自定义正文；空串 = 未定制，打印层回落默认文案。
+        installmentTerms: current.installmentTerms,
       };
     },
   };
@@ -3575,10 +3576,11 @@ function receiptPreviewSettings(
 /**
  * 每次退货履约物化只读取一次当前持久化设置。未明确启用打印或外设身份
  * 损坏时保持 plan pending，由设置页修复后人工重试，不能猜测旧打印机。
+ * 同时带出总部下发的退款券使用说明正文（空串 = 未定制）；导出仅供测试核对冻结设置的字段映射。
  */
-function returnReceiptSettings(
+export function returnReceiptSettings(
   settings: Pick<PosReceiptSettingsService, "get">,
-): ReturnReceiptSettingsPort {
+): RefundVoucherReceiptSettingsPort {
   return {
     async getFrozenReturnReceiptSettings() {
       const current = await settings.get();
@@ -3597,6 +3599,8 @@ function returnReceiptSettings(
           abn: current.abn,
           returnPolicy: current.returnPolicy,
         },
+        // 退款券券面底部「VOUCHER TERMS」的自定义正文；空串 = 未定制，券面渲染器回落默认文案。
+        voucherTerms: current.voucherTerms,
       };
     },
   };

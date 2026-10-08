@@ -1,7 +1,14 @@
+import { RECEIPT_TERMS_TEXT_MAX_LENGTH } from "@hb/pos-receipt-core/features/receipts/receipt-terms-text";
+
 import type { SqliteConnectionPort } from "@hb/pos-db/core/db/types";
 
 const RECEIPT_PRINTER_KEY = "receipt_printer_v1";
 const SENSITIVE_KEY = /token|authorization|voucher|card/i;
+/**
+ * voucherTerms 是印在退款券券面底部的公开使用说明文案，不是券码或任何凭据，但键名含 "voucher"，
+ * 必须显式豁免敏感键拦截；其余含 voucher 的键（如 voucherCode）仍按敏感字段拒绝。
+ */
+const NON_SENSITIVE_KEYS: ReadonlySet<string> = new Set(["voucherTerms"]);
 const PERIPHERAL_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const PAPER_VALUES = new Set(["58mm", "80mm"]);
 const LOCALE_VALUES = new Set(["en", "zh-CN"]);
@@ -18,10 +25,18 @@ export type ReceiptPrinterSettings = Readonly<{
   phone: string;
   abn: string;
   returnPolicy: string;
+  /**
+   * 退款代金券券面底部「VOUCHER TERMS」的自定义正文（多行纯文本，一行一条，标题仍由收银端固定打印）。
+   * 空串 / 纯空白 = 未定制，按内置默认文案打印。上限 RECEIPT_TERMS_TEXT_MAX_LENGTH，规则同退货政策。
+   * 旧数据缺省视为空串。
+   */
+  voucherTerms: string;
+  /** 进行中分期小票底部「INSTALLMENT TERMS」的自定义正文；规则同 voucherTerms。 */
+  installmentTerms: string;
   profileStoreCode: string;
   /**
    * 已应用的总部下发版本；0 = 从未应用过下发（资料由本机手工维护，行为与旧版完全一致）。
-   * 大于 0 时六项门店资料只读，由总部下发覆盖。旧数据缺省视为 0，无需迁移。
+   * 大于 0 时八项门店资料（含券使用说明、分期条款）只读，由总部下发覆盖。旧数据缺省视为 0，无需迁移。
    */
   profileVersion: number;
   /** 已成功回执给服务端的下发版本；小于 profileVersion 表示还有回执待补发。 */
@@ -40,6 +55,8 @@ export const DEFAULT_RECEIPT_PRINTER_SETTINGS: ReceiptPrinterSettings = {
   phone: "",
   abn: "",
   returnPolicy: "",
+  voucherTerms: "",
+  installmentTerms: "",
   profileStoreCode: "",
   profileVersion: 0,
   profileAckedVersion: 0,
@@ -82,7 +99,7 @@ export class PosSettingsRepository {
   /**
    * 设置页等「用户保存」入口专用：在同一个独占事务里重读已落盘设置，再合并后写入。
    * - 下发版本两个字段永远以已落盘值为准，草稿里的旧值不能覆盖后台刚写入的版本；
-   * - 已应用总部下发（profileVersion > 0）时，六项资料与绑定门店也以已落盘值为准，
+   * - 已应用总部下发（profileVersion > 0）时，八项资料（含券使用说明、分期条款）与绑定门店也以已落盘值为准，
    *   避免过期草稿把后台刚同步的新资料盖回旧值。
    * 换店清空等需要重置这些字段的内部路径仍用 saveReceiptPrinterSettings 整体覆盖。
    */
@@ -103,6 +120,8 @@ export class PosSettingsRepository {
               phone: current.phone,
               abn: current.abn,
               returnPolicy: current.returnPolicy,
+              voucherTerms: current.voucherTerms,
+              installmentTerms: current.installmentTerms,
               profileStoreCode: current.profileStoreCode,
             }
           : {}),
@@ -115,7 +134,8 @@ export class PosSettingsRepository {
   }
 
   /**
-   * 原子写入总部下发的一版资料：六项资料 + 下发版本 + 绑定门店代码在同一个事务、同一条 UPSERT 里落盘。
+   * 原子写入总部下发的一版资料：八项资料（六项门店资料 + 券使用说明 + 分期条款）+ 下发版本 + 绑定门店代码
+   * 在同一个事务、同一条 UPSERT 里落盘。
    * 校验与「现有保存」同口径（长度上限、控制字符规则，另要求门店名非空），任何一项不通过
    * 抛 ReceiptProfileRejectedError 且不写入任何内容；存储层 I/O 故障则以原异常抛出（调用方下一轮重试）。
    * 打印机型号、纸宽、钱箱等硬件设置保持落盘值不变。
@@ -136,6 +156,8 @@ export class PosSettingsRepository {
         phone: profile.phone,
         abn: profile.abn,
         returnPolicy: profile.returnPolicy,
+        voucherTerms: profile.voucherTerms,
+        installmentTerms: profile.installmentTerms,
         profileStoreCode: profile.storeCode,
         profileVersion: profile.version,
         profileAckedVersion: 0,
@@ -212,6 +234,10 @@ export type ReceiptProfileApplyInput = Readonly<{
   phone: string;
   abn: string;
   returnPolicy: string;
+  /** 券使用说明自定义正文；空串 = 未定制（服务端 null 已由 API 适配器归一为空串）。 */
+  voucherTerms: string;
+  /** 分期条款自定义正文；空串 = 未定制。 */
+  installmentTerms: string;
 }>;
 
 async function readReceiptPrinterSettings(
@@ -246,16 +272,19 @@ async function upsertReceiptPrinterSettings(
 }
 
 /**
- * 落盘序列化：下发版本为 0（从未应用过总部下发）时不写两个版本字段。
- * 这样没被下发过的设备，其 receipt_printer_v1 与旧版格式逐字段一致；
- * 旧代码的校验会拒绝未知键并把整份设置判为损坏（回落为关闭打印/钱箱的默认值），
- * 因此只有真正应用过下发的设备才写入新键，缩小 OTA 回滚时的影响面。读取时缺省按 0。
+ * 落盘序列化：下发版本为 0（从未应用过总部下发）时不写两个版本字段；券使用说明 / 分期条款
+ * 为空串（未定制）时也不写对应键。这样没被下发、没定制过的设备，其 receipt_printer_v1 与旧版
+ * 格式逐字段一致；旧代码的校验会拒绝未知键并把整份设置判为损坏（回落为关闭打印/钱箱的默认值），
+ * 因此只有真正应用过下发或填写过条款的设备才写入新键，缩小 OTA 回滚时的影响面。读取时缺省按 0 / 空串。
  */
 function serializeReceiptPrinterSettings(settings: ReceiptPrinterSettings): string {
-  const { profileVersion, profileAckedVersion, ...rest } = settings;
-  return JSON.stringify(
-    profileVersion > 0 ? { ...rest, profileVersion, profileAckedVersion } : rest,
-  );
+  const { profileVersion, profileAckedVersion, voucherTerms, installmentTerms, ...rest } = settings;
+  return JSON.stringify({
+    ...rest,
+    ...(voucherTerms !== "" ? { voucherTerms } : {}),
+    ...(installmentTerms !== "" ? { installmentTerms } : {}),
+    ...(profileVersion > 0 ? { profileVersion, profileAckedVersion } : {}),
+  });
 }
 
 function parseReceiptPrinterSettings(value: unknown): ReceiptPrinterSettings {
@@ -277,10 +306,11 @@ function validateReceiptPrinterSettings(value: unknown): ReceiptPrinterSettings 
   const allowed = new Set([
     "printEnabled", "drawerEnabled", "peripheralId", "paper", "locale",
     "brandName", "storeName", "address", "phone", "abn",
-    "returnPolicy", "profileStoreCode", "profileVersion", "profileAckedVersion",
+    "returnPolicy", "voucherTerms", "installmentTerms",
+    "profileStoreCode", "profileVersion", "profileAckedVersion",
   ]);
   for (const key of Object.keys(record)) {
-    if (SENSITIVE_KEY.test(key) || !allowed.has(key)) {
+    if ((SENSITIVE_KEY.test(key) && !NON_SENSITIVE_KEYS.has(key)) || !allowed.has(key)) {
       throw new Error("Receipt printer settings contain an unsupported or sensitive field.");
     }
   }
@@ -303,6 +333,17 @@ function validateReceiptPrinterSettings(value: unknown): ReceiptPrinterSettings 
     phone: boundedText(record.phone, 60, "phone"),
     abn: boundedText(record.abn, 32, "abn"),
     returnPolicy: optionalMultilineText(record.returnPolicy, 500, "returnPolicy"),
+    // 券使用说明 / 分期条款与退货政策同口径（仅放行 CR/LF/TAB），上限与打印层、设置页共用同一个常量。
+    voucherTerms: optionalMultilineText(
+      record.voucherTerms,
+      RECEIPT_TERMS_TEXT_MAX_LENGTH,
+      "voucherTerms",
+    ),
+    installmentTerms: optionalMultilineText(
+      record.installmentTerms,
+      RECEIPT_TERMS_TEXT_MAX_LENGTH,
+      "installmentTerms",
+    ),
     profileStoreCode: optionalText(record.profileStoreCode, 128, "profileStoreCode"),
     profileVersion: lenientVersion(record.profileVersion),
     profileAckedVersion: lenientVersion(record.profileAckedVersion),

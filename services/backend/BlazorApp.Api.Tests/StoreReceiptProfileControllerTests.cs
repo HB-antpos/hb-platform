@@ -255,10 +255,13 @@ public sealed class StoreReceiptProfileControllerTests
         Assert.Equal(JsonValueKind.Null, root.GetProperty("publishedAtUtc").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("publishedBy").ValueKind);
         Assert.Equal(
-            new[] { "brandName", "storeName", "address", "phone", "abn", "returnPolicy" },
+            new[] { "brandName", "storeName", "address", "phone", "abn", "returnPolicy", "voucherTerms", "installmentTerms" },
             root.GetProperty("current").EnumerateObject().Select(property => property.Name).ToArray()
         );
         Assert.Equal(JsonValueKind.Null, root.GetProperty("current").GetProperty("brandName").ValueKind);
+        // 未定制的代金券使用说明 / 分期条款显式输出 null（前端靠 === null 判断「使用收银端默认文案」）。
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("current").GetProperty("voucherTerms").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("current").GetProperty("installmentTerms").ValueKind);
     }
 
     [Fact]

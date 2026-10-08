@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "be70d6819d75f47bca08170e019390f58cba94ea827c03ca1a48be1229c8dae3",
+  "reviewedModuleTopologySha256": "8c74fc45d46e7dce5087dc6217f48b63aa75a77155158816117aa1ca9d0ea795",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -545,8 +545,8 @@
       "package": "pos-receipt-core",
       "reason": "退款券面支持混合退款与多张退款券：材料端口返回每笔 voucher tender 一份，逐张编码拼入同一冻结 print job；抽出 encodeRefundVoucherDocuments 供取消分期退款券复用，新增 hasRefundVoucherTender。券面新增两块内容：Amount 行之后按业务时区（Intl，非设备时区）印这张券自己的 Valid until: yyyy-MM-dd（材料里的到期日可选，缺失、格式异常或时区不可用时只省略该行，绝不阻断出票），QR 之后印英文券使用说明块（文案在 refund-voucher-terms.ts，按本渲染器纸宽 58mm=32 / 80mm=48 在单词边界换行）",
       "baselineCanonicalRuntimeSha256": "1f9d0f50597f2785dbe7bbf8cbc6d71739debf380b5c6a6817306363843d11fe",
-      "canonicalRuntimeSha256": "0dee4b5e4b43cbfa25ca0cd31a5a5e41707463e9cb818c20884ef655c57aca8b",
-      "canonicalTypeSha256": "9973df44e3b177442a544a33072cc4f7b5614a562cd4e26004c410a0e17ebd6d",
+      "canonicalRuntimeSha256": "4fa20339164a93b4ba3f9d2c67597ad2a0850b95fc887b382166ba27089896e0",
+      "canonicalTypeSha256": "2f7719ae3985090c29f7a3f5508f1947260219244b5a66bce512857a0bfc869d",
       "behaviorTests": [
         {
           "workspace": "packages/pos-receipt-core",

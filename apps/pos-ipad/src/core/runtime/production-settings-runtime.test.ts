@@ -59,6 +59,8 @@ const SNAPSHOT: SettingsSnapshot = {
     phone: "",
     abn: "",
     returnPolicy: "",
+    voucherTerms: "",
+    installmentTerms: "",
     profileStoreCode: "S1",
     profileVersion: 0,
     profileAckedVersion: 0,

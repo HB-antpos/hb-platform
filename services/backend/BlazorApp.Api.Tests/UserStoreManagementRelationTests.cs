@@ -1666,6 +1666,320 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateStoreAsync_PersistsVoucherAndInstallmentTerms()
+        {
+            var service = CreateStoreService();
+
+            var result = await service.CreateStoreAsync(new CreateStoreDto
+            {
+                StoreName = "Terms Store",
+                StoreCode = "1888",
+                IsActive = true,
+                VoucherTerms = "Use at the issuing store only.\nNot redeemable for cash.",
+                InstallmentTerms = "Order total: $50.00 minimum.\nFirst payment: $20.00 minimum.",
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("Use at the issuing store only.\nNot redeemable for cash.", result.Data!.VoucherTerms);
+            Assert.Equal("Order total: $50.00 minimum.\nFirst payment: $20.00 minimum.", result.Data.InstallmentTerms);
+            var createdStore = await _db.Queryable<Store>()
+                .FirstAsync(store => store.StoreCode == "1888");
+            Assert.NotNull(createdStore);
+            Assert.Equal("Use at the issuing store only.\nNot redeemable for cash.", createdStore!.VoucherTerms);
+            Assert.Equal("Order total: $50.00 minimum.\nFirst payment: $20.00 minimum.", createdStore.InstallmentTerms);
+        }
+
+        [Fact]
+        public async Task UpdateStoreByGuidAsync_PersistsVoucherAndInstallmentTerms_AndNullClearsThem()
+        {
+            var store = new Store
+            {
+                StoreGUID = "store-terms-update",
+                StoreName = "Existing Store",
+                StoreCode = "1889",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                VoucherTerms = "old voucher terms",
+                InstallmentTerms = "old installment terms",
+            };
+            await _db.Insertable(store).ExecuteCommandAsync();
+            var service = CreateStoreService();
+
+            var result = await service.UpdateStoreByGuidAsync(
+                store.StoreGUID,
+                new UpdateStoreDto
+                {
+                    StoreName = "Updated Store",
+                    StoreCode = "1889",
+                    IsActive = true,
+                    VoucherTerms = "Use at the issuing store only.",
+                    InstallmentTerms = "Each later payment: $5.00 minimum.",
+                }
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("Use at the issuing store only.", result.Data!.VoucherTerms);
+            Assert.Equal("Each later payment: $5.00 minimum.", result.Data.InstallmentTerms);
+            var updated = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == store.StoreGUID);
+            Assert.Equal("Use at the issuing store only.", updated!.VoucherTerms);
+            Assert.Equal("Each later payment: $5.00 minimum.", updated.InstallmentTerms);
+
+            // 表单清空后传 null：落库为 NULL，下发后收银端回落到内置默认文案。
+            var cleared = await service.UpdateStoreByGuidAsync(
+                store.StoreGUID,
+                new UpdateStoreDto { StoreName = "Updated Store", StoreCode = "1889", IsActive = true }
+            );
+            Assert.True(cleared.Success, cleared.Message);
+            Assert.Null(cleared.Data!.VoucherTerms);
+            var afterClear = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == store.StoreGUID);
+            Assert.Null(afterClear!.VoucherTerms);
+            Assert.Null(afterClear.InstallmentTerms);
+        }
+
+        [Fact]
+        public async Task UpdateStoreAsync_PersistsVoucherAndInstallmentTerms()
+        {
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-terms-update-legacy",
+                StoreName = "Legacy Update Store",
+                StoreCode = "1890",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateStoreService().UpdateStoreAsync(
+                "store-terms-update-legacy",
+                new UpdateStoreDto
+                {
+                    StoreName = "Legacy Update Store",
+                    StoreCode = "1890",
+                    IsActive = true,
+                    VoucherTerms = "voucher",
+                    InstallmentTerms = "installment",
+                }
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("voucher", result.Data!.VoucherTerms);
+            Assert.Equal("installment", result.Data.InstallmentTerms);
+            var updated = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == "store-terms-update-legacy");
+            Assert.Equal("voucher", updated!.VoucherTerms);
+            Assert.Equal("installment", updated.InstallmentTerms);
+        }
+
+        [Fact]
+        public async Task StoreReadModels_ReturnVoucherAndInstallmentTerms()
+        {
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-terms-read",
+                StoreName = "Terms Read Store",
+                StoreCode = "1891",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                VoucherTerms = "voucher terms",
+                InstallmentTerms = "installment terms",
+            }).ExecuteCommandAsync();
+            var service = CreateStoreService();
+
+            var detail = await service.GetStoreByGuidAsync("store-terms-read");
+            var byCode = await service.GetStoreByCodeAsync("1891");
+            var list = await service.GetStoresAsync(new StoreQueryDto { Search = "1891", Page = 1, PageSize = 20 });
+            var allByName = await service.GetAllStoresByNameAsync();
+            var active = await service.GetActiveStoresAsync();
+
+            Assert.True(detail.Success, detail.Message);
+            Assert.Equal(("voucher terms", "installment terms"), (detail.Data!.VoucherTerms, detail.Data.InstallmentTerms));
+            Assert.Equal(("voucher terms", "installment terms"), (byCode.Data!.VoucherTerms, byCode.Data.InstallmentTerms));
+            var listed = Assert.Single(list.Data!.Items!);
+            Assert.Equal(("voucher terms", "installment terms"), (listed.VoucherTerms, listed.InstallmentTerms));
+            var named = Assert.Single(allByName.Data!, item => item.StoreCode == "1891");
+            Assert.Equal(("voucher terms", "installment terms"), (named.VoucherTerms, named.InstallmentTerms));
+            var activeItem = Assert.Single(active.Data!, item => item.StoreCode == "1891");
+            Assert.Equal(("voucher terms", "installment terms"), (activeItem.VoucherTerms, activeItem.InstallmentTerms));
+        }
+
+        [Fact]
+        public async Task BatchUpdateStoresAsync_UpdatesVoucherAndInstallmentTermsWithTrimAndBlankToNull()
+        {
+            await _db.Insertable(new[]
+            {
+                new Store
+                {
+                    StoreGUID = "store-batch-terms-1",
+                    StoreName = "Batch Terms Store 1",
+                    StoreCode = "1892",
+                    ReturnPolicy = "Keep policy",
+                    VoucherTerms = "old voucher 1",
+                    InstallmentTerms = "old installment 1",
+                    IsActive = true,
+                },
+                new Store
+                {
+                    StoreGUID = "store-batch-terms-2",
+                    StoreName = "Batch Terms Store 2",
+                    StoreCode = "1893",
+                    ReturnPolicy = "Keep policy",
+                    IsActive = true,
+                },
+            }).ExecuteCommandAsync();
+            var service = CreateStoreService();
+
+            var result = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-terms-1", "store-batch-terms-2" },
+                    Fields = new List<string> { "voucherTerms", "installmentTerms" },
+                    VoucherTerms = "  Use at the issuing store only.\nNot redeemable for cash.  ",
+                    InstallmentTerms = "   ",
+                }
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(2, result.Data!.UpdatedCount);
+            var stores = await _db.Queryable<Store>()
+                .Where(store => new[] { "store-batch-terms-1", "store-batch-terms-2" }.Contains(store.StoreGUID))
+                .ToListAsync();
+            Assert.All(stores, store =>
+            {
+                Assert.Equal("Use at the issuing store only.\nNot redeemable for cash.", store.VoucherTerms);
+                // 空白＝未定制：落库 NULL（把原有的 old installment 1 清掉）。
+                Assert.Null(store.InstallmentTerms);
+                Assert.Equal("Keep policy", store.ReturnPolicy);
+            });
+        }
+
+        [Fact]
+        public async Task BatchUpdateStoresAsync_AcceptsAllSevenFieldsAndIgnoresUnselectedTerms()
+        {
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-batch-seven",
+                StoreName = "Seven Fields Store",
+                StoreCode = "1894",
+                TimeZoneId = StoreTimeZonePolicy.Brisbane,
+                ABN = "old-abn",
+                BrandName = "Old Brand",
+                ReturnPolicy = "Old policy",
+                VoucherTerms = "Keep voucher",
+                InstallmentTerms = "Keep installment",
+                IsActive = true,
+            }).ExecuteCommandAsync();
+            var service = CreateStoreService();
+
+            // 只选 returnPolicy：即使请求体带了新字段（含超长值），也被忽略、不校验、不落库。
+            var ignored = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-seven" },
+                    Fields = new List<string> { "returnPolicy" },
+                    ReturnPolicy = "New policy",
+                    VoucherTerms = new string('v', 601),
+                    InstallmentTerms = new string('i', 601),
+                }
+            );
+            Assert.True(ignored.Success, ignored.Message);
+            var afterIgnored = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == "store-batch-seven");
+            Assert.Equal("New policy", afterIgnored!.ReturnPolicy);
+            Assert.Equal("Keep voucher", afterIgnored.VoucherTerms);
+            Assert.Equal("Keep installment", afterIgnored.InstallmentTerms);
+
+            // 七个字段一次全选（旧上限是 5，必须放宽到 7）。
+            var all = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-seven" },
+                    Fields = new List<string>
+                    {
+                        "timeZoneId", "abn", "brandName", "isActive", "returnPolicy", "voucherTerms", "installmentTerms",
+                    },
+                    TimeZoneId = StoreTimeZonePolicy.Sydney,
+                    ABN = "new-abn",
+                    BrandName = "New Brand",
+                    IsActive = false,
+                    ReturnPolicy = "Newest policy",
+                    VoucherTerms = "New voucher",
+                    InstallmentTerms = "New installment",
+                }
+            );
+            Assert.True(all.Success, all.Message);
+            var afterAll = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == "store-batch-seven");
+            Assert.Equal(("New voucher", "New installment"), (afterAll!.VoucherTerms, afterAll.InstallmentTerms));
+            Assert.Equal("Newest policy", afterAll.ReturnPolicy);
+            Assert.False(afterAll.IsActive);
+
+            // 八个字段（含重复）仍被拒绝。
+            var tooMany = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-seven" },
+                    Fields = new List<string>
+                    {
+                        "timeZoneId", "abn", "brandName", "isActive", "returnPolicy", "voucherTerms", "installmentTerms", "abn",
+                    },
+                }
+            );
+            Assert.False(tooMany.Success);
+            Assert.Equal("INVALID_STORE_BATCH_FIELDS", tooMany.ErrorCode);
+        }
+
+        [Fact]
+        public async Task BatchUpdateStoresAsync_TermsLengthLimit600_AppliesAfterTrimAndRejectsWithoutWriting()
+        {
+            await _db.Insertable(new Store
+            {
+                StoreGUID = "store-batch-terms-length",
+                StoreName = "Terms Length Store",
+                StoreCode = "1895",
+                VoucherTerms = "Original voucher",
+                InstallmentTerms = "Original installment",
+                IsActive = true,
+            }).ExecuteCommandAsync();
+            var service = CreateStoreService();
+
+            var voucherTooLong = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-terms-length" },
+                    Fields = new List<string> { "voucherTerms" },
+                    VoucherTerms = new string('v', 601),
+                }
+            );
+            var installmentTooLong = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-terms-length" },
+                    Fields = new List<string> { "installmentTerms" },
+                    InstallmentTerms = new string('i', 601),
+                }
+            );
+
+            Assert.False(voucherTooLong.Success);
+            Assert.Equal("INVALID_STORE_BATCH_VALUE", voucherTooLong.ErrorCode);
+            Assert.False(installmentTooLong.Success);
+            Assert.Equal("INVALID_STORE_BATCH_VALUE", installmentTooLong.ErrorCode);
+            var untouched = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == "store-batch-terms-length");
+            Assert.Equal("Original voucher", untouched!.VoucherTerms);
+            Assert.Equal("Original installment", untouched.InstallmentTerms);
+
+            // 恰好 600 个有效字符（前后带空白）：trim 后通过。
+            var boundary = await service.BatchUpdateStoresAsync(
+                new BatchUpdateStoresDto
+                {
+                    StoreGuids = new List<string> { "store-batch-terms-length" },
+                    Fields = new List<string> { "voucherTerms", "installmentTerms" },
+                    VoucherTerms = "  " + new string('v', 600) + "\n",
+                    InstallmentTerms = new string('i', 600),
+                }
+            );
+            Assert.True(boundary.Success, boundary.Message);
+            var updated = await _db.Queryable<Store>().FirstAsync(item => item.StoreGUID == "store-batch-terms-length");
+            Assert.Equal(600, updated!.VoucherTerms!.Length);
+            Assert.Equal(600, updated.InstallmentTerms!.Length);
+        }
+
+        [Fact]
         public async Task BatchUpdateStoresAsync_UpdatesFiveSelectedFieldsAtomically()
         {
             var originalUpdatedAt = DateTime.UtcNow.AddDays(-1);

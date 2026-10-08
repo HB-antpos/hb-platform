@@ -19,6 +19,7 @@ import {
   type ReceiptPrinterSettings,
 } from "@/core/db/pos-settings-repository";
 import { isTrustedLocalHbposApiOrigin } from "@hb/pos-domain/core/security/pos-api-addresses";
+import { RECEIPT_TERMS_TEXT_MAX_LENGTH } from "@hb/pos-receipt-core/features/receipts/receipt-terms-text";
 import {
   type PendingWorkBlocker,
   type PendingWorkSnapshot,
@@ -206,6 +207,10 @@ export type SettingsReceiptProfileDraft = Readonly<{
   phone: string;
   abn: string;
   returnPolicy: string;
+  /** 退款券「VOUCHER TERMS」自定义正文；空串 = 未定制（默认文案）。 */
+  voucherTerms: string;
+  /** 分期小票「INSTALLMENT TERMS」自定义正文；空串 = 未定制（默认文案）。 */
+  installmentTerms: string;
 }>;
 
 /** 「立即同步」失败原因归类：设置页只展示这几类文案。 */
@@ -1502,9 +1507,27 @@ export class SettingsPresenter {
     });
   }
 
+  /** 退款券「VOUCHER TERMS」自定义正文；与门店资料同口径：已下发只读，未下发可本机编辑。 */
+  public setReceiptVoucherTerms(value: string): void {
+    if (!this.canEditReceiptProfile()) return;
+    this.patch({
+      printer: { ...this.state.printer, voucherTerms: value },
+      statusCode: null,
+    });
+  }
+
+  /** 分期小票「INSTALLMENT TERMS」自定义正文；规则同 setReceiptVoucherTerms。 */
+  public setReceiptInstallmentTerms(value: string): void {
+    if (!this.canEditReceiptProfile()) return;
+    this.patch({
+      printer: { ...this.state.printer, installmentTerms: value },
+      statusCode: null,
+    });
+  }
+
   /**
    * 已应用总部下发资料时，「立即同步」：立刻跑一轮同步并显示结果。
-   * 同步结果里的最新资料只替换六项资料与下发版本，不动尚未保存的硬件草稿。
+   * 同步结果里的最新资料只替换八项资料（含券使用说明、分期条款）与下发版本，不动尚未保存的硬件草稿。
    */
   public syncReceiptProfile(): Promise<void> {
     if (!this.requirePermission(this.state.access.canConfigurePrinter)) {
@@ -1543,6 +1566,8 @@ export class SettingsPresenter {
             phone: synced.phone,
             abn: synced.abn,
             returnPolicy: synced.returnPolicy,
+            voucherTerms: synced.voucherTerms,
+            installmentTerms: synced.installmentTerms,
             profileStoreCode: synced.profileStoreCode,
             profileVersion: synced.profileVersion,
             profileAckedVersion: synced.profileAckedVersion,
@@ -1581,7 +1606,7 @@ export class SettingsPresenter {
         return;
       }
       try {
-        // 六项资料先完整校验到局部对象，全部通过后才一次性替换草稿。
+        // 八项资料先完整校验到局部对象，全部通过后才一次性替换草稿。
         const normalized = normalizeReceiptProfileDraft(
           profile,
           this.state.device.storeCode,
@@ -1596,6 +1621,8 @@ export class SettingsPresenter {
             phone: normalized.phone,
             abn: normalized.abn,
             returnPolicy: normalized.returnPolicy,
+            voucherTerms: normalized.voucherTerms,
+            installmentTerms: normalized.installmentTerms,
           },
           statusCode: "receipt-profile-loaded",
         });
@@ -2921,7 +2948,7 @@ export class SettingsPresenter {
     return this.canEdit() && this.state.access.canConfigurePrinter;
   }
 
-  /** 已应用总部下发资料后六项门店资料只读，要改请到 Web 分店管理修改并重新下发。 */
+  /** 已应用总部下发资料后八项门店资料（含券使用说明、分期条款）只读，要改请到 Web 分店管理修改并重新下发。 */
   private canEditReceiptProfile(): boolean {
     return this.canEditPrinter() && this.state.printer.profileVersion === 0;
   }
@@ -3362,6 +3389,15 @@ function normalizePrinterSettings(
     phone: boundedPublicText(settings.phone, 60),
     abn: boundedPublicText(settings.abn, 32),
     returnPolicy: boundedPublicMultilineText(settings.returnPolicy, 500),
+    // 券使用说明 / 分期条款：规则同退货政策，上限与打印层、本机存储共用同一个常量。
+    voucherTerms: boundedPublicMultilineText(
+      settings.voucherTerms,
+      RECEIPT_TERMS_TEXT_MAX_LENGTH,
+    ),
+    installmentTerms: boundedPublicMultilineText(
+      settings.installmentTerms,
+      RECEIPT_TERMS_TEXT_MAX_LENGTH,
+    ),
     profileStoreCode: boundedPublicText(settings.profileStoreCode, 128),
     profileVersion: publicVersion(settings.profileVersion),
     profileAckedVersion: publicVersion(settings.profileAckedVersion),
@@ -3418,6 +3454,14 @@ function normalizeReceiptProfileDraft(
     phone: boundedPublicText(profile.phone, 60),
     abn: boundedPublicText(profile.abn, 32),
     returnPolicy: boundedPublicMultilineText(profile.returnPolicy, 500),
+    voucherTerms: boundedPublicMultilineText(
+      profile.voucherTerms,
+      RECEIPT_TERMS_TEXT_MAX_LENGTH,
+    ),
+    installmentTerms: boundedPublicMultilineText(
+      profile.installmentTerms,
+      RECEIPT_TERMS_TEXT_MAX_LENGTH,
+    ),
   });
 }
 

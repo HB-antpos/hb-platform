@@ -277,6 +277,8 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
                         Phone = fields.Phone,
                         ABN = fields.Abn,
                         ReturnPolicy = fields.ReturnPolicy,
+                        VoucherTerms = fields.VoucherTerms,
+                        InstallmentTerms = fields.InstallmentTerms,
                         PublishedAtUtc = nowUtc,
                         PublishedBy = actor,
                     }
@@ -410,7 +412,9 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             store.Address,
             store.Phone,
             store.ABN,
-            store.ReturnPolicy
+            store.ReturnPolicy,
+            store.VoucherTerms,
+            store.InstallmentTerms
         );
         if (invalidField is not null)
         {
@@ -430,7 +434,9 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             normalized.Address,
             normalized.Phone,
             normalized.Abn,
-            normalized.ReturnPolicy
+            normalized.ReturnPolicy,
+            normalized.VoucherTerms,
+            normalized.InstallmentTerms
         );
         if (tooLong.Count > 0)
         {
@@ -468,7 +474,16 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
     /// current、latest 与「是否一致」比较都用同一个归一结果，所以确认框里不会出现「看起来没变却显示有差异」。
     /// </summary>
     internal static StoreReceiptProfileFieldsDto ToFields(Store store) =>
-        Normalize(store.StoreName, store.BrandName, store.Address, store.Phone, store.ABN, store.ReturnPolicy);
+        Normalize(
+            store.StoreName,
+            store.BrandName,
+            store.Address,
+            store.Phone,
+            store.ABN,
+            store.ReturnPolicy,
+            store.VoucherTerms,
+            store.InstallmentTerms
+        );
 
     internal static StoreReceiptProfileFieldsDto ToFields(StoreReceiptProfileRelease release) =>
         Normalize(
@@ -477,7 +492,10 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             release.Address,
             release.Phone,
             release.ABN,
-            release.ReturnPolicy
+            release.ReturnPolicy,
+            // 迁移 20261008.002 之前的旧快照这两列是 NULL，归一后与「Store 未定制」同为 null，不会因新增字段把旧快照判成 Pending。
+            release.VoucherTerms,
+            release.InstallmentTerms
         );
 
     private static StoreReceiptProfileFieldsDto Normalize(
@@ -486,7 +504,9 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
         string? address,
         string? phone,
         string? abn,
-        string? returnPolicy
+        string? returnPolicy,
+        string? voucherTerms,
+        string? installmentTerms
     ) =>
         new()
         {
@@ -496,6 +516,8 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
             Phone = NormalizeOptional(phone),
             Abn = NormalizeOptional(abn),
             ReturnPolicy = NormalizeOptional(returnPolicy),
+            VoucherTerms = NormalizeOptional(voucherTerms),
+            InstallmentTerms = NormalizeOptional(installmentTerms),
         };
 
     private static string? NormalizeOptional(string? value) =>
@@ -507,7 +529,9 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
         && string.Equals(left.Address, right.Address, StringComparison.Ordinal)
         && string.Equals(left.Phone, right.Phone, StringComparison.Ordinal)
         && string.Equals(left.Abn, right.Abn, StringComparison.Ordinal)
-        && string.Equals(left.ReturnPolicy, right.ReturnPolicy, StringComparison.Ordinal);
+        && string.Equals(left.ReturnPolicy, right.ReturnPolicy, StringComparison.Ordinal)
+        && string.Equals(left.VoucherTerms, right.VoucherTerms, StringComparison.Ordinal)
+        && string.Equals(left.InstallmentTerms, right.InstallmentTerms, StringComparison.Ordinal);
 
     /// <summary>
     /// 由设备系统推导客户端类型，与 Hbpos.Api 写回执时由认证声明 hbpos_device_system 推导的口径一致：
@@ -644,7 +668,8 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
 
         var sql = $"""
             SELECT r.[StoreCode], r.[Version], r.[StoreName], r.[BrandName], r.[Address], r.[Phone],
-                   r.[ABN], r.[ReturnPolicy], r.[PublishedAtUtc], r.[PublishedBy]
+                   r.[ABN], r.[ReturnPolicy], r.[VoucherTerms], r.[InstallmentTerms],
+                   r.[PublishedAtUtc], r.[PublishedBy]
             FROM [StoreReceiptProfileRelease] AS r{hint}
             INNER JOIN (
                 SELECT [StoreCode], MAX([Version]) AS [MaxVersion]

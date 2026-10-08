@@ -58,7 +58,11 @@ public sealed record ReceiptPrinterSettings(
     bool PrintBankReceiptText = true,
     // 中文注释：本机已应用的总部下发版本，0 = 从未应用过下发（资料可手工编辑）。
     // 仅供设置页决定六个资料字段是否只读；打印路径不读取它，保存时存储层也忽略它（版本只由同步写入）。
-    int ProfileVersion = 0)
+    int ProfileVersion = 0,
+    // 中文注释：退款代金券「VOUCHER TERMS」/ 分期小票「INSTALLMENT TERMS」下面的定制正文（总部按门店下发，多行纯文本，一行一条）。
+    // 空串＝未定制，打印时走内置默认文案（取值规则见 ReceiptTermsText）；跟随门店资料一起按门店作用域保存。
+    string VoucherTerms = "",
+    string InstallmentTerms = "")
 {
     public const string DefaultPrinterPort = "USB,";
 
@@ -211,6 +215,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
     private const string StorePhoneKey = Prefix + "StorePhone";
     private const string AbnKey = Prefix + "Abn";
     private const string ReturnPolicyKey = Prefix + "ReturnPolicy";
+    private const string VoucherTermsKey = Prefix + "VoucherTerms";
+    private const string InstallmentTermsKey = Prefix + "InstallmentTerms";
     private const string CutDistanceKey = Prefix + "CutDistance";
     // 中文注释：与端口、切纸距离一样按设备保存，不随门店资料作用域迁移。
     private const string PrintBankReceiptTextKey = Prefix + "PrintBankReceiptText";
@@ -300,7 +306,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
                 return false;
             }
 
-            // 中文注释：六个字段 + 版本 + 绑定门店 + 回执版本清零放进同一次批量写（本地库里是一个事务），
+            // 中文注释：八个字段（六个资料 + 代金券使用说明 + 分期条款）+ 版本 + 绑定门店 + 回执版本清零放进同一次批量写（本地库里是一个事务），
             // 要么全部生效要么全部不生效，不会出现「字段是新的、版本是旧的」的半截状态。
             // 回执版本清零：新版本写入后必须重新回执，哪怕旧回执的版本号更大（服务端重建后版本回退）。
             var values = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -312,6 +318,9 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
                 [ProfileKey(storeCode, "StorePhone")] = NormalizeText(fields.Phone, string.Empty),
                 [ProfileKey(storeCode, "Abn")] = NormalizeText(fields.Abn, string.Empty),
                 [ProfileKey(storeCode, "ReturnPolicy")] = NormalizeText(fields.ReturnPolicy, string.Empty),
+                // 下发快照里为 null（旧快照 / 未定制）一律写成空串，覆盖掉本机之前手工填的内容，回到默认文案。
+                [ProfileKey(storeCode, "VoucherTerms")] = NormalizeText(fields.VoucherTerms, string.Empty),
+                [ProfileKey(storeCode, "InstallmentTerms")] = NormalizeText(fields.InstallmentTerms, string.Empty),
                 [ProfileVersionKey] = version.ToString(CultureInfo.InvariantCulture),
                 [ProfileAckedVersionKey] = "0",
             };
@@ -372,7 +381,9 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             NormalizeText(await _settingsRepository.GetValueAsync(StorePhoneKey, cancellationToken), fallback.StorePhone),
             NormalizeText(await _settingsRepository.GetValueAsync(AbnKey, cancellationToken), fallback.Abn),
             NormalizeText(await _settingsRepository.GetValueAsync(ReturnPolicyKey, cancellationToken), fallback.ReturnPolicy),
-            cutDistance);
+            cutDistance,
+            VoucherTerms: NormalizeText(await _settingsRepository.GetValueAsync(VoucherTermsKey, cancellationToken), fallback.VoucherTerms),
+            InstallmentTerms: NormalizeText(await _settingsRepository.GetValueAsync(InstallmentTermsKey, cancellationToken), fallback.InstallmentTerms));
     }
 
     private async Task<ReceiptPrinterSettings> LoadScopedAsync(
@@ -400,7 +411,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
         {
             // 设备改店：旧店资料不得用于打印，仅保留硬件设置并安全回退当前店名/店号。
             // 旧店的下发版本同样不属于新店，ProfileVersion 保持 0（资料可编辑，同步会重新拉取新店资料）。
-            var empty = new ProfileSnapshot(null, null, null, null, null, null);
+            var empty = new ProfileSnapshot(null, null, null, null, null, null, null, null);
             return CreateScopedSettings(port, cutDistance, empty, await ResolveCurrentStoreNameAsync(storeCode, cancellationToken));
         }
 
@@ -430,7 +441,10 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             NormalizeStored(snapshot.Abn, string.Empty),
             NormalizeStored(snapshot.ReturnPolicy, string.Empty),
             cutDistance,
-            ProfileVersion: profileVersion);
+            ProfileVersion: profileVersion,
+            // 旧库（升级前从未写过这两个键）读出来是 null → 空串＝未定制，打印走默认文案。
+            VoucherTerms: NormalizeStored(snapshot.VoucherTerms, string.Empty),
+            InstallmentTerms: NormalizeStored(snapshot.InstallmentTerms, string.Empty));
     }
 
     /// <summary>
@@ -467,7 +481,9 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "StoreAddress"), cancellationToken),
             await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "StorePhone"), cancellationToken),
             await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "Abn"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "ReturnPolicy"), cancellationToken));
+            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "ReturnPolicy"), cancellationToken),
+            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "VoucherTerms"), cancellationToken),
+            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "InstallmentTerms"), cancellationToken));
     }
 
     private async Task<string> ResolveCurrentStoreNameAsync(string storeCode, CancellationToken cancellationToken)
@@ -540,6 +556,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             [StorePhoneKey] = NormalizeText(settings.StorePhone, string.Empty),
             [AbnKey] = NormalizeText(settings.Abn, string.Empty),
             [ReturnPolicyKey] = NormalizeText(settings.ReturnPolicy, string.Empty),
+            [VoucherTermsKey] = NormalizeText(settings.VoucherTerms, string.Empty),
+            [InstallmentTermsKey] = NormalizeText(settings.InstallmentTerms, string.Empty),
             [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
             [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
         };
@@ -559,6 +577,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             [ProfileKey(storeCode, "StorePhone")] = NormalizeText(settings.StorePhone, string.Empty),
             [ProfileKey(storeCode, "Abn")] = NormalizeText(settings.Abn, string.Empty),
             [ProfileKey(storeCode, "ReturnPolicy")] = NormalizeText(settings.ReturnPolicy, string.Empty),
+            [ProfileKey(storeCode, "VoucherTerms")] = NormalizeText(settings.VoucherTerms, string.Empty),
+            [ProfileKey(storeCode, "InstallmentTerms")] = NormalizeText(settings.InstallmentTerms, string.Empty),
         };
     }
 
@@ -573,6 +593,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             [ProfileKey(storeCode, "StorePhone")] = NormalizeStored(snapshot.StorePhone, string.Empty),
             [ProfileKey(storeCode, "Abn")] = NormalizeStored(snapshot.Abn, string.Empty),
             [ProfileKey(storeCode, "ReturnPolicy")] = NormalizeStored(snapshot.ReturnPolicy, string.Empty),
+            [ProfileKey(storeCode, "VoucherTerms")] = NormalizeStored(snapshot.VoucherTerms, string.Empty),
+            [ProfileKey(storeCode, "InstallmentTerms")] = NormalizeStored(snapshot.InstallmentTerms, string.Empty),
         };
     }
 
@@ -621,7 +643,9 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
         string? StoreAddress,
         string? StorePhone,
         string? Abn,
-        string? ReturnPolicy)
+        string? ReturnPolicy,
+        string? VoucherTerms,
+        string? InstallmentTerms)
     {
         public bool HasAnyValue =>
             BrandName is not null ||
@@ -629,7 +653,9 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             StoreAddress is not null ||
             StorePhone is not null ||
             Abn is not null ||
-            ReturnPolicy is not null;
+            ReturnPolicy is not null ||
+            VoucherTerms is not null ||
+            InstallmentTerms is not null;
     }
 }
 
@@ -673,7 +699,7 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         if (receipt.RefundVoucher is { } refundVoucher)
         {
             // 中文注释：退款代金券必须是独立券面，避免商品和支付明细被误当作普通退款收据打印。
-            return BuildRefundVoucherDocument(builder, receipt, refundVoucher, printedAt);
+            return BuildRefundVoucherDocument(builder, receipt, refundVoucher, settings, printedAt);
         }
 
         if (receipt.VoucherBalance is { } voucherBalance)
@@ -803,8 +829,8 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
 
         if (receipt.Terms is { Lines.Count: > 0 } terms)
         {
-            // 中文注释：条款块放在退货政策之后、条码之前。
-            AppendTerms(builder, terms);
+            // 中文注释：条款块放在退货政策之后、条码之前；分期条款的正文先套用本机设置里总部下发的定制内容（未定制＝默认文案）。
+            AppendTerms(builder, ReceiptTermsText.ApplyCustomBody(terms, settings));
         }
 
         builder.Separator();
@@ -823,6 +849,7 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         ReceiptDocumentBuilder builder,
         ReceiptDetails receipt,
         RefundVoucherReceipt refundVoucher,
+        ReceiptPrinterSettings settings,
         DateTimeOffset printedAt)
     {
         var displayOrderId = string.IsNullOrWhiteSpace(receipt.OrderDisplay)
@@ -841,7 +868,8 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         builder.Barcode(refundVoucher.VoucherCode);
         builder.QrCode(refundVoucher.VoucherCode);
         // 中文注释：使用说明放在条码下方，顾客拿券时能直接看到；退款券绑定发券门店且可分次使用（服务端强制）。
-        AppendTerms(builder, VoucherReceiptTerms.RefundVoucher);
+        // 正文先套用本机设置里总部下发的定制使用说明（未定制＝上面的默认英文稿）。
+        AppendTerms(builder, ReceiptTermsText.ApplyCustomBody(VoucherReceiptTerms.RefundVoucher, settings));
         builder.Blank();
 
         return builder.Build();
@@ -859,14 +887,18 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         }
     }
 
-    /// <summary>条款块：分隔线 + 居中加粗标题 + 左对齐条款行；条款句子按纸宽换行，避免长句被打印机截断。</summary>
+    /// <summary>
+    /// 条款块：分隔线 + 居中加粗标题 + 左对齐条款行；条款句子按纸宽换行，避免长句被打印机截断。
+    /// 换行按显示宽度算（中日韩字符占两列）：总部定制的正文可能含中文，按字符数换行会超出纸宽；
+    /// 纯英文默认文案两种算法结果完全一致，打印输出不变。
+    /// </summary>
     private static void AppendTerms(ReceiptDocumentBuilder builder, ReceiptTerms terms)
     {
         builder.Separator();
         builder.Text(terms.Title, ReceiptPrintAlignment.Center, isEmphasized: true);
         foreach (var termLine in terms.Lines)
         {
-            foreach (var wrappedLine in WrapByWord(termLine, LineWidth))
+            foreach (var wrappedLine in WrapByDisplayWidth(termLine, LineWidth))
             {
                 builder.Text(wrappedLine);
             }

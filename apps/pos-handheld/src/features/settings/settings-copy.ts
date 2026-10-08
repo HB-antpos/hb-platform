@@ -213,6 +213,11 @@ export const settingsEnglishCopy = {
   "field.receiptPhone": "Phone",
   "field.receiptAbn": "ABN",
   "field.receiptReturnPolicy": "Return policy",
+  "field.receiptVoucherTerms": "Voucher terms",
+  "field.receiptInstallmentTerms": "Installment terms",
+  "field.receiptTermsPlaceholder": "Default wording",
+  "peripherals.receiptTermsHint":
+    "Printed under VOUCHER TERMS on refund vouchers and INSTALLMENT TERMS on installment receipts. One line per item. Leave blank to use the default wording.",
   "peripherals.loadStoreProfile": "Load from store",
   "peripherals.syncStoreProfile": "Sync now",
   "peripherals.storeProfileManaged":
@@ -631,6 +636,11 @@ export const settingsChineseCopy = {
   "field.receiptPhone": "电话",
   "field.receiptAbn": "ABN",
   "field.receiptReturnPolicy": "退货政策",
+  "field.receiptVoucherTerms": "代金券使用说明",
+  "field.receiptInstallmentTerms": "分期条款",
+  "field.receiptTermsPlaceholder": "默认文案",
+  "peripherals.receiptTermsHint":
+    "分别打印在退款券的 VOUCHER TERMS 与分期小票的 INSTALLMENT TERMS 下方，每行一条；留空＝使用默认文案。",
   "peripherals.loadStoreProfile": "从门店载入",
   "peripherals.syncStoreProfile": "立即同步",
   "peripherals.storeProfileManaged": "由总部下发，请在 Web 分店管理修改",

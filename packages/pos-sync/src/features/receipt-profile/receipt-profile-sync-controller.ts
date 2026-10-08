@@ -31,7 +31,12 @@ export type ReceiptProfileSyncTrigger =
   | "timer"
   | "manual";
 
-/** 服务端下发的一版资料；version 由 API 适配器容错归一（缺失按 0），由本控制器拒绝无效版本。 */
+/**
+ * 服务端下发的一版资料；version 由 API 适配器容错归一（缺失按 0），由本控制器拒绝无效版本。
+ * voucherTerms / installmentTerms 是退款券「VOUCHER TERMS」与分期小票「INSTALLMENT TERMS」的自定义正文：
+ * API 适配器把服务端的 null / 缺失归一为空串，空串（及纯空白）表示未定制、打印时用内置默认文案。
+ * 它们与 returnPolicy 一样只做透传，由本机存储层统一校验（控制字符、长度上限）。
+ */
 export type ReceiptProfileSnapshot = Readonly<{
   version: number;
   storeCode: string;
@@ -41,6 +46,8 @@ export type ReceiptProfileSnapshot = Readonly<{
   phone: string;
   abn: string;
   returnPolicy: string;
+  voucherTerms: string;
+  installmentTerms: string;
 }>;
 
 export type ReceiptProfileSyncResponse = Readonly<{
@@ -69,7 +76,7 @@ export interface ReceiptProfileSyncApiPort {
 
 export interface ReceiptProfileSyncStorePort {
   read(): Promise<ReceiptProfileLocalState>;
-  /** 必须一次性原子写入 6 个字段 + 版本 + 绑定门店代码。 */
+  /** 必须一次性原子写入 8 个字段（六项门店资料 + 券使用说明 + 分期条款）+ 版本 + 绑定门店代码。 */
   apply(profile: ReceiptProfileSnapshot): Promise<ReceiptProfileApplyOutcome>;
   /** 仅当本机当前版本仍等于 version 时才写入已回执版本（比较并设置）。 */
   markAcked(version: number): Promise<void>;

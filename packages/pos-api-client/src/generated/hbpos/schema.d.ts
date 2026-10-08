@@ -8028,6 +8028,8 @@ export interface components {
             version?: number;
             /** Format: date-time */
             publishedAt?: string | null;
+            voucherTerms?: string | null;
+            installmentTerms?: string | null;
         };
         StoreReceiptProfileDtoApiResult: {
             success?: boolean;

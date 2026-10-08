@@ -10,6 +10,10 @@ export interface StoreDto {
   brandName?: string
   timeZoneId?: string
   returnPolicy?: string
+  /** 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；未定制时服务端不返回，收银端按内置默认文案打印。 */
+  voucherTerms?: string
+  /** 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；同上。 */
+  installmentTerms?: string
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -40,6 +44,10 @@ export interface CreateStoreDto {
   brandName?: string
   timeZoneId?: string
   returnPolicy?: string
+  /** 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；未定制时服务端不返回，收银端按内置默认文案打印。 */
+  voucherTerms?: string
+  /** 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；同上。 */
+  installmentTerms?: string
   isActive?: boolean
 }
 
@@ -54,6 +62,10 @@ export interface UpdateStoreDto {
   brandName?: string
   timeZoneId?: string
   returnPolicy?: string
+  /** 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；未定制时服务端不返回，收银端按内置默认文案打印。 */
+  voucherTerms?: string
+  /** 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；同上。 */
+  installmentTerms?: string
   isActive?: boolean
 }
 
@@ -63,6 +75,8 @@ export type StoreBatchUpdateField =
   | 'brandName'
   | 'isActive'
   | 'returnPolicy'
+  | 'voucherTerms'
+  | 'installmentTerms'
 
 export interface BatchUpdateStoresRequest {
   storeGuids: string[]
@@ -72,6 +86,8 @@ export interface BatchUpdateStoresRequest {
   brandName?: string | null
   isActive?: boolean
   returnPolicy?: string | null
+  voucherTerms?: string | null
+  installmentTerms?: string | null
 }
 
 export interface BatchUpdateStoresResult {

@@ -3,14 +3,20 @@ using Hbpos.Contracts.Stores;
 
 namespace Hbpos.Client.Wpf.Services;
 
-/// <summary>总部下发的小票资料六个字段（与 StoreReceiptProfileDto 的资料部分一一对应）。</summary>
+/// <summary>
+/// 总部下发的小票资料字段（与 StoreReceiptProfileDto 的资料部分一一对应）：六个资料字段，
+/// 外加退款代金券「使用说明」与分期小票「分期条款」的定制正文（null/空白＝未定制，打印走默认文案）。
+/// 后两个放在末尾并带默认值，旧调用点（只传六个字段）不受影响。
+/// </summary>
 public sealed record ReceiptProfileFields(
     string? BrandName,
     string? StoreName,
     string? Address,
     string? Phone,
     string? Abn,
-    string? ReturnPolicy);
+    string? ReturnPolicy,
+    string? VoucherTerms = null,
+    string? InstallmentTerms = null);
 
 /// <summary>
 /// 本机保存的下发状态：Version=已应用的下发版本（0=从未应用过下发），
@@ -31,7 +37,7 @@ public interface IReceiptProfileLocalStore
     Task<ReceiptProfileLocalState> LoadProfileStateAsync(string storeCode, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 原子写入总部下发的资料：六个字段、版本、绑定门店在同一次批量写里完成，回执版本清零。
+    /// 原子写入总部下发的资料：所有字段（含代金券使用说明与分期条款）、版本、绑定门店在同一次批量写里完成，回执版本清零。
     /// 返回 false 表示设备当前门店已不是 <paramref name="storeCode"/>，未写入任何数据。
     /// </summary>
     Task<bool> ApplyHeadquartersProfileAsync(
@@ -423,7 +429,9 @@ public sealed class ReceiptProfileSyncService : IReceiptProfileSyncService
                     profile.Address,
                     profile.Phone,
                     profile.Abn,
-                    profile.ReturnPolicy),
+                    profile.ReturnPolicy,
+                    profile.VoucherTerms,
+                    profile.InstallmentTerms),
                 profile.Version,
                 cancellationToken);
         }

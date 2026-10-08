@@ -267,6 +267,14 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _receiptReturnPolicyText = string.Empty;
 
+    // 退款代金券「VOUCHER TERMS」/ 分期小票「INSTALLMENT TERMS」下面的定制正文；留空＝使用默认文案。
+    // 与退货政策一样：总部下发后只读，未下发时可在本机编辑。
+    [ObservableProperty]
+    private string _receiptVoucherTermsText = string.Empty;
+
+    [ObservableProperty]
+    private string _receiptInstallmentTermsText = string.Empty;
+
     [ObservableProperty]
     private bool _receiptPrintBankReceiptText = ReceiptPrinterSettings.Default.PrintBankReceiptText;
 
@@ -2163,6 +2171,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptStorePhoneText = profile.Phone ?? string.Empty;
             ReceiptAbnText = profile.Abn ?? string.Empty;
             ReceiptReturnPolicyText = profile.ReturnPolicy ?? string.Empty;
+            ReceiptVoucherTermsText = profile.VoucherTerms ?? string.Empty;
+            ReceiptInstallmentTermsText = profile.InstallmentTerms ?? string.Empty;
             ReceiptPrinterTestStatusMessage = T("settings.status.receiptProfileLoaded");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -2665,6 +2675,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ReceiptStorePhoneText = settings.StorePhone;
         ReceiptAbnText = settings.Abn;
         ReceiptReturnPolicyText = settings.ReturnPolicy;
+        ReceiptVoucherTermsText = settings.VoucherTerms;
+        ReceiptInstallmentTermsText = settings.InstallmentTerms;
         ReceiptPrintBankReceiptText = settings.PrintBankReceiptText;
         ReceiptProfileVersion = settings.ProfileVersion;
     }
@@ -2682,7 +2694,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptPrinterSettings.Default.CutDistance,
             ReceiptPrintBankReceiptText,
             // 版本只由同步写入；存储层保存时也不会读取它，这里带上仅为让保存后回显与界面状态一致。
-            ReceiptProfileVersion);
+            ReceiptProfileVersion,
+            ReceiptVoucherTermsText,
+            ReceiptInstallmentTermsText);
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

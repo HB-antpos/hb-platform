@@ -32,6 +32,7 @@ import {
   type SettingsStatusCode,
 } from "./settings-presenter";
 import type { PendingWorkBlocker } from "@hb/pos-domain";
+import { RECEIPT_TERMS_TEXT_MAX_LENGTH } from "@hb/pos-receipt-core/features/receipts/receipt-terms-text";
 import type {
   SettingsSquareDevice,
   SettingsSquareDeviceCode,
@@ -109,6 +110,8 @@ export type SettingsScreenPresenter = Pick<
   | "setReceiptPhone"
   | "setReceiptAbn"
   | "setReceiptReturnPolicy"
+  | "setReceiptVoucherTerms"
+  | "setReceiptInstallmentTerms"
   | "setDeviceActivationCode"
   | "setSquareDeviceId"
   | "setSquareDeviceCodeId"
@@ -2237,7 +2240,7 @@ function ReceiptStoreProfileCard({
     key: SettingsCopyKey,
     values?: Readonly<Record<string, string | number>>,
   ) => settingsText(locale, key, values);
-  // 已应用总部下发资料（profileVersion > 0）：六项资料只读，按钮改为「立即同步」。
+  // 已应用总部下发资料（profileVersion > 0）：八项资料（含券使用说明、分期条款）只读，按钮改为「立即同步」。
   const managed = state.printer.profileVersion > 0;
   const fieldsDisabled = disabled || managed;
   return (
@@ -2329,6 +2332,40 @@ function ReceiptStoreProfileCard({
         textAlignVertical="top"
         value={state.printer.returnPolicy}
       />
+      <FieldLabel label={t("field.receiptVoucherTerms")} />
+      <PosKeyboardAwareTextInput
+        accessibilityLabel={t("field.receiptVoucherTerms")}
+        editable={!fieldsDisabled}
+        maxLength={RECEIPT_TERMS_TEXT_MAX_LENGTH}
+        multiline
+        onChangeText={(value) => presenter.setReceiptVoucherTerms(value)}
+        placeholder={t("field.receiptTermsPlaceholder")}
+        placeholderTextColor="#7B8793"
+        style={styles.multilineTextInput}
+        testID="settings-receipt-voucher-terms"
+        textAlignVertical="top"
+        value={state.printer.voucherTerms}
+      />
+      <FieldLabel label={t("field.receiptInstallmentTerms")} />
+      <PosKeyboardAwareTextInput
+        accessibilityLabel={t("field.receiptInstallmentTerms")}
+        editable={!fieldsDisabled}
+        maxLength={RECEIPT_TERMS_TEXT_MAX_LENGTH}
+        multiline
+        onChangeText={(value) => presenter.setReceiptInstallmentTerms(value)}
+        placeholder={t("field.receiptTermsPlaceholder")}
+        placeholderTextColor="#7B8793"
+        style={styles.multilineTextInput}
+        testID="settings-receipt-installment-terms"
+        textAlignVertical="top"
+        value={state.printer.installmentTerms}
+      />
+      <Text
+        style={styles.sectionCopy}
+        testID="settings-receipt-terms-hint"
+      >
+        {t("peripherals.receiptTermsHint")}
+      </Text>
       <View style={styles.actionRow}>
         <ActionButton
           disabled={disabled}

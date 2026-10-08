@@ -7,6 +7,9 @@ import type { ReceiptTermsBlock } from "./receipt-document";
  * - 手持与 iPad 的退款券渲染器（退货首次打印、取消分期后打印共用）必须引用这同一份常量，不要各自抄写。
  * - 条款句子较长，不在此手工拆行：由退款券渲染器按自己的纸宽（58mm=32 / 80mm=48 字符）在单词边界自动换行。
  * - 文案只含可打印 ASCII，因此不会带入可注入 ESC/POS 指令的控制字符。
+ * - 这是「未定制」时的内置默认文案，必须保持逐字不变。总部在 Web 分店管理下发了自定义正文时，
+ *   由渲染器经 resolveReceiptTermsBlock（receipt-terms-text.ts）换成「本块标题 + 自定义正文」，
+ *   自定义文本不再有「只含可打印 ASCII」的保证，净化也在那里统一完成。
  */
 export const REFUND_VOUCHER_TERMS: ReceiptTermsBlock = Object.freeze({
   title: "VOUCHER TERMS",
