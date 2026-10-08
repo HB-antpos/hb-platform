@@ -367,7 +367,10 @@ public sealed class SettingsViewModelTests
 
             Assert.Equal("None", panningModeSetter.Attribute("Value")?.Value);
         });
-        Assert.Equal(2, multilineTextBoxes.Length);
+        // 中文注释：设置页共 4 个多行文本框——小票地址、退货政策，以及总部可下发的代金券使用说明、分期条款。
+        // 每个都必须是 VerticalFirst：触屏拖动文本框内部时优先滚文本，滚到头再带动外层设置页；
+        // 以后再加多行文本框要同步更新这个数量，同时保证新框也带这个属性。
+        Assert.Equal(4, multilineTextBoxes.Length);
         Assert.All(multilineTextBoxes, textBox =>
             Assert.Equal("VerticalFirst", textBox.Attribute("ScrollViewer.PanningMode")?.Value));
     }
