@@ -1164,6 +1164,7 @@ builder.Services.AddScoped<IAustralianPublicHolidayProvider, AustralianPublicHol
 builder.Services.AddScoped<IAttendancePublicHolidaySyncService, AttendancePublicHolidaySyncService>();
 builder.Services.AddScoped<IAttendanceReactService, AttendanceReactService>();
 builder.Services.AddScoped<ISeasonalCardRemainingReactService, SeasonalCardRemainingReactService>();
+builder.Services.AddScoped<ISeasonalCardStatsReactService, SeasonalCardStatsReactService>();
 builder.Services.AddScoped<IPDACartToOrderService, PDACartToOrderService>();
 builder.Services.AddScoped<IPDAWarehouseOrderService, PDAWarehouseOrderService>();
 builder.Services.AddScoped<IPosmSalesOrderReactService, PosmSalesOrderReactService>();

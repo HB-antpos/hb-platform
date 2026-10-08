@@ -126,6 +126,7 @@
     <Compile Include="PermissionAuthorizationHandlerTests.cs" />
     <Compile Include="RoleServicePermissionTests.cs" />
     <Compile Include="SeasonalCardRemainingReactServiceTests.cs" />
+    <Compile Include="SeasonalCardStatsReactServiceTests.cs" />
     <Compile Include="LocalSupplierInvoicesReactServiceTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreateProductDetailBackfillTests.cs" />
     <Compile Include="LocalSupplierInvoiceCreatedHereProductTests.cs" />

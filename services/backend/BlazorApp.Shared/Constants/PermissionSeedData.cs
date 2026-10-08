@@ -52,6 +52,13 @@ namespace BlazorApp.Shared.Constants
                     "季节卡片",
                     "移动端「季节卡」- 提交管理分店季节卡剩余"
                 ),
+                // 仅注册，不写入角色模板：由管理员在角色管理里授予总部账号；入库由版本号迁移 20261009.001 幂等完成。
+                new(
+                    Permissions.SeasonalCards.Remaining.ViewAllStores,
+                    "查看全部分店季节卡填报统计",
+                    "季节卡片",
+                    "Web 后台「节日贺卡填报统计」- 查看全部分店的贺卡剩余填报汇总、未填报分店与单店提交历史"
+                ),
             };
 
         public static IReadOnlyList<PermissionSeedDefinition> SalesDashboardPermissions { get; } =

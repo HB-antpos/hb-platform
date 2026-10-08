@@ -796,6 +796,22 @@ public class ControllerAuthorizationMetadataTests
             nameof(SeasonalCardRemainingController.GetSubmission),
             Permissions.SeasonalCards.Remaining.ViewManagedStore
         );
+        yield return Policy<SeasonalCardRemainingController>(
+            nameof(SeasonalCardRemainingController.GetOverview),
+            Permissions.SeasonalCards.Remaining.SubmitManagedStore
+        );
+        yield return Policy<SeasonalCardRemainingController>(
+            nameof(SeasonalCardRemainingController.CreateBatch),
+            Permissions.SeasonalCards.Remaining.SubmitManagedStore
+        );
+        yield return Policy<SeasonalCardRemainingController>(
+            nameof(SeasonalCardRemainingController.GetAdminSummary),
+            Permissions.SeasonalCards.Remaining.ViewAllStores
+        );
+        yield return Policy<SeasonalCardRemainingController>(
+            nameof(SeasonalCardRemainingController.GetAdminStoreDetail),
+            Permissions.SeasonalCards.Remaining.ViewAllStores
+        );
         yield return Policy<SeasonalProductInsightsController>(
             nameof(SeasonalProductInsightsController.Lookup),
             Permissions.SeasonalProductInsights.View

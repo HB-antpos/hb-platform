@@ -140,6 +140,269 @@ namespace BlazorApp.Api.Services.React
             );
         }
 
+        /// <summary>
+        /// 整组提交一个 分店 + 年份 + 节日 + 供应商 的全部价格：必须覆盖该节日全部启用的价格目录项（空着按 0），
+        /// 新批次整体取代旧批次（旧行保留为历史）。客户端须带上预填时看到的批次号，不一致说明已被他人更新。
+        /// </summary>
+        public async Task<ApiResponse<SeasonalCardBatchDto>> CreateBatchAsync(
+            CreateSeasonalCardRemainingBatchDto request
+        )
+        {
+            var validation = ValidateBatchRequest(request);
+            if (!validation.Success)
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(validation.Message, validation.ErrorCode);
+            }
+
+            var storeCode = request.StoreCode.Trim();
+            var supplierCode = request.LocalSupplierCode.Trim();
+            var access = await ResolveManagedStoreAccessAsync(storeCode);
+            if (!access.Success)
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(access.Message, access.ErrorCode);
+            }
+
+            var store = await _db.Queryable<Store>()
+                .FirstAsync(item => !item.IsDeleted && item.StoreCode == storeCode);
+            if (store == null)
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error("分店不存在", "STORE_NOT_FOUND");
+            }
+
+            // 名称快照以服务端查到的启用供应商为准，不信任客户端传入。
+            var supplier = await _db.Queryable<HBLocalSupplier>()
+                .FirstAsync(item =>
+                    !item.IsDeleted && item.Status == 1 && item.LocalSupplierCode == supplierCode
+                );
+            if (supplier == null)
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(
+                    "供应商不存在或已停用",
+                    "SUPPLIER_NOT_FOUND"
+                );
+            }
+
+            var catalogs = await _db.Queryable<SeasonalCardCatalog>()
+                .Where(item => !item.IsDeleted && item.IsEnabled && item.CardType == request.CardType)
+                .OrderBy(item => item.SortOrder)
+                .ToListAsync();
+            var itemsByCatalog = request.Items
+                .GroupBy(item => item.CatalogGuid.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var catalogGuids = catalogs
+                .Select(item => item.CatalogGuid)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // 每批都必须是完整快照：恰好覆盖该节日全部启用目录项，不多不少不重复，否则统计会混入上一批的旧值。
+            if (
+                catalogs.Count == 0
+                || itemsByCatalog.Count != request.Items.Count
+                || itemsByCatalog.Count != catalogs.Count
+                || itemsByCatalog.Any(group => !catalogGuids.Contains(group.Key))
+            )
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(
+                    "提交的价格项必须恰好包含该节日全部启用的价格",
+                    "BATCH_ITEMS_MISMATCH"
+                );
+            }
+
+            var requestedByCatalog = request.Items.ToDictionary(
+                item => item.CatalogGuid.Trim(),
+                StringComparer.OrdinalIgnoreCase
+            );
+            var resolvedLines = new List<(SeasonalCardCatalog Catalog, int Quantity, decimal UnitPrice)>();
+            foreach (var catalog in catalogs)
+            {
+                var item = requestedByCatalog[catalog.CatalogGuid];
+                // 「其他价格」数量为 0 时允许不填单价，记为 0；有数量则必须给出大于 0 的实际单价。
+                if (catalog.AllowsCustomUnitPrice && item.RemainingQuantity == 0 && !item.CustomUnitPrice.HasValue)
+                {
+                    resolvedLines.Add((catalog, 0, 0m));
+                    continue;
+                }
+
+                var unitPriceResult = ResolveUnitPrice(catalog, item.CustomUnitPrice);
+                if (!unitPriceResult.Success)
+                {
+                    return ApiResponse<SeasonalCardBatchDto>.Error(
+                        unitPriceResult.Message,
+                        unitPriceResult.ErrorCode
+                    );
+                }
+
+                resolvedLines.Add((catalog, item.RemainingQuantity, unitPriceResult.UnitPrice));
+            }
+
+            var existingRows = await _db.Queryable<SeasonalCardRemainingSubmission>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.StoreCode == storeCode
+                    && item.SeasonYear == request.SeasonYear
+                    && item.CardType == request.CardType
+                    && item.LocalSupplierCode == supplierCode
+                )
+                .ToListAsync();
+            var currentBatch = SeasonalCardBatchResolver.FindLatestBatch(existingRows);
+            var currentBatchGuid = currentBatch == null
+                ? null
+                : SeasonalCardBatchResolver.BatchKey(currentBatch[0]);
+            var expectedBatchGuid = string.IsNullOrWhiteSpace(request.ExpectedPreviousBatchGuid)
+                ? null
+                : request.ExpectedPreviousBatchGuid.Trim();
+
+            // 乐观并发：客户端预填后有人抢先提交，拒绝并把最新批次带回去，让客户端刷新「上次 → 本次」对比。
+            if (!string.Equals(currentBatchGuid, expectedBatchGuid, StringComparison.OrdinalIgnoreCase))
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(
+                    "该节日的填报已被其他人更新，请刷新后再提交",
+                    "SEASONAL_CARD_STALE",
+                    currentBatch == null
+                        ? null
+                        : SeasonalCardBatchResolver.ToBatchDto(currentBatch, store.StoreName, true)
+                );
+            }
+
+            // 与当前生效批次完全相同则不生成新记录，避免刷新「最后提交时间」造成重新盘点过的假象。
+            if (currentBatch != null && IsSameAsBatch(currentBatch, resolvedLines))
+            {
+                return ApiResponse<SeasonalCardBatchDto>.Error(
+                    "数量与上次填报相同，无需重复提交",
+                    "SEASONAL_CARD_NO_CHANGES"
+                );
+            }
+
+            var now = DateTime.UtcNow;
+            var batchGuid = Guid.NewGuid().ToString();
+            var userGuid = _currentUserService.GetCurrentUserGuid();
+            var username = _currentUserService.GetCurrentUsername();
+            var remark = NormalizeRemark(request.Remark);
+            var rows = resolvedLines
+                .Select(line => new SeasonalCardRemainingSubmission
+                {
+                    SubmissionGuid = Guid.NewGuid().ToString(),
+                    StoreCode = storeCode,
+                    CatalogGuid = line.Catalog.CatalogGuid,
+                    CatalogCode = line.Catalog.CatalogCode,
+                    CardType = line.Catalog.CardType,
+                    PriceOption = line.Catalog.PriceOption,
+                    PriceLabel = line.Catalog.PriceLabel,
+                    UnitPrice = line.UnitPrice,
+                    SeasonYear = request.SeasonYear,
+                    RemainingQuantity = line.Quantity,
+                    Remark = remark,
+                    SubmittedAt = now,
+                    SubmittedByUserGuid = userGuid,
+                    SubmittedByName = username,
+                    LocalSupplierCode = supplier.LocalSupplierCode,
+                    SupplierName = supplier.Name,
+                    BatchGuid = batchGuid,
+                    CreatedAt = now,
+                    CreatedBy = username,
+                    UpdatedAt = now,
+                    UpdatedBy = username,
+                })
+                .ToList();
+
+            // 整批同一事务写入，不会出现只覆盖了部分价格的半批数据。
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Insertable(rows).ExecuteCommandAsync();
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
+
+            _logger.LogInformation(
+                "季节卡剩余已整组提交: StoreCode={StoreCode}, SeasonYear={SeasonYear}, CardType={CardType}, Supplier={Supplier}, BatchGuid={BatchGuid}, Replaced={Replaced}",
+                storeCode,
+                request.SeasonYear,
+                request.CardType,
+                supplier.LocalSupplierCode,
+                batchGuid,
+                currentBatchGuid
+            );
+
+            return ApiResponse<SeasonalCardBatchDto>.OK(
+                SeasonalCardBatchResolver.ToBatchDto(rows, store.StoreName, true),
+                currentBatch == null ? "季节卡剩余已提交" : "已覆盖上次填报"
+            );
+        }
+
+        /// <summary>
+        /// 填报页总览：某分店 + 年份 + 供应商下，五个节日各自当前生效的批次（节日网格的已填/待填与预填数量）。
+        /// </summary>
+        public async Task<ApiResponse<SeasonalCardOverviewDto>> GetOverviewAsync(
+            SeasonalCardOverviewQueryDto query
+        )
+        {
+            if (string.IsNullOrWhiteSpace(query.StoreCode))
+            {
+                return ApiResponse<SeasonalCardOverviewDto>.Error("分店代码不能为空", "STORE_CODE_REQUIRED");
+            }
+
+            if (query.SeasonYear <= 0)
+            {
+                return ApiResponse<SeasonalCardOverviewDto>.Error("季节年份必须大于 0", "INVALID_SEASON_YEAR");
+            }
+
+            if (string.IsNullOrWhiteSpace(query.LocalSupplierCode))
+            {
+                return ApiResponse<SeasonalCardOverviewDto>.Error("请选择供应商", "SUPPLIER_REQUIRED");
+            }
+
+            var storeCode = query.StoreCode.Trim();
+            var supplierCode = query.LocalSupplierCode.Trim();
+            var access = await ResolveManagedStoreAccessAsync(storeCode);
+            if (!access.Success)
+            {
+                return ApiResponse<SeasonalCardOverviewDto>.Error(access.Message, access.ErrorCode);
+            }
+
+            var storeName = await _db.Queryable<Store>()
+                .Where(item => !item.IsDeleted && item.StoreCode == storeCode)
+                .Select(item => item.StoreName)
+                .FirstAsync();
+            var supplierName = await _db.Queryable<HBLocalSupplier>()
+                .Where(item => !item.IsDeleted && item.LocalSupplierCode == supplierCode)
+                .Select(item => item.Name)
+                .FirstAsync();
+            var rows = await _db.Queryable<SeasonalCardRemainingSubmission>()
+                .Where(item =>
+                    !item.IsDeleted
+                    && item.StoreCode == storeCode
+                    && item.SeasonYear == query.SeasonYear
+                    && item.LocalSupplierCode == supplierCode
+                )
+                .ToListAsync();
+
+            var rowsByType = rows.ToLookup(item => item.CardType);
+            return ApiResponse<SeasonalCardOverviewDto>.OK(new SeasonalCardOverviewDto
+            {
+                StoreCode = storeCode,
+                SeasonYear = query.SeasonYear,
+                LocalSupplierCode = supplierCode,
+                SupplierName = supplierName,
+                Holidays = Enum.GetValues<SeasonalCardType>()
+                    .Select(cardType =>
+                    {
+                        var latest = SeasonalCardBatchResolver.FindLatestBatch(rowsByType[cardType]);
+                        return new SeasonalCardOverviewHolidayDto
+                        {
+                            CardType = cardType,
+                            CardTypeName = SeasonalCardCatalogSeedData.GetCardTypeName(cardType),
+                            CurrentBatch = latest == null
+                                ? null
+                                : SeasonalCardBatchResolver.ToBatchDto(latest, storeName, true),
+                        };
+                    })
+                    .ToList(),
+            });
+        }
+
         public async Task<ApiResponse<PagedResult<SeasonalCardRemainingSubmissionDto>>> GetSubmissionsAsync(
             SeasonalCardRemainingSubmissionQueryDto query
         )
@@ -156,6 +419,7 @@ namespace BlazorApp.Api.Services.React
             var pageNumber = query.PageNumber <= 0 ? 1 : query.PageNumber;
             var pageSize = query.PageSize <= 0 ? 20 : Math.Min(query.PageSize, 200);
             var storeCode = query.StoreCode?.Trim();
+            var supplierCode = query.LocalSupplierCode?.Trim();
 
             var submissions = _db.Queryable<SeasonalCardRemainingSubmission>()
                 .Where(item => !item.IsDeleted)
@@ -165,7 +429,8 @@ namespace BlazorApp.Api.Services.React
                     item => access.StoreCodes.Contains(item.StoreCode)
                 )
                 .WhereIF(query.CardType.HasValue, item => item.CardType == query.CardType!.Value)
-                .WhereIF(query.SeasonYear.HasValue, item => item.SeasonYear == query.SeasonYear!.Value);
+                .WhereIF(query.SeasonYear.HasValue, item => item.SeasonYear == query.SeasonYear!.Value)
+                .WhereIF(!string.IsNullOrWhiteSpace(supplierCode), item => item.LocalSupplierCode == supplierCode!);
 
             var total = await submissions.CountAsync();
             var rows = await submissions
@@ -394,7 +659,72 @@ namespace BlazorApp.Api.Services.React
             SubmittedByUserGuid = item.SubmittedByUserGuid,
             SubmittedByName = item.SubmittedByName,
             SubmittedAt = item.SubmittedAt,
+            LocalSupplierCode = item.LocalSupplierCode,
+            SupplierName = item.SupplierName,
+            BatchGuid = item.BatchGuid,
         };
+
+        private static bool IsSameAsBatch(
+            IReadOnlyCollection<SeasonalCardRemainingSubmission> currentBatch,
+            IReadOnlyCollection<(SeasonalCardCatalog Catalog, int Quantity, decimal UnitPrice)> resolvedLines
+        )
+        {
+            if (currentBatch.Count != resolvedLines.Count)
+            {
+                return false;
+            }
+
+            var current = currentBatch.ToDictionary(
+                row => row.CatalogGuid,
+                row => (row.RemainingQuantity, row.UnitPrice),
+                StringComparer.OrdinalIgnoreCase
+            );
+            return resolvedLines.All(line =>
+                current.TryGetValue(line.Catalog.CatalogGuid, out var previous)
+                && previous.RemainingQuantity == line.Quantity
+                && previous.UnitPrice == line.UnitPrice
+            );
+        }
+
+        private static ValidationResult ValidateBatchRequest(CreateSeasonalCardRemainingBatchDto request)
+        {
+            if (string.IsNullOrWhiteSpace(request.StoreCode))
+            {
+                return ValidationResult.Error("分店代码不能为空", "STORE_CODE_REQUIRED");
+            }
+
+            if (request.SeasonYear <= 0)
+            {
+                return ValidationResult.Error("季节年份必须大于 0", "INVALID_SEASON_YEAR");
+            }
+
+            if (!Enum.IsDefined(request.CardType))
+            {
+                return ValidationResult.Error("节日无效", "INVALID_CARD_TYPE");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.LocalSupplierCode))
+            {
+                return ValidationResult.Error("请选择供应商", "SUPPLIER_REQUIRED");
+            }
+
+            if (request.Items == null || request.Items.Count == 0)
+            {
+                return ValidationResult.Error("请填写各价格的剩余数量", "BATCH_ITEMS_REQUIRED");
+            }
+
+            if (request.Items.Any(item => string.IsNullOrWhiteSpace(item.CatalogGuid)))
+            {
+                return ValidationResult.Error("目录编号不能为空", "CATALOG_GUID_REQUIRED");
+            }
+
+            if (request.Items.Any(item => item.RemainingQuantity < 0))
+            {
+                return ValidationResult.Error("剩余数量不能为负数", "INVALID_QUANTITY");
+            }
+
+            return ValidationResult.OK();
+        }
 
         private sealed class StoreAccessResult
         {
