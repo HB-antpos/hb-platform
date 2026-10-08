@@ -250,6 +250,18 @@ public sealed class StartupSchemaMigratorStartupContractTests
     }
 
     [Fact]
+    public async Task 贺卡填报供应商与批次列只走版本迁移_启动补列不触碰()
+    {
+        var migrator = await File.ReadAllTextAsync(Path.Combine(
+            FindRepoRoot(),
+            "services/backend/BlazorApp.Api/Data/StartupSchemaMigrator.cs"));
+        // 贺卡表随基线登记，三列只能由 20261009.001-seasonal-card-supplier-batch 加出，不得混入启动期补列。
+        // 只断言贺卡表名与权限码：BatchGuid 这个列名仓库进货变更历史表也在用。
+        Assert.DoesNotContain("SeasonalCardRemainingSubmission", migrator, StringComparison.Ordinal);
+        Assert.DoesNotContain("SeasonalCards.Remaining.ViewAllStores", migrator, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StoreService_Hq同步不写入或覆盖退换货政策()
     {
         var serviceSource = await File.ReadAllTextAsync(Path.Combine(

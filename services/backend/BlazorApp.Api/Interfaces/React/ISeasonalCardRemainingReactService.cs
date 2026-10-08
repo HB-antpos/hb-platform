@@ -8,6 +8,12 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<SeasonalCardRemainingSubmissionDto>> CreateSubmissionAsync(
             CreateSeasonalCardRemainingSubmissionDto request
         );
+        Task<ApiResponse<SeasonalCardBatchDto>> CreateBatchAsync(
+            CreateSeasonalCardRemainingBatchDto request
+        );
+        Task<ApiResponse<SeasonalCardOverviewDto>> GetOverviewAsync(
+            SeasonalCardOverviewQueryDto query
+        );
         Task<ApiResponse<PagedResult<SeasonalCardRemainingSubmissionDto>>> GetSubmissionsAsync(
             SeasonalCardRemainingSubmissionQueryDto query
         );

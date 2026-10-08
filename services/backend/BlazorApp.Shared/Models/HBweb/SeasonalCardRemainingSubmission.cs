@@ -47,5 +47,17 @@ namespace BlazorApp.Shared.Models
 
         [SugarColumn(IsNullable = false, Length = 100)]
         public string SubmittedByName { get; set; } = string.Empty;
+
+        // 以下三列由迁移 20261009.001 加出（可空）：批量填报前的历史行没有供应商与批次号。
+        // 供应商编码对应 LocalSupplier.LocalSupplierCode；名称为提交时服务端写入的快照。
+        [SugarColumn(IsNullable = true, Length = 64)]
+        public string? LocalSupplierCode { get; set; }
+
+        [SugarColumn(IsNullable = true, Length = 128)]
+        public string? SupplierName { get; set; }
+
+        // 同一次整组提交（一个节日 + 供应商的全部价格）共用一个批次号；覆盖判定与历史时间线都按批次计。
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? BatchGuid { get; set; }
     }
 }
