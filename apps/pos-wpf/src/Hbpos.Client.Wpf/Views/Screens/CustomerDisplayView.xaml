@@ -295,15 +295,9 @@
                            Stretch="Uniform"
                            Visibility="Collapsed"
                            ImageFailed="AdvertisementImage_ImageFailed" />
-                    <MediaElement x:Name="AdvertisementVideo"
-                                  Stretch="Uniform"
-                                  LoadedBehavior="Manual"
-                                  UnloadedBehavior="Manual"
-                                  IsMuted="True"
-                                  Volume="0"
-                                  Visibility="Collapsed"
-                                  MediaEnded="AdvertisementVideo_MediaEnded"
-                                  MediaFailed="AdvertisementVideo_MediaFailed" />
+                    <!-- 视频播放器由代码按条新建、播完销毁（见 CustomerDisplayView.StartVideoPlayer），这里只占图层位置。 -->
+                    <Border x:Name="AdvertisementVideoHost"
+                            Visibility="Collapsed" />
                     <Rectangle Opacity="0.18" Fill="#FF000000" />
                     <Border HorizontalAlignment="Right"
                             VerticalAlignment="Bottom"

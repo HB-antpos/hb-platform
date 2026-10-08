@@ -160,18 +160,68 @@ public sealed class CustomerDisplayViewModelTests
     [Fact]
     public void CustomerDisplayView_scales_advertisement_media_inside_promotion_panel()
     {
-        var (xaml, _) = ReadCustomerDisplayViewFiles();
+        var (xaml, codeBehind) = ReadCustomerDisplayViewFiles();
 
         var document = XDocument.Parse(xaml);
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
-        var mediaElements = document
-            .Descendants(presentation + "Image")
-            .Concat(document.Descendants(presentation + "MediaElement"))
-            .ToArray();
+        var image = Assert.Single(document.Descendants(presentation + "Image"));
 
-        Assert.Equal(2, mediaElements.Length);
-        Assert.All(mediaElements, element => Assert.Equal("Uniform", element.Attribute("Stretch")?.Value));
+        Assert.Equal("Uniform", image.Attribute("Stretch")?.Value);
+        // 视频播放器改由代码按条新建，XAML 里不再放固定的 MediaElement，缩放方式在代码里保持一致。
+        Assert.Empty(document.Descendants(presentation + "MediaElement"));
+        Assert.Contains("Stretch = Stretch.Uniform,", codeBehind);
         Assert.DoesNotContain("Stretch=\"UniformToFill\"", xaml);
+    }
+
+    [Fact]
+    public void CustomerDisplayView_creates_fresh_video_player_per_advertisement_and_defers_switching()
+    {
+        var (_, codeBehind) = ReadCustomerDisplayViewFiles();
+
+        // 复用同一个 MediaElement 换源会让硬解码器残留上一条的状态（多条视频轮播花屏/卡住），每条都要新建、播完 Close。
+        Assert.Contains("var player = new MediaElement", codeBehind);
+        Assert.Contains("player.Close();", codeBehind);
+        Assert.Contains("AdvertisementVideoHost.Child = null;", codeBehind);
+        // MediaEnded / MediaFailed 不能在事件里同步切换，要延后到事件处理完之后。
+        Assert.Contains("DispatcherPriority.Background", codeBehind);
+        Assert.Contains("RunAfterCurrentVideoEvent(AdvanceAdvertisementPlayback);", codeBehind);
+        Assert.Contains("RunAfterCurrentVideoEvent(SkipCurrentAdvertisementPlayback);", codeBehind);
+        // 失败、超时都要写日志，MediaFailed 要带上异常。
+        Assert.Contains("reason=media-failed", codeBehind);
+        Assert.Contains("exception: e.ErrorException", codeBehind);
+        Assert.Contains("advertisement video timeout action=", codeBehind);
+        Assert.Contains("advertisement video opened reason=", codeBehind);
+    }
+
+    [Theory]
+    // 没打开（卡在解码器）：第一次重试，重试过就移出本轮
+    [InlineData(false, null, false, true, true)]
+    [InlineData(false, null, true, true, false)]
+    // 打开了但停在中途（时长短于上限）：同样先重试一次
+    [InlineData(true, 8d, false, true, true)]
+    // 素材本身超过 30 秒上限：重试也播不完，直接移出
+    [InlineData(true, 45d, false, true, false)]
+    // 不知道是哪条广告时无法记重试标记，直接移出
+    [InlineData(false, null, false, false, false)]
+    public void CustomerDisplayView_retries_stuck_video_once_before_removing_it(
+        bool opened,
+        double? durationSeconds,
+        bool alreadyRetried,
+        bool canRetry,
+        bool expectRetry)
+    {
+        var duration = durationSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : (TimeSpan?)null;
+
+        var action = CustomerDisplayView.ResolveVideoTimeoutAction(
+            opened,
+            duration,
+            TimeSpan.FromSeconds(30),
+            alreadyRetried,
+            canRetry);
+
+        Assert.Equal(
+            expectRetry ? CustomerDisplayView.VideoTimeoutAction.RetryOnce : CustomerDisplayView.VideoTimeoutAction.Skip,
+            action);
     }
 
     [Fact]
@@ -480,7 +530,7 @@ public sealed class CustomerDisplayViewModelTests
         var (xaml, codeBehind) = ReadCustomerDisplayViewFiles();
         var fallbackBackgroundIndex = xaml.IndexOf("x:Name=\"PromotionFallbackBackground\"", StringComparison.Ordinal);
         var imageIndex = xaml.IndexOf("x:Name=\"AdvertisementImage\"", StringComparison.Ordinal);
-        var videoIndex = xaml.IndexOf("x:Name=\"AdvertisementVideo\"", StringComparison.Ordinal);
+        var videoIndex = xaml.IndexOf("x:Name=\"AdvertisementVideoHost\"", StringComparison.Ordinal);
         var dimOverlayIndex = xaml.IndexOf("Opacity=\"0.18\" Fill=\"#FF000000\"", StringComparison.Ordinal);
 
         Assert.Contains("x:Name=\"PromotionFallbackBackground\"", xaml);
