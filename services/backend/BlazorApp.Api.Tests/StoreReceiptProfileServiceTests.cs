@@ -320,6 +320,8 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
         Assert.Equal("handheld", b.ClientKind);
         Assert.True(b.IsOnline);
         Assert.Equal(new DateTime(2026, 10, 7, 1, 2, 3), b.LastHeartbeatAt);
+        // 心跳时间库里是 UTC 但读出来 Kind 不明；必须标成 UTC，JSON 才带 Z，浏览器才不会按本地时区解析。
+        Assert.Equal(DateTimeKind.Utc, b.LastHeartbeatAt!.Value.Kind);
         Assert.Equal(1, b.AppliedVersion);
         Assert.False(b.UpToDate); // 落后一版
 

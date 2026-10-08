@@ -178,7 +178,7 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
                     ClientKind = ResolveClientKind(device.设备系统),
                     DeviceStatus = device.设备状态,
                     IsOnline = device.是否在线,
-                    LastHeartbeatAt = device.最后心跳时间,
+                    LastHeartbeatAt = DeviceRuntimeTime.AsUtc(device.最后心跳时间),
                     // 只采信属于「设备当前门店」的回执；换店后旧店回执视为尚未应用。
                     AppliedVersion = ack?.AppliedVersion,
                     AppliedAtUtc = ack is null ? null : AsUtc(ack.AppliedAtUtc),

@@ -1,4 +1,5 @@
 using AutoMapper;
+using BlazorApp.Api.Services;
 using BlazorApp.Shared.Models.POSM;
 using BlazorApp.Shared.DTOs;
 
@@ -60,10 +61,14 @@ namespace BlazorApp.Api.Mappings
                 .ForMember(dest => dest.CreatedBy, opt => opt.MapFrom(src => src.创建人))
                 .ForMember(dest => dest.LastModifiedBy, opt => opt.MapFrom(src => src.最后修改人))
                 .ForMember(dest => dest.IsOnline, opt => opt.MapFrom(src => src.是否在线))
-                .ForMember(dest => dest.LastHeartbeatAt, opt => opt.MapFrom(src => src.最后心跳时间))
+                .ForMember(
+                    dest => dest.LastHeartbeatAt,
+                    // 库里是 UTC 但 Kind 不明，必须标成 UTC，JSON 才带 Z，浏览器才不会按本地时区解析。
+                    opt => opt.MapFrom(src => DeviceRuntimeTime.AsUtc(src.最后心跳时间))
+                )
                 .ForMember(dest => dest.CurrentCashierId, opt => opt.MapFrom(src => src.当前收银员ID))
                 .ForMember(dest => dest.CurrentCashierName, opt => opt.MapFrom(src => src.当前收银员姓名))
-                .ForMember(dest => dest.CashierLoginAt, opt => opt.MapFrom(src => src.收银员登录时间))
+                .ForMember(dest => dest.CashierLoginAt, opt => opt.MapFrom(src => DeviceRuntimeTime.AsUtc(src.收银员登录时间)))
                 .ForMember(dest => dest.AppVersion, opt => opt.MapFrom(src => src.应用版本));
         }
 
