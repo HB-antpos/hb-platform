@@ -18,6 +18,7 @@ import {
   getDetailVisibleOemPrice,
   hasDetailProductCodeConflict,
   mergeDetailDetectionResults,
+  normalizeAlignDomesticProductCodePreview,
   normalizeAlignDomesticProductCodeResult,
   normalizeCreateContainerResponse,
   normalizeContainerDetailResponse,
@@ -104,6 +105,41 @@ assert.deepEqual(
     TargetProductCode: "LOCAL-NEW",
     SupplierCode: "200",
   },
+);
+
+assert.equal(
+  buildAlignDomesticProductCodePayload({
+    detailHguid: "D-ALIGN",
+    expectedDomesticProductCode: "DOM-OLD",
+    targetProductCode: "LOCAL-NEW",
+    supplierCode: "200",
+    mergeIntoExistingDomesticProduct: true,
+  }).MergeIntoExistingDomesticProduct,
+  true,
+);
+
+const normalizedAlignPreview = normalizeAlignDomesticProductCodePreview({
+  success: true,
+  data: {
+    mode: "Merge",
+    affectedContainerDetails: 3,
+    affectedContainers: 2,
+    fields: [{ field: "Barcode", label: "条形码", existingValue: null, oldValue: "952", mergedValue: "952", filledFromOld: true }],
+  },
+});
+assert.equal(normalizedAlignPreview.mode, "Merge");
+assert.equal(normalizedAlignPreview.affectedContainerDetails, 3);
+assert.deepEqual(normalizedAlignPreview.fields[0], {
+  field: "Barcode",
+  label: "条形码",
+  existingValue: null,
+  oldValue: "952",
+  mergedValue: "952",
+  filledFromOld: true,
+});
+assert.deepEqual(
+  normalizeAlignDomesticProductCodeResult({ data: { Mode: "Merge", FilledFields: ["条形码", "国内价格"] } }).filledFields,
+  ["条形码", "国内价格"],
 );
 
 const normalizedAlignResult = normalizeAlignDomesticProductCodeResult({

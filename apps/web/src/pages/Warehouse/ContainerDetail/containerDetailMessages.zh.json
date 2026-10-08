@@ -6,17 +6,33 @@
     },
     "modals": {
       "recalculateCostsAfterDeleteNote": "删除明细后货柜总体积已变化，其余明细的运输成本和进口价格需要按新的总体积重算。",
-      "translateHqDataContent": "将按货柜编号 {{containerNumber}} 找到 HQ 货柜单中的商品，为英文名称为空或含中文的商品机器翻译英文名称，并直接写入 HQ 商品字典（已有有效英文名称的不覆盖）。是否继续？"
+      "translateHqDataContent": "将按货柜编号 {{containerNumber}} 找到 HQ 货柜单中的商品，为英文名称为空或含中文的商品机器翻译英文名称，并直接写入 HQ 商品字典（已有有效英文名称的不覆盖）。是否继续？",
+      "mergeDomesticProductTitle": "合并到已有国内商品",
+      "mergeDomesticProductContent": "国内商品表里已有澳洲编码 {{newCode}} 的记录。确认把国内商品和货柜中的编码 {{oldCode}} 改为澳洲的商品编码 {{newCode}}，并把原记录合并进去？",
+      "mergeDomesticProductScope": "将改指向 {{containers}} 个货柜的 {{details}} 行明细，明细自己的价格和装箱数不变。",
+      "mergeDomesticProductRule": "以已有记录为准，已有为空的字段用原记录补；原记录标记为已删除，可恢复。",
+      "mergeDomesticProductNoDiff": "两条记录的字段一致，无需补齐。",
+      "mergeDomesticProductFieldColumn": "字段",
+      "mergeDomesticProductExistingColumn": "已有记录",
+      "mergeDomesticProductOldColumn": "原记录",
+      "mergeDomesticProductMergedColumn": "合并后",
+      "mergeDomesticProductFilledTag": "用原记录补"
     },
     "messages": {
       "detailsDeletedCostsRecalculated": "已按剩余明细重算 {{count}} 条成本",
       "detailsDeletedCostsRecalculateCancelled": "已取消重算，其余明细的运输成本仍按删除前的总体积计算",
       "detailsDeletedCostsRecalculateFailed": "明细已删除，但成本重算失败：{{message}}",
       "createProductsPushHqUnsent": "{{count}} 个新建商品未能自动发送到 HQ（未找到可发送的明细），请手动「发送到 HQ」",
-      "createProductsPushHqBusy": "已有发送到 HQ 的任务正在提交，本次未自动更新 HQ，请稍后手动「发送到 HQ」"
+      "createProductsPushHqBusy": "已有发送到 HQ 的任务正在提交，本次未自动更新 HQ，请稍后手动「发送到 HQ」",
+      "domesticProductMerged": "已合并到已有国内商品 {{newCode}}",
+      "domesticProductMergedFilled": "已合并到已有国内商品 {{newCode}}，补齐：{{fields}}",
+      "alignDomesticProductPreviewFailed": "读取对齐预览失败"
     },
     "text": {
       "createProductsPushToHqAfterCreate": "创建完成后同时更新 HQ 数据库"
+    },
+    "actions": {
+      "mergeDomesticProduct": "合并编码"
     }
   }
 }

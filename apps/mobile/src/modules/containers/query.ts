@@ -1,4 +1,5 @@
 import type {
+  AlignDomesticProductCodePreview,
   AlignDomesticProductCodeRequest,
   AlignDomesticProductCodeResult,
   ContainerDetail,
@@ -104,6 +105,34 @@ export function buildAlignDomesticProductCodePayload(payload: AlignDomesticProdu
     ExpectedDomesticProductCode: payload.expectedDomesticProductCode,
     TargetProductCode: payload.targetProductCode,
     SupplierCode: payload.supplierCode,
+    // 只有用户在预览里确认合并时才带上，兼容旧接口的请求体
+    ...(payload.mergeIntoExistingDomesticProduct ? { MergeIntoExistingDomesticProduct: true } : {}),
+  };
+}
+
+function asNullableText(value: unknown) {
+  const text = asString(value).trim();
+  return text ? text : null;
+}
+
+export function normalizeAlignDomesticProductCodePreview(raw: unknown): AlignDomesticProductCodePreview {
+  const data = unwrapData(raw);
+  const record = isRecord(data) ? data : {};
+  const rawFields = pick<unknown[]>(record, "fields", "Fields");
+  return {
+    mode: pick<string>(record, "mode", "Mode") === "Merge" ? "Merge" : "Rename",
+    oldProductCode: asString(pick(record, "oldProductCode", "OldProductCode")),
+    newProductCode: asString(pick(record, "newProductCode", "NewProductCode")),
+    affectedContainerDetails: asNumber(pick(record, "affectedContainerDetails", "AffectedContainerDetails"), 0),
+    affectedContainers: asNumber(pick(record, "affectedContainers", "AffectedContainers"), 0),
+    fields: (Array.isArray(rawFields) ? rawFields : []).filter(isRecord).map((field) => ({
+      field: asString(pick(field, "field", "Field")),
+      label: asString(pick(field, "label", "Label")) || asString(pick(field, "field", "Field")),
+      existingValue: asNullableText(pick(field, "existingValue", "ExistingValue")),
+      oldValue: asNullableText(pick(field, "oldValue", "OldValue")),
+      mergedValue: asNullableText(pick(field, "mergedValue", "MergedValue")),
+      filledFromOld: Boolean(pick(field, "filledFromOld", "FilledFromOld")),
+    })),
   };
 }
 
@@ -113,7 +142,10 @@ export function normalizeAlignDomesticProductCodeResult(raw: unknown): AlignDome
   const oldProductCode = pick<string>(record, "oldProductCode", "OldProductCode");
   const newProductCode = pick<string>(record, "newProductCode", "NewProductCode");
 
+  const filledFields = pick<unknown[]>(record, "filledFields", "FilledFields");
   return {
+    mode: pick<string>(record, "mode", "Mode") === "Merge" ? "Merge" : "Rename",
+    filledFields: Array.isArray(filledFields) ? filledFields.map((field) => asString(field)).filter(Boolean) : [],
     oldProductCode: asString(oldProductCode),
     OldProductCode: pick<string>(record, "OldProductCode"),
     newProductCode: asString(newProductCode),

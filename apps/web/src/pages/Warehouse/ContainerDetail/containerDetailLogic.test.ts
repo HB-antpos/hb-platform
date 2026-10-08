@@ -2656,7 +2656,6 @@ const requiredContainerI18nKeys = [
   'containers.modals.batchActionAllHint',
   'containers.modals.alignDomesticProductCodeTitle',
   'containers.modals.alignDomesticProductCodeContent',
-  'containers.modals.alignDomesticProductCodeConflictHint',
   'containers.modals.rowCategoryTitle',
   'containers.export.summaryTitle',
   'containers.export.productImageDownloadFailed',
@@ -6202,6 +6201,27 @@ assertEqual(
       catchSource.includes('pagedDetailStatsKeyRef.current === statsKey'),
     true,
     '统计请求失败时只清空当前筛选范围的统计，过期请求不影响新结果',
+  )
+}
+
+// ---- 对齐编码：先预览，目标编码已存在时合并到已有国内商品 ----
+{
+  const zhPageMessages = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailMessages.zh.json', 'utf8'))
+  const enPageMessages = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailMessages.en.json', 'utf8'))
+  const mergeKeys = (pageSource.match(/'containers\.(?:modals|actions|messages)\.(?:mergeDomesticProduct\w*|domesticProductMerged\w*|alignDomesticProductPreviewFailed)'/g) ?? [])
+    .map((literal) => literal.slice(1, -1))
+  assertEqual(mergeKeys.length >= 12, true, '合并弹窗文案键应从页面源码中被识别到')
+  assertDeepEqual(
+    mergeKeys.filter((key) => !getLocaleValue(zhPageMessages, key) || !getLocaleValue(enPageMessages, key)),
+    [],
+    '合并弹窗文案应在本页中英文页面级文案中登记，不进全局 locale',
+  )
+  assertEqual(
+    pageSource.includes('void previewAlignDomesticProductCode(alignRequest)') &&
+      pageSource.includes('mergeIntoExistingDomesticProduct: isMerge') &&
+      !pageSource.includes('alignDomesticProductCodeConflictHint'),
+    true,
+    '对齐编码应先预览再确认，只有合并模式才带合并标记，旧的「目标已存在会拒绝」提示应移除',
   )
 }
 

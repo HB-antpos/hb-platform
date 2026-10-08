@@ -1116,6 +1116,32 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         /// <summary>
+        /// 对齐编码确认前预览：直接改码，或目标编码已存在时合并到已有国内商品（列出差异字段）。只读。
+        /// </summary>
+        [HttpPost("details/align-domestic-product-code/preview")]
+        [Authorize(Policy = Permissions.Container.Edit)]
+        [Authorize(Policy = Permissions.Products.Edit)]
+        public async Task<IActionResult> PreviewAlignDomesticProductCode(
+            [FromBody] AlignDomesticProductCodeRequestDto request
+        )
+        {
+            try
+            {
+                var result = await _containerReactService.PreviewAlignDomesticProductCodeAsync(request);
+                return Ok(new { success = true, data = result });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "预览对齐国内商品编码失败");
+                return StatusCode(500, new { success = false, message = "服务器内部错误" });
+            }
+        }
+
+        /// <summary>
         /// 人工确认后，将国内商品编码对齐到本地主档商品编码。
         /// </summary>
         [HttpPost("details/align-domestic-product-code")]
@@ -1132,7 +1158,7 @@ namespace BlazorApp.Api.Controllers.React
                     new
                     {
                         success = true,
-                        message = "国内商品编码已对齐",
+                        message = result.Mode == "Merge" ? "已合并到已有国内商品" : "国内商品编码已对齐",
                         data = result,
                     }
                 );

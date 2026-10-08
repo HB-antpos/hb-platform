@@ -1,6 +1,7 @@
 import type { AxiosResponse } from "axios";
 import { apiClient } from "@/shared/api/client";
 import type {
+  AlignDomesticProductCodePreview,
   AlignDomesticProductCodeRequest,
   AlignDomesticProductCodeResult,
   ContainerDetailBatchActionResult,
@@ -32,6 +33,7 @@ import {
   buildDetailDetectionItems,
   buildContainerListPayload,
   normalizeCreateContainerResponse,
+  normalizeAlignDomesticProductCodePreview,
   normalizeAlignDomesticProductCodeResult,
   normalizeContainerDetailResponse,
   normalizeContainerDetailQueryResult,
@@ -528,6 +530,18 @@ export async function alignDomesticProductCode(
   );
   ensureSuccess(response.data, "对齐国内商品编码失败");
   return normalizeAlignDomesticProductCodeResult(response.data);
+}
+
+/** 对齐编码确认前预览：直接改码，或目标编码已存在时合并到已有国内商品（附差异字段） */
+export async function previewAlignDomesticProductCode(
+  payload: AlignDomesticProductCodeRequest,
+): Promise<AlignDomesticProductCodePreview> {
+  const response = await apiClient.post(
+    `${CONTAINERS_PATH}/details/align-domestic-product-code/preview`,
+    buildAlignDomesticProductCodePayload({ ...payload, mergeIntoExistingDomesticProduct: false }),
+  );
+  ensureSuccess(response.data, "读取对齐预览失败");
+  return normalizeAlignDomesticProductCodePreview(response.data);
 }
 
 export async function exportContainerDetails(

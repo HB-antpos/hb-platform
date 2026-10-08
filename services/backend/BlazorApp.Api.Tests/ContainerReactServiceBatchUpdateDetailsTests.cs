@@ -431,6 +431,252 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
         Assert.Equal("供应商代码不能为空", ex.Message);
     }
 
+    /// <summary>
+    /// 合并场景种子：同货号两条国内商品（旧码被货柜引用、目标码=澳洲主档编码），供应商同为中国代码 HB196。
+    /// </summary>
+    private async Task SeedDomesticMergePairAsync(string prefix, int oldProductType = 0, int targetProductType = 0)
+    {
+        await SeedDetailAsync($"D-{prefix}-1", $"DOM-{prefix}-OLD");
+        await SeedDetailAsync($"D-{prefix}-2", $"DOM-{prefix}-OLD");
+        await _localDb.Insertable(new DomesticProduct
+        {
+            ProductCode = $"DOM-{prefix}-OLD",
+            HBProductNo = $"ITEM-{prefix}",
+            SupplierCode = "HB196",
+            ProductType = oldProductType,
+            ProductName = "旧记录名称",
+            Barcode = "9528519623009",
+            DomesticPrice = 8.5m,
+            ImportPrice = 1.6m,
+            PackingQuantity = 24,
+            UnitVolume = 0m,
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new DomesticProduct
+        {
+            ProductCode = $"LOCAL-{prefix}",
+            HBProductNo = $"ITEM-{prefix}",
+            SupplierCode = "HB196",
+            ProductType = targetProductType,
+            ProductName = "已有记录名称",
+            Barcode = null,
+            DomesticPrice = 0m,
+            ImportPrice = 1.8m,
+            PackingQuantity = 12,
+            UnitVolume = 0.05m,
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        await SeedLocalProductAsync($"LOCAL-{prefix}", "本地主档商品", null, $"ITEM-{prefix}", "200");
+    }
+
+    private static AlignDomesticProductCodeRequestDto CreateMergeRequest(string prefix, bool merge = true) =>
+        new()
+        {
+            DetailHguid = $"D-{prefix}-1",
+            ExpectedDomesticProductCode = $"DOM-{prefix}-OLD",
+            TargetProductCode = $"LOCAL-{prefix}",
+            SupplierCode = "200",
+            MergeIntoExistingDomesticProduct = merge,
+        };
+
+    [Fact]
+    public async Task PreviewAlignDomesticProductCodeAsync_目标不存在_应为直接改码()
+    {
+        await SeedDetailAsync("D-PREVIEW-RENAME", "DOM-PREVIEW-RENAME");
+        await _localDb.Insertable(new DomesticProduct
+        {
+            ProductCode = "DOM-PREVIEW-RENAME",
+            HBProductNo = "ITEM-PREVIEW-RENAME",
+            SupplierCode = "HB196",
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        await SeedLocalProductAsync("LOCAL-PREVIEW-RENAME", "本地主档商品", null, "ITEM-PREVIEW-RENAME", "200");
+        var service = CreateService();
+
+        var preview = await service.PreviewAlignDomesticProductCodeAsync(
+            new AlignDomesticProductCodeRequestDto
+            {
+                DetailHguid = "D-PREVIEW-RENAME",
+                ExpectedDomesticProductCode = "DOM-PREVIEW-RENAME",
+                TargetProductCode = "LOCAL-PREVIEW-RENAME",
+                SupplierCode = "200",
+            }
+        );
+
+        Assert.Equal("Rename", preview.Mode);
+        Assert.Equal(1, preview.AffectedContainerDetails);
+        Assert.Equal(1, preview.AffectedContainers);
+        Assert.Empty(preview.Fields);
+    }
+
+    [Fact]
+    public async Task PreviewAlignDomesticProductCodeAsync_目标已存在_应列出差异字段并以已有记录为准()
+    {
+        await SeedDomesticMergePairAsync("PREVIEW-MERGE");
+        var service = CreateService();
+
+        var preview = await service.PreviewAlignDomesticProductCodeAsync(CreateMergeRequest("PREVIEW-MERGE", merge: false));
+
+        Assert.Equal("Merge", preview.Mode);
+        Assert.Equal(2, preview.AffectedContainerDetails);
+        Assert.Equal(1, preview.AffectedContainers);
+        var fields = preview.Fields.ToDictionary(field => field.Field);
+        // 已有有值：保持已有
+        Assert.Equal("已有记录名称", fields["ProductName"].MergedValue);
+        Assert.False(fields["ProductName"].FilledFromOld);
+        Assert.Equal("1.8", fields["ImportPrice"].MergedValue);
+        Assert.Equal("12", fields["PackingQuantity"].MergedValue);
+        // 已有为空（null 或 0）：用旧记录补
+        Assert.Equal("9528519623009", fields["Barcode"].MergedValue);
+        Assert.True(fields["Barcode"].FilledFromOld);
+        Assert.Equal("8.5", fields["DomesticPrice"].MergedValue);
+        Assert.True(fields["DomesticPrice"].FilledFromOld);
+        // 旧记录为 0、已有有值：已有为准
+        Assert.Equal("0.05", fields["UnitVolume"].MergedValue);
+        Assert.False(fields["UnitVolume"].FilledFromOld);
+        // 两边都空的字段不列出
+        Assert.False(fields.ContainsKey("EnglishProductName"));
+    }
+
+    [Fact]
+    public async Task AlignDomesticProductCodeAsync_确认合并后应补齐空字段改指向明细并软删原记录()
+    {
+        await SeedDomesticMergePairAsync("MERGE");
+        await _localDb.Insertable(new ProductGrade
+        {
+            Id = "GRADE-MERGE",
+            ProductCode = "DOM-MERGE-OLD",
+            Grade = "A",
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new DomesticProductCreationLog
+        {
+            LogId = "LOG-MERGE",
+            ProductCode = "DOM-MERGE-OLD",
+            SupplierCode = "HB196",
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        var history = CreateAlignHistoryMock("DOM-MERGE-OLD", "LOCAL-MERGE", (_, _, _) => { });
+        var service = CreateService(history.Object, CreateCurrentUser("merge-guid", "合并操作员"));
+
+        var result = await service.AlignDomesticProductCodeAsync(CreateMergeRequest("MERGE"));
+
+        Assert.Equal("Merge", result.Mode);
+        Assert.Equal(1, result.DeletedDomesticProducts);
+        Assert.Equal(2, result.UpdatedContainerDetails);
+        Assert.Equal(1, result.UpdatedProductGrades);
+        Assert.Equal(1, result.UpdatedDomesticProductCreationLogs);
+        Assert.Equal(new[] { "条形码", "国内价格" }, result.FilledFields);
+
+        var old = await _localDb.Queryable<DomesticProduct>().FirstAsync(p => p.ProductCode == "DOM-MERGE-OLD");
+        Assert.True(old.IsDeleted);
+        Assert.Equal("旧记录名称", old.ProductName);
+        var target = await _localDb.Queryable<DomesticProduct>().FirstAsync(p => p.ProductCode == "LOCAL-MERGE");
+        Assert.False(target.IsDeleted);
+        Assert.Equal("已有记录名称", target.ProductName);
+        Assert.Equal("9528519623009", target.Barcode);
+        Assert.Equal(8.5m, target.DomesticPrice);
+        Assert.Equal(1.8m, target.ImportPrice);
+        Assert.Equal(12, target.PackingQuantity);
+        Assert.Equal(0.05m, target.UnitVolume);
+        Assert.Equal("合并操作员", target.UpdatedBy);
+        Assert.Equal(2, await _localDb.Queryable<ContainerDetail>().CountAsync(d => d.ProductCode == "LOCAL-MERGE"));
+        // 明细行自己存的价格不随国内商品合并变化
+        Assert.All(
+            await _localDb.Queryable<ContainerDetail>().Where(d => d.ProductCode == "LOCAL-MERGE").ToListAsync(),
+            detail => Assert.Equal(1.23m, detail.ImportPrice)
+        );
+        Assert.True(await _localDb.Queryable<ProductGrade>().AnyAsync(g => g.ProductCode == "LOCAL-MERGE"));
+        history.VerifyAll();
+    }
+
+    [Fact]
+    public async Task AlignDomesticProductCodeAsync_合并时目标已有等级_应保留目标等级不移动原等级()
+    {
+        await SeedDomesticMergePairAsync("MERGE-GRADE");
+        await _localDb.Insertable(new ProductGrade
+        {
+            Id = "GRADE-MERGE-OLD",
+            ProductCode = "DOM-MERGE-GRADE-OLD",
+            Grade = "C",
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new ProductGrade
+        {
+            Id = "GRADE-MERGE-TARGET",
+            ProductCode = "LOCAL-MERGE-GRADE",
+            Grade = "A",
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        var history = CreateAlignHistoryMock("DOM-MERGE-GRADE-OLD", "LOCAL-MERGE-GRADE", (_, _, _) => { });
+        var service = CreateService(history.Object, CreateCurrentUser("merge-guid", "合并操作员"));
+
+        var result = await service.AlignDomesticProductCodeAsync(CreateMergeRequest("MERGE-GRADE"));
+
+        Assert.Equal(0, result.UpdatedProductGrades);
+        Assert.Equal("A", (await _localDb.Queryable<ProductGrade>().FirstAsync(g => g.ProductCode == "LOCAL-MERGE-GRADE")).Grade);
+        Assert.True(await _localDb.Queryable<ProductGrade>().AnyAsync(g => g.Id == "GRADE-MERGE-OLD" && g.ProductCode == "DOM-MERGE-GRADE-OLD"));
+    }
+
+    [Fact]
+    public async Task AlignDomesticProductCodeAsync_合并时同一货柜已有目标编码明细_应拒绝()
+    {
+        await SeedDomesticMergePairAsync("MERGE-OVERLAP");
+        await SeedDetailAsync("D-MERGE-OVERLAP-TARGET", "LOCAL-MERGE-OVERLAP");
+        var service = CreateService();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AlignDomesticProductCodeAsync(CreateMergeRequest("MERGE-OVERLAP"))
+        );
+
+        Assert.Equal("有 1 个货柜同时含原编码和目标编码的明细，请先处理重复明细再合并", ex.Message);
+        Assert.False((await _localDb.Queryable<DomesticProduct>().FirstAsync(p => p.ProductCode == "DOM-MERGE-OVERLAP-OLD")).IsDeleted);
+    }
+
+    [Fact]
+    public async Task AlignDomesticProductCodeAsync_合并时目标是套装而原记录是普通商品_应拒绝()
+    {
+        await SeedDomesticMergePairAsync("MERGE-SET", targetProductType: 1);
+        var service = CreateService();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.PreviewAlignDomesticProductCodeAsync(CreateMergeRequest("MERGE-SET"))
+        );
+
+        Assert.Equal(
+            "两条国内商品类型不一致（原记录：普通商品，已有记录：套装商品），不能自动合并，请先确认商品类型",
+            ex.Message
+        );
+    }
+
+    [Fact]
+    public async Task AlignDomesticProductCodeAsync_请求合并但目标不存在_应要求刷新()
+    {
+        await SeedDetailAsync("D-MERGE-GONE", "DOM-MERGE-GONE");
+        await _localDb.Insertable(new DomesticProduct
+        {
+            ProductCode = "DOM-MERGE-GONE",
+            HBProductNo = "ITEM-MERGE-GONE",
+            SupplierCode = "HB196",
+            IsDeleted = false,
+        }).ExecuteCommandAsync();
+        await SeedLocalProductAsync("LOCAL-MERGE-GONE", "本地主档商品", null, "ITEM-MERGE-GONE", "200");
+        var service = CreateService();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AlignDomesticProductCodeAsync(new AlignDomesticProductCodeRequestDto
+            {
+                DetailHguid = "D-MERGE-GONE",
+                ExpectedDomesticProductCode = "DOM-MERGE-GONE",
+                TargetProductCode = "LOCAL-MERGE-GONE",
+                SupplierCode = "200",
+                MergeIntoExistingDomesticProduct = true,
+            })
+        );
+
+        Assert.Equal("目标国内商品已变化，请刷新后重试", ex.Message);
+    }
+
     [Fact]
     public async Task AlignDomesticProductCodeAsync_目标国内编码已存在_应拒绝()
     {

@@ -769,17 +769,54 @@ namespace BlazorApp.Shared.DTOs
         /// 不是 DomesticProduct.SupplierCode（中国供应商代码）。
         /// </summary>
         public string SupplierCode { get; set; } = string.Empty;
+        /// <summary>
+        /// 目标编码在国内商品表已存在时，用户在预览里确认「合并到已有国内商品」后传 true；
+        /// 为 false 时遇到已存在的目标编码仍按原规则拒绝。
+        /// </summary>
+        public bool MergeIntoExistingDomesticProduct { get; set; }
     }
 
     public class AlignDomesticProductCodeResultDto
     {
+        /// <summary>Rename：直接改码；Merge：合并到已有国内商品。</summary>
+        public string Mode { get; set; } = "Rename";
         public string OldProductCode { get; set; } = string.Empty;
         public string NewProductCode { get; set; } = string.Empty;
         public int UpdatedDomesticProducts { get; set; }
+        /// <summary>合并时软删除的原国内商品数（恒为 0 或 1）。</summary>
+        public int DeletedDomesticProducts { get; set; }
         public int UpdatedContainerDetails { get; set; }
         public int UpdatedDomesticSetProducts { get; set; }
         public int UpdatedProductGrades { get; set; }
         public int UpdatedDomesticProductCreationLogs { get; set; }
+        /// <summary>合并时用原记录补齐的目标字段（中文名）。</summary>
+        public List<string> FilledFields { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 对齐编码确认前的预览：Rename 直接改码；Merge 合并到已有国内商品，并列出两边不一致的字段。
+    /// </summary>
+    public class AlignDomesticProductCodePreviewDto
+    {
+        public string Mode { get; set; } = "Rename";
+        public string OldProductCode { get; set; } = string.Empty;
+        public string NewProductCode { get; set; } = string.Empty;
+        public int AffectedContainerDetails { get; set; }
+        public int AffectedContainers { get; set; }
+        public List<AlignDomesticProductFieldDiffDto> Fields { get; set; } = new();
+    }
+
+    public class AlignDomesticProductFieldDiffDto
+    {
+        public string Field { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        /// <summary>已有国内商品（澳洲编码那条）的值。</summary>
+        public string? ExistingValue { get; set; }
+        /// <summary>原国内商品（旧编码那条）的值。</summary>
+        public string? OldValue { get; set; }
+        /// <summary>合并后的值：以已有记录为准，已有为空时用原记录补。</summary>
+        public string? MergedValue { get; set; }
+        public bool FilledFromOld { get; set; }
     }
 
     /// <summary>
