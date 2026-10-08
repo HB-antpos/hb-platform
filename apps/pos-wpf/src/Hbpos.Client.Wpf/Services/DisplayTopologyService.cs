@@ -68,7 +68,11 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
 
     public void AttachWorkAreaConstraint(Window window)
     {
-        if (PresentationSource.FromVisual(window) is HwndSource existingSource)
+        // 关键逻辑：句柄已建好就直接挂钩子，不能再订阅 SourceInitialized。
+        // 主窗口为扫码初始化在 Show 之前 EnsureHandle，WPF 此时先触发 SourceInitialized、Show 时才设置 RootVisual，
+        // 本方法正是在该事件里被调用：FromVisual 为 null，若在触发中的事件里再订阅它，新订阅永远不会被调用，
+        // 工作区限制（最大化尺寸、高缩放屏下调最小尺寸）因此从未生效。
+        if (TryGetHwndSource(window) is { } existingSource)
         {
             AttachHook(window, existingSource);
             return;
@@ -76,7 +80,7 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
 
         window.SourceInitialized += (_, _) =>
         {
-            if (PresentationSource.FromVisual(window) is HwndSource source)
+            if (TryGetHwndSource(window) is { } source)
             {
                 AttachHook(window, source);
             }
@@ -249,7 +253,9 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
         minMaxInfo.MaxTrackSize.Y = maxTrackSize.Height;
 
         Marshal.StructureToPtr(minMaxInfo, lParam, false);
-        handled = true;
+        // 关键逻辑：不标记 handled，让 Window 自带的 WM_GETMINMAXINFO 处理接着执行（后挂的钩子先执行）。
+        // 它会在本钩子给出的上限内再套用 MinWidth/MinHeight/MaxWidth/MaxHeight 并记下系统限制供布局使用；
+        // 若在这里截断，拖动窗口边框就不再受最小尺寸约束，窗口可被拖到比内容小、内容被裁。
         return IntPtr.Zero;
     }
 
@@ -308,8 +314,25 @@ public sealed class DisplayTopologyService : IDisplayTopologyService
 
     private static Point FromDevice(Window source, int x, int y)
     {
-        var transform = PresentationSource.FromVisual(source)?.CompositionTarget?.TransformFromDevice;
+        // 句柄已建好但尚未 Show 时 FromVisual 为 null，按句柄取 HwndSource 才能拿到正确的 DPI 换算；
+        // 否则会把设备像素当逻辑单位，125%/150% 缩放下工作区被算大，最小尺寸不会下调。
+        var transform = TryGetHwndSource(source)?.CompositionTarget?.TransformFromDevice;
         return transform?.Transform(new Point(x, y)) ?? new Point(x, y);
+    }
+
+    /// <summary>
+    /// 取窗口的 HwndSource：优先 FromVisual；句柄已由 EnsureHandle 建好、RootVisual 还没设置时按句柄取。
+    /// 句柄未创建时返回 null。
+    /// </summary>
+    private static HwndSource? TryGetHwndSource(Window window)
+    {
+        if (PresentationSource.FromVisual(window) is HwndSource source)
+        {
+            return source;
+        }
+
+        var handle = new WindowInteropHelper(window).Handle;
+        return handle == IntPtr.Zero ? null : HwndSource.FromHwnd(handle);
     }
 
     private static void ApplyBounds(Window window, int left, int top, int width, int height)
