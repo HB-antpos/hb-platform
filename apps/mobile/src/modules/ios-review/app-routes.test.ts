@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createIosReviewDataStore } from "./data-store";
 import { IOS_REVIEW_STORES } from "./identity";
 import { createIosReviewTransport } from "./transport";
-import { resetIosReviewAppRouteState } from "./app-routes";
+import { queryReviewContainerDetails, resetIosReviewAppRouteState } from "./app-routes";
 import { normalizeInvoiceGridResponse } from "../local-supplier-invoices/api";
 import {
   buildSeasonalCardBatchRequest,
@@ -2692,6 +2692,55 @@ async function run() {
     true,
     "导出必须返回二进制数据",
   );
+
+  // 货柜明细审核模拟：分页/搜索/筛选/排序与真实接口行为一致
+  const reviewDetail = (index: number, extra: Record<string, unknown> = {}) => ({
+    hguid: `row-${index}`,
+    商品名称: `名称${index}`,
+    英文名称: `Name ${index}`,
+    装柜数量: index * 10,
+    贴牌价格: index,
+    是否新商品: index % 4 === 0,
+    warehouseIsActive: index % 2 === 0,
+    matchType: index % 3 === 0 ? "unmatched" : "productCode",
+    商品信息: { 货号: `IT-${String(index).padStart(3, "0")}`, 条形码: `95${index}` },
+    ...extra,
+  });
+  const reviewRows = Array.from({ length: 120 }, (_, i) => reviewDetail(i + 1));
+  const reviewPage1 = queryReviewContainerDetails(reviewRows, { pageNumber: 1, pageSize: 50 });
+  assert.equal(reviewPage1.items.length, 50);
+  assert.equal(reviewPage1.itemsTotal, 120);
+  assert.equal(reviewPage1.hasMore, true);
+  assert.equal(reviewPage1.items[0]?.商品信息.货号, "IT-001", "默认货号升序");
+  const reviewPage3 = queryReviewContainerDetails(reviewRows, { pageNumber: 3, pageSize: 50 });
+  assert.equal(reviewPage3.items.length, 20);
+  assert.equal(reviewPage3.hasMore, false);
+  assert.equal(reviewPage3.pageNumber, 3);
+  assert.equal(queryReviewContainerDetails(reviewRows, { pageSize: 5000 }).pageSize, 1000, "pageSize 与后端一样夹到 1000");
+  assert.equal(queryReviewContainerDetails(reviewRows, {}).pageSize, 100, "未传 pageSize 取 100");
+  const reviewDesc = queryReviewContainerDetails(reviewRows, { pageSize: 3, sortBy: "containerQuantity", sortOrder: "descend" });
+  assert.deepEqual(reviewDesc.items.map((item: any) => item.hguid), ["row-120", "row-119", "row-118"]);
+  const reviewSearch = queryReviewContainerDetails(reviewRows, { itemNumber: " it-01 ", pageSize: 50 });
+  assert.equal(reviewSearch.itemsTotal, 10, "货号包含搜索，忽略大小写与空白");
+  assert.equal(queryReviewContainerDetails(reviewRows, { englishName: "name 7" }).itemsTotal, 11, "Name 7 / Name 70-79");
+  assert.equal(queryReviewContainerDetails(reviewRows, { barcode: "9515" }).itemsTotal, 1);
+  const reviewFiltered = queryReviewContainerDetails(reviewRows, {
+    oemPriceMin: 10,
+    oemPriceMax: 20,
+    warehouseStatus: ["active"],
+    selectedTags: ["all", "new"],
+  });
+  assert.deepEqual(reviewFiltered.items.map((item: any) => item.hguid), ["row-12", "row-16", "row-20"]);
+  assert.equal(reviewFiltered.tagStats.all, 120, "标签统计始终是整柜口径");
+  assert.equal(reviewFiltered.tagStats.new, 30);
+  assert.equal(queryReviewContainerDetails(reviewRows, { matchTypes: ["unmatched"] }).itemsTotal, 40);
+  const reviewViaTransport = await request(
+    "POST",
+    "/react/v1/containers/review-container/products/query",
+    { pageNumber: 1, pageSize: 50, sortBy: "itemNumber", sortOrder: "ascend", includeTotal: true, includeStats: true },
+  );
+  assert.equal(reviewViaTransport.pageSize, 50, "路由必须透传分页参数");
+  assert.ok(reviewViaTransport.itemsTotal >= 1);
 
   const productMirrorCount = dataStore.list("carts").length;
   assert.ok(productMirrorCount > 1, "代表性写操作必须同步到 ReviewDataStore");

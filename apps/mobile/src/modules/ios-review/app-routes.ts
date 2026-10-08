@@ -1001,6 +1001,117 @@ function asRecord(value: unknown): JsonRecord {
     : {};
 }
 
+// 审核模式的货柜明细查询：与真实接口一样支持分页、搜索、筛选和排序，
+// 这样审核时翻页/换每页条数/排序的表现与线上一致（演示数据本身可能不足一页）。
+const REVIEW_CONTAINER_SORT_ACCESSORS: Record<string, (row: JsonRecord) => unknown> = {
+  itemNumber: (row) => row.商品信息?.货号,
+  productName: (row) => row.商品名称 ?? row.商品信息?.商品名称,
+  englishName: (row) => row.英文名称 ?? row.商品信息?.英文名称,
+  barcode: (row) => row.商品信息?.条形码,
+  containerQuantity: (row) => row.装柜数量,
+  containerPieces: (row) => row.装柜件数,
+  packingQuantity: (row) => row.单件装箱数,
+  unitVolume: (row) => row.单件体积,
+  domesticPrice: (row) => row.国内价格,
+  importPrice: (row) => row.进口价格,
+  warehouseImportPrice: (row) => row.warehouseImportPrice,
+  oemPrice: (row) => row.贴牌价格,
+  newProduct: (row) => (row.是否新商品 ? 1 : 0),
+  warehouseStatus: (row) => (row.warehouseIsActive === true ? 1 : 0),
+};
+
+function reviewContainsText(value: unknown, keyword: unknown) {
+  const needle = String(keyword ?? "").trim().toLowerCase();
+  if (!needle) return true;
+  return String(value ?? "").toLowerCase().includes(needle);
+}
+
+function reviewInRange(value: unknown, min: unknown, max: unknown) {
+  const number = typeof value === "number" ? value : Number.NaN;
+  if (typeof min === "number" && !(number >= min)) return false;
+  if (typeof max === "number" && !(number <= max)) return false;
+  return true;
+}
+
+function reviewCompare(left: unknown, right: unknown) {
+  // 空值排在最前（升序），与数据库 NULL 最小的默认行为一致。
+  if (left == null && right == null) return 0;
+  if (left == null) return -1;
+  if (right == null) return 1;
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right), "en", { numeric: true, sensitivity: "base" });
+}
+
+export function queryReviewContainerDetails(details: JsonRecord[], rawBody: unknown) {
+  const body = asRecord(rawBody);
+  const list = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
+  const productTypes = list(body.productTypes);
+  const warehouseStatuses = list(body.warehouseStatus);
+  const matchTypes = list(body.matchTypes);
+  const tags = list(body.selectedTags).filter((tag) => tag !== "all");
+  const isNew = (row: JsonRecord) => Boolean(row.是否新商品);
+  const isActive = (row: JsonRecord) => row.warehouseIsActive === true;
+
+  const matched = details.filter((row) => {
+    const info = asRecord(row.商品信息);
+    if (!reviewContainsText(info.货号, body.itemNumber)) return false;
+    if (!reviewContainsText(info.条形码, body.barcode)) return false;
+    if (!reviewContainsText(row.商品名称 ?? info.商品名称, body.productName)) return false;
+    if (!reviewContainsText(row.英文名称 ?? info.英文名称, body.englishName)) return false;
+    if (productTypes.length) {
+      const type = row.商品类型 === "套装子商品" ? "setChild" : row.商品类型 === "套装商品" ? "set" : row.商品类型 === "多码商品" ? "multi" : "normal";
+      if (!productTypes.includes(type)) return false;
+    }
+    if (warehouseStatuses.length && !warehouseStatuses.includes(isActive(row) ? "active" : "inactive")) return false;
+    if (matchTypes.length && !matchTypes.includes(String(row.matchType ?? "unmatched"))) return false;
+    if (!reviewInRange(row.装柜数量, body.containerQuantityMin, body.containerQuantityMax)) return false;
+    if (!reviewInRange(row.中包数, body.middlePackQuantityMin, body.middlePackQuantityMax)) return false;
+    if (!reviewInRange(row.warehouseImportPrice, body.warehouseImportPriceMin, body.warehouseImportPriceMax)) return false;
+    if (!reviewInRange(row.贴牌价格, body.oemPriceMin, body.oemPriceMax)) return false;
+    if (tags.includes("new") && !isNew(row)) return false;
+    if (tags.includes("existing") && isNew(row)) return false;
+    if (tags.includes("active") && !isActive(row)) return false;
+    if (tags.includes("inactive") && isActive(row)) return false;
+    return true;
+  });
+
+  const accessor = REVIEW_CONTAINER_SORT_ACCESSORS[String(body.sortBy ?? "itemNumber")]
+    ?? REVIEW_CONTAINER_SORT_ACCESSORS.itemNumber;
+  const direction = body.sortOrder === "descend" || body.sortOrder === "desc" ? -1 : 1;
+  const sorted = matched
+    .map((row, index) => ({ row, index }))
+    // 排序键相同时保持原顺序，保证翻页稳定。
+    .sort((left, right) => direction * reviewCompare(accessor(left.row), accessor(right.row)) || left.index - right.index)
+    .map((entry) => entry.row);
+
+  // 与后端一致：pageSize 夹在 1..1000，未传/非正数取 100；页码至少为 1。
+  const requestedSize = Number(body.pageSize);
+  const pageSize = Math.min(1000, Math.max(1, Number.isFinite(requestedSize) && requestedSize > 0 ? Math.floor(requestedSize) : 100));
+  const requestedPage = Number(body.pageNumber);
+  const pageNumber = Math.max(1, Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 1);
+  const start = (pageNumber - 1) * pageSize;
+  const stats = {
+    all: details.length,
+    new: details.filter(isNew).length,
+    existing: details.filter((row) => !isNew(row)).length,
+    noOemPrice: details.filter((row) => isNew(row) && !(Number(row.贴牌价格) > 0)).length,
+    abnormalImport: details.filter((row) => !(Number(row.进口价格) > 0)).length,
+    active: details.filter(isActive).length,
+    inactive: details.filter((row) => !isActive(row)).length,
+  };
+
+  return {
+    items: clone(sorted.slice(start, start + pageSize)),
+    itemsTotal: sorted.length,
+    pageNumber,
+    pageSize,
+    hasMore: start + pageSize < sorted.length,
+    totalComputed: true,
+    statsComputed: true,
+    tagStats: stats,
+  };
+}
+
 function nextId(state: AppRouteState, prefix: string) {
   state.sequence += 1;
   return `${prefix}-${state.sequence}`;
@@ -2047,20 +2158,8 @@ export function registerIosReviewAppRoutes(
     transport,
     ["POST"],
     /^\/react\/v1\/containers\/([^/]+)\/products\/query$/i,
-    () => ({
-      data: {
-        items: clone(state().containerDetails),
-        itemsTotal: state().containerDetails.length,
-        pageNumber: 1,
-        pageSize: 30,
-        hasMore: false,
-        totalComputed: true,
-        statsComputed: true,
-        tagStats: {
-          all: state().containerDetails.length,
-          existing: state().containerDetails.length,
-        },
-      },
+    ({ body }) => ({
+      data: queryReviewContainerDetails(state().containerDetails, body),
     }),
   );
   register(

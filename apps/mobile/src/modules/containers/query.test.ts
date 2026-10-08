@@ -1,6 +1,27 @@
 import assert from "node:assert/strict";
 import {
+  CONTAINER_DETAIL_DEFAULT_PAGE_SIZE,
+  CONTAINER_DETAIL_PAGE_SIZE,
+  CONTAINER_DETAIL_PAGE_SIZE_OPTIONS,
+  CONTAINER_DETAIL_SORT_OPTIONS,
+  DEFAULT_CONTAINER_DETAIL_SORT,
+  DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS,
   buildAlignDomesticProductCodePayload,
+  buildContainerDetailFilterQuery,
+  buildContainerDetailOverview,
+  buildCreatedProductsHqPushPlan,
+  countActiveContainerDetailFilters,
+  createEmptyContainerDetailFilters,
+  findContainerDetailsMissingRetailPrice,
+  findInvalidContainerDetailRangePairs,
+  getContainerDetailPageCount,
+  getContainerLoadRatePercent,
+  normalizeContainerDetailPageSize,
+  normalizeContainerDetailSort,
+  resetContainerDetailFilters,
+  resolveContainerDetailOverviewStats,
+  toggleContainerDetailFilterOption,
+  toggleContainerDetailSort,
   buildContainerDetailHqPushSelection,
   buildContainerDetailQuery,
   buildDetailDetectionItems,
@@ -196,11 +217,12 @@ const normalizedDetail = normalizeContainerDetailQueryResult({
   Items: [{ HGUID: "D1" }],
   ItemsTotal: 40,
   PageNumber: 1,
-  PageSize: 30,
+  PageSize: 50,
   HasMore: true,
   TagStats: { all: 40, new: 3 },
 }, detailQuery);
 
+assert.equal(normalizedDetail.pageSize, 50);
 assert.equal(normalizedDetail.items[0]?.HGUID, "D1");
 assert.equal(normalizedDetail.hasMore, true);
 assert.equal(normalizedDetail.tagStats.all, 40);
@@ -407,5 +429,257 @@ assert.equal(normalizedJob.status, "Succeeded");
 assert.equal(normalizedJob.result.createdCount, 2);
 assert.equal(normalizedJob.result.failedCount, 1);
 assert.equal(normalizedJob.result.errors.length, 1);
+
+
+// ---------------------------------------------------------------------------
+// 每页条数：默认 50，可选 50/100/200/500，非法值回到默认
+// ---------------------------------------------------------------------------
+assert.deepEqual([...CONTAINER_DETAIL_PAGE_SIZE_OPTIONS], [50, 100, 200, 500]);
+assert.equal(CONTAINER_DETAIL_DEFAULT_PAGE_SIZE, 50);
+assert.equal(CONTAINER_DETAIL_PAGE_SIZE, 50, "旧导出名保留并跟随默认值");
+assert.equal(detailQuery.pageSize, 50, "默认查询每页 50 条");
+assert.equal(buildContainerDetailQuery("c", { pageSize: 200 }).pageSize, 200);
+assert.equal(normalizeContainerDetailPageSize("100"), 100);
+assert.equal(normalizeContainerDetailPageSize(500), 500);
+assert.equal(normalizeContainerDetailPageSize(30), 50, "旧版本的 30 不在可选项里，回到默认");
+assert.equal(normalizeContainerDetailPageSize("abc"), 50);
+assert.equal(normalizeContainerDetailPageSize(null), 50);
+assert.equal(getContainerDetailPageCount(0, 50), 1);
+assert.equal(getContainerDetailPageCount(101, 50), 3);
+assert.equal(getContainerDetailPageCount(100, 50), 2);
+assert.equal(getContainerDetailPageCount(10, 0), 1);
+
+// ---------------------------------------------------------------------------
+// 搜索字段：keyword 只写入选中的字段；默认货号；显式字段优先
+// ---------------------------------------------------------------------------
+const nameSearch = buildContainerDetailQuery("c", { keyword: " mug ", searchField: "englishName" });
+assert.equal(nameSearch.englishName, "mug");
+assert.equal(nameSearch.itemNumber, undefined);
+assert.equal(nameSearch.productName, undefined);
+assert.equal(nameSearch.barcode, undefined);
+assert.equal(buildContainerDetailQuery("c", { keyword: "中文", searchField: "productName" }).productName, "中文");
+assert.equal(buildContainerDetailQuery("c", { keyword: "952", searchField: "barcode" }).barcode, "952");
+assert.equal(buildContainerDetailQuery("c", { keyword: "hb" }).itemNumber, "hb", "未指定字段默认货号");
+assert.equal(
+  buildContainerDetailQuery("c", { keyword: "x", searchField: "bogus" as never }).itemNumber,
+  "x",
+  "未知字段回退货号",
+);
+assert.equal(
+  buildContainerDetailQuery("c", { keyword: "kw", itemNumber: "explicit" }).itemNumber,
+  "explicit",
+  "显式 itemNumber 优先于 keyword（兼容旧调用）",
+);
+assert.equal(buildContainerDetailQuery("c", { keyword: "  " }).itemNumber, undefined);
+
+// ---------------------------------------------------------------------------
+// 排序：默认货号升序；sort 优先于 sortBy；点选切换方向
+// ---------------------------------------------------------------------------
+assert.deepEqual(DEFAULT_CONTAINER_DETAIL_SORT, { field: "itemNumber", order: "ascend" });
+assert.equal(detailQuery.sortBy, "itemNumber");
+const sortedQuery = buildContainerDetailQuery("c", { sort: { field: "oemPrice", order: "descend" }, sortBy: "barcode" });
+assert.equal(sortedQuery.sortBy, "oemPrice");
+assert.equal(sortedQuery.sortOrder, "descend");
+const legacySortQuery = buildContainerDetailQuery("c", { sortBy: "barcode", sortOrder: "descend" });
+assert.equal(legacySortQuery.sortBy, "barcode");
+assert.equal(legacySortQuery.sortOrder, "descend");
+assert.deepEqual(normalizeContainerDetailSort({ field: "nope" as never, order: "descend" }), { field: "itemNumber", order: "descend" });
+assert.deepEqual(normalizeContainerDetailSort(null), DEFAULT_CONTAINER_DETAIL_SORT);
+assert.equal(buildContainerDetailQuery("c", { sort: { field: "nope" as never } }).sortBy, "itemNumber");
+// 后端 ApplyContainerDetailSort 白名单（ContainerReactService.cs）
+const backendSortWhitelist = new Set([
+  "barcode", "productName", "englishName", "productType", "newProduct", "containerPieces", "middlePackQuantity",
+  "containerQuantity", "packingQuantity", "unitVolume", "domesticPrice", "floatRate", "transportCost",
+  "unitTransportCost", "warehouseImportPrice", "lastOEMPrice", "importPrice", "oemPrice", "warehouseStatus",
+  "remark", "itemNumber", "matchType",
+]);
+CONTAINER_DETAIL_SORT_OPTIONS.forEach((option) => {
+  assert.ok(backendSortWhitelist.has(option.field), `${option.field} 必须在后端排序白名单内`);
+  assert.ok(option.label && option.labelKey);
+});
+assert.equal(new Set(CONTAINER_DETAIL_SORT_OPTIONS.map((item) => item.field)).size, CONTAINER_DETAIL_SORT_OPTIONS.length);
+assert.deepEqual(toggleContainerDetailSort({ field: "itemNumber", order: "ascend" }, "itemNumber"), { field: "itemNumber", order: "descend" });
+assert.deepEqual(toggleContainerDetailSort({ field: "itemNumber", order: "descend" }, "itemNumber"), { field: "itemNumber", order: "ascend" });
+assert.deepEqual(toggleContainerDetailSort({ field: "itemNumber", order: "ascend" }, "importPrice"), { field: "importPrice", order: "descend" });
+assert.deepEqual(toggleContainerDetailSort({ field: "importPrice", order: "descend" }, "productName"), { field: "productName", order: "ascend" });
+
+// ---------------------------------------------------------------------------
+// 筛选状态：区间 + 商品类型 + 上下架 + 匹配方式
+// ---------------------------------------------------------------------------
+const emptyFilters = createEmptyContainerDetailFilters();
+assert.equal(countActiveContainerDetailFilters(emptyFilters), 0);
+assert.notEqual(emptyFilters.ranges, createEmptyContainerDetailFilters().ranges, "每次返回独立对象");
+const activeFilters = createEmptyContainerDetailFilters();
+activeFilters.ranges.oemPriceMin = " 5 ";
+activeFilters.ranges.oemPriceMax = "9";
+activeFilters.ranges.containerQuantityMax = "100";
+activeFilters.productTypes = ["set", "multi"];
+activeFilters.warehouseStatus = ["inactive"];
+activeFilters.matchTypes = ["unmatched"];
+assert.equal(countActiveContainerDetailFilters(activeFilters), 5, "2 个区间对 + 3 组多选；同一区间对只算一次");
+assert.deepEqual(findInvalidContainerDetailRangePairs(activeFilters), []);
+const filterQuery = buildContainerDetailFilterQuery(activeFilters);
+assert.equal(filterQuery.oemPriceMin, 5);
+assert.equal(filterQuery.oemPriceMax, 9);
+assert.equal(filterQuery.containerQuantityMax, 100);
+assert.equal(filterQuery.containerQuantityMin, undefined);
+assert.deepEqual(filterQuery.productTypes, ["set", "multi"]);
+assert.deepEqual(filterQuery.warehouseStatus, ["inactive"]);
+assert.deepEqual(filterQuery.matchTypes, ["unmatched"]);
+const filteredDetailQuery = buildContainerDetailQuery("c", { filters: activeFilters, selectedTags: ["new"] });
+assert.equal(filteredDetailQuery.oemPriceMin, 5);
+assert.deepEqual(filteredDetailQuery.productTypes, ["set", "multi"]);
+assert.deepEqual(filteredDetailQuery.selectedTags, ["new"], "标签 chips 逻辑不变");
+assert.equal(filteredDetailQuery.includeTotal, true);
+assert.equal(filteredDetailQuery.includeStats, true);
+assert.equal(
+  buildContainerDetailQuery("c", { filters: activeFilters, oemPriceMin: 1 }).oemPriceMin,
+  1,
+  "显式字段优先于 filters",
+);
+assert.equal(buildContainerDetailQuery("c", { filters: emptyFilters }).productTypes, undefined);
+const badRanges = createEmptyContainerDetailFilters();
+badRanges.ranges.containerQuantityMin = "abc";
+badRanges.ranges.oemPriceMin = "10";
+badRanges.ranges.oemPriceMax = "2";
+assert.deepEqual(findInvalidContainerDetailRangePairs(badRanges), ["containerQuantity", "oemPrice"]);
+assert.equal(buildContainerDetailFilterQuery(badRanges).containerQuantityMin, undefined, "非法数字被丢弃而不是发 NaN");
+assert.equal(countActiveContainerDetailFilters(resetContainerDetailFilters()), 0);
+assert.deepEqual(toggleContainerDetailFilterOption(["a", "b"], "a"), ["b"]);
+assert.deepEqual(toggleContainerDetailFilterOption(["a"], "b"), ["a", "b"]);
+assert.equal(
+  buildContainerDetailQuery("c", { includeTotal: false, includeStats: false }).includeTotal,
+  false,
+  "批量范围等场景仍可显式关闭总数/统计",
+);
+
+// ---------------------------------------------------------------------------
+// 创建新商品：零售价必须 > 0
+// ---------------------------------------------------------------------------
+const missingPriceRows = findContainerDetailsMissingRetailPrice([
+  { hguid: "N-OK", 是否新商品: true, 贴牌价格: 3.5, 商品信息: { 货号: "OK" } },
+  { hguid: "N-ZERO", 是否新商品: true, 贴牌价格: 0, 商品信息: { 货号: "ZERO" } },
+  { hguid: "N-NEG", 是否新商品: true, 贴牌价格: -1, 商品信息: { 货号: " " }, 商品编码: "P-NEG" },
+  { hguid: "N-NAN", 是否新商品: true, 贴牌价格: Number.NaN },
+  { hguid: "N-NONE", 是否新商品: true, 商品信息: { 货号: "NONE" } },
+  { hguid: "OLD", 是否新商品: false, 商品信息: { 货号: "OLD" } },
+]);
+assert.deepEqual(
+  missingPriceRows.map((row) => [row.hguid, row.label]),
+  [["N-ZERO", "ZERO"], ["N-NEG", "P-NEG"], ["N-NAN", "N-NAN"], ["N-NONE", "NONE"]],
+  "已有商品不校验；货号空白时依次回退商品编码、明细 GUID",
+);
+assert.deepEqual(findContainerDetailsMissingRetailPrice([]), []);
+
+// ---------------------------------------------------------------------------
+// 创建后同步 HQ 的发送计划
+// ---------------------------------------------------------------------------
+const createdRow = (hguid: string, productCode: string | undefined, extra: Record<string, unknown> = {}) => ({
+  hguid,
+  商品编码: productCode,
+  是否新商品: false,
+  商品信息: { 货号: `IT-${hguid}`, localSupplierCode: "200" },
+  ...extra,
+});
+const latestRows = [createdRow("D1", "P1"), createdRow("D2", "p2")];
+const confirmedRows = [
+  createdRow("D1", "P1", { 是否新商品: true }),
+  createdRow("D3", "P3", { 是否新商品: true }),
+  createdRow("D4", undefined, { 商品信息: { 货号: " ", localSupplierCode: "" } }),
+];
+const hqPlan = buildCreatedProductsHqPushPlan(
+  [
+    { detailHguid: " d1 ", productCode: "P1" },
+    { detailHguid: "D1", productCode: "P1" },
+    { productCode: "P2" },
+    { detailHguid: "D3" },
+    { detailHguid: "D4" },
+    { detailHguid: "GONE", productCode: "GONE" },
+  ],
+  latestRows,
+  confirmedRows,
+);
+assert.deepEqual(hqPlan.selection.productCodes, ["P1", "p2", "P3"], "同一明细只发一次；最新行优先、找不到再回退确认时的行");
+assert.equal(hqPlan.selection.items[0]?.isNewProduct, false, "优先使用重载后的最新行（已建档）");
+assert.equal(hqPlan.selection.items.length, 3);
+assert.equal(hqPlan.unsentCreatedCount, 2, "找不到明细 GONE + 缺编码和供应商货号的 D4");
+assert.deepEqual(hqPlan.warnings, [{ code: "UNSENT_CREATED", count: 2 }]);
+assert.equal(hqPlan.shouldPush, true);
+const busyPlan = buildCreatedProductsHqPushPlan([{ detailHguid: "D1" }], latestRows, [], { pushInFlight: true });
+assert.equal(busyPlan.shouldPush, false);
+assert.deepEqual(busyPlan.warnings, [{ code: "PUSH_BUSY" }]);
+const emptyPlan = buildCreatedProductsHqPushPlan([{ detailHguid: "NOPE" }], latestRows, []);
+assert.equal(emptyPlan.shouldPush, false);
+assert.deepEqual(emptyPlan.warnings, [{ code: "UNSENT_CREATED", count: 1 }], "一个候选都没有时按本次创建总数提示");
+assert.deepEqual(buildCreatedProductsHqPushPlan([], latestRows).warnings, []);
+// 编码冲突的行不带商品编码、改用供应商+货号候选
+const conflictPlan = buildCreatedProductsHqPushPlan(
+  [{ detailHguid: "C1" }],
+  [createdRow("C1", "P-C", { hasProductCodeConflict: true })],
+);
+assert.equal(conflictPlan.selection.items[0]?.productCode, undefined);
+assert.equal(conflictPlan.selection.items[0]?.itemNumber, "IT-C1");
+assert.equal(DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS.length, 17, "与 Web 默认 17 个更新字段对齐");
+assert.ok(DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS.includes("productType"));
+assert.equal(new Set(DEFAULT_PUSH_PRODUCTS_TO_HQ_UPDATE_FIELDS).size, 17);
+
+// ---------------------------------------------------------------------------
+// 头部概览
+// ---------------------------------------------------------------------------
+const overview = buildContainerDetailOverview(
+  {
+    合计金额: 12345.6,
+    总体积: 34,
+    合计件数: 800,
+    合计数量: 9600,
+    运费: 5000,
+    汇率: 4.8,
+    装柜日期: "2026-09-01T00:00:00",
+    预计到岸日期: "2026-10-10T00:00:00",
+    状态: 1,
+  },
+  { all: 40, new: 3, existing: 37, noOemPrice: 0, abnormalImport: 0, active: 0, inactive: 0 },
+  { today: "2026-10-08" },
+);
+assert.equal(overview.totalAmount, 12345.6);
+assert.equal(overview.totalVolume, 34);
+assert.equal(overview.loadRatePercent, 50);
+assert.equal(overview.newCount, 3);
+assert.equal(overview.existingCount, 37);
+assert.equal(overview.rowCount, 40);
+assert.equal(overview.etaDate, "2026-10-10");
+assert.equal(overview.actualArrivalDate, undefined);
+assert.equal(overview.statsMissing, false);
+assert.deepEqual(overview.arrivalInsight, { text: "2 天后", tone: "muted", target: "estimated" });
+const sparseOverview = buildContainerDetailOverview({}, undefined);
+assert.equal(sparseOverview.totalAmount, undefined);
+assert.equal(sparseOverview.loadRatePercent, undefined);
+assert.equal(sparseOverview.newCount, undefined);
+assert.equal(sparseOverview.statsMissing, true);
+assert.equal(sparseOverview.arrivalInsight, null);
+assert.equal(buildContainerDetailOverview(null, null).rowCount, undefined);
+assert.equal(getContainerLoadRatePercent(68), 100);
+assert.equal(getContainerLoadRatePercent(102), 150, "超过 100% 照实返回");
+assert.equal(getContainerLoadRatePercent(-1), undefined);
+assert.equal(getContainerLoadRatePercent(Number.NaN), undefined);
+const wholeStats = { all: 10, new: 1, existing: 9, noOemPrice: 0, abnormalImport: 0, active: 0, inactive: 0 };
+const filteredStats = { ...wholeStats, all: 2 };
+assert.deepEqual(
+  resolveContainerDetailOverviewStats({ remoteStats: wholeStats, hasScopeFilters: false, cachedStats: null }),
+  { stats: wholeStats, cacheable: true },
+);
+assert.deepEqual(
+  resolveContainerDetailOverviewStats({ remoteStats: filteredStats, hasScopeFilters: true, cachedStats: wholeStats }),
+  { stats: wholeStats, cacheable: false },
+  "带搜索/筛选时沿用整柜缓存，概览卡不跟着变",
+);
+assert.deepEqual(
+  resolveContainerDetailOverviewStats({ remoteStats: filteredStats, hasScopeFilters: true, cachedStats: null }),
+  { stats: null, cacheable: false },
+);
+assert.equal(
+  resolveContainerDetailOverviewStats({ remoteStats: wholeStats, statsComputed: false, hasScopeFilters: false, cachedStats: null }).cacheable,
+  false,
+);
 
 console.log("containers query tests passed");

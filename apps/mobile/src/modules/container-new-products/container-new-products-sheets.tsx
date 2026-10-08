@@ -7,7 +7,6 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { formatArrivalDateRange } from "./arrival-range";
 import { matchesContainerSearch, PRODUCT_TYPE_FILTERS, WAREHOUSE_FILTERS, type ContainerOption, type ProductTypeFilter, type WarehouseFilter } from "./filters";
-import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS, parsePageInput, type ContainerNewProductsPageSize } from "./pagination";
 
 function SectionLabel({ children }: { children: string }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
@@ -172,73 +171,6 @@ export function ContainerFilterSheet({ visible, options, selected, onApply, onDi
   </BusinessSheet>;
 }
 
-/** 跳页 + 每页条数：输入页码或点页码格子跳转；改每页条数由页面回到第 1 页并记住选择。 */
-export function PageSheet({ visible, page, pageCount, total, pageSize, onJump, onPageSizeChange, onDismiss }: {
-  visible: boolean;
-  page: number;
-  pageCount: number;
-  total: number;
-  pageSize: ContainerNewProductsPageSize;
-  onJump: (page: number) => void;
-  onPageSizeChange: (pageSize: ContainerNewProductsPageSize) => void;
-  onDismiss: () => void;
-}) {
-  const { t } = useAppTranslation("containerNewProducts");
-  const [input, setInput] = useState("");
-  useEffect(() => { if (visible) setInput(String(page)); }, [visible, page]);
-  const target = parsePageInput(input, pageCount);
-  // 页数不多时给出页码格子一键跳转；页数很多时只保留输入框，避免面板过长
-  const pageButtons = pageCount <= 40 ? Array.from({ length: pageCount }, (_, index) => index + 1) : [];
-
-  return <BusinessSheet visible={visible} title={t("pageSheet.title")} subtitle={t("pageSheet.subtitle", { total: total.toLocaleString("en-AU"), page, pageCount })} onDismiss={onDismiss}>
-    <SectionLabel>{t("pageSheet.goTo")}</SectionLabel>
-    <View style={styles.gotoRow}>
-      <View style={styles.gotoBox}>
-        <TextInput
-          value={input}
-          onChangeText={(value) => setInput(value.replace(/[^\d]/g, ""))}
-          keyboardType="number-pad"
-          returnKeyType="go"
-          selectTextOnFocus
-          accessibilityLabel={t("pageSheet.goTo")}
-          onSubmitEditing={() => { if (target) onJump(target); }}
-          style={styles.gotoInput}
-        />
-        <Text style={styles.gotoOf}>{t("pageSheet.of", { pageCount })}</Text>
-      </View>
-      <Button mode="contained" disabled={!target} onPress={() => { if (target) onJump(target); }} contentStyle={styles.gotoButtonContent}>{t("pageSheet.go")}</Button>
-    </View>
-    {pageButtons.length > 1 ? <View style={styles.pageGrid}>
-      {pageButtons.map((number) => <Pressable
-        key={number}
-        accessibilityRole="button"
-        accessibilityState={{ selected: number === page }}
-        onPress={() => onJump(number)}
-        style={[styles.pageCell, number === page && styles.pageCellCurrent]}
-      >
-        <Text style={[styles.pageCellText, number === page && styles.pageCellTextCurrent]}>{number}</Text>
-      </Pressable>)}
-    </View> : null}
-
-    <SectionLabel>{t("pageSheet.pageSize")}</SectionLabel>
-    <View style={styles.segment}>
-      {CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS.map((option, index) => {
-        const selected = option === pageSize;
-        return <Pressable
-          key={option}
-          accessibilityRole="radio"
-          accessibilityState={{ checked: selected }}
-          onPress={() => onPageSizeChange(option)}
-          style={[styles.segmentButton, index > 0 && styles.segmentDivider, selected && styles.segmentSelected]}
-        >
-          <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{option}</Text>
-        </Pressable>;
-      })}
-    </View>
-    <Text style={styles.hint}>{t("pageSheet.pageSizeHint")}</Text>
-  </BusinessSheet>;
-}
-
 const styles = StyleSheet.create({
   sectionLabel: { color: HB_COLORS.textSecondary, fontSize: 13, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase", marginTop: HB_SPACING.xxs },
   optionGroup: { borderWidth: 1, borderColor: HB_COLORS.outlineMuted, borderRadius: HB_RADIUS.surface, overflow: "hidden" },
@@ -272,14 +204,4 @@ const styles = StyleSheet.create({
   containerRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm, paddingHorizontal: HB_SPACING.xs, paddingVertical: HB_SPACING.xs, borderRadius: HB_RADIUS.control },
   containerCounts: { alignItems: "flex-end" },
   newKinds: { color: HB_COLORS.action, fontSize: 14, fontWeight: "700" },
-  gotoRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
-  gotoBox: { flex: 1, height: 50, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: HB_SPACING.sm, borderWidth: 2, borderColor: HB_COLORS.action, borderRadius: HB_RADIUS.surface },
-  gotoInput: { flex: 1, minWidth: 0, fontSize: 20, fontWeight: "700", color: HB_COLORS.textPrimary, paddingVertical: 0 },
-  gotoOf: { color: HB_COLORS.textSecondary, fontSize: 16 },
-  gotoButtonContent: { minHeight: 50, paddingHorizontal: HB_SPACING.xs },
-  pageGrid: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
-  pageCell: { width: 56, height: 44, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: HB_COLORS.outline, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.white },
-  pageCellCurrent: { backgroundColor: HB_COLORS.action, borderColor: HB_COLORS.action },
-  pageCellText: { color: HB_COLORS.textPrimary, fontSize: 15 },
-  pageCellTextCurrent: { color: HB_COLORS.white, fontWeight: "700" },
 });

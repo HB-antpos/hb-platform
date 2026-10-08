@@ -1,0 +1,332 @@
+{
+  "title": "Container details",
+  "common": {
+    "none": "--",
+    "listSeparator": ", "
+  },
+  "access": {
+    "deniedTitle": "No access to containers",
+    "deniedDescription": "Ask an administrator to grant container view permission"
+  },
+  "actions": {
+    "back": "Back",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "done": "Done",
+    "apply": "Apply",
+    "reset": "Reset",
+    "close": "Close",
+    "save": "Save"
+  },
+  "header": {
+    "estimatedArrival": "ETA",
+    "actualArrival": "Arrived",
+    "rows": "{{count}} rows"
+  },
+  "status": {
+    "0": "Loaded",
+    "1": "In transit",
+    "2": "Completed",
+    "7": "Cancelled",
+    "unknown": "Status {{status}}"
+  },
+  "overview": {
+    "amount": "Load amount",
+    "volume": "Volume / load rate",
+    "products": "New / existing"
+  },
+  "presence": {
+    "editing": "Editing: {{names}}",
+    "viewing": "Viewing: {{names}}",
+    "justNow": "just now"
+  },
+  "search": {
+    "fieldTitle": "Search field",
+    "fieldLabel": "Search field: {{field}}, tap to change",
+    "placeholder": "Search {{field}}",
+    "clear": "Clear search",
+    "submit": "Search"
+  },
+  "searchField": {
+    "itemNumber": "Item no.",
+    "productName": "Name",
+    "barcode": "Barcode",
+    "englishName": "English name"
+  },
+  "sort": {
+    "title": "Sort",
+    "current": "Current: {{label}} · {{direction}}",
+    "hint": "Tap a field to sort; tap the current field again to switch ascending / descending",
+    "ascend": "Ascending",
+    "descend": "Descending",
+    "button": "Sort: {{label}} ({{direction}})",
+    "options": {
+      "itemNumber": "Item no.",
+      "productName": "Name",
+      "englishName": "English name",
+      "barcode": "Barcode",
+      "containerQuantity": "Loaded quantity",
+      "containerPieces": "Loaded pieces",
+      "packingQuantity": "Units per carton",
+      "unitVolume": "Unit volume",
+      "domesticPrice": "Domestic price",
+      "importPrice": "Import price",
+      "warehouseImportPrice": "Live purchase price",
+      "oemPrice": "Retail price",
+      "newProduct": "New products first",
+      "warehouseStatus": "Listed status"
+    }
+  },
+  "filter": {
+    "title": "Filters",
+    "button": "Filters, {{count}} active",
+    "min": "Min",
+    "max": "Max",
+    "invalidRange": "Enter valid numbers; the minimum cannot exceed the maximum",
+    "ranges": {
+      "containerQuantity": "Loaded quantity",
+      "middlePackQuantity": "Inner pack",
+      "warehouseImportPrice": "Live purchase price",
+      "oemPrice": "Retail price"
+    },
+    "productTypes": "Product type",
+    "productTypeOptions": {
+      "normal": "Normal",
+      "set": "Set",
+      "multi": "Multi-code",
+      "setChild": "Set component"
+    },
+    "warehouseStatus": "Listed status",
+    "warehouseStatusOptions": {
+      "active": "Listed",
+      "inactive": "Delisted"
+    },
+    "matchTypes": "Match type",
+    "showReadonlyOemPrice": "Show read-only retail price",
+    "showReadonlyOemPriceHint": "Also show the server's read-only retail price in row details; not a filter"
+  },
+  "tags": {
+    "chip": "{{label}} {{count}}",
+    "all": "All",
+    "new": "New",
+    "existing": "Existing",
+    "noOemPrice": "No retail price",
+    "abnormalImport": "Import issue",
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "pageSizeHint": "Changing this returns to page 1; your choice is remembered on this device",
+  "table": {
+    "columns": {
+      "product": "Item / name",
+      "status": "Status",
+      "containerQuantity": "Qty",
+      "middlePack": "Pack",
+      "domesticPrice": "CN (¥)",
+      "warehouseImportPrice": "Live cost",
+      "importPrice": "Import",
+      "retailPrice": "Retail"
+    },
+    "tags": {
+      "new": "New",
+      "existing": "Existing",
+      "active": "On",
+      "inactive": "Off",
+      "attention": "Code needs review"
+    },
+    "retailMissing": "Retail price missing",
+    "selectRow": "Select row",
+    "selectAllOnPage": "Select all on this page"
+  },
+  "states": {
+    "loading": "Loading details…",
+    "loadFailed": "Failed to load details",
+    "empty": "No details",
+    "emptyHint": "Adjust the search or filters and try again",
+    "clearFilters": "Clear search and filters"
+  },
+  "selection": {
+    "summary": "{{selected}} selected / {{page}} on page",
+    "clear": "Clear"
+  },
+  "info": {
+    "viewTitle": "Row details",
+    "noImage": "No image",
+    "barcode": "Barcode",
+    "realtimeRetailPrice": "Live retail price",
+    "readonlyOemPrice": "Read-only retail price",
+    "matchType": "Match",
+    "match": {
+      "productCode": "Matched by product code",
+      "supplierItem": "Candidate to confirm",
+      "unmatched": "Unmatched"
+    },
+    "conflictCandidate": "Candidate: local code {{local}}, domestic code {{domestic}}",
+    "align": "Align code",
+    "remarkLine": "Remark: {{value}}"
+  },
+  "edit": {
+    "title": "Edit row",
+    "productName": "Chinese name",
+    "englishName": "English name",
+    "domesticPrice": "Domestic price",
+    "importPrice": "Import price",
+    "oemPrice": "Retail price",
+    "floatRate": "Float rate",
+    "containerQuantity": "Loaded quantity",
+    "middlePackQuantity": "Inner pack",
+    "active": "Active",
+    "validationTitle": "These fields were not saved",
+    "conflictTitle": "Updated on the server ({{count}})",
+    "useAllServer": "Use all server values",
+    "keepAllMine": "Keep all my values",
+    "serverValue": "Server: ",
+    "myValue": "Mine: ",
+    "useServer": "Use server value",
+    "keepMine": "Keep my value",
+    "overrideConfirmTitle": "Overwrite server values?",
+    "overrideConfirmMessage": "This will overwrite {{count}} field(s) updated on the server. If the server changes again you will be asked to confirm again.",
+    "overrideConfirmAction": "Keep my values",
+    "wholeRow": "This row",
+    "fields": {
+      "productName": "Chinese name",
+      "englishName": "English name",
+      "domesticPrice": "Domestic price",
+      "importPrice": "Import price",
+      "oemPrice": "Retail price",
+      "floatRate": "Float rate",
+      "containerQuantity": "Loaded quantity",
+      "middlePackQuantity": "Inner pack",
+      "isActive": "Active status"
+    },
+    "validationLine": "{{field}}: {{message}}"
+  },
+  "bulk": {
+    "title": "Bulk actions",
+    "button": "Bulk actions",
+    "scopeSelected": "Applies to {{count}} selected row(s)",
+    "scopeFiltered": "Nothing selected: applies to the current filtered results ({{count}} rows)",
+    "needsSelection": "Select rows first",
+    "submitContainerHint": "Whole-container action; ignores selection and filters and asks for confirmation first",
+    "groups": {
+      "edit": "Bulk edit",
+      "hq": "HQ",
+      "container": "Whole container",
+      "export": "Export",
+      "danger": "Danger zone"
+    },
+    "actions": {
+      "float": "Adjust float rate",
+      "prices": "Set prices",
+      "recalculate": "Recalculate costs",
+      "backfill": "Backfill last prices",
+      "pushHq": "Push selected to HQ",
+      "submitContainer": "Submit container",
+      "delete": "Delete selected",
+      "exportExcel": "Export Excel",
+      "exportPdf": "Export PDF"
+    },
+    "deleteTitle": "Delete selected rows",
+    "previewMessage": "Server preview: {{count}} row(s) affected. {{summary}}",
+    "previewAffected": "Server preview: {{count}} row(s) affected",
+    "confirmExecute": "Confirm",
+    "preview": "Preview"
+  },
+  "pushHq": {
+    "confirmMessage": "Send {{count}} selected row(s) to the HQ database (all updatable fields).",
+    "confirm": "Send"
+  },
+  "createProducts": {
+    "button": "Create products",
+    "title": "Create new products",
+    "warning": "This will create product records for the {{count}} selected new product(s) and list them. This cannot be undone.",
+    "syncToHq": "Also update the HQ database after creating",
+    "missingTitle": "{{count}} new product(s) have a retail price of 0",
+    "missingHint": "The retail price must be greater than 0 to create a product. Set the price, then try again.",
+    "missingMore": "{{count}} more not shown",
+    "retailPrice": "Retail {{price}}",
+    "locate": "Go to row",
+    "confirmDisabledCaption": "Available once prices are set",
+    "confirm": "Create",
+    "running": "Creating products, please keep this open…",
+    "runningWithHq": "Creating products and syncing HQ, please keep this open…",
+    "result": {
+      "blockedNoDetails": "There are no new products to create",
+      "blockedMissingPrice": "Some new products have a retail price of 0. Blocked; nothing was created",
+      "creationFailed": "The creation job failed; products were not created",
+      "creationPartial": "Finished: {{created}} created, {{skipped}} skipped, {{failed}} failed",
+      "creationNothing": "The job finished but no products were created",
+      "creationSuccess": "{{created}} new product(s) created",
+      "creationError": "The creation job could not be confirmed. Refresh the details to check the result before retrying",
+      "hq": {
+        "unsentCreated": "{{count}} created product(s) were not queued for HQ. Send them later from Bulk actions → Push selected to HQ",
+        "syncDisabled": "HQ sync was not selected and was skipped",
+        "nothingCreated": "Nothing was created, so nothing was sent to HQ",
+        "noCandidates": "Created products lack a product code or supplier item number and could not be sent to HQ",
+        "pushBusy": "Another HQ push is running, so this one was not sent automatically. Push manually later",
+        "succeeded": "HQ synced: {{success}} of {{total}} succeeded",
+        "failed": "Products were created, but syncing HQ failed. You can retry from Bulk actions",
+        "error": "Products were created, but syncing HQ hit an error. You can retry from Bulk actions"
+      }
+    }
+  },
+  "submitContainer": {
+    "title": "Submit container",
+    "scope": "This submits the whole container {{container}}: every detail row, regardless of the current search, filters or selection.",
+    "scopeNote": "Make sure the details have been checked before submitting.",
+    "scopeNoteWithRows": "{{count}} detail rows. Make sure they have been checked before submitting.",
+    "confirm": "Submit",
+    "running": "Submitting the container, please keep this open…",
+    "result": {
+      "success": "Container submitted",
+      "partial": "Container submitted, but {{failed}} row(s) failed",
+      "failed": "Container submission failed",
+      "error": "Submitting hit an error and the job status is unknown. Refresh the details to check"
+    }
+  },
+  "align": {
+    "missingCodes": "No product code available to align",
+    "filledFields": ", filled: {{fields}}",
+    "merged": "Merged into existing domestic product {{code}}{{filled}}",
+    "renamed": "Domestic product code aligned {{from}} -> {{to}}",
+    "failed": "Failed to align domestic product code",
+    "previewFailed": "Failed to load the alignment preview",
+    "mergeIntro": "The domestic product table already has a record with the Australian code {{local}}. Change code {{domestic}} in the domestic product and containers to the Australian code {{local}} and merge the old record into it?",
+    "itemNumber": "Item no.: {{value}}",
+    "product": "Product: {{value}}",
+    "mergeImpact": "{{rows}} detail row(s) in {{containers}} container(s) will be re-pointed. Row prices and carton sizes are unchanged.",
+    "mergeField": "{{label}}: existing {{existing}} | old {{old}} → {{merged}}{{filled}}",
+    "filledFromOld": " (filled from the old record)",
+    "mergeNoDiff": "The two records match; nothing to fill in.",
+    "mergeNote": "The existing record wins; empty fields are filled from the old record, and the old record is marked deleted (recoverable).",
+    "renameIntro": "Change code {{domestic}} in the domestic product and containers to the Australian code {{local}}?",
+    "mergeTitle": "Merge into existing domestic product",
+    "renameTitle": "Align domestic product code",
+    "mergeAction": "Merge code",
+    "renameAction": "Align code"
+  },
+  "messages": {
+    "foregroundConflicts": "{{count}} field(s) you are editing were updated on the server",
+    "nothingToSave": "Nothing to save",
+    "unsavedFields": "{{count}} field(s) were not saved. Fix them and try again",
+    "detailSaved": "Row saved",
+    "upgradeToEdit": "This app version is view-only. Upgrade to edit container details",
+    "saveFailed": "Failed to save the row",
+    "selectToDelete": "Select the rows to delete first",
+    "invalidFloatRate": "Enter a valid float rate",
+    "invalidPrices": "Enter a valid import price or retail price",
+    "bulkDone": "Bulk action completed",
+    "previewRefreshed": "The data changed and the preview was refreshed ({{count}} row(s) affected). Confirm again to run",
+    "bulkFailed": "Bulk action failed",
+    "previewFailed": "Bulk preview failed",
+    "selectToPushHq": "Select the rows to push to HQ first",
+    "pushHqNoCandidates": "The selected rows have no product code or supplier item candidate",
+    "pushHqFailed": "Push to HQ failed: {{message}}",
+    "pushHqDone": "Push to HQ finished",
+    "pushHqError": "Push to HQ failed",
+    "selectNewProducts": "Select new products to create first (already created products cannot be created again)",
+    "locateNotOnPage": "That row is not on this page. Clear the search and filters, then locate it again",
+    "exported": "Exported {{name}}",
+    "exportFailed": "Export failed"
+  }
+}
