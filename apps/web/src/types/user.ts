@@ -130,6 +130,32 @@ export interface UserStoreAssignmentDto {
   isManageable?: boolean
 }
 
+export type BatchUserStoreOperation = 'add' | 'remove'
+
+export interface BatchUserStoreOperationRequest {
+  userGuids: string[]
+  storeGuids: string[]
+  operation: BatchUserStoreOperation
+  /** 仅添加：同时设为可管理分店（只有管理员可以授予） */
+  asManageable?: boolean
+  /** 只计算影响、不写入 */
+  dryRun?: boolean
+}
+
+/** 批量分店操作的影响统计；预演与正式执行返回同一结构。 */
+export interface BatchUserStoreOperationResult {
+  dryRun: boolean
+  addedCount: number
+  upgradedCount: number
+  removedCount: number
+  removedManageableCount: number
+  unchangedCount: number
+  protectedManageableCount: number
+  affectedUserCount: number
+  usersLosingStoreManagerRole: string[]
+  usersGainingStoreManagerRole: string[]
+}
+
 export interface CreateUserDto {
   username: string
   email: string

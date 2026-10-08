@@ -914,6 +914,44 @@ namespace BlazorApp.Api.Controllers
         }
 
         /// <summary>
+        /// 批量为多个用户添加 / 移除分店关联；dryRun=true 时只返回影响、不写入。
+        /// </summary>
+        [HttpPost("batch-stores")]
+        [Authorize(Policy = Permissions.Users.ManageStores)]
+        public async Task<IActionResult> BatchManageUserStores(
+            [FromBody] BatchUserStoreOperationDto dto
+        )
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(
+                        ApiResponse<BatchUserStoreOperationResultDto>.Error(
+                            "请求参数验证失败",
+                            "VALIDATION_ERROR",
+                            ModelState
+                        )
+                    );
+                }
+
+                var result = await _userService.BatchManageUserStoresAsync(dto);
+                return ToUserAccessActionResult(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "批量分店操作失败");
+                return StatusCode(
+                    500,
+                    ApiResponse<BatchUserStoreOperationResultDto>.Error(
+                        "服务器内部错误",
+                        "INTERNAL_SERVER_ERROR"
+                    )
+                );
+            }
+        }
+
+        /// <summary>
         /// 导入用户
         /// </summary>
         [HttpPost("import")]

@@ -85,6 +85,26 @@
       "addRolePlan": "将为 {{count}} 个账号添加；{{skipped}} 个已持有该角色，自动跳过。",
       "storeManagerHint": "店长角色由用户的「可管理分店」自动决定，不在此列表中；请在用户的分店设置里调整。",
       "selectionLimit": "一次最多勾选 {{count}} 位用户"
+    },
+    "usersBatchStores": {
+      "previewFailed": "无法计算影响，请稍后重试",
+      "addSuccess": "已新增 {{added}} 条分店关联，升级 {{upgraded}} 条为可管理",
+      "removeSuccess": "已移除 {{count}} 条分店关联",
+      "submitFailed": "批量分店操作失败，所有关联均未修改",
+      "pickStoresFirst": "选择分店后会先预演，显示实际影响",
+      "addPreview": "将新增 {{added}} 条关联，升级 {{upgraded}} 条为可管理；{{unchanged}} 条已存在，保持不变。",
+      "removePreview": "将移除 {{removed}} 条关联（其中可管理 {{manageable}} 条）；{{unchanged}} 条本来就没有关联。",
+      "protectedHint": "{{count}} 条是可管理关联，只有管理员可以移除，将保持不变。",
+      "losingManagerRole": "{{count}} 位将失去全部可管理分店，同时失去店长角色：{{names}}",
+      "gainingManagerRole": "{{count}} 位将首次获得可管理分店，同时成为店长：{{names}}",
+      "removeTitle": "为 {{count}} 个已选账号移除分店",
+      "addTitle": "为 {{count}} 个已选账号添加分店",
+      "removeOk": "移除（{{count}}）",
+      "addOk": "添加（{{count}}）",
+      "selectStores": "选择分店（可多选）",
+      "asManageable": "同时设为可管理（店长）；已有普通关联的会升级为可管理",
+      "addStores": "添加分店",
+      "removeStores": "移除分店"
     }
   }
 }

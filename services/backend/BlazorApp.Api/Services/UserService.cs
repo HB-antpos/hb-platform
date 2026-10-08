@@ -2904,6 +2904,334 @@ namespace BlazorApp.Api.Services
         }
 
         /// <summary>
+        /// 批量为多个用户添加 / 移除分店关联。
+        /// 权限规则与单人分店分配一致：管理员不受限；店长只能操作自己管辖范围内的分店、
+        /// 只能增删普通关联，可管理关联既不能授予也不能移除（原样保留并计入 ProtectedManageableCount）。
+        /// 正式执行在一个可串行化事务里完成，任一目标不合法整批回滚；DryRun 只计算影响、不写入。
+        /// </summary>
+        public async Task<ApiResponse<BatchUserStoreOperationResultDto>> BatchManageUserStoresAsync(
+            BatchUserStoreOperationDto dto
+        )
+        {
+            var operation = dto.Operation?.Trim().ToLowerInvariant();
+            if (operation is not ("add" or "remove"))
+            {
+                return ApiResponse<BatchUserStoreOperationResultDto>.Error(
+                    "不支持的操作类型",
+                    "UNSUPPORTED_OPERATION"
+                );
+            }
+
+            var userGuids = NormalizeBatchGuids(dto.UserGuids);
+            var storeGuids = NormalizeBatchGuids(dto.StoreGuids);
+            if (userGuids.Length == 0 || storeGuids.Length == 0)
+            {
+                return ApiResponse<BatchUserStoreOperationResultDto>.Error(
+                    "请选择用户和分店",
+                    "VALIDATION_ERROR"
+                );
+            }
+            if (
+                userGuids.Length > BatchUserStoreOperationDto.MaxUserCount
+                || storeGuids.Length > BatchUserStoreOperationDto.MaxStoreCount
+            )
+            {
+                return ApiResponse<BatchUserStoreOperationResultDto>.Error(
+                    $"一次最多处理 {BatchUserStoreOperationDto.MaxUserCount} 位用户、{BatchUserStoreOperationDto.MaxStoreCount} 家分店",
+                    "BATCH_LIMIT_EXCEEDED"
+                );
+            }
+
+            // 「设为可管理」只对添加有意义。
+            var asManageable = operation == "add" && dto.AsManageable;
+
+            try
+            {
+                var db = _context.Db;
+                if (dto.DryRun)
+                {
+                    // 预演只读：不开串行化事务，避免在确认弹窗反复预览时持有范围锁。
+                    return await ApplyBatchUserStoreOperationAsync(
+                        db,
+                        operation,
+                        userGuids,
+                        storeGuids,
+                        asManageable,
+                        dryRun: true
+                    );
+                }
+
+                await db.Ado.BeginTranAsync(IsolationLevel.Serializable);
+                try
+                {
+                    var result = await ApplyBatchUserStoreOperationAsync(
+                        db,
+                        operation,
+                        userGuids,
+                        storeGuids,
+                        asManageable,
+                        dryRun: false
+                    );
+                    if (result.Success)
+                    {
+                        await db.Ado.CommitTranAsync();
+                        _logger.LogInformation(
+                            "批量分店操作成功，Operation: {Operation}, UserCount: {UserCount}, StoreCount: {StoreCount}, Added: {Added}, Upgraded: {Upgraded}, Removed: {Removed}",
+                            operation,
+                            userGuids.Length,
+                            storeGuids.Length,
+                            result.Data!.AddedCount,
+                            result.Data.UpgradedCount,
+                            result.Data.RemovedCount
+                        );
+                    }
+                    else
+                    {
+                        await db.Ado.RollbackTranAsync();
+                    }
+                    return result;
+                }
+                catch
+                {
+                    await db.Ado.RollbackTranAsync();
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "批量分店操作失败，Operation: {Operation}", operation);
+                return ApiResponse<BatchUserStoreOperationResultDto>.Error(
+                    "批量分店操作失败",
+                    "BATCH_STORE_OPERATION_FAILED"
+                );
+            }
+        }
+
+        private static string[] NormalizeBatchGuids(IEnumerable<string>? values)
+        {
+            return (values ?? Enumerable.Empty<string>())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        private async Task<ApiResponse<BatchUserStoreOperationResultDto>> ApplyBatchUserStoreOperationAsync(
+            ISqlSugarClient db,
+            string operation,
+            string[] userGuids,
+            string[] storeGuids,
+            bool asManageable,
+            bool dryRun
+        )
+        {
+            ApiResponse<BatchUserStoreOperationResultDto> Fail(string message, string code) =>
+                ApiResponse<BatchUserStoreOperationResultDto>.Error(message, code);
+
+            var actor = await UserAccessMutationSecurity.ResolveActorAsync(
+                db,
+                _manageableStoreScopeService
+            );
+            if (asManageable && !actor.IsSuperAdmin)
+            {
+                return Fail("只有管理员可以授予分店管理关系", "MANAGEABLE_STORE_GRANT_DENIED");
+            }
+            if (actor.IsStoreManager)
+            {
+                var scopedStoreGuids = actor.StoreGuids.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (storeGuids.Any(storeGuid => !scopedStoreGuids.Contains(storeGuid)))
+                {
+                    return Fail("不能分配非管辖分店", "STORE_SCOPE_DENIED");
+                }
+            }
+
+            var validStoreCount = await db.Queryable<Store>()
+                .Where(store => storeGuids.Contains(store.StoreGUID) && !store.IsDeleted)
+                .CountAsync();
+            if (validStoreCount != storeGuids.Length)
+            {
+                return Fail("包含不存在或已删除的分店", "STORE_NOT_FOUND");
+            }
+
+            var users = await db.Queryable<User>()
+                .Where(user => userGuids.Contains(user.UserGUID) && !user.IsDeleted)
+                .ToListAsync();
+            if (users.Count != userGuids.Length)
+            {
+                return Fail("用户不存在", "USER_NOT_FOUND");
+            }
+            var usersByGuid = users.ToDictionary(user => user.UserGUID, StringComparer.OrdinalIgnoreCase);
+
+            // 逐个复用单人接口的目标校验（本人、高权限账号、管辖范围），任一不通过整批拒绝并指明是谁。
+            foreach (var userGuid in userGuids)
+            {
+                var decision = await UserAccessMutationSecurity.ValidateTargetAsync(db, actor, userGuid);
+                if (!decision.IsAllowed)
+                {
+                    return Fail($"{usersByGuid[userGuid].Username}：{decision.Message}", decision.ErrorCode);
+                }
+            }
+
+            var existingRows = await db.Queryable<UserStore>()
+                .Where(item =>
+                    userGuids.Contains(item.UserGUID)
+                    && storeGuids.Contains(item.StoreGUID)
+                    && !item.IsDeleted
+                )
+                .ToListAsync();
+            var existingByPair = existingRows
+                .GroupBy(item => (User: item.UserGUID.ToLowerInvariant(), Store: item.StoreGUID.ToLowerInvariant()))
+                .ToDictionary(group => group.Key, group => group.ToList());
+
+            // 每位用户操作前持有的全部可管理分店，用来判断店长角色会不会因此增减。
+            var primaryRows = await db.Queryable<UserStore>()
+                .Where(item => userGuids.Contains(item.UserGUID) && item.IsPrimary && !item.IsDeleted)
+                .ToListAsync();
+            var primaryStoresBefore = userGuids.ToDictionary(
+                userGuid => userGuid,
+                userGuid => primaryRows
+                    .Where(item => string.Equals(item.UserGUID, userGuid, StringComparison.OrdinalIgnoreCase))
+                    .Select(item => item.StoreGUID)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase
+            );
+            var primaryStoresAfter = primaryStoresBefore.ToDictionary(
+                pair => pair.Key,
+                pair => new HashSet<string>(pair.Value, StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            var result = new BatchUserStoreOperationResultDto { DryRun = dryRun };
+            var rowsToInsert = new List<UserStore>();
+            var rowGuidsToUpgrade = new List<string>();
+            var rowGuidsToDelete = new List<string>();
+            var affectedUserGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var now = DateTime.UtcNow;
+
+            foreach (var userGuid in userGuids)
+            {
+                foreach (var storeGuid in storeGuids)
+                {
+                    existingByPair.TryGetValue(
+                        (userGuid.ToLowerInvariant(), storeGuid.ToLowerInvariant()),
+                        out var rows
+                    );
+                    var hasRelation = rows is { Count: > 0 };
+                    var hasManageable = hasRelation && rows!.Any(item => item.IsPrimary);
+
+                    if (operation == "add")
+                    {
+                        if (!hasRelation)
+                        {
+                            rowsToInsert.Add(new UserStore
+                            {
+                                UserStoreGUID = Guid.NewGuid().ToString(),
+                                UserGUID = usersByGuid[userGuid].UserGUID,
+                                StoreGUID = storeGuid,
+                                IsPrimary = asManageable,
+                                CreatedAt = now,
+                                UpdatedAt = now,
+                            });
+                            result.AddedCount++;
+                        }
+                        else if (asManageable && !hasManageable)
+                        {
+                            // 已有普通关联：升级为可管理，不新建重复行。
+                            rowGuidsToUpgrade.Add(rows![0].UserStoreGUID);
+                            result.UpgradedCount++;
+                        }
+                        else
+                        {
+                            // 添加从不降级：已是可管理的关联保持不变。
+                            result.UnchangedCount++;
+                            continue;
+                        }
+
+                        if (asManageable)
+                        {
+                            primaryStoresAfter[userGuid].Add(storeGuid);
+                        }
+                        affectedUserGuids.Add(userGuid);
+                        continue;
+                    }
+
+                    if (!hasRelation)
+                    {
+                        result.UnchangedCount++;
+                        continue;
+                    }
+                    if (hasManageable && !actor.IsSuperAdmin)
+                    {
+                        // 店长不能撤销分店管理关系，与单人分配接口一致：原行保留。
+                        result.ProtectedManageableCount++;
+                        continue;
+                    }
+
+                    rowGuidsToDelete.AddRange(rows!.Select(item => item.UserStoreGUID));
+                    result.RemovedCount++;
+                    if (hasManageable)
+                    {
+                        result.RemovedManageableCount++;
+                        primaryStoresAfter[userGuid].Remove(storeGuid);
+                    }
+                    affectedUserGuids.Add(userGuid);
+                }
+            }
+
+            var managerRoleChangedUserGuids = userGuids
+                .Where(userGuid =>
+                    (primaryStoresBefore[userGuid].Count > 0) != (primaryStoresAfter[userGuid].Count > 0)
+                )
+                .ToList();
+            result.UsersLosingStoreManagerRole = managerRoleChangedUserGuids
+                .Where(userGuid => primaryStoresBefore[userGuid].Count > 0)
+                .Select(userGuid => usersByGuid[userGuid].Username)
+                .ToList();
+            result.UsersGainingStoreManagerRole = managerRoleChangedUserGuids
+                .Where(userGuid => primaryStoresAfter[userGuid].Count > 0)
+                .Select(userGuid => usersByGuid[userGuid].Username)
+                .ToList();
+            result.AffectedUserCount = affectedUserGuids.Count;
+
+            if (dryRun)
+            {
+                return ApiResponse<BatchUserStoreOperationResultDto>.OK(result, "预演完成");
+            }
+
+            if (rowsToInsert.Count > 0)
+            {
+                await db.Insertable(rowsToInsert).ExecuteCommandAsync();
+            }
+            if (rowGuidsToUpgrade.Count > 0)
+            {
+                var upgradeGuids = rowGuidsToUpgrade.ToArray();
+                await db.Updateable<UserStore>()
+                    .SetColumns(item => new UserStore { IsPrimary = true, UpdatedAt = now })
+                    .Where(item => upgradeGuids.Contains(item.UserStoreGUID))
+                    .ExecuteCommandAsync();
+            }
+            if (rowGuidsToDelete.Count > 0)
+            {
+                var deleteGuids = rowGuidsToDelete.ToArray();
+                await db.Deleteable<UserStore>()
+                    .Where(item => deleteGuids.Contains(item.UserStoreGUID))
+                    .ExecuteCommandAsync();
+            }
+
+            // 可管理关系有增减的用户同步派生的店长角色（只有管理员能改可管理关系）。
+            foreach (var userGuid in affectedUserGuids)
+            {
+                if (!primaryStoresBefore[userGuid].SetEquals(primaryStoresAfter[userGuid]))
+                {
+                    await UserStoreManagerRoleSynchronizer.SynchronizeAsync(db, usersByGuid[userGuid].UserGUID);
+                }
+            }
+
+            return ApiResponse<BatchUserStoreOperationResultDto>.OK(result, "批量分店操作成功");
+        }
+
+        /// <summary>
         /// 导入用户（简化实现）
         /// </summary>
         public async Task<ApiResponse<ImportUserResultDto>> ImportUsersAsync(

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import dayjs from 'dayjs'
 import {
   STALE_LOGIN_DAYS,
+  countBatchStoreChanges,
+  getServerErrorMessage,
   describeLastLogin,
   diffAssignmentKeys,
   diffStoreAssignment,
@@ -158,3 +160,21 @@ const batchUser = (userGUID: string, isActive: boolean, roleNames: string[] = []
 assert.equal(isDerivedStoreManagerRoleName('StoreManager'), true)
 assert.equal(isDerivedStoreManagerRoleName('店长'), true)
 assert.equal(isDerivedStoreManagerRoleName('WarehouseManager'), false, '仓库经理可以批量增删')
+
+// 批量分店：只有新增、升级、移除算作会写入的变更；预演为空时不可提交。
+assert.equal(countBatchStoreChanges(null), 0)
+assert.equal(countBatchStoreChanges({
+  dryRun: true,
+  addedCount: 2,
+  upgradedCount: 1,
+  removedCount: 3,
+  removedManageableCount: 1,
+  unchangedCount: 9,
+  protectedManageableCount: 4,
+  affectedUserCount: 2,
+  usersLosingStoreManagerRole: [],
+  usersGainingStoreManagerRole: [],
+}), 6, '已存在与受保护的组合不计入变更数')
+
+assert.equal(getServerErrorMessage({ payload: { message: 'tommy：无权修改该用户' } }, '失败'), 'tommy：无权修改该用户')
+assert.equal(getServerErrorMessage(new Error('Network Error'), '失败'), '失败', '没有服务端业务消息时用通用文案')

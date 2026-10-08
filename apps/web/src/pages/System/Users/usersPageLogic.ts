@@ -1,7 +1,7 @@
 import dayjs from 'dayjs'
 import type { Key } from 'react'
 
-import type { UserDto } from '../../../types/user'
+import type { BatchUserStoreOperationResult, UserDto } from '../../../types/user'
 
 import { parseUserUtcTimestamp } from './time'
 
@@ -198,4 +198,22 @@ export function planBatchRoleChange(users: readonly UserDto[], roleName: string,
     else plan.targets.push(user)
   }
   return plan
+}
+
+/** 取服务端业务消息（RequestError.payload.message），没有时退回通用文案。 */
+export function getServerErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object' && 'payload' in error) {
+    const payload = (error as { payload?: unknown }).payload
+    if (payload && typeof payload === 'object' && 'message' in payload) {
+      const text = (payload as { message?: unknown }).message
+      if (typeof text === 'string' && text.trim()) return text
+    }
+  }
+  return fallback
+}
+
+/** 批量分店操作实际会写入的关联数；为 0 时没有可提交的变更。 */
+export function countBatchStoreChanges(result: BatchUserStoreOperationResult | null | undefined): number {
+  if (!result) return 0
+  return result.addedCount + result.upgradedCount + result.removedCount
 }

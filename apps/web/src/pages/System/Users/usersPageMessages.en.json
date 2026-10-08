@@ -85,6 +85,26 @@
       "addRolePlan": "Will add to {{count}} accounts; {{skipped}} already have this role and will be skipped.",
       "storeManagerHint": "The Store Manager role is derived from each user's manageable stores and is not listed here. Change it in the user's store settings.",
       "selectionLimit": "You can select up to {{count}} users at a time"
+    },
+    "usersBatchStores": {
+      "previewFailed": "Unable to calculate the impact. Please try again.",
+      "addSuccess": "Added {{added}} store links and upgraded {{upgraded}} to manageable",
+      "removeSuccess": "Removed {{count}} store links",
+      "submitFailed": "Bulk store update failed; no links were changed",
+      "pickStoresFirst": "Pick stores to preview the actual impact first",
+      "addPreview": "Will add {{added}} links and upgrade {{upgraded}} to manageable; {{unchanged}} already exist and stay unchanged.",
+      "removePreview": "Will remove {{removed}} links ({{manageable}} manageable); {{unchanged}} had no link.",
+      "protectedHint": "{{count}} manageable links can only be removed by an administrator and will be kept.",
+      "losingManagerRole": "{{count}} will lose all manageable stores and therefore the Store Manager role: {{names}}",
+      "gainingManagerRole": "{{count}} will get their first manageable store and become Store Managers: {{names}}",
+      "removeTitle": "Remove stores from {{count}} selected accounts",
+      "addTitle": "Add stores to {{count}} selected accounts",
+      "removeOk": "Remove ({{count}})",
+      "addOk": "Add ({{count}})",
+      "selectStores": "Select stores (multiple)",
+      "asManageable": "Also make them manageable (Store Manager); existing plain links are upgraded",
+      "addStores": "Add stores",
+      "removeStores": "Remove stores"
     }
   }
 }

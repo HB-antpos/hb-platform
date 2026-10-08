@@ -1,6 +1,8 @@
 import type { ApiResponse, PagedResult } from '../types/api'
 import type { RoleOptionDto } from '../types/role'
 import type {
+  BatchUserStoreOperationRequest,
+  BatchUserStoreOperationResult,
   CreateUserDto,
   UpdateUserDto,
   UserPermissionAssignmentDto,
@@ -111,6 +113,21 @@ export async function batchSetUsersActive(userGuids: string[], isActive: boolean
   const response = await request.post<ApiResponse<boolean>>('/api/Users/batch', {
     userGuids,
     operation: isActive ? 'activate' : 'deactivate',
+  })
+  return unwrapApiData(response)
+}
+
+/**
+ * 批量添加 / 移除分店关联：后端单事务执行，任一目标不合法整批不写入；
+ * dryRun=true 时只返回影响统计，用于确认前预览。
+ */
+export async function batchManageUserStores(payload: BatchUserStoreOperationRequest): Promise<BatchUserStoreOperationResult> {
+  const response = await request.post<ApiResponse<BatchUserStoreOperationResult>>('/api/Users/batch-stores', {
+    userGuids: payload.userGuids,
+    storeGuids: payload.storeGuids,
+    operation: payload.operation,
+    asManageable: payload.asManageable ?? false,
+    dryRun: payload.dryRun ?? false,
   })
   return unwrapApiData(response)
 }

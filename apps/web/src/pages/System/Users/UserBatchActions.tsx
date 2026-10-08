@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, MinusCircleOutlined, StopOutlined, UsergroupAddOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, CloseCircleOutlined, MinusCircleOutlined, ShopOutlined, StopOutlined, UsergroupAddOutlined } from '@ant-design/icons'
 import { Alert, Button, Modal, Select, Space, Typography, message } from 'antd'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -6,9 +6,11 @@ import { useTranslation } from 'react-i18next'
 import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
 import { addUsersToRole, removeUserFromRole } from '../../../services/roleService'
 import { batchSetUsersActive } from '../../../services/userService'
-import type { UserDto } from '../../../types/user'
+import type { BatchUserStoreOperation, UserDto } from '../../../types/user'
 
+import UserBatchStoreModal from './UserBatchStoreModal'
 import {
+  getServerErrorMessage,
   getUserDisplayName,
   isDerivedStoreManagerRoleName,
   planBatchRoleChange,
@@ -30,23 +32,17 @@ interface UserBatchActionsProps {
   /** 管理员且持有 Roles.ManageUsers：批量添加 / 移除角色（后端只允许管理员维护用户角色） */
   canManageRoles: boolean
   roleOptions: RoleOption[]
+  /** Users.ManageStores：批量添加 / 移除分店 */
+  canManageStores: boolean
+  /** 管理员可以批量授予「可管理」分店关系 */
+  canGrantManageableStores: boolean
+  /** 可选分店：范围受限的店长只会看到自己管辖的分店 */
+  storeOptions: { label: string; value: string }[]
   /** 范围受限店长不能编辑的账号，提前跳过，避免整批被后端回滚。 */
   isOutOfScope: (user: UserDto) => boolean
   onClearSelection: () => void
   /** 批量操作有写入后刷新列表并清空勾选。 */
   onCompleted: () => void
-}
-
-/** 取服务端业务消息（RequestError.payload.message），没有时退回通用文案。 */
-function getServerMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object' && 'payload' in error) {
-    const payload = (error as { payload?: unknown }).payload
-    if (payload && typeof payload === 'object' && 'message' in payload) {
-      const text = (payload as { message?: unknown }).message
-      if (typeof text === 'string' && text.trim()) return text
-    }
-  }
-  return fallback
 }
 
 export default function UserBatchActions({
@@ -55,6 +51,9 @@ export default function UserBatchActions({
   canEditStatus,
   canManageRoles,
   roleOptions,
+  canManageStores,
+  canGrantManageableStores,
+  storeOptions,
   isOutOfScope,
   onClearSelection,
   onCompleted,
@@ -63,6 +62,7 @@ export default function UserBatchActions({
   const [roleMode, setRoleMode] = useState<BatchRoleMode | null>(null)
   const [roleGuid, setRoleGuid] = useState<string | undefined>(undefined)
   const [roleSubmitting, setRoleSubmitting] = useState(false)
+  const [storeMode, setStoreMode] = useState<BatchUserStoreOperation | null>(null)
 
   // 店长角色由可管理分店派生，后端拒绝直接增删，不放进可选列表。
   const assignableRoleOptions = useMemo(
@@ -136,7 +136,7 @@ export default function UserBatchActions({
         } catch (error) {
           console.error(error)
           // 后端整批回滚：任何一个目标不合法都不会有账号被修改。
-          message.error(getServerMessage(error, t('system.usersBatch.statusFailed', '批量操作失败，所有账号均未修改')))
+          message.error(getServerErrorMessage(error, t('system.usersBatch.statusFailed', '批量操作失败，所有账号均未修改')))
         }
       },
     })
@@ -177,7 +177,7 @@ export default function UserBatchActions({
             await removeUserFromRole(selectedRole.value, user.userGUID)
           } catch (error) {
             console.error(error)
-            failures.push({ user, reason: getServerMessage(error, t('system.roles.removeUserFailed', '移除用户失败')) })
+            failures.push({ user, reason: getServerErrorMessage(error, t('system.roles.removeUserFailed', '移除用户失败')) })
           }
         }
         const succeeded = rolePlan.targets.length - failures.length
@@ -214,7 +214,7 @@ export default function UserBatchActions({
       onCompleted()
     } catch (error) {
       console.error(error)
-      message.error(getServerMessage(error, t('system.usersBatch.addRoleFailed', '批量添加角色失败')))
+      message.error(getServerErrorMessage(error, t('system.usersBatch.addRoleFailed', '批量添加角色失败')))
       setRoleSubmitting(false)
     }
   }
@@ -244,7 +244,29 @@ export default function UserBatchActions({
             </Button>
           </>
         ) : null}
+        {canManageStores ? (
+          <>
+            <Button size="small" icon={<ShopOutlined />} onClick={() => setStoreMode('add')}>
+              {t('system.usersBatchStores.addStores', '添加分店')}
+            </Button>
+            <Button size="small" icon={<CloseCircleOutlined />} onClick={() => setStoreMode('remove')}>
+              {t('system.usersBatchStores.removeStores', '移除分店')}
+            </Button>
+          </>
+        ) : null}
       </SelectionActionBar>
+
+      <UserBatchStoreModal
+        mode={storeMode}
+        selectedUsers={selectedUsers}
+        storeOptions={storeOptions}
+        canGrantManageable={canGrantManageableStores}
+        onClose={() => setStoreMode(null)}
+        onCompleted={() => {
+          setStoreMode(null)
+          onCompleted()
+        }}
+      />
 
       <Modal
         title={roleMode === 'remove'
