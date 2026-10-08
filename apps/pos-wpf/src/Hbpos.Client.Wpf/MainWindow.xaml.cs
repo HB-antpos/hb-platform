@@ -218,8 +218,9 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 
     private void MainWindowActivated(object? sender, EventArgs e)
     {
-        // 收银窗口从别的程序切回前台时，WPF 不保证把键盘焦点还给登录框；登录弹窗打开时主动夺回扫码焦点。
-        FocusCashierLoginOverlayInput();
+        // 收银窗口从别的程序切回前台时，WPF 会先恢复旧焦点、再处理激活时的那次鼠标点击；
+        // 用 ApplicationIdle 排在它们之后再夺回登录框焦点，并记录前后焦点便于现场核对。
+        FocusCashierLoginOverlayInput(DispatcherPriority.ApplicationIdle, "activated");
     }
 
     private void CashierLoginOverlayIsEnabledChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -231,11 +232,13 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         }
     }
 
-    private void FocusCashierLoginOverlayInput()
+    private void FocusCashierLoginOverlayInput(
+        DispatcherPriority priority = DispatcherPriority.Input,
+        string? diagnosticReason = null)
     {
         // 关键逻辑：遮盖打开或重新启用后把焦点交给扫码输入框，扫码枪可直接录入收银员条码。
         _ = Dispatcher.BeginInvoke(
-            DispatcherPriority.Input,
+            priority,
             new Action(() =>
             {
                 if (!CashierLoginOverlayPasswordBox.IsVisible || !CashierLoginOverlayPasswordBox.IsEnabled)
@@ -243,10 +246,25 @@ public partial class MainWindow : Window, IDisplayMovableWindow
                     return;
                 }
 
+                var before = Keyboard.FocusedElement;
                 CashierLoginOverlayPasswordBox.Focus();
                 Keyboard.Focus(CashierLoginOverlayPasswordBox);
+                if (diagnosticReason is not null)
+                {
+                    ConsoleLog.Write(
+                        "CashierLogin",
+                        $"login focus restore reason={diagnosticReason} before={DescribeFocusedElement(before)} " +
+                        $"after={DescribeFocusedElement(Keyboard.FocusedElement)} windowActive={IsActive}");
+                }
             }));
     }
+
+    private static string DescribeFocusedElement(IInputElement? element) => element switch
+    {
+        null => "<none>",
+        FrameworkElement { Name.Length: > 0 } named => $"{named.GetType().Name}#{named.Name}",
+        _ => element.GetType().Name
+    };
 
     private void OperationAuthorizationOverlayIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {

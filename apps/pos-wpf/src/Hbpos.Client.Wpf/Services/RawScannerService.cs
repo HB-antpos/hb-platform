@@ -194,9 +194,14 @@ public sealed class RawScannerService(
         _flushTimer.Start();
         _registeredHwnd = hwnd;
         IsActive = true;
+        // 线程级过滤器在窗口过程之前看到 Dispatcher 取出的每条消息：用来区分「系统没投递 WM_INPUT」与「投递了但没到窗口钩子」。
+        ComponentDispatcher.ThreadFilterMessage += OnThreadFilterMessage;
+        var windowThreadId = GetWindowThreadProcessId(hwnd, out _);
+        var registeringThreadId = GetCurrentThreadId();
         ConsoleLog.Write(
             "RawScanner",
-            $"raw input scanner service started hwnd=0x{hwnd.ToInt64():X} process64={Environment.Is64BitProcess} os64={Environment.Is64BitOperatingSystem}");
+            $"raw input scanner service started hwnd=0x{hwnd.ToInt64():X} process64={Environment.Is64BitProcess} os64={Environment.Is64BitOperatingSystem} " +
+            $"registeringThread={registeringThreadId} windowThread={windowThreadId} sameThread={registeringThreadId == windowThreadId}");
         VerifyRegistration("start");
         _diagnosticsTimer.Tick += OnDiagnosticsTimerTick;
         _diagnosticsTimer.Start();
@@ -213,6 +218,7 @@ public sealed class RawScannerService(
         _flushTimer.Tick -= OnFlushTimerTick;
         _diagnosticsTimer.Stop();
         _diagnosticsTimer.Tick -= OnDiagnosticsTimerTick;
+        ComponentDispatcher.ThreadFilterMessage -= OnThreadFilterMessage;
         inputProcessor.Clear();
         IsActive = false;
         ConsoleLog.Write("RawScanner", "raw input scanner service stopped");
@@ -234,6 +240,7 @@ public sealed class RawScannerService(
 
     public IntPtr ProcessWindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        _diagnostics.RecordHookMessage();
         if (msg != WM_INPUT)
         {
             return IntPtr.Zero;
@@ -392,6 +399,22 @@ public sealed class RawScannerService(
             "RawScanner",
             $"scan accepted barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} completion={result.CompletionKind} activePage={_activePageId} dispatchDelayMs={dispatchDelayMs:0.###}");
         handler(scannedEvent);
+    }
+
+    private void OnThreadFilterMessage(ref MSG msg, ref bool handled)
+    {
+        if (msg.message != WM_INPUT)
+        {
+            return;
+        }
+
+        if (_diagnostics.RecordThreadWmInput(msg.hwnd == _registeredHwnd))
+        {
+            // 只观察不处理（不改 handled）：首条线程级 WM_INPUT 留痕，带目标窗口是否为登记窗口。
+            ConsoleLog.Write(
+                "RawScanner",
+                $"first thread-level WM_INPUT seen targetHwnd=0x{msg.hwnd.ToInt64():X} registeredHwnd=0x{_registeredHwnd.ToInt64():X} hookWmInput={_diagnostics.WindowMessages}");
+        }
     }
 
     private void OnDiagnosticsTimerTick(object? sender, EventArgs e)
@@ -659,6 +682,12 @@ public sealed class RawScannerService(
 
     private const int ErrorInsufficientBuffer = 122;
 
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetRegisteredRawInputDevices(
         [Out] RAWINPUTDEVICE[]? pRawInputDevices,
@@ -687,6 +716,10 @@ public sealed class RawScannerService(
 internal sealed class RawScannerDiagnostics
 {
     private long _windowMessages;
+    private long _hookMessages;
+    private long _threadWmInput;
+    private long _threadWmInputOtherHwnd;
+    private int _nonRawReports;
     private long _keyDowns;
     private long _readFailures;
     private long _emptyDevicePaths;
@@ -703,6 +736,23 @@ internal sealed class RawScannerDiagnostics
 
     /// <summary>返回 true 表示这是本进程收到的第一条 WM_INPUT。</summary>
     public bool RecordWindowMessage() => ++_windowMessages == 1;
+
+    public void RecordHookMessage() => _hookMessages++;
+
+    /// <summary>返回 true 表示这是本进程在线程消息循环里看到的第一条 WM_INPUT。</summary>
+    public bool RecordThreadWmInput(bool targetsRegisteredWindow)
+    {
+        if (!targetsRegisteredWindow)
+        {
+            _threadWmInputOtherHwnd++;
+        }
+
+        return ++_threadWmInput == 1;
+    }
+
+    public long ThreadWmInput => _threadWmInput;
+
+    public long HookMessages => _hookMessages;
 
     public void RecordKeyDown() => _keyDowns++;
 
@@ -743,6 +793,13 @@ internal sealed class RawScannerDiagnostics
 
     public bool ShouldReportNonRawDelivery(DateTimeOffset now, TimeSpan interval)
     {
+        // 现场排查时前几次扫码都要能对照，之后再按间隔限流。
+        if (++_nonRawReports <= 5)
+        {
+            _lastNonRawReportAt = now;
+            return true;
+        }
+
         if (now - _lastNonRawReportAt < interval)
         {
             return false;
@@ -753,6 +810,6 @@ internal sealed class RawScannerDiagnostics
     }
 
     public string Describe() =>
-        $"wmInput={_windowMessages} keyDown={_keyDowns} readFailures={_readFailures} emptyDevicePath={_emptyDevicePaths} " +
+        $"wmInput={_windowMessages} threadWmInput={_threadWmInput} threadWmInputOtherHwnd={_threadWmInputOtherHwnd} hookMessages={_hookMessages} keyDown={_keyDowns} readFailures={_readFailures} emptyDevicePath={_emptyDevicePaths} " +
         $"rejectedDevice={_rejectedDevices} dispatched={_dispatched} registrationHealthy={_registrationHealthy?.ToString() ?? "unknown"}";
 }
