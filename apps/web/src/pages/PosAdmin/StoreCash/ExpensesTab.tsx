@@ -30,7 +30,7 @@ import {
   timeZoneOf,
 } from './logic'
 import { fetchAllPages, PAGE_FETCH_LIMIT, type FetchAllResult } from './paging'
-import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, StoreSelect } from './parts'
+import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, StoreSelect } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -200,7 +200,10 @@ export default function ExpensesTab({ context, filters, query, active, tr, tf, e
   return (
     <div className="store-cash-stack">
       <div className="store-cash-toolbar">
-        <StoreSelect stores={context.stores} value={storeCode} tr={tr} onChange={(code) => onQueryChange({ store: code })} />
+        {context.stores.length > 1 ? (
+          <RegisterSelect value={query.register} tr={tr} onChange={(register) => onQueryChange({ register })} />
+        ) : null}
+        <StoreSelect stores={filters.storeOptions} value={storeCode} tr={tr} onChange={(code) => onQueryChange({ store: code })} />
         <RangeFilter from={filters.from} to={filters.to} today={filters.today} tr={tr} onChange={(range) => onQueryChange(range)} />
         <label className="store-cash-field">
           <span className="store-cash-field-label">{tr('filters.category')}</span>

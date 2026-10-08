@@ -45,10 +45,19 @@ function ok(data: unknown) {
 
 try {
   // 1) context：信封解包、缺字段兜底。
-  ok({ stores: [{ storeCode: 'S001', storeName: 'A', timeZoneId: 'Australia/Sydney', storeToday: '2026-10-07' }], capabilities: { canVoid: true }, dailyCloseConnected: false, t2VisibleDays: 14 })
+  ok({
+    stores: [
+      { storeCode: 'S001', storeName: 'A', timeZoneId: 'Australia/Sydney', storeToday: '2026-10-07' },
+      { storeCode: 'S002', storeName: 'B', timeZoneId: 'Australia/Sydney', storeToday: '2026-10-07', cashRegisterEnabled: false },
+    ],
+    capabilities: { canVoid: true },
+    dailyCloseConnected: false,
+    t2VisibleDays: 14,
+  })
   const context = await getCashContext()
   assert.equal(last().url.pathname, '/api/react/v1/cash/context')
-  assert.equal(context.stores.length, 1)
+  // 旧后端没有 cashRegisterEnabled 时按启用处理；明确 false 的保留。
+  assert.deepEqual(context.stores.map((store) => store.cashRegisterEnabled), [true, false])
   assert.deepEqual(context.capabilities, { canCreateDeposit: false, canCreateExpense: false, canViewAllStores: false, canVoid: true })
   assert.equal(context.dailyCloseConnected, false)
 

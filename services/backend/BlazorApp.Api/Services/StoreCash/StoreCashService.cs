@@ -147,6 +147,7 @@ public sealed partial class StoreCashService : IStoreCashService
                         StoreName = store.StoreName,
                         TimeZoneId = StoreCashClock.ResolveTimeZoneId(store),
                         StoreToday = StoreCashClock.GetStoreToday(store, now),
+                        CashRegisterEnabled = store.IsActive,
                     })
                     .ToList(),
                 Capabilities = new CashCapabilitiesDto

@@ -14,6 +14,9 @@ public sealed class CashStoreOptionDto
 
     /// <summary>该店当前的本地日期，客户端的日期选择、补录范围都以它为准，不用手机时区。</summary>
     public DateOnly StoreToday { get; set; }
+
+    /// <summary>该店是否启用收银系统（Store.IsActive）；Web 总览默认只显示启用的分店。</summary>
+    public bool CashRegisterEnabled { get; set; }
 }
 
 public sealed class CashCapabilitiesDto
