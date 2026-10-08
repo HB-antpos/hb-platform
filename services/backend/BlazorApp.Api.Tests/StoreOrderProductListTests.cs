@@ -6102,7 +6102,7 @@ public sealed class StoreOrderProductListTests : IDisposable
     }
 
     [Fact]
-    public async Task GetProductActivityHistoryAsync_最近六单与十二个月窗口共同限制()
+    public async Task GetProductActivityHistoryAsync_最近六单与二十四个月窗口共同限制()
     {
         var today = new DateTime(2026, 8, 18);
         for (var index = 0; index < 7; index++)
@@ -6121,8 +6121,8 @@ public sealed class StoreOrderProductListTests : IDisposable
         await SeedStoreOrderAsync(
             "ORDER-LIMIT-OLD",
             flowStatus: 2,
-            orderDate: new DateTime(2025, 8, 17),
-            outboundDate: new DateTime(2025, 8, 17),
+            orderDate: new DateTime(2024, 8, 17),
+            outboundDate: new DateTime(2024, 8, 17),
             insertStore: false
         );
         await SeedOrderDetailOnlyAsync("ORDER-LIMIT-OLD", "P001", quantity: 1m, allocQuantity: 0m);
@@ -6156,8 +6156,8 @@ public sealed class StoreOrderProductListTests : IDisposable
         await SeedStoreOrderAsync(
             "ORDER-LIMIT-BOUNDARY",
             flowStatus: 2,
-            orderDate: today.AddMonths(-12),
-            outboundDate: today.AddMonths(-12),
+            orderDate: today.AddMonths(-24),
+            outboundDate: today.AddMonths(-24),
             insertStore: false
         );
         await SeedOrderDetailOnlyAsync("ORDER-LIMIT-BOUNDARY", "P002", quantity: 1m, allocQuantity: 0m);
@@ -6170,6 +6170,46 @@ public sealed class StoreOrderProductListTests : IDisposable
             }
         );
         Assert.Equal("ORDER-LIMIT-BOUNDARY", Assert.Single(boundary.Data!.Items).OrderGUID);
+
+        // 一年多以前（原 12 个月窗口外、24 个月窗口内）的唯一一单要能看到。
+        await SeedStoreOrderAsync(
+            "ORDER-LIMIT-14-MONTHS",
+            flowStatus: 2,
+            orderDate: today.AddMonths(-14),
+            outboundDate: today.AddMonths(-14),
+            insertStore: false
+        );
+        await SeedOrderDetailOnlyAsync("ORDER-LIMIT-14-MONTHS", "P003", quantity: 12m, allocQuantity: 12m);
+        var fourteenMonths = await CreateServiceForSalesDate(today).GetProductActivityHistoryAsync(
+            new StoreOrderProductActivityHistoryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCode = "P003",
+                RecordType = "order",
+            }
+        );
+        Assert.Equal("ORDER-LIMIT-14-MONTHS", Assert.Single(fourteenMonths.Data!.Items).OrderGUID);
+        Assert.Equal(12m, fourteenMonths.Data.LatestOrderQuantity);
+        Assert.Equal(12m, fourteenMonths.Data.LatestAllocQuantity);
+
+        // 超过 24 个月的单仍不进入时间轴。
+        await SeedStoreOrderAsync(
+            "ORDER-LIMIT-25-MONTHS",
+            flowStatus: 2,
+            orderDate: today.AddMonths(-24).AddDays(-1),
+            outboundDate: today.AddMonths(-24).AddDays(-1),
+            insertStore: false
+        );
+        await SeedOrderDetailOnlyAsync("ORDER-LIMIT-25-MONTHS", "P004", quantity: 1m, allocQuantity: 1m);
+        var outside = await CreateServiceForSalesDate(today).GetProductActivityHistoryAsync(
+            new StoreOrderProductActivityHistoryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCode = "P004",
+                RecordType = "order",
+            }
+        );
+        Assert.Empty(outside.Data!.Items);
     }
 
     [Fact]

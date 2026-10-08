@@ -90,8 +90,9 @@ internal sealed class ProductOrderHistoryQueryStore(
             );
         }
 
-        // 仅将最近 12 个月内的 6 个完成订单边界读入内存；历史行与销量仍在数据库分页。
-        var historyStartDate = endDate.AddMonths(-12);
+        // 仅将最近 24 个月内的 6 个完成订单边界读入内存；历史行与销量仍在数据库分页。
+        // 24 个月（原 12 个月）：一年多没再订的商品，弹窗也要能看到上次来货那张单及其后的销量，与商品卡片一致。
+        var historyStartDate = endDate.AddMonths(-24);
         var historyEndExclusive = endDate.AddDays(1);
         var selectedOrders = await BuildAggregatedProductOrderHistoryQuery(
                 input.StoreCode,
