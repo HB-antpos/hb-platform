@@ -2252,6 +2252,51 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task BatchCreateAsync_新建商品时清理无主商品的门店零售价残留行避免重复()
+        {
+            const string productCode = "P-BATCH-STALE-STORE-PRICE";
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            // 生产形态：门店 2010 残留的价格行没有对应 Product，且表上没有 (门店, 商品) 唯一索引。
+            await _db.Insertable(new StoreRetailPrice
+            {
+                StoreCode = "S01",
+                ProductCode = productCode,
+                StoreProductCode = "S01" + productCode,
+                StoreRetailPriceValue = 5m,
+                PurchasePrice = 2m,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchCreateAsync(
+                new List<CreateItemDto>
+                {
+                    new()
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-BATCH-STALE-PRICE",
+                        ChineseName = "残留价格商品",
+                        OEMPrice = 50m,
+                        ImportPrice = 10m,
+                    },
+                },
+                useTransaction: true,
+                updatedBy: "仓库员I"
+            );
+
+            Assert.True(result.Success, string.Join("；", result.Errors));
+            var active = await _db.Queryable<StoreRetailPrice>()
+                .Where(x => x.StoreCode == "S01" && x.ProductCode == productCode && !x.IsDeleted)
+                .ToListAsync();
+            // 只剩本次新建写入的一行，价格取新商品零售价；旧残留行被软删除。
+            var row = Assert.Single(active);
+            Assert.Equal(50m, row.StoreRetailPriceValue);
+            Assert.Equal(1, await _db.Queryable<StoreRetailPrice>()
+                .Where(x => x.StoreCode == "S01" && x.ProductCode == productCode && x.IsDeleted)
+                .CountAsync());
+        }
+
+        [Fact]
         public async Task UpdatedBy_国内导入新建与更新仓库商品都写入操作人()
         {
             const string productCode = "P-UPDATED-BY-DOMESTIC-IMPORT";
