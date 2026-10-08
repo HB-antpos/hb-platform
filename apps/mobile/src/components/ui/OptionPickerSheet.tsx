@@ -103,10 +103,8 @@ export function OptionPickerSheet({
                       color={selected ? HB_COLORS.action : HB_COLORS.textSecondary}
                     />
                   ) : null}
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.rowText, selected ? styles.rowTextSelected : null]}
-                  >
+                  {/* 不截断：供应商等长名称前缀相同的很多，截断后无法区分，允许换行、行高随内容增长。 */}
+                  <Text style={[styles.rowText, selected ? styles.rowTextSelected : null]}>
                     {option.label}
                   </Text>
                   {selected ? <Icon source="check" size={18} color={HB_COLORS.action} /> : null}
@@ -155,11 +153,12 @@ const styles = StyleSheet.create({
     gap: HB_SPACING.xs,
     minHeight: 46,
     paddingHorizontal: 4,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: HB_COLORS.outlineMuted,
   },
   rowPressed: { backgroundColor: HB_COLORS.surfaceMuted },
-  rowText: { flex: 1, fontSize: 14, color: HB_COLORS.textPrimary },
+  rowText: { flex: 1, fontSize: 14, lineHeight: 20, color: HB_COLORS.textPrimary },
   rowTextSelected: { color: HB_COLORS.action, fontWeight: "600" },
   actions: { alignItems: "flex-end", marginTop: HB_SPACING.xs },
 });
