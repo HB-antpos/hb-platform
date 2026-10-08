@@ -22,7 +22,12 @@ import {
   formatDateTime,
   formatStoreLabel,
 } from './deviceCells'
-import { collectDistinctOptions, getDeviceStatusActions, type DeviceStatusAction } from './deviceManagementLogic'
+import {
+  collectDistinctOptions,
+  getDeviceStatusActions,
+  mergeDeviceDetailView,
+  type DeviceStatusAction,
+} from './deviceManagementLogic'
 import {
   canEditRegisteredDeviceSystem,
   getRegisteredDeviceSystemEditOptions,
@@ -101,10 +106,8 @@ export default function DeviceDetailDrawer({
     }
   }, [deviceId, canManage])
 
-  // 状态动作执行后列表会刷新，抽屉头部的状态跟随最新列表行；表单字段以详情为准。
-  const view: DeviceRegistrationItem | null = device
-    ? { ...device, ...(detail ?? {}), status: device.status, statusDescription: device.statusDescription }
-    : null
+  // 状态动作执行后列表会刷新，抽屉头部的状态与运行态（在线、心跳、收银员、版本）跟随最新列表行；表单字段以详情为准。
+  const view: DeviceRegistrationItem | null = device ? mergeDeviceDetailView(device, detail) : null
 
   async function submit() {
     if (!detail) {

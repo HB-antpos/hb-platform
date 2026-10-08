@@ -10,6 +10,7 @@ import {
   getDeviceStatusActions,
   getRelativeTimeParts,
   formatDateOnly,
+  mergeDeviceDetailView,
   runWithConcurrency,
 } from './deviceManagementLogic'
 
@@ -166,5 +167,39 @@ assertEqual(failures.map((failure) => failure.item).sort().join(','), '3,6', '�
 assert(peak <= 3, `并发数超过上限：${peak}`)
 assertEqual(progress.join(','), '1,2,3,4,5,6,7', '进度逐个递增到总数')
 assertEqual((await runWithConcurrency([], 4, async () => undefined)).length, 0, '空列表直接返回')
+
+// 抽屉视图：详情接口不带运行态字段，归一化后是 false/null，不能盖掉列表行里的真实值
+const listRow = device({
+  id: 42,
+  status: 1,
+  statusDescription: '启用',
+  isOnline: true,
+  lastHeartbeatAt: '2026-10-08T02:00:33Z',
+  currentCashierId: 'C1',
+  currentCashierName: 'Alice',
+  cashierLoginAt: '2026-10-08T01:55:00Z',
+  appVersion: '1.0.53',
+  remark: '列表备注',
+})
+const detailWithoutRuntime = {
+  ...device({ id: 42, status: 0, statusDescription: '禁用', remark: '详情备注', deviceType: 'POS' }),
+  isOnline: false,
+  lastHeartbeatAt: null,
+  currentCashierId: null,
+  currentCashierName: null,
+  cashierLoginAt: null,
+  appVersion: null,
+}
+const merged = mergeDeviceDetailView(listRow, detailWithoutRuntime)
+assertEqual(merged.appVersion, '1.0.53', '详情没有版本时保留列表的客户端版本')
+assertEqual(merged.lastHeartbeatAt, '2026-10-08T02:00:33Z', '详情没有心跳时保留列表的最后心跳')
+assertEqual(merged.isOnline, true, '详情没有在线状态时保留列表的在线状态')
+assertEqual(merged.currentCashierName, 'Alice', '详情没有收银员时保留列表的当前收银员')
+assertEqual(merged.cashierLoginAt, '2026-10-08T01:55:00Z', '详情没有登录时间时保留列表的收银员登录时间')
+assertEqual(merged.status, 1, '状态始终跟随列表行')
+assertEqual(merged.statusDescription, '启用', '状态描述始终跟随列表行')
+assertEqual(merged.remark, '详情备注', '表单字段以详情为准')
+assertEqual(mergeDeviceDetailView(listRow, null).appVersion, '1.0.53', '详情未加载时直接展示列表行')
+assertEqual(mergeDeviceDetailView(listRow, null).remark, '列表备注', '详情未加载时备注取列表行')
 
 console.log('deviceManagementLogic.test: ok')
