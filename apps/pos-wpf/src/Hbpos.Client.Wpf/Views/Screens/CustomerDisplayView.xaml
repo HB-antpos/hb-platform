@@ -16,10 +16,11 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <Style x:Key="CustomerDisplayHeaderBaseStyle" TargetType="DataGridColumnHeader">
             <Setter Property="Background" Value="{StaticResource PosCustomerDisplaySurfaceBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayMutedTextBrush}" />
-            <Setter Property="FontSize" Value="14" />
+            <!-- 列头用专用的更亮颜色和 17px 字号：原来的 64% 白 + 14px 在客显上看不清。 -->
+            <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayHeaderTextBrush}" />
+            <Setter Property="FontSize" Value="17" />
             <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Padding" Value="12,12" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="BorderBrush" Value="{StaticResource PosCustomerDisplayDividerBrush}" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
