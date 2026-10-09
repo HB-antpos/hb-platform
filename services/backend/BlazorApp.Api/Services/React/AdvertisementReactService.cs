@@ -30,6 +30,9 @@ namespace BlazorApp.Api.Services.React
 
         private const long MaxImageFileSize = 20L * 1024 * 1024;
         private const long MaxVideoFileSize = 200L * 1024 * 1024;
+        // 素材像素宽高的合法范围（Web 上传时读取，两者必须同时提供）。
+        private const int MinMediaDimension = 1;
+        private const int MaxMediaDimension = 20000;
         private static readonly Regex AdvertisementObjectKeyPattern = new(
             @"^ads/\d{4}/(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(jpg|png|webp|gif|mp4|webm|mov)$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled
@@ -144,6 +147,10 @@ namespace BlazorApp.Api.Services.React
                 EffectiveEnd = dto.EffectiveEnd,
                 IsEnabled = dto.IsEnabled,
                 SortOrder = dto.SortOrder,
+                // 已通过校验：空值规范成 Any，其余规范成 PascalCase。
+                Orientation = AdvertisementOrientations.Normalize(dto.Orientation)!,
+                MediaWidth = dto.MediaWidth,
+                MediaHeight = dto.MediaHeight,
             };
 
             var stores = BuildStoreRelations(entity.Id, dto.Stores);
@@ -200,6 +207,9 @@ namespace BlazorApp.Api.Services.React
             entity.EffectiveEnd = dto.EffectiveEnd;
             entity.IsEnabled = dto.IsEnabled;
             entity.SortOrder = dto.SortOrder;
+            entity.Orientation = AdvertisementOrientations.Normalize(dto.Orientation)!;
+            entity.MediaWidth = dto.MediaWidth;
+            entity.MediaHeight = dto.MediaHeight;
 
             var stores = BuildStoreRelations(id, dto.Stores);
             var result = await _context.Db.Ado.UseTranAsync(async () =>
@@ -474,7 +484,38 @@ namespace BlazorApp.Api.Services.React
                 );
             }
 
+            // 版式只允许 Landscape / Portrait / Any（大小写不敏感），空值视为 Any。
+            if (AdvertisementOrientations.Normalize(dto.Orientation) == null)
+            {
+                return ApiResponse<AdvertisementDetailDto>.Error("广告版式无效", "INVALID_ORIENTATION");
+            }
+
+            var mediaSizeError = ValidateMediaSize(dto.MediaWidth, dto.MediaHeight);
+            if (mediaSizeError != null)
+            {
+                return ApiResponse<AdvertisementDetailDto>.Error(mediaSizeError, "INVALID_MEDIA_SIZE");
+            }
+
             return null;
+        }
+
+        private static string? ValidateMediaSize(int? width, int? height)
+        {
+            // 宽高要么都不传（历史素材或读取失败），要么都传；只给一个无法判断横竖，视为错误。
+            if (!width.HasValue && !height.HasValue)
+            {
+                return null;
+            }
+
+            if (!width.HasValue || !height.HasValue)
+            {
+                return "素材宽高必须同时提供";
+            }
+
+            return width.Value is < MinMediaDimension or > MaxMediaDimension
+                || height.Value is < MinMediaDimension or > MaxMediaDimension
+                ? $"素材宽高必须是 {MinMediaDimension}–{MaxMediaDimension} 的正整数"
+                : null;
         }
 
         private bool HasTencentMainBucketSettings()
@@ -510,6 +551,11 @@ namespace BlazorApp.Api.Services.React
             if (request.IsEnabled.HasValue)
             {
                 query = query.Where(item => item.IsEnabled == request.IsEnabled.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Orientation))
+            {
+                ApplyOrientationFilter(ref query, new[] { request.Orientation });
             }
 
             if (request.EffectiveStart.HasValue)
@@ -552,6 +598,9 @@ namespace BlazorApp.Api.Services.React
                         break;
                     case "isEnabled":
                         ApplyBoolFilter(ref query, filter);
+                        break;
+                    case "orientation":
+                        ApplyOrientationFilter(ref query, ExtractValues(filter));
                         break;
                     case "effectiveStart":
                         ApplyDateFilter(ref query, filter, true);
@@ -631,6 +680,32 @@ namespace BlazorApp.Api.Services.React
                     query = query.Where(item => item.MediaType.Contains(value));
                     return;
             }
+        }
+
+        private static void ApplyOrientationFilter(
+            ref ISugarQueryable<Advertisement> query,
+            IEnumerable<string> rawValues
+        )
+        {
+            // 大小写不敏感精确匹配：先规范成库里存的 PascalCase；无法识别的取值原样保留，查询结果为空而不是放宽过滤。
+            var values = rawValues
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => AdvertisementOrientations.Normalize(value) ?? value.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (values.Count == 0)
+            {
+                return;
+            }
+
+            if (values.Count == 1)
+            {
+                var value = values[0];
+                query = query.Where(item => item.Orientation == value);
+                return;
+            }
+
+            query = query.Where(item => values.Contains(item.Orientation));
         }
 
         private static void ApplyBoolFilter(
@@ -755,6 +830,7 @@ namespace BlazorApp.Api.Services.React
                 ["effectiveEnd"] = nameof(Advertisement.EffectiveEnd),
                 ["isEnabled"] = nameof(Advertisement.IsEnabled),
                 ["sortOrder"] = nameof(Advertisement.SortOrder),
+                ["orientation"] = nameof(Advertisement.Orientation),
                 ["createdAt"] = nameof(Advertisement.CreatedAt),
                 ["updatedAt"] = nameof(Advertisement.UpdatedAt),
             };
@@ -860,6 +936,11 @@ namespace BlazorApp.Api.Services.React
                 EffectiveEnd = entity.EffectiveEnd,
                 IsEnabled = entity.IsEnabled,
                 SortOrder = entity.SortOrder,
+                // 库里有 CHECK 约束兜底；这里仍按 Any 兜底，避免异常数据让列表整页失败。
+                Orientation = AdvertisementOrientations.Normalize(entity.Orientation)
+                    ?? AdvertisementOrientations.Any,
+                MediaWidth = entity.MediaWidth,
+                MediaHeight = entity.MediaHeight,
                 CreatedAt = entity.CreatedAt,
                 CreatedBy = entity.CreatedBy,
                 UpdatedAt = entity.UpdatedAt,
@@ -892,6 +973,9 @@ namespace BlazorApp.Api.Services.React
                 EffectiveEnd = listDto.EffectiveEnd,
                 IsEnabled = listDto.IsEnabled,
                 SortOrder = listDto.SortOrder,
+                Orientation = listDto.Orientation,
+                MediaWidth = listDto.MediaWidth,
+                MediaHeight = listDto.MediaHeight,
                 CreatedAt = listDto.CreatedAt,
                 CreatedBy = listDto.CreatedBy,
                 UpdatedAt = listDto.UpdatedAt,

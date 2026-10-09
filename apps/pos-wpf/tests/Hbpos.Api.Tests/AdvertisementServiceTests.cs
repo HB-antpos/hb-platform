@@ -91,6 +91,69 @@ public sealed class AdvertisementServiceTests
         Assert.Equal(expectedCount, response.Items.Count);
     }
 
+    [Fact]
+    public async Task GetActiveAsync_MapsOrientationToLowercaseAndMediaSize()
+    {
+        await using var fixture = await AdvertisementSqliteFixture.CreateAsync();
+        var now = DateTime.UtcNow;
+
+        await fixture.SeedAdvertisementAsync(
+            CreateAdvertisement("AD-L", "Landscape", "image", 1, now.AddMinutes(-1), now.AddHours(-1), now.AddHours(1),
+                orientation: "Landscape", mediaWidth: 1920, mediaHeight: 1080),
+            storeCode: "S01");
+        await fixture.SeedAdvertisementAsync(
+            CreateAdvertisement("AD-P", "Portrait", "image", 2, now.AddMinutes(-1), now.AddHours(-1), now.AddHours(1),
+                orientation: "portrait", mediaWidth: 1080, mediaHeight: 1920),
+            storeCode: "S01");
+        await fixture.SeedAdvertisementAsync(
+            CreateAdvertisement("AD-A", "Any", "image", 3, now.AddMinutes(-1), now.AddHours(-1), now.AddHours(1),
+                orientation: "Any"),
+            storeCode: "S01");
+        await fixture.SeedAdvertisementAsync(
+            CreateAdvertisement("AD-U", "Unknown", "image", 4, now.AddMinutes(-1), now.AddHours(-1), now.AddHours(1),
+                orientation: "Square"),
+            storeCode: "S01");
+        await fixture.SeedAdvertisementAsync(
+            CreateAdvertisement("AD-E", "Empty", "image", 5, now.AddMinutes(-1), now.AddHours(-1), now.AddHours(1),
+                orientation: ""),
+            storeCode: "S01");
+
+        var service = new AdvertisementPlaybackService(fixture.DbContext);
+
+        var response = await service.GetActiveAsync("S01", 20, CancellationToken.None);
+
+        // 库里大小写不规范的值也按版式识别；空值与未知值一律回落为 any。
+        Assert.Equal(["AD-L", "AD-P", "AD-A", "AD-U", "AD-E"], response.Items.Select(item => item.Id).ToArray());
+        Assert.Equal(
+            ["landscape", "portrait", "any", "any", "any"],
+            response.Items.Select(item => item.Orientation).ToArray());
+        Assert.Equal(1920, response.Items[0].MediaWidth);
+        Assert.Equal(1080, response.Items[0].MediaHeight);
+        Assert.Equal(1080, response.Items[1].MediaWidth);
+        Assert.Equal(1920, response.Items[1].MediaHeight);
+        Assert.Null(response.Items[2].MediaWidth);
+        Assert.Null(response.Items[2].MediaHeight);
+    }
+
+    [Fact]
+    public void AdvertisementPlaybackItemDto_OldPositionalCallersDefaultToAny()
+    {
+        // 末尾追加的可选参数不影响旧的 13 参数构造方式，默认 any 且无宽高。
+        var item = new Hbpos.Contracts.Advertisements.AdvertisementPlaybackItemDto(
+            "AD-OLD", "Old", null, "image", "https://cdn.example.com/a.jpg", null, "ads/a.jpg", "a.jpg",
+            "image/jpeg", 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 1);
+
+        Assert.Equal("any", item.Orientation);
+        Assert.Null(item.MediaWidth);
+        Assert.Null(item.MediaHeight);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            item,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Contains("\"orientation\":\"any\"", json);
+        Assert.Contains("\"mediaWidth\":null", json);
+    }
+
     private static Advertisement CreateAdvertisement(
         string id,
         string title,
@@ -100,10 +163,16 @@ public sealed class AdvertisementServiceTests
         DateTime effectiveStart,
         DateTime effectiveEnd,
         bool isEnabled = true,
-        bool isDeleted = false)
+        bool isDeleted = false,
+        string orientation = "Any",
+        int? mediaWidth = null,
+        int? mediaHeight = null)
     {
         return new Advertisement
         {
+            Orientation = orientation,
+            MediaWidth = mediaWidth,
+            MediaHeight = mediaHeight,
             Id = id,
             Title = title,
             Description = $"{title} description",
