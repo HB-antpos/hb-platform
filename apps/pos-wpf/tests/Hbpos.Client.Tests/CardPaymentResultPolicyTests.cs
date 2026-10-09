@@ -232,6 +232,25 @@ public sealed class CardPaymentResultPolicyTests
         Assert.NotEqual(CardPaymentTerminalOutcome.ResultUnknown, disposition.Outcome);
     }
 
+    [Fact]
+    public void Linkly_open_attempt_block_shows_the_recovery_overlay_without_locking_the_payment_page()
+    {
+        // 本机还有未结刷卡交易而拒绝新扣款：新交易没有提交，不是结果未知，不能锁付款页（可改用现金等方式），
+        // 但要弹出“上一笔需要恢复”的提示，并保留这条状态文案。
+        var result = PaymentTenderAttemptResult.Fail(
+            CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey,
+            "This POS has an unfinished card transaction.");
+        var policy = new LinklyCardPaymentResultPolicy();
+
+        Assert.True(policy.CanClassify(result));
+        var disposition = policy.Classify(result);
+
+        Assert.False(disposition.RequiresRecovery);
+        Assert.Equal(CardPaymentTerminalOutcome.None, disposition.Outcome);
+        Assert.Equal(CardPaymentErrorKind.ActiveSessionRequiresRecovery, disposition.ErrorKind);
+        Assert.True(disposition.PreserveStatus);
+    }
+
     // ── Square ──
 
     [Theory]

@@ -5702,6 +5702,195 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Startup_auto_recovers_deterministic_card_attempts_after_cashier_login_and_reports_the_result()
+    {
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            AutoRecoverSummary = new CardAutoRecoverySummary(Examined: 3, RecoveredOrders: 2)
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery,
+            cashierLoginService: new FakeCashierLoginService(cashierSession));
+        var startupOptions = new AppStartupOptions([], false, null, null);
+
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+
+        // 未登录时只等待，不查询也不恢复。
+        Assert.True(viewModel.IsCashierLoginOverlayOpen);
+        Assert.Equal(0, recovery.AutoRecoverCallCount);
+
+        viewModel.CashierBarcodeInput = "BAR-AUTO";
+        await viewModel.LoginCashierCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, recovery.AutoRecoverCallCount);
+        Assert.Equal(0, recovery.CallCount);
+        Assert.Equal(0, recovery.TargetedRecoverCallCount);
+        Assert.Equal(
+            "2 approved card payment(s) from before the restart were recovered into orders automatically.",
+            viewModel.StatusMessage);
+        // 自动恢复完成后仍然刷新异常中心角标。
+        Assert.True(recovery.ListOpenCallCount >= 1);
+    }
+
+    [Fact]
+    public async Task Startup_auto_recovery_with_nothing_to_do_stays_silent()
+    {
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var recovery = new FakeCardPaymentRecoveryService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery,
+            cashierLoginService: new FakeCashierLoginService(cashierSession));
+        var startupOptions = new AppStartupOptions([], false, null, null);
+
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        viewModel.CashierBarcodeInput = "BAR-AUTO-NONE";
+        await viewModel.LoginCashierCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, recovery.AutoRecoverCallCount);
+        Assert.DoesNotContain("recovered into orders", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(1, recovery.ListOpenCallCount);
+    }
+
+    [Fact]
+    public async Task Startup_auto_recovery_failure_never_blocks_the_cashier_login()
+    {
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            AutoRecoverHandler = (_, _) => throw new InvalidOperationException("sqlite busy")
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery,
+            cashierLoginService: new FakeCashierLoginService(cashierSession));
+        var startupOptions = new AppStartupOptions([], false, null, null);
+
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        viewModel.CashierBarcodeInput = "BAR-AUTO-FAIL";
+        await viewModel.LoginCashierCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.IsCashierLoginOverlayOpen);
+        Assert.Same(cashierSession, viewModel.Session.CashierSession);
+        Assert.Equal(1, recovery.AutoRecoverCallCount);
+        Assert.Equal(1, recovery.ListOpenCallCount);
+    }
+
+    [Fact]
+    public async Task Startup_auto_recovery_that_runs_long_does_not_hold_up_the_login()
+    {
+        var cashierSession = CreateCashierSession(Permissions.PosTerminal.Sales.AddItem);
+        var release = new TaskCompletionSource<CardAutoRecoverySummary>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            AutoRecoverHandler = (_, _) => release.Task
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery,
+            cashierLoginService: new FakeCashierLoginService(cashierSession));
+        var startupOptions = new AppStartupOptions([], false, null, null);
+
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        viewModel.CashierBarcodeInput = "BAR-AUTO-SLOW";
+        var login = viewModel.LoginCashierCommand.ExecuteAsync(null);
+
+        // 超过等待上限（5 秒）就让它在后台继续，登录不被拖住。
+        await login.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.False(viewModel.IsCashierLoginOverlayOpen);
+
+        release.SetResult(new CardAutoRecoverySummary(1, 1));
+    }
+
+    [Fact]
+    public async Task Device_reregistration_is_blocked_while_card_transactions_are_unresolved()
+    {
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            OpenItems =
+            [
+                new CardRecoveryQueueItem(
+                    CardProcessorKind.Linkly,
+                    Guid.Parse("40000000-0000-0000-0000-000000000099"),
+                    "Sale",
+                    12.34m,
+                    "1042",
+                    "POS-01",
+                    "C001",
+                    "Sandbox",
+                    "Recovering",
+                    DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DateTimeOffset.UtcNow.AddMinutes(-1))
+            ]
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        var result = await InvokeBeginDeviceReregistrationAsync(viewModel);
+
+        Assert.False(result.Started);
+        Assert.Equal(
+            "Resolve the unfinished card transactions in Card Recovery before changing store registration.",
+            result.StatusMessage);
+        Assert.False(viewModel.IsDeviceReregistrationDialogOpen);
+        Assert.Null(viewModel.DeviceRegistration);
+    }
+
+    [Fact]
+    public async Task Device_reregistration_is_blocked_when_the_card_queue_cannot_be_read()
+    {
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            ListOpenHandler = (_, _) => throw new InvalidOperationException("sqlite busy")
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        var result = await InvokeBeginDeviceReregistrationAsync(viewModel);
+
+        Assert.False(result.Started);
+        Assert.Contains("Could not check", result.StatusMessage, StringComparison.Ordinal);
+        Assert.False(viewModel.IsDeviceReregistrationDialogOpen);
+    }
+
+    [Fact]
+    public async Task Device_reregistration_proceeds_when_no_card_transaction_is_unresolved()
+    {
+        var recovery = new FakeCardPaymentRecoveryService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        var result = await InvokeBeginDeviceReregistrationAsync(viewModel);
+
+        Assert.True(result.Started);
+        Assert.True(viewModel.IsDeviceReregistrationDialogOpen);
+    }
+
+    private static async Task<DeviceReregistrationStartResult> InvokeBeginDeviceReregistrationAsync(
+        MainViewModel viewModel)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "BeginDeviceReregistrationAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task<DeviceReregistrationStartResult>>(method!.Invoke(viewModel, null));
+        return await task;
+    }
+
+    [Fact]
     public async Task Card_recovery_status_opens_center_without_changing_current_cart()
     {
         var cart = new PosCartService();
@@ -10335,6 +10524,21 @@ public sealed class MainViewModelScannerTests
         {
             TargetedRecoverCallCount++;
             return Task.FromResult(TargetedRecoverResult);
+        }
+
+        public int AutoRecoverCallCount { get; private set; }
+
+        public CardAutoRecoverySummary AutoRecoverSummary { get; init; } = CardAutoRecoverySummary.None;
+
+        public Func<PosSessionState, CancellationToken, Task<CardAutoRecoverySummary>>? AutoRecoverHandler { get; init; }
+
+        public Task<CardAutoRecoverySummary> AutoRecoverDeterministicAsync(
+            PosSessionState session,
+            CancellationToken cancellationToken = default)
+        {
+            AutoRecoverCallCount++;
+            return AutoRecoverHandler?.Invoke(session, cancellationToken) ??
+                Task.FromResult(AutoRecoverSummary);
         }
 
         public Task<CardRecoveryResolutionResult> ResolveAsync(
