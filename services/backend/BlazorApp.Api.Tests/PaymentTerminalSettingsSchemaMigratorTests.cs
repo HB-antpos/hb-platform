@@ -65,6 +65,9 @@ public sealed class PaymentTerminalSettingsSchemaMigratorTests
         Assert.Contains("IX_POSM_LinklyCloudBackendSession_TerminalRecovery", sql);
         Assert.Contains("UX_POSM_LinklyCloudBackendSession_ActiveCloudTerminal", sql);
         Assert.Contains("IX_POSM_LinklyCloudBackendSession_DeviceRecovery", sql);
+        // M35：回调按 (Environment, SessionId) 查会话；与 Hbpos.Api 初始化脚本同名，按名称幂等创建。
+        Assert.Contains("[name] = N'IX_POSM_LinklyCloudBackendSession_EnvSession'", sql);
+        Assert.Contains("ON [dbo].[POSM_LinklyCloudBackendSession] ([Environment], [SessionId])", sql);
         Assert.Contains("[PairingAttemptId] UNIQUEIDENTIFIER NULL", sql);
         Assert.Contains("[PairingLeaseExpiresAt] DATETIME2(7) NULL", sql);
         Assert.Contains("UX_POSM_LinklyCloudTerminal_Scope_LaneNo", sql);

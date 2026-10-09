@@ -64,6 +64,16 @@ public enum CardRecoverySupervisorDecision
     ContinueWaiting
 }
 
+// 收银员登录/启动后对“确定性”未结记录做自动定点恢复的汇总。
+// 只涉及不需要再向刷卡机发起任何交易、也不需要触碰购物车的记录：已批准待建单、待收尾、已完成未 ack。
+public sealed record CardAutoRecoverySummary(
+    int Examined,
+    int RecoveredOrders,
+    PosSessionState? UpdatedSession = null)
+{
+    public static CardAutoRecoverySummary None { get; } = new(0, 0);
+}
+
 // 定点结案的统一结果。
 public sealed record CardRecoveryResolutionResult(
     bool Succeeded,

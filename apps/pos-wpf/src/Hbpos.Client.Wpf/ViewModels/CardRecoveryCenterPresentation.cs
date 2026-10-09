@@ -72,11 +72,28 @@ public sealed partial class CardRecoveryCenterViewModel
             SelectedProductLines.Sum(line => line.Quantity))
         : string.Empty;
 
-    public bool ShowSafetyBanner => SelectedAttempt is { IsOpen: true };
-    public string SafetyBannerTitleText => IsRefundSelection
+    // 退货单已完成但 Square 仍在结算 / 事后拒绝的退款：详情页给出各自的说明，不再显示“请勿重复退款”。
+    public bool IsSettlementPendingSelection => IsSettlementPending(SelectedAttempt);
+    public bool IsSettlementRejectedSelection => IsSettlementRejected(SelectedAttempt);
+    public bool IsSettlementSelection => IsSettlementPendingSelection || IsSettlementRejectedSelection;
+    public bool ShowAlternativeOutcomes => !IsSettlementRejectedSelection;
+    // 被 Square 拒绝的退款只需要记录“已用其他方式退款”和备注，不需要银行证据与 Square 参考号。
+    public bool ShowEvidenceInputs => !IsSettlementRejectedSelection;
+    public bool ShowActionBar => SelectedAttempt is { } attempt && CanRecover(attempt);
+
+    public bool ShowSafetyBanner => SelectedAttempt is { IsOpen: true } || IsSettlementPendingSelection;
+    public string SafetyBannerTitleText => IsSettlementRejectedSelection
+        ? T("cardRecovery.settlement.banner.rejected.title", "Square rejected this refund.")
+        : IsSettlementPendingSelection
+            ? T("cardRecovery.settlement.banner.pending.title", "The return is complete. Square is settling the refund.")
+            : IsRefundSelection
         ? T("cardRecovery.v2.banner.refund.title", "Do not refund again.")
         : T("cardRecovery.v2.banner.payment.title", "Do not charge twice.");
-    public string SafetyBannerBodyText => IsSquareRefundProcessing
+    public string SafetyBannerBodyText => IsSettlementRejectedSelection
+        ? T("cardRecovery.settlement.banner.rejected.body", "The customer has not received this money. Refund them by cash or another method, then tap \"Refunded by other means\".")
+        : IsSettlementPendingSelection
+            ? T("cardRecovery.settlement.banner.pending.body", "Square accepted the refund and is sending it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed and no action is required.")
+            : IsSquareRefundProcessing
         ? T(
             "cardRecovery.v2.banner.squareRefund.body",
             "The refund was sent to Square and is still being processed. No card tap is needed. The order completes once Square confirms.")
@@ -97,15 +114,24 @@ public sealed partial class CardRecoveryCenterViewModel
             GetCulture(),
             T("cardRecovery.v2.step.since", "since {0}"),
             SelectedAttempt.UpdatedAt.ToLocalTime().ToString("T", GetCulture()));
-    public bool IsFinalStepDone => SelectedAttempt is { IsOpen: false } attempt && !IsFailed(attempt);
-    public bool IsFinalStepFailed => SelectedAttempt is { IsOpen: false } attempt && IsFailed(attempt);
-    public bool IsFinalStepPending => SelectedAttempt is { IsOpen: true };
-    public string StepFinalLabelText => IsFinalStepFailed
+    public bool IsFinalStepDone => SelectedAttempt is { IsOpen: false } attempt && !IsFailed(attempt) && !IsSettlementPending(attempt);
+    public bool IsFinalStepFailed => IsSettlementRejectedSelection || (SelectedAttempt is { IsOpen: false } attempt && IsFailed(attempt));
+    public bool IsFinalStepPending => (SelectedAttempt is { IsOpen: true } && !IsSettlementRejectedSelection) || IsSettlementPendingSelection;
+    // 第 2 步：普通交易为“处理中”（琥珀色圆环）；退货单已完成的退款第 2 步已经完成（绿色对勾）。
+    public bool IsCurrentStepActive => IsFinalStepPending && !IsSettlementSelection;
+    public string StepCurrentLabelText => IsSettlementSelection
+        ? T("cardRecovery.settlement.step.returnCompleted", "Return completed")
+        : SelectedStatusPillText;
+    public string StepFinalLabelText => IsSettlementPendingSelection
+        ? T("cardRecovery.settlement.step.settling", "Square settling to card")
+        : IsFinalStepFailed
         ? SelectedStatusText
         : IsRefundSelection
             ? T("cardRecovery.v2.step.refundCompleted", "Refund completed")
             : T("cardRecovery.v2.step.paymentCompleted", "Payment completed");
-    public string StepFinalTimeText => IsFinalStepPending
+    public string StepFinalTimeText => IsFinalStepFailed
+        ? SelectedAttempt?.UpdatedAt.ToLocalTime().ToString("T", GetCulture()) ?? NoneText
+        : IsFinalStepPending
         ? T("cardRecovery.v2.step.waiting", "Waiting")
         : SelectedAttempt?.UpdatedAt.ToLocalTime().ToString("T", GetCulture()) ?? NoneText;
 
@@ -138,7 +164,9 @@ public sealed partial class CardRecoveryCenterViewModel
             : $"{current}; {text}";
     });
 
-    public string ProcessedOutcomeHintText => IsRefundSelection
+    public string ProcessedOutcomeHintText => IsSettlementRejectedSelection
+        ? T("cardRecovery.settlement.outcome.refundedOther", "The customer was paid back by cash or another method.")
+        : IsRefundSelection
         ? T("cardRecovery.v2.outcome.processed.refund", "The refund reached the customer's card.")
         : T("cardRecovery.v2.outcome.processed.sale", "The customer's card was charged.");
     public string NotProcessedOutcomeHintText => IsRefundSelection
@@ -219,6 +247,11 @@ public sealed partial class CardRecoveryCenterViewModel
 
     private CardRecoveryTone ToneFor(CardRecoveryQueueItem item)
     {
+        if (IsSettlementPending(item))
+        {
+            return CardRecoveryTone.Info;
+        }
+
         if (!item.IsOpen)
         {
             return IsFailed(item) ? CardRecoveryTone.Neutral : CardRecoveryTone.Success;
@@ -302,6 +335,8 @@ public sealed partial class CardRecoveryCenterViewModel
                      nameof(SelectedProductSummaryText), nameof(ShowSafetyBanner), nameof(SafetyBannerTitleText),
                      nameof(SafetyBannerBodyText), nameof(StepSubmittedTimeText), nameof(StepCurrentTimeText),
                      nameof(IsFinalStepDone), nameof(IsFinalStepFailed), nameof(IsFinalStepPending),
+                     nameof(IsSettlementPendingSelection), nameof(IsSettlementRejectedSelection), nameof(IsSettlementSelection),
+                     nameof(ShowAlternativeOutcomes), nameof(ShowEvidenceInputs), nameof(ShowActionBar), nameof(IsCurrentStepActive), nameof(StepCurrentLabelText),
                      nameof(StepFinalLabelText), nameof(StepFinalTimeText), nameof(ProcessedOutcomeHintText),
                      nameof(NotProcessedOutcomeHintText), nameof(WaitingOutcomeHintText)
                  })

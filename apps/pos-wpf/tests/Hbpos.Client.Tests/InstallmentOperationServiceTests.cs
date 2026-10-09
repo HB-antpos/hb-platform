@@ -2,6 +2,7 @@ using System.Text.Json;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Installments;
+using Hbpos.Contracts.Linkly;
 using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
@@ -2205,7 +2206,409 @@ public sealed class InstallmentOperationServiceTests
         }
     }
 
+    [Fact]
+    public async Task Cloud_backend_installment_purchase_persists_derived_txn_ref_before_terminal_call()
+    {
+        // 后端模式过去不预派生 TxnRef，POST 已受理而响应丢失时本地既无 SessionId 也无 TxnRef，恢复无法认领会话。
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateRepaymentRequest();
+            var terminal = new PersistedLinklyPurchaseTerminal(attempts, context);
+            var service = CreateBackendInstallmentService(
+                repository, attempts, context, terminal, new RecordingInstallmentApi { AppendResponse = CreateAppendResponse(request) }, request,
+                new AckRecordingBackendClient());
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.NotNull(terminal.AttemptGuid);
+            var persisted = await attempts.GetAttemptAsync(terminal.AttemptGuid.Value);
+            Assert.NotNull(persisted);
+            AssertLocalTxnRef('P', persisted.TxnRef);
+            Assert.Equal(LinklyLocalTxnRef.Create('P', persisted.AttemptGuid.ToString("D")), persisted.TxnRef);
+            Assert.Equal(persisted.TxnRef, terminal.SubmittedTxnRef);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Cloud_backend_repayment_acknowledges_the_linkly_session_after_the_local_snapshot_completes()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateRepaymentRequest();
+            var backend = new AckRecordingBackendClient();
+            var terminal = new BackendSessionBindingTerminal(context, approve: true);
+            var service = CreateBackendInstallmentService(
+                repository, attempts, context, terminal, new RecordingInstallmentApi { AppendResponse = CreateAppendResponse(request) }, request, backend);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal([BackendSessionBindingTerminal.SessionId], backend.AcknowledgedSessionIds);
+            Assert.Equal(CardTerminalEnvironment.Sandbox, backend.AcknowledgedSettings!.Environment);
+            var attempt = await attempts.GetAttemptAsync(terminal.AttemptGuid!.Value);
+            Assert.NotNull(attempt!.AcknowledgedAt);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Cloud_backend_installment_create_acknowledges_the_linkly_session_after_the_local_snapshot_completes()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateInstallmentRequest(Guid.NewGuid());
+            var details = CreateDetails(request.InstallmentGuid, InstallmentStatus.Active);
+            var api = new RecordingInstallmentApi
+            {
+                CreateResponse = new InstallmentCreateResponse(request.InstallmentGuid, "IO-001", InstallmentStatus.Active, 30m, 90m, details)
+            };
+            var backend = new AckRecordingBackendClient();
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                new BackendSessionBindingTerminal(context, approve: true),
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(BackendSettings()),
+                cardPaymentAttemptRepository: attempts,
+                linklyPaymentAttemptContextAccessor: context,
+                linklyBackendTerminalClient: backend);
+
+            var result = await service.ExecuteCreateAsync(Session, request, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal([BackendSessionBindingTerminal.SessionId], backend.AcknowledgedSessionIds);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Cloud_backend_repayment_acknowledges_the_linkly_session_after_an_explicit_decline()
+    {
+        // 明确拒绝同样留下未确认的终态会话；不 ack 会让下一笔刷卡被 409 拦下并接管出待复核记录。
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateRepaymentRequest();
+            var backend = new AckRecordingBackendClient();
+            var service = CreateBackendInstallmentService(
+                repository, attempts, context, new BackendSessionBindingTerminal(context, approve: false),
+                new RecordingInstallmentApi { AppendResponse = CreateAppendResponse(request) }, request, backend);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal([BackendSessionBindingTerminal.SessionId], backend.AcknowledgedSessionIds);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Cloud_backend_repayment_does_not_acknowledge_while_the_central_commit_is_unknown()
+    {
+        // ack 只能发生在本地终态持久化之后：中央提交结果未知时会话必须保持未确认，恢复仍可按会话核验。
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateRepaymentRequest();
+            var backend = new AckRecordingBackendClient();
+            var service = CreateBackendInstallmentService(
+                repository, attempts, context, new BackendSessionBindingTerminal(context, approve: true),
+                new RecordingInstallmentApi { AppendException = new HttpRequestException("gateway") }, request, backend);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.False(result.Succeeded);
+            Assert.Empty(backend.AcknowledgedSessionIds);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Cloud_backend_repayment_stays_completed_when_the_linkly_acknowledge_fails()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateRepaymentRequest();
+            var backend = new AckRecordingBackendClient { AcknowledgeException = new HttpRequestException("ack failed") };
+            var terminal = new BackendSessionBindingTerminal(context, approve: true);
+            var service = CreateBackendInstallmentService(
+                repository, attempts, context, terminal, new RecordingInstallmentApi { AppendResponse = CreateAppendResponse(request) }, request, backend);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Equal(LocalInstallmentOperationState.Completed, (await repository.GetAsync(request.PaymentGuid))!.State);
+            // 本地未确认标记保持为空，后续接管/重试仍能补发。
+            Assert.Null((await attempts.GetAttemptAsync(terminal.AttemptGuid!.Value))!.AcknowledgedAt);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Direct_cloud_repayment_never_calls_the_backend_acknowledge()
+    {
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var context = new LinklyPaymentAttemptContextAccessor();
+            var request = CreateRepaymentRequest();
+            var backend = new AckRecordingBackendClient();
+            var service = new InstallmentOperationService(
+                repository,
+                new ClaimAwareInstallmentApiTestAdapter(
+                    new RecordingInstallmentApi { AppendResponse = CreateAppendResponse(request) }, request, new RepaymentClaimTestState()),
+                new BackendSessionBindingTerminal(context, approve: true),
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(
+                    BackendSettings() with { LinklyConnectionMode = LinklyConnectionMode.CloudDirectSync }),
+                cardPaymentAttemptRepository: attempts,
+                linklyPaymentAttemptContextAccessor: context,
+                linklyBackendTerminalClient: backend);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: true);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Empty(backend.AcknowledgedSessionIds);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    [Fact]
+    public async Task Cloud_backend_recovery_approves_from_the_verified_status_card_transaction_then_replays_only_api()
+    {
+        // 端到端：卡已批准但 WPF 在提交中央前崩溃。恢复必须用状态接口已核验的 CardTransaction 认定批准，
+        // 只补提交 API（不重扣），并在本地完成后确认会话。
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(path);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalInstallmentOperationRepository(store);
+            var attempts = new LocalCardPaymentAttemptRepository(store);
+            var request = CreateRepaymentRequest();
+            var attemptGuid = Guid.Parse("f588a502-9129-e8ad-8627-3d9e1b2b892a");
+            var txnRef = LinklyLocalTxnRef.Create('P', attemptGuid.ToString("D"));
+            var now = DateTimeOffset.UtcNow;
+            await attempts.CreateAsync(new LocalCardPaymentAttempt(
+                attemptGuid, BackendSessionBindingTerminal.SessionId, txnRef, "Linkly", "Sandbox", "CloudBackendAsync", "P", request.Amount,
+                LocalCardPaymentAttemptStatus.Recovering, "{}", request.StoreCode, request.DeviceCode, request.CashierId,
+                null, null, null, now, now, null, null, "Repayment", request.PaymentGuid));
+            await repository.CreateOrGetAsync(CreateApprovedRepaymentOperation(request) with
+            {
+                State = LocalInstallmentOperationState.ResultUnknown,
+                TerminalAttemptGuid = attemptGuid.ToString("D"),
+                RequestJson = JsonSerializer.Serialize(request)
+            });
+            var backend = new AckRecordingBackendClient
+            {
+                Status = CreateApprovedBackendStatus(txnRef, (long)(request.Amount * 100m))
+            };
+            var settings = BackendSettings();
+            var configured = new ConfiguredCardTerminalClient(
+                new StaticCardTerminalSettingsProvider(settings),
+                new HttpClient(),
+                linklyBackendTerminalClient: backend);
+            var api = new RecordingInstallmentApi { AppendResponse = CreateAppendResponse(request) };
+            var claimState = new RepaymentClaimTestState();
+            claimState.Seed(request, InstallmentRepaymentClaimStatus.Unknown, "Linkly", attemptGuid.ToString("D"));
+            var service = new InstallmentOperationService(
+                repository,
+                new ClaimAwareInstallmentApiTestAdapter(api, request, claimState),
+                configured,
+                new NoopVoucherTenderClient(),
+                cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(settings),
+                cardPaymentAttemptRepository: attempts,
+                linklyPaymentAttemptContextAccessor: new LinklyPaymentAttemptContextAccessor(),
+                linklyBackendTerminalClient: backend);
+
+            var recovered = await service.RecoverAsync(Session);
+
+            Assert.True(Assert.Single(recovered).ReplayedApi);
+            Assert.Equal(1, api.AppendCalls);
+            var card = Assert.Single(api.LastAppendRequest!.CardTransactions!);
+            Assert.Equal(txnRef, card.TxnRef);
+            Assert.Equal(request.Amount, card.Amount);
+            Assert.Equal([BackendSessionBindingTerminal.SessionId], backend.AcknowledgedSessionIds);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
     private static readonly PosSessionState Session = new("HB POS", "S001", "Main", "POS-01", "C001", "Alice", true, 0);
+
+    private static CardTerminalSettings BackendSettings() => CardTerminalSettings.FromEnvironment() with
+    {
+        Processor = CardProcessorKind.Linkly,
+        Environment = CardTerminalEnvironment.Sandbox,
+        LinklyConnectionMode = LinklyConnectionMode.CloudBackendAsync
+    };
+
+    private static InstallmentOperationService CreateBackendInstallmentService(
+        LocalInstallmentOperationRepository repository,
+        LocalCardPaymentAttemptRepository attempts,
+        LinklyPaymentAttemptContextAccessor context,
+        ICardTerminalClient terminal,
+        RecordingInstallmentApi api,
+        InstallmentAppendPaymentRequest request,
+        AckRecordingBackendClient backend) =>
+        new(
+            repository,
+            new ClaimAwareInstallmentApiTestAdapter(api, request, new RepaymentClaimTestState()),
+            terminal,
+            new NoopVoucherTenderClient(),
+            cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(BackendSettings()),
+            cardPaymentAttemptRepository: attempts,
+            linklyPaymentAttemptContextAccessor: context,
+            linklyBackendTerminalClient: backend);
+
+    private static LinklyCloudBackendSessionResponse CreateApprovedBackendStatus(string txnRef, long amountCents) =>
+        new(
+            "Sandbox", "S001", "POS-01", BackendSessionBindingTerminal.SessionId, "Completed", txnRef, "00", "APPROVED", null, "APPROVED",
+            false, false, false, false, false, null, null, null, "RECEIPT", 0, null, null, 200, [], TransactionSuccess: true)
+        {
+            CardTransaction = new LinklyCloudBackendCardTransactionDto(
+                txnRef, null, "AUTH01", "VISA", "************1234", "MID01", "00", "APPROVED", "000123", DateTimeOffset.UtcNow, amountCents)
+        };
+
+    private sealed class AckRecordingBackendClient : ILinklyBackendTerminalClient
+    {
+        public Exception? AcknowledgeException { get; init; }
+
+        public LinklyCloudBackendSessionResponse? Status { get; init; }
+
+        public List<string> AcknowledgedSessionIds { get; } = [];
+
+        public CardTerminalSettings? AcknowledgedSettings { get; private set; }
+
+        public Task<LinklyConnectionTestResult> TestConnectionAsync(CardTerminalEnvironment environment, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<LinklyConnectionTestResult> TestTransactionStatusAsync(CardTerminalEnvironment environment, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PaymentAuthorizationResult> PurchaseAsync(decimal amount, PosSessionState session, CardTerminalSettings settings, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PaymentAuthorizationResult> RefundAsync(decimal amount, PosSessionState session, CardTerminalSettings settings, string? originalReference, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<LinklyCloudBackendSessionResponse?> GetResumableSessionAsync(CardTerminalSettings settings, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LinklyCloudBackendSessionResponse?>(null);
+
+        public Task<LinklyCloudBackendSessionResponse> RecoverSessionAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<LinklyCloudBackendSessionResponse> ResumeSessionUntilFinalAsync(CardTerminalSettings settings, LinklyCloudBackendSessionResponse activeStatus, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<LinklyCloudBackendSessionResponse> GetSessionStatusAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default) =>
+            Status is null ? throw new NotSupportedException() : Task.FromResult(Status);
+
+        public Task AcknowledgeSessionAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default)
+        {
+            AcknowledgedSettings = settings;
+            if (AcknowledgeException is not null)
+            {
+                throw AcknowledgeException;
+            }
+
+            AcknowledgedSessionIds.Add(sessionId);
+            return Task.CompletedTask;
+        }
+
+        public Task AcknowledgeSupervisorResolvedSessionAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>模拟后端客户端：先把后端会话绑定到 attempt（落 SessionId），再返回批准或明确拒绝。</summary>
+    private sealed class BackendSessionBindingTerminal(
+        ILinklyPaymentAttemptContextAccessor context,
+        bool approve) : ICardTerminalClient
+    {
+        public const string SessionId = "7d9f6c1e-0000-4000-8000-000000000001";
+
+        public Guid? AttemptGuid { get; private set; }
+
+        public async Task<PaymentAuthorizationResult> AuthorizeAsync(decimal amount, PosSessionState session, CancellationToken cancellationToken = default)
+        {
+            var current = context.Current ?? throw new InvalidOperationException("Linkly attempt context was not available.");
+            AttemptGuid = current.AttemptGuid;
+            await current.BindSessionAsync(SessionId, current.TxnRef, DateTimeOffset.UtcNow, cancellationToken);
+            return approve
+                ? new PaymentAuthorizationResult(
+                    true, $"ANZBACKEND:{current.TxnRef}", "APPROVED", amount,
+                    [new CardTransactionDto("ANZ", current.TxnRef, null, null, null, null, null, "00", "APPROVED", null, DateTimeOffset.UtcNow, amount, null)],
+                    "ANZ", "Sandbox", LinklyConnectionMode.CloudBackendAsync.ToString(), "P", SessionId, current.TxnRef, "00", "APPROVED")
+                : new PaymentAuthorizationResult(
+                    false, null, "DECLINED", Processor: "ANZ", SessionId: SessionId, TxnRef: current.TxnRef, ResponseCode: "05", ResponseText: "DECLINED");
+        }
+
+        public Task<PaymentAuthorizationResult> RefundAsync(decimal amount, PosSessionState session, string? originalReference, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
 
     private static void AssertLocalTxnRef(char transactionType, string? txnRef)
     {
@@ -3134,7 +3537,10 @@ public sealed class InstallmentOperationServiceTests
         public InstallmentConfirmPickupRequest? LastPickupRequest { get; private set; }
         private readonly Dictionary<Guid, InstallmentCancelClaimDto> _cancelClaims = cancelClaims ?? [];
 
-        public Task<InstallmentCreateResponse> CreateAsync(InstallmentCreateRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public InstallmentCreateResponse? CreateResponse { get; init; }
+
+        public Task<InstallmentCreateResponse> CreateAsync(InstallmentCreateRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateResponse ?? throw new NotSupportedException());
 
         public async Task<InstallmentAppendPaymentResponse> AppendPaymentAsync(InstallmentAppendPaymentRequest request, CancellationToken cancellationToken = default)
         {

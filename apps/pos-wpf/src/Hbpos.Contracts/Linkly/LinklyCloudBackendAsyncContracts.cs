@@ -189,7 +189,17 @@ public sealed record LinklyCloudBackendSessionResponse(
     DateTimeOffset? CreatedAt = null)
 {
     public LinklyCloudBackendCardTransactionDto? CardTransaction { get; init; }
+
+    // 会话已被主管结案（或已 ack 的失败/未提交）之后才到达的 Linkly 最终结果。
+    // 它不会改写 Status 与 ack 状态，只作为独立证据供恢复中心与后台核对孤儿扣款。
+    public LinklyCloudBackendLateFinalResultDto? LateFinalResult { get; init; }
 }
+
+public sealed record LinklyCloudBackendLateFinalResultDto(
+    DateTimeOffset ReceivedAt,
+    bool? TransactionSuccess,
+    string? ResponseCode,
+    string? ResponseText);
 
 public sealed record LinklyCloudBackendCardTransactionDto(
     string? TxnRef,

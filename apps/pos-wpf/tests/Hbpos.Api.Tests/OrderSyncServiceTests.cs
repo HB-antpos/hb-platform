@@ -104,6 +104,62 @@ public sealed class OrderSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_verifies_card_payments_only_after_the_order_is_inserted()
+    {
+        var repository = new FakeOrderRepository(exists: false);
+        var insertedBeforeVerify = false;
+        var verifier = new RecordingCardTenderVerifier(() => insertedBeforeVerify = repository.InsertCalled);
+        var service = new OrderSyncService(
+            repository, new OrderSyncPlanner(), new FakeReservationService(), new StubStoreTimeZoneResolver(),
+            cardTenderVerifier: verifier);
+        var request = CreateRequest(
+            Guid.NewGuid(),
+            payments: [new PaymentSyncDto(Guid.NewGuid(), PaymentMethodKind.Card, 9.99m, "ANZ:1")]);
+
+        var response = await service.SyncAsync(request, CancellationToken.None);
+
+        Assert.Equal("Synced", response.Message);
+        Assert.Same(request, Assert.Single(verifier.Requests));
+        Assert.True(insertedBeforeVerify);
+    }
+
+    [Fact]
+    public async Task SyncAsync_does_not_verify_orders_without_card_payments_or_already_synced_orders()
+    {
+        var verifier = new RecordingCardTenderVerifier();
+        var cashService = new OrderSyncService(
+            new FakeOrderRepository(exists: false), new OrderSyncPlanner(), new FakeReservationService(),
+            new StubStoreTimeZoneResolver(), cardTenderVerifier: verifier);
+        var syncedService = new OrderSyncService(
+            new FakeOrderRepository(exists: true), new OrderSyncPlanner(), new FakeReservationService(),
+            new StubStoreTimeZoneResolver(), cardTenderVerifier: verifier);
+
+        await cashService.SyncAsync(CreateRequest(Guid.NewGuid()), CancellationToken.None);
+        await syncedService.SyncAsync(
+            CreateRequest(Guid.NewGuid(), payments: [new PaymentSyncDto(Guid.NewGuid(), PaymentMethodKind.Card, 9.99m, "ANZ:1")]),
+            CancellationToken.None);
+
+        Assert.Empty(verifier.Requests);
+    }
+
+    [Fact]
+    public async Task SyncAsync_still_reports_synced_when_card_verification_throws()
+    {
+        // 订单已提交，核对只是旁路；任何异常都不能把已入库订单变成 500 让客户端无限重试。
+        var verifier = new RecordingCardTenderVerifier(() => throw new InvalidOperationException("boom"));
+        var service = new OrderSyncService(
+            new FakeOrderRepository(exists: false), new OrderSyncPlanner(), new FakeReservationService(),
+            new StubStoreTimeZoneResolver(), cardTenderVerifier: verifier);
+
+        var response = await service.SyncAsync(
+            CreateRequest(Guid.NewGuid(), payments: [new PaymentSyncDto(Guid.NewGuid(), PaymentMethodKind.Card, 9.99m, "ANZ:1")]),
+            CancellationToken.None);
+
+        Assert.True(response.Accepted);
+        Assert.Equal("Synced", response.Message);
+    }
+
+    [Fact]
     public async Task SyncAsync_DoesNotConsumeVoucherReservationWhenOrderAlreadySyncedDuringInsert()
     {
         var orderGuid = Guid.NewGuid();
@@ -1562,6 +1618,18 @@ public sealed class OrderSyncServiceTests
         return new OrderReturnOriginalOrder(
             orderGuid,
             [new OrderReturnOriginalLine(lineGuid, quantity, actualAmount)]);
+    }
+
+    private sealed class RecordingCardTenderVerifier(Action? onVerify = null) : ICardTenderOrderVerifier
+    {
+        public List<OrderSyncRequest> Requests { get; } = [];
+
+        public Task VerifyAsync(OrderSyncRequest request)
+        {
+            Requests.Add(request);
+            onVerify?.Invoke();
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeOrderRepository(bool exists) : IOrderRepository

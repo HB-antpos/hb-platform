@@ -522,6 +522,9 @@ public sealed class ConfiguredCardTerminalClient :
     private const string SquareTimedOutStatusKey = "payment.card.squareTimedOut";
     private const string SquareTerminalOfflineStatusKey = "payment.card.squareTerminalOffline";
     private const string SquareTerminalNotPickedUpStatusKey = "payment.card.squareTerminalNotPickedUp";
+    internal const string SquareRefundAcceptedStatusKey = "payment.card.squareRefundAccepted";
+    private const string SquareRefundAcceptedMessage =
+        "Square accepted the refund and is returning it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed.";
     private const string SquareTimedOutMessage = "Square checkout timed out before the customer completed payment.";
     private const string SquareTerminalOfflineMessage = "Square terminal is offline. Check the terminal network and try again.";
     private const string SquareTerminalNotPickedUpMessage = "Square terminal did not pick up the checkout. Check that the terminal is online, then try again.";
@@ -530,6 +533,7 @@ public sealed class ConfiguredCardTerminalClient :
     private readonly HttpClient _httpClient;
     private readonly ILinklyTerminalClient? _linklyTerminalClient;
     private readonly ILinklyBackendTerminalClient? _linklyBackendTerminalClient;
+    private readonly ILinklyCloudTerminalClient? _linklyCloudTerminalClient;
     private readonly ILocalizationService? _localization;
     private readonly ISquarePaymentAttemptContextAccessor? _squarePaymentAttemptContextAccessor;
     private readonly ILocalSquarePaymentAttemptRepository? _squarePaymentAttemptRepository;
@@ -547,12 +551,14 @@ public sealed class ConfiguredCardTerminalClient :
         ILocalSquarePaymentAttemptRepository? squarePaymentAttemptRepository = null,
         ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null,
         ILinklyBackendTerminalClient? linklyBackendTerminalClient = null,
-        ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null)
+        ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
+        ILinklyCloudTerminalClient? linklyCloudTerminalClient = null)
     {
         _settingsProvider = settingsProvider;
         _httpClient = httpClient;
         _linklyTerminalClient = linklyTerminalClient;
         _linklyBackendTerminalClient = linklyBackendTerminalClient;
+        _linklyCloudTerminalClient = linklyCloudTerminalClient;
         _localization = localization;
         _squarePaymentAttemptContextAccessor = squarePaymentAttemptContextAccessor;
         _squarePaymentAttemptRepository = squarePaymentAttemptRepository;
@@ -1339,63 +1345,6 @@ public sealed class ConfiguredCardTerminalClient :
                     settings.Environment);
             }
 
-            if (string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    // CreatePaymentRefund 返回 PENDING 后只能查询同一 refund，绝不能再次 POST 来“确认”。
-                    using var statusResponse = await SendSquareApiAsync(
-                        HttpMethod.Get,
-                        $"api/v1/square/refunds/{Uri.EscapeDataString(refundId)}?environment={Uri.EscapeDataString(settings.Environment.ToString())}",
-                        body: null,
-                        cancellationToken);
-                    var statusBody = await ReadResponseBodyAsync(statusResponse, cancellationToken);
-                    if (!statusResponse.IsSuccessStatusCode)
-                    {
-                        return CreateSquareRefundPendingResult(
-                            refundId,
-                            status,
-                            amount,
-                            T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
-                    }
-
-                    var refreshedRefund = ReadSquareRefundResponse(statusBody);
-                    if (!IsExpectedSquareRefund(refreshedRefund, refundId, paymentId, minorAmount))
-                    {
-                        return CreateSquareRefundPendingResult(
-                            refundId,
-                            status,
-                            amount,
-                            T("payment.card.squareInvalidResponse", "Square terminal returned an invalid response."));
-                    }
-
-                    refund = refreshedRefund;
-                    status = refund.Status ?? string.Empty;
-                    if (squareAttempt?.CanBindRefund == true)
-                    {
-                        await BindSquareRefundEvidenceAsync(
-                            squareAttempt,
-                            refundId,
-                            status,
-                            refund.UpdatedAt ?? DateTimeOffset.UtcNow,
-                            settings.Environment);
-                    }
-                }
-                catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
-                {
-                    LogSquareOutcome(
-                        warning: true,
-                        $"refund status refresh failed attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} refundId={refundId} error={ex.GetType().Name} -> pending",
-                        squareAttempt?.AttemptGuid.ToString("D") ?? refundId,
-                        ex);
-                    return CreateSquareRefundPendingResult(
-                        refundId,
-                        status,
-                        amount,
-                        T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
-                }
-            }
-
             // 退款是低频人工操作，最终状态各记一条：完成/处理中 Information，失败或未知 Warning。
             var refundStatusIsKnown =
                 string.Equals(status, "COMPLETED", StringComparison.OrdinalIgnoreCase) ||
@@ -1431,24 +1380,22 @@ public sealed class ConfiguredCardTerminalClient :
                     ResultUnknown: true);
             }
 
-            if (string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase))
-            {
-                return CreateSquareRefundPendingResult(
-                    refundId,
-                    status,
-                    amount,
-                    T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
-            }
-
             if (string.IsNullOrWhiteSpace(idempotencyKey))
             {
                 _squareRefundIdempotencyKeys.TryRemove(refundAttemptKey, out _);
             }
 
+            // Square 官方定义：PENDING 表示退款已受理、正在从商家账户划款并退回原卡，多数几小时内完成，
+            // 最长可达 14 天；只有商家余额与绑定银行账户都不足时才会 REJECTED。
+            // 因此 PENDING 与 COMPLETED 一样视为退款已发起，退货单当场完成；交易状态保留 PENDING，
+            // 由退款结算跟踪在之后查询同一笔退款，转为 REJECTED/FAILED 时再提示主管改用其他方式退款。
+            var isAcceptedPending = string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase);
             return new PaymentAuthorizationResult(
                 true,
                 $"SQRF:{refundId}",
-                status,
+                isAcceptedPending
+                    ? T(SquareRefundAcceptedStatusKey, SquareRefundAcceptedMessage)
+                    : status,
                 amount,
                 [
                     new CardTransactionDto(
@@ -1465,7 +1412,8 @@ public sealed class ConfiguredCardTerminalClient :
                         DateTimeOffset.UtcNow,
                         amount,
                         null)
-                ]);
+                ],
+                StatusKey: isAcceptedPending ? SquareRefundAcceptedStatusKey : null);
         }
         catch (HttpRequestException ex)
         {
@@ -1511,36 +1459,6 @@ public sealed class ConfiguredCardTerminalClient :
             string.Equals(refund.AmountMoney.Currency, "AUD", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static PaymentAuthorizationResult CreateSquareRefundPendingResult(
-        string refundId,
-        string status,
-        decimal amount,
-        string message)
-    {
-        return new PaymentAuthorizationResult(
-            false,
-            $"SQRF:{refundId}",
-            message,
-            amount,
-            [
-                new CardTransactionDto(
-                    "Square",
-                    refundId,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    status,
-                    null,
-                    DateTimeOffset.UtcNow,
-                    amount,
-                    null)
-            ],
-            ResponseText: status,
-            ResultUnknown: true);
-    }
 
     public async Task<PaymentAuthorizationResult> RecoverLinklyAsync(
         LocalCardPaymentAttempt attempt,
@@ -1588,12 +1506,56 @@ public sealed class ConfiguredCardTerminalClient :
                     : UnknownRecovery("Linkly recovery identity did not match the persisted attempt.");
             }
 
-            if (_linklyBackendTerminalClient is null || string.IsNullOrWhiteSpace(attempt.SessionId))
+            if (mode == LinklyConnectionMode.CloudDirectSync)
+            {
+                // 中文注释：直连模式的 session 只存在于 Linkly 云端，后端会话接口里查不到（只会 404 后落成 Unknown）。
+                // 与销售恢复一致，按 attempt 冻结的模式走直连客户端，只查询已持久化的原 session，绝不重发扣款。
+                if (_linklyCloudTerminalClient is null ||
+                    string.IsNullOrWhiteSpace(attempt.SessionId) ||
+                    !LinklyLocalTxnRef.TryNormalizeHistoricalReference(attempt.TxnRef, out var directTxnRef))
+                {
+                    return UnknownRecovery("Linkly direct cloud attempt cannot be queried.");
+                }
+
+                var directResult = await _linklyCloudTerminalClient.RecoverTransactionAsync(
+                    attempt.Amount,
+                    session,
+                    settings with { LinklyConnectionMode = LinklyConnectionMode.CloudDirectSync },
+                    attempt.SessionId,
+                    directTxnRef,
+                    cancellationToken);
+                // 直连引用带 ANZCLOUD: 渠道前缀，身份核验与销售恢复共用同一套规则。
+                return directResult.ResultUnknown || CardPaymentRecoveryService.LocalAuthorizationMatchesAttempt(attempt, directResult)
+                    ? directResult
+                    : UnknownRecovery("Linkly recovery identity did not match the persisted attempt.");
+            }
+
+            if (_linklyBackendTerminalClient is null)
             {
                 return UnknownRecovery("Linkly backend session cannot be queried.");
             }
 
-            var status = await _linklyBackendTerminalClient.GetSessionStatusAsync(settings, attempt.SessionId, cancellationToken);
+            LinklyCloudBackendSessionResponse? status;
+            if (string.IsNullOrWhiteSpace(attempt.SessionId))
+            {
+                // 中文注释：POST 已受理但响应丢失（或断电）时本地没有 SessionId。attempt 的 TxnRef 在发请求前已落库，
+                // 后端用同一身份派生出相同引用，所以可以用设备上未确认的会话按 TxnRef 精确认领；没有引用可比对时不猜。
+                if (string.IsNullOrWhiteSpace(attempt.TxnRef))
+                {
+                    return UnknownRecovery("Linkly backend session cannot be queried.");
+                }
+
+                status = await _linklyBackendTerminalClient.GetResumableSessionAsync(settings, cancellationToken);
+                if (status is null)
+                {
+                    return UnknownRecovery("Linkly backend session was not found.");
+                }
+            }
+            else
+            {
+                status = await _linklyBackendTerminalClient.GetSessionStatusAsync(settings, attempt.SessionId, cancellationToken);
+            }
+
             if (!string.Equals(status.Environment, attempt.Environment, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(status.StoreCode, attempt.StoreCode, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(status.DeviceCode, attempt.DeviceCode, StringComparison.OrdinalIgnoreCase) ||
@@ -1604,8 +1566,7 @@ public sealed class ConfiguredCardTerminalClient :
 
             if (string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) && status.TransactionSuccess == true)
             {
-                // 会话状态不携带经核验的金额，恢复时不得用原请求金额补造成功回执。
-                return UnknownRecovery("Linkly backend session does not contain a verified approved amount.");
+                return RecoverBackendApproval(status, attempt);
             }
 
             if ((string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) && status.TransactionSuccess == false) ||
@@ -1822,6 +1783,45 @@ public sealed class ConfiguredCardTerminalClient :
 
     private static PaymentAuthorizationResult UnknownRecovery(string message) =>
         new(false, null, message, ResultUnknown: true);
+
+    // 状态接口返回的 CardTransaction 是服务端已核验的权威明细（金额、引用、批准码）。恢复与实时收款共用
+    // 同一套证据校验：核验通过才认定批准；证据缺失或与持久化 attempt 不符一律保持未知，
+    // 绝不能用 attempt 的请求金额补造终端批准金额。
+    private static PaymentAuthorizationResult RecoverBackendApproval(
+        LinklyCloudBackendSessionResponse status,
+        LocalCardPaymentAttempt attempt)
+    {
+        var requestedAmount = Math.Abs(attempt.Amount);
+        var transaction = LinklyBackendTerminalClient.ReadTransactionResult(
+            status,
+            requestedAmount,
+            attempt.TxnRef ?? string.Empty);
+        if (!transaction.Succeeded ||
+            !LinklyBackendTerminalClient.IsTransactionResultVerified(status, transaction, requestedAmount))
+        {
+            return UnknownRecovery("Linkly backend session does not contain a verified approved amount.");
+        }
+
+        var card = LinklyBackendTerminalClient.ToCardTransaction(transaction, transaction.Amount, status.ReceiptText);
+        return new PaymentAuthorizationResult(
+            true,
+            LinklyBackendPaymentReference.Format(
+                card.TxnRef ?? transaction.SessionId,
+                transaction.SessionId,
+                status.Environment,
+                transaction.RefundReference),
+            "ANZ Linkly Cloud",
+            transaction.Amount,
+            [card],
+            "ANZ",
+            status.Environment,
+            LinklyConnectionMode.CloudBackendAsync.ToString(),
+            attempt.TxnType,
+            status.SessionId,
+            card.TxnRef,
+            card.ResponseCode,
+            card.ResponseText);
+    }
 
     private static bool MatchesRecoveredAmount(
         PaymentAuthorizationResult result,

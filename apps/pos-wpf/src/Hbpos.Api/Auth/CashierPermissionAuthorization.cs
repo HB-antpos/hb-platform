@@ -15,6 +15,7 @@ public static class CashierAuthorizationPolicies
     public const string Returns = "Cashier.Returns";
     public const string Voucher = "Cashier.Voucher";
     public const string VoucherRefund = "Cashier.VoucherRefund";
+    public const string CardRefund = "Cashier.CardRefund";
     public const string InstallmentView = "Cashier.InstallmentView";
     public const string InstallmentCreate = "Cashier.InstallmentCreate";
     public const string InstallmentPayment = "Cashier.InstallmentPayment";
@@ -44,6 +45,11 @@ public static class CashierAuthorizationPolicies
         Add(options, Returns, Permissions.PosTerminal.Returns.Confirm);
         Add(options, Voucher, Permissions.PosTerminal.Payment.TakeVoucher);
         Add(options, VoucherRefund,
+            Permissions.PosTerminal.Returns.Confirm,
+            Permissions.PosTerminal.Installments.Cancel);
+        // 银行卡原路退款（Linkly TxnType=R）与礼券退款同口径：退货确认或分期取消权限之一；
+        // 该策略不能挂在 TakeCard 端点的 Authorize 特性上，由控制器在识别出 R 交易后动态校验。
+        Add(options, CardRefund,
             Permissions.PosTerminal.Returns.Confirm,
             Permissions.PosTerminal.Installments.Cancel);
         Add(options, InstallmentView, Permissions.PosTerminal.Installments.View);

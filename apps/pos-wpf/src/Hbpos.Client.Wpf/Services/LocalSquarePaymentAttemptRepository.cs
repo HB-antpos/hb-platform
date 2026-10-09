@@ -530,6 +530,52 @@ public interface ILocalSquarePaymentAttemptRepository
         throw new NotSupportedException("Square not-paid terminalization is not wired for this repository.");
 
     Task<LocalSquarePaymentAttempt?> GetAttemptAsync(Guid attemptGuid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 退货单已完成、但 Square 退款仍在结算（PENDING）或结算后被拒（REJECTED/FAILED，未处理）的退款记录。
+    /// 只用于结算跟踪与提示，不是金融恢复队列，不能据此重新发起退款。
+    /// </summary>
+    Task<IReadOnlyList<LocalSquarePaymentAttempt>> GetRefundSettlementsAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<LocalSquarePaymentAttempt>>([]);
+
+    /// <summary>
+    /// 以 PaymentStatus + UpdatedAt 做 CAS，更新已完成退货的 Square 退款结算状态；只允许 OrderCompleted 的退款记录。
+    /// </summary>
+    Task<bool> TryUpdateRefundSettlementStatusAsync(
+        Guid attemptGuid,
+        string expectedPaymentStatus,
+        DateTimeOffset expectedUpdatedAt,
+        string paymentStatus,
+        string? responseText,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(false);
+}
+
+/// <summary>已完成退货的 Square 退款结算状态（存于 PaymentStatus）。</summary>
+public static class SquareRefundSettlementStatuses
+{
+    public const string Pending = "PENDING";
+    public const string Completed = "COMPLETED";
+    public const string Rejected = "REJECTED";
+    public const string Failed = "FAILED";
+    // 主管确认已改用其他方式退给顾客后的结算失败状态；保留原失败类型便于对账。
+    public const string RejectedHandled = "REJECTED_HANDLED";
+    public const string FailedHandled = "FAILED_HANDLED";
+
+    public static bool IsPending(string? status) =>
+        string.Equals(status?.Trim(), Pending, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsUnhandledFailure(string? status) =>
+        string.Equals(status?.Trim(), Rejected, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status?.Trim(), Failed, StringComparison.OrdinalIgnoreCase);
+
+    public static string HandledFor(string failureStatus) =>
+        string.Equals(failureStatus.Trim(), Rejected, StringComparison.OrdinalIgnoreCase) ? RejectedHandled : FailedHandled;
 }
 
 public sealed class LocalSquarePaymentAttemptRepository(LocalSqliteStore store) : ILocalSquarePaymentAttemptRepository
@@ -2149,6 +2195,70 @@ public sealed class LocalSquarePaymentAttemptRepository(LocalSqliteStore store) 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) attempts.Add(ReadAttempt(reader));
         return attempts;
+    }
+
+    public async Task<IReadOnlyList<LocalSquarePaymentAttempt>> GetRefundSettlementsAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        // 结算跟踪只看退货单已完成的退款；未结退款仍走异常中心恢复，不在这里出现。
+        command.CommandText = """
+            SELECT * FROM LocalSquarePaymentAttempts
+            WHERE StoreCode = $StoreCode AND DeviceCode = $DeviceCode AND Environment = $Environment
+              AND OperationKind = 'Refund'
+              AND Status = $OrderCompletedStatus
+              AND UPPER(TRIM(COALESCE(PaymentStatus, ''))) IN ($Pending, $Rejected, $Failed)
+            ORDER BY UpdatedAt DESC, CreatedAt DESC LIMIT 100;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", storeCode);
+        command.Parameters.AddWithValue("$DeviceCode", deviceCode);
+        command.Parameters.AddWithValue("$Environment", environment);
+        command.Parameters.AddWithValue("$OrderCompletedStatus", LocalSquarePaymentAttemptStatus.OrderCompleted.ToString());
+        command.Parameters.AddWithValue("$Pending", SquareRefundSettlementStatuses.Pending);
+        command.Parameters.AddWithValue("$Rejected", SquareRefundSettlementStatuses.Rejected);
+        command.Parameters.AddWithValue("$Failed", SquareRefundSettlementStatuses.Failed);
+        var attempts = new List<LocalSquarePaymentAttempt>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) attempts.Add(ReadAttempt(reader));
+        return attempts;
+    }
+
+    public async Task<bool> TryUpdateRefundSettlementStatusAsync(
+        Guid attemptGuid,
+        string expectedPaymentStatus,
+        DateTimeOffset expectedUpdatedAt,
+        string paymentStatus,
+        string? responseText,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken = default)
+    {
+        return await ExecuteUpdateCountAsync(
+            """
+            UPDATE LocalSquarePaymentAttempts
+            SET PaymentStatus = $PaymentStatus,
+                ResponseText = COALESCE($ResponseText, ResponseText),
+                UpdatedAt = $UpdatedAt
+            WHERE AttemptGuid = $AttemptGuid
+              AND OperationKind = 'Refund'
+              AND Status = $OrderCompletedStatus
+              AND UPPER(TRIM(COALESCE(PaymentStatus, ''))) = $ExpectedPaymentStatus
+              AND UpdatedAt = $ExpectedUpdatedAt;
+            """,
+            command =>
+            {
+                command.Parameters.AddWithValue("$AttemptGuid", attemptGuid.ToString());
+                command.Parameters.AddWithValue("$PaymentStatus", paymentStatus.Trim().ToUpperInvariant());
+                command.Parameters.AddWithValue("$ResponseText", (object?)responseText ?? DBNull.Value);
+                command.Parameters.AddWithValue("$UpdatedAt", updatedAt.ToString("O"));
+                command.Parameters.AddWithValue("$OrderCompletedStatus", LocalSquarePaymentAttemptStatus.OrderCompleted.ToString());
+                command.Parameters.AddWithValue("$ExpectedPaymentStatus", expectedPaymentStatus.Trim().ToUpperInvariant());
+                command.Parameters.AddWithValue("$ExpectedUpdatedAt", expectedUpdatedAt.ToString("O"));
+            },
+            cancellationToken) == 1;
     }
 
     public async Task<IReadOnlyList<LocalSquarePaymentAttempt>> GetOpenAttemptsAsync(

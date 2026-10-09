@@ -21,7 +21,8 @@ public sealed class SquareTerminalBackendService(
     ISquareTerminalRestClient restClient,
     ISquareWebhookVerifier? webhookVerifier = null,
     IOptions<SquareWebhookOptions>? webhookOptions = null,
-    ISquareCheckoutSessionRepository? checkoutSessionRepository = null) : ISquareTerminalBackendService
+    ISquareCheckoutSessionRepository? checkoutSessionRepository = null,
+    ISquareRefundRepository? refundRepository = null) : ISquareTerminalBackendService
 {
     private const string TokenNotConfiguredCode = "SQUARE_TOKEN_NOT_CONFIGURED";
     private const string TokenNotConfiguredMessage = "Square token is not configured for this environment.";
@@ -39,6 +40,7 @@ public sealed class SquareTerminalBackendService(
     private readonly ISquareWebhookVerifier _webhookVerifier = webhookVerifier ?? new SquareWebhookVerifier();
     private readonly SquareWebhookOptions _webhookOptions = (webhookOptions ?? Options.Create(new SquareWebhookOptions())).Value;
     private readonly ISquareCheckoutSessionRepository _checkoutSessionRepository = checkoutSessionRepository ?? new NullSquareCheckoutSessionRepository();
+    private readonly ISquareRefundRepository _refundRepository = refundRepository ?? new NullSquareRefundRepository();
 
     public async Task<IReadOnlyList<SquareLocationDto>> GetLocationsAsync(
         string environment,
@@ -206,11 +208,25 @@ public sealed class SquareTerminalBackendService(
     {
         // 退款终态查询统一由后端持有 Square token，POS 不直连 Square。
         var context = await GetRequestContextAsync(environment, cancellationToken);
-        return await restClient.GetRefundAsync(
-            context.Environment,
-            context.AccessToken,
-            refundId,
-            cancellationToken);
+        try
+        {
+            return await restClient.GetRefundAsync(
+                context.Environment,
+                context.AccessToken,
+                refundId,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is SquareTerminalRestException or JsonException)
+        {
+            // Square 实时查询失败时，用 refund.updated 通知落库的最近状态兜底；没有通知记录就保持原错误。
+            var stored = await _refundRepository.GetRefundAsync(context.Environment, refundId, cancellationToken);
+            if (stored is null)
+            {
+                throw;
+            }
+
+            return MapStoredRefund(stored);
+        }
     }
 
     public Task<SquareWebhookAcceptedResponse> AcceptWebhookAsync(
@@ -383,6 +399,26 @@ public sealed class SquareTerminalBackendService(
                 "Duplicate webhook event ignored.");
         }
 
+        if (envelope.Refund is not null)
+        {
+            // 退款通知只落库为状态兜底；POS 仍以 GET refunds 的结果为准，并核对退款号/金额/原付款。
+            var refundUpdatedAt = envelope.Refund.UpdatedAt ?? envelope.CreatedAt ?? DateTimeOffset.UtcNow;
+            await _refundRepository.UpsertRefundAsync(
+                new SquareRefundRecord
+                {
+                    Environment = environment,
+                    RefundId = envelope.Refund.RefundId,
+                    Status = envelope.Refund.Status,
+                    PaymentId = envelope.Refund.PaymentId,
+                    Amount = envelope.Refund.Amount,
+                    Currency = envelope.Refund.Currency,
+                    RawRefundJson = envelope.Refund.RawRefundJson,
+                    LastEventId = envelope.EventId,
+                    UpdatedAt = refundUpdatedAt
+                },
+                cancellationToken);
+        }
+
         if (string.Equals(envelope.EventType, "terminal.checkout.updated", StringComparison.OrdinalIgnoreCase))
         {
             if (envelope.Checkout is null)
@@ -503,12 +539,50 @@ public sealed class SquareTerminalBackendService(
                 checkout = ParseCheckout(checkoutElement);
             }
 
-            return new SquareWebhookEnvelope(environment, eventId, eventType, createdAt, checkout);
+            SquareWebhookRefundEnvelope? refund = null;
+            if (string.Equals(eventType, "refund.updated", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(eventType, "refund.created", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetNestedElement(root, out var refundElement, "data", "object", "refund"))
+                {
+                    throw CreateInvalidWebhookPayloadException();
+                }
+
+                refund = ParseRefund(refundElement);
+            }
+
+            return new SquareWebhookEnvelope(environment, eventId, eventType, createdAt, checkout, refund);
         }
         catch (JsonException)
         {
             throw CreateInvalidWebhookPayloadException();
         }
+    }
+
+    private static SquareWebhookRefundEnvelope ParseRefund(JsonElement refundElement)
+    {
+        var amountMoney = TryGetProperty(refundElement, "amount_money", out var amountElement)
+            ? ReadAmount(amountElement)
+            : (Amount: (long?)null, Currency: (string?)null);
+        return new SquareWebhookRefundEnvelope(
+            ReadRequiredString(refundElement, "id"),
+            ReadRequiredString(refundElement, "status").ToUpperInvariant(),
+            TryReadString(refundElement, "payment_id"),
+            amountMoney.Amount,
+            amountMoney.Currency,
+            TryReadDateTimeOffset(refundElement, "updated_at"),
+            refundElement.GetRawText());
+    }
+
+    private static SquareRefundResponse MapStoredRefund(SquareRefundRecord stored)
+    {
+        return new SquareRefundResponse(
+            stored.RefundId,
+            stored.Environment,
+            Status: stored.Status,
+            PaymentId: stored.PaymentId,
+            AmountMoney: stored.Amount.HasValue ? new SquareMoneyDto(stored.Amount.Value, stored.Currency ?? string.Empty) : null,
+            UpdatedAt: stored.UpdatedAt);
     }
 
     private static SquareWebhookCheckoutEnvelope ParseCheckout(JsonElement checkoutElement)
@@ -693,7 +767,17 @@ public sealed class SquareTerminalBackendService(
         string EventId,
         string EventType,
         DateTimeOffset? CreatedAt,
-        SquareWebhookCheckoutEnvelope? Checkout);
+        SquareWebhookCheckoutEnvelope? Checkout,
+        SquareWebhookRefundEnvelope? Refund = null);
+
+    private sealed record SquareWebhookRefundEnvelope(
+        string RefundId,
+        string Status,
+        string? PaymentId,
+        long? Amount,
+        string? Currency,
+        DateTimeOffset? UpdatedAt,
+        string RawRefundJson);
 
     private sealed record SquareWebhookCheckoutEnvelope(
         string CheckoutId,
@@ -706,6 +790,16 @@ public sealed class SquareTerminalBackendService(
         string? PaymentId,
         string? PaymentIdsJson,
         string RawCheckoutJson);
+
+    private sealed class NullSquareRefundRepository : ISquareRefundRepository
+    {
+        public Task UpsertRefundAsync(SquareRefundRecord refund, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<SquareRefundRecord?> GetRefundAsync(
+            string environment,
+            string refundId,
+            CancellationToken cancellationToken) => Task.FromResult<SquareRefundRecord?>(null);
+    }
 
     private sealed class NullSquareCheckoutSessionRepository : ISquareCheckoutSessionRepository
     {

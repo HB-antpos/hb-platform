@@ -1,3 +1,4 @@
+import { deriveLinklyAttemptTxnRef } from "./linkly-attempt-txn-ref";
 import { paymentProviderAmountCents } from "./payment-amount";
 
 import { normalizeCardSyncEvidence, type CardSyncEvidenceV1, type OnlinePaymentPort, type PaymentAttempt, type PaymentOperation, type PaymentProvider, type PaymentProviderReferences, type PaymentProviderResult } from "@hb/pos-domain/core/contracts/payment";
@@ -584,11 +585,15 @@ export class PaymentAttemptService {
     const provider = this.providerFor(attempt.provider);
     if (attempt.state === "Created") {
       // Created → Submitted 的 CAS 成功后才能第一次越过 provider 边界。
-      const submitted = transition(
-        attempt,
-        "Submitted",
-        this.nextUpdatedAtIso(attempt),
-        null,
+      // 中文注释：Linkly 的 TxnRef 由 attempt 身份派生，必须随这次 CAS 一起耐久化——此后 create 响应丢失
+      // （断网、App 被挂起或被杀）时，恢复只能靠这个顶层 TxnRef 认领后端会话（对齐 WPF #260）。
+      const submitted = withLinklyAttemptTxnRef(
+        transition(
+          attempt,
+          "Submitted",
+          this.nextUpdatedAtIso(attempt),
+          null,
+        ),
       );
       await this.compareAndUpdateOrThrow(attempt, submitted);
       // 中文注释：自动恢复仍须先耐久进入 Submitted；CAS 成功后才把同一 signal
@@ -711,7 +716,10 @@ export class PaymentAttemptService {
 
     let references: PaymentProviderReferences;
     try {
-      references = mergeReferences(attempt.references, providerResult.references);
+      references = mergeReferences(
+        referencesBeforeProviderMerge(attempt, providerResult),
+        providerResult.references,
+      );
       assertResultTransition(attempt, providerResult.state);
     } catch (error) {
       const code =
@@ -1005,6 +1013,45 @@ function transition(
     );
   }
   return { ...attempt, state, updatedAtIso, lastErrorCode };
+}
+
+/**
+ * 兼容旧 Hbpos.Api：旧版会忽略 attemptGuid、为新会话生成随机 TxnRef（WPF #260 同样“绑定会话时以后端返回的引用
+ * 为准”）。仅当本地引用确为 attemptId 的派生值、尚未绑定会话、而创建响应首次带回另一个 TxnRef 时，才让后端返回值
+ * 取代派生值，避免该合法响应被当成 PROVIDER_REFERENCE_CONFLICT 而丢掉刚创建的 SessionId；已绑定会话后任何
+ * 不一致仍按冲突失败关闭。
+ */
+function referencesBeforeProviderMerge(
+  attempt: PaymentAttempt,
+  providerResult: PaymentProviderResult,
+): PaymentProviderReferences {
+  const returnedTxnRef = providerResult.references.txnRef;
+  if (
+    attempt.provider !== "linkly-cloud" ||
+    attempt.references.sessionId !== null ||
+    providerResult.references.sessionId === null ||
+    attempt.references.txnRef === null ||
+    returnedTxnRef === null ||
+    returnedTxnRef === attempt.references.txnRef ||
+    attempt.references.txnRef !== deriveLinklyAttemptTxnRef(attempt)
+  ) {
+    return attempt.references;
+  }
+  return { ...attempt.references, txnRef: null };
+}
+
+/**
+ * linkly-cloud 的 attempt 在越过 provider 边界前预置由 attemptId 派生的 TxnRef；
+ * attemptId 不是标准 GUID（历史数据/测试替身）或已带引用时原样返回，沿用旧的 UID 认领路径。
+ */
+function withLinklyAttemptTxnRef(attempt: PaymentAttempt): PaymentAttempt {
+  if (attempt.provider !== "linkly-cloud" || attempt.references.txnRef !== null) {
+    return attempt;
+  }
+  const txnRef = deriveLinklyAttemptTxnRef(attempt);
+  return txnRef === null
+    ? attempt
+    : { ...attempt, references: { ...attempt.references, txnRef } };
 }
 
 function outcome(

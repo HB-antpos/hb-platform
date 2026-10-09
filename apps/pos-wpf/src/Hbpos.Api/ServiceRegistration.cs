@@ -150,6 +150,8 @@ public static class ServiceRegistration
         services.AddScoped<IOrderSyncSchemaSqlExecutor, SqlSugarOrderSyncSchemaSqlExecutor>();
         services.AddScoped<IOrderSyncSchemaInitializer, SqlSugarOrderSyncSchemaInitializer>();
         services.AddScoped<IOrderRepository, SqlSugarOrderRepository>();
+        services.AddScoped<ICardTenderReconciliationRepository, SqlSugarCardTenderReconciliationRepository>();
+        services.AddScoped<ICardTenderOrderVerifier, CardTenderOrderVerifier>();
         services.AddScoped<IOrderSyncService, OrderSyncService>();
         services.AddScoped<ISharedHeldOrderPayloadProtector, SharedHeldOrderPayloadProtector>();
         services.AddScoped<ISharedHeldOrderRepository, SqlSugarSharedHeldOrderRepository>();
@@ -189,6 +191,8 @@ public static class ServiceRegistration
         services.AddScoped<ILinklyCloudCredentialSchemaSqlExecutor, SqlSugarLinklyCloudCredentialSchemaSqlExecutor>();
         services.AddScoped<ILinklyCloudCredentialSchemaInitializer, SqlSugarLinklyCloudCredentialSchemaInitializer>();
         services.AddScoped<ILinklyCloudBackendAsyncRepository, SqlSugarLinklyCloudBackendAsyncRepository>();
+        // 进程内共享的 Linkly token 缓存：Token Provider 是按请求创建的类型化客户端，缓存必须由单例持有。
+        services.AddSingleton<LinklyCloudBackendTokenCache>();
         services.AddScoped<ILinklyCloudBackendTerminalCredentialRepository, SqlSugarLinklyCloudBackendTerminalCredentialRepository>();
         services.AddScoped<ILinklyCloudTerminalRepository, SqlSugarLinklyCloudTerminalRepository>();
         services.AddScoped<ILinklyCloudTerminalService, LinklyCloudTerminalService>();
@@ -238,6 +242,7 @@ public static class ServiceRegistration
         services.AddScoped<ISquareTokenSchemaInitializer, SqlSugarSquareTokenSchemaInitializer>();
         services.AddScoped<ISquareWebhookVerifier, SquareWebhookVerifier>();
         services.AddScoped<ISquareCheckoutSessionRepository, SqlSugarSquareCheckoutSessionRepository>();
+        services.AddScoped<ISquareRefundRepository, SqlSugarSquareRefundRepository>();
         services.AddScoped<ISquareWebhookSchemaSqlExecutor, SqlSugarSquareWebhookSchemaSqlExecutor>();
         services.AddScoped<ISquareWebhookSchemaInitializer, SqlSugarSquareWebhookSchemaInitializer>();
         services.AddHttpClient<ISquareTerminalRestClient, HttpSquareTerminalRestClient>(client =>

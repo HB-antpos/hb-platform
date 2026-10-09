@@ -53,6 +53,8 @@ public sealed class CardRecoveryEntryIntegrationTests
             await cardTask.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.True(payment.IsCardPaymentRecoveryRequired);
             var queued = Assert.Single(await recovery.ListOpenAsync(fixture.Session));
+            // 主管结案前会向 Linkly 实时核验：只有查到终态“未批准”，才允许确认未付款。
+            cloudApi.GetTransactionReportsDecline = true;
             var resolution = new CardPaymentSupervisorResolution(
                 queued.AttemptGuid,
                 CardProcessorKind.Linkly,
@@ -108,7 +110,8 @@ public sealed class CardRecoveryEntryIntegrationTests
             Assert.Equal(PaymentMethodKind.Cash, tender.Method);
             Assert.Equal(10m, tender.Amount);
             Assert.Equal(1, cloudApi.SendCount);
-            Assert.Equal(0, cloudApi.GetTransactionCount);
+            // 唯一一次 GET 就是主管结案前的只读实时核验。
+            Assert.Equal(1, cloudApi.GetTransactionCount);
         }
         finally
         {

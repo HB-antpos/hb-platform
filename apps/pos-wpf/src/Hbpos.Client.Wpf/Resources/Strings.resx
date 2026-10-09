@@ -277,7 +277,7 @@
   <data name="payment.card.squarePaymentAmountMismatch" xml:space="preserve"><value>Square payment amount did not match the requested amount.</value></data>
   <data name="payment.card.squarePaymentCurrencyMismatch" xml:space="preserve"><value>Square payment currency did not match the requested currency.</value></data>
   <data name="payment.card.squareRefundMissingReference" xml:space="preserve"><value>Square refund requires an original Square payment reference.</value></data>
-  <data name="payment.card.squareRefundPending" xml:space="preserve"><value>Square refund is still processing. Do not refund again; run recovery later.</value></data>
+  <data name="payment.card.squareRefundPending" xml:space="preserve"><value>Square refund was submitted and is still processing. Do not refund again; check it again later in Card transaction recovery.</value></data>
   <data name="payment.card.squareRefundStatus" xml:space="preserve"><value>Square refund status is {0}.</value></data>
   <data name="payment.card.error.overlay.connectionFailed.title" xml:space="preserve"><value>Card Terminal Connection Failed</value></data>
   <data name="payment.card.error.overlay.connectionFailed.message" xml:space="preserve"><value>Unable to connect to the card terminal. Please check the terminal's power and network connection, then try again.</value></data>
@@ -295,10 +295,10 @@
   <data name="payment.card.error.overlay.cardDeclined.message" xml:space="preserve"><value>Card was not approved. Reason: {0}</value></data>
   <data name="payment.card.error.overlay.close" xml:space="preserve"><value>OK</value></data>
   <data name="payment.card.error.overlay.activeSession.title" xml:space="preserve"><value>Previous Card Transaction Needs Recovery</value></data>
-  <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve"><value>POS will check the previous Linkly transaction before another card payment. The current order will stay on this screen.</value></data>
+  <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve"><value>POS will check the previous card transaction before another card payment. The current order will stay on this screen.</value></data>
   <data name="payment.card.error.overlay.activeSession.recover" xml:space="preserve"><value>Recover previous</value></data>
   <data name="payment.card.error.overlay.activeSession.close" xml:space="preserve"><value>Close</value></data>
-  <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve"><value>Recovering previous Linkly transaction...</value></data>
+  <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve"><value>Recovering previous card transaction...</value></data>
   <data name="payment.card.error.overlay.activeSession.handoff" xml:space="preserve"><value>Move to recovery center and start a new sale</value></data>
   <data name="payment.card.error.overlay.activeSession.openCenter" xml:space="preserve"><value>Open card recovery center</value></data>
   <data name="payment.card.error.overlay.activeSession.openRecoveryCenter" xml:space="preserve"><value>Open card transaction recovery</value></data>
@@ -801,6 +801,7 @@
   <data name="returns.status.addedNoReceipt" xml:space="preserve"><value>Added {0} for no-receipt return.</value></data>
   <data name="returns.status.orderNotFound" xml:space="preserve"><value>Order was not found.</value></data>
   <data name="returns.status.loadedLocalStale" xml:space="preserve"><value>Loaded local order; online order history is not available.</value></data>
+  <data name="returns.status.cardRefundDisabledStale" xml:space="preserve"><value>Refund to the original card is disabled until the order's return records can be loaded online.</value></data>
   <data name="returns.status.addedReceiptLine" xml:space="preserve"><value>Added {0} to refund cart.</value></data>
   <data name="returns.status.openItemPrompt" xml:space="preserve"><value>Enter a no-barcode item name and retail price.</value></data>
   <data name="returns.status.openItemNameRequired" xml:space="preserve"><value>Enter an item name.</value></data>
@@ -819,6 +820,10 @@
   <data name="main.reregister.previewUnsupported" xml:space="preserve"><value>Device reregistration is unavailable in preview mode.</value></data>
   <data name="main.reregister.cartNotEmpty" xml:space="preserve"><value>Clear the current cart before changing store registration.</value></data>
   <data name="main.reregister.syncPending" xml:space="preserve"><value>Complete pending order sync before changing store registration.</value></data>
+  <data name="linkly.recovery.openAttemptBlocksPayment" xml:space="preserve"><value>This POS has an unfinished card transaction. Resolve it in Card Recovery before taking another card payment, so the customer is not charged twice.</value></data>
+  <data name="cardRecovery.auto.recoveredOrders" xml:space="preserve"><value>{0} approved card payment(s) from before the restart were recovered into orders automatically.</value></data>
+  <data name="main.reregister.cardRecoveryPending" xml:space="preserve"><value>Resolve the unfinished card transactions in Card Recovery before changing store registration.</value></data>
+  <data name="main.reregister.cardRecoveryUnknown" xml:space="preserve"><value>Could not check for unfinished card transactions, so store registration cannot be changed right now. Try again.</value></data>
   <data name="main.reregister.submitted" xml:space="preserve"><value>Store switch submitted. Re-register this device to continue.</value></data>
   <data name="main.reregister.cancelled" xml:space="preserve"><value>Store registration change cancelled.</value></data>
   <data name="main.suspendedUnavailable" xml:space="preserve"><value>Suspended order service is not available.</value></data>
@@ -881,7 +886,12 @@
   <data name="dailyClose.linklySettlement.reprintFailed" xml:space="preserve"><value>Linkly settlement reprint failed: {0}</value></data>
   <data name="dailyClose.linklySettlement.submission" xml:space="preserve"><value>Submission</value></data>
   <data name="dailyClose.linklySettlement.manual.title" xml:space="preserve"><value>Supervisor resolution</value></data>
-  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>For an unresolved Local IP or Cloud Direct settlement only. This never sends another settlement.</value></data>
+  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>For an unresolved Linkly settlement only. This never sends another settlement.</value></data>
+  <data name="dailyClose.linklySettlement.query.button" xml:space="preserve"><value>Query result from Linkly</value></data>
+  <data name="dailyClose.linklySettlement.query.hint" xml:space="preserve"><value>Look up this settlement on the Linkly server and record its result. This never sends another settlement.</value></data>
+  <data name="dailyClose.linklySettlement.query.resolved" xml:space="preserve"><value>The Linkly settlement result was found and recorded. No new settlement was sent.</value></data>
+  <data name="dailyClose.linklySettlement.query.unresolved" xml:space="preserve"><value>The Linkly settlement result is still unavailable. If the terminal shows the result, record the supervisor decision below.</value></data>
+  <data name="dailyClose.linklySettlement.blockedEarlierBusinessDay" xml:space="preserve"><value>An unresolved Linkly settlement from {0:yyyy-MM-dd} must be resolved first, so today's settlement was not sent. Change the business date to {0:yyyy-MM-dd}, open the Linkly Settlement tab, then query the result or record the supervisor decision.</value></data>
   <data name="dailyClose.linklySettlement.manual.succeeded" xml:space="preserve"><value>Confirmed succeeded</value></data>
   <data name="dailyClose.linklySettlement.manual.failed" xml:space="preserve"><value>Confirmed failed</value></data>
   <data name="dailyClose.linklySettlement.manual.notSubmitted" xml:space="preserve"><value>Confirmed not submitted</value></data>
@@ -1112,6 +1122,17 @@
   <data name="cardRecovery.linkly.supervisorWaiting" xml:space="preserve"><value>The payment remains locked. Run recovery again after the bank result is available.</value></data>
   <data name="cardRecovery.linkly.paymentAlreadyFinalized" xml:space="preserve"><value>The selected payment has already been finalized and cannot be changed.</value></data>
   <data name="cardRecovery.linkly.paymentEvidenceExists" xml:space="preserve"><value>Bank payment evidence already exists. Run recovery instead.</value></data>
+  <data name="cardRecovery.linkly.resolveLivePending" xml:space="preserve"><value>Linkly is still processing this card transaction, so it cannot be closed as paid or not paid yet. Choose Continue waiting and try again after the terminal shows a result.</value></data>
+  <data name="cardRecovery.linkly.resolveLiveQueryFailed" xml:space="preserve"><value>POS could not check the final result with Linkly or the card terminal, so the decision was not saved. Check the network or terminal connection and try again; until then only Continue waiting is available.</value></data>
+  <data name="cardRecovery.linkly.resolveLiveApproved" xml:space="preserve"><value>Linkly reports that this card transaction was approved (the customer was charged), so it cannot be closed as not paid. Run recovery so POS can handle the approved payment.</value></data>
+  <data name="cardRecovery.linkly.resolveLiveNotApproved" xml:space="preserve"><value>Linkly reports that this card transaction was not approved (no charge was made), so it cannot be closed as paid. Choose Confirmed not paid if the payment is being abandoned.</value></data>
+  <data name="cardRecovery.linkly.approvedClosedRestored" xml:space="preserve"><value>The supervisor closed this approved card transaction as refunded or handled elsewhere. The original order has been restored and can be paid again.</value></data>
+  <data name="cardRecovery.linkly.approvedClosedCleared" xml:space="preserve"><value>The supervisor closed this approved card transaction as refunded or handled elsewhere. It has been cleared.</value></data>
+  <data name="cardRecovery.linkly.activeSessionApprovedOrderPending" xml:space="preserve"><value>The previous Linkly transaction was approved, but its order has not been saved yet. Recover that transaction in Card Recovery before taking another payment.</value></data>
+  <data name="cardRecovery.linkly.activeSessionApprovedOrphan" xml:space="preserve"><value>The previous Linkly transaction was approved (the customer was charged) but this POS has no order for it. Do not charge again. Ask a supervisor to review it in Card Recovery.</value></data>
+  <data name="cardRecovery.center.action.closeApprovedHandled" xml:space="preserve"><value>Refunded or handled elsewhere, close</value></data>
+  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the evidence field, then close this record here. A supervisor note is optional.</value></data>
+  <data name="cardRecovery.payment.field.approvedEvidence" xml:space="preserve"><value>Refund or handling evidence (required, for example the refund reference)</value></data>
   <data name="cardRecovery.linkly.notPaidPaymentReferenceNotAllowed" xml:space="preserve"><value>Do not enter a payment reference when confirming that no payment was processed.</value></data>
   <data name="cardRecovery.linkly.supervisorNotPaidRestored" xml:space="preserve"><value>The bank confirmed that no payment was processed. The original order has been restored and can be paid again.</value></data>
   <data name="cardRecovery.linkly.supervisorPaidNoDraft" xml:space="preserve"><value>The supervisor confirmed the previous payment. The session is cleared, but no local order draft was available; reconcile the order before continuing.</value></data>
@@ -1572,4 +1593,23 @@
   <data name="cardRecovery.v2.outcome.notProcessed.refund" xml:space="preserve"><value>No refund was made. The return stays open for a new refund.</value></data>
   <data name="cardRecovery.v2.outcome.notProcessed.sale" xml:space="preserve"><value>No charge was made. The order can be paid again.</value></data>
   <data name="cardRecovery.v2.outcome.waiting" xml:space="preserve"><value>Keep the transaction locked and check again later. A supervisor note is required.</value></data>
+  <data name="payment.card.squareRefundAccepted" xml:space="preserve"><value>Square accepted the refund and is returning it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed.</value></data>
+  <data name="cardRecovery.center.transactionStatus.settlementPending" xml:space="preserve"><value>Square is settling the refund</value></data>
+  <data name="cardRecovery.center.transactionStatus.settlementRejected" xml:space="preserve"><value>Refund rejected by Square</value></data>
+  <data name="cardRecovery.settlement.pending" xml:space="preserve"><value>Square accepted this refund and is still settling it. No action is needed; the status updates automatically.</value></data>
+  <data name="cardRecovery.settlement.completed" xml:space="preserve"><value>Square completed the refund. The money is on its way to the customer&apos;s card.</value></data>
+  <data name="cardRecovery.settlement.rejected" xml:space="preserve"><value>Square did not complete this refund. Refund the customer by cash or another method, then confirm it here.</value></data>
+  <data name="cardRecovery.settlement.onlyAcknowledge" xml:space="preserve"><value>Square rejected this refund after the return was completed. Only &quot;Refunded by other means&quot; applies.</value></data>
+  <data name="cardRecovery.settlement.acknowledged" xml:space="preserve"><value>Recorded: the customer was refunded by other means.</value></data>
+  <data name="cardRecovery.settlement.acknowledgeFailed" xml:space="preserve"><value>The refund status changed. Refresh and try again.</value></data>
+  <data name="cardRecovery.settlement.action.refundedOther" xml:space="preserve"><value>Refunded by other means</value></data>
+  <data name="cardRecovery.settlement.banner.rejected.title" xml:space="preserve"><value>Square rejected this refund.</value></data>
+  <data name="cardRecovery.settlement.banner.rejected.body" xml:space="preserve"><value>The customer has not received this money. Refund them by cash or another method, then tap &quot;Refunded by other means&quot;.</value></data>
+  <data name="cardRecovery.settlement.banner.pending.title" xml:space="preserve"><value>The return is complete. Square is settling the refund.</value></data>
+  <data name="cardRecovery.settlement.banner.pending.body" xml:space="preserve"><value>Square accepted the refund and is sending it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed and no action is required.</value></data>
+  <data name="cardRecovery.settlement.step.returnCompleted" xml:space="preserve"><value>Return completed</value></data>
+  <data name="cardRecovery.settlement.step.settling" xml:space="preserve"><value>Square settling to card</value></data>
+  <data name="cardRecovery.settlement.instructions" xml:space="preserve"><value>Refund the customer by cash or another method first, then record it here. Optionally add a note, such as how much was paid and the receipt number.</value></data>
+  <data name="cardRecovery.settlement.field.note" xml:space="preserve"><value>Note (optional)</value></data>
+  <data name="cardRecovery.settlement.outcome.refundedOther" xml:space="preserve"><value>The customer was paid back by cash or another method.</value></data>
 </root>

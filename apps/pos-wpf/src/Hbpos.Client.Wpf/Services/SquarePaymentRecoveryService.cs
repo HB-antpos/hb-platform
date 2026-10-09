@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -59,9 +59,60 @@ public sealed class SquarePaymentRecoveryService(
     ILocalOrderRepository orderRepository,
     ILocalizationService? localization = null,
     FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
-    ISharedHeldOrderRepository? sharedHeldOrderRepository = null) : ISquarePaymentRecoveryService
+    ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
+    ISquareRefundSettlementService? refundSettlementService = null) : ISquarePaymentRecoveryService
 {
+    /// <summary>
+    /// 退货单已完成、退款仍在 Square 结算（PENDING）。只用于列表展示，不是数据库状态枚举。
+    /// </summary>
+    internal const string SettlementPendingStatus = "SettlementPending";
+
+    /// <summary>退货单已完成，但 Square 事后拒绝/失败了这笔退款，需要主管改用其他方式退给顾客。</summary>
+    internal const string SettlementRejectedStatus = "SettlementRejected";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static bool IsSettlementRefund(LocalSquarePaymentAttempt attempt) =>
+        attempt.Status == LocalSquarePaymentAttemptStatus.OrderCompleted &&
+        string.Equals(attempt.OperationKind, "Refund", StringComparison.OrdinalIgnoreCase);
+
+    // 把退款结算状态映射成列表状态；其余记录保持原有状态文本。
+    private static string DisplayStatus(LocalSquarePaymentAttempt attempt)
+    {
+        if (IsSettlementRefund(attempt))
+        {
+            if (SquareRefundSettlementStatuses.IsPending(attempt.PaymentStatus))
+            {
+                return SettlementPendingStatus;
+            }
+
+            if (SquareRefundSettlementStatuses.IsUnhandledFailure(attempt.PaymentStatus))
+            {
+                return SettlementRejectedStatus;
+            }
+        }
+
+        return string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal)
+            ? CardRecoveryPhases.FinalizePending
+            : attempt.Status.ToString();
+    }
+
+    private async Task<IReadOnlyList<LocalSquarePaymentAttempt>> GetSettlementFailuresAsync(
+        PosSessionState session,
+        string environment,
+        CancellationToken cancellationToken)
+    {
+        var settlements = await RunLocalStoreAsync(
+            () => attemptRepository.GetRefundSettlementsAsync(
+                session.StoreCode,
+                session.DeviceCode,
+                environment,
+                cancellationToken),
+            cancellationToken);
+        return settlements
+            .Where(item => SquareRefundSettlementStatuses.IsUnhandledFailure(item.PaymentStatus))
+            .ToArray();
+    }
 
     private readonly ISharedHeldOrderPaymentSourceResolver? _heldOrderPaymentSourceResolver =
         sharedHeldOrderRepository is null
@@ -157,33 +208,7 @@ public sealed class SquarePaymentRecoveryService(
         var open = await ListOpenAsync(session, cancellationToken);
         var openKeys = open.Select(item => item.Key).ToHashSet();
         var recent = attempts
-            .Select(attempt => new CardRecoveryQueueItem(
-                CardProcessorKind.Square,
-                attempt.AttemptGuid,
-                attempt.OperationKind,
-                attempt.Amount,
-                attempt.StoreCode,
-                attempt.DeviceCode,
-                attempt.CashierId,
-                attempt.Environment,
-                string.Equals(
-                    attempt.RecoveryPhase,
-                    CardRecoveryPhases.FinalizePending,
-                    StringComparison.Ordinal)
-                    ? CardRecoveryPhases.FinalizePending
-                    : attempt.Status.ToString(),
-                attempt.CreatedAt,
-                attempt.UpdatedAt,
-                attempt.OrderDraftJson,
-                null,
-                null,
-                attempt.CheckoutId,
-                attempt.ResponseCode,
-                attempt.ResponseText,
-                null,
-                attempt.PaymentId,
-                attempt.OperationGuid,
-                attempt.PaymentStatus))
+            .Select(ToQueueItem)
             .Select(item => item with { IsOpen = openKeys.Contains(item.Key) })
             .ToArray();
         return open.Concat(recent.Where(item => !openKeys.Contains(item.Key)))
@@ -202,36 +227,41 @@ public sealed class SquarePaymentRecoveryService(
                 settings.Environment.ToString(),
                 cancellationToken),
             cancellationToken);
+        // 退货单已完成但 Square 事后拒绝的退款也需要主管处理（改用其他方式退给顾客），一并列入待处理。
+        var settlementFailures = await GetSettlementFailuresAsync(
+            session,
+            settings.Environment.ToString(),
+            cancellationToken);
         return attempts
-            .Select(attempt => new CardRecoveryQueueItem(
-                CardProcessorKind.Square,
-                attempt.AttemptGuid,
-                attempt.OperationKind,
-                attempt.Amount,
-                attempt.StoreCode,
-                attempt.DeviceCode,
-                attempt.CashierId,
-                attempt.Environment,
-                string.Equals(
-                    attempt.RecoveryPhase,
-                    CardRecoveryPhases.FinalizePending,
-                    StringComparison.Ordinal)
-                    ? CardRecoveryPhases.FinalizePending
-                    : attempt.Status.ToString(),
-                attempt.CreatedAt,
-                attempt.UpdatedAt,
-                attempt.OrderDraftJson,
-                null,
-                null,
-                attempt.CheckoutId,
-                attempt.ResponseCode,
-                attempt.ResponseText,
-                null,
-                attempt.PaymentId,
-                attempt.OperationGuid,
-                attempt.PaymentStatus))
+            .Concat(settlementFailures)
+            .Select(ToQueueItem)
+            .OrderByDescending(item => item.UpdatedAt)
             .ToArray();
     }
+
+    private static CardRecoveryQueueItem ToQueueItem(LocalSquarePaymentAttempt attempt) =>
+        new(
+            CardProcessorKind.Square,
+            attempt.AttemptGuid,
+            attempt.OperationKind,
+            attempt.Amount,
+            attempt.StoreCode,
+            attempt.DeviceCode,
+            attempt.CashierId,
+            attempt.Environment,
+            DisplayStatus(attempt),
+            attempt.CreatedAt,
+            attempt.UpdatedAt,
+            attempt.OrderDraftJson,
+            null,
+            null,
+            attempt.CheckoutId,
+            attempt.ResponseCode,
+            attempt.ResponseText,
+            null,
+            attempt.PaymentId,
+            attempt.OperationGuid,
+            attempt.PaymentStatus);
 
     public async Task<CardPaymentRecoveryResult> RecoverAttemptAsync(
         Guid attemptGuid,
@@ -249,6 +279,14 @@ public sealed class SquarePaymentRecoveryService(
             !string.Equals(attempt.Environment, settings.Environment.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             return CardPaymentRecoveryResult.None;
+        }
+
+        // 退货单已完成的退款：只查询同一笔退款的结算结果，绝不重新发起退款，也不再改动退货单。
+        if (IsSettlementRefund(attempt) &&
+            (SquareRefundSettlementStatuses.IsPending(attempt.PaymentStatus) ||
+             SquareRefundSettlementStatuses.IsUnhandledFailure(attempt.PaymentStatus)))
+        {
+            return await RecoverRefundSettlementAsync(attempt, session, cancellationToken);
         }
 
         // 普通终态不可再恢复；唯一例外是旧版本/崩溃留下的精确退款失败中间态，
@@ -291,6 +329,11 @@ public sealed class SquarePaymentRecoveryService(
                 "The unresolved attempt no longer matches this terminal and cannot be changed.");
         }
 
+        if (IsSettlementRefund(attempt) && SquareRefundSettlementStatuses.IsUnhandledFailure(attempt.PaymentStatus))
+        {
+            return await AcknowledgeSettlementFailureAsync(attempt, decision, reason, evidence, session, cancellationToken);
+        }
+
         if (string.Equals(attempt.OperationKind, "Refund", StringComparison.OrdinalIgnoreCase))
         {
             var refundResult = await ResolveRefundAsync(
@@ -323,6 +366,98 @@ public sealed class SquarePaymentRecoveryService(
             cart,
             session,
             cancellationToken);
+    }
+
+    private async Task<CardPaymentRecoveryResult> RecoverRefundSettlementAsync(
+        LocalSquarePaymentAttempt attempt,
+        PosSessionState session,
+        CancellationToken cancellationToken)
+    {
+        var details = BuildRefundDialogDetails(attempt);
+        if (SquareRefundSettlementStatuses.IsUnhandledFailure(attempt.PaymentStatus))
+        {
+            // Square 已拒绝：状态已固化，不再查询；提示主管改用其他方式退给顾客并在人工核对里确认。
+            return new CardPaymentRecoveryResult(
+                CardPaymentRecoveryOutcome.Unknown,
+                T("cardRecovery.settlement.rejected", "Square did not complete this refund. Refund the customer by cash or another method, then confirm it here."),
+                DialogDetails: details,
+                RefundDetails: BuildRefundDetails(attempt));
+        }
+
+        if (refundSettlementService is null)
+        {
+            return new CardPaymentRecoveryResult(
+                CardPaymentRecoveryOutcome.Checking,
+                T("cardRecovery.settlement.pending", "Square accepted this refund and is still settling it. No action is needed; the status updates automatically."),
+                DialogDetails: details,
+                RefundDetails: BuildRefundDetails(attempt));
+        }
+
+        var result = await refundSettlementService.CheckPendingAsync(session, attempt.AttemptGuid, cancellationToken);
+        if (result.Completed > 0)
+        {
+            return new CardPaymentRecoveryResult(
+                CardPaymentRecoveryOutcome.Checking,
+                T("cardRecovery.settlement.completed", "Square completed the refund. The money is on its way to the customer's card."),
+                DialogDetails: details,
+                RefundDetails: BuildRefundDetails(attempt));
+        }
+
+        if (result.Failed > 0)
+        {
+            return new CardPaymentRecoveryResult(
+                CardPaymentRecoveryOutcome.Unknown,
+                T("cardRecovery.settlement.rejected", "Square did not complete this refund. Refund the customer by cash or another method, then confirm it here."),
+                DialogDetails: details,
+                RefundDetails: BuildRefundDetails(attempt));
+        }
+
+        return new CardPaymentRecoveryResult(
+            CardPaymentRecoveryOutcome.Checking,
+            T("cardRecovery.settlement.pending", "Square accepted this refund and is still settling it. No action is needed; the status updates automatically."),
+            DialogDetails: details,
+            RefundDetails: BuildRefundDetails(attempt));
+    }
+
+    private async Task<CardRecoveryResolutionResult> AcknowledgeSettlementFailureAsync(
+        LocalSquarePaymentAttempt attempt,
+        CardRecoverySupervisorDecision decision,
+        string reason,
+        string? evidence,
+        PosSessionState session,
+        CancellationToken cancellationToken)
+    {
+        if (decision != CardRecoverySupervisorDecision.ConfirmProcessed)
+        {
+            return new CardRecoveryResolutionResult(
+                false,
+                T("cardRecovery.settlement.onlyAcknowledge", "Square rejected this refund after the return was completed. Only \"Refunded by other means\" applies."),
+                LockRetained: true);
+        }
+
+        if (refundSettlementService is null)
+        {
+            return new CardRecoveryResolutionResult(false, "Refund settlement tracking is unavailable.", LockRetained: true);
+        }
+
+        var note = string.Join(
+            " ",
+            new[] { reason, evidence }.Where(text => !string.IsNullOrWhiteSpace(text)).Select(text => text!.Trim()));
+        var acknowledged = await refundSettlementService.AcknowledgeFailureAsync(
+            attempt.AttemptGuid,
+            session,
+            note,
+            cancellationToken);
+        return acknowledged
+            ? new CardRecoveryResolutionResult(
+                true,
+                T("cardRecovery.settlement.acknowledged", "Recorded: the customer was refunded by other means."),
+                ResolutionPersisted: true,
+                ResolutionApplied: true)
+            : new CardRecoveryResolutionResult(
+                false,
+                T("cardRecovery.settlement.acknowledgeFailed", "The refund status changed. Refresh and try again."),
+                LockRetained: true);
     }
 
     private async Task<CardRecoveryResolutionResult> ResolveSquareSaleAsync(
@@ -1856,50 +1991,6 @@ public sealed class SquarePaymentRecoveryService(
                 RefundDetails: BuildRefundDetails(attempt));
         }
 
-        if (string.Equals(refund.Status, "PENDING", StringComparison.OrdinalIgnoreCase))
-        {
-            var recorded = await RunLocalStoreAsync(
-                () => attemptRepository.TryRecordRefundResponseAsync(
-                    attempt.AttemptGuid,
-                    attempt.Status,
-                    attempt.UpdatedAt,
-                    attempt.SubmissionToken!,
-                    refund.RefundId,
-                    refund.Status,
-                    DateTimeOffset.UtcNow,
-                    CancellationToken.None),
-                CancellationToken.None);
-            if (!recorded)
-            {
-                var winner = await RunLocalStoreAsync(
-                    () => attemptRepository.GetAttemptAsync(attempt.AttemptGuid, CancellationToken.None),
-                    CancellationToken.None);
-                if (winner is not null &&
-                    (winner.Status != attempt.Status ||
-                     winner.UpdatedAt != attempt.UpdatedAt ||
-                     !string.Equals(winner.RecoveryPhase, attempt.RecoveryPhase, StringComparison.Ordinal)))
-                {
-                    return await ResolveSquareRefundWriteWinnerAsync(
-                        cart,
-                        session,
-                        winner,
-                        CancellationToken.None);
-                }
-
-                return new CardPaymentRecoveryResult(
-                    CardPaymentRecoveryOutcome.Unknown,
-                    T("cardRecovery.refund.requiresReview", "A previous card refund is still unresolved. Do not refund again; ask a supervisor to reconcile Square and the original sale."),
-                    DialogDetails: BuildRefundDialogDetails(attempt),
-                    RefundDetails: BuildRefundDetails(attempt));
-            }
-
-            return new CardPaymentRecoveryResult(
-                CardPaymentRecoveryOutcome.Checking,
-                T("cardRecovery.refund.squarePending", "Square is still processing the refund. Do not refund again; run recovery later."),
-                DialogDetails: BuildRefundDialogDetails(attempt),
-                RefundDetails: BuildRefundDetails(attempt));
-        }
-
         if (string.Equals(refund.Status, "FAILED", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(refund.Status, "REJECTED", StringComparison.OrdinalIgnoreCase))
         {
@@ -1959,7 +2050,11 @@ public sealed class SquarePaymentRecoveryService(
                 CancellationToken.None);
         }
 
-        if (!string.Equals(refund.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase))
+        // Square 官方定义 PENDING 为“已受理、正在划款并退回原卡”（多数几小时内完成，最长 14 天），
+        // 与 COMPLETED 一样完成退货单；PaymentStatus 保留 PENDING，交给退款结算跟踪继续查询最终结果。
+        var isAcceptedPending = string.Equals(refund.Status, "PENDING", StringComparison.OrdinalIgnoreCase);
+        if (!isAcceptedPending &&
+            !string.Equals(refund.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase))
         {
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Unknown,
@@ -1968,6 +2063,9 @@ public sealed class SquarePaymentRecoveryService(
                 RefundDetails: BuildRefundDetails(attempt));
         }
 
+        var verifiedResponseText = isAcceptedPending
+            ? "Square accepted the refund; settlement is pending."
+            : "Square refund status confirmed by lookup.";
         var completedAt = DateTimeOffset.UtcNow;
         var persisted = await RunLocalStoreAsync(
             () => attemptRepository.TryMarkRefundPaymentVerifiedAsync(
@@ -1976,9 +2074,9 @@ public sealed class SquarePaymentRecoveryService(
                 attempt.UpdatedAt,
                 attempt.SubmissionToken!,
                 refund.RefundId,
-                refund.Status,
+                refund.Status.ToUpperInvariant(),
                 responseCode: null,
-                responseText: "Square refund status confirmed by lookup.",
+                responseText: verifiedResponseText,
                 completedAt,
                 CancellationToken.None),
             CancellationToken.None);
@@ -2009,9 +2107,9 @@ public sealed class SquarePaymentRecoveryService(
         var verifiedAttempt = attempt with
         {
             Status = LocalSquarePaymentAttemptStatus.PaymentVerified,
-            PaymentStatus = refund.Status,
+            PaymentStatus = refund.Status.ToUpperInvariant(),
             ResponseCode = null,
-            ResponseText = "Square refund status confirmed by lookup.",
+            ResponseText = verifiedResponseText,
             CompletedAt = completedAt,
             UpdatedAt = completedAt,
             RecoveryPhase = CardRecoveryPhases.FinalizePending,

@@ -434,6 +434,8 @@ public static class ServiceRegistration
         services.AddSingleton<ICashPaymentWorkflowService, CashPaymentWorkflowService>();
         services.AddSingleton<CardPaymentRecoveryService>();
         services.AddSingleton<ISquarePaymentRecoveryService, SquarePaymentRecoveryService>();
+        // 已完成退货的 Square 退款结算跟踪（只查询同一笔退款，不发起退款）。
+        services.AddSingleton<ISquareRefundSettlementService, SquareRefundSettlementService>();
         services.AddSingleton<ICardPaymentRecoveryService, CardPaymentRecoveryCoordinator>();
         services.AddSingleton<ISuspendedOrderService, SuspendedOrderService>();
         services.AddSingleton<IRemoteOrderHistoryService, RemoteOrderHistoryService>();
@@ -619,7 +621,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<ILinklyTerminalDialogPresenter>(),
             sp.GetRequiredService<ICardPaymentRecoveryService>(),
             sp.GetRequiredService<ICardRecoveryResultDialogService>(),
-            sp.GetRequiredService<ILinklyFallbackPromptCoordinator>()));
+            sp.GetRequiredService<ILinklyFallbackPromptCoordinator>(),
+            sp.GetRequiredService<ISquareRefundSettlementService>()));
 
         services.AddSingleton<IPrintFacade>(sp => new PrintFacade(
             sp.GetRequiredService<IReceiptPrintService>(),

@@ -85,7 +85,8 @@ public sealed class CashPaymentWorkflowService(
     ISquarePaymentAttemptContextAccessor? squarePaymentAttemptContextAccessor = null,
     ILinklyBackendTerminalClient? linklyBackendTerminalClient = null,
     IEnumerable<ICardPaymentResultPolicy>? cardPaymentResultPolicies = null,
-    ISharedHeldOrderRepository? sharedHeldOrderRepository = null) : ICashPaymentWorkflowService
+    ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
+    Func<TimeSpan, CancellationToken, Task>? acknowledgeRetryDelayAsync = null) : ICashPaymentWorkflowService
 {
     private static readonly JsonSerializerOptions CardAttemptJsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -841,6 +842,24 @@ public sealed class CashPaymentWorkflowService(
         (LocalCardPaymentAttempt? Attempt, bool Reused, bool RequiresRecovery) cardAttemptSelection =
             (null, false, false);
         (LocalSquarePaymentAttempt? Attempt, bool Reused) squareAttemptSelection = (null, false);
+        if (!isRefund && settingsSnapshot?.Processor == CardProcessorKind.Linkly)
+        {
+            // 新扣款闸门：本机仍有未结的 Linkly 销售（结果未知、已批准未落单……）时不能再向终端发起扣款。
+            // LocalIp/CloudDirectSync 过去没有任何闸门；CloudBackendAsync 之间互相有服务端会话闸门兜底（并保留接管流程）。
+            var openAttemptBlocksPayment = await RunLocalStoreAsync(
+                () => HasBlockingOpenLinklyAttemptAsync(
+                    settingsSnapshot,
+                    session,
+                    persistenceCancellationToken),
+                persistenceCancellationToken);
+            if (openAttemptBlocksPayment)
+            {
+                return CreateCardFailureResult(
+                    OpenCardAttemptBlocksPaymentStatusKey,
+                    "This POS has an unfinished card transaction. Resolve it in Card Recovery before taking another card payment.");
+            }
+        }
+
         if (settingsSnapshot?.Processor == CardProcessorKind.Linkly)
         {
             cardAttemptSelection = await RunLocalStoreAsync(
@@ -1668,9 +1687,14 @@ public sealed class CashPaymentWorkflowService(
         var reference = isRefund
             ? CardRefundReference.Format(authorization.Reference, referenceText!)
             : authorization.Reference;
+        // Square 退款已受理但仍在结算（PENDING）：退货照常完成，付款页提示“已受理、无需刷卡、通常几小时内完成”。
+        var isAcceptedPendingSquareRefund = isRefund &&
+            string.Equals(authorization.StatusKey, ConfiguredCardTerminalClient.SquareRefundAcceptedStatusKey, StringComparison.Ordinal);
         var successStatusKey = authorization.FallbackSucceeded
             ? "payment.linklyFallback.succeeded"
-            : approvedStatusKey;
+            : isAcceptedPendingSquareRefund
+                ? ConfiguredCardTerminalClient.SquareRefundAcceptedStatusKey
+                : approvedStatusKey;
         var successStatusMessage = authorization.FallbackSucceeded
             ? string.Format(
                 CultureInfo.CurrentCulture,
@@ -1678,7 +1702,9 @@ public sealed class CashPaymentWorkflowService(
                 FormatLinklyModeDisplayName(authorization.RequestedConnectionMode),
                 FormatLinklyModeDisplayName(authorization.ActualConnectionMode),
                 T("payment.linklyFallback.promotePrimary"))
-            : null;
+            : isAcceptedPendingSquareRefund
+                ? authorization.Message
+                : null;
 
         return PaymentTenderAttemptResult.Success(
             new PaymentTender(
@@ -2098,6 +2124,88 @@ public sealed class CashPaymentWorkflowService(
         }
     }
 
+    /// <summary>付款页因本机未结刷卡交易而拒绝新扣款时使用的状态键；不是“结果未知”，不会锁住付款页。</summary>
+    internal const string OpenCardAttemptBlocksPaymentStatusKey = "linkly.recovery.openAttemptBlocksPayment";
+
+    private static readonly LocalCardPaymentAttemptStatus[] SettledAttemptStatuses =
+    [
+        LocalCardPaymentAttemptStatus.Declined,
+        LocalCardPaymentAttemptStatus.TimedOut,
+        LocalCardPaymentAttemptStatus.Cancelled,
+        LocalCardPaymentAttemptStatus.Failed,
+        LocalCardPaymentAttemptStatus.OrderCompleted,
+        LocalCardPaymentAttemptStatus.Abandoned
+    ];
+
+    /// <summary>
+    /// 本机是否还有会阻止新扣款的未结 Linkly 记录：销售或活动会话处于非终态（Pending/SessionStarted/Recovering/
+    /// RequiresReview/Approved，含已批准未落单的孤儿批准），或终态化仍卡在 FinalizePending。
+    /// 只差 ack 的记录（订单已完成未确认、明确失败未确认）不阻止——它们由接管/自动恢复静默补 ack，不涉及资金风险。
+    /// 当前模式是 CloudBackendAsync 时，同为 CloudBackendAsync 的未结记录由服务端会话闸门 + 接管流程处理（保持原行为）；
+    /// 其余组合（本地/直连的未结记录，或换了连接模式后遗留的记录）服务端看不见，只能靠这里拦截。
+    /// 读取失败按失败关闭，宁可让收银员去异常中心确认，也不冒重复扣款的风险。
+    /// </summary>
+    private async Task<bool> HasBlockingOpenLinklyAttemptAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        CancellationToken cancellationToken)
+    {
+        var mode = CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode);
+        if (settings.Processor != CardProcessorKind.Linkly ||
+            cardPaymentAttemptRepository is null ||
+            (mode != LinklyConnectionMode.CloudBackendAsync &&
+             mode != LinklyConnectionMode.LocalIp &&
+             mode != LinklyConnectionMode.CloudDirectSync))
+        {
+            return false;
+        }
+
+        IReadOnlyList<LocalCardPaymentAttempt> openAttempts;
+        try
+        {
+            openAttempts = await cardPaymentAttemptRepository.GetOpenAttemptsAsync(
+                session.StoreCode,
+                session.DeviceCode,
+                settings.Environment.ToString(),
+                cancellationToken);
+        }
+        catch (NotSupportedException)
+        {
+            // 仓储没有接线未结队列（精简实现/测试替身）：没有可核对的数据，不阻断。
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
+        {
+            LogCardRecoveryWarning("open-attempt-gate", null, ex);
+            return true;
+        }
+
+        var serverGateCoversBackendAttempts = mode == LinklyConnectionMode.CloudBackendAsync;
+        var blocker = openAttempts.FirstOrDefault(attempt =>
+            IsBlockingForNewCardPayment(attempt) &&
+            !(serverGateCoversBackendAttempts && IsCloudBackendAsyncAttempt(attempt)));
+        if (blocker is not null)
+        {
+            ConsoleLog.Write(
+                "CardRecovery",
+                $"new card payment blocked by open attempt attemptGuid={blocker.AttemptGuid} kind={blocker.OperationKind} status={blocker.Status} phase={blocker.RecoveryPhase} sessionId={LogValue(blocker.SessionId)} txnRef={LogValue(blocker.TxnRef)}");
+        }
+
+        return blocker is not null;
+    }
+
+    private static bool IsBlockingForNewCardPayment(LocalCardPaymentAttempt attempt)
+    {
+        if (!string.Equals(attempt.Processor, CardProcessorKind.Linkly.ToString(), StringComparison.OrdinalIgnoreCase) ||
+            attempt.OperationKind is not ("Sale" or "ActiveSession"))
+        {
+            return false;
+        }
+
+        return string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal) ||
+            !SettledAttemptStatuses.Contains(attempt.Status);
+    }
+
     private async Task<(
         LocalCardPaymentAttempt? Attempt,
         bool Reused,
@@ -2168,11 +2276,14 @@ public sealed class CashPaymentWorkflowService(
         var attempt = new LocalCardPaymentAttempt(
             attemptGuid,
             null,
-            // LocalIp 引用只绑定已落库 attempt 身份；Cloud 退款继续沿用既有原交易派生规则。
+            // LocalIp 与 CloudBackendAsync 的退款引用都只绑定已落库 attempt 身份：后端模式把 attempt 身份作为 AttemptGuid
+            // 交给后端，后端用同一算法派生出相同的 R 引用。过去后端退款用本地随机 GUID，POST 已受理而响应丢失时，
+            // 订单会话关联不上本地退款 attempt，出现两条互不关联的记录，主管误判“未退款”重试会重复退款。
+            // 直连模式的退款引用仍沿用既有规则。
             // 销售在三种模式下都必须在发请求前确定引用并随 attempt 落库：CloudBackendAsync 过去等服务端生成，
             // 请求发出后一旦断电或响应丢失，这一行 SessionId 与 TxnRef 皆空，自动恢复和主管结案都无法认领它。
             isRefund
-                ? mode == LinklyConnectionMode.LocalIp
+                ? mode is LinklyConnectionMode.LocalIp or LinklyConnectionMode.CloudBackendAsync
                     ? LinklyLocalTxnRef.Create('R', attemptGuid.ToString("D"))
                     : BuildRefundTxnRef(referenceText)
                 : LinklyLocalTxnRef.Create('P', attemptGuid.ToString("D")),
@@ -3103,7 +3214,32 @@ public sealed class CashPaymentWorkflowService(
         }
     }
 
+    private CardAcknowledgeRetryQueue? _acknowledgeRetryQueue;
+
+    private CardAcknowledgeRetryQueue AcknowledgeRetryQueue =>
+        LazyInitializer.EnsureInitialized(
+            ref _acknowledgeRetryQueue,
+            () => new CardAcknowledgeRetryQueue(
+                TryAcknowledgeCompletedCardAttemptAsync,
+                acknowledgeRetryDelayAsync));
+
+    /// <summary>等待后台 ack 重试链结束（测试使用）。</summary>
+    internal Task WaitForAcknowledgeRetriesAsync() => AcknowledgeRetryQueue.WhenIdleAsync();
+
     private async Task AcknowledgeCompletedCardAttemptAsync(
+        Guid attemptGuid,
+        CancellationToken cancellationToken)
+    {
+        if (!await TryAcknowledgeCompletedCardAttemptAsync(attemptGuid, cancellationToken))
+        {
+            // 订单/失败结果已经落库，ack 只是释放 Linkly 会话；失败后后台按退避重试，
+            // 否则服务端会话停在“终态未确认”，同设备下一笔 Cloud 刷卡的接管会被拒。
+            AcknowledgeRetryQueue.Schedule(attemptGuid);
+        }
+    }
+
+    /// <returns>true 表示已确认或无事可做；false 表示 ack 失败，需要重试。</returns>
+    private async Task<bool> TryAcknowledgeCompletedCardAttemptAsync(
         Guid attemptGuid,
         CancellationToken cancellationToken)
     {
@@ -3112,7 +3248,7 @@ public sealed class CashPaymentWorkflowService(
         var attemptRepository = cardPaymentAttemptRepository;
         if (backendTerminalClient is null || settingsProvider is null || attemptRepository is null)
         {
-            return;
+            return true;
         }
 
         var attempt = await RunLocalStoreAsync(
@@ -3122,7 +3258,7 @@ public sealed class CashPaymentWorkflowService(
             attempt.AcknowledgedAt is not null ||
             string.IsNullOrWhiteSpace(attempt.SessionId))
         {
-            return;
+            return true;
         }
 
         var sessionId = attempt.SessionId;
@@ -3136,7 +3272,7 @@ public sealed class CashPaymentWorkflowService(
             mode != LinklyConnectionMode.CloudBackendAsync ||
             !Enum.TryParse<CardTerminalEnvironment>(attempt.Environment, ignoreCase: true, out var environment))
         {
-            return;
+            return true;
         }
 
         try
@@ -3152,6 +3288,7 @@ public sealed class CashPaymentWorkflowService(
                     DateTimeOffset.UtcNow,
                     cancellationToken),
                 cancellationToken);
+            return true;
         }
         catch (Exception ex) when (
             ex is not OperationCanceledException and
@@ -3161,6 +3298,7 @@ public sealed class CashPaymentWorkflowService(
             ConsoleLog.Write(
                 "CardRecovery",
                 $"payment completion acknowledge failed attemptGuid={attemptGuid} sessionId={sessionId} error={ex.GetType().Name}");
+            return false;
         }
     }
 
@@ -3247,6 +3385,34 @@ public sealed class CashPaymentWorkflowService(
             {
                 return LinklyActiveSessionTakeoverResult.Failed(
                     "The previous Linkly approval evidence does not match the persisted transaction and was not acknowledged.");
+            }
+
+            if (IsLocallyFinalized(activeAttempt))
+            {
+                // 本地已经终态化（订单已完成/明确失败），只是上一次 ack 没成功：
+                // 终态一致时只补 ack，绝不再写 session/outcome（TryUpdateSession 的 CAS 拒绝终态是对的，不能放宽）；
+                // 终态矛盾（例如本地已建单但 Linkly 报拒绝）则不 ack，留给异常中心人工核对。
+                if (!LocalFinalizedOutcomeMatches(activeAttempt, outcome))
+                {
+                    return LinklyActiveSessionTakeoverResult.Failed(
+                        "The previous Linkly result differs from the result already saved on this POS and was not acknowledged. Resolve it in Card Recovery before charging again.");
+                }
+
+                await linklyBackendTerminalClient.AcknowledgeSessionAsync(
+                    settings,
+                    finalStatus.SessionId,
+                    cancellationToken);
+                if (activeAttempt.AcknowledgedAt is null)
+                {
+                    await RunLocalStoreAsync(
+                        () => cardPaymentAttemptRepository.MarkAcknowledgedAsync(
+                            activeAttempt.AttemptGuid,
+                            DateTimeOffset.UtcNow,
+                            CancellationToken.None),
+                        CancellationToken.None);
+                }
+
+                return LinklyActiveSessionTakeoverResult.Success;
             }
 
             if (isGenericActiveSession &&
@@ -3394,6 +3560,45 @@ public sealed class CashPaymentWorkflowService(
 
                 return txnMatches[0];
             }
+
+            // 分期付款/还款的 attempt 不在异常中心的未结队列里（它们由分期自己的恢复流程处理）。
+            // 后端模式下分期的 TxnRef 在发请求前就由 attempt 身份派生，这里按它精确认领遗留会话，
+            // 让接管把会话终态落到分期自己的 attempt 上，而不是另建一条来源不明的 ActiveSession。
+            var installmentAttempts = await RunLocalStoreAsync(
+                () => cardPaymentAttemptRepository!.GetUnacknowledgedInstallmentAttemptsAsync(
+                    session.StoreCode,
+                    session.DeviceCode,
+                    settings.Environment.ToString(),
+                    CancellationToken.None),
+                CancellationToken.None);
+            var installmentMatches = installmentAttempts
+                .Where(candidate =>
+                    string.Equals(NormalizeOptional(candidate.TxnRef), normalizedTxnRef, StringComparison.Ordinal) &&
+                    (string.IsNullOrWhiteSpace(candidate.SessionId) ||
+                     string.Equals(NormalizeOptional(candidate.SessionId), normalizedSessionId, StringComparison.Ordinal)))
+                .Take(2)
+                .ToArray();
+            if (installmentMatches.Length > 1)
+            {
+                throw new InvalidOperationException("Multiple installment Linkly attempts match the active TxnRef.");
+            }
+
+            if (installmentMatches.Length == 1)
+            {
+                return installmentMatches[0];
+            }
+        }
+
+        // 已终态且已不在未结队列里的 Sale/Refund（例如主管确认已付款时只有 TxnRef、会话从未被 ack，
+        // 本地订单早已建好）：必须关联到它，否则会再造一条 generic 批准记录，与已入账订单重复并永久挂在异常中心。
+        var settledMatch = await FindSettledAttemptForActiveSessionAsync(
+            settings,
+            session,
+            normalizedSessionId,
+            normalizedTxnRef);
+        if (settledMatch is not null)
+        {
+            return settledMatch;
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -3424,6 +3629,66 @@ public sealed class CashPaymentWorkflowService(
             () => cardPaymentAttemptRepository!.CreateOrGetActiveSessionAsync(attempt, CancellationToken.None),
             CancellationToken.None);
     }
+
+    private async Task<LocalCardPaymentAttempt?> FindSettledAttemptForActiveSessionAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        string sessionId,
+        string? txnRef)
+    {
+        // GetRecentAttemptsAsync 只覆盖最近 200 条：刚刚发生的上一笔一定在里面，更早的对不上就按原逻辑处理。
+        var recent = await RunLocalStoreAsync(
+            () => cardPaymentAttemptRepository!.GetRecentAttemptsAsync(
+                session.StoreCode,
+                session.DeviceCode,
+                settings.Environment.ToString(),
+                CancellationToken.None),
+            CancellationToken.None);
+        var matches = recent
+            .Where(candidate =>
+                candidate.OperationKind is "Sale" or "Refund" &&
+                string.Equals(candidate.Processor, CardProcessorKind.Linkly.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                IsLocallyFinalized(candidate) &&
+                (string.Equals(NormalizeOptional(candidate.SessionId), sessionId, StringComparison.Ordinal) ||
+                 (txnRef is not null &&
+                  NormalizeOptional(candidate.SessionId) is null &&
+                  string.Equals(NormalizeOptional(candidate.TxnRef), txnRef, StringComparison.Ordinal))))
+            .OrderByDescending(candidate => candidate.UpdatedAt)
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return null;
+        }
+
+        var matched = matches[0];
+        if (txnRef is not null &&
+            NormalizeOptional(matched.TxnRef) is { } matchedTxnRef &&
+            !string.Equals(matchedTxnRef, txnRef, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The active Linkly SessionId matches an attempt with a different TxnRef.");
+        }
+
+        return matched;
+    }
+
+    // 本地已经耐久终态化：订单已完成、明确失败或主管已放弃，且不在 FinalizePending 收尾中。
+    private static bool IsLocallyFinalized(LocalCardPaymentAttempt attempt) =>
+        attempt.Status is
+            LocalCardPaymentAttemptStatus.OrderCompleted or
+            LocalCardPaymentAttemptStatus.Declined or
+            LocalCardPaymentAttemptStatus.TimedOut or
+            LocalCardPaymentAttemptStatus.Cancelled or
+            LocalCardPaymentAttemptStatus.Failed or
+            LocalCardPaymentAttemptStatus.Abandoned &&
+        !string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal);
+
+    // 本地终态必须与 Linkly 的最终结果一致才允许只补 ack：订单已完成对应已批准，其余终态对应未批准。
+    private static bool LocalFinalizedOutcomeMatches(
+        LocalCardPaymentAttempt attempt,
+        LocalCardPaymentAttemptStatus remoteOutcome) =>
+        attempt.Status == LocalCardPaymentAttemptStatus.OrderCompleted
+            ? remoteOutcome == LocalCardPaymentAttemptStatus.Approved
+            : remoteOutcome != LocalCardPaymentAttemptStatus.Approved;
 
     private static bool IsTerminalActiveSessionStatus(LinklyCloudBackendSessionResponse status)
     {

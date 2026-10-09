@@ -4767,8 +4767,9 @@ public sealed class CashPaymentWorkflowServiceTests
     }
 
     [Fact]
-    public async Task Cloud_ordinary_refund_persists_and_submits_legacy_32_hex_txn_ref()
+    public async Task Cloud_backend_ordinary_refund_persists_and_submits_the_attempt_derived_refund_txn_ref()
     {
+        // 后端模式退款引用由 attempt 身份派生（后端用同一算法派生出相同的 R 引用），POST 响应丢失后订单会话才能关联到本地退款 attempt。
         var cart = CreateReturnCart(4m);
         var attempts = new RecordingCardPaymentAttemptRepository();
         LocalCardPaymentAttempt? persistedAtSubmission = null;
@@ -4797,9 +4798,47 @@ public sealed class CashPaymentWorkflowServiceTests
         Assert.NotNull(persistedAtSubmission);
         Assert.Equal(LinklyConnectionMode.CloudBackendAsync.ToString(), persistedAtSubmission.ConnectionMode);
         Assert.Equal("R", persistedAtSubmission.TxnType);
+        Assert.Matches("^R[0-9ABCDEFGHJKMNPQRSTVWXYZ]{15}$", persistedAtSubmission.TxnRef!);
+        Assert.Equal(
+            LinklyLocalTxnRef.Create('R', persistedAtSubmission.AttemptGuid.ToString("D")),
+            persistedAtSubmission.TxnRef);
+        Assert.Equal(persistedAtSubmission.TxnRef, terminal.LastIdempotencyKey);
+    }
+
+    [Fact]
+    public async Task Cloud_direct_ordinary_refund_keeps_the_legacy_32_hex_txn_ref()
+    {
+        // 直连模式不经后端，退款引用沿用既有规则，不随后端派生算法变化。
+        var cart = CreateReturnCart(4m);
+        var attempts = new RecordingCardPaymentAttemptRepository();
+        LocalCardPaymentAttempt? persistedAtSubmission = null;
+        var terminal = new RecordingIdempotentCardRefundClient(
+            new PaymentAuthorizationResult(true, "ANZ:CLOUD-REFUND", "APPROVED", AuthorizedAmount: 4m),
+            () => persistedAtSubmission = attempts.Attempts.SingleOrDefault());
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardPaymentAttemptRepository: attempts,
+            cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(
+                CreateBackendLinklySettings() with { LinklyConnectionMode = LinklyConnectionMode.CloudDirectSync }));
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            actualAmount: -4m,
+            currentTenders: [],
+            amountText: "4",
+            referenceText: "ANZ:CLOUD-SALE",
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded, result.StatusMessage);
+        Assert.NotNull(persistedAtSubmission);
+        Assert.Equal(LinklyConnectionMode.CloudDirectSync.ToString(), persistedAtSubmission.ConnectionMode);
         Assert.Matches("^[0-9a-f]{32}$", persistedAtSubmission.TxnRef!);
         Assert.Equal(persistedAtSubmission.TxnRef, terminal.LastIdempotencyKey);
-        Assert.DoesNotMatch("^[PR][0-9ABCDEFGHJKMNPQRSTVWXYZ]{15}$", terminal.LastIdempotencyKey!);
     }
 
     [Fact]
@@ -5024,12 +5063,63 @@ public sealed class CashPaymentWorkflowServiceTests
             cartSnapshot: cart.CreateSnapshot());
 
         Assert.False(first.Succeeded);
+        // 没有 Square 退款处理中证据的未知结果仍显示通用“结果无法确认”提示。
+        Assert.Equal("Card terminal result could not be confirmed. Recovery is required.", first.StatusMessage);
         Assert.False(afterRestart.Succeeded);
         Assert.Equal("payment.card.resultUnknown", afterRestart.StatusKey);
         Assert.Equal(LocalSquarePaymentAttemptStatus.Unknown, persistedAttempt.Status);
         Assert.Equal(persistedAttempt.IdempotencyKey, terminal.LastIdempotencyKey);
         Assert.Equal(1, terminal.IdempotentRefundCallCount);
         Assert.Single(attempts.Attempts);
+    }
+
+    [Fact]
+    public async Task Square_refund_accepted_while_pending_completes_the_tender_with_the_accepted_message()
+    {
+        const string acceptedMessage =
+            "Square accepted the refund and is returning it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed.";
+        var cart = CreateReturnCart(4m);
+        var attempts = new RecordingSquarePaymentAttemptRepository();
+        var terminal = new RecordingIdempotentCardRefundClient(
+            new PaymentAuthorizationResult(
+                true,
+                "SQRF:refund-still-pending",
+                acceptedMessage,
+                AuthorizedAmount: 4m,
+                CardTransactions:
+                [
+                    new CardTransactionDto(
+                        "Square", "refund-still-pending", null, null, null, null, null, null,
+                        "PENDING", null, DateTimeOffset.UtcNow, 4m, null)
+                ],
+                StatusKey: "payment.card.squareRefundAccepted"));
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
+            squarePaymentAttemptRepository: attempts);
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            actualAmount: -4m,
+            currentTenders: [],
+            amountText: "4",
+            referenceText: "SQ:payment-1",
+            cartSnapshot: cart.CreateSnapshot());
+
+        var persistedAttempt = Assert.Single(attempts.Attempts);
+        // 已受理的 PENDING 退款与 COMPLETED 一样生成负数卡 tender，不再锁进异常中心；提示说明已受理、无需刷卡。
+        Assert.True(result.Succeeded);
+        Assert.Equal("payment.card.squareRefundAccepted", result.StatusKey);
+        Assert.Equal(acceptedMessage, result.StatusMessage);
+        Assert.Equal(-4m, result.Tender?.Amount);
+        Assert.Equal(LocalSquarePaymentAttemptStatus.PaymentVerified, persistedAttempt.Status);
+        Assert.Equal("PENDING", persistedAttempt.PaymentStatus);
+        Assert.Equal(1, terminal.IdempotentRefundCallCount);
     }
 
     [Theory]

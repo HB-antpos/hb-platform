@@ -165,7 +165,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             () => ResolveSelectedAsync(
                 CardRecoverySupervisorDecision.ConfirmProcessed,
                 "resolve/confirm-paid"),
-            CanResolveSelection);
+            CanResolveWithoutApprovedEvidence);
         ConfirmNotPaidCommand = new AsyncRelayCommand(
             () => ResolveSelectedAsync(
                 CardRecoverySupervisorDecision.ConfirmNotProcessed,
@@ -175,7 +175,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             () => ResolveSelectedAsync(
                 CardRecoverySupervisorDecision.ContinueWaiting,
                 "resolve/continue-waiting"),
-            CanResolveSelection);
+            CanResolveWithoutApprovedEvidence);
         if (_localization is not null)
         {
             _localization.CultureChanged += OnCultureChanged;
@@ -330,7 +330,11 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         : IsPaymentSelection
             ? T("cardRecovery.payment.section.title", "Supervisor payment reconciliation")
             : T("cardRecovery.center.resolution.title", "Supervisor resolution");
-    public string ResolutionInstructionsText => IsSquareRefundSelection
+    public string ResolutionInstructionsText => IsSettlementRejectedSelection
+        ? T(
+            "cardRecovery.settlement.instructions",
+            "Refund the customer by cash or another method first, then record it here. Optionally add a note, such as how much was paid and the receipt number.")
+        : IsSquareRefundSelection
         ? T(
             "cardRecovery.refund.section.squareInstructions",
             "Check the Square refund record before choosing an outcome. Confirm refunded requires a real Square refund reference; confirm not refunded requires bank evidence; continue waiting requires a supervisor note.")
@@ -338,6 +342,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             ? T(
                 "cardRecovery.refund.section.instructions",
                 "Check the bank or terminal record before choosing one outcome. The refund remains locked until a supervisor decision is saved.")
+            : IsPaymentSelection && IsApprovedEvidenceSelection
+                ? T(
+                    "cardRecovery.payment.section.approvedInstructions",
+                    "This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the evidence field, then close this record here. A supervisor note is optional.")
             : IsPaymentSelection
                 ? T(
                     "cardRecovery.payment.section.instructions",
@@ -345,7 +353,9 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                 : T(
                     "cardRecovery.center.resolution.instructions",
                     "Confirm the bank or terminal evidence for this selected transaction. Each manual decision requires one-time supervisor authorization.");
-    public string ResolutionReasonLabelText => IsSquareRefundSelection
+    public string ResolutionReasonLabelText => IsSettlementRejectedSelection
+        ? T("cardRecovery.settlement.field.note", "Note (optional)")
+        : IsSquareRefundSelection
         ? T(
             "cardRecovery.refund.field.squareNote",
             "Supervisor note (required when continuing to wait)")
@@ -360,6 +370,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         ? T(
             "cardRecovery.refund.field.evidence",
             "Bank evidence (required when no refund was processed)")
+        : IsPaymentSelection && IsApprovedEvidenceSelection
+            ? T(
+                "cardRecovery.payment.field.approvedEvidence",
+                "Refund or handling evidence (required, for example the refund reference)")
         : IsPaymentSelection
             ? T(
                 "cardRecovery.payment.field.evidence",
@@ -451,7 +465,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
     private async Task RecoverSelectedAsync()
     {
         var selected = SelectedAttempt;
-        if (selected is null || !selected.IsOpen || IsBusy)
+        if (selected is null || !CanRecover(selected) || IsBusy)
         {
             return;
         }
@@ -522,15 +536,48 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         }
     }
 
-    private bool CanOperateOnSelection() => !IsBusy && SelectedAttempt is { IsOpen: true };
+    // 未结交易可恢复；退货单已完成、Square 仍在结算的退款也可以手动查询一次最新结果。
+    private static bool CanRecover(CardRecoveryQueueItem attempt) =>
+        attempt.IsOpen || IsSettlementPending(attempt);
+
+    private bool CanOperateOnSelection() => !IsBusy && SelectedAttempt is { } attempt && CanRecover(attempt);
+
+    internal static bool IsSettlementPending(CardRecoveryQueueItem? attempt) =>
+        attempt is not null &&
+        StatusIs(attempt.Status, SquarePaymentRecoveryService.SettlementPendingStatus);
+
+    internal static bool IsSettlementRejected(CardRecoveryQueueItem? attempt) =>
+        attempt is not null &&
+        StatusIs(attempt.Status, SquarePaymentRecoveryService.SettlementRejectedStatus);
 
     private bool CanResolveSelection() =>
         !IsBusy &&
         SelectedAttempt is { IsOpen: true } attempt &&
         IsSupervisorResolutionAllowed(attempt);
 
+    // 已带批准证据（扣款已发生）的记录只剩“确认已退款/另行处理后关闭”这一个出口：
+    // 确认已付款应走恢复建单，继续等待也没有意义（结果已经确定）。
+    private bool CanResolveWithoutApprovedEvidence() =>
+        CanResolveSelection() && !IsApprovedEvidenceSelection;
+
+    private bool IsApprovedEvidenceSelection =>
+        SelectedAttempt is { } attempt && HasApprovedPaymentEvidence(attempt);
+
+    internal static bool HasApprovedPaymentEvidence(CardRecoveryQueueItem attempt) =>
+        attempt.Processor == CardProcessorKind.Linkly &&
+        (string.Equals(attempt.OperationKind, "Sale", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(attempt.OperationKind, "ActiveSession", StringComparison.OrdinalIgnoreCase)) &&
+        (StatusIs(attempt.Status, nameof(LocalCardPaymentAttemptStatus.Approved)) ||
+         LinklyApprovalResponseCodes.IsApproved(attempt.ResponseCode));
+
     private static bool IsSupervisorResolutionAllowed(CardRecoveryQueueItem attempt)
     {
+        // Square 拒绝了已完成退货的退款：主管只能确认“已用其他方式退给顾客”。
+        if (IsSettlementRejected(attempt))
+        {
+            return true;
+        }
+
         if (string.Equals(
                 attempt.Status,
                 CardRecoveryPhases.FinalizePending,
@@ -564,7 +611,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                 nameof(LocalCardPaymentAttemptStatus.Pending),
                 nameof(LocalCardPaymentAttemptStatus.SessionStarted),
                 nameof(LocalCardPaymentAttemptStatus.Recovering),
-                nameof(LocalCardPaymentAttemptStatus.RequiresReview));
+                nameof(LocalCardPaymentAttemptStatus.RequiresReview)) ||
+                // 已批准却无法自动建单（Approved）的记录：主管可确认已退款/另行处理后关闭。
+                (StatusIs(attempt.Status, nameof(LocalCardPaymentAttemptStatus.Approved)) &&
+                 HasApprovedPaymentEvidence(attempt));
         }
 
         if (attempt.Processor != CardProcessorKind.Square)
@@ -596,6 +646,8 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
 
     private static bool HasSquareRefundPaymentEvidence(CardRecoveryQueueItem attempt) =>
         attempt.Processor == CardProcessorKind.Square &&
+        !IsSettlementPending(attempt) &&
+        !IsSettlementRejected(attempt) &&
         string.Equals(attempt.OperationKind, "Refund", StringComparison.OrdinalIgnoreCase) &&
         (Normalize(attempt.PaymentId) is not null || Normalize(attempt.PaymentStatus) is not null);
 
@@ -1091,6 +1143,8 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             "paymentverified" => "cardRecovery.center.transactionStatus.paymentVerified",
             // Provider 队列会把该阶段放入 Status；它不是数据库状态枚举。
             "finalizepending" => "cardRecovery.status.finalizePending",
+            "settlementpending" => "cardRecovery.center.transactionStatus.settlementPending",
+            "settlementrejected" => "cardRecovery.center.transactionStatus.settlementRejected",
             _ => "cardRecovery.center.transactionStatus.unknown"
         };
         return T(key, key switch
@@ -1110,6 +1164,8 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             "cardRecovery.center.transactionStatus.checkoutCompleted" => "Checkout completed",
             "cardRecovery.center.transactionStatus.paymentVerified" => "Payment verified",
             "cardRecovery.status.finalizePending" => "Finalization pending",
+            "cardRecovery.center.transactionStatus.settlementPending" => "Square is settling the refund",
+            "cardRecovery.center.transactionStatus.settlementRejected" => "Refund rejected by Square",
             _ => "Unknown"
         });
     }

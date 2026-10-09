@@ -85,7 +85,8 @@ public sealed class InstallmentOperationService(
     ILocalSquarePaymentAttemptRepository? squarePaymentAttemptRepository = null,
     ISquarePaymentAttemptContextAccessor? squarePaymentAttemptContextAccessor = null,
     FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
-    ISquareTerminalPaymentClient? squareTerminalPaymentClient = null) : IInstallmentOperationService
+    ISquareTerminalPaymentClient? squareTerminalPaymentClient = null,
+    ILinklyBackendTerminalClient? linklyBackendTerminalClient = null) : IInstallmentOperationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan ApiClaimLease = TimeSpan.FromMinutes(2);
@@ -830,6 +831,7 @@ public sealed class InstallmentOperationService(
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "中央补款已提交，本地快照正在恢复。", RequiresReview: true);
         }
 
+        await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
         return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(true, response, local, response.Message);
     }
 
@@ -1386,6 +1388,8 @@ public sealed class InstallmentOperationService(
                 {
                     await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Declined, CancellationToken.None);
                 }
+                // 明确拒绝同样会留下未确认的终态会话，不 ack 会让下一笔刷卡被 409 拦下。
+                await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
                 return TerminalReady.Failed(authorization.Message ?? "银行卡未获批准。");
             }
 
@@ -1482,7 +1486,12 @@ public sealed class InstallmentOperationService(
                 attempt = new LocalCardPaymentAttempt(
                     attemptGuid,
                     null,
-                    mode == LinklyConnectionMode.LocalIp
+                    // 中文注释：LocalIp 与 CloudBackendAsync 都必须在发请求前确定引用并随 attempt 落库。
+                    // 后端模式过去为 null，POST 已受理而响应丢失（或断电）时，本地 attempt 既无 SessionId 也无 TxnRef，
+                    // 恢复无法按引用认领会话；现在与销售一致，由 LinklyBackendTerminalClient 把 attempt 身份作为
+                    // AttemptGuid 交给后端，后端用同一算法派生出相同引用。CloudDirectSync 的引用仍由直连客户端按
+                    // attempt 身份稳定派生并在拿到 session 后绑定，这里保持不变。
+                    mode is LinklyConnectionMode.LocalIp or LinklyConnectionMode.CloudBackendAsync
                         ? LinklyLocalTxnRef.Create('P', attemptGuid.ToString("D"))
                         : null,
                     CardProcessorKind.Linkly.ToString(),
@@ -1639,6 +1648,58 @@ public sealed class InstallmentOperationService(
         return TerminalAttemptScope.Empty;
     }
 
+    // 中文注释：后端模式下终端结果落定后，会话仍会占用该设备/终端，直到 POS 确认（ack）。销售在落单后 ack，
+    // 分期过去从不 ack：每笔分期刷卡之后，下一笔刷卡都会先被 409 拦下，并被迫接管出一条来源不明的待复核记录。
+    // 只在本地已持久化终态（完成，或终端明确拒绝）之后调用；ack 失败只记日志，不改变分期操作状态，
+    // 下一次刷卡的活动会话接管仍是兜底。
+    private async Task TryAcknowledgeLinklyBackendSessionAsync(Guid operationGuid)
+    {
+        if (linklyBackendTerminalClient is null ||
+            cardTerminalSettingsProvider is null ||
+            cardPaymentAttemptRepository is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var attemptGuid = DeterministicGuid($"installment-linkly:{operationGuid:D}");
+            var attempt = await cardPaymentAttemptRepository.GetAttemptAsync(attemptGuid, CancellationToken.None);
+            if (attempt is null ||
+                attempt.AcknowledgedAt is not null ||
+                string.IsNullOrWhiteSpace(attempt.SessionId) ||
+                !Enum.TryParse<CardTerminalEnvironment>(attempt.Environment, ignoreCase: true, out var environment))
+            {
+                return;
+            }
+
+            var settings = await cardTerminalSettingsProvider.GetSettingsAsync(CancellationToken.None);
+            var mode = CardTerminalSettings.NormalizeLinklyConnectionMode(
+                attempt.ConnectionMode,
+                CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode));
+            // LocalIp 本身没有后端会话；已绑定 SessionId 说明实际回退到了后端异步链路（与销售的判断一致）。
+            if (mode == LinklyConnectionMode.LocalIp)
+            {
+                mode = LinklyConnectionMode.CloudBackendAsync;
+            }
+
+            if (settings.Processor != CardProcessorKind.Linkly || mode != LinklyConnectionMode.CloudBackendAsync)
+            {
+                return;
+            }
+
+            await linklyBackendTerminalClient.AcknowledgeSessionAsync(
+                settings with { Environment = environment },
+                attempt.SessionId,
+                CancellationToken.None);
+            await cardPaymentAttemptRepository.MarkAcknowledgedAsync(attempt.AttemptGuid, DateTimeOffset.UtcNow, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
+        {
+            LogOperationIssue(operationGuid, "linkly-backend-ack", "Not acknowledged", exception);
+        }
+    }
+
     private static bool RequiresLinklyPurchaseRecoveryForCurrentMode(
         LocalCardPaymentAttempt attempt,
         LinklyConnectionMode mode)
@@ -1702,6 +1763,7 @@ public sealed class InstallmentOperationService(
             {
                 return new InstallmentOperationResult<InstallmentCreateResponse>(false, Message: "创建结果已提交，正在安全对账，请勿重复收款。", RequiresReview: true);
             }
+            await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
             return new InstallmentOperationResult<InstallmentCreateResponse>(true, response, local, response.Message);
         }
         catch (OperationCanceledException exception)
@@ -1744,6 +1806,7 @@ public sealed class InstallmentOperationService(
             {
                 return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(false, Message: "补款结果已提交，正在安全对账，请勿重复收款。", RequiresReview: true);
             }
+            await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
             return new InstallmentOperationResult<InstallmentAppendPaymentResponse>(true, response, local, response.Message);
         }
         catch (OperationCanceledException exception)
@@ -2192,6 +2255,7 @@ public sealed class InstallmentOperationService(
             if (terminalRecovery.Rejected)
             {
                 await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.Failed, DateTimeOffset.UtcNow, failureMessage: "终端明确拒绝或取消。", cancellationToken: CancellationToken.None);
+                await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
                 return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "终端已明确拒绝或取消，可重新操作。");
             }
 
@@ -2403,6 +2467,7 @@ public sealed class InstallmentOperationService(
             {
                 await repository.TryTransitionAsync(operation.OperationGuid, [LocalInstallmentOperationState.ResultUnknown], LocalInstallmentOperationState.Failed, DateTimeOffset.UtcNow, failureMessage: "终端明确拒绝或取消。", cancellationToken: CancellationToken.None);
                 await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Declined, CancellationToken.None);
+                await TryAcknowledgeLinklyBackendSessionAsync(operation.OperationGuid);
                 return new InstallmentOperationRecoveryResult(operation.OperationGuid, operation.Kind, LocalInstallmentOperationState.Failed, false, "终端已明确拒绝或取消，可重新操作。");
             }
 

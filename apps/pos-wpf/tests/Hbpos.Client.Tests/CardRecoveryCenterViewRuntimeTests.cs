@@ -81,6 +81,75 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
             }
         });
 
+    [Theory]
+    [InlineData(1366, 768, "en-US")]
+    [InlineData(1024, 768, "zh-CN")]
+    public Task Settlement_states_render_with_their_own_banner_actions_and_steps(int width, int height, string culture) =>
+        host.RunAsync(async _ =>
+        {
+            var localization = new LocalizationService();
+            localization.SetCulture(culture);
+            LocalizationResourceProvider.Instance.Configure(localization);
+            var applier = new WpfColorThemeApplier();
+            applier.Apply(PosColorTheme.Blue);
+            try
+            {
+                var orderJson = """{"orderGuid":"89bfe0a9-0720-4028-ba30-64f8a4a0bfea","session":{"cashierName":"storemanager"}}""";
+                var rejected = CreateItem(CardProcessorKind.Square, "Refund", 12.50m, "SettlementRejected", Now.AddMinutes(-3)) with
+                {
+                    PaymentId = "REFUND-REJECTED-1",
+                    PaymentStatus = "REJECTED",
+                    OrderDraftJson = orderJson
+                };
+                var pending = CreateItem(CardProcessorKind.Square, "Refund", 0.50m, "SettlementPending", Now.AddMinutes(-20)) with
+                {
+                    IsOpen = false,
+                    PaymentId = "REFUND-PENDING-1",
+                    PaymentStatus = "PENDING",
+                    OrderDraftJson = orderJson
+                };
+                using var viewModel = new CardRecoveryCenterViewModel(
+                    new FakeRecoveryService([rejected, pending]),
+                    new PosCartService(),
+                    CreateSession(),
+                    new AllowingAuthorizationService(),
+                    localization);
+                await viewModel.LoadAsync();
+                var view = new CardRecoveryCenterView { DataContext = viewModel };
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+
+                // 被 Square 拒绝：待处理里只有它，详情提示改用其他方式退款，人工核对只剩一个结果。
+                Assert.Equal(rejected.Key, viewModel.SelectedAttempt?.Key);
+                Assert.True(viewModel.CanShowSupervisorResolution);
+                AssertCommandButtonOnScreen(view, viewModel.OpenManualCommand, width, height);
+                SaveScreenshot(view, width, height, $"settlement-rejected-{culture}");
+
+                viewModel.IsManualExpanded = true;
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                var confirm = FindCommandButton(view, viewModel.ConfirmPaidCommand);
+                Assert.True(confirm.ActualHeight >= 48);
+                Assert.DoesNotContain(
+                    PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(view),
+                    button => ReferenceEquals(button.Command, viewModel.ContinueWaitingCommand) && button.ActualHeight > 0);
+                SaveScreenshot(view, width, height, $"settlement-rejected-sheet-{culture}");
+                viewModel.IsManualExpanded = false;
+
+                // 结算中：在“已处理”里，可手动查询，没有主管操作。
+                viewModel.FilterCommand.Execute("resolved");
+                viewModel.SelectedRow = viewModel.OpenAttemptRows.Single(row => row.Key == pending.Key);
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                AssertCommandButtonOnScreen(view, viewModel.RecoverCommand, width, height);
+                SaveScreenshot(view, width, height, $"settlement-pending-{culture}");
+            }
+            finally
+            {
+                applier.Apply(PosColorTheme.Default);
+            }
+        });
+
     private static Button FindCommandButton(DependencyObject view, ICommand command) =>
         Assert.Single(PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(view)
             .Where(button => ReferenceEquals(button.Command, command) && button.ActualHeight > 0));

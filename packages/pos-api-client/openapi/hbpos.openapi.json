@@ -10443,6 +10443,28 @@
         },
         "additionalProperties": false
       },
+      "LinklyCloudBackendLateFinalResultDto": {
+        "type": "object",
+        "properties": {
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "transactionSuccess": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "responseCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "responseText": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "LinklyCloudBackendLogonTestResponse": {
         "type": "object",
         "properties": {
@@ -10732,6 +10754,9 @@
           },
           "cardTransaction": {
             "$ref": "#/components/schemas/LinklyCloudBackendCardTransactionDto"
+          },
+          "lateFinalResult": {
+            "$ref": "#/components/schemas/LinklyCloudBackendLateFinalResultDto"
           }
         },
         "additionalProperties": false

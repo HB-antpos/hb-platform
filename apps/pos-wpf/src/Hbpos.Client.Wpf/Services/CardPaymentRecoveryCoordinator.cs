@@ -188,6 +188,17 @@ public sealed class CardPaymentRecoveryCoordinator(
         }
     }
 
+    public async Task<CardAutoRecoverySummary> AutoRecoverDeterministicAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default)
+    {
+        await ReplaySupervisorAuditAsync(cancellationToken);
+        var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
+        return settings.Processor == CardProcessorKind.Linkly
+            ? await linklyRecoveryService.AutoRecoverDeterministicAsync(session, cancellationToken)
+            : CardAutoRecoverySummary.None;
+    }
+
     public async Task<CardPaymentRecoveryResult> RecoverAsync(
         CardRecoveryAttemptKey key,
         PosCartService cart,
