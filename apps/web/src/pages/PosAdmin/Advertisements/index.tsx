@@ -73,7 +73,7 @@ import {
   getScopeSelectionState,
 } from './storeBrandFilter'
 import { readMediaDimensions } from './mediaDimensions'
-import { suggestOrientationFromSize, toMediaSize } from './orientation'
+import { resolveOrientationAfterUpload, toMediaSize } from './orientation'
 import {
   ADVERTISEMENT_ORIENTATION_VALUES,
   DisplayPreview,
@@ -216,8 +216,6 @@ export default function AdvertisementsPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null)
   // 「已按尺寸自动选择」标签：上传后按宽高自动预选时为 true，管理员手动改动后消失。
   const [orientationAutoSelected, setOrientationAutoSelected] = useState(false)
-  // 管理员是否在本次编辑里手动点选过版式；手动选择优先，之后再上传也不自动覆盖。
-  const orientationTouchedRef = useRef(false)
   const mainListRequestGuardRef = useRef(createLatestRequestGuard())
   const mountedRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -357,7 +355,6 @@ export default function AdvertisementsPage() {
     setEditingId(null)
     setStoreBrandKey(null)
     setOrientationAutoSelected(false)
-    orientationTouchedRef.current = false
     editorForm.resetFields()
     editorForm.setFieldsValue({
       mediaType: 'Image',
@@ -388,9 +385,8 @@ export default function AdvertisementsPage() {
       const detail: AdvertisementDetailDto = await getAdvertisementById(id)
       setEditingId(id)
       setStoreBrandKey(null)
-      // 编辑已有广告：沿用记录里的版式（service 已把缺省兜底为 Any），不按尺寸自动改。
+      // 打开编辑弹窗：沿用记录里的版式（service 已把缺省兜底为 Any）；只有重新上传素材才会按新尺寸预选。
       setOrientationAutoSelected(false)
-      orientationTouchedRef.current = false
       editorForm.setFieldsValue({
         title: detail.title,
         description: detail.description,
@@ -422,7 +418,6 @@ export default function AdvertisementsPage() {
     setEditingId(null)
     setUploading(false)
     setOrientationAutoSelected(false)
-    orientationTouchedRef.current = false
     editorForm.resetFields()
   }
 
@@ -464,19 +459,15 @@ export default function AdvertisementsPage() {
         mediaHeight: dimensions?.height ?? null,
       }
 
-      // 自动预选版式：仅新建、且管理员未手动选过时生效（宽 > 高 → 横版，否则竖版）。
-      // 编辑已有广告沿用记录里的版式，不自动改；手动选择后再上传也不覆盖。
-      if (!editingId && !orientationTouchedRef.current) {
-        const suggested = suggestOrientationFromSize(dimensions?.width, dimensions?.height)
-        if (suggested) {
-          nextValues.orientation = suggested
-          setOrientationAutoSelected(true)
-        } else if (orientationAutoSelected) {
-          // 上一次是按旧素材自动选的，新素材读不到尺寸：清空让管理员重新选择，避免沿用过期的推断。
-          nextValues.orientation = undefined
-          setOrientationAutoSelected(false)
-        }
-      }
+      // 每次上传成功都按新素材预选版式（新建 / 编辑一致，即使之前手动选过）；读不到宽高时保持当前版式。
+      // 只打开编辑弹窗不会走到这里，记录里的版式保持不变。
+      const nextOrientation = resolveOrientationAfterUpload(
+        editorForm.getFieldValue('orientation'),
+        dimensions?.width,
+        dimensions?.height,
+      )
+      nextValues.orientation = nextOrientation.orientation
+      setOrientationAutoSelected(nextOrientation.autoSelected)
 
       if (mediaType === 'Image') {
         nextValues.thumbnailUrl = mediaUrl
@@ -1016,10 +1007,7 @@ export default function AdvertisementsPage() {
                   >
                     <OrientationSegmented
                       disabled={!access.canEditAdvertisements}
-                      onUserChange={() => {
-                        orientationTouchedRef.current = true
-                        setOrientationAutoSelected(false)
-                      }}
+                      onUserChange={() => setOrientationAutoSelected(false)}
                     />
                   </Form.Item>
                   <OrientationHelp />
