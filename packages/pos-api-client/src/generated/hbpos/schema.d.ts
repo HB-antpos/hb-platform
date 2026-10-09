@@ -6821,6 +6821,8 @@ export interface components {
             /** Format: uuid */
             terminalId?: string | null;
             terminalDisplayName?: string | null;
+            /** Format: date-time */
+            createdAt?: string | null;
             cardTransaction?: components["schemas"]["LinklyCloudBackendCardTransactionDto"];
             lateFinalResult?: components["schemas"]["LinklyCloudBackendLateFinalResultDto"];
         };

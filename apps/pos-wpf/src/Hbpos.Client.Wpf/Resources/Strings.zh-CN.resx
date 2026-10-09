@@ -2484,7 +2484,12 @@
   <data name="dailyClose.linklySettlement.reprintFailed" xml:space="preserve"><value>Linkly 结算回单重打失败：{0}</value></data>
   <data name="dailyClose.linklySettlement.submission" xml:space="preserve"><value>提交状态</value></data>
   <data name="dailyClose.linklySettlement.manual.title" xml:space="preserve"><value>主管人工处理</value></data>
-  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>仅适用于未决的本地直连或云端直连结算；此操作绝不会再次发送结算。</value></data>
+  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>仅适用于未决的 Linkly 结算；此操作绝不会再次发送结算。</value></data>
+  <data name="dailyClose.linklySettlement.query.button" xml:space="preserve"><value>向 Linkly 查询结果</value></data>
+  <data name="dailyClose.linklySettlement.query.hint" xml:space="preserve"><value>到 Linkly 服务端查询这笔结算并记录结果；绝不会再次发送结算。</value></data>
+  <data name="dailyClose.linklySettlement.query.resolved" xml:space="preserve"><value>已查到并记录 Linkly 结算结果，没有发送新的结算。</value></data>
+  <data name="dailyClose.linklySettlement.query.unresolved" xml:space="preserve"><value>暂时查不到 Linkly 结算结果。如果刷卡机上能看到结果，请在下方记录主管决定。</value></data>
+  <data name="dailyClose.linklySettlement.blockedEarlierBusinessDay" xml:space="preserve"><value>{0:yyyy-MM-dd} 有一笔 Linkly 结算尚未处理，今天的结算没有发送。请把营业日切换到 {0:yyyy-MM-dd}，打开 Linkly 结算页签，先查询结果或记录主管决定，再发送今天的结算。</value></data>
   <data name="dailyClose.linklySettlement.manual.succeeded" xml:space="preserve"><value>确认结算成功</value></data>
   <data name="dailyClose.linklySettlement.manual.failed" xml:space="preserve"><value>确认结算失败</value></data>
   <data name="dailyClose.linklySettlement.manual.notSubmitted" xml:space="preserve"><value>确认未提交结算</value></data>

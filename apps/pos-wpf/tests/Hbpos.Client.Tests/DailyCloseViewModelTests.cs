@@ -1320,6 +1320,84 @@ public sealed class DailyCloseViewModelTests
         Assert.Equal("ConfirmedSucceeded", auditEvent.ReasonCode);
     }
 
+    [Fact]
+    public async Task Linkly_settlement_blocked_by_an_unresolved_earlier_business_day_names_the_date_and_the_next_step()
+    {
+        var yesterday = DateTime.Today.AddDays(-1);
+        var settlementService = new FakeLinklySettlementService
+        {
+            EarlierBusinessDayBlock = yesterday
+        };
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            operationAuditLogger: logger,
+            linklySettlementService: settlementService,
+            confirmLinklySettlementAsync: _ => Task.FromResult(true));
+
+        await viewModel.LoadAsync();
+        await viewModel.SettleAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, settlementService.SettleCallCount);
+        Assert.Contains($"{yesterday:yyyy-MM-dd}", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("today's settlement was not sent", viewModel.StatusMessage, StringComparison.Ordinal);
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal("EARLIER_BUSINESS_DAY_UNRESOLVED", auditEvent.ReasonCode);
+    }
+
+    [Fact]
+    public async Task Linkly_cloud_backend_unknown_settlement_offers_query_and_supervisor_resolution()
+    {
+        var settlementService = new FakeLinklySettlementService(
+            LocalLinklySettlementStatus.Unknown,
+            LinklyConnectionMode.CloudBackendAsync.ToString());
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            operationAuditLogger: logger,
+            linklySettlementService: settlementService);
+
+        await viewModel.LoadAsync();
+
+        // CloudBackendAsync 以前既不能查询补录，也没有主管结案通道。
+        Assert.True(viewModel.IsSettlementManualResolutionVisible);
+        Assert.True(viewModel.IsSettlementQueryVisible);
+        Assert.True(viewModel.QuerySettlementResultCommand.CanExecute(null));
+
+        await viewModel.QuerySettlementResultCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, settlementService.QueryCallCount);
+        Assert.Equal(0, settlementService.SettleCallCount);
+        Assert.Equal(LocalLinklySettlementStatus.Succeeded, viewModel.SelectedSettlement!.Status);
+        Assert.Contains("found and recorded", viewModel.StatusMessage, StringComparison.Ordinal);
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("QUERY_RESOLVED", auditEvent.ReasonCode);
+        Assert.False(viewModel.IsSettlementQueryVisible);
+    }
+
+    [Fact]
+    public async Task Linkly_local_ip_unknown_settlement_does_not_offer_the_cloud_query()
+    {
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            linklySettlementService: new FakeLinklySettlementService(
+                LocalLinklySettlementStatus.Unknown,
+                LinklyConnectionMode.LocalIp.ToString()));
+
+        await viewModel.LoadAsync();
+
+        Assert.True(viewModel.IsSettlementManualResolutionVisible);
+        Assert.False(viewModel.IsSettlementQueryVisible);
+        Assert.False(viewModel.QuerySettlementResultCommand.CanExecute(null));
+    }
+
     private static async Task OpenNewDailyCloseDraftAsync(DailyCloseViewModel viewModel)
     {
         await viewModel.CreateOrResumeDailyCloseCommand.ExecuteAsync(null);
@@ -1552,6 +1630,11 @@ public sealed class DailyCloseViewModelTests
 
         public int ResolveCallCount { get; private set; }
 
+        public int QueryCallCount { get; private set; }
+
+        // 设置后结算被前一营业日遗留的未决结算拦下，返回那天的未知记录。
+        public DateTime? EarlierBusinessDayBlock { get; init; }
+
         public Exception? SettleException { get; init; }
 
         public bool WaitForCancellation { get; init; }
@@ -1573,6 +1656,34 @@ public sealed class DailyCloseViewModelTests
             if (SettleException is not null)
             {
                 throw SettleException;
+            }
+
+            if (EarlierBusinessDayBlock is { } blockedDay)
+            {
+                var earlier = new LocalLinklySettlementRecord(
+                    Guid.NewGuid(),
+                    session.StoreCode,
+                    session.DeviceCode,
+                    blockedDay,
+                    "CloudBackendAsync",
+                    "Production",
+                    "earlier-settlement-001",
+                    LocalLinklySettlementStatus.Unknown,
+                    ResponseCode: null,
+                    ResponseText: null,
+                    SettlementData: null,
+                    ReceiptTexts: [],
+                    DateTimeOffset.UtcNow,
+                    CompletedAt: null,
+                    FirstPrintedAt: null,
+                    LastPrintedAt: null,
+                    PrintCount: 0,
+                    LastPrintError: null);
+                return new LinklySettlementExecutionResult(
+                    earlier,
+                    PrintResult: null,
+                    ResultUnknown: true,
+                    BlockedByEarlierBusinessDay: true);
             }
 
             if (_settlements.FirstOrDefault(item => item.Status == LocalLinklySettlementStatus.Pending) is { } pending)
@@ -1645,6 +1756,22 @@ public sealed class DailyCloseViewModelTests
         {
             return Task.FromResult<IReadOnlyList<LocalLinklySettlementRecord>>(
                 _settlements.Where(item => item.BusinessDate == businessDate.Date).ToArray());
+        }
+
+        public Task<LinklySettlementManualResolutionResult> QueryUnresolvedAsync(
+            PosSessionState session,
+            LocalLinklySettlementRecord settlement,
+            CancellationToken cancellationToken = default)
+        {
+            QueryCallCount++;
+            var index = _settlements.FindIndex(item => item.SettlementGuid == settlement.SettlementGuid);
+            var updated = _settlements[index] with
+            {
+                Status = LocalLinklySettlementStatus.Succeeded,
+                CompletedAt = DateTimeOffset.UtcNow
+            };
+            _settlements[index] = updated;
+            return Task.FromResult(new LinklySettlementManualResolutionResult(true, updated, "found"));
         }
 
         public Task<LinklySettlementManualResolutionResult> ResolveUncertainAsync(

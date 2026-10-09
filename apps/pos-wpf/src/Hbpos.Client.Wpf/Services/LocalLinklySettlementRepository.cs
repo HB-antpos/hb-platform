@@ -162,6 +162,13 @@ public interface ILocalLinklySettlementRepository : ILinklyUnresolvedSettlementR
         DateTime businessDate,
         CancellationToken cancellationToken = default);
 
+    // 不分营业日的未决（Pending/Unknown）记录，按营业日、请求时间升序：前一天遗留的未决结算靠它找回。
+    Task<IReadOnlyList<LocalLinklySettlementRecord>> GetUnresolvedAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default);
+
     Task<LinklySettlementUploadOverview> GetUploadOverviewAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<LinklySettlementUploadQueueItem>> GetActiveUploadItemsAsync(
@@ -514,6 +521,39 @@ public sealed class LocalLinklySettlementRepository(LocalSqliteStore store) : IL
         command.Parameters.AddWithValue("$StoreCode", storeCode);
         command.Parameters.AddWithValue("$DeviceCode", deviceCode);
         command.Parameters.AddWithValue("$BusinessDate", businessDate.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+
+        var settlements = new List<LocalLinklySettlementRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            settlements.Add(ReadRecord(reader));
+        }
+
+        return settlements;
+    }
+
+    public async Task<IReadOnlyList<LocalLinklySettlementRecord>> GetUnresolvedAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT *
+            FROM LinklySettlementRecords
+            WHERE StoreCode = $StoreCode
+              AND DeviceCode = $DeviceCode
+              AND Environment = $Environment
+              AND Status IN ($PendingStatus, $UnknownStatus)
+            ORDER BY BusinessDate ASC, RequestedAt ASC;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", storeCode);
+        command.Parameters.AddWithValue("$DeviceCode", deviceCode);
+        command.Parameters.AddWithValue("$Environment", environment);
+        command.Parameters.AddWithValue("$PendingStatus", LocalLinklySettlementStatus.Pending.ToString());
+        command.Parameters.AddWithValue("$UnknownStatus", LocalLinklySettlementStatus.Unknown.ToString());
 
         var settlements = new List<LocalLinklySettlementRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

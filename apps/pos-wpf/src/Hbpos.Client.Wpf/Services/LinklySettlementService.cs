@@ -8,7 +8,9 @@ public sealed record LinklySettlementExecutionResult(
     LocalLinklySettlementRecord Settlement,
     ReceiptPrintResult? PrintResult,
     bool ResultUnknown = false,
-    bool ReusedFinalEvidence = false);
+    bool ReusedFinalEvidence = false,
+    // 前一营业日还有未决的 CloudBackendAsync 结算，今天的结算因此没有发送；Settlement 就是那条旧记录。
+    bool BlockedByEarlierBusinessDay = false);
 
 public sealed record LinklySettlementManualResolutionResult(
     bool Resolved,
@@ -65,6 +67,17 @@ public interface ILinklySettlementService
             settlement,
             "Manual Linkly settlement resolution is not supported by this service."));
 
+    // 只查询、补录：向 Linkly 服务端查询一条未决 CloudBackendAsync 结算的结果并写回本地，绝不发送新结算。
+    // 前一营业日遗留的未决结算靠它补完（营业日页切到那一天选中记录即可）。
+    Task<LinklySettlementManualResolutionResult> QueryUnresolvedAsync(
+        PosSessionState session,
+        LocalLinklySettlementRecord settlement,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new LinklySettlementManualResolutionResult(
+            false,
+            settlement,
+            "Querying an unresolved Linkly settlement is not supported by this service."));
+
     // 日结保存后是否自动发送 Linkly 结算；默认不自动，未实现的服务不能意外触发银行操作。
     Task<bool> ShouldAutoSettleAfterDailyCloseAsync(
         PosSessionState session,
@@ -81,8 +94,14 @@ public sealed class LinklySettlementService(
     ILinklyBackendTerminalClient? backendTerminalClient = null,
     ILinklySettlementUploadScheduler? settlementUploadScheduler = null,
     ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
-    IPaymentMethodSettingsService? paymentMethodSettingsService = null) : ILinklySettlementService
+    IPaymentMethodSettingsService? paymentMethodSettingsService = null,
+    TimeProvider? timeProvider = null) : ILinklySettlementService
 {
+    // 一次结算前最多处理多少条前一营业日遗留的服务端会话，防止异常数据造成无限循环。
+    private const int MaxEarlierSessionsPerRun = 5;
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     // 预检只是问一次刷卡机状态，用短超时：刷卡机真离线时不能让收银员干等业务级超时。
     private static readonly TimeSpan TerminalCheckTimeout = TimeSpan.FromSeconds(10);
 
@@ -190,6 +209,14 @@ public sealed class LinklySettlementService(
         await using var transitionLease = linklyTerminalSelectionTransitionGate is null
             ? null
             : await linklyTerminalSelectionTransitionGate.EnterFinancialOperationAsync(cancellationToken);
+
+        // 前一营业日遗留的结算（服务端未 ack 的会话、本地未决记录）必须先单独补完或结案，再发今天的结算：
+        // 否则 resumable 会把旧会话当成今天的结算接管，今天的批次没发给银行却显示成功，还会打印旧回单。
+        var earlierBlock = await ReconcileEarlierBusinessDaysAsync(settings, session, businessDate, cancellationToken);
+        if (earlierBlock is not null)
+        {
+            return earlierBlock;
+        }
 
         var existingSettlements = await settlementRepository.GetByBusinessDateAsync(
             session.StoreCode,
@@ -445,7 +472,7 @@ public sealed class LinklySettlementService(
             return new LinklySettlementManualResolutionResult(
                 false,
                 settlement,
-                "Only unresolved Local IP or Cloud Direct Linkly settlements for this POS can be manually resolved.");
+                "Only unresolved Linkly settlements for this POS can be manually resolved.");
         }
 
         var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
@@ -471,10 +498,25 @@ public sealed class LinklySettlementService(
                 "The selected Linkly settlement is no longer eligible for manual resolution. Refresh the history and try again.");
         }
 
+        // CloudBackendAsync：本地还没绑定服务端会话时，尽力把同一营业日的未 ack 会话绑上，
+        // 这样结案后 ack 才能关闭服务端会话，换线、配对不再被它挡住。
+        var expectedRevision = settlement.PayloadRevision;
+        if (IsCloudBackend(current))
+        {
+            var bound = await TryBindSameDayResumableSessionAsync(settings, current, cancellationToken);
+            if (!ReferenceEquals(bound, current) && current.PayloadRevision == settlement.PayloadRevision)
+            {
+                // 绑定本身会让修订号 +1；界面载入的记录没有过期时，期望修订号跟着走，过期的仍然会被 CAS 拒绝。
+                expectedRevision = bound.PayloadRevision;
+            }
+
+            current = bound;
+        }
+
         // CAS 只更新同一 revision 的未决记录；这里不会调用终端，也不会创建新的 settlement。
         var resolved = await settlementRepository.TryResolveUncertainAsync(
             current.SettlementGuid,
-            settlement.PayloadRevision,
+            expectedRevision,
             resolution,
             DateTimeOffset.UtcNow,
             cancellationToken);
@@ -487,6 +529,17 @@ public sealed class LinklySettlementService(
         }
 
         RequestSettlementUpload();
+        if (IsCloudBackend(current) && !string.IsNullOrWhiteSpace(current.ProviderSessionId))
+        {
+            // 主管结案要让服务端把非终态会话记为 SupervisorResolved；ack 失败不影响本地结案，
+            // 下次结算前的补发（ReplayAcknowledge）会按服务端仍未结案的状态再次带上主管标记。
+            await AcknowledgeCloudBackendSettlementAsync(
+                settings,
+                current with { Status = LocalLinklySettlementStatus.Failed },
+                cancellationToken,
+                supervisorResolved: true);
+        }
+
         var refreshed = (await settlementRepository.GetByBusinessDateAsync(
                 session.StoreCode,
                 session.DeviceCode,
@@ -502,7 +555,8 @@ public sealed class LinklySettlementService(
     private async Task AcknowledgeCloudBackendSettlementAsync(
         CardTerminalSettings settings,
         LocalLinklySettlementRecord settlement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool supervisorResolved = false)
     {
         if (backendTerminalClient is null ||
             settlement.Status is not (LocalLinklySettlementStatus.Succeeded or LocalLinklySettlementStatus.Failed) ||
@@ -514,11 +568,18 @@ public sealed class LinklySettlementService(
 
         try
         {
-            await backendTerminalClient.AcknowledgeSettlementAsync(backendSettings, settlement.ProviderSessionId, cancellationToken);
+            if (supervisorResolved)
+            {
+                await backendTerminalClient.AcknowledgeSupervisorResolvedSettlementAsync(backendSettings, settlement.ProviderSessionId, cancellationToken);
+            }
+            else
+            {
+                await backendTerminalClient.AcknowledgeSettlementAsync(backendSettings, settlement.ProviderSessionId, cancellationToken);
+            }
         }
         catch (Exception ex)
         {
-            // ack 失败不影响本地结果，后端会保留可恢复会话，下次结算前仍能续接。
+            // ack 失败不影响本地结果，后端会保留可恢复会话，下次结算前会按服务端未 ack 的会话补发。
             ConsoleLog.WriteWarning(
                 "LinklySettlement",
                 $"settlement acknowledge failed settlementGuid={settlement.SettlementGuid:D} sessionId={settlement.ProviderSessionId} error={ex.GetType().Name}",
@@ -559,13 +620,53 @@ public sealed class LinklySettlementService(
             return BlockUnresolvedSettlement(unresolvedSettlement);
         }
 
+        if (resumable is null &&
+            string.IsNullOrWhiteSpace(unresolvedSettlement.ProviderSessionId) &&
+            IsNotInFlight(unresolvedSettlement))
+        {
+            // 本地没有 sessionId，服务端也没有任何未 ack 的结算会话：请求没有创建出会话
+            // （例如服务端在建会话前就拒绝了），可以确认未提交。否则这条记录会一直是未决，当天再也无法结算。
+            return await ConfirmNotSubmittedAsync(unresolvedSettlement, cancellationToken);
+        }
+
         if (resumable is null ||
             string.IsNullOrWhiteSpace(resumable.SessionId) ||
             (!string.IsNullOrWhiteSpace(unresolvedSettlement.ProviderSessionId) &&
-             !string.Equals(unresolvedSettlement.ProviderSessionId, resumable.SessionId, StringComparison.Ordinal)) ||
-            !IsDeliverableResumableSettlement(resumable))
+             !string.Equals(unresolvedSettlement.ProviderSessionId, resumable.SessionId, StringComparison.Ordinal)))
         {
             return BlockUnresolvedSettlement(unresolvedSettlement);
+        }
+
+        if (string.IsNullOrWhiteSpace(unresolvedSettlement.ProviderSessionId) &&
+            !BelongsToBusinessDayOf(unresolvedSettlement, resumable))
+        {
+            // 绑定一个没有 sessionId 的记录前必须确认营业日一致：resumable 不按营业日过滤，
+            // 否则别的营业日的会话会被绑到当天的记录上，结果记错日期。
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement resumable session belongs to another business day settlementGuid={unresolvedSettlement.SettlementGuid:D} " +
+                $"businessDate={unresolvedSettlement.BusinessDate:yyyy-MM-dd} sessionId={resumable.SessionId} -> blocked",
+                BuildSettlementContext(unresolvedSettlement));
+            return BlockUnresolvedSettlement(unresolvedSettlement);
+        }
+
+        return await ApplyBackendSessionAsync(settings, unresolvedSettlement, resumable, cancellationToken)
+            ?? BlockUnresolvedSettlement(unresolvedSettlement);
+    }
+
+    /// <summary>
+    /// 把服务端已交付的结算会话结果写回本地未决记录：绑定 sessionId、落库、ack、打印回单。
+    /// 会话还不能交付（仍在进行或结果未知）时返回 null，本地记录保持未决。
+    /// </summary>
+    private async Task<LinklySettlementExecutionResult?> ApplyBackendSessionAsync(
+        CardTerminalSettings settings,
+        LocalLinklySettlementRecord unresolvedSettlement,
+        LinklyCloudBackendSessionResponse resumable,
+        CancellationToken cancellationToken)
+    {
+        if (!IsDeliverableResumableSettlement(resumable))
+        {
+            return null;
         }
 
         var settlement = unresolvedSettlement;
@@ -582,7 +683,7 @@ public sealed class LinklySettlementService(
             }
             catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
             {
-                return BlockUnresolvedSettlement(unresolvedSettlement);
+                return null;
             }
         }
 
@@ -590,6 +691,7 @@ public sealed class LinklySettlementService(
             .Where(receipt => !string.IsNullOrWhiteSpace(receipt))
             .ToArray();
         var failed = LinklyCloudBackendStatusConstants.IsSettlementFailureStatus(resumable.Status) ||
+            resumable.OperationSuccess == false ||
             !LinklyCloudBackendStatusConstants.IsSuccessfulSettlement(
                 resumable.OperationSuccess,
                 resumable.ResponseCode);
@@ -619,6 +721,330 @@ public sealed class LinklySettlementService(
         return new LinklySettlementExecutionResult(settlement, printResult);
     }
 
+    /// <summary>
+    /// 发今天的结算之前，先把前一营业日遗留的 CloudBackendAsync 结算补完或结案：
+    /// 1) 服务端还没 ack 的前一营业日会话：对应本地记录已定论就补发 ack，未决就尝试补录结果，本地没有记录就补建一条；
+    /// 2) 其余本地未决的前一营业日记录单独向服务端核对（没有 sessionId 且服务端没有会话的，确认为未提交）。
+    /// 仍无法补完时返回阻塞结果，今天的结算不发送，由主管在对应营业日查询或结案。
+    /// </summary>
+    private async Task<LinklySettlementExecutionResult?> ReconcileEarlierBusinessDaysAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        DateTime businessDate,
+        CancellationToken cancellationToken)
+    {
+        if (backendTerminalClient is null)
+        {
+            return null;
+        }
+
+        var today = businessDate.Date;
+        var blocked = await DrainEarlierServerSessionsAsync(settings, session, today, cancellationToken);
+        if (blocked is not null)
+        {
+            return blocked;
+        }
+
+        var unresolved = await settlementRepository.GetUnresolvedAsync(
+            session.StoreCode,
+            session.DeviceCode,
+            settings.Environment.ToString(),
+            cancellationToken);
+        foreach (var earlier in unresolved.Where(record => record.BusinessDate.Date < today && IsCloudBackend(record)))
+        {
+            var recovered = await RecoverResumableSettlementAsync(settings, earlier, cancellationToken);
+            if (recovered.Settlement.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown)
+            {
+                return BlockByEarlierBusinessDay(recovered.Settlement);
+            }
+        }
+
+        return null;
+    }
+
+    private static LinklySettlementExecutionResult BlockByEarlierBusinessDay(LocalLinklySettlementRecord settlement)
+    {
+        return new LinklySettlementExecutionResult(
+            settlement,
+            PrintResult: null,
+            ResultUnknown: settlement.Status == LocalLinklySettlementStatus.Unknown,
+            BlockedByEarlierBusinessDay: true);
+    }
+
+    private async Task<LinklySettlementExecutionResult?> DrainEarlierServerSessionsAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        DateTime today,
+        CancellationToken cancellationToken)
+    {
+        if (settings.LinklyConnectionMode != LinklyConnectionMode.CloudBackendAsync)
+        {
+            return null;
+        }
+
+        string? lastSessionId = null;
+        for (var i = 0; i < MaxEarlierSessionsPerRun; i++)
+        {
+            LinklyCloudBackendSessionResponse? resumable;
+            try
+            {
+                resumable = await backendTerminalClient!.GetResumableSettlementAsync(settings, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // 查不到旧会话时不阻塞今天的结算：后端客户端自己也不会接管前一营业日的会话。
+                ConsoleLog.WriteWarning(
+                    "LinklySettlement",
+                    $"earlier settlement session lookup failed error={ex.GetType().Name}",
+                    exception: ex);
+                return null;
+            }
+
+            if (resumable is null ||
+                string.IsNullOrWhiteSpace(resumable.SessionId) ||
+                LinklySettlementBusinessDay.Of(resumable.CreatedAt, _timeProvider) is not { } sessionDay ||
+                sessionDay >= today)
+            {
+                // 没有、或属于今天（无 CreatedAt 的旧服务端也走这里）：交给原有的同日恢复流程。
+                return null;
+            }
+
+            if (string.Equals(lastSessionId, resumable.SessionId, StringComparison.Ordinal))
+            {
+                // 上一轮处理后同一会话还在（ack 失败）：不再循环，留给下次。
+                return null;
+            }
+
+            lastSessionId = resumable.SessionId;
+            var blocked = await HandleEarlierServerSessionAsync(settings, session, resumable, sessionDay, cancellationToken);
+            if (blocked is not null)
+            {
+                return blocked;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<LinklySettlementExecutionResult?> HandleEarlierServerSessionAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        LinklyCloudBackendSessionResponse resumable,
+        DateTime sessionDay,
+        CancellationToken cancellationToken)
+    {
+        var local = await settlementRepository.GetByProviderSessionIdAsync(resumable.SessionId, cancellationToken);
+        if (local is null)
+        {
+            // 本地没有记录绑定这个会话：优先接到同一营业日、还没拿到 sessionId 的未决记录上
+            // （启动请求超时或响应丢失留下的）；确实没有再补建一条，保证每个服务端会话都有本地记录可审计、可结案。
+            var candidates = (await settlementRepository.GetUnresolvedAsync(
+                    session.StoreCode,
+                    session.DeviceCode,
+                    settings.Environment.ToString(),
+                    cancellationToken))
+                .Where(record => IsCloudBackend(record) &&
+                    string.IsNullOrWhiteSpace(record.ProviderSessionId) &&
+                    record.BusinessDate.Date == sessionDay)
+                .ToList();
+            if (candidates.Count > 1)
+            {
+                return BlockByEarlierBusinessDay(candidates[0]);
+            }
+
+            local = candidates.Count == 1
+                ? candidates[0]
+                : await AdoptOrphanSessionAsync(settings, session, resumable, sessionDay, cancellationToken);
+            if (local is null)
+            {
+                return null;
+            }
+        }
+
+        if (local.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown)
+        {
+            var applied = await ApplyBackendSessionAsync(settings, local, resumable, cancellationToken);
+            return applied is null
+                ? BlockByEarlierBusinessDay(local)
+                : null;
+        }
+
+        // 本地早已定论，只是当时 ack 没成功：补发。服务端会话若仍是非终态（主管结案的情形），要带上主管标记才能关闭。
+        await AcknowledgeCloudBackendSettlementAsync(
+            settings,
+            local,
+            cancellationToken,
+            supervisorResolved: !IsServerFinalStatus(resumable.Status));
+        return null;
+    }
+
+    private static bool IsServerFinalStatus(string? status)
+    {
+        return string.Equals(status, LinklyCloudBackendStatusConstants.StatusCompleted, StringComparison.OrdinalIgnoreCase) ||
+            LinklyCloudBackendStatusConstants.IsSettlementFailureStatus(status);
+    }
+
+    private async Task<LocalLinklySettlementRecord?> AdoptOrphanSessionAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        LinklyCloudBackendSessionResponse resumable,
+        DateTime sessionDay,
+        CancellationToken cancellationToken)
+    {
+        var requestedAt = resumable.CreatedAt ?? _timeProvider.GetUtcNow();
+        var orphan = new LocalLinklySettlementRecord(
+            Guid.NewGuid(),
+            session.StoreCode,
+            session.DeviceCode,
+            sessionDay,
+            LinklyConnectionMode.CloudBackendAsync.ToString(),
+            settings.Environment.ToString(),
+            ProviderSessionId: null,
+            LocalLinklySettlementStatus.Pending,
+            ResponseCode: null,
+            ResponseText: null,
+            SettlementData: null,
+            ReceiptTexts: [],
+            requestedAt,
+            CompletedAt: null,
+            FirstPrintedAt: null,
+            LastPrintedAt: null,
+            PrintCount: 0,
+            LastPrintError: null)
+        {
+            ProviderSubmissionState = ProviderSubmissionState.Unknown
+        };
+        if (!await settlementRepository.TryCreatePendingAsync(orphan, cancellationToken))
+        {
+            // 那个营业日已有别的未决记录占位：不再强建，由调用方按阻塞处理。
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"earlier settlement session could not be adopted: business date already has an unresolved record sessionId={resumable.SessionId}",
+                BuildSettlementContext(orphan));
+            return null;
+        }
+
+        RequestSettlementUpload();
+        ConsoleLog.WriteWarning(
+            "LinklySettlement",
+            $"earlier settlement session had no local record; created settlementGuid={orphan.SettlementGuid:D} " +
+            $"businessDate={sessionDay:yyyy-MM-dd} sessionId={resumable.SessionId} status={resumable.Status}",
+            BuildSettlementContext(orphan));
+        return orphan;
+    }
+
+    // 主管结案前尽力把同一营业日的未 ack 会话绑到没有 sessionId 的记录上；任何失败都当作没有可绑的会话。
+    private async Task<LocalLinklySettlementRecord> TryBindSameDayResumableSessionAsync(
+        CardTerminalSettings settings,
+        LocalLinklySettlementRecord settlement,
+        CancellationToken cancellationToken)
+    {
+        if (backendTerminalClient is null ||
+            !string.IsNullOrWhiteSpace(settlement.ProviderSessionId) ||
+            !TryGetStoredCloudBackendSettings(settings, settlement, out var backendSettings))
+        {
+            return settlement;
+        }
+
+        try
+        {
+            var resumable = await backendTerminalClient.GetResumableSettlementAsync(backendSettings, cancellationToken);
+            if (resumable is null ||
+                string.IsNullOrWhiteSpace(resumable.SessionId) ||
+                LinklySettlementBusinessDay.Of(resumable.CreatedAt, _timeProvider) != settlement.BusinessDate.Date ||
+                await settlementRepository.GetByProviderSessionIdAsync(resumable.SessionId, cancellationToken) is not null)
+            {
+                return settlement;
+            }
+
+            await settlementRepository.BindProviderSessionAsync(settlement.SettlementGuid, resumable.SessionId, CancellationToken.None);
+            // 绑定会让 payload 修订号 +1；重新读取，后面的 CAS 才对得上。
+            return (await settlementRepository.GetByBusinessDateAsync(
+                    settlement.StoreCode,
+                    settlement.DeviceCode,
+                    settlement.BusinessDate,
+                    cancellationToken))
+                .FirstOrDefault(item => item.SettlementGuid == settlement.SettlementGuid) ?? settlement;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            ConsoleLog.WriteWarning(
+                "LinklySettlement",
+                $"settlement session lookup before supervisor resolution failed settlementGuid={settlement.SettlementGuid:D} error={ex.GetType().Name}",
+                BuildSettlementContext(settlement),
+                ex);
+            return settlement;
+        }
+    }
+
+    public async Task<LinklySettlementManualResolutionResult> QueryUnresolvedAsync(
+        PosSessionState session,
+        LocalLinklySettlementRecord settlement,
+        CancellationToken cancellationToken = default)
+    {
+        if (backendTerminalClient is null ||
+            !string.Equals(settlement.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(settlement.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase) ||
+            settlement.Status is not (LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown) ||
+            !IsCloudBackend(settlement))
+        {
+            return new LinklySettlementManualResolutionResult(
+                false,
+                settlement,
+                "Only unresolved Cloud Backend Linkly settlements for this POS can be queried.");
+        }
+
+        var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
+        if (settings.Processor != CardProcessorKind.Linkly)
+        {
+            return new LinklySettlementManualResolutionResult(
+                false,
+                settlement,
+                "Linkly settlement query is unavailable because Linkly is not the active card processor.");
+        }
+
+        LocalLinklySettlementRecord? Reload(IEnumerable<LocalLinklySettlementRecord> records) =>
+            records.FirstOrDefault(item => item.SettlementGuid == settlement.SettlementGuid);
+
+        // 查询、补录要和结算一样占用线路切换闸门，期间不能换线。
+        await using var transitionLease = linklyTerminalSelectionTransitionGate is null
+            ? null
+            : await linklyTerminalSelectionTransitionGate.EnterFinancialOperationAsync(cancellationToken);
+
+        // 先按服务端未 ack 的前一营业日会话逐个对账（返回的阻塞结果无需处理，下面会重新读取本条记录的最新状态）。
+        await DrainEarlierServerSessionsAsync(settings, session, _timeProvider.GetLocalNow().Date, cancellationToken);
+        var current = Reload(await settlementRepository.GetByBusinessDateAsync(
+            settlement.StoreCode,
+            settlement.DeviceCode,
+            settlement.BusinessDate,
+            cancellationToken));
+        if (current is null)
+        {
+            return new LinklySettlementManualResolutionResult(
+                false,
+                settlement,
+                "The selected Linkly settlement no longer exists. Refresh the history and try again.");
+        }
+
+        if (current.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown)
+        {
+            var recovered = await RecoverResumableSettlementAsync(settings, current, cancellationToken);
+            current = Reload(await settlementRepository.GetByBusinessDateAsync(
+                settlement.StoreCode,
+                settlement.DeviceCode,
+                settlement.BusinessDate,
+                cancellationToken)) ?? recovered.Settlement;
+        }
+
+        var resolved = current.Status is not (LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown);
+        return new LinklySettlementManualResolutionResult(
+            resolved,
+            current,
+            resolved
+                ? "The Linkly settlement result was found and recorded. No new settlement was sent."
+                : "The Linkly settlement result is still unavailable. Record the supervisor decision if the terminal shows the result.");
+    }
+
     private static LinklySettlementExecutionResult BlockUnresolvedSettlement(LocalLinklySettlementRecord settlement)
     {
         return new LinklySettlementExecutionResult(
@@ -629,9 +1055,66 @@ public sealed class LinklySettlementService(
 
     private static bool IsDeliverableResumableSettlement(LinklyCloudBackendSessionResponse resumable)
     {
+        // 与服务端 ResolveCloudBackendFinalStatus 同口径：OperationSuccess=false 即失败终态（银行拒绝、刷卡机离线
+        // 都可能没有 Type=S 回单）；成功必须带回单，否则确认后会永久丢失需要打印的结算单。
         return LinklyCloudBackendStatusConstants.IsSettlementFailureStatus(resumable.Status) ||
+            resumable.OperationSuccess == false ||
             (resumable.OperationSuccess is not null &&
              (resumable.SettlementReceiptTexts ?? []).Any(receipt => !string.IsNullOrWhiteSpace(receipt)));
+    }
+
+    private static bool IsCloudBackend(LocalLinklySettlementRecord settlement)
+    {
+        return string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudBackendAsync.ToString(), StringComparison.Ordinal);
+    }
+
+    // Pending 可能是另一次结算正在进行（尚未建出服务端会话），不能据此断定“未提交”；
+    // Unknown 表示那次尝试已经结束，或 Pending 已久（崩溃遗留）才可以。
+    private bool IsNotInFlight(LocalLinklySettlementRecord settlement)
+    {
+        return settlement.Status == LocalLinklySettlementStatus.Unknown ||
+            _timeProvider.GetUtcNow() - settlement.RequestedAt >= LinklyTimeoutConstants.SettlementCallbackTimeout;
+    }
+
+    // 会话创建时间所在的本地日期必须等于本地记录的营业日；服务端还没有 CreatedAt（旧版本）时无法确认，
+    // 只放行今天的记录，沿用旧行为，前一天的记录一律不绑定。
+    private bool BelongsToBusinessDayOf(LocalLinklySettlementRecord settlement, LinklyCloudBackendSessionResponse resumable)
+    {
+        var sessionDay = LinklySettlementBusinessDay.Of(resumable.CreatedAt, _timeProvider);
+        return sessionDay is { } day
+            ? day == settlement.BusinessDate.Date
+            : settlement.BusinessDate.Date == _timeProvider.GetLocalNow().Date;
+    }
+
+    private async Task<LinklySettlementExecutionResult> ConfirmNotSubmittedAsync(
+        LocalLinklySettlementRecord settlement,
+        CancellationToken cancellationToken)
+    {
+        ConsoleLog.WriteWarning(
+            "LinklySettlement",
+            $"settlement confirmed not submitted: no provider session and no resumable session settlementGuid={settlement.SettlementGuid:D} " +
+            $"businessDate={settlement.BusinessDate:yyyy-MM-dd}",
+            BuildSettlementContext(settlement, LocalLinklySettlementStatus.Failed));
+        var completion = new LocalLinklySettlementCompletion(
+            LocalLinklySettlementStatus.Failed,
+            ResponseCode: null,
+            ResponseText: "Settlement was confirmed as not submitted: the server has no settlement session for this POS.",
+            SettlementData: null,
+            ReceiptTexts: [],
+            _timeProvider.GetUtcNow(),
+            ProviderSubmissionState.NotSubmitted);
+        await settlementRepository.CompleteAsync(settlement.SettlementGuid, completion, CancellationToken.None);
+        RequestSettlementUpload();
+        return new LinklySettlementExecutionResult(
+            settlement with
+            {
+                Status = completion.Status,
+                ResponseText = completion.ResponseText,
+                ReceiptTexts = [],
+                CompletedAt = completion.CompletedAt,
+                ProviderSubmissionState = completion.ProviderSubmissionState
+            },
+            PrintResult: null);
     }
 
     private static bool TryGetStoredCloudBackendSettings(
@@ -710,7 +1193,9 @@ public sealed class LinklySettlementService(
             string.Equals(settlement.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase) &&
             settlement.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown &&
             (string.Equals(settlement.ConnectionMode, LinklyConnectionMode.LocalIp.ToString(), StringComparison.Ordinal) ||
-             string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudDirectSync.ToString(), StringComparison.Ordinal));
+             string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudDirectSync.ToString(), StringComparison.Ordinal) ||
+             // CloudBackendAsync 以前没有人工结案通道：结果未知的结算只能改库。现在结案后会带主管标记 ack 服务端会话。
+             string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudBackendAsync.ToString(), StringComparison.Ordinal));
     }
 
     private void RequestSettlementUpload()

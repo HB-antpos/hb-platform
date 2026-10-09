@@ -10747,6 +10747,11 @@
             "type": "string",
             "nullable": true
           },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
           "cardTransaction": {
             "$ref": "#/components/schemas/LinklyCloudBackendCardTransactionDto"
           },
