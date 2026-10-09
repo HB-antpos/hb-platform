@@ -88,6 +88,15 @@ public interface ILinklyCloudTerminalService
         Guid leaseId,
         CancellationToken cancellationToken);
 
+    // Status/Logon 检测结果不明时调用：把覆盖整次 HTTP 往返的长租约缩短为短时长（检测类租约），
+    // 不再沿用 9 分钟的交易租约。默认实现保持原租约，兼容不关心租约时长的测试替身。
+    Task ShortenOperationLeaseAsync(
+        string environment,
+        string storeCode,
+        Guid terminalId,
+        Guid leaseId,
+        CancellationToken cancellationToken) => Task.CompletedTask;
+
     // 健康快照只记录已明确完成的实体终端探测；不得影响配置版本、配对或 POS 选择。
     Task<bool> RecordHealthAsync(
         LinklyCloudTerminalPaymentContext terminalContext,
@@ -223,6 +232,15 @@ public interface ILinklyCloudTerminalRepository
         Guid terminalId,
         Guid expectedOperationLeaseId,
         CancellationToken cancellationToken);
+
+    // 只允许把仍属于该租约的到期时间提前（缩短），不会延长，也不会动其他租约。
+    Task ShortenOperationLeaseAsync(
+        string environment,
+        string storeCode,
+        Guid terminalId,
+        Guid expectedOperationLeaseId,
+        DateTime newExpiresAt,
+        CancellationToken cancellationToken) => Task.CompletedTask;
 
     // 使用终端配置版本作 CAS，防止迟到的探测结果覆盖已重配对或已更新凭据的终端。
     Task<bool> TryRecordHealthAsync(
@@ -372,6 +390,20 @@ public sealed class LinklyCloudTerminalCredentialKeyRingMismatchException : Link
     public Guid MissingKeyId { get; }
 }
 
+/// <summary>
+/// 终端正被 Status/Logon/连接检测占用（结果不明时保留的短租约）。它不是“有未完成交易”：
+/// 继承 ActiveTransaction 异常只是为了让没有专门处理的调用方仍按 409 冲突返回，
+/// 有专门处理的控制器返回专用错误码并带上剩余秒数。
+/// </summary>
+public sealed class LinklyCloudTerminalProbingException(int retryAfterSeconds)
+    : LinklyCloudBackendActiveTransactionException(null)
+{
+    public int RetryAfterSeconds { get; } = Math.Max(1, retryAfterSeconds);
+
+    public override string Message =>
+        $"The Linkly Cloud terminal is being checked. Retry in {RetryAfterSeconds} seconds.";
+}
+
 public sealed class LinklyCloudTerminalService(
     ILinklyCloudTerminalRepository repository,
     ILinklyCloudBackendAsyncRepository sessionRepository,
@@ -386,6 +418,11 @@ public sealed class LinklyCloudTerminalService(
         LinklyTimeoutConstants.HttpTimeout + TimeSpan.FromMinutes(1);
     private static readonly TimeSpan OperationLeaseDuration =
         LinklyTimeoutConstants.HttpTimeout + LinklyTimeoutConstants.HttpTimeout + TimeSpan.FromMinutes(1);
+
+    // 检测类（Status/Logon/连接检测）结果不明后保留的租约时长。租约在请求飞行期间必须覆盖完整往返（上面的
+    // OperationLeaseDuration），但结果不明之后继续按 9 分钟占住终端，营业中一次网络抖动就会让这台终端
+    // 9 分钟不能刷卡；检测类请求不涉及扣款，短暂保护即可。
+    internal static readonly TimeSpan ProbeAmbiguousLeaseDuration = TimeSpan.FromSeconds(60);
 
     public async Task<LinklyCloudTerminalListResponse> GetTerminalsAsync(
         string storeCode,
@@ -583,7 +620,18 @@ public sealed class LinklyCloudTerminalService(
                 environment, terminal.StoreCode, terminalId, terminal.UpdatedAt!.Value,
                 leaseId, leaseExpiresAt, DateTime.UtcNow, cancellationToken,
                 owner?.DeviceCode, owner?.SelectionRevision ?? 0, effectiveDeviceCode))
+        {
+            // 被检测类短租约占着时给出专用错误码和剩余秒数，而不是笼统的“忙/有未确认操作”。
+            var held = await repository.GetAsync(environment, terminal.StoreCode, terminalId, cancellationToken);
+            if (held?.PairingAttemptId is not null &&
+                held.PairingLeaseExpiresAt is { } heldUntil &&
+                heldUntil > DateTime.UtcNow)
+            {
+                throw CreateLeaseHeldException(held, DateTime.UtcNow);
+            }
+
             throw new LinklyCloudTerminalSelectionConflictException("Terminal is busy or has an unacknowledged operation.");
+        }
 
         var releaseLease = true;
         var terminalRequestStarted = false;
@@ -656,6 +704,25 @@ public sealed class LinklyCloudTerminalService(
             errorType = nameof(OperationCanceledException);
             throw;
         }
+        catch (LinklyCloudTerminalRepairRequiredException ex)
+        {
+            // Token 端点以 401/403 拒绝 secret：终端在 Linkly 侧已被解除配对或 secret 已轮换。
+            // 还没碰到终端，租约随 finally 释放，让管理员立刻去重新配对。
+            outcome = "needs-repair";
+            errorType = nameof(LinklyCloudTerminalRepairRequiredException);
+            providerHttpStatus = (int)ex.TokenHttpStatus;
+            return ConnectionResult(terminal, environment, owner, false, "needs-repair", checkedAt,
+                "Terminal credentials require repair.", null);
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            // Token 端点暂时不可用（429/5xx/网络）：尚未触达终端，检测结果为“未确认”，不是 500。
+            outcome = "unknown";
+            errorType = nameof(LinklyCloudBackendTokenUnavailableException);
+            providerHttpStatus = (int)ex.StatusCode;
+            return ConnectionResult(terminal, environment, owner, false, "unknown", checkedAt,
+                "Linkly Cloud authentication is temporarily unavailable.", null);
+        }
         catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
         {
             outcome = "needs-repair";
@@ -702,6 +769,20 @@ public sealed class LinklyCloudTerminalService(
                 catch (Exception ex)
                 {
                     logger?.LogWarning("Linkly Cloud connection-test lease release failed environment={Environment} store={StoreCode} terminalId={TerminalId} errorType={ErrorType}", environment, terminal.StoreCode, terminalId, ex.GetType().Name);
+                }
+            }
+            else
+            {
+                // 检测结果不明：只保留检测类短租约，不沿用覆盖整次往返的 9 分钟租约。
+                try
+                {
+                    await repository.ShortenOperationLeaseAsync(
+                        environment, terminal.StoreCode, terminalId, leaseId,
+                        DateTime.UtcNow.Add(ProbeAmbiguousLeaseDuration), CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning("Linkly Cloud connection-test lease shorten failed environment={Environment} store={StoreCode} terminalId={TerminalId} errorType={ErrorType}", environment, terminal.StoreCode, terminalId, ex.GetType().Name);
                 }
             }
             // 只记录公开结果和异常类型，不记录 token、响应正文或异常正文。
@@ -1151,13 +1232,51 @@ public sealed class LinklyCloudTerminalService(
                 current.PairingLeaseExpiresAt is not null &&
                 current.PairingLeaseExpiresAt > now)
             {
-                throw new LinklyCloudBackendActiveTransactionException(null);
+                throw CreateLeaseHeldException(current, now);
             }
 
             throw new LinklyCloudTerminalSelectionConflictException();
         }
 
         return new LinklyCloudTerminalOperationLease(leaseId, terminal.TerminalId, expiresAt);
+    }
+
+    /// <summary>
+    /// 租约列复用了配对租约：配对会把 PairingState 置为 Unknown，而检测类租约只能在 Ready 的终端上取得。
+    /// 因此 Ready 状态下仍被租约占着，就是检测类操作（结果不明时保留的短租约），返回剩余秒数让调用方稍后重试，
+    /// 而不是误报“有未完成交易”。
+    /// </summary>
+    internal static LinklyCloudBackendActiveTransactionException CreateLeaseHeldException(
+        LinklyCloudTerminalRecord terminal,
+        DateTime nowUtc)
+    {
+        if (string.Equals(terminal.PairingState, "Ready", StringComparison.OrdinalIgnoreCase) &&
+            terminal.PairingLeaseExpiresAt is { } expiresAt)
+        {
+            // 请求仍在飞行时租约到期时间是覆盖完整往返的悲观上界（9 分钟），实际检测一结束就会释放；
+            // 对外提示的剩余秒数不超过检测类短租约时长，调用方稍后重试即可。
+            var remaining = (int)Math.Ceiling((expiresAt - nowUtc).TotalSeconds);
+            return new LinklyCloudTerminalProbingException(
+                Math.Min(remaining, (int)ProbeAmbiguousLeaseDuration.TotalSeconds));
+        }
+
+        return new LinklyCloudBackendActiveTransactionException(null);
+    }
+
+    public Task ShortenOperationLeaseAsync(
+        string environment,
+        string storeCode,
+        Guid terminalId,
+        Guid leaseId,
+        CancellationToken cancellationToken)
+    {
+        return repository.ShortenOperationLeaseAsync(
+            NormalizeEnvironment(environment),
+            NormalizeRequired(storeCode, "storeCode"),
+            terminalId,
+            leaseId,
+            DateTime.UtcNow.Add(ProbeAmbiguousLeaseDuration),
+            cancellationToken);
     }
 
     public Task ReleaseOperationLeaseAsync(
@@ -2418,6 +2537,33 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
             new SugarParameter("@StoreCode", storeCode),
             new SugarParameter("@TerminalId", terminalId),
             new SugarParameter("@ExpectedOperationLeaseId", expectedOperationLeaseId));
+    }
+
+    internal const string ShortenOperationLeaseSql = """
+        UPDATE [dbo].[POSM_LinklyCloudTerminal]
+        SET [PairingLeaseExpiresAt] = @NewExpiresAt
+        WHERE [Environment] = @Environment
+          AND [StoreCode] = @StoreCode
+          AND [TerminalId] = @TerminalId
+          AND [PairingAttemptId] = @ExpectedOperationLeaseId
+          AND [PairingLeaseExpiresAt] > @NewExpiresAt;
+        """;
+
+    public async Task ShortenOperationLeaseAsync(
+        string environment,
+        string storeCode,
+        Guid terminalId,
+        Guid expectedOperationLeaseId,
+        DateTime newExpiresAt,
+        CancellationToken cancellationToken)
+    {
+        await dbContext.PosmDb.Ado.ExecuteCommandAsync(
+            ShortenOperationLeaseSql,
+            new SugarParameter("@Environment", environment),
+            new SugarParameter("@StoreCode", storeCode),
+            new SugarParameter("@TerminalId", terminalId),
+            new SugarParameter("@ExpectedOperationLeaseId", expectedOperationLeaseId),
+            DateTime2Parameter("@NewExpiresAt", newExpiresAt));
     }
 
     public async Task<bool> TryRecordHealthAsync(

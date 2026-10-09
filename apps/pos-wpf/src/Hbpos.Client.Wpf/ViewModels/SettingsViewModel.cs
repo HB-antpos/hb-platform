@@ -202,9 +202,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private string _squareDeviceCodeNameText = DefaultSquareDeviceCodeName;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsLinklyRecommendedAddress))]
     private string _linklyHostText = CardTerminalConfiguration.Default.LinklyHost;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsLinklyRecommendedAddress))]
     private string _linklyPortText = CardTerminalConfiguration.Default.LinklyPort.ToString();
 
     [ObservableProperty]
@@ -3003,6 +3005,20 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         if (_syncingLinkly) return;
         SyncLinklyInputs();
         ResetLinklyConnectionTest();
+    }
+
+    /// <summary>本地 IP 模式是否正在使用 Linkly 官方推荐的本机 EFT-Client 地址（127.0.0.1:2011）。</summary>
+    public bool IsLinklyRecommendedAddress =>
+        string.Equals(LinklyHostText?.Trim(), CardTerminalConfiguration.Default.LinklyHost, StringComparison.OrdinalIgnoreCase) &&
+        int.TryParse(LinklyPortText?.Trim(), out var port) &&
+        port == CardTerminalConfiguration.Default.LinklyPort;
+
+    // 一键恢复官方推荐地址；与手动输入一样需要点保存才会写入配置。
+    [RelayCommand]
+    private void UseRecommendedLinklyAddress()
+    {
+        LinklyHostText = CardTerminalConfiguration.Default.LinklyHost;
+        LinklyPortText = CardTerminalConfiguration.Default.LinklyPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     partial void OnTimeoutSecondsTextChanged(string value)

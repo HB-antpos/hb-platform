@@ -432,4 +432,22 @@
   <data name="settings.linkly.cloudBackend.assignmentSnapshotChanged" xml:space="preserve"><value>The line directory changed before this operation started. Review the current owner and try again.</value></data>
   <data name="settings.linkly.cloudBackend.selectionReconciled" xml:space="preserve"><value>The selection response was uncertain. The terminal directory was refreshed; review the current payment line before continuing.</value></data>
   <data name="settings.linkly.cloudBackend.selectionReconcileFailed" xml:space="preserve"><value>The payment line is unknown because the selection response and directory refresh both failed. Refresh the terminal list before taking payment.</value></data>
+  <data name="settings.payment.provider.square.subtitle" xml:space="preserve"><value>Backend-managed token · device code pairing</value></data>
+  <data name="settings.payment.provider.linkly.subtitle" xml:space="preserve"><value>Local IP / cloud direct / backend async</value></data>
+  <data name="settings.payment.environment.production" xml:space="preserve"><value>Production</value></data>
+  <data name="settings.payment.environment.sandbox" xml:space="preserve"><value>Sandbox (test)</value></data>
+  <data name="settings.square.location.empty" xml:space="preserve"><value>No locations loaded yet. Tap Load locations.</value></data>
+  <data name="settings.square.device.empty" xml:space="preserve"><value>No terminals loaded yet. Tap Load devices.</value></data>
+  <data name="settings.linkly.localIp.recommended.help" xml:space="preserve"><value>HB POS connects to EFT-Client on this PC. Keep the Linkly recommended host and port unless support asks you to change them.</value></data>
+  <data name="settings.linkly.localIp.useRecommended" xml:space="preserve"><value>Use recommended</value></data>
+  <data name="settings.linkly.localIp.recommendedBadge" xml:space="preserve"><value>Linkly recommended</value></data>
+  <data name="settings.linkly.localIp.customTitle" xml:space="preserve"><value>Custom address (advanced)</value></data>
+  <data name="settings.receiptPrinter.connection.title" xml:space="preserve"><value>Printer connection</value></data>
+  <data name="settings.receiptPrinter.connection.help" xml:space="preserve"><value>Uses USB by default. Only change the port when support asks you to.</value></data>
+  <data name="settings.receiptPrinter.port.advanced" xml:space="preserve"><value>Printer port (advanced)</value></data>
+  <data name="settings.receiptPrinter.options.title" xml:space="preserve"><value>Print options</value></data>
+  <data name="settings.receiptPrinter.storeInfo.title" xml:space="preserve"><value>Store details</value></data>
+  <data name="settings.receiptPrinter.storeInfo.help" xml:space="preserve"><value>Printed at the top of every receipt.</value></data>
+  <data name="settings.receiptPrinter.terms.title" xml:space="preserve"><value>Receipt terms</value></data>
+  <data name="settings.receiptPrinter.terms.subtitle" xml:space="preserve"><value>Printed at the bottom of receipts.</value></data>
 </root>

@@ -14,7 +14,7 @@ public sealed class SquareWebhookSchemaInitializerTests
 
         await initializer.InitializeAsync();
 
-        Assert.Equal(3, executor.SqlStatements.Count);
+        Assert.Equal(4, executor.SqlStatements.Count);
         var combinedSql = string.Join(Environment.NewLine, executor.SqlStatements);
         Assert.Contains("POSM_SquareCheckoutSession", combinedSql);
         Assert.Contains("POSM_SquareWebhookEvent", combinedSql);
@@ -36,6 +36,22 @@ public sealed class SquareWebhookSchemaInitializerTests
         Assert.Contains("UX_POSM_SquareCheckoutSession_Environment_CheckoutId", combinedSql);
         Assert.Contains("UX_POSM_SquareWebhookEvent_Environment_EventId", combinedSql);
         Assert.Contains("CHECK ([Environment] IN (N'Production', N'Sandbox'))", combinedSql);
+        Assert.Contains("POSM_SquareRefund", combinedSql);
+        Assert.Contains("[RawRefundJson] NVARCHAR(MAX) NOT NULL", combinedSql);
+        Assert.Contains("UX_POSM_SquareRefund_Environment_RefundId", combinedSql);
+    }
+
+    [Fact]
+    public void Refund_upsert_keeps_terminal_status_and_ignores_older_events()
+    {
+        var sql = (string?)typeof(SqlSugarSquareRefundRepository)
+            .GetField("UpsertRefundSql", BindingFlags.Static | BindingFlags.NonPublic)?
+            .GetRawConstantValue();
+
+        Assert.NotNull(sql);
+        Assert.Contains("@UpdatedAt >= target.[UpdatedAt]", sql);
+        Assert.Contains("target.[Status] NOT IN (N'COMPLETED', N'REJECTED', N'FAILED', N'CANCELED')", sql);
+        Assert.Contains("OR @Status IN (N'COMPLETED', N'REJECTED', N'FAILED', N'CANCELED')", sql);
     }
 
     [Fact]
