@@ -455,8 +455,8 @@
 
         <Border x:Name="SummaryPanel"
                 Grid.Row="1"
-                Margin="0,20,0,0"
-                Padding="24,16"
+                Margin="0,12,0,0"
+                Padding="24,12"
                 Background="{StaticResource PosCustomerDisplaySurfaceBrush}"
                 BorderBrush="{StaticResource PosCustomerDisplayDividerBrush}"
                 BorderThickness="1"
@@ -474,36 +474,18 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <!-- 第一行：左侧件数 / SKU 数，右端服务徽标（紧凑版）。空闲全屏广告时汇总栏整体隐藏，徽标改叠在广告上。 -->
-                    <Grid>
+                    <Grid Margin="0,0,0,8" HorizontalAlignment="Left">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="32" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Grid Margin="0,0,0,8" HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="32" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{loc:Loc customer.itemQuantity}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Column="1" Text="{Binding TotalItemQuantity, StringFormat={}{0:0.##}}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" Margin="8,0,0,0" />
-                            <TextBlock Grid.Column="3" Text="{loc:Loc customer.skuCount}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Column="4" Text="{Binding SkuCount}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" Margin="8,0,0,0" />
-                        </Grid>
-
-                        <Viewbox Grid.Column="1"
-                                 HorizontalAlignment="Right"
-                                 VerticalAlignment="Center"
-                                 Margin="12,0,0,4"
-                                 MaxHeight="34"
-                                 Stretch="Uniform"
-                                 StretchDirection="DownOnly">
-                            <ContentControl Content="{Binding}"
-                                            ContentTemplate="{StaticResource CustomerDisplayServedByCompactBadgeTemplate}" />
-                        </Viewbox>
+                        <TextBlock Text="{loc:Loc customer.itemQuantity}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="1" Text="{Binding TotalItemQuantity, StringFormat={}{0:0.##}}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" Margin="8,0,0,0" />
+                        <TextBlock Grid.Column="3" Text="{loc:Loc customer.skuCount}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="4" Text="{Binding SkuCount}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontSize="15" Margin="8,0,0,0" />
                     </Grid>
 
                     <Grid Grid.Row="1">
@@ -550,18 +532,29 @@
                     </Viewbox>
                 </StackPanel>
 
-                <Border Grid.Column="2"
-                        Background="{StaticResource PosCustomerDisplayAccentSurfaceBrush}"
-                        BorderBrush="{StaticResource PosCustomerDisplayAccentBrush}"
-                        BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="16"
-                        VerticalAlignment="Center">
-                    <StackPanel>
-                        <TextBlock Text="{loc:Loc customer.readyForPayment}" Foreground="{StaticResource PosCustomerDisplayAccentBrush}" FontSize="18" FontWeight="Black" />
-                        <TextBlock Text="{loc:Loc customer.insertOrTap}" Foreground="{StaticResource PosCustomerDisplayTextBrush}" FontSize="15" Margin="0,4,0,0" />
-                    </StackPanel>
-                </Border>
+                <!-- 「Ready for Payment」框 + 正下方的服务徽标（紧凑版）。空闲全屏广告时汇总栏整体隐藏，徽标改叠在广告上。
+                     汇总栏可用高度约 106px：框约 70px + 间距 6px + 徽标 32px，所以框的上下内边距收到 10。 -->
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <Border Background="{StaticResource PosCustomerDisplayAccentSurfaceBrush}"
+                            BorderBrush="{StaticResource PosCustomerDisplayAccentBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            Padding="16,10">
+                        <StackPanel>
+                            <TextBlock Text="{loc:Loc customer.readyForPayment}" Foreground="{StaticResource PosCustomerDisplayAccentBrush}" FontSize="18" FontWeight="Black" />
+                            <TextBlock Text="{loc:Loc customer.insertOrTap}" Foreground="{StaticResource PosCustomerDisplayTextBrush}" FontSize="15" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Border>
+                    <!-- 超过列宽（220）时只缩小不撑破；名字较短时居中。 -->
+                    <Viewbox Margin="0,6,0,0"
+                             HorizontalAlignment="Center"
+                             MaxHeight="32"
+                             Stretch="Uniform"
+                             StretchDirection="DownOnly">
+                        <ContentControl Content="{Binding}"
+                                        ContentTemplate="{StaticResource CustomerDisplayServedByCompactBadgeTemplate}" />
+                    </Viewbox>
+                </StackPanel>
             </Grid>
             </Border>
         </Grid>

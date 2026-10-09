@@ -960,13 +960,20 @@ public sealed class CustomerDisplayViewModelTests
                 element => element.Attribute("Text")?.Value == "{Binding TerminalName}");
         }
 
-        // 有商品（右侧竖屏广告）时：徽标在汇总栏里（紧凑版，汇总栏可用高度只有约 98px），不再叠在广告面板上。
+        // 有商品（右侧竖屏广告）时：徽标在汇总栏里「Ready for Payment」框下方（紧凑版，汇总栏可用高度只有约 106px），不再叠在广告面板上。
         var summaryPanel = Assert.Single(document
             .Descendants(presentation + "Border")
             .Where(element => element.Attribute(x + "Name")?.Value == "SummaryPanel"));
-        Assert.Single(summaryPanel
+        var summaryBadge = Assert.Single(summaryPanel
             .Descendants(presentation + "ContentControl")
             .Where(element => element.Attribute("ContentTemplate")?.Value == compactTemplateReference));
+        // 紧凑徽标放在「Ready for Payment」框的正下方：与该框同属一个纵向 StackPanel，且排在它后面。
+        var readyColumn = Assert.IsType<XElement>(summaryBadge.Parent?.Parent);
+        Assert.Equal(presentation + "StackPanel", readyColumn.Name);
+        var readyBox = Assert.Single(readyColumn.Elements(presentation + "Border"));
+        Assert.Contains(readyBox.Descendants(presentation + "TextBlock"),
+            element => element.Attribute("Text")?.Value == "{loc:Loc customer.readyForPayment}");
+        Assert.True(readyBox.ElementsAfterSelf().Contains(summaryBadge.Parent));
 
         // 空闲全屏广告时汇总栏整体隐藏，徽标改叠在广告右下角，且只在这个状态显示，
         // 否则会和竖屏广告重叠。
