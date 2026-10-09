@@ -132,7 +132,11 @@ const pages = [
   {
     name: '广告管理',
     keyPattern: /['"`](posAdmin\.advertisements\.[A-Za-z0-9_.]+)['"`]/g,
-    sources: ['src/pages/PosAdmin/Advertisements/index.tsx'],
+    sources: [
+      'src/pages/PosAdmin/Advertisements/index.tsx',
+      // 广告版式：列表版式列 / 版式选择 / 客显效果预览组件用的也是 posAdmin.advertisements.* 文案
+      'src/pages/PosAdmin/Advertisements/OrientationParts.tsx',
+    ],
     messages: {
       zh: 'src/pages/PosAdmin/Advertisements/advertisementsMessages.zh.json',
       en: 'src/pages/PosAdmin/Advertisements/advertisementsMessages.en.json',
