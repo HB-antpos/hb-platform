@@ -63,7 +63,9 @@
       },
       "editorMismatch": "The media is {{shape}} ({{size}}). Set to \"{{orientation}}\", it will play on {{slot}} {{effect}}. You can still save.",
       "mismatchWithRatio": "{{ratio}}, {{text}}",
-      "labelSeparator": ": "
+      "labelSeparator": ": ",
+      "thumbnailAutoHint": "For videos, a cover image is created automatically from the video when you upload it. You can still replace the URL.",
+      "thumbnailAutoFailed": "Could not create a cover image from the video. You can enter a thumbnail URL manually."
     }
   }
 }
