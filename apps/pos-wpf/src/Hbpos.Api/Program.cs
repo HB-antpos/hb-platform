@@ -105,6 +105,19 @@ using (var scope = app.Services.CreateScope())
         var linklyCloudBackendAsyncSchemaInitializer = scope.ServiceProvider.GetRequiredService<ILinklyCloudBackendAsyncSchemaInitializer>();
         await linklyCloudBackendAsyncSchemaInitializer.InitializeAsync();
 
+        // 旧版单终端凭据（门店密码 / 终端 secret）历史上是明文落库；启动时补加密。
+        // 失败不阻止启动：读取侧兼容明文，下次启动会重试，但要在日志里留下可定位的错误。
+        try
+        {
+            await scope.ServiceProvider
+                .GetRequiredService<ILinklyCloudLegacyCredentialProtectionMigrator>()
+                .MigrateAsync();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Failed to encrypt legacy Linkly credentials at startup.");
+        }
+
         var linklySettlementSchemaInitializer = scope.ServiceProvider.GetRequiredService<ILinklySettlementSchemaInitializer>();
         await linklySettlementSchemaInitializer.InitializeAsync();
 

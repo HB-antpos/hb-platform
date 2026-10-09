@@ -4019,42 +4019,6 @@
       }
     },
     "/api/v1/linkly/cloud-credential": {
-      "get": {
-        "tags": [
-          "Linkly"
-        ],
-        "parameters": [
-          {
-            "name": "environment",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/LinklyCloudCredentialResponseApiResult"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LinklyCloudCredentialResponseApiResult"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LinklyCloudCredentialResponseApiResult"
-                }
-              }
-            }
-          }
-        }
-      },
       "put": {
         "tags": [
           "Linkly"
@@ -10989,52 +10953,6 @@
           "attemptGuid": {
             "type": "string",
             "format": "uuid",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "LinklyCloudCredentialResponse": {
-        "type": "object",
-        "properties": {
-          "storeCode": {
-            "type": "string",
-            "nullable": true
-          },
-          "environment": {
-            "type": "string",
-            "nullable": true
-          },
-          "username": {
-            "type": "string",
-            "nullable": true
-          },
-          "password": {
-            "type": "string",
-            "nullable": true
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "additionalProperties": false
-      },
-      "LinklyCloudCredentialResponseApiResult": {
-        "type": "object",
-        "properties": {
-          "success": {
-            "type": "boolean"
-          },
-          "data": {
-            "$ref": "#/components/schemas/LinklyCloudCredentialResponse"
-          },
-          "errorCode": {
-            "type": "string",
-            "nullable": true
-          },
-          "message": {
-            "type": "string",
             "nullable": true
           }
         },

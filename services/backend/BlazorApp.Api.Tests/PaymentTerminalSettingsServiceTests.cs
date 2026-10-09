@@ -141,112 +141,12 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateLinklyCredentialAsync_KeepsExistingPasswordWhenPasswordIsBlank()
-    {
-        var service = CreateService();
-        SeedStore("001", "City Store");
-        await service.UpdateLinklyCredentialAsync(
-            new UpdateLinklyCredentialDto
-            {
-                StoreCode = "001",
-                Environment = "Production",
-                Username = "old-user",
-                Password = "old-password",
-            },
-            "admin"
-        );
-
-        var result = await service.UpdateLinklyCredentialAsync(
-            new UpdateLinklyCredentialDto
-            {
-                StoreCode = "001",
-                Environment = "Production",
-                Username = "new-user",
-                Password = "   ",
-            },
-            "admin"
-        );
-        var row = (await QueryLinklyRowsAsync("001", "Production")).Single();
-
-        Assert.True(result.Success);
-        Assert.True(result.Data!.Linkly.Single(item => item.Environment == "Production").HasPassword);
-        Assert.Equal("new-user", row.Username);
-        Assert.Equal("old-password", row.Password);
-        Assert.DoesNotContain(
-            typeof(LinklyCloudCredentialAdminDto).GetProperties(),
-            property => property.Name == "Password"
-        );
-    }
-
-    [Fact]
-    public async Task UpdateLinklyCredentialAsync_WhenPasswordBlankWithoutExistingCredential_ReturnsValidationError()
-    {
-        var service = CreateService();
-        SeedStore("001", "City Store");
-
-        var result = await service.UpdateLinklyCredentialAsync(
-            new UpdateLinklyCredentialDto
-            {
-                StoreCode = "001",
-                Environment = "Sandbox",
-                Username = "sandbox-user",
-                Password = " ",
-            },
-            "admin"
-        );
-
-        Assert.False(result.Success);
-        Assert.Equal("LINKLY_PASSWORD_REQUIRED", result.ErrorCode);
-        Assert.Empty(await QueryLinklyRowsAsync("001", "Sandbox"));
-    }
-
-    [Fact]
-    public async Task UpdateLinklyCredentialAsync_ClearDeletesCredential()
-    {
-        var service = CreateService();
-        SeedStore("001", "City Store");
-        await service.UpdateLinklyCredentialAsync(
-            new UpdateLinklyCredentialDto
-            {
-                StoreCode = "001",
-                Environment = "Sandbox",
-                Username = "sandbox-user",
-                Password = "sandbox-password",
-            },
-            "admin"
-        );
-
-        var result = await service.UpdateLinklyCredentialAsync(
-            new UpdateLinklyCredentialDto
-            {
-                StoreCode = "001",
-                Environment = "Sandbox",
-                ClearCredential = true,
-            },
-            "admin"
-        );
-
-        Assert.True(result.Success);
-        Assert.False(result.Data!.Linkly.Single(item => item.Environment == "Sandbox").HasPassword);
-        Assert.Empty(await QueryLinklyRowsAsync("001", "Sandbox"));
-    }
-
-    [Fact]
     public async Task GetSettingsAsync_ReturnsStoresAndSelectedStoreStatuses()
     {
         var service = CreateService();
         SeedStore("001", "City Store");
         SeedStore("002", "Beach Store");
-        await service.UpdateLinklyCredentialAsync(
-            new UpdateLinklyCredentialDto
-            {
-                StoreCode = "002",
-                Environment = "Production",
-                Username = "linkly-user",
-                Password = "linkly-password",
-            },
-            "admin"
-        );
+        SeedLegacyLinklyCredential("002", "Production", "linkly-user", "linkly-password");
 
         var result = await service.GetSettingsAsync("002");
 
@@ -1992,17 +1892,16 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
         );
     }
 
-    private Task<List<LinklyRow>> QueryLinklyRowsAsync(string storeCode, string environment)
+    private void SeedLegacyLinklyCredential(string storeCode, string environment, string username, string password)
     {
-        return _posmDb.Ado.SqlQueryAsync<LinklyRow>(
-            """
-            SELECT Id, StoreCode, Environment, Username, Password, UpdatedAt, UpdatedBy
-            FROM POSM_LinklyCloudCredential
-            WHERE StoreCode = @StoreCode AND Environment = @Environment
-            ORDER BY Id
-            """,
+        _posmDb.Ado.ExecuteCommand(
+            "INSERT INTO POSM_LinklyCloudCredential (StoreCode, Environment, Username, Password, UpdatedAt, UpdatedBy) VALUES (@StoreCode, @Environment, @Username, @Password, @UpdatedAt, @UpdatedBy)",
             new SugarParameter("@StoreCode", storeCode),
-            new SugarParameter("@Environment", environment)
+            new SugarParameter("@Environment", environment),
+            new SugarParameter("@Username", username),
+            new SugarParameter("@Password", password),
+            new SugarParameter("@UpdatedAt", DateTime.UtcNow),
+            new SugarParameter("@UpdatedBy", "admin")
         );
     }
 
@@ -2062,17 +1961,6 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
         public string Environment { get; set; } = string.Empty;
         public string AccessToken { get; set; } = string.Empty;
         public bool IsEnabled { get; set; }
-        public DateTime UpdatedAt { get; set; }
-        public string? UpdatedBy { get; set; }
-    }
-
-    private sealed class LinklyRow
-    {
-        public long Id { get; set; }
-        public string StoreCode { get; set; } = string.Empty;
-        public string Environment { get; set; } = string.Empty;
-        public string Username { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
         public DateTime UpdatedAt { get; set; }
         public string? UpdatedBy { get; set; }
     }

@@ -25,9 +25,7 @@ public sealed class LinklyController(
 {
     private const string CloudCredentialEnvironmentInvalidCode = "LINKLY_CLOUD_CREDENTIAL_ENVIRONMENT_INVALID";
     private const string CloudCredentialInvalidCode = "LINKLY_CLOUD_CREDENTIAL_REQUEST_INVALID";
-    private const string CloudCredentialReadFailedCode = "LINKLY_CLOUD_CREDENTIAL_READ_FAILED";
     private const string CloudCredentialWriteFailedCode = "LINKLY_CLOUD_CREDENTIAL_WRITE_FAILED";
-    private const string CloudCredentialReadFailedMessage = "Failed to load Linkly Cloud credential configuration.";
     private const string CloudCredentialWriteFailedMessage = "Failed to save Linkly Cloud credential configuration.";
     private const string CloudBackendInvalidCode = "LINKLY_CLOUD_BACKEND_REQUEST_INVALID";
     private const string CloudBackendActiveCode = "LINKLY_CLOUD_BACKEND_ACTIVE_TRANSACTION";
@@ -491,71 +489,6 @@ public sealed class LinklyController(
                 ApiResult<LinklyCloudBackendTerminalCredentialResponse>.Fail(
                     CloudBackendFailedCode,
                     "Failed to pair Linkly Cloud backend terminal."));
-        }
-    }
-
-    [Authorize(Policy = CashierAuthorizationPolicies.TakeCard)]
-    [HttpGet("cloud-credential")]
-    public async Task<ActionResult<ApiResult<LinklyCloudCredentialResponse>>> GetCloudCredential(
-        [FromQuery] string? environment,
-        CancellationToken cancellationToken)
-    {
-        var storeCode = User.FindFirstValue(DeviceAuthConstants.StoreCodeClaim);
-        if (string.IsNullOrWhiteSpace(storeCode))
-        {
-            Log("cloud credential request rejected reason=missing-store-claim");
-            return DeviceAuthorizationExtensions.DeviceScopeForbidden<LinklyCloudCredentialResponse>(
-                "Device store scope is unavailable.");
-        }
-
-        var normalizedEnvironment = LinklyCloudCredentialService.NormalizeEnvironment(environment);
-        if (normalizedEnvironment is null)
-        {
-            return BadRequest(ApiResult<LinklyCloudCredentialResponse>.Fail(
-                CloudCredentialEnvironmentInvalidCode,
-                "environment must be Production or Sandbox"));
-        }
-
-        var stopwatch = Stopwatch.StartNew();
-        Log($"cloud credential request store={LogValue(storeCode)} environment={normalizedEnvironment}");
-        try
-        {
-            if (await IsLegacyModeDisabledAsync(
-                    normalizedEnvironment,
-                    storeCode,
-                    cancellationToken))
-            {
-                stopwatch.Stop();
-                return Conflict(ApiResult<LinklyCloudCredentialResponse>.Fail(
-                    CloudLegacyModeDisabledCode,
-                    CloudLegacyModeDisabledMessage));
-            }
-
-            var credential = await linklyCloudCredentialService.GetByStoreCodeAsync(
-                storeCode,
-                normalizedEnvironment,
-                cancellationToken);
-            stopwatch.Stop();
-            if (credential is null)
-            {
-                Log($"cloud credential response store={LogValue(storeCode)} environment={normalizedEnvironment} status=404 elapsedMs={stopwatch.ElapsedMilliseconds}");
-                return NotFound(ApiResult<LinklyCloudCredentialResponse>.Fail(
-                    "LINKLY_CLOUD_CREDENTIAL_NOT_CONFIGURED",
-                    "Linkly Cloud credential is not configured for this store."));
-            }
-
-            Log($"cloud credential response store={LogValue(storeCode)} environment={normalizedEnvironment} status=200 updatedAt={credential.UpdatedAt:O} elapsedMs={stopwatch.ElapsedMilliseconds}");
-            return Ok(ApiResult<LinklyCloudCredentialResponse>.Ok(credential));
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            Log($"cloud credential response store={LogValue(storeCode)} environment={normalizedEnvironment} status=500 error={ex.GetType().Name} elapsedMs={stopwatch.ElapsedMilliseconds}");
-            return StatusCode(
-                StatusCodes.Status500InternalServerError,
-                ApiResult<LinklyCloudCredentialResponse>.Fail(
-                    CloudCredentialReadFailedCode,
-                    CloudCredentialReadFailedMessage));
         }
     }
 

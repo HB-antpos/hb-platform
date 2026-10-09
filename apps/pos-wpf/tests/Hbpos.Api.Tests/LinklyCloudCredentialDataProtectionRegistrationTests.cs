@@ -1,4 +1,5 @@
 using BlazorApp.Shared.Security;
+using Hbpos.Api.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -49,6 +50,32 @@ public sealed class LinklyCloudCredentialDataProtectionRegistrationTests
 
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetRequiredService<ILinklyCloudTerminalCredentialProtector>());
+    }
+
+    [Fact]
+    public void Legacy_credential_repositories_are_registered_behind_the_encrypting_decorators()
+    {
+        // H15：旧版门店密码 / 终端 secret 不得绕过装饰器直接以明文落库。
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ASPNETCORE_ENVIRONMENT"] = "Development",
+                ["ConnectionStrings:MainConnection"] = "Server=localhost;Database=x;User Id=u;Password=p;TrustServerCertificate=true",
+                ["ConnectionStrings:PosmConnection"] = "Server=localhost;Database=x;User Id=u;Password=p;TrustServerCertificate=true"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddHbposApiServices(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.IsType<ProtectingLinklyCloudCredentialRepository>(
+            scope.ServiceProvider.GetRequiredService<ILinklyCloudCredentialRepository>());
+        Assert.IsType<ProtectingLinklyCloudBackendTerminalCredentialRepository>(
+            scope.ServiceProvider.GetRequiredService<ILinklyCloudBackendTerminalCredentialRepository>());
     }
 
     [Fact]

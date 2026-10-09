@@ -6,7 +6,6 @@ import { buildWebRoleMenuPreview } from '../../../utils/webMenuPreview'
 import type { CurrentUser } from '../../../types/auth'
 import { P } from '../../../types/permissions'
 import {
-  buildLinklyCredentialPayload,
   buildCreateLinklyTerminalPayload,
   buildUpdateLinklyTerminalPayload,
   buildLinklyActivationChecklist,
@@ -86,22 +85,6 @@ const linklyForm = createLinklyCredentialFormValues({
 })
 assertEqual(linklyForm.password, '', 'Linkly password input should not be hydrated')
 assertEqual(linklyForm.username, 'existing-user', 'Linkly username should be hydrated')
-
-const keepLinkly = buildLinklyCredentialPayload('001', 'Production', {
-  username: ' new-user ',
-  password: ' ',
-  clearCredential: false,
-})
-assertEqual(keepLinkly.username, 'new-user', 'Linkly username should be trimmed')
-assert('password' in keepLinkly === false, 'blank Linkly password should be omitted to keep existing password')
-
-const clearLinkly = buildLinklyCredentialPayload('001', 'Sandbox', {
-  username: 'ignored',
-  password: 'ignored',
-  clearCredential: true,
-})
-assertEqual(clearLinkly.clearCredential, true, 'clear Linkly payload should set clearCredential=true')
-assert('password' in clearLinkly === false, 'clear Linkly payload should not send password')
 
 const terminalForm = createLinklyTerminalFormValues({
   terminalId: 'terminal-1',

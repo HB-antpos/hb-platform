@@ -186,14 +186,22 @@ public static class ServiceRegistration
         services.AddSingleton<IInstallmentCancelClaimCommitFaultInjector, NoOpInstallmentCancelClaimCommitFaultInjector>();
         services.AddScoped<IStoreVoucherRepository, SqlSugarStoreVoucherRepository>();
         services.AddScoped<IStoreVoucherService, StoreVoucherService>();
-        services.AddScoped<ILinklyCloudCredentialRepository, SqlSugarLinklyCloudCredentialRepository>();
+        // 旧版门店凭据落库统一走 Linkly 专用 ring 加密；装饰器对上层透明，历史明文行读取时兼容。
+        services.AddScoped<SqlSugarLinklyCloudCredentialRepository>();
+        services.AddScoped<ILinklyCloudCredentialRepository>(sp => new ProtectingLinklyCloudCredentialRepository(
+            sp.GetRequiredService<SqlSugarLinklyCloudCredentialRepository>(),
+            sp.GetRequiredService<BlazorApp.Shared.Security.ILinklyCloudTerminalCredentialProtector>()));
+        services.AddScoped<ILinklyCloudLegacyCredentialProtectionMigrator, SqlSugarLinklyCloudLegacyCredentialProtectionMigrator>();
         services.AddScoped<ILinklyCloudCredentialService, LinklyCloudCredentialService>();
         services.AddScoped<ILinklyCloudCredentialSchemaSqlExecutor, SqlSugarLinklyCloudCredentialSchemaSqlExecutor>();
         services.AddScoped<ILinklyCloudCredentialSchemaInitializer, SqlSugarLinklyCloudCredentialSchemaInitializer>();
         services.AddScoped<ILinklyCloudBackendAsyncRepository, SqlSugarLinklyCloudBackendAsyncRepository>();
         // 进程内共享的 Linkly token 缓存：Token Provider 是按请求创建的类型化客户端，缓存必须由单例持有。
         services.AddSingleton<LinklyCloudBackendTokenCache>();
-        services.AddScoped<ILinklyCloudBackendTerminalCredentialRepository, SqlSugarLinklyCloudBackendTerminalCredentialRepository>();
+        services.AddScoped<SqlSugarLinklyCloudBackendTerminalCredentialRepository>();
+        services.AddScoped<ILinklyCloudBackendTerminalCredentialRepository>(sp => new ProtectingLinklyCloudBackendTerminalCredentialRepository(
+            sp.GetRequiredService<SqlSugarLinklyCloudBackendTerminalCredentialRepository>(),
+            sp.GetRequiredService<BlazorApp.Shared.Security.ILinklyCloudTerminalCredentialProtector>()));
         services.AddScoped<ILinklyCloudTerminalRepository, SqlSugarLinklyCloudTerminalRepository>();
         services.AddScoped<ILinklyCloudTerminalService, LinklyCloudTerminalService>();
         services.AddHttpClient<ILinklyCloudBackendAsyncTransport, HttpLinklyCloudBackendAsyncTransport>(client =>

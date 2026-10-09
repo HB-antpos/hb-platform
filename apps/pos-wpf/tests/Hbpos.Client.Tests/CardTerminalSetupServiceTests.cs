@@ -1499,18 +1499,6 @@ public sealed class CardTerminalSetupServiceTests
 
     private sealed class FakeLinklyCloudCredentialApiClient : ILinklyCloudCredentialApiClient
     {
-        public Task<LinklyCloudCredentialResponse> GetCredentialAsync(
-            CardTerminalEnvironment environment,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(new LinklyCloudCredentialResponse(
-                "S01",
-                environment.ToString(),
-                "store-user",
-                "store-password",
-                DateTimeOffset.UtcNow));
-        }
-
         public (CardTerminalEnvironment Environment, string Username, string Password)? LastCredentialUpsertRequest { get; private set; }
 
         public (CardTerminalEnvironment Environment, string Secret, string PosId)? LastTerminalCredentialUpsertRequest { get; private set; }

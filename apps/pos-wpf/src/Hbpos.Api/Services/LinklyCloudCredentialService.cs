@@ -6,11 +6,6 @@ namespace Hbpos.Api.Services;
 
 public interface ILinklyCloudCredentialService
 {
-    Task<LinklyCloudCredentialResponse?> GetByStoreCodeAsync(
-        string storeCode,
-        string environment,
-        CancellationToken cancellationToken);
-
     Task<LinklyCloudCredentialUpsertResponse> UpsertAsync(
         string storeCode,
         LinklyCloudCredentialUpsertRequest request,
@@ -21,36 +16,7 @@ public interface ILinklyCloudCredentialService
 public sealed class LinklyCloudCredentialService(
     ILinklyCloudCredentialRepository repository) : ILinklyCloudCredentialService
 {
-    public async Task<LinklyCloudCredentialResponse?> GetByStoreCodeAsync(
-        string storeCode,
-        string environment,
-        CancellationToken cancellationToken)
-    {
-        var normalizedStoreCode = NormalizeStoreCode(storeCode);
-        var normalizedEnvironment = NormalizeEnvironment(environment);
-        if (string.IsNullOrWhiteSpace(normalizedStoreCode) || normalizedEnvironment is null)
-        {
-            return null;
-        }
-
-        var credential = await repository.GetByStoreCodeAsync(
-            normalizedStoreCode,
-            normalizedEnvironment,
-            cancellationToken);
-        if (credential is null
-            || string.IsNullOrWhiteSpace(credential.Username)
-            || string.IsNullOrWhiteSpace(credential.Password))
-        {
-            return null;
-        }
-
-        return new LinklyCloudCredentialResponse(
-            credential.StoreCode ?? normalizedStoreCode,
-            credential.Environment ?? normalizedEnvironment,
-            credential.Username,
-            credential.Password,
-            new DateTimeOffset(DateTime.SpecifyKind(credential.UpdatedAt ?? DateTime.UtcNow, DateTimeKind.Utc)));
-    }
+    internal const int MaxPasswordBytes = 80;
 
     public async Task<LinklyCloudCredentialUpsertResponse> UpsertAsync(
         string storeCode,
@@ -65,6 +31,12 @@ public sealed class LinklyCloudCredentialService(
             ?? throw new LinklyCloudCredentialValidationException("environment must be Production or Sandbox");
         var username = NormalizeRequired(request.Username, "username");
         var password = NormalizeRequired(request.Password, "password");
+        if (System.Text.Encoding.UTF8.GetByteCount(password) > MaxPasswordBytes)
+        {
+            // 密文要放进 NVARCHAR(256) 列：DataProtection 加密并带前缀后约为明文字节数的 3 倍（80 字节 → 246 字符），超长直接拒绝而不是截断。
+            throw new LinklyCloudCredentialValidationException($"password must not exceed {MaxPasswordBytes} bytes (UTF-8).");
+        }
+
         var now = DateTime.UtcNow;
 
         var credential = await repository.UpsertAsync(
