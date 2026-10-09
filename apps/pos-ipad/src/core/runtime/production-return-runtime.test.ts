@@ -31,6 +31,7 @@ import type {
   DurableReturnAllocation,
   PrepareDurableReturnAction,
   ReturnAllocationExternalOutcome,
+  ReturnSupervisorResolutionRecord,
   ReturnExecutionLedgerPort,
   ReturnRecoveryScope,
 } from "@hb/pos-domain/features/returns/adapters/durable-return-execution-orchestrator";
@@ -772,6 +773,98 @@ test("恢复前后清除 session 均失败关闭，provider 完成事实不触�
   assert.equal(after.onlineRecovers.length, 1);
 });
 
+test("H9：退款未知主管结案强制另一名主管授权，结案落点收到冻结身份并补发 ACK", async () => {
+  let drained = 0;
+  const resolved: Record<string, unknown>[] = [];
+  const harness = createHarness({
+    onlineSubmitOutcomes: [{ status: "unknown", protectedRecoveryKey: null }],
+    onlineRecoverImpl: async () => ({ status: "unknown", protectedRecoveryKey: null }),
+    supervisorResolve: async (record) => {
+      resolved.push({ ...record });
+      return "declined";
+    },
+    supervisorDrain: async () => { drained += 1; },
+  });
+  const presenter = await unknownNoReceiptPresenter(harness);
+  assert.equal(presenter.getState().supervisorResolutionAvailable, true);
+  const recoversBefore = harness.onlineRecovers.length;
+
+  const resolving = presenter.resolveBySupervisor({
+    finding: "not-refunded",
+    evidenceReference: "terminal receipt 8841",
+    note: "Checked terminal and portal",
+  });
+  await flush();
+  // 当前收银员拥有 Confirm 权限也必须转交主管。
+  assert.equal(harness.authorizationService.getState().kind, "awaiting-supervisor");
+  assert.deepEqual(authorizationState(harness), {
+    permissionCode: POS_RETURN_PERMISSIONS.confirm,
+    action: "resolve-unknown-refund",
+  });
+  assert.equal(harness.authorizationRequests.at(-1)?.forceSupervisor, true);
+  assert.deepEqual(
+    await harness.authorizationService.submitSupervisorBarcode("RETURN-RESOLVE-SUPERVISOR"),
+    { consumed: true, outcome: "authorized" },
+  );
+  assert.equal(await resolving, true);
+  assert.equal(presenter.getState().errorCode, "RETURN_SUPERVISOR_NOT_REFUNDED");
+
+  // provider 真实结果优先：结案前先按原 attempt 恢复一次。
+  assert.equal(harness.onlineRecovers.length, recoversBefore + 1);
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0]?.finding, "not-refunded");
+  assert.equal(resolved[0]?.evidenceReference, "terminal receipt 8841");
+  assert.equal((resolved[0]?.supervisorActor as { cashierId: string }).cashierId, "SUPERVISOR-1");
+  assert.equal((resolved[0]?.requestingActor as { cashierId: string }).cashierId, "CASHIER-1");
+  assert.deepEqual(resolved[0]?.scope, { storeCode: STORE_CODE, deviceCode: DEVICE_CODE });
+  assert.equal(
+    resolved[0]?.authorizationId,
+    harness.authorizationRequests.at(-1)?.actionId,
+  );
+  assert.equal(drained, 1, "结论耐久后补发后端会话 ACK");
+  assert.equal(harness.onlineSubmits.length, 1, "绝不重新提交退款");
+});
+
+test("H9：主管拒绝/取消时不落结论、不补发 ACK，Unknown 锁定不变", async () => {
+  let drained = 0;
+  let resolveCalls = 0;
+  const harness = createHarness({
+    supervisorPermissions: [],
+    onlineSubmitOutcomes: [{ status: "unknown", protectedRecoveryKey: null }],
+    onlineRecoverImpl: async () => ({ status: "unknown", protectedRecoveryKey: null }),
+    supervisorResolve: async () => { resolveCalls += 1; return "declined"; },
+    supervisorDrain: async () => { drained += 1; },
+  });
+  const presenter = await unknownNoReceiptPresenter(harness);
+  const resolving = presenter.resolveBySupervisor({
+    finding: "not-refunded",
+    evidenceReference: "receipt",
+    note: "note",
+  });
+  await flush();
+  assert.deepEqual(
+    await harness.authorizationService.submitSupervisorBarcode("NO-PERMISSION"),
+    { consumed: true, outcome: "denied", reason: "PERMISSION_DENIED" },
+  );
+  harness.authorizationService.cancel();
+  assert.equal(await resolving, false);
+  assert.equal(presenter.getState().phase, "unknown");
+  assert.equal(presenter.getState().errorCode, "RETURN_SUPERVISOR_REQUIRED");
+  assert.equal(resolveCalls, 0);
+  assert.equal(drained, 0);
+});
+
+test("H9：未配置结案落点的组合根不展示结案入口，resolveUnknown 失败关闭", async () => {
+  const harness = createHarness({
+    onlineSubmitOutcomes: [{ status: "unknown", protectedRecoveryKey: null }],
+  });
+  const presenter = await unknownNoReceiptPresenter(harness);
+  assert.equal(presenter.getState().supervisorResolutionAvailable, false);
+  assert.equal(await presenter.resolveBySupervisor({ finding: "not-refunded", evidenceReference: "r", note: "n" }), false);
+  assert.equal(presenter.getState().phase, "unknown");
+  assert.equal(harness.authorizationRequests.some((request) => request.action === "resolve-unknown-refund"), false);
+});
+
 type HarnessOptions = Readonly<{
   cashierPermissions?: readonly string[];
   supervisorPermissions?: readonly string[];
@@ -784,6 +877,8 @@ type HarnessOptions = Readonly<{
   acknowledgementImpl?(attemptId: string): Promise<void>;
   acknowledgementPending?: boolean;
   malformedAcknowledgementResult?: boolean;
+  supervisorResolve?(record: ReturnSupervisorResolutionRecord): Promise<"declined" | "waiting">;
+  supervisorDrain?(): Promise<unknown>;
 }>;
 
 type Harness = ReturnType<typeof createHarness>;
@@ -980,6 +1075,12 @@ function createHarness(options: HarnessOptions = {}) {
       },
     },
     acknowledgements,
+    ...(options.supervisorResolve
+      ? { supervisorResolution: { resolve: options.supervisorResolve } }
+      : {}),
+    ...(options.supervisorDrain
+      ? { supervisorAcknowledgements: { drain: options.supervisorDrain } }
+      : {}),
     sha256Hex: async (material) =>
       `digest-${material.length}`,
     createId,

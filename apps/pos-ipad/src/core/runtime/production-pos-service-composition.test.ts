@@ -6924,6 +6924,20 @@ function databaseFor(
         throw new Error("return capacity protect is not used");
       },
     }),
+    returnSupervisorResolutions: () => ({
+      async resolve() {
+        throw new Error("return supervisor resolution is not used");
+      },
+    }),
+    paymentSupervisorAckQueue: () => ({
+      async listPending() {
+        return [];
+      },
+      async markAcknowledged() {
+        return false;
+      },
+      async recordFailure() {},
+    }),
     returnExecutionLedger: () => ({
       async hasRecoverableForTerminal(
         scope: Readonly<{ storeCode: string; deviceCode: string }>,

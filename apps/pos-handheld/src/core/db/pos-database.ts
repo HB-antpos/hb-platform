@@ -53,6 +53,8 @@ import {
 import { SqliteDailyCloseRepository } from "@hb/pos-db/core/db/sqlite-daily-close-repository";
 import { SqliteDailyCloseUploadRepository } from "@hb/pos-db/core/db/sqlite-daily-close-upload-repository";
 import { SqliteOrderSyncStatusRepository } from "@hb/pos-db";
+import { SqlitePaymentSupervisorAckQueue } from "@hb/pos-db/core/db/sqlite-payment-supervisor-acknowledgement-queue";
+import { SqliteReturnSupervisorResolutionStore } from "@hb/pos-db/core/db/sqlite-return-supervisor-resolution-store";
 import {
   SqliteFulfilmentStore,
   type PersistedDrawerEventInput,
@@ -501,6 +503,11 @@ export class PosDatabase implements DatabasePort {
    * 退货完整 plan、allocation、Unknown reservation 与最终订单仅经此 facade。
    * provider/API 调用前必须先 prepare action 和绑定对应 durable attempt。
    */
+  /** 主管结案后待补发的 Linkly 会话确认队列；队列行与人工结论同事务写入。 */
+  public paymentSupervisorAckQueue(): SqlitePaymentSupervisorAckQueue {
+    return new SqlitePaymentSupervisorAckQueue(this.connection);
+  }
+
   public returnExecutionLedger(
     encryptor: SensitivePayloadEncryptor,
     ids: ReturnExecutionPersistenceIds,
@@ -508,6 +515,23 @@ export class PosDatabase implements DatabasePort {
     return new SqliteReturnExecutionLedger(
       this.connection,
       encryptor,
+      ids,
+      this.nowIso,
+    );
+  }
+
+  /**
+   * 退款结果未知的主管结案（作废并释放额度 / 继续等待）。与退货账本同库同事务，
+   * 同时登记后端会话 ACK 待办；provider attempt 状态不被改写。
+   */
+  public returnSupervisorResolutions(
+    ids: Readonly<{
+      createResolutionId(): string;
+      createAuditEventId(): string;
+    }>,
+  ): SqliteReturnSupervisorResolutionStore {
+    return new SqliteReturnSupervisorResolutionStore(
+      this.connection,
       ids,
       this.nowIso,
     );

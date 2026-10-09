@@ -1812,6 +1812,7 @@ export function createProductionPosRuntimeServices(
         authorization: operationAuthorization,
         providerRefund: paymentRuntime.returnRefund,
         acknowledgements: paymentRuntime.acknowledgements,
+        supervisorAcknowledgements: paymentRuntime.supervisorAcknowledgements,
         requestOrderSyncDrain: () => coordinator.requestDrain(),
       })
     : {
@@ -3093,6 +3094,9 @@ function createAvailableReturnRuntime(input: Readonly<{
   acknowledgements: ReturnType<
     typeof createProductionPaymentRuntime
   >["acknowledgements"];
+  supervisorAcknowledgements: ReturnType<
+    typeof createProductionPaymentRuntime
+  >["supervisorAcknowledgements"];
   requestOrderSyncDrain: () => Promise<unknown>;
 }>): PosReturnsRuntimeService {
   const receiptRenderer = new OrderRepositoryReturnReceiptRenderer(
@@ -3156,6 +3160,14 @@ function createAvailableReturnRuntime(input: Readonly<{
     }),
     ...(input.acknowledgements
       ? { acknowledgements: input.acknowledgements }
+      : {}),
+    // 退款结果未知时的主管结案（未退款 / 继续等待）；ACK 失败只留队列。
+    supervisorResolution: input.input.database.returnSupervisorResolutions({
+      createResolutionId: input.input.createId,
+      createAuditEventId: input.input.createId,
+    }),
+    ...(input.supervisorAcknowledgements
+      ? { supervisorAcknowledgements: input.supervisorAcknowledgements }
       : {}),
     fulfilment: {
       materializeAction: (actionId) =>

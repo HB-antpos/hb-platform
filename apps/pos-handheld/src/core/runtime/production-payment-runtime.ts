@@ -66,6 +66,10 @@ import {
   type PaymentAcknowledgementRuntimePort,
 } from "@hb/pos-payments-core/features/payments/payment-acknowledgement-service";
 import {
+  SupervisorResolutionAcknowledgementService,
+  type LinklySupervisorResolvedAcknowledger,
+} from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
+import {
   PaymentCheckoutRuntime,
   PaymentCheckoutRuntimeError,
   type PaymentCheckoutDraft,
@@ -147,6 +151,8 @@ export type ProductionPaymentRuntime = Readonly<{
   returnRefund: DurableOnlineReturnRefundPort | null;
   /** 仅供组合根在退货账本完成后确认，禁止暴露到页面。 */
   acknowledgements: PaymentAcknowledgementRuntimePort | null;
+  /** 主管结案 ACK 的补发入口，仅供组合根在退货主管结案后触发；失败只保留队列。 */
+  supervisorAcknowledgements: Readonly<{ drain(): Promise<unknown> }> | null;
   initializeRecovery(): Promise<void>;
 }>;
 
@@ -211,6 +217,7 @@ export function createProductionPaymentRuntime(
       recoveryProbe,
       returnRefund: null,
       acknowledgements: null,
+      supervisorAcknowledgements: null,
       service: {
         status: "unavailable",
         blockers: [
@@ -255,6 +262,15 @@ export function createProductionPaymentRuntime(
       return returnRefund.trustedRefundReferenceSeed(request);
     },
   });
+  // 主管结案 ACK 队列：行与人工结论同事务写入，ACK 失败可在冷启动/下一次结案时重试。
+  const supervisorAcks = linklyAcknowledger && isSupervisorResolvedAcknowledger(linklyAcknowledger)
+    ? new SupervisorResolutionAcknowledgementService({
+        queue: input.database.paymentSupervisorAckQueue(),
+        ledger: input.repositories.payments,
+        acknowledger: linklyAcknowledger,
+        nowIso: input.clock.nowIso,
+      })
+    : null;
   const acknowledgements = linklyAcknowledger
     ? new PaymentAcknowledgementService({ ledger: input.repositories.payments, acknowledger: linklyAcknowledger, ...(legacyReconciler ? { legacyReconciler } : {}), nowIso: input.clock.nowIso })
     : null;
@@ -564,10 +580,14 @@ export function createProductionPaymentRuntime(
   return {
     returnRefund,
     acknowledgements,
+    supervisorAcknowledgements: supervisorAcks
+      ? Object.freeze({ drain: () => supervisorAcks.drain() })
+      : null,
     recoveryProbe,
     initializeRecovery: async () => {
       await cartLease.initializeRecovery();
       recoveryInitialized = true;
+      void supervisorAcks?.drain().catch(() => undefined);
       await discoverLegacy(true);
     },
     service: {
@@ -601,6 +621,13 @@ function requireLinklyAcknowledger(
   if (!provider || typeof provider !== "object" || !("acknowledge" in provider) || typeof provider.acknowledge !== "function") throw new Error("LINKLY_ACKNOWLEDGEMENT_PORT_MISSING");
   return provider as LinklyPaymentAcknowledgementPort & Readonly<{ reconcileLegacy?: unknown; listUnacknowledgedSessions?: unknown }>;
 }
+function isSupervisorResolvedAcknowledger(
+  provider: object,
+): provider is LinklySupervisorResolvedAcknowledger {
+  return "acknowledgeSupervisorResolved" in provider &&
+    typeof provider.acknowledgeSupervisorResolved === "function";
+}
+
 function legacyReconcilerOrNull(
   provider: Readonly<{ reconcileLegacy?: unknown; listUnacknowledgedSessions?: unknown }>,
 ): LinklyLegacyAcknowledgementReconciler | null {

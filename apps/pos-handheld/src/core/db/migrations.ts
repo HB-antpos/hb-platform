@@ -6426,6 +6426,73 @@ CREATE INDEX ix_local_daily_closes_upload_due
   );
 `;
 
+/**
+ * M50 主管结案：
+ * 1. 主管结案 ACK 队列——人工结论落库后，需要对后端 Linkly 会话补发 supervisorResolved 确认。
+ *    队列行与人工结论同事务写入，ACK 失败可无限重试；表不改 payment_attempts 状态，也不承载金融结论。
+ * 2. 退款未知的主管结论——退货界面与该收银员的收款被「退款结果未知」锁住时的人工出口。
+ */
+const M50 = `
+CREATE TABLE payment_supervisor_session_acks (
+  attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  resolution TEXT NOT NULL CHECK (resolution IN ('paid', 'unpaid', 'refunded', 'not-refunded')),
+  source_action_id TEXT NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  acknowledged_at_iso TEXT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  last_attempt_at_iso TEXT NULL,
+  last_error_code TEXT NULL,
+  CHECK (TRIM(attempt_id) <> '' AND LENGTH(attempt_id) <= 128),
+  CHECK (TRIM(source_action_id) <> '' AND LENGTH(source_action_id) <= 128)
+);
+CREATE INDEX ix_payment_supervisor_session_acks_pending
+  ON payment_supervisor_session_acks (acknowledged_at_iso, created_at_iso);
+CREATE TRIGGER trg_payment_supervisor_session_acks_identity_immutable
+BEFORE UPDATE ON payment_supervisor_session_acks
+FOR EACH ROW WHEN NEW.attempt_id <> OLD.attempt_id
+  OR NEW.resolution <> OLD.resolution
+  OR NEW.source_action_id <> OLD.source_action_id
+  OR NEW.created_at_iso <> OLD.created_at_iso
+  OR (OLD.acknowledged_at_iso IS NOT NULL AND NEW.acknowledged_at_iso IS NOT OLD.acknowledged_at_iso)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_SUPERVISOR_ACK_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_supervisor_session_acks_no_delete
+BEFORE DELETE ON payment_supervisor_session_acks
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_SUPERVISOR_ACK_IMMUTABLE'); END;
+-- 退款结果长期未知时主管的人工结论（不可变审计）。provider attempt 状态不被改写，
+-- 迟到的 Approved 仍能被恢复流程识别；not-refunded 每个 allocation 至多一条。
+CREATE TABLE return_supervisor_resolutions (
+  resolution_id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL,
+  allocation_id TEXT NOT NULL,
+  attempt_id TEXT NOT NULL REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  finding TEXT NOT NULL CHECK (finding IN ('not-refunded', 'keep-waiting')),
+  evidence_reference TEXT NOT NULL,
+  note TEXT NOT NULL,
+  authorization_id TEXT NOT NULL,
+  supervisor_actor_json TEXT NOT NULL,
+  requesting_actor_json TEXT NOT NULL,
+  attempt_state_snapshot TEXT NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  FOREIGN KEY (action_id, allocation_id)
+    REFERENCES return_action_allocations(action_id, allocation_id) ON DELETE RESTRICT,
+  CHECK (TRIM(resolution_id) <> '' AND LENGTH(resolution_id) <= 128),
+  CHECK (TRIM(evidence_reference) <> '' AND LENGTH(evidence_reference) <= 256),
+  CHECK (TRIM(note) <> '' AND LENGTH(note) <= 1000),
+  CHECK (TRIM(authorization_id) <> '' AND LENGTH(authorization_id) <= 128)
+);
+CREATE UNIQUE INDEX ux_return_supervisor_resolutions_not_refunded
+  ON return_supervisor_resolutions (action_id, allocation_id)
+  WHERE finding = 'not-refunded';
+CREATE INDEX ix_return_supervisor_resolutions_action
+  ON return_supervisor_resolutions (action_id, created_at_iso);
+CREATE TRIGGER trg_return_supervisor_resolutions_immutable
+BEFORE UPDATE ON return_supervisor_resolutions
+BEGIN SELECT RAISE(ABORT, 'RETURN_SUPERVISOR_RESOLUTION_IMMUTABLE'); END;
+CREATE TRIGGER trg_return_supervisor_resolutions_no_delete
+BEFORE DELETE ON return_supervisor_resolutions
+BEGIN SELECT RAISE(ABORT, 'RETURN_SUPERVISOR_RESOLUTION_IMMUTABLE'); END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6476,6 +6543,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 47, name: "M47_voucher_reversal_blocked_disposition", sql: M47 },
   { version: 48, name: "M48_installment_refund_voucher_print_jobs", sql: M48 },
   { version: 49, name: "M49_daily_close_upload_outbox", sql: M49 },
+  { version: 50, name: "M50_payment_supervisor_session_acks", sql: M50 },
 ];
 
 export async function applyMigrations(

@@ -17,6 +17,7 @@ import {
   type VoucherFundedRefundBasis,
 } from "./return-domain";
 
+import type { AuditActorSnapshot } from "../../core/contracts/audit-actor";
 import {
   normalizeLineSyncProvenance,
   type LineSyncProvenance,
@@ -43,8 +44,22 @@ export type NoReceiptReturnAuthorization = Readonly<{
   authorizationKey: string;
 }>;
 
+/**
+ * 主管结案的冻结身份：授权在动作发生时由组合根取得，页面与 workflow 都不接触主管凭据。
+ */
+export type ReturnSupervisorResolutionAuthorization = Readonly<{
+  authorizationId: string;
+  supervisorActor: AuditActorSnapshot;
+  requestingActor: AuditActorSnapshot;
+}>;
+
 export interface ReturnSupervisorAuthorizationPort {
   authorizeNoReceiptReturn(): Promise<NoReceiptReturnAuthorization>;
+  /**
+   * 退款结果长期未知时由另一名有权限的主管确认。必须强制主管（当前收银员即使有
+   * 权限也不能自己结案），拒绝或取消时抛 RETURN_SUPERVISOR_REQUIRED。
+   */
+  authorizeUnknownResolution?(): Promise<ReturnSupervisorResolutionAuthorization>;
 }
 
 /**
@@ -84,12 +99,35 @@ export type ReturnExecutionOutcome =
  * - card/voucher/installment 分配先持久化 payment attempt，再调用在线退款；
  * - 通信歧义必须返回 unknown，绝不能通过抛错暗示调用方可重试。
  */
+/**
+ * 主管对“退款结果未知”的人工结论。当前只支持：
+ * - not-refunded：已在终端/Linkly 后台核对确实没有退款，本次退货作废并释放额度；
+ * - keep-waiting：仍无法核对，只留审计，继续锁定。
+ * 「已退款」需要给回单同步提供人工退款凭据，服务端合同未就绪前不开放。
+ */
+export type ReturnSupervisorFinding = "not-refunded" | "keep-waiting";
+
+export type ReturnSupervisorResolutionCommand = Readonly<{
+  actionId: string;
+  finding: ReturnSupervisorFinding;
+  evidenceReference: string;
+  note: string;
+  authorization: ReturnSupervisorResolutionAuthorization;
+}>;
+
 export interface ReturnExecutionPort {
   execute(command: ReturnExecutionCommand): Promise<ReturnExecutionOutcome>;
   recover(input: Readonly<{
     actionId: string;
     recoveryKey: string | null;
   }>): Promise<ReturnExecutionOutcome>;
+  /**
+   * 未提供表示该端不支持主管结案（仍只能 recover）。实现必须先让 provider 真实结果
+   * 优先：只有原退款仍确实未知时才落主管结论。
+   */
+  resolveUnknown?(
+    command: ReturnSupervisorResolutionCommand,
+  ): Promise<ReturnExecutionOutcome>;
 }
 
 export type ReturnWorkflowOptions = Readonly<{
@@ -177,6 +215,14 @@ export class ReturnWorkflow {
 
   public getSnapshot(): ReturnWorkflowSnapshot {
     return this.snapshot;
+  }
+
+  /** 该端是否开放“退款结果未知”的主管结案（缺任一端口则 UI 不展示入口）。 */
+  public supportsSupervisorResolution(): boolean {
+    return Boolean(
+      this.options.execution.resolveUnknown &&
+        this.options.supervisorAuthorization.authorizeUnknownResolution,
+    );
   }
 
   /**
@@ -402,6 +448,69 @@ export class ReturnWorkflow {
     return operation;
   }
 
+  /**
+   * 退款结果未知时的主管结案出口（与 WPF 的 SUPERVISOR_CONFIRMED_* 同构）。
+   * 授权在状态变为 submitting 之前取得：授权被拒/取消不改变 Unknown 锁定。
+   */
+  public resolveUnknownBySupervisor(
+    input: Readonly<{
+      finding: ReturnSupervisorFinding;
+      evidenceReference: string;
+      note: string;
+    }>,
+  ): Promise<ReturnExecutionOutcome> {
+    try {
+      this.assertSession();
+      if (!this.actionId || !this.recoveryRequired) {
+        return Promise.reject(
+          new ReturnFeatureError("RETURN_UNKNOWN_RECOVERY_REQUIRED"),
+        );
+      }
+      if (this.recoveryInFlight || this.confirmInFlight) {
+        return Promise.reject(
+          new ReturnFeatureError("RETURN_OPERATION_IN_PROGRESS"),
+        );
+      }
+      if (
+        !this.options.execution.resolveUnknown ||
+        !this.options.supervisorAuthorization.authorizeUnknownResolution
+      ) {
+        return Promise.reject(
+          new ReturnFeatureError("RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED"),
+        );
+      }
+      if (input.finding !== "not-refunded" && input.finding !== "keep-waiting") {
+        return Promise.reject(
+          new ReturnFeatureError("RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED"),
+        );
+      }
+      const evidenceReference = input.evidenceReference.trim();
+      const note = input.note.trim();
+      if (
+        !evidenceReference || evidenceReference.length > 256 ||
+        !note || note.length > 1000 ||
+        CONTROL_CHARACTERS.test(evidenceReference) ||
+        CONTROL_CHARACTERS.test(note)
+      ) {
+        return Promise.reject(
+          new ReturnFeatureError("RETURN_RESOLUTION_EVIDENCE_REQUIRED"),
+        );
+      }
+      const operation = this.resolveOnce(
+        this.actionId,
+        input.finding,
+        evidenceReference,
+        note,
+      ).finally(() => {
+        if (this.recoveryInFlight === operation) this.recoveryInFlight = null;
+      });
+      this.recoveryInFlight = operation;
+      return operation;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   public reset(): ReturnWorkflowSnapshot {
     this.assertSession();
     if (this.confirmInFlight || this.recoveryInFlight) {
@@ -503,6 +612,62 @@ export class ReturnWorkflow {
         actionId,
         // provider key 只从受保护账本解析，跨进程恢复不把它带回 UI。
         recoveryKey: null,
+      });
+      validateExecutionOutcome(outcome);
+    } catch (error) {
+      this.snapshot = {
+        ...this.snapshot,
+        status: "unknown",
+        lastErrorCode: "RETURN_RECOVERY_FAILED",
+      };
+      throw error instanceof ReturnFeatureError
+        ? error
+        : new ReturnFeatureError("RETURN_RECOVERY_FAILED");
+    }
+    this.applyExecutionOutcome(outcome);
+    this.assertSession();
+    return outcome;
+  }
+
+  private async resolveOnce(
+    actionId: string,
+    finding: ReturnSupervisorFinding,
+    evidenceReference: string,
+    note: string,
+  ): Promise<ReturnExecutionOutcome> {
+    let authorization: ReturnSupervisorResolutionAuthorization;
+    try {
+      authorization =
+        await this.options.supervisorAuthorization.authorizeUnknownResolution!();
+      if (
+        !authorization.authorizationId.trim() ||
+        !authorization.supervisorActor.cashierId.trim() ||
+        authorization.supervisorActor.cashierId ===
+          authorization.requestingActor.cashierId
+      ) {
+        throw new ReturnFeatureError("RETURN_SUPERVISOR_REQUIRED");
+      }
+    } catch (error) {
+      // 授权失败不动 Unknown 锁定，也不记录任何结论。
+      this.assertSession();
+      throw error instanceof ReturnFeatureError
+        ? error
+        : new ReturnFeatureError("RETURN_SUPERVISOR_REQUIRED");
+    }
+    this.assertSession();
+    this.snapshot = {
+      ...this.snapshot,
+      status: "submitting",
+      lastErrorCode: null,
+    };
+    let outcome: ReturnExecutionOutcome;
+    try {
+      outcome = await this.options.execution.resolveUnknown!({
+        actionId,
+        finding,
+        evidenceReference,
+        note,
+        authorization,
       });
       validateExecutionOutcome(outcome);
     } catch (error) {
@@ -735,6 +900,8 @@ function validateExecutionOutcome(outcome: ReturnExecutionOutcome): void {
     throw new ReturnFeatureError("RETURN_EXECUTION_FAILED");
   }
 }
+
+const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/u;
 
 export function returnErrorCode(
   error: unknown,

@@ -9,3 +9,5 @@ export * from "./core/db/sqlite-payment-protected-material";
 export * from "./core/db/sqlite-settings-safety-repository";
 export * from "./core/db/sqlite-special-products-repository";
 export * from "./core/db/types";
+export * from "./core/db/sqlite-payment-supervisor-acknowledgement-queue";
+export * from "./core/db/sqlite-return-supervisor-resolution-store";

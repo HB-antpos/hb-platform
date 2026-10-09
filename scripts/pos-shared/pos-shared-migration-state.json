@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "8c74fc45d46e7dce5087dc6217f48b63aa75a77155158816117aa1ca9d0ea795",
+  "reviewedModuleTopologySha256": "a82414e481b3e62a0d3be088300e27d340b875628ab80c16ff847cf638ec630f",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -321,10 +321,10 @@
     {
       "path": "features/returns/adapters/durable-return-execution-orchestrator.ts",
       "package": "pos-domain",
-      "reason": "Linkly 多笔退款在单笔结果与证据耐久后逐笔确认；确认失败暂停后续退款，冷恢复只确认原退款后继续原计划；履约策略与 WPF 对齐：含刷卡打退货小票（追加各张退款券），不含刷卡但有退款券时逐张打印退款券（含现金+券、多券）",
+      "reason": "Linkly 多笔退款在单笔结果与证据耐久后逐笔确认；确认失败暂停后续退款，冷恢复只确认原退款后继续原计划；履约策略与 WPF 对齐：含刷卡打退货小票（追加各张退款券），不含刷卡但有退款券时逐张打印退款券（含现金+券、多券）；退款结果未知新增主管结案出口 resolveUnknown：先按原 attempt 恢复一次让 provider 真实结果优先，仍未知才经 ReturnSupervisorResolutionPort 落主管结论（未退款作废 / 继续等待仅审计）",
       "baselineCanonicalRuntimeSha256": "305c8af43381ef0d83ee69c80f602b7b777a7efc8715282ce8a4f27a44a9b84e",
-      "canonicalRuntimeSha256": "0625c06e61f053926c7250c0d93e86bf7f21b2448270dbfd7f74ef1bfb3b3867",
-      "canonicalTypeSha256": "4cb46ae16a746e797a7cfb7d75176d8362380c8b670dab39db6509875f283ed6",
+      "canonicalRuntimeSha256": "c42ea82e56d42424b37065fd25ae492c6564812c78c5647f81b83e0968e546e8",
+      "canonicalTypeSha256": "49d50f694b42892ebd980d2852103b2f7ab7f5aae87166d3eb69db842de40384",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -343,6 +343,12 @@
           "script": "test:runtime",
           "path": "src/core/runtime/production-return-runtime.test.ts",
           "pattern": "src/core/runtime/*.test.ts"
+        },
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/features/returns/return-supervisor-resolution.test.ts",
+          "pattern": "src/**/*.test.ts"
         }
       ]
     },
@@ -415,10 +421,10 @@
     {
       "path": "features/returns/return-domain.ts",
       "package": "pos-domain",
-      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券",
+      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券；新增主管结案相关稳定错误码 RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED / RETURN_RESOLUTION_EVIDENCE_REQUIRED / RETURN_SUPERVISOR_NOT_REFUNDED",
       "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
       "canonicalRuntimeSha256": "7cfef7124e26edf8fc115f9e6cfb9da44418ef5b37359a0647f454c85b0fd7d7",
-      "canonicalTypeSha256": "a0405781983dff1ce16fb69ed8fccaac9e3aeb1222167932559abce63e93288d",
+      "canonicalTypeSha256": "1e2646b1154d71c8bf02cdcde2391b6d8d3583765e10f77ceff2e8e67fd9d0e8",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -443,10 +449,10 @@
     {
       "path": "features/returns/return-presenter.ts",
       "package": "pos-domain",
-      "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮；state 暴露 requiredVoucherRefundCents，提示代金券买的部分至少须退代金券的金额",
+      "reason": "容量汇总暴露 originalRefundAvailable，界面据此隐藏无法原路退回的退款方式按钮；state 暴露 requiredVoucherRefundCents，提示代金券买的部分至少须退代金券的金额；暴露 resolveBySupervisor 与 supervisorResolutionAvailable / supervisorWaitingRecorded，供 Unknown 页展示主管结案",
       "baselineCanonicalRuntimeSha256": "c31c130fc7b0d8ecf8d6ad9be3b1a32e7edbd9ecca17d831f22a1f1cdfa9ba8c",
-      "canonicalRuntimeSha256": "683882270f9720079c44beb1ae61257fef4a84a1fee877610c0dec58310e7e85",
-      "canonicalTypeSha256": "1d6b9177157c7ce3ea97f4ce224d28864dfe6b6a2cff5010642aa7f5a24c66cd",
+      "canonicalRuntimeSha256": "647c8821e4f1a61ec1a6462ddbe6e9c892d51322329a44dc99b9b6d157f15cf1",
+      "canonicalTypeSha256": "9c6fe180bc60610f4652c8877f19a0c162e39c5d5c2a4c1c4876953690979696",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -465,16 +471,22 @@
           "script": "test:returns",
           "path": "src/features/returns/return-screen.rntl.test.tsx",
           "pattern": "src/features/returns/*.rntl.test.tsx"
+        },
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/features/returns/return-supervisor-resolution.test.ts",
+          "pattern": "src/**/*.test.ts"
         }
       ]
     },
     {
       "path": "features/returns/return-workflow.ts",
       "package": "pos-domain",
-      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划",
+      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划；新增 resolveUnknownBySupervisor：在 Unknown 状态下先取得强制另一名主管的授权，再调用执行端口 resolveUnknown，授权失败不改变 Unknown 锁定",
       "baselineCanonicalRuntimeSha256": "55a8b7b7f0db17efa15f1d7591e4fb8624b4b4b35b1efe4443927704ef262afc",
-      "canonicalRuntimeSha256": "e61c2d4ef5fbb85ead1b90864f41016db610f0da3331b999351d7219cfb51565",
-      "canonicalTypeSha256": "ba2777d086b13e4762dac88dd1f369c3ea866d1aa550be5fe7d3bbc2ba294af1",
+      "canonicalRuntimeSha256": "f1cb550bc0837a51a1911e7c3d792723d79bee6955ee9d721cfbdea8849e7653",
+      "canonicalTypeSha256": "9f0857ff2bcde9b21bc3a0bd622d22cc9f818231a5ca8f9aa0bb5a583862af85",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -493,6 +505,12 @@
           "script": "test:returns",
           "path": "src/features/returns/return-screen.rntl.test.tsx",
           "pattern": "src/features/returns/*.rntl.test.tsx"
+        },
+        {
+          "workspace": "packages/pos-domain",
+          "script": "test",
+          "path": "src/features/returns/return-supervisor-resolution.test.ts",
+          "pattern": "src/**/*.test.ts"
         }
       ]
     },
