@@ -82,6 +82,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly ITestSalesDataResetService? _testSalesDataResetService;
     private readonly ILinklyTerminalDialogPresenter? _linklyTerminalDialogPresenter;
     private readonly ICardPaymentRecoveryService? _cardPaymentRecoveryService;
+    private readonly ISquareRefundSettlementService? _squareRefundSettlementService;
+    // Square 退款结算多数几小时内完成；后台例行刷新每 15 秒一拍，这里最多每 10 分钟真正查询一次。
+    private static readonly TimeSpan RefundSettlementCheckInterval = TimeSpan.FromMinutes(10);
+    private DateTimeOffset _lastRefundSettlementCheckAt = DateTimeOffset.MinValue;
     private readonly ICardRecoveryResultDialogService? _cardRecoveryResultDialogService;
     private readonly ILinklyFallbackPromptCoordinator? _linklyFallbackPromptCoordinator;
     private readonly ICashierSessionContext _cashierSessionContext;
@@ -502,6 +506,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _testSalesDataResetService = testSalesDataResetService;
         _linklyTerminalDialogPresenter = paymentTerminal.LinklyTerminalDialogPresenter;
         _cardPaymentRecoveryService = paymentTerminal.CardPaymentRecoveryService;
+        _squareRefundSettlementService = paymentTerminal.SquareRefundSettlementService;
         _cardRecoveryResultDialogService = paymentTerminal.CardRecoveryResultDialogService;
         _linklyFallbackPromptCoordinator = paymentTerminal.LinklyFallbackPromptCoordinator;
         _cashierSessionContext = cashierSessionContext ?? new CashierSessionContext();
@@ -2448,6 +2453,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // 而订单重试可能很久，不能让总部下发的资料被它拖慢生效。
                 await TrySyncReceiptProfileAsync(refreshCancellation);
                 await TryAutoRetryPendingOrdersAsync(refreshCancellation);
+                await TryCheckSquareRefundSettlementsAsync(refreshCancellation);
             }
 
             return isOnline;
@@ -2872,6 +2878,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             string.Equals(left.DeviceCode, right.DeviceCode, StringComparison.OrdinalIgnoreCase);
     }
 
+    private async Task TryCheckSquareRefundSettlementsAsync(CancellationToken cancellationToken)
+    {
+        if (_squareRefundSettlementService is null ||
+            DateTimeOffset.UtcNow - _lastRefundSettlementCheckAt < RefundSettlementCheckInterval)
+        {
+            return;
+        }
+
+        _lastRefundSettlementCheckAt = DateTimeOffset.UtcNow;
+        try
+        {
+            var result = await _squareRefundSettlementService.CheckPendingAsync(Session, cancellationToken: cancellationToken);
+            if (result.Failed > 0)
+            {
+                // 退货已完成但 Square 拒绝退款：刷新收银页的异常中心角标，提醒主管改用其他方式退给顾客。
+                await RefreshCardRecoveryCountAsync();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 结算跟踪失败不影响收银；下一个周期再查。
+            ConsoleLog.Write(
+                "SquareRefundSettlement",
+                $"background check failed store={Session.StoreCode} device={Session.DeviceCode} error={ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private async Task RefreshCardRecoveryCountAsync()
     {
         if (_cardPaymentRecoveryService is null || PosTerminal is null)
@@ -2882,7 +2919,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var openAttempts = await _cardPaymentRecoveryService.ListOpenAsync(Session, CancellationToken.None);
-            PosTerminal.CardRecoveryOpenCount = openAttempts.Count;
+            // 已完成退货但 Square 拒绝的退款同样需要主管处理，计入角标。
+            var settlementFailures = _squareRefundSettlementService is null
+                ? 0
+                : await _squareRefundSettlementService.CountUnhandledFailuresAsync(Session, CancellationToken.None);
+            PosTerminal.CardRecoveryOpenCount = openAttempts.Count + settlementFailures;
         }
         catch (Exception ex)
         {

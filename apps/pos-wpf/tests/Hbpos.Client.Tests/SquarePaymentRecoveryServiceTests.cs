@@ -141,7 +141,7 @@ public sealed class SquarePaymentRecoveryServiceTests
     }
 
     [Fact]
-    public async Task RecoverLatestAsync_square_pending_refund_stays_locked_without_creating_order()
+    public async Task RecoverLatestAsync_square_pending_refund_completes_the_return_and_keeps_settlement_pending()
     {
         var attempts = new FakeSquarePaymentAttemptRepository(CreateSquareRefundAttempt());
         var orders = new FakeLocalOrderRepository();
@@ -158,10 +158,14 @@ public sealed class SquarePaymentRecoveryServiceTests
 
         var result = await service.RecoverLatestAsync(new PosCartService(), Session);
 
-        Assert.Equal(CardPaymentRecoveryOutcome.Checking, result.Outcome);
-        Assert.Equal(LocalSquarePaymentAttemptStatus.Recovering, attempts.Status);
-        Assert.Equal(0, attempts.MarkOrderCompletedCount);
-        Assert.Equal(0, orders.SaveCount);
+        // Square 官方定义 PENDING 为已受理、正在退回原卡：与 COMPLETED 一样完成退货单，
+        // 退款状态保留 PENDING，交给结算跟踪继续查询；绝不重新发起退款。
+        Assert.Equal(CardPaymentRecoveryOutcome.OrderCompleted, result.Outcome);
+        Assert.Equal(1, terminal.GetRefundCallCount);
+        Assert.Equal(1, attempts.MarkOrderCompletedCount);
+        Assert.Equal(1, orders.SaveCount);
+        Assert.Equal("PENDING", attempts.PaymentStatus);
+        Assert.Equal(-10m, Assert.Single(result.Order!.Payments).Amount);
     }
 
     [Fact]
@@ -1516,6 +1520,8 @@ public sealed class SquarePaymentRecoveryServiceTests
         public LocalSquarePaymentAttemptStatus Status { get; private set; } = attempt?.Status ?? LocalSquarePaymentAttemptStatus.Failed;
 
         public int MarkOrderCompletedCount { get; private set; }
+
+        public string? PaymentStatus => _attempt?.PaymentStatus;
 
         public int PersistRefundFailureForFinalizationCount { get; private set; }
 

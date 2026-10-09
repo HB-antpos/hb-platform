@@ -766,7 +766,7 @@
     <value>Square 退款必须提供原始 Square 付款参考号。</value>
   </data>
   <data name="payment.card.squareRefundPending" xml:space="preserve">
-    <value>Square 退款仍在处理中。请勿再次退款，稍后重新运行恢复。</value>
+    <value>Square 退款已提交，仍在处理中。请勿再次退款，稍后在卡交易异常中心再次查询结果。</value>
   </data>
   <data name="payment.card.squareRefundStatus" xml:space="preserve">
     <value>Square 退款状态为 {0}。</value>
@@ -820,7 +820,7 @@
     <value>上一笔刷卡需要恢复</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve">
-    <value>POS 会先检查上一笔 Linkly 交易，再允许新的刷卡付款。当前订单会保留在本页面。</value>
+    <value>POS 会先检查上一笔刷卡交易，再允许新的刷卡付款。当前订单会保留在本页面。</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.recover" xml:space="preserve">
     <value>恢复上一笔</value>
@@ -829,7 +829,7 @@
     <value>关闭</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve">
-    <value>正在恢复上一笔 Linkly 交易...</value>
+    <value>正在恢复上一笔刷卡交易...</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.handoff" xml:space="preserve">
     <value>移至异常中心并开始新单</value>
@@ -3573,5 +3573,62 @@
   </data>
   <data name="cardRecovery.v2.outcome.waiting" xml:space="preserve">
     <value>保持锁定，稍后再查。需填写主管备注。</value>
+  </data>
+  <data name="payment.card.squareRefundAccepted" xml:space="preserve">
+    <value>Square 已受理退款，正在退回原卡。多数几小时内完成，最长 14 天，顾客无需刷卡。</value>
+  </data>
+  <data name="cardRecovery.center.transactionStatus.settlementPending" xml:space="preserve">
+    <value>Square 退款结算中</value>
+  </data>
+  <data name="cardRecovery.center.transactionStatus.settlementRejected" xml:space="preserve">
+    <value>Square 拒绝了退款</value>
+  </data>
+  <data name="cardRecovery.settlement.pending" xml:space="preserve">
+    <value>Square 已受理这笔退款，仍在结算中。无需操作，状态会自动更新。</value>
+  </data>
+  <data name="cardRecovery.settlement.completed" xml:space="preserve">
+    <value>Square 已完成退款，款项正在退回顾客的卡。</value>
+  </data>
+  <data name="cardRecovery.settlement.rejected" xml:space="preserve">
+    <value>Square 没有完成这笔退款。请用现金等方式退给顾客，再在这里确认。</value>
+  </data>
+  <data name="cardRecovery.settlement.onlyAcknowledge" xml:space="preserve">
+    <value>退货完成后 Square 拒绝了这笔退款，只能选择「已用其他方式退款」。</value>
+  </data>
+  <data name="cardRecovery.settlement.acknowledged" xml:space="preserve">
+    <value>已记录：顾客已用其他方式退款。</value>
+  </data>
+  <data name="cardRecovery.settlement.acknowledgeFailed" xml:space="preserve">
+    <value>退款状态已变化，请刷新后重试。</value>
+  </data>
+  <data name="cardRecovery.settlement.action.refundedOther" xml:space="preserve">
+    <value>已用其他方式退款</value>
+  </data>
+  <data name="cardRecovery.settlement.banner.rejected.title" xml:space="preserve">
+    <value>Square 拒绝了这笔退款</value>
+  </data>
+  <data name="cardRecovery.settlement.banner.rejected.body" xml:space="preserve">
+    <value>顾客还没有收到这笔钱。请用现金等方式退给顾客，再点「已用其他方式退款」。</value>
+  </data>
+  <data name="cardRecovery.settlement.banner.pending.title" xml:space="preserve">
+    <value>退货已完成，Square 正在结算退款</value>
+  </data>
+  <data name="cardRecovery.settlement.banner.pending.body" xml:space="preserve">
+    <value>Square 已受理退款并正在退回原卡。多数几小时内完成，最长 14 天，顾客无需刷卡，你也无需操作。</value>
+  </data>
+  <data name="cardRecovery.settlement.step.returnCompleted" xml:space="preserve">
+    <value>退货已完成</value>
+  </data>
+  <data name="cardRecovery.settlement.step.settling" xml:space="preserve">
+    <value>Square 退回原卡</value>
+  </data>
+  <data name="cardRecovery.settlement.instructions" xml:space="preserve">
+    <value>请先用现金等方式把钱退给顾客，再在这里记录。可以备注退了多少、小票号等。</value>
+  </data>
+  <data name="cardRecovery.settlement.field.note" xml:space="preserve">
+    <value>备注（选填）</value>
+  </data>
+  <data name="cardRecovery.settlement.outcome.refundedOther" xml:space="preserve">
+    <value>已用现金等其他方式把钱退给顾客。</value>
   </data>
 </root>

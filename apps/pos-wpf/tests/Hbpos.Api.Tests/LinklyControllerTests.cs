@@ -565,6 +565,130 @@ public sealed class LinklyControllerTests
     }
 
     [Fact]
+    public async Task StartCloudBackendTransaction_maps_rejected_terminal_secret_to_repair_required_conflict()
+    {
+        // M9：token 端点 401/403 说明 secret 已失效，必须是专用错误码（needs-repair），而不是通用 400。
+        await using var factory = new LinklyApiFactory(
+            linklyCloudBackendAsyncService: new CapturingLinklyCloudBackendAsyncService(
+                new LinklyCloudTerminalRepairRequiredException(HttpStatusCode.Unauthorized)));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/v1/linkly/cloud-backend/transactions",
+            new { Environment = "Sandbox", TxnType = "P", AmtPurchase = 1000 });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudBackendSessionResponse>>();
+        Assert.Equal("LINKLY_CLOUD_TERMINAL_REPAIR_REQUIRED", envelope!.ErrorCode);
+    }
+
+    [Fact]
+    public async Task StartCloudBackendTransaction_maps_token_endpoint_outage_to_retryable_service_unavailable()
+    {
+        // M1：认证端 429/5xx/网络错误不是请求格式问题，不能返回 400/500。
+        await using var factory = new LinklyApiFactory(
+            linklyCloudBackendAsyncService: new CapturingLinklyCloudBackendAsyncService(
+                new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.TooManyRequests, "throttled")));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/v1/linkly/cloud-backend/transactions",
+            new { Environment = "Sandbox", TxnType = "P", AmtPurchase = 1000 });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Retry-After", out var retryAfter));
+        Assert.Equal("5", Assert.Single(retryAfter));
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudBackendSessionResponse>>();
+        Assert.Equal("LINKLY_CLOUD_BACKEND_TOKEN_UNAVAILABLE", envelope!.ErrorCode);
+    }
+
+    [Fact]
+    public async Task StartCloudBackendTransaction_reports_probe_lease_with_dedicated_code_and_remaining_seconds()
+    {
+        // M10：被 Status/Logon 检测的短租约挡住时，不能报成“有未完成交易”。
+        await using var factory = new LinklyApiFactory(
+            linklyCloudBackendAsyncService: new CapturingLinklyCloudBackendAsyncService(
+                new LinklyCloudTerminalProbingException(37)));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/v1/linkly/cloud-backend/transactions",
+            new { Environment = "Sandbox", TxnType = "P", AmtPurchase = 1000 });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("37", Assert.Single(response.Headers.GetValues("Retry-After")));
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudBackendSessionResponse>>();
+        Assert.Equal("LINKLY_CLOUD_TERMINAL_PROBING", envelope!.ErrorCode);
+        Assert.Contains("37", envelope.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("status-test")]
+    [InlineData("logon-test")]
+    public async Task CloudBackendTerminalTest_reports_probe_lease_with_dedicated_code_and_remaining_seconds(string route)
+    {
+        var backendService = new CapturingLinklyCloudBackendAsyncService(
+            terminalTestException: new LinklyCloudTerminalProbingException(12));
+        await using var factory = new LinklyApiFactory(linklyCloudBackendAsyncService: backendService);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.PostAsync($"/api/v1/linkly/cloud-backend/{route}?environment=sandbox", content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("12", Assert.Single(response.Headers.GetValues("Retry-After")));
+        var apiResult = await response.Content.ReadFromJsonAsync<ApiResult<object>>();
+        Assert.Equal("LINKLY_CLOUD_TERMINAL_PROBING", apiResult!.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetCloudBackendTransactionStatus_maps_rejected_terminal_secret_to_repair_required_conflict()
+    {
+        await using var factory = new LinklyApiFactory(
+            linklyCloudBackendAsyncService: new CapturingLinklyCloudBackendAsyncService(
+                statusException: new LinklyCloudTerminalRepairRequiredException(HttpStatusCode.Forbidden)));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.GetAsync(
+            "/api/v1/linkly/cloud-backend/transactions/session-1/status?environment=Sandbox");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudBackendSessionResponse>>();
+        Assert.Equal("LINKLY_CLOUD_TERMINAL_REPAIR_REQUIRED", envelope!.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(404, HttpStatusCode.BadRequest)]
+    [InlineData(409, HttpStatusCode.BadRequest)]
+    [InlineData(422, HttpStatusCode.BadRequest)]
+    [InlineData(400, HttpStatusCode.BadRequest)]
+    [InlineData(401, HttpStatusCode.OK)]
+    [InlineData(408, HttpStatusCode.OK)]
+    [InlineData(429, HttpStatusCode.OK)]
+    [InlineData(200, HttpStatusCode.OK)]
+    public async Task SendCloudBackendKey_keeps_the_400_contract_for_every_rejected_key_press(
+        int linklyStatus,
+        HttpStatusCode expected)
+    {
+        // M2：sendkey 被 Linkly 以 404/409/422 拒绝时会话保持 Pending，对客户端仍沿用既有的 400 约定。
+        var sendKeyResponse = CreateBackendResponse("session-key", "Pending") with { LastHttpStatus = linklyStatus };
+        await using var factory = new LinklyApiFactory(
+            linklyCloudBackendAsyncService: new CapturingLinklyCloudBackendAsyncService(sendKeyResponse: sendKeyResponse));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/v1/linkly/cloud-backend/transactions/session-key/sendkey",
+            new LinklyCloudBackendSendKeyRequest("Sandbox", "0", null));
+
+        Assert.Equal(expected, response.StatusCode);
+    }
+
+    [Fact]
     public async Task UpsertCloudBackendTerminalCredential_UsesAuthenticatedDeviceClaimsOnlyAndDoesNotExposeSecret()
     {
         var backendService = new CapturingLinklyCloudBackendAsyncService();
@@ -1199,7 +1323,8 @@ public sealed class LinklyControllerTests
         LinklyCloudBackendSessionResponse? sendKeyResponse = null,
         LinklyCloudBackendSessionResponse? acknowledgeResponse = null,
         Exception? acknowledgeException = null,
-        Exception? terminalTestException = null) : ILinklyCloudBackendAsyncService
+        Exception? terminalTestException = null,
+        Exception? statusException = null) : ILinklyCloudBackendAsyncService
     {
         public string? LastStoreCode { get; private set; }
 
@@ -1303,7 +1428,7 @@ public sealed class LinklyControllerTests
             string sessionId,
             CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            throw statusException ?? new NotImplementedException();
         }
 
         public Task<LinklyCloudBackendSessionResponse?> GetActiveSessionAsync(

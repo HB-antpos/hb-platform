@@ -431,4 +431,22 @@
   <data name="settings.linkly.cloudBackend.assignmentSnapshotChanged" xml:space="preserve"><value>操作开始前线路目录已变化，请核对当前归属后重试。</value></data>
   <data name="settings.linkly.cloudBackend.selectionReconciled" xml:space="preserve"><value>终端选择响应不确定，已刷新权威目录。继续前请核对当前付款线路。</value></data>
   <data name="settings.linkly.cloudBackend.selectionReconcileFailed" xml:space="preserve"><value>终端选择响应和目录刷新均失败，当前付款线路未知。收款前请刷新终端列表。</value></data>
+  <data name="settings.payment.provider.square.subtitle" xml:space="preserve"><value>后台托管令牌 · 设备码配对</value></data>
+  <data name="settings.payment.provider.linkly.subtitle" xml:space="preserve"><value>本地 IP / 云直连 / 后台异步</value></data>
+  <data name="settings.payment.environment.production" xml:space="preserve"><value>Production</value></data>
+  <data name="settings.payment.environment.sandbox" xml:space="preserve"><value>Sandbox 测试</value></data>
+  <data name="settings.square.location.empty" xml:space="preserve"><value>尚未载入门店位置，请点击“加载门店位置”。</value></data>
+  <data name="settings.square.device.empty" xml:space="preserve"><value>尚未载入刷卡设备，请点击“加载设备”。</value></data>
+  <data name="settings.linkly.localIp.recommended.help" xml:space="preserve"><value>HB POS 连接本机 EFT-Client。除非技术支持要求，请保持 Linkly 官方推荐的主机与端口。</value></data>
+  <data name="settings.linkly.localIp.useRecommended" xml:space="preserve"><value>使用推荐地址</value></data>
+  <data name="settings.linkly.localIp.recommendedBadge" xml:space="preserve"><value>官方推荐</value></data>
+  <data name="settings.linkly.localIp.customTitle" xml:space="preserve"><value>自定义地址（高级）</value></data>
+  <data name="settings.receiptPrinter.connection.title" xml:space="preserve"><value>打印机连接</value></data>
+  <data name="settings.receiptPrinter.connection.help" xml:space="preserve"><value>默认使用 USB 连接。仅在技术支持指导下修改端口。</value></data>
+  <data name="settings.receiptPrinter.port.advanced" xml:space="preserve"><value>打印机端口（高级）</value></data>
+  <data name="settings.receiptPrinter.options.title" xml:space="preserve"><value>打印选项</value></data>
+  <data name="settings.receiptPrinter.storeInfo.title" xml:space="preserve"><value>门店信息</value></data>
+  <data name="settings.receiptPrinter.storeInfo.help" xml:space="preserve"><value>打印在每张小票顶部。</value></data>
+  <data name="settings.receiptPrinter.terms.title" xml:space="preserve"><value>小票条款</value></data>
+  <data name="settings.receiptPrinter.terms.subtitle" xml:space="preserve"><value>打印在小票底部。</value></data>
 </root>

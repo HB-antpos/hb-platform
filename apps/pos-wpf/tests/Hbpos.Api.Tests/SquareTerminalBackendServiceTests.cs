@@ -936,6 +936,172 @@ public sealed class SquareTerminalBackendServiceTests
         }
     }
 
+    [Fact]
+    public async Task AcceptWebhookAsync_WhenRefundUpdated_StoresRefundStatus()
+    {
+        var refundRepository = new InMemorySquareRefundRepository();
+        const string notificationUrl = "https://example.com/api/v1/square/webhooks";
+        var rawBody = CreateRefundUpdatedPayload("COMPLETED");
+        var service = CreateRefundWebhookService(refundRepository);
+        var signature = CreateSignature("sandbox-webhook-key", notificationUrl, rawBody);
+
+        var response = await service.AcceptWebhookAsync(
+            new SquareWebhookRequest(rawBody, signature, "Sandbox", notificationUrl),
+            CancellationToken.None);
+
+        Assert.Equal("accepted", response.Status);
+        var stored = await refundRepository.GetRefundAsync("Sandbox", "refund-001", CancellationToken.None);
+        Assert.NotNull(stored);
+        Assert.Equal("COMPLETED", stored!.Status);
+        Assert.Equal("payment-001", stored.PaymentId);
+        Assert.Equal(50, stored.Amount);
+        Assert.Equal("AUD", stored.Currency);
+        Assert.Equal("event-refund-001", stored.LastEventId);
+    }
+
+    [Fact]
+    public async Task AcceptWebhookAsync_WhenRefundPayloadHasNoRefund_ThrowsPayloadInvalid()
+    {
+        const string notificationUrl = "https://example.com/api/v1/square/webhooks";
+        const string rawBody = """{"event_id":"event-refund-bad","type":"refund.updated","data":{"object":{}}}""";
+        var service = CreateRefundWebhookService(new InMemorySquareRefundRepository());
+        var signature = CreateSignature("sandbox-webhook-key", notificationUrl, rawBody);
+
+        var exception = await Assert.ThrowsAsync<SquareTerminalBackendException>(() =>
+            service.AcceptWebhookAsync(
+                new SquareWebhookRequest(rawBody, signature, "Sandbox", notificationUrl),
+                CancellationToken.None));
+
+        Assert.Equal("SQUARE_WEBHOOK_PAYLOAD_INVALID", exception.Code);
+        Assert.Equal(HttpStatusCode.BadRequest, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetRefundAsync_WhenSquareLookupFails_FallsBackToWebhookStoredRefund()
+    {
+        var refundRepository = new InMemorySquareRefundRepository();
+        await refundRepository.UpsertRefundAsync(
+            new SquareRefundRecord
+            {
+                Environment = "Sandbox",
+                RefundId = "refund-001",
+                Status = "COMPLETED",
+                PaymentId = "payment-001",
+                Amount = 50,
+                Currency = "AUD",
+                UpdatedAt = new DateTimeOffset(2026, 6, 22, 1, 2, 3, TimeSpan.Zero)
+            },
+            CancellationToken.None);
+        var service = CreateRefundLookupService(
+            (_, _, _, _) => throw new SquareTerminalRestException(HttpStatusCode.BadGateway, "Square refund lookup failed."),
+            refundRepository);
+
+        var refund = await service.GetRefundAsync("sandbox", "refund-001", CancellationToken.None);
+
+        Assert.NotNull(refund);
+        Assert.Equal("refund-001", refund!.RefundId);
+        Assert.Equal("COMPLETED", refund.Status);
+        Assert.Equal("payment-001", refund.PaymentId);
+        Assert.Equal(50, refund.AmountMoney?.Amount);
+        Assert.Equal("AUD", refund.AmountMoney?.Currency);
+    }
+
+    [Fact]
+    public async Task GetRefundAsync_WhenSquareLookupFailsAndNoStoredRefund_RethrowsOriginalError()
+    {
+        var service = CreateRefundLookupService(
+            (_, _, _, _) => throw new SquareTerminalRestException(HttpStatusCode.BadGateway, "Square refund lookup failed."),
+            new InMemorySquareRefundRepository());
+
+        var exception = await Assert.ThrowsAsync<SquareTerminalRestException>(() =>
+            service.GetRefundAsync("sandbox", "refund-001", CancellationToken.None));
+
+        Assert.Equal("Square refund lookup failed.", exception.Message);
+    }
+
+    [Fact]
+    public async Task GetRefundAsync_WhenSquareLookupSucceeds_PrefersLiveStatusOverStoredWebhook()
+    {
+        var refundRepository = new InMemorySquareRefundRepository();
+        await refundRepository.UpsertRefundAsync(
+            new SquareRefundRecord { Environment = "Sandbox", RefundId = "refund-001", Status = "PENDING" },
+            CancellationToken.None);
+        var service = CreateRefundLookupService(
+            (environment, _, refundId, _) => Task.FromResult<SquareRefundResponse?>(
+                new SquareRefundResponse(refundId, environment, Status: "COMPLETED")),
+            refundRepository);
+
+        var refund = await service.GetRefundAsync("sandbox", "refund-001", CancellationToken.None);
+
+        Assert.Equal("COMPLETED", refund?.Status);
+    }
+
+    private static SquareTerminalBackendService CreateRefundWebhookService(ISquareRefundRepository refundRepository)
+    {
+        return new SquareTerminalBackendService(
+            new RecordingSquareTokenService(response: null),
+            new FakeSquareTerminalRestClient(),
+            new SquareWebhookVerifier(),
+            CreateWebhookOptions("sandbox-webhook-key"),
+            new InMemorySquareCheckoutSessionRepository(),
+            refundRepository);
+    }
+
+    private static SquareTerminalBackendService CreateRefundLookupService(
+        Func<string, string, string, CancellationToken, Task<SquareRefundResponse?>> getRefund,
+        ISquareRefundRepository refundRepository)
+    {
+        return new SquareTerminalBackendService(
+            new RecordingSquareTokenService(new SquareTokenResponse("Sandbox", "token-001", DateTimeOffset.UtcNow)),
+            new FakeSquareTerminalRestClient { GetRefundAsyncHandler = getRefund },
+            refundRepository: refundRepository);
+    }
+
+    private static string CreateRefundUpdatedPayload(string status)
+    {
+        return $$"""
+            {
+              "event_id": "event-refund-001",
+              "type": "refund.updated",
+              "created_at": "2026-06-22T01:02:03Z",
+              "data": {
+                "object": {
+                  "refund": {
+                    "id": "refund-001",
+                    "status": "{{status}}",
+                    "payment_id": "payment-001",
+                    "amount_money": {
+                      "amount": 50,
+                      "currency": "AUD"
+                    },
+                    "updated_at": "2026-06-22T01:02:03Z"
+                  }
+                }
+              }
+            }
+            """;
+    }
+
+    private sealed class InMemorySquareRefundRepository : ISquareRefundRepository
+    {
+        private readonly Dictionary<string, SquareRefundRecord> _refunds = new(StringComparer.Ordinal);
+
+        public Task UpsertRefundAsync(SquareRefundRecord refund, CancellationToken cancellationToken)
+        {
+            _refunds[$"{refund.Environment}::{refund.RefundId}"] = refund;
+            return Task.CompletedTask;
+        }
+
+        public Task<SquareRefundRecord?> GetRefundAsync(
+            string environment,
+            string refundId,
+            CancellationToken cancellationToken)
+        {
+            _refunds.TryGetValue($"{environment}::{refundId}", out var refund);
+            return Task.FromResult(refund);
+        }
+    }
+
     private static SquareTerminalBackendService CreateWebhookService(
         ISquareCheckoutSessionRepository repository,
         IOptions<SquareWebhookOptions> options)

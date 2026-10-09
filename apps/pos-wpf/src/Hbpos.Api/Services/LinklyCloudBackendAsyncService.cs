@@ -213,6 +213,11 @@ public class LinklyCloudBackendAsyncService(
     private const string TerminalHealthHealthy = "Healthy";
     private const string TerminalHealthUnhealthy = "Unhealthy";
 
+    // 状态查询/恢复 GET 连续收到“未列出的 4xx”（400/409/422 等）达到该次数后，不再自动向 Linkly 重复查询：
+    // 官方文档里 GET 400 是我方请求格式错误、重试没有意义；继续空转只会放大对 Linkly 的请求量。
+    // 会话保持 Pending（结果未知），交给回调或主管恢复，绝不写成 Failed。
+    private const int OfficialQueryRejectLimit = 10;
+
     public async Task<LinklyCloudBackendSessionResponse> StartTransactionAsync(
         string storeCode,
         string deviceCode,
@@ -320,6 +325,7 @@ public class LinklyCloudBackendAsyncService(
 
         var response = await SendWithRecoverableFailureAsync(
             () => transport.StartTransactionAsync(transportRequest, cancellationToken));
+        InvalidateTokenWhenRejected(session, response);
         ApplyTransportResponse(session, response);
         if (IsTransportRecoveryFailure(response.StatusCode))
         {
@@ -397,6 +403,7 @@ public class LinklyCloudBackendAsyncService(
             session.TerminalId);
         var response = await SendWithRecoverableFailureAsync(
             () => transport.StartSettlementAsync(transportRequest, cancellationToken));
+        InvalidateTokenWhenRejected(session, response);
         ApplySettlementTransportResponse(session, response);
         if (IsTransportRecoveryFailure(response.StatusCode))
         {
@@ -448,22 +455,9 @@ public class LinklyCloudBackendAsyncService(
         if (ShouldRefreshOfficialTransaction(session))
         {
             var refreshesCompletedMissingSuccess = ShouldRefreshCompletedMissingSuccess(session);
-            var token = await tokenProvider.GetTokenAsync(
-                normalizedEnvironment,
-                normalizedStoreCode,
-                normalizedDeviceCode,
-                session!.TerminalId,
-                cancellationToken);
-            var transportRequest = new LinklyCloudBackendTransportSessionRequest(
-                normalizedEnvironment,
-                token.RestBaseUrl,
-                token.AccessToken,
-                normalizedSessionId,
-                normalizedStoreCode,
-                normalizedDeviceCode,
-                session.TerminalId);
-            var transportResponse = await SendWithRecoverableFailureAsync(
-                () => transport.GetTransactionAsync(transportRequest, cancellationToken));
+            // Token 端点的瞬时故障（429/5xx/网络）说明还没查到 Linkly，不代表交易失败：
+            // 按“官方查询瞬时失败”处理，返回可恢复的 Pending，而不是向 WPF 抛 400/500 让其立即判为结果未知。
+            var transportResponse = await GetOfficialTransactionWithTokenRecoveryAsync(session!, cancellationToken);
             if (refreshesCompletedMissingSuccess)
             {
                 ApplyCompletedMissingSuccessRefresh(session!, transportResponse);
@@ -473,7 +467,7 @@ public class LinklyCloudBackendAsyncService(
             }
             else
             {
-                ApplyTransportResponse(session!, transportResponse);
+                ApplyOfficialQueryTransportResponse(session!, transportResponse, "status");
             }
 
             await AddOfficialTransactionNotificationAsync(session!, transportResponse, cancellationToken);
@@ -630,26 +624,10 @@ public class LinklyCloudBackendAsyncService(
             reason: null,
             response: null,
             certCase: "3.1.3/4.1.2");
-        var token = await tokenProvider.GetTokenAsync(
-            session.Environment,
-            session.StoreCode,
-            session.DeviceCode,
-            session.TerminalId,
-            cancellationToken);
-        var transportRequest = new LinklyCloudBackendTransportSessionRequest(
-            session.Environment,
-            token.RestBaseUrl,
-            token.AccessToken,
-            session.SessionId,
-            session.StoreCode,
-            session.DeviceCode,
-            session.TerminalId);
-
-        var response = await SendWithRecoverableFailureAsync(
-            () => transport.RecoverTransactionAsync(transportRequest, cancellationToken));
+        var response = await RecoverOfficialTransactionWithTokenRecoveryAsync(session, cancellationToken);
 
         // 闁诡厹鍨归ˇ鏌ュ传瀹ュ懐瀹夐柛娆樹簻缁ㄦ煡鎮介妸銈囶伇婵炲棌妲勭�?08/5xx 濞ｅ洦绻冪€?Pending�?01 閻熸洑鐒﹂惇浼村礆闁垮鐓€ token�?04 闂佹彃锕ラ弬浣该虹拠鎻捫楅梺澶搁檷閳?
-        ApplyTransportResponse(session, response);
+        ApplyOfficialQueryTransportResponse(session, response, "recover");
         if (ShouldCountRecoveryResponse(response.StatusCode))
         {
             session.RecoveryCount++;
@@ -704,6 +682,7 @@ public class LinklyCloudBackendAsyncService(
 
         var response = await SendWithRecoverableFailureAsync(
             () => transport.SendKeyAsync(transportRequest, cancellationToken));
+        InvalidateTokenWhenRejected(session, response);
         ApplySendKeyTransportResponse(session, response);
         if (IsTransportRecoveryFailure(response.StatusCode))
         {
@@ -964,6 +943,15 @@ public class LinklyCloudBackendAsyncService(
         else if (string.Equals(normalizedType, "transaction", StringComparison.OrdinalIgnoreCase))
         {
             LogTransactionNotificationSnapshot(normalizedSessionId, payloadJson);
+            if (TryReadFinalOutcome(payloadJson, out var callbackOutcome) &&
+                IsLateFinalOutcome(session, callbackOutcome))
+            {
+                // 会话已被主管结案 / 已 ack 的失败或未提交，或与已落地的交易结果矛盾：
+                // 迟到的批准/拒付不得静默改写会话，只记入独立字段并告警（通知事实表里已保留原文）。
+                await RecordLateFinalResultAsync(session, callbackOutcome, "callback", cancellationToken);
+                return;
+            }
+
             var updateOutcomeEvidence = !IsCompleted(session) ||
                 string.IsNullOrWhiteSpace(session.ResponseCode);
             var fillMissingSuccess = session.TransactionSuccess is null &&
@@ -1595,7 +1583,9 @@ public class LinklyCloudBackendAsyncService(
                     currentTerminal.PairingLeaseExpiresAt is not null &&
                     currentTerminal.PairingLeaseExpiresAt > DateTime.UtcNow)
                 {
-                    throw new LinklyCloudBackendActiveTransactionException(null);
+                    // 配对租约与检测类租约共用同一组列；检测类租约（Ready 终端）返回专用错误码和剩余秒数，
+                    // 不再误报为“有未完成交易”。
+                    throw LinklyCloudTerminalService.CreateLeaseHeldException(currentTerminal, DateTime.UtcNow);
                 }
             }
         }
@@ -1818,7 +1808,7 @@ public class LinklyCloudBackendAsyncService(
             cancellationToken);
         if (ShouldKeepFinalResultSession(latestBeforeWrite, session))
         {
-            return latestBeforeWrite!;
+            return await KeepLatestAndRecordLateFinalResultAsync(latestBeforeWrite!, session, cancellationToken);
         }
 
         await repository.UpsertSessionAsync(session, cancellationToken);
@@ -1830,47 +1820,150 @@ public class LinklyCloudBackendAsyncService(
             session.SessionId,
             cancellationToken);
         return ShouldKeepFinalResultSession(latestAfterWrite, session)
-            ? latestAfterWrite!
+            ? await KeepLatestAndRecordLateFinalResultAsync(latestAfterWrite!, session, cancellationToken)
             : latestAfterWrite ?? session;
     }
 
+    // 与 SQL MERGE、InMemory 仓储共用同一份终态保护谓词（见 LinklyCloudBackendSessionWriteGuard）。
     private static bool ShouldKeepFinalResultSession(
         LinklyCloudBackendSessionRecord? latest,
         LinklyCloudBackendSessionRecord incoming)
     {
-        if (latest is null || !IsProtectedFinalResult(latest))
+        return LinklyCloudBackendSessionWriteGuard.ShouldRejectWrite(latest, incoming);
+    }
+
+    /// <summary>
+    /// 写入被终态保护拒绝时保留最新会话；若被拒绝的写入带着 Linkly 的最终结果且与已落地的结局矛盾
+    /// （主管已结案、已 ack 的失败/未提交，或与已完成结果冲突），不能就此静默丢弃——
+    /// 记入 LateFinal* 独立字段并告警，供恢复中心核对孤儿扣款。
+    /// </summary>
+    private async Task<LinklyCloudBackendSessionRecord> KeepLatestAndRecordLateFinalResultAsync(
+        LinklyCloudBackendSessionRecord latest,
+        LinklyCloudBackendSessionRecord incoming,
+        CancellationToken cancellationToken)
+    {
+        if (TryReadFinalOutcome(incoming, out var outcome) &&
+            IsLateFinalOutcome(latest, outcome))
         {
-            return false;
+            return await RecordLateFinalResultAsync(latest, outcome, "transport", cancellationToken);
         }
 
-        if (!IsProtectedFinalResult(incoming))
+        return latest;
+    }
+
+    private async Task<LinklyCloudBackendSessionRecord> RecordLateFinalResultAsync(
+        LinklyCloudBackendSessionRecord latest,
+        LinklyFinalOutcome outcome,
+        string source,
+        CancellationToken cancellationToken)
+    {
+        var recorded = await repository.RecordLateFinalResultAsync(
+            latest.Environment,
+            latest.StoreCode,
+            latest.DeviceCode,
+            latest.SessionId,
+            DateTimeOffset.UtcNow,
+            outcome.Success,
+            outcome.ResponseCode,
+            outcome.ResponseText,
+            cancellationToken);
+        // 钱的去向与会话终态矛盾，必须在中心日志可见：只记会话/引用/结果码，不含卡信息。
+        logger?.LogWarning(
+            "Linkly Cloud late final result received after the session was settled; status unchanged environment={Environment} store={StoreCode} device={DeviceCode} sessionId={SessionId} txnRef={TxnRef} sessionStatus={Status} acknowledged={Acknowledged} lateSuccess={LateSuccess} lateResponseCode={LateResponseCode} firstRecord={Recorded} source={Source}",
+            latest.Environment,
+            latest.StoreCode,
+            latest.DeviceCode,
+            latest.SessionId,
+            latest.TxnRef,
+            latest.Status,
+            latest.ClientAcknowledgedAt is not null,
+            outcome.Success,
+            outcome.ResponseCode,
+            recorded,
+            source);
+        Log(
+            $"late final result recorded sessionId={LogValue(latest.SessionId)} status={LogValue(latest.Status)} " +
+            $"success={outcome.Success?.ToString() ?? "<none>"} responseCode={LogValue(outcome.ResponseCode)} " +
+            $"firstRecord={recorded} source={source}");
+        return await repository.GetSessionAsync(
+            latest.Environment,
+            latest.StoreCode,
+            latest.DeviceCode,
+            latest.SessionId,
+            cancellationToken) ?? latest;
+    }
+
+    // 迟到的最终结果：会话已被主管结案/已 ack 的失败或未提交（Status 不可再改），
+    // 或已是 Completed/Cancelled 但新结果与已落地的交易结果矛盾。
+    private static bool IsLateFinalOutcome(LinklyCloudBackendSessionRecord latest, LinklyFinalOutcome outcome)
+    {
+        if (LinklyCloudBackendSessionWriteGuard.IsOperatorSettled(latest))
         {
             return true;
         }
 
-        // 已完成 session 只保护交易结果证据；允许旧资料补写缺失的 TransactionSuccess。
-        var transactionSuccessConflict =
-            latest.TransactionSuccess is not null &&
-            incoming.TransactionSuccess is not null &&
-            latest.TransactionSuccess != incoming.TransactionSuccess;
-        var operationSuccessConflict =
-            latest.OperationSuccess is not null &&
-            incoming.OperationSuccess is not null &&
-            latest.OperationSuccess != incoming.OperationSuccess;
-        return !SameOptional(latest.OperationType, incoming.OperationType) ||
-            !SameOptional(latest.TxnRef, incoming.TxnRef) ||
-            transactionSuccessConflict ||
-            operationSuccessConflict ||
-            !SameOptional(latest.ResponseCode, incoming.ResponseCode) ||
-            !SameOptional(latest.ResponseText, incoming.ResponseText) ||
-            !SameOptional(latest.SettlementData, incoming.SettlementData);
+        if (!LinklyCloudBackendSessionWriteGuard.IsProtectedFinalResult(latest))
+        {
+            return false;
+        }
+
+        var successConflict = latest.TransactionSuccess is not null &&
+            outcome.Success is not null &&
+            latest.TransactionSuccess != outcome.Success;
+        var codeConflict = NormalizeOptional(latest.ResponseCode) is not null &&
+            NormalizeOptional(outcome.ResponseCode) is not null &&
+            !SameOptional(latest.ResponseCode, outcome.ResponseCode);
+        return successConflict || codeConflict;
     }
+
+    private static bool TryReadFinalOutcome(LinklyCloudBackendSessionRecord session, out LinklyFinalOutcome outcome)
+    {
+        outcome = default;
+        if (!LinklyCloudBackendSessionWriteGuard.IsProtectedFinalResult(session) ||
+            (session.TransactionSuccess is null && NormalizeOptional(session.ResponseCode) is null))
+        {
+            return false;
+        }
+
+        outcome = new LinklyFinalOutcome(session.TransactionSuccess, session.ResponseCode, session.ResponseText);
+        return true;
+    }
+
+    private static bool TryReadFinalOutcome(string payloadJson, out LinklyFinalOutcome outcome)
+    {
+        outcome = default;
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var response = ReadResponse(document.RootElement);
+            var success = ReadBool(response, "Success");
+            var responseCode = ReadString(response, "ResponseCode");
+            if (success is null && NormalizeOptional(responseCode) is null)
+            {
+                return false;
+            }
+
+            outcome = new LinklyFinalOutcome(
+                success,
+                responseCode,
+                SanitizeOptionalText(ReadString(response, "ResponseText")));
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private readonly record struct LinklyFinalOutcome(bool? Success, string? ResponseCode, string? ResponseText);
 
     private static bool ShouldRefreshOfficialTransaction(LinklyCloudBackendSessionRecord? session)
     {
         // 未确认的活动 session 和缺失 Success 的 completed session 都要向官方刷新结果。
+        // 官方 GET 连续收到未列出的 4xx 达到上限后停止空转：会话保持 Pending，交给回调或主管处理。
         return session is { ClientAcknowledgedAt: null } &&
-            (session.IsActive || ShouldRefreshCompletedMissingSuccess(session));
+            (session.IsActive || ShouldRefreshCompletedMissingSuccess(session)) &&
+            session.OfficialQueryRejectCount < OfficialQueryRejectLimit;
     }
 
     private static bool ShouldRefreshCompletedMissingSuccess(LinklyCloudBackendSessionRecord? session)
@@ -1948,7 +2041,14 @@ public class LinklyCloudBackendAsyncService(
             terminalDisplayName);
         return response with
         {
-            CardTransaction = persistedCardTransaction
+            CardTransaction = persistedCardTransaction,
+            LateFinalResult = session.LateFinalAt is null
+                ? null
+                : new LinklyCloudBackendLateFinalResultDto(
+                    session.LateFinalAt.Value,
+                    session.LateFinalTransactionSuccess,
+                    session.LateFinalResponseCode,
+                    SanitizeOptionalText(session.LateFinalResponseText))
         };
     }
 
@@ -2253,28 +2353,46 @@ public class LinklyCloudBackendAsyncService(
                 throw;
             }
 
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                tokenProvider.InvalidateToken(environment, storeCode, deviceCode, terminalContext?.Terminal.TerminalId);
+            }
+
             preserveLeaseUntilExpiry = operationLease is not null &&
                 IsAmbiguousTerminalTestResponse(response.StatusCode);
             return response;
         }
         finally
         {
-            // 2xx/明确 4xx 可释放；网络、取消、408 或 5xx 可能已被终端接收，保留到自然过期。
-            if (!preserveLeaseUntilExpiry && operationLease is not null && terminalService is not null)
+            // 2xx/明确 4xx 可释放；网络、取消、408 或 5xx 可能已被终端接收，结果不明时不能立刻放行，
+            // 但也不再沿用覆盖整次往返的 9 分钟租约：缩短为检测类短租约，到期自然过期。
+            if (operationLease is not null && terminalService is not null)
             {
                 try
                 {
-                    await terminalService.ReleaseOperationLeaseAsync(
-                        environment,
-                        storeCode,
-                        operationLease.TerminalId,
-                        operationLease.LeaseId,
-                        CancellationToken.None);
+                    if (!preserveLeaseUntilExpiry)
+                    {
+                        await terminalService.ReleaseOperationLeaseAsync(
+                            environment,
+                            storeCode,
+                            operationLease.TerminalId,
+                            operationLease.LeaseId,
+                            CancellationToken.None);
+                    }
+                    else
+                    {
+                        await terminalService.ShortenOperationLeaseAsync(
+                            environment,
+                            storeCode,
+                            operationLease.TerminalId,
+                            operationLease.LeaseId,
+                            CancellationToken.None);
+                    }
                 }
                 catch (Exception ex)
                 {
                     logger?.LogWarning(
-                        "Linkly Cloud terminal operation lease release failed environment={Environment} store={StoreCode} terminalId={TerminalId} error={ErrorType}",
+                        "Linkly Cloud terminal operation lease release or shorten failed environment={Environment} store={StoreCode} terminalId={TerminalId} error={ErrorType}",
                         environment,
                         storeCode,
                         operationLease.TerminalId,
@@ -2427,7 +2545,19 @@ public class LinklyCloudBackendAsyncService(
             $"http={(int)response.StatusCode}");
         if (response.StatusCode == HttpStatusCode.OK)
         {
-            ApplyCompletedPayload(session, response.Body);
+            // sendkey 200 只说明“按键已被 Linkly 接受”，并不是交易的最终结果。
+            // 响应体自带明确的交易结果（Success 或 ResponseCode）时才落成 Completed；
+            // 空 body / 无结果 body 保持 Pending，结果交给回调或官方 GET。
+            // 此前无条件写成缺少结果的 Completed，随后到达的批准回调会被 SQL MERGE 当作“结果冲突”拦下，
+            // 已扣款的交易永久缺少 ResponseCode，被客户端判为结果未知。
+            if (TryReadFinalOutcome(response.Body ?? string.Empty, out _))
+            {
+                ApplyCompletedPayload(session, response.Body);
+                return;
+            }
+
+            session.Status = StatusPending;
+            session.IsActive = true;
             return;
         }
 
@@ -2454,26 +2584,172 @@ public class LinklyCloudBackendAsyncService(
             return;
         }
 
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        // 400/404/409/422 等其余响应：Linkly 拒绝或找不到的只是“这次按键动作”，不是在途交易本身。
+        // 顾客可能恰好在此刻刷卡获批，把会话写成 NotSubmitted/Failed 会让收银员重刷造成重复扣款，
+        // 所以一律保持 Pending，结果交给 GET 或回调决定。
+        session.Status = StatusPending;
+        session.IsActive = true;
+    }
+
+    /// <summary>
+    /// 状态查询 / 恢复（GET /sessions/{id}/transaction）专用的响应归类。
+    /// 与创建交易（POST）共用 <see cref="ApplyTransportResponse"/> 的兜底分支是错的：
+    /// POST 阶段的 4xx 说明请求被拒绝、交易没有执行，判 Failed 没问题；
+    /// 但按 Linkly 官方文档 GET 400 只代表“我方请求格式错误”，409/422 等同理，都不代表交易未成功。
+    /// 因此 GET 路径遇到 404 以外未列出的状态码时保持“结果未知/待恢复”：
+    /// 不写 Failed、不释放终端、不让客户端据此 ack 清理，只记录 LastHttpStatus 并告警，
+    /// 连续次数达到 <see cref="OfficialQueryRejectLimit"/> 后停止自动查询，避免无限空转。
+    /// </summary>
+    private void ApplyOfficialQueryTransportResponse(
+        LinklyCloudBackendSessionRecord session,
+        LinklyCloudBackendTransportResponse response,
+        string operation)
+    {
+        if (!IsUnlistedOfficialQueryStatus(response.StatusCode))
         {
-            session.Status = StatusNotSubmitted;
-            session.RecoveryAction = RecoveryRetryNewSession;
-            session.IsActive = false;
+            ApplyTransportResponse(session, response);
+            session.OfficialQueryRejectCount = 0;
             return;
         }
 
-        if (response.StatusCode == HttpStatusCode.BadRequest)
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        session.LastHttpStatus = (int)response.StatusCode;
+        session.RecoveryAction = null;
+        session.OfficialQueryRejectCount++;
+        // 已有终态/结案的会话保持原状态（不会因为一次异常 GET 被重新激活）；仍在途的会话维持 Pending + 活动。
+        if (!IsSettledOrFinalStatus(session.Status))
         {
-            // Linkly 拒绝 sendkey 只说明终端动作未被接受；交易仍可能通过通知或状态查询完成。
             session.Status = StatusPending;
             session.IsActive = true;
-            return;
         }
 
-        var code = (int)response.StatusCode;
-        session.Status = StatusFailed;
-        session.ResponseText = $"Linkly Cloud returned HTTP {code}.";
-        session.IsActive = false;
+        var exhausted = session.OfficialQueryRejectCount >= OfficialQueryRejectLimit;
+        logger?.LogWarning(
+            "Linkly Cloud official transaction query returned an unlisted status; the result stays unknown and the session is kept {Operation} environment={Environment} store={StoreCode} device={DeviceCode} sessionId={SessionId} txnRef={TxnRef} httpStatus={HttpStatus} rejectCount={RejectCount} limit={Limit} exhausted={Exhausted}",
+            operation,
+            session.Environment,
+            session.StoreCode,
+            session.DeviceCode,
+            session.SessionId,
+            session.TxnRef,
+            (int)response.StatusCode,
+            session.OfficialQueryRejectCount,
+            OfficialQueryRejectLimit,
+            exhausted);
+        Log(
+            $"official query unlisted status operation={operation} sessionId={LogValue(session.SessionId)} " +
+            $"http={(int)response.StatusCode} rejectCount={session.OfficialQueryRejectCount}/{OfficialQueryRejectLimit} exhausted={exhausted}");
+    }
+
+    // GET /transaction 官方文档列出的状态：200 完成、202 未完成、401 刷新 token、404 未提交、408/429/5xx 瞬时错误。
+    // 其余（400/409/422 等 4xx，以及 204/3xx 这类异常响应）都不能据此断定交易失败。
+    private static bool IsUnlistedOfficialQueryStatus(HttpStatusCode statusCode)
+    {
+        if (statusCode is HttpStatusCode.OK or HttpStatusCode.Accepted or
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        return !IsTransportRecoveryFailure(statusCode);
+    }
+
+    private static bool IsSettledOrFinalStatus(string? status)
+    {
+        return string.Equals(status, StatusCompleted, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, StatusCancelled, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, StatusFailed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, StatusSupervisorResolved, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<LinklyCloudBackendTransportResponse> GetOfficialTransactionWithTokenRecoveryAsync(
+        LinklyCloudBackendSessionRecord session,
+        CancellationToken cancellationToken)
+    {
+        var (token, transientFailure) = await TryGetTokenForOfficialQueryAsync(session, cancellationToken);
+        if (token is null)
+        {
+            return transientFailure!;
+        }
+
+        var transportRequest = BuildSessionTransportRequest(session, token);
+        var response = await SendWithRecoverableFailureAsync(
+            () => transport.GetTransactionAsync(transportRequest, cancellationToken));
+        InvalidateTokenWhenRejected(session, response);
+        return response;
+    }
+
+    private async Task<LinklyCloudBackendTransportResponse> RecoverOfficialTransactionWithTokenRecoveryAsync(
+        LinklyCloudBackendSessionRecord session,
+        CancellationToken cancellationToken)
+    {
+        var (token, transientFailure) = await TryGetTokenForOfficialQueryAsync(session, cancellationToken);
+        if (token is null)
+        {
+            return transientFailure!;
+        }
+
+        var transportRequest = BuildSessionTransportRequest(session, token);
+        var response = await SendWithRecoverableFailureAsync(
+            () => transport.RecoverTransactionAsync(transportRequest, cancellationToken));
+        InvalidateTokenWhenRejected(session, response);
+        return response;
+    }
+
+    private static LinklyCloudBackendTransportSessionRequest BuildSessionTransportRequest(
+        LinklyCloudBackendSessionRecord session,
+        LinklyCloudBackendToken token)
+    {
+        return new LinklyCloudBackendTransportSessionRequest(
+            session.Environment,
+            token.RestBaseUrl,
+            token.AccessToken,
+            session.SessionId,
+            session.StoreCode,
+            session.DeviceCode,
+            session.TerminalId);
+    }
+
+    // Token 端点 429/5xx/网络错误发生在请求 Linkly 交易接口之前：此时只是“暂时查不到”，
+    // 折算成对应的瞬时状态码走既有的可恢复分支（Pending + Retry），不向调用方抛 400/500。
+    private async Task<(LinklyCloudBackendToken? Token, LinklyCloudBackendTransportResponse? TransientFailure)>
+        TryGetTokenForOfficialQueryAsync(
+            LinklyCloudBackendSessionRecord session,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            var token = await tokenProvider.GetTokenAsync(
+                session.Environment,
+                session.StoreCode,
+                session.DeviceCode,
+                session.TerminalId,
+                cancellationToken);
+            return (token, null);
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            logger?.LogWarning(
+                "Linkly Cloud token endpoint is temporarily unavailable; the official query is treated as recoverable environment={Environment} store={StoreCode} device={DeviceCode} sessionId={SessionId} tokenHttpStatus={TokenHttpStatus}",
+                session.Environment,
+                session.StoreCode,
+                session.DeviceCode,
+                session.SessionId,
+                (int)ex.StatusCode);
+            return (null, new LinklyCloudBackendTransportResponse(ex.StatusCode, null));
+        }
+    }
+
+    // 401/403 说明缓存的 token 已不可用：作废后下一次调用才会重新换取，而不是反复带着坏 token 重试。
+    private void InvalidateTokenWhenRejected(
+        LinklyCloudBackendSessionRecord session,
+        LinklyCloudBackendTransportResponse response)
+    {
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            tokenProvider.InvalidateToken(session.Environment, session.StoreCode, session.DeviceCode, session.TerminalId);
+        }
     }
 
     private static void ApplyCompletedPayload(
@@ -3837,7 +4113,7 @@ public class LinklyCloudBackendAsyncService(
 
 public sealed class LinklyCloudBackendValidationException(string message) : Exception(message);
 
-public sealed class LinklyCloudBackendActiveTransactionException(string? activeSessionId)
+public class LinklyCloudBackendActiveTransactionException(string? activeSessionId)
     : Exception("An active Linkly Cloud transaction already exists for this terminal.")
 {
     public string? ActiveSessionId { get; } = activeSessionId;
@@ -3848,6 +4124,28 @@ public sealed class LinklyCloudBackendSessionNotFoundException()
 
 public sealed class LinklyCloudBackendNotificationUnauthorizedException()
     : Exception("Linkly Cloud notification authorization is invalid.");
+
+/// <summary>
+/// Token 端点暂时不可用（429/408/5xx、网络错误或超时）。此时请求还没有到达 Linkly 交易接口，
+/// 不能据此判定交易失败：状态/恢复接口折算为可恢复状态，创建类接口返回 503 让调用方稍后重试。
+/// </summary>
+public sealed class LinklyCloudBackendTokenUnavailableException(
+    HttpStatusCode statusCode,
+    string message,
+    Exception? innerException = null) : Exception(message, innerException)
+{
+    public HttpStatusCode StatusCode { get; } = statusCode;
+}
+
+/// <summary>
+/// Token 端点以 401/403 拒绝终端 secret：典型原因是终端在 Linkly 侧被解除配对或 secret 已轮换。
+/// 重试没有意义，必须让管理员重新配对；对应终端检测结果为 needs-repair。
+/// </summary>
+public sealed class LinklyCloudTerminalRepairRequiredException(HttpStatusCode tokenHttpStatus)
+    : Exception("Linkly Cloud rejected the terminal credentials. Re-pair the terminal.")
+{
+    public HttpStatusCode TokenHttpStatus { get; } = tokenHttpStatus;
+}
 
 public interface ILinklyCloudBackendTokenProvider
 {
@@ -3864,6 +4162,81 @@ public interface ILinklyCloudBackendTokenProvider
         Guid? terminalId,
         CancellationToken cancellationToken) =>
         GetTokenAsync(environment, storeCode, deviceCode, cancellationToken);
+
+    // 业务接口返回 401/403 后调用：作废该终端缓存的 token，下一次调用重新换取。默认无缓存的实现无需处理。
+    void InvalidateToken(string environment, string storeCode, string deviceCode, Guid? terminalId)
+    {
+    }
+}
+
+/// <summary>
+/// 按终端缓存 Linkly token（到期前刷新，401 作废）。此前每次状态轮询都要换一次 token，
+/// 高峰期认证端偶发 429/502 就会让还在输 PIN 的交易进入人工恢复。
+/// 缓存键含 secret/PosId/认证地址的指纹：重新配对或改配置后立即失效，且内存里不保留 secret 原文。
+/// </summary>
+public sealed class LinklyCloudBackendTokenCache(TimeProvider? timeProvider = null)
+{
+    // 到期前留出的余量，避免拿着“马上过期”的 token 发出去后在途中失效。
+    internal static readonly TimeSpan ExpiryMargin = TimeSpan.FromSeconds(60);
+
+    private readonly ConcurrentDictionary<string, Entry> entries = new(StringComparer.Ordinal);
+
+    internal static string BuildKey(string environment, string storeCode, string deviceCode, Guid? terminalId)
+    {
+        // 与 LinklyCloudTerminalConcurrencyGate 同一口径：有实体终端用 TerminalId，否则按设备码。
+        var terminalKey = terminalId is { } id && id != Guid.Empty ? id.ToString("D") : deviceCode;
+        return string.Join(
+            '|',
+            environment.Trim().ToUpperInvariant(),
+            storeCode.Trim().ToUpperInvariant(),
+            terminalKey.Trim().ToUpperInvariant());
+    }
+
+    internal static string Fingerprint(string secret, string posId, string authBaseUrl)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{secret.Trim()}\n{posId.Trim()}\n{authBaseUrl.Trim()}"));
+        return Convert.ToHexString(bytes);
+    }
+
+    internal bool TryGet(string key, string fingerprint, out LinklyCloudBackendToken token)
+    {
+        token = null!;
+        if (!entries.TryGetValue(key, out var entry))
+        {
+            return false;
+        }
+
+        if (!string.Equals(entry.Fingerprint, fingerprint, StringComparison.Ordinal) ||
+            entry.ExpiresAt <= (timeProvider ?? TimeProvider.System).GetUtcNow())
+        {
+            entries.TryRemove(key, out _);
+            return false;
+        }
+
+        token = entry.Token;
+        return true;
+    }
+
+    internal void Set(string key, string fingerprint, LinklyCloudBackendToken token, TimeSpan lifetime)
+    {
+        // 官方响应没给出有效期（或有效期不足余量）时不缓存：宁可多换一次，也不拿未知期限的 token 去创建交易。
+        var effective = lifetime - ExpiryMargin;
+        if (effective <= TimeSpan.Zero)
+        {
+            entries.TryRemove(key, out _);
+            return;
+        }
+
+        entries[key] = new Entry(fingerprint, token, (timeProvider ?? TimeProvider.System).GetUtcNow() + effective);
+    }
+
+    internal void Invalidate(string key)
+    {
+        entries.TryRemove(key, out _);
+    }
+
+    private sealed record Entry(string Fingerprint, LinklyCloudBackendToken Token, DateTimeOffset ExpiresAt);
 }
 
 public sealed record LinklyCloudBackendToken(
@@ -3915,12 +4288,29 @@ public sealed class HttpLinklyCloudBackendTokenProvider(
     HttpClient httpClient,
     IOptions<LinklyCloudBackendAsyncOptions> options,
     ILogger<HttpLinklyCloudBackendTokenProvider>? logger = null,
-    ILinklyCloudTerminalRepository? cloudTerminalRepository = null) : ILinklyCloudBackendTokenProvider
+    ILinklyCloudTerminalRepository? cloudTerminalRepository = null,
+    LinklyCloudBackendTokenCache? tokenCache = null) : ILinklyCloudBackendTokenProvider
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+
+    // 生产环境由 DI 注入进程内共享的缓存（见 ServiceRegistration）；未注入时每个实例自带一份，
+    // 行为等同“不跨实例缓存”，直接 new 出来的实例（含测试）不会互相污染。
+    private readonly LinklyCloudBackendTokenCache _tokenCache = tokenCache ?? new LinklyCloudBackendTokenCache();
+
+    public void InvalidateToken(string environment, string storeCode, string deviceCode, Guid? terminalId)
+    {
+        if (string.IsNullOrWhiteSpace(environment) ||
+            string.IsNullOrWhiteSpace(storeCode) ||
+            string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return;
+        }
+
+        _tokenCache.Invalidate(LinklyCloudBackendTokenCache.BuildKey(environment, storeCode, deviceCode, terminalId));
+    }
 
     public async Task<LinklyCloudBackendToken> GetTokenAsync(
         string environment,
@@ -4008,6 +4398,14 @@ public sealed class HttpLinklyCloudBackendTokenProvider(
         var authBaseUrl = NormalizeRequired(GetAuthBaseUrl(normalizedEnvironment), "authBaseUrl");
         var restBaseUrl = NormalizeRequired(GetRestBaseUrl(normalizedEnvironment), "restBaseUrl");
         var posVendorId = NormalizeRequired(GetPosVendorId(normalizedEnvironment), "posVendorId");
+        var cacheKey = LinklyCloudBackendTokenCache.BuildKey(
+            normalizedEnvironment, normalizedStoreCode, normalizedDeviceCode, terminalId);
+        var credentialFingerprint = LinklyCloudBackendTokenCache.Fingerprint(terminalSecret, terminalPosId, authBaseUrl);
+        if (_tokenCache.TryGet(cacheKey, credentialFingerprint, out var cachedToken))
+        {
+            return cachedToken;
+        }
+
         // 闂備礁鎲￠懝鎯归悜绛嬫�?token 闂佽崵濮村ú顓㈠绩闁秵鍎戦柣妤€鐗婃刊鎾偣閹帒濡介柡鍡楃箳缁辨挻鎷呴崫銉モ叡�?secret闂備線娼уΛ鏃傛導婵犵爤 identity 闂備礁鎲＄划宀勬儔婵傚摜宓侀柛鈩兩戝▍鐘绘煕閹扮數鍘涢柛銈囧█楠?endpoint�?
         var requestUri = new Uri(GetBaseUri(authBaseUrl), "tokens/cloudpos");
         var tokenRequest = new LinklyCloudBackendTokenRequest(
@@ -4034,22 +4432,73 @@ public sealed class HttpLinklyCloudBackendTokenProvider(
             terminalId,
             async gateCancellationToken =>
             {
+                // 排队等闸门期间，前一个请求可能已经换到 token：再查一次缓存，避免同一终端并发轮询各换一次。
+                if (_tokenCache.TryGet(cacheKey, credentialFingerprint, out var tokenFromQueue))
+                {
+                    return tokenFromQueue;
+                }
+
                 var stopwatch = Stopwatch.StartNew();
-                using var response = await httpClient.SendAsync(request, gateCancellationToken);
-                var body = await response.Content.ReadAsStringAsync(gateCancellationToken);
+                HttpStatusCode statusCode;
+                string body;
+                try
+                {
+                    using var response = await httpClient.SendAsync(request, gateCancellationToken);
+                    body = await response.Content.ReadAsStringAsync(gateCancellationToken);
+                    statusCode = response.StatusCode;
+                }
+                catch (HttpRequestException ex)
+                {
+                    // 网络错误发生在请求 Linkly 交易接口之前，只说明暂时换不到 token，不是交易失败，也不是 400/500。
+                    throw new LinklyCloudBackendTokenUnavailableException(
+                        HttpStatusCode.RequestTimeout,
+                        "Linkly Cloud token endpoint could not be reached.",
+                        ex);
+                }
+                catch (OperationCanceledException ex) when (!gateCancellationToken.IsCancellationRequested)
+                {
+                    // HttpClient 自身超时（非调用方取消）。
+                    throw new LinklyCloudBackendTokenUnavailableException(
+                        HttpStatusCode.RequestTimeout,
+                        "Linkly Cloud token endpoint timed out.",
+                        ex);
+                }
+
                 stopwatch.Stop();
                 LogTokenHttpResponse(
                     normalizedEnvironment,
                     normalizedStoreCode,
                     normalizedDeviceCode,
                     requestUri,
-                    response.StatusCode,
+                    statusCode,
                     stopwatch.ElapsedMilliseconds,
                     body);
-                if (!response.IsSuccessStatusCode)
+                if ((int)statusCode is < 200 or >= 300)
                 {
+                    _tokenCache.Invalidate(cacheKey);
+                    if (statusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                    {
+                        // secret 失效（终端在 Linkly 侧被解除配对等）：重试无意义，需要重新配对。
+                        logger?.LogWarning(
+                            "Linkly Cloud token endpoint rejected the terminal credentials environment={Environment} store={StoreCode} device={DeviceCode} terminalId={TerminalId} httpStatus={HttpStatus}",
+                            normalizedEnvironment,
+                            normalizedStoreCode,
+                            normalizedDeviceCode,
+                            terminalId,
+                            (int)statusCode);
+                        throw new LinklyCloudTerminalRepairRequiredException(statusCode);
+                    }
+
+                    if (statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
+                        (int)statusCode is >= 500 and <= 599)
+                    {
+                        throw new LinklyCloudBackendTokenUnavailableException(
+                            statusCode,
+                            $"Linkly Cloud token endpoint returned HTTP {(int)statusCode}.");
+                    }
+
                     throw new LinklyCloudBackendValidationException(
-                        $"Linkly Cloud token endpoint returned HTTP {(int)response.StatusCode}.");
+                        $"Linkly Cloud token endpoint returned HTTP {(int)statusCode}.");
                 }
 
                 using var document = JsonDocument.Parse(body);
@@ -4059,7 +4508,14 @@ public sealed class HttpLinklyCloudBackendTokenProvider(
                     throw new LinklyCloudBackendValidationException("Linkly Cloud token response was missing a token.");
                 }
 
-                return new LinklyCloudBackendToken(NormalizeBaseUrl(restBaseUrl), token);
+                var issued = new LinklyCloudBackendToken(NormalizeBaseUrl(restBaseUrl), token);
+                var expirySeconds = ReadExpirySeconds(document.RootElement);
+                _tokenCache.Set(
+                    cacheKey,
+                    credentialFingerprint,
+                    issued,
+                    expirySeconds is > 0 ? TimeSpan.FromSeconds(expirySeconds.Value) : TimeSpan.Zero);
+                return issued;
             },
             cancellationToken);
     }
@@ -4273,6 +4729,19 @@ public sealed class HttpLinklyCloudBackendTokenProvider(
 
         return value.ValueKind == JsonValueKind.String
             ? NormalizeRequired(value.GetString(), propertyName)
+            : null;
+    }
+
+    private static double? ReadExpirySeconds(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("expirySeconds", out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var seconds)
+            ? seconds
             : null;
     }
 
@@ -5473,6 +5942,20 @@ public interface ILinklyCloudBackendAsyncRepository
         bool supervisorResolved,
         CancellationToken cancellationToken);
 
+    // 会话已被主管结案（或已 ack 的失败/未提交）之后才到达的 Linkly 最终结果：只写 LateFinal* 独立字段，
+    // 绝不改 Status / ack 状态；首次写入后保持不变。返回是否为首次写入。
+    // 默认实现表示该仓储不保存迟到结果（测试替身），生产的 SQL 与 InMemory 仓储都显式实现。
+    Task<bool> RecordLateFinalResultAsync(
+        string environment,
+        string storeCode,
+        string deviceCode,
+        string sessionId,
+        DateTimeOffset receivedAt,
+        bool? transactionSuccess,
+        string? responseCode,
+        string? responseText,
+        CancellationToken cancellationToken) => Task.FromResult(false);
+
     Task AddNotificationAsync(
         LinklyCloudBackendNotificationRecord notification,
         CancellationToken cancellationToken);
@@ -5533,9 +6016,9 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
         lock (_gate)
         {
             var key = SessionKey(session.Environment, session.StoreCode, session.DeviceCode, session.SessionId);
+            // 与 SQL MERGE（UpsertSessionSql）使用同一份终态保护谓词，避免单测发现不了 SQL 才有的拦截。
             if (_sessions.TryGetValue(key, out var existing) &&
-                IsCompleted(existing) &&
-                !IsCompleted(session))
+                LinklyCloudBackendSessionWriteGuard.ShouldRejectWrite(existing, session))
             {
                 return Task.CompletedTask;
             }
@@ -5543,6 +6026,15 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
             var next = Clone(session);
             if (_sessions.TryGetValue(key, out existing))
             {
+                // 迟到最终结果首次写入后保持不变，整行写回不得抹掉它。
+                if (existing.LateFinalAt is not null)
+                {
+                    next.LateFinalAt = existing.LateFinalAt;
+                    next.LateFinalTransactionSuccess = existing.LateFinalTransactionSuccess;
+                    next.LateFinalResponseCode = existing.LateFinalResponseCode;
+                    next.LateFinalResponseText = existing.LateFinalResponseText;
+                }
+
                 // 并发恢复写回不得覆盖已落库的发送前证据或对应完整 TxnRef。
                 if (!string.IsNullOrWhiteSpace(existing.RequestTxnType) &&
                     existing.RequestAmountCents is not null &&
@@ -5774,6 +6266,35 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
         }
     }
 
+    public Task<bool> RecordLateFinalResultAsync(
+        string environment,
+        string storeCode,
+        string deviceCode,
+        string sessionId,
+        DateTimeOffset receivedAt,
+        bool? transactionSuccess,
+        string? responseCode,
+        string? responseText,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var key = SessionKey(environment, storeCode, deviceCode, sessionId);
+            if (!_sessions.TryGetValue(key, out var session) || session.LateFinalAt is not null)
+            {
+                return Task.FromResult(false);
+            }
+
+            var next = Clone(session);
+            next.LateFinalAt = receivedAt;
+            next.LateFinalTransactionSuccess = transactionSuccess;
+            next.LateFinalResponseCode = responseCode;
+            next.LateFinalResponseText = responseText;
+            _sessions[key] = next;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task AddNotificationAsync(
         LinklyCloudBackendNotificationRecord notification,
         CancellationToken cancellationToken)
@@ -5885,7 +6406,12 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
             ClientAcknowledgedAt = session.ClientAcknowledgedAt,
             LastHttpStatus = session.LastHttpStatus,
             IsActive = session.IsActive,
-            UpdatedAt = session.UpdatedAt
+            UpdatedAt = session.UpdatedAt,
+            LateFinalAt = session.LateFinalAt,
+            LateFinalTransactionSuccess = session.LateFinalTransactionSuccess,
+            LateFinalResponseCode = session.LateFinalResponseCode,
+            LateFinalResponseText = session.LateFinalResponseText,
+            OfficialQueryRejectCount = session.OfficialQueryRejectCount
         };
     }
 
@@ -6046,9 +6572,26 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                         target.[SettlementData] IS NOT NULL
                         AND ISNULL(target.[SettlementData], N'') <> ISNULL(@SettlementData, N'')
                     )
-                    OR ISNULL(target.[ResponseCode], N'') <> ISNULL(@ResponseCode, N'')
-                    OR ISNULL(target.[ResponseText], N'') <> ISNULL(@ResponseText, N'')
-                )) THEN
+                    -- target 的 ResponseCode/ResponseText 为空（如 sendkey 200 写下的“缺少结果的 Completed”）
+                    -- 表示结果证据尚未到齐，允许回调/官方 GET 补写；一旦有值，才把不同的值视为冲突。
+                    OR (
+                        NULLIF(target.[ResponseCode], N'') IS NOT NULL
+                        AND target.[ResponseCode] <> ISNULL(@ResponseCode, N'')
+                    )
+                    OR (
+                        NULLIF(target.[ResponseText], N'') IS NOT NULL
+                        AND target.[ResponseText] <> ISNULL(@ResponseText, N'')
+                    )
+                ))
+             -- 主管已结案（或已 ack 的失败/未提交）的会话：迟到的写入不得改写 Status，
+             -- 迟到的最终结果只能进入 LateFinal* 独立字段。同状态写入（小票/显示/ack 合并）照常放行。
+             AND NOT (
+                (
+                    target.[Status] = 'SupervisorResolved'
+                    OR (target.[ClientAcknowledgedAt] IS NOT NULL AND target.[Status] IN ('Failed', 'NotSubmitted'))
+                )
+                AND @Status <> target.[Status]
+             ) THEN
             UPDATE SET
                 [TerminalId] = COALESCE(target.[TerminalId], @TerminalId),
                 [Status] = @Status,
@@ -6085,6 +6628,11 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [ClientAcknowledgedAt] = COALESCE(@ClientAcknowledgedAt, target.[ClientAcknowledgedAt]),
                 [LastHttpStatus] = @LastHttpStatus,
                 [IsActive] = @IsActive,
+                [LateFinalAt] = COALESCE(target.[LateFinalAt], @LateFinalAt),
+                [LateFinalTransactionSuccess] = CASE WHEN target.[LateFinalAt] IS NOT NULL THEN target.[LateFinalTransactionSuccess] ELSE @LateFinalTransactionSuccess END,
+                [LateFinalResponseCode] = CASE WHEN target.[LateFinalAt] IS NOT NULL THEN target.[LateFinalResponseCode] ELSE @LateFinalResponseCode END,
+                [LateFinalResponseText] = CASE WHEN target.[LateFinalAt] IS NOT NULL THEN target.[LateFinalResponseText] ELSE @LateFinalResponseText END,
+                [OfficialQueryRejectCount] = @OfficialQueryRejectCount,
                 [UpdatedAt] = @UpdatedAt
         WHEN NOT MATCHED THEN
             INSERT (
@@ -6092,13 +6640,28 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt])
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount])
             VALUES (
                 @Environment, @StoreCode, @DeviceCode, @TerminalId, @SessionId, @Status, @TxnRef, @RequestTxnType, @RequestAmountCents, @RequestRfn, @OperationType,
                 @TransactionSuccess, @OperationSuccess, @SettlementData, @SettlementReceiptTexts, @ResponseCode, @ResponseText, @RecoveryAction, @DisplayText, @DisplayLines,
                 @CancelKeyFlag, @OKKeyFlag, @AcceptYesKeyFlag, @DeclineNoKeyFlag, @AuthoriseKeyFlag,
                 @InputType, @GraphicCode, @ReceiptText,
-                @RecoveryCount, @ReceiptPrintedAt, @ClientAcknowledgedAt, @LastHttpStatus, @IsActive, @UpdatedAt);
+                @RecoveryCount, @ReceiptPrintedAt, @ClientAcknowledgedAt, @LastHttpStatus, @IsActive, @UpdatedAt,
+                @LateFinalAt, @LateFinalTransactionSuccess, @LateFinalResponseCode, @LateFinalResponseText, @OfficialQueryRejectCount);
+        """;
+
+    internal const string RecordLateFinalResultSql = """
+        UPDATE [dbo].[POSM_LinklyCloudBackendSession]
+        SET [LateFinalAt] = @LateFinalAt,
+            [LateFinalTransactionSuccess] = @LateFinalTransactionSuccess,
+            [LateFinalResponseCode] = @LateFinalResponseCode,
+            [LateFinalResponseText] = @LateFinalResponseText
+        WHERE [Environment] = @Environment
+          AND [StoreCode] = @StoreCode
+          AND [DeviceCode] = @DeviceCode
+          AND [SessionId] = @SessionId
+          AND [LateFinalAt] IS NULL;
         """;
 
     public async Task<bool> TryCreateSessionAsync(
@@ -6148,7 +6711,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6175,7 +6739,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [SessionId] = @SessionId
@@ -6250,7 +6815,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6280,7 +6846,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6308,7 +6875,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6342,7 +6910,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6377,7 +6946,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt],
+                [LateFinalAt], [LateFinalTransactionSuccess], [LateFinalResponseCode], [LateFinalResponseText], [OfficialQueryRejectCount]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6440,6 +7010,31 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
         return affected <= 0
             ? null
             : await GetSessionAsync(environment, storeCode, deviceCode, sessionId, cancellationToken);
+    }
+
+    public async Task<bool> RecordLateFinalResultAsync(
+        string environment,
+        string storeCode,
+        string deviceCode,
+        string sessionId,
+        DateTimeOffset receivedAt,
+        bool? transactionSuccess,
+        string? responseCode,
+        string? responseText,
+        CancellationToken cancellationToken)
+    {
+        // 只动 LateFinal* 四列且只写一次（LateFinalAt IS NULL）：不触碰 Status / ClientAcknowledgedAt / IsActive。
+        var affected = await dbContext.PosmDb.Ado.ExecuteCommandAsync(
+            RecordLateFinalResultSql,
+            new SugarParameter("@Environment", environment),
+            new SugarParameter("@StoreCode", storeCode),
+            new SugarParameter("@DeviceCode", deviceCode),
+            new SugarParameter("@SessionId", sessionId),
+            new SugarParameter("@LateFinalAt", receivedAt.UtcDateTime),
+            new SugarParameter("@LateFinalTransactionSuccess", transactionSuccess),
+            new SugarParameter("@LateFinalResponseCode", responseCode),
+            new SugarParameter("@LateFinalResponseText", responseText));
+        return affected > 0;
     }
 
     public Task AddNotificationAsync(
@@ -6544,7 +7139,12 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
             new SugarParameter("@ClientAcknowledgedAt", session.ClientAcknowledgedAt?.UtcDateTime),
             new SugarParameter("@LastHttpStatus", session.LastHttpStatus),
             new SugarParameter("@IsActive", session.IsActive),
-            new SugarParameter("@UpdatedAt", session.UpdatedAt.UtcDateTime)
+            new SugarParameter("@UpdatedAt", session.UpdatedAt.UtcDateTime),
+            new SugarParameter("@LateFinalAt", session.LateFinalAt?.UtcDateTime),
+            new SugarParameter("@LateFinalTransactionSuccess", session.LateFinalTransactionSuccess),
+            new SugarParameter("@LateFinalResponseCode", session.LateFinalResponseCode),
+            new SugarParameter("@LateFinalResponseText", session.LateFinalResponseText),
+            new SugarParameter("@OfficialQueryRejectCount", session.OfficialQueryRejectCount)
         ];
     }
 
@@ -6636,6 +7236,19 @@ public sealed class LinklyCloudBackendSessionRecord
     public bool IsActive { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    // 会话被主管结案（或已 ack 的失败/未提交）之后才到达的 Linkly 最终结果。
+    // 只写入这组独立字段，不改写 Status / ack 状态；首次写入后保持不变。
+    public DateTimeOffset? LateFinalAt { get; set; }
+
+    public bool? LateFinalTransactionSuccess { get; set; }
+
+    public string? LateFinalResponseCode { get; set; }
+
+    public string? LateFinalResponseText { get; set; }
+
+    // 状态查询/恢复 GET 连续收到“未列出的 4xx”（400/409/422 等）的次数，达到上限后不再空转查询。
+    public int OfficialQueryRejectCount { get; set; }
 }
 
 public sealed class LinklyCloudBackendNotificationRecord

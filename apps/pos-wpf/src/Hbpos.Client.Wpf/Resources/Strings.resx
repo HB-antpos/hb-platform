@@ -277,7 +277,7 @@
   <data name="payment.card.squarePaymentAmountMismatch" xml:space="preserve"><value>Square payment amount did not match the requested amount.</value></data>
   <data name="payment.card.squarePaymentCurrencyMismatch" xml:space="preserve"><value>Square payment currency did not match the requested currency.</value></data>
   <data name="payment.card.squareRefundMissingReference" xml:space="preserve"><value>Square refund requires an original Square payment reference.</value></data>
-  <data name="payment.card.squareRefundPending" xml:space="preserve"><value>Square refund is still processing. Do not refund again; run recovery later.</value></data>
+  <data name="payment.card.squareRefundPending" xml:space="preserve"><value>Square refund was submitted and is still processing. Do not refund again; check it again later in Card transaction recovery.</value></data>
   <data name="payment.card.squareRefundStatus" xml:space="preserve"><value>Square refund status is {0}.</value></data>
   <data name="payment.card.error.overlay.connectionFailed.title" xml:space="preserve"><value>Card Terminal Connection Failed</value></data>
   <data name="payment.card.error.overlay.connectionFailed.message" xml:space="preserve"><value>Unable to connect to the card terminal. Please check the terminal's power and network connection, then try again.</value></data>
@@ -295,10 +295,10 @@
   <data name="payment.card.error.overlay.cardDeclined.message" xml:space="preserve"><value>Card was not approved. Reason: {0}</value></data>
   <data name="payment.card.error.overlay.close" xml:space="preserve"><value>OK</value></data>
   <data name="payment.card.error.overlay.activeSession.title" xml:space="preserve"><value>Previous Card Transaction Needs Recovery</value></data>
-  <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve"><value>POS will check the previous Linkly transaction before another card payment. The current order will stay on this screen.</value></data>
+  <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve"><value>POS will check the previous card transaction before another card payment. The current order will stay on this screen.</value></data>
   <data name="payment.card.error.overlay.activeSession.recover" xml:space="preserve"><value>Recover previous</value></data>
   <data name="payment.card.error.overlay.activeSession.close" xml:space="preserve"><value>Close</value></data>
-  <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve"><value>Recovering previous Linkly transaction...</value></data>
+  <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve"><value>Recovering previous card transaction...</value></data>
   <data name="payment.card.error.overlay.activeSession.handoff" xml:space="preserve"><value>Move to recovery center and start a new sale</value></data>
   <data name="payment.card.error.overlay.activeSession.openCenter" xml:space="preserve"><value>Open card recovery center</value></data>
   <data name="payment.card.error.overlay.activeSession.openRecoveryCenter" xml:space="preserve"><value>Open card transaction recovery</value></data>
@@ -1572,4 +1572,23 @@
   <data name="cardRecovery.v2.outcome.notProcessed.refund" xml:space="preserve"><value>No refund was made. The return stays open for a new refund.</value></data>
   <data name="cardRecovery.v2.outcome.notProcessed.sale" xml:space="preserve"><value>No charge was made. The order can be paid again.</value></data>
   <data name="cardRecovery.v2.outcome.waiting" xml:space="preserve"><value>Keep the transaction locked and check again later. A supervisor note is required.</value></data>
+  <data name="payment.card.squareRefundAccepted" xml:space="preserve"><value>Square accepted the refund and is returning it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed.</value></data>
+  <data name="cardRecovery.center.transactionStatus.settlementPending" xml:space="preserve"><value>Square is settling the refund</value></data>
+  <data name="cardRecovery.center.transactionStatus.settlementRejected" xml:space="preserve"><value>Refund rejected by Square</value></data>
+  <data name="cardRecovery.settlement.pending" xml:space="preserve"><value>Square accepted this refund and is still settling it. No action is needed; the status updates automatically.</value></data>
+  <data name="cardRecovery.settlement.completed" xml:space="preserve"><value>Square completed the refund. The money is on its way to the customer&apos;s card.</value></data>
+  <data name="cardRecovery.settlement.rejected" xml:space="preserve"><value>Square did not complete this refund. Refund the customer by cash or another method, then confirm it here.</value></data>
+  <data name="cardRecovery.settlement.onlyAcknowledge" xml:space="preserve"><value>Square rejected this refund after the return was completed. Only &quot;Refunded by other means&quot; applies.</value></data>
+  <data name="cardRecovery.settlement.acknowledged" xml:space="preserve"><value>Recorded: the customer was refunded by other means.</value></data>
+  <data name="cardRecovery.settlement.acknowledgeFailed" xml:space="preserve"><value>The refund status changed. Refresh and try again.</value></data>
+  <data name="cardRecovery.settlement.action.refundedOther" xml:space="preserve"><value>Refunded by other means</value></data>
+  <data name="cardRecovery.settlement.banner.rejected.title" xml:space="preserve"><value>Square rejected this refund.</value></data>
+  <data name="cardRecovery.settlement.banner.rejected.body" xml:space="preserve"><value>The customer has not received this money. Refund them by cash or another method, then tap &quot;Refunded by other means&quot;.</value></data>
+  <data name="cardRecovery.settlement.banner.pending.title" xml:space="preserve"><value>The return is complete. Square is settling the refund.</value></data>
+  <data name="cardRecovery.settlement.banner.pending.body" xml:space="preserve"><value>Square accepted the refund and is sending it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed and no action is required.</value></data>
+  <data name="cardRecovery.settlement.step.returnCompleted" xml:space="preserve"><value>Return completed</value></data>
+  <data name="cardRecovery.settlement.step.settling" xml:space="preserve"><value>Square settling to card</value></data>
+  <data name="cardRecovery.settlement.instructions" xml:space="preserve"><value>Refund the customer by cash or another method first, then record it here. Optionally add a note, such as how much was paid and the receipt number.</value></data>
+  <data name="cardRecovery.settlement.field.note" xml:space="preserve"><value>Note (optional)</value></data>
+  <data name="cardRecovery.settlement.outcome.refundedOther" xml:space="preserve"><value>The customer was paid back by cash or another method.</value></data>
 </root>

@@ -658,37 +658,49 @@ public sealed class ConfiguredCardTerminalClientTests
     }
 
     [Fact]
-    public async Task RefundAsync_posts_square_refund_request()
+    public async Task RefundAsync_treats_square_pending_refund_as_accepted_and_does_not_poll()
     {
         var capturedRequests = new List<HttpRequestMessage>();
         var handler = new StubHttpMessageHandler((request, _) =>
         {
             capturedRequests.Add(CloneRequestWithBody(request));
-            return request.Method == HttpMethod.Post
-                ? JsonResponse(
-                """
-                {
-                  "refund": {
-                    "id": "refund-1",
-                    "status": "PENDING",
-                    "payment_id": "payment-1",
-                    "amount_money": { "amount": 1234, "currency": "AUD" }
-                  }
-                }
-                """)
-                : JsonResponse(
-                """
-                {
-                  "success": true,
-                  "data": {
-                    "refundId": "refund-1",
-                    "environment": "Production",
-                    "status": "COMPLETED",
-                    "paymentId": "payment-1",
-                    "amountMoney": { "amount": 1234, "currency": "AUD" }
-                  }
-                }
-                """);
+            return JsonResponse(CreateSquareRefundCreateJson("refund-1", "PENDING"));
+        });
+        var client = new ConfiguredCardTerminalClient(
+            new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
+            CreateApiClient(handler));
+
+        var result = await client.RefundAsync(12.34m, CreateSession(), "SQ:payment-1");
+
+        // Square 官方定义 PENDING 为“已受理、正在退回原卡”（多数几小时内完成，最长 14 天），
+        // 与 COMPLETED 一样视为退款已发起：退货单当场完成，由结算跟踪继续查询。
+        Assert.True(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal("SQRF:refund-1", result.Reference);
+        Assert.Equal(12.34m, result.AuthorizedAmount);
+        Assert.Equal("payment.card.squareRefundAccepted", result.StatusKey);
+        Assert.Contains("accepted the refund", result.Message, StringComparison.Ordinal);
+        var transaction = Assert.Single(result.CardTransactions!);
+        Assert.Equal("PENDING", transaction.ResponseText);
+        Assert.Equal("refund-1", transaction.TxnRef);
+        // 只有一次 POST，没有任何轮询或二次请求。
+        var request = Assert.Single(capturedRequests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        AssertHbposApiRequest(request, "api/v1/square/refunds");
+        AssertNoSquareHeaders(request);
+        var body = await request.Content!.ReadAsStringAsync();
+        Assert.Contains("\"paymentId\":\"payment-1\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"amount\":1234", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RefundAsync_returns_plain_success_when_square_completes_the_refund_immediately()
+    {
+        var requestCount = 0;
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            requestCount++;
+            return JsonResponse(CreateSquareRefundCreateJson("refund-done", "COMPLETED"));
         });
         var client = new ConfiguredCardTerminalClient(
             new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
@@ -697,28 +709,21 @@ public sealed class ConfiguredCardTerminalClientTests
         var result = await client.RefundAsync(12.34m, CreateSession(), "SQ:payment-1");
 
         Assert.True(result.Approved);
-        Assert.Equal("SQRF:refund-1", result.Reference);
-        Assert.Equal(2, capturedRequests.Count);
-        AssertHbposApiRequest(capturedRequests[0], "api/v1/square/refunds");
-        AssertHbposApiRequest(capturedRequests[1], "api/v1/square/refunds/refund-1?environment=Production");
-        AssertNoSquareHeaders(capturedRequests[0]);
-        AssertNoSquareHeaders(capturedRequests[1]);
-        var body = await capturedRequests[0].Content!.ReadAsStringAsync();
-        Assert.Contains("\"paymentId\":\"payment-1\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"amount\":1234", body, StringComparison.Ordinal);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal("SQRF:refund-done", result.Reference);
+        Assert.Equal("COMPLETED", result.Message);
+        Assert.Null(result.StatusKey);
+        Assert.Equal("COMPLETED", Assert.Single(result.CardTransactions!).ResponseText);
+        Assert.Equal(1, requestCount);
     }
 
-    [Fact]
-    public async Task RefundAsync_keeps_square_pending_refund_unapproved_and_recoverable()
+    [Theory]
+    [InlineData("FAILED")]
+    [InlineData("REJECTED")]
+    public async Task RefundAsync_returns_square_refund_failure_when_square_rejects_immediately(string status)
     {
-        var requestCount = 0;
-        var handler = new StubHttpMessageHandler((request, _) =>
-        {
-            requestCount++;
-            return request.Method == HttpMethod.Post
-                ? JsonResponse("{ \"refund\": { \"id\": \"refund-pending\", \"status\": \"PENDING\", \"payment_id\": \"payment-1\", \"amount_money\": { \"amount\": 1234, \"currency\": \"AUD\" } } }")
-                : JsonResponse("{ \"success\": true, \"data\": { \"refundId\": \"refund-pending\", \"environment\": \"Production\", \"status\": \"PENDING\", \"paymentId\": \"payment-1\", \"amountMoney\": { \"amount\": 1234, \"currency\": \"AUD\" } } }");
-        });
+        var handler = new StubHttpMessageHandler((_, _) =>
+            JsonResponse(CreateSquareRefundCreateJson("refund-failed", status)));
         var client = new ConfiguredCardTerminalClient(
             new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
             CreateApiClient(handler));
@@ -726,22 +731,18 @@ public sealed class ConfiguredCardTerminalClientTests
         var result = await client.RefundAsync(12.34m, CreateSession(), "SQ:payment-1");
 
         Assert.False(result.Approved);
-        Assert.True(result.ResultUnknown);
-        Assert.Equal("SQRF:refund-pending", result.Reference);
-        Assert.Equal(12.34m, result.AuthorizedAmount);
-        Assert.Equal("PENDING", Assert.Single(result.CardTransactions!).ResponseText);
-        Assert.Equal(2, requestCount);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal("SQRF:refund-failed", result.Reference);
+        Assert.Equal($"Square refund status is {status}.", result.Message);
     }
 
     [Fact]
-    public async Task RefundAsync_persists_refund_id_before_returning_pending_result()
+    public async Task RefundAsync_persists_refund_id_before_returning_the_accepted_result()
     {
         var persisted = new List<(string RefundId, string Status, CardTerminalEnvironment Environment, DateTimeOffset UpdatedAt)>();
         var contextAccessor = new SquarePaymentAttemptContextAccessor();
-        var handler = new StubHttpMessageHandler((request, _) =>
-            request.Method == HttpMethod.Post
-                ? JsonResponse("{ \"refund\": { \"id\": \"refund-durable\", \"status\": \"PENDING\", \"payment_id\": \"payment-1\", \"amount_money\": { \"amount\": 1234, \"currency\": \"AUD\" } } }")
-                : JsonResponse("{ \"success\": true, \"data\": { \"refundId\": \"refund-durable\", \"environment\": \"Production\", \"status\": \"PENDING\", \"paymentId\": \"payment-1\", \"amountMoney\": { \"amount\": 1234, \"currency\": \"AUD\" } } }"));
+        var handler = new StubHttpMessageHandler((_, _) =>
+            JsonResponse(CreateSquareRefundCreateJson("refund-durable", "PENDING")));
         var client = new ConfiguredCardTerminalClient(
             new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
             CreateApiClient(handler),
@@ -762,16 +763,17 @@ public sealed class ConfiguredCardTerminalClientTests
             "SQ:payment-1",
             "refund-idempotency");
 
-        Assert.True(result.ResultUnknown);
-        Assert.Equal(2, persisted.Count);
-        Assert.All(persisted, evidence =>
-        {
-            Assert.Equal("refund-durable", evidence.RefundId);
-            Assert.Equal("PENDING", evidence.Status);
-            Assert.Equal(CardTerminalEnvironment.Production, evidence.Environment);
-            Assert.NotEqual(default, evidence.UpdatedAt);
-        });
+        Assert.True(result.Approved);
+        // Square 返回 refundId 后必须先落库退款证据，结算跟踪靠它查询同一笔退款。
+        var evidence = Assert.Single(persisted);
+        Assert.Equal("refund-durable", evidence.RefundId);
+        Assert.Equal("PENDING", evidence.Status);
+        Assert.Equal(CardTerminalEnvironment.Production, evidence.Environment);
+        Assert.NotEqual(default, evidence.UpdatedAt);
     }
+
+    private static string CreateSquareRefundCreateJson(string refundId, string status) =>
+        $$"""{ "refund": { "id": "{{refundId}}", "status": "{{status}}", "payment_id": "payment-1", "amount_money": { "amount": 1234, "currency": "AUD" } } }""";
 
     [Fact]
     public async Task Installment_refund_uses_the_persisted_square_idempotency_key_in_the_http_body()
