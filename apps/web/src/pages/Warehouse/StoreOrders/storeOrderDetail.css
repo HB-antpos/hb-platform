@@ -591,6 +591,12 @@
   text-overflow: ellipsis;
 }
 
+.wh-order-detail-row-index {
+  color: #98a2b3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .wh-order-detail-stack {
   display: flex;
   min-width: 0;

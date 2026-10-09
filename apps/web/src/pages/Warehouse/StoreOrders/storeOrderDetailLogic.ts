@@ -344,3 +344,13 @@ export function resolveStoreOrderDetailColumnOrderBase<T extends string>(base: u
   const followsDefault = baseShared.every((key, index) => key === defaultShared[index])
   return followsDefault ? [...defaultOrder] : base
 }
+
+/**
+ * 明细表序号：明细是服务端分页，序号要接着上一页往下数（第 2 页 50 条/页 → 51 起），
+ * 不能直接用当前页内的行下标。筛选/排序后序号表示「当前结果里的第几行」。
+ */
+export function resolveStoreOrderDetailRowNumber(page: number, pageSize: number, rowIndex: number): number {
+  const safePage = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1
+  const safePageSize = Number.isFinite(pageSize) && pageSize >= 1 ? Math.floor(pageSize) : 0
+  return (safePage - 1) * safePageSize + rowIndex + 1
+}

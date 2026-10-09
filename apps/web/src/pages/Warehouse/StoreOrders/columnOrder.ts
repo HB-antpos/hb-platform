@@ -1,6 +1,6 @@
 export type StoreOrderListTableColumnKey = string
 // 订货明细重设计后合并了列：商品（图片 + 货号 + 名称，第二行条码 · 零售价）、货位 · 拣货（货位 + 负责人）；
-// 序号列去掉，订货体积改为列设置里可选显示。
+// 订货体积改为列设置里可选显示；序号列不在这里（不可拖拽/调宽，由 Detail.tsx 固定拼在最前）。
 export type StoreOrderDetailTableColumnKey =
   | 'product'
   | 'locationCode'

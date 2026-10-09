@@ -58,6 +58,7 @@
       "resetColumnLayout": "Reset column layout",
       "copyOrderQtyToAlloc": "Ship qty = order qty",
       "batchModify": "Batch edit…",
+      "colIndex": "No.",
       "colProduct": "Product",
       "colLocationPicker": "Location · picker",
       "colOrdered": "Ordered",
