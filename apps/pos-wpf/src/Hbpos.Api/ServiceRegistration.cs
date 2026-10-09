@@ -84,6 +84,7 @@ public static class ServiceRegistration
         services.AddOptions<InstallmentCancelClaimOptions>();
         services.AddOptions<InstallmentCrossDeviceLifecycleOptions>();
         services.AddOptions<SharedHeldOrderOptions>();
+        services.AddOptions<CardTenderReconciliationOptions>();
         services.AddOptions<DeviceActivationOptions>();
         services.AddOptions<RemoteMaintenanceGatewayOptions>();
         services.AddOptions<SquareTerminalRestOptions>()
@@ -116,6 +117,7 @@ public static class ServiceRegistration
             services.Configure<InstallmentCancelClaimOptions>(configuration.GetSection("InstallmentCancelClaims"));
             services.Configure<InstallmentCrossDeviceLifecycleOptions>(configuration.GetSection("InstallmentCrossDeviceLifecycle"));
             services.Configure<SharedHeldOrderOptions>(configuration.GetSection("SharedHeldOrders"));
+            services.Configure<CardTenderReconciliationOptions>(configuration.GetSection("CardTenderReconciliation"));
             services.Configure<DeviceActivationOptions>(
                 configuration.GetSection(DeviceActivationOptions.SectionName));
             services.Configure<RemoteMaintenanceGatewayOptions>(
@@ -160,6 +162,8 @@ public static class ServiceRegistration
         services.AddScoped<IOrderRepository, SqlSugarOrderRepository>();
         services.AddScoped<ICardTenderReconciliationRepository, SqlSugarCardTenderReconciliationRepository>();
         services.AddScoped<ICardTenderOrderVerifier, CardTenderOrderVerifier>();
+        services.AddScoped<ICardTenderReconciliationService, CardTenderReconciliationService>();
+        services.AddHostedService<CardTenderReconciliationBackgroundService>();
         services.AddScoped<IOrderSyncService, OrderSyncService>();
         services.AddScoped<ISharedHeldOrderPayloadProtector, SharedHeldOrderPayloadProtector>();
         services.AddScoped<ISharedHeldOrderRepository, SqlSugarSharedHeldOrderRepository>();

@@ -329,6 +329,7 @@
     <Compile Include="PosOperationAuditRiskEvaluatorTests.cs" />
     <Compile Include="PosOperationAuditRiskSqlServerIntegrationTests.cs" />
     <Compile Include="LinklySettlementManagementTests.cs" />
+    <Compile Include="CardTenderReconciliationQueryTests.cs" />
     <Compile Include="ApplicationLogSchemaMigratorTests.cs" />
     <Compile Include="ApplicationLogQueueTests.cs" />
     <Compile Include="ApplicationLogBackgroundServiceTests.cs" />

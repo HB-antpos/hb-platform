@@ -216,6 +216,45 @@ public interface ICardTenderReconciliationRepository
     Task UpsertIssuesAsync(
         IReadOnlyList<CardTenderIssue> issues,
         CancellationToken cancellationToken);
+
+    /// <summary>已批准、尚未回链订单、且进入终态早于 <paramref name="completedBeforeUtc"/> 的会话（对账窗口内，最多 <paramref name="limit"/> 条，旧的优先）。</summary>
+    Task<IReadOnlyList<CardTenderOrphanSessionCandidate>> FindApprovedSessionsWithoutOrderAsync(
+        DateTime completedAfterUtc,
+        DateTime completedBeforeUtc,
+        int limit,
+        CancellationToken cancellationToken);
+
+    /// <summary>按 ANZBACKEND 付款引用在 payment_detail 里找承载该会话的订单号（找不到返回 null）。</summary>
+    Task<string?> FindOrderGuidByBackendPaymentAsync(
+        string environment,
+        string sessionId,
+        CancellationToken cancellationToken);
+
+    /// <summary>把「已批准会话无订单」类型、其会话已回链订单的未结异常自动置为 Resolved，返回解除条数。</summary>
+    Task<int> ResolveIssuesForLinkedSessionsAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>对账作业用到的最小会话信息。</summary>
+public sealed class CardTenderOrphanSessionCandidate
+{
+    public long Id { get; set; }
+
+    public string Environment { get; set; } = string.Empty;
+
+    public string StoreCode { get; set; } = string.Empty;
+
+    public string DeviceCode { get; set; } = string.Empty;
+
+    public string SessionId { get; set; } = string.Empty;
+
+    public string? TxnRef { get; set; }
+
+    public string? RequestTxnType { get; set; }
+
+    public long? RequestAmountCents { get; set; }
+
+    /// <summary>首次进入终态的时间（UTC）。</summary>
+    public DateTime CompletedAtUtc { get; set; }
 }
 
 /// <summary>订单入库后的卡付款核对：内部一致性 + ANZBACKEND 会话核对 + 会话回链订单。</summary>
@@ -502,6 +541,90 @@ public sealed class SqlSugarCardTenderReconciliationRepository(
             new SugarParameter("@Id", sessionRowId),
             new SugarParameter("@OrderGuid", orderGuid));
         return linked is null or DBNull ? null : Convert.ToString(linked);
+    }
+
+    internal const string FindOrphanCandidatesSql = """
+        SELECT TOP (@Limit)
+            [Id], [Environment], [StoreCode], [DeviceCode], [SessionId], [TxnRef], [RequestTxnType], [RequestAmountCents],
+            [CompletedAt] AS [CompletedAtUtc]
+        FROM [dbo].[POSM_LinklyCloudBackendSession]
+        WHERE [OrderGuid] IS NULL
+          AND [Status] = N'Completed'
+          AND [TransactionSuccess] = 1
+          AND [OperationType] = N'Transaction'
+          -- 只看部署后进入终态的会话：CompletedAt 只对迁移之后首次进入终态的行写入，历史行为 NULL。
+          -- 不能用 CreatedAt 判断：升级时旧行的 CreatedAt 已用 UpdatedAt 回填，历史会话没有 OrderGuid 回链，
+          -- 会被全部误报成孤儿。
+          AND [CompletedAt] IS NOT NULL
+          AND [CompletedAt] >= @CompletedAfter
+          AND [CompletedAt] < @CompletedBefore
+        ORDER BY [CompletedAt] ASC, [Id] ASC;
+        """;
+
+    // 订单同步（回链上线前）或回链失败时，订单仍在 payment_detail 里：用付款引用兜底，避免把正常订单报成孤儿。
+    // 引用格式见 LinklyBackendPaymentReference.Format：ANZBACKEND:{txnRef}[:{refund}]:session={id}:environment={env}。
+    internal const string FindOrderByBackendPaymentSql = """
+        SELECT TOP (1) [OrderGuid]
+        FROM [dbo].[payment_detail]
+        WHERE [Reference] LIKE @Pattern ESCAPE N'!'
+        ORDER BY [OrderGuid];
+        """;
+
+    internal const string ResolveLinkedIssuesSql = """
+        UPDATE issue
+        SET [Status] = N'Resolved', [ResolvedAt] = SYSUTCDATETIME()
+        FROM [dbo].[POSM_CardTenderReconciliationIssue] AS issue
+        INNER JOIN [dbo].[POSM_LinklyCloudBackendSession] AS session
+            ON session.[Environment] = issue.[Environment]
+           AND session.[StoreCode] = issue.[StoreCode]
+           AND session.[DeviceCode] = issue.[DeviceCode]
+           AND session.[SessionId] = issue.[SessionId]
+        WHERE issue.[IssueType] = N'ApprovedSessionWithoutOrder'
+          AND issue.[Status] = N'Open'
+          AND session.[OrderGuid] IS NOT NULL;
+        """;
+
+    public async Task<IReadOnlyList<CardTenderOrphanSessionCandidate>> FindApprovedSessionsWithoutOrderAsync(
+        DateTime completedAfterUtc,
+        DateTime completedBeforeUtc,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.PosmDb.Ado.SqlQueryAsync<CardTenderOrphanSessionCandidate>(
+            FindOrphanCandidatesSql,
+            new SugarParameter("@Limit", limit),
+            new SugarParameter("@CompletedAfter", completedAfterUtc) { DbType = System.Data.DbType.DateTime2 },
+            new SugarParameter("@CompletedBefore", completedBeforeUtc) { DbType = System.Data.DbType.DateTime2 });
+    }
+
+    public async Task<string?> FindOrderGuidByBackendPaymentAsync(
+        string environment,
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        var pattern =
+            $"{BackendReferenceLikePrefix}%:session={EscapeLike(Uri.EscapeDataString(sessionId.Trim()))}:environment={EscapeLike(Uri.EscapeDataString(environment.Trim()))}";
+        var orderGuid = await dbContext.PosmDb.Ado.GetScalarAsync(
+            FindOrderByBackendPaymentSql,
+            new SugarParameter("@Pattern", pattern));
+        return orderGuid is null or DBNull ? null : Convert.ToString(orderGuid);
+    }
+
+    public async Task<int> ResolveIssuesForLinkedSessionsAsync(CancellationToken cancellationToken)
+    {
+        return await dbContext.PosmDb.Ado.ExecuteCommandAsync(ResolveLinkedIssuesSql);
+    }
+
+    private const string BackendReferenceLikePrefix = "ANZBACKEND:";
+
+    /// <summary>LIKE 通配符转义（转义符 !）。Uri.EscapeDataString 的输出里本身就可能含 %。</summary>
+    internal static string EscapeLike(string value)
+    {
+        return value
+            .Replace("!", "!!", StringComparison.Ordinal)
+            .Replace("%", "!%", StringComparison.Ordinal)
+            .Replace("_", "!_", StringComparison.Ordinal)
+            .Replace("[", "![", StringComparison.Ordinal);
     }
 
     public async Task UpsertIssuesAsync(

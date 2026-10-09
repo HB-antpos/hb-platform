@@ -408,6 +408,15 @@ public sealed class CardTenderOrderVerifierTests
             UpsertedIssues.AddRange(issues);
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<CardTenderOrphanSessionCandidate>> FindApprovedSessionsWithoutOrderAsync(
+            DateTime completedAfterUtc, DateTime completedBeforeUtc, int limit, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<CardTenderOrphanSessionCandidate>>([]);
+
+        public Task<string?> FindOrderGuidByBackendPaymentAsync(
+            string environment, string sessionId, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+
+        public Task<int> ResolveIssuesForLinkedSessionsAsync(CancellationToken cancellationToken) => Task.FromResult(0);
     }
 }
 

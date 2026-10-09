@@ -6759,7 +6759,12 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [LateFinalResponseCode] = CASE WHEN target.[LateFinalAt] IS NOT NULL THEN target.[LateFinalResponseCode] ELSE @LateFinalResponseCode END,
                 [LateFinalResponseText] = CASE WHEN target.[LateFinalAt] IS NOT NULL THEN target.[LateFinalResponseText] ELSE @LateFinalResponseText END,
                 [OfficialQueryRejectCount] = @OfficialQueryRejectCount,
-                [UpdatedAt] = @UpdatedAt
+                [UpdatedAt] = @UpdatedAt,
+                -- 首次进入终态的时间只写一次，后续 ack/回执打印刷新 UpdatedAt 时不再改动；供卡付款对账判断「批准后多久没订单」。
+                [CompletedAt] = COALESCE(target.[CompletedAt], CASE
+                    WHEN @Status IN (N'Completed', N'Cancelled', N'Failed', N'NotSubmitted', N'SupervisorResolved')
+                    THEN @UpdatedAt
+                END)
         WHEN NOT MATCHED THEN
             INSERT (
                 [Environment], [StoreCode], [DeviceCode], [TerminalId], [SessionId], [Status], [TxnRef], [RequestTxnType], [RequestAmountCents], [RequestRfn], [OperationType],
