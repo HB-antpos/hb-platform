@@ -150,6 +150,8 @@ public static class ServiceRegistration
         services.AddScoped<IOrderSyncSchemaSqlExecutor, SqlSugarOrderSyncSchemaSqlExecutor>();
         services.AddScoped<IOrderSyncSchemaInitializer, SqlSugarOrderSyncSchemaInitializer>();
         services.AddScoped<IOrderRepository, SqlSugarOrderRepository>();
+        services.AddScoped<ICardTenderReconciliationRepository, SqlSugarCardTenderReconciliationRepository>();
+        services.AddScoped<ICardTenderOrderVerifier, CardTenderOrderVerifier>();
         services.AddScoped<IOrderSyncService, OrderSyncService>();
         services.AddScoped<ISharedHeldOrderPayloadProtector, SharedHeldOrderPayloadProtector>();
         services.AddScoped<ISharedHeldOrderRepository, SqlSugarSharedHeldOrderRepository>();
