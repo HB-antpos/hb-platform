@@ -126,6 +126,8 @@ import {
   type StoreOrderStatusCounts,
   type StoreOrderStatusTabKey,
 } from './storeOrderListLogic'
+// 序号规则与明细页相同：(页码-1)×每页条数 + 行下标 + 1。
+import { resolveStoreOrderDetailRowNumber } from './storeOrderDetailLogic'
 import storeOrdersMessagesEn from './storeOrdersMessages.en.json'
 import storeOrdersMessagesZh from './storeOrdersMessages.zh.json'
 import { formatStoreOrderVolume } from './volumeFormat'
@@ -328,6 +330,9 @@ function cleanStoreOrderListColumnFilters(
 }
 
 const STORE_ORDER_LIST_SELECTION_COLUMN_WIDTH = 40
+// 序号列在可拖拽/可调宽的列体系之外：固定宽度、固定在订单号列左侧，不进列顺序/列宽存储。
+const STORE_ORDER_LIST_INDEX_COLUMN_KEY = 'rowIndex'
+const STORE_ORDER_LIST_INDEX_COLUMN_WIDTH = 52
 // 改版合并了日期、数量、金额列，旧版（v1）保存的列序与列宽对不上新列，换 v2 让所有人从新默认布局开始。
 const STORE_ORDER_LIST_COLUMN_ORDER_STORAGE_KEY = 'hbweb_rv.storeOrders.list.columnOrder.v2'
 const STORE_ORDER_LIST_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.storeOrders.list.columnWidths.v2'
@@ -2017,7 +2022,18 @@ export default function StoreOrdersPage() {
   const columns = useMemo(() => {
     const activeOrder = columnOrder.length ? columnOrder : draggableColumnKeys
     const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]))
-    return activeOrder
+    // 序号接着服务端分页往下数；没有 data-column-key，表头不可拖拽、不可调宽。
+    const indexColumn: ColumnsType<StoreOrderListItem>[number] = {
+      key: STORE_ORDER_LIST_INDEX_COLUMN_KEY,
+      title: t('column.index'),
+      width: STORE_ORDER_LIST_INDEX_COLUMN_WIDTH,
+      align: 'center',
+      fixed: 'left',
+      render: (_: unknown, __: StoreOrderListItem, index: number) => (
+        <span className="wh-orders-row-index">{resolveStoreOrderDetailRowNumber(page, pageSize, index)}</span>
+      ),
+    }
+    const orderedColumns = activeOrder
       .map((key) => columnMap.get(key))
       .filter((column): column is ColumnsType<StoreOrderListItem>[number] => Boolean(column))
       .map((column) => {
@@ -2034,7 +2050,8 @@ export default function StoreOrdersPage() {
           } as DraggableHeaderCellProps),
         }
       }) as ColumnsType<StoreOrderListItem>
-  }, [baseColumns, columnOrder, columnWidths, draggableColumnKeys, handleColumnResizeStart])
+    return [indexColumn, ...orderedColumns]
+  }, [baseColumns, columnOrder, columnWidths, draggableColumnKeys, handleColumnResizeStart, page, pageSize, t])
   const tableScrollX =
     (canUseWarehouseManagerActions ? STORE_ORDER_LIST_SELECTION_COLUMN_WIDTH : 0)
     + columns.reduce((total, column) => {
@@ -2223,7 +2240,10 @@ export default function StoreOrdersPage() {
     }
     const offset = canUseWarehouseManagerActions ? 1 : 0
     // 合计标签放在第一个非数字列；列可拖动排序，所以按当前列顺序逐格生成，保证与表头对齐。
-    const labelColumnIndex = columns.findIndex((column) => column.key !== 'quantityVolume' && column.key !== 'orderShipAmount')
+    const labelColumnIndex = columns.findIndex(
+      (column) =>
+        column.key !== STORE_ORDER_LIST_INDEX_COLUMN_KEY && column.key !== 'quantityVolume' && column.key !== 'orderShipAmount',
+    )
     return (
       <MeasuredTable.Summary fixed="bottom">
         <MeasuredTable.Summary.Row className="wh-orders-summary-row">

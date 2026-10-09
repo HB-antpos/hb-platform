@@ -723,3 +723,9 @@
   height: 22px;
   padding: 0 6px 0 5px;
 }
+
+.store-order-list-table .wh-orders-row-index {
+  color: #98a2b3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
