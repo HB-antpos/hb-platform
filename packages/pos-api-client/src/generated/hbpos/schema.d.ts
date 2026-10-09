@@ -5583,6 +5583,11 @@ export interface components {
             effectiveEnd?: string;
             /** Format: int32 */
             sortOrder?: number;
+            orientation?: string | null;
+            /** Format: int32 */
+            mediaWidth?: number | null;
+            /** Format: int32 */
+            mediaHeight?: number | null;
         };
         AdvertisementPlaybackResponse: {
             storeCode?: string | null;

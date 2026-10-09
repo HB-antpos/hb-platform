@@ -1431,6 +1431,257 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 客显广告版式三列_依赖原表_可重复执行_旧广告回填Any_约束生效且InitTables空操作并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表不存在：拒绝执行，提示先跑基线。
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql));
+        Assert.Equal(52402, missingTable.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52402, missingVerify.Number);
+
+        // 迁移前形态：基线建出的旧广告表（与加列前实体一致）与一行历史广告。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.Advertisement
+            (
+                Id nvarchar(200) NOT NULL PRIMARY KEY,
+                Title nvarchar(200) NOT NULL,
+                Description nvarchar(1000) NULL,
+                MediaType nvarchar(20) NOT NULL,
+                MediaUrl nvarchar(1000) NOT NULL,
+                ThumbnailUrl nvarchar(1000) NULL,
+                ObjectKey nvarchar(500) NOT NULL,
+                OriginalFileName nvarchar(255) NOT NULL,
+                ContentType nvarchar(100) NOT NULL,
+                FileSize bigint NOT NULL,
+                EffectiveStart datetime NOT NULL,
+                EffectiveEnd datetime NOT NULL,
+                IsEnabled bit NOT NULL,
+                SortOrder int NOT NULL,
+                CreatedAt datetime NOT NULL,
+                CreatedBy nvarchar(200) NULL,
+                UpdatedAt datetime NULL,
+                UpdatedBy nvarchar(200) NULL,
+                IsDeleted bit NOT NULL
+            );
+            INSERT dbo.Advertisement
+                (Id, Title, MediaType, MediaUrl, ObjectKey, OriginalFileName, ContentType, FileSize,
+                 EffectiveStart, EffectiveEnd, IsEnabled, SortOrder, CreatedAt, IsDeleted)
+            VALUES (N'ad-1', N'Old', N'Image', N'https://cdn/ad-1.jpg', N'ads/2026/ad-1.jpg', N'ad-1.jpg', N'image/jpeg', 100,
+                    '2026-01-01', '2026-12-31', 1, 1, '2026-01-01', 0);
+            """);
+        // 缺列时门禁报 52403。
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+        // 重复执行是空操作；历史广告按默认值回填 Any，宽高为 NULL。
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.Advertisement WHERE Id = N'ad-1' AND Orientation = N'Any'
+                AND MediaWidth IS NULL AND MediaHeight IS NULL) <> 1
+                THROW 52410, 'Existing advertisement should be backfilled as Any.', 1;
+            IF (SELECT COUNT(*) FROM sys.default_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.Advertisement')
+                AND parent_column_id = COLUMNPROPERTY(OBJECT_ID(N'dbo.Advertisement'), N'Orientation', 'ColumnId')) <> 1
+                THROW 52411, 'Orientation should have exactly one default constraint.', 1;
+            """);
+
+        // CHECK 约束只放行三种取值；不写版式的新行取默认值 Any。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.Advertisement
+                (Id, Title, MediaType, MediaUrl, ObjectKey, OriginalFileName, ContentType, FileSize,
+                 EffectiveStart, EffectiveEnd, IsEnabled, SortOrder, CreatedAt, IsDeleted, Orientation, MediaWidth, MediaHeight)
+            VALUES (N'ad-2', N'Portrait', N'Image', N'https://cdn/ad-2.jpg', N'ads/2026/ad-2.jpg', N'ad-2.jpg', N'image/jpeg', 100,
+                    '2026-01-01', '2026-12-31', 1, 1, '2026-01-01', 0, N'Portrait', 1080, 1920);
+            INSERT dbo.Advertisement
+                (Id, Title, MediaType, MediaUrl, ObjectKey, OriginalFileName, ContentType, FileSize,
+                 EffectiveStart, EffectiveEnd, IsEnabled, SortOrder, CreatedAt, IsDeleted)
+            VALUES (N'ad-3', N'Default', N'Image', N'https://cdn/ad-3.jpg', N'ads/2026/ad-3.jpg', N'ad-3.jpg', N'image/jpeg', 100,
+                    '2026-01-01', '2026-12-31', 1, 1, '2026-01-01', 0);
+            IF (SELECT Orientation FROM dbo.Advertisement WHERE Id = N'ad-3') <> N'Any'
+                THROW 52412, 'New advertisement without orientation should default to Any.', 1;
+            """);
+        var invalidOrientation = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main,
+            "UPDATE dbo.Advertisement SET Orientation = N'Square' WHERE Id = N'ad-1';"));
+        Assert.Equal(547, invalidOrientation.Number);
+
+        // POS API 启动对广告表执行 CodeFirst.InitTables：列与约束已与实体一致时必须是空操作，
+        // 不得新增/替换默认约束、改列定义或动到 CHECK，门禁仍然通过。
+        var mainDb = databases.CreateMainContext().Db;
+        mainDb.CodeFirst.InitTables<BlazorApp.Shared.Models.HBweb.Advertisement, BlazorApp.Shared.Models.HBweb.AdvertisementStore>();
+        mainDb.CodeFirst.InitTables<BlazorApp.Shared.Models.HBweb.Advertisement, BlazorApp.Shared.Models.HBweb.AdvertisementStore>();
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM sys.default_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.Advertisement')
+                AND parent_column_id = COLUMNPROPERTY(OBJECT_ID(N'dbo.Advertisement'), N'Orientation', 'ColumnId')) <> 1
+                THROW 52413, 'InitTables should not add another default constraint.', 1;
+            IF (SELECT COUNT(*) FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.Advertisement')) <> 1
+                THROW 52414, 'InitTables should not touch check constraints.', 1;
+            IF (SELECT COUNT(*) FROM dbo.Advertisement) <> 3
+                THROW 52415, 'InitTables should not touch existing rows.', 1;
+            """);
+        // 用实体读写：未赋值的新广告按实体默认值写入 Any，宽高可空。
+        await mainDb.Insertable(new BlazorApp.Shared.Models.HBweb.Advertisement
+        {
+            Id = "ad-4",
+            Title = "Entity",
+            MediaType = "Image",
+            MediaUrl = "https://cdn/ad-4.jpg",
+            ObjectKey = "ads/2026/ad-4.jpg",
+            OriginalFileName = "ad-4.jpg",
+            ContentType = "image/jpeg",
+            FileSize = 100,
+            EffectiveStart = new DateTime(2026, 1, 1),
+            EffectiveEnd = new DateTime(2026, 12, 31),
+            CreatedAt = new DateTime(2026, 1, 1),
+        }).ExecuteCommandAsync();
+        var portrait = await mainDb.Queryable<BlazorApp.Shared.Models.HBweb.Advertisement>()
+            .FirstAsync(item => item.Id == "ad-2");
+        Assert.Equal("Portrait", portrait.Orientation);
+        Assert.Equal(1080, portrait.MediaWidth);
+        Assert.Equal(1920, portrait.MediaHeight);
+        var entityDefault = await mainDb.Queryable<BlazorApp.Shared.Models.HBweb.Advertisement>()
+            .FirstAsync(item => item.Id == "ad-4");
+        Assert.Equal("Any", entityDefault.Orientation);
+        Assert.Null(entityDefault.MediaWidth);
+
+        // CHECK 约束缺失被门禁识别，重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Advertisement DROP CONSTRAINT CK_Advertisement_Orientation;");
+        var missingCheck = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, missingCheck.Number);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+
+        // 未受信任的 CHECK（NOCHECK 重新启用）同样被门禁识别。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.Advertisement NOCHECK CONSTRAINT CK_Advertisement_Orientation;
+            ALTER TABLE dbo.Advertisement CHECK CONSTRAINT CK_Advertisement_Orientation;
+            """);
+        var untrustedCheck = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, untrustedCheck.Number);
+        await ExecuteNonQueryAsync(main,
+            "ALTER TABLE dbo.Advertisement WITH CHECK CHECK CONSTRAINT CK_Advertisement_Orientation;");
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+
+        // 同名 CHECK 但放宽了取值范围：门禁按规范化定义精确比对识别；迁移不改写已有同名约束。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.Advertisement DROP CONSTRAINT CK_Advertisement_Orientation;
+            ALTER TABLE dbo.Advertisement WITH CHECK ADD CONSTRAINT CK_Advertisement_Orientation
+                CHECK (Orientation IN (N'Landscape', N'Portrait', N'Any', N'Square'));
+            """);
+        var widenedCheck = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, widenedCheck.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.Advertisement DROP CONSTRAINT CK_Advertisement_Orientation;
+            """);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+
+        // 默认约束被换成匿名约束或默认值漂移：门禁识别；重跑迁移只把匿名约束换回具名约束。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.Advertisement DROP CONSTRAINT DF_Advertisement_Orientation;
+            ALTER TABLE dbo.Advertisement ADD DEFAULT (N'Any') FOR Orientation;
+            """);
+        var anonymousDefault = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, anonymousDefault.Number);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.Advertisement DROP CONSTRAINT DF_Advertisement_Orientation;
+            ALTER TABLE dbo.Advertisement ADD CONSTRAINT DF_Advertisement_Orientation DEFAULT (N'Landscape') FOR Orientation;
+            """);
+        var wrongDefault = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, wrongDefault.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.Advertisement DROP CONSTRAINT DF_Advertisement_Orientation;
+            ALTER TABLE dbo.Advertisement ADD CONSTRAINT DF_Advertisement_Orientation DEFAULT (N'Any') FOR Orientation;
+            """);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+
+        // 宽高列类型漂移（int → bigint）与可空性漂移（→ NOT NULL）都被门禁识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Advertisement ALTER COLUMN MediaWidth bigint NULL;");
+        var widthType = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, widthType.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Advertisement ALTER COLUMN MediaWidth int NULL;");
+
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.Advertisement SET MediaHeight = 1 WHERE MediaHeight IS NULL;
+            ALTER TABLE dbo.Advertisement ALTER COLUMN MediaHeight int NOT NULL;
+            """);
+        var heightNullable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, heightNullable.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.Advertisement ALTER COLUMN MediaHeight int NULL;");
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 模拟部署顺序出错：旧广告表（含历史行）上先由新版 POS API 启动执行 InitTables 自行补列。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.Advertisement
+            (
+                Id nvarchar(200) NOT NULL PRIMARY KEY,
+                Title nvarchar(200) NOT NULL,
+                Description nvarchar(1000) NULL,
+                MediaType nvarchar(20) NOT NULL,
+                MediaUrl nvarchar(1000) NOT NULL,
+                ThumbnailUrl nvarchar(1000) NULL,
+                ObjectKey nvarchar(500) NOT NULL,
+                OriginalFileName nvarchar(255) NOT NULL,
+                ContentType nvarchar(100) NOT NULL,
+                FileSize bigint NOT NULL,
+                EffectiveStart datetime NOT NULL,
+                EffectiveEnd datetime NOT NULL,
+                IsEnabled bit NOT NULL,
+                SortOrder int NOT NULL,
+                CreatedAt datetime NOT NULL,
+                CreatedBy nvarchar(200) NULL,
+                UpdatedAt datetime NULL,
+                UpdatedBy nvarchar(200) NULL,
+                IsDeleted bit NOT NULL
+            );
+            INSERT dbo.Advertisement
+                (Id, Title, MediaType, MediaUrl, ObjectKey, OriginalFileName, ContentType, FileSize,
+                 EffectiveStart, EffectiveEnd, IsEnabled, SortOrder, CreatedAt, IsDeleted)
+            VALUES (N'ad-1', N'Old', N'Image', N'https://cdn/ad-1.jpg', N'ads/2026/ad-1.jpg', N'ad-1.jpg', N'image/jpeg', 100,
+                    '2026-01-01', '2026-12-31', 1, 1, '2026-01-01', 0);
+            """);
+        mainDb.CodeFirst.InitTables<BlazorApp.Shared.Models.HBweb.Advertisement, BlazorApp.Shared.Models.HBweb.AdvertisementStore>();
+
+        // SqlSugar 补出的列没有具名默认约束与 CHECK：门禁拒绝，必须显式跑迁移。
+        var beforeMigration = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql));
+        Assert.Equal(52403, beforeMigration.Number);
+
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AdvertisementOrientationSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.Advertisement WHERE Id = N'ad-1' AND Orientation = N'Any') <> 1
+                THROW 52416, 'Existing advertisement should be Any after convergence.', 1;
+            """);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发服务_真实SQLServer下发_并发同店只产生一个版本且冲突映射409()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

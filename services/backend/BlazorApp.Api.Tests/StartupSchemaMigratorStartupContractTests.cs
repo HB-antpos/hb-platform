@@ -262,6 +262,31 @@ public sealed class StartupSchemaMigratorStartupContractTests
     }
 
     [Fact]
+    public async Task 客显广告版式与素材宽高列只走版本迁移_启动补列不触碰()
+    {
+        var root = FindRepoRoot();
+        var migrator = await File.ReadAllTextAsync(Path.Combine(
+            root,
+            "services/backend/BlazorApp.Api/Data/StartupSchemaMigrator.cs"));
+        // 广告表随基线登记，三列与两个具名约束只能由 20261009.002-advertisement-orientation 加出，不得混入启动期补列。
+        Assert.DoesNotContain("Advertisement", migrator, StringComparison.Ordinal);
+        Assert.DoesNotContain("DF_Advertisement_Orientation", migrator, StringComparison.Ordinal);
+        Assert.DoesNotContain("CK_Advertisement_Orientation", migrator, StringComparison.Ordinal);
+
+        // 实体特性须与迁移列定义一致：POS API 启动对广告表执行 CodeFirst.InitTables，定义不一致会被自动改表。
+        var entity = await File.ReadAllTextAsync(Path.Combine(
+            root,
+            "services/backend/BlazorApp.Shared/Models/HBweb/Advertisement.cs"));
+        Assert.Contains(
+            "[SugarColumn(Length = 16, IsNullable = false, DefaultValue = AdvertisementOrientations.Any)]",
+            entity,
+            StringComparison.Ordinal);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(
+            entity,
+            @"\[SugarColumn\(IsNullable = true\)\]\s+public int\? Media(Width|Height) \{ get; set; \}").Count);
+    }
+
+    [Fact]
     public async Task StoreService_Hq同步不写入或覆盖退换货政策()
     {
         var serviceSource = await File.ReadAllTextAsync(Path.Combine(

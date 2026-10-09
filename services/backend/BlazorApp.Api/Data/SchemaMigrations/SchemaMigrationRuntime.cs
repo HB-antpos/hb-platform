@@ -139,6 +139,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifySeasonalCardSupplierBatchAsync(CancellationToken cancellationToken);
 
+    Task ApplyAdvertisementOrientationAsync(CancellationToken cancellationToken);
+
+    Task VerifyAdvertisementOrientationAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -823,6 +827,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             SeasonalCardSupplierBatchSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAdvertisementOrientationAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AdvertisementOrientationSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 列、默认约束与 CHECK 约束签名通过后协调器才登记账本，同名但定义不符的列不会被误标为完成。
+        await VerifyAdvertisementOrientationAsync(cancellationToken);
+    }
+
+    public async Task VerifyAdvertisementOrientationAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AdvertisementOrientationSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

@@ -68,7 +68,21 @@ public sealed class AdvertisementPlaybackService(HbposSqlSugarContext dbContext)
             advertisement.FileSize,
             ToOffset(advertisement.EffectiveStart),
             ToOffset(advertisement.EffectiveEnd),
-            advertisement.SortOrder);
+            advertisement.SortOrder,
+            NormalizeOrientation(advertisement.Orientation),
+            advertisement.MediaWidth,
+            advertisement.MediaHeight);
+    }
+
+    private static string NormalizeOrientation(string? value)
+    {
+        // 客显协议用小写；库里存 PascalCase，空值或未知值一律按 any（两处都播），与加版式前的行为一致。
+        return AdvertisementOrientations.Normalize(value) switch
+        {
+            AdvertisementOrientations.Landscape => "landscape",
+            AdvertisementOrientations.Portrait => "portrait",
+            _ => "any",
+        };
     }
 
     private static string NormalizeMediaType(string value)

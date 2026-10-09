@@ -6849,6 +6849,20 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "orientation": {
+            "type": "string",
+            "nullable": true
+          },
+          "mediaWidth": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "mediaHeight": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false

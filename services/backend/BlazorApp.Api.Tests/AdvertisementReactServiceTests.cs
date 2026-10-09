@@ -362,6 +362,202 @@ public sealed class AdvertisementReactServiceTests : IDisposable
         Assert.Equal("INVALID_STORE_SCOPE", result.ErrorCode);
     }
 
+    [Fact]
+    public async Task CreateAsync_NormalizesOrientationAndStoresMediaSize()
+    {
+        var service = CreateService();
+        var dto = CreateValidDto("ads/2026/018f45ad00007000a000000000000011.jpg");
+        dto.Orientation = " portrait ";
+        dto.MediaWidth = 1080;
+        dto.MediaHeight = 1920;
+
+        var result = await service.CreateAsync(dto);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("Portrait", result.Data!.Orientation);
+        Assert.Equal(1080, result.Data.MediaWidth);
+        Assert.Equal(1920, result.Data.MediaHeight);
+        var stored = await _db.Queryable<Advertisement>().SingleAsync(item => item.Id == result.Data.Id);
+        Assert.Equal("Portrait", stored.Orientation);
+        Assert.Equal(1080, stored.MediaWidth);
+        Assert.Equal(1920, stored.MediaHeight);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateAsync_BlankOrientationStoresAnyWithoutMediaSize(string? orientation)
+    {
+        var service = CreateService();
+        var dto = CreateValidDto("ads/2026/018f45ad00007000a000000000000012.jpg");
+        dto.Orientation = orientation;
+
+        var result = await service.CreateAsync(dto);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("Any", result.Data!.Orientation);
+        Assert.Null(result.Data.MediaWidth);
+        Assert.Null(result.Data.MediaHeight);
+        var stored = await _db.Queryable<Advertisement>().SingleAsync(item => item.Id == result.Data.Id);
+        Assert.Equal("Any", stored.Orientation);
+    }
+
+    [Theory]
+    [InlineData("Square")]
+    [InlineData("horizontal")]
+    [InlineData("land scape")]
+    public async Task CreateAsync_RejectsUnknownOrientation(string orientation)
+    {
+        var service = CreateService();
+        var dto = CreateValidDto("ads/2026/018f45ad00007000a000000000000013.jpg");
+        dto.Orientation = orientation;
+
+        var result = await service.CreateAsync(dto);
+
+        Assert.False(result.Success);
+        Assert.Equal("INVALID_ORIENTATION", result.ErrorCode);
+        Assert.Equal("广告版式无效", result.Message);
+        Assert.Empty(await _db.Queryable<Advertisement>().ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(1920, null)]
+    [InlineData(null, 1080)]
+    [InlineData(0, 1080)]
+    [InlineData(-1, 1080)]
+    [InlineData(1920, 20001)]
+    [InlineData(20001, 1)]
+    public async Task CreateAsync_RejectsInvalidMediaSize(int? width, int? height)
+    {
+        var service = CreateService();
+        var dto = CreateValidDto("ads/2026/018f45ad00007000a000000000000014.jpg");
+        dto.MediaWidth = width;
+        dto.MediaHeight = height;
+
+        var result = await service.CreateAsync(dto);
+
+        Assert.False(result.Success);
+        Assert.Equal("INVALID_MEDIA_SIZE", result.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(20000, 20000)]
+    public async Task CreateAsync_AcceptsMediaSizeBoundaries(int width, int height)
+    {
+        var service = CreateService();
+        var dto = CreateValidDto("ads/2026/018f45ad00007000a000000000000015.jpg");
+        dto.Orientation = "LANDSCAPE";
+        dto.MediaWidth = width;
+        dto.MediaHeight = height;
+
+        var result = await service.CreateAsync(dto);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("Landscape", result.Data!.Orientation);
+        Assert.Equal(width, result.Data.MediaWidth);
+        Assert.Equal(height, result.Data.MediaHeight);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ChangesOrientationAndRejectsInvalidValueWithoutWriting()
+    {
+        await SeedAdvertisementAsync("ad-orientation", "Legacy", true, "Image", "S01");
+        var service = CreateService();
+
+        var legacy = await service.GetByIdAsync("ad-orientation");
+        Assert.Equal("Any", legacy.Data!.Orientation);
+        Assert.Null(legacy.Data.MediaWidth);
+
+        var invalid = CreateValidUpdateDto("ads/2026/018f45ad00007000a000000000000016.jpg");
+        invalid.Orientation = "Diagonal";
+        var rejected = await service.UpdateAsync("ad-orientation", invalid);
+        Assert.False(rejected.Success);
+        Assert.Equal("INVALID_ORIENTATION", rejected.ErrorCode);
+        Assert.Equal("Legacy", (await _db.Queryable<Advertisement>().SingleAsync(item => item.Id == "ad-orientation")).Title);
+
+        var update = CreateValidUpdateDto("ads/2026/018f45ad00007000a000000000000016.jpg");
+        update.Orientation = "landscape";
+        update.MediaWidth = 1920;
+        update.MediaHeight = 1080;
+        var updated = await service.UpdateAsync("ad-orientation", update);
+
+        Assert.True(updated.Success, updated.Message);
+        Assert.Equal("Landscape", updated.Data!.Orientation);
+        Assert.Equal(1920, updated.Data.MediaWidth);
+        Assert.Equal(1080, updated.Data.MediaHeight);
+        var stored = await _db.Queryable<Advertisement>().SingleAsync(item => item.Id == "ad-orientation");
+        Assert.Equal("Landscape", stored.Orientation);
+    }
+
+    [Fact]
+    public async Task GetGridAsync_FiltersByOrientationCaseInsensitiveExactMatch()
+    {
+        await SeedAdvertisementAsync("ad-any", "Any ad", true, "Image", Array.Empty<string>(),
+            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), "Any");
+        await SeedAdvertisementAsync("ad-portrait", "Portrait ad", true, "Image", Array.Empty<string>(),
+            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), "Portrait");
+        await SeedAdvertisementAsync("ad-landscape", "Landscape ad", true, "Image", Array.Empty<string>(),
+            new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), "Landscape");
+        var service = CreateService();
+
+        var simple = await service.GetGridAsync(new AdvertisementGridRequestDto
+        {
+            StartRow = 0,
+            PageSize = 20,
+            Orientation = " PORTRAIT ",
+        });
+        Assert.Equal(new[] { "ad-portrait" }, simple.Items!.Select(item => item.Id).ToArray());
+        Assert.Equal("Portrait", simple.Items![0].Orientation);
+
+        var unfiltered = await service.GetGridAsync(new AdvertisementGridRequestDto
+        {
+            StartRow = 0,
+            PageSize = 20,
+            Orientation = "",
+        });
+        Assert.Equal(3, unfiltered.Items!.Count);
+
+        // 无法识别的取值不放宽过滤：结果为空。
+        var unknown = await service.GetGridAsync(new AdvertisementGridRequestDto
+        {
+            StartRow = 0,
+            PageSize = 20,
+            Orientation = "Square",
+        });
+        Assert.Empty(unknown.Items!);
+
+        var filterModel = await service.GetGridAsync(new AdvertisementGridRequestDto
+        {
+            StartRow = 0,
+            PageSize = 20,
+            FilterModel = new Dictionary<string, FilterModelDto>
+            {
+                ["orientation"] = new()
+                {
+                    FilterType = "set",
+                    Values = new List<string> { "landscape", "any" },
+                },
+            },
+        });
+        Assert.Equal(
+            new[] { "ad-any", "ad-landscape" },
+            filterModel.Items!.Select(item => item.Id).OrderBy(id => id, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public void AdvertisementDtos_SerializeOrientationAndMediaSizeAsCamelCase()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new AdvertisementDetailDto { Orientation = "Portrait", MediaWidth = 1080, MediaHeight = 1920 },
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"orientation\":\"Portrait\"", json);
+        Assert.Contains("\"mediaWidth\":1080", json);
+        Assert.Contains("\"mediaHeight\":1920", json);
+    }
+
     public void Dispose()
     {
         _db.Dispose();
@@ -478,12 +674,14 @@ public sealed class AdvertisementReactServiceTests : IDisposable
         string mediaType,
         string[] storeCodes,
         DateTime effectiveStart,
-        DateTime effectiveEnd
+        DateTime effectiveEnd,
+        string orientation = "Any"
     )
     {
         await _db.Insertable(
             new Advertisement
             {
+                Orientation = orientation,
                 Id = id,
                 Title = title,
                 Description = title,
@@ -518,6 +716,47 @@ public sealed class AdvertisementReactServiceTests : IDisposable
                 IsDeleted = false,
             }).ToList()
         ).ExecuteCommandAsync();
+    }
+
+    private static CreateAdvertisementDto CreateValidDto(string objectKey)
+    {
+        return new CreateAdvertisementDto
+        {
+            Title = "Orientation",
+            Description = "Orientation",
+            MediaType = "Image",
+            MediaUrl = "https://cdn.example.com/file.jpg",
+            ObjectKey = objectKey,
+            OriginalFileName = "file.jpg",
+            ContentType = "image/jpeg",
+            FileSize = 1024,
+            EffectiveStart = new DateTime(2026, 5, 1),
+            EffectiveEnd = new DateTime(2026, 5, 31),
+            IsEnabled = true,
+            SortOrder = 1,
+            Stores = new List<AdvertisementStoreItemDto> { new() { StoreCode = "S01" } },
+        };
+    }
+
+    private static UpdateAdvertisementDto CreateValidUpdateDto(string objectKey)
+    {
+        var source = CreateValidDto(objectKey);
+        return new UpdateAdvertisementDto
+        {
+            Title = source.Title,
+            Description = source.Description,
+            MediaType = source.MediaType,
+            MediaUrl = source.MediaUrl,
+            ObjectKey = source.ObjectKey,
+            OriginalFileName = source.OriginalFileName,
+            ContentType = source.ContentType,
+            FileSize = source.FileSize,
+            EffectiveStart = source.EffectiveStart,
+            EffectiveEnd = source.EffectiveEnd,
+            IsEnabled = source.IsEnabled,
+            SortOrder = source.SortOrder,
+            Stores = source.Stores,
+        };
     }
 
     private static SqlSugarContext CreateSqlSugarContext(ISqlSugarClient db)
