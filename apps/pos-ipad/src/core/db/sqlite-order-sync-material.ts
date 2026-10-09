@@ -82,7 +82,8 @@ export class SqliteOrderSyncMaterialResolver {
         attempt.session_id,
         attempt.txn_ref,
         attempt.rfn,
-        attempt.provider_response_code
+        attempt.provider_response_code,
+        attempt.provider_environment
        FROM order_tenders tender
        LEFT JOIN payment_attempts attempt
          ON attempt.attempt_id = tender.payment_attempt_id
@@ -197,7 +198,8 @@ export class SqliteOrderSyncMaterialResolver {
         attempt.session_id,
         attempt.txn_ref,
         attempt.rfn,
-        attempt.provider_response_code
+        attempt.provider_response_code,
+        attempt.provider_environment
        FROM order_tenders tender
        LEFT JOIN payment_attempts attempt
          ON attempt.attempt_id = tender.payment_attempt_id
@@ -578,7 +580,12 @@ export class SqliteOrderSyncMaterialResolver {
     order: LocalOrder,
     linklyEnvironmentInput: string | null,
   ): Promise<OrderTender> {
-    const linklyEnvironment = environment(linklyEnvironmentInput);
+    // 上传引用里的环境必须是该笔交易实际发生的环境：用 attempt 冻结的 provider_environment，
+    // 而不是同步时的当前配置——切换 Sandbox/Production 后，旧订单的 Linkly 引用不能被改写成另一个环境。
+    // 只有历史 NULL 记录才退回当前配置。
+    const linklyEnvironment = environment(
+      attempt.providerEnvironment ?? linklyEnvironmentInput,
+    );
     if (
       tender.method !== "card" ||
       attempt.provider !== "linkly-cloud" ||
@@ -1204,6 +1211,7 @@ type TenderAttemptRow = Readonly<{
   txn_ref: unknown;
   rfn: unknown;
   provider_response_code: unknown;
+  provider_environment: unknown;
 }>;
 
 type ReversalMemberRow = Readonly<{
@@ -1423,6 +1431,8 @@ type ApprovedAttempt = Readonly<{
   txnRef: string | null;
   rfn: string | null;
   responseCode: string | null;
+  /** attempt 首次提交前冻结的 provider 环境；历史记录可能为 NULL。 */
+  providerEnvironment: string | null;
 }>;
 
 function readApprovedAttempt(
@@ -1478,6 +1488,9 @@ function readApprovedAttempt(
     rfn: persistedNullableProviderPart(row.rfn),
     responseCode: persistedNullableProviderPart(
       row.provider_response_code,
+    ),
+    providerEnvironment: persistedNullableProviderPart(
+      row.provider_environment,
     ),
   };
 }
