@@ -413,6 +413,16 @@ public interface ILocalCardPaymentAttemptRepository
         string environment,
         CancellationToken cancellationToken = default);
 
+    // 分期（Create/Repayment）卡 attempt 由分期操作自己的恢复流程负责，不进入异常中心队列。
+    // 这里只列出同一终端/环境下尚未向后端确认的那部分，供活动会话接管按 SessionId/TxnRef 精确认领：
+    // 否则分期遗留的未确认会话会被接管成来源不明的 ActiveSession 待复核记录，分期操作却仍找不回自己的会话。
+    Task<IReadOnlyList<LocalCardPaymentAttempt>> GetUnacknowledgedInstallmentAttemptsAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<LocalCardPaymentAttempt>>([]);
+
     Task<IReadOnlyList<LocalCardPaymentAttempt>> GetRecentAttemptsAsync(
         string storeCode, string deviceCode, string environment,
         CancellationToken cancellationToken = default) =>
@@ -2030,6 +2040,31 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
             attempts.Add(ReadAttempt(reader));
         }
 
+        return attempts;
+    }
+
+    public async Task<IReadOnlyList<LocalCardPaymentAttempt>> GetUnacknowledgedInstallmentAttemptsAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM LocalCardPaymentAttempts
+            WHERE StoreCode = $StoreCode AND DeviceCode = $DeviceCode AND Environment = $Environment
+              AND OperationKind IN ('Create', 'Repayment')
+              AND AcknowledgedAt IS NULL
+              AND TxnRef IS NOT NULL
+            ORDER BY UpdatedAt DESC, CreatedAt DESC LIMIT 50;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", storeCode);
+        command.Parameters.AddWithValue("$DeviceCode", deviceCode);
+        command.Parameters.AddWithValue("$Environment", environment);
+        var attempts = new List<LocalCardPaymentAttempt>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) attempts.Add(ReadAttempt(reader));
         return attempts;
     }
 

@@ -3394,6 +3394,33 @@ public sealed class CashPaymentWorkflowService(
 
                 return txnMatches[0];
             }
+
+            // 分期付款/还款的 attempt 不在异常中心的未结队列里（它们由分期自己的恢复流程处理）。
+            // 后端模式下分期的 TxnRef 在发请求前就由 attempt 身份派生，这里按它精确认领遗留会话，
+            // 让接管把会话终态落到分期自己的 attempt 上，而不是另建一条来源不明的 ActiveSession。
+            var installmentAttempts = await RunLocalStoreAsync(
+                () => cardPaymentAttemptRepository!.GetUnacknowledgedInstallmentAttemptsAsync(
+                    session.StoreCode,
+                    session.DeviceCode,
+                    settings.Environment.ToString(),
+                    CancellationToken.None),
+                CancellationToken.None);
+            var installmentMatches = installmentAttempts
+                .Where(candidate =>
+                    string.Equals(NormalizeOptional(candidate.TxnRef), normalizedTxnRef, StringComparison.Ordinal) &&
+                    (string.IsNullOrWhiteSpace(candidate.SessionId) ||
+                     string.Equals(NormalizeOptional(candidate.SessionId), normalizedSessionId, StringComparison.Ordinal)))
+                .Take(2)
+                .ToArray();
+            if (installmentMatches.Length > 1)
+            {
+                throw new InvalidOperationException("Multiple installment Linkly attempts match the active TxnRef.");
+            }
+
+            if (installmentMatches.Length == 1)
+            {
+                return installmentMatches[0];
+            }
         }
 
         var now = DateTimeOffset.UtcNow;

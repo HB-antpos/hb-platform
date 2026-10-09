@@ -1066,6 +1066,49 @@ public sealed class LocalCardPaymentAttemptRepositoryTests
     }
 
     [Fact]
+    public async Task GetUnacknowledgedInstallmentAttemptsAsync_returns_only_unacknowledged_installment_attempts_with_a_txn_ref_in_scope()
+    {
+        var databasePath = CreateTempDatabasePath();
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var repository = new LocalCardPaymentAttemptRepository(store);
+            var included = new[]
+            {
+                CreateAttempt(Guid.NewGuid(), txnRef: "PINSTALLMENT0001", operationKind: "Create"),
+                CreateAttempt(Guid.NewGuid(), txnRef: "PINSTALLMENT0002", operationKind: "Repayment", sessionId: "SESSION-1")
+            };
+            LocalCardPaymentAttempt[] excluded =
+            [
+                CreateAttempt(Guid.NewGuid(), txnRef: "PINSTALLMENT0003", operationKind: "Repayment", acknowledgedAt: DateTimeOffset.UtcNow),
+                CreateAttempt(Guid.NewGuid(), txnRef: null, operationKind: "Repayment"),
+                CreateAttempt(Guid.NewGuid(), txnRef: "PSALE000000000001", operationKind: "Sale"),
+                CreateAttempt(Guid.NewGuid(), txnRef: "PINSTALLMENT0004", operationKind: "Repayment", storeCode: "OTHER"),
+                CreateAttempt(Guid.NewGuid(), txnRef: "PINSTALLMENT0005", operationKind: "Repayment", deviceCode: "OTHER"),
+                CreateAttempt(Guid.NewGuid(), txnRef: "PINSTALLMENT0006", operationKind: "Repayment", environment: "Production")
+            ];
+            foreach (var attempt in included.Concat(excluded))
+            {
+                await repository.CreateAsync(attempt);
+            }
+
+            var result = await repository.GetUnacknowledgedInstallmentAttemptsAsync("S001", "POS-01", "sandbox");
+
+            Assert.Equal(
+                included.Select(attempt => attempt.AttemptGuid).Order(),
+                result.Select(attempt => attempt.AttemptGuid).Order());
+            // 分期 attempt 不进入异常中心队列：队列里只剩范围内那条销售。
+            var queue = await repository.GetOpenAttemptsAsync("S001", "POS-01", "sandbox");
+            Assert.Equal("Sale", Assert.Single(queue).OperationKind);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task Linkly_GetOpenAttemptsAsync_returns_all_open_sale_refund_and_active_session_attempts_across_cashiers()
     {
         var databasePath = CreateTempDatabasePath();
