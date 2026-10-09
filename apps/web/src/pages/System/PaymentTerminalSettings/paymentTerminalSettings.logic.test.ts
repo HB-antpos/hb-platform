@@ -321,6 +321,29 @@ const disabledConflictChecklist = buildLinklyActivationChecklist({
 })
 assertEqual(disabledConflictChecklist.conflicts.length, 0, 'disabled POS selections do not block activation')
 
+// 历史明文终端（hasPassword=false）即使没被任何 POS 选中，后端激活闸门也会拒绝；清单必须点名并阻止启用。
+const legacyPlaintextTerminal = {
+  ...unpairedTerminal,
+  hasPassword: false,
+}
+const legacyUnselected = {
+  ...activationBase,
+  terminals: [...activationBase.terminals, legacyPlaintextTerminal],
+}
+assertEqual(
+  canActivateLinklyConfiguration(legacyUnselected),
+  false,
+  'an unused terminal without a protected password blocks activation like the backend gate',
+)
+const legacyChecklist = buildLinklyActivationChecklist(legacyUnselected)
+assertEqual(legacyChecklist.canActivate, false, 'checklist shares the credential gate')
+assertEqual(
+  legacyChecklist.missingCredentialTerminals.map((terminal) => terminal.displayName).join(','),
+  'Back Counter',
+  'checklist names the terminal that needs its password re-entered',
+)
+assertEqual(readyChecklist.missingCredentialTerminals.length, 0, 'complete credentials add no blocking item')
+
 const orphanManagement = {
   ...activationBase,
   devices: [
