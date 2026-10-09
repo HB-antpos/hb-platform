@@ -312,7 +312,11 @@ namespace Hbpos.Api.Tests;
             "S01", "POS-01", "Sandbox", terminalId, 9, CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.RequestTimeout, response.HttpStatus);
+        // 结果不明仍保护终端，但租约已缩短为检测类短租约（M10），不再保留覆盖整次往返的 9 分钟。
         Assert.NotNull(leaseState.LeaseId);
+        Assert.Equal(1, terminalService.ShortenedLeaseCalls);
+        Assert.True(leaseState.ExpiresAt > DateTime.UtcNow);
+        Assert.True(leaseState.ExpiresAt <= DateTime.UtcNow + LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration);
     }
 
     [Fact]
@@ -358,9 +362,14 @@ namespace Hbpos.Api.Tests;
 
         await firstService.RunStatusTestAsync(
             "S01", "POS-01", "Sandbox", terminalId, 9, CancellationToken.None);
-        await Assert.ThrowsAsync<LinklyCloudBackendActiveTransactionException>(() =>
+        var blocked = await Assert.ThrowsAsync<LinklyCloudTerminalProbingException>(() =>
             secondService.RunStatusTestAsync(
                 "S01", "POS-02", "Sandbox", terminalId, 9, CancellationToken.None));
+        // 剩余秒数落在检测类短租约内，而不是 9 分钟交易租约。
+        Assert.InRange(
+            blocked.RetryAfterSeconds,
+            1,
+            (int)LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration.TotalSeconds);
         Assert.Null(secondTransport.LastStatus);
 
         leaseState.ExpiresAt = DateTime.UtcNow.AddTicks(-1);
@@ -394,13 +403,19 @@ namespace Hbpos.Api.Tests;
             repository: repository,
             terminalService: terminalService);
 
-        await Assert.ThrowsAsync<LinklyCloudBackendActiveTransactionException>(() =>
+        // 付款被检测类租约挡住时必须是专用错误码 + 剩余秒数，而不是“有未完成交易”（M10）。
+        var blocked = await Assert.ThrowsAsync<LinklyCloudTerminalProbingException>(() =>
             service.StartTransactionAsync(
                 "S01",
                 "POS-01",
                 new LinklyCloudBackendTransactionRequest("Sandbox", "P", 1000, null, terminalId, 9),
                 CancellationToken.None));
 
+        Assert.InRange(
+            blocked.RetryAfterSeconds,
+            1,
+            (int)LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration.TotalSeconds);
+        Assert.IsAssignableFrom<LinklyCloudBackendActiveTransactionException>(blocked);
         Assert.Null(transport.LastTransaction);
     }
 
@@ -2403,42 +2418,6 @@ namespace Hbpos.Api.Tests;
     }
 
     [Fact]
-    public async Task Late_linkly_final_result_replaces_supervisor_resolved_marker_and_stays_final()
-    {
-        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
-        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
-        {
-            Environment = "Sandbox",
-            StoreCode = "S01",
-            DeviceCode = "POS-01",
-            SessionId = "late-final-session",
-            Status = "Pending",
-            TxnRef = "TXN-LATE",
-            IsActive = true,
-            UpdatedAt = DateTimeOffset.UtcNow
-        }, CancellationToken.None);
-        await service.AcknowledgeSessionAsync(
-            "S01", "POS-01", "Sandbox", "late-final-session", supervisorResolved: true, CancellationToken.None);
-
-        await service.ReceiveNotificationAsync(
-            "Sandbox",
-            "late-final-session",
-            "transaction",
-            "Bearer sandbox-notify",
-            JsonDocument.Parse("""{ "Response": { "Success": false, "ResponseCode": "05", "ResponseText": "DECLINED", "TxnRef": "TXN-LATE" } }""").RootElement,
-            CancellationToken.None);
-        var persisted = await service.Repository.GetSessionAsync(
-            "Sandbox", "S01", "POS-01", "late-final-session", CancellationToken.None);
-
-        // Linkly 的真实终态优先于主管结案标记；两者都是终态，不会重新挡住付款或终端管理。
-        Assert.NotNull(persisted);
-        Assert.Equal("Completed", persisted.Status);
-        Assert.Equal("05", persisted.ResponseCode);
-        Assert.False(persisted.IsActive);
-        Assert.NotNull(persisted.ClientAcknowledgedAt);
-    }
-
-    [Fact]
     public async Task Recovery_service_operations_write_certification_evidence_json()
     {
         var logger = new RecordingLogger<LinklyCloudBackendAsyncService>();
@@ -4323,6 +4302,999 @@ namespace Hbpos.Api.Tests;
         Assert.Contains("APPROVE WITH SIG - 08", afterMark.ReceiptText, StringComparison.Ordinal);
     }
 
+    // ---- 状态查询 / 恢复 GET：未列出的 4xx 保持“结果未知”，不得写成 Failed ----
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task GetStatusAsync_keeps_session_pending_when_official_get_returns_unlisted_client_error(
+        HttpStatusCode statusCode)
+    {
+        // 官方文档：GET 400 是我方请求格式错误，不代表交易未成功。此前它落入 ApplyTransportResponse 兜底分支
+        // 被写成 Failed + IsActive=false，WPF 据此 ack 释放终端，已批准的交易会被重刷成重复扣款。
+        var sessionId = Guid.NewGuid().ToString("D");
+        var logger = new RecordingLogger<LinklyCloudBackendAsyncService>();
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.Accepted,
+            getTransactionStatusCode: statusCode);
+        var service = CreateService(transport, logger: logger);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+
+        Assert.NotNull(response);
+        Assert.Equal("Pending", response!.Status);
+        Assert.Null(response.TransactionSuccess);
+        Assert.Null(response.RecoveryAction);
+        Assert.Null(response.ClientAcknowledgedAt);
+        Assert.Equal((int)statusCode, response.LastHttpStatus);
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+        Assert.NotNull(persisted);
+        Assert.True(persisted!.IsActive);
+        Assert.Equal(1, persisted.OfficialQueryRejectCount);
+        // 终端仍被这笔结果未知的交易占用，不会被当成可放行的终态。
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+        Assert.Contains(
+            logger.Entries,
+            entry => entry.Level == LogLevel.Warning && entry.Message.Contains("unlisted status", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task RecoverAsync_keeps_session_pending_when_official_get_returns_unlisted_client_error(
+        HttpStatusCode statusCode)
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(statusCode));
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.RecoverAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendRecoverRequest("Sandbox"), CancellationToken.None);
+
+        Assert.Equal("Pending", response.Status);
+        Assert.Null(response.RecoveryAction);
+        Assert.Equal((int)statusCode, response.LastHttpStatus);
+        Assert.Equal(1, response.RecoveryCount);
+        Assert.Null(response.TransactionSuccess);
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "NotSubmitted", false)]
+    [InlineData(HttpStatusCode.Unauthorized, "TokenRefreshRequired", true)]
+    [InlineData(HttpStatusCode.Forbidden, "TokenRefreshRequired", true)]
+    [InlineData(HttpStatusCode.RequestTimeout, "Pending", true)]
+    [InlineData(HttpStatusCode.TooManyRequests, "Pending", true)]
+    [InlineData(HttpStatusCode.BadGateway, "Pending", true)]
+    public async Task GetStatusAsync_keeps_documented_status_mappings_for_official_get(
+        HttpStatusCode statusCode,
+        string expectedStatus,
+        bool expectedActive)
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.Accepted,
+            getTransactionStatusCode: statusCode));
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+
+        Assert.Equal(expectedStatus, response!.Status);
+        Assert.Equal(expectedActive, persisted!.IsActive);
+        Assert.Equal(0, persisted.OfficialQueryRejectCount);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_stops_polling_linkly_after_repeated_unlisted_client_errors()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.Accepted,
+            getTransactionStatusCode: HttpStatusCode.BadRequest);
+        var service = CreateService(transport);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        LinklyCloudBackendSessionResponse? last = null;
+        for (var i = 0; i < 25; i++)
+        {
+            last = await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+        }
+
+        // 有上限：达到上限后不再向 Linkly 空转，但会话仍是 Pending（结果未知），既不是 Failed 也没有被释放。
+        Assert.Equal(10, transport.GetTransactionCallCount);
+        Assert.Equal("Pending", last!.Status);
+        Assert.Equal(400, last.LastHttpStatus);
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_resets_unlisted_error_counter_when_linkly_answers_normally()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.Accepted,
+            getTransactionStatusCode: HttpStatusCode.BadRequest);
+        var service = CreateService(transport);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+        }
+
+        transport.GetTransactionStatusCodeOverride = HttpStatusCode.Accepted;
+        await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+
+        Assert.Equal(0, persisted!.OfficialQueryRejectCount);
+    }
+
+    [Theory]
+    [InlineData("Completed")]
+    [InlineData("NotSubmitted")]
+    [InlineData("Failed")]
+    public async Task RecoverAsync_unlisted_client_error_never_reactivates_a_final_session(string finalStatus)
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.BadRequest));
+        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = sessionId,
+            Status = finalStatus,
+            TxnRef = "TXN-FINAL",
+            TransactionSuccess = finalStatus == "Completed" ? true : null,
+            ResponseCode = finalStatus == "Completed" ? "00" : null,
+            IsActive = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+
+        var response = await service.RecoverAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendRecoverRequest("Sandbox"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+
+        Assert.Equal(finalStatus, response.Status);
+        Assert.False(persisted!.IsActive);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task StartTransactionAsync_post_client_error_is_still_a_definite_failure(HttpStatusCode statusCode)
+    {
+        // POST 创建阶段的 4xx 表示请求被拒绝、交易没有执行，仍可判 Failed（与 GET 状态/恢复路径不同）。
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(statusCode));
+
+        var response = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateTransactionRequest(), CancellationToken.None);
+
+        Assert.Equal("Failed", response.Status);
+        Assert.Equal((int)statusCode, response.LastHttpStatus);
+    }
+
+    // ---- sendkey：M2 / H3 ----
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task SendKeyAsync_keeps_in_flight_session_pending_for_non_400_client_errors(HttpStatusCode statusCode)
+    {
+        // 点 Cancel 时顾客恰好刷卡获批，Linkly 对 sendkey 返回 404：被拒绝的只是这次按键，
+        // 在途交易不能被写成 NotSubmitted/Failed，否则收银员重刷就是重复扣款。
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(statusCode));
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.SendKeyAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendSendKeyRequest("Sandbox", "OK", null), CancellationToken.None);
+
+        Assert.Equal("Pending", response.Status);
+        Assert.Null(response.RecoveryAction);
+        Assert.Equal((int)statusCode, response.LastHttpStatus);
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("""{ "SessionId": "abc", "Response": null }""")]
+    [InlineData("not json")]
+    public async Task SendKeyAsync_200_without_transaction_result_keeps_session_pending(string? body)
+    {
+        // sendkey 200 只说明按键被接受，不是交易结果；此前无条件写成缺少结果的 Completed（H3）。
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.OK, body));
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.SendKeyAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendSendKeyRequest("Sandbox", "OK", null), CancellationToken.None);
+
+        Assert.Equal("Pending", response.Status);
+        Assert.Null(response.TransactionSuccess);
+        Assert.Null(response.ResponseCode);
+        Assert.Equal(200, response.LastHttpStatus);
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SendKeyAsync_200_with_explicit_transaction_result_completes_the_session()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.OK,
+            """{ "Response": { "Success": false, "ResponseCode": "05", "ResponseText": "DECLINED" } }"""));
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.SendKeyAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendSendKeyRequest("Sandbox", "OK", null), CancellationToken.None);
+
+        Assert.Equal("Completed", response.Status);
+        Assert.False(response.TransactionSuccess);
+        Assert.Equal("05", response.ResponseCode);
+    }
+
+    [Fact]
+    public async Task Approval_callback_after_sendkey_200_still_records_the_response_code()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.OK));
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+        await service.SendKeyAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendSendKeyRequest("Sandbox", "OK", null), CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", sessionId, "transaction", "Bearer sandbox-notify",
+            CallbackPayload(true, "00", "APPROVED", "TXN-SENDKEY"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+
+        Assert.Equal("Completed", persisted!.Status);
+        Assert.True(persisted.TransactionSuccess);
+        Assert.Equal("00", persisted.ResponseCode);
+        Assert.Null(persisted.LateFinalAt);
+    }
+
+    [Fact]
+    public async Task Approval_callback_fills_response_code_of_a_completed_session_that_has_no_result_yet()
+    {
+        // 已落库的“缺少结果的 Completed”（旧版本 sendkey 200 的遗留）也必须允许回调补写 ResponseCode：
+        // InMemory 仓储与 SQL MERGE 共用同一套保护谓词，此前 InMemory 放行而 SQL 把 NULL <> '00' 当冲突拦掉。
+        var sessionId = Guid.NewGuid().ToString("D");
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = sessionId,
+            Status = "Completed",
+            TxnRef = "TXN-NORESULT",
+            IsActive = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", sessionId, "transaction", "Bearer sandbox-notify",
+            CallbackPayload(true, "00", "APPROVED", "TXN-NORESULT"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+
+        Assert.Equal("00", persisted!.ResponseCode);
+        Assert.Equal("APPROVED", persisted.ResponseText);
+        Assert.True(persisted.TransactionSuccess);
+        Assert.Null(persisted.LateFinalAt);
+    }
+
+    [Theory]
+    [InlineData(null, null, null, "00", "APPROVED", true, false)]
+    [InlineData("00", "APPROVED", true, "00", "APPROVED", true, false)]
+    [InlineData("00", "APPROVED", true, "05", "DECLINED", false, true)]
+    [InlineData("05", "DECLINED", false, "00", "APPROVED", true, true)]
+    [InlineData("00", null, true, "00", "APPROVED", true, false)]
+    [InlineData("00", "APPROVED", true, null, null, null, true)]
+    public void Write_guard_only_protects_result_evidence_that_already_exists(
+        string? existingCode,
+        string? existingText,
+        bool? existingSuccess,
+        string? incomingCode,
+        string? incomingText,
+        bool? incomingSuccess,
+        bool expectedRejected)
+    {
+        var existing = new LinklyCloudBackendSessionRecord
+        {
+            Status = "Completed",
+            TxnRef = "TXN-1",
+            ResponseCode = existingCode,
+            ResponseText = existingText,
+            TransactionSuccess = existingSuccess
+        };
+        var incoming = new LinklyCloudBackendSessionRecord
+        {
+            Status = "Completed",
+            TxnRef = "TXN-1",
+            ResponseCode = incomingCode,
+            ResponseText = incomingText,
+            TransactionSuccess = incomingSuccess
+        };
+
+        Assert.Equal(expectedRejected, LinklyCloudBackendSessionWriteGuard.ShouldRejectWrite(existing, incoming));
+    }
+
+    // ---- H1：迟到的最终结果不得静默覆盖已结案 / 已 ack 的会话 ----
+
+    [Theory]
+    [InlineData(false, "05", "DECLINED")]
+    [InlineData(true, "00", "APPROVED")]
+    public async Task Late_final_result_after_supervisor_resolution_is_recorded_aside_and_never_overwrites(
+        bool lateSuccess,
+        string lateCode,
+        string lateText)
+    {
+        var logger = new RecordingLogger<LinklyCloudBackendAsyncService>();
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted), logger: logger);
+        await SeedPendingSessionAsync(service.Repository, "late-final-session");
+        await service.AcknowledgeSessionAsync(
+            "S01", "POS-01", "Sandbox", "late-final-session", supervisorResolved: true, CancellationToken.None);
+        var acknowledgedAt = (await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "late-final-session", CancellationToken.None))!.ClientAcknowledgedAt;
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "late-final-session", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(lateSuccess, lateCode, lateText, "TXN-SENDKEY"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "late-final-session", CancellationToken.None);
+
+        // 主管的结案标记与 ack 状态原样保留；迟到结果只进入独立字段。
+        Assert.NotNull(persisted);
+        Assert.Equal("SupervisorResolved", persisted!.Status);
+        Assert.False(persisted.IsActive);
+        Assert.Equal(acknowledgedAt, persisted.ClientAcknowledgedAt);
+        Assert.Null(persisted.ResponseCode);
+        Assert.Null(persisted.TransactionSuccess);
+        Assert.NotNull(persisted.LateFinalAt);
+        Assert.Equal(lateSuccess, persisted.LateFinalTransactionSuccess);
+        Assert.Equal(lateCode, persisted.LateFinalResponseCode);
+        Assert.Equal(lateText, persisted.LateFinalResponseText);
+        Assert.Contains(
+            logger.Entries,
+            entry => entry.Level == LogLevel.Warning &&
+                entry.Message.Contains("late final result", StringComparison.OrdinalIgnoreCase) &&
+                entry.Message.Contains("late-final-session", StringComparison.Ordinal));
+
+        // 对外：Status 仍是 SupervisorResolved，迟到结果通过 LateFinalResult 暴露给恢复中心核对。
+        var status = await service.GetStatusAsync("S01", "POS-01", "Sandbox", "late-final-session", CancellationToken.None);
+        Assert.Equal("SupervisorResolved", status!.Status);
+        Assert.NotNull(status.LateFinalResult);
+        Assert.Equal(lateCode, status.LateFinalResult!.ResponseCode);
+        Assert.Equal(lateSuccess, status.LateFinalResult.TransactionSuccess);
+    }
+
+    [Theory]
+    [InlineData("Failed")]
+    [InlineData("NotSubmitted")]
+    public async Task Late_final_result_after_acknowledged_failure_is_recorded_aside(string status)
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = "acked-failure",
+            Status = status,
+            TxnRef = "TXN-ACKED",
+            IsActive = false,
+            ClientAcknowledgedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        }, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "acked-failure", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(true, "00", "APPROVED", "TXN-ACKED"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "acked-failure", CancellationToken.None);
+
+        Assert.Equal(status, persisted!.Status);
+        Assert.Null(persisted.ResponseCode);
+        Assert.NotNull(persisted.ClientAcknowledgedAt);
+        Assert.Equal("00", persisted.LateFinalResponseCode);
+        Assert.True(persisted.LateFinalTransactionSuccess);
+    }
+
+    [Fact]
+    public async Task Unacknowledged_failed_session_still_accepts_the_real_final_result()
+    {
+        // 未 ack 的 Failed/NotSubmitted 客户端还没据此行动，真实的 Linkly 结果仍应覆盖它（原有行为）。
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = "open-failure",
+            Status = "Failed",
+            TxnRef = "TXN-OPEN",
+            IsActive = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "open-failure", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(true, "00", "APPROVED", "TXN-OPEN"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "open-failure", CancellationToken.None);
+
+        Assert.Equal("Completed", persisted!.Status);
+        Assert.Equal("00", persisted.ResponseCode);
+        Assert.Null(persisted.LateFinalAt);
+    }
+
+    [Fact]
+    public async Task Conflicting_callback_after_a_completed_result_is_recorded_aside_and_keeps_the_original()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = "completed-conflict",
+            Status = "Completed",
+            TxnRef = "TXN-CONFLICT",
+            TransactionSuccess = true,
+            ResponseCode = "00",
+            ResponseText = "APPROVED",
+            IsActive = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "completed-conflict", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(false, "05", "DECLINED", "TXN-CONFLICT"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "completed-conflict", CancellationToken.None);
+
+        Assert.Equal("Completed", persisted!.Status);
+        Assert.Equal("00", persisted.ResponseCode);
+        Assert.True(persisted.TransactionSuccess);
+        Assert.Equal("05", persisted.LateFinalResponseCode);
+    }
+
+    [Fact]
+    public async Task Late_final_result_keeps_the_first_recorded_value()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedPendingSessionAsync(service.Repository, "first-wins");
+        await service.AcknowledgeSessionAsync(
+            "S01", "POS-01", "Sandbox", "first-wins", supervisorResolved: true, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "first-wins", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(true, "00", "APPROVED", "TXN-SENDKEY"), CancellationToken.None);
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "first-wins", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(false, "05", "DECLINED", "TXN-SENDKEY"), CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "first-wins", CancellationToken.None);
+
+        Assert.Equal("00", persisted!.LateFinalResponseCode);
+        Assert.True(persisted.LateFinalTransactionSuccess);
+    }
+
+    [Fact]
+    public async Task Late_final_result_from_recover_after_supervisor_resolution_is_recorded_aside()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.OK,
+            """{ "Response": { "Success": true, "ResponseCode": "00", "ResponseText": "APPROVED" } }"""));
+        await SeedPendingSessionAsync(service.Repository, "recover-late");
+        await service.AcknowledgeSessionAsync(
+            "S01", "POS-01", "Sandbox", "recover-late", supervisorResolved: true, CancellationToken.None);
+
+        var response = await service.RecoverAsync(
+            "S01", "POS-01", "recover-late", new LinklyCloudBackendRecoverRequest("Sandbox"), CancellationToken.None);
+
+        Assert.Equal("SupervisorResolved", response.Status);
+        Assert.Null(response.ResponseCode);
+        Assert.NotNull(response.LateFinalResult);
+        Assert.Equal("00", response.LateFinalResult!.ResponseCode);
+    }
+
+    [Fact]
+    public async Task Receipt_and_display_callbacks_still_update_a_supervisor_resolved_session()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedPendingSessionAsync(service.Repository, "resolved-receipt");
+        await service.AcknowledgeSessionAsync(
+            "S01", "POS-01", "Sandbox", "resolved-receipt", supervisorResolved: true, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "resolved-receipt", "receipt", "Bearer sandbox-notify",
+            JsonDocument.Parse("""{ "ReceiptText": "CUSTOMER COPY" }""").RootElement, CancellationToken.None);
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "resolved-receipt", CancellationToken.None);
+
+        Assert.Equal("SupervisorResolved", persisted!.Status);
+        Assert.Contains("CUSTOMER COPY", persisted.ReceiptText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Stale_write_cannot_reactivate_or_restate_a_supervisor_resolved_session()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedPendingSessionAsync(service.Repository, "stale-write");
+        await service.AcknowledgeSessionAsync(
+            "S01", "POS-01", "Sandbox", "stale-write", supervisorResolved: true, CancellationToken.None);
+
+        // 主管 ack 之前就读到的旧快照（Pending + 活动）在 ack 之后才写回。
+        await SeedPendingSessionAsync(service.Repository, "stale-write");
+        var persisted = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-write", CancellationToken.None);
+
+        Assert.Equal("SupervisorResolved", persisted!.Status);
+        Assert.False(persisted.IsActive);
+        Assert.NotNull(persisted.ClientAcknowledgedAt);
+    }
+
+    // ---- M1 / M9：token 缓存、瞬时错误、secret 失效 ----
+
+    [Fact]
+    public async Task GetStatusAsync_returns_recoverable_pending_when_token_endpoint_is_rate_limited()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider
+        {
+            Failure = new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.TooManyRequests, "throttled")
+        };
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport, tokenProvider);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        // 高峰期认证端偶发 429：不能向 WPF 抛 400/500 让它立即判为结果未知。
+        var response = await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+
+        Assert.Equal("Pending", response!.Status);
+        Assert.Equal("Retry", response.RecoveryAction);
+        Assert.Equal(429, response.LastHttpStatus);
+        Assert.Equal(0, transport.GetTransactionCallCount);
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_returns_recoverable_pending_when_token_endpoint_is_unreachable()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider
+        {
+            Failure = new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.RequestTimeout, "unreachable")
+        };
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted), tokenProvider);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+
+        Assert.Equal("Pending", response!.Status);
+        Assert.Equal("Retry", response.RecoveryAction);
+        Assert.Equal(408, response.LastHttpStatus);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_returns_recoverable_pending_when_token_endpoint_is_unavailable()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider
+        {
+            Failure = new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.BadGateway, "bad gateway")
+        };
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted), tokenProvider);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        var response = await service.RecoverAsync(
+            "S01", "POS-01", sessionId, new LinklyCloudBackendRecoverRequest("Sandbox"), CancellationToken.None);
+
+        Assert.Equal("Pending", response.Status);
+        Assert.Equal("Retry", response.RecoveryAction);
+        Assert.Equal(1, response.RecoveryCount);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_does_not_touch_a_completed_session_when_token_endpoint_is_unavailable()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider
+        {
+            Failure = new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.TooManyRequests, "throttled")
+        };
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted), tokenProvider);
+        await service.Repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = sessionId,
+            Status = "Completed",
+            TxnRef = "TXN-DONE",
+            ResponseCode = "00",
+            IsActive = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+
+        var response = await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+
+        Assert.Equal("Completed", response!.Status);
+        Assert.Equal("00", response.ResponseCode);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_propagates_repair_required_when_terminal_secret_is_rejected()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider
+        {
+            Failure = new LinklyCloudTerminalRepairRequiredException(HttpStatusCode.Unauthorized)
+        };
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted), tokenProvider);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        await Assert.ThrowsAsync<LinklyCloudTerminalRepairRequiredException>(() =>
+            service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None));
+
+        // 会话状态不被改写：secret 失效不代表交易失败。
+        var persisted = await service.Repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+        Assert.Equal("Pending", persisted!.Status);
+        Assert.True(persisted.IsActive);
+    }
+
+    [Fact]
+    public async Task StartTransactionAsync_token_unavailable_leaves_no_session_behind()
+    {
+        var tokenProvider = new ScriptedTokenProvider
+        {
+            Failure = new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.ServiceUnavailable, "down")
+        };
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport, tokenProvider);
+
+        await Assert.ThrowsAsync<LinklyCloudBackendTokenUnavailableException>(() =>
+            service.StartTransactionAsync("S01", "POS-01", CreateTransactionRequest(), CancellationToken.None));
+
+        Assert.Null(transport.LastTransaction);
+        Assert.Null(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("start", HttpStatusCode.Unauthorized)]
+    [InlineData("status", HttpStatusCode.Unauthorized)]
+    [InlineData("recover", HttpStatusCode.Forbidden)]
+    [InlineData("sendkey", HttpStatusCode.Unauthorized)]
+    public async Task Rejected_access_token_is_invalidated_so_the_next_call_fetches_a_new_one(
+        string operation,
+        HttpStatusCode statusCode)
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(statusCode, getTransactionStatusCode: statusCode),
+            tokenProvider);
+        if (operation != "start")
+        {
+            await SeedPendingSessionAsync(service.Repository, sessionId);
+        }
+
+        switch (operation)
+        {
+            case "start":
+                await service.StartTransactionAsync("S01", "POS-01", CreateTransactionRequest(), CancellationToken.None);
+                break;
+            case "status":
+                await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+                break;
+            case "recover":
+                await service.RecoverAsync(
+                    "S01", "POS-01", sessionId, new LinklyCloudBackendRecoverRequest("Sandbox"), CancellationToken.None);
+                break;
+            default:
+                await service.SendKeyAsync(
+                    "S01", "POS-01", sessionId, new LinklyCloudBackendSendKeyRequest("Sandbox", "OK", null), CancellationToken.None);
+                break;
+        }
+
+        var invalidation = Assert.Single(tokenProvider.Invalidations);
+        Assert.Equal(("Sandbox", "S01", "POS-01"), (invalidation.Environment, invalidation.StoreCode, invalidation.DeviceCode));
+    }
+
+    [Fact]
+    public async Task Successful_responses_do_not_invalidate_the_cached_token()
+    {
+        var sessionId = Guid.NewGuid().ToString("D");
+        var tokenProvider = new ScriptedTokenProvider();
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted), tokenProvider);
+        await SeedPendingSessionAsync(service.Repository, sessionId);
+
+        await service.GetStatusAsync("S01", "POS-01", "Sandbox", sessionId, CancellationToken.None);
+
+        Assert.Empty(tokenProvider.Invalidations);
+    }
+
+    [Fact]
+    public async Task TokenProvider_reuses_the_cached_token_until_shortly_before_expiry()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
+        var handler = new ScriptedTokenHttpMessageHandler(n => TokenResponse($"token-{n}", expirySeconds: 300));
+        var provider = CreateTokenProvider(handler, new LinklyCloudBackendTokenCache(clock));
+
+        var first = await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        var second = await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(first.AccessToken, second.AccessToken);
+
+        // 过期前 60 秒余量：有效期 300 秒的 token 缓存 240 秒。
+        clock.Advance(TimeSpan.FromSeconds(239));
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        Assert.Equal(1, handler.Requests);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        var refreshed = await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        Assert.Equal(2, handler.Requests);
+        Assert.Equal("token-2", refreshed.AccessToken);
+    }
+
+    [Fact]
+    public async Task TokenProvider_caches_per_terminal_not_across_devices()
+    {
+        var handler = new ScriptedTokenHttpMessageHandler(n => TokenResponse($"token-{n}", expirySeconds: 3600));
+        var provider = CreateTokenProvider(handler, new LinklyCloudBackendTokenCache(), includeSecondDevice: true);
+
+        var pos01 = await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        var pos02 = await provider.GetTokenAsync("Sandbox", "S01", "POS-02", CancellationToken.None);
+        var pos01Again = await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+
+        Assert.Equal(2, handler.Requests);
+        Assert.NotEqual(pos01.AccessToken, pos02.AccessToken);
+        Assert.Equal(pos01.AccessToken, pos01Again.AccessToken);
+    }
+
+    [Fact]
+    public async Task TokenProvider_fetches_again_after_invalidation_and_after_credentials_change()
+    {
+        var handler = new ScriptedTokenHttpMessageHandler(n => TokenResponse($"token-{n}", expirySeconds: 3600));
+        var terminalRepository = new CapturingTerminalCredentialRepository(new LinklyCloudBackendTerminalCredentialRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            Secret = "secret-pos-01",
+            PosId = "11111111-1111-4111-8111-111111111111"
+        });
+        var provider = CreateTokenProvider(handler, new LinklyCloudBackendTokenCache(), terminalRepository: terminalRepository);
+
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        provider.InvalidateToken("Sandbox", "S01", "POS-01", null);
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        Assert.Equal(2, handler.Requests);
+
+        // 重新配对写入新 secret：旧 token 属于旧配对，必须立即失效。
+        await terminalRepository.UpsertAsync(
+            "Sandbox", "S01", "POS-01", "rotated-secret", "11111111-1111-4111-8111-111111111111",
+            DateTime.UtcNow, null, CancellationToken.None);
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        Assert.Equal(3, handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(45)]
+    public async Task TokenProvider_does_not_cache_tokens_without_a_usable_expiry(int? expirySeconds)
+    {
+        var handler = new ScriptedTokenHttpMessageHandler(n => TokenResponse($"token-{n}", expirySeconds));
+        var provider = CreateTokenProvider(handler, new LinklyCloudBackendTokenCache());
+
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+
+        Assert.Equal(2, handler.Requests);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests, HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.RequestTimeout, HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.InternalServerError, HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway, HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, HttpStatusCode.ServiceUnavailable)]
+    public async Task TokenProvider_maps_transient_token_endpoint_statuses_to_token_unavailable(
+        HttpStatusCode tokenStatus,
+        HttpStatusCode expected)
+    {
+        var handler = new ScriptedTokenHttpMessageHandler(_ => new HttpResponseMessage(tokenStatus));
+        var provider = CreateTokenProvider(handler);
+
+        var exception = await Assert.ThrowsAsync<LinklyCloudBackendTokenUnavailableException>(() =>
+            provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+
+        Assert.Equal(expected, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task TokenProvider_maps_network_failure_and_http_client_timeout_to_token_unavailable()
+    {
+        var network = CreateTokenProvider(new ScriptedTokenHttpMessageHandler(_ => throw new HttpRequestException("down")));
+        var networkError = await Assert.ThrowsAsync<LinklyCloudBackendTokenUnavailableException>(() =>
+            network.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+        Assert.Equal(HttpStatusCode.RequestTimeout, networkError.StatusCode);
+
+        // HttpClient 自身超时（调用方没有取消）。
+        var timeout = CreateTokenProvider(new ScriptedTokenHttpMessageHandler(_ => throw new TaskCanceledException("timeout")));
+        var timeoutError = await Assert.ThrowsAsync<LinklyCloudBackendTokenUnavailableException>(() =>
+            timeout.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+        Assert.Equal(HttpStatusCode.RequestTimeout, timeoutError.StatusCode);
+    }
+
+    [Fact]
+    public async Task TokenProvider_keeps_caller_cancellation_as_cancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var provider = CreateTokenProvider(new ScriptedTokenHttpMessageHandler(_ => TokenResponse("t", 3600)));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.GetTokenAsync("Sandbox", "S01", "POS-01", cancellation.Token));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task TokenProvider_maps_rejected_terminal_secret_to_repair_required(
+        HttpStatusCode tokenStatus)
+    {
+        var handler = new ScriptedTokenHttpMessageHandler(n => n == 1
+            ? TokenResponse("good", expirySeconds: 3600)
+            : new HttpResponseMessage(tokenStatus));
+        var cache = new LinklyCloudBackendTokenCache();
+        var provider = CreateTokenProvider(handler, cache);
+        await provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None);
+        provider.InvalidateToken("Sandbox", "S01", "POS-01", null);
+
+        var exception = await Assert.ThrowsAsync<LinklyCloudTerminalRepairRequiredException>(() =>
+            provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+
+        Assert.Equal(tokenStatus, exception.TokenHttpStatus);
+    }
+
+    [Fact]
+    public async Task TokenProvider_keeps_other_client_errors_as_validation_errors()
+    {
+        var provider = CreateTokenProvider(new ScriptedTokenHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)));
+
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            provider.GetTokenAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+    }
+
+    private static HttpResponseMessage TokenResponse(string token, int? expirySeconds)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = expirySeconds is null
+                ? JsonContent.Create(new { token })
+                : JsonContent.Create(new { token, expirySeconds })
+        };
+    }
+
+    private static HttpLinklyCloudBackendTokenProvider CreateTokenProvider(
+        HttpMessageHandler handler,
+        LinklyCloudBackendTokenCache? cache = null,
+        CapturingTerminalCredentialRepository? terminalRepository = null,
+        bool includeSecondDevice = false)
+    {
+        var credentials = new List<LinklyCloudBackendTerminalCredentialRecord>
+        {
+            new()
+            {
+                Environment = "Sandbox",
+                StoreCode = "S01",
+                DeviceCode = "POS-01",
+                Secret = "secret-pos-01",
+                PosId = "11111111-1111-4111-8111-111111111111"
+            }
+        };
+        if (includeSecondDevice)
+        {
+            credentials.Add(new LinklyCloudBackendTerminalCredentialRecord
+            {
+                Environment = "Sandbox",
+                StoreCode = "S01",
+                DeviceCode = "POS-02",
+                Secret = "secret-pos-02",
+                PosId = "22222222-2222-4222-8222-222222222222"
+            });
+        }
+
+        return new HttpLinklyCloudBackendTokenProvider(
+            new CapturingCredentialRepository(new LinklyCloudCredentialRecord
+            {
+                StoreCode = "S01",
+                Environment = "Sandbox",
+                Username = "merchant-user",
+                Password = "merchant-password",
+                UpdatedAt = DateTime.UtcNow
+            }),
+            terminalRepository ?? new CapturingTerminalCredentialRepository(credentials.ToArray()),
+            new HttpClient(handler),
+            Options.Create(new LinklyCloudBackendAsyncOptions
+            {
+                SandboxAuthBaseUrl = "https://auth.sandbox.example/v1/",
+                SandboxRestBaseUrl = "https://rest.sandbox.example/v1/",
+                SandboxPosVendorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                PosName = "HBPOS",
+                PosVersion = "2026.5.1"
+            }),
+            tokenCache: cache);
+    }
+
+    private static JsonElement CallbackPayload(bool success, string responseCode, string responseText, string txnRef)
+    {
+        return JsonDocument.Parse(
+            $$"""
+            { "Response": { "Success": {{(success ? "true" : "false")}}, "ResponseCode": "{{responseCode}}", "ResponseText": "{{responseText}}", "TxnRef": "{{txnRef}}" } }
+            """).RootElement;
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan delta) => _now += delta;
+    }
+
+    private sealed class ScriptedTokenHttpMessageHandler(Func<int, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        public int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Requests++;
+            return Task.FromResult(respond(Requests));
+        }
+    }
+
+    private sealed class ScriptedTokenProvider : ILinklyCloudBackendTokenProvider
+    {
+        public Exception? Failure { get; set; }
+
+        public int Calls { get; private set; }
+
+        public List<(string Environment, string StoreCode, string DeviceCode, Guid? TerminalId)> Invalidations { get; } = [];
+
+        public Task<LinklyCloudBackendToken> GetTokenAsync(
+            string environment,
+            string storeCode,
+            string deviceCode,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Failure is null
+                ? Task.FromResult(new LinklyCloudBackendToken("https://server-rest.example/", "server-token"))
+                : Task.FromException<LinklyCloudBackendToken>(Failure);
+        }
+
+        public void InvalidateToken(string environment, string storeCode, string deviceCode, Guid? terminalId)
+        {
+            Invalidations.Add((environment, storeCode, deviceCode, terminalId));
+        }
+    }
+
     private static TestableLinklyCloudBackendAsyncService CreateService(
         ILinklyCloudBackendAsyncTransport transport,
         ILinklyCloudBackendTokenProvider? tokenProvider = null,
@@ -4432,6 +5404,11 @@ namespace Hbpos.Api.Tests;
 
         public LinklyCloudBackendTransportSessionRequest? LastGetTransaction { get; private set; }
 
+        public int GetTransactionCallCount { get; private set; }
+
+        // 测试中途改变官方 GET 的返回码（例如先连续 400，再恢复 202）。
+        public HttpStatusCode? GetTransactionStatusCodeOverride { get; set; }
+
         public Task<LinklyCloudBackendTransportResponse> StartTransactionAsync(
             LinklyCloudBackendTransportTransactionRequest request,
             CancellationToken cancellationToken)
@@ -4463,8 +5440,9 @@ namespace Hbpos.Api.Tests;
             CancellationToken cancellationToken)
         {
             LastGetTransaction = request;
+            GetTransactionCallCount++;
             return Task.FromResult(new LinklyCloudBackendTransportResponse(
-                getTransactionStatusCode ?? responseStatusCode,
+                GetTransactionStatusCodeOverride ?? getTransactionStatusCode ?? responseStatusCode,
                 GetTransactionBody ?? responseBody));
         }
 
@@ -4812,7 +5790,9 @@ namespace Hbpos.Api.Tests;
                 var now = DateTime.UtcNow;
                 if (_leaseState.LeaseId is not null && _leaseState.ExpiresAt > now)
                 {
-                    throw new LinklyCloudBackendActiveTransactionException(null);
+                    // 与真实服务一致：Ready 终端被检测类租约占着时给出 Probing（专用错误码 + 剩余秒数）。
+                    throw new LinklyCloudTerminalProbingException(
+                        (int)Math.Ceiling((_leaseState.ExpiresAt.Value - now).TotalSeconds));
                 }
 
                 _leaseState.LeaseId = Guid.NewGuid();
@@ -4837,6 +5817,29 @@ namespace Hbpos.Api.Tests;
                 {
                     _leaseState.LeaseId = null;
                     _leaseState.ExpiresAt = null;
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public int ShortenedLeaseCalls { get; private set; }
+
+        public Task ShortenOperationLeaseAsync(
+            string environment,
+            string storeCode,
+            Guid requestedTerminalId,
+            Guid leaseId,
+            CancellationToken cancellationToken)
+        {
+            lock (_leaseState.Gate)
+            {
+                // 与真实服务一致：只缩短到检测类短租约，绝不延长。
+                var shortened = DateTime.UtcNow.Add(LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration);
+                if (_leaseState.LeaseId == leaseId && _leaseState.ExpiresAt > shortened)
+                {
+                    _leaseState.ExpiresAt = shortened;
+                    ShortenedLeaseCalls++;
                 }
             }
 
@@ -5411,6 +6414,8 @@ namespace Hbpos.Api.Tests;
     {
         public List<string> Lines { get; } = [];
 
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull
         {
@@ -5429,7 +6434,9 @@ namespace Hbpos.Api.Tests;
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            Lines.Add(formatter(state, exception));
+            var message = formatter(state, exception);
+            Lines.Add(message);
+            Entries.Add((logLevel, message));
         }
     }
 }

@@ -6710,6 +6710,13 @@ export interface components {
             errorCode?: string | null;
             message?: string | null;
         };
+        LinklyCloudBackendLateFinalResultDto: {
+            /** Format: date-time */
+            receivedAt?: string;
+            transactionSuccess?: boolean | null;
+            responseCode?: string | null;
+            responseText?: string | null;
+        };
         LinklyCloudBackendLogonTestResponse: {
             environment?: string | null;
             storeCode?: string | null;
@@ -6792,6 +6799,7 @@ export interface components {
             terminalId?: string | null;
             terminalDisplayName?: string | null;
             cardTransaction?: components["schemas"]["LinklyCloudBackendCardTransactionDto"];
+            lateFinalResult?: components["schemas"]["LinklyCloudBackendLateFinalResultDto"];
         };
         LinklyCloudBackendSessionResponseApiResult: {
             success?: boolean;

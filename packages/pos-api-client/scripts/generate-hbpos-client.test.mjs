@@ -12,8 +12,8 @@ const document = JSON.parse(readFileSync(snapshotPath, "utf8"));
 assert.equal(Object.keys(document.paths ?? {}).length, 123, "共享 OpenAPI 必须锁定当前 123 条路径");
 assert.equal(
   Object.keys(document.components?.schemas ?? {}).length,
-  292,
-  "共享 OpenAPI 必须锁定当前 292 个 schema",
+  293,
+  "共享 OpenAPI 必须锁定当前 293 个 schema",
 );
 
 for (const route of [

@@ -53,6 +53,9 @@ public sealed class LinklyController(
         "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE";
     private const string CloudTerminalCredentialUnavailableMessage =
         "Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.";
+    private const string CloudBackendTerminalRepairRequiredCode = "LINKLY_CLOUD_TERMINAL_REPAIR_REQUIRED";
+    private const string CloudBackendTokenUnavailableCode = "LINKLY_CLOUD_BACKEND_TOKEN_UNAVAILABLE";
+    private const string CloudBackendTerminalProbingCode = "LINKLY_CLOUD_TERMINAL_PROBING";
     private const string CloudLegacyModeDisabledCode = "LINKLY_CLOUD_LEGACY_MODE_DISABLED";
     private const string CloudLegacyModeDisabledMessage =
         "Legacy Linkly Cloud credential endpoints are disabled while multi-terminal mode is Active.";
@@ -302,6 +305,10 @@ public sealed class LinklyController(
             var response = await GetTerminalService().ConnectionTestAsync(
                 scope.StoreCode!, scope.DeviceCode!, terminalId, request, cancellationToken);
             return Ok(ApiResult<LinklyCloudTerminalConnectionTestResponse>.Ok(response));
+        }
+        catch (LinklyCloudTerminalProbingException ex)
+        {
+            return TerminalProbing<LinklyCloudTerminalConnectionTestResponse>(ex);
         }
         catch (LinklyCloudTerminalNotFoundException ex)
         {
@@ -579,6 +586,10 @@ public sealed class LinklyController(
             return Ok(ApiResult<LinklyCloudBackendSessionResponse>.Ok(
                 LinklyCardTransactionSanitizer.Attach(response)));
         }
+        catch (LinklyCloudTerminalProbingException ex)
+        {
+            return TerminalProbing<LinklyCloudBackendSessionResponse>(ex);
+        }
         catch (LinklyCloudBackendActiveTransactionException ex)
         {
             return Conflict(ApiResult<LinklyCloudBackendSessionResponse>.Fail(
@@ -594,6 +605,14 @@ public sealed class LinklyController(
         catch (LinklyCloudTerminalCredentialUnavailableException)
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+        }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendSessionResponse>();
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            return TokenUnavailable<LinklyCloudBackendSessionResponse>(ex);
         }
         catch (LinklyCloudTerminalSelectionConflictException ex)
         {
@@ -651,6 +670,10 @@ public sealed class LinklyController(
                 cancellationToken);
             return Ok(ApiResult<LinklyCloudBackendSessionResponse>.Ok(response));
         }
+        catch (LinklyCloudTerminalProbingException ex)
+        {
+            return TerminalProbing<LinklyCloudBackendSessionResponse>(ex);
+        }
         catch (LinklyCloudBackendActiveTransactionException ex)
         {
             return Conflict(ApiResult<LinklyCloudBackendSessionResponse>.Fail(
@@ -666,6 +689,14 @@ public sealed class LinklyController(
         catch (LinklyCloudTerminalCredentialUnavailableException)
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+        }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendSessionResponse>();
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            return TokenUnavailable<LinklyCloudBackendSessionResponse>(ex);
         }
         catch (LinklyCloudTerminalSelectionConflictException ex)
         {
@@ -961,11 +992,23 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendStatusTestResponse>());
         }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendStatusTestResponse>();
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            return TokenUnavailable<LinklyCloudBackendStatusTestResponse>(ex);
+        }
         catch (LinklyCloudBackendValidationException ex)
         {
             return BadRequest(ApiResult<LinklyCloudBackendStatusTestResponse>.Fail(
                 CloudBackendInvalidCode,
                 ex.Message));
+        }
+        catch (LinklyCloudTerminalProbingException ex)
+        {
+            return TerminalProbing<LinklyCloudBackendStatusTestResponse>(ex);
         }
         catch (LinklyCloudBackendActiveTransactionException ex)
         {
@@ -1035,11 +1078,23 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendLogonTestResponse>());
         }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendLogonTestResponse>();
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            return TokenUnavailable<LinklyCloudBackendLogonTestResponse>(ex);
+        }
         catch (LinklyCloudBackendValidationException ex)
         {
             return BadRequest(ApiResult<LinklyCloudBackendLogonTestResponse>.Fail(
                 CloudBackendInvalidCode,
                 ex.Message));
+        }
+        catch (LinklyCloudTerminalProbingException ex)
+        {
+            return TerminalProbing<LinklyCloudBackendLogonTestResponse>(ex);
         }
         catch (LinklyCloudBackendActiveTransactionException ex)
         {
@@ -1110,6 +1165,10 @@ public sealed class LinklyController(
         catch (LinklyCloudTerminalCredentialUnavailableException)
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+        }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendSessionResponse>();
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1268,6 +1327,10 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
         }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendSessionResponse>();
+        }
         catch (LinklyCloudBackendSessionNotFoundException)
         {
             return NotFound(ApiResult<LinklyCloudBackendSessionResponse>.Fail(
@@ -1302,7 +1365,7 @@ public sealed class LinklyController(
                 sessionId,
                 request,
                 cancellationToken);
-            if (response.LastHttpStatus == StatusCodes.Status400BadRequest)
+            if (IsRejectedSendKeyStatus(response.LastHttpStatus))
             {
                 return BadRequest(ApiResult<LinklyCloudBackendSessionResponse>.Fail(
                     CloudBackendInvalidCode,
@@ -1318,6 +1381,14 @@ public sealed class LinklyController(
         catch (LinklyCloudTerminalCredentialUnavailableException)
         {
             return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+        }
+        catch (LinklyCloudTerminalRepairRequiredException)
+        {
+            return TerminalRepairRequired<LinklyCloudBackendSessionResponse>();
+        }
+        catch (LinklyCloudBackendTokenUnavailableException ex)
+        {
+            return TokenUnavailable<LinklyCloudBackendSessionResponse>(ex);
         }
         catch (LinklyCloudBackendSessionNotFoundException)
         {
@@ -1507,6 +1578,35 @@ public sealed class LinklyController(
         CloudTerminalCredentialReentryRequiredCode,
         CloudTerminalCredentialReentryRequiredMessage);
 
+    // Linkly 拒绝/找不到“这次按键动作”（400/404/409/422 等）。会话保持 Pending，不再写成 NotSubmitted；
+    // 对客户端仍沿用既有的 400 约定（按键未被接受，继续等待交易结果）。401/403 走 token 刷新，408/429 走可恢复重试。
+    private static bool IsRejectedSendKeyStatus(int? httpStatus)
+    {
+        return httpStatus is >= 400 and < 500 and not (401 or 403 or 408 or 429);
+    }
+    private ObjectResult TerminalRepairRequired<T>()
+    {
+        // 终端 secret 已被 Linkly 拒绝（401/403）：重试没有意义，提示管理员重新配对（needs-repair）。
+        return Conflict(ApiResult<T>.Fail(
+            CloudBackendTerminalRepairRequiredCode,
+            "Linkly Cloud rejected the terminal credentials. Re-pair the terminal in the management portal."));
+    }
+
+    private ObjectResult TokenUnavailable<T>(LinklyCloudBackendTokenUnavailableException ex)
+    {
+        // Token 端点暂时不可用（429/5xx/网络）：请求没有到达终端，也没有创建会话，稍后重试即可。
+        Response.Headers["Retry-After"] = "5";
+        return StatusCode(
+            StatusCodes.Status503ServiceUnavailable,
+            ApiResult<T>.Fail(CloudBackendTokenUnavailableCode, ex.Message));
+    }
+
+    private ObjectResult TerminalProbing<T>(LinklyCloudTerminalProbingException ex)
+    {
+        // 终端正被 Status/Logon/连接检测的短租约占用：专用错误码 + 剩余秒数（Retry-After 头与消息），不是“有未完成交易”。
+        Response.Headers["Retry-After"] = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return Conflict(ApiResult<T>.Fail(CloudBackendTerminalProbingCode, ex.Message));
+    }
     private static ApiResult<T> CredentialUnavailable<T>() => ApiResult<T>.Fail(
         CloudTerminalCredentialUnavailableCode,
         CloudTerminalCredentialUnavailableMessage);

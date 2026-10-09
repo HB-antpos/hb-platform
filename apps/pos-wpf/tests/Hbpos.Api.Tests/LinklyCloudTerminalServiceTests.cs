@@ -802,11 +802,21 @@ public sealed class LinklyCloudTerminalServiceTests
         Assert.False(failed.Succeeded);
         Assert.Equal("unknown", failed.Status);
         Assert.Equal(0, repository.ReleasedConnectionLeases);
-        Assert.True(repository.Terminals[0].PairingLeaseExpiresAt >= DateTime.UtcNow
-            + LinklyTimeoutConstants.HttpTimeout + LinklyTimeoutConstants.HttpTimeout);
 
-        await Assert.ThrowsAsync<LinklyCloudTerminalSelectionConflictException>(() =>
+        // M10：结果不明时仍保护终端，但租约缩短为检测类短租约，不再沿用覆盖整次往返的 9 分钟租约。
+        Assert.Equal(1, repository.ShortenedLeases);
+        var leaseExpiresAt = repository.Terminals[0].PairingLeaseExpiresAt;
+        Assert.NotNull(leaseExpiresAt);
+        Assert.True(leaseExpiresAt > DateTime.UtcNow);
+        Assert.True(leaseExpiresAt <= DateTime.UtcNow + LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration);
+
+        // 租约期间再次检测：专用错误码（Probing）+ 剩余秒数，而不是笼统的“忙/有未确认操作”。
+        var blocked = await Assert.ThrowsAsync<LinklyCloudTerminalProbingException>(() =>
             service.ConnectionTestAsync("S01", "POS-01", terminalId, request, CancellationToken.None));
+        Assert.InRange(
+            blocked.RetryAfterSeconds,
+            1,
+            (int)LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration.TotalSeconds);
     }
 
     [Theory]
@@ -844,6 +854,114 @@ public sealed class LinklyCloudTerminalServiceTests
         var response = await service.ConnectionTestAsync("S01", "POS-01", id, TestRequest(repository), CancellationToken.None);
         Assert.Equal("unknown", response.Status);
         Assert.Equal(0, repository.ReleasedConnectionLeases);
+    }
+
+    [Fact]
+    public async Task ConnectionTestAsync_rejected_terminal_secret_returns_needs_repair_and_releases_lease()
+    {
+        // M9：token 端点 401/403（secret 失效）映射为专用异常，连接检测给出 needs-repair，而不是通用错误。
+        var id = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        var repository = new FakeTerminalRepository { Terminals = [CreateTerminal(id, "S01", "Production", 1, "Front")] };
+        var transport = new FakeStatusTransport();
+        var service = CreateService(
+            repository,
+            tokenProvider: new FakeTokenProvider { Failure = new LinklyCloudTerminalRepairRequiredException(HttpStatusCode.Unauthorized) },
+            backendTransport: transport);
+
+        var response = await service.ConnectionTestAsync("S01", "POS-01", id, TestRequest(repository), CancellationToken.None);
+
+        Assert.Equal("needs-repair", response.Status);
+        Assert.False(response.Succeeded);
+        Assert.Equal(0, transport.StatusCalls);
+        Assert.Equal(1, repository.ReleasedConnectionLeases);
+    }
+
+    [Fact]
+    public async Task ConnectionTestAsync_token_endpoint_outage_returns_unknown_and_releases_lease()
+    {
+        // 认证端暂时不可用发生在触碰终端之前：结果为“未确认”，租约立即释放（终端并未处于结果不明状态）。
+        var id = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        var repository = new FakeTerminalRepository { Terminals = [CreateTerminal(id, "S01", "Production", 1, "Front")] };
+        var service = CreateService(
+            repository,
+            tokenProvider: new FakeTokenProvider { Failure = new LinklyCloudBackendTokenUnavailableException(HttpStatusCode.TooManyRequests, "throttled") },
+            backendTransport: new FakeStatusTransport());
+
+        var response = await service.ConnectionTestAsync("S01", "POS-01", id, TestRequest(repository), CancellationToken.None);
+
+        Assert.Equal("unknown", response.Status);
+        Assert.Equal(1, repository.ReleasedConnectionLeases);
+        Assert.Equal(0, repository.ShortenedLeases);
+    }
+
+    [Fact]
+    public async Task Ready_terminal_held_by_a_probe_lease_reports_probing_with_capped_remaining_seconds()
+    {
+        var terminalId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        var repository = new FakeTerminalRepository
+        {
+            Mode = "Active",
+            Terminals = [CreateTerminal(terminalId, "S01", "Production", 1, "Front")],
+            Selection = new LinklyCloudDeviceSelectionRecord
+            {
+                Environment = "Production",
+                StoreCode = "S01",
+                DeviceCode = "POS-01",
+                TerminalId = terminalId,
+                Revision = 1
+            }
+        };
+        var service = CreateService(repository);
+        var context = await service.ResolvePaymentTerminalAsync(
+            "Production", "S01", "POS-01", terminalId, 1, CancellationToken.None);
+        await service.AcquireOperationLeaseAsync("Production", "S01", "POS-01", context!, CancellationToken.None);
+
+        // 请求仍在飞行：租约到期时间是 9 分钟的悲观上界，对外提示的剩余秒数不超过检测类短租约时长。
+        var inFlight = await Assert.ThrowsAsync<LinklyCloudTerminalProbingException>(() =>
+            service.AcquireOperationLeaseAsync("Production", "S01", "POS-01", context!, CancellationToken.None));
+        Assert.Equal(
+            (int)LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration.TotalSeconds,
+            inFlight.RetryAfterSeconds);
+        Assert.IsAssignableFrom<LinklyCloudBackendActiveTransactionException>(inFlight);
+    }
+
+    [Fact]
+    public async Task ShortenOperationLeaseAsync_shortens_only_the_matching_lease_and_never_extends()
+    {
+        var terminalId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        var repository = new FakeTerminalRepository
+        {
+            Mode = "Active",
+            Terminals = [CreateTerminal(terminalId, "S01", "Production", 1, "Front")],
+            Selection = new LinklyCloudDeviceSelectionRecord
+            {
+                Environment = "Production",
+                StoreCode = "S01",
+                DeviceCode = "POS-01",
+                TerminalId = terminalId,
+                Revision = 1
+            }
+        };
+        var service = CreateService(repository);
+        var context = await service.ResolvePaymentTerminalAsync(
+            "Production", "S01", "POS-01", terminalId, 1, CancellationToken.None);
+        var lease = await service.AcquireOperationLeaseAsync(
+            "Production", "S01", "POS-01", context!, CancellationToken.None);
+        Assert.True(repository.Terminals.Single().PairingLeaseExpiresAt > DateTime.UtcNow.AddMinutes(8));
+
+        // 他人的租约号：不动。
+        await service.ShortenOperationLeaseAsync("Production", "S01", terminalId, Guid.NewGuid(), CancellationToken.None);
+        Assert.True(repository.Terminals.Single().PairingLeaseExpiresAt > DateTime.UtcNow.AddMinutes(8));
+
+        await service.ShortenOperationLeaseAsync("Production", "S01", terminalId, lease.LeaseId, CancellationToken.None);
+        var shortened = repository.Terminals.Single().PairingLeaseExpiresAt;
+        Assert.True(shortened <= DateTime.UtcNow + LinklyCloudTerminalService.ProbeAmbiguousLeaseDuration);
+        Assert.Equal(lease.LeaseId, repository.Terminals.Single().PairingAttemptId);
+
+        // 再次缩短不会把到期时间往后延。
+        await Task.Delay(20);
+        await service.ShortenOperationLeaseAsync("Production", "S01", terminalId, lease.LeaseId, CancellationToken.None);
+        Assert.True(repository.Terminals.Single().PairingLeaseExpiresAt <= shortened);
     }
 
     [Theory]
@@ -1126,6 +1244,24 @@ public sealed class LinklyCloudTerminalServiceTests
                 return Task.FromResult(false);
             Terminals[index] = Terminals[index] with { PairingAttemptId = leaseId, PairingLeaseExpiresAt = leaseExpiresAt };
             return Task.FromResult(true);
+        }
+
+        public int ShortenedLeases { get; private set; }
+
+        public Task ShortenOperationLeaseAsync(
+            string environment, string storeCode, Guid terminalId, Guid expectedOperationLeaseId,
+            DateTime newExpiresAt, CancellationToken cancellationToken)
+        {
+            // 与 SQL 一致：只缩短仍属于该租约、且到期时间晚于新值的租约，绝不延长。
+            var index = Terminals.FindIndex(item => item.TerminalId == terminalId &&
+                item.PairingAttemptId == expectedOperationLeaseId && item.PairingLeaseExpiresAt > newExpiresAt);
+            if (index >= 0)
+            {
+                Terminals[index] = Terminals[index] with { PairingLeaseExpiresAt = newExpiresAt };
+                ShortenedLeases++;
+            }
+
+            return Task.CompletedTask;
         }
 
         public Task ReleaseConnectionTestLeaseAsync(
