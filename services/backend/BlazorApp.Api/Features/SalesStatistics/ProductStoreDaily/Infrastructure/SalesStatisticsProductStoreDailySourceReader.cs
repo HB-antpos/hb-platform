@@ -6,6 +6,32 @@ using BlazorApp.Shared.Models.POSM;
 
 namespace BlazorApp.Api.Services;
 
+/// <summary>
+/// 标记「HBSales 历史来源行缺商品编码且无法唯一解析商品」这类拒绝：由商品主档漂移所致，
+/// 校验发生在任何写入之前，旧的已发布统计原封不动。失败状态写入据此保留旧快照，
+/// 不把整天标成 Failed 去阻断报表。用 Exception.Data 打标而不改异常类型，既有精确类型断言与捕获不受影响。
+/// </summary>
+internal static class HBSalesProductCodeUnresolvedMarker
+{
+    private const string Key = "HBSalesProductCodeUnresolved";
+
+    internal static T Mark<T>(T exception) where T : Exception
+    {
+        exception.Data[Key] = true;
+        return exception;
+    }
+
+    internal static bool IsMarked(Exception? exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current.Data.Contains(Key))
+                return true;
+        }
+        return false;
+    }
+}
+
 /// <summary>商品分店日统计的来源读取边界：只装载输入，不承担聚合或写入。</summary>
 internal sealed class SalesStatisticsProductStoreDailySourceReader
 {
@@ -305,8 +331,13 @@ internal sealed class SalesStatisticsProductStoreDailySourceReader
             missingFields.Add("分店编码");
         if (invalidRows.Any(row => string.IsNullOrWhiteSpace(row.ProductCode)))
             missingFields.Add("商品编码且无法获得唯一商品候选");
-        throw new InvalidOperationException(
-            $"2025 HBSales 存在 {invalidRows.Count} 条非零来源行缺少{string.Join("或", missingFields)}，不能替换双表统计: {targetDate:yyyy-MM-dd}");
+        var message =
+            $"2025 HBSales 存在 {invalidRows.Count} 条非零来源行缺少{string.Join("或", missingFields)}，不能替换双表统计: {targetDate:yyyy-MM-dd}";
+        // 只有「仅缺商品编码」才属于可保留旧快照的漂移；缺分店编码仍是来源数据缺陷，维持 Failed 契约。
+        var exception = new InvalidOperationException(message);
+        if (invalidRows.All(row => !string.IsNullOrWhiteSpace(row.BranchCode)))
+            HBSalesProductCodeUnresolvedMarker.Mark(exception);
+        throw exception;
     }
 
     private static bool IsOpenItemLookupCode(params string?[] values) => values.Any(value =>
