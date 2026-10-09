@@ -70,6 +70,10 @@ public sealed class LinklyCloudBackendAsyncSchemaInitializerTests
         Assert.Contains("COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'OperationSuccess') IS NULL", sql);
         Assert.Contains("COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'SettlementData') IS NULL", sql);
         Assert.Contains("COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'SettlementReceiptTexts') IS NULL", sql);
+        // 会话创建时间：新表直接带默认值；升级时先加列再用 UpdatedAt 回填旧行（动态 SQL，避免同批次引用新列）。
+        Assert.Contains("[CreatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_CreatedAt] DEFAULT (SYSUTCDATETIME())", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'CreatedAt') IS NULL", sql);
+        Assert.Contains("SET [CreatedAt] = [UpdatedAt] WHERE [CreatedAt] IS NULL", sql);
         Assert.Contains("UNIQUE ([Environment], [StoreCode], [DeviceCode], [SessionId])", sql);
         Assert.Contains("UX_POSM_LinklyCloudBackendSession_ActiveTerminal", sql);
         Assert.Contains("UX_POSM_LinklyCloudBackendSession_TxnRef", sql);

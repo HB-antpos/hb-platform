@@ -66,6 +66,7 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                 [ClientAcknowledgedAt] DATETIME2(7) NULL,
                 [LastHttpStatus] INT NULL,
                 [IsActive] BIT NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_IsActive] DEFAULT (0),
+                [CreatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_CreatedAt] DEFAULT (SYSUTCDATETIME()),
                 [UpdatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
                 CONSTRAINT [CK_POSM_LinklyCloudBackendSession_Environment] CHECK ([Environment] IN (N'Production', N'Sandbox')),
                 CONSTRAINT [UX_POSM_LinklyCloudBackendSession_Scope] UNIQUE ([Environment], [StoreCode], [DeviceCode], [SessionId])
@@ -217,6 +218,16 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
             BEGIN
                 ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
                     ADD [SettlementReceiptTexts] NVARCHAR(MAX) NULL;
+            END;
+
+            -- 创建时间用于判断未决结算属于哪个营业日。升级时先加可空列并带默认值（之后新行自动写入），
+            -- 旧行用 UpdatedAt 回填；回填语句用动态 SQL，避免同一批次里引用刚添加的列而编译失败。
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'CreatedAt') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [CreatedAt] DATETIME2(7) NULL
+                        CONSTRAINT [DF_POSM_LinklyCloudBackendSession_CreatedAt_Upgrade] DEFAULT (SYSUTCDATETIME());
+                EXEC (N'UPDATE [dbo].[POSM_LinklyCloudBackendSession] SET [CreatedAt] = [UpdatedAt] WHERE [CreatedAt] IS NULL;');
             END;
 
             IF NOT EXISTS (

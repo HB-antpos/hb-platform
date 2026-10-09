@@ -1287,6 +1287,7 @@ public sealed class LinklyController(
                 scope.DeviceCode!,
                 request?.Environment ?? string.Empty,
                 sessionId,
+                request?.SupervisorResolved == true,
                 cancellationToken);
             return Ok(ApiResult<LinklyCloudBackendSessionResponse>.Ok(response));
         }

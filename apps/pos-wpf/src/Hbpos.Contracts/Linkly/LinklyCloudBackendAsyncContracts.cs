@@ -183,7 +183,10 @@ public sealed record LinklyCloudBackendSessionResponse(
     string? SettlementData = null,
     IReadOnlyList<string>? SettlementReceiptTexts = null,
     Guid? TerminalId = null,
-    string? TerminalDisplayName = null)
+    string? TerminalDisplayName = null,
+    // 会话创建时间（UTC）。客户端据此判断未决结算属于哪个营业日，避免次日结算接管前一天的会话；
+    // 旧数据由 schema 升级时以 UpdatedAt 回填，仍为空时按“无法确认营业日”处理。
+    DateTimeOffset? CreatedAt = null)
 {
     public LinklyCloudBackendCardTransactionDto? CardTransaction { get; init; }
 }

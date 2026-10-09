@@ -157,6 +157,7 @@ public interface ILinklyCloudBackendAsyncService
         string deviceCode,
         string environment,
         string sessionId,
+        bool supervisorResolved,
         CancellationToken cancellationToken) => throw new NotSupportedException("Linkly Cloud backend settlement is not supported by this implementation.");
 
     Task ReceiveNotificationAsync(
@@ -245,7 +246,7 @@ public class LinklyCloudBackendAsyncService(
                 request.TerminalId,
                 request.SelectionRevision,
                 cancellationToken);
-        var activeSession = await repository.GetActiveSessionAsync(
+        var activeSession = await GetActiveSessionUnlessSettlementTimedOutAsync(
             environment,
             normalizedStoreCode,
             normalizedDeviceCode,
@@ -257,7 +258,7 @@ public class LinklyCloudBackendAsyncService(
 
         if (terminalContext is not null)
         {
-            var activeTerminalSession = await repository.GetActiveSessionByTerminalAsync(
+            var activeTerminalSession = await GetActiveSessionByTerminalUnlessSettlementTimedOutAsync(
                 environment,
                 normalizedStoreCode,
                 terminalContext.Terminal.TerminalId,
@@ -338,7 +339,7 @@ public class LinklyCloudBackendAsyncService(
                 request.TerminalId,
                 request.SelectionRevision,
                 cancellationToken);
-        var activeSession = await repository.GetActiveSessionAsync(
+        var activeSession = await GetActiveSessionUnlessSettlementTimedOutAsync(
             environment,
             normalizedStoreCode,
             normalizedDeviceCode,
@@ -350,7 +351,7 @@ public class LinklyCloudBackendAsyncService(
 
         if (terminalContext is not null)
         {
-            var activeTerminalSession = await repository.GetActiveSessionByTerminalAsync(
+            var activeTerminalSession = await GetActiveSessionByTerminalUnlessSettlementTimedOutAsync(
                 environment,
                 normalizedStoreCode,
                 terminalContext.Terminal.TerminalId,
@@ -386,7 +387,7 @@ public class LinklyCloudBackendAsyncService(
         var response = await SendWithRecoverableFailureAsync(
             () => transport.StartSettlementAsync(transportRequest, cancellationToken));
         ApplySettlementTransportResponse(session, response);
-        if (IsTransportRecoveryFailure(response.StatusCode))
+        if (session.IsActive && IsTransportRecoveryFailure(response.StatusCode))
         {
             session.RecoveryCount++;
         }
@@ -501,6 +502,11 @@ public class LinklyCloudBackendAsyncService(
             NormalizeRequired(deviceCode, "deviceCode"),
             NormalizeRequired(sessionId, "sessionId"),
             cancellationToken);
+        if (IsOperation(session, OperationTypeSettlement))
+        {
+            // 轮询到超时仍无回调的结算在这里收口，客户端立刻拿到“结果未知”，不用再空等。
+            session = await CloseTimedOutSettlementAsync(session!, cancellationToken);
+        }
 
         // Settlement 没有可安全复用的 transaction 查询端点，只以回调持久化结果为准。
         return IsOperation(session, OperationTypeSettlement)
@@ -514,7 +520,7 @@ public class LinklyCloudBackendAsyncService(
         string environment,
         CancellationToken cancellationToken)
     {
-        var session = await repository.GetActiveSessionAsync(
+        var session = await GetActiveSessionUnlessSettlementTimedOutAsync(
             NormalizeEnvironment(environment),
             NormalizeRequired(storeCode, "storeCode"),
             NormalizeRequired(deviceCode, "deviceCode"),
@@ -588,6 +594,11 @@ public class LinklyCloudBackendAsyncService(
             NormalizeRequired(storeCode, "storeCode"),
             NormalizeRequired(deviceCode, "deviceCode"),
             cancellationToken);
+        if (IsOperation(session, OperationTypeSettlement))
+        {
+            session = await CloseTimedOutSettlementAsync(session!, cancellationToken);
+        }
+
         return IsOperation(session, OperationTypeSettlement)
             ? await BuildResponseAsync(session!, cancellationToken)
             : null;
@@ -839,6 +850,7 @@ public class LinklyCloudBackendAsyncService(
         string deviceCode,
         string environment,
         string sessionId,
+        bool supervisorResolved,
         CancellationToken cancellationToken)
     {
         var normalizedEnvironment = NormalizeEnvironment(environment);
@@ -862,7 +874,8 @@ public class LinklyCloudBackendAsyncService(
             normalizedDeviceCode,
             normalizedSessionId,
             DateTimeOffset.UtcNow,
-            supervisorResolved: false,
+            // 主管结案才把非终态（含回调超时后的“结果未知”）写成 SupervisorResolved；普通 ack 不改状态。
+            supervisorResolved,
             cancellationToken) ?? throw new LinklyCloudBackendSessionNotFoundException();
         return await BuildResponseAsync(acknowledged, cancellationToken);
     }
@@ -1794,6 +1807,74 @@ public class LinklyCloudBackendAsyncService(
             bytes[3] == 0xb8;
     }
 
+    /// <summary>
+    /// 结算启动后超过回调等待上限仍无结果（408/5xx/网络异常后 Linkly 没有回调，或回调丢失）时，
+    /// 把会话收口为“结果未知”：IsActive=0 释放 POS 与终端，状态保持 Pending 且不写 ClientAcknowledgedAt，
+    /// 因此终端管理闸门仍视为未决，直到客户端确认结果或主管结案（ack 带 supervisorResolved）。
+    /// 若随后又收到迟到的回调，会话仍会被正常写成 Completed。
+    /// </summary>
+    private async Task<LinklyCloudBackendSessionRecord> CloseTimedOutSettlementAsync(
+        LinklyCloudBackendSessionRecord session,
+        CancellationToken cancellationToken)
+    {
+        if (!IsTimedOutActiveSettlement(session))
+        {
+            return session;
+        }
+
+        Log(
+            $"settlement callback timed out sessionId={LogValue(session.SessionId)} " +
+            $"lastHttp={session.LastHttpStatus?.ToString(CultureInfo.InvariantCulture) ?? "<null>"} -> result-unknown");
+        session.IsActive = false;
+        session.RecoveryAction = LinklyCloudBackendStatusConstants.RecoveryResultUnknown;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        return await UpsertSessionAndReadLatestAsync(session, cancellationToken);
+    }
+
+    private static bool IsTimedOutActiveSettlement(LinklyCloudBackendSessionRecord session)
+    {
+        return IsOperation(session, OperationTypeSettlement) &&
+            session.IsActive &&
+            session.ClientAcknowledgedAt is null &&
+            session.OperationSuccess is null &&
+            string.Equals(session.Status, StatusPending, StringComparison.OrdinalIgnoreCase) &&
+            DateTimeOffset.UtcNow - session.UpdatedAt >= LinklyTimeoutConstants.SettlementCallbackTimeout;
+    }
+
+    // 以下两个查询给“新付款/新结算前的占用检查”用：已超时的结算先收口再判断，避免它永久占住 POS 和终端。
+    private async Task<LinklyCloudBackendSessionRecord?> GetActiveSessionUnlessSettlementTimedOutAsync(
+        string environment,
+        string storeCode,
+        string deviceCode,
+        CancellationToken cancellationToken)
+    {
+        var session = await repository.GetActiveSessionAsync(environment, storeCode, deviceCode, cancellationToken);
+        return await StillBlockingAfterSettlementTimeoutAsync(session, cancellationToken);
+    }
+
+    private async Task<LinklyCloudBackendSessionRecord?> GetActiveSessionByTerminalUnlessSettlementTimedOutAsync(
+        string environment,
+        string storeCode,
+        Guid terminalId,
+        CancellationToken cancellationToken)
+    {
+        var session = await repository.GetActiveSessionByTerminalAsync(environment, storeCode, terminalId, cancellationToken);
+        return await StillBlockingAfterSettlementTimeoutAsync(session, cancellationToken);
+    }
+
+    private async Task<LinklyCloudBackendSessionRecord?> StillBlockingAfterSettlementTimeoutAsync(
+        LinklyCloudBackendSessionRecord? session,
+        CancellationToken cancellationToken)
+    {
+        if (session is null || !IsTimedOutActiveSettlement(session))
+        {
+            return session;
+        }
+
+        var closed = await CloseTimedOutSettlementAsync(session, cancellationToken);
+        return closed.IsActive ? closed : null;
+    }
+
     private async Task<LinklyCloudBackendSessionRecord> UpsertSessionAndReadLatestAsync(
         LinklyCloudBackendSessionRecord session,
         CancellationToken cancellationToken)
@@ -1933,7 +2014,8 @@ public class LinklyCloudBackendAsyncService(
             LinklyReceiptTextSanitizer.SanitizeSettlementData(session.SettlementData),
             settlementReceiptTexts,
             session.TerminalId,
-            terminalDisplayName);
+            terminalDisplayName,
+            session.CreatedAt);
         return response with
         {
             CardTransaction = persistedCardTransaction
@@ -2383,9 +2465,14 @@ public class LinklyCloudBackendAsyncService(
             return;
         }
 
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        if (response.StatusCode is HttpStatusCode.Unauthorized
+            or HttpStatusCode.Forbidden
+            or HttpStatusCode.NotFound
+            or HttpStatusCode.TooManyRequests)
         {
-            // Settlement 没有 transaction GET 恢复路径；鉴权拒绝表示请求未提交，必须立即释放终端锁。
+            // Settlement 没有 transaction GET 恢复路径：鉴权拒绝、404（原请求未成功提交）、429（限流，请求未被处理）
+            // 都表示 Linkly 没有执行结算，必须立即释放终端锁。若沿用交易的“Pending+重试”语义，
+            // 没有任何后续动作会收口这条会话，它会永久占用该 POS 和同一终端，刷卡、换线、配对全被挡住。
             var code = (int)response.StatusCode;
             session.UpdatedAt = DateTimeOffset.UtcNow;
             session.LastHttpStatus = code;
@@ -5382,7 +5469,8 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
                 return Task.FromResult(false);
             }
 
-            if (_sessions.Values.Any(existing =>
+            // 与 SQL 的 UX_..._TxnRef 过滤唯一索引一致：Settlement 会话没有 TxnRef，空值之间不算冲突。
+            if (session.TxnRef is not null && _sessions.Values.Any(existing =>
                 string.Equals(existing.Environment, session.Environment, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(existing.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(existing.TxnRef, session.TxnRef, StringComparison.OrdinalIgnoreCase)))
@@ -5390,7 +5478,9 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
                 return Task.FromResult(false);
             }
 
-            _sessions[SessionKey(session.Environment, session.StoreCode, session.DeviceCode, session.SessionId)] = Clone(session);
+            var created = Clone(session);
+            created.CreatedAt ??= DateTimeOffset.UtcNow;
+            _sessions[SessionKey(session.Environment, session.StoreCode, session.DeviceCode, session.SessionId)] = created;
             return Task.FromResult(true);
         }
     }
@@ -5410,6 +5500,8 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
             }
 
             var next = Clone(session);
+            // 与 SQL 的 MERGE 一致：创建时间只在首次写入时确定，之后的更新不改它。
+            next.CreatedAt = existing?.CreatedAt ?? next.CreatedAt ?? DateTimeOffset.UtcNow;
             if (_sessions.TryGetValue(key, out existing))
             {
                 // 并发恢复写回不得覆盖已落库的发送前证据或对应完整 TxnRef。
@@ -5564,8 +5656,8 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
                 .Where(existing =>
                     SameTerminal(existing, environment, storeCode, deviceCode) &&
                     string.Equals(existing.OperationType, "Settlement", StringComparison.OrdinalIgnoreCase) &&
-                    (existing.IsActive ||
-                        IsFinalForClientRecovery(existing) && existing.ClientAcknowledgedAt is null))
+                    // 回调超时收口的“结果未知”会话（Pending、IsActive=0、未 ack）也要能被找回并结案。
+                    (existing.IsActive || existing.ClientAcknowledgedAt is null))
                 .OrderBy(existing => existing.IsActive ? 0 : 1)
                 .ThenByDescending(existing => existing.UpdatedAt)
                 .ThenByDescending(existing => existing.Id)
@@ -5718,6 +5810,7 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
             ClientAcknowledgedAt = session.ClientAcknowledgedAt,
             LastHttpStatus = session.LastHttpStatus,
             IsActive = session.IsActive,
+            CreatedAt = session.CreatedAt,
             UpdatedAt = session.UpdatedAt
         };
     }
@@ -5981,7 +6074,7 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [CreatedAt], [UpdatedAt]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6033,7 +6126,7 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [CreatedAt], [UpdatedAt]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6160,7 +6253,7 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                 [TransactionSuccess], [OperationType], [OperationSuccess], [SettlementData], [SettlementReceiptTexts], [ResponseCode], [ResponseText], [RecoveryAction], [DisplayText], [DisplayLines],
                 [CancelKeyFlag], [OKKeyFlag], [AcceptYesKeyFlag], [DeclineNoKeyFlag], [AuthoriseKeyFlag],
                 [InputType], [GraphicCode], [ReceiptText],
-                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [UpdatedAt]
+                [RecoveryCount], [ReceiptPrintedAt], [ClientAcknowledgedAt], [LastHttpStatus], [IsActive], [CreatedAt], [UpdatedAt]
             FROM [dbo].[POSM_LinklyCloudBackendSession]
             WHERE [Environment] = @Environment
               AND [StoreCode] = @StoreCode
@@ -6168,7 +6261,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
               AND [OperationType] = N'Settlement'
               AND (
                     [IsActive] = 1
-                    OR ([Status] IN (N'Completed', N'Cancelled', N'Failed', N'NotSubmitted') AND [ClientAcknowledgedAt] IS NULL)
+                    -- 未 ack 的结算一律可恢复：含终态，以及回调超时收口为“结果未知”的 Pending 会话。
+                    OR [ClientAcknowledgedAt] IS NULL
                   )
             ORDER BY
                 CASE WHEN [IsActive] = 1 THEN 0 ELSE 1 END,
@@ -6417,6 +6511,9 @@ public sealed class LinklyCloudBackendSessionRecord
     public int? LastHttpStatus { get; set; }
 
     public bool IsActive { get; set; }
+
+    // 会话创建时间；SQL 由列默认值写入，升级前的旧行以 UpdatedAt 回填。仅按需 SELECT，未读取时为空。
+    public DateTimeOffset? CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
 }

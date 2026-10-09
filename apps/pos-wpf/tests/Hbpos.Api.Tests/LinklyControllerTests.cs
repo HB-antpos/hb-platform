@@ -863,6 +863,30 @@ public sealed class LinklyControllerTests
         Assert.Equal(expected, backendService.LastAcknowledgeSupervisorResolved);
     }
 
+    [Theory]
+    [InlineData("{ \"environment\": \"Sandbox\", \"supervisorResolved\": true }", true)]
+    [InlineData("{ \"environment\": \"Sandbox\", \"supervisorResolved\": false }", false)]
+    [InlineData("{ \"environment\": \"Sandbox\" }", false)]
+    [InlineData(null, false)]
+    public async Task AcknowledgeCloudBackendSettlement_PassesSupervisorResolutionFlagFromBody(
+        string? body,
+        bool expected)
+    {
+        // 回归 H12：结算 ack 原先固定 supervisorResolved=false，主管无法给“结果未知”的结算结案。
+        var backendService = new CapturingLinklyCloudBackendAsyncService();
+        await using var factory = new LinklyApiFactory(linklyCloudBackendAsyncService: backendService);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.PostAsync(
+            "/api/v1/linkly/cloud-backend/settlements/settlement-ack/acknowledge",
+            body is null ? null : new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("settlement-ack", backendService.LastSettlementAcknowledgeSessionId);
+        Assert.Equal(expected, backendService.LastSettlementAcknowledgeSupervisorResolved);
+    }
+
     [Fact]
     public async Task AcknowledgeCloudBackendTransaction_ReturnsNotFoundWhenSessionIsMissing()
     {
@@ -1485,6 +1509,23 @@ public sealed class LinklyControllerTests
             LastAcknowledgeSessionId = sessionId;
             LastAcknowledgeSupervisorResolved = supervisorResolved;
             return Task.FromResult(acknowledgeResponse ?? CreateBackendResponse(sessionId, "Completed"));
+        }
+
+        public string? LastSettlementAcknowledgeSessionId { get; private set; }
+
+        public bool? LastSettlementAcknowledgeSupervisorResolved { get; private set; }
+
+        public Task<LinklyCloudBackendSessionResponse> AcknowledgeSettlementSessionAsync(
+            string storeCode,
+            string deviceCode,
+            string environment,
+            string sessionId,
+            bool supervisorResolved,
+            CancellationToken cancellationToken)
+        {
+            LastSettlementAcknowledgeSessionId = sessionId;
+            LastSettlementAcknowledgeSupervisorResolved = supervisorResolved;
+            return Task.FromResult(CreateBackendResponse(sessionId, "Completed"));
         }
 
         public Task ReceiveNotificationAsync(
