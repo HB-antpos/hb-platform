@@ -373,6 +373,17 @@ namespace BlazorApp.Api.Services
                             expectedBatchFence,
                             ProvisionalFreshStatus);
                     }
+                    // 商品编码无法解析是商品主档漂移，被拒绝时旧快照原封不动；
+                    // 此时整天标 Failed 只会让含该日（含同期对比）的报表全部打不开，改为保留已发布状态并记告警。
+                    if (HBSalesProductCodeUnresolvedMarker.IsMarked(originalException)
+                        && await TryKeepPublishedSnapshotAsync(context, targetDate))
+                    {
+                        logger.LogWarning(
+                            originalException,
+                            "2025 重算被拒绝（商品编码无法解析），保留上一次已发布统计，不标记 Failed: {Date}",
+                            targetDate);
+                        return;
+                    }
                     await SalesStatisticsProductStoreDailyStateSlice.UpsertProductStatisticStateAsync(
                         context,
                         targetDate,
@@ -435,6 +446,54 @@ namespace BlazorApp.Api.Services
                 originalException.Message
             );
         }
+    }
+
+    /// <summary>
+    /// 被拒绝的重算没有写入任何事实，商品/分店/供应商统计仍是上一次的发布版本；
+    /// 但排队与认领已清空商品日统计的完成时间。仅当同日其余三类状态仍证明上次发布完整
+    /// （均为 Fresh、两类供应商与商品版本一致）时，才把商品状态还原为 Fresh；
+    /// 否则返回 false，由调用方走原有的成对 Failed 写入。必须在失败状态事务内、已持有日期锁时调用。
+    /// </summary>
+    internal static async Task<bool> TryKeepPublishedSnapshotAsync(SqlSugarContext context, DateTime targetDate)
+    {
+        var date = targetDate.Date;
+        var nextDate = date.AddDays(1);
+        var states = await context.Db.Queryable<SalesStatisticRefreshState>()
+            .Where(state => state.Date >= date && state.Date < nextDate
+                && (state.StatisticType == SalesStatisticType.ProductStoreDaily
+                    || state.StatisticType == SalesStatisticType.StoreSales
+                    || state.StatisticType == SalesStatisticType.AustralianSupplierStoreSales
+                    || state.StatisticType == SalesStatisticType.ChinaSupplierStoreSales))
+            .With(SqlWith.UpdLock)
+            .ToListAsync();
+        var product = states.SingleOrDefault(state => state.StatisticType == SalesStatisticType.ProductStoreDaily);
+        if (product == null
+            || (product.Status != SalesStatisticRefreshStatus.Running && product.Status != SalesStatisticRefreshStatus.Queued)
+            || !product.LastAggregatedAtUtc.HasValue
+            || string.IsNullOrWhiteSpace(product.SourceProductVersion))
+            return false;
+
+        bool IsPublished(string statisticType, bool requireSameVersion)
+        {
+            var row = states.SingleOrDefault(state => state.StatisticType == statisticType);
+            return row != null
+                && row.Status == SalesStatisticRefreshStatus.Fresh
+                && row.CompletedAtUtc.HasValue
+                && (!requireSameVersion || row.SourceProductVersion == product.SourceProductVersion);
+        }
+
+        if (!IsPublished(SalesStatisticType.StoreSales, requireSameVersion: false)
+            || !IsPublished(SalesStatisticType.AustralianSupplierStoreSales, requireSameVersion: true)
+            || !IsPublished(SalesStatisticType.ChinaSupplierStoreSales, requireSameVersion: true))
+            return false;
+
+        product.Status = SalesStatisticRefreshStatus.Fresh;
+        // 完成时间沿用上次发布的聚合时间，保持报表缓存版本不因这次被拒绝的重算而变化。
+        product.CompletedAtUtc = product.LastAggregatedAtUtc;
+        product.ErrorMessage = null;
+        product.LastCheckedAtUtc = DateTime.UtcNow;
+        await context.Db.Updateable(product).ExecuteCommandAsync();
+        return true;
     }
 
     internal static async Task PersistProductStatisticFailureAsync(

@@ -2033,6 +2033,99 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateProductStoreDailyStatistics_2025商品编码无法解析且上次发布完整时应保留Fresh不标Failed()
+    {
+        var targetDate = new DateTime(2025, 4, 3);
+        var (publishedAt, version) = await SeedPublishedFourStatesAsync(targetDate, productStatus: SalesStatisticRefreshStatus.Running);
+        await _localDb.Insertable(new ProductStoreDailySalesStatistic
+        {
+            Date = targetDate,
+            BranchCode = "1004",
+            SupplierCode = "200",
+            ProductCode = "OLD-PRODUCT",
+            TotalQuantity = 9,
+            TotalAmount = 99m,
+            OrderCount = 1,
+        }).ExecuteCommandAsync();
+        // 分店编码齐全、商品编码为空且主档里没有任何候选：重算被拒绝，旧快照不会被替换。
+        await SeedHBSalesAsync(39, targetDate, null, "1004", "200", 1m, 10m, "1",
+            barcode: null, useDefaultBarcode: false);
+
+        var error = await Assert.ThrowsAnyAsync<InvalidOperationException>(() =>
+            CreateService().UpdateProductStoreDailyStatistics(targetDate));
+
+        Assert.True(HBSalesProductCodeUnresolvedMarker.IsMarked(error));
+        var states = await _localDb.Queryable<SalesStatisticRefreshState>()
+            .Where(row => row.Date == targetDate)
+            .ToListAsync();
+        Assert.All(states, state => Assert.Equal(SalesStatisticRefreshStatus.Fresh, state.Status));
+        var product = states.Single(state => state.StatisticType == SalesStatisticType.ProductStoreDaily);
+        Assert.Null(product.ErrorMessage);
+        // 完成时间还原为上次发布的聚合时间，报表缓存版本不因被拒绝的重算而变化。
+        Assert.Equal(publishedAt, product.LastAggregatedAtUtc);
+        Assert.Equal(publishedAt, product.CompletedAtUtc);
+        Assert.Equal(version, product.SourceProductVersion);
+        Assert.Equal(99m, (await _localDb.Queryable<ProductStoreDailySalesStatistic>()
+            .Where(row => row.Date == targetDate && row.ProductCode == "OLD-PRODUCT")
+            .FirstAsync()).TotalAmount);
+    }
+
+    [Fact]
+    public async Task UpdateProductStoreDailyStatistics_2025商品编码无法解析但上次发布不完整时仍应成对Failed()
+    {
+        var targetDate = new DateTime(2025, 4, 3);
+        await SeedPublishedFourStatesAsync(targetDate, productStatus: SalesStatisticRefreshStatus.Running);
+        // 澳洲供应商统计已是 Failed，说明上次并未完整发布，不能把商品状态还原为 Fresh。
+        await _localDb.Updateable<SalesStatisticRefreshState>()
+            .SetColumns(row => row.Status == SalesStatisticRefreshStatus.Failed)
+            .Where(row => row.Date == targetDate
+                && row.StatisticType == SalesStatisticType.AustralianSupplierStoreSales)
+            .ExecuteCommandAsync();
+        await SeedHBSalesAsync(40, targetDate, null, "1004", "200", 1m, 10m, "1",
+            barcode: null, useDefaultBarcode: false);
+
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(() =>
+            CreateService().UpdateProductStoreDailyStatistics(targetDate));
+
+        var product = await LoadRefreshStateAsync(targetDate);
+        Assert.Equal(SalesStatisticRefreshStatus.Failed, product!.Status);
+        Assert.Contains("商品编码", product.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>种下「上次完整发布」的四类状态；商品状态可设为 Running 模拟已被队列认领。</summary>
+    private async Task<(DateTime PublishedAt, string Version)> SeedPublishedFourStatesAsync(
+        DateTime date,
+        string productStatus)
+    {
+        var publishedAt = new DateTime(2026, 9, 7, 21, 15, 32, DateTimeKind.Utc);
+        const string version = "PUBLISHED-VERSION-0001";
+        foreach (var type in new[]
+                 {
+                     SalesStatisticType.ProductStoreDaily,
+                     SalesStatisticType.StoreSales,
+                     SalesStatisticType.AustralianSupplierStoreSales,
+                     SalesStatisticType.ChinaSupplierStoreSales,
+                 })
+        {
+            var isProduct = type == SalesStatisticType.ProductStoreDaily;
+            await _localDb.Insertable(new SalesStatisticRefreshState
+            {
+                StatisticType = type,
+                Date = date.Date,
+                Status = isProduct ? productStatus : SalesStatisticRefreshStatus.Fresh,
+                SourceTimeZone = "POSM_LOCAL",
+                SourceProductVersion = type == SalesStatisticType.StoreSales ? null : version,
+                LastAggregatedAtUtc = publishedAt,
+                // 排队/认领会清空商品状态的完成时间，这正是需要还原的现场。
+                CompletedAtUtc = isProduct && productStatus != SalesStatisticRefreshStatus.Fresh ? null : publishedAt,
+                LastCheckedAtUtc = publishedAt,
+                LastSourceUploadTime = date.Date.AddHours(12),
+            }).ExecuteCommandAsync();
+        }
+        return (publishedAt, version);
+    }
+
+    [Fact]
     public async Task QueryDailySourceWatermarkAsync_2025应在数据库聚合HBSales水位()
     {
         var targetDate = new DateTime(2025, 4, 3);
