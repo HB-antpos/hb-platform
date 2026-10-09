@@ -96,6 +96,14 @@ public interface ILinklyBackendTerminalClient
         CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
+    // 主管结案：服务端把仍非终态（含回调超时后的“结果未知”）的结算会话记为 SupervisorResolved，
+    // 让换线、配对、连接测试不再被它永久挡住。默认空实现，不支持结算的客户端无需处理。
+    Task AcknowledgeSupervisorResolvedSettlementAsync(
+        CardTerminalSettings settings,
+        string sessionId,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
     Task MarkSettlementReceiptPrintedAsync(
         CardTerminalSettings settings,
         string sessionId,
@@ -149,6 +157,14 @@ public sealed class LinklyBackendTerminalClient(
     private const string CloudBackendInvalidRequestErrorCode = "LINKLY_CLOUD_BACKEND_REQUEST_INVALID";
     private const string CloudBackendActiveOperationErrorCode = "LINKLY_CLOUD_BACKEND_ACTIVE_TRANSACTION";
     private const string CloudBackendTerminalSelectionConflictErrorCode = "LINKLY_CLOUD_TERMINAL_SELECTION_CONFLICT";
+    // 以下错误码都在服务端创建结算会话之前抛出（解析终端、取凭据、取 token 先于建会话），可以证明结算未提交。
+    private const string CloudBackendTerminalNotReadyErrorCode = "LINKLY_CLOUD_TERMINAL_NOT_READY";
+    private const string CloudBackendTerminalNotFoundErrorCode = "LINKLY_CLOUD_TERMINAL_NOT_FOUND";
+    private const string CloudBackendCredentialReentryRequiredErrorCode = "LINKLY_CLOUD_TERMINAL_CREDENTIAL_REENTRY_REQUIRED";
+    private const string CloudBackendCredentialUnavailableErrorCode = "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE";
+    // 失败结果（OperationSuccess=false）到达后，再等几轮轮询给迟到的 Type=S 回单；约 5 秒（默认 1 秒轮询）。
+    // 超过后不再等回单：银行拒绝或刷卡机离线时可能根本没有回单，服务端同样把 OperationSuccess=false 视为失败终态。
+    private const int SettlementFailureReceiptGracePolls = 5;
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(1);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -507,6 +523,20 @@ public sealed class LinklyBackendTerminalClient(
         try
         {
             status = await GetResumableSettlementAsync(settings, timeoutCts.Token);
+            if (status is not null && IsFromEarlierBusinessDay(status))
+            {
+                // 前一营业日留下的会话（未 ack 或结果未知）不是今天的结算：不能接管它，否则今天的批次不会发给银行，
+                // 却显示成功并打印旧回单。它由结算服务按本地记录单独补完或结案；这里直接发今天的结算。
+                // 若那条旧会话仍在进行，服务端会以 ACTIVE_TRANSACTION 拒绝，走下面的活动会话提示。
+                LogSettlementEvent(
+                    "skip-earlier-session",
+                    "resumable settlement belongs to an earlier business day; starting a new settlement",
+                    status.SessionId,
+                    exception: null,
+                    LinklyLogLevel.Warning);
+                status = null;
+            }
+
             if (status is null)
             {
                 settlementStartRequested = true;
@@ -553,8 +583,21 @@ public sealed class LinklyBackendTerminalClient(
                 submitted = true;
             }
 
-            while (!IsSettlementFinal(status))
+            var failureWaitPolls = 0;
+            while (!IsSettlementFinal(status, failureWaitPolls))
             {
+                if (IsSettlementResultUnknown(status))
+                {
+                    // 服务端等回调超时后已把会话收口为“结果未知”：再轮询不会有新信息，直接交给结算服务按未决处理。
+                    LogSettlementEvent("unknown", "server closed the settlement as result-unknown", status.SessionId, exception: null);
+                    return SettlementUnknown(status.SessionId);
+                }
+
+                if (status.OperationSuccess == false)
+                {
+                    failureWaitPolls++;
+                }
+
                 await DelayAsync(_pollInterval, timeoutCts.Token);
                 status = await GetSettlementStatusAsync(settings, status.SessionId, timeoutCts.Token);
             }
@@ -1207,7 +1250,7 @@ public sealed class LinklyBackendTerminalClient(
         string phase,
         string reason,
         string? sessionId,
-        Exception exception,
+        Exception? exception,
         LinklyLogLevel? level = null)
     {
         LinklyJsonLog.Write(
@@ -1402,10 +1445,20 @@ public sealed class LinklyBackendTerminalClient(
 
     private static bool IsDefinitiveSettlementStartRejection(LinklyBackendHttpException ex)
     {
-        return ex.HttpStatus is HttpStatusCode.BadRequest or HttpStatusCode.Conflict &&
+        // 状态码 + 显式错误码缺一不可：裸 4xx/404（可能来自网关）不能证明服务端没建会话。
+        return ex.HttpStatus is HttpStatusCode.BadRequest or HttpStatusCode.Conflict or HttpStatusCode.NotFound &&
             (string.Equals(ex.ErrorCode, CloudBackendInvalidRequestErrorCode, StringComparison.Ordinal) ||
              string.Equals(ex.ErrorCode, CloudBackendActiveOperationErrorCode, StringComparison.Ordinal) ||
-             string.Equals(ex.ErrorCode, CloudBackendTerminalSelectionConflictErrorCode, StringComparison.Ordinal));
+             string.Equals(ex.ErrorCode, CloudBackendTerminalSelectionConflictErrorCode, StringComparison.Ordinal) ||
+             string.Equals(ex.ErrorCode, CloudBackendTerminalNotReadyErrorCode, StringComparison.Ordinal) ||
+             string.Equals(ex.ErrorCode, CloudBackendTerminalNotFoundErrorCode, StringComparison.Ordinal) ||
+             string.Equals(ex.ErrorCode, CloudBackendCredentialReentryRequiredErrorCode, StringComparison.Ordinal) ||
+             string.Equals(ex.ErrorCode, CloudBackendCredentialUnavailableErrorCode, StringComparison.Ordinal));
+    }
+
+    private bool IsFromEarlierBusinessDay(LinklyCloudBackendSessionResponse status)
+    {
+        return LinklySettlementBusinessDay.IsEarlierThanToday(status.CreatedAt, _timeProvider);
     }
 
     private LinklySettlementResult RejectActiveSessionForNewSettlement(
@@ -1491,7 +1544,7 @@ public sealed class LinklyBackendTerminalClient(
             : $"{detail} {guidance}";
     }
 
-    private static bool IsSettlementFinal(LinklyCloudBackendSessionResponse status)
+    private static bool IsSettlementFinal(LinklyCloudBackendSessionResponse status, int failureWaitPolls)
     {
         if (string.Equals(status.Status, StatusFailed, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(status.Status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase) ||
@@ -1500,10 +1553,24 @@ public sealed class LinklyBackendTerminalClient(
             return true;
         }
 
-        // Settlement 完成通知可能先于 Type=S 回单到达；回单可用前不能确认 session，
+        var hasReceipt = (status.SettlementReceiptTexts ?? []).Any(receipt => !string.IsNullOrWhiteSpace(receipt));
+
+        // 失败结果与服务端口径一致（OperationSuccess=false 即失败终态）：刷卡机离线或银行拒绝时回调只有 PF，
+        // 根本没有 Type=S 回单，若也等回单，本地永远是未知、永不 ack。有回单就立即带上；没有则只给迟到回单一个短宽限期。
+        if (status.OperationSuccess == false)
+        {
+            return hasReceipt || failureWaitPolls >= SettlementFailureReceiptGracePolls;
+        }
+
+        // 成功的完成通知可能先于 Type=S 回单到达；回单可用前不能确认 session，
         // 否则持久化/ack 后将永久失去需要打印的结算单。
-        return status.OperationSuccess.HasValue &&
-            (status.SettlementReceiptTexts ?? []).Any(receipt => !string.IsNullOrWhiteSpace(receipt));
+        return status.OperationSuccess.HasValue && hasReceipt;
+    }
+
+    private static bool IsSettlementResultUnknown(LinklyCloudBackendSessionResponse status)
+    {
+        return string.Equals(status.RecoveryAction, RecoveryResultUnknown, StringComparison.OrdinalIgnoreCase) &&
+            !status.OperationSuccess.HasValue;
     }
 
     private static string FormatSettlementMessage(
@@ -3762,6 +3829,19 @@ public sealed class LinklyBackendTerminalClient(
             sessionId,
             "acknowledge",
             new LinklyCloudBackendAcknowledgeRequest(settings.Environment.ToString()),
+            cancellationToken);
+    }
+
+    public async Task AcknowledgeSupervisorResolvedSettlementAsync(
+        CardTerminalSettings settings,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        await PostSettlementSessionMarkerAsync(
+            settings,
+            sessionId,
+            "acknowledge",
+            new LinklyCloudBackendAcknowledgeRequest(settings.Environment.ToString(), SupervisorResolved: true),
             cancellationToken);
     }
 

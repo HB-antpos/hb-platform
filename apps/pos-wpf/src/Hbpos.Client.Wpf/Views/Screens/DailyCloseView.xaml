@@ -1186,6 +1186,17 @@
                                            FontSize="12"
                                            Foreground="{DynamicResource PosTextSecondaryBrush}"
                                            TextWrapping="Wrap" />
+                                <Button Command="{Binding QuerySettlementResultCommand}"
+                                        Visibility="{Binding IsSettlementQueryVisible, Converter={StaticResource BoolToVis}}"
+                                        MinHeight="44"
+                                        Margin="0,0,0,8"
+                                        Padding="10,4"
+                                        IsTabStop="True"
+                                        ToolTip="{loc:Loc dailyClose.linklySettlement.query.hint}"
+                                        AutomationProperties.Name="{loc:Loc dailyClose.linklySettlement.query.button}"
+                                        Style="{StaticResource PosPrimaryButtonStyle}">
+                                    <TextBlock Text="{loc:Loc dailyClose.linklySettlement.query.button}" Foreground="White" FontWeight="Bold" />
+                                </Button>
                                 <UniformGrid Columns="3">
                                     <Button Command="{Binding PrepareSettlementManualResolutionCommand}"
                                             CommandParameter="{x:Static services:LocalLinklySettlementManualResolution.ConfirmedSucceeded}"

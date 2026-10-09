@@ -881,7 +881,12 @@
   <data name="dailyClose.linklySettlement.reprintFailed" xml:space="preserve"><value>Linkly settlement reprint failed: {0}</value></data>
   <data name="dailyClose.linklySettlement.submission" xml:space="preserve"><value>Submission</value></data>
   <data name="dailyClose.linklySettlement.manual.title" xml:space="preserve"><value>Supervisor resolution</value></data>
-  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>For an unresolved Local IP or Cloud Direct settlement only. This never sends another settlement.</value></data>
+  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>For an unresolved Linkly settlement only. This never sends another settlement.</value></data>
+  <data name="dailyClose.linklySettlement.query.button" xml:space="preserve"><value>Query result from Linkly</value></data>
+  <data name="dailyClose.linklySettlement.query.hint" xml:space="preserve"><value>Look up this settlement on the Linkly server and record its result. This never sends another settlement.</value></data>
+  <data name="dailyClose.linklySettlement.query.resolved" xml:space="preserve"><value>The Linkly settlement result was found and recorded. No new settlement was sent.</value></data>
+  <data name="dailyClose.linklySettlement.query.unresolved" xml:space="preserve"><value>The Linkly settlement result is still unavailable. If the terminal shows the result, record the supervisor decision below.</value></data>
+  <data name="dailyClose.linklySettlement.blockedEarlierBusinessDay" xml:space="preserve"><value>An unresolved Linkly settlement from {0:yyyy-MM-dd} must be resolved first, so today's settlement was not sent. Change the business date to {0:yyyy-MM-dd}, open the Linkly Settlement tab, then query the result or record the supervisor decision.</value></data>
   <data name="dailyClose.linklySettlement.manual.succeeded" xml:space="preserve"><value>Confirmed succeeded</value></data>
   <data name="dailyClose.linklySettlement.manual.failed" xml:space="preserve"><value>Confirmed failed</value></data>
   <data name="dailyClose.linklySettlement.manual.notSubmitted" xml:space="preserve"><value>Confirmed not submitted</value></data>

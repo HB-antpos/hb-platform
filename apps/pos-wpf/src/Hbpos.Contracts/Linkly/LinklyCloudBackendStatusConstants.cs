@@ -16,6 +16,9 @@ public static class LinklyCloudBackendStatusConstants
 
     public const string RecoveryRetry = "Retry";
     public const string RecoveryRefreshToken = "RefreshToken";
+    // 结算回调超时后服务端收口：会话已不再占用 POS/终端（IsActive=0），但 Linkly 是否执行过结算未知，
+    // 需要 POS 侧查询，或由主管结案（ack 带 supervisorResolved）。只会出现在 Settlement 会话上。
+    public const string RecoveryResultUnknown = "ResultUnknown";
 
     public static bool IsSuccessfulSettlement(bool? operationSuccess, string? responseCode)
     {
