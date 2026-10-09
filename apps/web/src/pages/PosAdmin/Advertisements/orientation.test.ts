@@ -6,6 +6,7 @@ import {
   getOrientationMismatch,
   getOrientationSlots,
   isSlotPlayed,
+  resolveOrientationAfterUpload,
   suggestOrientationFromSize,
   toMediaSize,
 } from './orientation'
@@ -38,6 +39,33 @@ assertEqual(suggestOrientationFromSize(772, 870), 'Portrait', '宽 < 高 自动�
 assertEqual(suggestOrientationFromSize(1000, 1000), 'Portrait', '正方形按「否则竖版」处理')
 assertEqual(suggestOrientationFromSize(null, null), null, '读不到尺寸不自动选择')
 assertEqual(suggestOrientationFromSize(1366, 0), null, '非法尺寸不自动选择')
+
+// ---- 上传后是否自动预选（新建 / 编辑一致）----
+assertDeepEqual(
+  resolveOrientationAfterUpload(undefined, 772, 870),
+  { orientation: 'Portrait', autoSelected: true },
+  '新建首次上传竖版素材：自动选竖版并标记自动选择',
+)
+assertDeepEqual(
+  resolveOrientationAfterUpload('Any', 1366, 768),
+  { orientation: 'Landscape', autoSelected: true },
+  '编辑已有广告（记录为通用）重新上传横版素材：按新素材改为横版并标记自动选择',
+)
+assertDeepEqual(
+  resolveOrientationAfterUpload('Landscape', 772, 870),
+  { orientation: 'Portrait', autoSelected: true },
+  '之前手动选过横版，再上传竖版素材：仍按新素材重新预选为竖版',
+)
+assertDeepEqual(
+  resolveOrientationAfterUpload('Portrait', null, null),
+  { orientation: 'Portrait', autoSelected: false },
+  '读不到宽高：保持当前版式不变，自动选择标记清除',
+)
+assertDeepEqual(
+  resolveOrientationAfterUpload(undefined, null, null),
+  { orientation: undefined, autoSelected: false },
+  '新建且读不到宽高：保持未选择，由管理员手动选',
+)
 
 // ---- 版式 → 播放位置 ----
 assertDeepEqual(getOrientationSlots('Landscape'), ['idle'], '横版只在空闲全屏播放')
