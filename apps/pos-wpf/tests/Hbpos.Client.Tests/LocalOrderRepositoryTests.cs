@@ -41,6 +41,59 @@ public sealed class LocalOrderRepositoryTests
         }
     }
 
+    [Fact]
+    public async Task GetReturnOrdersForOriginalAsync_returns_only_return_orders_of_that_original_and_filters_synced()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            var repository = new LocalOrderRepository(store);
+            await schema.InitializeAsync();
+            var originalOrderGuid = Guid.NewGuid();
+            var pendingReturn = CreateOrder() with
+            {
+                OrderGuid = Guid.NewGuid(),
+                Lines = [CreateOrder().Lines[0] with { OrderLineGuid = Guid.NewGuid(), OriginalOrderGuid = originalOrderGuid }]
+            };
+            var syncedReturn = CreateOrder() with
+            {
+                OrderGuid = Guid.NewGuid(),
+                Lines = [CreateOrder().Lines[0] with { OrderLineGuid = Guid.NewGuid(), OriginalOrderGuid = originalOrderGuid }]
+            };
+            var otherOriginalReturn = CreateOrder() with
+            {
+                OrderGuid = Guid.NewGuid(),
+                Lines = [CreateOrder().Lines[0] with { OrderLineGuid = Guid.NewGuid(), OriginalOrderGuid = Guid.NewGuid() }]
+            };
+            await repository.SavePendingOrderAsync(pendingReturn);
+            await repository.SavePendingOrderAsync(syncedReturn);
+            await repository.SavePendingOrderAsync(otherOriginalReturn);
+            await using (var connection = await store.OpenConnectionAsync())
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "UPDATE LocalOrders SET SyncStatus = 'Synced' WHERE OrderGuid = $OrderGuid;";
+                command.Parameters.AddWithValue("$OrderGuid", syncedReturn.OrderGuid.ToString());
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var all = await repository.GetReturnOrdersForOriginalAsync(originalOrderGuid, unsyncedOnly: false);
+            var unsynced = await repository.GetReturnOrdersForOriginalAsync(originalOrderGuid, unsyncedOnly: true);
+
+            Assert.Equal(
+                new[] { pendingReturn.OrderGuid, syncedReturn.OrderGuid }.OrderBy(guid => guid),
+                all.Select(order => order.OrderGuid).OrderBy(guid => guid));
+            Assert.Equal(pendingReturn.OrderGuid, Assert.Single(unsynced).OrderGuid);
+            Assert.NotEmpty(Assert.Single(unsynced).Payments);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
     private static LocalOrder CreateOrder()
     {
         return new LocalOrder(

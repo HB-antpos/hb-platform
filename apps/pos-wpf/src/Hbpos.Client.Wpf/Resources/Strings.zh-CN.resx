@@ -2312,6 +2312,9 @@
   <data name="returns.status.loadedLocalStale" xml:space="preserve">
     <value>已加载本地订单；线上订单历史不可用。</value>
   </data>
+  <data name="returns.status.cardRefundDisabledStale" xml:space="preserve">
+    <value>订单的线上退货记录加载成功前，不能原路退回银行卡。</value>
+  </data>
   <data name="returns.status.addedReceiptLine" xml:space="preserve">
     <value>已将 {0} 加入退款购物车。</value>
   </data>

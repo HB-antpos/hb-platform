@@ -42,6 +42,16 @@ public interface ILocalOrderRepository
         CancellationToken cancellationToken = default);
 
     Task<LocalOrder?> GetOrderAsync(Guid orderGuid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 读取本机保存的、引用指定原单的退货单。退货查单用它补上服务端还没收到（或降级到本地时根本查不到）的退货，
+    /// unsyncedOnly 为 true 时只返回尚未同步成功的订单（服务端记录已覆盖 Synced 的）。
+    /// </summary>
+    Task<IReadOnlyList<LocalOrder>> GetReturnOrdersForOriginalAsync(
+        Guid originalOrderGuid,
+        bool unsyncedOnly,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<LocalOrder>>([]);
 }
 
 public sealed class LocalOrderRepository(LocalSqliteStore store) : ILocalOrderRepository
@@ -516,6 +526,45 @@ public sealed class LocalOrderRepository(LocalSqliteStore store) : ILocalOrderRe
             Lines = lines,
             Payments = payments
         };
+    }
+
+    public async Task<IReadOnlyList<LocalOrder>> GetReturnOrdersForOriginalAsync(
+        Guid originalOrderGuid,
+        bool unsyncedOnly,
+        CancellationToken cancellationToken = default)
+    {
+        var returnOrderGuids = new List<Guid>();
+        await using (var connection = await store.OpenConnectionAsync(cancellationToken))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT DISTINCT o.OrderGuid
+                FROM LocalOrders o
+                JOIN LocalOrderLines l ON l.OrderGuid = o.OrderGuid
+                WHERE l.OriginalOrderGuid = $OriginalOrderGuid COLLATE NOCASE
+                  AND l.Kind = $ReturnKind
+                  AND ($UnsyncedOnly = 0 OR o.SyncStatus <> 'Synced');
+                """;
+            command.Parameters.AddWithValue("$OriginalOrderGuid", originalOrderGuid.ToString());
+            command.Parameters.AddWithValue("$ReturnKind", (int)OrderLineKind.Return);
+            command.Parameters.AddWithValue("$UnsyncedOnly", unsyncedOnly ? 1 : 0);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                returnOrderGuids.Add(ReadGuid(reader, "OrderGuid"));
+            }
+        }
+
+        var orders = new List<LocalOrder>(returnOrderGuids.Count);
+        foreach (var returnOrderGuid in returnOrderGuids)
+        {
+            if (await GetOrderAsync(returnOrderGuid, cancellationToken) is { } order)
+            {
+                orders.Add(order);
+            }
+        }
+
+        return orders;
     }
 
     private static async Task<LocalOrder?> ReadOrderHeaderAsync(
