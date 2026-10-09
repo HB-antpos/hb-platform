@@ -597,7 +597,8 @@ public sealed class CustomerDisplayViewModelTests
         Assert.Contains("Foreground=\"{StaticResource PosCustomerDisplayAmountBrush}\"", viewXaml);
         Assert.DoesNotContain("Background=\"White\"", viewXaml);
         Assert.DoesNotContain("<LinearGradientBrush", viewXaml);
-        Assert.Equal(4, viewXaml.Split("StretchDirection=\"DownOnly\"", StringSplitOptions.None).Length - 1);
+        // 只缩不放的 Viewbox：小计、税额、节省、应付总额 4 处金额，加汇总栏里的紧凑服务徽标 1 处（窄屏只缩小不撑破）。
+        Assert.Equal(5, viewXaml.Split("StretchDirection=\"DownOnly\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("Background=\"{StaticResource PosCustomerDisplayBackgroundBrush}\"", windowXaml);
         Assert.Contains("Foreground=\"{StaticResource PosCustomerDisplayTextBrush}\"", windowXaml);
     }
