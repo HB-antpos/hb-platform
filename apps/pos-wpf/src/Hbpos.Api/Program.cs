@@ -39,7 +39,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         options.KnownProxies.Add(proxyAddress);
     }
 });
-builder.Services.AddRateLimiter(DeviceActivationRateLimitOptions.Configure);
+builder.Services.AddRateLimiter(options =>
+{
+    DeviceActivationRateLimitOptions.Configure(options);
+    // Linkly 回调是匿名端点：只对没带正确 bearer 的请求限流，真实回调不受影响。
+    options.AddPolicy<string, LinklyNotificationRateLimitPolicy>(LinklyNotificationRateLimitPolicy.PolicyName);
+});
 builder.Services.AddSwaggerGen(options =>
 {
     options.SchemaFilter<SharedSaleCartPayloadSchemaFilter>();

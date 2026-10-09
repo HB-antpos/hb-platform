@@ -34,7 +34,10 @@ public static class HbposFileLoggingExtensions
         var minimumLevel = ParseLevel(
             configuration.GetValue<string>("FileLogging:MinimumLevel"),
             LogLevel.Information);
-        logging.AddProvider(new HbposFileLoggerProvider(path, minimumLevel));
+        // 文件日志按大小轮转：生产上曾长成约 600 MB 的单文件，磁盘写满后写入被静默吞掉，排障证据整体丢失。
+        var maxFileBytes = Math.Max(1, configuration.GetValue("FileLogging:MaxFileSizeMb", 50)) * 1024L * 1024L;
+        var retainedFiles = Math.Max(1, configuration.GetValue("FileLogging:RetainedFiles", 5));
+        logging.AddProvider(new HbposFileLoggerProvider(path, minimumLevel, maxFileBytes, retainedFiles));
         return logging;
     }
 
@@ -52,12 +55,23 @@ public sealed class HbposFileLoggerProvider : ILoggerProvider
     private readonly object syncRoot = new();
     private readonly string path;
     private readonly LogLevel minimumLevel;
+    private readonly long maxFileBytes;
+    private readonly int retainedFiles;
 
-    public HbposFileLoggerProvider(string path, LogLevel minimumLevel)
+    public HbposFileLoggerProvider(
+        string path,
+        LogLevel minimumLevel,
+        long maxFileBytes = DefaultMaxFileBytes,
+        int retainedFiles = DefaultRetainedFiles)
     {
         this.path = Path.GetFullPath(path);
         this.minimumLevel = minimumLevel;
+        this.maxFileBytes = maxFileBytes;
+        this.retainedFiles = Math.Max(1, retainedFiles);
     }
+
+    public const long DefaultMaxFileBytes = 50L * 1024 * 1024;
+    public const int DefaultRetainedFiles = 5;
 
     public ILogger CreateLogger(string categoryName)
     {
@@ -86,12 +100,47 @@ public sealed class HbposFileLoggerProvider : ILoggerProvider
 
             lock (syncRoot)
             {
+                RotateIfNeeded();
                 File.AppendAllText(path, line + Environment.NewLine);
             }
         }
         catch
         {
             // 文件日志不能影响 API 主流程。
+        }
+    }
+
+    // 当前文件达到上限时滚动：path -> path.1 -> ... -> path.N，最旧的一个被删除。调用方已持有 syncRoot。
+    private void RotateIfNeeded()
+    {
+        try
+        {
+            var current = new FileInfo(path);
+            if (!current.Exists || current.Length < maxFileBytes)
+            {
+                return;
+            }
+
+            var oldest = $"{path}.{retainedFiles}";
+            if (File.Exists(oldest))
+            {
+                File.Delete(oldest);
+            }
+
+            for (var index = retainedFiles - 1; index >= 1; index--)
+            {
+                var source = $"{path}.{index}";
+                if (File.Exists(source))
+                {
+                    File.Move(source, $"{path}.{index + 1}");
+                }
+            }
+
+            File.Move(path, $"{path}.1");
+        }
+        catch
+        {
+            // 轮转失败（例如文件被占用）时继续追加，宁可文件变大也不能丢日志或影响主流程。
         }
     }
 

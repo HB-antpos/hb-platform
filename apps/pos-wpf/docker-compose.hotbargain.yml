@@ -87,6 +87,12 @@ services:
       # Linkly 终端凭据 ring 与 Admin 共用，缺失宿主挂载时拒绝启动 compose。
       - ${LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH:?required}:/app/App_Data/LinklyCloudCredentialDataProtectionKeys
     restart: unless-stopped
+    # Docker 默认 json-file 驱动不轮转，匿名回调端点被扫描时会无限增长；与应用内 FileLogging 轮转配合限制磁盘占用。
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
       - hb-network
     healthcheck:

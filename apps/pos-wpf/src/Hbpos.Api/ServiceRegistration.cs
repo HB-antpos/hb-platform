@@ -9,6 +9,8 @@ namespace Hbpos.Api;
 
 public static class ServiceRegistration
 {
+    private const string LinklyCallbackProbeHttpClientName = "linkly-callback-probe";
+
     public static IServiceCollection AddHbposApiServices(
         this IServiceCollection services,
         IConfiguration? configuration = null)
@@ -194,6 +196,11 @@ public static class ServiceRegistration
         services.AddScoped<ILinklyCloudCredentialService, LinklyCloudCredentialService>();
         services.AddScoped<ILinklyCloudCredentialSchemaSqlExecutor, SqlSugarLinklyCloudCredentialSchemaSqlExecutor>();
         services.AddScoped<ILinklyCloudCredentialSchemaInitializer, SqlSugarLinklyCloudCredentialSchemaInitializer>();
+        // 回调可达性自探测：经公网地址回访自己，结果带缓存；超时要远小于健康检查的调用方超时。
+        services.AddHttpClient(LinklyCallbackProbeHttpClientName, client => client.Timeout = TimeSpan.FromSeconds(8));
+        services.AddSingleton<ILinklyCloudCallbackReachabilityProbe>(sp => new HttpLinklyCloudCallbackReachabilityProbe(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(LinklyCallbackProbeHttpClientName),
+            logger: sp.GetService<ILogger<HttpLinklyCloudCallbackReachabilityProbe>>()));
         services.AddScoped<ILinklyCloudBackendAsyncRepository, SqlSugarLinklyCloudBackendAsyncRepository>();
         services.AddScoped<ILinklyCloudBackendTerminalCredentialRepository, SqlSugarLinklyCloudBackendTerminalCredentialRepository>();
         services.AddScoped<ILinklyCloudTerminalRepository, SqlSugarLinklyCloudTerminalRepository>();

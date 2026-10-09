@@ -127,7 +127,8 @@ public sealed class LinklyCloudCredentialFailureControllerTests
         };
     }
 
-    private sealed class ThrowingBackendService(Exception exception)
+    // internal：回调可观测性测试复用；acceptNotifications 让回调通知成功，其余入口仍抛 exception。
+    internal sealed class ThrowingBackendService(Exception exception, bool acceptNotifications = false)
         : ILinklyCloudBackendAsyncService
     {
         public Task<LinklyCloudBackendSessionResponse> StartTransactionAsync(
@@ -194,6 +195,6 @@ public sealed class LinklyCloudCredentialFailureControllerTests
         public Task ReceiveNotificationAsync(
             string environment, string sessionId, string type, string? authorizationHeader,
             JsonElement payload, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            acceptNotifications ? Task.CompletedTask : throw exception;
     }
 }

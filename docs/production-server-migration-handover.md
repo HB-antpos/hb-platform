@@ -55,7 +55,11 @@
 /www/HBWeb/BackEnd/master-Vite/.env
 /www/HBWeb/BackEnd/master-Vite/docker-compose.yml
 /www/HBWeb/BackEnd/master-Vite/data-protection-keys/
+<ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH 指向的目录>            # 考勤二维码密钥目录，与收银后端共用，见第 4.2 节
+<LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH 指向的目录>  # Linkly 终端凭据密钥目录，与收银后端共用，见第 4.3 节
 ```
+
+后两个目录的宿主机路径由 `.env` 中的同名变量决定，路径在不同服务器上可以不同，但**主后端和收银后端的变量必须指向同一个目录**。
 
 主后端源码建议从已确认的 Git commit 重新同步和构建，不要把服务器上的 `bin/`、`obj/`、`node_modules/` 当成迁移资产。
 
@@ -66,11 +70,15 @@
 /www/HBWeb/BackEnd/hbpos-api/apps/pos-wpf/docker-compose.hotbargain.yml
 ```
 
-收银后端必须复用主后端的 DataProtection key ring，不应建立独立 key ring：
+收银后端的**全局** DataProtection ring（收银员授权票据、挂单密文等）使用独立的 Docker 命名卷 `hbpos-api-data-protection-keys`，
+**不再**挂载主后端的 `data-protection-keys`。收银后端与主后端只共享下面两个专用目录：
 
 ```text
-/www/HBWeb/BackEnd/master-Vite/data-protection-keys
+<ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH 指向的目录>
+<LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH 指向的目录>
 ```
+
+`hbpos-api-data-protection-keys` 卷随容器重建保留；迁移服务器时需要连卷一起备份恢复，否则已保存的挂单密文无法解开。
 
 ### 3.4 TLS 证书
 
@@ -87,48 +95,64 @@
 
 TLS 私钥不得复制进 Git、Docker 镜像、前端目录或应用容器。
 
-## 4. 必须共享的 DataProtection key ring
+## 4. DataProtection key ring（三套，用途不同，丢失后果不同）
 
-主后端和收银后端必须挂载同一个宿主机目录：
+| 编号 | 用途 | 主后端挂载 | 收银后端挂载 | 是否必须同一目录 |
+| --- | --- | --- | --- | --- |
+| 4.1 | 主后端全局 ring（SMTP 密码密文等） | `./data-protection-keys` → `/app/App_Data/DataProtectionKeys` | 不使用 | 否，仅主后端 |
+| 4.2 | 考勤二维码签名密钥 | `${ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH}` → `/app/App_Data/AttendanceQrDataProtectionKeys` | 同一变量、同一容器路径 | **是** |
+| 4.3 | Linkly 终端凭据（密码、配对 secret） | `${LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH}` → `/app/App_Data/LinklyCloudCredentialDataProtectionKeys` | 同一变量、同一容器路径 | **是** |
 
-```text
-宿主机：/www/HBWeb/BackEnd/master-Vite/data-protection-keys
-容器内：/app/App_Data/DataProtectionKeys
-```
+收银后端自己的全局 ring 是独立命名卷 `hbpos-api-data-protection-keys`（见 3.3），不属于上表的共享项。
 
-主后端挂载：
+### 4.1 主后端全局 ring
 
 ```yaml
+# services/backend/docker-compose.yml
 volumes:
   - ./data-protection-keys:/app/App_Data/DataProtectionKeys
 ```
 
-收银后端 `.env`：
+### 4.2 考勤二维码 ring（主后端 ↔ 收银后端）
+
+两个 `.env` 写入同一个宿主机路径：
 
 ```dotenv
-DATA_PROTECTION_KEYS_HOST_PATH=/www/HBWeb/BackEnd/master-Vite/data-protection-keys
+ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH=<同一个宿主机目录>
 ```
 
-收银后端挂载：
-
-```yaml
-volumes:
-  - ${DATA_PROTECTION_KEYS_HOST_PATH}:/app/App_Data/DataProtectionKeys
-```
-
-迁移要求：
-
-- 必须复制完整 key ring，不能只复制最新文件。
-- 保留文件名、内容、时间和访问权限。
-- 两个容器都必须能够读取；需要生成新 key 时还必须能够写入。
-- 不得在新服务器启动 API 后才补 key ring，否则容器可能先生成一套不兼容的新密钥。
-- 不得删除旧 key。旧 key 仍用于解密数据库中的历史密文和已登记的考勤二维码签名密钥。
-
-如果 key ring 丢失或两套 API 挂载不同目录，会出现：
+丢失或两侧目录不一致时出现：
 
 ```text
 ATTENDANCE_QR_KEY_DECRYPT_FAILED
 ```
+
+### 4.3 Linkly 终端凭据 ring（主后端 ↔ 收银后端）
+
+主后端（Web 管理端）录入终端密码时加密；收银后端配对、发起交易时解密。两侧靠**目录里的同一批 key 文件**互通，所以：
+
+```dotenv
+# 主后端 .env 与收银后端 .env 必须写同一个宿主机路径
+LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH=<同一个宿主机目录>
+```
+
+compose 里这个变量用 `${...:?required}` 声明，**只检查变量非空，不检查目录里有没有 key**。
+迁移后如果目录是空的，API 启动时会悄悄生成一套新 key，库里已有的密文就全部解不开。症状：
+
+- 收银后端日志出现 Error：`Linkly Cloud credential key ring mismatch ... missingKeyId=<GUID>`（`missingKeyId` 是密文引用、但目录里找不到的那把 key）；
+- 门店 POS 的 Linkly 请求返回 `409 LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH`，提示“不要重新录入密码，检查 Admin 与 POS 的密钥目录”；
+- 终端列表整体显示 `NeedsRepair`，而 Web 管理端仍显示终端“就绪”（它只看数据库列，不验证 POS 能否解密）。
+
+**此时在后台重新录入密码没有用**：新密文仍由主后端的那套 key 加密，收银后端照样解不开。正确做法是把旧 key 文件恢复进该目录，并确认两个容器挂载的是同一个目录。
+
+### 4.4 共同的迁移要求（4.1–4.3 都适用）
+
+- 必须复制完整 key ring，不能只复制最新文件。
+- 保留文件名、内容、时间和访问权限。
+- 两个容器都必须能够读取；需要生成新 key 时还必须能够写入。
+- **必须在启动 API 之前恢复**，不得在新服务器启动 API 后才补 key ring，否则容器可能先生成一套不兼容的新密钥。
+- 不得删除旧 key。旧 key 仍用于解密数据库中的历史密文（SMTP 密码、考勤二维码签名密钥、Linkly 终端凭据）。
+- 部署后必须做一次连接测试，见第 9.8 节。
 
 ## 5. 环境变量与敏感配置清单
 
@@ -165,6 +189,13 @@ EAS_WEBHOOK_ALLOWED_ACCOUNT_NAME
 EAS_WEBHOOK_ALLOWED_PROJECT_NAME
 ```
 
+共享密钥目录（必须与收银后端 `.env` 中的同名变量指向同一个目录）：
+
+```text
+ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH
+LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH
+```
+
 第三方服务：
 
 ```text
@@ -183,7 +214,8 @@ TENCENT_IMAGE_REGION
 CONNECTION_STRING_DEFAULT
 CONNECTION_STRING_POSM
 CENTER_LOG_HBPOS_API_KEY
-DATA_PROTECTION_KEYS_HOST_PATH
+ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH
+LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH
 LINKLY_CLOUD_PRODUCTION_NOTIFICATION_BEARER
 LINKLY_CLOUD_SANDBOX_NOTIFICATION_BEARER
 LINKLY_CLOUD_PRODUCTION_POS_VENDOR_ID
@@ -276,7 +308,7 @@ git status --short --branch
 ```text
 前端 webroot 与 .user.ini
 两个生产 .env
-完整 DataProtection key ring
+完整 DataProtection key ring：主后端全局 ring、考勤二维码 ring、Linkly 凭据 ring，以及收银后端命名卷 hbpos-api-data-protection-keys
 Nginx vhost 配置
 TLS 证书与私钥，或重新签发所需资料
 Docker Compose 文件
@@ -287,14 +319,25 @@ Docker Compose 文件
 
 ### 9.3 恢复目录与敏感文件
 
-先恢复 DataProtection key ring 和 `.env`，再启动容器：
+先恢复三套 DataProtection key ring 和 `.env`，再启动任何容器：
 
 ```bash
 sudo install -d /www/HBWeb/BackEnd/master-Vite/data-protection-keys
+# 考勤、Linkly 目录的位置以两个 .env 里的同名变量为准（两个 .env 必须一致）
+sudo install -d "$ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH"
+sudo install -d "$LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH"
 sudo chmod 600 /www/HBWeb/BackEnd/master-Vite/.env
 sudo chmod 600 /www/HBWeb/BackEnd/hbpos-api/.env
 ```
 
+**恢复后、启动前**确认两个共享目录里确有从旧服务器复制来的 key 文件（`key-*.xml`），而不是空目录：
+
+```bash
+ls "$ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH"/key-*.xml
+ls "$LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH"/key-*.xml
+```
+
+compose 的 `:?required` 对空目录不会报错，容器会悄悄生成一套新 key，之后所有 Linkly 终端凭据都解不开。
 DataProtection 目录的 owner/mode 应从旧服务器原样保留，并验证两个容器都可读写。
 
 ### 9.4 构建、迁移和部署主后端
@@ -366,10 +409,11 @@ curl -fsS http://127.0.0.1:5002/api/health
 
 ### 9.5 部署收银后端
 
-确认 `.env` 中的共享路径：
+确认 `.env` 中的共享路径，并与主后端 `.env` 逐项比对（必须是同一个目录）：
 
 ```dotenv
-DATA_PROTECTION_KEYS_HOST_PATH=/www/HBWeb/BackEnd/master-Vite/data-protection-keys
+ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH=<与主后端相同>
+LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH=<与主后端相同>
 ```
 
 启动：
@@ -388,7 +432,7 @@ sudo docker inspect hbpos-api --format '{{.State.Health.Status}}'
 curl -fsS http://127.0.0.1:5003/api/v1/health
 ```
 
-验证两个容器挂载源一致：
+验证两个容器的考勤、Linkly 挂载源一致（Source 必须相同）：
 
 ```bash
 sudo docker inspect hb-platform-vite-api \
@@ -401,7 +445,7 @@ sudo docker inspect hbpos-api \
 
 1. 恢复或重新构建前端静态文件。
 2. 保留 `.user.ini`。
-3. 恢复 Nginx vhost。
+3. 恢复 Nginx vhost。`/pos-api/` 的反向代理片段已纳入仓库：`scripts/ops/nginx/hotbargain-pos-api.location.conf`，改动或重建后以它为准，并注意其中的约束（前缀剥离、透传 Authorization、读超时不低于 240 秒、不加 IP 白名单）。
 4. 安全迁移或重新签发 TLS 证书。
 5. 运行：
 
@@ -423,6 +467,21 @@ curl --resolve hotbargain.vip:443:NEW_SERVER_IP \
 
 确认通过后再修改 DNS A/AAAA 记录。
 
+### 9.8 Linkly 凭据与回调验证（部署后必做）
+
+目录挂载一致不等于能解密，必须用真实终端做一次连接测试：
+
+1. **凭据可解密**：在任一 POS 的设置页，对一台已配对的 Linkly 终端点 “Test Logon”（对应接口 `POST /api/v1/linkly/cloud-backend/terminals/{terminalId}/connection-test`，会让收银后端解密该终端凭据并换取 token）。
+   - 通过：说明收银后端能用共享 ring 解开该终端凭据。
+   - 返回 `LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH`，或收银后端日志出现 `key ring mismatch ... missingKeyId`：
+     停止后续步骤，回到第 4.3 节，把旧 key 文件恢复进共享目录；**不要**在后台重新录入密码。
+2. **回调可达**：POS 的 `cloud-backend/health` 会对随机 sessionId 经公网地址自探测，结果在检查项 `CALLBACK_REACHABILITY` 中。
+   也可以手工验证（命令见 `scripts/ops/nginx/hotbargain-pos-api.location.conf` 头部注释），期望 `200`。
+   - `401`：Authorization 头被代理层吞掉，或两侧 bearer 不一致；
+   - `403` / `404`：被 WAF、IP 白名单或前缀改写拦截；
+   - 超时或连接失败：POS 容器无法经公网域名回访自己（hairpin NAT / DNS），可能是误报，需结合 Linkly 沙箱实测判断。
+3. 失败只会影响按键提示和回单，交易结果仍能靠轮询取得，所以该检查是提示项，不会让 POS 停止刷卡；但上线验收必须确认它为就绪。
+
 ## 10. 强制验收清单
 
 基础服务：
@@ -440,9 +499,12 @@ curl --resolve hotbargain.vip:443:NEW_SERVER_IP \
 
 挂载与密钥：
 
-- [ ] 主后端和收银后端挂载同一个 DataProtection 宿主机目录
-- [ ] 容器内路径都是 `/app/App_Data/DataProtectionKeys`
+- [ ] 考勤二维码 ring：主后端和收银后端挂载同一个宿主机目录（容器内 `/app/App_Data/AttendanceQrDataProtectionKeys`）
+- [ ] Linkly 凭据 ring：主后端和收银后端挂载同一个宿主机目录（容器内 `/app/App_Data/LinklyCloudCredentialDataProtectionKeys`）
+- [ ] 上述两个目录在启动 API 前已恢复旧 key 文件（非空目录），且文件数量与旧服务器一致
+- [ ] 主后端全局 ring 与收银后端命名卷 `hbpos-api-data-protection-keys` 已随迁移恢复
 - [ ] 旧 DataProtection key 文件完整保留
+- [ ] Linkly 终端连接测试通过（无 `KEY_RING_MISMATCH`），见第 9.8 节
 - [ ] 两个 `.env` 权限正确且变量名齐全
 - [ ] 日志中没有密钥、连接串或 token 泄漏
 
@@ -451,7 +513,8 @@ curl --resolve hotbargain.vip:443:NEW_SERVER_IP \
 - [ ] Web 登录成功
 - [ ] 移动端登录和 API 请求成功
 - [ ] POS 设备认证成功
-- [ ] Linkly/Square 回调可达
+- [ ] Linkly 回调可达：`CALLBACK_REACHABILITY` 就绪，手工 `curl` 自测返回 `200`（第 9.8 节）
+- [ ] Square 回调可达
 - [ ] EAS webhook 验签成功
 - [ ] 图片/对象存储访问成功
 
@@ -480,7 +543,7 @@ curl --resolve hotbargain.vip:443:NEW_SERVER_IP \
 - 主后端或收银后端持续 unhealthy
 - 数据库连接失败或出现数据一致性风险
 - 登录、支付、订单或考勤主链路不可用
-- DataProtection 解密失败
+- DataProtection 解密失败（含 `ATTENDANCE_QR_KEY_DECRYPT_FAILED`、`LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH`）
 - TLS、Nginx 路由或 webhook 大面积失败
 
 ### 11.3 回滚步骤
@@ -505,7 +568,7 @@ DNS TTL：
 主后端镜像/容器：
 收银后端镜像/容器：
 数据库是否迁移：
-DataProtection key 文件数量：
+DataProtection key 文件数量（主后端全局 / 考勤 / Linkly 凭据 / 收银后端卷，分别记录）：
 TLS 证书到期时间：
 备份位置（不得记录密码）：
 切换开始时间：
