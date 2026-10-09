@@ -64,7 +64,12 @@ public sealed record ActiveSessionResolution(
     string Reason,
     string? Evidence,
     string? PaymentReference,
-    DateTimeOffset ResolvedAt);
+    DateTimeOffset ResolvedAt)
+{
+    // 已带批准证据（响应码 00/08/11，或已记为 Approved）却无法自动建单的记录的受控出口：
+    // 仅允许 ConfirmNotPaid 且必须由服务层按“主管已确认退款/另行处理”授权，仓储 CAS 条件才放宽证据排除。
+    public bool AllowApprovedEvidence { get; init; }
+}
 
 public static class ActiveSessionSupervisorResolutionCodes
 {
@@ -412,6 +417,16 @@ public interface ILocalCardPaymentAttemptRepository
         string deviceCode,
         string environment,
         CancellationToken cancellationToken = default);
+
+    // 分期（Create/Repayment）卡 attempt 由分期操作自己的恢复流程负责，不进入异常中心队列。
+    // 这里只列出同一终端/环境下尚未向后端确认的那部分，供活动会话接管按 SessionId/TxnRef 精确认领：
+    // 否则分期遗留的未确认会话会被接管成来源不明的 ActiveSession 待复核记录，分期操作却仍找不回自己的会话。
+    Task<IReadOnlyList<LocalCardPaymentAttempt>> GetUnacknowledgedInstallmentAttemptsAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<LocalCardPaymentAttempt>>([]);
 
     Task<IReadOnlyList<LocalCardPaymentAttempt>> GetRecentAttemptsAsync(
         string storeCode, string deviceCode, string environment,
@@ -1014,15 +1029,15 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 RecoveryPhase = 'None',
                 RecoveryTargetStatus = NULL,
                 CompletedAt = COALESCE(CompletedAt, $CompletedAt),
-                AcknowledgedAt = $CompletedAt,
+                -- 已批准未建单的 ActiveSession 记录在接管时就已 ack；出口结案只补终态，不重写原 ack 时间。
+                AcknowledgedAt = COALESCE(AcknowledgedAt, $CompletedAt),
                 UpdatedAt = $CompletedAt
             WHERE AttemptGuid = $AttemptGuid
               AND Status = $ExpectedStatus
               AND UpdatedAt = $ExpectedUpdatedAt
               AND ResponseCode = $ConfirmedNotPaidCode
               AND RecoveryPhase = 'FinalizePending'
-              AND RecoveryTargetStatus = $AbandonedStatus
-              AND AcknowledgedAt IS NULL;
+              AND RecoveryTargetStatus = $AbandonedStatus;
             """;
         command.Parameters.AddWithValue("$AttemptGuid", attemptGuid.ToString());
         command.Parameters.AddWithValue("$ExpectedStatus", expectedStatus.ToString());
@@ -1695,11 +1710,22 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
                 nameof(resolution));
         }
 
+        if (resolution.AllowApprovedEvidence &&
+            resolution.Decision != ActiveSessionSupervisorDecision.ConfirmNotPaid)
+        {
+            throw new ArgumentException(
+                "Approved-evidence closure only supports ConfirmNotPaid.",
+                nameof(resolution));
+        }
+
         if (resolution.ExpectedStatus is not (
                 LocalCardPaymentAttemptStatus.Pending or
                 LocalCardPaymentAttemptStatus.SessionStarted or
                 LocalCardPaymentAttemptStatus.Recovering or
-                LocalCardPaymentAttemptStatus.RequiresReview))
+                LocalCardPaymentAttemptStatus.RequiresReview) &&
+            // 已批准未建单的记录（Approved）只有“主管确认已退款/另行处理”这一个受控出口。
+            !(resolution.AllowApprovedEvidence &&
+              resolution.ExpectedStatus == LocalCardPaymentAttemptStatus.Approved))
         {
             // 列表读取后记录可能已经被其他恢复流程终态化；这属于 CAS 失利，不是调用参数错误。
             return false;
@@ -1752,14 +1778,20 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
               AND UpdatedAt = $ExpectedUpdatedAt
               AND COALESCE(RecoveryPhase, $NoRecoveryPhase) <> $FinalizePending
               AND COALESCE(ResponseCode, '') NOT IN ($ResolvedCode1, $ResolvedCode2)
-              AND NULLIF(TRIM(COALESCE(PaymentReference, '')), '') IS NULL
-              AND UPPER(TRIM(COALESCE(ResponseCode, ''))) NOT IN (
-                    $ApprovedCode1,
-                    $ApprovedCode2,
-                    $ApprovedCode3
+              AND (
+                    $AllowApprovedEvidence = 1
+                    OR (
+                        NULLIF(TRIM(COALESCE(PaymentReference, '')), '') IS NULL
+                        AND UPPER(TRIM(COALESCE(ResponseCode, ''))) NOT IN (
+                            $ApprovedCode1,
+                            $ApprovedCode2,
+                            $ApprovedCode3
+                          )
+                    )
                   );
             """;
         command.Parameters.AddWithValue("$AttemptGuid", resolution.AttemptGuid.ToString());
+        command.Parameters.AddWithValue("$AllowApprovedEvidence", resolution.AllowApprovedEvidence ? 1 : 0);
         command.Parameters.AddWithValue("$SessionId", resolution.SessionId.Trim());
         command.Parameters.AddWithValue(
             "$ExpectedStatus",
@@ -2030,6 +2062,31 @@ public sealed class LocalCardPaymentAttemptRepository(LocalSqliteStore store) : 
             attempts.Add(ReadAttempt(reader));
         }
 
+        return attempts;
+    }
+
+    public async Task<IReadOnlyList<LocalCardPaymentAttempt>> GetUnacknowledgedInstallmentAttemptsAsync(
+        string storeCode,
+        string deviceCode,
+        string environment,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM LocalCardPaymentAttempts
+            WHERE StoreCode = $StoreCode AND DeviceCode = $DeviceCode AND Environment = $Environment
+              AND OperationKind IN ('Create', 'Repayment')
+              AND AcknowledgedAt IS NULL
+              AND TxnRef IS NOT NULL
+            ORDER BY UpdatedAt DESC, CreatedAt DESC LIMIT 50;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", storeCode);
+        command.Parameters.AddWithValue("$DeviceCode", deviceCode);
+        command.Parameters.AddWithValue("$Environment", environment);
+        var attempts = new List<LocalCardPaymentAttempt>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) attempts.Add(ReadAttempt(reader));
         return attempts;
     }
 

@@ -71,6 +71,12 @@ public sealed class LinklyCardPaymentResultPolicy : ICardPaymentResultPolicy
                 CardPaymentTerminalOutcome.ResultUnknown,
                 CardPaymentErrorKind.ActiveSessionRequiresRecovery,
                 PreserveStatus: true),
+            // 本机还有未结的刷卡交易：不是新交易的结果未知，不锁付款页（可改用其他方式付款），
+            // 但提示去异常中心处理，处理完成前不会向终端发起新的扣款。
+            "linkly.recovery.openAttemptBlocksPayment" => new(
+                CardPaymentTerminalOutcome.None,
+                CardPaymentErrorKind.ActiveSessionRequiresRecovery,
+                PreserveStatus: true),
             "linkly.local.connectionFailed" or "payment.card.linklyUnavailable" => new(
                 CardPaymentTerminalOutcome.None,
                 CardPaymentErrorKind.ConnectionFailed),

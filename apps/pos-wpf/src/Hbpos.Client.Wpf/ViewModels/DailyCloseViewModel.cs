@@ -153,6 +153,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         CancelSettlementManualResolutionCommand = new RelayCommand(
             CancelSettlementManualResolution,
             CanCancelSettlementManualResolution);
+        QuerySettlementResultCommand = new AsyncRelayCommand(
+            QuerySettlementResultAsync,
+            CanQuerySettlementResult);
         OpenCashCountDialogCommand = new RelayCommand<CashDenominationEntryViewModel>(
             OpenCashCountDialog,
             CanOpenCashCountDialog);
@@ -212,6 +215,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand ConfirmSettlementManualResolutionCommand { get; }
 
     public IRelayCommand CancelSettlementManualResolutionCommand { get; }
+
+    // 只向 Linkly 服务端查询选中结算的结果并补录，绝不发送新结算（CloudBackendAsync 的未决记录，含前一营业日的）。
+    public IAsyncRelayCommand QuerySettlementResultCommand { get; }
 
     public IRelayCommand<CashDenominationEntryViewModel> OpenCashCountDialogCommand { get; }
 
@@ -294,10 +300,14 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 ClearPendingSettlementManualResolution();
                 ReprintSelectedSettlementCommand.NotifyCanExecuteChanged();
                 PrepareSettlementManualResolutionCommand.NotifyCanExecuteChanged();
+                QuerySettlementResultCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(IsSettlementManualResolutionVisible));
+                OnPropertyChanged(nameof(IsSettlementQueryVisible));
             }
         }
     }
+
+    public bool IsSettlementQueryVisible => IsSettlementQueryEligible(SelectedSettlement);
 
     public bool IsSettlementManualResolutionVisible =>
         CanPrepareSettlementManualResolution(LocalLinklySettlementManualResolution.ConfirmedSucceeded);
@@ -974,7 +984,9 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 OperationAuditTypes.LinklySettlement,
                 settlementSucceeded ? "Succeeded" : "Failed",
                 Session,
-                reasonCode: execution.ResultUnknown
+                reasonCode: execution.BlockedByEarlierBusinessDay
+                    ? "EARLIER_BUSINESS_DAY_UNRESOLVED"
+                    : execution.ResultUnknown
                     ? "RESULT_UNKNOWN"
                     : execution.ReusedFinalEvidence
                         ? "REUSED_FINAL_EVIDENCE"
@@ -991,6 +1003,15 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 traceId: correlation.TraceId);
             auditRecorded = true;
             await RefreshSettlementsAsync(cancellationToken, execution.Settlement.SettlementGuid);
+
+            if (execution.BlockedByEarlierBusinessDay)
+            {
+                // 前一营业日有没补完的结算：今天的没有发送。营业日页切到那一天，在结算页签查询或结案后再发今天的。
+                return Format(
+                    "dailyClose.linklySettlement.blockedEarlierBusinessDay",
+                    "An unresolved Linkly settlement from {0:yyyy-MM-dd} must be resolved first, so today's settlement was not sent. Change the business date to {0:yyyy-MM-dd}, open the Linkly Settlement tab, then query the result or record the supervisor decision.",
+                    execution.Settlement.BusinessDate);
+            }
 
             return execution.ResultUnknown
                 ? T(
@@ -1343,6 +1364,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         PrepareSettlementManualResolutionCommand.NotifyCanExecuteChanged();
         ConfirmSettlementManualResolutionCommand.NotifyCanExecuteChanged();
         CancelSettlementManualResolutionCommand.NotifyCanExecuteChanged();
+        QuerySettlementResultCommand.NotifyCanExecuteChanged();
         OpenCashCountDialogCommand.NotifyCanExecuteChanged();
         CancelCashCountDialogCommand.NotifyCanExecuteChanged();
         KeypadInputCommand.NotifyCanExecuteChanged();
@@ -1543,7 +1565,95 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         return settlement is not null &&
             settlement.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown &&
             (string.Equals(settlement.ConnectionMode, LinklyConnectionMode.LocalIp.ToString(), StringComparison.Ordinal) ||
-             string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudDirectSync.ToString(), StringComparison.Ordinal));
+             string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudDirectSync.ToString(), StringComparison.Ordinal) ||
+             string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudBackendAsync.ToString(), StringComparison.Ordinal));
+    }
+
+    private static bool IsSettlementQueryEligible(LocalLinklySettlementRecord? settlement)
+    {
+        return settlement is not null &&
+            settlement.Status is LocalLinklySettlementStatus.Pending or LocalLinklySettlementStatus.Unknown &&
+            string.Equals(settlement.ConnectionMode, LinklyConnectionMode.CloudBackendAsync.ToString(), StringComparison.Ordinal);
+    }
+
+    private bool CanQuerySettlementResult()
+    {
+        return !IsBusy &&
+            _linklySettlementService is not null &&
+            IsSettlementQueryEligible(SelectedSettlement);
+    }
+
+    private async Task QuerySettlementResultAsync(CancellationToken cancellationToken = default)
+    {
+        if (!CanQuerySettlementResult())
+        {
+            return;
+        }
+
+        // 查询会把结果写回本地并 ack 服务端会话，与结案同权限。
+        using var authorization = await ViewModelOperationAuthorization.AuthorizeAsync(
+            _operationAuthorizationService,
+            TryRequirePermission,
+            Permissions.PosTerminal.DailyClose.Save,
+            "daily-close",
+            "query-linkly-settlement",
+            Session,
+            cancellationToken);
+        if (authorization is null || !CanQuerySettlementResult())
+        {
+            return;
+        }
+        using var authorizationActivation = authorization.Activate();
+
+        var settlement = SelectedSettlement!;
+        IsBusy = true;
+        var correlation = OperationAuditEvents.CreateCorrelation();
+        var auditRecorded = false;
+        try
+        {
+            var result = await _linklySettlementService!.QueryUnresolvedAsync(Session, settlement, cancellationToken);
+            OperationAuditEvents.RecordAction(
+                _operationAuditLogger,
+                OperationAuditTypes.LinklySettlement,
+                result.Resolved ? "Succeeded" : "Failed",
+                Session,
+                reasonCode: result.Resolved ? "QUERY_RESOLVED" : "QUERY_UNRESOLVED",
+                safeMessage: result.Resolved ? null : result.Message,
+                orderGuid: settlement.SettlementGuid.ToString("D"),
+                correlationId: correlation.CorrelationId,
+                traceId: correlation.TraceId);
+            auditRecorded = true;
+            await RefreshSettlementsAsync(cancellationToken, settlement.SettlementGuid);
+            StatusMessage = result.Resolved
+                ? T(
+                    "dailyClose.linklySettlement.query.resolved",
+                    "The Linkly settlement result was found and recorded. No new settlement was sent.")
+                : T(
+                    "dailyClose.linklySettlement.query.unresolved",
+                    "The Linkly settlement result is still unavailable. If the terminal shows the result, record the supervisor decision below.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (!auditRecorded)
+            {
+                OperationAuditEvents.RecordAction(
+                    _operationAuditLogger,
+                    OperationAuditTypes.LinklySettlement,
+                    "Failed",
+                    Session,
+                    reasonCode: "QUERY_EXCEPTION",
+                    safeMessage: ex.GetType().Name,
+                    orderGuid: settlement.SettlementGuid.ToString("D"),
+                    correlationId: correlation.CorrelationId,
+                    traceId: correlation.TraceId);
+            }
+
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task ApplySelectedArchiveAsync(

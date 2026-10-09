@@ -7,7 +7,7 @@ using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
-public sealed class CashPaymentWorkflowServiceTask2BTests
+public sealed partial class CashPaymentWorkflowServiceTask2BTests
 {
     [Fact]
     public async Task Takeover_creates_generic_review_session_and_persists_before_ack_then_starts_new()
@@ -521,6 +521,102 @@ public sealed class CashPaymentWorkflowServiceTask2BTests
         var updated = Assert.Single(attempts.Attempts, attempt => attempt.AttemptGuid == existing.AttemptGuid);
         Assert.Equal("active-session-1", updated.SessionId);
         Assert.Equal(LocalCardPaymentAttemptStatus.Approved, updated.Status);
+    }
+
+    [Theory]
+    [InlineData("Create")]
+    [InlineData("Repayment")]
+    public async Task Takeover_binds_the_session_to_the_unacknowledged_installment_attempt_instead_of_creating_a_generic_record(
+        string installmentKind)
+    {
+        // 分期 attempt 不在异常中心的未结队列里；后端模式下它的 TxnRef 在发请求前就已落库。
+        // 遗留的未确认会话必须按 TxnRef 认领到分期自己的 attempt，否则会另建一条来源不明的 ActiveSession 待复核记录，
+        // 分期操作却再也找不回自己的会话。
+        var events = new List<string>();
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var installmentAttempt = CreateExistingAttempt("Sale", null, "TXN-OLD", session, Guid.NewGuid()) with
+        {
+            OperationKind = installmentKind,
+            OperationGuid = Guid.NewGuid(),
+            Status = LocalCardPaymentAttemptStatus.Pending
+        };
+        var attempts = new RecordingAttemptRepository(events, initialAttempts: [installmentAttempt]);
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var backend = new RecordingBackendTerminalClient(
+            events,
+            FinalApprovedSession("active-session-1", "TXN-OLD") with
+            {
+                CardTransaction = VerifiedCardTransaction("TXN-OLD", 1000)
+            });
+        var settings = CreateBackendLinklySettings();
+        var terminal = new TakeoverInvokingCardTerminalClient(
+            accessor,
+            settings,
+            ActivePendingSession("active-session-1", "TXN-OLD"),
+            events);
+        var workflow = CreateWorkflow(terminal, attempts, settings, accessor, backend);
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-T2B-INST", "Installment Takeover Tea", "930T2BINST", 10m));
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            10m,
+            [],
+            "10.00",
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded);
+        Assert.DoesNotContain(attempts.Attempts, attempt => attempt.OperationKind == "ActiveSession");
+        var updated = Assert.Single(attempts.Attempts, attempt => attempt.AttemptGuid == installmentAttempt.AttemptGuid);
+        Assert.Equal("active-session-1", updated.SessionId);
+        Assert.Equal(LocalCardPaymentAttemptStatus.Approved, updated.Status);
+        Assert.NotNull(updated.AcknowledgedAt);
+        Assert.True(events.IndexOf("persist-final") < events.IndexOf("acknowledge"));
+    }
+
+    [Fact]
+    public async Task Takeover_ignores_an_installment_attempt_with_a_different_txn_ref()
+    {
+        var events = new List<string>();
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        var installmentAttempt = CreateExistingAttempt("Sale", null, "TXN-OTHER", session, Guid.NewGuid()) with
+        {
+            OperationKind = "Repayment",
+            OperationGuid = Guid.NewGuid(),
+            Status = LocalCardPaymentAttemptStatus.Pending
+        };
+        var attempts = new RecordingAttemptRepository(events, initialAttempts: [installmentAttempt]);
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var backend = new RecordingBackendTerminalClient(
+            events,
+            FinalApprovedSession("active-session-1", "TXN-OLD") with
+            {
+                CardTransaction = VerifiedCardTransaction("TXN-OLD", 1000)
+            });
+        var settings = CreateBackendLinklySettings();
+        var terminal = new TakeoverInvokingCardTerminalClient(
+            accessor,
+            settings,
+            ActivePendingSession("active-session-1", "TXN-OLD"),
+            events);
+        var workflow = CreateWorkflow(terminal, attempts, settings, accessor, backend);
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-T2B-INST2", "Installment Other Tea", "930T2BINST2", 10m));
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            10m,
+            [],
+            "10.00",
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded);
+        Assert.Single(attempts.Attempts, attempt => attempt.OperationKind == "ActiveSession");
+        var untouched = Assert.Single(attempts.Attempts, attempt => attempt.AttemptGuid == installmentAttempt.AttemptGuid);
+        Assert.Null(untouched.SessionId);
+        Assert.Equal(LocalCardPaymentAttemptStatus.Pending, untouched.Status);
     }
 
     [Fact]
@@ -1073,6 +1169,21 @@ public sealed class CashPaymentWorkflowServiceTask2BTests
                         LocalCardPaymentAttemptStatus.Approved or
                         LocalCardPaymentAttemptStatus.RequiresReview))
                 .OrderByDescending(attempt => attempt.UpdatedAt)
+                .ToArray());
+
+        public Task<IReadOnlyList<LocalCardPaymentAttempt>> GetUnacknowledgedInstallmentAttemptsAsync(
+            string storeCode,
+            string deviceCode,
+            string environment,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<LocalCardPaymentAttempt>>(Attempts
+                .Where(attempt =>
+                    string.Equals(attempt.StoreCode, storeCode, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(attempt.DeviceCode, deviceCode, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(attempt.Environment, environment, StringComparison.OrdinalIgnoreCase) &&
+                    attempt.OperationKind is "Create" or "Repayment" &&
+                    attempt.AcknowledgedAt is null &&
+                    attempt.TxnRef is not null)
                 .ToArray());
 
         public Task<LocalCardPaymentAttempt?> GetAttemptAsync(Guid attemptGuid, CancellationToken cancellationToken = default) =>

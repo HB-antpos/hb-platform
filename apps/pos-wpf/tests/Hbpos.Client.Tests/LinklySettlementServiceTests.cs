@@ -775,7 +775,8 @@ public sealed class LinklySettlementServiceTests
             Assert.True(result.ResultUnknown);
             Assert.Equal(unresolved.SettlementGuid, stored.SettlementGuid);
             Assert.Equal(LocalLinklySettlementStatus.Unknown, stored.Status);
-            Assert.Equal(1, backend.GetResumableSettlementCallCount);
+            // 云端模式下结算前先对账前一营业日遗留会话（1 次查询），再做同日恢复（1 次查询）。
+            Assert.Equal(2, backend.GetResumableSettlementCallCount);
             Assert.Equal(0, terminal.SettlementCallCount);
             Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
             Assert.Equal(0, backend.MarkReceiptPrintedCallCount);
@@ -835,7 +836,8 @@ public sealed class LinklySettlementServiceTests
             Assert.Equal("expected-settlement-001", stored.ProviderSessionId);
             Assert.Equal(LocalLinklySettlementStatus.Unknown, stored.Status);
             Assert.Empty(stored.ReceiptTexts);
-            Assert.Equal(1, backend.GetResumableSettlementCallCount);
+            // 云端模式下结算前先对账前一营业日遗留会话（1 次查询），再做同日恢复（1 次查询）。
+            Assert.Equal(2, backend.GetResumableSettlementCallCount);
             Assert.Equal(0, terminal.SettlementCallCount);
             Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
             Assert.Equal(0, backend.MarkReceiptPrintedCallCount);
@@ -895,7 +897,9 @@ public sealed class LinklySettlementServiceTests
             Assert.Equal(unresolved.SettlementGuid, stored.SettlementGuid);
             Assert.Null(stored.ProviderSessionId);
             Assert.Equal(LocalLinklySettlementStatus.Unknown, stored.Status);
-            Assert.Equal(0, backend.GetResumableSettlementCallCount);
+            // 结算前的前一营业日对账只查当前环境（Sandbox）的会话，不会碰另一环境（Production）的未决记录。
+            Assert.Equal(1, backend.GetResumableSettlementCallCount);
+            Assert.Equal(CardTerminalEnvironment.Sandbox, backend.LastResumableSettlementSettings?.Environment);
             Assert.Equal(0, terminal.SettlementCallCount);
             Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
             Assert.Equal(0, backend.MarkReceiptPrintedCallCount);
@@ -950,7 +954,8 @@ public sealed class LinklySettlementServiceTests
             Assert.Equal(unresolved.SettlementGuid, result.Settlement.SettlementGuid);
             Assert.Equal(unresolved.SettlementGuid, stored.SettlementGuid);
             Assert.Equal(LocalLinklySettlementStatus.Unknown, stored.Status);
-            Assert.Equal(1, backend.GetResumableSettlementCallCount);
+            // 前一营业日对账那次查询超时被忽略（不阻塞），同日恢复的查询再超时才把原记录按未决阻塞。
+            Assert.Equal(2, backend.GetResumableSettlementCallCount);
             Assert.Equal(0, terminal.SettlementCallCount);
             Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
             Assert.Equal(0, backend.MarkReceiptPrintedCallCount);
@@ -1484,6 +1489,415 @@ public sealed class LinklySettlementServiceTests
         }
     }
 
+    private static async Task<(LocalSqliteStore Store, LocalLinklySettlementRepository Repository, string DatabasePath)> CreateCloudRepositoryAsync(string name)
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-linkly-settlement-{name}-{Guid.NewGuid():N}.db");
+        var store = new LocalSqliteStore(databasePath);
+        await new LocalSchemaService(store).InitializeAsync();
+        return (store, new LocalLinklySettlementRepository(store), databasePath);
+    }
+
+    private static void DeleteDatabase(string databasePath)
+    {
+        SqliteConnection.ClearAllPools();
+        foreach (var path in new[] { databasePath, $"{databasePath}-wal", $"{databasePath}-shm" })
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    private static CardTerminalSettings CloudSettings() => CardTerminalSettings.FromEnvironment() with
+    {
+        Processor = CardProcessorKind.Linkly,
+        LinklyConnectionMode = LinklyConnectionMode.CloudBackendAsync
+    };
+
+    private static PosSessionState CreatePosSession() =>
+        new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+    [Fact]
+    public async Task Earlier_business_day_unknown_settlement_is_completed_before_todays_settlement_is_sent()
+    {
+        // 回归 H14：D 日结算结果未知（带 sessionId），D+1 日结算时必须先把 D 日的补完并 ack，
+        // 再单独发今天的结算；不能把 D 日会话当成今天的结算接管。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("earlier-unknown");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            await CreateUnknownSettlementAsync(repository, session, yesterday, "settlement-yesterday");
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "Settled", "settlement-today", "00", "Approved", "Totals", ["TODAY RECEIPT"], ProviderSubmissionState: ProviderSubmissionState.Submitted));
+            var printer = new FakeLinklyBankReceiptPrinter();
+            var backend = new FakeLinklyBackendTerminalClient();
+            backend.ResumableSettlementSequence.Enqueue(CreateResumableSettlement(
+                "settlement-yesterday", "Completed", operationSuccess: true, receiptTexts: ["YESTERDAY RECEIPT"], createdAt: DateTimeOffset.Now.AddDays(-1)));
+            backend.ResumableSettlementSequence.Enqueue(null);
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, printer, backend);
+
+            var result = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            var earlier = Assert.Single(await service.GetHistoryAsync(session, yesterday));
+            Assert.Equal(LocalLinklySettlementStatus.Succeeded, earlier.Status);
+            Assert.Equal("YESTERDAY RECEIPT", Assert.Single(earlier.ReceiptTexts));
+            Assert.Equal(["settlement-yesterday"], backend.AcknowledgedSessionIds.Take(1));
+            Assert.False(result.BlockedByEarlierBusinessDay);
+            Assert.Equal(1, terminal.SettlementCallCount);
+            var today = Assert.Single(await service.GetHistoryAsync(session, DateTime.Today));
+            Assert.Equal(result.Settlement.SettlementGuid, today.SettlementGuid);
+            Assert.Equal("settlement-today", today.ProviderSessionId);
+            Assert.Equal(["TODAY RECEIPT"], today.ReceiptTexts);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Earlier_business_day_session_is_bound_to_the_matching_unbound_record_not_to_todays_record()
+    {
+        // H14 变体：D 日本地记录没有 sessionId，服务端会话 S1（D 日创建）未 ack。
+        // 旧行为是把 S1 绑到 D+1 的记录上，结果记错日期。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("earlier-unbound");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unbound = await CreateUnknownSettlementAsync(repository, session, yesterday, providerSessionId: null);
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "Settled", "settlement-today", "00", "Approved", "Totals", ["TODAY RECEIPT"], ProviderSubmissionState: ProviderSubmissionState.Submitted));
+            var backend = new FakeLinklyBackendTerminalClient();
+            backend.ResumableSettlementSequence.Enqueue(CreateResumableSettlement(
+                "settlement-yesterday", "Completed", operationSuccess: true, receiptTexts: ["YESTERDAY RECEIPT"], createdAt: DateTimeOffset.Now.AddDays(-1)));
+            backend.ResumableSettlementSequence.Enqueue(null);
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            var earlier = Assert.Single(await service.GetHistoryAsync(session, yesterday));
+            Assert.Equal(unbound.SettlementGuid, earlier.SettlementGuid);
+            Assert.Equal("settlement-yesterday", earlier.ProviderSessionId);
+            Assert.Equal(LocalLinklySettlementStatus.Succeeded, earlier.Status);
+            var today = Assert.Single(await service.GetHistoryAsync(session, DateTime.Today));
+            Assert.Equal("settlement-today", today.ProviderSessionId);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Earlier_business_day_settlement_that_cannot_be_completed_blocks_todays_settlement()
+    {
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("earlier-blocked");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, yesterday, "settlement-yesterday");
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be submitted"));
+            var backend = new FakeLinklyBackendTerminalClient
+            {
+                // 服务端等回调超时后收口成“结果未知”：不可交付。
+                ResumableSettlement = CreateResumableSettlement(
+                    "settlement-yesterday", "Pending", createdAt: DateTimeOffset.Now.AddDays(-1), recoveryAction: "ResultUnknown")
+            };
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            var result = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            Assert.True(result.BlockedByEarlierBusinessDay);
+            Assert.True(result.ResultUnknown);
+            Assert.Equal(unknown.SettlementGuid, result.Settlement.SettlementGuid);
+            Assert.Equal(0, terminal.SettlementCallCount);
+            Assert.Empty(await service.GetHistoryAsync(session, DateTime.Today));
+            Assert.Equal(LocalLinklySettlementStatus.Unknown, Assert.Single(await service.GetHistoryAsync(session, yesterday)).Status);
+            Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Earlier_business_day_server_session_without_local_record_is_adopted_and_acknowledged()
+    {
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("earlier-orphan");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "Settled", "settlement-today", "00", "Approved", "Totals", ["TODAY RECEIPT"], ProviderSubmissionState: ProviderSubmissionState.Submitted));
+            var backend = new FakeLinklyBackendTerminalClient();
+            // 银行拒绝、没有回单：OperationSuccess=false 即失败终态（与服务端同口径）。
+            backend.ResumableSettlementSequence.Enqueue(CreateResumableSettlement(
+                "settlement-orphan", "Completed", operationSuccess: false, createdAt: DateTimeOffset.Now.AddDays(-1)));
+            backend.ResumableSettlementSequence.Enqueue(null);
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            var adopted = Assert.Single(await service.GetHistoryAsync(session, yesterday));
+            Assert.Equal("settlement-orphan", adopted.ProviderSessionId);
+            Assert.Equal(LocalLinklySettlementStatus.Failed, adopted.Status);
+            Assert.Contains("settlement-orphan", backend.AcknowledgedSessionIds);
+            Assert.Equal(1, terminal.SettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Earlier_business_day_session_whose_local_record_is_final_gets_its_acknowledgement_replayed()
+    {
+        // ack 补发：本地早已定论，只是当时 ack 失败，服务端会话一直未 ack。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("earlier-ack-replay");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, yesterday, "settlement-yesterday");
+            Assert.True(await repository.TryResolveUncertainAsync(
+                unknown.SettlementGuid, unknown.PayloadRevision, LocalLinklySettlementManualResolution.ConfirmedFailed, DateTimeOffset.UtcNow));
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "Settled"));
+            var backend = new FakeLinklyBackendTerminalClient();
+            // 服务端会话仍是非终态（主管结案的情形）：补发 ack 要带主管标记才能关闭它。
+            backend.ResumableSettlementSequence.Enqueue(CreateResumableSettlement(
+                "settlement-yesterday", "Pending", createdAt: DateTimeOffset.Now.AddDays(-1), recoveryAction: "ResultUnknown"));
+            backend.ResumableSettlementSequence.Enqueue(null);
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            Assert.Equal(["settlement-yesterday"], backend.SupervisorAcknowledgedSessionIds);
+            Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
+            Assert.Equal(1, terminal.SettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Todays_unbound_record_is_not_bound_to_a_session_created_on_another_business_day()
+    {
+        // 回归 M25：恢复逻辑原先会把任意 resumable 会话绑到当天没有 sessionId 的记录上。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("day-mismatch");
+        try
+        {
+            var session = CreatePosSession();
+            var unbound = await CreateUnknownSettlementAsync(repository, session, DateTime.Today, providerSessionId: null);
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be submitted"));
+            var backend = new FakeLinklyBackendTerminalClient();
+            // 对账那次查询失败被忽略，同日恢复那次查询却返回了昨天的会话（例如两次查询之间服务端状态变化）。
+            backend.ResumableSettlementSequence.Enqueue(null);
+            backend.ResumableSettlementSequence.Enqueue(CreateResumableSettlement(
+                "settlement-yesterday", "Completed", operationSuccess: true, receiptTexts: ["YESTERDAY RECEIPT"], createdAt: DateTimeOffset.Now.AddDays(-1)));
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            var result = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            Assert.True(result.ResultUnknown);
+            var stored = Assert.Single(await service.GetHistoryAsync(session, DateTime.Today));
+            Assert.Equal(unbound.SettlementGuid, stored.SettlementGuid);
+            Assert.Null(stored.ProviderSessionId);
+            Assert.Equal(LocalLinklySettlementStatus.Unknown, stored.Status);
+            Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
+            Assert.Equal(0, terminal.SettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Unknown_record_without_session_is_confirmed_not_submitted_when_the_server_has_no_session()
+    {
+        // 回归 M24：服务端在建会话前就拒绝了（终端未配对等），本地记录没有 sessionId，服务端也没有任何会话，
+        // 这条记录不能一直是未决，否则当天再也无法结算。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("not-submitted");
+        try
+        {
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, DateTime.Today, providerSessionId: null);
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be submitted"));
+            var backend = new FakeLinklyBackendTerminalClient();
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            var result = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            Assert.Equal(unknown.SettlementGuid, result.Settlement.SettlementGuid);
+            Assert.Equal(LocalLinklySettlementStatus.Failed, result.Settlement.Status);
+            Assert.False(result.ResultUnknown);
+            var stored = Assert.Single(await service.GetHistoryAsync(session, DateTime.Today));
+            Assert.Equal(LocalLinklySettlementStatus.Failed, stored.Status);
+            Assert.Equal(ProviderSubmissionState.NotSubmitted, stored.ProviderSubmissionState);
+            Assert.Equal(0, terminal.SettlementCallCount);
+            Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Recently_started_pending_record_without_session_is_not_confirmed_not_submitted()
+    {
+        // 刚创建的 Pending 记录可能是另一次结算正在进行（还没建出服务端会话），不能据此断定未提交。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("pending-in-flight");
+        try
+        {
+            var session = CreatePosSession();
+            var pending = new LocalLinklySettlementRecord(
+                Guid.NewGuid(), session.StoreCode, session.DeviceCode, DateTime.Today,
+                LinklyConnectionMode.CloudBackendAsync.ToString(), CardTerminalEnvironment.Production.ToString(),
+                ProviderSessionId: null, LocalLinklySettlementStatus.Pending, null, null, null, [],
+                DateTimeOffset.UtcNow, null, null, null, 0, null);
+            await repository.CreatePendingAsync(pending);
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be submitted"));
+            var service = new LinklySettlementService(
+                terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), new FakeLinklyBackendTerminalClient());
+
+            var result = await service.SettleAndPrintAsync(session, DateTime.Today);
+
+            Assert.Equal(LocalLinklySettlementStatus.Pending, result.Settlement.Status);
+            Assert.Equal(0, terminal.SettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Supervisor_resolution_of_a_cloud_backend_settlement_acknowledges_the_server_session_as_supervisor_resolved()
+    {
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("cloud-supervisor");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, yesterday, "settlement-yesterday");
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be submitted"));
+            var backend = new FakeLinklyBackendTerminalClient();
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            var result = await service.ResolveUncertainAsync(session, unknown, LocalLinklySettlementManualResolution.ConfirmedFailed);
+
+            Assert.True(result.Resolved);
+            Assert.Equal(LocalLinklySettlementStatus.Failed, result.Settlement.Status);
+            Assert.Equal(["settlement-yesterday"], backend.SupervisorAcknowledgedSessionIds);
+            Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
+            Assert.Equal(0, terminal.SettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Supervisor_resolution_binds_the_same_day_server_session_first_so_the_server_session_can_be_closed()
+    {
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("cloud-supervisor-bind");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, yesterday, providerSessionId: null);
+            var backend = new FakeLinklyBackendTerminalClient
+            {
+                ResumableSettlement = CreateResumableSettlement(
+                    "settlement-yesterday", "Pending", createdAt: DateTimeOffset.Now.AddDays(-1), recoveryAction: "ResultUnknown")
+            };
+            var service = new LinklySettlementService(
+                new FakeLinklyTerminalClient(new LinklySettlementResult(true, "x")),
+                new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            var result = await service.ResolveUncertainAsync(session, unknown, LocalLinklySettlementManualResolution.ConfirmedNotSubmitted);
+
+            Assert.True(result.Resolved);
+            Assert.Equal("settlement-yesterday", result.Settlement.ProviderSessionId);
+            Assert.Equal(["settlement-yesterday"], backend.SupervisorAcknowledgedSessionIds);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Query_records_the_result_of_an_earlier_business_day_settlement_without_sending_a_new_one()
+    {
+        // M25：非当天的未决记录“只查询、补录结果”的入口。
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("query-earlier");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, yesterday, "settlement-yesterday");
+            var terminal = new FakeLinklyTerminalClient(new LinklySettlementResult(true, "must not be submitted"));
+            var printer = new FakeLinklyBankReceiptPrinter();
+            var backend = new FakeLinklyBackendTerminalClient
+            {
+                ResumableSettlement = CreateResumableSettlement(
+                    "settlement-yesterday", "Completed", operationSuccess: true, receiptTexts: ["YESTERDAY RECEIPT"], createdAt: DateTimeOffset.Now.AddDays(-1))
+            };
+            var service = new LinklySettlementService(terminal, new FixedCardTerminalSettingsProvider(CloudSettings()), repository, printer, backend);
+
+            var result = await service.QueryUnresolvedAsync(session, unknown);
+
+            Assert.True(result.Resolved);
+            Assert.Equal(LocalLinklySettlementStatus.Succeeded, result.Settlement.Status);
+            Assert.Equal(0, terminal.SettlementCallCount);
+            Assert.Contains("settlement-yesterday", backend.AcknowledgedSessionIds);
+            Assert.Equal(1, printer.PrintCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Query_leaves_the_record_unresolved_when_the_server_has_no_final_result_yet()
+    {
+        var (_, repository, databasePath) = await CreateCloudRepositoryAsync("query-pending");
+        try
+        {
+            var yesterday = DateTime.Today.AddDays(-1);
+            var session = CreatePosSession();
+            var unknown = await CreateUnknownSettlementAsync(repository, session, yesterday, "settlement-yesterday");
+            var backend = new FakeLinklyBackendTerminalClient
+            {
+                ResumableSettlement = CreateResumableSettlement(
+                    "settlement-yesterday", "Pending", createdAt: DateTimeOffset.Now.AddDays(-1), recoveryAction: "ResultUnknown")
+            };
+            var service = new LinklySettlementService(
+                new FakeLinklyTerminalClient(new LinklySettlementResult(true, "x")),
+                new FixedCardTerminalSettingsProvider(CloudSettings()), repository, new FakeLinklyBankReceiptPrinter(), backend);
+
+            var result = await service.QueryUnresolvedAsync(session, unknown);
+
+            Assert.False(result.Resolved);
+            Assert.Equal(LocalLinklySettlementStatus.Unknown, Assert.Single(await service.GetHistoryAsync(session, yesterday)).Status);
+            Assert.Equal(0, backend.AcknowledgeSettlementCallCount);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
     private static async Task CreateCompletedSettlementAsync(
         ILocalLinklySettlementRepository repository,
         PosSessionState session,
@@ -1575,7 +1989,9 @@ public sealed class LinklySettlementServiceTests
         string sessionId,
         string status,
         bool? operationSuccess = null,
-        IReadOnlyList<string>? receiptTexts = null)
+        IReadOnlyList<string>? receiptTexts = null,
+        DateTimeOffset? createdAt = null,
+        string? recoveryAction = null)
     {
         return new LinklyCloudBackendSessionResponse(
             CardTerminalEnvironment.Production.ToString(),
@@ -1586,7 +2002,7 @@ public sealed class LinklySettlementServiceTests
             TxnRef: null,
             ResponseCode: operationSuccess == true ? "00" : null,
             ResponseText: operationSuccess == true ? "Approved" : null,
-            RecoveryAction: null,
+            RecoveryAction: recoveryAction,
             DisplayText: null,
             CancelKeyFlag: false,
             OKKeyFlag: false,
@@ -1606,7 +2022,8 @@ public sealed class LinklySettlementServiceTests
             OperationType: "Settlement",
             OperationSuccess: operationSuccess,
             SettlementData: operationSuccess == true ? "Totals: 3" : null,
-            SettlementReceiptTexts: receiptTexts);
+            SettlementReceiptTexts: receiptTexts,
+            CreatedAt: createdAt);
     }
 
     private sealed class FixedCardTerminalSettingsProvider(CardTerminalSettings settings) : ICardTerminalSettingsProvider
@@ -1698,6 +2115,13 @@ public sealed class LinklySettlementServiceTests
     {
         public int AcknowledgeSettlementCallCount { get; private set; }
 
+        public List<string> AcknowledgedSessionIds { get; } = [];
+
+        public List<string> SupervisorAcknowledgedSessionIds { get; } = [];
+
+        // 设置后按顺序返回（用尽后回到 ResumableSettlement）：模拟结算过程中服务端状态的变化。
+        public Queue<LinklyCloudBackendSessionResponse?> ResumableSettlementSequence { get; } = new();
+
         public int MarkReceiptPrintedCallCount { get; private set; }
 
         public int GetResumableSettlementCallCount { get; private set; }
@@ -1730,6 +2154,11 @@ public sealed class LinklySettlementServiceTests
         {
             GetResumableSettlementCallCount++;
             LastResumableSettlementSettings = settings;
+            if (ResumableSettlementSequence.Count > 0)
+            {
+                return Task.FromResult(ResumableSettlementSequence.Dequeue());
+            }
+
             if (ResumableSettlementExceptionFactory is not null)
             {
                 return Task.FromException<LinklyCloudBackendSessionResponse?>(ResumableSettlementExceptionFactory(cancellationToken));
@@ -1743,7 +2172,16 @@ public sealed class LinklySettlementServiceTests
         public Task AcknowledgeSettlementAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default)
         {
             AcknowledgeSettlementCallCount++;
+            AcknowledgedSessionIds.Add(sessionId);
             LastAcknowledgeSettlementSettings = settings;
+            return AcknowledgeSettlementException is null
+                ? Task.CompletedTask
+                : Task.FromException(AcknowledgeSettlementException);
+        }
+
+        public Task AcknowledgeSupervisorResolvedSettlementAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default)
+        {
+            SupervisorAcknowledgedSessionIds.Add(sessionId);
             return AcknowledgeSettlementException is null
                 ? Task.CompletedTask
                 : Task.FromException(AcknowledgeSettlementException);

@@ -373,6 +373,106 @@ public sealed class LinklyCloudApiClientTests
         Assert.Equal("P", ReadNestedJsonString(body, "Request", "TxnType"));
         Assert.Equal("1000", ReadNestedJsonString(body, "Request", "AmtPurchase"));
         Assert.Equal("TXN-1", ReadNestedJsonString(body, "Request", "TxnRef"));
+        // 同步模式官方不支持 POS 端收据打印：交易必须让 PIN pad 打印银行小票（与直连结算同值），不能是 "0"。
+        Assert.Equal("7", ReadNestedJsonString(body, "Request", "ReceiptAutoPrint"));
+    }
+
+    [Fact]
+    public async Task SendTransactionAsync_serializes_purchase_analysis_data()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        var client = new LinklyCloudApiClient(new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            capturedRequest = CloneRequestWithBody(request);
+            return JsonResponse("""{ "SessionId": "session-1", "Response": { "Success": true, "TxnRef": "TXN-1" } }""");
+        })));
+
+        await client.SendTransactionAsync(
+            CreateCloudSettings(),
+            "bearer-token",
+            new LinklyCloudTransactionRequest(
+                "P",
+                1000,
+                "TXN-1",
+                new Dictionary<string, string> { ["RFN"] = "TXN-1", ["AMT"] = "000001000", ["PCM"] = "0000" }),
+            "session-1");
+
+        var body = await capturedRequest!.Content!.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+        var pad = document.RootElement.GetProperty("Request").GetProperty("PurchaseAnalysisData");
+        Assert.Equal("TXN-1", pad.GetProperty("RFN").GetString());
+        Assert.Equal("000001000", pad.GetProperty("AMT").GetString());
+        Assert.Equal("0000", pad.GetProperty("PCM").GetString());
+    }
+
+    [Theory]
+    [InlineData("7", 7)]
+    [InlineData("Wed, 21 Oct 2099 07:28:00 GMT", -1)]
+    public async Task GetTransactionAsync_surfaces_rate_limit_with_retry_after(string retryAfter, int expectedSeconds)
+    {
+        var client = new LinklyCloudApiClient(new HttpClient(new StubHttpMessageHandler(_ =>
+        {
+            var response = TextResponse(HttpStatusCode.TooManyRequests, "slow down");
+            response.Headers.TryAddWithoutValidation("Retry-After", retryAfter);
+            return response;
+        })));
+
+        var exception = await Assert.ThrowsAsync<LinklyCloudApiException>(() =>
+            client.GetTransactionAsync(CreateCloudSettings(), "bearer-token", "session-1"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, exception.StatusCode);
+        Assert.False(exception.IsAuthenticationFailure);
+        Assert.NotNull(exception.RetryAfter);
+        if (expectedSeconds >= 0)
+        {
+            Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), exception.RetryAfter);
+        }
+        else
+        {
+            Assert.True(exception.RetryAfter > TimeSpan.FromDays(1));
+        }
+    }
+
+    [Fact]
+    public async Task GetTransactionAsync_rate_limit_without_retry_after_has_no_retry_after()
+    {
+        var client = new LinklyCloudApiClient(new HttpClient(new StubHttpMessageHandler(_ =>
+            TextResponse(HttpStatusCode.TooManyRequests, string.Empty))));
+
+        var exception = await Assert.ThrowsAsync<LinklyCloudApiException>(() =>
+            client.GetTransactionAsync(CreateCloudSettings(), "bearer-token", "session-1"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, exception.StatusCode);
+        Assert.Null(exception.RetryAfter);
+    }
+
+    [Fact]
+    public async Task Cloud_api_direct_operation_logs_never_contain_bearer_token_or_secret()
+    {
+        using var logs = new ConsoleLogCapture();
+        var client = new LinklyCloudApiClient(new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/sendkey", StringComparison.Ordinal))
+            {
+                return JsonResponse("""{ "success": true }""");
+            }
+
+            return JsonResponse("""{ "SessionId": "session-1", "Response": { "Success": true, "ResponseCode": "00", "TxnRef": "TXN-1", "AmtPurchase": 1000 } }""");
+        })));
+        var settings = CreateCloudSettings();
+
+        _ = await client.SendStatusAsync(settings, "very-secret-bearer");
+        _ = await client.SendLogonAsync(settings, "very-secret-bearer");
+        _ = await client.SendTransactionAsync(settings, "very-secret-bearer", new LinklyCloudTransactionRequest("P", 1000, "TXN-1"), "session-1");
+        _ = await client.GetTransactionAsync(settings, "very-secret-bearer", "session-1");
+        _ = await client.SendSettlementAsync(settings, "very-secret-bearer", "session-1");
+        await client.SendKeyAsync(settings, "very-secret-bearer", "session-1", "OK/CANCEL", null);
+
+        var text = string.Join(Environment.NewLine, logs.Lines);
+        Assert.NotEmpty(logs.Lines);
+        Assert.DoesNotContain("very-secret-bearer", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("paired-secret", text, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -52,7 +52,9 @@ public sealed partial class CardRecoveryCenterViewModel
         : T("cardRecovery.center.action.confirmPaid", "Confirmed paid");
     public string ConfirmNotProcessedText => IsRefundSelection
         ? T("cardRecovery.refund.action.confirmNotRefunded", "Confirmed not refunded")
-        : T("cardRecovery.center.action.confirmNotPaid", "Confirmed not paid");
+        : IsApprovedEvidenceSelection
+            ? T("cardRecovery.center.action.closeApprovedHandled", "Refunded or handled elsewhere, close")
+            : T("cardRecovery.center.action.confirmNotPaid", "Confirmed not paid");
     // 切换界面语言只改变数字格式，不能把澳元交易显示成人民币。
     private string FormatAmount(decimal amount) => $"AU${amount.ToString("N2", GetCulture())}";
     public string SelectedOrderText => OrderReference(SelectedAttempt);

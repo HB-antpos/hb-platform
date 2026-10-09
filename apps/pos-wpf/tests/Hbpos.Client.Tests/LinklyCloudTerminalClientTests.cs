@@ -308,40 +308,223 @@ public sealed class LinklyCloudTerminalClientTests
     }
 
     [Fact]
-    public async Task PurchaseAsync_returns_result_unknown_when_status_poll_fails_after_direct_submission()
+    public async Task PurchaseAsync_keeps_retrying_status_poll_after_network_error_and_returns_approved_result()
     {
+        // 单次断网不能让 POS 提前锁定为未知：顾客可能还在 PIN pad 上操作。
         var apiClient = new FakeLinklyCloudApiClient();
-        apiClient.TransactionResultSequence.Enqueue(new LinklyCloudTransactionResult(
-            "session-pending",
-            false,
-            "TXN-PENDING",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null)
-        {
-            Outcome = LinklyCloudTransactionOutcome.Pending
-        });
+        apiClient.TransactionResultSequence.Enqueue(Pending("session-pending"));
         apiClient.TransactionStatusSequence.Enqueue(new HttpRequestException("status offline"));
+        apiClient.TransactionStatusSequence.Enqueue(Pending("session-pending"));
+        apiClient.TransactionStatusSequence.Enqueue(Approved("session-pending", "TXN-RETRY"));
+        var timeProvider = new FakeTimeProvider();
         var client = new LinklyCloudTerminalClient(
             apiClient,
             new FakeLinklyCloudSecretStore(),
-            TimeSpan.Zero);
+            TimeSpan.Zero,
+            timeProvider: timeProvider);
 
-        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+        await AdvanceUntilCompletedAsync(timeProvider, purchaseTask, TimeSpan.FromSeconds(1), maxSteps: 30);
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        Assert.True(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal(1, apiClient.SendTransactionCallCount);
+        Assert.Equal(3, apiClient.GetTransactionCallCount);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_waits_for_retry_after_before_polling_again_when_status_poll_is_rate_limited()
+    {
+        var apiClient = new FakeLinklyCloudApiClient();
+        apiClient.TransactionResultSequence.Enqueue(Pending("session-pending"));
+        apiClient.TransactionStatusSequence.Enqueue(new LinklyCloudApiException(
+            "Linkly Cloud transaction status request failed with HTTP 429.",
+            HttpStatusCode.TooManyRequests,
+            detail: null,
+            retryAfter: TimeSpan.FromSeconds(5)));
+        apiClient.TransactionStatusSequence.Enqueue(Approved("session-pending", "TXN-429"));
+        var timeProvider = new FakeTimeProvider();
+        var client = new LinklyCloudTerminalClient(
+            apiClient,
+            new FakeLinklyCloudSecretStore(),
+            TimeSpan.Zero,
+            timeProvider: timeProvider);
+
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+        await WaitUntilAsync(() => apiClient.GetTransactionCallCount == 1);
+        var waited = TimeSpan.Zero;
+        // 逐秒推进虚拟时间，直到第二次查询发出；遵循 Retry-After 时不可能在不足 5s 时重试。
+        while (apiClient.GetTransactionCallCount < 2 && waited < TimeSpan.FromSeconds(30))
+        {
+            await Task.Delay(20);
+            if (apiClient.GetTransactionCallCount >= 2)
+            {
+                break;
+            }
+
+            timeProvider.Advance(TimeSpan.FromSeconds(1));
+            waited += TimeSpan.FromSeconds(1);
+            await Task.Delay(20);
+        }
+
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        Assert.True(waited >= TimeSpan.FromSeconds(5), $"429 retried after only {waited}, Retry-After was ignored.");
+        Assert.True(result.Approved);
+        Assert.Equal(2, apiClient.GetTransactionCallCount);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_returns_result_unknown_only_after_business_wait_when_status_poll_keeps_failing()
+    {
+        var apiClient = new FakeLinklyCloudApiClient { StatusPollException = new HttpRequestException("status offline") };
+        apiClient.TransactionResultSequence.Enqueue(Pending("session-pending"));
+        var timeProvider = new FakeTimeProvider();
+        var client = new LinklyCloudTerminalClient(
+            apiClient,
+            new FakeLinklyCloudSecretStore(),
+            TimeSpan.Zero,
+            timeProvider: timeProvider);
+
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+        await WaitUntilAsync(() => apiClient.GetTransactionCallCount >= 1);
+        // 业务等待窗口内只重试不放弃：先逐步推进到窗口前，仍未结束且已多次重试。
+        for (var i = 0; i < 20; i++)
+        {
+            await Task.Delay(20);
+            timeProvider.Advance(TimeSpan.FromSeconds(8));
+        }
+
+        await Task.Delay(50);
+        Assert.False(purchaseTask.IsCompleted);
+        Assert.True(apiClient.GetTransactionCallCount >= 5, "Expected the poll to keep retrying within the business wait window.");
+
+        await AdvanceUntilCompletedAsync(timeProvider, purchaseTask, TimeSpan.FromSeconds(8), maxSteps: 40);
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
         Assert.False(result.Approved);
         Assert.True(result.ResultUnknown);
         Assert.False(result.FallbackAllowed);
         Assert.Equal("linkly.cloud.resultUnknown", result.StatusKey);
         Assert.Equal(1, apiClient.SendTransactionCallCount);
+        Assert.Equal(apiClient.LastTransactionSessionId, result.SessionId);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_caller_cancel_during_status_poll_backoff_returns_unknown_without_further_polling()
+    {
+        var apiClient = new FakeLinklyCloudApiClient { StatusPollException = new HttpRequestException("status offline") };
+        apiClient.TransactionResultSequence.Enqueue(Pending("session-pending"));
+        var timeProvider = new FakeTimeProvider();
+        var client = new LinklyCloudTerminalClient(
+            apiClient,
+            new FakeLinklyCloudSecretStore(),
+            TimeSpan.Zero,
+            timeProvider: timeProvider);
+        using var cancellation = new CancellationTokenSource();
+
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings(), cancellation.Token);
+        await WaitUntilAsync(() => apiClient.GetTransactionCallCount == 1);
+        cancellation.Cancel();
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+        Assert.Equal(apiClient.LastTransactionSessionId, result.SessionId);
         Assert.Equal(1, apiClient.GetTransactionCallCount);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_does_not_retry_status_poll_on_bad_request()
+    {
+        // 官方：400 是我方请求格式错误，不得重试，也不代表交易未成功 -> 直接按结果未知交恢复。
+        var apiClient = new FakeLinklyCloudApiClient();
+        apiClient.TransactionResultSequence.Enqueue(Pending("session-pending"));
+        apiClient.TransactionStatusSequence.Enqueue(new LinklyCloudApiException(
+            "Linkly Cloud transaction status request failed with HTTP 400.",
+            HttpStatusCode.BadRequest));
+        var client = new LinklyCloudTerminalClient(
+            apiClient,
+            new FakeLinklyCloudSecretStore(),
+            TimeSpan.Zero,
+            timeProvider: new FakeTimeProvider());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings())
+            .WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        Assert.True(result.ResultUnknown);
+        Assert.Equal(1, apiClient.GetTransactionCallCount);
+    }
+
+    [Fact]
+    public void ComputePollRetryDelay_backs_off_exponentially_with_cap_jitter_and_honors_retry_after()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(1), LinklyCloudTerminalClient.ComputePollRetryDelay(1, null, 0d));
+        Assert.Equal(TimeSpan.FromSeconds(2), LinklyCloudTerminalClient.ComputePollRetryDelay(2, null, 0d));
+        Assert.Equal(TimeSpan.FromSeconds(4), LinklyCloudTerminalClient.ComputePollRetryDelay(3, null, 0d));
+        Assert.Equal(TimeSpan.FromSeconds(8), LinklyCloudTerminalClient.ComputePollRetryDelay(4, null, 0d));
+        Assert.Equal(TimeSpan.FromSeconds(8), LinklyCloudTerminalClient.ComputePollRetryDelay(50, null, 0d));
+        // 抖动只往后加（最多 25%）。
+        Assert.Equal(TimeSpan.FromSeconds(1.25), LinklyCloudTerminalClient.ComputePollRetryDelay(1, null, 1d));
+        // Retry-After 优先于指数退避，且不会被缩短；过小取 1s、过大取 15s。
+        Assert.Equal(TimeSpan.FromSeconds(5), LinklyCloudTerminalClient.ComputePollRetryDelay(1, TimeSpan.FromSeconds(5), 0d));
+        Assert.Equal(TimeSpan.FromSeconds(1), LinklyCloudTerminalClient.ComputePollRetryDelay(3, TimeSpan.Zero, 0d));
+        Assert.Equal(TimeSpan.FromSeconds(15), LinklyCloudTerminalClient.ComputePollRetryDelay(1, TimeSpan.FromMinutes(5), 0d));
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_writes_rfn_amt_and_pcm_so_direct_sales_can_be_refunded()
+    {
+        var apiClient = new FakeLinklyCloudApiClient();
+        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore());
+
+        await client.PurchaseAsync(12.34m, CreateSession(), CreateSettings());
+
+        var request = Assert.Single(apiClient.SentTransactionRequests);
+        Assert.Equal("P", request.TxnType);
+        var pad = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(request.PurchaseAnalysisData);
+        // 与后端模式 EnsurePurchaseAnalysisData 一致：RFN=txnRef，AMT 9 位分，PCM=0000。
+        Assert.Equal(request.TxnRef, pad["RFN"]);
+        Assert.Equal("000001234", pad["AMT"]);
+        Assert.Equal("0000", pad["PCM"]);
+        Assert.False(pad.ContainsKey("OPR"));
+    }
+
+    [Theory]
+    [InlineData("ANZCLOUD:TXN-ORIGINAL", "TXN-ORIGINAL")]
+    [InlineData("ANZCLOUD:TXN-ORIGINAL:RFN-FROM-TERMINAL", "RFN-FROM-TERMINAL")]
+    public async Task RefundAsync_uses_returned_rfn_or_falls_back_to_original_txn_ref(string originalReference, string expectedRfn)
+    {
+        var apiClient = new FakeLinklyCloudApiClient();
+        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore());
+
+        await client.RefundAsync(5m, CreateSession(), CreateSettings(), originalReference);
+
+        var request = Assert.Single(apiClient.SentTransactionRequests);
+        Assert.Equal("R", request.TxnType);
+        var pad = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(request.PurchaseAnalysisData);
+        Assert.Equal(expectedRfn, pad["RFN"]);
+        Assert.Equal("000000500", pad["AMT"]);
+        Assert.Equal("0000", pad["PCM"]);
+        Assert.Equal("C001|Cashier", pad["OPR"]);
+    }
+
+    [Theory]
+    [InlineData("ANZCLOUD")]
+    [InlineData("ANZCLOUD:")]
+    [InlineData("ANZ:LOCAL-REF")]
+    [InlineData("OTHER:TXN-1:RFN-1")]
+    public async Task RefundAsync_still_rejects_references_that_are_not_cloud_references(string originalReference)
+    {
+        var apiClient = new FakeLinklyCloudApiClient();
+        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore());
+
+        var result = await client.RefundAsync(5m, CreateSession(), CreateSettings(), originalReference);
+
+        Assert.False(result.Approved);
+        Assert.Equal("Linkly Cloud refund requires an original RFN reference.", result.Message);
+        Assert.Equal(0, apiClient.SendTransactionCallCount);
     }
 
     [Fact]
@@ -1026,6 +1209,30 @@ public sealed class LinklyCloudTerminalClientTests
         }
     }
 
+    /// <summary>
+    /// 逐步推进 FakeTimeProvider 直到任务结束。每步先让出线程，保证被测代码已登记好退避计时器再推进，
+    /// 避免推进发生在计时器登记之前被漏掉。
+    /// </summary>
+    private static async Task AdvanceUntilCompletedAsync(
+        FakeTimeProvider timeProvider,
+        Task task,
+        TimeSpan step,
+        int maxSteps)
+    {
+        for (var i = 0; i < maxSteps && !task.IsCompleted; i++)
+        {
+            await Task.Delay(20);
+            if (task.IsCompleted)
+            {
+                break;
+            }
+
+            timeProvider.Advance(step);
+        }
+
+        await Task.Delay(20);
+    }
+
     private static PosSessionState CreateSession()
     {
         return new PosSessionState(
@@ -1207,6 +1414,8 @@ public sealed class LinklyCloudTerminalClientTests
 
         public List<string> SentTransactionTxnRefs { get; } = [];
 
+        public List<LinklyCloudTransactionRequest> SentTransactionRequests { get; } = [];
+
         public TaskCompletionSource<LinklyCloudTransactionResult>? PendingTransactionCompletion { get; init; }
 
         public bool ObservePendingTransactionCancellation { get; init; }
@@ -1228,6 +1437,9 @@ public sealed class LinklyCloudTerminalClientTests
         public Func<LinklyCloudTransactionResult, LinklyCloudTransactionResult>? TransactionResponseTransform { get; init; }
 
         public Queue<object> TransactionStatusSequence { get; } = [];
+
+        // 状态队列耗尽后每次查询都抛出该异常（模拟持续断网）。
+        public Exception? StatusPollException { get; init; }
 
         public LinklyCloudLogonResult LogonResult { get; init; } =
             new(true, "00", null, "CAT-1", "CA-1", "1.0");
@@ -1292,6 +1504,7 @@ public sealed class LinklyCloudTerminalClientTests
             LastTransactionSessionId = sessionId;
             SentTransactionSessionIds.Add(sessionId);
             SentTransactionTxnRefs.Add(request.TxnRef);
+            SentTransactionRequests.Add(request);
             if (TransactionException is not null)
             {
                 throw TransactionException;
@@ -1320,6 +1533,11 @@ public sealed class LinklyCloudTerminalClientTests
             LastGetTransactionSessionId = sessionId;
             if (TransactionStatusSequence.Count == 0)
             {
+                if (StatusPollException is not null)
+                {
+                    throw StatusPollException;
+                }
+
                 throw new NotSupportedException();
             }
 

@@ -4,6 +4,7 @@ using System.Net.Http;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Contracts.Catalog;
+using Hbpos.Contracts.Linkly;
 using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Wpf.Services;
@@ -140,11 +141,18 @@ public sealed class ReceiptReturnsWorkflowService(
                     var context = await remoteOrderHistoryService.GetReturnContextAsync(remoteOrderGuid.Value, remoteCancellationToken);
                     if (context is not null)
                     {
-                        var result = new ReceiptReturnLookupResult(
+                        // 服务端的退货记录只覆盖已同步的退货单；本机还没上传成功的退货单要补进来，
+                        // 否则同一张小票的同一件商品/同一笔卡付款可以在同步窗口内被重复退掉。
+                        var (remoteOrder, localReturnsMerged) = await MergeLocalReturnsOrFailClosedAsync(
                             MapRemote(context),
+                            includeSynced: false,
+                            cancellationToken);
+                        var result = new ReceiptReturnLookupResult(
+                            remoteOrder,
                             true,
-                            false,
-                            T("returns.status.loadedOnline", "Loaded online order and return records."));
+                            !localReturnsMerged,
+                            T("returns.status.loadedOnline", "Loaded online order and return records.") +
+                                (localReturnsMerged ? string.Empty : CardRefundDisabledNotice(remoteOrder)));
                         LogLookupCompleted(result, queryType, query.Length, stopwatch.ElapsedMilliseconds);
                         return result;
                     }
@@ -180,7 +188,8 @@ public sealed class ReceiptReturnsWorkflowService(
                     : fallback with
                     {
                         ReturnRecordsMayBeStale = true,
-                        StatusMessage = Format("returns.status.loadedLocalStaleWithError", "Loaded local order; online return records may be stale. {0}", ex.Message)
+                        StatusMessage = Format("returns.status.loadedLocalStaleWithError", "Loaded local order; online return records may be stale. {0}", ex.Message) +
+                            CardRefundDisabledNotice(fallback.Order)
                     };
                 // 联网失败（API/断网）已由订单历史客户端记 Warning，这里只记明走了本地降级路径（Information）；
                 // 其它异常（映射、本地故障）客户端看不到，升级为 Warning 并带异常。
@@ -394,13 +403,225 @@ public sealed class ReceiptReturnsWorkflowService(
             }
         }
 
-        return order is null
-            ? new ReceiptReturnLookupResult(null, false, false, T("returns.status.orderNotFound", "Order was not found."))
-            : new ReceiptReturnLookupResult(
-                MapLocal(order),
-                false,
-                true,
-                T("returns.status.loadedLocalStale", "Loaded local order; return records may be stale."));
+        if (order is null)
+        {
+            return new ReceiptReturnLookupResult(null, false, false, T("returns.status.orderNotFound", "Order was not found."));
+        }
+
+        // 本地降级拿不到服务端的任何退货记录：把本机保存的全部退货单（含已同步的）都算上；
+        // 其它设备的退货仍然看不到，所以同时禁止原路退卡（见 DisableCardRefunds）。
+        var (mergedOrder, _) = await MergeLocalReturnsOrFailClosedAsync(
+            MapLocal(order),
+            includeSynced: true,
+            cancellationToken);
+        var localOrder = DisableCardRefunds(mergedOrder);
+        return new ReceiptReturnLookupResult(
+            localOrder,
+            false,
+            true,
+            T("returns.status.loadedLocalStale", "Loaded local order; return records may be stale.") +
+                CardRefundDisabledNotice(localOrder));
+    }
+
+    private async Task<(ReceiptReturnOrder Order, bool Merged)> MergeLocalReturnsOrFailClosedAsync(
+        ReceiptReturnOrder order,
+        bool includeSynced,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (await MergeLocalReturnsAsync(order, includeSynced, cancellationToken), true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 读不到本机退货单就无法保证额度准确：保留已有数据，但按过期处理并禁止原路退卡。
+            ConsoleLog.WriteWarning(
+                "ReceiptReturns",
+                $"merge local returns failed order={order.OrderGuid:D} includeSynced={includeSynced} error={ex.GetType().Name}",
+                new ApplicationLogContext(),
+                ex);
+            return (DisableCardRefunds(order), false);
+        }
+    }
+
+    private async Task<ReceiptReturnOrder> MergeLocalReturnsAsync(
+        ReceiptReturnOrder order,
+        bool includeSynced,
+        CancellationToken cancellationToken)
+    {
+        var localReturnOrders = await localOrderRepository.GetReturnOrdersForOriginalAsync(
+            order.OrderGuid,
+            unsyncedOnly: !includeSynced,
+            cancellationToken);
+        // 服务端已经有记录的退货单（例如上传成功但本机状态还没回写）以服务端为准，避免重复计数。
+        var knownReturnOrderGuids = order.ReturnRecords
+            .Where(record => record.ReturnOrderGuid is not null)
+            .Select(record => record.ReturnOrderGuid!.Value)
+            .ToHashSet();
+        var extraReturnOrders = localReturnOrders
+            .Where(returnOrder => returnOrder.OrderGuid != order.OrderGuid &&
+                !knownReturnOrderGuids.Contains(returnOrder.OrderGuid))
+            .ToList();
+        if (extraReturnOrders.Count == 0)
+        {
+            return order;
+        }
+
+        var extraRecords = extraReturnOrders
+            .SelectMany(returnOrder => returnOrder.Lines
+                .Where(line => line.Kind == OrderLineKind.Return && line.OriginalOrderGuid == order.OrderGuid)
+                .Select(line => new OrderReturnRecordDto(
+                    line.OrderLineGuid,
+                    returnOrder.OrderGuid,
+                    line.OriginalOrderGuid,
+                    line.OriginalOrderDetailGuid,
+                    line.ProductCode,
+                    line.ReferenceCode,
+                    Math.Abs(line.Quantity),
+                    Math.Abs(line.ActualAmount),
+                    returnOrder.CashierId,
+                    returnOrder.SoldAt)))
+            .ToList();
+        var extraQuantityByLine = extraRecords
+            .Where(record => record.OriginalOrderDetailGuid is not null)
+            .GroupBy(record => record.OriginalOrderDetailGuid!.Value)
+            .ToDictionary(group => group.Key, group => group.Sum(record => record.ReturnQuantity));
+        var lines = order.Lines
+            .Select(line => extraQuantityByLine.TryGetValue(line.OrderLineGuid, out var extraQuantity)
+                ? line with { ReturnedQuantity = line.ReturnedQuantity + extraQuantity }
+                : line)
+            .ToList();
+        ConsoleLog.Write(
+            "ReceiptReturns",
+            $"merged local returns order={order.OrderGuid:D} localReturnOrders={extraReturnOrders.Count} " +
+            $"records={extraRecords.Count} includeSynced={includeSynced}");
+        return order with
+        {
+            Lines = lines,
+            ReturnRecords = order.ReturnRecords.Concat(extraRecords).ToList(),
+            PaymentCapacities = ApplyLocalCardRefunds(order.PaymentCapacities, extraReturnOrders)
+        };
+    }
+
+    // 把本机尚未被服务端记录的原路退卡金额从对应卡付款的可退额度里扣掉。
+    // 匹配口径与服务端校验一致：退款引用里的 original 部分对上原卡付款；对不上时只有单一卡付款才能归属，
+    // 否则保守地视为全部卡付款都已被占满。
+    private static IReadOnlyList<OrderReturnPaymentCapacityDto> ApplyLocalCardRefunds(
+        IReadOnlyList<OrderReturnPaymentCapacityDto> capacities,
+        IReadOnlyList<LocalOrder> returnOrders)
+    {
+        var result = capacities.ToList();
+        var cardIndexes = result
+            .Select((capacity, index) => (capacity, index))
+            .Where(item => item.capacity.Method == PaymentMethodKind.Card)
+            .Select(item => item.index)
+            .ToList();
+        if (cardIndexes.Count == 0)
+        {
+            return capacities;
+        }
+
+        foreach (var payment in returnOrders
+            .SelectMany(returnOrder => returnOrder.Payments)
+            .Where(payment => payment.Method == PaymentMethodKind.Card && payment.Amount < 0m))
+        {
+            var amount = Math.Abs(payment.Amount);
+            var original = CardRefundReference.TryGetOriginalReference(payment.Reference, out var originalReference)
+                ? NormalizeReference(originalReference)
+                : null;
+            var matched = original is null
+                ? []
+                : cardIndexes.Where(index => MatchesOriginalCardReference(result[index], original)).ToList();
+            if (matched.Count == 0 && cardIndexes.Count > 1)
+            {
+                // 无法确定退的是哪一笔卡付款：全部占满，宁可拒绝也不放行。
+                foreach (var index in cardIndexes)
+                {
+                    result[index] = result[index] with { RefundedAmount = result[index].OriginalAmount, RemainingAmount = 0m };
+                }
+
+                continue;
+            }
+
+            var target = matched.Count > 0 ? matched[0] : cardIndexes[0];
+            var capacity = result[target];
+            result[target] = capacity with
+            {
+                RefundedAmount = Math.Min(capacity.OriginalAmount, capacity.RefundedAmount + amount),
+                RemainingAmount = Math.Max(0m, capacity.RemainingAmount - amount)
+            };
+        }
+
+        return result;
+    }
+
+    private static bool MatchesOriginalCardReference(OrderReturnPaymentCapacityDto capacity, string original)
+    {
+        if (string.Equals(NormalizeReference(capacity.Reference), original, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 收银台为 Linkly 退款可能把原引用换成 ANZCLOUD:{TxnRef}:{RFN} 形式（与 PaymentViewModel 的拼法一致）。
+        foreach (var transaction in capacity.CardTransactions ?? [])
+        {
+            var refundReference = NormalizeReference(transaction.RefundReference);
+            if (refundReference is null)
+            {
+                continue;
+            }
+
+            var txnRef = NormalizeReference(transaction.TxnRef) ?? TryGetLinklyTxnRef(capacity.Reference) ?? "RFN";
+            if (string.Equals($"ANZCLOUD:{txnRef}:{refundReference}", original, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(refundReference, original, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? TryGetLinklyTxnRef(string? reference)
+    {
+        var parts = reference?.Trim().Split(':', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) ?? [];
+        return parts.Length >= 2 &&
+            (string.Equals(parts[0], "ANZCLOUD", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(parts[0], LinklyBackendPaymentReference.Prefix, StringComparison.OrdinalIgnoreCase))
+                ? parts[1]
+                : null;
+    }
+
+    private static string? NormalizeReference(string? reference)
+    {
+        return string.IsNullOrWhiteSpace(reference) ? null : reference.Trim();
+    }
+
+    // 退货记录可能过期（本地降级、读不到本机退货单）时，原路退卡额度一律清零：
+    // 其它设备的退货、服务端已记录的退货此时都不可见，继续退卡会在同步窗口里重复退款。
+    private static ReceiptReturnOrder DisableCardRefunds(ReceiptReturnOrder order)
+    {
+        if (!order.PaymentCapacities.Any(capacity => capacity.Method == PaymentMethodKind.Card && capacity.RemainingAmount > 0m))
+        {
+            return order;
+        }
+
+        return order with
+        {
+            PaymentCapacities = order.PaymentCapacities
+                .Select(capacity => capacity.Method == PaymentMethodKind.Card
+                    ? capacity with { RefundedAmount = capacity.OriginalAmount, RemainingAmount = 0m }
+                    : capacity)
+                .ToList()
+        };
+    }
+
+    private string CardRefundDisabledNotice(ReceiptReturnOrder? order)
+    {
+        return order is not null &&
+            order.PaymentCapacities.Any(capacity => capacity.Method == PaymentMethodKind.Card && capacity.OriginalAmount > 0m)
+                ? " " + T("returns.status.cardRefundDisabledStale", "Refund to the original card is disabled until the order's return records can be loaded online.")
+                : string.Empty;
     }
 
     private string T(string key, string fallback)

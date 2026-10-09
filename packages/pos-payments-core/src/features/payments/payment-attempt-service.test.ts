@@ -18,6 +18,7 @@ import {
   type TrustedRefundReferenceSeedHook,
   type TrustedRefundReferenceSeedInput,
 } from "./payment-attempt-service";
+import { createLinklyAttemptTxnRef } from "./linkly-attempt-txn-ref";
 
 import type { CardSyncEvidenceV1, OnlinePaymentPort, PaymentAttempt, PaymentProvider, PaymentProviderReferences, PaymentProviderResult } from "@hb/pos-domain/core/contracts/payment";
 import type { Money } from "@hb/pos-domain/core/contracts/money";
@@ -126,6 +127,87 @@ test("Linkly 缺少可冻结环境时在 Created/provider 调用前失败关闭"
   );
   assert.equal(ledger.attempts.size, 0);
   assert.equal(provider.submitCalls, 0);
+});
+
+test("Linkly 在 Created→Submitted 的同一次 CAS 预置由 attemptId 派生的 TxnRef，早于 provider 边界", async () => {
+  const guid = "3b241101-e2bb-4255-8caf-4136c566a962";
+  for (const operation of ["purchase", "refund"] as const) {
+    const ledger = new MemoryLedger();
+    const provider = new FakeProvider("linkly-cloud");
+    const expected = createLinklyAttemptTxnRef(operation === "refund" ? "R" : "P", guid);
+    let persistedAtBoundary: string | null | undefined;
+    const run = async (value: PaymentAttempt) => {
+      // provider 看到的 attempt 与已落库的 Submitted 行必须带同一个引用。
+      persistedAtBoundary = ledger.attempts.get(value.attemptId)?.references.txnRef;
+      assert.equal(value.references.txnRef, expected);
+      return result("Pending", { sessionId: "linkly-session-1", txnRef: expected });
+    };
+    provider.submitResult = run;
+    provider.refundResult = run;
+    const service = createService({
+      ledger,
+      provider,
+      createAttemptId: () => guid,
+      ...(operation === "refund"
+        ? { trustedRefundReferenceSeed: async () => ({ provider: "linkly-cloud" as const, rfn: "RFN-ORIGINAL" }) }
+        : {}),
+    });
+
+    const started = await service.startAttempt({
+      ...input(),
+      provider: "linkly-cloud",
+      operation,
+      amount: operation === "refund" ? { currency: "AUD", cents: -1_250 } : amount,
+      ...(operation === "refund" ? { refundCapacityId: "capacity-1" } : {}),
+    });
+
+    assert.equal(persistedAtBoundary, expected);
+    assert.equal(started.attempt.references.txnRef, expected);
+    assert.equal(ledger.attempts.get(guid)?.references.txnRef, expected);
+  }
+});
+
+test("Linkly attemptId 不是标准 GUID 时不预置 TxnRef（沿用 UID 认领路径），其他 provider 不受影响", async () => {
+  const linkly = new FakeProvider("linkly-cloud");
+  linkly.submitResult = async (value) => {
+    assert.equal(value.references.txnRef, null);
+    return result("Pending", { sessionId: "linkly-session-1" });
+  };
+  await createService({ ledger: new MemoryLedger(), provider: linkly }).startAttempt({ ...input(), provider: "linkly-cloud" });
+  assert.equal(linkly.submitCalls, 1);
+
+  const square = new FakeProvider("square");
+  square.submitResult = async (value) => {
+    assert.equal(value.references.txnRef, null);
+    return result("Pending", { paymentId: "payment-1" });
+  };
+  await createService({
+    ledger: new MemoryLedger(),
+    provider: square,
+    createAttemptId: () => "3b241101-e2bb-4255-8caf-4136c566a962",
+  }).startAttempt(input());
+  assert.equal(square.submitCalls, 1);
+});
+
+test("旧 Hbpos.Api 忽略 attemptGuid 返回随机 TxnRef 时，创建响应带回的引用取代派生值，不触发引用冲突丢 SessionId", async () => {
+  const guid = "3b241101-e2bb-4255-8caf-4136c566a962";
+  const ledger = new MemoryLedger();
+  const provider = new FakeProvider("linkly-cloud");
+  provider.submitResult = async () => result("Pending", { sessionId: "linkly-session-1", txnRef: "260921123456AB12" });
+  const service = createService({ ledger, provider, createAttemptId: () => guid });
+
+  const started = await service.startAttempt({ ...input(), provider: "linkly-cloud" });
+
+  assert.equal(started.attempt.state, "Pending");
+  assert.equal(started.attempt.references.sessionId, "linkly-session-1");
+  assert.equal(started.attempt.references.txnRef, "260921123456AB12");
+
+  // 已绑定会话之后，任何与已落库 TxnRef 不一致的响应仍是引用冲突，必须失败关闭。
+  provider.recoverResult = async () => result("Pending", { sessionId: "linkly-session-1", txnRef: "PAAAAAAAAAAAAAAA" });
+  const conflicted = await service.recoverAttempt(guid);
+  assert.equal(conflicted.attempt.state, "Unknown");
+  assert.equal(conflicted.attempt.lastErrorCode, "PROVIDER_REFERENCE_CONFLICT");
+  assert.equal(conflicted.attempt.references.txnRef, "260921123456AB12");
 });
 
 test("旧 Linkly Submitted 先强匹配冻结环境，再只恢复原 session；不匹配时不访问 provider", async () => {
@@ -2258,6 +2340,7 @@ function createService(options: {
   online?: boolean;
   legacyPaymentRecoveryEnvironment?: LegacyPaymentRecoveryEnvironmentResolver;
   trustedRefundReferenceSeed?: TrustedRefundReferenceSeedHook;
+  createAttemptId?: () => string;
 }): PaymentAttemptService {
   const providers = options.providers ?? [options.provider ?? new FakeProvider("square")];
   let id = 0;
@@ -2276,7 +2359,7 @@ function createService(options: {
         return match;
       },
     },
-    createAttemptId: () => `attempt-${++id}`,
+    createAttemptId: options.createAttemptId ?? (() => `attempt-${++id}`),
     createIdempotencyKey: () => `key-${id}`,
     nowIso: () => "2026-07-28T00:00:00.000Z",
     ...(options.legacyPaymentRecoveryEnvironment

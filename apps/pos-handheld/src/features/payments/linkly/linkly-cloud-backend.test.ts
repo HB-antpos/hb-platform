@@ -523,7 +523,7 @@ test("新支付遇到其他 active session 或 create 409 时拒绝本次，不�
   assert.equal(transport.requests.filter((request) => request.method === "POST" && request.url === "/api/v1/linkly/cloud-backend/transactions").length, 1);
 });
 
-test("create 409 只精确分类 active transaction；selection conflict 独立且其他 409 原样失败", async () => {
+test("create 409 只精确分类 active transaction；selection conflict 独立且其他 409 是明确未提交的 Declined", async () => {
   const selectionTransport = new FakeTransport();
   selectionTransport.responses.push(
     none(),
@@ -566,7 +566,17 @@ test("create 409 只精确分类 active transaction；selection conflict 独立�
     providerOptions(),
   );
 
-  await assert.rejects(() => otherProvider.submit(attempt()), otherConflict);
+  // 其他 409（凭据轮换、重新录入等）发生在 Linkly POST 之前：证明没有创建会话，
+  // 必须是带具体码的 Declined，而不是原样抛出后被写成无会话的 Unknown。
+  const otherResult = await otherProvider.submit(attempt());
+  assert.equal(otherResult.state, "Declined");
+  assert.equal(otherResult.responseCode, "LINKLY_NOT_SUBMITTED_HTTP_409");
+  assert.equal(otherResult.references.sessionId, null);
+  assert.equal(
+    otherTransport.requests.filter((request) => request.url.endsWith("/active") || request.url.endsWith("/resumable")).length,
+    1,
+    "明确未提交不得进入 active/resumable 歧义恢复",
+  );
 });
 
 test("create 前终端变为不可用时把精确 409 映射为 Declined，且绝不恢复或重放", async () => {
@@ -1748,4 +1758,383 @@ test("冷启动 ACK probe 只发现当前环境 active/resumable 的未 ACK 且 
     none(),
   );
   assert.deepEqual(await provider.listUnacknowledgedSessions(), []);
+});
+
+// ---------------------------------------------------------------------------
+// 对齐 WPF #260 / 审查 H4、H5、H6、M18：TxnRef 派生认领、Failed/NotSubmitted 终态、
+// 提交前失败的“未提交”分类，以及受控恢复中的传输异常。
+// ---------------------------------------------------------------------------
+
+/** 与 test-fixtures/linkly-attempt-txnref/vectors.json 中该 GUID 的黄金向量一致（C# 与 TS 共用），非自反推导。 */
+const derivedAttemptId = "3b241101-e2bb-4255-8caf-4136c566a962";
+const derivedPurchaseTxnRef = "PYYM521JPGH9ARTN";
+const derivedRefundTxnRef = "RA80AJ7EBT50EKH8";
+
+const noReferences = { checkoutId: null, paymentId: null, sessionId: null, txnRef: null, rfn: null, voucherReservationToken: null };
+
+/** 服务在 Created→Submitted 的 CAS 里已预置派生 TxnRef 的 attempt。 */
+const derivedAttempt = (overrides: Partial<PaymentAttempt> = {}): PaymentAttempt =>
+  attempt({
+    attemptId: derivedAttemptId,
+    idempotencyKey: recoveryUid,
+    state: "Submitted",
+    references: { ...noReferences, txnRef: derivedPurchaseTxnRef },
+    ...overrides,
+  });
+
+const posts = (transport: FakeTransport) =>
+  transport.requests.filter((request) => request.method === "POST" && request.url === "/api/v1/linkly/cloud-backend/transactions");
+
+test("H4：落库的 TxnRef 确为 attemptId 派生值时请求携带 attemptGuid；否则不带", async () => {
+  const transport = new FakeTransport();
+  transport.responses.push(none(), ok(session({ txnRef: derivedPurchaseTxnRef, status: "Pending" })));
+  const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions());
+  await provider.submit(derivedAttempt({ state: "Created" }));
+  assert.equal((posts(transport)[0]?.data as { attemptGuid?: unknown }).attemptGuid, derivedAttemptId);
+
+  // 大小写不同的 attemptId 仍发送规范化（小写 D 格式）GUID。
+  const upperTransport = new FakeTransport();
+  upperTransport.responses.push(none(), ok(session({ txnRef: derivedPurchaseTxnRef, status: "Pending" })));
+  await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(upperTransport), providerOptions()).submit(
+    derivedAttempt({ state: "Created", attemptId: derivedAttemptId.toUpperCase() }),
+  );
+  assert.equal((posts(upperTransport)[0]?.data as { attemptGuid?: unknown }).attemptGuid, derivedAttemptId);
+
+  // 本地没有派生引用（旧 attempt）或引用与 attemptId 不对应时绝不发送，避免后端派生出与本地不一致的值。
+  for (const legacy of [
+    attempt({ attemptId: derivedAttemptId }),
+    attempt({ attemptId: "attempt-1", references: { ...noReferences, txnRef: derivedPurchaseTxnRef } }),
+    derivedAttempt({ state: "Created", references: { ...noReferences, txnRef: "PAAAAAAAAAAAAAAA" } }),
+  ]) {
+    const legacyTransport = new FakeTransport();
+    legacyTransport.responses.push(none(), ok(session({ status: "Pending" })));
+    await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(legacyTransport), providerOptions()).submit(legacy);
+    assert.equal("attemptGuid" in (posts(legacyTransport)[0]?.data as object), false);
+  }
+
+  // 退款用 R 类型派生值。
+  const refundTransport = new FakeTransport();
+  refundTransport.responses.push(none(), ok(session({ txnRef: derivedRefundTxnRef, status: "Pending" })));
+  await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(refundTransport), providerOptions()).refund(
+    derivedAttempt({
+      state: "Created",
+      operation: "refund",
+      amount: { currency: "AUD", cents: -1234 },
+      references: { ...noReferences, txnRef: derivedRefundTxnRef, rfn: "RFN-ORIGINAL" },
+    }),
+  );
+  assert.equal((posts(refundTransport)[0]?.data as { attemptGuid?: unknown }).attemptGuid, derivedAttemptId);
+});
+
+test("H4：create 响应丢失后，服务端剥离了终态通知也能凭顶层 TxnRef 认领 Declined 会话并绑定 SessionId", async () => {
+  const declined = session({
+    sessionId: "orphan-declined",
+    txnRef: derivedPurchaseTxnRef,
+    status: "Completed",
+    transactionSuccess: false,
+    responseCode: "05",
+    notifications: [], // 后端对 Declined/Cancelled 会话整体剥离 transaction 通知
+  });
+  const transport = new FakeTransport();
+  transport.responses.push(
+    none(),
+    new HbposApiError("connection lost after submit", { kind: "transport" }),
+    none(), // active 已无（会话已终态）
+    ok(declined), // resumable
+    ok(declined), // status
+  );
+  const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions());
+
+  const result = await provider.submit(derivedAttempt({ state: "Created" }));
+
+  assert.equal(result.state, "Declined");
+  assert.equal(result.references.sessionId, "orphan-declined");
+  assert.equal(result.references.txnRef, derivedPurchaseTxnRef);
+  assert.equal(posts(transport).length, 1, "歧义恢复绝不重发 create");
+});
+
+test("H4：Approved 会话的通知 TxnRef 被二次脱敏时仍凭顶层 TxnRef + 证据金额认领", async () => {
+  const approved = {
+    ...session({
+      sessionId: "orphan-approved",
+      txnRef: derivedPurchaseTxnRef,
+      status: "Completed",
+      transactionSuccess: true,
+      responseCode: "00",
+      notifications: [{
+        type: "transaction",
+        payloadJson: JSON.stringify({
+          Response: {
+            TxnType: "P",
+            AmtPurchase: 1234,
+            // 后端输出路径把 12 位数字串当 PAN 掩码：与顶层 txnRef 永远对不上。
+            TxnRef: "****3456AB12",
+            PurchaseAnalysisData: { UID: recoveryUid },
+          },
+        }),
+        receivedAt: "2026-07-28T00:00:05.000Z",
+      }],
+    }),
+    cardTransaction: cardTransaction({ txnRef: derivedPurchaseTxnRef, rfn: "RFN-ORPHAN" }),
+  };
+  const transport = new FakeTransport();
+  transport.responses.push(ok(approved), ok(approved));
+  const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions());
+
+  const result = await provider.recover(derivedAttempt({ state: "Unknown" }));
+
+  assert.equal(result.state, "Approved");
+  assert.equal(result.references.sessionId, "orphan-approved");
+  assert.equal(result.protectedSyncEvidence?.amountCents, 1234);
+});
+
+test("H4：Pending 且尚无通知的 active 会话同样按顶层 TxnRef 认领；TxnRef、类型、金额、UID 任一矛盾则拒绝", async () => {
+  const pending = session({ sessionId: "orphan-pending", txnRef: derivedPurchaseTxnRef, status: "Pending", notifications: [] });
+  const transport = new FakeTransport();
+  transport.responses.push(ok(pending), ok(pending));
+  const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions());
+  const claimed = await provider.recover(derivedAttempt({ state: "Unknown" }));
+  assert.equal(claimed.state, "Pending");
+  assert.equal(claimed.references.sessionId, "orphan-pending");
+
+  const rejected = [
+    session({ sessionId: "other", txnRef: "PZZZZZZZZZZZZZZZ", status: "Pending" }),
+    session({ sessionId: "wrong-type", txnRef: derivedPurchaseTxnRef, status: "Pending", notifications: [transactionNotification({ uid: recoveryUid, txnType: "R" })] }),
+    session({ sessionId: "wrong-amount", txnRef: derivedPurchaseTxnRef, status: "Pending", notifications: [transactionNotification({ uid: recoveryUid, amountCents: 999 })] }),
+    session({ sessionId: "wrong-uid", txnRef: derivedPurchaseTxnRef, status: "Pending", notifications: [transactionNotification({ uid: "89bd9d8d-69a2-4803-8f8d-830ec69be3a0" })] }),
+  ];
+  for (const candidate of rejected) {
+    const rejectTransport = new FakeTransport();
+    rejectTransport.responses.push(ok(candidate), ok(candidate));
+    const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(rejectTransport), providerOptions())
+      .recover(derivedAttempt({ state: "Unknown" }));
+    assert.equal(result.state, "Unknown", candidate.sessionId);
+    assert.equal(result.references.sessionId, null, candidate.sessionId);
+    assert.equal(rejectTransport.requests.some((request) => request.url.includes("/status") || request.url.includes("/recover")), false, candidate.sessionId);
+  }
+});
+
+test("H4：没有派生 TxnRef 的旧 attempt 仍走 UID 通知认领，通知被剥离时失败关闭", async () => {
+  const stripped = session({ sessionId: "legacy-orphan", txnRef: "TXN-LEGACY", status: "Completed", transactionSuccess: false, notifications: [] });
+  const transport = new FakeTransport();
+  transport.responses.push(ok(stripped), ok(stripped));
+  const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions())
+    .recover(attempt({ idempotencyKey: recoveryUid, state: "Unknown" }));
+  assert.equal(result.state, "Unknown");
+  assert.equal(result.references.sessionId, null);
+});
+
+test("H5：Failed/NotSubmitted 且 transactionSuccess 为 null 映射为 Declined，可进入 ACK；矛盾字段仍失败关闭", async () => {
+  for (const status of ["Failed", "NotSubmitted", "failed", "notsubmitted"]) {
+    for (const recoveryAction of [null, "RetryNewSession"]) {
+      const recovered = await recoverFromSession(session({
+        sessionId: "session-original",
+        txnRef: "TXN-1",
+        status,
+        transactionSuccess: null,
+        recoveryAction,
+        lastHttpStatus: status.toLowerCase() === "notsubmitted" ? 404 : 400,
+      }));
+      assert.equal(recovered.result.state, "Declined", `${status}/${recoveryAction}`);
+      assert.equal(recovered.result.references.sessionId, "session-original");
+      assert.equal(recovered.result.protectedSyncEvidence, undefined);
+    }
+  }
+  // 明确 success=false 保持 Declined；success=true 与 Failed 互相矛盾，不得放行也不得判拒绝。
+  assert.equal((await recoverFromSession(session({ sessionId: "session-original", status: "Failed", transactionSuccess: false }))).result.state, "Declined");
+  assert.equal((await recoverFromSession(session({ sessionId: "session-original", status: "NotSubmitted", transactionSuccess: true }))).result.state, "Unknown");
+});
+
+test("H6：create 之前读终端列表失败（超时、401、凭据轮换 409、响应非法）返回未提交 Declined，零 POST、无 SessionId", async () => {
+  const failures: readonly unknown[] = [
+    new HbposApiError("timeout", { kind: "transport", code: "NO_HTTP_RESPONSE" }),
+    new HbposApiError("unauthorized", { kind: "http", status: 401 }),
+    new HbposApiError("credential rotated", { kind: "http", status: 409, code: "LINKLY_CREDENTIAL_REENTRY_REQUIRED" }),
+    new Error("Invalid Linkly terminal selection response."),
+  ];
+  for (const error of failures) {
+    const transport = new FakeTransport();
+    const selection = new FakeTerminalSelectionPort();
+    selection.readTerminals = async () => { throw error; };
+    const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions(selection))
+      .submit(attempt({ state: "Submitted" }));
+    assert.equal(result.state, "Declined");
+    assert.equal(result.responseCode, "LINKLY_NOT_SUBMITTED_TERMINAL_LIST");
+    assert.equal(result.references.sessionId, null);
+    assert.equal(transport.requests.length, 0);
+  }
+});
+
+test("H6：create 之前 active 预检失败返回未提交 Declined，不 create、不进入歧义恢复；退款同样", async () => {
+  for (const operation of ["purchase", "refund"] as const) {
+    const transport = new FakeTransport();
+    transport.responses.push(new HbposApiError("gateway timeout", { kind: "transport", code: "NO_HTTP_RESPONSE" }));
+    const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions());
+    const result = operation === "purchase"
+      ? await provider.submit(attempt({ state: "Submitted" }))
+      : await provider.refund(attempt({
+          state: "Submitted",
+          operation: "refund",
+          amount: { currency: "AUD", cents: -1234 },
+          references: { ...noReferences, rfn: "RFN-1" },
+        }));
+    assert.equal(result.state, "Declined");
+    assert.equal(result.responseCode, "LINKLY_NOT_SUBMITTED_ACTIVE_CHECK");
+    assert.equal(transport.requests.length, 1);
+    assert.equal(posts(transport).length, 0);
+  }
+});
+
+test("H6：create 被 400/401/403/404/409/422/429 明确拒绝时返回带状态码的未提交 Declined，不查询 active/resumable", async () => {
+  for (const status of [400, 401, 403, 404, 409, 422, 429]) {
+    const transport = new FakeTransport();
+    transport.responses.push(none(), new HbposApiError(`rejected ${status}`, { kind: "http", status, code: "SOME_SERVER_CODE" }));
+    const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions())
+      .submit(derivedAttempt());
+    assert.equal(result.state, "Declined", String(status));
+    assert.equal(result.responseCode, `LINKLY_NOT_SUBMITTED_HTTP_${status}`);
+    assert.equal(result.references.sessionId, null);
+    // 本地派生的 TxnRef 仍保留在引用里（未提交的 attempt 以 Declined 终结，不影响重试新 attempt）。
+    assert.equal(result.references.txnRef, derivedPurchaseTxnRef);
+    assert.equal(posts(transport).length, 1);
+    assert.equal(transport.requests.length, 2);
+  }
+});
+
+test("H6：只有 408、5xx、传输错误与无法解析的响应才进入结果不确定恢复，且绝不重发 POST", async () => {
+  const ambiguous: readonly unknown[] = [
+    new HbposApiError("request timeout", { kind: "http", status: 408 }),
+    new HbposApiError("server error", { kind: "http", status: 500 }),
+    new HbposApiError("bad gateway", { kind: "http", status: 503 }),
+    new HbposApiError("connection lost", { kind: "transport", code: "NO_HTTP_RESPONSE" }),
+    // 200 但响应体缺字段：POST 很可能已落地，必须按歧义处理而不是当作未提交。
+    { status: 200, data: { success: true, data: {} } },
+  ];
+  for (const failure of ambiguous) {
+    const transport = new FakeTransport();
+    transport.responses.push(none(), failure, none(), none());
+    const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions())
+      .submit(derivedAttempt());
+    assert.equal(result.state, "Unknown");
+    assert.equal(result.responseCode, "LINKLY_SESSION_UNRESOLVED");
+    assert.equal(posts(transport).length, 1);
+    assert.deepEqual(
+      transport.requests.slice(2).map((request) => request.url),
+      ["/api/v1/linkly/cloud-backend/transactions/active", "/api/v1/linkly/cloud-backend/transactions/resumable"],
+    );
+  }
+});
+
+const pendingReferences = { ...noReferences, sessionId: "session-1", txnRef: "TXN-1" };
+const freshControl = () => ({ signal: new AbortController().signal, deadlineAtMs: Date.now() + 180_000 });
+
+test("M18：请求进行中被 abort 时返回中性码，而不是抛出后被写成 Unknown", async () => {
+  const controller = new AbortController();
+  const hangingTransport: HbposTransport = {
+    request: (request) => new Promise((_resolve, reject) => {
+      request.signal?.addEventListener("abort", () => {
+        reject(new HbposApiError("Hbpos request was cancelled.", { kind: "transport", code: "REQUEST_ABORTED" }));
+      });
+    }),
+  };
+  const provider = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(hangingTransport), providerOptions());
+  const running = provider.recoverWithControl(
+    attempt({ state: "Pending", references: pendingReferences }),
+    { signal: controller.signal, deadlineAtMs: Date.now() + 180_000 },
+  );
+  controller.abort();
+  const aborted = await running;
+  assert.equal(aborted.state, "Unknown");
+  assert.equal(aborted.responseCode, "LINKLY_RECOVERY_ABORTED");
+  assert.equal(aborted.references.sessionId, "session-1");
+
+  // 无会话的歧义恢复同样把 abort 转成中性码。
+  const ambiguousController = new AbortController();
+  const ambiguousRunning = new LinklyCloudBackendProvider(new LinklyCloudBackendApi(hangingTransport), providerOptions())
+    .recoverWithControl(
+      derivedAttempt({ state: "Submitted" }),
+      { signal: ambiguousController.signal, deadlineAtMs: Date.now() + 180_000 },
+    );
+  ambiguousController.abort();
+  assert.equal((await ambiguousRunning).responseCode, "LINKLY_RECOVERY_ABORTED");
+});
+
+test("M18：单次请求在截止时间到期时超时，返回截止中性码", async () => {
+  const slowFailure: HbposTransport = {
+    request: () => new Promise((_resolve, reject) => {
+      setTimeout(() => reject(new HbposApiError("timeout", { kind: "transport", code: "NO_HTTP_RESPONSE" })), 30);
+    }),
+  };
+  const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(slowFailure), providerOptions())
+    .recoverWithControl(
+      attempt({ state: "Pending", references: pendingReferences }),
+      { signal: new AbortController().signal, deadlineAtMs: Date.now() + 10 },
+    );
+  assert.equal(result.state, "Unknown");
+  assert.equal(result.responseCode, "LINKLY_RECOVERY_DEADLINE_EXCEEDED");
+});
+
+test("M18：Pending 的瞬时传输错误/408/429/5xx 保持 Pending，Unknown 保持 Unknown；非瞬时错误仍抛出", async () => {
+  const transient: readonly unknown[] = [
+    new HbposApiError("offline", { kind: "transport", code: "NO_HTTP_RESPONSE" }),
+    new HbposApiError("timeout", { kind: "http", status: 408 }),
+    new HbposApiError("limited", { kind: "http", status: 429 }),
+    new HbposApiError("bad gateway", { kind: "http", status: 502 }),
+  ];
+  for (const failure of transient) {
+    const transport = new FakeTransport();
+    transport.responses.push(failure);
+    const pending = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(transport), providerOptions())
+      .recoverWithControl(attempt({ state: "Pending", references: pendingReferences }), freshControl());
+    assert.equal(pending.state, "Pending");
+    assert.equal(pending.references.sessionId, "session-1");
+
+    const unknownTransport = new FakeTransport();
+    unknownTransport.responses.push(failure);
+    const stillUnknown = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(unknownTransport), providerOptions())
+      .recoverWithControl(attempt({ state: "Unknown", references: pendingReferences }), freshControl());
+    assert.equal(stillUnknown.state, "Unknown");
+  }
+
+  // recoveryAction 触发的 POST recover 失败同样保持 Pending。
+  const recoverFails = new FakeTransport();
+  recoverFails.responses.push(
+    ok(session({ status: "Pending", recoveryAction: "Retry" })),
+    new HbposApiError("bad gateway", { kind: "http", status: 502 }),
+  );
+  const afterRecover = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(recoverFails), providerOptions())
+    .recoverWithControl(attempt({ state: "Pending", references: pendingReferences }), freshControl());
+  assert.equal(afterRecover.state, "Pending");
+
+  const forbidden = new FakeTransport();
+  forbidden.responses.push(new HbposApiError("forbidden", { kind: "http", status: 403 }));
+  await assert.rejects(
+    () => new LinklyCloudBackendProvider(new LinklyCloudBackendApi(forbidden), providerOptions())
+      .recoverWithControl(attempt({ state: "Pending", references: pendingReferences }), freshControl()),
+    HbposApiError,
+  );
+});
+
+test("M18：取消键被 Linkly 拒绝（sendkey 400）或取消途中传输异常时保持 Pending，不禁用取消键", async () => {
+  const cancellable = session({ status: "Pending", transactionSuccess: null, cancelKeyFlag: true, txnRef: "TXN-1" });
+  const rejected = new FakeTransport();
+  rejected.responses.push(
+    ok(cancellable),
+    new HbposApiError("Continue waiting for the transaction result", { kind: "http", status: 400 }),
+  );
+  const result = await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(rejected), providerOptions())
+    .cancel(attempt({ state: "Pending", references: pendingReferences }));
+  assert.equal(result.state, "Pending");
+  assert.equal(result.responseCode, "LINKLY_CANCEL_NOT_ACCEPTED");
+  assert.equal(result.references.sessionId, "session-1");
+
+  const sendKeyDown = new FakeTransport();
+  sendKeyDown.responses.push(ok(cancellable), new HbposApiError("offline", { kind: "transport", code: "NO_HTTP_RESPONSE" }));
+  assert.equal((await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(sendKeyDown), providerOptions())
+    .cancel(attempt({ state: "Pending", references: pendingReferences }))).state, "Pending");
+
+  const statusDown = new FakeTransport();
+  statusDown.responses.push(new HbposApiError("bad gateway", { kind: "http", status: 502 }));
+  assert.equal((await new LinklyCloudBackendProvider(new LinklyCloudBackendApi(statusDown), providerOptions())
+    .cancel(attempt({ state: "Pending", references: pendingReferences }))).state, "Pending");
 });

@@ -76,6 +76,58 @@ test("手动刷卡保持MANUAL引用，无法伪装为Square或Linkly原卡退�
   });
 });
 
+test("Linkly 引用的环境取自 attempt 冻结的 provider_environment，不随当前配置漂移；仅历史 NULL 退回当前配置", async () => {
+  await withDatabase(async (connection) => {
+    for (const [suffix, providerEnvironment] of [
+      ["production", "Production"],
+      ["sandbox", "Sandbox"],
+      ["legacy", null],
+    ] as const) {
+      await seedOrderTender(connection, {
+        orderGuid: `order-env-${suffix}`,
+        tenderGuid: `tender-env-${suffix}`,
+        attemptId: `attempt-env-${suffix}`,
+        provider: "linkly-cloud",
+        operation: "purchase",
+        amountCents: 900,
+        syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE,
+        sessionId: "session-env",
+        txnRef: "txn-env",
+        rfn: "rfn-env",
+        providerEnvironment,
+      });
+    }
+    const resolver = createResolver(connection);
+    const productionOrder = await readOrdinaryOrder(connection, "order-env-production");
+    const sandboxOrder = await readOrdinaryOrder(connection, "order-env-sandbox");
+    const legacyOrder = await readOrdinaryOrder(connection, "order-env-legacy");
+
+    // 管理员在交易后把当前配置从 Production 切到 Sandbox（或相反）：已冻结的 attempt 仍上传其原环境。
+    assert.match(
+      String((await resolver.resolve(productionOrder, "Sandbox")).tenders[0]?.reference),
+      /environment=Production$/u,
+    );
+    assert.match(
+      String((await resolver.resolve(sandboxOrder, "Production")).tenders[0]?.reference),
+      /environment=Sandbox$/u,
+    );
+    // 当前配置缺失也不阻塞已冻结环境的订单同步。
+    assert.match(
+      String((await resolver.resolve(productionOrder, null)).tenders[0]?.reference),
+      /environment=Production$/u,
+    );
+    // 历史 NULL 记录无法证明原环境，退回当前配置；配置也缺失则失败关闭。
+    assert.match(
+      String((await resolver.resolve(legacyOrder, "Production")).tenders[0]?.reference),
+      /environment=Production$/u,
+    );
+    await assert.rejects(
+      () => resolver.resolve(legacyOrder, null),
+      /ORDER_SYNC_ENVIRONMENT_INVALID/u,
+    );
+  });
+});
+
 test("Square 与 Linkly purchase 只在受信任副本恢复 WPF 引用，普通仓储保持脱敏", async () => {
   await withDatabase(async (connection) => {
     await seedOrderTender(connection, {
@@ -1649,6 +1701,8 @@ type SeedTenderInput = Readonly<{
   txnRef?: string | null;
   rfn?: string | null;
   responseCode?: string | null;
+  /** payment_attempts.provider_environment；省略即历史 NULL 记录。 */
+  providerEnvironment?: string | null;
 }>;
 
 type ApprovedVoucherPurchaseFixture = Readonly<{
@@ -1809,9 +1863,9 @@ async function seedOrderTender(
         amount_cents, state, checkout_id, payment_id, session_id,
         txn_ref, rfn, provider_payload_ciphertext,
         provider_receipt_ciphertext, provider_response_code,
-        created_at_iso, updated_at_iso, last_error_code
+        created_at_iso, updated_at_iso, last_error_code, provider_environment
       ) VALUES (?, ?, ?, ?, ?, ?, 'Approved', NULL, ?, ?, ?, ?, NULL,
-        NULL, ?, ?, ?, NULL)`,
+        NULL, ?, ?, ?, NULL, ?)`,
       [
         input.attemptId,
         `idem-${input.attemptId}`,
@@ -1826,6 +1880,7 @@ async function seedOrderTender(
         input.responseCode ?? null,
         NOW,
         NOW,
+        input.providerEnvironment ?? null,
       ],
     );
   }

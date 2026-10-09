@@ -1,3 +1,7 @@
+import {
+  canonicalLinklyAttemptGuid,
+  deriveLinklyAttemptTxnRef,
+} from "@hb/pos-payments-core/features/payments/linkly-attempt-txn-ref";
 import { paymentProviderAmountCents } from "@hb/pos-payments-core/features/payments/payment-amount";
 import { LinklySupervisorAckSessionNotFoundError } from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
 
@@ -344,23 +348,42 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     linklyProviderAmountCents(attempt);
     if (attempt.operation === "refund") return this.refund(attempt);
     if (attempt.state === "Unknown" || attempt.references.sessionId) return this.recover(attempt);
+    return this.createSession(attempt);
+  }
+
+  /**
+   * 新交易的唯一 create 入口（购买与退款共用）。按“是否已越过 POST 边界”分类失败：
+   * - POST 之前的任何失败（读终端列表、active 预检）以及 create 被明确 4xx 拒绝，都证明没有创建会话，
+   *   返回带具体“未提交”码的 Declined，释放订单与手持设备级触发器，而不是写成无会话的 Unknown；
+   * - 只有 408、5xx、传输错误或响应无法解析（POST 可能已落地）才进入结果不确定恢复，且绝不重发 POST。
+   */
+  private async createSession(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
     const environment = frozenEnvironment(attempt, this.environment);
 
-    const selection = await transactionTerminalSelection(
-      this.options.terminalSelection,
-      environment,
-      attempt,
-    );
+    let selection: TransactionTerminalSelection;
+    try {
+      selection = await transactionTerminalSelection(
+        this.options.terminalSelection,
+        environment,
+        attempt,
+      );
+    } catch {
+      return notSubmittedDeclined(attempt, "LINKLY_NOT_SUBMITTED_TERMINAL_LIST");
+    }
     if (!selection.ok) return terminalSelectionDeclined(attempt, selection.code);
 
-    const active = await this.api.active(environment);
+    let active: LinklyCloudBackendSession | null;
+    try {
+      active = await this.api.active(environment);
+    } catch {
+      return notSubmittedDeclined(attempt, "LINKLY_NOT_SUBMITTED_ACTIVE_CHECK");
+    }
     // 这是另一笔未完成交易，不能把它的 SessionId/TxnRef 绑定到当前新订单。
     if (active) return activeSessionConflict(attempt);
+
+    const request = transactionRequest(attempt, environment, selection);
     try {
-      const created = await this.api.create(
-        transactionRequest(attempt, environment, selection),
-      );
-      return toPaymentResult(created, attempt);
+      return toPaymentResult(await this.api.create(request), attempt);
     } catch (error) {
       if (isActiveSessionConflict(error)) return activeSessionConflict(attempt);
       if (isTerminalSelectionConflict(error)) {
@@ -372,7 +395,9 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
       if (isTerminalNotReadyConflict(error)) {
         return terminalSelectionDeclined(attempt, "LINKLY_TERMINAL_NOT_READY");
       }
-      if (!isCreateAmbiguous(error)) throw error;
+      if (isCreateDefinitelyNotSubmitted(error)) {
+        return notSubmittedDeclined(attempt, `LINKLY_NOT_SUBMITTED_HTTP_${error.status}`);
+      }
       return this.recoverAmbiguousCreate(attempt, {
         signal: new AbortController().signal,
         deadlineAtMs: Date.now() + LINKLY_RECOVERY_DEADLINE_MS,
@@ -429,7 +454,12 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     if (attempt.references.sessionId) {
       return this.recoverPersistedSession(attempt, environment, attempt.references.sessionId, control);
     }
-    return this.recoverAmbiguousCreate(attempt, control);
+    try {
+      return await this.recoverAmbiguousCreate(attempt, control);
+    } catch (error) {
+      // 页面卸载/截止时的 abort 只代表本次查询停止，不能被 executeProvider 写成 Unknown。
+      return controlledTransportFailure(attempt, error, control);
+    }
   }
 
   public async cancel(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
@@ -447,7 +477,8 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
       status = await this.api.status(environment, attempt.references.sessionId);
     } catch (error) {
       if (isNotFound(error)) return unknownResult(attempt, "LINKLY_CANCEL_SESSION_NOT_FOUND");
-      throw error;
+      // 瞬时网络/5xx 不能把仍在等待顾客的 Pending 写成 Unknown：那会停掉自动轮询并禁用取消键。
+      return controlledTransportFailure(attempt, error);
     }
     if (!sameSessionEnvironment(status, attempt.references.sessionId, environment) ||
       (attempt.references.txnRef !== null && !sameIdentity(status.txnRef, attempt.references.txnRef))) {
@@ -457,7 +488,16 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     if (isFinalPaymentState(statusResult.state)) return statusResult;
     if (statusResult.state === "Unknown") return unknownResult(attempt, "LINKLY_CANCEL_CONTEXT_UNKNOWN");
     if (!supportsCancelPayment(status)) return unknownResult(attempt, "LINKLY_CANCEL_NOT_ALLOWED");
-    const session = await this.api.sendKey(environment, attempt.references.sessionId, "CANCEL", null);
+    let session: LinklyCloudBackendSession;
+    try {
+      session = await this.api.sendKey(environment, attempt.references.sessionId, "CANCEL", null);
+    } catch (error) {
+      // Linkly 拒绝取消键时控制器返回 400（提示继续等待交易结果），后端会话仍是 Pending。
+      if (isSendKeyRejected(error)) {
+        return stillPendingResult(attempt, "LINKLY_CANCEL_NOT_ACCEPTED");
+      }
+      return controlledTransportFailure(attempt, error);
+    }
     if (!sameSessionEnvironment(session, attempt.references.sessionId, environment) ||
       (attempt.references.txnRef !== null && !sameIdentity(session.txnRef, attempt.references.txnRef))) {
       return unknownResult(attempt, "LINKLY_CANCEL_CONTEXT_MISMATCH");
@@ -469,49 +509,15 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     linklyProviderAmountCents(attempt);
     if (attempt.references.rfn === null) return { state: "Declined", references: attempt.references, receiptText: null, responseCode: "LINKLY_RFN_REQUIRED" };
     if (attempt.state === "Unknown" || attempt.references.sessionId) return this.recover(attempt);
-    const environment = frozenEnvironment(attempt, this.environment);
-
-    const selection = await transactionTerminalSelection(
-      this.options.terminalSelection,
-      environment,
-      attempt,
-    );
-    if (!selection.ok) return terminalSelectionDeclined(attempt, selection.code);
-
-    const active = await this.api.active(environment);
-    if (active) return activeSessionConflict(attempt);
-    try {
-      return toPaymentResult(
-        await this.api.create(
-          transactionRequest(attempt, environment, selection),
-        ),
-        attempt,
-      );
-    } catch (error) {
-      if (isActiveSessionConflict(error)) return activeSessionConflict(attempt);
-      if (isTerminalSelectionConflict(error)) {
-        return terminalSelectionDeclined(
-          attempt,
-          "LINKLY_CLOUD_TERMINAL_SELECTION_CONFLICT",
-        );
-      }
-      if (isTerminalNotReadyConflict(error)) {
-        return terminalSelectionDeclined(attempt, "LINKLY_TERMINAL_NOT_READY");
-      }
-      if (!isCreateAmbiguous(error)) throw error;
-      return this.recoverAmbiguousCreate(attempt, {
-        signal: new AbortController().signal,
-        deadlineAtMs: Date.now() + LINKLY_RECOVERY_DEADLINE_MS,
-      });
-    }
+    return this.createSession(attempt);
   }
 
   private async recoverAmbiguousCreate(
     attempt: PaymentAttempt,
     control?: LinklyPaymentRecoveryControl,
   ): Promise<PaymentProviderResult> {
-    const recoveryUid = normalizeRecoveryUid(attempt.idempotencyKey);
-    if (recoveryUid === null) return unknownResult(attempt);
+    const proof = recoveryProof(attempt);
+    if (proof === null) return unknownResult(attempt);
 
     const environment = frozenEnvironmentOrNull(attempt);
     if (environment === null) return unknownResult(attempt, "LINKLY_RECOVERY_ENVIRONMENT_REQUIRED");
@@ -520,9 +526,9 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     const active = await this.api.active(environment, control?.signal, activeTimeoutMs);
     const activeScope = active === null
       ? null
-      : matchingRecoveryScope(active, attempt, environment, recoveryUid);
+      : matchingRecoveryScope(active, attempt, environment, proof);
     if (active !== null && activeScope !== null) {
-      return this.recoverMatchedSession(attempt, active, activeScope, recoveryUid, control);
+      return this.recoverMatchedSession(attempt, active, activeScope, proof, control);
     }
 
     const resumableTimeoutMs = recoveryTimeoutMs(control);
@@ -530,23 +536,23 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     const resumable = await this.api.resumable(environment, control?.signal, resumableTimeoutMs);
     const resumableScope = resumable === null
       ? null
-      : matchingRecoveryScope(resumable, attempt, environment, recoveryUid);
+      : matchingRecoveryScope(resumable, attempt, environment, proof);
     if (resumable === null || resumableScope === null) return unknownResult(attempt);
-    return this.recoverMatchedSession(attempt, resumable, resumableScope, recoveryUid, control);
+    return this.recoverMatchedSession(attempt, resumable, resumableScope, proof, control);
   }
 
   private async recoverMatchedSession(
     attempt: PaymentAttempt,
     candidate: LinklyCloudBackendSession,
     expectedScope: LinklyRecoveryScope,
-    recoveryUid: string,
+    proof: LinklyRecoveryProof,
     control?: LinklyPaymentRecoveryControl,
   ): Promise<PaymentProviderResult> {
     const statusTimeoutMs = recoveryTimeoutMs(control);
     if (statusTimeoutMs === null) return unknownResult(attempt, "LINKLY_RECOVERY_DEADLINE_EXCEEDED");
     const status = await this.api.status(expectedScope.environment, candidate.sessionId, control?.signal, statusTimeoutMs);
     if (!matchesRecoveryScope(status, expectedScope) ||
-      matchingRecoveryScope(status, attempt, expectedScope.environment, recoveryUid) === null) {
+      matchingRecoveryScope(status, attempt, expectedScope.environment, proof) === null) {
       return unknownResult(attempt);
     }
 
@@ -558,7 +564,7 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     if (recoverTimeoutMs === null) return unknownResult(attempt, "LINKLY_RECOVERY_DEADLINE_EXCEEDED");
     const recovered = await this.api.recover(expectedScope.environment, candidate.sessionId, control?.signal, recoverTimeoutMs);
     if (!matchesRecoveryScope(recovered, expectedScope) ||
-      matchingRecoveryScope(recovered, attempt, expectedScope.environment, recoveryUid) === null) {
+      matchingRecoveryScope(recovered, attempt, expectedScope.environment, proof) === null) {
       return unknownResult(attempt);
     }
     return toPaymentResult(recovered, attempt);
@@ -577,7 +583,7 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
       status = await this.api.status(environment, sessionId, control.signal, statusTimeoutMs);
     } catch (error) {
       if (isNotFound(error)) return unknownResult(attempt, "LINKLY_RECOVERY_SESSION_NOT_FOUND");
-      throw error;
+      return controlledTransportFailure(attempt, error, control);
     }
     if (!sameSessionEnvironment(status, sessionId, environment) ||
       (attempt.references.txnRef !== null && !sameIdentity(status.txnRef, attempt.references.txnRef))) {
@@ -588,7 +594,12 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     if (statusResult.state === "Pending" && !hasRecoveryAction(status)) return statusResult;
     const recoverTimeoutMs = recoveryTimeoutMs(control);
     if (recoverTimeoutMs === null) return unknownResult(attempt, "LINKLY_RECOVERY_DEADLINE_EXCEEDED");
-    const recovered = await this.api.recover(environment, sessionId, control.signal, recoverTimeoutMs);
+    let recovered: LinklyCloudBackendSession;
+    try {
+      recovered = await this.api.recover(environment, sessionId, control.signal, recoverTimeoutMs);
+    } catch (error) {
+      return controlledTransportFailure(attempt, error, control);
+    }
     if (!sameSessionEnvironment(recovered, sessionId, environment) ||
       (attempt.references.txnRef !== null && !sameIdentity(recovered.txnRef, attempt.references.txnRef))) {
       return unknownResult(attempt, "LINKLY_RECOVERY_CONTEXT_MISMATCH");
@@ -682,7 +693,7 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
     if (resumable) candidates.push(resumable);
     for (const candidate of candidates) {
       if (sameSessionEnvironment(candidate, attempt.references.sessionId, environment) &&
-        matchingRecoveryScope(candidate, attempt, environment, recoveryUid) !== null) {
+        matchingRecoveryScope(candidate, attempt, environment, { txnRef: null, uid: recoveryUid }) !== null) {
         return {
           environment,
           clientAcknowledgedAt: candidate.clientAcknowledgedAt,
@@ -759,11 +770,34 @@ function sessionRecoveryUid(session: LinklyCloudBackendSession): string | null {
     : null;
 }
 
+/**
+ * 认领 create 响应丢失的会话所依赖的本地证据：
+ * - txnRef：由 attemptId 派生且已随 Submitted CAS 落库的 TxnRef，后端按同一算法派生，会话顶层 txnRef 未脱敏、
+ *   不依赖通知，是强匹配键；
+ * - uid：随请求发出的 PAD UID，仅用于没有派生 TxnRef 的旧 attempt（非 GUID attemptId、历史数据）的通知认领。
+ */
+type LinklyRecoveryProof = Readonly<{
+  txnRef: string | null;
+  uid: string | null;
+}>;
+
+/** 本地已落库的 TxnRef 确为该 attemptId 的派生值时返回它，否则 null（此时不得向后端发送 attemptGuid）。 */
+function derivedTxnRefProof(attempt: PaymentAttempt): string | null {
+  const expected = deriveLinklyAttemptTxnRef(attempt);
+  return expected !== null && attempt.references.txnRef === expected ? expected : null;
+}
+
+function recoveryProof(attempt: PaymentAttempt): LinklyRecoveryProof | null {
+  const txnRef = derivedTxnRefProof(attempt);
+  const uid = normalizeRecoveryUid(attempt.idempotencyKey);
+  return txnRef === null && uid === null ? null : { txnRef, uid };
+}
+
 function matchingRecoveryScope(
   session: LinklyCloudBackendSession,
   attempt: PaymentAttempt,
   environment: string,
-  recoveryUid: string,
+  proof: LinklyRecoveryProof,
 ): LinklyRecoveryScope | null {
   // active/resumable 已由 Hbpos.Api 按当前门店/设备 claim 隔离；客户端仍要求后续响应保持同一作用域。
   if (!sameCaseInsensitiveIdentity(session.environment, environment) ||
@@ -775,6 +809,18 @@ function matchingRecoveryScope(
     return null;
   }
 
+  if (proof.txnRef !== null) {
+    // 强匹配：顶层 txnRef（未脱敏）等于本地派生值即可认领；类型已编码在引用首字符里。
+    // 服务端会在会话终态后剥离 Declined/Cancelled 的 transaction 通知，并对 Approved 通知里的 TxnRef 二次脱敏，
+    // 所以通知只做“矛盾即拒绝”的交叉校验：缺失/无法解析的通知不阻止认领，通知里的 TxnRef 完全不参与比较。
+    if (!sameIdentity(session.txnRef, proof.txnRef)) return null;
+    if (!notificationsConsistentWithAttempt(session, attempt, proof.uid)) return null;
+    return recoveryScopeOf(session);
+  }
+
+  // 旧 attempt（没有派生 TxnRef）：只能靠 transaction 通知里的 UID/类型/金额/TxnRef 强匹配。
+  const recoveryUid = proof.uid;
+  if (recoveryUid === null) return null;
   const identities: LinklyRecoveryIdentity[] = [];
   for (const notification of session.notifications) {
     if (!sameCaseInsensitiveIdentity(notification.type, "transaction")) continue;
@@ -794,13 +840,64 @@ function matchingRecoveryScope(
     return null;
   }
 
+  return recoveryScopeOf(session);
+}
+
+function recoveryScopeOf(session: LinklyCloudBackendSession): LinklyRecoveryScope {
   return {
     environment: session.environment.trim(),
     storeCode: session.storeCode.trim(),
     deviceCode: session.deviceCode.trim(),
     sessionId: session.sessionId.trim(),
-    txnRef: session.txnRef.trim(),
+    txnRef: (session.txnRef ?? "").trim(),
   };
+}
+
+/**
+ * 强匹配路径下对 transaction 通知的交叉校验：只在通知里“出现了”类型/金额/UID 且与本地 attempt 矛盾时拒绝；
+ * 通知缺失、JSON 无法解析或字段被脱敏/剥离都视为没有证据而不是矛盾。字段在大小写不同的重复键里出现多次，
+ * 视为关联证据冲突，失败关闭。
+ */
+function notificationsConsistentWithAttempt(
+  session: LinklyCloudBackendSession,
+  attempt: PaymentAttempt,
+  attemptUid: string | null,
+): boolean {
+  const expectedType = attempt.operation === "refund" ? "R" : "P";
+  const expectedAmount = linklyProviderAmountCents(attempt);
+  for (const notification of session.notifications) {
+    if (!sameCaseInsensitiveIdentity(notification.type, "transaction")) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(notification.payloadJson);
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed)) continue;
+    const responses = recordValues(parsed, "Response");
+    if (responses.length > 1) return false;
+    let source: Readonly<Record<string, unknown>> = parsed;
+    if (responses.length === 1) {
+      const response = responses[0];
+      if (!isRecord(response)) continue;
+      source = response;
+    }
+    const types = recordValues(source, "TxnType");
+    const amounts = recordValues(source, "AmtPurchase");
+    const analyses = recordValues(source, "PurchaseAnalysisData");
+    if (types.length > 1 || amounts.length > 1 || analyses.length > 1) return false;
+    if (types.length === 1 && (types[0] === "P" || types[0] === "R") && types[0] !== expectedType) return false;
+    const amount = amounts[0];
+    if (typeof amount === "number" && Number.isSafeInteger(amount) && Math.abs(amount) !== expectedAmount) return false;
+    const analysis = analyses[0];
+    if (isRecord(analysis)) {
+      const uids = recordValues(analysis, "UID");
+      if (uids.length > 1) return false;
+      const uid = normalizeRecoveryUid(uids[0]);
+      if (uid !== null && attemptUid !== null && uid !== attemptUid) return false;
+    }
+  }
+  return true;
 }
 
 function parseRecoveryIdentity(payloadJson: string): LinklyRecoveryIdentity | null {
@@ -914,6 +1011,11 @@ function transactionRequest(
     txnType: attempt.operation === "refund" ? "R" : "P",
     amtPurchase: linklyProviderAmountCents(attempt),
   };
+  // 只有本地已落库的 TxnRef 确为该 attemptId 的派生值时才发送 attemptGuid：Hbpos.Api 用同一算法派生同一引用，
+  // create 响应丢失后即可凭这个顶层 TxnRef 认领会话；否则（非 GUID 的旧数据）后端沿用随机引用，不能让两边不一致。
+  if (derivedTxnRefProof(attempt) !== null) {
+    request.attemptGuid = canonicalLinklyAttemptGuid(attempt.attemptId);
+  }
   const purchaseAnalysisData: Record<string, string> = {};
   const recoveryUid = normalizeRecoveryUid(attempt.idempotencyKey);
   // Linkly PAD UID 是会在结果中回显的 UUID v4 关联值；它只用于认领恢复，绝不授权重发 create。
@@ -977,6 +1079,55 @@ function toPaymentResult(session: LinklyCloudBackendSession, attempt: PaymentAtt
 
 function unknownResult(attempt: PaymentAttempt, responseCode = "LINKLY_SESSION_UNRESOLVED"): PaymentProviderResult {
   return { state: "Unknown", references: attempt.references, receiptText: null, responseCode };
+}
+
+/** 仍在等待终端结果：保持 Pending（不要把瞬时失败升级成 Unknown，否则自动轮询停止、取消键被禁用）。 */
+function stillPendingResult(attempt: PaymentAttempt, responseCode: string): PaymentProviderResult {
+  return {
+    state: "Pending",
+    references: attempt.references,
+    receiptText: attempt.receiptText ?? null,
+    responseCode,
+  };
+}
+
+/**
+ * 受控恢复/取消途中的传输异常分类，避免 executeProvider 把任何抛出的异常都写成 Unknown：
+ * - abort / 已过截止时间：返回中性码，PaymentAttemptService 保持原状态，重挂载后在剩余窗口内继续查询；
+ * - 已有 SessionId 的瞬时错误（传输失败、408、429、5xx）：保持 Pending（Unknown 保持 Unknown），下一轮轮询自然重试；
+ * - 其他错误（401/403/400 等需要人看的失败、解析错误）仍向上抛出，保持原有的失败关闭。
+ */
+function controlledTransportFailure(
+  attempt: PaymentAttempt,
+  error: unknown,
+  control?: LinklyPaymentRecoveryControl,
+): PaymentProviderResult {
+  if (isRequestAborted(error) || control?.signal.aborted === true) {
+    return unknownResult(attempt, "LINKLY_RECOVERY_ABORTED");
+  }
+  if (!(error instanceof HbposApiError) || !isTransientRecoveryError(error)) throw error;
+  if (control !== undefined && control.deadlineAtMs <= Date.now()) {
+    return unknownResult(attempt, "LINKLY_RECOVERY_DEADLINE_EXCEEDED");
+  }
+  if (attempt.references.sessionId === null || attempt.state === "Unknown") {
+    return unknownResult(attempt, "LINKLY_RECOVERY_TRANSIENT_ERROR");
+  }
+  return stillPendingResult(attempt, "LINKLY_RECOVERY_TRANSIENT_ERROR");
+}
+
+function isRequestAborted(error: unknown): boolean {
+  return error instanceof HbposApiError && error.kind === "transport" && error.code === "REQUEST_ABORTED";
+}
+
+function isTransientRecoveryError(error: HbposApiError): boolean {
+  return error.kind === "transport" ||
+    (error.kind === "http" && error.status !== undefined &&
+      (error.status === 408 || error.status === 429 || error.status >= 500));
+}
+
+/** 控制器在 Linkly 拒绝按键时返回 400（提示继续等待结果），后端会话保持 Pending。 */
+function isSendKeyRejected(error: unknown): boolean {
+  return error instanceof HbposApiError && error.kind === "http" && error.status === 400;
 }
 
 function activeSessionConflict(attempt: PaymentAttempt): PaymentProviderResult {
@@ -1060,6 +1211,16 @@ async function transactionTerminalSelection(
   };
 }
 
+/** 确定没有越过 POST 边界：保持 sessionId 为空并带具体“未提交”码，让订单与设备触发器立即释放。 */
+function notSubmittedDeclined(attempt: PaymentAttempt, responseCode: string): PaymentProviderResult {
+  return {
+    state: "Declined",
+    references: attempt.references,
+    receiptText: null,
+    responseCode,
+  };
+}
+
 function terminalSelectionDeclined(
   attempt: PaymentAttempt,
   responseCode: Extract<TransactionTerminalSelection, { ok: false }>["code"],
@@ -1075,6 +1236,11 @@ function terminalSelectionDeclined(
 const LINKLY_PENDING_STATUSES = new Set([
   "pending",
   "tokenrefreshrequired",
+]);
+
+const LINKLY_NOT_SUBMITTED_STATUSES = new Set([
+  "failed",
+  "notsubmitted",
 ]);
 
 const LINKLY_DECLINED_STATUSES = new Set([
@@ -1109,6 +1275,13 @@ function sessionState(session: LinklyCloudBackendSession): PaymentProviderResult
   }
 
   if (LINKLY_DECLINED_STATUSES.has(status) && session.transactionSuccess === false) {
+    return "Declined";
+  }
+
+  // Failed/NotSubmitted 只来自 Hbpos.Api 对 Linkly 的 HTTP 层明确拒绝或 404（交易从未提交成功），后端不会再刷新，
+  // 也不会写 TransactionSuccess；与 WPF 一致按“未批准的终态”处理，才能进入 ACK 队列释放设备/终端闸门。
+  // 若同时声称 success=true 则字段互相矛盾，继续失败关闭为 Unknown。
+  if (LINKLY_NOT_SUBMITTED_STATUSES.has(status) && session.transactionSuccess !== true) {
     return "Declined";
   }
 
@@ -1418,7 +1591,12 @@ function optionalText(value: unknown): string | null { return typeof value === "
 function integer(value: unknown, field: string): number { if (typeof value !== "number" || !Number.isSafeInteger(value)) throw new Error(`Invalid Linkly ${field}.`); return value; }
 function isNotFound(error: unknown): boolean { return error instanceof HbposApiError && (error.status === 404 || error.code === "LINKLY_CLOUD_BACKEND_SESSION_NOT_FOUND"); }
 function sessionNotFound(): HbposApiError { return new HbposApiError("Linkly session was not found.", { kind: "http", status: 404, code: "LINKLY_CLOUD_BACKEND_SESSION_NOT_FOUND" }); }
-function isCreateAmbiguous(error: unknown): boolean { return error instanceof HbposApiError && (error.kind === "transport" || error.status === 408 || (error.status !== undefined && error.status >= 500)); }
+/**
+ * create 被 Hbpos.Api 以 4xx 明确拒绝（400/401/403/404/非 ACTIVE 的 409/429…）：这些都发生在向 Linkly 发 POST 之前
+ * （凭据/终端解析、参数校验、限流），证明没有创建会话。408、5xx、传输错误、HTTP 200 的异常信封以及响应解析失败
+ * 都可能发生在会话创建之后，一律不算“明确未提交”。
+ */
+function isCreateDefinitelyNotSubmitted(error: unknown): error is HbposApiError & { status: number } { return error instanceof HbposApiError && error.kind === "http" && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 408; }
 function isActiveSessionConflict(error: unknown): boolean { return error instanceof HbposApiError && error.status === 409 && error.code === "LINKLY_CLOUD_BACKEND_ACTIVE_TRANSACTION"; }
 function isTerminalSelectionConflict(error: unknown): boolean { return error instanceof LinklyTerminalSelectionConflictError || (error instanceof HbposApiError && error.status === 409 && error.code === "LINKLY_CLOUD_TERMINAL_SELECTION_CONFLICT"); }
 function isTerminalNotReadyConflict(error: unknown): boolean { return error instanceof HbposApiError && error.status === 409 && error.code === "LINKLY_CLOUD_TERMINAL_NOT_READY"; }

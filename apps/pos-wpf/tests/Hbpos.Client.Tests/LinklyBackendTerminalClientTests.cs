@@ -1125,6 +1125,274 @@ public sealed class LinklyBackendTerminalClientTests
     }
 
     [Fact]
+    public async Task SettlementAsync_treats_bank_failure_without_receipt_as_final_after_a_short_grace()
+    {
+        // 回归 H13：刷卡机离线或银行拒绝时回调只有 PF，没有 Type=S 回单。服务端把 OperationSuccess=false 视为失败终态，
+        // 客户端若仍等回单，本地会永远卡在未知、永不 ack，之后每天的结算都被挡住。
+        var statusPolls = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/settlements/resumable", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/status", StringComparison.Ordinal))
+            {
+                statusPolls++;
+            }
+
+            return JsonResponse(SettlementSessionJson("settlement-pf", "Completed", operationSuccess: false, responseCode: "PF", responseText: "PINPAD OFFLINE"));
+        });
+        var client = CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.Zero,
+            delayAsync: null,
+            localization: null,
+            businessWait: TimeSpan.FromSeconds(2));
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal(ProviderSubmissionState.Submitted, result.ProviderSubmissionState);
+        Assert.Equal("settlement-pf", result.SessionId);
+        Assert.Equal("PF", result.ResponseCode);
+        Assert.Empty(result.ReceiptTexts ?? []);
+        // 只给迟到回单一个短宽限期（5 轮轮询），不是无限等待。
+        Assert.Equal(5, statusPolls);
+    }
+
+    [Fact]
+    public async Task SettlementAsync_still_waits_for_receipt_after_a_successful_settlement_result()
+    {
+        // 成功结果没有回单时仍不能确认：确认后本地会永久丢失需要打印的结算单。
+        var statusPolls = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/settlements/resumable", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/status", StringComparison.Ordinal))
+            {
+                statusPolls++;
+            }
+
+            return JsonResponse(SettlementSessionJson("settlement-ok-no-receipt", "Completed", operationSuccess: true, responseCode: "00", responseText: "SETTLED"));
+        });
+        var client = CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.Zero,
+            delayAsync: null,
+            localization: null,
+            businessWait: TimeSpan.FromMilliseconds(300));
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.ResultUnknown);
+        Assert.Equal("settlement-ok-no-receipt", result.SessionId);
+        Assert.True(statusPolls > 5, "A successful result without a receipt must keep waiting beyond the failure grace window.");
+    }
+
+    [Fact]
+    public async Task SettlementAsync_returns_unknown_immediately_when_server_closed_the_session_as_result_unknown()
+    {
+        var statusPolls = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/status", StringComparison.Ordinal))
+            {
+                statusPolls++;
+            }
+
+            return path.EndsWith("/settlements/resumable", StringComparison.Ordinal)
+                ? JsonResponse(SettlementSessionJson("settlement-timeout", "Pending", recoveryAction: "ResultUnknown", createdAt: DateTimeOffset.Now))
+                : throw new InvalidOperationException($"Unexpected request: {request.RequestUri}");
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.True(result.ResultUnknown);
+        Assert.Equal("settlement-timeout", result.SessionId);
+        Assert.Equal(0, statusPolls);
+    }
+
+    [Fact]
+    public async Task SettlementAsync_does_not_take_over_an_unacknowledged_session_from_an_earlier_business_day()
+    {
+        // 回归 H14：D 日结算 ack 失败/结果未知，D+1 日结算时 resumable 返回 D 日的会话。
+        // 旧行为是直接接管它：今天的批次没发给银行，界面却显示成功并打印旧回单。
+        var requests = new List<HttpRequestMessage>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(CloneRequestWithBody(request));
+            return request.RequestUri!.AbsolutePath switch
+            {
+                "/api/v1/linkly/cloud-backend/settlements/resumable" => JsonResponse(SettlementSessionJson(
+                    "settlement-yesterday",
+                    "Completed",
+                    operationSuccess: true,
+                    responseCode: "00",
+                    responseText: "YESTERDAY",
+                    receipts: ["YESTERDAY RECEIPT"],
+                    createdAt: DateTimeOffset.Now.AddDays(-1))),
+                "/api/v1/linkly/cloud-backend/settlements" => JsonResponse(SettlementSessionJson(
+                    "settlement-today",
+                    "Completed",
+                    operationSuccess: true,
+                    responseCode: "00",
+                    responseText: "TODAY",
+                    receipts: ["TODAY RECEIPT"],
+                    createdAt: DateTimeOffset.Now)),
+                _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+            };
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("settlement-today", result.SessionId);
+        Assert.Equal(["TODAY RECEIPT"], result.ReceiptTexts);
+        Assert.Contains(requests, request =>
+            request.Method == HttpMethod.Post &&
+            request.RequestUri!.AbsolutePath.EndsWith("/cloud-backend/settlements", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SettlementAsync_still_resumes_a_session_created_earlier_the_same_business_day()
+    {
+        var handler = new StubHttpMessageHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/linkly/cloud-backend/settlements/resumable" => JsonResponse(SettlementSessionJson(
+                "settlement-same-day",
+                "Completed",
+                operationSuccess: true,
+                responseCode: "00",
+                responseText: "SETTLED",
+                receipts: ["SAME DAY RECEIPT"],
+                createdAt: DateTimeOffset.Now.AddMinutes(-10))),
+            _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("settlement-same-day", result.SessionId);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Conflict, "LINKLY_CLOUD_TERMINAL_NOT_READY")]
+    [InlineData(HttpStatusCode.Conflict, "LINKLY_CLOUD_TERMINAL_CREDENTIAL_REENTRY_REQUIRED")]
+    [InlineData(HttpStatusCode.Conflict, "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE")]
+    [InlineData(HttpStatusCode.NotFound, "LINKLY_CLOUD_TERMINAL_NOT_FOUND")]
+    public async Task SettlementAsync_returns_not_submitted_for_rejections_raised_before_the_server_creates_a_session(
+        HttpStatusCode statusCode,
+        string errorCode)
+    {
+        // 回归 M24：终端未配对、凭据异常等错误在服务端建会话之前抛出，可以证明未提交；
+        // 若判成结果未知，当天的结算记录会被锁死。
+        var handler = new StubHttpMessageHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/linkly/cloud-backend/settlements/resumable" => new HttpResponseMessage(HttpStatusCode.NotFound),
+            "/api/v1/linkly/cloud-backend/settlements" => JsonResponse(
+                $$"""{ "success": false, "errorCode": "{{errorCode}}", "message": "rejected before session" }""",
+                statusCode),
+            _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal(ProviderSubmissionState.NotSubmitted, result.ProviderSubmissionState);
+        Assert.Null(result.SessionId);
+    }
+
+    [Fact]
+    public async Task SettlementAsync_keeps_unknown_for_a_bare_not_found_without_an_explicit_error_code()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/resumable", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("gateway not found") });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.SettlementAsync(CreateSession(), CreateSettings());
+
+        Assert.True(result.ResultUnknown);
+        Assert.Equal(ProviderSubmissionState.Unknown, result.ProviderSubmissionState);
+    }
+
+    [Fact]
+    public async Task AcknowledgeSupervisorResolvedSettlementAsync_posts_the_supervisor_flag_to_the_settlement_acknowledge_endpoint()
+    {
+        var requests = new List<HttpRequestMessage>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(CloneRequestWithBody(request));
+            return JsonResponse(SettlementSessionJson("settlement-unknown", "SupervisorResolved"));
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        await client.AcknowledgeSupervisorResolvedSettlementAsync(CreateSettings(), "settlement-unknown");
+
+        var request = Assert.Single(requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.EndsWith("/cloud-backend/settlements/settlement-unknown/acknowledge", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+        var body = await request.Content!.ReadAsStringAsync();
+        Assert.Equal("Sandbox", ReadJsonString(body, "environment"));
+        Assert.Equal("true", ReadJsonString(body, "supervisorResolved"), ignoreCase: true);
+    }
+
+    private static string SettlementSessionJson(
+        string sessionId,
+        string status,
+        bool? operationSuccess = null,
+        string? responseCode = null,
+        string? responseText = null,
+        IReadOnlyList<string>? receipts = null,
+        string? recoveryAction = null,
+        DateTimeOffset? createdAt = null)
+    {
+        static string Quote(string? value) => value is null ? "null" : JsonSerializer.Serialize(value);
+        var success = operationSuccess is null ? "null" : operationSuccess.Value ? "true" : "false";
+        var receiptJson = JsonSerializer.Serialize(receipts ?? []);
+        var created = createdAt is null ? "null" : Quote(createdAt.Value.ToString("O"));
+        return $$"""
+            {
+              "success": true,
+              "data": {
+                "environment": "Sandbox",
+                "storeCode": "S01",
+                "deviceCode": "TERM-1",
+                "sessionId": {{Quote(sessionId)}},
+                "status": {{Quote(status)}},
+                "responseCode": {{Quote(responseCode)}},
+                "responseText": {{Quote(responseText)}},
+                "recoveryAction": {{Quote(recoveryAction)}},
+                "operationType": "Settlement",
+                "operationSuccess": {{success}},
+                "settlementReceiptTexts": {{receiptJson}},
+                "createdAt": {{created}},
+                "notifications": []
+              }
+            }
+            """;
+    }
+
+    [Fact]
     public async Task PurchaseAsync_rejects_backend_completed_transaction_when_transaction_success_is_false()
     {
         var handler = new StubHttpMessageHandler(request =>
@@ -1661,7 +1929,7 @@ public sealed class LinklyBackendTerminalClientTests
     }
 
     [Fact]
-    public async Task PurchaseAsync_returns_result_unknown_when_status_poll_fails_after_backend_start()
+    public async Task PurchaseAsync_returns_result_unknown_when_status_poll_keeps_failing_after_backend_start()
     {
         var requests = new List<HttpRequestMessage>();
         var handler = new StubHttpMessageHandler(request =>
@@ -1701,7 +1969,8 @@ public sealed class LinklyBackendTerminalClientTests
         Assert.True(result.ResultUnknown);
         Assert.False(result.FallbackAllowed);
         Assert.Equal("linkly.backend.resultUnknown", result.StatusKey);
-        Assert.Equal(3, requests.Count);
+        // 预检 + 提交 + 首次状态查询，再加连续 10 次瞬时错误退避重试后才放弃（过去一次失败就放弃，共 3 次请求）。
+        Assert.Equal(13, requests.Count);
     }
 
     [Fact]
@@ -6204,6 +6473,466 @@ public sealed class LinklyBackendTerminalClientTests
               }
             }
             """);
+    }
+
+    [Fact]
+    public async Task RefundAsync_sends_attempt_identity_so_backend_derives_the_refund_txn_ref_already_persisted_locally()
+    {
+        // 退款 POST 已受理而响应丢失时，订单会话必须能按 R 引用关联到本地退款 attempt。
+        var attemptGuid = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        const string refundTxnRef = "RB7VFXNSJNPBZ6QX";
+        var requests = new List<HttpRequestMessage>();
+        string? boundTxnRef = null;
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(CloneRequestWithBody(request));
+            return request.RequestUri!.AbsolutePath switch
+            {
+                "/api/v1/linkly/cloud-backend/transactions/active" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/api/v1/linkly/cloud-backend/transactions" => JsonResponse(PendingSessionJson("refund-derived-session", refundTxnRef)),
+                "/api/v1/linkly/cloud-backend/transactions/refund-derived-session/status" => JsonResponse(ApprovedSessionJson("refund-derived-session", refundTxnRef)),
+                _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+            };
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService(), TimeSpan.Zero, null, null, accessor);
+        using var scope = accessor.Begin(new LinklyPaymentAttemptContext(
+            attemptGuid,
+            (_, txnRef, _, _) =>
+            {
+                boundTxnRef = txnRef;
+                return Task.CompletedTask;
+            },
+            TxnRef: LinklyLocalTxnRef.Create('R', attemptGuid.ToString("D"))));
+
+        await client.RefundAsync(
+            2m,
+            CreateSession(),
+            CreateSettings(),
+            LinklyBackendPaymentReference.Format("260601120001", "original-session", "Sandbox", "RFN-ORIGINAL"));
+
+        var start = Assert.Single(requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/transactions", StringComparison.Ordinal));
+        var body = await start.Content!.ReadAsStringAsync();
+        Assert.Equal("R", ReadJsonString(body, "txnType"));
+        Assert.Equal(attemptGuid.ToString("D"), ReadJsonString(body, "attemptGuid"));
+        Assert.Null(TryReadJsonString(body, "txnRef"));
+        // 与服务端测试里同一已知向量对齐，钉住两端 R 派生算法不漂移。
+        Assert.Equal(refundTxnRef, LinklyLocalTxnRef.Create('R', attemptGuid.ToString("D")));
+        Assert.Equal(refundTxnRef, boundTxnRef);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("0123456789abcdef0123456789abcdef")]
+    [InlineData("P0123456789ABCDE")]
+    public async Task RefundAsync_leaves_txn_ref_to_backend_when_local_reference_is_not_the_refund_reference_derived_from_the_attempt(string? attemptTxnRef)
+    {
+        // 升级前遗留的 32 位随机退款引用，以及销售的 P 引用，都不是该 attempt 的 R 派生值：不发送 AttemptGuid，
+        // 否则后端派生出的引用会与本地记录对不上。
+        var requests = new List<HttpRequestMessage>();
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(CloneRequestWithBody(request));
+            return request.RequestUri!.AbsolutePath switch
+            {
+                "/api/v1/linkly/cloud-backend/transactions/active" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/api/v1/linkly/cloud-backend/transactions" => JsonResponse(PendingSessionJson("refund-legacy-session", "260601120020ABCD")),
+                "/api/v1/linkly/cloud-backend/transactions/refund-legacy-session/status" => JsonResponse(ApprovedSessionJson("refund-legacy-session", "260601120020ABCD")),
+                _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+            };
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService(), TimeSpan.Zero, null, null, accessor);
+        using var scope = accessor.Begin(new LinklyPaymentAttemptContext(
+            Guid.Parse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+            (_, _, _, _) => Task.CompletedTask,
+            TxnRef: attemptTxnRef));
+
+        await client.RefundAsync(
+            2m,
+            CreateSession(),
+            CreateSettings(),
+            LinklyBackendPaymentReference.Format("260601120001", "original-session", "Sandbox", "RFN-ORIGINAL"));
+
+        var start = Assert.Single(requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/transactions", StringComparison.Ordinal));
+        Assert.Null(TryReadJsonString(await start.Content!.ReadAsStringAsync(), "attemptGuid"));
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_does_not_send_attempt_identity_when_the_local_reference_is_the_refund_reference()
+    {
+        // 销售请求只认 P 派生值：即便本地引用恰好是该 attempt 的 R 派生值也不能当作销售引用。
+        var attemptGuid = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var requests = new List<HttpRequestMessage>();
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(CloneRequestWithBody(request));
+            return request.RequestUri!.AbsolutePath switch
+            {
+                "/api/v1/linkly/cloud-backend/transactions/active" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/api/v1/linkly/cloud-backend/transactions" => JsonResponse(PendingSessionJson("p-vs-r-session", "260601120020ABCD")),
+                "/api/v1/linkly/cloud-backend/transactions/p-vs-r-session/status" => JsonResponse(ApprovedSessionJson("p-vs-r-session", "260601120020ABCD")),
+                _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+            };
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService(), TimeSpan.Zero, null, null, accessor);
+        using var scope = accessor.Begin(new LinklyPaymentAttemptContext(
+            attemptGuid,
+            (_, _, _, _) => Task.CompletedTask,
+            TxnRef: LinklyLocalTxnRef.Create('R', attemptGuid.ToString("D"))));
+
+        await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        var start = Assert.Single(requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/transactions", StringComparison.Ordinal));
+        Assert.Null(TryReadJsonString(await start.Content!.ReadAsStringAsync(), "attemptGuid"));
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_retries_transient_status_failures_with_exponential_backoff_until_the_terminal_result_arrives()
+    {
+        // 一次 502 / 503 就把付款页锁成“结果未知”是错的：终端上的交易还在继续，可能随后批准。
+        var statusRequests = 0;
+        var delays = new List<TimeSpan>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(PendingSessionJson("transient-session", "TXN-TRANSIENT"));
+            }
+
+            statusRequests++;
+            return statusRequests switch
+            {
+                1 => throw new LinklyBackendHttpException("bad gateway", HttpStatusCode.BadGateway),
+                2 => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+                3 => JsonResponse(PendingSessionJson("transient-session", "TXN-TRANSIENT")),
+                _ => JsonResponse(ApprovedSessionJson("transient-session", "TXN-TRANSIENT"))
+            };
+        });
+        var client = CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.FromSeconds(1),
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal(4, statusRequests);
+        // 第 1 次失败后 ≈1s、第 2 次失败后 ≈2s（±25% 抖动），随后恢复为 1s 的正常轮询间隔。
+        Assert.Equal(3, delays.Count);
+        Assert.InRange(delays[0].TotalMilliseconds, 750, 1250);
+        Assert.InRange(delays[1].TotalMilliseconds, 1500, 2500);
+        Assert.Equal(TimeSpan.FromSeconds(1), delays[2]);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.GatewayTimeout)]
+    public async Task PurchaseAsync_retries_status_http_errors_that_the_backend_treats_as_recoverable(HttpStatusCode failure)
+    {
+        var statusRequests = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(PendingSessionJson("recoverable-http-session", "TXN-RH"));
+            }
+
+            return ++statusRequests == 1
+                ? new HttpResponseMessage(failure)
+                : JsonResponse(ApprovedSessionJson("recoverable-http-session", "TXN-RH"));
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.Equal(2, statusRequests);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task PurchaseAsync_does_not_retry_deterministic_status_errors(HttpStatusCode failure)
+    {
+        // 400 是我方请求格式错误，重试没有意义；401/403/404/409 同样不是瞬时错误。
+        var statusRequests = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(PendingSessionJson("deterministic-session", "TXN-DET"));
+            }
+
+            statusRequests++;
+            return new HttpResponseMessage(failure);
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.ResultUnknown);
+        Assert.Equal(1, statusRequests);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_retries_status_requests_cancelled_by_an_endpoint_switch_while_the_business_window_is_open()
+    {
+        // API 端点切换窗口内请求被统一取消（取消令牌既不是调用方的也不是业务窗口的）：属于瞬时错误。
+        var statusRequests = 0;
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return Task.FromResult(JsonResponse(PendingSessionJson("switch-session", "TXN-SWITCH")));
+            }
+
+            return ++statusRequests == 1
+                ? Task.FromCanceled<HttpResponseMessage>(new CancellationToken(canceled: true))
+                : Task.FromResult(JsonResponse(ApprovedSessionJson("switch-session", "TXN-SWITCH")));
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.Equal(2, statusRequests);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_retries_the_recover_request_when_it_fails_transiently()
+    {
+        var recoverRequests = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(RecoveringSessionJson("recover-retry-session", "TXN-RR"));
+            }
+
+            Assert.EndsWith("/recover", path, StringComparison.Ordinal);
+            return ++recoverRequests == 1
+                ? new HttpResponseMessage(HttpStatusCode.BadGateway)
+                : JsonResponse(ApprovedSessionJson("recover-retry-session", "TXN-RR"));
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.Equal(2, recoverRequests);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_gives_up_after_consecutive_transient_failures_and_reports_result_unknown()
+    {
+        var statusRequests = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(PendingSessionJson("exhausted-session", "TXN-EX"));
+            }
+
+            statusRequests++;
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+        // 首次请求 + 连续 10 次退避重试，之后放弃。
+        Assert.Equal(11, statusRequests);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_a_successful_poll_resets_the_transient_failure_budget()
+    {
+        // 间歇性故障（每隔一次成功）不能累计到阈值：成功一次即清零。
+        var statusRequests = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(PendingSessionJson("flaky-session", "TXN-FLAKY"));
+            }
+
+            statusRequests++;
+            if (statusRequests > 40)
+            {
+                return JsonResponse(ApprovedSessionJson("flaky-session", "TXN-FLAKY"));
+            }
+
+            return statusRequests % 2 == 1
+                ? new HttpResponseMessage(HttpStatusCode.BadGateway)
+                : JsonResponse(PendingSessionJson("flaky-session", "TXN-FLAKY"));
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.Equal(41, statusRequests);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_stops_retrying_transient_failures_when_the_business_window_expires_on_the_time_provider()
+    {
+        var statusRequests = 0;
+        var timeProvider = new FakeTimeProvider();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/transactions", StringComparison.Ordinal))
+            {
+                return JsonResponse(PendingSessionJson("window-session", "TXN-WIN"));
+            }
+
+            statusRequests++;
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        });
+        var client = CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.FromSeconds(1),
+            (delay, cancellationToken) =>
+            {
+                // 退避等待走虚拟时间：推进后业务窗口到期并级联取消链接令牌。
+                timeProvider.Advance(delay);
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            localization: null,
+            businessWait: TimeSpan.FromSeconds(5),
+            timeProvider: timeProvider);
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.ResultUnknown);
+        // 1s + 2s 之后第三次退避（≈4s）越过 5s 窗口：远少于 10 次重试上限，说明受业务窗口约束。
+        Assert.InRange(statusRequests, 3, 4);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_propagates_caller_cancellation_during_transient_backoff()
+    {
+        using var callerCts = new CancellationTokenSource();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            return path.EndsWith("/transactions", StringComparison.Ordinal)
+                ? JsonResponse(PendingSessionJson("caller-cancel-session", "TXN-CC"))
+                : new HttpResponseMessage(HttpStatusCode.BadGateway);
+        });
+        var client = CreateClient(
+            handler,
+            new FakeLinklyTerminalDialogService(),
+            TimeSpan.FromSeconds(1),
+            (_, cancellationToken) =>
+            {
+                // 调用方取消（关闭支付页、退出程序）必须原样上抛，不能被“瞬时错误重试”吞掉。
+                callerCts.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            });
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings(), callerCts.Token);
+
+        Assert.False(result.Approved);
+        Assert.True(callerCts.IsCancellationRequested);
+        Assert.True(result.ResultUnknown);
+    }
+
+    private static string RecoveringSessionJson(string sessionId, string txnRef)
+    {
+        return $$"""
+            {
+              "success": true,
+              "data": {
+                "environment": "Sandbox",
+                "storeCode": "S01",
+                "deviceCode": "TERM-1",
+                "sessionId": "{{sessionId}}",
+                "status": "Pending",
+                "txnRef": "{{txnRef}}",
+                "recoveryAction": "Retry",
+                "displayText": "RECOVERING",
+                "receiptText": null,
+                "recoveryCount": 1,
+                "receiptPrintedAt": null,
+                "lastHttpStatus": 408,
+                "notifications": []
+              }
+            }
+            """;
     }
 
     private static string PendingSessionJson(string sessionId, string txnRef)

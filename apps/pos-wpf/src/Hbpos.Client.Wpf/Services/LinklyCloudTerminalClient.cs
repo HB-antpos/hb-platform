@@ -67,6 +67,13 @@ public sealed class LinklyCloudTerminalClient(
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(2);
     // 取消后仍需等待原交易结果时的让出间隔；此时不能再用已取消的令牌等待，否则会同步返回而空转。
     private static readonly TimeSpan CancelledResultWaitInterval = TimeSpan.FromMilliseconds(50);
+    // 轮询遇到断网/限流时的有界退避：起步 1s 指数增长、封顶 8s（保证收银员点取消时响应不会拖太久），再叠加随机抖动；
+    // 整体受业务等待（180s，对应官方建议的 3 分钟恢复窗口）约束。
+    private static readonly TimeSpan PollRetryBaseDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan PollRetryMaxDelay = TimeSpan.FromSeconds(8);
+    // 服务端 Retry-After 的采纳范围；超过上限按上限等待，下一轮仍会再查。
+    private static readonly TimeSpan PollRetryAfterMax = TimeSpan.FromSeconds(15);
+    private const double PollRetryJitterRatio = 0.25;
     private const string ProcessorName = "ANZ";
     private readonly TimeSpan _pollInterval = pollInterval.GetValueOrDefault(DefaultPollInterval);
     // 业务等待计时器走 TimeProvider，测试可注入 FakeTimeProvider 直接推进虚拟时间，不靠墙钟窗口判断是否超时。
@@ -481,15 +488,7 @@ public sealed class LinklyCloudTerminalClient(
                 txnType,
                 ToMinorUnits(amount),
                 txnRef,
-                string.IsNullOrWhiteSpace(refundReference)
-                    ? null
-                    : new Dictionary<string, string>
-                    {
-                        ["RFN"] = refundReference,
-                        ["OPR"] = $"{session.CashierId}|{session.CashierName}",
-                        ["AMT"] = ToMinorUnits(amount).ToString("D9", CultureInfo.InvariantCulture),
-                        ["PCM"] = "0000"
-                    });
+                BuildPurchaseAnalysisData(session, amount, txnRef, refundReference));
 
             timeoutCts.Token.ThrowIfCancellationRequested();
             await BindAttemptSessionAsync(attemptContext, sessionId, txnRef);
@@ -772,6 +771,8 @@ public sealed class LinklyCloudTerminalClient(
         CancellationToken cancellationToken)
     {
         var dialogMessage = T("linkly.cloud.directPendingMessage", "Waiting for the card terminal result. Complete the operation on the terminal.");
+        var consecutiveTransientFailures = 0;
+        TimeSpan? retryDelay = null;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -789,7 +790,13 @@ public sealed class LinklyCloudTerminalClient(
                 dialogMessage = await SendDirectDialogActionAsync(settings, token, sessionId, action, cancellationToken);
             }
 
-            if (_pollInterval > TimeSpan.Zero)
+            if (retryDelay is { } backoff)
+            {
+                // 中文注释：上一次查询遇到断网/限流，按退避等待后再查；走 TimeProvider，取消（含业务等待到期）立即结束等待。
+                retryDelay = null;
+                await Task.Delay(backoff, _timeProvider, cancellationToken);
+            }
+            else if (_pollInterval > TimeSpan.Zero)
             {
                 await Task.Delay(_pollInterval, cancellationToken);
             }
@@ -805,6 +812,17 @@ public sealed class LinklyCloudTerminalClient(
                 token = await GetTokenAsync(settings, session.StoreCode, session.DeviceCode, cancellationToken);
                 continue;
             }
+            catch (Exception ex) when (IsTransientPollFailure(ex, cancellationToken, out var retryAfter))
+            {
+                // 中文注释：顾客可能仍在 PIN pad 上操作，单次断网/429 不代表交易失败，也不能让 POS 提前锁定为未知；
+                // 在业务等待窗口内退避重试，窗口耗尽由外层按结果未知处理。400 等明确错误不在此列，不重试。
+                consecutiveTransientFailures++;
+                retryDelay = ComputePollRetryDelay(consecutiveTransientFailures, retryAfter, Random.Shared.NextDouble());
+                Log($"transaction status transient-failure retrying sessionId={sessionId} attempt={consecutiveTransientFailures} delayMs={(int)retryDelay.Value.TotalMilliseconds} error={ex.GetType().Name}");
+                continue;
+            }
+
+            consecutiveTransientFailures = 0;
 
             if (!MatchesSubmittedResponseIdentity(result, amount, sessionId, txnRef) || !IsPending(result))
             {
@@ -814,6 +832,46 @@ public sealed class LinklyCloudTerminalClient(
 
             Log($"transaction status still-pending sessionId={sessionId}");
         }
+    }
+
+    /// <summary>
+    /// 轮询状态查询的可重试失败：网络错误、HttpClient 自身超时（调用方令牌未取消）、429 限流。
+    /// 调用方取消/业务等待到期（令牌已取消）不算，必须照常向上抛出。
+    /// </summary>
+    private static bool IsTransientPollFailure(
+        Exception exception,
+        CancellationToken cancellationToken,
+        out TimeSpan? retryAfter)
+    {
+        retryAfter = null;
+        switch (exception)
+        {
+            case HttpRequestException:
+                return !cancellationToken.IsCancellationRequested;
+            case OperationCanceledException:
+                return !cancellationToken.IsCancellationRequested;
+            case LinklyCloudApiException { StatusCode: HttpStatusCode.TooManyRequests } api:
+                retryAfter = api.RetryAfter;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    internal static TimeSpan ComputePollRetryDelay(int consecutiveFailures, TimeSpan? retryAfter, double jitterSample)
+    {
+        var exponent = Math.Min(Math.Max(consecutiveFailures, 1) - 1, 10);
+        var delay = TimeSpan.FromTicks(Math.Min(PollRetryBaseDelay.Ticks << exponent, PollRetryMaxDelay.Ticks));
+        if (retryAfter is { } requested)
+        {
+            // 服务端要求的最短等待优先；抖动只往后加，绝不早于 Retry-After。
+            delay = requested < PollRetryBaseDelay
+                ? PollRetryBaseDelay
+                : requested > PollRetryAfterMax ? PollRetryAfterMax : requested;
+        }
+
+        var jitter = Math.Clamp(jitterSample, 0d, 1d) * PollRetryJitterRatio;
+        return delay + TimeSpan.FromTicks((long)(delay.Ticks * jitter));
     }
 
     private async Task<string> SendDirectDialogActionAsync(
@@ -1094,6 +1152,31 @@ public sealed class LinklyCloudTerminalClient(
         return LinklyLocalTxnRef.Create(transactionType, stableIdentity);
     }
 
+    /// <summary>
+    /// 构造 PurchaseAnalysisData。购买写入 RFN=txnRef（与后端模式 EnsurePurchaseAnalysisData 一致），
+    /// 后续退款才有可引用的原交易 RFN；退款携带原 RFN 与收银员。AMT/PCM 两种交易保持一致。
+    /// </summary>
+    private static Dictionary<string, string> BuildPurchaseAnalysisData(
+        PosSessionState session,
+        decimal amount,
+        string txnRef,
+        string? refundReference)
+    {
+        var isRefund = !string.IsNullOrWhiteSpace(refundReference);
+        var fields = new Dictionary<string, string>
+        {
+            ["RFN"] = isRefund ? refundReference! : txnRef
+        };
+        if (isRefund)
+        {
+            fields["OPR"] = $"{session.CashierId}|{session.CashierName}";
+        }
+
+        fields["AMT"] = ToMinorUnits(amount).ToString("D9", CultureInfo.InvariantCulture);
+        fields["PCM"] = "0000";
+        return fields;
+    }
+
     private static string? TryParseRefundReference(string? reference)
     {
         if (string.IsNullOrWhiteSpace(reference))
@@ -1102,10 +1185,13 @@ public sealed class LinklyCloudTerminalClient(
         }
 
         var parts = reference.Trim().Split(':', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length >= 3 &&
-            string.Equals(parts[0], "ANZCLOUD", StringComparison.OrdinalIgnoreCase)
-                ? parts[2]
-                : null;
+        if (parts.Length < 2 || !string.Equals(parts[0], "ANZCLOUD", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        // 中文注释：三段引用带终端回传的 RFN；两段引用（响应 PAD 未回传 RFN，含历史直连销售）退回购买时写入的 RFN=txnRef。
+        return parts.Length >= 3 ? parts[2] : parts[1];
     }
 
     private static string? MaskCardNumber(string? pan)

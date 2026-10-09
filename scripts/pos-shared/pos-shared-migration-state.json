@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "a82414e481b3e62a0d3be088300e27d340b875628ab80c16ff847cf638ec630f",
+  "reviewedModuleTopologySha256": "645c70ba32d10c8a8b0dff3fa17977ad6f273db42c8a44e773c64cd4d13e7e46",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -263,10 +263,10 @@
     {
       "path": "features/payments/payment-attempt-service.ts",
       "package": "pos-payments-core",
-      "reason": "Square 与 Linkly 首次提交前冻结环境，旧未决交易只读强匹配后按原环境恢复；已有阻塞优先于新提交，停止查询不改写金融状态；手动刷卡使用同一支付动作恢复，人工确认后不能取消或重新收款",
+      "reason": "Square 与 Linkly 首次提交前冻结环境，旧未决交易只读强匹配后按原环境恢复；已有阻塞优先于新提交，停止查询不改写金融状态；手动刷卡使用同一支付动作恢复，人工确认后不能取消或重新收款；Linkly 在 Created→Submitted 的同一次 CAS 预置由 attemptId 派生的 TxnRef（与 Hbpos.Contracts 算法一致，供创建响应丢失后认领会话），旧后端忽略 attemptGuid 时以首次创建响应带回的 TxnRef 取代派生值",
       "baselineCanonicalRuntimeSha256": "01187d0550a2ad7d1371aa00575202e9e68bd705258e88042795e4d9feef781f",
-      "canonicalRuntimeSha256": "ad829e5a886bdf936839242bb37d9c20a69147cb1b3babce8f03b86775ef577f",
-      "canonicalTypeSha256": "6d03d80f98916ec1d2a2761d34d8afbc1a907a2bf8c799240de67c2cc6c164cf",
+      "canonicalRuntimeSha256": "248598c1367f57a7e71397b4827396136e4b8c30cba613e42b3e9dadf3d9ad07",
+      "canonicalTypeSha256": "ca26fdfd693007e341d3a167a41785ceec6d6a3434b819c43377b4ccf2f04361",
       "behaviorTests": [
         {
           "workspace": "packages/pos-payments-core",

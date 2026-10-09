@@ -829,7 +829,33 @@ public sealed class LinklyCloudApiClient(HttpClient httpClient) : ILinklyCloudAp
         throw new LinklyCloudApiException(
             $"{operation} failed with HTTP {(int)response.StatusCode}.",
             response.StatusCode,
-            ReadErrorMessage(body));
+            ReadErrorMessage(body),
+            ReadRetryAfter(response));
+    }
+
+    /// <summary>
+    /// 读取 Retry-After（秒数或 HTTP 日期）。限流（429）时由调用方按它退避；缺失或无法解析返回 null。
+    /// </summary>
+    private static TimeSpan? ReadRetryAfter(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter is null)
+        {
+            return null;
+        }
+
+        if (retryAfter.Delta is { } delta)
+        {
+            return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+        }
+
+        if (retryAfter.Date is { } date)
+        {
+            var remaining = date - DateTimeOffset.UtcNow;
+            return remaining < TimeSpan.Zero ? TimeSpan.Zero : remaining;
+        }
+
+        return null;
     }
 
     private static string? ReadErrorMessage(string? body)
@@ -1002,6 +1028,9 @@ public sealed record LinklyCloudTransactionRequest(
     string TxnRef,
     IReadOnlyDictionary<string, string>? PurchaseAnalysisData = null)
 {
+    // 直连（同步）交易与结算共用的收据打印取值：由 PIN pad 打印。
+    internal const string DirectReceiptAutoPrint = "7";
+
     public Dictionary<string, object?> ToFields()
     {
         var fields = new Dictionary<string, object?>
@@ -1013,7 +1042,9 @@ public sealed record LinklyCloudTransactionRequest(
             ["TxnRef"] = TxnRef,
             ["CurrencyCode"] = "AUD",
             ["CutReceipt"] = "0",
-            ["ReceiptAutoPrint"] = "0"
+            // 中文注释：Linkly 官方文档明确同步模式（async=false）不支持 POS 端收据打印，直连交易只能由 PIN pad 打印银行小票；
+            // 沿用与直连结算相同的取值，否则商户联/签名联无人打印。取值语义待沙箱实测确认（见 PR 说明）。
+            ["ReceiptAutoPrint"] = DirectReceiptAutoPrint
         };
 
         if (PurchaseAnalysisData is { Count: > 0 })
@@ -1034,7 +1065,7 @@ public sealed record LinklyCloudSettlementRequest
             ["Merchant"] = "00",
             ["Application"] = "00",
             ["SettlementType"] = "S",
-            ["ReceiptAutoPrint"] = "7",
+            ["ReceiptAutoPrint"] = LinklyCloudTransactionRequest.DirectReceiptAutoPrint,
             ["CutReceipt"] = "0"
         };
     }
@@ -1101,13 +1132,18 @@ public sealed class LinklyCloudApiException : Exception
     public LinklyCloudApiException(
         string message,
         HttpStatusCode? statusCode = null,
-        string? detail = null)
+        string? detail = null,
+        TimeSpan? retryAfter = null)
         : base(string.IsNullOrWhiteSpace(detail) ? message : $"{message} {detail}")
     {
         StatusCode = statusCode;
+        RetryAfter = retryAfter;
     }
 
     public HttpStatusCode? StatusCode { get; }
+
+    /// <summary>服务端通过 Retry-After 头要求的最短等待（限流 429 常见）；未提供为 null。</summary>
+    public TimeSpan? RetryAfter { get; }
 
     public bool IsAuthenticationFailure => StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 }

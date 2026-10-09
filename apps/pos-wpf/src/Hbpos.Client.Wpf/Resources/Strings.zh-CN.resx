@@ -2312,6 +2312,9 @@
   <data name="returns.status.loadedLocalStale" xml:space="preserve">
     <value>已加载本地订单；线上订单历史不可用。</value>
   </data>
+  <data name="returns.status.cardRefundDisabledStale" xml:space="preserve">
+    <value>订单的线上退货记录加载成功前，不能原路退回银行卡。</value>
+  </data>
   <data name="returns.status.addedReceiptLine" xml:space="preserve">
     <value>已将 {0} 加入退款购物车。</value>
   </data>
@@ -2366,6 +2369,10 @@
   <data name="main.reregister.syncPending" xml:space="preserve">
     <value>请先完成待同步订单，再切换分店注册。</value>
   </data>
+  <data name="linkly.recovery.openAttemptBlocksPayment" xml:space="preserve"><value>本机还有未处理完的刷卡交易。请先在卡交易异常中心恢复或由主管结案，处理完成前不能再次刷卡，避免顾客被重复扣款。</value></data>
+  <data name="cardRecovery.auto.recoveredOrders" xml:space="preserve"><value>重启前已获批准的 {0} 笔刷卡付款已自动恢复为订单。</value></data>
+  <data name="main.reregister.cardRecoveryPending" xml:space="preserve"><value>请先在卡交易异常中心处理未完成的刷卡交易，再更换门店注册。</value></data>
+  <data name="main.reregister.cardRecoveryUnknown" xml:space="preserve"><value>无法确认是否还有未完成的刷卡交易，暂时不能更换门店注册，请稍后重试。</value></data>
   <data name="main.reregister.submitted" xml:space="preserve">
     <value>分店切换申请已提交，请重新注册设备后继续使用。</value>
   </data>
@@ -2480,7 +2487,12 @@
   <data name="dailyClose.linklySettlement.reprintFailed" xml:space="preserve"><value>Linkly 结算回单重打失败：{0}</value></data>
   <data name="dailyClose.linklySettlement.submission" xml:space="preserve"><value>提交状态</value></data>
   <data name="dailyClose.linklySettlement.manual.title" xml:space="preserve"><value>主管人工处理</value></data>
-  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>仅适用于未决的本地直连或云端直连结算；此操作绝不会再次发送结算。</value></data>
+  <data name="dailyClose.linklySettlement.manual.hint" xml:space="preserve"><value>仅适用于未决的 Linkly 结算；此操作绝不会再次发送结算。</value></data>
+  <data name="dailyClose.linklySettlement.query.button" xml:space="preserve"><value>向 Linkly 查询结果</value></data>
+  <data name="dailyClose.linklySettlement.query.hint" xml:space="preserve"><value>到 Linkly 服务端查询这笔结算并记录结果；绝不会再次发送结算。</value></data>
+  <data name="dailyClose.linklySettlement.query.resolved" xml:space="preserve"><value>已查到并记录 Linkly 结算结果，没有发送新的结算。</value></data>
+  <data name="dailyClose.linklySettlement.query.unresolved" xml:space="preserve"><value>暂时查不到 Linkly 结算结果。如果刷卡机上能看到结果，请在下方记录主管决定。</value></data>
+  <data name="dailyClose.linklySettlement.blockedEarlierBusinessDay" xml:space="preserve"><value>{0:yyyy-MM-dd} 有一笔 Linkly 结算尚未处理，今天的结算没有发送。请把营业日切换到 {0:yyyy-MM-dd}，打开 Linkly 结算页签，先查询结果或记录主管决定，再发送今天的结算。</value></data>
   <data name="dailyClose.linklySettlement.manual.succeeded" xml:space="preserve"><value>确认结算成功</value></data>
   <data name="dailyClose.linklySettlement.manual.failed" xml:space="preserve"><value>确认结算失败</value></data>
   <data name="dailyClose.linklySettlement.manual.notSubmitted" xml:space="preserve"><value>确认未提交结算</value></data>
@@ -3026,6 +3038,17 @@
   <data name="cardRecovery.linkly.supervisorWaiting" xml:space="preserve"><value>付款仍处于锁定状态。银行结果可用后请再次恢复。</value></data>
   <data name="cardRecovery.linkly.paymentAlreadyFinalized" xml:space="preserve"><value>所选付款已经终态化，不能再次修改。</value></data>
   <data name="cardRecovery.linkly.paymentEvidenceExists" xml:space="preserve"><value>已存在银行付款证据，请改为执行恢复。</value></data>
+  <data name="cardRecovery.linkly.resolveLivePending" xml:space="preserve"><value>Linkly 仍在处理这笔刷卡交易，暂时不能结案为已付款或未付款。请选择“继续等待”，待刷卡机出结果后再处理。</value></data>
+  <data name="cardRecovery.linkly.resolveLiveQueryFailed" xml:space="preserve"><value>POS 无法向 Linkly 或刷卡机核实这笔交易的最终结果，主管决定未保存。请检查网络或刷卡机连接后重试；在此之前只能选择“继续等待”。</value></data>
+  <data name="cardRecovery.linkly.resolveLiveApproved" xml:space="preserve"><value>Linkly 报告这笔刷卡交易已批准（顾客已被扣款），不能结案为未付款。请先运行恢复，由 POS 按已批准的付款处理订单。</value></data>
+  <data name="cardRecovery.linkly.resolveLiveNotApproved" xml:space="preserve"><value>Linkly 报告这笔刷卡交易未获批准（没有扣款），不能结案为已付款。如要放弃这笔付款，请选择“确认未付款”。</value></data>
+  <data name="cardRecovery.linkly.approvedClosedRestored" xml:space="preserve"><value>主管已将这笔已批准的刷卡交易按“已退款或已另行处理”关闭，原订单已恢复，可以重新付款。</value></data>
+  <data name="cardRecovery.linkly.approvedClosedCleared" xml:space="preserve"><value>主管已将这笔已批准的刷卡交易按“已退款或已另行处理”关闭，记录已清理。</value></data>
+  <data name="cardRecovery.linkly.activeSessionApprovedOrderPending" xml:space="preserve"><value>上一笔 Linkly 交易已批准，但对应订单尚未保存。请先在卡交易异常中心恢复该笔交易，再收取新的付款。</value></data>
+  <data name="cardRecovery.linkly.activeSessionApprovedOrphan" xml:space="preserve"><value>上一笔 Linkly 交易已批准（顾客已被扣款），但本机没有对应订单。请勿再次刷卡，请主管在卡交易异常中心核对处理。</value></data>
+  <data name="cardRecovery.center.action.closeApprovedHandled" xml:space="preserve"><value>已退款或已另行处理，关闭</value></data>
+  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>这笔刷卡已获批准（顾客已被扣款），但 POS 无法重建订单。请先尝试“恢复”；仍然失败时，请先给顾客退款或另行处理这笔付款（例如手工录入刷卡），在证据栏写明处理情况（如退款参考号），再在此关闭该记录。主管备注可不填。</value></data>
+  <data name="cardRecovery.payment.field.approvedEvidence" xml:space="preserve"><value>退款或处理证据（必填，例如退款参考号）</value></data>
   <data name="cardRecovery.linkly.notPaidPaymentReferenceNotAllowed" xml:space="preserve"><value>确认未付款时，请勿填写付款参考号。</value></data>
   <data name="cardRecovery.linkly.supervisorNotPaidRestored" xml:space="preserve"><value>银行确认未发生付款，原订单已恢复，可以再次付款。</value></data>
   <data name="cardRecovery.linkly.supervisorPaidNoDraft" xml:space="preserve"><value>主管确认上一笔已付款。会话已清理，但本地没有可用订单草稿；请核对订单后再继续。</value></data>
