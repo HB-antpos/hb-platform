@@ -67,6 +67,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                 [LastHttpStatus] INT NULL,
                 [IsActive] BIT NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_IsActive] DEFAULT (0),
                 [UpdatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
+                -- 订单同步核对会话后回写的订单号；用于「已批准会话无订单」对账。
+                [OrderGuid] NVARCHAR(50) NULL,
                 CONSTRAINT [CK_POSM_LinklyCloudBackendSession_Environment] CHECK ([Environment] IN (N'Production', N'Sandbox')),
                 CONSTRAINT [UX_POSM_LinklyCloudBackendSession_Scope] UNIQUE ([Environment], [StoreCode], [DeviceCode], [SessionId])
             );
@@ -217,6 +219,13 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
             BEGIN
                 ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
                     ADD [SettlementReceiptTexts] NVARCHAR(MAX) NULL;
+            END;
+
+            -- 订单同步（OrderSyncService）核对卡付款会话后回写订单号；可空，旧客户端与历史行不受影响。
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'OrderGuid') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [OrderGuid] NVARCHAR(50) NULL;
             END;
 
             IF NOT EXISTS (
@@ -494,6 +503,50 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
             BEGIN
                 CREATE INDEX [IX_POSM_LinklyCloudBackendNotification_Scope]
                     ON [dbo].[POSM_LinklyCloudBackendNotification] ([Environment], [StoreCode], [DeviceCode], [SessionId], [ReceivedAt]);
+            END;
+        END;
+
+        -- 卡付款对账异常表：订单入库校验（OrderSync）与后台对账作业（ReconciliationJob）共用。
+        -- 同一问题按 DedupKey（IssueType|OrderGuid|PaymentGuid|SessionId）幂等合并，重复发现只刷新 LastDetectedAt。
+        IF OBJECT_ID(N'[dbo].[POSM_CardTenderReconciliationIssue]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [dbo].[POSM_CardTenderReconciliationIssue] (
+                [Id] BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT [PK_POSM_CardTenderReconciliationIssue] PRIMARY KEY,
+                [DedupKey] NVARCHAR(256) NOT NULL,
+                [IssueType] NVARCHAR(64) NOT NULL,
+                [Severity] NVARCHAR(16) NOT NULL,
+                [Source] NVARCHAR(32) NOT NULL,
+                -- Open 待处理；Resolved 已自动或人工解除；Dismissed 人工确认无需处理（再次发现不会重新打开）。
+                [Status] NVARCHAR(16) NOT NULL CONSTRAINT [DF_POSM_CardTenderReconciliationIssue_Status] DEFAULT (N'Open'),
+                [StoreCode] NVARCHAR(32) NOT NULL,
+                [DeviceCode] NVARCHAR(64) NULL,
+                [Environment] NVARCHAR(32) NULL,
+                [SessionId] NVARCHAR(64) NULL,
+                [TxnRef] NVARCHAR(64) NULL,
+                [OrderGuid] NVARCHAR(50) NULL,
+                [PaymentGuid] NVARCHAR(50) NULL,
+                [Amount] DECIMAL(18,2) NULL,
+                [Detail] NVARCHAR(1000) NULL,
+                [OccurrenceCount] INT NOT NULL CONSTRAINT [DF_POSM_CardTenderReconciliationIssue_OccurrenceCount] DEFAULT (1),
+                [FirstDetectedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_CardTenderReconciliationIssue_FirstDetectedAt] DEFAULT (SYSUTCDATETIME()),
+                [LastDetectedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_CardTenderReconciliationIssue_LastDetectedAt] DEFAULT (SYSUTCDATETIME()),
+                [ResolvedAt] DATETIME2(7) NULL,
+                CONSTRAINT [CK_POSM_CardTenderReconciliationIssue_Status] CHECK ([Status] IN (N'Open', N'Resolved', N'Dismissed')),
+                CONSTRAINT [CK_POSM_CardTenderReconciliationIssue_Severity] CHECK ([Severity] IN (N'Warning', N'Error')),
+                CONSTRAINT [UX_POSM_CardTenderReconciliationIssue_DedupKey] UNIQUE ([DedupKey])
+            );
+        END;
+
+        IF OBJECT_ID(N'[dbo].[POSM_CardTenderReconciliationIssue]', N'U') IS NOT NULL
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM sys.indexes
+                WHERE [object_id] = OBJECT_ID(N'[dbo].[POSM_CardTenderReconciliationIssue]', N'U')
+                  AND [name] = N'IX_POSM_CardTenderReconciliationIssue_Status')
+            BEGIN
+                CREATE INDEX [IX_POSM_CardTenderReconciliationIssue_Status]
+                    ON [dbo].[POSM_CardTenderReconciliationIssue] ([Status], [StoreCode], [LastDetectedAt] DESC);
             END;
         END;
 

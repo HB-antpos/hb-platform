@@ -18,7 +18,8 @@ public sealed class OrderSyncService(
     IOrderSyncPlanner planner,
     IStoreVoucherReservationService reservationService,
     IStoreTimeZoneResolver storeTimeZoneResolver,
-    ILogger<OrderSyncService>? logger = null) : IOrderSyncService
+    ILogger<OrderSyncService>? logger = null,
+    ICardTenderOrderVerifier? cardTenderVerifier = null) : IOrderSyncService
 {
     public async Task<OrderSyncResponse> SyncAsync(
         OrderSyncRequest request,
@@ -87,6 +88,20 @@ public sealed class OrderSyncService(
             Log(
                 $"voucher reservation consumed orderGuid={request.OrderGuid:D} token={ShortToken(redemption.ReservationToken)} " +
                 $"voucher={redemption.VoucherCode} amount={redemption.Amount}");
+        }
+
+        // 卡付款核对放在订单与代金券都提交之后：核对不通过只登记异常，不影响本次同步结果（见 ICardTenderOrderVerifier）。
+        if (cardTenderVerifier is not null && request.Payments.Any(payment => payment.Method == PaymentMethodKind.Card))
+        {
+            try
+            {
+                await cardTenderVerifier.VerifyAsync(request);
+            }
+            catch (Exception ex)
+            {
+                // 订单已提交；核对失败不能让客户端把已入库订单当成失败重试。
+                logger?.LogError(ex, "OrderSyncService card tender verification failed orderGuid={OrderGuid}", request.OrderGuid);
+            }
         }
 
         Log($"service completed orderGuid={request.OrderGuid:D} status=synced elapsedMs={stopwatch.ElapsedMilliseconds}");
