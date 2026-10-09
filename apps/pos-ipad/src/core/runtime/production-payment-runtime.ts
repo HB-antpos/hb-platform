@@ -73,6 +73,10 @@ import {
   type PaymentAcknowledgementRuntimePort,
 } from "@hb/pos-payments-core/features/payments/payment-acknowledgement-service";
 import {
+  SupervisorResolutionAcknowledgementService,
+  type LinklySupervisorResolvedAcknowledger,
+} from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
+import {
   PaymentCheckoutRuntime,
   PaymentCheckoutRuntimeError,
   type PaymentCheckoutDraft,
@@ -176,6 +180,8 @@ export type ProductionPaymentRuntime = Readonly<{
   returnRefund: DurableOnlineReturnRefundPort | null;
   /** 仅供组合根在退货账本完成后确认，禁止暴露到页面。 */
   acknowledgements: PaymentAcknowledgementRuntimePort | null;
+  /** 主管结案 ACK 的补发入口，仅供组合根在退货主管结案后触发；失败只保留队列。 */
+  supervisorAcknowledgements: Readonly<{ drain(): Promise<unknown> }> | null;
   initializeRecovery(): Promise<void>;
 }>;
 
@@ -276,6 +282,11 @@ export function createProductionPaymentRuntime(
     input.reportPaymentRecoveryFallback,
   );
   let recoveryInitialized = false;
+  // 主管结案 ACK 的补发入口：bootstrap（含 Linkly provider）就绪后才绑定；未绑定时队列行原样保留。
+  let drainSupervisorAcknowledgements: (() => Promise<unknown>) | null = null;
+  const kickSupervisorAcknowledgements = (): void => {
+    void drainSupervisorAcknowledgements?.().catch(() => undefined);
+  };
   let recoverParkedPayment: ((recordId: string) => Promise<void | "completed">) | null = null;
   recoverParkedPayment = async (recordId) => {
     if (!recoveryInitialized) throw new Error("PAYMENT_RUNTIME_NOT_INITIALIZED");
@@ -318,6 +329,8 @@ export function createProductionPaymentRuntime(
   const recoveryCenter: ProductionPaymentRecoveryCenterService = Object.freeze({
     async list() {
       requireScopedCurrentCashier(input);
+      // 打开恢复中心顺带补发尚未确认的主管结案 ACK；网络失败只留队列，不影响列表展示。
+      kickSupervisorAcknowledgements();
       return recoveryCenterStore.list(terminalScope);
     },
     async parkCurrent() {
@@ -410,6 +423,9 @@ export function createProductionPaymentRuntime(
         }
         // “未扣款”只形成独立人工结论；provider attempt 保持原状态，迟到 Approved 才能被识别为冲突。
       });
+      // 人工结论（含 paid 的 tender 提交）已耐久，再关闭后端会话。ACK 失败不回滚结论，
+      // 队列会在打开恢复中心或冷启动时继续重试。
+      await drainSupervisorAcknowledgements?.().catch(() => undefined);
     },
   });
   const voucherReversalStore = voucherTenderReversalStore(input);
@@ -436,6 +452,7 @@ export function createProductionPaymentRuntime(
       recoveryProbe,
       returnRefund: null,
       acknowledgements: null,
+      supervisorAcknowledgements: null,
       service: {
         status: "unavailable",
         recoveryCenter,
@@ -495,6 +512,15 @@ export function createProductionPaymentRuntime(
     },
   });
   const queryOnlyAttempts = createQueryOnlyAttempts();
+  if (linklyAcknowledger && isSupervisorResolvedAcknowledger(linklyAcknowledger)) {
+    const supervisorAcks = new SupervisorResolutionAcknowledgementService({
+      queue: input.database.paymentSupervisorAckQueue(),
+      ledger: input.repositories.payments,
+      acknowledger: linklyAcknowledger,
+      nowIso: input.clock.nowIso,
+    });
+    drainSupervisorAcknowledgements = () => supervisorAcks.drain();
+  }
   const acknowledgements = linklyAcknowledger
     ? new PaymentAcknowledgementService({
         ledger: input.repositories.payments,
@@ -916,10 +942,14 @@ export function createProductionPaymentRuntime(
   return {
     returnRefund,
     acknowledgements,
+    supervisorAcknowledgements: drainSupervisorAcknowledgements
+      ? Object.freeze({ drain: () => drainSupervisorAcknowledgements!() })
+      : null,
     recoveryProbe,
     initializeRecovery: async () => {
       await cartLease.initializeRecovery();
       recoveryInitialized = true;
+      kickSupervisorAcknowledgements();
       await discoverLegacy(true);
     },
     service: {
@@ -961,6 +991,13 @@ function requireLinklyAcknowledger(
   }
   return provider as LinklyPaymentAcknowledgementPort &
     Readonly<{ reconcileLegacy?: unknown; listUnacknowledgedSessions?: unknown }>;
+}
+
+function isSupervisorResolvedAcknowledger(
+  provider: object,
+): provider is LinklySupervisorResolvedAcknowledger {
+  return "acknowledgeSupervisorResolved" in provider &&
+    typeof provider.acknowledgeSupervisorResolved === "function";
 }
 
 function legacyReconcilerOrNull(

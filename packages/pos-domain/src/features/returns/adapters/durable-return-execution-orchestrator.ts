@@ -10,6 +10,8 @@ import type {
   ReturnExecutionCommand,
   ReturnExecutionOutcome,
   ReturnExecutionPort,
+  ReturnSupervisorFinding,
+  ReturnSupervisorResolutionCommand,
 } from "../return-workflow";
 
 import type { AuditActorSnapshot } from "../../../core/contracts/audit-actor";
@@ -342,8 +344,33 @@ export interface ReturnExecutionLineMaterialPort {
   }>): Promise<readonly DurableReturnLine[]>;
 }
 
+export type ReturnSupervisorResolutionRecord = Readonly<{
+  actionId: string;
+  finding: ReturnSupervisorFinding;
+  evidenceReference: string;
+  note: string;
+  authorizationId: string;
+  supervisorActor: AuditActorSnapshot;
+  requestingActor: AuditActorSnapshot;
+  /** 作用域来自可信身份，存储层据此复核 action 属于本终端。 */
+  scope: Readonly<{ storeCode: string; deviceCode: string }>;
+}>;
+
+/**
+ * 主管结案的耐久落点。实现必须在同一事务内完成：复核 action/allocation 仍处于
+ * 未决、写不可变结论与审计、（not-refunded）作废 action 并释放额度、登记后端会话
+ * 的 supervisorResolved ACK 待办。任何不满足条件的情形抛错且不留下半截状态。
+ * - "declined"：整张 action 已作废（not-refunded）；
+ * - "waiting"：只留审计（keep-waiting），action 仍锁定。
+ */
+export interface ReturnSupervisorResolutionPort {
+  resolve(record: ReturnSupervisorResolutionRecord): Promise<"declined" | "waiting">;
+}
+
 export type DurableReturnExecutionOptions = Readonly<{
   ledger: ReturnExecutionLedgerPort;
+  /** 缺省表示该端不开放主管结案，resolveUnknown 会失败关闭。 */
+  supervisorResolution?: ReturnSupervisorResolutionPort | undefined;
   trustedIdentity: ReturnTrustedIdentityPort;
   cashRefund: DurableOfflineCashRefundPort;
   onlineRefund: DurableOnlineReturnRefundPort;
@@ -398,6 +425,50 @@ export class DurableReturnExecutionOrchestrator
     recoveryKey: string | null;
   }>): Promise<ReturnExecutionOutcome> {
     return this.serialized(input.actionId, () => this.recoverOnce(input));
+  }
+
+  public resolveUnknown(
+    command: ReturnSupervisorResolutionCommand,
+  ): Promise<ReturnExecutionOutcome> {
+    return this.serialized(command.actionId, () => this.resolveUnknownOnce(command));
+  }
+
+  private async resolveUnknownOnce(
+    command: ReturnSupervisorResolutionCommand,
+  ): Promise<ReturnExecutionOutcome> {
+    const port = this.options.supervisorResolution;
+    if (!port) {
+      throw new ReturnFeatureError("RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED");
+    }
+    const action = await this.requireAction(command.actionId);
+    const identity = await this.options.trustedIdentity.getTrustedIdentity();
+    validateIdentity(identity);
+    assertSameRecoveryScope(action.identity, identity);
+    if (action.status === "completed") return completedOutcome(action);
+    if (action.status === "declined") return { status: "declined" };
+
+    if (command.finding === "not-refunded") {
+      // provider 的真实结果优先：先按原 attempt 做一次标准恢复，只有仍然未知才允许主管
+      // 凭线下核对作出“未退款”结论，避免迟到的已批准退款被人工结论盖掉后重复退款。
+      const recovered = await this.recoverOnce({
+        actionId: action.actionId,
+        recoveryKey: null,
+      });
+      if (recovered.status !== "unknown") return recovered;
+    }
+
+    const result = await port.resolve({
+      actionId: action.actionId,
+      finding: command.finding,
+      evidenceReference: command.evidenceReference,
+      note: command.note,
+      authorizationId: command.authorization.authorizationId,
+      supervisorActor: command.authorization.supervisorActor,
+      requestingActor: command.authorization.requestingActor,
+      scope: { storeCode: identity.storeCode, deviceCode: identity.deviceCode },
+    });
+    if (result === "declined") return { status: "declined" };
+    return unknownOutcome(await this.requireAction(action.actionId));
   }
 
   private async executeOnce(

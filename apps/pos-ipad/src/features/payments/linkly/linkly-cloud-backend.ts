@@ -3,6 +3,7 @@ import {
   deriveLinklyAttemptTxnRef,
 } from "@hb/pos-payments-core/features/payments/linkly-attempt-txn-ref";
 import { paymentProviderAmountCents } from "@hb/pos-payments-core/features/payments/payment-amount";
+import { LinklySupervisorAckSessionNotFoundError } from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
 
 import type { PaymentStatusQueryResult } from "../runtime/payment-status-query-result";
 
@@ -220,6 +221,11 @@ export class LinklyCloudBackendApi implements LinklyTerminalSelectionPort {
 
   public acknowledge(environment: string, sessionId: string): Promise<LinklyCloudBackendSession> {
     return this.requestSession({ method: "POST", url: sessionUrl(sessionId, "acknowledge"), params: { environment }, data: { environment } });
+  }
+
+  /** 主管已在 POS 结案：后端据此把仍非终态的会话写成 SupervisorResolved，已有终态保持不变。 */
+  public acknowledgeSupervisorResolved(environment: string, sessionId: string): Promise<LinklyCloudBackendSession> {
+    return this.requestSession({ method: "POST", url: sessionUrl(sessionId, "acknowledge"), params: { environment }, data: { environment, supervisorResolved: true } });
   }
 
   private async requestSession(request: Parameters<HbposTransport["request"]>[0]): Promise<LinklyCloudBackendSession> {
@@ -627,6 +633,37 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
   }
 
   /**
+   * 主管人工结案后的会话确认。结论（已收款/未收款/已退款/未退款）已先持久化在本地，
+   * 这里只让后端关闭会话；返回的会话必须是同一 SessionId/环境、带确认时间，且处于
+   * 终态或 SupervisorResolved，否则视为未确认并保留队列重试。
+   */
+  public async acknowledgeSupervisorResolved(attempt: PaymentAttempt): Promise<void> {
+    const environment = attempt.providerEnvironment?.trim() || null;
+    const sessionId = attempt.references.sessionId?.trim() || null;
+    if (environment === null || sessionId === null) {
+      throw new Error("LINKLY_ACK_PROVIDER_ENVIRONMENT_REQUIRED");
+    }
+    let acknowledged: LinklyCloudBackendSession;
+    try {
+      acknowledged = await this.api.acknowledgeSupervisorResolved(environment, sessionId);
+    } catch (error) {
+      // 后端没有该会话（create 从未到达）：没有可关闭的会话，交给调用方按“无需确认”处理。
+      if (isNotFound(error)) throw new LinklySupervisorAckSessionNotFoundError();
+      throw error;
+    }
+    if (!sameSessionEnvironment(acknowledged, sessionId, environment)) {
+      throw new Error("LINKLY_ACK_CONTEXT_MISMATCH");
+    }
+    if (!isValidTimestamp(acknowledged.clientAcknowledgedAt)) {
+      throw new Error("LINKLY_ACK_NOT_CONFIRMED");
+    }
+    if (!isFinalPaymentState(sessionState(acknowledged)) && !isSupervisorResolvedStatus(acknowledged)) {
+      // 旧后端会忽略 supervisorResolved 标记：会话虽被关闭但状态仍非终态，终端管理闸门不会放行。
+      throw new Error("LINKLY_ACK_SUPERVISOR_STATE_REQUIRED");
+    }
+  }
+
+  /**
    * 为历史 NULL 环境记录提供只读、强匹配的环境冻结入口；不创建、不恢复、不 ACK。
    * 调用方必须先用返回值完成本地 CAS，再调用 acknowledge(attempt)。
    */
@@ -1011,7 +1048,10 @@ function toPaymentResult(session: LinklyCloudBackendSession, attempt: PaymentAtt
     state,
     references,
     receiptText: session.receiptText,
-    responseCode: session.responseCode,
+    // 后端已按主管结案关闭会话：不是 Linkly 的交易结果，用专用码让恢复界面能区分“已结案”与“仍未知”。
+    responseCode: state === "Unknown" && isSupervisorResolvedStatus(session)
+      ? LINKLY_SUPERVISOR_RESOLVED_RESPONSE_CODE
+      : session.responseCode,
   };
   if (state !== "Approved") return result;
 
@@ -1209,6 +1249,14 @@ const LINKLY_DECLINED_STATUSES = new Set([
   "declined",
   "notsubmitted",
 ]);
+
+/** 后端在主管结案后写入的终态；它不是 Linkly 的交易结果，本地仍以主管结论为准。 */
+const LINKLY_SUPERVISOR_RESOLVED_STATUS = "supervisorresolved";
+export const LINKLY_SUPERVISOR_RESOLVED_RESPONSE_CODE = "LINKLY_SUPERVISOR_RESOLVED";
+
+function isSupervisorResolvedStatus(session: LinklyCloudBackendSession): boolean {
+  return session.status.trim().toLowerCase() === LINKLY_SUPERVISOR_RESOLVED_STATUS;
+}
 
 function sessionState(session: LinklyCloudBackendSession): PaymentProviderResult["state"] {
   const status = session.status.trim().toLowerCase();

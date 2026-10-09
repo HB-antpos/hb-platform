@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -102,6 +102,17 @@ export function ReturnScreen({
         testID="return-unknown"
         title={t("status.unknownTitle")}
         tone="warning"
+        resolution={
+          state.supervisorResolutionAvailable
+            ? {
+                busy: state.busy,
+                onResolve: (finding, evidenceReference, note) =>
+                  void presenter.resolveBySupervisor({ finding, evidenceReference, note }),
+                t,
+                waitingRecorded: state.supervisorWaitingRecorded,
+              }
+            : undefined
+        }
       />
     );
   }
@@ -498,9 +509,21 @@ function StatusPage({
   testID,
   title,
   tone,
+  resolution,
 }: Readonly<{
   actionLabel?: string;
   busy?: boolean;
+  /** 退款结果未知时的主管结案面板；面板含输入框，必须由本组件的键盘感知滚动容器承载。 */
+  resolution?: Readonly<{
+    busy: boolean;
+    onResolve(
+      finding: "not-refunded" | "keep-waiting",
+      evidenceReference: string,
+      note: string,
+    ): void;
+    t: (key: ReturnCopyKey) => string;
+    waitingRecorded: boolean;
+  }> | undefined;
   error?: string | null;
   hint: string;
   onAction?(): void;
@@ -509,8 +532,8 @@ function StatusPage({
   title: string;
   tone: "waiting" | "warning" | "success" | "danger";
 }>) {
-  return (
-    <SafeAreaView style={styles.statusSafeArea} testID={testID}>
+  const body = (
+    <>
       <View
         style={[
           styles.statusMark,
@@ -543,7 +566,89 @@ function StatusPage({
           testID={`${testID}-action`}
         />
       ) : null}
+    </>
+  );
+  return (
+    <SafeAreaView style={styles.statusSafeArea} testID={testID}>
+      {resolution ? (
+        <PosKeyboardAwareScrollView
+          contentContainerStyle={styles.statusScrollContent}
+          style={styles.statusScroll}
+          testID={`${testID}-scroll`}
+        >
+          {body}
+          <SupervisorResolutionPanel
+            busy={resolution.busy}
+            onResolve={resolution.onResolve}
+            t={resolution.t}
+            waitingRecorded={resolution.waitingRecorded}
+          />
+        </PosKeyboardAwareScrollView>
+      ) : (
+        body
+      )}
     </SafeAreaView>
+  );
+}
+
+function SupervisorResolutionPanel({
+  busy,
+  onResolve,
+  t,
+  waitingRecorded,
+}: Readonly<{
+  busy: boolean;
+  onResolve(
+    finding: "not-refunded" | "keep-waiting",
+    evidenceReference: string,
+    note: string,
+  ): void;
+  t: (key: ReturnCopyKey) => string;
+  waitingRecorded: boolean;
+}>) {
+  const [evidence, setEvidence] = useState("");
+  const [note, setNote] = useState("");
+  const ready = !busy && evidence.trim().length > 0 && note.trim().length > 0;
+  return (
+    <View style={styles.resolutionCard} testID="return-resolution">
+      <Text style={styles.resolutionTitle}>{t("resolution.title")}</Text>
+      <Text style={styles.resolutionHint}>{t("resolution.hint")}</Text>
+      <LabeledInput
+        editable={!busy}
+        label={t("resolution.evidenceLabel")}
+        onChangeText={setEvidence}
+        placeholder={t("resolution.evidencePlaceholder")}
+        testID="return-resolution-evidence"
+        value={evidence}
+      />
+      <LabeledInput
+        editable={!busy}
+        label={t("resolution.noteLabel")}
+        onChangeText={setNote}
+        placeholder={t("resolution.notePlaceholder")}
+        testID="return-resolution-note"
+        value={note}
+      />
+      {waitingRecorded ? (
+        <Text style={styles.resolutionNotice} testID="return-resolution-waiting-recorded">
+          {t("resolution.waitingRecorded")}
+        </Text>
+      ) : null}
+      <ActionButton
+        disabled={!ready}
+        label={t("resolution.notRefunded")}
+        onPress={() => onResolve("not-refunded", evidence, note)}
+        sound="danger"
+        testID="return-resolution-not-refunded"
+      />
+      <ActionButton
+        disabled={!ready}
+        label={t("resolution.keepWaiting")}
+        onPress={() => onResolve("keep-waiting", evidence, note)}
+        testID="return-resolution-keep-waiting"
+        tone="quiet"
+      />
+    </View>
   );
 }
 
@@ -1149,6 +1254,42 @@ const styles = StyleSheet.create({
     color: posColors.green,
     fontSize: 22,
     fontWeight: "800",
+  },
+  statusScroll: {
+    alignSelf: "stretch",
+  },
+  statusScrollContent: {
+    alignItems: "center",
+    paddingVertical: 16,
+  },
+  resolutionCard: {
+    alignSelf: "stretch",
+    maxWidth: 620,
+    marginTop: 8,
+    padding: 16,
+    gap: 10,
+    borderColor: posColors.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    backgroundColor: posColors.surface,
+  },
+  resolutionTitle: {
+    color: posColors.ink,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  resolutionHint: {
+    color: posColors.mutedInk,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  resolutionNotice: {
+    padding: 10,
+    color: posColors.green,
+    backgroundColor: posColors.greenSoft,
+    borderRadius: 8,
+    fontSize: 14,
+    fontWeight: "700",
   },
   statusError: {
     maxWidth: 620,

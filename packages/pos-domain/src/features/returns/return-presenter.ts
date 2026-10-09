@@ -9,6 +9,7 @@ import {
   ReturnWorkflow,
   returnErrorCode,
   type ReturnExecutionOutcome,
+  type ReturnSupervisorFinding,
   type ReturnWorkflowSnapshot,
 } from "./return-workflow";
 
@@ -55,6 +56,10 @@ export type ReturnPresenterState = Readonly<{
   /** 代金券买的部分必须退代金券的最低金额（只读提示，计划阶段同口径强制）。 */
   requiredVoucherRefundCents: number;
   canConfirm: boolean;
+  /** unknown 阶段是否开放主管结案（未退款 / 继续等待）；该端未接线时为 false。 */
+  supervisorResolutionAvailable: boolean;
+  /** 主管选择“继续等待”并已记录审计；仍保持锁定，用于给出明确反馈。 */
+  supervisorWaitingRecorded: boolean;
   errorCode: ReturnErrorCode | null;
   result: Readonly<{
     returnOrderSummary: string;
@@ -75,6 +80,8 @@ const INITIAL_STATE: ReturnPresenterState = {
   selectedTotalCents: 0,
   requiredVoucherRefundCents: 0,
   canConfirm: false,
+  supervisorResolutionAvailable: false,
+  supervisorWaitingRecorded: false,
   errorCode: null,
   result: null,
 };
@@ -281,6 +288,40 @@ export class ReturnPresenter {
     });
   }
 
+  /**
+   * 主管对“退款结果未知”的结案：未退款（作废本次退货并释放额度）/ 继续等待（只留审计）。
+   * 返回 true 表示 Unknown 锁已解除（本次退货已作废，或恢复时发现 provider 已有明确结果）。
+   */
+  public resolveBySupervisor(
+    input: Readonly<{
+      finding: ReturnSupervisorFinding;
+      evidenceReference: string;
+      note: string;
+    }>,
+  ): Promise<boolean> {
+    return this.runExclusive(async () => {
+      this.patch({ phase: "submitting", errorCode: null, supervisorWaitingRecorded: false });
+      try {
+        const outcome = await this.workflow.resolveUnknownBySupervisor(input);
+        this.applyOutcome(outcome);
+        if (outcome.status === "declined" && input.finding === "not-refunded") {
+          this.patch({ errorCode: "RETURN_SUPERVISOR_NOT_REFUNDED" });
+        }
+        if (outcome.status === "unknown") {
+          this.patch({ supervisorWaitingRecorded: input.finding === "keep-waiting" });
+        }
+        return outcome.status !== "unknown";
+      } catch (error) {
+        const workflowStatus = this.workflow.getSnapshot().status;
+        this.patch({
+          phase: workflowStatus === "unknown" ? "unknown" : "failed",
+          errorCode: returnErrorCode(error, "RETURN_RECOVERY_FAILED"),
+        });
+        return false;
+      }
+    });
+  }
+
   public reset(): boolean {
     if (this.actionInFlight || this.destroyed) return false;
     try {
@@ -391,6 +432,9 @@ export class ReturnPresenter {
       canConfirm:
         snapshot.selectedTotalCents > 0 &&
         snapshot.status === "draft",
+      supervisorResolutionAvailable:
+        snapshot.status === "unknown" && this.workflow.supportsSupervisorResolution(),
+      supervisorWaitingRecorded: false,
       errorCode: snapshot.lastErrorCode,
       result: this.state.result,
     };

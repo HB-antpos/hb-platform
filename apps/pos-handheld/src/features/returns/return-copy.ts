@@ -60,6 +60,15 @@ export const returnEnglishCopy = {
   "status.successAmount": "{{amount}} refunded",
   "status.failedTitle": "Refund not completed",
   "status.failedHint": "No automatic retry was made. Follow the stable error below.",
+  "resolution.title": "Supervisor resolution",
+  "resolution.hint": "Only if a supervisor has checked the terminal receipt and the Linkly or bank records and confirmed the customer was NOT refunded. If the refund may have gone through, choose Keep waiting and do not refund again.",
+  "resolution.evidenceLabel": "Evidence (terminal receipt or record number)",
+  "resolution.evidencePlaceholder": "e.g. terminal receipt number",
+  "resolution.noteLabel": "Supervisor note",
+  "resolution.notePlaceholder": "What was checked",
+  "resolution.notRefunded": "Confirm NOT refunded",
+  "resolution.keepWaiting": "Keep waiting",
+  "resolution.waitingRecorded": "Supervisor decision recorded. The refund stays locked until the result is confirmed.",
   "error.RETURN_QUERY_REQUIRED": "Enter an order or product number.",
   "error.RETURN_ORDER_NOT_FOUND": "The order was not found.",
   "error.RETURN_PRODUCT_NOT_FOUND": "The product was not found.",
@@ -82,6 +91,9 @@ export const returnEnglishCopy = {
   "error.RETURN_RECOVERY_FAILED": "Recovery did not complete. Keep this refund in recovery.",
   "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "This card payment was confirmed on a standalone terminal and cannot be refunded to the card. Choose cash or voucher.",
   "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "Instalment payments cannot be replaced by a voucher refund. Choose cash for this order.",
+  "error.RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED": "A supervisor cannot resolve this refund on this device (partial, multi-tender or non-card refund). Keep recovering or contact support.",
+  "error.RETURN_RESOLUTION_EVIDENCE_REQUIRED": "Enter the evidence reference and a note before resolving.",
+  "error.RETURN_SUPERVISOR_NOT_REFUNDED": "A supervisor confirmed the customer was not refunded. This return was cancelled; start the return again if needed.",
 } as const;
 
 export type ReturnCopyKey = keyof typeof returnEnglishCopy;
@@ -148,6 +160,15 @@ const returnChineseCopy = {
   "status.successAmount": "已退款 {{amount}}",
   "status.failedTitle": "退款未完成",
   "status.failedHint": "系统未自动重试，请按下方稳定错误处理。",
+  "resolution.title": "主管结案",
+  "resolution.hint": "仅当主管已核对终端小票及 Linkly/银行记录，确认顾客没有收到退款时才可选择“确认未退款”。若退款可能已成功，请选择“继续等待”，切勿再次退款。",
+  "resolution.evidenceLabel": "核对凭据（终端小票或记录编号）",
+  "resolution.evidencePlaceholder": "例如终端小票号",
+  "resolution.noteLabel": "主管备注",
+  "resolution.notePlaceholder": "说明核对了什么",
+  "resolution.notRefunded": "确认未退款",
+  "resolution.keepWaiting": "继续等待",
+  "resolution.waitingRecorded": "已记录主管决定，退款在结果确认前保持锁定。",
   "error.RETURN_QUERY_REQUIRED": "请输入订单号或商品号。",
   "error.RETURN_ORDER_NOT_FOUND": "未找到原订单。",
   "error.RETURN_PRODUCT_NOT_FOUND": "未找到商品。",
@@ -170,6 +191,9 @@ const returnChineseCopy = {
   "error.RETURN_RECOVERY_FAILED": "恢复尚未完成，请保持此退款为恢复状态。",
   "error.RETURN_ORIGINAL_REFUND_UNAVAILABLE": "该笔刷卡为独立刷卡机人工确认，无法原卡退回，请选择现金或礼券退款。",
   "error.RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE": "分期付款部分不能以礼券代替退款，该订单请选择现金。",
+  "error.RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED": "此退款无法在本设备由主管结案（部分完成、多笔或非刷卡退款），请继续恢复或联系技术支持。",
+  "error.RETURN_RESOLUTION_EVIDENCE_REQUIRED": "请先填写核对凭据和备注。",
+  "error.RETURN_SUPERVISOR_NOT_REFUNDED": "主管已确认顾客未收到退款，本次退货已作废；如需退货请重新办理。",
 } as const satisfies Record<ReturnCopyKey, string>;
 
 const returnCopy = {

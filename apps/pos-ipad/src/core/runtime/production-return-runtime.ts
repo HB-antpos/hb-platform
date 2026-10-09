@@ -1,3 +1,4 @@
+import type { AuditActorSnapshot } from "@hb/pos-domain/core/contracts/audit-actor";
 import {
   CurrentCashierSession,
   type TrustedCashierLease,
@@ -24,6 +25,7 @@ import {
 } from "@/features/operation-authorization";
 import {
   DurableReturnExecutionOrchestrator,
+  type ReturnSupervisorResolutionPort,
   type DurableOfflineCashRefundPort,
   type DurableOnlineReturnRefundPort,
   type DurableReturnLine,
@@ -64,6 +66,8 @@ import {
   type ReturnLookupPort,
   type ReturnWorkflowOptions,
   type ReturnRecoveryHydration,
+  type ReturnSupervisorResolutionAuthorization,
+  type ReturnSupervisorResolutionCommand,
   type ReturnWorkflowSnapshot,
 } from "@hb/pos-domain/features/returns/return-workflow";
 
@@ -120,6 +124,10 @@ export type ProductionReturnRuntimeDependencies = Readonly<{
   >;
   /** 同一 payment_attempts durable ACK 队列；未配置时保留既有退货行为。 */
   acknowledgements?: PaymentAcknowledgementRuntimePort | undefined;
+  /** 退款结果未知的主管结案落点；缺省时该端不开放结案（失败关闭，仍只能重试恢复）。 */
+  supervisorResolution?: ReturnSupervisorResolutionPort | undefined;
+  /** 主管结案后补发后端会话 supervisorResolved ACK；失败只留队列，不影响结案结果。 */
+  supervisorAcknowledgements?: Readonly<{ drain(): Promise<unknown> }> | undefined;
   sha256Hex(material: string): Promise<string>;
   createId(): string;
   nowIso(): string;
@@ -360,12 +368,14 @@ function createPresenterForLease(
         input.acknowledgements,
         finalized.allocation.durableAttemptId,
       ),
+    supervisorResolution: input.supervisorResolution,
   });
   const execution = new MaterializingReturnExecution({
     delegate: orchestrator,
     identity,
     collector,
     fulfilment: input.fulfilment,
+    supervisorAcknowledgements: input.supervisorAcknowledgements,
   });
   const leaseToken = runtimeId(input);
   const workflow = new AuthorizedReturnWorkflow(
@@ -379,6 +389,17 @@ function createPresenterForLease(
             assertActive,
             createId: () => runtimeId(input),
           }),
+        ...(input.supervisorResolution
+          ? {
+              authorizeUnknownResolution: () =>
+                authorizeUnknownResolution({
+                  authorization: input.authorization,
+                  assertActive,
+                  createId: () => runtimeId(input),
+                  requestingActor: () => requestingActorOf(identity),
+                }),
+            }
+          : {}),
       },
       sessionGuard: {
         captureLease: () => leaseToken,
@@ -596,6 +617,58 @@ async function authorizeNoReceiptReturn(
   return result.value;
 }
 
+type UnknownResolutionAuthorizationContext = NoReceiptAuthorizationContext &
+  Readonly<{ requestingActor(): Promise<AuditActorSnapshot> }>;
+
+/**
+ * 退款结果未知的主管结案必须强制另一名主管（当前收银员即使拥有 Returns.Confirm 也不能
+ * 自己结案）；授权通过时在回调内冻结真实主管身份，主管凭据不进入 workflow 与页面。
+ */
+async function authorizeUnknownResolution(
+  context: UnknownResolutionAuthorizationContext,
+): Promise<ReturnSupervisorResolutionAuthorization> {
+  context.assertActive();
+  const authorizationId = requiredOpaque(context.createId());
+  const requestingActor = await context.requestingActor();
+  const result = await context.authorization.authorizeAndRun(
+    {
+      ...permissionRequest(
+        authorizationId,
+        POS_RETURN_PERMISSIONS.confirm,
+        "resolve-unknown-refund",
+      ),
+      forceSupervisor: true,
+    },
+    (authorized) => {
+      context.assertActive();
+      if (!authorized.authorizingActor) {
+        throw new ReturnFeatureError("RETURN_SUPERVISOR_REQUIRED");
+      }
+      return Object.freeze({
+        authorizationId,
+        supervisorActor: authorized.authorizingActor,
+        requestingActor,
+      });
+    },
+  );
+  if (!result.authorized) {
+    throw new ReturnFeatureError("RETURN_SUPERVISOR_REQUIRED");
+  }
+  context.assertActive();
+  return result.value;
+}
+
+async function requestingActorOf(
+  identity: ReturnTrustedIdentityPort,
+): Promise<AuditActorSnapshot> {
+  const trusted = await identity.getTrustedIdentity();
+  return Object.freeze({
+    cashierId: trusted.cashierId,
+    cashierName: trusted.cashierName,
+    userGuid: trusted.userGuid ?? null,
+  });
+}
+
 class LeaseBoundReturnIdentity implements ReturnTrustedIdentityPort {
   public constructor(
     private readonly lease: TrustedCashierLease,
@@ -772,7 +845,12 @@ class CollectingReturnLookup implements ReturnLookupPort {
 }
 
 type MaterializingExecutionOptions = Readonly<{
-  delegate: ReturnExecutionPort;
+  delegate: ReturnExecutionPort & Readonly<{
+    resolveUnknown?(
+      command: ReturnSupervisorResolutionCommand,
+    ): Promise<ReturnExecutionOutcome>;
+  }>;
+  supervisorAcknowledgements?: Readonly<{ drain(): Promise<unknown> }> | undefined;
   identity: ReturnTrustedIdentityPort;
   collector: PresenterReturnMaterialCollector;
   fulfilment: Pick<
@@ -812,6 +890,27 @@ class MaterializingReturnExecution implements ReturnExecutionPort {
         this.options.fulfilment,
         input.actionId,
       );
+    }
+    return outcome;
+  }
+
+  public async resolveUnknown(
+    command: ReturnSupervisorResolutionCommand,
+  ): Promise<ReturnExecutionOutcome> {
+    const delegate = this.options.delegate;
+    if (!delegate.resolveUnknown) {
+      throw new ReturnFeatureError("RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED");
+    }
+    const outcome = await delegate.resolveUnknown(command);
+    if (outcome.status === "completed") {
+      // provider 真实结果优先：结案前的恢复发现退款其实已批准并完成了退货。
+      await bestEffortFulfilment(this.options.fulfilment, command.actionId);
+    }
+    try {
+      // 结论已耐久；补发后端会话 ACK 失败只留队列，打开恢复中心/冷启动时继续重试。
+      await this.options.supervisorAcknowledgements?.drain();
+    } catch {
+      // 队列保留，不翻转结案结果。
     }
     return outcome;
   }

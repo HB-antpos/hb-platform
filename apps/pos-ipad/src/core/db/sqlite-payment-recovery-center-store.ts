@@ -1,3 +1,4 @@
+import { enqueueSupervisorResolvedAckInTransaction } from "@hb/pos-db/core/db/sqlite-payment-supervisor-acknowledgement-queue";
 import type { SqliteConnectionPort } from "@hb/pos-db/core/db/types";
 
 import {
@@ -480,6 +481,16 @@ export class SqlitePaymentRecoveryCenterStore {
         [nextState, now, recordId, scope.storeCode, scope.deviceCode],
       );
       if (changed.changes !== 1) throw new Error("PAYMENT_RECOVERY_MANUAL_CAS_FAILED");
+      // 主管明确结案（已收款/未收款）后后端会话也要关闭，否则设备继续收到 409 且终端管理被未知会话阻塞；
+      // “仍未知”不是结案，不入队。入队与结论同事务，ACK 之后可重试，失败不回滚人工结论。
+      if (finding === "paid" || finding === "unpaid") {
+        await enqueueSupervisorResolvedAckInTransaction(transaction, {
+          attemptId: current.attemptId,
+          resolution: finding,
+          sourceActionId: actionId,
+          createdAtIso: now,
+        });
+      }
       await appendAudit(transaction, {
         eventId: strictText(this.createAuditEventId(), "recovery audit event id", 128),
         eventType: "PAYMENT_RECOVERY_MANUAL_FINDING",

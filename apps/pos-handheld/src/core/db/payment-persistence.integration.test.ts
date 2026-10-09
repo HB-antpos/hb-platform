@@ -30,6 +30,9 @@ import {
 } from "./sqlite-repositories";
 import { SqliteReturnApiAttemptStore } from "./sqlite-return-api-attempt-store";
 import { ProductionReturnOnlineRefundRouter } from "../runtime/production-return-online-refund-router";
+import { SqlitePaymentSupervisorAckQueue } from "@hb/pos-db/core/db/sqlite-payment-supervisor-acknowledgement-queue";
+import { SqliteReturnSupervisorResolutionStore } from "@hb/pos-db/core/db/sqlite-return-supervisor-resolution-store";
+import { DurableReturnExecutionOrchestrator } from "@hb/pos-domain/features/returns/adapters/durable-return-execution-orchestrator";
 import { SqliteReturnCapacityVault } from "./sqlite-return-capacity-vault";
 import { SqliteReturnExecutionLedger } from "./sqlite-return-execution-ledger";
 import { SqliteReturnFulfilmentPlanStore } from "./sqlite-return-fulfilment-plan-store";
@@ -1820,6 +1823,319 @@ test("真实 SQLite：退货在线退款 attempt 未决（Created/Unknown/Approv
       /must resume existing order/,
     );
   });
+});
+
+test("真实 SQLite：退款结果未知经主管确认未退款，作废 action、释放额度、登记 ACK，且 provider/部分完成/同人结案一律拒绝", async () => {
+  await withDatabase("return-supervisor-resolution", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: { paymentId: "SECRET-PAYMENT-ID", rfn: "SECRET-RFN" },
+      observedAtIso: T0,
+    });
+    let tenderId = 0;
+    let auditId = 0;
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      { createTenderGuid: () => `rs-tender-${++tenderId}`, createAuditEventId: () => `rs-audit-${++auditId}` },
+      () => T2,
+    );
+    const base = durableReturnDraft();
+    const cardAllocation = { ...base.allocations[1]!, index: 0 };
+    const draft = {
+      ...base,
+      allocations: [cardAllocation],
+      plan: {
+        ...base.plan,
+        allocations: [{
+          method: "card" as const,
+          signedAmountCents: -500,
+          originalCapacityId: "return-capacity-card",
+          originalOrderGuid: "original-return-order",
+          offlineCashProof: null,
+        }],
+      },
+    };
+    const cardOnly = { ...draft, allocations: [{ ...cardAllocation, signedAmountCents: -500 }] };
+    await ledger.prepareOrLoad(cardOnly);
+    await ledger.markAllocationSubmitted({ actionId: cardOnly.actionId, allocationId: "return-allocation-card" });
+    await insertActionBinding(
+      connection, cardOnly.returnOrderGuid, "rs-provider-action", "rs-attempt", "rs-idempotency",
+      ["linkly-cloud", "refund", "AUD", -500],
+    );
+    await insertAttempt(connection, {
+      attemptId: "rs-attempt", idempotencyKey: "rs-idempotency", orderGuid: cardOnly.returnOrderGuid,
+      provider: "linkly-cloud", operation: "refund", amountCents: -500, state: "Unknown",
+    });
+    await connection.run(
+      "UPDATE payment_attempts SET session_id = 'rs-session', provider_environment = 'Sandbox' WHERE attempt_id = 'rs-attempt'",
+    );
+    await ledger.bindAllocationAttempt({
+      actionId: cardOnly.actionId, allocationId: "return-allocation-card",
+      attemptKind: "payment-provider", externalActionId: "rs-provider-action", durableAttemptId: "rs-attempt",
+    });
+    await ledger.recordAllocationOutcome({
+      actionId: cardOnly.actionId, allocationId: "return-allocation-card",
+      expectedStatuses: ["submitted"], status: "unknown", protectedRecoveryKey: "SECRET-RECOVERY-KEY",
+    });
+    await ledger.markActionUnknown({ actionId: cardOnly.actionId });
+
+    let resolutionId = 0;
+    let resolutionAuditId = 0;
+    const store = new SqliteReturnSupervisorResolutionStore(
+      connection,
+      {
+        createResolutionId: () => `rs-resolution-${++resolutionId}`,
+        createAuditEventId: () => `rs-resolution-audit-${++resolutionAuditId}`,
+      },
+      () => T2,
+    );
+    const supervisor = { cashierId: "SUP-RETURN", cashierName: "Supervisor", userGuid: "user-sup" };
+    const requesting = { cashierId: "C-RETURN", cashierName: "Return Cashier", userGuid: "user-cash" };
+    const scope = { storeCode: "S-RETURN", deviceCode: "D-RETURN" };
+    const command = {
+      actionId: cardOnly.actionId,
+      finding: "not-refunded" as const,
+      evidenceReference: "terminal receipt 8841",
+      note: "Terminal and Linkly portal show no refund",
+      authorizationId: "rs-auth-1",
+      supervisorActor: supervisor,
+      requestingActor: requesting,
+      scope,
+    };
+
+    // 拒绝路径不得留下任何半截状态。
+    await assert.rejects(() => store.resolve({ ...command, supervisorActor: requesting }), /RETURN_SUPERVISOR_REQUIRED/);
+    await assert.rejects(() => store.resolve({ ...command, scope: { ...scope, deviceCode: "OTHER" } }), /RETURN_RECOVERY_FAILED/);
+    await connection.run("UPDATE payment_attempts SET state = 'Approved' WHERE attempt_id = 'rs-attempt'");
+    await assert.rejects(() => store.resolve(command), /RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED/);
+    await connection.run("UPDATE payment_attempts SET state = 'Unknown' WHERE attempt_id = 'rs-attempt'");
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_supervisor_resolutions"), 0);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_actions WHERE state = 'unknown'"), 1);
+
+    // 继续等待：只留审计，action 继续锁定，ACK 不入队。
+    assert.equal(await store.resolve({ ...command, finding: "keep-waiting", authorizationId: "rs-auth-wait" }), "waiting");
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_actions WHERE state = 'unknown'"), 1);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_supervisor_session_acks"), 0);
+
+    // 未退款：作废 action、释放额度、登记后端会话 ACK。
+    assert.equal(await store.resolve(command), "declined");
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_actions WHERE state = 'declined'"), 1);
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM return_action_allocations WHERE status = 'declined' AND capacity_reservation_state = 'Released'"),
+      1,
+    );
+    assert.equal(
+      String((await connection.getFirst<{ state: unknown }>("SELECT state FROM payment_attempts WHERE attempt_id = 'rs-attempt'"))?.state),
+      "Unknown",
+      "provider attempt 状态不被人工结论改写，迟到 Approved 仍可识别",
+    );
+    const queue = new SqlitePaymentSupervisorAckQueue(connection);
+    assert.deepEqual(
+      (await queue.listPending()).map((row) => [row.attemptId, row.resolution]),
+      [["rs-attempt", "not-refunded"]],
+    );
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_supervisor_resolutions WHERE finding = 'not-refunded'"), 1);
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'RETURN_REFUND_SUPERVISOR_NOT_REFUNDED' AND scope_store_code = 'S-RETURN'"),
+      1,
+    );
+    // 已作废的 action 不得再被主管结论改写。
+    await assert.rejects(() => store.resolve({ ...command, authorizationId: "rs-auth-2" }), /RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED/);
+    await assert.rejects(
+      () => connection.run("UPDATE return_supervisor_resolutions SET note = 'tampered'"),
+      /RETURN_SUPERVISOR_RESOLUTION_IMMUTABLE/,
+    );
+
+    // 额度已释放：同一原卡额度可以重新发起新的退款 action。
+    const retry = await ledger.prepareOrLoad({
+      ...cardOnly,
+      actionId: "rs-retry-action",
+      requestFingerprint: "rs-retry-fingerprint",
+      returnOrderGuid: "rs-retry-order",
+      actionRecoveryToken: "rs-retry-token",
+      lines: cardOnly.lines.map((line) => ({ ...line, lineId: "rs-retry-line" })),
+      allocations: cardOnly.allocations.map((allocation) => ({
+        ...allocation, allocationId: "rs-retry-allocation", externalAttemptId: "rs-retry-external",
+      })),
+    });
+    assert.equal(retry.status, "processing");
+  });
+});
+
+test("真实 SQLite：多笔/部分完成的退款不开放主管结案（失败关闭）", async () => {
+  await withDatabase("return-supervisor-resolution-partial", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-cash", originalOrderGuid: "original-return-order", method: "cash",
+      originalAmountCents: 500, remainingAmountCents: 500, protectedContext: null, observedAtIso: T0,
+    });
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card", originalOrderGuid: "original-return-order", method: "card",
+      originalAmountCents: 500, remainingAmountCents: 500,
+      protectedContext: { paymentId: "SECRET-PAYMENT-ID", rfn: "SECRET-RFN" }, observedAtIso: T0,
+    });
+    let tenderId = 0;
+    let auditId = 0;
+    const ledger = new SqliteReturnExecutionLedger(
+      connection, encryptor,
+      { createTenderGuid: () => `rp-tender-${++tenderId}`, createAuditEventId: () => `rp-audit-${++auditId}` },
+      () => T2,
+    );
+    const draft = durableReturnDraft();
+    await ledger.prepareOrLoad(draft);
+    await ledger.markAllocationSubmitted({ actionId: draft.actionId, allocationId: "return-allocation-cash" });
+    await ledger.recordAllocationOutcome({
+      actionId: draft.actionId, allocationId: "return-allocation-cash",
+      expectedStatuses: ["submitted"], status: "completed", protectedRecoveryKey: null,
+    });
+    await ledger.markAllocationSubmitted({ actionId: draft.actionId, allocationId: "return-allocation-card" });
+    await insertActionBinding(connection, draft.returnOrderGuid, "rp-provider-action", "rp-attempt", "rp-idempotency", ["square", "refund", "AUD", -300]);
+    await insertAttempt(connection, {
+      attemptId: "rp-attempt", idempotencyKey: "rp-idempotency", orderGuid: draft.returnOrderGuid,
+      provider: "square", operation: "refund", amountCents: -300, state: "Unknown",
+    });
+    await ledger.bindAllocationAttempt({
+      actionId: draft.actionId, allocationId: "return-allocation-card",
+      attemptKind: "payment-provider", externalActionId: "rp-provider-action", durableAttemptId: "rp-attempt",
+    });
+    await ledger.recordAllocationOutcome({
+      actionId: draft.actionId, allocationId: "return-allocation-card",
+      expectedStatuses: ["submitted"], status: "unknown", protectedRecoveryKey: null,
+    });
+    await ledger.markActionUnknown({ actionId: draft.actionId });
+    const store = new SqliteReturnSupervisorResolutionStore(
+      connection,
+      { createResolutionId: () => "rp-resolution", createAuditEventId: () => "rp-resolution-audit" },
+      () => T2,
+    );
+    await assert.rejects(() => store.resolve({
+      actionId: draft.actionId, finding: "not-refunded", evidenceReference: "receipt", note: "checked",
+      authorizationId: "rp-auth",
+      supervisorActor: { cashierId: "SUP", cashierName: "Supervisor", userGuid: null },
+      requestingActor: { cashierId: "C-RETURN", cashierName: "Return Cashier", userGuid: null },
+      scope: { storeCode: "S-RETURN", deviceCode: "D-RETURN" },
+    }), /RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED/);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_actions WHERE state = 'unknown'"), 1);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_supervisor_resolutions"), 0);
+  });
+});
+
+test("真实 SQLite + 编排器：主管未退款先让 provider 真实结果优先，仍未知才落结论；ACK 在结论之后补发", async () => {
+  for (const scenario of ["still-unknown", "provider-declined", "keep-waiting"] as const) {
+    await withDatabase(`return-orchestrator-resolution-${scenario}`, async (connection) => {
+      await migrateFresh(connection);
+      const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+      await vault.seedOrLoad({
+        capacityId: "return-capacity-card", originalOrderGuid: "original-return-order", method: "card",
+        originalAmountCents: 500, remainingAmountCents: 500,
+        protectedContext: { paymentId: "SECRET-PAYMENT-ID", rfn: "SECRET-RFN" }, observedAtIso: T0,
+      });
+      let auditId = 0;
+      const ledger = new SqliteReturnExecutionLedger(
+        connection, encryptor,
+        { createTenderGuid: () => `ro-tender-${scenario}`, createAuditEventId: () => `ro-audit-${scenario}-${++auditId}` },
+        () => T2,
+      );
+      const base = durableReturnDraft();
+      const card = { ...base.allocations[1]!, index: 0, signedAmountCents: -500 };
+      const draft = {
+        ...base,
+        allocations: [card],
+        plan: {
+          ...base.plan,
+          allocations: [{
+            method: "card" as const, signedAmountCents: -500, originalCapacityId: "return-capacity-card",
+            originalOrderGuid: "original-return-order", offlineCashProof: null,
+          }],
+        },
+      };
+      await ledger.prepareOrLoad(draft);
+      await ledger.markAllocationSubmitted({ actionId: draft.actionId, allocationId: "return-allocation-card" });
+      await insertActionBinding(connection, draft.returnOrderGuid, "ro-provider-action", "ro-attempt", "ro-idempotency", ["linkly-cloud", "refund", "AUD", -500]);
+      await insertAttempt(connection, {
+        attemptId: "ro-attempt", idempotencyKey: "ro-idempotency", orderGuid: draft.returnOrderGuid,
+        provider: "linkly-cloud", operation: "refund", amountCents: -500, state: "Unknown",
+      });
+      await connection.run("UPDATE payment_attempts SET session_id = 'ro-session', provider_environment = 'Sandbox' WHERE attempt_id = 'ro-attempt'");
+      await ledger.bindAllocationAttempt({
+        actionId: draft.actionId, allocationId: "return-allocation-card",
+        attemptKind: "payment-provider", externalActionId: "ro-provider-action", durableAttemptId: "ro-attempt",
+      });
+      await ledger.recordAllocationOutcome({
+        actionId: draft.actionId, allocationId: "return-allocation-card",
+        expectedStatuses: ["submitted"], status: "unknown", protectedRecoveryKey: null,
+      });
+      await ledger.markActionUnknown({ actionId: draft.actionId });
+
+      const recoverCalls: string[] = [];
+      const orchestrator = new DurableReturnExecutionOrchestrator({
+        ledger,
+        supervisorResolution: new SqliteReturnSupervisorResolutionStore(
+          connection,
+          { createResolutionId: () => `ro-resolution-${scenario}`, createAuditEventId: () => `ro-resolution-audit-${scenario}` },
+          () => T2,
+        ),
+        trustedIdentity: { getTrustedIdentity: async () => ({ ...draft.identity, sessionEpoch: "later-epoch" }) },
+        cashRefund: { async submit() { throw new Error("not used"); }, async recover() { throw new Error("not used"); } },
+        onlineRefund: {
+          async prepareAttempt() { throw new Error("not used"); },
+          async submit() { throw new Error("must not resubmit"); },
+          async recover() {
+            recoverCalls.push(scenario);
+            if (scenario === "provider-declined") {
+              // 模拟迟到的 provider 明确拒绝：先把 attempt 落成 Declined，再报告 declined。
+              await connection.run("UPDATE payment_attempts SET state = 'Declined' WHERE attempt_id = 'ro-attempt'");
+              return { status: "declined" as const };
+            }
+            return { status: "unknown" as const, protectedRecoveryKey: null };
+          },
+        },
+        fingerprint: { async digest() { throw new Error("not used"); } },
+        lineMaterial: { async resolveForAction() { throw new Error("not used"); } },
+        createOpaqueId: () => "ro-opaque-id",
+        nowIso: () => T2,
+      });
+      const outcome = await orchestrator.resolveUnknown({
+        actionId: draft.actionId,
+        finding: scenario === "keep-waiting" ? "keep-waiting" : "not-refunded",
+        evidenceReference: "terminal receipt 8841",
+        note: "checked",
+        authorization: {
+          authorizationId: "ro-auth",
+          supervisorActor: { cashierId: "SUP-RETURN", cashierName: "Supervisor", userGuid: "user-sup" },
+          requestingActor: { cashierId: "C-RETURN", cashierName: "Return Cashier", userGuid: null },
+        },
+      });
+      const queued = (await new SqlitePaymentSupervisorAckQueue(connection).listPending()).map((row) => row.attemptId);
+      const resolutions = await scalar(connection, "SELECT COUNT(*) AS count FROM return_supervisor_resolutions");
+      if (scenario === "still-unknown") {
+        assert.equal(outcome.status, "declined");
+        assert.deepEqual(recoverCalls, ["still-unknown"], "结案前必须先按原 attempt 恢复一次");
+        assert.deepEqual(queued, ["ro-attempt"]);
+        assert.equal(resolutions, 1);
+      } else if (scenario === "provider-declined") {
+        assert.equal(outcome.status, "declined");
+        assert.deepEqual(recoverCalls, ["provider-declined"]);
+        // provider 的真实拒绝优先：不写主管结论，ACK 交给标准终态 ACK 管线。
+        assert.deepEqual(queued, []);
+        assert.equal(resolutions, 0);
+      } else {
+        assert.equal(outcome.status, "unknown");
+        assert.deepEqual(recoverCalls, [], "继续等待不触发恢复也不改状态");
+        assert.deepEqual(queued, []);
+        assert.equal(resolutions, 1);
+        assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM return_actions WHERE state = 'unknown'"), 1);
+      }
+    });
+  }
 });
 
 test("真实 SQLite：退货多 allocation 在 provider 前耐久绑定，Unknown 跨恢复冻结容量并以同一 OrderGuid 完成", async () => {
