@@ -10,7 +10,7 @@ using static Hbpos.Client.Tests.SharedHeldOrderClientTestSupport;
 namespace Hbpos.Client.Tests;
 
 [Collection(ConsoleLogGlobalStateTestCollection.Name)]
-public sealed class CardPaymentRecoveryServiceTests
+public sealed partial class CardPaymentRecoveryServiceTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly PosSessionState Session = new("HB POS", "S001", "Main Branch", "POS-01", "C001", "Alice", true, 0);
@@ -3140,9 +3140,12 @@ public sealed class CardPaymentRecoveryServiceTests
     }
 
     [Fact]
-    public async Task RecoverActiveSessionAsync_without_local_attempt_approved_session_acknowledges_and_returns_bank_receipt()
+    public async Task RecoverActiveSessionAsync_approved_session_with_completed_sale_acknowledges_and_closes_record()
     {
-        var attempts = new FakeCardPaymentAttemptRepository(null);
+        var attempts = new FakeCardPaymentAttemptRepository(null)
+        {
+            RecentAttempts = [CreateCompletedSaleFor("ACTIVE-APPROVED", "TXN-APPROVED")]
+        };
         var orders = new FakeLocalOrderRepository();
         var backend = new FakeLinklyBackendTerminalClient
         {
@@ -3164,6 +3167,9 @@ public sealed class CardPaymentRecoveryServiceTests
         Assert.Single(cart.Lines);
         Assert.Equal("CURRENT-SKU", cart.Lines[0].ProductCode);
         Assert.Equal("TXN-APPROVED", result.DialogDetails?.TxnRef);
+        // 有订单承接的批准直接终态化，不会留下一条永远“已批准未建单”的重复记录。
+        Assert.Equal(LocalCardPaymentAttemptStatus.OrderCompleted, attempts.Status);
+        Assert.NotNull(attempts.AcknowledgedAt);
     }
 
     [Fact]
@@ -3195,7 +3201,10 @@ public sealed class CardPaymentRecoveryServiceTests
     [Fact]
     public async Task RecoverActiveSessionAsync_approved_session_uses_receipt_notification_when_receipt_text_is_missing()
     {
-        var attempts = new FakeCardPaymentAttemptRepository(null);
+        var attempts = new FakeCardPaymentAttemptRepository(null)
+        {
+            RecentAttempts = [CreateCompletedSaleFor("ACTIVE-NOTIFICATION", "TXN-NOTIFICATION")]
+        };
         var orders = new FakeLocalOrderRepository();
         var backend = new FakeLinklyBackendTerminalClient
         {
@@ -3230,7 +3239,10 @@ public sealed class CardPaymentRecoveryServiceTests
         string finalStatus,
         bool transactionSuccess)
     {
-        var attempts = new FakeCardPaymentAttemptRepository(null);
+        var attempts = new FakeCardPaymentAttemptRepository(null)
+        {
+            RecentAttempts = [CreateCompletedSaleFor("ACTIVE-ACK-FAIL", "TXN-ACK-FAIL")]
+        };
         var orders = new FakeLocalOrderRepository();
         var backend = new FakeLinklyBackendTerminalClient
         {
@@ -5166,7 +5178,8 @@ public sealed class CardPaymentRecoveryServiceTests
             new CardPaymentSupervisorResolution(
                 attempt.AttemptGuid,
                 CardProcessorKind.Linkly,
-                CardPaymentSupervisorDecision.ConfirmNotPaid,
+                // 确认已付款不能绕过恢复：有批准证据时只能运行恢复建单（确认未付款见“已批准出口”用例）。
+                CardPaymentSupervisorDecision.ConfirmPaid,
                 "Supervisor review",
                 "MANAGER-01",
                 Evidence: "Bank evidence says to recover the approved payment"),
@@ -6274,7 +6287,8 @@ public sealed class CardPaymentRecoveryServiceTests
             attempts.ResponseCode);
         Assert.Equal(CardRecoveryPhases.FinalizePending, attempts.RecoveryPhase);
         Assert.Null(attempts.AcknowledgedAt);
-        Assert.Equal(0, backend.StatusCallCount);
+        // 结案前的实时核验只是一次只读状态查询；除此之外没有任何后端副作用。
+        Assert.Equal(1, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(originalRevision, cart.Revision);
@@ -6326,7 +6340,7 @@ public sealed class CardPaymentRecoveryServiceTests
         Assert.True(result.LockRetained);
         Assert.Equal(ActiveSessionSupervisorResolutionCodes.ContinueWaiting, attempts.ResponseCode);
         Assert.Equal(CardRecoveryPhases.None, attempts.RecoveryPhase);
-        Assert.Equal(0, backend.StatusCallCount);
+        Assert.Equal(1, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(0, cartChangedCount);
@@ -6368,7 +6382,7 @@ public sealed class CardPaymentRecoveryServiceTests
         Assert.True(result.LockRetained);
         Assert.Null(result.RecoveryResult);
         Assert.Null(attempts.LastPaymentJournal);
-        Assert.Equal(0, backend.StatusCallCount);
+        Assert.Equal(1, backend.StatusCallCount);
         Assert.Equal(0, backend.AcknowledgeCallCount);
         Assert.Equal(0, orders.SaveCount);
         Assert.Equal(0, cartChangedCount);
@@ -8892,6 +8906,28 @@ public sealed class CardPaymentRecoveryServiceTests
                 _attempt?.OperationKind == "Refund" ? [_attempt] : []);
         }
 
+        // 其他（已终态/已确认）的本机 attempt：供“批准会话是否已有订单承接”这类按近期记录核对的路径使用。
+        public IReadOnlyList<LocalCardPaymentAttempt> RecentAttempts { get; init; } = [];
+
+        public Exception? RecentAttemptsException { get; init; }
+
+        public Task<IReadOnlyList<LocalCardPaymentAttempt>> GetRecentAttemptsAsync(
+            string storeCode,
+            string deviceCode,
+            string environment,
+            CancellationToken cancellationToken = default)
+        {
+            if (RecentAttemptsException is not null)
+            {
+                throw RecentAttemptsException;
+            }
+
+            IReadOnlyList<LocalCardPaymentAttempt> attempts = _attempt is null
+                ? RecentAttempts
+                : [_attempt, .. RecentAttempts];
+            return Task.FromResult(attempts);
+        }
+
         public Task<LocalCardPaymentAttempt?> GetLatestOpenActiveSessionAsync(
             string storeCode,
             string deviceCode,
@@ -8952,7 +8988,10 @@ public sealed class CardPaymentRecoveryServiceTests
                     _ => ActiveSessionSupervisorResolutionCodes.ContinueWaiting
                 },
                 ResponseText = resolution.Reason,
-                PaymentReference = resolution.PaymentReference,
+                // 与仓储一致：只有确认已付款才写入付款参考号，其余决定保留库里原有证据。
+                PaymentReference = resolution.Decision == ActiveSessionSupervisorDecision.ConfirmPaid
+                    ? resolution.PaymentReference
+                    : _attempt.PaymentReference,
                 RecoveryPhase = resolution.Decision == ActiveSessionSupervisorDecision.ContinueWaiting
                     ? CardRecoveryPhases.None
                     : CardRecoveryPhases.FinalizePending,
@@ -9924,7 +9963,12 @@ public sealed class CardPaymentRecoveryServiceTests
                 throw StatusException;
             }
 
-            return Task.FromResult(Status ?? throw new InvalidOperationException("Missing status."));
+            // 测试没有设置会话状态时模拟“后端没有这条会话”（404），而不是随便抛一个异常：
+            // 主管结案前的实时核验把 404 视为无矛盾证据，需要查询失败/在途/终态的用例会显式设置 Status 或 StatusException。
+            return Task.FromResult(Status ?? throw new HttpRequestException(
+                "Missing status.",
+                inner: null,
+                statusCode: System.Net.HttpStatusCode.NotFound));
         }
 
         public Task AcknowledgeSessionAsync(CardTerminalSettings settings, string sessionId, CancellationToken cancellationToken = default)

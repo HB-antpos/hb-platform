@@ -787,7 +787,9 @@ public sealed class CardRecoveryCenterViewModelTests
             updatedAt: Now,
             operationKind: operationKind) with
         {
-            Status = status
+            Status = status,
+            // 没有批准证据：三种主管决定都可用；带批准证据的记录见 Approved_evidence_* 用例。
+            ResponseCode = null
         };
         var recovery = new RecordingRecoveryService { OpenItems = [selected] };
         using var viewModel = new CardRecoveryCenterViewModel(
@@ -809,6 +811,77 @@ public sealed class CardRecoveryCenterViewModelTests
         {
             Assert.Contains("Recover", viewModel.RecoveryOnlyGuidanceMessage, StringComparison.Ordinal);
         }
+    }
+
+    [Theory]
+    [InlineData("Sale", "Approved", "00")]
+    [InlineData("Sale", "RequiresReview", "08")]
+    [InlineData("Sale", "Recovering", "11")]
+    [InlineData("ActiveSession", "Approved", "00")]
+    [InlineData("ActiveSession", "RequiresReview", "00")]
+    public async Task Approved_evidence_records_only_offer_the_refunded_or_handled_close_action(
+        string operationKind,
+        string status,
+        string responseCode)
+    {
+        var selected = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.NewGuid(),
+            updatedAt: Now,
+            operationKind: operationKind) with
+        {
+            Status = status,
+            ResponseCode = responseCode,
+            PaymentReference = "ANZ:TXN-1"
+        };
+        var recovery = new RecordingRecoveryService { OpenItems = [selected] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+
+        await viewModel.LoadAsync();
+
+        // 已批准未建单：确认已付款应走恢复建单，继续等待没有意义，唯一出口是“已退款/已另行处理后关闭”。
+        Assert.True(viewModel.RecoverCommand.CanExecute(null));
+        Assert.True(viewModel.CanShowSupervisorResolution);
+        Assert.False(viewModel.ConfirmPaidCommand.CanExecute(null));
+        Assert.False(viewModel.ContinueWaitingCommand.CanExecute(null));
+        Assert.True(viewModel.ConfirmNotPaidCommand.CanExecute(null));
+        Assert.Equal("Refunded or handled elsewhere, close", viewModel.ConfirmNotProcessedText);
+        Assert.Contains("approved", GetStringProperty(viewModel, "ResolutionInstructionsText"), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "Refund or handling evidence (required, for example the refund reference)",
+            GetStringProperty(viewModel, "ResolutionEvidenceLabelText"));
+    }
+
+    [Fact]
+    public async Task Declined_payment_with_only_a_reference_keeps_the_regular_supervisor_actions()
+    {
+        var selected = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.NewGuid(),
+            updatedAt: Now) with
+        {
+            Status = "Recovering",
+            ResponseCode = "05",
+            PaymentReference = "ANZ:TXN-1"
+        };
+        var recovery = new RecordingRecoveryService { OpenItems = [selected] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+
+        await viewModel.LoadAsync();
+
+        Assert.True(viewModel.ConfirmPaidCommand.CanExecute(null));
+        Assert.True(viewModel.ContinueWaitingCommand.CanExecute(null));
+        Assert.Equal("Confirmed not paid", viewModel.ConfirmNotProcessedText);
     }
 
     [Theory]
@@ -1285,7 +1358,10 @@ public sealed class CardRecoveryCenterViewModelTests
             processor,
             Guid.NewGuid(),
             updatedAt: Now,
-            operationKind: operationKind);
+            operationKind: operationKind) with
+        {
+            ResponseCode = null
+        };
         var recovery = new RecordingRecoveryService { OpenItems = [selected] };
         using var viewModel = new CardRecoveryCenterViewModel(
             recovery,
