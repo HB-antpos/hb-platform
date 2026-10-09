@@ -1,0 +1,55 @@
+{
+  "description": "Linkly attempt TxnRef 跨语言黄金向量：由 Node crypto 按 LinklyAttemptTxnRef.cs 的算法独立计算；C# (Hbpos.Contracts.Linkly.LinklyAttemptTxnRef) 与 TS (pos-payments-core linkly-attempt-txn-ref) 必须都得到相同值。attemptGuid 一律小写 D 格式。",
+  "cases": [
+    {
+      "transactionType": "P",
+      "attemptGuid": "3b241101-e2bb-4255-8caf-4136c566a962",
+      "txnRef": "PYYM521JPGH9ARTN"
+    },
+    {
+      "transactionType": "R",
+      "attemptGuid": "3b241101-e2bb-4255-8caf-4136c566a962",
+      "txnRef": "RA80AJ7EBT50EKH8"
+    },
+    {
+      "transactionType": "P",
+      "attemptGuid": "89bd9d8d-69a2-4803-8f8d-830ec69be3a0",
+      "txnRef": "PBM2VVTH80BED2QD"
+    },
+    {
+      "transactionType": "R",
+      "attemptGuid": "89bd9d8d-69a2-4803-8f8d-830ec69be3a0",
+      "txnRef": "R1STY5TQH5BRXRMA"
+    },
+    {
+      "transactionType": "P",
+      "attemptGuid": "00000000-0000-4000-8000-000000000001",
+      "txnRef": "PGJMZZ8ZKDGA248H"
+    },
+    {
+      "transactionType": "R",
+      "attemptGuid": "00000000-0000-4000-8000-000000000001",
+      "txnRef": "RYC1DAS93K0FY9N7"
+    },
+    {
+      "transactionType": "P",
+      "attemptGuid": "ffffffff-ffff-4fff-bfff-ffffffffffff",
+      "txnRef": "P9AV9RD4ZKNV367Y"
+    },
+    {
+      "transactionType": "R",
+      "attemptGuid": "ffffffff-ffff-4fff-bfff-ffffffffffff",
+      "txnRef": "RV87JBEVMT6R8PQH"
+    },
+    {
+      "transactionType": "P",
+      "attemptGuid": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "txnRef": "PNYSFJVF0HTZFA9B"
+    },
+    {
+      "transactionType": "R",
+      "attemptGuid": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "txnRef": "RJGHQ1X2BV52Y6EZ"
+    }
+  ]
+}
