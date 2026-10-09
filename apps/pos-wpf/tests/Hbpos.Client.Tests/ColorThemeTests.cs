@@ -15,7 +15,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
 {
     private static readonly XNamespace Presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly string[] PaletteNames = ["Default", "Paper", "Graphite", "Celadon"];
+    private static readonly string[] PaletteNames = ["Default", "Paper", "Graphite", "Celadon", "Blue"];
 
     // 跟随主题的收银界面文件；客显与启动页保持独立配色，不在其中。
     private static readonly string[] ThemedXamlFiles =
@@ -39,14 +39,16 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     ];
 
     [Theory]
-    [InlineData(null, PosColorTheme.Default)]
-    [InlineData("", PosColorTheme.Default)]
+    [InlineData(null, PosColorTheme.Blue)]
+    [InlineData("", PosColorTheme.Blue)]
+    [InlineData("Default", PosColorTheme.Default)]
+    [InlineData("blue", PosColorTheme.Blue)]
     [InlineData("Paper", PosColorTheme.Paper)]
     [InlineData("graphite", PosColorTheme.Graphite)]
     [InlineData("CELADON", PosColorTheme.Celadon)]
-    [InlineData("Neon", PosColorTheme.Default)]
-    [InlineData("99", PosColorTheme.Default)]
-    public void Stored_theme_value_falls_back_to_default_when_unknown(string? stored, PosColorTheme expected)
+    [InlineData("Neon", PosColorTheme.Blue)]
+    [InlineData("99", PosColorTheme.Blue)]
+    public void Stored_theme_value_falls_back_to_blue_when_missing_or_unknown(string? stored, PosColorTheme expected)
     {
         Assert.Equal(expected, ColorThemeService.Parse(stored));
     }
@@ -65,15 +67,15 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
-    public async Task Initialize_keeps_default_theme_when_the_saved_preference_cannot_be_read()
+    public async Task Initialize_uses_the_blue_theme_when_the_saved_preference_cannot_be_read()
     {
         var applier = new RecordingApplier();
         var service = new ColorThemeService(new MemorySettings { ThrowOnRead = true }, applier);
 
         await service.InitializeAsync();
 
-        Assert.Equal(PosColorTheme.Default, service.Current);
-        Assert.Equal([PosColorTheme.Default], applier.Applied);
+        Assert.Equal(PosColorTheme.Blue, service.Current);
+        Assert.Equal([PosColorTheme.Blue], applier.Applied);
     }
 
     [Fact]
@@ -116,6 +118,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     [InlineData("Paper")]
     [InlineData("Graphite")]
     [InlineData("Celadon")]
+    [InlineData("Blue")]
     public void Palette_text_and_filled_buttons_stay_readable(string name)
     {
         var colors = SolidColors(LoadPalette(name));
@@ -224,7 +227,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
-    public async Task Switcher_lists_four_themes_marks_the_current_one_and_closes_after_selection()
+    public async Task Switcher_lists_five_themes_with_blue_first_marks_the_current_one_and_closes_after_selection()
     {
         var localization = new LocalizationService();
         localization.SetCulture("zh-CN");
@@ -232,9 +235,10 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
         var switcher = new ColorThemeSwitcherViewModel(service, localization);
 
         Assert.Equal("界面配色", switcher.MenuTitle);
-        Assert.Equal(["默认", "暖纸", "石墨夜", "青瓷"], switcher.Options.Select(option => option.Name));
+        Assert.Equal(["蓝色", "经典", "暖纸", "石墨夜", "青瓷"], switcher.Options.Select(option => option.Name));
         Assert.All(switcher.Options, option => Assert.Equal(3, option.Swatches.Count));
-        Assert.True(switcher.Options.Single(option => option.Theme == PosColorTheme.Default).IsSelected);
+        // 没有保存过偏好的收银机默认是蓝色。
+        Assert.True(switcher.Options.Single(option => option.Theme == PosColorTheme.Blue).IsSelected);
 
         switcher.IsMenuOpen = true;
         await switcher.SelectCommand.ExecuteAsync(PosColorTheme.Graphite);
@@ -245,7 +249,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
 
         localization.SetCulture("en-US");
         Assert.Equal("Color theme", switcher.MenuTitle);
-        Assert.Equal(["Default", "Paper", "Graphite", "Celadon"], switcher.Options.Select(option => option.Name));
+        Assert.Equal(["Blue", "Classic", "Paper", "Graphite", "Celadon"], switcher.Options.Select(option => option.Name));
     }
 
     [Theory]
@@ -253,6 +257,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     [InlineData("Paper")]
     [InlineData("Graphite")]
     [InlineData("Celadon")]
+    [InlineData("Blue")]
     public void Sidebar_icons_keep_function_colors_in_default_and_share_one_ink_color_in_new_themes(string name)
     {
         var colors = SolidColors(LoadPalette(name));

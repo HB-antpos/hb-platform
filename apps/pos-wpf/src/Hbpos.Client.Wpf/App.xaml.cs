@@ -26,13 +26,13 @@ public partial class App : Application
 
     /// <summary>
     /// 原 App.xaml 里 BundledTheme 之后的三个合并字典，顺序必须保持：色板在 POS 主题之前，
-    /// ColorThemeService 会在顶层合并字典里按键找到色板并整体替换。
+    /// ColorThemeService 会在顶层合并字典里按键找到色板并整体替换。首帧色板与默认配色（蓝色）一致，避免启动时闪一下旧配色。
     /// 这里只存字符串：pack 协议要等 WPF 初始化后才注册，类型初始化时构造 Uri 会抛"端口无效"。
     /// </summary>
     internal static readonly IReadOnlyList<string> DeferredResourceDictionarySources =
     [
         "pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml",
-        "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Default.xaml",
+        "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Blue.xaml",
         "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/PosTheme.xaml"
     ];
 

@@ -38,6 +38,7 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
     // 预览色块：背景、主色、重点金额，与 Themes/Palettes 中的色板一致。
     internal static IReadOnlyList<(PosColorTheme Theme, string[] Swatches)> Definitions { get; } =
     [
+        (PosColorTheme.Blue, ["#FFF3F5F8", "#FF0B5ED7", "#FFF59E0B"]),
         (PosColorTheme.Default, ["#FFF3F3F7", "#FF0056D2", "#FFFF8F00"]),
         (PosColorTheme.Paper, ["#FFEDE9E1", "#FF1E5E59", "#FFAE4519"]),
         (PosColorTheme.Graphite, ["#FF14171B", "#FF2F76B8", "#FFEFC05A"]),

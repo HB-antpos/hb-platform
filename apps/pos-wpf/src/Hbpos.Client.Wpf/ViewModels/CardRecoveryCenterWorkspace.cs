@@ -22,7 +22,18 @@ public sealed partial class CardRecoveryCenterViewModel
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) ApplyFilters(); } }
     public int ChannelIndex { get => _channelIndex; set { if (SetProperty(ref _channelIndex, value)) ApplyFilters(); } }
     public int OperationIndex { get => _operationIndex; set { if (SetProperty(ref _operationIndex, value)) ApplyFilters(); } }
-    public bool IsManualExpanded { get => _isManualExpanded; set => SetProperty(ref _isManualExpanded, value); }
+    public bool IsManualExpanded
+    {
+        get => _isManualExpanded;
+        set
+        {
+            if (SetProperty(ref _isManualExpanded, value))
+            {
+                // 人工核对面板打开期间暂停自动检查，避免查询结果把主管正在核对的交易刷新掉。
+                ResetAutoCheckCountdown();
+            }
+        }
+    }
     public IRelayCommand<string> FilterCommand => _filterCommand ??= new RelayCommand<string>(value => { _category = value ?? "pending"; ApplyFilters(); });
     public IRelayCommand ToggleManualCommand => _toggleManualCommand ??= new RelayCommand(() => IsManualExpanded = !IsManualExpanded);
     public bool IsPendingFilter => _category == "pending";
@@ -71,6 +82,7 @@ public sealed partial class CardRecoveryCenterViewModel
         foreach (var name in new[] { nameof(PendingCountText), nameof(FailedCountText), nameof(ResolvedCountText), nameof(ReviewCountText),
             nameof(IsPendingFilter), nameof(IsFailedFilter), nameof(IsResolvedFilter), nameof(IsReviewFilter), nameof(LastRefreshText),
             nameof(ConfirmProcessedText), nameof(ConfirmNotProcessedText), nameof(SelectedOrderText), nameof(SelectedHistory), nameof(IsHistorySelection) }) OnPropertyChanged(name);
+        NotifyPresentationProperties();
     }
     internal static string OrderReference(CardRecoveryQueueItem? item)
     {

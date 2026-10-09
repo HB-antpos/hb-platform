@@ -857,6 +857,168 @@ public sealed class CardRecoveryCenterViewModelTests
     }
 
     [Fact]
+    public async Task AutoCheck_queries_a_processing_square_refund_every_interval_without_resolving_it()
+    {
+        var recovery = new RecordingRecoveryService { OpenItems = [CreateProcessingSquareRefund()] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        Assert.True(viewModel.IsAutoCheckActive);
+        Assert.Equal("Checking automatically · next check in 0:30", viewModel.AutoCheckText);
+        for (var second = 1; second < CardRecoveryCenterViewModel.AutoCheckIntervalSeconds; second++)
+        {
+            await viewModel.OnAutoCheckTickAsync();
+        }
+
+        Assert.Equal(0, recovery.RecoverCallCount);
+        Assert.Equal("Checking automatically · next check in 0:01", viewModel.AutoCheckText);
+
+        await viewModel.OnAutoCheckTickAsync();
+
+        // 自动检查只走定点恢复（查询同一笔退款），绝不触发主管结案。
+        Assert.Equal(1, recovery.RecoverCallCount);
+        Assert.Equal(0, recovery.ResolveCallCount);
+        Assert.Equal(CardRecoveryCenterViewModel.AutoCheckIntervalSeconds, viewModel.AutoCheckSecondsRemaining);
+    }
+
+    [Fact]
+    public async Task AutoCheck_stays_off_for_sales_while_the_manual_sheet_is_open_and_without_cashier_permission()
+    {
+        var sale = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("52000000-0000-0000-0000-000000000001"),
+            Now);
+        var saleRecovery = new RecordingRecoveryService { OpenItems = [sale] };
+        using (var saleViewModel = new CardRecoveryCenterViewModel(
+                   saleRecovery,
+                   new PosCartService(),
+                   CreateSession(),
+                   new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+                   CreateLocalization()))
+        {
+            await saleViewModel.LoadAsync();
+            Assert.False(saleViewModel.IsAutoCheckActive);
+            Assert.Equal("Tap Check status now to query the latest result.", saleViewModel.AutoCheckText);
+            await TickAutoCheckIntervalAsync(saleViewModel);
+            Assert.Equal(0, saleRecovery.RecoverCallCount);
+        }
+
+        var refundRecovery = new RecordingRecoveryService { OpenItems = [CreateProcessingSquareRefund()] };
+        using (var sheetViewModel = new CardRecoveryCenterViewModel(
+                   refundRecovery,
+                   new PosCartService(),
+                   CreateSession(),
+                   new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+                   CreateLocalization()))
+        {
+            await sheetViewModel.LoadAsync();
+            sheetViewModel.IsManualExpanded = true;
+            Assert.False(sheetViewModel.IsAutoCheckActive);
+            await TickAutoCheckIntervalAsync(sheetViewModel);
+            Assert.Equal(0, refundRecovery.RecoverCallCount);
+        }
+
+        // 收银员自身没有查看权限时不自动查询，避免每 30 秒弹出主管扫码。
+        var sessionWithoutPermission = CreateSession() with { CashierSession = CreateCashier("CASHIER-1") };
+        using var restrictedViewModel = new CardRecoveryCenterViewModel(
+            refundRecovery,
+            new PosCartService(),
+            sessionWithoutPermission,
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await restrictedViewModel.LoadAsync();
+        Assert.False(restrictedViewModel.IsAutoCheckActive);
+        await TickAutoCheckIntervalAsync(restrictedViewModel);
+        Assert.Equal(0, refundRecovery.RecoverCallCount);
+    }
+
+    [Fact]
+    public async Task Touch_presentation_shows_square_processing_state_cashier_name_and_segmented_filters()
+    {
+        var refund = CreateProcessingSquareRefund() with
+        {
+            OrderDraftJson = """{"orderGuid":"ORDER-77","session":{"cashierName":"Alex Chen"}}"""
+        };
+        var sale = CreateQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("52000000-0000-0000-0000-000000000002"),
+            Now.AddMinutes(-5));
+        using var viewModel = new CardRecoveryCenterViewModel(
+            new RecordingRecoveryService { OpenItems = [refund, sale] },
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        var refundRow = viewModel.OpenAttemptRows.Single(row => row.IsRefund);
+        Assert.Equal("Processing at Square", refundRow.StatusPillText);
+        Assert.Equal(CardRecoveryTone.Warning, refundRow.Tone);
+        Assert.Equal(CardRecoveryTone.Danger, viewModel.OpenAttemptRows.Single(row => !row.IsRefund).Tone);
+
+        viewModel.SelectedRow = refundRow;
+        Assert.Equal("ORDER-77", viewModel.SelectedOrderText);
+        Assert.Equal("Alex Chen", viewModel.SelectedCashierNameText);
+        Assert.Equal("CASHIER-1", viewModel.SelectedCashierText);
+        Assert.Equal("Refund to original card", viewModel.SelectedHeadlineText);
+        Assert.Equal("Do not refund again.", viewModel.SafetyBannerTitleText);
+        Assert.True(viewModel.IsFinalStepPending);
+        Assert.Equal(2, viewModel.PendingCount);
+
+        viewModel.IsChannelSquare = true;
+        Assert.Equal(2, viewModel.ChannelIndex);
+        Assert.Equal([refund.Key], viewModel.OpenAttemptRows.Select(row => row.Key));
+        viewModel.IsOperationSale = true;
+        Assert.Empty(viewModel.OpenAttemptRows);
+        viewModel.IsChannelAll = true;
+        viewModel.IsOperationAll = true;
+        Assert.Equal(2, viewModel.OpenAttemptRows.Count);
+    }
+
+    [Fact]
+    public void Evidence_presets_fill_and_append_without_duplicates()
+    {
+        using var viewModel = new CardRecoveryCenterViewModel(
+            new RecordingRecoveryService(),
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+
+        viewModel.ApplyEvidencePresetCommand.Execute("squareDashboard");
+        viewModel.ApplyEvidencePresetCommand.Execute("squareDashboard");
+        viewModel.ApplyEvidencePresetCommand.Execute("bankStatement");
+        viewModel.ApplyEvidencePresetCommand.Execute("unknown");
+
+        Assert.Equal("Square Dashboard; Bank statement", viewModel.ResolutionEvidence);
+    }
+
+    private static async Task TickAutoCheckIntervalAsync(CardRecoveryCenterViewModel viewModel)
+    {
+        for (var second = 0; second < CardRecoveryCenterViewModel.AutoCheckIntervalSeconds; second++)
+        {
+            await viewModel.OnAutoCheckTickAsync();
+        }
+    }
+
+    private static CardRecoveryQueueItem CreateProcessingSquareRefund() =>
+        CreateQueueItem(
+            CardProcessorKind.Square,
+            Guid.Parse("52000000-0000-0000-0000-0000000000AA"),
+            Now,
+            operationKind: "Refund") with
+        {
+            Status = "Recovering",
+            PaymentId = "REFUND-1",
+            PaymentStatus = "PENDING"
+        };
+
+    [Fact]
     public async Task RefreshCommand_uses_payment_view_and_preserves_selection_by_key()
     {
         var first = CreateQueueItem(
