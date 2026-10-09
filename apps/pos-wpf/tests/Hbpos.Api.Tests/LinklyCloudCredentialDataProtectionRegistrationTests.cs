@@ -34,24 +34,6 @@ public sealed class LinklyCloudCredentialDataProtectionRegistrationTests
     }
 
     [Fact]
-    public void Development_registers_shared_Linkly_credential_protector()
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ASPNETCORE_ENVIRONMENT"] = "Development"
-            })
-            .Build();
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        services.AddHbposApiServices(configuration);
-
-        using var provider = services.BuildServiceProvider();
-        Assert.NotNull(provider.GetRequiredService<ILinklyCloudTerminalCredentialProtector>());
-    }
-
-    [Fact]
     public void Development_without_configured_path_uses_the_directory_shared_with_Admin()
     {
         // M8：两个进程的内容根不同，各自回落到“程序目录/App_Data”会让本机密钥环永远不一致。
@@ -72,6 +54,24 @@ public sealed class LinklyCloudCredentialDataProtectionRegistrationTests
 
         Assert.True(Directory.Exists(sharedPath));
         Assert.NotEmpty(Directory.GetFiles(sharedPath!, "key-*.xml"));
+    }
+
+    [Fact]
+    public void Development_registers_shared_Linkly_credential_protector()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ASPNETCORE_ENVIRONMENT"] = "Development"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddHbposApiServices(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.NotNull(provider.GetRequiredService<ILinklyCloudTerminalCredentialProtector>());
     }
 
     [Fact]
