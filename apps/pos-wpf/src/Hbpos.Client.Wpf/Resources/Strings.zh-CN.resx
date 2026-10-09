@@ -820,7 +820,7 @@
     <value>上一笔刷卡需要恢复</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve">
-    <value>POS 会先检查上一笔 Linkly 交易，再允许新的刷卡付款。当前订单会保留在本页面。</value>
+    <value>POS 会先检查上一笔刷卡交易，再允许新的刷卡付款。当前订单会保留在本页面。</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.recover" xml:space="preserve">
     <value>恢复上一笔</value>
@@ -829,7 +829,7 @@
     <value>关闭</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve">
-    <value>正在恢复上一笔 Linkly 交易...</value>
+    <value>正在恢复上一笔刷卡交易...</value>
   </data>
   <data name="payment.card.error.overlay.activeSession.handoff" xml:space="preserve">
     <value>移至异常中心并开始新单</value>
