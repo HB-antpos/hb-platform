@@ -10,7 +10,7 @@ using static Hbpos.Client.Tests.SharedHeldOrderClientTestSupport;
 namespace Hbpos.Client.Tests;
 
 [Collection(ConsoleLogGlobalStateTestCollection.Name)]
-public sealed class CardPaymentRecoveryServiceTests
+public sealed partial class CardPaymentRecoveryServiceTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly PosSessionState Session = new("HB POS", "S001", "Main Branch", "POS-01", "C001", "Alice", true, 0);

@@ -2366,6 +2366,10 @@
   <data name="main.reregister.syncPending" xml:space="preserve">
     <value>请先完成待同步订单，再切换分店注册。</value>
   </data>
+  <data name="linkly.recovery.openAttemptBlocksPayment" xml:space="preserve"><value>本机还有未处理完的刷卡交易。请先在卡交易异常中心恢复或由主管结案，处理完成前不能再次刷卡，避免顾客被重复扣款。</value></data>
+  <data name="cardRecovery.auto.recoveredOrders" xml:space="preserve"><value>重启前已获批准的 {0} 笔刷卡付款已自动恢复为订单。</value></data>
+  <data name="main.reregister.cardRecoveryPending" xml:space="preserve"><value>请先在卡交易异常中心处理未完成的刷卡交易，再更换门店注册。</value></data>
+  <data name="main.reregister.cardRecoveryUnknown" xml:space="preserve"><value>无法确认是否还有未完成的刷卡交易，暂时不能更换门店注册，请稍后重试。</value></data>
   <data name="main.reregister.submitted" xml:space="preserve">
     <value>分店切换申请已提交，请重新注册设备后继续使用。</value>
   </data>

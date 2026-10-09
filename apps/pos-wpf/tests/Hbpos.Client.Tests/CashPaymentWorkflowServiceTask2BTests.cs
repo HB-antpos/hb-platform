@@ -7,7 +7,7 @@ using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
-public sealed class CashPaymentWorkflowServiceTask2BTests
+public sealed partial class CashPaymentWorkflowServiceTask2BTests
 {
     [Fact]
     public async Task Takeover_creates_generic_review_session_and_persists_before_ack_then_starts_new()

@@ -311,6 +311,13 @@ public interface ICardPaymentRecoveryService
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Targeted card recovery is not wired for this service.");
 
+    // 启动/收银员登录后调用：对确定性记录（Approved、FinalizePending、已完成未 ack）自动定点恢复。
+    // 绝不重发扣款，不触碰当前购物车；结果未知的记录仍留给异常中心。
+    Task<CardAutoRecoverySummary> AutoRecoverDeterministicAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(CardAutoRecoverySummary.None);
+
     Task<CardRecoveryResolutionResult> ResolveAsync(
         CardRecoveryAttemptKey key,
         CardRecoverySupervisorDecision decision,
@@ -1082,6 +1089,127 @@ public sealed class CardPaymentRecoveryService(
             T("cardRecovery.linkly.unknown", "The previous card result cannot be confirmed. Ask a supervisor to confirm the Linkly backend status before continuing."),
             DialogDetails: BuildDialogDetails(attempt, status),
             PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
+    }
+
+    /// <summary>
+    /// 自动恢复“确定性”未结记录：本机已经持有该交易的最终金融证据（已批准、主管已决定已付款、已完成订单），
+    /// 剩下的只是建单/收尾/确认 Linkly 会话。流程与异常中心点“恢复”完全一致（走 RecoverAttemptAsync 的 CAS 路径），
+    /// 但不会发起任何新扣款，也不发布到当前购物车（使用一次性购物车，需要界面交接的结果留给异常中心）。
+    /// 结果未知（Pending/SessionStarted/Recovering/RequiresReview）、需要还原草稿的失败/未付款记录都不在此列。
+    /// </summary>
+    public async Task<CardAutoRecoverySummary> AutoRecoverDeterministicAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
+        if (settings.Processor != CardProcessorKind.Linkly)
+        {
+            return CardAutoRecoverySummary.None;
+        }
+
+        var configuredMode = CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode);
+        var attempts = await RunLocalStoreAsync(
+            () => attemptRepository.GetOpenAttemptsAsync(
+                session.StoreCode,
+                session.DeviceCode,
+                settings.Environment.ToString(),
+                cancellationToken),
+            cancellationToken);
+        var candidates = attempts
+            .Where(attempt => IsDeterministicAutoRecoveryCandidate(attempt, configuredMode))
+            .OrderBy(attempt => attempt.CreatedAt)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return CardAutoRecoverySummary.None;
+        }
+
+        var scratchCart = new PosCartService();
+        var recoveredOrders = 0;
+        PosSessionState? updatedSession = null;
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var result = await RecoverAttemptAsync(
+                    candidate.AttemptGuid,
+                    scratchCart,
+                    session,
+                    cancellationToken);
+                if (result.Outcome == CardPaymentRecoveryOutcome.OrderCompleted)
+                {
+                    recoveredOrders++;
+                    updatedSession = result.UpdatedSession ?? updatedSession;
+                }
+
+                ConsoleLog.Write(
+                    "CardRecovery",
+                    $"auto recovery attemptGuid={candidate.AttemptGuid} status={candidate.Status} phase={candidate.RecoveryPhase} outcome={result.Outcome}");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                // 单条失败不能影响其余记录；它仍留在异常中心队列，等待人工恢复。
+                ConsoleLog.WriteWarning(
+                    "CardRecovery",
+                    $"auto recovery failed attemptGuid={candidate.AttemptGuid} error={ex.GetType().Name}",
+                    RecoveryLogContext(candidate.AttemptGuid.ToString("D")),
+                    ex);
+            }
+        }
+
+        return new CardAutoRecoverySummary(candidates.Length, recoveredOrders, updatedSession);
+    }
+
+    private static bool IsDeterministicAutoRecoveryCandidate(
+        LocalCardPaymentAttempt attempt,
+        LinklyConnectionMode configuredMode)
+    {
+        if (!string.Equals(attempt.Processor, nameof(CardProcessorKind.Linkly), StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(attempt.OperationKind, "Sale", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // 只补 ack 的记录：明确失败未确认、历史主管“未付款”未确认。
+        if (IsFinalFailureAwaitingAcknowledgement(attempt) ||
+            IsHistoricalSupervisorNotPaidAwaitingAcknowledgement(attempt))
+        {
+            return true;
+        }
+
+        // 主管“确认未付款/继续等待”需要还原草稿或人工跟进，必须由异常中心界面交接，不自动处理。
+        if (string.Equals(attempt.ResponseCode, ActiveSessionSupervisorResolutionCodes.ConfirmedNotPaid, StringComparison.Ordinal) ||
+            string.Equals(attempt.ResponseCode, ActiveSessionSupervisorResolutionCodes.ContinueWaiting, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal))
+        {
+            // 批准证据已落库、订单尚未收尾；失败/未付款目标需要发布草稿，不在此列。
+            return attempt.Status == LocalCardPaymentAttemptStatus.Approved &&
+                Enum.TryParse<LocalCardPaymentAttemptStatus>(
+                    attempt.RecoveryTargetStatus,
+                    ignoreCase: false,
+                    out var target) &&
+                target is LocalCardPaymentAttemptStatus.OrderCompleted or LocalCardPaymentAttemptStatus.Approved &&
+                TryDeserializeDraft(attempt) is not null;
+        }
+
+        if (attempt.Status == LocalCardPaymentAttemptStatus.Approved)
+        {
+            return TryDeserializeDraft(attempt) is not null;
+        }
+
+        // 订单已完成、只差向 Linkly 确认会话。
+        return attempt.Status == LocalCardPaymentAttemptStatus.OrderCompleted &&
+            attempt.AcknowledgedAt is null &&
+            !string.IsNullOrWhiteSpace(attempt.SessionId) &&
+            ResolveAttemptConnectionMode(attempt, configuredMode) == LinklyConnectionMode.CloudBackendAsync;
     }
 
     public async Task<IReadOnlyList<CardRecoveryQueueItem>> ListHistoryAsync(

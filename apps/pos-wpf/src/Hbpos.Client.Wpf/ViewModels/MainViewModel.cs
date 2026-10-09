@@ -592,7 +592,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _cart,
             snapshot => ApplySyncCenterSnapshot(snapshot),
             msg => StatusMessage = msg ?? string.Empty,
-            () => _startupOptions?.PreviewMode == true);
+            () => _startupOptions?.PreviewMode == true,
+            HasUnresolvedCardAttemptsAsync);
 
         _catalogStartupCoordinator = new CatalogStartupCoordinator(
             _shellCatalogService,
@@ -2792,6 +2793,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _startupCardRecoveryPendingAfterCashierLogin = false;
+        await RunStartupCardAutoRecoveryAsync();
         await RefreshCardRecoveryCountAsync();
     }
 
@@ -2802,9 +2804,68 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // pending 只消费一次；这里只刷新提示数量，不查询终端、不恢复订单，也不弹阻断对话框。
+        // pending 只消费一次：先静默恢复确定性记录（已批准待建单/待收尾/已完成未 ack），再刷新异常数量；
+        // 不查询终端、不重发扣款，也不弹阻断对话框，结果未知的记录仍留给异常中心。
         _startupCardRecoveryPendingAfterCashierLogin = false;
+        await RunStartupCardAutoRecoveryAsync();
         await RefreshCardRecoveryCountAsync();
+    }
+
+    // 自动恢复可能要向 Linkly 补 ack（网络请求），启动不能被它拖住：超过等待时间就让它在后台继续，
+    // 完成后自己刷新数量；任何异常都只记日志，不影响收银。
+    private static readonly TimeSpan StartupCardAutoRecoveryWait = TimeSpan.FromSeconds(5);
+
+    private async Task RunStartupCardAutoRecoveryAsync()
+    {
+        var recovery = AutoRecoverDeterministicCardAttemptsAsync();
+        try
+        {
+            await recovery.WaitAsync(StartupCardAutoRecoveryWait);
+        }
+        catch (TimeoutException)
+        {
+            ConsoleLog.Write(
+                "CardRecovery",
+                $"startup auto recovery still running after {StartupCardAutoRecoveryWait.TotalSeconds:0}s, continuing in background");
+        }
+    }
+
+    private async Task AutoRecoverDeterministicCardAttemptsAsync()
+    {
+        if (_cardPaymentRecoveryService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var summary = await _cardPaymentRecoveryService.AutoRecoverDeterministicAsync(
+                Session,
+                CancellationToken.None);
+            if (summary.RecoveredOrders > 0)
+            {
+                // 不回写 summary.UpdatedSession：它是启动时刻的会话快照，后台跑完时收银员可能已经切换；
+                // 待同步数量由下面的 RefreshPendingSyncAsync 刷新。
+                StatusMessage = string.Format(
+                    _localization.CurrentCulture,
+                    _localization.T("cardRecovery.auto.recoveredOrders"),
+                    summary.RecoveredOrders);
+                await RefreshPendingSyncAsync();
+            }
+
+            if (summary.Examined > 0)
+            {
+                // 调用方在等待超时后会先刷新一次数量；真正有记录被处理时这里再刷新，保证角标跟上后台完成的结果。
+                await RefreshCardRecoveryCountAsync();
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // 自动恢复失败不能阻断收银；记录仍在异常中心队列里，可手动恢复。
+            ConsoleLog.Write(
+                "CardRecovery",
+                $"startup auto recovery failed store={Session.StoreCode} device={Session.DeviceCode} error={ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void OnCashierSessionRejected(object? sender, CashierSessionRejectedEventArgs eventArgs)
@@ -2907,6 +2968,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 "SquareRefundSettlement",
                 $"background check failed store={Session.StoreCode} device={Session.DeviceCode} error={ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    // 设备重注册前置检查：本机（当前门店/设备/环境）是否还有未结卡交易。读取失败时抛出，由协调器失败关闭。
+    private async Task<bool> HasUnresolvedCardAttemptsAsync(CancellationToken cancellationToken)
+    {
+        if (_cardPaymentRecoveryService is null)
+        {
+            return false;
+        }
+
+        var openAttempts = await _cardPaymentRecoveryService.ListOpenAsync(Session, cancellationToken);
+        return openAttempts.Count > 0;
     }
 
     private async Task RefreshCardRecoveryCountAsync()
