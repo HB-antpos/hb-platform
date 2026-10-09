@@ -624,6 +624,17 @@ public sealed class CustomerDisplayViewModelTests
         Assert.Equal("{StaticResource PosCustomerDisplayHeaderTextBrush}", SetterValue("Foreground"));
         Assert.True(double.Parse(SetterValue("FontSize")!, System.Globalization.CultureInfo.InvariantCulture) >= 16d);
         Assert.Contains("<Color x:Key=\"PosCustomerDisplayColorHeaderText\">#E6FFFFFF</Color>", themeXaml);
+
+        // 全局隐式 TextBlock 样式会盖掉列头传下去的 Foreground/FontSize（#668 因此在真机上没生效），
+        // 所以列头文字必须在 ContentTemplate 里用局部值显式设置。
+        var headerText = Assert.Single(headerStyle
+            .Elements(presentation + "Setter")
+            .Single(setter => setter.Attribute("Property")?.Value == "ContentTemplate")
+            .Descendants(presentation + "TextBlock"));
+        Assert.Equal("{Binding}", headerText.Attribute("Text")?.Value);
+        Assert.Equal("{StaticResource PosCustomerDisplayHeaderTextBrush}", headerText.Attribute("Foreground")?.Value);
+        Assert.True(double.Parse(headerText.Attribute("FontSize")!.Value, System.Globalization.CultureInfo.InvariantCulture) >= 16d);
+        Assert.Equal("Bold", headerText.Attribute("FontWeight")?.Value);
     }
 
     [Fact]
