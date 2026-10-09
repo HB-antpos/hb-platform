@@ -761,6 +761,82 @@ public sealed class CustomerDisplayViewModelTests
         Assert.Equal(isReadyForPayment, viewModel.IsReadyForPayment);
     }
 
+    [Theory]
+    [InlineData("Emma Watson", "Emma")]
+    [InlineData("  lily  ", "Lily")]
+    [InlineData("Ann\tLee", "Ann")]
+    [InlineData("mary-jane Smith", "Mary-jane")]
+    [InlineData("张三", "张三")]
+    [InlineData("alice@example.com", "")]
+    [InlineData("   ", "")]
+    [InlineData(null, "")]
+    public void ResolveCashierFirstName_shows_only_first_name(string? cashierName, string expected)
+    {
+        Assert.Equal(expected, CustomerDisplayViewModel.ResolveCashierFirstName(cashierName));
+    }
+
+    [Fact]
+    public void ApplyCashier_exposes_first_name_and_initial_for_badge()
+    {
+        var viewModel = new CustomerDisplayViewModel();
+
+        viewModel.ApplyCashier(CreateSession("emma watson"));
+
+        Assert.True(viewModel.HasCashier);
+        Assert.Equal("Emma", viewModel.CashierFirstName);
+        Assert.Equal("E", viewModel.CashierInitial);
+    }
+
+    [Fact]
+    public void ApplyCashier_hides_cashier_for_logout_and_emergency_override()
+    {
+        var viewModel = new CustomerDisplayViewModel();
+        viewModel.ApplyCashier(CreateSession("Emma"));
+
+        viewModel.ApplyCashier(CreateSession(string.Empty));
+        Assert.False(viewModel.HasCashier);
+        Assert.Equal(string.Empty, viewModel.CashierInitial);
+
+        var emergency = Hbpos.Client.Wpf.Services.CashierSessionContext.CreateEmergencyOverride(
+            "1042",
+            "POS_1042_0200",
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow.AddMinutes(30),
+            "token");
+        viewModel.ApplyCashier(CreateSession(emergency.CashierName) with { CashierSession = emergency });
+        Assert.False(viewModel.HasCashier);
+    }
+
+    [Fact]
+    public void CustomerDisplayView_badge_shows_served_by_cashier_with_terminal_fallback()
+    {
+        var (xaml, _) = ReadCustomerDisplayViewFiles();
+        var document = XDocument.Parse(xaml);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        Assert.Contains(document.Descendants(presentation + "Run"),
+            element => element.Attribute("Text")?.Value == "{loc:Loc customer.servedBy}");
+        Assert.Contains(document.Descendants(presentation + "Run"),
+            element => element.Attribute("Text")?.Value == "{Binding CashierFirstName, Mode=OneWay}");
+        Assert.Contains(document.Descendants(presentation + "TextBlock"),
+            element => element.Attribute("Text")?.Value == "{Binding CashierInitial}");
+        // 没有收银员时仍显示终端号，保证未登录/紧急授权时徽标不空。
+        Assert.Contains(document.Descendants(presentation + "TextBlock"),
+            element => element.Attribute("Text")?.Value == "{Binding TerminalName}");
+
+        var resources = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Resources");
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var keys = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Select(element => element.Attribute("name")?.Value);
+            Assert.Contains("customer.servedBy", keys);
+        }
+    }
+
+    private static PosSessionState CreateSession(string cashierName) =>
+        new("HB POS", "1042", "TestStore", "POS_1042_0200", "C001", cashierName, true, 0);
+
     private static string FindRepoRoot()
     {
         foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })

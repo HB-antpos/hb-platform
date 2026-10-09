@@ -13,6 +13,7 @@
                SnapsToDevicePixels="True"
                Background="{StaticResource PosCustomerDisplayBackgroundBrush}">
     <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <Style x:Key="CustomerDisplayHeaderBaseStyle" TargetType="DataGridColumnHeader">
             <Setter Property="Background" Value="{StaticResource PosCustomerDisplaySurfaceBrush}" />
             <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayMutedTextBrush}" />
@@ -305,11 +306,70 @@
                             Background="#B309111F"
                             BorderBrush="{StaticResource PosCustomerDisplayDividerBrush}"
                             BorderThickness="1"
-                            CornerRadius="16"
-                            Padding="16,12">
+                            CornerRadius="16">
+                        <!-- 有收银员：首字母头像 + 「Served by 名字」+ 小字终端号；未登录或紧急授权：显示器图标 + 终端号。 -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Padding" Value="16,12" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasCashier}" Value="True">
+                                        <Setter Property="Padding" Value="10,10,16,10" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel Orientation="Horizontal">
-                            <materialDesign:PackIcon Kind="Monitor" Width="22" Height="22" Foreground="{StaticResource PosCustomerDisplayTextBrush}" Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding TerminalName}" Foreground="{StaticResource PosCustomerDisplayTextBrush}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
+                            <Border Width="36"
+                                    Height="36"
+                                    CornerRadius="18"
+                                    Margin="0,0,10,0"
+                                    Background="{StaticResource PosCustomerDisplayAccentBrush}"
+                                    Visibility="{Binding HasCashier, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding CashierInitial}"
+                                           Foreground="{StaticResource PosCustomerDisplayBackgroundBrush}"
+                                           FontSize="17"
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <materialDesign:PackIcon Kind="Monitor" Width="22" Height="22" Foreground="{StaticResource PosCustomerDisplayTextBrush}" Margin="0,0,8,0" VerticalAlignment="Center">
+                                <materialDesign:PackIcon.Style>
+                                    <Style TargetType="materialDesign:PackIcon">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasCashier}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </materialDesign:PackIcon.Style>
+                            </materialDesign:PackIcon>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock FontSize="15"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource PosCustomerDisplayTextBrush}"
+                                           Visibility="{Binding HasCashier, Converter={StaticResource BoolToVis}}">
+                                    <Run Text="{loc:Loc customer.servedBy}" Foreground="{StaticResource PosCustomerDisplayMutedTextBrush}" FontWeight="SemiBold" />
+                                    <Run Text="{Binding CashierFirstName, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock Text="{Binding TerminalName}" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayTextBrush}" />
+                                            <Setter Property="FontSize" Value="14" />
+                                            <Setter Property="FontWeight" Value="Bold" />
+                                            <Style.Triggers>
+                                                <!-- 有收银员时终端号退为副信息 -->
+                                                <DataTrigger Binding="{Binding HasCashier}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource PosCustomerDisplayMutedTextBrush}" />
+                                                    <Setter Property="FontSize" Value="11" />
+                                                    <Setter Property="FontWeight" Value="Normal" />
+                                                    <Setter Property="Margin" Value="0,2,0,0" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </Grid>

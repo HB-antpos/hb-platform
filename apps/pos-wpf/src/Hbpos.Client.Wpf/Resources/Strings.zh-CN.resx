@@ -1098,6 +1098,9 @@
   <data name="customer.skuCount" xml:space="preserve">
     <value>SKU 数量</value>
   </data>
+  <data name="customer.servedBy" xml:space="preserve">
+    <value>收银员</value>
+  </data>
   <data name="customer.readyForPayment" xml:space="preserve">
     <value>准备支付</value>
   </data>

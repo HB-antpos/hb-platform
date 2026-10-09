@@ -693,6 +693,9 @@ internal sealed class ScreenNavigator
         {
             InstallmentCreate.Session = Session;
         }
+
+        // 换收银员（登录/登出）时购物车可能没变，客显徽标要单独跟着会话刷新；客显尚未创建时不强行创建。
+        _customerDisplay?.ApplyCashier(Session);
     }
 
     private static async Task EnsureSpecialProductsLoadedAsync(SpecialProductsViewModel specialProducts)
