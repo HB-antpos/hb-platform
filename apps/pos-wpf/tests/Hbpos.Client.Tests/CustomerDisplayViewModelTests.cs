@@ -908,30 +908,16 @@ public sealed class CustomerDisplayViewModelTests
     }
 
     [Fact]
-    public void CustomerDisplayView_badge_shows_served_by_cashier_with_terminal_fallback()
+    public void CustomerDisplayView_has_no_served_by_or_terminal_badge()
     {
+        // 右下角「Served by 名字 / 终端号」徽章已取消：它叠在广告上会盖住素材，汇总栏里又放不下。
+        // 视图模型上的收银员 / 终端号属性仍保留（上面的测试覆盖），这里只守住视图不再展示。
         var (xaml, _) = ReadCustomerDisplayViewFiles();
-        var document = XDocument.Parse(xaml);
-        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
-        Assert.Contains(document.Descendants(presentation + "Run"),
-            element => element.Attribute("Text")?.Value == "{loc:Loc customer.servedBy}");
-        Assert.Contains(document.Descendants(presentation + "Run"),
-            element => element.Attribute("Text")?.Value == "{Binding CashierFirstName, Mode=OneWay}");
-        Assert.Contains(document.Descendants(presentation + "TextBlock"),
-            element => element.Attribute("Text")?.Value == "{Binding CashierInitial}");
-        // 没有收银员时仍显示终端号，保证未登录/紧急授权时徽标不空。
-        Assert.Contains(document.Descendants(presentation + "TextBlock"),
-            element => element.Attribute("Text")?.Value == "{Binding TerminalName}");
-
-        var resources = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Resources");
-        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
-        {
-            var keys = XDocument.Load(Path.Combine(resources, file))
-                .Descendants("data")
-                .Select(element => element.Attribute("name")?.Value);
-            Assert.Contains("customer.servedBy", keys);
-        }
+        Assert.DoesNotContain("customer.servedBy", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CashierInitial", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CashierFirstName", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("TerminalName", xaml, StringComparison.Ordinal);
     }
 
     private static PosSessionState CreateSession(string cashierName) =>
