@@ -409,15 +409,15 @@ public sealed class MainWindowXamlTests
             new[]
             {
                 "pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml",
-                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Default.xaml",
+                "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/Blue.xaml",
                 "pack://application:,,,/Hbpos.Client.Wpf;component/Themes/PosTheme.xaml"
             },
             App.DeferredResourceDictionarySources.ToArray());
 
-        // 配色切换按同一个地址替换默认色板；测试进程里先注册 pack 协议再构造 Uri。
+        // 首帧色板与默认配色一致，配色切换按同一个地址替换；测试进程里先注册 pack 协议再构造 Uri。
         _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
         Assert.Equal(
-            WpfColorThemeApplier.GetPaletteUri(PosColorTheme.Default).OriginalString,
+            WpfColorThemeApplier.GetPaletteUri(ColorThemeService.FallbackTheme).OriginalString,
             App.DeferredResourceDictionarySources[1]);
     }
 

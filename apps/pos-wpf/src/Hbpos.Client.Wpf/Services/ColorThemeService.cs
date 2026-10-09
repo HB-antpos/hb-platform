@@ -7,10 +7,12 @@ namespace Hbpos.Client.Wpf.Services;
 /// <summary>收银主界面的配色主题；客显保持独立配色，不随主题切换。</summary>
 public enum PosColorTheme
 {
+    // Default 是改版前的原有配色，保留给已手动选过它的收银机；新装机默认用 Blue。
     Default,
     Paper,
     Graphite,
-    Celadon
+    Celadon,
+    Blue
 }
 
 public interface IColorThemeService
@@ -36,6 +38,9 @@ public sealed class ColorThemeService : IColorThemeService
 {
     internal const string SettingKey = "Shell:ColorTheme";
 
+    /// <summary>没有保存过偏好（或偏好无法读取）时使用的配色；已保存的选择不受影响。</summary>
+    public const PosColorTheme FallbackTheme = PosColorTheme.Blue;
+
     private readonly ILocalAppSettingsRepository _settings;
     private readonly IColorThemeApplier _applier;
 
@@ -45,13 +50,13 @@ public sealed class ColorThemeService : IColorThemeService
         _applier = applier ?? new WpfColorThemeApplier();
     }
 
-    public PosColorTheme Current { get; private set; } = PosColorTheme.Default;
+    public PosColorTheme Current { get; private set; } = FallbackTheme;
 
     public event EventHandler? ThemeChanged;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var theme = PosColorTheme.Default;
+        var theme = FallbackTheme;
         try
         {
             theme = Parse(await _settings.GetValueAsync(SettingKey, cancellationToken));
@@ -82,7 +87,7 @@ public sealed class ColorThemeService : IColorThemeService
     {
         return Enum.TryParse<PosColorTheme>(value, ignoreCase: true, out var theme) && Enum.IsDefined(theme)
             ? theme
-            : PosColorTheme.Default;
+            : FallbackTheme;
     }
 
     private void Apply(PosColorTheme theme)

@@ -22,7 +22,10 @@ public sealed class CardRecoveryQueueRowViewModel
         string channelText,
         string updatedAtText,
         string amountText,
-        string statusText)
+        string statusText,
+        string? statusPillText = null,
+        CardRecoveryTone tone = CardRecoveryTone.Neutral,
+        string? metaText = null)
     {
         Source = source;
         OperationTypeText = operationTypeText;
@@ -30,7 +33,20 @@ public sealed class CardRecoveryQueueRowViewModel
         UpdatedAtText = updatedAtText;
         AmountText = amountText;
         StatusText = statusText;
+        StatusPillText = statusPillText ?? statusText;
+        Tone = tone;
+        MetaText = metaText ?? updatedAtText;
     }
+
+    /// <summary>列表卡片上的状态标签；Square 退款已受理时显示“Square 处理中”，其余与 <see cref="StatusText" /> 相同。</summary>
+    public string StatusPillText { get; }
+
+    public CardRecoveryTone Tone { get; }
+
+    /// <summary>卡片第二行：渠道 · 单号尾号 · 时间。</summary>
+    public string MetaText { get; }
+
+    public bool IsRefund => string.Equals(Source.OperationKind, "Refund", StringComparison.OrdinalIgnoreCase);
 
     public CardRecoveryQueueItem Source { get; }
 
@@ -245,6 +261,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             if (SetProperty(ref _isBusy, value))
             {
                 NotifySelectionCommands();
+                OnPropertyChanged(nameof(AutoCheckText));
             }
         }
     }
@@ -365,7 +382,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
     public string SelectedCashierText => ValueOrNone(SelectedAttempt?.CashierId);
     public string SelectedTimeText => SelectedAttempt is null
         ? NoneText
-        : SelectedAttempt.UpdatedAt.ToString("g", GetCulture());
+        : SelectedAttempt.UpdatedAt.ToLocalTime().ToString("g", GetCulture());
     public string SelectedSessionText => ValueOrNone(
         Normalize(SelectedAttempt?.SessionId) ?? Normalize(SelectedAttempt?.CheckoutId));
     public string SelectedTxnText => ValueOrNone(
@@ -1005,7 +1022,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             MapChannel(item.Processor),
             item.UpdatedAt.ToString("g", GetCulture()),
             FormatAmount(item.Amount),
-            MapStatus(item.Status));
+            MapStatus(item.Status),
+            StatusPillFor(item),
+            ToneFor(item),
+            $"{MapChannel(item.Processor)} · {ShortOrder(OrderReference(item))} · {ListTimeText(item.UpdatedAt)}");
 
     private string MapOperationType(string? value)
     {

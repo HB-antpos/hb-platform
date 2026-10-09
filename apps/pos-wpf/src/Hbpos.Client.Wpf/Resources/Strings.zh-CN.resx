@@ -1140,8 +1140,14 @@
   <data name="shell.colorTheme" xml:space="preserve">
     <value>界面配色</value>
   </data>
+  <data name="shell.colorTheme.blue" xml:space="preserve">
+    <value>蓝色</value>
+  </data>
+  <data name="shell.colorTheme.blue.hint" xml:space="preserve">
+    <value>清爽专业（默认）</value>
+  </data>
   <data name="shell.colorTheme.default" xml:space="preserve">
-    <value>默认</value>
+    <value>经典</value>
   </data>
   <data name="shell.colorTheme.default.hint" xml:space="preserve">
     <value>原有配色</value>
@@ -3435,5 +3441,137 @@
   </data>
   <data name="history.quickRange.last7Days" xml:space="preserve">
     <value>近 7 天</value>
+  </data>
+  <data name="cardRecovery.v2.channelAll" xml:space="preserve">
+    <value>全部</value>
+  </data>
+  <data name="cardRecovery.v2.typeAll" xml:space="preserve">
+    <value>全部</value>
+  </data>
+  <data name="cardRecovery.v2.typeSale" xml:space="preserve">
+    <value>收款</value>
+  </data>
+  <data name="cardRecovery.v2.typeRefund" xml:space="preserve">
+    <value>退款</value>
+  </data>
+  <data name="cardRecovery.v2.listCount" xml:space="preserve">
+    <value>{0} 笔交易</value>
+  </data>
+  <data name="cardRecovery.v2.today" xml:space="preserve">
+    <value>今天 {0}</value>
+  </data>
+  <data name="cardRecovery.v2.copy" xml:space="preserve">
+    <value>复制</value>
+  </data>
+  <data name="cardRecovery.v2.headline.refund" xml:space="preserve">
+    <value>退回原卡</value>
+  </data>
+  <data name="cardRecovery.v2.headline.sale" xml:space="preserve">
+    <value>刷卡收款</value>
+  </data>
+  <data name="cardRecovery.v2.pill.squareRefundProcessing" xml:space="preserve">
+    <value>Square 处理中</value>
+  </data>
+  <data name="cardRecovery.v2.banner.refund.title" xml:space="preserve">
+    <value>请勿重复退款</value>
+  </data>
+  <data name="cardRecovery.v2.banner.payment.title" xml:space="preserve">
+    <value>请勿重复收款</value>
+  </data>
+  <data name="cardRecovery.v2.banner.squareRefund.body" xml:space="preserve">
+    <value>退款已提交到 Square，正在处理中，顾客无需刷卡。Square 确认后订单会自动完成。</value>
+  </data>
+  <data name="cardRecovery.v2.banner.refund.body" xml:space="preserve">
+    <value>再次刷卡或现金退款前，请先确认原退款的结果。</value>
+  </data>
+  <data name="cardRecovery.v2.step.submitted" xml:space="preserve">
+    <value>已提交</value>
+  </data>
+  <data name="cardRecovery.v2.step.since" xml:space="preserve">
+    <value>{0} 起</value>
+  </data>
+  <data name="cardRecovery.v2.step.refundCompleted" xml:space="preserve">
+    <value>退款完成</value>
+  </data>
+  <data name="cardRecovery.v2.step.paymentCompleted" xml:space="preserve">
+    <value>收款完成</value>
+  </data>
+  <data name="cardRecovery.v2.step.waiting" xml:space="preserve">
+    <value>等待中</value>
+  </data>
+  <data name="cardRecovery.v2.field.cashier" xml:space="preserve">
+    <value>收银员</value>
+  </data>
+  <data name="cardRecovery.v2.field.cashierId" xml:space="preserve">
+    <value>收银员编号</value>
+  </data>
+  <data name="cardRecovery.v2.products" xml:space="preserve">
+    <value>商品</value>
+  </data>
+  <data name="cardRecovery.v2.productsCount" xml:space="preserve">
+    <value>共 {0} 件</value>
+  </data>
+  <data name="cardRecovery.v2.noProducts" xml:space="preserve">
+    <value>这笔交易没有保存商品快照。</value>
+  </data>
+  <data name="cardRecovery.v2.details" xml:space="preserve">
+    <value>交易详情</value>
+  </data>
+  <data name="cardRecovery.v2.action.checkNow" xml:space="preserve">
+    <value>立即检查</value>
+  </data>
+  <data name="cardRecovery.v2.action.manual" xml:space="preserve">
+    <value>人工核对</value>
+  </data>
+  <data name="cardRecovery.v2.action.close" xml:space="preserve">
+    <value>关闭</value>
+  </data>
+  <data name="cardRecovery.v2.auto.countdown" xml:space="preserve">
+    <value>自动检查中 · {0} 后再查一次</value>
+  </data>
+  <data name="cardRecovery.v2.auto.checking" xml:space="preserve">
+    <value>正在检查…</value>
+  </data>
+  <data name="cardRecovery.v2.auto.manualOnly" xml:space="preserve">
+    <value>点「立即检查」查询最新结果。</value>
+  </data>
+  <data name="cardRecovery.v2.sheet.supervisorRequired" xml:space="preserve">
+    <value>需主管授权</value>
+  </data>
+  <data name="cardRecovery.v2.sheet.step.evidence" xml:space="preserve">
+    <value>核对证据</value>
+  </data>
+  <data name="cardRecovery.v2.sheet.step.outcome" xml:space="preserve">
+    <value>选择核对结果</value>
+  </data>
+  <data name="cardRecovery.v2.sheet.outcomeHint" xml:space="preserve">
+    <value>选择结果后，需由有权限的主管扫码确认。</value>
+  </data>
+  <data name="cardRecovery.v2.sheet.audit" xml:space="preserve">
+    <value>该决定会连同主管姓名记入审计日志。</value>
+  </data>
+  <data name="cardRecovery.v2.evidence.squareDashboard" xml:space="preserve">
+    <value>Square 后台</value>
+  </data>
+  <data name="cardRecovery.v2.evidence.terminalReceipt" xml:space="preserve">
+    <value>终端小票</value>
+  </data>
+  <data name="cardRecovery.v2.evidence.bankStatement" xml:space="preserve">
+    <value>银行流水</value>
+  </data>
+  <data name="cardRecovery.v2.outcome.processed.refund" xml:space="preserve">
+    <value>退款已到顾客卡上。</value>
+  </data>
+  <data name="cardRecovery.v2.outcome.processed.sale" xml:space="preserve">
+    <value>顾客卡已扣款。</value>
+  </data>
+  <data name="cardRecovery.v2.outcome.notProcessed.refund" xml:space="preserve">
+    <value>没有退款，退货单保留，可重新退款。</value>
+  </data>
+  <data name="cardRecovery.v2.outcome.notProcessed.sale" xml:space="preserve">
+    <value>没有扣款，订单可重新付款。</value>
+  </data>
+  <data name="cardRecovery.v2.outcome.waiting" xml:space="preserve">
+    <value>保持锁定，稍后再查。需填写主管备注。</value>
   </data>
 </root>

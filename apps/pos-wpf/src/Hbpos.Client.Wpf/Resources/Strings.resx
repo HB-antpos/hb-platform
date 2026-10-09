@@ -402,7 +402,9 @@
   <data name="shell.customerDisplayWindow" xml:space="preserve"><value>Customer display window</value></data>
   <data name="shell.swapCustomerDisplayScreens" xml:space="preserve"><value>Swap screens with the customer display</value></data>
   <data name="shell.colorTheme" xml:space="preserve"><value>Color theme</value></data>
-  <data name="shell.colorTheme.default" xml:space="preserve"><value>Default</value></data>
+  <data name="shell.colorTheme.blue" xml:space="preserve"><value>Blue</value></data>
+  <data name="shell.colorTheme.blue.hint" xml:space="preserve"><value>Crisp and clear (default)</value></data>
+  <data name="shell.colorTheme.default" xml:space="preserve"><value>Classic</value></data>
   <data name="shell.colorTheme.default.hint" xml:space="preserve"><value>Original colors</value></data>
   <data name="shell.colorTheme.paper" xml:space="preserve"><value>Paper</value></data>
   <data name="shell.colorTheme.paper.hint" xml:space="preserve"><value>Bright daytime stores</value></data>
@@ -1526,4 +1528,48 @@
   <data name="history.quickRange.last7Days" xml:space="preserve">
     <value>Last 7 days</value>
   </data>
+  <data name="cardRecovery.v2.channelAll" xml:space="preserve"><value>All</value></data>
+  <data name="cardRecovery.v2.typeAll" xml:space="preserve"><value>All</value></data>
+  <data name="cardRecovery.v2.typeSale" xml:space="preserve"><value>Sale</value></data>
+  <data name="cardRecovery.v2.typeRefund" xml:space="preserve"><value>Refund</value></data>
+  <data name="cardRecovery.v2.listCount" xml:space="preserve"><value>{0} transactions</value></data>
+  <data name="cardRecovery.v2.today" xml:space="preserve"><value>Today {0}</value></data>
+  <data name="cardRecovery.v2.copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="cardRecovery.v2.headline.refund" xml:space="preserve"><value>Refund to original card</value></data>
+  <data name="cardRecovery.v2.headline.sale" xml:space="preserve"><value>Card payment</value></data>
+  <data name="cardRecovery.v2.pill.squareRefundProcessing" xml:space="preserve"><value>Processing at Square</value></data>
+  <data name="cardRecovery.v2.banner.refund.title" xml:space="preserve"><value>Do not refund again.</value></data>
+  <data name="cardRecovery.v2.banner.payment.title" xml:space="preserve"><value>Do not charge twice.</value></data>
+  <data name="cardRecovery.v2.banner.squareRefund.body" xml:space="preserve"><value>The refund was sent to Square and is still being processed. No card tap is needed. The order completes once Square confirms.</value></data>
+  <data name="cardRecovery.v2.banner.refund.body" xml:space="preserve"><value>Check the original refund result before refunding again by card or cash.</value></data>
+  <data name="cardRecovery.v2.step.submitted" xml:space="preserve"><value>Submitted</value></data>
+  <data name="cardRecovery.v2.step.since" xml:space="preserve"><value>since {0}</value></data>
+  <data name="cardRecovery.v2.step.refundCompleted" xml:space="preserve"><value>Refund completed</value></data>
+  <data name="cardRecovery.v2.step.paymentCompleted" xml:space="preserve"><value>Payment completed</value></data>
+  <data name="cardRecovery.v2.step.waiting" xml:space="preserve"><value>Waiting</value></data>
+  <data name="cardRecovery.v2.field.cashier" xml:space="preserve"><value>CASHIER</value></data>
+  <data name="cardRecovery.v2.field.cashierId" xml:space="preserve"><value>CASHIER ID</value></data>
+  <data name="cardRecovery.v2.products" xml:space="preserve"><value>Products</value></data>
+  <data name="cardRecovery.v2.productsCount" xml:space="preserve"><value>{0} items</value></data>
+  <data name="cardRecovery.v2.noProducts" xml:space="preserve"><value>No product snapshot was saved for this transaction.</value></data>
+  <data name="cardRecovery.v2.details" xml:space="preserve"><value>Transaction details</value></data>
+  <data name="cardRecovery.v2.action.checkNow" xml:space="preserve"><value>Check status now</value></data>
+  <data name="cardRecovery.v2.action.manual" xml:space="preserve"><value>Manual verification</value></data>
+  <data name="cardRecovery.v2.action.close" xml:space="preserve"><value>Close</value></data>
+  <data name="cardRecovery.v2.auto.countdown" xml:space="preserve"><value>Checking automatically · next check in {0}</value></data>
+  <data name="cardRecovery.v2.auto.checking" xml:space="preserve"><value>Checking now…</value></data>
+  <data name="cardRecovery.v2.auto.manualOnly" xml:space="preserve"><value>Tap Check status now to query the latest result.</value></data>
+  <data name="cardRecovery.v2.sheet.supervisorRequired" xml:space="preserve"><value>Supervisor approval required</value></data>
+  <data name="cardRecovery.v2.sheet.step.evidence" xml:space="preserve"><value>Evidence</value></data>
+  <data name="cardRecovery.v2.sheet.step.outcome" xml:space="preserve"><value>Choose the outcome</value></data>
+  <data name="cardRecovery.v2.sheet.outcomeHint" xml:space="preserve"><value>Choosing an outcome asks an authorised supervisor to scan their barcode.</value></data>
+  <data name="cardRecovery.v2.sheet.audit" xml:space="preserve"><value>The decision is recorded in the audit log with the supervisor&apos;s name.</value></data>
+  <data name="cardRecovery.v2.evidence.squareDashboard" xml:space="preserve"><value>Square Dashboard</value></data>
+  <data name="cardRecovery.v2.evidence.terminalReceipt" xml:space="preserve"><value>Terminal receipt</value></data>
+  <data name="cardRecovery.v2.evidence.bankStatement" xml:space="preserve"><value>Bank statement</value></data>
+  <data name="cardRecovery.v2.outcome.processed.refund" xml:space="preserve"><value>The refund reached the customer&apos;s card.</value></data>
+  <data name="cardRecovery.v2.outcome.processed.sale" xml:space="preserve"><value>The customer&apos;s card was charged.</value></data>
+  <data name="cardRecovery.v2.outcome.notProcessed.refund" xml:space="preserve"><value>No refund was made. The return stays open for a new refund.</value></data>
+  <data name="cardRecovery.v2.outcome.notProcessed.sale" xml:space="preserve"><value>No charge was made. The order can be paid again.</value></data>
+  <data name="cardRecovery.v2.outcome.waiting" xml:space="preserve"><value>Keep the transaction locked and check again later. A supervisor note is required.</value></data>
 </root>
