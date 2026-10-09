@@ -18,9 +18,11 @@ class QueueTransport implements HbposTransport {
     request: HbposTransportRequest,
   ): Promise<HbposTransportResponse<T>> {
     this.requests.push(request);
+    const data = this.responses.shift();
+    if (data instanceof Error) throw data;
     return {
       status: 200,
-      data: this.responses.shift() as T,
+      data: data as T,
     };
   }
 }
@@ -69,6 +71,59 @@ test("Square Production 测试读取候选门店的设备列表并匹配公开 d
   ]);
 });
 
+const linklyInput = { provider: "linkly" as const, square: null,
+  linkly: { environment: "Production" as const } };
+const resultEnvelope = (data: Record<string, unknown>) => ({ success: true, data });
+
+test("Linkly 已签到时只查询 Status，不重复 Logon", async () => {
+  const transport = new QueueTransport([resultEnvelope({ httpStatus: 200,
+    succeeded: true, loggedOn: true, responseCode: "T0" })]);
+  await new HbposSettingsPaymentTestApi(transport).test("linkly", linklyInput, new AbortController().signal);
+  assert.equal(transport.requests.length, 1);
+  assert.equal(transport.requests[0]?.url, "/api/v1/linkly/cloud-backend/status-test");
+  assert.ok((transport.requests[0]?.timeoutMs ?? 0) > 240_000);
+});
+
+test("Linkly 明确未签到时等待 Logon 最终响应，不能被默认 15 秒截断", async () => {
+  const transport = new QueueTransport([
+    resultEnvelope({ httpStatus: 200, succeeded: false, loggedOn: false, responseCode: "TF" }),
+    resultEnvelope({ httpStatus: 200, succeeded: true, responseCode: "00" }),
+  ]);
+  await new HbposSettingsPaymentTestApi(transport).test("linkly", linklyInput, new AbortController().signal);
+  assert.deepEqual(transport.requests.map(request => request.url), [
+    "/api/v1/linkly/cloud-backend/status-test", "/api/v1/linkly/cloud-backend/logon-test",
+  ]);
+  assert.ok((transport.requests[1]?.timeoutMs ?? 0) > 240_000);
+});
+
+for (const status of [408, 202, 503]) {
+  test(`Linkly Status ${status} 结果未确认，不重发 Logon 或启用`, async () => {
+    const transport = new QueueTransport([resultEnvelope({ httpStatus: status, succeeded: false })]);
+    await assert.rejects(() => new HbposSettingsPaymentTestApi(transport)
+      .test("linkly", linklyInput, new AbortController().signal), { code: "LINKLY_TEST_UNCONFIRMED" });
+    assert.equal(transport.requests.length, 1);
+  });
+}
+
+test("Linkly Logon 超时保持未确认，不自动重放", async () => {
+  const transport = new QueueTransport([
+    resultEnvelope({ httpStatus: 200, succeeded: false, loggedOn: false, responseCode: "TF" }),
+    Object.assign(new Error("private transport details"), { code: "ECONNABORTED" }),
+  ]);
+  await assert.rejects(() => new HbposSettingsPaymentTestApi(transport)
+    .test("linkly", linklyInput, new AbortController().signal), { code: "LINKLY_TEST_UNCONFIRMED" });
+  assert.equal(transport.requests.length, 2);
+});
+
+test("Linkly 明确离线不会通过或自动发送 Logon", async () => {
+  const transport = new QueueTransport([
+    resultEnvelope({ httpStatus: 200, succeeded: false, loggedOn: false, responseCode: "PF" }),
+  ]);
+  await assert.rejects(() => new HbposSettingsPaymentTestApi(transport)
+    .test("linkly", linklyInput, new AbortController().signal));
+  assert.equal(transport.requests.length, 1);
+});
+
 test("Square 候选设备不存在或门店不符时失败关闭", async () => {
   const subject = new HbposSettingsPaymentTestApi(
     new QueueTransport([
@@ -106,9 +161,11 @@ test("Square 候选设备不存在或门店不符时失败关闭", async () => {
 
 test("Linkly 测试调用 Backend Async logon-test 且只接受 succeeded", async () => {
   const transport = new QueueTransport([
+    resultEnvelope({ httpStatus: 200, succeeded: true, responseCode: "T0" }),
     {
       success: true,
       data: {
+        httpStatus: 200,
         succeeded: true,
         responseCode: "00",
       },
@@ -126,21 +183,23 @@ test("Linkly 测试调用 Backend Async logon-test 且只接受 succeeded", asyn
     },
     signal,
   );
-  assert.deepEqual(transport.requests, [
+  assert.deepEqual(transport.requests.slice(1), [
     {
       method: "POST",
       url: "/api/v1/linkly/cloud-backend/logon-test",
       params: { environment: "Production" },
       signal,
+      timeoutMs: 270_000,
     },
   ]);
 });
 
 test("Linkly Active logon-test 携带当前终端和选择 revision", async () => {
   const transport = new QueueTransport([
+    resultEnvelope({ httpStatus: 200, succeeded: true, responseCode: "T0" }),
     {
       success: true,
-      data: { succeeded: true, responseCode: "00" },
+      data: { httpStatus: 200, succeeded: true, responseCode: "00" },
     },
   ]);
   const subject = new HbposSettingsPaymentTestApi(transport);
@@ -163,7 +222,7 @@ test("Linkly Active logon-test 携带当前终端和选择 revision", async () =
     },
   );
 
-  assert.deepEqual(transport.requests, [
+  assert.deepEqual(transport.requests.slice(1), [
     {
       method: "POST",
       url: "/api/v1/linkly/cloud-backend/logon-test",
@@ -173,6 +232,7 @@ test("Linkly Active logon-test 携带当前终端和选择 revision", async () =
         selectionRevision: 11,
       },
       signal,
+      timeoutMs: 270_000,
     },
   ]);
 });

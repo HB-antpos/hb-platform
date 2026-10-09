@@ -1002,6 +1002,37 @@ describe("SettingsScreen", () => {
     ]);
   });
 
+  it("Linkly Draft 模式没有旧版门店凭据时，配对按钮仍以终端自身凭据为准可用", async () => {
+    const port = new ScreenSettingsPort();
+    port.linklySetup.mode = "Draft";
+    port.linklySetup.storeCredentialReady = false;
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    await screen.findByTestId("settings-linkly-terminal-terminal-1");
+    await fireEvent.changeText(
+      screen.getByTestId("settings-linkly-pair-code"),
+      "123456",
+    );
+    expect(
+      screen.getByTestId("settings-linkly-pair").props.accessibilityState
+        .disabled,
+    ).toBe(false);
+
+    // Legacy 模式仍必须有旧版门店凭据才允许配对。
+    port.linklySetup.mode = "Legacy";
+    await fireEvent.press(screen.getByTestId("settings-linkly-refresh"));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("settings-linkly-pair").props.accessibilityState
+          .disabled,
+      ).toBe(true),
+    );
+  });
+
   it("Linkly 多终端列表显示 Lane 状态并可持久切换后配对指定终端", async () => {
     const port = new ScreenSettingsPort();
     port.linklySetup.multiTerminal = true;
@@ -2852,6 +2883,9 @@ class ScreenSettingsPort implements SettingsControlPort {
 
 class ScreenLinklySetupControlPort implements SettingsLinklySetupControlPort {
   public ready = false;
+  /** health 的旧版门店凭据 STORE_CREDENTIAL；Web 逐台建线路的新门店恒为 false。 */
+  public storeCredentialReady = true;
+  public mode: "Active" | "Draft" | "Legacy" = "Active";
   public multiTerminal = false;
   public busyTerminalId: string | null = null;
   public selectedTerminalId = "terminal-1";
@@ -2868,8 +2902,8 @@ class ScreenLinklySetupControlPort implements SettingsLinklySetupControlPort {
       checks: [
         {
           code: "STORE_CREDENTIAL",
-          isReady: true,
-          message: "ready",
+          isReady: this.storeCredentialReady,
+          message: this.storeCredentialReady ? "ready" : "missing",
         },
         {
           code: "TERMINAL_SECRET",
@@ -2890,7 +2924,7 @@ class ScreenLinklySetupControlPort implements SettingsLinklySetupControlPort {
   ): Promise<SettingsLinklyTerminalSelectionSnapshot> {
     return {
       environment,
-      mode: "Active",
+      mode: this.mode,
       selectedTerminalId: this.selectedTerminalId,
       selectionRevision: this.selectionRevision,
       terminals: (this.multiTerminal
