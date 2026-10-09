@@ -10,6 +10,8 @@ import {
 import {
   normalizeAdvertisementCacheRootUri,
   normalizeLocalAdvertisementUri,
+  normalizeLocalProductImageUri,
+  normalizeProductImageCacheRootUri,
 } from "@/core/peripherals/customer-display/local-advertisement-uri";
 
 export type CustomerDisplayFrame = Readonly<{
@@ -35,8 +37,25 @@ export type CustomerDisplayEnableResult =
       errorCode: "DISPLAY_ENABLE_FAILED";
     }>;
 
+/**
+ * 商品缩略图的同步查询口。peek 只读内存索引并返回已缓存的本地 file URI，
+ * 未命中返回 null（实现方可借机异步触发下载），客显层因此永不联网。
+ */
+export interface CustomerDisplayProductImagePort {
+  peek(line: Readonly<{ productCode: string; lookupCode: string }>): string | null;
+}
+
 export type CustomerDisplayPublisherOptions = Readonly<{
   advertisementCacheRootUri?: string | null;
+  /** 商品缩略图缓存根目录；缺省时快照一律不带 imageUri。 */
+  productImageCacheRootUri?: string | null;
+  /** 缺省时快照不带 imageUri。 */
+  productImageResolver?: CustomerDisplayProductImagePort | null;
+}>;
+
+type ProductImageProjection = Readonly<{
+  resolver: CustomerDisplayProductImagePort;
+  rootUri: string;
 }>;
 
 let producerSessionRevision = 0;
@@ -51,6 +70,7 @@ export function buildCustomerDisplaySnapshot(
   frame: CustomerDisplayFrame,
   advertisementCacheRootUri?: string | null,
   visibleItemStart?: number,
+  productImages?: ProductImageProjection | null,
 ): CustomerDisplaySnapshot {
   if (!Number.isSafeInteger(revision) || revision < 0) {
     throw new TypeError("Customer display revision must be non-negative.");
@@ -66,22 +86,32 @@ export function buildCustomerDisplaySnapshot(
   const totalCents = cart?.actualAmount.cents ?? 0;
   const cartLines = cart?.lines ?? [];
   const projectedLines = cartLines.slice(0, CUSTOMER_DISPLAY_SNAPSHOT_ITEM_LIMIT);
+  const windowStart =
+    visibleItemStart ?? defaultVisibleItemStart(projectedLines.length);
   const candidate = {
     revision,
     mode: frame.mode,
-    items: projectedLines.map((line) => ({
+    items: projectedLines.map((line, index) => ({
       name: line.displayName,
       quantity: line.quantity,
       unitPrice: createAud(line.unitPrice.cents),
       amount: createAud(line.actualAmount.cents),
+      ...projectItemDetails(line),
+      // 只为当前可见窗口内的行取图：窗口外的行客显看不到，不必触发下载；
+      // 窗口移动后下一次发布会对新进入窗口的行再取一次。
+      ...projectItemImage(
+        line,
+        index >= windowStart &&
+          index < windowStart + CUSTOMER_DISPLAY_VISIBLE_ITEM_LIMIT,
+        productImages ?? null,
+      ),
     })),
     summary: {
       itemQuantity: sumFixedQuantities(cartLines.map((line) => line.quantity)),
       skuCount: cartLines.length,
       subtotal: createAud(cart?.subtotal.cents ?? 0),
     },
-    visibleItemStart:
-      visibleItemStart ?? defaultVisibleItemStart(projectedLines.length),
+    visibleItemStart: windowStart,
     // 与 WPF CustomerDisplayViewModel 一致：GST 是含税应付额中的 1/11。
     gst: createAud(roundRatioAwayFromZero(totalCents, 11)),
     discount: createAud(cart?.discount.cents ?? 0),
@@ -102,6 +132,7 @@ export class CustomerDisplayPublisher {
   private lastObservedCart: CartSnapshot | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly advertisementCacheRootUri: string | null;
+  private readonly productImages: ProductImageProjection | null;
   private visibleItemStart = 0;
 
   public constructor(
@@ -115,6 +146,15 @@ export class CustomerDisplayPublisher {
         : normalizeAdvertisementCacheRootUri(
             options.advertisementCacheRootUri,
           );
+    this.productImages =
+      options.productImageResolver && options.productImageCacheRootUri
+        ? Object.freeze({
+            resolver: options.productImageResolver,
+            rootUri: normalizeProductImageCacheRootUri(
+              options.productImageCacheRootUri,
+            ),
+          })
+        : null;
   }
 
   public publish(
@@ -163,6 +203,7 @@ export class CustomerDisplayPublisher {
       frame,
       this.advertisementCacheRootUri,
       visibleItemStart,
+      this.productImages,
     );
     const fingerprint = snapshotFingerprint(draft);
     if (fingerprint === this.lastPublishedFingerprint) {
@@ -177,6 +218,7 @@ export class CustomerDisplayPublisher {
       frame,
       this.advertisementCacheRootUri,
       visibleItemStart,
+      this.productImages,
     );
     try {
       await this.display.publish(snapshot);
@@ -236,6 +278,101 @@ export class CustomerDisplayPublisher {
 }
 
 type ProjectedCartLine = CartSnapshot["lines"][number];
+
+const MAX_ITEM_CODE_LENGTH = 64;
+
+/**
+ * 对齐 WPF 客显商品行：货号、条码以及折扣前原价/折扣率。
+ * 所有可选字段缺失时返回空对象，旧版消费方看到的快照不变。
+ */
+function projectItemDetails(line: ProjectedCartLine): {
+  itemNumber?: string;
+  lookupCode?: string;
+  grossAmount?: ReturnType<typeof createAud>;
+  discountRate?: string;
+} {
+  const details: {
+    itemNumber?: string;
+    lookupCode?: string;
+    grossAmount?: ReturnType<typeof createAud>;
+    discountRate?: string;
+  } = {};
+  const itemNumber = normalizeItemCode(line.itemNumber);
+  if (itemNumber !== null) details.itemNumber = itemNumber;
+  const lookupCode = normalizeItemCode(line.lookupCode);
+  if (lookupCode !== null) details.lookupCode = lookupCode;
+
+  const discountCents = line.discount.cents;
+  if (Number.isSafeInteger(discountCents) && discountCents > 0) {
+    // 金额符号约定：销售行 actualAmount = 折前 - 折扣（>=0），退货行折扣恒为 0 且
+    // actualAmount 为负。折前金额 = |实收| + 折扣，符号与 actualAmount 一致。
+    const actualCents = line.actualAmount.cents;
+    const grossMagnitude = Math.abs(actualCents) + discountCents;
+    if (Number.isSafeInteger(grossMagnitude) && grossMagnitude > 0) {
+      const discountRate = formatDiscountRate(discountCents, grossMagnitude);
+      // 折扣率四舍五入后为 0（例如大额订单上 1 分钱折扣）时展示 "-0%" 没有意义，整体省略。
+      if (discountRate !== null) {
+        details.grossAmount = createAud(
+          actualCents < 0 ? -grossMagnitude : grossMagnitude,
+        );
+        details.discountRate = discountRate;
+      }
+    }
+  }
+  return details;
+}
+
+function normalizeItemCode(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  // 契约上限 64；宁可截断也不能因为超长字段让整帧快照校验失败。
+  return trimmed.slice(0, MAX_ITEM_CODE_LENGTH);
+}
+
+/**
+ * 折扣率 = 折扣 / 折前 * 100，四舍五入到两位小数并去掉末尾 0（对应 WPF `{rate:0.##}`）。
+ * 用 BigInt 整数运算，避免浮点误差；结果为 0 时返回 null。
+ */
+function formatDiscountRate(
+  discountCents: number,
+  grossCents: number,
+): string | null {
+  const discount = BigInt(discountCents);
+  const gross = BigInt(grossCents);
+  // 百分之一个百分点（0.01%）为单位，四舍五入（半数进位）。
+  const hundredths = (discount * 20_000n + gross) / (2n * gross);
+  if (hundredths <= 0n) return null;
+  const whole = hundredths / 100n;
+  const fraction = String(hundredths % 100n)
+    .padStart(2, "0")
+    .replace(/0+$/, "");
+  return `${whole}${fraction.length > 0 ? `.${fraction}` : ""}`;
+}
+
+/**
+ * 从注入的缩略图解析器同步取本地 file URI。解析器抛错或返回的地址不在
+ * 商品图缓存目录内时一律当作无图，绝不让缩略图问题拖垮整帧客显快照。
+ */
+function projectItemImage(
+  line: ProjectedCartLine,
+  visible: boolean,
+  productImages: ProductImageProjection | null,
+): { imageUri?: string } {
+  if (!visible || productImages === null) return {};
+  try {
+    const peeked = productImages.resolver.peek({
+      productCode: line.productCode,
+      lookupCode: line.lookupCode,
+    });
+    if (peeked === null || peeked === undefined) return {};
+    return {
+      imageUri: normalizeLocalProductImageUri(peeked, productImages.rootUri),
+    };
+  } catch {
+    return {};
+  }
+}
 
 function defaultVisibleItemStart(itemCount: number): number {
   return Math.max(0, itemCount - CUSTOMER_DISPLAY_VISIBLE_ITEM_LIMIT);
@@ -400,6 +537,10 @@ function freezeSnapshot(
               ? undefined
               : Object.freeze({ ...item.unitPrice }),
           amount: Object.freeze({ ...item.amount }),
+          // 可选字段缺省时不写入键，保持旧快照形态（deepEqual 也不受 undefined 键影响）。
+          ...(item.grossAmount === undefined
+            ? {}
+            : { grossAmount: Object.freeze({ ...item.grossAmount }) }),
         }),
       ),
     ),

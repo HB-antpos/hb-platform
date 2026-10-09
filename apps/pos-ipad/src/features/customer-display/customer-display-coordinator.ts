@@ -13,6 +13,16 @@ export interface CustomerDisplayCartPort {
   subscribe(listener: () => void): () => void;
 }
 
+/**
+ * 广告位：将要展示的购物车有商品行 = checkout（收银右侧位），否则 idle（空闲全屏位）。
+ * 付款/找零/成功沿用最后一个非空购物车，因此仍是 checkout。
+ */
+export type CustomerDisplayAdvertSlot = "idle" | "checkout";
+
+export type CustomerDisplayAdvertSlotListener = (
+  slot: CustomerDisplayAdvertSlot,
+) => void;
+
 export interface CustomerDisplayPublisherPort {
   publish(frame: CustomerDisplayFrame): Promise<CustomerDisplayPublishResult>;
 }
@@ -23,6 +33,8 @@ export interface CustomerDisplayPublisherPort {
  */
 export class CustomerDisplayCoordinator {
   private advert: CustomerDisplaySnapshot["advert"] = null;
+  private advertSlot: CustomerDisplayAdvertSlot | null = null;
+  private advertSlotListener: CustomerDisplayAdvertSlotListener | null = null;
   private changeCents = 0;
   private destroyed = false;
   private initialized = false;
@@ -91,6 +103,31 @@ export class CustomerDisplayCoordinator {
   }
 
   /**
+   * 注册广告位变化监听（用 setter 而不是构造参数，避免与播放层互相依赖的构造顺序问题）。
+   * 首次发布与之后每次位置变化都会通知；传 null 取消。
+   */
+  public setAdvertSlotListener(
+    listener: CustomerDisplayAdvertSlotListener | null,
+  ): void {
+    this.advertSlotListener = listener;
+    // 新监听器还没收到过任何位置，下次发布时需要重新通知一次当前位置。
+    this.advertSlot = null;
+  }
+
+  /**
+   * 按当前状态重发一次画面。商品缩略图等异步素材就绪后用它刷新，不改变 mode。
+   * 协调器已销毁或尚未初始化时静默忽略，避免晚到的回调打断退出流程。
+   */
+  public refresh(): Promise<CustomerDisplayPublishResult> | null {
+    if (this.destroyed || !this.initialized) return null;
+    return this.publish(
+      this.mode === "idle" || this.mode === "cart"
+        ? this.readCart()
+        : this.transactionCart(),
+    );
+  }
+
+  /**
    * 锁屏、设备拒绝与 runtime 退出都必须主动覆盖公共外屏；
    * 不能依赖下一笔购物车变更来清除上一位顾客的交易。
    */
@@ -138,12 +175,27 @@ export class CustomerDisplayCoordinator {
   private publish(
     cart: CartSnapshot | null,
   ): Promise<CustomerDisplayPublishResult> {
-    return this.publisher.publish({
+    const result = this.publisher.publish({
       mode: this.mode,
       cart,
       changeCents: this.changeCents,
       advert: this.advert,
     });
+    // 先发起发布再通知广告位，且不等待播放层，避免位置切换产生的广告帧抢在本帧之前。
+    this.notifyAdvertSlot(cart);
+    return result;
+  }
+
+  private notifyAdvertSlot(cart: CartSnapshot | null): void {
+    const slot: CustomerDisplayAdvertSlot =
+      cart !== null && cart.lines.length > 0 ? "checkout" : "idle";
+    if (slot === this.advertSlot) return;
+    this.advertSlot = slot;
+    try {
+      this.advertSlotListener?.(slot);
+    } catch {
+      // 播放层异常不能传播到客显发布或共享购物车的主交易通知。
+    }
   }
 
   private assertAlive(): void {

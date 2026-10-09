@@ -1,7 +1,78 @@
 import AVFoundation
 import UIKit
 
+// WPF 客显配色（PosTheme.xaml 的 PosCustomerDisplay*）。
+// React 面板与 UIKit 兜底层必须使用同一套颜色。
+private enum HBExternalDisplayPalette {
+  static let background = UIColor(red: 9 / 255, green: 17 / 255, blue: 31 / 255, alpha: 1)
+  static let surface = UIColor(red: 16 / 255, green: 27 / 255, blue: 45 / 255, alpha: 1)
+  static let text = UIColor.white
+  static let mutedText = UIColor.white.withAlphaComponent(0.64)
+  static let headerText = UIColor.white.withAlphaComponent(0.90)
+  static let accent = UIColor(red: 105 / 255, green: 227 / 255, blue: 194 / 255, alpha: 1)
+  static let amount = UIColor(red: 1, green: 199 / 255, blue: 61 / 255, alpha: 1)
+  static let divider = UIColor.white.withAlphaComponent(0.12)
+  static let accentSurface = UIColor(
+    red: 105 / 255,
+    green: 227 / 255,
+    blue: 194 / 255,
+    alpha: 0.12
+  )
+}
+
+// 客显几何：React 层透明广告窗口与 UIKit 兜底层必须使用同一套公式。
+// s = 屏高 / 768（WPF 设计画布高），所有 WPF 像素值乘 s；
+// 不做 WPF 的宽屏两侧留白，直接铺满整个屏幕宽度。
+struct HBExternalDisplayLayoutMetrics {
+  let scale: CGFloat
+  let cartFrame: CGRect
+  let advertFrame: CGRect
+  let summaryFrame: CGRect
+
+  init(size: CGSize) {
+    guard size.width > 0, size.height > 0 else {
+      scale = 1
+      cartFrame = .zero
+      advertFrame = .zero
+      summaryFrame = .zero
+      return
+    }
+
+    let width = size.width
+    let height = size.height
+    let s = height / 768
+    // 画布宽夹在 1024...1366 之间；越窄购物车占比越大，最多 0.68（对应 WPF ResolveCartColumnShare）。
+    let canvasWidth = min(max(768 * width / height, 1024), 1366)
+    let cartShare = 0.60 + 0.08 * ((1366 - canvasWidth) / (1366 - 1024))
+    let margin = 18 * s
+    let summaryHeight = 152 * s
+    let gap = 20 * s
+    let contentWidth = width - 2 * margin
+    let contentHeight = height - 2 * margin - summaryHeight - gap
+    let cartWidth = contentWidth * cartShare
+    // 购物车与广告之间固定留 18s。
+    let advertWidth = contentWidth * (1 - cartShare) - margin
+
+    scale = s
+    cartFrame = CGRect(x: margin, y: margin, width: cartWidth, height: contentHeight)
+    advertFrame = CGRect(
+      x: margin + cartWidth + margin,
+      y: margin,
+      width: advertWidth,
+      height: contentHeight
+    )
+    summaryFrame = CGRect(
+      x: margin,
+      y: margin + contentHeight + gap,
+      width: contentWidth,
+      height: summaryHeight
+    )
+  }
+}
+
 final class HBExternalDisplayViewController: UIViewController {
+  private typealias Palette = HBExternalDisplayPalette
+
   private struct AdvertIdentity: Hashable {
     let kind: String
     let localUri: String
@@ -13,41 +84,26 @@ final class HBExternalDisplayViewController: UIViewController {
     let hiddenBelow: Int
   }
 
-  // 48pt 窗口标题栏。
-  private let titleBar = UIView()
-  private let titleDivider = UIView()
-  private let windowTitleLabel = UILabel()
-
-  // 左侧订单表。
-  private let orderPanel = UIStackView()
-  private let orderTitleLabel = UILabel()
-  private let tableHeaderRow = UIStackView()
-  private let itemStack = UIStackView()
-  private let moreItemsLabel = UILabel()
+  // 左侧购物车面板：frame 布局，内部内容按当前缩放重建。
+  private let orderPanel = UIView()
+  private var itemStack = UIStackView()
+  private var moreItemsLabel = UILabel()
 
   // 右侧广告媒体区。
   private let advertContainer = UIView()
   private let advertImageView = UIImageView()
 
-  // 底部全宽汇总区，按 47% / 26% / 27% 分栏。
+  // 底部全宽汇总区，三列：弹性 / 220s / 220s。
   private let summaryPanel = UIView()
-  private let summarySections = UIStackView()
-  private let summaryMetricsContainer = UIView()
-  private let summaryMetricsStack = UIStackView()
-  private let metricsRow = UIStackView()
-  private let itemCountLabel = UILabel()
-  private let subtotalValueLabel = UILabel()
-  private let gstValueLabel = UILabel()
-  private let discountValueLabel = UILabel()
-  private let amountDueContainer = UIView()
-  private let amountDueStack = UIStackView()
-  private let amountDueLabel = UILabel()
-  private let totalValueLabel = UILabel()
-  private let statusRegion = UIView()
-  private let statusCard = UIView()
-  private let statusStack = UIStackView()
-  private let statusTitleLabel = UILabel()
-  private let statusSubtitleLabel = UILabel()
+  private var itemQuantityValueLabel = UILabel()
+  private var skuCountValueLabel = UILabel()
+  private var subtotalValueLabel = UILabel()
+  private var gstValueLabel = UILabel()
+  private var savingsMetricView = UIView()
+  private var savingsValueLabel = UILabel()
+  private var totalValueLabel = UILabel()
+  private var statusTitleLabel = UILabel()
+  private var statusSubtitleLabel = UILabel()
 
   private var videoPlayer: AVQueuePlayer?
   private var videoLooper: AVPlayerLooper?
@@ -66,14 +122,14 @@ final class HBExternalDisplayViewController: UIViewController {
   private var lastRequestedAdvertIdentity: AdvertIdentity?
   private var videoFailureCounts: [AdvertIdentity: Int] = [:]
   private var isHandlingVideoFailure = false
-  private var transactionLayoutConstraints: [NSLayoutConstraint] = []
-  private var fullScreenAdvertLayoutConstraints: [NSLayoutConstraint] = []
   private var isShowingFullScreenAdvert = false
+  // 当前内容使用的缩放系数；屏幕尺寸/旋转变化导致 s 变化时整体重建内容。
+  private var contentScale: CGFloat = 1
+  // 最近一次渲染的快照；nil 表示等待态。缩放变化重建内容后据此重绘。
+  private var lastSnapshot: HBExternalDisplaySnapshot?
   private let maximumVideoFailureCount = 2
   private let videoRetryDelay: TimeInterval = 0.75
   private let videoStartupTimeout: TimeInterval = 5
-  private let mintColor = UIColor(red: 0.447, green: 0.902, blue: 0.765, alpha: 1)
-  private let amberColor = UIColor(red: 1, green: 0.761, blue: 0.11, alpha: 1)
 
   var hasReactSurface: Bool {
     reactSurface != nil
@@ -93,32 +149,25 @@ final class HBExternalDisplayViewController: UIViewController {
 
   override func loadView() {
     let rootView = UIView()
-    rootView.backgroundColor = UIColor(red: 0.035, green: 0.067, blue: 0.122, alpha: 1)
+    rootView.backgroundColor = Palette.background
     rootView.isUserInteractionEnabled = false
     view = rootView
 
-    configureLabels()
     configureLayout()
     showWaitingState()
   }
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    applyFrames()
     videoLayer?.frame = advertContainer.bounds
   }
 
   func showWaitingState() {
     resetVideoRetryState()
     updateFallbackLayout(fullScreenAdvert: false)
-    renderStatusCard(mode: .idle, change: HBExternalDisplayMoney(cents: 0))
-    replaceItemRows(with: [])
-    moreItemsLabel.text = nil
-    moreItemsLabel.isHidden = true
-    itemCountLabel.text = formattedItemCount(itemQuantity: "0", skuCount: 0)
-    subtotalValueLabel.text = "$0.00"
-    gstValueLabel.text = "$0.00"
-    discountValueLabel.text = "$0.00"
-    totalValueLabel.text = "$0.00"
+    lastSnapshot = nil
+    renderTransaction()
     clearAdvert()
   }
 
@@ -130,24 +179,8 @@ final class HBExternalDisplayViewController: UIViewController {
         && snapshot.items.isEmpty
         && snapshot.advert != nil
     )
-    renderStatusCard(mode: snapshot.mode, change: snapshot.change)
-    let window = visibleItemWindow(for: snapshot)
-    replaceItemRows(with: window.items)
-    moreItemsLabel.text = moreItemsText(
-      hiddenAbove: window.hiddenAbove,
-      hiddenBelow: window.hiddenBelow
-    )
-    moreItemsLabel.isHidden =
-      window.hiddenAbove == 0 && window.hiddenBelow == 0
-    let summary = resolvedSummary(for: snapshot)
-    itemCountLabel.text = formattedItemCount(
-      itemQuantity: summary.itemQuantity,
-      skuCount: summary.skuCount
-    )
-    subtotalValueLabel.text = format(summary.subtotal)
-    gstValueLabel.text = format(snapshot.gst)
-    discountValueLabel.text = formatDiscount(snapshot.discount)
-    totalValueLabel.text = format(snapshot.total)
+    lastSnapshot = snapshot
+    renderTransaction()
 
     return render(advert: snapshot.advert)
   }
@@ -207,302 +240,68 @@ final class HBExternalDisplayViewController: UIViewController {
     reactSurface = nil
   }
 
-  private func configureLabels() {
-    windowTitleLabel.text = localizedText(english: "Customer Display", chinese: "客显")
-    windowTitleLabel.font = .systemFont(ofSize: 21, weight: .bold)
-    windowTitleLabel.textColor = .white
-    windowTitleLabel.numberOfLines = 1
+  // MARK: - 布局
 
-    orderTitleLabel.text = localizedText(english: "Your order", chinese: "您的订单")
-    orderTitleLabel.font = .systemFont(ofSize: 30, weight: .bold)
-    orderTitleLabel.textColor = mintColor
-    orderTitleLabel.numberOfLines = 1
-    orderTitleLabel.setContentHuggingPriority(.required, for: .vertical)
-    orderTitleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-
-    moreItemsLabel.font = .systemFont(ofSize: 14, weight: .medium)
-    moreItemsLabel.textColor = UIColor.white.withAlphaComponent(0.58)
-    moreItemsLabel.numberOfLines = 1
-
-    itemCountLabel.font = .systemFont(ofSize: 17, weight: .medium)
-    itemCountLabel.textColor = UIColor.white.withAlphaComponent(0.72)
-
-    amountDueLabel.text = localizedText(english: "Amount due", chinese: "应付总额")
-    amountDueLabel.font = .systemFont(ofSize: 17, weight: .semibold)
-    amountDueLabel.textColor = UIColor.white.withAlphaComponent(0.82)
-
-    totalValueLabel.font = .monospacedDigitSystemFont(ofSize: 42, weight: .heavy)
-    totalValueLabel.textColor = amberColor
-    totalValueLabel.adjustsFontSizeToFitWidth = true
-    totalValueLabel.minimumScaleFactor = 0.72
-
-    statusTitleLabel.font = .systemFont(ofSize: 27, weight: .bold)
-    statusTitleLabel.textColor = mintColor
-    statusTitleLabel.numberOfLines = 2
-    statusTitleLabel.textAlignment = .center
-    statusTitleLabel.adjustsFontSizeToFitWidth = true
-    statusTitleLabel.minimumScaleFactor = 0.75
-
-    statusSubtitleLabel.font = .systemFont(ofSize: 15, weight: .medium)
-    statusSubtitleLabel.textColor = UIColor.white.withAlphaComponent(0.88)
-    statusSubtitleLabel.numberOfLines = 2
-    statusSubtitleLabel.textAlignment = .center
-  }
-
+  // 三块顶层面板都用 frame 布局，frame 与 React 层同一套公式
+  // （HBExternalDisplayLayoutMetrics），旋转或分辨率变化时在 viewDidLayoutSubviews 重新计算。
   private func configureLayout() {
-    titleBar.backgroundColor = UIColor(red: 0.027, green: 0.078, blue: 0.149, alpha: 1)
-    titleBar.translatesAutoresizingMaskIntoConstraints = false
-    windowTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-    titleDivider.backgroundColor = UIColor.white.withAlphaComponent(0.22)
-    titleDivider.translatesAutoresizingMaskIntoConstraints = false
-    titleBar.addSubview(windowTitleLabel)
-    titleBar.addSubview(titleDivider)
-    view.addSubview(titleBar)
-
-    orderPanel.axis = .vertical
-    orderPanel.alignment = .fill
-    orderPanel.spacing = 0
-    orderPanel.backgroundColor = UIColor(red: 0.027, green: 0.078, blue: 0.149, alpha: 1)
-    orderPanel.layer.cornerRadius = 12
+    orderPanel.backgroundColor = Palette.background
     orderPanel.layer.borderWidth = 1
-    orderPanel.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+    orderPanel.layer.borderColor = Palette.divider.cgColor
     orderPanel.layer.masksToBounds = true
-    orderPanel.isLayoutMarginsRelativeArrangement = true
-    orderPanel.directionalLayoutMargins = NSDirectionalEdgeInsets(
-      top: 16,
-      leading: 16,
-      bottom: 16,
-      trailing: 16
-    )
-    orderPanel.translatesAutoresizingMaskIntoConstraints = false
-    let orderTitleRow = UIStackView()
-    orderTitleRow.axis = .horizontal
-    orderTitleRow.alignment = .center
-    orderTitleRow.spacing = 12
-    orderTitleLabel.setContentHuggingPriority(.required, for: .horizontal)
-    orderTitleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-    moreItemsLabel.setContentHuggingPriority(.required, for: .horizontal)
-    moreItemsLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-    let orderTitleSpacer = UIView()
-    orderTitleSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    orderTitleSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    orderTitleRow.addArrangedSubview(orderTitleLabel)
-    orderTitleRow.addArrangedSubview(orderTitleSpacer)
-    orderTitleRow.addArrangedSubview(moreItemsLabel)
-    orderPanel.addArrangedSubview(orderTitleRow)
-    orderPanel.setCustomSpacing(12, after: orderTitleRow)
-
-    tableHeaderRow.axis = .horizontal
-    tableHeaderRow.alignment = .center
-    tableHeaderRow.spacing = 0
-    tableHeaderRow.addArrangedSubview(
-      makeColumnHeader(localizedText(english: "Product", chinese: "商品"), alignment: .left)
-    )
-    tableHeaderRow.addArrangedSubview(
-      makeColumnHeader(localizedText(english: "Qty", chinese: "数量"), alignment: .right, width: 72)
-    )
-    tableHeaderRow.addArrangedSubview(
-      makeColumnHeader(localizedText(english: "Unit price", chinese: "单价"), alignment: .right, width: 104)
-    )
-    tableHeaderRow.addArrangedSubview(
-      makeColumnHeader(localizedText(english: "Amount", chinese: "金额"), alignment: .right, width: 104)
-    )
-    tableHeaderRow.heightAnchor.constraint(equalToConstant: 38).isActive = true
-    orderPanel.addArrangedSubview(tableHeaderRow)
-
-    let tableDivider = UIView()
-    tableDivider.backgroundColor = UIColor.white.withAlphaComponent(0.28)
-    tableDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
-    orderPanel.addArrangedSubview(tableDivider)
-
-    itemStack.axis = .vertical
-    itemStack.alignment = .fill
-    itemStack.distribution = .fill
-    itemStack.spacing = 0
-    itemStack.setContentHuggingPriority(.defaultLow, for: .vertical)
-    itemStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-    orderPanel.addArrangedSubview(itemStack)
     view.addSubview(orderPanel)
 
-    advertContainer.backgroundColor = UIColor.white.withAlphaComponent(0.035)
-    advertContainer.layer.cornerRadius = 12
-    advertContainer.layer.borderWidth = 1
-    advertContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+    advertContainer.layer.borderColor = Palette.divider.cgColor
     advertContainer.layer.masksToBounds = true
-    advertContainer.translatesAutoresizingMaskIntoConstraints = false
     advertImageView.contentMode = .scaleAspectFit
     advertImageView.translatesAutoresizingMaskIntoConstraints = false
     advertContainer.addSubview(advertImageView)
-    view.addSubview(advertContainer)
-
-    summaryPanel.backgroundColor = UIColor(red: 0.027, green: 0.078, blue: 0.149, alpha: 1)
-    summaryPanel.layer.cornerRadius = 12
-    summaryPanel.layer.borderWidth = 1
-    summaryPanel.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
-    summaryPanel.layer.masksToBounds = true
-    summaryPanel.translatesAutoresizingMaskIntoConstraints = false
-    summarySections.axis = .horizontal
-    summarySections.alignment = .fill
-    summarySections.distribution = .fill
-    summarySections.spacing = 0
-    summarySections.translatesAutoresizingMaskIntoConstraints = false
-    summarySections.addArrangedSubview(summaryMetricsContainer)
-    summarySections.addArrangedSubview(amountDueContainer)
-    summarySections.addArrangedSubview(statusRegion)
-    summaryPanel.addSubview(summarySections)
-    view.addSubview(summaryPanel)
-
-    summaryMetricsStack.axis = .vertical
-    summaryMetricsStack.alignment = .fill
-    summaryMetricsStack.distribution = .fill
-    summaryMetricsStack.spacing = 10
-    summaryMetricsStack.translatesAutoresizingMaskIntoConstraints = false
-    summaryMetricsStack.addArrangedSubview(itemCountLabel)
-    summaryMetricsStack.addArrangedSubview(metricsRow)
-    summaryMetricsContainer.addSubview(summaryMetricsStack)
-
-    metricsRow.axis = .horizontal
-    metricsRow.alignment = .fill
-    metricsRow.distribution = .fill
-    metricsRow.spacing = 14
-    let subtotalMetric = makeMetric(
-      title: localizedText(english: "Subtotal", chinese: "小计"),
-      valueLabel: subtotalValueLabel
-    )
-    let gstMetric = makeMetric(title: "GST", valueLabel: gstValueLabel)
-    let discountMetric = makeMetric(
-      title: localizedText(english: "Discount", chinese: "优惠"),
-      valueLabel: discountValueLabel
-    )
-    let firstMetricDivider = makeVerticalDivider()
-    let secondMetricDivider = makeVerticalDivider()
-    metricsRow.addArrangedSubview(subtotalMetric)
-    metricsRow.addArrangedSubview(firstMetricDivider)
-    metricsRow.addArrangedSubview(gstMetric)
-    metricsRow.addArrangedSubview(secondMetricDivider)
-    metricsRow.addArrangedSubview(discountMetric)
-    subtotalMetric.widthAnchor.constraint(equalTo: gstMetric.widthAnchor).isActive = true
-    gstMetric.widthAnchor.constraint(equalTo: discountMetric.widthAnchor).isActive = true
-
-    amountDueStack.axis = .vertical
-    amountDueStack.alignment = .fill
-    amountDueStack.distribution = .fill
-    amountDueStack.spacing = 3
-    amountDueStack.translatesAutoresizingMaskIntoConstraints = false
-    amountDueStack.addArrangedSubview(amountDueLabel)
-    amountDueStack.addArrangedSubview(totalValueLabel)
-    amountDueContainer.addSubview(amountDueStack)
-    let amountLeadingDivider = makeVerticalDivider()
-    let amountTrailingDivider = makeVerticalDivider()
-    amountDueContainer.addSubview(amountLeadingDivider)
-    amountDueContainer.addSubview(amountTrailingDivider)
-
-    statusRegion.addSubview(statusCard)
-    statusCard.layer.cornerRadius = 10
-    statusCard.layer.borderWidth = 1
-    statusCard.layer.borderColor = mintColor.cgColor
-    statusCard.layer.masksToBounds = true
-    statusCard.translatesAutoresizingMaskIntoConstraints = false
-    statusStack.axis = .vertical
-    statusStack.alignment = .fill
-    statusStack.spacing = 7
-    statusStack.translatesAutoresizingMaskIntoConstraints = false
-    statusStack.addArrangedSubview(statusTitleLabel)
-    statusStack.addArrangedSubview(statusSubtitleLabel)
-    statusCard.addSubview(statusStack)
-
     NSLayoutConstraint.activate([
-      titleBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      titleBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      titleBar.topAnchor.constraint(equalTo: view.topAnchor),
-      titleBar.heightAnchor.constraint(equalToConstant: 48),
-      windowTitleLabel.leadingAnchor.constraint(equalTo: titleBar.leadingAnchor, constant: 24),
-      windowTitleLabel.centerYAnchor.constraint(equalTo: titleBar.centerYAnchor),
-      titleDivider.leadingAnchor.constraint(equalTo: titleBar.leadingAnchor),
-      titleDivider.trailingAnchor.constraint(equalTo: titleBar.trailingAnchor),
-      titleDivider.bottomAnchor.constraint(equalTo: titleBar.bottomAnchor),
-      titleDivider.heightAnchor.constraint(equalToConstant: 1),
-
-      summarySections.leadingAnchor.constraint(equalTo: summaryPanel.leadingAnchor, constant: 16),
-      summarySections.trailingAnchor.constraint(equalTo: summaryPanel.trailingAnchor, constant: -16),
-      summarySections.topAnchor.constraint(equalTo: summaryPanel.topAnchor, constant: 16),
-      summarySections.bottomAnchor.constraint(equalTo: summaryPanel.bottomAnchor, constant: -16),
-      summaryMetricsContainer.widthAnchor.constraint(
-        equalTo: summarySections.widthAnchor,
-        multiplier: 0.47
-      ),
-      amountDueContainer.widthAnchor.constraint(
-        equalTo: summarySections.widthAnchor,
-        multiplier: 0.26
-      ),
-      summaryMetricsStack.leadingAnchor.constraint(equalTo: summaryMetricsContainer.leadingAnchor),
-      summaryMetricsStack.trailingAnchor.constraint(equalTo: summaryMetricsContainer.trailingAnchor, constant: -18),
-      summaryMetricsStack.topAnchor.constraint(equalTo: summaryMetricsContainer.topAnchor),
-      summaryMetricsStack.bottomAnchor.constraint(equalTo: summaryMetricsContainer.bottomAnchor),
-      amountDueStack.leadingAnchor.constraint(equalTo: amountDueContainer.leadingAnchor, constant: 18),
-      amountDueStack.trailingAnchor.constraint(equalTo: amountDueContainer.trailingAnchor, constant: -18),
-      amountDueStack.centerYAnchor.constraint(equalTo: amountDueContainer.centerYAnchor),
-      amountLeadingDivider.leadingAnchor.constraint(equalTo: amountDueContainer.leadingAnchor),
-      amountLeadingDivider.topAnchor.constraint(equalTo: amountDueContainer.topAnchor),
-      amountLeadingDivider.bottomAnchor.constraint(equalTo: amountDueContainer.bottomAnchor),
-      amountTrailingDivider.trailingAnchor.constraint(equalTo: amountDueContainer.trailingAnchor),
-      amountTrailingDivider.topAnchor.constraint(equalTo: amountDueContainer.topAnchor),
-      amountTrailingDivider.bottomAnchor.constraint(equalTo: amountDueContainer.bottomAnchor),
-      statusCard.leadingAnchor.constraint(equalTo: statusRegion.leadingAnchor, constant: 16),
-      statusCard.trailingAnchor.constraint(equalTo: statusRegion.trailingAnchor),
-      statusCard.topAnchor.constraint(equalTo: statusRegion.topAnchor),
-      statusCard.bottomAnchor.constraint(equalTo: statusRegion.bottomAnchor),
-      statusStack.leadingAnchor.constraint(equalTo: statusCard.leadingAnchor, constant: 14),
-      statusStack.trailingAnchor.constraint(equalTo: statusCard.trailingAnchor, constant: -14),
-      statusStack.centerYAnchor.constraint(equalTo: statusCard.centerYAnchor),
-
       advertImageView.leadingAnchor.constraint(equalTo: advertContainer.leadingAnchor),
       advertImageView.trailingAnchor.constraint(equalTo: advertContainer.trailingAnchor),
       advertImageView.topAnchor.constraint(equalTo: advertContainer.topAnchor),
       advertImageView.bottomAnchor.constraint(equalTo: advertContainer.bottomAnchor),
     ])
+    view.addSubview(advertContainer)
 
-    transactionLayoutConstraints = [
-      orderPanel.leadingAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.leadingAnchor,
-        constant: 24
-      ),
-      orderPanel.topAnchor.constraint(equalTo: titleBar.bottomAnchor, constant: 24),
-      orderPanel.bottomAnchor.constraint(equalTo: summaryPanel.topAnchor, constant: -18),
-      advertContainer.leadingAnchor.constraint(
-        equalTo: orderPanel.trailingAnchor,
-        constant: 18
-      ),
-      advertContainer.trailingAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.trailingAnchor,
-        constant: -24
-      ),
-      advertContainer.topAnchor.constraint(equalTo: orderPanel.topAnchor),
-      advertContainer.bottomAnchor.constraint(equalTo: orderPanel.bottomAnchor),
-      advertContainer.widthAnchor.constraint(equalTo: orderPanel.widthAnchor),
-      summaryPanel.leadingAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.leadingAnchor,
-        constant: 24
-      ),
-      summaryPanel.trailingAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.trailingAnchor,
-        constant: -24
-      ),
-      summaryPanel.bottomAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-        constant: -24
-      ),
-      summaryPanel.heightAnchor.constraint(equalToConstant: 132),
-    ]
+    summaryPanel.backgroundColor = Palette.surface
+    summaryPanel.layer.borderWidth = 1
+    summaryPanel.layer.borderColor = Palette.divider.cgColor
+    summaryPanel.layer.masksToBounds = true
+    view.addSubview(summaryPanel)
 
-    fullScreenAdvertLayoutConstraints = [
-      advertContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      advertContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      advertContainer.topAnchor.constraint(equalTo: view.topAnchor),
-      advertContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-    ]
+    rebuildContent()
+    applyFrames()
+  }
 
-    NSLayoutConstraint.activate(transactionLayoutConstraints)
+  private func applyFrames() {
+    let metrics = HBExternalDisplayLayoutMetrics(size: view.bounds.size)
+    let s = metrics.scale
+
+    orderPanel.frame = metrics.cartFrame
+    orderPanel.layer.cornerRadius = 12 * s
+    summaryPanel.frame = metrics.summaryFrame
+    summaryPanel.layer.cornerRadius = 12 * s
+
+    if isShowingFullScreenAdvert {
+      // 空闲全屏广告：铺满整个屏幕，无边距、无圆角、无边框。
+      advertContainer.frame = view.bounds
+      advertContainer.backgroundColor = .clear
+      advertContainer.layer.cornerRadius = 0
+      advertContainer.layer.borderWidth = 0
+    } else {
+      advertContainer.frame = metrics.advertFrame
+      advertContainer.backgroundColor = Palette.surface
+      advertContainer.layer.cornerRadius = 18 * s
+      advertContainer.layer.borderWidth = 1
+    }
+
+    // 缩放系数变化（旋转/分辨率切换）时按新的 s 重建内容并重绘当前快照。
+    if abs(s - contentScale) > 0.0005 {
+      contentScale = s
+      rebuildContent()
+      renderTransaction()
+    }
   }
 
   private func updateFallbackLayout(fullScreenAdvert: Bool) {
@@ -510,90 +309,625 @@ final class HBExternalDisplayViewController: UIViewController {
     isShowingFullScreenAdvert = fullScreenAdvert
 
     UIView.performWithoutAnimation {
-      NSLayoutConstraint.deactivate(
-        fullScreenAdvert
-          ? transactionLayoutConstraints
-          : fullScreenAdvertLayoutConstraints
-      )
-      titleBar.isHidden = fullScreenAdvert
       orderPanel.isHidden = fullScreenAdvert
       summaryPanel.isHidden = fullScreenAdvert
-      advertContainer.backgroundColor = fullScreenAdvert
-        ? .clear
-        : UIColor.white.withAlphaComponent(0.035)
-      advertContainer.layer.cornerRadius = fullScreenAdvert ? 0 : 12
-      advertContainer.layer.borderWidth = fullScreenAdvert ? 0 : 1
-      NSLayoutConstraint.activate(
-        fullScreenAdvert
-          ? fullScreenAdvertLayoutConstraints
-          : transactionLayoutConstraints
-      )
+      view.setNeedsLayout()
       view.layoutIfNeeded()
     }
   }
 
-  private func makeColumnHeader(
-    _ title: String,
-    alignment: NSTextAlignment,
-    width: CGFloat? = nil
+  // 所有 WPF 像素值乘以当前缩放系数。
+  private func px(_ value: CGFloat) -> CGFloat {
+    value * contentScale
+  }
+
+  private func rebuildContent() {
+    buildCartPanel()
+    buildSummaryPanel()
+  }
+
+  // MARK: - 购物车面板
+
+  private func buildCartPanel() {
+    orderPanel.subviews.forEach { $0.removeFromSuperview() }
+    let padding = px(20)
+
+    let headerRow = makeTableRow(
+      height: px(48),
+      background: Palette.surface,
+      item: makeHeaderCell(title: "Item Description", alignment: .left),
+      quantity: makeHeaderCell(title: "Qty", alignment: .center),
+      price: makeHeaderCell(title: "Price", alignment: .right),
+      total: makeHeaderCell(title: "Total", alignment: .right)
+    )
+    headerRow.translatesAutoresizingMaskIntoConstraints = false
+    orderPanel.addSubview(headerRow)
+
+    itemStack = UIStackView()
+    itemStack.axis = .vertical
+    itemStack.alignment = .fill
+    itemStack.distribution = .fill
+    itemStack.spacing = 0
+    itemStack.translatesAutoresizingMaskIntoConstraints = false
+    orderPanel.addSubview(itemStack)
+
+    moreItemsLabel = makeLabel(
+      size: 12,
+      weight: .medium,
+      color: Palette.mutedText,
+      alignment: .right
+    )
+    moreItemsLabel.isHidden = true
+    moreItemsLabel.translatesAutoresizingMaskIntoConstraints = false
+    orderPanel.addSubview(moreItemsLabel)
+
+    NSLayoutConstraint.activate([
+      headerRow.leadingAnchor.constraint(equalTo: orderPanel.leadingAnchor, constant: padding),
+      headerRow.trailingAnchor.constraint(equalTo: orderPanel.trailingAnchor, constant: -padding),
+      headerRow.topAnchor.constraint(equalTo: orderPanel.topAnchor, constant: padding),
+      itemStack.leadingAnchor.constraint(equalTo: headerRow.leadingAnchor),
+      itemStack.trailingAnchor.constraint(equalTo: headerRow.trailingAnchor),
+      itemStack.topAnchor.constraint(equalTo: headerRow.bottomAnchor),
+      itemStack.bottomAnchor.constraint(
+        lessThanOrEqualTo: orderPanel.bottomAnchor,
+        constant: -padding
+      ),
+      moreItemsLabel.trailingAnchor.constraint(
+        equalTo: orderPanel.trailingAnchor,
+        constant: -padding
+      ),
+      moreItemsLabel.bottomAnchor.constraint(
+        equalTo: orderPanel.bottomAnchor,
+        constant: -px(6)
+      ),
+    ])
+  }
+
+  // 表格行骨架：商品列（弹性）/ Qty 96s / Price 116s / Total 126s，行底 1 分隔线。
+  private func makeTableRow(
+    height: CGFloat,
+    background: UIColor?,
+    item: UIView,
+    quantity: UIView,
+    price: UIView,
+    total: UIView
+  ) -> UIView {
+    let row = UIView()
+    row.backgroundColor = background
+    row.heightAnchor.constraint(equalToConstant: height).isActive = true
+
+    quantity.widthAnchor.constraint(equalToConstant: px(96)).isActive = true
+    price.widthAnchor.constraint(equalToConstant: px(116)).isActive = true
+    total.widthAnchor.constraint(equalToConstant: px(126)).isActive = true
+    item.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    item.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    let stack = UIStackView(arrangedSubviews: [item, quantity, price, total])
+    stack.axis = .horizontal
+    stack.alignment = .fill
+    stack.distribution = .fill
+    stack.spacing = 0
+    stack.translatesAutoresizingMaskIntoConstraints = false
+
+    let divider = UIView()
+    divider.backgroundColor = Palette.divider
+    divider.translatesAutoresizingMaskIntoConstraints = false
+
+    row.addSubview(stack)
+    row.addSubview(divider)
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+      stack.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+      stack.topAnchor.constraint(equalTo: row.topAnchor),
+      stack.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+      divider.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+      divider.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+      divider.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+      divider.heightAnchor.constraint(equalToConstant: 1),
+    ])
+    return row
+  }
+
+  private func makeHeaderCell(title: String, alignment: NSTextAlignment) -> UIView {
+    let cell = UIView()
+    let label = makeLabel(
+      size: 17,
+      weight: .bold,
+      color: Palette.headerText,
+      alignment: alignment
+    )
+    label.text = title
+    label.translatesAutoresizingMaskIntoConstraints = false
+    cell.addSubview(label)
+    // 列头内边距 12s。
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: px(12)),
+      label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -px(12)),
+      label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+    ])
+    return cell
+  }
+
+  private func makeLabel(
+    size: CGFloat,
+    weight: UIFont.Weight,
+    color: UIColor,
+    alignment: NSTextAlignment = .left,
+    monospacedDigits: Bool = false
   ) -> UILabel {
     let label = UILabel()
-    label.text = title
-    label.font = .systemFont(ofSize: 16, weight: .semibold)
-    label.textColor = UIColor.white.withAlphaComponent(0.88)
+    label.font =
+      monospacedDigits
+      ? .monospacedDigitSystemFont(ofSize: px(size), weight: weight)
+      : .systemFont(ofSize: px(size), weight: weight)
+    label.textColor = color
     label.textAlignment = alignment
-    if let width {
-      label.widthAnchor.constraint(equalToConstant: width).isActive = true
-      label.setContentHuggingPriority(.required, for: .horizontal)
-      label.setContentCompressionResistancePriority(.required, for: .horizontal)
-    } else {
-      label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-      label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    }
+    label.numberOfLines = 1
     return label
   }
 
-  private func makeMetric(
-    title: String,
-    valueLabel: UILabel
-  ) -> UIView {
-    let titleLabel = UILabel()
+  private func replaceItemRows(with items: [HBExternalDisplayItem]) {
+    itemStack.arrangedSubviews.forEach { row in
+      itemStack.removeArrangedSubview(row)
+      row.removeFromSuperview()
+    }
+
+    // 空购物车只显示列头与空表，不再显示任何空态文案。
+    for (index, item) in items.enumerated() {
+      // 与 WPF AlternatingRowBackground 一致：第 1、3、5…（从 0 计）行用表面色。
+      let row = makeTableRow(
+        height: px(72),
+        background: index % 2 == 1 ? Palette.surface : Palette.background,
+        item: makeItemCell(for: item),
+        quantity: makeQuantityCell(for: item),
+        price: makePriceCell(for: item),
+        total: makeTotalCell(for: item)
+      )
+      itemStack.addArrangedSubview(row)
+    }
+
+    // 剩余空间由底部弹性占位吸收，行从顶部排列。
+    let flexibleSpacer = UIView()
+    flexibleSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+    flexibleSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+    itemStack.addArrangedSubview(flexibleSpacer)
+  }
+
+  private func makeItemCell(for item: HBExternalDisplayItem) -> UIView {
+    let cell = UIView()
+    let thumbnail = makeThumbnail(for: item)
+    thumbnail.translatesAutoresizingMaskIntoConstraints = false
+
+    let nameLabel = makeLabel(size: 19, weight: .semibold, color: Palette.text)
+    nameLabel.text = item.name
+    nameLabel.lineBreakMode = .byTruncatingTail
+    nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    let textStack = UIStackView(arrangedSubviews: [nameLabel])
+    textStack.axis = .vertical
+    textStack.alignment = .fill
+    textStack.distribution = .fill
+    textStack.spacing = px(4)
+    textStack.translatesAutoresizingMaskIntoConstraints = false
+    // 货号与查询码都没有时不占行。
+    if let metaRow = makeMetaRow(for: item) {
+      textStack.addArrangedSubview(metaRow)
+    }
+
+    cell.addSubview(thumbnail)
+    cell.addSubview(textStack)
+    NSLayoutConstraint.activate([
+      thumbnail.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: px(12)),
+      thumbnail.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+      thumbnail.widthAnchor.constraint(equalToConstant: px(52)),
+      thumbnail.heightAnchor.constraint(equalToConstant: px(52)),
+      textStack.leadingAnchor.constraint(equalTo: thumbnail.trailingAnchor, constant: px(12)),
+      textStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -px(8)),
+      textStack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+    ])
+    return cell
+  }
+
+  // 52s 缩略图盒：图来自已校验的本地 file URL，读失败回退购物袋占位。
+  // 这里只用 UIImage(contentsOfFile:)，客显层永不联网取图。
+  private func makeThumbnail(for item: HBExternalDisplayItem) -> UIView {
+    let box = UIView()
+    box.backgroundColor = Palette.accentSurface
+    box.layer.cornerRadius = px(6)
+    box.layer.borderWidth = 1
+    box.layer.borderColor = Palette.divider.cgColor
+    box.layer.masksToBounds = true
+
+    let imageView = UIImageView()
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    if let url = item.imageUrl, let image = UIImage(contentsOfFile: url.path) {
+      imageView.image = image
+      imageView.contentMode = .scaleAspectFit
+    } else {
+      let configuration = UIImage.SymbolConfiguration(pointSize: px(22), weight: .regular)
+      imageView.image = UIImage(systemName: "bag.fill", withConfiguration: configuration)
+      imageView.tintColor = Palette.accent
+      imageView.contentMode = .center
+    }
+    box.addSubview(imageView)
+    let inset = px(2)
+    NSLayoutConstraint.activate([
+      imageView.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: inset),
+      imageView.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -inset),
+      imageView.topAnchor.constraint(equalTo: box.topAnchor, constant: inset),
+      imageView.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -inset),
+    ])
+    return box
+  }
+
+  // "Item No. xxx" | lookupCode，两者之间插 1×12s 竖线（左右各 10s）。
+  private func makeMetaRow(for item: HBExternalDisplayItem) -> UIView? {
+    var arranged: [UIView] = []
+    if let itemNumber = item.itemNumber {
+      let label = makeLabel(size: 12, weight: .regular, color: Palette.mutedText)
+      label.text = "Item No. \(itemNumber)"
+      label.lineBreakMode = .byTruncatingTail
+      arranged.append(label)
+    }
+    if item.itemNumber != nil, item.lookupCode != nil {
+      let separator = UIView()
+      separator.translatesAutoresizingMaskIntoConstraints = false
+      let line = UIView()
+      line.backgroundColor = Palette.divider
+      line.translatesAutoresizingMaskIntoConstraints = false
+      separator.addSubview(line)
+      NSLayoutConstraint.activate([
+        separator.widthAnchor.constraint(equalToConstant: px(21)),
+        line.widthAnchor.constraint(equalToConstant: 1),
+        line.heightAnchor.constraint(equalToConstant: px(12)),
+        line.centerXAnchor.constraint(equalTo: separator.centerXAnchor),
+        line.centerYAnchor.constraint(equalTo: separator.centerYAnchor),
+      ])
+      separator.setContentHuggingPriority(.required, for: .horizontal)
+      separator.setContentCompressionResistancePriority(.required, for: .horizontal)
+      arranged.append(separator)
+    }
+    if let lookupCode = item.lookupCode {
+      let label = makeLabel(size: 12, weight: .regular, color: Palette.mutedText)
+      label.text = lookupCode
+      label.lineBreakMode = .byTruncatingTail
+      arranged.append(label)
+    }
+    guard !arranged.isEmpty else { return nil }
+
+    // 货号标签不被拉伸，保证竖线紧跟其后；多余宽度由最后一个标签吸收。
+    arranged.first?.setContentHuggingPriority(.required, for: .horizontal)
+    arranged.last?.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    let stack = UIStackView(arrangedSubviews: arranged)
+    stack.axis = .horizontal
+    stack.alignment = .center
+    stack.distribution = .fill
+    stack.spacing = 0
+    return stack
+  }
+
+  // 数量胶囊：内边距 10s×4s，强调表面背景，1 强调色边框，圆角 12s。
+  private func makeQuantityCell(for item: HBExternalDisplayItem) -> UIView {
+    let cell = UIView()
+    let pill = UIView()
+    pill.backgroundColor = Palette.accentSurface
+    pill.layer.cornerRadius = px(12)
+    pill.layer.borderWidth = 1
+    pill.layer.borderColor = Palette.accent.cgColor
+    pill.translatesAutoresizingMaskIntoConstraints = false
+
+    let label = makeLabel(
+      size: 16,
+      weight: .bold,
+      color: Palette.accent,
+      alignment: .center,
+      monospacedDigits: true
+    )
+    label.text = item.quantity
+    label.translatesAutoresizingMaskIntoConstraints = false
+    pill.addSubview(label)
+    cell.addSubview(pill)
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: px(10)),
+      label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -px(10)),
+      label.topAnchor.constraint(equalTo: pill.topAnchor, constant: px(4)),
+      label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -px(4)),
+      pill.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+      pill.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+      pill.leadingAnchor.constraint(greaterThanOrEqualTo: cell.leadingAnchor, constant: px(2)),
+      pill.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -px(2)),
+    ])
+    return cell
+  }
+
+  // 单价 17s 白色右对齐；有折扣率时其下 2s 显示 "-{rate}%"（12s 粗体强调色）。
+  private func makePriceCell(for item: HBExternalDisplayItem) -> UIView {
+    let priceLabel = makeLabel(
+      size: 17,
+      weight: .regular,
+      color: Palette.text,
+      alignment: .right,
+      monospacedDigits: true
+    )
+    priceLabel.text = unitPriceText(for: item)
+    var arranged: [UIView] = [priceLabel]
+    if let discountRate = item.discountRate {
+      let rateLabel = makeLabel(
+        size: 12,
+        weight: .bold,
+        color: Palette.accent,
+        alignment: .right
+      )
+      rateLabel.text = "-\(discountRate)%"
+      arranged.append(rateLabel)
+    }
+    return wrapTrailing(arranged, spacing: px(2))
+  }
+
+  // 有 grossAmount 时先显示删除线原价（13s 次要色），其下是实收金额 19s 粗体；
+  // 有折扣时实收用强调色，否则白色。
+  private func makeTotalCell(for item: HBExternalDisplayItem) -> UIView {
+    var arranged: [UIView] = []
+    if let grossAmount = item.grossAmount {
+      let grossLabel = makeLabel(
+        size: 13,
+        weight: .regular,
+        color: Palette.mutedText,
+        alignment: .right,
+        monospacedDigits: true
+      )
+      grossLabel.attributedText = NSAttributedString(
+        string: format(grossAmount),
+        attributes: [
+          .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+          .strikethroughColor: Palette.mutedText,
+          .font: grossLabel.font as Any,
+          .foregroundColor: Palette.mutedText,
+        ]
+      )
+      arranged.append(grossLabel)
+    }
+    let amountLabel = makeLabel(
+      size: 19,
+      weight: .bold,
+      color: item.grossAmount != nil ? Palette.accent : Palette.text,
+      alignment: .right,
+      monospacedDigits: true
+    )
+    amountLabel.text = format(item.amount)
+    arranged.append(amountLabel)
+    return wrapTrailing(arranged, spacing: px(2))
+  }
+
+  // 价格/合计列：内容右对齐、右内缩 12s、垂直居中。
+  private func wrapTrailing(_ views: [UIView], spacing: CGFloat) -> UIView {
+    let cell = UIView()
+    let stack = UIStackView(arrangedSubviews: views)
+    stack.axis = .vertical
+    stack.alignment = .trailing
+    stack.distribution = .fill
+    stack.spacing = spacing
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    cell.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -px(12)),
+      stack.leadingAnchor.constraint(greaterThanOrEqualTo: cell.leadingAnchor),
+      stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+    ])
+    return cell
+  }
+
+  // MARK: - 汇总区
+
+  private func buildSummaryPanel() {
+    summaryPanel.subviews.forEach { $0.removeFromSuperview() }
+
+    itemQuantityValueLabel = makeLabel(size: 15, weight: .regular, color: Palette.mutedText)
+    skuCountValueLabel = makeLabel(size: 15, weight: .regular, color: Palette.mutedText)
+    subtotalValueLabel = makeAmountValueLabel()
+    gstValueLabel = makeAmountValueLabel()
+    savingsValueLabel = makeAmountValueLabel()
+    totalValueLabel = makeLabel(
+      size: 62,
+      weight: .black,
+      color: Palette.amount,
+      alignment: .right,
+      monospacedDigits: true
+    )
+    totalValueLabel.adjustsFontSizeToFitWidth = true
+    totalValueLabel.minimumScaleFactor = 0.3
+
+    // 左列：数量行 + 三栏金额（Subtotal / GST / Savings）。
+    let countsRow = UIStackView(arrangedSubviews: [
+      makeCountCaption("Item Quantity"),
+      itemQuantityValueLabel,
+      makeCountCaption("SKU Count"),
+      skuCountValueLabel,
+      UIView(),
+    ])
+    countsRow.axis = .horizontal
+    countsRow.alignment = .center
+    countsRow.distribution = .fill
+    countsRow.spacing = px(8)
+    countsRow.setCustomSpacing(px(32), after: itemQuantityValueLabel)
+
+    let subtotalMetric = makeMetric(title: "Subtotal", valueLabel: subtotalValueLabel)
+    let gstMetric = makeMetric(title: "GST", valueLabel: gstValueLabel)
+    savingsMetricView = makeMetric(title: "Savings", valueLabel: savingsValueLabel)
+    let metricsRow = UIStackView(arrangedSubviews: [subtotalMetric, gstMetric, savingsMetricView])
+    metricsRow.axis = .horizontal
+    metricsRow.alignment = .top
+    metricsRow.distribution = .fillEqually
+    metricsRow.spacing = px(12)
+
+    let leftStack = UIStackView(arrangedSubviews: [countsRow, metricsRow])
+    leftStack.axis = .vertical
+    leftStack.alignment = .fill
+    leftStack.distribution = .fill
+    leftStack.spacing = px(8)
+    leftStack.translatesAutoresizingMaskIntoConstraints = false
+    let leftColumn = UIView()
+    leftColumn.addSubview(leftStack)
+    NSLayoutConstraint.activate([
+      leftStack.leadingAnchor.constraint(equalTo: leftColumn.leadingAnchor),
+      leftStack.trailingAnchor.constraint(equalTo: leftColumn.trailingAnchor, constant: -px(12)),
+      leftStack.centerYAnchor.constraint(equalTo: leftColumn.centerYAnchor),
+    ])
+
+    // 中列：Total To Pay，右对齐，金额宽 ≤200s、高 ≤68s，超出缩小。
+    let totalCaption = makeLabel(
+      size: 16,
+      weight: .black,
+      color: Palette.text,
+      alignment: .right
+    )
+    totalCaption.text = "Total To Pay"
+    let totalStack = UIStackView(arrangedSubviews: [totalCaption, totalValueLabel])
+    totalStack.axis = .vertical
+    totalStack.alignment = .fill
+    totalStack.distribution = .fill
+    totalStack.spacing = 0
+    totalStack.translatesAutoresizingMaskIntoConstraints = false
+    let middleColumn = UIView()
+    middleColumn.addSubview(totalStack)
+    NSLayoutConstraint.activate([
+      totalStack.widthAnchor.constraint(equalToConstant: px(200)),
+      totalStack.trailingAnchor.constraint(equalTo: middleColumn.trailingAnchor, constant: -px(20)),
+      totalStack.centerYAnchor.constraint(equalTo: middleColumn.centerYAnchor),
+      totalValueLabel.heightAnchor.constraint(equalToConstant: px(68)),
+    ])
+
+    // 右列：状态卡（强调表面、1 强调色边框、圆角 12s、内边距 16s、垂直居中）。
+    statusTitleLabel = makeLabel(size: 18, weight: .black, color: Palette.accent)
+    statusTitleLabel.numberOfLines = 2
+    statusSubtitleLabel = makeLabel(size: 15, weight: .regular, color: Palette.text)
+    statusSubtitleLabel.numberOfLines = 2
+    let statusStack = UIStackView(arrangedSubviews: [statusTitleLabel, statusSubtitleLabel])
+    statusStack.axis = .vertical
+    statusStack.alignment = .fill
+    statusStack.distribution = .fill
+    statusStack.spacing = px(4)
+    statusStack.translatesAutoresizingMaskIntoConstraints = false
+    let statusCard = UIView()
+    statusCard.backgroundColor = Palette.accentSurface
+    statusCard.layer.cornerRadius = px(12)
+    statusCard.layer.borderWidth = 1
+    statusCard.layer.borderColor = Palette.accent.cgColor
+    statusCard.translatesAutoresizingMaskIntoConstraints = false
+    statusCard.addSubview(statusStack)
+    let rightColumn = UIView()
+    rightColumn.addSubview(statusCard)
+    NSLayoutConstraint.activate([
+      statusStack.leadingAnchor.constraint(equalTo: statusCard.leadingAnchor, constant: px(16)),
+      statusStack.trailingAnchor.constraint(equalTo: statusCard.trailingAnchor, constant: -px(16)),
+      statusStack.topAnchor.constraint(equalTo: statusCard.topAnchor, constant: px(16)),
+      statusStack.bottomAnchor.constraint(equalTo: statusCard.bottomAnchor, constant: -px(16)),
+      statusCard.leadingAnchor.constraint(equalTo: rightColumn.leadingAnchor),
+      statusCard.trailingAnchor.constraint(equalTo: rightColumn.trailingAnchor),
+      statusCard.centerYAnchor.constraint(equalTo: rightColumn.centerYAnchor),
+    ])
+
+    middleColumn.widthAnchor.constraint(equalToConstant: px(220)).isActive = true
+    rightColumn.widthAnchor.constraint(equalToConstant: px(220)).isActive = true
+    let sections = UIStackView(arrangedSubviews: [leftColumn, middleColumn, rightColumn])
+    sections.axis = .horizontal
+    sections.alignment = .fill
+    sections.distribution = .fill
+    sections.spacing = 0
+    sections.translatesAutoresizingMaskIntoConstraints = false
+    summaryPanel.addSubview(sections)
+    // 汇总区内边距 16s（上下）× 24s（左右）。
+    NSLayoutConstraint.activate([
+      sections.leadingAnchor.constraint(equalTo: summaryPanel.leadingAnchor, constant: px(24)),
+      sections.trailingAnchor.constraint(equalTo: summaryPanel.trailingAnchor, constant: -px(24)),
+      sections.topAnchor.constraint(equalTo: summaryPanel.topAnchor, constant: px(16)),
+      sections.bottomAnchor.constraint(equalTo: summaryPanel.bottomAnchor, constant: -px(16)),
+    ])
+  }
+
+  private func makeCountCaption(_ title: String) -> UILabel {
+    let label = makeLabel(size: 15, weight: .regular, color: Palette.mutedText)
+    label.text = title
+    label.setContentHuggingPriority(.required, for: .horizontal)
+    return label
+  }
+
+  private func makeAmountValueLabel() -> UILabel {
+    let label = makeLabel(
+      size: 28,
+      weight: .black,
+      color: Palette.text,
+      monospacedDigits: true
+    )
+    // 宽度不足时缩小，最大高度 38s。
+    label.adjustsFontSizeToFitWidth = true
+    label.minimumScaleFactor = 0.5
+    label.heightAnchor.constraint(lessThanOrEqualToConstant: px(38)).isActive = true
+    return label
+  }
+
+  private func makeMetric(title: String, valueLabel: UILabel) -> UIView {
+    let titleLabel = makeLabel(size: 14, weight: .bold, color: Palette.mutedText)
     titleLabel.text = title
-    titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
-    titleLabel.textColor = UIColor.white.withAlphaComponent(0.64)
-
-    valueLabel.font = .monospacedDigitSystemFont(ofSize: 23, weight: .bold)
-    valueLabel.textColor = .white
-    valueLabel.adjustsFontSizeToFitWidth = true
-    valueLabel.minimumScaleFactor = 0.72
-
     let stack = UIStackView(arrangedSubviews: [titleLabel, valueLabel])
     stack.axis = .vertical
     stack.alignment = .fill
     stack.distribution = .fill
-    stack.spacing = 5
+    stack.spacing = 0
     return stack
   }
 
-  private func makeVerticalDivider() -> UIView {
-    let divider = UIView()
-    divider.backgroundColor = UIColor.white.withAlphaComponent(0.26)
-    divider.translatesAutoresizingMaskIntoConstraints = false
-    divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
-    return divider
+  // MARK: - 渲染当前状态
+
+  // 按 lastSnapshot 刷新购物车、汇总与状态卡；lastSnapshot 为 nil 即等待态。
+  private func renderTransaction() {
+    guard let snapshot = lastSnapshot else {
+      replaceItemRows(with: [])
+      moreItemsLabel.text = nil
+      moreItemsLabel.isHidden = true
+      itemQuantityValueLabel.text = "0"
+      skuCountValueLabel.text = "0"
+      subtotalValueLabel.text = "$0.00"
+      gstValueLabel.text = "$0.00"
+      savingsMetricView.alpha = 0
+      totalValueLabel.text = "$0.00"
+      renderStatusCard(mode: nil, change: HBExternalDisplayMoney(cents: 0))
+      return
+    }
+
+    renderStatusCard(mode: snapshot.mode, change: snapshot.change)
+    let window = visibleItemWindow(for: snapshot)
+    replaceItemRows(with: window.items)
+    moreItemsLabel.text = moreItemsText(
+      hiddenAbove: window.hiddenAbove,
+      hiddenBelow: window.hiddenBelow
+    )
+    moreItemsLabel.isHidden =
+      window.hiddenAbove == 0 && window.hiddenBelow == 0
+    let summary = resolvedSummary(for: snapshot)
+    itemQuantityValueLabel.text = summary.itemQuantity
+    skuCountValueLabel.text = String(summary.skuCount)
+    subtotalValueLabel.text = format(summary.subtotal)
+    gstValueLabel.text = format(snapshot.gst)
+    // 无优惠时整栏隐藏（用 alpha 保留列位，与 WPF 折叠不改变列宽一致）。
+    let hasSavings = snapshot.discount.cents != 0
+    savingsMetricView.alpha = hasSavings ? 1 : 0
+    savingsValueLabel.text = hasSavings ? formatSavings(snapshot.discount) : nil
+    totalValueLabel.text = format(snapshot.total)
   }
 
   private func visibleItemWindow(
     for snapshot: HBExternalDisplaySnapshot
   ) -> HBExternalDisplayItemWindow {
     let itemCount = snapshot.items.count
+    let limit = hbExternalDisplayVisibleItemLimit
     let start: Int
     if let visibleItemStart = snapshot.visibleItemStart {
-      start = min(max(visibleItemStart, 0), max(itemCount - 12, 0))
+      start = min(max(visibleItemStart, 0), max(itemCount - limit, 0))
     } else {
-      start = max(itemCount - 12, 0)
+      start = max(itemCount - limit, 0)
     }
-    let end = min(start + 12, itemCount)
+    let end = min(start + limit, itemCount)
     return HBExternalDisplayItemWindow(
       items: Array(snapshot.items[start..<end]),
       hiddenAbove: start,
@@ -623,106 +957,6 @@ final class HBExternalDisplayViewController: UIViewController {
     return nil
   }
 
-  private func replaceItemRows(with items: [HBExternalDisplayItem]) {
-    itemStack.arrangedSubviews.forEach { row in
-      itemStack.removeArrangedSubview(row)
-      row.removeFromSuperview()
-    }
-
-    if items.isEmpty {
-      itemStack.distribution = .fill
-      let emptyTopSpacer = UIView()
-      emptyTopSpacer.heightAnchor.constraint(equalToConstant: 22).isActive = true
-      emptyTopSpacer.setContentHuggingPriority(.required, for: .vertical)
-      emptyTopSpacer.setContentCompressionResistancePriority(.required, for: .vertical)
-
-      let emptyLabel = UILabel()
-      emptyLabel.text = localizedText(
-        english: "Your basket is empty",
-        chinese: "购物篮为空"
-      )
-      emptyLabel.font = .systemFont(ofSize: 18, weight: .medium)
-      emptyLabel.textColor = UIColor.white.withAlphaComponent(0.5)
-      emptyLabel.setContentHuggingPriority(.required, for: .vertical)
-      emptyLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-
-      // 空态文案紧跟表头，剩余空间由透明占位吸收，避免启动兜底跳版。
-      let flexibleSpacer = UIView()
-      flexibleSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-      flexibleSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-      itemStack.addArrangedSubview(emptyTopSpacer)
-      itemStack.addArrangedSubview(emptyLabel)
-      itemStack.addArrangedSubview(flexibleSpacer)
-      return
-    }
-
-    itemStack.distribution = .fill
-    for item in items {
-      let nameLabel = UILabel()
-      nameLabel.text = item.name
-      nameLabel.font = .systemFont(ofSize: 16, weight: .medium)
-      nameLabel.textColor = .white
-      nameLabel.lineBreakMode = .byTruncatingTail
-      nameLabel.numberOfLines = 1
-
-      let quantityLabel = UILabel()
-      quantityLabel.text = "× \(item.quantity)"
-      quantityLabel.font = .monospacedDigitSystemFont(ofSize: 16, weight: .regular)
-      quantityLabel.textColor = UIColor.white.withAlphaComponent(0.66)
-      quantityLabel.textAlignment = .right
-      quantityLabel.widthAnchor.constraint(equalToConstant: 72).isActive = true
-
-      let unitPriceLabel = UILabel()
-      unitPriceLabel.text = unitPriceText(for: item)
-      unitPriceLabel.font = .monospacedDigitSystemFont(ofSize: 16, weight: .medium)
-      unitPriceLabel.textColor = .white
-      unitPriceLabel.textAlignment = .right
-      unitPriceLabel.widthAnchor.constraint(equalToConstant: 104).isActive = true
-
-      let amountLabel = UILabel()
-      amountLabel.text = format(item.amount)
-      amountLabel.font = .monospacedDigitSystemFont(ofSize: 17, weight: .bold)
-      amountLabel.textColor = .white
-      amountLabel.textAlignment = .right
-      amountLabel.widthAnchor.constraint(equalToConstant: 104).isActive = true
-
-      let row = UIStackView(
-        arrangedSubviews: [nameLabel, quantityLabel, unitPriceLabel, amountLabel]
-      )
-      row.axis = .horizontal
-      row.alignment = .center
-      row.spacing = 0
-      row.translatesAutoresizingMaskIntoConstraints = false
-
-      let cell = UIView()
-      cell.heightAnchor.constraint(equalToConstant: 32).isActive = true
-      cell.setContentHuggingPriority(.required, for: .vertical)
-      cell.setContentCompressionResistancePriority(.required, for: .vertical)
-      let divider = UIView()
-      divider.backgroundColor = UIColor.white.withAlphaComponent(0.15)
-      divider.translatesAutoresizingMaskIntoConstraints = false
-      cell.addSubview(row)
-      cell.addSubview(divider)
-      NSLayoutConstraint.activate([
-        row.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-        row.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
-        row.topAnchor.constraint(equalTo: cell.topAnchor),
-        row.bottomAnchor.constraint(equalTo: divider.topAnchor),
-        divider.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-        divider.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
-        divider.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
-        divider.heightAnchor.constraint(equalToConstant: 1),
-      ])
-      itemStack.addArrangedSubview(cell)
-    }
-
-    // 商品行严格固定 32pt 并从顶部排列，剩余空间由底部弹性占位吸收，不滚动。
-    let flexibleSpacer = UIView()
-    flexibleSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-    flexibleSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-    itemStack.addArrangedSubview(flexibleSpacer)
-  }
-
   private func resolvedSummary(
     for snapshot: HBExternalDisplaySnapshot
   ) -> HBExternalDisplaySummary {
@@ -742,16 +976,6 @@ final class HBExternalDisplayViewController: UIViewController {
     )
   }
 
-  private func formattedItemCount(
-    itemQuantity: String,
-    skuCount: Int
-  ) -> String {
-    localizedText(
-      english: "\(itemQuantity) items · \(skuCount) SKU",
-      chinese: "\(itemQuantity) 件商品 · \(skuCount) 个货号"
-    )
-  }
-
   private func unitPriceText(for item: HBExternalDisplayItem) -> String {
     if let unitPrice = item.unitPrice {
       return format(unitPrice)
@@ -759,30 +983,20 @@ final class HBExternalDisplayViewController: UIViewController {
     return "—"
   }
 
+  // mode 为 nil（等待态）以及 idle/cart/payment 都显示 WPF 的 Ready for Payment；
+  // change/success 保留 iPad 原有的找零/完成文案。
   private func renderStatusCard(
-    mode: HBExternalDisplayMode,
+    mode: HBExternalDisplayMode?,
     change: HBExternalDisplayMoney
   ) {
     switch mode {
-    case .idle:
-      statusTitleLabel.text = localizedText(english: "Ready when you are", chinese: "准备开始")
-      statusSubtitleLabel.text = localizedText(english: "Scan an item to begin", chinese: "请扫描商品")
-    case .cart:
-      statusTitleLabel.text = localizedText(english: "Ready to pay", chinese: "可以付款")
-      statusSubtitleLabel.text = localizedText(
-        english: "Please follow the cashier's instructions",
-        chinese: "请按收银员提示付款"
-      )
-    case .payment:
-      statusTitleLabel.text = localizedText(english: "Payment in progress", chinese: "正在付款")
-      statusSubtitleLabel.text = localizedText(
-        english: "Please follow the terminal prompts",
-        chinese: "请按终端提示完成付款"
-      )
-    case .change:
+    case .none, .some(.idle), .some(.cart), .some(.payment):
+      statusTitleLabel.text = localizedText(english: "Ready for Payment", chinese: "准备付款")
+      statusSubtitleLabel.text = localizedText(english: "Insert or tap card", chinese: "请插卡或挥卡")
+    case .some(.change):
       statusTitleLabel.text = localizedText(english: "Your change", chinese: "找零")
       statusSubtitleLabel.text = format(change)
-    case .success:
+    case .some(.success):
       statusTitleLabel.text = localizedText(english: "Payment complete", chinese: "付款完成")
       statusSubtitleLabel.text = change.cents != 0
         ? localizedText(
@@ -812,13 +1026,11 @@ final class HBExternalDisplayViewController: UIViewController {
     )
   }
 
-  private func formatDiscount(_ money: HBExternalDisplayMoney) -> String {
+  // snapshot 保存的是折扣绝对金额；Savings 栏统一以 "-" 前缀呈现为减项。
+  private func formatSavings(_ money: HBExternalDisplayMoney) -> String {
     let absoluteCents = abs(money.cents)
-    guard absoluteCents > 0 else { return "$0.00" }
-
-    // snapshot 保存的是折扣绝对金额；UIKit fallback 同样明确呈现为减项。
     return String(
-      format: "−$%d.%02d",
+      format: "-$%d.%02d",
       absoluteCents / 100,
       absoluteCents % 100
     )

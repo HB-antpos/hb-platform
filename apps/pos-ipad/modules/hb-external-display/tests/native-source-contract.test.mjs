@@ -217,7 +217,7 @@ test("native snapshot accepts optional unit price and summary without breaking l
   assert.match(source, /payload\["visibleItemStart"\]\s*=\s*visibleItemStart/);
   assert.match(
     source,
-    /let maximumVisibleItemStart = max\(0, items\.count - 12\)/,
+    /let maximumVisibleItemStart = max\(0, items\.count - hbExternalDisplayVisibleItemLimit\)/,
   );
   assert.match(source, /visibleItemStart\s*<=\s*maximumVisibleItemStart/);
   assert.match(
@@ -226,101 +226,150 @@ test("native snapshot accepts optional unit price and summary without breaking l
   );
 });
 
-test("UIKit fallback matches reference design and keeps idle advert full-screen", async () => {
+test("visible item limit is a single shared constant of 6 rows used by models and view controller", async () => {
+  const [models, viewController] = await Promise.all([
+    read("ios/HBExternalDisplayModels.swift"),
+    read("ios/HBExternalDisplayViewController.swift"),
+  ]);
+
+  assert.match(models, /let hbExternalDisplayVisibleItemLimit\s*=\s*6\b/);
+  assert.match(viewController, /let limit = hbExternalDisplayVisibleItemLimit/);
+  // 旧的 12 行上限不得在窗口计算里残留。
+  assert.doesNotMatch(models, /items\.count - 12/);
+  assert.doesNotMatch(viewController, /itemCount - 12|start \+ 12/);
+});
+
+test("native item accepts WPF-aligned optional fields, validates them and echoes them back to React", async () => {
+  const source = await read("ios/HBExternalDisplayModels.swift");
+
+  for (const field of [
+    "itemNumber",
+    "lookupCode",
+    "grossAmount",
+    "discountRate",
+    "imageUri",
+  ]) {
+    // Record 字段 + 回传 React 层的 dictionary 键都必须存在，漏了就丢字段。
+    assert.match(source, new RegExp(`@Field\\s+var ${field}:`));
+    assert.match(source, new RegExp(`payload\\["${field}"\\]\\s*=\\s*${field}`));
+  }
+  assert.match(source, /var grossAmount: HBExternalDisplayMoneyRecord\?/);
+  assert.match(source, /\(1\.\.\.64\)\.contains\(itemNumber\.count\)/);
+  assert.match(source, /\(1\.\.\.64\)\.contains\(lookupCode\.count\)/);
+  assert.match(source, /\^\\d\{1,3\}\(\?:\\\.\\d\{1,2\}\)\?\$/);
+  // grossAmount 与 discountRate 必须同时出现。
+  assert.match(
+    source,
+    /\(grossAmount == nil\) == \(discountRate == nil\)[\s\S]*invalid\("items\[\\\(index\)\]\.discountRate"\)/,
+  );
+  // imageUri 与 advert.localUri 共用同一套本地 file URL 校验。
+  assert.match(source, /private func validatedLocalFileURL\(/);
+  assert.match(source, /uri\.count\s*<=\s*2_048/);
+  assert.match(source, /url\.isFileURL/);
+  assert.match(source, /url\.host == nil \|\| url\.host == "" \|\| url\.host == "localhost"/);
+  assert.match(source, /validatedLocalFileURL\(localUri,\s*field:\s*"advert\.localUri"\)/);
+  assert.match(source, /validatedLocalFileURL\(\$0,\s*field:\s*"items\[\\\(index\)\]\.imageUri"\)/);
+});
+
+test("UIKit fallback uses the shared WPF geometry and keeps idle advert full-screen", async () => {
   const source = await read("ios/HBExternalDisplayViewController.swift");
 
-  // 48pt title bar without any close control.
-  assert.match(
-    source,
-    /windowTitleLabel\.text\s*=\s*localizedText\(english:\s*"Customer Display",\s*chinese:\s*"客显"\)/,
-  );
-  assert.match(
-    source,
-    /windowTitleLabel\.font\s*=\s*\.systemFont\(ofSize:\s*21,\s*weight:\s*\.bold\)/,
-  );
-  assert.match(source, /titleBar\.heightAnchor\.constraint\(equalToConstant:\s*48\)/);
+  // 标题栏与 "Your order" 标题行已删除。
+  assert.doesNotMatch(source, /titleBar|windowTitleLabel|Customer Display/);
+  assert.doesNotMatch(source, /Your order|orderTitleLabel/);
   assert.doesNotMatch(source, /closeButton|dismissButton|UIButton/);
 
+  // 几何公式与 React 层一致：s = h/768、画布宽夹 1024...1366、占比 0.60 + 0.08 * ...
+  assert.match(source, /struct HBExternalDisplayLayoutMetrics/);
+  assert.match(source, /let s = height \/ 768/);
+  assert.match(source, /min\(max\(768 \* width \/ height, 1024\), 1366\)/);
+  assert.match(source, /0\.60 \+ 0\.08 \* \(\(1366 - canvasWidth\) \/ \(1366 - 1024\)\)/);
+  assert.match(source, /let margin = 18 \* s/);
+  assert.match(source, /let summaryHeight = 152 \* s/);
+  assert.match(source, /let gap = 20 \* s/);
+  assert.match(source, /contentWidth \* \(1 - cartShare\) - margin/);
+
+  // 面板 frame 在 viewDidLayoutSubviews 里按当前 bounds 计算，旋转/分辨率变化会重排。
+  assert.match(
+    source,
+    /override func viewDidLayoutSubviews\(\)[\s\S]*applyFrames\(\)/,
+  );
+  assert.match(source, /HBExternalDisplayLayoutMetrics\(size:\s*view\.bounds\.size\)/);
+  assert.match(source, /orderPanel\.frame\s*=\s*metrics\.cartFrame/);
+  assert.match(source, /advertContainer\.frame\s*=\s*metrics\.advertFrame/);
+  assert.match(source, /summaryPanel\.frame\s*=\s*metrics\.summaryFrame/);
+  assert.match(source, /abs\(s - contentScale\)\s*>\s*0\.0005/);
+
+  // 广告面板圆角 18s、背景表面色；空闲全屏广告无边距/圆角/边框。
+  assert.match(source, /advertContainer\.layer\.cornerRadius\s*=\s*18 \* s/);
+  assert.match(source, /advertContainer\.backgroundColor\s*=\s*Palette\.surface/);
   assert.match(
     source,
     /snapshot\.mode\s*==\s*\.idle\s*&&\s*snapshot\.items\.isEmpty\s*&&\s*snapshot\.advert\s*!=\s*nil/,
   );
   assert.match(source, /orderPanel\.isHidden\s*=\s*fullScreenAdvert/);
-  assert.match(
-    source,
-    /advertContainer\.layer\.cornerRadius\s*=\s*fullScreenAdvert\s*\?\s*0\s*:\s*12/,
-  );
-  assert.match(
-    source,
-    /advertContainer\.backgroundColor\s*=\s*fullScreenAdvert\s*\?\s*\.clear\s*:\s*UIColor\.white\.withAlphaComponent\(0\.035\)/,
-  );
+  assert.match(source, /summaryPanel\.isHidden\s*=\s*fullScreenAdvert/);
+  assert.match(source, /advertContainer\.frame\s*=\s*view\.bounds/);
+  assert.match(source, /advertContainer\.layer\.cornerRadius\s*=\s*0/);
+  assert.match(source, /advertContainer\.layer\.borderWidth\s*=\s*0/);
   assert.match(source, /UIView\.performWithoutAnimation/);
-
-  for (const edge of ["leading", "trailing", "top", "bottom"]) {
-    assert.match(
-      source,
-      new RegExp(
-        `advertContainer\\.${edge}Anchor\\.constraint\\(equalTo: view\\.${edge}Anchor\\)`,
-      ),
-    );
-  }
-
-  assert.match(
-    source,
-    /orderPanel\.leadingAnchor\.constraint\([\s\S]*view\.safeAreaLayoutGuide\.leadingAnchor,[\s\S]*constant:\s*24/,
-  );
-  assert.match(
-    source,
-    /advertContainer\.trailingAnchor\.constraint\([\s\S]*view\.safeAreaLayoutGuide\.trailingAnchor,[\s\S]*constant:\s*-24/,
-  );
-  assert.match(
-    source,
-    /summaryPanel\.bottomAnchor\.constraint\([\s\S]*view\.safeAreaLayoutGuide\.bottomAnchor,[\s\S]*constant:\s*-24/,
-  );
-  assert.match(
-    source,
-    /advertContainer\.leadingAnchor\.constraint\(\s*equalTo:\s*orderPanel\.trailingAnchor,\s*constant:\s*18\s*\)/,
-  );
-  assert.match(
-    source,
-    /advertContainer\.widthAnchor\.constraint\(\s*equalTo:\s*orderPanel\.widthAnchor\s*\)/,
-  );
-  assert.match(
-    source,
-    /summaryPanel\.heightAnchor\.constraint\(equalToConstant:\s*132\)/,
-  );
-  assert.match(
-    source,
-    /summaryMetricsContainer\.widthAnchor\.constraint\([\s\S]*multiplier:\s*0\.47/,
-  );
-  assert.match(
-    source,
-    /amountDueContainer\.widthAnchor\.constraint\([\s\S]*multiplier:\s*0\.26/,
-  );
-  assert.match(
-    source,
-    /summarySections\.addArrangedSubview\(statusRegion\)/,
-  );
 });
 
-test("UIKit fallback renders four-column order table and a full-width summary", async () => {
+test("UIKit fallback uses the WPF palette", async () => {
   const source = await read("ios/HBExternalDisplayViewController.swift");
 
-  assert.match(source, /orderTitleLabel\.text\s*=\s*localizedText\(english:\s*"Your order",\s*chinese:\s*"您的订单"\)/);
-  for (const title of ["Product", "Qty", "Unit price", "Amount"]) {
-    assert.match(source, new RegExp(`english:\\s*"${title}"`));
+  assert.match(source, /background = UIColor\(red: 9 \/ 255, green: 17 \/ 255, blue: 31 \/ 255/);
+  assert.match(source, /surface = UIColor\(red: 16 \/ 255, green: 27 \/ 255, blue: 45 \/ 255/);
+  assert.match(source, /accent = UIColor\(red: 105 \/ 255, green: 227 \/ 255, blue: 194 \/ 255/);
+  assert.match(source, /amount = UIColor\(red: 1, green: 199 \/ 255, blue: 61 \/ 255/);
+  assert.match(source, /mutedText = UIColor\.white\.withAlphaComponent\(0\.64\)/);
+  assert.match(source, /headerText = UIColor\.white\.withAlphaComponent\(0\.90\)/);
+  assert.match(source, /divider = UIColor\.white\.withAlphaComponent\(0\.12\)/);
+});
+
+test("UIKit fallback renders WPF four-column cart table and summary", async () => {
+  const source = await read("ios/HBExternalDisplayViewController.swift");
+
+  for (const title of ["Item Description", "Qty", "Price", "Total"]) {
+    assert.match(source, new RegExp(`title: "${title}"`));
   }
-  assert.match(source, /label\.font\s*=\s*\.systemFont\(ofSize:\s*16,\s*weight:\s*\.semibold\)/);
-  assert.match(source, /label\.textColor\s*=\s*UIColor\.white\.withAlphaComponent\(0\.88\)/);
-  assert.match(source, /unitPriceLabel\.text\s*=\s*unitPriceText\(for:\s*item\)/);
-  assert.match(source, /unitPriceLabel\.textColor\s*=\s*\.white/);
-  assert.match(source, /quantityLabel\.textColor\s*=\s*UIColor\.white\.withAlphaComponent\(0\.66\)/);
+  // 列宽 96s / 116s / 126s，行高 72s，列头 48s。
+  assert.match(source, /px\(96\)/);
+  assert.match(source, /px\(116\)/);
+  assert.match(source, /px\(126\)/);
+  assert.match(source, /height:\s*px\(72\)/);
+  assert.match(source, /size:\s*17,\s*weight:\s*\.bold,\s*color:\s*Palette\.headerText/);
+  // 奇偶行交替：第 1、3、5…（从 0 计）行用表面色。
+  assert.match(source, /index % 2 == 1 \? Palette\.surface : Palette\.background/);
+  // 货号 / 查询码、数量胶囊、折扣率、删除线原价。
+  assert.match(source, /"Item No\. \\\(itemNumber\)"/);
+  assert.match(source, /px\(21\)/);
+  assert.match(source, /"-\\\(discountRate\)%"/);
+  assert.match(source, /\.strikethroughStyle:\s*NSUnderlineStyle\.single\.rawValue/);
+  assert.match(source, /item\.grossAmount != nil \? Palette\.accent : Palette\.text/);
+  assert.match(source, /pill\.layer\.cornerRadius\s*=\s*px\(12\)/);
+  assert.match(source, /label\.text\s*=\s*item\.quantity/);
+  assert.doesNotMatch(source, /"× \\\(item\.quantity\)"/);
+  // 空购物车不显示任何空态文案。
+  assert.doesNotMatch(source, /basket is empty|emptyLabel/);
+
+  // 汇总区：三列 弹性 / 220s / 220s，Total To Pay 与状态卡。
+  assert.match(source, /"Item Quantity"/);
+  assert.match(source, /"SKU Count"/);
+  assert.match(source, /title:\s*"Subtotal"/);
+  assert.match(source, /title:\s*"GST"/);
+  assert.match(source, /title:\s*"Savings"/);
+  assert.match(source, /middleColumn\.widthAnchor\.constraint\(equalToConstant:\s*px\(220\)\)/);
+  assert.match(source, /rightColumn\.widthAnchor\.constraint\(equalToConstant:\s*px\(220\)\)/);
+  assert.match(source, /totalCaption\.text\s*=\s*"Total To Pay"/);
+  assert.match(source, /size:\s*62,\s*weight:\s*\.black,\s*color:\s*Palette\.amount/);
+  assert.match(source, /constraint\(equalToConstant:\s*px\(68\)\)/);
   assert.match(source, /subtotalValueLabel\.text\s*=\s*format\(summary\.subtotal\)/);
-  assert.match(
-    source,
-    /amountDueLabel\.text\s*=\s*localizedText\(english:\s*"Amount due",\s*chinese:\s*"应付总额"\)/,
-  );
-  assert.match(source, /totalValueLabel\.font\s*=\s*\.monospacedDigitSystemFont\(\s*ofSize:\s*42/);
+  // Savings 为 0 时整栏隐藏，且以 "-" 前缀显示。
+  assert.match(source, /let hasSavings = snapshot\.discount\.cents != 0/);
+  assert.match(source, /savingsMetricView\.alpha = hasSavings \? 1 : 0/);
+  assert.match(source, /format:\s*"-\$%d\.%02d"/);
+  assert.doesNotMatch(source, /Amount due|Your order|Unit price/);
   assert.match(
     source,
     /private func visibleItemWindow\([\s\S]*for snapshot: HBExternalDisplaySnapshot[\s\S]*-> HBExternalDisplayItemWindow/,
@@ -329,31 +378,28 @@ test("UIKit fallback renders four-column order table and a full-width summary", 
   assert.match(source, /moreItemsLabel\.text\s*=\s*moreItemsText\(/);
 });
 
-test("UIKit fallback keeps the order heading and empty message at the top", async () => {
-  const source = await read("ios/HBExternalDisplayViewController.swift");
+test("UIKit fallback loads thumbnails only from validated local files and never touches the network", async () => {
+  const [viewController, models] = await Promise.all([
+    read("ios/HBExternalDisplayViewController.swift"),
+    read("ios/HBExternalDisplayModels.swift"),
+  ]);
+  const combined = `${models}\n${viewController}`;
 
-  assert.match(
-    source,
-    /orderTitleLabel\.setContentHuggingPriority\(\.required,\s*for:\s*\.vertical\)/,
-  );
-  assert.match(
-    source,
-    /if items\.isEmpty \{[\s\S]*itemStack\.distribution\s*=\s*\.fill[\s\S]*emptyTopSpacer\.heightAnchor\.constraint\(equalToConstant:\s*22\)/,
-  );
-  assert.match(
-    source,
-    /itemStack\.distribution\s*=\s*\.fill[\s\S]*for item in items[\s\S]*cell\.heightAnchor\.constraint\(equalToConstant:\s*32\)/,
-  );
-  assert.match(
-    source,
-    /flexibleSpacer\.setContentHuggingPriority\(\.defaultLow,\s*for:\s*\.vertical\)[\s\S]*itemStack\.addArrangedSubview\(flexibleSpacer\)/,
+  assert.match(viewController, /UIImage\(contentsOfFile:\s*url\.path\)/);
+  assert.match(viewController, /item\.imageUrl/);
+  // 加载失败回退购物袋占位。
+  assert.match(viewController, /UIImage\(systemName:\s*"bag\.fill"/);
+  assert.doesNotMatch(
+    combined,
+    /URLSession|URLRequest|NSURLConnection|Data\(contentsOf|String\(contentsOf|contentsOf:\s*(?:url|URL)|URLSessionTask|WKWebView|CFNetwork|Network\.framework|import Network/,
   );
 });
 
-test("UIKit fallback slices from visibleItemStart and shows window overflow beside the title", async () => {
+test("UIKit fallback slices from visibleItemStart and shows the hidden-row hint at the panel corner", async () => {
   const source = await read("ios/HBExternalDisplayViewController.swift");
 
-  assert.match(source, /start = max\(itemCount - 12, 0\)/);
+  assert.match(source, /start = max\(itemCount - limit, 0\)/);
+  assert.match(source, /let end = min\(start \+ limit, itemCount\)/);
   assert.match(source, /Array\(snapshot\.items\[start\.\.<end\]\)/);
   assert.match(source, /hiddenAbove:\s*start/);
   assert.match(source, /hiddenBelow:\s*max\(itemCount - end, 0\)/);
@@ -365,8 +411,15 @@ test("UIKit fallback slices from visibleItemStart and shows window overflow besi
   assert.match(source, /hiddenAbove > 0/);
   assert.match(source, /hiddenBelow > 0/);
   assert.match(source, /return nil/);
-  assert.match(source, /orderTitleRow\.addArrangedSubview\(moreItemsLabel\)/);
-  assert.doesNotMatch(source, /orderPanel\.addArrangedSubview\(moreItemsLabel\)/);
+  // 提示小字在购物车面板右下角。
+  assert.match(
+    source,
+    /moreItemsLabel\.trailingAnchor\.constraint\(\s*equalTo:\s*orderPanel\.trailingAnchor/,
+  );
+  assert.match(
+    source,
+    /moreItemsLabel\.bottomAnchor\.constraint\(\s*equalTo:\s*orderPanel\.bottomAnchor/,
+  );
   assert.match(source, /english:\s*"\\\(hiddenAbove\) earlier · \\\(hiddenBelow\) later"/);
   assert.match(source, /chinese:\s*"上方 \\\(hiddenAbove\) 件 · 下方 \\\(hiddenBelow\) 件"/);
   assert.match(source, /english:\s*"\\\(hiddenAbove\) earlier"/);
@@ -375,20 +428,20 @@ test("UIKit fallback slices from visibleItemStart and shows window overflow besi
   assert.match(source, /chinese:\s*"后面还有 \\\(hiddenBelow\) 件"/);
 });
 
-test("UIKit fallback renders a localized status card per mode with change on success", async () => {
+test("UIKit fallback renders Ready for Payment by default and keeps change/success copy", async () => {
   const source = await read("ios/HBExternalDisplayViewController.swift");
 
+  // idle/cart/payment 与等待态：WPF 的 Ready for Payment / Insert or tap card。
+  assert.match(source, /case \.none,\s*\.some\(\.idle\),\s*\.some\(\.cart\),\s*\.some\(\.payment\):/);
+  assert.match(source, /english:\s*"Ready for Payment"/);
+  assert.match(source, /english:\s*"Insert or tap card"/);
+  // change/success 保留现有文案。
   for (const copy of [
-    "Ready when you are",
-    "Scan an item to begin",
-    "Ready to pay",
-    "Please follow the cashier's instructions",
-    "Payment in progress",
-    "Please follow the terminal prompts",
     "Your change",
     "Payment complete",
+    "Thank you for shopping with us",
   ]) {
-    assert.match(source, new RegExp(`english:\\s*"${copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
+    assert.match(source, new RegExp(`english:\\s*"${copy}"`));
   }
   assert.match(source, /statusSubtitleLabel\.text\s*=\s*format\(change\)/);
   assert.match(source, /change\.cents\s*!=\s*0/);
@@ -425,23 +478,6 @@ test("UIKit fallback safely derives summary and unit price when optional fields 
   assert.match(source, /if let unitPrice = item\.unitPrice \{[\s\S]*return format\(unitPrice\)/);
   assert.match(source, /private func unitPriceText[\s\S]*return "—"/);
   assert.doesNotMatch(source, /Double\(item\.quantity\)/);
-  assert.match(
-    source,
-    /private func formattedItemCount\([\s\S]*itemQuantity:\s*String,[\s\S]*skuCount:\s*Int[\s\S]*-> String/,
-  );
-});
-
-test("UIKit fallback renders a non-zero discount as an explicit deduction", async () => {
-  const source = await read("ios/HBExternalDisplayViewController.swift");
-
-  assert.match(
-    source,
-    /discountValueLabel\.text\s*=\s*formatDiscount\(snapshot\.discount\)/,
-  );
-  assert.match(
-    source,
-    /private func formatDiscount\([\s\S]*absoluteCents\s*=\s*abs\(money\.cents\)[\s\S]*guard absoluteCents\s*>\s*0 else \{ return "\$0\.00" \}[\s\S]*format:\s*"−\$%d\.%02d"/,
-  );
 });
 
 test("UIKit fallback fits media without cropping, reuses identical adverts, and clears identity on stop", async () => {

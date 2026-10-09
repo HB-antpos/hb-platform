@@ -29,6 +29,40 @@ export function normalizeLocalAdvertisementUri(
   return file.uri;
 }
 
+/**
+ * 商品缩略图缓存根目录校验；规则与广告缓存根一致（file 协议、无 query/hash/凭据、无路径穿越、非 `/`）。
+ */
+export function normalizeProductImageCacheRootUri(value: string): string {
+  const root = parseLocalFileUri(value, "product image cache root");
+  if (root.path === "/") {
+    throw new TypeError("Customer display product image cache root is invalid.");
+  }
+  return root.uri;
+}
+
+/**
+ * 商品缩略图的本地地址必须落在商品图缓存根目录内（且不能就是根目录本身），
+ * 保证客显层只会读取专用缓存目录里的文件，永不联网或读取任意本地路径。
+ */
+export function normalizeLocalProductImageUri(
+  value: string,
+  productImageCacheRootUri: string,
+): string {
+  const root = parseLocalFileUri(
+    productImageCacheRootUri,
+    "product image cache root",
+  );
+  const file = parseLocalFileUri(value, "local product image URI");
+  if (
+    file.host !== root.host ||
+    file.path === root.path ||
+    !file.path.startsWith(`${root.path}/`)
+  ) {
+    throw new TypeError("Customer display local product image URI is invalid.");
+  }
+  return file.uri;
+}
+
 function parseLocalFileUri(
   value: string,
   label: string,

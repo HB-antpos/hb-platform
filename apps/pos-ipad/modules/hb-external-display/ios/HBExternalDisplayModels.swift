@@ -3,6 +3,29 @@ import Foundation
 
 private let maximumSafeJavaScriptInteger = 9_007_199_254_740_991
 
+// 客显购物车一屏可见行数上限（与 WPF 客显 72 行高 / 768 设计高对齐）。
+// models 校验 visibleItemStart 与 view controller 的窗口切片共用这一个常量，
+// 并且必须与 TS 契约 CUSTOMER_DISPLAY_VISIBLE_ITEM_LIMIT 保持一致。
+let hbExternalDisplayVisibleItemLimit = 6
+
+// 本地文件 URI 校验：广告与商品缩略图共用。
+// 只接受 file URL（host 为空或 localhost）且长度不超过 2048，客显层永不联网取资源。
+private func validatedLocalFileURL(
+  _ uri: String,
+  field: String
+) throws -> URL {
+  guard
+    uri.count <= 2_048,
+    let url = URL(string: uri),
+    url.isFileURL,
+    !url.path.isEmpty,
+    url.host == nil || url.host == "" || url.host == "localhost"
+  else {
+    throw HBExternalDisplayValidationError.invalid(field)
+  }
+  return url
+}
+
 enum HBExternalDisplayMode: String {
   case idle
   case cart
@@ -32,7 +55,16 @@ struct HBExternalDisplayItem {
   let quantity: String
   let unitPrice: HBExternalDisplayMoney?
   let amount: HBExternalDisplayMoney
+  // 以下为对齐 WPF 客显追加的可选字段，缺省时按无该信息渲染。
+  let itemNumber: String?
+  let lookupCode: String?
+  let grossAmount: HBExternalDisplayMoney?
+  let discountRate: String?
+  let imageUri: String?
+  // 已通过校验的本地缩略图 file URL，仅供兜底层 UIImage(contentsOfFile:) 读取。
+  let imageUrl: URL?
 
+  // React 层只靠 onSnapshotChanged 拿快照，这里漏字段就会丢字段。
   var dictionary: [String: Any] {
     var payload: [String: Any] = [
       "name": name,
@@ -41,6 +73,21 @@ struct HBExternalDisplayItem {
     ]
     if let unitPrice {
       payload["unitPrice"] = unitPrice.dictionary
+    }
+    if let itemNumber {
+      payload["itemNumber"] = itemNumber
+    }
+    if let lookupCode {
+      payload["lookupCode"] = lookupCode
+    }
+    if let grossAmount {
+      payload["grossAmount"] = grossAmount.dictionary
+    }
+    if let discountRate {
+      payload["discountRate"] = discountRate
+    }
+    if let imageUri {
+      payload["imageUri"] = imageUri
     }
     return payload
   }
@@ -140,6 +187,21 @@ struct HBExternalDisplayItemRecord: Record {
   @Field
   var amount = HBExternalDisplayMoneyRecord()
 
+  @Field
+  var itemNumber: String?
+
+  @Field
+  var lookupCode: String?
+
+  @Field
+  var grossAmount: HBExternalDisplayMoneyRecord?
+
+  @Field
+  var discountRate: String?
+
+  @Field
+  var imageUri: String?
+
   func validated(index: Int) throws -> HBExternalDisplayItem {
     guard (1...160).contains(name.count) else {
       throw HBExternalDisplayValidationError.invalid("items[\(index)].name")
@@ -152,6 +214,33 @@ struct HBExternalDisplayItemRecord: Record {
     else {
       throw HBExternalDisplayValidationError.invalid("items[\(index)].quantity")
     }
+    if let itemNumber {
+      guard (1...64).contains(itemNumber.count) else {
+        throw HBExternalDisplayValidationError.invalid("items[\(index)].itemNumber")
+      }
+    }
+    if let lookupCode {
+      guard (1...64).contains(lookupCode.count) else {
+        throw HBExternalDisplayValidationError.invalid("items[\(index)].lookupCode")
+      }
+    }
+    if let discountRate {
+      guard
+        discountRate.range(
+          of: #"^\d{1,3}(?:\.\d{1,2})?$"#,
+          options: .regularExpression
+        ) != nil
+      else {
+        throw HBExternalDisplayValidationError.invalid("items[\(index)].discountRate")
+      }
+    }
+    // 折前金额与折扣率只在该行有折扣时成对出现，缺一即视为非法快照。
+    guard (grossAmount == nil) == (discountRate == nil) else {
+      throw HBExternalDisplayValidationError.invalid("items[\(index)].discountRate")
+    }
+    let validatedImageUrl: URL? = try imageUri.map {
+      try validatedLocalFileURL($0, field: "items[\(index)].imageUri")
+    }
 
     return try HBExternalDisplayItem(
       name: name,
@@ -159,7 +248,15 @@ struct HBExternalDisplayItemRecord: Record {
       unitPrice: unitPrice == nil
         ? nil
         : try unitPrice?.validated(field: "items[\(index)].unitPrice"),
-      amount: amount.validated(field: "items[\(index)].amount")
+      amount: amount.validated(field: "items[\(index)].amount"),
+      itemNumber: itemNumber,
+      lookupCode: lookupCode,
+      grossAmount: grossAmount == nil
+        ? nil
+        : try grossAmount?.validated(field: "items[\(index)].grossAmount"),
+      discountRate: discountRate,
+      imageUri: imageUri,
+      imageUrl: validatedImageUrl
     )
   }
 }
@@ -209,15 +306,7 @@ struct HBExternalDisplayAdvertRecord: Record {
     guard let parsedKind = HBExternalDisplayAdvertKind(rawValue: kind) else {
       throw HBExternalDisplayValidationError.invalid("advert.kind")
     }
-    guard
-      localUri.count <= 2_048,
-      let url = URL(string: localUri),
-      url.isFileURL,
-      !url.path.isEmpty,
-      url.host == nil || url.host == "" || url.host == "localhost"
-    else {
-      throw HBExternalDisplayValidationError.invalid("advert.localUri")
-    }
+    let url = try validatedLocalFileURL(localUri, field: "advert.localUri")
 
     return HBExternalDisplayAdvert(
       kind: parsedKind,
@@ -268,7 +357,7 @@ struct HBExternalDisplaySnapshotRecord: Record {
     guard items.count <= 100 else {
       throw HBExternalDisplayValidationError.invalid("items")
     }
-    let maximumVisibleItemStart = max(0, items.count - 12)
+    let maximumVisibleItemStart = max(0, items.count - hbExternalDisplayVisibleItemLimit)
     if let visibleItemStart {
       guard
         visibleItemStart >= 0,

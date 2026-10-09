@@ -35,11 +35,15 @@ import { DurableCashCheckoutService } from "../../features/checkout/cash";
 import {
   CustomerDisplayAdvertisementPlayback,
   CustomerDisplayCoordinator,
+  CustomerDisplayProductImageCache,
+  CustomerDisplayProductImageResolver,
   CustomerDisplayPublisher,
   HbposAdvertisementApi,
+  createCatalogProductImageUrlResolver,
   type AdvertisementRefreshResult,
   type CustomerDisplayAdvertisementCachePort,
   type CustomerDisplayPublishResult,
+  type ProductImageCacheFileSystemPort,
 } from "../../features/customer-display";
 import { CustomerDisplaySensitiveContentGuard } from "../../features/customer-display/customer-display-sensitive-content-guard";
 import { DailyClosePresenter } from "../../features/daily-close/daily-close-presenter";
@@ -611,6 +615,18 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   advertisementCache?:
     | CustomerDisplayAdvertisementCachePort
     | undefined;
+  /**
+   * 客显商品缩略图本地缓存（可选）。缺省时客显快照不带图；
+   * 提供后由组合根按需解析目录图片地址、下载到 rootUri 并在就绪后刷新客显。
+   */
+  customerDisplayProductImages?:
+    | Readonly<{
+        rootUri: string;
+        files: ProductImageCacheFileSystemPort;
+        /** 解析目录里相对图片地址、校验是否同源/https 所需的 API 基址。 */
+        apiBaseUrl: string;
+      }>
+    | undefined;
   businessTimeZone?: string | undefined;
   connectivity: PaymentConnectivityPort;
   cashierAuthentication: Pick<CashierAuthenticationService, "login">;
@@ -661,6 +677,9 @@ export function createProductionPosRuntimeServices(
   );
   let customerDisplayAdvertisementPlayback:
     | CustomerDisplayAdvertisementPlayback
+    | null = null;
+  let customerDisplayProductImageResolver:
+    | CustomerDisplayProductImageResolver
     | null = null;
   let sharedHeldOrderPublicationLoop: SharedHeldOrderPublicationLoop | null =
     null;
@@ -791,16 +810,54 @@ export function createProductionPosRuntimeServices(
         catalogRepository.loadActivePromotions(storeCode),
     },
   );
+  // 客显商品缩略图：publisher 只同步 peek 本地缓存，缺图在后台按需解析目录地址并下载，
+  // 就绪后经 coordinator.refresh() 重发画面；客显层本身永不联网。
+  if (input.externalDisplay && input.customerDisplayProductImages) {
+    const productImages = input.customerDisplayProductImages;
+    const productImageCache = new CustomerDisplayProductImageCache({
+      rootUri: productImages.rootUri,
+      files: productImages.files,
+      sha256Hex: input.sha256Hex,
+    });
+    // 启动即清理遗留临时文件并恢复 LRU；失败时降级为空缓存，不影响收银。
+    void productImageCache.initialize().catch(() => undefined);
+    customerDisplayProductImageResolver =
+      new CustomerDisplayProductImageResolver({
+        cache: productImageCache,
+        resolveRemoteUrl: createCatalogProductImageUrlResolver({
+          apiBaseUrl: productImages.apiBaseUrl,
+          findExact: localSalesCatalog.findExact,
+          findExactCandidates: localSalesCatalog.findExactCandidates,
+        }),
+        onImageReady: () => {
+          // 未登录或已锁屏时不刷新：锁屏后外屏已被清空，晚到的图片不能把购物车重新推上去。
+          try {
+            currentCashier.require();
+          } catch {
+            return;
+          }
+          // coordinator 已销毁时 refresh 返回 null；发布错误一律吞掉，不影响主流程。
+          void customerDisplayCoordinator?.refresh()?.catch(() => undefined);
+        },
+      });
+  }
   const customerDisplayPublisher = input.externalDisplay
-    ? new CustomerDisplayPublisher(
-        input.externalDisplay,
-        input.customerDisplayAdvertisementCacheRootUri
+    ? new CustomerDisplayPublisher(input.externalDisplay, {
+        ...(input.customerDisplayAdvertisementCacheRootUri
           ? {
               advertisementCacheRootUri:
                 input.customerDisplayAdvertisementCacheRootUri,
             }
-          : {},
-      )
+          : {}),
+        ...(customerDisplayProductImageResolver &&
+        input.customerDisplayProductImages
+          ? {
+              productImageCacheRootUri:
+                input.customerDisplayProductImages.rootUri,
+              productImageResolver: customerDisplayProductImageResolver,
+            }
+          : {}),
+      })
     : null;
   const customerDisplayCoordinator = customerDisplayPublisher
     ? new CustomerDisplayCoordinator(
@@ -824,6 +881,14 @@ export function createProductionPosRuntimeServices(
           now: input.clock.now,
         })
       : null;
+  // 广告位（空闲全屏 / 收银右侧）由协调器按展示购物车判定，异步通知播放层换条；
+  // 通知不等待播放层，播放层异常也不能影响客显发布。
+  if (customerDisplayCoordinator && customerDisplayAdvertisementPlayback) {
+    const advertisementPlayback = customerDisplayAdvertisementPlayback;
+    customerDisplayCoordinator.setAdvertSlotListener((slot) => {
+      void advertisementPlayback.setSlot(slot).catch(() => undefined);
+    });
+  }
   const cashierSession: PosCashierSessionRuntimeService = {
     signIn: async (userBarcode) => {
       const summary = await baseCashierSession.signIn(userBarcode);
@@ -2141,6 +2206,8 @@ export function createProductionPosRuntimeServices(
         disposeDeviceScopeListener();
         // 中止在途的下发资料同步请求，之后的触发一律跳过。
         receiptProfileSync.dispose();
+        // 停止商品缩略图的排队与完成回调，退出后不再触发客显刷新。
+        customerDisplayProductImageResolver?.dispose();
         shutdown ??= Promise.all([
           catalogRefreshCoordinator.shutdown(),
           sharedHeldOrderPublicationLoop!.shutdown(),
