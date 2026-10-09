@@ -19,7 +19,7 @@ const registeredPageCopySurfaces = {
   "app/installments.tsx": "src/features/installments/installment-copy.ts",
   "app/local-history.tsx": "src/features/local-history/local-history-copy.ts",
   "app/login.tsx": "src/features/cashier-login/cashier-login-screen.tsx",
-  "app/payment-recovery.tsx": "src/features/payment-recovery/payment-recovery-copy.ts",
+  "app/payment-recovery.tsx": "../../packages/pos-domain/src/features/payment-recovery/payment-recovery-copy.ts",
   "app/payment.tsx": "src/features/payments/ui/payment-copy.ts",
   "app/registration.tsx": "src/features/device-registration/device-registration-screen.tsx",
   "app/remote-history.tsx": "src/features/remote-history/remote-history-copy.ts",

@@ -1,5 +1,7 @@
 import { paymentProviderAmountCents } from "@hb/pos-payments-core/features/payments/payment-amount";
 
+import type { PaymentStatusQueryResult } from "../runtime/payment-status-query-result";
+
 import {
   HbposApiError,
   unwrapHbposEnvelope,
@@ -167,6 +169,21 @@ export class SquarePaymentAdapter implements OnlinePaymentPort {
       const configuration = environmentForAttempt(attempt);
       return this.getStatusWithConfiguration(attempt, configuration);
     });
+  }
+
+  /** 人工核实后的状态查询只读取已存在 checkout，禁止缺少 ID 时重新创建。 */
+  public async queryExistingPayment(attempt: PaymentAttempt, control: SquareRecoveryControl = {
+    signal: new AbortController().signal,
+    deadlineAtMs: Date.now() + 10_000,
+  }): Promise<PaymentStatusQueryResult> {
+    const result = await this.safely(attempt, async () => {
+      assertPurchaseAttempt(attempt);
+      requiredReference(attempt.references.checkoutId, "SQUARE_CHECKOUT_ID_REQUIRED");
+      const configuration = environmentForAttempt(attempt);
+      return this.getStatusWithConfiguration(attempt, configuration, control);
+    });
+    // Unknown 包含网络、本地校验和交易证据错误，不能证明已取得有效原交易状态。
+    return { ...result, queryVerified: result.state !== "Unknown" };
   }
 
   private async createOrReplayCheckout(

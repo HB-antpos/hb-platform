@@ -2,6 +2,7 @@ export type SalesToolbarActionId =
   | "hold"
   | "merge-cart"
   | "returns"
+  | "payment-recovery"
   | "local-history"
   | "held-orders"
   | "reprint-receipt"
@@ -20,6 +21,7 @@ export const DEFAULT_SALES_TOOLBAR_ORDER = [
   "hold",
   "merge-cart",
   "returns",
+  "payment-recovery",
   "local-history",
   "held-orders",
   "reprint-receipt",

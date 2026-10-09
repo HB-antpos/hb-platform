@@ -89,6 +89,7 @@ type PaymentScreenProps = Readonly<{
   presenter: PaymentScreenPresenter;
   locale?: PaymentLocale;
   onBack?(): void;
+  onOpenRecoveryCenter?(): void;
   onComplete?(orderGuid: string): void;
   onPrintReceipt?(orderGuid: string): Promise<PaymentReceiptPrintOutcome>;
   showStatusStrip?: boolean;
@@ -104,6 +105,7 @@ export function PaymentScreen({
   presenter,
   locale: localeOverride,
   onBack,
+  onOpenRecoveryCenter,
   onComplete,
   onPrintReceipt,
   showStatusStrip = true,
@@ -427,6 +429,7 @@ export function PaymentScreen({
               installmentModeControl={installmentModeControl}
               locale={locale}
               onBack={onBack}
+              onOpenRecoveryCenter={onOpenRecoveryCenter}
               presenter={presenter}
               state={state}
               t={t}
@@ -1112,6 +1115,7 @@ function PaymentContextPane({
   installmentModeControl,
   locale,
   onBack,
+  onOpenRecoveryCenter,
   presenter,
   state,
   t,
@@ -1121,6 +1125,7 @@ function PaymentContextPane({
   installmentModeControl: PaymentInstallmentModeControl | undefined;
   locale: PaymentLocale;
   onBack: (() => void) | undefined;
+  onOpenRecoveryCenter: (() => void) | undefined;
   presenter: PaymentScreenPresenter;
   state: PaymentPresenterState;
   t: Translate;
@@ -1159,6 +1164,16 @@ function PaymentContextPane({
             sound="navigate"
             style={styles.contextBack}
             testID="payment-back"
+            tone="quiet"
+          />
+        ) : null}
+        {onOpenRecoveryCenter && ["recovery-required", "declined", "cancelled"].includes(state.phase) ? (
+          <ActionButton
+            disabled={state.busy || state.recoveryInFlight === true}
+            label={locale === "zh" ? "支付恢复中心" : "Payment recovery"}
+            onPress={onOpenRecoveryCenter}
+            sound="navigate"
+            testID="payment-open-recovery-center"
             tone="quiet"
           />
         ) : null}

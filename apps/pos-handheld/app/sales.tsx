@@ -331,6 +331,7 @@ export default function SalesRoute() {
             }
           : {})}
         onOpenHeldOrders={() => push("/held-orders" as Href)}
+        onOpenPaymentRecovery={() => push("/payment-recovery" as Href)}
         onOpenReturns={() => push("/returns" as Href)}
         {...(activeCashier?.permissions.includes(REMOTE_HISTORY_VIEW_PERMISSION)
           ? {

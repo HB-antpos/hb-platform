@@ -11,6 +11,7 @@ export type OperationAuthorizationCopyKey =
   | "paymentRecoveryUnpaid"
   | "paymentRecoveryUncertain"
   | "paymentTenderVoidUnreleased"
+  | "returnResolveUnknownRefund"
   | "inputLabel"
   | "inputHint"
   | "keyboard"
@@ -38,6 +39,7 @@ const COPY: Readonly<
     paymentRecoveryUnpaid: "Manually confirm no card payment",
     paymentRecoveryUncertain: "Keep card payment awaiting verification",
     paymentTenderVoidUnreleased: "Void blocked gift card tender",
+    returnResolveUnknownRefund: "Resolve an unknown card refund",
     inputLabel: "Supervisor barcode",
     inputHint: "Scan supervisor barcode",
     keyboard: "Keyboard",
@@ -67,6 +69,7 @@ const COPY: Readonly<
     paymentRecoveryUnpaid: "人工确认刷卡未扣款",
     paymentRecoveryUncertain: "保留刷卡待核实状态",
     paymentTenderVoidUnreleased: "作废已阻断的礼品卡付款",
+    returnResolveUnknownRefund: "主管结案：退款结果未知",
     inputLabel: "主管条码",
     inputHint: "扫描主管条码",
     keyboard: "键盘",
@@ -114,6 +117,8 @@ export function operationAuthorizationActionCopyKey(
       return "paymentRecoveryUncertain";
     case "payment-tender-void-unreleased":
       return "paymentTenderVoidUnreleased";
+    case "resolve-unknown-refund":
+      return "returnResolveUnknownRefund";
     default:
       return null;
   }

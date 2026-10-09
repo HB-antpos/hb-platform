@@ -1491,6 +1491,24 @@ export function createProductionPosRuntimeServices(
           return result.value;
         }
       : undefined,
+    // 人工支付结论必须由另一名主管在回调内授权；UI 勾选永远不能充当主管身份。
+    authorizeRecovery: async (request, run) => {
+      const requesting = currentCashier.require();
+      assertTrustedCashierScope(requesting, input.auditMetadata);
+      if (!operationAuthorization) throw new Error("PAYMENT_RECOVERY_SUPERVISOR_REQUIRED");
+      const authorizationId = input.createId();
+      const result = await operationAuthorization.authorizeAndRun(
+        { actionId: authorizationId, permissionCode: "Permissions.PosTerminal.Payment.Confirm", screen: request.screen, action: request.action, forceSupervisor: true },
+        async (context) => {
+          const active = currentCashier.require();
+          assertTrustedCashierScope(active, input.auditMetadata);
+          if (active !== requesting || !context.authorizingActor) throw new Error("PAYMENT_RECOVERY_AUTHORIZATION_REVOKED");
+          return run({ authorizationId, authorizingActor: context.authorizingActor });
+        },
+      );
+      if (!result.authorized) throw new Error(`PAYMENT_RECOVERY_AUTHORIZATION_${result.reason}`);
+      return result.value;
+    },
   });
   const payments = paymentRuntime.service;
   const installmentConfiguration = input.installments;

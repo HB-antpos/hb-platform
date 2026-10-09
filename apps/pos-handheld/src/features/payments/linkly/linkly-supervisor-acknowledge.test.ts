@@ -107,3 +107,14 @@ test("M17：缺冻结环境或 SessionId 不发请求；后端 404 转为可识�
   transport.responses.push(new HbposApiError("boom", { kind: "transport" }));
   await assert.rejects(provider(transport).acknowledgeSupervisorResolved(unknownAttempt()), HbposApiError);
 });
+
+test("M17：SupervisorResolved 状态映射为 Unknown + 专用码，不会被当成 Linkly 交易结果", async () => {
+  const transport = new FakeTransport();
+  transport.responses.push(ok(session({
+    status: "SupervisorResolved", clientAcknowledgedAt: "2026-09-09T00:00:00.000Z",
+  })));
+  const result = await provider(transport).queryExistingPayment(unknownAttempt());
+  assert.equal(result.state, "Unknown");
+  assert.equal(result.responseCode, "LINKLY_SUPERVISOR_RESOLVED");
+  assert.equal(result.queryVerified, true);
+});

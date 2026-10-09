@@ -20,6 +20,10 @@ import type {
   PaymentDraftRecovery,
 } from "@/core/db/sqlite-payment-draft-recovery-store";
 import type {
+  ManualPaymentRecoveryFindingInput,
+  PaymentRecoveryCenterRecord,
+} from "@/core/db/sqlite-payment-recovery-center-store";
+import type {
   PosRepositoryBundle,
   SensitivePayloadEncryptor,
 } from "@/core/db/sqlite-repositories";
@@ -39,6 +43,7 @@ import type {
 import type {
   VoucherApprovedPurchaseReleasePort,
 } from "@/features/payments/runtime/payment-provider-registry";
+import { SquarePaymentAdapter } from "@/features/payments/square/square-payment-adapter";
 import { PricingCart } from "@/features/sales/domain";
 import { ActivePricingCartSession } from "@/features/sales/runtime";
 
@@ -89,6 +94,7 @@ test("生产支付只公开 presenter/恢复布尔值，启动前和无可信收
   assert.deepEqual(Object.keys(service).sort(), [
     "createPresenter",
     "hasRecoveryRequired",
+    "recoveryCenter",
     "status",
   ]);
   assert.equal(
@@ -1090,6 +1096,550 @@ test("Prepared/Submitted/Unknown/Blocked 重启投影与 provider capability 一
   }
 });
 
+test("恢复中心离线列表只读本地账本，不等待联网或 provider", async () => {
+  let connectivityCalls = 0;
+  let providerCalls = 0;
+  const record = recoveryCenterRecord({ status: "result-unknown", attemptState: "Unknown" });
+  const base = database();
+  const runtime = createProductionPaymentRuntime({
+    database: {
+      ...base,
+      paymentRecoveryCenter: () => ({
+        async list() { return [record]; },
+        async findCurrentCandidate() { return null; },
+        async getExact() { return record; },
+      }),
+    } as unknown as PosDatabase,
+    repositories: repositories(),
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { connectivityCalls += 1; return false; } },
+    bootstrap: bootstrap(() => undefined, () => { providerCalls += 1; }),
+    async drainFulfilment() {},
+  });
+
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  assert.deepEqual(await center.list(), [record]);
+  assert.equal(connectivityCalls, 0);
+  assert.equal(providerCalls, 0);
+});
+
+test("无 provider bootstrap 时人工已收款缺失 tender 可按原 action 重放完成", async () => {
+  let committed = false;
+  let commitCalls = 0;
+  const base = database();
+  const pending = recoveryCenterRecord({
+    status: "charged-order-incomplete",
+    attemptState: "Unknown",
+    orderState: "Draft",
+  });
+  const completed = { ...pending, status: "manual-paid" as const, orderState: "PendingSync" };
+  const runtime = createProductionPaymentRuntime({
+    database: {
+      ...base,
+      paymentRecoveryCenter: () => ({
+        async list() { return [committed ? completed : pending]; },
+        async findCurrentCandidate() { return null; },
+        async getExact() { return committed ? completed : pending; },
+        async getManualPaidCommitContext() {
+          return {
+            record: pending,
+            actionId: "manual-action-1",
+            authorizationId: "supervisor-authorization-1",
+            supervisorActor: { cashierId: "supervisor-1", cashierName: "Supervisor", userGuid: null },
+            tenderGuid: null,
+          };
+        },
+      }),
+      manualPaymentOrderCommitter: () => ({
+        async completeManualPaymentOrder(command: Readonly<{ actionId: string; attemptId: string }>) {
+          commitCalls += 1;
+          assert.equal(command.actionId, "manual-action-1");
+          assert.equal(command.attemptId, pending.attemptId);
+          committed = true;
+          return { replayed: false };
+        },
+      }),
+    } as unknown as PosDatabase,
+    repositories: repositories(),
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { throw new Error("must stay local"); } },
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  assert.equal(await center.recoverOriginalPayment(pending.recordId), "completed");
+  assert.equal(commitCalls, 1);
+  assert.equal(committed, true);
+});
+
+for (const queryState of ["Approved", "Unknown"] as const) {
+  test(`人工已收款先只读对账原 attempt：${queryState} 时${queryState === "Approved" ? "拒绝人工入账" : "持久绑定后提交"}`, async () => {
+    const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+    const attempt = { ...recoveryAttempt("Unknown"), providerEnvironment: "Sandbox" };
+    const repositoryBundle = repositories(attempt);
+    const record = recoveryCenterRecord({ status: "result-unknown", attemptState: "Unknown" });
+    let reconciliationCalls = 0;
+    let findingCalls = 0;
+    let commitCalls = 0;
+    const base = database();
+    const runtime = createProductionPaymentRuntime({
+      database: {
+        ...base,
+        paymentRecoveryCenter: () => ({
+          async list() { return [record]; },
+          async findCurrentCandidate() { return null; },
+          async getExact() { return record; },
+          async recordProviderReconciliation() {
+            reconciliationCalls += 1;
+            const current = await repositoryBundle.payments.get(attempt.attemptId);
+            if (current?.state !== "Unknown") throw new Error("PAYMENT_RECOVERY_RECONCILIATION_NOT_UNRESOLVED");
+            return "reconciliation-1";
+          },
+          async recordManualFinding(input: ManualPaymentRecoveryFindingInput) {
+            findingCalls += 1;
+            assert.equal(input.reconciliationId, "reconciliation-1");
+            return { record, actionId: "manual-action-1", authorizationId: input.authorizationId, replayed: false };
+          },
+        }),
+        manualPaymentOrderCommitter: () => ({
+          async completeManualPaymentOrder() { commitCalls += 1; return { replayed: false }; },
+        }),
+      } as unknown as PosDatabase,
+      repositories: repositoryBundle,
+      encryptor,
+      activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+      currentCashier: activeCashier(),
+      terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+      clock: testClock(),
+      createId: idFactory(),
+      connectivity: { async isOnline() { return true; } },
+      bootstrap: queryOnlyBootstrap(calls, () => undefined, queryState),
+      authorizeRecovery: async (_request, run) => run({
+        authorizationId: "authorization-1",
+        authorizingActor: {
+          cashierId: "supervisor-2",
+          cashierName: "Supervisor",
+          userGuid: "supervisor-user-2",
+        },
+      }),
+      async drainFulfilment() {},
+    });
+
+    const center = runtime.service.recoveryCenter;
+    assert.ok(center);
+    const action = center.submitManualVerification({
+      recordId: record.recordId,
+      finding: "paid",
+      verifiedAmountCents: record.amountCents,
+      evidenceReference: "terminal-history",
+      note: "Read-only provider check completed",
+    });
+    if (queryState === "Approved") {
+      await assert.rejects(action, /RECONCILIATION_NOT_UNRESOLVED/);
+      assert.deepEqual({ reconciliationCalls, findingCalls, commitCalls }, { reconciliationCalls: 0, findingCalls: 0, commitCalls: 0 });
+    } else {
+      await action;
+      assert.deepEqual({ reconciliationCalls, findingCalls, commitCalls }, { reconciliationCalls: 1, findingCalls: 1, commitCalls: 1 });
+    }
+    assert.equal(calls.query, 1);
+    assert.deepEqual({ submit: calls.submit, refund: calls.refund, recover: calls.recover, cancel: calls.cancel },
+      { submit: 0, refund: 0, recover: 0, cancel: 0 });
+  });
+}
+
+for (const scenario of ["Created", "stale-record", "query-unavailable", "query-throws", "square-transport-error", "missing-checkout", "bootstrap-unavailable"] as const) {
+  test(`人工已收款 ${scenario} 不得伪造对账或继续入账`, async () => {
+    const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+    const source = {
+      ...recoveryAttempt(scenario === "Created" || scenario === "stale-record" ? "Created" : "Unknown"),
+      providerEnvironment: "Sandbox",
+    };
+    const attempt = scenario === "missing-checkout"
+      ? { ...source, references: { ...source.references, checkoutId: null } }
+      : source;
+    const repositoryBundle = repositories(attempt);
+    // 页面记录可能过时，必须以耐久 attempt 的状态复核。
+    const record = recoveryCenterRecord({ status: "result-unknown", attemptState: scenario === "Created" ? "Created" : "Unknown" });
+    let reconciliationCalls = 0;
+    let findingCalls = 0;
+    let commitCalls = 0;
+    const providerBootstrap = queryOnlyBootstrap(calls, () => {
+      if (scenario === "query-throws") throw new Error("query transport failed");
+    }, "Unknown");
+    if (scenario === "query-unavailable") {
+      const provider = providerBootstrap.providers.get("square");
+      const { queryExistingPayment: _query, ...withoutQuery } = provider as typeof provider & { queryExistingPayment?: unknown };
+      providerBootstrap.providers.get = () => withoutQuery;
+    }
+    if (scenario === "square-transport-error") {
+      const square = new SquarePaymentAdapter({
+        async request(request) {
+          calls.query += 1;
+          assert.equal(request.method, "GET");
+          throw new Error("network timeout");
+        },
+      }, async () => ({ environment: "Sandbox", deviceId: "device-1", locationId: "location-1" }), "Sandbox");
+      providerBootstrap.providers.get = () => square;
+    }
+    const runtime = createProductionPaymentRuntime({
+      database: {
+        ...database(),
+        paymentRecoveryCenter: () => ({
+          async getExact() { return record; },
+          async recordProviderReconciliation() { reconciliationCalls += 1; return "reconciliation-1"; },
+          async recordManualFinding(input: ManualPaymentRecoveryFindingInput) {
+            findingCalls += 1;
+            return { record, actionId: "manual-action-1", authorizationId: input.authorizationId, replayed: false };
+          },
+        }),
+        manualPaymentOrderCommitter: () => ({
+          async completeManualPaymentOrder() { commitCalls += 1; return { replayed: false }; },
+        }),
+      } as unknown as PosDatabase,
+      repositories: repositoryBundle, encryptor,
+      activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+      currentCashier: activeCashier(),
+      terminal: { storeCode: "S1", deviceCode: "IPAD-1" }, clock: testClock(),
+      createId: idFactory(), connectivity: { async isOnline() { return true; } },
+      ...(scenario === "bootstrap-unavailable" ? {} : { bootstrap: providerBootstrap }),
+      authorizeRecovery: async (_request, run) => run({
+        authorizationId: "authorization-1",
+        authorizingActor: { cashierId: "supervisor-2", cashierName: "Supervisor", userGuid: "supervisor-user-2" },
+      }),
+      async drainFulfilment() {},
+    });
+    const center = runtime.service.recoveryCenter;
+    assert.ok(center);
+    await assert.rejects(center.submitManualVerification({
+      recordId: record.recordId, finding: "paid", verifiedAmountCents: record.amountCents,
+      evidenceReference: "terminal-history", note: "Checked terminal history",
+    }), /PAYMENT_RECOVERY_/);
+    assert.deepEqual({ reconciliationCalls, findingCalls, commitCalls }, { reconciliationCalls: 0, findingCalls: 0, commitCalls: 0 });
+    assert.deepEqual(calls, { query: scenario === "query-throws" || scenario === "square-transport-error" ? 1 : 0, submit: 0, refund: 0, recover: 0, cancel: 0 });
+    assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, attempt.state);
+  });
+}
+
+for (const attemptState of ["Submitted", "Unknown"] as const) {
+  test(`人工未收款 ${attemptState} 仅查询原交易，迟到 Approved 写回且不重新提交`, async () => {
+    const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+    const attempt = recoveryAttempt(attemptState);
+    const repositoryBundle = repositories(attempt);
+    const record = recoveryCenterRecord({ status: "manual-unpaid", attemptState });
+    const runtime = createProductionPaymentRuntime({
+      database: recoveryCenterDatabase(record, repositoryBundle),
+      repositories: repositoryBundle,
+      encryptor,
+      activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+      currentCashier: activeCashier(),
+      terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+      clock: testClock(),
+      createId: idFactory(),
+      connectivity: { async isOnline() { return true; } },
+      bootstrap: queryOnlyBootstrap(calls),
+      async drainFulfilment() {},
+    });
+
+    await runtime.initializeRecovery();
+    const center = runtime.service.recoveryCenter;
+    assert.ok(center);
+    assert.equal(await center.recoverOriginalPayment(record.recordId), "completed");
+    assert.equal(calls.query, 1);
+    assert.deepEqual(
+      { submit: calls.submit, refund: calls.refund, recover: calls.recover, cancel: calls.cancel },
+      { submit: 0, refund: 0, recover: 0, cancel: 0 },
+    );
+    assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, "Approved");
+  });
+}
+
+test("人工未收款 Created 不调用任何 provider 方法，只恢复原购物车", async () => {
+  const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+  const attempt = recoveryAttempt("Created");
+  const repositoryBundle = repositories(attempt);
+  const record = recoveryCenterRecord({ status: "manual-unpaid", attemptState: "Created" });
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: queryOnlyBootstrap(calls),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  assert.equal(await center.recoverOriginalPayment(record.recordId), undefined);
+  assert.deepEqual(calls, { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 });
+  assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, "Created");
+});
+
+test("provider 已配置但离线时人工未收款仍可恢复原单改收现金", async () => {
+  const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+  let resumeCalls = 0;
+  const attempt = recoveryAttempt("Unknown");
+  const repositoryBundle = repositories(attempt);
+  const record = recoveryCenterRecord({ status: "manual-unpaid", attemptState: "Unknown" });
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle, () => { resumeCalls += 1; }),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return false; } },
+    bootstrap: queryOnlyBootstrap(calls),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  assert.equal(await center.recoverOriginalPayment(record.recordId), undefined);
+  assert.equal(resumeCalls, 1);
+  assert.deepEqual(calls, { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 });
+  assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, "Unknown");
+});
+
+test("人工仍未知 Created 保持 parked 且不提交或恢复金融请求", async () => {
+  const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+  let resumeCalls = 0;
+  const attempt = recoveryAttempt("Created");
+  const repositoryBundle = repositories(attempt);
+  const record = recoveryCenterRecord({ status: "manual-uncertain", attemptState: "Created" });
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle, () => { resumeCalls += 1; }),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: queryOnlyBootstrap(calls),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  assert.equal(await center.recoverOriginalPayment(record.recordId), "completed");
+  assert.equal(resumeCalls, 0);
+  assert.deepEqual(calls, { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 });
+  assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, "Created");
+});
+
+test("已完成 Linkly 订单 ACK 未耐久时恢复中心保持待处理错误", async () => {
+  let acknowledgementCalls = 0;
+  const attempt: PaymentAttempt = {
+    ...recoveryAttempt("Approved"),
+    provider: "linkly-cloud",
+    providerEnvironment: "Sandbox",
+    references: {
+      ...recoveryAttempt("Approved").references,
+      sessionId: "linkly-recovery-session",
+    },
+  };
+  const baseRepositories = repositories(attempt);
+  const repositoryBundle = {
+    ...baseRepositories,
+    payments: {
+      ...baseRepositories.payments,
+      async canProviderAcknowledged() { return true; },
+      async markProviderAcknowledged() { return false; },
+    },
+  } as PosRepositoryBundle;
+  const record = {
+    ...recoveryCenterRecord({
+      status: "provider-recovered",
+      attemptState: "Approved",
+      orderState: "PendingSync",
+    }),
+    provider: "linkly-cloud" as const,
+  };
+  const baseBootstrap = bootstrap(() => undefined);
+  const provider = {
+    provider: "linkly-cloud" as const,
+    async acknowledge() { acknowledgementCalls += 1; },
+    async submit(source: PaymentAttempt) { return unknownProviderResult(source); },
+    async recover(source: PaymentAttempt) { return unknownProviderResult(source); },
+    async cancel(source: PaymentAttempt) { return unknownProviderResult(source); },
+    async refund(source: PaymentAttempt) { return unknownProviderResult(source); },
+  };
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: {
+      ...baseBootstrap,
+      providers: {
+        ...baseBootstrap.providers,
+        get() { return provider; },
+      } as unknown as PaymentProviderRuntimeBootstrap["providers"],
+      linklyTerminals: { environment: "Sandbox", port: {} as never },
+    },
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  await assert.rejects(
+    center.recoverOriginalPayment(record.recordId),
+    /LINKLY_ACKNOWLEDGEMENT_PENDING/,
+  );
+  assert.equal(acknowledgementCalls, 1);
+});
+
+test("人工已收款且订单已完成时 Created 也不调用 provider", async () => {
+  const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+  const attempt = recoveryAttempt("Created");
+  const repositoryBundle = repositories(attempt);
+  const record = recoveryCenterRecord({
+    status: "manual-paid",
+    attemptState: "Created",
+    orderState: "PendingSync",
+  });
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart: new ActivePricingCartSession(new PricingCart(), () => new PricingCart()),
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: queryOnlyBootstrap(calls),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  assert.equal(await center.recoverOriginalPayment(record.recordId), "completed");
+  assert.deepEqual(calls, { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 });
+  assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, "Created");
+});
+
+test("仅查询返回 Approved 但账本 CAS 失败时不恢复购物车或解除 parked", async () => {
+  const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+  let resumeCalls = 0;
+  const attempt = recoveryAttempt("Unknown");
+  const baseRepositories = repositories(attempt);
+  const repositoryBundle = {
+    ...baseRepositories,
+    payments: {
+      ...baseRepositories.payments,
+      async compareAndUpdate() { throw new Error("simulated ledger CAS failure"); },
+    },
+  } as PosRepositoryBundle;
+  const record = recoveryCenterRecord({ status: "manual-unpaid", attemptState: "Unknown" });
+  const activeCart = new ActivePricingCartSession(new PricingCart(), () => new PricingCart());
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle, () => { resumeCalls += 1; }),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart,
+    currentCashier: activeCashier(),
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: queryOnlyBootstrap(calls),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  await assert.rejects(center.recoverOriginalPayment(record.recordId));
+  assert.equal(calls.query, 1);
+  assert.deepEqual(
+    { submit: calls.submit, refund: calls.refund, recover: calls.recover, cancel: calls.cancel },
+    { submit: 0, refund: 0, recover: 0, cancel: 0 },
+  );
+  assert.equal(resumeCalls, 0);
+  assert.deepEqual(activeCart.getSnapshot().lines, []);
+});
+
+test("查询期间换班时只允许 Approved 落账，不恢复购物车或解除 parked", async () => {
+  const calls = { query: 0, submit: 0, refund: 0, recover: 0, cancel: 0 };
+  let resumeCalls = 0;
+  const cashier = activeCashier();
+  const attempt = recoveryAttempt("Submitted");
+  const repositoryBundle = repositories(attempt);
+  const record = recoveryCenterRecord({ status: "manual-unpaid", attemptState: "Submitted" });
+  const activeCart = new ActivePricingCartSession(new PricingCart(), () => new PricingCart());
+  const runtime = createProductionPaymentRuntime({
+    database: recoveryCenterDatabase(record, repositoryBundle, () => { resumeCalls += 1; }),
+    repositories: repositoryBundle,
+    encryptor,
+    activeCart,
+    currentCashier: cashier,
+    terminal: { storeCode: "S1", deviceCode: "IPAD-1" },
+    clock: testClock(),
+    createId: idFactory(),
+    connectivity: { async isOnline() { return true; } },
+    bootstrap: queryOnlyBootstrap(calls, () => {
+      cashier.clear();
+      const epoch = cashier.beginAuthentication();
+      cashier.activate(epoch, {
+        source: "online",
+        session: {
+          cashierId: "cashier-2",
+          cashierName: "Replacement Cashier",
+          storeCode: "S1",
+          deviceCode: "IPAD-1",
+          permissionCodes: [...ALL_PAYMENT_PERMISSIONS],
+        },
+      }, { storeCode: "S1", deviceCode: "IPAD-1" });
+    }),
+    async drainFulfilment() {},
+  });
+
+  await runtime.initializeRecovery();
+  const center = runtime.service.recoveryCenter;
+  assert.ok(center);
+  await assert.rejects(center.recoverOriginalPayment(record.recordId), /CURRENT_CASHIER_REQUIRED/);
+  assert.equal(calls.query, 1);
+  assert.deepEqual(
+    { submit: calls.submit, refund: calls.refund, recover: calls.recover, cancel: calls.cancel },
+    { submit: 0, refund: 0, recover: 0, cancel: 0 },
+  );
+  assert.equal((await repositoryBundle.payments.get(attempt.attemptId))?.state, "Approved");
+  assert.equal(resumeCalls, 0);
+  assert.deepEqual(activeCart.getSnapshot().lines, []);
+});
+
 test("Blocked 撤券：主管授权作废后不再阻塞并恢复可操作；授权取消保持阻断；未提供授权时不开放入口", async (t) => {
   const createRuntime = (options: Readonly<{
     authorize?: TenderReversalVoidAuthorizer;
@@ -1263,10 +1813,12 @@ test("Blocked 撤券：主管授权作废后不再阻塞并恢复可操作；授
 
 function bootstrap(
   onBind: () => void,
+  onProviderGet: () => void = () => undefined,
 ): PaymentProviderRuntimeBootstrap {
   return {
     providers: {
       get() {
+        onProviderGet();
         throw new Error("provider execution is outside this composition test");
       },
       getAvailability(provider: PaymentProvider) {
@@ -1312,6 +1864,205 @@ function bootstrap(
     createLinklyOperator() {
       return null;
     },
+  };
+}
+
+type QueryOnlyProviderCalls = {
+  query: number;
+  submit: number;
+  refund: number;
+  recover: number;
+  cancel: number;
+};
+
+function queryOnlyBootstrap(
+  calls: QueryOnlyProviderCalls,
+  onQuery: () => void = () => undefined,
+  queryState: "Approved" | "Unknown" = "Approved",
+): PaymentProviderRuntimeBootstrap {
+  const base = bootstrap(() => undefined);
+  const provider = {
+    provider: "square" as const,
+    async queryExistingPayment(source: PaymentAttempt) {
+      calls.query += 1;
+      onQuery();
+      return {
+        queryVerified: true,
+        state: queryState,
+        references: source.references,
+        receiptText: null,
+        responseCode: "APPROVED",
+        ...(queryState === "Approved" ? { protectedSyncEvidence: {
+          version: 1 as const,
+          provider: "square" as const,
+          operation: source.operation,
+          processor: "Square" as const,
+          txnRef: source.references.txnRef,
+          authCode: null,
+          cardType: null,
+          cardBin: null,
+          maskedCardNumber: null,
+          merchantId: null,
+          responseCode: "APPROVED",
+          responseText: "Approved",
+          stan: null,
+          bankDateTimeIso: null,
+          amountCents: Math.abs(source.amount.cents),
+          refundReference: null,
+        } } : {}),
+      };
+    },
+    async submit(source: PaymentAttempt) {
+      calls.submit += 1;
+      return unknownProviderResult(source);
+    },
+    async refund(source: PaymentAttempt) {
+      calls.refund += 1;
+      return unknownProviderResult(source);
+    },
+    async recover(source: PaymentAttempt) {
+      calls.recover += 1;
+      return unknownProviderResult(source);
+    },
+    async cancel(source: PaymentAttempt) {
+      calls.cancel += 1;
+      return unknownProviderResult(source);
+    },
+  };
+  return {
+    ...base,
+    providers: {
+      ...base.providers,
+      get(providerName: PaymentProvider) {
+        if (providerName !== "square") throw new Error(`unexpected provider ${providerName}`);
+        return provider;
+      },
+      getAvailability(providerName: PaymentProvider) {
+        return providerName === "square"
+          ? { provider: providerName, available: true, blocker: null }
+          : { provider: providerName, available: false, blocker: "PAYMENT_PROVIDER_UNKNOWN" };
+      },
+      listAvailability() {
+        return [
+          { provider: "square" as const, available: true as const, blocker: null },
+          { provider: "linkly-cloud" as const, available: false as const, blocker: "PAYMENT_PROVIDER_UNKNOWN" as const },
+          { provider: "voucher" as const, available: false as const, blocker: "PAYMENT_PROVIDER_UNKNOWN" as const },
+        ];
+      },
+      listAvailableProviders() { return ["square"] as const; },
+    } as unknown as PaymentProviderRuntimeBootstrap["providers"],
+  };
+}
+
+function unknownProviderResult(source: PaymentAttempt) {
+  return {
+    state: "Unknown" as const,
+    references: source.references,
+    receiptText: null,
+    responseCode: "TEST_FINANCIAL_METHOD_MUST_NOT_RUN",
+  };
+}
+
+function recoveryCenterDatabase(
+  baseRecord: PaymentRecoveryCenterRecord,
+  repositoryBundle: PosRepositoryBundle,
+  onResume: () => void = () => undefined,
+): PosDatabase {
+  const cart = pricedCart();
+  const base = database();
+  return {
+    ...base,
+    paymentDraftRecovery: () => ({
+      async assertPersisted() {},
+      async findBlockingRecovery() { return null; },
+      async readRecoveryCart(orderGuid: string) {
+        if (orderGuid !== baseRecord.orderGuid) return null;
+        return {
+          checkoutIntentId: baseRecord.checkoutIntentId,
+          cart: cart.snapshot(),
+          pricingState: cart.stateSnapshot(),
+          recallBinding: null,
+        };
+      },
+    }),
+    paymentRecoveryCenter: () => ({
+      async list() { return [await currentRecord()]; },
+      async findCurrentCandidate() { return null; },
+      async getExact(_scope: unknown, recordId: string) {
+        return recordId === baseRecord.recordId ? currentRecord() : null;
+      },
+      async getManualPaidCommitContext() { return null; },
+      async resumeExact() { onResume(); return currentRecord(); },
+    }),
+  } as unknown as PosDatabase;
+
+  async function currentRecord(): Promise<PaymentRecoveryCenterRecord> {
+    const attempt = await repositoryBundle.payments.get(baseRecord.attemptId);
+    assert.ok(attempt);
+    return {
+      ...baseRecord,
+      attemptState: attempt.state,
+      status: baseRecord.status === "manual-unpaid" && attempt.state === "Approved"
+        ? "review-required"
+        : baseRecord.status,
+    };
+  }
+}
+
+function recoveryCenterRecord(input: Readonly<{
+  status: PaymentRecoveryCenterRecord["status"];
+  attemptState: PaymentAttempt["state"];
+  orderState?: string;
+}>): PaymentRecoveryCenterRecord {
+  return {
+    recordId: "recovery-record-1",
+    checkoutIntentId: "checkout-1",
+    orderGuid: "order-1",
+    attemptId: "attempt-1",
+    storeCode: "S1",
+    deviceCode: "IPAD-1",
+    terminalName: "Lane 1",
+    occurredAtIso: "2026-07-28T00:00:00.000Z",
+    amountCents: 1_000,
+    provider: "square",
+    attemptState: input.attemptState,
+    orderState: input.orderState ?? "Draft",
+    isParked: true,
+    status: input.status,
+    transactionReference: null,
+    receiptReference: null,
+    lines: [{ id: "line-1", name: "Tea", quantity: "1", amountCents: 1_000 }],
+    events: [],
+  };
+}
+
+function recoveryAttempt(state: PaymentAttempt["state"]): PaymentAttempt {
+  return {
+    attemptId: "attempt-1",
+    idempotencyKey: "attempt-idempotency-1",
+    orderGuid: "order-1",
+    provider: "square",
+    operation: "purchase",
+    amount: aud(1_000),
+    state,
+    references: {
+      checkoutId: "checkout-1",
+      paymentId: "payment-1",
+      sessionId: null,
+      txnRef: null,
+      rfn: null,
+      voucherReservationToken: null,
+    },
+    createdAtIso: "2026-07-28T00:00:00.000Z",
+    updatedAtIso: "2026-07-28T00:01:00.000Z",
+    lastErrorCode: null,
+  };
+}
+
+function testClock() {
+  return {
+    now: () => new Date("2026-07-28T00:02:00.000Z"),
+    nowIso: () => "2026-07-28T00:02:00.000Z",
   };
 }
 
@@ -1399,6 +2150,22 @@ function database(draft: PaymentCheckoutDraft | null = null): PosDatabase {
   };
   return {
     paymentDraftRecovery: () => draftStore,
+    paymentRecoveryCenter: () => ({
+      async list() {
+        return [];
+      },
+      async findCurrentCandidate() {
+        return null;
+      },
+      async getExact() {
+        return null;
+      },
+    }),
+    manualPaymentOrderCommitter: () => ({
+      async completeManualPaymentOrder() {
+        throw new Error("not used");
+      },
+    }),
     paymentActionBindings: () => ({}),
     voucherPreparationStore: () => ({
       async prepare() {
