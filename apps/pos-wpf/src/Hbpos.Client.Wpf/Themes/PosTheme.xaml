@@ -10,6 +10,8 @@
     <Color x:Key="PosCustomerDisplayColorSurface">#FF101B2D</Color>
     <Color x:Key="PosCustomerDisplayColorText">#FFFFFFFF</Color>
     <Color x:Key="PosCustomerDisplayColorMutedText">#A3FFFFFF</Color>
+    <!-- 购物车列头专用：比弱化文字色（64%）更亮，客显离得远、画布又被缩放时列头也读得清。 -->
+    <Color x:Key="PosCustomerDisplayColorHeaderText">#E6FFFFFF</Color>
     <Color x:Key="PosCustomerDisplayColorAccent">#FF69E3C2</Color>
     <Color x:Key="PosCustomerDisplayColorAmount">#FFFFC73D</Color>
     <Color x:Key="PosCustomerDisplayColorDivider">#1FFFFFFF</Color>
@@ -19,6 +21,7 @@
     <SolidColorBrush x:Key="PosCustomerDisplaySurfaceBrush" Color="{StaticResource PosCustomerDisplayColorSurface}" />
     <SolidColorBrush x:Key="PosCustomerDisplayTextBrush" Color="{StaticResource PosCustomerDisplayColorText}" />
     <SolidColorBrush x:Key="PosCustomerDisplayMutedTextBrush" Color="{StaticResource PosCustomerDisplayColorMutedText}" />
+    <SolidColorBrush x:Key="PosCustomerDisplayHeaderTextBrush" Color="{StaticResource PosCustomerDisplayColorHeaderText}" />
     <SolidColorBrush x:Key="PosCustomerDisplayAccentBrush" Color="{StaticResource PosCustomerDisplayColorAccent}" />
     <SolidColorBrush x:Key="PosCustomerDisplayAmountBrush" Color="{StaticResource PosCustomerDisplayColorAmount}" />
     <SolidColorBrush x:Key="PosCustomerDisplayDividerBrush" Color="{StaticResource PosCustomerDisplayColorDivider}" />

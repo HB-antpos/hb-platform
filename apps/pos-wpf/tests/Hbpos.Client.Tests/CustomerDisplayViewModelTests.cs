@@ -603,6 +603,30 @@ public sealed class CustomerDisplayViewModelTests
     }
 
     [Fact]
+    public void CustomerDisplayView_column_headers_are_bright_and_large_enough_to_read()
+    {
+        var (viewXaml, _) = ReadCustomerDisplayViewFiles();
+        var themeXaml = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Themes", "PosTheme.xaml"));
+        var document = XDocument.Parse(viewXaml);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var headerStyle = Assert.Single(document
+            .Descendants(presentation + "Style")
+            .Where(element => element.Attribute(x + "Key")?.Value == "CustomerDisplayHeaderBaseStyle"));
+        string? SetterValue(string property) => headerStyle
+            .Elements(presentation + "Setter")
+            .Single(setter => setter.Attribute("Property")?.Value == property)
+            .Attribute("Value")?.Value;
+
+        // 列头用专用的更亮颜色（不是 64% 的弱化文字色）且字号不小于 16，客显上才读得清。
+        Assert.Equal("{StaticResource PosCustomerDisplayHeaderTextBrush}", SetterValue("Foreground"));
+        Assert.True(double.Parse(SetterValue("FontSize")!, System.Globalization.CultureInfo.InvariantCulture) >= 16d);
+        Assert.Contains("<Color x:Key=\"PosCustomerDisplayColorHeaderText\">#E6FFFFFF</Color>", themeXaml);
+    }
+
+    [Fact]
     public void CustomerDisplayView_coalesces_pending_line_scrolls_without_forcing_layout()
     {
         var (_, codeBehind) = ReadCustomerDisplayViewFiles();
