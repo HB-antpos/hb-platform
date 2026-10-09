@@ -238,6 +238,7 @@ public static class ServiceRegistration
         services.AddScoped<ISquareTokenSchemaInitializer, SqlSugarSquareTokenSchemaInitializer>();
         services.AddScoped<ISquareWebhookVerifier, SquareWebhookVerifier>();
         services.AddScoped<ISquareCheckoutSessionRepository, SqlSugarSquareCheckoutSessionRepository>();
+        services.AddScoped<ISquareRefundRepository, SqlSugarSquareRefundRepository>();
         services.AddScoped<ISquareWebhookSchemaSqlExecutor, SqlSugarSquareWebhookSchemaSqlExecutor>();
         services.AddScoped<ISquareWebhookSchemaInitializer, SqlSugarSquareWebhookSchemaInitializer>();
         services.AddHttpClient<ISquareTerminalRestClient, HttpSquareTerminalRestClient>(client =>

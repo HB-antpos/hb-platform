@@ -295,10 +295,10 @@
   <data name="payment.card.error.overlay.cardDeclined.message" xml:space="preserve"><value>Card was not approved. Reason: {0}</value></data>
   <data name="payment.card.error.overlay.close" xml:space="preserve"><value>OK</value></data>
   <data name="payment.card.error.overlay.activeSession.title" xml:space="preserve"><value>Previous Card Transaction Needs Recovery</value></data>
-  <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve"><value>POS will check the previous Linkly transaction before another card payment. The current order will stay on this screen.</value></data>
+  <data name="payment.card.error.overlay.activeSession.message" xml:space="preserve"><value>POS will check the previous card transaction before another card payment. The current order will stay on this screen.</value></data>
   <data name="payment.card.error.overlay.activeSession.recover" xml:space="preserve"><value>Recover previous</value></data>
   <data name="payment.card.error.overlay.activeSession.close" xml:space="preserve"><value>Close</value></data>
-  <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve"><value>Recovering previous Linkly transaction...</value></data>
+  <data name="payment.card.error.overlay.activeSession.recovering" xml:space="preserve"><value>Recovering previous card transaction...</value></data>
   <data name="payment.card.error.overlay.activeSession.handoff" xml:space="preserve"><value>Move to recovery center and start a new sale</value></data>
   <data name="payment.card.error.overlay.activeSession.openCenter" xml:space="preserve"><value>Open card recovery center</value></data>
   <data name="payment.card.error.overlay.activeSession.openRecoveryCenter" xml:space="preserve"><value>Open card transaction recovery</value></data>
