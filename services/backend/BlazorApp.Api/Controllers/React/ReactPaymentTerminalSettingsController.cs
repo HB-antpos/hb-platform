@@ -57,26 +57,6 @@ namespace BlazorApp.Api.Controllers.React
             return result.Success ? Ok(result) : BadRequest(result);
         }
 
-        [HttpPut("linkly")]
-        [Authorize(Policy = Permissions.System.ManageSettings)]
-        public async Task<IActionResult> UpdateLinkly(
-            [FromBody] UpdateLinklyCredentialDto request,
-            CancellationToken cancellationToken
-        )
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ApiResponse<object>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState));
-            }
-
-            var result = await _settingsService.UpdateLinklyCredentialAsync(
-                request,
-                _currentUserService.GetCurrentUsername(),
-                cancellationToken
-            );
-            return result.Success ? Ok(result) : BadRequest(result);
-        }
-
         [HttpGet("linkly-terminals")]
         [Authorize(Policy = Permissions.System.ManageSettings)]
         public async Task<IActionResult> GetLinklyTerminals(

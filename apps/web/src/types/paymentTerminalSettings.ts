@@ -37,14 +37,6 @@ export interface UpdateSquareTokenRequest {
   clearToken: boolean
 }
 
-export interface UpdateLinklyCredentialRequest {
-  storeCode: string
-  environment: PaymentTerminalEnvironment
-  username?: string
-  password?: string
-  clearCredential: boolean
-}
-
 export interface LinklyTerminalAdminDto {
   terminalId: string
   storeCode: string

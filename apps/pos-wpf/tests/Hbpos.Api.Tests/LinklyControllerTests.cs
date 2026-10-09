@@ -28,17 +28,23 @@ namespace Hbpos.Api.Tests;
 public sealed class LinklyControllerTests
 {
     [Fact]
-    public void LinklyCloudCredentialEndpoint_KeepsExpectedRouteAndAuthorization()
+    public async Task GetCloudCredential_IsRemovedAndNeverReturnsStoredCredential()
     {
-        Assert.Equal("cloud-credential", typeof(LinklyController)
-            .GetMethod(nameof(LinklyController.GetCloudCredential))?
-            .GetCustomAttributes(typeof(HttpGetAttribute), inherit: false)
-            .Cast<HttpGetAttribute>()
-            .Single()
-            .Template);
-        Assert.NotNull(typeof(LinklyController)
-            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: false)
-            .SingleOrDefault());
+        // H15：GET cloud-credential 曾以收款权限原样下发门店 Linkly 明文账号密码且已无调用方，端点必须保持下线。
+        Assert.Null(typeof(LinklyController).GetMethod("GetCloudCredential"));
+        Assert.DoesNotContain(
+            typeof(LinklyController).GetMethods(),
+            method => method.GetCustomAttributes(typeof(HttpGetAttribute), inherit: false)
+                .Cast<HttpGetAttribute>()
+                .Any(attribute => attribute.Template == "cloud-credential"));
+
+        await using var factory = new LinklyApiFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
+
+        using var response = await client.GetAsync("/api/v1/linkly/cloud-credential?environment=Production");
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
     }
 
     [Fact]
@@ -88,53 +94,6 @@ public sealed class LinklyControllerTests
                 .Cast<AuthorizeAttribute>()
                 .Single()
                 .Policy);
-    }
-
-    [Fact]
-    public async Task GetCloudCredential_RequiresAuthentication()
-    {
-        await using var factory = new LinklyApiFactory();
-        using var client = factory.CreateClient();
-
-        using var response = await client.GetAsync("/api/v1/linkly/cloud-credential");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task GetCloudCredential_UsesAuthenticatedStoreCodeOnly()
-    {
-        string? requestedStoreCode = null;
-        string? requestedEnvironment = null;
-        var expected = new LinklyCloudCredentialResponse(
-            "S01",
-            "Sandbox",
-            "merchant-user",
-            "merchant-password",
-            new DateTimeOffset(2026, 5, 28, 4, 0, 0, TimeSpan.Zero));
-
-        await using var factory = new LinklyApiFactory(new StubLinklyCloudCredentialService(
-            responseFactory: (storeCode, environment) =>
-            {
-                requestedStoreCode = storeCode;
-                requestedEnvironment = environment;
-                return Task.FromResult<LinklyCloudCredentialResponse?>(expected);
-            }));
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
-
-        using var response = await client.GetAsync("/api/v1/linkly/cloud-credential?storeCode=S99&environment=sandbox");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var apiResult = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudCredentialResponse>>();
-        Assert.NotNull(apiResult);
-        Assert.True(apiResult!.Success);
-        Assert.Equal("S01", requestedStoreCode);
-        Assert.Equal("Sandbox", requestedEnvironment);
-        Assert.Equal(expected.StoreCode, apiResult.Data?.StoreCode);
-        Assert.Equal(expected.Environment, apiResult.Data?.Environment);
-        Assert.Equal(expected.Username, apiResult.Data?.Username);
-        Assert.Equal(expected.Password, apiResult.Data?.Password);
     }
 
     [Fact]
@@ -360,23 +319,6 @@ public sealed class LinklyControllerTests
         Assert.NotNull(envelope);
         Assert.Equal(expectedCode, envelope!.ErrorCode);
         Assert.Equal(expectedMessage, envelope.Message);
-    }
-
-    [Fact]
-    public async Task GetCloudCredential_ReturnsBadRequestForInvalidEnvironment()
-    {
-        await using var factory = new LinklyApiFactory();
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
-
-        using var response = await client.GetAsync("/api/v1/linkly/cloud-credential?environment=staging");
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var apiResult = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudCredentialResponse>>();
-        Assert.NotNull(apiResult);
-        Assert.False(apiResult!.Success);
-        Assert.Equal("LINKLY_CLOUD_CREDENTIAL_ENVIRONMENT_INVALID", apiResult.ErrorCode);
-        Assert.Equal("environment must be Production or Sandbox", apiResult.Message);
     }
 
     [Fact]
@@ -614,8 +556,6 @@ public sealed class LinklyControllerTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
 
-        using var getCredential = await client.GetAsync(
-            "/api/v1/linkly/cloud-credential?environment=Sandbox");
         using var upsertCredential = await client.PutAsJsonAsync(
             "/api/v1/linkly/cloud-credential",
             new LinklyCloudCredentialUpsertRequest("Sandbox", "legacy-user", "legacy-password"));
@@ -626,26 +566,17 @@ public sealed class LinklyControllerTests
                 "legacy-secret",
                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
 
-        await AssertLegacyModeDisabledAsync(getCredential);
         await AssertLegacyModeDisabledAsync(upsertCredential);
         await AssertLegacyModeDisabledAsync(upsertTerminal);
-        Assert.Equal(0, credentialService.GetCalls);
         Assert.Equal(0, credentialService.UpsertCalls);
         Assert.Null(backendService.LastTerminalUpsertRequest);
-        Assert.Equal(3, modeService.ModeCalls);
+        Assert.Equal(2, modeService.ModeCalls);
     }
 
     [Fact]
     public async Task Draft_mode_keeps_legacy_credential_endpoints_compatible()
     {
-        var credentialService = new StubLinklyCloudCredentialService(
-            responseFactory: (storeCode, environment) => Task.FromResult<LinklyCloudCredentialResponse?>(
-                new LinklyCloudCredentialResponse(
-                    storeCode,
-                    environment,
-                    "legacy-user",
-                    "legacy-password",
-                    DateTimeOffset.UtcNow)));
+        var credentialService = new StubLinklyCloudCredentialService();
         var backendService = new CapturingLinklyCloudBackendAsyncService();
         var modeService = new FixedLinklyCloudTerminalModeService("Draft");
         await using var factory = new LinklyApiFactory(
@@ -667,13 +598,11 @@ public sealed class LinklyControllerTests
                 "legacy-secret",
                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
 
-        Assert.Equal(HttpStatusCode.OK, getCredential.StatusCode);
         Assert.Equal(HttpStatusCode.OK, upsertCredential.StatusCode);
         Assert.Equal(HttpStatusCode.OK, upsertTerminal.StatusCode);
-        Assert.Equal(1, credentialService.GetCalls);
         Assert.Equal(1, credentialService.UpsertCalls);
         Assert.NotNull(backendService.LastTerminalUpsertRequest);
-        Assert.Equal(3, modeService.ModeCalls);
+        Assert.Equal(2, modeService.ModeCalls);
     }
 
     [Fact]
@@ -883,48 +812,6 @@ public sealed class LinklyControllerTests
         Assert.Equal("LINKLY_CLOUD_BACKEND_SESSION_NOT_FOUND", apiResult.ErrorCode);
     }
 
-
-    [Fact]
-    public async Task GetCloudCredential_ReturnsStableNotFoundWhenCredentialIsMissing()
-    {
-        await using var factory = new LinklyApiFactory(new StubLinklyCloudCredentialService(
-            responseFactory: (_, _) => Task.FromResult<LinklyCloudCredentialResponse?>(null)));
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
-
-        using var response = await client.GetAsync("/api/v1/linkly/cloud-credential?environment=Production");
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        var apiResult = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudCredentialResponse>>();
-        Assert.NotNull(apiResult);
-        Assert.False(apiResult!.Success);
-        Assert.Equal("LINKLY_CLOUD_CREDENTIAL_NOT_CONFIGURED", apiResult.ErrorCode);
-        Assert.Equal("Linkly Cloud credential is not configured for this store.", apiResult.Message);
-    }
-
-    [Fact]
-    public async Task GetCloudCredential_ReturnsSanitizedServerErrorWhenServiceThrows()
-    {
-        const string secretPassword = "merchant-password";
-        await using var factory = new LinklyApiFactory(new StubLinklyCloudCredentialService(
-            exceptionFactory: (_, _) => new InvalidOperationException($"SQL timeout from POSM_LinklyCloudCredential on db01 for password {secretPassword}")));
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
-
-        using var response = await client.GetAsync("/api/v1/linkly/cloud-credential?environment=Production");
-
-        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
-        var apiResult = await response.Content.ReadFromJsonAsync<ApiResult<LinklyCloudCredentialResponse>>();
-        Assert.NotNull(apiResult);
-        Assert.False(apiResult!.Success);
-        Assert.Equal("LINKLY_CLOUD_CREDENTIAL_READ_FAILED", apiResult.ErrorCode);
-        var message = apiResult.Message ?? string.Empty;
-        Assert.Equal("Failed to load Linkly Cloud credential configuration.", message);
-        Assert.DoesNotContain("SQL", message, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("POSM_LinklyCloudCredential", message, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("db01", message, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(secretPassword, message, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Startup_FailsWhenLinklyCloudCredentialSchemaInitializerThrows()
@@ -1504,32 +1391,9 @@ public sealed class LinklyControllerTests
     }
 
     private sealed class StubLinklyCloudCredentialService(
-        Func<string, string, Task<LinklyCloudCredentialResponse?>>? responseFactory = null,
-        Func<string, string, Exception>? exceptionFactory = null,
         Func<string, LinklyCloudCredentialUpsertRequest, string?, Task<LinklyCloudCredentialUpsertResponse>>? upsertFactory = null) : ILinklyCloudCredentialService
     {
-        public int GetCalls { get; private set; }
-
         public int UpsertCalls { get; private set; }
-
-        public Task<LinklyCloudCredentialResponse?> GetByStoreCodeAsync(
-            string storeCode,
-            string environment,
-            CancellationToken cancellationToken)
-        {
-            GetCalls++;
-            if (exceptionFactory is not null)
-            {
-                throw exceptionFactory(storeCode, environment);
-            }
-
-            if (responseFactory is not null)
-            {
-                return responseFactory(storeCode, environment);
-            }
-
-            return Task.FromResult<LinklyCloudCredentialResponse?>(null);
-        }
 
         public Task<LinklyCloudCredentialUpsertResponse> UpsertAsync(
             string storeCode,

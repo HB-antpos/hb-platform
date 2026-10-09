@@ -7,7 +7,6 @@ import type {
   PaymentTerminalSettingsDto,
   PaymentTerminalEnvironment,
   UpdateLinklyDeviceSelectionRequest,
-  UpdateLinklyCredentialRequest,
   UpdateLinklyTerminalRequest,
   UpdateSquareTokenRequest,
 } from '../types/paymentTerminalSettings'
@@ -26,11 +25,6 @@ export async function saveSquareToken(payload: UpdateSquareTokenRequest, storeCo
   const response = await request.put<ApiResponse<PaymentTerminalSettingsDto>>(`${API_BASE}/square`, payload, {
     params: { storeCode },
   })
-  return unwrapApiData(response)
-}
-
-export async function saveLinklyCredential(payload: UpdateLinklyCredentialRequest) {
-  const response = await request.put<ApiResponse<PaymentTerminalSettingsDto>>(`${API_BASE}/linkly`, payload)
   return unwrapApiData(response)
 }
 

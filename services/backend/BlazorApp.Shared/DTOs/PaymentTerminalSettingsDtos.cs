@@ -47,25 +47,6 @@ namespace BlazorApp.Shared.DTOs
         public bool ClearToken { get; set; }
     }
 
-    public class UpdateLinklyCredentialDto
-    {
-        [Required(ErrorMessage = "门店编码不能为空")]
-        [StringLength(32, ErrorMessage = "门店编码长度不能超过32个字符")]
-        public string StoreCode { get; set; } = string.Empty;
-
-        [Required(ErrorMessage = "支付环境不能为空")]
-        [StringLength(32, ErrorMessage = "支付环境长度不能超过32个字符")]
-        public string Environment { get; set; } = string.Empty;
-
-        [StringLength(256, ErrorMessage = "Linkly 用户名长度不能超过256个字符")]
-        public string? Username { get; set; }
-
-        [StringLength(256, ErrorMessage = "Linkly 密码长度不能超过256个字符")]
-        public string? Password { get; set; }
-
-        public bool ClearCredential { get; set; }
-    }
-
     public class LinklyTerminalManagementDto
     {
         public string StoreCode { get; set; } = string.Empty;

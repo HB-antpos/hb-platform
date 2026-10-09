@@ -58,12 +58,6 @@ internal sealed class CapturingLinklyCloudPairingService(
 
 internal sealed class NoOpLinklyCloudCredentialService : ILinklyCloudCredentialService
 {
-    public Task<LinklyCloudCredentialResponse?> GetByStoreCodeAsync(
-        string storeCode,
-        string environment,
-        CancellationToken cancellationToken) =>
-        Task.FromResult<LinklyCloudCredentialResponse?>(null);
-
     public Task<LinklyCloudCredentialUpsertResponse> UpsertAsync(
         string storeCode,
         LinklyCloudCredentialUpsertRequest request,

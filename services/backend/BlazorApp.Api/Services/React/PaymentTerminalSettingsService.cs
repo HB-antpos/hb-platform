@@ -116,89 +116,6 @@ public sealed class PaymentTerminalSettingsService(
         return await GetSettingsAsync(storeCode, cancellationToken);
     }
 
-    public async Task<ApiResponse<PaymentTerminalSettingsDto>> UpdateLinklyCredentialAsync(
-        UpdateLinklyCredentialDto request,
-        string? updatedBy,
-        CancellationToken cancellationToken = default
-    )
-    {
-        var storeCode = NormalizeOptional(request.StoreCode);
-        if (storeCode is null)
-        {
-            return ApiResponse<PaymentTerminalSettingsDto>.Error("门店编码不能为空", "LINKLY_STORE_CODE_REQUIRED");
-        }
-
-        var environment = NormalizeEnvironment(request.Environment);
-        if (environment is null)
-        {
-            return ApiResponse<PaymentTerminalSettingsDto>.Error(
-                "支付环境必须是 Production 或 Sandbox",
-                "PAYMENT_ENVIRONMENT_INVALID"
-            );
-        }
-
-        if (await GetLinklyConfigurationModeAsync(storeCode, environment) == "Active")
-        {
-            return ApiResponse<PaymentTerminalSettingsDto>.Error(
-                "该门店环境已启用 Linkly 多终端配置，请改用终端管理接口",
-                "LEGACY_LINKLY_CONFIGURATION_DISABLED"
-            );
-        }
-
-        var existing = await QueryLinklyCredentialAsync(storeCode, environment);
-        if (request.ClearCredential)
-        {
-            await posmContext.Db.Deleteable<PaymentLinklyCredentialRecord>()
-                .Where(row => row.StoreCode == storeCode && row.Environment == environment)
-                .ExecuteCommandAsync();
-            return await GetSettingsAsync(storeCode, cancellationToken);
-        }
-
-        var username = NormalizeOptional(request.Username) ?? NormalizeOptional(existing?.Username);
-        if (username is null)
-        {
-            return ApiResponse<PaymentTerminalSettingsDto>.Error("Linkly 用户名不能为空", "LINKLY_USERNAME_REQUIRED");
-        }
-
-        var password = NormalizeOptional(request.Password);
-        if (password is null)
-        {
-            // 密码留空只允许保留旧密码；没有旧密码时必须显式输入，避免误保存不可用配置。
-            password = NormalizeOptional(existing?.Password);
-            if (password is null)
-            {
-                return ApiResponse<PaymentTerminalSettingsDto>.Error(
-                    "Linkly 密码不能为空",
-                    "LINKLY_PASSWORD_REQUIRED"
-                );
-            }
-        }
-
-        var now = DateTime.UtcNow;
-        if (existing is null)
-        {
-            await posmContext.Db.Insertable(new PaymentLinklyCredentialRecord
-            {
-                StoreCode = storeCode,
-                Environment = environment,
-                Username = username,
-                Password = password,
-                UpdatedAt = now,
-                UpdatedBy = NormalizeOptional(updatedBy),
-            }).ExecuteCommandAsync();
-        }
-        else
-        {
-            existing.Username = username;
-            existing.Password = password;
-            existing.UpdatedAt = now;
-            existing.UpdatedBy = NormalizeOptional(updatedBy);
-            await posmContext.Db.Updateable(existing).ExecuteCommandAsync();
-        }
-
-        return await GetSettingsAsync(storeCode, cancellationToken);
-    }
-
     public async Task<ApiResponse<LinklyTerminalManagementDto>> GetLinklyTerminalManagementAsync(
         string? storeCode,
         string? environment,
@@ -1172,18 +1089,6 @@ public sealed class PaymentTerminalSettingsService(
                 };
             })
             .ToList();
-    }
-
-    private async Task<PaymentLinklyCredentialRecord?> QueryLinklyCredentialAsync(
-        string storeCode,
-        string environment
-    )
-    {
-        return await posmContext.Db.Queryable<PaymentLinklyCredentialRecord>()
-            .Where(row => row.StoreCode == storeCode && row.Environment == environment)
-            .OrderByDescending(row => row.UpdatedAt)
-            .OrderByDescending(row => row.Id)
-            .FirstAsync();
     }
 
     private async Task<LinklyTerminalManagementDto> BuildLinklyTerminalManagementAsync(

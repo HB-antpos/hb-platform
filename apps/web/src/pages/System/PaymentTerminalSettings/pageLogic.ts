@@ -7,7 +7,6 @@ import type {
   LinklyTerminalManagementDto,
   PaymentTerminalEnvironment,
   PaymentTerminalEnvironmentStatusDto,
-  UpdateLinklyCredentialRequest,
   UpdateLinklyTerminalRequest,
   UpdateSquareTokenRequest,
 } from '../../../types/paymentTerminalSettings'
@@ -73,30 +72,6 @@ export function buildSquareTokenPayload(
   const token = values.accessToken.trim()
   if (!values.clearToken && token) {
     payload.accessToken = token
-  }
-
-  return payload
-}
-
-export function buildLinklyCredentialPayload(
-  storeCode: string,
-  environment: PaymentTerminalEnvironment,
-  values: LinklyCredentialFormValues,
-): UpdateLinklyCredentialRequest {
-  const payload: UpdateLinklyCredentialRequest = {
-    storeCode,
-    environment,
-    clearCredential: values.clearCredential,
-  }
-
-  const username = values.username.trim()
-  const password = values.password.trim()
-  if (!values.clearCredential && username) {
-    payload.username = username
-  }
-  // 密码留空表示保留旧密码；清除时也不发送密码，避免无意义地传输密钥。
-  if (!values.clearCredential && password) {
-    payload.password = password
   }
 
   return payload

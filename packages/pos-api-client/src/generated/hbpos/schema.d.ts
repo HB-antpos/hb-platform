@@ -3149,30 +3149,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
-            parameters: {
-                query?: {
-                    environment?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "text/plain": components["schemas"]["LinklyCloudCredentialResponseApiResult"];
-                        "application/json": components["schemas"]["LinklyCloudCredentialResponseApiResult"];
-                        "text/json": components["schemas"]["LinklyCloudCredentialResponseApiResult"];
-                    };
-                };
-            };
-        };
+        get?: never;
         put: {
             parameters: {
                 query?: never;
@@ -6888,20 +6865,6 @@ export interface components {
             selectionRevision?: number | null;
             /** Format: uuid */
             attemptGuid?: string | null;
-        };
-        LinklyCloudCredentialResponse: {
-            storeCode?: string | null;
-            environment?: string | null;
-            username?: string | null;
-            password?: string | null;
-            /** Format: date-time */
-            updatedAt?: string;
-        };
-        LinklyCloudCredentialResponseApiResult: {
-            success?: boolean;
-            data?: components["schemas"]["LinklyCloudCredentialResponse"];
-            errorCode?: string | null;
-            message?: string | null;
         };
         LinklyCloudCredentialUpsertRequest: {
             environment?: string | null;
