@@ -2175,11 +2175,14 @@ public sealed class CashPaymentWorkflowService(
         var attempt = new LocalCardPaymentAttempt(
             attemptGuid,
             null,
-            // LocalIp 引用只绑定已落库 attempt 身份；Cloud 退款继续沿用既有原交易派生规则。
+            // LocalIp 与 CloudBackendAsync 的退款引用都只绑定已落库 attempt 身份：后端模式把 attempt 身份作为 AttemptGuid
+            // 交给后端，后端用同一算法派生出相同的 R 引用。过去后端退款用本地随机 GUID，POST 已受理而响应丢失时，
+            // 订单会话关联不上本地退款 attempt，出现两条互不关联的记录，主管误判“未退款”重试会重复退款。
+            // 直连模式的退款引用仍沿用既有规则。
             // 销售在三种模式下都必须在发请求前确定引用并随 attempt 落库：CloudBackendAsync 过去等服务端生成，
             // 请求发出后一旦断电或响应丢失，这一行 SessionId 与 TxnRef 皆空，自动恢复和主管结案都无法认领它。
             isRefund
-                ? mode == LinklyConnectionMode.LocalIp
+                ? mode is LinklyConnectionMode.LocalIp or LinklyConnectionMode.CloudBackendAsync
                     ? LinklyLocalTxnRef.Create('R', attemptGuid.ToString("D"))
                     : BuildRefundTxnRef(referenceText)
                 : LinklyLocalTxnRef.Create('P', attemptGuid.ToString("D")),

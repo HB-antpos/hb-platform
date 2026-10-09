@@ -4767,8 +4767,9 @@ public sealed class CashPaymentWorkflowServiceTests
     }
 
     [Fact]
-    public async Task Cloud_ordinary_refund_persists_and_submits_legacy_32_hex_txn_ref()
+    public async Task Cloud_backend_ordinary_refund_persists_and_submits_the_attempt_derived_refund_txn_ref()
     {
+        // 后端模式退款引用由 attempt 身份派生（后端用同一算法派生出相同的 R 引用），POST 响应丢失后订单会话才能关联到本地退款 attempt。
         var cart = CreateReturnCart(4m);
         var attempts = new RecordingCardPaymentAttemptRepository();
         LocalCardPaymentAttempt? persistedAtSubmission = null;
@@ -4797,9 +4798,47 @@ public sealed class CashPaymentWorkflowServiceTests
         Assert.NotNull(persistedAtSubmission);
         Assert.Equal(LinklyConnectionMode.CloudBackendAsync.ToString(), persistedAtSubmission.ConnectionMode);
         Assert.Equal("R", persistedAtSubmission.TxnType);
+        Assert.Matches("^R[0-9ABCDEFGHJKMNPQRSTVWXYZ]{15}$", persistedAtSubmission.TxnRef!);
+        Assert.Equal(
+            LinklyLocalTxnRef.Create('R', persistedAtSubmission.AttemptGuid.ToString("D")),
+            persistedAtSubmission.TxnRef);
+        Assert.Equal(persistedAtSubmission.TxnRef, terminal.LastIdempotencyKey);
+    }
+
+    [Fact]
+    public async Task Cloud_direct_ordinary_refund_keeps_the_legacy_32_hex_txn_ref()
+    {
+        // 直连模式不经后端，退款引用沿用既有规则，不随后端派生算法变化。
+        var cart = CreateReturnCart(4m);
+        var attempts = new RecordingCardPaymentAttemptRepository();
+        LocalCardPaymentAttempt? persistedAtSubmission = null;
+        var terminal = new RecordingIdempotentCardRefundClient(
+            new PaymentAuthorizationResult(true, "ANZ:CLOUD-REFUND", "APPROVED", AuthorizedAmount: 4m),
+            () => persistedAtSubmission = attempts.Attempts.SingleOrDefault());
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardPaymentAttemptRepository: attempts,
+            cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(
+                CreateBackendLinklySettings() with { LinklyConnectionMode = LinklyConnectionMode.CloudDirectSync }));
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            actualAmount: -4m,
+            currentTenders: [],
+            amountText: "4",
+            referenceText: "ANZ:CLOUD-SALE",
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded, result.StatusMessage);
+        Assert.NotNull(persistedAtSubmission);
+        Assert.Equal(LinklyConnectionMode.CloudDirectSync.ToString(), persistedAtSubmission.ConnectionMode);
         Assert.Matches("^[0-9a-f]{32}$", persistedAtSubmission.TxnRef!);
         Assert.Equal(persistedAtSubmission.TxnRef, terminal.LastIdempotencyKey);
-        Assert.DoesNotMatch("^[PR][0-9ABCDEFGHJKMNPQRSTVWXYZ]{15}$", terminal.LastIdempotencyKey!);
     }
 
     [Fact]
