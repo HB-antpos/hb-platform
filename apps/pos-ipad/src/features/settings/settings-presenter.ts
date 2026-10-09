@@ -3631,6 +3631,9 @@ function updateLinklyLogonTest(
 }
 
 // 界面与配对请求共用资格判断，避免已加载云端线路却被旧健康检查挡住。
+// Active 与 Draft 下凭据属于终端本身（Web 后台逐台录入，服务端配对只校验终端自己的账号密码），
+// 只要终端存在就可配对；旧版门店凭据（health 的 STORE_CREDENTIAL）只对 Legacy 模式有意义。
+// 否则只走 Web 建线路的新门店会停在 Draft：配不出第一台终端，也就激活不了多终端。
 export function hasLinklyCloudCredentials(
   state: Pick<SettingsState, "linklySetup">,
   environment: PaymentEnvironment,
@@ -3639,7 +3642,7 @@ export function hasLinklyCloudCredentials(
   if (
     terminals?.kind === "ready" &&
     terminals.value?.environment === environment &&
-    terminals.value.mode === "Active"
+    (terminals.value.mode === "Active" || terminals.value.mode === "Draft")
   ) {
     return terminals.value.terminals.length > 0;
   }

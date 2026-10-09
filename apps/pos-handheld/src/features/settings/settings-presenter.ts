@@ -518,6 +518,9 @@ export type SettingsStatusCode =
   | "load-failed"
   | "linkly-health-load-failed"
   | "linkly-pair-code-invalid"
+  | "linkly-pair-code-rejected"
+  | "linkly-pair-credentials-required"
+  | "linkly-pair-busy"
   | "linkly-pair-failed"
   | "linkly-pair-unknown"
   | "linkly-paired"
@@ -528,6 +531,7 @@ export type SettingsStatusCode =
   | "payment-settings-save-failed"
   | "payment-settings-saved"
   | "payment-test-failed"
+  | "payment-test-unconfirmed"
   | "payment-test-passed"
   | "pending-local-data"
   | "permission-required"
@@ -1939,7 +1943,7 @@ export class SettingsPresenter {
           });
         }
         this.patch({ statusCode: "payment-test-passed" });
-      } catch {
+      } catch (error) {
         if (linklyTestEnvironment && this.state.linklySetup) {
           this.patch({
             linklySetup: updateLinklyLogonTest(
@@ -1949,7 +1953,10 @@ export class SettingsPresenter {
             ),
           });
         }
-        this.patch({ statusCode: "payment-test-failed" });
+        // 超时/408/5xx/202 说明银行签到可能已成功但结果未确认：单独提示稍后重测，不能报成“签到被拒”。
+        this.patch({ statusCode: error && typeof error === "object" &&
+          "code" in error && error.code === "LINKLY_TEST_UNCONFIRMED"
+          ? "payment-test-unconfirmed" : "payment-test-failed" });
       }
     });
   }
@@ -2608,7 +2615,7 @@ export class SettingsPresenter {
               ? "device-reregister-started"
               : "app-restart-requested",
         });
-      } catch {
+      } catch (error) {
         this.patch({
           ...(confirmation.kind === "change-api-address"
             ? { apiAddressDraft: this.state.apiBaseUrl }
@@ -2621,7 +2628,9 @@ export class SettingsPresenter {
                 }),
               }
             : {}),
-          statusCode: dangerousActionFailureCode(confirmation.kind),
+          statusCode: confirmation.kind === "pair-linkly"
+            ? linklyPairFailureStatus(error)
+            : dangerousActionFailureCode(confirmation.kind),
         });
       }
     });
@@ -3166,7 +3175,11 @@ function updateLinklyLogonTest(
   });
 }
 
-function hasLinklyCloudCredentials(
+// 界面与配对请求共用资格判断，避免已加载云端线路却被旧健康检查挡住。
+// Active 与 Draft 下凭据属于终端本身（Web 后台逐台录入，服务端配对只校验终端自己的账号密码），
+// 只要终端存在就可配对；旧版门店凭据（health 的 STORE_CREDENTIAL）只对 Legacy 模式有意义。
+// 否则只走 Web 建线路的新门店会停在 Draft：配不出第一台终端，也就激活不了多终端。
+export function hasLinklyCloudCredentials(
   state: Pick<SettingsState, "linklySetup">,
   environment: PaymentEnvironment,
 ): boolean {
@@ -3174,7 +3187,7 @@ function hasLinklyCloudCredentials(
   if (
     terminals?.kind === "ready" &&
     terminals.value?.environment === environment &&
-    terminals.value.mode === "Active"
+    (terminals.value.mode === "Active" || terminals.value.mode === "Draft")
   ) {
     return terminals.value.terminals.length > 0;
   }
@@ -3741,6 +3754,22 @@ function isAbortError(error: unknown): boolean {
     "name" in error &&
     error.name === "AbortError"
   );
+}
+
+// 配对被明确拒绝时区分原因，店员才知道该换码、找管理员还是等待（与 iPad 一致）。
+function linklyPairFailureStatus(error: unknown): SettingsStatusCode {
+  const code = error && typeof error === "object" && "code" in error ? error.code : null;
+  switch (code) {
+    case "LINKLY_CLOUD_BACKEND_PAIR_REJECTED":
+      return "linkly-pair-code-rejected";
+    case "LINKLY_CLOUD_BACKEND_PAIR_CREDENTIAL_MISSING":
+      return "linkly-pair-credentials-required";
+    case "LINKLY_CLOUD_BACKEND_PAIR_IN_PROGRESS":
+    case "LINKLY_CLOUD_TERMINAL_SESSION_ACTIVE":
+      return "linkly-pair-busy";
+    default:
+      return "linkly-pair-failed";
+  }
 }
 
 function dangerousActionFailureCode(

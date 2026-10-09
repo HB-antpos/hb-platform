@@ -16,6 +16,7 @@ import {
   SETTINGS_VIEW_PERMISSION,
 } from "./settings-authorization";
 import {
+  hasLinklyCloudCredentials,
   SettingsPresenter,
   type SettingsCashDrawerTestResult,
   type SettingsClearSavedPrinterResult,
@@ -1836,6 +1837,110 @@ test("Linkly 首次配对只需门店凭据；刷新 ready 后 logon 才可保�
   assert.equal(presenter.getState().confirmation, null);
   assert.equal(presenter.getState().statusCode, "payment-settings-saved");
   assert.equal(port.savedPayments.length, 1);
+});
+
+test("Linkly Draft 模式（Web 刚建线路）以终端自身凭据为准即可配出第一台终端，不要求旧版门店凭据", async () => {
+  const port = new FakeSettingsPort();
+  const setup = new FakeLinklySetupControlPort();
+  const pairing = new FakeLinklyPairingPort();
+  port.linklySetup = setup;
+  port.linklyPairing = pairing;
+  // 非 Active 时服务端用旧版门店凭据计算 STORE_CREDENTIAL；只用移动端/Web 逐台录入凭据的新门店永远没有它。
+  setup.health = linklyHealth("Production", false, false);
+  const base = linklyTerminals("Production", null, 0);
+  setup.terminals = Object.freeze({
+    ...base,
+    mode: "Draft" as const,
+    terminals: Object.freeze(base.terminals.map((terminal) => Object.freeze({
+      ...terminal,
+      pairingState: "Unpaired" as const,
+      isReady: false,
+    }))),
+  });
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  assert.equal(hasLinklyCloudCredentials(presenter.getState(), "Production"), true);
+  assert.equal(presenter.requestLinklyPair("terminal-1", "123456"), true);
+  assert.equal(presenter.getState().confirmation?.kind, "pair-linkly");
+  await presenter.confirmDangerousAction();
+  assert.deepEqual(pairing.pairCalls, [
+    { environment: "Production", terminalId: "terminal-1", pairCode: "123456" },
+  ]);
+  assert.equal(presenter.getState().statusCode, "linkly-paired");
+});
+
+test("Linkly 旧版门店凭据只约束 Legacy 模式；Draft 没有任何终端或环境不符时仍回退到 STORE_CREDENTIAL", async () => {
+  const build = async (mode: "Legacy" | "Draft", terminalCount: number, storeCredentialReady: boolean) => {
+    const port = new FakeSettingsPort();
+    const setup = new FakeLinklySetupControlPort();
+    port.linklySetup = setup;
+    setup.health = linklyHealth("Production", false, storeCredentialReady);
+    const base = linklyTerminals("Production", null, 0);
+    setup.terminals = Object.freeze({
+      ...base,
+      mode,
+      terminals: Object.freeze(base.terminals.slice(0, terminalCount)),
+    });
+    const presenter = createPresenter(port);
+    await presenter.load();
+    return presenter;
+  };
+
+  const legacy = await build("Legacy", 2, false);
+  assert.equal(hasLinklyCloudCredentials(legacy.getState(), "Production"), false);
+  assert.equal(legacy.requestLinklyPair("terminal-1", "123456"), false);
+  assert.equal(legacy.getState().statusCode, "linkly-setup-required");
+
+  assert.equal(hasLinklyCloudCredentials((await build("Legacy", 2, true)).getState(), "Production"), true);
+  // Draft 里还没有任何终端：没有可用的终端级凭据，仍按旧健康检查判定。
+  assert.equal(hasLinklyCloudCredentials((await build("Draft", 0, false)).getState(), "Production"), false);
+  assert.equal(hasLinklyCloudCredentials((await build("Draft", 2, false)).getState(), "Sandbox"), false);
+});
+
+for (const [code, statusCode] of [
+  ["LINKLY_CLOUD_BACKEND_PAIR_REJECTED", "linkly-pair-code-rejected"],
+  ["LINKLY_CLOUD_BACKEND_PAIR_CREDENTIAL_MISSING", "linkly-pair-credentials-required"],
+  ["LINKLY_CLOUD_BACKEND_PAIR_IN_PROGRESS", "linkly-pair-busy"],
+  ["LINKLY_CLOUD_TERMINAL_SESSION_ACTIVE", "linkly-pair-busy"],
+  ["SOMETHING_ELSE", "linkly-pair-failed"],
+] as const) {
+  test(`Linkly 新配对码提交失败显示原因 ${code}，不会自动重放`, async () => {
+    const port = new FakeSettingsPort();
+    const setup = new FakeLinklySetupControlPort();
+    const pairing = new FakeLinklyPairingPort();
+    port.linklySetup = setup;
+    port.linklyPairing = pairing;
+    let attempts = 0;
+    pairing.pair = async () => { attempts += 1; throw Object.assign(new Error("private"), { code }); };
+    setup.health = linklyHealth("Production", false, true);
+    const presenter = createPresenter(port);
+    await presenter.load();
+    assert.equal(presenter.requestLinklyPair("123456"), true);
+    await presenter.confirmDangerousAction();
+    assert.equal(attempts, 1);
+    assert.equal(presenter.getState().confirmation, null);
+    assert.equal(presenter.getState().statusCode, statusCode);
+  });
+}
+
+test("Linkly 测试结果未确认（超时/408/5xx）单独提示，不报成签到被拒", async () => {
+  const port = new FakeSettingsPort();
+  const setup = new FakeLinklySetupControlPort();
+  port.linklySetup = setup;
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  port.testPaymentProvider = async () => {
+    throw Object.assign(new Error("private details"), { code: "LINKLY_TEST_UNCONFIRMED" });
+  };
+  await presenter.testPaymentProvider("linkly");
+  assert.equal(presenter.getState().statusCode, "payment-test-unconfirmed");
+  assert.equal(presenter.getState().linklySetup?.logonTest.status, "failed");
+
+  port.testPaymentProvider = async () => { throw new Error("declined"); };
+  await presenter.testPaymentProvider("linkly");
+  assert.equal(presenter.getState().statusCode, "payment-test-failed");
 });
 
 test("Linkly 配对是危险操作；成功清码刷新，unknown 只刷新且不重试", async () => {

@@ -17,6 +17,10 @@ import {
 type SquareDevice = components["schemas"]["SquareDeviceDto"];
 type LinklyLogon =
   components["schemas"]["LinklyCloudBackendLogonTestResponse"];
+type LinklyStatus = components["schemas"]["LinklyCloudBackendStatusTestResponse"];
+
+// Linkly 上游最多等待 240 秒，额外留出 API 收尾时间；仅覆盖终端验证请求。
+const LINKLY_TEST_TIMEOUT_MS = 270_000;
 
 /**
  * 设置页的测试调用不会创建 checkout 或扣款。Square Sandbox 使用官方 checkout
@@ -119,19 +123,62 @@ export class HbposSettingsPaymentTestApi {
     if (!configuration) {
       throw new Error("Linkly test configuration is unavailable.");
     }
-    const response = await this.transport.request<
-      HbposEnvelope<LinklyLogon>
-    >({
-      method: "POST",
-      url: "/api/v1/linkly/cloud-backend/logon-test",
-      params: linklyLogonTestParams(configuration.environment, terminals),
-      signal,
-    });
-    const result = unwrapHbposEnvelope(response.data);
-    if (result.succeeded !== true) {
-      throw new Error("Linkly Cloud logon test was declined.");
+    const params = linklyLogonTestParams(configuration.environment, terminals);
+    try {
+      throwIfAborted(signal);
+      const statusResponse = await this.transport.request<HbposEnvelope<LinklyStatus>>({
+        method: "POST",
+        url: "/api/v1/linkly/cloud-backend/status-test",
+        params,
+        signal,
+        timeoutMs: LINKLY_TEST_TIMEOUT_MS,
+      });
+      const status = unwrapHbposEnvelope(statusResponse.data);
+      assertLinklyTestResponseConfirmed(status.httpStatus);
+      const code = status.responseCode?.trim().toUpperCase();
+      if (status.succeeded === true && status.loggedOn === true) return;
+      if (status.succeeded !== true && code !== "TF") {
+        throw new Error("Linkly terminal status test failed.");
+      }
+      // 明确需要签到，或旧服务未提供 LoggedOn 时，使用原有 Logon 验证兼容路径。
+      // 不把状态查询成功、配对成功或缺失字段当成已签到，也不自动重放不明请求。
+      throwIfAborted(signal);
+      const response = await this.transport.request<HbposEnvelope<LinklyLogon>>({
+        method: "POST",
+        url: "/api/v1/linkly/cloud-backend/logon-test",
+        params,
+        signal,
+        timeoutMs: LINKLY_TEST_TIMEOUT_MS,
+      });
+      const result = unwrapHbposEnvelope(response.data);
+      assertLinklyTestResponseConfirmed(result.httpStatus);
+      if (result.succeeded !== true || result.responseCode?.trim() !== "00") {
+        throw new Error("Linkly Cloud logon test was declined.");
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      if (error && typeof error === "object" && (
+        ("kind" in error && error.kind === "transport") ||
+        ("code" in error && ["ECONNABORTED", "ETIMEDOUT", "ERR_NETWORK"].includes(String(error.code))) ||
+        ("status" in error && typeof error.status === "number" &&
+          (error.status === 408 || error.status >= 500))
+      )) throw linklyTestUnconfirmed();
+      throw error;
     }
   }
+}
+
+function linklyTestUnconfirmed(): Error {
+  return Object.assign(new Error("Linkly test result is not confirmed."), {
+    code: "LINKLY_TEST_UNCONFIRMED",
+  });
+}
+
+function assertLinklyTestResponseConfirmed(httpStatus: number | undefined): void {
+  if (httpStatus === undefined || httpStatus === 202 || httpStatus === 408 || httpStatus >= 500) {
+    throw linklyTestUnconfirmed();
+  }
+  if (httpStatus !== 200) throw new Error("Linkly terminal test failed.");
 }
 
 function linklyLogonTestParams(

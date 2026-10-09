@@ -21,6 +21,7 @@ import {
   type SettingsLocale,
 } from "./settings-copy";
 import {
+  hasLinklyCloudCredentials,
   type PaymentEnvironment,
   type SettingsDangerousConfirmation,
   type SettingsPane,
@@ -1302,7 +1303,11 @@ function LinklySetupCard({
     (terminal) => terminal.terminalId === pairTerminalId,
   );
   const healthReady = linklyHealthReady(state);
-  const storeCredentialsReady = linklyStoreCredentialsReady(state);
+  // 与 presenter 的配对资格同源：Active/Draft 以终端凭据为准，Legacy 才看门店凭据。
+  const storeCredentialsReady = hasLinklyCloudCredentials(
+    state,
+    state.linklyDraft.environment,
+  );
   const terminalPaired = linklyTerminalPaired(state);
   const healthStatus = linklyHealthStatusText(
     locale,
@@ -1824,20 +1829,6 @@ function squareTokenStatusText(
   return settingsText(
     locale,
     token.value.enabled ? "square.tokenReady" : "square.tokenDisabled",
-  );
-}
-
-function linklyStoreCredentialsReady(
-  state: Pick<SettingsState, "linklySetup">,
-): boolean {
-  const health = state.linklySetup?.health;
-  return Boolean(
-    health?.kind === "ready" &&
-      health.value?.checks.some(
-        (check) =>
-          check.code.trim().toUpperCase() === "STORE_CREDENTIAL" &&
-          check.isReady,
-      ),
   );
 }
 
