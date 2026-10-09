@@ -1,4 +1,6 @@
 ﻿using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Localization;
@@ -335,9 +337,13 @@ public sealed class CardPaymentRecoveryService(
     FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
     ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
     ILinklyCloudTerminalClient? cloudTerminalClient = null,
-    ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null) : ICardPaymentRecoveryService
+    ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
+    IOperationAuditLogger? operationAuditLogger = null) : ICardPaymentRecoveryService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    // 审计原因码（≤64 字符，服务端按结构化文本清洗）：已批准未建单的记录由主管确认已退款/另行处理后关闭。
+    internal const string ApprovedEvidenceExitReasonCode = "CLOSE_APPROVED_HANDLED_ELSEWHERE";
 
     private readonly ISharedHeldOrderPaymentSourceResolver? _heldOrderPaymentSourceResolver =
         sharedHeldOrderRepository is null
@@ -1393,27 +1399,7 @@ public sealed class CardPaymentRecoveryService(
 
         if (IsApproved(status))
         {
-            if (!await TrySaveActiveSessionOutcomeAsync(
-                    attempt,
-                    LocalCardPaymentAttemptStatus.Approved,
-                    status,
-                    cancellationToken))
-            {
-                return BuildUnresolvedActiveSessionResult(
-                    attempt,
-                    T("payment.card.resultUnknown", "The card result is unknown. Do not collect payment again until recovery is completed."));
-            }
-
-            if (!await TryAcknowledgeActiveSessionAsync(settings, status, attempt, cancellationToken))
-            {
-                return ActiveSessionAcknowledgeFailed(status, attempt);
-            }
-
-            return new CardPaymentRecoveryResult(
-                CardPaymentRecoveryOutcome.ActiveSessionApproved,
-                T("cardRecovery.linkly.activeSessionApprovedCleared", "The previous Linkly transaction was successful and has been cleared. Continue the current order."),
-                DialogDetails: BuildDialogDetails(status),
-                BankReceipt: BuildActiveSessionBankReceipt(status, LinklyBankReceiptKind.RecoveredApproved));
+            return await HandleApprovedActiveSessionAsync(settings, session, status, attempt, cancellationToken);
         }
 
         if (IsDeclinedOrFailed(status))
@@ -1952,14 +1938,49 @@ public sealed class CardPaymentRecoveryService(
                 ResolutionPersisted: IsSupervisorResolvedPayment(attempt));
         }
 
+        // 已带批准证据（响应码 00/08/11 或银行参考号）的记录只能走“运行恢复”由系统建单。
+        // 恢复建不出单时（金额不符、草稿损坏、建单确定性失败……）主管的唯一出口是确认
+        // “已退款或已另行处理”后关闭；这不是确认未付款，所以不做下面的实时矛盾核验。
+        var approvedEvidenceExit = false;
         if (HasPersistedLinklyPaymentEvidence(attempt))
         {
-            return new CardPaymentSupervisorResolutionResult(
-                false,
-                T(
-                    "cardRecovery.linkly.paymentEvidenceExists",
-                    "Bank payment evidence already exists. Run recovery instead."),
-                LockRetained: true);
+            if (normalized.Decision == CardPaymentSupervisorDecision.ConfirmNotPaid &&
+                IsApprovedEvidenceExitEligible(attempt))
+            {
+                approvedEvidenceExit = true;
+            }
+            else
+            {
+                return new CardPaymentSupervisorResolutionResult(
+                    false,
+                    T(
+                        "cardRecovery.linkly.paymentEvidenceExists",
+                        "Bank payment evidence already exists. Run recovery instead."),
+                    LockRetained: true);
+            }
+        }
+
+        if (!approvedEvidenceExit &&
+            normalized.Decision != CardPaymentSupervisorDecision.ContinueWaiting)
+        {
+            // 结案前必须向 Linkly/刷卡机实时核验一次：仍在处理中只能继续等待；已有终态时拒绝与之矛盾的决定；
+            // 查询失败按失败关闭。否则迟到的批准/拒绝会落在已结案的记录上，形成无人可见的孤儿扣款。
+            var live = await QueryLivePaymentStateAsync(settings, session, attempt, cancellationToken);
+            var liveRejection = BuildLiveResolutionRejection(live.Verdict, normalized.Decision);
+            if (liveRejection is not null)
+            {
+                return new CardPaymentSupervisorResolutionResult(false, liveRejection, LockRetained: true);
+            }
+
+            if (live.Status is not null &&
+                NormalizeOptional(attempt.SessionId) is null &&
+                CanBindRecoveredSession(attempt, live.Status))
+            {
+                // 只有 TxnRef 的 attempt：实时查询已按 TxnRef 认领到真实 SessionId，先落库，
+                // 之后的 acknowledge 才会发给真实会话，而不是拿 TxnRef 当 SessionId 去撞 404。
+                attempt = await BindRecoveredSessionAsync(attempt, live.Status, cancellationToken);
+                sessionKey = NormalizeOptional(attempt.SessionId) ?? sessionKey;
+            }
         }
 
         var resolvedAt = DateTimeOffset.UtcNow;
@@ -1977,12 +1998,16 @@ public sealed class CardPaymentRecoveryService(
             normalized.Reason,
             normalized.Evidence,
             normalized.PaymentReference,
-            resolvedAt);
+            resolvedAt)
+        {
+            AllowApprovedEvidence = approvedEvidenceExit
+        };
         var journal = BuildPaymentSupervisorJournal(
             attempt,
             sessionKey,
             normalized,
-            resolvedAt);
+            resolvedAt,
+            approvedEvidenceExit);
         var applied = await RunLocalStoreAsync(
             () => attemptRepository.ResolvePaymentWithJournalAsync(
                 repositoryResolution,
@@ -2097,7 +2122,8 @@ public sealed class CardPaymentRecoveryService(
                 session,
                 settings,
                 updatedAttempt,
-                CancellationToken.None));
+                CancellationToken.None,
+                approvedEvidenceExit));
         var succeeded = completed.Outcome is
             CardPaymentRecoveryOutcome.OrderCompleted or
             CardPaymentRecoveryOutcome.DraftRestored;
@@ -2111,6 +2137,232 @@ public sealed class CardPaymentRecoveryService(
             LockRetained: lockRetained,
             ResolutionPersisted: true,
             ResolutionApplied: true);
+    }
+
+    // 已带“批准”证据（响应码 00/08/11，或已记为 Approved）却无法自动建单的记录，
+    // 主管可凭“已退款/已另行处理”的证据关闭。只有银行参考号而没有批准码的记录不算批准证据。
+    // FinalizePending 与已结案记录由恢复/收尾续跑，不属于这个出口。
+    private static bool IsApprovedEvidenceExitEligible(LocalCardPaymentAttempt attempt) =>
+        attempt.OperationKind is "Sale" or "ActiveSession" &&
+        attempt.Status is
+            LocalCardPaymentAttemptStatus.Pending or
+            LocalCardPaymentAttemptStatus.SessionStarted or
+            LocalCardPaymentAttemptStatus.Recovering or
+            LocalCardPaymentAttemptStatus.Approved or
+            LocalCardPaymentAttemptStatus.RequiresReview &&
+        (attempt.Status == LocalCardPaymentAttemptStatus.Approved ||
+         LinklyApprovalResponseCodes.IsApproved(attempt.ResponseCode)) &&
+        !IsSupervisorResolvedPayment(attempt) &&
+        !string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal);
+
+    private string? BuildLiveResolutionRejection(
+        LiveResolutionVerdict verdict,
+        CardPaymentSupervisorDecision decision) =>
+        verdict switch
+        {
+            LiveResolutionVerdict.Pending => T(
+                "cardRecovery.linkly.resolveLivePending",
+                "Linkly is still processing this card transaction, so it cannot be closed as paid or not paid yet. Choose Continue waiting and try again after the terminal shows a result."),
+            LiveResolutionVerdict.QueryFailed => T(
+                "cardRecovery.linkly.resolveLiveQueryFailed",
+                "POS could not check the final result with Linkly or the card terminal, so the decision was not saved. Check the network or terminal connection and try again; until then only Continue waiting is available."),
+            LiveResolutionVerdict.Approved when decision == CardPaymentSupervisorDecision.ConfirmNotPaid => T(
+                "cardRecovery.linkly.resolveLiveApproved",
+                "Linkly reports that this card transaction was approved (the customer was charged), so it cannot be closed as not paid. Run recovery so POS can handle the approved payment."),
+            LiveResolutionVerdict.Failed when decision == CardPaymentSupervisorDecision.ConfirmPaid => T(
+                "cardRecovery.linkly.resolveLiveNotApproved",
+                "Linkly reports that this card transaction was not approved (no charge was made), so it cannot be closed as paid. Choose Confirmed not paid if the payment is being abandoned."),
+            _ => null
+        };
+
+    private enum LiveResolutionVerdict
+    {
+        // Linkly/刷卡机明确报告批准（已扣款）。
+        Approved,
+        // Linkly/刷卡机明确报告未成功（拒绝、取消、超时、未提交）。
+        Failed,
+        // 交易仍在处理中，随时可能出终态。
+        Pending,
+        // 查询成功但对不上这笔 attempt 或没有终态结论；是否结案由主管凭银行证据决定。
+        Inconclusive,
+        // 查询本身失败（网络、终端不可达、客户端未接线）；失败关闭，只允许继续等待。
+        QueryFailed
+    }
+
+    private sealed record LiveResolutionCheck(
+        LiveResolutionVerdict Verdict,
+        LinklyCloudBackendSessionResponse? Status = null);
+
+    private async Task<LiveResolutionCheck> QueryLivePaymentStateAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        LocalCardPaymentAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var mode = ResolveAttemptConnectionMode(
+            attempt,
+            CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode));
+        try
+        {
+            // 只读查询：后端会话状态 / 本地 GetLast / 直连 GET 原交易，绝不重发扣款。
+            return mode switch
+            {
+                LinklyConnectionMode.CloudBackendAsync =>
+                    await QueryLiveBackendStateAsync(settings, attempt, cancellationToken),
+                LinklyConnectionMode.CloudDirectSync or LinklyConnectionMode.LocalIp =>
+                    await QueryLiveTerminalStateAsync(
+                        settings,
+                        session,
+                        attempt,
+                        mode == LinklyConnectionMode.CloudDirectSync,
+                        cancellationToken),
+                _ => new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive)
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            ConsoleLog.WriteWarning(
+                "CardRecovery",
+                $"supervisor resolve live check failed attemptGuid={attempt.AttemptGuid} mode={mode} error={ex.GetType().Name}",
+                RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
+                ex);
+            return new LiveResolutionCheck(LiveResolutionVerdict.QueryFailed);
+        }
+    }
+
+    private async Task<LiveResolutionCheck> QueryLiveBackendStateAsync(
+        CardTerminalSettings settings,
+        LocalCardPaymentAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var sessionId = NormalizeOptional(attempt.SessionId);
+        LinklyCloudBackendSessionResponse? status;
+        try
+        {
+            status = sessionId is not null
+                ? await backendTerminalClient.GetSessionStatusAsync(settings, sessionId, cancellationToken)
+                // 只有 TxnRef：按设备的可恢复会话认领，匹配 TxnRef 才算这笔交易。
+                : await RunWithTerminalSelectionAsync(
+                    () => backendTerminalClient.GetResumableSessionAsync(settings, cancellationToken),
+                    cancellationToken);
+        }
+        catch (HttpRequestException ex) when (
+            sessionId is not null && ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            // 后端没有这条会话：没有在途或已批准的会话可以与主管决定矛盾，凭银行证据结案。
+            return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
+        }
+
+        if (status is null ||
+            !StatusMatchesAttempt(attempt, status, statusFromResumable: sessionId is null, out _))
+        {
+            return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
+        }
+
+        if (string.Equals(status.Status, StatusSupervisorResolved, StringComparison.OrdinalIgnoreCase))
+        {
+            // 后端已被主管结案过，不会再产生新结果。
+            return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive, status);
+        }
+
+        if (IsApproved(status))
+        {
+            return new LiveResolutionCheck(LiveResolutionVerdict.Approved, status);
+        }
+
+        if (IsDeclinedOrFailed(status))
+        {
+            return new LiveResolutionCheck(LiveResolutionVerdict.Failed, status);
+        }
+
+        // 非终态（Pending / TokenRefreshRequired 等）随时可能出结果；Completed 却没有成败位则无结论。
+        return IsFinal(status)
+            ? new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive, status)
+            : new LiveResolutionCheck(LiveResolutionVerdict.Pending, status);
+    }
+
+    private async Task<LiveResolutionCheck> QueryLiveTerminalStateAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        LocalCardPaymentAttempt attempt,
+        bool directCloud,
+        CancellationToken cancellationToken)
+    {
+        if (!LinklyLocalTxnRef.TryNormalizeHistoricalReference(attempt.TxnRef, out var txnRef))
+        {
+            // 旧格式引用无法按协议查询，沿用主管对照终端小票人工核对（见 legacyTxnRefRequiresReview）。
+            return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
+        }
+
+        var querySession = TryDeserializeDraft(attempt)?.Session ?? session;
+        PaymentAuthorizationResult authorization;
+        if (directCloud)
+        {
+            var sessionId = NormalizeOptional(attempt.SessionId);
+            if (sessionId is null)
+            {
+                // 直连会话号没有绑定：没有可查询的原交易。
+                return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
+            }
+
+            if (cloudTerminalClient is null)
+            {
+                return new LiveResolutionCheck(LiveResolutionVerdict.QueryFailed);
+            }
+
+            authorization = await RunWithTerminalSelectionAsync(
+                () => cloudTerminalClient.RecoverTransactionAsync(
+                    attempt.Amount,
+                    querySession,
+                    settings with { LinklyConnectionMode = LinklyConnectionMode.CloudDirectSync },
+                    sessionId,
+                    txnRef,
+                    cancellationToken),
+                cancellationToken);
+        }
+        else
+        {
+            if (linklyTerminalClient is null)
+            {
+                return new LiveResolutionCheck(LiveResolutionVerdict.QueryFailed);
+            }
+
+            authorization = await RunWithTerminalSelectionAsync(
+                () => linklyTerminalClient.RecoverLastTransactionAsync(
+                    attempt.Amount,
+                    querySession,
+                    settings,
+                    txnRef,
+                    cancellationToken),
+                cancellationToken);
+        }
+
+        // ResultUnknown 表示刷卡机/Linkly 没能回答（离线、超时、仍在处理或直连 GET 无终态）：
+        // 无法证明没有迟到的结果，失败关闭。
+        if (authorization.ResultUnknown)
+        {
+            return new LiveResolutionCheck(LiveResolutionVerdict.QueryFailed);
+        }
+
+        var hasFinalResult = authorization.Approved || HasLocalFinalResult(authorization);
+        if (hasFinalResult && !LocalAuthorizationMatchesAttempt(attempt, authorization))
+        {
+            // 终端最近一笔不是这笔交易（终端已处理过别的交易）：既不证明也不否定，凭银行证据结案。
+            return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
+        }
+
+        if (authorization.Approved)
+        {
+            return new LiveResolutionCheck(LiveResolutionVerdict.Approved);
+        }
+
+        return hasFinalResult
+            ? new LiveResolutionCheck(LiveResolutionVerdict.Failed)
+            : new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
     }
 
     public async Task<CardPaymentRecoveryResult> RecoverActiveSessionAsync(
@@ -2259,28 +2511,9 @@ public sealed class CardPaymentRecoveryService(
 
         if (IsApproved(status))
         {
-            if (!await TrySaveActiveSessionOutcomeAsync(
-                    persistedAttempt,
-                    LocalCardPaymentAttemptStatus.Approved,
-                    status,
-                    cancellationToken))
-            {
-                return BuildUnresolvedActiveSessionResult(
-                    persistedAttempt,
-                    T("payment.card.resultUnknown", "The card result is unknown. Do not collect payment again until recovery is completed."));
-            }
-
-            // 付款页恢复只确认并清理上一笔 active session，不能把结果合并进当前购物车。
-            if (!await TryAcknowledgeActiveSessionAsync(settings, status, persistedAttempt, cancellationToken))
-            {
-                return ActiveSessionAcknowledgeFailed(status, persistedAttempt);
-            }
-
-            return new CardPaymentRecoveryResult(
-                CardPaymentRecoveryOutcome.ActiveSessionApproved,
-                T("cardRecovery.linkly.activeSessionApprovedCleared", "The previous Linkly transaction was successful and has been cleared. Continue the current order."),
-                DialogDetails: BuildDialogDetails(status),
-                BankReceipt: BuildActiveSessionBankReceipt(status, LinklyBankReceiptKind.RecoveredApproved));
+            // 付款页恢复只确认并清理上一笔 active session，不能把结果合并进当前购物车；
+            // 但清理前必须确认这笔批准已经有订单承接，否则 ack 之后服务端再也看不到这笔孤儿扣款。
+            return await HandleApprovedActiveSessionAsync(settings, session, status, persistedAttempt, cancellationToken);
         }
 
         if (IsDeclinedOrFailed(status))
@@ -2316,12 +2549,189 @@ public sealed class CardPaymentRecoveryService(
             PaymentSupervisorDetails: BuildPaymentSupervisorDetails(persistedAttempt));
     }
 
+    private enum ApprovedSessionLinkage
+    {
+        // 本机已有订单承接这笔批准，可以放心 ack。
+        Covered,
+        // 找到对应的 Sale/Refund attempt，但订单还没落库；应由该 attempt 自己的恢复建单，不能在这里 ack。
+        PendingAttempt,
+        // 本机没有任何 attempt/订单对应这笔批准：孤儿扣款。
+        Orphan
+    }
+
+    /// <summary>
+    /// 付款页/异常中心恢复到“已批准”的活动会话：ack 前先核对本机订单。
+    /// 已有订单承接才清理；找不到订单的批准不能被 ack 抹掉（服务端从此看不到，而顾客已被扣款），
+    /// 必须保留为未结记录并上报审计，由主管在异常中心核对处理。
+    /// </summary>
+    private async Task<CardPaymentRecoveryResult> HandleApprovedActiveSessionAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        LinklyCloudBackendSessionResponse status,
+        LocalCardPaymentAttempt? attempt,
+        CancellationToken cancellationToken)
+    {
+        var resultUnknown = T(
+            "payment.card.resultUnknown",
+            "The card result is unknown. Do not collect payment again until recovery is completed.");
+        ApprovedSessionLinkage linkage;
+        try
+        {
+            linkage = await ClassifyApprovedSessionLinkageAsync(
+                settings,
+                session,
+                status,
+                attempt?.AttemptGuid,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
+        {
+            // 无法证明已有订单承接时按失败关闭：不 ack、不清理。
+            ConsoleLog.WriteWarning(
+                "CardRecovery",
+                $"recover active-session approved linkage lookup failed sessionId={LogValue(status.SessionId)} error={ex.GetType().Name}",
+                RecoveryLogContext(status.SessionId),
+                ex);
+            return BuildUnresolvedActiveSessionResult(attempt, resultUnknown);
+        }
+
+        if (linkage == ApprovedSessionLinkage.PendingAttempt)
+        {
+            return new CardPaymentRecoveryResult(
+                CardPaymentRecoveryOutcome.Unknown,
+                T(
+                    "cardRecovery.linkly.activeSessionApprovedOrderPending",
+                    "The previous Linkly transaction was approved, but its order has not been saved yet. Recover that transaction in Card Recovery before taking another payment."),
+                DialogDetails: BuildDialogDetails(status),
+                PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
+        }
+
+        var firstDetection = attempt is not null &&
+            attempt.Status != LocalCardPaymentAttemptStatus.Approved;
+        // 有订单承接的批准直接终态化，避免留下一条永远“已批准未建单”的重复记录；孤儿批准保持 Approved（未结）。
+        var outcome = linkage == ApprovedSessionLinkage.Covered
+            ? LocalCardPaymentAttemptStatus.OrderCompleted
+            : LocalCardPaymentAttemptStatus.Approved;
+        if (!await TrySaveActiveSessionOutcomeAsync(attempt, outcome, status, cancellationToken))
+        {
+            return BuildUnresolvedActiveSessionResult(attempt, resultUnknown);
+        }
+
+        if (linkage == ApprovedSessionLinkage.Orphan)
+        {
+            if (firstDetection)
+            {
+                ReportOrphanApprovedSession(session, status, attempt);
+            }
+
+            return new CardPaymentRecoveryResult(
+                CardPaymentRecoveryOutcome.Unknown,
+                T(
+                    "cardRecovery.linkly.activeSessionApprovedOrphan",
+                    "The previous Linkly transaction was approved (the customer was charged) but this POS has no order for it. Do not charge again. Ask a supervisor to review it in Card Recovery."),
+                DialogDetails: BuildDialogDetails(status),
+                PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
+        }
+
+        if (!await TryAcknowledgeActiveSessionAsync(settings, status, attempt, cancellationToken))
+        {
+            return ActiveSessionAcknowledgeFailed(status, attempt);
+        }
+
+        return new CardPaymentRecoveryResult(
+            CardPaymentRecoveryOutcome.ActiveSessionApproved,
+            T("cardRecovery.linkly.activeSessionApprovedCleared", "The previous Linkly transaction was successful and has been cleared. Continue the current order."),
+            DialogDetails: BuildDialogDetails(status),
+            BankReceipt: BuildActiveSessionBankReceipt(status, LinklyBankReceiptKind.RecoveredApproved));
+    }
+
+    private async Task<ApprovedSessionLinkage> ClassifyApprovedSessionLinkageAsync(
+        CardTerminalSettings settings,
+        PosSessionState session,
+        LinklyCloudBackendSessionResponse status,
+        Guid? activeSessionAttemptGuid,
+        CancellationToken cancellationToken)
+    {
+        var sessionId = NormalizeOptional(status.SessionId);
+        var txnRef = NormalizeOptional(status.TxnRef);
+        // 近期记录足以覆盖“刚刚发生的上一笔”；更早的记录对不上就按孤儿处理（失败关闭，最多多一次主管核对）。
+        var recent = await RunLocalStoreAsync(
+            () => attemptRepository.GetRecentAttemptsAsync(
+                session.StoreCode,
+                session.DeviceCode,
+                settings.Environment.ToString(),
+                cancellationToken),
+            cancellationToken);
+        var matches = recent
+            .Where(candidate =>
+                candidate.AttemptGuid != activeSessionAttemptGuid &&
+                candidate.OperationKind is "Sale" or "Refund" &&
+                ((sessionId is not null && TextEquals(candidate.SessionId, sessionId)) ||
+                 (txnRef is not null && TextEquals(candidate.TxnRef, txnRef))))
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return ApprovedSessionLinkage.Orphan;
+        }
+
+        if (matches.Any(candidate => candidate.Status == LocalCardPaymentAttemptStatus.OrderCompleted))
+        {
+            return ApprovedSessionLinkage.Covered;
+        }
+
+        // attempt 还没来得及标记 OrderCompleted，但订单可能已经保存：用精确的 attempt tender key 证明。
+        foreach (var candidate in matches)
+        {
+            var draft = TryDeserializeDraft(candidate);
+            if (draft is null)
+            {
+                continue;
+            }
+
+            var order = await RunLocalStoreAsync(
+                () => orderRepository.GetOrderAsync(draft.OrderGuid, CancellationToken.None),
+                CancellationToken.None);
+            if (order is not null && HasExactAttemptTender(order, candidate.AttemptGuid))
+            {
+                return ApprovedSessionLinkage.Covered;
+            }
+        }
+
+        return ApprovedSessionLinkage.PendingAttempt;
+    }
+
+    private void ReportOrphanApprovedSession(
+        PosSessionState session,
+        LinklyCloudBackendSessionResponse status,
+        LocalCardPaymentAttempt? attempt)
+    {
+        var amount = status.CardTransaction?.AmountCents is long cents
+            ? decimal.Round(cents / 100m, 2, MidpointRounding.AwayFromZero)
+            : (decimal?)null;
+        ConsoleLog.WriteError(
+            "CardRecovery",
+            $"orphan approved linkly session detected sessionId={LogValue(status.SessionId)} txnRef={LogValue(status.TxnRef)} attemptGuid={attempt?.AttemptGuid.ToString("D") ?? "<null>"}",
+            RecoveryLogContext(status.SessionId));
+        // 复用服务端已白名单的“卡付款主管结案”类型：Failed + 独立原因码，表示发现了需要主管处理的孤儿批准。
+        OperationAuditEvents.RecordAction(
+            operationAuditLogger,
+            "CARD_PAYMENT_SUPERVISOR_RESOLUTION",
+            "Failed",
+            session,
+            reasonCode: "ORPHAN_APPROVED_SESSION",
+            safeMessage: $"session={LogValue(status.SessionId)} txnRef={LogValue(status.TxnRef)} response={LogValue(status.ResponseCode)}",
+            paymentMethod: CardProcessorKind.Linkly.ToString(),
+            paymentAmount: amount,
+            correlationId: attempt?.AttemptGuid.ToString("D") ?? NormalizeOptional(status.SessionId));
+    }
+
     private async Task<CardPaymentRecoveryResult> FinalizeSupervisorPaymentAsync(
         PosCartService cart,
         PosSessionState session,
         CardTerminalSettings settings,
         LocalCardPaymentAttempt attempt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool approvedEvidenceExit = false)
     {
         var confirmedPaid = string.Equals(
             attempt.ResponseCode,
@@ -2344,7 +2754,10 @@ public sealed class CardPaymentRecoveryService(
             CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode));
         if (confirmedNotPaid)
         {
-            if (draft is null && HasInvalidDraftPayload(attempt))
+            // 常规“确认未付款”要求仓储 CAS 保证记录没有任何付款证据；因此结案后仍带银行参考号的记录
+            // 只可能来自“已批准但主管确认已退款/另行处理”的受控出口，重启后续跑时也能据此识别。
+            approvedEvidenceExit |= NormalizeOptional(attempt.PaymentReference) is not null;
+            if (draft is null && HasInvalidDraftPayload(attempt) && !approvedEvidenceExit)
             {
                 return BuildUnresolvedActiveSessionResult(
                     attempt,
@@ -2417,7 +2830,9 @@ public sealed class CardPaymentRecoveryService(
 
                 return new CardPaymentRecoveryResult(
                     CardPaymentRecoveryOutcome.DraftRestored,
-                    T("cardRecovery.linkly.supervisorNotPaidRestored", "The bank confirmed that no payment was processed. The original order has been restored and can be paid again."),
+                    approvedEvidenceExit
+                        ? T("cardRecovery.linkly.approvedClosedRestored", "The supervisor closed this approved card transaction as refunded or handled elsewhere. The original order has been restored and can be paid again.")
+                        : T("cardRecovery.linkly.supervisorNotPaidRestored", "The bank confirmed that no payment was processed. The original order has been restored and can be paid again."),
                     TenderedAmount: draft.CurrentTenders.Sum(tender => tender.Amount),
                     DialogDetails: BuildDialogDetails(attempt),
                     RestoredTenders: draft.CurrentTenders,
@@ -2467,7 +2882,9 @@ public sealed class CardPaymentRecoveryService(
 
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.ActiveSessionNotPaid,
-                T("cardRecovery.linkly.activeSessionNotPaidCleared", "The previous Linkly transaction was not paid successfully and has been cleared. Continue the current order and retry payment if needed."),
+                approvedEvidenceExit
+                    ? T("cardRecovery.linkly.approvedClosedCleared", "The supervisor closed this approved card transaction as refunded or handled elsewhere. It has been cleared.")
+                    : T("cardRecovery.linkly.activeSessionNotPaidCleared", "The previous Linkly transaction was not paid successfully and has been cleared. Continue the current order and retry payment if needed."),
                 DialogDetails: BuildDialogDetails(attempt),
                 HasPostCommitWarning: false);
         }
@@ -3322,10 +3739,11 @@ public sealed class CardPaymentRecoveryService(
             {
                 hasPostCommitWarning = true;
             }
-            else if (!await TryAcknowledgeAsync(
+            else if (ResolveAcknowledgeSessionId(attempt, status) is { } acknowledgeSessionId &&
+                     !await TryAcknowledgeAsync(
                          settings,
                          attempt,
-                         status.SessionId,
+                         acknowledgeSessionId,
                          status.TxnRef,
                          CancellationToken.None))
             {
@@ -3367,6 +3785,26 @@ public sealed class CardPaymentRecoveryService(
             currentSession with { PendingSyncCount = pendingSyncCount },
             BuildDialogDetails(attempt, status),
             HasPostCommitWarning: hasPostCommitWarning);
+    }
+
+    // 主管确认已付款走 BuildSupervisorApprovedStatus 合成的状态：没有真实会话号时它用 TxnRef/AttemptGuid 顶替 SessionId，
+    // 拿这个假会话号去 acknowledge 只会在后端 404，真实会话也永远得不到确认。没有真实会话号就不发 ack。
+    private static string? ResolveAcknowledgeSessionId(
+        LocalCardPaymentAttempt attempt,
+        LinklyCloudBackendSessionResponse status)
+    {
+        var attemptSessionId = NormalizeOptional(attempt.SessionId);
+        if (attemptSessionId is not null)
+        {
+            return attemptSessionId;
+        }
+
+        var statusSessionId = NormalizeOptional(status.SessionId);
+        return statusSessionId is null ||
+            TextEquals(statusSessionId, attempt.TxnRef) ||
+            TextEquals(statusSessionId, attempt.AttemptGuid.ToString("N"))
+            ? null
+            : statusSessionId;
     }
 
     private async Task<CardPaymentRecoveryResult> CompleteApprovedLocalAttemptAsync(
@@ -4833,7 +5271,8 @@ public sealed class CardPaymentRecoveryService(
         LocalCardPaymentAttempt attempt,
         string sessionKey,
         CardPaymentSupervisorResolution resolution,
-        DateTimeOffset resolvedAt)
+        DateTimeOffset resolvedAt,
+        bool approvedEvidenceExit = false)
     {
         var resolutionGuid = Guid.NewGuid();
         var auditEventId = Guid.NewGuid();
@@ -4850,7 +5289,11 @@ public sealed class CardPaymentRecoveryService(
             DeviceCode = attempt.DeviceCode,
             CorrelationId = attempt.AttemptGuid.ToString("D"),
             PaymentMethod = attempt.Processor,
-            ReasonCode = resolution.Decision.ToString(),
+            // 已批准未建单的记录由主管确认“已退款/已另行处理”后关闭：单独的原因码，
+            // 并保留被关闭时的银行批准证据，便于事后与退款/结算对账。
+            ReasonCode = approvedEvidenceExit
+                ? ApprovedEvidenceExitReasonCode
+                : resolution.Decision.ToString(),
             SafeMessage = resolution.Reason,
             PaymentAmount = Math.Abs(attempt.Amount),
             Properties = new Dictionary<string, string?>
@@ -4862,6 +5305,18 @@ public sealed class CardPaymentRecoveryService(
                 ["financialReference"] = resolution.PaymentReference
             }
         };
+        if (approvedEvidenceExit)
+        {
+            // 服务端只接收白名单属性键：用 action/status/result/financialReference 带上被关闭记录的批准证据。
+            var properties = auditEvent.Properties!;
+            properties["action"] = "approved-evidence-exit";
+            properties["status"] = attempt.Status.ToString();
+            properties["result"] = attempt.ResponseCode;
+            properties["financialReference"] = NormalizeOptional(attempt.PaymentReference) ??
+                NormalizeOptional(attempt.TxnRef) ??
+                resolution.PaymentReference;
+        }
+
         return new LocalFinancialSupervisorResolution(
             resolutionGuid,
             LocalFinancialSupervisorResolutionTarget.ActiveSession,

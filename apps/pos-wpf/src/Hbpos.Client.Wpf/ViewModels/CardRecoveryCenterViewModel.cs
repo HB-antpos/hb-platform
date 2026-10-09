@@ -165,7 +165,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             () => ResolveSelectedAsync(
                 CardRecoverySupervisorDecision.ConfirmProcessed,
                 "resolve/confirm-paid"),
-            CanResolveSelection);
+            CanResolveWithoutApprovedEvidence);
         ConfirmNotPaidCommand = new AsyncRelayCommand(
             () => ResolveSelectedAsync(
                 CardRecoverySupervisorDecision.ConfirmNotProcessed,
@@ -175,7 +175,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             () => ResolveSelectedAsync(
                 CardRecoverySupervisorDecision.ContinueWaiting,
                 "resolve/continue-waiting"),
-            CanResolveSelection);
+            CanResolveWithoutApprovedEvidence);
         if (_localization is not null)
         {
             _localization.CultureChanged += OnCultureChanged;
@@ -342,6 +342,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
             ? T(
                 "cardRecovery.refund.section.instructions",
                 "Check the bank or terminal record before choosing one outcome. The refund remains locked until a supervisor decision is saved.")
+            : IsPaymentSelection && IsApprovedEvidenceSelection
+                ? T(
+                    "cardRecovery.payment.section.approvedInstructions",
+                    "This card payment was approved (the customer was charged) but POS could not rebuild an order for it. Try Recover first. If it still fails, refund the customer or handle the payment elsewhere (for example a manual card entry), describe it in the evidence field, then close this record here. A supervisor note is optional.")
             : IsPaymentSelection
                 ? T(
                     "cardRecovery.payment.section.instructions",
@@ -366,6 +370,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         ? T(
             "cardRecovery.refund.field.evidence",
             "Bank evidence (required when no refund was processed)")
+        : IsPaymentSelection && IsApprovedEvidenceSelection
+            ? T(
+                "cardRecovery.payment.field.approvedEvidence",
+                "Refund or handling evidence (required, for example the refund reference)")
         : IsPaymentSelection
             ? T(
                 "cardRecovery.payment.field.evidence",
@@ -547,6 +555,21 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
         SelectedAttempt is { IsOpen: true } attempt &&
         IsSupervisorResolutionAllowed(attempt);
 
+    // 已带批准证据（扣款已发生）的记录只剩“确认已退款/另行处理后关闭”这一个出口：
+    // 确认已付款应走恢复建单，继续等待也没有意义（结果已经确定）。
+    private bool CanResolveWithoutApprovedEvidence() =>
+        CanResolveSelection() && !IsApprovedEvidenceSelection;
+
+    private bool IsApprovedEvidenceSelection =>
+        SelectedAttempt is { } attempt && HasApprovedPaymentEvidence(attempt);
+
+    internal static bool HasApprovedPaymentEvidence(CardRecoveryQueueItem attempt) =>
+        attempt.Processor == CardProcessorKind.Linkly &&
+        (string.Equals(attempt.OperationKind, "Sale", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(attempt.OperationKind, "ActiveSession", StringComparison.OrdinalIgnoreCase)) &&
+        (StatusIs(attempt.Status, nameof(LocalCardPaymentAttemptStatus.Approved)) ||
+         LinklyApprovalResponseCodes.IsApproved(attempt.ResponseCode));
+
     private static bool IsSupervisorResolutionAllowed(CardRecoveryQueueItem attempt)
     {
         // Square 拒绝了已完成退货的退款：主管只能确认“已用其他方式退给顾客”。
@@ -588,7 +611,10 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
                 nameof(LocalCardPaymentAttemptStatus.Pending),
                 nameof(LocalCardPaymentAttemptStatus.SessionStarted),
                 nameof(LocalCardPaymentAttemptStatus.Recovering),
-                nameof(LocalCardPaymentAttemptStatus.RequiresReview));
+                nameof(LocalCardPaymentAttemptStatus.RequiresReview)) ||
+                // 已批准却无法自动建单（Approved）的记录：主管可确认已退款/另行处理后关闭。
+                (StatusIs(attempt.Status, nameof(LocalCardPaymentAttemptStatus.Approved)) &&
+                 HasApprovedPaymentEvidence(attempt));
         }
 
         if (attempt.Processor != CardProcessorKind.Square)

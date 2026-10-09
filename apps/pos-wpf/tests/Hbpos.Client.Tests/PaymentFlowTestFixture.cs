@@ -333,6 +333,9 @@ internal sealed class ScriptedLinklyCloudApi : ILinklyCloudApiClient
 
     public string? LastQueriedSessionId { get; private set; }
 
+    // 为 true 时 GET 原交易返回“已结束且被拒绝”（没有扣款），模拟顾客放弃/终端超时后的权威终态。
+    public bool GetTransactionReportsDecline { get; set; }
+
     public void ReleaseApprovedResult() => ReleaseApproval.TrySetResult();
 
     public Task<string> PairAsync(
@@ -403,6 +406,24 @@ internal sealed class ScriptedLinklyCloudApi : ILinklyCloudApiClient
         GetTransactionCount++;
         LastQueriedSessionId = sessionId;
         var txnRef = LastSubmittedTxnRef ?? "P-RECOVERY-REF";
+        if (GetTransactionReportsDecline)
+        {
+            return Task.FromResult(new LinklyCloudTransactionResult(
+                sessionId,
+                false,
+                txnRef,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "05",
+                "DECLINED",
+                "STAN-FLOW",
+                _submittedAmount,
+                null));
+        }
+
         return Task.FromResult(BuildApprovedResult(sessionId, txnRef, _submittedAmount));
     }
 

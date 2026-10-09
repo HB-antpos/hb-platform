@@ -3026,6 +3026,17 @@
   <data name="cardRecovery.linkly.supervisorWaiting" xml:space="preserve"><value>付款仍处于锁定状态。银行结果可用后请再次恢复。</value></data>
   <data name="cardRecovery.linkly.paymentAlreadyFinalized" xml:space="preserve"><value>所选付款已经终态化，不能再次修改。</value></data>
   <data name="cardRecovery.linkly.paymentEvidenceExists" xml:space="preserve"><value>已存在银行付款证据，请改为执行恢复。</value></data>
+  <data name="cardRecovery.linkly.resolveLivePending" xml:space="preserve"><value>Linkly 仍在处理这笔刷卡交易，暂时不能结案为已付款或未付款。请选择“继续等待”，待刷卡机出结果后再处理。</value></data>
+  <data name="cardRecovery.linkly.resolveLiveQueryFailed" xml:space="preserve"><value>POS 无法向 Linkly 或刷卡机核实这笔交易的最终结果，主管决定未保存。请检查网络或刷卡机连接后重试；在此之前只能选择“继续等待”。</value></data>
+  <data name="cardRecovery.linkly.resolveLiveApproved" xml:space="preserve"><value>Linkly 报告这笔刷卡交易已批准（顾客已被扣款），不能结案为未付款。请先运行恢复，由 POS 按已批准的付款处理订单。</value></data>
+  <data name="cardRecovery.linkly.resolveLiveNotApproved" xml:space="preserve"><value>Linkly 报告这笔刷卡交易未获批准（没有扣款），不能结案为已付款。如要放弃这笔付款，请选择“确认未付款”。</value></data>
+  <data name="cardRecovery.linkly.approvedClosedRestored" xml:space="preserve"><value>主管已将这笔已批准的刷卡交易按“已退款或已另行处理”关闭，原订单已恢复，可以重新付款。</value></data>
+  <data name="cardRecovery.linkly.approvedClosedCleared" xml:space="preserve"><value>主管已将这笔已批准的刷卡交易按“已退款或已另行处理”关闭，记录已清理。</value></data>
+  <data name="cardRecovery.linkly.activeSessionApprovedOrderPending" xml:space="preserve"><value>上一笔 Linkly 交易已批准，但对应订单尚未保存。请先在卡交易异常中心恢复该笔交易，再收取新的付款。</value></data>
+  <data name="cardRecovery.linkly.activeSessionApprovedOrphan" xml:space="preserve"><value>上一笔 Linkly 交易已批准（顾客已被扣款），但本机没有对应订单。请勿再次刷卡，请主管在卡交易异常中心核对处理。</value></data>
+  <data name="cardRecovery.center.action.closeApprovedHandled" xml:space="preserve"><value>已退款或已另行处理，关闭</value></data>
+  <data name="cardRecovery.payment.section.approvedInstructions" xml:space="preserve"><value>这笔刷卡已获批准（顾客已被扣款），但 POS 无法重建订单。请先尝试“恢复”；仍然失败时，请先给顾客退款或另行处理这笔付款（例如手工录入刷卡），在证据栏写明处理情况（如退款参考号），再在此关闭该记录。主管备注可不填。</value></data>
+  <data name="cardRecovery.payment.field.approvedEvidence" xml:space="preserve"><value>退款或处理证据（必填，例如退款参考号）</value></data>
   <data name="cardRecovery.linkly.notPaidPaymentReferenceNotAllowed" xml:space="preserve"><value>确认未付款时，请勿填写付款参考号。</value></data>
   <data name="cardRecovery.linkly.supervisorNotPaidRestored" xml:space="preserve"><value>银行确认未发生付款，原订单已恢复，可以再次付款。</value></data>
   <data name="cardRecovery.linkly.supervisorPaidNoDraft" xml:space="preserve"><value>主管确认上一笔已付款。会话已清理，但本地没有可用订单草稿；请核对订单后再继续。</value></data>
