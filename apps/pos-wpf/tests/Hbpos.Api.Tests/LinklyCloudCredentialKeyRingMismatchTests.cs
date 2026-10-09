@@ -131,6 +131,8 @@ public sealed class LinklyCloudCredentialKeyRingMismatchTests : IDisposable
         Assert.Equal(LogLevel.Error, entry.Level);
         Assert.IsType<LinklyCloudTerminalCredentialKeyRingMismatchException>(entry.Exception);
         Assert.Contains(adminKeyId.ToString("D"), entry.Message, StringComparison.OrdinalIgnoreCase);
+        // 中心日志只上传 EventId 名称，缺失的 key id 必须能从这里读到。
+        Assert.Equal($"linkly-keyring-missing-key:{adminKeyId:D}", entry.EventId.Name);
         Assert.DoesNotContain("lane-password", entry.Message, StringComparison.Ordinal);
     }
 
@@ -159,7 +161,7 @@ public sealed class LinklyCloudCredentialKeyRingMismatchTests : IDisposable
 
     private sealed class CapturingLogger<T> : ILogger<T>
     {
-        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+        public List<(LogLevel Level, EventId EventId, string Message, Exception? Exception)> Entries { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -171,6 +173,6 @@ public sealed class LinklyCloudCredentialKeyRingMismatchTests : IDisposable
             TState state,
             Exception? exception,
             Func<TState, Exception?, string> formatter) =>
-            Entries.Add((logLevel, formatter(state, exception), exception));
+            Entries.Add((logLevel, eventId, formatter(state, exception), exception));
     }
 }

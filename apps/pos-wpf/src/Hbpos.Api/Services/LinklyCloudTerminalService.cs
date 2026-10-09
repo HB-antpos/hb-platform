@@ -2103,7 +2103,9 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
         if (ex is LinklyCloudTerminalCredentialKeyRingMismatchException keyRing)
         {
             // Error 级别带异常对象：中心日志只收 Warning+，运维要能直接看到“缺哪把 key”，而不是被引导去重录密码。
+            // 中心日志只上传消息模板和 EventId 名称（不上传参数值），所以把缺失的 key id 放进 EventId 名称。
             logger?.LogError(
+                new EventId(0, $"linkly-keyring-missing-key:{keyRing.MissingKeyId:D}"),
                 keyRing,
                 "Linkly Cloud credential key ring mismatch environment={Environment} store={StoreCode} terminalId={TerminalId} missingKeyId={MissingKeyId}. Check that Admin and POS mount the same LinklyCloudCredentialDataProtection:KeysPath directory.",
                 stored.Environment,
