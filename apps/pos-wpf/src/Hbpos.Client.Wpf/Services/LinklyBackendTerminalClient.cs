@@ -150,6 +150,10 @@ public sealed class LinklyBackendTerminalClient(
     private const string CloudBackendActiveOperationErrorCode = "LINKLY_CLOUD_BACKEND_ACTIVE_TRANSACTION";
     private const string CloudBackendTerminalSelectionConflictErrorCode = "LINKLY_CLOUD_TERMINAL_SELECTION_CONFLICT";
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(1);
+    // 付款轮询对瞬时错误的退避重试：从一个轮询间隔（默认 1s）起步指数增长，单次不超过上限，
+    // 连续失败超过次数才放弃（总等待仍受业务等待窗口约束）。成功一次即清零计数。
+    private const int MaxConsecutiveTransientPollFailures = 10;
+    private static readonly TimeSpan MaxTransientPollRetryDelay = TimeSpan.FromSeconds(8);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -1372,24 +1376,25 @@ public sealed class LinklyBackendTerminalClient(
         return new PaymentAuthorizationResult(false, null, message, StatusKey: statusKey, ResultUnknown: true);
     }
 
-    // 销售 attempt 的引用在发请求前已落库。交易引用仍由后端生成，这里只把 attempt 身份交给它，
-    // 后端用同一算法（LinklyAttemptTxnRef）派生出与本地完全相同的引用：请求发出后即使断电或响应丢失，
-    // 恢复与接管仍能按 TxnRef 认领这笔会话。只有本地引用确实由该 attempt 身份派生时才发送，否则后端
-    // 派生出的值会与本地记录不一致。Cloud 退款的本地引用是另一套规则，继续由后端随机生成；
-    // 旧后端会忽略该字段，绑定会话时再以后端返回的引用为准。
+    // 销售与退款 attempt 的引用在发请求前已落库。交易引用仍由后端生成，这里只把 attempt 身份交给它，
+    // 后端用同一算法（LinklyAttemptTxnRef，P/R 前缀区分）派生出与本地完全相同的引用：请求发出后即使断电或
+    // 响应丢失，恢复与接管仍能按 TxnRef 认领这笔会话（退款尤其重要：认领不到会出现互不关联的两条记录，
+    // 主管误判“未退款”重试就会重复退款）。只有本地引用确实由该 attempt 身份派生时才发送，否则后端
+    // 派生出的值会与本地记录不一致（例如升级前遗留的 32 位随机退款引用）。旧后端会忽略该字段，
+    // 绑定会话时再以后端返回的引用为准。
     private Guid? ResolveAttemptGuidForBackendTxnRef(string txnType)
     {
         var context = paymentAttemptContextAccessor?.Current;
         if (context is null ||
             context.AttemptGuid == Guid.Empty ||
-            !string.Equals(txnType, "P", StringComparison.Ordinal))
+            txnType is not ("P" or "R"))
         {
             return null;
         }
 
         return string.Equals(
             NormalizeOptional(context.TxnRef),
-            LinklyLocalTxnRef.Create('P', context.AttemptGuid.ToString("D")),
+            LinklyLocalTxnRef.Create(txnType[0], context.AttemptGuid.ToString("D")),
             StringComparison.Ordinal)
             ? context.AttemptGuid
             : null;
@@ -1554,9 +1559,7 @@ public sealed class LinklyBackendTerminalClient(
                 await DelayBeforeNextPollAsync(status, cancellationToken);
             }
 
-            status = RequiresRecovery(status)
-                ? await RecoverAsync(settings, status.SessionId, cancellationToken)
-                : await GetStatusAsync(settings, status.SessionId, cancellationToken);
+            status = await RefreshStatusWithTransientRetryAsync(settings, status, cancellationToken, callerCancellationToken);
             status = await PresentStatusAsync(settings, status, message: null, cancellationToken, MarkManualCancelRequested, MarkSignatureDeclineRequested, signatureSlipPrintState);
         }
 
@@ -1590,6 +1593,88 @@ public sealed class LinklyBackendTerminalClient(
         }
 
         return new LinklyBackendPollResult(status, manualCancelRequested, signatureDeclineRequested);
+    }
+
+    // 会话 ID 已知时 status / recover 都是幂等读取，没有副作用，所以一次 502/503、网络抖动或 API 端点切换
+    // 不该直接把付款页锁成“结果未知”（终端上的交易仍在继续，可能随后批准）。在业务等待窗口内按
+    // “1s 起步、指数退避 + 抖动”重试；窗口到期或调用方取消照常上抛，连续失败超过阈值则抛出最后一次异常，
+    // 由调用方按原有语义转为结果未知。400/401/404 等确定性错误不重试（400 是请求格式错误，重试无意义）。
+    private async Task<LinklyCloudBackendSessionResponse> RefreshStatusWithTransientRetryAsync(
+        CardTerminalSettings settings,
+        LinklyCloudBackendSessionResponse status,
+        CancellationToken cancellationToken,
+        CancellationToken callerCancellationToken)
+    {
+        var consecutiveFailures = 0;
+        while (true)
+        {
+            try
+            {
+                return RequiresRecovery(status)
+                    ? await RecoverAsync(settings, status.SessionId, cancellationToken)
+                    : await GetStatusAsync(settings, status.SessionId, cancellationToken);
+            }
+            catch (Exception ex) when (IsTransientPollFailure(ex, cancellationToken, callerCancellationToken))
+            {
+                consecutiveFailures++;
+                if (consecutiveFailures > MaxConsecutiveTransientPollFailures)
+                {
+                    throw;
+                }
+
+                var delay = GetTransientPollRetryDelay(status.SessionId, consecutiveFailures);
+                Log(
+                    $"poll transient failure retry sessionId={status.SessionId} attempt={consecutiveFailures}/{MaxConsecutiveTransientPollFailures} " +
+                    $"delayMs={delay.TotalMilliseconds:0} error={ex.GetType().Name} http={DescribeHttpStatus(ex)}");
+                await DelayAsync(delay, cancellationToken);
+            }
+        }
+    }
+
+    private static bool IsTransientPollFailure(
+        Exception exception,
+        CancellationToken linkedCancellationToken,
+        CancellationToken callerCancellationToken)
+    {
+        // 业务等待到期或调用方取消：不是瞬时错误，必须原样上抛，由调用方收尾。
+        if (callerCancellationToken.IsCancellationRequested || linkedCancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return exception switch
+        {
+            // 与服务端 IsTransportRecoveryFailure 同一组状态码：408 / 429 / 5xx。
+            LinklyBackendHttpException http => IsRecoveryHttpStatus((int)http.HttpStatus),
+            HttpRequestException { StatusCode: { } statusCode } => IsRecoveryHttpStatus((int)statusCode),
+            // 无状态码：连接失败、DNS、代理断开等网络异常。
+            HttpRequestException => true,
+            // 网关返回的非 JSON 正文（如 HTML 错误页）。
+            JsonException => true,
+            // 令牌均未取消的取消：HttpClient 超时，或 API 端点切换窗口内被统一取消的请求。
+            OperationCanceledException => true,
+            _ => false
+        };
+    }
+
+    private TimeSpan GetTransientPollRetryDelay(string sessionId, int consecutiveFailures)
+    {
+        var baseMilliseconds = Math.Min(
+            _pollInterval.TotalMilliseconds * (1 << Math.Clamp(consecutiveFailures - 1, 0, 10)),
+            MaxTransientPollRetryDelay.TotalMilliseconds);
+        var jitterWindow = baseMilliseconds * 0.25d;
+        var milliseconds = Math.Clamp(
+            baseMilliseconds + CalculateStableJitterMilliseconds($"{sessionId}|transient|{consecutiveFailures}", jitterWindow),
+            0d,
+            MaxTransientPollRetryDelay.TotalMilliseconds);
+        return TimeSpan.FromMilliseconds(milliseconds);
+    }
+
+    private static string DescribeHttpStatus(Exception exception)
+    {
+        return exception is HttpRequestException { StatusCode: { } statusCode }
+            ? ((int)statusCode).ToString(CultureInfo.InvariantCulture)
+            : "<none>";
     }
 
     private static bool IsConsistentReceiptRefresh(
@@ -3988,13 +4073,19 @@ public sealed class LinklyBackendTerminalClient(
         LinklyCloudBackendSessionResponse status,
         double jitterWindow)
     {
+        // 使用 session 状态生成稳定抖动，避免多台收银机在恢复阶段同时重试。
+        return CalculateStableJitterMilliseconds(
+            $"{status.SessionId}|{status.RecoveryCount}|{status.LastHttpStatus}",
+            jitterWindow);
+    }
+
+    private static double CalculateStableJitterMilliseconds(string seed, double jitterWindow)
+    {
         if (jitterWindow <= 0d)
         {
             return 0d;
         }
 
-        // 使用 session 状态生成稳定抖动，避免多台收银机在恢复阶段同时重试。
-        var seed = $"{status.SessionId}|{status.RecoveryCount}|{status.LastHttpStatus}";
         uint hash = 2166136261u;
         unchecked
         {
