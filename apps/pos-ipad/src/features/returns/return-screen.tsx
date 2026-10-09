@@ -102,17 +102,18 @@ export function ReturnScreen({
         testID="return-unknown"
         title={t("status.unknownTitle")}
         tone="warning"
-      >
-        {state.supervisorResolutionAvailable ? (
-          <SupervisorResolutionPanel
-            busy={state.busy}
-            onResolve={(finding, evidenceReference, note) =>
-              void presenter.resolveBySupervisor({ finding, evidenceReference, note })}
-            t={t}
-            waitingRecorded={state.supervisorWaitingRecorded}
-          />
-        ) : null}
-      </StatusPage>
+        resolution={
+          state.supervisorResolutionAvailable
+            ? {
+                busy: state.busy,
+                onResolve: (finding, evidenceReference, note) =>
+                  void presenter.resolveBySupervisor({ finding, evidenceReference, note }),
+                t,
+                waitingRecorded: state.supervisorWaitingRecorded,
+              }
+            : undefined
+        }
+      />
     );
   }
   if (state.phase === "success" && state.result) {
@@ -508,11 +509,21 @@ function StatusPage({
   testID,
   title,
   tone,
-  children,
+  resolution,
 }: Readonly<{
   actionLabel?: string;
   busy?: boolean;
-  children?: ReactNode;
+  /** 退款结果未知时的主管结案面板；面板含输入框，必须由本组件的键盘感知滚动容器承载。 */
+  resolution?: Readonly<{
+    busy: boolean;
+    onResolve(
+      finding: "not-refunded" | "keep-waiting",
+      evidenceReference: string,
+      note: string,
+    ): void;
+    t: (key: ReturnCopyKey) => string;
+    waitingRecorded: boolean;
+  }> | undefined;
   error?: string | null;
   hint: string;
   onAction?(): void;
@@ -559,14 +570,19 @@ function StatusPage({
   );
   return (
     <SafeAreaView style={styles.statusSafeArea} testID={testID}>
-      {children ? (
+      {resolution ? (
         <PosKeyboardAwareScrollView
           contentContainerStyle={styles.statusScrollContent}
           style={styles.statusScroll}
           testID={`${testID}-scroll`}
         >
           {body}
-          {children}
+          <SupervisorResolutionPanel
+            busy={resolution.busy}
+            onResolve={resolution.onResolve}
+            t={resolution.t}
+            waitingRecorded={resolution.waitingRecorded}
+          />
         </PosKeyboardAwareScrollView>
       ) : (
         body
