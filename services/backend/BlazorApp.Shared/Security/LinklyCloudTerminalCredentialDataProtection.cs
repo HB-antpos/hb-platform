@@ -11,6 +11,19 @@ public static class LinklyCloudTerminalCredentialDataProtection
     public const string SecretPurpose = "HB.Linkly.CloudTerminalCredentials.Secret.v1";
     public const byte LegacyPlaintextVersion = 0;
     public const byte CurrentVersion = 1;
+
+    /// <summary>
+    /// 非生产环境未显式配置密钥目录时，Admin 与 POS API 共用的默认目录。
+    /// 两个进程的内容根目录不同，各自回落到“程序目录/App_Data”会让两侧密钥环不一致，
+    /// 表现为本机后台录入成功、POS 却永远解不开。取不到用户目录时返回 null，调用方沿用各自的旧默认值。
+    /// </summary>
+    public static string? ResolveSharedDevelopmentKeysPath()
+    {
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrWhiteSpace(root)
+            ? null
+            : Path.Combine(root, "HbPlatform", "LinklyCloudCredentialDataProtectionKeys");
+    }
 }
 
 public interface ILinklyCloudTerminalCredentialProtector

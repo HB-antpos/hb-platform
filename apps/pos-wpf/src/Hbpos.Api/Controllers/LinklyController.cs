@@ -55,6 +55,11 @@ public sealed class LinklyController(
         "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE";
     private const string CloudTerminalCredentialUnavailableMessage =
         "Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.";
+    private const string CloudTerminalCredentialKeyRingMismatchCode =
+        "LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH";
+    private const string CloudTerminalCredentialKeyRingMismatchMessage =
+        "Linkly Cloud terminal credentials cannot be decrypted by the POS server. Do not re-enter the password; "
+        + "ask an administrator to check that Admin and POS use the same Linkly credential key directory.";
     private const string CloudLegacyModeDisabledCode = "LINKLY_CLOUD_LEGACY_MODE_DISABLED";
     private const string CloudLegacyModeDisabledMessage =
         "Legacy Linkly Cloud credential endpoints are disabled while multi-terminal mode is Active.";
@@ -127,9 +132,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudTerminalSelectionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudTerminalSelectionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudTerminalSelectionResponse>(ex));
         }
         catch (LinklyCloudTerminalNotFoundException ex)
         {
@@ -207,9 +212,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudTerminalPairResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudTerminalPairResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudTerminalPairResponse>(ex));
         }
         catch (LinklyCloudTerminalNotFoundException ex)
         {
@@ -658,9 +663,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalSelectionConflictException ex)
         {
@@ -730,9 +735,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalSelectionConflictException ex)
         {
@@ -965,9 +970,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendHealthResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendHealthResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendHealthResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1024,9 +1029,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendStatusTestResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendStatusTestResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendStatusTestResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1098,9 +1103,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendLogonTestResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendLogonTestResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendLogonTestResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1174,9 +1179,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1217,9 +1222,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1331,9 +1336,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudBackendSessionNotFoundException)
         {
@@ -1382,9 +1387,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudBackendSessionNotFoundException)
         {
@@ -1574,9 +1579,15 @@ public sealed class LinklyController(
         CloudTerminalCredentialReentryRequiredCode,
         CloudTerminalCredentialReentryRequiredMessage);
 
-    private static ApiResult<T> CredentialUnavailable<T>() => ApiResult<T>.Fail(
-        CloudTerminalCredentialUnavailableCode,
-        CloudTerminalCredentialUnavailableMessage);
+    // 密钥环不一致时 “重新录入密码” 无效，必须换成专用错误码与提示，避免现场反复重录。
+    private static ApiResult<T> CredentialUnavailable<T>(LinklyCloudTerminalCredentialUnavailableException exception) =>
+        exception is LinklyCloudTerminalCredentialKeyRingMismatchException
+            ? ApiResult<T>.Fail(
+                CloudTerminalCredentialKeyRingMismatchCode,
+                CloudTerminalCredentialKeyRingMismatchMessage)
+            : ApiResult<T>.Fail(
+                CloudTerminalCredentialUnavailableCode,
+                CloudTerminalCredentialUnavailableMessage);
 
     private async Task<bool> IsLegacyModeDisabledAsync(
         string environment,

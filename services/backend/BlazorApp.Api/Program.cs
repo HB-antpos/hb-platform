@@ -311,9 +311,10 @@ if (string.IsNullOrWhiteSpace(linklyCredentialDataProtectionKeysPath))
             "生产环境必须配置 LinklyCloudCredentialDataProtection:KeysPath。");
     }
 
-    linklyCredentialDataProtectionKeysPath = Path.Combine(
-        "App_Data",
-        "LinklyCloudCredentialDataProtectionKeys");
+    // 非生产回落到与 POS API 相同的用户级目录（两个进程内容根不同，各用 App_Data 会让密钥环永远不一致）。
+    linklyCredentialDataProtectionKeysPath =
+        BlazorApp.Shared.Security.LinklyCloudTerminalCredentialDataProtection.ResolveSharedDevelopmentKeysPath()
+        ?? Path.Combine("App_Data", "LinklyCloudCredentialDataProtectionKeys");
 }
 
 if (!Path.IsPathRooted(linklyCredentialDataProtectionKeysPath))

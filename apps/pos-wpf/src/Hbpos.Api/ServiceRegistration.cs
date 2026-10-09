@@ -44,9 +44,15 @@ public static class ServiceRegistration
                 "Production requires LinklyCloudCredentialDataProtection:KeysPath.");
         }
 
-        var linklyCredentialKeysPath = ResolveDataProtectionKeysPath(
-            configuredLinklyCredentialKeysPath,
-            "LinklyCloudCredentialDataProtectionKeys");
+        // 非生产且未配置时，与 Admin 回落到同一个用户级目录；否则两个进程各用各自的程序目录，
+        // 本机后台录入的终端凭据 POS 永远解不开（生产已在上面强制显式配置）。
+        var linklyCredentialKeysPath = string.IsNullOrWhiteSpace(configuredLinklyCredentialKeysPath)
+            && BlazorApp.Shared.Security.LinklyCloudTerminalCredentialDataProtection
+                .ResolveSharedDevelopmentKeysPath() is { } sharedDevelopmentKeysPath
+            ? sharedDevelopmentKeysPath
+            : ResolveDataProtectionKeysPath(
+                configuredLinklyCredentialKeysPath,
+                "LinklyCloudCredentialDataProtectionKeys");
 
         Directory.CreateDirectory(globalKeysPath);
         // 关键逻辑：POS 自身票据使用独立持久 ring，不能挂载主 backend 的全局 ring。

@@ -174,6 +174,8 @@ public sealed class LinklyBackendTerminalClientTests
     [InlineData("LINKLY_CLOUD_BACKEND_PAIR_TIMEOUT", "could not be confirmed")]
     [InlineData("LINKLY_CLOUD_BACKEND_PAIR_CREDENTIAL_MISSING", "Web Admin")]
     [InlineData("LINKLY_CLOUD_BACKEND_PAIR_IN_PROGRESS", "Wait for it to finish")]
+    // 密钥目录不一致：必须明确告诉现场不要重录密码。
+    [InlineData("LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH", "Do not re-enter the password")]
     [InlineData("UNRECOGNIZED_ERROR", "Specific server explanation")]
     public async Task Pair_failure_distinguishes_rejection_timeout_credentials_and_busy(string errorCode, string expected)
     {

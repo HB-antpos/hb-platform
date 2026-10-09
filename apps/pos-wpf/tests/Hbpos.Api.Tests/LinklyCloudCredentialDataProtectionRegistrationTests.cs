@@ -52,6 +52,29 @@ public sealed class LinklyCloudCredentialDataProtectionRegistrationTests
     }
 
     [Fact]
+    public void Development_without_configured_path_uses_the_directory_shared_with_Admin()
+    {
+        // M8：两个进程的内容根不同，各自回落到“程序目录/App_Data”会让本机密钥环永远不一致。
+        var sharedPath = LinklyCloudTerminalCredentialDataProtection.ResolveSharedDevelopmentKeysPath();
+        Assert.NotNull(sharedPath);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ASPNETCORE_ENVIRONMENT"] = "Development"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddHbposApiServices(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        _ = provider.GetRequiredService<ILinklyCloudTerminalCredentialProtector>().ProtectPassword("probe");
+
+        Assert.True(Directory.Exists(sharedPath));
+        Assert.NotEmpty(Directory.GetFiles(sharedPath!, "key-*.xml"));
+    }
+
+    [Fact]
     public async Task Pos_compose_uses_required_shared_host_mount()
     {
         var composePath = Path.Combine(

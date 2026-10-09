@@ -350,6 +350,7 @@
   <data name="settings.linkly.cloudBackend.pairInProgress" xml:space="preserve"><value>该终端正在进行另一笔配对操作。请等待结束后刷新终端列表，再继续操作，暂勿重复提交配对码。</value></data>
   <data name="settings.linkly.cloudBackend.pairRejected" xml:space="preserve"><value>Linkly 拒绝了本次配对。请核对所选终端，从该终端获取新的 6 位配对码后重试；若仍被拒绝，请管理员检查云端凭据。</value></data>
   <data name="settings.linkly.cloudBackend.pairUnconfirmed" xml:space="preserve"><value>暂时无法确认本次配对结果。重试前请刷新终端列表并核对终端屏幕；Ready 可能来自之前的配对。若仍无法确认，请联系技术支持，勿连续提交新码。</value></data>
+  <data name="settings.linkly.cloudBackend.credentialKeyRingMismatch" xml:space="preserve"><value>POS 服务器无法解密此终端已保存的凭据。请不要重新录入密码，请管理员检查 Web 管理端与 POS 服务器是否使用同一个 Linkly 凭据密钥目录。</value></data>
   <data name="settings.linkly.cloudBackend.credentialsRequired" xml:space="preserve"><value>云端凭据未配置或不可用。请管理员在 Web 管理端检查此终端的凭据及环境，然后刷新并重试。</value></data>
   <data name="settings.linkly.cloudBackend.selectionChanged" xml:space="preserve"><value>终端选择已发生变化。请刷新列表，重新选择目标终端后再试。</value></data>
   <data name="settings.linkly.cloudBackend.assignedElsewhere" xml:space="preserve"><value>该终端已分配给其他 POS。请管理员在 Web 管理端核对终端分配，然后刷新列表。</value></data>

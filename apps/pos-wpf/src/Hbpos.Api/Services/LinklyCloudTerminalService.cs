@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using BlazorApp.Shared.Security;
 using Hbpos.Api.Data;
 using Hbpos.Contracts.Linkly;
@@ -339,8 +340,37 @@ public sealed class LinklyCloudTerminalPairingConflictException()
 public sealed class LinklyCloudTerminalCredentialReentryRequiredException()
     : Exception("Linkly Cloud terminal credentials must be re-entered in the management portal.");
 
-public sealed class LinklyCloudTerminalCredentialUnavailableException()
-    : Exception("Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.");
+public class LinklyCloudTerminalCredentialUnavailableException : Exception
+{
+    public LinklyCloudTerminalCredentialUnavailableException()
+        : base("Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.")
+    {
+    }
+
+    protected LinklyCloudTerminalCredentialUnavailableException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// 密文是合法的 Data Protection 载荷，却解不开：几乎一定是 POS 与 Admin 的 Linkly 凭据密钥目录不一致或密钥丢失。
+/// 此时“重新录入密码”无效（新密文仍由 Admin 的那套密钥加密），必须给运维一个专用错误码和缺失的 key id。
+/// 继承 Unavailable，保证既有 catch 不会漏接；只有控制器会按子类型换成专用错误码。
+/// </summary>
+public sealed class LinklyCloudTerminalCredentialKeyRingMismatchException : LinklyCloudTerminalCredentialUnavailableException
+{
+    public LinklyCloudTerminalCredentialKeyRingMismatchException(Guid missingKeyId, Exception innerException)
+        : base(
+            $"Linkly Cloud credential key {missingKeyId:D} cannot be used to decrypt stored terminal credentials; "
+            + "the Linkly credential Data Protection key directory is missing or differs from the one Admin writes with.",
+            innerException)
+    {
+        MissingKeyId = missingKeyId;
+    }
+
+    public Guid MissingKeyId { get; }
+}
 
 public sealed class LinklyCloudTerminalService(
     ILinklyCloudTerminalRepository repository,
@@ -1778,7 +1808,10 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
             new SugarParameter("@Environment", environment),
             new SugarParameter("@StoreCode", storeCode));
         return stored
-            .Select(item => MaterializeListTerminal(item, credentialProtector))
+            .Select(item => MaterializeListTerminal(
+                item,
+                credentialProtector,
+                ex => LogCredentialUnavailable(item, ex)))
             .ToArray();
     }
 
@@ -1936,6 +1969,8 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
             throw new LinklyCloudTerminalCredentialReentryRequiredException();
         }
 
+        // 记录当前正在解密的密文，失败时据此读取它引用的 key id（只读头部，不记录内容）。
+        var currentPayload = stored.Password;
         try
         {
             var password = protector.UnprotectPassword(stored.Password);
@@ -1947,6 +1982,7 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
             string? secret = null;
             if (!string.IsNullOrWhiteSpace(stored.Secret))
             {
+                currentPayload = stored.Secret;
                 secret = protector.UnprotectSecret(stored.Secret);
                 if (string.IsNullOrWhiteSpace(secret))
                 {
@@ -1965,6 +2001,13 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
         {
             throw;
         }
+        catch (CryptographicException ex) when (
+            LinklyCloudProtectedPayload.TryReadKeyId(currentPayload, out _))
+        {
+            // 载荷头部合法但解不开：密钥环里没有这把 key（或被改动）。保留 key id 供排障；密文和内部异常正文不外泄。
+            LinklyCloudProtectedPayload.TryReadKeyId(currentPayload, out var keyId);
+            throw new LinklyCloudTerminalCredentialKeyRingMismatchException(keyId, ex);
+        }
         catch (Exception)
         {
             // Data Protection 的底层异常和密文都不得越过 repository 边界。
@@ -1974,7 +2017,8 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
 
     internal static LinklyCloudTerminalRecord MaterializeListTerminal(
         LinklyCloudTerminalRecord stored,
-        ILinklyCloudTerminalCredentialProtector protector)
+        ILinklyCloudTerminalCredentialProtector protector,
+        Action<Exception>? onCredentialUnavailable = null)
     {
         try
         {
@@ -1990,8 +2034,9 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
         {
             return MarkCredentialRepairRequired(stored);
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
+            onCredentialUnavailable?.Invoke(ex);
             return MarkCredentialRepairRequired(stored);
         }
     }
@@ -2037,7 +2082,7 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
         }
     }
 
-    private LinklyCloudTerminalRecord MaterializeRuntimeTerminalWithLogging(
+    internal LinklyCloudTerminalRecord MaterializeRuntimeTerminalWithLogging(
         LinklyCloudTerminalRecord stored)
     {
         try
@@ -2048,14 +2093,32 @@ public sealed class SqlSugarLinklyCloudTerminalRepository(
             ex is LinklyCloudTerminalCredentialReentryRequiredException or
                 LinklyCloudTerminalCredentialUnavailableException)
         {
-            logger?.LogWarning(
-                "Linkly Cloud terminal credential materialization failed environment={Environment} store={StoreCode} terminalId={TerminalId} error={ErrorType}",
+            LogCredentialUnavailable(stored, ex);
+            throw;
+        }
+    }
+
+    private void LogCredentialUnavailable(LinklyCloudTerminalRecord stored, Exception ex)
+    {
+        if (ex is LinklyCloudTerminalCredentialKeyRingMismatchException keyRing)
+        {
+            // Error 级别带异常对象：中心日志只收 Warning+，运维要能直接看到“缺哪把 key”，而不是被引导去重录密码。
+            logger?.LogError(
+                keyRing,
+                "Linkly Cloud credential key ring mismatch environment={Environment} store={StoreCode} terminalId={TerminalId} missingKeyId={MissingKeyId}. Check that Admin and POS mount the same LinklyCloudCredentialDataProtection:KeysPath directory.",
                 stored.Environment,
                 stored.StoreCode,
                 stored.TerminalId,
-                ex.GetType().Name);
-            throw;
+                keyRing.MissingKeyId);
+            return;
         }
+
+        logger?.LogWarning(
+            "Linkly Cloud terminal credential materialization failed environment={Environment} store={StoreCode} terminalId={TerminalId} error={ErrorType}",
+            stored.Environment,
+            stored.StoreCode,
+            stored.TerminalId,
+            ex.GetType().Name);
     }
 
     private static LinklyCloudTerminalRecord MarkCredentialRepairRequired(
