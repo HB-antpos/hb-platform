@@ -227,12 +227,24 @@ public class LinklyCloudBackendAsyncService(
         var environment = NormalizeEnvironment(request.Environment);
         var normalizedStoreCode = NormalizeRequired(storeCode, "storeCode");
         var normalizedDeviceCode = NormalizeRequired(deviceCode, "deviceCode");
-        var txnType = NormalizeRequired(request.TxnType, "txnType");
+        // 交易类型只放行销售（P）和退款（R）；其余类型（预授权、提现等）本链路不支持，不能被任意客户端借道发起。
+        var txnType = NormalizeCardTransactionType(request.TxnType);
         // 不合规的 attempt 身份必须在创建 Pending 会话和请求终端之前拒绝，避免留下占用终端的假会话。
         var attemptTxnRef = DeriveAttemptTxnRef(txnType, request.AttemptGuid);
         var purchaseAnalysisDataSnapshot = request.PurchaseAnalysisData is null
             ? null
             : new Dictionary<string, string>(request.PurchaseAnalysisData, StringComparer.OrdinalIgnoreCase);
+        if (string.Equals(txnType, "R", StringComparison.Ordinal))
+        {
+            // 退款必须引用本店已成功的原销售，且累计退款不得超过原交易金额；全部在请求终端之前拒绝。
+            await ValidateRefundAgainstOriginalAsync(
+                environment,
+                normalizedStoreCode,
+                request.AmtPurchase,
+                ReadAnalysisField(purchaseAnalysisDataSnapshot, "RFN"),
+                cancellationToken);
+        }
+
         Log(
             $"transaction start environment={LogValue(environment)} " +
             $"store={LogValue(normalizedStoreCode)} device={LogValue(normalizedDeviceCode)} " +
@@ -2245,12 +2257,15 @@ public class LinklyCloudBackendAsyncService(
         JsonElement providerResponse)
     {
         var providerRfn = NormalizeOptional(TryReadRefundReference(root, out _));
-        if (string.Equals(requestTxnType, "R", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(requestTxnType, "R", StringComparison.OrdinalIgnoreCase) && requestRfn is null)
         {
-            return requestRfn is not null &&
-                string.Equals(requestRfn, providerRfn, StringComparison.OrdinalIgnoreCase);
+            // 退款必须有发送前持久化的原交易 RFN；没有它就没有可核验的退款意图。
+            return false;
         }
 
+        // Linkly 生产通知的 PurchaseAnalysisData 不一定回显 RFN（销售请求一直带 RFN 但从未被回显），
+        // 因此回调缺失 RFN 不能让已批准的交易（含退款）变成结果未知；退款身份靠发送前持久化的
+        // RequestRfn 加 TxnType/金额/TxnRef/响应码核验。一旦回调回显了 RFN，就必须与持久化值一致。
         return providerRfn is null ||
             requestRfn is not null &&
             string.Equals(requestRfn, providerRfn, StringComparison.OrdinalIgnoreCase);
@@ -3974,6 +3989,107 @@ public class LinklyCloudBackendAsyncService(
         Span<byte> bytes = stackalloc byte[2];
         Random.Shared.NextBytes(bytes);
         return $"{DateTimeOffset.UtcNow:yyMMddHHmmss}{Convert.ToHexString(bytes)}";
+    }
+
+    private static string NormalizeCardTransactionType(string? value)
+    {
+        var normalized = NormalizeRequired(value, "txnType").ToUpperInvariant();
+        return normalized is "P" or "R"
+            ? normalized
+            : throw new LinklyCloudBackendValidationException(
+                "txnType must be P (purchase) or R (refund).");
+    }
+
+    private async Task ValidateRefundAgainstOriginalAsync(
+        string environment,
+        string storeCode,
+        long amountCents,
+        string? rfn,
+        CancellationToken cancellationToken)
+    {
+        if (rfn is null)
+        {
+            throw new LinklyCloudBackendValidationException(
+                "A refund (R) requires the original transaction reference in PurchaseAnalysisData.RFN.");
+        }
+
+        if (!IsSafeRefundReference(rfn))
+        {
+            throw new LinklyCloudBackendValidationException("The refund RFN format is invalid.");
+        }
+
+        if (amountCents == 0 ||
+            amountCents == long.MinValue ||
+            Math.Abs(amountCents) > 999_999_999)
+        {
+            throw new LinklyCloudBackendValidationException("The refund amount is outside the allowed range.");
+        }
+
+        var refundCents = Math.Abs(amountCents);
+        var original = await repository.FindTransactionByReferenceAsync(
+            environment,
+            storeCode,
+            rfn,
+            cancellationToken);
+        if (original is null)
+        {
+            // 原交易不在本链路的会话表里（直连模式或迁移前的历史销售）时无法核对归属和额度，
+            // 此处不拦截，避免历史小票无法原路退款；该缺口需要产品决策后再收紧。
+            Log(
+                $"refund original not found in cloud backend sessions environment={LogValue(environment)} " +
+                $"store={LogValue(storeCode)} rfn={LogValue(MaskReference(rfn))}");
+            return;
+        }
+
+        if (!IsOperation(original, OperationTypeTransaction) ||
+            !string.Equals(original.RequestTxnType, "P", StringComparison.OrdinalIgnoreCase) ||
+            !IsCompleted(original) ||
+            original.TransactionSuccess != true ||
+            original.RequestAmountCents is not { } originalAmount ||
+            originalAmount == long.MinValue ||
+            AbsoluteAmountCents(originalAmount) <= 0)
+        {
+            throw new LinklyCloudBackendValidationException(
+                "The original transaction referenced by the refund RFN is not an approved purchase.");
+        }
+
+        // 已批准的、以及仍在途（结果未定）的同 RFN 退款都占用额度；失败、未提交、取消的不占。
+        // 主管结案（SupervisorResolved）的结论只存在于 POS 端，服务端不计入，避免“确认未退款”后无法重试。
+        var priorRefundCents = 0L;
+        foreach (var refund in await repository.GetRefundSessionsByReferenceAsync(
+                     environment,
+                     storeCode,
+                     rfn,
+                     cancellationToken))
+        {
+            if (refund.RequestAmountCents is not { } refundAmount ||
+                !CountsAgainstRefundCapacity(refund))
+            {
+                continue;
+            }
+
+            priorRefundCents += AbsoluteAmountCents(refundAmount);
+        }
+
+        if (priorRefundCents + refundCents > AbsoluteAmountCents(originalAmount))
+        {
+            throw new LinklyCloudBackendValidationException(
+                "The refund amount exceeds the remaining refundable amount of the original transaction.");
+        }
+    }
+
+    private static bool CountsAgainstRefundCapacity(LinklyCloudBackendSessionRecord refund)
+    {
+        if (refund.TransactionSuccess == false ||
+            string.Equals(refund.Status, StatusFailed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(refund.Status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(refund.Status, StatusCancelled, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(refund.Status, StatusSupervisorResolved, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return refund.TransactionSuccess == true || refund.IsActive;
     }
 
     // 交易引用始终由 API 生成：客户端只提供本地 attempt 身份，由与 POS 共用的算法派生出 16 位引用。
@@ -5777,6 +5893,21 @@ public interface ILinklyCloudBackendAsyncRepository
         string deviceCode,
         CancellationToken cancellationToken);
 
+    // 退款前按原交易引用（销售会话的 TxnRef）核对归属：只在同环境同门店内查找。
+    Task<LinklyCloudBackendSessionRecord?> FindTransactionByReferenceAsync(
+        string environment,
+        string storeCode,
+        string txnRef,
+        CancellationToken cancellationToken) => Task.FromResult<LinklyCloudBackendSessionRecord?>(null);
+
+    // 同一原交易 RFN 下已发起的退款会话，用来计算累计已退额度。
+    Task<IReadOnlyList<LinklyCloudBackendSessionRecord>> GetRefundSessionsByReferenceAsync(
+        string environment,
+        string storeCode,
+        string rfn,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<LinklyCloudBackendSessionRecord>>([]);
+
     Task<LinklyCloudBackendSessionRecord?> GetActiveSessionByTerminalAsync(
         string environment,
         string storeCode,
@@ -5955,6 +6086,42 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
                 string.Equals(existing.Environment, environment, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(existing.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(session is null ? null : Clone(session));
+        }
+    }
+
+    public Task<LinklyCloudBackendSessionRecord?> FindTransactionByReferenceAsync(
+        string environment,
+        string storeCode,
+        string txnRef,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var session = _sessions.Values.FirstOrDefault(existing =>
+                string.Equals(existing.Environment, environment, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(existing.StoreCode, storeCode, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(existing.TxnRef, txnRef, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(session is null ? null : Clone(session));
+        }
+    }
+
+    public Task<IReadOnlyList<LinklyCloudBackendSessionRecord>> GetRefundSessionsByReferenceAsync(
+        string environment,
+        string storeCode,
+        string rfn,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<LinklyCloudBackendSessionRecord> sessions = _sessions.Values
+                .Where(existing =>
+                    string.Equals(existing.Environment, environment, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existing.StoreCode, storeCode, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existing.RequestTxnType, "R", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existing.RequestRfn, rfn, StringComparison.OrdinalIgnoreCase))
+                .Select(Clone)
+                .ToArray();
+            return Task.FromResult(sessions);
         }
     }
 
@@ -6584,6 +6751,56 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
             sql,
             new SugarParameter("@Environment", environment),
             new SugarParameter("@SessionId", sessionId));
+    }
+
+    public async Task<LinklyCloudBackendSessionRecord?> FindTransactionByReferenceAsync(
+        string environment,
+        string storeCode,
+        string txnRef,
+        CancellationToken cancellationToken)
+    {
+        // 走 (Environment, StoreCode, TxnRef) 唯一索引。
+        const string sql = """
+            SELECT TOP 1
+                [Id], [Environment], [StoreCode], [DeviceCode], [SessionId], [Status], [TxnRef], [RequestTxnType], [RequestAmountCents], [RequestRfn],
+                [TransactionSuccess], [OperationType], [ResponseCode], [IsActive], [UpdatedAt]
+            FROM [dbo].[POSM_LinklyCloudBackendSession]
+            WHERE [Environment] = @Environment
+              AND [StoreCode] = @StoreCode
+              AND [TxnRef] = @TxnRef
+            ORDER BY [UpdatedAt] DESC, [Id] DESC;
+            """;
+
+        return await dbContext.PosmDb.Ado.SqlQuerySingleAsync<LinklyCloudBackendSessionRecord>(
+            sql,
+            new SugarParameter("@Environment", environment),
+            new SugarParameter("@StoreCode", storeCode),
+            new SugarParameter("@TxnRef", txnRef));
+    }
+
+    public async Task<IReadOnlyList<LinklyCloudBackendSessionRecord>> GetRefundSessionsByReferenceAsync(
+        string environment,
+        string storeCode,
+        string rfn,
+        CancellationToken cancellationToken)
+    {
+        // 退款极少发生，按门店范围过滤 RequestRfn 即可，不为它额外建索引。
+        const string sql = """
+            SELECT
+                [Id], [Environment], [StoreCode], [DeviceCode], [SessionId], [Status], [TxnRef], [RequestTxnType], [RequestAmountCents], [RequestRfn],
+                [TransactionSuccess], [OperationType], [ResponseCode], [IsActive], [UpdatedAt]
+            FROM [dbo].[POSM_LinklyCloudBackendSession]
+            WHERE [Environment] = @Environment
+              AND [StoreCode] = @StoreCode
+              AND [RequestTxnType] = N'R'
+              AND [RequestRfn] = @Rfn;
+            """;
+
+        return await dbContext.PosmDb.Ado.SqlQueryAsync<LinklyCloudBackendSessionRecord>(
+            sql,
+            new SugarParameter("@Environment", environment),
+            new SugarParameter("@StoreCode", storeCode),
+            new SugarParameter("@Rfn", rfn));
     }
 
     public async Task<LinklyCloudBackendSessionRecord?> GetActiveSessionAsync(
