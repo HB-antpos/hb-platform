@@ -109,6 +109,32 @@ namespace BlazorApp.Api.Services.React
             );
         }
 
+        /// <summary>
+        /// 广告分店选择器的数据源：返回全部启用分店。
+        /// 广告的投放范围本就不按操作者的分店关联限制（保存时只校验分店存在且启用），
+        /// 因此这里不能依赖需要 Stores.View 的通用分店接口，否则只有广告权限的角色（如 Marketing Manager）选不到任何分店。
+        /// </summary>
+        public async Task<ApiResponse<List<AdvertisementStoreOptionDto>>> GetStoreOptionsAsync()
+        {
+            var stores = await _context
+                .StoreDb.AsQueryable()
+                .Where(store => store.IsActive && !store.IsDeleted)
+                .OrderBy(store => store.StoreCode)
+                .ToListAsync();
+
+            return ApiResponse<List<AdvertisementStoreOptionDto>>.OK(
+                stores
+                    .Where(store => !string.IsNullOrWhiteSpace(store.StoreCode))
+                    .Select(store => new AdvertisementStoreOptionDto
+                    {
+                        StoreCode = store.StoreCode,
+                        StoreName = store.StoreName,
+                        BrandName = store.BrandName,
+                    })
+                    .ToList()
+            );
+        }
+
         public async Task<ApiResponse<AdvertisementDetailDto>> GetByIdAsync(string id)
         {
             var entity = await _context

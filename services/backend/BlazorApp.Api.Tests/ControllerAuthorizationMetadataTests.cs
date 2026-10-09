@@ -743,6 +743,10 @@ public class ControllerAuthorizationMetadataTests
             Permissions.Advertisements.View
         );
         yield return Policy<ReactAdvertisementsController>(
+            nameof(ReactAdvertisementsController.StoreOptions),
+            Permissions.Advertisements.View
+        );
+        yield return Policy<ReactAdvertisementsController>(
             nameof(ReactAdvertisementsController.Create),
             Permissions.Advertisements.Edit
         );

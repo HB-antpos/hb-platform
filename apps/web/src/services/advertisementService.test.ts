@@ -2,6 +2,7 @@ import {
   buildAdvertisementUpsertPayload,
   createAdvertisement,
   getAdvertisementGrid,
+  getAdvertisementStoreOptions,
   normalizeAdvertisementMediaSize,
   normalizeAdvertisementOrientation,
   resolveAdvertisementMediaType,
@@ -224,6 +225,34 @@ try {
     [['legacy', 'Any', null, null], ['portrait', 'Portrait', 772, 870]],
     'Grid items should normalize missing orientation to Any and keep valid size',
   )
+} finally {
+  globalThis.fetch = originalFetch
+}
+
+// 分店选项：走广告自己的 store-options 接口（不依赖 Stores.View），并映射品牌、按名称排序、丢弃无编码项
+let requestedUrl = ''
+globalThis.fetch = (async (input: RequestInfo | URL) => {
+  requestedUrl = String(input)
+  return new Response(JSON.stringify({
+    success: true,
+    data: [
+      { storeCode: '1003', storeName: 'Peninsula Fair', brandName: ' Hot Bargain ' },
+      { storeCode: '1002', storeName: 'Robinson Road', brandName: null },
+      { storeCode: '', storeName: 'No code' },
+    ],
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}) as typeof fetch
+
+try {
+  const options = await getAdvertisementStoreOptions()
+  assertDeepEqual(
+    options.map((item) => [item.value, item.label, item.brandName]),
+    [['1003', 'Peninsula Fair', 'Hot Bargain'], ['1002', 'Robinson Road', undefined]],
+    'Store options should map brand, drop codeless rows and sort by name',
+  )
+  if (!requestedUrl.includes('/api/react/v1/advertisements/store-options')) {
+    throw new Error(`Store options must use the advertisement endpoint, got ${requestedUrl}`)
+  }
 } finally {
   globalThis.fetch = originalFetch
 }

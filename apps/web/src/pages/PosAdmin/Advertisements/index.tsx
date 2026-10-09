@@ -40,6 +40,7 @@ import {
   enableAdvertisement,
   getAdvertisementById,
   getAdvertisementGrid,
+  getAdvertisementStoreOptions,
   requestAdvertisementUploadSignature,
   resolveAdvertisementMediaType,
   stripAdvertisementMediaUrlQuery,
@@ -47,7 +48,6 @@ import {
   uploadAdvertisementFile,
 } from '../../../services/advertisementService'
 import {
-  getActiveStoresWithBrand,
   type BrandedStoreOption,
   type StoreOption,
 } from '../../../services/storeService'
@@ -271,7 +271,7 @@ export default function AdvertisementsPage() {
 
   const loadStoreOptions = async () => {
     try {
-      const stores = await getActiveStoresWithBrand()
+      const stores = await getAdvertisementStoreOptions()
       setStoreOptions(stores)
     } catch (error) {
       console.error(t('posAdmin.advertisements.loadStoresFailed'), error)

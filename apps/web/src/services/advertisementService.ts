@@ -6,11 +6,14 @@ import type {
   AdvertisementMediaType,
   AdvertisementOrientation,
   AdvertisementPayloadInput,
+  AdvertisementStoreOptionDto,
   AdvertisementUploadSignatureRequest,
   AdvertisementUploadSignatureResponse,
   CreateAdvertisementDto,
   UpdateAdvertisementDto,
 } from '../types/advertisement'
+import type { BrandedStoreOption } from './storeService'
+import { sortStoreOptionsByName } from '../utils/managedStoreScope'
 import { reportExternalFetchError } from '../utils/centerLogClient'
 import request, { unwrapApiData } from '../utils/request'
 
@@ -121,6 +124,23 @@ export async function getAdvertisementGrid(data: Record<string, unknown>) {
   return result
     ? { ...result, items: (result.items ?? []).map(normalizeAdvertisementDto) }
     : result
+}
+
+/**
+ * 广告后台的分店选项：走广告自己的接口（只需 Advertisements.View），
+ * 不能用 /api/stores/active——它要求 Stores.View，Marketing Manager 等只有广告权限的角色会 403 而选不到分店。
+ */
+export async function getAdvertisementStoreOptions(): Promise<BrandedStoreOption[]> {
+  const response = await request.get<ApiResponse<AdvertisementStoreOptionDto[]>>(`${API_BASE}/store-options`)
+  return sortStoreOptionsByName(
+    unwrapApiData(response)
+      .filter((store) => store.storeCode)
+      .map((store) => ({
+        label: store.storeName || store.storeCode,
+        value: store.storeCode,
+        brandName: store.brandName?.trim() || undefined,
+      })),
+  )
 }
 
 export async function getAdvertisementById(id: string): Promise<AdvertisementDetailDto> {

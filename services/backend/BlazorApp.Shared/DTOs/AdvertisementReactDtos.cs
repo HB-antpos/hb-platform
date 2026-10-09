@@ -52,6 +52,16 @@ namespace BlazorApp.Shared.DTOs
         public string? StoreName { get; set; }
     }
 
+    /// <summary>
+    /// 广告后台分店选择器的选项：只暴露编码/名称/品牌，不带地址、ABN、联系方式等分店档案字段。
+    /// </summary>
+    public class AdvertisementStoreOptionDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public string? StoreName { get; set; }
+        public string? BrandName { get; set; }
+    }
+
     public class CreateAdvertisementDto
     {
         public string Title { get; set; } = string.Empty;
