@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { PaymentRecoveryCenterAdapter, type PaymentRecoveryOperations } from "./payment-recovery-center-adapter";
 
-import type { PaymentRecoveryRecord } from "@/features/payment-recovery/payment-recovery-types";
+import type { PaymentRecoveryRecord } from "./payment-recovery-types";
 const record: PaymentRecoveryRecord = {
   id: "attempt-1", orderGuid: "order-1", occurredAtIso: "2026-09-11T00:00:00.000Z",
   amountCents: 99, status: "result-unknown", terminalName: "Lane 1", transactionReference: "ref-1",

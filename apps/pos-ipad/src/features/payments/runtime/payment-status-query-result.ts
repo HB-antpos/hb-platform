@@ -1,6 +1,1 @@
-import type { PaymentProviderResult } from "@/core/contracts";
-
-/** 仅用于人工核实：本次 GET 已取得并校验原交易响应，不能由本地 Unknown 推断。 */
-export type PaymentStatusQueryResult = PaymentProviderResult & Readonly<{
-  queryVerified: boolean;
-}>;
+export type { PaymentStatusQueryResult } from "@hb/pos-payments-core/features/payments/payment-status-query-result";

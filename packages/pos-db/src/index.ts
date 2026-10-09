@@ -11,3 +11,6 @@ export * from "./core/db/sqlite-special-products-repository";
 export * from "./core/db/types";
 export * from "./core/db/sqlite-payment-supervisor-acknowledgement-queue";
 export * from "./core/db/sqlite-return-supervisor-resolution-store";
+export * from "./core/db/sqlite-payment-recovery-center-store";
+export * from "./core/db/sqlite-manual-payment-committer";
+export * from "./core/db/sqlite-manual-payment-sync";
