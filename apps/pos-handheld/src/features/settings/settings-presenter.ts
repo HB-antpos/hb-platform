@@ -3756,7 +3756,7 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-// 配对被明确拒绝时区分原因，店员才知道该换码、找管理员还是等待（与 iPad 一致）。
+// 配对被明确拒绝时区分原因，店员才知道该换码、找管理员还是等待。
 function linklyPairFailureStatus(error: unknown): SettingsStatusCode {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
   switch (code) {
