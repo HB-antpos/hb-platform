@@ -934,6 +934,56 @@ public sealed class CustomerDisplayViewModelTests
         }
     }
 
+    [Fact]
+    public void CustomerDisplayView_badge_moves_off_the_portrait_advertisement_into_summary_panel()
+    {
+        var (xaml, _) = ReadCustomerDisplayViewFiles();
+        var document = XDocument.Parse(xaml);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        const string overlayTemplateReference = "{StaticResource CustomerDisplayServedByBadgeTemplate}";
+        const string compactTemplateReference = "{StaticResource CustomerDisplayServedByCompactBadgeTemplate}";
+
+        // 两个模板（空闲全屏广告上的大徽标、汇总栏里的单行紧凑徽标）展示同样的内容：
+        // 「Served by 名字」+ 终端号，不能一个改了另一个漏改。
+        foreach (var key in new[] { "CustomerDisplayServedByBadgeTemplate", "CustomerDisplayServedByCompactBadgeTemplate" })
+        {
+            var template = Assert.Single(document
+                .Descendants(presentation + "DataTemplate")
+                .Where(element => element.Attribute(x + "Key")?.Value == key));
+            Assert.Contains(template.Descendants(presentation + "Run"),
+                element => element.Attribute("Text")?.Value == "{loc:Loc customer.servedBy}");
+            Assert.Contains(template.Descendants(presentation + "Run"),
+                element => element.Attribute("Text")?.Value == "{Binding CashierFirstName, Mode=OneWay}");
+            Assert.Contains(template.Descendants(presentation + "TextBlock"),
+                element => element.Attribute("Text")?.Value == "{Binding TerminalName}");
+        }
+
+        // 有商品（右侧竖屏广告）时：徽标在汇总栏里（紧凑版，汇总栏可用高度只有约 98px），不再叠在广告面板上。
+        var summaryPanel = Assert.Single(document
+            .Descendants(presentation + "Border")
+            .Where(element => element.Attribute(x + "Name")?.Value == "SummaryPanel"));
+        Assert.Single(summaryPanel
+            .Descendants(presentation + "ContentControl")
+            .Where(element => element.Attribute("ContentTemplate")?.Value == compactTemplateReference));
+
+        // 空闲全屏广告时汇总栏整体隐藏，徽标改叠在广告右下角，且只在这个状态显示，
+        // 否则会和竖屏广告重叠。
+        var promotionPanel = Assert.Single(document
+            .Descendants(presentation + "Border")
+            .Where(element => element.Attribute(x + "Name")?.Value == "PromotionPanel"));
+        var overlayBadge = Assert.Single(promotionPanel
+            .Descendants(presentation + "ContentControl")
+            .Where(element => element.Attribute("ContentTemplate")?.Value == overlayTemplateReference));
+        Assert.Contains(
+            "Binding IsIdleAdvertisementVisible",
+            overlayBadge.Attribute("Visibility")?.Value,
+            StringComparison.Ordinal);
+        Assert.Empty(promotionPanel
+            .Descendants(presentation + "ContentControl")
+            .Where(element => element.Attribute("ContentTemplate")?.Value == compactTemplateReference));
+    }
+
     private static PosSessionState CreateSession(string cashierName) =>
         new("HB POS", "1042", "TestStore", "POS_1042_0200", "C001", cashierName, true, 0);
 
