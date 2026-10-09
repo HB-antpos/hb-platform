@@ -58,6 +58,7 @@
       "resetColumnLayout": "重置列布局",
       "copyOrderQtyToAlloc": "发货数 = 订货数",
       "batchModify": "批量修改…",
+      "colIndex": "序号",
       "colProduct": "商品",
       "colLocationPicker": "货位 · 拣货",
       "colOrdered": "订货",

@@ -14,6 +14,7 @@ import {
   resolveStoreOrderDetailAllCount,
   resolveStoreOrderDetailColumnOrderBase,
   resolveStoreOrderDetailFlowActions,
+  resolveStoreOrderDetailRowNumber,
   resolveStoreOrderLineAssigneeState,
   summarizeStoreOrderEditedLines,
 } from './storeOrderDetailLogic'
@@ -204,6 +205,15 @@ runTest('列顺序基准：没拖过列序时切换订货体积列直接用新�
   // 没有持久化值或值不是数组时原样返回，由合并逻辑回退默认顺序。
   assert.equal(resolveStoreOrderDetailColumnOrderBase(null, withVolume), null)
   assert.deepEqual(resolveStoreOrderDetailColumnOrderBase({ product: true }, withVolume), { product: true })
+})
+
+runTest('明细序号随服务端分页接着往下数，异常入参兜底为从 1 起', () => {
+  assert.equal(resolveStoreOrderDetailRowNumber(1, 50, 0), 1)
+  assert.equal(resolveStoreOrderDetailRowNumber(1, 50, 49), 50)
+  assert.equal(resolveStoreOrderDetailRowNumber(2, 50, 0), 51)
+  assert.equal(resolveStoreOrderDetailRowNumber(3, 20, 5), 46)
+  assert.equal(resolveStoreOrderDetailRowNumber(0, 50, 2), 3)
+  assert.equal(resolveStoreOrderDetailRowNumber(Number.NaN, 50, 2), 3)
 })
 
 console.log('storeOrderDetailLogic.test: ok')

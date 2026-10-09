@@ -186,6 +186,7 @@ import {
   resolveStoreOrderDetailAllCount,
   resolveStoreOrderDetailColumnOrderBase,
   resolveStoreOrderDetailFlowActions,
+  resolveStoreOrderDetailRowNumber,
   resolveStoreOrderLineAssigneeState,
   summarizeStoreOrderEditedLines,
   type StoreOrderDetailFilterChip,
@@ -257,6 +258,8 @@ const STORE_ORDER_DETAIL_COLUMN_WIDTH_STORAGE_KEY = 'hbweb_rv.storeOrders.detail
 const STORE_ORDER_DETAIL_SHOW_ORDER_VOLUME_STORAGE_KEY = 'hbweb_rv.storeOrders.detail.showOrderVolume.v1'
 const STORE_ORDER_DETAIL_TABLE_MIN_SCROLL_X = 1080
 const STORE_ORDER_DETAIL_SELECTION_COLUMN_WIDTH = 34
+// 序号列在可拖拽/可调宽的列体系之外，固定宽度、固定在商品列左侧。
+const STORE_ORDER_DETAIL_INDEX_COLUMN_WIDTH = 52
 const STORE_ORDER_DETAIL_MAX_COLUMN_WIDTH = 520
 const STORE_ORDER_DETAIL_KEYWORD_DEBOUNCE_MS = 300
 const STORE_ORDER_DETAIL_DEFAULT_COLUMN_WIDTHS: Record<StoreOrderDetailTableColumnKey, number> = {
@@ -3713,10 +3716,23 @@ export default function StoreOrderDetailPage() {
       } as DraggableHeaderCellProps),
     }
   }) as ColumnsType<StoreOrderDetailLine>
+  // 序号列：不进列顺序/列宽存储（没有 data-column-key，表头不可拖拽、不可调宽），始终排在最前；
+  // 序号接着服务端分页往下数，筛选/排序后表示当前结果里的第几行。
+  const detailIndexColumn: ColumnsType<StoreOrderDetailLine>[number] = {
+    title: t('warehouseUi.storeOrderDetail.colIndex'),
+    key: 'rowIndex',
+    width: STORE_ORDER_DETAIL_INDEX_COLUMN_WIDTH,
+    align: 'center',
+    fixed: isDesktop ? 'left' : undefined,
+    render: (_: unknown, __: StoreOrderDetailLine, index: number) => (
+      <span className="wh-order-detail-row-index">{resolveStoreOrderDetailRowNumber(detailPage, detailPageSize, index)}</span>
+    ),
+  }
+  const detailTableColumns: ColumnsType<StoreOrderDetailLine> = [detailIndexColumn, ...columns]
   const detailTableScrollX = Math.max(
     STORE_ORDER_DETAIL_TABLE_MIN_SCROLL_X,
     (canUseWarehouseManagerActions ? STORE_ORDER_DETAIL_SELECTION_COLUMN_WIDTH : 0) +
-      columns.reduce((total, column) => {
+      detailTableColumns.reduce((total, column) => {
         const width = typeof column.width === 'number' ? column.width : Number(column.width)
         return total + (Number.isFinite(width) ? width : 0)
       }, 0),
@@ -4538,7 +4554,7 @@ export default function StoreOrderDetailPage() {
                   rowKey="detailGUID"
                   virtual
                   loading={lineActionLoading}
-                  columns={columns}
+                  columns={detailTableColumns}
                   dataSource={detail.items}
                   components={{ header: { cell: DraggableHeaderCell } }}
                   rowClassName={(record) => (editedLineGuidSet.has(record.detailGUID) ? 'wh-order-detail-row-dirty' : '')}
