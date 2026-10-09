@@ -22,6 +22,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     break;
                 case DetailAction.UpdatePurchasePrice:
                     Result.UpdatedPurchasePrices = operation.SuccessCount;
+                    Result.UpdatedStorePrices = operation.ExtraStorePriceCount;
                     break;
                 case DetailAction.UpdateItemNumber:
                     Result.UpdatedItemNumbers = operation.SuccessCount;
@@ -53,6 +54,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         {
             Result.CreatedProducts = 0;
             Result.UpdatedPurchasePrices = 0;
+            Result.UpdatedStorePrices = 0;
             Result.UpdatedItemNumbers = 0;
             Result.AddedMultiCodes = 0;
             Result.Skipped = 0;

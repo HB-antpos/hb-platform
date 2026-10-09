@@ -23,6 +23,32 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             await _context.Db.Queryable<Product>()
                 .AnyAsync(product => product.ProductCode == productCode && product.IsDeleted == false);
 
+        /// <summary>
+        /// 把前端传入的分店编码对照「POS 启用分店」（Store.IsActive 且未删除）解析成库内标准写法（忽略大小写）。
+        /// 启用分店只有几十家，直接整表读取后在内存比对，避免 IN 查询受数据库排序规则大小写影响。
+        /// </summary>
+        public async Task<(List<string> Resolved, List<string> Invalid)> ResolvePosEnabledStoreCodesAsync(
+            IReadOnlyCollection<string> storeCodes
+        )
+        {
+            if (storeCodes.Count == 0) return (new List<string>(), new List<string>());
+            var enabled = (await _context.Db.Queryable<Store>()
+                    .Where(store => store.IsActive && store.IsDeleted == false)
+                    .Select(store => store.StoreCode)
+                    .ToListAsync())
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .GroupBy(code => code.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Trim(), StringComparer.OrdinalIgnoreCase);
+            var resolved = new List<string>();
+            var invalid = new List<string>();
+            foreach (var code in storeCodes)
+            {
+                if (enabled.TryGetValue(code, out var canonical)) resolved.Add(canonical);
+                else invalid.Add(code);
+            }
+            return (resolved, invalid);
+        }
+
         public async Task<bool> StorePriceExistsAsync(string storeCode, string productCode) =>
             await _context.Db.Queryable<StoreRetailPrice>()
                 .AnyAsync(price =>

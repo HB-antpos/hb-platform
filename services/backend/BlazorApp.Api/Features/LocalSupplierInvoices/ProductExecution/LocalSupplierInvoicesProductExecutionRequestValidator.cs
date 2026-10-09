@@ -298,6 +298,20 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
         Dictionary<string, int>? ConfirmedActions,
         Dictionary<string, string>? ConfirmedDetailIdentities,
         // 用户已对「进货价较上次涨跌超过 40%」的行做二次确认；缺省为未确认，锁内校验据此拒绝。
-        bool ConfirmedLargePriceChange = false
-    );
+        bool ConfirmedLargePriceChange = false,
+        // 「更新进货价」额外同步的分店（已去重、已排除本单分店）；空表示只更新本单分店。不参与确认快照比对。
+        IReadOnlyList<string>? ExtraStoreCodes = null
+    )
+    {
+        /// <summary>规范化前端传入的目标分店：去空白、去重（忽略大小写）、排除本单分店。</summary>
+        public static List<string> NormalizeExtraStoreCodes(
+            IEnumerable<string>? targetStoreCodes,
+            string? invoiceStoreCode
+        ) => (targetStoreCodes ?? Enumerable.Empty<string>())
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code.Trim())
+            .Where(code => !string.Equals(code, invoiceStoreCode?.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }

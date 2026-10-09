@@ -1095,6 +1095,12 @@ namespace BlazorApp.Shared.DTOs
         /// 用户已二次确认「进货价较上次涨跌超过 40%」的行；缺省视为未确认，后端会拒绝并返回 PRICE_CHANGE_CONFIRM_REQUIRED。
         /// </summary>
         public bool? ConfirmedLargePriceChange { get; set; }
+
+        /// <summary>
+        /// 「更新进货价」额外同步的 POS 启用分店编码；本单所属分店始终执行，不必（也不会重复）出现在这里。
+        /// 缺省或为空表示只更新本单分店；包含未启用或不存在的分店时后端整单拒绝。
+        /// </summary>
+        public List<string>? TargetStoreCodes { get; set; }
     }
 
     /// <summary>
@@ -1213,6 +1219,11 @@ namespace BlazorApp.Shared.DTOs
         /// 更新进货价成功数
         /// </summary>
         public int UpdatedPurchasePrices { get; set; }
+
+        /// <summary>
+        /// 同步到其他勾选分店的分店价条数（本单分店不计入）
+        /// </summary>
+        public int UpdatedStorePrices { get; set; }
 
         /// <summary>
         /// 更新货号成功数

@@ -1660,7 +1660,8 @@ namespace BlazorApp.Api.Controllers.React
                 dto.NewProductProductTypeSelections,
                 dto.ExpectedActions,
                 confirmationValidation.ConfirmedDetails,
-                dto.ConfirmedLargePriceChange == true
+                dto.ConfirmedLargePriceChange == true,
+                dto.TargetStoreCodes
             );
             if (result.Success)
                 return Ok(new { success = true, data = result.Data, message = result.Message });

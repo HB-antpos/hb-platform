@@ -5,6 +5,9 @@ import { DetailAction } from '../../../../types/localSupplierInvoice'
 import { RequestError } from '../../../../utils/request'
 import {
   buildBatchExecuteConfirmText,
+  buildExtraStoreOptions,
+  countPurchasePriceUpdateRows,
+  getStoreSelectAllState,
   buildBatchExecuteSnapshot,
   getBatchExecuteErrorFeedback,
   getNewProductWithAdditionalBarcodesRows,
@@ -573,6 +576,74 @@ async function main() {
     assertEqual(bodies[2].confirmedLargePriceChange, true, '二次确认后应发送 true')
   })
   if (confirmedFlagFailure) failures.push(confirmedFlagFailure)
+
+  const storeScopeFailure = await runTest('更新进货价可额外勾选分店：行数统计、选项剔除本单分店、全选状态与请求体字段', async () => {
+    const details = [
+      { detailGUID: 'd1', activityType: DetailAction.UpdatePurchasePrice },
+      { detailGUID: 'd2', activityType: DetailAction.AddMultiCode },
+      { detailGUID: 'd3', activityType: DetailAction.None },
+    ]
+    assertEqual(countPurchasePriceUpdateRows(['d1', 'd2'], details, {}), 1, '只统计更新进货价的行')
+    assertEqual(countPurchasePriceUpdateRows(['d2'], details, {}), 0, '没有进货价行时不显示分店选择')
+    assertEqual(countPurchasePriceUpdateRows(['d3'], details, { d3: DetailAction.UpdatePurchasePrice }), 1, '以页面内存里刚改的操作为准')
+
+    const options = [
+      { value: '1009', label: '1009 - Lake Haven' },
+      { value: '1010', label: '1010 - Other' },
+      { value: '1010', label: '1010 - Other dup' },
+      { value: ' ', label: 'blank' },
+    ]
+    assertDeepEqual(buildExtraStoreOptions(options, '1009').map((o) => o.value), ['1010'], '剔除本单分店、重复项与空编码')
+    assertDeepEqual(buildExtraStoreOptions(options, null).map((o) => o.value), ['1009', '1010'], '没有本单分店时保留全部')
+
+    const all = ['1010', '1011', '1012']
+    assertDeepEqual(getStoreSelectAllState([], all), { checked: false, indeterminate: false, disabled: false }, '未勾选')
+    assertDeepEqual(getStoreSelectAllState(['1010'], all), { checked: false, indeterminate: true, disabled: false }, '部分勾选')
+    assertDeepEqual(getStoreSelectAllState(all, all), { checked: true, indeterminate: false, disabled: false }, '全选')
+    assertDeepEqual(getStoreSelectAllState([], []), { checked: false, indeterminate: false, disabled: true }, '没有可选分店时禁用')
+
+    const originalFetch = globalThis.fetch
+    const bodies: Record<string, unknown>[] = []
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({
+        success: true,
+        data: { createdProducts: 0, updatedPurchasePrices: 1, updatedStorePrices: 2, updatedItemNumbers: 0, addedMultiCodes: 0, skipped: 0, failed: 0, errors: [] },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+    const base = {
+      invoiceGuid: 'invoice-1',
+      detailGuids: ['d1'],
+      expectedActions: [{ detailGuid: 'd1', action: DetailAction.UpdatePurchasePrice, activityType: DetailAction.UpdatePurchasePrice }],
+      confirmedCreateProductCount: 0,
+      confirmedAt: '2026-10-10T09:30:00.000Z',
+    }
+    try {
+      await batchExecuteActions(base)
+      await batchExecuteActions({ ...base, targetStoreCodes: [] })
+      await batchExecuteActions({ ...base, targetStoreCodes: ['1010', '1011'] })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    assert(!('targetStoreCodes' in bodies[0]), '未勾选时请求体不带 targetStoreCodes')
+    assert(!('targetStoreCodes' in bodies[1]), '空数组也不发送，后端只更新本单分店')
+    assertDeepEqual(bodies[2].targetStoreCodes, ['1010', '1011'], '勾选的分店应原样发送')
+  })
+  if (storeScopeFailure) failures.push(storeScopeFailure)
+
+  const storeScopeMessagesFailure = await runTest('分店范围选择文案与同步结果文案应补齐中英文 key', () => {
+    const zhMessages = JSON.parse(readFileSync(resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.zh.json'), 'utf8'))
+    const enMessages = JSON.parse(readFileSync(resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.en.json'), 'utf8'))
+    const zh = JSON.parse(readFileSync(resolve(process.cwd(), 'src/i18n/locales/zh.json'), 'utf8'))
+    const en = JSON.parse(readFileSync(resolve(process.cwd(), 'src/i18n/locales/en.json'), 'utf8'))
+    for (const key of ['storeScopeTitle', 'storeScopeSelectAll', 'storeScopeCurrentSuffix', 'storeScopeHint']) {
+      assert(typeof zhMessages?.posAdmin?.invoiceWorkbench?.[key] === 'string' && zhMessages.posAdmin.invoiceWorkbench[key].length > 0, `中文页面消息缺少 ${key}`)
+      assert(typeof enMessages?.posAdmin?.invoiceWorkbench?.[key] === 'string' && enMessages.posAdmin.invoiceWorkbench[key].length > 0, `英文页面消息缺少 ${key}`)
+    }
+    assert(typeof zh?.posAdmin?.invoiceDetail?.updatedStorePrices === 'string', '中文 locale 缺少 updatedStorePrices')
+    assert(typeof en?.posAdmin?.invoiceDetail?.updatedStorePrices === 'string', '英文 locale 缺少 updatedStorePrices')
+  })
+  if (storeScopeMessagesFailure) failures.push(storeScopeMessagesFailure)
 
   const largePriceMessagesFailure = await runTest('页面级消息文件应补齐二次确认文案的中英文 key', () => {
     const zh = JSON.parse(readFileSync(resolve(process.cwd(), 'src/pages/PosAdmin/LocalSupplierInvoices/invoiceMessages.zh.json'), 'utf8'))

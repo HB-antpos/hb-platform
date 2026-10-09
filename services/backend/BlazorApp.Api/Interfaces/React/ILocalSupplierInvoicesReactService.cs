@@ -98,7 +98,8 @@ namespace BlazorApp.Api.Interfaces.React
             List<BatchExecuteNewProductProductTypeSelectionDto>? newProductProductTypeSelections = null,
             List<BatchExecuteExpectedActionDto>? expectedActions = null,
             IReadOnlyCollection<StoreLocalSupplierInvoiceDetails>? confirmedDetails = null,
-            bool confirmedLargePriceChange = false
+            bool confirmedLargePriceChange = false,
+            IReadOnlyCollection<string>? targetStoreCodes = null
         );
         Task<SyncResult> PushInvoicesToHqAsync(List<string> invoiceGuids);
     }

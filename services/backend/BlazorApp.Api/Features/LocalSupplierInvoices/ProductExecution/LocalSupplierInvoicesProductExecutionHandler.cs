@@ -32,7 +32,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             List<BatchExecuteNewProductProductTypeSelectionDto>? newProductProductTypeSelections = null,
             List<BatchExecuteExpectedActionDto>? expectedActions = null,
             IReadOnlyCollection<StoreLocalSupplierInvoiceDetails>? confirmedDetails = null,
-            bool confirmedLargePriceChange = false
+            bool confirmedLargePriceChange = false,
+            IReadOnlyCollection<string>? targetStoreCodes = null
         )
         {
             var result = new BatchExecuteActionsResultDto();
@@ -57,11 +58,25 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                     );
                 }
 
-                // 二次确认标志不参与确认快照比对，只在锁内校验阶段决定是否放行涨跌幅超限的「更新进货价」。
+                // 二次确认标志与目标分店都不参与确认快照比对：前者只在锁内校验阶段决定是否放行涨跌幅超限的「更新进货价」，
+                // 后者只决定「更新进货价」除本单分店外还同步到哪些 POS 启用分店。
                 var validatedRequest = request! with { ConfirmedLargePriceChange = confirmedLargePriceChange };
                 var initialData = await _source.LoadInitialAsync(validatedRequest);
                 if (initialData.Header == null)
                     return ApiResponse<BatchExecuteActionsResultDto>.Error("进货单不存在", "NOT_FOUND");
+                var extraStoreCodes = ProductExecutionRequest.NormalizeExtraStoreCodes(
+                    targetStoreCodes,
+                    initialData.Header.StoreCode
+                );
+                var (resolvedStoreCodes, invalidStoreCodes) = await _source.ResolvePosEnabledStoreCodesAsync(extraStoreCodes);
+                if (invalidStoreCodes.Count > 0)
+                {
+                    return ApiResponse<BatchExecuteActionsResultDto>.Error(
+                        $"目标分店未启用 POS 或不存在：{string.Join("、", invalidStoreCodes)}",
+                        "VALIDATION_ERROR"
+                    );
+                }
+                validatedRequest = validatedRequest with { ExtraStoreCodes = resolvedStoreCodes };
                 if (initialData.Details.Count != validatedRequest.SelectedDetailGuids.Count)
                 {
                     return ApiResponse<BatchExecuteActionsResultDto>.Error(

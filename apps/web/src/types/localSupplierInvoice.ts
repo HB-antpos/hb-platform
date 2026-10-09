@@ -716,6 +716,8 @@ export interface BatchExecuteActionsRequest {
   newProductProductTypeSelections?: BatchExecuteNewProductProductTypeSelection[]
   /** 用户已二次确认「进货价较上次涨跌超过 40%」的行；缺省视为未确认，后端会拒绝并返回 PRICE_CHANGE_CONFIRM_REQUIRED。 */
   confirmedLargePriceChange?: boolean
+  /** 「更新进货价」除本单分店外额外同步的 POS 启用分店编码；缺省只更新本单分店。 */
+  targetStoreCodes?: string[]
 }
 
 export interface BatchExecuteExpectedAction {
@@ -732,6 +734,8 @@ export interface BatchExecuteNewProductProductTypeSelection {
 export interface BatchExecuteActionsResult {
   createdProducts: number
   updatedPurchasePrices: number
+  /** 同步到其他勾选分店的分店价条数（不含本单分店）。 */
+  updatedStorePrices?: number
   updatedItemNumbers: number
   addedMultiCodes: number
   skipped: number
