@@ -597,8 +597,7 @@ public sealed class CustomerDisplayViewModelTests
         Assert.Contains("Foreground=\"{StaticResource PosCustomerDisplayAmountBrush}\"", viewXaml);
         Assert.DoesNotContain("Background=\"White\"", viewXaml);
         Assert.DoesNotContain("<LinearGradientBrush", viewXaml);
-        // 只缩不放的 Viewbox：小计、税额、节省、应付总额 4 处金额，加汇总栏里的紧凑服务徽标 1 处（窄屏只缩小不撑破）。
-        Assert.Equal(5, viewXaml.Split("StretchDirection=\"DownOnly\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(4, viewXaml.Split("StretchDirection=\"DownOnly\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("Background=\"{StaticResource PosCustomerDisplayBackgroundBrush}\"", windowXaml);
         Assert.Contains("Foreground=\"{StaticResource PosCustomerDisplayTextBrush}\"", windowXaml);
     }
@@ -909,87 +908,16 @@ public sealed class CustomerDisplayViewModelTests
     }
 
     [Fact]
-    public void CustomerDisplayView_badge_shows_served_by_cashier_with_terminal_fallback()
+    public void CustomerDisplayView_has_no_served_by_or_terminal_badge()
     {
+        // 右下角「Served by 名字 / 终端号」徽章已取消：它叠在广告上会盖住素材，汇总栏里又放不下。
+        // 视图模型上的收银员 / 终端号属性仍保留（上面的测试覆盖），这里只守住视图不再展示。
         var (xaml, _) = ReadCustomerDisplayViewFiles();
-        var document = XDocument.Parse(xaml);
-        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
-        Assert.Contains(document.Descendants(presentation + "Run"),
-            element => element.Attribute("Text")?.Value == "{loc:Loc customer.servedBy}");
-        Assert.Contains(document.Descendants(presentation + "Run"),
-            element => element.Attribute("Text")?.Value == "{Binding CashierFirstName, Mode=OneWay}");
-        Assert.Contains(document.Descendants(presentation + "TextBlock"),
-            element => element.Attribute("Text")?.Value == "{Binding CashierInitial}");
-        // 没有收银员时仍显示终端号，保证未登录/紧急授权时徽标不空。
-        Assert.Contains(document.Descendants(presentation + "TextBlock"),
-            element => element.Attribute("Text")?.Value == "{Binding TerminalName}");
-
-        var resources = Path.Combine(FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Resources");
-        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
-        {
-            var keys = XDocument.Load(Path.Combine(resources, file))
-                .Descendants("data")
-                .Select(element => element.Attribute("name")?.Value);
-            Assert.Contains("customer.servedBy", keys);
-        }
-    }
-
-    [Fact]
-    public void CustomerDisplayView_badge_moves_off_the_portrait_advertisement_into_summary_panel()
-    {
-        var (xaml, _) = ReadCustomerDisplayViewFiles();
-        var document = XDocument.Parse(xaml);
-        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
-        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
-        const string overlayTemplateReference = "{StaticResource CustomerDisplayServedByBadgeTemplate}";
-        const string compactTemplateReference = "{StaticResource CustomerDisplayServedByCompactBadgeTemplate}";
-
-        // 两个模板（空闲全屏广告上的大徽标、汇总栏里的单行紧凑徽标）展示同样的内容：
-        // 「Served by 名字」+ 终端号，不能一个改了另一个漏改。
-        foreach (var key in new[] { "CustomerDisplayServedByBadgeTemplate", "CustomerDisplayServedByCompactBadgeTemplate" })
-        {
-            var template = Assert.Single(document
-                .Descendants(presentation + "DataTemplate")
-                .Where(element => element.Attribute(x + "Key")?.Value == key));
-            Assert.Contains(template.Descendants(presentation + "Run"),
-                element => element.Attribute("Text")?.Value == "{loc:Loc customer.servedBy}");
-            Assert.Contains(template.Descendants(presentation + "Run"),
-                element => element.Attribute("Text")?.Value == "{Binding CashierFirstName, Mode=OneWay}");
-            Assert.Contains(template.Descendants(presentation + "TextBlock"),
-                element => element.Attribute("Text")?.Value == "{Binding TerminalName}");
-        }
-
-        // 有商品（右侧竖屏广告）时：徽标在汇总栏里「Ready for Payment」框下方（紧凑版，汇总栏可用高度只有约 106px），不再叠在广告面板上。
-        var summaryPanel = Assert.Single(document
-            .Descendants(presentation + "Border")
-            .Where(element => element.Attribute(x + "Name")?.Value == "SummaryPanel"));
-        var summaryBadge = Assert.Single(summaryPanel
-            .Descendants(presentation + "ContentControl")
-            .Where(element => element.Attribute("ContentTemplate")?.Value == compactTemplateReference));
-        // 紧凑徽标放在「Ready for Payment」框的正下方：与该框同属一个纵向 StackPanel，且排在它后面。
-        var readyColumn = Assert.IsType<XElement>(summaryBadge.Parent?.Parent);
-        Assert.Equal(presentation + "StackPanel", readyColumn.Name);
-        var readyBox = Assert.Single(readyColumn.Elements(presentation + "Border"));
-        Assert.Contains(readyBox.Descendants(presentation + "TextBlock"),
-            element => element.Attribute("Text")?.Value == "{loc:Loc customer.readyForPayment}");
-        Assert.True(readyBox.ElementsAfterSelf().Contains(summaryBadge.Parent));
-
-        // 空闲全屏广告时汇总栏整体隐藏，徽标改叠在广告右下角，且只在这个状态显示，
-        // 否则会和竖屏广告重叠。
-        var promotionPanel = Assert.Single(document
-            .Descendants(presentation + "Border")
-            .Where(element => element.Attribute(x + "Name")?.Value == "PromotionPanel"));
-        var overlayBadge = Assert.Single(promotionPanel
-            .Descendants(presentation + "ContentControl")
-            .Where(element => element.Attribute("ContentTemplate")?.Value == overlayTemplateReference));
-        Assert.Contains(
-            "Binding IsIdleAdvertisementVisible",
-            overlayBadge.Attribute("Visibility")?.Value,
-            StringComparison.Ordinal);
-        Assert.Empty(promotionPanel
-            .Descendants(presentation + "ContentControl")
-            .Where(element => element.Attribute("ContentTemplate")?.Value == compactTemplateReference));
+        Assert.DoesNotContain("customer.servedBy", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CashierInitial", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CashierFirstName", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("TerminalName", xaml, StringComparison.Ordinal);
     }
 
     private static PosSessionState CreateSession(string cashierName) =>
