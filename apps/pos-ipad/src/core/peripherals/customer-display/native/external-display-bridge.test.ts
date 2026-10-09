@@ -29,6 +29,8 @@ const disconnectedStatus: NativeExternalDisplayStatus = {
 const money = (cents: number) => ({ currency: "AUD" as const, cents });
 const advertisementCacheRootUri =
   "file:///var/mobile/Containers/Data/customer-display-ads/";
+const productImageCacheRootUri =
+  "file:///var/mobile/Containers/Data/customer-display-product-images/";
 
 const snapshot: CustomerDisplaySnapshot = {
   revision: 1,
@@ -389,7 +391,7 @@ test("冻结快照兼容新版单价、汇总与窗口字段，也继续接受�
   );
 });
 
-test("可视窗口必须是能完整容纳最多 12 行的有效起点", () => {
+test("可视窗口必须是能完整容纳最多 6 行的有效起点", () => {
   const items = Array.from({ length: 13 }, (_, index) => ({
     ...snapshot.items[0]!,
     name: `Item ${index + 1}`,
@@ -397,11 +399,11 @@ test("可视窗口必须是能完整容纳最多 12 行的有效起点", () => {
 
   assert.doesNotThrow(() =>
     sanitizeCustomerDisplaySnapshot(
-      { ...snapshot, items, visibleItemStart: 1 },
+      { ...snapshot, items, visibleItemStart: 7 },
       advertisementCacheRootUri,
     ),
   );
-  for (const visibleItemStart of [-1, 0.5, 2]) {
+  for (const visibleItemStart of [-1, 0.5, 8]) {
     assert.throws(() =>
       sanitizeCustomerDisplaySnapshot(
         { ...snapshot, items, visibleItemStart },
@@ -425,5 +427,119 @@ test("advertisements must be local files", () => {
         advertisementCacheRootUri,
       ),
     /local advertisement URI/,
+  );
+});
+
+const productImageItem = (imageUri: string) => ({
+  ...snapshot.items[0]!,
+  itemNumber: "A100",
+  lookupCode: "9300000000017",
+  grossAmount: money(1_000),
+  discountRate: "10",
+  imageUri,
+});
+
+test("商品缩略图只接受商品图缓存目录内的本地 file URI", () => {
+  const accepted = sanitizeCustomerDisplaySnapshot(
+    {
+      ...snapshot,
+      items: [
+        productImageItem(`${productImageCacheRootUri}abc123.jpg`),
+      ],
+    },
+    advertisementCacheRootUri,
+    productImageCacheRootUri,
+  );
+  assert.equal(
+    accepted.items[0]?.imageUri,
+    `${productImageCacheRootUri}abc123.jpg`,
+  );
+
+  for (const imageUri of [
+    "https://example.com/p.jpg",
+    "file:///var/mobile/Containers/Data/customer-display-ads/ad.png",
+    "file:///var/mobile/Containers/Data/customer-display-product-images/",
+    "file:///var/mobile/Containers/Data/customer-display-product-images/%2e%2e/secret.jpg",
+    "file:///var/mobile/Containers/Data/customer-display-product-images/a.jpg?x=1",
+    "file:///var/mobile/Containers/Data/customer-display-product-images/a.jpg#frag",
+    "file://user:pw@localhost/var/mobile/Containers/Data/customer-display-product-images/a.jpg",
+    "file://evil.example/var/mobile/Containers/Data/customer-display-product-images/a.jpg",
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeCustomerDisplaySnapshot(
+          { ...snapshot, items: [productImageItem(imageUri)] },
+          advertisementCacheRootUri,
+          productImageCacheRootUri,
+        ),
+      /local product image URI/,
+      imageUri,
+    );
+  }
+});
+
+test("缺少商品图缓存根目录时拒绝任何 imageUri，无图快照不受影响", async () => {
+  assert.throws(
+    () =>
+      sanitizeCustomerDisplaySnapshot(
+        {
+          ...snapshot,
+          items: [productImageItem(`${productImageCacheRootUri}abc.jpg`)],
+        },
+        advertisementCacheRootUri,
+      ),
+    /product image cache root/,
+  );
+  assert.doesNotThrow(() =>
+    sanitizeCustomerDisplaySnapshot(snapshot, advertisementCacheRootUri),
+  );
+
+  // 经由桥接发布同样会在到达原生层之前被拒绝。
+  let nativePublishCalls = 0;
+  const bridge = createExternalDisplayBridge({
+    advertisementCacheRootUri,
+    nativeModule: {
+      async getStatus() {
+        return disconnectedStatus;
+      },
+      async setEnabled() {
+        return disconnectedStatus;
+      },
+      async publishSnapshot(value) {
+        nativePublishCalls += 1;
+        return {
+          accepted: true,
+          revision: value.revision,
+          latestRevision: value.revision,
+          reason: "accepted",
+        };
+      },
+      async markReactSurfaceReady() {},
+      async markReactSurfaceRendered() {},
+      addListener() {
+        return { remove() {} };
+      },
+    },
+  });
+  await assert.rejects(() =>
+    bridge.publish({
+      ...snapshot,
+      items: [productImageItem(`${productImageCacheRootUri}abc.jpg`)],
+    }),
+  );
+  assert.equal(nativePublishCalls, 0);
+});
+
+test("grossAmount 与 discountRate 必须同时出现", () => {
+  const { grossAmount: _gross, ...withoutGross } = productImageItem(
+    `${productImageCacheRootUri}abc.jpg`,
+  );
+  void _gross;
+  assert.throws(() =>
+    sanitizeCustomerDisplaySnapshot(
+      { ...snapshot, items: [withoutGross] },
+      advertisementCacheRootUri,
+      productImageCacheRootUri,
+    ),
   );
 });

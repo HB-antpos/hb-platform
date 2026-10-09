@@ -12,6 +12,14 @@ type GeneratedItem =
 
 const MAXIMUM_ADVERTISEMENT_BYTES = 200 * 1024 * 1024;
 
+/**
+ * 广告版式：landscape 只在空闲全屏位播，portrait 只在收银右侧位播，any 两处都播。
+ */
+export type CustomerDisplayAdvertisementOrientation =
+  | "landscape"
+  | "portrait"
+  | "any";
+
 export type CustomerDisplayAdvertisementItem = Readonly<{
   id: string;
   kind: "image" | "video";
@@ -23,6 +31,8 @@ export type CustomerDisplayAdvertisementItem = Readonly<{
   effectiveStartIso: string;
   effectiveEndIso: string;
   sortOrder: number;
+  /** 缺省（旧缓存项、旧调用方）按 any 处理。 */
+  orientation?: CustomerDisplayAdvertisementOrientation;
 }>;
 
 export type CustomerDisplayAdvertisementResponse = Readonly<{
@@ -136,7 +146,22 @@ function normalizeItem(
       item.sortOrder,
       "item.sortOrder",
     ),
+    orientation: responseOrientation(item.orientation),
   });
+}
+
+/**
+ * 版式字段宽松解析：trim+小写后只接受 landscape/portrait，
+ * 空值、未知值与非字符串（旧服务端）一律归为 any，不能让它拖垮整批广告。
+ */
+function responseOrientation(
+  value: unknown,
+): CustomerDisplayAdvertisementOrientation {
+  if (typeof value !== "string") return "any";
+  const normalized = value.trim().toLowerCase();
+  return normalized === "landscape" || normalized === "portrait"
+    ? normalized
+    : "any";
 }
 
 function responseKind(value: unknown): "image" | "video" {

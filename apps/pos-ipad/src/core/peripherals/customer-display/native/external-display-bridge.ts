@@ -4,7 +4,10 @@ import {
   type DisplayStatus,
   type ExternalCustomerDisplayPort,
 } from "../../../contracts/external-display";
-import { normalizeLocalAdvertisementUri } from "../local-advertisement-uri";
+import {
+  normalizeLocalAdvertisementUri,
+  normalizeLocalProductImageUri,
+} from "../local-advertisement-uri";
 
 export type NativeExternalDisplayStatus = {
   state: DisplayStatus;
@@ -75,11 +78,13 @@ const displayStatuses = new Set<DisplayStatus>([
   "failed",
 ]);
 /**
- * 冻结契约本身使用 strict schema；这里再收紧广告地址，避免原生层触发任何网络加载。
+ * 冻结契约本身使用 strict schema；这里再收紧广告与商品缩略图地址，
+ * 避免原生层触发任何网络加载或读取缓存目录以外的本地文件。
  */
 export function sanitizeCustomerDisplaySnapshot(
   value: unknown,
   advertisementCacheRootUri?: string | null,
+  productImageCacheRootUri?: string | null,
 ): CustomerDisplaySnapshot {
   const snapshot = CustomerDisplaySnapshotSchema.parse(value);
 
@@ -93,6 +98,17 @@ export function sanitizeCustomerDisplaySnapshot(
       snapshot.advert.localUri,
       advertisementCacheRootUri,
     );
+  }
+
+  // 商品缩略图同样只能是商品图缓存目录内的本地 file URI；缺少根目录却带图一律拒绝。
+  for (const item of snapshot.items) {
+    if (item.imageUri === undefined) continue;
+    if (!productImageCacheRootUri) {
+      throw new TypeError(
+        "item.imageUri requires a product image cache root",
+      );
+    }
+    normalizeLocalProductImageUri(item.imageUri, productImageCacheRootUri);
   }
 
   return snapshot;
@@ -109,9 +125,12 @@ function normalizeStatus(
  */
 export function createExternalDisplayBridge({
   advertisementCacheRootUri,
+  productImageCacheRootUri,
   nativeModule,
 }: {
   advertisementCacheRootUri?: string | null;
+  /** 商品缩略图缓存根目录；缺省时任何带 imageUri 的快照都会被拒绝。 */
+  productImageCacheRootUri?: string | null;
   nativeModule: ExternalDisplayNativeModule | null;
 }): ExternalCustomerDisplayBridge {
   return {
@@ -182,6 +201,7 @@ export function createExternalDisplayBridge({
       const snapshot = sanitizeCustomerDisplaySnapshot(
         value,
         advertisementCacheRootUri,
+        productImageCacheRootUri,
       );
       if (nativeModule === null) {
         throw new Error("External display native module is unavailable.");

@@ -146,6 +146,148 @@ test("开始播放按五分钟刷新、十秒轮播，停止后取消两个计�
   assert.equal(cancellations, 2);
 });
 
+type Published = Readonly<{ kind: "image" | "video"; localUri: string }> | null;
+
+/** 构造一个固定返回给定素材的播放器，sink 记录每次发布的本地 URI。 */
+function slotPlayback(items: readonly CustomerDisplayAdvertisementItem[]) {
+  const published: Published[] = [];
+  const playback = new CustomerDisplayAdvertisementPlayback({
+    now: () => new Date("2026-07-28T00:00:00.000Z"),
+    remote: {
+      async getActive(
+        storeCode,
+      ): Promise<CustomerDisplayAdvertisementResponse> {
+        return {
+          storeCode,
+          generatedAtIso: "2026-07-28T00:00:00.000Z",
+          items,
+        };
+      },
+    },
+    cache: {
+      async cache(requested) {
+        return requested.map(
+          (item): CachedCustomerDisplayAdvertisement => ({
+            ...item,
+            localUri: `file:///cache/${item.id}.png`,
+          }),
+        );
+      },
+    },
+    sink: {
+      async setAdvert(advertisement) {
+        published.push(advertisement);
+      },
+    },
+  });
+  const ids = () =>
+    published.map((entry) =>
+      entry === null ? null : entry.localUri.slice("file:///cache/".length, -4),
+    );
+  return { playback, published, ids };
+}
+
+test("空闲位只轮播 landscape+any，收银位只轮播 portrait+any", async () => {
+  const { playback, ids } = slotPlayback([
+    advert("a-land", { sortOrder: 1, orientation: "landscape" }),
+    advert("b-port", { sortOrder: 2, orientation: "portrait" }),
+    advert("c-any", { sortOrder: 3, orientation: "any" }),
+  ]);
+
+  // 默认空闲位：首条 a-land，轮转跳过 b-port。
+  await playback.refresh("S001");
+  await playback.advance();
+  await playback.advance();
+  await playback.advance();
+  assert.deepEqual(ids(), ["a-land", "c-any", "a-land", "c-any"]);
+
+  // 切到收银位：当前 c-any 仍适合，不换；之后只轮转 portrait+any。
+  await playback.setSlot("checkout");
+  assert.deepEqual(ids().slice(4), []);
+  await playback.advance();
+  await playback.advance();
+  await playback.advance();
+  assert.deepEqual(ids().slice(4), ["b-port", "c-any", "b-port"]);
+});
+
+test("刷新后的首条按当前广告位选取", async () => {
+  const { playback, ids } = slotPlayback([
+    advert("a-land", { sortOrder: 1, orientation: "landscape" }),
+    advert("b-port", { sortOrder: 2, orientation: "portrait" }),
+  ]);
+  await playback.setSlot("checkout");
+  await playback.refresh("S001");
+  assert.deepEqual(ids(), ["b-port"]);
+
+  await playback.setSlot("idle");
+  assert.deepEqual(ids(), ["b-port", "a-land"]);
+  await playback.refresh("S001", true);
+  assert.deepEqual(ids().at(-1), "a-land");
+});
+
+test("当前位置没有任何匹配素材时退回播放全部", async () => {
+  const { playback, ids } = slotPlayback([
+    advert("a-land", { sortOrder: 1, orientation: "landscape" }),
+    advert("b-land", { sortOrder: 2, orientation: "landscape" }),
+  ]);
+  await playback.refresh("S001");
+  await playback.setSlot("checkout");
+  // 收银位没有竖版/通用素材：保持当前、轮转时在全部素材间转。
+  await playback.advance();
+  await playback.advance();
+  assert.deepEqual(ids(), ["a-land", "b-land", "a-land"]);
+  assert.equal(ids().includes(null), false);
+});
+
+test("位置切换时当前广告不适合新位置就立即换下一条并发布；适合则不重复发布", async () => {
+  const { playback, ids } = slotPlayback([
+    advert("a-land", { sortOrder: 1, orientation: "landscape" }),
+    advert("b-port", { sortOrder: 2, orientation: "portrait" }),
+    advert("c-any", { sortOrder: 3 }),
+  ]);
+  await playback.refresh("S001");
+  assert.deepEqual(ids(), ["a-land"]);
+
+  await playback.setSlot("checkout");
+  assert.deepEqual(ids(), ["a-land", "b-port"]);
+
+  // 同一位置重复设置不发布。
+  await playback.setSlot("checkout");
+  assert.deepEqual(ids(), ["a-land", "b-port"]);
+
+  await playback.advance(); // c-any
+  await playback.setSlot("idle"); // c-any 两边都适合，保持
+  assert.deepEqual(ids(), ["a-land", "b-port", "c-any"]);
+
+  await playback.advance(); // 空闲位：a-land
+  await playback.setSlot("checkout"); // a-land 不适合收银位 -> 立即换 b-port
+  assert.deepEqual(ids().slice(3), ["a-land", "b-port"]);
+});
+
+test("未知方向与旧缓存项缺省 orientation 都当 any，两个位置都可播", async () => {
+  const { playback, ids } = slotPlayback([
+    advert("a-legacy", { sortOrder: 1 }),
+    advert("b-unknown", {
+      sortOrder: 2,
+      orientation: "square" as unknown as "any",
+    }),
+  ]);
+  await playback.refresh("S001");
+  await playback.setSlot("checkout");
+  await playback.advance();
+  await playback.setSlot("idle");
+  await playback.advance();
+  assert.deepEqual(ids(), ["a-legacy", "b-unknown", "a-legacy"]);
+});
+
+test("位置在素材加载前设置、没有素材时不发布也不报错", async () => {
+  const { playback, published } = slotPlayback([]);
+  await playback.setSlot("checkout");
+  assert.deepEqual(published, []);
+  await playback.refresh("S001");
+  assert.deepEqual(published, [null]);
+});
+
 function advert(
   id: string,
   overrides: Partial<CustomerDisplayAdvertisementItem> = {},

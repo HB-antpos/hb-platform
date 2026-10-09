@@ -62,7 +62,9 @@ import {
 } from "../peripherals/attendance-security/native";
 import {
   customerDisplayAdvertisementCacheRootUri,
+  customerDisplayProductImageCacheRootUri,
   ExpoAdvertisementFileSystem,
+  ExpoProductImageFileSystem,
   externalDisplay,
 } from "../peripherals/customer-display/native";
 import { HidScannerRouter } from "../peripherals/scanner";
@@ -960,6 +962,12 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         files: new ExpoAdvertisementFileSystem(),
         sha256Hex,
       }),
+      // 客显商品缩略图：专用缓存目录 + 与销售页同口径的受信任地址解析。
+      customerDisplayProductImages: {
+        rootUri: customerDisplayProductImageCacheRootUri,
+        files: new ExpoProductImageFileSystem(),
+        apiBaseUrl,
+      },
       ...(publicExtra?.hbpos?.businessTimeZone
         ? {
             businessTimeZone:

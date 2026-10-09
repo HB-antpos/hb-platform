@@ -8,6 +8,12 @@ import type { CustomerDisplaySnapshot } from "@/core/contracts";
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60 * 1_000;
 const DEFAULT_ROTATION_INTERVAL_MS = 10_000;
 
+/**
+ * 广告位：idle = 购物车为空时的空闲全屏位（只播 landscape + any）；
+ * checkout = 购物车非空时的收银右侧位（只播 portrait + any）。对应 WPF MatchesSlot。
+ */
+export type CustomerDisplayAdvertisementSlot = "idle" | "checkout";
+
 export type CachedCustomerDisplayAdvertisement =
   CustomerDisplayAdvertisementItem &
     Readonly<{ localUri: string }>;
@@ -48,6 +54,7 @@ export type CustomerDisplayAdvertisementPlaybackOptions = Readonly<{
 export class CustomerDisplayAdvertisementPlayback {
   private readonly refreshIntervalMs: number;
   private currentIndex = -1;
+  private slot: CustomerDisplayAdvertisementSlot = "idle";
   private items: readonly CachedCustomerDisplayAdvertisement[] = [];
   private lastRefreshMs = Number.NEGATIVE_INFINITY;
   private storeCode: string | null = null;
@@ -112,6 +119,22 @@ export class CustomerDisplayAdvertisementPlayback {
     this.stopRotationTimer = null;
   }
 
+  /**
+   * 切换广告位。位置没变时什么都不做；变了且正在播的广告不适合新位置，
+   * 就立即换成新位置的下一条并发布（对应 WPF LoadLines 里的换位逻辑）。
+   * 素材尚未加载时只记录位置，由 refresh 按当前位置选首条。
+   */
+  public async setSlot(slot: CustomerDisplayAdvertisementSlot): Promise<void> {
+    if (this.slot === slot) return;
+    this.slot = slot;
+    if (this.items.length === 0) return;
+    const current =
+      this.currentIndex >= 0 ? this.items[this.currentIndex] : undefined;
+    if (current && this.isEligible(current)) return;
+    this.currentIndex = this.findNextEligibleIndex(this.currentIndex);
+    await this.publishCurrent();
+  }
+
   public async advance(): Promise<boolean> {
     const now = this.nowMs();
     this.items = Object.freeze(
@@ -122,7 +145,7 @@ export class CustomerDisplayAdvertisementPlayback {
       await this.options.sink.setAdvert(null);
       return false;
     }
-    this.currentIndex = (this.currentIndex + 1) % this.items.length;
+    this.currentIndex = this.findNextEligibleIndex(this.currentIndex);
     await this.publishCurrent();
     return true;
   }
@@ -150,7 +173,9 @@ export class CustomerDisplayAdvertisementPlayback {
       this.items = Object.freeze([...cached]);
       this.storeCode = storeCode;
       this.lastRefreshMs = now;
-      this.currentIndex = this.items.length > 0 ? 0 : -1;
+      // 首条从当前广告位可播的素材里选（没有适合当前位置的素材时退回全部）。
+      this.currentIndex =
+        this.items.length > 0 ? this.findNextEligibleIndex(-1) : -1;
       await this.publishCurrent();
       return "updated";
     } catch {
@@ -163,6 +188,29 @@ export class CustomerDisplayAdvertisementPlayback {
       }
       return "retained";
     }
+  }
+
+  /**
+   * 从 anchorIndex 之后（循环）找第一条适合当前广告位的素材；列表非空时一定有结果。
+   * anchorIndex 可能因过期剔除而越界，取模归位后继续轮转。
+   */
+  private findNextEligibleIndex(anchorIndex: number): number {
+    const count = this.items.length;
+    const start = ((anchorIndex % count) + count) % count;
+    for (let offset = 1; offset <= count; offset += 1) {
+      const index = (start + offset) % count;
+      const item = this.items[index];
+      if (item && this.isEligible(item)) return index;
+    }
+    return (start + 1) % count;
+  }
+
+  private isEligible(item: CustomerDisplayAdvertisementItem): boolean {
+    // 当前位置一条匹配的都没有时退回全部，保证广告位不空着。
+    return (
+      matchesSlot(item, this.slot) ||
+      !this.items.some((candidate) => matchesSlot(candidate, this.slot))
+    );
   }
 
   private publishCurrent(): Promise<unknown> {
@@ -194,6 +242,17 @@ const defaultScheduler = Object.freeze({
     return () => clearInterval(timer);
   },
 });
+
+function matchesSlot(
+  item: CustomerDisplayAdvertisementItem,
+  slot: CustomerDisplayAdvertisementSlot,
+): boolean {
+  // 横版只在空闲全屏位播、竖版只在收银右侧位播；
+  // any、缺省（旧缓存项）与未知值两处都播。
+  if (item.orientation === "landscape") return slot === "idle";
+  if (item.orientation === "portrait") return slot === "checkout";
+  return true;
+}
 
 function isEffective(
   item: CustomerDisplayAdvertisementItem,

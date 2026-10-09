@@ -3,7 +3,8 @@ import { z } from "zod";
 import { MoneySchema } from "@hb/pos-domain/core/contracts/money";
 
 export type DisplayStatus = "disconnected" | "connecting" | "ready" | "failed";
-export const CUSTOMER_DISPLAY_VISIBLE_ITEM_LIMIT = 12;
+// 与 WPF 客显对齐：商品行高 72（设计画布 768 高）时购物车区一屏可完整显示 6 行。
+export const CUSTOMER_DISPLAY_VISIBLE_ITEM_LIMIT = 6;
 
 const CustomerDisplayQuantitySchema = z
   .string()
@@ -15,8 +16,31 @@ const CustomerDisplayItemSchema = z
     quantity: CustomerDisplayQuantitySchema,
     unitPrice: MoneySchema.optional(),
     amount: MoneySchema,
+    // 以下为对齐 WPF 客显追加的可选字段（旧快照缺省时按无该信息渲染）。
+    /** 货号，对应 WPF 的 "Item No."。 */
+    itemNumber: z.string().min(1).max(64).optional(),
+    /** 条码/查询码，显示在货号右侧。 */
+    lookupCode: z.string().min(1).max(64).optional(),
+    /** 折扣前金额；只在该行有折扣时提供，与 discountRate 同时出现。 */
+    grossAmount: MoneySchema.optional(),
+    /** 折扣率（百分数，最多两位小数，如 "10"、"12.5"）；展示为 "-10%"。 */
+    discountRate: z
+      .string()
+      .regex(/^\d{1,3}(?:\.\d{1,2})?$/)
+      .optional(),
+    /** 商品缩略图的本地 file URI（位于商品图缓存目录内）；客显层永不联网取图。 */
+    imageUri: z.string().min(1).max(2_048).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((item, context) => {
+    if ((item.grossAmount === undefined) !== (item.discountRate === undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountRate"],
+        message: "grossAmount and discountRate must be provided together.",
+      });
+    }
+  });
 
 const CustomerDisplaySummarySchema = z
   .object({

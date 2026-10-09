@@ -103,6 +103,69 @@ test("会话失效时立即发布不含上一笔交易和广告的 idle 快照",
   assert.equal(cleared?.advert, null);
 });
 
+test("广告位随展示购物车是否有商品行变化，只在变化时通知；付款与成功沿用最后非空购物车", async () => {
+  const cart = new MutableCart(emptyCart());
+  const publisher = new RecordingPublisher();
+  const coordinator = new CustomerDisplayCoordinator(cart, publisher);
+  const slots: string[] = [];
+  coordinator.setAdvertSlotListener((slot) => slots.push(slot));
+
+  await coordinator.initialize();
+  assert.deepEqual(slots, ["idle"]);
+
+  cart.set(populatedCart());
+  await publisher.waitForCount(2);
+  cart.set(populatedCart(2_000));
+  await publisher.waitForCount(3);
+  assert.deepEqual(slots, ["idle", "checkout"]);
+
+  await coordinator.showPayment();
+  cart.set(emptyCart());
+  await coordinator.showSuccess(0);
+  assert.deepEqual(slots, ["idle", "checkout"]);
+
+  // 主屏明确开始下一笔：空购物车回到空闲位。
+  await coordinator.showCart();
+  assert.deepEqual(slots, ["idle", "checkout", "idle"]);
+});
+
+test("监听器抛错不影响发布，清屏回到空闲位，取消监听后不再通知", async () => {
+  const cart = new MutableCart(populatedCart());
+  const publisher = new RecordingPublisher();
+  const coordinator = new CustomerDisplayCoordinator(cart, publisher);
+  const slots: string[] = [];
+  coordinator.setAdvertSlotListener((slot) => {
+    slots.push(slot);
+    throw new Error("playback exploded");
+  });
+
+  await coordinator.initialize();
+  assert.equal(publisher.frames.length, 1);
+  assert.deepEqual(slots, ["checkout"]);
+
+  await coordinator.clearSensitiveContent();
+  assert.deepEqual(slots, ["checkout", "idle"]);
+  assert.equal(publisher.frames.length, 2);
+
+  // 取消监听后不再通知。
+  coordinator.setAdvertSlotListener(null);
+  cart.set(populatedCart());
+  await publisher.waitForCount(3);
+  assert.deepEqual(slots, ["checkout", "idle"]);
+});
+
+test("refresh 重发当前画面且不重复通知广告位", async () => {
+  const cart = new MutableCart(populatedCart());
+  const publisher = new RecordingPublisher();
+  const coordinator = new CustomerDisplayCoordinator(cart, publisher);
+  const slots: string[] = [];
+  coordinator.setAdvertSlotListener((slot) => slots.push(slot));
+  await coordinator.initialize();
+  await coordinator.refresh();
+  assert.equal(publisher.frames.length, 2);
+  assert.deepEqual(slots, ["checkout"]);
+});
+
 class MutableCart {
   private readonly listeners = new Set<() => void>();
   public subscriptions = 0;

@@ -5,6 +5,7 @@ import {
   buildCustomerDisplaySnapshot,
   CustomerDisplayPublisher,
   type CustomerDisplayFrame,
+  type CustomerDisplayProductImagePort,
 } from "./customer-display-publisher";
 
 import type {
@@ -16,6 +17,8 @@ import type {
 
 const advertisementCacheRootUri =
   "file:///cache/customer-display-ads/";
+const productImageCacheRootUri =
+  "file:///cache/customer-display-product-images/";
 
 test("客显快照按 WPF 含税总额的 1/11 计算 GST，且只投影冻结购物车白名单", () => {
   const snapshot = buildCustomerDisplaySnapshot(
@@ -42,6 +45,11 @@ test("客显快照按 WPF 含税总额的 1/11 计算 GST，且只投影冻结�
         quantity: "2",
         unitPrice: { currency: "AUD", cents: 667 },
         amount: { currency: "AUD", cents: 1_234 },
+        itemNumber: "I-1",
+        lookupCode: "930000000001",
+        // 折前 = 实收 1234 + 折扣 100；折扣率 100/1334 = 7.4962% -> 7.5。
+        grossAmount: { currency: "AUD", cents: 1_334 },
+        discountRate: "7.5",
       },
     ],
     summary: {
@@ -196,27 +204,27 @@ test("窗口变化发布失败后，下一帧仍重试尚未显示的窗口位�
   const editedFirst = changeLines(initial, [0]);
 
   await publisher.publish(frame(initial));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 
   display.failNextPublish = true;
   assert.equal((await publisher.publish(frame(editedFirst))).status, "failed");
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 
   await publisher.publish(frame(editedFirst, "payment"));
   assert.equal(latestVisibleItemStart(display), 0);
 });
 
-test("发布器初始显示末尾 12 行，新增和商品编辑只在目标离开窗口时移动", async () => {
+test("发布器初始显示末尾 6 行，新增和商品编辑只在目标离开窗口时移动", async () => {
   const display = new FakeDisplay();
   const publisher = new CustomerDisplayPublisher(display);
   const initial = cartWithItems(14);
 
   await publisher.publish(frame(initial));
-  assert.equal(latestVisibleItemStart(display), 2);
+  assert.equal(latestVisibleItemStart(display), 8);
 
   const appended = cartWithItems(15);
   await publisher.publish(frame(appended));
-  assert.equal(latestVisibleItemStart(display), 3);
+  assert.equal(latestVisibleItemStart(display), 9);
 
   const editedOffscreen = changeLines(appended, [0]);
   await publisher.publish(frame(editedOffscreen));
@@ -234,11 +242,11 @@ test("发布器多行同时变化选择顺序中最后一行，删除后显示�
   const initial = cartWithItems(20);
 
   await publisher.publish(frame(initial));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 
   const multipleChanges = changeLines(initial, [2, 15]);
   await publisher.publish(frame(multipleChanges));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 
   const removedAbove = removeLineAt(multipleChanges, 5);
   await publisher.publish(frame(removedAbove));
@@ -249,7 +257,7 @@ test("发布器多行同时变化选择顺序中最后一行，删除后显示�
     removedAbove.lines.length - 1,
   );
   await publisher.publish(frame(removedTail));
-  assert.equal(latestVisibleItemStart(display), 6);
+  assert.equal(latestVisibleItemStart(display), 12);
 });
 
 test("发布器混合新增、删除与编辑时选择当前顺序中最后一个变化项", async () => {
@@ -258,7 +266,7 @@ test("发布器混合新增、删除与编辑时选择当前顺序中最后一�
   const initial = cartWithItems(20);
 
   await publisher.publish(frame(initial));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 
   const inserted = {
     ...initial.lines[0]!,
@@ -290,7 +298,7 @@ test("发布器混合新增、删除与编辑时选择当前顺序中最后一�
   };
 
   await publisher.publish(frame(addedAndEdited));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 
   const deletedAndEdited: CartSnapshot = {
     ...addedAndEdited,
@@ -315,7 +323,7 @@ test("发布器混合新增、删除与编辑时选择当前顺序中最后一�
   };
 
   await publisher.publish(frame(deletedAndEdited));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 });
 
 test("发布器使用完整购物车判断 100 行边界变化且不突破快照上限", async () => {
@@ -325,7 +333,7 @@ test("发布器使用完整购物车判断 100 行边界变化且不突破快照
 
   await publisher.publish(frame(initial));
   assert.equal(display.snapshots.at(-1)?.items.length, 100);
-  assert.equal(latestVisibleItemStart(display), 88);
+  assert.equal(latestVisibleItemStart(display), 94);
 
   const removedFirst = removeLineAt(initial, 0);
   await publisher.publish(frame(removedFirst));
@@ -338,7 +346,7 @@ test("发布器使用完整购物车判断 100 行边界变化且不突破快照
   await boundaryPublisher.publish(frame(firstHundred));
   await boundaryPublisher.publish(frame(cartWithItems(101)));
   assert.equal(boundaryDisplay.snapshots.at(-1)?.items.length, 100);
-  assert.equal(latestVisibleItemStart(boundaryDisplay), 88);
+  assert.equal(latestVisibleItemStart(boundaryDisplay), 94);
 });
 
 test("支付和广告变化保留窗口，清车后下一单重新从末尾开始", async () => {
@@ -382,7 +390,7 @@ test("支付和广告变化保留窗口，清车后下一单重新从末尾开�
   await publisher.publish(frame(null, "idle"));
   assert.equal(latestVisibleItemStart(display), 0);
   await publisher.publish(frame(cartWithItems(20)));
-  assert.equal(latestVisibleItemStart(display), 8);
+  assert.equal(latestVisibleItemStart(display), 14);
 });
 
 test("同一 JS producer session 重建 Publisher 后继续使用更大的 revision", async () => {
@@ -429,6 +437,190 @@ test("启停和状态读取失败均返回受控结果，不把外屏故障抛�
   });
   assert.equal(await publisher.getStatus(), "failed");
 });
+
+function lineWith(
+  overrides: Partial<CartSnapshot["lines"][number]>,
+): CartSnapshot["lines"][number] {
+  return { ...cart().lines[0]!, ...overrides };
+}
+
+function itemsOf(lines: CartSnapshot["lines"][number][]) {
+  return buildCustomerDisplaySnapshot(1, {
+    mode: "cart",
+    cart: { ...cart(), lines },
+    changeCents: 0,
+    advert: null,
+  }).items;
+}
+
+test("货号与条码为空串或 null 时省略，超长时截断到契约上限", () => {
+  const [empty, nulled, long] = itemsOf([
+    lineWith({ itemNumber: "", lookupCode: "   " }),
+    lineWith({ itemNumber: null }),
+    lineWith({ itemNumber: "N".repeat(80), lookupCode: "B".repeat(70) }),
+  ]);
+  assert.equal("itemNumber" in empty!, false);
+  assert.equal("lookupCode" in empty!, false);
+  assert.equal("itemNumber" in nulled!, false);
+  assert.equal(nulled?.lookupCode, "930000000001");
+  assert.equal(long?.itemNumber?.length, 64);
+  assert.equal(long?.lookupCode?.length, 64);
+});
+
+test("折扣行提供折前金额与折扣率；无折扣、退货行和折扣率归零时都不提供", () => {
+  const zero = { currency: "AUD" as const, cents: 0 };
+  const [none, ten, half, full, tiny, tinyBig, sale, negativeGross] = itemsOf([
+    lineWith({ discount: zero, actualAmount: { currency: "AUD", cents: 1_000 } }),
+    // 折前 1000，折扣 100 -> 10%
+    lineWith({
+      discount: { currency: "AUD", cents: 100 },
+      actualAmount: { currency: "AUD", cents: 900 },
+    }),
+    // 折前 800，折扣 100 -> 12.5%
+    lineWith({
+      discount: { currency: "AUD", cents: 100 },
+      actualAmount: { currency: "AUD", cents: 700 },
+    }),
+    // 全额折扣：实收 0，折前 500 -> 100%
+    lineWith({
+      discount: { currency: "AUD", cents: 500 },
+      actualAmount: zero,
+    }),
+    // 0.01%：1 / 10000
+    lineWith({
+      discount: { currency: "AUD", cents: 1 },
+      actualAmount: { currency: "AUD", cents: 9_999 },
+    }),
+    // 0.001% 四舍五入为 0 -> 省略
+    lineWith({
+      discount: { currency: "AUD", cents: 1 },
+      actualAmount: { currency: "AUD", cents: 99_999 },
+    }),
+    // 1/3 -> 33.33（保留两位，半数进位）
+    lineWith({
+      discount: { currency: "AUD", cents: 100 },
+      actualAmount: { currency: "AUD", cents: 200 },
+    }),
+    // 退货行（实收为负）若带折扣，折前金额符号与实收一致
+    lineWith({
+      discount: { currency: "AUD", cents: 100 },
+      actualAmount: { currency: "AUD", cents: -900 },
+    }),
+  ]);
+
+  assert.equal(none?.grossAmount, undefined);
+  assert.equal(none?.discountRate, undefined);
+  assert.deepEqual(ten?.grossAmount, { currency: "AUD", cents: 1_000 });
+  assert.equal(ten?.discountRate, "10");
+  assert.deepEqual(half?.grossAmount, { currency: "AUD", cents: 800 });
+  assert.equal(half?.discountRate, "12.5");
+  assert.deepEqual(full?.grossAmount, { currency: "AUD", cents: 500 });
+  assert.equal(full?.discountRate, "100");
+  assert.equal(tiny?.discountRate, "0.01");
+  assert.equal(tinyBig?.grossAmount, undefined);
+  assert.equal(tinyBig?.discountRate, undefined);
+  assert.equal(sale?.discountRate, "33.33");
+  assert.deepEqual(negativeGross?.grossAmount, { currency: "AUD", cents: -1_000 });
+  assert.equal(negativeGross?.discountRate, "10");
+
+  // 真实退货行：折扣恒为 0，实收为负，不应有折扣字段。
+  const [returned] = itemsOf([
+    lineWith({
+      kind: "return",
+      discount: zero,
+      actualAmount: { currency: "AUD", cents: -1_334 },
+    }),
+  ]);
+  assert.equal("grossAmount" in returned!, false);
+  assert.equal("discountRate" in returned!, false);
+});
+
+class FakeProductImages implements CustomerDisplayProductImagePort {
+  public readonly peeked: string[] = [];
+  public readonly images = new Map<string, string>();
+  public throwOnPeek = false;
+  public peek(line: { productCode: string; lookupCode: string }): string | null {
+    this.peeked.push(line.productCode);
+    if (this.throwOnPeek) throw new Error("resolver exploded");
+    return this.images.get(line.productCode) ?? null;
+  }
+}
+
+test("商品缩略图只为可见窗口取图，本地地址进入快照且新增图片会改变指纹", async () => {
+  const display = new FakeDisplay();
+  const images = new FakeProductImages();
+  const publisher = new CustomerDisplayPublisher(display, {
+    productImageCacheRootUri,
+    productImageResolver: images,
+  });
+  const source = cartWithItems(10);
+
+  const first = await publisher.publish(frame(source));
+  assert.equal(first.status, "published");
+  // 10 行、窗口 6：起点 4，只对 P-5..P-10 取图。
+  assert.deepEqual(images.peeked.slice(0, 6), [
+    "P-5",
+    "P-6",
+    "P-7",
+    "P-8",
+    "P-9",
+    "P-10",
+  ]);
+  assert.equal(
+    display.snapshots.at(-1)?.items.every((item) => item.imageUri === undefined),
+    true,
+  );
+
+  // 图片就绪后同一帧重发：指纹变化，不能被去重吞掉。
+  images.images.set("P-6", `${productImageCacheRootUri}abc.jpg`);
+  const second = await publisher.publish(frame(source));
+  assert.equal(second.status, "published");
+  const published = display.snapshots.at(-1)!;
+  assert.equal(published.items[5]?.imageUri, `${productImageCacheRootUri}abc.jpg`);
+  assert.equal(published.items[4]?.imageUri, undefined);
+  // 窗口外（P-1）即便有图也不带。
+  assert.equal(published.items[0]?.imageUri, undefined);
+
+  // 再发一次没有变化 -> unchanged。
+  assert.equal((await publisher.publish(frame(source))).status, "unchanged");
+});
+
+test("商品缩略图解析器异常、越界地址或缺少根目录时按无图处理，不影响发布", async () => {
+  const source = cartWithItems(2);
+
+  const display = new FakeDisplay();
+  const images = new FakeProductImages();
+  const publisher = new CustomerDisplayPublisher(display, {
+    productImageCacheRootUri,
+    productImageResolver: images,
+  });
+  images.throwOnPeek = true;
+  assert.equal((await publisher.publish(frame(source))).status, "published");
+  assert.equal(display.snapshots.at(-1)?.items[0]?.imageUri, undefined);
+
+  images.throwOnPeek = false;
+  images.images.set("P-1", "file:///private/other/place.jpg");
+  images.images.set("P-2", "https://example.com/p.jpg");
+  assert.equal(
+    (await publisher.publish(frame(source, "payment"))).status,
+    "published",
+  );
+  assert.equal(
+    display.snapshots.at(-1)?.items.every((item) => item.imageUri === undefined),
+    true,
+  );
+
+  const noRootDisplay = new FakeDisplay();
+  const noRootImages = new FakeProductImages();
+  noRootImages.images.set("P-1", `${productImageCacheRootUri}abc.jpg`);
+  const noRootPublisher = new CustomerDisplayPublisher(noRootDisplay, {
+    productImageResolver: noRootImages,
+  });
+  await noRootPublisher.publish(frame(source));
+  assert.equal(noRootDisplay.snapshots.at(-1)?.items[0]?.imageUri, undefined);
+  assert.deepEqual(noRootImages.peeked, []);
+});
+
 
 class FakeDisplay implements ExternalCustomerDisplayPort {
   public failNextPublish = false;

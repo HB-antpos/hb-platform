@@ -41,7 +41,9 @@ jest.mock("../peripherals/attendance-security/native", () => ({
 }));
 jest.mock("../peripherals/customer-display/native", () => ({
   customerDisplayAdvertisementCacheRootUri: "file:///test",
+  customerDisplayProductImageCacheRootUri: "file:///test-product-images",
   ExpoAdvertisementFileSystem: class ExpoAdvertisementFileSystem {},
+  ExpoProductImageFileSystem: class ExpoProductImageFileSystem {},
   externalDisplay: {},
 }));
 jest.mock("./expo-printer-adapter", () => ({

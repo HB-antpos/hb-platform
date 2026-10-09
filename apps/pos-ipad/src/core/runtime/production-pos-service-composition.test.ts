@@ -13,7 +13,11 @@ import {
 } from "../../features/catalog/hbpos-catalog-remote";
 import { CATALOG_DOWNLOAD_PERMISSION } from "@hb/pos-domain/features/catalog/maintenance/catalog-maintenance-authorization";
 import type { CashCheckoutResult } from "../../features/checkout/cash";
-import type { CustomerDisplayAdvertisementCachePort } from "../../features/customer-display";
+import type {
+  CustomerDisplayAdvertisementCachePort,
+  ProductImageCacheFile,
+  ProductImageCacheFileSystemPort,
+} from "../../features/customer-display";
 import {
   HOLD_ORDER_PERMISSION,
   RECALL_LIST_PERMISSION,
@@ -4383,6 +4387,206 @@ test("可信收银员登录后缓存当前门店广告，并只向客显发布�
   services.customerDisplay.stopAdvertisements();
 });
 
+test("广告位随购物车变化：空闲播横版，加商品后立即换成竖版", async () => {
+  const display = new RecordingExternalDisplay();
+  const adItem = (id: string, sortOrder: number, orientation: string) => ({
+    id,
+    title: id,
+    description: null,
+    mediaType: "image",
+    mediaUrl: `https://cdn.example.com/${id}.png`,
+    thumbnailUrl: null,
+    objectKey: `ads/${id}.png`,
+    originalFileName: `${id}.png`,
+    contentType: "image/png",
+    fileSize: 1_024,
+    effectiveStart: "2026-07-27T00:00:00.000Z",
+    effectiveEnd: "2026-07-29T00:00:00.000Z",
+    sortOrder,
+    orientation,
+  });
+  const transport: HbposTransport = {
+    async request<T>() {
+      return {
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            storeCode: "S001",
+            generatedAt: "2026-07-28T00:00:00.000Z",
+            items: [adItem("land", 0, "landscape"), adItem("port", 1, "portrait")],
+          },
+        } as T,
+      };
+    },
+  };
+  const advertisementCache: CustomerDisplayAdvertisementCachePort = {
+    async cache(items) {
+      return items.map((item) => ({
+        ...item,
+        localUri: `file:///cache/customer-display/${item.id}.png`,
+      }));
+    },
+  };
+  const services = createTestComposition(databaseFor([]), {
+    advertisementCache,
+    customerDisplayAdvertisementCacheRootUri:
+      "file:///cache/customer-display/",
+    externalDisplay: display,
+    transport,
+  });
+  const waitForAdvert = async (name: string) => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (display.snapshots.at(-1)?.advert?.localUri.endsWith(`/${name}.png`)) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.fail(`advert ${name} was not published`);
+  };
+
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  await waitForAdvert("land");
+
+  const sales = services.sales.createPresenter();
+  sales.setQuery("930000000001");
+  assert.equal(await sales.addLookupCode(), true);
+  await waitForAdvert("port");
+  assert.equal(display.snapshots.at(-1)?.mode, "cart");
+
+  if (services.customerDisplay.status !== "available") {
+    assert.fail("customer display should be available");
+  }
+  services.customerDisplay.stopAdvertisements();
+  sales.destroy();
+});
+
+test("客显商品缩略图：先发无图快照，下载就绪后刷新为本地 file URI", async () => {
+  const display = new RecordingExternalDisplay();
+  const files = new MemoryProductImageFiles();
+  const gate = deferredPromise<void>();
+  files.beforeDownload = () => gate.promise;
+  const services = createTestComposition(
+    databaseFor([], { baseProductImage: "/media/milk.jpg" }),
+    {
+      externalDisplay: display,
+      customerDisplayProductImages: {
+        rootUri: PRODUCT_IMAGE_ROOT,
+        files,
+        apiBaseUrl: "https://api.example.com/",
+      },
+      sha256Hex: async (material) =>
+        createHash("sha256").update(material).digest("hex"),
+    },
+  );
+
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const sales = services.sales.createPresenter();
+  sales.setQuery("930000000001");
+  assert.equal(await sales.addLookupCode(), true);
+  await display.waitForCount(2);
+  assert.equal(display.snapshots.at(-1)?.items[0]?.imageUri, undefined);
+
+  const countBeforeReady = display.snapshots.length;
+  gate.resolve();
+  await display.waitForCount(countBeforeReady + 1);
+  const withImage = display.snapshots.at(-1);
+  assert.equal(withImage?.mode, "cart");
+  assert.match(
+    withImage?.items[0]?.imageUri ?? "",
+    new RegExp(`^${PRODUCT_IMAGE_ROOT}[a-f0-9]{64}\\.jpg$`, "u"),
+  );
+  assert.deepEqual(files.downloads, ["https://api.example.com/media/milk.jpg"]);
+  assert.doesNotMatch(
+    JSON.stringify(withImage),
+    /api\.example\.com|cashier-session-secret/,
+  );
+
+  sales.destroy();
+});
+
+test("客显商品缩略图：锁屏清屏后才完成的下载不会把购物车重新推回外屏", async () => {
+  const display = new RecordingExternalDisplay();
+  const invalidationCapture: { listener?: () => void } = {};
+  const files = new MemoryProductImageFiles();
+  const gate = deferredPromise<void>();
+  files.beforeDownload = () => gate.promise;
+  const services = createTestComposition(
+    databaseFor([], { baseProductImage: "https://cdn.example.com/milk.png" }),
+    {
+      externalDisplay: display,
+      captureInvalidation(listener) {
+        invalidationCapture.listener = listener;
+      },
+      customerDisplayProductImages: {
+        rootUri: PRODUCT_IMAGE_ROOT,
+        files,
+        apiBaseUrl: "https://api.example.com/",
+      },
+      sha256Hex: async (material) =>
+        createHash("sha256").update(material).digest("hex"),
+    },
+  );
+
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const sales = services.sales.createPresenter();
+  sales.setQuery("930000000001");
+  assert.equal(await sales.addLookupCode(), true);
+  await display.waitForCount(2);
+
+  const countBeforeLock = display.snapshots.length;
+  invalidationCapture.listener?.();
+  await display.waitForCount(countBeforeLock + 1);
+  const cleared = display.snapshots.at(-1);
+  assert.equal(cleared?.mode, "idle");
+
+  gate.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(display.snapshots.at(-1), cleared, "锁屏后不应再有新快照");
+  assert.equal(files.downloads.length, 1);
+  sales.destroy();
+});
+
+test("客显商品缩略图：目录图片地址不可信或下载内容不是图片时快照保持无图", async () => {
+  const display = new RecordingExternalDisplay();
+  const files = new MemoryProductImageFiles();
+  files.content = new TextEncoder().encode("<html>not an image</html>");
+  const services = createTestComposition(
+    databaseFor([], { baseProductImage: "https://cdn.example.com/milk.png" }),
+    {
+      externalDisplay: display,
+      customerDisplayProductImages: {
+        rootUri: PRODUCT_IMAGE_ROOT,
+        files,
+        apiBaseUrl: "https://api.example.com/",
+      },
+      sha256Hex: async (material) =>
+        createHash("sha256").update(material).digest("hex"),
+    },
+  );
+
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const sales = services.sales.createPresenter();
+  sales.setQuery("930000000001");
+  assert.equal(await sales.addLookupCode(), true);
+  await display.waitForCount(2);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(files.downloads.length, 1);
+  assert.equal(
+    display.snapshots.every((snapshot) =>
+      snapshot.items.every((item) => item.imageUri === undefined),
+    ),
+    true,
+  );
+  assert.deepEqual(files.uris(), []);
+  sales.destroy();
+});
+
 test("本地目录摘要只向具备下载权限的可信同店收银员公开", async () => {
   const summary: ActiveCatalogMetadata = {
     snapshotId: "catalog-active-1",
@@ -5688,6 +5892,7 @@ function createTestComposition(
     forwardSharedHeldOrderClaimsMine?: boolean;
     advertisementCache?: CustomerDisplayAdvertisementCachePort;
     customerDisplayAdvertisementCacheRootUri?: string;
+    customerDisplayProductImages?: ProductImageCompositionOptions;
     transport?: HbposTransport;
     onPrint?(jobId: string, bytes: Uint8Array): void;
     waitForPrint?(): Promise<void>;
@@ -5777,6 +5982,9 @@ function createTestComposition(
           customerDisplayAdvertisementCacheRootUri:
             options.customerDisplayAdvertisementCacheRootUri,
         }
+      : {}),
+    ...(options.customerDisplayProductImages
+      ? { customerDisplayProductImages: options.customerDisplayProductImages }
       : {}),
     cashierAuthentication: {
       async login(request) {
@@ -6109,6 +6317,64 @@ async function catalogDownloadTransport(
   };
 }
 
+const PRODUCT_IMAGE_ROOT = "file:///cache/customer-display-product-images/";
+type ProductImageCompositionOptions = NonNullable<
+  Parameters<typeof createProductionPosRuntimeServices>[0]["customerDisplayProductImages"]
+>;
+
+function deferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** 内存版商品图文件系统：download 可被门闩阻塞，内容默认是合法 JPEG 头。 */
+class MemoryProductImageFiles implements ProductImageCacheFileSystemPort {
+  public readonly downloads: string[] = [];
+  public beforeDownload: (() => Promise<void>) | null = null;
+  public content: Uint8Array = Uint8Array.from([
+    0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 1, 2, 3, 4,
+  ]);
+  private readonly store = new Map<string, Uint8Array>();
+
+  public uris(): string[] {
+    return [...this.store.keys()];
+  }
+
+  public async ensureDirectory(): Promise<void> {}
+
+  public async getSize(uri: string): Promise<number | null> {
+    return this.store.get(uri)?.length ?? null;
+  }
+
+  public async download(remoteUrl: string, destinationUri: string): Promise<void> {
+    this.downloads.push(remoteUrl);
+    await this.beforeDownload?.();
+    this.store.set(destinationUri, this.content);
+  }
+
+  public async readHeader(uri: string, length: number): Promise<Uint8Array | null> {
+    return this.store.get(uri)?.slice(0, length) ?? null;
+  }
+
+  public async move(sourceUri: string, destinationUri: string): Promise<void> {
+    const data = this.store.get(sourceUri);
+    if (!data) throw new Error("missing source");
+    this.store.delete(sourceUri);
+    this.store.set(destinationUri, data);
+  }
+
+  public async deleteIfExists(uri: string): Promise<void> {
+    this.store.delete(uri);
+  }
+
+  public async listFiles(): Promise<readonly ProductImageCacheFile[]> {
+    return [...this.store.keys()].map((uri) => ({ uri, modifiedAtMs: null }));
+  }
+}
+
 class RecordingExternalDisplay implements ExternalCustomerDisplayPort {
   public disableCalls = 0;
   public failedPublishCalls = 0;
@@ -6264,6 +6530,8 @@ function databaseFor(
     onActivePromotionsLoad?(storeCode: string): void;
     /** 提供时用真实设置仓库（内存连接）代替简易替身，验证下发资料的原子合并语义。 */
     receiptSettingsRepository?: PosSettingsRepository;
+    /** 基础目录商品（930000000001）的图片地址；缺省为无图。 */
+    baseProductImage?: string | null;
   }> = {},
 ): PosDatabase {
   let activeCatalogMetadata = options.activeCatalogMetadata ?? null;
@@ -6294,7 +6562,7 @@ function databaseFor(
           taxRateBasisPoints: 1_000,
           updatedAtIso: null,
           rowVersion: "1",
-          productImage: null,
+          productImage: options.baseProductImage ?? null,
           discountRate: null,
           isSpecialProduct: false,
         }

@@ -69,6 +69,24 @@ test("已存在同尺寸文件直接复用；尺寸不符或下载失败只跳�
   assert.equal(files.has(`${finalUri}.download`), false);
 });
 
+test("缓存结果透传 orientation，缺省项保持缺省", async () => {
+  const hash = "d".repeat(64);
+  const files = new MemoryAdvertisementFiles([
+    [`file:///cache/${hash}.png`, 1_024],
+  ]);
+  const cache = new CustomerDisplayAdvertisementCache({
+    rootUri: "file:///cache/",
+    files,
+    sha256Hex: async () => hash,
+  });
+  const [withOrientation] = await cache.cache([
+    advert("image", 1_024, { orientation: "portrait" }),
+  ]);
+  assert.equal(withOrientation?.orientation, "portrait");
+  const [legacy] = await cache.cache([advert("image", 1_024)]);
+  assert.equal(legacy?.orientation, undefined);
+});
+
 class MemoryAdvertisementFiles
   implements AdvertisementCacheFileSystemPort
 {
