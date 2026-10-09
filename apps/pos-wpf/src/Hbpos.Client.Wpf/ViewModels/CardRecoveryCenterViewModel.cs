@@ -382,7 +382,7 @@ public sealed partial class CardRecoveryCenterViewModel : ObservableObject, IDis
     public string SelectedCashierText => ValueOrNone(SelectedAttempt?.CashierId);
     public string SelectedTimeText => SelectedAttempt is null
         ? NoneText
-        : SelectedAttempt.UpdatedAt.ToString("g", GetCulture());
+        : SelectedAttempt.UpdatedAt.ToLocalTime().ToString("g", GetCulture());
     public string SelectedSessionText => ValueOrNone(
         Normalize(SelectedAttempt?.SessionId) ?? Normalize(SelectedAttempt?.CheckoutId));
     public string SelectedTxnText => ValueOrNone(

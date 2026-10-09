@@ -1347,7 +1347,8 @@ public sealed class CardRecoveryCenterViewModelTests
         Assert.Equal("Needs supervisor review", viewModel.SelectedStatusText);
         Assert.Equal("AU$12.34", viewModel.SelectedAmountText);
         Assert.Equal("CASHIER-1", viewModel.SelectedCashierText);
-        Assert.Equal(Now.ToString("g", CultureInfo.GetCultureInfo("en-US")), viewModel.SelectedTimeText);
+        // 界面按本机时区显示时间（数据库里存的是带偏移量的时间）。
+        Assert.Equal(Now.ToLocalTime().ToString("g", CultureInfo.GetCultureInfo("en-US")), viewModel.SelectedTimeText);
         Assert.Equal("CHECKOUT-1", viewModel.SelectedSessionText);
         Assert.Equal("PAYMENT-1", viewModel.SelectedTxnText);
         Assert.Equal("00", viewModel.SelectedResponseCodeText);

@@ -90,13 +90,13 @@ public sealed partial class CardRecoveryCenterViewModel
 
     public string StepSubmittedTimeText => SelectedAttempt is null
         ? NoneText
-        : SelectedAttempt.CreatedAt.ToString("T", GetCulture());
+        : SelectedAttempt.CreatedAt.ToLocalTime().ToString("T", GetCulture());
     public string StepCurrentTimeText => SelectedAttempt is null
         ? NoneText
         : string.Format(
             GetCulture(),
             T("cardRecovery.v2.step.since", "since {0}"),
-            SelectedAttempt.UpdatedAt.ToString("T", GetCulture()));
+            SelectedAttempt.UpdatedAt.ToLocalTime().ToString("T", GetCulture()));
     public bool IsFinalStepDone => SelectedAttempt is { IsOpen: false } attempt && !IsFailed(attempt);
     public bool IsFinalStepFailed => SelectedAttempt is { IsOpen: false } attempt && IsFailed(attempt);
     public bool IsFinalStepPending => SelectedAttempt is { IsOpen: true };
@@ -107,7 +107,7 @@ public sealed partial class CardRecoveryCenterViewModel
             : T("cardRecovery.v2.step.paymentCompleted", "Payment completed");
     public string StepFinalTimeText => IsFinalStepPending
         ? T("cardRecovery.v2.step.waiting", "Waiting")
-        : SelectedAttempt?.UpdatedAt.ToString("T", GetCulture()) ?? NoneText;
+        : SelectedAttempt?.UpdatedAt.ToLocalTime().ToString("T", GetCulture()) ?? NoneText;
 
     // ---------- 人工核对面板 ----------
 

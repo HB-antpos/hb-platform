@@ -56,8 +56,8 @@ public sealed partial class CardRecoveryCenterViewModel
     public string SelectedOrderText => OrderReference(SelectedAttempt);
     public bool IsHistorySelection => SelectedAttempt is { IsOpen: false };
     public IReadOnlyList<CardRecoveryHistoryEvent> SelectedHistory => SelectedAttempt is { } item
-        ? [new(item.CreatedAt.ToString("G", GetCulture()), T("cardRecovery.workspace.created", "Transaction recorded")),
-           new(item.UpdatedAt.ToString("G", GetCulture()), MapStatus(item.Status))] : [];
+        ? [new(item.CreatedAt.ToLocalTime().ToString("G", GetCulture()), T("cardRecovery.workspace.created", "Transaction recorded")),
+           new(item.UpdatedAt.ToLocalTime().ToString("G", GetCulture()), MapStatus(item.Status))] : [];
 
     private string LabelCount(string key, int count) => $"{T("cardRecovery.workspace." + key, key)}  {count}";
     private static bool IsFailed(CardRecoveryQueueItem item) => !item.IsOpen &&
