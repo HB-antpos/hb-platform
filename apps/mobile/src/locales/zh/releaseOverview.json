@@ -1,0 +1,75 @@
+{
+  "legend": {
+    "active": "已激活",
+    "pending": "待处理",
+    "inactive": "未启用",
+    "error": "读取失败"
+  },
+  "terminals": {
+    "mobile": "员工端",
+    "ipad": "iPad POS",
+    "handheld": "手持 POS",
+    "wpf": "WPF 收银端"
+  },
+  "terminalSubtitles": {
+    "mobile": "iOS · Android · OTA",
+    "ipad": "iOS · OTA",
+    "handheld": "Android · iOS · OTA",
+    "wpf": "Windows 安装包 · 生产 / 预览"
+  },
+  "lanes": {
+    "mobile-ios-native": "iOS 原生",
+    "mobile-android-native": "Android 原生",
+    "mobile-ios-ota": "OTA · iOS",
+    "mobile-android-ota": "OTA · Android",
+    "ipad-ios-native": "iOS 原生",
+    "ipad-ios-ota": "OTA 热更新",
+    "handheld-android-native": "Android 原生",
+    "handheld-ios-native": "iOS 原生",
+    "handheld-android-ota": "OTA · Android",
+    "handheld-ios-ota": "OTA · iOS",
+    "wpf-production": "生产通道",
+    "wpf-preview": "预览通道"
+  },
+  "modes": {
+    "optional": "可选更新",
+    "minimum": "最低版本强制",
+    "force": "强制更新"
+  },
+  "scope": {
+    "all": "全部设备",
+    "stores": "{count} 个分店",
+    "devices": "{count} 台机器"
+  },
+  "minimum": "最低 {value}",
+  "noTarget": "未选择目标",
+  "notEnabled": "未启用",
+  "laneLoading": "读取中…",
+  "laneFailed": "读取失败，下拉刷新重试",
+  "attention": {
+    "title": "待处理 · {count}",
+    "pendingRelease": "{latest} 等 {count} 个新版本未投放",
+    "pendingReleaseDesc": "已登记但当前策略仍指向旧版本，确认后在线路内激活",
+    "bindingInvalid": "策略绑定失效",
+    "bindingInvalidDesc": "设备会拒绝当前绑定，需重新选择候选版本",
+    "partialRollout": "灰度中：仅 {scope}",
+    "partialRolloutDesc": "确认无误后可扩大到全部范围",
+    "go": "去处理"
+  },
+  "statusTitle": "投放状态",
+  "recent": {
+    "title": "最近策略变更",
+    "empty": "暂无策略变更记录",
+    "unknownOperator": "未知操作人"
+  },
+  "errors": {
+    "allFailed": "投放状态读取失败",
+    "allFailedHint": "请检查网络后重试。",
+    "retry": "重试",
+    "partialFailed": "部分线路读取失败，下拉可刷新重试。"
+  },
+  "a11y": {
+    "openLane": "{lane}，{status}，{target}，进入线路管理",
+    "openAttention": "{lane}：{title}，去处理"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "legend": {
+    "active": "Active",
+    "pending": "Needs action",
+    "inactive": "Off",
+    "error": "Failed to load"
+  },
+  "terminals": {
+    "mobile": "Staff app",
+    "ipad": "iPad POS",
+    "handheld": "Handheld POS",
+    "wpf": "WPF POS"
+  },
+  "terminalSubtitles": {
+    "mobile": "iOS · Android · OTA",
+    "ipad": "iOS · OTA",
+    "handheld": "Android · iOS · OTA",
+    "wpf": "Windows installer · Production / Preview"
+  },
+  "lanes": {
+    "mobile-ios-native": "iOS native",
+    "mobile-android-native": "Android native",
+    "mobile-ios-ota": "OTA · iOS",
+    "mobile-android-ota": "OTA · Android",
+    "ipad-ios-native": "iOS native",
+    "ipad-ios-ota": "OTA update",
+    "handheld-android-native": "Android native",
+    "handheld-ios-native": "iOS native",
+    "handheld-android-ota": "OTA · Android",
+    "handheld-ios-ota": "OTA · iOS",
+    "wpf-production": "Production",
+    "wpf-preview": "Preview"
+  },
+  "modes": {
+    "optional": "Optional",
+    "minimum": "Minimum enforced",
+    "force": "Forced"
+  },
+  "scope": {
+    "all": "All devices",
+    "stores": "{count} store(s)",
+    "devices": "{count} device(s)"
+  },
+  "minimum": "Min {value}",
+  "noTarget": "No target",
+  "notEnabled": "Off",
+  "laneLoading": "Loading…",
+  "laneFailed": "Failed to load. Pull to refresh.",
+  "attention": {
+    "title": "Needs action · {count}",
+    "pendingRelease": "{count} newer version(s) not rolled out, latest {latest}",
+    "pendingReleaseDesc": "Registered, but the policy still targets an older version. Activate it in the lane when ready.",
+    "bindingInvalid": "Policy binding invalid",
+    "bindingInvalidDesc": "Devices will reject the current binding. Pick a new candidate.",
+    "partialRollout": "Staged rollout: {scope} only",
+    "partialRolloutDesc": "Expand to all once verified.",
+    "go": "Review"
+  },
+  "statusTitle": "Rollout status",
+  "recent": {
+    "title": "Recent policy changes",
+    "empty": "No policy changes yet",
+    "unknownOperator": "Unknown"
+  },
+  "errors": {
+    "allFailed": "Couldn't load rollout status",
+    "allFailedHint": "Check your connection and try again.",
+    "retry": "Retry",
+    "partialFailed": "Some lanes failed to load. Pull to refresh."
+  },
+  "a11y": {
+    "openLane": "{lane}, {status}, {target}, open lane",
+    "openAttention": "{lane}: {title}, review"
+  }
+}

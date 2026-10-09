@@ -1,7 +1,19 @@
 {
-  "title": "App 下载与更新",
-  "subtitle": "安装链接 · 版本登记 · 更新策略",
+  "title": "版本发布中心",
+  "subtitle": "安装包 · OTA 热更新 · WPF 收银端 · 更新策略",
   "openWeb": "打开 Web 管理页",
+  "terminalNav": "终端",
+  "terminals": {
+    "overview": "投放总览",
+    "mobile": "员工端",
+    "ipad": "iPad POS",
+    "handheld": "手持 POS",
+    "wpf": "WPF 收银端"
+  },
+  "wpfChannels": {
+    "production": "生产",
+    "preview": "预览"
+  },
   "apps": {
     "mobile": "员工端",
     "ipad": "POS iPad",

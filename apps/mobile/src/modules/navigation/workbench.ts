@@ -80,8 +80,8 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "employee-profile-review", labelKey: "routes.employeeProfileReview", icon: "account-check-outline" },
       { routeName: "device-management", labelKey: "routes.deviceManagement", icon: "cellphone-cog" },
       { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },
-      { routeName: "app-downloads", labelKey: "routes.appDownloads", icon: "download-outline" },
-      { routeName: "wpf-versions", labelKey: "routes.wpfVersions", icon: "microsoft-windows" },
+      // 版本发布中心：App 安装包 / OTA 与 WPF 收银端合并为一页；wpf-versions 路由仅保留为跳转到其 WPF 终端的旧入口。
+      { routeName: "app-downloads", labelKey: "routes.appDownloads", icon: "rocket-launch-outline" },
     ],
   },
 ];
