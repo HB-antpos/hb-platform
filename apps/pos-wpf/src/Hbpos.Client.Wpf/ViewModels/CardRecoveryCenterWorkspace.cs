@@ -45,7 +45,9 @@ public sealed partial class CardRecoveryCenterViewModel
     public string ResolvedCountText => LabelCount("resolved", _history.Count(x => !x.IsOpen && !IsFailed(x)));
     public string ReviewCountText => LabelCount("review", _history.Count(IsReview));
     public string LastRefreshText => _lastRefresh?.ToString("G", GetCulture()) ?? NoneText;
-    public string ConfirmProcessedText => IsRefundSelection
+    public string ConfirmProcessedText => IsSettlementRejected(SelectedAttempt)
+        ? T("cardRecovery.settlement.action.refundedOther", "Refunded by other means")
+        : IsRefundSelection
         ? T("cardRecovery.refund.action.confirmRefunded", "Confirmed refunded")
         : T("cardRecovery.center.action.confirmPaid", "Confirmed paid");
     public string ConfirmNotProcessedText => IsRefundSelection
@@ -62,7 +64,7 @@ public sealed partial class CardRecoveryCenterViewModel
     private string LabelCount(string key, int count) => $"{T("cardRecovery.workspace." + key, key)}  {count}";
     private static bool IsFailed(CardRecoveryQueueItem item) => !item.IsOpen &&
         item.Status is "Declined" or "Cancelled" or "Canceled" or "Failed" or "Abandoned" or "TimedOut";
-    private static bool IsReview(CardRecoveryQueueItem item) => item.IsOpen && item.Status is "RequiresReview" or "Unknown";
+    private static bool IsReview(CardRecoveryQueueItem item) => item.IsOpen && item.Status is "RequiresReview" or "Unknown" or SquarePaymentRecoveryService.SettlementRejectedStatus;
     private IEnumerable<CardRecoveryQueueItem> FilteredHistory() => _history.Where(item =>
         (_category switch { "failed" => IsFailed(item), "resolved" => !item.IsOpen && !IsFailed(item), "review" => IsReview(item), _ => item.IsOpen }) &&
         (ChannelIndex == 0 || item.Processor == (ChannelIndex == 1 ? CardProcessorKind.Linkly : CardProcessorKind.Square)) &&

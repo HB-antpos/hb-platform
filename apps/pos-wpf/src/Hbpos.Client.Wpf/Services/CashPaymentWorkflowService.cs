@@ -1668,9 +1668,14 @@ public sealed class CashPaymentWorkflowService(
         var reference = isRefund
             ? CardRefundReference.Format(authorization.Reference, referenceText!)
             : authorization.Reference;
+        // Square 退款已受理但仍在结算（PENDING）：退货照常完成，付款页提示“已受理、无需刷卡、通常几小时内完成”。
+        var isAcceptedPendingSquareRefund = isRefund &&
+            string.Equals(authorization.StatusKey, ConfiguredCardTerminalClient.SquareRefundAcceptedStatusKey, StringComparison.Ordinal);
         var successStatusKey = authorization.FallbackSucceeded
             ? "payment.linklyFallback.succeeded"
-            : approvedStatusKey;
+            : isAcceptedPendingSquareRefund
+                ? ConfiguredCardTerminalClient.SquareRefundAcceptedStatusKey
+                : approvedStatusKey;
         var successStatusMessage = authorization.FallbackSucceeded
             ? string.Format(
                 CultureInfo.CurrentCulture,
@@ -1678,7 +1683,9 @@ public sealed class CashPaymentWorkflowService(
                 FormatLinklyModeDisplayName(authorization.RequestedConnectionMode),
                 FormatLinklyModeDisplayName(authorization.ActualConnectionMode),
                 T("payment.linklyFallback.promotePrimary"))
-            : null;
+            : isAcceptedPendingSquareRefund
+                ? authorization.Message
+                : null;
 
         return PaymentTenderAttemptResult.Success(
             new PaymentTender(

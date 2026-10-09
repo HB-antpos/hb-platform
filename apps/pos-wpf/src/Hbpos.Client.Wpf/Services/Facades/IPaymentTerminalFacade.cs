@@ -9,4 +9,5 @@ public interface IPaymentTerminalFacade
     ICardPaymentRecoveryService? CardPaymentRecoveryService { get; }
     ICardRecoveryResultDialogService? CardRecoveryResultDialogService { get; }
     ILinklyFallbackPromptCoordinator? LinklyFallbackPromptCoordinator { get; }
+    ISquareRefundSettlementService? SquareRefundSettlementService => null;
 }

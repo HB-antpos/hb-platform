@@ -9,6 +9,7 @@ public sealed class PaymentTerminalFacade : IPaymentTerminalFacade
     public ICardPaymentRecoveryService? CardPaymentRecoveryService { get; }
     public ICardRecoveryResultDialogService? CardRecoveryResultDialogService { get; }
     public ILinklyFallbackPromptCoordinator? LinklyFallbackPromptCoordinator { get; }
+    public ISquareRefundSettlementService? SquareRefundSettlementService { get; }
 
     public PaymentTerminalFacade(
         IVoucherApiClient? voucherApiClient,
@@ -17,8 +18,10 @@ public sealed class PaymentTerminalFacade : IPaymentTerminalFacade
         ILinklyTerminalDialogPresenter? linklyTerminalDialogPresenter,
         ICardPaymentRecoveryService? cardPaymentRecoveryService,
         ICardRecoveryResultDialogService? cardRecoveryResultDialogService,
-        ILinklyFallbackPromptCoordinator? linklyFallbackPromptCoordinator)
+        ILinklyFallbackPromptCoordinator? linklyFallbackPromptCoordinator,
+        ISquareRefundSettlementService? squareRefundSettlementService = null)
     {
+        SquareRefundSettlementService = squareRefundSettlementService;
         VoucherApiClient = voucherApiClient;
         CardTerminalClient = cardTerminalClient;
         CardTerminalSetupService = cardTerminalSetupService;
