@@ -6494,7 +6494,7 @@ BEGIN SELECT RAISE(ABORT, 'RETURN_SUPERVISOR_RESOLUTION_IMMUTABLE'); END;
 `;
 
 /**
- * M51 支付恢复中心（与 iPad M45 + M46 等价）：异常刷卡订单从当前收银车移交后仍以原 order/attempt
+ * M51 支付恢复中心（与平板端 M45 + M46 等价）：异常刷卡订单从当前收银车移交后仍以原 order/attempt
  * 为唯一身份。case 保存当前投影，action 保存不可变人工判定历史，人工收款只经专用绑定表生成
  * MANUAL 来源 tender，不能覆盖 provider 账本。同时把单终端阻塞触发器改为认识已移交/已结案的
  * case（含 manual-card），并让 Linkly 终态 ACK 在 case 移交后仍占用物理 lane。
@@ -6593,7 +6593,7 @@ CREATE INDEX ix_payment_recovery_actions_record_time
   ON payment_recovery_actions (record_id, created_at_iso, action_id);
 CREATE INDEX ix_payment_recovery_reconciliations_record_time
   ON payment_recovery_reconciliations (record_id, observed_at_iso DESC);
--- 已移交的异常 attempt 不再占用整个 iPad；同一支付提供方仍视为同一物理通道，
+-- 已移交的异常 attempt 不再占用整台设备；同一支付提供方仍视为同一物理通道，
 -- 在没有可持久化 lane identity 前继续失败关闭，避免同一刷卡机重复扣款。
 DROP TRIGGER trg_payment_attempts_single_terminal_blocking_insert;
 DROP TRIGGER trg_payment_attempts_single_terminal_blocking_update;
