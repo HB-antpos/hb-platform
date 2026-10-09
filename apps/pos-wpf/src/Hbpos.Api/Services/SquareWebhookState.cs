@@ -109,6 +109,26 @@ public sealed class SqlSugarSquareWebhookSchemaInitializer(
         END;
         """;
 
+    // refund.updated 通知落库：退款可能 PENDING 数小时到 14 天，Square 实时查询失败时用它兜底。
+    internal const string EnsureRefundTableSql = """
+        IF OBJECT_ID(N'[dbo].[POSM_SquareRefund]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [dbo].[POSM_SquareRefund] (
+                [Id] BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT [PK_POSM_SquareRefund] PRIMARY KEY,
+                [Environment] NVARCHAR(32) NOT NULL,
+                [RefundId] NVARCHAR(128) NOT NULL,
+                [Status] NVARCHAR(64) NOT NULL,
+                [PaymentId] NVARCHAR(128) NULL,
+                [Amount] BIGINT NULL,
+                [Currency] NVARCHAR(16) NULL,
+                [RawRefundJson] NVARCHAR(MAX) NOT NULL,
+                [LastEventId] NVARCHAR(128) NULL,
+                [UpdatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_SquareRefund_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
+                CONSTRAINT [CK_POSM_SquareRefund_Environment] CHECK ([Environment] IN (N'Production', N'Sandbox'))
+            );
+        END;
+        """;
+
     internal const string EnsureIndexesSql = """
         IF OBJECT_ID(N'[dbo].[POSM_SquareCheckoutSession]', N'U') IS NOT NULL
            AND NOT EXISTS (
@@ -131,12 +151,24 @@ public sealed class SqlSugarSquareWebhookSchemaInitializer(
             CREATE UNIQUE INDEX [UX_POSM_SquareWebhookEvent_Environment_EventId]
                 ON [dbo].[POSM_SquareWebhookEvent] ([Environment], [EventId]);
         END;
+
+        IF OBJECT_ID(N'[dbo].[POSM_SquareRefund]', N'U') IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM sys.indexes
+               WHERE [object_id] = OBJECT_ID(N'[dbo].[POSM_SquareRefund]', N'U')
+                 AND [name] = N'UX_POSM_SquareRefund_Environment_RefundId')
+        BEGIN
+            CREATE UNIQUE INDEX [UX_POSM_SquareRefund_Environment_RefundId]
+                ON [dbo].[POSM_SquareRefund] ([Environment], [RefundId]);
+        END;
         """;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await sqlExecutor.ExecuteAsync(EnsureCheckoutSessionTableSql, cancellationToken);
         await sqlExecutor.ExecuteAsync(EnsureWebhookEventTableSql, cancellationToken);
+        await sqlExecutor.ExecuteAsync(EnsureRefundTableSql, cancellationToken);
         await sqlExecutor.ExecuteAsync(EnsureIndexesSql, cancellationToken);
     }
 }
@@ -484,6 +516,117 @@ public sealed class SqlSugarSquareCheckoutSessionRepository(
             new SugarParameter("@Environment", environment),
             new SugarParameter("@PaymentId", paymentId));
     }
+}
+
+public interface ISquareRefundRepository
+{
+    Task UpsertRefundAsync(SquareRefundRecord refund, CancellationToken cancellationToken);
+
+    Task<SquareRefundRecord?> GetRefundAsync(
+        string environment,
+        string refundId,
+        CancellationToken cancellationToken);
+}
+
+public sealed class SqlSugarSquareRefundRepository(HbposSqlSugarContext dbContext) : ISquareRefundRepository
+{
+    private const string UpsertRefundSql = """
+        MERGE [dbo].[POSM_SquareRefund] WITH (HOLDLOCK) AS target
+        USING (
+            SELECT @Environment AS [Environment], @RefundId AS [RefundId]
+        ) AS source
+        ON target.[Environment] = source.[Environment]
+           AND target.[RefundId] = source.[RefundId]
+        -- 只允许更“新”的事件覆盖；已落库的终态（COMPLETED/REJECTED/FAILED/CANCELED）不能被后续非终态回退。
+        WHEN MATCHED
+             AND @UpdatedAt >= target.[UpdatedAt]
+             AND (
+                 target.[Status] NOT IN (N'COMPLETED', N'REJECTED', N'FAILED', N'CANCELED')
+                 OR @Status IN (N'COMPLETED', N'REJECTED', N'FAILED', N'CANCELED')
+             ) THEN
+            UPDATE SET
+                [Status] = @Status,
+                [PaymentId] = COALESCE(@PaymentId, target.[PaymentId]),
+                [Amount] = COALESCE(@Amount, target.[Amount]),
+                [Currency] = COALESCE(@Currency, target.[Currency]),
+                [RawRefundJson] = @RawRefundJson,
+                [LastEventId] = @LastEventId,
+                [UpdatedAt] = @UpdatedAt
+        WHEN NOT MATCHED THEN
+            INSERT ([Environment], [RefundId], [Status], [PaymentId], [Amount], [Currency], [RawRefundJson], [LastEventId], [UpdatedAt])
+            VALUES (@Environment, @RefundId, @Status, @PaymentId, @Amount, @Currency, @RawRefundJson, @LastEventId, @UpdatedAt);
+        """;
+
+    public async Task UpsertRefundAsync(SquareRefundRecord refund, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ExecuteUpsertAsync(refund);
+        }
+        catch (Exception ex) when (SquareWebhookSqlErrorClassifier.IsUniqueConstraintViolation(ex))
+        {
+            // 并发首写同一笔退款时可能撞唯一键；重试一次会进入 MATCHED 分支完成状态更新。
+            await ExecuteUpsertAsync(refund);
+        }
+    }
+
+    public async Task<SquareRefundRecord?> GetRefundAsync(
+        string environment,
+        string refundId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT TOP 1
+                [Id], [Environment], [RefundId], [Status], [PaymentId], [Amount], [Currency],
+                [RawRefundJson], [LastEventId], [UpdatedAt]
+            FROM [dbo].[POSM_SquareRefund]
+            WHERE [Environment] = @Environment
+              AND [RefundId] = @RefundId;
+            """;
+
+        return await dbContext.PosmDb.Ado.SqlQuerySingleAsync<SquareRefundRecord>(
+            sql,
+            new SugarParameter("@Environment", environment),
+            new SugarParameter("@RefundId", refundId));
+    }
+
+    private Task ExecuteUpsertAsync(SquareRefundRecord refund)
+    {
+        return dbContext.PosmDb.Ado.ExecuteCommandAsync(
+            UpsertRefundSql,
+            new SugarParameter("@Environment", refund.Environment),
+            new SugarParameter("@RefundId", refund.RefundId),
+            new SugarParameter("@Status", refund.Status),
+            new SugarParameter("@PaymentId", refund.PaymentId),
+            new SugarParameter("@Amount", refund.Amount),
+            new SugarParameter("@Currency", refund.Currency),
+            new SugarParameter("@RawRefundJson", refund.RawRefundJson),
+            new SugarParameter("@LastEventId", refund.LastEventId),
+            new SugarParameter("@UpdatedAt", refund.UpdatedAt.UtcDateTime));
+    }
+}
+
+public sealed class SquareRefundRecord
+{
+    public long Id { get; set; }
+
+    public string Environment { get; set; } = string.Empty;
+
+    public string RefundId { get; set; } = string.Empty;
+
+    public string Status { get; set; } = string.Empty;
+
+    public string? PaymentId { get; set; }
+
+    public long? Amount { get; set; }
+
+    public string? Currency { get; set; }
+
+    public string RawRefundJson { get; set; } = string.Empty;
+
+    public string? LastEventId { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 internal static class SquareWebhookSqlErrorClassifier
