@@ -73,6 +73,7 @@ import {
   getScopeSelectionState,
 } from './storeBrandFilter'
 import { readMediaDimensions } from './mediaDimensions'
+import { createVideoThumbnailUrl } from './videoThumbnail'
 import { resolveOrientationAfterUpload, toMediaSize } from './orientation'
 import {
   ADVERTISEMENT_ORIENTATION_VALUES,
@@ -441,6 +442,8 @@ export default function AdvertisementsPage() {
       const mediaType = resolveAdvertisementMediaType(file)
       // 与上传并行读取本地素材宽高；该 Promise 永不 reject，读不到（超时/失败）时为 null，不阻断上传。
       const dimensionsPromise = readMediaDimensions(file, mediaType)
+      // 视频同时在本地抽一帧当封面并上传；该 Promise 永不 reject，失败为 null，不阻断视频上传。
+      const thumbnailPromise = mediaType === 'Video' ? createVideoThumbnailUrl(file) : Promise.resolve(null)
       const signature = await requestAdvertisementUploadSignature({
         fileName: file.name,
         contentType: file.type || (mediaType === 'Video' ? 'video/mp4' : 'image/jpeg'),
@@ -473,6 +476,14 @@ export default function AdvertisementsPage() {
 
       if (mediaType === 'Image') {
         nextValues.thumbnailUrl = mediaUrl
+      } else {
+        // 视频：用抽帧封面覆盖（换了视频，旧封面就不对了）；生成失败时保持原值并提示手填。
+        const generatedThumbnailUrl = await thumbnailPromise
+        if (generatedThumbnailUrl) {
+          nextValues.thumbnailUrl = generatedThumbnailUrl
+        } else {
+          messageApi.warning(t('posAdmin.advertisements.thumbnailAutoFailed'))
+        }
       }
 
       editorForm.setFieldsValue(nextValues)
@@ -1042,7 +1053,11 @@ export default function AdvertisementsPage() {
               <Form.Item name="mediaUrl" label={t('posAdmin.advertisements.mediaUrl')} rules={[{ required: true, message: t('posAdmin.advertisements.mediaRequired') }]}>
                 <Input disabled placeholder={t('posAdmin.advertisements.mediaUrlPlaceholder')} />
               </Form.Item>
-              <Form.Item name="thumbnailUrl" label={t('posAdmin.advertisements.thumbnailUrl')}>
+              <Form.Item
+                name="thumbnailUrl"
+                label={t('posAdmin.advertisements.thumbnailUrl')}
+                extra={t('posAdmin.advertisements.thumbnailAutoHint')}
+              >
                 <Input placeholder={t('posAdmin.advertisements.thumbnailUrlPlaceholder')} />
               </Form.Item>
 

@@ -63,7 +63,9 @@
       },
       "editorMismatch": "素材是{{shape}}（{{size}}），设为「{{orientation}}」后会在{{slot}}播放，{{effect}}。仍可保存。",
       "mismatchWithRatio": "{{ratio}}，{{text}}",
-      "labelSeparator": "："
+      "labelSeparator": "：",
+      "thumbnailAutoHint": "上传视频时会自动从视频中截取一帧作为封面，也可以手动替换为其他地址。",
+      "thumbnailAutoFailed": "无法从视频自动生成封面，可手动填写缩略图地址。"
     }
   }
 }
