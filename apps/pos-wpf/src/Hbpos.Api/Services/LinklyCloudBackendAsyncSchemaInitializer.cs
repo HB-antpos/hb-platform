@@ -219,6 +219,39 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                     ADD [SettlementReceiptTexts] NVARCHAR(MAX) NULL;
             END;
 
+            -- 会话被主管结案或已 ack 之后才到达的 Linkly 最终结果：独立保存，不改写 Status / ack 状态。
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'LateFinalAt') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [LateFinalAt] DATETIME2(7) NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'LateFinalTransactionSuccess') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [LateFinalTransactionSuccess] BIT NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'LateFinalResponseCode') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [LateFinalResponseCode] NVARCHAR(32) NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'LateFinalResponseText') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [LateFinalResponseText] NVARCHAR(512) NULL;
+            END;
+
+            -- 状态查询/恢复 GET 连续收到未列出的 4xx（如 400/409/422）的次数，用于限制向 Linkly 的空转查询。
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'OfficialQueryRejectCount') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [OfficialQueryRejectCount] INT NOT NULL
+                        CONSTRAINT [DF_POSM_LinklyCloudBackendSession_OfficialQueryRejectCount_Upgrade] DEFAULT (0) WITH VALUES;
+            END;
+
             IF NOT EXISTS (
                 SELECT 1
                 FROM sys.indexes
@@ -275,6 +308,19 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                         ([Environment], [StoreCode], [TerminalId], [IsActive], [Status], [ClientAcknowledgedAt])
                     INCLUDE ([UpdatedAt])
                     WHERE [TerminalId] IS NOT NULL;
+            END;
+
+            -- Linkly 回调只带 (Environment, SessionId)，唯一键以 StoreCode/DeviceCode 打头无法用于这条查询。
+            -- 非唯一：不同门店/设备理论上可能出现相同 SessionId，由查询按 UpdatedAt 取最新一条。
+            IF NOT EXISTS (
+                SELECT 1
+                FROM sys.indexes
+                WHERE [object_id] = OBJECT_ID(N'[dbo].[POSM_LinklyCloudBackendSession]', N'U')
+                  AND [name] = N'IX_POSM_LinklyCloudBackendSession_EnvSession')
+            BEGIN
+                CREATE INDEX [IX_POSM_LinklyCloudBackendSession_EnvSession]
+                    ON [dbo].[POSM_LinklyCloudBackendSession] ([Environment], [SessionId])
+                    INCLUDE ([UpdatedAt]);
             END;
         END;
 

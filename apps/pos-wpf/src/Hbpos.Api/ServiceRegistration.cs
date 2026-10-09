@@ -189,6 +189,8 @@ public static class ServiceRegistration
         services.AddScoped<ILinklyCloudCredentialSchemaSqlExecutor, SqlSugarLinklyCloudCredentialSchemaSqlExecutor>();
         services.AddScoped<ILinklyCloudCredentialSchemaInitializer, SqlSugarLinklyCloudCredentialSchemaInitializer>();
         services.AddScoped<ILinklyCloudBackendAsyncRepository, SqlSugarLinklyCloudBackendAsyncRepository>();
+        // 进程内共享的 Linkly token 缓存：Token Provider 是按请求创建的类型化客户端，缓存必须由单例持有。
+        services.AddSingleton<LinklyCloudBackendTokenCache>();
         services.AddScoped<ILinklyCloudBackendTerminalCredentialRepository, SqlSugarLinklyCloudBackendTerminalCredentialRepository>();
         services.AddScoped<ILinklyCloudTerminalRepository, SqlSugarLinklyCloudTerminalRepository>();
         services.AddScoped<ILinklyCloudTerminalService, LinklyCloudTerminalService>();
