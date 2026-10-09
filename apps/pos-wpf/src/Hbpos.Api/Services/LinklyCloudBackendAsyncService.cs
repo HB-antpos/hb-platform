@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Hbpos.Api.Data;
+using Hbpos.Api.Logging;
 using Hbpos.Contracts.Linkly;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -199,8 +200,15 @@ public class LinklyCloudBackendAsyncService(
     ILinklyCloudBackendTerminalCredentialRepository terminalCredentialRepository,
     IOptions<LinklyCloudBackendAsyncOptions> options,
     ILogger<LinklyCloudBackendAsyncService>? logger = null,
-    ILinklyCloudTerminalService? terminalService = null) : ILinklyCloudBackendAsyncService
+    ILinklyCloudTerminalService? terminalService = null,
+    ILinklyCloudCallbackReachabilityProbe? callbackReachabilityProbe = null) : ILinklyCloudBackendAsyncService
 {
+    /// <summary>
+    /// 回调自探测检查项。它只提示、不阻塞支付：回调丢失只影响按键提示和回单，交易结果仍可通过轮询取得；
+    /// 且 POS 容器经自己的公网域名回访可能因 hairpin NAT / DNS 受限产生误报，不能因此让所有门店无法刷卡。
+    /// </summary>
+    internal const string CallbackReachabilityCheckCode = "CALLBACK_REACHABILITY";
+
     private static readonly JsonSerializerOptions ServiceJsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -870,18 +878,27 @@ public class LinklyCloudBackendAsyncService(
         var expectedBearer = GetNotificationBearer(normalizedEnvironment);
         var authorizationMatches = !string.IsNullOrWhiteSpace(expectedBearer) &&
             string.Equals(authorizationHeader?.Trim(), $"Bearer {expectedBearer}", StringComparison.Ordinal);
-        Log(
-            $"notification received environment={LogValue(normalizedEnvironment)} " +
-            $"sessionId={LogValue(sessionId)} type={LogValue(type)} " +
-            $"authorizationPresent={!string.IsNullOrWhiteSpace(authorizationHeader)} authorizationMatches={authorizationMatches}");
-        if (string.IsNullOrWhiteSpace(expectedBearer) ||
-            !authorizationMatches)
+        if (string.IsNullOrWhiteSpace(expectedBearer) &&
+            LogThrottle.Shared.TryAcquire(
+                $"linkly-callback-bearer-missing:{normalizedEnvironment}",
+                TimeSpan.FromMinutes(1),
+                out _))
         {
-            Log(
-                $"notification rejected environment={LogValue(normalizedEnvironment)} " +
-                $"sessionId={LogValue(sessionId)} type={LogValue(type)} reason=invalid-authorization");
+            // 配置缺失会让所有回调被拒；必须以 Error 进入中心日志（只收 Warning+），且限频，避免被匿名请求刷屏。
+            logger?.LogError(
+                new EventId(0, $"linkly-callback-bearer-missing:{normalizedEnvironment}"),
+                "Linkly Cloud notification bearer is not configured; every callback is rejected until it is set.");
+        }
+
+        if (!authorizationMatches)
+        {
+            // 鉴权失败发生在匿名端点上，这里不逐条写日志：Controller 做限频后的 Warning，避免公网扫描刷满日志。
             throw new LinklyCloudBackendNotificationUnauthorizedException();
         }
+
+        Log(
+            $"notification received environment={LogValue(normalizedEnvironment)} " +
+            $"sessionId={LogValue(sessionId)} type={LogValue(type)}");
 
         var normalizedSessionId = NormalizeRequired(sessionId, "sessionId");
         var normalizedType = NormalizeRequired(type, "type");
@@ -1104,12 +1121,28 @@ public class LinklyCloudBackendAsyncService(
             "Linkly Cloud notification callback URL is public HTTPS.",
             "Linkly Cloud notification callback URL must be public HTTPS."));
 
+        if (callbackReachabilityProbe is not null && publicCallbackReady && notificationBearerReady)
+        {
+            var probe = await callbackReachabilityProbe.ProbeAsync(
+                normalizedEnvironment,
+                publicCallbackUri!,
+                GetNotificationBearer(normalizedEnvironment)!,
+                cancellationToken);
+            checks.Add(CreateHealthCheck(
+                CallbackReachabilityCheckCode,
+                probe.Reachable,
+                "Linkly Cloud notification callback is reachable through the public URL.",
+                $"Linkly Cloud notification callback could not be reached through the public URL ({probe.Reason}). "
+                + "Card results are still collected by polling, but on-screen prompts and receipts may be lost. Check the reverse proxy route for /pos-api/."));
+        }
+
         // 闂傚倸鍊搁崐鐑芥嚄閸洍鈧箓宕奸妷顔芥櫈闂佸憡鍔﹂崰鏍閸ф鈷戞い鎺嗗亾缂佸顕划濠氬冀椤愮喎浜炬鐐茬仢閸旀岸鏌熼崣澹濐亪鍩ユ径鎰潊闁绘﹢娼ф慨锔戒繆閻愵亜鈧牜鏁幒鏂哄亾濮樼厧澧撮柟閿嬪灴閹垽宕楅懖鈺佸妇濠电姰鍨煎▔娑㈡偋閸℃稑绀夋慨姗嗗幘缁犻箖鏌熼崘鎻掓Щ闁告碍锕㈠顕€宕奸悢铚傛睏闂備浇鍋愰埛鍫ュ礈濞戙垹绀夋い鏇楀亾婵﹦鍎ょ€电厧鈻庨幋鐘虫婵＄偑鍊х粻鎾愁焽瑜旈、姘舵晲婢跺浠洪梺鍛婃尭瀵爼寮查姀銈嗏拺闂侇偆鍋涢懟顖涙櫠椤曗偓閺屻劑寮村Ο铏逛紙濡ょ姷鍋為敃銏ゃ€佸▎鎾村仼閻忕偠妫勭粭宀勬⒑鐠囨煡顎楃紒鐘茬Ч瀹曟洟宕￠悘缁樻そ婵℃悂鍩℃担绋挎闂備胶顭堥惉濂稿磻閻愮儤鍋傞柕澶涘缁犻箖鏌熺€甸晲绱虫い蹇撶墑閳ь剙鍟埢搴ㄥ箣閻樼绱叉繝寰锋澘鈧劙宕戦幘娣簻闁挎梻鍋撻弳顒勬�?active session �?404 闂傚倷娴囧畷鐢稿窗閹邦喖鍨濋幖娣灪濞呯姵淇婇妶鍛櫣缂佺姵婢橀—鍐偓锝庝簼閹癸絿绱掗埀顒佺節閸ャ劎鍘搁梺鍛婂姂閸斿孩鏅跺☉銏＄厽闁圭虎鍨版禍楣冩⒑鐠囨煡顎楃紒鐘茬Ч瀹曟洟宕￠悘缁樻そ婵℃悂鍩℃担绋挎闂備胶顭堥惉濂稿磻閻愮儤鍋傞柡鍥╁枔缁犻箖鏌涢埄鍐ｆ（妞ゅ繐鐗婇崐鍫曟煥濠靛棭妲归柣鎾寸☉闇夐柨婵嗩槹濞懷囨煃瑜滈崜姘辨崲閸愨晝�?
         var response = new LinklyCloudBackendHealthResponse(
             normalizedEnvironment,
             normalizedStoreCode,
             normalizedDeviceCode,
-            checks.All(check => check.IsReady),
+            // 回调自探测只提示，不参与整体就绪判定（见 CallbackReachabilityCheckCode 注释）。
+            checks.Where(check => check.Code != CallbackReachabilityCheckCode).All(check => check.IsReady),
             publicCallbackUri?.AbsoluteUri,
             checks);
         LogServiceJson(

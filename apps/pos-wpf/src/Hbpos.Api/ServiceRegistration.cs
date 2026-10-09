@@ -9,6 +9,8 @@ namespace Hbpos.Api;
 
 public static class ServiceRegistration
 {
+    private const string LinklyCallbackProbeHttpClientName = "linkly-callback-probe";
+
     public static IServiceCollection AddHbposApiServices(
         this IServiceCollection services,
         IConfiguration? configuration = null)
@@ -44,9 +46,15 @@ public static class ServiceRegistration
                 "Production requires LinklyCloudCredentialDataProtection:KeysPath.");
         }
 
-        var linklyCredentialKeysPath = ResolveDataProtectionKeysPath(
-            configuredLinklyCredentialKeysPath,
-            "LinklyCloudCredentialDataProtectionKeys");
+        // 非生产且未配置时，与 Admin 回落到同一个用户级目录；否则两个进程各用各自的程序目录，
+        // 本机后台录入的终端凭据 POS 永远解不开（生产已在上面强制显式配置）。
+        var linklyCredentialKeysPath = string.IsNullOrWhiteSpace(configuredLinklyCredentialKeysPath)
+            && BlazorApp.Shared.Security.LinklyCloudTerminalCredentialDataProtection
+                .ResolveSharedDevelopmentKeysPath() is { } sharedDevelopmentKeysPath
+            ? sharedDevelopmentKeysPath
+            : ResolveDataProtectionKeysPath(
+                configuredLinklyCredentialKeysPath,
+                "LinklyCloudCredentialDataProtectionKeys");
 
         Directory.CreateDirectory(globalKeysPath);
         // 关键逻辑：POS 自身票据使用独立持久 ring，不能挂载主 backend 的全局 ring。
@@ -195,6 +203,11 @@ public static class ServiceRegistration
         services.AddScoped<ILinklyCloudCredentialService, LinklyCloudCredentialService>();
         services.AddScoped<ILinklyCloudCredentialSchemaSqlExecutor, SqlSugarLinklyCloudCredentialSchemaSqlExecutor>();
         services.AddScoped<ILinklyCloudCredentialSchemaInitializer, SqlSugarLinklyCloudCredentialSchemaInitializer>();
+        // 回调可达性自探测：经公网地址回访自己，结果带缓存；超时要远小于健康检查的调用方超时。
+        services.AddHttpClient(LinklyCallbackProbeHttpClientName, client => client.Timeout = TimeSpan.FromSeconds(8));
+        services.AddSingleton<ILinklyCloudCallbackReachabilityProbe>(sp => new HttpLinklyCloudCallbackReachabilityProbe(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(LinklyCallbackProbeHttpClientName),
+            logger: sp.GetService<ILogger<HttpLinklyCloudCallbackReachabilityProbe>>()));
         services.AddScoped<ILinklyCloudBackendAsyncRepository, SqlSugarLinklyCloudBackendAsyncRepository>();
         // 进程内共享的 Linkly token 缓存：Token Provider 是按请求创建的类型化客户端，缓存必须由单例持有。
         services.AddSingleton<LinklyCloudBackendTokenCache>();

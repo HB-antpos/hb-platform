@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Hbpos.Api.Auth;
+using Hbpos.Api.Logging;
 using Hbpos.Api.Services;
 using Hbpos.Contracts.Common;
 using Hbpos.Contracts.Devices;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Hbpos.Api.Controllers;
 
@@ -54,6 +56,11 @@ public sealed class LinklyController(
         "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE";
     private const string CloudTerminalCredentialUnavailableMessage =
         "Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.";
+    private const string CloudTerminalCredentialKeyRingMismatchCode =
+        "LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH";
+    private const string CloudTerminalCredentialKeyRingMismatchMessage =
+        "Linkly Cloud terminal credentials cannot be decrypted by the POS server. Do not re-enter the password; "
+        + "ask an administrator to check that Admin and POS use the same Linkly credential key directory.";
     private const string CloudBackendTerminalRepairRequiredCode = "LINKLY_CLOUD_TERMINAL_REPAIR_REQUIRED";
     private const string CloudBackendTokenUnavailableCode = "LINKLY_CLOUD_BACKEND_TOKEN_UNAVAILABLE";
     private const string CloudBackendTerminalProbingCode = "LINKLY_CLOUD_TERMINAL_PROBING";
@@ -129,9 +136,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudTerminalSelectionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudTerminalSelectionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudTerminalSelectionResponse>(ex));
         }
         catch (LinklyCloudTerminalNotFoundException ex)
         {
@@ -209,9 +216,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudTerminalPairResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudTerminalPairResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudTerminalPairResponse>(ex));
         }
         catch (LinklyCloudTerminalNotFoundException ex)
         {
@@ -278,6 +285,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud backend terminal pair failed terminalId={terminalId:D} error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud terminal pairing failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudTerminalPairResponse>.Fail(
@@ -484,6 +493,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud backend pair failed error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud backend pairing failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudBackendTerminalCredentialResponse>.Fail(
@@ -557,6 +568,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud credential upsert failed store={LogValue(storeCode)} error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud store credential save failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudCredentialUpsertResponse>.Fail(
@@ -621,9 +634,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -653,6 +666,8 @@ public sealed class LinklyController(
         }
         catch (LinklyCloudBackendValidationException ex)
         {
+            // 配置类失败（bearer/回调地址/凭据缺失）原先静默变成 400，中心日志里什么都没有。
+            logger?.LogWarning(ex, "Linkly Cloud transaction request was rejected as invalid or misconfigured");
             return BadRequest(ApiResult<LinklyCloudBackendSessionResponse>.Fail(
                 CloudBackendInvalidCode,
                 ex.Message));
@@ -660,6 +675,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud backend transaction failed error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud backend transaction start failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudBackendSessionResponse>.Fail(
@@ -705,9 +722,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -737,6 +754,8 @@ public sealed class LinklyController(
         }
         catch (LinklyCloudBackendValidationException ex)
         {
+            // 配置类失败（bearer/回调地址/凭据缺失）原先静默变成 400，中心日志里什么都没有。
+            logger?.LogWarning(ex, "Linkly Cloud settlement request was rejected as invalid or misconfigured");
             return BadRequest(ApiResult<LinklyCloudBackendSessionResponse>.Fail(
                 CloudBackendInvalidCode,
                 ex.Message));
@@ -744,6 +763,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud backend settlement failed error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud backend settlement start failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudBackendSessionResponse>.Fail(
@@ -814,6 +835,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud backend terminal upsert failed error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud backend terminal credential save failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudBackendTerminalCredentialResponse>.Fail(
@@ -948,9 +971,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendHealthResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendHealthResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendHealthResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1007,9 +1030,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendStatusTestResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendStatusTestResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendStatusTestResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -1056,6 +1079,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud-backend status-test error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud status test failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudBackendStatusTestResponse>.Fail(
@@ -1093,9 +1118,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendLogonTestResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendLogonTestResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendLogonTestResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -1142,6 +1167,8 @@ public sealed class LinklyController(
         catch (Exception ex)
         {
             Log($"cloud-backend logon-test error={ex.GetType().Name}");
+            // 只记异常类型名无法区分 Pending 写入前还是写入后失败；带上异常对象让文件日志有堆栈、中心日志（Warning+）有类型与堆栈。
+            logger?.LogError(ex, "Linkly Cloud logon test failed unexpectedly");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 ApiResult<LinklyCloudBackendLogonTestResponse>.Fail(
@@ -1181,9 +1208,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -1228,9 +1255,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudBackendValidationException ex)
         {
@@ -1342,9 +1369,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -1397,9 +1424,9 @@ public sealed class LinklyController(
         {
             return Conflict(CredentialReentryRequired<LinklyCloudBackendSessionResponse>());
         }
-        catch (LinklyCloudTerminalCredentialUnavailableException)
+        catch (LinklyCloudTerminalCredentialUnavailableException ex)
         {
-            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>());
+            return Conflict(CredentialUnavailable<LinklyCloudBackendSessionResponse>(ex));
         }
         catch (LinklyCloudTerminalRepairRequiredException)
         {
@@ -1497,6 +1524,8 @@ public sealed class LinklyController(
     }
 
     [AllowAnonymous]
+    // 匿名端点：只限制没带正确 bearer 的请求，真实 Linkly 回调不受影响（见 LinklyNotificationRateLimitPolicy）。
+    [EnableRateLimiting(LinklyNotificationRateLimitPolicy.PolicyName)]
     [HttpPost("cloud-notifications/{environment}/{sessionId}/{type}")]
     public async Task<ActionResult<ApiResult<string>>> ReceiveCloudBackendNotification(
         string environment,
@@ -1505,6 +1534,7 @@ public sealed class LinklyController(
         [FromBody] JsonElement payload,
         CancellationToken cancellationToken)
     {
+        // 鉴权之前的请求日志降为 Debug：匿名请求每条都写 Console 和文件会被公网扫描刷满，且不轮转的日志会撑爆磁盘。
         LogNotification(
             "request",
             "request",
@@ -1514,7 +1544,8 @@ public sealed class LinklyController(
             statusCode: null,
             request: null,
             response: null,
-            callback: DescribeCallbackPayload(payload, includeCardNumber: false));
+            callback: DescribeCallbackPayload(payload, includeCardNumber: false),
+            level: LogLevel.Debug);
         try
         {
             await linklyCloudBackendAsyncService.ReceiveNotificationAsync(
@@ -1542,15 +1573,24 @@ public sealed class LinklyController(
             var unauthorized = ApiResult<string>.Fail(
                 "LINKLY_CLOUD_BACKEND_NOTIFICATION_UNAUTHORIZED",
                 "Linkly Cloud notification authorization is invalid.");
-            LogNotification(
-                "response",
-                "response",
-                environment,
-                sessionId,
-                type,
-                StatusCodes.Status401Unauthorized,
-                request: null,
-                response: unauthorized);
+            // bearer 配错会让 Linkly 的所有回调返回 401（按键提示和回单静默丢失）；必须有 Warning 进中心日志，
+            // 但匿名请求任何人都能发，所以按环境每分钟最多一条，其余只累计次数。环境名只取已知值，避免请求里的自由文本进入键。
+            var environmentKey = string.Equals(environment, "Sandbox", StringComparison.OrdinalIgnoreCase)
+                ? "Sandbox"
+                : string.Equals(environment, "Production", StringComparison.OrdinalIgnoreCase)
+                    ? "Production"
+                    : "Unknown";
+            if (LogThrottle.Shared.TryAcquire(
+                    $"linkly-callback-unauthorized:{environmentKey}",
+                    TimeSpan.FromMinutes(1),
+                    out var suppressed))
+            {
+                logger?.LogWarning(
+                    new EventId(StatusCodes.Status401Unauthorized, $"linkly-callback-unauthorized:{environmentKey}"),
+                    "Linkly Cloud callback rejected: authorization is missing or invalid. Check the notification bearer configured on both Linkly and POS. Suppressed {Suppressed} similar events since the last report.",
+                    suppressed);
+            }
+
             return Unauthorized(unauthorized);
         }
         catch (LinklyCloudBackendValidationException ex)
@@ -1626,9 +1666,15 @@ public sealed class LinklyController(
         Response.Headers["Retry-After"] = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         return Conflict(ApiResult<T>.Fail(CloudBackendTerminalProbingCode, ex.Message));
     }
-    private static ApiResult<T> CredentialUnavailable<T>() => ApiResult<T>.Fail(
-        CloudTerminalCredentialUnavailableCode,
-        CloudTerminalCredentialUnavailableMessage);
+    // 密钥环不一致时 “重新录入密码” 无效，必须换成专用错误码与提示，避免现场反复重录。
+    private static ApiResult<T> CredentialUnavailable<T>(LinklyCloudTerminalCredentialUnavailableException exception) =>
+        exception is LinklyCloudTerminalCredentialKeyRingMismatchException
+            ? ApiResult<T>.Fail(
+                CloudTerminalCredentialKeyRingMismatchCode,
+                CloudTerminalCredentialKeyRingMismatchMessage)
+            : ApiResult<T>.Fail(
+                CloudTerminalCredentialUnavailableCode,
+                CloudTerminalCredentialUnavailableMessage);
 
     private async Task<bool> IsLegacyModeDisabledAsync(
         string environment,
@@ -1675,7 +1721,8 @@ public sealed class LinklyController(
         int? statusCode,
         object? request,
         object? response,
-        object? callback = null)
+        object? callback = null,
+        LogLevel level = LogLevel.Information)
     {
         LogJson(BuildJsonLog(
             source: "api-linkly-controller",
@@ -1692,13 +1739,21 @@ public sealed class LinklyController(
                 type,
                 timestamp = DateTimeOffset.Now.ToString("O"),
                 callback
-            }));
+            }),
+            level);
     }
 
-    private void LogJson(string json)
+    private void LogJson(string json, LogLevel level = LogLevel.Information)
     {
+        if (level < LogLevel.Information)
+        {
+            // Debug 级别只给 ILogger（默认被过滤），不写 Console，避免 docker 日志被刷。
+            logger?.Log(level, "[HBPOS][Api][LinklyCloud] {Message}", json);
+            return;
+        }
+
         Console.WriteLine($"[HBPOS][Api][LinklyCloud] {DateTimeOffset.Now:O} {json}");
-        logger?.LogInformation("[HBPOS][Api][LinklyCloud] {Message}", json);
+        logger?.Log(level, "[HBPOS][Api][LinklyCloud] {Message}", json);
     }
 
     private static object DescribeCallbackPayload(JsonElement payload, bool includeCardNumber)

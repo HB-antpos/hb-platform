@@ -196,8 +196,10 @@ public sealed class PaymentTerminalSettingsService(
             // 密码只在进入持久化边界前短暂存在，数据库绝不写入 Linkly 明文凭据。
             protectedPassword = linklyCredentialProtector.ProtectPassword(password!);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // 加密失败通常是 Linkly 凭据密钥目录不可写/不可读；必须留日志，否则只剩一句“稍后重试”。
+            logger.LogError(ex, "Linkly 终端密码加密失败 StoreCode={StoreCode} Environment={Environment}", scope.StoreCode, scope.Environment);
             return LinklyCredentialProtectionFailure();
         }
 
@@ -283,8 +285,9 @@ public sealed class PaymentTerminalSettingsService(
                 // 只要管理端重新提交密码就强制轮换密文，不能把明文同现有密文比较。
                 protectedSubmittedPassword = linklyCredentialProtector.ProtectPassword(submittedPassword);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                logger.LogError(ex, "Linkly 终端密码加密失败 StoreCode={StoreCode} Environment={Environment}", scope.StoreCode, scope.Environment);
                 return LinklyCredentialProtectionFailure();
             }
         }

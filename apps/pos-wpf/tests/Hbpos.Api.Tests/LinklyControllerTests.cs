@@ -759,6 +759,38 @@ public sealed class LinklyControllerTests
     }
 
     [Fact]
+    public async Task ReceiveCloudBackendNotification_RateLimitsOnlyRequestsWithoutTheConfiguredBearer()
+    {
+        // M28：匿名回调端点被扫描时按来源 IP 限流（无有效 bearer 的请求），超限返回 429，且不是设备激活的限流文案。
+        await using var factory = new LinklyApiFactory();
+        using var client = factory.CreateClient();
+        var statuses = new List<HttpStatusCode>();
+        string? rejectedBody = null;
+
+        for (var index = 0; index < LinklyNotificationRateLimitPolicy.UnauthorizedPermitLimit + 3; index++)
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                "/api/v1/linkly/cloud-notifications/Sandbox/scan-probe/display")
+            {
+                Content = JsonContent.Create(new { })
+            };
+            using var response = await client.SendAsync(request);
+            statuses.Add(response.StatusCode);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                rejectedBody ??= await response.Content.ReadAsStringAsync();
+            }
+        }
+
+        Assert.Equal(
+            LinklyNotificationRateLimitPolicy.UnauthorizedPermitLimit,
+            statuses.Count(status => status != HttpStatusCode.TooManyRequests));
+        Assert.Equal(3, statuses.Count(status => status == HttpStatusCode.TooManyRequests));
+        Assert.DoesNotContain("device activation", rejectedBody ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ReceiveCloudBackendNotification_LogsRequestAndResponseAsJson()
     {
         var backendService = new CapturingLinklyCloudBackendAsyncService();

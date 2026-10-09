@@ -100,15 +100,36 @@ public sealed class SqlSugarLinklyCloudCredentialSchemaInitializer(
         END;
         """;
 
+    // 与 Admin 的 PaymentTerminalSettingsSchemaMigrator.SchemaLockSql、LinklyCloudBackendAsyncSchemaInitializer 使用同一把锁。
+    internal const string SchemaLockPrefixSql = """
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        DECLARE @SchemaLockResult INT;
+        EXEC @SchemaLockResult = sys.sp_getapplock
+            @Resource = N'Hbpos.LinklyCloud.Schema.v2',
+            @LockMode = N'Exclusive',
+            @LockOwner = N'Transaction',
+            @LockTimeout = 60000;
+        IF @SchemaLockResult < 0
+            THROW 51000, 'Could not acquire the shared Linkly Cloud schema lock.', 1;
+
+        """;
+
+    internal static string WrapWithSchemaLock(string sql) =>
+        SchemaLockPrefixSql + sql + Environment.NewLine + "COMMIT TRANSACTION;";
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         Console.WriteLine($"[HBPOS][Api][LinklyCloud] {DateTimeOffset.Now:O} credential schema ensure start table=POSM_LinklyCloudCredential");
         try
         {
-            await sqlExecutor.ExecuteAsync(EnsureTableSql, cancellationToken);
-            await sqlExecutor.ExecuteAsync(EnsureEnvironmentColumnSql, cancellationToken);
-            await sqlExecutor.ExecuteAsync(NormalizeEnvironmentColumnSql, cancellationToken);
-            await sqlExecutor.ExecuteAsync(EnsureConstraintsSql, cancellationToken);
+            // 每个批次各自在事务内先拿 Admin 迁移器同名的 schema 应用锁：
+            // 新环境首次部署时 Admin 迁移与 POS 启动可能同时建表，没有锁会出现“对象已存在”导致 POS 启动失败。
+            await sqlExecutor.ExecuteAsync(WrapWithSchemaLock(EnsureTableSql), cancellationToken);
+            await sqlExecutor.ExecuteAsync(WrapWithSchemaLock(EnsureEnvironmentColumnSql), cancellationToken);
+            await sqlExecutor.ExecuteAsync(WrapWithSchemaLock(NormalizeEnvironmentColumnSql), cancellationToken);
+            await sqlExecutor.ExecuteAsync(WrapWithSchemaLock(EnsureConstraintsSql), cancellationToken);
             Console.WriteLine($"[HBPOS][Api][LinklyCloud] {DateTimeOffset.Now:O} credential schema ensure succeeded table=POSM_LinklyCloudCredential");
         }
         catch (OperationCanceledException)

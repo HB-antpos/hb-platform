@@ -15,16 +15,23 @@ namespace Hbpos.Api.Tests;
 public sealed class LinklyCloudCredentialFailureControllerTests
 {
     [Theory]
-    [InlineData(true, "LINKLY_CLOUD_TERMINAL_CREDENTIAL_REENTRY_REQUIRED", "Linkly Cloud terminal credentials must be re-entered in the management portal.")]
-    [InlineData(false, "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE", "Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.")]
+    [InlineData("reentry", "LINKLY_CLOUD_TERMINAL_CREDENTIAL_REENTRY_REQUIRED", "Linkly Cloud terminal credentials must be re-entered in the management portal.")]
+    [InlineData("unavailable", "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE", "Linkly Cloud terminal credentials are unavailable. Re-enter them in the management portal.")]
+    // 密钥环不一致时“重新录入”无效，必须是专用错误码，且提示明确要求不要重录。
+    [InlineData("keyring", "LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH", "Linkly Cloud terminal credentials cannot be decrypted by the POS server. Do not re-enter the password; ask an administrator to check that Admin and POS use the same Linkly credential key directory.")]
     public async Task Every_payment_entry_point_returns_the_same_safe_credential_failure(
-        bool reentryRequired,
+        string scenario,
         string expectedCode,
         string expectedMessage)
     {
-        Exception exception = reentryRequired
-            ? new LinklyCloudTerminalCredentialReentryRequiredException()
-            : new LinklyCloudTerminalCredentialUnavailableException();
+        Exception exception = scenario switch
+        {
+            "reentry" => new LinklyCloudTerminalCredentialReentryRequiredException(),
+            "keyring" => new LinklyCloudTerminalCredentialKeyRingMismatchException(
+                Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                new System.Security.Cryptography.CryptographicException("key not found")),
+            _ => new LinklyCloudTerminalCredentialUnavailableException()
+        };
         var controller = CreateController(new ThrowingBackendService(exception));
         var terminalId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
@@ -120,7 +127,8 @@ public sealed class LinklyCloudCredentialFailureControllerTests
         };
     }
 
-    private sealed class ThrowingBackendService(Exception exception)
+    // internal：回调可观测性测试复用；acceptNotifications 让回调通知成功，其余入口仍抛 exception。
+    internal sealed class ThrowingBackendService(Exception exception, bool acceptNotifications = false)
         : ILinklyCloudBackendAsyncService
     {
         public Task<LinklyCloudBackendSessionResponse> StartTransactionAsync(
@@ -187,6 +195,6 @@ public sealed class LinklyCloudCredentialFailureControllerTests
         public Task ReceiveNotificationAsync(
             string environment, string sessionId, string type, string? authorizationHeader,
             JsonElement payload, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            acceptNotifications ? Task.CompletedTask : throw exception;
     }
 }

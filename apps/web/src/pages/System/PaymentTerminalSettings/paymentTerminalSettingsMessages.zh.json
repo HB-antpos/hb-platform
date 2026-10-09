@@ -18,6 +18,8 @@
     "stepAddTerminals": "添加终端",
     "stepAddTerminalsDone": "已添加 {{count}} 台",
     "stepAddTerminalsTodo": "还没有终端，点击「新增终端」",
+    "stepCredentials": "重新录入终端密码",
+    "stepCredentialsBlocked": "以下终端缺少密码：{{names}}。请编辑终端并重新录入密码。",
     "stepPair": "在 POS 上配对",
     "stepPairDone": "{{ready}} / {{total}} 台可用",
     "stepPairTodo": "在 POS 设置页输入 Pair Code 完成配对",

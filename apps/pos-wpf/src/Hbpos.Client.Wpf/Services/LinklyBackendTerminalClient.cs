@@ -3016,6 +3016,8 @@ public sealed class LinklyBackendTerminalClient(
             "LINKLY_CLOUD_BACKEND_PAIR_REQUEST_INVALID" => "pairRequestInvalid",
             "LINKLY_CLOUD_BACKEND_PAIR_CREDENTIAL_MISSING" or "LINKLY_CLOUD_CREDENTIAL_NOT_CONFIGURED" or
                 "LINKLY_CLOUD_TERMINAL_CREDENTIAL_REENTRY_REQUIRED" or "LINKLY_CLOUD_TERMINAL_CREDENTIAL_UNAVAILABLE" => "credentialsRequired",
+            // 密钥目录不一致：重新录入密码无效，必须单独提示，不能复用 credentialsRequired。
+            "LINKLY_CLOUD_TERMINAL_CREDENTIAL_KEY_RING_MISMATCH" => "credentialKeyRingMismatch",
             "LINKLY_CLOUD_BACKEND_PAIR_TIMEOUT" or "LINKLY_CLOUD_BACKEND_PAIR_UPSTREAM_FAILED" or
                 "LINKLY_CLOUD_BACKEND_PAIR_PERSISTENCE_FAILED" => "pairUnconfirmed",
             "LINKLY_CLOUD_TERMINAL_NOT_READY" => "pairBeforeSelect",

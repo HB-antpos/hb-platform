@@ -177,6 +177,9 @@ function LinklyActivationPanel({ checklist, canManage, activating, onActivate }:
 }) {
   const { t } = useTranslation()
   const blockingIssueCount = checklist.conflicts.length + checklist.notReadySelections.length
+  const missingCredentialCount = checklist.missingCredentialTerminals.length
+  // 有终端缺少受保护密码时多出一步，后面的序号顺延。
+  const stepOffset = missingCredentialCount > 0 ? 1 : 0
   const canActivate = canManage && checklist.canActivate
 
   return (
@@ -191,8 +194,18 @@ function LinklyActivationPanel({ checklist, canManage, activating, onActivate }:
             ? t('paymentTerminalSettings.stepAddTerminalsDone', { count: checklist.terminalCount })
             : t('paymentTerminalSettings.stepAddTerminalsTodo')}
         />
+        {missingCredentialCount > 0 ? (
+          <ActivationStep
+            index={2}
+            state="blocked"
+            title={t('paymentTerminalSettings.stepCredentials')}
+            description={t('paymentTerminalSettings.stepCredentialsBlocked', {
+              names: checklist.missingCredentialTerminals.map((terminal) => terminal.displayName).join(', '),
+            })}
+          />
+        ) : null}
         <ActivationStep
-          index={2}
+          index={2 + stepOffset}
           state={checklist.readyTerminalCount > 0 ? 'done' : 'todo'}
           title={t('paymentTerminalSettings.stepPair')}
           description={checklist.readyTerminalCount > 0
@@ -203,7 +216,7 @@ function LinklyActivationPanel({ checklist, canManage, activating, onActivate }:
             : t('paymentTerminalSettings.stepPairTodo')}
         />
         <ActivationStep
-          index={3}
+          index={3 + stepOffset}
           // 还没有终端时「无冲突」只是空成立，显示为待办而不是打勾。
           state={blockingIssueCount > 0 ? 'blocked' : checklist.terminalCount > 0 ? 'done' : 'todo'}
           title={t('paymentTerminalSettings.stepAssign')}

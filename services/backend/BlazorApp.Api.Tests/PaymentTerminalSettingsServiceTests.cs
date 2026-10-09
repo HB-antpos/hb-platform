@@ -410,7 +410,8 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     [Fact]
     public async Task CreateLinklyTerminalAsync_WhenProtectionFails_DoesNotPersistCredential()
     {
-        var service = CreateService(new ThrowingLinklyCredentialProtector());
+        var logger = new CapturingServiceLogger();
+        var service = CreateService(new ThrowingLinklyCredentialProtector(), logger);
         SeedStore("001", "City Store");
 
         var result = await service.CreateLinklyTerminalAsync(
@@ -429,6 +430,11 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
         Assert.False(result.Success);
         Assert.Equal("LINKLY_TERMINAL_CREDENTIAL_PROTECTION_FAILED", result.Code);
         Assert.Empty(await QueryLinklyTerminalRowsAsync("001", "Production"));
+        // 加密失败原先只返回一句“稍后重试”，日志里没有任何线索；现在必须带异常对象记 Error，且不含密码明文。
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Error, entry.Level);
+        Assert.IsType<InvalidOperationException>(entry.Exception);
+        Assert.DoesNotContain("password-sentinel", entry.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1702,12 +1708,15 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
         }
     }
 
-    private PaymentTerminalSettingsService CreateService(LinklyCredentialProtector? protector = null)
+    private PaymentTerminalSettingsService CreateService(
+        LinklyCredentialProtector? protector = null,
+        Microsoft.Extensions.Logging.ILogger<PaymentTerminalSettingsService>? logger = null
+    )
     {
         return new PaymentTerminalSettingsService(
             CreatePOSMSqlSugarContext(_posmDb),
             CreateSqlSugarContext(_mainDb),
-            NullLogger<PaymentTerminalSettingsService>.Instance,
+            logger ?? NullLogger<PaymentTerminalSettingsService>.Instance,
             protector ?? _linklyCredentialProtector
         );
     }
@@ -1990,6 +1999,23 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     private sealed class LinklyTerminalLockProbe
     {
         public Guid TerminalId { get; set; }
+    }
+
+    private sealed class CapturingServiceLogger : Microsoft.Extensions.Logging.ILogger<PaymentTerminalSettingsService>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter
+        ) => Entries.Add((logLevel, formatter(state, exception), exception));
     }
 
     private sealed class ThrowingLinklyCredentialProtector : LinklyCredentialProtector

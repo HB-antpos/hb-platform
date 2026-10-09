@@ -120,6 +120,12 @@ export function canActivateLinklyConfiguration(management?: LinklyTerminalManage
     return false
   }
 
+  // 后端激活闸门会拒绝门店环境内任一历史明文（缺少受保护密码）的终端，哪怕它没有被任何 POS 选中，
+  // 所以这里不能只看 Ready / 已选终端。
+  if (management.terminals.some((terminal) => !terminal.hasPassword)) {
+    return false
+  }
+
   const readyTerminalIds = new Set(
     management.terminals
       .filter((terminal) => terminal.pairingState === 'Ready')
@@ -196,6 +202,8 @@ export interface LinklyTerminalConflict {
 
 export interface LinklyActivationChecklist {
   terminalCount: number
+  /** 缺少受保护密码（历史明文）的终端；后端激活闸门要求先重新录入（阻止启用） */
+  missingCredentialTerminals: Array<{ terminalId: string; displayName: string }>
   readyTerminalCount: number
   /** 已启用且选择了 Cloud 终端的 POS 数量 */
   assignedDeviceCount: number
@@ -230,6 +238,9 @@ export function buildLinklyActivationChecklist(
 
   return {
     terminalCount: terminals.length,
+    missingCredentialTerminals: terminals
+      .filter((terminal) => !terminal.hasPassword)
+      .map((terminal) => ({ terminalId: terminal.terminalId, displayName: terminal.displayName })),
     readyTerminalCount: readyTerminalIds.size,
     assignedDeviceCount: enabledSelections.length,
     conflicts: [...devicesByTerminal.entries()]

@@ -18,6 +18,8 @@
     "stepAddTerminals": "Add terminals",
     "stepAddTerminalsDone": "{{count}} added",
     "stepAddTerminalsTodo": "No terminals yet. Use Add terminal.",
+    "stepCredentials": "Re-enter terminal passwords",
+    "stepCredentialsBlocked": "Missing password for: {{names}}. Edit the terminal and enter the password again.",
     "stepPair": "Pair on POS",
     "stepPairDone": "{{ready}} / {{total}} ready",
     "stepPairTodo": "Enter the Pair Code in the POS settings screen",
