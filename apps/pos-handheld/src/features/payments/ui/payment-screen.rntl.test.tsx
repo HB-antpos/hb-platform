@@ -807,6 +807,43 @@ test("Unknown 隐藏新付款和 Linkly 按键，只允许恢复同一 attempt",
   expect(linkly.sendCalls).toHaveLength(0);
 });
 
+test("H7：需要恢复的付款提供支付恢复中心入口；正常付款页不显示", async () => {
+  const runtime = new ScreenPaymentRuntime();
+  runtime.recovery = snapshot({
+    status: "recovery-required",
+    provider: "linkly-cloud",
+    attemptId: "attempt-linkly-unknown",
+    errorCode: "PAYMENT_STATUS_UNKNOWN",
+    allowedActions: actions({ recover: true }),
+  });
+  const opened = jest.fn();
+  const unknown = await render(
+    <PaymentScreen
+      locale="en"
+      onBack={() => undefined}
+      onOpenRecoveryCenter={opened}
+      presenter={screenPresenter(runtime, new ScreenLinklyOperator())}
+      showStatusStrip={false}
+    />,
+  );
+  await waitFor(() =>
+    expect(unknown.getByTestId("payment-open-recovery-center")).toBeTruthy(),
+  );
+  await fireEvent.press(unknown.getByTestId("payment-open-recovery-center"));
+  expect(opened).toHaveBeenCalledTimes(1);
+  await unknown.unmount();
+
+  const idle = await render(
+    <PaymentScreen
+      locale="en"
+      onOpenRecoveryCenter={opened}
+      presenter={screenPresenter(new ScreenPaymentRuntime(), new ScreenLinklyOperator())}
+      showStatusStrip={false}
+    />,
+  );
+  expect(idle.queryByTestId("payment-open-recovery-center")).toBeNull();
+});
+
 test("Blocked 礼券撤券显示主管作废入口，作废后回到可继续收款的支付页", async () => {
   class VoidingScreenRuntime extends ScreenPaymentRuntime {
     public readonly voidInputs: unknown[] = [];

@@ -3,6 +3,7 @@ import {
   deriveLinklyAttemptTxnRef,
 } from "@hb/pos-payments-core/features/payments/linkly-attempt-txn-ref";
 import { paymentProviderAmountCents } from "@hb/pos-payments-core/features/payments/payment-amount";
+import { approvedAmountMismatchResponseCode } from "@hb/pos-domain/features/payment-recovery/payment-recovery-center-contract";
 import { LinklySupervisorAckSessionNotFoundError } from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
 
 import type { PaymentStatusQueryResult } from "../runtime/payment-status-query-result";
@@ -1412,7 +1413,9 @@ type ApprovedEvidenceResult =
       code:
         | "LINKLY_CARD_EVIDENCE_REQUIRED"
         | "LINKLY_CARD_EVIDENCE_INVALID"
-        | "LINKLY_CARD_EVIDENCE_MISMATCH";
+        | "LINKLY_CARD_EVIDENCE_MISMATCH"
+        // 批准但实扣金额不符：LINKLY_APPROVED_AMOUNT_MISMATCH:<终端实扣分值>
+        | `LINKLY_APPROVED_AMOUNT_MISMATCH:${number}`;
     }>;
 
 function buildApprovedCardSyncEvidence(
@@ -1464,7 +1467,6 @@ function buildApprovedCardSyncEvidence(
     return { ok: false, code: "LINKLY_CARD_EVIDENCE_MISMATCH" };
   }
   if (
-    evidence.amountCents !== expectedAmountCents ||
     evidence.txnRef === null ||
     evidence.refundReference === null ||
     !sameIdentity(evidence.txnRef, session.txnRef) ||
@@ -1477,6 +1479,11 @@ function buildApprovedCardSyncEvidence(
       !sameIdentity(attempt.references.rfn, evidence.refundReference))
   ) {
     return { ok: false, code: "LINKLY_CARD_EVIDENCE_MISMATCH" };
+  }
+  if (evidence.amountCents !== expectedAmountCents) {
+    // 终端批准、身份一致，但实扣金额与订单不符：不是“未知交易”，必须把实扣金额带给主管，
+    // 避免按未收款处理后顾客被再次扣款。
+    return { ok: false, code: approvedAmountMismatchResponseCode(evidence.amountCents) };
   }
 
   return { ok: true, value: evidence };

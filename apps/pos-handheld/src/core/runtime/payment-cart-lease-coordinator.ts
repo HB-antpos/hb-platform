@@ -162,6 +162,58 @@ implements PaymentCartLeasePort {
     await this.releaseHeld(held);
   }
 
+  /**
+   * 恢复中心已先耐久接管原订单；随后释放支付 lease 并开启空白交易。
+   * 若清车失败，case 仍已安全保存在数据库，重启不会重新占用当前收银车。
+   */
+  public async clearAfterRecoveryParked(
+    checkoutIntentId: string,
+    orderGuid: string,
+  ): Promise<void> {
+    requiredText(orderGuid, "order guid");
+    const expectedIntent = requiredText(checkoutIntentId, "checkout intent id");
+    const held = this.held;
+    if (!held || held.publicLease.checkoutIntentId !== expectedIntent) {
+      throw paymentLeaseError(
+        "PAYMENT_CART_LEASE_CONFLICT",
+        "Parked payment does not own the active cart lease.",
+      );
+    }
+    // case 已先耐久落库，因此可在 exclusive lease 内原子清车；清车失败时保留 lease 供重试。
+    held.sessionLease.clearAfterRecoveryParked(requiredText(orderGuid, "order guid"));
+    await this.releaseHeld(held);
+  }
+
+  /** 仅供恢复中心在“已落库、清车前崩溃”后定位仍持有的精确 checkout。 */
+  public heldCheckoutIntentId(): string | null {
+    return this.held?.publicLease.checkoutIntentId ?? null;
+  }
+
+  /** 仅在当前销售车为空时，把所选 parked 订单恢复为原 cart/lease。 */
+  public async prepareParkedRecovery(
+    material: PaymentCartRecoveryMaterial,
+    assertSession: () => void = () => undefined,
+  ): Promise<PaymentCartLease> {
+    const normalized = normalizeRecoveryMaterial(material);
+    assertSession();
+    if (this.held) {
+      return assertHeldMatches(this.held, {
+        checkoutIntentId: normalized.checkoutIntentId,
+        expectedRevision: normalized.cart.revision,
+      });
+    }
+    const current = this.activeCart.read();
+    if (current.cart.lines.length > 0) {
+      throw paymentLeaseError(
+        ACTIVE_PRICING_CART_BUSY,
+        "A current sale must be completed or cleared before payment recovery.",
+      );
+    }
+    const lease = await this.restoreRecoveryLease(normalized);
+    assertSession();
+    return lease;
+  }
+
   private async initializeRecoveryOnce(): Promise<PaymentCartLease | null> {
     const material = await this.recovery.findBlockingCart();
     if (!material) {

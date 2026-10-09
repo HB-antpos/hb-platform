@@ -1415,6 +1415,16 @@ class SqlitePaymentAttemptRepository implements PaymentAttemptRepositoryPort {
     const row = await database.getFirst<PaymentRow>(
       `SELECT p.* FROM payment_attempts p
        WHERE p.order_guid = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM payment_recovery_cases resolved
+           WHERE resolved.attempt_id = p.attempt_id
+             AND resolved.order_guid = p.order_guid
+             AND resolved.state = 'manual-unpaid'
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM manual_payment_tender_bindings manual
+           WHERE manual.attempt_id = p.attempt_id
+         )
          AND (
            p.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
            OR (p.state = 'Approved' AND NOT EXISTS (

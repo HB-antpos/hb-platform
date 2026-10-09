@@ -1944,6 +1944,98 @@ test("真实 SQLite + 编排器：主管未退款先让 provider 真实结果优
   }
 });
 
+test("真实 SQLite：M34 终端批准但实扣金额不符：展示实扣金额，禁止确认已收款，未收款必须确认冲正并留审计", async () => {
+  await withDatabase("payment-recovery-approved-amount-mismatch", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("mismatch-order", "mismatch-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const input = draftInput({ draftId: "mismatch-draft" });
+    const created = await drafts.createOrReuseDraft(input);
+    await insertAttempt(connection, {
+      attemptId: "mismatch-attempt", idempotencyKey: "mismatch-key", orderGuid: created.orderGuid,
+      provider: "linkly-cloud", operation: "purchase", amountCents: input.cart.actualAmount.cents, state: "Unknown",
+    });
+    const terminalCharged = input.cart.actualAmount.cents + 500;
+    await connection.run(
+      "UPDATE payment_attempts SET session_id = 'mismatch-session', provider_environment = 'Sandbox', txn_ref = 'TXN-MISMATCH', provider_response_code = ? WHERE attempt_id = 'mismatch-attempt'",
+      [`LINKLY_APPROVED_AMOUNT_MISMATCH:${terminalCharged}`],
+    );
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `mismatch-record-${++value}`; })(),
+      (() => { let value = 0; return () => `mismatch-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const supervisor = { cashierId: "supervisor-mm", cashierName: "Supervisor", userGuid: "user-supervisor-mm" };
+    const requester = { cashierId: "cashier-mm", cashierName: "Cashier", userGuid: "user-cashier-mm" };
+    const parked = await center.parkExact({
+      ...input.identity, orderGuid: created.orderGuid, attemptId: "mismatch-attempt", actionId: "mismatch-park", actor: supervisor,
+    });
+    assert.equal(parked.terminalAmountMismatchCents, terminalCharged);
+    assert.equal(parked.status, "result-unknown");
+    const command = (finding: "paid" | "unpaid" | "uncertain", actionId: string, extra: Record<string, unknown> = {}) => ({
+      ...input.identity,
+      recordId: parked.recordId,
+      actionId,
+      finding,
+      verifiedAmountCents: finding === "paid" ? input.cart.actualAmount.cents : null,
+      evidenceReference: "terminal receipt 9001",
+      note: "Terminal shows a different amount",
+      authorizationId: `auth-${actionId}`,
+      supervisorActor: supervisor,
+      requestingActor: requester,
+      ...extra,
+    });
+    const reconciliationId = await center.recordProviderReconciliation({
+      ...input.identity, recordId: parked.recordId, reconciliationId: "mismatch-reconciliation",
+    });
+
+    // 即使主管输入订单金额，也不能把实扣不同金额的交易确认为已收款。
+    await assert.rejects(
+      () => center.recordManualFinding(command("paid", "mismatch-paid", { reconciliationId })),
+      /PAYMENT_RECOVERY_APPROVED_AMOUNT_MISMATCH/,
+    );
+    // 未收款不带确认：拒绝（顾客已被扣款，不能悄悄放行再次收款）。
+    await assert.rejects(
+      () => center.recordManualFinding(command("unpaid", "mismatch-unpaid-no-ack")),
+      /PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED/,
+    );
+    await assert.rejects(
+      () => center.recordManualFinding(command("unpaid", "mismatch-unpaid-false-ack", { terminalChargeAcknowledged: false })),
+      /PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED/,
+    );
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_recovery_actions"), 0);
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'PAYMENT_RECOVERY_REVERSAL_REQUIRED'"),
+      0,
+    );
+
+    // 仍未知不受影响，也不产生冲正需求。
+    await center.recordManualFinding(command("uncertain", "mismatch-uncertain"));
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'PAYMENT_RECOVERY_REVERSAL_REQUIRED'"),
+      0,
+    );
+
+    // 明确确认后登记冲正需求：结论 + 冲正审计 + 后端会话 ACK 同事务。
+    const resolved = await center.recordManualFinding(
+      command("unpaid", "mismatch-unpaid", { terminalChargeAcknowledged: true }),
+    );
+    assert.equal(resolved.record.status, "manual-unpaid");
+    const audit = await connection.getFirst<{ payload_json: unknown; scope_store_code: unknown }>(
+      "SELECT payload_json, scope_store_code FROM audit_events WHERE event_type = 'PAYMENT_RECOVERY_REVERSAL_REQUIRED'",
+    );
+    assert.ok(audit);
+    const payload = JSON.parse(String(audit.payload_json)) as Record<string, unknown>;
+    assert.equal(payload.terminalChargedCents, terminalCharged);
+    assert.equal(payload.orderAmountCents, input.cart.actualAmount.cents);
+    assert.equal(payload.attemptId, "mismatch-attempt");
+    assert.equal(payload.transactionReference, "TXN-MISMATCH");
+    assert.equal(audit.scope_store_code, input.identity.storeCode);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_supervisor_session_acks"), 1);
+  });
+});
+
 test("真实 SQLite：人工仍未知可把精确 case 交回原支付上下文", async () => {
   await withDatabase("payment-recovery-manual-uncertain-resume", async (connection) => {
     await migrateFresh(connection);

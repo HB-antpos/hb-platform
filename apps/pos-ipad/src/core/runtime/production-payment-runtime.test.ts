@@ -2031,6 +2031,7 @@ function recoveryCenterRecord(input: Readonly<{
     status: input.status,
     transactionReference: null,
     receiptReference: null,
+    terminalAmountMismatchCents: null,
     lines: [{ id: "line-1", name: "Tea", quantity: "1", amountCents: 1_000 }],
     events: [],
   };

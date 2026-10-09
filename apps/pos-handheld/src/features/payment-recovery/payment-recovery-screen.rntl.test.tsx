@@ -20,6 +20,11 @@ jest.mock("react-i18next", () => ({
   }),
 }));
 
+async function openDetails(screen: Awaited<ReturnType<typeof render>>, recordId = "attempt-1") {
+  await fireEvent.press(screen.getByTestId(`payment-recovery-record-${recordId}`));
+  await waitFor(() => expect(screen.getByTestId("payment-recovery-details-pane")).toBeTruthy());
+}
+
 const pendingRecord: PaymentRecoveryRecord = {
   id: "attempt-1",
   orderGuid: "11854d1a-9c27-4a04-86e1-b7f8f606c688",
@@ -43,6 +48,7 @@ const pendingRecord: PaymentRecoveryRecord = {
 test("已有付款待补订单时保留恢复入口，不允许再次人工改写", async () => {
   const { service } = createService({ ...pendingRecord, status: "charged-order-incomplete" });
   const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await openDetails(screen);
   expect(screen.getByTestId("payment-recovery-recover-original")).toBeTruthy();
   expect(screen.queryByTestId("payment-recovery-open-manual")).toBeNull();
 });
@@ -93,19 +99,22 @@ function createService(record: PaymentRecoveryRecord = pendingRecord) {
 beforeEach(() => {
   mockLanguage = "en";
   Dimensions.set({
-    window: { width: 1_024, height: 768, scale: 2, fontScale: 1 },
-    screen: { width: 1_024, height: 768, scale: 2, fontScale: 1 },
+    window: { width: 390, height: 844, scale: 3, fontScale: 1 },
+    screen: { width: 390, height: 844, scale: 3, fontScale: 1 },
   });
 });
 
-test("恢复中心按设计展示双栏、原支付证据、历史和不阻断下一单入口", async () => {
+test("手持恢复中心单栏展示：先列表，点开后看原支付证据、历史和不阻断下一单入口", async () => {
   const { service, recoveries } = createService();
   const onBack = jest.fn();
   const screen = await render(<PaymentRecoveryScreen onBack={onBack} service={service} />);
 
   expect(screen.getByText("Payment recovery centre")).toBeTruthy();
   expect(screen.getByTestId("payment-recovery-list-pane")).toBeTruthy();
-  expect(screen.getByTestId("payment-recovery-details-pane")).toBeTruthy();
+  expect(screen.queryByTestId("payment-recovery-details-pane")).toBeNull();
+
+  await openDetails(screen);
+  expect(screen.queryByTestId("payment-recovery-list-pane")).toBeNull();
   expect(screen.getAllByText("AU$0.99").length).toBeGreaterThan(0);
   expect(screen.getByText("2609101317495BC4")).toBeTruthy();
   expect(screen.getByText("Card payment attempt saved")).toBeTruthy();
@@ -118,34 +127,32 @@ test("恢复中心按设计展示双栏、原支付证据、历史和不阻断�
 
   for (const testID of [
     "payment-recovery-back-to-sale",
-    "payment-recovery-filter-pending",
-    "payment-recovery-filter-failed",
-    "payment-recovery-filter-resolved",
-    "payment-recovery-refresh",
+    "payment-recovery-back-to-list",
     "payment-recovery-recover-original",
     "payment-recovery-open-manual",
   ]) {
     expect(StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight)
       .toBeGreaterThanOrEqual(PAYMENT_RECOVERY_MIN_TOUCH_TARGET);
   }
-});
+  expect(PAYMENT_RECOVERY_MIN_TOUCH_TARGET).toBe(48);
 
-test("较窄横屏收紧双栏间距并保留可触达的恢复操作", async () => {
-  Dimensions.set({
-    window: { width: 834, height: 1_194, scale: 2, fontScale: 1 },
-    screen: { width: 834, height: 1_194, scale: 2, fontScale: 1 },
-  });
-  const { service } = createService();
-  const screen = await render(<PaymentRecoveryScreen service={service} />);
-  expect(StyleSheet.flatten(screen.getByTestId("payment-recovery-list-pane").props.style))
-    .toEqual(expect.objectContaining({ minWidth: 310, width: "42%" }));
-  expect(screen.getByTestId("payment-recovery-recover-original")).toBeTruthy();
-  expect(screen.getByTestId("payment-recovery-open-manual")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("payment-recovery-back-to-list"));
+  expect(screen.getByTestId("payment-recovery-list-pane")).toBeTruthy();
+  for (const testID of [
+    "payment-recovery-filter-pending",
+    "payment-recovery-filter-failed",
+    "payment-recovery-filter-resolved",
+    "payment-recovery-refresh",
+  ]) {
+    expect(StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight)
+      .toBeGreaterThanOrEqual(PAYMENT_RECOVERY_MIN_TOUCH_TARGET);
+  }
 });
 
 test("人工核实默认三项未选且未确认，完整有效证据和等额金额后才允许提交", async () => {
   const { service, submissions } = createService();
   const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await openDetails(screen);
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
 
   for (const finding of ["paid", "unpaid", "uncertain"]) {
@@ -182,6 +189,7 @@ test("确认未扣款不提交伪造金额，并显示完整中文主管验证�
   const { service, submissions } = createService();
   const screen = await render(<PaymentRecoveryScreen service={service} />);
   expect(screen.getByText("支付恢复中心")).toBeTruthy();
+  await openDetails(screen);
   expect(screen.getByText("禁止再次扣款，请先查询原支付尝试。")).toBeTruthy();
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
@@ -202,6 +210,7 @@ test("提交时隐藏人工面板让主管原生弹窗显示，授权失败后�
     rejectAuthorization = reject;
   }));
   const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await openDetails(screen);
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-paid"));
   await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-amount"), "0.99");
@@ -225,6 +234,7 @@ test("人工未扣款与明确失败可继续原单，中英文动作准确", as
       const { service, recoveries } = createService({ ...pendingRecord, status });
       service.setFilter(status === "manual-unpaid" ? "resolved" : "failed");
       const screen = await render(<PaymentRecoveryScreen service={service} />);
+      await openDetails(screen);
       expect(screen.getByText(language === "en" ? "Continue payment for original order" : "继续原订单付款")).toBeTruthy();
       await fireEvent.press(screen.getByTestId("payment-recovery-recover-original"));
       expect(recoveries).toEqual([pendingRecord.id]);
@@ -239,7 +249,7 @@ test("M34：终端批准不同金额时展示实扣金额，禁用已收款，�
   const record: PaymentRecoveryRecord = { ...pendingRecord, amountCents: 1_000, terminalAmountMismatchCents: 1_500 };
   const { service, submissions } = createService(record);
   const screen = await render(<PaymentRecoveryScreen service={service} />);
-
+  await openDetails(screen);
   expect(screen.getByTestId("payment-recovery-mismatch-warning")).toBeTruthy();
   expect(screen.getByText("Terminal charged")).toBeTruthy();
   expect(screen.getAllByText("AU$15.00").length).toBeGreaterThan(0);
@@ -269,7 +279,7 @@ test("M34：终端批准不同金额时展示实扣金额，禁用已收款，�
 test("M34：无金额不符的记录不显示实扣警告与冲正确认", async () => {
   const { service } = createService();
   const screen = await render(<PaymentRecoveryScreen service={service} />);
-
+  await openDetails(screen);
   expect(screen.queryByTestId("payment-recovery-mismatch-warning")).toBeNull();
   await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
   await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));

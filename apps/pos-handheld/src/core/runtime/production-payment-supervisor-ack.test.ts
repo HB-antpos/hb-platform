@@ -7,6 +7,10 @@ import { createProductionPaymentRuntime } from "./production-payment-runtime";
 import type { PaymentAttempt, PaymentProvider } from "@/core/contracts";
 import type { PosDatabase } from "@/core/db/pos-database";
 import type {
+  ManualPaymentRecoveryFindingInput,
+  PaymentRecoveryCenterRecord,
+} from "@/core/db/sqlite-payment-recovery-center-store";
+import type {
   PosRepositoryBundle,
   SensitivePayloadEncryptor,
 } from "@/core/db/sqlite-repositories";
@@ -48,6 +52,30 @@ function linklyAttempt(state: PaymentAttempt["state"] = "Unknown"): PaymentAttem
   };
 }
 
+function record(): PaymentRecoveryCenterRecord {
+  return {
+    recordId: "recovery-record-1",
+    checkoutIntentId: "checkout-1",
+    orderGuid: "order-1",
+    attemptId: "linkly-attempt-1",
+    storeCode: "S1",
+    deviceCode: "IPAD-1",
+    terminalName: null,
+    occurredAtIso: "2026-07-28T00:00:00.000Z",
+    amountCents: 1_000,
+    provider: "linkly-cloud",
+    attemptState: "Unknown",
+    orderState: "Draft",
+    isParked: true,
+    status: "result-unknown",
+    transactionReference: null,
+    receiptReference: null,
+    terminalAmountMismatchCents: null,
+    lines: [],
+    events: [],
+  };
+}
+
 type QueueRow = { attemptId: string; acknowledgedAtIso: string | null; failures: string[] };
 
 function harness(options: Readonly<{
@@ -64,6 +92,7 @@ function harness(options: Readonly<{
   let supervisorAckCalls = 0;
   let plainAckCalls = 0;
   let failuresLeft = options.failAckTimes ?? 0;
+  const findings: ManualPaymentRecoveryFindingInput[] = [];
   const provider: Record<string, unknown> = {
     provider: "linkly-cloud",
     async acknowledge() { plainAckCalls += 1; },
@@ -96,6 +125,7 @@ function harness(options: Readonly<{
       rows.get(attemptId)?.failures.push(code);
     },
   };
+  const current = record();
   const database = {
     paymentDraftRecovery: () => ({
       async assertPersisted() {},
@@ -103,6 +133,15 @@ function harness(options: Readonly<{
       async readDraft() { return null; },
       async hasLegacyLinklyRecovery() { return false; },
       async findPendingLinklyAcknowledgement() { return null; },
+    }),
+    paymentRecoveryCenter: () => ({
+      async list() { return [current]; },
+      async findCurrentCandidate() { return null; },
+      async getExact() { return current; },
+      async recordManualFinding(input: ManualPaymentRecoveryFindingInput) {
+        findings.push(input);
+        return { record: current, actionId: input.actionId, authorizationId: input.authorizationId, replayed: false };
+      },
     }),
     manualPaymentOrderCommitter: () => ({ async completeManualPaymentOrder() { return { replayed: false }; } }),
     paymentActionBindings: () => ({}),
@@ -156,37 +195,71 @@ function harness(options: Readonly<{
       bindVoucherContextProvider() {},
       createLinklyOperator() { return null; },
     },
+    authorizeRecovery: async (_request, run) => run({
+      authorizationId: "authorization-1",
+      authorizingActor: { cashierId: "supervisor-2", cashierName: "Supervisor", userGuid: "supervisor-user-2" },
+    }),
     async drainFulfilment() {},
   });
   return {
-    runtime, rows,
+    runtime, rows, findings,
     calls: () => ({ supervisorAckCalls, plainAckCalls }),
   };
 }
 
+const unpaid = {
+  recordId: "recovery-record-1",
+  finding: "unpaid" as const,
+  verifiedAmountCents: null,
+  evidenceReference: "terminal-history",
+  note: "No charge found on the terminal",
+};
 
 async function settle(): Promise<void> {
   for (let index = 0; index < 20; index += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-test("M17（手持）：冷启动 initializeRecovery 会补发上次遗留的主管结案 ACK", async () => {
+test("M17：主管确认未收款并持久化结论后，向后端补发 supervisorResolved ACK 并标记队列", async () => {
+  const h = harness();
+  const center = h.runtime.service.recoveryCenter;
+  assert.ok(center);
+  await center.submitManualVerification(unpaid);
+  assert.equal(h.findings.length, 1, "人工结论必须先落库");
+  assert.deepEqual(h.calls(), { supervisorAckCalls: 1, plainAckCalls: 0 });
+  assert.notEqual(h.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null);
+});
+
+test("M17：ACK 失败不回滚人工结论、只记录错误并保留队列；打开恢复中心时自动重试成功", async () => {
   const h = harness({ failAckTimes: 1 });
-  await h.runtime.initializeRecovery();
-  await settle();
-  assert.equal(h.calls().supervisorAckCalls, 1);
-  assert.equal(h.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null, "失败保留队列");
+  const center = h.runtime.service.recoveryCenter;
+  assert.ok(center);
+  await center.submitManualVerification(unpaid);
+  assert.equal(h.findings.length, 1);
+  assert.equal(h.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null);
   assert.deepEqual(h.rows.get("linkly-attempt-1")?.failures, ["LINKLY_NETWORK_DOWN"]);
 
-  await h.runtime.supervisorAcknowledgements?.drain();
+  await center.list();
+  await settle();
   assert.equal(h.calls().supervisorAckCalls, 2);
   assert.notEqual(h.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null);
-  await h.runtime.supervisorAcknowledgements?.drain();
+
+  await center.list();
+  await settle();
   assert.equal(h.calls().supervisorAckCalls, 2, "已确认的队列行不再重复 POST");
 });
 
-test("M17（手持）：没有入队或 provider 已有终态时不发主管结案 ACK；provider 不支持时不暴露入口", async () => {
+test("M17：冷启动 initializeRecovery 会补发上次崩溃遗留的 ACK", async () => {
+  const h = harness();
+  await h.runtime.initializeRecovery();
+  await settle();
+  assert.equal(h.calls().supervisorAckCalls, 1);
+  assert.notEqual(h.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null);
+});
+
+test("M17：没有入队（仍未知结论）时不发 ACK；迟到的 provider 终态由既有终态 ACK 管线负责", async () => {
   const none = harness({ queued: false });
   await none.runtime.initializeRecovery();
+  await none.runtime.service.recoveryCenter?.list();
   await settle();
   assert.deepEqual(none.calls(), { supervisorAckCalls: 0, plainAckCalls: 0 });
 
@@ -194,7 +267,14 @@ test("M17（手持）：没有入队或 provider 已有终态时不发主管结�
   await late.runtime.initializeRecovery();
   await settle();
   assert.deepEqual(late.calls(), { supervisorAckCalls: 0, plainAckCalls: 0 });
+  assert.notEqual(late.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null);
+});
 
-  const unsupported = harness({ withSupervisorAck: false });
-  assert.equal(unsupported.runtime.supervisorAcknowledgements, null);
+test("M17：provider 不支持 supervisorResolved ACK 时人工结论照常保存，队列行保留", async () => {
+  const h = harness({ withSupervisorAck: false });
+  const center = h.runtime.service.recoveryCenter;
+  assert.ok(center);
+  await center.submitManualVerification(unpaid);
+  assert.equal(h.findings.length, 1);
+  assert.equal(h.rows.get("linkly-attempt-1")?.acknowledgedAtIso, null);
 });

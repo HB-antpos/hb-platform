@@ -43,6 +43,60 @@ test("恢复只使用 attempt 冻结的 Sandbox 环境，不随当前 Production
   ]);
 });
 
+test("人工结论后 Square 查询缺少 checkout 不创建，已有 checkout 只 GET", async () => {
+  const transport = new ScriptedTransport([ok({ checkoutId: "checkout-existing", environment: "Sandbox", status: "PENDING", paymentIds: [] })]);
+  const adapter = createAdapter(transport);
+  assert.equal((await adapter.queryExistingPayment(attempt({ state: "Unknown" }))).queryVerified, false);
+  assert.equal(transport.calls.length, 0);
+  assert.equal((await adapter.queryExistingPayment(attempt({ state: "Unknown", references: references({ checkoutId: "checkout-existing" }) }))).queryVerified, true);
+  assert.equal(transport.calls.length, 1);
+  assert.equal(transport.calls[0]?.method, "GET");
+});
+
+test("Square 只读查询失败或身份冲突不能作为人工收款的有效查询证据", async () => {
+  for (const responses of [
+    [new Error("GET timeout")],
+    [{ status: 503, data: { success: false } }],
+    [ok({ checkoutId: "other-checkout", environment: "Sandbox", status: "PENDING" })],
+    [ok({ checkoutId: "checkout-1", environment: "Sandbox", status: "COMPLETED", paymentIds: ["payment-1"] }), new Error("payment timeout")],
+  ]) {
+    const result = await createAdapter(new ScriptedTransport(responses)).queryExistingPayment(
+      attempt({ state: "Unknown", references: references({ checkoutId: "checkout-1" }) }),
+    );
+    assert.equal(result.state, "Unknown");
+    assert.equal(result.queryVerified, false);
+  }
+});
+
+test("恢复只使用 attempt 冻结的 Sandbox 环境，不随当前 Production 配置漂移", async () => {
+  const transport = new ScriptedTransport([
+    ok({
+      checkoutId: "checkout-sandbox",
+      environment: "Sandbox",
+      status: "CANCELED",
+    }),
+  ]);
+  const adapter = createAdapter(transport, { environment: "Production" });
+
+  assert.equal(adapter.providerEnvironment, "Production");
+  const recovered = await adapter.recover(
+    attempt({
+      providerEnvironment: "Sandbox",
+      state: "Pending",
+      references: references({ checkoutId: "checkout-sandbox" }),
+    }),
+  );
+
+  assert.equal(recovered.state, "Cancelled");
+  assert.deepEqual(transport.calls, [
+    {
+      method: "GET",
+      url: "/api/v1/square/checkouts/checkout-sandbox",
+      params: { environment: "Sandbox" },
+    },
+  ]);
+});
+
 test("Square 状态查询、取消、dismiss 与退款统一路由到 attempt 冻结环境", async () => {
   const transport = new ScriptedTransport([
     ok({ checkoutId: "checkout-1", environment: "Sandbox", status: "CANCELED" }),

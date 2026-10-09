@@ -3,7 +3,10 @@ import {
   deriveLinklyAttemptTxnRef,
 } from "@hb/pos-payments-core/features/payments/linkly-attempt-txn-ref";
 import { paymentProviderAmountCents } from "@hb/pos-payments-core/features/payments/payment-amount";
+import { approvedAmountMismatchResponseCode } from "@hb/pos-domain/features/payment-recovery/payment-recovery-center-contract";
 import { LinklySupervisorAckSessionNotFoundError } from "@hb/pos-payments-core/features/payments/supervisor-resolution-acknowledgement-service";
+
+import type { PaymentStatusQueryResult } from "../runtime/payment-status-query-result";
 
 import {
   HbposApiError,
@@ -408,6 +411,35 @@ export class LinklyCloudBackendProvider implements OnlinePaymentPort {
       signal: new AbortController().signal,
       deadlineAtMs: Date.now() + LINKLY_RECOVERY_DEADLINE_MS,
     });
+  }
+
+  /** 人工结论之后只允许 GET 原交易状态；绝不创建、POST recover 或发送终端按键。 */
+  public async queryExistingPayment(
+    attempt: PaymentAttempt,
+    control?: LinklyPaymentRecoveryControl,
+  ): Promise<PaymentStatusQueryResult> {
+    linklyProviderAmountCents(attempt);
+    const environment = frozenEnvironmentOrNull(attempt);
+    const sessionId = attempt.references.sessionId;
+    if (attempt.state === "Created" || environment === null || !sessionId) {
+      return { ...unknownResult(attempt, "LINKLY_STATUS_IDENTITY_REQUIRED"), queryVerified: false };
+    }
+    const remaining = control ? recoveryTimeoutMs(control) : 10_000;
+    if (remaining === null) return { ...unknownResult(attempt, "LINKLY_RECOVERY_DEADLINE_EXCEEDED"), queryVerified: false };
+    let status: LinklyCloudBackendSession;
+    try {
+      status = await this.api.status(environment, sessionId, control?.signal, Math.min(remaining, 10_000));
+    } catch (error) {
+      if (isNotFound(error)) return { ...unknownResult(attempt, "LINKLY_RECOVERY_SESSION_NOT_FOUND"), queryVerified: false };
+      throw error;
+    }
+    if (!sameSessionEnvironment(status, sessionId, environment) ||
+      (attempt.references.txnRef !== null && !sameIdentity(status.txnRef, attempt.references.txnRef))) {
+      return { ...unknownResult(attempt, "LINKLY_RECOVERY_CONTEXT_MISMATCH"), queryVerified: false };
+    }
+    const result = toPaymentResult(status, attempt);
+    // 服务端明确未知也能作为一次有效查询；批准响应因证据校验降级时不能人工补成已收款。
+    return { ...result, queryVerified: sessionState(status) !== "Approved" || result.state === "Approved" };
   }
 
   public async recoverWithControl(
@@ -1381,7 +1413,9 @@ type ApprovedEvidenceResult =
       code:
         | "LINKLY_CARD_EVIDENCE_REQUIRED"
         | "LINKLY_CARD_EVIDENCE_INVALID"
-        | "LINKLY_CARD_EVIDENCE_MISMATCH";
+        | "LINKLY_CARD_EVIDENCE_MISMATCH"
+        // 批准但实扣金额不符：LINKLY_APPROVED_AMOUNT_MISMATCH:<终端实扣分值>
+        | `LINKLY_APPROVED_AMOUNT_MISMATCH:${number}`;
     }>;
 
 function buildApprovedCardSyncEvidence(
@@ -1433,7 +1467,6 @@ function buildApprovedCardSyncEvidence(
     return { ok: false, code: "LINKLY_CARD_EVIDENCE_MISMATCH" };
   }
   if (
-    evidence.amountCents !== expectedAmountCents ||
     evidence.txnRef === null ||
     evidence.refundReference === null ||
     !sameIdentity(evidence.txnRef, session.txnRef) ||
@@ -1446,6 +1479,11 @@ function buildApprovedCardSyncEvidence(
       !sameIdentity(attempt.references.rfn, evidence.refundReference))
   ) {
     return { ok: false, code: "LINKLY_CARD_EVIDENCE_MISMATCH" };
+  }
+  if (evidence.amountCents !== expectedAmountCents) {
+    // 终端批准、身份一致，但实扣金额与订单不符：不是“未知交易”，必须把实扣金额带给主管，
+    // 避免按未收款处理后顾客被再次扣款。
+    return { ok: false, code: approvedAmountMismatchResponseCode(evidence.amountCents) };
   }
 
   return { ok: true, value: evidence };

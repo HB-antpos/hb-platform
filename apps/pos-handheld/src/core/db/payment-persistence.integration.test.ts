@@ -30,6 +30,9 @@ import {
 } from "./sqlite-repositories";
 import { SqliteReturnApiAttemptStore } from "./sqlite-return-api-attempt-store";
 import { ProductionReturnOnlineRefundRouter } from "../runtime/production-return-online-refund-router";
+import { SqliteManualPaymentOrderCommitter } from "./sqlite-manual-payment-committer";
+import { SqliteOrderSyncMaterialResolver } from "./sqlite-order-sync-material";
+import { SqlitePaymentRecoveryCenterStore } from "./sqlite-payment-recovery-center-store";
 import { SqlitePaymentSupervisorAckQueue } from "@hb/pos-db/core/db/sqlite-payment-supervisor-acknowledgement-queue";
 import { SqliteReturnSupervisorResolutionStore } from "@hb/pos-db/core/db/sqlite-return-supervisor-resolution-store";
 import { DurableReturnExecutionOrchestrator } from "@hb/pos-domain/features/returns/adapters/durable-return-execution-orchestrator";
@@ -2136,6 +2139,675 @@ test("真实 SQLite + 编排器：主管未退款先让 provider 真实结果优
       }
     });
   }
+});
+
+test("真实 SQLite：异常刷卡移交恢复中心后不阻断新订单，人工结论按原 attempt 幂等审计", async () => {
+  await withDatabase("payment-recovery-center", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("recovery-order", "recovery-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const firstInput = draftInput({ draftId: "recovery-draft-1" });
+    const first = await drafts.createOrReuseDraft(firstInput);
+    await insertAttempt(connection, {
+      attemptId: "recovery-attempt-old-declined",
+      idempotencyKey: "recovery-key-old",
+      orderGuid: first.orderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: firstInput.cart.actualAmount.cents,
+      state: "Declined",
+    });
+    await insertAttempt(connection, {
+      attemptId: "recovery-attempt-1",
+      idempotencyKey: "recovery-key-1",
+      orderGuid: first.orderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: firstInput.cart.actualAmount.cents,
+      state: "Unknown",
+    });
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `recovery-record-${++value}`; })(),
+      (() => { let value = 0; return () => `recovery-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const actor = { cashierId: "supervisor-1", cashierName: "Supervisor", userGuid: "user-supervisor-1" };
+    assert.equal(
+      (await center.findCurrentCandidate(firstInput.identity))?.attemptId,
+      "recovery-attempt-1",
+    );
+    const parked = await center.parkExact({
+      ...firstInput.identity,
+      orderGuid: first.orderGuid,
+      attemptId: "recovery-attempt-1",
+      actionId: "park-action-1",
+      actor,
+    });
+    assert.equal(parked.status, "result-unknown");
+    await assert.rejects(
+      () => center.parkExact({
+        ...firstInput.identity,
+        orderGuid: first.orderGuid,
+        attemptId: "recovery-attempt-1",
+        actionId: "park-action-changed",
+        actor,
+      }),
+      /IDENTITY_CONFLICT/,
+    );
+    const earlierAttempt = await center.parkExact({
+      ...firstInput.identity,
+      orderGuid: first.orderGuid,
+      attemptId: "recovery-attempt-old-declined",
+      actionId: "park-action-other",
+      actor,
+    });
+    assert.notEqual(earlierAttempt.recordId, parked.recordId);
+    assert.equal(await drafts.findBlockingRecovery(firstInput.identity), null);
+
+    const second = await drafts.createOrReuseDraft(
+      draftInput({ draftId: "recovery-draft-2" }),
+    );
+    assert.notEqual(second.orderGuid, first.orderGuid);
+    // 已移交 Linkly 异常不能封锁其他通道的新收银，但同一 Linkly 通道仍须失败关闭。
+    await insertAttempt(connection, {
+      attemptId: "recovery-attempt-square-next",
+      idempotencyKey: "recovery-key-square-next",
+      orderGuid: second.orderGuid,
+      provider: "square",
+      operation: "purchase",
+      amountCents: firstInput.cart.actualAmount.cents,
+      state: "Created",
+    });
+    await assert.rejects(
+      () => insertAttempt(connection, {
+        attemptId: "recovery-attempt-linkly-same-lane",
+        idempotencyKey: "recovery-key-linkly-same-lane",
+        orderGuid: second.orderGuid,
+        provider: "linkly-cloud",
+        operation: "purchase",
+        amountCents: firstInput.cart.actualAmount.cents,
+        state: "Created",
+      }),
+      /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/,
+    );
+    assert.equal((await center.list(firstInput.identity)).length, 2);
+
+    const command = {
+      ...firstInput.identity,
+      recordId: parked.recordId,
+      actionId: "manual-action-1",
+      finding: "paid" as const,
+      verifiedAmountCents: firstInput.cart.actualAmount.cents,
+      evidenceReference: "receipt-123",
+      note: "Terminal receipt verified",
+      authorizationId: "supervisor-auth-1",
+      supervisorActor: actor,
+      requestingActor: {
+        cashierId: "cashier-requester-1",
+        cashierName: "Cashier Requester",
+        userGuid: "user-requester-1",
+      },
+      reconciliationId: await center.recordProviderReconciliation({
+        ...firstInput.identity,
+        recordId: parked.recordId,
+        reconciliationId: "reconciliation-1",
+      }),
+    };
+    assert.throws(
+      () => center.recordManualFinding({
+        ...command,
+        actionId: "manual-action-same-actor",
+        requestingActor: actor,
+      }),
+      /REQUESTING_ACTOR_MUST_DIFFER/,
+    );
+    assert.throws(
+      () => center.recordManualFinding({
+        ...command,
+        actionId: "manual-action-same-cashier",
+        requestingActor: { ...command.requestingActor, cashierId: actor.cashierId },
+      }),
+      /REQUESTING_ACTOR_MUST_DIFFER/,
+    );
+    assert.throws(
+      () => center.recordManualFinding({
+        ...command,
+        actionId: "manual-action-same-user",
+        requestingActor: { ...command.requestingActor, userGuid: actor.userGuid },
+      }),
+      /REQUESTING_ACTOR_MUST_DIFFER/,
+    );
+    const resolved = await center.recordManualFinding(command);
+    assert.equal(resolved.record.status, "charged-order-incomplete");
+    assert.equal((await center.recordManualFinding(command)).record.events.length, 2);
+    assert.deepEqual(
+      { ...await connection.getFirst<Record<string, unknown>>(
+        `SELECT record_id, order_guid, attempt_id, action_id, finding
+         FROM payment_recovery_authorizations WHERE authorization_id = ?`,
+        [command.authorizationId],
+      ) },
+      {
+        record_id: parked.recordId,
+        order_guid: first.orderGuid,
+        attempt_id: parked.attemptId,
+        action_id: command.actionId,
+        finding: "paid",
+      },
+    );
+    await assert.rejects(
+      () => center.recordManualFinding({ ...command, evidenceReference: "changed" }),
+      /ACTION_CONFLICT/,
+    );
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events WHERE event_type LIKE 'PAYMENT_RECOVERY_%'"),
+      3,
+    );
+  });
+});
+
+test("真实 SQLite：人工未扣款保留 provider 状态并允许原单重付，迟到 Approved 转人工复核", async () => {
+  await withDatabase("payment-recovery-manual-unpaid", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("manual-unpaid-order", "manual-unpaid-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const input = draftInput({ draftId: "manual-unpaid-draft" });
+    const created = await drafts.createOrReuseDraft(input);
+    await insertAttempt(connection, {
+      attemptId: "manual-unpaid-attempt",
+      idempotencyKey: "manual-unpaid-key",
+      orderGuid: created.orderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: input.cart.actualAmount.cents,
+      state: "Unknown",
+    });
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `manual-unpaid-record-${++value}`; })(),
+      (() => { let value = 0; return () => `manual-unpaid-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const actor = { cashierId: "supervisor-2", cashierName: "Supervisor Two", userGuid: "user-supervisor-2" };
+    const parked = await center.parkExact({
+      ...input.identity,
+      orderGuid: created.orderGuid,
+      attemptId: "manual-unpaid-attempt",
+      actionId: "manual-unpaid-park",
+      actor,
+    });
+    await center.recordManualFinding({
+      ...input.identity,
+      recordId: parked.recordId,
+      actionId: "manual-unpaid-action",
+      finding: "unpaid",
+      verifiedAmountCents: null,
+      evidenceReference: "terminal-history",
+      note: "No debit found",
+      authorizationId: "manual-unpaid-auth",
+      supervisorActor: actor,
+      requestingActor: { cashierId: "cashier-unpaid", cashierName: "Cashier", userGuid: "user-cashier-unpaid" },
+    });
+    assert.equal(
+      String((await connection.getFirst<{ state: unknown }>(
+        "SELECT state FROM payment_attempts WHERE attempt_id = ?",
+        ["manual-unpaid-attempt"],
+      ))?.state),
+      "Unknown",
+    );
+    await center.resumeExact(input.identity, parked.recordId);
+    await assert.rejects(
+      () => center.recordManualFinding({
+        ...input.identity,
+        recordId: parked.recordId,
+        actionId: "manual-unpaid-unparked-action",
+        finding: "unpaid",
+        verifiedAmountCents: null,
+        evidenceReference: "terminal-history",
+        note: "Must be parked first",
+        authorizationId: "manual-unpaid-unparked-auth",
+        supervisorActor: actor,
+        requestingActor: { cashierId: "cashier-unpaid", cashierName: "Cashier", userGuid: "user-cashier-unpaid" },
+      }),
+      /MANUAL_REQUIRES_PARKED_CASE/,
+    );
+    const reparked = await center.parkExact({
+      ...input.identity,
+      orderGuid: created.orderGuid,
+      attemptId: "manual-unpaid-attempt",
+      actionId: "manual-unpaid-repark",
+      actor,
+    });
+    assert.equal(reparked.isParked, true);
+    await center.resumeExact(input.identity, parked.recordId);
+    assert.equal((await drafts.findBlockingRecovery(input.identity))?.kind, "DraftPrepared");
+    const nextOrderGuid = "manual-unpaid-next-order";
+    await insertOrder(connection, {
+      orderGuid: nextOrderGuid, sequence: 811, ...input.identity,
+      cashierId: "cashier-next", amountCents: input.cart.actualAmount.cents,
+      state: "Draft", syncProvenance: TEST_SYNC_PROVENANCE,
+    });
+    await insertActivePaymentDraft(connection, nextOrderGuid, input.identity);
+    await insertAttempt(connection, {
+      attemptId: "manual-unpaid-next-order-attempt",
+      idempotencyKey: "manual-unpaid-next-order-key",
+      orderGuid: nextOrderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: input.cart.actualAmount.cents,
+      state: "Created",
+    });
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Declined', updated_at_iso = ? WHERE attempt_id = ?",
+      [T2, "manual-unpaid-next-order-attempt"],
+    );
+    const repositories = createSqliteRepositories(connection, {
+      nowIso: () => T2,
+      createLeaseId: () => "manual-unpaid-lease",
+      encryptor,
+    });
+    assert.equal(await repositories.payments.findBlocking(created.orderGuid), null);
+    assert.equal(await repositories.payments.insertIfUnblocked({
+      attemptId: "manual-unpaid-retry-attempt",
+      idempotencyKey: "manual-unpaid-retry-key",
+      orderGuid: created.orderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amount: { currency: "AUD", cents: input.cart.actualAmount.cents },
+      state: "Created",
+      references: {
+        checkoutId: null, paymentId: null, sessionId: null,
+        txnRef: null, rfn: null, voucherReservationToken: null,
+      },
+      createdAtIso: T2,
+      updatedAtIso: T2,
+      lastErrorCode: null,
+    }), null);
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Unknown', updated_at_iso = ? WHERE attempt_id = ?",
+      [T2, "manual-unpaid-retry-attempt"],
+    );
+    const retryParked = await center.parkExact({
+      ...input.identity,
+      orderGuid: created.orderGuid,
+      attemptId: "manual-unpaid-retry-attempt",
+      actionId: "manual-unpaid-retry-park",
+      actor,
+    });
+    assert.notEqual(retryParked.recordId, parked.recordId);
+    assert.equal(retryParked.attemptId, "manual-unpaid-retry-attempt");
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Approved', updated_at_iso = ? WHERE attempt_id = ?",
+      [T2, "manual-unpaid-attempt"],
+    );
+    assert.equal((await center.getExact(input.identity, parked.recordId))?.status, "review-required");
+  });
+});
+
+test("真实 SQLite：主管结案（未收款/已收款）与结论同事务入队 supervisorResolved ACK，仍未知与终态 attempt 不入队", async () => {
+  await withDatabase("payment-recovery-supervisor-ack", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("sack-order", "sack-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const input = draftInput({ draftId: "sack-draft" });
+    const created = await drafts.createOrReuseDraft(input);
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `sack-record-${++value}`; })(),
+      (() => { let value = 0; return () => `sack-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const queue = new SqlitePaymentSupervisorAckQueue(connection);
+    const actor = { cashierId: "supervisor-sack", cashierName: "Supervisor", userGuid: "user-supervisor-sack" };
+    const requester = { cashierId: "cashier-sack", cashierName: "Cashier", userGuid: "user-cashier-sack" };
+    const finding = (recordId: string, actionId: string, kind: "unpaid" | "uncertain") => center.recordManualFinding({
+      ...input.identity,
+      recordId,
+      actionId,
+      finding: kind,
+      verifiedAmountCents: null,
+      evidenceReference: "terminal-history",
+      note: "checked",
+      authorizationId: `auth-${actionId}`,
+      supervisorActor: actor,
+      requestingActor: requester,
+    });
+    const park = (attemptId: string) => center.parkExact({
+      ...input.identity, orderGuid: created.orderGuid, attemptId, actionId: `park-${attemptId}`, actor,
+    });
+    const attempt = async (attemptId: string, provider: string, state: string, sessionId: string | null) => {
+      await insertAttempt(connection, {
+        attemptId, idempotencyKey: `key-${attemptId}`, orderGuid: created.orderGuid,
+        provider, operation: "purchase", amountCents: input.cart.actualAmount.cents, state,
+      });
+      await connection.run("UPDATE payment_attempts SET session_id = ? WHERE attempt_id = ?", [sessionId, attemptId]);
+    };
+
+    // 仍未知：不是结案，不入队。
+    await attempt("sack-uncertain", "linkly-cloud", "Unknown", "session-uncertain");
+    const uncertain = await park("sack-uncertain");
+    await finding(uncertain.recordId, "sack-action-uncertain", "uncertain");
+    assert.deepEqual(await queue.listPending(), []);
+
+    // 未收款：与结论同事务入队；重放同一 action 不重复入队。
+    await attempt("sack-unpaid", "linkly-cloud", "Unknown", "session-unpaid");
+    const unpaid = await park("sack-unpaid");
+    await finding(unpaid.recordId, "sack-action-unpaid", "unpaid");
+    await finding(unpaid.recordId, "sack-action-unpaid", "unpaid");
+    const pending = await queue.listPending();
+    assert.deepEqual(pending.map((row) => [row.attemptId, row.resolution, row.sourceActionId]),
+      [["sack-unpaid", "unpaid", "sack-action-unpaid"]]);
+
+    // 已收款：同样入队（订单入账由人工 tender 提交完成，后端会话仍需关闭）。
+    await attempt("sack-paid", "linkly-cloud", "Unknown", "session-paid");
+    const paid = await park("sack-paid");
+    await center.recordManualFinding({
+      ...input.identity,
+      recordId: paid.recordId,
+      actionId: "sack-action-paid",
+      finding: "paid",
+      verifiedAmountCents: input.cart.actualAmount.cents,
+      evidenceReference: "receipt-1",
+      note: "verified",
+      authorizationId: "auth-sack-paid",
+      supervisorActor: actor,
+      requestingActor: requester,
+      reconciliationId: await center.recordProviderReconciliation({
+        ...input.identity, recordId: paid.recordId, reconciliationId: "sack-reconciliation",
+      }),
+    });
+    assert.deepEqual((await queue.listPending()).map((row) => [row.attemptId, row.resolution]),
+      [["sack-paid", "paid"], ["sack-unpaid", "unpaid"]]);
+
+    // Square 或没有后端会话（Created / 无 SessionId）的 attempt 无会话可关闭，不入队。
+    await attempt("sack-square", "square", "Unknown", null);
+    const square = await park("sack-square");
+    await finding(square.recordId, "sack-action-square", "unpaid");
+    await attempt("sack-nosession", "linkly-cloud", "Unknown", null);
+    const noSession = await park("sack-nosession");
+    await finding(noSession.recordId, "sack-action-nosession", "unpaid");
+    assert.equal((await queue.listPending()).length, 2);
+
+    // 失败只累计次数；确认后不再待办且不可改回。
+    await queue.recordFailure("sack-unpaid", "LINKLY_NETWORK_DOWN", T2);
+    assert.deepEqual((await queue.listPending()).map((row) => [row.attemptCount, row.lastErrorCode]), [[0, null], [1, "LINKLY_NETWORK_DOWN"]]);
+    assert.equal(await queue.markAcknowledged("sack-unpaid", T2), true);
+    assert.equal(await queue.markAcknowledged("sack-unpaid", T2), false);
+    assert.deepEqual((await queue.listPending()).map((row) => row.attemptId), ["sack-paid"]);
+    await assert.rejects(
+      () => connection.run("UPDATE payment_supervisor_session_acks SET acknowledged_at_iso = NULL WHERE attempt_id = 'sack-unpaid'"),
+      /PAYMENT_SUPERVISOR_ACK_IMMUTABLE/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM payment_supervisor_session_acks WHERE attempt_id = 'sack-unpaid'"),
+      /PAYMENT_SUPERVISOR_ACK_IMMUTABLE/,
+    );
+  });
+});
+
+test("真实 SQLite：M34 终端批准但实扣金额不符：展示实扣金额，禁止确认已收款，未收款必须确认冲正并留审计", async () => {
+  await withDatabase("payment-recovery-approved-amount-mismatch", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("mismatch-order", "mismatch-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const input = draftInput({ draftId: "mismatch-draft" });
+    const created = await drafts.createOrReuseDraft(input);
+    await insertAttempt(connection, {
+      attemptId: "mismatch-attempt", idempotencyKey: "mismatch-key", orderGuid: created.orderGuid,
+      provider: "linkly-cloud", operation: "purchase", amountCents: input.cart.actualAmount.cents, state: "Unknown",
+    });
+    const terminalCharged = input.cart.actualAmount.cents + 500;
+    await connection.run(
+      "UPDATE payment_attempts SET session_id = 'mismatch-session', provider_environment = 'Sandbox', txn_ref = 'TXN-MISMATCH', provider_response_code = ? WHERE attempt_id = 'mismatch-attempt'",
+      [`LINKLY_APPROVED_AMOUNT_MISMATCH:${terminalCharged}`],
+    );
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `mismatch-record-${++value}`; })(),
+      (() => { let value = 0; return () => `mismatch-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const supervisor = { cashierId: "supervisor-mm", cashierName: "Supervisor", userGuid: "user-supervisor-mm" };
+    const requester = { cashierId: "cashier-mm", cashierName: "Cashier", userGuid: "user-cashier-mm" };
+    const parked = await center.parkExact({
+      ...input.identity, orderGuid: created.orderGuid, attemptId: "mismatch-attempt", actionId: "mismatch-park", actor: supervisor,
+    });
+    assert.equal(parked.terminalAmountMismatchCents, terminalCharged);
+    assert.equal(parked.status, "result-unknown");
+    const command = (finding: "paid" | "unpaid" | "uncertain", actionId: string, extra: Record<string, unknown> = {}) => ({
+      ...input.identity,
+      recordId: parked.recordId,
+      actionId,
+      finding,
+      verifiedAmountCents: finding === "paid" ? input.cart.actualAmount.cents : null,
+      evidenceReference: "terminal receipt 9001",
+      note: "Terminal shows a different amount",
+      authorizationId: `auth-${actionId}`,
+      supervisorActor: supervisor,
+      requestingActor: requester,
+      ...extra,
+    });
+    const reconciliationId = await center.recordProviderReconciliation({
+      ...input.identity, recordId: parked.recordId, reconciliationId: "mismatch-reconciliation",
+    });
+
+    // 即使主管输入订单金额，也不能把实扣不同金额的交易确认为已收款。
+    await assert.rejects(
+      () => center.recordManualFinding(command("paid", "mismatch-paid", { reconciliationId })),
+      /PAYMENT_RECOVERY_APPROVED_AMOUNT_MISMATCH/,
+    );
+    // 未收款不带确认：拒绝（顾客已被扣款，不能悄悄放行再次收款）。
+    await assert.rejects(
+      () => center.recordManualFinding(command("unpaid", "mismatch-unpaid-no-ack")),
+      /PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED/,
+    );
+    await assert.rejects(
+      () => center.recordManualFinding(command("unpaid", "mismatch-unpaid-false-ack", { terminalChargeAcknowledged: false })),
+      /PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED/,
+    );
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_recovery_actions"), 0);
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'PAYMENT_RECOVERY_REVERSAL_REQUIRED'"),
+      0,
+    );
+
+    // 仍未知不受影响，也不产生冲正需求。
+    await center.recordManualFinding(command("uncertain", "mismatch-uncertain"));
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'PAYMENT_RECOVERY_REVERSAL_REQUIRED'"),
+      0,
+    );
+
+    // 明确确认后登记冲正需求：结论 + 冲正审计 + 后端会话 ACK 同事务。
+    const resolved = await center.recordManualFinding(
+      command("unpaid", "mismatch-unpaid", { terminalChargeAcknowledged: true }),
+    );
+    assert.equal(resolved.record.status, "manual-unpaid");
+    const audit = await connection.getFirst<{ payload_json: unknown; scope_store_code: unknown }>(
+      "SELECT payload_json, scope_store_code FROM audit_events WHERE event_type = 'PAYMENT_RECOVERY_REVERSAL_REQUIRED'",
+    );
+    assert.ok(audit);
+    const payload = JSON.parse(String(audit.payload_json)) as Record<string, unknown>;
+    assert.equal(payload.terminalChargedCents, terminalCharged);
+    assert.equal(payload.orderAmountCents, input.cart.actualAmount.cents);
+    assert.equal(payload.attemptId, "mismatch-attempt");
+    assert.equal(payload.transactionReference, "TXN-MISMATCH");
+    assert.equal(audit.scope_store_code, input.identity.storeCode);
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_supervisor_session_acks"), 1);
+  });
+});
+
+test("真实 SQLite：人工仍未知可把精确 case 交回原支付上下文", async () => {
+  await withDatabase("payment-recovery-manual-uncertain-resume", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("manual-uncertain-order", "manual-uncertain-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const input = draftInput({ draftId: "manual-uncertain-draft" });
+    const created = await drafts.createOrReuseDraft(input);
+    await insertAttempt(connection, {
+      attemptId: "manual-uncertain-attempt",
+      idempotencyKey: "manual-uncertain-key",
+      orderGuid: created.orderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: input.cart.actualAmount.cents,
+      state: "Unknown",
+    });
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      () => "manual-uncertain-record",
+      (() => {
+        let value = 0;
+        return () => `manual-uncertain-audit-event-${++value}`;
+      })(),
+      () => T2,
+    );
+    const actor = {
+      cashierId: "supervisor-uncertain",
+      cashierName: "Supervisor Uncertain",
+      userGuid: "user-supervisor-uncertain",
+    };
+    const parked = await center.parkExact({
+      ...input.identity,
+      orderGuid: created.orderGuid,
+      attemptId: "manual-uncertain-attempt",
+      actionId: "manual-uncertain-park",
+      actor,
+    });
+    await center.recordManualFinding({
+      ...input.identity,
+      recordId: parked.recordId,
+      actionId: "manual-uncertain-action",
+      finding: "uncertain",
+      verifiedAmountCents: null,
+      evidenceReference: "terminal-history-inconclusive",
+      note: "Provider result is still unavailable",
+      authorizationId: "manual-uncertain-auth",
+      supervisorActor: actor,
+      requestingActor: { cashierId: "cashier-uncertain", cashierName: "Cashier", userGuid: "user-cashier-uncertain" },
+    });
+
+    const resumed = await center.resumeExact(input.identity, parked.recordId);
+    assert.equal(resumed.status, "manual-uncertain");
+    assert.equal(resumed.isParked, false);
+    assert.equal(
+      String((await connection.getFirst<{ state: unknown }>(
+        "SELECT state FROM payment_attempts WHERE attempt_id = ?",
+        ["manual-uncertain-attempt"],
+      ))?.state),
+      "Unknown",
+    );
+    const nextOrderGuid = "manual-uncertain-next-order";
+    await insertOrder(connection, {
+      orderGuid: nextOrderGuid, sequence: 812, ...input.identity,
+      cashierId: "cashier-next", amountCents: input.cart.actualAmount.cents,
+      state: "Draft", syncProvenance: TEST_SYNC_PROVENANCE,
+    });
+    await insertActivePaymentDraft(connection, nextOrderGuid, input.identity);
+    await insertAttempt(connection, {
+      attemptId: "manual-uncertain-next-order-attempt",
+      idempotencyKey: "manual-uncertain-next-order-key",
+      orderGuid: nextOrderGuid,
+      provider: "linkly-cloud",
+      operation: "purchase",
+      amountCents: input.cart.actualAmount.cents,
+      state: "Created",
+    });
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Declined', updated_at_iso = ? WHERE attempt_id = ?",
+      [T2, "manual-uncertain-attempt"],
+    );
+    assert.equal(
+      (await center.getExact(input.identity, parked.recordId))?.status,
+      "payment-failed",
+    );
+  });
+});
+
+test("真实 SQLite：MANUAL outbox 取得租约后 provider Approved 仍在 HTTP 前失败关闭", async () => {
+  await withDatabase("manual-payment-sync-race", async (connection) => {
+    await migrateFresh(connection);
+    let nextId = 0;
+    const createId = () =>
+      `00000000-0000-4000-8000-${String(++nextId).padStart(12, "0")}`;
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, {
+      createOrderGuid: createId,
+      createOrderLineGuid: createId,
+      createAuditEventId: createId,
+    }, () => T2);
+    const input = draftInput({ draftId: "manual-sync-race-draft" });
+    const created = await drafts.createOrReuseDraft(input);
+    const attemptId = createId();
+    await insertAttempt(connection, {
+      attemptId,
+      idempotencyKey: createId(),
+      orderGuid: created.orderGuid,
+      provider: "square",
+      operation: "purchase",
+      amountCents: input.cart.actualAmount.cents,
+      state: "Unknown",
+    });
+    const center = new SqlitePaymentRecoveryCenterStore(connection, createId, createId, () => T2);
+    const parked = await center.parkExact({
+      ...input.identity, orderGuid: created.orderGuid, attemptId,
+      actionId: createId(),
+      actor: { cashierId: "cashier-1", cashierName: "Cashier", userGuid: "cashier-user-1" },
+    });
+    const reconciliationId = await center.recordProviderReconciliation({
+      ...input.identity, recordId: parked.recordId, reconciliationId: createId(),
+    });
+    const finding = await center.recordManualFinding({
+      ...input.identity, recordId: parked.recordId, actionId: createId(),
+      finding: "paid", verifiedAmountCents: parked.amountCents,
+      evidenceReference: "terminal-history", note: "Read-only result remained unknown",
+      authorizationId: createId(), reconciliationId,
+      requestingActor: { cashierId: "cashier-1", cashierName: "Cashier", userGuid: "cashier-user-1" },
+      supervisorActor: { cashierId: "supervisor-2", cashierName: "Supervisor", userGuid: "supervisor-user-2" },
+    });
+    const committer = new SqliteManualPaymentOrderCommitter(connection, () => T2);
+    const tenderGuid = createId();
+    await committer.completeManualPaymentOrder({
+      recordId: parked.recordId, actionId: finding.actionId,
+      orderGuid: created.orderGuid, attemptId, ...input.identity,
+      authorizationId: finding.authorizationId, tenderGuid,
+      completionAuditEvent: {
+        eventId: createId(), eventType: "PAYMENT_COMPLETE", occurredAtIso: T2,
+        orderGuid: created.orderGuid, correlationId: finding.actionId,
+        payload: { action: "manual-payment-complete" },
+      },
+      outbox: {
+        messageId: createId(), aggregateId: created.orderGuid, kind: "order-sync",
+        payloadJson: JSON.stringify({ orderGuid: created.orderGuid }), nextAttemptAtIso: T2,
+      },
+    });
+    const repositories = createSqliteRepositories(connection, {
+      nowIso: () => T2, createLeaseId: createId, encryptor,
+    });
+    const [lease] = await repositories.outbox.leaseReady(1, 60);
+    assert.ok(lease);
+    await connection.run(
+      "UPDATE payment_attempts SET state = 'Approved', updated_at_iso = ? WHERE attempt_id = ?",
+      [T2, attemptId],
+    );
+    let httpCalls = 0;
+    const adapter = new HbposOrderSyncAdapter(
+      { async request() { httpCalls += 1; throw new Error("HTTP must not run"); } },
+      repositories.orders,
+      {
+        resolver: new SqliteOrderSyncMaterialResolver(connection, {
+          returnCapacityVault: { async resolveProtectedContext() { return null; } },
+          voucherProtectedTokens: { async getByAttempt() { return null; } },
+          paymentProtectedMaterials: { async read() { throw new Error("provider material must not be read"); } },
+        }),
+        linklyEnvironment: "Production",
+      },
+    );
+    assert.deepEqual(
+      await adapter.sync(created.orderGuid, JSON.stringify({ orderGuid: created.orderGuid })),
+      { kind: "retry", failure: "server" },
+    );
+    assert.equal(httpCalls, 0);
+  });
 });
 
 test("真实 SQLite：退货多 allocation 在 provider 前耐久绑定，Unknown 跨恢复冻结容量并以同一 OrderGuid 完成", async () => {
@@ -6378,6 +7050,20 @@ async function insertOrder(
       input.amountCents,
       ...syncProvenanceParameters,
     ],
+  );
+}
+
+async function insertActivePaymentDraft(
+  connection: SqliteConnectionPort,
+  orderGuid: string,
+  scope: Readonly<{ storeCode: string; deviceCode: string }>,
+): Promise<void> {
+  await connection.run(
+    `INSERT INTO payment_order_draft_bindings (
+      draft_id, request_fingerprint, pricing_state_json, order_guid,
+      store_code, device_code, state, created_at_iso
+    ) VALUES (?, '{}', '{}', ?, ?, ?, 'Active', ?)`,
+    [`draft-${orderGuid}`, orderGuid, scope.storeCode, scope.deviceCode, T2],
   );
 }
 

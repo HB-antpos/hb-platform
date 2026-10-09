@@ -63,6 +63,9 @@ export interface ActivePricingCartLease {
   clearAfterCommittedOrder(
     orderGuid: string,
   ): ActivePricingCartSessionSnapshot;
+  clearAfterRecoveryParked(
+    orderGuid: string,
+  ): ActivePricingCartSessionSnapshot;
 }
 
 /**
@@ -475,6 +478,11 @@ export class ActivePricingCartSession {
         this.assertActiveLeaseToken(token);
         return this.clearAfterCommittedOrderInternal(orderGuid);
       },
+      clearAfterRecoveryParked: (orderGuid: string) => {
+        this.assertActiveLeaseToken(token);
+        requiredText(orderGuid, "Parked recovery order guid");
+        return this.clearCurrentCartWithoutCompletionTombstone();
+      },
     });
   }
 
@@ -490,6 +498,13 @@ export class ActivePricingCartSession {
       return this.current;
     }
 
+    const next = this.clearCurrentCartWithoutCompletionTombstone();
+    this.rememberCommittedOrder(normalizedOrderGuid);
+    return next;
+  }
+
+  /** 移交恢复中心只清当前车，不可污染订单完成幂等墓碑。 */
+  private clearCurrentCartWithoutCompletionTombstone(): ActivePricingCartSessionSnapshot {
     const emptyCart = cloneCart(this.createEmptyCart());
     if (emptyCart.snapshot().lines.length > 0) {
       throw new Error("Empty cart factory must return a cart without lines.");
@@ -500,9 +515,7 @@ export class ActivePricingCartSession {
     this.cart = emptyCart;
     this.recallBinding = null;
     this.commitCurrentCartMutation();
-    const next = this.current;
-    this.rememberCommittedOrder(normalizedOrderGuid);
-    return next;
+    return this.current;
   }
 
   private swapCart(

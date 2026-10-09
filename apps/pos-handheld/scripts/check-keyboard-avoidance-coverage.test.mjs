@@ -21,6 +21,7 @@ const keyboardAwareHosts = new Set([
   "src/features/installments/installment-screen.tsx",
   "src/features/local-history/local-history-screen.tsx",
   "src/features/operation-authorization/operation-authorization-modal.tsx",
+  "src/features/payment-recovery/payment-recovery-screen.tsx",
   "src/features/payments/ui/payment-screen.tsx",
   "src/features/remote-history/remote-history-screen.tsx",
   "src/features/returns/return-screen.tsx",

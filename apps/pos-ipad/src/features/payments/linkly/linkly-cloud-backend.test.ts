@@ -1477,7 +1477,7 @@ test("批准证据金额、SessionId、TxnRef 或退款 RFN 不一致时失败�
     assert.ok(
       ["LINKLY_CARD_EVIDENCE_MISMATCH", "LINKLY_RECOVERY_CONTEXT_MISMATCH"].includes(
         result.responseCode ?? "",
-      ),
+      ) || (result.responseCode ?? "").startsWith("LINKLY_APPROVED_AMOUNT_MISMATCH:"),
     );
     assert.equal(result.protectedSyncEvidence, undefined);
   }

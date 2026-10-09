@@ -1104,6 +1104,12 @@ test("真实 SQLite：M46 升级前 manual-card 已入账仍误阻断，升级�
         .map((migration) => migration.sql)
         .join("\n"),
     );
+    // 仓储的 findBlocking 现在会读取恢复中心表（M51 才创建）；本用例模拟 M46 之前的历史库，
+    // 只补两张空占位表，使“无恢复 case”的语义与历史一致，不引入 M51 的触发器。
+    await connection.exec(
+      "CREATE TABLE payment_recovery_cases (attempt_id TEXT, order_guid TEXT, state TEXT);" +
+      "CREATE TABLE manual_payment_tender_bindings (attempt_id TEXT);",
+    );
     await insertDraftOrder(connection, "m46-manual-completed", 1, 500);
     await insertDraftOrder(connection, "m46-manual-next", 2, 500);
     for (const orderGuid of ["m46-manual-completed", "m46-manual-next"]) {

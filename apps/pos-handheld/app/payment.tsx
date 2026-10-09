@@ -78,7 +78,7 @@ const UNAVAILABLE_INSTALLMENT_LANE: UnifiedPaymentFacadeDependencies["installmen
 
 /** 只接受 sales route 生成的最小 checkout 上下文；支付事实仍由组合根复核。 */
 export default function PaymentRoute() {
-  const { dismissTo } = useRouter();
+  const { dismissTo, push } = useRouter();
   const runtime = usePosRuntime();
   const { i18n } = useTranslation();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);
@@ -306,6 +306,7 @@ export default function PaymentRoute() {
     <PaymentScreen
       locale={resolvePaymentLocale(i18n.resolvedLanguage ?? i18n.language)}
       onBack={() => dismissTo("/sales" as Href)}
+      onOpenRecoveryCenter={() => push("/payment-recovery" as Href)}
       onComplete={() => dismissTo("/sales" as Href)}
       presenter={presenter}
       {...(installmentModeControl ? { installmentModeControl } : {})}

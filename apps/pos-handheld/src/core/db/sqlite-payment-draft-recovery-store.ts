@@ -120,6 +120,13 @@ export type BlockingPaymentAttemptRecovery = RecoveryBase &
     amountCents: number;
   }>;
 
+export type PaymentRecoveryCartMaterial = Readonly<{
+  checkoutIntentId: string;
+  cart: CartSnapshot;
+  pricingState: PricingCartStateSnapshot;
+  recallBinding: RecallActiveBinding | null;
+}>;
+
 export type PaymentDraftRecovery =
   | PreparedPaymentDraftRecovery
   | BlockingPaymentAttemptRecovery;
@@ -463,6 +470,33 @@ implements PersistedOrderDraftPort {
     return this.connection.withExclusiveTransaction((transaction) =>
       readCheckoutDraftInTransaction(transaction, orderGuid, scope),
     );
+  }
+
+  /** 恢复中心按精确订单重建购物车，不依赖全局 blocking 查询。 */
+  public readRecoveryCart(
+    orderGuidInput: string,
+    scopeInput: PaymentRecoveryScope,
+  ): Promise<PaymentRecoveryCartMaterial | null> {
+    const orderGuid = strictId(orderGuidInput, "payment recovery order guid");
+    const scope = normalizeScope(scopeInput);
+    return this.connection.withExclusiveTransaction(async (transaction) => {
+      const order = await requireRecoveryOrder(transaction, orderGuid);
+      if (
+        text(order.store_code, "recovery store code") !== scope.storeCode ||
+        text(order.device_code, "recovery device code") !== scope.deviceCode ||
+        !["Draft", "Completing"].includes(text(order.state, "recovery order state"))
+      ) {
+        return null;
+      }
+      const base = await recoveryBase(transaction, order);
+      if (!base.draftId) return null;
+      return {
+        checkoutIntentId: base.draftId,
+        cart: base.cart,
+        pricingState: base.pricingState,
+        recallBinding: base.recallBinding,
+      };
+    });
   }
 
   /**
@@ -1513,6 +1547,11 @@ async function findBlockingRecoveryInTransaction(
      INNER JOIN local_orders o ON o.order_guid = d.order_guid
      WHERE d.store_code = ? AND d.device_code = ? AND d.state = 'Active'
        AND o.state IN ('Draft', 'Completing')
+       AND NOT EXISTS (
+         SELECT 1 FROM payment_recovery_cases parked
+         WHERE parked.order_guid = o.order_guid
+           AND parked.is_parked = 1
+       )
      ORDER BY o.local_sequence DESC
      LIMIT 3`,
     [scope.storeCode, scope.deviceCode],
@@ -1523,6 +1562,22 @@ async function findBlockingRecoveryInTransaction(
      FROM payment_attempts p
      INNER JOIN local_orders o ON o.order_guid = p.order_guid
      WHERE o.store_code = ? AND o.device_code = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM payment_recovery_cases parked
+         WHERE parked.attempt_id = p.attempt_id
+           AND parked.order_guid = p.order_guid
+           AND parked.is_parked = 1
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM manual_payment_tender_bindings manual
+         WHERE manual.attempt_id = p.attempt_id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM payment_recovery_cases resolved
+         WHERE resolved.attempt_id = p.attempt_id
+           AND resolved.order_guid = p.order_guid
+           AND resolved.state = 'manual-unpaid'
+       )
        -- 退货在线退款 attempt 归退货账本（production-return-runtime）恢复，不是销售草稿：
        -- 退货单无草稿行绑定，若在此选中会抛 "no lines" 让冷启动/销售页恢复全部失败。
        -- 按退货单号排除（prepare 时与 Draft 同事务写入），覆盖 attempt 已 Created

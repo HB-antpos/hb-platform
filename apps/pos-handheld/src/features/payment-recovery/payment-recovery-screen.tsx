@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -38,8 +37,7 @@ import {
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { posColors } from "@/ui/theme";
 
-export const PAYMENT_RECOVERY_MIN_TOUCH_TARGET = 44;
-const COMPACT_BREAKPOINT = 900;
+export const PAYMENT_RECOVERY_MIN_TOUCH_TARGET = 48;
 
 export type PaymentRecoveryScreenProps = Readonly<{
   service: PaymentRecoveryCenterService;
@@ -51,8 +49,6 @@ export function PaymentRecoveryScreen({
   onBack,
 }: PaymentRecoveryScreenProps) {
   const state = useSyncExternalStore(service.subscribe, service.getState, service.getState);
-  const { width } = useWindowDimensions();
-  const compact = width < COMPACT_BREAKPOINT;
   const { i18n } = useTranslation();
   const locale = resolvePaymentRecoveryLocale(i18n.resolvedLanguage ?? i18n.language);
   const t = useCallback(
@@ -63,6 +59,8 @@ export function PaymentRecoveryScreen({
   const [keyword, setKeyword] = useState(state.keyword);
   const [manualRecord, setManualRecord] = useState<PaymentRecoveryRecord | null>(null);
   const [manualVisible, setManualVisible] = useState(false);
+  // 手持竖屏一次只放一栏：先看记录列表，点开某条再看证据与操作。
+  const [view, setView] = useState<"list" | "details">("list");
 
   useEffect(() => {
     void service.refresh();
@@ -74,9 +72,13 @@ export function PaymentRecoveryScreen({
     [state.filter, state.keyword, state.records],
   );
   const selected = useMemo(
-    () => visibleRecords.find((record) => record.id === state.selectedRecordId) ?? visibleRecords[0] ?? null,
+    () => visibleRecords.find((record) => record.id === state.selectedRecordId) ?? null,
     [state.selectedRecordId, visibleRecords],
   );
+  // 选中的记录被过滤掉或处理后消失时回到列表，避免停在空详情页。
+  useEffect(() => {
+    if (view === "details" && !selected) setView("list");
+  }, [selected, view]);
 
   const applySearch = () => {
     service.setKeyword(keyword.trim());
@@ -104,8 +106,36 @@ export function PaymentRecoveryScreen({
         />
       </View>
 
-      <View style={[styles.workspace, compact && styles.workspaceCompact]}>
-        <View style={[styles.listPane, compact && styles.listPaneCompact]} testID="payment-recovery-list-pane">
+      {view === "details" && selected ? (
+        <View style={styles.detailsPane} testID="payment-recovery-details-pane">
+          <View style={styles.detailsBar}>
+            <ActionButton
+              compact
+              disabled={state.action !== "idle"}
+              label={t("action.backToList")}
+              onPress={() => setView("list")}
+              testID="payment-recovery-back-to-list"
+              tone="quiet"
+            />
+          </View>
+          <RecoveryDetails
+            action={state.action}
+            locale={locale}
+            onManual={() => {
+              setManualRecord(selected);
+              setManualVisible(true);
+            }}
+            onRecover={() => void service.recoverOriginalPayment(selected.id).catch(() => undefined)}
+            record={selected}
+          />
+          {state.errorCode && !state.loading ? (
+            <Text accessibilityRole="alert" style={styles.actionError}>
+              {errorText(t, state.errorCode)}
+            </Text>
+          ) : null}
+        </View>
+      ) : (
+        <View style={styles.listPane} testID="payment-recovery-list-pane">
           <View style={styles.tabs}>
             {(["pending", "failed", "resolved"] as const).map((filter) => (
               <FilterTab
@@ -156,36 +186,17 @@ export function PaymentRecoveryScreen({
                   key={record.id}
                   active={record.id === selected?.id}
                   locale={locale}
-                  onPress={() => service.selectRecord(record.id)}
+                  onPress={() => {
+                    service.selectRecord(record.id);
+                    setView("details");
+                  }}
                   record={record}
                 />
               ))
             )}
           </ScrollView>
         </View>
-
-        <View style={styles.detailsPane} testID="payment-recovery-details-pane">
-          {selected ? (
-            <RecoveryDetails
-              action={state.action}
-              locale={locale}
-              onManual={() => {
-                setManualRecord(selected);
-                setManualVisible(true);
-              }}
-              onRecover={() => void service.recoverOriginalPayment(selected.id).catch(() => undefined)}
-              record={selected}
-            />
-          ) : (
-            <CenteredState message={t("details.select")} />
-          )}
-          {state.errorCode && !state.loading ? (
-            <Text accessibilityRole="alert" style={styles.actionError}>
-            {errorText(t, state.errorCode)}
-            </Text>
-          ) : null}
-        </View>
-      </View>
+      )}
 
       <ManualVerificationModal
         action={state.action}
@@ -719,14 +730,11 @@ function shortGuid(value: string): string {
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: posColors.canvas, flex: 1 },
-  header: { alignItems: "center", backgroundColor: posColors.ink, flexDirection: "row", gap: 16, justifyContent: "space-between", paddingHorizontal: 18, paddingVertical: 12 },
+  header: { alignItems: "center", backgroundColor: posColors.ink, flexDirection: "row", gap: 10, justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 10 },
   headerCopy: { flex: 1 },
-  title: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
+  title: { color: "#FFFFFF", fontSize: 20, fontWeight: "800" },
   subtitle: { color: "#DDE7EF", fontSize: 13, marginTop: 2 },
-  workspace: { flex: 1, flexDirection: "row", gap: 14, padding: 14 },
-  workspaceCompact: { gap: 8, padding: 8 },
-  listPane: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, minWidth: 350, width: "38%" },
-  listPaneCompact: { minWidth: 310, width: "42%" },
+  listPane: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, flex: 1, margin: 8 },
   tabs: { borderBottomColor: posColors.border, borderBottomWidth: 1, flexDirection: "row" },
   filterTab: { alignItems: "center", borderBottomColor: "transparent", borderBottomWidth: 3, flex: 1, justifyContent: "center", minHeight: PAYMENT_RECOVERY_MIN_TOUCH_TARGET, paddingHorizontal: 8 },
   filterTabActive: { backgroundColor: posColors.blueSoft, borderBottomColor: posColors.blue },
@@ -743,16 +751,17 @@ const styles = StyleSheet.create({
   recordAmount: { color: posColors.ink, fontSize: 18, fontWeight: "800" },
   recordOrder: { color: posColors.ink, fontSize: 13, fontWeight: "700", marginTop: 8 },
   recordMeta: { color: posColors.mutedInk, fontSize: 12, marginTop: 3 },
-  detailsPane: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, flex: 1, minWidth: 400 },
-  detailsContent: { padding: 16 },
-  detailsHeading: { alignItems: "flex-start", borderBottomColor: posColors.border, borderBottomWidth: 1, flexDirection: "row", gap: 20, justifyContent: "space-between", paddingBottom: 14 },
+  detailsPane: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, flex: 1, margin: 8 },
+  detailsBar: { borderBottomColor: posColors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", padding: 8 },
+  detailsContent: { padding: 12 },
+  detailsHeading: { alignItems: "flex-start", borderBottomColor: posColors.border, borderBottomWidth: 1, flexDirection: "column", gap: 10, paddingBottom: 12 },
   detailsHeadingCopy: { flex: 1 },
   mismatchWarning: { backgroundColor: posColors.redSoft, color: posColors.red, fontSize: 13, fontWeight: "700", lineHeight: 19, marginTop: 10, padding: 10 },
   statusHint: { color: posColors.mutedInk, fontSize: 14, lineHeight: 20, marginTop: 8 },
   fieldLabel: { color: posColors.mutedInk, fontSize: 11, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   heroAmount: { color: posColors.ink, fontSize: 30, fontWeight: "900", marginTop: 2 },
   factGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 14 },
-  fact: { backgroundColor: "#F8F7F3", borderColor: posColors.border, borderWidth: 1, minWidth: "46%", padding: 10 },
+  fact: { backgroundColor: "#F8F7F3", borderColor: posColors.border, borderWidth: 1, minWidth: "100%", padding: 10 },
   factValue: { color: posColors.ink, fontSize: 13, fontWeight: "700", marginTop: 5 },
   detailsSection: { borderColor: posColors.border, borderWidth: 1, marginBottom: 10 },
   lineRow: { alignItems: "center", borderBottomColor: posColors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", justifyContent: "space-between", minHeight: 52, paddingHorizontal: 12, paddingVertical: 8 },
@@ -763,7 +772,7 @@ const styles = StyleSheet.create({
   eventMarker: { backgroundColor: posColors.blue, borderRadius: 4, height: 8, marginTop: 5, width: 8 },
   eventCopy: { flex: 1 },
   eventText: { color: posColors.ink, fontSize: 13, fontWeight: "600" },
-  detailsActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "flex-end", paddingTop: 8 },
+  detailsActions: { flexDirection: "column", gap: 10, paddingTop: 8 },
   actionError: { backgroundColor: posColors.redSoft, color: posColors.red, fontSize: 13, padding: 10 },
   statusBadge: { alignSelf: "flex-start", borderRadius: 2, paddingHorizontal: 8, paddingVertical: 5 },
   statusWarning: { backgroundColor: posColors.yellowSoft },
@@ -772,24 +781,24 @@ const styles = StyleSheet.create({
   statusBadgeText: { color: posColors.ink, fontSize: 12, fontWeight: "800" },
   centeredState: { alignItems: "center", flex: 1, gap: 10, justifyContent: "center", minHeight: 160, padding: 20 },
   emptyText: { color: posColors.mutedInk, fontSize: 13, lineHeight: 19, textAlign: "center" },
-  actionButton: { alignItems: "center", justifyContent: "center", minHeight: PAYMENT_RECOVERY_MIN_TOUCH_TARGET, minWidth: 148, paddingHorizontal: 14, paddingVertical: 9 },
-  actionButtonCompact: { minWidth: 88 },
+  actionButton: { alignItems: "center", justifyContent: "center", minHeight: PAYMENT_RECOVERY_MIN_TOUCH_TARGET, minWidth: 120, paddingHorizontal: 12, paddingVertical: 9 },
+  actionButtonCompact: { minWidth: 72 },
   actionPrimary: { backgroundColor: posColors.blue },
   actionSecondary: { backgroundColor: posColors.blueSoft, borderColor: posColors.blue, borderWidth: 1 },
   actionQuiet: { backgroundColor: "#FFFFFF", borderColor: posColors.border, borderWidth: 1 },
   actionText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800", textAlign: "center" },
   actionTextDark: { color: posColors.ink },
   disabled: { opacity: 0.42 },
-  modalBackdrop: { alignItems: "center", backgroundColor: "rgba(16,37,58,0.48)", flex: 1, justifyContent: "center", padding: 24 },
+  modalBackdrop: { alignItems: "center", backgroundColor: "rgba(16,37,58,0.48)", flex: 1, justifyContent: "center", padding: 8 },
   modalDismissArea: { ...StyleSheet.absoluteFillObject },
-  modalCard: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, maxHeight: "92%", maxWidth: 840, width: "86%" },
-  modalContent: { padding: 20 },
+  modalCard: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, maxHeight: "96%", width: "100%" },
+  modalContent: { padding: 14 },
   modalTitle: { color: posColors.ink, fontSize: 22, fontWeight: "900" },
   modalSubtitle: { color: posColors.mutedInk, fontSize: 13, lineHeight: 19, marginTop: 4 },
   modalOrder: { backgroundColor: posColors.blueSoft, color: posColors.ink, fontSize: 14, fontWeight: "800", marginTop: 12, padding: 10 },
   formLabel: { color: posColors.ink, fontSize: 13, fontWeight: "800", marginBottom: 6, marginTop: 14 },
-  findingGrid: { flexDirection: "row", gap: 8 },
-  findingOption: { alignItems: "flex-start", borderColor: posColors.border, borderWidth: 1, flex: 1, flexDirection: "row", gap: 8, minHeight: 86, padding: 10 },
+  findingGrid: { flexDirection: "column", gap: 8 },
+  findingOption: { alignItems: "flex-start", borderColor: posColors.border, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 72, padding: 10 },
   findingOptionSelected: { backgroundColor: posColors.blueSoft, borderColor: posColors.blue, borderWidth: 2 },
   radio: { borderColor: posColors.mutedInk, borderRadius: 8, borderWidth: 2, height: 16, marginTop: 2, width: 16 },
   radioSelected: { backgroundColor: posColors.blue, borderColor: posColors.blue, borderWidth: 4 },
@@ -808,5 +817,5 @@ const styles = StyleSheet.create({
   checkboxLabel: { color: posColors.ink, flex: 1, fontSize: 13, lineHeight: 19 },
   authorizationHint: { color: posColors.blue, fontSize: 12, marginTop: 6 },
   auditNotice: { color: posColors.mutedInk, fontSize: 11, marginTop: 8 },
-  modalActions: { flexDirection: "row", gap: 10, justifyContent: "flex-end", marginTop: 18 },
+  modalActions: { flexDirection: "column-reverse", gap: 10, marginTop: 18 },
 });

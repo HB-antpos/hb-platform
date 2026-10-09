@@ -6493,6 +6493,404 @@ BEFORE DELETE ON return_supervisor_resolutions
 BEGIN SELECT RAISE(ABORT, 'RETURN_SUPERVISOR_RESOLUTION_IMMUTABLE'); END;
 `;
 
+/**
+ * M51 支付恢复中心（与平板端 M45 + M46 等价）：异常刷卡订单从当前收银车移交后仍以原 order/attempt
+ * 为唯一身份。case 保存当前投影，action 保存不可变人工判定历史，人工收款只经专用绑定表生成
+ * MANUAL 来源 tender，不能覆盖 provider 账本。同时把单终端阻塞触发器改为认识已移交/已结案的
+ * case（含 manual-card），并让 Linkly 终态 ACK 在 case 移交后仍占用物理 lane。
+ */
+const M51 = `
+CREATE TABLE payment_recovery_cases (
+  record_id TEXT PRIMARY KEY,
+  order_guid TEXT NOT NULL REFERENCES local_orders(order_guid) ON DELETE RESTRICT,
+  attempt_id TEXT NOT NULL UNIQUE REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  store_code TEXT NOT NULL,
+  device_code TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN (
+    'pending', 'manual-paid', 'manual-unpaid', 'manual-uncertain',
+    'provider-recovered', 'review-required'
+  )),
+  is_parked INTEGER NOT NULL CHECK (is_parked IN (0, 1)),
+  park_action_id TEXT NOT NULL UNIQUE,
+  opened_at_iso TEXT NOT NULL,
+  updated_at_iso TEXT NOT NULL,
+  CHECK (TRIM(record_id) <> '' AND LENGTH(record_id) <= 128),
+  CHECK (TRIM(order_guid) <> '' AND LENGTH(order_guid) <= 128),
+  CHECK (TRIM(attempt_id) <> '' AND LENGTH(attempt_id) <= 128),
+  CHECK (TRIM(store_code) <> '' AND LENGTH(store_code) <= 64),
+  CHECK (TRIM(device_code) <> '' AND LENGTH(device_code) <= 128)
+);
+-- 人工结论必须绑定一次对原 provider attempt 的只读对账；仅 paid 使用，且不能换绑。
+CREATE TABLE payment_recovery_reconciliations (
+  reconciliation_id TEXT PRIMARY KEY,
+  record_id TEXT NOT NULL REFERENCES payment_recovery_cases(record_id) ON DELETE RESTRICT,
+  order_guid TEXT NOT NULL REFERENCES local_orders(order_guid) ON DELETE RESTRICT,
+  attempt_id TEXT NOT NULL REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  provider TEXT NOT NULL CHECK (provider IN ('square', 'linkly-cloud')),
+  observed_state TEXT NOT NULL CHECK (observed_state IN ('Submitted', 'Pending', 'Unknown')),
+  observed_at_iso TEXT NOT NULL,
+  CHECK (TRIM(reconciliation_id) <> '' AND LENGTH(reconciliation_id) <= 128),
+  CHECK (TRIM(order_guid) <> '' AND LENGTH(order_guid) <= 128),
+  CHECK (TRIM(attempt_id) <> '' AND LENGTH(attempt_id) <= 128)
+);
+CREATE TABLE payment_recovery_authorizations (
+  authorization_id TEXT PRIMARY KEY,
+  record_id TEXT NOT NULL REFERENCES payment_recovery_cases(record_id) ON DELETE RESTRICT,
+  order_guid TEXT NOT NULL REFERENCES local_orders(order_guid) ON DELETE RESTRICT,
+  attempt_id TEXT NOT NULL REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  action_id TEXT NOT NULL UNIQUE,
+  finding TEXT NOT NULL CHECK (finding IN ('paid', 'unpaid', 'uncertain')),
+  requesting_actor_json TEXT NOT NULL,
+  supervisor_actor_json TEXT NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  CHECK (TRIM(authorization_id) <> '' AND LENGTH(authorization_id) <= 128),
+  CHECK (TRIM(action_id) <> '' AND LENGTH(action_id) <= 128)
+);
+CREATE TABLE payment_recovery_actions (
+  action_id TEXT PRIMARY KEY,
+  record_id TEXT NOT NULL REFERENCES payment_recovery_cases(record_id) ON DELETE RESTRICT,
+  request_signature TEXT NOT NULL,
+  finding TEXT NOT NULL CHECK (finding IN ('paid', 'unpaid', 'uncertain')),
+  verified_amount_cents INTEGER NULL,
+  evidence_reference TEXT NOT NULL,
+  note TEXT NOT NULL,
+  authorization_id TEXT NOT NULL REFERENCES payment_recovery_authorizations(authorization_id) ON DELETE RESTRICT,
+  supervisor_actor_json TEXT NOT NULL,
+  requesting_actor_json TEXT NOT NULL,
+  reconciliation_id TEXT NULL UNIQUE REFERENCES payment_recovery_reconciliations(reconciliation_id) ON DELETE RESTRICT,
+  attempt_state_snapshot TEXT NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  CHECK (TRIM(action_id) <> '' AND LENGTH(action_id) <= 128),
+  CHECK (TRIM(request_signature) <> '' AND LENGTH(request_signature) <= 2048),
+  CHECK (TRIM(evidence_reference) <> '' AND LENGTH(evidence_reference) <= 256),
+  CHECK (TRIM(note) <> '' AND LENGTH(note) <= 1000),
+  CHECK (TRIM(authorization_id) <> '' AND LENGTH(authorization_id) <= 128),
+  CHECK ((finding = 'paid' AND verified_amount_cents IS NOT NULL AND verified_amount_cents > 0)
+    OR (finding <> 'paid' AND verified_amount_cents IS NULL))
+);
+CREATE TABLE payment_recovery_park_actions (
+  action_id TEXT PRIMARY KEY,
+  record_id TEXT NOT NULL REFERENCES payment_recovery_cases(record_id) ON DELETE RESTRICT,
+  actor_json TEXT NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  CHECK (TRIM(action_id) <> '' AND LENGTH(action_id) <= 128)
+);
+-- 人工已收款 tender 的来源独立于 provider attempt；同步端只能由该不可变绑定识别 MANUAL_CARD。
+CREATE TABLE manual_payment_tender_bindings (
+  tender_guid TEXT PRIMARY KEY REFERENCES order_tenders(tender_guid) ON DELETE RESTRICT,
+  record_id TEXT NOT NULL REFERENCES payment_recovery_cases(record_id) ON DELETE RESTRICT,
+  action_id TEXT NOT NULL UNIQUE REFERENCES payment_recovery_actions(action_id) ON DELETE RESTRICT,
+  attempt_id TEXT NOT NULL UNIQUE REFERENCES payment_attempts(attempt_id) ON DELETE RESTRICT,
+  created_at_iso TEXT NOT NULL,
+  CHECK (TRIM(tender_guid) <> '' AND LENGTH(tender_guid) <= 128),
+  CHECK (TRIM(record_id) <> '' AND LENGTH(record_id) <= 128),
+  CHECK (TRIM(action_id) <> '' AND LENGTH(action_id) <= 128),
+  CHECK (TRIM(attempt_id) <> '' AND LENGTH(attempt_id) <= 128)
+);
+CREATE INDEX ix_payment_recovery_cases_scope_state
+  ON payment_recovery_cases (store_code, device_code, is_parked, state, updated_at_iso DESC);
+CREATE INDEX ix_payment_recovery_actions_record_time
+  ON payment_recovery_actions (record_id, created_at_iso, action_id);
+CREATE INDEX ix_payment_recovery_reconciliations_record_time
+  ON payment_recovery_reconciliations (record_id, observed_at_iso DESC);
+-- 已移交的异常 attempt 不再占用整台设备；同一支付提供方仍视为同一物理通道，
+-- 在没有可持久化 lane identity 前继续失败关闭，避免同一刷卡机重复扣款。
+DROP TRIGGER trg_payment_attempts_single_terminal_blocking_insert;
+DROP TRIGGER trg_payment_attempts_single_terminal_blocking_update;
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_insert
+BEFORE INSERT ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND EXISTS (
+  SELECT 1 FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid AND prior_draft.state = 'Active'
+  WHERE prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (prior.state = 'Approved' AND NOT EXISTS (
+        SELECT 1 FROM order_tenders consumed
+        WHERE consumed.payment_attempt_id = prior.attempt_id
+          AND consumed.order_guid = prior.order_guid
+          AND consumed.amount_cents = prior.amount_cents
+          AND ((prior.provider IN ('square', 'linkly-cloud') AND consumed.method = 'card')
+            OR (prior.provider = 'voucher' AND consumed.method = 'voucher'))
+      ))
+    )
+    -- 已由主管明确分类并恢复到原订单上下文的旧 attempt 不再永久占用其他订单。
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases released
+      WHERE released.attempt_id = prior.attempt_id
+        AND released.is_parked = 0
+        AND released.state IN ('manual-unpaid', 'manual-uncertain')
+    )
+    AND (
+      NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases parked
+        WHERE parked.attempt_id = prior.attempt_id AND parked.is_parked = 1
+      )
+      OR (prior.provider = NEW.provider AND NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases released
+        WHERE released.attempt_id = prior.attempt_id
+          AND released.is_parked = 1
+          AND released.state = 'manual-unpaid'
+      ))
+    )
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS'); END;
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_update
+BEFORE UPDATE OF state ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND NOT EXISTS (
+  SELECT 1 FROM payment_recovery_cases incoming_case
+  WHERE incoming_case.attempt_id = NEW.attempt_id
+)
+AND EXISTS (
+  SELECT 1 FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid AND prior_draft.state = 'Active'
+  WHERE prior.attempt_id <> OLD.attempt_id
+    AND prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (prior.state = 'Approved' AND NOT EXISTS (
+        SELECT 1 FROM order_tenders consumed
+        WHERE consumed.payment_attempt_id = prior.attempt_id
+          AND consumed.order_guid = prior.order_guid
+          AND consumed.amount_cents = prior.amount_cents
+          AND ((prior.provider IN ('square', 'linkly-cloud') AND consumed.method = 'card')
+            OR (prior.provider = 'voucher' AND consumed.method = 'voucher'))
+      ))
+    )
+    -- 恢复后的人工未扣款/仍未知结论保留 provider 原事实，但释放跨订单全局阻断。
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases released
+      WHERE released.attempt_id = prior.attempt_id
+        AND released.is_parked = 0
+        AND released.state IN ('manual-unpaid', 'manual-uncertain')
+    )
+    AND (
+      NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases parked
+        WHERE parked.attempt_id = prior.attempt_id AND parked.is_parked = 1
+      )
+      OR (prior.provider = NEW.provider AND NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases released
+        WHERE released.attempt_id = prior.attempt_id
+          AND released.is_parked = 1
+          AND released.state = 'manual-unpaid'
+      ))
+    )
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS'); END;
+-- Parked case 可释放购物车，但 Linkly 最终结果的 ACK 仍占用物理 lane。
+CREATE TRIGGER trg_payment_attempts_linkly_ack_lane_insert
+BEFORE INSERT ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted')
+AND EXISTS (
+  SELECT 1
+  FROM local_orders incoming_order
+  INNER JOIN payment_order_draft_bindings incoming_draft
+    ON incoming_draft.order_guid = incoming_order.order_guid AND incoming_draft.state = 'Active'
+  INNER JOIN payment_attempts ack_pending ON 1 = 1
+  INNER JOIN local_orders ack_order ON ack_order.order_guid = ack_pending.order_guid
+  WHERE incoming_order.order_guid = NEW.order_guid
+    AND ack_order.store_code = incoming_order.store_code
+    AND ack_order.device_code = incoming_order.device_code
+    AND ack_pending.provider = 'linkly-cloud'
+    AND ack_pending.state IN ('Approved', 'Declined', 'Cancelled')
+    AND ack_pending.provider_environment IS NOT NULL
+    AND ack_pending.provider_acknowledged_at_iso IS NULL
+    AND ack_pending.session_id IS NOT NULL
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_LINKLY_ACK_PENDING'); END;
+CREATE TRIGGER trg_payment_attempts_linkly_ack_lane_update
+BEFORE UPDATE OF state ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted')
+AND EXISTS (
+  SELECT 1
+  FROM local_orders incoming_order
+  INNER JOIN payment_attempts ack_pending ON 1 = 1
+  INNER JOIN local_orders ack_order ON ack_order.order_guid = ack_pending.order_guid
+  WHERE incoming_order.order_guid = NEW.order_guid
+    AND ack_pending.attempt_id <> OLD.attempt_id
+    AND ack_order.store_code = incoming_order.store_code
+    AND ack_order.device_code = incoming_order.device_code
+    AND ack_pending.provider = 'linkly-cloud'
+    AND ack_pending.state IN ('Approved', 'Declined', 'Cancelled')
+    AND ack_pending.provider_environment IS NOT NULL
+    AND ack_pending.provider_acknowledged_at_iso IS NULL
+    AND ack_pending.session_id IS NOT NULL
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_LINKLY_ACK_PENDING'); END;
+CREATE TRIGGER trg_payment_recovery_case_identity_immutable
+BEFORE UPDATE ON payment_recovery_cases
+FOR EACH ROW WHEN NEW.record_id <> OLD.record_id
+  OR NEW.order_guid <> OLD.order_guid OR NEW.attempt_id <> OLD.attempt_id
+  OR NEW.store_code <> OLD.store_code OR NEW.device_code <> OLD.device_code
+  OR NEW.park_action_id <> OLD.park_action_id OR NEW.opened_at_iso <> OLD.opened_at_iso
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_CASE_IDENTITY_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_actions_immutable
+BEFORE UPDATE ON payment_recovery_actions
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_ACTION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_actions_no_delete
+BEFORE DELETE ON payment_recovery_actions
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_ACTION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_authorizations_immutable
+BEFORE UPDATE ON payment_recovery_authorizations
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_AUTHORIZATION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_authorizations_no_delete
+BEFORE DELETE ON payment_recovery_authorizations
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_AUTHORIZATION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_reconciliations_immutable
+BEFORE UPDATE ON payment_recovery_reconciliations
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_RECONCILIATION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_reconciliations_no_delete
+BEFORE DELETE ON payment_recovery_reconciliations
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_RECONCILIATION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_park_actions_immutable
+BEFORE UPDATE ON payment_recovery_park_actions
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_PARK_ACTION_IMMUTABLE'); END;
+CREATE TRIGGER trg_payment_recovery_park_actions_no_delete
+BEFORE DELETE ON payment_recovery_park_actions
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_RECOVERY_PARK_ACTION_IMMUTABLE'); END;
+CREATE TRIGGER trg_manual_payment_tender_bindings_immutable
+BEFORE UPDATE ON manual_payment_tender_bindings
+BEGIN SELECT RAISE(ABORT, 'MANUAL_PAYMENT_TENDER_BINDING_IMMUTABLE'); END;
+CREATE TRIGGER trg_manual_payment_tender_bindings_no_delete
+BEFORE DELETE ON manual_payment_tender_bindings
+BEGIN SELECT RAISE(ABORT, 'MANUAL_PAYMENT_TENDER_BINDING_IMMUTABLE'); END;
+
+DROP TRIGGER trg_payment_attempts_single_terminal_blocking_insert;
+DROP TRIGGER trg_payment_attempts_single_terminal_blocking_update;
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_insert
+BEFORE INSERT ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND EXISTS (
+  SELECT 1 FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid AND prior_draft.state = 'Active'
+  WHERE prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (prior.state = 'Approved' AND NOT EXISTS (
+        SELECT 1 FROM order_tenders consumed
+        WHERE consumed.payment_attempt_id = prior.attempt_id
+          AND consumed.order_guid = prior.order_guid
+          AND consumed.amount_cents = prior.amount_cents
+          AND ((prior.provider IN ('square', 'linkly-cloud', 'manual-card') AND consumed.method = 'card')
+            OR (prior.provider = 'voucher' AND consumed.method = 'voucher'))
+      ))
+    )
+    -- 已由主管明确分类并恢复到原订单上下文的旧 attempt 不再永久占用其他订单。
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases released
+      WHERE released.attempt_id = prior.attempt_id
+        AND released.is_parked = 0
+        AND released.state IN ('manual-unpaid', 'manual-uncertain')
+    )
+    AND (
+      NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases parked
+        WHERE parked.attempt_id = prior.attempt_id AND parked.is_parked = 1
+      )
+      OR (prior.provider = NEW.provider AND NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases released
+        WHERE released.attempt_id = prior.attempt_id
+          AND released.is_parked = 1
+          AND released.state = 'manual-unpaid'
+      ))
+    )
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS'); END;
+CREATE TRIGGER trg_payment_attempts_single_terminal_blocking_update
+BEFORE UPDATE OF state ON payment_attempts
+FOR EACH ROW
+WHEN NEW.state IN ('Created', 'Submitted', 'Pending', 'Approved', 'Unknown')
+AND NOT EXISTS (
+  SELECT 1 FROM payment_recovery_cases incoming_case
+  WHERE incoming_case.attempt_id = NEW.attempt_id
+)
+AND EXISTS (
+  SELECT 1 FROM payment_order_draft_bindings incoming_draft
+  WHERE incoming_draft.order_guid = NEW.order_guid AND incoming_draft.state = 'Active'
+)
+AND EXISTS (
+  SELECT 1
+  FROM payment_attempts prior
+  INNER JOIN local_orders prior_order ON prior_order.order_guid = prior.order_guid
+  INNER JOIN local_orders incoming_order ON incoming_order.order_guid = NEW.order_guid
+  INNER JOIN payment_order_draft_bindings prior_draft
+    ON prior_draft.order_guid = prior.order_guid AND prior_draft.state = 'Active'
+  WHERE prior.attempt_id <> OLD.attempt_id
+    AND prior.order_guid <> NEW.order_guid
+    AND prior_order.store_code = incoming_order.store_code
+    AND prior_order.device_code = incoming_order.device_code
+    AND (
+      prior.state IN ('Created', 'Submitted', 'Pending', 'Unknown')
+      OR (prior.state = 'Approved' AND NOT EXISTS (
+        SELECT 1 FROM order_tenders consumed
+        WHERE consumed.payment_attempt_id = prior.attempt_id
+          AND consumed.order_guid = prior.order_guid
+          AND consumed.amount_cents = prior.amount_cents
+          AND ((prior.provider IN ('square', 'linkly-cloud', 'manual-card') AND consumed.method = 'card')
+            OR (prior.provider = 'voucher' AND consumed.method = 'voucher'))
+      ))
+    )
+    -- 恢复后的人工未扣款/仍未知结论保留 provider 原事实，但释放跨订单全局阻断。
+    AND NOT EXISTS (
+      SELECT 1 FROM payment_recovery_cases released
+      WHERE released.attempt_id = prior.attempt_id
+        AND released.is_parked = 0
+        AND released.state IN ('manual-unpaid', 'manual-uncertain')
+    )
+    AND (
+      NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases parked
+        WHERE parked.attempt_id = prior.attempt_id AND parked.is_parked = 1
+      )
+      OR (prior.provider = NEW.provider AND NOT EXISTS (
+        SELECT 1 FROM payment_recovery_cases released
+        WHERE released.attempt_id = prior.attempt_id
+          AND released.is_parked = 1
+          AND released.state = 'manual-unpaid'
+      ))
+    )
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS'); END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -6544,6 +6942,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 48, name: "M48_installment_refund_voucher_print_jobs", sql: M48 },
   { version: 49, name: "M49_daily_close_upload_outbox", sql: M49 },
   { version: 50, name: "M50_payment_supervisor_session_acks", sql: M50 },
+  { version: 51, name: "M51_payment_recovery_center", sql: M51 },
 ];
 
 export async function applyMigrations(

@@ -53,6 +53,8 @@ import {
 import { SqliteDailyCloseRepository } from "@hb/pos-db/core/db/sqlite-daily-close-repository";
 import { SqliteDailyCloseUploadRepository } from "@hb/pos-db/core/db/sqlite-daily-close-upload-repository";
 import { SqliteOrderSyncStatusRepository } from "@hb/pos-db";
+import { SqliteManualPaymentOrderCommitter } from "@hb/pos-db/core/db/sqlite-manual-payment-committer";
+import { SqlitePaymentRecoveryCenterStore } from "@hb/pos-db/core/db/sqlite-payment-recovery-center-store";
 import { SqlitePaymentSupervisorAckQueue } from "@hb/pos-db/core/db/sqlite-payment-supervisor-acknowledgement-queue";
 import { SqliteReturnSupervisorResolutionStore } from "@hb/pos-db/core/db/sqlite-return-supervisor-resolution-store";
 import {
@@ -503,9 +505,26 @@ export class PosDatabase implements DatabasePort {
    * 退货完整 plan、allocation、Unknown reservation 与最终订单仅经此 facade。
    * provider/API 调用前必须先 prepare action 和绑定对应 durable attempt。
    */
+  /** 异常刷卡订单独立于当前购物车保存；页面只能经窄恢复中心端口访问。 */
+  public paymentRecoveryCenter(
+    createAuditEventId: () => string,
+  ): SqlitePaymentRecoveryCenterStore {
+    return new SqlitePaymentRecoveryCenterStore(
+      this.connection,
+      createAuditEventId,
+      createAuditEventId,
+      this.nowIso,
+    );
+  }
+
   /** 主管结案后待补发的 Linkly 会话确认队列；队列行与人工结论同事务写入。 */
   public paymentSupervisorAckQueue(): SqlitePaymentSupervisorAckQueue {
     return new SqlitePaymentSupervisorAckQueue(this.connection);
+  }
+
+  /** 人工确认已收款只经专用事务写入 manual tender，不能伪造 provider Approved。 */
+  public manualPaymentOrderCommitter(): SqliteManualPaymentOrderCommitter {
+    return new SqliteManualPaymentOrderCommitter(this.connection, this.nowIso);
   }
 
   public returnExecutionLedger(

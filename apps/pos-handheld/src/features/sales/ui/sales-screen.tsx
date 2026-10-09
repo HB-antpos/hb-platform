@@ -137,6 +137,7 @@ export type SalesScreenProps = Readonly<{
   onOpenRequiredUpdate?: () => void;
   onReprintReceipt?: () => Promise<SalesUtilityActionResult>;
   onOpenRemoteHistory?: () => void;
+  onOpenPaymentRecovery?: () => void;
   onOpenReturns?: () => void;
   onOpenSettings?: () => void;
   onOpenSpecialProducts?: () => void;
@@ -184,6 +185,7 @@ export function SalesScreen({
   onOpenRequiredUpdate,
   onReprintReceipt,
   onOpenRemoteHistory,
+  onOpenPaymentRecovery,
   onOpenReturns,
   onOpenSettings,
   onOpenSpecialProducts,
@@ -1275,6 +1277,17 @@ export function SalesScreen({
             label: t("functions.returns"),
             onPress: onOpenReturns,
             testID: "sales-open-returns",
+            tone: "secondary" as const,
+          },
+        ]
+      : []),
+    ...(onOpenPaymentRecovery
+      ? [
+          {
+            id: "payment-recovery" as const,
+            label: t("functions.paymentRecovery"),
+            onPress: onOpenPaymentRecovery,
+            testID: "sales-open-payment-recovery",
             tone: "secondary" as const,
           },
         ]
