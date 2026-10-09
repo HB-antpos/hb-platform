@@ -5,6 +5,7 @@ namespace BlazorApp.Api.Interfaces.React
     public interface IAdvertisementReactService
     {
         Task<GridResponseDto<AdvertisementListDto>> GetGridAsync(AdvertisementGridRequestDto request);
+        Task<ApiResponse<List<AdvertisementStoreOptionDto>>> GetStoreOptionsAsync();
         Task<ApiResponse<AdvertisementDetailDto>> GetByIdAsync(string id);
         Task<ApiResponse<AdvertisementDetailDto>> CreateAsync(CreateAdvertisementDto dto);
         Task<ApiResponse<AdvertisementDetailDto>> UpdateAsync(

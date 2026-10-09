@@ -130,6 +130,19 @@ public sealed class AdvertisementReactServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetStoreOptionsAsync_ReturnsAllActiveStoresOnly()
+    {
+        var service = CreateService();
+
+        var result = await service.GetStoreOptionsAsync();
+
+        Assert.True(result.Success);
+        // S04 未启用、S05 已删除，都不能出现在选项里；其余启用分店必须全部返回。
+        Assert.Equal(new[] { "S01", "S02", "S03" }, result.Data!.Select(item => item.StoreCode).ToArray());
+        Assert.Equal("Store 1", result.Data[0].StoreName);
+    }
+
+    [Fact]
     public async Task GetGridAsync_FiltersByStoreCodeAndSimpleFields()
     {
         await SeedAdvertisementAsync("ad-1", "Winter Image", true, "Image", "S01");

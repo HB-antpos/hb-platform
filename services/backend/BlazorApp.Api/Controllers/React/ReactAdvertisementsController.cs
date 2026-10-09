@@ -27,6 +27,14 @@ namespace BlazorApp.Api.Controllers.React
             return Ok(await _service.GetGridAsync(request));
         }
 
+        // 分店选项只要求广告查看权限，不要求 Stores.View；字面量路由优先于下面的 {id}。
+        [HttpGet("store-options")]
+        [Authorize(Policy = Permissions.Advertisements.View)]
+        public async Task<ActionResult<ApiResponse<List<AdvertisementStoreOptionDto>>>> StoreOptions()
+        {
+            return Ok(await _service.GetStoreOptionsAsync());
+        }
+
         [HttpGet("{id}")]
         [Authorize(Policy = Permissions.Advertisements.View)]
         public async Task<ActionResult<ApiResponse<AdvertisementDetailDto>>> Get(string id)

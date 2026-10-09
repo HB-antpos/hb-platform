@@ -13,6 +13,13 @@ export interface AdvertisementStoreItemDto {
   storeName?: string
 }
 
+/** 广告后台分店选择器的选项（GET /api/react/v1/advertisements/store-options）。 */
+export interface AdvertisementStoreOptionDto {
+  storeCode: string
+  storeName?: string | null
+  brandName?: string | null
+}
+
 export interface AdvertisementListDto {
   id: string
   title: string
