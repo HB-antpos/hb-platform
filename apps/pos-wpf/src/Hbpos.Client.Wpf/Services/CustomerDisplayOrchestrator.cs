@@ -153,6 +153,7 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
             DiscountRateText = line.DiscountRateText
         });
         customerDisplay.TerminalName = session.DeviceCode;
+        customerDisplay.ApplyCashier(session);
         customerDisplay.LoadLines(lines, cart.TotalAmount, cart.DiscountAmount);
         if (!refreshAdvertisements)
         {

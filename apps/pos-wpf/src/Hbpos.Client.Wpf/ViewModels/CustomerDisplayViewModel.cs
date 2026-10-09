@@ -30,6 +30,11 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
     private string _terminalName = "Terminal 01";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCashier))]
+    [NotifyPropertyChangedFor(nameof(CashierInitial))]
+    private string _cashierFirstName = string.Empty;
+
+    [ObservableProperty]
     private bool _isReadyForPayment;
 
     [ObservableProperty]
@@ -61,6 +66,41 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
     public string SavingsLabel => "Savings";
 
     public bool HasSavings => SavingsAmount > 0m;
+
+    public bool HasCashier => CashierFirstName.Length > 0;
+
+    public string CashierInitial => HasCashier
+        ? char.ConvertFromUtf32(char.ConvertToUtf32(CashierFirstName, 0)).ToUpperInvariant()
+        : string.Empty;
+
+    public void ApplyCashier(PosSessionState session)
+    {
+        // 紧急授权会话的收银员名是固定的 EMERGENCY，不是真人，客显只显示终端号。
+        var isEmergencyOverride = session.CashierSession?.IsEmergencyOverride == true;
+        CashierFirstName = isEmergencyOverride ? string.Empty : ResolveCashierFirstName(session.CashierName);
+    }
+
+    internal static string ResolveCashierFirstName(string? cashierName)
+    {
+        // 客显面向顾客，只露名不露姓：取全名按空白切分后的第一个词。
+        var trimmed = cashierName?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = trimmed.IndexOfAny([' ', '\t', '　']);
+        var firstName = separatorIndex < 0 ? trimmed : trimmed[..separatorIndex];
+
+        // 没填姓名的账号会回退成用户名；用户名若是邮箱就不展示，避免把邮箱露给顾客。
+        if (firstName.Contains('@'))
+        {
+            return string.Empty;
+        }
+
+        // 用户名多为小写（如 lily），首字母大写后再展示。
+        return char.ToUpperInvariant(firstName[0]) + firstName[1..];
+    }
 
     public string CurrentAdvertisementTitle => CurrentAdvertisement?.Title ?? string.Empty;
 

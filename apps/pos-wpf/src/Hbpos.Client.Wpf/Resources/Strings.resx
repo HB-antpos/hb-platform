@@ -388,6 +388,7 @@
   <data name="customer.totalToPay" xml:space="preserve"><value>Total To Pay</value></data>
   <data name="customer.itemQuantity" xml:space="preserve"><value>Item Quantity</value></data>
   <data name="customer.skuCount" xml:space="preserve"><value>SKU Count</value></data>
+  <data name="customer.servedBy" xml:space="preserve"><value>Served by</value></data>
   <data name="customer.readyForPayment" xml:space="preserve"><value>Ready for Payment</value></data>
   <data name="customer.insertOrTap" xml:space="preserve"><value>Insert or tap card</value></data>
   <data name="customerDisplay.window.opened" xml:space="preserve"><value>Customer display opened on the second display.</value></data>
