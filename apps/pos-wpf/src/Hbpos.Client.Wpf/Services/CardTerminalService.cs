@@ -533,6 +533,7 @@ public sealed class ConfiguredCardTerminalClient :
     private readonly HttpClient _httpClient;
     private readonly ILinklyTerminalClient? _linklyTerminalClient;
     private readonly ILinklyBackendTerminalClient? _linklyBackendTerminalClient;
+    private readonly ILinklyCloudTerminalClient? _linklyCloudTerminalClient;
     private readonly ILocalizationService? _localization;
     private readonly ISquarePaymentAttemptContextAccessor? _squarePaymentAttemptContextAccessor;
     private readonly ILocalSquarePaymentAttemptRepository? _squarePaymentAttemptRepository;
@@ -550,12 +551,14 @@ public sealed class ConfiguredCardTerminalClient :
         ILocalSquarePaymentAttemptRepository? squarePaymentAttemptRepository = null,
         ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null,
         ILinklyBackendTerminalClient? linklyBackendTerminalClient = null,
-        ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null)
+        ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
+        ILinklyCloudTerminalClient? linklyCloudTerminalClient = null)
     {
         _settingsProvider = settingsProvider;
         _httpClient = httpClient;
         _linklyTerminalClient = linklyTerminalClient;
         _linklyBackendTerminalClient = linklyBackendTerminalClient;
+        _linklyCloudTerminalClient = linklyCloudTerminalClient;
         _localization = localization;
         _squarePaymentAttemptContextAccessor = squarePaymentAttemptContextAccessor;
         _squarePaymentAttemptRepository = squarePaymentAttemptRepository;
@@ -1503,12 +1506,56 @@ public sealed class ConfiguredCardTerminalClient :
                     : UnknownRecovery("Linkly recovery identity did not match the persisted attempt.");
             }
 
-            if (_linklyBackendTerminalClient is null || string.IsNullOrWhiteSpace(attempt.SessionId))
+            if (mode == LinklyConnectionMode.CloudDirectSync)
+            {
+                // 中文注释：直连模式的 session 只存在于 Linkly 云端，后端会话接口里查不到（只会 404 后落成 Unknown）。
+                // 与销售恢复一致，按 attempt 冻结的模式走直连客户端，只查询已持久化的原 session，绝不重发扣款。
+                if (_linklyCloudTerminalClient is null ||
+                    string.IsNullOrWhiteSpace(attempt.SessionId) ||
+                    !LinklyLocalTxnRef.TryNormalizeHistoricalReference(attempt.TxnRef, out var directTxnRef))
+                {
+                    return UnknownRecovery("Linkly direct cloud attempt cannot be queried.");
+                }
+
+                var directResult = await _linklyCloudTerminalClient.RecoverTransactionAsync(
+                    attempt.Amount,
+                    session,
+                    settings with { LinklyConnectionMode = LinklyConnectionMode.CloudDirectSync },
+                    attempt.SessionId,
+                    directTxnRef,
+                    cancellationToken);
+                // 直连引用带 ANZCLOUD: 渠道前缀，身份核验与销售恢复共用同一套规则。
+                return directResult.ResultUnknown || CardPaymentRecoveryService.LocalAuthorizationMatchesAttempt(attempt, directResult)
+                    ? directResult
+                    : UnknownRecovery("Linkly recovery identity did not match the persisted attempt.");
+            }
+
+            if (_linklyBackendTerminalClient is null)
             {
                 return UnknownRecovery("Linkly backend session cannot be queried.");
             }
 
-            var status = await _linklyBackendTerminalClient.GetSessionStatusAsync(settings, attempt.SessionId, cancellationToken);
+            LinklyCloudBackendSessionResponse? status;
+            if (string.IsNullOrWhiteSpace(attempt.SessionId))
+            {
+                // 中文注释：POST 已受理但响应丢失（或断电）时本地没有 SessionId。attempt 的 TxnRef 在发请求前已落库，
+                // 后端用同一身份派生出相同引用，所以可以用设备上未确认的会话按 TxnRef 精确认领；没有引用可比对时不猜。
+                if (string.IsNullOrWhiteSpace(attempt.TxnRef))
+                {
+                    return UnknownRecovery("Linkly backend session cannot be queried.");
+                }
+
+                status = await _linklyBackendTerminalClient.GetResumableSessionAsync(settings, cancellationToken);
+                if (status is null)
+                {
+                    return UnknownRecovery("Linkly backend session was not found.");
+                }
+            }
+            else
+            {
+                status = await _linklyBackendTerminalClient.GetSessionStatusAsync(settings, attempt.SessionId, cancellationToken);
+            }
+
             if (!string.Equals(status.Environment, attempt.Environment, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(status.StoreCode, attempt.StoreCode, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(status.DeviceCode, attempt.DeviceCode, StringComparison.OrdinalIgnoreCase) ||
@@ -1519,8 +1566,7 @@ public sealed class ConfiguredCardTerminalClient :
 
             if (string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) && status.TransactionSuccess == true)
             {
-                // 会话状态不携带经核验的金额，恢复时不得用原请求金额补造成功回执。
-                return UnknownRecovery("Linkly backend session does not contain a verified approved amount.");
+                return RecoverBackendApproval(status, attempt);
             }
 
             if ((string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) && status.TransactionSuccess == false) ||
@@ -1737,6 +1783,45 @@ public sealed class ConfiguredCardTerminalClient :
 
     private static PaymentAuthorizationResult UnknownRecovery(string message) =>
         new(false, null, message, ResultUnknown: true);
+
+    // 状态接口返回的 CardTransaction 是服务端已核验的权威明细（金额、引用、批准码）。恢复与实时收款共用
+    // 同一套证据校验：核验通过才认定批准；证据缺失或与持久化 attempt 不符一律保持未知，
+    // 绝不能用 attempt 的请求金额补造终端批准金额。
+    private static PaymentAuthorizationResult RecoverBackendApproval(
+        LinklyCloudBackendSessionResponse status,
+        LocalCardPaymentAttempt attempt)
+    {
+        var requestedAmount = Math.Abs(attempt.Amount);
+        var transaction = LinklyBackendTerminalClient.ReadTransactionResult(
+            status,
+            requestedAmount,
+            attempt.TxnRef ?? string.Empty);
+        if (!transaction.Succeeded ||
+            !LinklyBackendTerminalClient.IsTransactionResultVerified(status, transaction, requestedAmount))
+        {
+            return UnknownRecovery("Linkly backend session does not contain a verified approved amount.");
+        }
+
+        var card = LinklyBackendTerminalClient.ToCardTransaction(transaction, transaction.Amount, status.ReceiptText);
+        return new PaymentAuthorizationResult(
+            true,
+            LinklyBackendPaymentReference.Format(
+                card.TxnRef ?? transaction.SessionId,
+                transaction.SessionId,
+                status.Environment,
+                transaction.RefundReference),
+            "ANZ Linkly Cloud",
+            transaction.Amount,
+            [card],
+            "ANZ",
+            status.Environment,
+            LinklyConnectionMode.CloudBackendAsync.ToString(),
+            attempt.TxnType,
+            status.SessionId,
+            card.TxnRef,
+            card.ResponseCode,
+            card.ResponseText);
+    }
 
     private static bool MatchesRecoveredAmount(
         PaymentAuthorizationResult result,

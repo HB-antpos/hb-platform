@@ -5165,7 +5165,7 @@ public sealed class CardPaymentRecoveryService(
                 !string.IsNullOrWhiteSpace(transaction?.ResponseText));
     }
 
-    private static bool LocalAuthorizationMatchesAttempt(
+    internal static bool LocalAuthorizationMatchesAttempt(
         LocalCardPaymentAttempt attempt,
         PaymentAuthorizationResult authorization)
     {
