@@ -213,6 +213,17 @@ public static class PaymentTerminalSettingsSchemaMigrator
                     INCLUDE ([UpdatedAt])
                     WHERE [TerminalId] IS NOT NULL;
             END;
+
+            -- Linkly 回调只带 (Environment, SessionId)；与 Hbpos.Api 初始化脚本同名同定义，按名称幂等创建。
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE [object_id] = OBJECT_ID(N'[dbo].[POSM_LinklyCloudBackendSession]', N'U')
+                  AND [name] = N'IX_POSM_LinklyCloudBackendSession_EnvSession')
+            BEGIN
+                CREATE INDEX [IX_POSM_LinklyCloudBackendSession_EnvSession]
+                    ON [dbo].[POSM_LinklyCloudBackendSession] ([Environment], [SessionId])
+                    INCLUDE ([UpdatedAt]);
+            END;
         END;
         """;
 

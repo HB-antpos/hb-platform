@@ -93,6 +93,20 @@ public sealed class LinklyCloudBackendAsyncSchemaInitializerTests
         Assert.Contains("[Environment], [StoreCode], [TerminalId]", sql);
         Assert.Contains("[TerminalId] IS NOT NULL", sql);
 
+        // M35：回调按 (Environment, SessionId) 查会话，必须有以这两列打头的索引，并按名称幂等创建。
+        Assert.Contains("[name] = N'IX_POSM_LinklyCloudBackendSession_EnvSession'", sql);
+        Assert.Contains("ON [dbo].[POSM_LinklyCloudBackendSession] ([Environment], [SessionId])", sql);
+
+        // H1：迟到最终结果的独立字段，以及官方查询 4xx 计数，都走幂等的 COL_LENGTH 迁移。
+        foreach (var column in new[]
+                 {
+                     "LateFinalAt", "LateFinalTransactionSuccess", "LateFinalResponseCode",
+                     "LateFinalResponseText", "OfficialQueryRejectCount"
+                 })
+        {
+            Assert.Contains($"COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'{column}') IS NULL", sql);
+        }
+
         Assert.Contains("IF OBJECT_ID(N'[dbo].[POSM_LinklyCloudTerminal]', N'U') IS NULL", sql);
         Assert.Contains("CONSTRAINT [PK_POSM_LinklyCloudTerminal] PRIMARY KEY", sql);
         Assert.Contains("[LaneNo] INT NOT NULL", sql);
