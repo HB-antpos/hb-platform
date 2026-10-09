@@ -91,6 +91,8 @@ registerPageMessages({ zh: advertisementsMessagesZh, en: advertisementsMessagesE
 
 /** 品牌筛选里「全部品牌」的取值；品牌键都是小写品牌名或 UNBRANDED_STORE_KEY，不会与之冲突。 */
 const ALL_STORE_BRANDS = '__all__'
+// 序号列固定宽度；横向滚动总宽要把它算进去，否则右侧列会被挤压。
+const ROW_INDEX_COLUMN_WIDTH = 64
 
 type AdvertisementRow = AdvertisementListDto & { key: string }
 
@@ -560,6 +562,14 @@ export default function AdvertisementsPage() {
 
   const columns: ColumnsType<AdvertisementRow> = [
     {
+      // 序号接着服务端分页往下数：(页码-1)×每页条数 + 行下标 + 1。
+      title: t('column.index'),
+      key: 'rowIndex',
+      width: ROW_INDEX_COLUMN_WIDTH,
+      align: 'center',
+      render: (_: unknown, __: AdvertisementRow, index: number) => (page - 1) * pageSize + index + 1,
+    },
+    {
       title: t('posAdmin.advertisements.preview'),
       dataIndex: 'mediaUrl',
       key: 'preview',
@@ -767,7 +777,7 @@ export default function AdvertisementsPage() {
           loading={loading}
           dataSource={data}
           columns={columns}
-          scroll={{ x: 1590 }}
+          scroll={{ x: 1590 + ROW_INDEX_COLUMN_WIDTH }}
           pagination={{
             total,
             current: page,
