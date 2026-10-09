@@ -289,6 +289,148 @@ public sealed class ReceiptReturnsWorkflowServiceTests
     }
 
     [Fact]
+    public async Task LookupOrderAsync_LocalFallbackCountsLocalReturnsAndDisablesOriginalCardRefund()
+    {
+        var originalGuid = Guid.NewGuid();
+        var lineGuid = Guid.NewGuid();
+        var original = CreateCardSaleOrder(originalGuid, lineGuid, quantity: 3m, cardReference: "SQ:card-1");
+        var pendingReturn = CreateReturnOrder(originalGuid, lineGuid, quantity: 1m, cardRefund: 10m, originalReference: "SQ:card-1");
+        var syncedReturn = CreateReturnOrder(originalGuid, lineGuid, quantity: 1m, cardRefund: 10m, originalReference: "SQ:card-1");
+        var repository = new FakeLocalOrderRepository([original, pendingReturn, syncedReturn]);
+        repository.SyncedOrders.Add(syncedReturn.OrderGuid);
+        var service = CreateService(new ThrowingRemoteOrderHistoryService(), repository);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), originalGuid.ToString("D"));
+
+        Assert.NotNull(result.Order);
+        Assert.True(result.ReturnRecordsMayBeStale);
+        // 降级到本地时服务端记录不可见，本机保存的退货单（含已同步的）都要计入已退数量。
+        var line = Assert.Single(result.Order.Lines);
+        Assert.Equal(2m, line.ReturnedQuantity);
+        Assert.Equal(1m, line.AvailableQuantity);
+        Assert.Equal(2, result.Order.ReturnRecords.Count);
+        // 陈旧状态下禁止原路退卡：卡付款可退额度清零，不再进入购物车的退款额度。
+        var capacity = Assert.Single(result.Order.PaymentCapacities, c => c.Method == PaymentMethodKind.Card);
+        Assert.Equal(0m, capacity.RemainingAmount);
+        Assert.Equal(capacity.OriginalAmount, capacity.RefundedAmount);
+        Assert.Contains("Refund to the original card is disabled", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_OfflineLocalLookupDisablesOriginalCardRefundWithLocalizedNotice()
+    {
+        var originalGuid = Guid.NewGuid();
+        var original = CreateCardSaleOrder(originalGuid, Guid.NewGuid(), quantity: 1m, cardReference: "SQ:card-1");
+        var service = CreateService(
+            localRepository: new FakeLocalOrderRepository([original]),
+            localization: CreateLocalization("zh-CN"));
+
+        var result = await service.LookupOrderAsync(CreateOfflineSession(), originalGuid.ToString("D"));
+
+        Assert.NotNull(result.Order);
+        Assert.All(
+            result.Order.PaymentCapacities.Where(c => c.Method == PaymentMethodKind.Card),
+            capacity => Assert.Equal(0m, capacity.RemainingAmount));
+        Assert.Contains("不能原路退回银行卡", result.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_RemoteContextMergesUnsyncedLocalReturnsIntoQuantityAndCardCapacity()
+    {
+        var originalGuid = Guid.NewGuid();
+        var lineGuid = Guid.NewGuid();
+        var serverReturnOrderGuid = Guid.NewGuid();
+        var pendingReturn = CreateReturnOrder(originalGuid, lineGuid, quantity: 1m, cardRefund: 10m, originalReference: "SQ:card-1");
+        var syncedReturn = CreateReturnOrder(originalGuid, lineGuid, quantity: 1m, cardRefund: 10m, originalReference: "SQ:card-1");
+        // 服务端已记录、但本机状态尚未回写为 Synced 的退货单：以服务端为准，不能重复计数。
+        var alreadyOnServer = CreateReturnOrder(originalGuid, lineGuid, quantity: 1m, cardRefund: 10m, originalReference: "SQ:card-1") with
+        {
+            OrderGuid = serverReturnOrderGuid
+        };
+        var repository = new FakeLocalOrderRepository([pendingReturn, syncedReturn, alreadyOnServer]);
+        repository.SyncedOrders.Add(syncedReturn.OrderGuid);
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            ReturnContext = new OrderReturnContextDto(
+                CreateRemoteOrder(originalGuid, lineGuid, quantity: 5m, actualAmount: 50m),
+                [
+                    new OrderReturnRecordDto(Guid.NewGuid(), serverReturnOrderGuid, originalGuid, lineGuid, "SKU-001", "REF-001", 1m, 10m, "C01", DateTimeOffset.UtcNow),
+                    new OrderReturnRecordDto(Guid.NewGuid(), syncedReturn.OrderGuid, originalGuid, lineGuid, "SKU-001", "REF-001", 1m, 10m, "C01", DateTimeOffset.UtcNow)
+                ],
+                PaymentCapacities:
+                [
+                    new OrderReturnPaymentCapacityDto(PaymentMethodKind.Card, 50m, 20m, 30m, "SQ:card-1", null, originalGuid)
+                ])
+        };
+        var service = CreateService(remote, repository);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), originalGuid.ToString("D"));
+
+        Assert.NotNull(result.Order);
+        Assert.True(result.IsRemote);
+        Assert.False(result.ReturnRecordsMayBeStale);
+        var line = Assert.Single(result.Order.Lines);
+        // 服务端 2 件 + 本机未同步的 1 件。
+        Assert.Equal(3m, line.ReturnedQuantity);
+        Assert.Equal(3, result.Order.ReturnRecords.Count);
+        var capacity = Assert.Single(result.Order.PaymentCapacities);
+        Assert.Equal(20m, capacity.RemainingAmount);
+        Assert.Equal(30m, capacity.RefundedAmount);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_RemoteContextWithUnreadableLocalReturnsFailsClosedOnCardRefund()
+    {
+        var originalGuid = Guid.NewGuid();
+        var lineGuid = Guid.NewGuid();
+        var repository = new FakeLocalOrderRepository([]) { ReturnOrdersException = new InvalidOperationException("sqlite busy") };
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            ReturnContext = new OrderReturnContextDto(
+                CreateRemoteOrder(originalGuid, lineGuid, quantity: 2m, actualAmount: 20m),
+                [],
+                PaymentCapacities:
+                [
+                    new OrderReturnPaymentCapacityDto(PaymentMethodKind.Card, 20m, 0m, 20m, "SQ:card-1", null, originalGuid)
+                ])
+        };
+        var service = CreateService(remote, repository);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), originalGuid.ToString("D"));
+
+        Assert.NotNull(result.Order);
+        Assert.True(result.ReturnRecordsMayBeStale);
+        Assert.Equal(0m, Assert.Single(result.Order.PaymentCapacities).RemainingAmount);
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_UnmatchedLocalCardRefundBlocksEveryCardPaymentWhenOriginalIsAmbiguous()
+    {
+        var originalGuid = Guid.NewGuid();
+        var lineGuid = Guid.NewGuid();
+        // 退款引用没有 original 部分，且原单有两笔卡付款：无法归属，全部占满。
+        var returnOrder = CreateReturnOrder(originalGuid, lineGuid, quantity: 1m, cardRefund: 5m, originalReference: null);
+        var repository = new FakeLocalOrderRepository([returnOrder]);
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            ReturnContext = new OrderReturnContextDto(
+                CreateRemoteOrder(originalGuid, lineGuid, quantity: 4m, actualAmount: 40m),
+                [],
+                PaymentCapacities:
+                [
+                    new OrderReturnPaymentCapacityDto(PaymentMethodKind.Card, 20m, 0m, 20m, "SQ:card-1", null, originalGuid),
+                    new OrderReturnPaymentCapacityDto(PaymentMethodKind.Card, 20m, 0m, 20m, "SQ:card-2", null, originalGuid)
+                ])
+        };
+        var service = CreateService(remote, repository);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), originalGuid.ToString("D"));
+
+        Assert.NotNull(result.Order);
+        Assert.All(result.Order.PaymentCapacities, capacity => Assert.Equal(0m, capacity.RemainingAmount));
+    }
+
+    [Fact]
     public async Task LookupNoReceiptProductAsync_ReturnsCurrentLocalCatalogItem()
     {
         var priceIndex = new LocalSellableItemIndex();
@@ -424,6 +566,66 @@ public sealed class ReceiptReturnsWorkflowServiceTests
             [new OrderHistoryPaymentDto(Guid.NewGuid(), PaymentMethodKind.Cash, actualAmount, null)]);
     }
 
+    private static LocalOrder CreateCardSaleOrder(Guid orderGuid, Guid lineGuid, decimal quantity, string cardReference)
+    {
+        var amount = quantity * 10m;
+        return new LocalOrder(
+            orderGuid,
+            "S001",
+            "POS-01",
+            "C01",
+            "Alice",
+            DateTimeOffset.UtcNow,
+            amount,
+            0m,
+            amount,
+            [
+                new LocalOrderLine(lineGuid, "SKU-001", "REF-001", "Milk", "690001", "ITEM-001", quantity, 10m, 0m, amount, PriceSourceKind.StoreRetailPrice)
+            ],
+            [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Card, amount, cardReference)]);
+    }
+
+    private static LocalOrder CreateReturnOrder(
+        Guid originalOrderGuid,
+        Guid originalLineGuid,
+        decimal quantity,
+        decimal cardRefund,
+        string? originalReference)
+    {
+        var refundReference = originalReference is null
+            ? "SQ:refund-1"
+            : CardRefundReference.Format("SQ:refund-1", originalReference);
+        return new LocalOrder(
+            Guid.NewGuid(),
+            "S001",
+            "POS-01",
+            "C01",
+            "Alice",
+            DateTimeOffset.UtcNow,
+            -quantity * 10m,
+            0m,
+            -quantity * 10m,
+            [
+                new LocalOrderLine(
+                    Guid.NewGuid(),
+                    "SKU-001",
+                    "REF-001",
+                    "Milk",
+                    "690001",
+                    "ITEM-001",
+                    quantity,
+                    10m,
+                    0m,
+                    -quantity * 10m,
+                    PriceSourceKind.StoreRetailPrice,
+                    OrderLineKind.Return,
+                    $"RETURN:{Guid.NewGuid():N}",
+                    originalOrderGuid,
+                    originalLineGuid)
+            ],
+            [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Card, -cardRefund, refundReference)]);
+    }
+
     private static LocalOrder CreateLocalOrder(Guid orderGuid)
     {
         return new LocalOrder(
@@ -492,6 +694,27 @@ public sealed class ReceiptReturnsWorkflowServiceTests
     private sealed class FakeLocalOrderRepository(IEnumerable<LocalOrder> orders) : ILocalOrderRepository
     {
         private readonly Dictionary<Guid, LocalOrder> _orders = orders.ToDictionary(order => order.OrderGuid);
+
+        public HashSet<Guid> SyncedOrders { get; } = [];
+
+        public Exception? ReturnOrdersException { get; init; }
+
+        public Task<IReadOnlyList<LocalOrder>> GetReturnOrdersForOriginalAsync(
+            Guid originalOrderGuid,
+            bool unsyncedOnly,
+            CancellationToken cancellationToken = default)
+        {
+            if (ReturnOrdersException is not null)
+            {
+                return Task.FromException<IReadOnlyList<LocalOrder>>(ReturnOrdersException);
+            }
+
+            return Task.FromResult<IReadOnlyList<LocalOrder>>(_orders.Values
+                .Where(order => order.Lines.Any(line =>
+                    line.Kind == OrderLineKind.Return && line.OriginalOrderGuid == originalOrderGuid))
+                .Where(order => !unsyncedOnly || !SyncedOrders.Contains(order.OrderGuid))
+                .ToList());
+        }
 
         public Task SavePendingOrderAsync(LocalOrder order, CancellationToken cancellationToken = default)
         {
