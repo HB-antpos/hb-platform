@@ -31,6 +31,7 @@ public sealed class LinklyController(
     private const string CloudCredentialWriteFailedMessage = "Failed to save Linkly Cloud credential configuration.";
     private const string CloudBackendInvalidCode = "LINKLY_CLOUD_BACKEND_REQUEST_INVALID";
     private const string CloudBackendActiveCode = "LINKLY_CLOUD_BACKEND_ACTIVE_TRANSACTION";
+    private const string CloudBackendRefundForbiddenCode = "LINKLY_CLOUD_BACKEND_REFUND_FORBIDDEN";
     private const string CloudBackendNotFoundCode = "LINKLY_CLOUD_BACKEND_SESSION_NOT_FOUND";
     private const string CloudBackendFailedCode = "LINKLY_CLOUD_BACKEND_FAILED";
     private const string CloudBackendPairInvalidCode = "LINKLY_CLOUD_BACKEND_PAIR_REQUEST_INVALID";
@@ -634,6 +635,24 @@ public sealed class LinklyController(
         if (scope.Result is not null)
         {
             return scope.Result;
+        }
+
+        if (string.Equals(request.TxnType?.Trim(), "R", StringComparison.OrdinalIgnoreCase))
+        {
+            // 端点只挂了 TakeCard（收卡）策略；原路退款是资金流出，必须额外具备退货确认（或分期取消）权限。
+            // Authorize 特性无法按请求体区分 P/R，所以在识别出 R 后动态走同一套 cashier 授权策略（含 Audit/Enforce 模式）。
+            var authorization = await HttpContext.RequestServices
+                .GetRequiredService<IAuthorizationService>()
+                .AuthorizeAsync(User, resource: null, CashierAuthorizationPolicies.CardRefund);
+            if (!authorization.Succeeded)
+            {
+                Log("cloud backend refund rejected reason=missing-refund-permission");
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    ApiResult<LinklyCloudBackendSessionResponse>.Fail(
+                        CloudBackendRefundForbiddenCode,
+                        "The cashier is not authorized to refund a card transaction."));
+            }
         }
 
         try

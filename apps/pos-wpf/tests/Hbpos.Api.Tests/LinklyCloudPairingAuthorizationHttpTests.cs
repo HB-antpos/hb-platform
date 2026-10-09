@@ -181,6 +181,106 @@ public sealed class LinklyCloudPairingAuthorizationHttpTests
         Assert.Equal(0, pairing.Calls);
     }
 
+    [Theory]
+    [InlineData("P", Permissions.PosTerminal.Payment.TakeCard, HttpStatusCode.OK)]
+    [InlineData("R", Permissions.PosTerminal.Payment.TakeCard, HttpStatusCode.Forbidden)]
+    [InlineData("r", Permissions.PosTerminal.Payment.TakeCard, HttpStatusCode.Forbidden)]
+    [InlineData("R", Permissions.PosTerminal.Returns.Confirm, HttpStatusCode.OK)]
+    [InlineData("R", Permissions.PosTerminal.Installments.Cancel, HttpStatusCode.OK)]
+    public async Task Card_refund_requires_refund_permission_on_top_of_take_card(
+        string txnType,
+        string extraPermission,
+        HttpStatusCode expectedStatusCode)
+    {
+        var backend = new RecordingTransactionBackendService();
+        await using var factory = new LinklyCloudPairingAuthorizationApiFactory(
+            new CapturingLinklyCloudPairingService(),
+            paymentSettingsGranted: false,
+            [
+                Permissions.PosTerminal.Payment.TakeCard,
+                Permissions.PosTerminal.Payment.Confirm,
+                extraPermission
+            ],
+            backend);
+        using var client = factory.CreateClient();
+        AddDeviceAuthentication(client);
+        client.DefaultRequestHeaders.Add(CashierAuthorizationConstants.HeaderName, "valid");
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/v1/linkly/cloud-backend/transactions",
+            new LinklyCloudBackendTransactionRequest(
+                "Sandbox",
+                txnType,
+                1000,
+                new Dictionary<string, string> { ["RFN"] = "ORIGINAL-RFN" }));
+
+        Assert.Equal(expectedStatusCode, response.StatusCode);
+        Assert.Equal(expectedStatusCode == HttpStatusCode.OK ? 1 : 0, backend.StartCalls);
+    }
+
+    [Fact]
+    public async Task Card_purchase_does_not_require_refund_permission()
+    {
+        var backend = new RecordingTransactionBackendService();
+        await using var factory = new LinklyCloudPairingAuthorizationApiFactory(
+            new CapturingLinklyCloudPairingService(),
+            paymentSettingsGranted: false,
+            [
+                Permissions.PosTerminal.Payment.TakeCard,
+                Permissions.PosTerminal.Payment.Confirm
+            ],
+            backend);
+        using var client = factory.CreateClient();
+        AddDeviceAuthentication(client);
+        client.DefaultRequestHeaders.Add(CashierAuthorizationConstants.HeaderName, "valid");
+
+        using var response = await client.PostAsJsonAsync(
+            "/api/v1/linkly/cloud-backend/transactions",
+            new LinklyCloudBackendTransactionRequest("Sandbox", "P", 1000, null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, backend.StartCalls);
+    }
+
+    private sealed class RecordingTransactionBackendService : NoOpLinklyCloudBackendAsyncService
+    {
+        public int StartCalls { get; private set; }
+
+        public override Task<LinklyCloudBackendSessionResponse> StartTransactionAsync(
+            string storeCode,
+            string deviceCode,
+            LinklyCloudBackendTransactionRequest request,
+            CancellationToken cancellationToken)
+        {
+            StartCalls++;
+            return Task.FromResult(new LinklyCloudBackendSessionResponse(
+                request.Environment,
+                storeCode,
+                deviceCode,
+                "session-1",
+                "Pending",
+                "SERVER-TXN",
+                null,
+                null,
+                null,
+                null,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                [],
+                null,
+                0,
+                null,
+                null,
+                null,
+                []));
+        }
+    }
+
     private static void AddDeviceAuthentication(HttpClient client)
     {
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Test");
@@ -189,7 +289,8 @@ public sealed class LinklyCloudPairingAuthorizationHttpTests
     private sealed class LinklyCloudPairingAuthorizationApiFactory(
         CapturingLinklyCloudPairingService pairing,
         bool paymentSettingsGranted,
-        IReadOnlyCollection<string>? grantedPermissions = null) : WebApplicationFactory<Program>
+        IReadOnlyCollection<string>? grantedPermissions = null,
+        ILinklyCloudBackendAsyncService? backendService = null) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -221,7 +322,7 @@ public sealed class LinklyCloudPairingAuthorizationHttpTests
                 services.AddSingleton<ILinklyCloudCredentialService>(new NoOpLinklyCloudCredentialService());
                 services.RemoveAll<ILinklyCloudBackendAsyncService>();
                 services.AddSingleton<ILinklyCloudBackendAsyncService>(
-                    new NoOpLinklyCloudBackendAsyncService(
+                    backendService ?? new NoOpLinklyCloudBackendAsyncService(
                         new LinklyCloudBackendHealthResponse(
                             "Sandbox",
                             "S01",

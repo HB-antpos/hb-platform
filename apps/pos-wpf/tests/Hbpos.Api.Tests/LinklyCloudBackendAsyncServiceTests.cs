@@ -4323,6 +4323,294 @@ namespace Hbpos.Api.Tests;
         Assert.Contains("APPROVE WITH SIG - 08", afterMark.ReceiptText, StringComparison.Ordinal);
     }
 
+    private static LinklyCloudBackendTransactionRequest CreateRefundRequest(string? rfn, long amount = 250)
+    {
+        return new LinklyCloudBackendTransactionRequest(
+            "Sandbox",
+            "R",
+            amount,
+            rfn is null ? null : new Dictionary<string, string> { ["RFN"] = rfn });
+    }
+
+    private static async Task SeedPurchaseAsync(
+        ILinklyCloudBackendAsyncRepository repository,
+        string txnRef,
+        long amountCents,
+        string status = "Completed",
+        bool? success = true,
+        string storeCode = "S01")
+    {
+        await repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = storeCode,
+            DeviceCode = "POS-01",
+            SessionId = Guid.NewGuid().ToString("D"),
+            Status = status,
+            TxnRef = txnRef,
+            RequestTxnType = "P",
+            RequestAmountCents = amountCents,
+            RequestRfn = txnRef,
+            TransactionSuccess = success,
+            ResponseCode = "00",
+            IsActive = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+    }
+
+    private static async Task SeedRefundAsync(
+        ILinklyCloudBackendAsyncRepository repository,
+        string rfn,
+        long amountCents,
+        string status,
+        bool? success,
+        bool isActive = false)
+    {
+        await repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = "POS-01",
+            SessionId = Guid.NewGuid().ToString("D"),
+            Status = status,
+            TxnRef = "R" + Guid.NewGuid().ToString("N")[..15].ToUpperInvariant(),
+            RequestTxnType = "R",
+            RequestAmountCents = amountCents,
+            RequestRfn = rfn,
+            TransactionSuccess = success,
+            ResponseCode = success == true ? "00" : null,
+            IsActive = isActive,
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(false, "PMND6WYVF2GBVY6G", true)]
+    [InlineData(true, "PMND6WYVF2GBVY6G", true)]
+    [InlineData(true, "SOMEONE-ELSES-RFN", false)]
+    public async Task Approved_refund_callback_is_verified_without_requiring_an_echoed_rfn(
+        bool echoRfn,
+        string echoedRfn,
+        bool expectEvidence)
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        var started = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateRefundRequest("PMND6WYVF2GBVY6G"), CancellationToken.None);
+        // 生产通知的 PurchaseAnalysisData 不含 RFN：退款证据靠发送前持久化的 RequestRfn 加 TxnType/金额/TxnRef/响应码核验。
+        object purchaseAnalysisData = echoRfn ? new { RFN = echoedRfn } : new { };
+        using var notification = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            Response = new
+            {
+                Success = true,
+                TxnRef = started.TxnRef,
+                TxnType = "R",
+                AmtPurchase = 250,
+                ResponseCode = "00",
+                ResponseText = "APPROVED",
+                PurchaseAnalysisData = purchaseAnalysisData
+            }
+        }));
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", started.SessionId, "transaction", "Bearer sandbox-notify",
+            notification.RootElement, CancellationToken.None);
+        var recovered = await service.GetStatusAsync(
+            "S01", "POS-01", "Sandbox", started.SessionId, CancellationToken.None);
+
+        if (!expectEvidence)
+        {
+            // 回显了 RFN 就必须与持久化值一致，否则仍判为无法核验。
+            Assert.Null(recovered?.CardTransaction);
+            Assert.DoesNotContain(recovered?.Notifications ?? [], item =>
+                string.Equals(item.Type, "transaction", StringComparison.OrdinalIgnoreCase));
+            return;
+        }
+
+        Assert.NotNull(recovered?.CardTransaction);
+        Assert.Equal(started.TxnRef, recovered!.CardTransaction!.TxnRef);
+        Assert.Equal("PMND6WYVF2GBVY6G", recovered.CardTransaction.Rfn);
+        Assert.Equal(250, recovered.CardTransaction.AmountCents);
+        Assert.Contains(recovered.Notifications ?? [], item =>
+            string.Equals(item.Type, "transaction", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("txn-type")]
+    [InlineData("amount")]
+    [InlineData("txn-ref")]
+    public async Task Refund_callback_without_rfn_still_rejects_other_mismatched_evidence(string mismatch)
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        var started = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateRefundRequest("PMND6WYVF2GBVY6G"), CancellationToken.None);
+        using var notification = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            Response = new
+            {
+                Success = true,
+                TxnRef = mismatch == "txn-ref" ? "260101010101FFFF" : started.TxnRef,
+                TxnType = mismatch == "txn-type" ? "P" : "R",
+                AmtPurchase = mismatch == "amount" ? 251 : 250,
+                ResponseCode = "00",
+                ResponseText = "APPROVED"
+            }
+        }));
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox", started.SessionId, "transaction", "Bearer sandbox-notify",
+            notification.RootElement, CancellationToken.None);
+        var recovered = await service.GetStatusAsync(
+            "S01", "POS-01", "Sandbox", started.SessionId, CancellationToken.None);
+
+        Assert.Null(recovered?.CardTransaction);
+    }
+
+    [Theory]
+    [InlineData("X")]
+    [InlineData("C")]
+    [InlineData("p r")]
+    public async Task StartTransactionAsync_rejects_txn_types_other_than_purchase_and_refund(string txnType)
+    {
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport);
+
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01",
+                "POS-01",
+                CreateTransactionRequest() with { TxnType = txnType },
+                CancellationToken.None));
+
+        Assert.Null(transport.LastTransaction);
+        Assert.Null(await service.GetResumableSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task StartTransactionAsync_normalizes_lowercase_refund_type()
+    {
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport);
+
+        await service.StartTransactionAsync(
+            "S01", "POS-01", CreateRefundRequest("ORIGINAL-RFN") with { TxnType = " r " }, CancellationToken.None);
+
+        Assert.Equal("R", transport.LastTransaction?.TxnType);
+    }
+
+    [Theory]
+    [InlineData(null, 250L)]
+    [InlineData("RFN WITH SPACE", 250L)]
+    [InlineData("ORIGINAL-RFN", 0L)]
+    [InlineData("ORIGINAL-RFN", 1_000_000_000L)]
+    [InlineData("ORIGINAL-RFN", long.MinValue)]
+    public async Task Refund_requires_a_safe_rfn_and_a_bounded_non_zero_amount(string? rfn, long amount)
+    {
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport);
+
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01", "POS-01", CreateRefundRequest(rfn, amount), CancellationToken.None));
+
+        Assert.Null(transport.LastTransaction);
+        Assert.Null(await service.GetResumableSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("Completed", false)]
+    [InlineData("Pending", null)]
+    [InlineData("Failed", false)]
+    public async Task Refund_is_rejected_when_the_original_purchase_was_not_approved(string status, bool? success)
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        await SeedPurchaseAsync(repository, "2610090900000001", 1000, status, success);
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport, repository: repository);
+
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01", "POS-01", CreateRefundRequest("2610090900000001", 500), CancellationToken.None));
+
+        Assert.Null(transport.LastTransaction);
+    }
+
+    [Fact]
+    public async Task Refund_is_rejected_when_the_rfn_points_at_another_refund()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        await SeedPurchaseAsync(repository, "2610090900000001", 1000);
+        await SeedRefundAsync(repository, "2610090900000001", 100, "Completed", true);
+        var refundTxnRef = (await repository.GetRefundSessionsByReferenceAsync(
+            "Sandbox", "S01", "2610090900000001", CancellationToken.None)).Single().TxnRef!;
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport, repository: repository);
+
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01", "POS-01", CreateRefundRequest(refundTxnRef, 50), CancellationToken.None));
+
+        Assert.Null(transport.LastTransaction);
+    }
+
+    [Fact]
+    public async Task Refund_cannot_exceed_original_amount_across_the_same_rfn()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        await SeedPurchaseAsync(repository, "2610090900000001", 1000);
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport, repository: repository);
+
+        // 单笔超额直接拒绝。
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01", "POS-01", CreateRefundRequest("2610090900000001", 1001), CancellationToken.None));
+        Assert.Null(transport.LastTransaction);
+
+        // 累计额度：已批准的 600 + 在途的 300 占用额度，只剩 100。
+        await SeedRefundAsync(repository, "2610090900000001", 600, "Completed", true);
+        await SeedRefundAsync(repository, "2610090900000001", 300, "Pending", null, isActive: true);
+        await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01", "POS-01", CreateRefundRequest("2610090900000001", 101), CancellationToken.None));
+        Assert.Null(transport.LastTransaction);
+    }
+
+    [Fact]
+    public async Task Refund_within_remaining_capacity_is_allowed_and_failed_refunds_do_not_consume_it()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        await SeedPurchaseAsync(repository, "2610090900000001", 1000);
+        await SeedRefundAsync(repository, "2610090900000001", 600, "Completed", true);
+        // 失败、未提交、取消、主管结案的退款不占额度。
+        await SeedRefundAsync(repository, "2610090900000001", 900, "Completed", false);
+        await SeedRefundAsync(repository, "2610090900000001", 900, "Failed", null);
+        await SeedRefundAsync(repository, "2610090900000001", 900, "NotSubmitted", null);
+        await SeedRefundAsync(repository, "2610090900000001", 900, "Cancelled", null);
+        await SeedRefundAsync(repository, "2610090900000001", 900, "SupervisorResolved", null);
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport, repository: repository);
+
+        var started = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateRefundRequest("2610090900000001", -400), CancellationToken.None);
+
+        Assert.NotNull(transport.LastTransaction);
+        Assert.Equal(started.SessionId, transport.LastTransaction!.SessionId);
+    }
+
+    [Fact]
+    public async Task Refund_of_an_original_purchase_not_in_cloud_backend_sessions_is_not_blocked()
+    {
+        // 直连模式或迁移前的历史销售查不到会话：保持可退，避免历史小票无法原路退款（缺口写在 PR 描述里）。
+        var transport = new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted);
+        var service = CreateService(transport);
+
+        await service.StartTransactionAsync(
+            "S01", "POS-01", CreateRefundRequest("LEGACY-DIRECT-RFN", 777), CancellationToken.None);
+
+        Assert.NotNull(transport.LastTransaction);
+    }
+
     private static TestableLinklyCloudBackendAsyncService CreateService(
         ILinklyCloudBackendAsyncTransport transport,
         ILinklyCloudBackendTokenProvider? tokenProvider = null,

@@ -72,10 +72,10 @@ internal sealed class NoOpLinklyCloudCredentialService : ILinklyCloudCredentialS
         throw new NotSupportedException();
 }
 
-internal sealed class NoOpLinklyCloudBackendAsyncService(
+internal class NoOpLinklyCloudBackendAsyncService(
     LinklyCloudBackendHealthResponse? healthResponse = null) : ILinklyCloudBackendAsyncService
 {
-    public Task<LinklyCloudBackendSessionResponse> StartTransactionAsync(
+    public virtual Task<LinklyCloudBackendSessionResponse> StartTransactionAsync(
         string storeCode,
         string deviceCode,
         LinklyCloudBackendTransactionRequest request,
