@@ -3733,6 +3733,7 @@
       "executeResultMsg": "Execution complete: {{parts}}",
       "createdProducts": "Created products {{count}}",
       "updatedPurchasePrices": "Updated purchase prices {{count}}",
+      "updatedStorePrices": "Synced other stores {{count}}",
       "updatedItemNumbers": "Updated item numbers {{count}}",
       "addedMultiCodes": "Added multi codes {{count}}",
       "skipped": "Skipped {{count}}",

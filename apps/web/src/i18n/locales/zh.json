@@ -3732,6 +3732,7 @@
       "executeResultMsg": "执行完成：{{parts}}",
       "createdProducts": "新建商品{{count}}条",
       "updatedPurchasePrices": "更新进货价{{count}}条",
+      "updatedStorePrices": "同步其他分店{{count}}条",
       "updatedItemNumbers": "更新货号{{count}}条",
       "addedMultiCodes": "添加多码{{count}}条",
       "skipped": "跳过{{count}}条",

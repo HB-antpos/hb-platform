@@ -150,6 +150,7 @@ import {
 import {
   buildBatchExecuteConfirmText,
   buildBatchExecuteSnapshot,
+  countPurchasePriceUpdateRows,
   constrainSelectedRowKeysToVisibleDetails,
   findLargePriceChangeRows,
   getBatchExecuteErrorFeedback,
@@ -161,6 +162,7 @@ import {
   splitCreateProductDetailGuids,
   splitPurchasePriceDirectionGuids,
 } from './batchExecuteConfirm'
+import { BatchExecuteStorePicker } from './BatchExecuteStorePicker'
 import {
   EditableNumberCell,
   EditableTextCell,
@@ -1774,6 +1776,7 @@ export default function InvoiceEditPage() {
     const parts: string[] = []
     if (result.createdProducts > 0) parts.push(t('posAdmin.invoiceDetail.createdProducts', '新建商品{{count}}条', { count: result.createdProducts }))
     if (result.updatedPurchasePrices > 0) parts.push(t('posAdmin.invoiceDetail.updatedPurchasePrices', '更新进货价{{count}}条', { count: result.updatedPurchasePrices }))
+    if ((result.updatedStorePrices ?? 0) > 0) parts.push(t('posAdmin.invoiceDetail.updatedStorePrices', '同步其他分店{{count}}条', { count: result.updatedStorePrices }))
     if (result.updatedItemNumbers > 0) parts.push(t('posAdmin.invoiceDetail.updatedItemNumbers', '更新货号{{count}}条', { count: result.updatedItemNumbers }))
     if (result.addedMultiCodes > 0) parts.push(t('posAdmin.invoiceDetail.addedMultiCodes', '添加多码{{count}}条', { count: result.addedMultiCodes }))
     if (result.skipped > 0) parts.push(t('posAdmin.invoiceDetail.skipped', '跳过{{count}}条', { count: result.skipped }))
@@ -2332,7 +2335,7 @@ export default function InvoiceEditPage() {
 
   const executeSelectedBatchActions = async (
     snapshot: ReturnType<typeof buildBatchExecuteSnapshot>,
-    options?: { syncCreatedToHq?: boolean; confirmedLargePriceChange?: boolean },
+    options?: { syncCreatedToHq?: boolean; confirmedLargePriceChange?: boolean; targetStoreCodes?: string[] },
   ) => {
     if (!invoiceGuid || !ensureCanAccessInvoice()) return
     setExecuting(true)
@@ -2346,6 +2349,8 @@ export default function InvoiceEditPage() {
         confirmedAt: snapshot.confirmedAt ?? new Date().toISOString(),
         newProductProductTypeSelections: snapshot.newProductProductTypeSelections,
         confirmedLargePriceChange: options?.confirmedLargePriceChange,
+        // 只在用户额外勾选了分店时才带上；缺省后端只更新本单分店。
+        targetStoreCodes: options?.targetStoreCodes?.length ? options.targetStoreCodes : undefined,
       })
       const parts = formatBatchExecuteResultParts(result)
       const hasDetails = !!result.errors?.length || result.failed > 0 || result.skipped > 0
@@ -2420,6 +2425,9 @@ export default function InvoiceEditPage() {
     const priceChoice = { includeUp: true, includeDown: true }
     // 写 HQ 需要 PushToHq 权限；没有时开关禁用且不勾选。确认框不受 React 状态管理，用普通对象记录勾选结果。
     const hqChoice = { syncToHq: canWriteLocalPurchaseToHq }
+    // 「更新进货价」默认只写本单分店；确认框里可额外勾选 POS 启用分店（或全选），勾选结果记在这个普通对象里。
+    const hasPurchasePriceRows = !isCreateMode && countPurchasePriceUpdateRows(targetGuids, details, rowActions) > 0
+    const storeChoice: { extraStoreCodes: string[] } = { extraStoreCodes: [] }
 
     const previewSnapshot = buildBatchExecuteSnapshot({
       selectedRowKeys: targetGuids,
@@ -2531,6 +2539,21 @@ export default function InvoiceEditPage() {
               </div>
             </div>
           )}
+          {hasPurchasePriceRows && (
+            <BatchExecuteStorePicker
+              currentStoreCode={invoice?.storeCode}
+              options={storeOptions}
+              labels={{
+                title: t('posAdmin.invoiceWorkbench.storeScopeTitle'),
+                currentStoreLabel: `${[invoice?.storeCode, invoice?.storeName].filter(Boolean).join(' - ') || '--'}${t('posAdmin.invoiceWorkbench.storeScopeCurrentSuffix')}`,
+                selectAll: t('posAdmin.invoiceWorkbench.storeScopeSelectAll'),
+                hint: t('posAdmin.invoiceWorkbench.storeScopeHint'),
+              }}
+              onChange={(codes) => {
+                storeChoice.extraStoreCodes = codes
+              }}
+            />
+          )}
           {isCreateMode && (
             <div style={{ marginTop: 8 }}>
               <Checkbox
@@ -2573,7 +2596,11 @@ export default function InvoiceEditPage() {
             })),
             // 真正提交的确认时间在用户点击确认时生成。
             confirmedAt: new Date().toISOString(),
-          }), { syncCreatedToHq: isCreateMode && hqChoice.syncToHq, confirmedLargePriceChange })
+          }), {
+            syncCreatedToHq: isCreateMode && hqChoice.syncToHq,
+            confirmedLargePriceChange,
+            targetStoreCodes: hasPurchasePriceRows ? storeChoice.extraStoreCodes : undefined,
+          })
         }
         // 涨跌超 40% 的「更新进货价」行（含手动勾选、「执行全部待执行」）必须二次确认；取消则整批不执行，行保持原状态。
         const largePriceRows = isCreateMode ? [] : findLargePriceChangeRows(executeGuids, details, rowActions)

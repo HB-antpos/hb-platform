@@ -875,6 +875,8 @@ export async function batchExecuteActions(data: BatchExecuteActionsRequest): Pro
     newProductProductTypeSelections: data.newProductProductTypeSelections ?? [],
     // 只在确认过时才发送，未确认的请求体保持原样，由后端按未确认处理。
     confirmedLargePriceChange: data.confirmedLargePriceChange ? true : undefined,
+    // 额外同步的 POS 启用分店；为空时不发送，后端只更新本单分店。
+    targetStoreCodes: data.targetStoreCodes?.length ? data.targetStoreCodes : undefined,
   })
   assertApiSuccess(response, '批量执行操作失败')
   return unwrapApiData(response)

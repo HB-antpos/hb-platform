@@ -76,6 +76,7 @@ function normalizeBatchExecuteFailure(error: unknown): BatchExecuteActionsResult
   return {
     createdProducts: Number(candidate.createdProducts ?? 0),
     updatedPurchasePrices: Number(candidate.updatedPurchasePrices ?? 0),
+    updatedStorePrices: Number(candidate.updatedStorePrices ?? 0),
     updatedItemNumbers: Number(candidate.updatedItemNumbers ?? 0),
     addedMultiCodes: Number(candidate.addedMultiCodes ?? 0),
     skipped: Number(candidate.skipped ?? 0),
@@ -341,5 +342,51 @@ export function getBatchExecuteErrorFeedback(error: unknown, fallbackMessage: st
     message: error instanceof Error ? error.message : fallbackMessage,
     details: failure?.errors ?? [],
     failure,
+  }
+}
+
+/** 选中行里操作为「更新进货价」的行数；为 0 时确认框不显示分店选择。 */
+export function countPurchasePriceUpdateRows(
+  detailGuids: Key[],
+  details: Array<Pick<LocalSupplierInvoiceItemDto, 'detailGUID' | 'activityType'>>,
+  rowActions: Record<string, number>,
+): number {
+  const detailMap = new Map(details.map((item) => [item.detailGUID, item]))
+  return detailGuids.filter((key) => {
+    const guid = String(key)
+    const detail = detailMap.get(guid)
+    const action = detail ? getCurrentDetailAction(detail, rowActions) : rowActions[guid]
+    return action === DetailAction.UpdatePurchasePrice
+  }).length
+}
+
+export interface StoreScopeOption {
+  value: string
+  label: string
+}
+
+/** 可额外勾选的分店：去掉本单分店（始终执行、不可取消）与重复项，保持原顺序。 */
+export function buildExtraStoreOptions(
+  options: StoreScopeOption[],
+  currentStoreCode?: string | null,
+): StoreScopeOption[] {
+  const current = currentStoreCode?.trim().toUpperCase()
+  const seen = new Set<string>()
+  return options.filter((option) => {
+    const code = option.value.trim().toUpperCase()
+    if (!code || code === current || seen.has(code)) return false
+    seen.add(code)
+    return true
+  })
+}
+
+/** 「全选」复选框状态：全部勾选为 checked，部分勾选为 indeterminate；没有可选分店时不可用。 */
+export function getStoreSelectAllState(selectedCodes: string[], allCodes: string[]) {
+  const selected = new Set(selectedCodes)
+  const selectedCount = allCodes.filter((code) => selected.has(code)).length
+  return {
+    checked: allCodes.length > 0 && selectedCount === allCodes.length,
+    indeterminate: selectedCount > 0 && selectedCount < allCodes.length,
+    disabled: allCodes.length === 0,
   }
 }

@@ -327,7 +327,7 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             if (groups.TryGetValue(DetailAction.UpdatePurchasePrice, out var prices))
                 accumulator.Apply(
                     DetailAction.UpdatePurchasePrice,
-                    await _store.BatchUpdatePurchasePriceAsync(prices, request.UserName)
+                    await _store.BatchUpdatePurchasePriceAsync(prices, request.UserName, request.ExtraStoreCodes)
                 );
             if (groups.TryGetValue(DetailAction.UpdateItemNumber, out var itemNumbers))
                 accumulator.Apply(

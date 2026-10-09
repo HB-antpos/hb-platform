@@ -468,7 +468,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
 
         internal async Task<BatchOperationResult> BatchUpdatePurchasePriceAsync(
             List<StoreLocalSupplierInvoiceDetails> details,
-            string userName
+            string userName,
+            IReadOnlyList<string>? extraStoreCodes = null
         )
         {
             var result = new BatchOperationResult();
@@ -574,7 +575,62 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
                 await db.Updateable(storePricesToUpdate.Values.ToList()).ExecuteCommandAsync();
             }
 
+            // 用户额外勾选的 POS 启用分店：只改这些分店里已存在的分店价进货价，不新建分店价行、不动零售价。
+            // 价格口径与上面本单分店一致（同一商品多行时后者覆盖）。
+            if (extraStoreCodes is { Count: > 0 } && productsToUpdate.Count > 0)
+                await UpdateExtraStorePurchasePricesAsync(productsToUpdate, extraStoreCodes, userName, now, result);
+
             return result;
+        }
+
+        private async Task UpdateExtraStorePurchasePricesAsync(
+            Dictionary<string, Product> updatedProducts,
+            IReadOnlyList<string> extraStoreCodes,
+            string userName,
+            DateTime now,
+            BatchOperationResult result
+        )
+        {
+            var db = _context.Db;
+            var productCodes = updatedProducts.Keys.ToList();
+            var extraPrices = (await db.Queryable<StoreRetailPrice>()
+                    .Where(srp =>
+                        srp.ProductCode != null
+                        && srp.StoreCode != null
+                        && productCodes.Contains(srp.ProductCode)
+                        && extraStoreCodes.Contains(srp.StoreCode)
+                        && srp.IsDeleted == false
+                    )
+                    .ToListAsync())
+                .GroupBy(srp => $"{srp.ProductCode}\u001f{srp.StoreCode}", StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var toUpdate = new List<StoreRetailPrice>();
+            foreach (var storeCode in extraStoreCodes)
+            {
+                var missing = 0;
+                foreach (var (productCode, product) in updatedProducts)
+                {
+                    if (!extraPrices.TryGetValue($"{productCode}\u001f{storeCode}", out var storePrice))
+                    {
+                        missing++;
+                        continue;
+                    }
+
+                    storePrice.PurchasePrice = product.PurchasePrice;
+                    storePrice.UpdatedAt = now;
+                    storePrice.UpdatedBy = userName;
+                    toUpdate.Add(storePrice);
+                }
+
+                // 缺分店价的商品不阻断整单，汇总成一条提示，让用户知道该分店有多少商品未同步。
+                if (missing > 0)
+                    result.Errors.Add($"分店 {storeCode} 有 {missing} 个商品没有分店价，进货价未同步");
+            }
+
+            if (toUpdate.Count > 0)
+                await db.Updateable(toUpdate).ExecuteCommandAsync();
+            result.ExtraStorePriceCount = toUpdate.Count;
         }
 
         internal async Task<BatchOperationResult> BatchUpdateItemNumberAsync(
@@ -906,6 +962,8 @@ namespace BlazorApp.Api.Features.LocalSupplierInvoices
             public int AddedMultiCodeCount { get; set; }
             public int FailedCount { get; set; }
             public int SkippedCount { get; set; }
+            /// <summary>「更新进货价」同步到其他勾选分店的分店价条数（不含本单分店）。</summary>
+            public int ExtraStorePriceCount { get; set; }
             public List<string> Errors { get; set; } = new();
             public List<string> SuccessfulDetailGuids { get; set; } = new();
             public HashSet<string> ChangedProductCodes { get; set; } = new(StringComparer.Ordinal);

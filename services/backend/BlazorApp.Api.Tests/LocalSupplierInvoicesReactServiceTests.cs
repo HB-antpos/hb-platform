@@ -2098,6 +2098,99 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(0, multiCodeCount);
         }
 
+        private async Task SeedExtraStoreAsync(string storeCode, bool isActive, bool withStorePrice)
+        {
+            await _db.Insertable(new Store
+            {
+                StoreGUID = $"store-guid-{storeCode}",
+                StoreCode = storeCode,
+                StoreName = $"Store {storeCode}",
+                IsActive = isActive,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            if (!withStorePrice) return;
+            await _db.Insertable(new StoreRetailPrice
+            {
+                UUID = $"SRP-{storeCode}-P001",
+                StoreCode = storeCode,
+                ProductCode = "P001",
+                StoreProductCode = $"{storeCode}P001",
+                SupplierCode = "SUP01",
+                PurchasePrice = 1.11m,
+                StoreRetailPriceValue = 2.22m,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_更新进货价可同步到额外勾选的POS启用分店()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedExtraStoreAsync("S02", isActive: true, withStorePrice: true);
+            await SeedExtraStoreAsync("S03", isActive: true, withStorePrice: false);
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester",
+                targetStoreCodes: new[] { "s02", "S03", "S01", " S02 " }
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(1, result.Data?.UpdatedPurchasePrices);
+            // 本单分店 S01 不计入额外分店；S02 有分店价被同步，S03 没有分店价只给提示不阻断。
+            Assert.Equal(1, result.Data?.UpdatedStorePrices);
+            Assert.Contains(result.Data!.Errors, line => line.Contains("S03") && line.Contains("没有分店价"));
+
+            var prices = await _db.Queryable<StoreRetailPrice>().Where(x => x.ProductCode == "P001").ToListAsync();
+            Assert.Equal(5.55m, prices.Single(x => x.StoreCode == "S01").PurchasePrice);
+            Assert.Equal(5.55m, prices.Single(x => x.StoreCode == "S02").PurchasePrice);
+            Assert.DoesNotContain(prices, x => x.StoreCode == "S03");
+            // 只改进货价，不动零售价。
+            Assert.Equal(2.22m, prices.Single(x => x.StoreCode == "S02").StoreRetailPriceValue);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_默认只更新本单分店不动其他分店价()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedExtraStoreAsync("S02", isActive: true, withStorePrice: true);
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester"
+            );
+
+            Assert.True(result.Success, $"{result.ErrorCode} {result.Message}");
+            Assert.Equal(0, result.Data?.UpdatedStorePrices);
+            var other = await _db.Queryable<StoreRetailPrice>().FirstAsync(x => x.StoreCode == "S02");
+            Assert.Equal(1.11m, other.PurchasePrice);
+        }
+
+        [Fact]
+        public async Task BatchExecuteActionsAsync_目标分店未启用POS或不存在时整单拒绝且零写入()
+        {
+            await SeedExecutablePriceUpdateAsync();
+            await SeedExtraStoreAsync("S02", isActive: false, withStorePrice: true);
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                "invoice-execute",
+                new List<string> { "detail-price" },
+                "tester",
+                targetStoreCodes: new[] { "S02", "S99" }
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+            Assert.Contains("S02", result.Message);
+            Assert.Contains("S99", result.Message);
+            var product = await _db.Queryable<Product>().FirstAsync(x => x.ProductCode == "P001");
+            var detail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>().FirstAsync(x => x.DetailGUID == "detail-price");
+            Assert.Equal(1.11m, product.PurchasePrice);
+            Assert.Equal((int)DetailAction.UpdatePurchasePrice, detail.ActivityType);
+        }
+
         [Fact]
         public async Task BatchExecuteActionsAsync_更新进货价为0时跳过()
         {

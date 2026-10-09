@@ -723,6 +723,29 @@
   color: #0958d9;
 }
 
+/* 执行确认框里的「同步分店」选择：本单分店锁定，其余 POS 启用分店可勾选/全选，列表过长时内部滚动 */
+.lsi-wb-store-scope {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f7f9fd;
+}
+
+.lsi-wb-store-scope-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-bottom: 4px;
+}
+
+.lsi-wb-store-scope-list.ant-checkbox-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 12px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
 .lsi-wb-filter-panel {
   display: grid;
   grid-template-columns: 88px 200px;
