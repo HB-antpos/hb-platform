@@ -44,6 +44,8 @@ export type PaymentRecoveryRecord = Readonly<{
   terminalName: string | null;
   transactionReference: string | null;
   receiptReference: string | null;
+  /** 终端批准但实扣金额与订单不符时的实扣分值（M34）；否则为 null。 */
+  terminalAmountMismatchCents?: number | null;
   lines: readonly PaymentRecoveryLine[];
   events: readonly PaymentRecoveryEvent[];
 }>;
@@ -56,6 +58,8 @@ export type ManualPaymentVerificationInput = Readonly<{
   verifiedAmountCents: number | null;
   evidenceReference: string;
   note: string;
+  /** 终端已批准不同金额时，主管明确知晓终端已扣款且需总部冲正（仅 unpaid 结论使用）。 */
+  terminalChargeAcknowledged?: boolean;
 }>;
 
 export type PaymentRecoveryCenterState = Readonly<{

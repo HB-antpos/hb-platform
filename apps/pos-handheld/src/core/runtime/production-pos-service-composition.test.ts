@@ -5716,6 +5716,22 @@ function databaseFor(
         throw new Error("return capacity protect is not used");
       },
     }),
+    paymentRecoveryCenter: () => ({
+      async list() { return []; },
+      async findCurrentCandidate() { return null; },
+      async getExact() { return null; },
+      async parkExact() {},
+      async resumeExact() {},
+      async getManualPaidCommitContext() { return null; },
+      async recordManualFinding() {
+        throw new Error("manual payment recovery is not configured");
+      },
+    }),
+    manualPaymentOrderCommitter: () => ({
+      async completeManualPaymentOrder() {
+        throw new Error("manual payment commit is not configured");
+      },
+    }),
     returnSupervisorResolutions: () => ({
       async resolve() {
         throw new Error("return supervisor resolution is not used");

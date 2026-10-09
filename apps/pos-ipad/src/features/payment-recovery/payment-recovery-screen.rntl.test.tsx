@@ -233,3 +233,46 @@ test("人工未扣款与明确失败可继续原单，中英文动作准确", as
     }
   }
 });
+
+
+test("M34：终端批准不同金额时展示实扣金额，禁用已收款，未收款需确认冲正后才提交", async () => {
+  const record: PaymentRecoveryRecord = { ...pendingRecord, amountCents: 1_000, terminalAmountMismatchCents: 1_500 };
+  const { service, submissions } = createService(record);
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+
+  expect(screen.getByTestId("payment-recovery-mismatch-warning")).toBeTruthy();
+  expect(screen.getByText("Terminal charged")).toBeTruthy();
+  expect(screen.getAllByText("AU$15.00").length).toBeGreaterThan(0);
+  await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
+
+  expect(screen.getByTestId("payment-recovery-finding-paid").props.accessibilityState.disabled).toBe(true);
+  expect(screen.getByText("Register reversal required")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
+  await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-evidence"), "TERMINAL-9001");
+  await fireEvent.changeText(screen.getByTestId("payment-recovery-manual-note"), "Terminal shows AU$15.00");
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-confirmation"));
+  // 缺少“终端已扣款需冲正”确认时不能提交。
+  expect(screen.getByTestId("payment-recovery-manual-submit").props.accessibilityState.disabled).toBe(true);
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-terminal-charge"));
+  expect(screen.getByTestId("payment-recovery-manual-submit").props.accessibilityState.disabled).toBe(false);
+  await fireEvent.press(screen.getByTestId("payment-recovery-manual-submit"));
+  await waitFor(() => expect(submissions).toEqual([{
+    recordId: pendingRecord.id,
+    finding: "unpaid",
+    verifiedAmountCents: null,
+    evidenceReference: "TERMINAL-9001",
+    note: "Terminal shows AU$15.00",
+    terminalChargeAcknowledged: true,
+  }]));
+});
+
+test("M34：无金额不符的记录不显示实扣警告与冲正确认", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+
+  expect(screen.queryByTestId("payment-recovery-mismatch-warning")).toBeNull();
+  await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-unpaid"));
+  expect(screen.queryByTestId("payment-recovery-manual-terminal-charge")).toBeNull();
+  expect(screen.getByTestId("payment-recovery-finding-paid").props.accessibilityState.disabled).toBeFalsy();
+});

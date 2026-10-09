@@ -9,16 +9,19 @@ export type ManualVerificationDraft = Readonly<{
   evidenceReference: string;
   note: string;
   confirmedByOperator: boolean;
+  /** 终端实扣金额与订单不符时，“未收款”需额外确认：终端已扣款，须总部冲正。 */
+  terminalChargeAcknowledged?: boolean;
 }>;
 
 export type ManualVerificationValidation = Readonly<{
   amountCents: number | null;
   errors: Readonly<{
-    finding: "required" | null;
+    finding: "required" | "amount-mismatch-paid" | null;
     amount: "required" | "mismatch" | null;
     evidenceReference: "required" | null;
     note: "required" | null;
     operatorConfirmation: "required" | null;
+    terminalChargeAcknowledgement: "required" | null;
   }>;
   valid: boolean;
 }>;
@@ -29,6 +32,7 @@ export const EMPTY_MANUAL_VERIFICATION_DRAFT: ManualVerificationDraft = {
   evidenceReference: "",
   note: "",
   confirmedByOperator: false,
+  terminalChargeAcknowledged: false,
 };
 
 export function validateManualVerification(
@@ -44,12 +48,20 @@ export function validateManualVerification(
       : amountCents !== record.amountCents
         ? "mismatch"
         : null;
+  const mismatch = (record.terminalAmountMismatchCents ?? null) !== null;
   const errors = {
-    finding: draft.finding === null ? "required" : null,
+    // 终端批准了不同金额：按订单金额确认“已收款”会账实不符，只能登记冲正（未收款）或继续等待。
+    finding: draft.finding === null
+      ? "required"
+      : mismatch && draft.finding === "paid"
+        ? "amount-mismatch-paid"
+        : null,
     amount: amountError,
     evidenceReference: draft.evidenceReference.trim() && draft.evidenceReference.trim().length <= 256 && !/[\u0000-\u001f\u007f]/u.test(draft.evidenceReference) ? null : "required",
     note: normalizeVerificationNote(draft.note) && draft.note.length <= 1000 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(draft.note) ? null : "required",
     operatorConfirmation: draft.confirmedByOperator ? null : "required",
+    terminalChargeAcknowledgement:
+      mismatch && draft.finding === "unpaid" && draft.terminalChargeAcknowledged !== true ? "required" : null,
   } as const;
 
   return {

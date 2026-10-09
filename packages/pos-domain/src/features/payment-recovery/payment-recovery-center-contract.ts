@@ -5,6 +5,34 @@ import type { PaymentAttempt } from "../../core/contracts/payment";
  * 支付恢复中心的耐久记录与命令合同。SQLite 实现在 pos-db，运行时适配与页面只依赖本合同，
  * iPad 与手持共用同一份。
  */
+
+/**
+ * 终端已批准但实扣金额与订单金额不符（M34）。恢复结果被降级为 Unknown 时，响应码携带终端
+ * 实扣分值：LINKLY_APPROVED_AMOUNT_MISMATCH:<cents>，使金额随 attempt 耐久保存并展示给主管。
+ */
+export const APPROVED_AMOUNT_MISMATCH_CODE = "LINKLY_APPROVED_AMOUNT_MISMATCH";
+
+export type ApprovedAmountMismatchResponseCode = `${typeof APPROVED_AMOUNT_MISMATCH_CODE}:${number}`;
+
+export function approvedAmountMismatchResponseCode(
+  terminalChargedCents: number,
+): ApprovedAmountMismatchResponseCode {
+  return `${APPROVED_AMOUNT_MISMATCH_CODE}:${terminalChargedCents}`;
+}
+
+/** 仅当响应码是合法的“批准但金额不符”码时返回终端实扣分值。 */
+export function parseApprovedAmountMismatchCents(responseCode: unknown): number | null {
+  if (typeof responseCode !== "string") return null;
+  const code = responseCode.trim().toUpperCase();
+  const prefix = APPROVED_AMOUNT_MISMATCH_CODE + ":";
+  if (!code.startsWith(prefix)) return null;
+  const digits = code.slice(prefix.length);
+  if (digits.length === 0 || digits.length > 12) return null;
+  for (const ch of digits) if (ch < "0" || ch > "9") return null;
+  const cents = Number(digits);
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : null;
+}
+
 export type PaymentRecoveryCenterStatus =
   | "result-unknown"
   | "payment-failed"
@@ -33,6 +61,8 @@ export type PaymentRecoveryCenterRecord = Readonly<{
   status: PaymentRecoveryCenterStatus;
   transactionReference: string | null;
   receiptReference: string | null;
+  /** 终端批准但实扣金额与订单不符时的实扣分值；否则为 null。 */
+  terminalAmountMismatchCents: number | null;
   lines: readonly Readonly<{
     id: string;
     name: string;
@@ -72,6 +102,11 @@ export type ManualPaymentRecoveryFindingInput = PaymentRecoveryCenterScope & Rea
   requestingActor: AuditActorSnapshot;
   /** paid 结论必须引用刚完成且绑定原 attempt 的只读 provider 对账。 */
   reconciliationId?: string;
+  /**
+   * 终端已批准但实扣金额与订单不符时，“未收款”实际是登记冲正需求：主管必须确认知晓
+   * 终端已扣款，且该扣款需由总部冲正；否则拒绝，避免顾客被再次扣款而无人跟进。
+   */
+  terminalChargeAcknowledged?: boolean;
 }>;
 
 export type PaymentRecoveryReconciliationInput = PaymentRecoveryCenterScope & Readonly<{

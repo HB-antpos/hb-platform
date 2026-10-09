@@ -99,6 +99,7 @@ export function projectPaymentRecoveryRecord(record: PaymentRecoveryCenterRecord
     terminalName: record.terminalName,
     transactionReference: record.transactionReference,
     receiptReference: record.receiptReference,
+    terminalAmountMismatchCents: record.terminalAmountMismatchCents,
     lines: record.lines,
     events: record.events.map((event) => ({
       id: event.id, occurredAtIso: event.occurredAtIso, source: event.source,
@@ -118,6 +119,9 @@ function recoveryActionErrorCode(error: unknown): string {
   if (code === "PAYMENT_RECOVERY_PROVIDER_UNAVAILABLE") return "RECOVERY_PROVIDER_UNAVAILABLE";
   if (code === "LINKLY_ACKNOWLEDGEMENT_PENDING") return "RECOVERY_TERMINAL_CONFIRMATION_PENDING";
   if (code === "PAYMENT_RECOVERY_AUTHORIZATION_DENIED") return "RECOVERY_AUTHORIZATION_DENIED";
+  if (code === "PAYMENT_RECOVERY_APPROVED_AMOUNT_MISMATCH" || code === "PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED") {
+    return "RECOVERY_APPROVED_AMOUNT_MISMATCH";
+  }
   if (code === "PAYMENT_RECOVERY_AUTHORIZATION_REVOKED" || code === "CURRENT_CASHIER_REQUIRED") return "RECOVERY_SESSION_CHANGED";
   return "RECOVERY_ACTION_FAILED";
 }

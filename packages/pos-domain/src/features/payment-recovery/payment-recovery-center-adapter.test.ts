@@ -59,3 +59,23 @@ test("当前销售占用时显示本地化可操作错误，不泄漏底层消�
   await assert.rejects(adapter.recoverOriginalPayment(record.id));
   assert.equal(adapter.getState().errorCode, "RECOVERY_CURRENT_SALE_BUSY");
 });
+
+test("M34：投影保留终端实扣金额，金额不符与反冲正确认的底层错误映射为稳定页面错误码", async () => {
+  const { projectPaymentRecoveryRecord } = await import("./payment-recovery-center-adapter");
+  const projected = projectPaymentRecoveryRecord({
+    recordId: "r1", checkoutIntentId: "c1", orderGuid: "o1", attemptId: "a1", storeCode: "S1", deviceCode: "D1",
+    terminalName: null, occurredAtIso: "2026-09-11T00:00:00.000Z", amountCents: 1_000, provider: "linkly-cloud",
+    attemptState: "Unknown", orderState: "Draft", isParked: true, status: "result-unknown",
+    transactionReference: "TXN-1", receiptReference: null, terminalAmountMismatchCents: 1_500, lines: [], events: [],
+  });
+  assert.equal(projected.terminalAmountMismatchCents, 1_500);
+  for (const code of ["PAYMENT_RECOVERY_APPROVED_AMOUNT_MISMATCH", "PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED"]) {
+    const adapter = new PaymentRecoveryCenterAdapter(ports({
+      submitManualVerification: async () => { throw new Error(code); },
+    }));
+    await assert.rejects(adapter.submitManualVerification({
+      recordId: "attempt-1", finding: "unpaid", verifiedAmountCents: null, evidenceReference: "e", note: "n",
+    }));
+    assert.equal(adapter.getState().errorCode, "RECOVERY_APPROVED_AMOUNT_MISMATCH");
+  }
+});

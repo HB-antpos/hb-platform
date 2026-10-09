@@ -4,6 +4,9 @@ import {
   type AuditActorSnapshot,
 } from "@hb/pos-domain/core/contracts/audit-actor";
 import type { PaymentAttempt } from "@hb/pos-domain/core/contracts/payment";
+import {
+  parseApprovedAmountMismatchCents,
+} from "@hb/pos-domain/features/payment-recovery/payment-recovery-center-contract";
 import type {
   ManualPaidRecoveryCommitContext,
   ManualPaymentRecoveryFindingInput,
@@ -36,6 +39,7 @@ type CaseRow = Readonly<{
   opened_at_iso: unknown; updated_at_iso: unknown; amount_cents: unknown;
   provider: unknown; attempt_state: unknown; order_state: unknown;
   txn_ref: unknown; rfn: unknown;
+  attempt_response_code: unknown;
   draft_id: unknown;
   is_parked: unknown;
 }>;
@@ -348,6 +352,16 @@ export class SqlitePaymentRecoveryCenterStore {
       if (current.attemptState === "Approved") {
         throw new Error("PAYMENT_RECOVERY_PROVIDER_RESULT_MUST_BE_USED");
       }
+      // M34：终端已批准但实扣金额与订单不符。按订单金额确认“已收款”会让账实不符；
+      // 选“未收款”则顾客已被扣款却会再被扣一次，必须明确登记冲正需求。
+      if (current.terminalAmountMismatchCents !== null) {
+        if (finding === "paid") {
+          throw new Error("PAYMENT_RECOVERY_APPROVED_AMOUNT_MISMATCH");
+        }
+        if (finding === "unpaid" && input.terminalChargeAcknowledged !== true) {
+          throw new Error("PAYMENT_RECOVERY_REVERSAL_ACK_REQUIRED");
+        }
+      }
       if ((current.attemptState === "Declined" || current.attemptState === "Cancelled") && finding === "paid") {
         throw new Error("PAYMENT_RECOVERY_PROVIDER_MANUAL_CONFLICT");
       }
@@ -414,6 +428,27 @@ export class SqlitePaymentRecoveryCenterStore {
         [nextState, now, recordId, scope.storeCode, scope.deviceCode],
       );
       if (changed.changes !== 1) throw new Error("PAYMENT_RECOVERY_MANUAL_CAS_FAILED");
+      if (finding === "unpaid" && current.terminalAmountMismatchCents !== null) {
+        // 冲正需求：作为不可变审计事件随同步上送，总部据此对终端实扣款项发起冲正。
+        await appendAudit(transaction, {
+          eventId: strictText(this.createAuditEventId(), "recovery audit event id", 128),
+          eventType: "PAYMENT_RECOVERY_REVERSAL_REQUIRED",
+          occurredAtIso: now,
+          orderGuid: current.orderGuid,
+          correlationId: actionId,
+          payload: {
+            action: "payment-recovery-reversal-required",
+            attemptId: current.attemptId,
+            provider: current.provider,
+            orderAmountCents: current.amountCents,
+            terminalChargedCents: current.terminalAmountMismatchCents,
+            transactionReference: current.transactionReference,
+            authorizationId,
+            ...auditActorPayload(supervisor),
+          },
+          scope,
+        });
+      }
       // 主管明确结案（已收款/未收款）后后端会话也要关闭，否则设备继续收到 409 且终端管理被未知会话阻塞；
       // “仍未知”不是结案，不入队。入队与结论同事务，ACK 之后可重试，失败不回滚人工结论。
       if (finding === "paid" || finding === "unpaid") {
@@ -442,7 +477,8 @@ function caseSelectSql(extra: string): string {
   return `SELECT c.record_id, c.order_guid, c.attempt_id, c.store_code,
     c.device_code, c.state AS case_state, c.opened_at_iso, c.updated_at_iso,
     p.amount_cents, p.provider, p.state AS attempt_state,
-    o.state AS order_state, p.txn_ref, p.rfn, d.draft_id, c.is_parked
+    o.state AS order_state, p.txn_ref, p.rfn, p.provider_response_code AS attempt_response_code,
+    d.draft_id, c.is_parked
    FROM payment_recovery_cases c
    INNER JOIN local_orders o ON o.order_guid = c.order_guid
    INNER JOIN payment_attempts p ON p.attempt_id = c.attempt_id AND p.order_guid = c.order_guid
@@ -492,6 +528,10 @@ async function projectRecord(transaction: SqliteConnectionPort, row: CaseRow): P
     status: projectedStatus(caseState, attemptState, orderState, manualBinding !== null),
     transactionReference: nullableText(row.txn_ref),
     receiptReference: nullableText(row.rfn),
+    // 仅在 attempt 仍是未知态时有意义：终端批准了不同金额，已无法凭订单金额当作普通未知处理。
+    terminalAmountMismatchCents: attemptState === "Unknown"
+      ? parseApprovedAmountMismatchCents(row.attempt_response_code)
+      : null,
     lines: Object.freeze(lines.map((line) => Object.freeze({
       id: text(line.line_id, "recovery line id"), name: text(line.display_name, "recovery line name"),
       quantity: text(line.quantity, "recovery line quantity"), amountCents: integer(line.actual_amount_cents, "recovery line amount"),

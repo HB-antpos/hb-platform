@@ -206,6 +206,9 @@ export function PaymentRecoveryScreen({
               verifiedAmountCents: validation.amountCents,
               evidenceReference: draft.evidenceReference.trim(),
               note: normalizeVerificationNote(draft.note),
+              ...(draft.finding === "unpaid" && draft.terminalChargeAcknowledged
+                ? { terminalChargeAcknowledged: true }
+                : {}),
             });
             setManualRecord(null);
           } catch (error) {
@@ -285,7 +288,18 @@ function RecoveryDetails({
         </View>
       </View>
 
+      {record.terminalAmountMismatchCents ? (
+        <Text accessibilityRole="alert" style={styles.mismatchWarning} testID="payment-recovery-mismatch-warning">
+          {t("mismatch.warning", {
+            charged: formatAud(record.terminalAmountMismatchCents),
+            order: formatAud(record.amountCents),
+          })}
+        </Text>
+      ) : null}
       <View style={styles.factGrid}>
+        {record.terminalAmountMismatchCents ? (
+          <Fact label={t("mismatch.charged")} value={formatAud(record.terminalAmountMismatchCents)} />
+        ) : null}
         <Fact label={t("details.order")} value={record.orderGuid} />
         <Fact label={t("details.transaction")} value={record.transactionReference ?? t("details.unavailable")} />
         <Fact label={t("details.terminal")} value={record.terminalName ?? t("details.unavailable")} />
@@ -407,16 +421,29 @@ function ManualVerificationModal({
 
             <Text style={styles.formLabel}>{t("manual.finding")}</Text>
             <View style={styles.findingGrid}>
-              {(["paid", "unpaid", "uncertain"] as const).map((finding) => (
-                <FindingOption
-                  key={finding}
-                  label={t(`manual.finding.${finding}`)}
-                  hint={t(`manual.finding.${finding}Hint`)}
-                  onPress={() => selectFinding(finding)}
-                  selected={draft.finding === finding}
-                  testID={`payment-recovery-finding-${finding}`}
-                />
-              ))}
+              {(["paid", "unpaid", "uncertain"] as const).map((finding) => {
+                const mismatchCents = record.terminalAmountMismatchCents ?? null;
+                const charged = mismatchCents === null ? "" : formatAud(mismatchCents);
+                const blockedPaid = mismatchCents !== null && finding === "paid";
+                const reversal = mismatchCents !== null && finding === "unpaid";
+                return (
+                  <FindingOption
+                    key={finding}
+                    disabled={blockedPaid}
+                    label={reversal ? t("manual.finding.unpaidMismatch") : t(`manual.finding.${finding}`)}
+                    hint={
+                      blockedPaid
+                        ? t("manual.finding.paidBlockedHint", { charged })
+                        : reversal
+                          ? t("manual.finding.unpaidMismatchHint", { charged })
+                          : t(`manual.finding.${finding}Hint`)
+                    }
+                    onPress={() => selectFinding(finding)}
+                    selected={draft.finding === finding}
+                    testID={`payment-recovery-finding-${finding}`}
+                  />
+                );
+              })}
             </View>
 
             {draft.finding === "paid" ? (
@@ -465,6 +492,27 @@ function ManualVerificationModal({
               />
             </FormField>
 
+            {record.terminalAmountMismatchCents && draft.finding === "unpaid" ? (
+              <>
+                <PosPressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: draft.terminalChargeAcknowledged }}
+                  onPress={() => update("terminalChargeAcknowledged", !draft.terminalChargeAcknowledged)}
+                  style={styles.checkboxRow}
+                  testID="payment-recovery-manual-terminal-charge"
+                >
+                  <View style={[styles.checkbox, draft.terminalChargeAcknowledged && styles.checkboxChecked]}>
+                    <Text style={styles.checkboxMark}>{draft.terminalChargeAcknowledged ? "✓" : ""}</Text>
+                  </View>
+                  <Text style={styles.checkboxLabel}>
+                    {t("manual.terminalCharge", { charged: formatAud(record.terminalAmountMismatchCents) })}
+                  </Text>
+                </PosPressable>
+                {validation?.errors.terminalChargeAcknowledgement ? (
+                  <ValidationText>{t("validation.terminalCharge")}</ValidationText>
+                ) : null}
+              </>
+            ) : null}
             <Text style={styles.formLabel}>{t("manual.authorization")}</Text>
             <PosPressable
               accessibilityRole="checkbox"
@@ -497,7 +545,8 @@ function ManualVerificationModal({
   );
 }
 
-function FindingOption({ hint, label, onPress, selected, testID }: Readonly<{
+function FindingOption({ disabled = false, hint, label, onPress, selected, testID }: Readonly<{
+  disabled?: boolean;
   hint: string;
   label: string;
   onPress(): void;
@@ -507,9 +556,10 @@ function FindingOption({ hint, label, onPress, selected, testID }: Readonly<{
   return (
     <PosPressable
       accessibilityRole="radio"
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.findingOption, selected && styles.findingOptionSelected]}
+      style={[styles.findingOption, selected && styles.findingOptionSelected, disabled && styles.disabled]}
       testID={testID}
     >
       <View style={[styles.radio, selected && styles.radioSelected]} />
@@ -636,7 +686,7 @@ function errorText(
   t: (key: PaymentRecoveryCopyKey, values?: Readonly<Record<string, string | number>>) => string,
   code: string,
 ): string {
-  if (code === "RECOVERY_LOAD_FAILED" || code === "RECOVERY_ACTION_FAILED" || code === "RECOVERY_BUSY" || code === "RECOVERY_CURRENT_SALE_BUSY" || code === "RECOVERY_PROVIDER_UNAVAILABLE" || code === "RECOVERY_AUTHORIZATION_DENIED" || code === "RECOVERY_SESSION_CHANGED" || code === "RECOVERY_TERMINAL_CONFIRMATION_PENDING") {
+  if (code === "RECOVERY_LOAD_FAILED" || code === "RECOVERY_ACTION_FAILED" || code === "RECOVERY_BUSY" || code === "RECOVERY_CURRENT_SALE_BUSY" || code === "RECOVERY_PROVIDER_UNAVAILABLE" || code === "RECOVERY_AUTHORIZATION_DENIED" || code === "RECOVERY_SESSION_CHANGED" || code === "RECOVERY_TERMINAL_CONFIRMATION_PENDING" || code === "RECOVERY_APPROVED_AMOUNT_MISMATCH") {
     return t(`error.${code}`);
   }
   return t("error.action");
@@ -697,6 +747,7 @@ const styles = StyleSheet.create({
   detailsContent: { padding: 16 },
   detailsHeading: { alignItems: "flex-start", borderBottomColor: posColors.border, borderBottomWidth: 1, flexDirection: "row", gap: 20, justifyContent: "space-between", paddingBottom: 14 },
   detailsHeadingCopy: { flex: 1 },
+  mismatchWarning: { backgroundColor: posColors.redSoft, color: posColors.red, fontSize: 13, fontWeight: "700", lineHeight: 19, marginTop: 10, padding: 10 },
   statusHint: { color: posColors.mutedInk, fontSize: 14, lineHeight: 20, marginTop: 8 },
   fieldLabel: { color: posColors.mutedInk, fontSize: 11, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   heroAmount: { color: posColors.ink, fontSize: 30, fontWeight: "900", marginTop: 2 },

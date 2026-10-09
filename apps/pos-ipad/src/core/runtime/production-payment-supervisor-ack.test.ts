@@ -70,6 +70,7 @@ function record(): PaymentRecoveryCenterRecord {
     status: "result-unknown",
     transactionReference: null,
     receiptReference: null,
+    terminalAmountMismatchCents: null,
     lines: [],
     events: [],
   };
