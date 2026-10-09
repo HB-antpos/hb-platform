@@ -522,6 +522,9 @@ public sealed class ConfiguredCardTerminalClient :
     private const string SquareTimedOutStatusKey = "payment.card.squareTimedOut";
     private const string SquareTerminalOfflineStatusKey = "payment.card.squareTerminalOffline";
     private const string SquareTerminalNotPickedUpStatusKey = "payment.card.squareTerminalNotPickedUp";
+    internal const string SquareRefundAcceptedStatusKey = "payment.card.squareRefundAccepted";
+    private const string SquareRefundAcceptedMessage =
+        "Square accepted the refund and is returning it to the original card. Most refunds complete within a few hours (up to 14 days). No card tap is needed.";
     private const string SquareTimedOutMessage = "Square checkout timed out before the customer completed payment.";
     private const string SquareTerminalOfflineMessage = "Square terminal is offline. Check the terminal network and try again.";
     private const string SquareTerminalNotPickedUpMessage = "Square terminal did not pick up the checkout. Check that the terminal is online, then try again.";
@@ -1339,63 +1342,6 @@ public sealed class ConfiguredCardTerminalClient :
                     settings.Environment);
             }
 
-            if (string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    // CreatePaymentRefund 返回 PENDING 后只能查询同一 refund，绝不能再次 POST 来“确认”。
-                    using var statusResponse = await SendSquareApiAsync(
-                        HttpMethod.Get,
-                        $"api/v1/square/refunds/{Uri.EscapeDataString(refundId)}?environment={Uri.EscapeDataString(settings.Environment.ToString())}",
-                        body: null,
-                        cancellationToken);
-                    var statusBody = await ReadResponseBodyAsync(statusResponse, cancellationToken);
-                    if (!statusResponse.IsSuccessStatusCode)
-                    {
-                        return CreateSquareRefundPendingResult(
-                            refundId,
-                            status,
-                            amount,
-                            T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
-                    }
-
-                    var refreshedRefund = ReadSquareRefundResponse(statusBody);
-                    if (!IsExpectedSquareRefund(refreshedRefund, refundId, paymentId, minorAmount))
-                    {
-                        return CreateSquareRefundPendingResult(
-                            refundId,
-                            status,
-                            amount,
-                            T("payment.card.squareInvalidResponse", "Square terminal returned an invalid response."));
-                    }
-
-                    refund = refreshedRefund;
-                    status = refund.Status ?? string.Empty;
-                    if (squareAttempt?.CanBindRefund == true)
-                    {
-                        await BindSquareRefundEvidenceAsync(
-                            squareAttempt,
-                            refundId,
-                            status,
-                            refund.UpdatedAt ?? DateTimeOffset.UtcNow,
-                            settings.Environment);
-                    }
-                }
-                catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
-                {
-                    LogSquareOutcome(
-                        warning: true,
-                        $"refund status refresh failed attemptGuid={LogValue(squareAttempt?.AttemptGuid.ToString("D"))} refundId={refundId} error={ex.GetType().Name} -> pending",
-                        squareAttempt?.AttemptGuid.ToString("D") ?? refundId,
-                        ex);
-                    return CreateSquareRefundPendingResult(
-                        refundId,
-                        status,
-                        amount,
-                        T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
-                }
-            }
-
             // 退款是低频人工操作，最终状态各记一条：完成/处理中 Information，失败或未知 Warning。
             var refundStatusIsKnown =
                 string.Equals(status, "COMPLETED", StringComparison.OrdinalIgnoreCase) ||
@@ -1431,24 +1377,22 @@ public sealed class ConfiguredCardTerminalClient :
                     ResultUnknown: true);
             }
 
-            if (string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase))
-            {
-                return CreateSquareRefundPendingResult(
-                    refundId,
-                    status,
-                    amount,
-                    T("payment.card.squareRefundPending", "Square refund is still processing. Do not refund again; run recovery later."));
-            }
-
             if (string.IsNullOrWhiteSpace(idempotencyKey))
             {
                 _squareRefundIdempotencyKeys.TryRemove(refundAttemptKey, out _);
             }
 
+            // Square 官方定义：PENDING 表示退款已受理、正在从商家账户划款并退回原卡，多数几小时内完成，
+            // 最长可达 14 天；只有商家余额与绑定银行账户都不足时才会 REJECTED。
+            // 因此 PENDING 与 COMPLETED 一样视为退款已发起，退货单当场完成；交易状态保留 PENDING，
+            // 由退款结算跟踪在之后查询同一笔退款，转为 REJECTED/FAILED 时再提示主管改用其他方式退款。
+            var isAcceptedPending = string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase);
             return new PaymentAuthorizationResult(
                 true,
                 $"SQRF:{refundId}",
-                status,
+                isAcceptedPending
+                    ? T(SquareRefundAcceptedStatusKey, SquareRefundAcceptedMessage)
+                    : status,
                 amount,
                 [
                     new CardTransactionDto(
@@ -1465,7 +1409,8 @@ public sealed class ConfiguredCardTerminalClient :
                         DateTimeOffset.UtcNow,
                         amount,
                         null)
-                ]);
+                ],
+                StatusKey: isAcceptedPending ? SquareRefundAcceptedStatusKey : null);
         }
         catch (HttpRequestException ex)
         {
@@ -1511,36 +1456,6 @@ public sealed class ConfiguredCardTerminalClient :
             string.Equals(refund.AmountMoney.Currency, "AUD", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static PaymentAuthorizationResult CreateSquareRefundPendingResult(
-        string refundId,
-        string status,
-        decimal amount,
-        string message)
-    {
-        return new PaymentAuthorizationResult(
-            false,
-            $"SQRF:{refundId}",
-            message,
-            amount,
-            [
-                new CardTransactionDto(
-                    "Square",
-                    refundId,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    status,
-                    null,
-                    DateTimeOffset.UtcNow,
-                    amount,
-                    null)
-            ],
-            ResponseText: status,
-            ResultUnknown: true);
-    }
 
     public async Task<PaymentAuthorizationResult> RecoverLinklyAsync(
         LocalCardPaymentAttempt attempt,

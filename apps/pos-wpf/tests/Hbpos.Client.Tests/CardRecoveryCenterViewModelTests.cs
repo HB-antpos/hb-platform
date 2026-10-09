@@ -981,6 +981,94 @@ public sealed class CardRecoveryCenterViewModelTests
     }
 
     [Fact]
+    public async Task Settlement_pending_refund_is_tracked_with_a_check_button_and_no_supervisor_actions()
+    {
+        var pending = CreateQueueItem(
+            CardProcessorKind.Square,
+            Guid.Parse("52000000-0000-0000-0000-0000000000B1"),
+            Now,
+            operationKind: "Refund",
+            status: "SettlementPending") with
+        {
+            IsOpen = false,
+            PaymentId = "REFUND-1",
+            PaymentStatus = "PENDING"
+        };
+        var recovery = new RecordingRecoveryService { OpenItems = [pending] };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR")),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+        viewModel.FilterCommand.Execute("resolved");
+        viewModel.SelectedRow = viewModel.OpenAttemptRows.Single();
+
+        // 退货单已完成：不在“待处理”，但可以手动查询一次结算结果；主管操作和自动检查都不适用。
+        Assert.True(viewModel.IsSettlementPendingSelection);
+        Assert.True(viewModel.ShowActionBar);
+        Assert.True(viewModel.RecoverCommand.CanExecute(null));
+        Assert.False(viewModel.ConfirmPaidCommand.CanExecute(null));
+        Assert.False(viewModel.IsAutoCheckActive);
+        Assert.True(viewModel.ShowSafetyBanner);
+        Assert.Equal(CardRecoveryTone.Info, viewModel.SelectedTone);
+        Assert.Equal("Square is settling the refund", viewModel.SelectedStatusPillText);
+        Assert.False(viewModel.IsFinalStepDone);
+        Assert.True(viewModel.IsFinalStepPending);
+        Assert.False(viewModel.IsCurrentStepActive);
+
+        await viewModel.RecoverCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, recovery.RecoverCallCount);
+        Assert.Equal(pending.Key, recovery.RecoveredKey);
+    }
+
+    [Fact]
+    public async Task Settlement_rejected_refund_needs_review_and_only_offers_refunded_by_other_means()
+    {
+        var rejected = CreateQueueItem(
+            CardProcessorKind.Square,
+            Guid.Parse("52000000-0000-0000-0000-0000000000B2"),
+            Now,
+            operationKind: "Refund",
+            status: "SettlementRejected") with
+        {
+            PaymentId = "REFUND-2",
+            PaymentStatus = "REJECTED"
+        };
+        var recovery = new RecordingRecoveryService
+        {
+            OpenItems = [rejected],
+            ResolveResult = new CardRecoveryResolutionResult(true, "Recorded", ResolutionPersisted: true, ResolutionApplied: true)
+        };
+        using var viewModel = new CardRecoveryCenterViewModel(
+            recovery,
+            new PosCartService(),
+            CreateSession(),
+            new RecordingAuthorizationService(CreateCashier("SUPERVISOR", Permissions.PosTerminal.Returns.Confirm)),
+            CreateLocalization());
+        await viewModel.LoadAsync();
+
+        // 退款被 Square 拒绝属于“需复核”，不会被当成还在处理中，也不会自动检查。
+        Assert.Equal(1, viewModel.ReviewCount);
+        Assert.Equal(CardRecoveryTone.Danger, viewModel.OpenAttemptRows.Single().Tone);
+        Assert.True(viewModel.IsSettlementRejectedSelection);
+        Assert.False(viewModel.IsSquareRefundProcessing);
+        Assert.False(viewModel.IsAutoCheckActive);
+        Assert.False(viewModel.ShowAlternativeOutcomes);
+        Assert.True(viewModel.IsFinalStepFailed);
+        Assert.Equal("Square rejected this refund.", viewModel.SafetyBannerTitleText);
+        Assert.Equal("Refunded by other means", viewModel.ConfirmProcessedText);
+        Assert.True(viewModel.CanShowSupervisorResolution);
+
+        await viewModel.ConfirmPaidCommand.ExecuteAsync(null);
+
+        Assert.Equal(CardRecoverySupervisorDecision.ConfirmProcessed, recovery.ResolvedDecision);
+        Assert.Equal(rejected.Key, recovery.ResolvedKey);
+    }
+
+    [Fact]
     public void Evidence_presets_fill_and_append_without_duplicates()
     {
         using var viewModel = new CardRecoveryCenterViewModel(

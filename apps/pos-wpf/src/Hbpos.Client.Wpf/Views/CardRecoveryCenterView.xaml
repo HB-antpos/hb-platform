@@ -538,12 +538,46 @@
                                 </Grid>
 
                                 <!-- 安全提示 -->
-                                <Border Margin="0,18,0,0" Padding="16,14" CornerRadius="14" BorderThickness="1.5" Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" Visibility="{Binding ShowSafetyBanner, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Border Margin="0,18,0,0" Padding="16,14" CornerRadius="14" BorderThickness="1.5" Visibility="{Binding ShowSafetyBanner, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSettlementPendingSelection}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}"/>
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
                                     <DockPanel>
-                                        <materialDesign:PackIcon Kind="AlertOutline" Width="26" Height="26" Margin="0,0,14,0" VerticalAlignment="Top" Foreground="{DynamicResource PosWarningStrongBrush}"/>
+                                        <materialDesign:PackIcon Width="26" Height="26" Margin="0,0,14,0" VerticalAlignment="Top">
+                                            <materialDesign:PackIcon.Style>
+                                                <Style TargetType="materialDesign:PackIcon">
+                                                    <Setter Property="Kind" Value="AlertOutline"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosWarningStrongBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSettlementPendingSelection}" Value="True">
+                                                            <Setter Property="Kind" Value="InformationOutline"/>
+                                                            <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </materialDesign:PackIcon.Style>
+                                        </materialDesign:PackIcon>
                                         <StackPanel>
-                                            <TextBlock Text="{Binding SafetyBannerTitleText}" FontSize="16.5" FontWeight="Bold" Foreground="{DynamicResource PosWarningTextBrush}"/>
-                                            <TextBlock Text="{Binding SafetyBannerBodyText}" FontSize="14.5" Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource PosWarningTextBrush}"/>
+                                            <TextBlock Text="{Binding SafetyBannerTitleText}" FontSize="16.5" FontWeight="Bold">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSettlementPendingSelection}" Value="True"><Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}"/></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding SafetyBannerBodyText}" FontSize="14.5" Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource PosTextSecondaryBrush}"/>
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
@@ -569,6 +603,7 @@
                                                     <Setter Property="Background" Value="{DynamicResource PosDividerBrush}"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsFinalStepDone}" Value="True"><Setter Property="Background" Value="{DynamicResource PosSuccessBrush}"/></DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsSettlementSelection}" Value="True"><Setter Property="Background" Value="{DynamicResource PosSuccessBrush}"/></DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
                                             </Border.Style>
@@ -588,7 +623,7 @@
                                                     <Setter Property="Background" Value="{DynamicResource PosSuccessBrush}"/>
                                                     <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBrush}"/>
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsFinalStepPending}" Value="True">
+                                                        <DataTrigger Binding="{Binding IsCurrentStepActive}" Value="True">
                                                             <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}"/>
                                                             <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBrush}"/>
                                                         </DataTrigger>
@@ -596,19 +631,19 @@
                                                 </Style>
                                             </Border.Style>
                                             <Grid>
-                                                <TextBlock Text="2" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource PosWarningTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsFinalStepPending, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                <TextBlock Text="2" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource PosWarningTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsCurrentStepActive, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                                 <materialDesign:PackIcon Kind="Check" Width="22" Height="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center">
                                                     <materialDesign:PackIcon.Style>
                                                         <Style TargetType="materialDesign:PackIcon">
                                                             <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsFinalStepPending}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsCurrentStepActive}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
                                                     </materialDesign:PackIcon.Style>
                                                 </materialDesign:PackIcon>
                                             </Grid>
                                         </Border>
-                                        <TextBlock Text="{Binding SelectedStatusPillText}" Style="{StaticResource RecoveryValue}" FontSize="15" Margin="0,8,0,0" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                        <TextBlock Text="{Binding StepCurrentLabelText}" Style="{StaticResource RecoveryValue}" FontSize="15" Margin="0,8,0,0" HorizontalAlignment="Center" TextAlignment="Center"/>
                                         <TextBlock Text="{Binding StepCurrentTimeText}" Style="{StaticResource RecoveryLabel}" FontSize="13" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" HorizontalAlignment="Center">
@@ -769,7 +804,7 @@
                         </ScrollViewer>
 
                         <!-- 固定操作栏：自动检查倒计时 + 人工核对 + 立即检查 -->
-                        <Border Grid.Row="1" Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,16,16" Padding="24,14" Visibility="{Binding SelectedAttempt.IsOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Border Grid.Row="1" Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,16,16" Padding="24,14" Visibility="{Binding ShowActionBar, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -857,22 +892,22 @@
                             <TextBlock Text="{Binding ResolutionInstructionsText}" Style="{StaticResource RecoveryLabel}" FontSize="14.5" Margin="0,14,0,0"/>
 
                             <!-- 第 1 步：证据 -->
-                            <StackPanel Orientation="Horizontal" Margin="0,20,0,10">
+                            <StackPanel Orientation="Horizontal" Margin="0,20,0,10" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Border Style="{StaticResource RecoveryStepNumber}">
                                     <TextBlock Text="1" Foreground="White" FontWeight="Bold" FontSize="13.5" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                                 <TextBlock Text="{loc:Loc cardRecovery.v2.sheet.step.evidence}" FontSize="16.5" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" VerticalAlignment="Center"/>
                             </StackPanel>
-                            <WrapPanel Margin="0,0,0,4">
+                            <WrapPanel Margin="0,0,0,4" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Button Command="{Binding ApplyEvidencePresetCommand}" CommandParameter="squareDashboard" Content="{loc:Loc cardRecovery.v2.evidence.squareDashboard}" Style="{StaticResource RecoveryChipButton}"/>
                                 <Button Command="{Binding ApplyEvidencePresetCommand}" CommandParameter="terminalReceipt" Content="{loc:Loc cardRecovery.v2.evidence.terminalReceipt}" Style="{StaticResource RecoveryChipButton}"/>
                                 <Button Command="{Binding ApplyEvidencePresetCommand}" CommandParameter="bankStatement" Content="{loc:Loc cardRecovery.v2.evidence.bankStatement}" Style="{StaticResource RecoveryChipButton}"/>
                             </WrapPanel>
-                            <StackPanel Margin="0,4,0,0">
+                            <StackPanel Margin="0,4,0,0" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <TextBlock Text="{Binding ResolutionReferenceLabelText}" Style="{StaticResource RecoveryLabel}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                 <TextBox Text="{Binding ResolutionReference, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionReferenceLabelText}" MinHeight="56" FontSize="16" VerticalContentAlignment="Center" TextWrapping="Wrap" Style="{StaticResource PosSearchTextBoxStyle}"/>
                             </StackPanel>
-                            <StackPanel Margin="0,12,0,0">
+                            <StackPanel Margin="0,12,0,0" Visibility="{Binding ShowEvidenceInputs, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <TextBlock Text="{Binding ResolutionEvidenceLabelText}" Style="{StaticResource RecoveryLabel}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                 <TextBox Text="{Binding ResolutionEvidence, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding ResolutionEvidenceLabelText}" MinHeight="56" FontSize="16" VerticalContentAlignment="Center" TextWrapping="Wrap" Style="{StaticResource PosSearchTextBoxStyle}"/>
                             </StackPanel>
@@ -891,8 +926,8 @@
                             <TextBlock Text="{loc:Loc cardRecovery.v2.sheet.outcomeHint}" Style="{StaticResource RecoveryLabel}" Margin="38,0,0,12"/>
                             <UniformGrid Columns="3" Margin="0,0,-10,0">
                                 <Button Command="{Binding ConfirmPaidCommand}" Content="{Binding ConfirmProcessedText}" Tag="{Binding ProcessedOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="128" Background="{DynamicResource PosSuccessSoftBrush}" BorderBrush="{DynamicResource PosSuccessBorderBrush}" Foreground="{DynamicResource PosSuccessTextBrush}"/>
-                                <Button Command="{Binding ConfirmNotPaidCommand}" Content="{Binding ConfirmNotProcessedText}" Tag="{Binding NotProcessedOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="128"/>
-                                <Button Command="{Binding ContinueWaitingCommand}" Content="{loc:Loc cardRecovery.center.action.continueWaiting}" Tag="{Binding WaitingOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="128"/>
+                                <Button Command="{Binding ConfirmNotPaidCommand}" Content="{Binding ConfirmNotProcessedText}" Tag="{Binding NotProcessedOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="128" Visibility="{Binding ShowAlternativeOutcomes, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <Button Command="{Binding ContinueWaitingCommand}" Content="{loc:Loc cardRecovery.center.action.continueWaiting}" Tag="{Binding WaitingOutcomeHintText}" Style="{StaticResource RecoveryOutcomeTile}" MinHeight="128" Visibility="{Binding ShowAlternativeOutcomes, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                             </UniformGrid>
                         </StackPanel>
                     </ScrollViewer>
