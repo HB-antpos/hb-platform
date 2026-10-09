@@ -716,6 +716,220 @@ namespace Hbpos.Api.Tests;
         Assert.Equal("RefreshToken", transaction.RecoveryAction);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.NotFound)]
+    public async Task StartSettlementAsync_closes_not_submitted_session_when_linkly_rejects_without_processing(
+        HttpStatusCode statusCode)
+    {
+        // 回归 H12：结算遇到 429/404 时 Linkly 没有执行结算，不会有任何回调；
+        // 若会话留在 Pending/IsActive=1，就没有任何动作能收口，会永久占住该 POS 和终端。
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(statusCode),
+            repository: repository);
+
+        var settlement = await service.StartSettlementAsync(
+            "S01",
+            "POS-01",
+            new LinklyCloudBackendSettlementRequest("Sandbox"),
+            CancellationToken.None);
+
+        Assert.Equal("NotSubmitted", settlement.Status);
+        Assert.False(settlement.OperationSuccess);
+        Assert.Null(settlement.RecoveryAction);
+        Assert.Equal(0, settlement.RecoveryCount);
+        Assert.Contains(((int)statusCode).ToString(), settlement.ResponseText, StringComparison.Ordinal);
+        Assert.Null(await repository.GetActiveSessionAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+
+        // 立刻还能发起新的结算（前一条已是终态、不再占用 POS）。
+        var retry = await service.StartSettlementAsync(
+            "S01",
+            "POS-01",
+            new LinklyCloudBackendSettlementRequest("Sandbox"),
+            CancellationToken.None);
+        Assert.NotEqual(settlement.SessionId, retry.SessionId);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    public async Task StartSettlementAsync_ambiguous_response_blocks_until_callback_timeout_then_becomes_result_unknown(
+        HttpStatusCode statusCode)
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(statusCode),
+            repository: repository);
+        var started = await service.StartSettlementAsync(
+            "S01",
+            "POS-01",
+            new LinklyCloudBackendSettlementRequest("Sandbox"),
+            CancellationToken.None);
+
+        // 408/5xx 无法证明 Linkly 没有执行：回调等待期内仍视为进行中，阻塞同一 POS，防止重复结算或并发刷卡。
+        Assert.Equal("Pending", started.Status);
+        await Assert.ThrowsAsync<LinklyCloudBackendActiveTransactionException>(() =>
+            service.StartTransactionAsync("S01", "POS-01", CreateTransactionRequest(), CancellationToken.None));
+
+        await AgeSessionAsync(repository, started.SessionId, LinklyTimeoutConstants.SettlementCallbackTimeout + TimeSpan.FromSeconds(1));
+
+        // 超过回调等待上限：会话转为 IsActive=0 的“结果未知”，释放 POS，但仍未 ack、仍可被找回。
+        var status = await service.GetSettlementStatusAsync("S01", "POS-01", "Sandbox", started.SessionId, CancellationToken.None);
+        Assert.Equal("Pending", status!.Status);
+        Assert.Equal(LinklyCloudBackendStatusConstants.RecoveryResultUnknown, status.RecoveryAction);
+        Assert.Null(status.OperationSuccess);
+        Assert.Null(status.ClientAcknowledgedAt);
+        Assert.Null(await repository.GetActiveSessionAsync("Sandbox", "S01", "POS-01", CancellationToken.None));
+        var resumable = await service.GetResumableSettlementSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None);
+        Assert.Equal(started.SessionId, resumable?.SessionId);
+
+        var transaction = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateTransactionRequest(), CancellationToken.None);
+        Assert.NotEqual(started.SessionId, transaction.SessionId);
+    }
+
+    [Fact]
+    public async Task Settlement_timeout_is_applied_when_a_new_payment_checks_for_active_sessions()
+    {
+        // 收银员不会去轮询结算状态：新付款前的占用检查本身必须能把超时的结算收口，否则 POS 永久无法刷卡。
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted),
+            repository: repository);
+        var started = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+        await AgeSessionAsync(repository, started.SessionId, LinklyTimeoutConstants.SettlementCallbackTimeout + TimeSpan.FromSeconds(1));
+
+        Assert.Null(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+
+        var again = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+        Assert.NotEqual(started.SessionId, again.SessionId);
+    }
+
+    [Fact]
+    public async Task Settlement_within_callback_timeout_stays_active()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted),
+            repository: repository);
+        var started = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+        await AgeSessionAsync(repository, started.SessionId, LinklyTimeoutConstants.SettlementCallbackTimeout - TimeSpan.FromSeconds(30));
+
+        var status = await service.GetSettlementStatusAsync("S01", "POS-01", "Sandbox", started.SessionId, CancellationToken.None);
+
+        Assert.Null(status!.RecoveryAction);
+        Assert.NotNull(await service.GetActiveSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Settlement_callback_arriving_after_timeout_still_completes_the_session()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.InternalServerError),
+            repository: repository);
+        var started = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+        await AgeSessionAsync(repository, started.SessionId, LinklyTimeoutConstants.SettlementCallbackTimeout + TimeSpan.FromSeconds(1));
+        _ = await service.GetSettlementStatusAsync("S01", "POS-01", "Sandbox", started.SessionId, CancellationToken.None);
+
+        await service.ReceiveNotificationAsync(
+            "Sandbox",
+            started.SessionId,
+            "settlement",
+            "Bearer sandbox-notify",
+            JsonDocument.Parse("""{ "Response": { "Success": true, "ResponseCode": "00", "ResponseText": "SETTLED" } }""").RootElement,
+            CancellationToken.None);
+
+        var late = await service.GetSettlementStatusAsync("S01", "POS-01", "Sandbox", started.SessionId, CancellationToken.None);
+        Assert.Equal("Completed", late!.Status);
+        Assert.True(late.OperationSuccess);
+        Assert.Null(late.RecoveryAction);
+    }
+
+    [Fact]
+    public async Task AcknowledgeSettlementSessionAsync_supervisor_resolution_closes_result_unknown_session()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.InternalServerError),
+            repository: repository);
+        var started = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+        await AgeSessionAsync(repository, started.SessionId, LinklyTimeoutConstants.SettlementCallbackTimeout + TimeSpan.FromSeconds(1));
+
+        // 普通 ack 只记录确认，非终态会话不会因此变成已结案。
+        var plain = await service.AcknowledgeSettlementSessionAsync(
+            "S01", "POS-01", "Sandbox", started.SessionId, supervisorResolved: false, CancellationToken.None);
+        Assert.Equal("Pending", plain.Status);
+
+        var resolved = await service.AcknowledgeSettlementSessionAsync(
+            "S01", "POS-01", "Sandbox", started.SessionId, supervisorResolved: true, CancellationToken.None);
+
+        Assert.Equal("SupervisorResolved", resolved.Status);
+        Assert.NotNull(resolved.ClientAcknowledgedAt);
+        Assert.Null(await service.GetResumableSettlementSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AcknowledgeSettlementSessionAsync_supervisor_resolution_keeps_existing_linkly_final_status()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(
+            HttpStatusCode.OK,
+            """{ "Response": { "Success": false, "ResponseCode": "PF", "ResponseText": "PINPAD OFFLINE" } }"""));
+        var started = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+
+        var acknowledged = await service.AcknowledgeSettlementSessionAsync(
+            "S01", "POS-01", "Sandbox", started.SessionId, supervisorResolved: true, CancellationToken.None);
+
+        Assert.Equal("Completed", acknowledged.Status);
+        Assert.False(acknowledged.OperationSuccess);
+    }
+
+    [Fact]
+    public async Task Settlement_responses_carry_creation_time_that_does_not_move_on_later_updates()
+    {
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted),
+            repository: repository);
+        var before = DateTimeOffset.UtcNow;
+        var started = await service.StartSettlementAsync(
+            "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None);
+        Assert.NotNull(started.CreatedAt);
+        Assert.InRange(started.CreatedAt!.Value, before.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1));
+
+        await AgeSessionAsync(repository, started.SessionId, TimeSpan.FromHours(30));
+        await service.ReceiveNotificationAsync(
+            "Sandbox",
+            started.SessionId,
+            "settlement",
+            "Bearer sandbox-notify",
+            JsonDocument.Parse("""{ "Response": { "Success": true, "ResponseCode": "00", "ResponseText": "SETTLED" } }""").RootElement,
+            CancellationToken.None);
+
+        var resumable = await service.GetResumableSettlementSessionAsync("S01", "POS-01", "Sandbox", CancellationToken.None);
+        // 回调（UpdatedAt 变化）不能改写创建时间，否则跨营业日判断会被刷新后的更新时间欺骗。
+        Assert.Equal(started.CreatedAt, resumable!.CreatedAt);
+    }
+
+    private static async Task AgeSessionAsync(
+        ILinklyCloudBackendAsyncRepository repository,
+        string sessionId,
+        TimeSpan age)
+    {
+        var session = await repository.GetSessionAsync("Sandbox", "S01", "POS-01", sessionId, CancellationToken.None);
+        Assert.NotNull(session);
+        session!.UpdatedAt = DateTimeOffset.UtcNow - age;
+        await repository.UpsertSessionAsync(session, CancellationToken.None);
+    }
+
     [Fact]
     public async Task Settlement_notification_and_receipt_are_persisted_in_any_order_without_transaction_refresh()
     {

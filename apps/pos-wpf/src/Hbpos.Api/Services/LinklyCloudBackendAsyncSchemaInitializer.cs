@@ -66,6 +66,7 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                 [ClientAcknowledgedAt] DATETIME2(7) NULL,
                 [LastHttpStatus] INT NULL,
                 [IsActive] BIT NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_IsActive] DEFAULT (0),
+                [CreatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_CreatedAt] DEFAULT (SYSUTCDATETIME()),
                 [UpdatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
                 -- 订单同步核对会话后回写的订单号；用于「已批准会话无订单」对账。
                 [OrderGuid] NVARCHAR(50) NULL,
@@ -219,6 +220,16 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
             BEGIN
                 ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
                     ADD [SettlementReceiptTexts] NVARCHAR(MAX) NULL;
+            END;
+
+            -- 创建时间用于判断未决结算属于哪个营业日。升级时先加可空列并带默认值（之后新行自动写入），
+            -- 旧行用 UpdatedAt 回填；回填语句用动态 SQL，避免同一批次里引用刚添加的列而编译失败。
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'CreatedAt') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [CreatedAt] DATETIME2(7) NULL
+                        CONSTRAINT [DF_POSM_LinklyCloudBackendSession_CreatedAt_Upgrade] DEFAULT (SYSUTCDATETIME());
+                EXEC (N'UPDATE [dbo].[POSM_LinklyCloudBackendSession] SET [CreatedAt] = [UpdatedAt] WHERE [CreatedAt] IS NULL;');
             END;
 
             -- 订单同步（OrderSyncService）核对卡付款会话后回写订单号；可空，旧客户端与历史行不受影响。
