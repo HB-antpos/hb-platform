@@ -56,6 +56,23 @@ export function suggestOrientationFromSize(
   return size.width > size.height ? 'Landscape' : 'Portrait'
 }
 
+/**
+ * 上传素材成功后版式怎么变（新建 / 编辑一致）：
+ * - 读到新素材宽高：按新素材重新预选（即使管理员之前手动选过），并标记为「已按尺寸自动选择」
+ * - 读不到宽高：保持当前版式不变；自动选择标记清除（它描述的是旧素材，对新素材已不成立）
+ * 仅「打开编辑弹窗」不经过这里，记录里的版式保持不变。
+ */
+export function resolveOrientationAfterUpload(
+  currentOrientation: AdvertisementOrientation | undefined,
+  width?: number | null,
+  height?: number | null,
+): { orientation: AdvertisementOrientation | undefined; autoSelected: boolean } {
+  const suggested = suggestOrientationFromSize(width, height)
+  return suggested
+    ? { orientation: suggested, autoSelected: true }
+    : { orientation: currentOrientation, autoSelected: false }
+}
+
 /** 该版式会在哪些广告位播放。 */
 export function getOrientationSlots(orientation: AdvertisementOrientation): readonly AdvertisementSlot[] {
   return ORIENTATION_SLOTS[orientation] ?? ORIENTATION_SLOTS.Any
