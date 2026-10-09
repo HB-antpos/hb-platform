@@ -70,6 +70,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                 [UpdatedAt] DATETIME2(7) NOT NULL CONSTRAINT [DF_POSM_LinklyCloudBackendSession_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
                 -- 订单同步核对会话后回写的订单号；用于「已批准会话无订单」对账。
                 [OrderGuid] NVARCHAR(50) NULL,
+                -- 首次进入终态的时间（只写一次，不再被后续 ack/打印回写覆盖）；历史行为 NULL，对账以它判断「部署后的会话」。
+                [CompletedAt] DATETIME2(7) NULL,
                 CONSTRAINT [CK_POSM_LinklyCloudBackendSession_Environment] CHECK ([Environment] IN (N'Production', N'Sandbox')),
                 CONSTRAINT [UX_POSM_LinklyCloudBackendSession_Scope] UNIQUE ([Environment], [StoreCode], [DeviceCode], [SessionId])
             );
@@ -270,6 +272,29 @@ public sealed class SqlSugarLinklyCloudBackendAsyncSchemaInitializer(
                 ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
                     ADD [OfficialQueryRejectCount] INT NOT NULL
                         CONSTRAINT [DF_POSM_LinklyCloudBackendSession_OfficialQueryRejectCount_Upgrade] DEFAULT (0) WITH VALUES;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_LinklyCloudBackendSession', N'CompletedAt') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_LinklyCloudBackendSession]
+                    ADD [CompletedAt] DATETIME2(7) NULL;
+            END;
+
+            -- 对账作业只扫描「已批准且尚未回链订单」的会话，过滤索引让它随订单回链后迅速变小。
+            -- 同一批次里刚新增的列不能直接引用，所以用动态 SQL 建索引。
+            IF NOT EXISTS (
+                SELECT 1
+                FROM sys.indexes
+                WHERE [object_id] = OBJECT_ID(N'[dbo].[POSM_LinklyCloudBackendSession]', N'U')
+                  AND [name] = N'IX_POSM_LinklyCloudBackendSession_UnlinkedApproved')
+            BEGIN
+                EXEC (N'CREATE INDEX [IX_POSM_LinklyCloudBackendSession_UnlinkedApproved]
+                    ON [dbo].[POSM_LinklyCloudBackendSession] ([UpdatedAt])
+                    INCLUDE ([CompletedAt])
+                    WHERE [OrderGuid] IS NULL
+                      AND [Status] = N''Completed''
+                      AND [TransactionSuccess] = 1
+                      AND [OperationType] = N''Transaction''');
             END;
 
             IF NOT EXISTS (

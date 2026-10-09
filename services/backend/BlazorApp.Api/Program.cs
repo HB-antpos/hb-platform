@@ -691,6 +691,8 @@ builder.Services.AddHostedService<BlazorApp.Api.Features.LegacyEmployeeLogs.Risk
 builder.Services.AddScoped<ILinklySettlementQueryService, LinklySettlementQueryService>();
 builder.Services.AddSingleton<ILinklySettlementAmountParser, LinklySettlementAmountParser>();
 builder.Services.AddSingleton<LinklySettlementExcelExporter>();
+// 卡付款对账异常只读查询：异常表由 Hbpos.Api 建表并写入（订单同步核对 + 后台对账作业），后台只读。
+builder.Services.AddScoped<ICardTenderReconciliationQueryService, CardTenderReconciliationQueryService>();
 // 日结记录只读查询：日结在 POSM 库（表由 Hbpos.Api 启动时创建，后台不建表），门店名称与时区在 HBweb 门店表。
 builder.Services.AddScoped<BlazorApp.Api.Services.DailyCloses.IDailyCloseQueryService>(sp =>
     new BlazorApp.Api.Services.DailyCloses.DailyCloseQueryService(
