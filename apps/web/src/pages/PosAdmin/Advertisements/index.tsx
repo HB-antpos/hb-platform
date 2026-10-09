@@ -7,6 +7,7 @@ import {
   VideoCameraOutlined,
 } from '@ant-design/icons'
 import {
+  Alert,
   App as AntdApp,
   Button,
   Card,
@@ -56,6 +57,7 @@ import type {
   AdvertisementDetailDto,
   AdvertisementListDto,
   AdvertisementMediaType,
+  AdvertisementOrientation,
 } from '../../../types/advertisement'
 import {
   createLatestRequestGuard,
@@ -70,6 +72,17 @@ import {
   filterStoresByBrand,
   getScopeSelectionState,
 } from './storeBrandFilter'
+import { readMediaDimensions } from './mediaDimensions'
+import { suggestOrientationFromSize, toMediaSize } from './orientation'
+import {
+  ADVERTISEMENT_ORIENTATION_VALUES,
+  DisplayPreview,
+  OrientationCell,
+  OrientationHelp,
+  OrientationMismatchAlert,
+  OrientationSegmented,
+  getOrientationLabel,
+} from './OrientationParts'
 import advertisementsMessagesEn from './advertisementsMessages.en.json'
 import advertisementsMessagesZh from './advertisementsMessages.zh.json'
 
@@ -85,6 +98,8 @@ interface QueryFormValues {
   keyword?: string
   storeCode?: string
   mediaType?: AdvertisementMediaType
+  /** 空字符串 = 全部（不过滤）。 */
+  orientation?: AdvertisementOrientation | ''
   isEnabled?: boolean
   effectiveRange?: [Dayjs, Dayjs]
 }
@@ -99,6 +114,11 @@ interface AdvertisementFormValues {
   originalFileName?: string
   contentType?: string
   fileSize?: number
+  /** 版式必填；新建且读不到尺寸时为空，须管理员手动选择。 */
+  orientation?: AdvertisementOrientation
+  /** 素材像素宽高（上传时在浏览器端读取），读不到为 null。 */
+  mediaWidth?: number | null
+  mediaHeight?: number | null
   effectiveStart: Dayjs
   effectiveEnd: Dayjs
   isEnabled: boolean
@@ -194,6 +214,10 @@ export default function AdvertisementsPage() {
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewRecord, setPreviewRecord] = useState<AdvertisementListDto | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  // 「已按尺寸自动选择」标签：上传后按宽高自动预选时为 true，管理员手动改动后消失。
+  const [orientationAutoSelected, setOrientationAutoSelected] = useState(false)
+  // 管理员是否在本次编辑里手动点选过版式；手动选择优先，之后再上传也不自动覆盖。
+  const orientationTouchedRef = useRef(false)
   const mainListRequestGuardRef = useRef(createLatestRequestGuard())
   const mountedRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -202,9 +226,14 @@ export default function AdvertisementsPage() {
   const currentMediaType = Form.useWatch('mediaType', editorForm)
   const currentMediaUrl = Form.useWatch('mediaUrl', editorForm)
   const currentThumbnailUrl = Form.useWatch('thumbnailUrl', editorForm)
-  const currentOriginalFileName = Form.useWatch('originalFileName', editorForm)
-  const currentContentType = Form.useWatch('contentType', editorForm)
-  const currentFileSize = Form.useWatch('fileSize', editorForm)
+  // 以下元数据没有挂 Form.Item（只经 setFieldsValue 写入表单 store），必须用 preserve 才能被 useWatch 读到。
+  const currentOriginalFileName = Form.useWatch('originalFileName', { form: editorForm, preserve: true })
+  const currentContentType = Form.useWatch('contentType', { form: editorForm, preserve: true })
+  const currentFileSize = Form.useWatch('fileSize', { form: editorForm, preserve: true })
+  const currentMediaWidth = Form.useWatch('mediaWidth', { form: editorForm, preserve: true })
+  const currentMediaHeight = Form.useWatch('mediaHeight', { form: editorForm, preserve: true })
+  const currentOrientation = Form.useWatch('orientation', editorForm)
+  const currentMediaSize = toMediaSize(currentMediaWidth, currentMediaHeight)
   const storeBrandGroups = useMemo(() => buildStoreBrandGroups(storeOptions), [storeOptions])
   const brandFilteredStoreOptions = useMemo(
     () => filterStoresByBrand(storeOptions, storeBrandKey),
@@ -225,6 +254,17 @@ export default function AdvertisementsPage() {
     () => [
       { label: t('posAdmin.advertisements.mediaTypes.image'), value: 'Image' },
       { label: t('posAdmin.advertisements.mediaTypes.video'), value: 'Video' },
+    ],
+    [t],
+  )
+
+  const orientationFilterOptions = useMemo(
+    () => [
+      { label: t('posAdmin.advertisements.orientationAll'), value: '' },
+      ...ADVERTISEMENT_ORIENTATION_VALUES.map((orientation) => ({
+        label: getOrientationLabel(t, orientation),
+        value: orientation,
+      })),
     ],
     [t],
   )
@@ -262,6 +302,7 @@ export default function AdvertisementsPage() {
         keyword: values.keyword || undefined,
         storeCode: values.storeCode || undefined,
         mediaType: values.mediaType || undefined,
+        orientation: values.orientation || undefined,
         isEnabled: typeof values.isEnabled === 'boolean' ? values.isEnabled : undefined,
         effectiveStart: values.effectiveRange?.[0]?.startOf('day').toISOString(),
         effectiveEnd: values.effectiveRange?.[1]?.endOf('day').toISOString(),
@@ -315,6 +356,8 @@ export default function AdvertisementsPage() {
   const resetEditor = () => {
     setEditingId(null)
     setStoreBrandKey(null)
+    setOrientationAutoSelected(false)
+    orientationTouchedRef.current = false
     editorForm.resetFields()
     editorForm.setFieldsValue({
       mediaType: 'Image',
@@ -327,6 +370,9 @@ export default function AdvertisementsPage() {
       originalFileName: '',
       contentType: '',
       fileSize: undefined,
+      orientation: undefined,
+      mediaWidth: null,
+      mediaHeight: null,
       effectiveStart: dayjs(),
       effectiveEnd: dayjs().add(7, 'day'),
     })
@@ -342,6 +388,9 @@ export default function AdvertisementsPage() {
       const detail: AdvertisementDetailDto = await getAdvertisementById(id)
       setEditingId(id)
       setStoreBrandKey(null)
+      // 编辑已有广告：沿用记录里的版式（service 已把缺省兜底为 Any），不按尺寸自动改。
+      setOrientationAutoSelected(false)
+      orientationTouchedRef.current = false
       editorForm.setFieldsValue({
         title: detail.title,
         description: detail.description,
@@ -352,6 +401,9 @@ export default function AdvertisementsPage() {
         originalFileName: detail.originalFileName,
         contentType: detail.contentType,
         fileSize: detail.fileSize,
+        orientation: detail.orientation,
+        mediaWidth: detail.mediaWidth ?? null,
+        mediaHeight: detail.mediaHeight ?? null,
         effectiveStart: dayjs(detail.effectiveStart),
         effectiveEnd: dayjs(detail.effectiveEnd),
         isEnabled: detail.isEnabled,
@@ -369,6 +421,8 @@ export default function AdvertisementsPage() {
     setEditorOpen(false)
     setEditingId(null)
     setUploading(false)
+    setOrientationAutoSelected(false)
+    orientationTouchedRef.current = false
     editorForm.resetFields()
   }
 
@@ -388,6 +442,8 @@ export default function AdvertisementsPage() {
     try {
       setUploading(true)
       const mediaType = resolveAdvertisementMediaType(file)
+      // 与上传并行读取本地素材宽高；该 Promise 永不 reject，读不到（超时/失败）时为 null，不阻断上传。
+      const dimensionsPromise = readMediaDimensions(file, mediaType)
       const signature = await requestAdvertisementUploadSignature({
         fileName: file.name,
         contentType: file.type || (mediaType === 'Video' ? 'video/mp4' : 'image/jpeg'),
@@ -395,6 +451,7 @@ export default function AdvertisementsPage() {
         mediaType,
       })
       const mediaUrl = await uploadAdvertisementFile(signature, file)
+      const dimensions = await dimensionsPromise
       const nextValues: Partial<AdvertisementFormValues> = {
         mediaType,
         mediaUrl,
@@ -402,6 +459,23 @@ export default function AdvertisementsPage() {
         originalFileName: file.name,
         contentType: file.type || undefined,
         fileSize: file.size,
+        // 换了素材就必须同步覆盖宽高（读不到也要清成 null），不能残留旧素材的尺寸。
+        mediaWidth: dimensions?.width ?? null,
+        mediaHeight: dimensions?.height ?? null,
+      }
+
+      // 自动预选版式：仅新建、且管理员未手动选过时生效（宽 > 高 → 横版，否则竖版）。
+      // 编辑已有广告沿用记录里的版式，不自动改；手动选择后再上传也不覆盖。
+      if (!editingId && !orientationTouchedRef.current) {
+        const suggested = suggestOrientationFromSize(dimensions?.width, dimensions?.height)
+        if (suggested) {
+          nextValues.orientation = suggested
+          setOrientationAutoSelected(true)
+        } else if (orientationAutoSelected) {
+          // 上一次是按旧素材自动选的，新素材读不到尺寸：清空让管理员重新选择，避免沿用过期的推断。
+          nextValues.orientation = undefined
+          setOrientationAutoSelected(false)
+        }
       }
 
       if (mediaType === 'Image') {
@@ -532,6 +606,19 @@ export default function AdvertisementsPage() {
       ),
     },
     {
+      title: t('posAdmin.advertisements.orientation'),
+      dataIndex: 'orientation',
+      key: 'orientation',
+      width: 210,
+      render: (value: AdvertisementOrientation, record) => (
+        <OrientationCell
+          orientation={value}
+          mediaWidth={record.mediaWidth}
+          mediaHeight={record.mediaHeight}
+        />
+      ),
+    },
+    {
       title: t('posAdmin.advertisements.sortOrder'),
       dataIndex: 'sortOrder',
       key: 'sortOrder',
@@ -642,6 +729,9 @@ export default function AdvertisementsPage() {
           <Form.Item name="mediaType" label={t('posAdmin.advertisements.mediaType')}>
             <Select allowClear options={mediaTypeOptions} style={{ width: 140 }} />
           </Form.Item>
+          <Form.Item name="orientation" label={t('posAdmin.advertisements.orientation')} initialValue="">
+            <Select options={orientationFilterOptions} style={{ width: 120 }} />
+          </Form.Item>
           <Form.Item name="isEnabled" label={t('posAdmin.advertisements.enabled')}>
             <Select
               allowClear
@@ -674,12 +764,19 @@ export default function AdvertisementsPage() {
       </Card>
 
       <Card style={{ marginTop: 16 }}>
+        {/* 常驻说明：客显在哪个广告位播哪种版式，以及没有匹配广告时的退回规则。 */}
+        <Alert
+          type="info"
+          showIcon
+          message={t('posAdmin.advertisements.orientationNotice')}
+          style={{ marginBottom: 16 }}
+        />
         <MeasuredTable<AdvertisementRow> metricId="pos-admin.advertisements.table-1"
           rowKey="key"
           loading={loading}
           dataSource={data}
           columns={columns}
-          scroll={{ x: 1380 }}
+          scroll={{ x: 1590 }}
           pagination={{
             total,
             current: page,
@@ -846,6 +943,9 @@ export default function AdvertisementsPage() {
                       originalFileName: editorForm.getFieldValue('originalFileName'),
                       contentType: editorForm.getFieldValue('contentType'),
                       fileSize: editorForm.getFieldValue('fileSize'),
+                      orientation: currentOrientation ?? 'Any',
+                      mediaWidth: currentMediaSize?.width ?? null,
+                      mediaHeight: currentMediaSize?.height ?? null,
                       effectiveStart: editorForm.getFieldValue('effectiveStart')?.toISOString?.() || '',
                       effectiveEnd: editorForm.getFieldValue('effectiveEnd')?.toISOString?.() || '',
                       isEnabled: editorForm.getFieldValue('isEnabled') ?? true,
@@ -871,24 +971,82 @@ export default function AdvertisementsPage() {
             />
 
             <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+                <div style={{ flex: '1 1 280px', minWidth: 260 }}>
+                  {/* 素材信息：文件名、类型/大小、像素尺寸（宽高比） */}
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid rgba(5, 5, 5, 0.06)',
+                      borderRadius: 8,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <Typography.Text strong style={{ display: 'block', wordBreak: 'break-all' }}>
+                      {currentOriginalFileName || '--'}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                      {currentContentType || '--'} · {formatFileSize(currentFileSize)}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                      {currentMediaSize
+                        ? t('posAdmin.advertisements.mediaDimensions', {
+                            width: currentMediaSize.width,
+                            height: currentMediaSize.height,
+                            ratio: (currentMediaSize.width / currentMediaSize.height).toFixed(2),
+                          })
+                        : t('posAdmin.advertisements.sizeUnknown')}
+                    </Typography.Text>
+                  </div>
+
+                  <Form.Item
+                    name="orientation"
+                    label={
+                      <Space size={8}>
+                        {t('posAdmin.advertisements.orientation')}
+                        {orientationAutoSelected ? (
+                          <Tag color="success" style={{ marginInlineEnd: 0 }}>
+                            {t('posAdmin.advertisements.orientationAutoSelected')}
+                          </Tag>
+                        ) : null}
+                      </Space>
+                    }
+                    rules={[{ required: true, message: t('posAdmin.advertisements.orientationRequired') }]}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <OrientationSegmented
+                      disabled={!access.canEditAdvertisements}
+                      onUserChange={() => {
+                        orientationTouchedRef.current = true
+                        setOrientationAutoSelected(false)
+                      }}
+                    />
+                  </Form.Item>
+                  <OrientationHelp />
+                </div>
+
+                <DisplayPreview
+                  orientation={currentOrientation}
+                  mediaType={currentMediaType}
+                  mediaUrl={currentMediaUrl}
+                  posterUrl={currentThumbnailUrl}
+                  mediaWidth={currentMediaSize?.width ?? null}
+                  mediaHeight={currentMediaSize?.height ?? null}
+                />
+              </div>
+
+              <OrientationMismatchAlert
+                orientation={currentOrientation}
+                mediaWidth={currentMediaSize?.width ?? null}
+                mediaHeight={currentMediaSize?.height ?? null}
+              />
+
               <Form.Item name="mediaUrl" label={t('posAdmin.advertisements.mediaUrl')} rules={[{ required: true, message: t('posAdmin.advertisements.mediaRequired') }]}>
                 <Input disabled placeholder={t('posAdmin.advertisements.mediaUrlPlaceholder')} />
               </Form.Item>
               <Form.Item name="thumbnailUrl" label={t('posAdmin.advertisements.thumbnailUrl')}>
                 <Input placeholder={t('posAdmin.advertisements.thumbnailUrlPlaceholder')} />
               </Form.Item>
-
-              <Space wrap size={[16, 8]}>
-                <Typography.Text type="secondary">
-                  {t('posAdmin.advertisements.originalFileName')}: {currentOriginalFileName || '--'}
-                </Typography.Text>
-                <Typography.Text type="secondary">
-                  {t('posAdmin.advertisements.contentType')}: {currentContentType || '--'}
-                </Typography.Text>
-                <Typography.Text type="secondary">
-                  {t('posAdmin.advertisements.fileSize')}: {formatFileSize(currentFileSize)}
-                </Typography.Text>
-              </Space>
 
               <Form.Item name="objectKey" label={t('posAdmin.advertisements.objectKey')}>
                 <Input disabled placeholder={t('posAdmin.advertisements.objectKeyPlaceholder')} />

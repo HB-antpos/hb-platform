@@ -1,6 +1,9 @@
 import {
   buildAdvertisementUpsertPayload,
   createAdvertisement,
+  getAdvertisementGrid,
+  normalizeAdvertisementMediaSize,
+  normalizeAdvertisementOrientation,
   resolveAdvertisementMediaType,
   stripAdvertisementMediaUrlQuery,
 } from './advertisementService'
@@ -74,6 +77,9 @@ assertDeepEqual(
     originalFileName: ' banner.png ',
     contentType: ' image/png ',
     fileSize: 2048,
+    orientation: 'Portrait',
+    mediaWidth: 772,
+    mediaHeight: 870,
     effectiveStart: { toISOString: () => '2026-05-27T10:00:00.000Z' },
     effectiveEnd: '2026-06-01T10:00:00.000Z',
     isEnabled: false,
@@ -90,6 +96,9 @@ assertDeepEqual(
     originalFileName: 'banner.png',
     contentType: 'image/png',
     fileSize: 2048,
+    orientation: 'Portrait',
+    mediaWidth: 772,
+    mediaHeight: 870,
     effectiveStart: '2026-05-27T10:00:00.000Z',
     effectiveEnd: '2026-06-01T10:00:00.000Z',
     isEnabled: false,
@@ -97,6 +106,44 @@ assertDeepEqual(
     stores: [{ storeCode: 'S001' }, { storeCode: 'S002' }],
   },
   'Advertisement payload helper should normalize trimmed fields and store scope shape',
+)
+
+// 版式兜底：旧数据 / 缺省 / 未知值一律按 Any
+assertEqual(normalizeAdvertisementOrientation('Landscape'), 'Landscape', 'Landscape should be kept')
+assertEqual(normalizeAdvertisementOrientation('portrait'), 'Portrait', 'Orientation should be case-insensitive')
+assertEqual(normalizeAdvertisementOrientation(undefined), 'Any', 'Missing orientation should fall back to Any')
+assertEqual(normalizeAdvertisementOrientation('Square'), 'Any', 'Unknown orientation should fall back to Any')
+assertEqual(normalizeAdvertisementOrientation(2), 'Any', 'Non-string orientation should fall back to Any')
+
+// 素材宽高：要么都有、要么都为 null
+assertDeepEqual(
+  normalizeAdvertisementMediaSize(1366, 768),
+  { mediaWidth: 1366, mediaHeight: 768 },
+  'Valid media size should be kept',
+)
+assertDeepEqual(
+  normalizeAdvertisementMediaSize(1366, null),
+  { mediaWidth: null, mediaHeight: null },
+  'Partial media size should be cleared together',
+)
+assertDeepEqual(
+  normalizeAdvertisementMediaSize(0, 768),
+  { mediaWidth: null, mediaHeight: null },
+  'Non-positive media size should be cleared together',
+)
+
+assertDeepEqual(
+  (({ orientation, mediaWidth, mediaHeight }) => ({ orientation, mediaWidth, mediaHeight }))(
+    buildAdvertisementUpsertPayload({
+      title: '旧广告',
+      mediaType: 'Video',
+      mediaUrl: 'https://cdn.example.com/ads/legacy.mp4',
+      effectiveStart: '2026-05-27T10:00:00.000Z',
+      effectiveEnd: '2026-06-01T10:00:00.000Z',
+    }),
+  ),
+  { orientation: 'Any', mediaWidth: null, mediaHeight: null },
+  'Payload without orientation or size should submit Any with null size',
 )
 
 const originalFetch = globalThis.fetch
@@ -129,6 +176,9 @@ try {
       originalFileName: 'banner.png',
       contentType: 'image/png',
       fileSize: 2048,
+      orientation: 'Landscape',
+      mediaWidth: 1366,
+      mediaHeight: 768,
       effectiveStart: '2026-05-27T10:00:00.000Z',
       effectiveEnd: '2026-06-01T10:00:00.000Z',
       isEnabled: true,
@@ -142,6 +192,37 @@ try {
     createFailureCalls[0]?.url,
     '/api/react/v1/advertisements',
     'Create advertisement failure request should use the advertisements API contract',
+  )
+} finally {
+  globalThis.fetch = originalFetch
+}
+
+// 列表返回：旧数据没有 orientation / 宽高时，service 层兜底为 Any + null 尺寸
+globalThis.fetch = (async () => new Response(JSON.stringify({
+  success: true,
+  data: {
+    total: 2,
+    items: [
+      { id: 'legacy', title: '旧广告', mediaType: 'Image', mediaUrl: 'https://cdn.example.com/a.png' },
+      {
+        id: 'portrait',
+        title: '竖版',
+        mediaType: 'Video',
+        mediaUrl: 'https://cdn.example.com/b.mp4',
+        orientation: 'Portrait',
+        mediaWidth: 772,
+        mediaHeight: 870,
+      },
+    ],
+  },
+}), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+
+try {
+  const grid = await getAdvertisementGrid({ orientation: 'Portrait' })
+  assertDeepEqual(
+    grid.items.map((item) => [item.id, item.orientation, item.mediaWidth, item.mediaHeight]),
+    [['legacy', 'Any', null, null], ['portrait', 'Portrait', 772, 870]],
+    'Grid items should normalize missing orientation to Any and keep valid size',
   )
 } finally {
   globalThis.fetch = originalFetch

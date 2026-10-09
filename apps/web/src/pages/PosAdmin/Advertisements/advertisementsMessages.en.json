@@ -6,7 +6,64 @@
       "allBrands": "All brands",
       "unbrandedStores": "No brand",
       "selectAllBrandStores": "Select all {{brand}} stores ({{count}})",
-      "selectAllStoresWithCount": "Select all stores ({{count}})"
+      "selectAllStoresWithCount": "Select all stores ({{count}})",
+      "orientation": "Layout",
+      "orientationAll": "All",
+      "orientations": {
+        "landscape": "Landscape",
+        "portrait": "Portrait",
+        "any": "Any"
+      },
+      "orientationPlacements": {
+        "landscape": "Idle full screen",
+        "portrait": "Checkout right panel",
+        "any": "Both slots"
+      },
+      "orientationNotice": "The customer display picks ads by layout: idle full screen plays Landscape and Any ads; the right panel during checkout plays Portrait and Any ads. If a slot has no matching ad, it falls back to all enabled ads.",
+      "sizeUnknown": "Size unknown",
+      "mismatchShort": {
+        "both": "letterboxed in both slots",
+        "idleSides": "pillarboxed on idle full screen",
+        "idleTopBottom": "letterboxed on idle full screen",
+        "checkoutSides": "pillarboxed on checkout panel",
+        "checkoutTopBottom": "letterboxed on checkout panel"
+      },
+      "mediaDimensions": "Size {{width}} × {{height}} (aspect ratio {{ratio}})",
+      "orientationRequired": "Please choose a layout",
+      "orientationAutoSelected": "Auto-selected from size",
+      "orientationHelp": {
+        "landscape": "Plays full screen when idle; recommended 1366×768 (16:9)",
+        "portrait": "Plays in the right panel during checkout; recommended 772×870 (about 0.89:1)",
+        "any": "Plays in both slots; slots with a different ratio show borders"
+      },
+      "displayPreview": "Customer display preview",
+      "displayPreviewHint": "True ad slot ratios on a 1366×768 display",
+      "previewEmpty": "Upload media to preview",
+      "slots": {
+        "idle": "Idle full screen",
+        "checkout": "Checkout right panel",
+        "both": "both slots"
+      },
+      "slotPlays": "✓ Plays",
+      "slotNotPlayed": "Not played",
+      "slotNotPlayedOverlay": "{{orientation}} ads don't play on {{slot}}",
+      "slotLetterbox": {
+        "sides": "Side borders",
+        "topBottom": "Top/bottom borders"
+      },
+      "mediaShapes": {
+        "landscape": "landscape",
+        "portrait": "portrait",
+        "square": "square"
+      },
+      "mismatchEffects": {
+        "sides": "with large side borders",
+        "topBottom": "with large top/bottom borders",
+        "both": "with borders in both slots"
+      },
+      "editorMismatch": "The media is {{shape}} ({{size}}). Set to \"{{orientation}}\", it will play on {{slot}} {{effect}}. You can still save.",
+      "mismatchWithRatio": "{{ratio}}, {{text}}",
+      "labelSeparator": ": "
     }
   }
 }

@@ -1,5 +1,13 @@
 export type AdvertisementMediaType = 'Image' | 'Video'
 
+/**
+ * 广告版式：决定客显在哪个广告位播放。
+ * - Landscape 横版：只在空闲全屏播放
+ * - Portrait 竖版：只在收银时右侧广告位播放
+ * - Any 通用：两处都播（旧广告一律为 Any）
+ */
+export type AdvertisementOrientation = 'Landscape' | 'Portrait' | 'Any'
+
 export interface AdvertisementStoreItemDto {
   storeCode: string
   storeName?: string
@@ -16,6 +24,11 @@ export interface AdvertisementListDto {
   originalFileName?: string
   contentType?: string
   fileSize?: number
+  /** 服务端对旧数据也返回 Any；service 层对缺省/未知值统一兜底为 Any。 */
+  orientation: AdvertisementOrientation
+  /** 素材像素宽高，旧数据或读取失败时为 null。 */
+  mediaWidth?: number | null
+  mediaHeight?: number | null
   effectiveStart: string
   effectiveEnd: string
   isEnabled: boolean
@@ -35,6 +48,10 @@ export interface CreateAdvertisementDto {
   originalFileName?: string
   contentType?: string
   fileSize?: number
+  orientation: AdvertisementOrientation
+  /** 素材像素宽高：两者要么都有、要么都为 null。 */
+  mediaWidth: number | null
+  mediaHeight: number | null
   effectiveStart: string
   effectiveEnd: string
   isEnabled: boolean
@@ -74,6 +91,9 @@ export interface AdvertisementPayloadInput {
   originalFileName?: string | null
   contentType?: string | null
   fileSize?: number | null
+  orientation?: AdvertisementOrientation | string | null
+  mediaWidth?: number | null
+  mediaHeight?: number | null
   effectiveStart: string | { toISOString: () => string }
   effectiveEnd: string | { toISOString: () => string }
   isEnabled?: boolean

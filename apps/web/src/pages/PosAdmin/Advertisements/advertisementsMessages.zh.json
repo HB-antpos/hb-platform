@@ -6,7 +6,64 @@
       "allBrands": "全部品牌",
       "unbrandedStores": "未设置品牌",
       "selectAllBrandStores": "全选「{{brand}}」分店（{{count}}）",
-      "selectAllStoresWithCount": "全选分店（{{count}}）"
+      "selectAllStoresWithCount": "全选分店（{{count}}）",
+      "orientation": "版式",
+      "orientationAll": "全部",
+      "orientations": {
+        "landscape": "横版",
+        "portrait": "竖版",
+        "any": "通用"
+      },
+      "orientationPlacements": {
+        "landscape": "空闲全屏",
+        "portrait": "收银右侧",
+        "any": "两处都播"
+      },
+      "orientationNotice": "客显按版式选播：空闲全屏播「横版」和「通用」，收银时右侧广告位播「竖版」和「通用」；某个位置没有可播的广告时，退回播放全部已启用广告。",
+      "sizeUnknown": "尺寸未知",
+      "mismatchShort": {
+        "both": "两处都会留边",
+        "idleSides": "空闲全屏会两侧留边",
+        "idleTopBottom": "空闲全屏会上下留边",
+        "checkoutSides": "收银右侧会两侧留边",
+        "checkoutTopBottom": "收银右侧会上下留边"
+      },
+      "mediaDimensions": "尺寸 {{width}} × {{height}}（宽高比 {{ratio}}）",
+      "orientationRequired": "请选择版式",
+      "orientationAutoSelected": "已按尺寸自动选择",
+      "orientationHelp": {
+        "landscape": "空闲时全屏播放，建议 1366×768（16:9）",
+        "portrait": "收银时右侧广告位播放，建议 772×870（约 0.89:1）",
+        "any": "两处都播，比例不合适的位置会留边"
+      },
+      "displayPreview": "客显效果预览",
+      "displayPreviewHint": "按 1366×768 客显屏的真实广告位比例",
+      "previewEmpty": "上传素材后预览",
+      "slots": {
+        "idle": "空闲全屏",
+        "checkout": "收银右侧",
+        "both": "两处"
+      },
+      "slotPlays": "✓ 播放",
+      "slotNotPlayed": "不播放",
+      "slotNotPlayedOverlay": "{{orientation}}不在{{slot}}播放",
+      "slotLetterbox": {
+        "sides": "两侧留边",
+        "topBottom": "上下留边"
+      },
+      "mediaShapes": {
+        "landscape": "横版",
+        "portrait": "竖版",
+        "square": "方形"
+      },
+      "mismatchEffects": {
+        "sides": "两侧大面积留边",
+        "topBottom": "上下大面积留边",
+        "both": "两处都会留边"
+      },
+      "editorMismatch": "素材是{{shape}}（{{size}}），设为「{{orientation}}」后会在{{slot}}播放，{{effect}}。仍可保存。",
+      "mismatchWithRatio": "{{ratio}}，{{text}}",
+      "labelSeparator": "："
     }
   }
 }
