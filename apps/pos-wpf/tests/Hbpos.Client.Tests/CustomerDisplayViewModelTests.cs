@@ -718,6 +718,106 @@ public sealed class CustomerDisplayViewModelTests
         Assert.False(viewModel.IsIdleAdvertisementVisible);
     }
 
+    [Theory]
+    [InlineData("landscape", false, true)]
+    [InlineData("landscape", true, false)]
+    [InlineData("portrait", false, false)]
+    [InlineData("portrait", true, true)]
+    [InlineData("any", false, true)]
+    [InlineData("any", true, true)]
+    [InlineData("LANDSCAPE", true, false)]
+    [InlineData("", true, true)]
+    [InlineData("unknown", false, true)]
+    public void MatchesSlot_plays_landscape_on_idle_portrait_on_checkout_and_any_on_both(
+        string orientation,
+        bool isCheckoutSlot,
+        bool expected)
+    {
+        var advertisement = CreateOrientedAdvertisement("ad", orientation);
+
+        Assert.Equal(expected, CustomerDisplayViewModel.MatchesSlot(advertisement, isCheckoutSlot));
+    }
+
+    [Fact]
+    public void Idle_slot_rotates_only_landscape_and_any_advertisements()
+    {
+        var viewModel = new CustomerDisplayViewModel();
+        viewModel.LoadAdvertisements(
+            [
+                CreateOrientedAdvertisement("portrait-1", "portrait"),
+                CreateOrientedAdvertisement("landscape-1", "landscape"),
+                CreateOrientedAdvertisement("any-1", "any"),
+                CreateOrientedAdvertisement("landscape-2", "landscape")
+            ]);
+
+        Assert.Equal("landscape-1", viewModel.CurrentAdvertisement?.Id);
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("any-1", viewModel.CurrentAdvertisement?.Id);
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("landscape-2", viewModel.CurrentAdvertisement?.Id);
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("landscape-1", viewModel.CurrentAdvertisement?.Id);
+    }
+
+    [Fact]
+    public void Cart_becoming_non_empty_switches_to_checkout_slot_advertisements_immediately()
+    {
+        var viewModel = new CustomerDisplayViewModel();
+        viewModel.LoadAdvertisements(
+            [
+                CreateOrientedAdvertisement("portrait-1", "portrait"),
+                CreateOrientedAdvertisement("landscape-1", "landscape"),
+                CreateOrientedAdvertisement("any-1", "any")
+            ]);
+        Assert.Equal("landscape-1", viewModel.CurrentAdvertisement?.Id);
+
+        viewModel.LoadLines([new CustomerDisplayLine("Milk", "SKU-001", 1m, 3m, 3m)], subtotal: 3m, savingsAmount: 0m);
+
+        // 横版不适合收银右侧，立即换成下一条可播的（通用），之后只在竖版与通用之间轮播。
+        Assert.Equal("any-1", viewModel.CurrentAdvertisement?.Id);
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("portrait-1", viewModel.CurrentAdvertisement?.Id);
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("any-1", viewModel.CurrentAdvertisement?.Id);
+
+        // 收银完成清空购物车后回到空闲全屏，竖版立即让位给横版/通用。
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("portrait-1", viewModel.CurrentAdvertisement?.Id);
+        viewModel.LoadLines([], subtotal: 0m, savingsAmount: 0m);
+        Assert.Equal("landscape-1", viewModel.CurrentAdvertisement?.Id);
+    }
+
+    [Fact]
+    public void Slot_without_matching_advertisement_falls_back_to_all_advertisements()
+    {
+        var viewModel = new CustomerDisplayViewModel();
+        viewModel.LoadLines([new CustomerDisplayLine("Milk", "SKU-001", 1m, 3m, 3m)], subtotal: 3m, savingsAmount: 0m);
+
+        viewModel.LoadAdvertisements(
+            [
+                CreateOrientedAdvertisement("landscape-1", "landscape"),
+                CreateOrientedAdvertisement("landscape-2", "landscape")
+            ]);
+
+        Assert.Equal("landscape-1", viewModel.CurrentAdvertisement?.Id);
+        viewModel.AdvanceAdvertisement();
+        Assert.Equal("landscape-2", viewModel.CurrentAdvertisement?.Id);
+    }
+
+    [Fact]
+    public void Advertisement_without_orientation_from_older_server_plays_on_both_slots()
+    {
+        // 旧服务端不返回版式时 DTO 取默认值 any，两种广告位都照常播放。
+        var legacy = CreateAdvertisement("legacy", "image", "https://cdn.example.com/legacy.png");
+
+        Assert.Equal("any", legacy.Orientation);
+        Assert.True(CustomerDisplayViewModel.MatchesSlot(legacy, isCheckoutSlot: false));
+        Assert.True(CustomerDisplayViewModel.MatchesSlot(legacy, isCheckoutSlot: true));
+    }
+
+    private static AdvertisementPlaybackItemDto CreateOrientedAdvertisement(string id, string orientation) =>
+        CreateAdvertisement(id, "image", $"https://cdn.example.com/{id}.png") with { Orientation = orientation };
+
     private static AdvertisementPlaybackItemDto CreateAdvertisement(string id, string mediaType, string mediaUrl)
     {
         var now = DateTimeOffset.UtcNow;

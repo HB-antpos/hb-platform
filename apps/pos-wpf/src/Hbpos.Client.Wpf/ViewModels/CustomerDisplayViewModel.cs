@@ -49,6 +49,9 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
     private readonly List<AdvertisementPlaybackItemDto> _advertisements = [];
     private int _currentAdvertisementIndex = -1;
 
+    // 当前广告位：false = 空闲全屏（播横版 + 通用），true = 收银时右侧（播竖版 + 通用）。
+    private bool _isCheckoutSlot;
+
     internal Func<DateTimeOffset> UtcNow { get; init; } = () => DateTimeOffset.UtcNow;
 
     public ObservableCollection<CustomerDisplayLine> Lines { get; } = [];
@@ -137,6 +140,17 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
         SkuCount = materialized.Count;
         IsReadyForPayment = TotalToPay > 0m;
         RefreshIdleAdvertisementVisibility();
+
+        // 购物车由空变有（空闲全屏 → 收银右侧）或反过来时广告位换了，正在播的广告不适合新位置就立即换一条。
+        var isCheckoutSlot = materialized.Count > 0;
+        if (isCheckoutSlot != _isCheckoutSlot)
+        {
+            _isCheckoutSlot = isCheckoutSlot;
+            if (CurrentAdvertisement is not null && !IsEligibleForCurrentSlot(CurrentAdvertisement))
+            {
+                AdvanceAdvertisement();
+            }
+        }
     }
 
     public void LoadAdvertisements(IEnumerable<AdvertisementPlaybackItemDto> advertisements)
@@ -145,8 +159,9 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
         _advertisements.Clear();
         _advertisements.AddRange(advertisements.Where(advertisement => IsPlayableAdvertisement(advertisement, now)));
         IsAdvertisementAvailable = _advertisements.Count > 0;
-        _currentAdvertisementIndex = IsAdvertisementAvailable ? 0 : -1;
-        CurrentAdvertisement = IsAdvertisementAvailable ? _advertisements[0] : null;
+        // 从当前广告位可播的第一条开始（没有适合当前位置的广告时退回全部）。
+        _currentAdvertisementIndex = IsAdvertisementAvailable ? FindNextEligibleIndex(-1) : -1;
+        CurrentAdvertisement = _currentAdvertisementIndex >= 0 ? _advertisements[_currentAdvertisementIndex] : null;
         RefreshIdleAdvertisementVisibility();
     }
 
@@ -159,13 +174,19 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
             return;
         }
 
+        // 以当前广告在列表中的位置为起点往后找；当前广告已被剔除（过期/失败）时，沿用上次记下的位置继续轮转。
+        var anchorIndex = _currentAdvertisementIndex;
         if (CurrentAdvertisement is not null)
         {
-            _currentAdvertisementIndex = _advertisements.FindIndex(advertisement =>
+            var currentIndex = _advertisements.FindIndex(advertisement =>
                 EqualityComparer<AdvertisementPlaybackItemDto>.Default.Equals(advertisement, CurrentAdvertisement));
+            if (currentIndex >= 0)
+            {
+                anchorIndex = currentIndex;
+            }
         }
 
-        _currentAdvertisementIndex = (_currentAdvertisementIndex + 1) % _advertisements.Count;
+        _currentAdvertisementIndex = FindNextEligibleIndex(anchorIndex);
         var nextAdvertisement = _advertisements[_currentAdvertisementIndex];
 
         // 只有一条广告时也要触发属性变更，让播放层重新开始下一轮。
@@ -221,6 +242,49 @@ public sealed partial class CustomerDisplayViewModel : ObservableObject
     private void RefreshIdleAdvertisementVisibility()
     {
         IsIdleAdvertisementVisible = IsAdvertisementAvailable && Lines.Count == 0;
+    }
+
+    /// <summary>
+    /// 从 <paramref name="anchorIndex"/> 之后（循环）找第一条适合当前广告位的广告；列表非空时一定有结果。
+    /// </summary>
+    private int FindNextEligibleIndex(int anchorIndex)
+    {
+        var count = _advertisements.Count;
+        var start = ((anchorIndex % count) + count) % count;
+        for (var offset = 1; offset <= count; offset++)
+        {
+            var index = (start + offset) % count;
+            if (IsEligibleForCurrentSlot(_advertisements[index]))
+            {
+                return index;
+            }
+        }
+
+        return (start + 1) % count;
+    }
+
+    private bool IsEligibleForCurrentSlot(AdvertisementPlaybackItemDto advertisement)
+    {
+        // 当前位置一条匹配的都没有时退回全部，保证广告位不空着。
+        return MatchesSlot(advertisement, _isCheckoutSlot)
+            || !_advertisements.Any(item => MatchesSlot(item, _isCheckoutSlot));
+    }
+
+    internal static bool MatchesSlot(AdvertisementPlaybackItemDto advertisement, bool isCheckoutSlot)
+    {
+        // 横版只在空闲全屏播、竖版只在收银右侧播；通用、空值或未知值（旧服务端、旧缓存）两处都播。
+        var orientation = advertisement.Orientation?.Trim();
+        if (string.Equals(orientation, "landscape", StringComparison.OrdinalIgnoreCase))
+        {
+            return !isCheckoutSlot;
+        }
+
+        if (string.Equals(orientation, "portrait", StringComparison.OrdinalIgnoreCase))
+        {
+            return isCheckoutSlot;
+        }
+
+        return true;
     }
 
     private void RemoveExpiredAdvertisements()
