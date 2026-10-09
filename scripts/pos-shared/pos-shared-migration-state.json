@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "645c70ba32d10c8a8b0dff3fa17977ad6f273db42c8a44e773c64cd4d13e7e46",
+  "reviewedModuleTopologySha256": "97f2a35d7be6ef32d2285a6ffdf7a4c7f27ec4ea8eb183b6298078ddfcb5b724",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
