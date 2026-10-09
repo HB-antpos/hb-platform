@@ -1,11 +1,13 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconButton, Portal, Snackbar, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { apiClient } from "@/shared/api/client";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { WpfReleaseView } from "@/modules/wpf-versions/screen";
 import { appDownloadsApi } from "./api";
 import { useLocalCopy, type SaveResult } from "./copy";
 import {
@@ -18,6 +20,19 @@ import {
 } from "./logic";
 import { NativeChannel } from "./native-channel";
 import { OtaChannel } from "./ota-channel";
+import { ReleaseOverviewView } from "./overview/overview-view";
+import {
+  RELEASE_OVERVIEW_QUERY_KEY,
+  useReleaseOverview,
+} from "./overview/use-release-overview";
+import {
+  parseReleaseCenterView,
+  parseWpfChannel,
+  type ReleaseCenterTarget,
+  type ReleaseCenterTerminal,
+  type ReleaseLaneStatus,
+  type WpfChannel,
+} from "./release-center-nav";
 import {
   loadSectionData,
   sectionQueryKey,
@@ -34,41 +49,93 @@ import type {
 import {
   Panel,
   ScreenFrame,
-  SegmentedControl,
+  TerminalNav,
   TextLink,
   UnderlineTabs,
   ui,
+  type Tone,
 } from "./ui";
 
-function resolveWebAppDownloadsUrl() {
+/** Web 版本发布中心地址；终端视图带上 ?view=，与 Web 的终端取值一致。 */
+function resolveWebReleaseCenterUrl(terminal: ReleaseCenterTerminal) {
   const baseUrl = apiClient.defaults.baseURL;
   try {
-    return new URL("/system/app-downloads", baseUrl).toString();
+    const url = new URL("/system/app-downloads", baseUrl);
+    if (terminal !== "overview") url.searchParams.set("view", terminal);
+    return url.toString();
   } catch {
     return null;
   }
 }
 
+function isAppTerminal(
+  terminal: ReleaseCenterTerminal,
+): terminal is AppDownloadsApp {
+  return terminal === "mobile" || terminal === "ipad" || terminal === "handheld";
+}
+
+function laneTone(status: ReleaseLaneStatus | null | undefined): Tone | null {
+  switch (status) {
+    case "active":
+      return "success";
+    case "pending":
+      return "warning";
+    case "error":
+      return "danger";
+    case "inactive":
+      return "neutral";
+    default:
+      return null;
+  }
+}
+
+/**
+ * 版本发布中心（原「App 下载」与「WPF 版本管理」合并）：
+ * 投放总览 + 员工端 / iPad POS / 手持 POS / WPF 收银端四个终端，信息架构对齐 Web 版本发布中心。
+ */
 export default function AppDownloadsScreen() {
   const copy = useLocalCopy();
   const queryClient = useQueryClient();
-  const [app, setApp] = useState<AppDownloadsApp>("mobile");
+  const params = useLocalSearchParams<{ view?: string; channel?: string }>();
+  const [terminal, setTerminal] = useState<ReleaseCenterTerminal>(() =>
+    parseReleaseCenterView(params.view),
+  );
+  const [wpfChannel, setWpfChannel] = useState<WpfChannel>(() =>
+    parseWpfChannel(params.channel),
+  );
+  // 本页已打开时再从旧 WPF 入口或深链跳来：按新参数切一次终端。
+  useEffect(() => {
+    if (params.view) setTerminal(parseReleaseCenterView(params.view));
+    if (params.channel) setWpfChannel(parseWpfChannel(params.channel));
+  }, [params.view, params.channel]);
+  const appTerminal = isAppTerminal(terminal) ? terminal : null;
   const [channel, setChannel] = useState<AppDownloadsChannel>("native");
   const [profile, setProfile] = useState<AppDownloadEnvironment>("production");
   const [platform, setPlatform] = useState<AppDownloadPlatform>("ios");
   const [saving, setSaving] = useState(false);
+  const [wpfBusy, setWpfBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [snack, setSnack] = useState("");
   const saveInFlightRef = useRef(false);
+  const busy = saving || wpfBusy;
+  const app: AppDownloadsApp = appTerminal ?? "mobile";
   const section = resolveAppDownloadsSection(app, channel);
   const query = useQuery<SectionData>({
     queryKey: sectionQueryKey(section, profile, platform),
     queryFn: () => loadSectionData(section, profile, platform),
     retry: 1,
+    // 总览与 WPF 终端不读 App 分区数据。
+    enabled: appTerminal !== null,
   });
+  // 终端切换上的状态点与 WPF 通道页签的状态点；与总览视图共用同一份查询缓存。
+  const overview = useReleaseOverview();
   const data = query.data;
   const apiBaseUrl = apiClient.defaults.baseURL;
-  const webAppDownloadsUrl = resolveWebAppDownloadsUrl();
+  const webReleaseCenterUrl = resolveWebReleaseCenterUrl(terminal);
+
+  const invalidateOverview = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: RELEASE_OVERVIEW_QUERY_KEY });
+  }, [queryClient]);
 
   const readBack = async () => {
     try {
@@ -96,6 +163,8 @@ export default function AppDownloadsScreen() {
     setSaving(true);
     try {
       await execute();
+      // 写入成功即让总览缓存失效：回到总览时看到的是新策略。
+      invalidateOverview();
       await readBack();
       setSnack(successMessage);
       return { ok: true, message: successMessage };
@@ -202,7 +271,8 @@ export default function AppDownloadsScreen() {
     setRefreshing(true);
     try {
       await Promise.all([
-        query.refetch(),
+        appTerminal ? query.refetch() : Promise.resolve(),
+        overview.refetch(),
         queryClient.invalidateQueries({
           queryKey: ["app-downloads-build-latest"],
         }),
@@ -213,6 +283,28 @@ export default function AppDownloadsScreen() {
   };
   const onRefresh = () => void refresh();
 
+  // 从总览点进某条线路：切到对应终端，并把渠道 / 平台 / WPF 通道对准该线路。
+  const openLane = (target: ReleaseCenterTarget) => {
+    if (target.terminal === "wpf") {
+      setWpfChannel(target.wpfChannel);
+      setTerminal("wpf");
+      return;
+    }
+    setChannel(target.channel);
+    if (target.platform) setPlatform(target.platform);
+    setTerminal(target.terminal);
+  };
+
+  const wpfLaneTone = (wpf: WpfChannel) =>
+    laneTone(
+      overview.lanes.find(
+        (lane) =>
+          !lane.loading &&
+          lane.navTarget.terminal === "wpf" &&
+          lane.navTarget.wpfChannel === wpf,
+      )?.status,
+    );
+
   const header = (
     <View style={styles.header}>
       <View style={styles.titleRow}>
@@ -222,7 +314,7 @@ export default function AppDownloadsScreen() {
           </Text>
           <Text style={styles.subtitle}>{copy.subtitle}</Text>
         </View>
-        {webAppDownloadsUrl ? (
+        {webReleaseCenterUrl ? (
           <IconButton
             icon="web"
             mode="outlined"
@@ -231,38 +323,95 @@ export default function AppDownloadsScreen() {
             size={20}
             style={styles.webButton}
             onPress={() =>
-              void Linking.openURL(webAppDownloadsUrl).catch(() =>
+              void Linking.openURL(webReleaseCenterUrl).catch(() =>
                 setSnack(copy.error),
               )
             }
           />
         ) : null}
       </View>
-      <SegmentedControl
-        tone="strong"
+      <TerminalNav
+        accessibilityLabel={copy.terminalNav}
         options={[
-          { value: "mobile", label: copy.apps.mobile },
-          { value: "ipad", label: copy.apps.ipad },
-          { value: "handheld", label: copy.apps.handheld },
+          { value: "overview", label: copy.terminals.overview },
+          {
+            value: "mobile",
+            label: copy.terminals.mobile,
+            tone: laneTone(overview.terminalStatus.mobile),
+          },
+          {
+            value: "ipad",
+            label: copy.terminals.ipad,
+            tone: laneTone(overview.terminalStatus.ipad),
+          },
+          {
+            value: "handheld",
+            label: copy.terminals.handheld,
+            tone: laneTone(overview.terminalStatus.handheld),
+          },
+          {
+            value: "wpf",
+            label: copy.terminals.wpf,
+            tone: laneTone(overview.terminalStatus.wpf),
+          },
         ]}
-        value={app}
-        onChange={setApp}
-        disabled={saving}
+        value={terminal}
+        onChange={setTerminal}
+        disabled={busy}
       />
-      <UnderlineTabs
-        options={[
-          { value: "native", label: copy.channels.native },
-          { value: "ota", label: copy.channels.ota },
-        ]}
-        value={channel}
-        onChange={setChannel}
-        disabled={saving}
-      />
+      {appTerminal ? (
+        <UnderlineTabs
+          options={[
+            { value: "native", label: copy.channels.native },
+            { value: "ota", label: copy.channels.ota },
+          ]}
+          value={channel}
+          onChange={setChannel}
+          disabled={busy}
+        />
+      ) : terminal === "wpf" ? (
+        // WPF 只有一种安装包：生产 / 预览两个通道就是它的两条线路。
+        <UnderlineTabs
+          options={[
+            {
+              value: "production",
+              label: copy.wpfChannels.production,
+              tone: wpfLaneTone("production"),
+            },
+            {
+              value: "preview",
+              label: copy.wpfChannels.preview,
+              tone: wpfLaneTone("preview"),
+            },
+          ]}
+          value={wpfChannel}
+          onChange={setWpfChannel}
+          disabled={busy}
+        />
+      ) : null}
     </View>
   );
 
   let content: ReactNode;
-  if (query.isLoading || !data) {
+  if (terminal === "overview") {
+    content = (
+      <ReleaseOverviewView
+        header={header}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onOpenLane={openLane}
+      />
+    );
+  } else if (terminal === "wpf") {
+    content = (
+      <WpfReleaseView
+        header={header}
+        channel={wpfChannel}
+        onBusyChange={setWpfBusy}
+        onChanged={invalidateOverview}
+      />
+    );
+  } else if (query.isLoading || !data) {
     content = (
       <ScreenFrame header={header} refreshing={false} onRefresh={onRefresh}>
         {query.error ? (

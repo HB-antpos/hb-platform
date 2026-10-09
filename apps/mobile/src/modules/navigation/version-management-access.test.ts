@@ -87,10 +87,12 @@ assert.equal(
 );
 for (const route of VERSION_MANAGEMENT_ROUTES) {
   assert.equal(TAB_PATHS[route], `/(shell)/${route}`);
-  assert.ok(
+  // 版本发布中心合并了 App 下载与 WPF 版本：工作台只有它一个入口，wpf-versions 仅作旧深链的跳转。
+  assert.equal(
     buildWorkbenchSections(routes).some((section) =>
       section.items.some((item) => item.routeName === route),
     ),
+    route === "app-downloads",
   );
   assert.equal(
     buildPrimaryNavigation({

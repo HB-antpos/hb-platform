@@ -1,7 +1,19 @@
 {
-  "title": "App downloads & updates",
-  "subtitle": "Install links · releases · update policies",
+  "title": "Release center",
+  "subtitle": "Installers · OTA updates · WPF POS · update policies",
   "openWeb": "Open web console",
+  "terminalNav": "Terminals",
+  "terminals": {
+    "overview": "Overview",
+    "mobile": "Staff app",
+    "ipad": "iPad POS",
+    "handheld": "Handheld POS",
+    "wpf": "WPF POS"
+  },
+  "wpfChannels": {
+    "production": "Production",
+    "preview": "Preview"
+  },
   "apps": {
     "mobile": "Staff",
     "ipad": "POS iPad",

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Pressable,
   RefreshControl,
@@ -25,6 +25,8 @@ export type Tone = "success" | "neutral" | "warning" | "danger";
 export interface SegmentOption<T extends string> {
   value: T;
   label: string;
+  /** 可选状态点：线路页签、终端切换用它标出已激活 / 待处理 / 未启用。 */
+  tone?: Tone | null;
 }
 
 /** 灰色轨道 + 白色选中块的分段控件；strong 用于页面级切换，soft 用于卡片内。 */
@@ -106,15 +108,96 @@ export function UnderlineTabs<T extends string>({
             onPress={() => onChange(option.value)}
             style={[styles.tab, selected && styles.tabSelected]}
           >
+            <View style={styles.tabInner}>
+              {option.tone ? <StatusDot tone={option.tone} /> : null}
+              <Text
+                style={[styles.tabLabel, selected && styles.tabLabelSelected]}
+              >
+                {option.label}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * 终端切换：对应 Web 版本发布中心的左侧导航，手机上改成一行可横滑的胶囊，
+ * 状态点取该终端最需要关注的线路状态（总览项不带点）。
+ */
+export function TerminalNav<T extends string>({
+  options,
+  value,
+  onChange,
+  disabled,
+  accessibilityLabel,
+}: {
+  options: SegmentOption<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const offsetsRef = useRef(new Map<string, number>());
+  // 选中项变化（含深链直接落到靠右的终端）时把它滚进可视区，左侧留一点余量提示还能往回滑。
+  useEffect(() => {
+    const x = offsetsRef.current.get(value);
+    if (x !== undefined)
+      scrollRef.current?.scrollTo({ x: Math.max(0, x - HB_SPACING.lg), animated: true });
+  }, [value]);
+  return (
+    <ScrollView
+      ref={scrollRef}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      accessibilityRole="tablist"
+      accessibilityLabel={accessibilityLabel}
+      contentContainerStyle={styles.terminalNav}
+    >
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            onLayout={(event) => {
+              const { x } = event.nativeEvent.layout;
+              offsetsRef.current.set(option.value, x);
+              // 首次布局时选中项已在右侧（深链进入）：不等用户切换就滚过去。
+              if (selected)
+                scrollRef.current?.scrollTo({
+                  x: Math.max(0, x - HB_SPACING.lg),
+                  animated: false,
+                });
+            }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected, disabled }}
+            disabled={disabled}
+            onPress={() => {
+              if (!selected) onChange(option.value);
+            }}
+            style={({ pressed }) => [
+              styles.terminalPill,
+              selected && styles.terminalPillSelected,
+              pressed && !selected && styles.pressed,
+            ]}
+          >
+            {option.tone ? <StatusDot tone={option.tone} /> : null}
             <Text
-              style={[styles.tabLabel, selected && styles.tabLabelSelected]}
+              numberOfLines={1}
+              style={[
+                styles.terminalLabel,
+                selected && styles.terminalLabelSelected,
+              ]}
             >
               {option.label}
             </Text>
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -779,6 +862,29 @@ const styles = StyleSheet.create({
     borderBottomColor: "transparent",
   },
   tabSelected: { borderBottomColor: HB_COLORS.action },
+  tabInner: { flexDirection: "row", alignItems: "center", gap: 6 },
+  terminalNav: { flexDirection: "row", gap: HB_SPACING.xs, paddingVertical: 2 },
+  terminalPill: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: HB_COLORS.outlineMuted,
+    backgroundColor: HB_COLORS.white,
+  },
+  terminalPillSelected: {
+    backgroundColor: BRAND_SOFT,
+    borderColor: "#B2CCFF",
+  },
+  terminalLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#344054",
+  },
+  terminalLabelSelected: { fontWeight: "600", color: HB_COLORS.action },
   tabLabel: { fontSize: 15, fontWeight: "500", color: HB_COLORS.textSecondary },
   tabLabelSelected: { fontWeight: "600", color: HB_COLORS.action },
   sectionHeader: {

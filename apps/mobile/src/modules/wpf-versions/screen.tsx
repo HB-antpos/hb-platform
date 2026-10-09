@@ -1,32 +1,48 @@
 import * as Clipboard from "expo-clipboard";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Linking, ScrollView, StyleSheet, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Linking, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import {
   ActivityIndicator,
   Button,
-  Card,
   Checkbox,
   Divider,
   HelperText,
   IconButton,
+  Menu,
   Modal,
   Portal,
   Searchbar,
   SegmentedButtons,
   Snackbar,
-  Surface,
   Switch,
   Text,
   TextInput,
-  useTheme,
 } from "react-native-paper";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
-import { HB_COLORS } from "@/shared/theme/tokens";
+import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
+import { formatDateTime } from "@/modules/app-downloads/copy";
+import type { WpfChannel } from "@/modules/app-downloads/release-center-nav";
+import {
+  ConfirmLines,
+  Panel,
+  Pill,
+  PrimaryButton,
+  ScreenFrame,
+  SecondaryButton,
+  SectionHeader,
+  TextLink,
+  ui,
+} from "@/modules/app-downloads/ui";
 import {
   getWpfReleases,
   getWpfTargetDevices,
@@ -35,17 +51,23 @@ import {
   updateWpfRelease,
 } from "./api";
 import {
+  buildWpfDecisionLadder,
   canSavePolicy,
+  compareVersions,
   createLatestRequestGuard,
   formatFileSize,
   getErrorMessage,
   getPolicySummary,
   getPolicyValidationError,
+  getWpfNewerActiveVersions,
+  getWpfPolicyMode,
   inferRollback,
   maskSha256,
   normalizeTargetScope,
   normalizeVersion,
   policySummaryMatchesRequest,
+  type WpfDecisionSegment,
+  type WpfPolicyMode,
 } from "./logic";
 import type {
   WpfDeviceOption,
@@ -56,16 +78,17 @@ import type {
   WpfStoreOption,
 } from "./types";
 
-const WEB_WPF_VERSIONS_URL = "https://hotbargain.vip/system/wpf-versions";
 const PAGE_SIZE = 10;
 const DEVICE_PAGE_SIZE = 30;
+/** 策略弹层里最多列出多少个可点选的已启用版本。 */
+const QUICK_VERSION_LIMIT = 8;
 
 type DetailField = [string, string];
 
-function dateText(value: string | null, locale: string) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString(locale);
+/** 服务器上的策略快照：摘要 + 全量版本（算更新方式、待投放版本都要用全量）。 */
+interface PolicySnapshot {
+  summary: WpfPolicySummary | null;
+  releases: WpfRelease[];
 }
 
 function deviceLabel(device: WpfDeviceOption) {
@@ -101,12 +124,62 @@ function normalizeSha256(value: string | null | undefined) {
   return normalizeOptionalText(value)?.toLowerCase() ?? null;
 }
 
-export default function WpfVersionsScreen() {
-  const theme = useTheme();
-  const { t, language } = useAppTranslation(["wpfVersions", "common"]);
+const EMPTY_POLICY = (channel: string): WpfReleasePolicyRequest => ({
+  channel,
+  targetVersion: "",
+  minimumSupportedVersion: "",
+  forceUpdate: false,
+  isRollback: false,
+  targetScope: "all",
+  targetStoreGuids: [],
+  targetDeviceRegistrationIds: [],
+});
+
+/** 把服务器策略摘要还原成编辑表单；无策略时给空表单，允许管理员创建首条策略。 */
+function policyFormFromSummary(
+  channel: string,
+  summary: WpfPolicySummary | null,
+): WpfReleasePolicyRequest {
+  if (!summary) return EMPTY_POLICY(channel);
+  return {
+    channel: summary.channel,
+    targetVersion: summary.targetVersion,
+    minimumSupportedVersion: summary.minimumSupportedVersion,
+    forceUpdate: summary.forceUpdate,
+    targetScope: summary.targetScope,
+    targetStoreGuids: summary.targetStoreGuids,
+    targetDeviceRegistrationIds: summary.targetDeviceRegistrationIds,
+    isRollback: false,
+    rollbackConfirmed: undefined,
+  };
+}
+
+export interface WpfReleaseViewProps {
+  /** 合并页的页头（标题、终端切换、生产 / 预览页签），由版本发布中心传入。 */
+  header: ReactNode;
+  /** 当前通道由页头页签控制。 */
+  channel: WpfChannel;
+  /** 保存中通知父级锁住终端与通道切换，避免写到一半切走。 */
+  onBusyChange?: (busy: boolean) => void;
+  /** 策略或版本状态写入后通知父级刷新投放总览缓存。 */
+  onChanged?: () => void;
+}
+
+/**
+ * 版本发布中心的「WPF 收银端」视图（原 WPF 版本管理页）：
+ * 当前生效策略卡 + 「调整策略」弹层（编辑 → 确认两步）+ 已登记版本列表。
+ * 读取、保存后回读核验、回滚判断的逻辑沿用原页面。
+ */
+export function WpfReleaseView({
+  header,
+  channel,
+  onBusyChange,
+  onChanged,
+}: WpfReleaseViewProps) {
+  const { t } = useAppTranslation(["wpfVersions", "common"]);
   const isAdmin = useAuthStore((state) => state.access.isAdmin);
   const [query, setQuery] = useState<WpfReleaseQuery>({
-    channel: "production",
+    channel,
     includeDisabled: false,
     page: 1,
     pageSize: PAGE_SIZE,
@@ -114,14 +187,14 @@ export default function WpfVersionsScreen() {
   const [releases, setReleases] = useState<WpfRelease[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [policyReady, setPolicyReady] = useState(false);
+  const [snapshot, setSnapshot] = useState<PolicySnapshot | null>(null);
   const [activeVersions, setActiveVersions] = useState<string[]>([]);
-  const [serverTargetVersion, setServerTargetVersion] = useState<string | null>(
-    null,
-  );
   const [detail, setDetail] = useState<WpfRelease | null>(null);
   const [editRelease, setEditRelease] = useState<WpfRelease | null>(null);
+  const [editError, setEditError] = useState("");
   const [editDraft, setEditDraft] = useState<{
     downloadUrl: string;
     sha256: string;
@@ -136,20 +209,16 @@ export default function WpfVersionsScreen() {
     releaseNotes: "",
   });
   const [qrRelease, setQrRelease] = useState<WpfRelease | null>(null);
+  const [menuReleaseId, setMenuReleaseId] = useState("");
   const [snackbar, setSnackbar] = useState("");
   const [updatingId, setUpdatingId] = useState("");
   const [policySaving, setPolicySaving] = useState(false);
-  const [policyConfirmVisible, setPolicyConfirmVisible] = useState(false);
-  const [policy, setPolicy] = useState<WpfReleasePolicyRequest>({
-    channel: "production",
-    targetVersion: "",
-    minimumSupportedVersion: "",
-    forceUpdate: false,
-    isRollback: false,
-    targetScope: "all",
-    targetStoreGuids: [],
-    targetDeviceRegistrationIds: [],
-  });
+  const [policySheetOpen, setPolicySheetOpen] = useState(false);
+  const [policyStep, setPolicyStep] = useState<"edit" | "confirm">("edit");
+  const [policySheetError, setPolicySheetError] = useState("");
+  const [policy, setPolicy] = useState<WpfReleasePolicyRequest>(
+    EMPTY_POLICY(channel),
+  );
   const [stores, setStores] = useState<WpfStoreOption[]>([]);
   const [devices, setDevices] = useState<WpfDeviceOption[]>([]);
   const [deviceKeywordDraft, setDeviceKeywordDraft] = useState("");
@@ -164,6 +233,13 @@ export default function WpfVersionsScreen() {
   const storesLoadedRef = useRef(false);
   const devicesLoadedRef = useRef(false);
   const deviceKeywordAppliedRef = useRef("");
+
+  // 通道由页头页签驱动：切换时回到第一页。
+  useEffect(() => {
+    setQuery((current) =>
+      current.channel === channel ? current : { ...current, channel, page: 1 },
+    );
+  }, [channel]);
 
   const loadReleases = useCallback(
     async (nextQuery: WpfReleaseQuery = query) => {
@@ -191,13 +267,13 @@ export default function WpfVersionsScreen() {
   );
 
   const loadPolicySnapshot = useCallback(
-    async (channel: string) => {
+    async (snapshotChannel: string) => {
       const requestId = policyGuard.current.next();
       setPolicyReady(false);
       try {
         // 策略 lane 独立读取第一页全量视图，避免分页列表或编辑草稿覆盖当前服务器策略。
         const firstPage = await getWpfReleases({
-          channel,
+          channel: snapshotChannel,
           includeDisabled: true,
           page: 1,
           pageSize: 100,
@@ -211,7 +287,7 @@ export default function WpfVersionsScreen() {
         );
         for (let page = 2; page <= pageCount; page += 1) {
           const nextPage = await getWpfReleases({
-            channel,
+            channel: snapshotChannel,
             includeDisabled: true,
             page,
             pageSize: firstPage.pageSize,
@@ -230,40 +306,8 @@ export default function WpfVersionsScreen() {
           ),
         ].sort();
         setActiveVersions(availableVersions);
-        if (!summary) {
-          setServerTargetVersion(null);
-          setPolicy((current) => ({
-            ...current,
-            channel,
-            targetVersion: "",
-            minimumSupportedVersion: "",
-            forceUpdate: false,
-            targetScope: "all",
-            targetStoreGuids: [],
-            targetDeviceRegistrationIds: [],
-            isRollback: false,
-            rollbackConfirmed: undefined,
-          }));
-        } else {
-          setServerTargetVersion(summary.targetVersion);
-          setPolicy((current) => ({
-            ...current,
-            channel: summary.channel,
-            targetVersion: summary.targetVersion,
-            minimumSupportedVersion: summary.minimumSupportedVersion,
-            forceUpdate: summary.forceUpdate,
-            targetScope: summary.targetScope,
-            targetStoreGuids: summary.targetStoreGuids,
-            targetDeviceRegistrationIds: summary.targetDeviceRegistrationIds,
-            isRollback: false,
-            rollbackConfirmed: undefined,
-          }));
-        }
-        if (!summary) {
-          // 成功读取但尚无策略时允许管理员创建首条策略；保存后的核验仍要求服务端返回完整摘要。
-          setPolicyReady(true);
-          return { ok: true as const, summary: null };
-        }
+        setSnapshot({ summary, releases: allReleases });
+        // 成功读取但尚无策略时允许管理员创建首条策略；保存后的核验仍要求服务端返回完整摘要。
         setPolicyReady(true);
         return { ok: true as const, summary };
       } catch (error) {
@@ -289,20 +333,10 @@ export default function WpfVersionsScreen() {
 
   useEffect(() => {
     setPolicyReady(false);
-    setServerTargetVersion(null);
+    setSnapshot(null);
     setActiveVersions([]);
-    setPolicy((current) => ({
-      ...current,
-      channel: query.channel,
-      targetVersion: "",
-      minimumSupportedVersion: "",
-      forceUpdate: false,
-      targetScope: "all",
-      targetStoreGuids: [],
-      targetDeviceRegistrationIds: [],
-      isRollback: false,
-      rollbackConfirmed: undefined,
-    }));
+    setPolicySheetOpen(false);
+    setPolicy(EMPTY_POLICY(query.channel));
     void loadPolicySnapshot(query.channel);
   }, [loadPolicySnapshot, query.channel]);
 
@@ -373,19 +407,28 @@ export default function WpfVersionsScreen() {
     [t],
   );
 
+  // 只在策略弹层打开时按范围懒加载门店 / 设备选项。
   useEffect(() => {
+    if (!policySheetOpen) return;
     targetGuard.current.invalidate();
     setTargetError("");
     if (policy.targetScope === "stores" && !storesLoadedRef.current)
       void loadStores();
     if (policy.targetScope === "devices" && !devicesLoadedRef.current)
       void loadDevices("", 1, false);
-  }, [loadDevices, loadStores, policy.targetScope]);
+  }, [loadDevices, loadStores, policy.targetScope, policySheetOpen]);
 
+  const summary = snapshot?.summary ?? null;
+  const currentTargetVersion = summary?.targetVersion ?? null;
   const policyError = getPolicyValidationError({ ...policy, activeVersions });
-  const currentTargetVersion = serverTargetVersion;
   const mutationBusy = policySaving || Boolean(updatingId);
   const pages = Math.max(1, Math.ceil(total / query.pageSize));
+
+  useEffect(() => {
+    onBusyChange?.(mutationBusy);
+  }, [mutationBusy, onBusyChange]);
+  // 离开 WPF 终端时解除父级的切换锁，避免卸载瞬间残留「保存中」。
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   const updateQuery = (patch: Partial<WpfReleaseQuery>) =>
     setQuery((current) => ({
@@ -396,13 +439,25 @@ export default function WpfVersionsScreen() {
         : {}),
     }));
 
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadReleases(query),
+        loadPolicySnapshot(query.channel),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const readReleaseById = useCallback(
-    async (releaseId: string, channel: string) => {
+    async (releaseId: string, releaseChannel: string) => {
       let page = 1;
       const pageSize = 100;
       while (true) {
         const result = await getWpfReleases({
-          channel,
+          channel: releaseChannel,
           includeDisabled: true,
           page,
           pageSize,
@@ -478,6 +533,7 @@ export default function WpfVersionsScreen() {
       } catch {
         readBackFailed = true;
       }
+      onChanged?.();
       if (
         readBackFailed ||
         readBack === null ||
@@ -499,6 +555,7 @@ export default function WpfVersionsScreen() {
   };
 
   const openEditor = (release: WpfRelease) => {
+    setEditError("");
     setEditRelease(release);
     setEditDraft({
       downloadUrl: release.downloadUrl ?? "",
@@ -511,17 +568,19 @@ export default function WpfVersionsScreen() {
 
   const saveReleaseMetadata = async () => {
     if (!editRelease) return;
+    // 弹层是原生 Modal，页面 Snackbar 会被压住：校验与失败信息显示在弹层内。
     if (
       editDraft.downloadUrl.trim() &&
       !isSafeDownloadUrl(editDraft.downloadUrl)
     ) {
-      setSnackbar(t("invalidUrl"));
+      setEditError(t("invalidUrl"));
       return;
     }
     if (!isValidSha256(editDraft.sha256)) {
-      setSnackbar(t("invalidSha256"));
+      setEditError(t("invalidSha256"));
       return;
     }
+    setEditError("");
     setUpdatingId(editRelease.id);
     try {
       await updateWpfRelease(editRelease.id, editDraft);
@@ -551,15 +610,30 @@ export default function WpfVersionsScreen() {
           : t("savedButReadFailed"),
       );
     } catch (error) {
-      setSnackbar(getErrorMessage(error, t("saveFailed")));
+      setEditError(getErrorMessage(error, t("saveFailed")));
     } finally {
       setUpdatingId("");
     }
   };
 
+  // 每次打开都从服务器策略重新填表，避免上次没保存的草稿冒充当前策略。
+  const openPolicySheet = () => {
+    if (!policyReady) return;
+    setPolicy(policyFormFromSummary(query.channel, summary));
+    setPolicyStep("edit");
+    setPolicySheetError("");
+    setPolicySheetOpen(true);
+  };
+
+  const closePolicySheet = () => {
+    if (policySaving) return;
+    setPolicySheetOpen(false);
+  };
+
   const performSavePolicy = async (rollbackConfirmed: boolean) => {
     if (!policyReady || !canSavePolicy({ ...policy, activeVersions })) return;
     setPolicySaving(true);
+    setPolicySheetError("");
     const targetVersion = normalizeVersion(policy.targetVersion);
     const payload: WpfReleasePolicyRequest = {
       ...policy,
@@ -571,443 +645,372 @@ export default function WpfVersionsScreen() {
     };
     try {
       await saveWpfPolicy(payload);
-      setPolicy((current) => ({
-        ...current,
-        isRollback: false,
-        rollbackConfirmed: undefined,
-      }));
-      // 策略保存后必须重新请求版本与策略摘要，独立验证服务端最终状态。
+    } catch (error) {
+      // 写入失败：留在弹层确认步，错误显示在弹层内。
+      setPolicySheetError(getErrorMessage(error, t("saveFailed")));
+      setPolicySaving(false);
+      return;
+    }
+    // 写入已成功：关闭弹层，再独立重新请求版本与策略摘要核验服务端最终状态。
+    setPolicySheetOpen(false);
+    try {
       const verifiedList = await loadReleases(query);
       const verifiedPolicy = await loadPolicySnapshot(query.channel);
-      if (
-        verifiedList === null ||
-        !verifiedPolicy.ok ||
-        !verifiedPolicy.summary ||
-        !policySummaryMatchesRequest(payload, verifiedPolicy.summary)
-      ) {
-        setSnackbar(t("savedButReadFailed"));
-        return;
-      }
-      setSnackbar(t("policyVerified"));
-    } catch (error) {
-      setSnackbar(getErrorMessage(error, t("saveFailed")));
+      setSnackbar(
+        verifiedList !== null &&
+          verifiedPolicy.ok &&
+          verifiedPolicy.summary &&
+          policySummaryMatchesRequest(payload, verifiedPolicy.summary)
+          ? t("policyVerified")
+          : t("savedButReadFailed"),
+      );
+    } catch {
+      setSnackbar(t("savedButReadFailed"));
     } finally {
+      onChanged?.();
       setPolicySaving(false);
     }
-  };
-
-  const savePolicy = () => {
-    if (!policyReady || !canSavePolicy({ ...policy, activeVersions })) return;
-    setPolicyConfirmVisible(true);
   };
 
   const policyIsRollback = inferRollback(
     policy.targetVersion,
     currentTargetVersion,
   );
-  const selectedStoreLabels = policy.targetStoreGuids.map((storeGuid) => {
-    const store = stores.find((item) => item.storeGuid === storeGuid);
+  const storeLabel = (storeGuid: string) => {
+    const store =
+      stores.find((item) => item.storeGuid === storeGuid) ??
+      summary?.targetStoreSummaries.find((item) => item.storeGuid === storeGuid);
     return store
       ? [store.storeCode, store.storeName].filter(Boolean).join(" · ") ||
           store.storeGuid
       : storeGuid;
-  });
+  };
   const selectedDeviceLabels = policy.targetDeviceRegistrationIds.map(
     (deviceId) => {
-      const device = devices.find(
-        (item) => item.deviceRegistrationId === deviceId,
-      );
+      const device =
+        devices.find((item) => item.deviceRegistrationId === deviceId) ??
+        summary?.targetDeviceSummaries.find(
+          (item) => item.deviceRegistrationId === deviceId,
+        );
       return device ? deviceLabel(device) : `#${deviceId}`;
     },
   );
 
+  const scopeText = (target: WpfPolicySummary) =>
+    target.targetScope === "stores"
+      ? t("scopeStores", { count: target.targetStoreGuids.length })
+      : target.targetScope === "devices"
+        ? t("scopeDevices", { count: target.targetDeviceRegistrationIds.length })
+        : t("scopeAll");
+  const modeText = (mode: WpfPolicyMode) =>
+    mode === "required"
+      ? t("modeRequired")
+      : mode === "minimum"
+        ? t("modeMinimum")
+        : t("modeOptional");
+  const ladderRange = (segment: WpfDecisionSegment) => {
+    switch (segment.kind) {
+      case "force":
+      case "optional":
+        return segment.variant === "between"
+          ? t("ladder.between", { bound: segment.bound })
+          : t("ladder.below", { bound: segment.bound });
+      case "latest":
+        return t("ladder.equal", { bound: segment.bound });
+      case "rollback":
+        return t("ladder.above", { bound: segment.bound });
+    }
+  };
+
   if (!isAdmin) {
     return (
-      <SafeAreaView style={styles.center}>
-        <Text>{t("adminOnly")}</Text>
-      </SafeAreaView>
+      <ScreenFrame header={header} refreshing={false} onRefresh={() => {}}>
+        <Panel>
+          <View style={ui.cardBody}>
+            <Text style={ui.muted}>{t("adminOnly")}</Text>
+          </View>
+        </Panel>
+      </ScreenFrame>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.headerRow}>
-          <View style={styles.flex}>
-            <Text variant="headlineSmall" style={BUSINESS_UI.title}>{t("title")}</Text>
-            <Text variant="bodySmall" style={styles.muted}>
-              {t("subtitle")}
-            </Text>
-          </View>
-          <IconButton
-            icon="refresh"
-            accessibilityLabel={t("refresh")}
-            onPress={() => void loadReleases(query)}
-            disabled={loading}
-          />
+  const modeInfo = summary
+    ? getWpfPolicyMode(snapshot?.releases ?? [], summary)
+    : null;
+  const newerVersions = summary
+    ? getWpfNewerActiveVersions(snapshot?.releases ?? [], summary.targetVersion)
+    : [];
+  const scopedLabels = summary
+    ? summary.targetScope === "stores"
+      ? summary.targetStoreSummaries.map(
+          (store) => store.storeCode || store.storeName || store.storeGuid,
+        )
+      : summary.targetDeviceSummaries.map(
+          (device) =>
+            device.systemDeviceNumber || `#${device.deviceRegistrationId}`,
+        )
+    : [];
+
+  const policyCard = (
+    <Panel>
+      <View style={styles.policyBody}>
+        <View style={ui.headRow}>
+          <Text accessibilityRole="header" style={[ui.cardTitle, ui.flexText]}>
+            {t("policyCardTitle")}
+          </Text>
+          {policyReady ? (
+            <Pill
+              label={summary ? t("statusActive") : t("statusInactive")}
+              tone={summary ? "success" : "neutral"}
+            />
+          ) : null}
         </View>
-
-        <Card mode="contained" style={styles.card}>
-          <Card.Content>
-            <Text variant="titleMedium">{t("filters")}</Text>
-            <SegmentedButtons
-              value={query.channel}
-              onValueChange={(value) => updateQuery({ channel: value })}
-              buttons={[
-                {
-                  value: "production",
-                  label: t("production"),
-                  disabled: mutationBusy,
-                },
-                {
-                  value: "preview",
-                  label: t("preview"),
-                  disabled: mutationBusy,
-                },
-              ]}
-              style={styles.segmented}
-            />
-            <View style={styles.switchRow}>
-              <Text>{t("includeDisabled")}</Text>
-              <Switch
-                value={query.includeDisabled}
-                onValueChange={(value) =>
-                  updateQuery({ includeDisabled: value })
-                }
-                disabled={mutationBusy}
-              />
-            </View>
-            <Button
-              mode="text"
-              icon="open-in-new"
-              onPress={() => void openUrl(WEB_WPF_VERSIONS_URL)}
-            >
-              {t("openWeb")}
-            </Button>
-          </Card.Content>
-        </Card>
-
-        <Card mode="contained" style={styles.card}>
-          <Card.Content>
-            <Text variant="titleMedium">{t("policyTitle")}</Text>
-            <TextInput
-              label={t("targetVersion")}
-              value={policy.targetVersion}
-              onChangeText={(value) =>
-                setPolicy((current) => ({ ...current, targetVersion: value }))
-              }
-              mode="outlined"
-              style={styles.input}
-            />
-            <TextInput
-              label={t("minimumVersion")}
-              value={policy.minimumSupportedVersion}
-              onChangeText={(value) =>
-                setPolicy((current) => ({
-                  ...current,
-                  minimumSupportedVersion: value,
-                }))
-              }
-              mode="outlined"
-              style={styles.input}
-            />
-            {policyError ? (
-              <HelperText type="error">
-                {t(`validation.${policyError}`)}
-              </HelperText>
-            ) : null}
-            <View style={styles.switchRow}>
-              <Text>{t("forceUpdate")}</Text>
-              <Switch
-                value={policy.forceUpdate}
-                onValueChange={(value) =>
-                  setPolicy((current) => ({ ...current, forceUpdate: value }))
-                }
-              />
-            </View>
-            <Text variant="labelLarge" style={styles.label}>
-              {t("targetScope")}
-            </Text>
-            <SegmentedButtons
-              value={normalizeTargetScope(policy.targetScope)}
-              onValueChange={(value) =>
-                setPolicy((current) => ({
-                  ...current,
-                  targetScope: normalizeTargetScope(value),
-                  targetStoreGuids: [],
-                  targetDeviceRegistrationIds: [],
-                }))
-              }
-              buttons={[
-                {
-                  value: "all",
-                  label: t("allTargets"),
-                  disabled: mutationBusy || policyConfirmVisible,
-                },
-                {
-                  value: "stores",
-                  label: t("stores"),
-                  disabled: mutationBusy || policyConfirmVisible,
-                },
-                {
-                  value: "devices",
-                  label: t("devices"),
-                  disabled: mutationBusy || policyConfirmVisible,
-                },
-              ]}
-              style={styles.segmented}
-            />
-            {targetError ? (
-              <HelperText type="error">{targetError}</HelperText>
-            ) : null}
-            {policy.targetScope === "stores" ? (
-              <View style={styles.targetList}>
-                {targetLoading && stores.length === 0 ? (
-                  <ActivityIndicator />
-                ) : (
-                  stores.map((store) => (
-                    <Checkbox.Item
-                      key={store.storeGuid}
-                      label={
-                        [store.storeCode, store.storeName]
-                          .filter(Boolean)
-                          .join(" · ") || store.storeGuid
-                      }
-                      status={
-                        policy.targetStoreGuids.includes(store.storeGuid)
-                          ? "checked"
-                          : "unchecked"
-                      }
-                      onPress={() =>
-                        setPolicy((current) => ({
-                          ...current,
-                          targetStoreGuids: current.targetStoreGuids.includes(
-                            store.storeGuid,
-                          )
-                            ? current.targetStoreGuids.filter(
-                                (value) => value !== store.storeGuid,
-                              )
-                            : [...current.targetStoreGuids, store.storeGuid],
-                        }))
-                      }
-                    />
-                  ))
-                )}
+        {!policyReady ? (
+          <ActivityIndicator color={HB_COLORS.action} style={styles.loader} />
+        ) : summary && modeInfo ? (
+          <>
+            <View style={styles.factGrid}>
+              <View style={styles.fact}>
+                <Text style={ui.caption}>{t("targetVersion")}</Text>
+                <Text style={styles.factValue}>{summary.targetVersion}</Text>
               </View>
-            ) : null}
-            {policy.targetScope === "devices" ? (
-              <View style={styles.targetList}>
-                <Searchbar
-                  value={deviceKeywordDraft}
-                  onChangeText={setDeviceKeywordDraft}
-                  onSubmitEditing={() =>
-                    !targetLoading &&
-                    void loadDevices(deviceKeywordDraft, 1, false)
-                  }
-                  placeholder={t("searchDevices")}
-                />
-                <View style={styles.searchActions}>
-                  <Button
-                    mode="text"
-                    onPress={() =>
-                      void loadDevices(deviceKeywordDraft, 1, false)
-                    }
-                    disabled={targetLoading}
-                  >
-                    {t("search")}
-                  </Button>
-                  {deviceTotal > devices.length ? (
-                    <Button
-                      mode="text"
-                      onPress={() =>
-                        void loadDevices(
-                          deviceKeywordApplied,
-                          devicePage + 1,
-                          true,
-                        )
-                      }
-                      loading={targetLoading}
-                      disabled={targetLoading}
-                    >
-                      {t("loadMore")}
-                    </Button>
-                  ) : null}
-                </View>
-                {devices.map((device) => (
-                  <Checkbox.Item
-                    key={device.deviceRegistrationId}
-                    label={deviceLabel(device)}
-                    status={
-                      policy.targetDeviceRegistrationIds.includes(
-                        device.deviceRegistrationId,
-                      )
-                        ? "checked"
-                        : "unchecked"
-                    }
-                    onPress={() =>
-                      setPolicy((current) => ({
-                        ...current,
-                        targetDeviceRegistrationIds:
-                          current.targetDeviceRegistrationIds.includes(
-                            device.deviceRegistrationId,
-                          )
-                            ? current.targetDeviceRegistrationIds.filter(
-                                (value) =>
-                                  value !== device.deviceRegistrationId,
-                              )
-                            : [
-                                ...current.targetDeviceRegistrationIds,
-                                device.deviceRegistrationId,
-                              ],
-                      }))
+              <View style={styles.fact}>
+                <Text style={ui.caption}>{t("minimumVersion")}</Text>
+                <Text style={styles.factValue}>
+                  {summary.minimumSupportedVersion}
+                </Text>
+              </View>
+              <View style={styles.fact}>
+                <Text style={ui.caption}>{t("updateMode")}</Text>
+                <View style={styles.factPill}>
+                  <Pill
+                    label={modeText(modeInfo.mode)}
+                    tone={
+                      modeInfo.mode === "required"
+                        ? "danger"
+                        : modeInfo.mode === "minimum"
+                          ? "warning"
+                          : "neutral"
                     }
                   />
-                ))}
+                </View>
+              </View>
+              <View style={styles.fact}>
+                <Text style={ui.caption}>{t("scopeLabel")}</Text>
+                <Text style={styles.factValueSmall}>{scopeText(summary)}</Text>
+              </View>
+              <View style={[styles.fact, styles.factWide]}>
+                <Text style={ui.caption}>{t("lastUpdated")}</Text>
+                <Text style={ui.body}>
+                  {[
+                    formatDateTime(summary.policyUpdatedAt),
+                    summary.policyUpdatedBy,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+              </View>
+            </View>
+            {summary.targetScope !== "all" ? (
+              <View style={styles.notice}>
+                <Text style={styles.noticeText}>
+                  {t("partialRollout", {
+                    scope: scopedLabels.length
+                      ? scopedLabels.join("、")
+                      : scopeText(summary),
+                    target: summary.targetVersion,
+                  })}
+                </Text>
               </View>
             ) : null}
-            <Button
-              mode="contained"
-              icon="content-save"
-              onPress={savePolicy}
-              disabled={
-                mutationBusy || !policyReady || Boolean(policyError) || loading
-              }
-              loading={policySaving}
-              style={styles.actionButton}
-            >
-              {t("savePolicy")}
-            </Button>
-          </Card.Content>
-        </Card>
+            {newerVersions.length ? (
+              <View style={styles.notice}>
+                <Text style={styles.noticeText}>
+                  {t("pendingRelease", {
+                    count: newerVersions.length,
+                    latest: newerVersions[0],
+                  })}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.ladder}>
+              <Text style={ui.caption}>
+                {t("ladderTitle")} · {t("ladderHint")}
+              </Text>
+              <View style={styles.ladderGrid}>
+                {buildWpfDecisionLadder(
+                  modeInfo.mode,
+                  summary.targetVersion,
+                  modeInfo.minimum,
+                ).map((segment) => (
+                  <View
+                    key={`${segment.kind}-${segment.bound}`}
+                    style={[styles.ladderCell, ladderTone[segment.kind].box]}
+                  >
+                    <Text
+                      style={[styles.ladderKind, ladderTone[segment.kind].text]}
+                    >
+                      {t(`ladder.${segment.kind}`)}
+                    </Text>
+                    <Text style={styles.ladderRange}>{ladderRange(segment)}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </>
+        ) : (
+          <Text style={ui.muted}>{t("noPolicy")}</Text>
+        )}
+        <SecondaryButton
+          label={summary ? t("adjustPolicy") : t("createPolicy")}
+          icon="tune-variant"
+          onPress={openPolicySheet}
+          disabled={!policyReady || mutationBusy}
+        />
+      </View>
+    </Panel>
+  );
 
-        <View style={styles.listHeader}>
-          <Text variant="titleMedium">{t("releaseList")}</Text>
-          <Text variant="bodySmall" style={styles.muted}>
-            {t("count", { count: total })}
-          </Text>
-        </View>
-        {loading && releases.length === 0 ? (
-          <ActivityIndicator style={styles.loader} />
-        ) : null}
-        {loadError ? <HelperText type="error">{loadError}</HelperText> : null}
-        {!loading && releases.length === 0 && !loadError ? (
-          <Text style={styles.muted}>{t("empty")}</Text>
-        ) : null}
-        {releases.map((release) => (
-          <Card
+  const releaseList = (
+    <View style={styles.section}>
+      <SectionHeader
+        title={`${t("releaseList")} · ${t("count", { count: total })}`}
+        action={
+          <View style={styles.inlineSwitch}>
+            <Text style={ui.muted}>{t("showDisabled")}</Text>
+            <Switch
+              value={query.includeDisabled}
+              onValueChange={(value) => updateQuery({ includeDisabled: value })}
+              disabled={mutationBusy}
+              accessibilityLabel={t("includeDisabled")}
+            />
+          </View>
+        }
+      />
+      {loading && releases.length === 0 ? (
+        <ActivityIndicator color={HB_COLORS.action} style={styles.loader} />
+      ) : null}
+      {loadError ? (
+        <Panel>
+          <View style={ui.cardBody}>
+            <Text style={ui.error}>{loadError}</Text>
+            <TextLink
+              icon="refresh"
+              label={t("refresh")}
+              onPress={() => void loadReleases(query)}
+            />
+          </View>
+        </Panel>
+      ) : null}
+      {!loading && releases.length === 0 && !loadError ? (
+        <Text style={ui.muted}>{t("empty")}</Text>
+      ) : null}
+      {releases.map((release) => {
+        const canUseUrl = isSafeDownloadUrl(release.downloadUrl);
+        return (
+          <Panel
             key={
               release.id ||
               `${release.channel}-${release.version}-${release.fileName}`
             }
-            mode="contained"
-            style={styles.card}
+            style={release.isCurrent ? styles.currentCard : undefined}
           >
-            <Card.Content>
-              <View style={styles.releaseTop}>
-                <View style={styles.flex}>
-                  <Text variant="titleMedium">{release.version}</Text>
-                  <Text variant="bodySmall" style={styles.muted}>
-                    {release.fileName || "-"} ·{" "}
-                    {formatFileSize(release.fileSize)}
-                  </Text>
-                </View>
-                <Switch
-                  value={release.isActive}
-                  onValueChange={() => void toggleRelease(release)}
-                  disabled={mutationBusy || updatingId === release.id}
-                />
-              </View>
-              <View style={styles.badgeRow}>
+            <View style={styles.releaseBody}>
+              <View style={styles.releaseTitleRow}>
+                <Text style={styles.releaseVersion}>{release.version}</Text>
                 {release.isCurrent ? (
-                  <Surface
-                    style={[
-                      styles.badge,
-                      { backgroundColor: theme.colors.primaryContainer },
-                    ]}
-                  >
-                    <Text variant="labelSmall">{t("current")}</Text>
-                  </Surface>
+                  <Pill label={t("current")} tone="success" />
+                ) : null}
+                {!release.isActive ? (
+                  <Pill label={t("disabledBadge")} tone="neutral" />
                 ) : null}
                 {release.forceUpdate ? (
-                  <Surface
-                    style={[
-                      styles.badge,
-                      { backgroundColor: theme.colors.errorContainer },
-                    ]}
-                  >
-                    <Text variant="labelSmall">{t("forced")}</Text>
-                  </Surface>
+                  <Pill label={t("forced")} tone="danger" />
                 ) : null}
-                <Text variant="bodySmall" style={styles.muted}>
-                  {release.installerType?.toUpperCase() || "-"} · SHA{" "}
-                  {maskSha256(release.sha256)}
-                </Text>
+                {release.isRollback ? (
+                  <Pill label={t("rollbackBadge")} tone="warning" />
+                ) : null}
               </View>
-              <Text variant="bodySmall" style={styles.muted}>
-                {t("updatedAt")}:{" "}
-                {dateText(
-                  release.updatedAt || release.createdAt,
-                  language === "zh" ? "zh-CN" : "en-AU",
-                )}
+              <Text style={ui.muted} numberOfLines={1}>
+                {release.fileName || "-"} · {formatFileSize(release.fileSize)} ·{" "}
+                {release.installerType?.toUpperCase() || "-"}
               </Text>
-              <View style={styles.buttonRow}>
-                <Button
-                  compact
-                  mode="text"
-                  onPress={() => setDetail(release)}
-                  disabled={mutationBusy}
-                >
-                  {t("details")}
-                </Button>
-                <Button
-                  compact
-                  mode="text"
-                  icon="pencil"
-                  onPress={() => openEditor(release)}
-                  disabled={mutationBusy}
-                >
-                  {t("edit")}
-                </Button>
-                <Button
-                  compact
-                  mode="text"
-                  icon="open-in-new"
-                  onPress={() => void openUrl(release.downloadUrl)}
-                  disabled={
-                    !isSafeDownloadUrl(release.downloadUrl) || mutationBusy
-                  }
-                >
-                  {t("open")}
-                </Button>
-                <Button
-                  compact
-                  mode="text"
-                  icon="content-copy"
-                  onPress={() => void copyUrl(release.downloadUrl)}
-                  disabled={
-                    !isSafeDownloadUrl(release.downloadUrl) || mutationBusy
-                  }
-                >
-                  {t("copy")}
-                </Button>
-                <Button
-                  compact
-                  mode="text"
+              <Text style={ui.caption}>
+                {t("registeredAt", {
+                  time: formatDateTime(release.updatedAt || release.createdAt),
+                })}{" "}
+                · SHA {maskSha256(release.sha256)}
+              </Text>
+              <View style={styles.releaseActions}>
+                <TextLink
                   icon="qrcode"
+                  label={t("qrCode")}
                   onPress={() => setQrRelease(release)}
-                  disabled={
-                    !isSafeDownloadUrl(release.downloadUrl) || mutationBusy
+                  disabled={!canUseUrl || mutationBusy}
+                />
+                <TextLink
+                  icon="content-copy"
+                  label={t("copyLink")}
+                  onPress={() => void copyUrl(release.downloadUrl)}
+                  disabled={!canUseUrl || mutationBusy}
+                />
+                <View style={ui.flexText} />
+                {/* 次要操作收进 Paper 菜单（页面级 Portal），不叠加原生弹层 */}
+                <Menu
+                  visible={menuReleaseId === release.id}
+                  onDismiss={() => setMenuReleaseId("")}
+                  anchor={
+                    <IconButton
+                      icon="dots-horizontal"
+                      accessibilityLabel={t("moreActions")}
+                      onPress={() => setMenuReleaseId(release.id)}
+                      disabled={mutationBusy || updatingId === release.id}
+                      style={styles.moreButton}
+                    />
                   }
                 >
-                  {t("qrCode")}
-                </Button>
+                  <Menu.Item
+                    leadingIcon="open-in-new"
+                    title={t("openDownload")}
+                    disabled={!canUseUrl}
+                    onPress={() => {
+                      setMenuReleaseId("");
+                      void openUrl(release.downloadUrl);
+                    }}
+                  />
+                  <Menu.Item
+                    leadingIcon="information-outline"
+                    title={t("details")}
+                    onPress={() => {
+                      setMenuReleaseId("");
+                      setDetail(release);
+                    }}
+                  />
+                  <Menu.Item
+                    leadingIcon="pencil"
+                    title={t("editMetadata")}
+                    onPress={() => {
+                      setMenuReleaseId("");
+                      openEditor(release);
+                    }}
+                  />
+                  <Menu.Item
+                    leadingIcon={
+                      release.isActive ? "eye-off-outline" : "eye-outline"
+                    }
+                    title={release.isActive ? t("disable") : t("enable")}
+                    onPress={() => {
+                      setMenuReleaseId("");
+                      void toggleRelease(release);
+                    }}
+                  />
+                </Menu>
               </View>
-            </Card.Content>
-          </Card>
-        ))}
+            </View>
+          </Panel>
+        );
+      })}
+      {total > query.pageSize ? (
         <View style={styles.pagination}>
           <Button
             mode="outlined"
@@ -1016,7 +1019,9 @@ export default function WpfVersionsScreen() {
           >
             {t("previous")}
           </Button>
-          <Text>{t("page", { page: query.page, total: pages })}</Text>
+          <Text style={ui.muted}>
+            {t("page", { page: query.page, total: pages })}
+          </Text>
           <Button
             mode="outlined"
             onPress={() =>
@@ -1027,7 +1032,294 @@ export default function WpfVersionsScreen() {
             {t("next")}
           </Button>
         </View>
-      </ScrollView>
+      ) : null}
+    </View>
+  );
+
+  // 按版本号从新到旧（字符串排序会把 1.0.100 排在 1.0.99 前面）。
+  const quickVersions = [...activeVersions]
+    .sort((left, right) => compareVersions(right, left) ?? 0)
+    .slice(0, QUICK_VERSION_LIMIT);
+  const scopeConfirmLine =
+    policy.targetScope === "stores"
+      ? policy.targetStoreGuids.map(storeLabel).join("、")
+      : policy.targetScope === "devices"
+        ? selectedDeviceLabels.join("、")
+        : "";
+
+  const policyEditor = (
+    <View style={styles.sheetBody}>
+      <TextInput
+        label={t("targetVersion")}
+        value={policy.targetVersion}
+        onChangeText={(value) =>
+          setPolicy((current) => ({ ...current, targetVersion: value }))
+        }
+        mode="outlined"
+        autoCapitalize="none"
+      />
+      {quickVersions.length ? (
+        <View style={styles.quickVersions}>
+          <Text style={ui.caption}>{t("activeVersionsHint")}</Text>
+          <View style={styles.chipRow}>
+            {quickVersions.map((version) => {
+              const selected =
+                normalizeVersion(policy.targetVersion) === version;
+              return (
+                <Pressable
+                  key={version}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() =>
+                    setPolicy((current) => ({
+                      ...current,
+                      targetVersion: version,
+                    }))
+                  }
+                  style={[styles.chip, selected && styles.chipSelected]}
+                >
+                  <Text
+                    style={[styles.chipLabel, selected && styles.chipLabelSelected]}
+                  >
+                    {version}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+      <TextInput
+        label={t("minimumVersion")}
+        value={policy.minimumSupportedVersion}
+        onChangeText={(value) =>
+          setPolicy((current) => ({
+            ...current,
+            minimumSupportedVersion: value,
+          }))
+        }
+        mode="outlined"
+        autoCapitalize="none"
+      />
+      {policyError ? (
+        <HelperText type="error">{t(`validation.${policyError}`)}</HelperText>
+      ) : null}
+      <View style={styles.switchRow}>
+        <Text style={ui.body}>{t("forceUpdate")}</Text>
+        <Switch
+          value={policy.forceUpdate}
+          onValueChange={(value) =>
+            setPolicy((current) => ({ ...current, forceUpdate: value }))
+          }
+        />
+      </View>
+      <Text style={styles.fieldLabel}>{t("targetScope")}</Text>
+      <SegmentedButtons
+        value={normalizeTargetScope(policy.targetScope)}
+        onValueChange={(value) =>
+          setPolicy((current) => ({
+            ...current,
+            targetScope: normalizeTargetScope(value),
+            targetStoreGuids: [],
+            targetDeviceRegistrationIds: [],
+          }))
+        }
+        buttons={[
+          { value: "all", label: t("allTargets"), disabled: policySaving },
+          { value: "stores", label: t("stores"), disabled: policySaving },
+          { value: "devices", label: t("devices"), disabled: policySaving },
+        ]}
+      />
+      {targetError ? <HelperText type="error">{targetError}</HelperText> : null}
+      {policy.targetScope === "stores" ? (
+        <View style={styles.targetList}>
+          {targetLoading && stores.length === 0 ? (
+            <ActivityIndicator />
+          ) : (
+            stores.map((store) => (
+              <Checkbox.Item
+                key={store.storeGuid}
+                label={
+                  [store.storeCode, store.storeName]
+                    .filter(Boolean)
+                    .join(" · ") || store.storeGuid
+                }
+                status={
+                  policy.targetStoreGuids.includes(store.storeGuid)
+                    ? "checked"
+                    : "unchecked"
+                }
+                onPress={() =>
+                  setPolicy((current) => ({
+                    ...current,
+                    targetStoreGuids: current.targetStoreGuids.includes(
+                      store.storeGuid,
+                    )
+                      ? current.targetStoreGuids.filter(
+                          (value) => value !== store.storeGuid,
+                        )
+                      : [...current.targetStoreGuids, store.storeGuid],
+                  }))
+                }
+              />
+            ))
+          )}
+        </View>
+      ) : null}
+      {policy.targetScope === "devices" ? (
+        <View style={styles.targetList}>
+          <Searchbar
+            value={deviceKeywordDraft}
+            onChangeText={setDeviceKeywordDraft}
+            onSubmitEditing={() =>
+              !targetLoading && void loadDevices(deviceKeywordDraft, 1, false)
+            }
+            placeholder={t("searchDevices")}
+          />
+          <View style={styles.searchActions}>
+            <Button
+              mode="text"
+              onPress={() => void loadDevices(deviceKeywordDraft, 1, false)}
+              disabled={targetLoading}
+            >
+              {t("search")}
+            </Button>
+            {deviceTotal > devices.length ? (
+              <Button
+                mode="text"
+                onPress={() =>
+                  void loadDevices(deviceKeywordApplied, devicePage + 1, true)
+                }
+                loading={targetLoading}
+                disabled={targetLoading}
+              >
+                {t("loadMore")}
+              </Button>
+            ) : null}
+          </View>
+          {devices.map((device) => (
+            <Checkbox.Item
+              key={device.deviceRegistrationId}
+              label={deviceLabel(device)}
+              status={
+                policy.targetDeviceRegistrationIds.includes(
+                  device.deviceRegistrationId,
+                )
+                  ? "checked"
+                  : "unchecked"
+              }
+              onPress={() =>
+                setPolicy((current) => ({
+                  ...current,
+                  targetDeviceRegistrationIds:
+                    current.targetDeviceRegistrationIds.includes(
+                      device.deviceRegistrationId,
+                    )
+                      ? current.targetDeviceRegistrationIds.filter(
+                          (value) => value !== device.deviceRegistrationId,
+                        )
+                      : [
+                          ...current.targetDeviceRegistrationIds,
+                          device.deviceRegistrationId,
+                        ],
+                }))
+              }
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+
+  const policyConfirm = (
+    <View style={styles.sheetBody}>
+      <Text style={ui.body}>
+        {policyIsRollback ? t("rollbackMessage") : t("confirmPolicyMessage")}
+      </Text>
+      <ConfirmLines
+        lines={[
+          `${t("targetVersion")}: ${normalizeVersion(policy.targetVersion)}`,
+          `${t("minimumVersion")}: ${normalizeVersion(policy.minimumSupportedVersion)}`,
+          `${t("forceUpdate")}: ${policy.forceUpdate ? t("yes") : t("no")}`,
+          `${t("targetScope")}: ${t(
+            policy.targetScope === "stores"
+              ? "stores"
+              : policy.targetScope === "devices"
+                ? "devices"
+                : "allTargets",
+          )}`,
+          ...(scopeConfirmLine ? [scopeConfirmLine] : []),
+        ]}
+      />
+    </View>
+  );
+
+  return (
+    <View style={styles.root}>
+      <ScreenFrame
+        header={header}
+        refreshing={refreshing}
+        onRefresh={() => void refresh()}
+      >
+        {policyCard}
+        {releaseList}
+      </ScreenFrame>
+
+      <BusinessSheet
+        visible={policySheetOpen}
+        title={
+          policyStep === "confirm"
+            ? policyIsRollback
+              ? t("rollbackTitle")
+              : t("confirmPolicyTitle")
+            : t("adjustPolicy")
+        }
+        subtitle={t("policySheetSubtitle", {
+          channel:
+            query.channel === "preview" ? t("preview") : t("production"),
+        })}
+        dismissable={!policySaving}
+        onDismiss={closePolicySheet}
+        footer={
+          <View style={styles.sheetFooter}>
+            {policySheetError ? (
+              <Text accessibilityRole="alert" style={ui.error}>
+                {policySheetError}
+              </Text>
+            ) : null}
+            {policyStep === "edit" ? (
+              <PrimaryButton
+                label={t("savePolicy")}
+                icon="content-save"
+                onPress={() => {
+                  setPolicySheetError("");
+                  setPolicyStep("confirm");
+                }}
+                disabled={!policyReady || Boolean(policyError) || loading}
+              />
+            ) : (
+              <View style={styles.confirmButtons}>
+                <SecondaryButton
+                  label={t("backToEdit")}
+                  onPress={() => setPolicyStep("edit")}
+                  disabled={policySaving}
+                  style={ui.flexText}
+                />
+                <PrimaryButton
+                  label={
+                    policyIsRollback ? t("confirmRollback") : t("confirmSave")
+                  }
+                  onPress={() => void performSavePolicy(policyIsRollback)}
+                  loading={policySaving}
+                  style={ui.flexText}
+                />
+              </View>
+            )}
+          </View>
+        }
+      >
+        {policyStep === "edit" ? policyEditor : policyConfirm}
+      </BusinessSheet>
 
       <Portal>
         <Modal
@@ -1038,7 +1330,11 @@ export default function WpfVersionsScreen() {
         >
           <View style={styles.modalHeader}>
             <Text variant="titleLarge">{detail?.version || t("details")}</Text>
-            <IconButton icon="close" onPress={() => setDetail(null)} />
+            <IconButton
+              icon="close"
+              accessibilityLabel={t("cancel")}
+              onPress={() => setDetail(null)}
+            />
           </View>
           <Divider />
           {detail ? (
@@ -1051,20 +1347,8 @@ export default function WpfVersionsScreen() {
                   [t("installerArguments"), detail.installerArguments || "-"],
                   [t("releaseNotes"), detail.releaseNotes || "-"],
                   [t("downloadUrl"), detail.downloadUrl || "-"],
-                  [
-                    t("createdAt"),
-                    dateText(
-                      detail.createdAt,
-                      language === "zh" ? "zh-CN" : "en-AU",
-                    ),
-                  ],
-                  [
-                    t("updatedAt"),
-                    dateText(
-                      detail.updatedAt,
-                      language === "zh" ? "zh-CN" : "en-AU",
-                    ),
-                  ],
+                  [t("createdAt"), formatDateTime(detail.createdAt)],
+                  [t("updatedAt"), formatDateTime(detail.updatedAt)],
                 ] as DetailField[]
               ).map(([label, value]) => (
                 <View key={label} style={styles.detailRow}>
@@ -1108,10 +1392,16 @@ export default function WpfVersionsScreen() {
       <BusinessSheet
         visible={Boolean(editRelease)}
         title={t("editMetadata")}
+        subtitle={editRelease?.version}
+        dismissable={!updatingId}
         onDismiss={() => setEditRelease(null)}
         footer={
-          <View style={{ gap: 8 }}>
-            {snackbar ? <Text accessibilityRole="alert" style={{ color: HB_COLORS.danger }}>{snackbar}</Text> : null}
+          <View style={styles.sheetFooter}>
+            {editError ? (
+              <Text accessibilityRole="alert" style={ui.error}>
+                {editError}
+              </Text>
+            ) : null}
             <Button
               mode="contained"
               icon="content-save"
@@ -1125,6 +1415,7 @@ export default function WpfVersionsScreen() {
           </View>
         }
       >
+        <View style={styles.sheetBody}>
           <TextInput
             label={t("downloadUrl")}
             value={editDraft.downloadUrl}
@@ -1132,7 +1423,6 @@ export default function WpfVersionsScreen() {
               setEditDraft((current) => ({ ...current, downloadUrl: value }))
             }
             mode="outlined"
-            style={styles.input}
             autoCapitalize="none"
           />
           <TextInput
@@ -1142,12 +1432,9 @@ export default function WpfVersionsScreen() {
               setEditDraft((current) => ({ ...current, sha256: value }))
             }
             mode="outlined"
-            style={styles.input}
             autoCapitalize="none"
           />
-          <Text variant="labelLarge" style={styles.label}>
-            {t("installerType")}
-          </Text>
+          <Text style={styles.fieldLabel}>{t("installerType")}</Text>
           <SegmentedButtons
             value={editDraft.installerType ?? "exe"}
             onValueChange={(value) =>
@@ -1160,7 +1447,6 @@ export default function WpfVersionsScreen() {
               { value: "exe", label: "EXE" },
               { value: "msi", label: "MSI" },
             ]}
-            style={styles.segmented}
           />
           <TextInput
             label={t("installerArguments")}
@@ -1172,7 +1458,6 @@ export default function WpfVersionsScreen() {
               }))
             }
             mode="outlined"
-            style={styles.input}
           />
           <TextInput
             label={t("releaseNotes")}
@@ -1182,152 +1467,156 @@ export default function WpfVersionsScreen() {
             }
             mode="outlined"
             multiline
-            style={styles.input}
           />
+        </View>
       </BusinessSheet>
       <Portal>
-        <Modal
-          visible={policyConfirmVisible}
-          style={styles.sheetOverlay}
-          onDismiss={() => setPolicyConfirmVisible(false)}
-          contentContainerStyle={styles.modal}
+        <Snackbar
+          visible={Boolean(snackbar)}
+          onDismiss={() => setSnackbar("")}
+          duration={3500}
         >
-          <View style={styles.modalHeader}>
-            <Text variant="titleLarge">
-              {policyIsRollback ? t("rollbackTitle") : t("confirmPolicyTitle")}
-            </Text>
-            <IconButton
-              icon="close"
-              onPress={() => setPolicyConfirmVisible(false)}
-            />
-          </View>
-          <Divider />
-          <Text style={styles.confirmText}>
-            {policyIsRollback
-              ? t("rollbackMessage")
-              : t("confirmPolicyMessage")}
-          </Text>
-          <View style={styles.confirmSummary}>
-            <Text>
-              <Text variant="labelLarge">{t("targetVersion")}: </Text>
-              {normalizeVersion(policy.targetVersion)}
-            </Text>
-            <Text>
-              <Text variant="labelLarge">{t("minimumVersion")}: </Text>
-              {normalizeVersion(policy.minimumSupportedVersion)}
-            </Text>
-            <Text>
-              <Text variant="labelLarge">{t("forceUpdate")}: </Text>
-              {policy.forceUpdate ? t("yes") : t("no")}
-            </Text>
-            <Text>
-              <Text variant="labelLarge">{t("targetScope")}: </Text>
-              {t(
-                policy.targetScope === "stores"
-                  ? "stores"
-                  : policy.targetScope === "devices"
-                    ? "devices"
-                    : "allTargets",
-              )}
-            </Text>
-            {policy.targetScope === "stores" ? (
-              <Text>
-                {selectedStoreLabels.length
-                  ? selectedStoreLabels.join(", ")
-                  : policy.targetStoreGuids.join(", ")}
-              </Text>
-            ) : null}
-            {policy.targetScope === "devices" ? (
-              <Text>
-                {selectedDeviceLabels.length
-                  ? selectedDeviceLabels.join(", ")
-                  : policy.targetDeviceRegistrationIds.map(String).join(", ")}
-              </Text>
-            ) : null}
-          </View>
-          <View style={styles.confirmButtons}>
-            <Button
-              mode="outlined"
-              onPress={() => setPolicyConfirmVisible(false)}
-            >
-              {t("cancel")}
-            </Button>
-            <Button
-              mode="contained"
-              onPress={() => {
-                setPolicyConfirmVisible(false);
-                void performSavePolicy(policyIsRollback);
-              }}
-              loading={policySaving}
-            >
-              {policyIsRollback ? t("confirmRollback") : t("confirmSave")}
-            </Button>
-          </View>
-        </Modal>
+          {snackbar}
+        </Snackbar>
       </Portal>
-      <Snackbar
-        visible={Boolean(snackbar)}
-        onDismiss={() => setSnackbar("")}
-        duration={3500}
-      >
-        {snackbar}
-      </Snackbar>
-    </SafeAreaView>
+    </View>
   );
 }
 
+// 决策预览配色：强制 = 警示，可选 = 信息，无需更新 = 成功，回退 = 中性（与 Web 版本发布中心一致）。
+const ladderTone = {
+  force: StyleSheet.create({
+    box: { backgroundColor: "#FFFAEB" },
+    text: { color: "#93370D" },
+  }),
+  optional: StyleSheet.create({
+    box: { backgroundColor: "#EEF4FF" },
+    text: { color: HB_COLORS.action },
+  }),
+  latest: StyleSheet.create({
+    box: { backgroundColor: "#ECFDF3" },
+    text: { color: HB_COLORS.success },
+  }),
+  rollback: StyleSheet.create({
+    box: { backgroundColor: HB_COLORS.surfaceMuted },
+    text: { color: "#344054" },
+  }),
+};
+
 const styles = StyleSheet.create({
-  safe: { ...BUSINESS_UI.screen },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
+  root: { flex: 1 },
+  section: { gap: HB_SPACING.sm },
+  loader: { marginVertical: HB_SPACING.lg },
+  policyBody: { padding: HB_SPACING.md, gap: 14 },
+  factGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    rowGap: 14,
   },
-  content: { padding: 16, paddingBottom: 44, gap: 12 },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  flex: { flex: 1 },
-  muted: { color: HB_COLORS.textSecondary },
-  card: { ...BUSINESS_UI.section, marginBottom: 2 },
-  segmented: { marginTop: 10, marginBottom: 10 },
+  fact: { width: "50%", gap: 4, paddingRight: HB_SPACING.xs },
+  factWide: { width: "100%" },
+  factValue: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: HB_COLORS.textPrimary,
+    fontVariant: ["tabular-nums"],
+  },
+  factValueSmall: {
+    fontSize: 14,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: HB_COLORS.textPrimary,
+  },
+  factPill: { flexDirection: "row" },
+  notice: {
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: 10,
+    borderRadius: HB_RADIUS.control,
+    backgroundColor: "#FFFAEB",
+  },
+  noticeText: { fontSize: 13, lineHeight: 20, color: "#93370D" },
+  ladder: { gap: 6 },
+  ladderGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  ladderCell: {
+    flexGrow: 1,
+    flexBasis: "45%",
+    padding: HB_SPACING.xs,
+    borderRadius: HB_RADIUS.control,
+    gap: 2,
+  },
+  ladderKind: { fontSize: 12, lineHeight: 18, fontWeight: "600" },
+  ladderRange: { fontSize: 12, lineHeight: 18, color: "#344054" },
+  inlineSwitch: { flexDirection: "row", alignItems: "center", gap: 6 },
+  currentCard: { borderColor: "#B2CCFF" },
+  releaseBody: {
+    paddingHorizontal: HB_SPACING.md,
+    paddingTop: 14,
+    paddingBottom: 6,
+    gap: 6,
+  },
+  releaseTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: HB_SPACING.xs,
+  },
+  releaseVersion: {
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: "700",
+    color: HB_COLORS.textPrimary,
+    fontVariant: ["tabular-nums"],
+  },
+  releaseActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.xs,
+  },
+  moreButton: { margin: 0 },
+  pagination: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetBody: { gap: HB_SPACING.sm },
+  sheetFooter: { gap: HB_SPACING.xs },
+  confirmButtons: { flexDirection: "row", gap: HB_SPACING.sm },
+  fieldLabel: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: "#344054",
+  },
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     minHeight: 48,
   },
-  input: { marginTop: 10 },
-  label: { marginTop: 8 },
-  targetList: { marginTop: 8, borderRadius: 8, overflow: "hidden" },
+  quickVersions: { gap: 6 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chip: {
+    minHeight: 36,
+    paddingHorizontal: HB_SPACING.sm,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: HB_COLORS.outline,
+    justifyContent: "center",
+    backgroundColor: HB_COLORS.white,
+  },
+  chipSelected: { borderColor: HB_COLORS.action, backgroundColor: "#EEF4FF" },
+  chipLabel: {
+    fontSize: 13,
+    color: "#344054",
+    fontVariant: ["tabular-nums"],
+  },
+  chipLabelSelected: { color: HB_COLORS.action, fontWeight: "600" },
+  targetList: { borderRadius: HB_RADIUS.control, overflow: "hidden" },
   searchActions: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  actionButton: { marginTop: 12 },
-  listHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 6,
-  },
-  loader: { marginVertical: 24 },
-  releaseTop: { flexDirection: "row", alignItems: "center" },
-  badgeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  badge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },
-  buttonRow: { flexDirection: "row", flexWrap: "wrap", gap: 2, marginTop: 6 },
-  pagination: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 4,
   },
   modal: {
     alignSelf: "center",
@@ -1346,7 +1635,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  detailRow: { paddingVertical: 12, gap: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HB_COLORS.outlineMuted },
+  detailRow: {
+    paddingVertical: 12,
+    gap: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: HB_COLORS.outlineMuted,
+  },
   detailLabel: { color: HB_COLORS.textSecondary },
   qrModal: {
     margin: 20,
@@ -1357,18 +1651,4 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   qrUrl: { textAlign: "center", opacity: 0.72 },
-  confirmText: { marginTop: 14 },
-  confirmSummary: {
-    gap: 8,
-    marginTop: 16,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: "#f5f6f8",
-  },
-  confirmButtons: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-    marginTop: 18,
-  },
 });
