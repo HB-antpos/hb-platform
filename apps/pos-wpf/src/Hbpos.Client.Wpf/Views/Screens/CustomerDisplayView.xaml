@@ -24,6 +24,20 @@
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="BorderBrush" Value="{StaticResource PosCustomerDisplayDividerBrush}" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+            <!-- 关键逻辑：PosTheme.xaml 的全局隐式 TextBlock 样式会作用到列头自动生成的文字上，
+                 把上面的 Foreground/FontSize 盖成正文色（浅色调色板下近黑）和 14px，深色客显上几乎看不见。
+                 这里用模板里的局部值钉死文字属性，局部值优先于隐式样式。 -->
+            <Setter Property="ContentTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}"
+                                   Foreground="{StaticResource PosCustomerDisplayHeaderTextBrush}"
+                                   FontSize="17"
+                                   FontWeight="Bold"
+                                   TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="CustomerDisplayHeaderLeftStyle" TargetType="DataGridColumnHeader" BasedOn="{StaticResource CustomerDisplayHeaderBaseStyle}">
