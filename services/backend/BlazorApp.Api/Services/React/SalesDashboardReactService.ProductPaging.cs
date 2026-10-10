@@ -9,6 +9,13 @@ namespace BlazorApp.Api.Services.React;
 public partial class SalesDashboardReactService
 {
     /// <summary>
+    /// 商品明细（enhanced-sales-product-details）每页条数上限。
+    /// 移动端商品报告提供 100/200/500 三档；外层方法与 SQL 分页方法必须共用这一个上限，
+    /// 否则一处放宽、另一处仍夹到旧值，会让返回的 PageSize 与前端按所选档位算出的总页数对不上。
+    /// </summary>
+    internal const int EnhancedProductDetailMaxPageSize = 500;
+
+    /// <summary>
     /// SQL Server 商品报表读取结果。无数据页仍返回一行 HasData=false，保证越界页可以得到准确 Total。
     /// </summary>
     internal sealed class ProductReportPagingSqlRow
@@ -53,7 +60,7 @@ public partial class SalesDashboardReactService
     {
         ValidateDateRange(dateRange);
         pageIndex = Math.Max(1, pageIndex);
-        pageSize = Math.Clamp(pageSize, 1, 100);
+        pageSize = Math.Clamp(pageSize, 1, EnhancedProductDetailMaxPageSize);
 
         if (_context.Db.CurrentConnectionConfig.DbType != DbType.SqlServer)
         {

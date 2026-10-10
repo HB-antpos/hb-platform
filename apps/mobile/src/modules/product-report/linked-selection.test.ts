@@ -22,6 +22,7 @@ const base: ProductReportDisplayContext = {
   supplierCode: null,
   productSearch: "",
   productPage: 1,
+  productPageSize: 100,
   productSort: "quantity:desc",
 };
 const next = (patch: Partial<ProductReportDisplayContext>) => ({ ...base, ...patch });
@@ -50,6 +51,11 @@ assert.deepEqual(
   getLinkedTransitionStaleness(base, next({ productPage: 2 })),
   { branchTable: false, supplierTable: false, productTable: true },
   "明细翻页只影响明细，不反向影响分店表与供应商表",
+);
+assert.deepEqual(
+  getLinkedTransitionStaleness(base, next({ productPageSize: 200 })),
+  { branchTable: false, supplierTable: false, productTable: true },
+  "明细切换每页条数同样只影响明细",
 );
 assert.deepEqual(
   getLinkedTransitionStaleness(base, next({ productSearch: "HB1", productSort: "amount:desc" })),

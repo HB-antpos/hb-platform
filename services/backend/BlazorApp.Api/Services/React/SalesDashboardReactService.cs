@@ -2414,7 +2414,7 @@ namespace BlazorApp.Api.Services.React
             {
                 ValidateDateRange(dateRange);
                 pageIndex = Math.Max(1, pageIndex);
-                pageSize = Math.Clamp(pageSize, 1, 100);
+                pageSize = Math.Clamp(pageSize, 1, EnhancedProductDetailMaxPageSize);
                 // 排序在分页之前完成；三条读取路径共用同一个归一化结果，未知参数一律回退为金额降序。
                 var sort = ProductReportSort.Parse(sortField, sortOrder);
                 if (!IsProductStatisticFresh(statisticStatus))

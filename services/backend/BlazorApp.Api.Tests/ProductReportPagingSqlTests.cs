@@ -63,6 +63,13 @@ public sealed class ProductReportPagingSqlTests
     }
 
     [Fact]
+    public void ProductDetailPageSizeCeilingCoversMobile100_200_500Choices()
+    {
+        // 移动端商品报告提供 100/200/500 三档；上限低于 500 会让后端夹小 pageSize，前端总页数与实际行数对不上。
+        Assert.True(SalesDashboardReactService.EnhancedProductDetailMaxPageSize >= 500);
+    }
+
+    [Fact]
     public void MappingKeepsTotalForAnOutOfRangePageAndAppliesGrossProfitCompleteness()
     {
         var rows = new[]
