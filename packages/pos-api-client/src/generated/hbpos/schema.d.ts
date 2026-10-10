@@ -7993,6 +7993,7 @@ export interface components {
             cardBrand?: string | null;
             maskedCardNumber?: string | null;
             authCode?: string | null;
+            refundIds?: string[] | null;
         };
         SquarePaymentStatusDtoApiResult: {
             success?: boolean;
@@ -8015,6 +8016,8 @@ export interface components {
             amountMoney?: components["schemas"]["SquareMoneyDto"];
             /** Format: date-time */
             updatedAt?: string | null;
+            /** Format: date-time */
+            createdAt?: string | null;
         };
         SquareRefundResponseApiResult: {
             success?: boolean;

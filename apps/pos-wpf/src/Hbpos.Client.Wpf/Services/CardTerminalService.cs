@@ -519,6 +519,14 @@ public sealed class ConfiguredCardTerminalClient :
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan SquarePollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SquareCleanupTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SquareApprovedSettleInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// checkout 已 COMPLETED 而 payment 仍是 APPROVED（已授权未入账）时，等待其转 COMPLETED 的最长时间。
+    /// Square 实机偶发该时间差；超时后仍按结果未知交给恢复中心，不会误判为失败。
+    /// </summary>
+    internal TimeSpan SquareApprovedSettleGrace { get; init; } = TimeSpan.FromSeconds(30);
+
     private const string SquareTimedOutStatusKey = "payment.card.squareTimedOut";
     private const string SquareTerminalOfflineStatusKey = "payment.card.squareTerminalOffline";
     private const string SquareTerminalNotPickedUpStatusKey = "payment.card.squareTerminalNotPickedUp";
@@ -779,6 +787,8 @@ public sealed class ConfiguredCardTerminalClient :
         string? lastLoggedStatus = null;
         var sawSquareInProgress = false;
         var sawSquareCancelRequested = false;
+        Stopwatch? approvedSettleWatch = null;
+        var loggedApprovedWait = false;
         var squareCreateSubmitted = false;
         var reference = Limit($"{session.DeviceCode}-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}", 40);
         const string squareCurrency = "AUD";
@@ -964,6 +974,21 @@ public sealed class ConfiguredCardTerminalClient :
                             responseText: "Square payment is missing amount_money.",
                             CancellationToken.None);
                         return new PaymentAuthorizationResult(false, null, T("payment.card.squareInvalidResponse", "Square terminal returned an invalid response."), ResultUnknown: true);
+                    }
+
+                    // APPROVED 只是授权未入账，Square 会在数秒内自动转 COMPLETED；先在宽限期内重查，
+                    // 避免一笔已刷成功的卡被送进恢复中心。仍只有 COMPLETED 才算收款成功。
+                    if (string.Equals(paymentStatus, "APPROVED", StringComparison.OrdinalIgnoreCase) &&
+                        (approvedSettleWatch ??= Stopwatch.StartNew()).Elapsed < SquareApprovedSettleGrace)
+                    {
+                        if (!loggedApprovedWait)
+                        {
+                            LogSquare($"payment approved but not completed yet; waiting up to {(int)SquareApprovedSettleGrace.TotalSeconds}s checkoutId={checkoutId} paymentId={paymentId}");
+                            loggedApprovedWait = true;
+                        }
+
+                        await Task.Delay(SquareApprovedSettleInterval, timeoutCts.Token);
+                        continue;
                     }
 
                     var verification = SquarePaymentVerifier.Verify(

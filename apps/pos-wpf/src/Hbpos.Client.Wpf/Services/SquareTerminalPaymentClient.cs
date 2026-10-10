@@ -21,7 +21,8 @@ public sealed record SquarePaymentStatusResult(
     string Currency,
     string? CardBrand = null,
     string? MaskedCardNumber = null,
-    string? AuthCode = null);
+    string? AuthCode = null,
+    IReadOnlyList<string>? RefundIds = null);
 
 public sealed record SquareRefundStatusResult(
     string RefundId,
@@ -29,7 +30,8 @@ public sealed record SquareRefundStatusResult(
     string PaymentId,
     long AmountCents,
     string Currency,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    DateTimeOffset? CreatedAt = null);
 
 public interface ISquareTerminalPaymentClient
 {
@@ -117,7 +119,8 @@ public sealed class SquareTerminalPaymentClient(HttpClient httpClient) : ISquare
             amount.Currency,
             payment.CardBrand,
             payment.MaskedCardNumber,
-            payment.AuthCode);
+            payment.AuthCode,
+            payment.RefundIds);
     }
 
     public async Task<SquareRefundStatusResult> GetRefundAsync(
@@ -149,7 +152,8 @@ public sealed class SquareTerminalPaymentClient(HttpClient httpClient) : ISquare
             refund.PaymentId,
             refund.AmountMoney.Amount,
             refund.AmountMoney.Currency,
-            refund.UpdatedAt);
+            refund.UpdatedAt,
+            refund.CreatedAt);
     }
 
     private async Task<T> SendApiAsync<T>(

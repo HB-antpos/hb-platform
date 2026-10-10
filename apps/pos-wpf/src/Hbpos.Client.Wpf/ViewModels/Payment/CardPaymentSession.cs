@@ -150,6 +150,8 @@ internal sealed class CardPaymentSession
             return;
         }
 
+        // 取消来源（点取消 / 页面重入）此前不留任何痕迹，排查“结果未知”时无从判断是否被取消。
+        ConsoleLog.Write("CardPayment", "card payment cancel requested");
         _cardPaymentCancellationRequested = true;
         _awaitingLateCardResultAfterManualCancel = true;
         _manuallyCancelledCardPaymentCts = _activeCardPaymentCts;

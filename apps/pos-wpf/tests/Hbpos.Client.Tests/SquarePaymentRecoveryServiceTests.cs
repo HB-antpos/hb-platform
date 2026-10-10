@@ -168,6 +168,80 @@ public sealed class SquarePaymentRecoveryServiceTests
         Assert.Equal(-10m, Assert.Single(result.Order!.Payments).Amount);
     }
 
+    private static LocalSquarePaymentAttempt CreateUnboundSquareRefundAttempt() =>
+        CreateSquareRefundAttempt() with
+        {
+            Status = LocalSquarePaymentAttemptStatus.Unknown,
+            PaymentId = null,
+            PaymentStatus = null
+        };
+
+    private static SquareRefundStatusResult CreateDiscoverableRefund(
+        string refundId,
+        LocalSquarePaymentAttempt attempt,
+        TimeSpan createdOffset,
+        long amountCents = 1000) =>
+        new(refundId, "PENDING", "PAYMENT-001", amountCents, "AUD", CreatedAt: attempt.CreatedAt + createdOffset);
+
+    [Fact]
+    public async Task RecoverLatestAsync_unbound_refund_is_discovered_from_original_payment_and_completes_the_return()
+    {
+        var attempt = CreateUnboundSquareRefundAttempt();
+        var attempts = new FakeSquarePaymentAttemptRepository(attempt);
+        var orders = new FakeLocalOrderRepository();
+        var terminal = new FakeSquareTerminalPaymentClient
+        {
+            Payment = new SquarePaymentStatusResult("PAYMENT-001", "COMPLETED", 1000, "AUD", RefundIds: ["REFUND-001"])
+        };
+        terminal.RefundsById["REFUND-001"] = CreateDiscoverableRefund("REFUND-001", attempt, TimeSpan.FromSeconds(20));
+        var service = CreateService(attempts, orders, terminal);
+
+        var result = await service.RecoverLatestAsync(new PosCartService(), Session);
+
+        // 回执丢失但 Square 已受理：按原付款的 refund_ids 找回并绑定，再沿用原有自动恢复，不会重复退款。
+        Assert.Equal(CardPaymentRecoveryOutcome.OrderCompleted, result.Outcome);
+        Assert.Equal(1, attempts.MarkOrderCompletedCount);
+        Assert.Equal(1, orders.SaveCount);
+        Assert.Equal("PENDING", attempts.PaymentStatus);
+    }
+
+    [Theory]
+    [InlineData("ambiguous")]
+    [InlineData("bound-elsewhere")]
+    [InlineData("amount-mismatch")]
+    [InlineData("created-outside-window")]
+    [InlineData("created-unknown")]
+    public async Task RecoverLatestAsync_unbound_refund_stays_for_supervisor_when_discovery_is_not_conclusive(string scenario)
+    {
+        var attempt = CreateUnboundSquareRefundAttempt();
+        var attempts = new FakeSquarePaymentAttemptRepository(attempt)
+        {
+            RefundIdBoundToOtherAttempt = scenario == "bound-elsewhere"
+        };
+        var terminal = new FakeSquareTerminalPaymentClient
+        {
+            Payment = new SquarePaymentStatusResult(
+                "PAYMENT-001", "COMPLETED", 1000, "AUD",
+                RefundIds: scenario == "ambiguous" ? ["REFUND-001", "REFUND-002"] : ["REFUND-001"])
+        };
+        terminal.RefundsById["REFUND-001"] = scenario switch
+        {
+            "amount-mismatch" => CreateDiscoverableRefund("REFUND-001", attempt, TimeSpan.FromSeconds(20), amountCents: 500),
+            "created-outside-window" => CreateDiscoverableRefund("REFUND-001", attempt, TimeSpan.FromHours(2)),
+            "created-unknown" => CreateDiscoverableRefund("REFUND-001", attempt, TimeSpan.Zero) with { CreatedAt = null },
+            _ => CreateDiscoverableRefund("REFUND-001", attempt, TimeSpan.FromSeconds(20))
+        };
+        terminal.RefundsById["REFUND-002"] = CreateDiscoverableRefund("REFUND-002", attempt, TimeSpan.FromSeconds(30));
+        var service = CreateService(attempts, new FakeLocalOrderRepository(), terminal);
+
+        var result = await service.RecoverLatestAsync(new PosCartService(), Session);
+
+        // 任何不确定都不能自动认领退款：保持“结果未知”，交给主管对账。
+        Assert.Equal(CardPaymentRecoveryOutcome.Unknown, result.Outcome);
+        Assert.Equal(0, attempts.MarkOrderCompletedCount);
+        Assert.Null(attempts.PaymentStatus);
+    }
+
     [Fact]
     public async Task RecoverLatestAsync_square_completed_refund_creates_return_without_second_refund()
     {
@@ -1533,6 +1607,15 @@ public sealed class SquarePaymentRecoveryServiceTests
 
         public Exception? GetAttemptException { get; set; }
 
+        public bool RefundIdBoundToOtherAttempt { get; init; }
+
+        public Task<bool> IsRefundIdBoundToOtherAttemptAsync(
+            string environment,
+            string refundId,
+            Guid excludingAttemptGuid,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RefundIdBoundToOtherAttempt);
+
         public Task CreateAsync(LocalSquarePaymentAttempt attempt, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
@@ -2060,6 +2143,8 @@ public sealed class SquarePaymentRecoveryServiceTests
         public SquareRefundStatusResult Refund { get; set; } =
             new("REFUND-001", "COMPLETED", "PAYMENT-001", 1000, "AUD");
 
+        public Dictionary<string, SquareRefundStatusResult> RefundsById { get; } = new(StringComparer.Ordinal);
+
         public int GetRefundCallCount { get; private set; }
 
         public int GetCheckoutCallCount { get; private set; }
@@ -2090,7 +2175,7 @@ public sealed class SquarePaymentRecoveryServiceTests
             CancellationToken cancellationToken = default)
         {
             GetRefundCallCount++;
-            return Task.FromResult(Refund);
+            return Task.FromResult(RefundsById.TryGetValue(refundId, out var byId) ? byId : Refund);
         }
     }
 

@@ -21,6 +21,7 @@ public sealed class SquareTerminalRestClientTests
                 "status": "COMPLETED",
                 "payment_id": "payment-1",
                 "amount_money": { "amount": 99, "currency": "AUD" },
+                "created_at": "2026-08-17T04:50:10Z",
                 "updated_at": "2026-08-17T04:53:22Z"
               }
             }
@@ -38,6 +39,8 @@ public sealed class SquareTerminalRestClientTests
 
         Assert.NotNull(refund);
         Assert.Equal("COMPLETED", refund.Status);
+        // 创建时间用于 POS 在退款回执丢失后按时间窗口找回退款。
+        Assert.Equal(DateTimeOffset.Parse("2026-08-17T04:50:10Z"), refund.CreatedAt);
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(
             "https://connect.squareupsandbox.com/v2/refunds/refund-1",
@@ -206,6 +209,7 @@ public sealed class SquareTerminalRestClientTests
                   "auth_result_code": "68aLBM",
                   "entry_method": "CONTACTLESS"
                 },
+                "refund_ids": [ "refund-a", "refund-b" ],
                 "updated_at": "2026-06-22T01:02:03Z"
               }
             }
@@ -232,6 +236,7 @@ public sealed class SquareTerminalRestClientTests
         Assert.Equal("VISA", response.CardBrand);
         Assert.Equal("****1111", response.MaskedCardNumber);
         Assert.Equal("68aLBM", response.AuthCode);
+        Assert.Equal(["refund-a", "refund-b"], response.RefundIds);
     }
 
     [Fact]

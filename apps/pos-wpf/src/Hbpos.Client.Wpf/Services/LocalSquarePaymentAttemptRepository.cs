@@ -532,6 +532,16 @@ public interface ILocalSquarePaymentAttemptRepository
     Task<LocalSquarePaymentAttempt?> GetAttemptAsync(Guid attemptGuid, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 该 Square 退款号是否已被其他退款 attempt 记录。默认返回 true（保守：视为已被占用），
+    /// 只有能真实查询本地库的实现才应覆盖，用于自动找回退款时避免把别人的退款认领成自己的。
+    /// </summary>
+    Task<bool> IsRefundIdBoundToOtherAttemptAsync(
+        string environment,
+        string refundId,
+        Guid excludingAttemptGuid,
+        CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+    /// <summary>
     /// 退货单已完成、但 Square 退款仍在结算（PENDING）或结算后被拒（REJECTED/FAILED，未处理）的退款记录。
     /// 只用于结算跟踪与提示，不是金融恢复队列，不能据此重新发起退款。
     /// </summary>
@@ -2104,6 +2114,30 @@ public sealed class LocalSquarePaymentAttemptRepository(LocalSqliteStore store) 
             cashierId: null,
             environment,
             cancellationToken);
+
+    public async Task<bool> IsRefundIdBoundToOtherAttemptAsync(
+        string environment,
+        string refundId,
+        Guid excludingAttemptGuid,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM LocalSquarePaymentAttempts
+            WHERE OperationKind = $Refund
+              AND Environment = $Environment
+              AND PaymentId = $RefundId
+              AND AttemptGuid <> $AttemptGuid
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$Refund", "Refund");
+        command.Parameters.AddWithValue("$Environment", environment);
+        command.Parameters.AddWithValue("$RefundId", refundId);
+        command.Parameters.AddWithValue("$AttemptGuid", excludingAttemptGuid.ToString());
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
 
     public async Task<LocalSquarePaymentAttempt?> GetAttemptAsync(Guid attemptGuid, CancellationToken cancellationToken = default)
     {

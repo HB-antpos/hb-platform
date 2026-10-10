@@ -1327,6 +1327,19 @@ public sealed class SquarePaymentRecoveryService(
             return await RestoreSupervisorApprovedRetryAsync(cart, refundAttempt, cancellationToken);
         }
 
+        if (string.IsNullOrWhiteSpace(refundAttempt.PaymentId) &&
+            !string.IsNullOrWhiteSpace(refundAttempt.SubmissionToken) &&
+            refundAttempt.Status is LocalSquarePaymentAttemptStatus.Unknown or LocalSquarePaymentAttemptStatus.Recovering)
+        {
+            // 退款请求已越过提交边界却没拿到退款号（回执丢失）：先去 Square 按原付款找回已受理的退款，
+            // 找到并绑定后沿用下面的自动恢复路径；找不到或有歧义则保持原样交给主管对账。
+            var discovered = await TryDiscoverUnboundRefundAsync(settings, refundAttempt, cancellationToken);
+            if (discovered is not null)
+            {
+                refundAttempt = discovered;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(refundAttempt.PaymentId) &&
             !string.IsNullOrWhiteSpace(refundAttempt.SubmissionToken))
         {
@@ -1935,6 +1948,118 @@ public sealed class SquarePaymentRecoveryService(
             cancellationToken);
     }
 
+    // 本地时钟可能与 Square 相差数十秒甚至更多，窗口取宽，仍要求退款创建时间落在该次 attempt 前后。
+    private static readonly TimeSpan RefundDiscoveryWindowBefore = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RefundDiscoveryWindowAfter = TimeSpan.FromMinutes(10);
+
+    private static string? TryGetOriginalSquarePaymentId(LocalSquarePaymentAttempt attempt)
+    {
+        try
+        {
+            var originalReference = DeserializeDraft(attempt).OriginalReference;
+            if (!string.IsNullOrWhiteSpace(originalReference) &&
+                originalReference.Trim().StartsWith("SQ:", StringComparison.OrdinalIgnoreCase))
+            {
+                return originalReference.Trim()[3..].Trim();
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            // 草稿损坏时不能自动认定退款终态，保留主管核对路径。
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 退款请求已被 Square 受理但本地没收到退款号时，按原付款的 refund_ids 找回它。
+    /// 只有“恰好一笔”且金额、币种、原付款、创建时间窗口都吻合、又没被其他 attempt 占用的退款才会绑定；
+    /// 任何查询失败、旧后端缺字段或存在歧义都返回 null，由主管对账兜底。
+    /// </summary>
+    private async Task<LocalSquarePaymentAttempt?> TryDiscoverUnboundRefundAsync(
+        CardTerminalSettings settings,
+        LocalSquarePaymentAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var originalPaymentId = TryGetOriginalSquarePaymentId(attempt);
+        if (string.IsNullOrWhiteSpace(originalPaymentId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var payment = await squareTerminalPaymentClient.GetPaymentAsync(settings, originalPaymentId, cancellationToken);
+            if (payment.RefundIds is not { Count: > 0 } refundIds)
+            {
+                return null;
+            }
+
+            var windowStart = attempt.CreatedAt - RefundDiscoveryWindowBefore;
+            var windowEnd = attempt.CreatedAt + RefundDiscoveryWindowAfter;
+            var candidates = new List<SquareRefundStatusResult>();
+            foreach (var refundId in refundIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+            {
+                var refund = await squareTerminalPaymentClient.GetRefundAsync(settings, refundId, cancellationToken);
+                if (string.Equals(refund.RefundId, refundId, StringComparison.Ordinal) &&
+                    string.Equals(refund.PaymentId, originalPaymentId, StringComparison.Ordinal) &&
+                    refund.AmountCents == attempt.AmountCents &&
+                    string.Equals(refund.Currency, attempt.Currency, StringComparison.OrdinalIgnoreCase) &&
+                    refund.CreatedAt is { } createdAt &&
+                    createdAt >= windowStart &&
+                    createdAt <= windowEnd &&
+                    !await RunLocalStoreAsync(
+                        () => attemptRepository.IsRefundIdBoundToOtherAttemptAsync(
+                            attempt.Environment,
+                            refundId,
+                            attempt.AttemptGuid,
+                            CancellationToken.None),
+                        CancellationToken.None))
+                {
+                    candidates.Add(refund);
+                }
+            }
+
+            if (candidates.Count != 1)
+            {
+                ConsoleLog.Write(
+                    "SquareRecovery",
+                    $"unbound refund discovery inconclusive attemptGuid={attempt.AttemptGuid} candidates={candidates.Count} refundIds={refundIds.Count}");
+                return null;
+            }
+
+            var found = candidates[0];
+            var bound = await RunLocalStoreAsync(
+                () => attemptRepository.TryRecordRefundResponseAsync(
+                    attempt.AttemptGuid,
+                    attempt.Status,
+                    attempt.UpdatedAt,
+                    attempt.SubmissionToken!,
+                    found.RefundId,
+                    found.Status.ToUpperInvariant(),
+                    DateTimeOffset.UtcNow,
+                    CancellationToken.None),
+                CancellationToken.None);
+            ConsoleLog.Write(
+                "SquareRecovery",
+                $"unbound refund discovered attemptGuid={attempt.AttemptGuid} refundId={found.RefundId} status={found.Status} bound={bound}");
+            return bound
+                ? await RunLocalStoreAsync(
+                    () => attemptRepository.GetAttemptAsync(attempt.AttemptGuid, CancellationToken.None),
+                    CancellationToken.None)
+                : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
+        {
+            ConsoleLog.WriteWarning(
+                "SquareRecovery",
+                $"unbound refund discovery failed attemptGuid={attempt.AttemptGuid} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: attempt.AttemptGuid.ToString("D")),
+                ex);
+            return null;
+        }
+    }
+
     private async Task<CardPaymentRecoveryResult?> TryRecoverSquareRefundAsync(
         PosCartService cart,
         PosSessionState session,
@@ -1960,20 +2085,7 @@ public sealed class SquarePaymentRecoveryService(
             return null;
         }
 
-        string? originalPaymentId = null;
-        try
-        {
-            var originalReference = DeserializeDraft(attempt).OriginalReference;
-            if (!string.IsNullOrWhiteSpace(originalReference) &&
-                originalReference.Trim().StartsWith("SQ:", StringComparison.OrdinalIgnoreCase))
-            {
-                originalPaymentId = originalReference.Trim()[3..].Trim();
-            }
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
-        {
-            // 草稿损坏时不能自动认定退款终态，保留主管核对路径。
-        }
+        var originalPaymentId = TryGetOriginalSquarePaymentId(attempt);
 
         if (!string.Equals(refund.RefundId, attempt.PaymentId, StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(originalPaymentId) ||
@@ -2282,6 +2394,8 @@ public sealed class SquarePaymentRecoveryService(
         {
             return new CardRefundSupervisorResolutionResult(false, validationError);
         }
+
+        normalized = CardRefundSupervisorResolutionRules.WithDefaultReason(normalized);
 
         var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
         var attempt = await RunLocalStoreAsync(
