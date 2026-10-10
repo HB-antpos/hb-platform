@@ -1139,6 +1139,28 @@ public sealed class ConfiguredCardTerminalClient :
                 return new PaymentAuthorizationResult(false, null, message, ResultUnknown: true);
             }
 
+            if (wasCallerCancelled)
+            {
+                // 中文注释：收银员手动取消，且清理接口已明确确认 CANCELED/FAILED：这是确定的取消，
+                // 要记为「已取消」，不能套用「超时 / 终端未接单」的状态和提示。
+                var cancelMessage = T(
+                    "payment.card.squareCanceledSeller",
+                    "Square checkout was canceled. Please start the card payment again.");
+                await MarkSquareAttemptFailureAsync(
+                    squareAttempt,
+                    LocalSquarePaymentAttemptStatus.Canceled,
+                    lastLoggedStatus,
+                    paymentStatus: null,
+                    responseCode: null,
+                    responseText: cancelMessage,
+                    CancellationToken.None);
+                return new PaymentAuthorizationResult(
+                    false,
+                    null,
+                    cancelMessage,
+                    StatusKey: "payment.card.squareCanceledSeller");
+            }
+
             var timeoutOutcome = MapSquareLocalTimeout(sawSquareInProgress);
             await MarkSquareAttemptFailureAsync(
                 squareAttempt,

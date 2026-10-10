@@ -2065,10 +2065,16 @@ public sealed class ConfiguredCardTerminalClientTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Unreachable after cancellation.");
         });
+        var contextAccessor = new SquarePaymentAttemptContextAccessor();
+        var repository = new RecordingFailureSquarePaymentAttemptRepository();
         var client = new ConfiguredCardTerminalClient(
             new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
-            CreateApiClient(handler));
+            CreateApiClient(handler),
+            squarePaymentAttemptContextAccessor: contextAccessor,
+            squarePaymentAttemptRepository: repository);
         using var cancellationTokenSource = new CancellationTokenSource();
+        using var attemptScope = contextAccessor.Begin(
+            new SquarePaymentAttemptContext(Guid.Parse("99999999-aaaa-bbbb-cccc-888888888888"), "idem-manual-cancel"));
         var authorizeTask = client.AuthorizeAsync(10m, CreateSession(), cancellationTokenSource.Token);
 
         await getStarted.Task;
@@ -2077,6 +2083,9 @@ public sealed class ConfiguredCardTerminalClientTests
         var result = await authorizeTask;
         Assert.False(result.Approved);
         Assert.False(result.ResultUnknown);
+        // 收银员手动取消且 Square 明确确认取消：记为「已取消」，不是「超时 / 终端未接单」。
+        Assert.Equal("payment.card.squareCanceledSeller", result.StatusKey);
+        Assert.Equal(LocalSquarePaymentAttemptStatus.Canceled, repository.FailedStatus);
         Assert.Collection(
             requests,
             create =>
