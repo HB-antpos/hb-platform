@@ -14442,6 +14442,13 @@
           "authCode": {
             "type": "string",
             "nullable": true
+          },
+          "refundIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -14514,6 +14521,11 @@
             "$ref": "#/components/schemas/SquareMoneyDto"
           },
           "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
             "type": "string",
             "format": "date-time",
             "nullable": true
