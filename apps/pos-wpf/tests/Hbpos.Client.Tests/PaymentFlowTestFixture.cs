@@ -336,6 +336,10 @@ internal sealed class ScriptedLinklyCloudApi : ILinklyCloudApiClient
     // 为 true 时 GET 原交易返回“已结束且被拒绝”（没有扣款），模拟顾客放弃/终端超时后的权威终态。
     public bool GetTransactionReportsDecline { get; set; }
 
+    // 为 true 时原交易查询不可用（断网）：模拟手动取消时终端结果还确认不了，必须保守落入异常中心；
+    // 之后置回 false，恢复才能查到终态。不可用的查询不计入 GetTransactionCount。
+    public bool StatusQueriesUnavailable { get; set; }
+
     public void ReleaseApprovedResult() => ReleaseApproval.TrySetResult();
 
     public Task<string> PairAsync(
@@ -403,6 +407,11 @@ internal sealed class ScriptedLinklyCloudApi : ILinklyCloudApiClient
         string sessionId,
         CancellationToken cancellationToken = default)
     {
+        if (StatusQueriesUnavailable)
+        {
+            return Task.FromException<LinklyCloudTransactionResult>(new HttpRequestException("status offline"));
+        }
+
         GetTransactionCount++;
         LastQueriedSessionId = sessionId;
         var txnRef = LastSubmittedTxnRef ?? "P-RECOVERY-REF";

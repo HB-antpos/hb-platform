@@ -432,7 +432,8 @@ public sealed class LinklyCloudTerminalClientTests
         Assert.False(result.Approved);
         Assert.True(result.ResultUnknown);
         Assert.Equal(apiClient.LastTransactionSessionId, result.SessionId);
-        Assert.Equal(1, apiClient.GetTransactionCallCount);
+        // 取消后只允许一次「确认取消结果」的查询（它同样失败，所以仍按结果未知处理），不再继续轮询。
+        Assert.Equal(2, apiClient.GetTransactionCallCount);
     }
 
     [Fact]
@@ -687,6 +688,79 @@ public sealed class LinklyCloudTerminalClientTests
         Assert.Equal(1, apiClient.SendTransactionCallCount);
     }
 
+    [Fact]
+    public async Task PurchaseAsync_manual_cancel_after_direct_submission_is_definitive_when_terminal_confirms_cancelled()
+    {
+        // 手动取消成功（终端明确回「已取消」）不能进异常中心：发取消键 + 查到最终的取消结果。
+        var apiClient = new FakeLinklyCloudApiClient
+        {
+            PendingTransactionCompletion = new TaskCompletionSource<LinklyCloudTransactionResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously),
+            ObservePendingTransactionCancellation = true
+        };
+        apiClient.TransactionStatusSequence.Enqueue(Pending("session-x"));
+        apiClient.TransactionStatusSequence.Enqueue(Cancelled("session-x"));
+        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore(), TimeSpan.Zero);
+        using var cancellation = new CancellationTokenSource();
+
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings(), cancellation.Token);
+        await WaitUntilAsync(() => apiClient.SendTransactionCallCount == 1);
+        cancellation.Cancel();
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        Assert.False(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal(LinklyTerminalDialogKeys.OkCancel, apiClient.LastSendKeyKey);
+        Assert.Equal(1, apiClient.SendKeyCallCount);
+        Assert.Equal(apiClient.LastTransactionSessionId, apiClient.LastSendKeySessionId);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_manual_cancel_returns_late_approval_when_customer_already_paid()
+    {
+        var apiClient = new FakeLinklyCloudApiClient
+        {
+            PendingTransactionCompletion = new TaskCompletionSource<LinklyCloudTransactionResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously),
+            ObservePendingTransactionCancellation = true
+        };
+        apiClient.TransactionStatusSequence.Enqueue(Approved("session-x", "TXN-LATE"));
+        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore(), TimeSpan.Zero);
+        using var cancellation = new CancellationTokenSource();
+
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings(), cancellation.Token);
+        await WaitUntilAsync(() => apiClient.SendTransactionCallCount == 1);
+        cancellation.Cancel();
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        // 取消键到达前顾客已经付款：必须按已批准处理，不能丢掉这笔扣款。
+        Assert.True(result.Approved);
+        Assert.False(result.ResultUnknown);
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_manual_cancel_stays_unknown_when_cancel_key_cannot_be_sent()
+    {
+        var apiClient = new FakeLinklyCloudApiClient
+        {
+            PendingTransactionCompletion = new TaskCompletionSource<LinklyCloudTransactionResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously),
+            ObservePendingTransactionCancellation = true,
+            SendKeyException = new HttpRequestException("offline")
+        };
+        var client = new LinklyCloudTerminalClient(apiClient, new FakeLinklyCloudSecretStore(), TimeSpan.Zero);
+        using var cancellation = new CancellationTokenSource();
+
+        var purchaseTask = client.PurchaseAsync(10m, CreateSession(), CreateSettings(), cancellation.Token);
+        await WaitUntilAsync(() => apiClient.SendTransactionCallCount == 1);
+        cancellation.Cancel();
+        var result = await purchaseTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        // 取消没送达终端，交易可能仍会完成：保守进异常中心。
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+        Assert.Equal(0, apiClient.GetTransactionCallCount);
+    }
     [Fact]
     public async Task RecoverTransactionAsync_queries_only_original_session_and_maps_linkly_success()
     {
@@ -1300,6 +1374,23 @@ public sealed class LinklyCloudTerminalClientTests
         };
     }
 
+    private static LinklyCloudTransactionResult Cancelled(string sessionId)
+    {
+        return new LinklyCloudTransactionResult(
+            sessionId,
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "C0",
+            "OPERATOR CANCELLED",
+            null,
+            10m,
+            null);
+    }
     private static LinklyCloudTransactionResult Approved(string sessionId, string txnRef, decimal amount = 10m)
     {
         return new LinklyCloudTransactionResult(

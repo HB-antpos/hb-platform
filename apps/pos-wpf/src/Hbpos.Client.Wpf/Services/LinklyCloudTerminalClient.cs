@@ -62,7 +62,8 @@ public sealed class LinklyCloudTerminalClient(
     ILocalizationService? localization = null,
     ILinklyTerminalDialogService? dialogService = null,
     ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null,
-    TimeProvider? timeProvider = null) : ILinklyCloudTerminalClient
+    TimeProvider? timeProvider = null,
+    TimeSpan? manualCancelResolveWindow = null) : ILinklyCloudTerminalClient
 {
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(2);
     // 取消后仍需等待原交易结果时的让出间隔；此时不能再用已取消的令牌等待，否则会同步返回而空转。
@@ -78,6 +79,8 @@ public sealed class LinklyCloudTerminalClient(
     private readonly TimeSpan _pollInterval = pollInterval.GetValueOrDefault(DefaultPollInterval);
     // 业务等待计时器走 TimeProvider，测试可注入 FakeTimeProvider 直接推进虚拟时间，不靠墙钟窗口判断是否超时。
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    // 收银员手动取消已提交的直连交易后，等待终端回最终结果的上限：发取消键 + 查询原交易，窗口内拿到明确结果才算取消成功。
+    private readonly TimeSpan _manualCancelResolveWindow = manualCancelResolveWindow ?? TimeSpan.FromSeconds(20);
 
     public async Task<LinklyConnectionTestResult> TestConnectionAsync(
         CardTerminalSettings settings,
@@ -476,6 +479,7 @@ public sealed class LinklyCloudTerminalClient(
         var attemptContext = linklyPaymentAttemptContextAccessor?.Current;
         var txnRef = string.Empty;
         var sessionId = string.Empty;
+        LinklyCloudToken? submittedToken = null;
 
         try
         {
@@ -484,6 +488,7 @@ public sealed class LinklyCloudTerminalClient(
             txnRef = ResolveTxnRef(session, txnType, attemptContext);
             sessionId = Guid.NewGuid().ToString("D");
             var token = await GetTokenAsync(settings, session.StoreCode, session.DeviceCode, timeoutCts.Token);
+            submittedToken = token;
             var request = new LinklyCloudTransactionRequest(
                 txnType,
                 ToMinorUnits(amount),
@@ -504,6 +509,7 @@ public sealed class LinklyCloudTerminalClient(
                 var polled = await PollTransactionAsync(settings, session, token, sessionId, txnRef, amount, timeoutCts.Token);
                 result = polled.Result;
                 token = polled.Token;
+                submittedToken = token;
                 if (!MatchesSubmittedResponseIdentity(result, amount, sessionId, txnRef))
                     return UnknownResponseIdentity(sessionId, txnRef, txnType);
             }
@@ -587,6 +593,19 @@ public sealed class LinklyCloudTerminalClient(
         }
         catch (OperationCanceledException) when (transactionSubmitted && cancellationToken.IsCancellationRequested)
         {
+            // 收银员手动取消：先向终端发取消键并等原交易的最终结果。终端明确回「已取消/已拒绝」就是确定的取消，
+            // 订单不该进异常中心；只有取消键没送达、或窗口内没拿到明确结果时，才保守按结果未知处理（可能已扣款）。
+            var resolved = submittedToken is null
+                ? null
+                : await TryResolveAfterManualCancelAsync(settings, submittedToken, sessionId, txnRef, amount);
+            if (resolved is not null)
+            {
+                Log($"transaction manual-cancel resolved sessionId={sessionId} outcome={resolved.Outcome} success={resolved.Succeeded} txnRef={LogValue(txnRef)}");
+                var resolvedResult = ToAuthorizationResult(resolved, amount, txnRef, txnType);
+                keepDialogOpen = !resolvedResult.Approved && !IsCancelledResult(resolved);
+                return resolvedResult;
+            }
+
             var message = T(
                 "linkly.cloud.resultUnknown",
                 "Linkly Cloud transaction result is unknown. Confirm the Linkly transaction status before retrying.");
@@ -758,6 +777,60 @@ public sealed class LinklyCloudTerminalClient(
             {
                 return await transactionTask;
             }
+        }
+    }
+
+    /// <summary>
+    /// 手动取消已提交的直连交易：发 OK/CANCEL 键，再在有限窗口内查询原交易直到不再 Pending。
+    /// 返回 null 表示没拿到可信的最终结果（键没送达、查询失败、窗口耗尽、会话身份对不上），调用方必须按结果未知处理。
+    /// </summary>
+    private async Task<LinklyCloudTransactionResult?> TryResolveAfterManualCancelAsync(
+        CardTerminalSettings settings,
+        LinklyCloudToken token,
+        string sessionId,
+        string txnRef,
+        decimal amount)
+    {
+        using var windowCts = new CancellationTokenSource(_manualCancelResolveWindow, _timeProvider);
+        try
+        {
+            await apiClient.SendKeyAsync(
+                settings,
+                token.Token,
+                sessionId,
+                LinklyTerminalDialogKeys.OkCancel,
+                null,
+                windowCts.Token);
+            Log($"transaction manual-cancel key sent sessionId={sessionId}");
+            while (true)
+            {
+                if (_pollInterval > TimeSpan.Zero)
+                {
+                    await Task.Delay(_pollInterval, _timeProvider, windowCts.Token);
+                }
+                else
+                {
+                    await Task.Yield();
+                    windowCts.Token.ThrowIfCancellationRequested();
+                }
+
+                var result = await apiClient.GetTransactionAsync(settings, token.Token, sessionId, windowCts.Token);
+                if (!MatchesSubmittedResponseIdentity(result, amount, sessionId, txnRef))
+                {
+                    return null;
+                }
+
+                if (!IsPending(result))
+                {
+                    return result;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // 任何失败都只能说明「没拿到可信的最终结果」，必须回到结果未知，不能让异常带走交易身份。
+            Log($"transaction manual-cancel unresolved sessionId={sessionId} error={ex.GetType().Name}");
+            return null;
         }
     }
 

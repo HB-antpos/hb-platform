@@ -110,6 +110,8 @@ public sealed class PaymentFlowIntegrationTests
             Assert.Equal(cloudApi.LastSubmittedTxnRef, submittedAttempt.TxnRef);
             Assert.False(string.IsNullOrWhiteSpace(submittedAttempt.OrderDraftJson));
 
+            // 手动取消时终端结果确认不了（取消键后查询不可用）：保守按结果未知进异常中心。
+            cloudApi.StatusQueriesUnavailable = true;
             viewModel.CancelCommand.Execute(null);
             await cardTask.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -141,6 +143,7 @@ public sealed class PaymentFlowIntegrationTests
             Assert.Equal(10m, draft.CardAmount);
             Assert.Empty(await fixture.OrderRepository.GetRecentOrdersAsync());
 
+            cloudApi.StatusQueriesUnavailable = false;
             await using var restarted = await fixture.CreateRestartedRecoveryAsync();
             var persistedAfterRestart = await restarted.AttemptRepository.GetAttemptAsync(attempt.AttemptGuid);
             Assert.NotNull(persistedAfterRestart);
