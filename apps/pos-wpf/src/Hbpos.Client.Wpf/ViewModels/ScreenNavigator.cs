@@ -158,6 +158,12 @@ internal sealed class ScreenNavigator
     public SettingsViewModel? Settings { get; set; }
     public CardRecoveryCenterViewModel? CardRecoveryCenter { get; set; }
 
+    /// <summary>
+    /// 从异常中心返回时按本地队列全量重算主页角标。中心自己回写的数字只含卡交易、
+    /// 且仅在各渠道都加载成功时才回写，主管确认后主页可能一直停在旧数字。
+    /// </summary>
+    public Func<Task>? RefreshCardRecoveryCountAsync { get; set; }
+
     private CustomerDisplayViewModel? _customerDisplay;
     public CustomerDisplayViewModel CustomerDisplay => _customerDisplay ??= _factory.CreateCustomerDisplayViewModel();
 
@@ -218,6 +224,13 @@ internal sealed class ScreenNavigator
                 ShowPos();
             };
         }
+
+        var backToOrigin = returnFromRecoveryCenter;
+        returnFromRecoveryCenter = () =>
+        {
+            backToOrigin();
+            _ = RefreshCardRecoveryCountAsync?.Invoke();
+        };
 
         CardRecoveryCenter?.Dispose();
         CardRecoveryCenter = _factory.CreateCardRecoveryCenterViewModel(

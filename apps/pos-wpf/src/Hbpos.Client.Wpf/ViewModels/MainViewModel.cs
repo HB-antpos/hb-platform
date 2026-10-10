@@ -549,6 +549,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             linklySettlementUploadExecutionService);
 
         _screenNavigator = CreateScreenNavigator();
+        _screenNavigator.RefreshCardRecoveryCountAsync = RefreshCardRecoveryCountAsync;
 
         if (_operationAuthorizationService is not null)
         {
