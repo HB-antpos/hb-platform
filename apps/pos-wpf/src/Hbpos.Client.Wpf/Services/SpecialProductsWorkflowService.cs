@@ -23,6 +23,27 @@ public sealed record SpecialProductsMutationWorkflowResult(
     bool IsSpecialProduct,
     IReadOnlyList<SellableItemDto> SpecialItems);
 
+public sealed record SpecialProductsPriceWorkflowResult(
+    string StoreCode,
+    string ProductCode,
+    decimal RetailPrice,
+    IReadOnlyList<SellableItemDto> SpecialItems);
+
+/// <summary>
+/// 特殊商品改价的业务规则，与服务端口径一致：大于 0、不超过 99999.99、最多两位小数。
+/// 视图模型用它决定「保存」是否可用，工作流服务用它在发请求前兜底。
+/// </summary>
+public static class SpecialProductPriceRules
+{
+    public const decimal MaxRetailPrice = 99999.99m;
+
+    public static bool IsValid(decimal price) =>
+        price > 0m && price <= MaxRetailPrice && decimal.Round(price, 2) == price;
+}
+
+/// <summary>撤销加购的结果：是否改动了购物车、是否把整行删掉。</summary>
+public sealed record SpecialProductsUndoAddResult(bool Changed, bool RemovedLine);
+
 public sealed record SpecialProductsReorderWorkflowResult(
     string StoreCode,
     IReadOnlyList<SellableItemDto> SpecialItems,
@@ -55,6 +76,12 @@ public interface ISpecialProductsWorkflowService
 
     SpecialProductsAddToCartResult AddToCart(SellableItemDto item);
 
+    // 中文注释：撤销一次加购；默认实现按"不支持"处理，既有测试替身无需实现。
+    SpecialProductsUndoAddResult UndoAddToCart(CartLine line, decimal addedQuantity)
+    {
+        throw new NotSupportedException("Undo add-to-cart is not supported by this workflow.");
+    }
+
     Task<SpecialProductsDownloadWorkflowResult> DownloadAsync(
         string storeCode,
         CancellationToken cancellationToken = default,
@@ -72,6 +99,16 @@ public interface ISpecialProductsWorkflowService
         string productCode,
         int delta,
         CancellationToken cancellationToken = default);
+
+    // 中文注释：修改特殊商品门店零售价（必须在线）；默认实现按"不支持"处理，既有测试替身无需实现。
+    Task<SpecialProductsPriceWorkflowResult> UpdateSpecialProductPriceAsync(
+        string storeCode,
+        string productCode,
+        decimal retailPrice,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product price update is not supported by this workflow.");
+    }
 }
 
 public sealed class SpecialProductsWorkflowService(
@@ -202,6 +239,24 @@ public sealed class SpecialProductsWorkflowService(
         return new SpecialProductsAddToCartResult(line, cart.Lines.Count);
     }
 
+    public SpecialProductsUndoAddResult UndoAddToCart(CartLine line, decimal addedQuantity)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+
+        // 购物车行已被收银台改动或移除时不做任何事。
+        if (!cart.Lines.Contains(line) || addedQuantity <= 0m)
+        {
+            return new SpecialProductsUndoAddResult(false, false);
+        }
+
+        // 数量不超过本次加入量就删整行，否则只减回本次加入的数量。
+        var removeWholeLine = line.Quantity <= addedQuantity;
+        var changed = removeWholeLine
+            ? cart.RemoveLine(line)
+            : cart.SetLineQuantity(line, line.Quantity - addedQuantity);
+        return new SpecialProductsUndoAddResult(changed, changed && removeWholeLine);
+    }
+
     public async Task<SpecialProductsDownloadWorkflowResult> DownloadAsync(
         string storeCode,
         CancellationToken cancellationToken = default,
@@ -255,6 +310,55 @@ public sealed class SpecialProductsWorkflowService(
             normalizedStoreCode,
             normalizedProductCode,
             isSpecialProduct,
+            specialItems);
+    }
+
+    public async Task<SpecialProductsPriceWorkflowResult> UpdateSpecialProductPriceAsync(
+        string storeCode,
+        string productCode,
+        decimal retailPrice,
+        CancellationToken cancellationToken = default)
+    {
+        // 业务规则在服务层兜底：非法价格不发请求（视图模型也会提前拦下）。
+        if (!SpecialProductPriceRules.IsValid(retailPrice))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(retailPrice),
+                retailPrice,
+                "Retail price must be greater than 0, at most 99999.99 and have at most two decimals.");
+        }
+
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        var normalizedProductCode = NormalizeProductCode(productCode);
+
+        var result = await specialProductService.UpdateSpecialProductPriceAsync(
+            normalizedStoreCode,
+            normalizedProductCode,
+            retailPrice,
+            cancellationToken);
+
+        IReadOnlyList<SellableItemDto> specialItems;
+        if (result.ChangedItems.Count > 0)
+        {
+            // 服务端返回了该商品改价后的全部查码项，直接覆盖内存价格索引，收银扫码立即按新价。
+            foreach (var item in result.ChangedItems)
+            {
+                priceIndex.Upsert(item);
+            }
+
+            specialItems = result.SpecialItems;
+        }
+        else
+        {
+            await RefreshIndexAsync(normalizedStoreCode, cancellationToken);
+            specialItems = await catalogRepository.LoadSpecialProductItemsAsync(normalizedStoreCode, cancellationToken);
+        }
+
+        UpdateLoadedResult(normalizedStoreCode, specialItems);
+        return new SpecialProductsPriceWorkflowResult(
+            normalizedStoreCode,
+            normalizedProductCode,
+            retailPrice,
             specialItems);
     }
 

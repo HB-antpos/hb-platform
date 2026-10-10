@@ -280,5 +280,6 @@ public sealed class CatalogResponseCompressionHttpTests
         public Task<CatalogCompareResponse?> CompareSellableItemsAsync(CatalogCompareRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<CatalogSpecialProductsPageResponse?> GetSpecialProductsPageAsync(string storeCode, string? cursor, int pageSize, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<CatalogSpecialProductMarkServiceResult> MarkSpecialProductAsync(CatalogSpecialProductMarkRequest request, string updatedBy, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<CatalogSpecialProductPriceServiceResult> UpdateSpecialProductPriceAsync(CatalogSpecialProductPriceRequest request, string updatedBy, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

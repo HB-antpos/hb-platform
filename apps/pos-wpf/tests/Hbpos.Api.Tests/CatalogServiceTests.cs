@@ -1354,6 +1354,247 @@ public sealed class CatalogServiceTests
         Assert.Equal("MULTI-RETAIL-SECOND", item.ReferenceCode);
     }
 
+    private static async Task SeedPriceEditProductAsync(CatalogSqliteFixture fixture, string productCode)
+    {
+        await fixture.SeedStoreAsync("S01");
+        await fixture.SeedProductAsync(new Product
+        {
+            UUID = $"{productCode}-UUID",
+            ProductCode = productCode,
+            ProductName = "Price edit product",
+            Barcode = $"{productCode}-BARCODE",
+            RetailPrice = 12m,
+            IsActive = true,
+            IsDeleted = false
+        });
+    }
+
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_updates_primary_row_price_and_turns_off_auto_pricing()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-PRICE");
+        await fixture.SeedStoreRetailPriceAsync(
+            "S01", "P-PRICE", 10m, "PRICE-ROW", isSpecialProduct: true, isAutoPricing: true,
+            updatedAt: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-PRICE", 15.5m),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(15.5m, result.Response!.RetailPrice);
+        var row = Assert.Single(await fixture.LoadStoreRetailPricesAsync());
+        Assert.Equal(15.5m, row.StoreRetailPriceValue);
+        // 人工改价必须关闭自动定价，否则会被后续进价联动覆盖。
+        Assert.False(row.IsAutoPricing);
+        Assert.True(row.IsSpecialProduct);
+        Assert.Equal("pos-actor", row.UpdatedBy);
+        Assert.True(row.UpdatedAt > new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        // 响应 Items 带的是改价后的价格，且仍是特殊商品。
+        var item = Assert.Single(result.Response.Items, x => x.LookupCode == "P-PRICE-BARCODE");
+        Assert.Equal(15.5m, item.RetailPrice);
+        Assert.True(item.IsSpecialProduct);
+    }
+
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_leaves_other_store_price_rows_untouched()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-PRICE-ROWS");
+        await fixture.SeedStoreRetailPriceAsync(
+            "S01", "P-PRICE-ROWS", 11m, "ROWS-OLD", isSpecialProduct: true, isAutoPricing: true,
+            updatedAt: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await fixture.SeedStoreRetailPriceAsync(
+            "S01", "P-PRICE-ROWS", 12m, "ROWS-NEW", isSpecialProduct: true, isAutoPricing: true,
+            updatedAt: new DateTime(2026, 1, 1, 0, 1, 0, DateTimeKind.Utc));
+        // 其他门店的同商品价格行也不能被改动。
+        await fixture.SeedStoreRetailPriceAsync(
+            "S02", "P-PRICE-ROWS", 13m, "ROWS-OTHER-STORE", isSpecialProduct: true, isAutoPricing: true);
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-PRICE-ROWS", 20m),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        var rows = await fixture.LoadStoreRetailPricesAsync();
+        var primary = Assert.Single(rows, x => x.UUID == "ROWS-NEW");
+        Assert.Equal(20m, primary.StoreRetailPriceValue);
+        Assert.False(primary.IsAutoPricing);
+        var secondary = Assert.Single(rows, x => x.UUID == "ROWS-OLD");
+        Assert.Equal(11m, secondary.StoreRetailPriceValue);
+        Assert.True(secondary.IsAutoPricing);
+        Assert.NotEqual("pos-actor", secondary.UpdatedBy);
+        var otherStore = Assert.Single(rows, x => x.UUID == "ROWS-OTHER-STORE");
+        Assert.Equal(13m, otherStore.StoreRetailPriceValue);
+        Assert.True(otherStore.IsAutoPricing);
+    }
+
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_syncs_type2_set_code_projection_only()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-PRICE-SET");
+        await fixture.SeedStoreRetailPriceAsync(
+            "S01", "P-PRICE-SET", 10m, "SET-PRICE-ROW", isSpecialProduct: true);
+        // SetType==2：套码价跟随门店主价；SetType==1：套码有自己的价格，不能被改。
+        await fixture.SeedProductSetCodeAsync("P-PRICE-SET", "MC-FOLLOW", "SET-BAR-FOLLOW", 10m, "SET-FOLLOW", setType: 2);
+        await fixture.SeedProductSetCodeAsync("P-PRICE-SET", "MC-OWN", "SET-BAR-OWN", 3m, "SET-OWN", setType: 1);
+        await fixture.SeedStoreMultiCodeProductAsync("S01", "P-PRICE-SET", "MC-FOLLOW", "SET-BAR-FOLLOW", 10m, "PROJ-FOLLOW");
+        await fixture.SeedStoreMultiCodeProductAsync("S01", "P-PRICE-SET", "MC-OWN", "SET-BAR-OWN", 3m, "PROJ-OWN");
+        // 其他门店的投影行不属于本次改价范围。
+        await fixture.SeedStoreMultiCodeProductAsync("S02", "P-PRICE-SET", "MC-FOLLOW", "SET-BAR-FOLLOW", 10m, "PROJ-OTHER-STORE");
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-PRICE-SET", 18m),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        var projections = await fixture.LoadStoreMultiCodeProductsAsync();
+        var follow = Assert.Single(projections, x => x.UUID == "PROJ-FOLLOW");
+        Assert.Equal(18m, follow.MultiCodeRetailPrice);
+        Assert.Equal("pos-actor", follow.UpdatedBy);
+        var own = Assert.Single(projections, x => x.UUID == "PROJ-OWN");
+        Assert.Equal(3m, own.MultiCodeRetailPrice);
+        Assert.NotEqual("pos-actor", own.UpdatedBy);
+        var otherStore = Assert.Single(projections, x => x.UUID == "PROJ-OTHER-STORE");
+        Assert.Equal(10m, otherStore.MultiCodeRetailPrice);
+
+        // 响应里的套码条码也已是新价；SetType 其他值的套码价格不变。
+        Assert.Equal(18m, Assert.Single(result.Response!.Items, x => x.LookupCode == "SET-BAR-FOLLOW").RetailPrice);
+        Assert.Equal(3m, Assert.Single(result.Response.Items, x => x.LookupCode == "SET-BAR-OWN").RetailPrice);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task UpdateSpecialProductPriceAsync_rejects_product_that_is_not_an_active_special_product(
+        bool isActive,
+        bool isSpecialProduct)
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-NOT-SPECIAL");
+        await fixture.SeedStoreRetailPriceAsync(
+            "S01", "P-NOT-SPECIAL", 10m, "NOT-SPECIAL-ROW",
+            isSpecialProduct: isSpecialProduct, isActive: isActive, isAutoPricing: true);
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-NOT-SPECIAL", 15m),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("NOT_SPECIAL_PRODUCT", result.ErrorCode);
+        var row = Assert.Single(await fixture.LoadStoreRetailPricesAsync());
+        Assert.Equal(10m, row.StoreRetailPriceValue);
+        Assert.True(row.IsAutoPricing);
+    }
+
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_rejects_product_without_any_store_price_row()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-NO-ROW");
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-NO-ROW", 15m),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("NOT_SPECIAL_PRODUCT", result.ErrorCode);
+        Assert.Empty(await fixture.LoadStoreRetailPricesAsync());
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("0.001")]
+    [InlineData("1.234")]
+    [InlineData("100000")]
+    [InlineData("99999.995")]
+    public async Task UpdateSpecialProductPriceAsync_rejects_invalid_price(string rawPrice)
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-BAD-PRICE");
+        await fixture.SeedStoreRetailPriceAsync("S01", "P-BAD-PRICE", 10m, "BAD-PRICE-ROW", isSpecialProduct: true);
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest(
+                "S01", "P-BAD-PRICE", decimal.Parse(rawPrice, System.Globalization.CultureInfo.InvariantCulture)),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("PRICE_INVALID", result.ErrorCode);
+        Assert.Equal(10m, Assert.Single(await fixture.LoadStoreRetailPricesAsync()).StoreRetailPriceValue);
+    }
+
+    [Theory]
+    [InlineData("0.01")]
+    [InlineData("99999.99")]
+    [InlineData("5")]
+    public async Task UpdateSpecialProductPriceAsync_accepts_boundary_prices(string rawPrice)
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-OK-PRICE");
+        await fixture.SeedStoreRetailPriceAsync("S01", "P-OK-PRICE", 10m, "OK-PRICE-ROW", isSpecialProduct: true);
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+        var price = decimal.Parse(rawPrice, System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-OK-PRICE", price),
+            "pos-actor",
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(price, Assert.Single(await fixture.LoadStoreRetailPricesAsync()).StoreRetailPriceValue);
+    }
+
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_returns_not_found_for_missing_store_or_product()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await SeedPriceEditProductAsync(fixture, "P-EXISTS");
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var missingStore = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("NOPE", "P-EXISTS", 5m), "pos-actor", CancellationToken.None);
+        var missingProduct = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest("S01", "P-NOPE", 5m), "pos-actor", CancellationToken.None);
+
+        Assert.Equal("STORE_NOT_FOUND", missingStore.ErrorCode);
+        Assert.Equal("PRODUCT_NOT_FOUND", missingProduct.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("", "P01", "STORE_CODE_REQUIRED")]
+    [InlineData("S01", "  ", "PRODUCT_CODE_REQUIRED")]
+    public async Task UpdateSpecialProductPriceAsync_requires_codes(
+        string storeCode,
+        string productCode,
+        string expectedErrorCode)
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        var service = new CatalogService(fixture.DbContext, new PriceIndexBuilder(), new CatalogIndexCache());
+
+        var result = await service.UpdateSpecialProductPriceAsync(
+            new CatalogSpecialProductPriceRequest(storeCode, productCode, 5m), "pos-actor", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(expectedErrorCode, result.ErrorCode);
+    }
+
     private static SellableItemDto CreateSellableItem(
         string productCode,
         string lookupCode,
@@ -1511,7 +1752,8 @@ public sealed class CatalogServiceTests
             decimal? discountRate = null,
             bool isSpecialProduct = false,
             bool isActive = true,
-            DateTime? updatedAt = null)
+            DateTime? updatedAt = null,
+            bool isAutoPricing = false)
         {
             var timestamp = updatedAt ?? DateTime.UtcNow;
             await client.Insertable(new StoreRetailPrice
@@ -1523,6 +1765,7 @@ public sealed class CatalogServiceTests
                 StoreRetailPriceValue = retailPrice,
                 DiscountRate = discountRate,
                 IsSpecialProduct = isSpecialProduct,
+                IsAutoPricing = isAutoPricing,
                 IsActive = isActive,
                 IsDeleted = false,
                 CreatedAt = timestamp,
@@ -1582,7 +1825,8 @@ public sealed class CatalogServiceTests
             string setProductCode,
             string setBarcode,
             decimal setRetailPrice,
-            string uuid)
+            string uuid,
+            int setType = 1)
         {
             await client.Insertable(new ProductSetCode
             {
@@ -1593,7 +1837,7 @@ public sealed class CatalogServiceTests
                 SetBarcode = setBarcode,
                 SetRetailPrice = setRetailPrice,
                 SetQuantity = 1,
-                SetType = 1,
+                SetType = setType,
                 IsActive = true,
                 IsDeleted = false,
                 CreatedAt = DateTime.UtcNow,
@@ -1671,6 +1915,11 @@ public sealed class CatalogServiceTests
             {
                 await client.Insertable(batch).ExecuteCommandAsync();
             }
+        }
+
+        public async Task<List<StoreMultiCodeProduct>> LoadStoreMultiCodeProductsAsync()
+        {
+            return await client.Queryable<StoreMultiCodeProduct>().ToListAsync();
         }
 
         public async Task<List<StoreRetailPrice>> LoadStoreRetailPricesAsync()

@@ -58,7 +58,7 @@ public sealed class WpfScrollViewerTouchPanningTests
             "src",
             "Hbpos.Client.Wpf");
         var failures = new List<string>();
-        var foundHorizontalScroller = false;
+        var foundVerticalScroller = false;
 
         foreach (var path in Directory.EnumerateFiles(sourceRoot, "*.xaml", SearchOption.AllDirectories)
                      .Where(path => !IsBuildOutput(path, sourceRoot)))
@@ -71,7 +71,7 @@ public sealed class WpfScrollViewerTouchPanningTests
                     "Disabled",
                     StringComparison.Ordinal);
                 var expectedStyle = isHorizontalOnly ? HorizontalTouchStyleKey : VerticalTouchStyleKey;
-                foundHorizontalScroller |= isHorizontalOnly;
+                foundVerticalScroller |= !isHorizontalOnly;
 
                 if (!string.Equals(
                         (string?)scrollViewer.Attribute("Style"),
@@ -85,7 +85,9 @@ public sealed class WpfScrollViewerTouchPanningTests
             }
         }
 
-        Assert.True(foundHorizontalScroller, "测试样本中至少应包含一个仅横向滚动的页面区域。");
+        // 样本必须包含纵向滚动区域，保证扫描确实覆盖到了页面。仅横向滚动区域目前没有
+        // （特殊商品页重设计后搜索结果改为右侧纵向列表）；将来再出现时仍受上面的按轴样式约束。
+        Assert.True(foundVerticalScroller, "测试样本中至少应包含一个纵向滚动的页面区域。");
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
@@ -108,7 +110,7 @@ public sealed class WpfScrollViewerTouchPanningTests
                 $"{{StaticResource {HorizontalTouchStyleKey}}}")
             .ToArray();
 
-        Assert.NotEmpty(horizontalScrollers);
+        // 目前应用里没有仅横向滚动的区域，因此可能为空；一旦出现，其中的 ListBox 必须放弃自身触控平移。
         Assert.All(
             horizontalScrollers.SelectMany(scrollViewer => scrollViewer.Descendants(Presentation + "ListBox")),
             listBox => Assert.Equal("None", (string?)listBox.Attribute("ScrollViewer.PanningMode")));

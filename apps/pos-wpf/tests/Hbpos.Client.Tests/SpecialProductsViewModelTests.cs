@@ -52,11 +52,10 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Theory]
-    [InlineData("download", "back")]
-    [InlineData("add", "back")]
-    [InlineData("remove", "back")]
-    [InlineData("download", "add-to-cart")]
-    public async Task Navigation_cancels_running_remote_operation_before_leaving(string operation, string navigation)
+    [InlineData("download")]
+    [InlineData("add")]
+    [InlineData("remove")]
+    public async Task Navigation_cancels_running_remote_operation_before_leaving(string operation)
     {
         var operationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -106,22 +105,12 @@ public sealed class SpecialProductsViewModelTests
         };
         await operationStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
 
-        Task navigationExecution = Task.CompletedTask;
-        if (navigation == "back")
-        {
-            Assert.True(viewModel.BackCommand.CanExecute(null));
-            viewModel.BackCommand.Execute(null);
-        }
-        else
-        {
-            Assert.True(viewModel.AddToCartCommand.CanExecute(item));
-            navigationExecution = Assert.IsAssignableFrom<IAsyncRelayCommand<SellableItemDto>>(viewModel.AddToCartCommand)
-                .ExecuteAsync(item);
-        }
+        Assert.True(viewModel.BackCommand.CanExecute(null));
+        viewModel.BackCommand.Execute(null);
         await WaitUntilAsync(() => navigated);
         await cancellationObserved.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         var wasCancellationRequested = receivedToken.IsCancellationRequested;
-        await Task.WhenAll(execution, navigationExecution).WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        await execution.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
         operationCancellationRegistration.Dispose();
 
         Assert.True(navigated);
@@ -163,7 +152,8 @@ public sealed class SpecialProductsViewModelTests
         var line = Assert.Single(cart.Lines);
         Assert.Equal("SKU-001", line.ProductCode);
         Assert.Equal(1m, line.Quantity);
-        Assert.Equal(1, backCallCount);
+        // 加购后留在本页，方便连续点选；只有点「返回收银」才离开。
+        Assert.Equal(0, backCallCount);
         Assert.Equal(1, repository.LoadSpecialProductItemsCallCount);
     }
 
@@ -205,7 +195,7 @@ public sealed class SpecialProductsViewModelTests
 
         var line = Assert.Single(cart.Lines);
         Assert.Equal("SKU-001", line.ProductCode);
-        Assert.Equal(1, backCallCount);
+        Assert.Equal(0, backCallCount);
     }
 
     [Fact]
@@ -246,7 +236,7 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task AddToCartCommand_reports_added_cart_line_for_reveal()
+    public async Task AddToCartCommand_reports_added_cart_line_for_reveal_when_returning_to_cashier()
     {
         var cart = new PosCartService();
         CartLine? revealedLine = null;
@@ -260,12 +250,16 @@ public sealed class SpecialProductsViewModelTests
 
         viewModel.AddToCartCommand.Execute(item);
 
+        // 留在页内时不定位购物车行；返回收银后才定位到最后加入的那一行。
+        Assert.Null(revealedLine);
+        viewModel.BackCommand.Execute(null);
+
         var line = Assert.Single(cart.Lines);
         Assert.Same(line, revealedLine);
     }
 
     [Fact]
-    public async Task AddToCartCommand_reports_existing_cart_line_when_quantity_increases()
+    public async Task AddToCartCommand_reveals_existing_cart_line_once_after_quantity_increases()
     {
         var cart = new PosCartService();
         var revealedLines = new List<CartLine>();
@@ -279,15 +273,16 @@ public sealed class SpecialProductsViewModelTests
 
         viewModel.AddToCartCommand.Execute(item);
         viewModel.AddToCartCommand.Execute(item);
+        viewModel.BackCommand.Execute(null);
 
         var line = Assert.Single(cart.Lines);
         Assert.Equal(2m, line.Quantity);
-        Assert.Equal(2, revealedLines.Count);
-        Assert.All(revealedLines, revealedLine => Assert.Same(line, revealedLine));
+        var revealedLine = Assert.Single(revealedLines);
+        Assert.Same(line, revealedLine);
     }
 
     [Fact]
-    public async Task PreloadAsync_loads_special_products_and_pages_first_twenty()
+    public async Task PreloadAsync_loads_special_products_and_shows_all_cards_without_paging()
     {
         var repository = new FakeCatalogRepository { SpecialItems = CreateSpecialItems(21) };
         var viewModel = CreateViewModel(repository: repository);
@@ -295,8 +290,8 @@ public sealed class SpecialProductsViewModelTests
         await viewModel.PreloadAsync();
 
         Assert.Equal(1, repository.LoadSpecialProductItemsCallCount);
-        Assert.Equal(20, viewModel.PagedSpecialItems.Count);
-        Assert.Equal(2, viewModel.TotalPages);
+        Assert.Equal(21, viewModel.DisplayedCards.Count);
+        Assert.False(viewModel.HasMoreToShow);
     }
 
     [Fact]
@@ -311,8 +306,8 @@ public sealed class SpecialProductsViewModelTests
         await viewModel.PreloadAsync();
 
         Assert.Equal(1, workflow.PreloadCallCount);
-        Assert.Equal(20, viewModel.PagedSpecialItems.Count);
-        Assert.Equal(2, viewModel.TotalPages);
+        Assert.Equal(21, viewModel.DisplayedCards.Count);
+        Assert.Equal(21, viewModel.SpecialItems.Count);
     }
 
     [Fact]
@@ -362,7 +357,7 @@ public sealed class SpecialProductsViewModelTests
         await Task.WhenAll(preloadTask, ensureTask);
 
         Assert.Equal(1, repository.LoadSpecialProductItemsCallCount);
-        Assert.Single(viewModel.PagedSpecialItems);
+        Assert.Single(viewModel.DisplayedCards);
     }
 
     [Fact]
@@ -396,7 +391,7 @@ public sealed class SpecialProductsViewModelTests
 
         Assert.Equal(20, preloadedSources.Count);
         Assert.Equal(repository.SpecialItems.Take(20).Select(item => item.ProductImage), preloadedSources);
-        Assert.Equal(20, viewModel.PagedSpecialItems.Count);
+        Assert.Equal(21, viewModel.DisplayedCards.Count);
     }
 
     [Fact]
@@ -436,7 +431,7 @@ public sealed class SpecialProductsViewModelTests
         await viewModel.PreloadFirstPageThumbnailsAsync();
 
         Assert.Single(viewModel.SpecialItems);
-        Assert.Single(viewModel.PagedSpecialItems);
+        Assert.Single(viewModel.DisplayedCards);
     }
 
     [Fact]
@@ -528,28 +523,23 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task LoadAsync_with_more_than_twenty_items_pages_the_special_product_list()
+    public async Task LoadAsync_with_more_than_one_chunk_shows_first_hundred_then_show_more()
     {
-        var repository = new FakeCatalogRepository { SpecialItems = CreateSpecialItems(21) };
+        var repository = new FakeCatalogRepository { SpecialItems = CreateSpecialItems(101) };
         var viewModel = CreateViewModel(repository: repository);
 
         await viewModel.LoadAsync();
 
-        Assert.Equal(1, viewModel.CurrentPage);
-        Assert.Equal(2, viewModel.TotalPages);
-        Assert.Equal(
-            Enumerable.Range(1, 20).Select(number => $"SKU-{number:000}"),
-            viewModel.PagedSpecialItems.Select(item => item.ProductCode));
+        Assert.Equal(100, viewModel.DisplayedCards.Count);
+        Assert.True(viewModel.HasMoreToShow);
+        Assert.Equal("SKU-001", viewModel.DisplayedCards.First().ProductCode);
+        Assert.True(viewModel.ShowMoreCommand.CanExecute(null));
 
-        viewModel.NextPageCommand.Execute(null);
+        viewModel.ShowMoreCommand.Execute(null);
 
-        Assert.Equal(2, viewModel.CurrentPage);
-        Assert.Equal("SKU-021", Assert.Single(viewModel.PagedSpecialItems).ProductCode);
-
-        viewModel.PreviousPageCommand.Execute(null);
-
-        Assert.Equal(1, viewModel.CurrentPage);
-        Assert.Equal("SKU-001", viewModel.PagedSpecialItems.First().ProductCode);
+        Assert.Equal(101, viewModel.DisplayedCards.Count);
+        Assert.False(viewModel.HasMoreToShow);
+        Assert.False(viewModel.ShowMoreCommand.CanExecute(null));
     }
 
     [Fact]
@@ -569,7 +559,7 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task ActivateForEntry_resets_page_edit_search_and_selection()
+    public async Task ActivateForEntry_resets_filter_edit_search_toast_and_selection()
     {
         var repository = new FakeCatalogRepository { SpecialItems = CreateSpecialItems(21) };
         var searchItem = CreateItem("SKU-999", "Search Item", "930999");
@@ -580,25 +570,29 @@ public sealed class SpecialProductsViewModelTests
         };
         var viewModel = CreateViewModel(workflow: workflow);
         await viewModel.LoadAsync();
-        viewModel.NextPageCommand.Execute(null);
+        viewModel.FilterText = "Item 021";
         viewModel.ToggleEditModeCommand.Execute(null);
         viewModel.SearchText = "930999";
         viewModel.SearchCommand.Execute(null);
-        viewModel.SpecialItemCardCommand.Execute(viewModel.PagedSpecialItems.Single());
+        viewModel.SpecialItemCardCommand.Execute(viewModel.SpecialItems.Last());
 
         viewModel.ActivateForEntry();
 
-        Assert.Equal(1, viewModel.CurrentPage);
         Assert.False(viewModel.IsEditMode);
+        Assert.Empty(viewModel.FilterText);
+        Assert.False(viewModel.IsCartFilterActive);
+        Assert.False(viewModel.IsToastVisible);
+        Assert.False(viewModel.IsPriceEditorOpen);
         Assert.Empty(viewModel.SearchText);
         Assert.Empty(viewModel.SearchResults);
         Assert.Null(viewModel.SelectedSearchResult);
         Assert.Null(viewModel.SelectedSpecialItem);
-        Assert.Equal("SKU-001", viewModel.PagedSpecialItems.First().ProductCode);
+        Assert.Equal(21, viewModel.DisplayedCards.Count);
+        Assert.Equal("SKU-001", viewModel.DisplayedCards.First().ProductCode);
     }
 
     [Fact]
-    public async Task ActivateForEntry_after_edit_add_returns_to_first_page_normal_mode()
+    public async Task ActivateForEntry_after_edit_add_returns_to_normal_mode_with_all_items()
     {
         var initialItems = CreateSpecialItems(20);
         var addedItem = CreateItem("SKU-021", "Item 021", "930021");
@@ -620,10 +614,9 @@ public sealed class SpecialProductsViewModelTests
         await viewModel.AddSpecialProductCommand.ExecuteAsync(addedItem);
         viewModel.ActivateForEntry();
 
-        Assert.Equal(1, viewModel.CurrentPage);
         Assert.False(viewModel.IsEditMode);
-        Assert.Equal(2, viewModel.TotalPages);
-        Assert.Equal("SKU-001", viewModel.PagedSpecialItems.First().ProductCode);
+        Assert.Equal(21, viewModel.DisplayedCards.Count);
+        Assert.Equal("SKU-001", viewModel.DisplayedCards.First().ProductCode);
     }
 
     [Fact]
@@ -689,15 +682,16 @@ public sealed class SpecialProductsViewModelTests
             });
         await viewModel.LoadAsync();
         var collectionChangeCount = 0;
-        viewModel.PagedSpecialItems.CollectionChanged += (_, _) => collectionChangeCount++;
+        viewModel.DisplayedCards.CollectionChanged += (_, _) => collectionChangeCount++;
 
         viewModel.ActivateForEntry();
 
         Assert.Equal(0, delayCallCount);
         Assert.True(viewModel.AreThumbnailsEnabled);
+        // 序列未变时不重建网格，缩略图不会重新解码。
         Assert.Equal(0, collectionChangeCount);
-        Assert.Equal(20, viewModel.PagedSpecialItems.Count);
-        Assert.Equal("SKU-001", viewModel.PagedSpecialItems.First().ProductCode);
+        Assert.Equal(20, viewModel.DisplayedCards.Count);
+        Assert.Equal("SKU-001", viewModel.DisplayedCards.First().ProductCode);
     }
 
     [Fact]
@@ -804,21 +798,23 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task MoveDown_across_page_boundary_keeps_moved_item_visible_on_destination_page()
+    public async Task MoveToFront_saves_order_with_selected_item_first_and_keeps_it_selected()
     {
-        var repository = new FakeCatalogRepository { SpecialItems = CreateSpecialItems(21) };
+        var repository = new FakeCatalogRepository { SpecialItems = CreateSpecialItems(3) };
         var viewModel = CreateViewModel(repository: repository);
         await viewModel.LoadAsync();
         viewModel.ToggleEditModeCommand.Execute(null);
-        var lastItemOnFirstPage = viewModel.PagedSpecialItems.Last();
+        var third = viewModel.SpecialItems.Last();
+        viewModel.SpecialItemCardCommand.Execute(third);
 
-        await viewModel.MoveDownCommand.ExecuteAsync(lastItemOnFirstPage);
+        Assert.True(viewModel.MoveToFrontCommand.CanExecute(third));
+        await viewModel.MoveToFrontCommand.ExecuteAsync(third);
 
-        Assert.Equal(2, viewModel.CurrentPage);
-        Assert.Equal("SKU-020", Assert.Single(viewModel.PagedSpecialItems).ProductCode);
-        Assert.Equal(
-            ["SKU-019", "SKU-021", "SKU-020"],
-            Assert.Single(repository.SavedOrders).Skip(18).ToArray());
+        Assert.Equal(["SKU-003", "SKU-001", "SKU-002"], Assert.Single(repository.SavedOrders));
+        Assert.Equal("SKU-003", viewModel.DisplayedCards.First().ProductCode);
+        Assert.Equal(1, viewModel.DisplayedCards.First().Position);
+        Assert.Equal("SKU-003", viewModel.SelectedSpecialItem?.ProductCode);
+        Assert.False(viewModel.MoveToFrontCommand.CanExecute(viewModel.SelectedSpecialItem));
     }
 
     [Fact]
@@ -931,7 +927,7 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task Failed_remove_preserves_special_list_page_and_selection_with_error_status()
+    public async Task Failed_remove_preserves_special_list_cards_and_selection_with_error_status()
     {
         var specialItems = CreateSpecialItems(2);
         var workflow = new FakeSpecialProductsWorkflowService
@@ -943,15 +939,15 @@ public sealed class SpecialProductsViewModelTests
         var viewModel = CreateViewModel(workflow: workflow);
         await viewModel.LoadAsync();
         viewModel.ToggleEditModeCommand.Execute(null);
-        var selectedItem = viewModel.PagedSpecialItems.Last();
+        var selectedItem = viewModel.SpecialItems.Last();
         viewModel.SpecialItemCardCommand.Execute(selectedItem);
         var specialItemCodes = viewModel.SpecialItems.Select(item => item.ProductCode).ToArray();
-        var pagedItemCodes = viewModel.PagedSpecialItems.Select(item => item.ProductCode).ToArray();
+        var displayedItemCodes = viewModel.DisplayedCards.Select(card => card.ProductCode).ToArray();
 
         await viewModel.RemoveSpecialProductCommand.ExecuteAsync(selectedItem);
 
         Assert.Equal(specialItemCodes, viewModel.SpecialItems.Select(item => item.ProductCode));
-        Assert.Equal(pagedItemCodes, viewModel.PagedSpecialItems.Select(item => item.ProductCode));
+        Assert.Equal(displayedItemCodes, viewModel.DisplayedCards.Select(card => card.ProductCode));
         Assert.Equal(selectedItem.ProductCode, viewModel.SelectedSpecialItem?.ProductCode);
         Assert.Contains("network unavailable", viewModel.StatusMessage, StringComparison.Ordinal);
     }
@@ -981,7 +977,7 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task Remove_last_item_on_last_page_returns_to_previous_page()
+    public async Task Remove_item_drops_its_card_and_clears_selection()
     {
         var initialItems = CreateSpecialItems(21);
         var repository = new FakeCatalogRepository { SpecialItems = initialItems };
@@ -998,21 +994,18 @@ public sealed class SpecialProductsViewModelTests
         var viewModel = CreateViewModel(repository: repository, service: service);
         await viewModel.LoadAsync();
         viewModel.ToggleEditModeCommand.Execute(null);
-        viewModel.NextPageCommand.Execute(null);
-        var lastPageItem = Assert.Single(viewModel.PagedSpecialItems);
-        viewModel.SpecialItemCardCommand.Execute(lastPageItem);
+        var lastItem = viewModel.SpecialItems.Last();
+        viewModel.SpecialItemCardCommand.Execute(lastItem);
 
-        await viewModel.RemoveSpecialProductCommand.ExecuteAsync(lastPageItem);
+        await viewModel.RemoveSpecialProductCommand.ExecuteAsync(lastItem);
 
-        Assert.Equal(1, viewModel.CurrentPage);
-        Assert.Equal(1, viewModel.TotalPages);
-        Assert.Equal(20, viewModel.PagedSpecialItems.Count());
-        Assert.DoesNotContain(viewModel.PagedSpecialItems, item => item.ProductCode == "SKU-021");
+        Assert.Equal(20, viewModel.DisplayedCards.Count);
+        Assert.DoesNotContain(viewModel.DisplayedCards, card => card.ProductCode == "SKU-021");
         Assert.Null(viewModel.SelectedSpecialItem);
     }
 
     [Fact]
-    public async Task Add_item_that_creates_new_page_navigates_to_the_added_item()
+    public async Task Add_item_appends_card_and_requests_focus_on_it()
     {
         var initialItems = CreateSpecialItems(20);
         var addedItem = CreateItem("SKU-021", "Item 021", "930021");
@@ -1030,12 +1023,14 @@ public sealed class SpecialProductsViewModelTests
         var viewModel = CreateViewModel(repository: repository, service: service);
         await viewModel.LoadAsync();
         viewModel.ToggleEditModeCommand.Execute(null);
+        var focusRequests = new List<string>();
+        viewModel.FocusProductRequested += (_, productCode) => focusRequests.Add(productCode);
 
         await viewModel.AddSpecialProductCommand.ExecuteAsync(addedItem);
 
-        Assert.Equal(2, viewModel.CurrentPage);
-        Assert.Equal(2, viewModel.TotalPages);
-        Assert.Equal("SKU-021", Assert.Single(viewModel.PagedSpecialItems).ProductCode);
+        Assert.Equal("SKU-021", viewModel.DisplayedCards.Last().ProductCode);
+        Assert.Equal(21, viewModel.DisplayedCards.Last().Position);
+        Assert.Equal(["SKU-021"], focusRequests);
     }
 
     [Fact]
@@ -1102,6 +1097,529 @@ public sealed class SpecialProductsViewModelTests
         Assert.False(viewModel.IsDownloadProgressVisible);
     }
 
+    // ================= 卡片角标、购物车联动、筛选 =================
+
+    [Fact]
+    public async Task Cards_show_cart_quantity_and_follow_cart_changes()
+    {
+        var cart = new PosCartService();
+        var alpha = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var beta = CreateItem("SKU-002", "Beta", "930002", isSpecialProduct: true);
+        var repository = new FakeCatalogRepository { SpecialItems = [alpha, beta] };
+        var viewModel = CreateViewModel(cart: cart, repository: repository);
+        await viewModel.LoadAsync();
+        var alphaCard = viewModel.DisplayedCards.Single(card => card.ProductCode == "SKU-001");
+        Assert.False(alphaCard.IsInCart);
+
+        var line = cart.AddItem(alpha);
+        cart.AddItem(alpha);
+
+        Assert.True(alphaCard.IsInCart);
+        Assert.Equal(2m, alphaCard.CartQuantity);
+        Assert.Equal("×2", alphaCard.CartQuantityText);
+        Assert.False(viewModel.DisplayedCards.Single(card => card.ProductCode == "SKU-002").IsInCart);
+        Assert.Equal(1, viewModel.InCartCount);
+
+        cart.RemoveLine(line);
+
+        Assert.False(alphaCard.IsInCart);
+        Assert.Equal(0, viewModel.InCartCount);
+    }
+
+    [Fact]
+    public async Task FilterText_filters_cards_by_name_item_number_and_lookup_code()
+    {
+        var alpha = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var beta = CreateItem("SKU-002", "Beta", "930002", isSpecialProduct: true);
+        var viewModel = CreateViewModel(repository: new FakeCatalogRepository { SpecialItems = [alpha, beta] });
+        await viewModel.LoadAsync();
+
+        viewModel.FilterText = "beta";
+        Assert.Equal(["SKU-002"], viewModel.DisplayedCards.Select(card => card.ProductCode));
+
+        viewModel.FilterText = "930001";
+        Assert.Equal(["SKU-001"], viewModel.DisplayedCards.Select(card => card.ProductCode));
+
+        viewModel.FilterText = "sku-002";
+        Assert.Equal(["SKU-002"], viewModel.DisplayedCards.Select(card => card.ProductCode));
+
+        viewModel.FilterText = "no-such-product";
+        Assert.Empty(viewModel.DisplayedCards);
+        Assert.True(viewModel.IsFilterEmpty);
+        Assert.False(viewModel.IsSpecialListEmpty);
+
+        viewModel.FilterText = string.Empty;
+        Assert.Equal(2, viewModel.DisplayedCards.Count);
+        Assert.False(viewModel.IsFilterEmpty);
+    }
+
+    [Fact]
+    public async Task Cart_filter_shows_only_products_in_cart_and_tracks_cart_changes()
+    {
+        var cart = new PosCartService();
+        var alpha = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var beta = CreateItem("SKU-002", "Beta", "930002", isSpecialProduct: true);
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: new FakeCatalogRepository { SpecialItems = [alpha, beta] });
+        await viewModel.LoadAsync();
+        var line = cart.AddItem(alpha);
+
+        viewModel.ShowInCartCommand.Execute(null);
+
+        Assert.True(viewModel.IsCartFilterActive);
+        Assert.Equal(["SKU-001"], viewModel.DisplayedCards.Select(card => card.ProductCode));
+        Assert.Contains("1", viewModel.InCartChipText, StringComparison.Ordinal);
+
+        // 筛选开着时购物车清空，列表随之为空，而不是保留过期卡片。
+        cart.RemoveLine(line);
+        Assert.Empty(viewModel.DisplayedCards);
+
+        viewModel.ShowAllCommand.Execute(null);
+        Assert.False(viewModel.IsCartFilterActive);
+        Assert.Equal(2, viewModel.DisplayedCards.Count);
+    }
+
+    [Fact]
+    public async Task Cart_summary_lists_latest_lines_total_and_empty_state()
+    {
+        var cart = new PosCartService();
+        var alpha = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var beta = CreateItem("SKU-002", "Beta", "930002", isSpecialProduct: true);
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: new FakeCatalogRepository { SpecialItems = [alpha, beta] });
+        await viewModel.LoadAsync();
+        Assert.True(viewModel.IsCartEmpty);
+        Assert.Empty(viewModel.CartSummaryLines);
+
+        cart.AddItem(alpha);
+        cart.AddItem(beta);
+
+        Assert.False(viewModel.IsCartEmpty);
+        Assert.True(viewModel.HasCartLines);
+        // 摘要按最近加入在前。
+        Assert.Equal(["Beta", "Alpha"], viewModel.CartSummaryLines.Select(line => line.DisplayName));
+        Assert.Equal("$2.50", viewModel.CartTotalText);
+        Assert.Equal("$1.25", viewModel.CartSummaryLines[0].AmountText);
+        Assert.Contains("2", viewModel.CartCountText, StringComparison.Ordinal);
+
+        cart.Clear();
+
+        Assert.True(viewModel.IsCartEmpty);
+        Assert.Empty(viewModel.CartSummaryLines);
+        Assert.Equal("$0.00", viewModel.CartTotalText);
+    }
+
+    // ================= 加购提示与撤销 =================
+
+    [Fact]
+    public async Task AddToCart_shows_toast_with_undo_and_highlights_the_card()
+    {
+        var cart = new PosCartService();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var viewModel = CreateViewModel(cart: cart, repository: new FakeCatalogRepository { SpecialItems = [item] });
+        await viewModel.LoadAsync();
+
+        viewModel.AddToCartCommand.Execute(item);
+
+        Assert.True(viewModel.IsToastVisible);
+        Assert.True(viewModel.CanUndoToast);
+        Assert.Contains("Alpha", viewModel.ToastText, StringComparison.Ordinal);
+        Assert.True(viewModel.UndoAddCommand.CanExecute(null));
+        Assert.True(viewModel.DisplayedCards.Single().IsJustAdded);
+
+        viewModel.DismissToastCommand.Execute(null);
+        Assert.False(viewModel.IsToastVisible);
+        Assert.False(viewModel.CanUndoToast);
+    }
+
+    [Fact]
+    public async Task Toast_and_highlight_clear_after_their_delays()
+    {
+        var delay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var viewModel = CreateViewModel(
+            repository: new FakeCatalogRepository { SpecialItems = [item] },
+            delayAsync: (_, cancellationToken) => delay.Task.WaitAsync(cancellationToken));
+        await viewModel.LoadAsync();
+
+        viewModel.AddToCartCommand.Execute(item);
+        Assert.True(viewModel.IsToastVisible);
+
+        delay.SetResult();
+        await WaitUntilAsync(() => !viewModel.IsToastVisible);
+        await WaitUntilAsync(() => !viewModel.DisplayedCards.Single().IsJustAdded);
+        Assert.False(viewModel.IsToastVisible);
+    }
+
+    [Fact]
+    public async Task UndoAdd_reduces_quantity_when_line_holds_more_than_the_last_add()
+    {
+        var cart = new PosCartService();
+        var logger = new RecordingOperationAuditLogger();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: new FakeCatalogRepository { SpecialItems = [item] },
+            operationAuditLogger: logger);
+        await viewModel.LoadAsync();
+        viewModel.AddToCartCommand.Execute(item);
+        viewModel.AddToCartCommand.Execute(item);
+
+        viewModel.UndoAddCommand.Execute(null);
+
+        Assert.Equal(1m, Assert.Single(cart.Lines).Quantity);
+        Assert.False(viewModel.IsToastVisible);
+        Assert.False(viewModel.UndoAddCommand.CanExecute(null));
+        var undoEvent = logger.Events.Last();
+        Assert.Equal("CART_ITEM_QUANTITY_CHANGE", undoEvent.OperationType);
+        Assert.Equal("special-products-undo", undoEvent.ReasonCode);
+        Assert.Contains("Alpha", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UndoAdd_removes_the_line_when_it_was_the_only_unit_and_skips_reveal()
+    {
+        var cart = new PosCartService();
+        var logger = new RecordingOperationAuditLogger();
+        var revealed = new List<CartLine>();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: new FakeCatalogRepository { SpecialItems = [item] },
+            onCartLineAdded: revealed.Add,
+            operationAuditLogger: logger);
+        await viewModel.LoadAsync();
+        viewModel.AddToCartCommand.Execute(item);
+
+        viewModel.UndoAddCommand.Execute(null);
+        viewModel.BackCommand.Execute(null);
+
+        Assert.Empty(cart.Lines);
+        Assert.Equal("CART_ITEM_REMOVE", logger.Events.Last().OperationType);
+        // 撤销后购物车里没有这一行，返回收银时不应再定位。
+        Assert.Empty(revealed);
+    }
+
+    [Fact]
+    public async Task UndoAdd_is_a_noop_when_the_cart_line_is_already_gone()
+    {
+        var cart = new PosCartService();
+        var logger = new RecordingOperationAuditLogger();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: new FakeCatalogRepository { SpecialItems = [item] },
+            operationAuditLogger: logger);
+        await viewModel.LoadAsync();
+        viewModel.AddToCartCommand.Execute(item);
+        var auditCountBefore = logger.Events.Count;
+        cart.RemoveLine(Assert.Single(cart.Lines));
+
+        viewModel.UndoAddCommand.Execute(null);
+
+        Assert.Equal(auditCountBefore, logger.Events.Count);
+        Assert.False(viewModel.IsToastVisible);
+        Assert.Empty(cart.Lines);
+    }
+
+    // ================= 编辑模式：选中位置与移除确认 =================
+
+    [Fact]
+    public async Task Edit_mode_selection_reports_position_and_marks_only_the_selected_card()
+    {
+        var viewModel = CreateViewModel(repository: new FakeCatalogRepository { SpecialItems = CreateSpecialItems(3) });
+        await viewModel.LoadAsync();
+        viewModel.ToggleEditModeCommand.Execute(null);
+
+        viewModel.SpecialItemCardCommand.Execute(viewModel.SpecialItems[1]);
+
+        Assert.Contains("Item 002", viewModel.SelectedPositionText, StringComparison.Ordinal);
+        Assert.Contains("2", viewModel.SelectedPositionText, StringComparison.Ordinal);
+        Assert.Equal(["SKU-002"], viewModel.DisplayedCards.Where(card => card.IsSelected).Select(card => card.ProductCode));
+        Assert.Equal([1, 2, 3], viewModel.DisplayedCards.Select(card => card.Position));
+    }
+
+    [Fact]
+    public async Task BeginRemove_asks_for_confirmation_on_the_card_and_cancel_clears_it()
+    {
+        var viewModel = CreateViewModel(repository: new FakeCatalogRepository { SpecialItems = CreateSpecialItems(2) });
+        await viewModel.LoadAsync();
+        viewModel.ToggleEditModeCommand.Execute(null);
+        var first = viewModel.SpecialItems[0];
+        var second = viewModel.SpecialItems[1];
+        viewModel.SpecialItemCardCommand.Execute(first);
+
+        Assert.True(viewModel.BeginRemoveCommand.CanExecute(first));
+        viewModel.BeginRemoveCommand.Execute(first);
+
+        Assert.True(viewModel.DisplayedCards[0].IsRemoveConfirming);
+        Assert.False(viewModel.DisplayedCards[1].IsRemoveConfirming);
+        Assert.Contains("Item 001", viewModel.RemoveConfirmPromptText, StringComparison.Ordinal);
+
+        viewModel.CancelRemoveCommand.Execute(first);
+        Assert.All(viewModel.DisplayedCards, card => Assert.False(card.IsRemoveConfirming));
+
+        // 确认态跟随选中：换选另一张后，上一张的确认提示必须收起。
+        viewModel.BeginRemoveCommand.Execute(first);
+        viewModel.SpecialItemCardCommand.Execute(second);
+        Assert.All(viewModel.DisplayedCards, card => Assert.False(card.IsRemoveConfirming));
+    }
+
+    // ================= 改价（必须在线）=================
+
+    private static async Task<(SpecialProductsViewModel ViewModel, FakeSpecialProductsWorkflowService Workflow, RecordingOperationAuditLogger Logger, SellableItemDto Item, PosCartService Cart)>
+        CreatePriceEditorScenarioAsync(
+            bool online = true,
+            Exception? priceException = null,
+            Func<string, string, decimal, SpecialProductsPriceWorkflowResult>? priceResult = null)
+    {
+        var cart = new PosCartService();
+        var logger = new RecordingOperationAuditLogger();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var workflow = new FakeSpecialProductsWorkflowService
+        {
+            LoadResult = new SpecialProductsLoadResult("S001", [item]),
+            PriceException = priceException,
+            PriceResultOverride = priceResult ?? ((store, product, price) => new SpecialProductsPriceWorkflowResult(
+                store,
+                product,
+                price,
+                [item with { RetailPrice = price }]))
+        };
+        var viewModel = CreateViewModel(
+            cart: cart,
+            workflow: workflow,
+            session: Session with { IsOnline = online },
+            operationAuditLogger: logger);
+        await viewModel.LoadAsync();
+        viewModel.ToggleEditModeCommand.Execute(null);
+        viewModel.SpecialItemCardCommand.Execute(item);
+        return (viewModel, workflow, logger, item, cart);
+    }
+
+    [Fact]
+    public async Task OpenPriceEditor_is_disabled_offline_and_never_opens()
+    {
+        var (viewModel, workflow, _, item, _) = await CreatePriceEditorScenarioAsync(online: false);
+
+        Assert.False(viewModel.OpenPriceEditorCommand.CanExecute(item));
+        viewModel.OpenPriceEditorCommand.Execute(item);
+
+        Assert.False(viewModel.IsPriceEditorOpen);
+        Assert.Equal(0, workflow.PriceCallCount);
+    }
+
+    [Fact]
+    public async Task OpenPriceEditor_requires_edit_mode()
+    {
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var viewModel = CreateViewModel(workflow: new FakeSpecialProductsWorkflowService
+        {
+            LoadResult = new SpecialProductsLoadResult("S001", [item])
+        });
+        await viewModel.LoadAsync();
+
+        Assert.False(viewModel.OpenPriceEditorCommand.CanExecute(item));
+        viewModel.OpenPriceEditorCommand.Execute(item);
+
+        Assert.False(viewModel.IsPriceEditorOpen);
+    }
+
+    [Fact]
+    public async Task OpenPriceEditor_prefills_current_price_and_shows_product()
+    {
+        var (viewModel, _, _, item, _) = await CreatePriceEditorScenarioAsync();
+
+        viewModel.OpenPriceEditorCommand.Execute(item);
+
+        Assert.True(viewModel.IsPriceEditorOpen);
+        Assert.Equal("Alpha", viewModel.PriceEditorProductName);
+        Assert.Equal("$1.25", viewModel.PriceEditorCurrentPriceText);
+        Assert.Equal("1.25", viewModel.PriceEditorInputText);
+        Assert.Equal("$1.25", viewModel.PriceEditorNewPriceText);
+        // 价格没变不能保存。
+        Assert.False(viewModel.SavePriceCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Price_keypad_replaces_prefill_then_enforces_digit_and_decimal_limits()
+    {
+        var (viewModel, _, _, item, _) = await CreatePriceEditorScenarioAsync();
+        viewModel.OpenPriceEditorCommand.Execute(item);
+
+        viewModel.PriceKeyCommand.Execute("5");
+        Assert.Equal("5", viewModel.PriceEditorInputText);
+
+        viewModel.PriceKeyCommand.Execute(".");
+        viewModel.PriceKeyCommand.Execute(".");
+        Assert.Equal("5.", viewModel.PriceEditorInputText);
+
+        viewModel.PriceKeyCommand.Execute("9");
+        viewModel.PriceKeyCommand.Execute("9");
+        viewModel.PriceKeyCommand.Execute("9");
+        Assert.Equal("5.99", viewModel.PriceEditorInputText);
+        Assert.Equal("$5.99", viewModel.PriceEditorNewPriceText);
+        Assert.True(viewModel.SavePriceCommand.CanExecute(null));
+
+        viewModel.PriceBackspaceCommand.Execute(null);
+        Assert.Equal("5.9", viewModel.PriceEditorInputText);
+
+        viewModel.PriceClearCommand.Execute(null);
+        Assert.Equal(string.Empty, viewModel.PriceEditorInputText);
+        Assert.False(viewModel.SavePriceCommand.CanExecute(null));
+
+        // 小数点开头补 0；前导 0 后接数字会被替换；整数最多 5 位。
+        viewModel.PriceKeyCommand.Execute(".");
+        Assert.Equal("0.", viewModel.PriceEditorInputText);
+        viewModel.PriceClearCommand.Execute(null);
+        viewModel.PriceKeyCommand.Execute("0");
+        viewModel.PriceKeyCommand.Execute("7");
+        Assert.Equal("7", viewModel.PriceEditorInputText);
+        foreach (var digit in new[] { "1", "2", "3", "4", "5" })
+        {
+            viewModel.PriceKeyCommand.Execute(digit);
+        }
+
+        Assert.Equal("71234", viewModel.PriceEditorInputText);
+    }
+
+    [Fact]
+    public async Task SavePrice_calls_workflow_refreshes_cards_audits_and_closes_the_editor()
+    {
+        var (viewModel, workflow, logger, item, _) = await CreatePriceEditorScenarioAsync();
+        viewModel.OpenPriceEditorCommand.Execute(item);
+        viewModel.PriceKeyCommand.Execute("5");
+        viewModel.PriceKeyCommand.Execute(".");
+        viewModel.PriceKeyCommand.Execute("9");
+        viewModel.PriceKeyCommand.Execute("9");
+
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, workflow.PriceCallCount);
+        Assert.Equal(("S001", "SKU-001", 5.99m), workflow.LastPriceCall);
+        Assert.False(viewModel.IsPriceEditorOpen);
+        Assert.Equal(5.99m, viewModel.DisplayedCards.Single().RetailPrice);
+        Assert.Contains("$5.99", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.False(viewModel.IsBusy);
+
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("SPECIAL_PRODUCT_PRICE_CHANGE", auditEvent.OperationType);
+        Assert.Equal("Succeeded", auditEvent.Outcome);
+        Assert.Equal("PRICE_CHANGE", auditEvent.ReasonCode);
+        Assert.Equal(4.74m, auditEvent.AmountDelta);
+        var auditItem = Assert.Single(auditEvent.Items);
+        Assert.Equal("SKU-001", auditItem.ProductCode);
+        Assert.Equal(1.25m, auditItem.BeforeUnitPrice);
+        Assert.Equal(5.99m, auditItem.AfterUnitPrice);
+    }
+
+    [Fact]
+    public async Task SavePrice_failure_keeps_editor_open_shows_error_and_audits_failure()
+    {
+        var (viewModel, workflow, logger, item, _) = await CreatePriceEditorScenarioAsync(
+            priceException: new InvalidOperationException("network unavailable"));
+        viewModel.OpenPriceEditorCommand.Execute(item);
+        viewModel.PriceKeyCommand.Execute("8");
+
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, workflow.PriceCallCount);
+        Assert.True(viewModel.IsPriceEditorOpen);
+        Assert.True(viewModel.HasPriceEditorError);
+        Assert.Contains("network unavailable", viewModel.PriceEditorErrorText, StringComparison.Ordinal);
+        Assert.Contains("network unavailable", viewModel.StatusMessage, StringComparison.Ordinal);
+        // 失败时本地价格保持不变，可直接重试。
+        Assert.Equal(1.25m, viewModel.DisplayedCards.Single().RetailPrice);
+        Assert.False(viewModel.IsBusy);
+
+        var auditEvent = Assert.Single(logger.Events);
+        Assert.Equal("SPECIAL_PRODUCT_PRICE_CHANGE", auditEvent.OperationType);
+        Assert.Equal("Failed", auditEvent.Outcome);
+        Assert.Equal(0m, auditEvent.AmountDelta);
+        Assert.Equal("InvalidOperationException", auditEvent.SafeMessage);
+    }
+
+    [Fact]
+    public async Task SavePrice_rejects_unchanged_or_invalid_price_without_calling_backend()
+    {
+        var (viewModel, workflow, logger, item, _) = await CreatePriceEditorScenarioAsync();
+        viewModel.OpenPriceEditorCommand.Execute(item);
+
+        // 保存按钮在价格未变 / 非法时本就不可用；直接执行命令也不能绕过校验。
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+        viewModel.PriceClearCommand.Execute(null);
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+        viewModel.PriceKeyCommand.Execute("0");
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, workflow.PriceCallCount);
+        Assert.Empty(logger.Events);
+        Assert.True(viewModel.IsPriceEditorOpen);
+    }
+
+    [Fact]
+    public async Task SavePrice_when_product_is_in_cart_warns_that_the_cart_line_keeps_the_old_price()
+    {
+        var (viewModel, _, _, item, cart) = await CreatePriceEditorScenarioAsync();
+        var line = cart.AddItem(item);
+        viewModel.OpenPriceEditorCommand.Execute(item);
+        viewModel.PriceKeyCommand.Execute("3");
+
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+
+        Assert.Equal(1.25m, line.UnitPrice);
+        Assert.Equal(3m, viewModel.DisplayedCards.Single().RetailPrice);
+        Assert.Contains("cart", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("old price", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SavePrice_goes_offline_after_opening_is_blocked()
+    {
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var workflow = new FakeSpecialProductsWorkflowService
+        {
+            LoadResult = new SpecialProductsLoadResult("S001", [item])
+        };
+        var viewModel = CreateViewModel(workflow: workflow);
+        await viewModel.LoadAsync();
+        viewModel.ToggleEditModeCommand.Execute(null);
+        viewModel.OpenPriceEditorCommand.Execute(item);
+        viewModel.PriceKeyCommand.Execute("9");
+        Assert.True(viewModel.SavePriceCommand.CanExecute(null));
+
+        // 弹窗打开后网络掉线：保存必须被拦下，且不发请求。
+        viewModel.Session = viewModel.Session with { IsOnline = false };
+
+        Assert.False(viewModel.SavePriceCommand.CanExecute(null));
+        await viewModel.SavePriceCommand.ExecuteAsync(null);
+        Assert.Equal(0, workflow.PriceCallCount);
+    }
+
+    [Fact]
+    public async Task Back_closes_the_price_editor()
+    {
+        var backCount = 0;
+        var cart = new PosCartService();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var workflow = new FakeSpecialProductsWorkflowService
+        {
+            LoadResult = new SpecialProductsLoadResult("S001", [item])
+        };
+        var viewModel = CreateViewModel(cart: cart, workflow: workflow, onBack: () => backCount++);
+        await viewModel.LoadAsync();
+        viewModel.ToggleEditModeCommand.Execute(null);
+        viewModel.OpenPriceEditorCommand.Execute(item);
+        Assert.True(viewModel.IsPriceEditorOpen);
+
+        viewModel.BackCommand.Execute(null);
+
+        Assert.False(viewModel.IsPriceEditorOpen);
+        Assert.Equal(1, backCount);
+    }
+
     private static SpecialProductsViewModel CreateViewModel(
         LocalSellableItemIndex? index = null,
         PosCartService? cart = null,
@@ -1139,6 +1657,9 @@ public sealed class SpecialProductsViewModelTests
             Events.Add(auditEvent);
         }
     }
+
+    private static IReadOnlyList<SellableItemDto> DisplayedItems(SpecialProductsViewModel viewModel) =>
+        viewModel.DisplayedCards.Select(card => card.Item).ToArray();
 
     private static PosSessionState Session => new("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
 
@@ -1294,6 +1815,30 @@ public sealed class SpecialProductsViewModelTests
 
         public Func<string, bool, SpecialProductMarkResult>? MarkResultFactory { get; init; }
 
+        public int PriceCallCount { get; private set; }
+
+        public (string StoreCode, string ProductCode, decimal RetailPrice)? LastPriceCall { get; private set; }
+
+        public Func<string, decimal, SpecialProductMarkResult>? PriceResultFactory { get; init; }
+
+        public Exception? PriceException { get; init; }
+
+        public Task<SpecialProductMarkResult> UpdateSpecialProductPriceAsync(
+            string storeCode,
+            string productCode,
+            decimal retailPrice,
+            CancellationToken cancellationToken = default)
+        {
+            PriceCallCount++;
+            LastPriceCall = (storeCode, productCode, retailPrice);
+            if (PriceException is not null)
+            {
+                return Task.FromException<SpecialProductMarkResult>(PriceException);
+            }
+
+            return Task.FromResult(PriceResultFactory?.Invoke(productCode, retailPrice) ?? new SpecialProductMarkResult([], []));
+        }
+
         public Task<SpecialProductMarkResult> MarkSpecialProductAsync(
             string storeCode,
             string productCode,
@@ -1376,6 +1921,21 @@ public sealed class SpecialProductsViewModelTests
                 isSpecialProduct,
                 []);
 
+        public int PriceCallCount { get; private set; }
+
+        public (string StoreCode, string ProductCode, decimal RetailPrice)? LastPriceCall { get; private set; }
+
+        public Func<string, string, decimal, SpecialProductsPriceWorkflowResult> PriceResultFactory { get; init; } =
+            (storeCode, productCode, retailPrice) => new SpecialProductsPriceWorkflowResult(
+                storeCode,
+                productCode,
+                retailPrice,
+                []);
+
+        public Exception? PriceException { get; init; }
+
+        public Func<string, string, decimal, SpecialProductsPriceWorkflowResult>? PriceResultOverride { get; init; }
+
         public Func<string, IReadOnlyList<SellableItemDto>, string, int, SpecialProductsReorderWorkflowResult?> ReorderResultFactory { get; init; } =
             (storeCode, items, productCode, _) => new SpecialProductsReorderWorkflowResult(storeCode, items, productCode);
 
@@ -1447,6 +2007,22 @@ public sealed class SpecialProductsViewModelTests
             }
 
             return Task.FromResult(MarkResultFactory(storeCode, productCode, isSpecialProduct));
+        }
+
+        public Task<SpecialProductsPriceWorkflowResult> UpdateSpecialProductPriceAsync(
+            string storeCode,
+            string productCode,
+            decimal retailPrice,
+            CancellationToken cancellationToken = default)
+        {
+            PriceCallCount++;
+            LastPriceCall = (storeCode, productCode, retailPrice);
+            if (PriceException is not null)
+            {
+                return Task.FromException<SpecialProductsPriceWorkflowResult>(PriceException);
+            }
+
+            return Task.FromResult((PriceResultOverride ?? PriceResultFactory)(storeCode, productCode, retailPrice));
         }
 
         public Task<SpecialProductsReorderWorkflowResult?> ReorderAsync(

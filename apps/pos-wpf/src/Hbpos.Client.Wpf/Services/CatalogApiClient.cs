@@ -46,6 +46,14 @@ public interface ICatalogApiClient
         CatalogSpecialProductMarkRequest request,
         CancellationToken cancellationToken = default);
 
+    // 中文注释：修改特殊商品门店零售价（必须在线）。默认实现按"服务端不支持"处理，既有测试替身无需实现。
+    Task<CatalogSpecialProductPriceResponse> UpdateSpecialProductPriceAsync(
+        CatalogSpecialProductPriceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogSpecialProductPriceResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
     // 中文注释：以下三个是与 iPad 同一套按版本同步的协议；默认实现按"服务端不支持"处理，
     // 同步服务据此回退旧的逐页核对流程，既有测试替身无需实现。
     Task<CatalogSyncPlanResponse> GetCatalogSyncPlanAsync(
@@ -366,6 +374,34 @@ public sealed class CatalogApiClient : ICatalogApiClient
         {
             stopwatch.Stop();
             LogFailed("POST", requestUri, $"store={request.StoreCode} product={request.ProductCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<CatalogSpecialProductPriceResponse> UpdateSpecialProductPriceAsync(
+        CatalogSpecialProductPriceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        const string requestUri = "api/v1/catalog/special-products/price";
+        var stopwatch = Stopwatch.StartNew();
+        Log($"POST {requestUri} start base={_httpClient.BaseAddress} store={request.StoreCode} product={request.ProductCode} price={request.RetailPrice}");
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                requestUri,
+                request,
+                JsonOptions,
+                cancellationToken);
+
+            var result = await ReadApiResultAsync<CatalogSpecialProductPriceResponse>(response, cancellationToken);
+            stopwatch.Stop();
+            Log($"POST {requestUri} completed status={(int)response.StatusCode} store={result.StoreCode} product={result.ProductCode} price={result.RetailPrice} items={result.Items.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            LogFailed("POST", requestUri, $"store={request.StoreCode} product={request.ProductCode} price={request.RetailPrice} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }

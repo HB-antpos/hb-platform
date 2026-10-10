@@ -661,6 +661,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/special-products/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CatalogSpecialProductPriceRequest"];
+                    "text/json": components["schemas"]["CatalogSpecialProductPriceRequest"];
+                    "application/*+json": components["schemas"]["CatalogSpecialProductPriceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CatalogSpecialProductPriceResponseApiResult"];
+                        "application/json": components["schemas"]["CatalogSpecialProductPriceResponseApiResult"];
+                        "text/json": components["schemas"]["CatalogSpecialProductPriceResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/files/sync-plan": {
         parameters: {
             query?: never;
@@ -5846,6 +5889,27 @@ export interface components {
         CatalogSpecialProductMarkResponseApiResult: {
             success?: boolean;
             data?: components["schemas"]["CatalogSpecialProductMarkResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        CatalogSpecialProductPriceRequest: {
+            storeCode?: string | null;
+            productCode?: string | null;
+            /** Format: double */
+            retailPrice?: number;
+        };
+        CatalogSpecialProductPriceResponse: {
+            storeCode?: string | null;
+            productCode?: string | null;
+            /** Format: double */
+            retailPrice?: number;
+            /** Format: date-time */
+            generatedAt?: string;
+            items?: components["schemas"]["CatalogLookupItemDto"][] | null;
+        };
+        CatalogSpecialProductPriceResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["CatalogSpecialProductPriceResponse"];
             errorCode?: string | null;
             message?: string | null;
         };

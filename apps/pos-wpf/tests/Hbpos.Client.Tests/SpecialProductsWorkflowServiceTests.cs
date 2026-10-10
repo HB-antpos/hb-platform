@@ -152,6 +152,111 @@ public sealed class SpecialProductsWorkflowServiceTests
         Assert.Equal(["SKU-002", "SKU-001"], Assert.Single(repository.SavedOrders));
     }
 
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_upserts_changed_items_into_price_index()
+    {
+        var oldItem = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var repricedItem = oldItem with { RetailPrice = 6.5m };
+        var index = new LocalSellableItemIndex();
+        index.ReplaceAll([oldItem]);
+        var repository = new FakeCatalogRepository { SpecialItems = [repricedItem] };
+        var specialProductService = new FakeSpecialProductService
+        {
+            PriceResult = new SpecialProductMarkResult([repricedItem], [repricedItem])
+        };
+        var service = CreateWorkflowService(index, repository, specialProductService);
+
+        var result = await service.UpdateSpecialProductPriceAsync(" S001 ", " SKU-001 ", 6.5m);
+
+        Assert.Equal(("S001", "SKU-001", 6.5m), specialProductService.LastPriceCall);
+        Assert.Equal(6.5m, Assert.Single(result.SpecialItems).RetailPrice);
+        Assert.Equal(6.5m, result.RetailPrice);
+        // 收银扫码走内存索引，必须立即按新价。
+        Assert.Equal(6.5m, Assert.Single(index.Search("S001", "930001")).RetailPrice);
+        // 服务端已返回改价后的查码项时不必整库重载。
+        Assert.Equal(0, repository.LoadSellableItemsCallCount);
+        Assert.Equal(0, repository.LoadSpecialProductItemsCallCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1.5)]
+    [InlineData(100000)]
+    [InlineData(5.999)]
+    public async Task UpdateSpecialProductPriceAsync_rejects_invalid_price_before_calling_the_service(double price)
+    {
+        var specialProductService = new FakeSpecialProductService();
+        var service = CreateWorkflowService(specialProductService: specialProductService);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.UpdateSpecialProductPriceAsync("S001", "SKU-001", (decimal)price));
+
+        Assert.Equal(0, specialProductService.PriceCallCount);
+    }
+
+    [Theory]
+    [InlineData(0.01, true)]
+    [InlineData(99999.99, true)]
+    [InlineData(12.5, true)]
+    [InlineData(0, false)]
+    [InlineData(99999.995, false)]
+    [InlineData(0.001, false)]
+    public void SpecialProductPriceRules_accepts_only_positive_two_decimal_prices_up_to_the_maximum(double price, bool valid)
+    {
+        Assert.Equal(valid, SpecialProductPriceRules.IsValid((decimal)price));
+    }
+
+    [Fact]
+    public void UndoAddToCart_reduces_quantity_removes_the_line_and_ignores_missing_lines()
+    {
+        var cart = new PosCartService();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var service = new SpecialProductsWorkflowService(
+            new LocalSellableItemIndex(),
+            cart,
+            new FakeCatalogRepository(),
+            new FakeSpecialProductService());
+        var line = cart.AddItem(item);
+        cart.AddItem(item);
+
+        var reduced = service.UndoAddToCart(line, 1m);
+
+        Assert.True(reduced.Changed);
+        Assert.False(reduced.RemovedLine);
+        Assert.Equal(1m, line.Quantity);
+
+        var removed = service.UndoAddToCart(line, 1m);
+
+        Assert.True(removed.Changed);
+        Assert.True(removed.RemovedLine);
+        Assert.Empty(cart.Lines);
+
+        // 行已经不在购物车里：什么都不做。
+        var missing = service.UndoAddToCart(line, 1m);
+        Assert.False(missing.Changed);
+        Assert.False(missing.RemovedLine);
+    }
+
+    [Fact]
+    public async Task UpdateSpecialProductPriceAsync_reloads_catalog_when_server_returns_no_items()
+    {
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var repository = new FakeCatalogRepository
+        {
+            SellableItems = [item with { RetailPrice = 9m }],
+            SpecialItems = [item with { RetailPrice = 9m }]
+        };
+        var index = new LocalSellableItemIndex();
+        var service = CreateWorkflowService(index, repository, new FakeSpecialProductService());
+
+        var result = await service.UpdateSpecialProductPriceAsync("S001", "SKU-001", 9m);
+
+        Assert.Equal(1, repository.LoadSellableItemsCallCount);
+        Assert.Equal(1, repository.LoadSpecialProductItemsCallCount);
+        Assert.Equal(9m, Assert.Single(result.SpecialItems).RetailPrice);
+        Assert.Equal(9m, Assert.Single(index.Search("S001", "930001")).RetailPrice);
+    }
+
     private static SpecialProductsWorkflowService CreateWorkflowService(
         LocalSellableItemIndex? index = null,
         FakeCatalogRepository? repository = null,
@@ -299,6 +404,23 @@ public sealed class SpecialProductsWorkflowServiceTests
         public int DownloadCallCount { get; private set; }
 
         public SpecialProductMarkResult MarkResult { get; init; } = new([], []);
+
+        public int PriceCallCount { get; private set; }
+
+        public (string StoreCode, string ProductCode, decimal RetailPrice)? LastPriceCall { get; private set; }
+
+        public SpecialProductMarkResult PriceResult { get; init; } = new([], []);
+
+        public Task<SpecialProductMarkResult> UpdateSpecialProductPriceAsync(
+            string storeCode,
+            string productCode,
+            decimal retailPrice,
+            CancellationToken cancellationToken = default)
+        {
+            PriceCallCount++;
+            LastPriceCall = (storeCode, productCode, retailPrice);
+            return Task.FromResult(PriceResult);
+        }
 
         public SpecialProductDownloadResult DownloadResult { get; init; } =
             new("S001", 0, 0, 0, 0, 0);

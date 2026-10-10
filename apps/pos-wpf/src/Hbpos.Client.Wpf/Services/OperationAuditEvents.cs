@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Models;
+using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Installments;
 
 namespace Hbpos.Client.Wpf.Services;
@@ -39,6 +40,7 @@ internal static class OperationAuditTypes
     public const string PermissionOverride = "PERMISSION_OVERRIDE";
     public const string InstallmentPickupConfirm = "INSTALLMENT_PICKUP_CONFIRM";
     public const string InstallmentLinesAmend = "INSTALLMENT_LINES_AMEND";
+    public const string SpecialProductPriceChange = "SPECIAL_PRODUCT_PRICE_CHANGE";
     public const string CatalogReset = "CATALOG_RESET";
     public const string TestSalesDataReset = "TEST_SALES_DATA_RESET";
     public const string DeviceReregister = "DEVICE_REREGISTER";
@@ -206,6 +208,56 @@ internal static class OperationAuditEvents
             CaptureInstallmentLines(afterLines),
             reasonCode: "AMEND_LINES",
             orderGuid: installmentGuid.ToString("D"));
+    }
+
+    /// <summary>
+    /// 特殊商品改零售价审计：以单行快照表达旧价→新价，后台操作日志的"金额变化"列即新价减旧价。
+    /// 改价没有独立的历史表，这条审计是唯一的变更留痕，成功与失败都要记录。
+    /// </summary>
+    public static void RecordSpecialProductPriceChange(
+        IOperationAuditLogger? logger,
+        PosSessionState session,
+        SellableItemDto item,
+        decimal oldPrice,
+        decimal newPrice,
+        string outcome = "Succeeded",
+        string? safeMessage = null)
+    {
+        if (logger is null)
+        {
+            return;
+        }
+
+        OperationAuditCartSnapshot Snapshot(decimal price) => new(
+            RoundMoney(price),
+            0m,
+            RoundMoney(price),
+            [
+                new OperationAuditCartLineSnapshot(
+                    $"{item.ProductCode}|special-product",
+                    item.ProductCode,
+                    item.ItemNumber,
+                    item.ReferenceCode,
+                    item.LookupCode,
+                    item.DisplayName,
+                    "Sale",
+                    1m,
+                    RoundMoney(price),
+                    0m,
+                    RoundMoney(price),
+                    RoundMoney(price))
+            ]);
+
+        RecordCartChange(
+            logger,
+            OperationAuditTypes.SpecialProductPriceChange,
+            session,
+            Snapshot(oldPrice),
+            // 失败时价格未变，改后快照沿用旧价，避免日志出现虚假的金额变化。
+            Snapshot(outcome == "Succeeded" ? newPrice : oldPrice),
+            outcome: outcome,
+            reasonCode: outcome == "Succeeded" ? "PRICE_CHANGE" : "PRICE_CHANGE_FAILED",
+            safeMessage: safeMessage);
     }
 
     public static bool HasChanged(OperationAuditCartSnapshot before, OperationAuditCartSnapshot after)

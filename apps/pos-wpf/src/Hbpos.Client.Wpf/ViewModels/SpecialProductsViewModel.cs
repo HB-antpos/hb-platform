@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.Security;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -16,11 +17,19 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 {
     public const string PageId = "SpecialProducts";
 
+    private sealed record LastAddInfo(CartLine Line, decimal AddedQuantity, string DisplayName);
+
     private bool _disposed;
 
     public string ScannerPageId => PageId;
 
-    private const int PageSize = 20;
+    // 首页缩略图预热张数（原分页大小）；网格本身已改为可滚动，不再分页。
+    private const int ThumbnailPreloadCount = 20;
+    // 网格一次最多渲染的卡片数，超出后用「显示更多」追加，避免上千个商品一次性解码缩略图。
+    private const int DisplayChunkSize = 100;
+    private static readonly TimeSpan ToastAutoHideDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan JustAddedHighlightDelay = TimeSpan.FromMilliseconds(1200);
+    private static readonly CultureInfo MoneyCulture = CultureInfo.GetCultureInfo("en-AU");
     private static readonly TimeSpan ThumbnailEnableDelay = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan DownloadProgressAutoHideDelay = TimeSpan.FromSeconds(5);
 
@@ -38,6 +47,17 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly Func<IEnumerable<string?>, int, CancellationToken, Task<int>> _thumbnailPreloadAsync;
     private CancellationTokenSource? _downloadProgressHideCts;
+    private CancellationTokenSource? _toastHideCts;
+    private CancellationTokenSource? _justAddedCts;
+    // 卡片按商品编码复用，刷新列表时只更新内容，避免整页重建闪烁。
+    private Dictionary<string, SpecialProductCardViewModel> _cardsByProduct = new(StringComparer.OrdinalIgnoreCase);
+    private List<SpecialProductCardViewModel> _allCards = [];
+    private int _displayLimit = DisplayChunkSize;
+    // 最近一次加购（仅这一次可撤销）与「返回收银后需要定位的购物车行」。
+    private LastAddInfo? _lastAdd;
+    private CartLine? _pendingRevealLine;
+    private SellableItemDto? _priceEditorTarget;
+    private bool _priceInputIsFresh;
     private CancellationTokenSource? _thumbnailEnableCts;
     private CancellationTokenSource? _searchCts;
     private long _searchVersion;
@@ -75,8 +95,30 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     [ObservableProperty]
     private bool _areThumbnailsEnabled = true;
 
+    /// <summary>浏览模式的页内筛选（按名称、货号、条码、查码模糊匹配）。</summary>
     [ObservableProperty]
-    private int _currentPage = 1;
+    private string _filterText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isCartFilterActive;
+
+    [ObservableProperty]
+    private string _toastText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isToastVisible;
+
+    [ObservableProperty]
+    private bool _canUndoToast;
+
+    [ObservableProperty]
+    private bool _isPriceEditorOpen;
+
+    [ObservableProperty]
+    private string _priceEditorInputText = string.Empty;
+
+    [ObservableProperty]
+    private string _priceEditorErrorText = string.Empty;
 
     [ObservableProperty]
     private SellableItemDto? _selectedSpecialItem;
@@ -131,23 +173,44 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         RefreshCommand = new AsyncRelayCommand(LoadAsync);
         DownloadCommand = new AsyncRelayCommand(DownloadSpecialProductsAsync, CanDownloadSpecialProducts);
         ToggleEditModeCommand = new AsyncRelayCommand(ToggleEditModeAsync, () => !IsBusy);
-        PreviousPageCommand = new RelayCommand(ShowPreviousPage, CanShowPreviousPage);
-        NextPageCommand = new RelayCommand(ShowNextPage, CanShowNextPage);
+        ShowAllCommand = new RelayCommand(() => SetCartFilter(false));
+        ShowInCartCommand = new RelayCommand(() => SetCartFilter(true));
+        ShowMoreCommand = new RelayCommand(ShowMore, () => HasMoreToShow);
+        UndoAddCommand = new RelayCommand(UndoLastAdd, () => _lastAdd is not null);
+        DismissToastCommand = new RelayCommand(HideToast);
         AddToCartCommand = new AsyncRelayCommand<SellableItemDto>(AddToCartAsync);
         SpecialItemCardCommand = new AsyncRelayCommand<SellableItemDto>(HandleSpecialItemCardAsync);
         AddSpecialProductCommand = new AsyncRelayCommand<SellableItemDto>(AddSpecialProductAsync, CanMutateItem);
         RemoveSpecialProductCommand = new AsyncRelayCommand<SellableItemDto>(RemoveSpecialProductAsync, CanMutateItem);
-        MoveUpCommand = new AsyncRelayCommand<SellableItemDto>(item => MoveSpecialProductAsync(item, -1), CanMoveUp);
-        MoveDownCommand = new AsyncRelayCommand<SellableItemDto>(item => MoveSpecialProductAsync(item, 1), CanMoveDown);
+        MoveUpCommand = new AsyncRelayCommand<SellableItemDto>(item => MoveSpecialProductAsync(item, -1, "move-up"), CanMoveUp);
+        MoveDownCommand = new AsyncRelayCommand<SellableItemDto>(item => MoveSpecialProductAsync(item, 1, "move-down"), CanMoveDown);
+        MoveToFrontCommand = new AsyncRelayCommand<SellableItemDto>(MoveToFrontAsync, CanMoveUp);
+        BeginRemoveCommand = new RelayCommand<SellableItemDto>(BeginRemove, CanMutateItem);
+        CancelRemoveCommand = new RelayCommand<SellableItemDto>(CancelRemove);
+        OpenPriceEditorCommand = new RelayCommand<SellableItemDto>(OpenPriceEditor, CanMutateItem);
+        ClosePriceEditorCommand = new RelayCommand(ClosePriceEditor);
+        PriceKeyCommand = new RelayCommand<string>(PressPriceKey);
+        PriceBackspaceCommand = new RelayCommand(BackspacePrice);
+        PriceClearCommand = new RelayCommand(ClearPrice);
+        SavePriceCommand = new AsyncRelayCommand(SavePriceAsync, CanSavePrice);
 
         _localization.CultureChanged += OnCultureChanged;
+        _cart.CartChanged += OnCartChanged;
         _rawScannerService?.Subscribe(PageId, OnRawBarcodeScanned);
         StatusMessage = T("specialProducts.status.ready");
+        RefreshCartState();
     }
+
+    /// <summary>新增、改价、排序后请求视图把指定商品滚动到可见区域（参数为商品编码）。</summary>
+    public event EventHandler<string>? FocusProductRequested;
 
     public ObservableCollection<SellableItemDto> SpecialItems { get; } = [];
 
-    public ObservableCollection<SellableItemDto> PagedSpecialItems { get; } = [];
+    /// <summary>网格实际显示的卡片（已套用筛选与「显示更多」上限）。</summary>
+    public ObservableCollection<SpecialProductCardViewModel> DisplayedCards { get; } = [];
+
+    /// <summary>右侧购物车摘要：最近加入的几行。</summary>
+    public ObservableCollection<SpecialCartSummaryLine> CartSummaryLines { get; } = [];
 
     public ObservableCollection<SellableItemDto> SearchResults { get; } = [];
 
@@ -163,9 +226,33 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     public IRelayCommand ToggleEditModeCommand { get; }
 
-    public IRelayCommand PreviousPageCommand { get; }
+    public IRelayCommand ShowAllCommand { get; }
 
-    public IRelayCommand NextPageCommand { get; }
+    public IRelayCommand ShowInCartCommand { get; }
+
+    public IRelayCommand ShowMoreCommand { get; }
+
+    public IRelayCommand UndoAddCommand { get; }
+
+    public IRelayCommand DismissToastCommand { get; }
+
+    public IAsyncRelayCommand<SellableItemDto> MoveToFrontCommand { get; }
+
+    public IRelayCommand<SellableItemDto> BeginRemoveCommand { get; }
+
+    public IRelayCommand<SellableItemDto> CancelRemoveCommand { get; }
+
+    public IRelayCommand<SellableItemDto> OpenPriceEditorCommand { get; }
+
+    public IRelayCommand ClosePriceEditorCommand { get; }
+
+    public IRelayCommand<string> PriceKeyCommand { get; }
+
+    public IRelayCommand PriceBackspaceCommand { get; }
+
+    public IRelayCommand PriceClearCommand { get; }
+
+    public IAsyncRelayCommand SavePriceCommand { get; }
 
     public IRelayCommand<SellableItemDto> AddToCartCommand { get; }
 
@@ -201,9 +288,144 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     public string EditModeText => T(IsEditMode ? "specialProducts.done" : "specialProducts.edit");
 
-    public string PreviousPageText => T("specialProducts.previousPage");
+    public string FilterPlaceholderText => T("specialProducts.filter.placeholder");
 
-    public string NextPageText => T("specialProducts.nextPage");
+    public string BrowseHintText => T("specialProducts.hint.browse");
+
+    public string FilterEmptyText => T("specialProducts.filter.empty");
+
+    public string CartTitleText => T("specialProducts.cart.title");
+
+    public string CartTotalLabelText => T("specialProducts.cart.total");
+
+    public string CartEmptyText => T("specialProducts.cart.empty");
+
+    public string CartCheckoutText => T("specialProducts.cart.checkout");
+
+    public string UndoText => T("specialProducts.undo");
+
+    public string CancelText => T("specialProducts.cancel");
+
+    public string EditBannerText => T("specialProducts.edit.banner");
+
+    public string EditBannerDetailText => T("specialProducts.edit.bannerDetail");
+
+    public string MoveToFrontText => T("specialProducts.moveToFront");
+
+    public string EditPriceText => T("specialProducts.editPrice");
+
+    public string AddPanelTitleText => T("specialProducts.addPanel.title");
+
+    public string AddPanelHintText => T("specialProducts.addPanel.hint");
+
+    public string AddPanelFooterText => T("specialProducts.addPanel.footer");
+
+    public string PriceEditorTitleText => T("specialProducts.priceEditor.title");
+
+    public string PriceEditorCurrentLabelText => T("specialProducts.priceEditor.current");
+
+    public string PriceEditorNewLabelText => T("specialProducts.priceEditor.new");
+
+    public string PriceEditorOnlineHintText => T("specialProducts.priceEditor.onlineHint");
+
+    public string PriceEditorManualNoteText => T("specialProducts.priceEditor.manualNote");
+
+    public string PriceEditorSaveText => T("specialProducts.priceEditor.save");
+
+    public string PriceEditorClearText => T("specialProducts.priceEditor.clear");
+
+    public string PriceEditorBackspaceText => T("specialProducts.priceEditor.backspace");
+
+    /// <summary>卡片内「移除 xxx？」的确认提示；同一时间只有一张卡处于确认态。</summary>
+    public string RemoveConfirmPromptText { get; private set; } = string.Empty;
+
+    public string PriceEditorProductName => _priceEditorTarget?.DisplayName ?? string.Empty;
+
+    public string PriceEditorCurrentPriceText => _priceEditorTarget is null
+        ? string.Empty
+        : FormatMoney(_priceEditorTarget.RetailPrice);
+
+    /// <summary>键盘输入区的金额显示（带货币符号）。</summary>
+    public string PriceEditorNewPriceText => string.IsNullOrEmpty(PriceEditorInputText)
+        ? FormatMoney(0m)
+        : "$" + PriceEditorInputText;
+
+    public bool HasPriceEditorError => !string.IsNullOrEmpty(PriceEditorErrorText);
+
+    public string TotalCountText => string.Format(
+        _localization.CurrentCulture,
+        T("specialProducts.countFormat"),
+        SpecialItems.Count);
+
+    public string AllChipText => string.Format(
+        _localization.CurrentCulture,
+        T("specialProducts.chip.all"),
+        SpecialItems.Count);
+
+    public string InCartChipText => string.Format(
+        _localization.CurrentCulture,
+        T("specialProducts.chip.inCart"),
+        InCartCount);
+
+    public string ShowMoreText => string.Format(
+        _localization.CurrentCulture,
+        T("specialProducts.showMore"),
+        Math.Max(0, FilteredCardCount - DisplayedCards.Count));
+
+    /// <summary>特殊商品里当前已在购物车的种数，用于「已在购物车」筛选标签。</summary>
+    public int InCartCount => _allCards.Count(card => card.IsInCart);
+
+    public bool IsBrowseMode => !IsEditMode;
+
+    public bool IsFilterEmpty => SpecialItems.Count > 0 && DisplayedCards.Count == 0;
+
+    public bool HasMoreToShow => DisplayedCards.Count < FilteredCardCount;
+
+    private int FilteredCardCount => FilterCards().Count();
+
+    // ---- 右侧购物车摘要 ----
+    public bool IsCartEmpty => _cart.Lines.Count == 0;
+
+    public bool HasCartLines => !IsCartEmpty;
+
+    public string CartCountText => string.Format(
+        _localization.CurrentCulture,
+        T("specialProducts.cart.count"),
+        _cart.Lines.Where(line => !line.IsReturnLine).Sum(line => line.Quantity).ToString("0.##", CultureInfo.InvariantCulture),
+        _cart.Lines.Count);
+
+    public string CartTotalText => FormatMoney(_cart.ActualAmount);
+
+    public bool HasMoreCartLines => _cart.Lines.Count > CartSummaryLines.Count;
+
+    public string CartMoreText => string.Format(
+        _localization.CurrentCulture,
+        T("specialProducts.cart.more"),
+        Math.Max(0, _cart.Lines.Count - CartSummaryLines.Count));
+
+    // ---- 网格布局：编辑模式右侧面板更宽，卡片相应加宽以保持整列对齐 ----
+    public double CardItemWidth => IsEditMode ? 236d : 196d;
+
+    public double CardItemHeight => 122d;
+
+    public string SelectedPositionText
+    {
+        get
+        {
+            var selected = SelectedSpecialItem;
+            if (selected is null)
+            {
+                return T("specialProducts.edit.noSelection");
+            }
+
+            var index = SpecialItems.IndexOf(selected);
+            return string.Format(
+                _localization.CurrentCulture,
+                T("specialProducts.edit.selected"),
+                selected.DisplayName,
+                index + 1);
+        }
+    }
 
     public string AddText => T("specialProducts.add");
 
@@ -229,15 +451,6 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     public string SelectedSpecialItemText => SelectedSpecialItem?.DisplayName ?? T("specialProducts.edit.noSelection");
 
-    public int TotalPages => Math.Max(1, (SpecialItems.Count + PageSize - 1) / PageSize);
-
-    public string PageStatusText => string.Format(
-        _localization.CurrentCulture,
-        T("specialProducts.pageStatus"),
-        CurrentPage,
-        TotalPages,
-        SpecialItems.Count);
-
     public Task PreloadAsync(CancellationToken cancellationToken = default)
     {
         return PreloadCoreAsync(cancellationToken);
@@ -254,7 +467,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             int firstPageItemCount;
             lock (_specialItemsGate)
             {
-                var firstPageItems = SpecialItems.Take(PageSize).ToArray();
+                var firstPageItems = SpecialItems.Take(ThumbnailPreloadCount).ToArray();
                 firstPageItemCount = firstPageItems.Length;
                 firstPageImageSources = firstPageItems
                     .Select(item => item.ProductImage)
@@ -322,12 +535,22 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         IsEditMode = false;
         ClearSearch();
         SelectedSpecialItem = null;
-        if (PagedSpecialItems.Count == 0)
+        // 页面被缓存复用：每次进入都回到干净的浏览状态，不保留上次的筛选、提示和改价弹窗。
+        FilterText = string.Empty;
+        IsCartFilterActive = false;
+        ClosePriceEditor();
+        HideToast();
+        _lastAdd = null;
+        _pendingRevealLine = null;
+        _displayLimit = DisplayChunkSize;
+        UndoAddCommand.NotifyCanExecuteChanged();
+        if (DisplayedCards.Count == 0)
         {
             DeferThumbnailLoading();
         }
 
-        ResetFirstPageForEntry();
+        RefreshCartState();
+        RefreshDisplayedCards();
     }
 
     private async Task PreloadCoreAsync(CancellationToken cancellationToken)
@@ -401,10 +624,23 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     partial void OnIsEditModeChanged(bool value)
     {
         OnPropertyChanged(nameof(EditModeText));
+        OnPropertyChanged(nameof(IsBrowseMode));
+        OnPropertyChanged(nameof(CardItemWidth));
         if (!value)
         {
             ClearSearch();
             SelectedSpecialItem = null;
+            ClosePriceEditor();
+            ClearRemoveConfirmations();
+        }
+        else
+        {
+            // 进入编辑模式时关闭购物车筛选与提示，网格回到完整排序视图。
+            HideToast();
+            if (IsCartFilterActive)
+            {
+                SetCartFilter(false);
+            }
         }
 
         RefreshCommandStates();
@@ -413,7 +649,44 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     partial void OnSelectedSpecialItemChanged(SellableItemDto? value)
     {
         OnPropertyChanged(nameof(SelectedSpecialItemText));
+        OnPropertyChanged(nameof(SelectedPositionText));
+        var selectedKey = NormalizeProductCode(value?.ProductCode);
+        foreach (var card in _allCards)
+        {
+            card.IsSelected = selectedKey.Length > 0 &&
+                string.Equals(NormalizeProductCode(card.ProductCode), selectedKey, StringComparison.OrdinalIgnoreCase);
+            if (!card.IsSelected)
+            {
+                card.IsRemoveConfirming = false;
+            }
+        }
+
         RefreshCommandStates();
+    }
+
+    partial void OnFilterTextChanged(string value)
+    {
+        _displayLimit = DisplayChunkSize;
+        RefreshDisplayedCards();
+    }
+
+    partial void OnPriceEditorInputTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(PriceEditorNewPriceText));
+        SavePriceCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnPriceEditorErrorTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasPriceEditorError));
+    }
+
+    partial void OnIsToastVisibleChanged(bool value)
+    {
+        if (!value)
+        {
+            CanUndoToast = false;
+        }
     }
 
     public bool ProcessScannerBarcode(string barcode, string devicePath, string source)
@@ -572,11 +845,15 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             }
 
             cartAuditRecorded = true;
+            // 关键逻辑：加购后留在本页连续点选；仅最近一次加购可撤销，返回收银时再定位到最后加入的购物车行。
+            _lastAdd = new LastAddInfo(result.Line, itemSnapshot.QuantityFactor, itemSnapshot.DisplayName);
+            _pendingRevealLine = result.Line;
+            UndoAddCommand.NotifyCanExecuteChanged();
             SetStatus("specialProducts.status.addedToCart", itemSnapshot.DisplayName);
-            Back();
-            _onCartLineAdded?.Invoke(result.Line);
+            ShowToast(string.Format(_localization.CurrentCulture, T("specialProducts.toast.added"), itemSnapshot.DisplayName), canUndo: true);
+            HighlightJustAdded(itemSnapshot.ProductCode);
             stopwatch.Stop();
-            Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} lookupCode={itemSnapshot.LookupCode} success=true revealRequested={_onCartLineAdded is not null} cartLines={result.CartLineCount} totalElapsedMs={stopwatch.ElapsedMilliseconds}");
+            Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} lookupCode={itemSnapshot.LookupCode} success=true revealRequested={_onCartLineAdded is not null} stayOnPage=true cartLines={result.CartLineCount} totalElapsedMs={stopwatch.ElapsedMilliseconds}");
         }
         catch (Exception ex)
         {
@@ -772,12 +1049,23 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         }
     }
 
-    private async Task MoveSpecialProductAsync(SellableItemDto? item, int delta)
+    private async Task MoveToFrontAsync(SellableItemDto? item)
+    {
+        var index = item is null ? -1 : SpecialItems.IndexOf(item);
+        if (index <= 0)
+        {
+            return;
+        }
+
+        await MoveSpecialProductAsync(item, -index, "move-front");
+    }
+
+    private async Task MoveSpecialProductAsync(SellableItemDto? item, int delta, string action)
     {
         var itemSnapshot = item;
         using var authorization = await AuthorizeAsync(
             Permissions.PosTerminal.SpecialProducts.Manage,
-            delta < 0 ? "move-up" : "move-down");
+            action);
         if (authorization is null)
         {
             return;
@@ -791,7 +1079,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
         var currentIndex = SpecialItems.IndexOf(itemSnapshot);
         var nextIndex = currentIndex + delta;
-        if (currentIndex < 0 || nextIndex < 0 || nextIndex >= SpecialItems.Count)
+        if (delta == 0 || currentIndex < 0 || nextIndex < 0 || nextIndex >= SpecialItems.Count)
         {
             return;
         }
@@ -859,108 +1147,581 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         return false;
     }
 
-    private void ShowPreviousPage()
+    // ================= 卡片、筛选与网格 =================
+
+    /// <summary>按商品编码复用卡片并刷新排序位置；商品本身仍以 SpecialItems 为准。</summary>
+    private void RebuildCards()
     {
-        if (!CanShowPreviousPage())
+        var next = new Dictionary<string, SpecialProductCardViewModel>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<SpecialProductCardViewModel>(SpecialItems.Count);
+        for (var index = 0; index < SpecialItems.Count; index++)
         {
-            return;
-        }
-
-        CurrentPage--;
-        RefreshPagedSpecialItems();
-    }
-
-    private void ShowNextPage()
-    {
-        if (!CanShowNextPage())
-        {
-            return;
-        }
-
-        CurrentPage++;
-        RefreshPagedSpecialItems();
-    }
-
-    private void RefreshPagedSpecialItems(string? focusProductCode = null, bool resetToFirstPage = false)
-    {
-        if (resetToFirstPage)
-        {
-            CurrentPage = 1;
-        }
-        else if (!string.IsNullOrWhiteSpace(focusProductCode))
-        {
-            var focusIndex = SpecialItems
-                .Select((item, index) => new { item.ProductCode, Index = index })
-                .FirstOrDefault(x => string.Equals(
-                    NormalizeProductCode(x.ProductCode),
-                    NormalizeProductCode(focusProductCode),
-                    StringComparison.OrdinalIgnoreCase))
-                ?.Index;
-
-            if (focusIndex.HasValue)
+            var item = SpecialItems[index];
+            var key = NormalizeProductCode(item.ProductCode);
+            SpecialProductCardViewModel card;
+            if (key.Length > 0 && !next.ContainsKey(key) && _cardsByProduct.TryGetValue(key, out var existing))
             {
-                CurrentPage = focusIndex.Value / PageSize + 1;
+                existing.Item = item;
+                card = existing;
             }
+            else
+            {
+                card = new SpecialProductCardViewModel(item);
+            }
+
+            card.Position = index + 1;
+            if (key.Length > 0 && !next.ContainsKey(key))
+            {
+                next[key] = card;
+            }
+
+            ordered.Add(card);
         }
 
-        CurrentPage = Math.Clamp(CurrentPage, 1, TotalPages);
-        PagedSpecialItems.ReplaceWith(SpecialItems
-            .Skip((CurrentPage - 1) * PageSize)
-            .Take(PageSize));
+        _cardsByProduct = next;
+        _allCards = ordered;
+        ApplyCartQuantitiesToCards();
+        var selectedKey = NormalizeProductCode(SelectedSpecialItem?.ProductCode);
+        foreach (var card in _allCards)
+        {
+            card.IsSelected = selectedKey.Length > 0 &&
+                string.Equals(NormalizeProductCode(card.ProductCode), selectedKey, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private IEnumerable<SpecialProductCardViewModel> FilterCards()
+    {
+        IEnumerable<SpecialProductCardViewModel> cards = _allCards;
+        if (IsCartFilterActive)
+        {
+            cards = cards.Where(card => card.IsInCart);
+        }
+
+        var text = (FilterText ?? string.Empty).Trim();
+        if (text.Length == 0)
+        {
+            return cards;
+        }
+
+        return cards.Where(card =>
+            Contains(card.Item.DisplayName, text) ||
+            Contains(card.Item.ItemNumber, text) ||
+            Contains(card.Item.LookupCode, text) ||
+            Contains(card.Item.Barcode, text) ||
+            Contains(card.Item.ProductCode, text));
+
+        static bool Contains(string? source, string value) =>
+            source?.Contains(value, StringComparison.CurrentCultureIgnoreCase) == true;
+    }
+
+    private void RefreshDisplayedCards()
+    {
+        var next = FilterCards().Take(_displayLimit).ToList();
+        // 序列未变（如重新进入页面）时不动集合，避免网格重建、缩略图重新解码闪烁。
+        if (!DisplayedCards.SequenceEqual(next))
+        {
+            DisplayedCards.ReplaceWith(next);
+        }
+
         OnPropertyChanged(nameof(IsSpecialListEmpty));
-        OnPropertyChanged(nameof(TotalPages));
-        OnPropertyChanged(nameof(PageStatusText));
+        OnPropertyChanged(nameof(IsFilterEmpty));
+        OnPropertyChanged(nameof(HasMoreToShow));
+        OnPropertyChanged(nameof(ShowMoreText));
+        OnPropertyChanged(nameof(TotalCountText));
+        OnPropertyChanged(nameof(AllChipText));
+        OnPropertyChanged(nameof(InCartChipText));
+        OnPropertyChanged(nameof(InCartCount));
+        OnPropertyChanged(nameof(SelectedPositionText));
+        ShowMoreCommand.NotifyCanExecuteChanged();
         RefreshCommandStates();
     }
 
-    private void ResetFirstPageForEntry()
+    private void SetCartFilter(bool active)
     {
-        CurrentPage = 1;
-        if (PagedSpecialItemsMatchCurrentPage())
+        if (IsCartFilterActive == active)
         {
-            OnPropertyChanged(nameof(IsSpecialListEmpty));
-            OnPropertyChanged(nameof(TotalPages));
-            OnPropertyChanged(nameof(PageStatusText));
-            RefreshCommandStates();
             return;
         }
 
-        RefreshPagedSpecialItems(resetToFirstPage: false);
+        IsCartFilterActive = active;
+        _displayLimit = DisplayChunkSize;
+        RefreshDisplayedCards();
     }
 
-    private bool PagedSpecialItemsMatchCurrentPage()
+    private void ShowMore()
     {
-        var expectedItems = SpecialItems
-            .Take(PageSize)
-            .ToArray();
-        if (PagedSpecialItems.Count != expectedItems.Length)
+        _displayLimit += DisplayChunkSize;
+        RefreshDisplayedCards();
+    }
+
+    // ================= 购物车联动 =================
+
+    private void OnCartChanged(object? sender, EventArgs e)
+    {
+        RefreshCartState();
+        if (IsCartFilterActive)
         {
-            return false;
+            // 「已在购物车」筛选的成员会随购物车变化。
+            RefreshDisplayedCards();
+        }
+    }
+
+    /// <summary>同步卡片数量角标与右侧购物车摘要。</summary>
+    private void RefreshCartState()
+    {
+        ApplyCartQuantitiesToCards();
+        CartSummaryLines.ReplaceWith(_cart.Lines
+            .Reverse()
+            .Take(3)
+            .Select(line => new SpecialCartSummaryLine(
+                line.DisplayName,
+                "× " + line.Quantity.ToString("0.##", CultureInfo.InvariantCulture),
+                FormatMoney(line.ActualAmount))));
+        OnPropertyChanged(nameof(IsCartEmpty));
+        OnPropertyChanged(nameof(HasCartLines));
+        OnPropertyChanged(nameof(CartCountText));
+        OnPropertyChanged(nameof(CartTotalText));
+        OnPropertyChanged(nameof(HasMoreCartLines));
+        OnPropertyChanged(nameof(CartMoreText));
+        OnPropertyChanged(nameof(InCartCount));
+        OnPropertyChanged(nameof(InCartChipText));
+    }
+
+    private void ApplyCartQuantitiesToCards()
+    {
+        var quantities = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in _cart.Lines.Where(line => !line.IsReturnLine))
+        {
+            var key = NormalizeProductCode(line.ProductCode);
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            quantities[key] = quantities.GetValueOrDefault(key) + line.Quantity;
         }
 
-        for (var index = 0; index < expectedItems.Length; index++)
+        foreach (var card in _allCards)
         {
-            if (!ReferenceEquals(PagedSpecialItems[index], expectedItems[index]) &&
-                !string.Equals(
-                    NormalizeProductCode(PagedSpecialItems[index].ProductCode),
-                    NormalizeProductCode(expectedItems[index].ProductCode),
-                    StringComparison.OrdinalIgnoreCase))
+            card.CartQuantity = quantities.GetValueOrDefault(NormalizeProductCode(card.ProductCode));
+        }
+    }
+
+    // ================= 加购提示、撤销与回到收银 =================
+
+    private void ShowToast(string text, bool canUndo)
+    {
+        CancelToastHide();
+        ToastText = text;
+        IsToastVisible = true;
+        CanUndoToast = canUndo;
+        var cts = new CancellationTokenSource();
+        _toastHideCts = cts;
+        _ = HideToastAfterDelayAsync(cts);
+    }
+
+    private async Task HideToastAfterDelayAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await _delayAsync(ToastAutoHideDelay, cts.Token);
+            if (!cts.IsCancellationRequested && ReferenceEquals(_toastHideCts, cts))
             {
-                return false;
+                IsToastVisible = false;
             }
         }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_toastHideCts, cts))
+            {
+                _toastHideCts = null;
+            }
 
-        return true;
+            cts.Dispose();
+        }
     }
 
-    private bool EnsureOnlineMutationAllowed()
+    private void HideToast()
+    {
+        CancelToastHide();
+        IsToastVisible = false;
+    }
+
+    private void CancelToastHide()
+    {
+        var cts = Interlocked.Exchange(ref _toastHideCts, null);
+        if (cts is null)
+        {
+            return;
+        }
+
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private void HighlightJustAdded(string productCode)
+    {
+        foreach (var card in _allCards)
+        {
+            card.IsJustAdded = string.Equals(
+                NormalizeProductCode(card.ProductCode),
+                NormalizeProductCode(productCode),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        var previous = Interlocked.Exchange(ref _justAddedCts, null);
+        previous?.Cancel();
+        previous?.Dispose();
+        var cts = new CancellationTokenSource();
+        _justAddedCts = cts;
+        _ = ClearJustAddedAfterDelayAsync(cts);
+    }
+
+    private async Task ClearJustAddedAfterDelayAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await _delayAsync(JustAddedHighlightDelay, cts.Token);
+            if (!cts.IsCancellationRequested && ReferenceEquals(_justAddedCts, cts))
+            {
+                foreach (var card in _allCards)
+                {
+                    card.IsJustAdded = false;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_justAddedCts, cts))
+            {
+                _justAddedCts = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>撤销最近一次加购：数量大于本次加入量则减回，否则删除整行；并补记审计。</summary>
+    private void UndoLastAdd()
+    {
+        var last = _lastAdd;
+        if (last is null)
+        {
+            return;
+        }
+
+        _lastAdd = null;
+        UndoAddCommand.NotifyCanExecuteChanged();
+        HideToast();
+
+        var before = OperationAuditEvents.CaptureCart(_cart.Lines);
+        // 购物车操作与规则在工作流服务里；购物车行已被改动或移除时它返回 Changed=false，无需撤销。
+        var result = _workflowService.UndoAddToCart(last.Line, last.AddedQuantity);
+        if (!result.Changed)
+        {
+            return;
+        }
+
+        if (result.RemovedLine && ReferenceEquals(_pendingRevealLine, last.Line))
+        {
+            _pendingRevealLine = null;
+        }
+
+        OperationAuditEvents.RecordCartChange(
+            _operationAuditLogger,
+            result.RemovedLine ? OperationAuditTypes.CartItemRemove : OperationAuditTypes.CartItemQuantityChange,
+            Session,
+            before,
+            OperationAuditEvents.CaptureCart(_cart.Lines),
+            reasonCode: "special-products-undo");
+        SetStatus("specialProducts.status.addUndone", last.DisplayName);
+        Log($"operation=undo-add store={Session.StoreCode} product={last.DisplayName} removedLine={result.RemovedLine}");
+    }
+
+    // ================= 编辑模式：移除确认 =================
+
+    private void BeginRemove(SellableItemDto? item)
+    {
+        if (item is null || !IsEditMode)
+        {
+            return;
+        }
+
+        var key = NormalizeProductCode(item.ProductCode);
+        RemoveConfirmPromptText = string.Format(
+            _localization.CurrentCulture,
+            T("specialProducts.remove.confirm"),
+            item.DisplayName);
+        OnPropertyChanged(nameof(RemoveConfirmPromptText));
+        foreach (var card in _allCards)
+        {
+            card.IsRemoveConfirming = string.Equals(
+                NormalizeProductCode(card.ProductCode),
+                key,
+                StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private void CancelRemove(SellableItemDto? item)
+    {
+        ClearRemoveConfirmations();
+    }
+
+    private void ClearRemoveConfirmations()
+    {
+        foreach (var card in _allCards)
+        {
+            card.IsRemoveConfirming = false;
+        }
+    }
+
+    // ================= 编辑模式：修改零售价（必须在线）=================
+
+    private void OpenPriceEditor(SellableItemDto? item)
+    {
+        if (item is null || !IsEditMode || IsBusy)
+        {
+            return;
+        }
+
+        if (!EnsureOnlineMutationAllowed("specialProducts.status.priceOnlineRequired"))
+        {
+            return;
+        }
+
+        _priceEditorTarget = item;
+        // 预填当前价；首次按键会整体替换，之后才是追加输入。
+        _priceInputIsFresh = true;
+        PriceEditorErrorText = string.Empty;
+        PriceEditorInputText = item.RetailPrice.ToString("0.00", CultureInfo.InvariantCulture);
+        IsPriceEditorOpen = true;
+        RaisePriceEditorTargetProperties();
+        SavePriceCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ClosePriceEditor()
+    {
+        if (!IsPriceEditorOpen && _priceEditorTarget is null)
+        {
+            return;
+        }
+
+        SavePriceCommand.Cancel();
+        IsPriceEditorOpen = false;
+        _priceEditorTarget = null;
+        PriceEditorInputText = string.Empty;
+        PriceEditorErrorText = string.Empty;
+        RaisePriceEditorTargetProperties();
+        SavePriceCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RaisePriceEditorTargetProperties()
+    {
+        OnPropertyChanged(nameof(PriceEditorProductName));
+        OnPropertyChanged(nameof(PriceEditorCurrentPriceText));
+    }
+
+    private void PressPriceKey(string? key)
+    {
+        if (string.IsNullOrEmpty(key) || key.Length != 1 || !IsPriceEditorOpen)
+        {
+            return;
+        }
+
+        var current = _priceInputIsFresh ? string.Empty : PriceEditorInputText;
+        _priceInputIsFresh = false;
+        PriceEditorErrorText = string.Empty;
+        var next = AppendPriceKey(current, key[0]);
+        if (next is not null)
+        {
+            PriceEditorInputText = next;
+        }
+    }
+
+    /// <summary>金额输入规则：整数最多 5 位、小数最多 2 位、只允许一个小数点、去掉前导 0。</summary>
+    private static string? AppendPriceKey(string current, char key)
+    {
+        if (key == '.')
+        {
+            if (current.Contains('.'))
+            {
+                return null;
+            }
+
+            return current.Length == 0 ? "0." : current + ".";
+        }
+
+        if (key is < '0' or > '9')
+        {
+            return null;
+        }
+
+        var dot = current.IndexOf('.');
+        if (dot >= 0)
+        {
+            return current.Length - dot - 1 >= 2 ? null : current + key;
+        }
+
+        if (current == "0")
+        {
+            return key.ToString();
+        }
+
+        return current.Length >= 5 ? null : current + key;
+    }
+
+    private void BackspacePrice()
+    {
+        if (!IsPriceEditorOpen)
+        {
+            return;
+        }
+
+        _priceInputIsFresh = false;
+        PriceEditorErrorText = string.Empty;
+        PriceEditorInputText = PriceEditorInputText.Length <= 1
+            ? string.Empty
+            : PriceEditorInputText[..^1];
+    }
+
+    private void ClearPrice()
+    {
+        if (!IsPriceEditorOpen)
+        {
+            return;
+        }
+
+        _priceInputIsFresh = false;
+        PriceEditorErrorText = string.Empty;
+        PriceEditorInputText = string.Empty;
+    }
+
+    private bool TryParseEditedPrice(out decimal price)
+    {
+        price = 0m;
+        return decimal.TryParse(
+                   PriceEditorInputText,
+                   NumberStyles.AllowDecimalPoint,
+                   CultureInfo.InvariantCulture,
+                   out price) &&
+               SpecialProductPriceRules.IsValid(price);
+    }
+
+    private bool CanSavePrice()
+    {
+        // 价格没变就不允许保存：预填的是当前价，必须改动后才可保存。
+        return IsPriceEditorOpen &&
+            !IsBusy &&
+            Session.IsOnline &&
+            _priceEditorTarget is not null &&
+            TryParseEditedPrice(out var price) &&
+            price != _priceEditorTarget.RetailPrice;
+    }
+
+    private async Task SavePriceAsync(CancellationToken cancellationToken)
+    {
+        var target = _priceEditorTarget;
+        if (target is null || !IsPriceEditorOpen)
+        {
+            return;
+        }
+
+        using var authorization = await AuthorizeAsync(
+            Permissions.PosTerminal.SpecialProducts.Manage,
+            "edit-price",
+            cancellationToken);
+        if (authorization is null)
+        {
+            return;
+        }
+        using var authorizationActivation = authorization.Activate();
+
+        if (IsBusy || !EnsureOnlineMutationAllowed("specialProducts.status.priceOnlineRequired"))
+        {
+            return;
+        }
+
+        if (!TryParseEditedPrice(out var newPrice))
+        {
+            PriceEditorErrorText = T("specialProducts.priceEditor.invalid");
+            return;
+        }
+
+        var oldPrice = target.RetailPrice;
+        if (newPrice == oldPrice)
+        {
+            PriceEditorErrorText = T("specialProducts.priceEditor.same");
+            return;
+        }
+
+        IsBusy = true;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            Log($"operation=price store={Session.StoreCode} productCode={target.ProductCode} oldPrice={oldPrice} newPrice={newPrice} stage=start");
+            var result = await _workflowService.UpdateSpecialProductPriceAsync(
+                Session.StoreCode,
+                target.ProductCode,
+                newPrice,
+                cancellationToken);
+            ApplySpecialItems(result.SpecialItems, resetToFirstPage: false, focusProductCode: target.ProductCode);
+            OperationAuditEvents.RecordSpecialProductPriceChange(
+                _operationAuditLogger, Session, target, oldPrice, newPrice);
+
+            // 购物车行在加入时已固化价格，改价不会回改；如果该商品已在车里，明确告知收银员。
+            var inCart = _cart.Lines.Any(line =>
+                !line.IsReturnLine &&
+                string.Equals(
+                    NormalizeProductCode(line.ProductCode),
+                    NormalizeProductCode(target.ProductCode),
+                    StringComparison.OrdinalIgnoreCase));
+            SetStatus(
+                inCart ? "specialProducts.status.priceUpdatedInCart" : "specialProducts.status.priceUpdated",
+                target.DisplayName,
+                FormatMoney(newPrice));
+            ClosePriceEditor();
+            stopwatch.Stop();
+            Log($"operation=price store={Session.StoreCode} productCode={target.ProductCode} oldPrice={oldPrice} newPrice={newPrice} stage=completed inCart={inCart} totalElapsedMs={stopwatch.ElapsedMilliseconds}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 返回收银或关闭弹窗导致取消：服务端是否已写入未知，保持本地不变，下次刷新以服务端为准。
+            Log($"operation=price store={Session.StoreCode} productCode={target.ProductCode} stage=canceled");
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"operation=price store={Session.StoreCode} productCode={target.ProductCode} oldPrice={oldPrice} newPrice={newPrice} stage=failed totalElapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            OperationAuditEvents.RecordSpecialProductPriceChange(
+                _operationAuditLogger, Session, target, oldPrice, newPrice,
+                outcome: "Failed", safeMessage: ex.GetType().Name);
+            var message = string.Format(_localization.CurrentCulture, T("specialProducts.status.priceFailed"), ex.Message);
+            // 弹窗保持打开，收银员可直接重试；失败时本地价格不变。
+            PriceEditorErrorText = message;
+            SetStatusText(message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string FormatMoney(decimal amount) => amount.ToString("C2", MoneyCulture);
+
+    private bool EnsureOnlineMutationAllowed(string statusKey = "specialProducts.status.onlineRequired")
     {
         if (Session.IsOnline)
         {
             return true;
         }
 
-        SetStatus("specialProducts.status.onlineRequired");
+        SetStatus(statusKey);
         return false;
     }
 
@@ -985,26 +1746,18 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         return index >= 0 && IsEditMode && !IsBusy && index < SpecialItems.Count - 1;
     }
 
-    private bool CanShowPreviousPage()
-    {
-        return !IsBusy && CurrentPage > 1;
-    }
-
-    private bool CanShowNextPage()
-    {
-        return !IsBusy && CurrentPage < TotalPages;
-    }
-
     private void RefreshCommandStates()
     {
         DownloadCommand.NotifyCanExecuteChanged();
         ToggleEditModeCommand.NotifyCanExecuteChanged();
-        PreviousPageCommand.NotifyCanExecuteChanged();
-        NextPageCommand.NotifyCanExecuteChanged();
         AddSpecialProductCommand.NotifyCanExecuteChanged();
         RemoveSpecialProductCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
         MoveDownCommand.NotifyCanExecuteChanged();
+        MoveToFrontCommand.NotifyCanExecuteChanged();
+        BeginRemoveCommand.NotifyCanExecuteChanged();
+        OpenPriceEditorCommand.NotifyCanExecuteChanged();
+        SavePriceCommand.NotifyCanExecuteChanged();
         RefreshCommand.NotifyCanExecuteChanged();
     }
 
@@ -1029,7 +1782,34 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         {
             var selectedProductCode = SelectedSpecialItem?.ProductCode;
             SpecialItems.ReplaceWith(specialItems);
-            RefreshPagedSpecialItems(focusProductCode, resetToFirstPage);
+            if (resetToFirstPage)
+            {
+                _displayLimit = DisplayChunkSize;
+            }
+
+            if (!string.IsNullOrWhiteSpace(focusProductCode))
+            {
+                // 新增 / 改价 / 排序后让目标商品落在已渲染范围内，并通知视图滚动到它。
+                var focusIndex = SpecialItems
+                    .Select((item, index) => new { item.ProductCode, Index = index })
+                    .FirstOrDefault(x => string.Equals(
+                        NormalizeProductCode(x.ProductCode),
+                        NormalizeProductCode(focusProductCode),
+                        StringComparison.OrdinalIgnoreCase))
+                    ?.Index;
+                if (focusIndex.HasValue && focusIndex.Value >= _displayLimit)
+                {
+                    _displayLimit = focusIndex.Value + 1;
+                }
+            }
+
+            RebuildCards();
+            RefreshDisplayedCards();
+            if (!string.IsNullOrWhiteSpace(focusProductCode))
+            {
+                FocusProductRequested?.Invoke(this, focusProductCode);
+            }
+
             SelectedSpecialItem = string.IsNullOrWhiteSpace(selectedProductCode)
                 ? null
                 : SpecialItems.FirstOrDefault(item => string.Equals(
@@ -1085,9 +1865,37 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         OnPropertyChanged(nameof(RefreshText));
         OnPropertyChanged(nameof(DownloadText));
         OnPropertyChanged(nameof(EditModeText));
-        OnPropertyChanged(nameof(PreviousPageText));
-        OnPropertyChanged(nameof(NextPageText));
-        OnPropertyChanged(nameof(PageStatusText));
+        OnPropertyChanged(nameof(FilterPlaceholderText));
+        OnPropertyChanged(nameof(BrowseHintText));
+        OnPropertyChanged(nameof(FilterEmptyText));
+        OnPropertyChanged(nameof(CartTitleText));
+        OnPropertyChanged(nameof(CartTotalLabelText));
+        OnPropertyChanged(nameof(CartEmptyText));
+        OnPropertyChanged(nameof(CartCheckoutText));
+        OnPropertyChanged(nameof(UndoText));
+        OnPropertyChanged(nameof(CancelText));
+        OnPropertyChanged(nameof(EditBannerText));
+        OnPropertyChanged(nameof(EditBannerDetailText));
+        OnPropertyChanged(nameof(MoveToFrontText));
+        OnPropertyChanged(nameof(EditPriceText));
+        OnPropertyChanged(nameof(AddPanelTitleText));
+        OnPropertyChanged(nameof(AddPanelHintText));
+        OnPropertyChanged(nameof(AddPanelFooterText));
+        OnPropertyChanged(nameof(PriceEditorTitleText));
+        OnPropertyChanged(nameof(PriceEditorCurrentLabelText));
+        OnPropertyChanged(nameof(PriceEditorNewLabelText));
+        OnPropertyChanged(nameof(PriceEditorOnlineHintText));
+        OnPropertyChanged(nameof(PriceEditorManualNoteText));
+        OnPropertyChanged(nameof(PriceEditorSaveText));
+        OnPropertyChanged(nameof(PriceEditorClearText));
+        OnPropertyChanged(nameof(PriceEditorBackspaceText));
+        OnPropertyChanged(nameof(TotalCountText));
+        OnPropertyChanged(nameof(AllChipText));
+        OnPropertyChanged(nameof(InCartChipText));
+        OnPropertyChanged(nameof(ShowMoreText));
+        OnPropertyChanged(nameof(CartCountText));
+        OnPropertyChanged(nameof(CartMoreText));
+        OnPropertyChanged(nameof(SelectedPositionText));
         OnPropertyChanged(nameof(AddText));
         OnPropertyChanged(nameof(RemoveText));
         OnPropertyChanged(nameof(MoveUpText));
@@ -1125,6 +1933,11 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         _disposed = true;
         CancelSearch();
         _localization.CultureChanged -= OnCultureChanged;
+        _cart.CartChanged -= OnCartChanged;
+        CancelToastHide();
+        var justAddedCts = Interlocked.Exchange(ref _justAddedCts, null);
+        justAddedCts?.Cancel();
+        justAddedCts?.Dispose();
         CancelDownloadProgressAutoHide();
         _thumbnailEnableCts?.Cancel();
         _thumbnailEnableCts?.Dispose();
@@ -1143,8 +1956,20 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         DownloadCommand.Cancel();
         AddSpecialProductCommand.Cancel();
         RemoveSpecialProductCommand.Cancel();
+        SavePriceCommand.Cancel();
         CancelSearch();
+        ClosePriceEditor();
+        HideToast();
+        // 本次访问里加入过商品：回到收银台后定位到最后加入的购物车行（与旧「加购即返回」的定位一致）。
+        var reveal = _pendingRevealLine;
+        _pendingRevealLine = null;
+        _lastAdd = null;
+        UndoAddCommand.NotifyCanExecuteChanged();
         _onBack();
+        if (reveal is not null)
+        {
+            _onCartLineAdded?.Invoke(reveal);
+        }
     }
 
     private void CancelSearch()
