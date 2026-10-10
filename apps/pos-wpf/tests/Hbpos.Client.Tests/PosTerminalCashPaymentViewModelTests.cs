@@ -4011,6 +4011,38 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.Equal("payment.status.cardMustBeFinalTender", viewModel.StatusMessage);
     }
 
+    [Theory]
+    [InlineData(10.49, "3", "7.49")]
+    [InlineData(10.99, "3", "7.99")]
+    [InlineData(10.01, "3", "7.01")]
+    public async Task Payment_page_cash_then_card_pays_exact_remainder_when_total_is_not_multiple_of_five_cents(
+        double total,
+        string cashText,
+        string cardText)
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-152M", "Mixed Pay Tea", "930152M", PriceSourceKind.StoreRetailPrice, (decimal)total));
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new InMemoryOrderRepository(),
+            new InMemorySyncQueueRepository(),
+            cardTerminalClient: new ApprovedCardTerminalClient("CARD-152M"));
+        var viewModel = new PaymentViewModel(cart, workflow, Session)
+        {
+            TenderAmountText = cashText
+        };
+        var completed = false;
+        viewModel.PaymentCompleted += (_, _) => completed = true;
+        await viewModel.SelectCashCommand.ExecuteAsync(null);
+
+        viewModel.TenderAmountText = cardText;
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.NotEqual("payment.status.cardMustBeFinalTender", viewModel.StatusMessage);
+        Assert.NotEqual("payment.status.cardExceedsRemaining", viewModel.StatusMessage);
+        Assert.True(completed, viewModel.StatusMessage);
+    }
+
     [Fact]
     public async Task Payment_page_quick_cash_options_add_cash_tender()
     {

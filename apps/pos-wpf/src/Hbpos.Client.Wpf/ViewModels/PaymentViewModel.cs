@@ -1588,7 +1588,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             !IsInstallmentPaymentEnabled &&
             (IsPaymentMode || IsRefundMode) &&
             _workflowService.TryParseTenderedAmount(amountText, out var plannedCardAmount) &&
-            plannedCardAmount >= RemainingAmount;
+            plannedCardAmount >= GetCardFinalTenderAmount();
         using var confirmPermissionGrant = willAutoCompleteCardPayment
             ? await AuthorizeAsync(
                 Permissions.PosTerminal.Payment.Confirm,
@@ -1923,7 +1923,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             tenderAmount > 0m &&
             // 已收够（含现金超收）时剩余应收为 0，不能再追加卡笔；
             // 未收够时仍要求卡是足额的最后一笔。
-            (IsSettlementComplete() || tenderAmount < RemainingAmount))
+            (IsSettlementComplete() || tenderAmount < GetCardFinalTenderAmount()))
         {
             SetStatus("payment.status.cardMustBeFinalTender");
             NotifyPaymentCommandStates();
@@ -3059,6 +3059,19 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
         // UI 输入始终为正数；退款审计必须恢复 POS 现有的有符号金额语义。
         return IsRefundMode ? -Math.Abs(amount) : Math.Abs(amount);
+    }
+
+    /// <summary>
+    /// 刷卡作为最后一笔时应刷的金额。RemainingAmount 在已有现金时按 0.05 凑整（如 10.49 先收现金 3.00，
+    /// 显示 7.50），但卡不能凑整，实际只能刷精确余额 7.49；取两者较小值，
+    /// 避免 .49/.99 这类非 5 分尾数的混合支付里"7.49 不够、7.50 超额"互相卡死。
+    /// 退款模式沿用原有 RemainingAmount 语义。
+    /// </summary>
+    private decimal GetCardFinalTenderAmount()
+    {
+        return IsPaymentMode
+            ? Math.Min(RemainingAmount, GetExternalRemainingAmount())
+            : RemainingAmount;
     }
 
     private decimal GetExternalRemainingAmount()
