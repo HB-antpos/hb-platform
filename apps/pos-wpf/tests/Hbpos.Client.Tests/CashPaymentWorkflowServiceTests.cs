@@ -4440,6 +4440,45 @@ public sealed class CashPaymentWorkflowServiceTests
         Assert.Equal(1, settingsProvider.GetSettingsCalls);
     }
 
+    [Fact]
+    public async Task Square_refund_is_not_aborted_by_cancellation_once_the_request_is_dispatched()
+    {
+        var cart = CreateReturnCart(4m);
+        var squareAttempts = new RecordingSquarePaymentAttemptRepository();
+        var linklyContext = new LinklyPaymentAttemptContextAccessor();
+        var squareContext = new SquarePaymentAttemptContextAccessor();
+        var terminal = new SettingsBoundRecordingCardTerminalClient(linklyContext, squareContext);
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardPaymentAttemptRepository: new RecordingCardPaymentAttemptRepository(),
+            cardTerminalSettingsProvider: new TxnRefSequencedCardTerminalSettingsProvider(
+                CreateSquareSettings(),
+                CreateSquareSettings()),
+            squarePaymentAttemptRepository: squareAttempts,
+            linklyPaymentAttemptContextAccessor: linklyContext,
+            squarePaymentAttemptContextAccessor: squareContext);
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        // 付款页取消 / 页面重入会取消卡操作；Square 退款请求发出后 Square 可能已受理，取消不能中断它。
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            actualAmount: -4m,
+            currentTenders: [],
+            amountText: "4",
+            referenceText: "SQ:processor-sale",
+            cancellationToken: cancellation.Token,
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded, result.StatusMessage);
+        Assert.Equal(1, terminal.BoundRefundCallCount);
+    }
+
     [Theory]
     [InlineData(CardProcessorKind.Linkly, CardProcessorKind.Square)]
     [InlineData(CardProcessorKind.Square, CardProcessorKind.Linkly)]

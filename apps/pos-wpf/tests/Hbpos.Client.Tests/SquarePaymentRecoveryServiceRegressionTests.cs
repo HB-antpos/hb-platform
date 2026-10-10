@@ -98,6 +98,42 @@ public sealed class SquarePaymentRecoveryServiceRegressionTests
     }
 
     [Fact]
+    public async Task ResolveRefundAsync_confirm_refunded_with_reference_only_writes_journal_with_non_empty_reason()
+    {
+        var attempt = CreateVerifiedAttempt() with
+        {
+            OperationKind = "Refund",
+            Status = LocalSquarePaymentAttemptStatus.Recovering,
+            PaymentId = null,
+            PaymentStatus = null,
+            RecoveryPhase = CardRecoveryPhases.None,
+            RecoveryTargetStatus = null,
+            ResponseCode = null
+        };
+        var attempts = new RecordingSquareAttemptRepository(attempt);
+        var service = CreateService(
+            attempts,
+            new RecordingLocalOrderRepository(CreateExistingOrder(hasExactTenderKey: true)));
+
+        // UI 只在“继续等待”时要求备注；仅填退款号确认退款时，主管结案日志仍不能因空原因被拒绝落库。
+        await service.ResolveRefundAsync(
+            new CardRefundSupervisorResolution(
+                attempt.AttemptGuid,
+                CardProcessorKind.Square,
+                CardRefundSupervisorDecision.ConfirmRefunded,
+                Reason: string.Empty,
+                Evidence: null,
+                RefundReference: "refund-ref-1"),
+            new PosCartService(),
+            Session);
+
+        Assert.Equal(1, attempts.ResolveRefundCount);
+        var journal = Assert.IsType<LocalFinancialSupervisorResolution>(attempts.LastRefundJournal);
+        Assert.False(string.IsNullOrWhiteSpace(journal.Reason));
+        Assert.Equal("refund-ref-1", journal.FinancialReference);
+    }
+
+    [Fact]
     public async Task ResolveRefundAsync_missing_square_refund_reference_uses_localized_message()
     {
         var attempt = CreateVerifiedAttempt() with
@@ -279,6 +315,8 @@ public sealed class SquarePaymentRecoveryServiceRegressionTests
 
         public int ResolveRefundCount { get; private set; }
 
+        public LocalFinancialSupervisorResolution? LastRefundJournal { get; private set; }
+
         public Task CreateAsync(
             LocalSquarePaymentAttempt attempt,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -357,6 +395,7 @@ public sealed class SquarePaymentRecoveryServiceRegressionTests
             CancellationToken cancellationToken = default)
         {
             ResolveRefundCount++;
+            LastRefundJournal = journal;
             return Task.FromResult(false);
         }
 

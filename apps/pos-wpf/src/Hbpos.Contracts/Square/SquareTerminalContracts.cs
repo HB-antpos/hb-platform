@@ -55,7 +55,8 @@ public sealed record SquarePaymentStatusDto(
     DateTimeOffset? UpdatedAt = null,
     string? CardBrand = null,
     string? MaskedCardNumber = null,
-    string? AuthCode = null);
+    string? AuthCode = null,
+    IReadOnlyList<string>? RefundIds = null);
 
 public sealed record SquareCheckoutStatusResponse(
     string CheckoutId,
@@ -82,7 +83,8 @@ public sealed record SquareRefundResponse(
     string? Status = null,
     string? PaymentId = null,
     SquareMoneyDto? AmountMoney = null,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    DateTimeOffset? CreatedAt = null);
 
 public sealed record SquareWebhookRequest(
     string RawBody,

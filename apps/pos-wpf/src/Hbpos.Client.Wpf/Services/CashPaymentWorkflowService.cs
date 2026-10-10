@@ -1100,6 +1100,19 @@ public sealed class CashPaymentWorkflowService(
                                 new InvalidOperationException("Square 退款缺少 submission token，无法持久化退款响应。")),
                         CancellationToken.None);
                 }));
+        // Square 退款是一次无需持卡人参与的后端 HTTP 调用：请求一旦发出，Square 就可能已受理，
+        // 此时取消只会中断本地等待回执（既拿不到退款号，也撤销不了退款），把已完成的退款变成“结果未知”。
+        // 因此越过提交边界后不再响应取消（付款页取消、页面切换），交由 HttpClient 自身超时兜底；
+        // Linkly 等需要终端交互的退款仍保留取消能力。
+        var shieldSquareRefundFromCancel = isRefund && refundDispatchBoundaryPersisted && squareAttempt is not null;
+        var terminalCancellationToken = shieldSquareRefundFromCancel ? CancellationToken.None : cancellationToken;
+        var squareRefundAttemptGuid = squareAttempt?.AttemptGuid;
+        // 取消可能在调用前或调用过程中到达；已取消时 Register 会立即回调，两种情况都留痕。
+        using var ignoredCancelLog = shieldSquareRefundFromCancel
+            ? cancellationToken.Register(() => TryWriteCardRecoveryLog(
+                $"square refund cancel ignored attemptGuid={squareRefundAttemptGuid:D} reason=request-already-dispatched"))
+            : default;
+
         try
         {
             if (settingsSnapshot is not null &&
@@ -1112,7 +1125,7 @@ public sealed class CashPaymentWorkflowService(
                         session,
                         referenceText,
                         refundIdempotencyKey,
-                        cancellationToken)
+                        terminalCancellationToken)
                     : await settingsBoundClient.AuthorizeWithSettingsAsync(
                         settingsSnapshot,
                         amount,
@@ -1127,9 +1140,9 @@ public sealed class CashPaymentWorkflowService(
                         session,
                         referenceText,
                         refundIdempotencyKey,
-                        cancellationToken)
+                        terminalCancellationToken)
                     : isRefund
-                        ? await _cardTerminalClient.RefundAsync(amount, session, referenceText, cancellationToken)
+                        ? await _cardTerminalClient.RefundAsync(amount, session, referenceText, terminalCancellationToken)
                         : await _cardTerminalClient.AuthorizeAsync(amount, session, cancellationToken);
             }
         }
@@ -1178,6 +1191,9 @@ public sealed class CashPaymentWorkflowService(
 
             if (wasSubmitted)
             {
+                // 触发“结果未知”的原始异常此前不留痕迹（退款场景下连 HTTP 日志都可能缺失），这里补一条诊断。
+                LogCardTerminalCallException(attempt?.AttemptGuid ?? squareAttempt?.AttemptGuid, isRefund, ex);
+
                 // 终端已接单后任何异常都不能被当成失败并允许重新收款。
                 var recoveryPersistenceSucceeded = true;
                 try
@@ -2109,6 +2125,14 @@ public sealed class CashPaymentWorkflowService(
     {
         TryWriteCardRecoveryLog(
             $"conservative result-unknown stage={stage} attemptGuid={attemptGuid?.ToString("D") ?? "<none>"} error={ex.GetType().Name}");
+    }
+
+    private static void LogCardTerminalCallException(Guid? attemptGuid, bool isRefund, Exception ex)
+    {
+        var detail = ex.Message.ReplaceLineEndings(" ");
+        TryWriteCardRecoveryLog(
+            $"terminal call ended with exception operation={(isRefund ? "refund" : "sale")} attemptGuid={attemptGuid?.ToString("D") ?? "<none>"} " +
+            $"error={ex.GetType().Name} message={(detail.Length <= 200 ? detail : detail[..200])} -> ResultUnknown");
     }
 
     private static void TryWriteCardRecoveryLog(string message)

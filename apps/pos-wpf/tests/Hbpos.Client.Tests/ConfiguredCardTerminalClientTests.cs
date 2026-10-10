@@ -1112,7 +1112,11 @@ public sealed class ConfiguredCardTerminalClientTests
               }
             }
             """.Replace("%STATUS%", paymentStatus, StringComparison.Ordinal));
-        var client = new ConfiguredCardTerminalClient(new StaticCardTerminalSettingsProvider(CreateSquareSettings()), CreateApiClient(handler));
+        // 关闭 APPROVED 宽限期，专测宽限期之外的最终判定。
+        var client = new ConfiguredCardTerminalClient(new StaticCardTerminalSettingsProvider(CreateSquareSettings()), CreateApiClient(handler))
+        {
+            SquareApprovedSettleGrace = TimeSpan.Zero
+        };
 
         var result = await client.AuthorizeAsync(5m, CreateSession());
 
@@ -1122,6 +1126,46 @@ public sealed class ConfiguredCardTerminalClientTests
             !string.Equals(paymentStatus, "FAILED", StringComparison.OrdinalIgnoreCase),
             result.ResultUnknown);
         Assert.Equal($"Square payment status is {paymentStatus}.", result.Message);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_waits_for_square_payment_approved_to_become_completed()
+    {
+        var paymentPolls = 0;
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                return JsonResponse("""{ "checkout": { "id": "checkout-settle", "status": "PENDING" } }""");
+            }
+
+            if (request.RequestUri!.AbsolutePath.Contains("/api/v1/square/payments/", StringComparison.Ordinal))
+            {
+                // 实机现象：checkout 刚 COMPLETED 时 payment 仍是 APPROVED，随后才转 COMPLETED。
+                var status = ++paymentPolls < 3 ? "APPROVED" : "COMPLETED";
+                return JsonResponse(
+                    $$"""{ "payment": { "id": "payment-1", "status": "{{status}}", "amount_money": { "amount": 99, "currency": "AUD" } } }""");
+            }
+
+            return JsonResponse(
+                """
+                {
+                  "checkout": {
+                    "id": "checkout-settle",
+                    "status": "COMPLETED",
+                    "amount_money": { "amount": 99, "currency": "AUD" },
+                    "payment_ids": [ "payment-1" ]
+                  }
+                }
+                """);
+        });
+        var client = new ConfiguredCardTerminalClient(new StaticCardTerminalSettingsProvider(CreateSquareSettings()), CreateApiClient(handler));
+
+        var result = await client.AuthorizeAsync(0.99m, CreateSession());
+
+        Assert.True(result.Approved);
+        Assert.Equal("SQ:payment-1", result.Reference);
+        Assert.Equal(3, paymentPolls);
     }
 
     [Fact]

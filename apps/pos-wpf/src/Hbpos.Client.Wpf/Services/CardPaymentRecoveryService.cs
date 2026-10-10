@@ -153,6 +153,27 @@ internal static class CardRefundSupervisorResolutionRules
         return true;
     }
 
+    /// <summary>
+    /// 规则层允许只凭退款号/银行证据结案（备注可为空），但主管结案日志要求原因非空，否则落库抛 ArgumentException。
+    /// 这里只给空备注补一条默认原因，不改变规则层的校验结果。
+    /// </summary>
+    public static CardRefundSupervisorResolution WithDefaultReason(CardRefundSupervisorResolution resolution)
+    {
+        if (!string.IsNullOrWhiteSpace(resolution.Reason))
+        {
+            return resolution;
+        }
+
+        return resolution.Decision switch
+        {
+            CardRefundSupervisorDecision.ConfirmRefunded =>
+                resolution with { Reason = "Supervisor confirmed the refund (no note entered)." },
+            CardRefundSupervisorDecision.ConfirmNotRefunded =>
+                resolution with { Reason = "Supervisor confirmed no refund was processed (no note entered)." },
+            _ => resolution
+        };
+    }
+
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
@@ -1793,6 +1814,8 @@ public sealed class CardPaymentRecoveryService(
         {
             return new CardRefundSupervisorResolutionResult(false, validationError);
         }
+
+        normalized = CardRefundSupervisorResolutionRules.WithDefaultReason(normalized);
 
         var settings = await settingsProvider.GetSettingsAsync(cancellationToken);
         var attempt = await RunLocalStoreAsync(

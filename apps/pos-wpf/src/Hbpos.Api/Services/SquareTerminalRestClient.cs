@@ -669,7 +669,9 @@ public sealed class HttpSquareTerminalRestClient(
             CardBrand: NormalizeOptionalText(TryGetNestedString(element, "card_details", "card", "card_brand")),
             // 只从 Square 的 last_4 生成脱敏显示值，避免把 BIN、有效期或 fingerprint 带给前端。
             MaskedCardNumber: FormatMaskedCardNumber(TryGetNestedString(element, "card_details", "card", "last_4")),
-            AuthCode: NormalizeOptionalText(TryGetNestedString(element, "card_details", "auth_result_code")));
+            AuthCode: NormalizeOptionalText(TryGetNestedString(element, "card_details", "auth_result_code")),
+            // 退款请求结果丢失时，POS 靠付款上的 refund_ids 找回已受理的退款。
+            RefundIds: TryGetStringList(element, "refund_ids"));
     }
 
     private static SquareRefundResponse MapRefund(string environment, JsonElement element)
@@ -680,7 +682,8 @@ public sealed class HttpSquareTerminalRestClient(
             Status: TryGetString(element, "status"),
             PaymentId: TryGetString(element, "payment_id"),
             AmountMoney: TryGetMoney(element, "amount_money"),
-            UpdatedAt: TryGetDateTimeOffset(element, "updated_at"));
+            UpdatedAt: TryGetDateTimeOffset(element, "updated_at"),
+            CreatedAt: TryGetDateTimeOffset(element, "created_at"));
     }
 
     private static SquareMoneyDto? TryGetMoney(JsonElement element, string propertyName)
