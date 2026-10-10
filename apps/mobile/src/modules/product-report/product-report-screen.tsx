@@ -86,7 +86,7 @@ import {
   saveCompleteReportSnapshot,
   type CompleteReportSnapshot,
 } from "@/modules/reports/report-snapshot";
-import { PRODUCT_PAGE_SIZE, SUPPLIER_PAGE_SIZE, getPageRows } from "@/modules/product-report/pagination";
+import { PRODUCT_PAGE_SIZE, PRODUCT_PAGE_SIZE_OPTIONS, SUPPLIER_PAGE_SIZE, SUPPLIER_PAGE_SIZE_OPTIONS, getPageRows } from "@/modules/product-report/pagination";
 import {
   buildChinaBranchShareRows,
   mergeSupplierBranchSales,
@@ -480,6 +480,9 @@ export function ProductReportScreen({
   const [selectedSupplierCode, setSelectedSupplierCode] = useState<string | null>(null);
   const [supplierPage, setSupplierPage] = useState(1);
   const [productPage, setProductPage] = useState(1);
+  // 每页条数：供应商表前端切页，商品明细交给后端分页；切换时回到第 1 页（见 handle*PageSizeChange）。
+  const [supplierPageSize, setSupplierPageSize] = useState<number>(SUPPLIER_PAGE_SIZE);
+  const [productPageSize, setProductPageSize] = useState<number>(PRODUCT_PAGE_SIZE);
   const [productSearchDraft, setProductSearchDraft] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [drilldown, setDrilldown] = useState<Drilldown | null>(null);
@@ -644,9 +647,10 @@ export function ProductReportScreen({
       supplierFilterCodes,
       productSearch,
       productPage,
+      productPageSize,
       productSortKey,
     ] as const,
-    [accountIdentity, cashierStoreScopeVersion, kind, productPage, productSearch, productSortKey, queryParams, supplierFilterCodes],
+    [accountIdentity, cashierStoreScopeVersion, kind, productPage, productPageSize, productSearch, productSortKey, queryParams, supplierFilterCodes],
   );
   const isChinaKind = kind === "china";
   const chinaBranchTotalsQueryKey = useMemo(
@@ -702,12 +706,12 @@ export function ProductReportScreen({
           supplierCode: selectedSupplierCode,
           search: productSearch,
           page: productPage,
-          pageSize: PRODUCT_PAGE_SIZE,
+          pageSize: productPageSize,
           // 商品明细由后端排序后分页，不同排序的完整快照不能互相替代。
           sort: productSortKey,
         })
       : null,
-    [accountIdentity, kind, productPage, productSearch, productSortKey, snapshotQueryParams, range.key, selectedSupplierCode],
+    [accountIdentity, kind, productPage, productPageSize, productSearch, productSortKey, snapshotQueryParams, range.key, selectedSupplierCode],
   );
 
   const startProductLoad = useCallback((cacheState: ReportLoadCacheState) => {
@@ -841,7 +845,7 @@ export function ProductReportScreen({
           queryParams!,
           supplierFilterCodes,
           productPage,
-          PRODUCT_PAGE_SIZE,
+          productPageSize,
           productSearch,
           productSort,
           { signal },
@@ -1149,10 +1153,11 @@ export function ProductReportScreen({
           supplierCode: selectedSupplierCode,
           productSearch,
           productPage,
+          productPageSize,
           productSort: productSortKey,
         }
       : null,
-    [kind, linkedScopeKey, productPage, productSearch, productSortKey, selectedStoreCode, selectedSupplierCode, snapshotQueryParams],
+    [kind, linkedScopeKey, productPage, productPageSize, productSearch, productSortKey, selectedStoreCode, selectedSupplierCode, snapshotQueryParams],
   );
   // 联动点选或明细翻页后，新条件的数据到齐前沿用最近一次完整展示的结果：
   // 只有依赖变化的区块变淡并显示「更新中」，其余区块保持可读可点，避免整页闪成加载态或空表。
@@ -1200,8 +1205,8 @@ export function ProductReportScreen({
     () => sortReportRows(supplierRows, supplierSort, SUPPLIER_METRIC_SORT_VALUES, (row) => row.supplierCode),
     [supplierRows, supplierSort],
   );
-  const supplierPageCount = Math.max(1, Math.ceil(sortedSupplierRows.length / SUPPLIER_PAGE_SIZE));
-  const supplierPageRows = getPageRows(sortedSupplierRows, supplierPage, SUPPLIER_PAGE_SIZE);
+  const supplierPageCount = Math.max(1, Math.ceil(sortedSupplierRows.length / supplierPageSize));
+  const supplierPageRows = getPageRows(sortedSupplierRows, supplierPage, supplierPageSize);
   const supplierSubtotal = supplierRows.reduce((sum, row) => sum + row.revenue, 0);
   const supplierCompareSubtotal = supplierRows.reduce((sum, row) => sum + row.compareRevenue, 0);
   // 总营业额固定按全部授权分店取数：汇总卡按当前所选分店即时切片；
@@ -1218,11 +1223,12 @@ export function ProductReportScreen({
     if (supplierPageAnchorRef.current === supplierRows) return;
     supplierPageAnchorRef.current = supplierRows;
     if (!selectedSupplierCode) return;
-    const page = findRowPage(sortedSupplierRows, SUPPLIER_PAGE_SIZE, (row) => isSameLinkedCode(row.supplierCode, selectedSupplierCode));
+    const page = findRowPage(sortedSupplierRows, supplierPageSize, (row) => isSameLinkedCode(row.supplierCode, selectedSupplierCode));
     if (page !== null) setSupplierPage(page);
-  }, [selectedSupplierCode, sortedSupplierRows, supplierRows]);
+  }, [selectedSupplierCode, sortedSupplierRows, supplierPageSize, supplierRows]);
   // 明细的行号与「本页合计」说明按表里实际显示的那一页计算，过渡期间不把旧行标成新页码。
   const displayedProductPage = displayedContext?.productPage ?? productPage;
+  const displayedProductPageSize = displayedContext?.productPageSize ?? productPageSize;
   const productSectionLoading = !mainReportHasDisplay
     && (productQuery.isLoading || productQuery.isPlaceholderData);
 
@@ -1403,7 +1409,7 @@ export function ProductReportScreen({
   const productInfoWidth = getChinaLeadingColumnWidth(width, CHINA_PRODUCT_FIRST_SCREEN_FIXED, 96, 220);
   // 宽表可横向滚动，空态若按整表宽度居中会落到屏幕外；限制在首屏可见宽度内居中。
   const tableViewportWidth = Math.max(0, width - CHINA_TABLE_VIEWPORT_INSET);
-  const productPageCount = Math.max(1, Math.ceil(productTotal / PRODUCT_PAGE_SIZE));
+  const productPageCount = Math.max(1, Math.ceil(productTotal / productPageSize));
   // 商品报告的两个数据区块各自接近一屏，分页和搜索栏也计入区块高度。
   const sectionScreenHeight = Math.max(560, Math.floor(height * 0.76));
   const supplierTableBodyHeight = Math.max(420, sectionScreenHeight - 112);
@@ -2094,8 +2100,8 @@ export function ProductReportScreen({
             <TableCell style={styles.strongText}>{t("productReport.chinaGoods.pageTotal")}</TableCell>
             <TableCell style={styles.muted}>
               {t("productReport.pageSummaryCaption", {
-                start: productTotal === 0 ? 0 : (displayedProductPage - 1) * PRODUCT_PAGE_SIZE + 1,
-                end: Math.min(displayedProductPage * PRODUCT_PAGE_SIZE, productTotal),
+                start: productTotal === 0 ? 0 : (displayedProductPage - 1) * displayedProductPageSize + 1,
+                end: Math.min(displayedProductPage * displayedProductPageSize, productTotal),
                 total: productTotal,
               })}
             </TableCell>
@@ -2289,8 +2295,8 @@ export function ProductReportScreen({
                 <ProductPageSummaryCard
                   summary={productPageSummary}
                   caption={t("productReport.pageSummaryCaption", {
-                    start: productTotal === 0 ? 0 : (displayedProductPage - 1) * PRODUCT_PAGE_SIZE + 1,
-                    end: Math.min(displayedProductPage * PRODUCT_PAGE_SIZE, productTotal),
+                    start: productTotal === 0 ? 0 : (displayedProductPage - 1) * displayedProductPageSize + 1,
+                    end: Math.min(displayedProductPage * displayedProductPageSize, productTotal),
                     total: productTotal,
                   })}
                 />
@@ -2309,6 +2315,10 @@ export function ProductReportScreen({
                 pageCount={supplierPageCount}
                 onPrevious={() => setSupplierPage((current) => Math.max(1, current - 1))}
                 onNext={() => setSupplierPage((current) => Math.min(supplierPageCount, current + 1))}
+                pageSize={supplierPageSize}
+                pageSizeOptions={SUPPLIER_PAGE_SIZE_OPTIONS}
+                onPageSizeChange={(size) => { setSupplierPageSize(size); setSupplierPage(1); }}
+                pageSizeTestID="product-report-supplier-page-size"
                 previousLabel={t("productReport.actions.previous")}
                 nextLabel={t("productReport.actions.next")}
               />
@@ -2362,7 +2372,7 @@ export function ProductReportScreen({
                             >
                               {renderSupplierRow({
                                 item,
-                                rowNumber: (supplierPage - 1) * SUPPLIER_PAGE_SIZE + index + 1,
+                                rowNumber: (supplierPage - 1) * supplierPageSize + index + 1,
                                 scrollX,
                               })}
                             </View>
@@ -2395,6 +2405,10 @@ export function ProductReportScreen({
                 pageCount={productPageCount}
                 onPrevious={() => setProductPage((current) => Math.max(1, current - 1))}
                 onNext={() => setProductPage((current) => Math.min(productPageCount, current + 1))}
+                pageSize={productPageSize}
+                pageSizeOptions={PRODUCT_PAGE_SIZE_OPTIONS}
+                onPageSizeChange={(size) => { setProductPageSize(size); setProductPage(1); }}
+                pageSizeTestID="product-report-product-page-size"
                 previousLabel={t("productReport.actions.previous")}
                 nextLabel={t("productReport.actions.next")}
               />
@@ -2469,7 +2483,7 @@ export function ProductReportScreen({
                           >
                             {renderProductRow({
                               item,
-                              rowNumber: (displayedProductPage - 1) * PRODUCT_PAGE_SIZE + index + 1,
+                              rowNumber: (displayedProductPage - 1) * displayedProductPageSize + index + 1,
                               scrollX,
                             })}
                           </View>
@@ -2556,6 +2570,10 @@ function SectionHeader({
   onNext,
   previousLabel,
   nextLabel,
+  pageSize,
+  pageSizeOptions,
+  onPageSizeChange,
+  pageSizeTestID,
 }: {
   title: string;
   // 单行布局可用提示替代「本期 / 同期」图例；无提示时由 showComparison 控制图例。
@@ -2571,9 +2589,14 @@ function SectionHeader({
   onNext: () => void;
   previousLabel: string;
   nextLabel: string;
+  pageSize: number;
+  pageSizeOptions: readonly number[];
+  onPageSizeChange: (pageSize: number) => void;
+  pageSizeTestID: string;
 }) {
   const { t } = useAppTranslation("common");
   return (
+    <View style={styles.sectionHeaderBlock}>
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleBlock}>
         <View style={styles.sectionTitleLine}>
@@ -2608,6 +2631,30 @@ function SectionHeader({
           {nextLabel}
         </Button>
       </View>
+    </View>
+    <View style={styles.pageSizeRow}>
+      <Text variant="labelSmall" style={styles.muted}>{t("pagination.perPage")}</Text>
+      <View style={styles.pageSizeSegment} accessibilityRole="radiogroup">
+        {pageSizeOptions.map((option, index) => {
+          const selected = option === pageSize;
+          return (
+            <Pressable
+              key={option}
+              testID={`${pageSizeTestID}-${option}`}
+              accessibilityRole="radio"
+              accessibilityLabel={t("pagination.perPageOption", { count: option })}
+              accessibilityState={{ checked: selected }}
+              hitSlop={{ top: 6, bottom: 6 }}
+              // 点已选中的档位不触发回调，避免无谓地回到第 1 页
+              onPress={() => { if (!selected) onPageSizeChange(option); }}
+              style={[styles.pageSizeButton, index > 0 && styles.pageSizeDivider, selected && styles.pageSizeSelected]}
+            >
+              <Text style={[styles.pageSizeText, selected && styles.pageSizeTextSelected]}>{option}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
     </View>
   );
 }
@@ -3387,6 +3434,47 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     gap: 2,
     paddingHorizontal: 3,
+  },
+  // 标题/翻页一行 + 每页条数一行；外层只负责纵向排布，原 sectionHeader 的间距保持不变。
+  sectionHeaderBlock: {
+    gap: 6,
+  },
+  pageSizeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+  },
+  pageSizeSegment: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  pageSizeButton: {
+    minWidth: 44,
+    height: 30,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  pageSizeDivider: {
+    borderLeftWidth: 1,
+    borderLeftColor: "#D1D5DB",
+  },
+  pageSizeSelected: {
+    backgroundColor: "#2563EB",
+  },
+  pageSizeText: {
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+  },
+  pageSizeTextSelected: {
+    color: "#FFFFFF",
   },
   sectionHeader: {
     flexDirection: "row",

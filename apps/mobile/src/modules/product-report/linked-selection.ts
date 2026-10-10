@@ -17,6 +17,8 @@ export interface ProductReportDisplayContext {
   supplierCode: string | null;
   productSearch: string;
   productPage: number;
+  /** 明细每页条数：页码相同但条数不同，取回的是另一批行，必须当作条件变化。 */
+  productPageSize: number;
   productSort: string;
 }
 
@@ -66,6 +68,7 @@ export function getLinkedTransitionStaleness(
       || supplierChanged
       || displayed.productSearch !== requested.productSearch
       || displayed.productPage !== requested.productPage
+      || displayed.productPageSize !== requested.productPageSize
       || displayed.productSort !== requested.productSort,
   };
 }

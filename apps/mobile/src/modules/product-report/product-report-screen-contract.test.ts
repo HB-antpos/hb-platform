@@ -120,10 +120,10 @@ assert.match(source, /function formatGrossMarginRate\([\s\S]*?costStatus: Produc
 assert.match(source, /\(value \* 100\)\.toFixed\(1\)/, "毛利率 0.4 必须显示为 40.0%，不能显示成 0.4%");
 assert.match(source, /productReport\.states\.costPending/);
 assert.match(source, /styles\.rowNumberColumn/);
-assert.match(source, /rowNumber: \(supplierPage - 1\) \* SUPPLIER_PAGE_SIZE \+ index \+ 1/);
+assert.match(source, /rowNumber: \(supplierPage - 1\) \* supplierPageSize \+ index \+ 1/);
 assert.match(
   source,
-  /rowNumber: \(displayedProductPage - 1\) \* PRODUCT_PAGE_SIZE \+ index \+ 1/,
+  /rowNumber: \(displayedProductPage - 1\) \* displayedProductPageSize \+ index \+ 1/,
   "明细行号按表里实际显示的那一页计算，局部过渡期间不能把旧行标成新页码",
 );
 assert.match(source, /grossProfit/);
@@ -782,3 +782,13 @@ for (const language of ["zh", "en"]) {
   assert.ok(copy.productReport.metrics.productAveragePrice, "商品均价文案必须位于 productReport.metrics 分组");
   assert.doesNotMatch(copy.productReport.chinaGoods.productHint, /同期|\bLY\b/, "商品明细提示不得再引导用户查看同期列");
 }
+
+// 每页条数：供应商 50/100、商品明细 100/200/500；档位必须进入查询键与请求，否则切换后仍显示旧批次。
+assert.match(source, /useState<number>\(SUPPLIER_PAGE_SIZE\)/, "供应商每页条数用默认 50 初始化");
+assert.match(source, /useState<number>\(PRODUCT_PAGE_SIZE\)/, "商品明细每页条数用默认 100 初始化");
+assert.match(source, /pageSizeOptions=\{SUPPLIER_PAGE_SIZE_OPTIONS\}/, "供应商表提供每页条数选择");
+assert.match(source, /pageSizeOptions=\{PRODUCT_PAGE_SIZE_OPTIONS\}/, "商品明细提供每页条数选择");
+assert.match(source, /productPage,\s*productPageSize,\s*productSortKey,\s*\] as const/, "商品明细查询键必须包含每页条数");
+assert.match(source, /productPage,\s*productPageSize,\s*productSearch,\s*productSort,/, "商品明细请求必须带上所选每页条数");
+assert.match(source, /setProductPageSize\(size\); setProductPage\(1\)/, "切换商品明细每页条数回到第 1 页");
+assert.match(source, /setSupplierPageSize\(size\); setSupplierPage\(1\)/, "切换供应商每页条数回到第 1 页");
