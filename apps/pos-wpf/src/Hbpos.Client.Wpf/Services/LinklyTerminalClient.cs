@@ -861,6 +861,7 @@ public sealed class LinklyTerminalClient(
         var receipts = new List<string>();
         using var client = clientFactory.Create();
         var transactionRequestSent = false;
+        Task<bool>? activeCancelKeyTask = null;
 
         try
         {
@@ -926,7 +927,13 @@ public sealed class LinklyTerminalClient(
             }
 
             transactionRequestSent = true;
-            var response = await ReadTransactionResponseAsync(client, receipts, timeoutCts.Token, settings.Environment, txnRef);
+            // 中文注释：取消必须在仍然存活的连接上发取消键。直接取消 SDK 的读取会释放底层 TcpClient，
+            // 之后取消键发不出去（生产日志 "Cannot access a disposed object ... TcpClient"），
+            // 终端会一直停在等待刷卡。因此读取只受业务超时约束；调用方取消只负责发取消键，终端随后回「已取消」结果。
+            using var readTimeoutCts = CreateBusinessWaitTimeoutToken(CancellationToken.None);
+            using var cancelKeyRegistration = cancellationToken.Register(() =>
+                activeCancelKeyTask = SendCancelKeyDuringTransactionAsync(client, settings, txnRef));
+            var response = await ReadTransactionResponseAsync(client, receipts, readTimeoutCts.Token, settings.Environment, txnRef);
             return ToAuthorizationResult(response, requestedAmount, txnRef, receipts, transactionType);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -948,7 +955,8 @@ public sealed class LinklyTerminalClient(
                     requestedAmount,
                     txnRef,
                     receipts,
-                    transactionType);
+                    transactionType,
+                    Volatile.Read(ref activeCancelKeyTask));
             }
 
             return new PaymentAuthorizationResult(false, null, T("linkly.local.cancelled", CancelledMessage), TxnType: ToResultTxnType(transactionType));
@@ -1034,13 +1042,49 @@ public sealed class LinklyTerminalClient(
         }
     }
 
+    private async Task<bool> SendCancelKeyDuringTransactionAsync(
+        ILinklyEftClient client,
+        CardTerminalSettings settings,
+        string txnRef)
+    {
+        var cancelRequest = CreateCancelRequest();
+        LogJson(
+            "cancel",
+            "sent",
+            "request",
+            settings.Environment,
+            txnRef,
+            request: cancelRequest);
+        try
+        {
+            return await client.SendCancelRequestAsync();
+        }
+        catch (Exception ex) when (ex is ConnectionException or ObjectDisposedException or InvalidOperationException)
+        {
+            // 发送失败按“取消键未送达”处理：交易结果仍未知，由调用方走原有的最近交易恢复。
+            LogJson(
+                "cancel",
+                "failed",
+                "response",
+                settings.Environment,
+                txnRef,
+                success: false,
+                reason: "connection-closed",
+                request: cancelRequest,
+                details: new { exception = ex.GetType().Name, ex.Message },
+                exception: ex);
+            return false;
+        }
+    }
+
     private async Task<PaymentAuthorizationResult> TryCancelActiveTransactionAsync(
         ILinklyEftClient client,
         CardTerminalSettings settings,
         decimal amount,
         string txnRef,
         IReadOnlyList<string> capturedReceipts,
-        TransactionType transactionType)
+        TransactionType transactionType,
+        Task<bool>? cancelKeyAlreadySent = null)
     {
         var receipts = new List<string>(capturedReceipts);
         var fallbackMessage = T("linkly.local.cancelOutcomeUnknown", "ANZ Linkly cancellation outcome could not be confirmed.");
@@ -1049,14 +1093,19 @@ public sealed class LinklyTerminalClient(
 
         try
         {
-            LogJson(
-                "cancel",
-                "sent",
-                "request",
-                settings.Environment,
-                txnRef,
-                request: cancelRequest);
-            if (!await client.SendCancelRequestAsync().WaitAsync(cancelCts.Token))
+            if (cancelKeyAlreadySent is null)
+            {
+                LogJson(
+                    "cancel",
+                    "sent",
+                    "request",
+                    settings.Environment,
+                    txnRef,
+                    request: cancelRequest);
+            }
+
+            // 取消键可能已在读取期间由取消回调发出，这里等它的结果，不能再发第二次。
+            if (!await (cancelKeyAlreadySent ?? client.SendCancelRequestAsync()).WaitAsync(cancelCts.Token))
             {
                 LogJson(
                     "cancel",

@@ -919,6 +919,27 @@ public sealed class LinklyTerminalClientTests
     }
 
     [Fact]
+    public async Task PurchaseAsync_cancel_sends_cancel_key_on_live_connection_before_read_is_aborted()
+    {
+        // 回归（生产）：Linkly 本地支付点取消，SDK 一旦读取被取消就会释放 TcpClient，
+        // 随后取消键报 "Cannot access a disposed object"，终端仍在等客人刷卡，还进了异常中心。
+        using var cts = new CancellationTokenSource();
+        var sdkClient = new SdkLikeEftClient();
+        var factory = new QueueLinklyEftClientFactory(sdkClient);
+        var client = new LinklyTerminalClient(factory);
+
+        var purchase = client.PurchaseAsync(10m, CreateSession(), CreateSettings(), cts.Token);
+        await sdkClient.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+        var result = await purchase.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Contains("CANCELLED", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, sdkClient.CancelKeysDelivered);
+        Assert.Equal(1, factory.CreatedCount);
+    }
+    [Fact]
     public async Task PurchaseAsync_keeps_result_unknown_when_cancel_recovery_reference_does_not_match()
     {
         using var logs = new ConsoleLogCapture();
@@ -1564,6 +1585,66 @@ public sealed class LinklyTerminalClientTests
             TimeSpan.FromSeconds(10));
     }
 
+    /// <summary>
+    /// 模拟官方 SDK：读取的取消令牌一旦触发就释放底层连接；取消键只有在连接存活时才能送达，
+    /// 送达后终端会回一条「已取消」的交易结果。
+    /// </summary>
+    private sealed class SdkLikeEftClient : ILinklyEftClient
+    {
+        private readonly TaskCompletionSource<EFTResponse?> _terminalReply =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private EFTTransactionRequest? _transaction;
+        private bool _connectionDisposed;
+
+        public TaskCompletionSource ReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int CancelKeysDelivered { get; private set; }
+
+        public Task<bool> ConnectAsync(string hostName, int hostPort, bool useSsl, bool useKeepAlive) => Task.FromResult(true);
+
+        public Task<bool> WriteRequestAsync(EFTRequest request)
+        {
+            _transaction = request as EFTTransactionRequest ?? _transaction;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> SendCancelRequestAsync()
+        {
+            if (_connectionDisposed)
+            {
+                throw new ConnectionException("Cannot access a disposed object.\r\nObject name: 'System.Net.Sockets.TcpClient'.");
+            }
+
+            CancelKeysDelivered++;
+            _terminalReply.TrySetResult(new EFTTransactionResponse
+            {
+                Success = false,
+                TxnRef = _transaction?.TxnRef,
+                TxnType = TransactionType.PurchaseCash,
+                AmtPurchase = _transaction?.AmtPurchase ?? 0m,
+                ResponseCode = "C0",
+                ResponseText = "OPERATOR CANCELLED"
+            });
+            return Task.FromResult(true);
+        }
+
+        public async Task<EFTResponse?> ReadResponseAsync(CancellationToken cancellationToken)
+        {
+            ReadStarted.TrySetResult();
+            using var abort = cancellationToken.Register(() =>
+            {
+                _connectionDisposed = true;
+                _terminalReply.TrySetCanceled(cancellationToken);
+            });
+            return await _terminalReply.Task;
+        }
+
+        public bool Disconnect() => true;
+
+        public void Dispose()
+        {
+        }
+    }
     private sealed class FakeLinklyEftClientFactory(ILinklyEftClient client) : ILinklyEftClientFactory
     {
         public int CreatedCount { get; private set; }
