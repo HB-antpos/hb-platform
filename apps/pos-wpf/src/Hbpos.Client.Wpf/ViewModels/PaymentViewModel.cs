@@ -85,6 +85,10 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _tenderAmountText = string.Empty;
 
+    /// <summary>刷卡进行中面板展示的扣款金额；仅在刷卡期间有值，结束后清零。</summary>
+    [ObservableProperty]
+    private decimal _cardPaymentAmount;
+
     [ObservableProperty]
     private string _voucherCodeText = string.Empty;
 
@@ -833,6 +837,11 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     partial void OnIsCardPaymentInProgressChanged(bool value)
     {
+        if (!value)
+        {
+            CardPaymentAmount = 0m;
+        }
+
         OnPropertyChanged(nameof(CanSwitchLinklyCloudTerminal));
         NotifyPaymentCommandStates();
     }
@@ -1617,6 +1626,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         {
             if (isCard && !deferInstallmentRepaymentProvider)
             {
+                CardPaymentAmount = attemptedPaymentAmount ?? 0m;
                 cardPaymentCts = _cardSession.BeginCardPayment();
             }
 

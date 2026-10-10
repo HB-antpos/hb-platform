@@ -5,7 +5,7 @@ namespace Hbpos.Client.Tests;
 public sealed class PaymentViewLayoutTests
 {
     [Fact]
-    public void Installment_toggle_is_compact_accessible_and_next_to_back_button()
+    public void Installment_toggle_is_compact_accessible_and_in_payment_method_area()
     {
         var document = XDocument.Load(Path.Combine(
             FindRepoRoot(),
@@ -29,12 +29,12 @@ public sealed class PaymentViewLayoutTests
             element.Name == presentation + "TextBlock" &&
             (string?)element.Attribute("Text") == "{Binding OrderSummaryText}"));
 
-        Assert.True(Array.IndexOf(elements, backButton) < Array.IndexOf(elements, installmentToggle));
-        Assert.True(Array.IndexOf(elements, installmentToggle) < Array.IndexOf(elements, orderSummary));
-        Assert.Same(backButton.Parent, installmentToggle.Parent);
-        Assert.Same(installmentToggle.Parent, orderSummary.Parent?.Parent);
-        Assert.Equal("0", (string?)installmentToggle.Attribute("Grid.Row"));
-        Assert.Equal("1", (string?)installmentToggle.Attribute("Grid.Column"));
+        // 分期开关位于右侧「支付方式」2×2 方块网格的第 2 行右格（与其他方块等高），返回按钮独占左上角整行。
+        Assert.Equal("PaymentMethodTiles", (string?)installmentToggle.Parent?.Attribute("AutomationProperties.AutomationId"));
+        Assert.Equal("1", (string?)installmentToggle.Attribute("Grid.Row"));
+        Assert.Equal("2", (string?)installmentToggle.Attribute("Grid.Column"));
+        Assert.NotSame(backButton.Parent, installmentToggle.Parent);
+        Assert.Equal("2", (string?)backButton.Attribute("Grid.ColumnSpan"));
         Assert.Equal("1", (string?)orderSummary.Parent?.Attribute("Grid.Row"));
         Assert.Equal("2", (string?)orderSummary.Parent?.Attribute("Grid.ColumnSpan"));
 
