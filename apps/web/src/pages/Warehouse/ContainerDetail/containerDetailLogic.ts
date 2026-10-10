@@ -785,15 +785,15 @@ export const CONTAINER_DETAIL_EXPORT_COLUMNS: ContainerDetailExportColumnDefinit
   { key: 'totalVolume', labelKey: 'containers.export.totalVolumeColumn', fallbackLabel: '总体积', width: 12, valueType: 'volume' },
   { key: 'middlePackQuantity', labelKey: 'containers.fields.middlePackQuantity', fallbackLabel: '中包数', width: 12, valueType: 'integer' },
   { key: 'domesticPrice', labelKey: 'containers.fields.domesticPrice', fallbackLabel: '国内价格', width: 12, valueType: 'money' },
-  { key: 'lastImportPrice', labelKey: 'containers.fields.warehouseImportPrice', fallbackLabel: '实时进货价', width: 14, valueType: 'money' },
-  { key: 'lastOEMPrice', labelKey: 'containers.fields.lastOEMPrice', fallbackLabel: '实时零售价', width: 14, valueType: 'money' },
-  { key: 'oemPrice', labelKey: 'containers.fields.oemPrice', fallbackLabel: '零售价', width: 12, valueType: 'money' },
+  { key: 'lastImportPrice', labelKey: 'containers.fields.warehouseImportPrice', fallbackLabel: '已有进口价', width: 14, valueType: 'money' },
+  { key: 'lastOEMPrice', labelKey: 'containers.fields.lastOEMPrice', fallbackLabel: '已有零售价', width: 14, valueType: 'money' },
+  { key: 'oemPrice', labelKey: 'containers.fields.oemPrice', fallbackLabel: '本次零售价', width: 12, valueType: 'money' },
   { key: 'categoryName', labelKey: 'containers.fields.category', fallbackLabel: '分类', width: 24, valueType: 'text' },
   { key: 'packingQuantity', labelKey: 'containers.fields.packingQuantity', fallbackLabel: '单件装箱数', width: 14, valueType: 'integer' },
   { key: 'transportCost', labelKey: 'containers.fields.transportCost', fallbackLabel: '运输成本', width: 14, valueType: 'money' },
   { key: 'unitTransportCost', labelKey: 'containers.fields.unitTransportCost', fallbackLabel: '单件运输成本', width: 16, valueType: 'money' },
   { key: 'floatRate', labelKey: 'containers.fields.floatRate', fallbackLabel: '调整浮率', width: 12, valueType: 'number' },
-  { key: 'importPrice', labelKey: 'containers.fields.importPrice', fallbackLabel: '进口价格', width: 12, valueType: 'money' },
+  { key: 'importPrice', labelKey: 'containers.fields.importPrice', fallbackLabel: '本次进口价', width: 12, valueType: 'money' },
   { key: 'productType', labelKey: 'containers.fields.productType', fallbackLabel: '类型', width: 14, valueType: 'text' },
   { key: 'newProduct', labelKey: 'containers.fields.newProduct', fallbackLabel: '新商品', width: 12, valueType: 'text' },
   { key: 'matchType', labelKey: 'containers.fields.matchType', fallbackLabel: '匹配方式', width: 16, valueType: 'text' },
@@ -1304,6 +1304,43 @@ export function getContainerDetailVisibleOemPrice(row: ContainerDetail): number 
 
 export function getContainerDetailLastOemPrice(row: ContainerDetail): number | undefined {
   return getContainerDetailRealtimeRetailPrice(row)
+}
+
+/** 本次价与已有价差额超过该比例（以已有价为基数）时，两列单元格高亮提示。 */
+export const CONTAINER_DETAIL_PRICE_GAP_HIGHLIGHT_RATIO = 0.3
+
+/**
+ * 本次价相对已有价的变动比例：(本次 - 已有) ÷ 已有，正数为涨、负数为跌。
+ * 任一价格缺失或 ≤ 0（未填价不算差额）时返回 undefined。
+ * 结果四舍五入到 4 位小数，避免 1.3 ÷ 1 这类浮点误差把恰好 30% 判成“超过”。
+ */
+export function getContainerDetailPriceGapRatio(current?: number, existing?: number): number | undefined {
+  if (
+    typeof current !== 'number' ||
+    typeof existing !== 'number' ||
+    !Number.isFinite(current) ||
+    !Number.isFinite(existing) ||
+    current <= 0 ||
+    existing <= 0
+  ) {
+    return undefined
+  }
+  return Math.round(((current - existing) / existing) * 10000) / 10000
+}
+
+/** 差额绝对值严格大于 30% 才高亮。 */
+export function isContainerDetailPriceGapHighlighted(ratio?: number): boolean {
+  return ratio != null && Math.abs(ratio) > CONTAINER_DETAIL_PRICE_GAP_HIGHLIGHT_RATIO
+}
+
+/** 本次进口价 vs 已有进口价（仓库进货价）。 */
+export function getContainerDetailImportPriceGapRatio(row: ContainerDetail): number | undefined {
+  return getContainerDetailPriceGapRatio(row.进口价格, getContainerDetailRealtimeImportPrice(row))
+}
+
+/** 本次零售价（表格可见价）vs 已有零售价（仓库零售价）。 */
+export function getContainerDetailRetailPriceGapRatio(row: ContainerDetail): number | undefined {
+  return getContainerDetailPriceGapRatio(getContainerDetailVisibleOemPrice(row), getContainerDetailRealtimeRetailPrice(row))
 }
 
 export function calculateContainerDetailUnitTransportCost(row: ContainerDetail): number | undefined {
@@ -2573,8 +2610,8 @@ const CONTAINER_DETAIL_PREVIEW_FIELD_LABELS: Record<string, { key: string, fallb
   IsActive: { key: 'containers.fields.warehouseStatus', fallback: '仓库状态' },
   LastImportPrice: { key: 'containers.fields.lastImportPriceSnapshot', fallback: '上次进口价' },
   LastOEMPrice: { key: 'containers.fields.lastOemPriceSnapshot', fallback: '上次零售价' },
-  贴牌价格: { key: 'containers.fields.oemPrice', fallback: '零售价' },
-  进口价格: { key: 'containers.fields.importPrice', fallback: '进口价格' },
+  贴牌价格: { key: 'containers.fields.oemPrice', fallback: '本次零售价' },
+  进口价格: { key: 'containers.fields.importPrice', fallback: '本次进口价' },
   调整浮率: { key: 'containers.fields.floatRate', fallback: '调整浮率' },
   运输成本: { key: 'containers.fields.transportCost', fallback: '运输成本' },
   删除明细: { key: 'containers.actions.deleteDetails', fallback: '删除明细' },

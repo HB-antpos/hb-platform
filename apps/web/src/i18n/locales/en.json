@@ -334,7 +334,7 @@
     },
     "formulas": {
       "transportCost": "Transport cost = Freight × Detail volume ÷ Container quantity ÷ Total volume",
-      "importPrice": "Import price = ((Domestic price ÷ Exchange rate + Transport cost) × Float rate × 10) ÷ 11"
+      "importPrice": "Import price (this container) = ((Domestic price ÷ Exchange rate + Transport cost) × Float rate × 10) ÷ 11"
     },
     "status": {
       "unknown": "Unknown",

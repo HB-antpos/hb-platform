@@ -87,7 +87,10 @@
       "updateWarehouseImportPriceHint": "用本次货柜的进口价格覆盖仓库进货价（实时进货价），只写仓库主表，不改分店进货价。只处理已有商品且进口价与实时进货价不同的明细，已跳过 {{skipped}} 条。",
       "noWarehouseImportPriceChanges": "没有需要更新的仓库进货价：所选明细不是已有商品，或进口价缺失、与实时进货价一致。",
       "warehouseImportPriceUpdated": "已更新 {{count}} 个商品的仓库进货价",
-      "warehouseImportPriceUpdateFailed": "更新仓库进货价失败"
+      "warehouseImportPriceUpdateFailed": "更新仓库进货价失败",
+      "importPriceGapHint": "本次进口价比已有进口价 {{percent}}，差额超过 30%",
+      "retailPriceGapHint": "本次零售价比已有零售价 {{percent}}，差额超过 30%",
+      "formulaHint": "计算公式"
     }
   }
 }
