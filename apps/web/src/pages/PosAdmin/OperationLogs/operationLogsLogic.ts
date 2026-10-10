@@ -145,6 +145,7 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   PERMISSION_OVERRIDE: 'operationLogs.operations.permissionOverride',
   INSTALLMENT_PICKUP_CONFIRM: 'operationLogs.operations.installmentPickupConfirm',
   INSTALLMENT_LINES_AMEND: 'operationLogs.operations.installmentLinesAmend',
+  SPECIAL_PRODUCT_PRICE_CHANGE: 'operationLogs.operations.specialProductPriceChange',
   CATALOG_RESET: 'operationLogs.operations.catalogReset',
   TEST_SALES_DATA_RESET: 'operationLogs.operations.testSalesDataReset',
   DEVICE_REREGISTER: 'operationLogs.operations.deviceReregister',

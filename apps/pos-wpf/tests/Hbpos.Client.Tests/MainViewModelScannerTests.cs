@@ -3683,7 +3683,7 @@ public sealed class MainViewModelScannerTests
         await viewModel.PosTerminal!.OpenSpecialProductsCommand.ExecuteAsync(null);
         await viewModel.SpecialProducts!.EnsureLoadedAsync();
 
-        var firstPageItem = viewModel.SpecialProducts.PagedSpecialItems.First();
+        var firstPageItem = viewModel.SpecialProducts.DisplayedCards.First().Item;
         Assert.IsType<BitmapImage>(
             converter.Convert(firstPageItem.ProductImage, typeof(BitmapSource), null, CultureInfo.InvariantCulture));
         Assert.Equal(1, loadedImages[firstPageItem.ProductImage!]);
@@ -3738,7 +3738,7 @@ public sealed class MainViewModelScannerTests
         releaseLoad.SetResult();
         await viewModel.SpecialProducts!.EnsureLoadedAsync();
 
-        Assert.Single(viewModel.SpecialProducts.PagedSpecialItems);
+        Assert.Single(viewModel.SpecialProducts.DisplayedCards);
         Assert.Equal(1, catalog.LoadSpecialProductItemsCallCount);
     }
 

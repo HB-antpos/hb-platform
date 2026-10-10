@@ -181,6 +181,25 @@ public sealed record CatalogSpecialProductMarkResponse(
     DateTimeOffset GeneratedAt,
     IReadOnlyList<CatalogLookupItemDto> Items);
 
+/// <summary>
+/// 修改特殊商品的门店零售价（仅在线、仅限已是特殊商品的商品）。
+/// RetailPrice 为新的主码零售价，必须大于 0 且最多两位小数。
+/// </summary>
+public sealed record CatalogSpecialProductPriceRequest(
+    string StoreCode,
+    string ProductCode,
+    decimal RetailPrice);
+
+/// <summary>
+/// 改价结果：Items 是该商品改价后的全部查码项（含多码、套码、清货码），客户端据此整体覆盖本地目录。
+/// </summary>
+public sealed record CatalogSpecialProductPriceResponse(
+    string StoreCode,
+    string ProductCode,
+    decimal RetailPrice,
+    DateTimeOffset GeneratedAt,
+    IReadOnlyList<CatalogLookupItemDto> Items);
+
 public sealed record CatalogSpecialProductsPageResponse(
     string StoreCode,
     DateTimeOffset GeneratedAt,

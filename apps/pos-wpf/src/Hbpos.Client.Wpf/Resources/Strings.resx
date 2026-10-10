@@ -552,6 +552,47 @@
   <data name="specialProducts.download.completed" xml:space="preserve"><value>Special product download complete {0}%</value></data>
   <data name="specialProducts.download.failed" xml:space="preserve"><value>Special product download failed {0}%</value></data>
   <data name="specialProducts.download.detail" xml:space="preserve"><value>{0}/{1}  Pages: {2}  Upserted: {3}  Unmarked: {4}  Elapsed: {5}</value></data>
+  <data name="specialProducts.countFormat" xml:space="preserve"><value>{0} items</value></data>
+  <data name="specialProducts.chip.all" xml:space="preserve"><value>All {0}</value></data>
+  <data name="specialProducts.chip.inCart" xml:space="preserve"><value>In cart {0}</value></data>
+  <data name="specialProducts.filter.placeholder" xml:space="preserve"><value>Filter by name / item no.</value></data>
+  <data name="specialProducts.hint.browse" xml:space="preserve"><value>Scroll to browse · tap a card to add</value></data>
+  <data name="specialProducts.showMore" xml:space="preserve"><value>Show more ({0} left)</value></data>
+  <data name="specialProducts.filter.empty" xml:space="preserve"><value>No special products match.</value></data>
+  <data name="specialProducts.cart.title" xml:space="preserve"><value>Current cart</value></data>
+  <data name="specialProducts.cart.count" xml:space="preserve"><value>{0} pcs · {1} items</value></data>
+  <data name="specialProducts.cart.total" xml:space="preserve"><value>Total</value></data>
+  <data name="specialProducts.cart.empty" xml:space="preserve"><value>The cart is empty. Tap a card to add it.</value></data>
+  <data name="specialProducts.cart.checkout" xml:space="preserve"><value>Back to checkout</value></data>
+  <data name="specialProducts.cart.more" xml:space="preserve"><value>{0} more items</value></data>
+  <data name="specialProducts.toast.added" xml:space="preserve"><value>Added to cart: {0}</value></data>
+  <data name="specialProducts.undo" xml:space="preserve"><value>Undo</value></data>
+  <data name="specialProducts.status.addUndone" xml:space="preserve"><value>Add undone: {0}</value></data>
+  <data name="specialProducts.edit.banner" xml:space="preserve"><value>Edit mode: select a card, then reorder, reprice or remove it below.</value></data>
+  <data name="specialProducts.edit.bannerDetail" xml:space="preserve"><value>Tapping a card does not add it to the cart here; add, remove and reprice need a connection.</value></data>
+  <data name="specialProducts.edit.selected" xml:space="preserve"><value>Selected: {0} · No. {1}</value></data>
+  <data name="specialProducts.position" xml:space="preserve"><value>No. {0}</value></data>
+  <data name="specialProducts.moveToFront" xml:space="preserve"><value>To front</value></data>
+  <data name="specialProducts.editPrice" xml:space="preserve"><value>Reprice</value></data>
+  <data name="specialProducts.cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="specialProducts.remove.confirm" xml:space="preserve"><value>Remove {0}?</value></data>
+  <data name="specialProducts.addPanel.title" xml:space="preserve"><value>Add products</value></data>
+  <data name="specialProducts.addPanel.hint" xml:space="preserve"><value>Only products not yet special</value></data>
+  <data name="specialProducts.addPanel.footer" xml:space="preserve"><value>Adding and repricing take effect at once; the order is saved on this device only.</value></data>
+  <data name="specialProducts.priceEditor.title" xml:space="preserve"><value>Edit retail price</value></data>
+  <data name="specialProducts.priceEditor.current" xml:space="preserve"><value>Current price</value></data>
+  <data name="specialProducts.priceEditor.new" xml:space="preserve"><value>New price</value></data>
+  <data name="specialProducts.priceEditor.onlineHint" xml:space="preserve"><value>The price is written to the server and synced to every terminal. Requires a connection.</value></data>
+  <data name="specialProducts.priceEditor.manualNote" xml:space="preserve"><value>After saving, this product uses manual pricing and no longer follows purchase-price changes.</value></data>
+  <data name="specialProducts.priceEditor.save" xml:space="preserve"><value>Save</value></data>
+  <data name="specialProducts.priceEditor.clear" xml:space="preserve"><value>Clear</value></data>
+  <data name="specialProducts.priceEditor.backspace" xml:space="preserve"><value>Backspace</value></data>
+  <data name="specialProducts.priceEditor.invalid" xml:space="preserve"><value>Enter a price above 0 and up to 99999.99, with at most two decimals.</value></data>
+  <data name="specialProducts.priceEditor.same" xml:space="preserve"><value>The new price equals the current price.</value></data>
+  <data name="specialProducts.status.priceOnlineRequired" xml:space="preserve"><value>Go online to change the retail price.</value></data>
+  <data name="specialProducts.status.priceUpdated" xml:space="preserve"><value>Retail price of {0} changed to {1}.</value></data>
+  <data name="specialProducts.status.priceUpdatedInCart" xml:space="preserve"><value>Retail price of {0} changed to {1}. The line already in the cart keeps the old price; remove and re-add it to use the new one.</value></data>
+  <data name="specialProducts.status.priceFailed" xml:space="preserve"><value>Price change failed: {0}</value></data>
   <data name="returns.title" xml:space="preserve"><value>Receipt Returns</value></data>
   <data name="returns.noReceipt" xml:space="preserve"><value>No-receipt return</value></data>
   <data name="returns.back" xml:space="preserve"><value>Back to POS</value></data>

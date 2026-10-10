@@ -105,6 +105,11 @@ public interface ICatalogService
         CatalogSpecialProductMarkRequest request,
         string updatedBy,
         CancellationToken cancellationToken);
+
+    Task<CatalogSpecialProductPriceServiceResult> UpdateSpecialProductPriceAsync(
+        CatalogSpecialProductPriceRequest request,
+        string updatedBy,
+        CancellationToken cancellationToken);
 }
 
 public sealed record CatalogSpecialProductMarkServiceResult(
@@ -117,6 +122,19 @@ public sealed record CatalogSpecialProductMarkServiceResult(
         new(true, response, null, null);
 
     public static CatalogSpecialProductMarkServiceResult Fail(string errorCode, string message) =>
+        new(false, null, errorCode, message);
+}
+
+public sealed record CatalogSpecialProductPriceServiceResult(
+    bool Success,
+    CatalogSpecialProductPriceResponse? Response,
+    string? ErrorCode,
+    string? Message)
+{
+    public static CatalogSpecialProductPriceServiceResult Ok(CatalogSpecialProductPriceResponse response) =>
+        new(true, response, null, null);
+
+    public static CatalogSpecialProductPriceServiceResult Fail(string errorCode, string message) =>
         new(false, null, errorCode, message);
 }
 
@@ -1014,6 +1032,171 @@ public sealed class CatalogService(
             normalizedStoreCode,
             normalizedProductCode,
             request.IsSpecialProduct,
+            DateTimeOffset.UtcNow,
+            items));
+    }
+
+    /// <summary>特殊商品门店零售价上限，与主后端门店零售价输入口径一致（两位小数、不超过 99999.99）。</summary>
+    private const decimal SpecialProductPriceMax = 99999.99m;
+
+    public async Task<CatalogSpecialProductPriceServiceResult> UpdateSpecialProductPriceAsync(
+        CatalogSpecialProductPriceRequest request,
+        string updatedBy,
+        CancellationToken cancellationToken)
+    {
+        var totalStopwatch = Stopwatch.StartNew();
+        var normalizedStoreCode = NormalizeStoreCode(request.StoreCode);
+        var normalizedProductCode = NormalizeProductCode(request.ProductCode);
+        Log($"update special product price start store={normalizedStoreCode} product={normalizedProductCode} newPrice={request.RetailPrice}");
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            totalStopwatch.Stop();
+            Log($"update special product price failed store={normalizedStoreCode} product={normalizedProductCode} reason=store-code-required totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return CatalogSpecialProductPriceServiceResult.Fail("STORE_CODE_REQUIRED", "storeCode is required");
+        }
+
+        if (string.IsNullOrEmpty(normalizedProductCode))
+        {
+            totalStopwatch.Stop();
+            Log($"update special product price failed store={normalizedStoreCode} product={normalizedProductCode} reason=product-code-required totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return CatalogSpecialProductPriceServiceResult.Fail("PRODUCT_CODE_REQUIRED", "productCode is required");
+        }
+
+        // 价格必须为 (0, 99999.99] 且最多两位小数；Round(v,2)==v 可同时挡住 0.001 这类多余小数位。
+        var newPrice = request.RetailPrice;
+        if (newPrice <= 0m || newPrice > SpecialProductPriceMax || decimal.Round(newPrice, 2) != newPrice)
+        {
+            totalStopwatch.Stop();
+            Log($"update special product price failed store={normalizedStoreCode} product={normalizedProductCode} reason=price-invalid newPrice={newPrice} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return CatalogSpecialProductPriceServiceResult.Fail(
+                "PRICE_INVALID",
+                "retailPrice must be greater than 0, at most 99999.99 and have at most two decimal places");
+        }
+
+        var store = await dbContext.MainDb.Queryable<Store>()
+            .FirstAsync(x => x.StoreCode == normalizedStoreCode && x.IsActive && !x.IsDeleted, cancellationToken);
+        if (store is null)
+        {
+            totalStopwatch.Stop();
+            Log($"update special product price failed store={normalizedStoreCode} product={normalizedProductCode} reason=store-not-found totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return CatalogSpecialProductPriceServiceResult.Fail("STORE_NOT_FOUND", "store was not found or inactive");
+        }
+
+        var product = await dbContext.MainDb.Queryable<Product>()
+            .FirstAsync(x => x.ProductCode == normalizedProductCode && !x.IsDeleted, cancellationToken);
+        if (product is null)
+        {
+            totalStopwatch.Stop();
+            Log($"update special product price failed store={normalizedStoreCode} product={normalizedProductCode} reason=product-not-found totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return CatalogSpecialProductPriceServiceResult.Fail("PRODUCT_NOT_FOUND", "product was not found or deleted");
+        }
+
+        var now = DateTime.UtcNow;
+        var actor = string.IsNullOrWhiteSpace(updatedBy) ? "pos-device" : updatedBy.Trim();
+        decimal? oldPrice;
+        var syncedSetCodeProjections = 0;
+
+        var transactionStopwatch = Stopwatch.StartNew();
+        await dbContext.MainDb.Ado.BeginTranAsync();
+        try
+        {
+            var storeRetailPrices = await dbContext.MainDb.Queryable<StoreRetailPrice>()
+                .Where(x =>
+                    x.StoreCode == normalizedStoreCode &&
+                    x.ProductCode == normalizedProductCode &&
+                    !x.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            // 只允许修改“启用且已是特殊商品”的门店价；主行取最新更新的那一条，规则与标记接口一致。
+            var primaryStoreRetailPrice = storeRetailPrices
+                .Where(x => x.IsActive && x.IsSpecialProduct)
+                .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
+                .FirstOrDefault();
+            if (primaryStoreRetailPrice is null)
+            {
+                await dbContext.MainDb.Ado.RollbackTranAsync();
+                transactionStopwatch.Stop();
+                totalStopwatch.Stop();
+                Log($"update special product price failed store={normalizedStoreCode} product={normalizedProductCode} reason=not-special-product totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+                return CatalogSpecialProductPriceServiceResult.Fail(
+                    "NOT_SPECIAL_PRODUCT",
+                    "product is not an active special product in this store");
+            }
+
+            oldPrice = primaryStoreRetailPrice.StoreRetailPriceValue;
+            primaryStoreRetailPrice.StoreRetailPriceValue = newPrice;
+            // 改价属于人工定价：必须关闭自动定价，否则后续进价联动会按加价率把手工价覆盖回去。
+            primaryStoreRetailPrice.IsAutoPricing = false;
+            primaryStoreRetailPrice.UpdatedAt = now;
+            primaryStoreRetailPrice.UpdatedBy = actor;
+            // 只更新主行；同店同商品的其他历史/重复行价格保持原样，由主行最新 UpdatedAt 决定选价。
+            await dbContext.MainDb.Updateable(primaryStoreRetailPrice).ExecuteCommandAsync();
+
+            // 套码联动：主后端 ApplyProjectionValues 对 SetType==2 的套码把门店主价投影到
+            // StoreMultiCodeProduct.MultiCodeRetailPrice（行以 StoreCode+ProductCode+MultiCodeProductCode 对应套码），
+            // 这里同事务保持一致，否则 POS 目录里套码条码仍按旧价售卖。其他 SetType 的套码价是自有价，不能动。
+            var setType2Codes = await dbContext.MainDb.Queryable<ProductSetCode>()
+                .Where(x =>
+                    x.ProductCode == normalizedProductCode &&
+                    x.SetType == 2 &&
+                    x.IsActive &&
+                    !x.IsDeleted)
+                .ToListAsync(cancellationToken);
+            if (setType2Codes.Count > 0)
+            {
+                // 与主后端 ResolveSetProductCode 一致：套码编号为空时回退到 SetCodeId。
+                var projectionCodes = setType2Codes
+                    .Select(x => string.IsNullOrWhiteSpace(x.SetProductCode) ? x.SetCodeId : x.SetProductCode)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var projections = (await dbContext.MainDb.Queryable<StoreMultiCodeProduct>()
+                        .Where(x =>
+                            x.StoreCode == normalizedStoreCode &&
+                            x.ProductCode == normalizedProductCode &&
+                            !x.IsDeleted)
+                        .ToListAsync(cancellationToken))
+                    .Where(x => x.MultiCodeProductCode is not null && projectionCodes.Contains(x.MultiCodeProductCode))
+                    .ToList();
+                foreach (var projection in projections)
+                {
+                    projection.MultiCodeRetailPrice = newPrice;
+                    projection.UpdatedAt = now;
+                    projection.UpdatedBy = actor;
+                }
+
+                if (projections.Count > 0)
+                {
+                    await dbContext.MainDb.Updateable(projections).ExecuteCommandAsync();
+                }
+
+                syncedSetCodeProjections = projections.Count;
+            }
+
+            await dbContext.MainDb.Ado.CommitTranAsync();
+            transactionStopwatch.Stop();
+        }
+        catch (Exception ex)
+        {
+            transactionStopwatch.Stop();
+            await dbContext.MainDb.Ado.RollbackTranAsync();
+            Log($"update special product price transaction failed store={normalizedStoreCode} product={normalizedProductCode} newPrice={newPrice} actor={actor} transactionElapsedMs={transactionStopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+
+        catalogIndexCache.InvalidateStore(normalizedStoreCode);
+
+        // 写入已提交，只构建当前商品的查码项即可让 POS 立即覆盖本地货架，不重建整店目录。
+        var items = await BuildMarkedSpecialProductItemsAsync(
+            store.StoreCode,
+            product,
+            isSpecialProduct: true,
+            cancellationToken);
+        totalStopwatch.Stop();
+        Log($"update special product price completed store={normalizedStoreCode} product={normalizedProductCode} oldPrice={oldPrice?.ToString() ?? "<null>"} newPrice={newPrice} actor={actor} syncedSetCodes={syncedSetCodeProjections} items={items.Count} transactionElapsedMs={transactionStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+
+        return CatalogSpecialProductPriceServiceResult.Ok(new CatalogSpecialProductPriceResponse(
+            normalizedStoreCode,
+            normalizedProductCode,
+            newPrice,
             DateTimeOffset.UtcNow,
             items));
     }

@@ -15,6 +15,16 @@ public interface ISpecialProductService
         string storeCode,
         CancellationToken cancellationToken = default,
         IProgress<SpecialProductDownloadProgress>? progress = null);
+
+    // 中文注释：修改特殊商品的门店零售价，必须在线；默认实现按"不支持"处理，既有测试替身无需实现。
+    Task<SpecialProductMarkResult> UpdateSpecialProductPriceAsync(
+        string storeCode,
+        string productCode,
+        decimal retailPrice,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product price update is not supported by this service.");
+    }
 }
 
 public sealed record SpecialProductDownloadResult(
@@ -106,6 +116,45 @@ public sealed class SpecialProductService(
         {
             totalStopwatch.Stop();
             Log($"mark failed store={storeCode} productCode={productCode} isSpecialProduct={isSpecialProduct} totalElapsedMs={totalStopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<SpecialProductMarkResult> UpdateSpecialProductPriceAsync(
+        string storeCode,
+        string productCode,
+        decimal retailPrice,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        ArgumentException.ThrowIfNullOrWhiteSpace(productCode);
+
+        var totalStopwatch = Stopwatch.StartNew();
+        Log($"price start store={storeCode} productCode={productCode} price={retailPrice}");
+        try
+        {
+            // 关键逻辑：价格只以服务端为准，必须先在线写入成功，才允许覆盖本地目录；失败时本地价格保持不变。
+            var response = await catalogApiClient.UpdateSpecialProductPriceAsync(
+                new CatalogSpecialProductPriceRequest(storeCode, productCode, retailPrice),
+                cancellationToken);
+
+            var upsertItems = response.Items
+                .Select(item => item.ToSellableItemDto())
+                .ToArray();
+            if (upsertItems.Length > 0)
+            {
+                await localCatalogRepository.UpsertSellableItemsAsync(upsertItems, cancellationToken);
+            }
+
+            var specialItems = await localCatalogRepository.LoadSpecialProductItemsAsync(response.StoreCode, cancellationToken);
+            totalStopwatch.Stop();
+            Log($"price completed store={response.StoreCode} productCode={response.ProductCode} price={response.RetailPrice} items={specialItems.Count} upserted={upsertItems.Length} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return new SpecialProductMarkResult(upsertItems, specialItems);
+        }
+        catch (Exception ex)
+        {
+            totalStopwatch.Stop();
+            Log($"price failed store={storeCode} productCode={productCode} price={retailPrice} totalElapsedMs={totalStopwatch.ElapsedMilliseconds} error={ex.Message}");
             throw;
         }
     }

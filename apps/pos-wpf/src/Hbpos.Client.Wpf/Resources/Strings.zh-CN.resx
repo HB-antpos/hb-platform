@@ -1568,6 +1568,129 @@
   <data name="specialProducts.download.detail" xml:space="preserve">
     <value>{0}/{1}  页: {2}  写入: {3}  取消特殊: {4}  耗时: {5}</value>
   </data>
+  <data name="specialProducts.countFormat" xml:space="preserve">
+    <value>共 {0} 个</value>
+  </data>
+  <data name="specialProducts.chip.all" xml:space="preserve">
+    <value>全部 {0}</value>
+  </data>
+  <data name="specialProducts.chip.inCart" xml:space="preserve">
+    <value>已在购物车 {0}</value>
+  </data>
+  <data name="specialProducts.filter.placeholder" xml:space="preserve">
+    <value>筛选名称 / 货号</value>
+  </data>
+  <data name="specialProducts.hint.browse" xml:space="preserve">
+    <value>上下滑动浏览 · 点卡片直接加购</value>
+  </data>
+  <data name="specialProducts.showMore" xml:space="preserve">
+    <value>显示更多（还有 {0} 个）</value>
+  </data>
+  <data name="specialProducts.filter.empty" xml:space="preserve">
+    <value>没有符合条件的特殊商品。</value>
+  </data>
+  <data name="specialProducts.cart.title" xml:space="preserve">
+    <value>当前购物车</value>
+  </data>
+  <data name="specialProducts.cart.count" xml:space="preserve">
+    <value>{0} 件 · {1} 种</value>
+  </data>
+  <data name="specialProducts.cart.total" xml:space="preserve">
+    <value>合计</value>
+  </data>
+  <data name="specialProducts.cart.empty" xml:space="preserve">
+    <value>购物车还是空的，点左侧卡片加入商品。</value>
+  </data>
+  <data name="specialProducts.cart.checkout" xml:space="preserve">
+    <value>返回收银结算</value>
+  </data>
+  <data name="specialProducts.cart.more" xml:space="preserve">
+    <value>另有 {0} 种商品</value>
+  </data>
+  <data name="specialProducts.toast.added" xml:space="preserve">
+    <value>已加入购物车：{0}</value>
+  </data>
+  <data name="specialProducts.undo" xml:space="preserve">
+    <value>撤销</value>
+  </data>
+  <data name="specialProducts.status.addUndone" xml:space="preserve">
+    <value>已撤销加购：{0}</value>
+  </data>
+  <data name="specialProducts.edit.banner" xml:space="preserve">
+    <value>编辑模式：点选卡片后用下方按钮调整顺序、改价或移除。</value>
+  </data>
+  <data name="specialProducts.edit.bannerDetail" xml:space="preserve">
+    <value>此模式下点卡片不会加购；添加、移除、改价需要联网。</value>
+  </data>
+  <data name="specialProducts.edit.selected" xml:space="preserve">
+    <value>已选：{0} · 第 {1} 位</value>
+  </data>
+  <data name="specialProducts.position" xml:space="preserve">
+    <value>第 {0} 位</value>
+  </data>
+  <data name="specialProducts.moveToFront" xml:space="preserve">
+    <value>移到最前</value>
+  </data>
+  <data name="specialProducts.editPrice" xml:space="preserve">
+    <value>改价</value>
+  </data>
+  <data name="specialProducts.cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="specialProducts.remove.confirm" xml:space="preserve">
+    <value>移除 {0}？</value>
+  </data>
+  <data name="specialProducts.addPanel.title" xml:space="preserve">
+    <value>添加商品</value>
+  </data>
+  <data name="specialProducts.addPanel.hint" xml:space="preserve">
+    <value>只搜索未设为特殊的商品</value>
+  </data>
+  <data name="specialProducts.addPanel.footer" xml:space="preserve">
+    <value>添加与改价立即生效；排序只保存在本机，其他终端不受影响。</value>
+  </data>
+  <data name="specialProducts.priceEditor.title" xml:space="preserve">
+    <value>修改零售价</value>
+  </data>
+  <data name="specialProducts.priceEditor.current" xml:space="preserve">
+    <value>当前零售价</value>
+  </data>
+  <data name="specialProducts.priceEditor.new" xml:space="preserve">
+    <value>新零售价</value>
+  </data>
+  <data name="specialProducts.priceEditor.onlineHint" xml:space="preserve">
+    <value>改价会立即写入服务器并同步到所有终端，必须联网。</value>
+  </data>
+  <data name="specialProducts.priceEditor.manualNote" xml:space="preserve">
+    <value>保存后该商品改为人工定价，不再随进价自动调整。</value>
+  </data>
+  <data name="specialProducts.priceEditor.save" xml:space="preserve">
+    <value>保存</value>
+  </data>
+  <data name="specialProducts.priceEditor.clear" xml:space="preserve">
+    <value>清除</value>
+  </data>
+  <data name="specialProducts.priceEditor.backspace" xml:space="preserve">
+    <value>退格</value>
+  </data>
+  <data name="specialProducts.priceEditor.invalid" xml:space="preserve">
+    <value>请输入大于 0 且不超过 99999.99 的价格，最多两位小数。</value>
+  </data>
+  <data name="specialProducts.priceEditor.same" xml:space="preserve">
+    <value>新价格与当前价格相同。</value>
+  </data>
+  <data name="specialProducts.status.priceOnlineRequired" xml:space="preserve">
+    <value>修改零售价需要联网。</value>
+  </data>
+  <data name="specialProducts.status.priceUpdated" xml:space="preserve">
+    <value>已把 {0} 的零售价改为 {1}。</value>
+  </data>
+  <data name="specialProducts.status.priceUpdatedInCart" xml:space="preserve">
+    <value>已把 {0} 的零售价改为 {1}；购物车里已有的该商品仍按旧价，需要新价请删除后重新加入。</value>
+  </data>
+  <data name="specialProducts.status.priceFailed" xml:space="preserve">
+    <value>改价失败：{0}</value>
+  </data>
   <data name="returns.title" xml:space="preserve">
     <value>退货选择</value>
   </data>

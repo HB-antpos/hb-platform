@@ -490,6 +490,56 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
             : BadRequest(failed);
     }
 
+    /// <summary>修改特殊商品的门店零售价；仅限已是特殊商品的商品，由 WPF 在线调用。</summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.SpecialProductsManage)]
+    [HttpPost("special-products/price")]
+    public async Task<ActionResult<ApiResult<CatalogSpecialProductPriceResponse>>> UpdateSpecialProductPrice(
+        [FromBody] CatalogSpecialProductPriceRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductPriceResponse>.Fail("PRICE_REQUEST_REQUIRED", "request body is required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.StoreCode))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductPriceResponse>.Fail("STORE_CODE_REQUIRED", "storeCode is required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProductCode))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductPriceResponse>.Fail("PRODUCT_CODE_REQUIRED", "productCode is required"));
+        }
+
+        if (!this.IsDeviceScopeAllowed(request.StoreCode))
+        {
+            return DeviceAuthorizationExtensions.DeviceScopeForbidden<CatalogSpecialProductPriceResponse>("Device is not authorized for this store.");
+        }
+
+        var updatedBy = User.FindFirstValue(DeviceAuthConstants.DeviceCodeClaim)
+            ?? User.Identity?.Name
+            ?? "pos-device";
+        var stopwatch = Stopwatch.StartNew();
+        Log($"special product price request store={request.StoreCode} product={request.ProductCode} newPrice={request.RetailPrice} actor={updatedBy}");
+        var response = await catalogService.UpdateSpecialProductPriceAsync(request, updatedBy, cancellationToken);
+        stopwatch.Stop();
+        Log(response.Success && response.Response is not null
+            ? $"special product price response store={response.Response.StoreCode} product={response.Response.ProductCode} status=200 newPrice={response.Response.RetailPrice} items={response.Response.Items.Count} elapsedMs={stopwatch.ElapsedMilliseconds}"
+            : $"special product price response store={request.StoreCode} product={request.ProductCode} status=failed errorCode={response.ErrorCode ?? "<null>"} elapsedMs={stopwatch.ElapsedMilliseconds}");
+        if (response.Success && response.Response is not null)
+        {
+            return Ok(ApiResult<CatalogSpecialProductPriceResponse>.Ok(response.Response));
+        }
+
+        var failed = ApiResult<CatalogSpecialProductPriceResponse>.Fail(
+            response.ErrorCode ?? "SPECIAL_PRODUCT_PRICE_FAILED",
+            response.Message ?? "failed to update special product price");
+        return response.ErrorCode is "STORE_NOT_FOUND" or "PRODUCT_NOT_FOUND"
+            ? NotFound(failed)
+            : BadRequest(failed);
+    }
+
     private static void Log(string message)
     {
         Console.WriteLine($"[HBPOS][Api][Catalog] {DateTimeOffset.Now:O} {message}");
