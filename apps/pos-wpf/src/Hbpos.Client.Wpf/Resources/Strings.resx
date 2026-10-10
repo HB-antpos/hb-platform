@@ -810,7 +810,7 @@
   <data name="returns.status.openItemDuplicate" xml:space="preserve"><value>Multiple OPENITEM records were found in the local catalog.</value></data>
   <data name="returns.status.addedNoReceiptOpenItem" xml:space="preserve"><value>Added no-barcode return item: {0}</value></data>
   <data name="returns.orderSummary.none" xml:space="preserve"><value>No order loaded</value></data>
-  <data name="returns.orderSummary.format" xml:space="preserve"><value>Order {0}  {1} items  Refund {2:C2}</value></data>
+  <data name="returns.orderSummary.format" xml:space="preserve"><value>Order #{0}  {1:yyyy-MM-dd HH:mm}  Cashier {2}</value></data>
   <data name="returns.priceSource.receipt" xml:space="preserve"><value>Receipt return</value></data>
   <data name="main.catalogSync.timedOut" xml:space="preserve"><value>Catalog sync timed out. Using the local catalog for now.</value></data>
   <data name="main.catalogSync.failed" xml:space="preserve"><value>Catalog sync failed: {0}</value></data>

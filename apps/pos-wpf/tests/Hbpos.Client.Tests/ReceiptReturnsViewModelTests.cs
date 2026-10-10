@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hbpos.Client.Wpf.Localization;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -42,6 +43,48 @@ public sealed class ReceiptReturnsViewModelTests
             localization.SetCulture(LocalizationService.DefaultCultureName);
 
             Assert.Equal(countAfterDispose, localizedChangeCount);
+        }
+        finally
+        {
+            viewModel.Dispose();
+            localization.SetCulture(LocalizationService.DefaultCultureName);
+        }
+    }
+
+    [Fact]
+    public async Task OrderSummaryText_shows_order_no_sold_time_and_cashier_in_both_cultures()
+    {
+        // 资源格式串的占位符语义必须与代码传参一致：{0}=单号前 8 位、{1}=本地售出时间、{2}=收银员。
+        // 曾因资源写成「{1} 件 退款 {2:C2}」而显示成「订单 AB12CD34  2026-10-09 17:30 件  退款 Lucy」。
+        var orderGuid = Guid.Parse("ab12cd34-0000-0000-0000-000000000001");
+        var soldAt = new DateTimeOffset(2026, 10, 9, 7, 30, 0, TimeSpan.Zero);
+        var soldAtText = soldAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var localization = new LocalizationService();
+        var workflow = new FakeReceiptReturnsWorkflowService
+        {
+            LookupResult = new ReceiptReturnLookupResult(
+                new ReceiptReturnOrder(orderGuid, "S001", "POS-01", "Lucy", soldAt, 10m, [], [], []),
+                false,
+                false,
+                "")
+        };
+        var viewModel = new ReceiptReturnsViewModel(
+            workflow,
+            CreateSession(),
+            () => { },
+            localization: localization)
+        {
+            ScanText = "ORDER-001"
+        };
+
+        try
+        {
+            await viewModel.LookupCommand.ExecuteAsync(null);
+            Assert.Equal($"Order #AB12CD34  {soldAtText}  Cashier Lucy", viewModel.OrderSummaryText);
+
+            // 切语言会走 RefreshLocalizedState，那里是第二个 Format 调用点，一并覆盖。
+            localization.SetCulture(LocalizationService.ChineseCultureName);
+            Assert.Equal($"订单 #AB12CD34  {soldAtText}  收银员 Lucy", viewModel.OrderSummaryText);
         }
         finally
         {
