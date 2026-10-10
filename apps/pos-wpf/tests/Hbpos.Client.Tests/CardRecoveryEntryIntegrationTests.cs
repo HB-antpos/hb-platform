@@ -49,10 +49,13 @@ public sealed class CardRecoveryEntryIntegrationTests
         try
         {
             await cloudApi.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // 手动取消时终端结果确认不了（取消键后查询不可用）：保守按结果未知进异常中心。
+            cloudApi.StatusQueriesUnavailable = true;
             payment.CancelCommand.Execute(null);
             await cardTask.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.True(payment.IsCardPaymentRecoveryRequired);
             var queued = Assert.Single(await recovery.ListOpenAsync(fixture.Session));
+            cloudApi.StatusQueriesUnavailable = false;
             // 主管结案前会向 Linkly 实时核验：只有查到终态“未批准”，才允许确认未付款。
             cloudApi.GetTransactionReportsDecline = true;
             var resolution = new CardPaymentSupervisorResolution(
