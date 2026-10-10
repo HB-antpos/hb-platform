@@ -5954,6 +5954,59 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Card_recovery_center_back_recomputes_home_badge_from_local_queue()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("1042", "SKU-BADGE-REFRESH", "930BADGEREFRESH"));
+        var cashierContext = new CashierSessionContext();
+        var cashierSession = CreateCashierSession(
+            Permissions.PosTerminal.Sales.AddItem,
+            Permissions.PosTerminal.Payment.View);
+        var authorization = new GrantingOperationAuthorizationService();
+        var item = new CardRecoveryQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("40000000-0000-0000-0000-0000000000A1"),
+            "Sale",
+            0.49m,
+            "1042",
+            "POS-01",
+            "OLD-CASHIER",
+            "Sandbox",
+            "Recovering",
+            DateTimeOffset.UtcNow.AddMinutes(-2),
+            DateTimeOffset.UtcNow.AddMinutes(-1));
+        var openItems = new List<CardRecoveryQueueItem> { item };
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            OpenItems = [item],
+            ListOpenHandler = (_, _) => Task.FromResult<IReadOnlyList<CardRecoveryQueueItem>>(openItems.ToArray())
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery,
+            cart: cart,
+            cashierSessionContext: cashierContext,
+            cashierLoginService: new FakeCashierLoginService(cashierSession),
+            operationAuthorizationService: authorization,
+            enforceCashierPermissions: true);
+        var startupOptions = new AppStartupOptions([], false, null, null);
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        viewModel.CashierBarcodeInput = "CARD-RECOVERY-CASHIER";
+        await viewModel.LoginCashierCommand.ExecuteAsync(null);
+        await viewModel.PosTerminal!.OpenCardRecoveryCenterCommand.ExecuteAsync(null);
+        var center = Assert.IsType<CardRecoveryCenterViewModel>(viewModel.CurrentScreen);
+        Assert.Equal(1, viewModel.PosTerminal.CardRecoveryOpenCount);
+
+        // 主管在中心里确认后，本地队列已清空；但中心回写给主页的数字停在旧值（例如渠道刷新不完整时不回写）。
+        openItems.Clear();
+        center.BackCommand.Execute(null);
+
+        Assert.Same(viewModel.PosTerminal, viewModel.CurrentScreen);
+        await WaitUntilAsync(() => viewModel.PosTerminal.CardRecoveryOpenCount == 0);
+        Assert.Equal(0, viewModel.PosTerminal.CardRecoveryOpenCount);
+    }
+    [Fact]
     public async Task Card_recovery_center_back_from_unknown_payment_restores_same_locked_payment()
     {
         var cart = new PosCartService();
