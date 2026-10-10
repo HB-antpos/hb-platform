@@ -35,10 +35,6 @@ function ScreenMessage({ message, onBack, retry }: { message: string; onBack: ()
   return <SafeAreaView style={styles.message}><Text>{message}</Text>{retry ? <Button onPress={retry}>{t("actions.retry")}</Button> : null}<Button onPress={onBack}>{t("actions.back")}</Button></SafeAreaView>;
 }
 
-function formatQuantity(value: number) {
-  return value.toLocaleString("en-AU", { maximumFractionDigits: 2 });
-}
-
 function formatPrice(value: number) {
   return value.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -63,7 +59,7 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
         <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
         {item.retailPrice !== null ? <Text variant="titleSmall" style={styles.retailPrice} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
         <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: item.containerNumber?.trim() || item.containerCode })}</Text>
-        {item.quantity !== null ? <Text variant="bodyMedium" style={styles.quantity} numberOfLines={1}>{t("labels.quantity", { value: formatQuantity(item.quantity) })}</Text> : null}
+        {/* 不向门店展示到货数量：数量只在接口里保留，卡片上不显示 */}
         {/* 新品/已有 与到仓状态放同一行，不挤占货号；到仓状态即后端 basis：已到仓按到仓库日期推算到店日，在途按预计到岸推算 */}
         <View style={styles.tagRow}>
           <Text style={[styles.typeTag, !item.isNewProduct && styles.typeTagExisting]}>{t(item.isNewProduct ? "labels.newTag" : "labels.existingTag")}</Text>
@@ -285,7 +281,6 @@ const styles = StyleSheet.create({
   typeTag: { color: HB_COLORS.action, backgroundColor: ACCENT_SOFT, fontSize: 12, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, overflow: "hidden" },
   typeTagExisting: { color: HB_COLORS.textSecondary, backgroundColor: HB_COLORS.surfaceMuted },
   containerCode: { color: HB_COLORS.textSecondary },
-  quantity: { color: HB_COLORS.textPrimary, fontWeight: "600" },
   retailPrice: { color: HB_COLORS.action, fontWeight: "700" },
   statusPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: HB_SPACING.xs, paddingVertical: 3, borderRadius: 10 },
   statusArrived: { backgroundColor: SUCCESS_SOFT },
