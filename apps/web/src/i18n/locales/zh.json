@@ -303,10 +303,10 @@
       "floatRate": "调整浮率",
       "transportCost": "运输成本",
       "unitTransportCost": "单件运输成本",
-      "warehouseImportPrice": "实时进货价",
-      "lastOEMPrice": "实时零售价",
-      "importPrice": "进口价格",
-      "oemPrice": "零售价",
+      "warehouseImportPrice": "已有进口价",
+      "lastOEMPrice": "已有零售价",
+      "importPrice": "本次进口价",
+      "oemPrice": "本次零售价",
       "warehouseStatus": "仓库状态"
     },
     "freightCalculator": {
@@ -334,7 +334,7 @@
     },
     "formulas": {
       "transportCost": "运输成本 = 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积",
-      "importPrice": "进口价格 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11"
+      "importPrice": "本次进口价 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11"
     },
     "status": {
       "unknown": "未知",

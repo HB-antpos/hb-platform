@@ -86,6 +86,10 @@ import {
   getContainerDetailProductTypeFilterKey,
   getContainerDetailImageUrl,
   getContainerDetailImportPriceTrend,
+  getContainerDetailImportPriceGapRatio,
+  getContainerDetailPriceGapRatio,
+  getContainerDetailRetailPriceGapRatio,
+  isContainerDetailPriceGapHighlighted,
   getContainerDetailRealtimeImportPrice,
   getContainerDetailRealtimeRetailPrice,
   getContainerDetailVisibleOemPrice,
@@ -311,6 +315,26 @@ assertEqual(
   CONTAINER_DETAIL_EXPORT_COLUMNS.find((column) => column.key === 'lastImportPrice')?.labelKey,
   'containers.fields.warehouseImportPrice',
   '实时进货价导出列应复用表格里的实时进货价翻译 key',
+)
+// 本次价 vs 已有价差额超过 30% 高亮：以已有价为基数，严格大于 30% 才算。
+assertEqual(getContainerDetailPriceGapRatio(1.3, 1), 0.3, '差额比例应四舍五入消除浮点误差')
+assertEqual(isContainerDetailPriceGapHighlighted(getContainerDetailPriceGapRatio(1.3, 1)), false, '恰好 30% 不高亮')
+assertEqual(isContainerDetailPriceGapHighlighted(getContainerDetailPriceGapRatio(1.31, 1)), true, '涨幅超过 30% 应高亮')
+assertEqual(isContainerDetailPriceGapHighlighted(getContainerDetailPriceGapRatio(0.69, 1)), true, '跌幅超过 30% 也应高亮')
+assertEqual(isContainerDetailPriceGapHighlighted(getContainerDetailPriceGapRatio(0.7, 1)), false, '跌幅恰好 30% 不高亮')
+assertEqual(getContainerDetailPriceGapRatio(undefined, 1), undefined, '本次价缺失不算差额')
+assertEqual(getContainerDetailPriceGapRatio(1, undefined), undefined, '已有价缺失不算差额')
+assertEqual(getContainerDetailPriceGapRatio(0, 1), undefined, '本次价为 0（未填）不算差额')
+assertEqual(getContainerDetailPriceGapRatio(1, 0), undefined, '已有价为 0 不算差额，避免除零')
+assertEqual(
+  isContainerDetailPriceGapHighlighted(getContainerDetailImportPriceGapRatio({ id: 130, hguid: 'import-gap', warehouseImportPrice: 1.0, 进口价格: 1.5 })),
+  true,
+  '本次进口价比已有进口价高 50% 应高亮',
+)
+assertEqual(
+  getContainerDetailRetailPriceGapRatio({ id: 131, hguid: 'retail-gap-existing', 是否新商品: false, warehouseOEMPrice: 4.99, 贴牌价格: 9.99 }),
+  0,
+  '已有商品本次零售价绑定已有零售价，二者差额为 0',
 )
 assertEqual(
   getContainerDetailImportPriceTrend({ id: 120, hguid: 'import-trend-up', warehouseImportPrice: 0.29, 进口价格: 0.38 }),
@@ -4639,7 +4663,7 @@ assertEqual(
 assertEqual(pageSource.includes("t('containers.formulas.transportCost'"), true, '表格页脚运输成本公式应使用 i18n key')
 assertEqual(pageSource.includes("t('containers.formulas.importPrice'"), true, '表格页脚进口价格公式应使用 i18n key')
 assertEqual(pageSource.includes('运输成本 = 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积'), true, '表格页脚应展示运输成本公式')
-assertEqual(pageSource.includes('进口价格 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11'), true, '表格页脚应展示进口价格公式')
+assertEqual(pageSource.includes('本次进口价 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11'), true, '表格页脚「计算公式」提示应展示本次进口价公式')
 assertEqual(
   pageSource.includes('const [recalculateCostsLoading, setRecalculateCostsLoading] = useState(false)'),
   false,
@@ -6019,13 +6043,13 @@ assertEqual(
   )
   assertEqual(
     formatContainerDetailPreviewFields(['进口价格', '贴牌价格', 'LastImportPrice', 'LastOEMPrice'], translate),
-    '进口价格、零售价、上次进口价、上次零售价',
+    '本次进口价、本次零售价、上次进口价、上次零售价',
     '价格类预览应把“贴牌价格”和 Last*Price 换成页面列名',
   )
   assertEqual(
     formatContainerDetailPreviewFields(['调整浮率', '运输成本', '进口价格', '进口价格'], translate),
-    '调整浮率、运输成本、进口价格',
-    '重复字段应去重，已是中文的字段原样保留',
+    '调整浮率、运输成本、本次进口价',
+    '重复字段应去重，未登记的中文字段原样保留，已登记的换成页面列名',
   )
   assertEqual(formatContainerDetailPreviewFields([], translate), '--', '无字段时显示 --')
   assertEqual(formatContainerDetailPreviewFields(undefined, translate), '--', '缺少字段摘要时显示 --')

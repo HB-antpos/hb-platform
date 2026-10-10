@@ -87,7 +87,10 @@
       "updateWarehouseImportPriceHint": "Overwrite the warehouse purchase price (current purchase price) with this container's import price. Only the warehouse master is updated; store purchase prices are unchanged. Only existing products whose import price differs are included; {{skipped}} line(s) skipped.",
       "noWarehouseImportPriceChanges": "Nothing to update: the lines are new products, have no import price, or already match the current purchase price.",
       "warehouseImportPriceUpdated": "Updated the warehouse purchase price for {{count}} product(s)",
-      "warehouseImportPriceUpdateFailed": "Failed to update the warehouse purchase price"
+      "warehouseImportPriceUpdateFailed": "Failed to update the warehouse purchase price",
+      "importPriceGapHint": "Import price is {{percent}} vs. the existing import price (over 30% difference)",
+      "retailPriceGapHint": "Retail price is {{percent}} vs. the existing retail price (over 30% difference)",
+      "formulaHint": "Formulas"
     }
   }
 }

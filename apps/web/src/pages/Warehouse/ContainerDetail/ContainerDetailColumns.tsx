@@ -74,6 +74,12 @@ export function renderImportPriceCell(row: ContainerDetail, input?: ReactNode) {
   )
 }
 
+/** 本次/已有价格差额超过阈值时给单元格内容套上高亮底色；未超过时原样返回。title 用于悬停说明差额。 */
+export function renderPriceGapHighlight(content: ReactNode, highlighted: boolean, title?: string) {
+  if (!highlighted) return content
+  return <span className="container-detail-price-gap" title={title}>{content}</span>
+}
+
 // ---- 分类相关 ----
 
 /** 递归展开分类树到指定层级，返回所有应展开的 GUID。 */

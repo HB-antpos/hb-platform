@@ -11,6 +11,7 @@ import {
   EditOutlined,
   ExclamationCircleOutlined,
   HistoryOutlined,
+  InfoCircleOutlined,
   LoadingOutlined,
   MoreOutlined,
   ReloadOutlined,
@@ -190,9 +191,12 @@ import {
   getContainerDetailItemNumber,
   getContainerDetailLocalProductCode,
   getContainerDetailDomesticProductCode,
+  getContainerDetailImportPriceGapRatio,
   getContainerDetailRealtimeImportPrice,
   getContainerDetailRealtimeRetailPrice,
+  getContainerDetailRetailPriceGapRatio,
   getContainerDetailVisibleOemPrice,
+  isContainerDetailPriceGapHighlighted,
   getPendingContainerDetailEnglishNameError,
   getContainerDetailMatchType,
   getContainerDetailProductCode,
@@ -355,6 +359,7 @@ import {
   renderImportPriceCell,
   renderNumericCell,
   renderOemPriceCell,
+  renderPriceGapHighlight,
 } from './ContainerDetailColumns'
 import './index.css'
 import { MeasuredTable } from '../../../components/MeasuredTable'
@@ -6182,6 +6187,23 @@ export default function ContainerDetailPage() {
     return dirty ? 'container-detail-draft-input container-detail-draft-input-dirty' : 'container-detail-draft-input'
   }
 
+  // 本次价与已有价差额超过 30% 时，「本次」「已有」两列同时高亮，悬停显示带正负号的差额百分比。
+  const formatPriceGapPercent = (ratio: number) => `${ratio > 0 ? '+' : ''}${Math.round(ratio * 100)}%`
+  const renderImportPriceGap = (row: ContainerDetail, content: ReactNode) => {
+    const ratio = getContainerDetailImportPriceGapRatio(row)
+    const highlighted = isContainerDetailPriceGapHighlighted(ratio)
+    return renderPriceGapHighlight(content, highlighted, highlighted && ratio != null
+      ? t('warehouseUi.containerDetail.importPriceGapHint', '本次进口价比已有进口价 {{percent}}，差额超过 30%', { percent: formatPriceGapPercent(ratio) })
+      : undefined)
+  }
+  const renderRetailPriceGap = (row: ContainerDetail, content: ReactNode) => {
+    const ratio = getContainerDetailRetailPriceGapRatio(row)
+    const highlighted = isContainerDetailPriceGapHighlighted(ratio)
+    return renderPriceGapHighlight(content, highlighted, highlighted && ratio != null
+      ? t('warehouseUi.containerDetail.retailPriceGapHint', '本次零售价比已有零售价 {{percent}}，差额超过 30%', { percent: formatPriceGapPercent(ratio) })
+      : undefined)
+  }
+
   const productColumn: ColumnsType<ContainerDetail>[number] = {
     // 视图专用合成列：图 + 货号（可复制/看修改记录）+ 新/已有与特殊类型标签 + 名称（双击编辑，失焦自动保存）。
     key: 'product',
@@ -6494,13 +6516,13 @@ export default function ContainerDetailPage() {
       },
     },
     {
-      title: renderColumnTitle('warehouseImportPrice', t('containers.fields.warehouseImportPrice', '实时进货价')),
+      title: renderColumnTitle('warehouseImportPrice', t('containers.fields.warehouseImportPrice', '已有进口价')),
       dataIndex: 'warehouseImportPrice',
       width: 112,
       align: 'right',
       ...makeSortProps('warehouseImportPrice'),
       ...numberFilterProps('warehouseImportPrice'),
-      render: (_value, row) => renderNumericCell(formatCurrency(getContainerDetailRealtimeImportPrice(row), '$')),
+      render: (_value, row) => renderImportPriceGap(row, renderNumericCell(formatCurrency(getContainerDetailRealtimeImportPrice(row), '$'))),
     },
     {
       title: renderColumnTitle('importPrice', t('containers.fields.importPrice')),
@@ -6516,7 +6538,7 @@ export default function ContainerDetailPage() {
           '进口价格',
         )
         const concurrencyConflict = resolveConcurrencyConflict(row, '进口价格')
-        return access.canEditContainer
+        return renderImportPriceGap(row, access.canEditContainer
           ? renderConcurrentEditableField(row, '进口价格', renderImportPriceCell(row, (
             <InputNumber
               ref={(cell) => setEditableCellRef(rowKey(row), 'importPrice', cell)}
@@ -6540,7 +6562,7 @@ export default function ContainerDetailPage() {
               onPaste={(event) => handleEditableCellPaste(row, 'importPrice', event)}
             />
           )))
-          : renderConcurrentEditableField(row, '进口价格', renderImportPriceCell(row))
+          : renderConcurrentEditableField(row, '进口价格', renderImportPriceCell(row)))
       },
     },
     {
@@ -6557,7 +6579,7 @@ export default function ContainerDetailPage() {
           '贴牌价格',
         )
         const concurrencyConflict = resolveConcurrencyConflict(row, '贴牌价格')
-        return access.canEditContainer ? renderConcurrentEditableField(row, '贴牌价格', (
+        return renderRetailPriceGap(row, access.canEditContainer ? renderConcurrentEditableField(row, '贴牌价格', (
           <InputNumber
             ref={(cell) => setEditableCellRef(rowKey(row), 'oemPrice', cell)}
             rootClassName={getDraftInputRootClassName(row, '贴牌价格')}
@@ -6578,16 +6600,16 @@ export default function ContainerDetailPage() {
             onKeyDown={(event) => handleEditableCellKeyDown(row, 'oemPrice', event)}
             onPaste={(event) => handleEditableCellPaste(row, 'oemPrice', event)}
           />
-        )) : renderConcurrentEditableField(row, '贴牌价格', renderOemPriceCell(row))
+        )) : renderConcurrentEditableField(row, '贴牌价格', renderOemPriceCell(row)))
       },
     },
     {
-      title: renderColumnTitle('lastOEMPrice', t('containers.fields.lastOEMPrice', '实时零售价')),
+      title: renderColumnTitle('lastOEMPrice', t('containers.fields.lastOEMPrice', '已有零售价')),
       width: 104,
       align: 'right',
       ...makeSortProps('lastOEMPrice'),
       ...numberFilterProps('lastOEMPrice'),
-      render: (_, row) => renderNumericCell(formatCurrency(getContainerDetailRealtimeRetailPrice(row), '$')),
+      render: (_, row) => renderRetailPriceGap(row, renderNumericCell(formatCurrency(getContainerDetailRealtimeRetailPrice(row), '$'))),
     },
     {
       title: renderColumnTitle('newProduct', t('containers.fields.newProduct')),
@@ -7942,10 +7964,20 @@ export default function ContainerDetailPage() {
                       onScroll={handleDetailTableScroll}
                       footer={() => (
                         <div className="wh-cdetail-table-footer">
-                          <Space direction="vertical" size={2}>
-                            <Typography.Text type="secondary">{t('containers.formulas.transportCost', '运输成本 = 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积')}</Typography.Text>
-                            <Typography.Text type="secondary">{t('containers.formulas.importPrice', '进口价格 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11')}</Typography.Text>
-                          </Space>
+                          {/* 公式收进悬停提示，页脚压成一行，把高度让给表格（表格高度按实测页脚高度扣减） */}
+                          <Tooltip
+                            placement="topLeft"
+                            title={(
+                              <div className="wh-cdetail-formula-tooltip">
+                                <div>{t('containers.formulas.transportCost', '运输成本 = 运费 × 明细体积 ÷ 装柜数量 ÷ 总体积')}</div>
+                                <div>{t('containers.formulas.importPrice', '本次进口价 = ((国内价格 ÷ 汇率 + 运输成本) × 调整浮率 × 10) ÷ 11')}</div>
+                              </div>
+                            )}
+                          >
+                            <Typography.Text type="secondary" className="wh-cdetail-formula-trigger" tabIndex={0}>
+                              <InfoCircleOutlined /> {t('warehouseUi.containerDetail.formulaHint', '计算公式')}
+                            </Typography.Text>
+                          </Tooltip>
                           <Typography.Text type="secondary" className="container-detail-loaded-count">
                             {detailLoadMode === 'full'
                               ? filteredRows.length !== rows.length

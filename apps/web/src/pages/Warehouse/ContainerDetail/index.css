@@ -244,6 +244,21 @@
   font-size: 12px;
 }
 
+/* 本次价与已有价差额超过 30%：玫红底 + 内描边，和未保存草稿的琥珀底、涨跌箭头的红绿、保存失败的红框区分开。
+   负外边距抵消内边距，底色延伸进单元格自身的 6px 内边距，不占列宽（本次进口价列输入框 + 箭头已占满）。 */
+.container-detail-price-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: #fff0f3;
+  box-shadow: inset 0 0 0 1px #ff85a2;
+  color: #c41d5c;
+  font-weight: 600;
+}
+
 .container-detail-barcode-cell {
   white-space: nowrap;
 }
@@ -1180,9 +1195,26 @@
 .wh-cdetail-table-footer {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: 4px 16px;
+  line-height: 20px;
+}
+
+/* 页脚只留一行：上下内边距压到 4px，省下的高度由表格高度测量自动让给表格。
+   选择器要盖过 antd 小尺寸表格的 .ant-table-wrapper .ant-table.ant-table-small .ant-table-footer */
+.container-detail-table.ant-table-wrapper .ant-table.ant-table-small .ant-table-footer {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.wh-cdetail-formula-trigger {
+  cursor: help;
+}
+
+.wh-cdetail-formula-tooltip {
+  display: grid;
+  gap: 4px;
 }
 
 .wh-cdetail-table-footer .container-detail-loaded-count {
