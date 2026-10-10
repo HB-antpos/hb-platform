@@ -2340,7 +2340,7 @@
     <value>尚未加载订单</value>
   </data>
   <data name="returns.orderSummary.format" xml:space="preserve">
-    <value>订单 {0}  {1} 件  退款 {2:C2}</value>
+    <value>订单 #{0}  {1:yyyy-MM-dd HH:mm}  收银员 {2}</value>
   </data>
   <data name="returns.priceSource.receipt" xml:space="preserve">
     <value>小票退货</value>
