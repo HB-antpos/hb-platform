@@ -135,7 +135,10 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
         var vm = new SettingsViewModel(setup, localization, apiServerSettings: apiSettings);
         await vm.LoadAsync();
         await ((IAsyncRelayCommand)select(vm)).ExecuteAsync(null);
-        var view = new SettingsView { DataContext = vm };
+        var view = new SettingsView();
+        // 先隔离单选按钮分组再设置 DataContext，避免与其它测试遗留的同名分组互相清除勾选。
+        PaymentViewRuntimeStaTestHost.IsolateRadioGroups(view);
+        view.DataContext = vm;
         view.Resources.MergedDictionaries.Add(new MaterialDesignThemes.Wpf.BundledTheme
         {
             BaseTheme = MaterialDesignThemes.Wpf.BaseTheme.Light,
@@ -147,7 +150,7 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
 
     private static List<RadioButton> Segment(DependencyObject root, string groupName) =>
         PaymentViewRuntimeStaTestHost.FindVisualDescendants<RadioButton>(root)
-            .Where(radio => radio.GroupName == groupName)
+            .Where(radio => radio.GroupName is { } name && name.StartsWith(groupName + "#", StringComparison.Ordinal))
             .ToList();
 
     private static Button AssertTouchButton(DependencyObject root, object command, double minHeight)

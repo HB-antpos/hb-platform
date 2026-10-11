@@ -197,6 +197,43 @@ public sealed class PaymentViewRuntimeStaTestHost : IAsyncLifetime
             DispatcherPriority.ApplicationIdle);
     }
 
+    /// <summary>
+    /// 把视图里所有单选按钮的 <c>GroupName</c> 改成按实例唯一，视图内部仍保持互斥。
+    /// 未挂到窗口的视图没有可见根，WPF 会把同名分组注册到全进程共用的一个集合里：
+    /// 其它测试留下、尚未被回收的同类视图，其视图模型异步完成后改勾选状态，会把本视图的单选按钮清掉。
+    /// 单进程全量运行时存活实例多、回收时机随机，因此偶发「视图模型状态正确，但两个单选按钮都没勾」。
+    /// 必须在设置 DataContext 之前调用，避免绑定先落到共享分组里。
+    /// </summary>
+    public static void IsolateRadioGroups(DependencyObject root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        var suffix = "#" + Guid.NewGuid().ToString("N");
+        foreach (var radio in FindLogicalDescendants<System.Windows.Controls.RadioButton>(root))
+        {
+            if (!string.IsNullOrEmpty(radio.GroupName))
+            {
+                radio.GroupName += suffix;
+            }
+        }
+    }
+
+    private static IEnumerable<T> FindLogicalDescendants<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in FindLogicalDescendants<T>(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
     public static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root)
         where T : DependencyObject
     {
