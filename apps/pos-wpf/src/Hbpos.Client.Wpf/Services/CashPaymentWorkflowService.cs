@@ -1436,29 +1436,40 @@ public sealed class CashPaymentWorkflowService(
                     squareRecoveryAttempt: squareRecoveryPersisted ? squareAttempt : null);
             }
 
-            await RunLocalStoreAsync(
-                () => refundSubmissionToken is not null
-                    ? RequireRefundCasAsync(
-                        TryMarkCurrentSquareRefundFailedAsync(
+            // 中文注释：终端客户端（取消清理、已确认取消等路径）可能已经把本地记录写成终态。
+            // 这里不能再写一次：状态保护会拒绝对终态记录的写入，成功的取消反而弹出「意外错误」。
+            var squareAttemptAlreadyTerminalFailure = refundSubmissionToken is null &&
+                squareAttemptAfterAuthorization?.Status is
+                    LocalSquarePaymentAttemptStatus.Canceled or
+                    LocalSquarePaymentAttemptStatus.Failed or
+                    LocalSquarePaymentAttemptStatus.TimedOut or
+                    LocalSquarePaymentAttemptStatus.Abandoned;
+            if (!squareAttemptAlreadyTerminalFailure)
+            {
+                await RunLocalStoreAsync(
+                    () => refundSubmissionToken is not null
+                        ? RequireRefundCasAsync(
+                            TryMarkCurrentSquareRefundFailedAsync(
+                                squareAttempt.AttemptGuid,
+                                refundSubmissionToken,
+                                MapSquareAuthorizationFailureStatus(authorization.StatusKey, authorization.Message),
+                                null,
+                                authorization.ResponseText,
+                                authorization.ResponseCode,
+                                authorization.Message,
+                                DateTimeOffset.UtcNow,
+                                CancellationToken.None))
+                        : squarePaymentAttemptRepository!.MarkFailedAsync(
                             squareAttempt.AttemptGuid,
-                            refundSubmissionToken,
                             MapSquareAuthorizationFailureStatus(authorization.StatusKey, authorization.Message),
                             null,
                             authorization.ResponseText,
                             authorization.ResponseCode,
                             authorization.Message,
                             DateTimeOffset.UtcNow,
-                            CancellationToken.None))
-                    : squarePaymentAttemptRepository!.MarkFailedAsync(
-                        squareAttempt.AttemptGuid,
-                        MapSquareAuthorizationFailureStatus(authorization.StatusKey, authorization.Message),
-                        null,
-                        authorization.ResponseText,
-                        authorization.ResponseCode,
-                        authorization.Message,
-                        DateTimeOffset.UtcNow,
-                        CancellationToken.None),
-                CancellationToken.None);
+                            CancellationToken.None),
+                    CancellationToken.None);
+            }
         }
 
         ConsoleLog.Write(
