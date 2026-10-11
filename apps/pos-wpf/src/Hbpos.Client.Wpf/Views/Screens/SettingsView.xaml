@@ -3130,7 +3130,7 @@
                                                 Width="200"
                                                 Height="200"
                                                 Padding="0"
-                                                Background="White"
+                                                Background="{DynamicResource PosSurfaceBrush}"
                                                 HorizontalAlignment="Center"
                                                 AutomationProperties.Name="{loc:Loc mobileApp.enlarge.open}">
                                             <Grid>
@@ -3188,7 +3188,7 @@
                                                 Width="200"
                                                 Height="200"
                                                 Padding="0"
-                                                Background="White"
+                                                Background="{DynamicResource PosSurfaceBrush}"
                                                 HorizontalAlignment="Center"
                                                 AutomationProperties.Name="{loc:Loc mobileApp.enlarge.open}"
                                                 Visibility="{Binding IsAndroidAvailable, Converter={StaticResource BoolToVis}}">
@@ -3245,8 +3245,8 @@
                                                 </StackPanel>
                                             </Button>
                                         </Grid>
-                                        <Border Background="#FFFFF8E1" BorderBrush="#FFF5D98B" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,8,0,0">
-                                            <TextBlock Text="{loc:Loc mobileApp.android.note}" FontSize="11" Foreground="#FF6B4E00" TextWrapping="Wrap" />
+                                        <Border Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,8,0,0">
+                                            <TextBlock Text="{loc:Loc mobileApp.android.note}" FontSize="11" Foreground="{DynamicResource PosWarningTextBrush}" TextWrapping="Wrap" />
                                         </Border>
                                     </StackPanel>
                                 </Border>
@@ -3316,7 +3316,7 @@
                     Padding="24,18">
                 <StackPanel HorizontalAlignment="Center">
                     <TextBlock Text="{Binding MobileAppDownload.EnlargedTitleText}" FontSize="18" FontWeight="Black" HorizontalAlignment="Center" Margin="0,0,0,12" />
-                    <Border Background="White" BorderBrush="{DynamicResource PosBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                    <Border Background="{DynamicResource PosSurfaceBrush}" BorderBrush="{DynamicResource PosBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
                         <Image Source="{Binding MobileAppDownload.EnlargedQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=360}"
                                Stretch="None"
                                RenderOptions.BitmapScalingMode="NearestNeighbor" />
