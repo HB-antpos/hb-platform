@@ -3016,6 +3016,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CardRecoveryAttemptKey selectedKey,
         CardPaymentRecoveryResult result)
     {
+        try
+        {
+            await HandleCardRecoveryCenterResultCoreAsync(selectedKey, result);
+        }
+        finally
+        {
+            // 中文注释：「立即检查状态」收尾（如确认未付款后的收尾待处理）会让本地队列变空，但这条路径不经过「返回」，
+            // 主页角标因此停在旧数字。无论哪种结果都按本地队列全量重算一次（内部已吞掉异常，不影响收银）。
+            await RefreshCardRecoveryCountAsync();
+        }
+    }
+
+    private async Task HandleCardRecoveryCenterResultCoreAsync(
+        CardRecoveryAttemptKey selectedKey,
+        CardPaymentRecoveryResult result)
+    {
         if (result.Outcome == CardPaymentRecoveryOutcome.DraftRestored)
         {
             // Recovery Center 与启动恢复共用同一条原子交接，不能再次手工投影并绕过 owner 收尾。
