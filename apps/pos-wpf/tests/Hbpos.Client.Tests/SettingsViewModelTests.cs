@@ -3943,6 +3943,66 @@ public sealed class SettingsViewModelTests
         }
     }
 
+    [Fact]
+    public async Task Selecting_mobile_app_download_opens_the_page_and_loads_versions()
+    {
+        var localization = new LocalizationService();
+        localization.SetCulture(LocalizationService.DefaultCultureName);
+        var service = new FakeMobileAppDownloadService
+        {
+            OnRefresh = () => Task.FromResult(new MobileAppInstallInfo(
+                "https://apps.apple.com/au/app/hbgroup/id6786073002",
+                "1.0.7",
+                "https://hotbargain.vip/api/mobile-app-builds/android-latest/download?profile=production",
+                MobileAppAndroidAvailability.Available,
+                "1.0.10",
+                "63",
+                124_168_826,
+                MetadataLoaded: true))
+        };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            localization,
+            mobileAppDownloadService: service);
+
+        await viewModel.SelectMobileAppDownloadCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsMobileAppDownloadSelected);
+        Assert.False(viewModel.IsRemoteMaintenanceSelected);
+        Assert.False(viewModel.IsDataMaintenanceSelected);
+        Assert.Equal(localization.T("settings.subtitle.mobileAppDownload"), viewModel.SettingsSubtitleText);
+        Assert.Equal(1, service.RefreshCalls);
+        Assert.Equal("1.0.10 (build 63)", viewModel.MobileAppDownload.AndroidVersionText);
+    }
+
+    [Fact]
+    public async Task Mobile_app_download_is_open_to_every_cashier_without_a_permission_code()
+    {
+        // 支付终端等分类需要权限码；员工 App 下载页不设权限，任何已登录收银员（或未登录的强制权限模式）都能打开。
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            enforcePermissionsWhenNoCashier: true,
+            mobileAppDownloadService: new FakeMobileAppDownloadService());
+
+        await viewModel.SelectMobileAppDownloadCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsMobileAppDownloadSelected);
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.MobileAppDownload.IosQrPayload));
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.MobileAppDownload.AndroidQrPayload));
+    }
+
+    [Fact]
+    public async Task Mobile_app_download_still_shows_QR_codes_when_no_service_is_wired()
+    {
+        using var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService());
+
+        await viewModel.SelectMobileAppDownloadCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsMobileAppDownloadSelected);
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.MobileAppDownload.AndroidQrPayload));
+        Assert.False(viewModel.MobileAppDownload.IsLoading);
+    }
+
     private sealed class FakeCardTerminalSetupService(
         CardTerminalConfiguration? configuration = null,
         string? squareAccessToken = null) : ICardTerminalSetupService

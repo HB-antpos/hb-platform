@@ -450,4 +450,31 @@
   <data name="settings.receiptPrinter.storeInfo.help" xml:space="preserve"><value>Printed at the top of every receipt.</value></data>
   <data name="settings.receiptPrinter.terms.title" xml:space="preserve"><value>Receipt terms</value></data>
   <data name="settings.receiptPrinter.terms.subtitle" xml:space="preserve"><value>Printed at the bottom of receipts.</value></data>
+  <data name="settings.category.mobileAppDownload" xml:space="preserve"><value>Staff app download</value></data>
+  <data name="settings.subtitle.mobileAppDownload" xml:space="preserve"><value>Staff app download</value></data>
+  <data name="mobileApp.description" xml:space="preserve"><value>For staff use. Scan with a phone camera to install; PDAs use the Android version. Tap a QR code to enlarge it.</value></data>
+  <data name="mobileApp.ios.title" xml:space="preserve"><value>iPhone / iPad</value></data>
+  <data name="mobileApp.ios.subtitle" xml:space="preserve"><value>App Store</value></data>
+  <data name="mobileApp.ios.hint" xml:space="preserve"><value>Scan with the camera to open the App Store</value></data>
+  <data name="mobileApp.android.title" xml:space="preserve"><value>Android phone / PDA</value></data>
+  <data name="mobileApp.android.subtitle" xml:space="preserve"><value>Installer (APK)</value></data>
+  <data name="mobileApp.android.badge" xml:space="preserve"><value>Scan this one on a PDA</value></data>
+  <data name="mobileApp.android.hint" xml:space="preserve"><value>Scan to download the installer</value></data>
+  <data name="mobileApp.android.note" xml:space="preserve"><value>On first install, allow installing unknown apps on the phone or PDA</value></data>
+  <data name="mobileApp.android.versionFormat" xml:space="preserve"><value>{0} (build {1})</value></data>
+  <data name="mobileApp.android.sizeFormat" xml:space="preserve"><value>About {0} MB</value></data>
+  <data name="mobileApp.android.notPublished" xml:space="preserve"><value>No installer available yet</value></data>
+  <data name="mobileApp.android.notPublishedHint" xml:space="preserve"><value>Ask HQ to publish one, then retry</value></data>
+  <data name="mobileApp.version" xml:space="preserve"><value>Latest version</value></data>
+  <data name="mobileApp.versionUnknown" xml:space="preserve"><value>—</value></data>
+  <data name="mobileApp.copyLink" xml:space="preserve"><value>Copy link</value></data>
+  <data name="mobileApp.copied" xml:space="preserve"><value>Link copied</value></data>
+  <data name="mobileApp.copyFailed" xml:space="preserve"><value>Couldn't copy the link. Try again.</value></data>
+  <data name="mobileApp.refresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="mobileApp.retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="mobileApp.status.loading" xml:space="preserve"><value>Checking the latest version…</value></data>
+  <data name="mobileApp.status.latest" xml:space="preserve"><value>Up to date · refreshed each time you open this page</value></data>
+  <data name="mobileApp.status.offline" xml:space="preserve"><value>Can't reach HQ: QR codes still work, but version info is unavailable</value></data>
+  <data name="mobileApp.enlarge.hint" xml:space="preserve"><value>Tap anywhere to close · a bigger code is easier to scan</value></data>
+  <data name="mobileApp.enlarge.open" xml:space="preserve"><value>Enlarge QR code</value></data>
 </root>
