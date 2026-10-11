@@ -40,6 +40,7 @@ internal static class SalesStatisticsHourlyRefresher
             );
 
             // 金额取支付明细、销量取销售明细、订单数取订单头，避免拆分支付放大非金额指标。
+            // 金额与销量并入退款单（Status=3，负数）得净额，订单数/客数仍只数 1/4（退款单不算一单）。
             var hourlyRevenueRows = await posmContext
                 .Db.Queryable<PaymentDetail, SalesOrder>(
                     (pd, so) => pd.OrderGuid == so.OrderGuid
@@ -47,7 +48,7 @@ internal static class SalesStatisticsHourlyRefresher
                 .Where(
                     (pd, so) =>
                         so.Status != null
-                        && (so.Status == 1 || so.Status == 4)
+                        && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                         && so.OrderTime != null
                         && so.OrderTime >= rangeStart
                         && so.OrderTime < rangeEnd
@@ -82,7 +83,7 @@ internal static class SalesStatisticsHourlyRefresher
                 .Where(
                     (detail, so) =>
                         so.Status != null
-                        && (so.Status == 1 || so.Status == 4)
+                        && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                         && so.OrderTime != null
                         && so.OrderTime >= rangeStart
                         && so.OrderTime < rangeEnd

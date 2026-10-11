@@ -76,6 +76,7 @@ namespace BlazorApp.Api.Services
                 SupplierName = supplierName,
                 IsDomestic = isDomestic,
                 OrderGuid = data.OrderGuid,
+                OrderStatus = data.OrderStatus,
                 TotalAmount = data.ActualAmount,
                 TotalQuantity = (int)data.Quantity,
             });
@@ -86,7 +87,9 @@ namespace BlazorApp.Api.Services
             .GroupBy(stat => new { stat.Date, stat.BranchCode, stat.SupplierCode })
             .Select(group =>
             {
+                // 退款单只冲减金额/数量，不计订单数。
                 var orderCount = group
+                    .Where(x => !SalesOrderStatusRules.IsRefundOrder(x.OrderStatus))
                     .Select(x => x.OrderGuid)
                     .Where(orderGuid => !string.IsNullOrWhiteSpace(orderGuid))
                     .Distinct()
@@ -148,6 +151,7 @@ namespace BlazorApp.Api.Services
                 SupplierCode = supplierCode,
                 SupplierName = supplierName,
                 OrderGuid = data.OrderGuid,
+                OrderStatus = data.OrderStatus,
                 TotalAmount = data.ActualAmount,
                 TotalQuantity = (int)data.Quantity,
             });
@@ -158,7 +162,9 @@ namespace BlazorApp.Api.Services
             .GroupBy(stat => new { stat.Date, stat.BranchCode, stat.SupplierCode })
             .Select(group =>
             {
+                // 退款单只冲减金额/数量，不计订单数。
                 var orderCount = group
+                    .Where(x => !SalesOrderStatusRules.IsRefundOrder(x.OrderStatus))
                     .Select(x => x.OrderGuid)
                     .Where(orderGuid => !string.IsNullOrWhiteSpace(orderGuid))
                     .Distinct()
@@ -215,9 +221,10 @@ namespace BlazorApp.Api.Services
                 .LeftJoin<PosmProductSupplierMapping>(
                     (o, d, m) => d.ProductCode == m.ProductCode
                 )
+                // 金额、数量按净额并入退款单（Status=3，负数）；订单数只数 1/4。
                 .Where(o =>
                     o.Status != null
-                    && (o.Status == 1 || o.Status == 4)
+                    && SalesOrderStatusRules.NetSalesStatuses.Contains(o.Status)
                     && o.OrderTime != null
                     && o.OrderTime >= targetDate
                     && o.OrderTime < nextDate
@@ -266,6 +273,7 @@ namespace BlazorApp.Api.Services
                             BranchCode = o.BranchCode,
                             DeviceCode = o.DeviceCode,
                             OrderGuid = o.OrderGuid,
+                            OrderStatus = o.Status,
                             DetailSupplierCode = d.SupplierCode,
                             LocalSupplierCode = m.LocalSupplierCode,
                             ChinaSupplierCode = m.ChinaSupplierCode,
@@ -301,6 +309,7 @@ namespace BlazorApp.Api.Services
                     ),
                     DeviceCode = row.DeviceCode,
                     OrderGuid = row.OrderGuid,
+                    OrderStatus = row.OrderStatus,
                     DetailSupplierCode = row.DetailSupplierCode,
                     LocalSupplierCode = row.LocalSupplierCode,
                     ChinaSupplierCode = row.ChinaSupplierCode,

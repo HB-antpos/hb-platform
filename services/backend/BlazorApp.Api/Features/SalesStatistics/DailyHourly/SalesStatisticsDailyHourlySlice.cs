@@ -119,12 +119,13 @@ namespace BlazorApp.Api.Services
         var targetDate = date.Date;
         var nextDate = targetDate.AddDays(1);
 
+        // 金额与销量按净额统计：并入退款单（Status=3，负数），订单数与 SKU 数仍只数 1/4。
         var paymentSummary = await posmContext.Db.Queryable<PaymentDetail, SalesOrder>(
                 (pd, so) => pd.OrderGuid == so.OrderGuid
             )
             .Where((pd, so) =>
                 so.Status != null
-                && (so.Status == 1 || so.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                 && so.OrderTime != null
                 && so.OrderTime >= targetDate
                 && so.OrderTime < nextDate
@@ -141,7 +142,7 @@ namespace BlazorApp.Api.Services
             )
             .Where((d, so) =>
                 so.Status != null
-                && (so.Status == 1 || so.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                 && so.OrderTime != null
                 && so.OrderTime >= targetDate
                 && so.OrderTime < nextDate

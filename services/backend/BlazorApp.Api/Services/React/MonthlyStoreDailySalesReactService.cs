@@ -13,8 +13,9 @@ namespace BlazorApp.Api.Services.React;
 /// 月度日销售下载页的数据：某个月内每家分店逐日的营业额、刷卡、现金。
 ///
 /// 口径（与营业额日报一致，不另起炉灶）：
-/// - 营业额取 StoreSalesStatistic.TotalAmount。统计任务里这个值 = 对 Status 为 1/4 订单的 payment_detail.Amount 求和，
-///   所以按支付方式拆分后，刷卡 + 现金 + 其他（代金券等）恒等于营业额；退款支付是负数，自然按净额计入。
+/// - 营业额取 StoreSalesStatistic.TotalAmount。统计任务里这个值 = 对 Status 为 1/3/4 订单的 payment_detail.Amount 求和
+///   （3 是旧 POS 的退款单，支付为负数；见 <see cref="SalesOrderStatusRules"/>），
+///   所以按支付方式拆分后，刷卡 + 现金 + 其他（代金券等）恒等于营业额，且是扣掉退款的净额，与日结小票一致。
 /// - 刷卡/现金读 POSM：payment_detail 关联 sales_order，订单状态、OrderTime 墙钟日、分店解析（订单无分店时按设备注册表回填）
 ///   与统计任务逐项相同。
 /// - 2024-09-14 至 2026-04-30 的营业额还叠加了 HBSales 旧系统（没有支付方式），这些日子 POSM 合计小于营业额，
@@ -194,12 +195,13 @@ public sealed class MonthlyStoreDailySalesReactService : IMonthlyStoreDailySales
             return cached;
         }
 
-        // 与 UpdateDailyStatistics / 分店日统计同一过滤：已支付(1)与分期付(4)的订单，OrderTime 是门店墙钟时间，直接按日比较。
+        // 与 UpdateDailyStatistics / 分店日统计同一过滤：已支付(1)、退款单(3，负数支付)与分期付(4)的订单，
+        // 净额口径才能与营业额、日结小票对上；OrderTime 是门店墙钟时间，直接按日比较。
         var rows = await _posmContext.Db.Queryable<PaymentDetail, SalesOrder>(
                 (pd, so) => pd.OrderGuid == so.OrderGuid)
             .Where((pd, so) =>
                 so.Status != null
-                && (so.Status == 1 || so.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                 && so.OrderTime != null
                 && so.OrderTime >= monthStart
                 && so.OrderTime < endExclusive)

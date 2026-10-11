@@ -52,8 +52,11 @@ namespace BlazorApp.Api.Services
                 .LeftJoin<PosmProductSupplierMapping>(
                     (o, d, m) => d.ProductCode == m.ProductCode
                 )
+                // 金额、数量按净额并入退款单（Status=3，负数）；门店数、订单数只数 1/4。
                 .Where(o =>
-                    o.Status != null && (o.Status == 1 || o.Status == 4) && o.OrderTime != null
+                    o.Status != null
+                    && SalesOrderStatusRules.NetSalesStatuses.Contains(o.Status)
+                    && o.OrderTime != null
                 );
 
             // 使用半开区间过滤，避免不同数据库对 DateTime.Date 的翻译差异。
@@ -96,6 +99,7 @@ namespace BlazorApp.Api.Services
                             TotalAmount = d.ActualAmount,
                             Quantity = d.Quantity ?? 0m,
                             OrderGuid = o.OrderGuid,
+                            OrderStatus = o.Status,
                         }
                 )
                 .ToListAsync();
@@ -129,6 +133,7 @@ namespace BlazorApp.Api.Services
                     ),
                     x.Quantity,
                     x.OrderGuid,
+                    x.OrderStatus,
                 })
                 .ToList();
 
@@ -159,11 +164,14 @@ namespace BlazorApp.Api.Services
                     IsDomestic = false,
                     TotalAmount = g.Sum(x => x.TotalAmount),
                     TotalQuantity = (int)g.Sum(x => x.Quantity),
-                    StoreCount = g.Select(x => x.BranchCode)
+                    // 退款单只冲减金额/数量，不计门店数与订单数。
+                    StoreCount = g.Where(x => !SalesOrderStatusRules.IsRefundOrder(x.OrderStatus))
+                        .Select(x => x.BranchCode)
                         .Where(code => !string.IsNullOrWhiteSpace(code))
                         .Distinct()
                         .Count(),
-                    OrderCount = g.Select(x => x.OrderGuid)
+                    OrderCount = g.Where(x => !SalesOrderStatusRules.IsRefundOrder(x.OrderStatus))
+                        .Select(x => x.OrderGuid)
                         .Where(orderGuid => !string.IsNullOrWhiteSpace(orderGuid))
                         .Distinct()
                         .Count(),
@@ -185,11 +193,14 @@ namespace BlazorApp.Api.Services
                     IsDomestic = true,
                     TotalAmount = g.Sum(x => x.TotalAmount),
                     TotalQuantity = (int)g.Sum(x => x.Quantity),
-                    StoreCount = g.Select(x => x.BranchCode)
+                    // 退款单只冲减金额/数量，不计门店数与订单数。
+                    StoreCount = g.Where(x => !SalesOrderStatusRules.IsRefundOrder(x.OrderStatus))
+                        .Select(x => x.BranchCode)
                         .Where(code => !string.IsNullOrWhiteSpace(code))
                         .Distinct()
                         .Count(),
-                    OrderCount = g.Select(x => x.OrderGuid)
+                    OrderCount = g.Where(x => !SalesOrderStatusRules.IsRefundOrder(x.OrderStatus))
+                        .Select(x => x.OrderGuid)
                         .Where(orderGuid => !string.IsNullOrWhiteSpace(orderGuid))
                         .Distinct()
                         .Count(),

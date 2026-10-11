@@ -457,7 +457,7 @@ namespace BlazorApp.Api.Services
             rows.AddRange(await _posmContext.Db.Queryable<SalesOrder>()
                 .Where(order =>
                     order.Status != null
-                    && (order.Status == 1 || order.Status == 4)
+                    && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                     && order.OrderTime != null
                     && order.OrderTime >= start
                     && order.OrderTime < endExclusive
@@ -475,7 +475,7 @@ namespace BlazorApp.Api.Services
                 )
                 .Where((payment, order) =>
                     order.Status != null
-                    && (order.Status == 1 || order.Status == 4)
+                    && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                     && order.OrderTime != null
                     && order.OrderTime >= start
                     && order.OrderTime < endExclusive
@@ -493,7 +493,7 @@ namespace BlazorApp.Api.Services
                 )
                 .Where((detail, order) =>
                     order.Status != null
-                    && (order.Status == 1 || order.Status == 4)
+                    && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                     && order.OrderTime != null
                     && order.OrderTime >= start
                     && order.OrderTime < endExclusive

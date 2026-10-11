@@ -151,12 +151,13 @@ internal static class SalesStatisticsProductStoreDailySourceQueries
         Func<T, string?> orderGuidSelector,
         Func<T, decimal> detailAmountSelector)
     {
+        // 支付金额映射与明细来源同口径（含退款单），否则退款行会被分摊成 0 金额、负数量。
         var paymentRows = await posmContext.Db.Queryable<PaymentDetail, SalesOrder>(
                 (payment, order) => payment.OrderGuid == order.OrderGuid
             )
             .Where((payment, order) =>
                 order.Status != null
-                && (order.Status == 1 || order.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null
                 && order.OrderTime >= startDate
                 && order.OrderTime < endExclusive
@@ -403,11 +404,12 @@ internal static class SalesStatisticsProductStoreDailySourceQueries
                 UpdatedAt = order.UpdatedTime,
             })
             .ToListAsync();
+        // 订单行（订单数）只含 1/4；明细与支付按净额口径并入退款单（Status=3）。
         var detailRows = await posmContext.Db.Queryable<SalesOrder>()
             .LeftJoin<SalesOrderDetail>((order, detail) => order.OrderGuid == detail.OrderGuid)
             .Where(order =>
                 order.Status != null
-                && (order.Status == 1 || order.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null
                 && order.OrderTime >= targetDate
                 && order.OrderTime < nextDate)
@@ -415,6 +417,7 @@ internal static class SalesStatisticsProductStoreDailySourceQueries
             {
                 Date = order.OrderTime!.Value.Date,
                 OrderGuid = order.OrderGuid,
+                OrderStatus = order.Status,
                 DetailGuid = detail.OrderDetailGuid,
                 BranchCode = order.BranchCode,
                 DeviceCode = order.DeviceCode,
@@ -440,7 +443,7 @@ internal static class SalesStatisticsProductStoreDailySourceQueries
                 (payment, order) => payment.OrderGuid == order.OrderGuid)
             .Where((payment, order) =>
                 order.Status != null
-                && (order.Status == 1 || order.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null
                 && order.OrderTime >= targetDate
                 && order.OrderTime < nextDate)

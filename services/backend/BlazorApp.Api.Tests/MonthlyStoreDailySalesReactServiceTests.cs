@@ -45,6 +45,25 @@ public sealed class MonthlyStoreDailySalesReactServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task 旧POS退款单Status3的负数支付计入对应方式_与扣退款后的营业额对上()
+    {
+        await SeedFreshStatesAsync(new DateTime(2026, 9, 1), new DateTime(2026, 9, 1));
+        // 9-1：已支付单 现金100+刷卡200；旧 POS 的退款单是独立的 Status=3 订单，现金支付 -40.45。
+        // 营业额统计按净额（与日结小票一致）= 259.55；退款单不参与订单数，但其支付必须进现金列，三项才对得上。
+        await SeedOrderAsync("o1", new DateTime(2026, 9, 1, 9, 0, 0), "S1", null, 1, (Cash, 100m), (Card, 200m));
+        await SeedOrderAsync("o2", new DateTime(2026, 9, 1, 11, 38, 44), "S1", null, 3, (Cash, -40.45m));
+        await SeedStatAsync("2026-09-01", "S1", "分店一", 259.55m);
+
+        var result = await CreateService().GetMonthlyStoreDailySalesAsync("2026-09", null, false, default);
+
+        var day1 = Assert.Single(result.Stores).Days[0];
+        Assert.Equal(259.55m, day1.Revenue);
+        Assert.Equal(200m, day1.Card);
+        Assert.Equal(59.55m, day1.Cash);
+        Assert.Equal(0m, day1.Other);
+    }
+
+    [Fact]
     public async Task 刷卡现金其他与营业额逐日对上_退款按净额_非支付状态订单不计入()
     {
         await SeedFreshStatesAsync(new DateTime(2026, 9, 1), new DateTime(2026, 9, 3));

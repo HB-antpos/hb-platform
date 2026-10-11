@@ -19,7 +19,7 @@ internal sealed class BatchProductSalesDiscountSnapshotSourceReader(
     ISqlSugarClient hbSalesDb,
     ILogger<BatchProductSalesDiscountSnapshotSourceReader>? logger = null)
 {
-    private const string DiscountClassificationRuleVersion = "batch-product-sales-discount-v2";
+    private const string DiscountClassificationRuleVersion = "batch-product-sales-discount-v3";
     private readonly ISqlSugarClient _catalogDb = catalogDb;
     private readonly ISqlSugarClient _posmDb = posmDb;
     private readonly ISqlSugarClient _hbSalesDb = hbSalesDb;
@@ -190,6 +190,7 @@ internal sealed class BatchProductSalesDiscountSnapshotSourceReader(
         var nextDay = day.AddDays(1);
 
         // 同一 SqlSugar client 的连接未必启用 MARS，来源读取按连接顺序执行以保持可用性。
+        // 明细/折扣明细/支付与商品日统计同口径并入退款单（Status=3）；订单行与补充退货保持 1/4。
         var orders = await _posmDb.Queryable<SalesOrder>()
             .Where(order => order.Status != null && (order.Status == 1 || order.Status == 4)
                 && order.OrderTime != null && order.OrderTime >= day && order.OrderTime < nextDay)
@@ -206,7 +207,8 @@ internal sealed class BatchProductSalesDiscountSnapshotSourceReader(
             }).ToListAsync(token);
         var details = await _posmDb.Queryable<SalesOrder>()
             .LeftJoin<SalesOrderDetail>((order, detail) => order.OrderGuid == detail.OrderGuid)
-            .Where((order, detail) => order.Status != null && (order.Status == 1 || order.Status == 4)
+            .Where((order, detail) => order.Status != null
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null && order.OrderTime >= day && order.OrderTime < nextDay)
             .Select((order, detail) => new ProductStoreDailySourceRow
             {
@@ -232,7 +234,8 @@ internal sealed class BatchProductSalesDiscountSnapshotSourceReader(
             }).ToListAsync(token);
         var discountDetails = await _posmDb.Queryable<SalesOrder>()
             .InnerJoin<SalesOrderDetail>((order, detail) => order.OrderGuid == detail.OrderGuid)
-            .Where((order, detail) => order.Status != null && (order.Status == 1 || order.Status == 4)
+            .Where((order, detail) => order.Status != null
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null && order.OrderTime >= day && order.OrderTime < nextDay)
             .Select((order, detail) => new DiscountSemanticRow
             {
@@ -244,7 +247,8 @@ internal sealed class BatchProductSalesDiscountSnapshotSourceReader(
         token.ThrowIfCancellationRequested();
         var payments = await _posmDb.Queryable<PaymentDetail, SalesOrder>(
                 (payment, order) => payment.OrderGuid == order.OrderGuid)
-            .Where((payment, order) => order.Status != null && (order.Status == 1 || order.Status == 4)
+            .Where((payment, order) => order.Status != null
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null && order.OrderTime >= day && order.OrderTime < nextDay)
             .Select((payment, order) => new StoreStatisticPaymentRow
             {

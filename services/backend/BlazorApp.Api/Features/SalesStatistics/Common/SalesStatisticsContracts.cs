@@ -154,6 +154,11 @@ internal class ProductStoreDailySourceRow
     public bool IsHBSalesSource { get; set; }
     public DateTime Date { get; set; }
     public string? OrderGuid { get; set; }
+    /// <summary>
+    /// POSM 来源行所属订单的 Status；HBSales 与补充退货行为空。
+    /// 退款单（Status=3）的负数明细计入金额/数量，但不能让商品的订单数多算一单。
+    /// </summary>
+    public int? OrderStatus { get; set; }
     public string? HBSalesOrderNumber { get; set; }
     public string? DetailGuid { get; set; }
     /// <summary>HBSales 明细原始 ID；物化后再格式化为签名键，避免 SQL Server 生成 nvarchar(max) CAST。</summary>
@@ -292,6 +297,8 @@ internal class StoreSupplierSourceRow
     public string? BranchCode { get; set; }
     public string? DeviceCode { get; set; }
     public string? OrderGuid { get; set; }
+    /// <summary>订单 Status；退款单（3）只冲减金额/数量，不计订单数。</summary>
+    public int? OrderStatus { get; set; }
     public string? DetailSupplierCode { get; set; }
     public string? LocalSupplierCode { get; set; }
     public string? ChinaSupplierCode { get; set; }
@@ -307,6 +314,8 @@ internal class StoreSupplierResolvedRow
     public string SupplierName { get; set; } = string.Empty;
     public bool IsDomestic { get; set; }
     public string? OrderGuid { get; set; }
+    /// <summary>订单 Status；退款单（3）只冲减金额/数量，不计订单数。</summary>
+    public int? OrderStatus { get; set; }
     public decimal TotalAmount { get; set; }
     public int TotalQuantity { get; set; }
 }

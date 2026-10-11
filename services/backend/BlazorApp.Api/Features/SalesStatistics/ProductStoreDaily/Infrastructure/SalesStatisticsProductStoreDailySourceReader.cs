@@ -117,10 +117,11 @@ internal sealed class SalesStatisticsProductStoreDailySourceReader
                 targetDate.ToString("yyyy-MM-dd"));
         }
 
+        // 明细按净额口径并入退款单（Status=3，负数行）；退款单自带负数明细，补充退货不再重复冲减。
         var detailRows = preloadedPosmSnapshot?.DetailRows.ToList() ?? await posmContext.Db.Queryable<SalesOrder>()
             .LeftJoin<SalesOrderDetail>((order, detail) => order.OrderGuid == detail.OrderGuid)
             .Where(order => order.Status != null
-                && (order.Status == 1 || order.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(order.Status)
                 && order.OrderTime != null
                 && order.OrderTime >= targetDate
                 && order.OrderTime < nextDate)
@@ -128,6 +129,7 @@ internal sealed class SalesStatisticsProductStoreDailySourceReader
             {
                 Date = order.OrderTime!.Value.Date,
                 OrderGuid = order.OrderGuid,
+                OrderStatus = order.Status,
                 DetailGuid = detail.OrderDetailGuid,
                 BranchCode = order.BranchCode,
                 DeviceCode = order.DeviceCode,

@@ -158,7 +158,13 @@ internal sealed class SalesStatisticsProductStoreDailyBuilder
             Barcode = group.Select(row => row.Row.Barcode).FirstOrDefault(barcode => !string.IsNullOrWhiteSpace(barcode)),
             TotalQuantity = quantity,
             TotalAmount = totalAmount,
-            OrderCount = group.Select(row => row.Row.OrderGuid).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().Count(),
+            // 退款单（Status=3）的负数明细只冲减金额/数量，不算该商品多出一单。
+            OrderCount = group
+                .Where(row => !SalesOrderStatusRules.IsRefundOrder(row.Row.OrderStatus))
+                .Select(row => row.Row.OrderGuid)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct()
+                .Count(),
             UnitCostSnapshot = unitCost,
             TotalCost = totalCost,
             GrossProfit = grossProfit,

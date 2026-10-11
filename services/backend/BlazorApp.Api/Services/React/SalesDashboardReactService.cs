@@ -5430,7 +5430,7 @@ namespace BlazorApp.Api.Services.React
                     var sourceRows = await _posmContext.Db.Queryable<SalesOrder>()
                         .Where(so =>
                             so.Status != null
-                            && (so.Status == 1 || so.Status == 4)
+                            && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                             && so.OrderTime != null
                             && so.OrderTime >= startDate.Date
                             && so.OrderTime < nextDate
