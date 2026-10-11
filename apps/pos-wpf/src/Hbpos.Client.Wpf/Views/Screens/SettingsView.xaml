@@ -910,6 +910,8 @@
 
                         <TabControl Grid.Row="2"
                                     Grid.ColumnSpan="3"
+                                    AutomationProperties.AutomationId="PaymentProviderTabs"
+                                    SelectedIndex="{Binding SelectedProviderTabIndex, Mode=TwoWay}"
                                     Background="Transparent"
                                     BorderThickness="0"
                                     Padding="0">
