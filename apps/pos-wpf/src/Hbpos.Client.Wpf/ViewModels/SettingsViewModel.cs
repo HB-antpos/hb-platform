@@ -213,6 +213,12 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private LinklySettingsMode _selectedLinklyMode = LinklySettingsMode.LocalIp;
 
+    /// <summary>
+    /// 支付终端设置页的服务商标签：0 = Square，1 = Linkly。进入页面时默认跳到当前启用的刷卡方式，之后可手动切换查看另一家。
+    /// </summary>
+    [ObservableProperty]
+    private int _selectedProviderTabIndex;
+
     [ObservableProperty]
     private string _linklyPairCodeText = string.Empty;
 
@@ -837,6 +843,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             LogSquareSettings(
                 $"load settings succeeded squareEnvironment={SelectedSquareEnvironment} linklyEnvironment={SelectedLinklyEnvironment} hasSavedToken={HasSavedSquareToken} savedLocationId={LogValue(_savedSquareLocationId)} savedDeviceId={LogValue(_savedSquareDeviceId)}");
             RaiseActivePaymentProviderProperties();
+            // 默认显示当前启用的刷卡方式对应的标签（Linkly 的云端/本地连接方式由页内单选按钮显示，已按已保存的模式选中）。
+            SelectedProviderTabIndex = _loadedConfiguration.Processor == CardProcessorKind.Linkly ? 1 : 0;
             SetStatus("settings.status.loaded");
         }, operationName: "load settings");
         await LoadCatalogSyncStatusAsync();

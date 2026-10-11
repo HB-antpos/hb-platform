@@ -1,4 +1,4 @@
-﻿using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
@@ -1371,6 +1371,41 @@ public sealed class SettingsViewModelTests
         Assert.Null(service.SavedConfiguration);
     }
 
+    [Theory]
+    [InlineData(CardProcessorKind.Square, 0)]
+    [InlineData(CardProcessorKind.Linkly, 1)]
+    public async Task LoadAsync_selects_provider_tab_of_the_active_card_processor(
+        CardProcessorKind processor,
+        int expectedTabIndex)
+    {
+        var service = new FakeCardTerminalSetupService(CardTerminalConfiguration.Default with
+        {
+            Processor = processor
+        });
+        var viewModel = new SettingsViewModel(service);
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal(expectedTabIndex, viewModel.SelectedProviderTabIndex);
+    }
+
+    [Fact]
+    public async Task Provider_tab_can_be_switched_manually_after_load()
+    {
+        var service = new FakeCardTerminalSetupService(CardTerminalConfiguration.Default with
+        {
+            Processor = CardProcessorKind.Square
+        });
+        var viewModel = new SettingsViewModel(service);
+        await viewModel.LoadAsync();
+
+        var activeProviderBefore = viewModel.ActivePaymentProviderText;
+        viewModel.SelectedProviderTabIndex = 1;
+
+        // 手动切到另一家只是查看，不会改变已启用的刷卡方式。
+        Assert.Equal(1, viewModel.SelectedProviderTabIndex);
+        Assert.Equal(activeProviderBefore, viewModel.ActivePaymentProviderText);
+    }
     [Fact]
     public async Task LoadAsync_requires_fresh_linkly_test_even_when_linkly_was_previously_enabled()
     {
