@@ -6007,6 +6007,61 @@ public sealed class MainViewModelScannerTests
         Assert.Equal(0, viewModel.PosTerminal.CardRecoveryOpenCount);
     }
     [Fact]
+    public async Task Card_recovery_center_check_status_result_recomputes_home_badge_from_local_queue()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("1042", "SKU-BADGE-REFRESH", "930BADGEREFRESH"));
+        var cashierContext = new CashierSessionContext();
+        var cashierSession = CreateCashierSession(
+            Permissions.PosTerminal.Sales.AddItem,
+            Permissions.PosTerminal.Payment.View);
+        var authorization = new GrantingOperationAuthorizationService();
+        var item = new CardRecoveryQueueItem(
+            CardProcessorKind.Linkly,
+            Guid.Parse("40000000-0000-0000-0000-0000000000A1"),
+            "Sale",
+            0.49m,
+            "1042",
+            "POS-01",
+            "OLD-CASHIER",
+            "Sandbox",
+            "Recovering",
+            DateTimeOffset.UtcNow.AddMinutes(-2),
+            DateTimeOffset.UtcNow.AddMinutes(-1));
+        var openItems = new List<CardRecoveryQueueItem> { item };
+        var recovery = new FakeCardPaymentRecoveryService
+        {
+            OpenItems = [item],
+            ListOpenHandler = (_, _) => Task.FromResult<IReadOnlyList<CardRecoveryQueueItem>>(openItems.ToArray())
+        };
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cardPaymentRecoveryService: recovery,
+            cart: cart,
+            cashierSessionContext: cashierContext,
+            cashierLoginService: new FakeCashierLoginService(cashierSession),
+            operationAuthorizationService: authorization,
+            enforceCashierPermissions: true);
+        var startupOptions = new AppStartupOptions([], false, null, null);
+        await viewModel.InitializeAsync(startupOptions);
+        await viewModel.ContinueStartupAfterShownAsync(startupOptions);
+        viewModel.CashierBarcodeInput = "CARD-RECOVERY-CASHIER";
+        await viewModel.LoginCashierCommand.ExecuteAsync(null);
+        await viewModel.PosTerminal!.OpenCardRecoveryCenterCommand.ExecuteAsync(null);
+        var center = Assert.IsType<CardRecoveryCenterViewModel>(viewModel.CurrentScreen);
+        Assert.Equal(1, viewModel.PosTerminal.CardRecoveryOpenCount);
+
+        // 主管在中心里确认后，本地队列已清空；但中心回写给主页的数字停在旧值（例如渠道刷新不完整时不回写）。
+        // 「立即检查状态」收尾后队列已空，但这条路径不经过「返回」，中心回写的数字也没更新。
+        openItems.Clear();
+        await InvokeHandleCardRecoveryCenterResultAsync(
+            viewModel,
+            item.Key,
+            new CardPaymentRecoveryResult(CardPaymentRecoveryOutcome.Unknown, "The bank confirmed that no payment was made."));
+
+        Assert.Equal(0, viewModel.PosTerminal.CardRecoveryOpenCount);
+    }
+    [Fact]
     public async Task Card_recovery_center_back_from_unknown_payment_restores_same_locked_payment()
     {
         var cart = new PosCartService();
@@ -6199,7 +6254,8 @@ public sealed class MainViewModelScannerTests
         recoveryStarted = true;
         await center.RecoverCommand.ExecuteAsync(null);
 
-        Assert.Equal(listCallCountBeforeRecovery + 1, recovery.ListOpenCallCount);
+        // 恢复后列表重读 1 次 + 主页角标按本地队列全量重算 1 次。
+        Assert.Equal(listCallCountBeforeRecovery + 2, recovery.ListOpenCallCount);
         Assert.Same(viewModel.PosTerminal, viewModel.CurrentScreen);
         Assert.Same(payment, viewModel.CashPayment);
         Assert.Equal(
@@ -6327,7 +6383,8 @@ public sealed class MainViewModelScannerTests
             viewModel.PropertyChanged -= ThrowFromPropertyChanged;
         }
 
-        Assert.Equal(listCallCountBeforeRecovery + 1, recovery.ListOpenCallCount);
+        // 恢复后列表重读 1 次 + 主页角标按本地队列全量重算 1 次。
+        Assert.Equal(listCallCountBeforeRecovery + 2, recovery.ListOpenCallCount);
         Assert.Equal(1, recovery.TargetedRecoverCallCount);
         Assert.False(cardSession.HasUnknownResult);
         Assert.Null(payment.CreateCardPaymentHandoffRequest().RecoveryAttemptKey);
@@ -6535,7 +6592,8 @@ public sealed class MainViewModelScannerTests
                 viewModel.PropertyChanged -= ThrowFromWarningNotification;
             }
 
-            Assert.Equal(listCallCountBeforeRecovery + 1, recovery.ListOpenCallCount);
+            // 恢复后列表重读 1 次 + 主页角标按本地队列全量重算 1 次。
+        Assert.Equal(listCallCountBeforeRecovery + 2, recovery.ListOpenCallCount);
             Assert.Equal(1, recovery.TargetedRecoverCallCount);
             Assert.False(cardSession.HasUnknownResult);
             Assert.Null(payment.CreateCardPaymentHandoffRequest().RecoveryAttemptKey);
@@ -6648,7 +6706,8 @@ public sealed class MainViewModelScannerTests
                 () => center.RecoverCommand.ExecuteAsync(null));
 
             Assert.Null(commandException);
-            Assert.Equal(listCallCountBeforeRecovery + 1, recovery.ListOpenCallCount);
+            // 恢复后列表重读 1 次 + 主页角标按本地队列全量重算 1 次。
+        Assert.Equal(listCallCountBeforeRecovery + 2, recovery.ListOpenCallCount);
             Assert.Equal(1, recovery.TargetedRecoverCallCount);
             Assert.Equal(
                 "Payment completed. Do not take payment again; a follow-up action needs attention.",
@@ -6755,7 +6814,8 @@ public sealed class MainViewModelScannerTests
         syncQueue.ThrowOnRead = true;
         recoveryStarted = true;
         await center.ConfirmPaidCommand.ExecuteAsync(null);
-        Assert.Equal(listCallCountBeforeRecovery + 1, recovery.ListOpenCallCount);
+        // 恢复后列表重读 1 次 + 主页角标按本地队列全量重算 1 次。
+        Assert.Equal(listCallCountBeforeRecovery + 2, recovery.ListOpenCallCount);
 
         Assert.Same(center, viewModel.CurrentScreen);
         Assert.Equal(
