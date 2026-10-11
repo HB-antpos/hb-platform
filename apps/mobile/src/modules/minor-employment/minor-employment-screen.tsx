@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { TFunction } from "i18next";
 import { ScrollView, Share, StyleSheet, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -15,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { getStoredApiHost } from "@/shared/api/config";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { useAuthStore } from "@/store/auth-store";
 import { minorEmploymentApi } from "./api";
 import {
@@ -34,20 +36,21 @@ const days = [
   "Friday",
   "Saturday",
 ];
-const returnFieldLabels: Record<string, string> = {
-  parentContact: "家长联系方式",
-  parent: "家长联系方式",
-  emergencyContact: "备用紧急联系人",
-  backupContact: "备用紧急联系人",
-  schoolCalendar: "学校日历",
-  education: "教育状态",
-  workAvailability: "工作时段",
-  rosterEvidence: "排班证明",
-  otherWork: "其他工作",
-  commutePlan: "通勤与接送",
-  formData: "CE1 表单",
-};
+const returnFieldKeys = [
+  "parentContact",
+  "parent",
+  "emergencyContact",
+  "backupContact",
+  "schoolCalendar",
+  "education",
+  "workAvailability",
+  "rosterEvidence",
+  "otherWork",
+  "commutePlan",
+  "formData",
+];
 export function MinorEmploymentScreen() {
+  const { t } = useAppTranslation("minorEmployment");
   const router = useRouter();
   const qc = useQueryClient();
   const actor = useAuthStore(
@@ -89,7 +92,7 @@ export function MinorEmploymentScreen() {
     }, [refetch]),
   );
   const serverMessage = (error: unknown) =>
-    error instanceof Error ? error.message : "服务器未能完成操作，请刷新后重试";
+    error instanceof Error ? error.message : t("form.errors.server");
   const save = useMutation({
     mutationFn: () =>
       minorEmploymentApi.saveDraft({
@@ -103,7 +106,8 @@ export function MinorEmploymentScreen() {
       setDirty(false);
       setError("");
     },
-    onError: (error) => setError(`保存失败：${serverMessage(error)}`),
+    onError: (error) =>
+      setError(t("form.errors.saveFailed", { message: serverMessage(error) })),
   });
   // 发起签署：先保存草稿（等待签署中再发起会生成新版本、旧链接作废），再由后端发邮件或返回转发链接。
   const invite = useMutation({
@@ -140,7 +144,10 @@ export function MinorEmploymentScreen() {
       await qc.invalidateQueries({ queryKey: key });
       await query.refetch();
     },
-    onError: (error) => setError(`发起签署失败：${serverMessage(error)}`),
+    onError: (error) =>
+      setError(
+        t("form.errors.inviteFailed", { message: serverMessage(error) }),
+      ),
   });
   const submit = useMutation({
     mutationFn: () => minorEmploymentApi.submit(query.data?.version ?? 0),
@@ -148,7 +155,10 @@ export function MinorEmploymentScreen() {
       qc.setQueryData(key, x);
       setError("");
     },
-    onError: (error) => setError(`提交失败：${serverMessage(error)}`),
+    onError: (error) =>
+      setError(
+        t("form.errors.submitFailed", { message: serverMessage(error) }),
+      ),
   });
   const validateBeforeInvite = () => {
     if (
@@ -157,7 +167,7 @@ export function MinorEmploymentScreen() {
       !draft.emergencyContact.fullName.trim() ||
       !draft.emergencyContact.phone.trim()
     ) {
-      setError("签署前必须填写家长电话、邮箱及一名完整备用联系人");
+      setError(t("form.errors.inviteRequired"));
       return false;
     }
     return true;
@@ -183,9 +193,9 @@ export function MinorEmploymentScreen() {
     return (
       <SafeAreaView style={styles.center}>
         <EmptyState
-          title="无法加载资料"
+          title={t("form.loadFailed")}
           primaryAction={{
-            label: "重试",
+            label: t("common.retry"),
             icon: "refresh",
             onPress: () => void query.refetch(),
           }}
@@ -215,39 +225,38 @@ export function MinorEmploymentScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Button icon="arrow-left" onPress={() => router.back()}>
-          返回
+          {t("common.back")}
         </Button>
-        <Text variant="headlineSmall">未成年用工合规</Text>
-        <Text style={styles.muted}>
-          完整填写 CE1 / NSW
-          企业同意书资料。草稿可保存不完整，家长电话和邮箱在签署前必填。
-        </Text>
+        <Text variant="headlineSmall">{t("title")}</Text>
+        <Text style={styles.muted}>{t("form.intro")}</Text>
         {(requests.data ?? []).map((request) => (
           <Surface key={request.id} style={styles.requestBanner} elevation={0}>
             <Text variant="titleSmall" style={styles.requestTitle}>
               {request.requestedByName
-                ? `${request.requestedByName} 请你填写未成年用工资料`
-                : "店长请你填写未成年用工资料"}
+                ? t("form.requestFrom", { name: request.requestedByName })
+                : t("form.requestFromManager")}
             </Text>
             {request.note ? <Text>{request.note}</Text> : null}
-            <Text style={styles.muted}>
-              填好后发送签署邮件给监护人，监护人签字后再提交 HR
-              审核，这条待办会自动完成。
-            </Text>
+            <Text style={styles.muted}>{t("form.requestHint")}</Text>
           </Surface>
         ))}
         {query.data ? (
           <View style={styles.rowBetween}>
             <Text style={styles.status}>
-              状态：{query.data.status} · 版本 {query.data.version}
+              {t("form.statusLine", {
+                status: t(`statuses.${query.data.status}`, {
+                  defaultValue: query.data.status,
+                }),
+                version: query.data.version,
+              })}
             </Text>
             <Button compact icon="refresh" onPress={() => void query.refetch()}>
-              刷新状态
+              {t("form.refreshStatus")}
             </Button>
           </View>
         ) : null}
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">适用州与身份</Text>
+          <Text variant="titleMedium">{t("form.sections.stateIdentity")}</Text>
           <SegmentedButtons
             value={draft.state}
             onValueChange={(v) => set({ state: v as "NSW" | "QLD" })}
@@ -257,19 +266,21 @@ export function MinorEmploymentScreen() {
             ]}
           />
           {field(
-            "出生日期",
+            t("form.fields.dateOfBirth"),
             draft.dateOfBirth,
             (v) => set({ dateOfBirth: v }),
             { placeholder: "YYYY-MM-DD" },
           )}
-          {field("学校名称", draft.schoolName, (v) => set({ schoolName: v }))}
-          {field("年级", draft.schoolYear, (v) => set({ schoolYear: v }))}
-          {field(
-            "教育状态（在校/培训/完成 Year 10 等）",
-            draft.educationStatus,
-            (v) => set({ educationStatus: v }),
+          {field(t("form.fields.schoolName"), draft.schoolName, (v) =>
+            set({ schoolName: v }),
           )}
-          <Text>是否完成 Year 10</Text>
+          {field(t("form.fields.schoolYear"), draft.schoolYear, (v) =>
+            set({ schoolYear: v }),
+          )}
+          {field(t("form.fields.educationStatus"), draft.educationStatus, (v) =>
+            set({ educationStatus: v }),
+          )}
+          <Text>{t("form.fields.completedYear10")}</Text>
           <SegmentedButtons
             value={
               draft.completedYear10 === true
@@ -285,12 +296,16 @@ export function MinorEmploymentScreen() {
               })
             }
             buttons={[
-              { value: "yes", label: "是", disabled: locked },
-              { value: "no", label: "否", disabled: locked },
-              { value: "unknown", label: "待确认", disabled: locked },
+              { value: "yes", label: t("options.yes"), disabled: locked },
+              { value: "no", label: t("options.no"), disabled: locked },
+              {
+                value: "unknown",
+                label: t("options.unknown"),
+                disabled: locked,
+              },
             ]}
           />
-          <Text>是否必须继续注册入学</Text>
+          <Text>{t("form.fields.requiredToBeEnrolled")}</Text>
           <SegmentedButtons
             value={
               draft.requiredToBeEnrolled === true
@@ -306,108 +321,129 @@ export function MinorEmploymentScreen() {
               })
             }
             buttons={[
-              { value: "yes", label: "是", disabled: locked },
-              { value: "no", label: "否", disabled: locked },
-              { value: "unknown", label: "待确认", disabled: locked },
+              { value: "yes", label: t("options.yes"), disabled: locked },
+              { value: "no", label: t("options.no"), disabled: locked },
+              {
+                value: "unknown",
+                label: t("options.unknown"),
+                disabled: locked,
+              },
             ]}
           />
           {field(
-            "教育参与结束日",
+            t("form.fields.participationEndDate"),
             draft.participationEndDate,
             (v) => set({ participationEndDate: v }),
             { placeholder: "YYYY-MM-DD" },
           )}
         </Surface>
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">孩子与家长 / 监护人</Text>
-          {field("孩子名", draft.formData.childGivenName, (v) =>
-            set({ formData: { ...draft.formData, childGivenName: v } }),
+          <Text variant="titleMedium">{t("form.sections.childGuardian")}</Text>
+          {field(
+            t("form.fields.childGivenName"),
+            draft.formData.childGivenName,
+            (v) => set({ formData: { ...draft.formData, childGivenName: v } }),
           )}
-          {field("孩子姓", draft.formData.childFamilyName, (v) =>
-            set({ formData: { ...draft.formData, childFamilyName: v } }),
+          {field(
+            t("form.fields.childFamilyName"),
+            draft.formData.childFamilyName,
+            (v) => set({ formData: { ...draft.formData, childFamilyName: v } }),
           )}
-          {field("孩子住址", draft.childAddress, (v) =>
+          {field(t("form.fields.childAddress"), draft.childAddress, (v) =>
             set({ childAddress: v }),
           )}
           {field(
-            "孩子邮编",
+            t("form.fields.childPostcode"),
             draft.childPostcode,
             (v) => set({ childPostcode: v }),
             { keyboardType: "number-pad" },
           )}
-          {field("孩子电话", draft.childPhone, (v) => set({ childPhone: v }), {
-            keyboardType: "phone-pad",
-          })}
-          {field("家长姓名", draft.parentName, (v) => set({ parentName: v }))}
-          {field("家长关系", draft.parentRelationship, (v) =>
-            set({ parentRelationship: v }),
+          {field(
+            t("form.fields.childPhone"),
+            draft.childPhone,
+            (v) => set({ childPhone: v }),
+            {
+              keyboardType: "phone-pad",
+            },
+          )}
+          {field(t("form.fields.parentName"), draft.parentName, (v) =>
+            set({ parentName: v }),
           )}
           {field(
-            "家长电话（签署前必填）",
+            t("form.fields.parentRelationship"),
+            draft.parentRelationship,
+            (v) => set({ parentRelationship: v }),
+          )}
+          {field(
+            t("form.fields.parentPhone"),
             draft.parentPhone,
             (v) => set({ parentPhone: v }),
             { keyboardType: "phone-pad" },
           )}
           {field(
-            "家长邮箱（签署前必填）",
+            t("form.fields.parentEmail"),
             draft.parentEmail,
             (v) => set({ parentEmail: v }),
             { keyboardType: "email-address", autoCapitalize: "none" },
           )}
-          {field("家长地址", draft.parentAddress, (v) =>
+          {field(t("form.fields.parentAddress"), draft.parentAddress, (v) =>
             set({ parentAddress: v }),
           )}
           {field(
-            "家长邮编",
+            t("form.fields.parentPostcode"),
             draft.parentPostcode,
             (v) => set({ parentPostcode: v }),
             { keyboardType: "number-pad" },
           )}
         </Surface>
         <ContactCard
-          title="备用紧急联系人（必填）"
+          title={t("form.sections.emergencyContact")}
           value={draft.emergencyContact}
           disabled={locked}
           onChange={(v) => set({ emergencyContact: v })}
         />
         <ContactCard
-          title="额外联系人（选填）"
+          title={t("form.sections.extraContact")}
           value={draft.backupContact}
           disabled={locked}
           onChange={(v) => set({ backupContact: v })}
         />
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">学校联系人、每周上学日与日期</Text>
-          {field("教育提供者", draft.schoolCalendar.schoolProvider, (v) =>
-            setCalendar({ schoolProvider: v }),
-          )}
-          {field("学校时区", draft.schoolCalendar.timeZoneId, (v) =>
-            setCalendar({ timeZoneId: v }),
+          <Text variant="titleMedium">{t("form.sections.schoolCalendar")}</Text>
+          {field(
+            t("form.school.provider"),
+            draft.schoolCalendar.schoolProvider,
+            (v) => setCalendar({ schoolProvider: v }),
           )}
           {field(
-            "学校联系人姓名",
+            t("form.school.timeZone"),
+            draft.schoolCalendar.timeZoneId,
+            (v) => setCalendar({ timeZoneId: v }),
+          )}
+          {field(
+            t("form.school.contactName"),
             draft.schoolCalendar.schoolContactName,
             (v) => setCalendar({ schoolContactName: v }),
           )}
           {field(
-            "学校联系人职位",
+            t("form.school.contactPosition"),
             draft.schoolCalendar.schoolContactPosition,
             (v) => setCalendar({ schoolContactPosition: v }),
           )}
           {field(
-            "学校联系人电话",
+            t("form.school.contactPhone"),
             draft.schoolCalendar.schoolContactPhone,
             (v) => setCalendar({ schoolContactPhone: v }),
             { keyboardType: "phone-pad" },
           )}
           {field(
-            "学校联系人邮箱",
+            t("form.school.contactEmail"),
             draft.schoolCalendar.schoolContactEmail,
             (v) => setCalendar({ schoolContactEmail: v }),
             { keyboardType: "email-address" },
           )}
           {field(
-            "学校联系人手机",
+            t("form.school.contactMobile"),
             draft.schoolCalendar.schoolContactMobile,
             (v) => setCalendar({ schoolContactMobile: v }),
             { keyboardType: "phone-pad" },
@@ -436,18 +472,26 @@ export function MinorEmploymentScreen() {
                     })
                   }
                   buttons={[
-                    { value: "yes", label: `${d} 上学`, disabled: locked },
-                    { value: "no", label: "不适用", disabled: locked },
+                    {
+                      value: "yes",
+                      label: t("form.school.dayAttend", { day: d }),
+                      disabled: locked,
+                    },
+                    {
+                      value: "no",
+                      label: t("options.notApplicable"),
+                      disabled: locked,
+                    },
                   ]}
                 />
                 <Text style={styles.muted}>
-                  上课时长（根据开始和结束自动计算）：
+                  {t("form.school.classDuration")}
                   {old?.mustAttend
-                    ? durationLabel(old.startLocalTime, old.endLocalTime)
+                    ? durationLabel(old.startLocalTime, old.endLocalTime, t)
                     : "—"}
                 </Text>
                 {field(
-                  "开始",
+                  t("form.school.start"),
                   old?.startLocalTime ?? "",
                   (v) =>
                     setCalendar({
@@ -466,7 +510,7 @@ export function MinorEmploymentScreen() {
                   { placeholder: "09:00" },
                 )}
                 {field(
-                  "结束",
+                  t("form.school.end"),
                   old?.endLocalTime ?? "",
                   (v) =>
                     setCalendar({
@@ -489,14 +533,14 @@ export function MinorEmploymentScreen() {
           })}
           {draft.schoolCalendar.termRanges.map((x, i) => (
             <View key={`term-${i}`} style={styles.info}>
-              {field("学期开始", x.startDate, (v) =>
+              {field(t("form.school.termStart"), x.startDate, (v) =>
                 setCalendar({
                   termRanges: draft.schoolCalendar.termRanges.map((z, j) =>
                     j === i ? { ...z, startDate: v } : z,
                   ),
                 }),
               )}
-              {field("学期结束", x.endDate, (v) =>
+              {field(t("form.school.termEnd"), x.endDate, (v) =>
                 setCalendar({
                   termRanges: draft.schoolCalendar.termRanges.map((z, j) =>
                     j === i ? { ...z, endDate: v } : z,
@@ -512,7 +556,7 @@ export function MinorEmploymentScreen() {
                   })
                 }
               >
-                删除学期
+                {t("form.school.removeTerm")}
               </Button>
             </View>
           ))}
@@ -526,25 +570,25 @@ export function MinorEmploymentScreen() {
               })
             }
           >
-            添加学期区间
+            {t("form.school.addTerm")}
           </Button>
           {draft.schoolCalendar.holidays.map((x, i) => (
             <View key={`holiday-${i}`} style={styles.info}>
-              {field("学校假期开始", x.startDate, (v) =>
+              {field(t("form.school.holidayStart"), x.startDate, (v) =>
                 setCalendar({
                   holidays: draft.schoolCalendar.holidays.map((z, j) =>
                     j === i ? { ...z, startDate: v } : z,
                   ),
                 }),
               )}
-              {field("学校假期结束", x.endDate, (v) =>
+              {field(t("form.school.holidayEnd"), x.endDate, (v) =>
                 setCalendar({
                   holidays: draft.schoolCalendar.holidays.map((z, j) =>
                     j === i ? { ...z, endDate: v } : z,
                   ),
                 }),
               )}
-              {field("假期标签", x.label ?? "", (v) =>
+              {field(t("form.school.holidayLabel"), x.label ?? "", (v) =>
                 setCalendar({
                   holidays: draft.schoolCalendar.holidays.map((z, j) =>
                     j === i ? { ...z, label: v } : z,
@@ -560,7 +604,7 @@ export function MinorEmploymentScreen() {
                   })
                 }
               >
-                删除假期
+                {t("form.school.removeHoliday")}
               </Button>
             </View>
           ))}
@@ -574,11 +618,11 @@ export function MinorEmploymentScreen() {
               })
             }
           >
-            添加学校假期
+            {t("form.school.addHoliday")}
           </Button>
           {draft.schoolCalendar.pupilFreeDays.map((x, i) => (
             <View key={`pupil-${i}`} style={styles.info}>
-              {field("Pupil-free 日期", x.startDate, (v) =>
+              {field(t("form.school.pupilFreeDate"), x.startDate, (v) =>
                 setCalendar({
                   pupilFreeDays: draft.schoolCalendar.pupilFreeDays.map(
                     (z, j) =>
@@ -595,7 +639,7 @@ export function MinorEmploymentScreen() {
                   })
                 }
               >
-                删除日期
+                {t("form.school.removePupilFree")}
               </Button>
             </View>
           ))}
@@ -609,11 +653,11 @@ export function MinorEmploymentScreen() {
               })
             }
           >
-            添加 Pupil-free 日期
+            {t("form.school.addPupilFree")}
           </Button>
         </Surface>
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">灵活学习与教师核实</Text>
+          <Text variant="titleMedium">{t("form.sections.flexible")}</Text>
           <SegmentedButtons
             value={
               draft.formData.flexibleSchoolingQualifiedTeacher === true
@@ -632,56 +676,77 @@ export function MinorEmploymentScreen() {
               })
             }
             buttons={[
-              { value: "yes", label: "教师已确认", disabled: locked },
-              { value: "no", label: "尚未确认", disabled: locked },
-              { value: "unknown", label: "不适用", disabled: locked },
+              {
+                value: "yes",
+                label: t("form.flexible.confirmed"),
+                disabled: locked,
+              },
+              {
+                value: "no",
+                label: t("form.flexible.notConfirmed"),
+                disabled: locked,
+              },
+              {
+                value: "unknown",
+                label: t("options.notApplicable"),
+                disabled: locked,
+              },
             ]}
           />
-          <Text style={styles.muted}>
-            请由学校或灵活学习负责教师核对工作安排与上课安排。
-          </Text>
+          <Text style={styles.muted}>{t("form.flexible.note")}</Text>
         </Surface>
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">实际雇主（CE1）</Text>
-          {field("雇主法定名称", draft.formData.employerCompanyName, (v) =>
-            set({ formData: { ...draft.formData, employerCompanyName: v } }),
-          )}
-          {field("雇主交易名称", draft.formData.employerTradingName, (v) =>
-            set({ formData: { ...draft.formData, employerTradingName: v } }),
-          )}
-          {field("雇主地址", draft.formData.employerAddress, (v) =>
-            set({ formData: { ...draft.formData, employerAddress: v } }),
-          )}
-          {field("雇主邮编", draft.formData.employerPostcode, (v) =>
-            set({ formData: { ...draft.formData, employerPostcode: v } }),
+          <Text variant="titleMedium">{t("form.sections.employer")}</Text>
+          {field(
+            t("form.employer.companyName"),
+            draft.formData.employerCompanyName,
+            (v) =>
+              set({ formData: { ...draft.formData, employerCompanyName: v } }),
           )}
           {field(
-            "雇主电话",
+            t("form.employer.tradingName"),
+            draft.formData.employerTradingName,
+            (v) =>
+              set({ formData: { ...draft.formData, employerTradingName: v } }),
+          )}
+          {field(
+            t("form.employer.address"),
+            draft.formData.employerAddress,
+            (v) => set({ formData: { ...draft.formData, employerAddress: v } }),
+          )}
+          {field(
+            t("form.employer.postcode"),
+            draft.formData.employerPostcode,
+            (v) =>
+              set({ formData: { ...draft.formData, employerPostcode: v } }),
+          )}
+          {field(
+            t("form.employer.phone"),
             draft.formData.employerPhone,
             (v) => set({ formData: { ...draft.formData, employerPhone: v } }),
             { keyboardType: "phone-pad" },
           )}
           {field(
-            "雇主手机",
+            t("form.employer.mobile"),
             draft.formData.employerMobile,
             (v) => set({ formData: { ...draft.formData, employerMobile: v } }),
             { keyboardType: "phone-pad" },
           )}
           {field(
-            "雇主邮箱",
+            t("form.employer.email"),
             draft.formData.employerEmail,
             (v) => set({ formData: { ...draft.formData, employerEmail: v } }),
             { keyboardType: "email-address" },
           )}
         </Surface>
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">其他雇主与计划 / 实际工时</Text>
+          <Text variant="titleMedium">{t("form.sections.otherWork")}</Text>
           <SegmentedButtons
             value={draft.otherWork.hasOtherWork ? "yes" : "no"}
             onValueChange={(v) => setOther({ hasOtherWork: v === "yes" })}
             buttons={[
-              { value: "no", label: "无", disabled: locked },
-              { value: "yes", label: "有", disabled: locked },
+              { value: "no", label: t("options.haveNot"), disabled: locked },
+              { value: "yes", label: t("options.have"), disabled: locked },
             ]}
           />
           {draft.otherWork.employers.map((e, i) => (
@@ -707,19 +772,19 @@ export function MinorEmploymentScreen() {
                 })
               }
             >
-              添加其他雇主
+              {t("form.otherWork.addEmployer")}
             </Button>
           ) : null}
           {draft.otherWork.plannedIntervals.map((x, i) => (
             <Surface key={`planned-${i}`} style={styles.info} elevation={0}>
-              {field("计划开始（ISO，含时区偏移）", x.startUtc, (v) =>
+              {field(t("form.otherWork.plannedStart"), x.startUtc, (v) =>
                 setOther({
                   plannedIntervals: draft.otherWork.plannedIntervals.map(
                     (z, j) => (j === i ? { ...z, startUtc: v } : z),
                   ),
                 }),
               )}
-              {field("计划结束（ISO，含时区偏移）", x.endUtc, (v) =>
+              {field(t("form.otherWork.plannedEnd"), x.endUtc, (v) =>
                 setOther({
                   plannedIntervals: draft.otherWork.plannedIntervals.map(
                     (z, j) => (j === i ? { ...z, endUtc: v } : z),
@@ -727,7 +792,7 @@ export function MinorEmploymentScreen() {
                 }),
               )}
               {field(
-                "计划小时",
+                t("form.otherWork.plannedHours"),
                 String(x.hours),
                 (v) =>
                   setOther({
@@ -737,7 +802,7 @@ export function MinorEmploymentScreen() {
                   }),
                 { keyboardType: "decimal-pad" },
               )}
-              {field("来源", x.source, (v) =>
+              {field(t("form.otherWork.source"), x.source, (v) =>
                 setOther({
                   plannedIntervals: draft.otherWork.plannedIntervals.map(
                     (z, j) => (j === i ? { ...z, source: v } : z),
@@ -753,7 +818,7 @@ export function MinorEmploymentScreen() {
                   })
                 }
               >
-                删除计划区间
+                {t("form.otherWork.removePlanned")}
               </Button>
             </Surface>
           ))}
@@ -767,18 +832,18 @@ export function MinorEmploymentScreen() {
               })
             }
           >
-            添加计划区间
+            {t("form.otherWork.addPlanned")}
           </Button>
           {draft.otherWork.actualIntervals.map((x, i) => (
             <Surface key={`actual-${i}`} style={styles.info} elevation={0}>
-              {field("实际开始（ISO，含时区偏移）", x.startUtc, (v) =>
+              {field(t("form.otherWork.actualStart"), x.startUtc, (v) =>
                 setOther({
                   actualIntervals: draft.otherWork.actualIntervals.map(
                     (z, j) => (j === i ? { ...z, startUtc: v } : z),
                   ),
                 }),
               )}
-              {field("实际结束（ISO，含时区偏移）", x.endUtc, (v) =>
+              {field(t("form.otherWork.actualEnd"), x.endUtc, (v) =>
                 setOther({
                   actualIntervals: draft.otherWork.actualIntervals.map(
                     (z, j) => (j === i ? { ...z, endUtc: v } : z),
@@ -786,7 +851,7 @@ export function MinorEmploymentScreen() {
                 }),
               )}
               {field(
-                "实际小时",
+                t("form.otherWork.actualHours"),
                 String(x.hours),
                 (v) =>
                   setOther({
@@ -796,7 +861,7 @@ export function MinorEmploymentScreen() {
                   }),
                 { keyboardType: "decimal-pad" },
               )}
-              {field("来源", x.source, (v) =>
+              {field(t("form.otherWork.source"), x.source, (v) =>
                 setOther({
                   actualIntervals: draft.otherWork.actualIntervals.map(
                     (z, j) => (j === i ? { ...z, source: v } : z),
@@ -812,7 +877,7 @@ export function MinorEmploymentScreen() {
                   })
                 }
               >
-                删除实际区间
+                {t("form.otherWork.removeActual")}
               </Button>
             </Surface>
           ))}
@@ -826,37 +891,41 @@ export function MinorEmploymentScreen() {
               })
             }
           >
-            添加实际区间
+            {t("form.otherWork.addActual")}
           </Button>
         </Surface>
         <Surface style={styles.card} elevation={0}>
-          <Text variant="titleMedium">通勤、接送与最晚时间</Text>
+          <Text variant="titleMedium">{t("form.sections.commute")}</Text>
           {field(
-            "放学到门店分钟",
+            t("form.commute.afterSchoolToStore"),
             draft.commute.afterSchoolToStoreMinutes,
             (v) => setCommute({ afterSchoolToStoreMinutes: v }),
             { keyboardType: "number-pad" },
           )}
           {field(
-            "下班回家分钟",
+            t("form.commute.homeward"),
             draft.commute.homewardMinutes,
             (v) => setCommute({ homewardMinutes: v }),
             { keyboardType: "number-pad" },
           )}
-          {field("交通方式", draft.commute.transportMode, (v) =>
-            setCommute({ transportMode: v }),
-          )}
-          {field("接送人", draft.commute.pickupPerson, (v) =>
-            setCommute({ pickupPerson: v }),
+          {field(
+            t("form.commute.transportMode"),
+            draft.commute.transportMode,
+            (v) => setCommute({ transportMode: v }),
           )}
           {field(
-            "最晚可用交通时间",
+            t("form.commute.pickupPerson"),
+            draft.commute.pickupPerson,
+            (v) => setCommute({ pickupPerson: v }),
+          )}
+          {field(
+            t("form.commute.latestTransport"),
             draft.commute.latestTransportLocalTime,
             (v) => setCommute({ latestTransportLocalTime: v }),
             { placeholder: "21:30" },
           )}
           {field(
-            "本人最晚可工作时间",
+            t("form.commute.latestWorkEnd"),
             draft.commute.latestWorkEndLocalTime,
             (v) => setCommute({ latestWorkEndLocalTime: v }),
             { placeholder: "21:00" },
@@ -864,23 +933,26 @@ export function MinorEmploymentScreen() {
         </Surface>
         {query.data?.returnFields?.length ? (
           <Surface style={styles.info} elevation={0}>
-            <Text variant="titleMedium">待补充字段</Text>
+            <Text variant="titleMedium">{t("returnFields.heading")}</Text>
             <Text>
               {query.data.returnFields
-                .map(
-                  (x) =>
-                    returnFieldLabels[x] ??
-                    returnFieldLabels[x.replace(/^returnFields\./, "")] ??
-                    "待补充资料",
-                )
+                .map((x) => {
+                  const name = x.replace(/^returnFields\./, "");
+                  const known = returnFieldKeys.find(
+                    (k) => k === x || k === name,
+                  );
+                  return known
+                    ? t(`returnFields.${known}`)
+                    : t("returnFields.fallback");
+                })
                 .filter((x, i, a) => a.indexOf(x) === i)
-                .join("、")}
+                .join(t("common.listSeparator"))}
             </Text>
           </Surface>
         ) : null}
         {query.data?.reviewComment ? (
           <HelperText type="info">
-            HR 备注：{query.data.reviewComment}
+            {t("form.reviewComment", { comment: query.data.reviewComment })}
           </HelperText>
         ) : null}
         <Button
@@ -891,37 +963,40 @@ export function MinorEmploymentScreen() {
             locked || save.isPending || invite.isPending || submit.isPending
           }
         >
-          保存草稿
+          {t("form.actions.saveDraft")}
         </Button>
         {query.data?.parentSignedAt &&
         query.data.guardianAmendedFields.length ? (
           <Surface style={styles.requestBanner} elevation={0}>
             <Text variant="titleSmall" style={styles.requestTitle}>
-              监护人签署时修改了：
-              {describeGuardianAmendments(query.data.guardianAmendedFields)}
+              {t("form.amended.title", {
+                fields: describeGuardianAmendments(
+                  query.data.guardianAmendedFields,
+                  (key) => t(`guardianAmended.${key}`, { defaultValue: key }),
+                  t("common.listSeparator"),
+                ),
+              })}
             </Text>
-            <Text style={styles.muted}>
-              下面的资料已更新为监护人修改后的内容，不需要你重新填写。
-            </Text>
+            <Text style={styles.muted}>{t("form.amended.note")}</Text>
           </Surface>
         ) : null}
         {query.data?.status === "AwaitingParentSignature" ? (
           <Surface style={styles.info} elevation={0}>
-            <Text variant="titleMedium">等待监护人签署</Text>
+            <Text variant="titleMedium">{t("form.awaiting.title")}</Text>
             <Text>
               {query.data.guardianInviteChannel === "email"
                 ? query.data.guardianInviteEmailSentAt
-                  ? "签署邮件已发送到监护人邮箱。"
-                  : "签署邮件未能发出，请改为转发链接或重新发送。"
-                : "已生成转发链接，请发给监护人。"}
+                  ? t("form.awaiting.emailSent")
+                  : t("form.awaiting.emailFailed")
+                : t("form.awaiting.linkGenerated")}
             </Text>
             <Text style={styles.muted}>
               {query.data.guardianEmailVerifiedAt
-                ? "监护人已打开链接并通过邮箱验证码核验，等待签字。"
-                : "监护人打开链接后，需要输入发到其邮箱的验证码才能查看和签署。"}
+                ? t("form.awaiting.verified")
+                : t("form.awaiting.notVerified")}
             </Text>
             {!query.data.guardianLinkActive ? (
-              <HelperText type="error">链接已过期，请重新发送。</HelperText>
+              <HelperText type="error">{t("form.awaiting.expired")}</HelperText>
             ) : null}
           </Surface>
         ) : null}
@@ -943,8 +1018,8 @@ export function MinorEmploymentScreen() {
               disabled={invite.isPending || save.isPending}
             >
               {query.data?.status === "AwaitingParentSignature"
-                ? "重新发送签署邮件（旧链接作废）"
-                : "发送签署邮件给监护人"}
+                ? t("form.actions.resendEmail")
+                : t("form.actions.sendEmail")}
             </Button>
             <Button
               mode="text"
@@ -956,31 +1031,35 @@ export function MinorEmploymentScreen() {
               loading={invite.isPending && invite.variables === false}
               disabled={invite.isPending || save.isPending}
             >
-              监护人收不到邮件？改为转发链接
+              {t("form.actions.shareLink")}
             </Button>
             {inviteResult?.emailSent ? (
               <HelperText type="info">
-                {`签署邮件已发送到 ${inviteResult.maskedGuardianEmail ?? "监护人邮箱"}。请提醒监护人查收（可能在垃圾邮件里），打开链接后会再收到一封验证码邮件。`}
+                {t("form.invite.emailSent", {
+                  email:
+                    inviteResult.maskedGuardianEmail ??
+                    t("form.invite.guardianEmail"),
+                })}
               </HelperText>
             ) : null}
             {inviteResult &&
             !inviteResult.emailSent &&
             inviteResult.emailError ? (
               <HelperText type="error">
-                {`邮件发送失败：${inviteResult.emailError}。可以把下面的链接转发给监护人。`}
+                {t("form.invite.emailFailed", {
+                  error: inviteResult.emailError,
+                })}
               </HelperText>
             ) : null}
             {link ? (
               <>
                 <Text selectable>{link}</Text>
-                <Text style={styles.muted}>
-                  监护人打开后仍需输入发到其邮箱的验证码，只有监护人本人能完成签署。
-                </Text>
+                <Text style={styles.muted}>{t("form.invite.linkNote")}</Text>
                 <Button
                   icon="share-variant"
                   onPress={() => void Share.share({ message: link })}
                 >
-                  分享签署链接
+                  {t("form.actions.shareLinkButton")}
                 </Button>
               </>
             ) : null}
@@ -995,13 +1074,11 @@ export function MinorEmploymentScreen() {
               dirty || submit.isPending || save.isPending || invite.isPending
             }
           >
-            {dirty ? "请先保存新版本" : "提交 HR 审核"}
+            {dirty ? t("form.actions.saveFirst") : t("form.actions.submit")}
           </Button>
         ) : null}
         {error ? <HelperText type="error">{error}</HelperText> : null}
-        <Text style={styles.muted}>
-          合规提醒不阻断排班发布；审核通过后修改会生成新版本，旧版本保留只读历史。
-        </Text>
+        <Text style={styles.muted}>{t("form.footer")}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1017,6 +1094,7 @@ function ContactCard({
   disabled: boolean;
   onChange: (x: MinorContact) => void;
 }) {
+  const { t } = useAppTranslation("minorEmployment");
   const f = (
     label: keyof MinorContact,
     caption: string,
@@ -1034,13 +1112,13 @@ function ContactCard({
   return (
     <Surface style={styles.card} elevation={0}>
       <Text variant="titleMedium">{title}</Text>
-      {f("fullName", "姓名")}
-      {f("relationship", "关系")}
-      {f("phone", "电话", "phone-pad")}
-      {f("mobile", "手机", "phone-pad")}
-      {f("email", "邮箱", "email-address")}
-      {f("address", "地址")}
-      {f("postcode", "邮编")}
+      {f("fullName", t("form.contact.name"))}
+      {f("relationship", t("form.contact.relationship"))}
+      {f("phone", t("form.contact.phone"), "phone-pad")}
+      {f("mobile", t("form.contact.mobile"), "phone-pad")}
+      {f("email", t("form.contact.email"), "email-address")}
+      {f("address", t("form.contact.address"))}
+      {f("postcode", t("form.contact.postcode"))}
     </Surface>
   );
 }
@@ -1053,6 +1131,7 @@ function EmployerCard({
   disabled: boolean;
   onChange: (x: MinorOtherEmployer) => void;
 }) {
+  const { t } = useAppTranslation("minorEmployment");
   const f = (key: keyof MinorOtherEmployer, label: string) => (
     <TextInput
       mode="outlined"
@@ -1064,12 +1143,12 @@ function EmployerCard({
   );
   return (
     <Surface style={styles.info} elevation={0}>
-      {f("companyName", "公司法定名称")}
-      {f("tradingName", "交易名称")}
-      {f("address", "地址")}
-      {f("postcode", "邮编")}
-      {f("phone", "电话")}
-      {f("email", "邮箱")}
+      {f("companyName", t("form.otherEmployer.companyName"))}
+      {f("tradingName", t("form.otherEmployer.tradingName"))}
+      {f("address", t("form.contact.address"))}
+      {f("postcode", t("form.contact.postcode"))}
+      {f("phone", t("form.contact.phone"))}
+      {f("email", t("form.contact.email"))}
       {Object.keys({
         Sunday: 0,
         Monday: 0,
@@ -1082,7 +1161,7 @@ function EmployerCard({
         <TextInput
           key={d}
           mode="outlined"
-          label={`${d} 小时`}
+          label={t("form.otherEmployer.dayHours", { day: d })}
           value={employer.weeklyHours[d] ?? ""}
           onChangeText={(v) =>
             onChange({
@@ -1106,7 +1185,7 @@ const newEmployer = (): MinorOtherEmployer => ({
   email: "",
   weeklyHours: {},
 });
-function durationLabel(start: string, end: string) {
+function durationLabel(start: string, end: string, t: TFunction) {
   const toMinutes = (value: string) => {
     const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
     return match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
@@ -1115,7 +1194,9 @@ function durationLabel(start: string, end: string) {
     b = toMinutes(end);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return "—";
   const minutes = b - a;
-  return `${Math.floor(minutes / 60)}小时${minutes % 60 ? ` ${minutes % 60}分钟` : ""}`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? t("duration.hoursMinutes", { h, m }) : t("duration.hours", { h });
 }
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: HB_COLORS.background },

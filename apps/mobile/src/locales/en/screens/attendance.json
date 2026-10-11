@@ -789,5 +789,12 @@
     "message": "Your roster has {{count}} meal break(s) today with no break recorded.\n\nChoose \"Took break\" if you ate. Choose \"No break\" if you did not; it goes to your manager, and if approved {{minutes}} minutes are added back to your hours.",
     "taken": "Took break",
     "notTaken": "No break"
+  },
+  "minorCompliance": {
+    "scheduleSavedWithWarnings": "Schedule saved; {{count}} minor employment warning(s) kept",
+    "reminderLink": "Minor employment reminders",
+    "warningTitle": "Minor employment warnings ({{count}})",
+    "punchNotAffected": "This warning does not affect this punch; a supervisor can follow up in the reminders list.",
+    "cellWarning": "Minor employment warning"
   }
 }

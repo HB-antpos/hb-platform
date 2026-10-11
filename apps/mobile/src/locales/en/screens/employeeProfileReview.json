@@ -2,6 +2,7 @@
   "list": {
     "title": "Sensitive details review",
     "subtitle": "Review pending changes for employees in stores you manage.",
+    "minorEmployment": "Minor employment compliance",
     "loading": "Loading sensitive details review requests",
     "loadingMore": "Loading more review requests",
     "loadMoreFailed": "Retry loading more requests",

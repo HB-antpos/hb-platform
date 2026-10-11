@@ -305,14 +305,14 @@ export function TodayPunchCard({
               <Icon source="shield-alert-outline" size={16} color={HB_COLORS.warning} />
               <View style={styles.flexText}>
                 <Text variant="labelLarge" style={styles.bannerText}>
-                  未成年用工提醒（{today.minorCompliance.findings.length}）
+                  {t("minorCompliance.warningTitle", { count: today.minorCompliance.findings.length })}
                 </Text>
                 {today.minorCompliance.findings.slice(0, 2).map((finding) => (
                   <Text key={`${finding.ruleId}-${finding.workDate ?? "current"}`} variant="bodySmall" style={styles.bannerText}>
                     {finding.message}
                   </Text>
                 ))}
-                <Text variant="bodySmall" style={styles.muted}>提醒不影响本次打卡；主管可在提醒待办继续跟进。</Text>
+                <Text variant="bodySmall" style={styles.muted}>{t("minorCompliance.punchNotAffected")}</Text>
               </View>
             </View>
           ) : null}

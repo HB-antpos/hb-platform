@@ -894,7 +894,7 @@ export function ScheduleManagementCard({
           ) : null}
           {/* 未成年用工合规只提醒不拦截：格子里用小标记提示店长，详情在提醒待办里看。 */}
           {hasMinorFindings ? (
-            <Text style={styles.minorWarning} accessibilityLabel="未成年用工提醒">!</Text>
+            <Text style={styles.minorWarning} accessibilityLabel={t("minorCompliance.cellWarning")}>!</Text>
           ) : null}
         </View>
       );

@@ -147,4 +147,17 @@ assert.equal(
   describeGuardianAmendments(amendedProfile.guardianAmendedFields),
   "学校安排、备用联系人",
 );
+// 界面传入当前语言的分区名与分隔符；未知分区回落为原始键。
+assert.equal(
+  describeGuardianAmendments(
+    [...amendedProfile.guardianAmendedFields, "unknownSection"],
+    (key) =>
+      ({
+        schoolCalendar: "School arrangements",
+        backupContact: "Backup contact",
+      })[key],
+    ", ",
+  ),
+  "School arrangements, Backup contact, unknownSection",
+);
 console.log("minor employment API contract mapping passed");

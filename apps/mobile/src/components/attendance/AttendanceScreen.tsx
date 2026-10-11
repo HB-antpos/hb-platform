@@ -592,7 +592,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     onSuccess: async (schedule) => {
       await invalidateScheduleManagementData();
       const count = schedule.minorCompliance?.findings.length ?? 0;
-      showMessage(count > 0 ? `排班已保存；保留 ${count} 条未成年用工提醒` : t("messages.scheduleSaved"));
+      showMessage(count > 0 ? t("minorCompliance.scheduleSavedWithWarnings", { count }) : t("messages.scheduleSaved"));
     },
     onError: (error) =>
       showMessage(
@@ -635,7 +635,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     onSuccess: async (schedule) => {
       await invalidateScheduleManagementData();
       const count = schedule.minorCompliance?.findings.length ?? 0;
-      showMessage(count > 0 ? `排班已保存；保留 ${count} 条未成年用工提醒` : t("messages.scheduleSaved"));
+      showMessage(count > 0 ? t("minorCompliance.scheduleSavedWithWarnings", { count }) : t("messages.scheduleSaved"));
     },
     onError: (error) =>
       showMessage(
@@ -1774,7 +1774,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   )
                 }
               >
-                未成年用工提醒待办
+                {t("minorCompliance.reminderLink")}
               </Button>
             ) : null}
             {isManagementContentLoading ? (

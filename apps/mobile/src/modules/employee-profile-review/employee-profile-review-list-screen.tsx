@@ -203,7 +203,7 @@ export function EmployeeProfileReviewListScreen() {
           compact
           onPress={() => router.push("/(shell)/employee-minor-employment-review" as never)}
         >
-          未成年用工合规
+          {t("list.minorEmployment")}
         </Button>
         <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
           {t("list.subtitle")}

@@ -146,6 +146,7 @@ export const minorEmploymentApi = {
 
 export async function downloadMinorDocument(
   id: string,
+  dialogTitle = "查看未成年用工原件",
 ): Promise<() => Promise<void>> {
   const response = await apiClient.get(
     `${BASE}/hr/${encodeURIComponent(id)}/document/download`,
@@ -175,7 +176,7 @@ export async function downloadMinorDocument(
       throw new Error("SHARING_UNAVAILABLE");
     await Sharing.shareAsync(fileUri, {
       mimeType: "application/pdf",
-      dialogTitle: "查看未成年用工原件",
+      dialogTitle,
     });
     return () => FileSystem.deleteAsync(fileUri, { idempotent: true });
   } catch (error) {
