@@ -53,6 +53,7 @@ internal sealed class MainChildViewModelFactory
     private readonly IPaymentMethodSettingsService? _paymentMethodSettingsService;
     private readonly ICatalogSyncStatusService? _catalogSyncStatusService;
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
+    private readonly IMobileAppDownloadService? _mobileAppDownloadService;
 
     public MainChildViewModelFactory(
         IDeviceRegistrationWorkflowService deviceRegistrationWorkflowService,
@@ -97,7 +98,8 @@ internal sealed class MainChildViewModelFactory
         IRemoteMaintenanceService? remoteMaintenanceService = null,
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
         ICatalogSyncStatusService? catalogSyncStatusService = null,
-        IReceiptProfileSyncService? receiptProfileSyncService = null)
+        IReceiptProfileSyncService? receiptProfileSyncService = null,
+        IMobileAppDownloadService? mobileAppDownloadService = null)
     {
         _deviceRegistrationWorkflowService = deviceRegistrationWorkflowService;
         _receiptQueryService = receiptQueryService;
@@ -142,6 +144,7 @@ internal sealed class MainChildViewModelFactory
         _paymentMethodSettingsService = paymentMethodSettingsService;
         _catalogSyncStatusService = catalogSyncStatusService;
         _receiptProfileSyncService = receiptProfileSyncService;
+        _mobileAppDownloadService = mobileAppDownloadService;
     }
 
     public DeviceRegistrationViewModel CreateDeviceRegistrationViewModel(
@@ -455,7 +458,8 @@ internal sealed class MainChildViewModelFactory
             paymentMethodSettingsService: _paymentMethodSettingsService,
             catalogSyncStatusService: _catalogSyncStatusService,
             operationAuditLogger: _operationAuditLogger,
-            receiptProfileSyncService: _receiptProfileSyncService);
+            receiptProfileSyncService: _receiptProfileSyncService,
+            mobileAppDownloadService: _mobileAppDownloadService);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()

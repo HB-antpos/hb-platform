@@ -17,6 +17,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <converters:LocalizationKeyConverter x:Key="LocalizationKeyConverter" />
         <converters:InverseBooleanConverter x:Key="InverseBool" />
+        <converters:ReceiptQrCodeImageSourceConverter x:Key="QrCodeImage" />
 
         <Style x:Key="SettingsLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
@@ -369,6 +370,11 @@
                             <materialDesign:PackIcon Kind="RemoteDesktop" Width="18" Height="18" Margin="0,0,8,0" />
                             <TextBlock Text="{Binding RemoteMaintenanceTitleText}" FontWeight="Bold" />
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal"
+                                    Visibility="{Binding IsMobileAppDownloadSelected, Converter={StaticResource BoolToVis}}">
+                            <materialDesign:PackIcon Kind="CellphoneArrowDown" Width="18" Height="18" Margin="0,0,8,0" />
+                            <TextBlock Text="{loc:Loc settings.category.mobileAppDownload}" FontWeight="Bold" />
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>
@@ -469,6 +475,22 @@
                                                      Margin="0,0,12,0"
                                                      Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
                             <TextBlock Text="{Binding RemoteMaintenanceTitleText}"
+                                       FontWeight="Bold"
+                                       VerticalAlignment="Center"
+                                       Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Command="{Binding SelectMobileAppDownloadCommand}"
+                            Tag="{Binding IsMobileAppDownloadSelected}"
+                            Style="{StaticResource SettingsCategoryButtonStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="CellphoneArrowDown"
+                                                     Width="21"
+                                                     Height="21"
+                                                     Margin="0,0,12,0"
+                                                     Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                            <TextBlock Text="{loc:Loc settings.category.mobileAppDownload}"
                                        FontWeight="Bold"
                                        VerticalAlignment="Center"
                                        Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
@@ -3068,6 +3090,189 @@
                             </Grid>
                         </Border>
                     </Grid>
+
+                    <!-- 员工 App 下载：iPhone 与安卓（含 PDA）各一张二维码卡片，所有收银员可见。 -->
+                    <Grid Visibility="{Binding IsMobileAppDownloadSelected, Converter={StaticResource BoolToVis}}">
+                        <Grid DataContext="{Binding MobileAppDownload}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                                <TextBlock Text="{loc:Loc settings.category.mobileAppDownload}" Style="{StaticResource SettingsPageTitleStyle}" />
+                                <TextBlock Text="{loc:Loc mobileApp.description}" Style="{StaticResource SettingsPageDescriptionStyle}" />
+                            </StackPanel>
+
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- iPhone / iPad -->
+                                <Border Grid.Column="0" Style="{StaticResource SettingsActionCardStyle}" Padding="14">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,8">
+                                            <Border DockPanel.Dock="Left" Width="40" Height="40" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="9" Margin="0,0,12,0">
+                                                <materialDesign:PackIcon Kind="AppleIos" Width="24" Height="24" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{loc:Loc mobileApp.ios.title}" FontSize="15" FontWeight="Bold" />
+                                                <TextBlock Text="{loc:Loc mobileApp.ios.subtitle}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <Button Command="{Binding EnlargeCommand}"
+                                                CommandParameter="ios"
+                                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                                Width="200"
+                                                Height="200"
+                                                Padding="0"
+                                                Background="White"
+                                                HorizontalAlignment="Center"
+                                                AutomationProperties.Name="{loc:Loc mobileApp.enlarge.open}">
+                                            <Grid>
+                                                <Image Source="{Binding IosQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=190}"
+                                                       Stretch="None"
+                                                       RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                                <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource PosPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,6,6">
+                                                    <materialDesign:PackIcon Kind="MagnifyPlus" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                            </Grid>
+                                        </Button>
+                                        <TextBlock Text="{loc:Loc mobileApp.ios.hint}" FontSize="13" FontWeight="Bold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,4" />
+                                        <Grid Margin="0,0,0,8">
+                                            <TextBlock Text="{loc:Loc mobileApp.version}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Left" />
+                                            <TextBlock Text="{Binding IosVersionText}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                        </Grid>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="6" Padding="10,0" Height="40" Margin="0,0,8,0">
+                                                <TextBlock Text="{Binding IosLinkText}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </Border>
+                                            <Button Grid.Column="1" Command="{Binding CopyLinkCommand}" CommandParameter="ios" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="12,0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <materialDesign:PackIcon Kind="ContentCopy" Width="16" Height="16" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                    <TextBlock Text="{loc:Loc mobileApp.copyLink}" FontSize="12" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 安卓手机 / PDA：二维码指向总部匿名下载入口，扫码后直接下载最新安装包。 -->
+                                <Border Grid.Column="2" Style="{StaticResource SettingsActionCardStyle}" Padding="14">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,8">
+                                            <Border DockPanel.Dock="Left" Width="40" Height="40" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="9" Margin="0,0,12,0">
+                                                <materialDesign:PackIcon Kind="Android" Width="24" Height="24" Foreground="{DynamicResource PosSuccessBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <Border DockPanel.Dock="Right" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="11" Padding="9,3" VerticalAlignment="Center">
+                                                <TextBlock Text="{loc:Loc mobileApp.android.badge}" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{loc:Loc mobileApp.android.title}" FontSize="15" FontWeight="Bold" />
+                                                <TextBlock Text="{loc:Loc mobileApp.android.subtitle}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <Button Command="{Binding EnlargeCommand}"
+                                                CommandParameter="android"
+                                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                                Width="200"
+                                                Height="200"
+                                                Padding="0"
+                                                Background="White"
+                                                HorizontalAlignment="Center"
+                                                AutomationProperties.Name="{loc:Loc mobileApp.enlarge.open}"
+                                                Visibility="{Binding IsAndroidAvailable, Converter={StaticResource BoolToVis}}">
+                                            <Grid>
+                                                <Image Source="{Binding AndroidQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=190}"
+                                                       Stretch="None"
+                                                       RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                                <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource PosPrimaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,6,6">
+                                                    <materialDesign:PackIcon Kind="MagnifyPlus" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                            </Grid>
+                                        </Button>
+                                        <!-- 总部确认没有可下载的安卓包时，不显示会扫出 404 的二维码，改为说明与重试。 -->
+                                        <Border Width="200"
+                                                Height="200"
+                                                HorizontalAlignment="Center"
+                                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Visibility="{Binding IsAndroidNotPublished, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                <materialDesign:PackIcon Kind="PackageVariantClosed" Width="40" Height="40" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Center" />
+                                                <TextBlock Text="{loc:Loc mobileApp.android.notPublished}" FontSize="14" FontWeight="Bold" TextAlignment="Center" Margin="0,10,0,2" />
+                                                <TextBlock Text="{loc:Loc mobileApp.android.notPublishedHint}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" TextAlignment="Center" />
+                                                <Button Command="{Binding RefreshCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="16,0" HorizontalAlignment="Center" Margin="0,12,0,0">
+                                                    <TextBlock Text="{loc:Loc mobileApp.retry}" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Text="{loc:Loc mobileApp.android.hint}" FontSize="13" FontWeight="Bold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,4" />
+                                        <!-- 版本与包大小合成一行，让两张卡片在 1366×688 下一屏放得下。 -->
+                                        <Grid Margin="0,0,0,8">
+                                            <TextBlock Text="{loc:Loc mobileApp.version}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Left" />
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <TextBlock Text="{Binding AndroidVersionText}" FontSize="12" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding AndroidSizeText}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="10,0,0,0" Visibility="{Binding HasAndroidSize, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1" CornerRadius="6" Padding="10,0" Height="40" Margin="0,0,8,0">
+                                                <TextBlock Text="{Binding AndroidLinkText}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </Border>
+                                            <Button Grid.Column="1" Command="{Binding CopyLinkCommand}" CommandParameter="android" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="12,0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <materialDesign:PackIcon Kind="ContentCopy" Width="16" Height="16" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                    <TextBlock Text="{loc:Loc mobileApp.copyLink}" FontSize="12" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                        <Border Background="#FFFFF8E1" BorderBrush="#FFF5D98B" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,8,0,0">
+                                            <TextBlock Text="{loc:Loc mobileApp.android.note}" FontSize="11" Foreground="#FF6B4E00" TextWrapping="Wrap" />
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <!-- 底部状态：联网状态文案、复制反馈、刷新。 -->
+                            <Grid Grid.Row="2" Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <ProgressBar Width="60" Height="4" IsIndeterminate="True" Margin="0,0,10,0" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
+                                    <materialDesign:PackIcon Kind="AlertCircleOutline" Width="16" Height="16" Margin="0,0,6,0" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" Visibility="{Binding IsOfflineWarning, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                                    <TextBlock Text="{Binding CopyFeedbackText}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosSuccessBrush}" Margin="14,0,0,0" VerticalAlignment="Center" Visibility="{Binding HasCopyFeedback, Converter={StaticResource BoolToVis}}" AutomationProperties.LiveSetting="Polite" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Command="{Binding RefreshCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="40" Padding="14,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Refresh" Width="18" Height="18" Margin="0,0,6,0" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                        <TextBlock Text="{loc:Loc mobileApp.refresh}" FontWeight="Bold" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Grid>
                 </Grid>
             </ScrollViewer>
         </Grid>
@@ -3093,6 +3298,32 @@
                              IsIndeterminate="True"
                              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
             </StackPanel>
+        </Border>
+
+        <!-- 放大扫码：二维码放大到 360px，方便手机在收银台旁边远距离对准；点任意位置关闭。 -->
+        <Border Grid.RowSpan="3"
+                Background="#99000000"
+                Visibility="{Binding MobileAppDownload.IsEnlarged, Converter={StaticResource BoolToVis}}">
+            <Border.InputBindings>
+                <MouseBinding Gesture="LeftClick" Command="{Binding MobileAppDownload.CloseEnlargedCommand}" />
+            </Border.InputBindings>
+            <Border HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="24,18">
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding MobileAppDownload.EnlargedTitleText}" FontSize="18" FontWeight="Black" HorizontalAlignment="Center" Margin="0,0,0,12" />
+                    <Border Background="White" BorderBrush="{DynamicResource PosBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                        <Image Source="{Binding MobileAppDownload.EnlargedQrPayload, Converter={StaticResource QrCodeImage}, ConverterParameter=360}"
+                               Stretch="None"
+                               RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                    </Border>
+                    <TextBlock Text="{loc:Loc mobileApp.enlarge.hint}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" HorizontalAlignment="Center" Margin="0,12,0,0" />
+                </StackPanel>
+            </Border>
         </Border>
 
         <Border Grid.RowSpan="3"

@@ -16,9 +16,17 @@ public sealed class ReceiptQrCodeImageSourceConverter : IValueConverter
             return DependencyProperty.UnsetValue;
         }
 
+        // ConverterParameter 可指定二维码画布像素（例如放大扫码用更大的尺寸）；不给就沿用 260px。
+        var containerPixels = parameter switch
+        {
+            int pixels when pixels > 0 => pixels,
+            string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixels) && pixels > 0 => pixels,
+            _ => AttendanceQrPngRenderer.ContainerPixels
+        };
+
         try
         {
-            var rendered = AttendanceQrPngRenderer.Render(payload);
+            var rendered = AttendanceQrPngRenderer.Render(payload, containerPixels);
             using var stream = new MemoryStream(rendered.PngBytes);
             var image = new BitmapImage();
             image.BeginInit();

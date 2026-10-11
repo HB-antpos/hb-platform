@@ -19,7 +19,8 @@ public enum SettingsCategory
     PaymentTerminal,
     ReceiptPrinter,
     DeviceRegistration,
-    RemoteMaintenance
+    RemoteMaintenance,
+    MobileAppDownload
 }
 
 public enum LinklySettingsMode
@@ -310,7 +311,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IOperationAuditLogger? operationAuditLogger = null,
-        IReceiptProfileSyncService? receiptProfileSyncService = null)
+        IReceiptProfileSyncService? receiptProfileSyncService = null,
+        IMobileAppDownloadService? mobileAppDownloadService = null)
     {
         _setupService = setupService;
         _receiptProfileSyncService = receiptProfileSyncService;
@@ -400,6 +402,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SelectReceiptPrinterCommand = new AsyncRelayCommand(() => SelectCategoryAsync(SettingsCategory.ReceiptPrinter, Permissions.PosTerminal.Settings.ReceiptPrinter));
         SelectDeviceRegistrationCommand = new AsyncRelayCommand(() => SelectCategoryAsync(SettingsCategory.DeviceRegistration, Permissions.PosTerminal.Settings.DeviceRegistration));
         SelectRemoteMaintenanceCommand = new AsyncRelayCommand(SelectRemoteMaintenanceAsync);
+        // 员工 App 下载页所有收银员都能看，不设权限码；没传服务时只显示固定链接的二维码。
+        MobileAppDownload = new MobileAppDownloadViewModel(mobileAppDownloadService, localization);
+        SelectMobileAppDownloadCommand = new AsyncRelayCommand(SelectMobileAppDownloadAsync);
         LoadCommand = new AsyncRelayCommand(LoadAsync);
         SavePaymentMethodsCommand = new AsyncRelayCommand(SavePaymentMethodsAsync, CanSavePaymentMethods);
         LoadLocationsCommand = new AsyncRelayCommand(LoadLocationsAsync, CanLoadLocations);
@@ -562,6 +567,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand SelectRemoteMaintenanceCommand { get; }
 
+    public IAsyncRelayCommand SelectMobileAppDownloadCommand { get; }
+
+    public MobileAppDownloadViewModel MobileAppDownload { get; }
+
     public IAsyncRelayCommand SaveReceiptPrinterCommand { get; }
 
     public IAsyncRelayCommand TestReceiptPrinterCommand { get; }
@@ -591,6 +600,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SettingsCategory.ReceiptPrinter => T("settings.subtitle.receiptPrinter"),
         SettingsCategory.DeviceRegistration => T("settings.subtitle.deviceRegistration"),
         SettingsCategory.RemoteMaintenance => RemoteMaintenanceTitleText,
+        SettingsCategory.MobileAppDownload => T("settings.subtitle.mobileAppDownload"),
         _ => T("settings.title")
     };
 
@@ -629,6 +639,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public bool IsDeviceRegistrationSelected => SelectedCategory == SettingsCategory.DeviceRegistration;
 
     public bool IsRemoteMaintenanceSelected => SelectedCategory == SettingsCategory.RemoteMaintenance;
+
+    public bool IsMobileAppDownloadSelected => SelectedCategory == SettingsCategory.MobileAppDownload;
 
     public bool IsRemoteMaintenanceConfigured => _remoteMaintenanceStatus?.IsConfigured == true;
 
@@ -2368,6 +2380,13 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         return !IsBusy && (!_enforcePermissions || _cashierSessionContext.CurrentSession is not null);
     }
 
+    private async Task SelectMobileAppDownloadAsync()
+    {
+        SelectedCategory = SettingsCategory.MobileAppDownload;
+        // 每次进入页面都重新向总部确认最新版本；二维码本身不等网络，先显示。
+        await MobileAppDownload.LoadAsync();
+    }
+
     private async Task SelectRemoteMaintenanceAsync()
     {
         SelectedCategory = SettingsCategory.RemoteMaintenance;
@@ -2615,6 +2634,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RemoteMaintenanceStatusText));
         OnPropertyChanged(nameof(RemoteMaintenanceDetailText));
         OnPropertyChanged(nameof(SquareTitleText));
+        MobileAppDownload.RaiseLocalizedProperties();
         OnPropertyChanged(nameof(RemoteMaintenanceProgressText));
         OnPropertyChanged(nameof(LinklyTitleText));
         RaiseActivePaymentProviderProperties();
@@ -2661,6 +2681,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsReceiptPrinterSelected));
         OnPropertyChanged(nameof(IsDeviceRegistrationSelected));
         OnPropertyChanged(nameof(IsRemoteMaintenanceSelected));
+        OnPropertyChanged(nameof(IsMobileAppDownloadSelected));
     }
 
     private async Task LoadReceiptPrinterSettingsAsync()

@@ -450,4 +450,31 @@
   <data name="settings.receiptPrinter.storeInfo.help" xml:space="preserve"><value>打印在每张小票顶部。</value></data>
   <data name="settings.receiptPrinter.terms.title" xml:space="preserve"><value>小票条款</value></data>
   <data name="settings.receiptPrinter.terms.subtitle" xml:space="preserve"><value>打印在小票底部。</value></data>
+  <data name="settings.category.mobileAppDownload" xml:space="preserve"><value>员工 App 下载</value></data>
+  <data name="settings.subtitle.mobileAppDownload" xml:space="preserve"><value>员工 App 下载</value></data>
+  <data name="mobileApp.description" xml:space="preserve"><value>供员工使用。用手机相机扫描二维码安装；PDA 使用安卓版。点二维码可放大。</value></data>
+  <data name="mobileApp.ios.title" xml:space="preserve"><value>iPhone / iPad</value></data>
+  <data name="mobileApp.ios.subtitle" xml:space="preserve"><value>App Store</value></data>
+  <data name="mobileApp.ios.hint" xml:space="preserve"><value>用相机扫码，打开 App Store</value></data>
+  <data name="mobileApp.android.title" xml:space="preserve"><value>安卓手机 / PDA</value></data>
+  <data name="mobileApp.android.subtitle" xml:space="preserve"><value>安装包 APK</value></data>
+  <data name="mobileApp.android.badge" xml:space="preserve"><value>PDA 扫这张</value></data>
+  <data name="mobileApp.android.hint" xml:space="preserve"><value>扫码后直接下载安装包</value></data>
+  <data name="mobileApp.android.note" xml:space="preserve"><value>首次安装需在手机或 PDA 上允许“安装未知应用”</value></data>
+  <data name="mobileApp.android.versionFormat" xml:space="preserve"><value>{0}（构建 {1}）</value></data>
+  <data name="mobileApp.android.sizeFormat" xml:space="preserve"><value>约 {0} MB</value></data>
+  <data name="mobileApp.android.notPublished" xml:space="preserve"><value>暂无可下载的安装包</value></data>
+  <data name="mobileApp.android.notPublishedHint" xml:space="preserve"><value>请联系总部发布后再试</value></data>
+  <data name="mobileApp.version" xml:space="preserve"><value>最新版本</value></data>
+  <data name="mobileApp.versionUnknown" xml:space="preserve"><value>—</value></data>
+  <data name="mobileApp.copyLink" xml:space="preserve"><value>复制链接</value></data>
+  <data name="mobileApp.copied" xml:space="preserve"><value>链接已复制</value></data>
+  <data name="mobileApp.copyFailed" xml:space="preserve"><value>复制失败，请重试</value></data>
+  <data name="mobileApp.refresh" xml:space="preserve"><value>刷新</value></data>
+  <data name="mobileApp.retry" xml:space="preserve"><value>重试</value></data>
+  <data name="mobileApp.status.loading" xml:space="preserve"><value>正在获取最新版本…</value></data>
+  <data name="mobileApp.status.latest" xml:space="preserve"><value>已是最新 · 进入页面时自动刷新</value></data>
+  <data name="mobileApp.status.offline" xml:space="preserve"><value>无法连接总部：二维码仍可正常扫码，版本信息暂不可用</value></data>
+  <data name="mobileApp.enlarge.hint" xml:space="preserve"><value>点任意位置关闭 · 放大后更容易扫</value></data>
+  <data name="mobileApp.enlarge.open" xml:space="preserve"><value>放大二维码</value></data>
 </root>

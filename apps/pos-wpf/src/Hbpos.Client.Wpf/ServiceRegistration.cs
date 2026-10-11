@@ -265,6 +265,22 @@ public static class ServiceRegistration
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        // 员工 App 下载页访问的是总部公网上的匿名接口（版本信息），不是 POS API：
+        // 不挂 API 地址切换与设备授权处理器；地址可用 MobileAppDownload:CenterBaseUrl 覆盖，默认生产域名。
+        services.AddHttpClient<IMobileAppDownloadService, MobileAppDownloadService>((sp, client) =>
+        {
+            var configured = sp.GetService<IConfiguration>()?["MobileAppDownload:CenterBaseUrl"]?.Trim();
+            if (!string.IsNullOrEmpty(configured) && !configured.EndsWith('/'))
+            {
+                configured += "/";
+            }
+
+            client.BaseAddress = Uri.TryCreate(configured, UriKind.Absolute, out var configuredUri)
+                && configuredUri.Scheme == Uri.UriSchemeHttps
+                    ? configuredUri
+                    : new Uri(MobileAppDownloadService.DefaultCenterBaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
         services.AddHttpClient<IConnectivityApiClient, ConnectivityApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
@@ -693,7 +709,8 @@ public static class ServiceRegistration
                 remoteMaintenanceService: sp.GetRequiredService<IRemoteMaintenanceService>(),
                 paymentMethodSettingsService: sp.GetRequiredService<IPaymentMethodSettingsService>(),
                 catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>(),
-                receiptProfileSyncService: sp.GetRequiredService<IReceiptProfileSyncService>());
+                receiptProfileSyncService: sp.GetRequiredService<IReceiptProfileSyncService>(),
+                mobileAppDownloadService: sp.GetRequiredService<IMobileAppDownloadService>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),
