@@ -527,6 +527,15 @@ public sealed class ConfiguredCardTerminalClient :
     /// </summary>
     internal TimeSpan SquareApprovedSettleGrace { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// 取消请求被 Square 受理（CANCEL_REQUESTED）后，等终端确认「已取消」的最长时间与查询间隔。
+    /// 生产日志：收银员取消时结账已 IN_PROGRESS，取消接口只返回 CANCEL_REQUESTED，终端通常一两秒内才变 CANCELED；
+    /// 不等就会把一次成功的取消记成结果未知并进异常中心。窗口耗尽仍按未知处理，不会误判为未扣款。
+    /// </summary>
+    internal TimeSpan SquareCancelConfirmWindow { get; init; } = TimeSpan.FromSeconds(15);
+
+    internal TimeSpan SquareCancelConfirmInterval { get; init; } = TimeSpan.FromSeconds(1);
+
     private const string SquareTimedOutStatusKey = "payment.card.squareTimedOut";
     private const string SquareTerminalOfflineStatusKey = "payment.card.squareTerminalOffline";
     private const string SquareTerminalNotPickedUpStatusKey = "payment.card.squareTerminalNotPickedUp";
@@ -2040,7 +2049,11 @@ public sealed class ConfiguredCardTerminalClient :
                 checkoutId,
                 allowRefresh,
                 cleanupCts.Token);
-            return new SquareCleanupResult(ShouldDismiss: true, Status: dismissStatus ?? cancelResult.Status);
+            var cleanupStatus = await ConfirmSquareCancelAsync(
+                settings,
+                checkoutId,
+                dismissStatus ?? cancelResult.Status);
+            return new SquareCleanupResult(ShouldDismiss: true, Status: cleanupStatus);
         }
         else
         {
@@ -2048,6 +2061,62 @@ public sealed class ConfiguredCardTerminalClient :
         }
 
         return cancelResult;
+    }
+
+    /// <summary>
+    /// 取消已受理但结账还没到终态时，短时间轮询原结账，直到变成 CANCELED / FAILED / COMPLETED。
+    /// 只有明确的 CANCELED / FAILED 才会被调用方当作取消成功；COMPLETED（顾客已付款）、窗口耗尽、查询失败都保持原状态，
+    /// 由调用方按结果未知交给异常中心。
+    /// </summary>
+    private async Task<string?> ConfirmSquareCancelAsync(
+        CardTerminalSettings settings,
+        string checkoutId,
+        string? lastStatus)
+    {
+        if (IsSquareTerminalStatusFinal(lastStatus))
+        {
+            return lastStatus;
+        }
+
+        var status = lastStatus;
+        using var windowCts = new CancellationTokenSource(SquareCancelConfirmWindow);
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(SquareCancelConfirmInterval, windowCts.Token);
+                using var response = await SendSquareApiAsync(
+                    HttpMethod.Get,
+                    $"api/v1/square/checkouts/{Uri.EscapeDataString(checkoutId)}?environment={Uri.EscapeDataString(settings.Environment.ToString())}",
+                    body: null,
+                    windowCts.Token);
+                var body = await ReadResponseBodyAsync(response, windowCts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    LogSquare($"cancel confirm poll failed checkoutId={checkoutId} http={(int)response.StatusCode}");
+                    return status;
+                }
+
+                var current = ReadSquareCheckoutStatusResponse(body);
+                if (!string.Equals(current.CheckoutId, checkoutId, StringComparison.Ordinal))
+                {
+                    LogSquare($"cancel confirm identity mismatch expected={checkoutId} actual={LogValue(current.CheckoutId)}");
+                    return status;
+                }
+
+                status = current.Status ?? status;
+                LogSquare($"cancel confirm poll checkoutId={checkoutId} status={LogValue(status)}");
+                if (IsSquareTerminalStatusFinal(status))
+                {
+                    return status;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            LogSquare($"cancel confirm unresolved checkoutId={checkoutId} status={LogValue(status)} reason={ex.GetType().Name}");
+            return status;
+        }
     }
 
     private async Task<SquareCleanupResult> CancelSquareCheckoutBestEffortAsync(
