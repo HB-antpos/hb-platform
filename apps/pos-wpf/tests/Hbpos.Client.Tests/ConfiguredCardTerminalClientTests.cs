@@ -2117,6 +2117,119 @@ public sealed class ConfiguredCardTerminalClientTests
     }
 
     [Fact]
+    public async Task AuthorizeAsync_manual_cancel_is_definitive_when_square_confirms_canceled_after_cancel_requested()
+    {
+        // 生产日志：收银员取消时结账已 IN_PROGRESS，取消接口只回 CANCEL_REQUESTED，终端稍后才变 CANCELED。
+        // 取消成功不能因为「没等到确认」被记成结果未知而进异常中心。
+        var getStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelPosted = false;
+        var postCancelGets = 0;
+        var handler = new StubHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            if (request.Method == HttpMethod.Post &&
+                request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal))
+            {
+                cancelPosted = true;
+                return JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "CANCEL_REQUESTED" } }""");
+            }
+
+            if (request.Method == HttpMethod.Post &&
+                request.RequestUri!.AbsolutePath.EndsWith("/dismiss", StringComparison.Ordinal))
+            {
+                return JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "CANCEL_REQUESTED" } }""");
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                return JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "PENDING" } }""");
+            }
+
+            if (!cancelPosted)
+            {
+                getStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("Unreachable after cancellation.");
+            }
+
+            return Interlocked.Increment(ref postCancelGets) == 1
+                ? JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "CANCEL_REQUESTED" } }""")
+                : JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "CANCELED", "cancel_reason": "SELLER_CANCELED" } }""");
+        });
+        var contextAccessor = new SquarePaymentAttemptContextAccessor();
+        var repository = new RecordingFailureSquarePaymentAttemptRepository();
+        var client = new ConfiguredCardTerminalClient(
+            new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
+            CreateApiClient(handler),
+            squarePaymentAttemptContextAccessor: contextAccessor,
+            squarePaymentAttemptRepository: repository)
+        {
+            SquareCancelConfirmInterval = TimeSpan.FromMilliseconds(10),
+            SquareCancelConfirmWindow = TimeSpan.FromSeconds(5)
+        };
+        using var cancellationTokenSource = new CancellationTokenSource();
+        using var attemptScope = contextAccessor.Begin(
+            new SquarePaymentAttemptContext(Guid.Parse("99999999-aaaa-bbbb-cccc-777777777777"), "idem-cancel-confirm"));
+        var authorizeTask = client.AuthorizeAsync(10m, CreateSession(), cancellationTokenSource.Token);
+
+        await getStarted.Task;
+        cancellationTokenSource.Cancel();
+        var result = await authorizeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Approved);
+        Assert.False(result.ResultUnknown);
+        Assert.Equal("payment.card.squareCanceledSeller", result.StatusKey);
+        Assert.Equal(LocalSquarePaymentAttemptStatus.Canceled, repository.FailedStatus);
+        Assert.True(postCancelGets >= 2);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_manual_cancel_stays_unknown_when_square_never_confirms_cancel()
+    {
+        // 取消只被「受理」、窗口内始终没有终态：可能已扣款，保守按结果未知进异常中心。
+        var getStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelPosted = false;
+        var handler = new StubHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            if (request.Method == HttpMethod.Post &&
+                (request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal) ||
+                 request.RequestUri.AbsolutePath.EndsWith("/dismiss", StringComparison.Ordinal)))
+            {
+                cancelPosted = true;
+                return JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "CANCEL_REQUESTED" } }""");
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                return JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "PENDING" } }""");
+            }
+
+            if (!cancelPosted)
+            {
+                getStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("Unreachable after cancellation.");
+            }
+
+            return JsonResponse("""{ "checkout": { "id": "checkout-confirm", "status": "CANCEL_REQUESTED" } }""");
+        });
+        var client = new ConfiguredCardTerminalClient(
+            new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
+            CreateApiClient(handler))
+        {
+            SquareCancelConfirmInterval = TimeSpan.FromMilliseconds(10),
+            SquareCancelConfirmWindow = TimeSpan.FromMilliseconds(200)
+        };
+        using var cancellationTokenSource = new CancellationTokenSource();
+        var authorizeTask = client.AuthorizeAsync(10m, CreateSession(), cancellationTokenSource.Token);
+
+        await getStarted.Task;
+        cancellationTokenSource.Cancel();
+        var result = await authorizeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+    }
+    [Fact]
     public async Task AuthorizeAsync_cleans_up_square_checkout_on_timeout()
     {
         var requests = new List<HttpRequestMessage>();

@@ -3581,6 +3581,50 @@ public sealed class CashPaymentWorkflowServiceTests
     }
 
     [Fact]
+    public async Task Square_card_tender_does_not_rewrite_attempt_the_terminal_client_already_marked_canceled()
+    {
+        // 生产回归：Square 取消清理确认 CANCELED 后，终端客户端已把本地记录写成 Canceled；
+        // 工作流再写一次会被状态保护拒绝，成功的取消弹出「意外错误」。
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-398", "Square Cancel Tea", "930398", 10m));
+        var squareAttempts = new RecordingSquarePaymentAttemptRepository { RejectMarkFailedOnTerminalAttempt = true };
+        var contextAccessor = new SquarePaymentAttemptContextAccessor();
+        const string message = "Square checkout was canceled. Please start the card payment again.";
+        var terminal = new ObservingCardTerminalClient(
+            () => squareAttempts.MarkFailedAsync(
+                contextAccessor.Current!.AttemptGuid,
+                LocalSquarePaymentAttemptStatus.Canceled,
+                "CANCELED",
+                null,
+                null,
+                message,
+                DateTimeOffset.UtcNow).GetAwaiter().GetResult(),
+            new PaymentAuthorizationResult(false, null, message, StatusKey: "payment.card.squareCanceledSeller"));
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardTerminalSettingsProvider: new StaticCardTerminalSettingsProvider(CreateSquareSettings()),
+            squarePaymentAttemptRepository: squareAttempts,
+            squarePaymentAttemptContextAccessor: contextAccessor);
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+        var tenderResult = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            10m,
+            [],
+            "10.00",
+            cancellationToken: CancellationToken.None,
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.False(tenderResult.Succeeded);
+        Assert.Equal("payment.card.squareCanceledSeller", tenderResult.StatusKey);
+        var savedAttempt = Assert.Single(squareAttempts.Attempts);
+        Assert.Equal(LocalSquarePaymentAttemptStatus.Canceled, savedAttempt.Status);
+    }
+    [Fact]
     public async Task Card_tender_fallback_success_tells_supervisor_to_change_primary_mode_in_settings()
     {
         var cart = new PosCartService();
@@ -6852,6 +6896,9 @@ public sealed class CashPaymentWorkflowServiceTests
 
         public int MarkOrderCompletedCount { get; private set; }
 
+        // 与真实仓储的状态保护一致：对已经是终态的记录再写 MarkFailed 会被拒绝。
+        public bool RejectMarkFailedOnTerminalAttempt { get; init; }
+
         public int CompleteRecoveryFinalizationCount { get; private set; }
 
         public int TryMarkFailedCount { get; private set; }
@@ -7296,6 +7343,16 @@ public sealed class CashPaymentWorkflowServiceTests
             CancellationToken cancellationToken = default,
             string? cancelReason = null)
         {
+            if (RejectMarkFailedOnTerminalAttempt &&
+                Attempts.Single(attempt => attempt.AttemptGuid == attemptGuid).Status is
+                    LocalSquarePaymentAttemptStatus.Canceled or
+                    LocalSquarePaymentAttemptStatus.Failed or
+                    LocalSquarePaymentAttemptStatus.TimedOut or
+                    LocalSquarePaymentAttemptStatus.Abandoned)
+            {
+                throw new InvalidOperationException("支付 attempt 状态已变化，旧任务不得继续写入。");
+            }
+
             Update(attemptGuid, attempt => attempt with
             {
                 Status = status,
