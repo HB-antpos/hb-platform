@@ -75,7 +75,7 @@
         </Style>
 
         <Style x:Key="PaymentMethodTileStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
-            <Setter Property="MinHeight" Value="124" />
+            <Setter Property="MinHeight" Value="100" />
             <Setter Property="Padding" Value="8" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -90,7 +90,7 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="CashMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="MinHeight" Value="124" />
+            <Setter Property="MinHeight" Value="100" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsCashSelected}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
@@ -99,7 +99,7 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="CardMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="MinHeight" Value="124" />
+            <Setter Property="MinHeight" Value="100" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsCardSelected}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
@@ -108,7 +108,7 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="VoucherMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="MinHeight" Value="62" />
+            <Setter Property="MinHeight" Value="100" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsVoucherSelected}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
@@ -219,6 +219,7 @@
 
                     <Button Grid.Row="0"
                             Grid.Column="0"
+                            Grid.ColumnSpan="2"
                             Command="{Binding BackToPosCommand}"
                             Style="{StaticResource PosSecondaryButtonStyle}"
                             HorizontalAlignment="Stretch"
@@ -229,74 +230,6 @@
                             <TextBlock Text="{loc:Loc shell.backToPos}" FontWeight="Bold" FontSize="15" />
                         </StackPanel>
                     </Button>
-                    <ToggleButton Grid.Row="0"
-                                  Grid.Column="1"
-                                  AutomationProperties.AutomationId="InstallmentPaymentToggle"
-                                  AutomationProperties.Name="{Binding InstallmentMethodText}"
-                                  ToolTip="{loc:Loc payment.installment.switchHelp}"
-                                  ToolTipService.ShowOnDisabled="True"
-                                  IsChecked="{Binding IsInstallmentPaymentEnabled, Mode=TwoWay}"
-                                  HorizontalAlignment="Stretch"
-                                  MinHeight="44"
-                                  Margin="6,0,0,0">
-                        <ToggleButton.Style>
-                            <Style TargetType="ToggleButton" BasedOn="{StaticResource InstallmentMethodToggleStyle}">
-                                <Setter Property="Visibility" Value="Visible" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsInstallmentEntryVisible}" Value="False">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding IsInstallmentSwitchLocked}" Value="True">
-                                        <Setter Property="IsEnabled" Value="False" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ToggleButton.Style>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="4" />
-                                <ColumnDefinition Width="36" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0"
-                                       Text="{Binding InstallmentMethodText}"
-                                       VerticalAlignment="Center"
-                                       FontSize="13"
-                                       TextWrapping="Wrap"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource PosTextBrush}" />
-                            <Border Grid.Column="2"
-                                    Width="36"
-                                    Height="24"
-                                    CornerRadius="12"
-                                    VerticalAlignment="Center">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="Background" Value="{DynamicResource PosSurfaceStrongBrush}" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsInstallmentPaymentEnabled}" Value="True">
-                                                <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <Ellipse Width="18" Height="18" Fill="{DynamicResource PosSurfaceBrush}" VerticalAlignment="Center">
-                                    <Ellipse.Style>
-                                        <Style TargetType="Ellipse">
-                                            <Setter Property="HorizontalAlignment" Value="Left" />
-                                            <Setter Property="Margin" Value="3,0,0,0" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsInstallmentPaymentEnabled}" Value="True">
-                                                    <Setter Property="HorizontalAlignment" Value="Right" />
-                                                    <Setter Property="Margin" Value="0,0,3,0" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Ellipse.Style>
-                                </Ellipse>
-                            </Border>
-                        </Grid>
-                    </ToggleButton>
                     <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,14,0,0">
                         <Border Padding="8,3" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="4">
                             <TextBlock FontSize="10" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}">
@@ -508,15 +441,48 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="3*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,12,0">
                         <TextBlock Text="{Binding RemainingAmountText}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" TextWrapping="Wrap" />
-                        <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Height="62" HorizontalAlignment="Right">
-                            <TextBlock Text="{Binding RemainingAmount, StringFormat={}{0:C2}}" AutomationProperties.AutomationId="RemainingAmount" FontSize="52" FontWeight="Bold" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                        <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Height="72" HorizontalAlignment="Right">
+                            <TextBlock Text="{Binding RemainingAmount, StringFormat={}{0:C2}}" AutomationProperties.AutomationId="RemainingAmount" FontSize="60" FontWeight="Black" Foreground="{DynamicResource PosPrimaryTextBrush}" />
                         </Viewbox>
                     </StackPanel>
+                    <!-- 有找零时整块换成成功色，提醒收银员需要找钱；无找零时保持弱化。 -->
                     <Border Grid.Column="1" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1,0,0,0" Padding="14,0,0,0">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ChangeDue}" Value="0">
+                                        <Setter Property="Background" Value="Transparent" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel>
-                            <TextBlock Text="{Binding ChangeDueText}" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" />
-                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Height="62" HorizontalAlignment="Right">
-                                <TextBlock Text="{Binding ChangeDue, StringFormat={}{0:C2}}" FontSize="36" FontWeight="Bold" />
+                            <TextBlock Text="{Binding ChangeDueText}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ChangeDue}" Value="0">
+                                                <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Height="72" HorizontalAlignment="Right">
+                                <TextBlock Text="{Binding ChangeDue, StringFormat={}{0:C2}}" FontSize="40" FontWeight="Black">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ChangeDue}" Value="0">
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </Viewbox>
                         </StackPanel>
                     </Border>
@@ -566,9 +532,17 @@
                 </Button>
             </Grid>
 
-            <DockPanel Grid.Row="2" Margin="0" LastChildFill="True">
-                <DockPanel.Style>
-                    <Style TargetType="DockPanel">
+            <!-- 快捷现金 + 数字键盘共用 5 个等高行：有快捷现金时占第 1 行，键盘占其余 4 行；无快捷现金时键盘占满 5 行，底部不留空。 -->
+            <Grid Grid.Row="2" Margin="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="48" />
+                    <RowDefinition Height="*" MinHeight="48" />
+                    <RowDefinition Height="*" MinHeight="48" />
+                    <RowDefinition Height="*" MinHeight="48" />
+                    <RowDefinition Height="*" MinHeight="48" />
+                </Grid.RowDefinitions>
+                <Grid.Style>
+                    <Style TargetType="Grid">
                         <Setter Property="Visibility" Value="Visible" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsTenderEntryVisible}" Value="False">
@@ -576,9 +550,9 @@
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
-                </DockPanel.Style>
+                </Grid.Style>
 
-                <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding QuickCashAmounts}" AutomationProperties.AutomationId="PaymentQuickCashAmounts" Height="50" Margin="0,0,0,8">
+                <ItemsControl Grid.Row="0" ItemsSource="{Binding QuickCashAmounts}" AutomationProperties.AutomationId="PaymentQuickCashAmounts" Margin="0,0,0,5">
                     <ItemsControl.Style>
                         <Style TargetType="ItemsControl">
                             <Setter Property="Visibility" Value="Collapsed" />
@@ -610,6 +584,22 @@
                 </ItemsControl>
 
                 <UniformGrid Columns="3" Rows="4" Margin="0" AutomationProperties.AutomationId="PaymentNumberKeypad">
+                    <UniformGrid.Style>
+                        <Style TargetType="UniformGrid">
+                            <Setter Property="Grid.Row" Value="0" />
+                            <Setter Property="Grid.RowSpan" Value="5" />
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsCashSelected}" Value="True" />
+                                        <Condition Binding="{Binding IsQuickCashVisible}" Value="True" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Grid.Row" Value="1" />
+                                    <Setter Property="Grid.RowSpan" Value="4" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </UniformGrid.Style>
                     <Button Command="{Binding NumberInputCommand}" CommandParameter="1" Style="{StaticResource PosNumberButtonStyle}">
                         <TextBlock Text="1" Style="{StaticResource PaymentKeypadNumberTextStyle}" />
                     </Button>
@@ -652,7 +642,7 @@
                         <TextBlock Text="{loc:Loc Clear}" Style="{StaticResource PaymentKeypadFunctionTextStyle}" />
                     </Button>
                 </UniformGrid>
-            </DockPanel>
+            </Grid>
 
         </Grid>
 
@@ -753,41 +743,107 @@
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                     <Button  Command="{Binding SelectCashCommand}" AutomationProperties.AutomationId="AddCashTenderButton" Style="{StaticResource CashMethodButtonStyle}">
                         <Grid>
-                            <Grid.RowDefinitions><RowDefinition Height="52" /><RowDefinition Height="44" /></Grid.RowDefinitions>
-                            <Border Width="48" Height="48" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="24" HorizontalAlignment="Center">
-                                <materialDesign:PackIcon Kind="Cash" Width="28" Height="28" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="40" /></Grid.RowDefinitions>
+                            <Border Width="42" Height="42" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="21" HorizontalAlignment="Center">
+                                <materialDesign:PackIcon Kind="Cash" Width="26" Height="26" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <TextBlock Grid.Row="1" Text="{Binding CashMethodText}" Style="{StaticResource PaymentMethodTileTextStyle}" VerticalAlignment="Center" />
                         </Grid>
                     </Button>
                     <Button Grid.Column="2" Command="{Binding SelectCardCommand}" AutomationProperties.AutomationId="AddCardTenderButton" Style="{StaticResource CardMethodButtonStyle}" Visibility="{Binding IsIntegratedCardPaymentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <Grid>
-                            <Grid.RowDefinitions><RowDefinition Height="52" /><RowDefinition Height="44" /></Grid.RowDefinitions>
-                            <Border Width="48" Height="48" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="24" HorizontalAlignment="Center">
-                                <materialDesign:PackIcon Kind="CreditCard" Width="28" Height="28" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="40" /></Grid.RowDefinitions>
+                            <Border Width="42" Height="42" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="21" HorizontalAlignment="Center">
+                                <materialDesign:PackIcon Kind="CreditCard" Width="26" Height="26" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <TextBlock Grid.Row="1" Text="{Binding CardMethodText}" Style="{StaticResource PaymentMethodTileTextStyle}" VerticalAlignment="Center" />
                         </Grid>
                     </Button>
                     <Button Grid.Column="2" Command="{Binding OpenManualCardCommand}" AutomationProperties.AutomationId="ManualCardPaymentButton" Style="{StaticResource PaymentMethodTileStyle}" Visibility="{Binding IsManualCardPaymentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <Grid>
-                            <Grid.RowDefinitions><RowDefinition Height="52" /><RowDefinition Height="44" /></Grid.RowDefinitions>
-                            <Border Width="48" Height="48" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="24" HorizontalAlignment="Center">
-                                <materialDesign:PackIcon Kind="CreditCard" Width="28" Height="28" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="40" /></Grid.RowDefinitions>
+                            <Border Width="42" Height="42" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="21" HorizontalAlignment="Center">
+                                <materialDesign:PackIcon Kind="CreditCard" Width="26" Height="26" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <TextBlock Grid.Row="1" Text="{loc:Loc payment.manualCard.title}" Style="{StaticResource PaymentMethodTileTextStyle}" VerticalAlignment="Center" />
                         </Grid>
                     </Button>
-                    <Button Grid.Row="1" Grid.ColumnSpan="3" Command="{Binding OpenVoucherEntryCommand}"
+                    <Button Grid.Row="1" Command="{Binding OpenVoucherEntryCommand}"
                             AutomationProperties.AutomationId="AddVoucherTenderButton" Style="{StaticResource VoucherMethodButtonStyle}" Margin="0,8,0,0"
                             Visibility="{Binding IsVoucherPaymentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <Border Width="38" Height="38" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="19" Margin="0,0,12,0">
-                                <materialDesign:PackIcon Kind="TicketPercent" Width="24" Height="24" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="40" /></Grid.RowDefinitions>
+                            <Border Width="42" Height="42" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="21" HorizontalAlignment="Center">
+                                <materialDesign:PackIcon Kind="TicketPercent" Width="26" Height="26" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
-                            <TextBlock Text="{Binding VoucherMethodText}" Style="{StaticResource PaymentMethodTileTextStyle}" VerticalAlignment="Center" />
-                        </StackPanel>
+                            <TextBlock Grid.Row="1" Text="{Binding VoucherMethodText}" Style="{StaticResource PaymentMethodTileTextStyle}" VerticalAlignment="Center" />
+                        </Grid>
                     </Button>
+                    <!-- 分期开关并入支付方式区，仍沿用原绑定与可见性（仅付款模式显示）。 -->
+                    <ToggleButton Grid.Row="1"
+                                  Grid.Column="2"
+                                  AutomationProperties.AutomationId="InstallmentPaymentToggle"
+                                  AutomationProperties.Name="{Binding InstallmentMethodText}"
+                                  ToolTip="{loc:Loc payment.installment.switchHelp}"
+                                  ToolTipService.ShowOnDisabled="True"
+                                  IsChecked="{Binding IsInstallmentPaymentEnabled, Mode=TwoWay}"
+                                  HorizontalAlignment="Stretch"
+                                  MinHeight="100"
+                                  Margin="0,8,0,0">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton" BasedOn="{StaticResource InstallmentMethodToggleStyle}">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsInstallmentEntryVisible}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsInstallmentSwitchLocked}" Value="True">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="40" />
+                            </Grid.RowDefinitions>
+                            <Border Width="46"
+                                    Height="26"
+                                    CornerRadius="13"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{DynamicResource PosSurfaceStrongBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsInstallmentPaymentEnabled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource PosPrimaryBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Ellipse Width="20" Height="20" Fill="{DynamicResource PosSurfaceBrush}" VerticalAlignment="Center">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="HorizontalAlignment" Value="Left" />
+                                            <Setter Property="Margin" Value="3,0,0,0" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsInstallmentPaymentEnabled}" Value="True">
+                                                    <Setter Property="HorizontalAlignment" Value="Right" />
+                                                    <Setter Property="Margin" Value="0,0,3,0" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                            </Border>
+                            <TextBlock Grid.Row="1"
+                                       Text="{Binding InstallmentMethodText}"
+                                       VerticalAlignment="Center"
+                                       Style="{StaticResource PaymentMethodTileTextStyle}" />
+                        </Grid>
+</ToggleButton>
                 </Grid>
                 <TextBox Text="{Binding VoucherCodeText, UpdateSourceTrigger=PropertyChanged}"
                          materialDesign:HintAssist.Hint="{loc:Loc payment.voucher.code}"
@@ -932,7 +988,67 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="3" Margin="14,0,14,8" Padding="10" Background="{DynamicResource PosPrimarySoftBrush}" BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}" BorderThickness="1" CornerRadius="6" VerticalAlignment="Top">
+            <StackPanel Grid.Row="3" VerticalAlignment="Top">
+            <!-- 刷卡进行中面板：沿用一键扣款流程，只展示终端、金额与等待状态，取消仍用底部取消按钮。 -->
+            <Border AutomationProperties.AutomationId="CardPaymentProgressPanel"
+                    Margin="14,0,14,8" Padding="12"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosPrimaryBrush}"
+                    BorderThickness="1" CornerRadius="8">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCardPaymentInProgress}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource PosPrimarySoftBrush}" VerticalAlignment="Center">
+                            <materialDesign:PackIcon Kind="CreditCard" Width="20" Height="20" Foreground="{DynamicResource PosPrimaryTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding CardMethodText}" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource PosTextBrush}" />
+                            <TextBlock Text="{Binding SelectedLinklyCloudTerminalText}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsLinklyCloudTerminalSelectorVisible}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding CardPaymentAmount, StringFormat={}{0:C2}}"
+                               AutomationProperties.AutomationId="CardPaymentProgressAmount"
+                               Margin="0,10,0,0" FontSize="30" FontWeight="Black"
+                               Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                    <ProgressBar IsIndeterminate="True" Height="4" Margin="0,8,0,8" Foreground="{DynamicResource PosPrimaryBrush}" />
+                    <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                </StackPanel>
+            </Border>
+            <Border Margin="14,0,14,8" Padding="10" Background="{DynamicResource PosPrimarySoftBrush}" BorderBrush="{DynamicResource PosPrimarySoftBorderBrush}" BorderThickness="1" CornerRadius="6" VerticalAlignment="Top">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCardPaymentInProgress}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -996,6 +1112,8 @@
                 </Grid>
             </Border>
 
+            </StackPanel>
+
             <Grid Grid.Row="4" Margin="14,0,14,14">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -1016,7 +1134,7 @@
                 </Button>
                 <Button Command="{Binding ConfirmPaymentCommand}"
                         AutomationProperties.AutomationId="ConfirmPaymentButton"
-                        Height="54" HorizontalContentAlignment="Stretch" Padding="10,0">
+                        Height="60" HorizontalContentAlignment="Stretch" Padding="10,0">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource PosPrimaryButtonStyle}">
                             <Setter Property="Grid.Column" Value="0" />
@@ -1034,7 +1152,7 @@
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="26" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <materialDesign:PackIcon Kind="CheckCircle" Width="20" Height="20" Foreground="White" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="{Binding ConfirmPaymentText}" Foreground="White" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding ConfirmPaymentText}" Foreground="White" FontSize="17" FontWeight="Black" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" />
                     </Grid>
                 </Button>
             </Grid>

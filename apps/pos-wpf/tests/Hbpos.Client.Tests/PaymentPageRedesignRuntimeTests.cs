@@ -61,6 +61,7 @@ public sealed class PaymentPageRedesignRuntimeTests(PaymentViewRuntimeStaTestHos
             AssertInBounds(view, confirm, width, height, 48);
             AssertInBounds(view, quickCash, width, height, 48);
             Assert.Equal(Bounds(view, cash).Top, Bounds(view, activeCard).Top, 1);
+            Assert.Equal(Bounds(view, cash).Height, Bounds(view, activeCard).Height, 1);
             Assert.True(Bounds(view, cash).Right < Bounds(view, activeCard).Left);
             Assert.True(Bounds(view, confirm).Left > Bounds(view, keypad).Right,
                 "完成付款应固定在右侧付款面板底部。");
@@ -81,7 +82,8 @@ public sealed class PaymentPageRedesignRuntimeTests(PaymentViewRuntimeStaTestHos
                 AssertInBounds(view, voucher, width, height, 48);
                 Assert.True(Bounds(view, voucher).Top > Bounds(view, cash).Bottom);
                 Assert.Equal(Bounds(view, cash).Left, Bounds(view, voucher).Left, 1);
-                Assert.Equal(Bounds(view, activeCard).Right, Bounds(view, voucher).Right, 1);
+                Assert.Equal(Bounds(view, cash).Right, Bounds(view, voucher).Right, 1);
+                Assert.Equal(Bounds(view, cash).Height, Bounds(view, voucher).Height, 1);
             }
 
             var keys = PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(keypad).ToArray();
@@ -99,6 +101,13 @@ public sealed class PaymentPageRedesignRuntimeTests(PaymentViewRuntimeStaTestHos
                     .GetBinding(button, ButtonBase.CommandProperty)?.Path?.Path == "BackToPosCommand"));
             var visibleInstallmentToggle = PaymentViewRuntimeStaTestHost.FindVisualDescendants<ToggleButton>(view)
                 .Where(toggle => AutomationProperties.GetAutomationId(toggle) == "InstallmentPaymentToggle" && toggle.IsVisible);
+            // 分期方块与现金/刷卡/代金券等高，且固定在 2×2 网格的右下格。
+            foreach (var installment in visibleInstallmentToggle)
+            {
+                Assert.Equal(Bounds(view, cash).Height, Bounds(view, installment).Height, 1);
+                Assert.Equal(Bounds(view, activeCard).Left, Bounds(view, installment).Left, 1);
+                Assert.True(Bounds(view, installment).Top > Bounds(view, activeCard).Bottom);
+            }
             // 检查实际文字布局，防止英文卡片标签、清除键或放大后的返回/分期文字因固定宽度被裁切。
             foreach (var control in keys.Concat(notes).Concat([cash, activeCard, confirm, backToPos])
                          .Cast<FrameworkElement>()
@@ -122,6 +131,19 @@ public sealed class PaymentPageRedesignRuntimeTests(PaymentViewRuntimeStaTestHos
             Assert.True(string.IsNullOrEmpty(vm.TenderAmountText));
             Assert.Empty(vm.PaymentTenders);
             Assert.Equal(0, fixture.CloudApi.SendCount);
+
+            // 刷卡进行中：显示扣款面板与金额，原状态提示条让位；结束后恢复。
+            var progressPanel = Find<Border>(view, "CardPaymentProgressPanel");
+            Assert.Equal(Visibility.Collapsed, progressPanel.Visibility);
+            vm.CardPaymentAmount = 8.5m;
+            vm.IsCardPaymentInProgress = true;
+            view.UpdateLayout();
+            Assert.Equal(Visibility.Visible, progressPanel.Visibility);
+            Assert.Contains("8.50", Find<TextBlock>(view, "CardPaymentProgressAmount").Text);
+            vm.IsCardPaymentInProgress = false;
+            view.UpdateLayout();
+            Assert.Equal(Visibility.Collapsed, progressPanel.Visibility);
+            Assert.Equal(0m, vm.CardPaymentAmount);
         }
         finally
         {
