@@ -294,6 +294,13 @@ export const GUARDIAN_AMENDED_LABELS: Record<string, string> = {
   commute: "通勤与接送",
   backupContact: "备用联系人",
 };
-export function describeGuardianAmendments(keys: string[]) {
-  return keys.map((key) => GUARDIAN_AMENDED_LABELS[key] ?? key).join("、");
+/** `translate` 由界面传入当前语言的分区名；缺省回落到上面的中文名。 */
+export function describeGuardianAmendments(
+  keys: string[],
+  translate?: (key: string) => string | undefined,
+  separator = "、",
+) {
+  return keys
+    .map((key) => translate?.(key) ?? GUARDIAN_AMENDED_LABELS[key] ?? key)
+    .join(separator);
 }

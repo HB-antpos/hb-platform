@@ -24,6 +24,8 @@ import {
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { i18n } from "@/shared/i18n/i18n";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { downloadMinorDocument } from "./api";
@@ -34,32 +36,27 @@ import {
   type MinorReturnField,
 } from "./types";
 
-const tabs: { value: HrReviewStatus; label: string }[] = [
-  { value: "Submitted", label: "待审核" },
-  { value: "Approved", label: "已通过" },
-  { value: "Returned", label: "已退回" },
-];
-const returnLabels: Record<MinorReturnField, string> = {
-  parentContact: "家长联系方式",
-  emergencyContact: "备用紧急联系人",
-  schoolCalendar: "学校日历",
-  education: "教育状态",
-  workAvailability: "工作时段",
-  otherWork: "其他工作",
-  commutePlan: "通勤与接送",
-  formData: "CE1 表单",
-};
+const tabs: HrReviewStatus[] = ["Submitted", "Approved", "Returned"];
 const get = (value: unknown, key: string): unknown => {
   if (!value || typeof value !== "object") return undefined;
   const x = value as Record<string, unknown>;
   return x[key] ?? x[key[0].toUpperCase() + key.slice(1)];
 };
+// 模块级辅助函数不能用 hook，直接读当前语言；使用它们的组件都已订阅语言变化。
+const tr = (key: string, options?: Record<string, unknown>): string =>
+  String(i18n.t(key, { ns: "minorEmployment", ...options }));
 const display = (value: unknown) =>
-  value == null || value === "" ? "未填写" : String(value);
+  value == null || value === "" ? tr("common.notFilled") : String(value);
 const range = (value: unknown) =>
-  `${display(get(value, "startDate"))} 至 ${display(get(value, "endDate"))}`;
+  tr("review.lines.range", {
+    start: display(get(value, "startDate")),
+    end: display(get(value, "endDate")),
+  });
+const statusLabel = (status: string) =>
+  tr(`statuses.${status}`, { defaultValue: status });
 
 export function MinorEmploymentReviewScreen() {
+  const { t } = useAppTranslation("minorEmployment");
   const router = useRouter();
   const queryClient = useQueryClient();
   const actor = useAuthStore(
@@ -99,8 +96,8 @@ export function MinorEmploymentReviewScreen() {
     onSuccess: refresh,
     onError: (e) =>
       Alert.alert(
-        "审核失败",
-        e instanceof Error ? e.message : "版本已变化，请刷新",
+        t("review.alerts.approveFailed"),
+        e instanceof Error ? e.message : t("review.alerts.versionChanged"),
       ),
   });
   const reject = useMutation({
@@ -119,19 +116,22 @@ export function MinorEmploymentReviewScreen() {
     },
     onError: (e) =>
       Alert.alert(
-        "退回失败",
-        e instanceof Error ? e.message : "版本已变化，请刷新",
+        t("review.alerts.returnFailed"),
+        e instanceof Error ? e.message : t("review.alerts.versionChanged"),
       ),
   });
   const document = async () => {
     if (!selectedId) return;
     let cleanup: (() => Promise<void>) | undefined;
     try {
-      cleanup = await downloadMinorDocument(selectedId);
+      cleanup = await downloadMinorDocument(
+        selectedId,
+        t("review.documentDialogTitle"),
+      );
     } catch (e) {
       Alert.alert(
-        "文件下载失败",
-        e instanceof Error ? e.message : "请稍后重试",
+        t("review.alerts.downloadFailed"),
+        e instanceof Error ? e.message : t("review.alerts.tryLater"),
       );
     } finally {
       if (cleanup) await cleanup().catch(() => undefined);
@@ -155,7 +155,7 @@ export function MinorEmploymentReviewScreen() {
     return (
       <SafeAreaView style={styles.screen} edges={["top"]}>
         <Button icon="arrow-left" onPress={() => setSelectedId(undefined)}>
-          返回审核列表
+          {t("review.backToList")}
         </Button>
         <ReviewPane
           actor={actor}
@@ -180,9 +180,9 @@ export function MinorEmploymentReviewScreen() {
     return (
       <SafeAreaView style={styles.center}>
         <EmptyState
-          title="无法加载审核列表"
+          title={t("review.loadFailed")}
           primaryAction={{
-            label: "重试",
+            label: t("common.retry"),
             icon: "refresh",
             onPress: () => void list.refetch(),
           }}
@@ -195,13 +195,11 @@ export function MinorEmploymentReviewScreen() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Button icon="arrow-left" onPress={() => router.back()}>
-            返回
+            {t("common.back")}
           </Button>
-          <Text variant="headlineSmall">未成年用工合规审核</Text>
+          <Text variant="headlineSmall">{t("review.title")}</Text>
         </View>
-        <Text style={styles.muted}>
-          审核只产生记录和提醒，不阻断排班、发布或考勤。
-        </Text>
+        <Text style={styles.muted}>{t("review.subtitle")}</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -209,16 +207,16 @@ export function MinorEmploymentReviewScreen() {
         >
           {tabs.map((item) => (
             <Chip
-              key={item.value}
-              selected={status === item.value}
+              key={item}
+              selected={status === item}
               onPress={() => {
-                setStatus(item.value);
+                setStatus(item);
                 setPage(1);
                 setSelectedId(undefined);
               }}
             >
-              {item.label}
-              {status === item.value ? `  ${list.data?.total ?? 0}` : ""}
+              {t(`review.tabs.${item}`)}
+              {status === item ? `  ${list.data?.total ?? 0}` : ""}
             </Chip>
           ))}
         </ScrollView>
@@ -226,7 +224,7 @@ export function MinorEmploymentReviewScreen() {
       <View style={[styles.body, wide && styles.bodyWide]}>
         <Surface style={[styles.queue, wide && styles.queueWide]} elevation={0}>
           <View style={styles.rowBetween}>
-            <Text variant="titleMedium">审核资料</Text>
+            <Text variant="titleMedium">{t("review.queueTitle")}</Text>
             <Chip compact>{list.data?.total ?? 0}</Chip>
           </View>
           <ScrollView>
@@ -243,7 +241,9 @@ export function MinorEmploymentReviewScreen() {
                   <TouchableRipple
                     style={styles.rowButton}
                     accessibilityRole="button"
-                    accessibilityLabel={`查看 ${row.employeeName || row.employeeId} 的未成年用工资料`}
+                    accessibilityLabel={t("review.viewAria", {
+                      name: row.employeeName || row.employeeId,
+                    })}
                     onPress={() => setSelectedId(row.id)}
                   >
                     <View style={styles.rowContent}>
@@ -257,15 +257,17 @@ export function MinorEmploymentReviewScreen() {
                       </View>
                       <Chip compact>
                         {row.warningCodes.length
-                          ? `提醒 ${row.warningCodes.length}`
-                          : row.status}
+                          ? t("review.warningCount", {
+                              count: row.warningCodes.length,
+                            })
+                          : statusLabel(row.status)}
                       </Chip>
                     </View>
                   </TouchableRipple>
                 </Surface>
               ))
             ) : (
-              <EmptyState title="暂无资料" />
+              <EmptyState title={t("review.empty")} />
             )}
           </ScrollView>
           <View style={styles.pagination}>
@@ -273,9 +275,9 @@ export function MinorEmploymentReviewScreen() {
               disabled={page <= 1 || list.isFetching}
               onPress={() => setPage((p) => p - 1)}
             >
-              上一页
+              {t("review.previous")}
             </Button>
-            <Text style={styles.muted}>第 {page} 页</Text>
+            <Text style={styles.muted}>{t("review.page", { page })}</Text>
             <Button
               disabled={
                 !rows.length ||
@@ -284,7 +286,7 @@ export function MinorEmploymentReviewScreen() {
               }
               onPress={() => setPage((p) => p + 1)}
             >
-              加载更多
+              {t("review.loadMore")}
             </Button>
           </View>
         </Surface>
@@ -327,6 +329,7 @@ function ReviewPane({
   onDocument: () => void;
   pending: boolean;
 }) {
+  const { t } = useAppTranslation("minorEmployment");
   if (loading)
     return (
       <View style={styles.center}>
@@ -336,8 +339,8 @@ function ReviewPane({
   if (error || !detail)
     return (
       <EmptyState
-        title="请选择一条资料查看详情"
-        description="可核对家长、课表、假期、其他工作和通勤信息。"
+        title={t("review.selectTitle")}
+        description={t("review.selectDescription")}
       />
     );
   return (
@@ -368,9 +371,13 @@ function Section({
   );
 }
 function Line({ label, value }: { label: string; value: unknown }) {
+  const { t } = useAppTranslation("minorEmployment");
   return (
     <Text selectable>
-      <Text style={styles.label}>{label}：</Text>
+      <Text style={styles.label}>
+        {label}
+        {t("common.labelSuffix")}
+      </Text>
       {display(value)}
     </Text>
   );
@@ -390,6 +397,7 @@ function ReviewDetail({
   onDocument: () => void;
   pending: boolean;
 }) {
+  const { t } = useAppTranslation("minorEmployment");
   const history = useQuery({
     queryKey: ["minorEmployment", "history", actor, detail.id],
     queryFn: () => minorEmploymentHrApi.getHistory(detail.id),
@@ -408,170 +416,226 @@ function ReviewDetail({
           </Text>
           <Text style={styles.muted}>
             {detail.state} · {detail.formType ?? "CE1"} · v{detail.version}
-            {detail.revision ? ` · 修订 ${detail.revision}` : ""}
+            {detail.revision
+              ? t("review.revision", { revision: detail.revision })
+              : ""}
           </Text>
         </View>
-        <Chip>{detail.status}</Chip>
+        <Chip>{statusLabel(detail.status)}</Chip>
       </View>
-      <Section title="孩子与雇主">
+      <Section title={t("review.sections.childEmployer")}>
         <Line
-          label="孩子姓名"
+          label={t("review.lines.childName")}
           value={`${form.childGivenName} ${form.childFamilyName}`}
         />
-        <Line label="出生日期" value={detail.dateOfBirth} />
         <Line
-          label="地址"
+          label={t("review.lines.dateOfBirth")}
+          value={detail.dateOfBirth}
+        />
+        <Line
+          label={t("review.lines.address")}
           value={`${form.childAddress} ${form.childPostcode}`}
         />
         <Line
-          label="雇主"
+          label={t("review.lines.employer")}
           value={`${form.employerCompanyName} / ${form.employerTradingName}`}
         />
         <Line
-          label="雇主联系方式"
+          label={t("review.lines.employerContact")}
           value={`${form.employerPhone} ${form.employerMobile} ${form.employerEmail}`}
         />
       </Section>
-      <Section title="家长与紧急联系人">
+      <Section title={t("review.sections.parentContacts")}>
         <Line
-          label="家长"
+          label={t("review.lines.parent")}
           value={`${detail.parentName} · ${detail.parentPhone} · ${detail.parentEmail}`}
         />
         <Line
-          label="家长签署"
+          label={t("review.lines.parentSigned")}
           value={
             detail.parentSignedAt
-              ? `${detail.parentSignedAt}（${detail.parentSignatureName || "已签署"}）`
-              : "未签署"
+              ? t("review.lines.signedWithName", {
+                  at: detail.parentSignedAt,
+                  name:
+                    detail.parentSignatureName ||
+                    t("review.lines.signedDefault"),
+                })
+              : t("review.lines.notSigned")
           }
         />
         {detail.guardianAmendedFields.length ? (
           <Line
-            label="监护人现场修改"
-            value={`${describeGuardianAmendments(detail.guardianAmendedFields)}（修改前后内容见历史记录）`}
+            label={t("review.lines.guardianAmended")}
+            value={t("review.lines.guardianAmendedValue", {
+              fields: describeGuardianAmendments(
+                detail.guardianAmendedFields,
+                (key) => t(`guardianAmended.${key}`, { defaultValue: key }),
+                t("common.listSeparator"),
+              ),
+            })}
           />
         ) : null}
         <Line
-          label="备用联系人"
+          label={t("review.lines.backupContact")}
           value={`${detail.backupContact.fullName} · ${detail.backupContact.relationship} · ${detail.backupContact.phone} · ${detail.backupContact.email}`}
         />
         <Line
-          label="联系方式完整性"
+          label={t("review.lines.contactCompleteness")}
           value={
             detail.parentPhone &&
             detail.parentEmail &&
             detail.backupContact.phone &&
             detail.backupContact.email
-              ? "完整"
-              : "需要补充"
+              ? t("review.lines.complete")
+              : t("review.lines.incomplete")
           }
         />
       </Section>
-      <Section title="学校课表与假期">
+      <Section title={t("review.sections.schoolCalendar")}>
         <Line
-          label="学校"
+          label={t("review.lines.school")}
           value={`${detail.schoolName} · ${detail.schoolYear}`}
         />
         <Line
-          label="学校联系人"
+          label={t("review.lines.schoolContact")}
           value={`${cal.schoolContactName} ${cal.schoolContactPhone} ${cal.schoolContactEmail}`}
         />
-        <Text style={styles.subheading}>每周上学安排</Text>
+        <Text style={styles.subheading}>
+          {t("review.lines.weeklySchedule")}
+        </Text>
         {cal.weeklySchedule.length ? (
           cal.weeklySchedule.map((item, i) => (
             <Line
               key={i}
               label={
                 item.mustAttend
-                  ? `星期 ${item.dayOfWeek}（上学）`
-                  : `星期 ${item.dayOfWeek}`
+                  ? t("review.lines.dayAttend", { day: item.dayOfWeek })
+                  : t("review.lines.day", { day: item.dayOfWeek })
               }
               value={`${item.startLocalTime}–${item.endLocalTime}`}
             />
           ))
         ) : (
-          <Line label="课表" value="未填写" />
+          <Line
+            label={t("review.lines.timetable")}
+            value={t("common.notFilled")}
+          />
         )}
-        <Text style={styles.subheading}>学期、学校假期和无课日</Text>
+        <Text style={styles.subheading}>{t("review.lines.termsHeading")}</Text>
         {[
-          ...cal.termRanges.map((x) => `学期：${range(x)}`),
-          ...cal.holidays.map((x) => `学校假期：${range(x)}`),
-          ...cal.pupilFreeDays.map((x) => `无课日：${range(x)}`),
+          ...cal.termRanges.map((x) =>
+            t("review.lines.term", { range: range(x) }),
+          ),
+          ...cal.holidays.map((x) =>
+            t("review.lines.holiday", { range: range(x) }),
+          ),
+          ...cal.pupilFreeDays.map((x) =>
+            t("review.lines.pupilFree", { range: range(x) }),
+          ),
         ].map((x, i) => (
           <Text key={i}>{x}</Text>
         ))}
       </Section>
-      <Section title="其他工作与实际工时">
+      <Section title={t("review.sections.otherWork")}>
         <Line
-          label="是否有其他工作"
-          value={other.hasOtherWork ? "有" : "没有"}
+          label={t("review.lines.hasOtherWork")}
+          value={other.hasOtherWork ? t("options.have") : t("options.haveNone")}
         />
-        <Line label="工时是否未知" value={other.hoursUnknown ? "是" : "否"} />
+        <Line
+          label={t("review.lines.hoursUnknown")}
+          value={other.hoursUnknown ? t("options.yes") : t("options.no")}
+        />
         {other.employers.map((x, i) => (
           <View key={i} style={styles.nested}>
             <Line
-              label={`其他雇主 ${i + 1}`}
+              label={t("review.lines.otherEmployer", { n: i + 1 })}
               value={`${x.companyName} ${x.phone} ${x.email}`}
             />
             <Line
-              label="每周工时"
+              label={t("review.lines.weeklyHours")}
               value={Object.entries(x.weeklyHours)
-                .map(([d, h]) => `${d}: ${h} 小时`)
-                .join("；")}
+                .map(([d, h]) =>
+                  t("review.lines.dayHours", { day: d, hours: h }),
+                )
+                .join(t("review.lines.dayHoursSeparator"))}
             />
           </View>
         ))}
-        <Text style={styles.subheading}>计划时段</Text>
+        <Text style={styles.subheading}>{t("review.lines.planned")}</Text>
         {other.plannedIntervals.map((x, i) => (
           <Line
             key={i}
-            label={`计划 ${i + 1}`}
-            value={`${x.startUtc}–${x.endUtc}（${x.hours} 小时）`}
+            label={t("review.lines.plannedN", { n: i + 1 })}
+            value={t("review.lines.interval", {
+              start: x.startUtc,
+              end: x.endUtc,
+              hours: x.hours,
+            })}
           />
         ))}
-        <Text style={styles.subheading}>实际时段</Text>
+        <Text style={styles.subheading}>{t("review.lines.actual")}</Text>
         {other.actualIntervals.map((x, i) => (
           <Line
             key={i}
-            label={`实际 ${i + 1}`}
-            value={`${x.startUtc}–${x.endUtc}（${x.hours} 小时）`}
+            label={t("review.lines.actualN", { n: i + 1 })}
+            value={t("review.lines.interval", {
+              start: x.startUtc,
+              end: x.endUtc,
+              hours: x.hours,
+            })}
           />
         ))}
       </Section>
-      <Section title="通勤与接送">
+      <Section title={t("review.sections.commute")}>
         <Line
-          label="放学到门店"
-          value={`${detail.commute.afterSchoolToStoreMinutes} 分钟`}
+          label={t("review.lines.afterSchoolToStore")}
+          value={t("review.lines.minutes", {
+            n: detail.commute.afterSchoolToStoreMinutes,
+          })}
         />
         <Line
-          label="回家用时"
-          value={`${detail.commute.homewardMinutes} 分钟`}
+          label={t("review.lines.homeward")}
+          value={t("review.lines.minutes", {
+            n: detail.commute.homewardMinutes,
+          })}
         />
-        <Line label="交通方式" value={detail.commute.transportMode} />
-        <Line label="接送人" value={detail.commute.pickupPerson} />
         <Line
-          label="最晚交通"
+          label={t("review.lines.transportMode")}
+          value={detail.commute.transportMode}
+        />
+        <Line
+          label={t("review.lines.pickupPerson")}
+          value={detail.commute.pickupPerson}
+        />
+        <Line
+          label={t("review.lines.latestTransport")}
           value={detail.commute.latestTransportLocalTime}
         />
         <Line
-          label="最晚工作结束"
+          label={t("review.lines.latestWorkEnd")}
           value={detail.commute.latestWorkEndLocalTime}
         />
       </Section>
       {detail.warningCodes.length ? (
-        <Section title="合规提醒" warning>
-          <Text>{detail.warningCodes.join("、")}</Text>
-          <Text style={styles.muted}>提醒不会阻止排班、发布或考勤。</Text>
+        <Section title={t("review.sections.warnings")} warning>
+          <Text>{detail.warningCodes.join(t("common.listSeparator"))}</Text>
+          <Text style={styles.muted}>{t("review.warningNote")}</Text>
         </Section>
       ) : null}
-      <Section title="审核历史">
-        <Line label="提交时间" value={detail.submittedAt} />
-        <Line label="审核时间" value={detail.reviewedAt} />
-        <Line label="审核意见" value={detail.reviewComment} />
+      <Section title={t("review.sections.history")}>
+        <Line
+          label={t("review.lines.submittedAt")}
+          value={detail.submittedAt}
+        />
+        <Line label={t("review.lines.reviewedAt")} value={detail.reviewedAt} />
+        <Line
+          label={t("review.lines.reviewComment")}
+          value={detail.reviewComment}
+        />
         {history.isLoading ? (
           <ActivityIndicator />
         ) : history.isError ? (
-          <Text style={styles.muted}>历史加载失败，可稍后刷新。</Text>
+          <Text style={styles.muted}>{t("review.historyFailed")}</Text>
         ) : (
           history.data?.map((item, i) => (
             <HistoryItem
@@ -589,7 +653,7 @@ function ReviewDetail({
           onPress={onDocument}
           disabled={pending}
         >
-          查看只读原件
+          {t("review.actions.document")}
         </Button>
         {detail.status === "Submitted" ? (
           <>
@@ -599,10 +663,10 @@ function ReviewDetail({
               loading={pending}
               disabled={pending}
             >
-              通过
+              {t("review.actions.approve")}
             </Button>
             <Button mode="outlined" onPress={onReturn} disabled={pending}>
-              退回补充
+              {t("review.actions.returnForCorrection")}
             </Button>
           </>
         ) : null}
@@ -611,6 +675,7 @@ function ReviewDetail({
   );
 }
 function HistoryItem({ item }: { item: unknown }) {
+  const { t } = useAppTranslation("minorEmployment");
   const metadata = get(item, "metadata");
   const audits = get(item, "audits");
   return (
@@ -626,10 +691,12 @@ function HistoryItem({ item }: { item: unknown }) {
       {Array.isArray(audits)
         ? audits.map((audit, i) => (
             <Text key={i} style={styles.muted}>
-              审计：{display(get(audit, "action"))} ·{" "}
-              {display(get(audit, "actorLabel"))} ·{" "}
-              {display(get(audit, "createdAt"))} ·{" "}
-              {display(get(get(audit, "metadata"), "comment"))}
+              {t("review.audit", {
+                action: display(get(audit, "action")),
+                actor: display(get(audit, "actorLabel")),
+                at: display(get(audit, "createdAt")),
+                comment: display(get(get(audit, "metadata"), "comment")),
+              })}
             </Text>
           ))
         : null}
@@ -659,17 +726,18 @@ function ReturnDialog({
   pending: boolean;
   onSubmit: () => void;
 }) {
+  const { t } = useAppTranslation("minorEmployment");
   return (
     <Portal>
       <Dialog visible={open} onDismiss={onDismiss}>
-        <Dialog.Title>退回补充</Dialog.Title>
+        <Dialog.Title>{t("review.dialog.title")}</Dialog.Title>
         <Dialog.Content>
           <ScrollView style={styles.returnScroll}>
-            <Text>选择需要补充的字段，并填写必填意见。</Text>
+            <Text>{t("review.dialog.hint")}</Text>
             {MINOR_RETURN_FIELDS.map((field) => (
               <Checkbox.Item
                 key={field}
-                label={returnLabels[field]}
+                label={t(`returnFields.${field}`)}
                 status={fields.includes(field) ? "checked" : "unchecked"}
                 onPress={() =>
                   setFields(
@@ -682,7 +750,7 @@ function ReturnDialog({
             ))}
             <TextInput
               mode="outlined"
-              label="退回意见（必填）"
+              label={t("review.dialog.comment")}
               value={comment}
               onChangeText={setComment}
               multiline
@@ -693,11 +761,11 @@ function ReturnDialog({
           </ScrollView>
         </Dialog.Content>
         <Dialog.Actions>
-          <Button onPress={onDismiss}>取消</Button>
+          <Button onPress={onDismiss}>{t("review.dialog.cancel")}</Button>
           <Button
             onPress={() => {
               if (!fields.length || !comment.trim()) {
-                setMessage("请选择字段并填写退回意见");
+                setMessage(t("review.dialog.validation"));
                 return;
               }
               setMessage("");
@@ -706,7 +774,7 @@ function ReturnDialog({
             loading={pending}
             disabled={pending}
           >
-            确认退回
+            {t("review.dialog.confirm")}
           </Button>
         </Dialog.Actions>
       </Dialog>

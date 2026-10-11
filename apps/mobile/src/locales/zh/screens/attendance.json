@@ -789,5 +789,12 @@
     "message": "按排班你今天还有 {{count}} 次用餐没有休息记录。\n\n吃过饭请选「休息了」；没吃请选「没休息」，会提交店长审核，批准后加回 {{minutes}} 分钟工时。",
     "taken": "休息了",
     "notTaken": "没休息"
+  },
+  "minorCompliance": {
+    "scheduleSavedWithWarnings": "排班已保存；保留 {{count}} 条未成年用工提醒",
+    "reminderLink": "未成年用工提醒待办",
+    "warningTitle": "未成年用工提醒（{{count}}）",
+    "punchNotAffected": "提醒不影响本次打卡；主管可在提醒待办继续跟进。",
+    "cellWarning": "未成年用工提醒"
   }
 }

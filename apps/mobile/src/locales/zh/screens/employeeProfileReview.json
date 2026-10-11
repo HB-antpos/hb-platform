@@ -2,6 +2,7 @@
   "list": {
     "title": "敏感资料审核",
     "subtitle": "审核你所管理分店员工提交的敏感资料变更。",
+    "minorEmployment": "未成年用工合规",
     "loading": "正在加载敏感资料审核申请",
     "loadingMore": "正在加载更多审核申请",
     "loadMoreFailed": "重试加载更多申请",
