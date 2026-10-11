@@ -319,19 +319,19 @@ namespace BlazorApp.Api.Services
             FROM (
                 SELECT MAX([LastUploadTime]) AS [SourceWatermark]
                 FROM [sales_order]{noLockHint}
-                WHERE [Status] IN (1, 4)
+                WHERE [Status] IN (1, 3, 4)
                   AND [OrderTime] >= @TargetDate AND [OrderTime] < @NextDate
                 UNION ALL
                 SELECT MAX([payment].[LastUploadTime]) AS [SourceWatermark]
                 FROM [payment_detail] AS [payment]{noLockHint}
                 INNER JOIN [sales_order] AS [orders]{noLockHint} ON [payment].[OrderGuid] = [orders].[OrderGuid]
-                WHERE [orders].[Status] IN (1, 4)
+                WHERE [orders].[Status] IN (1, 3, 4)
                   AND [orders].[OrderTime] >= @TargetDate AND [orders].[OrderTime] < @NextDate
                 UNION ALL
                 SELECT MAX([detail].[LastUploadTime]) AS [SourceWatermark]
                 FROM [sales_order_detail] AS [detail]{noLockHint}
                 INNER JOIN [sales_order] AS [orders]{noLockHint} ON [detail].[OrderGuid] = [orders].[OrderGuid]
-                WHERE [orders].[Status] IN (1, 4)
+                WHERE [orders].[Status] IN (1, 3, 4)
                   AND [orders].[OrderTime] >= @TargetDate AND [orders].[OrderTime] < @NextDate
             ) AS [watermarks]
             """,

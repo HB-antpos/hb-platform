@@ -25,9 +25,10 @@ namespace BlazorApp.Api.Services
         var nextDate = targetDate.AddDays(1);
         var detailRows = await _posmContext.Db.Queryable<SalesOrder>()
             .LeftJoin<SalesOrderDetail>((o, d) => o.OrderGuid == d.OrderGuid)
+            // 与商品店日统计的明细来源完全一致（含退款单），补充退货才能按同一批明细 GUID 去重。
             .Where((o, d) =>
                 o.Status != null
-                && (o.Status == 1 || o.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(o.Status)
                 && o.OrderTime != null
                 && o.OrderTime >= targetDate
                 && o.OrderTime < nextDate
@@ -154,12 +155,13 @@ namespace BlazorApp.Api.Services
         var nextDate = targetDate.AddDays(1);
         var targetBranchCodes = SalesStatisticsCodeRules.NormalizeBranchCodes(branchCodes);
 
+        // 金额、销量按净额：并入退款单（Status=3，负数）；订单数仍只数 1/4（见 orderRows）。
         var paymentRows = preloadedPosmSnapshot?.PaymentRows.ToList() ?? await posmContext.Db.Queryable<PaymentDetail, SalesOrder>(
                 (pd, so) => pd.OrderGuid == so.OrderGuid
             )
             .Where((pd, so) =>
                 so.Status != null
-                && (so.Status == 1 || so.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                 && so.OrderTime != null
                 && so.OrderTime >= targetDate
                 && so.OrderTime < nextDate
@@ -187,7 +189,7 @@ namespace BlazorApp.Api.Services
             )
             .Where((d, so) =>
                 so.Status != null
-                && (so.Status == 1 || so.Status == 4)
+                && SalesOrderStatusRules.NetSalesStatuses.Contains(so.Status)
                 && so.OrderTime != null
                 && so.OrderTime >= targetDate
                 && so.OrderTime < nextDate

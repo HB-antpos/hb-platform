@@ -138,6 +138,43 @@ public sealed partial class BatchProductSalesAnalysisSqlServerIntegrationTests :
     }
 
     [BatchSalesSqlServerFact]
+    public async Task ReadAsync_POSM旧POS退款单Status3按净额并入_其退货记录不重复冲减_不归为未知()
+    {
+        var day = new DateTime(2026, 6, 10);
+        await SeedProductsAsync(("P1", "001", null));
+        await _posm!.Insertable(new SalesOrder[]
+        {
+            new SalesOrder { OrderGuid = "O1", OrderTime = day.AddHours(10), BranchCode = "S1", Status = 1 },
+            // 旧 POS 的退款是独立的 Status=3 订单：明细、支付均为负数。
+            new SalesOrder { OrderGuid = "X1", OrderTime = day.AddHours(11), BranchCode = "S1", Status = 3 },
+        }).ExecuteCommandAsync();
+        await _posm.Insertable(new PaymentDetail[]
+        {
+            new PaymentDetail { PaymentGuid = "PAY-1", OrderGuid = "O1", Amount = 20m },
+            new PaymentDetail { PaymentGuid = "PAY-X1", OrderGuid = "X1", Amount = -10m },
+        }).ExecuteCommandAsync();
+        await _posm.Insertable(new SalesOrderDetail[]
+        {
+            new SalesOrderDetail { OrderDetailGuid = "D-1", OrderGuid = "O1", ProductCode = "P1", Quantity = 2, Price = 10m, Subtotal = 20m, ActualAmount = 20m, DiscountAmount = 0m },
+            new SalesOrderDetail { OrderDetailGuid = "D-X1", OrderGuid = "X1", ProductCode = "P1", Quantity = -1, Price = 10m, Subtotal = -10m, ActualAmount = -10m, DiscountAmount = 0m },
+        }).ExecuteCommandAsync();
+        // 退货记录的 ReturnDetailGuid 与退款单明细 GUID 不重合；它属于 Status=3 订单，只能由退款单自带的负数明细冲减一次。
+        await _posm.Insertable(new SalesReturnRecord
+        {
+            ReturnDetailGuid = "RET-X1", ReturnOrderGuid = "X1", OriginalOrderGuid = "O1", OriginalOrderDetailGuid = "D-1",
+            ProductCode = "P1", ReturnQuantity = 1m, ReturnAmount = 10m,
+        }).ExecuteCommandAsync();
+
+        var rows = await ReadAsync("P1", day, "S1");
+
+        Assert.Equal(1m, rows.Sum(row => row.Quantity)); // 2 - 1，不是 2 - 1 - 1
+        Assert.Equal(10m, rows.Sum(row => row.SalesAmount)); // 20 - 10
+        Assert.Equal(1m, rows.Sum(row => row.ReturnQuantity));
+        Assert.Equal(0, rows.Sum(row => row.UnknownRowCount)); // 退款单行按自身原价/小计判定，不因缺原单证据变未知
+        Assert.Equal(1m, rows.Sum(row => row.RegularQuantity));
+    }
+
+    [BatchSalesSqlServerFact]
     public async Task ReadAsync_POSM缺失可选退货表仍可读取已支付销售()
     {
         var day = new DateTime(2026, 6, 10);

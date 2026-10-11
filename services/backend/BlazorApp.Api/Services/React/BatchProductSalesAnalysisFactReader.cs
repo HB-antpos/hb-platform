@@ -95,18 +95,20 @@ SELECT DeviceCode, BranchCode INTO #DeviceBranch FROM (
 ) mapped WHERE RowNumber = 1;
 CREATE UNIQUE CLUSTERED INDEX IX_DeviceBranch ON #DeviceBranch(DeviceCode);
 
-SELECT o.[OrderGuid], o.[OrderTime],
+-- 与商品日统计同口径：按净额并入退款单（Status=3，负数明细/支付）；补充退货（ReturnFacts）只认 Status 1/4，
+-- 否则会与退款单自带的负数明细重复冲减。
+SELECT o.[OrderGuid], o.[OrderTime], o.[Status],
        COALESCE(NULLIF(LTRIM(RTRIM(o.[BranchCode])), ''), db.BranchCode) AS BranchCode,
        o.[DeviceCode]
 INTO #EligibleOrders
     FROM [sales_order] o
     LEFT JOIN #DeviceBranch db ON db.DeviceCode = UPPER(LTRIM(RTRIM(o.[DeviceCode])))
     INNER JOIN #StoreScope ss ON ss.BranchCode = COALESCE(NULLIF(LTRIM(RTRIM(o.[BranchCode])), ''), db.BranchCode)
-    WHERE o.[Status] IN (1, 4) AND o.[OrderTime] >= @startDate AND o.[OrderTime] < @endExclusive
+    WHERE o.[Status] IN (1, 3, 4) AND o.[OrderTime] >= @startDate AND o.[OrderTime] < @endExclusive
 ;
 CREATE UNIQUE CLUSTERED INDEX IX_EligibleOrders ON #EligibleOrders(OrderGuid);
 
-SELECT o.[OrderGuid], o.[OrderTime], o.[BranchCode], o.[DeviceCode], d.[OrderDetailGuid],
+SELECT o.[OrderGuid], o.[OrderTime], o.[Status] AS OrderStatus, o.[BranchCode], o.[DeviceCode], d.[OrderDetailGuid],
            d.[ProductCode], d.[SupplierCode], d.[Quantity], d.[ActualAmount], d.[Price], d.[Subtotal], d.[DiscountAmount], d.[DiscountRate],
        CONVERT(nvarchar(50), LTRIM(RTRIM(d.[ProductCode]))) AS NormalizedProductCode
 INTO #DayDetails
@@ -124,7 +126,7 @@ FROM [payment_detail] p INNER JOIN #TargetSaleOrders o ON o.[OrderGuid] = p.[Ord
 GROUP BY p.[OrderGuid];
 CREATE UNIQUE CLUSTERED INDEX IX_PaymentTotals ON #PaymentTotals(OrderGuid);
 
-SELECT d.[OrderGuid], d.[OrderTime], d.[BranchCode], d.[DeviceCode], d.[OrderDetailGuid], d.[ProductCode], d.[SupplierCode],
+SELECT d.[OrderGuid], d.[OrderTime], d.[OrderStatus], d.[BranchCode], d.[DeviceCode], d.[OrderDetailGuid], d.[ProductCode], d.[SupplierCode],
        d.[Quantity], d.[ActualAmount], d.[Price], d.[Subtotal], d.[DiscountAmount], d.[DiscountRate],
        d.NormalizedProductCode,
        SUM(COALESCE(d.[ActualAmount], 0)) OVER (PARTITION BY d.[OrderGuid]) AS OrderDetailAmount
@@ -135,7 +137,7 @@ CREATE INDEX IX_AllDetailsProduct ON #AllDetails(NormalizedProductCode);
 -- 退货去重是日/状态语义，不能受本次分店 scope 影响；显式从当天全店订单收集 GUID。
 SELECT d.[OrderDetailGuid] INTO #CurrentDayDetailGuids
 FROM [sales_order] o INNER JOIN [sales_order_detail] d ON d.[OrderGuid] = o.[OrderGuid]
-WHERE o.[Status] IN (1, 4) AND o.[OrderTime] >= @startDate AND o.[OrderTime] < @endExclusive;
+WHERE o.[Status] IN (1, 3, 4) AND o.[OrderTime] >= @startDate AND o.[OrderTime] < @endExclusive;
 CREATE UNIQUE CLUSTERED INDEX IX_CurrentDayDetailGuids ON #CurrentDayDetailGuids(OrderDetailGuid);
 
 WITH ProductScope AS (SELECT ProductCode FROM #ProductScope),
@@ -155,7 +157,9 @@ SaleFacts AS (
                     / NULLIF(CAST(d.OrderDetailAmount AS decimal(19,6)), 0)
                     AS decimal(38,16)) END AS SalesAmount,
            d.[Price], d.[ActualAmount], d.[Subtotal], d.[DiscountAmount], d.[DiscountRate],
-           CAST(CASE WHEN COALESCE(d.[Quantity], 0) < 0 OR COALESCE(d.[ActualAmount], 0) < 0 THEN 1 ELSE 0 END AS bit) AS IsReturn
+           CAST(CASE WHEN COALESCE(d.[Quantity], 0) < 0 OR COALESCE(d.[ActualAmount], 0) < 0 THEN 1 ELSE 0 END AS bit) AS IsReturn,
+           -- 退款单（Status=3）的负数行自带原价/小计/折扣字段，按行自身判定折扣，不因缺「原单数量证据」归为未知。
+           CAST(CASE WHEN d.OrderStatus = 3 THEN 1 ELSE 0 END AS bit) AS IsRefundOrderLine
     FROM #AllDetails d
     LEFT JOIN #PaymentTotals pt ON pt.[OrderGuid] = d.[OrderGuid]
     LEFT JOIN [posm_product_supplier_mapping] supplierMap
@@ -187,9 +191,10 @@ ReturnFacts AS (
            CASE WHEN LTRIM(RTRIM(r.[OriginalOrderGuid])) = LTRIM(RTRIM(od.[OrderGuid]))
                      AND (NULLIF(LTRIM(RTRIM(r.[ProductCode])), '') IS NULL OR NULLIF(LTRIM(RTRIM(od.[ProductCode])), '') IS NULL OR LTRIM(RTRIM(r.[ProductCode])) = LTRIM(RTRIM(od.[ProductCode])))
                 THEN od.[DiscountRate] END AS DiscountRate,
-           CAST(1 AS bit) AS IsReturn
+           CAST(1 AS bit) AS IsReturn,
+           CAST(0 AS bit) AS IsRefundOrderLine
     FROM [sales_return_record] r
-    INNER JOIN #EligibleOrders o ON o.[OrderGuid] = r.[ReturnOrderGuid]
+    INNER JOIN #EligibleOrders o ON o.[OrderGuid] = r.[ReturnOrderGuid] AND o.[Status] IN (1, 4)
     LEFT JOIN [sales_order_detail] od ON od.[OrderDetailGuid] = r.[OriginalOrderDetailGuid]
     LEFT JOIN [posm_product_supplier_mapping] returnSupplierMap
         ON returnSupplierMap.[ProductCode] = LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(r.[ProductCode])), ''), od.[ProductCode])))
@@ -199,15 +204,15 @@ ReturnFacts AS (
 ),
 Facts AS (
     SELECT s.[Date], s.BranchCode, s.ProductCode, s.SupplierCode, s.Quantity, s.SalesAmount, s.[Price], s.[ActualAmount],
-           NULL AS OriginalActualAmount, NULL AS OriginalQuantity, s.[Subtotal], s.[DiscountAmount], s.[DiscountRate], s.IsReturn FROM SaleFacts s
+           NULL AS OriginalActualAmount, NULL AS OriginalQuantity, s.[Subtotal], s.[DiscountAmount], s.[DiscountRate], s.IsReturn, s.IsRefundOrderLine FROM SaleFacts s
     UNION ALL
     SELECT r.[Date], r.BranchCode, r.ProductCode, r.SupplierCode, r.Quantity, r.SalesAmount, r.[Price], NULL,
-           r.OriginalActualAmount, r.OriginalQuantity, r.[Subtotal], r.[DiscountAmount], r.[DiscountRate], r.IsReturn FROM ReturnFacts r
+           r.OriginalActualAmount, r.OriginalQuantity, r.[Subtotal], r.[DiscountAmount], r.[DiscountRate], r.IsReturn, r.IsRefundOrderLine FROM ReturnFacts r
 ),
 Classified AS (
     SELECT f.*,
       CASE
-        WHEN f.IsReturn = 1 AND (f.[Price] IS NULL OR f.OriginalQuantity IS NULL OR f.OriginalQuantity = 0
+        WHEN f.IsReturn = 1 AND f.IsRefundOrderLine = 0 AND (f.[Price] IS NULL OR f.OriginalQuantity IS NULL OR f.OriginalQuantity = 0
              OR ABS(ABS(f.SalesAmount) / NULLIF(ABS(f.Quantity), 0) - ABS(f.OriginalActualAmount) / NULLIF(ABS(f.OriginalQuantity), 0)) > 0.0001) THEN 2
         WHEN f.[DiscountAmount] IS NULL AND f.[DiscountRate] IS NULL AND f.[Subtotal] IS NULL THEN 2
         WHEN COALESCE(f.[DiscountAmount], 0) <> 0 OR COALESCE(f.[DiscountRate], 0) <> 0

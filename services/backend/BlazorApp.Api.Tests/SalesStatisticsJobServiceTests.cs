@@ -3964,6 +3964,75 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task 各统计按净额并入退款单Status3_金额与数量冲减_订单数不含退款单()
+    {
+        // 旧 POS 的退款是独立的 Status=3 订单，明细与支付都是负数；日结小票的 Total Income 是扣掉退款的净额，
+        // 统计必须与之一致，同时订单数/客数只数真实成交单。
+        var targetDate = new DateTime(2026, 6, 19);
+        await SeedProductAsync("P-NET");
+        await SeedOrderAsync("ORDER-NET-SALE", "1004", targetDate.AddHours(10), 1);
+        await SeedSaleDetailAsync("ORDER-NET-SALE", "DETAIL-NET-SALE", "P-NET", 5, 100m, "112");
+        await SeedPaymentAsync("PAY-NET-SALE", "ORDER-NET-SALE", 100m, targetDate.AddHours(10).AddMinutes(1));
+        await SeedOrderAsync("ORDER-NET-REFUND", "1004", targetDate.AddHours(11), 1, status: 3);
+        await SeedSaleDetailAsync("ORDER-NET-REFUND", "DETAIL-NET-REFUND", "P-NET", -1, -30m, "112");
+        await SeedPaymentAsync("PAY-NET-REFUND", "ORDER-NET-REFUND", -30m, targetDate.AddHours(11).AddMinutes(1));
+
+        var service = CreateService();
+        await service.UpdateStoreStatistics(targetDate);
+        await service.UpdateDailyStatistics(targetDate.ToString("yyyy-MM-dd"));
+        await service.UpdateHourlyStatistics(targetDate);
+        await service.UpdateSupplierStatistics(targetDate, targetDate);
+        await service.UpdateStoreSupplierStatistics(targetDate);
+        await service.UpdateProductStoreDailyStatistics(targetDate);
+
+        var store = await _localDb.Queryable<StoreSalesStatistic>()
+            .Where(row => row.Date == targetDate && row.BranchCode == "1004").SingleAsync();
+        Assert.Equal(70m, store.TotalAmount);
+        Assert.Equal(4, store.TotalQuantity);
+        Assert.Equal(1, store.OrderCount);
+        Assert.Equal(1, store.CustomerCount);
+        Assert.Equal(70m, store.AverageOrderValue);
+
+        var daily = await _localDb.Queryable<DailySalesStatistic>().Where(row => row.Date == targetDate).SingleAsync();
+        Assert.Equal(70m, daily.TotalAmount);
+        Assert.Equal(4, daily.TotalQuantity);
+        Assert.Equal(1, daily.OrderCount);
+
+        // 退款发生在 11 点：该小时金额为负、订单数为 0；分店全天合计仍与分店日统计相等。
+        var hourly = await _localDb.Queryable<HourlySalesStatistic>()
+            .Where(row => row.Date == targetDate && row.BranchCode == "1004").ToListAsync();
+        Assert.Equal(70m, hourly.Sum(row => row.TotalAmount));
+        Assert.Equal(1, hourly.Sum(row => row.OrderCount));
+        var refundHour = Assert.Single(hourly, row => row.Hour == 11);
+        Assert.Equal(-30m, refundHour.TotalAmount);
+        Assert.Equal(0, refundHour.OrderCount);
+
+        var supplier = await _localDb.Queryable<SupplierSalesStatistic>()
+            .Where(row => row.Date == targetDate && row.SupplierCode == "112").SingleAsync();
+        Assert.Equal(70m, supplier.TotalAmount);
+        Assert.Equal(4, supplier.TotalQuantity);
+        Assert.Equal(1, supplier.StoreCount);
+        Assert.Equal(1, supplier.OrderCount);
+
+        var storeSupplier = await _localDb.Queryable<StoreSupplierSalesDetail>()
+            .Where(row => row.Date == targetDate && row.BranchCode == "1004" && row.SupplierCode == "112").SingleAsync();
+        Assert.Equal(70m, storeSupplier.TotalAmount);
+        Assert.Equal(4, storeSupplier.TotalQuantity);
+        Assert.Equal(1, storeSupplier.OrderCount);
+
+        // 商品日统计：退款明细冲减金额与数量，退款单不让该商品多出一单；与分店日统计对账一致。
+        var product = await _localDb.Queryable<ProductStoreDailySalesStatistic>()
+            .Where(row => row.Date == targetDate && row.ProductCode == "P-NET").SingleAsync();
+        Assert.Equal(70m, product.TotalAmount);
+        Assert.Equal(4, product.TotalQuantity);
+        Assert.Equal(1, product.OrderCount);
+        var state = await _localDb.Queryable<SalesStatisticRefreshState>()
+            .Where(row => row.StatisticType == SalesStatisticType.ProductStoreDaily && row.Date == targetDate)
+            .FirstAsync();
+        Assert.Equal(SalesStatisticRefreshStatus.Fresh, state.Status);
+    }
+
+    [Fact]
     public async Task UpdateSupplierStatistics_局部国内供应商刷新不应覆盖本地200总计()
     {
         var targetDate = new DateTime(2026, 6, 17);
@@ -5227,7 +5296,8 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
         string orderGuid,
         string branchCode,
         DateTime orderTime,
-        int itemCount
+        int itemCount,
+        int status = 1
     )
     {
         await _posmDb.Insertable(new SalesOrder
@@ -5235,7 +5305,7 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
             OrderGuid = orderGuid,
             BranchCode = branchCode,
             OrderTime = orderTime,
-            Status = 1,
+            Status = status,
             ItemCount = itemCount,
             LastUploadTime = orderTime.AddMinutes(5),
         }).ExecuteCommandAsync();

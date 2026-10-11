@@ -380,6 +380,48 @@ public sealed class SalesStatisticsProductStoreDailyArchitectureContractTests
         Assert.Equal(1, CountOccurrences(commandWriter, "RollbackTranAsync"));
     }
 
+    /// <summary>
+    /// 金额/数量统计必须按净额并入退款单（Status=3），统一走 <see cref="SalesOrderStatusRules.NetSalesStatuses"/>。
+    /// 仍写死「Status == 1 || Status == 4」的只允许是数订单/客数、补充退货、已知的手动导入入口；
+    /// 新增写死处会让该统计回到毛额，与日结小票对不上，须在此登记理由。
+    /// </summary>
+    [Fact]
+    public void 写死订单状态1或4的查询只允许订单数_补充退货_手动导入()
+    {
+        var apiRoot = Path.Combine(FindRepoRoot(), "services/backend/BlazorApp.Api");
+        var allowed = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            // 订单数/客数：退款单不算一单
+            ["Features/SalesStatistics/DailyHourly/SalesStatisticsHourlyRefresher.cs"] = 1,
+            ["Features/SalesStatistics/DailyHourly/SalesStatisticsDailyHourlySlice.cs"] = 2,
+            ["Features/SalesStatistics/ProductStoreDaily/SalesStatisticsProductStoreDailySupportSlice.cs"] = 1,
+            // 补充退货（sales_return_record）与退款单自带的负数明细 GUID 不重合，并入 3 会重复冲减；
+            // 另含 2025 快照的订单行（订单数口径）
+            ["Features/SalesStatistics/ProductStoreDaily/Infrastructure/SalesStatisticsProductStoreDailySourceQueries.cs"] = 2,
+            ["Services/React/BatchProductSalesDiscountSnapshotSourceReader.cs"] = 3,
+            // 手动「导入 2025 全年」入口：自带一套按明细金额的口径且订单数按单号计，未并入退款单
+            ["Services/HBSalesRecordStatisticsService.cs"] = 1,
+        };
+        var pattern = new System.Text.RegularExpressions.Regex(
+            @"Status == 1 \|\| \w+\.Status == 4");
+        var actual = Directory
+            .EnumerateFiles(apiRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Select(path => (
+                Path: Path.GetRelativePath(apiRoot, path).Replace('\\', '/'),
+                Count: pattern.Matches(File.ReadAllText(path)).Count))
+            .Where(item => item.Count > 0)
+            .ToDictionary(item => item.Path, item => item.Count, StringComparer.Ordinal);
+
+        Assert.Equal(allowed.OrderBy(x => x.Key), actual.OrderBy(x => x.Key));
+
+        // 折扣事实聚合的原生 SQL：补充退货只认 1/4，销售明细与支付分母认 1/3/4。
+        var factReader = File.ReadAllText(Path.Combine(apiRoot, "Services/React/BatchProductSalesAnalysisFactReader.cs"));
+        Assert.Equal(1, CountOccurrences(factReader, "[Status] IN (1, 4)"));
+        Assert.Equal(2, CountOccurrences(factReader, "[Status] IN (1, 3, 4)"));
+    }
+
     private static string ReadRepoFile(string relativePath) =>
         File.ReadAllText(Path.Combine(FindRepoRoot(), relativePath));
 
