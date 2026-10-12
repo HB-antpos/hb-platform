@@ -315,7 +315,9 @@ public sealed class PosCartService
     public bool UpdateLineFromRemote(CartLine line, SellableItemDto item)
     {
         using var mutation = EnterMutationScope();
-        if (!_lines.Contains(line) || _preserveSharedSnapshotCatalogValues)
+        // 退货行是锁定行：远程复核不得改写它的价格、商品元数据和折扣基线，也不能清掉价格来源标记。
+        // 按条码查找的重载靠 FindLineByLookupCode 已排除退货行；本重载直接收行引用，必须显式拒绝。
+        if (line.IsReturnLine || !_lines.Contains(line) || _preserveSharedSnapshotCatalogValues)
         {
             return false;
         }
