@@ -285,7 +285,9 @@ internal sealed class CardRecoveryPresenter
                 LogRecoveredCardOrderCompleted(result.Order);
                 var printResult = await PrintRecoveredCardReceiptAsync(result.Order);
                 _onCardRecoveryOrderCompleted?.Invoke(result.Order);
-                await ShowRecoveredCardOrderDialogAsync(result, printResult);
+                // 中文注释：退款券面排在完成回调之后：订单完成状态先落定，券面打印慢或失败都不再影响它。
+                var voucherPrintResult = await PrintRecoveredRefundVouchersAsync(result.Order);
+                await ShowRecoveredCardOrderDialogAsync(result, printResult, voucherPrintResult);
                 if (result.HasPostCommitWarning)
                 {
                     // 打印、同步等收尾失败不能覆盖“金融提交已完成”的安全提示。
@@ -878,9 +880,97 @@ internal sealed class CardRecoveryPresenter
         return printResult;
     }
 
+    // 中文注释：恢复落单后补打退款代金券券面（刷卡/现金 + 退款券的混合退款，每张已签发的券一份）。
+    // 与 PrintRecoveredCardReceiptAsync 并列，两处“恢复完成”分支共用；口径与正常付款的 mixed-voucher-refund-print 一致。
+    // 返回 null = 本单无需出券（非退款单，或没有已签发的券：#725 补签失败时引用仍是占位串，Create 会滤掉）；
+    // 否则 Succeeded 表示全部券面打印成功。任何失败（含异常）只记日志并带回给弹窗/状态栏，绝不向上抛，
+    // 保证已打印的刷卡回单、订单完成状态和完成回调不受影响；单张失败也不阻断其余券。
+    private async Task<ReceiptPrintResult?> PrintRecoveredRefundVouchersAsync(LocalOrder order)
+    {
+        if (order.ActualAmount >= 0m)
+        {
+            return null;
+        }
+
+        IReadOnlyList<ReceiptDetails> documents;
+        try
+        {
+            documents = ReceiptRefundVoucherDocuments.Create(ReceiptQueryService.CreateReceipt(order));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            TryWriteRecoveredVoucherPrintWarning(
+                $"recovered refund voucher documents build failed orderGuid={order.OrderGuid:D} error={ex.GetType().Name}",
+                ex);
+            return new ReceiptPrintResult(false, ex.GetType().Name, order.OrderGuid);
+        }
+
+        if (documents.Count == 0)
+        {
+            return null;
+        }
+
+        var failedCount = 0;
+        string? firstFailure = null;
+        foreach (var document in documents)
+        {
+            ReceiptPrintResult result;
+            Exception? printException = null;
+            try
+            {
+                result = await PrintReceiptAsync(document, ReceiptPrintReason.VoucherRefundAuto);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                printException = ex;
+                result = new ReceiptPrintResult(false, ex.GetType().Name, order.OrderGuid);
+            }
+
+            if (result.Succeeded)
+            {
+                continue;
+            }
+
+            failedCount++;
+            firstFailure ??= string.IsNullOrWhiteSpace(result.Message) ? "unknown error" : result.Message;
+            // 日志只留券号尾部，完整券号等同可用凭证，不进日志。
+            TryWriteRecoveredVoucherPrintWarning(
+                $"recovered refund voucher print failed orderGuid={order.OrderGuid:D} " +
+                $"voucherTail={VoucherCodeLogFormat.Tail(document.RefundVoucher?.VoucherCode)} " +
+                $"error={printException?.GetType().Name ?? "print-result-failed"}",
+                printException);
+        }
+
+        if (failedCount == 0)
+        {
+            return new ReceiptPrintResult(true, string.Empty, order.OrderGuid);
+        }
+
+        // 多张券时带上失败张数，收银员才知道还有几张没出。
+        var failureMessage = documents.Count > 1
+            ? $"{failedCount}/{documents.Count} - {firstFailure}"
+            : firstFailure!;
+        return new ReceiptPrintResult(false, failureMessage, order.OrderGuid);
+    }
+
+    private static void TryWriteRecoveredVoucherPrintWarning(string message, Exception? exception)
+    {
+        try
+        {
+            ConsoleLog.WriteWarning("CardRecovery", message, exception: exception);
+        }
+        catch (Exception loggingException) when (
+            loggingException is not OutOfMemoryException and
+            not StackOverflowException)
+        {
+            // 诊断链自身失败不能反向影响券面打印之后的收尾。
+        }
+    }
+
     private async Task ShowRecoveredCardOrderDialogAsync(
         CardPaymentRecoveryResult result,
-        ReceiptPrintResult printResult)
+        ReceiptPrintResult printResult,
+        ReceiptPrintResult? voucherPrintResult)
     {
         if (result.Order is null)
         {
@@ -898,10 +988,27 @@ internal sealed class CardRecoveryPresenter
                 _localization.T("cardRecovery.dialog.message.autoPrintFailed"),
                 printResult.Message);
 
+        // 退款券面没打出来必须让收银员看到：并入弹窗文案、降为警告，同时写状态栏（弹窗关掉后仍可见）。
+        if (voucherPrintResult is { Succeeded: false })
+        {
+            var voucherMessage = string.Format(
+                _localization.CurrentCulture,
+                LocalizeOrFallback(
+                    "cardRecovery.dialog.message.voucherPrintFailed",
+                    "The refund voucher was not printed: {0}. Check the printer and reprint the refund voucher."),
+                voucherPrintResult.Message);
+            printMessage = $"{printMessage} {voucherMessage}";
+            RunPostCommitAction(
+                () => _setStatusMessage?.Invoke(voucherMessage),
+                "recovered refund voucher print status");
+        }
+
         ShowCardRecoveryResultDialog(new CardRecoveryResultDialogViewModel(
             _localization.T("cardRecovery.dialog.title.completed"),
             printMessage,
-            printResult.Succeeded ? CardRecoveryResultSeverity.Success : CardRecoveryResultSeverity.Warning,
+            printResult.Succeeded && voucherPrintResult is not { Succeeded: false }
+                ? CardRecoveryResultSeverity.Success
+                : CardRecoveryResultSeverity.Warning,
             result.Order.OrderGuid,
             result.Order.ActualAmount,
             details?.SessionId ?? GetCardRecoveryEvidence(result.Order).SessionId,
@@ -946,7 +1053,8 @@ internal sealed class CardRecoveryPresenter
             LogRecoveredCardOrderCompleted(result.Order);
             var printResult = await PrintRecoveredCardReceiptAsync(result.Order);
             _onCardRecoveryOrderCompleted?.Invoke(result.Order);
-            await ShowRecoveredCardOrderDialogAsync(result, printResult);
+            var voucherPrintResult = await PrintRecoveredRefundVouchersAsync(result.Order);
+            await ShowRecoveredCardOrderDialogAsync(result, printResult, voucherPrintResult);
             if (result.HasPostCommitWarning)
             {
                 ApplyRecoveryStatus(result);
@@ -1322,6 +1430,13 @@ internal sealed class CardRecoveryPresenter
     private async Task<ReceiptPrintResult> PrintReceiptAsync(ReceiptDetails receipt, ReceiptPrintReason reason)
     {
         return await _printReceiptAsync!(receipt, reason);
+    }
+
+    // 缺键时 ILocalizationService.T 返回 "[[key]]"，此时改用内置英文兜底，避免界面露出键名。
+    private string LocalizeOrFallback(string key, string fallback)
+    {
+        var value = _localization.T(key);
+        return string.IsNullOrWhiteSpace(value) || value == $"[[{key}]]" ? fallback : value;
     }
 
     private static string? GetCardRecoveryResponseCode(LocalOrder order)
