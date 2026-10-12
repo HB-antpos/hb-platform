@@ -58,6 +58,13 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     private long _matchesRefreshVersion;
     private CancellationTokenSource? _manualSearchCts;
     private long _manualSearchVersion;
+    // 收银会话的身份（门店 / 设备 / 收银员）。联机状态、待同步数等字段变化不算换会话，不应让在途补查作废。
+    private (string StoreCode, string DeviceCode, string CashierId) _sessionIdentity;
+    // 正在等远程补查结果的扫码：从补查发起到整条扫码链路（加购、促销排队、审计）结束才完成，供点击收款时等待。
+    private readonly List<TaskCompletionSource> _pendingRemoteLookupScans = [];
+    // 收款等待补查的预算计时走 TimeProvider，测试可注入 FakeTimeProvider。
+    private readonly TimeProvider _timeProvider;
+    private bool _isOpeningPayment;
     private bool _disposed;
 
     [ObservableProperty]
@@ -135,8 +142,10 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         IOperationAuthorizationService? operationAuthorizationService = null,
         Func<string?, string, CancellationToken, IReadOnlyList<SellableItemDto>>? searchCatalogMatches = null,
         Func<Guid, PosSessionState, CancellationToken, Task>? releaseSharedHeldOrderAsync = null,
-        Func<Task>? onOpenCardRecoveryCenterAsync = null)
+        Func<Task>? onOpenCardRecoveryCenterAsync = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _priceIndex = priceIndex;
         _searchCatalogMatches = searchCatalogMatches ?? ((storeCode, query, cancellationToken) =>
             _priceIndex.Search(storeCode, query, cancellationToken));
@@ -164,6 +173,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             onOpenCardRecoveryCenterAsync);
         _scanController = new PosTerminalScanController(cart);
         _session = session;
+        _sessionIdentity = GetSessionIdentity(session);
         _localization = localization;
         _userFeedbackService = userFeedbackService ?? NoopUserFeedbackService.Instance;
         _cashierSessionContext = cashierSessionContext ?? new CashierSessionContext();
@@ -386,6 +396,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         _disposed = true;
+        // 页面销毁后（重新登录、锁定重建等）旧页面里仍在途的补查结果不得再改动共享购物车。
+        _workflowService.AdvanceCartGeneration("view-model-disposed");
         CancelMatchesRefresh();
         CancelManualSearch();
         if (_localization is not null)
@@ -439,6 +451,14 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     partial void OnSessionChanged(PosSessionState value)
     {
         CancelManualSearch();
+        var sessionIdentity = GetSessionIdentity(value);
+        if (sessionIdentity != _sessionIdentity)
+        {
+            // 换门店 / 设备 / 收银员：此前扫码发起的补查结果不属于新会话，作废。
+            _sessionIdentity = sessionIdentity;
+            _workflowService.AdvanceCartGeneration("session-changed");
+        }
+
         if (value.CashierSession is not null)
         {
             _cashierSessionContext.SetCurrent(value.CashierSession);
@@ -557,11 +577,22 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         IsLastSaleVisible = false;
     }
 
+    private static (string StoreCode, string DeviceCode, string CashierId) GetSessionIdentity(PosSessionState session)
+    {
+        return (session.StoreCode, session.DeviceCode, session.CashierId);
+    }
+
     private void OnCartChanged(object? sender, EventArgs e)
     {
         if (!_cart.IsEmpty)
         {
             DismissLastSale();
+        }
+        else
+        {
+            // 购物车变空：不论是本页清空，还是付款完成 / 挂单 / 其它流程清空了共享购物车，都意味着换了一单。
+            // 此前扫码发起、还没回来的补查结果不能落进下一单。
+            _workflowService.AdvanceCartGeneration("cart-emptied");
         }
 
         _cartChangedSequence++;
@@ -1319,29 +1350,114 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private async Task OpenPaymentAsync()
     {
-        using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Payment.View, "open-payment");
-        if (permissionGrant is null)
+        // 补查期间收款会先等待，这段时间内重复点击不能把付款页打开两次。
+        if (_isOpeningPayment)
         {
             return;
         }
 
-        // 进入支付前等待本轮促销尝试结束，避免使用过期金额。
-        using var authorizationActivation = permissionGrant.Activate();
-        await WaitForPendingPromotionEvaluationAsync();
-
-        var stopwatch = Stopwatch.StartNew();
-        var result = _workflowService.GuardPayment();
-        ApplyWorkflowResult(result);
-        if (!result.PaymentAllowed)
+        _isOpeningPayment = true;
+        try
         {
+            using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Payment.View, "open-payment");
+            if (permissionGrant is null)
+            {
+                return;
+            }
+
+            using var authorizationActivation = permissionGrant.Activate();
+            // 刚扫的商品可能还在远程补查：先等在途补查结束（最多 2 秒，await 不阻塞 UI），商品加进购物车后再收款，
+            // 否则带着缺商品的购物车进付款页，迟到的结果只能被丢弃，收银员却以为已经扫进去了。
+            await WaitForPendingRemoteLookupsAsync();
+            // 进入支付前等待本轮促销尝试结束，避免使用过期金额。
+            await WaitForPendingPromotionEvaluationAsync();
+
+            // 等待期间购物车可能被清空或页面已销毁：沿用「购物车为空不可收款」的规则，不进付款页。
+            if (_disposed || _cart.IsEmpty)
+            {
+                return;
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            var result = _workflowService.GuardPayment();
+            ApplyWorkflowResult(result);
+            if (!result.PaymentAllowed)
+            {
+                stopwatch.Stop();
+                return;
+            }
+
+            PaymentRequested?.Invoke(this, EventArgs.Empty);
+            _actions.OpenPayment?.Invoke();
             stopwatch.Stop();
+            LogCartOperation("open-payment", (CartLine?)null, success: true, stopwatch.ElapsedMilliseconds);
+        }
+        finally
+        {
+            _isOpeningPayment = false;
+        }
+    }
+
+    /// <summary>
+    /// 等待点击收款时已在途的远程补查结束（加购、超时、未找到、被丢弃都算结束）。
+    /// 只等点击那一刻已经发起的补查，之后才扫的商品不在范围内；最长等一个补查超时，
+    /// 补查自身一旦卡死（回调不响应取消）也不会把收款拖住，超时后照常收款，迟到的结果按世代规则丢弃。
+    /// </summary>
+    private async Task WaitForPendingRemoteLookupsAsync()
+    {
+        Task[] pendingScans;
+        lock (_pendingRemoteLookupScans)
+        {
+            if (_pendingRemoteLookupScans.Count == 0)
+            {
+                return;
+            }
+
+            pendingScans = _pendingRemoteLookupScans.Select(scan => scan.Task).ToArray();
+        }
+
+        var allCompleted = Task.WhenAll(pendingScans);
+        if (allCompleted.IsCompleted)
+        {
             return;
         }
 
-        PaymentRequested?.Invoke(this, EventArgs.Empty);
-        _actions.OpenPayment?.Invoke();
-        stopwatch.Stop();
-        LogCartOperation("open-payment", (CartLine?)null, success: true, stopwatch.ElapsedMilliseconds);
+        using var delayCancellation = new CancellationTokenSource();
+        var budget = Task.Delay(PosTerminalWorkflowService.RemoteLookupTimeout, _timeProvider, delayCancellation.Token);
+        var finished = await Task.WhenAny(allCompleted, budget);
+        delayCancellation.Cancel();
+        if (!ReferenceEquals(finished, allCompleted))
+        {
+            ConsoleLog.Write(
+                "PosScan",
+                $"open-payment wait for remote lookup timed out pendingScans={pendingScans.Length} timeoutMs={PosTerminalWorkflowService.RemoteLookupTimeout.TotalMilliseconds:0}");
+        }
+    }
+
+    private TaskCompletionSource RegisterPendingRemoteLookupScan()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_pendingRemoteLookupScans)
+        {
+            _pendingRemoteLookupScans.Add(completion);
+        }
+
+        return completion;
+    }
+
+    private void CompletePendingRemoteLookupScan(TaskCompletionSource? completion)
+    {
+        if (completion is null)
+        {
+            return;
+        }
+
+        lock (_pendingRemoteLookupScans)
+        {
+            _pendingRemoteLookupScans.Remove(completion);
+        }
+
+        completion.TrySetResult();
     }
 
     private async Task OpenReturnsAsync()
@@ -1353,6 +1469,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         using var authorizationActivation = permissionGrant.Activate();
+        // 退货页会往同一个购物车里加退货行：离开收银页前先作废在途补查，避免销售商品稍后混进退货单。
+        _workflowService.AdvanceCartGeneration("open-returns");
         _actions.OpenReturns?.Invoke();
     }
 
@@ -1382,6 +1500,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         // 挂单会持久化金额，必须先等当前促销重算完成。
         using var authorizationActivation = permissionGrant.Activate();
         await WaitForPendingPromotionEvaluationAsync();
+        // 挂单保存的是此刻的购物车：此后才回来的补查结果不能再混进这一单（保存完购物车就被清空，商品会凭空丢失）。
+        _workflowService.AdvanceCartGeneration("hold-order");
 
         if (_actions.HoldOrderAsync is not null)
         {
@@ -1403,6 +1523,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         using var authorizationActivation = permissionGrant.Activate();
+        // 取单会把另一单恢复进购物车，属于换单：作废取单前发起的在途补查。
+        _workflowService.AdvanceCartGeneration("recall-order");
         if (_actions.RecallOrderAsync is not null)
         {
             // 这里仅导航到暂存订单列表，真实取单成功由 TransactionHistoryViewModel 记录。
@@ -1662,6 +1784,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         var workflowStopwatch = Stopwatch.StartNew();
         PosTerminalWorkflowResult result;
         var applyStopwatch = new Stopwatch();
+        // 补查发起时登记，整条扫码链路结束（含 finally）才完成；点击收款时据此等待在途补查。
+        TaskCompletionSource? remoteLookupCompletion = null;
         try
         {
             var hasCashierSession = _cashierSessionContext.CurrentSession is not null || Session.CashierSession is not null;
@@ -1695,12 +1819,42 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
             var auditBefore = OperationAuditEvents.CaptureCart(_cart.Lines);
             var previousSequence = _cartChangedSequence;
+            var remoteLookupDispatched = false;
+            var remoteLookupApplied = false;
+            var scanHooks = new PosScanHooks
+            {
+                // 本地未命中后远程补查最长要等 2 秒：发起的同一时刻就切换状态栏并给一次受理提示音，
+                // 不然收银员看不到任何反应，多半会再扫一次。
+                OnInterimResult = interimResult =>
+                {
+                    remoteLookupDispatched = true;
+                    remoteLookupCompletion ??= RegisterPendingRemoteLookupScan();
+                    if (isCurrent is not null && !isCurrent())
+                    {
+                        return;
+                    }
+
+                    ApplyWorkflowResult(interimResult, statusTextOverrideFactory?.Invoke(interimResult));
+                },
+                // 补查结果回来时购物车可能已被别的扫码改动过：审计前快照与促销排队基线必须取在这一次加购之前，
+                // 否则前后快照会把等待期间其它扫码的商品一并记进这一条审计。
+                OnBeforeRemoteApply = () =>
+                {
+                    remoteLookupApplied = true;
+                    auditBefore = OperationAuditEvents.CaptureCart(_cart.Lines);
+                    previousSequence = _cartChangedSequence;
+                    // 等待期间别的扫码可能已把当前扫码的 trace 信息清掉，补回来让后续购物车日志仍能串起这次扫码。
+                    _activeScanTraceId = plan.TraceId;
+                    _activeScanStartedAt = plan.StartedAt;
+                }
+            };
             result = await _workflowService.ProcessScanAsync(
                 Session,
                 plan.Barcode,
                 plan.PreferExactLookup,
                 plan.Source,
                 plan.TraceId,
+                scanHooks,
                 cancellationToken);
             workflowStopwatch.Stop();
             cancellationToken.ThrowIfCancellationRequested();
@@ -1726,24 +1880,31 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             applyStopwatch.Start();
             ApplyWorkflowResult(result, statusTextOverrideFactory?.Invoke(result));
             applyStopwatch.Stop();
-            QueuePromotionEvaluationIfCartChanged(previousSequence, "scan");
-            var auditAfter = OperationAuditEvents.CaptureCart(_cart.Lines);
-            if (OperationAuditEvents.HasChanged(auditBefore, auditAfter))
+            // 远程补查已发起却没有加购（超时、未找到、结果被丢弃）时，这次扫码并没有改动购物车：
+            // 等待期间购物车的变化属于别的操作，不能触发促销排队，也不能记成这次扫码的审计。
+            if (!remoteLookupDispatched || remoteLookupApplied)
             {
-                OperationAuditEvents.RecordCartChange(
-                    _operationAuditLogger,
-                    OperationAuditTypes.CartItemAdd,
-                    Session,
-                    auditBefore,
-                    auditAfter,
-                    reasonCode: "SCAN",
-                    traceId: plan.TraceId);
+                QueuePromotionEvaluationIfCartChanged(previousSequence, "scan");
+                var auditAfter = OperationAuditEvents.CaptureCart(_cart.Lines);
+                if (OperationAuditEvents.HasChanged(auditBefore, auditAfter))
+                {
+                    OperationAuditEvents.RecordCartChange(
+                        _operationAuditLogger,
+                        OperationAuditTypes.CartItemAdd,
+                        Session,
+                        auditBefore,
+                        auditAfter,
+                        reasonCode: "SCAN",
+                        traceId: plan.TraceId);
+                }
             }
         }
         finally
         {
             _activeScanTraceId = null;
             _activeScanStartedAt = null;
+            // 加购、促销排队、审计都已处理完（或扫码被取消 / 出错），可以放行等待中的收款。
+            CompletePendingRemoteLookupScan(remoteLookupCompletion);
         }
 
         totalStopwatch.Stop();
@@ -2215,6 +2376,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos.status.added" => (StatusFeedbackKind.Success, UserFeedbackCue.ScanAdded),
             "pos.status.multipleMatches" => (StatusFeedbackKind.Warning, UserFeedbackCue.ScanMultipleMatches),
             "pos.status.noLocalMatch" => (StatusFeedbackKind.Error, UserFeedbackCue.ScanNoMatch),
+            // 远程补查开始：沿用现有的按键点击音作为「扫码已受理」，不新增音效；加购成功时仍会播 ScanAdded。
+            "pos.status.remoteLookupStarted" => (StatusFeedbackKind.Neutral, UserFeedbackCue.ButtonClick),
+            // 同码重复扫码只提示，不再响一次，避免让收银员误以为又加了一件。
+            "pos.status.remoteLookupInProgress" => (StatusFeedbackKind.Warning, null),
+            // 结果被丢弃意味着这件商品没有进购物车，需要收银员重扫，用错误音提醒。
+            "pos.status.remoteLookupDiscarded" => (StatusFeedbackKind.Warning, UserFeedbackCue.OperationError),
             "cart.status.zeroPriceItem" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "cart.status.quantityMustBeInteger" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.sharedHeldOrderReleaseFailed" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),

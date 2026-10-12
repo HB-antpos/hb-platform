@@ -477,6 +477,15 @@
   <data name="pos.status.noLocalMatch" xml:space="preserve">
     <value>未在本地找到商品，可继续离线结账。</value>
   </data>
+  <data name="pos.status.remoteLookupStarted" xml:space="preserve">
+    <value>正在查询商品...</value>
+  </data>
+  <data name="pos.status.remoteLookupInProgress" xml:space="preserve">
+    <value>该商品仍在查询中，请勿重复扫码。</value>
+  </data>
+  <data name="pos.status.remoteLookupDiscarded" xml:space="preserve">
+    <value>查询期间购物车已变化，该商品未加入，请重新扫码。</value>
+  </data>
   <data name="pos.status.multipleMatches" xml:space="preserve">
     <value>找到 {0} 个商品，请选择后加入。</value>
   </data>
