@@ -5,22 +5,37 @@ namespace Hbpos.Client.Wpf.Services;
 public sealed class LocalSellableItemIndex
 {
     private const int CancellationCheckInterval = 256;
+    private const int MaxPartialSelectTake = 64;
     private readonly object _gate = new();
-    private readonly List<SellableItemDto> _items = [];
-    private readonly Dictionary<ExactLookupKey, List<SellableItemDto>> _exactLookupIndex = [];
-    private readonly Dictionary<ExactLookupKey, List<SellableItemDto>> _metadataLookupIndex = [];
+
+    // 顺序约定：_items 按"到达顺序"保存（ReplaceAll 传入顺序，Upsert 追加在末尾），不再做全局文化排序。
+    // 对外可见的"全局顺序"定义为：对 _items 按 DisplayName（CurrentCultureIgnoreCase）做稳定排序，
+    // 即名称相同的商品保持到达顺序，与旧实现（OrderBy 稳定排序 + Upsert 插在相等项之后）完全等价。
+    // GetFirst / Search / Items 都按这一定义在读取时选择或排序，避免启动时对几十万行做文化排序。
+    // 下面三个字段在 ReplaceAll 时整体换引用（锁内只换引用），Upsert/Remove 才在锁内原地修改。
+    private List<SellableItemDto> _items = [];
+    private Dictionary<ExactLookupKey, List<SellableItemDto>> _exactLookupIndex = [];
+    private Dictionary<ExactLookupKey, List<SellableItemDto>> _metadataLookupIndex = [];
 
     internal Action<string, int>? SearchProgressForTests { get; set; }
     internal Action? ExactLookupGateWaitForTests { get; set; }
+    // 测试钩子：GetFirst 已释放锁、尚未开始选择时调用，用于确定性验证选择期间不占锁。
+    internal Action? GetFirstSelectionStartedForTests { get; set; }
 
     public IReadOnlyList<SellableItemDto> Items
     {
         get
         {
+            SellableItemDto[] snapshot;
             lock (_gate)
             {
-                return _items.ToArray();
+                snapshot = _items.ToArray();
             }
+
+            // 排序放在锁外：Items 只给兜底路径和测试用，按全局顺序定义做稳定排序。
+            return snapshot
+                .OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray();
         }
     }
 
@@ -43,25 +58,87 @@ public sealed class LocalSellableItemIndex
         }
 
         var normalizedStoreCode = Normalize(storeCode);
+        // 锁内只拷贝引用数组（35 万条约 1ms）；门店过滤和文化比较都放到锁外，
+        // 避免扫码线程的 FindExactMatches 在选择期间等同一把锁。
+        SellableItemDto[] snapshot;
         lock (_gate)
         {
-            return _items
-                .Where(item => normalizedStoreCode.Length == 0 || Normalize(item.StoreCode) == normalizedStoreCode)
+            snapshot = _items.ToArray();
+        }
+
+        GetFirstSelectionStartedForTests?.Invoke();
+
+        var filtered = snapshot.Where(item =>
+            normalizedStoreCode.Length == 0 || Normalize(item.StoreCode) == normalizedStoreCode);
+        if (take > MaxPartialSelectTake)
+        {
+            // take 很大时插入选择不划算，直接稳定排序后截取。
+            return filtered
+                .OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
                 .Take(take)
                 .ToArray();
         }
+
+        // 部分选择：保持一个按名称有序的前 take 名列表，O(N) 扫描一遍即可；
+        // 相等名称视为"后到者排后"，等价于对 _items 做稳定排序后取前 take 个。
+        var comparer = StringComparer.CurrentCultureIgnoreCase;
+        var top = new List<SellableItemDto>(take + 1);
+        foreach (var item in filtered)
+        {
+            if (top.Count == take && comparer.Compare(item.DisplayName, top[^1].DisplayName) >= 0)
+            {
+                continue;
+            }
+
+            var position = top.Count;
+            while (position > 0 && comparer.Compare(top[position - 1].DisplayName, item.DisplayName) > 0)
+            {
+                position--;
+            }
+
+            top.Insert(position, item);
+            if (top.Count > take)
+            {
+                top.RemoveAt(top.Count - 1);
+            }
+        }
+
+        return top.ToArray();
     }
 
     public void ReplaceAll(IEnumerable<SellableItemDto> items)
     {
-        var orderedItems = items
-            .OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
-        var (exactLookupIndex, metadataLookupIndex) = BuildIndexes(orderedItems);
+        // 全部在锁外完成：物化、建索引、对同码多商品的桶排序；锁内只交换三个引用，
+        // 扫码线程（FindExactMatches 要拿同一把锁）因此不会被整表重建阻塞。
+        var arrivalItems = items as List<SellableItemDto> ?? items.ToList();
+        var (exactLookupIndex, metadataLookupIndex) = BuildIndexes(arrivalItems);
+        SortMultiItemBuckets(exactLookupIndex);
+        SortMultiItemBuckets(metadataLookupIndex);
+        // 防止调用方之后修改传入列表而影响索引，拷贝一份（仅数组拷贝，毫秒级）。
+        var snapshotItems = new List<SellableItemDto>(arrivalItems);
 
         lock (_gate)
         {
-            ReplaceLocked(orderedItems, exactLookupIndex, metadataLookupIndex);
+            ReplaceLocked(snapshotItems, exactLookupIndex, metadataLookupIndex);
+        }
+    }
+
+    // 桶内顺序必须与"全局稳定排序"一致：OrderBy 是稳定排序，桶按到达顺序建好后稳定排序即等价。
+    // 绝大多数桶只有 1 项，只处理 Count>1 的桶。
+    private static void SortMultiItemBuckets(Dictionary<ExactLookupKey, List<SellableItemDto>> index)
+    {
+        foreach (var bucket in index.Values)
+        {
+            if (bucket.Count < 2)
+            {
+                continue;
+            }
+
+            var sorted = bucket
+                .OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            bucket.Clear();
+            bucket.AddRange(sorted);
         }
     }
 
@@ -136,12 +213,12 @@ public sealed class LocalSellableItemIndex
     private static (
         Dictionary<ExactLookupKey, List<SellableItemDto>> ExactLookupIndex,
         Dictionary<ExactLookupKey, List<SellableItemDto>> MetadataLookupIndex) BuildIndexes(
-        IReadOnlyList<SellableItemDto> orderedItems)
+        IReadOnlyList<SellableItemDto> arrivalItems)
     {
         var exactLookupIndex = new Dictionary<ExactLookupKey, List<SellableItemDto>>();
         var metadataLookupIndex = new Dictionary<ExactLookupKey, List<SellableItemDto>>();
 
-        foreach (var item in orderedItems)
+        foreach (var item in arrivalItems)
         {
             AddLookup(exactLookupIndex, item, item.LookupCode);
             AddLookup(metadataLookupIndex, item, item.Barcode);
@@ -153,23 +230,14 @@ public sealed class LocalSellableItemIndex
     }
 
     private void ReplaceLocked(
-        IEnumerable<SellableItemDto> orderedItems,
+        List<SellableItemDto> arrivalItems,
         Dictionary<ExactLookupKey, List<SellableItemDto>> exactLookupIndex,
         Dictionary<ExactLookupKey, List<SellableItemDto>> metadataLookupIndex)
     {
-        _items.Clear();
-        _items.AddRange(orderedItems);
-        _exactLookupIndex.Clear();
-        foreach (var pair in exactLookupIndex)
-        {
-            _exactLookupIndex[pair.Key] = pair.Value;
-        }
-
-        _metadataLookupIndex.Clear();
-        foreach (var pair in metadataLookupIndex)
-        {
-            _metadataLookupIndex[pair.Key] = pair.Value;
-        }
+        // 只换引用：新对象在锁外已构建完成且之后只经由本类的锁访问，读取方要么看到旧快照要么看到新快照。
+        _items = arrivalItems;
+        _exactLookupIndex = exactLookupIndex;
+        _metadataLookupIndex = metadataLookupIndex;
     }
 
     private bool RemoveLookupLocked(ExactLookupKey key)
@@ -206,7 +274,8 @@ public sealed class LocalSellableItemIndex
 
     private void InsertItemLocked(SellableItemDto item)
     {
-        _items.Insert(FindInsertionIndex(_items, item), item);
+        // _items 按到达顺序保存，追加即可；桶内仍需保持名称有序（相等项排在后面）。
+        _items.Add(item);
         AddLookup(_exactLookupIndex, item, item.LookupCode, keepSorted: true);
         AddLookup(_metadataLookupIndex, item, item.Barcode, keepSorted: true);
         AddLookup(_metadataLookupIndex, item, item.ItemNumber, keepSorted: true);
