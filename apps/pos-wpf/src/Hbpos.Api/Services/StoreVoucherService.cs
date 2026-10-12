@@ -377,6 +377,84 @@ internal static class StoreVoucherQueryableExtensions
     }
 }
 
+/// <summary>
+/// 代金券预占与开券幂等的并发闸门：SQL Server 上取事务级 sp_getapplock，提交或回滚时自动释放。
+/// 不用 UPDLOCK/HOLDLOCK 行锁的原因：开券幂等查找是备注 LIKE 全表扫描、键对应行此时还不存在，
+/// HOLDLOCK 只能锁住整张表的范围，并发开券各自插入时互相死锁；预占读券行的查询带 OR 与 ORDER BY，
+/// 锁住的范围取决于执行计划和券码索引。applock 只按券码/幂等键互斥，与索引无关，且总是事务里第一把锁，
+/// 加锁顺序固定。非 SQL Server（单元测试的 SQLite）没有 applock，直接跳过。
+/// </summary>
+internal static class StoreVoucherMutationLock
+{
+    internal const string ReadCommittedHint = "WITH(READCOMMITTED)";
+
+    internal const string AppLockSql = """
+        DECLARE @Result int;
+        EXEC @Result = sys.sp_getapplock
+            @Resource = @Resource,
+            @LockMode = N'Exclusive',
+            @LockOwner = N'Transaction',
+            @LockTimeout = 15000;
+        SELECT @Result;
+        """;
+
+    // sp_getapplock 的资源名上限 255 字符，且按二进制比较（区分大小写）。
+    private const int MaxResourceLength = 255;
+
+    internal static string BuildVoucherResource(string voucherCode)
+    {
+        // 券码比较走库排序规则（不区分大小写），资源名统一大写，保证 v001 与 V001 抢同一把锁。
+        var resource = $"hbpos-voucher:{voucherCode.Trim().ToUpperInvariant()}";
+        return resource.Length <= MaxResourceLength
+            ? resource
+            : $"hbpos-voucher:{HashHex(voucherCode.Trim().ToUpperInvariant())}";
+    }
+
+    internal static string BuildIdempotencyResource(string codePrefix, string? storeCode, string idempotencyKey)
+    {
+        // 幂等键可能很长，取哈希控制长度；前缀与门店都进入资源名，与幂等查找的过滤条件一致。
+        var normalizedStoreCode = string.IsNullOrWhiteSpace(storeCode) ? string.Empty : storeCode.Trim().ToUpperInvariant();
+        return $"hbpos-voucher-issue:{codePrefix}:{HashHex($"{normalizedStoreCode}\n{idempotencyKey.Trim()}")}";
+    }
+
+    internal static async Task AcquireAsync(ISqlSugarClient db, string resource)
+    {
+        if (db.CurrentConnectionConfig.DbType != SqlSugar.DbType.SqlServer)
+        {
+            return;
+        }
+
+        var result = await db.Ado.SqlQuerySingleAsync<int>(
+            AppLockSql,
+            new SugarParameter("@Resource", resource));
+        if (result < 0)
+        {
+            throw new InvalidOperationException("Voucher is busy with another request. Please retry.");
+        }
+    }
+
+    /// <summary>
+    /// SQL Server 的 LIKE 把 [ 当作字符集开头，而幂等标记形如 IssueKey[...]，不转义就永远匹配不到已开的券，
+    /// 每次重试都会再开一张。SqlSugar 的 Contains/StartsWith 不做转义，这里把 [ 写成 [[]。
+    /// SQLite 的 LIKE 没有字符集语法，原样返回。
+    /// </summary>
+    internal static string EscapeLikeLiteral(ISqlSugarClient db, string value)
+    {
+        if (db.CurrentConnectionConfig.DbType != SqlSugar.DbType.SqlServer)
+        {
+            return value;
+        }
+
+        return value
+            .Replace("[", "[[]", StringComparison.Ordinal)
+            .Replace("%", "[%]", StringComparison.Ordinal)
+            .Replace("_", "[_]", StringComparison.Ordinal);
+    }
+
+    private static string HashHex(string value) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+}
+
 public sealed class SqlSugarStoreVoucherRepository(HbposSqlSugarContext dbContext) : IStoreVoucherRepository
 {
     public async Task<StoreVoucher?> FindAvailableAsync(
@@ -543,6 +621,11 @@ public sealed class SqlSugarStoreVoucherRepository(HbposSqlSugarContext dbContex
             await dbContext.PosmDb.Ado.BeginTranAsync(IsolationLevel.Serializable);
             try
             {
+                // 关键逻辑：同一幂等键的并发重试必须串行，否则双方都查不到对方未提交的券、各开一张。
+                // 幂等查找是备注 LIKE 全表扫描，不能靠 UPDLOCK/HOLDLOCK 行锁兜底（见 StoreVoucherMutationLock）。
+                await StoreVoucherMutationLock.AcquireAsync(
+                    dbContext.PosmDb,
+                    StoreVoucherMutationLock.BuildIdempotencyResource(request.CodePrefix, request.StoreCode, request.IdempotencyKey));
                 var existing = await FindVoucherByIdempotencyKeyAsync(request, cancellationToken);
                 if (existing is not null)
                 {
@@ -592,13 +675,20 @@ public sealed class SqlSugarStoreVoucherRepository(HbposSqlSugarContext dbContex
         VoucherCreatePersistenceModel request,
         CancellationToken cancellationToken)
     {
+        var db = dbContext.PosmDb;
         var marker = request.BuildIdempotencyMarker(request.IdempotencyKey);
-        var query = dbContext.PosmDb.Queryable<StoreVoucher>()
+        var refundPrefixPattern = StoreVoucherMutationLock.EscapeLikeLiteral(db, marker + StoreVoucherRefundMarker.Separator);
+        var issueMarkerPattern = StoreVoucherMutationLock.EscapeLikeLiteral(db, marker);
+        // 关键逻辑：全局 IsWithNoLockQuery 会加 WITH(NOLOCK) 脏读；去掉 NOLOCK 又会在 Serializable 事务里
+        // 对全表扫描持有范围锁，并发开券互相插入时死锁。READCOMMITTED 只读已提交数据且不保留范围锁，
+        // 同一幂等键的串行化由上面的 applock 保证。
+        var query = db.Queryable<StoreVoucher>()
+            .With(StoreVoucherMutationLock.ReadCommittedHint)
             .Where(x => x.IsDelete == null || x.IsDelete == false);
         // 退款券以唯一的首段 marker 归属；普通发券保留既有备注格式，避免扩大本次安全变更。
         query = request.CodePrefix == "RF"
-            ? query.Where(x => x.Remark != null && x.Remark.StartsWith(marker + StoreVoucherRefundMarker.Separator))
-            : query.Where(x => x.Remark != null && x.Remark.Contains(marker));
+            ? query.Where(x => x.Remark != null && x.Remark.StartsWith(refundPrefixPattern))
+            : query.Where(x => x.Remark != null && x.Remark.Contains(issueMarkerPattern));
         query = string.IsNullOrWhiteSpace(request.StoreCode)
             ? query.Where(x => x.StoreCode == null || x.StoreCode == string.Empty)
             : query.Where(x => x.StoreCode == request.StoreCode);
@@ -817,9 +907,26 @@ public sealed class SqlSugarStoreVoucherReservationService(
                 normalizedStoreCode,
                 normalizedVoucherCode,
                 requestedAmount);
+            // 关键逻辑：全局 IsWithNoLockQuery 会给下面两条读加 WITH(NOLOCK)，表提示覆盖 Serializable，
+            // 两台 POS 同时预占同一张券时都读到「已预占 0」，各拿一张满额 token，后上传的一单永远余额不足。
+            // 按券码取事务级 applock 串行化同一张券的预占（券码对应行可能无索引、查询带 OR/ORDER BY，
+            // UPDLOCK/HOLDLOCK 的锁范围依赖执行计划，见 StoreVoucherMutationLock）。
+            await StoreVoucherMutationLock.AcquireAsync(
+                db,
+                StoreVoucherMutationLock.BuildVoucherResource(normalizedVoucherCode));
             var now = _timeProvider.GetUtcNow();
             var nowUtc = now.UtcDateTime;
+            // 先汇总已预占、再读余额：上传事务是「先 claim 预占、再扣余额」同一事务提交，
+            // 这个顺序下任何交错都只会少算可预占额，不会把已 claim 但尚未扣减的金额算成可用。
+            var reservedAmount = await db.Queryable<StoreVoucherReservationEntity>()
+                .With(StoreVoucherMutationLock.ReadCommittedHint)
+                .Where(x => x.StoreCode == normalizedStoreCode)
+                .Where(x => x.VoucherCode == normalizedVoucherCode)
+                .Where(x => x.Status == PendingStatus)
+                .Where(x => x.ExpiresAtUtc > nowUtc)
+                .SumAsync(x => x.LockedAmount);
             var voucher = await db.Queryable<StoreVoucher>()
+                .With(StoreVoucherMutationLock.ReadCommittedHint)
                 .Where(x => x.VoucherCode == normalizedVoucherCode)
                 .Where(x => x.Status == "1")
                 .Where(x => x.IsDelete == null || x.IsDelete == false)
@@ -829,12 +936,6 @@ public sealed class SqlSugarStoreVoucherReservationService(
                 .OrderByExactStoreFirst(normalizedStoreCode)
                 .FirstAsync(cancellationToken)
                 ?? throw new InvalidOperationException("Voucher is unavailable.");
-            var reservedAmount = await db.Queryable<StoreVoucherReservationEntity>()
-                .Where(x => x.StoreCode == normalizedStoreCode)
-                .Where(x => x.VoucherCode == normalizedVoucherCode)
-                .Where(x => x.Status == PendingStatus)
-                .Where(x => x.ExpiresAtUtc > nowUtc)
-                .SumAsync(x => x.LockedAmount);
             var lockableAmount = Math.Min(
                 requestedAmount,
                 Math.Max(0m, (voucher.RemainingAmount ?? 0m) - reservedAmount));
