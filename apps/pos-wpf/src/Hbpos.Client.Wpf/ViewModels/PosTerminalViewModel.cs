@@ -1051,10 +1051,30 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         ExecuteCartMutation("decrease-line", () => _workflowService.DecreaseLine(lineSnapshot));
     }
 
+    /// <summary>
+    /// 工作流给出了退货行拒绝提示时，直接按错误态展示（状态栏 + 错误音）并返回 true；
+    /// 调用方据此在弹授权 / 主管 PIN 之前就返回，不为一个注定被拒绝的操作索要授权。
+    /// </summary>
+    private bool TryShowRejectionBeforeAuthorization(PosTerminalWorkflowResult? rejection)
+    {
+        if (rejection is null)
+        {
+            return false;
+        }
+
+        ApplyWorkflowResult(rejection);
+        return true;
+    }
+
     private async Task ModifySelectedLineQuantityAsync()
     {
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
+        if (TryShowRejectionBeforeAuthorization(_workflowService.GetQuantityEditRejection(lineSnapshot)))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Sales.ChangeQuantity, "modify-quantity");
         if (permissionGrant is null)
         {
@@ -1069,6 +1089,11 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     {
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
+        if (TryShowRejectionBeforeAuthorization(_workflowService.GetPriceEditRejection(lineSnapshot)))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Sales.ChangePrice, "modify-price");
         if (permissionGrant is null)
         {
@@ -1087,6 +1112,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
         var isWholeOrderSnapshot = IsWholeOrderOperation;
+        // 选中退货行（或整单模式下购物车含退货行）的折扣注定被拒绝：先提示，不弹授权 / 主管 PIN。
+        if (TryShowRejectionBeforeAuthorization(_workflowService.GetDiscountRejection(lineSnapshot, isWholeOrderSnapshot)))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(permissionCode, "manual-discount-amount");
         if (permissionGrant is null)
         {
@@ -1105,6 +1136,11 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
         var isWholeOrderSnapshot = IsWholeOrderOperation;
+        if (TryShowRejectionBeforeAuthorization(_workflowService.GetDiscountRejection(lineSnapshot, isWholeOrderSnapshot)))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(permissionCode, "manual-discount-percent");
         if (permissionGrant is null)
         {
@@ -1131,6 +1167,11 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         var lineSnapshot = SelectedCartLine;
         var isWholeOrderSnapshot = IsWholeOrderOperation;
         var valueSnapshot = value;
+        if (TryShowRejectionBeforeAuthorization(_workflowService.GetDiscountRejection(lineSnapshot, isWholeOrderSnapshot)))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(permissionCode, "quick-discount-percent");
         if (permissionGrant is null)
         {
@@ -2390,6 +2431,11 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos.status.discountAmountTooHigh" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.discountPercentOutOfRange" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.quantityMustBePositive" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            // 退货行 / 含退货行的整单折扣被拒绝：沿用其它校验失败的错误态与错误音，不新增音效。
+            "pos.status.returnLineDiscountBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.orderDiscountBlockedByReturn" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.returnLineQuantityBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.returnLinePriceBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             _ => (StatusFeedbackKind.Neutral, null)
         };
     }
