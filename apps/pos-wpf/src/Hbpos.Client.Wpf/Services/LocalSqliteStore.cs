@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using System.IO;
 using Microsoft.Data.Sqlite;
 
@@ -65,8 +66,15 @@ public sealed class LocalSqliteStore : ILocalSqliteCheckpointService
 
         try
         {
+            // 只读计时：量化「每次新建非池化连接」的真实代价，用于决定是否值得改成连接池（见 LocalSqliteOpenTimingDiagnostics）。
+            var openStartedAt = Stopwatch.GetTimestamp();
             await connection.OpenAsync(cancellationToken);
+            var openedAt = Stopwatch.GetTimestamp();
             await ConfigureConnectionAsync(connection, cancellationToken);
+            var configuredAt = Stopwatch.GetTimestamp();
+            LocalSqliteOpenTimingDiagnostics.Shared.Record(
+                Stopwatch.GetElapsedTime(openStartedAt, openedAt),
+                Stopwatch.GetElapsedTime(openedAt, configuredAt));
             return connection;
         }
         catch
@@ -185,8 +193,15 @@ public sealed class LocalSqliteStore : ILocalSqliteCheckpointService
         var connection = new SqliteConnection(CreateConnectionString(transition.PreviousDatabasePath));
         try
         {
+            // 只读计时：量化「每次新建非池化连接」的真实代价，用于决定是否值得改成连接池（见 LocalSqliteOpenTimingDiagnostics）。
+            var openStartedAt = Stopwatch.GetTimestamp();
             await connection.OpenAsync(cancellationToken);
+            var openedAt = Stopwatch.GetTimestamp();
             await ConfigureConnectionAsync(connection, cancellationToken);
+            var configuredAt = Stopwatch.GetTimestamp();
+            LocalSqliteOpenTimingDiagnostics.Shared.Record(
+                Stopwatch.GetElapsedTime(openStartedAt, openedAt),
+                Stopwatch.GetElapsedTime(openedAt, configuredAt));
             return connection;
         }
         catch
