@@ -277,6 +277,10 @@
       "name": "View daily close records",
       "description": "View daily close records and cash count details uploaded by the WPF, handheld and iPad POS for managed stores on the web admin and the mobile app."
     },
+    "FaceCapture.Cameras.Manage": {
+      "name": "Manage face capture cameras",
+      "description": "Add, edit and disable face capture cameras, regenerate camera tokens and view recent capture metadata (no images) on the web admin page /system/face-cameras."
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",
       "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."

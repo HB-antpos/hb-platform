@@ -114,6 +114,18 @@ namespace BlazorApp.Shared.Constants
             public const string View = "DailyCloseRecords.View";
         }
 
+        /// <summary>
+        /// 门店人脸抓拍：Web 后台 /system/face-cameras，管理抓拍摄像机（新增、停用、轮换 token、查看最近抓拍元数据）。
+        /// 只给管理员（Admin 角色靠角色放行，不挂任何角色模板）；刻意不放在 Permissions.PosTerminal.* 下。
+        /// </summary>
+        public static class FaceCapture
+        {
+            public static class Cameras
+            {
+                public const string Manage = "FaceCapture.Cameras.Manage";
+            }
+        }
+
         public static class PosTerminal
         {
             public static class Sales

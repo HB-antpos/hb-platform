@@ -1,0 +1,130 @@
+{
+  "faceCameras": {
+    "title": "Face Capture Cameras",
+    "subtitle": "{{total}} cameras · {{online}} online · {{offline}} offline · {{disabled}} disabled",
+    "empty": "No cameras registered yet. Use \"Add camera\" at the top right to start.",
+    "notice": {
+      "effect": "Adding, editing, enabling/disabling a camera or rotating its token takes effect in the face ingest service within 30 seconds.",
+      "definition": "Online means enabled and a push was received in the last {{minutes}} minutes. Capture, face and parse-failure counts cover the last {{hours}} hours."
+    },
+    "actions": {
+      "add": "Add camera",
+      "refresh": "Refresh",
+      "retry": "Retry",
+      "edit": "Edit",
+      "captures": "Recent captures",
+      "rotateToken": "Rotate token"
+    },
+    "columns": {
+      "store": "Store",
+      "cameraId": "Camera ID",
+      "deviceModel": "Model",
+      "status": "Status",
+      "lastSeen": "Last push",
+      "stats24h": "Last 24 hours",
+      "captureCount": "Captures",
+      "faceCount": "Faces",
+      "parseFailureCount": "Parse failures",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "disabled": "Disabled"
+    },
+    "confirmDisable": {
+      "title": "Disable camera {{cameraId}}?",
+      "content": "The face ingest service will stop accepting pushes from this camera (within 30 seconds). You can enable it again at any time.",
+      "ok": "Disable"
+    },
+    "confirmRotate": {
+      "title": "Rotate the token of {{cameraId}}?",
+      "content": "The old token stops working immediately. The camera must be reconfigured with the new address or its pushes will be rejected. The new address is shown only once.",
+      "ok": "Rotate"
+    },
+    "messages": {
+      "saved": "Saved",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "form": {
+      "titleCreate": "Add camera",
+      "titleEdit": "Edit camera",
+      "submitCreate": "Create and generate address",
+      "submitSave": "Save",
+      "cancel": "Cancel",
+      "cameraId": "Camera ID",
+      "cameraIdPlaceholder": "e.g. store1008-door-01",
+      "cameraIdHint": "Lowercase letters, digits and hyphens; must not start with a hyphen; up to 64 characters. Cannot be changed after creation.",
+      "cameraIdReadonly": "The camera ID cannot be changed after creation.",
+      "storeCode": "Store",
+      "storeCodePlaceholder": "Select or type a store code",
+      "storeCodeHint": "Search by code or name. Must be an existing store code.",
+      "storeCodeManualHint": "The store list could not be loaded (you may lack store view permission). Type an existing store code directly.",
+      "deviceModel": "Model",
+      "macAddress": "MAC address",
+      "note": "Note"
+    },
+    "validation": {
+      "cameraIdRequired": "Enter a camera ID",
+      "cameraIdInvalid": "Use lowercase letters, digits and hyphens only; must not start with a hyphen; up to 64 characters",
+      "storeCodeRequired": "Select or type a store code",
+      "storeCodeTooLong": "Store code is at most 32 characters",
+      "storeCodeInvalid": "Store code may only contain letters, digits, underscores and hyphens",
+      "noteTooLong": "Note is at most 200 characters",
+      "deviceModelTooLong": "Model is at most 64 characters",
+      "macAddressTooLong": "MAC address is at most 32 characters"
+    },
+    "secret": {
+      "titleCreated": "Camera created",
+      "titleRotated": "Token rotated",
+      "onceOnly": "This address is shown only once. After you close this dialog it cannot be viewed again; if it is lost, the token must be rotated.",
+      "createdNote": "Push address for camera {{cameraId}}.",
+      "rotatedNote": "The old token of camera {{cameraId}} stopped working immediately. Configure the new address below on the camera.",
+      "urlLabel": "Camera address",
+      "copy": "Copy address",
+      "copied": "Copied to clipboard",
+      "copyFailed": "The browser did not allow automatic copying. The address is selected; press Ctrl/Cmd + C to copy it.",
+      "hide": "Hide",
+      "show": "Show",
+      "usage": "Enter this address as the camera's event push (HTTP listening) address. It works like a password: do not paste it into chats or keep screenshots.",
+      "close": "I have saved it, close"
+    },
+    "captures": {
+      "title": "Recent captures · {{cameraId}}",
+      "metadataOnly": "Only metadata of the pushed messages is shown. No images.",
+      "receivedAt": "Received at",
+      "eventTime": "Camera event time",
+      "eventType": "Event type",
+      "faceCount": "Faces",
+      "parseStatus": "Parse status",
+      "parseNote": "Parse note",
+      "duplicate": "Duplicate",
+      "parse": {
+        "parsed": "Parsed",
+        "partial": "Partially parsed",
+        "unparsed": "Unparsed",
+        "notFace": "Not a face event"
+      },
+      "empty": "No captures yet",
+      "loadFailed": "Failed to load captures",
+      "prev": "Previous",
+      "next": "Next",
+      "pageLabel": "Page {{page}}"
+    },
+    "errors": {
+      "generic": "The operation failed. Please try again later.",
+      "loadFailed": "Failed to load the camera list",
+      "forbidden": "You do not have permission to manage face capture cameras",
+      "secretResponseInvalid": "The response was incomplete. The camera may already have been created or rotated; refresh the list to check and rotate the token again if needed.",
+      "FACE_CAMERA_ID_INVALID": "The camera ID format is invalid",
+      "FACE_CAMERA_STORE_CODE_INVALID": "The store code format is invalid",
+      "FACE_CAMERA_STORE_NOT_FOUND": "The store does not exist. Choose an existing store code.",
+      "FACE_CAMERA_FIELD_INVALID": "A field is invalid. Check the lengths and try again.",
+      "FACE_CAMERA_ID_EXISTS": "This camera ID already exists",
+      "FACE_CAMERA_TOKEN_CONFLICT": "Token generation conflicted. Please try again.",
+      "FACE_CAMERA_NOT_FOUND": "The camera does not exist. Refresh the list."
+    }
+  }
+}

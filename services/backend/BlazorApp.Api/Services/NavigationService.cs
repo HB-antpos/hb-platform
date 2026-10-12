@@ -83,6 +83,7 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/system/invoice-email-settings", TitleKey = "menu.invoiceEmailSettings", Icon = "SettingOutlined", Permission = Permissions.System.ManageSettings },
                     new() { Path = "/system/payment-terminal-settings", TitleKey = "menu.paymentTerminalSettings", Icon = "WalletOutlined", Permission = Permissions.System.ManageSettings },
                     new() { Path = "/system/emergency-login-keys", TitleKey = "menu.emergencyLoginKeys", Icon = "KeyOutlined", Permission = Permissions.System.ManageSettings },
+                    new() { Path = "/system/face-cameras", TitleKey = "menu.faceCameras", Icon = "VideoCameraOutlined", Permission = Permissions.FaceCapture.Cameras.Manage },
                     new() { Path = "/system/device-registration", TitleKey = "menu.deviceRegistration", Icon = "BuildOutlined", Permission = Permissions.DeviceRegistration.View },
                     // 版本发布中心：App 原生 / OTA 与 WPF 安装包合并为一页，旧 /system/wpf-versions 由 Web 重定向到其 WPF 终端。
                     new() { Path = "/system/app-downloads", TitleKey = "menu.appDownloads", Icon = "QrcodeOutlined", Permission = Permissions.System.ViewAppDownloads },
@@ -758,6 +759,8 @@ namespace BlazorApp.Api.Services
                 Permissions.PosTerminal.Audit.View,
                 Permissions.LegacyEmployeeLogs.View,
                 Permissions.DailyCloseRecords.View,
+                // 人脸抓拍摄像机管理：只有该权限的账号也要能拿到后台菜单。
+                Permissions.FaceCapture.Cameras.Manage,
                 // 现金管理页：只有该权限的店长 / 财务也要能拿到后台菜单，否则前端只能退回本地菜单。
                 Permissions.Cash.OverviewView,
                 // 节日贺卡分店填报统计：只有该权限的总部账号也要能拿到后台菜单。

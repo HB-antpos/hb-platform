@@ -1,0 +1,130 @@
+{
+  "faceCameras": {
+    "title": "人脸抓拍摄像机",
+    "subtitle": "共 {{total}} 台 · 在线 {{online}} · 离线 {{offline}} · 已停用 {{disabled}}",
+    "empty": "还没有登记摄像机，点击右上角「新增摄像机」开始",
+    "notice": {
+      "effect": "摄像机的新增、修改、启停和 token 轮换，最多 30 秒后在人脸接收服务生效。",
+      "definition": "在线判定：已启用，且最近 {{minutes}} 分钟内有推送；抓拍数、人脸数和解析失败数均为近 {{hours}} 小时统计。"
+    },
+    "actions": {
+      "add": "新增摄像机",
+      "refresh": "刷新",
+      "retry": "重试",
+      "edit": "编辑",
+      "captures": "最近抓拍",
+      "rotateToken": "重新生成 token"
+    },
+    "columns": {
+      "store": "门店",
+      "cameraId": "摄像机编号",
+      "deviceModel": "型号",
+      "status": "状态",
+      "lastSeen": "最近推送",
+      "stats24h": "近 24 小时",
+      "captureCount": "抓拍数",
+      "faceCount": "人脸数",
+      "parseFailureCount": "解析失败",
+      "enabled": "启用",
+      "actions": "操作"
+    },
+    "status": {
+      "online": "在线",
+      "offline": "离线",
+      "disabled": "已停用"
+    },
+    "confirmDisable": {
+      "title": "停用摄像机 {{cameraId}}？",
+      "content": "停用后人脸接收服务将不再接收该摄像机的推送（最多 30 秒后生效），可随时重新启用。",
+      "ok": "停用"
+    },
+    "confirmRotate": {
+      "title": "重新生成 {{cameraId}} 的 token？",
+      "content": "旧 token 立即失效，摄像机需要用新地址重新配置，否则推送会被拒绝。新地址只显示一次。",
+      "ok": "重新生成"
+    },
+    "messages": {
+      "saved": "已保存",
+      "enabled": "已启用",
+      "disabled": "已停用"
+    },
+    "form": {
+      "titleCreate": "新增摄像机",
+      "titleEdit": "编辑摄像机",
+      "submitCreate": "创建并生成地址",
+      "submitSave": "保存",
+      "cancel": "取消",
+      "cameraId": "摄像机编号",
+      "cameraIdPlaceholder": "例如 store1008-door-01",
+      "cameraIdHint": "小写字母、数字和横线，不能以横线开头，最长 64 位；创建后不可修改。",
+      "cameraIdReadonly": "摄像机编号创建后不可修改。",
+      "storeCode": "门店",
+      "storeCodePlaceholder": "选择或输入分店编码",
+      "storeCodeHint": "可按编码或名称搜索，必须是已存在的分店编码。",
+      "storeCodeManualHint": "分店列表加载失败（可能没有分店查看权限），请直接输入已存在的分店编码。",
+      "deviceModel": "型号",
+      "macAddress": "MAC 地址",
+      "note": "备注"
+    },
+    "validation": {
+      "cameraIdRequired": "请输入摄像机编号",
+      "cameraIdInvalid": "只能使用小写字母、数字和横线，不能以横线开头，最长 64 位",
+      "storeCodeRequired": "请选择或输入分店编码",
+      "storeCodeTooLong": "分店编码最长 32 位",
+      "storeCodeInvalid": "分店编码只能包含字母、数字、下划线和横线",
+      "noteTooLong": "备注最长 200 字",
+      "deviceModelTooLong": "型号最长 64 字",
+      "macAddressTooLong": "MAC 地址最长 32 字"
+    },
+    "secret": {
+      "titleCreated": "摄像机已创建",
+      "titleRotated": "token 已重新生成",
+      "onceOnly": "此地址只显示这一次，关闭后无法再次查看，丢失只能重新生成。",
+      "createdNote": "摄像机 {{cameraId}} 的推送地址如下。",
+      "rotatedNote": "摄像机 {{cameraId}} 的旧 token 已立即失效，请把下面的新地址重新配置到摄像机。",
+      "urlLabel": "摄像机地址",
+      "copy": "复制地址",
+      "copied": "已复制到剪贴板",
+      "copyFailed": "浏览器没有允许自动复制，地址已选中，请按 Ctrl/⌘ + C 手动复制。",
+      "hide": "隐藏",
+      "show": "显示",
+      "usage": "请把该地址填入摄像机的事件推送（HTTP 监听）地址。地址等同于密码，请勿发到聊天群或截图留存。",
+      "close": "我已保存，关闭"
+    },
+    "captures": {
+      "title": "最近抓拍 · {{cameraId}}",
+      "metadataOnly": "这里只显示推送报文的元数据，不含图片。",
+      "receivedAt": "接收时间",
+      "eventTime": "摄像机事件时间",
+      "eventType": "事件类型",
+      "faceCount": "人脸数",
+      "parseStatus": "解析状态",
+      "parseNote": "解析备注",
+      "duplicate": "重复报文",
+      "parse": {
+        "parsed": "已解析 · Parsed",
+        "partial": "部分解析 · Partial",
+        "unparsed": "未解析 · Unparsed",
+        "notFace": "非人脸事件 · Not face"
+      },
+      "empty": "暂无抓拍记录",
+      "loadFailed": "抓拍记录加载失败",
+      "prev": "上一页",
+      "next": "下一页",
+      "pageLabel": "第 {{page}} 页"
+    },
+    "errors": {
+      "generic": "操作失败，请稍后重试",
+      "loadFailed": "摄像机列表加载失败",
+      "forbidden": "没有权限管理人脸抓拍摄像机",
+      "secretResponseInvalid": "服务返回的结果不完整，摄像机可能已创建或已轮换，请刷新列表确认，必要时重新生成 token",
+      "FACE_CAMERA_ID_INVALID": "摄像机编号格式不正确",
+      "FACE_CAMERA_STORE_CODE_INVALID": "分店编码格式不正确",
+      "FACE_CAMERA_STORE_NOT_FOUND": "分店不存在，请选择已有的分店编码",
+      "FACE_CAMERA_FIELD_INVALID": "有字段不符合要求，请检查长度后重试",
+      "FACE_CAMERA_ID_EXISTS": "该摄像机编号已存在",
+      "FACE_CAMERA_TOKEN_CONFLICT": "生成 token 冲突，请重试",
+      "FACE_CAMERA_NOT_FOUND": "摄像机不存在，请刷新列表"
+    }
+  }
+}

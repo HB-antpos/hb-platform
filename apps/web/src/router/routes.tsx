@@ -30,6 +30,7 @@ import {
   TeamOutlined,
   TrophyOutlined,
   UserOutlined,
+  VideoCameraOutlined,
   WalletOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
@@ -108,6 +109,8 @@ const SystemRemoteMaintenancePage = lazy(() => import('../pages/System/RemoteMai
 const SystemCenterLogsPage = lazy(() => import('../pages/System/CenterLogs'))
 const SystemPerformanceBaselinePage = lazy(() => import('../pages/System/PerformanceBaseline'))
 const EmergencyLoginKeysPage = lazy(() => import('../pages/System/EmergencyLoginKeys'))
+// 门店人脸抓拍摄像机管理（页面文案随页面懒加载；会短暂持有一次性摄像机地址，路由不做 keepAlive）。
+const FaceCamerasPage = lazy(() => import('../pages/System/FaceCameras'))
 const InvoiceEmailSettingsPage = lazy(() => import('../pages/System/InvoiceEmailSettings'))
 const PaymentTerminalSettingsPage = lazy(() => import('../pages/System/PaymentTerminalSettings'))
 const SystemScheduledStatisticsPage = lazy(() => import('../pages/System/ScheduledStatistics'))
@@ -176,6 +179,7 @@ const iconMap = {
   PictureOutlined: <PictureOutlined />,
   QrcodeOutlined: <QrcodeOutlined />,
   TrophyOutlined: <TrophyOutlined />,
+  VideoCameraOutlined: <VideoCameraOutlined />,
   WalletOutlined: <WalletOutlined />,
 }
 
@@ -278,6 +282,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canManageSystemSettings',
         },
         element: <EmergencyLoginKeysPage />,
+      },
+      {
+        path: '/system/face-cameras',
+        meta: {
+          title: 'menu.faceCameras',
+          icon: 'VideoCameraOutlined',
+          // 新增 / 轮换后页面内存里会短暂持有一次性摄像机地址（含 token）：离开页签即卸载，保证不会留在缓存页里。
+          keepAlive: false,
+          accessKey: 'canManageFaceCameras',
+        },
+        element: <FaceCamerasPage />,
       },
       {
         path: '/system/users',

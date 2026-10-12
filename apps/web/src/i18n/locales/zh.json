@@ -77,6 +77,7 @@
     "invoiceEmailSettings": "发票邮箱配置",
     "paymentTerminalSettings": "支付终端配置",
     "emergencyLoginKeys": "紧急登录密钥",
+    "faceCameras": "人脸抓拍摄像机",
     "employeeProfiles": "员工个人信息维护",
     "systemUsers": "用户管理",
     "systemRoles": "角色管理",

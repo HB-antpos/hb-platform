@@ -381,6 +381,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.LegacyEmployeeLogs.Review, "核查员工操作日志异常", "POS 审计", "Web 页面 /pos-admin/operation-logs 与移动端「员工操作日志」- 对老收银、新收银命中异常规则的操作标记确认正常或需跟进，并可撤销"),
                 // 日结记录只读查询；不能挂在 PosTerminal.* 下（会被当作收银机权限下发）。仅授予店长，管理员按需在角色管理里再授。
                 new(Permissions.DailyCloseRecords.View, "查看日结记录", "POS 日结", "Web 页面 /pos-admin/daily-closes 与员工 App「日结记录」- 按管理的分店查看 WPF、手持、iPad 的日结记录与现金盘点明细"),
+                // 人脸抓拍摄像机管理：只登记权限，不写任何角色模板；Admin 角色靠角色放行。入库靠 20261013_AddFaceCameraManagePermission.sql。
+                new(Permissions.FaceCapture.Cameras.Manage, "管理人脸抓拍摄像机", "系统管理", "Web 页面 /system/face-cameras - 新增、编辑、停用人脸抓拍摄像机，重新生成 token，查看最近抓拍记录（仅元数据，不含图片）"),
                 new(Permissions.Promotions.View, "查看促销", "促销管理", "Web 页面 /pos-admin/promotions 与移动端「促销」- 查看促销活动"),
                 // 全局促销的写接口额外要求 Admin 角色，属有意设计；分店促销仅需本权限。
                 new(Permissions.Promotions.Edit, "编辑促销", "促销管理", "Web 页面 /pos-admin/promotions - 编辑分店促销；全局促销的新增、修改、删除、启停另需管理员角色"),
