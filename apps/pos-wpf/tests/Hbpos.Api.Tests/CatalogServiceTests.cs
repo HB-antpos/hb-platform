@@ -1194,6 +1194,86 @@ public sealed class CatalogServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetCodeConflictsAsync_serves_updated_candidates_when_only_losing_candidate_changes()
+    {
+        await using var fixture = await CatalogSqliteFixture.CreateAsync();
+        await fixture.SeedStoreAsync("S01");
+        // flower 只有一个码（货号与条码相同），且被套装码抢走：它只出现在码冲突候选里，不是任何胜出行。
+        await fixture.SeedProductAsync(new Product
+        {
+            UUID = "PRODUCT-FLOWER-UUID",
+            ProductCode = "P-FLOWER",
+            ProductName = "flower",
+            ItemNumber = "6405090401470",
+            Barcode = "6405090401470",
+            RetailPrice = 2.99m,
+            IsActive = true,
+            IsDeleted = false
+        });
+        await fixture.SeedProductAsync(new Product
+        {
+            UUID = "PRODUCT-FLY-UUID",
+            ProductCode = "P-FLY",
+            ProductName = "EXTENSION Fly Swatter",
+            ItemNumber = "HB294-002",
+            Barcode = "9300000000001",
+            RetailPrice = 3m,
+            IsActive = true,
+            IsDeleted = false
+        });
+        await fixture.SeedProductSetCodeAsync("P-FLY", "HB294-002-5363DA", "6405090401470", 8.99m, "SET-FLY-UUID");
+        var root = Path.Combine(Path.GetTempPath(), "hbpos-code-conflicts-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var fileOptions = new CatalogDownloadFileOptions { Enabled = true };
+            var fileStore = new CatalogDownloadFileStore(root, fileOptions, TimeProvider.System);
+            var cache = new CatalogIndexCache(TimeProvider.System, TimeSpan.FromMinutes(20), TimeSpan.FromHours(72), 8, new NoopRefreshScheduler());
+            // 每轮用新的基础数据缓存，模拟后台刷新重新读库。
+            CatalogService CreateService() => new(
+                fixture.DbContext,
+                new PriceIndexBuilder(),
+                cache,
+                new CatalogBaseDataCache(),
+                catalogSyncOptions: null,
+                fileStore,
+                Microsoft.Extensions.Options.Options.Create(fileOptions));
+
+            // 第一轮：后台刷新发布版本并写出下载文件（含码冲突文件）。
+            await CreateService().RefreshCatalogIndexAsync("S01", CancellationToken.None);
+            var first = await CreateService().GetCodeConflictsAsync("S01", CancellationToken.None);
+            Assert.Equal(2.99m, Assert.Single(first!.Items, item => item.ProductCode == "P-FLOWER").RetailPrice);
+            var firstVersion = cache.PeekLatestVersion("S01")!.CatalogVersion;
+
+            // 数据没变：仍沿用旧版本，客户端照旧 noChange。
+            await CreateService().RefreshCatalogIndexAsync("S01", CancellationToken.None);
+            Assert.Equal(firstVersion, cache.PeekLatestVersion("S01")!.CatalogVersion);
+
+            // 只改落选候选的价格：胜出行不变，但码冲突候选变了。
+            await fixture.DbContext.MainDb.Updateable<Product>()
+                .SetColumns(product => product.RetailPrice == 1.99m)
+                .Where(product => product.ProductCode == "P-FLOWER")
+                .ExecuteCommandAsync();
+            var firstItems = cache.GetByVersion("S01", since: null, firstVersion)!.CatalogIndex.Items;
+            await CreateService().RefreshCatalogIndexAsync("S01", CancellationToken.None);
+            var secondVersion = cache.PeekLatestVersion("S01")!.CatalogVersion;
+            Assert.Equal(firstItems, cache.GetByVersion("S01", since: null, secondVersion)!.CatalogIndex.Items);
+
+            // 接口（优先读磁盘码冲突文件）必须返回新候选；修复前沿用旧版本号，读到的是旧文件里的 2.99。
+            var second = await CreateService().GetCodeConflictsAsync("S01", CancellationToken.None);
+            Assert.Equal(1.99m, Assert.Single(second!.Items, item => item.ProductCode == "P-FLOWER").RetailPrice);
+            Assert.NotEqual(firstVersion, secondVersion);
+            Assert.Equal(1.99m, Assert.Single(fileStore.FindCodeConflicts("S01", secondVersion)!.Items, item => item.ProductCode == "P-FLOWER").RetailPrice);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static void AssertSameCodeConflicts(CatalogCodeConflictsResponse expected, CatalogCodeConflictsResponse? actual)
     {
         Assert.NotNull(actual);

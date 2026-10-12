@@ -75,6 +75,94 @@ public sealed class CatalogIndexCacheTests
     }
 
     [Fact]
+    public async Task GetOrBuildAsync_ReusesPublishedVersionWhenWinnersAndCodeConflictsAreUnchanged()
+    {
+        var timeProvider = new MutableTimeProvider(GeneratedAt);
+        var cache = new CatalogIndexCache(timeProvider, TimeSpan.FromMinutes(2));
+        var buildCount = 0;
+
+        var first = await cache.GetOrBuildAsync("S01", since: null, BuildAsync, CancellationToken.None);
+        timeProvider.Advance(TimeSpan.FromMinutes(3));
+        var rebuilt = await cache.GetOrBuildAsync("S01", since: null, BuildAsync, CancellationToken.None);
+
+        Assert.Equal(2, buildCount);
+        Assert.Equal("catalog-v1:build-1", first?.CatalogIndex.CatalogVersion);
+        Assert.Equal(first?.CatalogIndex.CatalogVersion, rebuilt?.CatalogIndex.CatalogVersion);
+
+        Task<CatalogIndexBuildResult?> BuildAsync(CancellationToken _)
+        {
+            buildCount++;
+            var result = CreateResult("S01", $"catalog-v1:build-{buildCount}", contentMarker: "unchanged");
+            // 每次构建都是新实例，但内容逐字段相同。
+            return Task.FromResult<CatalogIndexBuildResult?>(
+                result with { CodeConflicts = CreateCodeConflicts(result, loserPrice: 2m) });
+        }
+    }
+
+    [Fact]
+    public async Task GetOrBuildAsync_PublishesNewVersionWhenOnlyCodeConflictsChange()
+    {
+        var timeProvider = new MutableTimeProvider(GeneratedAt);
+        var cache = new CatalogIndexCache(timeProvider, TimeSpan.FromMinutes(2));
+        var buildCount = 0;
+
+        var first = await cache.GetOrBuildAsync("S01", since: null, BuildAsync, CancellationToken.None);
+        timeProvider.Advance(TimeSpan.FromMinutes(3));
+        var rebuilt = await cache.GetOrBuildAsync("S01", since: null, BuildAsync, CancellationToken.None);
+
+        Assert.Equal(2, buildCount);
+        // 胜出行完全相同，只有落选候选的价格变了：码冲突文件按版本落盘且不再改写，必须换新版本。
+        Assert.Equal(first!.CatalogIndex.Items, rebuilt!.CatalogIndex.Items);
+        Assert.Equal("catalog-v1:build-1", first.CatalogIndex.CatalogVersion);
+        Assert.Equal("catalog-v1:build-2", rebuilt.CatalogIndex.CatalogVersion);
+        Assert.Equal(3m, rebuilt.CodeConflicts![1].RetailPrice);
+
+        Task<CatalogIndexBuildResult?> BuildAsync(CancellationToken _)
+        {
+            buildCount++;
+            var result = CreateResult("S01", $"catalog-v1:build-{buildCount}", contentMarker: "unchanged");
+            return Task.FromResult<CatalogIndexBuildResult?>(
+                result with { CodeConflicts = CreateCodeConflicts(result, loserPrice: buildCount == 1 ? 2m : 3m) });
+        }
+    }
+
+    [Fact]
+    public async Task GetOrBuildAsync_PublishesNewVersionWhenPreviousCodeConflictsWereNotComputed()
+    {
+        var timeProvider = new MutableTimeProvider(GeneratedAt);
+        var cache = new CatalogIndexCache(timeProvider, TimeSpan.FromMinutes(2));
+        var buildCount = 0;
+
+        var first = await cache.GetOrBuildAsync("S01", since: null, BuildAsync, CancellationToken.None);
+        timeProvider.Advance(TimeSpan.FromMinutes(3));
+        var rebuilt = await cache.GetOrBuildAsync("S01", since: null, BuildAsync, CancellationToken.None);
+
+        // 旧快照恢复的工件没有码冲突候选（null = 未计算）；新构建算出了候选就不能沿用旧版本。
+        Assert.Null(first!.CodeConflicts);
+        Assert.Equal("catalog-v1:build-2", rebuilt!.CatalogIndex.CatalogVersion);
+
+        Task<CatalogIndexBuildResult?> BuildAsync(CancellationToken _)
+        {
+            buildCount++;
+            var result = CreateResult("S01", $"catalog-v1:build-{buildCount}", contentMarker: "unchanged");
+            return Task.FromResult<CatalogIndexBuildResult?>(
+                buildCount == 1 ? result : result with { CodeConflicts = CreateCodeConflicts(result, loserPrice: 2m) });
+        }
+    }
+
+    private static IReadOnlyList<SellableItemDto> CreateCodeConflicts(CatalogIndexBuildResult result, decimal loserPrice) =>
+    [
+        result.SellableItems[0],
+        result.SellableItems[0] with
+        {
+            ProductCode = "P-LOSER",
+            DisplayName = "Loser product",
+            RetailPrice = loserPrice,
+            PriceSource = PriceSourceKind.ProductBase
+        }
+    ];
+
+    [Fact]
     public async Task GetOrBuildAsync_DoesNotOutliveSharedBaseDataValidity()
     {
         var timeProvider = new MutableTimeProvider(GeneratedAt);
