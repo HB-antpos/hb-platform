@@ -1430,6 +1430,18 @@
   <data name="pos.status.orderDiscountUpdated" xml:space="preserve">
     <value>整单折扣已应用。</value>
   </data>
+  <data name="pos.status.returnLineDiscountBlocked" xml:space="preserve">
+    <value>退货商品不能修改折扣。</value>
+  </data>
+  <data name="pos.status.orderDiscountBlockedByReturn" xml:space="preserve">
+    <value>有退货商品时不能使用整单折扣。</value>
+  </data>
+  <data name="pos.status.returnLineQuantityBlocked" xml:space="preserve">
+    <value>退货商品不能修改数量。</value>
+  </data>
+  <data name="pos.status.returnLinePriceBlocked" xml:space="preserve">
+    <value>退货商品不能修改价格。</value>
+  </data>
   <data name="cart.status.zeroPriceItem" xml:space="preserve">
     <value>购物车存在价格为 0 的商品，请先修改价格后再结账。</value>
   </data>

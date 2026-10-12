@@ -121,6 +121,28 @@ public interface IPosTerminalWorkflowService
 
     PosTerminalWorkflowResult ApplyQuickDiscountPercent(CartLine? selectedLine, string? value, bool isWholeOrderOperation);
 
+    /// <summary>
+    /// 折扣类操作（行折扣金额 / 百分比 / 快速折扣 / 整单折扣）的退货行门禁：选中退货行，或整单模式下购物车含退货行，
+    /// 返回应展示的拒绝提示；可以继续则返回 null。收银页在弹授权 / 主管 PIN 之前先问一次，避免为一个注定被拒绝的操作索要授权。
+    /// 默认实现一律放行，这样只实现了旧签名的替身 / 测试桩无需改动即可继续使用。
+    /// </summary>
+    PosTerminalWorkflowResult? GetDiscountRejection(CartLine? selectedLine, bool isWholeOrderOperation)
+    {
+        return null;
+    }
+
+    /// <summary>改数量的退货行门禁，口径同 <see cref="GetDiscountRejection"/>：退货行的数量由退货流程锁定。</summary>
+    PosTerminalWorkflowResult? GetQuantityEditRejection(CartLine? selectedLine)
+    {
+        return null;
+    }
+
+    /// <summary>改价的退货行门禁，口径同 <see cref="GetDiscountRejection"/>：退货行的单价由退货流程锁定。</summary>
+    PosTerminalWorkflowResult? GetPriceEditRejection(CartLine? selectedLine)
+    {
+        return null;
+    }
+
     PosTerminalWorkflowResult ClearCart();
 
     PosTerminalWorkflowResult GuardPayment();
@@ -440,8 +462,37 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             : Status("pos.status.ready");
     }
 
+    public PosTerminalWorkflowResult? GetDiscountRejection(CartLine? selectedLine, bool isWholeOrderOperation)
+    {
+        // 整单模式看的是整张购物车：只要含退货行就整单拒绝（PosCartService 对整单折扣是「全有或全无」），
+        // 与当前选中的是哪一行无关，所以提示也用整单文案，而不是行文案。
+        if (isWholeOrderOperation)
+        {
+            return _cart.HasReturnLine ? Status("pos.status.orderDiscountBlockedByReturn") : null;
+        }
+
+        return selectedLine is { IsReturnLine: true } ? Status("pos.status.returnLineDiscountBlocked") : null;
+    }
+
+    public PosTerminalWorkflowResult? GetQuantityEditRejection(CartLine? selectedLine)
+    {
+        return selectedLine is { IsReturnLine: true } ? Status("pos.status.returnLineQuantityBlocked") : null;
+    }
+
+    public PosTerminalWorkflowResult? GetPriceEditRejection(CartLine? selectedLine)
+    {
+        return selectedLine is { IsReturnLine: true } ? Status("pos.status.returnLinePriceBlocked") : null;
+    }
+
     public PosTerminalWorkflowResult ModifySelectedLineQuantity(CartLine? selectedLine, string keypadBuffer)
     {
+        // 退货行的数量由退货流程锁定，购物车一律拒绝；在这里先给出明确提示，不再让它落成静默的空结果。
+        // 放在键盘输入校验之前：输入值无论对错，这一行都改不了，提示「输入有效数值」只会误导。
+        if (GetQuantityEditRejection(selectedLine) is { } quantityRejection)
+        {
+            return quantityRejection;
+        }
+
         if (!TryGetSelectedLineKeypadValue(selectedLine, keypadBuffer, out var line, out var value, out var failure))
         {
             return failure;
@@ -471,6 +522,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ModifySelectedLinePrice(CartLine? selectedLine, string keypadBuffer)
     {
+        // 同改数量：退货行的单价由退货流程锁定，先给明确提示。
+        if (GetPriceEditRejection(selectedLine) is { } priceRejection)
+        {
+            return priceRejection;
+        }
+
         if (!TryGetSelectedLineKeypadValue(selectedLine, keypadBuffer, out var line, out var value, out var failure))
         {
             return failure;
@@ -490,6 +547,13 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ApplySelectedLineDiscountAmount(CartLine? selectedLine, string keypadBuffer, bool isWholeOrderOperation)
     {
+        // 退货行 / 含退货行的整单折扣一律拒绝并给出明确提示：
+        // 退货行毛额为负，不拦的话会拿负数去比折扣金额，要么误报「折扣金额过高」，要么落到购物车的静默拒绝。
+        if (GetDiscountRejection(selectedLine, isWholeOrderOperation) is { } rejection)
+        {
+            return rejection;
+        }
+
         if (isWholeOrderOperation)
         {
             return ApplyWholeOrderDiscountAmount(keypadBuffer);
@@ -519,6 +583,11 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ApplySelectedLineDiscountPercent(CartLine? selectedLine, string keypadBuffer, bool isWholeOrderOperation)
     {
+        if (GetDiscountRejection(selectedLine, isWholeOrderOperation) is { } rejection)
+        {
+            return rejection;
+        }
+
         if (isWholeOrderOperation)
         {
             return ApplyWholeOrderDiscountPercent(keypadBuffer);
@@ -534,6 +603,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ApplyQuickDiscountPercent(CartLine? selectedLine, string? value, bool isWholeOrderOperation)
     {
+        // 先于档位校验：退货行 / 含退货行的整单，无论点哪一档都不可能成功。
+        if (GetDiscountRejection(selectedLine, isWholeOrderOperation) is { } rejection)
+        {
+            return rejection;
+        }
+
         if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var discountPercent) ||
             discountPercent < 0m)
         {

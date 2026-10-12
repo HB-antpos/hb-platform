@@ -191,6 +191,10 @@
   <data name="pos.status.linePriceUpdated" xml:space="preserve"><value>Price updated.</value></data>
   <data name="pos.status.lineDiscountUpdated" xml:space="preserve"><value>Line discount updated.</value></data>
   <data name="pos.status.orderDiscountUpdated" xml:space="preserve"><value>Order discount applied.</value></data>
+  <data name="pos.status.returnLineDiscountBlocked" xml:space="preserve"><value>Returned items cannot be discounted.</value></data>
+  <data name="pos.status.orderDiscountBlockedByReturn" xml:space="preserve"><value>Order discount is unavailable while the cart contains returned items.</value></data>
+  <data name="pos.status.returnLineQuantityBlocked" xml:space="preserve"><value>Returned item quantity cannot be changed.</value></data>
+  <data name="pos.status.returnLinePriceBlocked" xml:space="preserve"><value>Returned item price cannot be changed.</value></data>
 
   <data name="payment.title" xml:space="preserve"><value>Payment</value></data>
   <data name="payment.refund.title" xml:space="preserve"><value>Refund</value></data>
