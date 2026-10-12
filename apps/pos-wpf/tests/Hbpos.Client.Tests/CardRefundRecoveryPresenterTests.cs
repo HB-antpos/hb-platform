@@ -1327,6 +1327,24 @@ public sealed class CardRefundRecoveryPresenterTests
         Assert.Equal(CardRecoveryResultSeverity.Success, run.Presenter.CardRecoveryResultDialog!.Severity);
     }
 
+    [Theory]
+    [InlineData("en-US", "refund voucher")]
+    [InlineData("zh-CN", "退款券")]
+    public void Refund_voucher_print_failure_message_exists_in_every_culture_with_reason_placeholder(
+        string cultureName,
+        string expectedPhrase)
+    {
+        var localization = new LocalizationService();
+        localization.SetCulture(cultureName);
+
+        var template = localization.T("cardRecovery.dialog.message.voucherPrintFailed");
+
+        // 缺键时 T() 返回 "[[key]]"；同时必须保留 {0} 给失败原因，否则弹窗会吞掉原因。
+        Assert.DoesNotContain("[[", template);
+        Assert.Contains("{0}", template);
+        Assert.Contains(expectedPhrase, template);
+    }
+
     // 刷卡 -10.00 + 每个引用一张 -5.00 的退款券：与离线生成的混合退款订单同形。
     private static LocalOrder CreateMixedRefundOrder(params string[] voucherReferences)
     {
