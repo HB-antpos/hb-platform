@@ -3683,58 +3683,130 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 _userFeedbackService.Play(UserFeedbackCue.Checkout);
                 return Task.CompletedTask;
             });
+        // 中文注释：现金是最高频场景，钱箱紧跟提示音打开，不再排在成功页小票预览（读小票设置）与待同步刷新之后。
+        // 开钱箱只依赖订单付款明细、收银员权限与审计记录，不依赖成功页加载结果；失败只在成功卡片上留告警。
+        await ExecutePaymentCompletionFollowUpAsync("cash-drawer", () => OpenCashDrawerAfterPaymentAsync(e.Order));
         await ExecutePaymentCompletionFollowUpAsync(
             "success-page-load",
             () => PaymentSuccess.LoadFromOrderAsync(e.Order));
-        await ExecutePaymentCompletionFollowUpAsync("pending-sync-refresh", RefreshPendingSyncAsync);
-        await ExecutePaymentCompletionFollowUpAsync("cash-drawer", () => OpenCashDrawerAfterPaymentAsync(e.Order));
 
-        // 普通销售成功后不自动打印；退款和代金券余额的既有打印习惯保持不变。
-        if (IsPureVoucherRefund(e.Order))
+        // 中文注释：待同步刷新排在全部自动打印之后。SyncQueue 读取目前仍在调用线程（UI 线程）上同步执行
+        // （Microsoft.Data.Sqlite 的 *Async 实际同步），若与打印「并行」，全表统计会插到打印续体前面、照样挡住打印；
+        // 放到最后，角标晚一点更新，但退款券、刷卡退款小票、余额券等自动打印不再等这次扫描。
+        var autoPrintStatusShown = await PrintAutomaticallyAfterPaymentAsync(e.Order);
+        await RefreshPendingSyncAfterPaymentAsync(e.Order, autoPrintStatusShown);
+    }
+
+    /// <summary>
+    /// 收款完成后的自动打印：普通销售成功后不自动打印；退款和代金券余额的既有打印习惯保持不变。
+    /// 返回本次是否有自动打印把结果（成功或失败）写到了状态栏，供随后的待同步刷新判断能否覆盖状态栏。
+    /// </summary>
+    private async Task<bool> PrintAutomaticallyAfterPaymentAsync(LocalOrder order)
+    {
+        // 中文注释：自动打印无论成败都会经 MainReceiptCoordinator 把结果写到状态栏，这里只记「是否打过」。
+        var printStatusShown = false;
+        async Task PrintAsync(ReceiptDetails receipt, ReceiptPrintReason reason)
+        {
+            printStatusShown = true;
+            await PrintReceiptWithShellPermissionAsync(receipt, reason);
+        }
+
+        if (IsPureVoucherRefund(order))
         {
             await ExecutePaymentCompletionFollowUpAsync(
                 "voucher-refund-print",
                 async () =>
                 {
-                    var receipt = ReceiptQueryService.CreateReceipt(e.Order);
+                    var receipt = ReceiptQueryService.CreateReceipt(order);
                     if (receipt.RefundVoucher is not null)
                     {
-                        await PrintReceiptWithShellPermissionAsync(receipt, ReceiptPrintReason.VoucherRefundAuto);
+                        await PrintAsync(receipt, ReceiptPrintReason.VoucherRefundAuto);
                     }
                 });
 
-            return;
+            return printStatusShown;
         }
 
-        if (MainReceiptCoordinator.ContainsCardPayment(e.Order) && e.Order.ActualAmount < 0m)
+        if (MainReceiptCoordinator.ContainsCardPayment(order) && order.ActualAmount < 0m)
         {
             await ExecutePaymentCompletionFollowUpAsync(
                 "card-refund-print",
-                () => PrintReceiptWithShellPermissionAsync(
-                    ReceiptQueryService.CreateReceipt(e.Order),
+                () => PrintAsync(
+                    ReceiptQueryService.CreateReceipt(order),
                     ReceiptPrintReason.CardAuto));
         }
 
-        if (e.Order.ActualAmount < 0m)
+        if (order.ActualAmount < 0m)
         {
             // 代金券买的商品须退代金券后，刷卡/现金 + 退款券的混合退款变得常见；每张退款券都要能扫码使用。
             await ExecutePaymentCompletionFollowUpAsync(
                 "mixed-voucher-refund-print",
                 async () =>
                 {
-                    foreach (var document in ReceiptRefundVoucherDocuments.Create(ReceiptQueryService.CreateReceipt(e.Order)))
+                    foreach (var document in ReceiptRefundVoucherDocuments.Create(ReceiptQueryService.CreateReceipt(order)))
                     {
-                        await PrintReceiptWithShellPermissionAsync(document, ReceiptPrintReason.VoucherRefundAuto);
+                        await PrintAsync(document, ReceiptPrintReason.VoucherRefundAuto);
                     }
                 });
-            return;
+            return printStatusShown;
         }
 
-        if (e.Order.ActualAmount >= 0m)
+        if (order.ActualAmount >= 0m)
         {
             await ExecutePaymentCompletionFollowUpAsync(
                 "voucher-balance-print",
-                () => PrintVoucherBalancesAsync(e.Order));
+                async () =>
+                {
+                    if (await PrintVoucherBalancesAsync(order))
+                    {
+                        printStatusShown = true;
+                    }
+                });
+        }
+
+        return printStatusShown;
+    }
+
+    /// <summary>
+    /// 收款完成后的待同步刷新（只更新待同步角标），在全部自动打印结束后执行。
+    /// 自身吞掉并记录全部普通异常，返回的 Task 只会正常完成，不会产生未观察的异常。
+    /// </summary>
+    private async Task RefreshPendingSyncAfterPaymentAsync(LocalOrder order, bool autoPrintStatusShown)
+    {
+        if (IsLifetimeEnding)
+        {
+            // 关机/释放后不再访问本地库与绑定属性。
+            return;
+        }
+
+        try
+        {
+            await RefreshPendingSyncAsync();
+        }
+        catch (OperationCanceledException) when (IsLifetimeEnding)
+        {
+            // 关闭过程中的预期取消不记为收尾失败。
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            ConsoleLog.WriteError("PaymentCompleted", "payment follow-up failed stage=pending-sync-refresh", null, ex);
+            // 中文注释：失败要在这一单的成功卡片上留告警；但自动打印可能耗时数秒，期间若已完成下一单（或已关机），
+            // 不能把告警挂到别的订单上。
+            if (IsLifetimeEnding || !ReferenceEquals(_lastCompletedOrder, order))
+            {
+                return;
+            }
+
+            if (autoPrintStatusShown)
+            {
+                // 中文注释：原串行流程里刷新排在打印前，打印结果会盖过收尾告警文字；现在刷新排在打印后，
+                // 只给成功卡片留告警、保住状态栏上的打印结果，尤其是打印失败提示（收银员要据此补打退款券/余额券）。
+                PaymentSuccess.HasPostCommitWarning = true;
+            }
+            else
+            {
+                SetPaymentCompletedWarning();
+            }
         }
     }
 
@@ -3791,7 +3863,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         order.Payments[0].Method == PaymentMethodKind.Voucher &&
         order.Payments[0].Amount < 0m;
 
-    private async Task PrintVoucherBalancesAsync(LocalOrder order)
+    /// <summary>逐张打印代金券余额凭证；返回是否至少尝试打印了一张（每张的结果都会写到状态栏）。</summary>
+    private async Task<bool> PrintVoucherBalancesAsync(LocalOrder order)
     {
         var receipt = ReceiptQueryService.CreateReceipt(order);
         var balances = receipt.Payments
@@ -3833,6 +3906,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 _localization.T("receipt.print.failed"),
                 $"{failure.VoucherCode}: {failure.Result.Message}");
         }
+
+        return balances.Count > 0;
     }
 
     private async Task OnInstallmentOrderCreatedAsync(InstallmentOrderSummary order)

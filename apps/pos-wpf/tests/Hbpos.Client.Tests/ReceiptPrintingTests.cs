@@ -1312,6 +1312,37 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
+    public async Task Cash_drawer_service_opens_with_settings_batch_loaded_from_local_database()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-cash-drawer-settings-{Guid.NewGuid():N}.db");
+        try
+        {
+            // 收款后开钱箱走真实设置存储：本地库批量读取到的端口与切纸距离要原样交给驱动。
+            var repository = new LocalAppSettingsRepository(new LocalSqliteStore(databasePath));
+            await repository.SetValuesAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ReceiptPrinter:Port"] = " COM7 ",
+                ["ReceiptPrinter:CutDistance"] = "90",
+                ["ReceiptPrinter:BrandName"] = "HB",
+            });
+            var driver = new RecordingReceiptPrinterDriver();
+            var service = new CashDrawerService(new ReceiptPrinterSettingsStore(repository), driver);
+
+            var result = await service.OpenAsync();
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(1, driver.OpenCashDrawerCallCount);
+            Assert.Equal("COM7", driver.LastCashDrawerSettings?.PrinterPort);
+            Assert.Equal(90, driver.LastCashDrawerSettings?.CutDistance);
+            Assert.Equal("HB", driver.LastCashDrawerSettings?.BrandName);
+        }
+        finally
+        {
+            await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task Cash_drawer_service_returns_failure_when_driver_fails()
     {
         var driver = new RecordingReceiptPrinterDriver

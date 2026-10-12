@@ -249,6 +249,231 @@ public sealed class LocalSchemaServiceTests
         }
     }
 
+    [Fact]
+    public async Task InitializeAsync_records_schema_version_on_fresh_database_and_skips_catalog_backfill_afterwards()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+
+            await schema.InitializeAsync();
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                // 写一行三列都是空白的商品：回填条件对它成立，用来判断后续启动是否还在跑回填。
+                await ExecuteSqlAsync(
+                    connection,
+                    """
+                    INSERT INTO LocalSellableItemIndex (
+                        StoreCode, ProductCode, ReferenceCode, DisplayName, LookupCode, LookupCodeNormalized,
+                        ItemNumber, Barcode, ProductImage, DiscountRate, IsSpecialProduct, RetailPrice,
+                        PriceSource, PriceSourceLabel, QuantityFactor, UpdatedAt, ContentHash, SyncedAt)
+                    VALUES ('S001', 'P001', NULL, 'Apple', '930abc', '', NULL, NULL, NULL, NULL, 0, '1.50',
+                        1, 'Retail', '1', NULL, '', '');
+                    """);
+            }
+
+            // 新库首次初始化已记下当前版本：之后每次启动（InitializeAsync 每次都完整执行）不再全表回填。
+            await schema.InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            Assert.Equal(
+                new[] { "", "", "" },
+                await QuerySingleRowAsync(
+                    verification,
+                    "SELECT LookupCodeNormalized, ContentHash, SyncedAt FROM LocalSellableItemIndex WHERE ProductCode = 'P001';"));
+            Assert.Equal((long)LocalSchemaService.LocalDatabaseSchemaVersion, await ScalarAsync(verification, "PRAGMA user_version;"));
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_backfills_catalog_index_once_when_schema_version_is_behind()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                // 老库：三列早已补上但从未回填（user_version 仍是 0）。
+                await CreateLegacyCatalogIndexAsync(connection, includeBackfillColumns: true);
+                Assert.Equal(0L, await ScalarAsync(connection, "PRAGMA user_version;"));
+            }
+
+            await schema.InitializeAsync();
+
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                await AssertLegacyCatalogRowsBackfilledAsync(connection);
+                Assert.Equal((long)LocalSchemaService.LocalDatabaseSchemaVersion, await ScalarAsync(connection, "PRAGMA user_version;"));
+                await ExecuteSqlAsync(connection, "UPDATE LocalSellableItemIndex SET ContentHash = '' WHERE ProductCode = 'P001';");
+            }
+
+            // 回填成功后版本号已置上：下一次启动不再回填。
+            await schema.InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            Assert.Equal(
+                string.Empty,
+                await ScalarAsync(verification, "SELECT ContentHash FROM LocalSellableItemIndex WHERE ProductCode = 'P001';"));
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    public async Task InitializeAsync_backfills_newly_added_catalog_columns_even_when_schema_version_is_not_behind(int versionOffset)
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-{Guid.NewGuid():N}.db");
+        var existingVersion = LocalSchemaService.LocalDatabaseSchemaVersion + versionOffset;
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                // 极老的库缺这三列；版本号不低（例如被更新的客户端写过），但刚补上的列在已有行上全是 NULL，必须当场回填。
+                await CreateLegacyCatalogIndexAsync(connection, includeBackfillColumns: false);
+                await ExecuteSqlAsync(connection, $"PRAGMA user_version = {existingVersion};");
+            }
+
+            await new LocalSchemaService(store).InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            await AssertLegacyCatalogRowsBackfilledAsync(verification);
+            // 只升不降：已是更高版本的库保持原值。
+            Assert.Equal((long)existingVersion, await ScalarAsync(verification, "PRAGMA user_version;"));
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_rolls_back_catalog_backfill_and_keeps_schema_version_when_backfill_fails()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-local-schema-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                await CreateLegacyCatalogIndexAsync(connection, includeBackfillColumns: true);
+                // 第三条回填（SyncedAt）失败：前两条已在同一事务里执行，必须一起回滚。
+                await ExecuteSqlAsync(
+                    connection,
+                    """
+                    CREATE TRIGGER FailSyncedAtBackfill
+                    BEFORE UPDATE OF SyncedAt ON LocalSellableItemIndex
+                    BEGIN
+                        SELECT RAISE(ABORT, 'simulated backfill failure');
+                    END;
+                    """);
+            }
+
+            await Assert.ThrowsAsync<SqliteException>(() => schema.InitializeAsync());
+
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                Assert.Equal(0L, await ScalarAsync(connection, "PRAGMA user_version;"));
+                Assert.Equal(
+                    new[] { "<NULL>", "<NULL>", "<NULL>" },
+                    await QuerySingleRowAsync(
+                        connection,
+                        "SELECT LookupCodeNormalized, ContentHash, SyncedAt FROM LocalSellableItemIndex WHERE ProductCode = 'P001';"));
+                await ExecuteSqlAsync(connection, "DROP TRIGGER FailSyncedAtBackfill;");
+            }
+
+            // 版本号没被提前置上：下次启动照常重跑回填并在成功后记版本。
+            await schema.InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            await AssertLegacyCatalogRowsBackfilledAsync(verification);
+            Assert.Equal((long)LocalSchemaService.LocalDatabaseSchemaVersion, await ScalarAsync(verification, "PRAGMA user_version;"));
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// 旧版商品目录索引表：回填依赖的三列可空（早期 ALTER 补列的形态）或干脆没有；两行分别覆盖 NULL 与空白值。
+    /// </summary>
+    private static async Task CreateLegacyCatalogIndexAsync(SqliteConnection connection, bool includeBackfillColumns)
+    {
+        var backfillColumnDefinitions = includeBackfillColumns
+            ? "LookupCodeNormalized TEXT NULL, ContentHash TEXT NULL, SyncedAt TEXT NULL,"
+            : string.Empty;
+        var backfillColumnNames = includeBackfillColumns ? ", LookupCodeNormalized, ContentHash, SyncedAt" : string.Empty;
+        var firstRowBackfillValues = includeBackfillColumns ? ", NULL, NULL, NULL" : string.Empty;
+        var secondRowBackfillValues = includeBackfillColumns ? ", '  ', '', '  '" : string.Empty;
+        await ExecuteSqlAsync(
+            connection,
+            $"""
+            CREATE TABLE LocalSellableItemIndex (
+                StoreCode TEXT NOT NULL,
+                ProductCode TEXT NOT NULL,
+                ReferenceCode TEXT NULL,
+                DisplayName TEXT NOT NULL,
+                LookupCode TEXT NOT NULL,
+                ItemNumber TEXT NULL,
+                Barcode TEXT NULL,
+                ProductImage TEXT NULL,
+                DiscountRate TEXT NULL,
+                IsSpecialProduct INTEGER NOT NULL DEFAULT 0,
+                RetailPrice TEXT NOT NULL,
+                PriceSource INTEGER NOT NULL,
+                PriceSourceLabel TEXT NOT NULL,
+                QuantityFactor TEXT NOT NULL,
+                {backfillColumnDefinitions}
+                UpdatedAt TEXT NULL
+            );
+
+            INSERT INTO LocalSellableItemIndex (
+                StoreCode, ProductCode, ReferenceCode, DisplayName, LookupCode, ItemNumber, Barcode, ProductImage,
+                DiscountRate, IsSpecialProduct, RetailPrice, PriceSource, PriceSourceLabel, QuantityFactor, UpdatedAt{backfillColumnNames})
+            VALUES
+                ('S001', 'P001', NULL, 'Apple', ' 930abc ', NULL, NULL, NULL,
+                    NULL, 0, '1.50', 1, 'Retail', '1', '2026-01-02T03:04:05.0000000+00:00'{firstRowBackfillValues}),
+                ('S001', 'P002', 'R2', 'Pear', '930def', 'IT2', 'BC2', 'img.png',
+                    '0.1', 1, '2.00', 2, 'Promo', '2', NULL{secondRowBackfillValues});
+            """);
+    }
+
+    private static async Task AssertLegacyCatalogRowsBackfilledAsync(SqliteConnection connection)
+    {
+        Assert.Equal(
+            new[] { "930ABC", "S001|P001||Apple| 930abc |||1.50|1|Retail|1|||0", "2026-01-02T03:04:05.0000000+00:00" },
+            await QuerySingleRowAsync(
+                connection,
+                "SELECT LookupCodeNormalized, ContentHash, SyncedAt FROM LocalSellableItemIndex WHERE ProductCode = 'P001';"));
+
+        var second = await QuerySingleRowAsync(
+            connection,
+            "SELECT LookupCodeNormalized, ContentHash, SyncedAt FROM LocalSellableItemIndex WHERE ProductCode = 'P002';");
+        Assert.NotNull(second);
+        Assert.Equal("930DEF", second![0]);
+        Assert.Equal("S001|P002|R2|Pear|930def|IT2|BC2|2.00|2|Promo|2|img.png|0.1|1", second[1]);
+        // 没有 UpdatedAt 的行回填为当前 UTC 时间。
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$", second[2]);
+    }
+
     private static async Task<bool> HasColumnAsync(
         SqliteConnection connection,
         string tableName,
