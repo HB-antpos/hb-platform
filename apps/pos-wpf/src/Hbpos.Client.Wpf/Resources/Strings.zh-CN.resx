@@ -3119,6 +3119,7 @@
   <data name="cardRecovery.dialog.message.failedLastTransaction" xml:space="preserve"><value>已完成不带 TxnRef 的 Transaction Status 查询，终端返回上一笔交易未成功。请按认证表记录 TxnRef、时间和响应码。</value></data>
   <data name="cardRecovery.dialog.message.autoPrintSucceeded" xml:space="preserve"><value>小票已自动打印。可在此预览并按需重新打印。</value></data>
   <data name="cardRecovery.dialog.message.autoPrintFailed" xml:space="preserve"><value>订单已恢复，但自动打印失败：{0}。请检查打印机后点击打印。</value></data>
+  <data name="cardRecovery.dialog.message.voucherPrintFailed" xml:space="preserve"><value>退款券未打印：{0}。请检查打印机并补打退款券。</value></data>
   <data name="cardRecovery.dialog.message.draftRestoredFallback" xml:space="preserve"><value>购物车已恢复，请重新确认付款。</value></data>
   <data name="cardRecovery.dialog.message.failedFallback" xml:space="preserve"><value>已确认终端结果，请按提示人工处理。</value></data>
   <data name="cardRecovery.dialog.action.printReceipt" xml:space="preserve"><value>打印小票</value></data>

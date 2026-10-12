@@ -993,9 +993,7 @@ internal sealed class CardRecoveryPresenter
         {
             var voucherMessage = string.Format(
                 _localization.CurrentCulture,
-                LocalizeOrFallback(
-                    "cardRecovery.dialog.message.voucherPrintFailed",
-                    "The refund voucher was not printed: {0}. Check the printer and reprint the refund voucher."),
+                _localization.T("cardRecovery.dialog.message.voucherPrintFailed"),
                 voucherPrintResult.Message);
             printMessage = $"{printMessage} {voucherMessage}";
             RunPostCommitAction(
@@ -1430,13 +1428,6 @@ internal sealed class CardRecoveryPresenter
     private async Task<ReceiptPrintResult> PrintReceiptAsync(ReceiptDetails receipt, ReceiptPrintReason reason)
     {
         return await _printReceiptAsync!(receipt, reason);
-    }
-
-    // 缺键时 ILocalizationService.T 返回 "[[key]]"，此时改用内置英文兜底，避免界面露出键名。
-    private string LocalizeOrFallback(string key, string fallback)
-    {
-        var value = _localization.T(key);
-        return string.IsNullOrWhiteSpace(value) || value == $"[[{key}]]" ? fallback : value;
     }
 
     private static string? GetCardRecoveryResponseCode(LocalOrder order)
