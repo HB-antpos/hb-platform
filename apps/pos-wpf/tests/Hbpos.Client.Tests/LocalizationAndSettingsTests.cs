@@ -1,11 +1,29 @@
-﻿using Hbpos.Client.Wpf.Localization;
+﻿using System.Globalization;
+using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 using Microsoft.Data.Sqlite;
 
 namespace Hbpos.Client.Tests;
 
-public sealed class LocalizationAndSettingsTests
+// LocalizationService 的构造和 SetCulture 会写进程级的 DefaultThreadCurrentCulture / DefaultThreadCurrentUICulture，
+// 并行时会在别的测试进行中途把它在 en-US 和 zh-CN 之间翻转（曾让 LocalSellableItemIndexOrderingTests 偶发失败），
+// 所以放进非并行的区域性集合，并在每个用例结束后还原。
+[Collection(CultureSensitiveTestCollection.Name)]
+public sealed class LocalizationAndSettingsTests : IDisposable
 {
+    private readonly CultureInfo _originalCulture = CultureInfo.CurrentCulture;
+    private readonly CultureInfo _originalUiCulture = CultureInfo.CurrentUICulture;
+    private readonly CultureInfo? _originalDefaultCulture = CultureInfo.DefaultThreadCurrentCulture;
+    private readonly CultureInfo? _originalDefaultUiCulture = CultureInfo.DefaultThreadCurrentUICulture;
+
+    public void Dispose()
+    {
+        CultureInfo.CurrentCulture = _originalCulture;
+        CultureInfo.CurrentUICulture = _originalUiCulture;
+        CultureInfo.DefaultThreadCurrentCulture = _originalDefaultCulture;
+        CultureInfo.DefaultThreadCurrentUICulture = _originalDefaultUiCulture;
+    }
+
     [Fact]
     public void Localization_defaults_to_en_us_and_returns_english_text()
     {
