@@ -9,7 +9,7 @@ using Hbpos.Contracts.Square;
 
 namespace Hbpos.Client.Tests;
 
-public sealed class ConfiguredCardTerminalClientTests
+public sealed partial class ConfiguredCardTerminalClientTests
 {
     private const string InitialToken = "opaque-initial-square-token";
     private const string RefreshedToken = "opaque-refreshed-square-token";
@@ -2109,7 +2109,7 @@ public sealed class ConfiguredCardTerminalClientTests
                 AssertNoSquareHeaders(dismiss);
             });
         AssertContainsLogLine(logs.Lines, "authorize canceled checkoutId=checkout-cancel reason=caller-cancelled; starting cleanup");
-        AssertContainsLogLine(logs.Lines, "cleanup start checkoutId=checkout-cancel allowRefresh=True");
+        AssertContainsLogLine(logs.Lines, "cleanup start checkoutId=checkout-cancel");
         AssertContainsLogLine(logs.Lines, "checkout cancel result checkoutId=checkout-cancel status=CANCEL_REQUESTED shouldDismiss=True");
         AssertContainsLogLine(logs.Lines, "cleanup dismiss required checkoutId=checkout-cancel");
         AssertContainsLogLine(logs.Lines, "checkout dismiss result checkoutId=checkout-cancel http=200");
