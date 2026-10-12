@@ -6,6 +6,7 @@
 | 文件 | 作用 |
 | --- | --- |
 | `hotbargain-pos-api.location.conf` | `/pos-api/` 反向代理到收银后端；Linkly 云支付回调（按键提示、回单）依赖这条路由 |
+| `hotbargain-notification-hub.location.conf` | `/api/hubs/` 通知实时通道（SignalR）透传 WebSocket 升级头；不加也能用（自动退回长轮询），加了走 WebSocket |
 
 ## 改动后的验证
 

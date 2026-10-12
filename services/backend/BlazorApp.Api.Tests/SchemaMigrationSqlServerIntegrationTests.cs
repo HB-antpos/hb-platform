@@ -1630,6 +1630,53 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 通知平台两张表_可重复执行_幂等键唯一且允许多个空值_并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql));
+        Assert.Equal(52500, missing.Number);
+
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql);
+
+        // 没有幂等键的通知可以有多条；同一幂等键第二次写入被唯一索引拒绝。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.AppNotification (NotificationId, Type, Priority, Title, Body, CreatedAtUtc, CreatedBy)
+            VALUES (N'n1', N'system.test', 0, N'T', N'B', SYSUTCDATETIME(), N'test'),
+                   (N'n2', N'system.test', 0, N'T', N'B', SYSUTCDATETIME(), N'test');
+            INSERT dbo.AppNotification (NotificationId, Type, Priority, Title, Body, DedupeKey, CreatedAtUtc, CreatedBy)
+            VALUES (N'n3', N'system.test', 0, N'T', N'B', N'k1', SYSUTCDATETIME(), N'test');
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.AppNotification (NotificationId, Type, Priority, Title, Body, DedupeKey, CreatedAtUtc, CreatedBy)
+                VALUES (N'n4', N'system.test', 0, N'T', N'B', N'k1', SYSUTCDATETIME(), N'test');
+                """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 列被改窄报 52501；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AppNotification ALTER COLUMN Title nvarchar(100) NOT NULL;");
+        var narrowed = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql));
+        Assert.Equal(52501, narrowed.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AppNotification ALTER COLUMN Title nvarchar(200) NOT NULL;");
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql);
+
+        // 收件箱索引被删报 52502；重跑迁移补回后通过。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_AppNotificationRecipient_User_Created ON dbo.AppNotificationRecipient;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql));
+        Assert.Equal(52502, indexMissing.Number);
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppNotificationSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
