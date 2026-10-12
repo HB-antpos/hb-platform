@@ -309,6 +309,107 @@ public sealed class PromotionEvaluationServiceTests
         Assert.Equal(PromotionComputationBudget.MaxWorkUnitsPerOrder + PromotionComputationBudget.MaxWorkUnitsPerRule, exception.CalculatedWorkUnits);
     }
 
+    [Fact]
+    public async Task EvaluateAsync_ignores_a_negative_fixed_price_rule_entirely()
+    {
+        // 固定价必须 >= 0：负价规则整条忽略，不会把整组折成 0 元甚至倒贴（与旧引擎、目录源服务端、iPad 一致）。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-NEGATIVE", asOf, ["SKU-001"], applyQuantity: 2, fixedPrice: -1m)
+        ]);
+        var cart = new PosCartService();
+        var line = cart.AddItem(CreateItem(productCode: "SKU-001", lookupCode: "SKU-001-A", price: 10m));
+        Assert.True(cart.SetLineQuantity(line, 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+
+        Assert.Empty(discounts);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_negative_fixed_price_exclusive_rule_does_not_suppress_other_rules()
+    {
+        // 被忽略的负价规则也不参与互斥选择：否则它会作为最高优先级的互斥规则把真正有效的规则整条压住。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-NEGATIVE", asOf, ["SKU-001"], priority: 99, isExclusive: true, applyQuantity: 2, fixedPrice: -1m),
+            CreateRule("PROMO-VALID", asOf, ["SKU-001"], priority: 1, applyQuantity: 2, fixedPrice: 15m)
+        ]);
+        var cart = new PosCartService();
+        var line = cart.AddItem(CreateItem(productCode: "SKU-001", lookupCode: "SKU-001-A", price: 10m));
+        Assert.True(cart.SetLineQuantity(line, 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+
+        Assert.Equal(5m, Assert.Single(discounts).DiscountAmount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_zero_fixed_price_is_still_a_valid_free_bundle()
+    {
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-FREE", asOf, ["SKU-001"], applyQuantity: 2, fixedPrice: 0m)
+        ]);
+        var cart = new PosCartService();
+        var line = cart.AddItem(CreateItem(productCode: "SKU-001", lookupCode: "SKU-001-A", price: 10m));
+        Assert.True(cart.SetLineQuantity(line, 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+
+        Assert.Equal(20m, Assert.Single(discounts).DiscountAmount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_sub_cent_unit_price_bundle_actual_equals_the_fixed_price()
+    {
+        // 单价 3.335×3 凑 3 件 9.00：行原价 10.01（整行一次舍入），折 1.01，实收恰为 9.00；
+        // 若先把每个单位舍入到 3.34 再求和（10.02），会多折 1 分、实收 8.99。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-SUBCENT", asOf, ["SKU-001"], applyQuantity: 3, fixedPrice: 9m)
+        ]);
+        var cart = new PosCartService();
+        var line = cart.AddItem(CreateItem(productCode: "SKU-001", lookupCode: "SKU-001-A", price: 3.335m));
+        Assert.True(cart.SetLineQuantity(line, 3m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+        cart.ApplyPromotionDiscounts(discounts);
+
+        Assert.Equal(1.01m, Assert.Single(discounts).DiscountAmount);
+        Assert.Equal(9.00m, line.ActualAmount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_sub_cent_unit_price_across_lines_rounds_each_line_once()
+    {
+        // 两行各 1 件 3.335：行原价各 3.34（与购物车行原价同口径），组原价 6.68，凑 2 件 5.00 折 1.68，均分 0.84/0.84，整组实收 5.00。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-SUBCENT-PAIR", asOf, ["SKU-A", "SKU-B"], applyQuantity: 2, fixedPrice: 5m)
+        ]);
+        var cart = new PosCartService();
+        var first = cart.AddItem(CreateItem(productCode: "SKU-A", lookupCode: "SKU-A-001", price: 3.335m));
+        var second = cart.AddItem(CreateItem(productCode: "SKU-B", lookupCode: "SKU-B-001", price: 3.335m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+        cart.ApplyPromotionDiscounts(discounts);
+
+        Assert.Equal(0.84m, first.DiscountAmount);
+        Assert.Equal(0.84m, second.DiscountAmount);
+        Assert.Equal(5.00m, first.ActualAmount + second.ActualAmount);
+    }
+
     private static SellableItemDto CreateItem(
         string storeCode = "S001",
         string productCode = "SKU-001",

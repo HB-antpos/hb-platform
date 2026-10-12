@@ -1129,6 +1129,18 @@ public sealed class PosCartService
             return;
         }
 
+        // 只评估与购物车相关的规则：规则里至少有一个商品对应可参与促销的购物车行。
+        // 与 PromotionEvaluationService、共享挂单重演、iPad 一致；否则商品不在购物车里的互斥规则
+        // 会先被选中、再什么都算不出来，反而把购物车里真正命中的非互斥规则整条压住。
+        var eligibleLines = _lines.Where(IsAutomaticPromotionLineEligible).ToList();
+        candidates = candidates
+            .Where(rule => RuleHasEligibleProduct(rule, eligibleLines))
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
         // 后端促销评估：存在互斥促销时，只取优先级最高的一条，保持收银端和后台一致。
         if (candidates.Any(rule => rule.IsExclusive))
         {
@@ -1210,7 +1222,7 @@ public sealed class PosCartService
         }
 
         // 每次只保留一个 bundle，避免按数量和权重构造整单展开列表。
-        var group = new List<PromotionCartUnit>(
+        var group = new List<PromotionBundleUnit<CartLine>>(
             Math.Min(plan.Rule.ApplyQuantity, checked((int)plan.Budget.WorkUnits)));
         foreach (var unit in EnumeratePromotionCartUnits(plan))
         {
@@ -1220,12 +1232,14 @@ public sealed class PosCartService
                 continue;
             }
 
-            ApplyPromotionBundle(plan.Rule, group, automaticDiscounts);
+            // 一组的折扣计算与逐行分摊走共享实现（与新引擎、共享挂单重演同一份），
+            // 分摊到分因此与它们逐行一致。这里不传折扣容量：多条规则先累加，最后统一截断到行原价（D3 暂不统一）。
+            PromotionBundleAllocator.AllocateBundle(group, plan.Rule.FixedPrice, automaticDiscounts, getRemainingCapacity: null);
             group.Clear();
         }
     }
 
-    private IEnumerable<PromotionCartUnit> EnumeratePromotionCartUnits(AutomaticPromotionPlan plan)
+    private IEnumerable<PromotionBundleUnit<CartLine>> EnumeratePromotionCartUnits(AutomaticPromotionPlan plan)
     {
         long emittedUnits = 0;
         foreach (var line in _lines)
@@ -1243,7 +1257,7 @@ public sealed class PosCartService
                 // SortOrder 记录该单位属于本行第几件实物，供组内金额折叠使用。
                 for (var weightIndex = 0; weightIndex < unitWeight; weightIndex++)
                 {
-                    yield return new PromotionCartUnit(line, line.UnitPrice, quantityIndex);
+                    yield return new PromotionBundleUnit<CartLine>(line, line.UnitPrice, quantityIndex);
                     emittedUnits++;
                     if (emittedUnits >= plan.Budget.WorkUnits)
                     {
@@ -1254,41 +1268,14 @@ public sealed class PosCartService
         }
     }
 
-    private static void ApplyPromotionBundle(
-        CatalogPromotionRuleDto rule,
-        IReadOnlyList<PromotionCartUnit> group,
-        Dictionary<CartLine, decimal> automaticDiscounts)
+    private static bool RuleHasEligibleProduct(CatalogPromotionRuleDto rule, IReadOnlyList<CartLine> eligibleLines)
     {
-        // 关键逻辑：UnitWeight 只用于凑够 ApplyQuantity 的阈值计数，不参与组内金额累加。
-        // 同一件实物按权重展开成多个单位，这里必须按 (行, 实物序号) 折叠回去让单价只计一次；
-        // 否则权重大于 1 的商品单价会被重复累加，固定总价折扣随之放大，直接少收钱。
-        // 该语义与 PromotionEvaluationService.AddGroupDiscount 的 (Line, SortOrder) 分组保持一致。
-        var physicalUnits = group
-            .GroupBy(unit => (unit.Line, unit.SortOrder))
-            .Select(units => units.First())
-            .ToList();
-
-        var grossAmount = physicalUnits.Sum(unit => unit.UnitPrice);
-        var bundleDiscount = decimal.Round(grossAmount - rule.FixedPrice, 2, MidpointRounding.AwayFromZero);
-        if (bundleDiscount <= 0m)
-        {
-            return;
-        }
-
-        var remainingDiscount = bundleDiscount;
-        for (var i = 0; i < physicalUnits.Count; i++)
-        {
-            var unit = physicalUnits[i];
-            var unitDiscount = i == physicalUnits.Count - 1
-                ? remainingDiscount
-                : decimal.Round(bundleDiscount * unit.UnitPrice / grossAmount, 2, MidpointRounding.AwayFromZero);
-            unitDiscount = Math.Clamp(unitDiscount, 0m, remainingDiscount);
-            if (unitDiscount > 0m)
-            {
-                automaticDiscounts[unit.Line] = automaticDiscounts.GetValueOrDefault(unit.Line) + unitDiscount;
-                remainingDiscount -= unitDiscount;
-            }
-        }
+        // 与 PromotionEvaluationService.RuleHasEligibleProduct 同口径：去空白、忽略大小写，空商品码不算。
+        var productCodes = rule.Products
+            .Select(product => NormalizeProductCode(product.ProductCode))
+            .Where(productCode => productCode.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return eligibleLines.Any(line => productCodes.Contains(NormalizeProductCode(line.ProductCode)));
     }
 
     private static bool IsAutomaticPromotionLineEligible(CartLine line)
@@ -1360,8 +1347,6 @@ public sealed class PosCartService
         CatalogPromotionRuleDto Rule,
         IReadOnlyDictionary<string, int> ProductWeights,
         PromotionRuleBudget Budget);
-
-    private sealed record PromotionCartUnit(CartLine Line, decimal UnitPrice, long SortOrder);
 }
 
 public sealed record PosCartSnapshot(

@@ -43,8 +43,14 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
             return [];
         }
 
+        // 固定价必须 >= 0：负价规则整条忽略（也不参与互斥选择），与旧引擎 rule.FixedPrice >= 0m、
+        // 目录源服务端过滤、iPad 契约校验一致；否则负价会把整组折成 0 元甚至倒贴。
         var applicableRules = activeRules
-            .Where(rule => rule.ApplyQuantity > 0 && rule.Products.Count > 0 && RuleHasEligibleProduct(rule, eligibleLines))
+            .Where(rule =>
+                rule.ApplyQuantity > 0 &&
+                rule.FixedPrice >= 0m &&
+                rule.Products.Count > 0 &&
+                RuleHasEligibleProduct(rule, eligibleLines))
             .ToArray();
         if (applicableRules.Length == 0)
         {
@@ -76,6 +82,9 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
         // 所有选中规则先统一预检；任一超限都不允许留下部分自动促销结果。
         PromotionComputationBudget.EnsureOrderLimit(plans.Select(plan => plan.Budget));
         var discountsByLine = new Dictionary<CartLine, decimal>();
+        // 折扣容量 = 行原价 - 该行已累计的自动促销折扣；多条规则叠加不得超过行原价（D3：超出部分转给还有容量的行）。
+        Func<CartLine, decimal> getRemainingCapacity =
+            line => GetRemainingLineDiscountCapacity(discountsByLine, line);
 
         foreach (var plan in plans)
         {
@@ -85,7 +94,7 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
             }
 
             // 与 Web 端评估保持一致：每条非排他规则独立按购物车顺序分组，不跨规则消费同一份展开单位。
-            var selectedUnits = new List<RuleUnit>(
+            var selectedUnits = new List<PromotionBundleUnit<CartLine>>(
                 Math.Min(plan.Rule.ApplyQuantity, checked((int)plan.Budget.WorkUnits)));
             foreach (var unit in EnumerateRuleUnits(
                          eligibleLines,
@@ -99,7 +108,12 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                AddGroupDiscount(discountsByLine, selectedUnits, plan.Rule.FixedPrice);
+                // 一组的折扣计算与逐行分摊走共享实现（旧引擎、共享挂单重演同用），保证三处逐行一致。
+                PromotionBundleAllocator.AllocateBundle(
+                    selectedUnits,
+                    plan.Rule.FixedPrice,
+                    discountsByLine,
+                    getRemainingCapacity);
                 selectedUnits.Clear();
             }
         }
@@ -168,7 +182,7 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
         return weights;
     }
 
-    private static IEnumerable<RuleUnit> EnumerateRuleUnits(
+    private static IEnumerable<PromotionBundleUnit<CartLine>> EnumerateRuleUnits(
         IReadOnlyList<CartLine> lines,
         IReadOnlyDictionary<string, int> ruleProductWeights,
         long workUnits)
@@ -188,7 +202,7 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
                 // Web 端的权重语义是按 qty * UnitWeight 展开同价单位，每个展开单位自身权重都视为 1。
                 for (var weightIndex = 0; weightIndex < unitWeight; weightIndex++)
                 {
-                    yield return new RuleUnit(
+                    yield return new PromotionBundleUnit<CartLine>(
                         line,
                         line.UnitPrice,
                         quantityIndex);
@@ -199,79 +213,6 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
                     }
                 }
             }
-        }
-    }
-
-    private static void AddGroupDiscount(
-        Dictionary<CartLine, decimal> discountsByLine,
-        IReadOnlyList<RuleUnit> selectedUnits,
-        decimal fixedPrice)
-    {
-        var groupedLineUnits = selectedUnits
-            .GroupBy(unit => new RuleUnitGroupKey(unit.Line, unit.SortOrder))
-            .Select(group => new
-            {
-                group.Key.Line,
-                group.Key.SortOrder,
-                Amount = decimal.Round(group.First().UnitPrice, 2, MidpointRounding.AwayFromZero)
-            })
-            .OrderBy(group => group.SortOrder)
-            .ToArray();
-
-        var groupTotal = decimal.Round(groupedLineUnits.Sum(unit => unit.Amount), 2, MidpointRounding.AwayFromZero);
-        var groupDiscount = decimal.Round(groupTotal - fixedPrice, 2, MidpointRounding.AwayFromZero);
-        if (groupDiscount <= 0m)
-        {
-            return;
-        }
-
-        var groupedLines = groupedLineUnits
-            .GroupBy(unit => unit.Line)
-            .Select(group => new
-            {
-                Line = group.Key,
-                Amount = decimal.Round(group.Sum(unit => unit.Amount), 2, MidpointRounding.AwayFromZero),
-                SortOrder = group.Min(unit => unit.SortOrder),
-                MaxAdditionalDiscount = GetRemainingLineDiscountCapacity(discountsByLine, group.Key)
-            })
-            .Where(group => group.MaxAdditionalDiscount > 0m)
-            .OrderBy(group => group.SortOrder)
-            .ToArray();
-        if (groupedLines.Length == 0)
-        {
-            return;
-        }
-
-        var remainingDiscount = groupDiscount;
-        var remainingAmount = decimal.Round(
-            groupedLines.Sum(item => item.Amount),
-            2,
-            MidpointRounding.AwayFromZero);
-        for (var index = 0; index < groupedLines.Length && remainingDiscount > 0m; index++)
-        {
-            var group = groupedLines[index];
-            if (remainingAmount <= 0m)
-            {
-                break;
-            }
-
-            var lineDiscount = index == groupedLines.Length - 1
-                ? remainingDiscount
-                : decimal.Round(remainingDiscount * group.Amount / remainingAmount, 2, MidpointRounding.AwayFromZero);
-            lineDiscount = Math.Clamp(lineDiscount, 0m, Math.Min(remainingDiscount, group.MaxAdditionalDiscount));
-            if (lineDiscount > 0m)
-            {
-                discountsByLine[group.Line] = discountsByLine.TryGetValue(group.Line, out var currentDiscount)
-                    ? decimal.Round(currentDiscount + lineDiscount, 2, MidpointRounding.AwayFromZero)
-                    : lineDiscount;
-                remainingDiscount -= lineDiscount;
-            }
-
-            // Amount 均已按分币舍入；递减与旧实现每轮 Skip(index).Sum 的结果一致，且避免 O(n²)。
-            remainingAmount = decimal.Round(
-                remainingAmount - group.Amount,
-                2,
-                MidpointRounding.AwayFromZero);
         }
     }
 
@@ -295,13 +236,4 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
         PromotionRuleDto Rule,
         IReadOnlyDictionary<string, int> ProductWeights,
         PromotionRuleBudget Budget);
-
-    private sealed record RuleUnit(
-        CartLine Line,
-        decimal UnitPrice,
-        long SortOrder);
-
-    private sealed record RuleUnitGroupKey(
-        CartLine Line,
-        long SortOrder);
 }
