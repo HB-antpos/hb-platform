@@ -1744,16 +1744,12 @@ public sealed class ConfiguredCardTerminalClient :
                 return UnknownRecovery("Linkly backend session does not match the persisted attempt.");
             }
 
-            if (string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) && status.TransactionSuccess == true)
+            if (LinklyBackendSessionClassifier.IsApprovedByFlag(status))
             {
                 return RecoverBackendApproval(status, attempt);
             }
 
-            if ((string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) && status.TransactionSuccess == false) ||
-                string.Equals(status.Status, "Failed", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status.Status, "NotSubmitted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status.Status, "Canceled", StringComparison.OrdinalIgnoreCase))
+            if (LinklyBackendSessionClassifier.IsDeclinedOrFailed(status))
             {
                 return new PaymentAuthorizationResult(false, null, status.ResponseText ?? "Linkly transaction was not approved.", Processor: "ANZ", ResponseCode: status.ResponseCode, ResponseText: status.ResponseText);
             }
@@ -1971,13 +1967,11 @@ public sealed class ConfiguredCardTerminalClient :
         LinklyCloudBackendSessionResponse status,
         LocalCardPaymentAttempt attempt)
     {
-        var requestedAmount = Math.Abs(attempt.Amount);
-        var transaction = LinklyBackendTerminalClient.ReadTransactionResult(
-            status,
-            requestedAmount,
-            attempt.TxnRef ?? string.Empty);
-        if (!transaction.Succeeded ||
-            !LinklyBackendTerminalClient.IsTransactionResultVerified(status, transaction, requestedAmount))
+        if (!LinklyBackendSessionClassifier.TryReadVerifiedApproval(
+                status,
+                attempt.Amount,
+                attempt.TxnRef,
+                out var transaction))
         {
             return UnknownRecovery("Linkly backend session does not contain a verified approved amount.");
         }

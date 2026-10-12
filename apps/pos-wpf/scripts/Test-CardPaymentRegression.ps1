@@ -32,6 +32,7 @@ $testClasses = @(
     'LinklyCloudTerminalClientTests'
     'LinklyCloudApiClientTests'
     'LinklyBackendTerminalClient'
+    'LinklyBackendSession'
     'LinklyRecoveryServiceGateTests'
     'LinklyTerminalSelectionTransitionGateTests'
     'SquareTerminalPaymentClientTests'
