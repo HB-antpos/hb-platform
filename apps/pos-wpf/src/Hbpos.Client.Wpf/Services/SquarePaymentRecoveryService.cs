@@ -3778,7 +3778,7 @@ public sealed class SquarePaymentRecoveryService(
             return false;
         }
 
-        // 褰撳墠璐墿杞﹀凡鏈夋柊璁㈠崟鏃讹紝涓嶆仮澶嶆棫鑽夌銆佷笉淇濆瓨璁㈠崟锛屼篃涓嶆妸鏃?attempt 鏍囪涓哄凡澶勭悊銆?
+        // 当前购物车已有新订单时，不恢复旧草稿、不保存订单，也不把旧 attempt 标记为已处理。
         ConsoleLog.Write(
             "SquareRecovery",
             $"defer recovery because current cart is not empty attemptGuid={attempt.AttemptGuid} checkoutId={attempt.CheckoutId ?? "<null>"} reason={reason}");

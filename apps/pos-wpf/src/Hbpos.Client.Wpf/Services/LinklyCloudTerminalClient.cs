@@ -1446,7 +1446,7 @@ public sealed class ConfiguredLinklyTerminalClient(
         CardTerminalSettings settings,
         CancellationToken cancellationToken = default)
     {
-        return RunWithPriorityAsync(
+        return RunConfiguredModeAsync(
             settings,
             (mode, modeSettings) => PurchaseOneModeAsync(mode, amount, session, modeSettings, cancellationToken));
     }
@@ -1458,7 +1458,7 @@ public sealed class ConfiguredLinklyTerminalClient(
         string txnRef,
         CancellationToken cancellationToken = default)
     {
-        return RunWithPriorityAsync(
+        return RunConfiguredModeAsync(
             settings,
             (mode, modeSettings) => PurchaseOneModeAsync(mode, amount, session, modeSettings, cancellationToken, txnRef));
     }
@@ -1480,7 +1480,7 @@ public sealed class ConfiguredLinklyTerminalClient(
         string? originalReference,
         CancellationToken cancellationToken = default)
     {
-        return RunWithPriorityAsync(
+        return RunConfiguredModeAsync(
             settings,
             (mode, modeSettings) => RefundOneModeAsync(mode, amount, session, modeSettings, originalReference, cancellationToken));
     }
@@ -1493,7 +1493,7 @@ public sealed class ConfiguredLinklyTerminalClient(
         string refundTxnRef,
         CancellationToken cancellationToken = default)
     {
-        return RunWithPriorityAsync(
+        return RunConfiguredModeAsync(
             settings,
             (mode, modeSettings) => RefundOneModeAsync(mode, amount, session, modeSettings, originalReference, cancellationToken, refundTxnRef));
     }
@@ -1571,13 +1571,15 @@ public sealed class ConfiguredLinklyTerminalClient(
         };
     }
 
-    private async Task<PaymentAuthorizationResult> RunWithPriorityAsync(
+    private async Task<PaymentAuthorizationResult> RunConfiguredModeAsync(
         CardTerminalSettings settings,
         Func<LinklyConnectionMode, CardTerminalSettings, Task<PaymentAuthorizationResult>> runModeAsync)
     {
         var mode = CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode);
         var formattedMode = CardTerminalSettings.FormatLinklyConnectionMode(mode);
-        // 关键逻辑：每笔交易只执行配置的连接模式，失败后不再切换到其他 Linkly 链路。
+        // 关键逻辑：每笔交易只执行配置的连接模式，失败后不再切换到其他 Linkly 链路（名字里没有“优先级/回退”）。
+        // 下面的 Fallback* 字段仅为兼容上层读取而固定写成“未回退、不允许回退”，
+        // 包括覆盖 BackendUnavailable() 里的 FallbackAllowed: true；改动它会影响付款流程对失败结果的判定，别顺手清理。
         var result = await runModeAsync(mode, settings with { LinklyConnectionMode = mode });
         return result with
         {

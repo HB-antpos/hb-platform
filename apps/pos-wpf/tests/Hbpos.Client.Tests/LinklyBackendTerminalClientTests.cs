@@ -1931,6 +1931,92 @@ public sealed class LinklyBackendTerminalClientTests
     }
 
     [Fact]
+    public async Task PurchaseAsync_unchanged_status_polls_write_bounded_logs_and_status_change_is_still_logged()
+    {
+        // 后端模式每秒轮询一次：状态没变化时不能每轮都写请求/响应体/快照/延时日志（每条都是一次本地库事务并上传），
+        // 但状态一旦变化（这里是 Pending -> Completed）必须照常记录。
+        using var logs = new ConsoleLogCapture();
+        const int unchangedPolls = 8;
+        var statusPollCount = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/transactions/active", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.EndsWith("/status", StringComparison.Ordinal))
+            {
+                statusPollCount++;
+                return JsonResponse(statusPollCount <= unchangedPolls
+                    ? PendingSessionJson("poll-log-session", "TXN-POLL-LOG")
+                    : ApprovedSessionJson("poll-log-session", "TXN-POLL-LOG"));
+            }
+
+            return JsonResponse(PendingSessionJson("poll-log-session", "TXN-POLL-LOG"));
+        });
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService());
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.True(statusPollCount > unchangedPolls);
+        var statusLogs = CountLinklyLogs(logs.Lines, "status");
+        // 8 次无变化轮询 + 1 次变化：响应只应在“首次/变化”时记录，不随轮询次数线性增长。
+        Assert.True(statusLogs.Response <= 3, $"status response logs={statusLogs.Response}");
+        Assert.True(statusLogs.Request <= 4, $"status request logs={statusLogs.Request}");
+        Assert.True(statusLogs.Snapshot <= 4, $"status snapshot logs={statusLogs.Snapshot}");
+        Assert.True(CountLinklyLogs(logs.Lines, "poll").Snapshot <= 3);
+        Assert.DoesNotContain(logs.Lines, line => line.Contains("poll delay", StringComparison.Ordinal));
+        // 状态变化（Completed）的响应体仍然完整落日志。
+        Assert.Contains(
+            logs.Lines,
+            line => line.Contains("\"operation\":\"status\"", StringComparison.Ordinal) &&
+                line.Contains("\"phase\":\"response\"", StringComparison.Ordinal) &&
+                line.Contains("Completed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void StatusLogFingerprint_changes_for_result_evidence_fields_but_not_for_identical_status()
+    {
+        // 仅最终结果/卡交易明细变化、状态与通知条数不变时，也必须判定为“有变化”继续写日志；完全相同则判定无变化。
+        var method = typeof(LinklyBackendTerminalClient).GetMethod(
+            "BuildStatusLogFingerprint",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        string Fingerprint(Hbpos.Contracts.Linkly.LinklyCloudBackendSessionResponse status) =>
+            (string)method!.Invoke(null, [status])!;
+
+        var baseStatus = new Hbpos.Contracts.Linkly.LinklyCloudBackendSessionResponse(
+            "Sandbox", "S01", "TERM-1", "fp-session", "Completed", "TXN-FP", "00", "APPROVED", null, "APPROVED",
+            false, false, false, false, false, null, null, null, null, 0, null, null, 200, [], null)
+        {
+            CardTransaction = new Hbpos.Contracts.Linkly.LinklyCloudBackendCardTransactionDto(
+                "TXN-FP", "RFN-1", "AUTH", "VISA", "****1111", "M1", "00", "APPROVED", "42", null, 1000)
+        };
+
+        Assert.Equal(Fingerprint(baseStatus), Fingerprint(baseStatus with { }));
+        Assert.NotEqual(Fingerprint(baseStatus), Fingerprint(baseStatus with { TransactionSuccess = true }));
+        Assert.NotEqual(
+            Fingerprint(baseStatus),
+            Fingerprint(baseStatus with { CardTransaction = baseStatus.CardTransaction! with { Rfn = "RFN-2" } }));
+        Assert.NotEqual(
+            Fingerprint(baseStatus),
+            Fingerprint(baseStatus with { CardTransaction = baseStatus.CardTransaction! with { AmountCents = 999 } }));
+        Assert.NotEqual(
+            Fingerprint(baseStatus),
+            Fingerprint(baseStatus with { ClientAcknowledgedAt = DateTimeOffset.Parse("2026-06-05T10:05:00+10:00") }));
+        Assert.NotEqual(
+            Fingerprint(baseStatus),
+            Fingerprint(baseStatus with
+            {
+                LateFinalResult = new Hbpos.Contracts.Linkly.LinklyCloudBackendLateFinalResultDto(
+                    DateTimeOffset.Parse("2026-06-05T10:06:00+10:00"), true, "00", "APPROVED")
+            }));
+    }
+
+    [Fact]
     public async Task PurchaseAsync_returns_result_unknown_when_status_poll_keeps_failing_after_backend_start()
     {
         var requests = new List<HttpRequestMessage>();
@@ -7163,6 +7249,45 @@ public sealed class LinklyBackendTerminalClientTests
             Results.RemoveAt(0);
             return Task.FromResult(result);
         }
+    }
+
+    private static (int Request, int Response, int Snapshot) CountLinklyLogs(
+        IReadOnlyList<string> lines,
+        string operation)
+    {
+        int request = 0, response = 0, snapshot = 0;
+        foreach (var line in lines)
+        {
+            var jsonStart = line.IndexOf('{', StringComparison.Ordinal);
+            if (jsonStart < 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(line[jsonStart..]);
+                if (!document.RootElement.TryGetProperty("operation", out var op) ||
+                    !string.Equals(op.GetString(), operation, StringComparison.Ordinal) ||
+                    !document.RootElement.TryGetProperty("phase", out var phase))
+                {
+                    continue;
+                }
+
+                switch (phase.GetString())
+                {
+                    case "request": request++; break;
+                    case "response": response++; break;
+                    case "snapshot": snapshot++; break;
+                }
+            }
+            catch (JsonException)
+            {
+                // 非 Linkly JSON 行（普通文本日志）忽略。
+            }
+        }
+
+        return (request, response, snapshot);
     }
 
     private static JsonDocument FindLinklyLog(

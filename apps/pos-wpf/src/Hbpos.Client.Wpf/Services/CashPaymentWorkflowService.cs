@@ -393,34 +393,15 @@ public sealed class CashPaymentWorkflowService(
             throw new InvalidOperationException("Tendered amount is invalid.");
         }
 
-        var result = checkout.CreateCashOrder(cart, session, tenderedAmount);
-        // 共享挂单取单完成：现金路径必须用正在结账的购物车快照做来源匹配，
-        // 避免把无关 open claim 误绑到普通订单。
-        var cartSnapshot = cart.CreateSnapshot();
-        // 共享挂单取单完成：现金路径与 LocalOrder 同一事务写入来源/完成 claim/消费本地挂单。
-        var heldOrder = await TryResolveHeldOrderAsync(session, cartSnapshot, cancellationToken);
-        await RunLocalStoreAsync(
-            () => heldOrder is null
-                ? orderRepository.SavePendingOrderAsync(result.Order, cancellationToken)
-                : orderRepository.SavePendingOrderWithHeldSourceAsync(
-                    result.Order,
-                    heldOrder,
-                    cancellationToken),
+        // 纯现金是多付款方式完成的特例：委托给统一入口，避免再维护一份落盘/挂单来源/清购物车/计数的重复实现。
+        // 退货（购物车实付为负）时现金金额按负数记，与原 CreateCashOrder 的符号规则一致。
+        var signedTenderAmount = cart.ActualAmount < 0m ? -tenderedAmount : tenderedAmount;
+        return await CompletePaymentAsync(
+            cart,
+            session,
+            [new PaymentTender(PaymentMethodKind.Cash, signedTenderAmount)],
+            signedTenderAmount,
             cancellationToken);
-
-        var hasPostCommitWarning = TryClearCartAfterCommit(cart, result.Order.OrderGuid);
-        var pendingSyncResult = await ReadPendingSyncCountAfterCommitAsync(session, cancellationToken);
-        hasPostCommitWarning |= pendingSyncResult.HasPostCommitWarning;
-        var pendingSyncCount = pendingSyncResult.PendingSyncCount;
-        var updatedSession = session with { PendingSyncCount = pendingSyncCount };
-
-        return new CashPaymentWorkflowResult(
-            result.Order,
-            result.TenderedAmount,
-            result.ChangeAmount,
-            pendingSyncCount,
-            updatedSession,
-            hasPostCommitWarning);
     }
 
     public async Task<CashPaymentWorkflowResult> CompletePaymentAsync(
@@ -500,94 +481,18 @@ public sealed class CashPaymentWorkflowService(
                 "The card was approved, but POS could not safely save the order. Recovery or supervisor review is required.",
                 ex);
         }
-        try
-        {
-            order = await IssuePendingRefundVouchersAsync(order, session, cancellationToken);
-        }
-        catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
-        {
-            // 中文注释：退款券签发的致命异常必须原样传播，不能降级成可重试上传失败。
-            throw new PaymentUploadFailedException(
-                order.OrderGuid,
-                CalculateTenderedAmount(tenderSnapshot),
-                result.ChangeAmount,
-                ex.Message,
-                ex);
-        }
-
-        result = result with { Order = order };
-
-        var hasPositiveVoucher = result.Order.Payments.Any(payment =>
-            payment.Method == Hbpos.Contracts.Orders.PaymentMethodKind.Voucher &&
-            payment.Amount > 0m);
-        if (hasPositiveVoucher)
-        {
-            if (orderUploadService is null)
-            {
-                throw new InvalidOperationException("Voucher payments require online order upload.");
-            }
-
-            try
-            {
-                await orderUploadService.UploadOrderAsync(result.Order.OrderGuid, cancellationToken);
-            }
-            catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
-            {
-                // 中文注释：代金券订单上传的致命异常必须原样传播，不能包装成普通上传失败。
-                throw new PaymentUploadFailedException(
-                    result.Order.OrderGuid,
-                    CalculateTenderedAmount(tenderSnapshot),
-                    result.ChangeAmount,
-                    ex.Message,
-                    ex);
-            }
-        }
-
-        var hasPostCommitWarning = false;
-        try
-        {
-            await MarkCompletedCardAttemptsAsync(
-                cart,
-                tenderSnapshot,
-                recoveryOwnerAttemptGuid,
-                recoveryOwnerAttemptKey,
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-        {
-            hasPostCommitWarning = true;
-            LogPostCommitWarning("mark-card-attempt-completed", result.Order.OrderGuid, ex);
-        }
-
-        try
-        {
-            await MarkCompletedSquareAttemptsAsync(
-                cart,
-                tenderSnapshot,
-                recoveryOwnerAttemptGuid,
-                recoveryOwnerAttemptKey,
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-        {
-            hasPostCommitWarning = true;
-            LogPostCommitWarning("mark-square-attempt-completed", result.Order.OrderGuid, ex);
-        }
-
-        hasPostCommitWarning |= TryClearCartAfterCommit(cart, result.Order.OrderGuid);
-
-        var pendingSyncResult = await ReadPendingSyncCountAfterCommitAsync(session, cancellationToken);
-        hasPostCommitWarning |= pendingSyncResult.HasPostCommitWarning;
-        var pendingSyncCount = pendingSyncResult.PendingSyncCount;
-        var updatedSession = session with { PendingSyncCount = pendingSyncCount };
-
-        return new CashPaymentWorkflowResult(
-            result.Order,
+        // 订单已落盘：后续收尾（退款券、代金券上传、标记完成、清购物车、计数）与重试路径共用同一实现。
+        return await FinalizePersistedOrderAsync(
+            order,
+            cart,
+            session,
+            tenderSnapshot,
             CalculateTenderedAmount(tenderSnapshot),
             result.ChangeAmount,
-            pendingSyncCount,
-            updatedSession,
-            hasPostCommitWarning);
+            recoveryOwnerAttemptGuid,
+            recoveryOwnerAttemptKey,
+            logOperationPrefix: string.Empty,
+            cancellationToken);
     }
 
     public async Task<CashPaymentWorkflowResult> RetryVoucherUploadAsync(
@@ -606,15 +511,50 @@ public sealed class CashPaymentWorkflowService(
                 () => orderRepository.GetOrderAsync(orderGuid, cancellationToken),
                 cancellationToken)
             ?? throw new InvalidOperationException("Pending voucher order was not found.");
+        // 重试路径的付款明细以已落盘订单为准（tenderSnapshot 传 null），其余收尾与首次完成共用同一实现。
+        return await FinalizePersistedOrderAsync(
+            order,
+            cart,
+            session,
+            tenderSnapshot: null,
+            tenderedAmount,
+            changeAmount,
+            recoveryOwnerAttemptGuid,
+            recoveryOwnerAttemptKey,
+            logOperationPrefix: "retry-voucher-",
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// 订单已落盘之后的统一收尾：签发待发退款券、上传代金券订单、标记 Linkly/Square 尝试完成、清空购物车、读取待同步数并组装结果。
+    /// 首次完成（CompletePaymentAsync）与代金券上传重试（RetryVoucherUploadAsync）逻辑同构，合并于此以免两处各改各的而漂移。
+    /// </summary>
+    /// <param name="tenderSnapshot">
+    /// 首次完成时传入付款明细快照；重试时传 null，表示在退款券签发、代金券上传之后，以已落盘订单的付款行重建明细
+    /// （与此前重试路径的取值时机一致）。
+    /// </param>
+    /// <param name="logOperationPrefix">收尾后警告日志的操作名前缀，用来区分首次完成与重试（保持原有日志名不变）。</param>
+    private async Task<CashPaymentWorkflowResult> FinalizePersistedOrderAsync(
+        LocalOrder order,
+        PosCartService cart,
+        PosSessionState session,
+        IReadOnlyList<PaymentTender>? tenderSnapshot,
+        decimal tenderedAmount,
+        decimal changeAmount,
+        Guid? recoveryOwnerAttemptGuid,
+        CardRecoveryAttemptKey? recoveryOwnerAttemptKey,
+        string logOperationPrefix,
+        CancellationToken cancellationToken)
+    {
         try
         {
             order = await IssuePendingRefundVouchersAsync(order, session, cancellationToken);
         }
         catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
         {
-            // 中文注释：重试退款券签发同样不拦截 OOM/StackOverflowException。
+            // 中文注释：退款券签发的致命异常（含 OOM/StackOverflowException）必须原样传播，不能降级成可重试上传失败。
             throw new PaymentUploadFailedException(
-                orderGuid,
+                order.OrderGuid,
                 tenderedAmount,
                 changeAmount,
                 ex.Message,
@@ -633,13 +573,13 @@ public sealed class CashPaymentWorkflowService(
 
             try
             {
-                await orderUploadService.UploadOrderAsync(orderGuid, cancellationToken);
+                await orderUploadService.UploadOrderAsync(order.OrderGuid, cancellationToken);
             }
             catch (Exception ex) when (IsRetryableFailureAfterOrderPersisted(ex, cancellationToken))
             {
-                // 中文注释：重试代金券上传的致命异常必须保持原实例传播。
+                // 中文注释：代金券订单上传的致命异常必须保持原实例传播，不能包装成普通上传失败。
                 throw new PaymentUploadFailedException(
-                    orderGuid,
+                    order.OrderGuid,
                     tenderedAmount,
                     changeAmount,
                     ex.Message,
@@ -647,7 +587,7 @@ public sealed class CashPaymentWorkflowService(
             }
         }
 
-        var persistedTenderSnapshot = order.Payments
+        var completionTenders = tenderSnapshot ?? order.Payments
             .Select(payment => new PaymentTender(
                 payment.Method,
                 payment.Amount,
@@ -660,7 +600,7 @@ public sealed class CashPaymentWorkflowService(
         {
             await MarkCompletedCardAttemptsAsync(
                 cart,
-                persistedTenderSnapshot,
+                completionTenders,
                 recoveryOwnerAttemptGuid,
                 recoveryOwnerAttemptKey,
                 cancellationToken);
@@ -668,14 +608,14 @@ public sealed class CashPaymentWorkflowService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            LogPostCommitWarning("retry-voucher-mark-card-attempt-completed", order.OrderGuid, ex);
+            LogPostCommitWarning($"{logOperationPrefix}mark-card-attempt-completed", order.OrderGuid, ex);
         }
 
         try
         {
             await MarkCompletedSquareAttemptsAsync(
                 cart,
-                persistedTenderSnapshot,
+                completionTenders,
                 recoveryOwnerAttemptGuid,
                 recoveryOwnerAttemptKey,
                 cancellationToken);
@@ -683,7 +623,7 @@ public sealed class CashPaymentWorkflowService(
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             hasPostCommitWarning = true;
-            LogPostCommitWarning("retry-voucher-mark-square-attempt-completed", order.OrderGuid, ex);
+            LogPostCommitWarning($"{logOperationPrefix}mark-square-attempt-completed", order.OrderGuid, ex);
         }
 
         hasPostCommitWarning |= TryClearCartAfterCommit(cart, order.OrderGuid);

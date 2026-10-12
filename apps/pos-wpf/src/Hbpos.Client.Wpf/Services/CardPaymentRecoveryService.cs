@@ -894,7 +894,7 @@ public sealed class CardPaymentRecoveryService(
                     () => backendTerminalClient.GetResumableSessionAsync(settings, cancellationToken),
                     cancellationToken);
 
-            // 鏈?SessionId 浣嗗悗绔?session 宸茶繃鏈?娓呯悊锛屽厹搴曞皾璇?Resumable
+            // 有 SessionId 但后端 session 已过期/清理，兜底尝试 Resumable
             if (!statusFromResumable && status is null)
             {
                 ConsoleLog.Write(
@@ -4949,7 +4949,7 @@ public sealed class CardPaymentRecoveryService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
         {
-            // 鏈湴璁㈠崟/鑽夌鎭㈠宸茬粡瀹屾垚锛宎ck 澶辫触鍙奖鍝?backend 娓呯悊锛屼笉鑳介樆鏂惎鍔ㄤ綋楠屻€?
+            // 本地订单/草稿恢复已经完成，ack 失败只影响 backend 清理，不能阻断启动体验。
             ConsoleLog.WriteWarning(
                 "CardRecovery",
                 $"recover acknowledge failed attemptGuid={attempt.AttemptGuid} sessionId={LogValue(sessionId)} txnRef={LogValue(txnRef)} error={ex.GetType().Name}",
@@ -5745,7 +5745,7 @@ public sealed class CardPaymentRecoveryService(
         }
         else if (attemptSessionId is null)
         {
-            // 鏈湴娌℃湁 sessionId 鏃跺彧鑳介€氳繃 txnRef 缁戝畾 backend resumable锛岀己澶卞垯涓嶈兘鑷姩澶勭悊銆?
+            // 本地没有 sessionId 时只能通过 txnRef 绑定 backend resumable，缺失则不能自动处理。
             mismatchReason = "missing-recoverable-binding";
             return false;
         }
@@ -5959,6 +5959,13 @@ public sealed class CardPaymentRecoveryService(
 
     private static string? TryReadRefundReference(LinklyCloudBackendSessionResponse status)
     {
+        // 后端白名单化的卡交易明细是权威来源，与实时路径 ReadTransactionResult 的优先级一致。
+        var fromCardTransaction = NormalizeOptional(status.CardTransaction?.Rfn);
+        if (fromCardTransaction is not null)
+        {
+            return fromCardTransaction;
+        }
+
         foreach (var notification in (status.Notifications ?? []).Reverse())
         {
             if (!string.Equals(notification.Type, "transaction", StringComparison.OrdinalIgnoreCase) ||
@@ -5969,13 +5976,14 @@ public sealed class CardPaymentRecoveryService(
 
             try
             {
+                // 官方 GET transaction payload 里 RFN 是后续退款和认证证据链的关键引用；
+                // 解析逻辑与实时路径共用，这里只负责逐条遍历，并对损坏的通知 JSON 逐条容错（跳过去读更早的通知）。
                 using var document = JsonDocument.Parse(notification.PayloadJson);
-                var response = ReadResponse(document.RootElement);
-                var purchaseAnalysisData = ReadValue(response, "PurchaseAnalysisData");
-                // 官方 GET transaction payload 里 RFN 是后续退款和认证证据链的关键引用。
-                return TryReadRefundReferenceValue(purchaseAnalysisData) ??
-                    TryReadRefundReferenceValue(response) ??
-                    TryReadRefundReferenceValue(document.RootElement);
+                var reference = LinklyBackendTerminalClient.ReadRefundReference(document.RootElement);
+                if (!string.IsNullOrWhiteSpace(reference))
+                {
+                    return reference;
+                }
             }
             catch (JsonException)
             {
@@ -6013,7 +6021,8 @@ public sealed class CardPaymentRecoveryService(
         try
         {
             using var document = JsonDocument.Parse(payloadJson);
-            return ReadReceiptText(document.RootElement) ?? ReadReceiptText(ReadResponse(document.RootElement));
+            return LinklyBackendTerminalClient.ReadReceiptText(document.RootElement) ??
+                LinklyBackendTerminalClient.ReadReceiptText(ReadResponse(document.RootElement));
         }
         catch (JsonException)
         {
@@ -6021,61 +6030,9 @@ public sealed class CardPaymentRecoveryService(
         }
     }
 
-    private static string? ReadReceiptText(JsonElement element)
-    {
-        if (!TryGetProperty(element, "ReceiptText", out var receipt))
-        {
-            return null;
-        }
-
-        return receipt.ValueKind == JsonValueKind.String
-            ? NormalizeOptional(receipt.GetString())
-            : null;
-    }
-
     private static JsonElement ReadResponse(JsonElement root)
     {
         return TryGetProperty(root, "Response", out var response) ? response : root;
-    }
-
-    private static JsonElement ReadValue(JsonElement element, string propertyName)
-    {
-        return TryGetProperty(element, propertyName, out var value) ? value : default;
-    }
-
-    private static string? TryReadRefundReferenceValue(JsonElement element, bool allowScalar = false)
-    {
-        return element.ValueKind switch
-        {
-            JsonValueKind.Object => TryReadRefundReferenceObject(element),
-            JsonValueKind.Array => element.EnumerateArray()
-                .Select(item => TryReadRefundReferenceValue(item))
-                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
-            JsonValueKind.String when allowScalar => NormalizeOptional(element.GetString()),
-            _ => null
-        };
-    }
-
-    private static string? TryReadRefundReferenceObject(JsonElement element)
-    {
-        foreach (var property in element.EnumerateObject())
-        {
-            if (string.Equals(property.Name, "RFN", StringComparison.OrdinalIgnoreCase))
-            {
-                return TryReadRefundReferenceValue(property.Value, allowScalar: true);
-            }
-        }
-
-        foreach (var property in element.EnumerateObject())
-        {
-            var value = TryReadRefundReferenceValue(property.Value);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        return null;
     }
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
