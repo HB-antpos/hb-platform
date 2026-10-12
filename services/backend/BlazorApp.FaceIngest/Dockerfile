@@ -1,5 +1,5 @@
 # =============================================================================
-# 人脸抓拍原始报文接收服务（BlazorApp.FaceIngest，P0）Docker 配置
+# 人脸抓拍接收服务（BlazorApp.FaceIngest，P0 接收落盘 + P1 后台处理）Docker 配置
 # 独立于主后端 hb-platform-vite-api（5002）与收银后端 hbpos-api（5003），容器固定使用 5004 端口。
 # 构建上下文是 services/backend（与 hb-api 一致）；生产用同目录的 docker-compose.face-ingest.yml
 # 构建与启动，步骤见 docs/runbooks/face-ingest.md。本地单独验证镜像：
@@ -13,7 +13,7 @@ WORKDIR /src
 RUN dotnet nuget locals all --clear
 
 # 先只复制项目文件，利用 Docker layer cache 加速 restore。
-# P0 不引用 BlazorApp.Shared / BlazorApp.Api；不要把测试项目带进镜像构建。
+# 不引用 BlazorApp.Shared / BlazorApp.Api（P1 只多了 Microsoft.Data.SqlClient 包）；不要把测试项目带进镜像构建。
 COPY BlazorApp.FaceIngest/BlazorApp.FaceIngest.csproj ./BlazorApp.FaceIngest/
 
 RUN dotnet restore "BlazorApp.FaceIngest/BlazorApp.FaceIngest.csproj" --verbosity minimal

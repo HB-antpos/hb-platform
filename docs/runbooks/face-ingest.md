@@ -1,11 +1,14 @@
-# 人脸抓拍原始报文接收服务（face-ingest）P0 运维手册
+# 人脸抓拍接收服务（face-ingest）运维手册（P0 接收落盘 + P1 解析入库）
 
 ## 1. 用途与边界
 
 门店海康摄像机（「应用仓库 → 人脸抓拍」）通过报警主机 / HTTP 监听，主动用 HTTPS 把抓拍事件推到
 `https://hotbargain.vip/face-ingest/hik/v1/<token>`。
 
-P0 只做一件事：**校验摄像机 token → 把请求体逐字节原样落盘并写一份元数据 → 立刻回 200**。目的是到现场抓真实报文，P1 再据此写正式解析。
+P0 只做一件事：**校验摄像机 token → 把请求体逐字节原样落盘并写一份元数据 → 立刻回 200**。目的是到现场抓真实报文。
+
+P1（第 13 节）在不改变接收端点行为的前提下，加了一个**后台处理器**：宽容解析海康 multipart → 存图（本地或专用私有 COS）→
+写主库 `FaceCamera` / `FaceCaptureEvent` / `FaceCaptureImage` 三张表（受限账号直连）。第 1–12 节描述的接收、落盘、清理行为在 P1 里不变。
 
 P0 **不做**：
 
@@ -15,12 +18,12 @@ P0 **不做**：
 
 | 项目 | 值 |
 | --- | --- |
-| 源码 | `services/backend/BlazorApp.FaceIngest`（不进 `BlazorApp.sln`，不引用 Api / Shared，不连数据库） |
+| 源码 | `services/backend/BlazorApp.FaceIngest`（不进 `BlazorApp.sln`，不引用 Api / Shared；P1 可选直连主库，见第 13 节） |
 | compose | `services/backend/BlazorApp.FaceIngest/docker-compose.face-ingest.yml`，项目名 `hbweb_face_ingest` |
 | 容器 / 镜像 | `hb-face-ingest` / `hb-face-ingest:local` |
 | 端口 | 宿主机 `127.0.0.1:5004` → 容器 `5004`，公网只经 Nginx |
 | 公网入口 | `https://hotbargain.vip/face-ingest/`（Nginx 片段 `scripts/ops/nginx/hotbargain-face-ingest.location.conf`） |
-| 健康检查 | `GET /face-ingest/health` → `{"status":"healthy","captureEnabled":…,"storedFileCount":…,"storedBytes":…}` |
+| 健康检查 | `GET /face-ingest/health` → `{"status":"healthy","captureEnabled":…,"storedFileCount":…,"storedBytes":…,"cameraSource":"json\|database","cameraSourceReady":…}` |
 
 ## 2. 隐私要求（部署前必读）
 
@@ -521,6 +524,8 @@ python3 - "$HOME/face-ingest-samples" <<'PY'
 import hashlib, json, pathlib, sys
 bad = 0
 for meta in sorted(pathlib.Path(sys.argv[1]).rglob('*.json')):
+    if meta.name.endswith('.parsed.json'):   # P1 不连库时的解析摘要，不是报文元数据
+        continue
     m = json.loads(meta.read_text(encoding='utf-8'))
     body = meta.with_suffix('.bin').read_bytes()
     ok = len(body) == m['bodyBytes'] and hashlib.sha256(body).hexdigest() == m['bodySha256']
@@ -593,3 +598,167 @@ sudo find "${DATA_DIR:?}/raw" -mindepth 1 | wc -l                               
 ```
 
    本机按第 9 节取回的样本照常「用完删除」。`cameras.json` 与 `.env` 保留到确认不再启用为止。
+
+## 13. P1：解析、入库与私有 COS
+
+### 13.1 数据流与边界
+
+```text
+摄像机 → Nginx → 接收端点（P0 逻辑不变：鉴权 → 原样落盘 raw/ → 立刻 200）
+                     ↓（完全解耦，处理慢 / 库挂 / COS 挂都不影响回 200）
+         后台处理器 CaptureProcessingService（每 5 秒一轮，每轮最多 50 条，串行）
+           找 raw/ 下有 .json、没有 .processed / .failed、.retry 已到期的报文
+           → 宽容解析（JSON / XML / 裸 XML、不规范 multipart，失败也不丢：记 ParseStatus / ParseNote）
+           → 存图（COS 开：私有桶；COS 关：本地 images/）
+           → 写库（配了连接串：事务内写事件 + 图片行，按 CaptureId / ImageId 幂等；没配：写本地 .parsed.json 摘要）
+           → 写 .processed 标记
+         清理任务（P0 已有）：按保留期删 raw/，并一起删处理标记与本地 images/
+```
+
+P1 **不做**：人脸比对、特征提取、客流聚类、黑名单、通知推送、管理后台页面；主 API 只建表，不读写这三张表。
+
+| 摄像机来源 | 条件 | 行为 |
+| --- | --- | --- |
+| `json` | `FACE_INGEST_DB_CONNECTION` 为空 | 与 P0 完全相同：`cameras.json` 热更新 |
+| `database` | `FACE_INGEST_DB_CONNECTION` 非空 | 以 `FaceCamera` 表为准（**不与 cameras.json 合并**），每 30 秒刷新；启动后到第一次读表成功之前，接收端点对所有请求回 **503**（摄像机断网续传缓存后重推，不会当成 401 丢数据）；之后刷新失败保留上一份快照，只记 Error；非法行（编号 / 门店 / 哈希格式错、哈希重复）只跳过该行并记 Error |
+
+`/health` 的 `cameraSource` 显示当前来源，`cameraSourceReady=false` 表示数据库来源还没加载成功（此时 `status` 仍是 `healthy`，容器不会被重启）。
+
+### 13.2 部署顺序（首次启用入库）
+
+1. **主 API 建表**：按主后端发布流程用候选镜像跑一次显式迁移（`--schema=migrate`，见 `docs/production-server-migration-handover.md`「显式迁移」），
+   确认迁移清单里有 `20261013.001-face-capture`（新建 `FaceCamera`、`FaceCaptureEvent`、`FaceCaptureImage`，只建表、主 API 不读写）。
+2. **建受限账号**：13.3。
+3. **把摄像机登记进 `FaceCamera`**：13.5（先登记再切换，否则切换后所有摄像机 401）。
+4. **写 `.env`**：13.4。
+5. **重建 face-ingest**：按第 5 节部署（需要重新构建镜像，P1 新增了 SqlClient 依赖），然后核对：
+
+```bash
+curl -fsS http://127.0.0.1:5004/health; echo        # cameraSource=database，cameraSourceReady=true
+sudo docker logs --since 5m hb-face-ingest 2>&1 | grep -E 'Face ingest started|camera registry loaded|processor started'
+```
+
+`cameraSourceReady` 一直是 `false`：看日志里 `camera registry refresh from database failed` 的异常（连不上、登录失败、没权限）。
+期间摄像机收到 503 会缓存重推；短时间修不好就把 `FACE_INGEST_DB_CONNECTION` 清空、按第 6 节方式重建容器，退回 cameras.json。
+
+不入库、只想先看解析效果：保持 `FACE_INGEST_DB_CONNECTION` 为空即可，处理器照样解析、存本地图，并在报文旁写 `.parsed.json` 摘要（13.7）。
+
+### 13.3 建受限数据库账号（DBA 手工执行，不由代码执行）
+
+脚本：`services/backend/SqlScripts/face-ingest-db-login.sql`（幂等）。建 login + user `face_ingest_app`，**只**授：
+
+| 表 | 权限 |
+| --- | --- |
+| `dbo.FaceCamera` | `SELECT`、`UPDATE(LastSeenAtUtc)`（只能改「最近推送时间」一列） |
+| `dbo.FaceCaptureEvent` | `SELECT`、`INSERT` |
+| `dbo.FaceCaptureImage` | `SELECT`、`INSERT` |
+
+```bash
+# 只用字母数字的随机密码（脚本把它放进 N'…' 字面量，含单引号会出错）；不回显、不进 shell 历史
+FACE_INGEST_DB_PASSWORD=$(openssl rand -base64 36 | tr -dc 'A-Za-z0-9' | head -c 32); export FACE_INGEST_DB_PASSWORD
+export MAIN_DATABASE=HBweb
+sqlcmd -S <主库地址> -U <管理员账号> -I -b -i services/backend/SqlScripts/face-ingest-db-login.sql
+# 立刻把密码写进服务器 .env（13.4），然后：
+unset FACE_INGEST_DB_PASSWORD
+```
+
+脚本最后两段查询应只列出 6 行权限、且角色列表为空。密码**只**进服务器 `.env`；需要轮换时 `ALTER LOGIN [face_ingest_app] WITH PASSWORD = N'…'`，
+改 `.env` 后按第 6 节方式重建容器。
+
+### 13.4 `.env` 新变量（都有默认值，未配置是合法状态）
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `FACE_INGEST_PROCESSING_ENABLED` | `true` | 后台处理器开关；`false` 只接收落盘（P0 行为） |
+| `FACE_INGEST_DB_CONNECTION` | 空 | **密钥**。受限账号连接串，空 = 不连库、摄像机走 cameras.json |
+| `FACE_INGEST_COS_ENABLED` | `false` | 图片是否上私有 COS；关闭时写本地 `images/` |
+| `FACE_INGEST_COS_BUCKET` / `FACE_INGEST_COS_REGION` | 空 | 专用私有桶（形如 `name-appid`）与地域（如 `ap-singapore`） |
+| `FACE_INGEST_COS_SECRET_ID` / `FACE_INGEST_COS_SECRET_KEY` | 空 | **密钥**。只授 PutObject 的 CAM 子账号，**不得**复用 `TENCENT_*` 主密钥 |
+
+连接串示例（全是假值，按实际改；`TrustServerCertificate` 按主库证书情况决定）：
+
+```text
+FACE_INGEST_DB_CONNECTION=Server=db.example.invalid,1433;Database=HBweb;User ID=face_ingest_app;Password=<只写在服务器 .env>;Encrypt=True;TrustServerCertificate=True;Connect Timeout=10
+```
+
+启动校验：连接串格式非法、`FACE_INGEST_COS_ENABLED=true` 但桶 / 地域 / 两个密钥缺任何一个 → 容器起不来，`docker logs` 只报键名、不打印值；
+连接串格式对但连不上 → 照常启动，接收端点 503（13.1）。处理节奏（`ProcessingIntervalSeconds=5`、`ProcessingBatchSize=50`、`ProcessingMaxAttempts=10`）、
+摄像机表刷新周期（30 秒）、COS 键前缀（`face-ingest`）与是否上传原始报文（`UploadRawBody=false`）沿用 appsettings 默认，不开放 `.env` 覆盖。
+
+### 13.5 从 `cameras.json` 迁到 `FaceCamera` 表
+
+`FaceCamera` 的字段与 `cameras.json` 一一对应（`TokenSha256` 原样照抄，**token 不用重发给摄像机**）；规则与 4.2 节相同：
+`CameraId` 小写字母数字与连字符、`StoreCode` 1–32 位 `[A-Za-z0-9_-]`、`TokenSha256` 64 位十六进制且不重复。
+用管理员账号执行（`face_ingest_app` 没有 INSERT 权限，这是有意的）：
+
+```sql
+-- 假数据示例：把 cameras.json 里每台摄像机照抄一行
+INSERT INTO dbo.FaceCamera (CameraId, StoreCode, TokenSha256, Enabled, Note, DeviceModel, MacAddress)
+VALUES (N'test01-entrance-01', N'S0000', '0000000000000000000000000000000000000000000000000000000000000000', 1,
+        N'试点门店入口（示例）', N'DS-2CD3726FWDA3/F-IZS', N'00:00:5e:00:53:00');
+
+-- 停用 / 恢复（30 秒内生效，不用重启容器）
+UPDATE dbo.FaceCamera SET Enabled = 0, UpdatedAtUtc = SYSUTCDATETIME() WHERE CameraId = N'test01-entrance-01';
+
+-- 核对：每台摄像机最近一次推送时间（处理器至多每 5 分钟更新一次）
+SELECT CameraId, StoreCode, Enabled, LastSeenAtUtc FROM dbo.FaceCamera ORDER BY CameraId;
+```
+
+切换后 `cameras.json` 不再参与鉴权，但仍会被加载与校验（坏 JSON 照样让容器起不来），保留原文件即可，便于回退。
+
+### 13.6 开启私有 COS（前置由用户在腾讯云控制台完成）
+
+1. **新建专用私有桶**（建议与服务器同区 `ap-singapore`），访问权限「私有读写」；不要复用主桶 / 图片桶（主桶默认公开读）。
+2. **CAM 子账号**：只授 `cos:PutObject`（确需核对时再加 `cos:HeadObject`），资源限定 `qcs::cos:<region>:uid/<appid>:<bucket>/face-ingest/*`；
+   不给 GetObject / DeleteObject / List。服务端每次上传都在签名里带 `x-cos-acl: private`，即使桶权限被误改也不会公开单个对象。
+3. **生命周期规则**：给 `face-ingest/images/`（与开启了原始报文上传时的 `face-ingest/raw/`）配过期删除，天数按隐私要求定（与本地保留期一致或更短）。
+4. 写 `.env` 的五个 `FACE_INGEST_COS_*` 后按第 6 节方式重建容器；日志 `Face ingest started … imageStorage=cos` 即生效。
+
+对象键：`face-ingest/images/{StoreCode}/{yyyy}/{MM}/{dd}/{CameraId}/{CaptureId}_{PartIndex}.jpg`（日期为 UTC 接收日）；
+图片上 COS 后本地不再写 `images/`，原始报文仍只留本地 `raw/` 按保留期清理（排障依据）。上传判定：HTTP 200 且带 ETag，否则按 13.7 重试。
+
+### 13.7 处理状态与排查
+
+每条报文旁（同目录、同名 + 后缀）的旁路标记：
+
+| 文件 | 含义 |
+| --- | --- |
+| `{name}.processed` | 处理成功（终态）：`parseStatus`、`faceCount`、`imageCount`、`imageStorage`、`databaseWritten`、`duplicateOfCaptureId` |
+| `{name}.retry` | 失败待重试：`attempts`、`nextAttemptUtc`、`lastError`（截断 300 字）。退避 30 秒起翻倍、单次最长 6 小时 |
+| `{name}.failed` | 放弃（终态）：重试满 10 次（`permanent=false`），或元数据损坏不可能成功（`permanent=true`）。原始报文保留到保留期 |
+| `{name}.parsed.json` | 只在不连库时写：与库表列一一对应的解析摘要，便于离线看解析效果 |
+
+`ParseStatus`：`0 Parsed`、`1 PartiallyParsed`（报文截断、有 faces[] 没人脸图、只有图没有事件体等，细节看 `ParseNote`）、
+`2 Unparsed`（空 body、无法识别；原始报文仍在）、`3 NotFaceEvent`（VMD / videoloss 等，也入库便于统计流量）。
+解析失败**不重试**（重试也一样），只有存图 / 写库 / 读文件失败才重试。
+
+```bash
+DATA=/www/HBWeb/face-ingest-data
+sudo find "$DATA/raw" -name '*.retry' | wc -l                     # 待重试
+sudo find "$DATA/raw" -name '*.failed' | head                     # 已放弃
+sudo find "$DATA/raw" -name '*.retry' -exec sudo cat {} + | grep lastError | sort | uniq -c | sort -rn | head   # 失败原因分布
+sudo docker logs --since 1h hb-face-ingest 2>&1 | grep -E 'capture processed' | tail -5
+sudo docker logs --since 1h hb-face-ingest 2>&1 | grep -E 'processing failed|refresh from database failed|LastSeenAtUtc update failed'
+```
+
+想让 `.failed` 的报文重新处理（例如修好库权限后）：删掉对应的 `.failed`（保留 `.json` / `.bin`），下一轮就会重做；写库按 `CaptureId` / `ImageId` 幂等，不会重复插入。
+
+重复报文（断网续传、持续告警）照样入库，`DuplicateOfCaptureId` 指向同一摄像机 24 小时内同一请求体哈希的最早一条。
+
+### 13.8 存储口径
+
+- 处理标记只有几百字节，**不计入** `/health` 的 `storedFileCount` / `storedBytes`（P0 容量护栏口径不变），由清理任务与报文同一保留期删除。
+- COS 关闭时本地图片在 `images/{UTC 日期}/{CameraId}/{CaptureId}_{PartIndex}.jpg`，**同样不计入**上述统计，但和原始报文在同一块盘上：
+  图片约等于原始报文再存一份，盘占用接近翻倍。写图前复用 `FACE_INGEST_MIN_FREE_DISK_BYTES` 护栏，剩余空间不足时该条进入重试而不是把盘写满。
+  图片按保留期删除（写入时间或整个日期目录过期即删，处理延迟时最多比原始报文多留一天）。试点盘紧时建议尽早开 COS。
+- 第 9 节的 rsync 会把 `.processed` 等标记一并取回（无害，完整性脚本已跳过 `.parsed.json`）；本地 `images/` 不在 `raw/` 下，需要时单独取，同样按第 2 节「用完删除」。
+
+### 13.9 回退
+
+- 只停处理：`FACE_INGEST_PROCESSING_ENABLED=false` 后按第 6 节重建容器，接收不受影响，未处理的报文留到重新打开后补处理（仍受保留期约束）。
+- 退回 cameras.json：清空 `FACE_INGEST_DB_CONNECTION`，重建容器；已入库数据保留在三张表里。
+- 关 COS：`FACE_INGEST_COS_ENABLED=false`，之后的图片写本地；已上 COS 的对象由生命周期规则过期。
+- 整体回到 P0 镜像：按 5.6 回滚；P1 留下的标记与 `images/` 不影响 P0 接收，但 P0 的清理任务不认识它们：
+  `.processed` / `.retry` / `.failed` 会留在 `raw/` 的日期目录里（目录因此删不掉；`.parsed.json` 会被 P0 当元数据计入统计并按期删除），
+  `images/` 不会过期，需要手工按保留期删除。
+- 完全下线（第 12 节）时，除 `raw/` 外同样要删除 `"${DATA_DIR:?}/images"` 下的内容（人脸图）。

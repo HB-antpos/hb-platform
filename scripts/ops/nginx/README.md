@@ -7,7 +7,7 @@
 | --- | --- |
 | `hotbargain-pos-api.location.conf` | `/pos-api/` 反向代理到收银后端；Linkly 云支付回调（按键提示、回单）依赖这条路由 |
 | `hotbargain-notification-hub.location.conf` | `/api/hubs/` 通知实时通道（SignalR）透传 WebSocket 升级头；不加也能用（自动退回长轮询），加了走 WebSocket |
-| `hotbargain-face-ingest.location.conf` | `/face-ingest/` 反向代理到人脸抓拍原始报文接收服务（`127.0.0.1:5004`）；门店海康摄像机推送依赖这条路由。token 在 URL 里，所以关闭 `access_log`、把 `error_log` 指到 `/dev/null`，并用 `/hik/` 兜底块挡住漏写前缀的推送；明文 HTTP 直接 `403`；不加 IP 白名单 |
+| `hotbargain-face-ingest.location.conf` | `/face-ingest/` 反向代理到人脸抓拍原始报文接收服务（`127.0.0.1:5004`）；门店海康摄像机推送依赖这条路由。token 在 URL 里，所以关闭 `access_log`、把 `error_log` 指到 `/dev/null`，并用 `/hik/` 兜底块挡住漏写前缀的推送；明文 HTTP 直接 `403`；不加 IP 白名单。宝塔里 80 与 443 是两个独立 `server` 块：443 块放完整片段，80 块只放文件末尾注释里的「只拒绝」两段（`/face-ingest/` 403、`/hik/` 404） |
 
 ## 改动后的验证
 

@@ -1,8 +1,9 @@
 using BlazorApp.FaceIngest;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-// 人脸抓拍原始报文接收服务（P0）：校验摄像机 token → 请求体逐字节原样落盘 + 元数据 → 立刻 200。
-// 不解析 multipart、不入库、不接 COS、不做人脸比对；部署与运维见 docs/runbooks/face-ingest.md。
+// 人脸抓拍接收服务：校验摄像机 token → 请求体逐字节原样落盘 + 元数据 → 立刻 200（P0，接收端点不做任何网络调用）。
+// P1 后台处理器再异步解析 multipart、存图（本地或私有 COS）、写库（直连主库受限账号）；不做人脸比对。
+// 部署与运维见 docs/runbooks/face-ingest.md。
 var builder = WebApplication.CreateBuilder(args);
 
 // 中文注释：cameras.json 的目录必须在 AddJsonFile 之前，从已有配置（环境变量 FaceIngest__ConfigDirectory /
@@ -68,12 +69,49 @@ builder.Services.AddSingleton<FaceIngestRequestHandler>();
 builder.Services.AddSingleton<CaptureStorageCleaner>();
 builder.Services.AddHostedService<CaptureStorageCleanupService>();
 
+// 中文注释：以下按「已校验快照」在首次解析时决定实现（测试的内存配置在 Build 之后才可见，不能在这里读 builder.Configuration）。
+// 摄像机来源：配置了数据库连接串 → FaceCamera 表；否则 → cameras.json（P0 行为不变）。不合并。
+builder.Services.AddSingleton<JsonFileCameraSource>();
+builder.Services.AddSingleton<IFaceCameraRepository>(services => new SqlFaceCameraRepository(
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.DatabaseConnectionString
+    ?? throw new InvalidOperationException("FaceIngest:Database:ConnectionString is not configured.")));
+builder.Services.AddSingleton<DatabaseCameraSource>();
+builder.Services.AddSingleton<ICameraRegistrySource>(services =>
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.DatabaseConfigured
+        ? services.GetRequiredService<DatabaseCameraSource>()
+        : services.GetRequiredService<JsonFileCameraSource>());
+builder.Services.AddHostedService<CameraRegistryRefreshService>();
+
+// 后台处理器：图片存储按 Cos:Enabled 选择；写库只在配置了数据库时启用（由 CaptureProcessor 判断）。
+builder.Services.AddHttpClient(CosImageStore.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<LocalImageStore>();
+builder.Services.AddSingleton<CosImageStore>();
+builder.Services.AddSingleton<IImageStore>(services =>
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.Cos.Enabled
+        ? services.GetRequiredService<CosImageStore>()
+        : services.GetRequiredService<LocalImageStore>());
+builder.Services.AddSingleton<ICaptureEventWriter>(services => new SqlCaptureEventWriter(
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.DatabaseConnectionString
+    ?? throw new InvalidOperationException("FaceIngest:Database:ConnectionString is not configured.")));
+builder.Services.AddSingleton<CaptureProcessor>();
+builder.Services.AddHostedService<CaptureProcessingService>();
+
 var app = builder.Build();
 
 // 中文注释：启动即校验配置（等效 ValidateOnStart：非法直接抛 OptionsValidationException，容器启动失败）
 // 并扫描已有报文得到存储统计，确保第一个请求进来前护栏数据已就绪。
-app.Services.GetRequiredService<FaceIngestSettingsMonitor>();
+var startupSettings = app.Services.GetRequiredService<FaceIngestSettingsMonitor>().Current;
 app.Services.GetRequiredService<RawCaptureStore>();
+// 中文注释：同样在启动时就把摄像机来源与图片存储建出来，COS 配置缺项等问题在启动阶段暴露（缺项已由配置校验拦下）。
+var cameraSource = app.Services.GetRequiredService<ICameraRegistrySource>();
+var imageStore = app.Services.GetRequiredService<IImageStore>();
+app.Logger.LogInformation(
+    "Face ingest started cameraSource={CameraSource} imageStorage={ImageStorage} database={DatabaseConfigured} processingEnabled={ProcessingEnabled} uploadRawBody={UploadRawBody}",
+    cameraSource.SourceName,
+    imageStore.StorageName,
+    startupSettings.DatabaseConfigured,
+    startupSettings.ProcessingEnabled,
+    startupSettings.Cos.Enabled && startupSettings.Cos.UploadRawBody);
 
 app.MapFaceIngestEndpoints();
 

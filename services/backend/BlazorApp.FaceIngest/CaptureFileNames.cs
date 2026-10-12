@@ -6,6 +6,9 @@ namespace BlazorApp.FaceIngest;
 /// 落盘文件命名约定（P1 解析与运维脚本都依赖它，改动需同步）：
 /// <c>raw/{yyyy-MM-dd}/{cameraId}/{yyyyMMdd'T'HHmmssfff'Z'}_{guid:N}.bin</c> 与同名 <c>.json</c>；
 /// 写入过程中的临时文件为 <c>.bin.tmp</c> / <c>.json.tmp</c>。日期与时间戳都取服务端 UTC 接收时间。
+/// P1 后台处理器在同目录写旁路标记（同名 + 后缀）：<c>.processed</c>（成功）/ <c>.failed</c>（超过重试上限）/
+/// <c>.retry</c>（待重试）/ <c>.parsed.json</c>（不连库时的本地解析摘要），同样先写 .tmp 再改名；
+/// 不连 COS 时图片写在 <c>images/{yyyy-MM-dd}/{cameraId}/{captureId}_{partIndex}.jpg</c>。
 /// </summary>
 internal static class CaptureFileNames
 {
@@ -13,6 +16,21 @@ internal static class CaptureFileNames
     public const string BodyExtension = ".bin";
     public const string MetadataExtension = ".json";
     public const string TempExtension = ".tmp";
+    public const string ImagesDirectoryName = "images";
+    public const string ProcessedMarkerExtension = ".processed";
+    public const string FailedMarkerExtension = ".failed";
+    public const string RetryMarkerExtension = ".retry";
+    public const string ParsedSummaryExtension = ".parsed.json";
+    public const string ImageExtension = ".jpg";
+
+    // 中文注释：.parsed.json 也以 .json 结尾，必须先于 .json 判定，否则会被当成报文元数据计入统计与处理。
+    private static readonly string[] MarkerExtensions =
+    [
+        ProcessedMarkerExtension,
+        FailedMarkerExtension,
+        RetryMarkerExtension,
+        ParsedSummaryExtension,
+    ];
 
     private const string DateDirectoryFormat = "yyyy-MM-dd";
     private const string TimestampFormat = "yyyyMMdd'T'HHmmssfff'Z'";
@@ -32,6 +50,14 @@ internal static class CaptureFileNames
         if (fileName.EndsWith(TempExtension, StringComparison.Ordinal))
         {
             return CaptureFileKind.Temp;
+        }
+
+        foreach (var markerExtension in MarkerExtensions)
+        {
+            if (fileName.EndsWith(markerExtension, StringComparison.Ordinal))
+            {
+                return CaptureFileKind.Marker;
+            }
         }
 
         if (fileName.EndsWith(BodyExtension, StringComparison.Ordinal))
@@ -81,6 +107,13 @@ internal enum CaptureFileKind
     /// <summary>元数据 .json。</summary>
     Metadata,
 
-    /// <summary>写入中的临时文件 .bin.tmp / .json.tmp。</summary>
+    /// <summary>写入中的临时文件 .bin.tmp / .json.tmp（以及处理标记、图片的 .tmp）。</summary>
     Temp,
+
+    /// <summary>
+    /// 处理器旁路标记 .processed / .failed / .retry / .parsed.json。
+    /// 统计口径：不计入 storedFileCount / storedBytes（保持 P0 容量护栏口径不漂移，标记都只有几百字节）；
+    /// 清理口径：与报文同一保留期删除。
+    /// </summary>
+    Marker,
 }

@@ -241,7 +241,8 @@ SQUARE_WEBHOOK_SIGNATURE_KEY_SANDBOX
 
 ### 5.4 人脸抓拍接收服务 `.env`
 
-位于 `/www/HBWeb/BackEnd/face-ingest/.env`，不含密钥（摄像机 token 只以 SHA-256 存在 `cameras.json`）：
+位于 `/www/HBWeb/BackEnd/face-ingest/.env`（权限 `600`）。P0 变量不含密钥（摄像机 token 只以 SHA-256 存在 `cameras.json` 或 `FaceCamera` 表）；
+P1 启用入库 / 私有 COS 后，`FACE_INGEST_DB_CONNECTION` 与 `FACE_INGEST_COS_SECRET_*` **是密钥**，按本节密钥口径迁移（只读核对、不进 Git、不进聊天）：
 
 ```text
 FACE_INGEST_STORAGE_HOST_PATH
@@ -251,9 +252,17 @@ FACE_INGEST_RETENTION_DAYS
 FACE_INGEST_MAX_TOTAL_BYTES
 FACE_INGEST_MAX_FILE_COUNT
 FACE_INGEST_MIN_FREE_DISK_BYTES
+FACE_INGEST_PROCESSING_ENABLED
+FACE_INGEST_DB_CONNECTION        # 密钥：受限账号 face_ingest_app 的连接串；空 = 不连库
+FACE_INGEST_COS_ENABLED
+FACE_INGEST_COS_BUCKET
+FACE_INGEST_COS_REGION
+FACE_INGEST_COS_SECRET_ID        # 密钥：只授 PutObject 的 CAM 子账号
+FACE_INGEST_COS_SECRET_KEY       # 密钥
 ```
 
-前两个必填（compose 用 `:?required` 声明），其余有默认值，含义见 `docs/runbooks/face-ingest.md`。
+前两个必填（compose 用 `:?required` 声明），其余有默认值（P1 变量未配置是合法状态），含义见 `docs/runbooks/face-ingest.md`。
+`FACE_INGEST_DB_CONNECTION` 里的服务器地址换服务器后要按新库地址改；受限账号本身在数据库里，随数据库迁移。
 
 ## 6. 可以重新创建的资源
 
