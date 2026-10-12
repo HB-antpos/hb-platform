@@ -19,6 +19,7 @@ import {
   CONTAINER_DETAIL_NEW_STATE_TAGS,
   CONTAINER_DETAIL_PRODUCT_TYPE_TAGS,
   DEFAULT_CONTAINER_DETAIL_COLUMN_VIEW,
+  applyContainerDetailHiddenColumns,
   applyContainerDetailSearchText,
   buildContainerDetailOverviewFacts,
   describeContainerDetailColumnFilters,
@@ -27,11 +28,13 @@ import {
   hasContainerDetailColumnFilterValues,
   isContainerDetailMatchPendingFilterActive,
   normalizeContainerDetailColumnView,
+  normalizeContainerDetailHiddenColumnKeys,
   removeContainerDetailColumnFilter,
   replaceContainerDetailTagGroup,
   resolveContainerDetailOverviewStats,
   resolveContainerDetailTagSegmentValue,
   resolveContainerDetailViewColumnKeys,
+  setContainerDetailColumnVisible,
   summarizeContainerDetailManualDraft,
   switchContainerDetailSearchField,
   toggleContainerDetailMatchPendingFilter,
@@ -418,5 +421,44 @@ if (getContainerDetailViewDefaultColumnWidth('all', 'product') !== undefined) {
 if (getContainerDetailViewDefaultColumnWidth('cost', 'importPrice') !== CONTAINER_DETAIL_VIEW_DEFAULT_COLUMN_WIDTHS.cost.importPrice) {
   throw new Error('成本核算视图应返回自己的默认列宽')
 }
+
+// ---- 列显示设置 ----
+
+assertDeepEqual(
+  normalizeContainerDetailHiddenColumnKeys(['remark', 'itemNumber', 'remark', 'bogus', 7]),
+  ['itemNumber', 'remark'],
+  '隐藏列读取时应去重、丢弃未知 key 并按默认列顺序排列',
+)
+assertDeepEqual(normalizeContainerDetailHiddenColumnKeys('remark'), [], '隐藏列存储内容不是数组时应视为没有隐藏列')
+assertDeepEqual(
+  applyContainerDetailHiddenColumns(['itemNumber', 'remark', 'barcode'], ['remark']),
+  ['itemNumber', 'barcode'],
+  '隐藏列应从视图列里去掉并保持原顺序',
+)
+assertDeepEqual(
+  applyContainerDetailHiddenColumns(['itemNumber', 'remark'], ['itemNumber', 'remark', 'barcode']),
+  ['itemNumber', 'remark'],
+  '隐藏设置会让视图一列不剩时应忽略隐藏设置',
+)
+assertDeepEqual(
+  setContainerDetailColumnVisible([], ['itemNumber', 'remark'], 'remark', false),
+  ['remark'],
+  '取消勾选应把列加入隐藏列',
+)
+assertDeepEqual(
+  setContainerDetailColumnVisible(['remark'], ['itemNumber', 'remark'], 'remark', true),
+  [],
+  '重新勾选应把列从隐藏列移除',
+)
+assertDeepEqual(
+  setContainerDetailColumnVisible(['remark'], ['itemNumber', 'remark'], 'itemNumber', false),
+  ['remark'],
+  '不允许隐藏当前视图的最后一个可见列',
+)
+assertDeepEqual(
+  setContainerDetailColumnVisible(['remark'], ['itemNumber', 'remark', 'barcode'], 'barcode', false),
+  ['barcode', 'remark'],
+  '新增隐藏列后应按默认列顺序保存',
+)
 
 console.log('containerDetailViewLogic.test: ok')

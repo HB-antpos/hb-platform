@@ -1037,6 +1037,24 @@
   font-weight: 600;
 }
 
+.wh-cdetail-colset-subtitle {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wh-cdetail-colset-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.wh-cdetail-colset-list .ant-checkbox-wrapper {
+  margin-inline-start: 0;
+}
+
 .wh-cdetail-colset-hint {
   color: #667085;
   font-size: 12px;

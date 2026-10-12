@@ -57,6 +57,7 @@
       "warehouseStatusAll": "全部状态",
       "legendAutoSave": "失焦自动保存",
       "legendDraft": "需点「保存明细」",
+      "columnVisibleTitle": "显示的列",
       "columnSettingsHint": "拖动表头调整列顺序，拖动表头右边缘调整列宽。",
       "chipGroupProduct": "商品",
       "chipGroupShelf": "上下架",

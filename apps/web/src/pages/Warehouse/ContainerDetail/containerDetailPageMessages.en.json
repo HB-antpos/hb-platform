@@ -57,6 +57,7 @@
       "warehouseStatusAll": "Any status",
       "legendAutoSave": "Saves when you leave the cell",
       "legendDraft": "Needs “Save Details”",
+      "columnVisibleTitle": "Visible columns",
       "columnSettingsHint": "Drag a header to reorder columns; drag its right edge to resize.",
       "chipGroupProduct": "Product",
       "chipGroupShelf": "Shelf status",

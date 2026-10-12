@@ -274,10 +274,12 @@ import {
   CONTAINER_DETAIL_CHECK_TAGS,
   CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY,
   CONTAINER_DETAIL_COLUMN_VIEWS,
+  CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY,
   CONTAINER_DETAIL_NEW_STATE_TAGS,
   CONTAINER_DETAIL_PRICE_TREND_TAGS,
   CONTAINER_DETAIL_PRODUCT_TYPE_TAGS,
   CONTAINER_DETAIL_SEARCH_FIELDS,
+  applyContainerDetailHiddenColumns,
   applyContainerDetailSearchText,
   buildContainerDetailOverviewFacts,
   describeContainerDetailColumnFilters,
@@ -285,10 +287,12 @@ import {
   hasContainerDetailColumnFilterValues,
   isContainerDetailMatchPendingFilterActive,
   normalizeContainerDetailColumnView,
+  normalizeContainerDetailHiddenColumnKeys,
   removeContainerDetailColumnFilter,
   resolveContainerDetailOverviewStats,
   resolveContainerDetailViewColumnKeys,
   alignContainerDetailColumnOrderToView,
+  setContainerDetailColumnVisible,
   sortContainerDetailColumnKeysByDefaultOrder,
   summarizeContainerDetailManualDraft,
   switchContainerDetailSearchField,
@@ -992,6 +996,15 @@ export default function ContainerDetailPage() {
       return normalizeContainerDetailColumnView(typeof window === 'undefined' ? null : localStorage.getItem(CONTAINER_DETAIL_COLUMN_VIEW_STORAGE_KEY))
     } catch {
       return normalizeContainerDetailColumnView(null)
+    }
+  })
+  // 用户在「列设置」里取消勾选的列，记在本机；按列 key 记录，对所有列视图生效。
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<ContainerDetailTableColumnKey[]>(() => {
+    try {
+      const raw = typeof window === 'undefined' ? null : localStorage.getItem(CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY)
+      return normalizeContainerDetailHiddenColumnKeys(raw ? JSON.parse(raw) : null)
+    } catch {
+      return []
     }
   })
   const [searchField, setSearchField] = useState<ContainerDetailSearchField>('itemNumber')
@@ -6771,7 +6784,8 @@ export default function ContainerDetailPage() {
   )
   const isColumnOrderCustomized = isContainerDetailColumnOrderCustomized(columnOrder, draggableColumnKeys)
   const isColumnWidthCustomized = Object.keys(columnWidths).length > 0
-  const isColumnSettingsCustomized = isColumnOrderCustomized || isColumnWidthCustomized
+  const isColumnVisibilityCustomized = hiddenColumnKeys.length > 0
+  const isColumnSettingsCustomized = isColumnOrderCustomized || isColumnWidthCustomized || isColumnVisibilityCustomized
 
   useEffect(() => {
     setColumnOrder((current) => {
@@ -6875,16 +6889,19 @@ export default function ContainerDetailPage() {
   const resetColumnOrder = () => {
     setColumnOrder(draggableColumnKeys)
     setColumnWidths({})
+    setHiddenColumnKeys([])
     try {
       localStorage.removeItem(CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY)
       localStorage.removeItem(CONTAINER_DETAIL_COLUMN_WIDTH_STORAGE_KEY)
+      localStorage.removeItem(CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY)
     } catch {
       // localStorage 不可用时仍恢复当前页面内的默认列设置。
     }
     message.success(t('containers.messages.columnOrderReset', '列设置已恢复默认'))
   }
 
-  const orderedBaseColumns = useMemo(() => {
+  // 当前列视图包含的列（尚未应用「列设置」里的隐藏），同时也是列设置里可勾选的列清单。
+  const viewColumns = useMemo(() => {
     const activeOrder = columnOrder.length ? columnOrder : draggableColumnKeys
     const columnMap = new Map(baseColumns.map((column) => [String(column.key), column]))
     // 列视图只决定哪些列可见：按当前（可拖拽调整的）列顺序挑出该视图的列，左固定列挪到最前。
@@ -6895,6 +6912,13 @@ export default function ContainerDetailPage() {
       .map((key) => columnMap.get(key))
       .filter((column): column is ColumnsType<ContainerDetail>[number] => Boolean(column))
   }, [baseColumns, columnOrder, columnView, draggableColumnKeys])
+
+  const viewColumnKeys = viewColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey)
+  const visibleViewColumnKeys = applyContainerDetailHiddenColumns(viewColumnKeys, hiddenColumnKeys)
+  const orderedBaseColumns = useMemo(() => {
+    const visibleKeys = new Set(visibleViewColumnKeys)
+    return viewColumns.filter((column) => visibleKeys.has(String(column.key) as ContainerDetailTableColumnKey))
+  }, [viewColumns, visibleViewColumnKeys.join('|')])
 
   const orderedEditableColumnKeys = useMemo(
     () => getContainerDetailEditableColumnKeysInOrder(
@@ -6960,6 +6984,27 @@ export default function ContainerDetailPage() {
     } catch {
       // localStorage 不可用时只影响本次页面内的视图选择。
     }
+  }
+
+  const handleColumnVisibleChange = (key: ContainerDetailTableColumnKey, visible: boolean) => {
+    const nextHidden = setContainerDetailColumnVisible(hiddenColumnKeys, viewColumnKeys, key, visible)
+    if (nextHidden.length === hiddenColumnKeys.length && nextHidden.every((hiddenKey, index) => hiddenKey === hiddenColumnKeys[index])) return
+    setHiddenColumnKeys(nextHidden)
+    try {
+      if (nextHidden.length) localStorage.setItem(CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY, JSON.stringify(nextHidden))
+      else localStorage.removeItem(CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY)
+    } catch {
+      // localStorage 不可用时只影响本次页面内的列显示设置。
+    }
+  }
+
+  const getColumnSettingLabel = (key: ContainerDetailTableColumnKey) => {
+    if (key === 'product') return t('warehouseUi.containerDetail.columnProduct')
+    if (key === 'issues') return t('warehouseUi.containerDetail.columnIssues')
+    if (key === 'index') return t('containers.columns.index')
+    if (key === 'image') return t('containers.columns.image')
+    if (key === 'categoryName') return t('containers.fields.category', '分类')
+    return t(`containers.fields.${key}`, key)
   }
 
   // ---- 工具栏搜索：输入约 300ms 防抖后写入对应列头文字筛选；列头筛选、清空全部或定位草稿改了同一字段时，搜索框跟随显示 ----
@@ -7844,6 +7889,23 @@ export default function ContainerDetailPage() {
                         content={(
                           <div className="wh-cdetail-colset">
                             <div className="wh-cdetail-colset-title">{t('common.listToolbar.columnSettings')}</div>
+                            <div className="wh-cdetail-colset-subtitle">{t('warehouseUi.containerDetail.columnVisibleTitle')}</div>
+                            <div className="wh-cdetail-colset-list">
+                              {viewColumnKeys.map((key) => {
+                                const visible = visibleViewColumnKeys.includes(key)
+                                return (
+                                  <Checkbox
+                                    key={key}
+                                    checked={visible}
+                                    // 至少保留一列：当前只剩这一列可见时不允许取消勾选。
+                                    disabled={visible && visibleViewColumnKeys.length <= 1}
+                                    onChange={(event) => handleColumnVisibleChange(key, event.target.checked)}
+                                  >
+                                    {getColumnSettingLabel(key)}
+                                  </Checkbox>
+                                )
+                              })}
+                            </div>
                             <div className="wh-cdetail-colset-hint">{t('warehouseUi.containerDetail.columnSettingsHint')}</div>
                             {isColumnSettingsCustomized ? (
                               <Button size="small" icon={<ReloadOutlined />} onClick={resetColumnOrder}>
