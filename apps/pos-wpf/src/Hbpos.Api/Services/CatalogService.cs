@@ -176,7 +176,29 @@ public sealed class CatalogService(
     : ICatalogService, ICatalogIndexRefreshWorker, ICatalogTargetIndexSource
 {
     private const int CatalogSourceBatchSize = 100_000;
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> StoreRetailPriceEnsureLocks = new(StringComparer.Ordinal);
+    // 超过该差异数时 sync-plan 退回全量下载。
+    internal const int MaxDeltaOperations = 5_000;
+
+    // 补建门店价的互斥锁改为固定数量的分段锁：按“门店|商品”哈希取模选锁，
+    // 同一 key 永远落在同一把锁（互斥语义不变），不同 key 基本并行；
+    // 偶发哈希碰撞只会让两个不同商品短暂串行。不再为每个 key 建一个永不移除的信号量。
+    // 该方法持锁期间不会再取别的分段锁，不存在锁序死锁。
+    private const int StoreRetailPriceEnsureLockStripes = 256;
+    private static readonly SemaphoreSlim[] StoreRetailPriceEnsureLocks = CreateEnsureLockStripes();
+
+    private static SemaphoreSlim[] CreateEnsureLockStripes()
+    {
+        var stripes = new SemaphoreSlim[StoreRetailPriceEnsureLockStripes];
+        for (var i = 0; i < stripes.Length; i++)
+        {
+            stripes[i] = new SemaphoreSlim(1, 1);
+        }
+
+        return stripes;
+    }
+
+    internal static int StoreRetailPriceEnsureLockIndex(string key) =>
+        (int)((uint)StringComparer.Ordinal.GetHashCode(key) % StoreRetailPriceEnsureLockStripes);
 
     public CatalogService(
         HbposSqlSugarContext dbContext,
@@ -359,19 +381,23 @@ public sealed class CatalogService(
                 normalizedBase, target.CatalogIndex.CatalogVersion, target.CatalogIndex.Items.Count, lease.LeaseId);
         }
 
-        var operations = target.CatalogIndex.GetDeltaOperations(baseline.CatalogIndex);
-        if (operations.Count > 5_000)
+        // 阈值传入归并：差异超过上限时不再为每个差异项分配操作对象（两版本差异大时可达数十万个），
+        // 只继续计数，返回的计划（Full + 真实差异数）与先全量再判断时完全一致。
+        var (operations, operationCount) = target.CatalogIndex.GetDeltaOperationsLimited(
+            baseline.CatalogIndex,
+            MaxDeltaOperations);
+        if (operations is null)
         {
             var lease = catalogIndexCache.CreateFullLease(target);
             return new CatalogSyncPlanResponse(target.StoreCode, target.GeneratedAt, CatalogSyncModes.Full,
                 normalizedBase, target.CatalogIndex.CatalogVersion, target.CatalogIndex.Items.Count, lease.LeaseId,
-                operations.Count);
+                operationCount);
         }
 
         var deltaLease = catalogIndexCache.CreateDeltaLease(baseline, target, operations);
         return new CatalogSyncPlanResponse(target.StoreCode, target.GeneratedAt, CatalogSyncModes.Delta,
             normalizedBase, target.CatalogIndex.CatalogVersion, target.CatalogIndex.Items.Count,
-            deltaLease.LeaseId, operations.Count);
+            deltaLease.LeaseId, operationCount);
     }
 
     public async Task<CatalogSyncPageResponse?> GetSellableItemsPageWithLeaseAsync(
@@ -1437,7 +1463,13 @@ public sealed class CatalogService(
         List<StoreRetailPriceRecord> storeRetailPrices;
         List<StoreMultiCodeProductRecord> multiCodeProducts;
         List<StoreClearancePriceRecord> clearancePrices;
-        var storeReadTransactionStarted = await BeginCatalogSnapshotReadTransactionAsync(cancellationToken);
+        // 整表键集分页读走独立非 MARS 连接（开关关闭/SQLite/已有外部事务时为 null，沿用 MainDb 原路径）；
+        // SNAPSHOT 事务就开在该连接上，三类数据仍在同一快照内读完才提交。
+        using var bulkReadClient = dbContext.TryCreateMainNonMarsReadClient();
+        var db = bulkReadClient ?? dbContext.MainDb;
+        var readMode = bulkReadClient is null ? "shared" : "nonMars";
+        var storeReadTransactionStarted = await BeginCatalogSnapshotReadTransactionAsync(db, cancellationToken);
+        var storeRetailPriceReadStopwatch = Stopwatch.StartNew();
         try
         {
         stepStopwatch.Restart();
@@ -1449,7 +1481,7 @@ public sealed class CatalogService(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var batchStopwatch = Stopwatch.StartNew();
-            var storeRetailPriceQuery = dbContext.MainDb.Queryable<StoreRetailPrice>()
+            var storeRetailPriceQuery = db.Queryable<StoreRetailPrice>()
                 .With(SqlWith.Null)
                 .Where(x => x.StoreCode == normalizedStoreCode
                     && x.IsActive
@@ -1489,7 +1521,7 @@ public sealed class CatalogService(
                 x.DiscountRate,
                 x.IsSpecialProduct)));
             batchStopwatch.Stop();
-            Log($"store retail prices batch query store={normalizedStoreCode} rows={storeRetailPriceBatch.Count} total={storeRetailPrices.Count} elapsedMs={batchStopwatch.ElapsedMilliseconds}");
+            Log($"store retail prices batch query store={normalizedStoreCode} rows={storeRetailPriceBatch.Count} total={storeRetailPrices.Count} elapsedMs={batchStopwatch.ElapsedMilliseconds} rowsPerSec={RowsPerSecond(storeRetailPriceBatch.Count, batchStopwatch.ElapsedMilliseconds)} readMode={readMode}");
 
             if (storeRetailPriceBatch.Count < CatalogSourceBatchSize)
             {
@@ -1502,10 +1534,11 @@ public sealed class CatalogService(
         }
 
         stepStopwatch.Stop();
-        Log($"store retail prices query store={normalizedStoreCode} count={storeRetailPrices.Count} elapsedMs={stepStopwatch.ElapsedMilliseconds}");
+        storeRetailPriceReadStopwatch.Stop();
+        Log($"store retail prices query store={normalizedStoreCode} count={storeRetailPrices.Count} elapsedMs={stepStopwatch.ElapsedMilliseconds} rowsPerSec={RowsPerSecond(storeRetailPrices.Count, stepStopwatch.ElapsedMilliseconds)} readMode={readMode}");
 
         stepStopwatch.Restart();
-        var multiCodeProductEntities = await dbContext.MainDb.Queryable<StoreMultiCodeProduct>()
+        var multiCodeProductEntities = await db.Queryable<StoreMultiCodeProduct>()
             .With(SqlWith.Null)
             .Where(x => x.StoreCode == normalizedStoreCode && x.IsActive && !x.IsDeleted)
             .Select(x => new StoreMultiCodeProduct
@@ -1534,7 +1567,7 @@ public sealed class CatalogService(
             .ToList();
 
         stepStopwatch.Restart();
-        var clearancePriceEntities = await dbContext.MainDb.Queryable<StoreClearancePrice>()
+        var clearancePriceEntities = await db.Queryable<StoreClearancePrice>()
             .With(SqlWith.Null)
             .Where(x => x.StoreCode == normalizedStoreCode && !x.IsDeleted)
             .Select(x => new StoreClearancePrice
@@ -1560,14 +1593,14 @@ public sealed class CatalogService(
 
         if (storeReadTransactionStarted)
         {
-            await dbContext.MainDb.Ado.CommitTranAsync();
+            await db.Ado.CommitTranAsync();
         }
         }
         catch
         {
             if (storeReadTransactionStarted)
             {
-                await dbContext.MainDb.Ado.RollbackTranAsync();
+                await db.Ado.RollbackTranAsync();
             }
 
             throw;
@@ -1599,7 +1632,7 @@ public sealed class CatalogService(
 
         stepStopwatch.Stop();
         totalStopwatch.Stop();
-        Log($"build index completed store={store.StoreCode} items={items.Count} codeConflictItems={codeConflicts?.Count.ToString(CultureInfo.InvariantCulture) ?? "<null>"} buildElapsedMs={stepStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+        Log($"build index completed store={store.StoreCode} items={items.Count} codeConflictItems={codeConflicts?.Count.ToString(CultureInfo.InvariantCulture) ?? "<null>"} buildElapsedMs={stepStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds} readMode={readMode} storeRetailPriceRows={storeRetailPrices.Count} storeRetailPriceReadMs={storeRetailPriceReadStopwatch.ElapsedMilliseconds} storeRetailPriceRowsPerSec={RowsPerSecond(storeRetailPrices.Count, storeRetailPriceReadStopwatch.ElapsedMilliseconds)}");
         return new CatalogIndexBuildResult(
             store.StoreCode,
             generatedAt,
@@ -1614,10 +1647,12 @@ public sealed class CatalogService(
     private Task<CatalogBaseData> BuildCatalogBaseDataAsync(
         CancellationToken cancellationToken)
     {
-        return RunCatalogSnapshotReadAsync(BuildCatalogBaseDataCoreAsync, cancellationToken);
+        return RunCatalogBulkSnapshotReadAsync(BuildCatalogBaseDataCoreAsync, cancellationToken);
     }
 
     private async Task<CatalogBaseData> BuildCatalogBaseDataCoreAsync(
+        ISqlSugarClient db,
+        string readMode,
         CancellationToken cancellationToken)
     {
         var totalStopwatch = Stopwatch.StartNew();
@@ -1630,13 +1665,16 @@ public sealed class CatalogService(
             cancellationToken.ThrowIfCancellationRequested();
             var batchStopwatch = Stopwatch.StartNew();
             // 停用商品门店仍可销售，全量目录与扫码查询口径一致，只排除已删除商品。
-            var productQuery = dbContext.MainDb.Queryable<Product>()
+            var productQuery = db.Queryable<Product>()
                 .With(SqlWith.Null)
                 .Where(x => !x.IsDeleted && x.ProductCode != null && x.UUID != null);
 
             if (lastProductCode is not null && lastProductUuid is not null)
             {
-                // 全局商品基础按覆盖索引顺序键集读取；10 万批次减少重复 SQL 往返和范围扫描。
+                // 全局商品基础按 (ProductCode, UUID) 键集分页，10 万批次减少重复 SQL 往返和范围扫描。
+                // 过滤 IsDeleted=0、排序 ProductCode+UUID，对应索引 IX_HbposCatalogDownload_Product_Cursor_Sorted
+                // (IsDeleted, ProductCode, UUID)（手工脚本 HbposCatalogDownloadPerformanceIndexes.sql）；
+                // 不能加 IsActive 条件，停用商品门店仍可销售。
                 productQuery = productQuery.Where(
                     "(([ProductCode] > @lastProductCode) OR ([ProductCode] = @lastProductCode AND [UUID] > @lastUuid))",
                     new { lastProductCode, lastUuid = lastProductUuid });
@@ -1670,7 +1708,7 @@ public sealed class CatalogService(
                 x.ProductImage,
                 x.UUID)));
             batchStopwatch.Stop();
-            Log($"base products batch rows={productBatch.Count} total={products.Count} elapsedMs={batchStopwatch.ElapsedMilliseconds}");
+            Log($"base products batch rows={productBatch.Count} total={products.Count} elapsedMs={batchStopwatch.ElapsedMilliseconds} rowsPerSec={RowsPerSecond(productBatch.Count, batchStopwatch.ElapsedMilliseconds)} readMode={readMode}");
 
             if (productBatch.Count < CatalogSourceBatchSize)
             {
@@ -1682,8 +1720,9 @@ public sealed class CatalogService(
             lastProductUuid = lastProduct.UUID;
         }
 
+        var productReadElapsedMs = totalStopwatch.ElapsedMilliseconds;
         var setCodeStopwatch = Stopwatch.StartNew();
-        var setCodeEntities = await dbContext.MainDb.Queryable<ProductSetCode>()
+        var setCodeEntities = await db.Queryable<ProductSetCode>()
             .With(SqlWith.Null)
             .Where(x => x.IsActive && !x.IsDeleted)
             .Select(x => new ProductSetCode
@@ -1709,7 +1748,7 @@ public sealed class CatalogService(
             .ToArray();
         totalStopwatch.Stop();
         var generatedAt = DateTimeOffset.UtcNow;
-        Log($"base data build completed products={products.Count} setCodes={setCodes.Length} setCodeElapsedMs={setCodeStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+        Log($"base data build completed products={products.Count} setCodes={setCodes.Length} setCodeElapsedMs={setCodeStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds} readMode={readMode} productReadMs={productReadElapsedMs} productRowsPerSec={RowsPerSecond(products.Count, productReadElapsedMs)}");
         return new CatalogBaseData(generatedAt, products.ToArray(), setCodes);
     }
 
@@ -1733,14 +1772,14 @@ public sealed class CatalogService(
             return currentResponse;
         }
 
-        var ensureLock = StoreRetailPriceEnsureLocks.GetOrAdd(
-            StoreRetailPriceEnsureLockKey(normalizedStoreCode, productCode),
-            _ => new SemaphoreSlim(1, 1));
+        var ensureLock = StoreRetailPriceEnsureLocks[StoreRetailPriceEnsureLockIndex(
+            StoreRetailPriceEnsureLockKey(normalizedStoreCode, productCode))];
         await ensureLock.WaitAsync(cancellationToken);
         try
         {
             var now = DateTime.UtcNow;
-            var writeAction = "none";
+            // 三个分支（insert / update / refresh）都会赋值，且都会让该店缓存失效。
+            string writeAction;
             StoreRetailPrice? storeRetailPrice = null;
             await dbContext.MainDb.Ado.BeginTranAsync();
             try
@@ -1804,11 +1843,6 @@ public sealed class CatalogService(
             {
                 await dbContext.MainDb.Ado.RollbackTranAsync();
                 throw;
-            }
-
-            if (writeAction == "none")
-            {
-                return currentResponse;
             }
 
             catalogIndexCache.InvalidateStore(normalizedStoreCode);
@@ -1965,10 +1999,48 @@ public sealed class CatalogService(
         }
     }
 
-    private async Task<bool> BeginCatalogSnapshotReadTransactionAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// 与 <see cref="RunCatalogSnapshotReadAsync{T}"/> 相同的快照语义，但整表键集分页读取改走独立非 MARS 连接
+    /// （SNAPSHOT 事务开在该连接上，读完才提交）。无法使用独立连接时沿用 MainDb 原路径。
+    /// </summary>
+    private async Task<T> RunCatalogBulkSnapshotReadAsync<T>(
+        Func<ISqlSugarClient, string, CancellationToken, Task<T>> readAsync,
+        CancellationToken cancellationToken)
+    {
+        using var bulkReadClient = dbContext.TryCreateMainNonMarsReadClient();
+        var db = bulkReadClient ?? dbContext.MainDb;
+        var readMode = bulkReadClient is null ? "shared" : "nonMars";
+        var transactionStarted = await BeginCatalogSnapshotReadTransactionAsync(db, cancellationToken);
+        try
+        {
+            var result = await readAsync(db, readMode, cancellationToken);
+            if (transactionStarted)
+            {
+                await db.Ado.CommitTranAsync();
+            }
+
+            return result;
+        }
+        catch
+        {
+            if (transactionStarted)
+            {
+                await db.Ado.RollbackTranAsync();
+            }
+
+            throw;
+        }
+    }
+
+    private Task<bool> BeginCatalogSnapshotReadTransactionAsync(CancellationToken cancellationToken) =>
+        BeginCatalogSnapshotReadTransactionAsync(dbContext.MainDb, cancellationToken);
+
+    private static async Task<bool> BeginCatalogSnapshotReadTransactionAsync(
+        ISqlSugarClient db,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (dbContext.MainDb.CurrentConnectionConfig.DbType != SqlSugar.DbType.SqlServer)
+        if (db.CurrentConnectionConfig.DbType != SqlSugar.DbType.SqlServer)
         {
             // SQLite 单元测试不支持 SNAPSHOT；生产 MainDb 固定为 SQL Server，绝不在生产静默降级。
             return false;
@@ -1976,7 +2048,7 @@ public sealed class CatalogService(
 
         try
         {
-            await dbContext.MainDb.Ado.BeginTranAsync(IsolationLevel.Snapshot);
+            await db.Ado.BeginTranAsync(IsolationLevel.Snapshot);
             return true;
         }
         catch (Exception exception)
@@ -1984,6 +2056,10 @@ public sealed class CatalogService(
             throw new CatalogSnapshotIsolationUnavailableException(exception);
         }
     }
+
+    /// <summary>日志用：每秒读取行数，耗时为 0 时按 1 毫秒计，避免除零。</summary>
+    internal static long RowsPerSecond(int rows, long elapsedMs) =>
+        rows * 1000L / Math.Max(1L, elapsedMs);
 
     private static void Log(string message)
     {
@@ -2229,23 +2305,59 @@ public sealed class CatalogSellableIndex
     public IReadOnlyList<global::Hbpos.Api.Services.CatalogDeltaOperation> GetDeltaOperations(
         CatalogSellableIndex baseline)
     {
+        // 不设上限：Operations 一定非空。
+        return GetDeltaOperationsLimited(baseline, int.MaxValue).Operations!;
+    }
+
+    /// <summary>
+    /// 归并出两版本的差异。差异数不超过 <paramref name="maxOperations"/> 时返回完整操作列表；
+    /// 一旦超过，立即丢弃已收集的操作并停止分配对象，只继续计数，Operations 返回 null，
+    /// Count 仍是真实差异总数（与不设上限时 <c>GetDeltaOperations().Count</c> 相同）。
+    /// </summary>
+    public (IReadOnlyList<global::Hbpos.Api.Services.CatalogDeltaOperation>? Operations, int Count) GetDeltaOperationsLimited(
+        CatalogSellableIndex baseline,
+        int maxOperations)
+    {
         ArgumentNullException.ThrowIfNull(baseline);
-        var operations = new List<global::Hbpos.Api.Services.CatalogDeltaOperation>();
+        List<global::Hbpos.Api.Services.CatalogDeltaOperation>? operations = new();
+        var count = 0;
         var baselinePosition = 0;
         var targetPosition = 0;
+
+        // 登记一个差异：超过上限后不再创建操作对象。
+        bool Collecting()
+        {
+            count++;
+            if (operations is not null && count > maxOperations)
+            {
+                operations = null;
+            }
+
+            return operations is not null;
+        }
+
         while (baselinePosition < baseline.Items.Count || targetPosition < Items.Count)
         {
             if (baselinePosition >= baseline.Items.Count)
             {
-                operations.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Upsert(Items[targetPosition++]));
+                var added = Items[targetPosition++];
+                if (Collecting())
+                {
+                    operations!.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Upsert(added));
+                }
+
                 continue;
             }
 
             if (targetPosition >= Items.Count)
             {
                 var item = baseline.Items[baselinePosition++];
-                operations.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Delete(
-                    new DeletedLookupDto(StoreCode, item.LookupCode, item.LookupCodeNormalized, GeneratedAt)));
+                if (Collecting())
+                {
+                    operations!.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Delete(
+                        new DeletedLookupDto(StoreCode, item.LookupCode, item.LookupCodeNormalized, GeneratedAt)));
+                }
+
                 continue;
             }
 
@@ -2255,26 +2367,33 @@ public sealed class CatalogSellableIndex
             if (comparison < 0)
             {
                 baselinePosition++;
-                operations.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Delete(
-                    new DeletedLookupDto(StoreCode, left.LookupCode, left.LookupCodeNormalized, GeneratedAt)));
+                if (Collecting())
+                {
+                    operations!.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Delete(
+                        new DeletedLookupDto(StoreCode, left.LookupCode, left.LookupCodeNormalized, GeneratedAt)));
+                }
             }
             else if (comparison > 0)
             {
                 targetPosition++;
-                operations.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Upsert(right));
+                if (Collecting())
+                {
+                    operations!.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Upsert(right));
+                }
             }
             else
             {
                 baselinePosition++;
                 targetPosition++;
-                if (!string.Equals(left.RowVersion, right.RowVersion, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(left.RowVersion, right.RowVersion, StringComparison.OrdinalIgnoreCase)
+                    && Collecting())
                 {
-                    operations.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Upsert(right));
+                    operations!.Add(global::Hbpos.Api.Services.CatalogDeltaOperation.Upsert(right));
                 }
             }
         }
 
-        return operations;
+        return (operations, count);
     }
 
     /// <summary>
