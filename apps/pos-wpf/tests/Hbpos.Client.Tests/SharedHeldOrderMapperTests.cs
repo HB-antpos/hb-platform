@@ -703,4 +703,91 @@ public sealed class SharedHeldOrderMapperTests
         Assert.Equal(200L, result.Payload!.PricingState.Lines[0].DiscountState.Cents);
         Assert.Equal(100L, result.Payload.PricingState.Lines[1].DiscountState.Cents);
     }
+
+    [Fact]
+    public void Map_cent_allocation_across_lines_follows_the_shared_remaining_amount_allocation()
+    {
+        // 3 件 2.90：P1(1.00)×2 + P2(1.00)×1，折扣 0.10 按行合并后用递减的剩余折扣/剩余原价分摊 -> P1 0.07 / P2 0.03。
+        // 购物车里的旧引擎与新引擎现在用同一份分摊（PromotionBundleAllocator），重演只认这个结果。
+        var rules = new[] { ThreeForTwoNinety() };
+
+        var exact = Mapper.Map(
+            Order(
+                SaleLine("P1", 2, 1.00m, 0.07m, null, PosCartLineDiscountSource.Promotion),
+                SaleLine("P2", 1, 1.00m, 0.03m, null, PosCartLineDiscountSource.Promotion)),
+            rules,
+            revision: 1);
+        Assert.False(exact.IsBlocked);
+        Assert.Equal(7L, exact.Payload!.PricingState.Lines[0].DiscountState.Cents);
+        Assert.Equal(3L, exact.Payload.PricingState.Lines[1].DiscountState.Cents);
+
+        // 老版本旧引擎按每个实物单位分摊出来的 0.06 / 0.04 对不上 -> 阻断。
+        var oldPerUnitAllocation = Mapper.Map(
+            Order(
+                SaleLine("P1", 2, 1.00m, 0.06m, null, PosCartLineDiscountSource.Promotion),
+                SaleLine("P2", 1, 1.00m, 0.04m, null, PosCartLineDiscountSource.Promotion)),
+            rules,
+            revision: 1);
+        Assert.True(oldPerUnitAllocation.IsBlocked);
+        Assert.Equal(SharedHeldOrderMappingReasons.PromotionRulesMismatch, oldPerUnitAllocation.Block!.Reason);
+    }
+
+    [Fact]
+    public void Map_ignores_a_negative_fixed_price_frozen_rule_like_the_evaluation_engine()
+    {
+        // 固定价必须 >= 0：负价规则整条忽略（与 PromotionEvaluationService、旧引擎一致）。
+        // 若重演照单全收，会认为普通行应被折成 0 元而把没有促销折扣的挂单阻断。
+        var negative = FrozenRule("PROMO-NEGATIVE", isExclusive: true, priority: 100, applyQuantity: 2, fixedPrice: -1m, "P1");
+        var plain = Order(
+            SaleLine("P1", 1, 11.00m, 0m, null),
+            SaleLine("P1", 1, 11.00m, 0m, null));
+
+        var result = Mapper.Map(plain, [negative], revision: 1);
+
+        Assert.False(result.IsBlocked);
+        Assert.Empty(result.Payload!.PricingState.Promotions);
+    }
+
+    [Fact]
+    public void Map_negative_fixed_price_exclusive_rule_does_not_suppress_the_valid_rule()
+    {
+        // 负价的互斥高优先级规则被忽略后不参与互斥选择，有效规则照常重演（每行折 $1.00）。
+        var negative = FrozenRule("PROMO-NEGATIVE", isExclusive: true, priority: 100, applyQuantity: 2, fixedPrice: -1m, "P1");
+        var valid = FrozenRule("PROMO-VALID", isExclusive: false, priority: 1, applyQuantity: 2, fixedPrice: 20.00m, "P1");
+        var order = Order(
+            SaleLine("P1", 1, 11.00m, 1.00m, null, PosCartLineDiscountSource.Promotion),
+            SaleLine("P1", 1, 11.00m, 1.00m, null, PosCartLineDiscountSource.Promotion));
+
+        var result = Mapper.Map(order, [negative, valid], revision: 1);
+
+        Assert.False(result.IsBlocked);
+        Assert.Equal("PROMO-VALID", Assert.Single(result.Payload!.PricingState.Promotions).Id);
+    }
+
+    private static CatalogPromotionRuleDto ThreeForTwoNinety()
+    {
+        return FrozenRule("PROMO-3FOR290", isExclusive: true, priority: 100, applyQuantity: 3, fixedPrice: 2.90m, "P1", "P2");
+    }
+
+    private static CatalogPromotionRuleDto FrozenRule(
+        string id,
+        bool isExclusive,
+        int priority,
+        int applyQuantity,
+        decimal fixedPrice,
+        params string[] productCodes)
+    {
+        return new CatalogPromotionRuleDto(
+            id,
+            $"Rule {id}",
+            isExclusive,
+            priority,
+            applyQuantity,
+            fixedPrice,
+            null,
+            HeldAt.AddDays(-1),
+            HeldAt.AddDays(1),
+            null,
+            productCodes.Select(code => new CatalogPromotionProductDto(code, 1)).ToArray());
+    }
 }

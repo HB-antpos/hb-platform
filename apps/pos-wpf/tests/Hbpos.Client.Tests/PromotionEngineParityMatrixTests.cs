@@ -2,22 +2,29 @@ using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Promotions;
+using Xunit.Abstractions;
 
 namespace Hbpos.Client.Tests;
 
-// 新旧自动促销引擎「逐格对照」矩阵（特征化测试，C3 任务产出）。
+// 新旧自动促销引擎「逐格对照」矩阵。
 //
 // 背景：同一个折扣字段（CartLine 的 Promotion 来源折扣）目前有两个写入方：
 //   旧引擎 = PosCartService.RefreshAutomaticPromotionDiscounts（规则来自目录同步的 CatalogPromotionRuleDto，购物车内同步重算）；
 //   新引擎 = PromotionEvaluationService + PosCartService.ApplyPromotionDiscounts（规则来自 /promotions/rules，由 VM 排队异步重算）。
-// 本文件把同一份中立规则/购物车描述分别喂给两套引擎，逐行钉住「当前实际」输出。
+// 本文件把同一份中立规则/购物车描述分别喂给两套引擎，逐行钉住两边的输出。
 //
 // 标注约定：
-//   EQ-*   = 等价格：两套引擎输出完全相同（统一到新引擎后行为不变）。
-//   DIFF-* = 已知差异格：两套引擎本来就不同。这些格子钉的是「当前」各自的输出；
+//   EQ-*   = 等价格：两套引擎输出完全相同。
+//   DIFF-* = 已知差异格：两套引擎本来就不同，钉的是各自「当前」输出；
 //            在用户拍板选哪一边之前，不得为了让测试通过而改生产语义。拍板并收敛后，应把对应格改成 EQ 并更新期望值。
-// 所有用例都是特征化测试（不改生产代码，在 origin/main 上同样通过）。
-public sealed class PromotionEngineParityMatrixTests
+//
+// 语义收敛记录（本 PR，不删旧引擎、不切换规则来源）：
+//   D1 分摊到分：旧引擎改用新算法（共享 PromotionBundleAllocator）-> EQ-D1*；
+//   D2 互斥判定范围：旧引擎只评估与购物车相关的规则 -> EQ-D2*；
+//   D4 亚分单价：组原价按「行」舍入一次（新引擎改为与购物车行原价同一口径），凑组实收恰为规则目标价 -> EQ-D4*；
+//   D5 负固定价：新引擎也整条忽略 -> EQ-D5*。
+//   仍未决：D3 叠加封顶（DIFF-D3*）；S1 总部促销是规则源差异，不在本矩阵里（见 Hbpos.Api.Tests 的 PromotionRuleSourceParityTests）。
+public sealed class PromotionEngineParityMatrixTests(ITestOutputHelper output)
 {
     // 现配置同构 = 单条规则 + 互斥 + 单店；扩展配置 = 多条/非互斥/叠加/特殊价格等。
     private const string Prod = "现配置同构";
@@ -200,27 +207,69 @@ public sealed class PromotionEngineParityMatrixTests
         Add("EQ-H1-product-code-case-and-whitespace-insensitive", Prod, "规则商品码带空格/大小写不同仍命中", [ParityRule.Of("P", 2, 15m, [" a "], isExclusive: true)],
             [new("A", 10m, 2)], [5.00m]);
 
-        // ======================= 已知差异格（两套引擎本来就不同，未决，等用户拍板）=======================
+        // ======================= 原差异 D1/D2/D4/D5：已收敛（旧引擎改用新算法，新引擎补齐过滤/亚分口径）=======================
 
-        // D1 分摊到分：同一组跨多行时，旧引擎按「每个实物单位」用整组原价做分母一次性分摊；
-        //    新引擎按「行」合并后用递减的剩余折扣/剩余原价逐行分摊。总折扣一致，逐行差几分。
-        //    现配置同构下就会出现，所以「现配置两者结果相同」只在总额层面成立。
-        Add("DIFF-D1a-cents-allocation-two-lines-3for2.90", Prod, "3 件 2.90，A(1.00)×2 + B(1.00)×1：折扣 0.10 在两行间的分摊",
+        // D1 分摊到分：同一组跨多行时，逐行分摊用「新算法」——按行合并后，用递减的剩余折扣/剩余原价逐行取整，最后一行吃余数。
+        //    旧引擎原先按「每个实物单位」用整组原价做分母一次性分摊（A 0.06 / B 0.04），现已改走共享的 PromotionBundleAllocator。
+        //    现配置同构下就会出现，总折扣一直相同，收敛的只是逐行差几分。
+        Add("EQ-D1a-cents-allocation-two-lines-3for2.90", Prod, "3 件 2.90，A(1.00)×2 + B(1.00)×1：折扣 0.10 在两行间分摊（原：旧 0.06/0.04，新 0.07/0.03）",
             [ParityRule.Of("P", 3, 2.90m, ["A", "B"], isExclusive: true)],
             [new("A", 1m, 2), new("B", 1m)],
-            [0.06m, 0.04m], [0.07m, 0.03m]);
-        Add("DIFF-D1b-cents-allocation-three-single-lines", Prod, "3 件 2.90，三行各 1 件 1.00：0.10 分摊 0.03/0.03/0.04 vs 0.03/0.04/0.03",
+            [0.07m, 0.03m]);
+        Add("EQ-D1b-cents-allocation-three-single-lines", Prod, "3 件 2.90，三行各 1 件 1.00：0.10 分摊 0.03/0.04/0.03（原：旧 0.03/0.03/0.04）",
             [ParityRule.Of("P", 3, 2.90m, ["A", "B", "C"], isExclusive: true)],
             [new("A", 1m), new("B", 1m), new("C", 1m)],
-            [0.03m, 0.03m, 0.04m], [0.03m, 0.04m, 0.03m]);
+            [0.03m, 0.04m, 0.03m]);
 
-        // D2 互斥判定范围：旧引擎「只要有任何生效的互斥规则（哪怕与购物车商品无关）就只评估那一条」；
-        //    新引擎只在「购物车里有可参与商品的规则」之间判互斥。iPad 的 pricing-cart 与共享挂单重演口径同新引擎。
-        Add("DIFF-D2-unrelated-exclusive-suppresses-non-exclusive-in-legacy", Ext, "互斥规则(商品 Z)与购物车无关 + 非互斥规则(商品 A)命中：旧=0，新=5.00",
+        // D2 互斥判定范围：只在「与购物车相关的规则」之间判互斥（相关 = 规则里至少有一个商品对应可参与促销的购物车行）。
+        //    旧引擎原先「只要有任何生效的互斥规则（哪怕与购物车商品无关）就只评估那一条」，会把真正命中的非互斥规则整条压住；
+        //    现已与新引擎、iPad 的 pricing-cart、共享挂单重演一致。
+        Add("EQ-D2-unrelated-exclusive-does-not-suppress-non-exclusive", Ext, "互斥规则(商品 Z)与购物车无关 + 非互斥规则(商品 A)命中：两边都 5.00（原：旧=0）",
             [ParityRule.Of("EX", 2, 15m, ["Z"], isExclusive: true, priority: 1),
              ParityRule.Of("NX", 2, 15m, ["A"], isExclusive: false, priority: 9)],
             [new("A", 10m, 2)],
-            [0m], [5.00m], sameTotalDiscount: false);
+            [5.00m]);
+        Add("EQ-D2b-unrelated-higher-priority-exclusive-does-not-beat-related-exclusive", Ext, "两条互斥：高优先级的(商品 Z)与购物车无关，低优先级的(商品 A)命中：取 A 那条",
+            [ParityRule.Of("EX-Z", 2, 15m, ["Z"], isExclusive: true, priority: 9),
+             ParityRule.Of("EX-A", 2, 15m, ["A"], isExclusive: true, priority: 1)],
+            [new("A", 10m, 2)],
+            [5.00m]);
+        Add("EQ-D2c-exclusive-whose-only-product-line-is-ineligible-is-not-cart-related", Ext, "互斥规则(商品 A)的唯一购物车行带手工折扣不可参与 -> 该规则不算与购物车相关，非互斥规则(商品 B)照常生效",
+            [ParityRule.Of("EX", 2, 15m, ["A"], isExclusive: true, priority: 9),
+             ParityRule.Of("NX", 2, 15m, ["B"], isExclusive: false, priority: 1)],
+            [new("A", 10m, 1, ParityLineKind.ManualDiscountAmount, 2m), new("B", 10m, 2)],
+            [2.00m, 5.00m]);
+
+        // D4 亚分单价：组原价按「行」舍入到分一次（单价不先舍入），与购物车行原价 CartLine.GrossAmount 同一口径，
+        //    因此单行成组时凑组实收恰为规则目标价。3.335×3 凑 3 件 9.00：行原价 10.01，折 1.01，实收 9.00。
+        //    新引擎原先把每个单位先舍入到分再求和（3.34×3 = 10.02），多折 1 分、实收 8.99。
+        Add("EQ-D4a-sub-cent-unit-price-single-line", Ext, "单价 3.335×3 凑 3 件 9.00：两边折 1.01、实收 9.00（原：新折 1.02、实收 8.99）",
+            [ParityRule.Of("P", 3, 9m, ["A"], isExclusive: true)],
+            [new("A", 3.335m, 3)],
+            [1.01m]);
+        Add("EQ-D4b-sub-cent-unit-price-two-lines", Ext, "单价 3.335 两行凑 2 件 5.00：两行原价各 3.34，折 1.68 均分 0.84/0.84、实收 5.00（原：旧总折 1.67、实收 5.01）",
+            [ParityRule.Of("P", 2, 5m, ["A", "B"], isExclusive: true)],
+            [new("A", 3.335m), new("B", 3.335m)],
+            [0.84m, 0.84m]);
+        Add("EQ-D4c-sub-cent-unit-price-line-spans-two-bundles", Ext, "单价 3.335×6 凑 3 件 9.00：两组各折 1.01，行原价整行一次舍入 20.01，实收 17.99（既有行为：多组各自舍入，与目标价差 1 分）",
+            [ParityRule.Of("P", 3, 9m, ["A"], isExclusive: true)],
+            [new("A", 3.335m, 6)],
+            [2.02m]);
+
+        // D5 负固定价：整条规则忽略（不参与互斥选择、不产生折扣）。
+        //    旧引擎的规则过滤原本就要求 FixedPrice >= 0（目录源服务端也过滤，iPad 契约校验同样要求 >= 0）；
+        //    新引擎原先不检查 -> 整组被折成 0 元。后台是否可能保存负固定价未核实（服务端 PromotionReactService 未见校验）。
+        Add("EQ-D5-negative-fixed-price-rule-ignored", Ext, "固定价 -1：两边都忽略该规则（原：新整组免费）",
+            [ParityRule.Of("NEG", 2, -1m, ["A"], isExclusive: true)],
+            [new("A", 10m, 2)],
+            [0m]);
+        Add("EQ-D5b-negative-exclusive-rule-does-not-suppress-others", Ext, "负固定价的互斥高优先级规则不压制其它规则：忽略 NEG，NX 照常生效",
+            [ParityRule.Of("NEG", 2, -1m, ["A"], isExclusive: true, priority: 9),
+             ParityRule.Of("NX", 2, 15m, ["A"], isExclusive: false, priority: 1)],
+            [new("A", 10m, 2)],
+            [5.00m]);
+
+        // ======================= 已知差异格（两套引擎本来就不同，未决，等用户拍板）=======================
 
         // D3 叠加封顶：多条非互斥规则叠加超过行原价时，旧引擎先累加再逐行截断（超出部分丢弃）；
         //    新引擎逐条规则按行剩余容量封顶，并把同组里被封顶行的份额重新分给还有容量的行。
@@ -237,25 +286,6 @@ public sealed class PromotionEngineParityMatrixTests
             [new("A", 10m), new("B", 2m)],
             [10.00m, 1.50m], [10.00m, 2.00m], sameTotalDiscount: false);
 
-        // D4 亚分单价：新引擎把每个单位原价先舍入到分再求组原价，旧引擎用未舍入的原价。
-        //    3.335×3 凑 3 件 9.00：旧让整行实收恰为 9.00，新多折 1 分变 8.99。
-        Add("DIFF-D4a-sub-cent-unit-price-single-line", Ext, "单价 3.335×3 凑 3 件 9.00：旧折 1.01(实收 9.00)，新折 1.02(实收 8.99)",
-            [ParityRule.Of("P", 3, 9m, ["A"], isExclusive: true)],
-            [new("A", 3.335m, 3)],
-            [1.01m], [1.02m], sameTotalDiscount: false);
-        Add("DIFF-D4b-sub-cent-unit-price-two-lines", Ext, "单价 3.335 两行凑 2 件 5.00：旧 0.84/0.83，新 0.84/0.84",
-            [ParityRule.Of("P", 2, 5m, ["A", "B"], isExclusive: true)],
-            [new("A", 3.335m), new("B", 3.335m)],
-            [0.84m, 0.83m], [0.84m, 0.84m], sameTotalDiscount: false);
-
-        // D5 负固定价：旧引擎规则过滤要求 FixedPrice >= 0（目录源服务端也过滤）；
-        //    新引擎规则源 /promotions/rules 不过滤，引擎本身也不检查 -> 整行被折成 0 元。
-        //    后台是否可能保存负固定价未核实（服务端 PromotionReactService 未见校验）。
-        Add("DIFF-D5-negative-fixed-price-legacy-ignores-unified-makes-free", Ext, "固定价 -1：旧忽略该规则，新整组免费",
-            [ParityRule.Of("NEG", 2, -1m, ["A"], isExclusive: true)],
-            [new("A", 10m, 2)],
-            [0m], [20.00m], sameTotalDiscount: false);
-
         return cells.ToArray();
     }
 
@@ -267,17 +297,19 @@ public sealed class PromotionEngineParityMatrixTests
         ParityRule.Of("P", 3, 2.90m, ["A", "B"], isExclusive: true);
 
     [Fact]
-    public async Task Remote_review_rewrites_unified_discounts_back_to_legacy_values()
+    public async Task Remote_review_recompute_by_legacy_no_longer_changes_cent_allocation_of_unified_discounts()
     {
         // 生产里两套引擎同时在线：购物车已挂旧规则 -> 每次编辑先由旧引擎同步算一遍，
-        // VM 随后排队新引擎重算并覆盖；但后台远程复核（PosTerminalWorkflowService -> UpdateLineFromRemote）
-        // 只会再触发旧引擎，且 VM 不会为它排队新引擎，于是旧值覆盖新值（本任务要消除的现象）。
+        // VM 随后排队新引擎重算并覆盖；后台远程复核（PosTerminalWorkflowService -> UpdateLineFromRemote）
+        // 只会再触发旧引擎，且 VM 不会为它排队新引擎。
+        // D1 收敛前：旧引擎分摊到分与新引擎不同（0.06/0.04 vs 0.07/0.03），远程复核会把新值覆盖回旧值；
+        // D1 收敛后：两边同一份分摊算法，远程复核重算出来的逐行折扣与新引擎相同，不再翻来覆去。
         var now = DateTimeOffset.UtcNow;
         var cart = new PosCartService();
         cart.SetAutomaticPromotionRules([ThreeFor290.ToLegacy(now)]);
         var lines = PromotionEngineParityHarness.AddLines(cart, [new("A", 1m, 2, Lookup: "LK-A"), new("B", 1m, Lookup: "LK-B")]);
 
-        Assert.Equal([0.06m, 0.04m], PromotionEngineParityHarness.Capture(cart).Discounts);
+        Assert.Equal([0.07m, 0.03m], PromotionEngineParityHarness.Capture(cart).Discounts);
 
         await PromotionEngineParityHarness.ApplyUnifiedAsync(cart, [ThreeFor290], now);
         Assert.Equal([0.07m, 0.03m], PromotionEngineParityHarness.Capture(cart).Discounts);
@@ -285,7 +317,7 @@ public sealed class PromotionEngineParityMatrixTests
         Assert.True(cart.UpdateLineFromRemote(
             lines[0],
             PromotionEngineParityHarness.CreateItem("A", "LK-A", 1m)));
-        Assert.Equal([0.06m, 0.04m], PromotionEngineParityHarness.Capture(cart).Discounts);
+        Assert.Equal([0.07m, 0.03m], PromotionEngineParityHarness.Capture(cart).Discounts);
     }
 
     [Fact]
@@ -330,11 +362,13 @@ public sealed class PromotionEngineParityMatrixTests
     }
 
     [Fact]
-    public async Task Shared_held_order_mapper_replays_the_unified_algorithm_so_legacy_cent_allocation_is_blocked()
+    public async Task Shared_held_order_mapper_accepts_the_cart_whichever_engine_wrote_the_cent_allocation()
     {
-        // 第三个消费者：共享挂单 SharedHeldOrderMapper 用「冻结规则」按新引擎同一算法重演，要求每行折扣精确相等，
+        // 第三个消费者：共享挂单 SharedHeldOrderMapper 用「冻结规则」重演，要求每行折扣精确相等，
         // 否则 PromotionRulesMismatch 阻断发布（保留本地）。冻结规则取自购物车里的旧规则集（CreateFrozenAutomaticPromotionRules）。
-        // 所以旧引擎的分摊到分一旦留在购物车上（远程复核覆盖后），这单就发布不到共享挂单。
+        // D1 收敛前：旧引擎分摊到分（0.03/0.03/0.04）与重演（0.03/0.04/0.03）对不上 -> 阻断，
+        //           远程复核让旧引擎覆盖新引擎结果后，这单又发布不到共享挂单；
+        // D1 收敛后：旧引擎、新引擎、重演用同一份分摊算法，购物车上无论是谁写的折扣都能精确对应。
         var now = DateTimeOffset.UtcNow;
         var threeSingles = ParityRule.Of("P", 3, 2.90m, ["A", "B", "C"], isExclusive: true);
         var cart = new PosCartService();
@@ -344,21 +378,94 @@ public sealed class PromotionEngineParityMatrixTests
             [new("A", 1m, Lookup: "LK-A"), new("B", 1m, Lookup: "LK-B"), new("C", 1m, Lookup: "LK-C")]);
         var mapper = new SharedHeldOrderMapper();
 
-        // 旧引擎刚算完（0.03/0.03/0.04）：与新算法的 0.03/0.04/0.03 对不上 -> 阻断。
+        // 旧引擎刚算完：0.03/0.04/0.03，精确对应。
+        Assert.Equal([0.03m, 0.04m, 0.03m], PromotionEngineParityHarness.Capture(cart).Discounts);
         var legacyResult = mapper.Map(ToSuspendedOrder(cart), cart.CreateFrozenAutomaticPromotionRules(), revision: 1);
-        Assert.True(legacyResult.IsBlocked);
-        Assert.Equal(SharedHeldOrderMappingReasons.PromotionRulesMismatch, legacyResult.Block!.Reason);
+        Assert.False(legacyResult.IsBlocked);
 
-        // 新引擎覆盖后（0.03/0.04/0.03）：精确对应 -> 可发布。
+        // 新引擎覆盖后：同样精确对应。
         await PromotionEngineParityHarness.ApplyUnifiedAsync(cart, [threeSingles], now);
         var unifiedResult = mapper.Map(ToSuspendedOrder(cart), cart.CreateFrozenAutomaticPromotionRules(), revision: 1);
         Assert.False(unifiedResult.IsBlocked);
 
-        // 远程复核又让旧引擎覆盖回去 -> 再次阻断（这就是要收敛的现象在业务上的后果）。
+        // 远程复核又让旧引擎覆盖回去：不再阻断。
         Assert.True(cart.UpdateLineFromRemote(lines[0], PromotionEngineParityHarness.CreateItem("A", "LK-A", 1m)));
         var overwrittenResult = mapper.Map(ToSuspendedOrder(cart), cart.CreateFrozenAutomaticPromotionRules(), revision: 1);
-        Assert.True(overwrittenResult.IsBlocked);
-        Assert.Equal(SharedHeldOrderMappingReasons.PromotionRulesMismatch, overwrittenResult.Block!.Reason);
+        Assert.False(overwrittenResult.IsBlocked);
+    }
+
+    [Fact]
+    public void Shared_held_order_mapper_still_blocks_a_cart_holding_the_old_per_unit_cent_allocation()
+    {
+        // 精确对应的要求没有放松：老版本留在挂单/购物车里的逐单位分摊（0.03/0.03/0.04）与重演的 0.03/0.04/0.03 对不上，照旧阻断。
+        var now = DateTimeOffset.UtcNow;
+        var threeSingles = ParityRule.Of("P", 3, 2.90m, ["A", "B", "C"], isExclusive: true);
+        var cart = new PosCartService();
+        var lines = PromotionEngineParityHarness.AddLines(cart, [new("A", 1m), new("B", 1m), new("C", 1m)]);
+        lines[0].SetPromotionDiscountAmount(0.03m);
+        lines[1].SetPromotionDiscountAmount(0.03m);
+        lines[2].SetPromotionDiscountAmount(0.04m);
+
+        var result = new SharedHeldOrderMapper().Map(ToSuspendedOrder(cart), [threeSingles.ToLegacy(now)], revision: 1);
+
+        Assert.True(result.IsBlocked);
+        Assert.Equal(SharedHeldOrderMappingReasons.PromotionRulesMismatch, result.Block!.Reason);
+    }
+
+    [Theory]
+    [MemberData(nameof(CellIds))]
+    public async Task Shared_held_order_mapper_accepts_the_unified_engine_result_of_every_matrix_cell(string id)
+    {
+        // 共享挂单重演必须与新引擎逐行一致：矩阵里每个格子，新引擎算出的购物车都能被重演精确对应（含 D3 叠加封顶格）。
+        // 重演只认整分单价、不看生效时间、拒绝开放商品/退货行，所以这三类格子不适用。
+        var cell = Cells.Single(candidate => candidate.Id == id);
+        var applicable =
+            cell.Lines.All(line => line.Kind is not (ParityLineKind.OpenItem or ParityLineKind.Return)) &&
+            cell.Lines.All(line => line.Price * 100m == decimal.Truncate(line.Price * 100m)) &&
+            cell.Rules.All(rule => rule.StartDaysFromNow <= 0 && rule.EndDaysFromNow >= 0);
+        if (!applicable)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var cart = new PosCartService();
+        PromotionEngineParityHarness.AddLines(cart, cell.Lines);
+        await PromotionEngineParityHarness.ApplyUnifiedAsync(cart, cell.Rules, now);
+
+        var result = new SharedHeldOrderMapper().Map(
+            ToSuspendedOrder(cart),
+            cell.Rules.Select(rule => rule.ToLegacy(now)).ToArray(),
+            revision: 1);
+
+        Assert.False(result.IsBlocked, result.Block?.Detail);
+        var mappedCents = result.Payload!.PricingState.Lines
+            .Select(line => line.DiscountState.Mode == "promotion" ? line.DiscountState.Cents!.Value : 0L)
+            .ToArray();
+        // 手工折扣行的折扣不是促销，不计入；其余行的促销折扣分必须与购物车一致。
+        var expectedCents = cart.Lines
+            .Select(line => line.DiscountSource == CartLineDiscountSource.Promotion ? (long)(line.DiscountAmount * 100m) : 0L)
+            .ToArray();
+        Assert.Equal(expectedCents, mappedCents);
+    }
+
+    [Fact]
+    public async Task Shared_held_order_mapper_blocks_sub_cent_priced_cart_that_hits_a_promotion()
+    {
+        // D4 的副作用（只在零售价/手工价带亚分位时出现）：购物车按原价 3.335 算，3 件凑 9.00 折 1.01；
+        // 共享挂单 canonical 只有整数分单价（3.335 -> 3.34），重演按 3.34×3 = 10.02 得 1.02，对不上 -> 阻断，这单保留在本地。
+        // 阻断（fail-closed）比发布一份「单价 3.34×3 却只折 1.01、实收 9.01」的数据更安全。
+        var now = DateTimeOffset.UtcNow;
+        var rule = ParityRule.Of("P", 3, 9m, ["A"], isExclusive: true);
+        var cart = new PosCartService();
+        var line = PromotionEngineParityHarness.AddLines(cart, [new("A", 3.335m, 3)])[0];
+        await PromotionEngineParityHarness.ApplyUnifiedAsync(cart, [rule], now);
+        Assert.Equal(1.01m, line.DiscountAmount);
+
+        var result = new SharedHeldOrderMapper().Map(ToSuspendedOrder(cart), [rule.ToLegacy(now)], revision: 1);
+
+        Assert.True(result.IsBlocked);
+        Assert.Equal(SharedHeldOrderMappingReasons.PromotionRulesMismatch, result.Block!.Reason);
     }
 
     private static SuspendedOrder ToSuspendedOrder(PosCartService cart)
@@ -648,21 +755,22 @@ public sealed class PromotionEngineParityMatrixTests
     }
 
     // ===================================================================================
-    // 现配置同构的种子随机对照：总折扣恒等，逐行最多差几分
+    // 固定种子的随机对照
     // ===================================================================================
 
     [Fact]
-    public async Task Production_shaped_random_carts_have_identical_total_discount_and_cent_level_line_differences()
+    public async Task Production_shaped_random_carts_are_identical_in_every_line_for_both_engines()
     {
         // 固定种子的随机对照：单条互斥规则（ApplyQuantity 1~4、固定价 0~40、商品 1~3 个、可选每单上限），
         // 购物车 1~5 个普通销售行（数量 1~5、单价取常见零售价），覆盖跨行成组与取整。
-        // 探索时 10000 个随机购物车：约 96% 两边逐行完全一致，其余只差分摊到分（逐行最大差 0.02），总折扣从无差异。
-        // 这里只钉不变量，不钉具体占比：总折扣相同、折扣来源相同、逐行差不超过 0.05。
+        // 历史（D1 收敛前，同一发生器、同一种子、10000 个购物车）：总折扣从无差异，但约 96% 两边逐行完全一致，
+        // 其余只差分摊到分（逐行最大差 0.02）；D1 收敛后两边用同一份分摊算法，必须 100% 逐行一致。
         string[] products = ["A", "B", "C", "D"];
         decimal[] prices = [0.99m, 1.00m, 1.25m, 3.33m, 5m, 7.77m, 10m, 12.5m, 19.99m];
         var random = new Random(20261012);
         var identical = 0;
-        const int scenarioCount = 2000;
+        var totalDiscountDiffers = 0;
+        const int scenarioCount = 10000;
         for (var scenario = 0; scenario < scenarioCount; scenario++)
         {
             var ruleProducts = products.OrderBy(_ => random.Next()).Take(random.Next(1, 4)).Select(code => (code, 1)).ToArray();
@@ -684,11 +792,9 @@ public sealed class PromotionEngineParityMatrixTests
             var legacy = PromotionEngineParityHarness.RunLegacy(rules, lines);
             var unified = await PromotionEngineParityHarness.RunUnifiedAsync(rules, lines);
 
-            Assert.Equal(legacy.DiscountAmount, unified.DiscountAmount);
-            Assert.Equal(legacy.Sources, unified.Sources);
-            for (var index = 0; index < legacy.Lines.Count; index++)
+            if (legacy.DiscountAmount != unified.DiscountAmount)
             {
-                Assert.InRange(Math.Abs(legacy.Lines[index].Discount - unified.Lines[index].Discount), 0m, 0.05m);
+                totalDiscountDiffers++;
             }
 
             if (legacy.SameAs(unified))
@@ -697,7 +803,140 @@ public sealed class PromotionEngineParityMatrixTests
             }
         }
 
-        // 大多数购物车逐行一致（防止对照工具本身出错导致「全不一致」被误当成正常）。
-        Assert.True(identical > scenarioCount * 9 / 10, $"identical={identical}/{scenarioCount}");
+        output.WriteLine($"production-shaped random carts: identical={identical}/{scenarioCount}, total-discount-differs={totalDiscountDiffers}");
+        Assert.Equal(0, totalDiscountDiffers);
+        Assert.Equal(scenarioCount, identical);
+    }
+
+    [Fact]
+    public async Task Extended_random_carts_differ_only_where_stacked_rules_hit_a_fully_discounted_line()
+    {
+        // 扩展配置的随机对照：1~3 条规则（互斥/非互斥、优先级、权重 1~3、可选每单上限）、购物车里混入手工折扣行与目录折扣行，
+        // 单价取整分价。收敛后两套引擎唯一还不同的是 D3 叠加封顶（旧=先累加再逐行截断，新=按行剩余容量封顶并转给还有容量的行），
+        // 而 D3 只有在某行被折到 0 元（折扣 = 行原价）时才可能发生。所以：
+        //   - 新引擎结果里没有任何促销行被折到 0 元 -> 两边必须逐行完全一致；
+        //   - 否则允许不同（这就是 DIFF-D3 / DIFF-D3b 两格的差异），但方向固定：新引擎把被封顶的份额转给还有容量的行，
+        //     所以新引擎的总折扣只会大于等于旧引擎、不会更少。
+        var (differing, withoutFullyDiscountedLine, unifiedBelowLegacy) = await CountExtendedDifferencesAsync(20261013, 5000, subCentPrices: false);
+
+        output.WriteLine($"extended random carts: differing={differing}/5000, differing-without-fully-discounted-line={withoutFullyDiscountedLine}, unified-total-below-legacy={unifiedBelowLegacy}");
+        Assert.Equal(0, withoutFullyDiscountedLine);
+        Assert.Equal(0, unifiedBelowLegacy);
+    }
+
+    [Fact]
+    public async Task Sub_cent_random_carts_differ_only_where_stacked_rules_hit_a_fully_discounted_line()
+    {
+        // 同上，但单价带亚分位（0.995、3.335、12.345 ...）：D4 收敛后两边的组原价口径相同，不应再有分位差异。
+        var (differing, withoutFullyDiscountedLine, unifiedBelowLegacy) = await CountExtendedDifferencesAsync(20261014, 5000, subCentPrices: true);
+
+        output.WriteLine($"sub-cent random carts: differing={differing}/5000, differing-without-fully-discounted-line={withoutFullyDiscountedLine}, unified-total-below-legacy={unifiedBelowLegacy}");
+        Assert.Equal(0, withoutFullyDiscountedLine);
+        Assert.Equal(0, unifiedBelowLegacy);
+    }
+
+    private static async Task<(int Differing, int WithoutFullyDiscountedLine, int UnifiedBelowLegacy)> CountExtendedDifferencesAsync(
+        int seed,
+        int scenarioCount,
+        bool subCentPrices)
+    {
+        var random = new Random(seed);
+        var differing = 0;
+        var withoutFullyDiscountedLine = 0;
+        var unifiedBelowLegacy = 0;
+        for (var scenario = 0; scenario < scenarioCount; scenario++)
+        {
+            var (rules, lines) = BuildExtendedScenario(random, subCentPrices);
+
+            var legacy = PromotionEngineParityHarness.RunLegacy(rules, lines);
+            var unified = await PromotionEngineParityHarness.RunUnifiedAsync(rules, lines);
+
+            if (legacy.SameAs(unified))
+            {
+                continue;
+            }
+
+            differing++;
+            if (unified.DiscountAmount < legacy.DiscountAmount)
+            {
+                unifiedBelowLegacy++;
+            }
+
+            if (!unified.Lines.Any(line => line.Source == (int)CartLineDiscountSource.Promotion && line.Gross > 0m && line.Discount == line.Gross))
+            {
+                withoutFullyDiscountedLine++;
+            }
+        }
+
+        return (differing, withoutFullyDiscountedLine, unifiedBelowLegacy);
+    }
+
+    [Fact]
+    public async Task Shared_held_order_mapper_accepts_the_unified_engine_result_for_random_carts()
+    {
+        // 共享挂单重演与新引擎的逐行一致性（含多规则叠加、权重、每单上限、D3 封顶）：新引擎算出的购物车，重演必须能精确对应。
+        // 单价取整分价（canonical 只有整数分单价；亚分价的后果见 Shared_held_order_mapper_blocks_sub_cent_priced_cart_that_hits_a_promotion）。
+        var random = new Random(20261015);
+        var promoted = 0;
+        const int scenarioCount = 3000;
+        for (var scenario = 0; scenario < scenarioCount; scenario++)
+        {
+            var (rules, lines) = BuildExtendedScenario(random, subCentPrices: false);
+            var now = DateTimeOffset.UtcNow;
+            var cart = new PosCartService();
+            PromotionEngineParityHarness.AddLines(cart, lines);
+            await PromotionEngineParityHarness.ApplyUnifiedAsync(cart, rules, now);
+            if (cart.Lines.Any(line => line.DiscountSource == CartLineDiscountSource.Promotion))
+            {
+                promoted++;
+            }
+
+            var result = new SharedHeldOrderMapper().Map(
+                ToSuspendedOrder(cart),
+                rules.Select(rule => rule.ToLegacy(now)).ToArray(),
+                revision: 1);
+
+            Assert.False(
+                result.IsBlocked,
+                $"scenario {scenario}: {result.Block?.Reason} {result.Block?.Detail} | cart: {PromotionEngineParityHarness.Capture(cart)}");
+        }
+
+        output.WriteLine($"mapper random carts: promoted={promoted}/{scenarioCount}");
+        // 防止发生器退化成「都没有促销」导致本用例空转。
+        Assert.True(promoted > scenarioCount / 4, $"promoted={promoted}/{scenarioCount}");
+    }
+
+    /// <summary>扩展配置发生器：多规则、权重、互斥/非互斥、手工折扣行与目录折扣行；subCentPrices=true 时单价带亚分位。</summary>
+    private static (ParityRule[] Rules, ParityLine[] Lines) BuildExtendedScenario(Random random, bool subCentPrices)
+    {
+        string[] products = ["A", "B", "C", "D"];
+        decimal[] prices = subCentPrices
+            ? [0.995m, 1.005m, 3.335m, 7.775m, 12.345m, 0.99m, 5m, 10m]
+            : [0.99m, 1.00m, 1.25m, 3.33m, 5m, 7.77m, 10m, 12.5m, 19.99m];
+        var rules = Enumerable.Range(0, random.Next(1, 4))
+            .Select(index => new ParityRule(
+                $"R{index}",
+                random.Next(1, 5),
+                Math.Round(random.Next(0, 4000) / 100m, 2),
+                products.OrderBy(_ => random.Next()).Take(random.Next(1, 4)).Select(code => (code, random.Next(1, 4))).ToArray(),
+                IsExclusive: random.Next(4) == 0,
+                Priority: random.Next(0, 4),
+                MaxApplicationsPerOrder: random.Next(4) == 0 ? random.Next(1, 3) : null))
+            .ToArray();
+        var lines = Enumerable.Range(0, random.Next(1, 6))
+            .Select(_ =>
+            {
+                var product = products[random.Next(products.Length)];
+                var price = prices[random.Next(prices.Length)];
+                var quantity = random.Next(1, 6);
+                return random.Next(10) switch
+                {
+                    0 => new ParityLine(product, price, quantity, ParityLineKind.ManualDiscountPercent, 10m),
+                    1 => new ParityLine(product, price, quantity, ParityLineKind.CatalogDiscount, 0.1m),
+                    _ => new ParityLine(product, price, quantity)
+                };
+            })
+            .ToArray();
+        return (rules, lines);
     }
 }
