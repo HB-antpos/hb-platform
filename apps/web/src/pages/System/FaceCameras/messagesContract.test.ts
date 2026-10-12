@@ -47,7 +47,15 @@ function stripComments(source: string) {
 
 const directory = 'src/pages/System/FaceCameras'
 const NAMESPACE = 'faceCameras'
-const sources = ['index.tsx', 'CameraFormModal.tsx', 'SecretRevealModal.tsx', 'CapturesDrawer.tsx', 'logic.ts'].map((name) => ({
+const sources = [
+  'index.tsx',
+  'CameraFormModal.tsx',
+  'SecretRevealModal.tsx',
+  'CapturesDrawer.tsx',
+  'FaceImageViewerModal.tsx',
+  'logic.ts',
+  'imageLogic.ts',
+].map((name) => ({
   name,
   text: stripComments(readFileSync(resolve(directory, name), 'utf8')),
 }))
@@ -115,6 +123,75 @@ for (const language of ['zh', 'en'] as const) {
 for (const { name, text } of sources) {
   const literal = text.match(/[一-鿿]+/)
   if (literal) throw new Error(`${name} 含有硬编码中文文案「${literal[0]}」，请移入 messages.zh.json`)
+}
+
+// 8) 状态文案不得写成「在线 / 离线」：海康摄像机只有检测到人脸才推送，没人经过镜头时没有任何推送也没有心跳，
+//    「暂无推送」不等于断电断网，用户已经因为「离线」标签误以为摄像机坏了。
+{
+  const zh = pageMessages.zh as { faceCameras: { subtitle: string; status: Record<string, string>; notice: Record<string, string> } }
+  const en = pageMessages.en as { faceCameras: { subtitle: string; status: Record<string, string>; notice: Record<string, string> } }
+  const expectEqual = (actual: string, expected: string, what: string) => {
+    if (actual !== expected) throw new Error(`${what} 应为「${expected}」，实际是「${actual}」`)
+  }
+  expectEqual(zh.faceCameras.status.recentlyActive, '近期有推送', '中文状态标签')
+  expectEqual(zh.faceCameras.status.noRecentPush, '暂无推送', '中文状态标签')
+  expectEqual(zh.faceCameras.status.disabled, '已停用', '中文状态标签')
+  expectEqual(en.faceCameras.status.recentlyActive, 'Recently active', '英文状态标签')
+  expectEqual(en.faceCameras.status.noRecentPush, 'No recent pushes', '英文状态标签')
+  expectEqual(en.faceCameras.status.disabled, 'Disabled', '英文状态标签')
+  expectEqual(
+    zh.faceCameras.subtitle,
+    '共 {{total}} 台 · 近期有推送 {{active}} · 暂无推送 {{quiet}} · 已停用 {{disabled}}',
+    '中文页头计数',
+  )
+  const labelTexts = [
+    zh.faceCameras.subtitle,
+    ...Object.values(zh.faceCameras.status),
+    en.faceCameras.subtitle,
+    en.faceCameras.status.recentlyActive,
+    en.faceCameras.status.noRecentPush,
+    en.faceCameras.status.disabled,
+  ]
+  for (const text of labelTexts) {
+    if (/在线|离线|\b(online|offline)\b/i.test(text)) throw new Error(`状态标签 / 页头计数不得出现在线 / 离线字样: ${text}`)
+  }
+  for (const text of [zh.faceCameras.notice.pushStatus, zh.faceCameras.status.noRecentPushTip]) {
+    if (!text.includes('检测到人脸') || !text.includes('不代表断电或断网')) {
+      throw new Error(`说明文案必须写清「只有检测到人脸才推送」与「不代表断电或断网」: ${text}`)
+    }
+  }
+  if (!zh.faceCameras.notice.pushStatus.includes('近期有推送') || !zh.faceCameras.notice.pushStatus.includes('{{minutes}}')) {
+    throw new Error('顶部说明要给出「近期有推送」的判定窗口')
+  }
+  for (const text of [en.faceCameras.notice.pushStatus, en.faceCameras.status.noRecentPushTip]) {
+    if (!/only pushes when it detects a face/.test(text) || !/does not mean/.test(text)) {
+      throw new Error(`英文说明文案必须写清只有检测到人脸才推送、且不代表离线: ${text}`)
+    }
+  }
+}
+
+// 9) 抓拍图片查看的文案：敏感提示必须逐字包含约定内容；各类失败文案都要有；全局语言包里没有任何图片相关键。
+{
+  const zh = pageMessages.zh as { faceCameras: { images: Record<string, string | Record<string, string>> } }
+  const en = pageMessages.en as { faceCameras: { images: Record<string, string | Record<string, string>> } }
+  if (zh.faceCameras.images.sensitiveNotice !== '这是敏感的生物识别信息。查看会被记录，请勿截图外传。') {
+    throw new Error('中文敏感提示文案必须是约定的原文')
+  }
+  if (!/sensitive biometric/i.test(String(en.faceCameras.images.sensitiveNotice)) || !/logged/i.test(String(en.faceCameras.images.sensitiveNotice))) {
+    throw new Error('英文敏感提示必须写清敏感生物识别信息与查看会被记录')
+  }
+  if (zh.faceCameras.images.local !== '图片在本地') throw new Error('中文「图片在本地」文案不对')
+  const zhErrors = zh.faceCameras.images.errors as Record<string, string>
+  if (zhErrors.notConfigured !== '图片读取尚未配置') throw new Error('中文「图片读取尚未配置」文案不对')
+  if (zhErrors.local !== '图片仍在接收服务本地，暂不可在后台查看') throw new Error('中文「图片在本地」错误文案不对')
+  for (const kind of ['notConfigured', 'local', 'forbidden', 'unauthorized', 'missing', 'failed']) {
+    if (!zhErrors[kind] || !(en.faceCameras.images.errors as Record<string, string>)[kind]) throw new Error(`缺少图片失败文案: ${kind}`)
+  }
+  for (const language of ['zh', 'en'] as const) {
+    if (JSON.stringify(globalMessages[language]).includes('FaceImage') || JSON.stringify(globalMessages[language]).includes('faceCameras.images')) {
+      throw new Error(`图片相关文案不允许进全局${language}语言包`)
+    }
+  }
 }
 
 console.log('FaceCameras messagesContract.test: ok')

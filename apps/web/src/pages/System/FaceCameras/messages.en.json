@@ -1,11 +1,11 @@
 {
   "faceCameras": {
     "title": "Face Capture Cameras",
-    "subtitle": "{{total}} cameras · {{online}} online · {{offline}} offline · {{disabled}} disabled",
+    "subtitle": "{{total}} cameras · {{active}} recently active · {{quiet}} no recent pushes · {{disabled}} disabled",
     "empty": "No cameras registered yet. Use \"Add camera\" at the top right to start.",
     "notice": {
       "effect": "Adding, editing, enabling/disabling a camera or rotating its token takes effect in the face ingest service within 30 seconds.",
-      "definition": "Online means enabled and a push was received in the last {{minutes}} minutes. Capture, face and parse-failure counts cover the last {{hours}} hours."
+      "pushStatus": "Push status: an enabled camera that pushed within the last {{minutes}} minutes is \"Recently active\". A camera only pushes when it detects a face and sends nothing when nobody passes by, so \"No recent pushes\" does not mean the camera is powered off or offline. Capture, face and parse-failure counts cover the last {{hours}} hours."
     },
     "actions": {
       "add": "Add camera",
@@ -29,8 +29,9 @@
       "actions": "Actions"
     },
     "status": {
-      "online": "Online",
-      "offline": "Offline",
+      "recentlyActive": "Recently active",
+      "noRecentPush": "No recent pushes",
+      "noRecentPushTip": "A camera only pushes when it detects a face and sends nothing when nobody passes by, so \"No recent pushes\" does not mean the camera is powered off or offline.",
       "disabled": "Disabled"
     },
     "confirmDisable": {
@@ -93,7 +94,8 @@
     },
     "captures": {
       "title": "Recent captures · {{cameraId}}",
-      "metadataOnly": "Only metadata of the pushed messages is shown. No images.",
+      "metadataOnly": "Only push-message metadata is shown here, no images. Viewing capture images needs the separate \"View face capture images\" permission.",
+      "imagesOnDemand": "The table shows message metadata only. Images are sensitive biometric information: they are loaded on demand after you click \"View images\", and every view is logged.",
       "receivedAt": "Received at",
       "eventTime": "Camera event time",
       "eventType": "Event type",
@@ -111,7 +113,30 @@
       "loadFailed": "Failed to load captures",
       "prev": "Previous",
       "next": "Next",
-      "pageLabel": "Page {{page}}"
+      "pageLabel": "Page {{page}}",
+      "images": "Images"
+    },
+    "images": {
+      "view": "View images",
+      "local": "Image stored locally",
+      "localTip": "The image is still on the ingest service's local disk and cannot be viewed here yet",
+      "loading": "Loading…",
+      "title": "Capture images · {{captureId}}",
+      "sensitiveNotice": "This is sensitive biometric information. Viewing is logged. Do not take screenshots or share it.",
+      "background": "Background image",
+      "faces": "Face images",
+      "others": "Other images",
+      "faceTitle": "Face {{index}}",
+      "score": "Score {{score}}",
+      "close": "Close",
+      "errors": {
+        "notConfigured": "Image reading is not configured yet",
+        "local": "The image is still on the ingest service's local disk and cannot be viewed here yet",
+        "forbidden": "You do not have permission to view face capture images",
+        "unauthorized": "Your session has expired. Refresh the page and sign in again",
+        "missing": "The image does not exist or has been cleaned up",
+        "failed": "Failed to read the image. Please try again later"
+      }
     },
     "errors": {
       "generic": "The operation failed. Please try again later.",

@@ -765,7 +765,7 @@ sudo docker logs --since 1h hb-face-ingest 2>&1 | grep -E 'processing failed|ref
 
 ## 14. 摄像机管理后台（Web）
 
-第 13.5 节的手工 SQL 登记摄像机，现在可以在 Web 后台完成：新增、编辑、停用 / 启用、重新生成 token、查看最近抓拍记录（只有元数据，**不显示任何图片**）。
+第 13.5 节的手工 SQL 登记摄像机，现在可以在 Web 后台完成：新增、编辑、停用 / 启用、重新生成 token、查看最近抓拍记录（表格只有元数据；**图片是敏感生物识别信息，只有另外被授予「查看人脸抓拍图片」权限的账号才能按需查看，见 14.8**）。
 
 ### 14.1 入口与权限
 
@@ -774,7 +774,7 @@ sudo docker logs --since 1h hb-face-ingest 2>&1 | grep -E 'processing failed|ref
 | 页面 | Web 后台 → 系统 → **人脸抓拍摄像机**，路由 `/system/face-cameras` |
 | 权限码 | `FaceCapture.Cameras.Manage`（中文名「管理人脸抓拍摄像机」，分类「系统管理」） |
 | 谁能用 | 管理员（Admin 角色靠角色放行）；其他账号只有被管理员在「角色管理」里显式授予该码后才可见。**不属于任何默认角色模板**，店长 / 经理默认看不到 |
-| 接口 | `/api/react/v1/face-cameras`（列表 / 新增 / 修改 / `{cameraId}/rotate-token` / `{cameraId}/captures`），所有响应 `Cache-Control: no-store`；没有删除接口，摄像机只能停用 |
+| 接口 | `/api/react/v1/face-cameras`（列表 / 新增 / 修改 / `{cameraId}/rotate-token` / `{cameraId}/captures`），所有响应 `Cache-Control: no-store`；没有删除接口，摄像机只能停用。查看图片接口另见 14.8 |
 | 配置 | 摄像机完整地址的域名前缀默认 `https://hotbargain.vip`；主 API 如需覆盖，配置 `FaceCapture:PublicBaseUrl`（必须是 `https` 且不带路径，否则回退默认值） |
 
 **前提**：后台改的是 `FaceCamera` 表。人脸接收服务必须已按 13.2 / 13.5 切到 `database` 来源（`/health` 的 `cameraSource=database`、`cameraSourceReady=true`）才会读这张表；
@@ -806,12 +806,15 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
    摄像机必须用新地址重新配置才能继续推送。适用于：token 泄露或怀疑泄露、摄像机被回写成 HTTP 推送过（见 7.1）、更换设备、地址丢失。
 3. **停用 / 启用**：行内开关。停用后接收服务对该摄像机的推送回 401（最多 30 秒后生效），已入库的数据保留；启用后恢复。**没有删除**：停用即下线。
 4. **编辑**：可改门店、型号、MAC、备注；摄像机编号不可改（它会进文件路径与历史记录）。改门店只影响之后的新抓拍，已入库事件保留原门店编码。
-5. **查看最近抓拍**：行内「最近抓拍」打开抽屉，按接收时间倒序，每页 20 条（最多 50），只显示接收时间、摄像机事件时间、事件类型、人脸数、解析状态 / 备注、是否重复报文；最多翻到第 100 页。
+5. **查看最近抓拍**：行内「最近抓拍」打开抽屉，按接收时间倒序，每页 20 条（最多 50），表格只显示接收时间、摄像机事件时间、事件类型、人脸数、解析状态 / 备注、是否重复报文；最多翻到第 100 页。
+   表格本身不加载任何图片；有「查看人脸抓拍图片」权限的账号每行多一列「图片」，点「查看图片」才按需读取（14.8）。
 
 ### 14.4 状态与统计口径
 
-- **在线**：摄像机已启用，且 `LastSeenAtUtc` 距现在不超过 10 分钟（恰好 10 分钟仍算在线）。人脸接收服务收到有效推送后更新 `LastSeenAtUtc`（首次推送立即写入，之后对同一摄像机至多每 5 分钟更新一次），所以时间戳最多比真实最近推送晚 5 分钟，10 分钟窗口留足了余量。
-- **离线**：已启用但超过 10 分钟没有推送，或从未推送过。**已停用**优先于离线显示。
+- **近期有推送**（接口字段仍叫 `online`，契约未改名，只是页面不再叫「在线」）：摄像机已启用，且 `LastSeenAtUtc` 距现在不超过 10 分钟（恰好 10 分钟仍算）。人脸接收服务收到有效推送后更新 `LastSeenAtUtc`（首次推送立即写入，之后对同一摄像机至多每 5 分钟更新一次），所以时间戳最多比真实最近推送晚 5 分钟，10 分钟窗口留足了余量。
+- **暂无推送**：已启用但超过 10 分钟没有推送，或从未推送过。**已停用**优先于「暂无推送」显示。
+- **「暂无推送」不代表断电或断网**：海康摄像机在推送模式下**只有检测到人脸才推送**，没有人经过镜头时什么都不发，也没有心跳；夜间、店内无人时长时间「暂无推送」是正常现象。页面上「暂无推送」标签的悬停提示和顶部说明写的是同一个意思。
+- **怎么确认摄像机真的在工作**：在镜头前走一下，几秒内应出现新的抓拍记录（刷新「最近抓拍」抽屉，或看该摄像机状态变成「近期有推送」、近 24 小时抓拍数增加）。走过后仍然没有新记录，再按 7.2 节排查网络 / 配置，或在后台重新生成 token 后重配。
 - 近 24 小时统计（以服务器当前时间往前 24 小时）：抓拍事件数（含重复报文）、人脸数（**排除**重复报文）、解析失败数（`ParseStatus=2`）；「最近事件」不限 24 小时。
 - 查询只走 `IX_FaceCaptureEvent_Camera_Received` 的按摄像机区间查找，固定 3 条 SQL，不随摄像机数量增加；页面打开时查一次，没有自动轮询，请不要用脚本高频刷新该接口。
 
@@ -824,11 +827,70 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 1. 在后台新增（或轮换）摄像机，复制一次性地址，**等 30 秒**再测试。
 2. 在门店内网按第 7.1 节配置：报警主机协议 HTTPS、域名 `hotbargain.vip`、端口 443、URL 填地址里 `/face-ingest/hik/v1/<token>` 的路径部分（68 个字符，在海康 URL 字段 128 字符上限内），图片上传方式 binary，人脸抓拍联动勾选「上传中心」，其他事件联动全部关闭。
-3. 点摄像机上的「测试」，再让人从镜头前走过；回到后台刷新，该摄像机应变为「在线」（首次推送后很快），近 24 小时抓拍数增加，「最近抓拍」抽屉里能看到记录。
+3. 点摄像机上的「测试」，再让人从镜头前走过；回到后台刷新，该摄像机应变为「近期有推送」（首次推送后很快），近 24 小时抓拍数增加，「最近抓拍」抽屉里能看到记录。
 4. 不通时按 7.2 节排查；怀疑地址填错或泄露，回到后台重新生成 token 再配置一遍。
 
 ### 14.7 审计与日志
 
 - 新增、修改、启用、停用、轮换都会写一条后台审计日志（类别 `BlazorApp.Api.Features.FaceCameras.FaceCameraAdminService`，消息以「人脸摄像机后台审计」开头），含动作、摄像机编号、门店、操作人 Id 与用户名、UTC 时间和变更字段名；**不含 token，也不含 token 哈希**。
 - 这些日志级别是 Information：进主 API 容器日志（`docker logs`），默认**不进**中心日志（中心日志最低级别 Warning）。需要长期留痕时另行建审计表（尚未做）。
+- 查看图片的审计另见 14.8（成功读取是 Information，被拒绝的尝试是 Warning，后者会进中心日志）。
 - 哈希唯一约束冲突（概率极低）会记一条 Warning，只含摄像机编号与重试次数，并自动换 token 重试至多 3 次，仍冲突则返回 409，页面提示稍后重试。
+
+### 14.8 查看抓拍图片（敏感生物识别信息）
+
+最近抓拍抽屉里可以按需查看抓拍的人脸图与背景图。图片在专用私有 COS 桶里，**浏览器永远拿不到 COS 地址**：主 API 用服务端凭据读 COS，再把图片字节转发给已登录且有权限的账号。
+
+**权限与接口**
+
+| 项目 | 值 |
+| --- | --- |
+| 权限码 | `FaceCapture.Images.View`（中文名「查看人脸抓拍图片」，分类「系统管理」） |
+| 谁能用 | 管理员（Admin 角色靠角色放行）；其他账号必须被管理员在「角色管理」里**显式授予**。与 `FaceCapture.Cameras.Manage` **分开授予**：管理摄像机**不**自动包含查看图片，只有查看权限没有管理权限也进不了该页面（页面入口仍是管理权限） |
+| 列表 | `GET /api/react/v1/face-cameras/{cameraId}/captures`：只在调用者同时持有查看权限时，每条抓拍才带 `images` 元数据（图片编号、种类、存储位置、宽高、大小、人脸框、评分，**不含对象键和任何地址**）并返回 `canViewImages=true`；否则 `images` 恒为空数组、`canViewImages=false`，页面不显示任何图片入口 |
+| 内容 | `GET /api/react/v1/face-cameras/{cameraId}/captures/{captureId}/images/{imageId}/content`：对象键**只来自数据库**，客户端只传三个编号；`imageId → captureId → cameraId` 任一不一致都是同一个 404；响应只有图片字节，`Content-Type` 只会是 `image/jpeg` / `image/png`，带 `Cache-Control: no-store`、`Pragma: no-cache`、`X-Content-Type-Options: nosniff`、`Content-Disposition: inline`，不带 ETag 和任何 COS 响应头 |
+
+| 状态码 | 错误码 | 含义 / 页面提示 |
+| --- | --- | --- |
+| 403 | `FACE_IMAGE_FORBIDDEN` | 没有查看权限 |
+| 404 | `FACE_IMAGE_NOT_FOUND` | 编号不存在或归属不一致（不区分，不泄露存在性） |
+| 404 | `FACE_IMAGE_OBJECT_MISSING` | 库里有记录但 COS 里没有对象（已被生命周期清理等） |
+| 409 | `FACE_IMAGE_NOT_IN_COS` | 图片仍在接收服务本地磁盘（`Storage=local`），页面提示「图片仍在接收服务本地，暂不可在后台查看」 |
+| 415 | `FACE_IMAGE_TYPE_UNSUPPORTED` | 库里的类型不在白名单，或字节头与声明类型不符 |
+| 502 | `FACE_IMAGE_TOO_LARGE` | 超过 5MB 上限（库里声明的大小、COS 声明的长度、实际读到的字节三处都卡） |
+| 502 | `FACE_IMAGE_STORE_DENIED` / `FACE_IMAGE_STORE_TIMEOUT` / `FACE_IMAGE_STORE_ERROR` | COS 拒绝（401/403）/ 超时（总时限 15 秒）/ 其他失败；错误信息不含桶名、密钥、签名、地址 |
+| 503 | `FACE_IMAGE_STORE_NOT_CONFIGURED` | 读取尚未配置，页面提示「图片读取尚未配置」 |
+
+**配置（服务器 `master-Vite/.env`，主 API 的 compose 环境变量；全部可选，未配置是合法状态，不会让部署失败）**
+
+| 变量 | 说明 |
+| --- | --- |
+| `FACE_CAPTURE_COS_BUCKET` / `FACE_CAPTURE_COS_REGION` | 专用私有桶（与第 13.4 节 `FACE_INGEST_COS_BUCKET` / `_REGION` 是同一个桶，如 `hb-face-ingest-1300114625` / `ap-singapore`）。**没有默认值，也绝不回退到主桶**；任一为空或格式不合法 → 接口返回 503 |
+| `FACE_CAPTURE_COS_SECRET_ID` / `FACE_CAPTURE_COS_SECRET_KEY` | **密钥**，可选。必须成对配置；两个都不配时**回退使用主 API 已有的 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`**（桶与区域仍只用上面两个变量）；只配一个视为配置错误（503），不会混用两套密钥 |
+
+- **推荐做法**：新建一个**只授 `cos:GetObject`、资源限定 `qcs::cos:<region>:uid/<appid>:<bucket>/face-ingest/images/*`** 的 CAM 子账号，把它的密钥写进 `FACE_CAPTURE_COS_SECRET_ID/KEY`。这样即使密钥泄露也只能读图片目录，不能读原始报文、不能写、不能删；
+  不推荐长期用主密钥回退（主密钥权限大得多），回退只是为了先跑通。该子账号与第 13.6 节只授 PutObject 的接收端子账号是两个不同的账号，**不要**给接收端子账号加 GetObject。
+- 签名：主 API 用 `q-sign-algorithm=sha1` 的请求头签名（`Authorization`，只签 `host`，有效期 5 分钟，起点回拨 60 秒容忍时钟偏差），不生成也不外泄带签名的 URL；不跟随重定向。
+- 改完 `.env` 后按主 API 的常规方式重建 `hb-api` 容器生效。需要紧急关闭查看：清空 `FACE_CAPTURE_COS_BUCKET` 并重建容器（接口随即返回 503），或在「角色管理」收回权限。
+
+**权限入库（部署后手工执行一次）**：脚本 `services/backend/BlazorApp.Api/Data/Migrations/20261013_AddFaceCaptureImagesViewPermission.sql`，规则与 14.2 完全相同（幂等、目标库必须是 `HBweb`、只登记权限、**不授予任何角色或用户**、`CreatedBy` 写 `Migration_20261013_FaceCaptureImagesView`）：
+
+```bash
+sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend/BlazorApp.Api/Data/Migrations/20261013_AddFaceCaptureImagesViewPermission.sql
+```
+
+- 执行后核对：应看到 `InsertedPermissions` 为 1（重复执行为 0）和一行 `FaceCapture.Images.View`、`IsDeleted=0`。不执行的话「角色管理」里看不到该权限、授权保存时被静默丢弃（管理员本人不受影响）。
+- 回滚：按 `CreatedBy = N'Migration_20261013_FaceCaptureImagesView'` 精确定位这一行；先在「角色管理」取消该权限已授予的账号，再把这一行 `IsDeleted` 置 1。**不要按权限码批量删除，也不要物理删除。** 回滚后仅管理员（Admin 角色放行）还能看图，如需连管理员也不可看须回滚代码或清空 `FACE_CAPTURE_COS_BUCKET`。
+
+**页面行为与隐私要求**
+
+- 抽屉里每行只有有权限且该行有图片时才出现「查看图片」；图片都还在接收服务本地的行显示灰色「图片在本地」。**列表不加载任何图片、没有缩略图、没有预加载**；点「查看图片」才打开弹框并按顺序逐张读取（背景图 → 人脸图）。
+- 弹框顶部固定提示：「这是敏感的生物识别信息。查看会被记录，请勿截图外传。」背景图上用人脸框标出人脸位置（归一化坐标按比例，像素坐标按背景图原始宽高换算）。
+- 浏览器端：图片以 Blob → `objectURL` 显示，弹框关闭、切换抓拍、页面卸载时立即撤销并清空引用；不写 `localStorage` / `sessionStorage` / 地址栏 / 控制台。
+- 使用要求：仅限有业务需要的管理员查看；不得截图、下载、转发；定期核对被授予该权限的账号清单，离职 / 调岗及时收回。图片保留期由 COS 生命周期规则决定（13.6），到期后查看返回「图片文件不存在或已被清理」。
+
+**审计（目前只有容器日志，没有持久化审计表）**
+
+- 每次**成功读取**记一条 Information、每次**被拒绝的尝试**（无权限、编号不存在或归属不一致、图片在本地、未配置、COS 失败等）记一条 Warning，类别 `BlazorApp.Api.Features.FaceCameras.FaceCaptureImageService`，消息以「人脸抓拍图片查看审计」开头，字段：`Result`（成功为 `ok`，否则为上表错误码）、`ActorId`、`ActorName`、`CameraId`、`CaptureId`、`ImageId`、`Bytes`、`AtUtc`（UTC）。
+  **日志里没有对象键、COS 地址、桶名、密钥、签名**。检索方式：`docker logs <hb-api 容器> 2>&1 | grep "人脸抓拍图片查看审计"`。
+- Information 级别默认不进中心日志，只在容器日志里，容器重建后会丢；Warning 会进中心日志。**生物信息查看建议后续补持久化审计表**（谁、何时、看了哪张），目前不具备长期追溯能力，权限授予要从严。

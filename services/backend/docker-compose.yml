@@ -139,6 +139,12 @@ services:
       - TencentCloud__Region=${TENCENT_REGION}
       - TencentCloud__ImageBucketName=${TENCENT_IMAGE_BUCKET_NAME}
       - TencentCloud__ImageRegion=${TENCENT_IMAGE_REGION}
+      # 人脸抓拍图片后台查看（专用私有桶，只读）：桶 / 区域没有默认值，未配置是合法状态（接口返回 503 而不是让部署失败），
+      # 所以全部不用 :?required。密钥缺省时回退上面的 TENCENT_* 密钥；推荐配置只授 cos:GetObject 于 face-ingest/images/* 的专用子账号密钥。
+      - FaceCapture__Cos__Bucket=${FACE_CAPTURE_COS_BUCKET:-}
+      - FaceCapture__Cos__Region=${FACE_CAPTURE_COS_REGION:-}
+      - FaceCapture__Cos__SecretId=${FACE_CAPTURE_COS_SECRET_ID:-}
+      - FaceCapture__Cos__SecretKey=${FACE_CAPTURE_COS_SECRET_KEY:-}
     volumes: &hb-api-volumes
       - hb-api-logs:/app/logs
       - ./data-protection-keys:/app/App_Data/DataProtectionKeys

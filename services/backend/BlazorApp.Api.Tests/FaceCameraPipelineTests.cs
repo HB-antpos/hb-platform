@@ -85,6 +85,8 @@ public sealed class FaceCameraPipelineTests : IDisposable
                     services.AddOptions<AppUpdatePolicyOptions>();
                     services.AddSingleton(roleService.Object);
                     services.AddSingleton<IFaceCameraAdminService>(service);
+                    // 本类不测图片读取（见 FaceCaptureImagePipelineTests），只需满足控制器的构造依赖。
+                    services.AddSingleton(new Mock<IFaceCaptureImageService>().Object);
                     services.AddAuthentication("Test").AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("Test", _ => { });
                     services.AddAuthorization();
                     services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
@@ -111,6 +113,7 @@ public sealed class FaceCameraPipelineTests : IDisposable
             (HttpMethod.Put, "/api/react/v1/face-cameras/cam-1", new { storeCode = "1013", enabled = false }),
             (HttpMethod.Post, "/api/react/v1/face-cameras/cam-1/rotate-token", null),
             (HttpMethod.Get, "/api/react/v1/face-cameras/cam-1/captures", null),
+            (HttpMethod.Get, "/api/react/v1/face-cameras/cam-1/captures/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/images/11111111111111111111111111111111/content", null),
         };
 
         foreach (var call in calls)
@@ -223,7 +226,7 @@ public sealed class FaceCameraPipelineTests : IDisposable
         var actions = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
             .Where(method => method.GetCustomAttributes<HttpMethodAttribute>(inherit: false).Any())
             .ToList();
-        Assert.Equal(5, actions.Count);
+        Assert.Equal(6, actions.Count);
         Assert.All(actions, method =>
         {
             Assert.Empty(method.GetCustomAttributes<AllowAnonymousAttribute>(inherit: false));

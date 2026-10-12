@@ -56,6 +56,35 @@ export interface FaceCameraSecretResult {
 /** 0 Parsed / 1 PartiallyParsed / 2 Unparsed / 3 NotFaceEvent。 */
 export type FaceCaptureParseStatus = 0 | 1 | 2 | 3
 
+/** 0 人脸图 / 1 背景图 / 2 其他。 */
+export type FaceCaptureImageKind = 0 | 1 | 2
+
+/** 人脸框：rectNormalized 为 true 时是 0~1 的比例，否则是像素（相对背景图原始宽高）。 */
+export interface FaceCaptureImageRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * 单张图片的元数据。没有对象键、COS 地址、哈希：图片字节只能经
+ * GET .../captures/{captureId}/images/{imageId}/content 由服务端转发，且需要权限 FaceCapture.Images.View。
+ */
+export interface FaceCaptureImageMeta {
+  imageId: string
+  kind: FaceCaptureImageKind
+  /** cos | local；local 表示图片仍在接收服务本地磁盘，后台无法读取。 */
+  storage: string
+  width: number | null
+  height: number | null
+  byteSize: number
+  faceIndex: number | null
+  rect: FaceCaptureImageRect | null
+  rectNormalized: boolean | null
+  faceScore: number | null
+}
+
 export interface FaceCapture {
   captureId: string
   receivedAtUtc: string
@@ -65,6 +94,8 @@ export interface FaceCapture {
   parseStatus: FaceCaptureParseStatus
   parseNote: string | null
   isDuplicate: boolean
+  /** 仅当页面级 canViewImages 为 true 时才可能非空。 */
+  images: FaceCaptureImageMeta[]
 }
 
 export interface FaceCapturePage {
@@ -72,4 +103,6 @@ export interface FaceCapturePage {
   page: number
   pageSize: number
   hasMore: boolean
+  /** 调用者是否持有 FaceCapture.Images.View；为 false 时每条记录的 images 都是空数组。 */
+  canViewImages: boolean
 }

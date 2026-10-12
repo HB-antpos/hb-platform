@@ -1,5 +1,5 @@
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Grid, Modal, Space, Switch, Tag, Typography, message } from 'antd'
+import { Alert, Button, Empty, Grid, Modal, Space, Switch, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -48,8 +48,8 @@ registerPageMessages({ zh, en })
 
 // 文案键写成字面量映射而不是模板拼接：契约测试按字面量扫描键。
 const STATUS_LABEL_KEYS: Record<CameraStatus, string> = {
-  online: 'faceCameras.status.online',
-  offline: 'faceCameras.status.offline',
+  recentlyActive: 'faceCameras.status.recentlyActive',
+  noRecentPush: 'faceCameras.status.noRecentPush',
   disabled: 'faceCameras.status.disabled',
 }
 
@@ -277,7 +277,9 @@ export default function FaceCamerasPage() {
         width: 96,
         render: (_: unknown, record) => {
           const status = getCameraStatus(record)
-          return <Tag color={CAMERA_STATUS_COLORS[status]}>{t(STATUS_LABEL_KEYS[status])}</Tag>
+          const tag = <Tag color={CAMERA_STATUS_COLORS[status]}>{t(STATUS_LABEL_KEYS[status])}</Tag>
+          // 「暂无推送」容易被理解成故障：悬停说明它只表示最近没有人脸触发推送。
+          return status === 'noRecentPush' ? <Tooltip title={t('faceCameras.status.noRecentPushTip')}>{tag}</Tooltip> : tag
         },
       },
       {
@@ -364,7 +366,7 @@ export default function FaceCamerasPage() {
   )
 
   const counts = useMemo(() => countCameraStatuses(data?.items ?? []), [data])
-  const onlineMinutes = data?.onlineWindowMinutes ?? 10
+  const pushWindowMinutes = data?.onlineWindowMinutes ?? 10
   const statsHours = data?.statsWindowHours ?? 24
 
   return (
@@ -375,8 +377,8 @@ export default function FaceCamerasPage() {
         data
           ? t('faceCameras.subtitle', {
               total: counts.total,
-              online: counts.online,
-              offline: counts.offline,
+              active: counts.recentlyActive,
+              quiet: counts.noRecentPush,
               disabled: counts.disabled,
             })
           : undefined
@@ -398,7 +400,7 @@ export default function FaceCamerasPage() {
           type="info"
           showIcon
           message={t('faceCameras.notice.effect')}
-          description={t('faceCameras.notice.definition', { minutes: onlineMinutes, hours: statsHours })}
+          description={t('faceCameras.notice.pushStatus', { minutes: pushWindowMinutes, hours: statsHours })}
         />
         {loadError ? (
           <Alert

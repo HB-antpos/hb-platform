@@ -124,6 +124,15 @@ namespace BlazorApp.Shared.Constants
             {
                 public const string Manage = "FaceCapture.Cameras.Manage";
             }
+
+            /// <summary>
+            /// 查看人脸抓拍图片（敏感生物识别信息）：与 <see cref="Cameras.Manage"/> 完全分开授予，
+            /// 管理摄像机不自动包含查看图片；Admin 角色靠角色放行，其他账号须由管理员显式授予。
+            /// </summary>
+            public static class Images
+            {
+                public const string View = "FaceCapture.Images.View";
+            }
         }
 
         public static class PosTerminal

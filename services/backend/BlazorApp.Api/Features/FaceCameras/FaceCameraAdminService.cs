@@ -12,7 +12,8 @@ namespace BlazorApp.Api.Features.FaceCameras;
 /// token 安全约束（逐条都有测试）：
 /// 1. 明文只存在于 Create / Rotate 的局部变量和一次性响应里，库里只写 SHA-256；
 /// 2. 明文不进日志、不进异常消息、不进审计内容；唯一冲突时只记「哪个约束」，不记异常原文；
-/// 3. 抓拍记录只返回元数据，实体里没有图片 / 对象键 / 地址列。
+/// 3. 抓拍记录只返回元数据；图片元数据只在调用者有 FaceCapture.Images.View 时才查询和返回，
+///    且查询里根本不取 ObjectKey 列，响应契约里也没有对象键 / 地址 / 哈希字段。
 /// </summary>
 public sealed class FaceCameraAdminService(
     SqlSugarContext context,
@@ -204,6 +205,7 @@ public sealed class FaceCameraAdminService(
         string cameraId,
         int page,
         int pageSize,
+        bool includeImages = false,
         CancellationToken cancellationToken = default
     )
     {
@@ -225,23 +227,36 @@ public sealed class FaceCameraAdminService(
             .Take(size + 1)
             .ToListAsync(cancellationToken);
 
+        var pageRows = rows.Take(size).ToList();
+        // 图片元数据整页只查一次（IN 查询，不是每条记录各查一次）；没有权限时连查询都不发，
+        // 调用方得到的是空数组 + CanViewImages=false，无法从元数据得知图片结构。
+        var images = includeImages
+            ? await QueryImageMetaAsync(pageRows.Select(row => row.CaptureId.TrimEnd()).ToList(), cancellationToken)
+            : null;
+
         return new FaceCapturePageDto
         {
-            Items = rows.Take(size).Select(row => new FaceCaptureItemDto
+            Items = pageRows.Select(row =>
             {
                 // char(32) 列在 SQL Server 上会补空格；真实 CaptureId 恰好 32 位，这里仍去掉尾部空白以防历史数据。
-                CaptureId = row.CaptureId.TrimEnd(),
-                ReceivedAtUtc = AsUtc(row.ReceivedAtUtc),
-                CameraEventTime = row.CameraEventTime,
-                EventType = row.EventType,
-                FaceCount = row.FaceCount,
-                ParseStatus = row.ParseStatus,
-                ParseNote = row.ParseNote,
-                IsDuplicate = !string.IsNullOrEmpty(row.DuplicateOfCaptureId),
+                var captureId = row.CaptureId.TrimEnd();
+                return new FaceCaptureItemDto
+                {
+                    CaptureId = captureId,
+                    ReceivedAtUtc = AsUtc(row.ReceivedAtUtc),
+                    CameraEventTime = row.CameraEventTime,
+                    EventType = row.EventType,
+                    FaceCount = row.FaceCount,
+                    ParseStatus = row.ParseStatus,
+                    ParseNote = row.ParseNote,
+                    IsDuplicate = !string.IsNullOrEmpty(row.DuplicateOfCaptureId),
+                    Images = images != null && images.TryGetValue(captureId, out var list) ? list : [],
+                };
             }).ToList(),
             Page = number,
             PageSize = size,
             HasMore = rows.Count > size,
+            CanViewImages = includeImages,
         };
     }
 
@@ -415,6 +430,61 @@ public sealed class FaceCameraAdminService(
     }
 
     /// <summary>
+    /// 一页抓拍的图片元数据：一条 IN 查询（命中 IX_FaceCaptureImage_CaptureId），不取 ObjectKey / Sha256 / 属性 JSON。
+    /// CaptureId 是 char(32)：参数显式声明为定长 ANSI，避免 SQL Server 按 nvarchar 做隐式转换而放弃索引查找。
+    /// </summary>
+    private async Task<Dictionary<string, List<FaceCaptureImageMetaDto>>> QueryImageMetaAsync(
+        IReadOnlyList<string> captureIds, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, List<FaceCaptureImageMetaDto>>(StringComparer.OrdinalIgnoreCase);
+        if (captureIds.Count == 0)
+        {
+            return result;
+        }
+
+        var names = captureIds.Select((_, index) => $"@c{index}").ToList();
+        var sql = $"""
+SELECT i.ImageId AS ImageId, i.CaptureId AS CaptureId, i.Kind AS Kind, i.PartIndex AS PartIndex,
+       i.FaceIndex AS FaceIndex, i.Storage AS Storage, i.ByteSize AS ByteSize, i.Width AS Width, i.Height AS Height,
+       i.RectX AS RectX, i.RectY AS RectY, i.RectW AS RectW, i.RectH AS RectH,
+       i.RectNormalized AS RectNormalized, i.FaceScore AS FaceScore
+FROM FaceCaptureImage i
+WHERE i.CaptureId IN ({string.Join(",", names)})
+ORDER BY i.CaptureId, i.PartIndex
+""";
+        var parameters = captureIds
+            .Select((id, index) => new SugarParameter($"@c{index}", id, System.Data.DbType.AnsiStringFixedLength) { Size = 32 })
+            .ToList();
+        var rows = await _db.Ado.SqlQueryAsync<FaceImageMetaRow>(sql, parameters);
+        foreach (var row in rows)
+        {
+            var captureId = row.CaptureId.TrimEnd();
+            if (!result.TryGetValue(captureId, out var list))
+            {
+                result[captureId] = list = [];
+            }
+
+            list.Add(new FaceCaptureImageMetaDto
+            {
+                ImageId = row.ImageId.TrimEnd(),
+                Kind = row.Kind,
+                Storage = (row.Storage ?? string.Empty).Trim().ToLowerInvariant(),
+                Width = row.Width,
+                Height = row.Height,
+                ByteSize = row.ByteSize,
+                FaceIndex = row.FaceIndex,
+                Rect = row.RectX.HasValue && row.RectY.HasValue && row.RectW.HasValue && row.RectH.HasValue
+                    ? new FaceCaptureImageRectDto(row.RectX.Value, row.RectY.Value, row.RectW.Value, row.RectH.Value)
+                    : null,
+                RectNormalized = row.RectNormalized,
+                FaceScore = row.FaceScore,
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// 统计 SQL（SQL Server 与 SQLite 通用，全部参数化）：
     /// - 近 24 小时聚合：CameraId IN (...) AND ReceivedAtUtc >= @since，命中 IX_FaceCaptureEvent_Camera_Received 做区间查找；
     /// - 最近一次事件：相关子查询 MAX(ReceivedAtUtc) WHERE CameraId = c.CameraId，同一索引上退化为 TOP 1 查找，不扫全表；
@@ -523,6 +593,25 @@ WHERE c.CameraId IN ({inList})
 
     private static FaceCameraException FieldInvalid(string message) =>
         new(400, "FACE_CAMERA_FIELD_INVALID", message);
+
+    private sealed class FaceImageMetaRow
+    {
+        public string ImageId { get; set; } = string.Empty;
+        public string CaptureId { get; set; } = string.Empty;
+        public int Kind { get; set; }
+        public int PartIndex { get; set; }
+        public int? FaceIndex { get; set; }
+        public string? Storage { get; set; }
+        public int ByteSize { get; set; }
+        public int? Width { get; set; }
+        public int? Height { get; set; }
+        public decimal? RectX { get; set; }
+        public decimal? RectY { get; set; }
+        public decimal? RectW { get; set; }
+        public decimal? RectH { get; set; }
+        public bool? RectNormalized { get; set; }
+        public decimal? FaceScore { get; set; }
+    }
 
     private sealed class FaceCameraStatsRow
     {

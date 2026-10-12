@@ -1,4 +1,4 @@
-import { LeftOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
+import { LeftOutlined, PictureOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
 import { Alert, Button, Drawer, Empty, Space, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -7,6 +7,8 @@ import { useTranslation } from 'react-i18next'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import { getFaceCameraCaptures } from '../../../services/faceCameraService'
 import type { FaceCamera, FaceCapture, FaceCapturePage, FaceCaptureParseStatus } from '../../../types/faceCamera'
+import FaceImageViewerModal from './FaceImageViewerModal'
+import { getRowImageAction } from './imageLogic'
 import {
   CAPTURE_PAGE_SIZE,
   PARSE_STATUS_COLORS,
@@ -30,7 +32,11 @@ interface CapturesDrawerProps {
   onClose: () => void
 }
 
-/** 最近抓拍：只展示报文元数据（没有也不会请求图片）；后端没有总数，用上一页 / 下一页翻页。 */
+/**
+ * 最近抓拍：表格只展示报文元数据，列表本身不请求任何图片（没有预加载、没有缩略图）；
+ * 有「查看人脸抓拍图片」权限者每行多一个「查看图片」入口，点击后才在弹框里按需读取。
+ * 后端没有总数，用上一页 / 下一页翻页。
+ */
 export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
@@ -38,9 +44,12 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   const [tick, setTick] = useState(0)
+  // 正在查看图片的抓拍；弹框仅在它非空时挂载，关闭 / 换行 / 卸载都会清理 objectURL（见 FaceImageViewerModal）。
+  const [viewTarget, setViewTarget] = useState<FaceCapture | null>(null)
   const [guard] = useState(createLatestGuard)
   const abortRef = useRef<AbortController | null>(null)
   const cameraId = camera.cameraId
+  const canViewImages = result?.canViewImages === true
 
   const load = useCallback(async () => {
     abortRef.current?.abort()
@@ -128,8 +137,36 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
             '-'
           ),
       },
+      // 没有查看图片权限时后端不返回图片元数据，这一列整列不出现，页面上看不出图片结构。
+      ...(canViewImages
+        ? [
+            {
+              title: t('faceCameras.captures.images'),
+              key: 'images',
+              width: 120,
+              render: (_: unknown, record: FaceCapture) => {
+                const action = getRowImageAction(canViewImages, record.images)
+                if (action === 'view') {
+                  return (
+                    <Button size="small" icon={<PictureOutlined />} onClick={() => setViewTarget(record)}>
+                      {t('faceCameras.images.view')}
+                    </Button>
+                  )
+                }
+                if (action === 'local') {
+                  return (
+                    <Tooltip title={t('faceCameras.images.localTip')}>
+                      <Tag>{t('faceCameras.images.local')}</Tag>
+                    </Tooltip>
+                  )
+                }
+                return '-'
+              },
+            },
+          ]
+        : []),
     ],
-    [t],
+    [canViewImages, t],
   )
 
   return (
@@ -146,7 +183,9 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
       }
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Typography.Text type="secondary">{t('faceCameras.captures.metadataOnly')}</Typography.Text>
+        <Typography.Text type="secondary">
+          {canViewImages ? t('faceCameras.captures.imagesOnDemand') : t('faceCameras.captures.metadataOnly')}
+        </Typography.Text>
         {failed ? (
           <Alert
             type="error"
@@ -167,7 +206,7 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
           dataSource={result?.items ?? []}
           columns={columns}
           pagination={false}
-          scroll={{ x: 890 }}
+          scroll={{ x: canViewImages ? 1010 : 890 }}
           locale={{ emptyText: loading ? ' ' : <Empty description={t('faceCameras.captures.empty')} /> }}
         />
         <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
@@ -188,6 +227,14 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
           </Button>
         </Space>
       </Space>
+      {viewTarget ? (
+        <FaceImageViewerModal
+          key={viewTarget.captureId}
+          cameraId={cameraId}
+          capture={viewTarget}
+          onClose={() => setViewTarget(null)}
+        />
+      ) : null}
     </Drawer>
   )
 }

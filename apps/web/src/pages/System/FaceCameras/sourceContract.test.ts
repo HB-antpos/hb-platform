@@ -19,7 +19,9 @@ const files = {
   form: stripComments(read(`${directory}/CameraFormModal.tsx`)),
   secret: stripComments(read(`${directory}/SecretRevealModal.tsx`)),
   drawer: stripComments(read(`${directory}/CapturesDrawer.tsx`)),
+  viewer: stripComments(read(`${directory}/FaceImageViewerModal.tsx`)),
   logic: stripComments(read(`${directory}/logic.ts`)),
+  imageLogic: stripComments(read(`${directory}/imageLogic.ts`)),
   service: stripComments(read('src/services/faceCameraService.ts')),
 }
 const everything = Object.entries(files)
@@ -112,5 +114,48 @@ const routeBlock = route.slice(routeStart, route.indexOf('element:', routeStart)
 assert(route.includes("const FaceCamerasPage = lazy(() => import('../pages/System/FaceCameras'))"), '页面必须懒加载，不进首屏包')
 assert(routeBlock.includes('keepAlive: false'), '含一次性地址的页面不能 keepAlive')
 assert(routeBlock.includes("accessKey: 'canManageFaceCameras'") && routeBlock.includes("title: 'menu.faceCameras'"), '路由使用独立访问键与全局菜单键')
+
+// ───────── 抓拍图片查看（敏感生物识别信息）：按需、不落地、不外泄 ─────────
+// 读取：只经服务层的专用函数，且只有查看弹框调用；页面 / 抽屉 / 逻辑文件都不直接请求图片
+assert(files.service.includes('export async function fetchFaceCaptureImage('), '服务层必须提供按需读取单张图片的函数')
+assert(files.service.includes("credentials: 'include'") && files.service.includes('...NO_STORE'), '读取图片带登录 Cookie 且 no-store')
+assert(/\/captures\/\$\{captureId\}\/images\/\$\{imageId\}\/content/.test(files.service), '图片只走专用内容接口')
+assert(files.viewer.includes('fetchFaceCaptureImage('), '图片只由查看弹框读取')
+for (const name of ['page', 'form', 'secret', 'drawer', 'logic', 'imageLogic'] as const) {
+  assert(!files[name].includes('fetchFaceCaptureImage'), `${name} 不得直接读取图片（只能由查看弹框按需读取）`)
+}
+// 入口：列表只在后端返回 canViewImages 且该行有图片时才出现入口，点击才挂载弹框
+assert(files.drawer.includes('getRowImageAction(canViewImages, record.images)'), '行内入口按 canViewImages 与该行图片元数据判定')
+assert(files.drawer.includes('const canViewImages = result?.canViewImages === true'), '入口开关来自后端返回的 canViewImages')
+assert(files.drawer.includes('setViewTarget(record)') && files.drawer.includes('{viewTarget ? ('), '点击「查看图片」才挂载弹框')
+assert(files.drawer.includes('key={viewTarget.captureId}'), '切换抓拍时弹框重新挂载，旧图片 URL 随之撤销')
+assert(files.drawer.includes('onClose={() => setViewTarget(null)}'), '关闭弹框要卸载组件')
+// 不预加载：没有任何图片元素 / 预取 / 缩略图
+for (const [name, text] of everything) {
+  assert(!/new Image\(|rel=["']?(preload|prefetch)|<link\b|\bImage\.prototype|createImageBitmap|<canvas|getContext\(|toDataURL|FileReader|readAsDataURL/.test(text), `${name} 不得预加载图片、使用 canvas 读取像素或转 dataURL`)
+  assert(!/<picture\b|<source\b|srcSet|loading=["']lazy/.test(text), `${name} 不得做缩略图 / 响应式图片列表`)
+}
+// 只有查看弹框可以有 <img>，且 src 只能是 state 里的 objectURL，不是后端地址
+assert((files.viewer.match(/<img\b/g) ?? []).length === 1, '查看弹框只有一处 <img>')
+assert(/<img[^>]*\bsrc=\{state\.url\}/.test(files.viewer), '<img> 的 src 必须是 state 里的 objectURL')
+assert(!/src=["']/.test(files.viewer) && !/\/api\//.test(files.viewer + files.imageLogic) && !/https?:/.test(files.viewer + files.imageLogic), '图片地址不能写成后端地址或外链')
+assert(!/\.(src|href)\s*=/.test(files.viewer), '不得用命令式方式设置图片地址')
+// 生命周期：objectURL 只由登记表创建，关闭 / 切换 / 卸载都要撤销并清空
+assert(!files.viewer.includes('createObjectURL') && !files.viewer.includes('revokeObjectURL'), '弹框不直接操作 objectURL，统一走会话 / 登记表')
+assert(files.imageLogic.includes('URL.createObjectURL(blob)') && files.imageLogic.includes('URL.revokeObjectURL(url)'), '登记表封装 objectURL 的创建与撤销')
+assert((files.imageLogic.match(/URL\.createObjectURL/g) ?? []).length === 1, 'objectURL 只在登记表里创建')
+assert(
+  /useEffect\(\(\) => \{[\s\S]*createImageSession\([\s\S]*void session\.start\(\)[\s\S]*return \(\) => session\.dispose\(\)[\s\S]*\}, \[cameraId, capture\]\)/.test(files.viewer),
+  '弹框卸载 / 切换抓拍时 effect 清理函数必须 dispose 会话',
+)
+assert(files.imageLogic.includes('registry.dispose()') && files.imageLogic.includes('controller.abort()') && files.imageLogic.includes('states = new Map()'), 'dispose 要撤销 URL、中止请求并清空状态')
+assert(files.imageLogic.includes('return null') && files.imageLogic.includes('if (disposed) return null'), '登记表 dispose 后拒绝再登记（晚到的响应不泄漏 URL）')
+// 状态里只放 URL 字符串，不放 Blob
+assert(!/useState<[^>]*Blob/.test(files.viewer), '弹框 state 里不保存 Blob')
+// 敏感提示与审计提醒
+assert(files.viewer.includes('faceCameras.images.sensitiveNotice') && /<Alert\s+type="warning"/.test(files.viewer), '弹框顶部必须有醒目的敏感信息提示')
+// 失败文案：按错误码分类，不把响应体原样展示
+assert(files.viewer.includes('FACE_IMAGE_ERROR_MESSAGE_KEYS['), '失败文案按错误码分类映射')
+assert(!/error\.(message|payload)/.test(files.viewer + files.drawer), '页面不直接展示错误对象里的内容')
 
 console.log('FaceCameras sourceContract.test: ok')

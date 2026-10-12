@@ -40,6 +40,8 @@
     <Compile Include="FaceCameraAdminTests.cs" />
     <Compile Include="FaceCameraPipelineTests.cs" />
     <Compile Include="FaceCameraAdminSqlServerTests.cs" />
+    <Compile Include="FaceCaptureImageTests.cs" />
+    <Compile Include="FaceImageStoreTests.cs" />
     <Compile Include="NotificationHubTests.cs" />
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />

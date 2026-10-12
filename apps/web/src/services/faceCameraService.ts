@@ -5,11 +5,14 @@ import type {
   FaceCameraList,
   FaceCameraSecretResult,
   FaceCapture,
+  FaceCaptureImageKind,
+  FaceCaptureImageMeta,
+  FaceCaptureImageRect,
   FaceCapturePage,
   FaceCaptureParseStatus,
   UpdateFaceCameraRequest,
 } from '../types/faceCamera'
-import request, { unwrapApiData } from '../utils/request'
+import request, { RequestError, unwrapApiData } from '../utils/request'
 
 // 门店人脸抓拍摄像机管理接口。返回 ApiResponse 信封，字段 camelCase；权限 FaceCapture.Cameras.Manage。
 const API_BASE = '/api/react/v1/face-cameras'
@@ -22,6 +25,7 @@ const API_BASE = '/api/react/v1/face-cameras'
  * 3. 本文件禁止出现 console.*，由 sourceContract 测试静态守住。
  */
 const NO_STORE = { cache: 'no-store' } as const
+const API_BASE_URL = (((import.meta as ImportMeta & { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL) || '').trim()
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
@@ -89,7 +93,40 @@ export function normalizeFaceCameraSecretResult(value: unknown): FaceCameraSecre
   return { camera: normalizeFaceCamera(raw.camera), token, cameraUrl }
 }
 
-export function normalizeFaceCapture(value: unknown): FaceCapture {
+function asNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function asImageKind(value: unknown): FaceCaptureImageKind {
+  return value === 0 || value === 1 ? value : 2
+}
+
+function normalizeImageRect(value: unknown): FaceCaptureImageRect | null {
+  const raw = asRecord(value)
+  const x = asNullableNumber(raw.x)
+  const y = asNullableNumber(raw.y)
+  const w = asNullableNumber(raw.w)
+  const h = asNullableNumber(raw.h)
+  return x === null || y === null || w === null || h === null ? null : { x, y, w, h }
+}
+
+export function normalizeFaceCaptureImage(value: unknown): FaceCaptureImageMeta {
+  const raw = asRecord(value)
+  return {
+    imageId: asString(raw.imageId),
+    kind: asImageKind(raw.kind),
+    storage: asString(raw.storage).trim().toLowerCase(),
+    width: asNullableNumber(raw.width),
+    height: asNullableNumber(raw.height),
+    byteSize: asCount(raw.byteSize),
+    faceIndex: asNullableNumber(raw.faceIndex),
+    rect: normalizeImageRect(raw.rect),
+    rectNormalized: typeof raw.rectNormalized === 'boolean' ? raw.rectNormalized : null,
+    faceScore: asNullableNumber(raw.faceScore),
+  }
+}
+
+export function normalizeFaceCapture(value: unknown, canViewImages = false): FaceCapture {
   const raw = asRecord(value)
   return {
     captureId: String(raw.captureId ?? ''),
@@ -100,16 +137,23 @@ export function normalizeFaceCapture(value: unknown): FaceCapture {
     parseStatus: asParseStatus(raw.parseStatus),
     parseNote: asNullableString(raw.parseNote),
     isDuplicate: raw.isDuplicate === true,
+    // 没有查看权限时即使响应里带了 images 也丢弃（后端本就返回空数组，这里再保险一层）。
+    images:
+      canViewImages && Array.isArray(raw.images)
+        ? raw.images.map(normalizeFaceCaptureImage).filter((image) => image.imageId)
+        : [],
   }
 }
 
 export function normalizeFaceCapturePage(value: unknown): FaceCapturePage {
   const raw = asRecord(value)
+  const canViewImages = raw.canViewImages === true
   return {
-    items: Array.isArray(raw.items) ? raw.items.map(normalizeFaceCapture) : [],
+    items: Array.isArray(raw.items) ? raw.items.map((item) => normalizeFaceCapture(item, canViewImages)) : [],
     page: asCount(raw.page) || 1,
     pageSize: asCount(raw.pageSize) || 20,
     hasMore: raw.hasMore === true,
+    canViewImages,
   }
 }
 
@@ -153,4 +197,42 @@ export async function getFaceCameraCaptures(
     ...NO_STORE,
   })
   return normalizeFaceCapturePage(unwrapApiData(response))
+}
+
+// 路径里的编号：摄像机编号为小写字母数字横线，抓拍 / 图片编号为 1~32 位字母数字。
+// 发请求前先校验，避免 ".." 之类被浏览器当成路径穿越而指向别的接口（编号来自服务端数据，这是第二道防线）。
+const IMAGE_PATH_CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,63}$/
+const IMAGE_PATH_ID = /^[A-Za-z0-9]{1,32}$/
+const IMAGE_CONTENT_TYPES = ['image/jpeg', 'image/png']
+
+/**
+ * 按需读取一张抓拍图片（敏感生物识别信息）。
+ * 1. 请求层 request 只解析 JSON / 文本，会把二进制弄坏，所以这里单独用 fetch（带登录 Cookie），其余约定一致：no-store；
+ * 2. 成功时只认 image/jpeg、image/png，返回 Blob 由调用方转 objectURL 显示；响应体绝不写入缓存、存储、日志；
+ * 3. 失败时抛 RequestError（status + 统一信封 payload），由 imageLogic.classifyFaceImageError 按错误码分类，不读取其他内容。
+ */
+export async function fetchFaceCaptureImage(
+  cameraId: string,
+  captureId: string,
+  imageId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  if (!IMAGE_PATH_CAMERA_ID.test(cameraId) || !IMAGE_PATH_ID.test(captureId) || !IMAGE_PATH_ID.test(imageId)) {
+    throw new RequestError('FACE_IMAGE_NOT_FOUND', 404, { success: false, errorCode: 'FACE_IMAGE_NOT_FOUND' })
+  }
+  const url = `${API_BASE_URL}${cameraPath(cameraId)}/captures/${captureId}/images/${imageId}/content`.replace(/([^:]\/)\/+/g, '$1')
+  const response = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: IMAGE_CONTENT_TYPES.join(', ') },
+    signal,
+    ...NO_STORE,
+  })
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  if (response.ok && IMAGE_CONTENT_TYPES.some((type) => contentType.startsWith(type))) {
+    return await response.blob()
+  }
+  const payload: unknown = contentType.includes('json') ? await response.json().catch(() => null) : null
+  const message = asString(asRecord(payload).message) || `请求失败 (${response.status})`
+  throw new RequestError(message, response.ok ? 502 : response.status, payload)
 }
