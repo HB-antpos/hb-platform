@@ -1039,6 +1039,25 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.FaceCameras.IFaceCameraAdminService,
     BlazorApp.Api.Features.FaceCameras.FaceCameraAdminService
 >();
+// 人脸抓拍图片查看：专用私有桶（FaceCapture:Cos），服务端用凭据向 COS 取字节后转发，不向浏览器暴露 COS 地址。
+// 未配置桶 / 区域是合法状态（接口返回 503）；密钥缺省时回退 TencentCloud:SecretId/SecretKey，桶与区域绝不回退主桶。
+builder.Services.Configure<BlazorApp.Api.Features.FaceCameras.FaceCaptureCosOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.FaceCameras.FaceCaptureCosOptions.SectionName)
+);
+// 读取总时限 15 秒；不跟随重定向（读取只面向固定的 *.myqcloud.com 域名，任何跳转都视为异常）。
+builder.Services.AddHttpClient(
+        BlazorApp.Api.Features.FaceCameras.CosFaceImageStore.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(15)
+    )
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.FaceCameras.IFaceImageStore,
+    BlazorApp.Api.Features.FaceCameras.CosFaceImageStore
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceCameras.IFaceCaptureImageService,
+    BlazorApp.Api.Features.FaceCameras.FaceCaptureImageService
+>();
 builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService

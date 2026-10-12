@@ -198,6 +198,8 @@ export const P = {
   // 门店人脸抓拍摄像机管理（系统菜单「人脸抓拍摄像机」）：独立顶层权限码，与后端 Permissions.FaceCapture.Cameras.Manage 一致。
   FaceCapture: {
     CamerasManage: 'FaceCapture.Cameras.Manage',
+    // 查看抓拍图片（敏感生物识别信息）：与管理摄像机分开授予；页面是否显示「查看图片」以后端返回的 canViewImages 为准。
+    ImagesView: 'FaceCapture.Images.View',
   },
   Dashboard: {
     View: 'Dashboard',

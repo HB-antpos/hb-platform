@@ -30,30 +30,35 @@ export const CAPTURE_MAX_PAGE = 100
 
 // ───────────── 状态判定 ─────────────
 
-export type CameraStatus = 'disabled' | 'online' | 'offline'
+/**
+ * 摄像机的「推送状态」。注意不是在线 / 离线：海康摄像机在推送模式下只有检测到人脸才推送，
+ * 没人经过镜头时什么都不发、也没有心跳，所以「暂无推送」不等于断电或断网，文案和命名都不能写成「离线」。
+ * 后端字段仍叫 online（契约不改名），只在前端展示层换成不会误导的说法。
+ */
+export type CameraStatus = 'disabled' | 'recentlyActive' | 'noRecentPush'
 
-/** 停用优先于在线：已停用的摄像机即使仍有推送也显示「已停用」；其余按服务端算好的 online 判定。 */
+/** 停用优先于推送状态：已停用的摄像机即使仍有推送也显示「已停用」；其余按服务端算好的 online 判定。 */
 export function getCameraStatus(camera: Pick<FaceCamera, 'enabled' | 'online'>): CameraStatus {
   if (!camera.enabled) return 'disabled'
-  return camera.online ? 'online' : 'offline'
+  return camera.online ? 'recentlyActive' : 'noRecentPush'
 }
 
-/** antd Tag 颜色：在线绿、离线橙（需要关注）、停用灰。 */
+/** antd Tag 颜色：近期有推送绿、暂无推送灰（不是故障，不用警示色）、停用灰。 */
 export const CAMERA_STATUS_COLORS: Record<CameraStatus, string> = {
-  online: 'green',
-  offline: 'orange',
+  recentlyActive: 'green',
+  noRecentPush: 'default',
   disabled: 'default',
 }
 
 export interface CameraStatusCounts {
   total: number
-  online: number
-  offline: number
+  recentlyActive: number
+  noRecentPush: number
   disabled: number
 }
 
 export function countCameraStatuses(cameras: ReadonlyArray<Pick<FaceCamera, 'enabled' | 'online'>>): CameraStatusCounts {
-  const counts: CameraStatusCounts = { total: cameras.length, online: 0, offline: 0, disabled: 0 }
+  const counts: CameraStatusCounts = { total: cameras.length, recentlyActive: 0, noRecentPush: 0, disabled: 0 }
   for (const camera of cameras) counts[getCameraStatus(camera)] += 1
   return counts
 }

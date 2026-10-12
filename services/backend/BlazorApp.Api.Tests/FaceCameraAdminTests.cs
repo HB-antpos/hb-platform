@@ -606,15 +606,30 @@ public sealed class FaceCameraAdminTests : IDisposable
     }
 
     [Fact]
-    public void Captures_响应契约不含任何图片或对象存储字段()
+    public void Captures_响应契约不含对象键_地址_哈希_原始报文字段()
     {
-        var forbidden = new[] { "image", "object", "url", "storage", "key", "path", "sha", "body", "raw", "base64" };
+        // 图片元数据（FaceCaptureImageMetaDto，仅限有权限者）可以有 images / storage，但任何契约和后台实体映射里
+        // 都不能有对象键、地址、哈希、原始报文：图片字节只经专用内容接口转发。图片字段的细节契约见 FaceCaptureImageListTests。
+        var forbidden = new[] { "object", "url", "key", "path", "sha", "body", "raw", "base64", "bucket", "cos" };
         var names = typeof(FaceCaptureItemDto).GetProperties().Select(property => property.Name)
             .Concat(typeof(FaceCapturePageDto).GetProperties().Select(property => property.Name))
+            .Concat(typeof(FaceCaptureImageMetaDto).GetProperties().Select(property => property.Name))
             .Concat(typeof(FaceCaptureEvent).GetProperties().Select(property => property.Name))
             .ToList();
 
         Assert.All(names, name => Assert.DoesNotContain(forbidden, word => name.Contains(word, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public async Task Captures_默认不带图片元数据_canViewImages为false()
+    {
+        await SeedCameraAsync("cam-1");
+        await SeedEventAsync("e01", "cam-1", Now.AddMinutes(-1), faceCount: 1, parseStatus: 0);
+
+        var page = await CreateService().ListCapturesAsync("cam-1", 1, 20);
+
+        Assert.False(page.CanViewImages);
+        Assert.Empty(page.Items.Single().Images);
     }
 
     [Fact]

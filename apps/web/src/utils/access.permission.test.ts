@@ -385,6 +385,18 @@ for (const [permission, expectedPath] of backendNavigationEntryCases) {
   )
 }
 
+// 查看抓拍图片（敏感生物识别信息）与管理摄像机分开授予：单独拥有它既不能进入摄像机管理页，也不会解锁后台壳；
+// 管理摄像机权限同样不会自动获得它（页面是否显示「查看图片」以后端返回的 canViewImages 为准）。
+const faceImagesOnlyAccess = buildAccess(createCurrentUser({ permissions: [P.FaceCapture.ImagesView] }))
+assertEqual(P.FaceCapture.ImagesView, 'FaceCapture.Images.View', '前端权限码需与后端 Permissions.FaceCapture.Images.View 一致')
+assertEqual(faceImagesOnlyAccess.canManageFaceCameras, false, '单独的查看抓拍图片权限不能管理摄像机')
+assertEqual(faceImagesOnlyAccess.canAccessAdminShell, false, '单独的查看抓拍图片权限不应解锁后台壳')
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.FaceCapture.CamerasManage] })).hasPermission(P.FaceCapture.ImagesView),
+  false,
+  '管理摄像机权限不应自动包含查看抓拍图片',
+)
+
 assertEqual(
   productMovementReportOnlyAccess.canViewReports,
   false,

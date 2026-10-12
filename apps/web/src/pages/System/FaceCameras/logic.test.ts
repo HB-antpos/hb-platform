@@ -36,13 +36,13 @@ import {
 const FAKE_TOKEN = '0'.repeat(48)
 const FAKE_URL = `https://example.invalid/face-ingest/hik/v1/${FAKE_TOKEN}`
 
-// ───────── 状态判定：停用优先，其次在线，否则离线 ─────────
-assert.equal(getCameraStatus({ enabled: false, online: true }), 'disabled', '停用优先于在线')
+// ───────── 状态判定：停用优先，其次近期有推送，否则暂无推送（不是「离线」）─────────
+assert.equal(getCameraStatus({ enabled: false, online: true }), 'disabled', '停用优先于推送状态')
 assert.equal(getCameraStatus({ enabled: false, online: false }), 'disabled')
-assert.equal(getCameraStatus({ enabled: true, online: true }), 'online')
-assert.equal(getCameraStatus({ enabled: true, online: false }), 'offline')
-assert.equal(CAMERA_STATUS_COLORS.online, 'green')
-assert.equal(CAMERA_STATUS_COLORS.offline, 'orange')
+assert.equal(getCameraStatus({ enabled: true, online: true }), 'recentlyActive')
+assert.equal(getCameraStatus({ enabled: true, online: false }), 'noRecentPush')
+assert.equal(CAMERA_STATUS_COLORS.recentlyActive, 'green')
+assert.equal(CAMERA_STATUS_COLORS.noRecentPush, 'default', '暂无推送不是故障，不用橙色警示')
 assert.equal(CAMERA_STATUS_COLORS.disabled, 'default')
 assert.deepEqual(
   countCameraStatuses([
@@ -51,7 +51,7 @@ assert.deepEqual(
     { enabled: false, online: true },
     { enabled: false, online: false },
   ]),
-  { total: 4, online: 1, offline: 1, disabled: 2 },
+  { total: 4, recentlyActive: 1, noRecentPush: 1, disabled: 2 },
 )
 assert.equal(hasParseFailures({ parseFailureCount24h: 0 }), false)
 assert.equal(hasParseFailures({ parseFailureCount24h: 3 }), true)

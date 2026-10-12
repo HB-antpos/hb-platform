@@ -1,11 +1,11 @@
 {
   "faceCameras": {
     "title": "人脸抓拍摄像机",
-    "subtitle": "共 {{total}} 台 · 在线 {{online}} · 离线 {{offline}} · 已停用 {{disabled}}",
+    "subtitle": "共 {{total}} 台 · 近期有推送 {{active}} · 暂无推送 {{quiet}} · 已停用 {{disabled}}",
     "empty": "还没有登记摄像机，点击右上角「新增摄像机」开始",
     "notice": {
       "effect": "摄像机的新增、修改、启停和 token 轮换，最多 30 秒后在人脸接收服务生效。",
-      "definition": "在线判定：已启用，且最近 {{minutes}} 分钟内有推送；抓拍数、人脸数和解析失败数均为近 {{hours}} 小时统计。"
+      "pushStatus": "推送状态：已启用，且最近 {{minutes}} 分钟内有推送为「近期有推送」。摄像机只有检测到人脸时才推送，没有人经过镜头时不会推送，所以「暂无推送」不代表断电或断网。抓拍数、人脸数和解析失败数均为近 {{hours}} 小时统计。"
     },
     "actions": {
       "add": "新增摄像机",
@@ -29,8 +29,9 @@
       "actions": "操作"
     },
     "status": {
-      "online": "在线",
-      "offline": "离线",
+      "recentlyActive": "近期有推送",
+      "noRecentPush": "暂无推送",
+      "noRecentPushTip": "摄像机只有检测到人脸时才推送，没有人经过镜头时不会推送，所以「暂无推送」不代表断电或断网。",
       "disabled": "已停用"
     },
     "confirmDisable": {
@@ -93,7 +94,8 @@
     },
     "captures": {
       "title": "最近抓拍 · {{cameraId}}",
-      "metadataOnly": "这里只显示推送报文的元数据，不含图片。",
+      "metadataOnly": "这里只显示推送报文的元数据，不含图片；查看抓拍图片需要单独的「查看人脸抓拍图片」权限。",
+      "imagesOnDemand": "表格只显示推送报文的元数据；图片是敏感的生物识别信息，只在点击「查看图片」后按需读取，每次查看都会被记录。",
       "receivedAt": "接收时间",
       "eventTime": "摄像机事件时间",
       "eventType": "事件类型",
@@ -111,7 +113,30 @@
       "loadFailed": "抓拍记录加载失败",
       "prev": "上一页",
       "next": "下一页",
-      "pageLabel": "第 {{page}} 页"
+      "pageLabel": "第 {{page}} 页",
+      "images": "图片"
+    },
+    "images": {
+      "view": "查看图片",
+      "local": "图片在本地",
+      "localTip": "图片仍在接收服务本地，暂不可在后台查看",
+      "loading": "正在读取…",
+      "title": "抓拍图片 · {{captureId}}",
+      "sensitiveNotice": "这是敏感的生物识别信息。查看会被记录，请勿截图外传。",
+      "background": "背景图",
+      "faces": "人脸图",
+      "others": "其他图片",
+      "faceTitle": "人脸 {{index}}",
+      "score": "评分 {{score}}",
+      "close": "关闭",
+      "errors": {
+        "notConfigured": "图片读取尚未配置",
+        "local": "图片仍在接收服务本地，暂不可在后台查看",
+        "forbidden": "没有权限查看人脸抓拍图片",
+        "unauthorized": "登录已过期，请刷新页面后重新登录",
+        "missing": "图片不存在或已被清理",
+        "failed": "图片读取失败，请稍后重试"
+      }
     },
     "errors": {
       "generic": "操作失败，请稍后重试",

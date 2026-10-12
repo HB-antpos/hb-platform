@@ -281,6 +281,10 @@
       "name": "Manage face capture cameras",
       "description": "Add, edit and disable face capture cameras, regenerate camera tokens and view recent capture metadata (no images) on the web admin page /system/face-cameras."
     },
+    "FaceCapture.Images.View": {
+      "name": "View face capture images",
+      "description": "View the face and background images of face captures in the recent captures drawer on the web admin page /system/face-cameras. Images are sensitive biometric information and every view is logged. Granted separately from managing the cameras; the page itself also needs the manage permission."
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",
       "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."
