@@ -5431,13 +5431,15 @@ assertEqual(
 )
 assertEqual(
   pageSource.includes("containers.actions.resetColumns") &&
-    pageSource.includes('const isColumnSettingsCustomized = isColumnOrderCustomized || isColumnWidthCustomized') &&
+    pageSource.includes('const isColumnSettingsCustomized = isColumnOrderCustomized || isColumnWidthCustomized || isColumnVisibilityCustomized') &&
     pageSource.includes('setColumnOrder(draggableColumnKeys)') &&
     pageSource.includes('setColumnWidths({})') &&
     pageSource.includes('localStorage.removeItem(CONTAINER_DETAIL_COLUMN_ORDER_STORAGE_KEY)') &&
-    pageSource.includes('localStorage.removeItem(CONTAINER_DETAIL_COLUMN_WIDTH_STORAGE_KEY)'),
+    pageSource.includes('localStorage.removeItem(CONTAINER_DETAIL_COLUMN_WIDTH_STORAGE_KEY)') &&
+    pageSource.includes('setHiddenColumnKeys([])') &&
+    pageSource.includes('localStorage.removeItem(CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY)'),
   true,
-  '货柜明细手动拖拽列或列宽后应提供重置列按钮并清除本地列设置',
+  '货柜明细手动拖拽列、调整列宽或隐藏列后应提供重置列按钮并清除本地列设置',
 )
 assertEqual(
   pageSource.includes('const draggableColumnKeys = sortContainerDetailColumnKeysByDefaultOrder(\n    baseColumns.map((column) => String(column.key) as ContainerDetailTableColumnKey),\n  )') &&

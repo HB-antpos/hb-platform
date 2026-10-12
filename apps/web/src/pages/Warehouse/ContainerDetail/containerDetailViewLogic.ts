@@ -164,6 +164,51 @@ export function normalizeContainerDetailColumnView(value: unknown): ContainerDet
     : DEFAULT_CONTAINER_DETAIL_COLUMN_VIEW
 }
 
+// ---------------------------------------------------------------------------
+// 列显示设置：在列视图挑出的列之上，再让用户逐列隐藏；隐藏按列 key 记录，对所有视图生效
+// ---------------------------------------------------------------------------
+
+export const CONTAINER_DETAIL_HIDDEN_COLUMNS_STORAGE_KEY = 'hbweb_rv.containerDetail.hiddenColumns.v1'
+
+/** 读取本地保存的隐藏列：只保留已知列 key，去重并按默认列顺序排列，其余内容一律忽略。 */
+export function normalizeContainerDetailHiddenColumnKeys(value: unknown): ContainerDetailTableColumnKey[] {
+  if (!Array.isArray(value)) return []
+  const hidden = new Set<unknown>(value)
+  return CONTAINER_DETAIL_DEFAULT_COLUMN_ORDER.filter((key) => hidden.has(key))
+}
+
+/**
+ * 从视图列里去掉隐藏列。至少保留一列：隐藏会让视图一列不剩时（例如从别的视图带来的隐藏列正好覆盖本视图所有列）
+ * 忽略隐藏设置，避免出现没有任何业务列的空表。
+ */
+export function applyContainerDetailHiddenColumns(
+  viewKeys: readonly ContainerDetailTableColumnKey[],
+  hiddenKeys: readonly ContainerDetailTableColumnKey[],
+): ContainerDetailTableColumnKey[] {
+  if (!hiddenKeys.length) return [...viewKeys]
+  const hidden = new Set(hiddenKeys)
+  const visible = viewKeys.filter((key) => !hidden.has(key))
+  return visible.length ? visible : [...viewKeys]
+}
+
+/**
+ * 切换某一列的显示状态。要隐藏的是当前视图里最后一个可见列时不处理（返回原数组），保证表格至少有一列。
+ */
+export function setContainerDetailColumnVisible(
+  hiddenKeys: readonly ContainerDetailTableColumnKey[],
+  viewKeys: readonly ContainerDetailTableColumnKey[],
+  key: ContainerDetailTableColumnKey,
+  visible: boolean,
+): ContainerDetailTableColumnKey[] {
+  const isHidden = hiddenKeys.includes(key)
+  if (visible) {
+    return isHidden ? hiddenKeys.filter((hiddenKey) => hiddenKey !== key) : [...hiddenKeys]
+  }
+  if (isHidden) return [...hiddenKeys]
+  if (applyContainerDetailHiddenColumns(viewKeys, [...hiddenKeys, key]).includes(key)) return [...hiddenKeys]
+  return normalizeContainerDetailHiddenColumnKeys([...hiddenKeys, key])
+}
+
 /**
  * 按视图从「当前列顺序」里挑出可见列。
  * - 全部列：原列顺序原样保留，只去掉视图专用的合成列
