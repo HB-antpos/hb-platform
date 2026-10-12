@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
@@ -425,6 +426,155 @@ public sealed class SyncOrchestratorTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Audit_list_write_back_failure_is_reported_as_audit_error_without_failing_refresh(
+        bool failInCollectionChanged)
+    {
+        var pending = CreateItem("Pending");
+        var notified = new List<string>();
+        var orchestrator = new SyncOrchestrator(
+            new StaticSyncCenterService(new ShellSyncCenterSnapshot(
+                new SyncQueueOverview(1, 0, 0, null),
+                [pending])),
+            NoopOrderUploadExecutionService.Instance,
+            new LocalizationService(),
+            notifyPropertyChanged: name =>
+            {
+                notified.Add(name);
+                // 模拟 MainViewModel.PropertyChanged 的某个订阅方在审计列表通知时抛错。
+                if (!failInCollectionChanged && name == nameof(SyncOrchestrator.SyncCenterAuditLogs))
+                {
+                    throw new InvalidOperationException("audit subscriber failed");
+                }
+            });
+        if (failInCollectionChanged)
+        {
+            // 模拟审计列表 CollectionChanged 的订阅方抛错。
+            orchestrator.SyncCenterAuditLogs.CollectionChanged += (_, _) =>
+                throw new InvalidOperationException("audit subscriber failed");
+        }
+
+        // 写回界面阶段的异常与读取失败一样只落到审计错误文案，不能让整个同步中心刷新失败：
+        // 收款完成后续步骤、自动重试、手动重试都依赖这次刷新正常结束。
+        await orchestrator.RefreshPendingSyncAsync();
+
+        Assert.Same(pending, Assert.Single(orchestrator.SyncCenterOrders));
+        Assert.Equal(1, orchestrator.PendingUploadCount);
+        Assert.StartsWith("Audit log refresh failed:", orchestrator.LastAuditSyncErrorText, StringComparison.Ordinal);
+        Assert.Contains("audit subscriber failed", orchestrator.LastAuditSyncErrorText, StringComparison.Ordinal);
+        Assert.Equal(nameof(SyncOrchestrator.LastAuditSyncErrorText), notified[^1]);
+    }
+
+    [Fact]
+    public async Task Refresh_reads_local_queues_off_the_caller_context_and_applies_results_on_it()
+    {
+        var order = CreateItem("Pending");
+        var settlement = CreateSettlementItem(LocalLinklySettlementUploadStatus.Pending);
+        var syncCenter = new ThreadRecordingSyncCenterService(new ShellSyncCenterSnapshot(
+            new SyncQueueOverview(1, 0, 0, null),
+            [order]));
+        var settlementReader = new StaticSettlementQueueReader(
+            new LinklySettlementUploadOverview(1, 0, 0, null),
+            [settlement]);
+        var callbackThreadIds = new List<int>();
+        var orchestrator = new SyncOrchestrator(
+            syncCenter,
+            NoopOrderUploadExecutionService.Instance,
+            new LocalizationService(),
+            onPendingSyncCountChanged: _ => callbackThreadIds.Add(Environment.CurrentManagedThreadId),
+            notifyPropertyChanged: _ => callbackThreadIds.Add(Environment.CurrentManagedThreadId),
+            linklySettlementUploadQueueReader: settlementReader);
+
+        var uiThreadId = await SingleThreadSynchronizationContextTestSupport.RunAsync(
+            () => orchestrator.RefreshPendingSyncAsync());
+
+        // 15 秒定时刷新从 Dispatcher 进来：订单快照与结算队列这类本地读取不能在 UI 线程（及其同步上下文）上执行。
+        var snapshotRead = Assert.Single(syncCenter.Calls);
+        Assert.NotEqual(uiThreadId, snapshotRead.ThreadId);
+        Assert.False(snapshotRead.OnUiContext);
+        Assert.NotEmpty(settlementReader.Calls);
+        Assert.All(settlementReader.Calls, call =>
+        {
+            Assert.NotEqual(uiThreadId, call.ThreadId);
+            Assert.False(call.OnUiContext);
+        });
+
+        // 读取结果仍回到调用方线程写回绑定属性与回调。
+        Assert.NotEmpty(callbackThreadIds);
+        Assert.All(callbackThreadIds, threadId => Assert.Equal(uiThreadId, threadId));
+        Assert.Same(order, orchestrator.SyncCenterOrders[0]);
+        Assert.Equal(2, orchestrator.SyncCenterOrders.Count);
+        Assert.Equal(2, orchestrator.PendingUploadCount);
+    }
+
+    [Fact]
+    public async Task Auto_retry_runs_uploads_off_the_caller_context_and_keeps_state_updates_on_it()
+    {
+        var orderExecutor = new CapturingOrderExecutor(new OrderUploadExecutionResult(1, 1, 0));
+        var settlementExecutor = new CapturingSettlementExecutor(
+            new LinklySettlementUploadExecutionResult(1, 1, 0, 0, false));
+        var callbackThreadIds = new List<int>();
+        var orchestrator = new SyncOrchestrator(
+            new StaticSyncCenterService(new ShellSyncCenterSnapshot(
+                new SyncQueueOverview(1, 0, 0, null),
+                [CreateItem("Pending")])),
+            orderExecutor,
+            new LocalizationService(),
+            onPendingSyncCountChanged: _ => callbackThreadIds.Add(Environment.CurrentManagedThreadId),
+            notifyPropertyChanged: _ => callbackThreadIds.Add(Environment.CurrentManagedThreadId),
+            linklySettlementUploadQueueReader: new StaticSettlementQueueReader(
+                new LinklySettlementUploadOverview(1, 0, 0, null),
+                [CreateSettlementItem(LocalLinklySettlementUploadStatus.Pending)]),
+            linklySettlementUploadExecutionService: settlementExecutor);
+        orchestrator.RetryAllSyncOrdersCommand.CanExecuteChanged +=
+            (_, _) => callbackThreadIds.Add(Environment.CurrentManagedThreadId);
+
+        var uiThreadId = await SingleThreadSynchronizationContextTestSupport.RunAsync(
+            () => orchestrator.TryAutoRetryPendingAsync(CancellationToken.None));
+
+        // 自动重试的上传执行（读待传队列、HTTP、回写上传状态）整体不在 UI 线程上跑。
+        var orderUpload = Assert.Single(orderExecutor.PendingCalls);
+        Assert.NotEqual(uiThreadId, orderUpload.ThreadId);
+        Assert.False(orderUpload.OnUiContext);
+        var settlementUpload = Assert.Single(settlementExecutor.PendingCalls);
+        Assert.NotEqual(uiThreadId, settlementUpload.ThreadId);
+        Assert.False(settlementUpload.OnUiContext);
+
+        // 命令可执行状态、绑定属性通知仍全部在调用方线程。
+        Assert.NotEmpty(callbackThreadIds);
+        Assert.All(callbackThreadIds, threadId => Assert.Equal(uiThreadId, threadId));
+    }
+
+    [Fact]
+    public async Task Earlier_refresh_returning_last_does_not_overwrite_newer_sync_center_snapshot()
+    {
+        var staleItem = CreateItem("Failed");
+        var freshItem = CreateItem("Pending");
+        var syncCenter = new FirstCallGatedSyncCenterService(
+            new ShellSyncCenterSnapshot(new SyncQueueOverview(0, 1, 0, "stale error"), [staleItem]),
+            new ShellSyncCenterSnapshot(new SyncQueueOverview(1, 0, 0, null), [freshItem]));
+        var orchestrator = new SyncOrchestrator(
+            syncCenter,
+            NoopOrderUploadExecutionService.Instance,
+            new LocalizationService());
+
+        // 先发起的刷新卡在读取上（例如 SQLite 等锁），随后发起的刷新先完成并写回界面。
+        var earlierRefresh = orchestrator.RefreshPendingSyncAsync();
+        await WaitUntilAsync(() => syncCenter.CallCount == 1);
+        await orchestrator.RefreshPendingSyncAsync();
+        Assert.Same(freshItem, Assert.Single(orchestrator.SyncCenterOrders));
+
+        syncCenter.ReleaseFirstCall();
+        await earlierRefresh.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+
+        // 读取挪到线程池后会出现乱序返回：旧读取不能把较新的快照盖回去。
+        Assert.Same(freshItem, Assert.Single(orchestrator.SyncCenterOrders));
+        Assert.Equal(1, orchestrator.PendingUploadCount);
+        Assert.Equal(0, orchestrator.FailedUploadCount);
+    }
+
     private static SyncQueueListItem CreateItem(string status) => new(
         Guid.NewGuid(),
         "Order",
@@ -491,19 +641,69 @@ public sealed class SyncOrchestratorTests
         }
     }
 
+    // 记录仓储/执行服务被调用时所在的线程，以及是否处在测试用"UI"同步上下文里。
+    private sealed record ThreadObservation(int ThreadId, bool OnUiContext)
+    {
+        public static ThreadObservation Capture() => new(
+            Environment.CurrentManagedThreadId,
+            SingleThreadSynchronizationContextTestSupport.IsOnUiContext);
+    }
+
+    private sealed class ThreadRecordingSyncCenterService(ShellSyncCenterSnapshot snapshot) : IShellSyncCenterService
+    {
+        private readonly ConcurrentQueue<ThreadObservation> _calls = new();
+
+        public IReadOnlyCollection<ThreadObservation> Calls => _calls.ToArray();
+
+        public Task<ShellSyncCenterSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+        {
+            _calls.Enqueue(ThreadObservation.Capture());
+            return Task.FromResult(snapshot);
+        }
+    }
+
+    // 第一次读取挂起到测试放行为止，其后的读取立即返回，用来制造"先发起、后返回"的乱序刷新。
+    private sealed class FirstCallGatedSyncCenterService(
+        ShellSyncCenterSnapshot firstSnapshot,
+        ShellSyncCenterSnapshot laterSnapshot) : IShellSyncCenterService
+    {
+        private readonly TaskCompletionSource<ShellSyncCenterSnapshot> _firstCall =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public Task<ShellSyncCenterSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+        {
+            return Interlocked.Increment(ref _callCount) == 1
+                ? _firstCall.Task
+                : Task.FromResult(laterSnapshot);
+        }
+
+        public void ReleaseFirstCall() => _firstCall.TrySetResult(firstSnapshot);
+    }
+
     private sealed class StaticSettlementQueueReader(
         LinklySettlementUploadOverview overview,
         IReadOnlyList<LinklySettlementUploadQueueItem> items) : ILinklySettlementUploadQueueReader
     {
+        private readonly ConcurrentQueue<ThreadObservation> _calls = new();
+
         public List<int> RequestedTakes { get; } = [];
 
-        public Task<LinklySettlementUploadOverview> GetOverviewAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(overview);
+        public IReadOnlyCollection<ThreadObservation> Calls => _calls.ToArray();
+
+        public Task<LinklySettlementUploadOverview> GetOverviewAsync(CancellationToken cancellationToken = default)
+        {
+            _calls.Enqueue(ThreadObservation.Capture());
+            return Task.FromResult(overview);
+        }
 
         public Task<IReadOnlyList<LinklySettlementUploadQueueItem>> GetActiveItemsAsync(
             int take = 20,
             CancellationToken cancellationToken = default)
         {
+            _calls.Enqueue(ThreadObservation.Capture());
             RequestedTakes.Add(take);
             return Task.FromResult<IReadOnlyList<LinklySettlementUploadQueueItem>>(items.Take(take).ToArray());
         }
@@ -526,7 +726,11 @@ public sealed class SyncOrchestratorTests
 
         public IReadOnlyList<Guid> SelectedIds { get; private set; } = [];
 
-        public int PendingCallCount { get; private set; }
+        private readonly ConcurrentQueue<ThreadObservation> _pendingCalls = new();
+
+        public int PendingCallCount => _pendingCalls.Count;
+
+        public IReadOnlyCollection<ThreadObservation> PendingCalls => _pendingCalls.ToArray();
 
         public int SelectedCallCount { get; private set; }
 
@@ -538,7 +742,7 @@ public sealed class SyncOrchestratorTests
 
         public Task<OrderUploadExecutionResult> ExecutePendingAsync(int batchSize = 20, CancellationToken cancellationToken = default)
         {
-            PendingCallCount++;
+            _pendingCalls.Enqueue(ThreadObservation.Capture());
             return Task.FromResult(result);
         }
 
@@ -555,15 +759,19 @@ public sealed class SyncOrchestratorTests
     private sealed class CapturingSettlementExecutor(
         LinklySettlementUploadExecutionResult result) : ILinklySettlementUploadExecutionService
     {
+        private readonly ConcurrentQueue<ThreadObservation> _pendingCalls = new();
+
         public IReadOnlyList<Guid> OneIds { get; private set; } = [];
 
-        public int PendingCallCount { get; private set; }
+        public int PendingCallCount => _pendingCalls.Count;
+
+        public IReadOnlyCollection<ThreadObservation> PendingCalls => _pendingCalls.ToArray();
 
         public Task<LinklySettlementUploadExecutionResult> ExecutePendingAsync(
             int batchSize = 20,
             CancellationToken cancellationToken = default)
         {
-            PendingCallCount++;
+            _pendingCalls.Enqueue(ThreadObservation.Capture());
             return Task.FromResult(result);
         }
 
