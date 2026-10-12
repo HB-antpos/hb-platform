@@ -2468,6 +2468,145 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Cash_payment_completion_opens_drawer_before_success_preview_and_refreshes_pending_sync_only_after_auto_print()
+    {
+        var events = new List<string>();
+        void Record(string name)
+        {
+            lock (events)
+            {
+                events.Add(name);
+            }
+        }
+
+        var settingsStore = new GatedReceiptPrinterSettingsStore(() => Record("success-settings-load"));
+        var cashDrawerService = new RecordingCashDrawerService { OnOpen = () => Record("cash-drawer") };
+        var printService = new RecordingReceiptPrintService();
+        var syncQueue = new FakeSyncQueueRepository();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            syncQueueRepository: syncQueue,
+            cashDrawerService: cashDrawerService,
+            receiptPrinterSettingsStore: settingsStore);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+
+        // 初始化完成后才卡住：成功页预览读小票设置、余额券自动打印、收款后的待同步刷新，精确复现收尾窗口。
+        settingsStore.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        printService.ReleaseReceiptPrint = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        syncQueue.OverviewReadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        syncQueue.ReleaseOverviewRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readCountBeforePayment = syncQueue.ReadCount;
+        var settingsLoadsBeforePayment = settingsStore.LoadCallCount;
+        lock (events)
+        {
+            events.Clear();
+        }
+
+        var order = CreateReceiptPrintOrder(PaymentMethodKind.Cash, PaymentMethodKind.Voucher) with
+        {
+            Payments =
+            [
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, 5m, null),
+                new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, 5m, "VOUCHER:VC200:LOCK-1:12.34")
+            ]
+        };
+
+        try
+        {
+            InvokePaymentCompleted(viewModel, order);
+
+            // 现金收款先开钱箱，不等成功页预览读小票设置。
+            await WaitUntilAsync(() =>
+                cashDrawerService.OpenCallCount == 1 &&
+                settingsStore.LoadCallCount == settingsLoadsBeforePayment + 1);
+            lock (events)
+            {
+                Assert.Equal(["cash-drawer", "success-settings-load"], events);
+            }
+
+            // 预览加载完后进入余额券自动打印。生产上 SyncQueue 读取在 UI 线程同步执行，若与打印并行会插进打印续体前面，
+            // 所以待同步刷新必须等自动打印全部结束才开始：打印卡在打印机期间，同步概览一次都不能读。
+            settingsStore.Gate.TrySetResult();
+            await WaitUntilAsync(() => printService.Calls.Count == 1);
+            Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, printService.Calls[0].Reason);
+            var refreshStartedDuringPrint = await Task.WhenAny(
+                syncQueue.OverviewReadStarted.Task,
+                Task.Delay(TimeSpan.FromMilliseconds(200))) == syncQueue.OverviewReadStarted.Task;
+            Assert.False(refreshStartedDuringPrint);
+
+            // 打印结束后刷新才开始。
+            printService.ReleaseReceiptPrint.TrySetResult();
+            await syncQueue.OverviewReadStarted.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+            Assert.Single(printService.Calls);
+        }
+        finally
+        {
+            settingsStore.Gate?.TrySetResult();
+            printService.ReleaseReceiptPrint?.TrySetResult();
+            syncQueue.ReleaseOverviewRead.TrySetResult();
+        }
+
+        // 放行后刷新照常完成（概览 + 活动项各读一次），且正常完成的刷新不会留下收尾告警。
+        await WaitUntilAsync(() => syncQueue.ReadCount >= readCountBeforePayment + 2);
+        Assert.False(viewModel.PaymentSuccess.HasPostCommitWarning);
+    }
+
+    [Fact]
+    public async Task Payment_completion_pending_sync_refresh_failure_still_marks_the_sale_with_warning()
+    {
+        const string completedWarning = "Payment completed. Do not take payment again; a follow-up action needs attention.";
+        var syncQueue = new FakeSyncQueueRepository();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            syncQueueRepository: syncQueue);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        syncQueue.ThrowOnRead = true;
+
+        InvokePaymentCompleted(viewModel, CreateReceiptPrintOrder(PaymentMethodKind.Card));
+
+        // 回归护栏：待同步刷新挪到自动打印之后，异常仍被观察，记录日志并在这一单的成功卡片上留告警。
+        // 刷新续体可能在别的线程上先写卡片告警、再写状态栏，两者都要等到，不能只等前一个就断言后一个。
+        await WaitUntilAsync(() =>
+            IsShowingCompletedSale(viewModel) &&
+            viewModel.PaymentSuccess.HasPostCommitWarning &&
+            viewModel.StatusMessage == completedWarning);
+    }
+
+    [Fact]
+    public async Task Payment_completion_pending_sync_refresh_failure_keeps_auto_print_failure_message()
+    {
+        var printService = new RecordingReceiptPrintService
+        {
+            PrintReceiptResult = new ReceiptPrintResult(false, "printer offline")
+        };
+        var syncQueue = new FakeSyncQueueRepository();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            printService,
+            syncQueueRepository: syncQueue);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        syncQueue.ThrowOnRead = true;
+        var readCountBeforePayment = syncQueue.ReadCount;
+        var order = CreateReceiptPrintOrder(PaymentMethodKind.Voucher) with
+        {
+            Payments = [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, 10m, "VOUCHER:VC200:LOCK-1:12.34")]
+        };
+
+        InvokePaymentCompleted(viewModel, order);
+
+        // 待同步刷新排在余额券自动打印之后：刷新失败只给成功卡片留告警，状态栏上的打印失败提示不能被收尾告警盖掉，
+        // 收银员要靠它知道余额券没打出来、需要补打。
+        await WaitUntilAsync(() =>
+            IsShowingCompletedSale(viewModel) &&
+            viewModel.PaymentSuccess.HasPostCommitWarning &&
+            syncQueue.ReadCount > readCountBeforePayment);
+        var printCall = Assert.Single(printService.Calls);
+        Assert.Equal(ReceiptPrintReason.VoucherBalanceAuto, printCall.Reason);
+        Assert.Equal("Receipt print failed: VC200: printer offline", viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task Manually_opening_payment_success_does_not_play_checkout_feedback()
     {
         var feedback = new RecordingUserFeedbackService();
@@ -7738,7 +7877,8 @@ public sealed class MainViewModelScannerTests
         IDeviceRegistrationWorkflowService? deviceRegistrationWorkflowService = null,
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
         ICustomerDisplayWindowPreferenceStore? customerDisplayPreferences = null,
-        IReceiptProfileSyncService? receiptProfileSyncService = null)
+        IReceiptProfileSyncService? receiptProfileSyncService = null,
+        IReceiptPrinterSettingsStore? receiptPrinterSettingsStore = null)
     {
         var priceIndex = new LocalSellableItemIndex();
         var effectiveCart = cart ?? new PosCartService();
@@ -7765,7 +7905,7 @@ public sealed class MainViewModelScannerTests
                 cardPaymentRecoveryService: cardPaymentRecoveryService,
                 cardRecoveryResultDialogService: null,
                 linklyFallbackPromptCoordinator: null),
-            new PrintFacade(receiptPrintService, receiptPrinterSettingsStore: null, receiptTextFormatter: null, linklyBankReceiptPrinter: linklyBankReceiptPrinter),
+            new PrintFacade(receiptPrintService, receiptPrinterSettingsStore: receiptPrinterSettingsStore, receiptTextFormatter: null, linklyBankReceiptPrinter: linklyBankReceiptPrinter),
             new ShellCultureService(localization, new FakeSettingsRepository()),
             new ShellCatalogService(priceIndex, catalogRepository, new FakeCatalogSyncService()),
             catalogRepository,
@@ -9887,6 +10027,9 @@ public sealed class MainViewModelScannerTests
 
         public Queue<ReceiptPrintResult> PrintReceiptResults { get; } = new();
 
+        /// <summary>设置后，按小票内容打印时先记录调用、再卡住直到放行，用来复现「自动打印卡在打印机」的窗口。</summary>
+        public TaskCompletionSource? ReleaseReceiptPrint { get; set; }
+
         public Task<ReceiptPrintResult> PrintLatestReceiptAsync(
             ReceiptPrintReason reason = ReceiptPrintReason.LastReceipt,
             CancellationToken cancellationToken = default)
@@ -9923,7 +10066,18 @@ public sealed class MainViewModelScannerTests
             var result = PrintReceiptResults.Count > 0
                 ? PrintReceiptResults.Dequeue()
                 : PrintReceiptResult ?? new ReceiptPrintResult(true, "printed", receipt.OrderGuid);
-            return Task.FromResult(result);
+            return ReleaseReceiptPrint is { } release
+                ? ReturnAfterReleaseAsync(release.Task, result, cancellationToken)
+                : Task.FromResult(result);
+        }
+
+        private static async Task<ReceiptPrintResult> ReturnAfterReleaseAsync(
+            Task release,
+            ReceiptPrintResult result,
+            CancellationToken cancellationToken)
+        {
+            await release.WaitAsync(cancellationToken);
+            return result;
         }
 
         public Task<ReceiptPrintResult> TestPrinterAsync(CancellationToken cancellationToken = default)
@@ -10066,11 +10220,43 @@ public sealed class MainViewModelScannerTests
 
         public ReceiptPrintResult Result { get; init; } = new(true, "Cash drawer opened.");
 
+        /// <summary>开钱箱时回调，用于记录收款后续步骤的先后顺序。</summary>
+        public Action? OnOpen { get; init; }
+
         public Task<ReceiptPrintResult> OpenAsync(CancellationToken cancellationToken = default)
         {
             OpenCallCount++;
+            OnOpen?.Invoke();
             return Task.FromResult(Result);
         }
+    }
+
+    /// <summary>
+    /// 成功页小票预览用的设置存储：每次加载先回调记录，设置了 <see cref="Gate"/> 时卡住直到放行，
+    /// 用来复现「成功页加载慢」的收尾窗口。
+    /// </summary>
+    private sealed class GatedReceiptPrinterSettingsStore(Action onLoad) : IReceiptPrinterSettingsStore
+    {
+        private int _loadCallCount;
+
+        public int LoadCallCount => Volatile.Read(ref _loadCallCount);
+
+        public TaskCompletionSource? Gate { get; set; }
+
+        public async Task<ReceiptPrinterSettings> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _loadCallCount);
+            onLoad();
+            if (Gate is { } gate)
+            {
+                await gate.Task.WaitAsync(cancellationToken);
+            }
+
+            return ReceiptPrinterSettings.Default;
+        }
+
+        public Task SaveAsync(ReceiptPrinterSettings settings, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class RecordingApplicationExitService : IApplicationExitService

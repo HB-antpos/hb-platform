@@ -134,24 +134,38 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         }
     }
 
+    /// <summary>
+    /// 本地主库的 schema 版本，记在每个库文件头的 <c>PRAGMA user_version</c> 里。
+    /// 按 API 端点分区时每个库文件各自记录、各自判断；ClientLogOutboxStore 是另一个库文件，它的 user_version 与此无关。
+    /// 目前只用于门控 <see cref="EnsureLocalSellableItemIndexColumnsAsync"/> 里的一次性回填：
+    /// 版本低于此值的库跑一遍回填后写入此值，之后每次启动跳过。
+    /// 以后新增需要对已有数据做一次性回填时递增此值，并让新回填按新版本门控。
+    /// </summary>
+    internal const int LocalDatabaseSchemaVersion = 1;
+
     private static async Task EnsureLocalSellableItemIndexColumnsAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
         var columns = await ReadColumnNamesAsync(connection, "LocalSellableItemIndex", cancellationToken);
+        // 中文注释：回填依赖的三列只要有一列是本次刚补上的，已有行在该列上全是 NULL，必须当场回填，不看版本号。
+        var addedBackfillColumn = false;
         if (!columns.Contains("LookupCodeNormalized"))
         {
             await ExecuteAsync(connection, "ALTER TABLE LocalSellableItemIndex ADD COLUMN LookupCodeNormalized TEXT;", cancellationToken);
+            addedBackfillColumn = true;
         }
 
         if (!columns.Contains("ContentHash"))
         {
             await ExecuteAsync(connection, "ALTER TABLE LocalSellableItemIndex ADD COLUMN ContentHash TEXT;", cancellationToken);
+            addedBackfillColumn = true;
         }
 
         if (!columns.Contains("SyncedAt"))
         {
             await ExecuteAsync(connection, "ALTER TABLE LocalSellableItemIndex ADD COLUMN SyncedAt TEXT;", cancellationToken);
+            addedBackfillColumn = true;
         }
 
         if (!columns.Contains("ProductImage"))
@@ -169,8 +183,20 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             await ExecuteAsync(connection, "ALTER TABLE LocalSellableItemIndex ADD COLUMN IsSpecialProduct INTEGER NOT NULL DEFAULT 0;", cancellationToken);
         }
 
+        var schemaVersion = await ReadUserVersionAsync(connection, cancellationToken);
+        if (!addedBackfillColumn && schemaVersion >= LocalDatabaseSchemaVersion)
+        {
+            // 中文注释：已回填过的库直接跳过。三列在当前建表里都是 NOT NULL、所有写路径都会写，
+            // 回填只对很老的库有意义；表有几十万行、WHERE 含 TRIM/OR 用不上索引，原先每次启动白扫三遍。
+            return;
+        }
+
+        // 中文注释：三条回填与版本号写入放在同一个事务里：任何一步失败（含取消）整体回滚，
+        // 版本号不会被提前置上，下次启动照常重跑；user_version 写在库文件头里，同样随事务提交/回滚。
+        await using var transaction = connection.BeginTransaction();
         await ExecuteAsync(
             connection,
+            transaction,
             """
             UPDATE LocalSellableItemIndex
             SET LookupCodeNormalized = UPPER(TRIM(LookupCode))
@@ -180,6 +206,7 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
 
         await ExecuteAsync(
             connection,
+            transaction,
             """
             UPDATE LocalSellableItemIndex
             SET ContentHash =
@@ -203,12 +230,35 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
 
         await ExecuteAsync(
             connection,
+            transaction,
             """
             UPDATE LocalSellableItemIndex
             SET SyncedAt = COALESCE(UpdatedAt, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             WHERE SyncedAt IS NULL OR TRIM(SyncedAt) = '';
             """,
             cancellationToken);
+
+        if (schemaVersion < LocalDatabaseSchemaVersion)
+        {
+            // 中文注释：只升不降——因刚补列而强制回填时，库若已是更高版本（新客户端写过）就保持原值。
+            // PRAGMA 不支持参数，值来自编译期常量。
+            await ExecuteAsync(
+                connection,
+                transaction,
+                $"PRAGMA user_version = {LocalDatabaseSchemaVersion};",
+                cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<long> ReadUserVersionAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
     }
 
     private static async Task EnsureLocalOrderColumnsAsync(

@@ -225,6 +225,19 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
     // 是否等于当前门店：换店后旧值读出来一律按 0，重新绑定时在同一次批量写里清零。
     private const string ProfileVersionKey = Prefix + "ProfileVersion";
     private const string ProfileAckedVersionKey = Prefix + "ProfileAckedVersion";
+    // 中文注释：门店资料八个字段的键后缀，与 ProfileSnapshot / ReadProfile 一一对应；LoadAsync 据此生成批量读取的键。
+    // 新增资料字段时两处要一起改，否则批量结果里没有该键、读出来恒为 null。
+    private static readonly string[] ProfileFieldSuffixes =
+    [
+        "BrandName",
+        "StoreName",
+        "StoreAddress",
+        "StorePhone",
+        "Abn",
+        "ReturnPolicy",
+        "VoucherTerms",
+        "InstallmentTerms",
+    ];
 
     // 中文注释：设置页保存、测试打印前保存与后台同步写入都会改资料键；用进程内互斥串行化，
     // 避免「保存读到版本 0 → 同步写入新版本 → 保存用旧草稿覆盖六个字段」造成字段与版本不一致。
@@ -245,19 +258,24 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
 
     public async Task<ReceiptPrinterSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
-        var port = NormalizePort(await _settingsRepository.GetValueAsync(PrinterPortKey, cancellationToken));
+        // 中文注释：原先逐键读取约 14 次，每次都新开连接并执行 PRAGMA 与建表检查；收款后开钱箱、成功页预览各读一遍。
+        // 这里先按门店作用域算出本次可能用到的全部键、一次批量读取，再按原有优先级取值：
+        // 缺失键视为 null、显式空串原样保留、作用域键的回退顺序不变，结果与逐键读取完全一致。
+        var storeCode = CurrentStoreCode;
+        var values = await _settingsRepository.GetValuesAsync(BuildLoadKeys(storeCode), cancellationToken);
+
+        var port = NormalizePort(ReadValue(values, PrinterPortKey));
         var cutDistance = NormalizeCutDistance(
-            await _settingsRepository.GetValueAsync(CutDistanceKey, cancellationToken),
+            ReadValue(values, CutDistanceKey),
             ReceiptPrinterSettings.Default.CutDistance);
 
         var printBankReceiptText = NormalizeFlag(
-            await _settingsRepository.GetValueAsync(PrintBankReceiptTextKey, cancellationToken),
+            ReadValue(values, PrintBankReceiptTextKey),
             ReceiptPrinterSettings.Default.PrintBankReceiptText);
 
-        var storeCode = CurrentStoreCode;
         var settings = storeCode is null
-            ? await LoadLegacyUnscopedAsync(port, cutDistance, cancellationToken)
-            : await LoadScopedAsync(storeCode, port, cutDistance, cancellationToken);
+            ? LoadLegacyUnscoped(values, port, cutDistance)
+            : await LoadScopedAsync(storeCode, values, port, cutDistance, cancellationToken);
         return settings with { PrintBankReceiptText = printBankReceiptText };
     }
 
@@ -366,38 +384,69 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
     private string? CurrentStoreCode =>
         _deviceAuthorizationState?.Current?.StoreCode is { Length: > 0 } code ? code : null;
 
-    private async Task<ReceiptPrinterSettings> LoadLegacyUnscopedAsync(
+    /// <summary>
+    /// <see cref="LoadAsync"/> 一次批量读取的全部键：硬件三键 + 无作用域资料八键（无门店时就是旧版资料；
+    /// 有门店时首次升级要用它判断是否迁移），有门店时再加绑定门店、下发版本与该店作用域资料八键。
+    /// 多读几个用不到的键只是同一条查询里多几个参数，换来整个加载只有一次数据库往返。
+    /// </summary>
+    private static string[] BuildLoadKeys(string? storeCode)
+    {
+        var keys = new List<string>(storeCode is null ? 11 : 21)
+        {
+            PrinterPortKey,
+            CutDistanceKey,
+            PrintBankReceiptTextKey,
+        };
+        keys.AddRange(ProfileFieldSuffixes.Select(suffix => ProfileKey(null, suffix)));
+        if (storeCode is not null)
+        {
+            keys.Add(ProfileStoreCodeKey);
+            keys.Add(ProfileVersionKey);
+            keys.AddRange(ProfileFieldSuffixes.Select(suffix => ProfileKey(storeCode, suffix)));
+        }
+
+        return keys.ToArray();
+    }
+
+    private static string? ReadValue(IReadOnlyDictionary<string, string> values, string key)
+    {
+        // 批量结果里没有的键＝逐键读取时的 null（键不存在）。
+        return values.TryGetValue(key, out var value) ? value : null;
+    }
+
+    private static ReceiptPrinterSettings LoadLegacyUnscoped(
+        IReadOnlyDictionary<string, string> values,
         string port,
-        int cutDistance,
-        CancellationToken cancellationToken)
+        int cutDistance)
     {
         // 无设备授权上下文时保持旧版无作用域读取行为，避免启动早期破坏既有配置。
         var fallback = ReceiptPrinterSettings.Default;
         return new ReceiptPrinterSettings(
             port,
-            NormalizeText(await _settingsRepository.GetValueAsync(BrandNameKey, cancellationToken), fallback.BrandName),
-            NormalizeText(await _settingsRepository.GetValueAsync(StoreNameKey, cancellationToken), fallback.StoreName),
-            NormalizeText(await _settingsRepository.GetValueAsync(StoreAddressKey, cancellationToken), fallback.StoreAddress),
-            NormalizeText(await _settingsRepository.GetValueAsync(StorePhoneKey, cancellationToken), fallback.StorePhone),
-            NormalizeText(await _settingsRepository.GetValueAsync(AbnKey, cancellationToken), fallback.Abn),
-            NormalizeText(await _settingsRepository.GetValueAsync(ReturnPolicyKey, cancellationToken), fallback.ReturnPolicy),
+            NormalizeText(ReadValue(values, BrandNameKey), fallback.BrandName),
+            NormalizeText(ReadValue(values, StoreNameKey), fallback.StoreName),
+            NormalizeText(ReadValue(values, StoreAddressKey), fallback.StoreAddress),
+            NormalizeText(ReadValue(values, StorePhoneKey), fallback.StorePhone),
+            NormalizeText(ReadValue(values, AbnKey), fallback.Abn),
+            NormalizeText(ReadValue(values, ReturnPolicyKey), fallback.ReturnPolicy),
             cutDistance,
-            VoucherTerms: NormalizeText(await _settingsRepository.GetValueAsync(VoucherTermsKey, cancellationToken), fallback.VoucherTerms),
-            InstallmentTerms: NormalizeText(await _settingsRepository.GetValueAsync(InstallmentTermsKey, cancellationToken), fallback.InstallmentTerms));
+            VoucherTerms: NormalizeText(ReadValue(values, VoucherTermsKey), fallback.VoucherTerms),
+            InstallmentTerms: NormalizeText(ReadValue(values, InstallmentTermsKey), fallback.InstallmentTerms));
     }
 
     private async Task<ReceiptPrinterSettings> LoadScopedAsync(
         string storeCode,
+        IReadOnlyDictionary<string, string> values,
         string port,
         int cutDistance,
         CancellationToken cancellationToken)
     {
-        var boundCode = await _settingsRepository.GetValueAsync(ProfileStoreCodeKey, cancellationToken);
+        var boundCode = ReadValue(values, ProfileStoreCodeKey);
 
         if (boundCode is null)
         {
             // 首次升级：仅有旧的、无作用域 profile 值时才绑定当前店，避免把纯硬件配置误判为 profile。
-            var legacy = await ReadProfileAsync(null, cancellationToken);
+            var legacy = ReadProfile(values, null);
             if (!legacy.HasAnyValue)
             {
                 return CreateScopedSettings(port, cutDistance, legacy, await ResolveCurrentStoreNameAsync(storeCode, cancellationToken));
@@ -415,8 +464,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             return CreateScopedSettings(port, cutDistance, empty, await ResolveCurrentStoreNameAsync(storeCode, cancellationToken));
         }
 
-        var scoped = await ReadProfileAsync(storeCode, cancellationToken);
-        var profileVersion = ParseVersion(await _settingsRepository.GetValueAsync(ProfileVersionKey, cancellationToken));
+        var scoped = ReadProfile(values, storeCode);
+        var profileVersion = ParseVersion(ReadValue(values, ProfileVersionKey));
         return CreateScopedSettings(
             port,
             cutDistance,
@@ -473,17 +522,17 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             : 0;
     }
 
-    private async Task<ProfileSnapshot> ReadProfileAsync(string? storeCode, CancellationToken cancellationToken)
+    private static ProfileSnapshot ReadProfile(IReadOnlyDictionary<string, string> values, string? storeCode)
     {
         return new ProfileSnapshot(
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "BrandName"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "StoreName"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "StoreAddress"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "StorePhone"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "Abn"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "ReturnPolicy"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "VoucherTerms"), cancellationToken),
-            await _settingsRepository.GetValueAsync(ProfileKey(storeCode, "InstallmentTerms"), cancellationToken));
+            ReadValue(values, ProfileKey(storeCode, "BrandName")),
+            ReadValue(values, ProfileKey(storeCode, "StoreName")),
+            ReadValue(values, ProfileKey(storeCode, "StoreAddress")),
+            ReadValue(values, ProfileKey(storeCode, "StorePhone")),
+            ReadValue(values, ProfileKey(storeCode, "Abn")),
+            ReadValue(values, ProfileKey(storeCode, "ReturnPolicy")),
+            ReadValue(values, ProfileKey(storeCode, "VoucherTerms")),
+            ReadValue(values, ProfileKey(storeCode, "InstallmentTerms")));
     }
 
     private async Task<string> ResolveCurrentStoreNameAsync(string storeCode, CancellationToken cancellationToken)

@@ -300,6 +300,192 @@ public sealed class ReceiptPrinterProfileTests
         Assert.DoesNotContain("S001", driver.LastDocument.PlainText, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [MemberData(nameof(LoadScenarioNames))]
+    public async Task Load_reads_all_settings_with_one_batch_read_and_no_per_key_reads(string scenario)
+    {
+        var (storeCode, values) = CreateLoadScenario(scenario);
+        var repository = new CountingSettingsRepository(values);
+        var store = new ReceiptPrinterSettingsStore(repository, storeCode is null ? null : NewAuth(storeCode));
+
+        await store.LoadAsync();
+
+        // 收款后开钱箱与成功页预览各加载一次设置：每次加载只能有一次数据库往返。
+        Assert.Equal(1, repository.BatchReadCount);
+        Assert.Equal(0, repository.SingleReadCount);
+    }
+
+    [Theory]
+    [MemberData(nameof(LoadScenarioNames))]
+    public async Task Load_from_local_database_batch_read_matches_per_key_reads(string scenario)
+    {
+        var (storeCode, values) = CreateLoadScenario(scenario);
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-receipt-settings-{Guid.NewGuid():N}.db");
+        try
+        {
+            // 同一组设置分别放进本地库（批量 IN 查询）与只支持逐键读取的内存库（接口默认实现逐键读），加载结果必须完全一致。
+            var databaseRepository = new LocalAppSettingsRepository(new LocalSqliteStore(databasePath));
+            await databaseRepository.SetValuesAsync(values);
+            var perKeyRepository = new InMemorySettingsRepository();
+            foreach (var (key, value) in values)
+            {
+                await perKeyRepository.SetValueAsync(key, value);
+            }
+
+            var batched = await new ReceiptPrinterSettingsStore(databaseRepository, storeCode is null ? null : NewAuth(storeCode)).LoadAsync();
+            var perKey = await new ReceiptPrinterSettingsStore(perKeyRepository, storeCode is null ? null : NewAuth(storeCode)).LoadAsync();
+
+            Assert.Equal(perKey, batched);
+            // 首次升级的迁移写入也要一致（绑定门店与作用域资料键）。
+            foreach (var key in AllProfileKeys(storeCode))
+            {
+                Assert.Equal(await perKeyRepository.GetValueAsync(key), await databaseRepository.GetValueAsync(key));
+            }
+        }
+        finally
+        {
+            await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Load_scenarios_keep_per_key_semantics_for_missing_blank_and_scoped_values()
+    {
+        // 显式期望值：批量读取后缺失键、空串、空白、作用域回退的取值规则与逐键读取时代完全相同。
+        var legacy = await LoadScenarioAsync("legacy-unscoped");
+        Assert.Equal("COM3", legacy.PrinterPort);
+        Assert.Equal(ReceiptPrinterSettings.Default.CutDistance, legacy.CutDistance);
+        Assert.False(legacy.PrintBankReceiptText);
+        Assert.Equal(ReceiptPrinterSettings.Default.BrandName, legacy.BrandName);
+        Assert.Equal("Old Store", legacy.StoreName);
+        Assert.Equal("ABN", legacy.Abn);
+        Assert.Equal("V1", legacy.VoucherTerms);
+        Assert.Equal(string.Empty, legacy.InstallmentTerms);
+
+        var firstUpgrade = await LoadScenarioAsync("scoped-first-upgrade");
+        Assert.Equal("Old Brand", firstUpgrade.BrandName);
+        Assert.Equal(string.Empty, firstUpgrade.StoreAddress);
+        Assert.Equal("S001", firstUpgrade.StoreName);
+        Assert.Equal("I1", firstUpgrade.InstallmentTerms);
+        Assert.Equal(0, firstUpgrade.ProfileVersion);
+
+        var fresh = await LoadScenarioAsync("scoped-fresh-hardware-only");
+        Assert.Equal("COM9", fresh.PrinterPort);
+        Assert.Equal(75, fresh.CutDistance);
+        Assert.Equal(string.Empty, fresh.BrandName);
+        Assert.Equal("S001", fresh.StoreName);
+
+        var bound = await LoadScenarioAsync("scoped-bound");
+        Assert.Equal(string.Empty, bound.BrandName);
+        Assert.Equal("Sunny", bound.StoreName);
+        Assert.Equal("7 days", bound.ReturnPolicy);
+        Assert.Equal(string.Empty, bound.Abn);
+        Assert.Equal(3, bound.ProfileVersion);
+        Assert.True(bound.PrintBankReceiptText);
+
+        var invalidVersion = await LoadScenarioAsync("scoped-bound-invalid-version");
+        Assert.Equal(0, invalidVersion.ProfileVersion);
+        Assert.Equal(string.Empty, invalidVersion.VoucherTerms);
+        Assert.Equal("S001", invalidVersion.StoreName);
+
+        var otherStore = await LoadScenarioAsync("scoped-other-store");
+        Assert.Equal(string.Empty, otherStore.BrandName);
+        Assert.Equal("S002", otherStore.StoreName);
+        Assert.Equal(0, otherStore.ProfileVersion);
+    }
+
+    public static TheoryData<string> LoadScenarioNames() =>
+    [
+        "legacy-unscoped",
+        "scoped-first-upgrade",
+        "scoped-fresh-hardware-only",
+        "scoped-bound",
+        "scoped-bound-invalid-version",
+        "scoped-other-store",
+    ];
+
+    private static async Task<ReceiptPrinterSettings> LoadScenarioAsync(string scenario)
+    {
+        var (storeCode, values) = CreateLoadScenario(scenario);
+        var repository = new InMemorySettingsRepository();
+        foreach (var (key, value) in values)
+        {
+            await repository.SetValueAsync(key, value);
+        }
+
+        return await new ReceiptPrinterSettingsStore(repository, storeCode is null ? null : NewAuth(storeCode)).LoadAsync();
+    }
+
+    private static (string? StoreCode, Dictionary<string, string> Values) CreateLoadScenario(string scenario)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? storeCode = "S001";
+        switch (scenario)
+        {
+            case "legacy-unscoped":
+                storeCode = null;
+                values["ReceiptPrinter:Port"] = " COM3 ";
+                values["ReceiptPrinter:CutDistance"] = "abc";
+                values["ReceiptPrinter:PrintBankReceiptText"] = "false";
+                values["ReceiptPrinter:BrandName"] = string.Empty;
+                values["ReceiptPrinter:StoreName"] = "  Old Store  ";
+                values["ReceiptPrinter:Abn"] = "ABN";
+                values["ReceiptPrinter:VoucherTerms"] = "V1";
+                break;
+            case "scoped-first-upgrade":
+                values["ReceiptPrinter:Port"] = "USB,";
+                values["ReceiptPrinter:BrandName"] = "Old Brand";
+                values["ReceiptPrinter:StoreAddress"] = string.Empty;
+                values["ReceiptPrinter:InstallmentTerms"] = "I1";
+                break;
+            case "scoped-fresh-hardware-only":
+                values["ReceiptPrinter:Port"] = "COM9";
+                values["ReceiptPrinter:CutDistance"] = "75";
+                break;
+            case "scoped-bound":
+                values["ReceiptPrinter:ProfileStoreCode"] = "S001";
+                values["ReceiptPrinter:ProfileVersion"] = "3";
+                values["ReceiptPrinter:PrintBankReceiptText"] = "garbage";
+                values["ReceiptPrinter:BrandName"] = "Old Brand";
+                values["ReceiptPrinter:S001:BrandName"] = string.Empty;
+                values["ReceiptPrinter:S001:StoreName"] = " Sunny ";
+                values["ReceiptPrinter:S001:ReturnPolicy"] = "7 days";
+                break;
+            case "scoped-bound-invalid-version":
+                values["ReceiptPrinter:ProfileStoreCode"] = "S001";
+                values["ReceiptPrinter:ProfileVersion"] = "-2";
+                values["ReceiptPrinter:S001:VoucherTerms"] = "  ";
+                break;
+            case "scoped-other-store":
+                storeCode = "S002";
+                values["ReceiptPrinter:ProfileStoreCode"] = "S001";
+                values["ReceiptPrinter:ProfileVersion"] = "5";
+                values["ReceiptPrinter:S001:BrandName"] = "HB";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null);
+        }
+
+        return (storeCode, values);
+    }
+
+    private static IEnumerable<string> AllProfileKeys(string? storeCode)
+    {
+        string[] suffixes = ["BrandName", "StoreName", "StoreAddress", "StorePhone", "Abn", "ReturnPolicy", "VoucherTerms", "InstallmentTerms"];
+        foreach (var suffix in suffixes)
+        {
+            yield return $"ReceiptPrinter:{suffix}";
+            if (storeCode is not null)
+            {
+                yield return $"ReceiptPrinter:{storeCode}:{suffix}";
+            }
+        }
+
+        yield return "ReceiptPrinter:ProfileStoreCode";
+        yield return "ReceiptPrinter:ProfileVersion";
+        yield return "ReceiptPrinter:ProfileAckedVersion";
+    }
+
     private static DeviceAuthorizationState NewAuth(string storeCode)
     {
         var state = new DeviceAuthorizationState();
@@ -381,6 +567,60 @@ public sealed class ReceiptPrinterProfileTests
         {
             BatchWriteCount++;
             foreach (var (key, value) in values)
+            {
+                _values[key] = value;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteValueAsync(string key, CancellationToken cancellationToken = default)
+        {
+            _values.Remove(key);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// 同时支持单键与批量读取的设置库，分别计数：用来断言加载设置时只发一次批量读取。
+    /// </summary>
+    private sealed class CountingSettingsRepository(IReadOnlyDictionary<string, string> values) : ILocalAppSettingsRepository
+    {
+        private readonly Dictionary<string, string> _values = new(values, StringComparer.Ordinal);
+
+        public int SingleReadCount { get; private set; }
+
+        public int BatchReadCount { get; private set; }
+
+        public Task<string?> GetValueAsync(string key, CancellationToken cancellationToken = default)
+        {
+            SingleReadCount++;
+            return Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);
+        }
+
+        public Task<IReadOnlyDictionary<string, string>> GetValuesAsync(
+            IReadOnlyCollection<string> keys,
+            CancellationToken cancellationToken = default)
+        {
+            BatchReadCount++;
+            IReadOnlyDictionary<string, string> result = keys
+                .Distinct(StringComparer.Ordinal)
+                .Where(_values.ContainsKey)
+                .ToDictionary(key => key, key => _values[key], StringComparer.Ordinal);
+            return Task.FromResult(result);
+        }
+
+        public Task SetValueAsync(string key, string value, CancellationToken cancellationToken = default)
+        {
+            _values[key] = value;
+            return Task.CompletedTask;
+        }
+
+        public Task SetValuesAsync(
+            IReadOnlyDictionary<string, string> newValues,
+            CancellationToken cancellationToken = default)
+        {
+            foreach (var (key, value) in newValues)
             {
                 _values[key] = value;
             }
