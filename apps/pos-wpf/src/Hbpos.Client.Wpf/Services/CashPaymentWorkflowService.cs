@@ -4585,9 +4585,66 @@ public sealed class CashPaymentWorkflowService(
         string.Equals(NormalizeOptional(expected.IdempotencyKey), NormalizeOptional(actual.IdempotencyKey), StringComparison.Ordinal) &&
         (expected.CardTransactions ?? []).SequenceEqual(actual.CardTransactions ?? []);
 
-    private async Task<LocalOrder> IssuePendingRefundVouchersAsync(
+    private Task<LocalOrder> IssuePendingRefundVouchersAsync(
         LocalOrder order,
         PosSessionState session,
+        CancellationToken cancellationToken) =>
+        IssuePendingRefundVouchersAsync(order, session, _voucherTenderClient, orderRepository, cancellationToken);
+
+    // 中文注释：卡退款经恢复服务落单后补签退款券。订单与卡退款事实已落库，这里只做尽力补签：
+    // 与首次完成共用同一签券逻辑和幂等键；失败只保留占位引用并记 Warning，不抛出、不改变恢复结果，
+    // 占位订单交给上传侧兜底。
+    internal static async Task<LocalOrder> TryIssuePendingRefundVouchersAfterRecoveryAsync(
+        LocalOrder order,
+        PosSessionState session,
+        IVoucherTenderClient? refundVoucherClient,
+        ILocalOrderRepository refundOrderRepository,
+        string logCategory,
+        Guid attemptGuid)
+    {
+        if (refundVoucherClient is null || !order.Payments.Any(IsPendingVoucherRefundPayment))
+        {
+            return order;
+        }
+
+        try
+        {
+            return await IssuePendingRefundVouchersAsync(
+                order,
+                session,
+                refundVoucherClient,
+                refundOrderRepository,
+                CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            ConsoleLog.WriteWarning(
+                logCategory,
+                $"recovered order refund voucher issue deferred attemptGuid={attemptGuid} orderGuid={order.OrderGuid:D} error={ex.GetType().Name}",
+                new ApplicationLogContext(TraceId: order.OrderGuid.ToString("D")),
+                ex);
+            try
+            {
+                // 多张退款券时可能已有部分签发并回写；尽力重读，让结果里的订单与本地库一致。
+                return await RunLocalStoreAsync(
+                        () => refundOrderRepository.GetOrderAsync(order.OrderGuid, CancellationToken.None),
+                        CancellationToken.None)
+                    ?? order;
+            }
+            catch (Exception reloadException) when (
+                reloadException is not OutOfMemoryException and not StackOverflowException)
+            {
+                return order;
+            }
+        }
+    }
+
+    // 中文注释：首次完成、付款页重试与卡退款恢复落单共用这一套签券逻辑与幂等键。
+    internal static async Task<LocalOrder> IssuePendingRefundVouchersAsync(
+        LocalOrder order,
+        PosSessionState session,
+        IVoucherTenderClient refundVoucherClient,
+        ILocalOrderRepository refundOrderRepository,
         CancellationToken cancellationToken)
     {
         var updatedPayments = new List<LocalPayment>(order.Payments.Count);
@@ -4613,7 +4670,7 @@ public sealed class CashPaymentWorkflowService(
                 "Voucher",
                 $"refund voucher issue start orderGuid={order.OrderGuid:D} paymentGuid={payment.PaymentGuid:D} amount={Math.Abs(payment.Amount):0.00}",
                 refundLogContext);
-            var authorization = await _voucherTenderClient.IssueRefundAsync(
+            var authorization = await refundVoucherClient.IssueRefundAsync(
                 Math.Abs(payment.Amount),
                 session,
                 order.OrderGuid.ToString("D"),
@@ -4640,7 +4697,7 @@ public sealed class CashPaymentWorkflowService(
 
             // 每张退款券发券成功后立刻回写本地引用，避免后续步骤失败时再次展示为待处理。
             await RunLocalStoreAsync(
-                () => orderRepository.UpdatePaymentReferenceAsync(payment.PaymentGuid, authorization.Reference, cancellationToken),
+                () => refundOrderRepository.UpdatePaymentReferenceAsync(payment.PaymentGuid, authorization.Reference, cancellationToken),
                 cancellationToken);
             updatedPayments.Add(payment with
             {
