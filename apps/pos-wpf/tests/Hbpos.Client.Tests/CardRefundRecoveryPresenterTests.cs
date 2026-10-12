@@ -1173,6 +1173,257 @@ public sealed class CardRefundRecoveryPresenterTests
         Assert.False(await recoveryTask.WaitAsync(AsyncTestWaitSupport.DefaultTimeout));
     }
 
+    // ---- 恢复路径完成卡退款后的退款代金券券面打印（恢复流程与主管结案流程共用同一打印逻辑）----
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Completed_mixed_refund_prints_card_receipt_then_one_document_per_refund_voucher(
+        bool viaRefundResolution)
+    {
+        var order = CreateMixedRefundOrder("VOUCHER_REFUND:VCH-AAA", "VOUCHER_REFUND:VCH-BBB");
+
+        var run = await CompleteRecoveryAsync(order, viaRefundResolution);
+
+        // 刷卡回单打一份（整单），随后每张已签发的退款券各一份独立凭证，且都按自动出票原因打印。
+        Assert.Equal<ReceiptPrintReason>(
+            [ReceiptPrintReason.CardAuto, ReceiptPrintReason.VoucherRefundAuto, ReceiptPrintReason.VoucherRefundAuto],
+            run.Prints.Select(call => call.Reason));
+        Assert.Equal(order.OrderGuid, run.Prints[0].Receipt.OrderGuid);
+        var voucherDocuments = run.Prints.Skip(1).Select(call => call.Receipt).ToList();
+        Assert.All(voucherDocuments, document => Assert.Single(document.Payments));
+        Assert.Equal<string>(
+            ["VCH-AAA", "VCH-BBB"],
+            voucherDocuments.Select(document => document.RefundVoucher!.VoucherCode));
+        Assert.All(voucherDocuments, document => Assert.Equal(5m, document.RefundVoucher!.Amount));
+        Assert.Same(order, Assert.Single(run.CompletedOrders));
+        Assert.Equal(CardRecoveryResultSeverity.Success, run.Presenter.CardRecoveryResultDialog!.Severity);
+    }
+
+    [Fact]
+    public async Task Completed_mixed_refund_prints_only_vouchers_that_were_signed()
+    {
+        // #725 补签只成功了一张：另一张引用仍是占位串，不出票。
+        var order = CreateMixedRefundOrder("VOUCHER_REFUND:VCH-AAA", "VOUCHER_REFUND_PENDING");
+
+        var run = await CompleteRecoveryAsync(order, viaRefundResolution: false);
+
+        Assert.Equal<ReceiptPrintReason>(
+            [ReceiptPrintReason.CardAuto, ReceiptPrintReason.VoucherRefundAuto],
+            run.Prints.Select(call => call.Reason));
+        Assert.Equal("VCH-AAA", run.Prints[1].Receipt.RefundVoucher!.VoucherCode);
+        Assert.Same(order, Assert.Single(run.CompletedOrders));
+    }
+
+    [Fact]
+    public async Task Completed_mixed_refund_with_unsigned_vouchers_prints_only_card_receipt_without_error()
+    {
+        // 补签失败时订单里只有占位引用：没有已签发的券就什么都不打，也不报错、不降级弹窗。
+        var order = CreateMixedRefundOrder("VOUCHER_REFUND_PENDING");
+
+        var run = await CompleteRecoveryAsync(order, viaRefundResolution: false);
+
+        Assert.Equal<ReceiptPrintReason>(
+            [ReceiptPrintReason.CardAuto],
+            run.Prints.Select(call => call.Reason));
+        Assert.Same(order, Assert.Single(run.CompletedOrders));
+        Assert.Equal(CardRecoveryResultSeverity.Success, run.Presenter.CardRecoveryResultDialog!.Severity);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Refund_voucher_print_failure_keeps_order_completed_and_warns_cashier(
+        bool viaRefundResolution)
+    {
+        var order = CreateMixedRefundOrder("VOUCHER_REFUND:VCH-AAA", "VOUCHER_REFUND:VCH-BBB");
+
+        var run = await CompleteRecoveryAsync(
+            order,
+            viaRefundResolution,
+            (receipt, reason) => reason == ReceiptPrintReason.VoucherRefundAuto &&
+                receipt.RefundVoucher!.VoucherCode == "VCH-AAA"
+                    ? new ReceiptPrintResult(false, "Printer offline", receipt.OrderGuid)
+                    : new ReceiptPrintResult(true, "Printed.", receipt.OrderGuid));
+
+        // 刷卡回单只打一次；完成回调先于券面打印、只触发一次；第一张失败不阻断第二张。
+        Assert.Equal<string>(
+            ["print:CardAuto", "completed", "print:VoucherRefundAuto", "print:VoucherRefundAuto"],
+            run.Timeline);
+        Assert.Same(order, Assert.Single(run.CompletedOrders));
+        // 失败必须体现在弹窗（降为警告并带失败张数与原因）和状态栏，卡回单成功的提示仍保留。
+        var dialog = Assert.IsType<CardRecoveryResultDialogViewModel>(run.Presenter.CardRecoveryResultDialog);
+        Assert.Equal(CardRecoveryResultSeverity.Warning, dialog.Severity);
+        Assert.Contains(
+            new LocalizationService().T("cardRecovery.dialog.message.autoPrintSucceeded"),
+            dialog.Message);
+        Assert.Contains("1/2", dialog.Message);
+        Assert.Contains("Printer offline", dialog.Message);
+        Assert.Contains("Printer offline", run.Statuses[^1]);
+    }
+
+    [Fact]
+    public async Task Refund_voucher_print_exception_does_not_escape_or_undo_completed_order()
+    {
+        var order = CreateMixedRefundOrder("VOUCHER_REFUND:VCH-AAA", "VOUCHER_REFUND:VCH-BBB");
+
+        var run = await CompleteRecoveryAsync(
+            order,
+            viaRefundResolution: false,
+            (receipt, reason) => reason == ReceiptPrintReason.VoucherRefundAuto
+                ? throw new InvalidOperationException("Spooler crashed")
+                : new ReceiptPrintResult(true, "Printed.", receipt.OrderGuid));
+
+        // 异常只在券面打印内部被消化：两张券都尝试过，订单完成回调照常触发，弹窗给出警告而不是静默吞掉。
+        Assert.Equal(3, run.Prints.Count);
+        Assert.Same(order, Assert.Single(run.CompletedOrders));
+        var dialog = Assert.IsType<CardRecoveryResultDialogViewModel>(run.Presenter.CardRecoveryResultDialog);
+        Assert.Equal(CardRecoveryResultSeverity.Warning, dialog.Severity);
+        Assert.Contains("2/2", dialog.Message);
+        Assert.Contains(nameof(InvalidOperationException), dialog.Message);
+    }
+
+    [Fact]
+    public async Task Card_receipt_print_failure_does_not_stop_refund_voucher_printing()
+    {
+        var order = CreateMixedRefundOrder("VOUCHER_REFUND:VCH-AAA");
+
+        var run = await CompleteRecoveryAsync(
+            order,
+            viaRefundResolution: false,
+            (receipt, reason) => reason == ReceiptPrintReason.CardAuto
+                ? new ReceiptPrintResult(false, "Paper out", receipt.OrderGuid)
+                : new ReceiptPrintResult(true, "Printed.", receipt.OrderGuid));
+
+        Assert.Equal<ReceiptPrintReason>(
+            [ReceiptPrintReason.CardAuto, ReceiptPrintReason.VoucherRefundAuto],
+            run.Prints.Select(call => call.Reason));
+        var dialog = Assert.IsType<CardRecoveryResultDialogViewModel>(run.Presenter.CardRecoveryResultDialog);
+        Assert.Equal(CardRecoveryResultSeverity.Warning, dialog.Severity);
+        Assert.Contains("Paper out", dialog.Message);
+    }
+
+    [Fact]
+    public async Task Completed_card_sale_does_not_print_refund_voucher_documents()
+    {
+        var order = new LocalOrder(
+            Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+            "S001",
+            "POS-01",
+            "CASHIER",
+            "Cashier",
+            DateTimeOffset.UtcNow,
+            20m,
+            0m,
+            20m,
+            [],
+            [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Card, 20m, $"CARD_ATTEMPT:{AttemptGuid:D}")]);
+
+        var run = await CompleteRecoveryAsync(order, viaRefundResolution: false);
+
+        Assert.Equal<ReceiptPrintReason>(
+            [ReceiptPrintReason.CardAuto],
+            run.Prints.Select(call => call.Reason));
+        Assert.Equal(CardRecoveryResultSeverity.Success, run.Presenter.CardRecoveryResultDialog!.Severity);
+    }
+
+    // 刷卡 -10.00 + 每个引用一张 -5.00 的退款券：与离线生成的混合退款订单同形。
+    private static LocalOrder CreateMixedRefundOrder(params string[] voucherReferences)
+    {
+        var payments = new List<LocalPayment>
+        {
+            new(Guid.NewGuid(), PaymentMethodKind.Card, -10m, $"CARD_ATTEMPT:{AttemptGuid:D}")
+        };
+        payments.AddRange(voucherReferences.Select(reference =>
+            new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, -5m, reference)));
+        var actualAmount = payments.Sum(payment => payment.Amount);
+        return new LocalOrder(
+            Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+            "S001",
+            "POS-01",
+            "CASHIER",
+            "Cashier",
+            DateTimeOffset.UtcNow,
+            actualAmount,
+            0m,
+            actualAmount,
+            [],
+            payments);
+    }
+
+    // 让恢复结果以 OrderCompleted 走完：viaRefundResolution=false 走普通恢复入口，
+    // true 走主管结案（ResolveCardRefundCommand → ApplyResolvedRefundRecoveryAsync）。
+    private static async Task<CompletedRecoveryRun> CompleteRecoveryAsync(
+        LocalOrder order,
+        bool viaRefundResolution,
+        Func<ReceiptDetails, ReceiptPrintReason, ReceiptPrintResult>? printBehavior = null)
+    {
+        var run = new CompletedRecoveryRun();
+        var completedResult = new CardPaymentRecoveryResult(
+            CardPaymentRecoveryOutcome.OrderCompleted,
+            "The card refund was recovered and the return was saved.",
+            order);
+        var recovery = viaRefundResolution
+            ? new StubRecoveryService
+            {
+                ResolveResult = new CardRefundSupervisorResolutionResult(
+                    true,
+                    completedResult.Message,
+                    RecoveryResult: completedResult,
+                    ResolutionPersisted: true,
+                    ResolutionApplied: true)
+            }
+            : new StubRecoveryService { RecoverResult = completedResult };
+        run.Presenter = CreatePresenter(
+            recovery,
+            new StubOperationAuthorizationService(CreateCashier(
+                "SUPERVISOR",
+                Permissions.PosTerminal.Returns.Confirm)),
+            new RecordingAuditLogger(),
+            CreateSession(CreateCashier("REQUESTER")),
+            setStatusMessage: run.Statuses.Add,
+            printReceiptAsync: async (receipt, reason) =>
+            {
+                run.Prints.Add(new PrintCall(receipt, reason));
+                run.Timeline.Add($"print:{reason}");
+                await Task.Yield();
+                return printBehavior?.Invoke(receipt, reason)
+                    ?? new ReceiptPrintResult(true, "Printed.", receipt.OrderGuid);
+            },
+            onCardRecoveryOrderCompleted: completed =>
+            {
+                run.CompletedOrders.Add(completed);
+                run.Timeline.Add("completed");
+            });
+
+        await run.Presenter.RecoverCardPaymentAttemptAsync(navigateToPaymentOnDraft: false);
+        if (viaRefundResolution)
+        {
+            // 默认桩的首次恢复返回待主管结案的退款对话框，再由主管确认后拿到 OrderCompleted。
+            var dialog = Assert.IsType<CardRecoveryResultDialogViewModel>(run.Presenter.CardRecoveryResultDialog);
+            dialog.RefundReference = "BANK-REFUND-001";
+            await run.Presenter.ResolveCardRefundCommand.ExecuteAsync(CardRefundSupervisorDecision.ConfirmRefunded);
+        }
+
+        return run;
+    }
+
+    private sealed record PrintCall(ReceiptDetails Receipt, ReceiptPrintReason Reason);
+
+    private sealed class CompletedRecoveryRun
+    {
+        public CardRecoveryPresenter Presenter { get; set; } = null!;
+
+        public List<PrintCall> Prints { get; } = [];
+
+        public List<LocalOrder> CompletedOrders { get; } = [];
+
+        public List<string?> Statuses { get; } = [];
+
+        // 按发生顺序记录 "print:<原因>" 与 "completed"，用来钉住完成回调先于券面打印。
+        public List<string> Timeline { get; } = [];
+    }
+
     private static CardRecoveryPresenter CreatePresenter(
         ICardPaymentRecoveryService recovery,
         IOperationAuthorizationService authorization,
@@ -1187,7 +1438,9 @@ public sealed class CardRefundRecoveryPresenterTests
         Func<bool, IReadOnlyList<PaymentTender>?, string?, bool>? tryApplyCardRecoveryDraft = null,
         Action? notifyShowCashPaymentCanExecuteChanged = null,
         Func<CardRecoveryAttemptKey, CancellationToken, Task<bool>>? completeRecoveredDraftHandoffAsync = null,
-        PosCartService? cart = null)
+        PosCartService? cart = null,
+        Func<ReceiptDetails, ReceiptPrintReason, Task<ReceiptPrintResult>>? printReceiptAsync = null,
+        Action<LocalOrder>? onCardRecoveryOrderCompleted = null)
     {
         return new CardRecoveryPresenter(
             recovery,
@@ -1212,7 +1465,9 @@ public sealed class CardRefundRecoveryPresenterTests
             requirePermission: _ => false,
             setPaymentRecoveryBlocked: setPaymentRecoveryBlocked,
             notifyShowCashPaymentCanExecuteChanged: notifyShowCashPaymentCanExecuteChanged,
-            setAlternativeRefundMethodRequired: setAlternativeRefundMethodRequired);
+            setAlternativeRefundMethodRequired: setAlternativeRefundMethodRequired,
+            printReceiptAsync: printReceiptAsync,
+            onCardRecoveryOrderCompleted: onCardRecoveryOrderCompleted);
     }
 
     private static CardPaymentRecoveryResult CreatePaymentSupervisorRecoveryResult() =>
