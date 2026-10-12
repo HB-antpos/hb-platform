@@ -598,7 +598,9 @@ public sealed class FaceCameraAdminTests : IDisposable
         Assert.Equal(2, first.FaceCount);
         Assert.Equal(1, first.ParseStatus);
         Assert.Equal("part 2 skipped", first.ParseNote);
-        Assert.Equal(TimeSpan.FromHours(10), first.CameraEventTime!.Value.Offset);
+        // SQLite 只保存墙钟时间文本：偏移丢失，读回时还会按运行机器的本地时区重新解释，所以这里只断言墙钟部分（12:59），
+        // 不断言偏移与绝对时刻；偏移保真由真实 SQL Server 用例 FaceCameraAdminSqlServerTests 覆盖。这样本测试不依赖 CI 机器的时区。
+        Assert.Equal(new DateTime(2026, 10, 13, 12, 59, 0), first.CameraEventTime!.Value.DateTime);
         Assert.False(first.IsDuplicate);
         Assert.True(page.Items[1].IsDuplicate);
     }
