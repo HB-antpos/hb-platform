@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Contracts.Catalog;
 
@@ -7,8 +8,30 @@ namespace Hbpos.Client.Tests;
 /// 去掉 ReplaceAll 的全局文化排序后，所有读取顺序必须与旧实现（<see cref="LegacySellableItemIndexReference"/>）等价：
 /// GetFirst 前 N 个、Items、同码多商品的桶内顺序、Search 结果，以及 Upsert / RemoveLookup 之后的状态。
 /// </summary>
-public sealed class LocalSellableItemIndexOrderingTests
+/// <remarks>
+/// 两套实现都按 StringComparer.CurrentCultureIgnoreCase 排序，但旧实现在 ReplaceAll / Upsert 时就排好，新实现在读取时才比较，
+/// 所以"测试进行中当前文化变了"就会让两边顺序对不上（en-US 下拉丁在前，zh-CN 下中文在前）。
+/// LocalizationService 的构造和 SetCulture 会写进程级的 DefaultThreadCurrentCulture，别的测试类并行时会在测试中途翻转它。
+/// 这里在构造时把本测试的当前文化固定为 en-US：线程 / 异步上下文里显式设置的文化优先于 DefaultThreadCurrentCulture，不受影响。
+/// </remarks>
+public sealed class LocalSellableItemIndexOrderingTests : IDisposable
 {
+    private readonly CultureInfo _originalCulture = CultureInfo.CurrentCulture;
+    private readonly CultureInfo _originalUiCulture = CultureInfo.CurrentUICulture;
+
+    public LocalSellableItemIndexOrderingTests()
+    {
+        var pinned = CultureInfo.GetCultureInfo("en-US");
+        CultureInfo.CurrentCulture = pinned;
+        CultureInfo.CurrentUICulture = pinned;
+    }
+
+    public void Dispose()
+    {
+        CultureInfo.CurrentCulture = _originalCulture;
+        CultureInfo.CurrentUICulture = _originalUiCulture;
+    }
+
     // 名称刻意混合大小写、重音、中文与重复，覆盖"文化比较视为相等"的并列情形（并列时到达顺序决定先后）。
     private static readonly string[] NameWords =
     [
