@@ -1034,6 +1034,11 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.Notifications.INotificationInboxService,
     BlazorApp.Api.Features.Notifications.NotificationInboxService
 >();
+// 人脸抓拍摄像机后台管理（表由迁移 20261013.001-face-capture 创建，人脸接收服务读取）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceCameras.IFaceCameraAdminService,
+    BlazorApp.Api.Features.FaceCameras.FaceCameraAdminService
+>();
 builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService

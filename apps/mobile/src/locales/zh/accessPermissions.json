@@ -277,6 +277,10 @@
       "name": "查看日结记录",
       "description": "Web 页面 /pos-admin/daily-closes 与员工 App「日结记录」- 按管理的分店查看 WPF、手持、iPad 的日结记录与现金盘点明细"
     },
+    "FaceCapture.Cameras.Manage": {
+      "name": "管理人脸抓拍摄像机",
+      "description": "Web 页面 /system/face-cameras - 新增、编辑、停用人脸抓拍摄像机，重新生成 token，查看最近抓拍记录（仅元数据，不含图片）"
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "打开钱箱",
       "description": "收银端钱箱 - 打开钱箱按钮"

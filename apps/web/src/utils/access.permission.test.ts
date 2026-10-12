@@ -372,6 +372,7 @@ const backendNavigationEntryCases: Array<[string, string]> = [
   [P.PosTerminal.AuditView, '/pos-admin/operation-logs'],
   [P.Cash.OverviewView, '/pos-admin/store-cash'],
   [P.SeasonalCards.Remaining.ViewAllStores, '/pos-admin/seasonal-card-stats'],
+  [P.FaceCapture.CamerasManage, '/system/face-cameras'],
 ]
 
 for (const [permission, expectedPath] of backendNavigationEntryCases) {

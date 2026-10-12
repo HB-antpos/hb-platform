@@ -120,6 +120,8 @@ export interface AccessControl {
   canViewDailyCloseRecords: boolean
   /** 节日贺卡分店填报统计页：独立权限 SeasonalCards.Remaining.ViewAllStores。 */
   canViewSeasonalCardStats: boolean
+  /** 人脸抓拍摄像机管理页：独立权限 FaceCapture.Cameras.Manage。 */
+  canManageFaceCameras: boolean
   canManageScheduledTasks: boolean
   canManageSystemSettings: boolean
   canViewAppDownloads: boolean

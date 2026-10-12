@@ -150,6 +150,12 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.hasPermission(P.SeasonalCards.Remaining.ViewAllStores),
   },
   {
+    // 人脸抓拍摄像机管理：只有该独立权限的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/system/face-cameras',
+    targetPrefixes: ['/system/face-cameras'],
+    canAccess: (access) => access.hasPermission(P.FaceCapture.CamerasManage),
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline'],
