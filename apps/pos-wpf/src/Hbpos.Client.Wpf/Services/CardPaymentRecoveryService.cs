@@ -366,7 +366,8 @@ public sealed class CardPaymentRecoveryService(
     ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
     ILinklyCloudTerminalClient? cloudTerminalClient = null,
     ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
-    IOperationAuditLogger? operationAuditLogger = null) : ICardPaymentRecoveryService
+    IOperationAuditLogger? operationAuditLogger = null,
+    IVoucherTenderClient? voucherTenderClient = null) : ICardPaymentRecoveryService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -3370,6 +3371,14 @@ public sealed class CardPaymentRecoveryService(
             LocalCardPaymentAttemptStatus.OrderCompleted,
             DateTimeOffset.UtcNow,
             CancellationToken.None);
+        // 中文注释：订单已落库后补签草稿里的退款券；失败保留占位，不改变恢复结果。
+        order = await CashPaymentWorkflowService.TryIssuePendingRefundVouchersAfterRecoveryAsync(
+            order,
+            draft.Session,
+            voucherTenderClient,
+            orderRepository,
+            "CardRecovery",
+            attempt.AttemptGuid);
         var recoveredSession = currentSession;
         var hasPostCommitWarning = !finalizedFullRefund;
         try
@@ -3911,6 +3920,15 @@ public sealed class CardPaymentRecoveryService(
                 ex);
         }
 
+        // 中文注释：新落单或命中已保存订单都补签仍为占位的退款券；已有真实券号的不会再签。
+        order = await CashPaymentWorkflowService.TryIssuePendingRefundVouchersAfterRecoveryAsync(
+            order,
+            draft.Session,
+            voucherTenderClient,
+            orderRepository,
+            "CardRecovery",
+            attempt.AttemptGuid);
+
         var pendingSyncCount = currentSession.PendingSyncCount;
         try
         {
@@ -4119,6 +4137,15 @@ public sealed class CardPaymentRecoveryService(
                 RecoveryLogContext(attempt.AttemptGuid.ToString("D")),
                 ex);
         }
+
+        // 中文注释：新落单或命中已保存订单都补签仍为占位的退款券；已有真实券号的不会再签。
+        order = await CashPaymentWorkflowService.TryIssuePendingRefundVouchersAfterRecoveryAsync(
+            order,
+            draft.Session,
+            voucherTenderClient,
+            orderRepository,
+            "CardRecovery",
+            attempt.AttemptGuid);
 
         var pendingSyncCount = currentSession.PendingSyncCount;
         try

@@ -60,7 +60,8 @@ public sealed class SquarePaymentRecoveryService(
     ILocalizationService? localization = null,
     FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
     ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
-    ISquareRefundSettlementService? refundSettlementService = null) : ISquarePaymentRecoveryService
+    ISquareRefundSettlementService? refundSettlementService = null,
+    IVoucherTenderClient? voucherTenderClient = null) : ISquarePaymentRecoveryService
 {
     /// <summary>
     /// 退货单已完成、退款仍在 Square 结算（PENDING）。只用于列表展示，不是数据库状态枚举。
@@ -2870,6 +2871,14 @@ public sealed class SquarePaymentRecoveryService(
             fullFinalizePending,
             LocalSquarePaymentAttemptStatus.OrderCompleted,
             CancellationToken.None);
+        // 中文注释：订单已落库后补签草稿里的退款券；失败保留占位，不改变恢复结果。
+        order = await CashPaymentWorkflowService.TryIssuePendingRefundVouchersAfterRecoveryAsync(
+            order,
+            draft.Session,
+            voucherTenderClient,
+            orderRepository,
+            "SquareRecovery",
+            attempt.AttemptGuid);
         return new CardPaymentRecoveryResult(
             CardPaymentRecoveryOutcome.OrderCompleted,
             T("cardRecovery.refund.confirmedCompleted", "The confirmed card refund was recovered and the return was saved."),
