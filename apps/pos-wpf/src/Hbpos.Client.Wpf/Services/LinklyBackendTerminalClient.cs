@@ -1556,9 +1556,7 @@ public sealed class LinklyBackendTerminalClient(
 
     private static bool IsSettlementFinal(LinklyCloudBackendSessionResponse status, int failureWaitPolls)
     {
-        if (string.Equals(status.Status, StatusFailed, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase) ||
-            IsCancelledStatus(status.Status))
+        if (LinklyBackendSessionClassifier.IsFailureStatus(status.Status))
         {
             return true;
         }
@@ -3264,7 +3262,7 @@ public sealed class LinklyBackendTerminalClient(
         bool suppressPrintedReceipt,
         bool manualCancelRequested = false)
     {
-        if (string.Equals(status.Status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase))
+        if (LinklyBackendSessionClassifier.IsNotSubmitted(status.Status))
         {
             return new PaymentAuthorizationResult(false, null, T("linkly.backend.notSubmitted", "Linkly Cloud transaction was not submitted. Retry the payment."));
         }
@@ -3492,7 +3490,7 @@ public sealed class LinklyBackendTerminalClient(
 
     private static LinklyReceiptApproval? TryReadReceiptApproval(LinklyCloudBackendSessionResponse status)
     {
-        if (!string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase))
+        if (!LinklyBackendSessionClassifier.IsCompleted(status.Status))
         {
             return null;
         }
@@ -3532,7 +3530,7 @@ public sealed class LinklyBackendTerminalClient(
 
     private static bool IsUnresolvedSignatureReceiptStatus(LinklyCloudBackendSessionResponse status)
     {
-        if (!string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase) ||
+        if (!LinklyBackendSessionClassifier.IsCompleted(status.Status) ||
             !IsSignatureReceiptPrompt(status))
         {
             return false;
@@ -3933,12 +3931,12 @@ public sealed class LinklyBackendTerminalClient(
         return lines.Length == 0 ? null : string.Join(Environment.NewLine, lines);
     }
 
+    // 实时轮询的终态口径（比 LinklyBackendSessionClassifier.IsTerminalStatusName 严格）：
+    // Completed 必须结果字段已到位；失败类状态名恒为终态；Pending 但已有官方批准证据也收尾。
     private static bool IsFinal(LinklyCloudBackendSessionResponse status)
     {
         return HasResolvedCompletedOutcome(status) ||
-            string.Equals(status.Status, StatusFailed, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase) ||
-            IsCancelledStatus(status.Status) ||
+            LinklyBackendSessionClassifier.IsFailureStatus(status.Status) ||
             HasOfficialPendingSuccess(status);
     }
 
@@ -3983,7 +3981,7 @@ public sealed class LinklyBackendTerminalClient(
 
     private static bool HasResolvedCompletedOutcome(LinklyCloudBackendSessionResponse status)
     {
-        if (!string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase))
+        if (!LinklyBackendSessionClassifier.IsCompleted(status.Status))
         {
             return false;
         }
@@ -3996,14 +3994,14 @@ public sealed class LinklyBackendTerminalClient(
 
     private static bool IsCompletedOrPendingSuccess(LinklyCloudBackendSessionResponse status)
     {
-        return string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase) ||
+        return LinklyBackendSessionClassifier.IsCompleted(status.Status) ||
             HasOfficialPendingSuccess(status);
     }
 
     private static bool HasOfficialPendingSuccess(LinklyCloudBackendSessionResponse status)
     {
         // Pending 但已有官方交易成功证据时，必须收尾成功交易，避免终端已批准而 WPF 继续等待。
-        return string.Equals(status.Status, StatusPending, StringComparison.OrdinalIgnoreCase) &&
+        return LinklyBackendSessionClassifier.IsPending(status.Status) &&
             HasOfficialSuccessEvidence(status);
     }
 
@@ -4029,14 +4027,13 @@ public sealed class LinklyBackendTerminalClient(
         string? expectedTxnRef,
         decimal expectedAmount)
     {
-        if (string.Equals(status.Status, StatusPending, StringComparison.OrdinalIgnoreCase))
+        if (LinklyBackendSessionClassifier.IsPending(status.Status))
         {
             return true;
         }
 
-        var requestedAmount = Math.Abs(expectedAmount);
-        var result = ReadTransactionResult(status, requestedAmount, NormalizeOptional(expectedTxnRef) ?? string.Empty);
-        return result.Succeeded && IsTransactionResultVerified(status, result, requestedAmount);
+        // 恢复服务与 ConfiguredCardTerminalClient 的批准核验走同一个入口，不再各自手写这对调用。
+        return LinklyBackendSessionClassifier.TryReadVerifiedApproval(status, expectedAmount, expectedTxnRef, out _);
     }
 
     internal static bool HasPendingApprovalEvidenceMatchingAttempt(
@@ -4045,7 +4042,7 @@ public sealed class LinklyBackendTerminalClient(
         decimal expectedAmount,
         string? expectedTxnType)
     {
-        if (!string.Equals(status.Status, StatusPending, StringComparison.OrdinalIgnoreCase))
+        if (!LinklyBackendSessionClassifier.IsPending(status.Status))
         {
             return true;
         }
@@ -4130,13 +4127,6 @@ public sealed class LinklyBackendTerminalClient(
         string TxnRef,
         decimal Amount,
         string? TxnType);
-
-    private static bool IsCancelledStatus(string? status)
-    {
-        // Linkly 后端取消成功可能返回两种拼写，轮询必须在这里停止，避免误报上一笔未完成。
-        return string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Canceled", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static bool RequiresRecovery(LinklyCloudBackendSessionResponse status)
     {

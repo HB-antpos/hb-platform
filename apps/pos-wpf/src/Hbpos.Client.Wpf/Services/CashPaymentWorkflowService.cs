@@ -3667,12 +3667,9 @@ public sealed class CashPaymentWorkflowService(
 
     private static bool IsTerminalActiveSessionStatus(LinklyCloudBackendSessionResponse status)
     {
+        // 实时收款口径的批准（含 Pending + 已核验的官方批准证据），或状态名终态（Completed / 失败类状态名）。
         return LinklyBackendTerminalClient.IsApprovedFinalTransaction(status) ||
-            string.Equals(status.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, "Failed", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, "NotSubmitted", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, "Canceled", StringComparison.OrdinalIgnoreCase);
+            LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status);
     }
 
     private static LocalCardPaymentAttemptStatus MapActiveSessionOutcome(LinklyCloudBackendSessionResponse status)
@@ -3682,23 +3679,7 @@ public sealed class CashPaymentWorkflowService(
             return LocalCardPaymentAttemptStatus.Approved;
         }
 
-        var text = $"{status.Status} {status.ResponseText}".ToUpperInvariant();
-        if (text.Contains("TIMEOUT", StringComparison.Ordinal))
-        {
-            return LocalCardPaymentAttemptStatus.TimedOut;
-        }
-
-        if (text.Contains("CANCEL", StringComparison.Ordinal))
-        {
-            return LocalCardPaymentAttemptStatus.Cancelled;
-        }
-
-        if (text.Contains("DECLIN", StringComparison.Ordinal))
-        {
-            return LocalCardPaymentAttemptStatus.Declined;
-        }
-
-        return LocalCardPaymentAttemptStatus.Failed;
+        return LinklyBackendSessionClassifier.MapFailureOutcome(status);
     }
 
     private static void EnsureActiveSessionScopeMatches(

@@ -910,7 +910,7 @@ public sealed class CardPaymentRecoveryService(
                 attempt = await BindRecoveredSessionAsync(attempt, status, cancellationToken);
             }
 
-            if (status is not null && !IsFinal(status))
+            if (status is not null && !LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status))
             {
                 ConsoleLog.Write(
                     "CardRecovery",
@@ -973,7 +973,7 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
         }
 
-        if (!IsFinal(status))
+        if (!LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status))
         {
             LogRecoveryResult(settings, attempt, status, CardPaymentRecoveryOutcome.Checking, "remote-status-not-final");
             return new CardPaymentRecoveryResult(
@@ -996,24 +996,23 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
         }
 
-        if (IsApproved(status))
+        if (LinklyBackendSessionClassifier.IsApprovedByFlag(status))
         {
             // 与实时收款共用同一套证据核验，服务端没给卡交易明细时也不能跳过：那正是证据没核验上的情形
             // （例如终端批准的金额与请求不一致），跳过就等于拿草稿金额补造终端批准金额并自动落单。
             // 旧服务端不返回明细但会带原始 transaction 通知，ReadTransactionResult 会从通知里读出金额，兼容路径不受影响。
-            var transactionResult = LinklyBackendTerminalClient.ReadTransactionResult(
+            // 终态批准的金额核验与实时收款、ConfiguredCardTerminalClient 共用同一个入口（先对 attempt 金额），
+            // 草稿存在时卡金额还要再对一次：attempt 金额与草稿卡金额必须都对得上终端批准金额。
+            var isAttemptAmountVerified = LinklyBackendSessionClassifier.TryReadVerifiedApproval(
                 status,
-                Math.Abs(attempt.Amount),
-                attempt.TxnRef ?? string.Empty);
-            var isAttemptAmountVerified = LinklyBackendTerminalClient.IsTransactionResultVerified(
-                status,
-                transactionResult,
-                Math.Abs(attempt.Amount));
+                attempt.Amount,
+                attempt.TxnRef,
+                out var transactionResult);
             var isDraftAmountVerified = draft is null || LinklyBackendTerminalClient.IsTransactionResultVerified(
                 status,
                 transactionResult,
                 Math.Abs(draft.CardAmount));
-            if (!transactionResult.Succeeded || !isAttemptAmountVerified || !isDraftAmountVerified)
+            if (!isAttemptAmountVerified || !isDraftAmountVerified)
             {
                 // 先核验支付证据，即使草稿缺失也不能持久化未经验证的批准状态、保存订单或确认 session。
                 LogRecoveryResult(
@@ -1076,14 +1075,14 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
         }
 
-        if (IsDeclinedOrFailed(status))
+        if (LinklyBackendSessionClassifier.IsDeclinedOrFailed(status))
         {
             var reason = string.IsNullOrWhiteSpace(status.ResponseText) ? status.Status : status.ResponseText;
             if (draft is null)
             {
                 return await PersistInvalidRecoveredDraftAsync(
                     attempt,
-                    MapFailureStatus(status),
+                    LinklyBackendSessionClassifier.MapFailureOutcome(status),
                     status.ResponseCode,
                     status.ResponseText,
                     attempt.PaymentReference,
@@ -1095,7 +1094,7 @@ public sealed class CardPaymentRecoveryService(
                 cart,
                 attempt,
                 draft,
-                MapFailureStatus(status),
+                LinklyBackendSessionClassifier.MapFailureOutcome(status),
                 status.ResponseCode,
                 status.ResponseText,
                 attempt.PaymentReference,
@@ -1486,14 +1485,13 @@ public sealed class CardPaymentRecoveryService(
             }
 
             attempt = await BindRecoveredSessionAsync(attempt, status, cancellationToken);
-            if (!IsFinal(status))
+            if (!LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status))
             {
                 status = await backendTerminalClient.ResumeSessionUntilFinalAsync(settings, status, cancellationToken);
                 attempt = await BindRecoveredSessionAsync(attempt, status, cancellationToken);
             }
 
-            if (string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase) &&
-                status.TransactionSuccess is null)
+            if (LinklyBackendSessionClassifier.IsCompletedWithoutSuccessFlag(status))
             {
                 status = await backendTerminalClient.GetSessionStatusAsync(settings, status.SessionId, cancellationToken);
             }
@@ -1538,7 +1536,7 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
         }
 
-        if (!IsFinal(status))
+        if (!LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status))
         {
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Checking,
@@ -1547,16 +1545,16 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(attempt));
         }
 
-        if (IsApproved(status))
+        if (LinklyBackendSessionClassifier.IsApprovedByFlag(status))
         {
             return await HandleApprovedActiveSessionAsync(settings, session, status, attempt, cancellationToken);
         }
 
-        if (IsDeclinedOrFailed(status))
+        if (LinklyBackendSessionClassifier.IsDeclinedOrFailed(status))
         {
             if (!await TrySaveActiveSessionOutcomeAsync(
                     attempt,
-                    MapFailureStatus(status),
+                    LinklyBackendSessionClassifier.MapFailureOutcome(status),
                     status,
                     cancellationToken))
             {
@@ -2421,18 +2419,18 @@ public sealed class CardPaymentRecoveryService(
             return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive, status);
         }
 
-        if (IsApproved(status))
+        if (LinklyBackendSessionClassifier.IsApprovedByFlag(status))
         {
             return new LiveResolutionCheck(LiveResolutionVerdict.Approved, status);
         }
 
-        if (IsDeclinedOrFailed(status))
+        if (LinklyBackendSessionClassifier.IsDeclinedOrFailed(status))
         {
             return new LiveResolutionCheck(LiveResolutionVerdict.Failed, status);
         }
 
         // 非终态（Pending / TokenRefreshRequired 等）随时可能出结果；Completed 却没有成败位则无结论。
-        return IsFinal(status)
+        return LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status)
             ? new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive, status)
             : new LiveResolutionCheck(LiveResolutionVerdict.Pending, status);
     }
@@ -2592,7 +2590,7 @@ public sealed class CardPaymentRecoveryService(
             }
 
             // 付款页按钮只处理后端 active/resumable session，不能把它和当前购物车自动合并。
-            if (!IsFinal(status))
+            if (!LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status))
             {
                 ConsoleLog.Write(
                     "CardRecovery",
@@ -2600,8 +2598,7 @@ public sealed class CardPaymentRecoveryService(
                 status = await backendTerminalClient.ResumeSessionUntilFinalAsync(settings, status, cancellationToken);
             }
 
-            if (string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase) &&
-                status.TransactionSuccess is null)
+            if (LinklyBackendSessionClassifier.IsCompletedWithoutSuccessFlag(status))
             {
                 // 中文注释：resumable 可能只返回 active session 摘要；Completed 但没有成功/失败位时必须按 SessionId 再查一次权威状态。
                 ConsoleLog.Write(
@@ -2652,7 +2649,7 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(persistedAttempt));
         }
 
-        if (!IsFinal(status))
+        if (!LinklyBackendSessionClassifier.IsTerminalStatusName(status.Status))
         {
             return new CardPaymentRecoveryResult(
                 CardPaymentRecoveryOutcome.Checking,
@@ -2661,18 +2658,18 @@ public sealed class CardPaymentRecoveryService(
                 PaymentSupervisorDetails: BuildPaymentSupervisorDetails(persistedAttempt));
         }
 
-        if (IsApproved(status))
+        if (LinklyBackendSessionClassifier.IsApprovedByFlag(status))
         {
             // 付款页恢复只确认并清理上一笔 active session，不能把结果合并进当前购物车；
             // 但清理前必须确认这笔批准已经有订单承接，否则 ack 之后服务端再也看不到这笔孤儿扣款。
             return await HandleApprovedActiveSessionAsync(settings, session, status, persistedAttempt, cancellationToken);
         }
 
-        if (IsDeclinedOrFailed(status))
+        if (LinklyBackendSessionClassifier.IsDeclinedOrFailed(status))
         {
             if (!await TrySaveActiveSessionOutcomeAsync(
                     persistedAttempt,
-                    MapFailureStatus(status),
+                    LinklyBackendSessionClassifier.MapFailureOutcome(status),
                     status,
                     cancellationToken))
             {
@@ -5637,37 +5634,6 @@ public sealed class CardPaymentRecoveryService(
         return draft;
     }
 
-    private static bool IsFinal(LinklyCloudBackendSessionResponse status)
-    {
-        return string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, StatusFailed, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status.Status, StatusNotSubmitted, StringComparison.OrdinalIgnoreCase) ||
-            IsCancelledStatus(status.Status);
-    }
-
-    private static bool IsApproved(LinklyCloudBackendSessionResponse status)
-    {
-        return string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase) &&
-            status.TransactionSuccess == true;
-    }
-
-    private static bool IsDeclinedOrFailed(LinklyCloudBackendSessionResponse status)
-    {
-        if (string.Equals(status.Status, StatusCompleted, StringComparison.OrdinalIgnoreCase))
-        {
-            return status.TransactionSuccess == false;
-        }
-
-        return IsFinal(status);
-    }
-
-    private static bool IsCancelledStatus(string? status)
-    {
-        // Linkly 后端可能用英式或美式拼写表示收银员取消成功；都应视为可清除终态。
-        return string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Canceled", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool CanBindRecoveredSession(
         LocalCardPaymentAttempt attempt,
         LinklyCloudBackendSessionResponse status)
@@ -5752,27 +5718,6 @@ public sealed class CardPaymentRecoveryService(
 
         mismatchReason = string.Empty;
         return true;
-    }
-
-    private static LocalCardPaymentAttemptStatus MapFailureStatus(LinklyCloudBackendSessionResponse status)
-    {
-        var text = $"{status.Status} {status.ResponseText}".ToUpperInvariant();
-        if (text.Contains("TIMEOUT", StringComparison.Ordinal))
-        {
-            return LocalCardPaymentAttemptStatus.TimedOut;
-        }
-
-        if (text.Contains("CANCEL", StringComparison.Ordinal))
-        {
-            return LocalCardPaymentAttemptStatus.Cancelled;
-        }
-
-        if (text.Contains("DECLIN", StringComparison.Ordinal))
-        {
-            return LocalCardPaymentAttemptStatus.Declined;
-        }
-
-        return LocalCardPaymentAttemptStatus.Failed;
     }
 
     private static LinklyConnectionMode ResolveAttemptConnectionMode(
