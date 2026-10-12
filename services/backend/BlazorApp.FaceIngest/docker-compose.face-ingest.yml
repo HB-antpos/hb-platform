@@ -1,0 +1,68 @@
+# 人脸抓拍原始报文接收服务（BlazorApp.FaceIngest，P0）独立 compose 项目，运维说明见 docs/runbooks/face-ingest.md。
+#
+# 必须在服务器 /www/HBWeb/BackEnd/face-ingest 下这样启动（.env 放在该目录，不放进 BlazorApp.FaceIngest/，
+# 因为部署时会对 BlazorApp.FaceIngest/ 做 rsync --delete）：
+#   sudo docker compose -p hbweb_face_ingest --env-file .env \
+#     -f BlazorApp.FaceIngest/docker-compose.face-ingest.yml up -d --build
+#
+# 约束（改动前请先对照）：
+#   1. 每次都显式带 -p hbweb_face_ingest：.env 或 shell 里的 COMPOSE_PROJECT_NAME 会盖过下面的顶层 name，
+#      一旦落进 hbweb_vite 等别的项目，就可能误动主后端 / 收银后端容器。
+#   2. 禁止 --remove-orphans、down -v：本机多个 compose 项目共存，误删别的服务代价远大于收益。
+#   3. FACE_INGEST_STORAGE_HOST_PATH 不得放在 /www/HBWeb/BackEnd/master-Vite/ 下（主后端部署的
+#      rsync --delete 会把它删掉），也不得用 /lhcos-data（COS 挂载，公共读桶）。人脸图属敏感信息。
+#   4. 端口只绑 127.0.0.1，公网只经宿主机 Nginx 的 /face-ingest/
+#      （scripts/ops/nginx/hotbargain-face-ingest.location.conf）。
+#   5. 宿主机存储目录与配置目录都用 `sudo install -d -o 1000 -g 1000 -m 700` 创建（容器内 appuser 的 uid 为 1000）。
+#   6. 配置目录整个只读挂载（不要只挂 cameras.json 单个文件）：编辑器 / mv 原子替换会换 inode，
+#      单文件绑定挂载会继续指向旧文件，热更新就失效了。
+name: hbweb_face_ingest
+
+services:
+  face-ingest:
+    build:
+      context: ..
+      dockerfile: BlazorApp.FaceIngest/Dockerfile
+    image: hb-face-ingest:local
+    container_name: hb-face-ingest
+    # 用 Docker 自带的 init 当 PID 1：dotnet 直接做 PID 1 时，启动期未处理异常（cameras.json 坏 JSON / 校验不通过）
+    # 触发的 abort 信号会被内核忽略，进程不退出且占满一个 CPU（本机实测 99.9%），restart 策略也不会生效；
+    # 有 init 后容器以 134 退出并按 restart 策略重试，docker logs 里能看到 Unhandled exception。
+    init: true
+    # 只做流式落盘，不缓存请求体；限制内存并禁止占用 swap，避免拖慢同机的主 API 与收银 API。
+    mem_limit: 256m
+    memswap_limit: 256m
+    ports:
+      - "127.0.0.1:5004:5004"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_HTTP_PORTS=5004
+      # 绑定挂载下 inotify 不可靠，改用轮询；cameras.json 改动后无需重启容器即可生效。
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+      # 默认关闭：鉴权通过的请求照样回 200，但读掉请求体不落盘。试点时在 .env 里显式设为 true。
+      - FaceIngest__CaptureEnabled=${FACE_INGEST_CAPTURE_ENABLED:-false}
+      - FaceIngest__StorageRootPath=/app/App_Data/FaceIngest
+      - FaceIngest__ConfigDirectory=/app/config
+      # 容量护栏：任一触发即丢弃新报文（仍回 200，避免摄像机断网续传反复重推），并节流记 Warning。
+      - FaceIngest__MaxTotalBytes=${FACE_INGEST_MAX_TOTAL_BYTES:-5368709120}
+      - FaceIngest__MaxFileCount=${FACE_INGEST_MAX_FILE_COUNT:-100000}
+      - FaceIngest__MinFreeDiskBytes=${FACE_INGEST_MIN_FREE_DISK_BYTES:-10737418240}
+      - FaceIngest__RetentionDays=${FACE_INGEST_RETENTION_DAYS:-7}
+      # 单请求上限沿用 appsettings 的 16777216（16MB），与 Nginx client_max_body_size 16m 对齐；
+      # 要改必须两边一起改，所以这里不开放 .env 覆盖。
+    volumes:
+      - ${FACE_INGEST_STORAGE_HOST_PATH:?required}:/app/App_Data/FaceIngest
+      - ${FACE_INGEST_CONFIG_HOST_PATH:?required}:/app/config:ro
+    restart: unless-stopped
+    # 匿名可达的接收端点会被扫描；json-file 默认不轮转，限制容器日志占用（最多约 250MB）。
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5004/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

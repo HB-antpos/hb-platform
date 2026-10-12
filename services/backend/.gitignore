@@ -201,6 +201,9 @@ data-protection-keys/
 **/App_Data/LinklyCloudCredentialDataProtectionKeys/
 attendance-qr-data-protection-keys/
 
+# 人脸抓拍原始报文（BlazorApp.FaceIngest 本地调试落盘的人脸图片与请求头，属敏感生物信息，绝不能提交）
+**/App_Data/FaceIngest/
+
 # NuGet Packages
 *.nupkg
 # NuGet Symbol Packages

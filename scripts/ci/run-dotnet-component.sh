@@ -14,11 +14,14 @@ case "$component" in
   backend)
     project="services/backend/BlazorApp.Api.Tests/BlazorApp.Api.Tests.csproj"
     mobile_activation_project="services/backend/BlazorApp.MobileDeviceActivation.Tests/BlazorApp.MobileDeviceActivation.Tests.csproj"
+    face_ingest_project="services/backend/BlazorApp.FaceIngest.Tests/BlazorApp.FaceIngest.Tests.csproj"
     node scripts/ci/backend-test-inventory.mjs
     dotnet restore "$project"
     dotnet restore "$mobile_activation_project"
+    dotnet restore "$face_ingest_project"
     dotnet build "$project" --configuration Release --no-restore
     dotnet build "$mobile_activation_project" --configuration Release --no-restore
+    dotnet build "$face_ingest_project" --configuration Release --no-restore
     dotnet test "$project" \
       --configuration Release \
       --no-build \
@@ -42,6 +45,14 @@ case "$component" in
       --logger 'trx;LogFileName=mobile-device-activation.trx' \
       --results-directory "$results_root"
     node scripts/ci/assert-trx-tests.mjs "$results_root/mobile-device-activation.trx" 'Mobile device activation contracts'
+
+    dotnet test "$face_ingest_project" \
+      --configuration Release \
+      --no-build \
+      --filter 'Category!=SQL' \
+      --logger 'trx;LogFileName=face-ingest.trx' \
+      --results-directory "$results_root"
+    node scripts/ci/assert-trx-tests.mjs "$results_root/face-ingest.trx" 'Face ingest tests'
     ;;
   pos-api)
     project="apps/pos-wpf/tests/Hbpos.Api.Tests/Hbpos.Api.Tests.csproj"
