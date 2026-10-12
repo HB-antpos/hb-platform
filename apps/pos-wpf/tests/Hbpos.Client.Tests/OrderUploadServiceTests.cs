@@ -975,6 +975,534 @@ public sealed class OrderUploadServiceTests
         }
     }
 
+    [Fact]
+    public async Task ExecutePendingAsync_skips_failed_order_during_backoff_and_picks_it_again_once_due()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var order = await harness.SaveOrderAsync();
+        harness.Api.Failure = _ => new HttpRequestException("network down");
+
+        Assert.Equal(new OrderUploadExecutionResult(1, 0, 1), await harness.Executor.ExecutePendingAsync());
+        var failed = await harness.ReadQueueRowAsync(order.OrderGuid);
+        Assert.Equal("Failed", failed.Status);
+        Assert.Equal(1, failed.AttemptCount);
+        Assert.Equal(TimeSpan.FromSeconds(30), failed.Delay);
+
+        // 退避期内的 15 秒定时上传不再原样重发失败单。
+        harness.Api.Failure = _ => null;
+        Assert.Equal(new OrderUploadExecutionResult(0, 0, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Single(harness.Api.RequestedOrderGuids);
+
+        await harness.ExpireBackoffAsync();
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecutePendingAsync());
+        var synced = await harness.ReadQueueRowAsync(order.OrderGuid);
+        Assert.Equal("Synced", synced.Status);
+        Assert.Equal(0, synced.AttemptCount);
+        Assert.Null(synced.NextAttemptAt);
+    }
+
+    [Fact]
+    public async Task ExecutePendingAsync_twenty_failed_orders_no_longer_block_a_new_order()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var failedOrders = new List<Guid>();
+        for (var index = 0; index < 20; index++)
+        {
+            failedOrders.Add((await harness.SaveOrderAsync()).OrderGuid);
+        }
+
+        harness.Api.Failure = _ => new HttpRequestException("network down");
+        Assert.Equal(new OrderUploadExecutionResult(20, 0, 20), await harness.Executor.ExecutePendingAsync());
+
+        // 旧实现按 CreatedAt 取前 20 张 Pending/Failed：20 张失败单永远占满一批，新单再也轮不到。
+        var newOrder = await harness.SaveOrderAsync();
+        harness.Api.Failure = _ => null;
+        harness.Api.ClearRequests();
+
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal([newOrder.OrderGuid], harness.Api.RequestedOrderGuids);
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(newOrder.OrderGuid));
+        foreach (var orderGuid in failedOrders)
+        {
+            Assert.Equal("Failed", await harness.GetSyncStatusAsync(orderGuid));
+        }
+    }
+
+    [Theory]
+    [InlineData("network", null, "30,60,120,300,300")]
+    [InlineData("500", null, "30,60,120,300,300")]
+    [InlineData("404", null, "30,60,120,300,300")]
+    [InlineData("408", null, "30,60,120,300,300")]
+    [InlineData("429", null, "30,60,120,300,300")]
+    [InlineData("403", "DEVICE_SCOPE_FORBIDDEN", "30,60,120,300,300")]
+    [InlineData("400", "ORDER_SYNC_INVALID", "30,60,120,300,600,1200,1800,1800")]
+    [InlineData("409", null, "30,60,120,300,600,1200,1800,1800")]
+    [InlineData("not-accepted", null, "30,60,120,300,600,1200,1800,1800")]
+    public async Task Failed_upload_backoff_caps_at_five_minutes_unless_server_reliably_rejects_the_order(
+        string failure,
+        string? errorCode,
+        string expectedDelaySeconds)
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var order = await harness.SaveOrderAsync();
+        if (failure == "not-accepted")
+        {
+            harness.Api.NotAccepted = true;
+        }
+        else
+        {
+            harness.Api.Failure = _ => failure == "network"
+                ? new HttpRequestException("network down")
+                : new CatalogApiException($"HTTP {failure}", (HttpStatusCode)int.Parse(failure), errorCode);
+        }
+
+        var expected = expectedDelaySeconds.Split(',').Select(value => TimeSpan.FromSeconds(int.Parse(value))).ToArray();
+        for (var attempt = 1; attempt <= expected.Length; attempt++)
+        {
+            await harness.ExpireBackoffAsync();
+            Assert.Equal(new OrderUploadExecutionResult(1, 0, 1), await harness.Executor.ExecutePendingAsync());
+            var row = await harness.ReadQueueRowAsync(order.OrderGuid);
+            Assert.Equal("Failed", row.Status);
+            Assert.Equal(attempt, row.AttemptCount);
+            Assert.Equal(expected[attempt - 1], row.Delay);
+        }
+    }
+
+    [Fact]
+    public async Task Upload_timeout_counts_a_transient_attempt_but_keeps_order_pending()
+    {
+        await using var harness = await TimeoutUploadHarness.CreateAsync(slowOrderCount: 1, fastOrderCount: 0);
+        var order = harness.SlowOrders[0];
+
+        Assert.Equal(new OrderUploadExecutionResult(1, 0, 1), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal("Pending", (await harness.GetOrderAsync(order)).SyncStatus);
+        var row = await ReadQueueRowAsync(harness.Store, order);
+        Assert.Equal("Pending", row.Status);
+        Assert.Equal(1, row.AttemptCount);
+        Assert.Equal(TimeSpan.FromSeconds(30), row.Delay);
+
+        // 退避期内不再每 15 秒等满一次超时。
+        Assert.Equal(new OrderUploadExecutionResult(0, 0, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal(1, harness.Handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task Endpoint_transition_requeue_clears_backoff_without_counting_an_attempt()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var order = await harness.SaveOrderAsync();
+        harness.Api.Failure = _ => new HttpRequestException("network down");
+        await harness.Executor.ExecutePendingAsync();
+
+        await harness.UploadRepository.MarkPendingAsync(order.OrderGuid);
+
+        var requeued = await harness.ReadQueueRowAsync(order.OrderGuid);
+        Assert.Equal("Pending", requeued.Status);
+        Assert.Equal(1, requeued.AttemptCount);
+        Assert.Null(requeued.NextAttemptAt);
+        Assert.Equal([order.OrderGuid], await harness.UploadRepository.GetPendingOrderGuidsAsync());
+    }
+
+    [Fact]
+    public async Task Manual_single_and_selected_retry_ignore_backoff()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var first = await harness.SaveOrderAsync();
+        var second = await harness.SaveOrderAsync();
+        harness.Api.Failure = _ => new HttpRequestException("network down");
+        Assert.Equal(new OrderUploadExecutionResult(2, 0, 2), await harness.Executor.ExecutePendingAsync());
+        harness.Api.Failure = _ => null;
+
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecuteOneAsync(first.OrderGuid));
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecuteSelectedAsync([second.OrderGuid]));
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(first.OrderGuid));
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(second.OrderGuid));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "DEVICE_AUTH_REQUIRED")]
+    [InlineData(HttpStatusCode.Forbidden, null)]
+    public async Task Global_authorization_failure_ends_the_round_without_counting_attempts_or_moving_backoff(
+        HttpStatusCode statusCode,
+        string? errorCode)
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var backedOff = await harness.SaveOrderAsync();
+        var fresh = await harness.SaveOrderAsync();
+        var untouched = await harness.SaveOrderAsync();
+        harness.Api.Failure = request => request.OrderGuid == backedOff.OrderGuid
+            ? new HttpRequestException("network down")
+            : null;
+        await harness.Executor.ExecuteSelectedAsync([backedOff.OrderGuid]);
+        var beforeAuthorization = await harness.ReadQueueRowAsync(backedOff.OrderGuid);
+        harness.Api.Failure = _ => new CatalogApiException("authorization required", statusCode, errorCode);
+        harness.Api.ClearRequests();
+
+        // 自动上传：收银员票据/设备授权是全局条件，第一笔被拒就结束本轮，后面的订单不再逐笔请求。
+        Assert.Equal(new OrderUploadExecutionResult(2, 0, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal([fresh.OrderGuid], harness.Api.RequestedOrderGuids);
+
+        // 手动重试也一样；已在退避中的订单被授权拦下时，失败次数与下次时间都保持原样。
+        harness.Api.ClearRequests();
+        Assert.Equal(
+            new OrderUploadExecutionResult(3, 0, 3),
+            await harness.Executor.ExecuteSelectedAsync([backedOff.OrderGuid, fresh.OrderGuid, untouched.OrderGuid]));
+        Assert.Equal([backedOff.OrderGuid], harness.Api.RequestedOrderGuids);
+        var afterAuthorization = await harness.ReadQueueRowAsync(backedOff.OrderGuid);
+        Assert.Equal("Pending", afterAuthorization.Status);
+        Assert.Equal(beforeAuthorization.AttemptCount, afterAuthorization.AttemptCount);
+        Assert.Equal(beforeAuthorization.NextAttemptAt, afterAuthorization.NextAttemptAt);
+        foreach (var orderGuid in new[] { fresh.OrderGuid, untouched.OrderGuid })
+        {
+            var row = await harness.ReadQueueRowAsync(orderGuid);
+            Assert.Equal("Pending", row.Status);
+            Assert.Equal(0, row.AttemptCount);
+            Assert.Null(row.NextAttemptAt);
+        }
+    }
+
+    [Fact]
+    public async Task Device_scope_forbidden_is_a_per_order_failure_and_the_round_continues()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var rebound = await harness.SaveOrderAsync();
+        var current = await harness.SaveOrderAsync();
+        harness.Api.Failure = request => request.OrderGuid == rebound.OrderGuid
+            ? new CatalogApiException("Device is not authorized for this store.", HttpStatusCode.Forbidden, "DEVICE_SCOPE_FORBIDDEN")
+            : null;
+
+        Assert.Equal(new OrderUploadExecutionResult(2, 1, 1), await harness.Executor.ExecutePendingAsync());
+
+        // 设备换绑前的旧单与当前授权范围不符：只是这一笔失败并退避，不能当成全局授权失效把整轮停下。
+        var row = await harness.ReadQueueRowAsync(rebound.OrderGuid);
+        Assert.Equal("Failed", row.Status);
+        Assert.Equal(1, row.AttemptCount);
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(current.OrderGuid));
+    }
+
+    [Fact]
+    public async Task Order_with_unissued_refund_voucher_is_held_until_the_reference_is_written_back()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var refundPayment = new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Voucher, -3.00m, " voucher_refund_pending\t");
+        var held = await harness.SaveOrderAsync(
+        [
+            new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, 12.00m, null),
+            refundPayment
+        ]);
+        var normal = await harness.SaveOrderAsync();
+
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal([normal.OrderGuid], harness.Api.RequestedOrderGuids);
+
+        // 直接按订单号上传的入口（同步中心选中重试、交易历史重传）同样不能把占位引用传上去，也不改上传状态。
+        Assert.Equal(new OrderUploadExecutionResult(1, 0, 1), await harness.Executor.ExecuteSelectedAsync([held.OrderGuid]));
+        Assert.Equal([normal.OrderGuid], harness.Api.RequestedOrderGuids);
+        var row = await harness.ReadQueueRowAsync(held.OrderGuid);
+        Assert.Equal("Pending", row.Status);
+        Assert.Equal(0, row.AttemptCount);
+        Assert.Null(row.NextAttemptAt);
+
+        // 签券成功回写真实券号后，下一轮自动上传正常带出券号。
+        await harness.Orders.UpdatePaymentReferenceAsync(refundPayment.PaymentGuid, "VOUCHER_REFUND:RF-0001");
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecutePendingAsync());
+        var uploaded = harness.Api.Requests.Single(request => request.OrderGuid == held.OrderGuid);
+        Assert.Contains(uploaded.Payments, payment => payment.Method == PaymentMethodKind.Voucher && payment.Reference == "RF-0001");
+        Assert.DoesNotContain(
+            harness.Api.Requests.SelectMany(request => request.Payments),
+            payment => (payment.Reference ?? string.Empty).Contains("PENDING", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(held.OrderGuid));
+    }
+
+    [Fact]
+    public async Task Refund_voucher_hold_past_threshold_shows_reason_in_sync_center_without_touching_status_or_backoff()
+    {
+        // 卡退款经恢复服务落单的订单从不签券（签券失败后离开付款页同理）：除了中心日志，同步中心也要看得到暂扣原因，
+        // 不能只是一条没有原因的 Pending。原因只写 ErrorMessage，状态、失败次数、退避时间一概不动。
+        await using var harness = await BackoffHarness.CreateAsync();
+        static LocalPayment PendingRefundVoucher() =>
+            new(Guid.NewGuid(), PaymentMethodKind.Voucher, -3.00m, "VOUCHER_REFUND_PENDING");
+        var stuckRefund = PendingRefundVoucher();
+        var stuck = await harness.SaveOrderAsync(
+        [
+            new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, 12.00m, null),
+            stuckRefund
+        ]);
+        var failedBeforeUpgrade = await harness.SaveOrderAsync([PendingRefundVoucher()]);
+        var justSaved = await harness.SaveOrderAsync([PendingRefundVoucher()]);
+        var syncedWithPlaceholder = await harness.SaveOrderAsync([PendingRefundVoucher()]);
+
+        // 入队 20 分钟仍是占位引用（已过 10 分钟告警阈值、仍在 30 分钟暂扣窗口内）。
+        // 用 +14:00 的本地时间串：按字符串比较会显得比现在还晚，只有按 julianday 换算才判得出已超时。
+        var queuedAt = DateTimeOffset.UtcNow.AddMinutes(-20).ToOffset(TimeSpan.FromHours(14))
+            .ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        await harness.ExecuteSqlAsync(
+            $"UPDATE SyncQueue SET CreatedAt = '{queuedAt}' WHERE EntityId IN " +
+            $"('{stuck.OrderGuid}', '{failedBeforeUpgrade.OrderGuid}', '{syncedWithPlaceholder.OrderGuid}');");
+        // 升级前就已失败过的旧单：带着旧错误、失败次数与未到期的退避时间。
+        const string farFutureDue = "2099-01-01T00:00:00.0000000+00:00";
+        await harness.ExecuteSqlAsync(
+            $"UPDATE SyncQueue SET Status = 'Failed', AttemptCount = 2, NextAttemptAt = '{farFutureDue}', " +
+            $"ErrorMessage = 'old error' WHERE EntityId = '{failedBeforeUpgrade.OrderGuid}';");
+        // 本 PR 之前已带着占位引用上传成功的历史订单：已同步的行不能再被标成暂扣。
+        await harness.ExecuteSqlAsync($"UPDATE SyncQueue SET Status = 'Synced' WHERE EntityId = '{syncedWithPlaceholder.OrderGuid}';");
+
+        Assert.Equal(new OrderUploadExecutionResult(0, 0, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Empty(harness.Api.Requests);
+
+        var stuckRow = await harness.ReadQueueRowAsync(stuck.OrderGuid);
+        Assert.StartsWith("Refund voucher not issued", stuckRow.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal("Pending", stuckRow.Status);
+        Assert.Equal(0, stuckRow.AttemptCount);
+        Assert.Null(stuckRow.NextAttemptAt);
+        Assert.Null(stuckRow.LastTriedAt);
+
+        var failedRow = await harness.ReadQueueRowAsync(failedBeforeUpgrade.OrderGuid);
+        Assert.Equal(stuckRow.ErrorMessage, failedRow.ErrorMessage);
+        Assert.Equal("Failed", failedRow.Status);
+        Assert.Equal(2, failedRow.AttemptCount);
+        Assert.Equal(farFutureDue, failedRow.NextAttemptAt);
+
+        // 刚落库、签券通常几秒内就会回写的订单不提前打上暂扣原因；已同步的行不受影响。
+        Assert.Null((await harness.ReadQueueRowAsync(justSaved.OrderGuid)).ErrorMessage);
+        Assert.Null((await harness.ReadQueueRowAsync(syncedWithPlaceholder.OrderGuid)).ErrorMessage);
+        Assert.Contains(
+            await harness.SyncQueue.GetActiveItemsAsync(),
+            item => item.EntityId == stuck.OrderGuid &&
+                item.Status == "Pending" &&
+                (item.ErrorMessage ?? string.Empty).StartsWith("Refund voucher not issued", StringComparison.Ordinal));
+
+        // 补签回写真实券号后：下一轮自动上传正常带出券号，暂扣原因随之清掉。
+        await harness.Orders.UpdatePaymentReferenceAsync(stuckRefund.PaymentGuid, "VOUCHER_REFUND:RF-0002");
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal([stuck.OrderGuid], harness.Api.RequestedOrderGuids);
+        var uploadedRow = await harness.ReadQueueRowAsync(stuck.OrderGuid);
+        Assert.Equal("Synced", uploadedRow.Status);
+        Assert.Null(uploadedRow.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Unissued_refund_voucher_hold_expires_after_thirty_minutes_on_both_queue_and_direct_upload_paths()
+    {
+        // 暂扣只挡"落库 → 签券回写"之间的插队；从不签券的订单（卡退款经恢复服务落单等）不能永远留在本机，
+        // 入队满 30 分钟后自动上传与按订单号直接上传都要放行，且用同一把尺子（队列入队时间）。
+        await using var harness = await BackoffHarness.CreateAsync();
+        static LocalPayment PendingRefundVoucher() =>
+            new(Guid.NewGuid(), PaymentMethodKind.Voucher, -3.00m, "VOUCHER_REFUND_PENDING");
+        var expiredQueued = await harness.SaveOrderAsync([PendingRefundVoucher()]);
+        var expiredSelected = await harness.SaveOrderAsync([PendingRefundVoucher()]);
+        var fresh = await harness.SaveOrderAsync([PendingRefundVoucher()]);
+        // +14:00 的本地时间串：按字符串比较会显得比现在还晚，只有按 julianday 换算才判得出已过窗口。
+        var expiredAt = DateTimeOffset.UtcNow.AddMinutes(-31).ToOffset(TimeSpan.FromHours(14))
+            .ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        await harness.ExecuteSqlAsync(
+            $"UPDATE SyncQueue SET CreatedAt = '{expiredAt}' WHERE EntityId IN " +
+            $"('{expiredQueued.OrderGuid}', '{expiredSelected.OrderGuid}');");
+
+        // 按订单号直接上传：过了窗口照常上传；仍在窗口内的照旧暂扣、不改状态。
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecuteSelectedAsync([expiredSelected.OrderGuid]));
+        Assert.Equal(new OrderUploadExecutionResult(1, 0, 1), await harness.Executor.ExecuteSelectedAsync([fresh.OrderGuid]));
+        Assert.Equal([expiredSelected.OrderGuid], harness.Api.RequestedOrderGuids);
+
+        // 后台自动上传：只放行过了窗口的那笔，窗口内的继续暂扣。
+        Assert.Equal(new OrderUploadExecutionResult(1, 1, 0), await harness.Executor.ExecutePendingAsync());
+        Assert.Equal([expiredSelected.OrderGuid, expiredQueued.OrderGuid], harness.Api.RequestedOrderGuids);
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(expiredQueued.OrderGuid));
+        Assert.Equal("Synced", await harness.GetSyncStatusAsync(expiredSelected.OrderGuid));
+        var freshRow = await harness.ReadQueueRowAsync(fresh.OrderGuid);
+        Assert.Equal("Pending", freshRow.Status);
+        Assert.Equal(0, freshRow.AttemptCount);
+        Assert.Null(freshRow.NextAttemptAt);
+
+        // "全部重试"同样只放行过了窗口的订单：此时没有可传的了。
+        Assert.Equal(new OrderUploadExecutionResult(0, 0, 0), await harness.Executor.ExecuteAllRetryableAsync());
+    }
+
+    [Fact]
+    public async Task Reupload_of_order_whose_synced_queue_row_was_cleaned_up_recreates_the_queue_row()
+    {
+        await using var harness = await BackoffHarness.CreateAsync();
+        var order = await harness.SaveOrderAsync();
+        await harness.UploadRepository.MarkSyncedAsync(order.OrderGuid);
+        // 模拟启动清理删掉 30 天前已同步的队列行。
+        await harness.ExecuteSqlAsync($"DELETE FROM SyncQueue WHERE EntityId = '{order.OrderGuid}';");
+        harness.Api.Failure = _ => new HttpRequestException("network down");
+
+        // 交易历史重传失败：队列行要补回来，同步中心看得到、后台按退避继续重试，而不是只剩 LocalOrders.SyncStatus=Failed。
+        Assert.Equal(new OrderUploadExecutionResult(1, 0, 1), await harness.Executor.ExecuteSelectedAsync([order.OrderGuid]));
+        var row = await harness.ReadQueueRowAsync(order.OrderGuid);
+        Assert.Equal("Failed", row.Status);
+        Assert.Equal(1, row.AttemptCount);
+        Assert.Contains(
+            await harness.SyncQueue.GetActiveItemsAsync(),
+            item => item.EntityId == order.OrderGuid && item.Status == "Failed");
+
+        // 本地不存在的订单不会凭空补出队列行。
+        await harness.UploadRepository.MarkFailedAsync(Guid.NewGuid(), "missing");
+        Assert.Equal(1L, await harness.ScalarAsync("SELECT COUNT(*) FROM SyncQueue;"));
+    }
+
+    private static async Task<QueueRow> ReadQueueRowAsync(LocalSqliteStore store, Guid orderGuid)
+    {
+        await using var connection = await store.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Status, AttemptCount, NextAttemptAt, LastTriedAt, ErrorMessage
+            FROM SyncQueue
+            WHERE EntityId = $OrderGuid AND EntityType = 'Order';
+            """;
+        command.Parameters.AddWithValue("$OrderGuid", orderGuid.ToString());
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync(), $"SyncQueue row missing for {orderGuid:D}");
+        return new QueueRow(
+            reader.GetString(0),
+            reader.GetInt32(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4));
+    }
+
+    private sealed record QueueRow(
+        string Status,
+        int AttemptCount,
+        string? NextAttemptAt,
+        string? LastTriedAt,
+        string? ErrorMessage)
+    {
+        // NextAttemptAt（UTC）与 LastTriedAt（本地带偏移）由同一时刻写出，二者之差就是这次的退避延时。
+        public TimeSpan? Delay => NextAttemptAt is null || LastTriedAt is null
+            ? null
+            : DateTimeOffset.Parse(NextAttemptAt, System.Globalization.CultureInfo.InvariantCulture) -
+              DateTimeOffset.Parse(LastTriedAt, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    // 真实 SQLite 仓储 + 真实上传服务 + 可编程的服务端响应；退避"到期"通过把 NextAttemptAt 改到过去模拟。
+    private sealed class BackoffHarness : IAsyncDisposable
+    {
+        private readonly string _databasePath;
+
+        private BackoffHarness(string databasePath, LocalSqliteStore store)
+        {
+            _databasePath = databasePath;
+            Store = store;
+            Orders = new LocalOrderRepository(store);
+            UploadRepository = new LocalOrderUploadRepository(store);
+            SyncQueue = new SyncQueueRepository(store);
+            Executor = new OrderUploadExecutionService(
+                new OrderUploadService(Orders, Api, UploadRepository),
+                UploadRepository);
+        }
+
+        public LocalSqliteStore Store { get; }
+
+        public LocalOrderRepository Orders { get; }
+
+        public LocalOrderUploadRepository UploadRepository { get; }
+
+        public SyncQueueRepository SyncQueue { get; }
+
+        public ProgrammableOrderSyncApiClient Api { get; } = new();
+
+        public OrderUploadExecutionService Executor { get; }
+
+        public static async Task<BackoffHarness> CreateAsync()
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-order-upload-backoff-{Guid.NewGuid():N}.db");
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            return new BackoffHarness(databasePath, store);
+        }
+
+        public async Task<LocalOrder> SaveOrderAsync(IReadOnlyList<LocalPayment>? payments = null)
+        {
+            var order = CreateLocalOrder();
+            if (payments is not null)
+            {
+                order = order with { Payments = payments };
+            }
+
+            await Orders.SavePendingOrderAsync(order);
+            return order;
+        }
+
+        public Task<QueueRow> ReadQueueRowAsync(Guid orderGuid) => OrderUploadServiceTests.ReadQueueRowAsync(Store, orderGuid);
+
+        public async Task<string> GetSyncStatusAsync(Guid orderGuid) =>
+            (await Orders.GetRecentOrdersAsync()).Single(order => order.OrderGuid == orderGuid).SyncStatus;
+
+        public Task ExpireBackoffAsync() => ExecuteSqlAsync(
+            "UPDATE SyncQueue SET NextAttemptAt = '2000-01-01T00:00:00.0000000+00:00' WHERE NextAttemptAt IS NOT NULL;");
+
+        public async Task ExecuteSqlAsync(string sql)
+        {
+            await using var connection = await Store.OpenConnectionAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task<object?> ScalarAsync(string sql)
+        {
+            await using var connection = await Store.OpenConnectionAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            return await command.ExecuteScalarAsync();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(_databasePath);
+        }
+    }
+
+    private sealed class ProgrammableOrderSyncApiClient : IOrderSyncApiClient
+    {
+        private readonly List<OrderSyncRequest> _requests = [];
+
+        public Func<OrderSyncRequest, Exception?> Failure { get; set; } = _ => null;
+
+        public bool NotAccepted { get; set; }
+
+        public IReadOnlyList<OrderSyncRequest> Requests
+        {
+            get
+            {
+                lock (_requests)
+                {
+                    return _requests.ToArray();
+                }
+            }
+        }
+
+        public IReadOnlyList<Guid> RequestedOrderGuids => Requests.Select(request => request.OrderGuid).ToArray();
+
+        public void ClearRequests()
+        {
+            lock (_requests)
+            {
+                _requests.Clear();
+            }
+        }
+
+        public Task<OrderSyncResponse> SyncAsync(OrderSyncRequest request, CancellationToken cancellationToken = default)
+        {
+            lock (_requests)
+            {
+                _requests.Add(request);
+            }
+
+            var failure = Failure(request);
+            if (failure is not null)
+            {
+                return Task.FromException<OrderSyncResponse>(failure);
+            }
+
+            return Task.FromResult(NotAccepted
+                ? new OrderSyncResponse(request.OrderGuid, false, false, "Rejected by test")
+                : new OrderSyncResponse(request.OrderGuid, true, false, "Synced"));
+        }
+    }
+
     private static LocalOrder CreateLocalOrder()
     {
         return new LocalOrder(
@@ -1231,6 +1759,7 @@ public sealed class OrderUploadServiceTests
             IReadOnlyList<Guid> fastOrders)
         {
             _databasePath = databasePath;
+            Store = store;
             Handler = handler;
             SlowOrders = slowOrders;
             FastOrders = fastOrders;
@@ -1249,6 +1778,8 @@ public sealed class OrderUploadServiceTests
             UploadService = new OrderUploadService(Orders, new OrderSyncApiClient(_httpClient), UploadRepository);
             Executor = new OrderUploadExecutionService(UploadService, UploadRepository);
         }
+
+        public LocalSqliteStore Store { get; }
 
         public SlowOrderSyncHandler Handler { get; }
 

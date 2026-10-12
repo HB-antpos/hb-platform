@@ -583,7 +583,8 @@ internal sealed class SyncOrchestrator
     {
         var tasks = new List<Task<UploadRetrySummary>>
         {
-            ExecuteOrderPendingAsync(cancellationToken)
+            // 手动"全部重试"覆盖全部待传/失败订单并忽略后台退避时间，与下面的结算队列口径一致。
+            ExecuteOrderRetryAllAsync(cancellationToken)
         };
         if (_linklySettlementUploadQueueReader is not null &&
             _linklySettlementUploadExecutionService is not null)
@@ -637,8 +638,12 @@ internal sealed class SyncOrchestrator
             : CombineRetryResults(await Task.WhenAll(tasks));
     }
 
+    // 后台自动上传：只取已到退避时间的订单。
     private async Task<UploadRetrySummary> ExecuteOrderPendingAsync(CancellationToken cancellationToken) =>
         ToSummary(await _orderUploadExecutionService.ExecutePendingAsync(cancellationToken: cancellationToken));
+
+    private async Task<UploadRetrySummary> ExecuteOrderRetryAllAsync(CancellationToken cancellationToken) =>
+        ToSummary(await _orderUploadExecutionService.ExecuteAllRetryableAsync(cancellationToken: cancellationToken));
 
     private async Task<UploadRetrySummary> ExecuteSettlementPendingAsync(CancellationToken cancellationToken) =>
         ToSummary(await _linklySettlementUploadExecutionService!.ExecutePendingAsync(cancellationToken: cancellationToken));

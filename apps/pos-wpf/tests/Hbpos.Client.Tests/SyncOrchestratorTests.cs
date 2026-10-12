@@ -2,7 +2,9 @@ using System.Collections.Concurrent;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Contracts.Catalog;
 using Hbpos.Contracts.Linkly;
+using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
@@ -573,6 +575,96 @@ public sealed class SyncOrchestratorTests
         Assert.Same(freshItem, Assert.Single(orchestrator.SyncCenterOrders));
         Assert.Equal(1, orchestrator.PendingUploadCount);
         Assert.Equal(0, orchestrator.FailedUploadCount);
+    }
+
+    [Fact]
+    public async Task Auto_retry_respects_order_backoff_but_retry_all_ignores_it_and_covers_every_queued_order()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-sync-center-backoff-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            var orders = new LocalOrderRepository(store);
+            var uploadRepository = new LocalOrderUploadRepository(store);
+            var api = new SwitchableOrderSyncApiClient { Fail = true };
+            var executor = new OrderUploadExecutionService(
+                new OrderUploadService(orders, api, uploadRepository),
+                uploadRepository);
+            var orderGuids = new List<Guid>();
+            for (var index = 0; index < 25; index++)
+            {
+                var order = CreateLocalOrder();
+                await orders.SavePendingOrderAsync(order);
+                orderGuids.Add(order.OrderGuid);
+            }
+
+            Assert.Equal(new OrderUploadExecutionResult(25, 0, 25), await executor.ExecuteSelectedAsync(orderGuids));
+            api.Fail = false;
+            api.RequestedOrderGuids.Clear();
+            var status = string.Empty;
+            var orchestrator = new SyncOrchestrator(
+                new ShellSyncCenterService(new SyncQueueRepository(store)),
+                executor,
+                new LocalizationService(),
+                setStatusMessage: value => status = value);
+
+            // 15 秒后台自动重试：刚失败的订单都还在退避期内，一笔也不重发。
+            await orchestrator.TryAutoRetryPendingAsync(CancellationToken.None);
+            Assert.Empty(api.RequestedOrderGuids);
+            Assert.Equal(25, orchestrator.FailedUploadCount);
+
+            // 同步中心"全部重试"：忽略退避，且覆盖超过自动上传一批（20 笔）的全部失败单。
+            await orchestrator.RetryAllSyncOrdersCommand.ExecuteAsync(null);
+            Assert.Equal(orderGuids.OrderBy(id => id), api.RequestedOrderGuids.OrderBy(id => id));
+            Assert.Equal("Upload retry completed: 25 succeeded, 0 not completed.", status);
+            Assert.Equal(0, orchestrator.FailedUploadCount + orchestrator.PendingUploadCount);
+        }
+        finally
+        {
+            await SqliteTestDatabaseCleanup.DeleteDatabaseFilesAsync(databasePath);
+        }
+    }
+
+    private static LocalOrder CreateLocalOrder() => new(
+        Guid.NewGuid(),
+        "S001",
+        "POS-01",
+        "C001",
+        "Alice",
+        DateTimeOffset.UtcNow,
+        5.00m,
+        0m,
+        5.00m,
+        [
+            new LocalOrderLine(
+                Guid.NewGuid(),
+                "SKU-101",
+                null,
+                "Organic Gala Apples",
+                "690101",
+                "ITEM-101",
+                2m,
+                2.50m,
+                0m,
+                5.00m,
+                PriceSourceKind.StoreRetailPrice)
+        ],
+        [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, 5.00m, null)]);
+
+    private sealed class SwitchableOrderSyncApiClient : IOrderSyncApiClient
+    {
+        public bool Fail { get; set; }
+
+        public List<Guid> RequestedOrderGuids { get; } = [];
+
+        public Task<OrderSyncResponse> SyncAsync(OrderSyncRequest request, CancellationToken cancellationToken = default)
+        {
+            RequestedOrderGuids.Add(request.OrderGuid);
+            return Fail
+                ? Task.FromException<OrderSyncResponse>(new HttpRequestException("network down"))
+                : Task.FromResult(new OrderSyncResponse(request.OrderGuid, true, false, "Synced"));
+        }
     }
 
     private static SyncQueueListItem CreateItem(string status) => new(

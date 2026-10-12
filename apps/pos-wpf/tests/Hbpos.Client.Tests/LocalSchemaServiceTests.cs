@@ -474,6 +474,158 @@ public sealed class LocalSchemaServiceTests
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$", second[2]);
     }
 
+    [Fact]
+    public async Task InitializeAsync_adds_backoff_columns_to_existing_sync_queue_and_keeps_old_rows_due()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-sync-queue-upgrade-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var orderGuid = Guid.NewGuid().ToString("D");
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                // 旧版本地库的 SyncQueue：没有 AttemptCount / NextAttemptAt。
+                await ExecuteSqlAsync(
+                    connection,
+                    $"""
+                    CREATE TABLE SyncQueue (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        EntityId TEXT NOT NULL,
+                        EntityType TEXT NOT NULL,
+                        Status TEXT NOT NULL,
+                        CreatedAt TEXT NOT NULL,
+                        LastTriedAt TEXT NULL,
+                        ErrorMessage TEXT NULL
+                    );
+                    INSERT INTO SyncQueue (EntityId, EntityType, Status, CreatedAt, LastTriedAt, ErrorMessage)
+                    VALUES ('{orderGuid}', 'Order', 'Failed', '2026-10-01T09:00:00.0000000+10:00', '2026-10-01T09:00:15.0000000+10:00', 'network down');
+                    """);
+            }
+
+            await new LocalSchemaService(store).InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            Assert.True(await HasColumnAsync(verification, "SyncQueue", "AttemptCount"));
+            Assert.True(await HasColumnAsync(verification, "SyncQueue", "NextAttemptAt"));
+            Assert.Equal(
+                ["Failed", "0", "<NULL>"],
+                await QuerySingleRowAsync(
+                    verification,
+                    $"SELECT Status, AttemptCount, NextAttemptAt FROM SyncQueue WHERE EntityId = '{orderGuid}';"));
+            // 旧行没有退避时间，升级后立即可被自动上传取到。
+            Assert.Equal(
+                [Guid.Parse(orderGuid)],
+                await new LocalOrderUploadRepository(store).GetPendingOrderGuidsAsync());
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_deletes_only_order_queue_rows_synced_more_than_thirty_days_ago()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-sync-queue-cleanup-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+            await schema.InitializeAsync();
+            var now = DateTimeOffset.UtcNow;
+            string Local(DateTimeOffset utc, int offsetHours) =>
+                utc.ToOffset(TimeSpan.FromHours(offsetHours)).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            var rows = new (string Name, string EntityType, string Status, string CreatedAt, string? LastTriedAt, bool Deleted)[]
+            {
+                ("synced-31d-aedt", "Order", "Synced", Local(now.AddDays(-32), 11), Local(now.AddDays(-31), 11), true),
+                ("synced-29d-aest", "Order", "Synced", Local(now.AddDays(-35), 10), Local(now.AddDays(-29), 10), false),
+                ("synced-no-last-tried-40d", "Order", "Synced", Local(now.AddDays(-40), 10), null, true),
+                // 下单很早但最近才同步成功：按最后一次状态变化算，还要保留。
+                ("synced-old-created-recently-synced", "Order", "Synced", Local(now.AddDays(-90), 10), Local(now.AddDays(-1), 11), false),
+                ("failed-60d", "Order", "Failed", Local(now.AddDays(-60), 10), Local(now.AddDays(-60), 10), false),
+                ("pending-60d", "Order", "Pending", Local(now.AddDays(-60), 10), null, false),
+                ("other-entity-synced-60d", "Catalog", "Synced", Local(now.AddDays(-60), 10), Local(now.AddDays(-60), 10), false),
+                // 时区陷阱：+14:00 的本地时间串按字符串比较会显得比 UTC 截止时间晚，实际已超过 30 天，必须删除。
+                ("synced-30d-plus-2h-utc14", "Order", "Synced", Local(now.AddDays(-31), 14), Local(now.AddDays(-30).AddHours(-2), 14), true),
+                // 反向陷阱：-12:00 的本地时间串按字符串比较会显得更早，实际还不满 30 天，必须保留。
+                ("synced-30d-minus-2h-utc-12", "Order", "Synced", Local(now.AddDays(-31), -12), Local(now.AddDays(-30).AddHours(2), -12), false)
+            };
+            var ids = new Dictionary<string, string>();
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                foreach (var row in rows)
+                {
+                    var entityId = Guid.NewGuid().ToString("D");
+                    ids[row.Name] = entityId;
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = """
+                        INSERT INTO SyncQueue (EntityId, EntityType, Status, CreatedAt, LastTriedAt)
+                        VALUES ($EntityId, $EntityType, $Status, $CreatedAt, $LastTriedAt);
+                        """;
+                    command.Parameters.AddWithValue("$EntityId", entityId);
+                    command.Parameters.AddWithValue("$EntityType", row.EntityType);
+                    command.Parameters.AddWithValue("$Status", row.Status);
+                    command.Parameters.AddWithValue("$CreatedAt", row.CreatedAt);
+                    command.Parameters.AddWithValue("$LastTriedAt", (object?)row.LastTriedAt ?? DBNull.Value);
+                    await command.ExecuteNonQueryAsync();
+                }
+            }
+
+            await schema.InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            var remaining = (await QueryStringsAsync(verification, "SELECT EntityId FROM SyncQueue;")).ToHashSet();
+            foreach (var row in rows)
+            {
+                Assert.True(
+                    remaining.Contains(ids[row.Name]) != row.Deleted,
+                    $"{row.Name} expected deleted={row.Deleted}");
+            }
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_creates_upload_queue_indexes_used_for_status_updates()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-sync-queue-indexes-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+
+            await using var connection = await store.OpenConnectionAsync();
+            var indexes = await QueryStringsAsync(connection, "SELECT name FROM sqlite_master WHERE type = 'index';");
+            Assert.Contains("IX_SyncQueue_Status_EntityType_CreatedAt", indexes);
+            Assert.Contains("IX_SyncQueue_EntityId_EntityType", indexes);
+            Assert.Contains("IX_LocalPayments_OrderGuid", indexes);
+
+            // 上传状态回写按订单号更新队列行，必须走索引而不是全表扫描。
+            var updatePlan = string.Join(
+                " | ",
+                (await QueryRowsAsync(
+                    connection,
+                    "EXPLAIN QUERY PLAN UPDATE SyncQueue SET Status = 'Synced' WHERE EntityId = 'x' AND EntityType = 'Order';"))
+                    .Select(row => row[^1]));
+            Assert.Contains("IX_SyncQueue_EntityId_EntityType", updatePlan, StringComparison.Ordinal);
+            var paymentPlan = string.Join(
+                " | ",
+                (await QueryRowsAsync(connection, "EXPLAIN QUERY PLAN SELECT * FROM LocalPayments WHERE OrderGuid = 'x';"))
+                    .Select(row => row[^1]));
+            Assert.Contains("IX_LocalPayments_OrderGuid", paymentPlan, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CleanupDatabase(databasePath);
+        }
+    }
+
     private static async Task<bool> HasColumnAsync(
         SqliteConnection connection,
         string tableName,
