@@ -65,6 +65,7 @@ internal sealed class SchemaMigrationCoordinator
         "20261009.001-seasonal-card-supplier-batch";
     internal const string AdvertisementOrientationMigrationId =
         "20261009.002-advertisement-orientation";
+    internal const string AppNotificationMigrationId = "20261012.001-app-notification";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -220,6 +221,11 @@ internal sealed class SchemaMigrationCoordinator
             AdvertisementOrientationMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAdvertisementOrientationAsync(cancellationToken)
+        ),
+        new(
+            AppNotificationMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAppNotificationAsync(cancellationToken)
         ),
     ];
 

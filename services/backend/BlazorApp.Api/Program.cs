@@ -518,6 +518,17 @@ authenticationBuilder.AddJwtBearer(options =>
                     context.Request.Cookies.TryGetValue("access_token", out accessToken);
                 }
 
+                // WebSocket 握手无法带 Authorization 头，SignalR 客户端把令牌放在查询串；只对通知通道放开。
+                if (
+                    string.IsNullOrEmpty(accessToken)
+                    && context.Request.Path.StartsWithSegments(
+                        BlazorApp.Api.Features.Notifications.NotificationHub.Path
+                    )
+                )
+                {
+                    accessToken = context.Request.Query["access_token"].FirstOrDefault();
+                }
+
                 // 如果找到 token，设置到 Token 属性
                 if (!string.IsNullOrEmpty(accessToken))
                 {
@@ -1005,6 +1016,24 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.WarehousePicking.IWarehousePickingAssignmentService,
     BlazorApp.Api.Features.WarehousePicking.WarehousePickingAssignmentService
 >();
+// 通知平台：统一发布入口 + 站内消息收件箱 + SignalR 实时通道（单实例，分组在内存中）。
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.Notifications.INotificationRealtimeDispatcher,
+    BlazorApp.Api.Features.Notifications.SignalRNotificationRealtimeDispatcher
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.Notifications.INotificationRecipientResolver,
+    BlazorApp.Api.Features.Notifications.NotificationRecipientResolver
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.Notifications.INotificationPublisher,
+    BlazorApp.Api.Features.Notifications.NotificationPublisher
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.Notifications.INotificationInboxService,
+    BlazorApp.Api.Features.Notifications.NotificationInboxService
+>();
 builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService
@@ -1327,6 +1356,11 @@ app.UseAuthorization();
 
 // 映射控制器路由（启用API端点）
 app.MapControllers();
+// 长连接会一直挂到断开，不能计入普通 API 的请求时延指标。
+app.MapHub<BlazorApp.Api.Features.Notifications.NotificationHub>(
+        BlazorApp.Api.Features.Notifications.NotificationHub.Path
+    )
+    .DisableHttpMetrics();
 
 // 角色、权限和用户角色只允许通过明确的一次性维护流程初始化；常规启动保持禁用。
 // Console.WriteLine("🌱 开始初始化种子数据...");
