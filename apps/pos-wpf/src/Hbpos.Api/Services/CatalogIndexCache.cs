@@ -72,6 +72,7 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
     // 每个门店默认保留八个完整版本，覆盖短时间内的多台 iPad 下载与回退窗口。
     private const int DefaultMaxSnapshotsPerStore = 8;
     private const int DefaultRawArtifactCapacity = 2;
+    private static readonly TimeSpan LazyLoadBusyBackoff = TimeSpan.FromSeconds(5);
     private const int DefaultSoftItemCapacity = 1_500_000;
     private const int DefaultHardItemCapacity = 2_500_000;
     private readonly ConcurrentDictionary<CatalogIndexCacheKey, CacheEntry> _entries = new();
@@ -80,6 +81,12 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
     private readonly Dictionary<CatalogSnapshotCacheKey, SnapshotEntry> _snapshots = [];
     private readonly Dictionary<CatalogSnapshotCacheKey, PendingSnapshotEntry> _pendingSnapshots = [];
     private readonly Dictionary<CatalogSnapshotCacheKey, LazySnapshotEntry> _lazySnapshotDescriptors = [];
+    // 懒加载单飞表：同一（门店,版本）并发请求共用一个加载任务；仅在 _snapshotGate 下增删，加载本身在锁外执行。
+    private readonly Dictionary<CatalogSnapshotCacheKey, Lazy<LazyLoadOutcome>> _lazyLoadFlights = [];
+    // 容量拒绝后的短退避：描述保留，但退避期内不重复解压整份快照（解压后仍会被拒绝，纯属浪费）。
+    private readonly Dictionary<CatalogSnapshotCacheKey, DateTimeOffset> _lazyLoadBusyUntil = [];
+    // 限制同时解压/建索引的快照数，防止多门店并发懒加载把内存瞬时撑爆（原先靠全局锁串行）；不持有 _snapshotGate。
+    private readonly SemaphoreSlim _lazyLoadSlots = new(2, 2);
     private readonly Dictionary<CatalogSnapshotCacheKey, RawArtifactEntry> _rawArtifacts = [];
     private readonly HashSet<CatalogSnapshotCacheKey> _rawArtifactVersions = [];
     private readonly LinkedList<CatalogSnapshotCacheKey> _rawArtifactLru = [];
@@ -727,38 +734,17 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                 Log($"snapshot hit store={key.StoreCode} since={FormatSince(key.Since)}");
                 return ProjectLegacySince(entry: null, snapshot.Result, since);
             }
-
-            if (_lazySnapshotDescriptors.TryGetValue(key, out var lazySnapshot))
-            {
-                try
-                {
-                    var descriptor = lazySnapshot.Descriptor;
-                    var loaded = _snapshotStore?.Load(descriptor.StoreCode, descriptor.Since, descriptor.CatalogVersion);
-                    if (loaded is null)
-                    {
-                        _lazySnapshotDescriptors.Remove(key);
-                        Log($"snapshot lazy body missing store={key.StoreCode}");
-                        return null;
-                    }
-
-                    var result = new CatalogIndexBuildResult(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems,
-                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, key.CatalogVersion),
-                        CodeConflicts: loaded.CodeConflicts);
-                    if (TryAdmitLoadedSnapshotLocked(key, result, loaded.ExpiresAt, lazySnapshot.Sequence))
-                    {
-                        _lazySnapshotDescriptors.Remove(key);
-                        return ProjectLegacySince(entry: null, result, since);
-                    }
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
-                {
-                    _lazySnapshotDescriptors.Remove(key);
-                    Log($"snapshot lazy load failed store={key.StoreCode} error={exception.GetType().Name}");
-                }
-            }
         }
 
-        Log($"snapshot miss store={key.StoreCode} since={FormatSince(key.Since)}");
+        // 磁盘描述的懒加载（校验、解压、反序列化、建索引）全部在全局锁外单飞执行，
+        // 避免一家门店的冷加载阻塞其他门店的 sync-plan/租约热路径。
+        var outcome = LoadLazySnapshot(key);
+        if (outcome.Status == LazyLoadStatus.Loaded)
+        {
+            return ProjectLegacySince(entry: null, outcome.Result, since);
+        }
+
+        Log($"snapshot miss store={key.StoreCode} since={FormatSince(key.Since)} lazy={outcome.Status}");
         return null;
     }
 
@@ -1095,13 +1081,16 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
         }
 
         // 胜出行与码冲突候选都没有变化时沿用已发布版本，客户端可直接 noChange，避免重复全量克隆。
-        return current with
+        // 直接复用上一版的 CatalogSellableIndex 实例（含已算好的 v2 标准页摘要缓存），不再新建索引：
+        // 新建要对 34 万行重算 SHA-256 RowVersion、分组、排序、建字典，并使旧实例上的页摘要缓存作废。
+        // GeneratedAt 随版本保持不变（与磁盘 manifest、下载文件的 GeneratedAt 一致，三条读取路径口径统一）；
+        // 只更新会随本次构建变化的字段：行列表、来源有效期（决定过期时间）、原始候选（legacy since 派生用）。
+        return previous with
         {
-            CatalogIndex = new CatalogSellableIndex(
-                current.StoreCode,
-                current.GeneratedAt,
-                current.SellableItems,
-                previousVersion)
+            SellableItems = current.SellableItems,
+            SourceValidUntil = current.SourceValidUntil,
+            RawPriceIndexInput = current.RawPriceIndexInput,
+            CodeConflicts = current.CodeConflicts
         };
     }
 
@@ -1257,55 +1246,165 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
 
     private CatalogIndexBuildResult? GetLatestSnapshot(CatalogIndexCacheKey key, DateTimeOffset now)
     {
+        (CatalogSnapshotCacheKey Key, long Sequence, CatalogIndexBuildResult? Resident)[] candidates;
         lock (_snapshotGate)
         {
             PruneExpiredSnapshots(now);
             // 按原发布序号合并驻留与磁盘版本；读取旧版分页不能使它盖过磁盘上的新版 LKG。
-            var candidates = _snapshots
+            candidates = _snapshots
                 .Where(pair => string.Equals(pair.Key.StoreCode, key.StoreCode, StringComparison.OrdinalIgnoreCase)
                     && pair.Key.Since == key.Since)
-                .Select(pair => (pair.Key, pair.Value.Sequence, Resident: (CatalogIndexBuildResult?)pair.Value.Result, Lazy: (LazySnapshotEntry?)null))
+                .Select(pair => (pair.Key, pair.Value.Sequence, Resident: (CatalogIndexBuildResult?)pair.Value.Result))
                 .Concat(_lazySnapshotDescriptors
                     .Where(pair => string.Equals(pair.Key.StoreCode, key.StoreCode, StringComparison.OrdinalIgnoreCase)
                         && pair.Key.Since == key.Since)
-                    .Select(pair => (pair.Key, pair.Value.Sequence, Resident: (CatalogIndexBuildResult?)null, Lazy: (LazySnapshotEntry?)pair.Value)))
+                    .Select(pair => (pair.Key, pair.Value.Sequence, Resident: (CatalogIndexBuildResult?)null)))
                 .OrderByDescending(candidate => candidate.Sequence)
                 .ToArray();
-            foreach (var (descriptorKey, _, resident, lazySnapshot) in candidates)
+        }
+
+        foreach (var (descriptorKey, _, resident) in candidates)
+        {
+            if (resident is not null)
             {
-                if (resident is not null)
-                {
-                    return resident;
-                }
-
-                // 损坏或被并发删除的最新持久化版本不能遮蔽仍可用的次新版本。
-                try
-                {
-                    var descriptor = lazySnapshot!.Descriptor;
-                    var loaded = _snapshotStore?.Load(descriptor.StoreCode, descriptor.Since, descriptor.CatalogVersion);
-                    if (loaded is null)
-                    {
-                        _lazySnapshotDescriptors.Remove(descriptorKey);
-                        continue;
-                    }
-
-                    var result = new CatalogIndexBuildResult(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems,
-                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, descriptor.CatalogVersion),
-                        CodeConflicts: loaded.CodeConflicts);
-                    if (TryAdmitLoadedSnapshotLocked(descriptorKey, result, loaded.ExpiresAt, lazySnapshot.Sequence))
-                    {
-                        _lazySnapshotDescriptors.Remove(descriptorKey);
-                        return result;
-                    }
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
-                {
-                    _lazySnapshotDescriptors.Remove(descriptorKey);
-                    Log($"snapshot lazy load failed store={key.StoreCode} error={exception.GetType().Name}");
-                }
+                return resident;
             }
 
-            return null;
+            // 懒加载在锁外单飞执行。
+            var outcome = LoadLazySnapshot(descriptorKey);
+            switch (outcome.Status)
+            {
+                case LazyLoadStatus.Loaded:
+                    return outcome.Result;
+                case LazyLoadStatus.Busy:
+                    // 容量拒绝（不是损坏）：更旧的版本同样放不进去，回退只会白白再解压一遍然后丢弃。
+                    // 直接返回"无"，描述保留，退避期内也不会重复解压。
+                    Log($"snapshot lazy load busy store={key.StoreCode} version={descriptorKey.CatalogVersion}");
+                    return null;
+                default:
+                    // 损坏、被并发删除或已被淘汰：不能遮蔽仍可用的次新版本，继续尝试下一个。
+                    continue;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 把磁盘描述加载为驻留快照：重活（Load 校验 SHA-256、gzip 解压、反序列化、建索引）在锁外，
+    /// 同一（门店,版本）并发调用共用一个加载任务；只有准入（放入常驻集合、更新容量计数）才短暂持 _snapshotGate。
+    /// 返回 Loaded=已驻留；Missing=无此描述/损坏/已被并发删除（描述已移除，可回退次新版本）；
+    /// Busy=容量拒绝（描述保留，短退避内不重复解压）。
+    /// </summary>
+    private LazyLoadOutcome LoadLazySnapshot(CatalogSnapshotCacheKey key)
+    {
+        Lazy<LazyLoadOutcome>? flight;
+        lock (_snapshotGate)
+        {
+            if (_snapshots.TryGetValue(key, out var resident))
+            {
+                return new LazyLoadOutcome(LazyLoadStatus.Loaded, resident.Result);
+            }
+
+            if (!_lazySnapshotDescriptors.TryGetValue(key, out var descriptorEntry))
+            {
+                return new LazyLoadOutcome(LazyLoadStatus.Missing);
+            }
+
+            if (_lazyLoadBusyUntil.TryGetValue(key, out var busyUntil))
+            {
+                if (busyUntil > _timeProvider.GetUtcNow())
+                {
+                    return new LazyLoadOutcome(LazyLoadStatus.Busy);
+                }
+
+                _lazyLoadBusyUntil.Remove(key);
+            }
+
+            if (!_lazyLoadFlights.TryGetValue(key, out flight))
+            {
+                flight = new Lazy<LazyLoadOutcome>(
+                    () => ExecuteLazyLoad(key, descriptorEntry),
+                    LazyThreadSafetyMode.ExecutionAndPublication);
+                _lazyLoadFlights.Add(key, flight);
+            }
+        }
+
+        return flight.Value;
+    }
+
+    private LazyLoadOutcome ExecuteLazyLoad(CatalogSnapshotCacheKey key, LazySnapshotEntry descriptorEntry)
+    {
+        try
+        {
+            CatalogPersistedSnapshot? loaded = null;
+            CatalogIndexBuildResult? result = null;
+            var failed = false;
+            _lazyLoadSlots.Wait();
+            try
+            {
+                var descriptor = descriptorEntry.Descriptor;
+                loaded = _snapshotStore?.Load(descriptor.StoreCode, descriptor.Since, descriptor.CatalogVersion);
+                if (loaded is not null)
+                {
+                    result = new CatalogIndexBuildResult(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems,
+                        new CatalogSellableIndex(key.StoreCode, loaded.GeneratedAt, loaded.SellableItems, key.CatalogVersion),
+                        CodeConflicts: loaded.CodeConflicts);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+            {
+                failed = true;
+                Log($"snapshot lazy load failed store={key.StoreCode} error={exception.GetType().Name}");
+            }
+            finally
+            {
+                _lazyLoadSlots.Release();
+            }
+
+            lock (_snapshotGate)
+            {
+                if (_snapshots.TryGetValue(key, out var resident))
+                {
+                    // 加载期间同版本已被别处固定为驻留（例如刚发布），以驻留实例为准。
+                    return new LazyLoadOutcome(LazyLoadStatus.Loaded, resident.Result);
+                }
+
+                if (!_lazySnapshotDescriptors.TryGetValue(key, out var current))
+                {
+                    // 加载期间描述已被淘汰（过期清理等）：不得把它重新放回驻留集合。
+                    return new LazyLoadOutcome(LazyLoadStatus.Missing);
+                }
+
+                if (failed || result is null || loaded is null)
+                {
+                    _lazySnapshotDescriptors.Remove(key);
+                    _lazyLoadBusyUntil.Remove(key);
+                    if (!failed)
+                    {
+                        Log($"snapshot lazy body missing store={key.StoreCode}");
+                    }
+
+                    return new LazyLoadOutcome(LazyLoadStatus.Missing);
+                }
+
+                if (TryAdmitLoadedSnapshotLocked(key, result, loaded.ExpiresAt, current.Sequence))
+                {
+                    _lazySnapshotDescriptors.Remove(key);
+                    _lazyLoadBusyUntil.Remove(key);
+                    return new LazyLoadOutcome(LazyLoadStatus.Loaded, result);
+                }
+
+                _lazyLoadBusyUntil[key] = _timeProvider.GetUtcNow().Add(LazyLoadBusyBackoff);
+                return new LazyLoadOutcome(LazyLoadStatus.Busy);
+            }
+        }
+        finally
+        {
+            lock (_snapshotGate)
+            {
+                _lazyLoadFlights.Remove(key);
+            }
         }
     }
 
@@ -1456,6 +1555,7 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                 if (ShouldPrune(key, lazySnapshot.Descriptor.ExpiresAt))
                 {
                     _lazySnapshotDescriptors.Remove(key);
+                    _lazyLoadBusyUntil.Remove(key);
                 }
             }
 
@@ -1801,10 +1901,24 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
             TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private static InvalidOperationException CreateInvalidatedPublicationException()
+    private static InvalidOperationException CreateInvalidatedPublicationException() =>
+        CreateBuildInvalidatedException();
+
+    private const string BuildInvalidatedDataKey = "Hbpos.CatalogBuildInvalidated";
+
+    /// <summary>
+    /// 构建在发布完成前被门店失效。保持 InvalidOperationException 原类型（既有调用方与断言依赖），
+    /// 用 Data 标记区分，供后台刷新服务识别为"需要立即重建"而非构建故障。
+    /// </summary>
+    internal static InvalidOperationException CreateBuildInvalidatedException()
     {
-        return new InvalidOperationException("目录构建在发布完成前已失效。");
+        var exception = new InvalidOperationException("目录构建在发布完成前已失效。");
+        exception.Data[BuildInvalidatedDataKey] = true;
+        return exception;
     }
+
+    public static bool IsBuildInvalidated(Exception exception) =>
+        exception.Data.Contains(BuildInvalidatedDataKey);
 
     private static TaskCompletionSource<CatalogPublicationOutcome> CreateCompletedPublication()
     {
@@ -1928,6 +2042,15 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
         bool IsPersisted);
 
     private sealed record LazySnapshotEntry(CatalogSnapshotDescriptor Descriptor, long Sequence);
+
+    private enum LazyLoadStatus
+    {
+        Loaded,
+        Missing,
+        Busy
+    }
+
+    private sealed record LazyLoadOutcome(LazyLoadStatus Status, CatalogIndexBuildResult? Result = null);
 
     private sealed class PendingSnapshotEntry
     {

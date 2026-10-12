@@ -82,6 +82,9 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
     private readonly int _maxSnapshotsPerStore;
     private readonly Func<bool>? _manifestWriteFailure;
     private readonly object _gate = new();
+    // 已校验过 SHA-256 的正文指纹（路径 -> 哈希/长度/修改时间）。正文不可变（Save 每次写新文件名），
+    // 续期时指纹未变就不必再对整份压缩文件重算哈希；读取正文时 TryReadSnapshot 仍会完整校验。仅在 _gate 内访问。
+    private readonly Dictionary<string, BodyFingerprint> _verifiedBodies = new(StringComparer.Ordinal);
 
     public GzipCatalogSnapshotStore(
         string rootPath,
@@ -176,6 +179,8 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
             var targetWasReferencedByOldManifest = manifest.Snapshots!.Any(entry =>
                 string.Equals(entry.FileName, relativeFileName, StringComparison.Ordinal));
             var sha256 = WriteSnapshotBody(targetPath, snapshot);
+            // 刚写入时已在同一遍写入中算出哈希，记录指纹供后续续期免重算。
+            RememberVerifiedBody(targetPath, sha256);
             var manifestSnapshots = manifest.Snapshots!;
             manifestSnapshots.RemoveAll(entry =>
                 string.Equals(entry.StoreCode, snapshot.StoreCode.Trim(), StringComparison.OrdinalIgnoreCase)
@@ -223,6 +228,7 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
             }
 
             CleanupUnreferencedSnapshotBodies(manifest);
+            ForgetUnreferencedVerifiedBodies(manifest);
         }
     }
 
@@ -252,8 +258,7 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
             // 真正读取目录时 TryReadSnapshot 仍会校验解压及正文元数据。
             var entry = manifestSnapshots[index];
             var bodyPath = ResolveRelativePath(entry.FileName);
-            if (!File.Exists(bodyPath) ||
-                !string.Equals(ComputeSha256(bodyPath), entry.Sha256, StringComparison.OrdinalIgnoreCase))
+            if (!IsBodyVerified(bodyPath, entry.Sha256))
             {
                 throw new InvalidDataException("目录快照正文损坏，不能更新刷新时间。");
             }
@@ -264,6 +269,60 @@ public sealed class GzipCatalogSnapshotStore : ICatalogSnapshotStore
     }
 
     private string ManifestPath => Path.Combine(_rootPath, ManifestFileName);
+
+    /// <summary>
+    /// 确认正文仍与 manifest 记录的哈希一致。内容未变的续期每次都对数百 MB 的 gzip 文件重算 SHA-256 是纯浪费：
+    /// 若此前已校验/写入过该文件且哈希、长度、修改时间都没变，直接复用；否则（首次、重启后、文件被改动）完整重算，
+    /// 通过后记录指纹。文件被截断/覆盖/替换都会改变长度或修改时间而回到完整校验，因此损坏仍然拒绝续期。
+    /// </summary>
+    private bool IsBodyVerified(string bodyPath, string expectedSha256)
+    {
+        var info = new FileInfo(bodyPath);
+        if (!info.Exists)
+        {
+            _verifiedBodies.Remove(bodyPath);
+            return false;
+        }
+
+        if (_verifiedBodies.TryGetValue(bodyPath, out var known) &&
+            string.Equals(known.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase) &&
+            known.Length == info.Length &&
+            known.LastWriteTimeUtcTicks == info.LastWriteTimeUtc.Ticks)
+        {
+            return true;
+        }
+
+        if (!string.Equals(ComputeSha256(bodyPath), expectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            _verifiedBodies.Remove(bodyPath);
+            return false;
+        }
+
+        RememberVerifiedBody(bodyPath, expectedSha256);
+        return true;
+    }
+
+    private void RememberVerifiedBody(string bodyPath, string sha256)
+    {
+        var info = new FileInfo(bodyPath);
+        if (info.Exists)
+        {
+            _verifiedBodies[bodyPath] = new BodyFingerprint(sha256, info.Length, info.LastWriteTimeUtc.Ticks);
+        }
+    }
+
+    private void ForgetUnreferencedVerifiedBodies(CatalogSnapshotManifest manifest)
+    {
+        var referenced = manifest.Snapshots!
+            .Select(entry => ResolveRelativePath(entry.FileName))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var path in _verifiedBodies.Keys.Where(path => !referenced.Contains(path)).ToArray())
+        {
+            _verifiedBodies.Remove(path);
+        }
+    }
+
+    private sealed record BodyFingerprint(string Sha256, long Length, long LastWriteTimeUtcTicks);
 
     private void WriteManifest(CatalogSnapshotManifest manifest)
     {
