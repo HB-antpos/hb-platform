@@ -2079,7 +2079,10 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => printService.Calls.Count == 2);
+        // 余额券全部打完后才汇总写状态栏（续体可能在其他线程），等到汇总文案出现再断言。
+        await WaitUntilAsync(() =>
+            printService.Calls.Count == 2 &&
+            (viewModel.StatusMessage ?? string.Empty).Contains("VC200", StringComparison.Ordinal));
         Assert.Contains("VC200", viewModel.StatusMessage, StringComparison.Ordinal);
         Assert.Contains("printer offline", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
     }
@@ -2463,7 +2466,10 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => cashDrawerService.OpenCallCount == 1);
+        // 告警文案在开钱箱返回之后才写入（续体可能在其他线程），等到文案出现再断言。
+        await WaitUntilAsync(() =>
+            cashDrawerService.OpenCallCount == 1 &&
+            viewModel.StatusMessage == "Payment completed. Do not take payment again; a follow-up action needs attention.");
         Assert.Equal("Payment completed. Do not take payment again; a follow-up action needs attention.", viewModel.StatusMessage);
     }
 
@@ -2609,7 +2615,12 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && cashDrawerService.OpenCallCount == 1);
+        // 待同步刷新的本地读取在线程池执行，之后的开钱箱与审计记录在测试同步上下文的其他线程上续行；
+        // 开钱箱计数先于审计写入，必须一并等到审计落地再断言，否则会在两步之间读到空列表。
+        await WaitUntilAsync(() =>
+            IsShowingCompletedSale(viewModel) &&
+            cashDrawerService.OpenCallCount == 1 &&
+            auditLogger.Events.Count == 1);
 
         Assert.Equal(1, cashDrawerService.OpenCallCount);
         var auditEvent = Assert.Single(auditLogger.Events);
@@ -2634,8 +2645,12 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel));
-        await Task.Delay(50);
+        // 开钱箱步骤因缺权限跳过后才写告警（续体可能在其他线程）：以告警出现作为"开钱箱步骤已走完"的信号，
+        // 比固定等待更可靠；此后再断言钱箱确实没被打开。
+        await WaitUntilAsync(() =>
+            IsShowingCompletedSale(viewModel) &&
+            viewModel.PaymentSuccess.HasPostCommitWarning &&
+            viewModel.StatusMessage == "Payment completed. Do not take payment again; a follow-up action needs attention.");
         Assert.Equal(0, cashDrawerService.OpenCallCount);
         Assert.False(cashierContext.RequirePermission(Permissions.PosTerminal.CashDrawer.Open, out _));
         Assert.Equal("Payment completed. Do not take payment again; a follow-up action needs attention.", viewModel.StatusMessage);
@@ -2657,7 +2672,12 @@ public sealed class MainViewModelScannerTests
 
         InvokePaymentCompleted(viewModel, order);
 
-        await WaitUntilAsync(() => IsShowingCompletedSale(viewModel) && cashDrawerService.OpenCallCount == 1);
+        // 开钱箱失败后的告警（成功卡片标记 + 状态栏文案）在开钱箱返回之后才写入，两项都等到再断言。
+        await WaitUntilAsync(() =>
+            IsShowingCompletedSale(viewModel) &&
+            cashDrawerService.OpenCallCount == 1 &&
+            viewModel.PaymentSuccess.HasPostCommitWarning &&
+            viewModel.StatusMessage == "Payment completed. Do not take payment again; a follow-up action needs attention.");
 
         Assert.Equal(1, cashDrawerService.OpenCallCount);
         Assert.Equal("Payment completed. Do not take payment again; a follow-up action needs attention.", viewModel.StatusMessage);

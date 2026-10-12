@@ -19,10 +19,40 @@ public interface ILocalPromotionRepository
 
 public sealed class LocalPromotionRepository(LocalSqliteStore store) : ILocalPromotionRepository
 {
+    // 中文注释：扫码、改数量后每次重算促销都会读规则。这里按（当前活动库路径，门店码）缓存该门店“未按时间过滤”的
+    // 全部规则行与商品行，GetActiveRulesAsync 在内存里按 asOf 过滤，命中时不再新开连接读库。
+    // 失效：本仓储写促销表（ReplaceStoreRulesAsync，无论成败）与活动库路径变化都会清空缓存；促销表没有其他写入方，
+    // TestSalesDataResetService 只清销售表、不碰促销表。_cacheVersion 防止“失效前开始、失效后才返回”的读取把旧数据写回缓存。
+    // 并发：字典只在 _cacheGate 锁内读写；缓存快照是只读数组，不直接交给调用方，每次返回新建的规则与商品数组。
+    private readonly object _cacheGate = new();
+    private readonly Dictionary<PromotionCacheKey, StoreRulesSnapshot> _rulesCache = [];
+    private string? _cachedDatabasePath;
+    private long _cacheVersion;
+
+    // 测试钩子：未命中缓存、即将读库时在读库所在线程调用（用于断言读库不在调用方 UI 线程，以及命中后不再读库）。
+    internal Action? StoreRulesLoadingForTests { get; set; }
+
     public async Task ReplaceStoreRulesAsync(
         string storeCode,
         PromotionRulesResponse response,
         CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await ReplaceStoreRulesCoreAsync(storeCode, response, cancellationToken);
+        }
+        finally
+        {
+            // 写事务结束（提交或回滚）后再失效：此后的读取一定读到已提交的数据；
+            // 写入期间已开始的读取因版本号变化不会把旧数据写回缓存。
+            InvalidateRulesCache();
+        }
+    }
+
+    private async Task ReplaceStoreRulesCoreAsync(
+        string storeCode,
+        PromotionRulesResponse response,
+        CancellationToken cancellationToken)
     {
         var normalizedStoreCode = NormalizeStoreCode(storeCode);
         if (string.IsNullOrEmpty(normalizedStoreCode))
@@ -75,36 +105,73 @@ public sealed class LocalPromotionRepository(LocalSqliteStore store) : ILocalPro
             return [];
         }
 
-        await using var connection = await store.OpenConnectionAsync(cancellationToken);
-        var promotionRows = await ReadPromotionRowsAsync(
-            connection,
-            normalizedStoreCode,
-            asOf.ToUniversalTime(),
-            cancellationToken);
-        if (promotionRows.Count == 0)
+        var databasePath = store.ActiveDatabasePath;
+        var cacheKey = new PromotionCacheKey(databasePath, normalizedStoreCode);
+        StoreRulesSnapshot? cached;
+        long cacheVersion;
+        lock (_cacheGate)
         {
-            return [];
+            if (!string.Equals(_cachedDatabasePath, databasePath, StringComparison.Ordinal))
+            {
+                // 活动库已切换（或首次使用）：旧库的缓存全部作废。
+                ClearRulesCacheLocked();
+                _cachedDatabasePath = databasePath;
+            }
+
+            _rulesCache.TryGetValue(cacheKey, out cached);
+            cacheVersion = _cacheVersion;
         }
 
-        var productsByPromotionId = await ReadProductsByPromotionIdAsync(
-            connection,
-            normalizedStoreCode,
-            promotionRows.Select(row => row.PromotionId).ToArray(),
+        if (cached is not null)
+        {
+            // 命中：快照不可变，在锁外按 asOf 过滤，同步返回、不切线程。
+            return cached.SelectActiveRules(asOf);
+        }
+
+        // 未命中：首次读库放进线程池，扫码后在 UI 线程发起的促销重算不必等 SQLite（*Async 实为同步执行）。
+        var loadingHook = StoreRulesLoadingForTests;
+        var snapshot = await Task.Run(
+            () =>
+            {
+                loadingHook?.Invoke();
+                return LoadStoreRulesAsync(normalizedStoreCode, cancellationToken);
+            },
             cancellationToken);
 
-        return promotionRows
-            .Select(row => new PromotionRuleDto(
-                row.PromotionId,
-                row.Name,
-                row.EffectiveStart,
-                row.EffectiveEnd,
-                row.IsExclusive,
-                row.Priority,
-                row.ApplyQuantity,
-                row.FixedPrice,
-                row.MaxApplicationsPerOrder,
-                productsByPromotionId.TryGetValue(row.PromotionId, out var products) ? products : []))
-            .ToArray();
+        lock (_cacheGate)
+        {
+            if (_cacheVersion == cacheVersion &&
+                string.Equals(_cachedDatabasePath, databasePath, StringComparison.Ordinal))
+            {
+                _rulesCache[cacheKey] = snapshot;
+            }
+        }
+
+        return snapshot.SelectActiveRules(asOf);
+    }
+
+    private async Task<StoreRulesSnapshot> LoadStoreRulesAsync(string storeCode, CancellationToken cancellationToken)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        var promotionRows = await ReadPromotionRowsAsync(connection, storeCode, cancellationToken);
+        IReadOnlyList<LocalPromotionProductRow> productRows = promotionRows.Count == 0
+            ? []
+            : await ReadStoreProductRowsAsync(connection, storeCode, cancellationToken);
+        return new StoreRulesSnapshot([.. promotionRows], [.. productRows]);
+    }
+
+    private void InvalidateRulesCache()
+    {
+        lock (_cacheGate)
+        {
+            ClearRulesCacheLocked();
+        }
+    }
+
+    private void ClearRulesCacheLocked()
+    {
+        _rulesCache.Clear();
+        _cacheVersion++;
     }
 
     private static async Task DeleteStoreRulesAsync(
@@ -128,10 +195,11 @@ public sealed class LocalPromotionRepository(LocalSqliteStore store) : ILocalPro
         await deletePromotions.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    // 读取门店全部规则（不按时间过滤），排序与原来按 asOf 过滤的查询一致；过滤只保留子集、不改变相对顺序。
+    // 起止时间保留库里的原始文本，过滤时与 asOf 按同一格式做序数比较，与 SQL 的 TEXT 比较完全等价。
     private static async Task<List<LocalPromotionRow>> ReadPromotionRowsAsync(
         SqliteConnection connection,
         string storeCode,
-        DateTimeOffset asOf,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -148,12 +216,9 @@ public sealed class LocalPromotionRepository(LocalSqliteStore store) : ILocalPro
                 MaxApplicationsPerOrder
             FROM LocalPromotions
             WHERE StoreCode = $StoreCode
-              AND EffectiveStart <= $AsOf
-              AND EffectiveEnd >= $AsOf
             ORDER BY Priority DESC, EffectiveStart ASC, PromotionId ASC;
             """;
         command.Parameters.AddWithValue("$StoreCode", storeCode);
-        command.Parameters.AddWithValue("$AsOf", FormatUtc(asOf));
 
         var rows = new List<LocalPromotionRow>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -162,64 +227,44 @@ public sealed class LocalPromotionRepository(LocalSqliteStore store) : ILocalPro
             rows.Add(new LocalPromotionRow(
                 reader.GetString(0),
                 reader.GetString(1),
-                ParseUtcDateTime(reader.GetString(2)),
-                ParseUtcDateTime(reader.GetString(3)),
+                reader.GetString(2),
+                reader.GetString(3),
                 reader.GetInt32(4) == 1,
                 reader.GetInt32(5),
                 reader.GetInt32(6),
-                decimal.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
+                reader.GetString(7),
                 reader.IsDBNull(8) ? null : reader.GetInt32(8)));
         }
 
         return rows;
     }
 
-    private static async Task<Dictionary<string, IReadOnlyList<PromotionRuleProductDto>>> ReadProductsByPromotionIdAsync(
+    private static async Task<List<LocalPromotionProductRow>> ReadStoreProductRowsAsync(
         SqliteConnection connection,
         string storeCode,
-        IReadOnlyList<string> promotionIds,
         CancellationToken cancellationToken)
     {
-        if (promotionIds.Count == 0)
-        {
-            return [];
-        }
-
         await using var command = connection.CreateCommand();
-        var parameterNames = new List<string>(promotionIds.Count);
-        for (var index = 0; index < promotionIds.Count; index++)
-        {
-            var parameterName = $"$PromotionId{index}";
-            parameterNames.Add(parameterName);
-            command.Parameters.AddWithValue(parameterName, promotionIds[index]);
-        }
-
-        command.CommandText = $"""
+        command.CommandText = """
             SELECT PromotionId, ProductCode, UnitWeight
             FROM LocalPromotionRuleProducts
             WHERE StoreCode = $StoreCode
-              AND PromotionId IN ({string.Join(", ", parameterNames)})
             ORDER BY PromotionId ASC, ProductCode ASC;
             """;
         command.Parameters.AddWithValue("$StoreCode", storeCode);
 
-        var rows = new List<(string PromotionId, PromotionRuleProductDto Product)>();
+        var rows = new List<LocalPromotionProductRow>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            rows.Add((
+            rows.Add(new LocalPromotionProductRow(
                 reader.GetString(0),
                 new PromotionRuleProductDto(
                     reader.GetString(1),
                     reader.GetInt32(2))));
         }
 
-        return rows
-            .GroupBy(row => row.PromotionId, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.Key,
-                group => (IReadOnlyList<PromotionRuleProductDto>)group.Select(item => item.Product).ToArray(),
-                StringComparer.OrdinalIgnoreCase);
+        return rows;
     }
 
     private static void AddPromotionParameters(SqliteCommand command)
@@ -316,16 +361,70 @@ public sealed class LocalPromotionRepository(LocalSqliteStore store) : ILocalPro
         return DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
     }
 
+    private readonly record struct PromotionCacheKey(string DatabasePath, string StoreCode);
+
     private sealed record LocalPromotionRow(
         string PromotionId,
         string Name,
-        DateTime EffectiveStart,
-        DateTime EffectiveEnd,
+        string EffectiveStartText,
+        string EffectiveEndText,
         bool IsExclusive,
         int Priority,
         int ApplyQuantity,
-        decimal FixedPrice,
+        string FixedPriceText,
         int? MaxApplicationsPerOrder);
+
+    private sealed record LocalPromotionProductRow(
+        string PromotionId,
+        PromotionRuleProductDto Product);
+
+    // 一个门店的规则快照（只读）。SelectActiveRules 复刻原 SQL 的口径：
+    // 规则 EffectiveStart <= asOf <= EffectiveEnd（TEXT 序数比较，含边界）；
+    // 商品只取 PromotionId 与生效规则完全相同（SQLite BINARY 比较）的行，再按忽略大小写分组挂到规则上。
+    private sealed class StoreRulesSnapshot(
+        LocalPromotionRow[] promotionRows,
+        LocalPromotionProductRow[] productRows)
+    {
+        public IReadOnlyList<PromotionRuleDto> SelectActiveRules(DateTimeOffset asOf)
+        {
+            var asOfText = FormatUtc(asOf);
+            var activeRows = promotionRows
+                .Where(row =>
+                    string.CompareOrdinal(row.EffectiveStartText, asOfText) <= 0 &&
+                    string.CompareOrdinal(row.EffectiveEndText, asOfText) >= 0)
+                .ToArray();
+            if (activeRows.Length == 0)
+            {
+                return [];
+            }
+
+            var activeIds = activeRows
+                .Select(row => row.PromotionId)
+                .ToHashSet(StringComparer.Ordinal);
+            var productsByPromotionId = productRows
+                .Where(row => activeIds.Contains(row.PromotionId))
+                .GroupBy(row => row.PromotionId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => (IReadOnlyList<PromotionRuleProductDto>)group.Select(item => item.Product).ToArray(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            // 每次都新建规则对象与商品数组：调用方拿到的集合改不到缓存。
+            return activeRows
+                .Select(row => new PromotionRuleDto(
+                    row.PromotionId,
+                    row.Name,
+                    ParseUtcDateTime(row.EffectiveStartText),
+                    ParseUtcDateTime(row.EffectiveEndText),
+                    row.IsExclusive,
+                    row.Priority,
+                    row.ApplyQuantity,
+                    decimal.Parse(row.FixedPriceText, CultureInfo.InvariantCulture),
+                    row.MaxApplicationsPerOrder,
+                    productsByPromotionId.TryGetValue(row.PromotionId, out var products) ? products : []))
+                .ToArray();
+        }
+    }
 
     private const string InsertPromotionSql = """
         INSERT INTO LocalPromotions (

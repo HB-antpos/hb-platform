@@ -49,7 +49,10 @@ public sealed class RemoteLookupRefreshService(
                 }
 
                 var item = response.Item.ToSellableItemDto();
-                await localCatalogRepository.UpsertSellableItemsAsync([item], cancellationToken);
+                // 中文注释：HTTP 返回后续体回到调用方上下文（扫码加购链路是 UI 线程），而目录写事务（BEGIN IMMEDIATE）
+                // 遇上目录同步提交最长会等锁 5 秒（busy_timeout）。本地写库放进线程池；返回值不变，
+                // 调用方 PosTerminalWorkflowService 在它自己 await 之后的上下文（UI 线程）回写购物车。
+                await Task.Run(() => localCatalogRepository.UpsertSellableItemsAsync([item], cancellationToken));
                 stopwatch.Stop();
                 Log($"refresh completed storeCode={storeCode} lookupCode={lookupCode} found=True upserted=1 deleted=0 productCode={item.ProductCode} referenceCode={item.ReferenceCode ?? "<null>"} elapsedMs={stopwatch.ElapsedMilliseconds}");
                 return new RemoteLookupRefreshResult(storeCode, lookupCode, true, item, 0);
@@ -58,10 +61,11 @@ public sealed class RemoteLookupRefreshService(
             var deleteLookupCode = response is null
                 ? lookupCode
                 : GetDeleteLookupCode(response);
-            var deletedCount = await localCatalogRepository.DeleteByLookupCodesAsync(
+            // 删除本地失效条目同样是写事务，理由同上，放进线程池。
+            var deletedCount = await Task.Run(() => localCatalogRepository.DeleteByLookupCodesAsync(
                 storeCode,
                 [deleteLookupCode],
-                cancellationToken);
+                cancellationToken));
 
             stopwatch.Stop();
             Log($"refresh completed storeCode={storeCode} lookupCode={lookupCode} found=False upserted=0 deleted={deletedCount} deleteLookupCode={deleteLookupCode} elapsedMs={stopwatch.ElapsedMilliseconds}");

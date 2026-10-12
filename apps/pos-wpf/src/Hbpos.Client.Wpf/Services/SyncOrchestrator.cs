@@ -28,6 +28,12 @@ internal sealed class SyncOrchestrator
     private IReadOnlyList<LinklySettlementUploadQueueItem> _settlementQueueItems = [];
     private string? _settlementLoadFailureMessage;
     private bool _isAutoSyncRetrying;
+    // 中文注释：同步中心刷新序号。本地读取移到线程池后，15 秒定时、收款完成、同步中心按钮等入口的刷新可能并发，
+    // 先发起的读取可能后返回；每段界面状态只应用比已写回结果更新的读取，避免旧快照盖掉新快照。
+    // 序号在发起时递增；_applied* 只在调用方上下文（生产中即 UI 线程）读写。
+    private long _syncCenterRefreshSequence;
+    private long _appliedOrderRefreshSequence;
+    private long _appliedAuditRefreshSequence;
 
     public SyncOrchestrator(
         IShellSyncCenterService shellSyncCenterService,
@@ -113,10 +119,27 @@ internal sealed class SyncOrchestrator
 
     public async Task RefreshPendingSyncAsync(CancellationToken cancellationToken = default)
     {
-        var orderSnapshot = await _shellSyncCenterService.GetSnapshotAsync(cancellationToken);
-        await RefreshSettlementUploadsSafelyAsync(cancellationToken);
-        ApplySyncCenterSnapshot(orderSnapshot);
-        await RefreshAuditLogsSafelyAsync();
+        // 中文注释：15 秒联网探测、收款完成、同步中心按钮都在 Dispatcher 线程调用这里，而 Microsoft.Data.Sqlite 的
+        // *Async 实际同步执行。订单快照、结算队列、审计 outbox 三项本地读取整体放进线程池：后台委托只调用仓储/读取器，
+        // 不读写任何绑定集合、属性或回调；await 回到调用方上下文（UI 线程）后再一次性写回界面。
+        var refreshSequence = Interlocked.Increment(ref _syncCenterRefreshSequence);
+        var auditSource = CaptureAuditSource();
+        var loaded = await Task.Run(async () =>
+        {
+            var orderSnapshot = await _shellSyncCenterService.GetSnapshotAsync(cancellationToken);
+            var settlement = await LoadSettlementUploadsSafelyAsync(cancellationToken);
+            var auditLogs = await LoadAuditLogsSafelyAsync(auditSource);
+            return new SyncCenterLoadResult(orderSnapshot, settlement, auditLogs);
+        });
+
+        if (refreshSequence > _appliedOrderRefreshSequence)
+        {
+            _appliedOrderRefreshSequence = refreshSequence;
+            ApplySettlementUploads(loaded.Settlement);
+            ApplySyncCenterSnapshot(loaded.OrderSnapshot);
+        }
+
+        ApplyAuditLogs(refreshSequence, loaded.AuditLogs);
     }
 
     public async Task TryAutoRetryPendingAsync(CancellationToken cancellationToken)
@@ -137,7 +160,10 @@ internal sealed class SyncOrchestrator
             }
 
             ConsoleLog.Write("UploadSync", "auto retry pending start");
-            var result = await ExecutePendingUploadsAsync(cancellationToken);
+            // 中文注释：自动重试的上传执行（读待传队列、HTTP 上传、回写上传状态）整体放进线程池。上传服务内部没有
+            // ConfigureAwait(false)，从 Dispatcher 直接调用时 HTTP 返回后的 SQLite 写入会回到 UI 线程。该委托只调用两个
+            // 上传执行服务并汇总计数，不碰绑定属性；_isAutoSyncRetrying 与命令状态仍在 await 回来后的调用方线程修改。
+            var result = await Task.Run(() => ExecutePendingUploadsAsync(cancellationToken));
             await RefreshPendingSyncAsync(cancellationToken);
             ConsoleLog.Write(
                 "UploadSync",
@@ -294,64 +320,103 @@ internal sealed class SyncOrchestrator
         }
     }
 
-    private async Task RefreshAuditLogsAsync()
-    {
-        var scope = _deviceAuthorizationState?.Current;
-        if (_logOutboxStore is null || scope is null)
-        {
-            SyncCenterAuditLogs.Clear();
-            _notifyPropertyChanged?.Invoke(nameof(SyncCenterAuditLogs));
-            return;
-        }
-
-        var records = await _logOutboxStore.ReadOperationForScopeAsync(
-            scope.StoreCode,
-            scope.DeviceCode,
-            200,
-            CancellationToken.None);
-        SyncCenterAuditLogs.Clear();
-        foreach (var record in records)
-        {
-            SyncCenterAuditLogs.Add(new OperationAuditQueueListItem(
-                record.EventId,
-                record.State,
-                record.OccurredAtUtc,
-                record.AttemptCount,
-                record.NextAttemptAtUtc,
-                record.LastErrorCode,
-                record.LastErrorMessage));
-        }
-
-        _notifyPropertyChanged?.Invoke(nameof(SyncCenterAuditLogs));
-    }
-
     private async Task RefreshAuditLogsSafelyAsync()
     {
+        var refreshSequence = Interlocked.Increment(ref _syncCenterRefreshSequence);
+        var auditSource = CaptureAuditSource();
+        // 中文注释：审计 outbox 读取同样放进线程池，结果回到调用方上下文再写回界面。
+        var auditLogs = await Task.Run(() => LoadAuditLogsSafelyAsync(auditSource));
+        ApplyAuditLogs(refreshSequence, auditLogs);
+    }
+
+    // 在调用方线程取一次审计来源快照，后台读取不再读这两个可被 ConfigureAudit 改写的字段。
+    private AuditLogSource CaptureAuditSource() =>
+        new(_logOutboxStore, _deviceAuthorizationState?.Current);
+
+    // 仅做本地读取（线程池执行）：不碰绑定集合与属性。
+    private static async Task<AuditLogsLoadResult> LoadAuditLogsSafelyAsync(AuditLogSource source)
+    {
+        if (source.Store is null || source.Scope is null)
+        {
+            // 没有审计来源时清空列表。
+            return new AuditLogsLoadResult([], null);
+        }
+
         try
         {
-            await RefreshAuditLogsAsync();
-            LastAuditSyncErrorText = string.Empty;
+            var records = await source.Store.ReadOperationForScopeAsync(
+                source.Scope.StoreCode,
+                source.Scope.DeviceCode,
+                200,
+                CancellationToken.None);
+            return new AuditLogsLoadResult(records, null);
         }
         catch (Exception ex)
         {
             // 审计 outbox 故障不能阻止订单页签刷新或覆盖订单重试结果。
-            LastAuditSyncErrorText = string.Format(
-                _localization.CurrentCulture,
-                _localization.T("shell.sync.auditLoadFailed"),
-                ex.Message);
+            return new AuditLogsLoadResult([], ex.Message);
+        }
+    }
+
+    // 在调用方上下文（UI 线程）写回审计列表与错误文案。
+    private void ApplyAuditLogs(long refreshSequence, AuditLogsLoadResult auditLogs)
+    {
+        if (refreshSequence <= _appliedAuditRefreshSequence)
+        {
+            // 更晚发起的审计读取已写回界面，这次较旧的结果丢弃。
+            return;
+        }
+
+        _appliedAuditRefreshSequence = refreshSequence;
+        if (auditLogs.FailureMessage is null)
+        {
+            // 中文注释：写回阶段同样兜底。SyncCenterAuditLogs 的 CollectionChanged 订阅方或属性通知订阅方抛错时，
+            // 与改为后台读取之前一样只落到审计错误文案，不让整个同步中心刷新失败（收款完成后续步骤、自动重试、
+            // 手动重试都依赖刷新正常结束）。
+            try
+            {
+                SyncCenterAuditLogs.Clear();
+                foreach (var record in auditLogs.Records)
+                {
+                    SyncCenterAuditLogs.Add(new OperationAuditQueueListItem(
+                        record.EventId,
+                        record.State,
+                        record.OccurredAtUtc,
+                        record.AttemptCount,
+                        record.NextAttemptAtUtc,
+                        record.LastErrorCode,
+                        record.LastErrorMessage));
+                }
+
+                _notifyPropertyChanged?.Invoke(nameof(SyncCenterAuditLogs));
+                LastAuditSyncErrorText = string.Empty;
+            }
+            catch (Exception ex)
+            {
+                LastAuditSyncErrorText = FormatAuditLoadFailure(ex.Message);
+            }
+        }
+        else
+        {
+            // 读取失败时保留界面上已有的审计列表，只更新错误文案。
+            LastAuditSyncErrorText = FormatAuditLoadFailure(auditLogs.FailureMessage);
         }
 
         _notifyPropertyChanged?.Invoke(nameof(LastAuditSyncErrorText));
     }
 
-    private async Task RefreshSettlementUploadsSafelyAsync(CancellationToken cancellationToken)
+    private string FormatAuditLoadFailure(string message) =>
+        string.Format(
+            _localization.CurrentCulture,
+            _localization.T("shell.sync.auditLoadFailed"),
+            message);
+
+    // 仅做本地读取（线程池执行）：结果由 ApplySettlementUploads 在调用方上下文写回字段。
+    private async Task<SettlementUploadsLoadResult> LoadSettlementUploadsSafelyAsync(CancellationToken cancellationToken)
     {
         if (_linklySettlementUploadQueueReader is null)
         {
-            _settlementOverview = new LinklySettlementUploadOverview(0, 0, 0, null);
-            _settlementQueueItems = [];
-            _settlementLoadFailureMessage = null;
-            return;
+            return SettlementUploadsLoadResult.Empty;
         }
 
         try
@@ -359,9 +424,7 @@ internal sealed class SyncOrchestrator
             var overviewTask = _linklySettlementUploadQueueReader.GetOverviewAsync(cancellationToken);
             var itemsTask = _linklySettlementUploadQueueReader.GetActiveItemsAsync(cancellationToken: cancellationToken);
             await Task.WhenAll(overviewTask, itemsTask);
-            _settlementOverview = await overviewTask;
-            _settlementQueueItems = await itemsTask;
-            _settlementLoadFailureMessage = null;
+            return new SettlementUploadsLoadResult(await overviewTask, await itemsTask, null);
         }
         catch (OperationCanceledException)
         {
@@ -370,10 +433,15 @@ internal sealed class SyncOrchestrator
         catch (Exception ex)
         {
             // 结算上传队列独立于订单快照，读取失败时保留订单同步中心可用。
-            _settlementOverview = new LinklySettlementUploadOverview(0, 0, 0, null);
-            _settlementQueueItems = [];
-            _settlementLoadFailureMessage = ex.Message;
+            return SettlementUploadsLoadResult.Empty with { FailureMessage = ex.Message };
         }
+    }
+
+    private void ApplySettlementUploads(SettlementUploadsLoadResult settlement)
+    {
+        _settlementOverview = settlement.Overview;
+        _settlementQueueItems = settlement.Items;
+        _settlementLoadFailureMessage = settlement.FailureMessage;
     }
 
     private void SelectAllAuditLogs()
@@ -687,6 +755,29 @@ internal sealed class SyncOrchestrator
 
         return new UploadRetrySummary(attempted, uploaded, failed, interrupted);
     }
+
+    private sealed record SyncCenterLoadResult(
+        ShellSyncCenterSnapshot OrderSnapshot,
+        SettlementUploadsLoadResult Settlement,
+        AuditLogsLoadResult AuditLogs);
+
+    private sealed record SettlementUploadsLoadResult(
+        LinklySettlementUploadOverview Overview,
+        IReadOnlyList<LinklySettlementUploadQueueItem> Items,
+        string? FailureMessage)
+    {
+        public static SettlementUploadsLoadResult Empty { get; } =
+            new(new LinklySettlementUploadOverview(0, 0, 0, null), [], null);
+    }
+
+    private sealed record AuditLogSource(
+        ClientLogOutboxStore? Store,
+        DeviceAuthorizationContext? Scope);
+
+    // FailureMessage 非空表示读取失败，此时 Records 为空且不覆盖界面上的旧列表。
+    private sealed record AuditLogsLoadResult(
+        IReadOnlyList<OperationAuditOutboxListItem> Records,
+        string? FailureMessage);
 
     private sealed record UploadRetrySummary(
         int AttemptedCount,

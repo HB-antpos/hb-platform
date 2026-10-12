@@ -60,6 +60,47 @@ public sealed class CatalogSyncServiceTests
         Assert.Equal(["ABC"], deleteCall.LookupCodes);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RefreshLookupAsync_WritesLocalCatalogOffCallerContextAndReturnsToCaller(bool found)
+    {
+        var repository = new FakeLocalCatalogRepository();
+        var apiClient = new FakeCatalogApiClient
+        {
+            LookupResponse = found
+                ? new CatalogLookupResponse("S01", "abc", "ABC", Found: true, Item: CreateLookupItem("P-001", "abc", "REF-001"))
+                : new CatalogLookupResponse("S01", "abc", "ABC", Found: false, Item: null)
+        };
+        var service = new RemoteLookupRefreshService(repository, apiClient);
+
+        // 扫码加购后的价格复核：HTTP 返回后续体回到 UI 线程，本地目录写事务（BEGIN IMMEDIATE，最长等锁 5 秒）不能在 UI 线程执行。
+        var ((result, resumedThreadId), uiThreadId) = await SingleThreadSynchronizationContextTestSupport.RunAsync(async () =>
+        {
+            var refreshResult = await service.RefreshLookupAsync("S01", "abc");
+            return (refreshResult, Environment.CurrentManagedThreadId);
+        });
+
+        var write = Assert.Single(repository.WriteThreads);
+        Assert.NotEqual(uiThreadId, write.ThreadId);
+        Assert.False(write.OnUiContext);
+        // 返回值语义不变，调用方 await 之后仍回到自己的（UI）上下文继续回写购物车。
+        Assert.Equal(uiThreadId, resumedThreadId);
+        Assert.Equal(found, result.Updated);
+        Assert.Equal(!found, result.Deleted);
+        if (found)
+        {
+            Assert.Equal("P-001", Assert.Single(Assert.Single(repository.UpsertedBatches)).ProductCode);
+            Assert.Empty(repository.DeleteCalls);
+        }
+        else
+        {
+            Assert.Empty(repository.UpsertedBatches);
+            Assert.Equal(["ABC"], Assert.Single(repository.DeleteCalls).LookupCodes);
+            Assert.Equal(1, result.DeletedCount);
+        }
+    }
+
     [Fact]
     public async Task RefreshLookupAsync_WhenRemoteFails_DoesNotDeleteLocalCatalog()
     {
@@ -1301,6 +1342,9 @@ public sealed class CatalogSyncServiceTests
 
         public Action? StageStarted { get; set; }
 
+        // 记录 Upsert/Delete 写入发生在哪条线程、是否处在测试用"UI"同步上下文里。
+        public ConcurrentQueue<(int ThreadId, bool OnUiContext)> WriteThreads { get; } = new();
+
         public Task ReplaceSellableItemsAsync(IEnumerable<SellableItemDto> items, CancellationToken cancellationToken = default)
         {
             return UpsertSellableItemsAsync(items, cancellationToken);
@@ -1308,6 +1352,7 @@ public sealed class CatalogSyncServiceTests
 
         public Task UpsertSellableItemsAsync(IEnumerable<SellableItemDto> items, CancellationToken cancellationToken = default)
         {
+            WriteThreads.Enqueue((Environment.CurrentManagedThreadId, SingleThreadSynchronizationContextTestSupport.IsOnUiContext));
             var batch = items.ToArray();
             UpsertedBatches.Add(batch);
             foreach (var item in batch)
@@ -1332,6 +1377,7 @@ public sealed class CatalogSyncServiceTests
             IEnumerable<string> lookupCodes,
             CancellationToken cancellationToken = default)
         {
+            WriteThreads.Enqueue((Environment.CurrentManagedThreadId, SingleThreadSynchronizationContextTestSupport.IsOnUiContext));
             var materializedCodes = lookupCodes.ToArray();
             DeleteCalls.Add((storeCode, materializedCodes));
             return Task.FromResult(materializedCodes.Length);
