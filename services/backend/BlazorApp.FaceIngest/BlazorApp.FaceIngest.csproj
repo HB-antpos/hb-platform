@@ -11,4 +11,9 @@
     <InternalsVisibleTo Include="BlazorApp.FaceIngest.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- P1 直连主库（受限账号）写抓拍事件；版本与主 API 保持一致。不引 SqlSugar / BlazorApp.Shared。 -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.1" />
+  </ItemGroup>
+
 </Project>

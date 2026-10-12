@@ -4,6 +4,9 @@ namespace BlazorApp.FaceIngest;
 /// 原始报文清理（一轮）。业务口径：
 /// - 删除接收时间早于 now - RetentionDays 的 .bin / .json；接收时间以文件名里的 UTC 时间戳为准
 ///   （与目录日期同源，都来自 TimeProvider），文件名解析不出时回退 LastWriteTimeUtc；
+/// - 处理器旁路标记（.processed / .failed / .retry / .parsed.json）与报文同一保留期删除，不计入存储统计；
+/// - 本地图片 images/：文件写入时间早于截止时间，或整个日期目录（UTC 接收日）都已过期即删除；
+///   写入时间不早于接收时间，所以不会早删；处理延迟时最多比原始报文多留一天；
 /// - 删除超过 1 小时的 .tmp 残片（正常写入在秒级完成，残片只可能来自进程被杀）；
 /// - 删除空目录（今天与昨天的日期目录除外，避免与正在建目录的写入竞争）；
 /// - 最后全量重扫校正统计。单个文件删除失败只记日志不中断。
@@ -51,6 +54,7 @@ internal sealed class CaptureStorageCleaner
         long deletedTempFiles = 0;
         long failedDeletes = 0;
         long deletedDirectories = 0;
+        long deletedMarkerFiles = 0;
 
         if (Directory.Exists(rawRoot))
         {
@@ -110,6 +114,11 @@ internal sealed class CaptureStorageCleaner
                 {
                     deletedTempFiles++;
                 }
+                else if (kind == CaptureFileKind.Marker)
+                {
+                    // 中文注释：标记文件本来就不计入统计，删了也不扣减计数器。
+                    deletedMarkerFiles++;
+                }
                 else
                 {
                     deletedCaptureFiles++;
@@ -121,6 +130,11 @@ internal sealed class CaptureStorageCleaner
             deletedDirectories = DeleteEmptyDirectories(rawRoot, now, cancellationToken);
         }
 
+        var images = CleanImages(retentionCutoff, tempCutoff, now, cancellationToken);
+        failedDeletes += images.FailedDeletes;
+        deletedTempFiles += images.DeletedTempFiles;
+        deletedDirectories += images.DeletedDirectories;
+
         var statistics = _store.RescanStatistics();
         var summary = new CleanupSummary(
             deletedCaptureFiles,
@@ -129,12 +143,16 @@ internal sealed class CaptureStorageCleaner
             deletedDirectories,
             failedDeletes,
             statistics.FileCount,
-            statistics.Bytes);
+            statistics.Bytes,
+            deletedMarkerFiles,
+            images.DeletedImageFiles);
         _logger.LogInformation(
-            "Face ingest cleanup finished deletedFiles={DeletedFiles} deletedBytes={DeletedBytes} deletedTempFiles={DeletedTempFiles} deletedDirectories={DeletedDirectories} failedDeletes={FailedDeletes} storedFiles={StoredFileCount} storedBytes={StoredBytes}",
+            "Face ingest cleanup finished deletedFiles={DeletedFiles} deletedBytes={DeletedBytes} deletedTempFiles={DeletedTempFiles} deletedMarkerFiles={DeletedMarkerFiles} deletedImageFiles={DeletedImageFiles} deletedDirectories={DeletedDirectories} failedDeletes={FailedDeletes} storedFiles={StoredFileCount} storedBytes={StoredBytes}",
             summary.DeletedCaptureFiles,
             summary.DeletedBytes,
             summary.DeletedTempFiles,
+            summary.DeletedMarkerFiles,
+            summary.DeletedImageFiles,
             summary.DeletedDirectories,
             summary.FailedDeletes,
             summary.StoredFileCount,
@@ -142,7 +160,110 @@ internal sealed class CaptureStorageCleaner
         return summary;
     }
 
-    private long DeleteEmptyDirectories(string rawRoot, DateTimeOffset now, CancellationToken cancellationToken)
+    /// <summary>
+    /// 清理本地图片目录 <c>images/{yyyy-MM-dd}/{cameraId}/</c>（只在 COS 关闭时才会有）。
+    /// 图片文件名不带时间戳，过期判定：写入时间早于截止时间，或日期目录整天都早于截止时间。
+    /// </summary>
+    private ImageCleanupResult CleanImages(
+        DateTimeOffset retentionCutoff,
+        DateTimeOffset tempCutoff,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var imagesRoot = Path.Combine(_store.RootPath, CaptureFileNames.ImagesDirectoryName);
+        if (!Directory.Exists(imagesRoot))
+        {
+            return default;
+        }
+
+        long deletedImages = 0;
+        long deletedTemp = 0;
+        long failed = 0;
+        List<string> dateDirectories;
+        try
+        {
+            dateDirectories = [.. Directory.EnumerateDirectories(imagesRoot)];
+        }
+        catch (Exception ex) when (RawCaptureStore.IsStorageFailure(ex))
+        {
+            _logger.LogWarning(ex, "Face ingest cleanup could not enumerate image directories.");
+            return default;
+        }
+
+        foreach (var dateDirectory in dateDirectories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var date = CaptureFileNames.TryParseDateDirectory(Path.GetFileName(dateDirectory));
+            // 中文注释：整天都已过期 = 当天结束时刻（次日 0 点 UTC）不晚于截止时间。
+            var wholeDayExpired = date is DateOnly day
+                && new DateTimeOffset(day.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero) <= retentionCutoff;
+            List<FileInfo> files;
+            try
+            {
+                files = [.. new DirectoryInfo(dateDirectory).EnumerateFiles("*", RawCaptureStore.RecursiveEnumeration)];
+            }
+            catch (Exception ex) when (RawCaptureStore.IsStorageFailure(ex))
+            {
+                _logger.LogWarning(ex, "Face ingest cleanup could not enumerate image directory {DirectoryName}.", Path.GetFileName(dateDirectory));
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                bool isTemp;
+                bool expired;
+                try
+                {
+                    isTemp = file.Name.EndsWith(CaptureFileNames.TempExtension, StringComparison.Ordinal);
+                    var writtenAt = new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero);
+                    expired = isTemp
+                        ? writtenAt < tempCutoff || wholeDayExpired
+                        : writtenAt < retentionCutoff || wholeDayExpired;
+                }
+                catch (Exception ex) when (RawCaptureStore.IsStorageFailure(ex))
+                {
+                    continue;
+                }
+
+                if (!expired)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    file.Delete();
+                }
+                catch (Exception ex) when (RawCaptureStore.IsStorageFailure(ex))
+                {
+                    failed++;
+                    _logger.LogWarning(ex, "Face ingest cleanup could not delete image {FileName}.", file.Name);
+                    continue;
+                }
+
+                if (isTemp)
+                {
+                    deletedTemp++;
+                }
+                else
+                {
+                    deletedImages++;
+                }
+            }
+        }
+
+        var deletedDirectories = DeleteEmptyDirectories(imagesRoot, now, cancellationToken);
+        return new ImageCleanupResult(deletedImages, deletedTemp, deletedDirectories, failed);
+    }
+
+    private readonly record struct ImageCleanupResult(
+        long DeletedImageFiles,
+        long DeletedTempFiles,
+        long DeletedDirectories,
+        long FailedDeletes);
+
+    private long DeleteEmptyDirectories(string rootPath, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(now.UtcDateTime);
         var yesterday = today.AddDays(-1);
@@ -150,7 +271,7 @@ internal sealed class CaptureStorageCleaner
         IEnumerable<string> dateDirectories;
         try
         {
-            dateDirectories = [.. Directory.EnumerateDirectories(rawRoot)];
+            dateDirectories = [.. Directory.EnumerateDirectories(rootPath)];
         }
         catch (Exception ex) when (RawCaptureStore.IsStorageFailure(ex))
         {
@@ -208,4 +329,6 @@ internal sealed record CleanupSummary(
     long DeletedDirectories,
     long FailedDeletes,
     long StoredFileCount,
-    long StoredBytes);
+    long StoredBytes,
+    long DeletedMarkerFiles = 0,
+    long DeletedImageFiles = 0);

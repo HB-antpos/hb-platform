@@ -24,9 +24,12 @@ public sealed class HealthAndUtilityTests
             var json = await response.Content.ReadAsStringAsync();
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
+            // 中文注释：P1 按规格新增 cameraSource / cameraSourceReady 两个字段，其余与 P0 相同。
             Assert.Equal(
-                ["captureEnabled", "status", "storedBytes", "storedFileCount"],
+                ["cameraSource", "cameraSourceReady", "captureEnabled", "status", "storedBytes", "storedFileCount"],
                 root.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal("json", root.GetProperty("cameraSource").GetString());
+            Assert.True(root.GetProperty("cameraSourceReady").GetBoolean());
             Assert.Equal("healthy", root.GetProperty("status").GetString());
             Assert.True(root.GetProperty("captureEnabled").GetBoolean());
             Assert.Equal(0, root.GetProperty("storedFileCount").GetInt64());

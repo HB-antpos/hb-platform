@@ -7,6 +7,7 @@ namespace BlazorApp.FaceIngest;
 /// <summary>
 /// 海康摄像机推送接收端点的处理逻辑（任意 HTTP 方法、任意 Content-Type）。
 /// 业务口径：
+/// - 摄像机来源未就绪（数据库来源启动后从未加载成功）→ 不读请求体，503 空体（让摄像机断网续传缓存后重推），节流记 Warning；
 /// - 鉴权失败（无 token / 不匹配 / 摄像机停用）→ 不读请求体，401 空体，按来源节流记 Warning；
 /// - 鉴权通过：CaptureEnabled=false 或存储护栏触发 → 读掉请求体丢弃后照样 200（避免断网续传反复重推）；
 ///   正常 → 原样落盘后 200 空体；请求体超限 413；写盘失败 503（让摄像机缓存后重推）。
@@ -20,26 +21,31 @@ internal sealed class FaceIngestRequestHandler
     private static readonly TimeSpan LogThrottleWindow = TimeSpan.FromSeconds(60);
 
     private readonly FaceIngestSettingsMonitor _settings;
+    private readonly ICameraRegistrySource _cameraSource;
     private readonly RawCaptureStore _store;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<FaceIngestRequestHandler> _logger;
     private readonly ThrottledLogGate _rejectionLogGate;
     private readonly ThrottledLogGate _discardLogGate;
+    private readonly ThrottledLogGate _notReadyLogGate;
     // 中文注释：因存储护栏累计丢弃的报文数（进程启动以来），写进节流 Warning 日志。
     private long _droppedTotal;
 
     public FaceIngestRequestHandler(
         FaceIngestSettingsMonitor settings,
+        ICameraRegistrySource cameraSource,
         RawCaptureStore store,
         TimeProvider timeProvider,
         ILogger<FaceIngestRequestHandler> logger)
     {
         _settings = settings;
+        _cameraSource = cameraSource;
         _store = store;
         _timeProvider = timeProvider;
         _logger = logger;
         _rejectionLogGate = new ThrottledLogGate(timeProvider, LogThrottleWindow);
         _discardLogGate = new ThrottledLogGate(timeProvider, LogThrottleWindow);
+        _notReadyLogGate = new ThrottledLogGate(timeProvider, LogThrottleWindow);
     }
 
     public async Task HandleAsync(HttpContext context)
@@ -51,6 +57,24 @@ internal sealed class FaceIngestRequestHandler
         var request = context.Request;
         var response = context.Response;
 
+        // 关键逻辑：数据库来源从未加载成功时无法判断 token 真假，回 401 会让摄像机把真数据当成配置错误丢掉；
+        // 回 503 让它按断网续传缓存、稍后重推。只在启动后到首次加载成功之间出现，一旦加载成功即正常判定。
+        var cameras = _cameraSource.Current;
+        if (cameras is null)
+        {
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            if (_notReadyLogGate.TryAcquire("camera-source-not-ready", out var notReadySuppressed))
+            {
+                _logger.LogWarning(
+                    "Face ingest camera source not ready; responding 503 so the camera retries later source={CameraSource} method={Method} suppressedSinceLastLog={SuppressedCount}",
+                    _cameraSource.SourceName,
+                    request.Method,
+                    notReadySuppressed);
+            }
+
+            return;
+        }
+
         var token = IngestTokenResolver.Resolve(request);
         if (token.Value is null)
         {
@@ -58,7 +82,7 @@ internal sealed class FaceIngestRequestHandler
             return;
         }
 
-        var camera = settings.FindCameraByToken(token.Value);
+        var camera = cameras.FindCameraByToken(token.Value);
         if (camera is null)
         {
             Reject(context, token, "token-mismatch", cameraId: null);

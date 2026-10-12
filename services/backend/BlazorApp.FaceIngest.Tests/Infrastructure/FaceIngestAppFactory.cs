@@ -29,6 +29,18 @@ internal sealed class FaceIngestAppOptions
     public bool EnableCleanupService { get; set; }
 
     /// <summary>
+    /// 默认移除 P1 后台处理服务：它会在 raw/ 旁写 .processed 等标记、在 images/ 写图，P0 测试按文件清单断言；
+    /// 处理器测试直接调用 <see cref="CaptureProcessor.RunOnceAsync"/>。
+    /// </summary>
+    public bool EnableProcessingService { get; set; }
+
+    /// <summary>默认移除数据库摄像机来源的后台刷新；测试直接调用 <see cref="DatabaseCameraSource.RefreshAsync"/> 控制时序。</summary>
+    public bool EnableCameraRefreshService { get; set; }
+
+    /// <summary>额外的服务替换（在框架默认替换之后执行），例如注入假仓储 / 假写库器 / 假图片存储。</summary>
+    public Action<IServiceCollection>? ConfigureServices { get; set; }
+
+    /// <summary>
     /// 为每个请求设置的连接层对端地址。TestServer 默认是 null；生产容器里看到的是 Docker 网桥网关
     /// （如 172.18.0.1），需要模拟这一点时设置它。
     /// </summary>
@@ -147,16 +159,33 @@ internal sealed class FaceIngestAppFactory : WebApplicationFactory<Program>
 
             if (!_options.EnableCleanupService)
             {
-                var hosted = services.Where(descriptor =>
-                        descriptor.ServiceType == typeof(IHostedService)
-                        && descriptor.ImplementationType == typeof(CaptureStorageCleanupService))
-                    .ToList();
-                foreach (var descriptor in hosted)
-                {
-                    services.Remove(descriptor);
-                }
+                RemoveHostedService<CaptureStorageCleanupService>(services);
             }
+
+            if (!_options.EnableProcessingService)
+            {
+                RemoveHostedService<CaptureProcessingService>(services);
+            }
+
+            if (!_options.EnableCameraRefreshService)
+            {
+                RemoveHostedService<CameraRegistryRefreshService>(services);
+            }
+
+            _options.ConfigureServices?.Invoke(services);
         });
+    }
+
+    private static void RemoveHostedService<T>(IServiceCollection services)
+    {
+        var hosted = services.Where(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationType == typeof(T))
+            .ToList();
+        foreach (var descriptor in hosted)
+        {
+            services.Remove(descriptor);
+        }
     }
 
     protected override void Dispose(bool disposing)

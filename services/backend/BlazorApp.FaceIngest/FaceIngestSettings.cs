@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Data.SqlClient;
 
 namespace BlazorApp.FaceIngest;
 
@@ -14,7 +13,11 @@ internal sealed partial class FaceIngestSettings
 {
     private readonly CameraRegistration[] _cameras;
 
-    private FaceIngestSettings(FaceIngestOptions options, string storageRootPath, CameraRegistration[] cameras)
+    private FaceIngestSettings(
+        FaceIngestOptions options,
+        string storageRootPath,
+        CameraRegistration[] cameras,
+        string? databaseConnectionString)
     {
         CaptureEnabled = options.CaptureEnabled;
         StorageRootPath = storageRootPath;
@@ -25,6 +28,22 @@ internal sealed partial class FaceIngestSettings
         RetentionDays = options.RetentionDays;
         CleanupIntervalMinutes = options.CleanupIntervalMinutes;
         _cameras = cameras;
+        Registry = new CameraRegistry(cameras);
+        ProcessingEnabled = options.ProcessingEnabled;
+        ProcessingIntervalSeconds = options.ProcessingIntervalSeconds;
+        ProcessingBatchSize = options.ProcessingBatchSize;
+        ProcessingMaxAttempts = options.ProcessingMaxAttempts;
+        DatabaseConnectionString = databaseConnectionString;
+        CameraRefreshSeconds = options.Database.CameraRefreshSeconds;
+        var cos = options.Cos;
+        Cos = new CosSettings(
+            cos.Enabled,
+            cos.Bucket?.Trim() ?? string.Empty,
+            cos.Region?.Trim() ?? string.Empty,
+            cos.SecretId?.Trim() ?? string.Empty,
+            cos.SecretKey?.Trim() ?? string.Empty,
+            NormalizeKeyPrefix(cos.KeyPrefix),
+            cos.UploadRawBody);
     }
 
     /// <summary>是否真正落盘。</summary>
@@ -53,6 +72,33 @@ internal sealed partial class FaceIngestSettings
 
     /// <summary>已登记的摄像机（含停用的）。</summary>
     public IReadOnlyList<CameraRegistration> Cameras => _cameras;
+
+    /// <summary>cameras.json / 内存配置里的摄像机清单（json 来源用；配置了数据库时不参与鉴权）。</summary>
+    public CameraRegistry Registry { get; }
+
+    /// <summary>是否运行后台处理器。</summary>
+    public bool ProcessingEnabled { get; }
+
+    /// <summary>处理器扫描周期（秒）。</summary>
+    public int ProcessingIntervalSeconds { get; }
+
+    /// <summary>每轮最多处理条数。</summary>
+    public int ProcessingBatchSize { get; }
+
+    /// <summary>单条最多尝试次数。</summary>
+    public int ProcessingMaxAttempts { get; }
+
+    /// <summary>数据库连接串（已校验格式）；null 表示不连库。只在启动时读取。</summary>
+    internal string? DatabaseConnectionString { get; }
+
+    /// <summary>是否配置了数据库。</summary>
+    public bool DatabaseConfigured => DatabaseConnectionString is not null;
+
+    /// <summary>摄像机表刷新周期（秒）。</summary>
+    public int CameraRefreshSeconds { get; }
+
+    /// <summary>COS 配置（已校验）。只在启动时读取。</summary>
+    internal CosSettings Cos { get; }
 
     /// <summary>
     /// 校验并生成快照。任何一项不合法都返回 false 并给出全部错误；错误信息不含 token 哈希。
@@ -96,6 +142,12 @@ internal sealed partial class FaceIngestSettings
         {
             problems.Add("FaceIngest:MinFreeDiskBytes must be zero or positive.");
         }
+
+        RequirePositive(problems, nameof(FaceIngestOptions.ProcessingIntervalSeconds), options.ProcessingIntervalSeconds);
+        RequirePositive(problems, nameof(FaceIngestOptions.ProcessingBatchSize), options.ProcessingBatchSize);
+        RequirePositive(problems, nameof(FaceIngestOptions.ProcessingMaxAttempts), options.ProcessingMaxAttempts);
+        var databaseConnectionString = ValidateDatabase(problems, options.Database);
+        ValidateCos(problems, options.Cos);
 
         var cameras = new List<CameraRegistration>();
         var seenCameraIds = new HashSet<string>(StringComparer.Ordinal);
@@ -170,38 +222,98 @@ internal sealed partial class FaceIngestSettings
             return false;
         }
 
-        settings = new FaceIngestSettings(options, storageRootPath, [.. cameras]);
+        settings = new FaceIngestSettings(options, storageRootPath, [.. cameras], databaseConnectionString);
         errors = [];
         return true;
     }
 
+    /// <summary>按 token 找摄像机（含停用的，由调用方决定是否放行），常量时间比较，见 <see cref="CameraRegistry.FindCameraByToken"/>。</summary>
+    public CameraRegistration? FindCameraByToken(string token) => Registry.FindCameraByToken(token);
+
     /// <summary>
-    /// 按 token 找摄像机（含停用的，由调用方决定是否放行）。
-    /// 关键逻辑：先算 token 的 SHA-256，再用 <see cref="CryptographicOperations.FixedTimeEquals"/>
-    /// 与每台摄像机比对且不提前退出，避免时序侧信道暴露「哪台匹配 / 匹配到第几台」；30 台规模开销可忽略。
+    /// 校验数据库配置：连接串为空 = 不连库；非空必须是合法的 SQL Server 连接串且指定了服务器与库名（否则启动失败）。
+    /// 关键逻辑：错误信息只给键名，绝不回显连接串或解析异常原文（里面可能带密码）。
+    /// 连接串合法但连不上不算配置错误，由摄像机来源回 503 处理。
     /// </summary>
-    public CameraRegistration? FindCameraByToken(string token)
+    private static string? ValidateDatabase(List<string> problems, FaceIngestDatabaseOptions? database)
     {
-        ArgumentNullException.ThrowIfNull(token);
-        Span<byte> incomingHash = stackalloc byte[SHA256.HashSizeInBytes];
-        var tokenBytes = Encoding.UTF8.GetBytes(token);
+        database ??= new FaceIngestDatabaseOptions();
+        RequirePositive(problems, "Database:CameraRefreshSeconds", database.CameraRefreshSeconds);
+        var connectionString = database.ConnectionString?.Trim();
+        if (string.IsNullOrEmpty(connectionString))
+        {
+            return null;
+        }
+
         try
         {
-            SHA256.HashData(tokenBytes, incomingHash);
+            var builder = new SqlConnectionStringBuilder(connectionString);
+            if (string.IsNullOrWhiteSpace(builder.DataSource) || string.IsNullOrWhiteSpace(builder.InitialCatalog))
+            {
+                problems.Add("FaceIngest:Database:ConnectionString must specify both a server (Data Source) and a database (Initial Catalog).");
+                return null;
+            }
+
+            // 中文注释：标上应用名，DBA 在会话列表里能一眼认出人脸服务的连接；运维显式写了就尊重原值。
+            if (string.IsNullOrWhiteSpace(builder.ApplicationName) || builder.ApplicationName == "Core Microsoft SqlClient Data Provider")
+            {
+                builder.ApplicationName = "BlazorApp.FaceIngest";
+            }
+
+            return builder.ConnectionString;
         }
-        finally
+        catch (Exception ex) when (ex is ArgumentException or FormatException or KeyNotFoundException or InvalidOperationException)
         {
-            CryptographicOperations.ZeroMemory(tokenBytes);
+            problems.Add("FaceIngest:Database:ConnectionString is not a valid SQL Server connection string.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 校验 COS 配置：Enabled=true 时 Bucket / Region / SecretId / SecretKey 缺一不可（启动失败，只报键名不报值）；
+    /// 桶名、地域、前缀只允许安全字符，因为它们会拼进请求主机名与对象键。
+    /// </summary>
+    private static void ValidateCos(List<string> problems, FaceIngestCosOptions? cos)
+    {
+        if (cos is null || !cos.Enabled)
+        {
+            return;
         }
 
-        CameraRegistration? matched = null;
-        foreach (var camera in _cameras)
+        foreach (var (name, value) in new[]
+                 {
+                     (nameof(FaceIngestCosOptions.Bucket), cos.Bucket),
+                     (nameof(FaceIngestCosOptions.Region), cos.Region),
+                     (nameof(FaceIngestCosOptions.SecretId), cos.SecretId),
+                     (nameof(FaceIngestCosOptions.SecretKey), cos.SecretKey),
+                 })
         {
-            var equal = CryptographicOperations.FixedTimeEquals(incomingHash, camera.TokenSha256);
-            matched = equal ? camera : matched;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                problems.Add($"FaceIngest:Cos:{name} is required when FaceIngest:Cos:Enabled is true.");
+            }
         }
 
-        return matched;
+        if (!string.IsNullOrWhiteSpace(cos.Bucket) && !CosHostPartPattern().IsMatch(cos.Bucket.Trim()))
+        {
+            problems.Add("FaceIngest:Cos:Bucket must contain only lowercase letters, digits and hyphens.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(cos.Region) && !CosHostPartPattern().IsMatch(cos.Region.Trim()))
+        {
+            problems.Add("FaceIngest:Cos:Region must contain only lowercase letters, digits and hyphens.");
+        }
+
+        if (!CosKeyPrefixPattern().IsMatch(NormalizeKeyPrefix(cos.KeyPrefix)))
+        {
+            problems.Add("FaceIngest:Cos:KeyPrefix must be 1-64 characters of [A-Za-z0-9_-] segments separated by '/'.");
+        }
+    }
+
+    private static string NormalizeKeyPrefix(string? keyPrefix)
+    {
+        var trimmed = keyPrefix?.Trim().Trim('/') ?? string.Empty;
+        return trimmed.Length == 0 ? FaceIngestCosOptions.DefaultKeyPrefix : trimmed;
     }
 
     private static void RequirePositive(List<string> problems, string name, long value)
@@ -221,6 +333,36 @@ internal sealed partial class FaceIngestSettings
 
     [GeneratedRegex(@"^[0-9A-Fa-f]{64}\z", RegexOptions.CultureInvariant)]
     private static partial Regex TokenHashPattern();
+
+    [GeneratedRegex(@"^[a-z0-9][a-z0-9-]{0,62}\z", RegexOptions.CultureInvariant)]
+    private static partial Regex CosHostPartPattern();
+
+    [GeneratedRegex(@"^(?=.{1,64}\z)[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*\z", RegexOptions.CultureInvariant)]
+    private static partial Regex CosKeyPrefixPattern();
+
+    /// <summary>摄像机编号是否合法（DB 来源与处理器复用同一规则，保证能安全进文件路径）。</summary>
+    internal static bool IsValidCameraId(string? cameraId) => cameraId is not null && CameraIdPattern().IsMatch(cameraId);
+
+    /// <summary>门店编码是否合法。</summary>
+    internal static bool IsValidStoreCode(string? storeCode) => storeCode is not null && StoreCodePattern().IsMatch(storeCode);
+
+    /// <summary>token 哈希是否为 64 位十六进制（允许首尾空白由调用方先 Trim）。</summary>
+    internal static bool IsValidTokenHash(string? tokenHash) => tokenHash is not null && TokenHashPattern().IsMatch(tokenHash);
+}
+
+/// <summary>已校验的 COS 配置。<see cref="Enabled"/> 为 true 时其余键保证非空。</summary>
+internal sealed record CosSettings(
+    bool Enabled,
+    string Bucket,
+    string Region,
+    string SecretId,
+    string SecretKey,
+    string KeyPrefix,
+    bool UploadRawBody)
+{
+    /// <summary>不在 ToString / 日志里输出密钥。</summary>
+    public override string ToString()
+        => $"CosSettings {{ Enabled = {Enabled}, Bucket = {Bucket}, Region = {Region}, KeyPrefix = {KeyPrefix}, UploadRawBody = {UploadRawBody} }}";
 }
 
 /// <summary>

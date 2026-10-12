@@ -1677,6 +1677,63 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 人脸抓拍三张表_可重复执行_token哈希唯一_图片随事件级联删除_并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql));
+        Assert.Equal(52600, missing.Number);
+
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql);
+
+        // 摄像机登记只填必填列即可（Enabled / 创建与更新时间有默认值）；同一 token 哈希第二次登记被唯一索引拒绝。
+        var tokenHash = new string('a', 64);
+        await ExecuteNonQueryAsync(main, $"""
+            INSERT dbo.FaceCamera (CameraId, StoreCode, TokenSha256) VALUES (N'cam-test-01', N'S0001', '{tokenHash}');
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, $"""
+                INSERT dbo.FaceCamera (CameraId, StoreCode, TokenSha256) VALUES (N'cam-test-02', N'S0001', '{tokenHash}');
+                """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 事件 + 两张图；删除事件时图片行随外键级联删除。
+        var captureId = new string('1', 32);
+        var bodyHash = new string('b', 64);
+        await ExecuteNonQueryAsync(main, $"""
+            INSERT dbo.FaceCaptureEvent (CaptureId, CameraId, StoreCode, ReceivedAtUtc, BodySha256, BodyBytes, ParseStatus, RawStorage, CreatedAtUtc)
+            VALUES ('{captureId}', N'cam-test-01', N'S0001', SYSUTCDATETIME(), '{bodyHash}', 10, 0, N'local', SYSUTCDATETIME());
+            INSERT dbo.FaceCaptureImage (ImageId, CaptureId, Kind, PartIndex, Storage, ObjectKey, ByteSize, Sha256, RectX, FaceScore, CreatedAtUtc)
+            VALUES ('{new string('c', 32)}', '{captureId}', 0, 1, N'local', N'images/x_1.jpg', 3, '{bodyHash}', 0.1234, 87.5, SYSUTCDATETIME()),
+                   ('{new string('d', 32)}', '{captureId}', 1, 2, N'local', N'images/x_2.jpg', 3, '{bodyHash}', NULL, NULL, SYSUTCDATETIME());
+            DELETE dbo.FaceCaptureEvent WHERE CaptureId = '{captureId}';
+            IF EXISTS (SELECT 1 FROM dbo.FaceCaptureImage WHERE CaptureId = '{captureId}')
+                THROW 50001, N'Images were not cascade-deleted.', 1;
+            """);
+
+        // 列被改窄报 52601；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceCaptureEvent ALTER COLUMN ParseNote nvarchar(100) NULL;");
+        var narrowed = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql));
+        Assert.Equal(52601, narrowed.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceCaptureEvent ALTER COLUMN ParseNote nvarchar(500) NULL;");
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql);
+
+        // 待比对过滤索引被删报 52602；重跑迁移补回后通过。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_FaceCaptureEvent_MatchPending ON dbo.FaceCaptureEvent;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql));
+        Assert.Equal(52602, indexMissing.Number);
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

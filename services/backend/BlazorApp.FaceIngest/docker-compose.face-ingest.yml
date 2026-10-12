@@ -1,4 +1,4 @@
-# 人脸抓拍原始报文接收服务（BlazorApp.FaceIngest，P0）独立 compose 项目，运维说明见 docs/runbooks/face-ingest.md。
+# 人脸抓拍接收服务（BlazorApp.FaceIngest，P0 接收落盘 + P1 后台解析 / 存图 / 入库）独立 compose 项目，运维说明见 docs/runbooks/face-ingest.md。
 #
 # 必须在服务器 /www/HBWeb/BackEnd/face-ingest 下这样启动（.env 放在该目录，不放进 BlazorApp.FaceIngest/，
 # 因为部署时会对 BlazorApp.FaceIngest/ 做 rsync --delete）：
@@ -50,6 +50,18 @@ services:
       - FaceIngest__RetentionDays=${FACE_INGEST_RETENTION_DAYS:-7}
       # 单请求上限沿用 appsettings 的 16777216（16MB），与 Nginx client_max_body_size 16m 对齐；
       # 要改必须两边一起改，所以这里不开放 .env 覆盖。
+      # ---- P1：以下变量都有默认值、未配置是合法状态（不要改成 :?required）。----
+      # 后台处理器（解析 → 存图 → 写库）；false = 只接收落盘（P0 行为）。
+      - FaceIngest__ProcessingEnabled=${FACE_INGEST_PROCESSING_ENABLED:-true}
+      # 直连主库的受限账号连接串（只能读写人脸三张表）；空 = 不连库，摄像机仍走 cameras.json，处理结果只写本地摘要。
+      # 密码只写在服务器 .env，绝不进仓库；配置后摄像机改以 FaceCamera 表为准，库从未连上前接收端点回 503。
+      - FaceIngest__Database__ConnectionString=${FACE_INGEST_DB_CONNECTION:-}
+      # 专用私有 COS 桶 + 只授 PutObject 的 CAM 子账号；默认关闭（图片写本地 images/）。开启时四个键缺一个容器就起不来。
+      - FaceIngest__Cos__Enabled=${FACE_INGEST_COS_ENABLED:-false}
+      - FaceIngest__Cos__Bucket=${FACE_INGEST_COS_BUCKET:-}
+      - FaceIngest__Cos__Region=${FACE_INGEST_COS_REGION:-}
+      - FaceIngest__Cos__SecretId=${FACE_INGEST_COS_SECRET_ID:-}
+      - FaceIngest__Cos__SecretKey=${FACE_INGEST_COS_SECRET_KEY:-}
     volumes:
       - ${FACE_INGEST_STORAGE_HOST_PATH:?required}:/app/App_Data/FaceIngest
       - ${FACE_INGEST_CONFIG_HOST_PATH:?required}:/app/config:ro

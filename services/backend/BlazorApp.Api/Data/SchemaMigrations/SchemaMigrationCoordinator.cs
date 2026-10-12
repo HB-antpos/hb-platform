@@ -66,6 +66,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string AdvertisementOrientationMigrationId =
         "20261009.002-advertisement-orientation";
     internal const string AppNotificationMigrationId = "20261012.001-app-notification";
+    internal const string FaceCaptureMigrationId = "20261013.001-face-capture";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -226,6 +227,11 @@ internal sealed class SchemaMigrationCoordinator
             AppNotificationMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAppNotificationAsync(cancellationToken)
+        ),
+        new(
+            FaceCaptureMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyFaceCaptureAsync(cancellationToken)
         ),
     ];
 
