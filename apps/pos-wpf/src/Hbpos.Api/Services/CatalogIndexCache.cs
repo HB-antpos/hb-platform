@@ -1081,7 +1081,8 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
         if (previous is null ||
             !string.Equals(previous.StoreCode, current.StoreCode, StringComparison.OrdinalIgnoreCase) ||
             previous.CatalogIndex.Items.Count != current.CatalogIndex.Items.Count ||
-            !previous.CatalogIndex.Items.SequenceEqual(current.CatalogIndex.Items))
+            !previous.CatalogIndex.Items.SequenceEqual(current.CatalogIndex.Items) ||
+            !CodeConflictsAreEqual(previous.CodeConflicts, current.CodeConflicts))
         {
             return current;
         }
@@ -1093,7 +1094,7 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
             return current;
         }
 
-        // 内容没有变化时沿用已发布版本，客户端可直接 noChange，避免重复全量克隆。
+        // 胜出行与码冲突候选都没有变化时沿用已发布版本，客户端可直接 noChange，避免重复全量克隆。
         return current with
         {
             CatalogIndex = new CatalogSellableIndex(
@@ -1102,6 +1103,22 @@ public sealed class CatalogIndexCache : ICatalogIndexCache
                 current.SellableItems,
                 previousVersion)
         };
+    }
+
+    /// <summary>
+    /// 码冲突候选随版本落盘（下载目录 code-conflicts 文件、持久化快照），同一版本发布后不再改写；
+    /// 候选不同就必须换新版本，否则客户端会一直拿到旧候选。null（未计算）只与 null 相等。
+    /// </summary>
+    private static bool CodeConflictsAreEqual(
+        IReadOnlyList<SellableItemDto>? previous,
+        IReadOnlyList<SellableItemDto>? current)
+    {
+        if (previous is null || current is null)
+        {
+            return previous is null && current is null;
+        }
+
+        return previous.Count == current.Count && previous.SequenceEqual(current);
     }
 
     private CatalogIndexBuildResult? ProjectLegacySince(
