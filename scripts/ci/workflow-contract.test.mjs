@@ -361,6 +361,19 @@ test('POS CI 只消费根 workspace lock，并由各 job 单次安装后调用 w
   assert.match(androidRunner, /npm run prebuild:android --workspace=@hb\/pos-handheld -- --clean/)
 })
 
+test('Backend dotnet lane 执行人脸接收服务测试，并用 TRX 计数拒绝空跑假绿', () => {
+  const dotnetRunner = readFileSync(dotnetRunnerPath, 'utf8')
+  const backendCase = dotnetRunner.slice(dotnetRunner.indexOf('  backend)'), dotnetRunner.indexOf('  pos-api)'))
+
+  // 人脸接收服务独立于 BlazorApp.Api.Tests，不在 backend-test-inventory 审计范围内，靠这里防止被静默移出 CI。
+  assert.match(
+    backendCase,
+    /face_ingest_project="services\/backend\/BlazorApp\.FaceIngest\.Tests\/BlazorApp\.FaceIngest\.Tests\.csproj"/,
+  )
+  assert.match(backendCase, /dotnet build "\$face_ingest_project" --configuration Release --no-restore/)
+  assert.match(backendCase, /assert-trx-tests\.mjs "\$results_root\/face-ingest\.trx" 'Face ingest tests'/)
+})
+
 test('托管 runner 隔离 WPF 分片，并避免原生多架构与 Android 内存争抢', () => {
   const source = readFileSync(workflowPath, 'utf8')
   const windows = workflowJobBlock(source, 'windows')

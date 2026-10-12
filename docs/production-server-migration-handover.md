@@ -20,6 +20,7 @@
 | Web 前端 | `/www/wwwroot/www.hotbargain.vip` | Nginx 静态文件 | 无 | `https://hotbargain.vip/` |
 | 主后端 | `/www/HBWeb/BackEnd/master-Vite` | `hb-platform-vite-api` | `5002` | `/api/` |
 | 收银后端 | `/www/HBWeb/BackEnd/hbpos-api` | `hbpos-api` | `5003` | `/pos-api/` |
+| 人脸抓拍接收（P0 试点） | `/www/HBWeb/BackEnd/face-ingest` | `hb-face-ingest`（compose 项目 `hbweb_face_ingest`） | `5004`（只绑 `127.0.0.1`） | `/face-ingest/` |
 | 旧前端容器 | Docker `hb-platform-frontend` | 遗留服务 | `8080` | 只保留，不作为新站主入口 |
 | 旧后端 | Docker `hb-platform-api` | 遗留服务 | `5001` | 迁移时不要误当主后端 |
 
@@ -35,6 +36,7 @@
 /             -> /www/wwwroot/www.hotbargain.vip
 /api/         -> 127.0.0.1:5002
 /pos-api/     -> 127.0.0.1:5003
+/face-ingest/ -> 127.0.0.1:5004
 ```
 
 ## 3. 必须迁移的文件与目录
@@ -94,6 +96,15 @@
 2. 在新服务器重新签发证书，确认成功后再切换 DNS。
 
 TLS 私钥不得复制进 Git、Docker 镜像、前端目录或应用容器。
+
+### 3.5 人脸抓拍接收服务（仅已部署时）
+
+```text
+/www/HBWeb/BackEnd/face-ingest/.env
+/www/HBWeb/face-ingest-config/cameras.json   # 摄像机登记，只含 token 的 SHA-256；丢失后所有摄像机推送都返回 401
+```
+
+原始报文目录（`.env` 中 `FACE_INGEST_STORAGE_HOST_PATH`，建议 `/www/HBWeb/face-ingest-data`）是只保留 7 天的人脸敏感数据，**不随迁移复制**；新服务器按 `docs/runbooks/face-ingest.md` 新建空目录（`1000:1000`、`700`）。配置目录 `/www/HBWeb/face-ingest-config` 恢复后同样必须是 `1000:1000`、`700`，`cameras.json` 必须能被 uid 1000 读取：文件存在但读不到（例如以 root 解包、`scp` 或不带 `-p` 的 `cp` 恢复成 `root:root 600`）时服务启动失败、容器反复重启（`docker logs` 里有 `UnauthorizedAccessException`），所有推送回 502；只有整个配置目录 uid 1000 进不去时，才会被当成文件不存在、服务照常启动但所有摄像机返回 401。启动前先核对：`sudo ls -ln /www/HBWeb/face-ingest-config/`（`cameras.json` 应显示 `-rw-------` 且属主为 `1000`）。服务源码从固定 commit 重新同步。
 
 ## 4. DataProtection key ring（三套，用途不同，丢失后果不同）
 
@@ -228,6 +239,22 @@ SQUARE_WEBHOOK_SIGNATURE_KEY_SANDBOX
 
 `VITE_CENTER_LOG_KEY` 属于前端构建期变量。它会在构建时进入产物，不是容器运行时挂载文件。必须通过受控 CI/CD 环境注入，不要写入仓库或迁移文档。
 
+### 5.4 人脸抓拍接收服务 `.env`
+
+位于 `/www/HBWeb/BackEnd/face-ingest/.env`，不含密钥（摄像机 token 只以 SHA-256 存在 `cameras.json`）：
+
+```text
+FACE_INGEST_STORAGE_HOST_PATH
+FACE_INGEST_CONFIG_HOST_PATH
+FACE_INGEST_CAPTURE_ENABLED
+FACE_INGEST_RETENTION_DAYS
+FACE_INGEST_MAX_TOTAL_BYTES
+FACE_INGEST_MAX_FILE_COUNT
+FACE_INGEST_MIN_FREE_DISK_BYTES
+```
+
+前两个必填（compose 用 `:?required` 声明），其余有默认值，含义见 `docs/runbooks/face-ingest.md`。
+
 ## 6. 可以重新创建的资源
 
 以下内容通常不需要从旧服务器逐文件复制：
@@ -308,6 +335,7 @@ git status --short --branch
 ```text
 前端 webroot 与 .user.ini
 两个生产 .env
+已部署人脸接收服务时：/www/HBWeb/BackEnd/face-ingest/.env 与 /www/HBWeb/face-ingest-config/cameras.json
 完整 DataProtection key ring：主后端全局 ring、考勤二维码 ring、Linkly 凭据 ring，以及收银后端命名卷 hbpos-api-data-protection-keys
 Nginx vhost 配置
 TLS 证书与私钥，或重新签发所需资料
@@ -446,6 +474,7 @@ sudo docker inspect hbpos-api \
 1. 恢复或重新构建前端静态文件。
 2. 保留 `.user.ini`。
 3. 恢复 Nginx vhost。`/pos-api/` 的反向代理片段已纳入仓库：`scripts/ops/nginx/hotbargain-pos-api.location.conf`，改动或重建后以它为准，并注意其中的约束（前缀剥离、透传 Authorization、读超时不低于 240 秒、不加 IP 白名单）。
+   已部署人脸接收服务时，`/face-ingest/` 片段同样以 `scripts/ops/nginx/hotbargain-face-ingest.location.conf` 为准（含 `/face-ingest/` 与 `/hik/` 兜底两个 location；明文 HTTP 直接 403、关闭 access_log 并把 error_log 指到 /dev/null、请求体上限 16m、不加 IP 白名单）。
 4. 安全迁移或重新签发 TLS 证书。
 5. 运行：
 
@@ -494,6 +523,7 @@ curl --resolve hotbargain.vip:443:NEW_SERVER_IP \
 - [ ] `https://hotbargain.vip/pos-api/api/v1/health` 返回 `200`
 - [ ] `hb-platform-vite-api` 为 `healthy`
 - [ ] `hbpos-api` 为 `healthy`
+- [ ] 已部署人脸接收服务时：`https://hotbargain.vip/face-ingest/health` 返回 `200`，`hb-face-ingest` 为 `healthy`
 - [ ] Nginx 配置检查通过
 - [ ] TLS 证书链和域名正确
 
@@ -515,6 +545,7 @@ curl --resolve hotbargain.vip:443:NEW_SERVER_IP \
 - [ ] POS 设备认证成功
 - [ ] Linkly 回调可达：`CALLBACK_REACHABILITY` 就绪，手工 `curl` 自测返回 `200`（第 9.8 节）
 - [ ] Square 回调可达
+- [ ] 已部署人脸接收服务时：公网自测错误 token 返回 `401`、测试摄像机 token 加二进制 multipart 返回 `200`（未被宝塔 WAF 拦截）、`http://` 明文请求返回 `403` 或 `301`（见 `docs/runbooks/face-ingest.md`）
 - [ ] EAS webhook 验签成功
 - [ ] 图片/对象存储访问成功
 
