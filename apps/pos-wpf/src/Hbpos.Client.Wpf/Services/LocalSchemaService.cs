@@ -1893,6 +1893,15 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         ON LocalCardPaymentAttempts (StoreCode, DeviceCode, CashierId, Environment, Status, UpdatedAt DESC, CreatedAt DESC);
         """,
         """
+        -- 热点查询（最近记录、未结记录、异常队列、展示历史）都只按 门店/设备/环境 等值过滤，
+        -- 再按 UpdatedAt DESC, CreatedAt DESC 排序，且不按收银员过滤（收银员为可选条件）。
+        -- 上面的 RecoverLatest 索引把 CashierId 放在第三列，在单设备库里只能用到前两列，排序仍要临时 B 树；
+        -- 本索引列序与查询一致，等值列后直接按更新时间倒序读取，LIMIT 可提前结束。
+        -- 只新增索引，不改动、不清理任何数据。
+        CREATE INDEX IF NOT EXISTS IX_LocalCardPaymentAttempts_Store_Device_Env_UpdatedAt
+        ON LocalCardPaymentAttempts (StoreCode, DeviceCode, Environment, UpdatedAt DESC, CreatedAt DESC);
+        """,
+        """
         CREATE UNIQUE INDEX IF NOT EXISTS UX_LocalCardPaymentAttempts_OpenRefundBusinessKey
         ON LocalCardPaymentAttempts (RefundBusinessKey)
         WHERE OperationKind = 'Refund'
@@ -1908,6 +1917,11 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         """
         CREATE INDEX IF NOT EXISTS IX_LocalSquarePaymentAttempts_RecoverLatest
         ON LocalSquarePaymentAttempts (StoreCode, DeviceCode, CashierId, Environment, Status, UpdatedAt DESC, CreatedAt DESC);
+        """,
+        """
+        -- 同上：Square 尝试表的热点查询同样不按收银员过滤，补一个列序对齐查询的索引。
+        CREATE INDEX IF NOT EXISTS IX_LocalSquarePaymentAttempts_Store_Device_Env_UpdatedAt
+        ON LocalSquarePaymentAttempts (StoreCode, DeviceCode, Environment, UpdatedAt DESC, CreatedAt DESC);
         """,
         """
         CREATE UNIQUE INDEX IF NOT EXISTS UX_LocalSquarePaymentAttempts_OpenRefundBusinessKey

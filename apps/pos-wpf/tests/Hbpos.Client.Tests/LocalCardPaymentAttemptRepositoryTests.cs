@@ -144,6 +144,51 @@ public sealed class LocalCardPaymentAttemptRepositoryTests
         }
     }
 
+    [Theory]
+    [InlineData("LocalCardPaymentAttempts", "IX_LocalCardPaymentAttempts_Store_Device_Env_UpdatedAt")]
+    [InlineData("LocalSquarePaymentAttempts", "IX_LocalSquarePaymentAttempts_Store_Device_Env_UpdatedAt")]
+    public async Task Hot_attempt_queries_use_store_device_environment_updated_at_index_without_sorting(
+        string table,
+        string expectedIndex)
+    {
+        // 热点查询不按收银员过滤：必须命中 门店+设备+环境 三列等值的索引，并直接按索引顺序取 UpdatedAt 倒序，
+        // 不能再退回只用前两列、再做临时 B 树排序。
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await new LocalSchemaService(store).InitializeAsync();
+            await using var connection = await store.OpenConnectionAsync();
+
+            string[] queries =
+            [
+                $"SELECT * FROM {table} WHERE StoreCode = 'S1' AND DeviceCode = 'D1' AND Environment = 'Sandbox' AND OperationKind IN ('Sale', 'Refund', 'ActiveSession') ORDER BY UpdatedAt DESC, CreatedAt DESC LIMIT 200",
+                $"SELECT * FROM {table} WHERE StoreCode = 'S1' AND DeviceCode = 'D1' AND Environment = 'Sandbox' AND OperationKind = 'Sale' AND Status NOT IN ('Failed', 'Abandoned') ORDER BY UpdatedAt DESC, CreatedAt DESC",
+                $"SELECT * FROM {table} WHERE StoreCode = 'S1' AND DeviceCode = 'D1' AND ($CashierId IS NULL OR CashierId = $CashierId) AND Environment = 'Sandbox' AND OperationKind = 'Sale' AND Status NOT IN ('Failed') ORDER BY UpdatedAt DESC, CreatedAt DESC LIMIT 1"
+            ];
+            foreach (var query in queries)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "EXPLAIN QUERY PLAN " + query;
+                var details = new List<string>();
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    details.Add(reader.GetString(3));
+                }
+
+                var plan = string.Join(" | ", details);
+                Assert.Contains(expectedIndex, plan, StringComparison.Ordinal);
+                Assert.DoesNotContain("TEMP B-TREE", plan, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
     [Fact]
     public async Task Local_schema_service_creates_local_card_payment_attempts_table_and_indexes()
     {
@@ -162,6 +207,8 @@ public sealed class LocalCardPaymentAttemptRepositoryTests
             Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'LocalSquarePaymentAttempts';"));
             Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_LocalSquarePaymentAttempts_RecoverLatest';"));
             Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_LocalSquarePaymentAttempts_CheckoutId';"));
+            Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_LocalCardPaymentAttempts_Store_Device_Env_UpdatedAt';"));
+            Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_LocalSquarePaymentAttempts_Store_Device_Env_UpdatedAt';"));
             Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('LocalCardPaymentAttempts') WHERE name = 'RecoveryPhase';"));
             Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('LocalCardPaymentAttempts') WHERE name = 'RecoveryTargetStatus';"));
             Assert.Equal(1, await ReadScalarIntAsync(connection, "SELECT COUNT(*) FROM pragma_table_info('LocalSquarePaymentAttempts') WHERE name = 'RecoveryPhase';"));

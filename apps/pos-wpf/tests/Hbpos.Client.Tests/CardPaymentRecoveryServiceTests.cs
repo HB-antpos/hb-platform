@@ -3232,6 +3232,40 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.Equal("NOTIFICATION RECEIPT", result.BankReceipt?.ReceiptText);
     }
 
+    [Fact]
+    public async Task RecoverActiveSessionAsync_approved_session_uses_receipt_notification_line_array_when_receipt_text_is_missing()
+    {
+        var attempts = new FakeCardPaymentAttemptRepository(null)
+        {
+            RecentAttempts = [CreateCompletedSaleFor("ACTIVE-NOTIF-ARR", "TXN-NOTIF-ARR")]
+        };
+        var orders = new FakeLocalOrderRepository();
+        var backend = new FakeLinklyBackendTerminalClient
+        {
+            ResumableStatus = CreateStatus(
+                "Completed",
+                sessionId: "ACTIVE-NOTIF-ARR",
+                txnRef: "TXN-NOTIF-ARR",
+                responseCode: "00",
+                responseText: "APPROVED",
+                transactionSuccess: true,
+                receiptText: null,
+                notifications:
+                [
+                    new LinklyCloudBackendNotificationDto(
+                        "receipt",
+                        """{ "Response": { "ReceiptText": [ "LINE 1", "LINE 2" ] } }""",
+                        DateTimeOffset.Parse("2026-06-05T10:01:00+10:00"))
+                ])
+        };
+        var service = CreateService(attempts, orders, backend);
+
+        var result = await service.RecoverActiveSessionAsync(new PosCartService(), Session);
+
+        Assert.Equal(CardPaymentRecoveryOutcome.ActiveSessionApproved, result.Outcome);
+        Assert.Equal("LINE 1" + Environment.NewLine + "LINE 2", result.BankReceipt?.ReceiptText);
+    }
+
     [Theory]
     [InlineData("Completed", true)]
     [InlineData("Failed", false)]
@@ -3658,6 +3692,103 @@ public sealed partial class CardPaymentRecoveryServiceTests
         Assert.Equal(
             "ANZBACKEND:TXN-RFN:RFN-OFFICIAL:session=SESSION-RFN:environment=Sandbox",
             attempts.PaymentReference);
+    }
+
+    [Fact]
+    public async Task RecoverLatestAsync_completed_card_transaction_rfn_is_kept_in_payment_reference()
+    {
+        // 后端白名单明细 CardTransaction.Rfn 是权威来源；恢复路径此前只找通知里的 RFN，会漏掉它。
+        var attempt = CreateAttempt(sessionId: "SESSION-RFN-DTO", txnRef: "TXN-RFN-DTO");
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var orders = new FakeLocalOrderRepository();
+        var backend = new FakeLinklyBackendTerminalClient
+        {
+            Status = CreateStatus(
+                "Completed",
+                sessionId: "SESSION-RFN-DTO",
+                txnRef: "TXN-RFN-DTO",
+                responseCode: null,
+                responseText: null,
+                transactionSuccess: true) with
+            {
+                CardTransaction = CreateCloudCardTransaction(amountCents: 1000, txnRef: null, rfn: "RFN-DTO")
+            }
+        };
+        var service = CreateService(attempts, orders, backend);
+
+        var result = await service.RecoverLatestAsync(new PosCartService(), Session);
+
+        Assert.Equal(CardPaymentRecoveryOutcome.OrderCompleted, result.Outcome);
+        Assert.Equal(
+            "ANZBACKEND:TXN-RFN-DTO:RFN-DTO:session=SESSION-RFN-DTO:environment=Sandbox",
+            attempts.PaymentReference);
+    }
+
+    [Fact]
+    public async Task RecoverLatestAsync_completed_pad_key_value_array_rfn_is_kept_in_payment_reference()
+    {
+        // PurchaseAnalysisData 为 Key/Value 数组时，实时路径能取到 RFN，恢复路径也必须一致。
+        var attempt = CreateAttempt(sessionId: "SESSION-RFN-ARR", txnRef: "TXN-RFN-ARR");
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var orders = new FakeLocalOrderRepository();
+        var backend = new FakeLinklyBackendTerminalClient
+        {
+            Status = CreateStatus(
+                "Completed",
+                sessionId: "SESSION-RFN-ARR",
+                txnRef: "TXN-RFN-ARR",
+                responseCode: "08",
+                responseText: "APPROVE WITH SIG",
+                transactionSuccess: true,
+                notifications:
+                [
+                    new LinklyCloudBackendNotificationDto(
+                        "transaction",
+                        """{ "Response": { "Success": true, "TxnRef": "TXN-RFN-ARR", "ResponseCode": "08", "ResponseText": "APPROVE WITH SIG", "AmtPurchase": 1000, "PurchaseAnalysisData": [ { "Key": "OTHER", "Value": "X" }, { "Key": "RFN", "Value": "RFN-ARRAY" } ] } }""",
+                        DateTimeOffset.Parse("2026-06-05T10:01:00+10:00"))
+                ])
+        };
+        var service = CreateService(attempts, orders, backend);
+
+        var result = await service.RecoverLatestAsync(new PosCartService(), Session);
+
+        Assert.Equal(CardPaymentRecoveryOutcome.OrderCompleted, result.Outcome);
+        Assert.Equal(
+            "ANZBACKEND:TXN-RFN-ARR:RFN-ARRAY:session=SESSION-RFN-ARR:environment=Sandbox",
+            attempts.PaymentReference);
+    }
+
+    [Fact]
+    public void TryReadRefundReference_skips_corrupt_newest_notification_and_reads_earlier_rfn()
+    {
+        // 恢复路径对每条 transaction 通知逐条容错：最新一条 JSON 损坏时，要继续读更早一条里的 RFN。
+        var status = CreateStatus(
+            "Completed",
+            sessionId: "SESSION-RFN-CORRUPT",
+            txnRef: "TXN-RFN-CORRUPT",
+            responseCode: "00",
+            responseText: "APPROVED",
+            transactionSuccess: true,
+            notifications:
+            [
+                new LinklyCloudBackendNotificationDto(
+                    "transaction",
+                    """{ "Response": { "PurchaseAnalysisData": { "RFN": "RFN-EARLIER" } } }""",
+                    DateTimeOffset.Parse("2026-06-05T10:00:00+10:00")),
+                new LinklyCloudBackendNotificationDto(
+                    "transaction",
+                    "{ not valid json",
+                    DateTimeOffset.Parse("2026-06-05T10:01:00+10:00"))
+            ]);
+        var method = typeof(CardPaymentRecoveryService).GetMethod(
+            "TryReadRefundReference",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+            null,
+            [typeof(LinklyCloudBackendSessionResponse)],
+            null);
+        Assert.NotNull(method);
+
+        Assert.Equal("RFN-EARLIER", method!.Invoke(null, [status]));
     }
 
     [Fact]
@@ -8079,11 +8210,12 @@ public sealed partial class CardPaymentRecoveryServiceTests
 
     private static LinklyCloudBackendCardTransactionDto CreateCloudCardTransaction(
         long? amountCents,
-        string? txnRef)
+        string? txnRef,
+        string? rfn = null)
     {
         return new LinklyCloudBackendCardTransactionDto(
             txnRef,
-            null,
+            rfn,
             "AUTH-CARD-DTO",
             "VISA",
             "****1111",

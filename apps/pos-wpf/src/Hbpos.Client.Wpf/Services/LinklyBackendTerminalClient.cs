@@ -182,6 +182,11 @@ public sealed class LinklyBackendTerminalClient(
     // 业务等待计时器走 TimeProvider，测试可注入 FakeTimeProvider 直接推进虚拟时间，不靠墙钟窗口判断是否超时。
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly object _terminalDirectorySync = new();
+    // 轮询日志去重状态：只记录“最近一次已写入日志的会话状态指纹”，状态不变时不再重复写快照/响应体。
+    private readonly object _statusLogSync = new();
+    private string? _statusLogSessionId;
+    private string? _statusLogFingerprint;
+    private bool _statusLogLastPollUnchanged;
     private readonly Dictionary<CardTerminalEnvironment, LinklyCloudTerminalListResponse> _terminalDirectories = [];
 
     public async Task<LinklyCloudTerminalListResponse> GetTerminalsAsync(
@@ -1206,7 +1211,7 @@ public sealed class LinklyBackendTerminalClient(
         {
             transactionTimeoutCts?.Dispose();
             transactionBusinessWaitCts?.Dispose();
-            // 闂傚倷鑳堕幊鎾绘偤閵娾晛绀夐柡鍥╁枑閸欏繑绻涢幋鐐垫噮妞も晜鐓￠弻鏇㈠醇濠靛浂妫″銈庡亝缁捇寮婚妶鍡欓檮濠㈣泛顦遍惄搴㈢節濞堝灝鏋撻柡鍛Т椤曪綁濡搁埡浣虹暰闂佺粯顨呴悧鍡涙⒒椤栨稐绻嗛柣鎰典簻閳ь剚顨婂顐ゆ嫚瀹割喚鍔烽梺鍝勵槹椤戞瑩宕甸弴銏＄厱闁挎棁顕ч獮妯尖偓瑙勬礀閻栧ジ寮婚妸銉㈡婵炲棙鍨熷Σ鍫ユ⒑闂堟稒澶勯柛銊ョ秺楠炲繗銇愰幒鎳炽劑鏌ㄩ弮鈧崹婵堝垝椤栨粎纾介柛灞剧懅椤︼箓鏌ｅΔ鈧换鎴﹀箞閵娾晛绠瑰ù锝呮憸閻ｈ鲸绻涙潏鍓хМ妞ゃ儲鎸剧划缁樼鐎ｎ偆鍘介梺鎸庣箓濡盯骞婇崨顖滅＜妞ゆ棁顕у畵鍡欌偓娈垮枔閸旀垵鐣锋總绋垮嵆闁绘梻顭堝▓蹇涙⒒娴ｅ憡鍟炵紒瀣浮閳ワ箓宕堕鈧悘铏繆椤栨艾鎮戝┑顖氥偢閺屾洟宕煎┑鍡樻疁闂?
+            // 成功交易自动收起页面弹窗；失败最终状态保留给收银员确认。
             if (!keepDialogOpen)
             {
                 // 关闭页面弹窗不能复用交易 token；收银员取消交易时该 token 可能已经取消。
@@ -1617,12 +1622,12 @@ public sealed class LinklyBackendTerminalClient(
         {
             if (shouldRefreshImmediately)
             {
-                LogStatusSnapshot("poll loop immediate refresh", status);
+                LogStatusSnapshotIfChanged("poll loop immediate refresh", status);
                 shouldRefreshImmediately = false;
             }
             else
             {
-                LogStatusSnapshot("poll loop before delay", status);
+                LogStatusSnapshotIfChanged("poll loop before delay", status);
                 await DelayBeforeNextPollAsync(status, cancellationToken);
             }
 
@@ -1806,7 +1811,7 @@ public sealed class LinklyBackendTerminalClient(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // session 缂傚倸鍊搁崐鐑芥倿閿曞倸鍨傞柣銏犳啞閸嬧晠鏌ｉ幇闈涘缂佸墎鍋ゅ鍫曞醇椤愵澀鍑介悶姘箖缁绘盯骞嬮悙鏉戠缂備礁顦遍崗妯虹暦濡も偓铻ｉ柤濮愬€愰弸鏍ь渻閵堝棙灏甸柛鐘冲姍閹偤鎳為妷锕€寮垮┑鐘茬仛閹搁箖宕氶悧鍫㈢瘈闁逞屽墴椤㈡棃宕ㄩ缁樺攭婵犵數鍋為崹鍓佸垝閻樿缁╁ù鐘差儐閻撶喖鏌曟繛鍨姎妞ゅ繆鏅犻弻娑㈠煛閸屾粍鍒涢悗瑙勬穿缁绘繈宕洪妷鈺佸窛妞ゆ牗绮犲Σ宄扳攽閻愯埖褰х紒鑼舵铻炴俊銈呭暞瀹曟煡鏌嶈閸撴瑩鈥旈崘顔嘉ч柛顐ｇ箓閹偤姊洪崫鍕棏闁稿鎸荤换娑㈠箣閻愭潙纰嶅銈嗗灥濡瑧绮嬮幒妤婃晩闁芥ê顦辩粣鐐烘倵楠炲灝鍔氶柣妤€绻愬嵄婵鍩栭悡娑㈡煕鐏炶鈧洟鐛鈧弻娑㈠Χ閸涱喗宕冲┑鈥冲级閸旀瑩鏁愰悙渚晞闁芥ê顦竟?
+            // session 绑定失败不能中断正在进行的刷卡，但必须留下恢复诊断线索。
             Log(
                 $"payment attempt session bind failed attemptGuid={context.AttemptGuid} " +
                 $"sessionId={status.SessionId} txnRef={LogValue(status.TxnRef)} error={ex.GetType().Name}");
@@ -2614,13 +2619,18 @@ public sealed class LinklyBackendTerminalClient(
     {
         var stopwatch = Stopwatch.StartNew();
         var relativeUrl = $"api/v1/linkly/cloud-backend/transactions/{Uri.EscapeDataString(sessionId)}/status?environment={Uri.EscapeDataString(settings.Environment.ToString())}";
-        LogHttpRequest(
-            "status",
-            HttpMethod.Get,
-            FormatRequestUrl(relativeUrl),
-            txnType: null,
-            txnRef: null,
-            bodyJson: null);
+        // 状态轮询是无请求体的 GET：上一轮已确认“无变化”时不再重复写请求日志，
+        // 一旦状态变化（或首次轮询）立即恢复记录；发送失败仍由 SendWithFailureLogAsync 单独记录。
+        if (!IsStatusPollQuiet(sessionId))
+        {
+            LogHttpRequest(
+                "status",
+                HttpMethod.Get,
+                FormatRequestUrl(relativeUrl),
+                txnType: null,
+                txnRef: null,
+                bodyJson: null);
+        }
         using var response = await SendWithFailureLogAsync(
             "status",
             HttpMethod.Get,
@@ -3029,7 +3039,7 @@ public sealed class LinklyBackendTerminalClient(
         return key is null ? null : T($"settings.linkly.cloudBackend.{key}", string.Empty);
     }
 
-    private static async Task<LinklyCloudBackendSessionResponse> ReadApiResultAsync(
+    private async Task<LinklyCloudBackendSessionResponse> ReadApiResultAsync(
         HttpResponseMessage response,
         string operation,
         HttpMethod method,
@@ -3067,15 +3077,27 @@ public sealed class LinklyBackendTerminalClient(
             }
         }
         stopwatch.Stop();
-        LogHttpResponse(
-            operation,
-            method,
-            url,
-            response.StatusCode,
-            stopwatch.ElapsedMilliseconds,
-            txnType,
-            result?.Data?.TxnRef,
-            content);
+        // 只有“状态轮询成功且状态指纹与上次已记录的一致”才省略响应体与快照；
+        // 创建会话、sendkey、取消、确认等非轮询操作，以及任何失败响应，一律照常完整记录。
+        var isPollingStatus = string.Equals(operation, "status", StringComparison.Ordinal);
+        var statusUnchanged = isPollingStatus &&
+            response.IsSuccessStatusCode &&
+            result?.Success == true &&
+            result.Data is { } polled &&
+            !string.IsNullOrWhiteSpace(polled.SessionId) &&
+            !MarkStatusLogged(polled, fromPollResponse: true);
+        if (!statusUnchanged)
+        {
+            LogHttpResponse(
+                operation,
+                method,
+                url,
+                response.StatusCode,
+                stopwatch.ElapsedMilliseconds,
+                txnType,
+                result?.Data?.TxnRef,
+                content);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
@@ -3098,7 +3120,11 @@ public sealed class LinklyBackendTerminalClient(
             throw new JsonException("Linkly backend response is missing session id.");
         }
 
-        LogStatusSnapshot($"{operation} http response elapsedMs={stopwatch.ElapsedMilliseconds} http={(int)response.StatusCode}", result.Data);
+        if (!statusUnchanged)
+        {
+            LogStatusSnapshot($"{operation} http response elapsedMs={stopwatch.ElapsedMilliseconds} http={(int)response.StatusCode}", result.Data);
+        }
+
         return result.Data;
     }
 
@@ -3557,6 +3583,15 @@ public sealed class LinklyBackendTerminalClient(
         }
     }
 
+    /// <summary>
+    /// 从单条 transaction 通知的 JSON 根节点读取退款引用（RFN），与实时路径同一套解析（对象/键值数组/文本格式）。
+    /// 恢复服务共用：它自己逐条遍历通知并对损坏 JSON 逐条容错，因此这里只暴露“单个 JsonElement”入口。
+    /// </summary>
+    internal static string? ReadRefundReference(JsonElement notificationRoot)
+    {
+        return TryReadRefundReference(notificationRoot, out _);
+    }
+
     private static string? TryReadRefundReference(
         LinklyCloudBackendSessionResponse status,
         string? fallbackReference)
@@ -3626,7 +3661,7 @@ public sealed class LinklyBackendTerminalClient(
     {
         var response = ReadResponse(root);
         var purchaseAnalysisData = ReadValue(response, "PurchaseAnalysisData");
-        // Linkly backend 闂?PAD 闂傚倷绶氬鑽ゆ嫻閻旂厧绀夐悗锝庡墰缁犳柨顭块懜闈涘閻熸瑱濡囬埀顒€鍘滈崑鎾绘煕閺囨ê濡煎ù婊呭亾閹便劌螣婢剁鎯堥梺鍛婄憿閸嬫捇姊婚崒娆戝妽鐟滄澘鍟撮幊鐔碱敍濠靛嫪姹楅梺鍝勮閸庢煡宕甸崟顖涚厾闁诡厽甯掗崝婊呯箔閹达附鐓熼幖杈剧稻閺嗏晜銇勯姀鐙呰含闁圭鎳樺畷鐔碱敍濮ｇ鍎遍妴鎺戭潩閿濆懍澹曢梻浣芥〃缁讹繝宕ｉ崘銊ф殾闁圭増婢樼粈鍌炴煕韫囨挸鎮戞い鏂跨Ф缁辨捇宕掑▎鎴М闁诲孩鍑归崣鍐ㄧ暦瑜版帒惟鐟滃宕戦幘鏂ユ婵炲棙蓱閻ｇ厧顪冮妶鍡楃仯闁绘帪濡囩划娆愬緞鐏炴儳鐝伴悷婊冪箳缁牊寰勯幇顓涙嫼濡炪倖鍔楅崰搴㈢閹€鏀介柣鎰级椤ョ娀鏌涚€ｎ偅灏扮紒鍌涘浮椤㈡瑩鎸婃径宀€鐛柣搴＄畭閸庨亶骞婇幇顔句笉闁瑰瓨绻嶅〒濠氭煏閸繄澧遍柛銈嗙懄閵囧嫰寮埀顒€顫忔繝姘疅闁圭虎鍠楅弲鏌ユ煕閳╁啰鎲块柛?RFN闂?
+        // Linkly backend 的 PAD 在不同通知里可能是对象、键值数组或字符串，退款恢复必须宽解析 RFN。
         var refundReference = TryReadRefundReferenceValue(purchaseAnalysisData, "Response.PurchaseAnalysisData", out source);
         if (!string.IsNullOrWhiteSpace(refundReference))
         {
@@ -3870,7 +3905,8 @@ public sealed class LinklyBackendTerminalClient(
         return ReadReceiptText(document.RootElement) ?? ReadReceiptText(ReadResponse(document.RootElement));
     }
 
-    private static string? ReadReceiptText(JsonElement element)
+    // 恢复服务共用：支持 ReceiptText 为字符串或行数组两种形态。
+    internal static string? ReadReceiptText(JsonElement element)
     {
         if (!TryGetProperty(element, "ReceiptText", out var receipt))
         {
@@ -4115,11 +4151,14 @@ public sealed class LinklyBackendTerminalClient(
         CancellationToken cancellationToken)
     {
         var delay = GetNextPollDelay(status);
-        Log($"poll delay start sessionId={status.SessionId} delayMs={delay.TotalMilliseconds:0} lastHttp={status.LastHttpStatus?.ToString(CultureInfo.InvariantCulture) ?? "<null>"}");
-        var stopwatch = Stopwatch.StartNew();
+        // 常规轮询间隔（每秒一次）的开始/结束不进日志，否则每次轮询白白多两条中心日志；
+        // 只有因后端恢复状态而改用退避间隔时才记一条，便于排查为什么变慢。
+        if (delay != _pollInterval)
+        {
+            Log($"poll delay start sessionId={status.SessionId} delayMs={delay.TotalMilliseconds:0} lastHttp={status.LastHttpStatus?.ToString(CultureInfo.InvariantCulture) ?? "<null>"}");
+        }
+
         await DelayAsync(delay, cancellationToken);
-        stopwatch.Stop();
-        Log($"poll delay completed sessionId={status.SessionId} elapsedMs={stopwatch.ElapsedMilliseconds}");
     }
 
     private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
@@ -4489,7 +4528,11 @@ public sealed class LinklyBackendTerminalClient(
                 txnType,
                 txnRef = NormalizeOptional(txnRef) ?? responseDetails.TxnRef,
                 requestJson = (string?)null,
-                responseJson = RedactedJsonText(bodyJson),
+                // 响应体已完整写在 response.body 里；状态轮询（每秒一次）不再重复写一份文本副本，
+                // 其余操作保持原样，避免影响 Linkly 认证取证。
+                responseJson = string.Equals(operation, "status", StringComparison.Ordinal)
+                    ? (string?)null
+                    : RedactedJsonText(bodyJson),
                 responseTxnRef = responseDetails.TxnRef,
                 responseDate = responseDetails.Date,
                 responseTime = responseDetails.Time,
@@ -4664,6 +4707,84 @@ public sealed class LinklyBackendTerminalClient(
         string? ResponseText)
     {
         public static LinklyHttpEvidenceDetails Empty { get; } = new(null, null, null, null, null);
+    }
+
+    /// <summary>
+    /// 状态指纹：覆盖会被写进快照/响应日志的全部可见字段。指纹未变说明这次轮询没有任何新信息。
+    /// </summary>
+    private static string BuildStatusLogFingerprint(LinklyCloudBackendSessionResponse status)
+    {
+        return string.Join(
+            "|",
+            status.Status,
+            status.LastHttpStatus?.ToString(CultureInfo.InvariantCulture),
+            status.TxnRef,
+            status.ResponseCode,
+            status.ResponseText,
+            status.DisplayText,
+            status.CancelKeyFlag,
+            status.OKKeyFlag,
+            status.AcceptYesKeyFlag,
+            status.DeclineNoKeyFlag,
+            status.AuthoriseKeyFlag,
+            status.RecoveryAction,
+            status.Notifications?.Count ?? 0,
+            // 以下字段会影响认证取证/恢复判断（最终结果、迟到结果、确认状态、卡交易明细），变化时必须重新记日志；
+            // 刻意不放每次轮询都会变的时间戳（如 UpdatedAt），否则去重失效。
+            status.TransactionSuccess,
+            status.OperationSuccess,
+            status.OperationType,
+            status.RecoveryCount,
+            status.ReceiptPrintedAt,
+            status.ClientAcknowledgedAt,
+            status.ReceiptText,
+            status.SettlementData,
+            status.DisplayLines is null ? null : string.Join("\n", status.DisplayLines),
+            status.LateFinalResult is { } late
+                ? $"{late.ReceivedAt:O}/{late.TransactionSuccess}/{late.ResponseCode}/{late.ResponseText}"
+                : null,
+            status.CardTransaction is { } card
+                ? $"{card.TxnRef}/{card.Rfn}/{card.AuthCode}/{card.CardType}/{card.MaskedCardNumber}/{card.MerchantId}/{card.ResponseCode}/{card.ResponseText}/{card.Stan}/{card.BankDateTime:O}/{card.AmountCents}"
+                : null);
+    }
+
+    /// <summary>
+    /// 记录本次状态指纹；返回 true 表示相对上一次已记录的状态有变化（需要写日志），false 表示无变化。
+    /// </summary>
+    private bool MarkStatusLogged(LinklyCloudBackendSessionResponse status, bool fromPollResponse = false)
+    {
+        var fingerprint = BuildStatusLogFingerprint(status);
+        lock (_statusLogSync)
+        {
+            var changed = !string.Equals(_statusLogSessionId, status.SessionId, StringComparison.Ordinal) ||
+                !string.Equals(_statusLogFingerprint, fingerprint, StringComparison.Ordinal);
+            _statusLogSessionId = status.SessionId;
+            _statusLogFingerprint = fingerprint;
+            if (fromPollResponse)
+            {
+                _statusLogLastPollUnchanged = !changed;
+            }
+
+            return changed;
+        }
+    }
+
+    /// <summary>上一轮同会话轮询已确认无变化时，下一次状态请求日志也一并省略。</summary>
+    private bool IsStatusPollQuiet(string sessionId)
+    {
+        lock (_statusLogSync)
+        {
+            return _statusLogLastPollUnchanged &&
+                string.Equals(_statusLogSessionId, sessionId, StringComparison.Ordinal);
+        }
+    }
+
+    private void LogStatusSnapshotIfChanged(string prefix, LinklyCloudBackendSessionResponse status)
+    {
+        if (MarkStatusLogged(status))
+        {
+            LogStatusSnapshot(prefix, status);
+        }
     }
 
     private static void LogStatusSnapshot(string prefix, LinklyCloudBackendSessionResponse status)
