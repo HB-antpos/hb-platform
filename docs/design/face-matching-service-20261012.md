@@ -1,6 +1,6 @@
 # 门店人脸比对服务设计（腾讯云 IAI）
 
-设计日期：2026-10-12；**第三版 2026-10-13**（纳入用户的四项决定：第一期 2 家店、先用腾讯云后续可改自建、顾客人脸去重要做、黑名单要做，见第 13、14 节）。交付范围：设计方案；**未实施业务代码、数据库迁移或生产配置**。
+设计日期：2026-10-12；**第四版 2026-10-13**（纳入用户的五项决定：第一期 2 家店（已定 QLD Orion）、先用腾讯云后续可改自建、顾客人脸去重要做、不受欢迎人员名单（原「黑名单」）要做、匹配结果显示相似度百分比，见第 13、14 节）。交付范围：设计方案；**未实施业务代码、数据库迁移或生产配置**。
 
 上游已上线：人脸接收服务 P0/P1（#724、#726）、摄像机管理后台（#727）、查看抓拍图片（#737）。本文在此基础上设计「比对」。
 
@@ -14,8 +14,8 @@
 4. **三个用途分开处理**：
    - **员工排除**：有明确路径（自愿同意），先做。
    - **顾客人脸去重客流**：**按用户决定纳入第一期**。调研认为对顾客做人脸去重没有已知的合法路径（对标 7-Eleven 2021），所以设计成「独立闸门」：对真实顾客运行前，必须记录单独的律师确认、隐私影响评估和门口告示，缺一后端拒绝打开；数据只在当天、当店的访客库里存在，次日删除，只留计数（第 8 节）。
-   - **黑名单提示**：**按用户决定与第一期同时开发，但默认关闭、「暗发布」**——代码上线，任何门店都不能打开，直到该门店记录了黑名单专项的律师确认与评估（第 14 节）。只提示「疑似」，不处置，必须两人复核；入名单有硬条件（严重事件、证据、批准、到期），不是每个小偷都能入。
-5. **最小权限与两套凭据**：接收端只持有「搜索」权限的腾讯云子账号；员工库和黑名单库的增删由主 API 持有另一套「管理」权限的子账号，互相隔离。
+   - **不受欢迎人员名单提示**：**按用户决定与第一期同时开发，但默认关闭、「暗发布」**——代码上线，任何门店都不能打开，直到该门店记录了不受欢迎人员名单专项的律师确认与评估（第 14 节）。只提示「疑似」，不处置，必须两人复核；入名单有硬条件（严重事件、证据、批准、到期），不是每个小偷都能入。
+5. **最小权限与两套凭据**：接收端只持有「搜索」权限的腾讯云子账号；员工库和不受欢迎人员名单库的增删由主 API 持有另一套「管理」权限的子账号，互相隔离。
 
 ## 2. 约束与已知事实
 
@@ -36,7 +36,7 @@
 | 告示不等于同意；员工同意须自愿、知情、具体 | 员工登记走「同意记录」，单独签署，拒绝或撤回无不利后果，提供不登记者的替代办法（第 7 节） |
 | 非匹配者数据与模板立即删除；内存也算「收集」 | `Match` 模式非匹配即丢弃（第 5 节）；但**调用腾讯云本身就是一次对外披露**，见第 9 节风险 |
 | 必须有隐私影响评估（PIA）、门口告示、隐私政策提及 | 门店模式的前置条件记录这三项；设计文档不替代 PIA |
-| 黑名单：必要性与相称性、人工复核、名单准入与退出规则 | 黑名单条目必须有证据、批准人、到期与复核日期；命中只给店员「疑似」提示 |
+| 不受欢迎人员名单：必要性与相称性、人工复核、名单准入与退出规则 | 不受欢迎人员名单条目必须有证据、批准人、到期与复核日期；命中只给店员「疑似」提示 |
 | 准确性与偏差 | 试点用本地数据标定阈值；腾讯云无 3.0 库搜索的官方误识率表，不能照搬 |
 | 访问控制与审计 | 看图、入名单、命中处理都要持久审计（本设计新增审计表） |
 | 跨境披露 | 与腾讯云的合同条款、告示与隐私政策写明数据在新加坡，【待律师确认】 |
@@ -59,24 +59,24 @@
                                                       │
                   ┌───────────────┬───────────────────┴──────────┐
                   ▼               ▼                              ▼
-             员工命中          黑名单命中                       无命中
+             员工命中          命中                       无命中
           只累加「员工」计数   存图+建复核任务+发通知          只累加「非员工」计数
           图片与原始报文删除   （人工复核，图保留 7 天）       图片与原始报文立即删除
 ```
 
 - **匹配放在处理器里**（而不是另起一个服务读库再匹配），因为数据在这里就已经在手、可以当场丢弃；另起服务就必须把图片先放到某处，等于增加留存。
-- **主 API 管理员面**：员工登记、同意记录、黑名单条目、门店模式与前置条件、复核任务、审计都在主 API 与 Web 后台完成；人脸服务通过受限数据库账号读门店模式、写命中事件与计数。
+- **主 API 管理员面**：员工登记、同意记录、不受欢迎人员名单条目、门店模式与前置条件、复核任务、审计都在主 API 与 Web 后台完成；人脸服务通过受限数据库账号读门店模式、写命中事件与计数。
 - **腾讯云凭据**：
-  - 接收端：CAM 子账号，只授 `SearchFacesReturnsByGroup`（及必要时 `DetectFace`），资源限定到员工库、黑名单库；
+  - 接收端：CAM 子账号，只授 `SearchFacesReturnsByGroup`（及必要时 `DetectFace`），资源限定到员工库、不受欢迎人员名单库；
   - 主 API：另一个子账号，授 `CreateGroup`、`CreatePerson`、`CreateFace`、`DeletePerson`、`DeleteFace`、`GetPersonList` 等；
   - 两者都不授 `DeleteGroup` 以外的高危管理动作；密钥只经服务器 `.env`。
-- 抽象接口：`IFaceMatcher`（搜索）与 `IFaceLibrary`（员工库、黑名单库增删），腾讯云实现可替换（AWS Rekognition 悉尼区是调研推荐的数据留澳备选）。
+- 抽象接口：`IFaceMatcher`（搜索）与 `IFaceLibrary`（员工库、不受欢迎人员名单库增删），腾讯云实现可替换（AWS Rekognition 悉尼区是调研推荐的数据留澳备选）。
 
 ## 5. 处理流程与数据最小化
 
 **质量闸门（免费，本地做）**：尺寸、清晰度、人脸占比不达标的抓拍，不调用腾讯云，直接计数后丢弃。腾讯云要求短边至少 64px、建议人脸不小于 80px；`NoFaceInPhoto` 仍计费。紧裁剪小图送检失败时，可用背景图按原坐标扩边重裁再试一次，**不要直接送整张背景图**（其中可能有多人，会搜错脸）。
 
-**调用方式**：每张人脸只发**一次** `SearchFacesReturnsByGroup`，`GroupIds` 同时带上 `staff` 与（该店启用黑名单时）`blacklist`，用 Base64 上传（人脸小图约 80–190KB，远低于 5MB 上限，也不依赖 COS 私有地址可达）。Region 显式传 `ap-singapore`，接入域名用 `iai.ap-singapore.tencentcloudapi.com`，不用就近解析域名。
+**调用方式**：每张人脸只发**一次** `SearchFacesReturnsByGroup`，`GroupIds` 同时带上 `staff` 与（该店启用不受欢迎人员名单时）`unwelcome`，用 Base64 上传（人脸小图约 80–190KB，远低于 5MB 上限，也不依赖 COS 私有地址可达）。Region 显式传 `ap-singapore`，接入域名用 `iai.ap-singapore.tencentcloudapi.com`，不用就近解析域名。
 
 **降本**（中国站文档：按调用次数计费时每个接口组默认 50 QPS 且不可调整；国际站的 QPS 配额未证实。我们平均约 1 次/秒，起步够用）：
 1. 两个库合并成一次调用（比各搜一次省一半）。
@@ -89,26 +89,26 @@
 | 结果 | 动作 | 保留 |
 |---|---|---|
 | 员工命中 | 当日该店员工计数 +1 | 不留图、不留原始报文；只留计数 |
-| 黑名单命中（分数 ≥ 黑名单阈值） | 建「待复核」任务，存人脸图（COS，7 天），通过通知平台（#718）给该店有权限的人发「疑似」提示 | 复核结束后 N 天删（起步 7 天，由律师定）；条目与复核结论长期留痕 |
+| 命中（分数 ≥ 名单阈值） | 建「待复核」任务，存人脸图（COS，7 天），通过通知平台（#718）给该店有权限的人发「疑似」提示 | 复核结束后 N 天删（起步 7 天，由律师定）；条目与复核结论长期留痕 |
 | 无命中、质量达标，且开启顾客去重 | 当日该店访客库里新建一人，「唯一访客」计数 +1 | 访客库次日删除；图片与原始报文立即删除，不留事件行 |
 | 命中当日访客库 | 「重复抓拍」计数 +1，不新建人 | 图片与原始报文立即删除 |
 | 无命中且未开启去重，或质量不达标 | 当日该店「非员工」或「低质量」计数 +1 | 立即删除图片与原始报文，不留事件行 |
 | 腾讯云调用失败 | 处理器退避重试；超过重试上限的**丢弃并记失败计数** | 不因调用失败而长期留存生物数据 |
 
-**当前的 `Capture` 模式保留**：现在 1042 的测试摄像机仍需要「全部留存并能在后台看图」来联调。它只允许用在**只拍知情同意的内部人员**的门店，由前置条件字段 `AllowedSubjects` 标明；切到 `Match` 后，看图功能只对黑名单命中有效。
+**当前的 `Capture` 模式保留**：现在 1042 的测试摄像机仍需要「全部留存并能在后台看图」来联调。它只允许用在**只拍知情同意的内部人员**的门店，由前置条件字段 `AllowedSubjects` 标明；切到 `Match` 后，看图功能只对命中有效。
 
 ## 6. 数据模型（新增，需独立版本号迁移）
 
-> 本节是第一版的概念模型。**第一期的具体表结构以第 13.3 节为准**（两处字段有出入时以 13.3 为准）；黑名单相关的表（`FaceBlacklistEntry`、`FaceMatchTask`）留到第 2 期再建。
+> 本节是第一版的概念模型。**第一期的具体表结构以第 13.3 节为准**（两处字段有出入时以 13.3 为准）；不受欢迎人员名单相关的表（`FaceUnwelcomeEntry`、`FaceMatchTask`）留到第 2 期再建。
 
 所有表在 HBweb，时间一律 UTC。
 
 **FaceStoreProfile**（每店一行，决定处理模式）
-- `StoreCode` PK、`Mode`（0 Off、1 Capture、2 Match）、`StaffExclusionEnabled`、`BlacklistEnabled`
+- `StoreCode` PK、`Mode`（0 Off、1 Capture、2 Match）、`StaffExclusionEnabled`、`UnwelcomeListEnabled`
 - `AllowedSubjects`（Capture 模式必填：说明拍摄对象，例如「仅内部测试员工」）
 - 前置条件：`PiaReference`、`SignageInstalledOn`、`StaffNoticeDate`（NSW 必填）、`LegalSignoffBy`、`LegalSignoffAt`
 - `UpdatedAtUtc`、`UpdatedBy`
-- **服务端校验**：`Mode=Match` 或 `BlacklistEnabled=true` 时，上述前置字段缺项则拒绝保存；`BlacklistEnabled` 另需 `LegalSignoffAt` 晚于黑名单专项评估日期。人脸服务启动与每 30 秒刷新读取，失败时**按 Off 处理**（宁可不识别，也不在配置读不到时放开）。
+- **服务端校验**：`Mode=Match` 或 `UnwelcomeListEnabled=true` 时，上述前置字段缺项则拒绝保存；`UnwelcomeListEnabled` 另需 `LegalSignoffAt` 晚于不受欢迎人员名单专项评估日期。人脸服务启动与每 30 秒刷新读取，失败时**按 Off 处理**（宁可不识别，也不在配置读不到时放开）。
 
 **FaceConsentRecord**（员工同意记录）
 - `ConsentId` PK、`UserGuid`、`ConsentVersion`（同意书版本）、`SignedAtUtc`、`Method`（纸质扫描/电子签）、`EvidenceObjectKey`（同意书扫描件，存在私有桶独立前缀）、`NswNoticeDate`、`WithdrawnAtUtc`、`WithdrawnReason`
@@ -118,11 +118,11 @@
 - `EnrollmentId` PK、`UserGuid`、`ConsentId` FK、`TencentPersonId`、`GroupKey`（`staff`）、`EnrolledAtUtc`、`EnrolledBy`、`Status`（Active/Withdrawn）
 - 登记照另存私有桶（腾讯云不能导出人脸），仅同意有效期内保留，撤回即删。
 
-**FaceBlacklistEntry**（黑名单条目）
+**FaceUnwelcomeEntry**（不受欢迎人员名单条目）
 - `EntryId` PK、`TencentPersonId`、`ReasonCategory`（枚举，不收自由文本中的个人隐私细节）、`EvidenceRef`（事件记录编号，不放图片）、`ApprovedBy`、`ApprovedAtUtc`、`ReviewDueAtUtc`、`ExpiresAtUtc`（**必填**，上限起步 12 个月）、`StoreScope`（可限定门店）、`Status`
 - 到期自动停用并 `DeletePerson`；提供申诉与更正的受理字段（`DisputeNote`）。
 
-**FaceMatchTask**（黑名单命中的复核任务；员工命中不建任务）
+**FaceMatchTask**（命中的复核任务；员工命中不建任务）
 - `TaskId` PK、`StoreCode`、`CameraId`、`CapturedAtUtc`、`EntryId`、`Score`、`ImageObjectKey`（仅此类保留图）、`ReviewStatus`（Pending/ConfirmedBySecondPerson/Dismissed）、`ReviewedBy`、`ReviewedAtUtc`、`ImageDeleteAtUtc`
 - 命中提示文案固定为「**疑似**匹配，需要人工确认」；确认流程至少两人（店员加经理）；不得自动拒绝服务。
 
@@ -130,9 +130,9 @@
 - `StoreCode`、`BucketStartUtc`（小时）、`CaptureCount`、`StaffMatchCount`、`NonStaffCount`、`LowQualityCount`、`ApiFailureCount`、PK 为 `(StoreCode, BucketStartUtc)`。
 
 **FaceAuditLog**（持久审计，取代「只在容器日志里」）
-- `AuditId`、`AtUtc`、`ActorId`、`ActorName`、`Action`（看图、登记、撤回、入黑名单、复核、改门店模式…）、`StoreCode`、`TargetRef`、`Result`；不含图片、对象键、密钥。保留期由律师定，起步 2 年。
+- `AuditId`、`AtUtc`、`ActorId`、`ActorName`、`Action`（看图、登记、撤回、入不受欢迎人员名单、复核、改门店模式…）、`StoreCode`、`TargetRef`、`Result`；不含图片、对象键、密钥。保留期由律师定，起步 2 年。
 
-**数据库保留策略**：现有 `FaceCaptureEvent` / `FaceCaptureImage` 无清理任务。`Capture` 模式的行，按 7 天与 COS 图片同步清理；`Match` 模式不再写这两张表（除黑名单命中）。清理任务写进本设计的第一期。
+**数据库保留策略**：现有 `FaceCaptureEvent` / `FaceCaptureImage` 无清理任务。`Capture` 模式的行，按 7 天与 COS 图片同步清理；`Match` 模式不再写这两张表（除命中）。清理任务写进本设计的第一期。
 
 ## 7. 员工登记与同意（自愿路径）
 
@@ -152,7 +152,7 @@
 2. **一次调用判三种情况**：`SearchFacesReturnsByGroup` 同时搜 `staff` 与当日访客库。命中员工 → 员工计数；命中访客 → 重复抓拍；都没命中且质量达标 → `CreatePerson` 进访客库并计「唯一访客」；质量不达标 → 低质量计数。
 3. **口径**：「唯一访客数」= 当日访客库里新建的人数，是**估算值**：摄像机角度、距离、遮挡会造成「同一人被认成两人」（偏高）或「两人认成一人」（偏低）。页面展示时标注「估算」。
 4. **串行与一致性**：同一家店的处理必须串行（现有处理器本身是串行），避免相邻两条抓拍同时判成「新访客」而重复建人。腾讯云新建人员后立刻搜索是否可见，**官方未说明**，试点必须实测；有延迟时用「同一摄像机 N 秒内的抓拍合并」补偿，并把补偿写进口径说明。
-5. **闸门（后端强制）**：`TrafficDedupEnabled` 打开需要同时具备：`PiaReference`、`SignageInstalledOn`（告示文案明确写出「使用人脸识别技术统计客流」）、`DedupLegalSignoffBy/At`（针对去重这一用途的律师确认，与黑名单的确认分开）。在没有这些之前，去重只能在 `Capture` 模式下对**内部知情人员**验证。
+5. **闸门（后端强制）**：`TrafficDedupEnabled` 打开需要同时具备：`PiaReference`、`SignageInstalledOn`（告示文案明确写出「使用人脸识别技术统计客流」）、`DedupLegalSignoffBy/At`（针对去重这一用途的律师确认，与不受欢迎人员名单的确认分开）。在没有这些之前，去重只能在 `Capture` 模式下对**内部知情人员**验证。
 6. **退路**：律师结论不可做时，关闭这个开关；员工排除和「抓拍次数」口径不受影响。
 7. **非人脸备选**（若最终不能做人脸去重）：摄像机自带的区域或越线人数统计（该型号是否支持待现场确认）、门口计数传感器、POS 交易笔数近似。
 
@@ -161,7 +161,7 @@
 1. **调用腾讯云就是披露**：Match 模式下每张抓拍（含无命中者）都会发到腾讯云新加坡地域。腾讯云文档对「图片是否保存」自相矛盾（国际隐私条款称提取特征后不保留；中国站文档暗示库里留有图片，并称人员库图片丢失需要重传）。**必须书面向腾讯云确认**不保留非库内图片、不用于训练，并取得国际 DPSA；【待律师确认】跨境披露如何在告示与隐私政策里表述。
 2. **适用法域**：中国站账号的主协议适用中国大陆法律、争议由深圳南山区法院管辖；用国际站账号是否更合适，需律师与用户评估。
 3. **训练用途**：腾讯云国际隐私条款写明人脸特征可用于「改进和优化训练模型」，法律依据是合法利益，敏感数据靠最终用户同意覆盖，**没有退出机制的说明**。这与我们的用途限定直接冲突，需要书面确认能否关闭。
-4. **腾讯云 3.0 库搜索没有官方分数与误识率对照表**。阈值只能在试点中用本地数据标定；黑名单阈值要明显高于官方最严档（以下为粗算，不是官方数据：取 1:1 比对表里 3.0 的 60 分约对应十万分之一，库里 200 人时单次搜索误报约 0.2%，单店一天约 6 次、30 店约 180 次）。
+4. **腾讯云 3.0 库搜索没有官方分数与误识率对照表**。阈值只能在试点中用本地数据标定；名单阈值要明显高于官方最严档（以下为粗算，不是官方数据：取 1:1 比对表里 3.0 的 60 分约对应十万分之一，库里 200 人时单次搜索误报约 0.2%，单店一天约 6 次、30 店约 180 次）。
 5. **顾客以澳洲人为主，缺乏对应人群的可引用评测**，不能假设误识率与官方一致。
 6. **数据库保留缺口**：必须先补清理任务（第 6 节），否则抓拍元数据无限期累积。
 7. **腾讯云不能导出库中人脸**：登记照必须由我们自己留存，撤回时两处都要删。
@@ -173,7 +173,7 @@
 
 | 方案 | 每月调用量（低/高） | 中国站（人民币） | 国际站（美元） |
 |---|---|---|---|
-| 员工排除 + 黑名单，一次调用同时搜两库（本设计） | 90 万 / 270 万 | 约 2,880 / 8,640 | 约 720 / 2,160 |
+| 员工排除 + 不受欢迎人员名单，一次调用同时搜两库（本设计） | 90 万 / 270 万 | 约 2,880 / 8,640 | 约 720 / 2,160 |
 | 对比：两库各搜一次 | 180 万 / 540 万 | 约 5,760 / 16,200 | 约 1,440 / 3,240 |
 | 对比：再加顾客去重（不做） | 在上面基础上加建人 | 约 3,840 / 11,520 | 约 960 / 2,880 |
 
@@ -187,8 +187,8 @@
 |---|---|---|
 | 0 | 本文评审；保持现状：1042 只拍参与测试的内部人员；补库保留清理任务；向腾讯云书面确认第 9 节 1、3 两点；腾讯云账号准备（第 13.5 节） | 用户决策 |
 | 1（**2 家店**） | 引擎抽象；`FaceStoreProfile` 与前置条件校验；员工登记与同意记录；`Match` 模式：**员工排除 + 顾客人脸去重（独立闸门）**；访客库生命周期；计数桶与统计页；持久审计；在 `Capture` 模式的内部人员店做**阈值标定**；数据库保留清理 | 同意书定稿；腾讯云子账号；DB 迁移；**去重的律师确认、隐私影响评估、门口告示（对真实顾客运行前）** |
-| 1（**同期暗发布**） | 黑名单：条目管理（严重事件类别、证据、批准、到期）、复核任务与两人确认、通知（#718）、命中图保留与清理；**上线即关闭，各门店须单独满足第 14.1 节闸门才能启用** | 开发不需要前置；**启用**需要律师确认、黑名单专项评估、门口告示 |
-| 2 | 黑名单在具体门店启用与运行 | 第 14.1 节闸门 |
+| 1（**同期暗发布**） | 不受欢迎人员名单：条目管理（严重事件类别、证据、批准、到期）、复核任务与两人确认、通知（#718）、命中图保留与清理；**上线即关闭，各门店须单独满足第 14.1 节闸门才能启用** | 开发不需要前置；**启用**需要律师确认、不受欢迎人员名单专项评估、门口告示 |
+| 2 | 不受欢迎人员名单在具体门店启用与运行 | 第 14.1 节闸门 |
 | 3 | 规模扩大后的自建迁移（第 13.3 节） | 触发条件见 13.3；模型授权或选型 |
 
 ## 12. 决策状态
@@ -196,20 +196,20 @@
 **已决定（2026-10-13）**：第一期上线 2 家店；先用腾讯云，规模变大再改自建；顾客人脸去重要做。
 
 **仍待确认**
-1. 第一期是哪 2 家店（门店编码、所在州；NSW 门店员工登记要提前 14 天书面通知）？摄像机是否已安装？
+1. 第一期是哪 2 家店？**已确定一家：QLD 的 Orion（库里门店编码 1013，Australia/Brisbane；另有一条地址相同的 2015 `spo`，待用户确认哪个才是）**；另一家待定（门店编码、所在州；NSW 门店员工登记要提前 14 天书面通知，QLD 目前没有专门的工作场所监控法，约束主要来自联邦隐私法）。摄像机是否已安装？
 2. 腾讯云账号：继续用中国站账号加新加坡地域，还是换国际站账号？（计价与适用法域不同，建议律师参与）
 3. 员工同意书由谁起草、谁收集；登记照谁拍。
 4. 对真实顾客运行前，隐私影响评估、门口告示、律师确认（去重用途）由谁负责、预计何时完成。
 5. 数据库里 `Capture` 模式的抓拍记录保留几天（建议 7 天）；持久审计表保留几年（建议 2 年，律师定）。
-6. 黑名单入名单的严重事件类别与证据标准（第 14.2 节草案）由谁定稿；黑名单专项评估与律师确认由谁负责、何时完成。
+6. 不受欢迎人员名单入名单的严重事件类别与证据标准（第 14.2 节草案）由谁定稿；不受欢迎人员名单专项评估与律师确认由谁负责、何时完成。
 
 ## 13. 第一期实现规格（2026-10-13）
 
 ### 13.1 范围
 
 - **做**：引擎抽象与腾讯云实现；门店档案与闸门；员工同意与登记；`Match` 模式（员工排除 + 顾客去重）；访客库生命周期；计数与统计页；持久审计；数据库保留清理；阈值标定（内部人员门店）。
-- **不做**：基于人脸的跨天、跨店分析（黑名单命中除外，见第 14 节）；自建引擎（第 3 期）。
-- **黑名单**：与第一期同时开发并暗发布（第 14 节）。
+- **不做**：基于人脸的跨天、跨店分析（命中除外，见第 14 节）；自建引擎（第 3 期）。
+- **不受欢迎人员名单**：与第一期同时开发并暗发布（第 14 节）。
 
 ### 13.2 引擎可替换，以及将来改自建
 
@@ -224,7 +224,7 @@
 
 ### 13.3 数据模型（独立版本号迁移，如 `20261014.001-face-match`，照 `FaceCaptureSchema` 的写法；时间一律 UTC）
 
-**FaceStoreProfile**：`StoreCode nvarchar(32)` PK；`Mode tinyint`（0 Off、1 Capture、2 Match，默认 0）；`EvaluateMatch bit`（Capture 模式下评估匹配并记分数，用于标定）；`StaffExclusionEnabled bit`；`TrafficDedupEnabled bit`；`BlacklistEnabled bit`（第 2 期，先建列）；`AllowedSubjects nvarchar(200)`；`PiaReference nvarchar(100)`；`SignageInstalledOn date`；`StaffNoticeDate date`；`LegalSignoffBy nvarchar(100)`、`LegalSignoffAt datetime2`；`DedupLegalSignoffBy nvarchar(100)`、`DedupLegalSignoffAt datetime2`；`TimeZoneId nvarchar(64)`（空则取门店表）；`UpdatedAtUtc`、`UpdatedBy`。
+**FaceStoreProfile**：`StoreCode nvarchar(32)` PK；`Mode tinyint`（0 Off、1 Capture、2 Match，默认 0）；`EvaluateMatch bit`（Capture 模式下评估匹配并记分数，用于标定）；`StaffExclusionEnabled bit`；`TrafficDedupEnabled bit`；`UnwelcomeListEnabled bit`（第 2 期，先建列）；`AllowedSubjects nvarchar(200)`；`PiaReference nvarchar(100)`；`SignageInstalledOn date`；`StaffNoticeDate date`；`LegalSignoffBy nvarchar(100)`、`LegalSignoffAt datetime2`；`DedupLegalSignoffBy nvarchar(100)`、`DedupLegalSignoffAt datetime2`；`TimeZoneId nvarchar(64)`（空则取门店表）；`UpdatedAtUtc`、`UpdatedBy`。
 
 **FaceConsentRecord**：`ConsentId char(32)` PK；`UserGuid nvarchar(50)`；`ConsentVersion nvarchar(32)`；`SignedAtUtc`；`Method nvarchar(16)`（paper/electronic）；`EvidenceObjectKey nvarchar(400)`；`NswNoticeDate date NULL`；`WithdrawnAtUtc NULL`；`WithdrawnReason nvarchar(200) NULL`；`CreatedAtUtc`、`CreatedBy`。
 
@@ -278,57 +278,66 @@
 - 假的腾讯云 HTTP 处理器；官方签名向量；阈值边界；`Off`/`Capture`/`Match` 三种模式的行为与数据残留（`Match` 下不得留下本地图片、原始报文、COS 对象、事件行）；闸门校验（缺项拒绝、读取失败按 `Off`）；同一店相邻两条相同抓拍只建一人；访客库删除与过期库扫描；撤回同意后腾讯云与登记照两处都删；NSW 14 天校验；审计覆盖每个动作；日志与审计不含图片、对象键、密钥。
 - 时间相关用例在 `TZ=UTC` 与 `America/Los_Angeles` 各跑一遍（门店本地营业日、午夜后删库）。
 
-## 14. 黑名单（按用户决定同期开发、默认关闭）
+## 14. 不受欢迎人员名单（原「黑名单」，按用户决定同期开发、默认关闭）
 
-用户需求：对被确认的盗窃者做人脸比对，命中时提示店员。
+用户需求：对被确认的盗窃者等「不受欢迎的人」做人脸比对，命中时提示店员，并给出匹配相似度百分比。**2026-10-13 用户要求把「黑名单」改称「不受欢迎的人」**，文档与界面一律用「不受欢迎人员名单」，内部标识用 `Unwelcome`（库 `unwelcome`、表 `FaceUnwelcomeEntry`、权限 `FaceMatch.Unwelcome.*`）。
 
 ### 14.1 法律边界与启用闸门
 
 - **理由必须落在「严重威胁或违法活动」**：OAIC 指南与 Bunnings 复审认可的是有限目的——打击严重零售犯罪、保护员工与顾客免受暴力、辱骂、威胁；Kmart 用于退款欺诈被认定不相称（存在更小的替代办法）。**普通的小额偷窃很可能更接近 Kmart 的情形**。【待律师确认】你们的门店与事件频次能否满足。
 - **按门店自证**：OAIC 指出不同门店可能要分别评估。每个门店启用前必须记录：
-  - `BlacklistAssessmentRef`（黑名单专项评估编号，要有该店的事件频次、已采取的替代措施、相称性分析）；
-  - `BlacklistLegalSignoffBy/At`（针对黑名单这一用途的律师确认，与去重的确认分开）；
+  - `UnwelcomeAssessmentRef`（不受欢迎人员名单专项评估编号，要有该店的事件频次、已采取的替代措施、相称性分析）；
+  - `UnwelcomeLegalSignoffBy/At`（针对不受欢迎人员名单这一用途的律师确认，与去重的确认分开）；
   - `PiaReference`、`SignageInstalledOn`（告示明确写「使用人脸识别技术识别有过严重事件的人员」）；
   - 员工培训记录日期与负责的隐私联系人。
-- 缺任何一项，后端拒绝打开 `BlacklistEnabled`；读取档案失败按关闭处理。
+- 缺任何一项，后端拒绝打开 `UnwelcomeListEnabled`；读取档案失败按关闭处理。
 
 ### 14.2 入名单的硬条件（系统强制）
 
 1. **事件类别必须是枚举**：`ViolenceOrThreat`（暴力或威胁员工 / 顾客）、`OrganisedOrRepeatTheft`（有组织或有记录的反复盗窃）、`Other`（须额外说明，需第二人批准）；**没有「一般偷窃」这一项**，这是把 Bunnings 与 Kmart 的区别落到系统里。
 2. **证据引用必填**：事件记录编号或警方报告编号，不上传图片到条目、不填自由文本的个人隐私细节。
-3. **两个人**：提交人 ≠ 批准人，批准人须具备指定权限（`FaceMatch.Blacklist.Approve`）。
+3. **两个人**：提交人 ≠ 批准人，批准人须具备指定权限（`FaceMatch.Unwelcome.Approve`）。
 4. **到期日必填**，上限起步 12 个月；到期自动停用并 `DeletePerson`；到期前 30 天提醒复核。
 5. **适用范围**：可限定到具体门店；默认只对事件发生的门店生效。
 6. **申诉与更正**：条目有 `DisputeNote` 与状态；被识别者提出查询或更正时，须在 30 天内处理（用人脸检索是否在名单里，本身就会产生新的识别数据，要有固定流程和审计）。
-7. **名单照片来源**：只用该事件现场抓拍或监控截图，入库到腾讯云 `blacklist` 库；照片同时按条目有效期留存在私有桶独立前缀，条目失效即删。
+7. **名单照片来源**：只用该事件现场抓拍或监控截图，入库到腾讯云 `unwelcome` 库；照片同时按条目有效期留存在私有桶独立前缀，条目失效即删。
 
 ### 14.3 命中与复核流程
 
-- 接收端对每张抓拍的一次搜索同时带上 `staff`、`blacklist` 与当日访客库。**黑名单阈值明显高于员工和去重的阈值**，由试点标定，默认取很严的值。
-- 命中（分数 ≥ 黑名单阈值）：
+- 接收端对每张抓拍的一次搜索同时带上 `staff`、`unwelcome` 与当日访客库。**名单阈值明显高于员工和去重的阈值**，由试点标定，默认取很严的值。
+- 命中（分数 ≥ 名单阈值）：
   1. 建 `FaceMatchTask`（待复核），保存该张人脸图（私有桶，7 天）；
-  2. 通过通知平台（#718）给**该店**持有 `FaceMatch.Blacklist.Review` 权限的人发提示，文案固定：**「疑似匹配，需要人工确认」**，不显示姓名、不显示事件细节；
+  2. 通过通知平台（#718）给**该店**持有 `FaceMatch.Unwelcome.Review` 权限的人发提示，文案固定：**「疑似匹配，需要人工确认」**，不显示姓名、不显示事件细节；
   3. 复核**至少两个人**：店员核对 + 经理确认（`ConfirmedBySecondPerson`）；任何一方判断「不是」即 `Dismissed`；
   4. **系统不自动拒绝服务、不自动通知警方**；店里怎么处置由门店流程与法务制定。
 - 未命中、命中后被驳回：图片按保留策略删除，驳回的任务只保留元数据与分数用于误报统计。
 - **误报监控**：按条目统计命中数、被驳回比例；某条目驳回率持续偏高，自动提示复核该条目是否应出名单。
 
+### 14.3.1 匹配相似度百分比的展示（用户要求）
+
+- **显示的是「相似度」，不是「是同一个人的概率」**：腾讯云返回 0–100 的相似度分数；官方对 3.0 库搜索没有分数与误识率的对照表。界面显示「相似度 87%」没问题，但**必须同时写明「这是相似度，不是同一个人的概率」**，否则店员容易把 87% 理解成「87% 就是这个人」。
+- **按标定后的阈值给档位**：试点标定后分「较高 / 一般」两档（低于不提示的阈值不出现）；页面同时显示相似度百分比与档位。档位阈值不照搬官方表，用本地数据标定。
+- **复核页并排显示两张照片**：现场抓拍 + 该条目的参考照片（仅持有 `FaceMatch.Unwelcome.Review` 的人在复核页可见，走服务端转发与审计）。没有并排对比，人工复核就名存实亡。
+- **提示文案**：「疑似匹配（相似度 87%），**不是同一个人的概率，必须由两人人工确认**」；不显示姓名与事件细节。
+- **记录**：相似度写入 `FaceMatchTask.Score`；误报统计按相似度区间看驳回比例，用于调阈值。
+- **只给有权限的人看**：相似度与参考照片只在复核页与提示里出现；统计页只显示计数。
+
 ### 14.4 数据模型补充（与 13.3 同一迁移）
 
-**FaceBlacklistEntry**：`EntryId char(32)` PK；`TencentPersonId nvarchar(64)`；`IncidentCategory tinyint`；`EvidenceRef nvarchar(100)`；`StoreScope nvarchar(500)`（门店编码列表，空表示仅发生门店，由应用层写具体值）；`SubmittedBy`、`SubmittedAtUtc`；`ApprovedBy`、`ApprovedAtUtc`；`ReviewDueAtUtc`；`ExpiresAtUtc`（NOT NULL）；`Status tinyint`（Pending/Active/Expired/Withdrawn）；`PhotoObjectKeysJson nvarchar(2000)`；`DisputeNote nvarchar(500) NULL`。
+**FaceUnwelcomeEntry**：`EntryId char(32)` PK；`TencentPersonId nvarchar(64)`；`IncidentCategory tinyint`；`EvidenceRef nvarchar(100)`；`StoreScope nvarchar(500)`（门店编码列表，空表示仅发生门店，由应用层写具体值）；`SubmittedBy`、`SubmittedAtUtc`；`ApprovedBy`、`ApprovedAtUtc`；`ReviewDueAtUtc`；`ExpiresAtUtc`（NOT NULL）；`Status tinyint`（Pending/Active/Expired/Withdrawn）；`PhotoObjectKeysJson nvarchar(2000)`；`DisputeNote nvarchar(500) NULL`。
 
 **FaceMatchTask**：`TaskId char(32)` PK；`StoreCode`；`CameraId`；`CapturedAtUtc`；`EntryId`；`Score decimal(9,4)`；`ImageObjectKey nvarchar(400)`（仅此类保留图）；`ReviewStatus tinyint`（Pending/Dismissed/ConfirmedBySecondPerson）；`FirstReviewerId`、`FirstReviewedAtUtc`；`SecondReviewerId`、`SecondReviewedAtUtc`；`ImageDeleteAtUtc`。
 
-**FaceStoreProfile 追加列**：`BlacklistAssessmentRef`、`BlacklistLegalSignoffBy`、`BlacklistLegalSignoffAt`、`StaffTrainingDate`、`PrivacyContact`。
+**FaceStoreProfile 追加列**：`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy`、`UnwelcomeLegalSignoffAt`、`StaffTrainingDate`、`PrivacyContact`。
 
-**权限码追加**：`FaceMatch.Blacklist.Manage`（提交、查看条目）、`FaceMatch.Blacklist.Approve`（批准，须与提交人不同）、`FaceMatch.Blacklist.Review`（收到提示并参与复核，按门店授权）。
+**权限码追加**：`FaceMatch.Unwelcome.Manage`（提交、查看条目）、`FaceMatch.Unwelcome.Approve`（批准，须与提交人不同）、`FaceMatch.Unwelcome.Review`（收到提示并参与复核，按门店授权）。
 
-**数据库账号授权追加**（`face_ingest_app`）：`FaceBlacklistEntry` SELECT；`FaceMatchTask` SELECT、INSERT。
+**数据库账号授权追加**（`face_ingest_app`）：`FaceUnwelcomeEntry` SELECT；`FaceMatchTask` SELECT、INSERT。
 
 ### 14.5 主 API 与 Web 追加
 
-- 接口：`POST/GET /blacklist/entries`、`POST /blacklist/entries/{id}/approve`、`POST /blacklist/entries/{id}/withdraw`、`GET /blacklist/tasks`、`POST /blacklist/tasks/{id}/review`（第一与第二复核人）。全部写 `FaceAuditLog`。
-- Web：「黑名单」页面分三块：条目（提交、批准、撤回、到期提醒）、复核任务（看命中图、两人确认）、误报统计。看命中图沿用 #737 的服务端转发与审计，权限为 Review；文案中固定使用「疑似」。
+- 接口：`POST/GET /unwelcome/entries`、`POST /unwelcome/entries/{id}/approve`、`POST /unwelcome/entries/{id}/withdraw`、`GET /unwelcome/tasks`、`POST /unwelcome/tasks/{id}/review`（第一与第二复核人）。全部写 `FaceAuditLog`。
+- Web：「不受欢迎人员名单」页面分三块：条目（提交、批准、撤回、到期提醒）、复核任务（看命中图、两人确认）、误报统计。看命中图沿用 #737 的服务端转发与审计，权限为 Review；文案中固定使用「疑似」。
 - 后台任务：到期条目自动停用与 `DeletePerson`；命中任务的图片到期删除；到期前 30 天提醒。
 
 ### 14.6 风险
@@ -336,5 +345,5 @@
 1. **理由不够会被认定不相称**（Kmart）。入名单的类别枚举与证据要求就是为此设计；但每个门店的事件频次是否足够，是律师与评估的问题，不是系统能判断的。
 2. **误识**：库里 200 人时，即使取官方最严档，30 家店每天仍可能有数百次误报（第 9 节粗算）；所以必须人工复核、阈值要标定，且「疑似」文案不能省。
 3. **顾客被错误拒绝服务或被指控的风险在门店流程里**，不在系统里；系统只给提示，不处置。需要门店处置流程与培训，并让法务确认话术。
-4. **自动化决策披露**：2026-12-10 起新增的透明度要求，黑名单提示若影响拒绝服务可能落入，隐私政策要同步写。
-5. **腾讯云训练用途、跨境披露**同第 9 节，黑名单照片是更敏感的数据，必须先取得腾讯云的书面确认。
+4. **自动化决策披露**：2026-12-10 起新增的透明度要求，不受欢迎人员名单提示若影响拒绝服务可能落入，隐私政策要同步写。
+5. **腾讯云训练用途、跨境披露**同第 9 节，名单照片是更敏感的数据，必须先取得腾讯云的书面确认。
