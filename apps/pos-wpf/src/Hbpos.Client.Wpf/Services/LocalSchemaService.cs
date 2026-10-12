@@ -74,6 +74,27 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         await EnsureSharedHeldOrderSchemaAsync(connection, cancellationToken);
         await EnsureLinklySettlementUploadColumnsAsync(connection, cancellationToken);
         await EnsureLocalDailyCloseUploadColumnsAsync(connection, cancellationToken);
+        await EnsureSyncQueueColumnsAsync(connection, cancellationToken);
+
+        // 上传成功只把队列行改成 Synced，此前没有任何删除路径，表随运行时长无限增长，同步中心每 15 秒的统计都要全表扫描。
+        // 已同步满 30 天的订单行在启动时删除：同步中心统计、日结、交易历史、退货都读 LocalOrders 而不是这些行；
+        // 交易历史重传这类老订单时，上传仓储会按需补回队列行（见 LocalOrderUploadRepository.UpdateStatusAsync）。
+        // 时间按"最后一次状态变化"（LastTriedAt，缺失再退回 CreatedAt）算；两列都是本地时间带时区偏移的 "O" 串，
+        // 夏令时前后偏移不同，必须用 julianday 换算成同一时间轴比较，不能直接比字符串。
+        // 放在建索引之前：老库首次升级时不必为即将删除的行维护新索引（20 万行实测约 1 秒降到 0.15 秒）；
+        // 之后每次启动走 IX_SyncQueue_Status_EntityType_CreatedAt，只扫已同步行。单条 DELETE 自身即原子。
+        await using var cleanupCommand = connection.CreateCommand();
+        cleanupCommand.CommandText =
+            """
+            DELETE FROM SyncQueue
+            WHERE Status = 'Synced'
+              AND EntityType = 'Order'
+              AND julianday(COALESCE(LastTriedAt, CreatedAt)) < julianday($SyncedBefore);
+            """;
+        cleanupCommand.Parameters.AddWithValue(
+            "$SyncedBefore",
+            DateTimeOffset.UtcNow.Subtract(SyncedQueueRetention).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        await cleanupCommand.ExecuteNonQueryAsync(cancellationToken);
 
         foreach (var sql in IndexStatements)
         {
@@ -106,6 +127,27 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             """;
         await recoveryCommand.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    // 已同步订单队列行的保留期，见 InitializeAsync 里的清理说明。
+    internal static readonly TimeSpan SyncedQueueRetention = TimeSpan.FromDays(30);
+
+    private static async Task EnsureSyncQueueColumnsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var columns = await ReadColumnNamesAsync(connection, "SyncQueue", cancellationToken);
+        if (!columns.Contains("AttemptCount"))
+        {
+            // 订单上传失败次数，用于计算退避；旧行补 0，表示从未失败过、立即可传。
+            await ExecuteAsync(connection, "ALTER TABLE SyncQueue ADD COLUMN AttemptCount INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+        }
+
+        if (!columns.Contains("NextAttemptAt"))
+        {
+            // 后台自动上传的最早下次尝试时间：UTC 的 "O" 串（固定 7 位小数、+00:00），可按字典序比较；NULL 表示立即到期。
+            await ExecuteAsync(connection, "ALTER TABLE SyncQueue ADD COLUMN NextAttemptAt TEXT NULL;", cancellationToken);
+        }
     }
 
     private static async Task EnsureDeviceCacheColumnsAsync(
@@ -1617,7 +1659,9 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             Status TEXT NOT NULL,
             CreatedAt TEXT NOT NULL,
             LastTriedAt TEXT NULL,
-            ErrorMessage TEXT NULL
+            ErrorMessage TEXT NULL,
+            AttemptCount INTEGER NOT NULL DEFAULT 0,
+            NextAttemptAt TEXT NULL
         );
         """,
         """
@@ -1961,6 +2005,22 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         """
         CREATE INDEX IF NOT EXISTS IX_SuspendedOrderReturnPaymentCapacities_Order
         ON SuspendedOrderReturnPaymentCapacities (SuspendedOrderGuid);
+        """,
+        """
+        -- 订单上传取单（Status IN ('Pending','Failed') AND EntityType='Order'）只扫活动行。
+        -- Status 放首列：同步中心按 Status 统计待传数、列活动行的查询（不带 EntityType）也能用上这个索引。
+        CREATE INDEX IF NOT EXISTS IX_SyncQueue_Status_EntityType_CreatedAt
+        ON SyncQueue (Status, EntityType, CreatedAt);
+        """,
+        """
+        -- 上传状态回写、启动恢复 Syncing 都按订单号定位队列行。
+        CREATE INDEX IF NOT EXISTS IX_SyncQueue_EntityId_EntityType
+        ON SyncQueue (EntityId, EntityType);
+        """,
+        """
+        -- 读订单付款明细、上传取单排除"退款券待签发"订单都按订单号查付款。
+        CREATE INDEX IF NOT EXISTS IX_LocalPayments_OrderGuid
+        ON LocalPayments (OrderGuid);
         """
     ];
 }
