@@ -169,6 +169,9 @@
   <data name="pos.status.offline" xml:space="preserve"><value>Offline</value></data>
   <data name="pos.status.pendingSync" xml:space="preserve"><value>Pending Sync: {0}</value></data>
   <data name="pos.status.noLocalMatch" xml:space="preserve"><value>No local item found. Checkout can continue offline.</value></data>
+  <data name="pos.status.remoteLookupStarted" xml:space="preserve"><value>Looking up item...</value></data>
+  <data name="pos.status.remoteLookupInProgress" xml:space="preserve"><value>This item is still being looked up. Please do not scan it again.</value></data>
+  <data name="pos.status.remoteLookupDiscarded" xml:space="preserve"><value>The cart changed while the item was being looked up, so it was not added. Please scan it again.</value></data>
   <data name="pos.status.multipleMatches" xml:space="preserve"><value>Found {0} items. Select one to add.</value></data>
   <data name="pos.status.added" xml:space="preserve"><value>Added {0}</value></data>
   <data name="pos.status.scannerResult" xml:space="preserve"><value>Scan {0}: {1}</value></data>

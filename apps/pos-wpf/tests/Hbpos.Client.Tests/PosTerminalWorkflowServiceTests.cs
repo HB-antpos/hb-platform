@@ -333,7 +333,7 @@ public sealed class PosTerminalWorkflowServiceTests
     }
 
     [Fact]
-    public async Task Process_scan_async_concurrent_same_local_miss_shares_remote_lookup_and_adds_each_scan()
+    public async Task Process_scan_async_concurrent_same_local_miss_shares_remote_lookup_and_adds_only_once()
     {
         var cart = new PosCartService();
         var index = new LocalSellableItemIndex();
@@ -356,11 +356,13 @@ public sealed class PosTerminalWorkflowServiceTests
         remoteLookup.SetResult(new RemoteLookupRefreshResult("S001", "930218", Found: true, remoteItem, DeletedCount: 0));
         var results = await Task.WhenAll(first, second);
 
-        Assert.All(results, result => Assert.Equal("pos.status.added", result.StatusKey));
+        // 补查进行中的同码第二次扫码只提示「正在查询」，不再各自加购一次（旧行为是连扫两次最终数量变 2）。
+        Assert.Equal("pos.status.added", results[0].StatusKey);
+        Assert.Equal("pos.status.remoteLookupInProgress", results[1].StatusKey);
         Assert.Equal(1, Volatile.Read(ref lookupCalls));
         var line = Assert.Single(cart.Lines);
-        Assert.Equal(2m, line.Quantity);
-        Assert.Equal(6.5m, cart.TotalAmount);
+        Assert.Equal(1m, line.Quantity);
+        Assert.Equal(3.25m, cart.TotalAmount);
         Assert.Same(remoteItem, Assert.Single(index.FindExactMatches("S001", "930218")));
     }
 

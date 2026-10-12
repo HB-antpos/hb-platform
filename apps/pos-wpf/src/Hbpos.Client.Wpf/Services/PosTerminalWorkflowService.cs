@@ -44,6 +44,25 @@ public sealed class PosTerminalCatalogReloadedEventArgs : EventArgs
     public IReadOnlyList<SellableItemDto> CatalogItems { get; }
 }
 
+/// <summary>
+/// 一次扫码附带的 UI 侧回调。工作流本身不依赖 UI，只在补查的关键节点同步通知调用方，
+/// 由收银页决定如何展示（状态栏、提示音）以及如何记审计。回调抛出的异常会被工作流吞掉并记日志，不会打断扫码。
+/// </summary>
+public sealed record PosScanHooks
+{
+    /// <summary>
+    /// 本地未命中、远程补查已发起（或加入了他人已发起的补查）时，在调用线程、首个 await 之前同步触发，
+    /// 参数是中间状态结果（「正在查询商品…」）。补查要等最长 2 秒，这里让收银员在扫码的同一时刻就得到反馈。
+    /// </summary>
+    public Action<PosTerminalWorkflowResult>? OnInterimResult { get; init; }
+
+    /// <summary>
+    /// 补查结果已通过「购物车世代」校验、即将加购时同步触发，早于真正的加购。
+    /// 补查结果回来时购物车可能已被其它扫码改动过，审计的「改前快照」应当在这一刻取，而不是扫码发起时。
+    /// </summary>
+    public Action? OnBeforeRemoteApply { get; init; }
+}
+
 public interface IPosTerminalWorkflowService
 {
     event EventHandler<PosTerminalCatalogReloadedEventArgs>? CatalogReloaded;
@@ -57,6 +76,30 @@ public interface IPosTerminalWorkflowService
         string source,
         string? traceId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 带 UI 回调的扫码入口。默认实现忽略回调并转调旧入口，
+    /// 这样只实现了旧签名的替身 / 测试桩无需改动即可继续使用。
+    /// </summary>
+    Task<PosTerminalWorkflowResult> ProcessScanAsync(
+        PosSessionState session,
+        string scanText,
+        bool preferExactLookup,
+        string source,
+        string? traceId,
+        PosScanHooks? hooks,
+        CancellationToken cancellationToken = default)
+    {
+        return ProcessScanAsync(session, scanText, preferExactLookup, source, traceId, cancellationToken);
+    }
+
+    /// <summary>
+    /// 推进「购物车世代」：在此之前发起、尚未回来的远程补查结果一律作废（不加购，只提示）。
+    /// 清空、开始收款、挂单 / 取单 / 退货、购物车被清空、收银会话变化、页面销毁时调用。默认实现为空。
+    /// </summary>
+    void AdvanceCartGeneration(string reason)
+    {
+    }
 
     PosTerminalWorkflowResult AddSelectedItem(PosSessionState session, SellableItemDto item, bool clearScanText, bool closeMatchesPopup, string operation);
 
@@ -100,6 +143,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
     private readonly object _remoteLookupGate = new();
     private readonly HashSet<RemoteLookupKey> _pendingRemoteLookups = [];
     private readonly Dictionary<RemoteLookupKey, Task<RemoteLookupRefreshResult>> _pendingRemoteLookupTasks = [];
+    // 本地未命中后「正在补查并等待加购」的扫码，按（商品码, 购物车世代）登记，受 _remoteLookupGate 保护。
+    // 同码同世代只有第一次扫码等待结果并加购，后续重复扫码直接提示「正在查询」。
+    private readonly HashSet<PendingRemoteScan> _pendingRemoteScans = [];
+    // 购物车世代：每发生一次「这一单的购物车已经不是扫码时那一单」的事件就加一。
+    // 补查发起时记下当时的世代，结果回来时比对，不一致就丢弃，不依赖时间判断。
+    private long _cartGeneration;
 
     public PosTerminalWorkflowService(
         LocalSellableItemIndex priceIndex,
@@ -195,7 +244,7 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         return result;
     }
 
-    public async Task<PosTerminalWorkflowResult> ProcessScanAsync(
+    public Task<PosTerminalWorkflowResult> ProcessScanAsync(
         PosSessionState session,
         string scanText,
         bool preferExactLookup,
@@ -203,6 +252,20 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         string? traceId = null,
         CancellationToken cancellationToken = default)
     {
+        return ProcessScanAsync(session, scanText, preferExactLookup, source, traceId, hooks: null, cancellationToken);
+    }
+
+    public async Task<PosTerminalWorkflowResult> ProcessScanAsync(
+        PosSessionState session,
+        string scanText,
+        bool preferExactLookup,
+        string source,
+        string? traceId,
+        PosScanHooks? hooks,
+        CancellationToken cancellationToken = default)
+    {
+        // 关键逻辑：扫码发起的这一刻就记下购物车世代；本地未命中走远程补查时，结果回来再与当前世代比对。
+        var cartGeneration = Volatile.Read(ref _cartGeneration);
         var localResult = preferExactLookup
             ? ProcessScan(session, scanText, preferExactLookup, source, traceId)
             : await ProcessSearchScanAsync(session, scanText, source, traceId, cancellationToken);
@@ -212,7 +275,25 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             return localResult;
         }
 
-        return await TryAddRemoteLookupMissAsync(session, scanText, source, traceId, localResult, cancellationToken);
+        return await TryAddRemoteLookupMissAsync(session, scanText, source, traceId, localResult, cartGeneration, hooks, cancellationToken);
+    }
+
+    public void AdvanceCartGeneration(string reason)
+    {
+        var generation = Interlocked.Increment(ref _cartGeneration);
+        int pendingScanCount;
+        lock (_remoteLookupGate)
+        {
+            pendingScanCount = _pendingRemoteScans.Count;
+        }
+
+        // 购物车每次变空都会走到这里；只有确实有在途补查被作废时才写日志，避免刷屏。
+        if (pendingScanCount > 0)
+        {
+            ConsoleLog.Write(
+                "PosScan",
+                $"remote lookup pending scans invalidated reason={reason} cartGeneration={generation} pendingScans={pendingScanCount}");
+        }
     }
 
     private async Task<PosTerminalWorkflowResult> ProcessSearchScanAsync(
@@ -471,6 +552,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ClearCart()
     {
+        // 清空即换单：清空前仍在补查的商品，结果回来后不能落进清空后的购物车。
+        AdvanceCartGeneration("clear-cart");
         _cart.Clear();
         return Status("pos.status.cartCleared");
     }
@@ -487,6 +570,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             return Status("cart.status.zeroPriceItem");
         }
 
+        // 校验通过才会真正进入收款；被拦下时收银员还在收银页，在途补查照常加购，所以放在所有拦截之后。
+        AdvanceCartGeneration("payment-started");
         return new PosTerminalWorkflowResult { PaymentAllowed = true };
     }
 
@@ -596,6 +681,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         string source,
         string? traceId,
         PosTerminalWorkflowResult localResult,
+        long cartGeneration,
+        PosScanHooks? hooks,
         CancellationToken cancellationToken)
     {
         if (!session.IsOnline)
@@ -616,18 +703,32 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
         var stopwatch = Stopwatch.StartNew();
         var key = new RemoteLookupKey(NormalizeIdentity(session.StoreCode), NormalizeIdentity(scanText));
+        var pendingScan = new PendingRemoteScan(key, cartGeneration);
         Task<RemoteLookupRefreshResult>? lookupTask = null;
         var startedLookup = false;
+        var registeredScan = false;
         try
         {
             lock (_remoteLookupGate)
             {
-                if (!_pendingRemoteLookupTasks.TryGetValue(key, out lookupTask))
+                // 同码同世代只登记一次：补查进行中收银员再扫同一个码，不再叠加第二次加购（否则一个商品会加成两件）。
+                // 世代不同（清空 / 换单后重扫）则不算重复，仍然共享同一次远程请求，但各自按自己的世代决定是否加购。
+                registeredScan = _pendingRemoteScans.Add(pendingScan);
+                if (registeredScan && !_pendingRemoteLookupTasks.TryGetValue(key, out lookupTask))
                 {
                     lookupTask = ExecuteRemoteLookupWithTimeoutAsync(session.StoreCode, scanText, cancellationToken);
                     _pendingRemoteLookupTasks[key] = lookupTask;
                     startedLookup = true;
                 }
+            }
+
+            if (!registeredScan)
+            {
+                // 不等待、不加购，直接告诉收银员「这个码正在查询」，避免界面长时间无反应又被反复扫码。
+                ConsoleLog.Write(
+                    "PosScan",
+                    $"{FormatTraceId(traceId)}remote lookup duplicate scan ignored storeCode={session.StoreCode} lookupCode={LogValue(scanText)} source={source} cartGeneration={cartGeneration}");
+                return Status("pos.status.remoteLookupInProgress");
             }
 
             ConsoleLog.Write(
@@ -636,28 +737,46 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
                     ? $"{FormatTraceId(traceId)}remote lookup dispatch after local miss storeCode={session.StoreCode} lookupCode={LogValue(scanText)} source={source}"
                     : $"{FormatTraceId(traceId)}remote lookup joined after local miss storeCode={session.StoreCode} lookupCode={LogValue(scanText)} source={source}");
 
-            var result = await lookupTask.WaitAsync(cancellationToken);
+            // 补查最长要等 2 秒：发起的同一时刻先给收银员反馈，而不是等结果回来才有动静。
+            InvokeHook(hooks?.OnInterimResult, Status("pos.status.remoteLookupStarted"), "interim-result");
+
+            var result = await lookupTask!.WaitAsync(cancellationToken);
             stopwatch.Stop();
 
             if (result.Updated && result.Item is not null)
             {
+                // 商品信息本身是最新的，无论这一次要不要加购都先回写本地索引：被丢弃后收银员重扫即可本地命中。
                 await Task.Run(() => _priceIndex.Upsert(result.Item), cancellationToken);
-                PosTerminalWorkflowResult addResult;
+                PosTerminalWorkflowResult? addResult = null;
                 lock (_remoteLookupGate)
                 {
                     // ponytail: 复用现有远程查询锁串行化短回写；并发吞吐成为瓶颈时再按 RemoteLookupKey 分锁。
-                    // 本地未命中后远端已返回最新商品，这里直接加购，避免加购后再重复排队远端刷新。
-                    addResult = AddItem(
-                        session,
-                        result.Item,
-                        clearScanText: true,
-                        closeMatchesPopup: false,
-                        "scan-auto-add",
-                        traceId,
-                        refreshRemoteAfterAdd: false);
+                    // 世代校验与加购放在同一临界区内，二者之间不会再插进来清空 / 收款等操作。
+                    if (cartGeneration == Volatile.Read(ref _cartGeneration))
+                    {
+                        InvokeHook(hooks?.OnBeforeRemoteApply, "before-remote-apply");
+                        // 本地未命中后远端已返回最新商品，这里直接加购，避免加购后再重复排队远端刷新。
+                        addResult = AddItem(
+                            session,
+                            result.Item,
+                            clearScanText: true,
+                            closeMatchesPopup: false,
+                            "scan-auto-add",
+                            traceId,
+                            refreshRemoteAfterAdd: false);
+                    }
                 }
 
                 CatalogReloaded?.Invoke(this, new PosTerminalCatalogReloadedEventArgs());
+                if (addResult is null)
+                {
+                    // 扫码之后购物车已被清空 / 已开始收款 / 已换单 / 会话已变：这件商品不属于现在的购物车，丢弃并提示重扫。
+                    ConsoleLog.Write(
+                        "PosScan",
+                        $"{FormatTraceId(traceId)}remote lookup local miss discarded storeCode={session.StoreCode} lookupCode={LogValue(scanText)} productCode={LogValue(result.Item.ProductCode)} scanGeneration={cartGeneration} currentGeneration={Volatile.Read(ref _cartGeneration)} elapsedMs={stopwatch.ElapsedMilliseconds}");
+                    return Status("pos.status.remoteLookupDiscarded");
+                }
+
                 ConsoleLog.Write(
                     "PosScan",
                     $"{FormatTraceId(traceId)}remote lookup local miss added storeCode={session.StoreCode} lookupCode={LogValue(scanText)} productCode={LogValue(result.Item.ProductCode)} elapsedMs={stopwatch.ElapsedMilliseconds}");
@@ -698,17 +817,56 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         }
         finally
         {
-            if (startedLookup && lookupTask is not null)
+            if (registeredScan)
             {
                 lock (_remoteLookupGate)
                 {
-                    if (_pendingRemoteLookupTasks.TryGetValue(key, out var pendingTask) &&
+                    // 无论成功、失败、超时还是被取消，都要释放「正在查询」登记，否则这个码在本世代内再也扫不进去。
+                    _pendingRemoteScans.Remove(pendingScan);
+                    if (startedLookup &&
+                        lookupTask is not null &&
+                        _pendingRemoteLookupTasks.TryGetValue(key, out var pendingTask) &&
                         ReferenceEquals(pendingTask, lookupTask))
                     {
                         _pendingRemoteLookupTasks.Remove(key);
                     }
                 }
             }
+        }
+    }
+
+    private static void InvokeHook<T>(Action<T>? hook, T argument, string hookName)
+    {
+        if (hook is null)
+        {
+            return;
+        }
+
+        try
+        {
+            hook(argument);
+        }
+        catch (Exception ex)
+        {
+            // UI 回调出错只记日志，不能让一次提示失败把扫码加购也带崩。
+            ConsoleLog.Write("PosScan", $"scan hook failed hook={hookName} error={ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void InvokeHook(Action? hook, string hookName)
+    {
+        if (hook is null)
+        {
+            return;
+        }
+
+        try
+        {
+            hook();
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.Write("PosScan", $"scan hook failed hook={hookName} error={ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -1102,4 +1260,7 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
                 NormalizeIdentity(snapshot.LookupCode));
         }
     }
+
+    // 一次「等待补查结果后加购」的扫码：商品码 + 发起时的购物车世代。同值即视为重复扫码。
+    private sealed record PendingRemoteScan(RemoteLookupKey Key, long CartGeneration);
 }
