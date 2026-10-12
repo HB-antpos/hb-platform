@@ -536,6 +536,20 @@ public sealed class ConfiguredCardTerminalClient :
 
     internal TimeSpan SquareCancelConfirmInterval { get; init; } = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// Square 付款等待用的时钟：总等待预算（TerminalTimeout）、轮询间隔与瞬时错误退避都走它。
+    /// 生产使用系统时钟；测试注入 FakeTimeProvider，直接推进虚拟时间验证“重试不会超出总预算”，不靠墙钟硬等。
+    /// </summary>
+    internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    // 等待顾客刷卡期间的两个查询（结账状态、付款详情）都是幂等读取：遇到瞬时错误不能一次就把付款页锁成“结果未知”，
+    // 否则 Hbpos API 重启、端点切换、网关 502 时，顾客明明正在终端上刷卡，POS 却已锁定、终端结账也没人取消。
+    // 每次查询按“1s 起步、指数退避 + 抖动、封顶 8s”重试，连续失败超过次数才放弃并走原有“结果未知”语义；
+    // 重试的等待全部受 AuthorizeSquareAsync 的总预算令牌约束，不会延长整体等待上限。
+    // 响应体解析失败更可能是网关错误页或确定性的坏数据，只给少量重试。
+    private const int MaxSquareTransientQueryRetries = 10;
+    private const int MaxSquareInvalidResponseRetries = 2;
+
     private const string SquareTimedOutStatusKey = "payment.card.squareTimedOut";
     private const string SquareTerminalOfflineStatusKey = "payment.card.squareTerminalOffline";
     private const string SquareTerminalNotPickedUpStatusKey = "payment.card.squareTerminalNotPickedUp";
@@ -782,8 +796,9 @@ public sealed class ConfiguredCardTerminalClient :
             return new PaymentAuthorizationResult(false, null, T("payment.card.squareConfigIncomplete", "Square terminal configuration is incomplete."));
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(settings.TerminalTimeout);
+        // 总等待预算走 TimeProvider（生产为系统时钟，行为与 CancelAfter 一致）；timeoutCts 同时响应调用方取消与预算到期。
+        using var budgetCts = new CancellationTokenSource(settings.TerminalTimeout, TimeProvider);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budgetCts.Token);
 
         var checkoutDeviceId = SquareDeviceIdNormalizer.NormalizeForTerminalCheckout(settings.SquareDeviceId);
         if (string.IsNullOrWhiteSpace(checkoutDeviceId))
@@ -863,27 +878,28 @@ public sealed class ConfiguredCardTerminalClient :
             {
                 timeoutCts.Token.ThrowIfCancellationRequested();
                 pollCount++;
-                using var getResponse = await SendSquareApiAsync(
-                    HttpMethod.Get,
+                // 中文注释：结账状态查询是幂等读取，瞬时错误在总预算内有界重试；仅明确的客户端错误或重试用尽才走下面的“结果未知”。
+                var checkoutQuery = await QuerySquareWithTransientRetryAsync(
+                    "checkout status",
                     $"api/v1/square/checkouts/{Uri.EscapeDataString(checkoutId)}?environment={Uri.EscapeDataString(settings.Environment.ToString())}",
-                    body: null,
+                    $"checkoutId={checkoutId} poll={pollCount}",
+                    ReadSquareCheckoutStatusResponse,
                     timeoutCts.Token);
-                var getBody = await ReadResponseBodyAsync(getResponse, timeoutCts.Token);
-                if (!getResponse.IsSuccessStatusCode)
+                if (checkoutQuery.FailedStatusCode is { } getStatusCode)
                 {
-                    LogSquare($"checkout poll failed checkoutId={checkoutId} poll={pollCount} http={(int)getResponse.StatusCode} detail={LogValue(ReadSquareErrorMessage(getBody))}");
+                    LogSquare($"checkout poll failed checkoutId={checkoutId} poll={pollCount} http={(int)getStatusCode} detail={LogValue(ReadSquareErrorMessage(checkoutQuery.FailedBody))}");
                     await MarkSquareAttemptFailureAsync(
                         squareAttempt,
                         LocalSquarePaymentAttemptStatus.Unknown,
                         lastLoggedStatus,
                         paymentStatus: null,
-                        responseCode: ((int)getResponse.StatusCode).ToString(CultureInfo.InvariantCulture),
-                        responseText: ReadSquareErrorMessage(getBody),
+                        responseCode: ((int)getStatusCode).ToString(CultureInfo.InvariantCulture),
+                        responseText: ReadSquareErrorMessage(checkoutQuery.FailedBody),
                         CancellationToken.None);
-                    return FailSquareSubmittedRequest("checkout status", getResponse.StatusCode, getBody);
+                    return FailSquareSubmittedRequest("checkout status", getStatusCode, checkoutQuery.FailedBody);
                 }
 
-                var currentCheckout = ReadSquareCheckoutStatusResponse(getBody);
+                var currentCheckout = checkoutQuery.Value!;
                 if (!string.Equals(currentCheckout.CheckoutId, checkoutId, StringComparison.Ordinal))
                 {
                     const string message = "Square checkout response does not match the submitted checkout.";
@@ -934,27 +950,28 @@ public sealed class ConfiguredCardTerminalClient :
                         return new PaymentAuthorizationResult(false, null, T("payment.card.squareMissingPaymentId", "Square checkout did not return a payment id."), ResultUnknown: true);
                     }
 
-                    using var paymentResponse = await SendSquareApiAsync(
-                        HttpMethod.Get,
+                    // 中文注释：付款详情查询同样是幂等读取；此时顾客已刷卡完成，更不能因一次网关抖动就锁成未知。
+                    var paymentQuery = await QuerySquareWithTransientRetryAsync(
+                        "payment lookup",
                         $"api/v1/square/payments/{Uri.EscapeDataString(paymentId)}?environment={Uri.EscapeDataString(settings.Environment.ToString())}",
-                        body: null,
+                        $"checkoutId={checkoutId} paymentId={paymentId}",
+                        ReadSquarePaymentStatusResponse,
                         timeoutCts.Token);
-                    var paymentBody = await ReadResponseBodyAsync(paymentResponse, timeoutCts.Token);
-                    if (!paymentResponse.IsSuccessStatusCode)
+                    if (paymentQuery.FailedStatusCode is { } paymentStatusCode)
                     {
-                        LogSquare($"payment lookup failed checkoutId={checkoutId} paymentId={paymentId} http={(int)paymentResponse.StatusCode} detail={LogValue(ReadSquareErrorMessage(paymentBody))}");
+                        LogSquare($"payment lookup failed checkoutId={checkoutId} paymentId={paymentId} http={(int)paymentStatusCode} detail={LogValue(ReadSquareErrorMessage(paymentQuery.FailedBody))}");
                         await MarkSquareAttemptFailureAsync(
                             squareAttempt,
                             LocalSquarePaymentAttemptStatus.Unknown,
                             status,
                             paymentStatus: null,
-                            responseCode: ((int)paymentResponse.StatusCode).ToString(CultureInfo.InvariantCulture),
-                            responseText: ReadSquareErrorMessage(paymentBody),
+                            responseCode: ((int)paymentStatusCode).ToString(CultureInfo.InvariantCulture),
+                            responseText: ReadSquareErrorMessage(paymentQuery.FailedBody),
                             CancellationToken.None);
-                        return FailSquareSubmittedRequest("payment", paymentResponse.StatusCode, paymentBody);
+                        return FailSquareSubmittedRequest("payment", paymentStatusCode, paymentQuery.FailedBody);
                     }
 
-                    var payment = ReadSquarePaymentStatusResponse(paymentBody);
+                    var payment = paymentQuery.Value!;
                     var paymentStatus = payment.Status ?? string.Empty;
                     if (!string.Equals(payment.PaymentId, paymentId, StringComparison.Ordinal))
                     {
@@ -996,7 +1013,7 @@ public sealed class ConfiguredCardTerminalClient :
                             loggedApprovedWait = true;
                         }
 
-                        await Task.Delay(SquareApprovedSettleInterval, timeoutCts.Token);
+                        await Task.Delay(SquareApprovedSettleInterval, TimeProvider, timeoutCts.Token);
                         continue;
                     }
 
@@ -1115,7 +1132,7 @@ public sealed class ConfiguredCardTerminalClient :
                         ResultUnknown: true);
                 }
 
-                await Task.Delay(SquarePollInterval, timeoutCts.Token);
+                await Task.Delay(SquarePollInterval, TimeProvider, timeoutCts.Token);
             }
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
@@ -1123,10 +1140,7 @@ public sealed class ConfiguredCardTerminalClient :
             var wasCallerCancelled = cancellationToken.IsCancellationRequested;
             var cancellationReason = wasCallerCancelled ? "caller-cancelled" : "local-timeout";
             LogSquare($"authorize canceled checkoutId={LogValue(checkoutId)} reason={cancellationReason}; starting cleanup");
-            var cleanup = await CleanupSquareCheckoutBestEffortAsync(
-                settings,
-                checkoutId,
-                allowRefresh: true);
+            var cleanup = await CleanupSquareCheckoutBestEffortAsync(settings, checkoutId);
             if (wasCallerCancelled && !squareCreateSubmitted)
             {
                 throw;
@@ -1212,6 +1226,116 @@ public sealed class ConfiguredCardTerminalClient :
             return new PaymentAuthorizationResult(false, null, T("payment.card.squareInvalidResponse", "Square terminal returned an invalid response."), ResultUnknown: true);
         }
     }
+
+    private readonly record struct SquareQueryResult<T>(
+        T? Value,
+        System.Net.HttpStatusCode? FailedStatusCode,
+        string? FailedBody);
+
+    /// <summary>
+    /// 带瞬时错误有界重试的幂等 GET 查询。成功返回解析后的 <see cref="SquareQueryResult{T}.Value"/>；
+    /// 明确的客户端错误（400/401/403/404 等）或 HTTP 瞬时错误重试用尽时，返回失败状态码与响应体，由调用方按原有语义处理；
+    /// 网络异常、响应体解析失败、请求被取消但调用方与总预算都未取消（HttpClient 超时、API 端点切换窗口）重试用尽时，
+    /// 原样重新抛出最后一次异常，仍由 AuthorizeSquareAsync 原有的 catch 判为结果未知。
+    /// </summary>
+    /// <param name="operation">日志里的操作名。</param>
+    /// <param name="relativeUrl">相对 Hbpos API 的 GET 地址。</param>
+    /// <param name="logContext">日志里的上下文（checkoutId / paymentId 等）。</param>
+    /// <param name="parseBody">2xx 响应体解析；抛 <see cref="JsonException"/> 视为响应无效。</param>
+    /// <param name="cancellationToken">总预算令牌（已合并调用方取消）；重试等待也使用它，到期或取消时立即上抛。</param>
+    private async Task<SquareQueryResult<T>> QuerySquareWithTransientRetryAsync<T>(
+        string operation,
+        string relativeUrl,
+        string logContext,
+        Func<string, T> parseBody,
+        CancellationToken cancellationToken)
+    {
+        var transientFailures = 0;
+        var invalidResponseFailures = 0;
+        string? lastLoggedCause = null;
+        while (true)
+        {
+            string cause;
+            try
+            {
+                using var response = await SendSquareApiAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
+                var responseBody = await ReadResponseBodyAsync(response, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    var value = parseBody(responseBody);
+                    if (transientFailures > 0)
+                    {
+                        LogSquare($"{operation} recovered after {transientFailures} transient failure(s) {logContext}");
+                    }
+
+                    return new SquareQueryResult<T>(value, null, null);
+                }
+
+                // 400/401/403/404 等明确的客户端错误重试无意义，立即交回调用方；408/429/5xx 才是瞬时错误。
+                if (!IsAmbiguousSquareHttpStatus(response.StatusCode))
+                {
+                    return new SquareQueryResult<T>(default, response.StatusCode, responseBody);
+                }
+
+                cause = $"http={(int)response.StatusCode}";
+                if (transientFailures >= MaxSquareTransientQueryRetries)
+                {
+                    LogSquare($"{operation} transient retries exhausted {logContext} attempts={transientFailures + 1} cause={cause}");
+                    return new SquareQueryResult<T>(default, response.StatusCode, responseBody);
+                }
+            }
+            catch (Exception ex) when (IsTransientSquareQueryFailure(ex, cancellationToken))
+            {
+                if (ex is JsonException)
+                {
+                    invalidResponseFailures++;
+                }
+
+                cause = DescribeSquareQueryFailure(ex);
+                if (transientFailures >= MaxSquareTransientQueryRetries ||
+                    invalidResponseFailures > MaxSquareInvalidResponseRetries)
+                {
+                    LogSquare($"{operation} transient retries exhausted {logContext} attempts={transientFailures + 1} cause={cause}");
+                    throw;
+                }
+            }
+
+            transientFailures++;
+            var delay = LinklyCloudTerminalClient.ComputePollRetryDelay(
+                transientFailures,
+                retryAfter: null,
+                Random.Shared.NextDouble());
+            // 只在失败原因变化时写日志，持续同一种故障时不会每轮刷屏；恢复时再写一条收尾。
+            if (!string.Equals(cause, lastLoggedCause, StringComparison.Ordinal))
+            {
+                LogSquare($"{operation} transient failure, retrying {logContext} attempt={transientFailures}/{MaxSquareTransientQueryRetries} cause={cause} delayMs={(int)delay.TotalMilliseconds}");
+                lastLoggedCause = cause;
+            }
+
+            // 等待用总预算令牌：预算到期或收银员取消时抛 OperationCanceledException，
+            // 走 AuthorizeSquareAsync 原有的超时/取消分支（取消终端上的结账），重试不会延长整体等待上限。
+            await Task.Delay(delay, TimeProvider, cancellationToken);
+        }
+    }
+
+    private static bool IsTransientSquareQueryFailure(Exception exception, CancellationToken cancellationToken)
+    {
+        // 调用方取消或总预算到期：不是瞬时错误，必须原样上抛，由超时/取消分支收尾。
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        // OperationCanceledException 走到这里说明令牌均未取消：HttpClient 自身超时，或 API 端点切换窗口内被统一取消的请求。
+        return exception is HttpRequestException or JsonException or OperationCanceledException;
+    }
+
+    private static string DescribeSquareQueryFailure(Exception exception) => exception switch
+    {
+        HttpRequestException => "network-error",
+        JsonException => "invalid-response",
+        _ => "request-timeout"
+    };
 
     private async Task MarkSquareAttemptFailureAsync(
         SquarePaymentAttemptContext? squareAttempt,
@@ -2025,8 +2149,7 @@ public sealed class ConfiguredCardTerminalClient :
 
     private async Task<SquareCleanupResult> CleanupSquareCheckoutBestEffortAsync(
         CardTerminalSettings settings,
-        string? checkoutId,
-        bool allowRefresh)
+        string? checkoutId)
     {
         if (string.IsNullOrWhiteSpace(checkoutId))
         {
@@ -2034,12 +2157,11 @@ public sealed class ConfiguredCardTerminalClient :
             return new SquareCleanupResult(ShouldDismiss: false, Status: null);
         }
 
-        LogSquare($"cleanup start checkoutId={checkoutId} allowRefresh={allowRefresh}");
+        LogSquare($"cleanup start checkoutId={checkoutId}");
         using var cleanupCts = new CancellationTokenSource(SquareCleanupTimeout);
         var cancelResult = await CancelSquareCheckoutBestEffortAsync(
             settings,
             checkoutId,
-            allowRefresh,
             cleanupCts.Token);
         if (cancelResult.ShouldDismiss)
         {
@@ -2047,7 +2169,6 @@ public sealed class ConfiguredCardTerminalClient :
             var dismissStatus = await DismissSquareCheckoutBestEffortAsync(
                 settings,
                 checkoutId,
-                allowRefresh,
                 cleanupCts.Token);
             var cleanupStatus = await ConfirmSquareCancelAsync(
                 settings,
@@ -2122,7 +2243,6 @@ public sealed class ConfiguredCardTerminalClient :
     private async Task<SquareCleanupResult> CancelSquareCheckoutBestEffortAsync(
         CardTerminalSettings settings,
         string checkoutId,
-        bool allowRefresh,
         CancellationToken cancellationToken)
     {
         try
@@ -2153,7 +2273,6 @@ public sealed class ConfiguredCardTerminalClient :
     private async Task<string?> DismissSquareCheckoutBestEffortAsync(
         CardTerminalSettings settings,
         string checkoutId,
-        bool allowRefresh,
         CancellationToken cancellationToken)
     {
         try
@@ -2403,7 +2522,8 @@ public sealed class ConfiguredCardTerminalClient :
                 return false;
             }
 
-            var result = JsonSerializer.Deserialize<ApiResult<T>>(responseBody, JsonOptions)
+            // 直接从已解析的 JsonElement 反序列化，避免同一段 JSON 每轮被解析两次。
+            var result = document.RootElement.Deserialize<ApiResult<T>>(JsonOptions)
                 ?? throw new JsonException("Square API result is null.");
             if (!result.Success || result.Data is null)
             {
