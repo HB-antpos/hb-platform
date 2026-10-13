@@ -10720,7 +10720,8 @@ public sealed class MainViewModelScannerTests
         public Task<SpecialProductsDownloadWorkflowResult> DownloadAsync(
             string storeCode,
             CancellationToken cancellationToken = default,
-            IProgress<SpecialProductDownloadProgress>? progress = null)
+            IProgress<SpecialProductDownloadProgress>? progress = null,
+            Action<IReadOnlyList<SellableItemDto>>? onSpecialItemsReady = null)
         {
             return Task.FromResult(new SpecialProductsDownloadWorkflowResult(
                 new SpecialProductDownloadResult(storeCode, 0, 0, 0, 0, 0),

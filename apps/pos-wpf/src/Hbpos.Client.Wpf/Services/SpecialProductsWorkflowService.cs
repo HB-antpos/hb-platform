@@ -82,10 +82,14 @@ public interface ISpecialProductsWorkflowService
         throw new NotSupportedException("Undo add-to-cart is not supported by this workflow.");
     }
 
+    // 中文注释：onSpecialItemsReady 在本地库写完、特殊商品列表读出后立刻回调（早于整体重建价格索引），
+    // 让页面不必等索引重建就能显示下载结果；方法返回时索引仍已完整重建、缓存已就绪。
+    // 回调在 await 的延续上同步执行（视图模型调用时即 UI 线程）。
     Task<SpecialProductsDownloadWorkflowResult> DownloadAsync(
         string storeCode,
         CancellationToken cancellationToken = default,
-        IProgress<SpecialProductDownloadProgress>? progress = null);
+        IProgress<SpecialProductDownloadProgress>? progress = null,
+        Action<IReadOnlyList<SellableItemDto>>? onSpecialItemsReady = null);
 
     Task<SpecialProductsMutationWorkflowResult> MarkSpecialProductAsync(
         string storeCode,
@@ -260,17 +264,65 @@ public sealed class SpecialProductsWorkflowService(
     public async Task<SpecialProductsDownloadWorkflowResult> DownloadAsync(
         string storeCode,
         CancellationToken cancellationToken = default,
-        IProgress<SpecialProductDownloadProgress>? progress = null)
+        IProgress<SpecialProductDownloadProgress>? progress = null,
+        Action<IReadOnlyList<SellableItemDto>>? onSpecialItemsReady = null)
     {
         var normalizedStoreCode = NormalizeStoreCode(storeCode);
-        var result = await specialProductService.DownloadSpecialProductsAsync(
-            normalizedStoreCode,
-            cancellationToken,
-            progress);
 
-        await RefreshIndexAsync(normalizedStoreCode, cancellationToken);
-        var specialItems = await catalogRepository.LoadSpecialProductItemsAsync(normalizedStoreCode, cancellationToken);
+        // 有「列表就绪」回调时，把服务层上报的 Completed(100%) 扣到列表交给调用方之后再放出，
+        // 避免进度条先显示「下载完成」而列表还是空的；没有回调时原样透传，行为与改动前一致。
+        var deferringProgress = progress is not null && onSpecialItemsReady is not null
+            ? new CompletionDeferringProgress(progress)
+            : null;
+
+        SpecialProductDownloadResult result;
+        IReadOnlyList<SellableItemDto> specialItems;
+        var listStopwatch = new Stopwatch();
+        try
+        {
+            result = await specialProductService.DownloadSpecialProductsAsync(
+                normalizedStoreCode,
+                cancellationToken,
+                (IProgress<SpecialProductDownloadProgress>?)deferringProgress ?? progress);
+
+            // 关键逻辑：下载已写完本地库，先读出特殊商品列表（只读特殊商品，很轻）并立刻交给调用方显示；
+            // 整体重建价格索引要读全店可售商品，商品多时要好几秒，放在显示之后。
+            listStopwatch.Start();
+            specialItems = await catalogRepository.LoadSpecialProductItemsAsync(normalizedStoreCode, cancellationToken);
+
+            // 缓存时机：本地库已变，旧缓存立刻作废（否则此时重新进入页面会拿旧缓存把已显示的新列表盖回去）；
+            // 新缓存等索引重建成功后再写入，保证缓存里的特殊商品不会比索引新，也不会比页面显示的旧。
+            ClearLoadedResult(normalizedStoreCode);
+            NotifySpecialItemsReady(onSpecialItemsReady, normalizedStoreCode, specialItems);
+            listStopwatch.Stop();
+        }
+        finally
+        {
+            // 无论成功还是读列表失败/被取消，都放出被扣住的 Completed，避免进度条停在「下载中 100%」。
+            deferringProgress?.Release();
+        }
+
+        var indexStopwatch = Stopwatch.StartNew();
+        try
+        {
+            // 关键逻辑：重建放到线程池执行。仓储读库的「Async」实为同步完成（Microsoft.Data.Sqlite），
+            // 建索引又是纯 CPU，若在 UI 线程上内联执行会一直占住它，刚显示的列表要等重建结束才能重绘；
+            // 与 ShellCatalogService 加载目录同样走 Task.Run。ReplaceAll 在锁外建好再交换引用，可从任意线程调用。
+            await Task.Run(() => RefreshIndexAsync(normalizedStoreCode, cancellationToken), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // 重建失败/被取消：本地库已更新但内存索引没跟上。缓存保持作废，下次进入页面从本地库重读，
+            // 而不是回退成下载前的旧缓存；异常照旧向上抛，由视图模型走「下载失败」提示并复位忙碌状态。
+            ClearLoadedResult(normalizedStoreCode);
+            indexStopwatch.Stop();
+            Log($"download index refresh failed store={normalizedStoreCode} items={specialItems.Count} listReadyElapsedMs={listStopwatch.ElapsedMilliseconds} indexRefreshElapsedMs={indexStopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+
         UpdateLoadedResult(normalizedStoreCode, specialItems);
+        indexStopwatch.Stop();
+        Log($"download completed store={normalizedStoreCode} items={specialItems.Count} listReadyElapsedMs={listStopwatch.ElapsedMilliseconds} indexRefreshElapsedMs={indexStopwatch.ElapsedMilliseconds}");
         return new SpecialProductsDownloadWorkflowResult(result, specialItems);
     }
 
@@ -469,6 +521,28 @@ public sealed class SpecialProductsWorkflowService(
         priceIndex.ReplaceAll(CatalogCodeConflictMerger.Merge(catalogItems, codeConflictItems));
     }
 
+    private static void NotifySpecialItemsReady(
+        Action<IReadOnlyList<SellableItemDto>>? onSpecialItemsReady,
+        string normalizedStoreCode,
+        IReadOnlyList<SellableItemDto> specialItems)
+    {
+        if (onSpecialItemsReady is null)
+        {
+            return;
+        }
+
+        try
+        {
+            onSpecialItemsReady(specialItems);
+        }
+        catch (Exception ex)
+        {
+            // 提前显示只是体验优化：回调失败不能挡住后面的价格索引重建（索引必须跟上已更新的本地库）；
+            // 调用方可凭返回值兜底再显示一次，仍失败时由调用方自己的失败路径提示。
+            Log($"download special items ready callback failed store={normalizedStoreCode} error={ex.Message}");
+        }
+    }
+
     private bool IsLoadedForStore(string normalizedStoreCode)
     {
         return _loadedResult is not null &&
@@ -525,5 +599,50 @@ public sealed class SpecialProductsWorkflowService(
     private static void Log(string message)
     {
         ConsoleLog.Write("SpecialProducts", message);
+    }
+
+    /// <summary>
+    /// 扣住下载服务上报的 Completed 阶段，直到 <see cref="Release"/> 才转发给真正的进度接收方；
+    /// 其余阶段（准备、下载中、失败）原样转发。服务层只会在全部写库完成后上报一次 Completed。
+    /// </summary>
+    private sealed class CompletionDeferringProgress(IProgress<SpecialProductDownloadProgress> inner)
+        : IProgress<SpecialProductDownloadProgress>
+    {
+        private readonly object _gate = new();
+        private SpecialProductDownloadProgress? _deferred;
+        private bool _released;
+
+        public void Report(SpecialProductDownloadProgress value)
+        {
+            if (value.Stage == SpecialProductDownloadProgressStage.Completed)
+            {
+                lock (_gate)
+                {
+                    if (!_released)
+                    {
+                        _deferred = value;
+                        return;
+                    }
+                }
+            }
+
+            inner.Report(value);
+        }
+
+        public void Release()
+        {
+            SpecialProductDownloadProgress? deferred;
+            lock (_gate)
+            {
+                _released = true;
+                deferred = _deferred;
+                _deferred = null;
+            }
+
+            if (deferred is not null)
+            {
+                inner.Report(deferred);
+            }
+        }
     }
 }

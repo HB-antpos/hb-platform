@@ -1983,7 +1983,8 @@ public sealed class SpecialProductsViewModelTests
         public Task<SpecialProductsDownloadWorkflowResult> DownloadAsync(
             string storeCode,
             CancellationToken cancellationToken = default,
-            IProgress<SpecialProductDownloadProgress>? progress = null)
+            IProgress<SpecialProductDownloadProgress>? progress = null,
+            Action<IReadOnlyList<SellableItemDto>>? onSpecialItemsReady = null)
         {
             if (DownloadAsyncOverride is not null)
             {
