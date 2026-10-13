@@ -82,6 +82,12 @@ function toWarehouseDateKey(container: Pick<ContainerMain, '实际到货日期' 
   return value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : '9999-99-99'
 }
 
+// 仓库到货页的商品名称：优先本地主档商品名称，没建主档（或主档名为空白）时用国内商品名称兜底。
+// 空白字符串按「没有」处理，避免主档名只有空格时把卡片标题显示成空白。
+function resolveComingSoonProductName(info: ContainerDetail['商品信息']) {
+  return info?.主档商品名称?.trim() || info?.商品名称?.trim() || undefined
+}
+
 function toComingSoonProduct(item: ContainerDetail): ComingSoonHomeProduct {
   return {
     id: item.id,
@@ -89,7 +95,7 @@ function toComingSoonProduct(item: ContainerDetail): ComingSoonHomeProduct {
     productCode: item.商品编码 ?? item.商品信息?.商品编码,
     itemNumber: item.商品信息?.货号,
     barcode: item.商品信息?.条形码,
-    productName: item.商品信息?.商品名称,
+    productName: resolveComingSoonProductName(item.商品信息),
     englishName: item.商品信息?.英文名称,
     productImage: item.商品信息?.商品图片,
     quantity: item.装柜数量,

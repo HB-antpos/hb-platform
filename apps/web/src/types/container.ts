@@ -22,8 +22,11 @@ export interface ContainerProductInfo {
   货号?: string
   localSupplierCode?: string
   条形码?: string
+  /** 国内商品名称 */
   商品名称?: string
   英文名称?: string
+  /** 本地主档商品名称（未建主档时为空）；仓库到货页按「主档名优先、国内商品名称兜底」展示 */
+  主档商品名称?: string
   商品图片?: string
   零售价格?: number
   商品规格?: string

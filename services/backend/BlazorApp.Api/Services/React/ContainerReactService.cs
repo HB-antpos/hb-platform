@@ -1459,6 +1459,9 @@ namespace BlazorApp.Api.Services.React
                                     商品名称 = dp.ProductName,
                                     // 已有商品按本地主档商品名称展示英文列；未建主档时才回退国内英文名。
                                     英文名称 = lp.ProductName ?? dp.EnglishProductName,
+                                    // 单独给出主档商品名称（未建主档为 null），Web 订货前台「仓库到货」按
+                                    // 「主档商品名称优先、国内商品名称（上面的 商品名称）兜底」展示。
+                                    主档商品名称 = lp.ProductName,
                                     商品图片 = dp.ProductImage,
                                     条形码 = dp.Barcode,
                                     // SqlSugar 投影内不能调用 C# helper，这里映射需与 MapDomesticProductTypeLabel 保持一致。

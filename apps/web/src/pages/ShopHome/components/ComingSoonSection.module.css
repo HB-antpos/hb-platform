@@ -285,6 +285,10 @@
   align-items: center;
   gap: 12px;
 }
+/* 每页条数选择器：「每页 200 条」/「200 per page」最长，固定最小宽度避免切换时抖动 */
+.pageSizeSelect {
+  min-width: 120px;
+}
 @media (max-width: 1280px) {
   .header {
     align-items: flex-start;

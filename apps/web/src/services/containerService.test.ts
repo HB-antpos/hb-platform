@@ -867,7 +867,7 @@ try {
           id: 1,
           hguid: 'DETAIL-1',
           商品编码: 'P-3',
-          商品信息: { 货号: 'HB10', 条形码: '9300000000100', 商品名称: 'Item 10', 零售价格: 1.99 },
+          商品信息: { 货号: 'HB10', 条形码: '9300000000100', 商品名称: 'Item 10', 主档商品名称: 'Master Item 10', 零售价格: 1.99 },
           装柜数量: 10,
           // 本柜建档后 是否新商品 变 false，但仍是本柜新品。
           是否新商品: false,
@@ -885,7 +885,8 @@ try {
           id: 3,
           hguid: 'DETAIL-3',
           商品编码: 'P-2',
-          商品信息: { 商品名称: 'No Item Number' },
+          // 主档名只有空白：按「没有主档名」处理，回退国内商品名称。
+          商品信息: { 商品名称: 'No Item Number', 主档商品名称: '   ' },
           装柜数量: 30,
           是否新商品: false,
         },
@@ -918,6 +919,22 @@ try {
     products.find((item) => item.itemNumber === 'HB10')?.retailPrice,
     1.99,
     'Coming Soon 单货柜商品应映射商品建议零售价',
+  )
+  // 仓库到货页商品名称：主档商品名称优先，没建主档（或主档名空白）时用国内商品名称兜底
+  assertEqual(
+    products.find((item) => item.itemNumber === 'HB10')?.productName,
+    'Master Item 10',
+    '有主档商品名称时应优先显示主档名，而不是国内商品名称',
+  )
+  assertEqual(
+    products.find((item) => item.itemNumber === 'HB2')?.productName,
+    'Item 2',
+    '没有主档商品名称时应回退国内商品名称',
+  )
+  assertEqual(
+    products.find((item) => item.hguid === 'DETAIL-3')?.productName,
+    'No Item Number',
+    '主档商品名称只有空白时应回退国内商品名称',
   )
   assertEqual(
     products.find((item) => item.itemNumber === 'HB10')?.isNewProduct,

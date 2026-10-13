@@ -22,7 +22,33 @@ assert.match(source, /loadStartedRef.current.has\(containerGuid\)/, '同一货�
 assert.match(source, /loadStartedRef.current.delete\(containerGuid\)/, '失败货柜必须能重试')
 assert.match(source, /summaryGenerationRef.current !== generation/, '废弃摘要结果不得回写商品')
 assert.match(source, /requestTokensRef.current.get\(containerGuid\) !== token/, '失效请求不得覆盖新结果')
-assert.match(source, /const PRODUCT_PAGE_SIZE = 24/, '单页商品DOM应有明确上限')
+// 每页条数：默认 50，可选 50 / 100 / 200；200 是单页 DOM（图片 + 条码画布）的硬上限
+assert.match(
+  source,
+  /const PRODUCT_PAGE_SIZE_OPTIONS = \[50, 100, 200\] as const/,
+  '每页条数只能是 50 / 100 / 200，最大 200 是单页 DOM 上限',
+)
+assert.match(
+  source,
+  /const DEFAULT_PRODUCT_PAGE_SIZE: number = PRODUCT_PAGE_SIZE_OPTIONS\[0\]/,
+  '默认每页 50 条',
+)
+assert.doesNotMatch(source, /const PRODUCT_PAGE_SIZE = /, '不再使用固定每页 24 条')
+assert.match(source, /useState<number>\(DEFAULT_PRODUCT_PAGE_SIZE\)/, '每页条数应由状态控制，默认 50')
+assert.match(
+  source,
+  /const changePageSize = \(size: number\) => \{[\s\S]*?setPageSize\(size\)[\s\S]*?setProductPage\(1\)/,
+  '切换每页条数后必须回到第 1 页',
+)
+assert.match(
+  source,
+  /<Select<number>[\s\S]*?options=\{pageSizeOptions\}[\s\S]*?onChange=\{changePageSize\}/,
+  '分页栏应有每页条数选择器',
+)
+// 条码默认显示；商品卡片不再显示装柜数量
+assert.match(source, /const \[showBarcode, setShowBarcode\] = useState\(true\)/, '条码开关应默认打开')
+assert.doesNotMatch(source, /product\.quantity/, '商品卡片不显示装柜数量')
+assert.doesNotMatch(source, /comingSoonWorkspace\.quantity/, '商品卡片不显示装柜数量')
 assert.match(
   source,
   /selectedProducts.slice\([\s\S]*?\(productPage - 1\) \* pageSize,[\s\S]*?productPage \* pageSize/,
@@ -106,8 +132,18 @@ for (const locale of locales) {
     assert.equal(typeof locale.shop[key], 'string')
     assert.ok(source.includes(`'shop.${key}'`))
   }
-  for (const key of ['globalFilter', 'containerFilter', 'showBarcodes', 'next', 'previous', 'pageInfo']) {
+  for (const key of ['globalFilter', 'containerFilter', 'showBarcodes', 'next', 'previous', 'pageInfo', 'pageSize', 'perPage']) {
     assert.equal(typeof locale.shop.comingSoonWorkspace[key], 'string')
   }
+  assert.ok(locale.shop.comingSoonWorkspace.perPage.includes('{{count}}'), '每页条数文案应带 count 占位')
+  assert.equal(locale.shop.comingSoonWorkspace.quantity, undefined, '装柜数量文案已不再使用，不应留在首屏主文案包')
 }
+// 页面改名「仓库到货」：键名 shop.comingSoon 不变（路由 /shop/coming-soon 也不变），只改显示值
+assert.equal(zh.shop.comingSoon, '仓库到货')
+assert.equal(en.shop.comingSoon, 'Warehouse Arrivals')
+assert.equal(zh.shop.comingSoonWorkspace.loadFailed, '仓库到货数据加载失败。')
+assert.equal(zh.shop.comingSoonWorkspace.perPage, '每页 {{count}} 条')
+assert.equal(en.shop.comingSoonWorkspace.perPage, '{{count}} per page')
+assert.doesNotMatch(JSON.stringify(zh.shop), /即将上新/, '订货前台不应再出现「即将上新」')
+assert.doesNotMatch(JSON.stringify(en.shop), /Coming Soon|coming soon/, '订货前台不应再出现 Coming Soon')
 console.log('shopComingSoonPerformance.logic.test: ok')

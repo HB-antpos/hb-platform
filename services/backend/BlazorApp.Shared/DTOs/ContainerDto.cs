@@ -340,6 +340,13 @@ namespace BlazorApp.Shared.DTOs
         public string? 英文名称 { get; set; }
 
         /// <summary>
+        /// 本地主档商品名称（本地商品表 Product.ProductName）；商品还没建主档时为空。
+        /// 与「商品名称」（国内商品名称）分开返回，让前端能明确按「主档名优先、国内名兜底」展示，
+        /// 而不必从「英文名称」里猜它到底是主档名还是国内英文名。
+        /// </summary>
+        public string? 主档商品名称 { get; set; }
+
+        /// <summary>
         /// 商品图片
         /// </summary>
         public string? 商品图片 { get; set; }
