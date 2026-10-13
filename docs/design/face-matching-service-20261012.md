@@ -1,6 +1,6 @@
 # 门店人脸比对服务设计（腾讯云 IAI）
 
-设计日期：2026-10-12；**第四版 2026-10-13**（纳入用户的五项决定：第一期 2 家店（已定 QLD Orion）、先用腾讯云后续可改自建、顾客人脸去重要做、不受欢迎人员名单（原「黑名单」）要做、匹配结果显示相似度百分比，见第 13、14 节）。交付范围：设计方案；**未实施业务代码、数据库迁移或生产配置**。
+设计日期：2026-10-12；**第五版 2026-10-13**（纳入用户的六项决定：第一期 2 家店（已定 QLD Orion）、先用腾讯云后续可改自建、顾客人脸去重要做、不受欢迎人员名单（原「黑名单」）要做、匹配结果显示相似度百分比、腾讯云使用广州地域（中国大陆），见第 13、14 节）。交付范围：设计方案；**未实施业务代码、数据库迁移或生产配置**。
 
 上游已上线：人脸接收服务 P0/P1（#724、#726）、摄像机管理后台（#727）、查看抓拍图片（#737）。本文在此基础上设计「比对」。
 
@@ -8,7 +8,8 @@
 
 ## 1. 设计结论
 
-1. **比对引擎用腾讯云人脸识别（IAI，托管 API），地域固定 `ap-singapore`**（已由用户决定）。不自建 InsightFace：其预训练模型仅限非商业研究，商用须书面授权。
+1. **比对引擎用腾讯云人脸识别（IAI，托管 API），账号为现有中国站账号，地域按用户 2026-10-13 的决定用广州 `ap-guangzhou`（中国大陆）**。地域是**配置项，不写死**（`FaceMatch:Tencent:Region`）。原计划的新加坡地域在该账号下**未开通**（探测返回「计费状态未知」，属账号层面），暂不可用；将来可改新加坡、国际站账号或自建，只改配置。不自建 InsightFace：其预训练模型仅限非商业研究，商用须书面授权。
+   - **广州在中国大陆：每张送去比对的人脸（包括没匹配上的顾客）都会在大陆处理，受中国法律管辖，合同争议归深圳法院。这是比新加坡更重的跨境披露**【待律师确认】，要写进告示、隐私政策与员工同意书。
 2. **比对前置到接收端的处理器里，并且「非匹配即丢弃」**：匹配在人脸服务处理每条抓拍时完成；没匹配上的图片、原始报文立即删除，不入 COS、不留数据库事件，只累加计数。这是 OAIC 2026-07 指南的核心要求，也和当前「全部留存再慢慢删」的试点行为相反。
 3. **按门店分模式，且服务端强制前置条件**：`Off` / `Capture`（现在的试点：全部留存，只允许拍摄知情同意的内部人员）/ `Match`（生产：匹配后丢弃）。门店进入 `Match` 前，必须记录隐私影响评估编号、门口告示安装日期、律师确认人（NSW 门店还要员工监控通知日期），缺一项后端拒绝切换。
 4. **三个用途分开处理**：
@@ -25,7 +26,7 @@
 | 量级 | 30 店 × 每店每天约 1000–3000 次抓拍（每月 90 万–270 万） | 估算 |
 | 摄像机 | 海康 DS-2CD3726FWDA3/F-IZS，固件 V5.7.4；只在检测到人脸时推送，没有心跳；推送的是已裁剪人脸（约 592×560）加背景图（1280×848） | 摄像机网页与真实推送 |
 | 现有留存 | 原始报文 1 天、COS 人脸图 7 天、数据库事件行**无清理** | 2026-10-12 已收紧 |
-| 腾讯云账号 | 中国站账号（appid 以 13 开头）；用新加坡地域受《境外服务协议》约束，主协议适用中国大陆法律 | 调研 |
+| 腾讯云账号 | 中国站账号（appid 以 13 开头）；**广州、上海地域已开通可用；新加坡、雅加达地域报「计费状态未知」未开通**（2026-10-13 探测，新加坡请求编号 35c0ba78-3f98-4933-bb63-da7b466d9243）；主协议适用中国大陆法律 | 探测与调研 |
 
 ## 3. 合规设计要求（来自 OAIC 指南与裁定的整理）
 
@@ -168,6 +169,7 @@
 8. **库闲置清理**：官方称超过 1 年未调用的人员库会被删除，需要定时调用保活或监控库是否还在。
 9. **顾客人脸去重是 OAIC 已有先例认定违法的做法**（见第 8 节）。系统用闸门保证没有独立的律师确认就不会对真实顾客运行，但**闸门只是记录，不能替代法律判断**。
 10. **腾讯云的 `CreatePerson` 不支持按库限定权限**（CAM 资源级策略只覆盖部分接口）。接收端为了建访客，持有的子账号理论上能往任何库建人，包括员工库。补偿措施：员工库的写入只经主 API；主 API 每日对比员工库人数与有效登记数，不一致就告警并记审计。
+11. **数据在中国大陆处理（用广州）**：这比新加坡多一层跨境披露：数据落在大陆、受中国法律管辖、服务商可能被要求配合调取。**【待律师确认】**：对澳洲隐私法 APP 8（我们对境外接收方的合规负责）的影响、告示与隐私政策的写法、员工同意书的写法；以及是否因此要改回新加坡或国际站。**系统用「跨境披露审查」闸门保证：没有该记录，不对真实顾客运行。**
 
 ## 10. 成本估算（调研数据，价格会变，上线前以账单为准）
 
@@ -197,7 +199,7 @@
 
 **仍待确认**
 1. 第一期是哪 2 家店？**已确定一家：QLD 的 Orion（库里门店编码 1013，Australia/Brisbane；另有一条地址相同的 2015 `spo`，待用户确认哪个才是）**；另一家待定（门店编码、所在州；NSW 门店员工登记要提前 14 天书面通知，QLD 目前没有专门的工作场所监控法，约束主要来自联邦隐私法）。摄像机是否已安装？
-2. 腾讯云账号：继续用中国站账号加新加坡地域，还是换国际站账号？（计价与适用法域不同，建议律师参与）
+2. ~~腾讯云账号与地域~~：**已决定（2026-10-13）用中国站账号 + 广州**（新加坡在该账号下未开通）。仍待律师评估大陆地域的跨境影响（第 9 节第 11 点）；账号或地域将来可改。
 3. 员工同意书由谁起草、谁收集；登记照谁拍。
 4. 对真实顾客运行前，隐私影响评估、门口告示、律师确认（去重用途）由谁负责、预计何时完成。
 5. 数据库里 `Capture` 模式的抓拍记录保留几天（建议 7 天）；持久审计表保留几年（建议 2 年，律师定）。
@@ -214,7 +216,7 @@
 ### 13.2 引擎可替换，以及将来改自建
 
 - 抽象接口：`IFaceMatcher`（搜索：员工库 + 当日访客库）、`IFaceLibrary`（员工库、访客库的建删，主 API 使用）、`IVisitorRegistry`（访客库的「查找或新建」语义）。腾讯云实现放在独立类里，业务逻辑不出现任何腾讯云类型。
-- **腾讯云客户端**：不引入官方 SDK，用 `HttpClient` 自实现 TC3-HMAC-SHA256 签名（与现有 COS 签名同一做法，依赖最少，可用假的 HTTP 处理器测试）；签名实现必须通过腾讯云文档给出的官方签名示例向量测试。Region 显式传 `ap-singapore`，域名用 `iai.ap-singapore.tencentcloudapi.com`。
+- **腾讯云客户端**：不引入官方 SDK，用 `HttpClient` 自实现 TC3-HMAC-SHA256 签名（与现有 COS 签名同一做法，依赖最少，可用假的 HTTP 处理器测试）；签名实现必须通过腾讯云文档给出的官方签名示例向量测试。Region 从配置读取（`FaceMatch:Tencent:Region`，默认 `ap-guangzhou`），**缺省或不在白名单（`ap-guangzhou`、`ap-shanghai`、`ap-singapore`）时启动失败**，不静默回退；域名用 `iai.<region>.tencentcloudapi.com`。
 - **迁移到自建要付出的代价**：
   - 员工库：用我们自己保留的登记照在新引擎里重新登记；腾讯云不能导出库中人脸，所以**登记照必须自行留存**（本设计已要求）。
   - 访客库：每天重建，不需要迁移。
@@ -224,7 +226,9 @@
 
 ### 13.3 数据模型（独立版本号迁移，如 `20261014.001-face-match`，照 `FaceCaptureSchema` 的写法；时间一律 UTC）
 
-**FaceStoreProfile**：`StoreCode nvarchar(32)` PK；`Mode tinyint`（0 Off、1 Capture、2 Match，默认 0）；`EvaluateMatch bit`（Capture 模式下评估匹配并记分数，用于标定）；`StaffExclusionEnabled bit`；`TrafficDedupEnabled bit`；`UnwelcomeListEnabled bit`（第 2 期，先建列）；`AllowedSubjects nvarchar(200)`；`PiaReference nvarchar(100)`；`SignageInstalledOn date`；`StaffNoticeDate date`；`LegalSignoffBy nvarchar(100)`、`LegalSignoffAt datetime2`；`DedupLegalSignoffBy nvarchar(100)`、`DedupLegalSignoffAt datetime2`；`TimeZoneId nvarchar(64)`（空则取门店表）；`UpdatedAtUtc`、`UpdatedBy`。
+**FaceStoreProfile**：`StoreCode nvarchar(32)` PK；`Mode tinyint`（0 Off、1 Capture、2 Match，默认 0）；`EvaluateMatch bit`（Capture 模式下评估匹配并记分数，用于标定）；`StaffExclusionEnabled bit`；`TrafficDedupEnabled bit`；`UnwelcomeListEnabled bit`（第 2 期，先建列）；`AllowedSubjects nvarchar(200)`；`PiaReference nvarchar(100)`；`SignageInstalledOn date`；`StaffNoticeDate date`；`LegalSignoffBy nvarchar(100)`、`LegalSignoffAt datetime2`；`DedupLegalSignoffBy nvarchar(100)`、`DedupLegalSignoffAt datetime2`；`CrossBorderRegion nvarchar(32)`（实际处理地域，例如 `ap-guangzhou`）、`CrossBorderReviewRef nvarchar(100)`（跨境披露审查编号）、`CrossBorderReviewedBy nvarchar(100)`、`CrossBorderReviewedAt datetime2`；`TimeZoneId nvarchar(64)`（空则取门店表）；`UpdatedAtUtc`、`UpdatedBy`。
+
+**跨境披露审查闸门（后端强制）**：`Mode=Match`、`StaffExclusionEnabled`、`TrafficDedupEnabled`、`UnwelcomeListEnabled` 中任何一项对真实顾客生效前，都必须有 `CrossBorderRegion` 与 `CrossBorderReviewRef/By/At`；`CrossBorderRegion` 必须等于当前配置的处理地域，**地域配置被改动后，所有门店的审查记录作废，须重新审查**。`Capture` 模式（仅内部知情人员）不要求，但同意书必须写明数据在该地域处理。
 
 **FaceConsentRecord**：`ConsentId char(32)` PK；`UserGuid nvarchar(50)`；`ConsentVersion nvarchar(32)`；`SignedAtUtc`；`Method nvarchar(16)`（paper/electronic）；`EvidenceObjectKey nvarchar(400)`；`NswNoticeDate date NULL`；`WithdrawnAtUtc NULL`；`WithdrawnReason nvarchar(200) NULL`；`CreatedAtUtc`、`CreatedBy`。
 
@@ -326,7 +330,7 @@
 
 **FaceUnwelcomeEntry**：`EntryId char(32)` PK；`TencentPersonId nvarchar(64)`；`IncidentCategory tinyint`；`EvidenceRef nvarchar(100)`；`StoreScope nvarchar(500)`（门店编码列表，空表示仅发生门店，由应用层写具体值）；`SubmittedBy`、`SubmittedAtUtc`；`ApprovedBy`、`ApprovedAtUtc`；`ReviewDueAtUtc`；`ExpiresAtUtc`（NOT NULL）；`Status tinyint`（Pending/Active/Expired/Withdrawn）；`PhotoObjectKeysJson nvarchar(2000)`；`DisputeNote nvarchar(500) NULL`。
 
-**FaceMatchTask**：`TaskId char(32)` PK；`StoreCode`；`CameraId`；`CapturedAtUtc`；`EntryId`；`Score decimal(9,4)`；`ImageObjectKey nvarchar(400)`（仅此类保留图）；`ReviewStatus tinyint`（Pending/Dismissed/ConfirmedBySecondPerson）；`FirstReviewerId`、`FirstReviewedAtUtc`；`SecondReviewerId`、`SecondReviewedAtUtc`；`ImageDeleteAtUtc`。
+**FaceMatchTask**：`TaskId char(32)` PK；`StoreCode`；`CameraId`；`CapturedAtUtc`；`EntryId`；`Score decimal(9,4)`；`ImageObjectKey nvarchar(400)`（仅此类保留图）；`ReviewStatus tinyint`（Pending/Dismissed/ConfirmedBySecondPerson）；`FirstReviewerId`、`FirstReviewedAtUtc`；`SecondReviewerId`、`SecondReviewedAtUtc`；`ImageDeleteAtUtc`；`NotifiedAtUtc datetime2 NULL`（主 API 后台任务发出提示后写入）。
 
 **FaceStoreProfile 追加列**：`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy`、`UnwelcomeLegalSignoffAt`、`StaffTrainingDate`、`PrivacyContact`。
 
@@ -347,3 +351,11 @@
 3. **顾客被错误拒绝服务或被指控的风险在门店流程里**，不在系统里；系统只给提示，不处置。需要门店处置流程与培训，并让法务确认话术。
 4. **自动化决策披露**：2026-12-10 起新增的透明度要求，不受欢迎人员名单提示若影响拒绝服务可能落入，隐私政策要同步写。
 5. **腾讯云训练用途、跨境披露**同第 9 节，名单照片是更敏感的数据，必须先取得腾讯云的书面确认。
+
+## 15. 组件边界与契约（实现分工依据）
+
+- **迁移与实体只由主 API 侧写**（`20261014.001-face-match`，含 13.3 与 14.4 的全部表与列，列名以本文为准）；人脸服务不写迁移。
+- **人脸服务**（接收端处理器）：腾讯云搜索与建访客；读 `FaceStoreProfile` / `FaceUnwelcomeEntry`；写 `FaceTrafficBucket`、`FaceVisitGroup`、`FaceMatchEvaluation`、`FaceMatchTask`。**它不能调用通知平台**（通知发布器只在主 API 里）。
+- **主 API**：管理接口、员工与名单的腾讯云库增删（管理子账号）、访客库清理、员工库完整性检查、保留清理；**后台任务轮询 `FaceMatchTask.NotifiedAtUtc IS NULL` 的新任务，提交后经 `INotificationPublisher` 发提示**（`DedupeKey = unwelcome-hit:{TaskId}`，发布在事务之外、try/catch 包裹、失败只记日志并下轮重试；已知陷阱见 N3 调研：不得在业务事务内调用发布器，撤回后同一键不可再发）。
+- **腾讯云凭据**：接收端 `FACE_MATCH_TENCENT_SECRET_ID/KEY`（搜索、建组、建人）；主 API `FACE_MATCH_ADMIN_SECRET_ID/KEY`（库管理）；**两者缺失时功能整体关闭（不是回退主密钥）**。主 API 不得使用 `TENCENT_SECRET_*` 主密钥调用 IAI。
+- **默认全部关闭**：没有任何门店档案时，处理器按 `Off`；新代码上线不改变现有 `Capture` 行为。
