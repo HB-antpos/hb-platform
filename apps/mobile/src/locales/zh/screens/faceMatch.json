@@ -94,8 +94,7 @@
     "photoEmpty": "有一张照片是空的，请重新选择",
     "photoTooLarge": "照片不能超过 {{maxMb}}MB",
     "textRequired": "请填写原因",
-    "textTooLong": "最多 {{max}} 个字符",
-    "allowedSubjectsRequired": "Capture 模式必须填写允许拍摄对象"
+    "textTooLong": "最多 {{max}} 个字符"
   },
   "unwelcome": {
     "title": "不受欢迎人员名单",
@@ -291,7 +290,7 @@
         "capture": "Capture",
         "match": "Match",
         "offHint": "关闭：不处理该门店摄像机的抓拍。",
-        "captureHint": "Capture：全部留存并可在后台看图，只允许用于只拍知情同意内部人员的联调场景，必须填写“允许拍摄对象”。",
+        "captureHint": "Capture：全部留存并可在后台看图，只用于只拍知情同意内部人员的联调场景，建议填写“允许拍摄对象”。",
         "matchHint": "Match：对抓拍做比对，不留存无命中的图片；律师确认等记录缺了会显示为红色警告（不阻止启用），对真实顾客运行前必须补齐。"
       },
       "sections": {
@@ -311,7 +310,7 @@
         "staffExclusion": "客流统计里排除已登记员工；需要门店成员有有效的同意与登记。",
         "trafficDedup": "对顾客做当日人脸去重统计，法律风险高。缺的去重专项律师确认等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。",
         "unwelcomeList": "命中名单时提示店员并进入两人复核。缺的专项评估、律师确认、告示、培训等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。",
-        "allowedSubjects": "Capture 模式必填：说明镜头前只会出现哪些知情同意的人员。",
+        "allowedSubjects": "Capture 模式建议填写：说明镜头前只会出现哪些知情同意的人员（不填只给提示）。",
         "timeZone": "留空则自动判断。当前生效时区：{{zone}}，所在州：{{jurisdiction}}。"
       },
       "timeZone": {
@@ -320,7 +319,7 @@
         "Australia/Brisbane": "布里斯班",
         "Australia/Melbourne": "墨尔本"
       },
-      "complianceWarning": "合规记录未补齐（共 {{count}} 项）：可以保存并启用，但对真实顾客运行前法律上必须补齐。",
+      "complianceWarning": "合规记录未补齐（共 {{count}} 项）：可以保存并启用，有问题只给提示。",
       "webOnly": "PIA、告示、律师确认、跨境审查、员工培训等合规记录不在手机上编辑，保存时会原样保留；请到网页后台「人脸比对 → 门店档案」补齐。",
       "save": "保存档案",
       "saved": "门店档案已保存",
@@ -342,7 +341,7 @@
       "facetLine": "{{facet}}：{{status}}",
       "satisfied": "保存所需的前置条件已满足",
       "missingTitle": "还缺 {{count}} 项",
-      "warningTitle": "还有 {{count}} 项合规记录未补齐。不会阻止启用，但对真实顾客运行前必须完成",
+      "warningTitle": "有 {{count}} 项提示，不会阻止保存和启用；其中合规记录对真实顾客运行前必须补齐",
       "savedStateHint": "以上闸门状态按已保存的档案计算，未保存的修改不会立即改变它；保存后以服务端返回的结果为准。",
       "facets": {
         "capture": "Capture 模式（仅限内部知情人员）",

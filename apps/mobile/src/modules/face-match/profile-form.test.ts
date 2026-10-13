@@ -166,13 +166,14 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
 // ───────── 本地校验：Capture 必填允许拍摄对象 ─────────
 {
   const base = profileToEditValues(fullProfile());
-  assert.deepEqual(validateProfileEdits({ ...base, mode: 1, allowedSubjects: "" }), { allowedSubjects: { key: "validation.allowedSubjectsRequired" } });
-  assert.deepEqual(validateProfileEdits({ ...base, mode: 1, allowedSubjects: "   " }), { allowedSubjects: { key: "validation.allowedSubjectsRequired" } });
+  // 2026-10-13 起 Capture 不填允许拍摄对象也不拦（后端只给警告），本地只拦最长 200。
+  assert.deepEqual(validateProfileEdits({ ...base, mode: 1, allowedSubjects: "" }), {});
+  assert.deepEqual(validateProfileEdits({ ...base, mode: 1, allowedSubjects: "   " }), {});
   assert.deepEqual(validateProfileEdits({ ...base, mode: 1, allowedSubjects: "内部" }), {});
-  assert.deepEqual(validateProfileEdits({ ...base, mode: 2, allowedSubjects: "" }), {}, "Match 不要求");
+  assert.deepEqual(validateProfileEdits({ ...base, mode: 2, allowedSubjects: "" }), {});
   assert.deepEqual(validateProfileEdits({ ...base, mode: 0, allowedSubjects: "" }), {});
   assert.equal(validateProfileEdits({ ...base, mode: 2, allowedSubjects: "x".repeat(201) }).allowedSubjects?.key, "validation.textTooLong");
-  assert.deepEqual(validateProfileEdits({ ...base, mode: 2, allowedSubjects: "x".repeat(200) }), {});
+  assert.deepEqual(validateProfileEdits({ ...base, mode: 1, allowedSubjects: "x".repeat(200) }), {});
 }
 
 // ───────── 时区选项：自动 + 后端允许的三个 ─────────

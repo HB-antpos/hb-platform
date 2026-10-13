@@ -94,8 +94,7 @@
     "photoEmpty": "One photo is empty. Pick it again",
     "photoTooLarge": "A photo cannot exceed {{maxMb}}MB",
     "textRequired": "Enter a reason",
-    "textTooLong": "At most {{max}} characters",
-    "allowedSubjectsRequired": "Allowed subjects is required in Capture mode"
+    "textTooLong": "At most {{max}} characters"
   },
   "unwelcome": {
     "title": "Unwelcome persons list",
@@ -291,7 +290,7 @@
         "capture": "Capture",
         "match": "Match",
         "offHint": "Off: captures from this store's cameras are not processed.",
-        "captureHint": "Capture: keeps everything and lets you view images in admin; only for integration testing where cameras capture informed, consenting internal people. Allowed subjects is required.",
+        "captureHint": "Capture: keeps everything and lets you view images in admin; only for integration testing with consenting internal staff. Filling in \"Allowed subjects\" is recommended.",
         "matchHint": "Match: matches captures and keeps no unmatched images. Missing legal sign-off and related records show as red warnings (they do not block enabling) and must be completed before it runs on real customers."
       },
       "sections": {
@@ -311,7 +310,7 @@
         "staffExclusion": "Excludes enrolled staff from traffic counts; needs store members with a valid consent and enrolment.",
         "trafficDedup": "De-duplicates customers by face per day. High legal risk. A missing de-duplication legal sign-off or other record shows as a red warning and does not block enabling, but it must be completed before running on real customers.",
         "unwelcomeList": "Alerts staff on a list match and starts two-person review. Missing assessment, legal sign-off, signage or training records show as red warnings and do not block enabling, but they must be completed before running on real customers.",
-        "allowedSubjects": "Required for Capture mode: say who may appear in front of the cameras, all informed and consenting.",
+        "allowedSubjects": "Recommended for Capture mode: say who may appear in front of the cameras, all informed and consenting (leaving it empty only shows a hint).",
         "timeZone": "Leave on Auto to detect automatically. Effective time zone: {{zone}}; state: {{jurisdiction}}."
       },
       "timeZone": {
@@ -320,7 +319,7 @@
         "Australia/Brisbane": "Brisbane",
         "Australia/Melbourne": "Melbourne"
       },
-      "complianceWarning": "Compliance records incomplete ({{count}} in total): you can save and enable, but they are legally required before running on real customers.",
+      "complianceWarning": "Compliance records incomplete ({{count}} in total): you can save and enable; problems are shown as hints only.",
       "webOnly": "Compliance records (PIA, signage, legal sign-off, cross-border review, staff training and so on) are not edited on the phone and are kept exactly as saved; complete them in the web admin under Face Matching > Store profiles.",
       "save": "Save profile",
       "saved": "Store profile saved",
@@ -342,7 +341,7 @@
       "facetLine": "{{facet}}: {{status}}",
       "satisfied": "Prerequisites for saving are met",
       "missingTitle": "{{count}} missing",
-      "warningTitle": "{{count}} compliance record(s) still incomplete. This does not block enabling, but they must be completed before running on real customers",
+      "warningTitle": "{{count}} hint(s). They do not block saving or enabling; compliance records must be completed before running on real customers",
       "savedStateHint": "The gate status above is computed from the saved profile. Unsaved edits do not change it until you save; the server result on save is authoritative.",
       "facets": {
         "capture": "Capture mode (informed internal people only)",

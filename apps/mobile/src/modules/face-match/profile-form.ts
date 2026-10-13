@@ -143,16 +143,15 @@ export function isProfileDirty(profile: FaceStoreProfile, edits: ProfileEditValu
 export type ProfileEditErrors = Partial<Record<"allowedSubjects", ValidationIssue>>;
 
 /**
- * 本地即时校验：Capture 模式必须填写允许拍摄对象（后端同样阻塞保存），且最长 200。
- * 其余阻塞项（评估比对需 Capture、各开关需模式不为关闭、员工排除需有效登记）由服务端闸门判定，409 时展示缺项。
+ * 本地即时校验：只拦「允许拍摄对象最长 200」（与后端 400 字段校验一致）。
+ * Capture 不填允许拍摄对象、评估比对非 Capture、开关在关闭模式下、员工排除没有有效登记，后端 2026-10-13 起一律只给警告
+ * （「有问题只给提示」），不再拦截保存，所以这里也不拦；这些提示由保存响应 / 检查接口的闸门报告展示。
  */
 export function validateProfileEdits(edits: ProfileEditValues): ProfileEditErrors {
   const errors: ProfileEditErrors = {};
   const subjects = edits.allowedSubjects.trim();
   if (subjects.length > ALLOWED_SUBJECTS_MAX_LENGTH) {
     errors.allowedSubjects = { key: "validation.textTooLong", params: { max: ALLOWED_SUBJECTS_MAX_LENGTH } };
-  } else if (edits.mode === PROFILE_MODE_CAPTURE && !subjects) {
-    errors.allowedSubjects = { key: "validation.allowedSubjectsRequired" };
   }
   return errors;
 }
