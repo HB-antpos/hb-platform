@@ -58,7 +58,7 @@ END CATCH;
     internal const string VerifySql = """
 IF OBJECT_ID(N'dbo.ContainerNewProductSeen', N'U') IS NULL
  OR OBJECT_ID(N'dbo.ContainerNewProductRun', N'U') IS NULL
-    THROW 52800, N'Container new product notice tables are missing.', 1;
+    THROW 52810, N'Container new product notice tables are missing.', 1;
 
 IF EXISTS (
     SELECT 1 FROM (VALUES
@@ -82,7 +82,7 @@ IF EXISTS (
        OR (expected.[max_length] <> 0 AND c.[max_length] <> expected.[max_length])
        OR c.[is_nullable] <> expected.[is_nullable]
 )
-    THROW 52801, N'Container new product notice column signature is incompatible.', 1;
+    THROW 52811, N'Container new product notice column signature is incompatible.', 1;
 
 -- 主键必须正好是 (StoreCode, ProductCode) 与 (StoreCode, LocalDate)，列顺序一致；多一列或换序都算不兼容。
 IF EXISTS (
@@ -108,6 +108,6 @@ IF EXISTS (
       AND kc.[parent_object_id] IN (OBJECT_ID(N'dbo.ContainerNewProductSeen'), OBJECT_ID(N'dbo.ContainerNewProductRun'))
       AND ic.[key_ordinal] > 2
 )
-    THROW 52802, N'Container new product notice primary key signature is incompatible.', 1;
+    THROW 52812, N'Container new product notice primary key signature is incompatible.', 1;
 """;
 }

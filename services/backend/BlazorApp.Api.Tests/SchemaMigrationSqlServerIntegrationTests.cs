@@ -1866,7 +1866,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
 
         var missing = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql));
-        Assert.Equal(52800, missing.Number);
+        Assert.Equal(52810, missing.Number);
 
         await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.ApplySql);
         await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
@@ -1898,22 +1898,22 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
                 """));
         Assert.Equal(2627, duplicateRun.Number);
 
-        // 列被改窄报 52801；改回后通过。
+        // 列被改窄报 52811；改回后通过。
         await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.ContainerNewProductSeen ALTER COLUMN ContainerCode nvarchar(20) NOT NULL;");
         var narrowed = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql));
-        Assert.Equal(52801, narrowed.Number);
+        Assert.Equal(52811, narrowed.Number);
         await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.ContainerNewProductSeen ALTER COLUMN ContainerCode nvarchar(50) NOT NULL;");
         await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
 
-        // 主键列顺序被换掉报 52802；改回后通过。
+        // 主键列顺序被换掉报 52812；改回后通过。
         await ExecuteNonQueryAsync(main, """
             ALTER TABLE dbo.ContainerNewProductRun DROP CONSTRAINT PK_ContainerNewProductRun;
             ALTER TABLE dbo.ContainerNewProductRun ADD CONSTRAINT PK_ContainerNewProductRun PRIMARY KEY CLUSTERED (LocalDate, StoreCode);
             """);
         var wrongKey = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql));
-        Assert.Equal(52802, wrongKey.Number);
+        Assert.Equal(52812, wrongKey.Number);
         await ExecuteNonQueryAsync(main, """
             ALTER TABLE dbo.ContainerNewProductRun DROP CONSTRAINT PK_ContainerNewProductRun;
             ALTER TABLE dbo.ContainerNewProductRun ADD CONSTRAINT PK_ContainerNewProductRun PRIMARY KEY CLUSTERED (StoreCode, LocalDate);
