@@ -24,7 +24,8 @@ public sealed class ContainerNewProductsReactService(
     public async Task<ContainerNewProductsResponseDto> GetAsync(
         string storeCode,
         bool includeExisting = false,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        ContainerNewProductsWindowBasis windowBasis = ContainerNewProductsWindowBasis.StoreArrival
     )
     {
         var normalizedStoreCode = storeCode.Trim();
@@ -43,13 +44,14 @@ public sealed class ContainerNewProductsReactService(
 
         // 鉴权与查门店到此为止；之后的查询逻辑是不依赖 HttpContext 的内核，后台任务（新品到店每日推送）共用同一份。
         return await QueryForStoreAsync(
-            _db, store, normalizedStoreCode, includeExisting, _timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+            _db, store, normalizedStoreCode, includeExisting, _timeProvider.GetUtcNow().UtcDateTime, cancellationToken, windowBasis);
     }
 
     /// <summary>
     /// 新品到店查询内核：不做任何鉴权，调用方必须已确认可以读取该门店（控制器路径走 <see cref="GetAsync"/>，
     /// 后台推送走 <see cref="ContainerNewProductsQuery"/>）。<paramref name="normalizedStoreCode"/> 是查询用的门店编码，
     /// GetAsync 传调用方裁剪后的原值，响应里的 StoreCode 与原先逐字一致；<paramref name="nowUtc"/> 决定「本地今天」，必须是 UTC。
+    /// <paramref name="windowBasis"/> 追加在末尾且默认 <see cref="ContainerNewProductsWindowBasis.StoreArrival"/>：后台每日推送不传，行为与改动前完全一致。
     /// </summary>
     internal static async Task<ContainerNewProductsResponseDto> QueryForStoreAsync(
         ISqlSugarClient db,
@@ -57,7 +59,8 @@ public sealed class ContainerNewProductsReactService(
         string normalizedStoreCode,
         bool includeExisting,
         DateTime nowUtc,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        ContainerNewProductsWindowBasis windowBasis = ContainerNewProductsWindowBasis.StoreArrival
     )
     {
         var stateCode = ResolveState(store);
@@ -67,9 +70,11 @@ public sealed class ContainerNewProductsReactService(
         }
 
         var localToday = GetLocalToday(stateCode, nowUtc);
-        // 窗口按「预计到店区间」算；区间 = 货柜日期 + [起, 止] 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤
         var (from, toExclusive) = BuildWindow(localToday);
-        var (containerFrom, containerToExclusive) = BuildContainerQueryWindow(from, toExclusive);
+        var byWarehouseDate = windowBasis == ContainerNewProductsWindowBasis.WarehouseArrival;
+        // 默认（StoreArrival）：窗口按「预计到店区间」算；区间 = 货柜日期 + [起, 止] 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤。
+        // WarehouseArrival：窗口就是货柜到仓库日期本身（实际到货日期优先，没有时用预计到岸日期），粗筛窗口即精确窗口，不再做到店区间交集过滤。
+        var (containerFrom, containerToExclusive) = byWarehouseDate ? (from, toExclusive) : BuildContainerQueryWindow(from, toExclusive);
         var (startWeekdays, endWeekdays) = GetStoreArrivalWeekdayRange(stateCode);
         var candidateContainers = await db.Queryable<Container>()
             .Where(x => !x.IsDeleted)
@@ -90,8 +95,8 @@ public sealed class ContainerNewProductsReactService(
         {
             var containerDate = (candidate.ActualArrivalDate ?? candidate.EstimatedArrivalDate)!.Value.Date;
             var storeArrival = (Start: AddWeekdays(containerDate, startWeekdays), End: AddWeekdays(containerDate, endWeekdays));
-            // 到店区间与窗口有交集就显示：区间跨过窗口边界的货柜也可能在窗口内到店
-            if (!OverlapsWindow(storeArrival.Start, storeArrival.End, from, toExclusive)) continue;
+            // 到店区间与窗口有交集就显示：区间跨过窗口边界的货柜也可能在窗口内到店（到仓库日期口径下货柜日期已在粗筛里落在窗口内，无需再判）
+            if (!byWarehouseDate && !OverlapsWindow(storeArrival.Start, storeArrival.End, from, toExclusive)) continue;
             storeArrivalByContainer[candidate.ContainerCode] = storeArrival;
             containers.Add(candidate);
         }
@@ -204,14 +209,18 @@ public sealed class ContainerNewProductsReactService(
             });
         }
 
+        // 主排序键：默认按到店区间起始日排（同一门店各柜区间长度相同，起始日相同则结束日也相同）；
+        // 到仓库日期口径按到仓库日期排（不同到仓日可能推出同一个到店日，例如周六、周日到仓，所以不能沿用到店日排序）
+        var ordered = byWarehouseDate
+            ? items.OrderBy(x => x.WarehouseArrivalDate)
+            : items.OrderBy(x => x.EstimatedStoreArrivalDate);
         return new ContainerNewProductsResponseDto
         {
             StoreCode = normalizedStoreCode,
             StateCode = stateCode,
             LocalToday = DateOnly.FromDateTime(localToday),
-            // 按到店区间起始日排（同一门店各柜区间长度相同，起始日相同则结束日也相同），同一到店日按 HB 货号排；没有货号的排在该日末尾，最后用 ProductCode 保证顺序稳定
-            Items = items
-                .OrderBy(x => x.EstimatedStoreArrivalDate)
+            // 同一日期内按 HB 货号排；没有货号的排在该日末尾，最后用 ProductCode 保证顺序稳定
+            Items = ordered
                 .ThenBy(x => x.HbProductNo == null)
                 .ThenBy(x => x.HbProductNo, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(x => x.ProductCode, StringComparer.Ordinal)

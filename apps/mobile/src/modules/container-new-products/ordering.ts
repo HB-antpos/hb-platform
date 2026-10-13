@@ -1,8 +1,10 @@
+import { resolveListDate } from "./arrival-range";
 import type { ContainerNewProductItem } from "./types";
 
-// 与后端一致：到店区间起始日升序（同一门店区间长度相同） → HB 货号（忽略大小写，没有货号的排在该日末尾）→ ProductCode 兜底保证顺序稳定
+// 与后端（windowBasis=warehouse）一致：到仓库日期升序 → HB 货号（忽略大小写，没有货号的排在该日末尾）→ ProductCode 兜底保证顺序稳定。
+// 旧版后端没有到仓库日期时，resolveListDate 退回预计到店起始日，顺序与原来一致
 export function compareByArrivalThenProductNo(a: ContainerNewProductItem, b: ContainerNewProductItem): number {
-  const byDate = compareOrdinal(a.estimatedStoreArrivalDate, b.estimatedStoreArrivalDate);
+  const byDate = compareOrdinal(resolveListDate(a), resolveListDate(b));
   if (byDate !== 0) return byDate;
   if (a.hbProductNo && b.hbProductNo) {
     const byNo = compareOrdinal(a.hbProductNo.toUpperCase(), b.hbProductNo.toUpperCase());

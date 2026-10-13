@@ -86,10 +86,12 @@ export function ProductFilterSheet({ visible, value, countFor, onApply, onDismis
 }
 
 /** 货柜多选：按已到仓 / 在途分组，支持搜柜号；不选 = 全部货柜。 */
-export function ContainerFilterSheet({ visible, options, selected, onApply, onDismiss }: {
+export function ContainerFilterSheet({ visible, options, selected, localToday, onApply, onDismiss }: {
   visible: boolean;
   options: readonly ContainerOption[];
   selected: readonly string[];
+  /** 门店本地今天（YYYY-MM-DD）：仓库日期跨年时据此补上年份 */
+  localToday: string;
   onApply: (containerCodes: string[]) => void;
   onDismiss: () => void;
 }) {
@@ -147,8 +149,8 @@ export function ContainerFilterSheet({ visible, options, selected, onApply, onDi
       </View>
       {group.items.map((option) => {
         const checked = draftSet.has(option.containerCode.toUpperCase());
-        // 柜号下方只显示货柜到仓库日期（已到仓 = 实际日期，在途 = 预计日期兜底），不再显示到店日期；没有日期不渲染这一行
-        const warehouseDate = getWarehouseDateText("containerSheet", option.basis, option.warehouseArrivalDate, option.estimatedStoreArrivalDate);
+        // 柜号下方只显示货柜到仓库日期（已到仓 = 实际日期，在途 = 预计日期兜底），不显示到店日期；没有日期（旧版后端）不渲染这一行
+        const warehouseDate = getWarehouseDateText(option.basis, option.warehouseArrivalDate, localToday);
         return <Pressable
           key={option.containerCode}
           accessibilityRole="checkbox"

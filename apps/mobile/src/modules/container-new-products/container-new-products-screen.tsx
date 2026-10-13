@@ -14,7 +14,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { canViewContainerNewProducts } from "./access";
-import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, formatArrivalDateRange, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
+import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "./api";
 import { ContainerFilterSheet, ProductFilterSheet } from "./container-new-products-sheets";
 import { countActiveFilters, DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS, matchesFilters, pruneSelectedContainers, summarizeContainers, type ContainerNewProductFilters } from "./filters";
@@ -23,7 +23,7 @@ import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE, CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTI
 import { peekRememberedPageSize, readRememberedPageSize, rememberPageSize } from "./page-size-storage";
 import { countNewProductKinds } from "./summary";
 import type { ContainerNewProductItem } from "./types";
-import { getWarehouseDateText } from "./warehouse-date";
+import { getWarehouseDateColumn } from "./warehouse-date";
 
 const ACCENT_SOFT = "#EAF2FF";
 const SUCCESS_SOFT = "#ECFDF3";
@@ -51,10 +51,10 @@ function FilterChip({ icon, label, active, onPress }: { icon: keyof typeof Mater
 function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProductItem; imageSize: number; dateWidth: number }) {
   const { t } = useAppTranslation("containerNewProducts");
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
-  const date = formatArrivalDateRange(item.estimatedStoreArrivalDate, item.estimatedStoreArrivalDateEnd);
   const arrived = item.basis === "actual";
-  // 商品所在货柜的到仓库日期：已到仓 = 实际日期，在途 = 预计日期兜底；没有日期（旧版后端）不渲染这一行，也不回退去显示到店日期
-  const warehouseDate = getWarehouseDateText("labels", item.basis, item.warehouseArrivalDate, item.estimatedStoreArrivalDate);
+  // 右列显示货柜到仓库日期：已到仓 = 「到仓库」+ 实际到货日期，在途 = 「预计到仓库」+ 预计到岸日期；
+  // 旧版后端没有该字段时整列不渲染（左侧详情自然撑满），也不回退去显示到店日期
+  const warehouseColumn = getWarehouseDateColumn(item.basis, item.warehouseArrivalDate);
   return <Card style={styles.card} contentStyle={styles.cardContent} mode="contained">
     <View style={styles.cardRow}>
       <View style={[styles.imageFrame, { width: imageSize, height: imageSize }]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
@@ -62,11 +62,8 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
         <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
         {item.retailPrice !== null ? <Text variant="titleSmall" style={styles.retailPrice} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
         <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: item.containerNumber?.trim() || item.containerCode })}</Text>
-        {/* 仓库日期单独一行（不与货柜号同行：柜号本身就可能占满一行）；详情列在 360pt 宽下文字区约 92pt，
-            「预计到仓库 DD/MM」略超一点，所以允许等比缩小字号（最小 0.8）而不是截断日期，仍保证不溢出、不挤右侧「预计到店」块 */}
-        {warehouseDate ? <Text variant="bodySmall" style={styles.warehouseDate} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t(warehouseDate.key, { date: warehouseDate.date })}</Text> : null}
         {/* 不向门店展示到货数量：数量只在接口里保留，卡片上不显示 */}
-        {/* 新品/已有 与到仓状态放同一行，不挤占货号；到仓状态即后端 basis：已到仓按到仓库日期推算到店日，在途按预计到岸推算 */}
+        {/* 新品/已有 与到仓状态放同一行，不挤占货号；到仓状态即后端 basis：已到仓日期为实际到货日期，在途为预计到岸日期 */}
         <View style={styles.tagRow}>
           <Text style={[styles.typeTag, !item.isNewProduct && styles.typeTagExisting]}>{t(item.isNewProduct ? "labels.newTag" : "labels.existingTag")}</Text>
           <View style={[styles.statusPill, arrived ? styles.statusArrived : styles.statusTransit]}>
@@ -75,15 +72,11 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
           </View>
         </View>
       </View>
-      <View style={[styles.dateBlock, { width: dateWidth }]}>
-        <Text variant="labelMedium" style={styles.dateLabel}>{t("labels.estimatedArrival")}</Text>
-        {/* 到店区间分两行「起 / – 止」，窄屏日期列也放得下；旧版后端只有单日时保持大字单行 */}
-        {date.end ? <>
-          <Text variant="titleMedium" style={styles.date}>{date.start}</Text>
-          <Text variant="titleMedium" style={styles.dateEnd}>{`– ${date.end}`}</Text>
-        </> : <Text variant="titleLarge" style={styles.date}>{date.start}</Text>}
-        <Text variant="bodySmall" style={styles.dateYear}>{date.year}</Text>
-      </View>
+      {warehouseColumn ? <View style={[styles.dateBlock, { width: dateWidth }]}>
+        <Text variant="labelMedium" style={styles.dateLabel}>{t(warehouseColumn.labelKey)}</Text>
+        <Text variant="titleLarge" style={styles.date}>{warehouseColumn.day}</Text>
+        <Text variant="bodySmall" style={styles.dateYear}>{warehouseColumn.year}</Text>
+      </View> : null}
     </View>
     {/* 条码放在卡片底部整宽显示，门店可直接对着屏幕扫码；没有条码不占位 */}
     {item.barcode ? <View style={styles.barcode}><ProductBarcodeImage value={item.barcode} compact /></View> : null}
@@ -125,7 +118,7 @@ export function ContainerNewProductsScreen() {
   const itemsMatchingFilters = useMemo(() => orderedItems.filter((item) => matchesFilters(item, effectiveFilters)), [orderedItems, effectiveFilters]);
   const rangeKinds = useMemo(() => Object.fromEntries(ARRIVAL_RANGE_FILTERS.map((filter) => [filter, countNewProductKinds(itemsMatchingFilters.filter((item) => matchesArrivalRange(item, filter, localToday)))])) as Record<ArrivalRangeFilter, number>, [itemsMatchingFilters, localToday]);
   const filteredItems = useMemo(() => itemsMatchingFilters.filter((item) => matchesArrivalRange(item, rangeFilter, localToday)), [itemsMatchingFilters, rangeFilter, localToday]);
-  // 筛选面板的数量：按草稿里的商品类型/到仓状态 + 当前货柜和到店时间段统计品种数
+  // 筛选面板的数量：按草稿里的商品类型/到仓状态 + 当前货柜和到仓库时间段统计品种数
   const countForProductSheet = (draft: Pick<ContainerNewProductFilters, "productType" | "warehouse">) =>
     countNewProductKinds(orderedItems.filter((item) => matchesFilters(item, { ...effectiveFilters, ...draft }) && matchesArrivalRange(item, rangeFilter, localToday)));
   const [requestedPage, setRequestedPage] = useState(1);
@@ -227,6 +220,7 @@ export function ContainerNewProductsScreen() {
       visible={openSheet === "containers"}
       options={containerOptions}
       selected={effectiveFilters.containerCodes}
+      localToday={localToday}
       onApply={(containerCodes) => { setFilters((current) => ({ ...current, containerCodes })); setOpenSheet(null); }}
       onDismiss={() => setOpenSheet(null)}
     />
@@ -287,7 +281,6 @@ const styles = StyleSheet.create({
   typeTag: { color: HB_COLORS.action, backgroundColor: ACCENT_SOFT, fontSize: 12, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, overflow: "hidden" },
   typeTagExisting: { color: HB_COLORS.textSecondary, backgroundColor: HB_COLORS.surfaceMuted },
   containerCode: { color: HB_COLORS.textSecondary },
-  warehouseDate: { color: HB_COLORS.textSecondary },
   retailPrice: { color: HB_COLORS.action, fontWeight: "700" },
   statusPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: HB_SPACING.xs, paddingVertical: 3, borderRadius: 10 },
   statusArrived: { backgroundColor: SUCCESS_SOFT },
@@ -298,7 +291,6 @@ const styles = StyleSheet.create({
   dateBlock: { width: 100, borderLeftWidth: 1, borderLeftColor: HB_COLORS.outlineMuted, paddingLeft: HB_SPACING.sm },
   dateLabel: { color: HB_COLORS.textSecondary },
   date: { color: HB_COLORS.action, fontWeight: "700", marginTop: 4 },
-  dateEnd: { color: HB_COLORS.action, fontWeight: "700" },
   dateYear: { color: HB_COLORS.textSecondary, marginTop: 2 },
   center: { alignItems: "center", justifyContent: "center", padding: 48, gap: 12 },
   message: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
