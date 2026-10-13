@@ -43,5 +43,17 @@ namespace BlazorApp.Shared.Models
 
         [SugarColumn(IsNullable = false)]
         public DateTime LocationCapturedAtUtc { get; set; }
+
+        /// <summary>
+        /// 客户端生成的采样点 ID（GUID），批量上传的幂等键。旧版单条上传不带，为 NULL。
+        /// 数据库有过滤唯一索引 (UserGuid, ClientSampleId) WHERE ClientSampleId IS NOT NULL，
+        /// 索引与本列由独立迁移 20261015.003 创建（nvarchar(50) NULL）。
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? ClientSampleId { get; set; }
+
+        /// <summary>设备上报该定位是否来自模拟定位（Mock Location）；旧版上传不带，为 NULL（未知）。</summary>
+        [SugarColumn(IsNullable = true)]
+        public bool? IsMocked { get; set; }
     }
 }

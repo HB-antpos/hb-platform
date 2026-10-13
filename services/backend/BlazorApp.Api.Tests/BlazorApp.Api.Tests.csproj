@@ -123,6 +123,7 @@
     <Compile Include="AttendanceReactServiceTests.cs" />
     <Compile Include="AttendanceReactServiceMealBreakTests.cs" />
     <Compile Include="AttendanceReactServiceApprovalNotificationTests.cs" />
+    <Compile Include="AttendanceReactServiceLocationBatchTests.cs" />
     <Compile Include="AttendanceApproverResolverTests.cs" />
     <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />

@@ -117,6 +117,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.PosmHistoryTable,
             SchemaMigrationCoordinator.PosmMigrationId
         );
+        // 班中定位批量上传的两列与过滤唯一索引：全新库经真实基线 + 独立版本步骤登记账本，且启动门禁签名通过。
+        await AssertHistoryTableAsync(
+            databases.MainConnectionString,
+            SqlServerSchemaMigrationRuntime.MainHistoryTable,
+            SchemaMigrationCoordinator.AttendanceLocationSampleBatchMigrationId
+        );
     }
 
     [SchemaMigrationSqlServerFact]
@@ -1919,6 +1925,156 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             ALTER TABLE dbo.ContainerNewProductRun ADD CONSTRAINT PK_ContainerNewProductRun PRIMARY KEY CLUSTERED (StoreCode, LocalDate);
             """);
         await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 班中定位批量上传_旧表加两列与过滤唯一索引_可重复执行_历史行不受约束_并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 旧结构：与 StartupSchemaMigrator / 生产基线一致的定位样本表（没有 ClientSampleId / IsMocked），并带两条历史行。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.AttendanceLocationSample (
+                [Id] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_AttendanceLocationSample] PRIMARY KEY,
+                [SampleGuid] nvarchar(50) NOT NULL,
+                [UserGuid] nvarchar(50) NOT NULL,
+                [StoreCode] nvarchar(50) NULL,
+                [HardwareId] nvarchar(100) NULL,
+                [SystemDeviceNumber] nvarchar(100) NULL,
+                [DeviceSystem] nvarchar(30) NULL,
+                [EventType] nvarchar(30) NOT NULL,
+                [LocationLatitude] float NOT NULL,
+                [LocationLongitude] float NOT NULL,
+                [LocationAccuracyMeters] float NULL,
+                [LocationPermissionStatus] nvarchar(30) NULL,
+                [LocationCapturedAtUtc] datetime2 NOT NULL,
+                [CreatedAt] datetime2 NOT NULL,
+                [CreatedBy] nvarchar(max) NULL,
+                [UpdatedAt] datetime2 NULL,
+                [UpdatedBy] nvarchar(max) NULL,
+                [IsDeleted] bit NULL
+            );
+            INSERT dbo.AttendanceLocationSample
+                (SampleGuid, UserGuid, StoreCode, EventType, LocationLatitude, LocationLongitude, LocationCapturedAtUtc, CreatedAt)
+            VALUES (N'legacy-1', N'u-1', N'S0001', N'ShiftInterval', -27.1, 153.1, SYSUTCDATETIME(), SYSUTCDATETIME()),
+                   (N'legacy-2', N'u-1', N'S0001', N'ShiftInterval', -27.2, 153.2, SYSUTCDATETIME(), SYSUTCDATETIME());
+            """);
+
+        // 旧表缺两列：门禁报 52901（不是 52900）。
+        var beforeMigration = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql));
+        Assert.Equal(52901, beforeMigration.Number);
+
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql);
+        // 幂等：重复执行是空操作且签名仍通过。
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql);
+
+        // 历史行与旧版单条上传（ClientSampleId 为 NULL）不受唯一性约束：同一用户可以有任意多条 NULL。
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.AttendanceLocationSample WHERE ClientSampleId IS NULL AND IsMocked IS NULL) <> 2
+                THROW 50001, N'Legacy rows should keep NULL in the new columns.', 1;
+            INSERT dbo.AttendanceLocationSample
+                (SampleGuid, UserGuid, StoreCode, EventType, LocationLatitude, LocationLongitude, LocationCapturedAtUtc, CreatedAt)
+            VALUES (N'legacy-3', N'u-1', N'S0001', N'ShiftInterval', -27.3, 153.3, SYSUTCDATETIME(), SYSUTCDATETIME());
+            """);
+
+        // 同一用户同一客户端 ID 第二次入库被过滤唯一索引拒绝（2601）；不同用户可以使用同一个 ID。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.AttendanceLocationSample
+                (SampleGuid, UserGuid, StoreCode, EventType, LocationLatitude, LocationLongitude, LocationCapturedAtUtc, CreatedAt, ClientSampleId, IsMocked)
+            VALUES (N's-1', N'u-1', N'S0001', N'ShiftSample', -27.1, 153.1, SYSUTCDATETIME(), SYSUTCDATETIME(), N'client-1', 0),
+                   (N's-2', N'u-2', N'S0001', N'ShiftSample', -27.1, 153.1, SYSUTCDATETIME(), SYSUTCDATETIME(), N'client-1', 1);
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.AttendanceLocationSample
+                    (SampleGuid, UserGuid, StoreCode, EventType, LocationLatitude, LocationLongitude, LocationCapturedAtUtc, CreatedAt, ClientSampleId)
+                VALUES (N's-3', N'u-1', N'S0001', N'ShiftSample', -27.1, 153.1, SYSUTCDATETIME(), SYSUTCDATETIME(), N'client-1');
+                """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // IsMocked 列类型被改（bit 改 tinyint）报 52901；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceLocationSample ALTER COLUMN IsMocked tinyint NULL;");
+        var wrongType = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql));
+        Assert.Equal(52901, wrongType.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceLocationSample ALTER COLUMN IsMocked bit NULL;");
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql);
+
+        // 过滤唯一索引被删报 52902；重跑迁移补回后通过。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_AttendanceLocationSample_User_ClientSample ON dbo.AttendanceLocationSample;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql));
+        Assert.Equal(52902, indexMissing.Number);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql);
+
+        // 同名但没有过滤条件的唯一索引（会把历史 NULL 行也算重复）同样不合格报 52902；
+        // 此时 ApplySql 因同名索引已存在而跳过建索引，随后的签名校验把它拦下（不会被误标为完成）。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AttendanceLocationSample_User_ClientSample ON dbo.AttendanceLocationSample;
+            DELETE dbo.AttendanceLocationSample WHERE ClientSampleId IS NULL AND SampleGuid <> N'legacy-1';
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AttendanceLocationSample_User_ClientSample
+                ON dbo.AttendanceLocationSample (UserGuid, ClientSampleId);
+            """);
+        var noFilter = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql));
+        Assert.Equal(52902, noFilter.Number);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.ApplySql);
+        var stillWrong = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql));
+        Assert.Equal(52902, stillWrong.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 班中定位批量上传_全新库CodeFirst先建表_两列类型与迁移签名一致且迁移只补索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 全新库基线由 SqlSugarContext 的 CodeFirst 按实体属性建表：新列类型必须与迁移 VerifySql 的精确签名一致。
+        mainDb.CodeFirst.InitTables<AttendanceLocationSample>();
+
+        // 此时只缺过滤唯一索引（CodeFirst 不会建它）：门禁报 52902，而不是列签名 52901。
+        var beforeMigration = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql));
+        Assert.Equal(52902, beforeMigration.Number);
+
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationSampleBatchSchema.VerifySql);
+
+        // 经实体（SqlSugar）插入同一用户同一 ClientSampleId 两次，第二次被唯一索引拒绝为 2601。
+        await mainDb.Insertable(new AttendanceLocationSample
+        {
+            UserGuid = "u-1",
+            StoreCode = "S0001",
+            EventType = "ShiftSample",
+            LocationLatitude = -27.1,
+            LocationLongitude = 153.1,
+            LocationCapturedAtUtc = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            ClientSampleId = "client-1",
+            IsMocked = false,
+        }).ExecuteCommandAsync();
+        var duplicate = await Assert.ThrowsAnyAsync<Exception>(() =>
+            mainDb.Insertable(new AttendanceLocationSample
+            {
+                UserGuid = "u-1",
+                StoreCode = "S0001",
+                EventType = "ShiftSample",
+                LocationLatitude = -27.1,
+                LocationLongitude = 153.1,
+                LocationCapturedAtUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                ClientSampleId = "client-1",
+            }).ExecuteCommandAsync());
+        Assert.True(BlazorApp.Api.Services.React.AttendancePunchPersistenceException.IsUniqueConstraintViolation(duplicate));
     }
 
     [SchemaMigrationSqlServerFact]

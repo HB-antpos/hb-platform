@@ -30,6 +30,7 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendancePunchAdjustmentDto>> CreateManagedPunchAdjustmentAsync(CreateManagedAttendancePunchAdjustmentDto request);
         Task<ApiResponse<AttendanceQrResolveDto>> ResolveAttendanceQrAsync(AttendanceQrResolveRequestDto request);
         Task<ApiResponse<AttendanceLocationSampleDto>> CreateLocationSampleAsync(AttendanceLocationSampleRequestDto request);
+        Task<ApiResponse<AttendanceLocationSampleBatchResultDto>> CreateLocationSamplesBatchAsync(AttendanceLocationSampleBatchRequestDto request);
         Task<ApiResponse<List<AttendanceLocationSampleDto>>> GetLocationSamplesAsync(AttendanceLocationSampleQueryDto query);
         Task<ApiResponse<List<AttendanceLeaveRequestDto>>> GetMyLeaveRequestsAsync();
         Task<ApiResponse<AttendanceLeaveRequestDto>> CreateMyLeaveRequestAsync(CreateAttendanceLeaveRequestDto request);

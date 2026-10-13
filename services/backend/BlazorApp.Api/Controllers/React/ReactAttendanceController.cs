@@ -166,6 +166,13 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> CreateLocationSample([FromBody] AttendanceLocationSampleRequestDto request) =>
             Ok(await _service.CreateLocationSampleAsync(request));
 
+        // 班中定位完整轨迹：客户端本地攒点、批量上传、可补传；按 ClientSampleId 幂等，逐点返回结果。
+        [HttpPost("location-samples/batch")]
+        [Authorize(Policy = Permissions.Attendance.Punch.Self)]
+        public async Task<IActionResult> CreateLocationSamplesBatch(
+            [FromBody] AttendanceLocationSampleBatchRequestDto request) =>
+            Ok(await _service.CreateLocationSamplesBatchAsync(request));
+
         [HttpGet("location-samples")]
         [Authorize(Policy = Permissions.Attendance.Punch.ViewManagedStore)]
         public async Task<IActionResult> GetLocationSamples([FromQuery] AttendanceLocationSampleQueryDto query) =>
