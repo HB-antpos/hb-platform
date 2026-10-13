@@ -51,8 +51,10 @@ for (const messages of [zh, en]) {
 }
 assert.equal(zh.labels.warehouseDateLabel, "到仓库");
 assert.equal(zh.labels.warehouseDateEstimatedLabel, "预计到仓库");
-assert.equal(en.labels.warehouseDateLabel, "In warehouse");
-assert.equal(en.labels.warehouseDateEstimatedLabel, "Est. in warehouse");
+// 右列标签必须在最窄屏（dateWidth 88 → 文字区 75pt）一行放得下，否则同一列里有的卡片一行、有的两行，大号日期对不齐。
+// 12pt、字距 0.5 的实测宽度：「Arrived」45.5pt、「Est. arrival」67.3pt；而「In warehouse」82.7pt、「Est. in warehouse」110.2pt 都放不下。
+assert.equal(en.labels.warehouseDateLabel, "Arrived");
+assert.equal(en.labels.warehouseDateEstimatedLabel, "Est. arrival");
 assert.equal(zh.containerSheet.warehouseDate, "到仓库 {{date}}");
 assert.equal(zh.containerSheet.warehouseDateEstimated, "预计到仓库 {{date}}");
 assert.equal(en.containerSheet.warehouseDate, "In warehouse {{date}}");
