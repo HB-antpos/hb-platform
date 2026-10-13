@@ -1922,6 +1922,122 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 门店分时客流报表表_可重复执行_三列主键兜底重复_并识别列与主键漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52820, missing.Number);
+
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+
+        // 主键 (门店, 本地日期, 本地小时)：同店同日同小时重复写入报 2627；不同门店 / 不同小时可以共存；计数列默认 0。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.FaceTrafficHourly (StoreCode, StatDate, StatHour, TimeZoneId, ComputedAtUtc)
+            VALUES (N'1013', '2026-10-15', 9, N'Australia/Brisbane', SYSUTCDATETIME()),
+                   (N'1013', '2026-10-15', 10, N'Australia/Brisbane', SYSUTCDATETIME()),
+                   (N'2001', '2026-10-15', 9, N'Australia/Sydney', SYSUTCDATETIME());
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.FaceTrafficHourly (StoreCode, StatDate, StatHour, TimeZoneId, ComputedAtUtc)
+                VALUES (N'1013', '2026-10-15', 9, N'Australia/Brisbane', SYSUTCDATETIME());
+                """));
+        Assert.Equal(2627, duplicate.Number);
+        await ExecuteNonQueryAsync(main, """
+            IF EXISTS (SELECT 1 FROM dbo.FaceTrafficHourly
+                       WHERE CaptureCount <> 0 OR StaffMatchCount <> 0 OR UniqueVisitorCount <> 0 OR RepeatCount <> 0
+                          OR LowQualityCount <> 0 OR ApiFailureCount <> 0 OR VisitCount <> 0)
+                THROW 52829, 'Count defaults are not zero.', 1;
+            """);
+
+        // 小时只允许 0–23（CHECK 约束兜底投影缺陷）。
+        var badHour = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.FaceTrafficHourly (StoreCode, StatDate, StatHour, TimeZoneId, ComputedAtUtc)
+                VALUES (N'1013', '2026-10-15', 24, N'Australia/Brisbane', SYSUTCDATETIME());
+                """));
+        Assert.Equal(547, badHour.Number);
+
+        // 列被改窄（TimeZoneId nvarchar(64)→(32)）报 52821；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceTrafficHourly ALTER COLUMN TimeZoneId nvarchar(32) NOT NULL;");
+        var narrowed = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52821, narrowed.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceTrafficHourly ALTER COLUMN TimeZoneId nvarchar(64) NOT NULL;");
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+
+        // 计数列类型被改（VisitCount int→bigint）同样报 52821；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceTrafficHourly DROP CONSTRAINT DF_FaceTrafficHourly_VisitCount;
+            ALTER TABLE dbo.FaceTrafficHourly ALTER COLUMN VisitCount bigint NOT NULL;
+            """);
+        var wrongType = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52821, wrongType.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceTrafficHourly ALTER COLUMN VisitCount int NOT NULL;
+            ALTER TABLE dbo.FaceTrafficHourly ADD CONSTRAINT DF_FaceTrafficHourly_VisitCount DEFAULT (0) FOR VisitCount;
+            """);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+
+        // 主键列顺序被换掉报 52822；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceTrafficHourly DROP CONSTRAINT PK_FaceTrafficHourly;
+            ALTER TABLE dbo.FaceTrafficHourly ADD CONSTRAINT PK_FaceTrafficHourly PRIMARY KEY CLUSTERED (StatDate, StoreCode, StatHour);
+            """);
+        var wrongKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52822, wrongKey.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceTrafficHourly DROP CONSTRAINT PK_FaceTrafficHourly;
+            ALTER TABLE dbo.FaceTrafficHourly ADD CONSTRAINT PK_FaceTrafficHourly PRIMARY KEY CLUSTERED (StoreCode, StatDate, StatHour);
+            """);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+
+        // 主键多出一列也算漂移（52822）；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceTrafficHourly DROP CONSTRAINT PK_FaceTrafficHourly;
+            ALTER TABLE dbo.FaceTrafficHourly ADD CONSTRAINT PK_FaceTrafficHourly PRIMARY KEY CLUSTERED (StoreCode, StatDate, StatHour, TimeZoneId);
+            """);
+        var extraKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52822, extraKey.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceTrafficHourly DROP CONSTRAINT PK_FaceTrafficHourly;
+            ALTER TABLE dbo.FaceTrafficHourly ADD CONSTRAINT PK_FaceTrafficHourly PRIMARY KEY CLUSTERED (StoreCode, StatDate, StatHour);
+            """);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+
+        // 日期索引被删报 52822；重跑迁移补回后通过。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_FaceTrafficHourly_StatDate_Store ON dbo.FaceTrafficHourly;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52822, indexMissing.Number);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+
+        // 日期索引键列顺序被换掉也报 52822；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX IX_FaceTrafficHourly_StatDate_Store ON dbo.FaceTrafficHourly;
+            CREATE NONCLUSTERED INDEX IX_FaceTrafficHourly_StatDate_Store ON dbo.FaceTrafficHourly (StoreCode, StatDate);
+            """);
+        var wrongIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql));
+        Assert.Equal(52822, wrongIndex.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX IX_FaceTrafficHourly_StatDate_Store ON dbo.FaceTrafficHourly;
+            CREATE NONCLUSTERED INDEX IX_FaceTrafficHourly_StatDate_Store ON dbo.FaceTrafficHourly (StatDate, StoreCode);
+            """);
+        await ExecuteNonQueryAsync(main, FaceTrafficHourlySchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

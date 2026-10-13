@@ -5,6 +5,7 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 每个任务单独 try/catch，一个失败不影响其他。时间来自 <see cref="TimeProvider"/>，默认安全：
 /// 没有管理凭据时不发任何腾讯云请求，没有门店启用时不做读取类与保留清理类工作（见 <see cref="FaceMatchMaintenance"/>）。
 /// 命中提示发布每个节拍都跑（只是一条廉价的索引查询）；其余任务按各自间隔。
+/// 分时客流投影（任务⑧）只在主库内换算计数桶，不依赖腾讯云凭据与「有门店启用」，功能没开启时也会把已有计数桶投影出来。
 /// </summary>
 public sealed class FaceMatchBackgroundService(
     IServiceScopeFactory scopeFactory,
@@ -19,8 +20,13 @@ public sealed class FaceMatchBackgroundService(
     public static readonly TimeSpan RetentionInterval = TimeSpan.FromHours(1);
     public static readonly TimeSpan OrphanSweepInterval = TimeSpan.FromHours(6);
     public static readonly TimeSpan IntegrityInterval = TimeSpan.FromHours(24);
+    public static readonly TimeSpan TrafficHourlyInterval = TimeSpan.FromMinutes(10);
 
     private readonly Dictionary<string, DateTimeOffset> _nextRun = new(StringComparer.Ordinal);
+
+    // 分时客流投影的进程内状态：历史补齐每个进程只做一次；迁移未执行的 Warning 只记一次，表出现后重置。
+    private bool _trafficHourlyCaughtUp;
+    private bool _trafficHourlyMissingLogged;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -93,6 +99,52 @@ public sealed class FaceMatchBackgroundService(
                 await maintenance.CheckStaffLibraryIntegrityAsync(cancellationToken);
             }
         }, cancellationToken);
+        // ⑧ 分时客流投影：不调用腾讯云、不需要管理凭据（功能没开启时也要把已有计数桶投影出来，免得报表缺数据）。
+        await RunIfDueAsync("traffic-hourly", TrafficHourlyInterval, now, async scope =>
+            await ProjectTrafficHourlyAsync(scope.GetRequiredService<FaceTrafficHourlyProjector>(), cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// 任务⑧：把最近 3 个门店本地日的 UTC 计数桶重算成「门店 + 本地日期 + 本地小时」分时行。
+    /// 最近没有计数桶时只是一条廉价查询；迁移未执行（表不存在）时记一次 Warning 后跳过，不让任务失败；
+    /// 进程启动后第一次成功投影之后补齐一次历史（最早的计数桶早于最早的分时行时）。
+    /// </summary>
+    private async Task ProjectTrafficHourlyAsync(FaceTrafficHourlyProjector projector, CancellationToken cancellationToken)
+    {
+        var recent = await projector.ProjectRecentAsync(cancellationToken);
+        if (recent.SchemaMissing)
+        {
+            if (!_trafficHourlyMissingLogged)
+            {
+                _trafficHourlyMissingLogged = true;
+                logger.LogWarning("分时客流投影已跳过：FaceTrafficHourly 表不存在，请先带 --schema=migrate 执行迁移 20261016.001-face-traffic-hourly");
+            }
+
+            return;
+        }
+
+        _trafficHourlyMissingLogged = false;
+        if (!_trafficHourlyCaughtUp)
+        {
+            var history = await projector.BackfillMissingHistoryAsync(cancellationToken);
+            if (!history.SchemaMissing)
+            {
+                _trafficHourlyCaughtUp = true;
+                if (history.RowsChanged > 0)
+                {
+                    logger.LogInformation(
+                        "分时客流历史补齐完成: Stores={Stores}, Inserted={Inserted}, Updated={Updated}, Deleted={Deleted}",
+                        history.StoresProcessed, history.RowsInserted, history.RowsUpdated, history.RowsDeleted);
+                }
+            }
+        }
+
+        if (recent.RowsChanged > 0)
+        {
+            logger.LogDebug(
+                "分时客流投影: Stores={Stores}, Inserted={Inserted}, Updated={Updated}, Deleted={Deleted}",
+                recent.StoresProcessed, recent.RowsInserted, recent.RowsUpdated, recent.RowsDeleted);
+        }
     }
 
     private async Task RunIfDueAsync(
