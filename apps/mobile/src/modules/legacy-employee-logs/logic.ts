@@ -292,19 +292,8 @@ export function clockOf(wallClock: string) {
   return wallClock.slice(11, 19);
 }
 
-// 腾讯云 COS 默认域名：<bucket>-<appid>.cos.<region>.myqcloud.com，桶已开通图片处理。
-const COS_HOST_PATTERN = /^https?:\/\/[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com\//i;
-
-/**
- * 商品缩略图地址：COS 原图追加 imageMogr2 由 COS 实时缩放并转 WebP（单张 100KB+ 降到约 2KB），
- * 与 Web 的 toProductThumbnailUrl 规则一致；非 COS 或已带查询参数的地址原样返回。
- */
-export function productThumbnailUri(url: string | null | undefined, size: number) {
-  const trimmed = url?.trim();
-  if (!trimmed) return null;
-  if (trimmed.includes("?") || !COS_HOST_PATTERN.test(trimmed)) return trimmed;
-  return `${trimmed}?imageMogr2/thumbnail/${size}x${size}/format/webp`;
-}
+// 商品缩略图地址的实现已提到共用工具（货柜明细表格也用），这里保留原导出路径，调用方与测试不变。
+export { productThumbnailUri } from "../../shared/utils/product-image";
 
 export function formatAmountImpact(amount: number | null | undefined) {
   return amount && amount > 0 ? `−${amount.toFixed(2)}` : null;

@@ -26,7 +26,8 @@ const sheets = read("container-detail-sheets.tsx");
 const confirmSheets = read("container-detail-confirm-sheets.tsx");
 const header = read("container-detail-header.tsx");
 const chip = read("container-detail-chip.tsx");
-const uiSources = { screen, table, sheets, confirmSheets, header, chip };
+const thumb = read("container-detail-thumb.tsx");
+const uiSources = { screen, table, sheets, confirmSheets, header, chip, thumb };
 const zh = JSON.parse(readFileSync(join(directory, "../../locales/zh/screens/containerDetail.json"), "utf8")) as Record<string, unknown>;
 const en = JSON.parse(readFileSync(join(directory, "../../locales/en/screens/containerDetail.json"), "utf8")) as Record<string, unknown>;
 const i18nSource = readFileSync(join(directory, "../../shared/i18n/i18n.ts"), "utf8");
@@ -72,6 +73,49 @@ assert.ok(table.includes("scrollToIndex"), "定位到行使用 scrollToIndex（�
 assert.doesNotMatch(screen, /details\.map\(/, "页面不得再 map 渲染整页卡片");
 assert.doesNotMatch(screen, /<DetailCard|<Card\b/, "旧的明细卡片已删除");
 assert.doesNotMatch(screen, /<ScrollView[\s\S]{0,400}details\.map/, "不得出现 ScrollView + details.map 的整页渲染");
+// 固定列左侧显示商品图：[勾选框] [图片槽] [货号/名称]，数据行与表头共用同一组宽度常量
+{
+  const code = stripComments(table);
+  const thumbCode = stripComments(thumb);
+  assert.match(code, /import \{ ContainerDetailThumb \} from "\.\/container-detail-thumb"/, "表格使用商品缩略图组件");
+  // 数据行固定单元：勾选框 -> 图片槽(pointerEvents none) -> 货号/名称，顺序固定
+  // （stripComments 会把 JSX 注释 {/* … */} 剥成 {}，所以正则里允许中间夹一个空的 {}）
+  assert.match(
+    code,
+    /styles\.checkboxHit\}[\s\S]*?<\/Pressable>\s*(?:\{\}\s*)?<View pointerEvents="none" style=\{styles\.imageSlot\}>\s*<ContainerDetailThumb uri=\{cells\.imageUri\} label=\{cells\.itemNumber \|\| cells\.productName\} \/>\s*<\/View>\s*<View style=\{styles\.fixedText\}>/,
+    "数据行固定单元顺序：勾选框 | 图片槽 | 货号/名称；图片槽 pointerEvents=none，label 取货号或名称",
+  );
+  // 表头固定单元：勾选框 -> 空图片槽 -> 「商品」表头文字，图片槽对应位置不放文案
+  assert.match(
+    code,
+    /onPress=\{onToggleAll\}[\s\S]*?<\/Pressable>\s*(?:\{\}\s*)?<View style=\{styles\.imageSlot\} \/>\s*<Text numberOfLines=\{1\} style=\{\[styles\.headerText, styles\.fixedHeaderText\]\}>/,
+    "表头固定单元顺序：全选框 | 空图片槽 | 商品表头",
+  );
+  assert.equal((code.match(/styles\.imageSlot\b/g) ?? []).length, 2, "图片槽样式在数据行与表头各用一次，两处共用同一份");
+  assert.match(code, /imageSlot: \{\s*width: CONTAINER_DETAIL_IMAGE_SLOT_WIDTH,\s*height: "100%"/, "图片槽宽来自常量，高度撑满行");
+  // 表头与数据行的固定单元、勾选框、图片槽宽度全部来自常量，不得写死数字
+  assert.equal((code.match(/width: CONTAINER_DETAIL_FIXED_COLUMN_WIDTH/g) ?? []).length, 2, "fixedHeaderCell 与 fixedCell 都用固定列宽常量");
+  assert.match(code, /marginLeft: CONTAINER_DETAIL_FIXED_COLUMN_WIDTH/, "滚动列让出的宽度也来自同一常量");
+  assert.match(code, /checkboxHit: \{\s*width: CONTAINER_DETAIL_CHECKBOX_WIDTH/, "表头与数据行共用同一份勾选框样式");
+  assert.doesNotMatch(code, /\bwidth: (?:44|48|84|128|176)\b/, "固定列相关宽度不得写死数字");
+  // 行高 / 表头高仍来自常量，图片没有撑高行
+  assert.match(code, /row: \{[^}]*height: CONTAINER_DETAIL_ROW_HEIGHT/);
+  assert.match(code, /headerRow: \{[^}]*height: CONTAINER_DETAIL_HEADER_HEIGHT/);
+  // 性能：不为每行新增 Animated 值，固定列平移仍只用一个 scrollX
+  assert.equal((code.match(/new Animated\.Value/g) ?? []).length, 1, "整张表只有一个 scrollX Animated 值");
+  assert.doesNotMatch(thumbCode, /Animated/, "缩略图组件不使用 Animated");
+  assert.match(thumb, /export const ContainerDetailThumb = memo\(/, "缩略图组件 memo，勾选其它行不会重渲染它");
+  // 缩略图组件：不拦截手势、占位、失败兜底、无障碍
+  assert.doesNotMatch(thumbCode, /Pressable|Touchable|onPress|onLongPress|onTouch/, "图片不接收手势，不拦截整行点击与勾选");
+  assert.match(thumbCode, /resizeMode="contain"/, "图片 contain 不裁切");
+  assert.match(thumbCode, /name="image-outline"/, "无图/失败显示灰色占位图标");
+  assert.match(thumbCode, /onError=\{\(\) => \{[\s\S]*rememberContainerDetailImageFailure\(imageUri\);[\s\S]*setFailedUri\(imageUri\);/, "加载失败要写入记忆并切到占位");
+  assert.match(thumbCode, /hasContainerDetailImageFailed\(uri\)/, "挂载时先查失败记忆，失败过的地址不再请求");
+  assert.match(thumbCode, /accessibilityRole="image"[\s\S]*accessibilityLabel=\{label\}/, "图片有无障碍标签（货号或名称）");
+  assert.match(thumbCode, /width: CONTAINER_DETAIL_IMAGE_SIZE,\s*height: CONTAINER_DETAIL_IMAGE_SIZE/, "图片框尺寸来自常量");
+  assert.match(thumbCode, /backgroundColor: HB_COLORS\.surfaceMuted/, "图片框浅灰底，加载中不留空洞");
+  assert.match(thumbCode, /borderRadius: HB_RADIUS\.control/, "圆角 8（HB_RADIUS.control）");
+}
 // 表格状态：加载骨架 / 空 / 列表错误 + 重试
 assert.match(table, /status === "loading"/);
 assert.match(table, /status === "error"/);

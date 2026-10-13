@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import {
+  CONTAINER_DETAIL_CHECKBOX_WIDTH,
   CONTAINER_DETAIL_FIXED_COLUMN_WIDTH,
   CONTAINER_DETAIL_HEADER_HEIGHT,
+  CONTAINER_DETAIL_IMAGE_GAP,
+  CONTAINER_DETAIL_IMAGE_SIZE,
+  CONTAINER_DETAIL_IMAGE_SLOT_WIDTH,
+  CONTAINER_DETAIL_IMAGE_THUMBNAIL_PIXELS,
+  CONTAINER_DETAIL_PRODUCT_TEXT_WIDTH,
   CONTAINER_DETAIL_ROW_HEIGHT,
   CONTAINER_DETAIL_SCROLL_COLUMNS,
   CONTAINER_DETAIL_SCROLL_COLUMNS_WIDTH,
@@ -23,8 +29,26 @@ import type { ContainerDetail } from "./types";
 
 // ---- 尺寸与列定义 ----
 assert.equal(CONTAINER_DETAIL_ROW_HEIGHT, 52, "行高固定 52，FlatList 才能用 getItemLayout");
-assert.equal(CONTAINER_DETAIL_FIXED_COLUMN_WIDTH, 128, "固定首列宽约 128");
-assert.ok(CONTAINER_DETAIL_HEADER_HEIGHT > 0);
+assert.equal(CONTAINER_DETAIL_HEADER_HEIGHT, 40, "表头高 40：加图片列不改表头高度");
+// 固定列 = 勾选框 + 图片槽 + 货号/名称，三段全部由常量推出
+assert.equal(CONTAINER_DETAIL_CHECKBOX_WIDTH, 44, "勾选框触控区 44");
+assert.equal(CONTAINER_DETAIL_IMAGE_SIZE, 40, "商品图 40×40");
+assert.equal(CONTAINER_DETAIL_IMAGE_GAP, 8, "图片与货号/名称间距 8");
+assert.equal(CONTAINER_DETAIL_IMAGE_SLOT_WIDTH, CONTAINER_DETAIL_IMAGE_SIZE + CONTAINER_DETAIL_IMAGE_GAP, "图片槽 = 图片 + 间距 = 48");
+assert.equal(CONTAINER_DETAIL_IMAGE_SLOT_WIDTH, 48);
+assert.equal(CONTAINER_DETAIL_PRODUCT_TEXT_WIDTH, 84, "货号/名称文字区宽度不变");
+assert.equal(
+  CONTAINER_DETAIL_FIXED_COLUMN_WIDTH,
+  CONTAINER_DETAIL_CHECKBOX_WIDTH + CONTAINER_DETAIL_IMAGE_SLOT_WIDTH + CONTAINER_DETAIL_PRODUCT_TEXT_WIDTH,
+  "固定列宽 = 勾选框 + 图片槽 + 货号/名称",
+);
+assert.equal(CONTAINER_DETAIL_FIXED_COLUMN_WIDTH, 176, "固定列宽由 128 变为 176");
+assert.ok(
+  CONTAINER_DETAIL_ROW_HEIGHT - CONTAINER_DETAIL_IMAGE_SIZE >= 12,
+  "图片垂直居中，行高 52 里上下各留至少 6 的余量，图片不顶到分隔线",
+);
+assert.equal(CONTAINER_DETAIL_IMAGE_THUMBNAIL_PIXELS, CONTAINER_DETAIL_IMAGE_SIZE * 3, "缩略图按 3 倍屏取像素边长 = 120");
+assert.equal(CONTAINER_DETAIL_IMAGE_THUMBNAIL_PIXELS, 120);
 assert.deepEqual(
   CONTAINER_DETAIL_SCROLL_COLUMNS.map((column) => column.key),
   ["status", "containerQuantity", "middlePack", "domesticPrice", "warehouseImportPrice", "importPrice", "retailPrice"],
@@ -35,6 +59,25 @@ assert.equal(
   CONTAINER_DETAIL_SCROLL_COLUMNS.reduce((sum, column) => sum + column.width, 0),
 );
 assert.equal(CONTAINER_DETAIL_TABLE_WIDTH, CONTAINER_DETAIL_FIXED_COLUMN_WIDTH + CONTAINER_DETAIL_SCROLL_COLUMNS_WIDTH);
+assert.equal(CONTAINER_DETAIL_SCROLL_COLUMNS_WIDTH, 576, "右侧滚动列总宽不变（各列宽度未改）");
+assert.equal(CONTAINER_DETAIL_TABLE_WIDTH, 176 + 576, "表格总宽 752");
+assert.deepEqual(
+  CONTAINER_DETAIL_SCROLL_COLUMNS.map((column) => column.width),
+  [96, 76, 64, 80, 92, 80, 88],
+  "右侧各列宽度不变",
+);
+// 窄屏：表格视口 = 屏宽 - 页面左右内边距 2×16 - 表格外框 2×1；固定列右侧的可视宽须容得下首个滚动列「状态」(96)
+// 320 屏 110、360 屏 150、390 屏 180，都能完整看到「状态」，其余列靠横向滚动
+const PAGE_HORIZONTAL_PADDING = 16;
+const TABLE_FRAME_BORDER = 1;
+for (const screenWidth of [320, 360, 390, 430]) {
+  const viewport = screenWidth - PAGE_HORIZONTAL_PADDING * 2 - TABLE_FRAME_BORDER * 2;
+  assert.ok(
+    viewport - CONTAINER_DETAIL_FIXED_COLUMN_WIDTH >= CONTAINER_DETAIL_SCROLL_COLUMNS[0].width,
+    `${screenWidth}pt 屏：固定列右侧可视宽 ${viewport - CONTAINER_DETAIL_FIXED_COLUMN_WIDTH} 须 >= 状态列宽 ${CONTAINER_DETAIL_SCROLL_COLUMNS[0].width}`,
+  );
+}
+assert.ok(CONTAINER_DETAIL_TABLE_WIDTH > 430, "表格总宽大于任何手机视口，右侧列靠横向滚动到达");
 assert.ok(CONTAINER_DETAIL_SCROLL_COLUMNS.every((column) => column.width >= 56), "每列至少 56，数字不被截断");
 assert.ok(CONTAINER_DETAIL_SCROLL_COLUMNS.filter((column) => column.key !== "status").every((column) => column.align === "right"), "数值列右对齐");
 
@@ -85,6 +128,7 @@ const cells = buildContainerDetailRowCells(newProduct);
 assert.equal(cells.hguid, "g-1");
 assert.equal(cells.itemNumber, "A100");
 assert.equal(cells.productName, "测试商品");
+assert.equal(cells.imageUri, null, "没有图片地址时 imageUri 为 null，界面显示占位");
 assert.equal(cells.isNewProduct, true);
 assert.equal(cells.isActive, true);
 assert.equal(cells.containerQuantity, "1,200");
@@ -113,6 +157,25 @@ assert.equal(createdCells.retailPrice, "4.20");
 assert.equal(createdCells.retailPriceMissing, false);
 assert.equal(createdCells.productName, "");
 assert.equal(createdCells.containerQuantity, "--");
+
+// ---- 商品图地址：COS 原图走缩略图，明细行自己的图优先于商品信息里的图 ----
+const COS_URL = "https://hotbargain-yw-2023-1300114625.cos.ap-shanghai.myqcloud.com/YW200/A100.jpg";
+assert.equal(
+  buildContainerDetailRowCells({ 商品信息: { 商品图片: ` ${COS_URL} ` } }).imageUri,
+  `${COS_URL}?imageMogr2/thumbnail/120x120/format/webp`,
+  "COS 默认图地址追加 imageMogr2 缩略图参数（3 倍屏 120 像素），并去掉首尾空白",
+);
+assert.equal(
+  buildContainerDetailRowCells({ 商品图片: "https://cdn.example.com/detail.png", 商品信息: { 商品图片: COS_URL } }).imageUri,
+  "https://cdn.example.com/detail.png",
+  "明细行自带的图优先；非 COS 外链无法处理，保持原地址",
+);
+assert.equal(buildContainerDetailRowCells({ 商品信息: { 商品图片: "   " } }).imageUri, null, "空白地址按没有图片处理");
+assert.equal(
+  buildContainerDetailRowCells({ 商品信息: { 商品图片: `${COS_URL}?v=2` } }).imageUri,
+  `${COS_URL}?v=2`,
+  "已带查询参数的地址不再追加（COS 要求处理参数在查询串开头）",
+);
 
 // 没有货号时回退商品编码
 assert.equal(buildContainerDetailRowCells({ 商品编码: "PC-9" }).itemNumber, "PC-9");

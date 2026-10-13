@@ -9,6 +9,7 @@ import {
   CONTAINER_DETAIL_CHECKBOX_WIDTH,
   CONTAINER_DETAIL_FIXED_COLUMN_WIDTH,
   CONTAINER_DETAIL_HEADER_HEIGHT,
+  CONTAINER_DETAIL_IMAGE_SLOT_WIDTH,
   CONTAINER_DETAIL_ROW_HEIGHT,
   CONTAINER_DETAIL_SCROLL_COLUMNS,
   CONTAINER_DETAIL_SCROLL_COLUMNS_WIDTH,
@@ -19,11 +20,12 @@ import {
   type ContainerDetailScrollColumnKey,
 } from "./container-detail-table-columns";
 import { LOCATE_ROW_VIEW_POSITION, type PageSelectionState } from "./container-detail-selection";
+import { ContainerDetailThumb } from "./container-detail-thumb";
 import { getDetailGuid } from "./query";
 import type { ContainerDetail } from "./types";
 
 /**
- * 货柜明细表格：固定首列 + 横向滚动列 + 吸顶表头 + 虚拟化。
+ * 货柜明细表格：固定首列（勾选 + 商品图 + 货号/名称）+ 横向滚动列 + 吸顶表头 + 虚拟化。
  *
  * 实现要点（React Native 没有 sticky 列，纯 JS 方案）：
  * - 只有一个纵向 FlatList（唯一的纵向滚动源），整张表放进一个横向 Animated.ScrollView；
@@ -135,6 +137,10 @@ const TableRow = memo(function TableRow({ detail, selected, highlighted, scrollX
         >
           <CheckIcon state={selected ? "checked" : "unchecked"} />
         </Pressable>
+        {/* 商品图槽：pointerEvents="none" 让图片不接收手势，点图片等同点行（打开明细），勾选只认勾选框 */}
+        <View pointerEvents="none" style={styles.imageSlot}>
+          <ContainerDetailThumb uri={cells.imageUri} label={cells.itemNumber || cells.productName} />
+        </View>
         <View style={styles.fixedText}>
           <Text numberOfLines={1} style={styles.itemNumber}>{cells.itemNumber || "--"}</Text>
           <Text numberOfLines={1} style={styles.productName}>{cells.productName || "--"}</Text>
@@ -334,6 +340,8 @@ export function ContainerDetailTable({
               >
                 <CheckIcon state={headerState} />
               </Pressable>
+              {/* 图片槽对应位置留空（不放「图片」文案），与数据行共用 styles.imageSlot，列边界逐像素对齐 */}
+              <View style={styles.imageSlot} />
               <Text numberOfLines={1} style={[styles.headerText, styles.fixedHeaderText]}>{t("table.columns.product")}</Text>
             </Animated.View>
           </View>
@@ -429,6 +437,14 @@ const styles = StyleSheet.create({
     height: "100%",
     alignItems: "center",
     justifyContent: "center",
+  },
+  // 图片槽：宽 = 图片 + 间距，图片靠左、垂直居中（行高 52、图片 40，上下各留 6）；表头与数据行共用
+  imageSlot: {
+    width: CONTAINER_DETAIL_IMAGE_SLOT_WIDTH,
+    height: "100%",
+    flexShrink: 0,
+    justifyContent: "center",
+    alignItems: "flex-start",
   },
   fixedText: { flex: 1, minWidth: 0, paddingRight: HB_SPACING.xs, gap: 2 },
   itemNumber: { color: HB_COLORS.textPrimary, fontSize: 13, lineHeight: 17, fontWeight: "700" },
