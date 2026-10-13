@@ -90,6 +90,7 @@
     "totalAmount": "Total",
     "discount": "Discount",
     "actualPay": "Paid",
+    "orderQr": "Order QR code",
     "previewInvoice": "Preview invoice",
     "downloadInvoice": "Download invoice",
     "loading": "Loading order lines",

@@ -90,6 +90,7 @@
     "totalAmount": "总金额",
     "discount": "折扣",
     "actualPay": "实付",
+    "orderQr": "订单二维码",
     "previewInvoice": "预览发票",
     "downloadInvoice": "下载发票",
     "loading": "正在加载订单明细",
