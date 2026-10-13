@@ -378,6 +378,7 @@ public sealed class SharedHeldOrderMapper : ISharedHeldOrderMapper
 
             // 重演必须与购物车引擎逐行精确相等，所以一组的折扣计算与分摊直接用同一份共享实现，
             // 不在这里另写一份（分摊到分、亚分位单价的行金额舍入口径都随共享实现一起变）。
+            // 叠加封顶（D3）同理：容量 = 行原价 - 已累计折扣，超出的份额丢弃（不转给其它行），与购物车引擎一致。
             PromotionBundleAllocator.AllocateBundle(
                 selectedUnits,
                 plan.Rule.FixedPrice,

@@ -99,7 +99,7 @@ public sealed class PromotionBundleAllocatorTests
     [Fact]
     public void Without_a_capacity_function_nothing_is_capped_and_the_caller_truncates_afterwards()
     {
-        // 旧引擎的用法：不按行封顶（D3 暂不统一），累加后由调用方整体截断到行原价。
+        // 旧引擎的用法：入账时不按行截断，累加后由调用方整体截断到行原价。
         var discounts = Allocate([Unit("A", 1m, 0), Unit("A", 1m, 1), Unit("B", 1m, 0)], 2.90m, capacity: null);
 
         Assert.Equal(0.07m, discounts["A"]);
@@ -107,29 +107,95 @@ public sealed class PromotionBundleAllocatorTests
     }
 
     [Fact]
-    public void With_a_capacity_function_the_capped_share_moves_to_lines_that_still_have_room()
+    public void With_a_capacity_function_the_share_beyond_capacity_is_dropped_and_not_moved_to_other_lines()
     {
-        // 新引擎的用法（D3）：A 只剩 0.02 容量 -> A 封顶 0.02，多出来的份额由后面还有容量的 B 接走（0.08）。
+        // 新引擎的用法（D3，用户拍板「超出的份额丢弃」）：A 只剩 0.02 容量 -> A 入账 0.02，
+        // 多出来的 0.05 直接丢弃，B 仍只得自己的份额 0.03（不是 0.08）；本组实际折扣 0.05 小于「组原价 - 固定价」0.10。
         var discounts = Allocate(
             [Unit("A", 1m, 0), Unit("A", 1m, 1), Unit("B", 1m, 0)],
             2.90m,
             capacity: line => line == "A" ? 0.02m : 100m);
 
         Assert.Equal(0.02m, discounts["A"]);
-        Assert.Equal(0.08m, discounts["B"]);
+        Assert.Equal(0.03m, discounts["B"]);
     }
 
     [Fact]
-    public void A_line_without_capacity_is_left_out_of_the_allocation()
+    public void A_line_without_capacity_keeps_its_share_and_denominator_but_receives_nothing()
     {
         var discounts = Allocate(
             [Unit("A", 1m), Unit("B", 1m)],
             1.50m,
             capacity: line => line == "B" ? 0m : 100m);
 
-        // 组折扣仍按两行原价算（2.00 - 1.50 = 0.50），B 没有容量 -> 全部落在 A。
-        Assert.Equal(0.50m, Assert.Single(discounts).Value);
+        // 组折扣按两行原价算（2.00 - 1.50 = 0.50），A/B 各占 0.25；B 没有容量 -> B 的 0.25 丢弃，不转给 A。
+        Assert.Equal(0.25m, Assert.Single(discounts).Value);
         Assert.Equal("A", Assert.Single(discounts).Key);
+    }
+
+    [Fact]
+    public void A_line_without_capacity_does_not_change_the_split_of_the_lines_after_it()
+    {
+        // 三行各 2.00 凑 3 件 3.00：折扣 3.00，每行 1.00。第一行已封顶也不影响后两行（原：把它剔除，后两行各 1.50）。
+        var discounts = Allocate(
+            [Unit("A", 2m), Unit("B", 2m), Unit("C", 2m)],
+            3m,
+            capacity: line => line == "A" ? 0m : 100m);
+
+        Assert.False(discounts.ContainsKey("A"));
+        Assert.Equal(1.00m, discounts["B"]);
+        Assert.Equal(1.00m, discounts["C"]);
+    }
+
+    [Fact]
+    public void Capacity_equals_accumulating_uncapped_and_truncating_to_the_line_amount_afterwards()
+    {
+        // 等价性（D3 三处一致的依据）：多个组、多条规则依次入账，「传容量（每组之后容量随累计折扣递减）」
+        // 与「不传容量、全部累加完再整体截断到行原价」逐行结果完全相同。
+        var random = new Random(20261017);
+        decimal[] prices = [0.99m, 1.00m, 1.25m, 3.33m, 5m, 7.77m, 10m, 12.5m, 19.99m];
+        for (var iteration = 0; iteration < 2000; iteration++)
+        {
+            var lineCount = random.Next(1, 5);
+            var linePrice = Enumerable.Range(0, lineCount).Select(_ => prices[random.Next(prices.Length)]).ToArray();
+            var lineQuantity = Enumerable.Range(0, lineCount).Select(_ => random.Next(1, 4)).ToArray();
+            var gross = Enumerable.Range(0, lineCount)
+                .ToDictionary(line => $"L{line}", line => decimal.Round(linePrice[line] * lineQuantity[line], 2, MidpointRounding.AwayFromZero), StringComparer.Ordinal);
+
+            var withCapacity = new Dictionary<string, decimal>(StringComparer.Ordinal);
+            var uncapped = new Dictionary<string, decimal>(StringComparer.Ordinal);
+            var bundleCount = random.Next(1, 6);
+            for (var bundle = 0; bundle < bundleCount; bundle++)
+            {
+                var units = new List<PromotionBundleUnit<string>>();
+                var unitCount = random.Next(1, 5);
+                for (var unit = 0; unit < unitCount; unit++)
+                {
+                    var line = random.Next(lineCount);
+                    units.Add(Unit($"L{line}", linePrice[line], units.Count(candidate => candidate.Line == $"L{line}")));
+                }
+
+                var fixedPrice = Math.Round(random.Next(0, 1500) / 100m, 2);
+                PromotionBundleAllocator.AllocateBundle(
+                    units,
+                    fixedPrice,
+                    withCapacity,
+                    line => Math.Max(0m, gross[line] - (withCapacity.TryGetValue(line, out var current) ? current : 0m)));
+                PromotionBundleAllocator.AllocateBundle(units, fixedPrice, uncapped, getRemainingCapacity: null);
+            }
+
+            var truncated = uncapped
+                .Select(entry => (entry.Key, Value: Math.Min(entry.Value, gross[entry.Key])))
+                .Where(entry => entry.Value > 0m)
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .ToArray();
+            var capped = withCapacity
+                .Where(entry => entry.Value > 0m)
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .Select(entry => (entry.Key, entry.Value))
+                .ToArray();
+            Assert.Equal(truncated, capped);
+        }
     }
 
     [Fact]

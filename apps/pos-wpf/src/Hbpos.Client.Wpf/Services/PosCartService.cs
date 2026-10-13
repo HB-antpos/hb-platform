@@ -1233,7 +1233,7 @@ public sealed class PosCartService
             }
 
             // 一组的折扣计算与逐行分摊走共享实现（与新引擎、共享挂单重演同一份），
-            // 分摊到分因此与它们逐行一致。这里不传折扣容量：多条规则先累加，最后统一截断到行原价（D3 暂不统一）。
+            // 分摊到分因此与它们逐行一致。这里不传折扣容量：多条规则先累加，最后统一截断到行原价（D3：新引擎、共享挂单重演传容量入账，超出行原价的份额同样丢弃，结果与这里一致）。
             PromotionBundleAllocator.AllocateBundle(group, plan.Rule.FixedPrice, automaticDiscounts, getRemainingCapacity: null);
             group.Clear();
         }

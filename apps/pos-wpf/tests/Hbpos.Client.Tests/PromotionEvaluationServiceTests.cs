@@ -410,6 +410,106 @@ public sealed class PromotionEvaluationServiceTests
         Assert.Equal(5.00m, first.ActualAmount + second.ActualAmount);
     }
 
+    [Theory]
+    [InlineData(2, 1)] // N1(A 免费)优先级更高，先跑
+    [InlineData(1, 2)] // N2(A+B 凑 2 件)优先级更高，先跑：结果不因规则先后而变
+    public async Task EvaluateAsync_stacked_rules_drop_the_share_beyond_line_gross_instead_of_moving_it_to_other_lines(
+        int freePriority,
+        int bundlePriority)
+    {
+        // D3 叠加封顶：N1 把 A(2.00) 免到 0 元；N2(A+B 凑 2 件 1.00)组折扣 3.00，按原价各分 A 1.50 / B 1.50。
+        // A 已没有容量，N2 分给 A 的 1.50 直接丢弃，不转给 B（B 仍是 1.50，不是 2.00）；总折扣 3.50，与旧引擎「先累加再截断」一致。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-FREE-A", asOf, ["SKU-A"], priority: freePriority, applyQuantity: 1, fixedPrice: 0m),
+            CreateRule("PROMO-A-B", asOf, ["SKU-A", "SKU-B"], priority: bundlePriority, applyQuantity: 2, fixedPrice: 1m)
+        ]);
+        var cart = new PosCartService();
+        var lineA = cart.AddItem(CreateItem(productCode: "SKU-A", lookupCode: "SKU-A-001", price: 2m));
+        var lineB = cart.AddItem(CreateItem(productCode: "SKU-B", lookupCode: "SKU-B-001", price: 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+
+        Assert.Equal(2.00m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineA)).DiscountAmount);
+        Assert.Equal(1.50m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineB)).DiscountAmount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_saturated_line_keeps_its_share_in_the_denominator_for_the_other_lines()
+    {
+        // 三行各 2.00，N1 把 A 免到 0 元；N2(A+B+C 凑 3 件 3.00)组折扣 3.00，每行份额 1.00。
+        // A 的 1.00 丢弃；B/C 各 1.00（不是把 A 剔除后重新分的 1.50）。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-FREE-A", asOf, ["SKU-A"], priority: 20, applyQuantity: 1, fixedPrice: 0m),
+            CreateRule("PROMO-ABC", asOf, ["SKU-A", "SKU-B", "SKU-C"], priority: 10, applyQuantity: 3, fixedPrice: 3m)
+        ]);
+        var cart = new PosCartService();
+        var lineA = cart.AddItem(CreateItem(productCode: "SKU-A", lookupCode: "SKU-A-001", price: 2m));
+        var lineB = cart.AddItem(CreateItem(productCode: "SKU-B", lookupCode: "SKU-B-001", price: 2m));
+        var lineC = cart.AddItem(CreateItem(productCode: "SKU-C", lookupCode: "SKU-C-001", price: 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+
+        Assert.Equal(2.00m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineA)).DiscountAmount);
+        Assert.Equal(1.00m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineB)).DiscountAmount);
+        Assert.Equal(1.00m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineC)).DiscountAmount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_line_with_partial_capacity_takes_only_what_fits_and_the_rest_is_dropped()
+    {
+        // N1 先给 A 折 1.50（A 2.00，还剩 0.50 容量）；N2(A+B 凑 2 件 1.00)分给 A 的 1.50 只入账 0.50，其余 1.00 丢弃，B 仍是自己的 1.50。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule("PROMO-A-HALF", asOf, ["SKU-A"], priority: 20, applyQuantity: 1, fixedPrice: 0.5m),
+            CreateRule("PROMO-A-B", asOf, ["SKU-A", "SKU-B"], priority: 10, applyQuantity: 2, fixedPrice: 1m)
+        ]);
+        var cart = new PosCartService();
+        var lineA = cart.AddItem(CreateItem(productCode: "SKU-A", lookupCode: "SKU-A-001", price: 2m));
+        var lineB = cart.AddItem(CreateItem(productCode: "SKU-B", lookupCode: "SKU-B-001", price: 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+
+        Assert.Equal(2.00m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineA)).DiscountAmount);
+        Assert.Equal(1.50m, Assert.Single(discounts, item => ReferenceEquals(item.Line, lineB)).DiscountAmount);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_single_rule_with_unit_weight_above_one_drops_the_overflow_instead_of_moving_it()
+    {
+        // D3b：单条规则 + UnitWeight>1。2 件 3.00，A 权重 3、B 权重 1，A@10 + B@2：
+        // 一件 A 展开成 3 个单位，落进两个组 [A,A]（折 7.00）与 [A,B]（折 9.00，A 7.50 / B 1.50）。
+        // A 累计 14.50 超出行原价 10.00，多出的 4.50 丢弃，B 仍是 1.50（不是 2.00）。
+        var repository = new FakeLocalPromotionRepository();
+        var asOf = DateTimeOffset.Parse("2026-06-13T12:00:00Z");
+        repository.SeedStore("S001",
+        [
+            CreateRule(
+                "PROMO-WEIGHT-3",
+                asOf,
+                [new PromotionRuleProductDto("SKU-A", 3), new PromotionRuleProductDto("SKU-B", 1)],
+                applyQuantity: 2,
+                fixedPrice: 3m)
+        ]);
+        var cart = new PosCartService();
+        var lineA = cart.AddItem(CreateItem(productCode: "SKU-A", lookupCode: "SKU-A-001", price: 10m));
+        var lineB = cart.AddItem(CreateItem(productCode: "SKU-B", lookupCode: "SKU-B-001", price: 2m));
+
+        var discounts = await new PromotionEvaluationService(repository).EvaluateAsync(cart.Lines, "S001", asOf);
+        cart.ApplyPromotionDiscounts(discounts);
+
+        Assert.Equal(10.00m, lineA.DiscountAmount);
+        Assert.Equal(1.50m, lineB.DiscountAmount);
+        Assert.Equal(0m, lineA.ActualAmount);
+    }
+
     private static SellableItemDto CreateItem(
         string storeCode = "S001",
         string productCode = "SKU-001",
