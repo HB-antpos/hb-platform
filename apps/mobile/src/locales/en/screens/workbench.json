@@ -63,6 +63,8 @@
     "permissions": "Permissions",
     "employeeProfile": "My profile",
     "employeeProfileReview": "Profile reviews",
+    "faceUnwelcome": "Unwelcome persons list",
+    "faceMatchSettings": "Face match settings",
     "deviceManagement": "Device management",
     "appInstall": "Install app",
     "appDownloads": "Release Center",

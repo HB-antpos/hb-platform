@@ -24,6 +24,9 @@ const EXISTING_REAL_PAGE_FILES = [
   "app/(shell)/store-cash/record-detail.tsx",
   "app/(shell)/daily-closes/index.tsx",
   "app/(shell)/daily-closes/detail.tsx",
+  "app/(shell)/face-unwelcome/index.tsx",
+  "app/(shell)/face-unwelcome/entry-new.tsx",
+  "app/(shell)/face-match-settings.tsx",
   "app/(shell)/seasonal-cards.tsx",
   "app/(shell)/container-new-products.tsx",
   "app/(shell)/app-install.tsx",
@@ -64,6 +67,8 @@ const EXISTING_TAB_PATHS = {
   "store-vouchers": "/(shell)/store-vouchers",
   "store-cash": "/(shell)/store-cash",
   "daily-closes": "/(shell)/daily-closes",
+  "face-unwelcome": "/(shell)/face-unwelcome",
+  "face-match-settings": "/(shell)/face-match-settings",
   "seasonal-cards": "/(shell)/seasonal-cards",
   "container-new-products": "/(shell)/container-new-products",
   containers: "/(shell)/containers",
@@ -88,7 +93,7 @@ async function assertFileExists(relativePath: string) {
 async function run() {
   assert.equal(
     EXISTING_REAL_PAGE_FILES.length,
-    40,
+    43,
     "导航改版前的真实业务页面必须全部保留"
   );
   await Promise.all(EXISTING_REAL_PAGE_FILES.map(assertFileExists));
@@ -96,11 +101,12 @@ async function run() {
   await assertFileExists("app/(shell)/containers/_layout.tsx");
   await assertFileExists("app/(shell)/store-cash/_layout.tsx");
   await assertFileExists("app/(shell)/daily-closes/_layout.tsx");
+  await assertFileExists("app/(shell)/face-unwelcome/_layout.tsx");
   await assertFileExists("app/(shell)/users/_layout.tsx");
 
   assert.equal(
     EXISTING_REAL_PAGE_FILES.filter((path) => path.startsWith("app/(shell)/")).length,
-    38,
+    41,
     "除认证和隐私政策外，所有真实业务页面（含详情）都必须位于 Shell Stack"
   );
   await assert.rejects(

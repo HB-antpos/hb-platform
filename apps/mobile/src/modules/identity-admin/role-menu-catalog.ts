@@ -95,6 +95,10 @@ const MOBILE_MENU: MenuSource[] = ([
   ["permissions", "Permission management", "权限管理", ["Roles.View"]],
   ["employee-profile", "Employee profile", "员工档案", ["EmployeeProfiles.View"]],
   ["employee-profile-review", "Profile review", "档案审核", ["EmployeeProfiles.ReviewSensitiveManagedStore"]],
+  // 与后端 FullAppMenu 的 AnyPermissions 一致：名单管理 / 批准 / 复核任一即可见；不新增权限码。
+  ["face-unwelcome", "Unwelcome persons list", "不受欢迎人员名单", ["FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve", "FaceMatch.Unwelcome.Review"]],
+  // 与后端 FullAppMenu 的 AnyPermissions 一致：门店档案管理或摄像机管理任一即可见。
+  ["face-match-settings", "Face match settings", "人脸比对设置", ["FaceMatch.Manage", "FaceCapture.Cameras.Manage"]],
   ["device-management", "Device management", "设备管理", ["DeviceRegistration.View"]],
   ["reports", "Reports", "报表", ["Reports.ProductMovement.View"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：老收银或新收银任一查看权限即可见。

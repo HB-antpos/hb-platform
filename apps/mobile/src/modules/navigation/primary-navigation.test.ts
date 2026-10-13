@@ -200,6 +200,16 @@ assert.equal(
   "日结记录从工作台进入，不能新增一级导航"
 );
 assert.equal(
+  compactPrimaryItems("face-unwelcome", [...fullMenu, "face-unwelcome"])[0]?.active,
+  true,
+  "不受欢迎人员名单从工作台进入，不能新增一级导航"
+);
+assert.equal(
+  compactPrimaryItems("face-match-settings", [...fullMenu, "face-match-settings"])[0]?.active,
+  true,
+  "人脸比对设置从工作台进入，不能新增一级导航"
+);
+assert.equal(
   compactPrimaryItems("attendance-management", fullMenu)[2]?.active,
   true,
   "考勤管理页也必须高亮打卡，而不是改变打卡的个人考勤目标"
@@ -528,6 +538,23 @@ assert.deepEqual(
   ],
   "日结记录必须归入运营与报表并紧跟员工操作日志，只依赖后端显式菜单"
 );
+assert.deepEqual(
+  buildWorkbenchSections(["employee-profile-review", "face-unwelcome", "face-match-settings", "device-management"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "people-management",
+      itemRouteNames: ["employee-profile-review", "face-unwelcome", "face-match-settings", "device-management"],
+    },
+  ],
+  "人脸比对两个入口必须归入人员与管理，紧跟资料审核，只依赖后端显式菜单"
+);
+assert.equal(zhWorkbench.routes.faceUnwelcome, "不受欢迎人员名单", "中文工作台必须用正式名称显示不受欢迎人员名单");
+assert.equal(zhWorkbench.routes.faceMatchSettings, "人脸比对设置", "中文工作台必须显示人脸比对设置");
+assert.equal(enWorkbench.routes.faceUnwelcome, "Unwelcome persons list", "英文工作台必须显示 Unwelcome persons list");
+assert.equal(enWorkbench.routes.faceMatchSettings, "Face match settings", "英文工作台必须显示 Face match settings");
 assert.equal(zhWorkbench.routes.dailyCloses, "日结记录", "中文工作台必须显示日结记录");
 assert.equal(enWorkbench.routes.dailyCloses, "Daily closes", "英文工作台必须显示 Daily closes");
 assert.deepEqual(

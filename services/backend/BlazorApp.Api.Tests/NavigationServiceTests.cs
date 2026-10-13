@@ -1009,8 +1009,10 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(38, menu.Count);
+        Assert.Equal(40, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
+        Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
+        Assert.Contains(menu, item => item.RouteName == "face-match-settings");
         Assert.Contains(menu, item => item.RouteName == "app-install");
         Assert.Contains(menu, item => item.RouteName == "store-cash");
         Assert.Contains(menu, item => item.RouteName == "containers");
@@ -1653,6 +1655,110 @@ public class NavigationServiceTests
         var menu = _service.BuildDeviceAppMenu("Mobile");
 
         Assert.DoesNotContain(menu, item => item.RouteName == "daily-closes");
+    }
+
+    [Theory]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Manage)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Approve)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Review)]
+    public void BuildAppMenu_不受欢迎人员名单_仅凭三个名单权限之一可见(string permission)
+    {
+        var item = Assert.Single(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+            menu => menu.RouteName == "face-unwelcome"
+        );
+        Assert.Equal("tabs.faceUnwelcome", item.TitleKey);
+        Assert.Equal("account-cancel-outline", item.Icon);
+        // 名单权限不能顺带打开设置页：两个入口的权限口径互不相通。
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+            menu => menu.RouteName == "face-match-settings"
+        );
+    }
+
+    [Theory]
+    [InlineData(Permissions.FaceMatch.Manage)]
+    [InlineData(Permissions.FaceMatch.Traffic.View)]
+    [InlineData(Permissions.FaceCapture.Cameras.Manage)]
+    [InlineData(Permissions.FaceCapture.Images.View)]
+    [InlineData(Permissions.Users.View)]
+    public void BuildAppMenu_不受欢迎人员名单_其他权限或无权限不可见(string permission)
+    {
+        // 档案管理、客流统计、摄像机与抓拍图片权限都不能打开名单页（名单页展示参考照片与命中抓拍，只认名单权限）。
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+            menu => menu.RouteName == "face-unwelcome"
+        );
+    }
+
+    [Fact]
+    public void BuildAppMenu_不受欢迎人员名单_没有任何权限的账号不可见()
+    {
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser()),
+            menu => menu.RouteName == "face-unwelcome"
+        );
+    }
+
+    [Theory]
+    [InlineData(Permissions.FaceMatch.Manage)]
+    [InlineData(Permissions.FaceCapture.Cameras.Manage)]
+    public void BuildAppMenu_人脸比对设置_仅凭档案管理或摄像机管理权限可见(string permission)
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", permission)));
+        var item = Assert.Single(menu, entry => entry.RouteName == "face-match-settings");
+        Assert.Equal("tabs.faceMatchSettings", item.TitleKey);
+        Assert.Equal("face-recognition", item.Icon);
+        // 设置页的权限也不能顺带打开名单页。
+        Assert.DoesNotContain(menu, entry => entry.RouteName == "face-unwelcome");
+    }
+
+    [Theory]
+    [InlineData(Permissions.FaceMatch.Traffic.View)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Manage)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Approve)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Review)]
+    [InlineData(Permissions.FaceCapture.Images.View)]
+    [InlineData(Permissions.Users.View)]
+    public void BuildAppMenu_人脸比对设置_其他权限不可见(string permission)
+    {
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+            menu => menu.RouteName == "face-match-settings"
+        );
+    }
+
+    [Fact]
+    public void BuildAppMenu_人脸比对设置_没有任何权限的账号不可见()
+    {
+        Assert.DoesNotContain(
+            _service.BuildAppMenu(CreateUser()),
+            menu => menu.RouteName == "face-match-settings"
+        );
+    }
+
+    [Fact]
+    public void BuildAppMenu_人脸两个入口_管理员别名都可见()
+    {
+        // 生产里这些权限没有挂在任何角色模板上，Admin 靠角色放行：几种管理员别名都必须看到两个入口。
+        foreach (var role in new[] { "Admin", "管理员", "SuperAdmin", "超级管理员" })
+        {
+            var menu = _service.BuildAppMenu(CreateUser(new Claim(ClaimTypes.Role, role)));
+            Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
+            Assert.Contains(menu, item => item.RouteName == "face-match-settings");
+        }
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesFaceMatchEntriesForDeviceMode()
+    {
+        // 参考照片与命中抓拍是生物识别信息，设备会话没有用户账号与权限，设备模式菜单（含仓库设备）不能暴露这两个入口。
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            var menu = _service.BuildDeviceAppMenu(deviceType);
+            Assert.DoesNotContain(menu, item => item.RouteName == "face-unwelcome");
+            Assert.DoesNotContain(menu, item => item.RouteName == "face-match-settings");
+        }
     }
 
     [Fact]
