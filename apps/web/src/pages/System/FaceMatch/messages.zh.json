@@ -68,7 +68,7 @@
       "FACE_MATCH_TENCENT_UNAVAILABLE": "腾讯云服务暂不可用，请稍后重试",
       "FACE_MATCH_TENCENT_ERROR": "腾讯云处理失败，请稍后重试；如反复失败请联系管理员",
       "FACE_MATCH_ENTRY_NOT_PENDING": "该条目不是待批准状态，请刷新后重试",
-      "FACE_MATCH_APPROVER_IS_SUBMITTER": "提交人不能批准自己提交的条目",
+      "FACE_MATCH_APPROVER_IS_SUBMITTER": "提交人不能批准自己提交的条目（管理员除外）",
       "FACE_MATCH_ALREADY_APPROVED_BY_YOU": "你已经批准过该条目，需要另一位不同的批准人",
       "FACE_MATCH_ENTRY_EXPIRED": "该条目已到期，不能再批准",
       "FACE_MATCH_UNWELCOME_NOT_ENABLED": "条目的生效门店都还没有开启不受欢迎人员名单，暂时不能批准；请先在门店档案里开启",
@@ -362,10 +362,10 @@
       "form": {
         "title": "提交不受欢迎人员名单条目",
         "submit": "提交条目",
-        "scopeNotice": "请确认事件属于严重事件。条目只保存事件类别、证据编号和参考照片，不要在任何字段里填写姓名或隐私细节。提交后需由另一位有批准权限的人批准才会生效。",
+        "scopeNotice": "请确认事件属于严重事件。条目只保存事件类别、证据编号和参考照片，不要在任何字段里填写姓名或隐私细节。提交后需由另一位有批准权限的人批准才会生效；管理员可自行批准，一人即可。",
         "category": "事件类别",
         "categoryPlaceholder": "选择事件类别",
-        "otherNeedsTwo": "选择“其他”的条目需要两位不同的批准人才会生效。",
+        "otherNeedsTwo": "选择“其他”的条目：非管理员需要两位不同的批准人才会生效，管理员一人批准即可。",
         "categoryNote": "情形说明",
         "evidenceRef": "证据编号",
         "evidenceRefHint": "填写事件记录编号或警方报告编号，不要填写姓名或其他隐私细节。",
@@ -380,7 +380,7 @@
       "approve": {
         "title": "批准该条目？",
         "content": "批准后条目生效，该门店范围内的摄像机会开始对它做比对。",
-        "contentTwo": "该条目需要 {{needed}} 位不同的批准人，目前已有 {{done}} 位。你的批准会计入进度，满额后才生效。",
+        "contentTwo": "该条目需要 {{needed}} 位不同的批准人，目前已有 {{done}} 位。你的批准会计入进度，满额后才生效；管理员一人批准即可直接生效。",
         "ok": "确认批准",
         "done": "已批准"
       },

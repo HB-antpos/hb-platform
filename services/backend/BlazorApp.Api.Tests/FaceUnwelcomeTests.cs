@@ -15,6 +15,10 @@ public sealed class FaceUnwelcomeTests : IDisposable
     private static readonly FaceMatchActor Submitter = new("sub-1", "Sub Mitter", IsAdmin: true);
     private static readonly FaceMatchActor Approver = new("app-1", "App Rover", IsAdmin: true);
     private static readonly FaceMatchActor Approver2 = new("app-2", "App Rover Two", IsAdmin: true);
+    // 非管理员：保持「提交人 ≠ 批准人」「Other 需要两位不同批准人」的原规则。
+    private static readonly FaceMatchActor StaffSubmitter = new("psub-1", "Staff Submitter");
+    private static readonly FaceMatchActor StaffApprover = new("papp-1", "Staff Approver");
+    private static readonly FaceMatchActor StaffApprover2 = new("papp-2", "Staff Approver Two");
     private static readonly FaceMatchActor ReviewerA = new("rev-a", "Reviewer A");
     private static readonly FaceMatchActor ReviewerB = new("rev-b", "Reviewer B");
 
@@ -22,7 +26,7 @@ public sealed class FaceUnwelcomeTests : IDisposable
 
     public FaceUnwelcomeTests()
     {
-        foreach (var user in new[] { Submitter, Approver, Approver2, ReviewerA, ReviewerB })
+        foreach (var user in new[] { Submitter, Approver, Approver2, StaffSubmitter, StaffApprover, StaffApprover2, ReviewerA, ReviewerB })
         {
             _h.Database.AddUser(user.Id, user.Name, "s-1013");
         }
@@ -152,11 +156,11 @@ public sealed class FaceUnwelcomeTests : IDisposable
     // ---------- 批准 ----------
 
     [Fact]
-    public async Task 提交人不能批准自己的条目()
+    public async Task 非管理员的提交人不能批准自己的条目()
     {
-        var entry = await SubmitAsync();
+        var entry = await SubmitAsync(by: StaffSubmitter);
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Submitter));
+        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, StaffSubmitter));
 
         Assert.Equal("FACE_MATCH_APPROVER_IS_SUBMITTER", ex.Code);
         Assert.Empty(_h.Library.Calls);
@@ -216,30 +220,105 @@ public sealed class FaceUnwelcomeTests : IDisposable
     }
 
     [Fact]
-    public async Task 其他类别_第一位批准人只记录_第二位不同的批准人才生效()
+    public async Task 其他类别_非管理员第一位只记录_第二位不同的批准人才生效()
     {
         EnableUnwelcome("1013");
-        var entry = await SubmitAsync(category: FaceIncidentCategory.Other, note: "说明");
+        var entry = await SubmitAsync(category: FaceIncidentCategory.Other, note: "说明", by: StaffSubmitter);
 
-        var first = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Approver);
+        var first = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, StaffApprover);
         Assert.Equal("pending", first.StatusName);
         Assert.Equal(1, first.ApprovalsDone);
         Assert.Equal(2, first.ApprovalsNeeded);
         Assert.Empty(_h.Library.Calls);
 
-        var same = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Approver));
+        var same = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, StaffApprover));
         Assert.Equal("FACE_MATCH_ALREADY_APPROVED_BY_YOU", same.Code);
-        var submitter = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Submitter));
+        var submitter = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, StaffSubmitter));
         Assert.Equal("FACE_MATCH_APPROVER_IS_SUBMITTER", submitter.Code);
 
-        var second = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Approver2);
+        var second = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, StaffApprover2);
         Assert.Equal("active", second.StatusName);
-        Assert.Equal("App Rover", second.ApprovedByName);
-        Assert.Equal("App Rover Two", second.SecondApprovedByName);
+        Assert.Equal("Staff Approver", second.ApprovedByName);
+        Assert.Equal("Staff Approver Two", second.SecondApprovedByName);
+        Assert.Equal(2, second.ApprovalsDone);
+        var row = await Load(entry.EntryId);
+        Assert.Equal("papp-1", row.ApprovedBy);
+        Assert.Equal("papp-2", row.SecondApprovedBy);
+        Assert.Contains($"CreatePerson:uw_{entry.EntryId}", _h.Library.Calls);
+    }
+
+    // ---------- 管理员一个人批准即可生效（2026-10-13 用户决定） ----------
+
+    [Fact]
+    public async Task 管理员一个人批准即可生效_可以批准自己提交的条目_审计留痕()
+    {
+        EnableUnwelcome("1013");
+        var entry = await SubmitAsync();   // 提交人 Submitter 是管理员
+
+        var approved = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Submitter);
+
+        Assert.Equal("active", approved.StatusName);
+        Assert.Equal("sub-1", (await Load(entry.EntryId)).ApprovedBy);
+        Assert.Contains($"CreatePerson:uw_{entry.EntryId}", _h.Library.Calls);
+        Assert.Contains(
+            await _h.Db.Queryable<FaceAuditLog>().ToListAsync(),
+            a => a.Action == FaceMatchAuditActions.EntryApprove && a.Result == "active;self-approved");
+    }
+
+    [Fact]
+    public async Task 管理员批准其他类别_一位即生效_不需要第二位_审计标记单人批准()
+    {
+        EnableUnwelcome("1013");
+        var entry = await SubmitAsync(category: FaceIncidentCategory.Other, note: "说明");
+
+        var approved = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Approver);
+
+        Assert.Equal("active", approved.StatusName);
+        // 已生效的单人批准条目按实际显示 1 / 1，不会出现「已生效 1 / 2」。
+        Assert.Equal(1, approved.ApprovalsNeeded);
+        Assert.Equal(1, approved.ApprovalsDone);
         var row = await Load(entry.EntryId);
         Assert.Equal("app-1", row.ApprovedBy);
-        Assert.Equal("app-2", row.SecondApprovedBy);
+        Assert.Null(row.SecondApprovedBy);
         Assert.Contains($"CreatePerson:uw_{entry.EntryId}", _h.Library.Calls);
+        Assert.Contains(
+            await _h.Db.Queryable<FaceAuditLog>().ToListAsync(),
+            a => a.Action == FaceMatchAuditActions.EntryApprove && a.Result == "active;admin-solo");
+    }
+
+    [Fact]
+    public async Task 其他类别_非管理员已批准一次后_管理员一位即可补完生效()
+    {
+        EnableUnwelcome("1013");
+        var entry = await SubmitAsync(category: FaceIncidentCategory.Other, note: "说明", by: StaffSubmitter);
+        await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, StaffApprover);
+
+        var finished = await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Approver);
+
+        Assert.Equal("active", finished.StatusName);
+        var row = await Load(entry.EntryId);
+        Assert.Equal("papp-1", row.ApprovedBy);
+        Assert.Equal("app-1", row.SecondApprovedBy);
+        Assert.Equal(2, finished.ApprovalsDone);
+    }
+
+    [Fact]
+    public async Task 管理员的批准不绕过其它校验_未开名单_已生效_已过期照样拒绝()
+    {
+        var entry = await SubmitAsync();
+        var notEnabled = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Submitter));
+        Assert.Equal("FACE_MATCH_UNWELCOME_NOT_ENABLED", notEnabled.Code);
+        Assert.Empty(_h.Library.Calls);
+
+        EnableUnwelcome("1013");
+        await _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Submitter);
+        var again = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(entry.EntryId, Submitter));
+        Assert.Equal("FACE_MATCH_ENTRY_NOT_PENDING", again.Code);
+
+        var pending = await SubmitAsync();
+        _h.Time.Now = _h.Time.Now.AddDays(130);
+        var expired = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ApproveEntryAsync(pending.EntryId, Submitter));
+        Assert.Equal("FACE_MATCH_ENTRY_EXPIRED", expired.Code);
     }
 
     [Fact]
@@ -364,26 +443,34 @@ public sealed class FaceUnwelcomeTests : IDisposable
     // ---------- 列表 ----------
 
     [Fact]
-    public async Task 列表_状态与门店筛选_canApprove按提交人与批准进度计算_即将到期标记()
+    public async Task 列表_状态与门店筛选_canApprove按提交人与批准进度计算_管理员不受限_即将到期标记()
     {
         EnableUnwelcome("1013");
         var pending = await SubmitAsync();
-        var other = await SubmitAsync(category: FaceIncidentCategory.Other, note: "n");
+        // 「其他」由非管理员批准一次，仍是待批准（第一位）。
+        var other = await SubmitAsync(category: FaceIncidentCategory.Other, note: "n", by: StaffSubmitter);
         var active = await SubmitAsync(expiresInDays: 20);
         await _h.Unwelcome.ApproveEntryAsync(active.EntryId, Approver);
-        await _h.Unwelcome.ApproveEntryAsync(other.EntryId, Approver);
+        await _h.Unwelcome.ApproveEntryAsync(other.EntryId, StaffApprover);
 
         var all = await _h.Unwelcome.ListEntriesAsync(null, null, 1, 20, Approver, canApprove: true);
         var forApprover = all.Items.ToDictionary(e => e.EntryId);
         Assert.True(forApprover[pending.EntryId].CanApprove);
-        Assert.False(forApprover[other.EntryId].CanApprove);   // 已经批准过一次
+        Assert.True(forApprover[other.EntryId].CanApprove);    // 管理员一位即可补完生效
         Assert.False(forApprover[active.EntryId].CanApprove);  // 已生效
         Assert.True(forApprover[active.EntryId].ExpiringSoon);
         Assert.False(forApprover[pending.EntryId].ExpiringSoon);
 
-        var forSubmitter = await _h.Unwelcome.ListEntriesAsync("pending", "1013", 1, 20, Submitter, canApprove: true);
-        Assert.Equal(2, forSubmitter.Items.Count);
-        Assert.All(forSubmitter.Items, e => Assert.False(e.CanApprove));
+        // 管理员提交人：自己提交的条目也能批准（管理员一个人批准即可）。
+        var forAdminSubmitter = await _h.Unwelcome.ListEntriesAsync("pending", "1013", 1, 20, Submitter, canApprove: true);
+        Assert.Equal(2, forAdminSubmitter.Items.Count);
+        Assert.All(forAdminSubmitter.Items, e => Assert.True(e.CanApprove));
+        // 非管理员提交人：自己提交的不能批准；已批准过一次的不能再批准一次。
+        var forStaffSubmitter = await _h.Unwelcome.ListEntriesAsync("pending", "1013", 1, 20, StaffSubmitter, canApprove: true);
+        Assert.False(forStaffSubmitter.Items.Single(e => e.EntryId == other.EntryId).CanApprove);
+        var forStaffApprover = await _h.Unwelcome.ListEntriesAsync("pending", "1013", 1, 20, StaffApprover, canApprove: true);
+        Assert.False(forStaffApprover.Items.Single(e => e.EntryId == other.EntryId).CanApprove);
+        Assert.True(forStaffApprover.Items.Single(e => e.EntryId == pending.EntryId).CanApprove);
         var noRights = await _h.Unwelcome.ListEntriesAsync(null, null, 1, 20, Approver2, canApprove: false);
         Assert.All(noRights.Items, e => Assert.False(e.CanApprove));
 
@@ -667,10 +754,11 @@ public sealed class FaceUnwelcomeTests : IDisposable
         ExpiresAtUtc = _h.At(TimeSpan.FromDays(120)),
     };
 
-    private async Task<FaceUnwelcomeEntryDto> SubmitAsync(int photos = 1, byte category = FaceIncidentCategory.ViolenceOrThreat, string? note = null, int expiresInDays = 120) =>
+    private async Task<FaceUnwelcomeEntryDto> SubmitAsync(
+        int photos = 1, byte category = FaceIncidentCategory.ViolenceOrThreat, string? note = null, int expiresInDays = 120, FaceMatchActor? by = null) =>
         await _h.Unwelcome.CreateEntryAsync(
             NewEntry() with { IncidentCategory = category, CategoryNote = note, ExpiresAtUtc = _h.At(TimeSpan.FromDays(expiresInDays)) },
-            _h.PhotoSet(photos), Submitter);
+            _h.PhotoSet(photos), by ?? Submitter);
 
     private void EnableUnwelcome(string storeCode) =>
         _h.Db.Insertable(new FaceStoreProfile { StoreCode = storeCode, Mode = FaceStoreMode.Capture, UnwelcomeListEnabled = true, UpdatedAtUtc = FaceMatchTestDatabase.Now }).ExecuteCommand();
