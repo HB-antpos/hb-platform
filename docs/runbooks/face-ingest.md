@@ -1031,6 +1031,14 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 - **复核一个人就够（2026-10-13 用户决定，原设计要两人）**：任何持有 Review 权限、在门店范围内的人判断一次即结案——「是同一个人」→ `Confirmed`（命中图按原保留期保留），「不是」→ `Dismissed`，并把命中图提前到期（后台删除，只保留元数据与分数用于误报统计）。不再有第二步，也不再要求第二人不同于第一人；接口 `nextStep` 只返回 `first` / `none`，错误码 `FACE_MATCH_SAME_REVIEWER` 不再产生。
   **旧数据**：两人复核时代留下的「已一审、仍 Pending」任务，下一位复核人（含第一复核人本人）提交一次即结案，结案人写进 `SecondReviewerId`，审计 Result 为 `legacy-second:{verdict}`；新任务的审计 Result 为 `first:{verdict}`。
   **系统不自动拒绝服务、不自动通知警方**，店里怎么处置由门店流程与法务制定。命中图已被删除的任务不能再复核。
+- **高相似度自动确认（2026-10-13 用户决定）**：相似度达到或超过门店阈值 `FaceStoreProfile.UnwelcomeAutoConfirmScore`（默认 **90**，`0` = 不自动确认，可填 50–100、最多两位小数；Web「门店档案 → 不受欢迎人员名单」里设置）的命中任务，
+  由主 API 后台任务（⑥ 之后的 `hit-auto-confirm`，每个节拍）**自动标为 `Confirmed`，不再需要人工复核**：
+  - **提示照发**：只处理已经发过提示（`NotifiedAtUtc` 非空）、仍待复核、没人判断过（`FirstReviewerId` 为空）、命中图还在的任务；店员先收到提示，自动确认只是替人结案；
+  - 复核人记为 `system`（页面显示「自动确认」、DTO `autoConfirmed = true`），命中图按原保留期保留；条件更新，与人工复核并发时谁先写谁生效，**不会覆盖人工结论**；旧版「已一审待二审」的遗留任务不碰；
+  - 每个任务写一条审计 `unwelcome.task.review`，`Result = auto:confirmed;min=阈值`；阈值本身的修改写进档案保存的审计（`Result` 追加 `;auto=阈值`，没改不追加）；
+  - **「已确认」只是任务状态**：系统不会因此拒绝服务或通知警方；`Confirmed` 与自动确认不代表「是同一个人」——相似度不等于是同一个人的概率；
+  - **误报统计口径**：自动确认的任务**单独计数**（`autoConfirmedCount`，总体 / 每条目 / 每相似度区间），不进「人工确认」，也不参与驳回率与「建议复核该条目」的判断（否则高分任务没人驳回会把驳回率拉低）；`taskCount = 待复核 + 已驳回 + 人工确认 + 自动确认`；
+  - 档案保存接口 `unwelcomeAutoConfirmScore`：**省略 / null = 保持库里原值**（旧版 App 整体替换保存时不带这个字段，不会被清掉），`0` = 关闭，非法值 400（字段 `unwelcomeAutoConfirmScore`）。
 - 看图（命中图 / 参考照片）：对象键只来自数据库、门店范围内才可见（越权与不存在共用 404）、仅持有 Review 权限者；**每次查看（含被拒绝的尝试）写持久审计**，且审计写不进去就不返回图片字节。
 - 误报统计：按条目的命中数 / 驳回率（已结束任务 ≥5 条且驳回率 ≥80% 提示复核该条目是否应出名单），以及按相似度每 5 分一档的驳回率，用于调阈值。
 
@@ -1046,6 +1054,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | ⑥ 命中提示发布 + 撤回补偿 | 每个节拍 / 10 分钟 | 发布命中提示（见 16.6）；重试「同意已撤回但腾讯云删除未完成」的登记、补删已撤回登记遗留的登记照 | 命中提示只是一条索引查询 |
 | ⑦ 地域改动作废审查 | 10 分钟 | 把审查地域 ≠ 当前配置地域的档案**只清空审查记录**并写审计 `profile.region-invalidated`（`Result=review-cleared`），**不再把任何档案关成 `Off`**（见 16.3） | 配置地域无效 / 功能未开启时什么都不动（配置写错不波及门店档案） |
 | ⑧ 分时客流投影 | 10 分钟 | 把最近 3 个门店本地日的 `FaceTrafficBucket`（UTC 整点桶）重算成 `FaceTrafficHourly`（门店本地「日期 + 小时」，与营业额同口径，见 16.12）；进程启动后第一次成功投影之后顺带补齐一次历史 | **不调用腾讯云、不依赖管理凭据，也不依赖「有门店启用」**（功能没开启时也把已有计数桶投影出来，免得报表缺数据）；最近 4 天内没有计数桶时只是一条查询；`FaceTrafficHourly` 表不存在（迁移未执行）时记一次 Warning 后跳过，不报错 |
+| ⑨ 命中自动确认 | 每个节拍 | 把已提示、待复核、没人判断过、相似度达到门店阈值（默认 90，0 = 关闭）的命中任务标为 `Confirmed`（复核人 `system`），写审计 `auto:confirmed;min=…`（见 16.6） | **不调用腾讯云、不依赖管理凭据**；没有符合条件的任务时只是一条索引查询 |
 
 说明：已存在数据的**删除类补偿**（过期访客库、撤回后的清理、命中图到期）不依赖「有门店启用」，否则门店关闭后数据会无人清理；没有可删的行时它们只是廉价查询。
 
@@ -1054,6 +1063,8 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 1. **迁移**：主 API 带 `--schema=migrate` 显式执行 `20261014.001-face-match`（建九张表：`FaceStoreProfile`、`FaceConsentRecord`、`FaceEnrollment`、`FaceVisitGroup`、`FaceTrafficBucket`、`FaceMatchEvaluation`、`FaceAuditLog`、`FaceUnwelcomeEntry`、`FaceMatchTask`；幂等，签名校验通过才登记账本）。
    **API 启动只做只读 schema 检查，不迁移；账本里没有这条迁移时主 API 启动失败（容器退出并打印诊断码），所以必须先迁移、再部署新版本的主 API**（与其他版本号迁移相同）。
    **分时客流表**：`20261016.001-face-traffic-hourly`（只建 `FaceTrafficHourly` 一张表，见 16.12）与上面同一次 `--schema=migrate` 一起执行，同样须先迁移、再部署主 API；没有新环境变量、没有新权限码、没有新接口。
+   **自动确认阈值列**：`20261016.002-face-unwelcome-auto-confirm`（只给 `FaceStoreProfile` 加一列 `UnwelcomeAutoConfirmScore decimal(5,2) NOT NULL DEFAULT 90`，`CHECK` 为 0 或 50–100；已有门店档案行得到默认 90；错误号 `52830` 档案表缺失、`52831` 列签名不兼容）。
+   同样**先迁移、再部署新版主 API**（新实体会 SELECT 这一列，缺列会让档案相关查询失败）；对旧版 API / 接收端无害（它们 INSERT 省略该列时取默认值、UPDATE 只写自己认识的列）。**回滚**：旧版主 API 不认识这一列，直接换回旧镜像即可，该列可以留着；若要删列，须先 `DROP CONSTRAINT` 两个约束（`DF_…` 与 `CK_FaceStoreProfile_UnwelcomeAutoConfirmScore`）再 `DROP COLUMN`。
 2. **权限入库 SQL**（手工执行一次，规则同 14.2）：`services/backend/BlazorApp.Api/Data/Migrations/20261014_AddFaceMatchPermissions.sql`（登记五个权限码，幂等，`CreatedBy = Migration_20261014_FaceMatch`，不授予任何角色）。
    ```bash
    sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend/BlazorApp.Api/Data/Migrations/20261014_AddFaceMatchPermissions.sql

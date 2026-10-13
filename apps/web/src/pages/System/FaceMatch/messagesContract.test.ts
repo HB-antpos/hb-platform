@@ -188,6 +188,63 @@ for (const { name, text } of sources) {
   if (!String((zh.faceMatch.review as Record<string, string>).intro).includes('系统不会自动拒绝服务或通知警方')) {
     throw new Error('复核页说明必须写明系统不会自动拒绝服务或通知警方')
   }
+  // 命中自动确认：阈值说明固定（用户定稿），必须写明相似度的口径、仍会提示店员、系统不会自动拒绝服务或通知警方、0 = 不自动确认、默认 90。
+  const zhProfile = zh.faceMatch.profile as unknown as { fields: Record<string, string>; hints: Record<string, string> }
+  const enProfile = en.faceMatch.profile as unknown as { fields: Record<string, string>; hints: Record<string, string> }
+  expectEqual(zhProfile.fields.unwelcomeAutoConfirmScore, '命中自动确认阈值（%）', '中文自动确认阈值字段名')
+  expectEqual(
+    zhProfile.hints.unwelcomeAutoConfirmScore,
+    '命中任务的相似度达到或超过这个值时，系统自动把任务标为“已确认”，不再需要人工复核（店员仍会收到提示；系统不会自动拒绝服务或通知警方）。填 0 表示不自动确认，默认 90。相似度不等于是同一个人的概率。',
+    '中文自动确认阈值说明',
+  )
+  if (!zhProfile.hints.unwelcomeAutoConfirmScore.includes('不等于是同一个人的概率')) throw new Error('自动确认阈值说明必须写明「相似度不等于是同一个人的概率」')
+  const enAutoHint = enProfile.hints.unwelcomeAutoConfirmScore
+  if (!/not the probability of being the same person/.test(enAutoHint) || !/never refuses service or notifies police/.test(enAutoHint) || !/default is 90/.test(enAutoHint)) {
+    throw new Error(`英文自动确认阈值说明必须写明 not the probability、不会自动拒绝服务或通知警方、默认 90: ${enAutoHint}`)
+  }
+  expectEqual(zh.faceMatch.review.autoConfirmedTag, '自动确认', '中文自动确认小标签')
+  expectEqual(zh.faceMatch.review.autoConfirmedBy, '系统自动确认', '中文自动确认复核人列')
+  expectEqual(en.faceMatch.review.autoConfirmedTag, 'Auto-confirmed', '英文自动确认小标签')
+  expectEqual(en.faceMatch.review.autoConfirmedBy, 'Confirmed automatically by the system', '英文自动确认复核人列')
+  // 误报统计：自动确认单独一列（总体 / 条目 / 相似度区间都有），原「已确认」列头改成「人工确认」，驳回率说明写明只统计人工判断的任务。
+  const zhStats = zh.faceMatch.stats as Record<string, string>
+  const enStats = en.faceMatch.stats as Record<string, string>
+  expectEqual(zhStats.confirmedCount, '人工确认', '中文统计页「已确认」列头')
+  expectEqual(zhStats.autoConfirmedCount, '自动确认', '中文统计页自动确认列头')
+  expectEqual(enStats.confirmedCount, 'Manually confirmed', '英文统计页人工确认列头')
+  expectEqual(enStats.autoConfirmedCount, 'Auto-confirmed', '英文统计页自动确认列头')
+  if (!zhStats.intro.includes('驳回率只统计人工判断的任务，系统自动确认的不计入。')) throw new Error('中文统计说明必须写明「驳回率只统计人工判断的任务，系统自动确认的不计入。」')
+  if (!zhStats.intro.includes('已驳回 ÷（已驳回 + 人工确认）')) throw new Error('中文统计说明里的驳回率公式应为「已驳回 ÷（已驳回 + 人工确认）」')
+  if (!/counts only tasks decided by a person/.test(enStats.intro) || !/not included/.test(enStats.intro) || !/dismissed \+ manually confirmed/.test(enStats.intro)) {
+    throw new Error(`英文统计说明必须写明驳回率只统计人工判断的任务、自动确认的不计入: ${enStats.intro}`)
+  }
+  // 自动确认新增的全部文案：沿用单人复核口径，不出现双人 / 序数 / 有歧义的概率写法
+  const autoConfirmTexts = {
+    zh: [
+      zhProfile.fields.unwelcomeAutoConfirmScore, zhProfile.hints.unwelcomeAutoConfirmScore,
+      (zh.faceMatch.validation as Record<string, unknown>).autoConfirmScoreRequired, (zh.faceMatch.validation as Record<string, unknown>).autoConfirmScoreInvalid,
+      zh.faceMatch.review.autoConfirmedTag, zh.faceMatch.review.autoConfirmedBy,
+      zhStats.confirmedCount, zhStats.autoConfirmedCount, zhStats.intro,
+    ],
+    en: [
+      enProfile.fields.unwelcomeAutoConfirmScore, enProfile.hints.unwelcomeAutoConfirmScore,
+      (en.faceMatch.validation as Record<string, unknown>).autoConfirmScoreRequired, (en.faceMatch.validation as Record<string, unknown>).autoConfirmScoreInvalid,
+      en.faceMatch.review.autoConfirmedTag, en.faceMatch.review.autoConfirmedBy,
+      enStats.confirmedCount, enStats.autoConfirmedCount, enStats.intro,
+    ],
+  }
+  for (const text of autoConfirmTexts.zh.map(String)) {
+    if (text === '' || text === 'undefined') throw new Error('自动确认的中文文案缺失')
+    for (const banned of [new RegExp('不是同一个人' + '的概率'), /两人/, /两位/, /第[一二]复核/, /不同于/]) {
+      if (banned.test(text)) throw new Error(`自动确认中文文案不得出现 ${banned}: ${text}`)
+    }
+  }
+  for (const text of autoConfirmTexts.en.map(String)) {
+    if (text === '' || text === 'undefined') throw new Error('自动确认的英文文案缺失')
+    for (const banned of [/two people/i, /two[- ]person/i, /second reviewer/i, /first reviewer/i, /different person/i, /probability of not being/i]) {
+      if (banned.test(text)) throw new Error(`自动确认英文文案不得出现 ${banned}: ${text}`)
+    }
+  }
   const reviewScope = [
     JSON.stringify(zh.faceMatch.review),
     JSON.stringify(en.faceMatch.review),

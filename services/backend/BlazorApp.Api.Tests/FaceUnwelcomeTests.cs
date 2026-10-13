@@ -601,6 +601,27 @@ public sealed class FaceUnwelcomeTests : IDisposable
     }
 
     [Fact]
+    public async Task 系统自动确认的任务_列表标记AutoConfirmed_没有复核人姓名_不能再复核()
+    {
+        var entry = await SeedActiveEntryAsync();
+        var auto = await SeedTaskAsync(entry, score: 96m, status: FaceMatchReviewStatus.Confirmed);
+        var manual = await SeedTaskAsync(entry, score: 88m, status: FaceMatchReviewStatus.Confirmed);
+        await _h.Db.Updateable<FaceMatchTask>()
+            .SetColumns(t => new FaceMatchTask { FirstReviewerId = FaceMatchAuditActions.SystemActorId })
+            .Where(t => t.TaskId == auto)
+            .ExecuteCommandAsync();
+
+        var items = (await _h.Unwelcome.ListTasksAsync("confirmed", null, 1, 20, ReviewerA)).Items.ToDictionary(t => t.TaskId);
+
+        Assert.True(items[auto].AutoConfirmed);
+        Assert.Null(items[auto].FirstReviewerName);
+        Assert.False(items[auto].CanReview);
+        Assert.Equal("none", items[auto].NextStep);
+        Assert.False(items[manual].AutoConfirmed);   // 人工确认的不带标记
+        Assert.Equal("Reviewer A", items[manual].FirstReviewerName);
+    }
+
+    [Fact]
     public async Task 复核校验_结论非法400_图已删除不能复核_门店范围外404()
     {
         var entry = await SeedActiveEntryAsync();
@@ -754,6 +775,39 @@ public sealed class FaceUnwelcomeTests : IDisposable
         Assert.Equal(4, bucket95.ConfirmedCount);
         Assert.Equal(3, stats.ScoreBuckets.Single(b => b.From == 60).Total);
         Assert.Equal(2, stats.ScoreBuckets.Single(b => b.From == 65).Total);
+    }
+
+    [Fact]
+    public async Task 误报统计_系统自动确认的任务单独计数_不进已确认也不进驳回率_也不触发建议复核()
+    {
+        var entry = await SeedActiveEntryAsync();
+        // 人工判断：2 条驳回 + 2 条人工确认 → 驳回率 0.5；另有 6 条高分任务是系统自动确认的（没有人判断过）。
+        for (var i = 0; i < 2; i++) await SeedTaskAsync(entry, score: 70m + i, status: FaceMatchReviewStatus.Dismissed);
+        for (var i = 0; i < 2; i++) await SeedTaskAsync(entry, score: 92m + i, status: FaceMatchReviewStatus.Confirmed);
+        var autoIds = new List<string>();
+        for (var i = 0; i < 6; i++) autoIds.Add(await SeedTaskAsync(entry, score: 97m, status: FaceMatchReviewStatus.Confirmed));
+        await _h.Db.Updateable<FaceMatchTask>()
+            .SetColumns(t => new FaceMatchTask { FirstReviewerId = FaceMatchAuditActions.SystemActorId })
+            .Where(t => autoIds.Contains(t.TaskId))
+            .ExecuteCommandAsync();
+
+        var stats = await _h.Unwelcome.GetStatsAsync(Submitter);
+
+        Assert.Equal(10, stats.TaskCount);
+        Assert.Equal(2, stats.DismissedCount);
+        Assert.Equal(2, stats.ConfirmedCount);        // 只含人工确认
+        Assert.Equal(6, stats.AutoConfirmedCount);    // 自动确认单独计数
+        Assert.Equal(0.5m, stats.DismissRate);        // 自动确认不稀释驳回率（否则会是 2/10 = 0.2）
+        var entryStats = Assert.Single(stats.Entries);
+        Assert.Equal(2, entryStats.ConfirmedCount);
+        Assert.Equal(6, entryStats.AutoConfirmedCount);
+        Assert.Equal(0.5m, entryStats.DismissRate);
+        Assert.False(entryStats.SuggestReview);
+        var bucket95 = stats.ScoreBuckets.Single(b => b.From == 95);
+        Assert.Equal(6, bucket95.Total);
+        Assert.Equal(6, bucket95.AutoConfirmedCount);
+        Assert.Equal(0, bucket95.ConfirmedCount);
+        Assert.Equal(0, bucket95.DismissedCount);
     }
 
     [Fact]

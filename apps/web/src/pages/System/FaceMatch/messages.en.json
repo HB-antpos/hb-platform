@@ -114,7 +114,9 @@
       "storeScopeRequired": "Select at least one store",
       "expiresRequired": "Select an expiry date",
       "expiresPast": "The expiry date must be after today",
-      "expiresTooFar": "The expiry date can be at most {{months}} months from today"
+      "expiresTooFar": "The expiry date can be at most {{months}} months from today",
+      "autoConfirmScoreRequired": "Enter the auto-confirm threshold (0 turns auto-confirm off)",
+      "autoConfirmScoreInvalid": "The auto-confirm threshold must be 0 (off) or a number from {{min}} to {{max}} with at most 2 decimal places"
     },
     "photos": {
       "add": "Add photos",
@@ -178,6 +180,7 @@
         "staffExclusionEnabled": "Staff exclusion",
         "trafficDedupEnabled": "Customer de-duplication",
         "unwelcomeListEnabled": "Enable Unwelcome Persons List",
+        "unwelcomeAutoConfirmScore": "Auto-confirm threshold (%)",
         "allowedSubjects": "Allowed subjects",
         "piaReference": "Privacy impact assessment (PIA) reference",
         "signageInstalledOn": "Signage installed on",
@@ -209,6 +212,7 @@
         "timeZone": "Leave blank to detect automatically. Effective time zone: {{zone}}; state: {{jurisdiction}}.",
         "crossBorderRegion": "Which region was reviewed. Currently configured processing region: {{region}}. If the region changes, every store's review record becomes void.",
         "dedupSignoff": "Sign-off specific to customer de-duplication, separate from the list's sign-off.",
+        "unwelcomeAutoConfirmScore": "When a task's similarity reaches or exceeds this value, the system automatically marks the task as Confirmed and no manual review is needed (staff still get the alert; the system never refuses service or notifies police automatically). Enter 0 to turn auto-confirm off; the default is 90. Similarity is not the probability of being the same person.",
         "unwelcomeAssessment": "Should cover this store's incident frequency, alternatives already tried and a proportionality analysis.",
         "unwelcomeSignoff": "Sign-off specific to the Unwelcome Persons List, separate from the de-duplication sign-off."
       },
@@ -426,6 +430,8 @@
         "nextStep": "Next step",
         "reviewers": "Reviewers"
       },
+      "autoConfirmedTag": "Auto-confirmed",
+      "autoConfirmedBy": "Confirmed automatically by the system",
       "reviewerFirst": "Reviewer: {{name}}",
       "reviewerSecond": "Additional reviewer: {{name}}",
       "actions": {
@@ -474,7 +480,7 @@
       }
     },
     "stats": {
-      "intro": "Review outcomes by entry and by similarity range: dismiss rate = dismissed / (dismissed + confirmed). A persistently high rate means many false positives; review whether the entry should stay on the list or raise the matching threshold. Counts only, no images or names.",
+      "intro": "Review outcomes by entry and by similarity range: dismiss rate = dismissed / (dismissed + manually confirmed). The dismiss rate counts only tasks decided by a person; tasks the system auto-confirmed are not included. A persistently high rate means many false positives; review whether the entry should stay on the list or raise the matching threshold. Counts only, no images or names.",
       "suggestBanner": "{{count}} entry(ies) have a persistently high dismiss rate. Consider reviewing whether they should stay on the list.",
       "byEntry": "By entry",
       "byScore": "By similarity range",
@@ -483,7 +489,8 @@
       "taskCount": "Tasks",
       "pendingCount": "Pending",
       "dismissedCount": "Dismissed",
-      "confirmedCount": "Confirmed",
+      "confirmedCount": "Manually confirmed",
+      "autoConfirmedCount": "Auto-confirmed",
       "dismissRate": "Dismiss rate",
       "suggestion": "Suggestion",
       "suggestReview": "Review whether this entry should stay on the list",

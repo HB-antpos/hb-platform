@@ -121,6 +121,10 @@ public sealed record FaceStoreProfileDto
     public bool StaffExclusionEnabled { get; init; }
     public bool TrafficDedupEnabled { get; init; }
     public bool UnwelcomeListEnabled { get; init; }
+
+    /// <summary>名单命中自动确认阈值（生效值）：0 = 不自动确认；没有档案行或未设置时为默认 90。</summary>
+    public decimal UnwelcomeAutoConfirmScore { get; init; } = BlazorApp.Shared.Models.FaceStoreProfile.DefaultUnwelcomeAutoConfirmScore;
+
     public string? AllowedSubjects { get; init; }
     public string? PiaReference { get; init; }
     public string? SignageInstalledOn { get; init; }
@@ -183,6 +187,10 @@ public sealed record FaceStoreProfileUpdateRequest
     public bool StaffExclusionEnabled { get; init; }
     public bool TrafficDedupEnabled { get; init; }
     public bool UnwelcomeListEnabled { get; init; }
+
+    /// <summary>名单命中自动确认阈值：省略 / null = 保持库里原值（旧版 App 的保存不带它）；0 = 关闭；50–100（最多两位小数）= 阈值。</summary>
+    public decimal? UnwelcomeAutoConfirmScore { get; init; }
+
     public string? AllowedSubjects { get; init; }
     public string? PiaReference { get; init; }
     public string? SignageInstalledOn { get; init; }
@@ -424,6 +432,9 @@ public sealed record FaceUnwelcomeTaskDto
     public string? SecondReviewerName { get; init; }
     public DateTime? SecondReviewedAtUtc { get; init; }
 
+    /// <summary>true = 系统按门店阈值自动确认的（ReviewStatus 为 Confirmed，FirstReviewerName 为空，不可再复核）。</summary>
+    public bool AutoConfirmed { get; init; }
+
     /// <summary>命中图是否还在（到期删除后为 false，任务不能再复核）。</summary>
     public bool ImageAvailable { get; init; }
 
@@ -452,9 +463,14 @@ public sealed record FaceUnwelcomeStatsEntryDto
     public int TaskCount { get; init; }
     public int PendingCount { get; init; }
     public int DismissedCount { get; init; }
+
+    /// <summary>人工确认的任务数（不含系统自动确认的）。</summary>
     public int ConfirmedCount { get; init; }
 
-    /// <summary>驳回率 = 已驳回 / (已驳回 + 已确认)；没有已结束任务时为 null。</summary>
+    /// <summary>系统按门店阈值自动确认的任务数：没有人判断过，不参与驳回率与「建议复核」。</summary>
+    public int AutoConfirmedCount { get; init; }
+
+    /// <summary>驳回率 = 已驳回 / (已驳回 + 人工确认)；没有人工结案的任务时为 null。</summary>
     public decimal? DismissRate { get; init; }
 
     /// <summary>已结束任务不少于 5 条且驳回率不低于 80%：提示复核该条目是否应出名单。</summary>
@@ -467,7 +483,12 @@ public sealed record FaceUnwelcomeStatsBucketDto
     public int To { get; init; }
     public int Total { get; init; }
     public int DismissedCount { get; init; }
+
+    /// <summary>人工确认的任务数（不含自动确认）。</summary>
     public int ConfirmedCount { get; init; }
+
+    /// <summary>系统自动确认的任务数（没有人判断过，不进驳回率）。</summary>
+    public int AutoConfirmedCount { get; init; }
 }
 
 public sealed record FaceUnwelcomeStatsDto
@@ -475,7 +496,12 @@ public sealed record FaceUnwelcomeStatsDto
     public int TaskCount { get; init; }
     public int PendingCount { get; init; }
     public int DismissedCount { get; init; }
+
+    /// <summary>人工确认的任务数（不含自动确认）。</summary>
     public int ConfirmedCount { get; init; }
+
+    /// <summary>系统自动确认的任务数；TaskCount = 待复核 + 驳回 + 人工确认 + 自动确认。</summary>
+    public int AutoConfirmedCount { get; init; }
     public decimal? DismissRate { get; init; }
     public IReadOnlyList<FaceUnwelcomeStatsEntryDto> Entries { get; init; } = [];
 

@@ -84,6 +84,8 @@ export default function ReviewTasksTab({ context }: { context: FaceMatchTabConte
             <Tag color={REVIEW_STATUS_COLORS[record.reviewStatus] ?? 'default'} style={{ marginInlineEnd: 0 }}>
               {REVIEW_STATUS_LABEL_KEYS[record.reviewStatus] ? t(REVIEW_STATUS_LABEL_KEYS[record.reviewStatus]) : record.reviewStatusName}
             </Tag>
+            {/* 相似度达到门店阈值、由系统自动确认的任务：状态仍是「已确认」，旁边加小标签说明不是人工判断的。 */}
+            {record.autoConfirmed ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('faceMatch.review.autoConfirmedTag')}</Tag> : null}
             {!record.imageAvailable ? <Tag style={{ marginInlineEnd: 0 }}>{t('faceMatch.review.imageDeleted')}</Tag> : null}
           </Space>
         ),
@@ -100,7 +102,10 @@ export default function ReviewTasksTab({ context }: { context: FaceMatchTabConte
         key: 'reviewers',
         width: 220,
         render: (_: unknown, record) =>
-          record.firstReviewerName ? (
+          // 自动确认的任务没有复核人：明确写「系统自动确认」，而不是空白；人工复核的任务照常显示复核人姓名。
+          record.autoConfirmed ? (
+            t('faceMatch.review.autoConfirmedBy')
+          ) : record.firstReviewerName ? (
             <div>
               <div>{t('faceMatch.review.reviewerFirst', { name: record.firstReviewerName })}</div>
               {record.secondReviewerName ? <div>{t('faceMatch.review.reviewerSecond', { name: record.secondReviewerName })}</div> : null}

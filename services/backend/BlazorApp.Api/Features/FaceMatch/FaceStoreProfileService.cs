@@ -121,8 +121,12 @@ public sealed class FaceStoreProfileService(
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var entity = ToEntity(store.StoreCode, draft, now, actor.Name);
-        var exists = await _db.Queryable<FaceStoreProfile>().AnyAsync(p => p.StoreCode == store.StoreCode, cancellationToken);
+        var existing = await _db.Queryable<FaceStoreProfile>().FirstAsync(p => p.StoreCode == store.StoreCode, cancellationToken);
+        var exists = existing != null;
+        // 自动确认阈值：请求省略 = 保持库里原值（旧版 App 整体替换保存时不带这个字段，不能把它悄悄清掉）。
+        var previousAutoConfirm = existing?.UnwelcomeAutoConfirmScore ?? FaceStoreProfile.DefaultUnwelcomeAutoConfirmScore;
+        var autoConfirmScore = draft.UnwelcomeAutoConfirmScore ?? previousAutoConfirm;
+        var entity = ToEntity(store.StoreCode, draft, autoConfirmScore, now, actor.Name);
         if (exists)
         {
             await _db.Updateable(entity).ExecuteCommandAsync(cancellationToken);
@@ -150,6 +154,11 @@ public sealed class FaceStoreProfileService(
         var auditResult = report.HasWarnings
             ? $"mode={draft.Mode};warnings={CountWarnings(report)}"
             : $"mode={draft.Mode}";
+        // 自动确认阈值改动要留痕（它决定哪些命中不再有人复核）：只在变了的时候追加，最长 "mode=2;warnings=NN;auto=99.99" 仍在 32 位内。
+        if (autoConfirmScore != previousAutoConfirm)
+        {
+            auditResult += $";auto={autoConfirmScore.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}";
+        }
         await audit.WriteAsync(
             actor, FaceMatchAuditActions.ProfileUpdate, store.StoreCode, store.StoreCode,
             auditResult, cancellationToken);
@@ -215,6 +224,8 @@ public sealed class FaceStoreProfileService(
             throw FieldInvalid("crossBorderRegion", "处理地域不在允许的名单内。");
         }
 
+        var autoConfirmScore = NormalizeAutoConfirmScore(request.UnwelcomeAutoConfirmScore);
+
         return new ProfileDraft
         {
             Mode = (byte)mode,
@@ -222,6 +233,7 @@ public sealed class FaceStoreProfileService(
             StaffExclusionEnabled = request.StaffExclusionEnabled,
             TrafficDedupEnabled = request.TrafficDedupEnabled,
             UnwelcomeListEnabled = request.UnwelcomeListEnabled,
+            UnwelcomeAutoConfirmScore = autoConfirmScore,
             AllowedSubjects = Text(request.AllowedSubjects, 200, "allowedSubjects"),
             PiaReference = Text(request.PiaReference, 100, "piaReference"),
             SignageInstalledOn = Date(request.SignageInstalledOn, "signageInstalledOn", allowFuture: false),
@@ -241,6 +253,26 @@ public sealed class FaceStoreProfileService(
             StaffTrainingDate = Date(request.StaffTrainingDate, "staffTrainingDate", allowFuture: false),
             PrivacyContact = Text(request.PrivacyContact, 100, "privacyContact"),
         };
+    }
+
+    /// <summary>自动确认阈值：省略（null）= 保持原值；0 = 关闭；50–100 且最多两位小数 = 阈值。其余一律 400（与闸门缺项无关）。</summary>
+    private static decimal? NormalizeAutoConfirmScore(decimal? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var v = value.Value;
+        var valid = v == Math.Round(v, 2, MidpointRounding.AwayFromZero)
+            && v <= 100m
+            && (v == 0m || v >= FaceStoreProfile.MinUnwelcomeAutoConfirmScore);
+        if (!valid)
+        {
+            throw FieldInvalid("unwelcomeAutoConfirmScore", "自动确认阈值必须是 0（不自动确认）或 50–100 之间、最多两位小数的数字。");
+        }
+
+        return v;
     }
 
     /// <summary>「今天」按门店时区算；未知门店时区时按悉尼（只用于「不能晚于今天」这类宽松校验）。</summary>
@@ -487,6 +519,7 @@ public sealed class FaceStoreProfileService(
         StaffExclusionEnabled = p.StaffExclusionEnabled,
         TrafficDedupEnabled = p.TrafficDedupEnabled,
         UnwelcomeListEnabled = p.UnwelcomeListEnabled,
+        UnwelcomeAutoConfirmScore = p.UnwelcomeAutoConfirmScore,
         AllowedSubjects = p.AllowedSubjects,
         PiaReference = p.PiaReference,
         SignageInstalledOn = p.SignageInstalledOn?.Date,
@@ -507,7 +540,7 @@ public sealed class FaceStoreProfileService(
         PrivacyContact = p.PrivacyContact,
     };
 
-    private static FaceStoreProfile ToEntity(string storeCode, ProfileDraft d, DateTime now, string updatedBy) => new()
+    private static FaceStoreProfile ToEntity(string storeCode, ProfileDraft d, decimal autoConfirmScore, DateTime now, string updatedBy) => new()
     {
         StoreCode = storeCode,
         Mode = d.Mode,
@@ -515,6 +548,7 @@ public sealed class FaceStoreProfileService(
         StaffExclusionEnabled = d.StaffExclusionEnabled,
         TrafficDedupEnabled = d.TrafficDedupEnabled,
         UnwelcomeListEnabled = d.UnwelcomeListEnabled,
+        UnwelcomeAutoConfirmScore = autoConfirmScore,
         AllowedSubjects = d.AllowedSubjects,
         PiaReference = d.PiaReference,
         SignageInstalledOn = d.SignageInstalledOn,
@@ -551,6 +585,7 @@ public sealed class FaceStoreProfileService(
             StaffExclusionEnabled = e.StaffExclusionEnabled,
             TrafficDedupEnabled = e.TrafficDedupEnabled,
             UnwelcomeListEnabled = e.UnwelcomeListEnabled,
+            UnwelcomeAutoConfirmScore = e.UnwelcomeAutoConfirmScore,
             AllowedSubjects = e.AllowedSubjects,
             PiaReference = e.PiaReference,
             SignageInstalledOn = FaceMatchRules.FormatDate(e.SignageInstalledOn),
@@ -586,6 +621,9 @@ public sealed class FaceStoreProfileService(
         public bool StaffExclusionEnabled { get; init; }
         public bool TrafficDedupEnabled { get; init; }
         public bool UnwelcomeListEnabled { get; init; }
+
+        /// <summary>null = 请求没带（保存时保持库里原值）；DraftFromEntity 给出库里的值。</summary>
+        public decimal? UnwelcomeAutoConfirmScore { get; init; }
         public string? AllowedSubjects { get; init; }
         public string? PiaReference { get; init; }
         public DateTime? SignageInstalledOn { get; init; }

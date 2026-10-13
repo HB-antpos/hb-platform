@@ -38,6 +38,9 @@ const API_BASE = '/api/react/v1/face-match'
  * 3. 抛出的错误不得带上传文件内容、图片字节或响应体里的敏感内容；本文件禁止出现 console.*，由 sourceContract 测试静态守住。
  */
 const NO_STORE = { cache: 'no-store' } as const
+
+/** 命中任务自动确认阈值的默认值（与后端一致）：档案行不存在、字段缺失或不是数字时使用。 */
+export const DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE = 90
 const API_BASE_URL = (((import.meta as ImportMeta & { env?: ImportMetaEnv }).env?.VITE_API_BASE_URL) || '').trim()
 
 // ───────────── 归一化小工具（后端字段缺失 / 类型漂移时界面不崩） ─────────────
@@ -142,6 +145,8 @@ export function normalizeFaceStoreProfile(value: unknown): FaceStoreProfile {
     unwelcomeLegalSignoffAt: asNullableString(raw.unwelcomeLegalSignoffAt),
     staffTrainingDate: asNullableString(raw.staffTrainingDate),
     privacyContact: asNullableString(raw.privacyContact),
+    // 生效值：老后端没有这个字段 / 不是数字时按默认 90（0 是合法值，表示不自动确认，不能被当成缺失）。
+    unwelcomeAutoConfirmScore: asNumber(raw.unwelcomeAutoConfirmScore, DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE),
     updatedAtUtc: asNullableString(raw.updatedAtUtc),
     updatedBy: asNullableString(raw.updatedBy),
     effectiveTimeZoneId: asString(raw.effectiveTimeZoneId),
@@ -342,6 +347,8 @@ export function normalizeFaceUnwelcomeTask(value: unknown): FaceUnwelcomeTask {
     referencePhotoCount: Math.max(0, Math.trunc(asNumber(raw.referencePhotoCount))),
     nextStep: asString(raw.nextStep, 'none'),
     canReview: raw.canReview === true,
+    // 老后端没有这个字段：按「人工复核的任务」处理。
+    autoConfirmed: raw.autoConfirmed === true,
   }
 }
 
@@ -354,6 +361,8 @@ function normalizeStatsEntry(value: unknown): FaceUnwelcomeStatsEntry {
     pendingCount: asNumber(raw.pendingCount),
     dismissedCount: asNumber(raw.dismissedCount),
     confirmedCount: asNumber(raw.confirmedCount),
+    // 系统自动确认的任务单独计数（不再算进「人工确认」）；老后端没有这个字段，缺失或不是数字按 0。
+    autoConfirmedCount: Math.max(0, asNumber(raw.autoConfirmedCount)),
     dismissRate: asNullableNumber(raw.dismissRate),
     suggestReview: raw.suggestReview === true,
   }
@@ -367,6 +376,8 @@ function normalizeStatsBucket(value: unknown): FaceUnwelcomeStatsBucket {
     total: asNumber(raw.total),
     dismissedCount: asNumber(raw.dismissedCount),
     confirmedCount: asNumber(raw.confirmedCount),
+    // 系统自动确认的任务单独计数（不再算进「人工确认」）；老后端没有这个字段，缺失或不是数字按 0。
+    autoConfirmedCount: Math.max(0, asNumber(raw.autoConfirmedCount)),
   }
 }
 
@@ -377,6 +388,8 @@ export function normalizeFaceUnwelcomeStats(value: unknown): FaceUnwelcomeStats 
     pendingCount: asNumber(raw.pendingCount),
     dismissedCount: asNumber(raw.dismissedCount),
     confirmedCount: asNumber(raw.confirmedCount),
+    // 系统自动确认的任务单独计数（不再算进「人工确认」）；老后端没有这个字段，缺失或不是数字按 0。
+    autoConfirmedCount: Math.max(0, asNumber(raw.autoConfirmedCount)),
     dismissRate: asNullableNumber(raw.dismissRate),
     entries: asArray(raw.entries, normalizeStatsEntry),
     scoreBuckets: asArray(raw.scoreBuckets, normalizeStatsBucket),
@@ -409,13 +422,23 @@ export async function getFaceStoreProfile(storeCode: string, signal?: AbortSigna
   return normalizeFaceStoreProfile(unwrapApiData(response))
 }
 
+/**
+ * 档案请求体（PUT 与 POST .../check 共用）：unwelcomeAutoConfirmScore 始终出现在 JSON 里。
+ * 后端把「省略」和 null 都当作「保持库里原值」，所以这里把缺失 / 非数字统一写成 null，绝不静默改写成别的数字；
+ * 保存前页面一定先校验过阈值，真正保存时这里就是用户填的数字。
+ */
+export function buildProfileRequestBody(payload: FaceStoreProfileUpdateRequest): FaceStoreProfileUpdateRequest {
+  const score = payload.unwelcomeAutoConfirmScore
+  return { ...payload, unwelcomeAutoConfirmScore: typeof score === 'number' && Number.isFinite(score) ? score : null }
+}
+
 /** 只检查闸门，不保存：用于表单实时提示「缺哪一项」。 */
 export async function checkFaceStoreProfile(
   storeCode: string,
   payload: FaceStoreProfileUpdateRequest,
   signal?: AbortSignal,
 ): Promise<FaceGateReport> {
-  const response = await request.post<Envelope>(`${profilePath(storeCode)}/check`, payload, { signal, ...NO_STORE })
+  const response = await request.post<Envelope>(`${profilePath(storeCode)}/check`, buildProfileRequestBody(payload), { signal, ...NO_STORE })
   return normalizeFaceGateReport(unwrapApiData(response))
 }
 
@@ -424,7 +447,7 @@ export async function updateFaceStoreProfile(
   storeCode: string,
   payload: FaceStoreProfileUpdateRequest,
 ): Promise<FaceStoreProfile> {
-  const response = await request.put<Envelope>(profilePath(storeCode), payload, NO_STORE)
+  const response = await request.put<Envelope>(profilePath(storeCode), buildProfileRequestBody(payload), NO_STORE)
   return normalizeFaceStoreProfile(unwrapApiData(response))
 }
 

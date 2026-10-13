@@ -74,9 +74,17 @@ export interface FaceStoreProfileUpdateRequest {
   unwelcomeLegalSignoffAt: string | null
   staffTrainingDate: string | null
   privacyContact: string | null
+  /**
+   * 命中任务自动确认阈值（相似度 0-100）：达到或超过时系统自动把任务标为「已确认」，不再需要人工复核。
+   * 0 = 不自动确认；50–100（最多 2 位小数）= 阈值。Web 保存时始终带上数字；
+   * null = 保持库里原值（后端语义，旧版 App 的保存不带这个字段；Web 只在输入当前不合法、仅做闸门检查时才会是 null，保存前一定先校验）。
+   */
+  unwelcomeAutoConfirmScore: number | null
 }
 
 export interface FaceStoreProfile extends FaceStoreProfileUpdateRequest {
+  /** 生效值：0 = 不自动确认；没有档案行或未设置时为默认 90。 */
+  unwelcomeAutoConfirmScore: number
   storeCode: string
   storeName: string | null
   /** 档案行是否已存在；不存在时其余字段是默认值。 */
@@ -302,6 +310,11 @@ export interface FaceUnwelcomeTask {
   /** first = 待复核；none = 已结束。旧版后端还会返回 second（已一审待二审的遗留任务），前端一律当作待复核。 */
   nextStep: string
   canReview: boolean
+  /**
+   * true = 相似度达到门店阈值，系统自动确认的任务：此时 reviewStatusName 为 confirmed、firstReviewerName 为 null、canReview 为 false。
+   * 老后端没有这个字段，归一化为 false。
+   */
+  autoConfirmed: boolean
 }
 
 export type FaceReviewVerdict = 'match' | 'notMatch'
@@ -312,8 +325,11 @@ export interface FaceUnwelcomeStatsEntry {
   taskCount: number
   pendingCount: number
   dismissedCount: number
+  /** 只含人工确认的任务（系统自动确认的单独计入 autoConfirmedCount）。 */
   confirmedCount: number
-  /** 驳回率 0-1；没有已结束任务时为 null。 */
+  /** 系统自动确认的任务数；老后端没有这个字段，归一化为 0。不参与驳回率和「建议复核」。 */
+  autoConfirmedCount: number
+  /** 驳回率 0-1 = 已驳回 ÷（已驳回 + 人工确认）；没有人工结案的任务时为 null。 */
   dismissRate: number | null
   suggestReview: boolean
 }
@@ -323,14 +339,21 @@ export interface FaceUnwelcomeStatsBucket {
   to: number
   total: number
   dismissedCount: number
+  /** 只含人工确认的任务。 */
   confirmedCount: number
+  /** 系统自动确认的任务数；老后端没有这个字段，归一化为 0。 */
+  autoConfirmedCount: number
 }
 
 export interface FaceUnwelcomeStats {
   taskCount: number
   pendingCount: number
   dismissedCount: number
+  /** 只含人工确认的任务。taskCount = pendingCount + dismissedCount + confirmedCount + autoConfirmedCount。 */
   confirmedCount: number
+  /** 系统自动确认的任务数；老后端没有这个字段，归一化为 0。 */
+  autoConfirmedCount: number
+  /** 驳回率 = 已驳回 ÷（已驳回 + 人工确认）；系统自动确认的不计入；没有人工结案的任务时为 null。 */
   dismissRate: number | null
   entries: FaceUnwelcomeStatsEntry[]
   scoreBuckets: FaceUnwelcomeStatsBucket[]

@@ -70,6 +70,9 @@ public sealed class FaceMatchBackgroundService(
         var now = timeProvider.GetUtcNow();
         await RunIfDueAsync("hit-notify", TimeSpan.Zero, now, async scope =>
             await scope.GetRequiredService<FaceHitNotifier>().PublishPendingAsync(cancellationToken), cancellationToken);
+        // 提示发出后再按门店阈值自动确认高相似度任务（只读写主库，不调用腾讯云；每个节拍一条廉价索引查询）。
+        await RunIfDueAsync("hit-auto-confirm", TimeSpan.Zero, now, async scope =>
+            await scope.GetRequiredService<FaceMatchMaintenance>().AutoConfirmHitsAsync(cancellationToken), cancellationToken);
         await RunIfDueAsync("visit-groups", VisitGroupInterval, now, async scope =>
             await scope.GetRequiredService<FaceMatchMaintenance>().CleanupVisitGroupsAsync(cancellationToken), cancellationToken);
         await RunIfDueAsync("housekeeping", HousekeepingInterval, now, async scope =>

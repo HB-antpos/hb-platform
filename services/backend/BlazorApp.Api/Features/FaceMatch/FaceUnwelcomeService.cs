@@ -630,13 +630,22 @@ public sealed class FaceUnwelcomeService(
         }
     }
 
+    /// <summary>系统自动确认的任务（复核人记为 system）：没有人判断过，误报统计里单独计数，不进驳回率。</summary>
+    private static bool IsAutoConfirmed(byte reviewStatus, string? firstReviewerId) =>
+        reviewStatus == FaceMatchReviewStatus.Confirmed
+        && string.Equals(firstReviewerId, FaceMatchAuditActions.SystemActorId, StringComparison.Ordinal);
+
+    /// <summary>人工确认的任务（Confirmed 且不是系统自动确认）。</summary>
+    private static bool IsManuallyConfirmed(byte reviewStatus, string? firstReviewerId) =>
+        reviewStatus == FaceMatchReviewStatus.Confirmed && !IsAutoConfirmed(reviewStatus, firstReviewerId);
+
     public async Task<FaceUnwelcomeStatsDto> GetStatsAsync(FaceMatchActor actor, CancellationToken cancellationToken = default)
     {
         var allowedStores = await GetAllowedStoresAsync(actor, cancellationToken);
         var allowedList = allowedStores?.ToList() ?? [];
         var tasks = await _db.Queryable<FaceMatchTask>()
             .WhereIF(allowedStores != null, t => allowedList.Contains(t.StoreCode))
-            .Select(t => new { t.EntryId, t.Score, t.ReviewStatus })
+            .Select(t => new { t.EntryId, t.Score, t.ReviewStatus, t.FirstReviewerId })
             .ToListAsync(cancellationToken);
 
         var entryIds = tasks.Select(t => t.EntryId).Distinct().ToList();
@@ -653,7 +662,8 @@ public sealed class FaceUnwelcomeService(
             .Select(g =>
             {
                 var dismissed = g.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Dismissed);
-                var confirmed = g.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Confirmed);
+                var confirmed = g.Count(t => IsManuallyConfirmed(t.ReviewStatus, t.FirstReviewerId));   // 驳回率只看人工判断
+                var autoConfirmed = g.Count(t => IsAutoConfirmed(t.ReviewStatus, t.FirstReviewerId));
                 var closed = dismissed + confirmed;
                 decimal? rate = closed == 0 ? null : Math.Round((decimal)dismissed / closed, 4);
                 return new FaceUnwelcomeStatsEntryDto
@@ -664,6 +674,7 @@ public sealed class FaceUnwelcomeService(
                     PendingCount = g.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Pending),
                     DismissedCount = dismissed,
                     ConfirmedCount = confirmed,
+                    AutoConfirmedCount = autoConfirmed,
                     DismissRate = rate,
                     SuggestReview = closed >= StatsMinReviewedForFlag && rate >= StatsDismissRateForFlag,
                 };
@@ -685,18 +696,21 @@ public sealed class FaceUnwelcomeService(
                 To = high == 100 ? 100 : high - 1,
                 Total = inBucket.Count,
                 DismissedCount = inBucket.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Dismissed),
-                ConfirmedCount = inBucket.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Confirmed),
+                ConfirmedCount = inBucket.Count(t => IsManuallyConfirmed(t.ReviewStatus, t.FirstReviewerId)),
+                AutoConfirmedCount = inBucket.Count(t => IsAutoConfirmed(t.ReviewStatus, t.FirstReviewerId)),
             });
         }
 
         var totalDismissed = tasks.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Dismissed);
-        var totalConfirmed = tasks.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Confirmed);
+        var totalConfirmed = tasks.Count(t => IsManuallyConfirmed(t.ReviewStatus, t.FirstReviewerId));
+        var totalAutoConfirmed = tasks.Count(t => IsAutoConfirmed(t.ReviewStatus, t.FirstReviewerId));
         return new FaceUnwelcomeStatsDto
         {
             TaskCount = tasks.Count,
             PendingCount = tasks.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Pending),
             DismissedCount = totalDismissed,
             ConfirmedCount = totalConfirmed,
+            AutoConfirmedCount = totalAutoConfirmed,
             DismissRate = totalDismissed + totalConfirmed == 0
                 ? null
                 : Math.Round((decimal)totalDismissed / (totalDismissed + totalConfirmed), 4),
@@ -787,6 +801,8 @@ public sealed class FaceUnwelcomeService(
                 FirstReviewedAtUtc = FaceMatchRules.AsUtc(t.FirstReviewedAtUtc),
                 SecondReviewerName = t.SecondReviewerId != null ? names.GetValueOrDefault(t.SecondReviewerId) : null,
                 SecondReviewedAtUtc = FaceMatchRules.AsUtc(t.SecondReviewedAtUtc),
+                // 系统自动确认的任务：复核人列记的是 system（不是用户），页面据此显示「自动确认」。
+                AutoConfirmed = IsAutoConfirmed(t.ReviewStatus, t.FirstReviewerId),
                 ImageAvailable = imageAvailable,
                 ImageDeleteAtUtc = FaceMatchRules.AsUtc(t.ImageDeleteAtUtc),
                 ReferencePhotoCount = referenceCount,

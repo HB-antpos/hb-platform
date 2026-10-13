@@ -1,5 +1,5 @@
 import { CheckCircleFilled, CloseCircleFilled, ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Col, DatePicker, Divider, Form, Input, Radio, Row, Space, Spin, Switch, Tag, Typography, message } from 'antd'
+import { Alert, Button, Col, DatePicker, Divider, Form, Input, InputNumber, Radio, Row, Space, Spin, Switch, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -28,12 +28,14 @@ import {
   isSameProfileRequest,
   profileToFormValues,
   summarizeGates,
+  validateAutoConfirmScore,
   type FaceProfileFormValues,
 } from './logic'
 import { NUMERIC_STYLE, StoreSelect, type FaceMatchTabContext } from './shared'
 import { useRemote } from './useRemote'
 
 const CHECK_DEBOUNCE_MS = 500
+const AUTO_CONFIRM_SCORE_FIELD = 'unwelcomeAutoConfirmScore'
 
 // 日期 / 日期时间在表单里统一存字符串（yyyy-MM-dd / UTC ISO），DatePicker 通过这两组属性做双向转换。
 const dateFieldProps = {
@@ -101,6 +103,13 @@ function ProfileForm({ context, profile, onSaved }: ProfileFormProps) {
   )
 
   const handleSave = async () => {
+    // 先在前端校验自动确认阈值：不合法就在字段下提示并阻止保存（后端也会校验，非法值返回 400）。
+    if (validateAutoConfirmScore(form.getFieldValue(AUTO_CONFIRM_SCORE_FIELD)) !== null) {
+      setSaveError(null)
+      void form.validateFields([AUTO_CONFIRM_SCORE_FIELD]).catch(() => undefined)
+      form.scrollToField(AUTO_CONFIRM_SCORE_FIELD)
+      return
+    }
     setSaving(true)
     setSaveError(null)
     try {
@@ -187,6 +196,25 @@ function ProfileForm({ context, profile, onSaved }: ProfileFormProps) {
             <Col xs={24} md={12}>
               <Form.Item name="unwelcomeListEnabled" valuePropName="checked" label={t('faceMatch.profile.fields.unwelcomeListEnabled')} extra={t('faceMatch.profile.hints.unwelcomeList')}>
                 <Switch />
+              </Form.Item>
+            </Col>
+            {/* 命中自动确认阈值：紧跟「启用不受欢迎人员名单」开关，整行显示，说明文字较长。0 = 不自动确认。 */}
+            <Col xs={24}>
+              <Form.Item
+                name={AUTO_CONFIRM_SCORE_FIELD}
+                label={t('faceMatch.profile.fields.unwelcomeAutoConfirmScore')}
+                extra={t('faceMatch.profile.hints.unwelcomeAutoConfirmScore')}
+                rules={[
+                  {
+                    // 与保存前的校验同一个函数：必须是 0，或 50–100 之间、最多 2 位小数。
+                    validator: async (_, value: unknown) => {
+                      const issue = validateAutoConfirmScore(value)
+                      if (issue) throw new Error(t(issue.key, issue.params))
+                    },
+                  },
+                ]}
+              >
+                <InputNumber style={{ width: 200 }} step={1} suffix="%" inputMode="decimal" />
               </Form.Item>
             </Col>
           </Row>

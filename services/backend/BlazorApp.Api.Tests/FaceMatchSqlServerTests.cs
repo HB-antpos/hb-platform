@@ -456,6 +456,8 @@ SELECT N'1013', DATEADD(hour, i, '2026-09-30 14:00:00'), 1, 0, 0, 0, 0, 0 FROM n
                          FaceCaptureSchema.ApplySql, FaceMatchSchema.ApplySql, AppNotificationSchema.ApplySql,
                          FaceMatchSchema.VerifySql,
                          FaceTrafficHourlySchema.ApplySql, FaceTrafficHourlySchema.VerifySql,
+                         // 新实体会 SELECT FaceStoreProfile.UnwelcomeAutoConfirmScore：与生产一样先执行这条迁移再用新版代码。
+                         FaceUnwelcomeAutoConfirmSchema.ApplySql, FaceUnwelcomeAutoConfirmSchema.VerifySql,
                      })
             {
                 await database.ExecuteAsync(sql);
