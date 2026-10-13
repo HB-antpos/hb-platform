@@ -1815,6 +1815,50 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 门店价格更新已通知记录表_可重复执行_任务编号主键唯一_并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql));
+        Assert.Equal(52800, missing.Number);
+
+        await ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql);
+
+        // 每个任务至多一行：同一任务编号第二次写入被主键拒绝；TaskId=0 是首次启用基线标记，合法。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StorePriceUpdateNotice (TaskId, ChangeCount, NotifiedAtUtc)
+            VALUES (0, 0, SYSUTCDATETIME()), (1, 1, SYSUTCDATETIME());
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.StorePriceUpdateNotice (TaskId, ChangeCount, NotifiedAtUtc)
+                VALUES (1, 2, SYSUTCDATETIME());
+                """));
+        Assert.Equal(2627, duplicate.Number);
+
+        // 列类型被改（ChangeCount 改成 bigint）报 52801；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StorePriceUpdateNotice ALTER COLUMN ChangeCount bigint NOT NULL;");
+        var wrongType = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql));
+        Assert.Equal(52801, wrongType.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StorePriceUpdateNotice ALTER COLUMN ChangeCount int NOT NULL;");
+        await ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql);
+
+        // 主键被删报 52802；补回主键后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StorePriceUpdateNotice DROP CONSTRAINT PK_StorePriceUpdateNotice;");
+        var pkMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql));
+        Assert.Equal(52802, pkMissing.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StorePriceUpdateNotice ADD CONSTRAINT PK_StorePriceUpdateNotice PRIMARY KEY CLUSTERED (TaskId);");
+        await ExecuteNonQueryAsync(main, StorePriceUpdateNoticeSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

@@ -96,4 +96,10 @@ public static class AppNotificationTypes
 
     /// <summary>考勤审批已处理（通过 / 驳回），发给申请人；文案为英文，不含审批意见。</summary>
     public const string ApprovalDecided = "approval.decided";
+
+    /// <summary>
+    /// 门店价格更新合并推送：仓库调价后本店有商品需要改价或换货架标签（同一门店窗口内多条任务合并为一条）。
+    /// 只发给该店持有 StoreProducts.PriceUpdates 的人；正文为英文，只带数量，不含商品与价格明细。
+    /// </summary>
+    public const string StorePriceUpdates = "store.price_updates";
 }
