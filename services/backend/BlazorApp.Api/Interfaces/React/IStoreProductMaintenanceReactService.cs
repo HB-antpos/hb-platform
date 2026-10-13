@@ -63,6 +63,21 @@ namespace BlazorApp.Api.Interfaces.React
             List<string>? accessibleStoreCodes
         );
 
+        Task<ApiResponse<StoreProductNameUpdateResultDto>> UpdateProductNameAsync(
+            string productCode,
+            UpdateStoreProductNameDto request,
+            string updatedBy,
+            List<string>? accessibleStoreCodes
+        );
+
+        /// <summary>读取商品名称的修改记录（从商品变更历史里筛出 productName 字段的变化，新的在前）。</summary>
+        Task<ApiResponse<StoreProductNameHistoryDto>> GetProductNameHistoryAsync(
+            string productCode,
+            string? storeCode,
+            int limit,
+            List<string>? accessibleStoreCodes
+        );
+
         Task<ApiResponse<StoreProductStorePriceDto>> UpdateStorePriceAsync(
             string uuid,
             UpdateStoreProductPriceDto request,

@@ -173,6 +173,232 @@ public sealed class ProductChangeHistoryLegacyEntryPointTests : IDisposable
         Assert.Equal(0, (await _db.Queryable<DomesticProduct>().SingleAsync(x => x.ProductCode == "product-1")).ProductType);
     }
 
+    [Fact]
+    public async Task UpdateProductNameAsync_成功时同步改主档与国内商品镜像_记录历史并只入队名称字段()
+    {
+        await SeedProductAndDomesticProductAsync(0);
+        var contexts = new List<WarehouseProductChangeHistoryContextDto>();
+        var enqueued = new List<ProductMaintenanceHqMutationRequest>();
+        var service = CreateStoreMaintenanceService(
+            CreateHistoryService(contexts).Object,
+            "server-user-guid",
+            "服务端更新者",
+            enqueued
+        );
+
+        var result = await service.UpdateProductNameAsync(
+            "product-1",
+            new UpdateStoreProductNameDto { ProductName = "  新的商品名称  " },
+            "请求传入的名称",
+            null
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.Data!.Changed);
+        // 首尾空白被去掉后写入。
+        Assert.Equal("新的商品名称", result.Data.ProductName);
+        var product = await _db.Queryable<Product>().SingleAsync(item => item.ProductCode == "product-1");
+        var domestic = await _db.Queryable<DomesticProduct>().SingleAsync(item => item.ProductCode == "product-1");
+        Assert.Equal("新的商品名称", product.ProductName);
+        Assert.Equal("新的商品名称", domestic.ProductName);
+        // 操作人取服务端身份，不取请求里传来的名字。
+        Assert.Equal("服务端更新者", product.UpdatedBy);
+        Assert.Equal("服务端更新者", domestic.UpdatedBy);
+
+        var context = Assert.Single(contexts);
+        Assert.Equal("Update", context.Action);
+        Assert.Equal("StoreProductMaintenance", context.Source);
+        Assert.Equal("product-1", context.SourceReference);
+        Assert.Equal("server-user-guid", context.ActorUserGuid);
+        Assert.Equal("服务端更新者", context.ActorName);
+
+        // HQ 同步只带名称字段：不能顺带推价格、类型等其它列。
+        var request = Assert.Single(enqueued);
+        Assert.Equal(ProductMaintenanceHqOperationKinds.ProductNameUpdated, request.OperationKind);
+        Assert.Equal("product-1", request.ProductCode);
+        Assert.Equal(new[] { ProductMaintenanceHqFieldMasks.ProductName }, request.FieldMask.ToArray());
+    }
+
+    [Fact]
+    public async Task UpdateProductNameAsync_名称没变时不写库不记历史不入队()
+    {
+        await SeedProductAndDomesticProductAsync(0);
+        var contexts = new List<WarehouseProductChangeHistoryContextDto>();
+        var enqueued = new List<ProductMaintenanceHqMutationRequest>();
+        var service = CreateStoreMaintenanceService(
+            CreateHistoryService(contexts).Object,
+            "server-user-guid",
+            "服务端更新者",
+            enqueued
+        );
+
+        var result = await service.UpdateProductNameAsync(
+            "product-1",
+            new UpdateStoreProductNameDto { ProductName = " 测试商品 " },
+            "x",
+            null
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.False(result.Data!.Changed);
+        Assert.Empty(contexts);
+        Assert.Empty(enqueued);
+        Assert.Null((await _db.Queryable<Product>().SingleAsync(item => item.ProductCode == "product-1")).UpdatedBy);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("第一行\n第二行")]
+    [InlineData("带\t制表符")]
+    public async Task UpdateProductNameAsync_空名称或含控制字符时拒绝且不改动(string name)
+    {
+        await SeedProductAndDomesticProductAsync(0);
+        var contexts = new List<WarehouseProductChangeHistoryContextDto>();
+        var service = CreateStoreMaintenanceService(
+            CreateHistoryService(contexts).Object,
+            "server-user-guid",
+            "服务端更新者"
+        );
+
+        var result = await service.UpdateProductNameAsync(
+            "product-1",
+            new UpdateStoreProductNameDto { ProductName = name },
+            "x",
+            null
+        );
+
+        Assert.False(result.Success);
+        Assert.Empty(contexts);
+        Assert.Equal("测试商品", (await _db.Queryable<Product>().SingleAsync(item => item.ProductCode == "product-1")).ProductName);
+    }
+
+    [Fact]
+    public async Task UpdateProductNameAsync_超过200字符时拒绝_恰好200字符时通过()
+    {
+        await SeedProductAndDomesticProductAsync(0);
+        var service = CreateStoreMaintenanceService(
+            CreateHistoryService().Object,
+            "server-user-guid",
+            "服务端更新者"
+        );
+
+        var tooLong = await service.UpdateProductNameAsync(
+            "product-1",
+            new UpdateStoreProductNameDto { ProductName = new string('名', 201) },
+            "x",
+            null
+        );
+        var exact = await service.UpdateProductNameAsync(
+            "product-1",
+            new UpdateStoreProductNameDto { ProductName = new string('名', 200) },
+            "x",
+            null
+        );
+
+        Assert.False(tooLong.Success);
+        Assert.True(exact.Success, exact.Message);
+        Assert.Equal(200, (await _db.Queryable<Product>().SingleAsync(item => item.ProductCode == "product-1")).ProductName.Length);
+    }
+
+    [Fact]
+    public async Task UpdateProductNameAsync_历史失败时回滚Product和DomesticProduct()
+    {
+        await SeedProductAndDomesticProductAsync(0);
+        var service = CreateStoreMaintenanceService(
+            CreateHistoryService(throwWhenRecording: true).Object,
+            "server-user-guid",
+            "服务端更新者"
+        );
+
+        var result = await service.UpdateProductNameAsync(
+            "product-1",
+            new UpdateStoreProductNameDto { ProductName = "新名称" },
+            "x",
+            null
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("测试商品", (await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == "product-1")).ProductName);
+        Assert.Equal("测试国内商品", (await _db.Queryable<DomesticProduct>().SingleAsync(x => x.ProductCode == "product-1")).ProductName);
+    }
+
+    [Fact]
+    public async Task UpdateProductNameAsync_商品不存在时报错()
+    {
+        var service = CreateStoreMaintenanceService(
+            CreateHistoryService().Object,
+            "server-user-guid",
+            "服务端更新者"
+        );
+
+        var result = await service.UpdateProductNameAsync(
+            "missing",
+            new UpdateStoreProductNameDto { ProductName = "新名称" },
+            "x",
+            null
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("商品不存在", result.Message);
+    }
+
+    [Fact]
+    public async Task GetProductNameHistoryAsync_只返回名称变更_保持新到旧并按条数截取()
+    {
+        await SeedProductAndDomesticProductAsync(0);
+        var history = CreateHistoryService();
+        history.Setup(service => service.GetChangeHistoryAsync(
+                "product-1",
+                1,
+                100,
+                It.IsAny<CancellationToken>()
+            ))
+            .ReturnsAsync(new WarehouseProductChangeHistoryPageDto
+            {
+                PageNumber = 1,
+                PageSize = 100,
+                TotalCount = 4,
+                TotalPages = 1,
+                Events =
+                [
+                    HistoryEvent("店长甲", "productName", "旧名B", "新名C", new DateTime(2026, 10, 13, 3, 0, 0, DateTimeKind.Utc)),
+                    HistoryEvent("店长乙", "retailPrice", "1.00", "2.00", new DateTime(2026, 10, 13, 2, 0, 0, DateTimeKind.Utc)),
+                    HistoryEvent("店长丙", "productName", "旧名A", "旧名B", new DateTime(2026, 10, 12, 3, 0, 0, DateTimeKind.Utc)),
+                    HistoryEvent("店长丁", "productName", "最初", "旧名A", new DateTime(2026, 10, 11, 3, 0, 0, DateTimeKind.Utc)),
+                ],
+            });
+        var service = CreateStoreMaintenanceService(history.Object, "server-user-guid", "服务端更新者");
+
+        var result = await service.GetProductNameHistoryAsync("product-1", null, 2, null);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2, result.Data!.Items.Count);
+        Assert.Equal("新名C", result.Data.Items[0].AfterName);
+        Assert.Equal("旧名B", result.Data.Items[0].BeforeName);
+        Assert.Equal("店长甲", result.Data.Items[0].ActorName);
+        // 价格变更那一条被过滤掉，第二条是上一次改名。
+        Assert.Equal("店长丙", result.Data.Items[1].ActorName);
+        Assert.Equal("旧名B", result.Data.Items[1].AfterName);
+    }
+
+    private static WarehouseProductChangeHistoryEventDto HistoryEvent(
+        string actor,
+        string fieldKey,
+        string before,
+        string after,
+        DateTime occurredAtUtc
+    ) => new()
+    {
+        EventGuid = Guid.NewGuid(),
+        Action = "Update",
+        Source = "StoreProductMaintenance",
+        ActorName = actor,
+        ActorType = "User",
+        OccurredAtUtc = occurredAtUtc,
+        Changes = [new WarehouseProductChangeItemDto { FieldKey = fieldKey, BeforeValue = before, AfterValue = after }],
+    };
+
     public void Dispose()
     {
         _cache.Dispose();
@@ -204,7 +430,8 @@ public sealed class ProductChangeHistoryLegacyEntryPointTests : IDisposable
     private StoreProductMaintenanceReactService CreateStoreMaintenanceService(
         IWarehouseProductChangeHistoryService historyService,
         string userGuid,
-        string username
+        string username,
+        List<ProductMaintenanceHqMutationRequest>? enqueued = null
     ) => new(
         CreateSqlSugarContext(_db),
         NullLogger<StoreProductMaintenanceReactService>.Instance,
@@ -212,10 +439,12 @@ public sealed class ProductChangeHistoryLegacyEntryPointTests : IDisposable
         _cache,
         historyService,
         CreateCurrentUserService(userGuid, username),
-        CreateSuccessfulProjectionWriter()
+        CreateSuccessfulProjectionWriter(enqueued)
     );
 
-    private static IProductMaintenanceHqProjectionWriter CreateSuccessfulProjectionWriter()
+    private static IProductMaintenanceHqProjectionWriter CreateSuccessfulProjectionWriter(
+        List<ProductMaintenanceHqMutationRequest>? enqueued = null
+    )
     {
         var writer = new Mock<IProductMaintenanceHqProjectionWriter>();
         writer.Setup(item => item.EnqueueAsync(
@@ -223,6 +452,8 @@ public sealed class ProductChangeHistoryLegacyEntryPointTests : IDisposable
                 It.IsAny<ProductMaintenanceHqMutationRequest>(),
                 It.IsAny<CancellationToken>()
             ))
+            .Callback((ISqlSugarClient _, ProductMaintenanceHqMutationRequest request, CancellationToken _) =>
+                enqueued?.Add(request))
             .ReturnsAsync(new ProductHqSyncOperationStatusDto
             {
                 OperationId = Guid.NewGuid().ToString("N"),

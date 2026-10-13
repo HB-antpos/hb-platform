@@ -136,6 +136,8 @@ export const P = {
     Edit: 'StoreProducts.Edit',
     // 移动端「商品维护」把本店零售价/折扣同步到其它可管理分店；名称与说明由后端权限种子提供。
     SyncToOtherStores: 'StoreProducts.SyncToOtherStores',
+    // 移动端「商品查询」修改商品主档中文名称（全局生效）；名称与说明由后端权限种子提供。
+    EditName: 'StoreProducts.EditName',
     PriceUpdates: 'StoreProducts.PriceUpdates',
   },
   Promotions: {

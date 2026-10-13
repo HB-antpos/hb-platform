@@ -266,6 +266,27 @@ export interface UpdateProductTypeResult extends ProductHqSyncCarrier {
   productTypeLabel?: string | null;
 }
 
+export interface UpdateProductNameRequest {
+  productName: string;
+  storeCode?: string | null;
+}
+
+export interface UpdateProductNameResult extends ProductHqSyncCarrier {
+  productCode: string;
+  productName: string;
+  /** 名称与原来相同时为 false：服务端没有写库，也没有触发 HQ 同步。 */
+  changed: boolean;
+}
+
+/** 商品名称的一条修改记录：谁在什么时候把名称从什么改成什么。 */
+export interface ProductNameHistoryItem {
+  occurredAtUtc: string;
+  actorName: string;
+  beforeName: string | null;
+  afterName: string | null;
+  source: string;
+}
+
 export interface DeleteSetCodeResult extends ProductHqSyncCarrier {
   deleted: boolean;
 }

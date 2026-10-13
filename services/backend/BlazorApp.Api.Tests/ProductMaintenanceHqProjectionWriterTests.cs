@@ -848,6 +848,35 @@ public sealed class ProductMaintenanceHqProjectionWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyAsync_名称字段只委托productName给既有推送_不带其它列()
+    {
+        await SeedHqProductAndBranchAsync();
+        PushProductsToHqRequest? delegated = null;
+        var hqSync = new Mock<IProductHqSyncService>(MockBehavior.Strict);
+        hqSync.Setup(item => item.PushToHqAsync(It.IsAny<PushProductsToHqRequest>()))
+            .Callback<PushProductsToHqRequest>(request => delegated = request)
+            .ReturnsAsync(ApiResponse<PushProductsToHqResult>.OK(new PushProductsToHqResult
+            {
+                TotalCount = 1,
+                SuccessCount = 1,
+            }));
+        var writer = CreateWriter(Mock.Of<IProductHqSyncOutboxQueue>(), hqSync.Object);
+
+        var result = await writer.ApplyAsync(WorkItem(
+            ProductMaintenanceHqOperationKinds.ProductNameUpdated,
+            new[] { ProductMaintenanceHqFieldMasks.ProductName },
+            Array.Empty<string>()
+        ));
+
+        Assert.Equal(ProductHqSyncOutboxExecutionDisposition.Success, result.Disposition);
+        Assert.NotNull(delegated);
+        Assert.Equal(new[] { "P001" }, delegated!.ProductCodes);
+        // 只推中文名：HQ 侧据此只更新「大写名称」，英文显示名、价格、类型都不动。
+        Assert.Equal(new[] { "productName" }, delegated.UpdateFields);
+        hqSync.VerifyAll();
+    }
+
+    [Fact]
     public async Task ApplyAsync_HQ商品主档不存在时进入Blocked而不是永久重试()
     {
         await SeedLocalProductGraphAsync();
@@ -870,6 +899,7 @@ public sealed class ProductMaintenanceHqProjectionWriterTests : IDisposable
 
     [Theory]
     [InlineData(ProductMaintenanceHqOperationKinds.ProductTypeUpdated, ProductMaintenanceHqFieldMasks.ProductType)]
+    [InlineData(ProductMaintenanceHqOperationKinds.ProductNameUpdated, ProductMaintenanceHqFieldMasks.ProductName)]
     [InlineData(ProductMaintenanceHqOperationKinds.ProductCodesUpdated, ProductMaintenanceHqFieldMasks.ProductSetCodes)]
     public async Task ApplyAsync_非创建委托字段在HQ主档缺失时Blocked且不调用既有Push(
         string operationKind,

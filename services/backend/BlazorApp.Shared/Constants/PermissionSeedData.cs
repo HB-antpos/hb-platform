@@ -315,6 +315,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.StoreProducts.Edit, "编辑分店商品", "分店商品管理", "Web 页面 /pos-admin/store-product-price - 编辑分店商品价格"),
                 new(Permissions.StoreProducts.PriceUpdates, "处理价格更新通知", "分店商品管理", "移动端「价格更新」- 查看本店价格更新与换标签通知，按仓库价更新本店零售价/折扣，打印或标记标签"),
                 new(Permissions.StoreProducts.SyncToOtherStores, "同步价格到其它分店", "分店商品管理", "移动端「商品维护」- 把本店零售价/折扣同步到其它可管理分店，被同步分店会收到「待换标签」通知"),
+                new(Permissions.StoreProducts.EditName, "修改商品名称", "分店商品管理", "移动端「商品查询」- 修改商品主档的中文名称（全局生效，影响所有分店与 POS 小票/标签，并同步 HQ）；与编辑分店商品价格权限分开授予"),
                 new(Permissions.PosProducts.View, "查看 POS 商品管理", "POS 管理", "Web 页面 /pos-admin/products - 查看 POS 商品、分类、套装码、同步和完整性检查入口"),
                 new(Permissions.PosProducts.Manage, "管理 POS 商品", "POS 管理", "Web 页面 /pos-admin/products - 编辑 POS 商品、批量改价、同步总部/分店、维护分类/套装码、执行完整性修复"),
                 new(Permissions.PosTerminal.Sales.View, "查看销售页", "POS 销售", "收银端销售页 - 进入销售页面"),

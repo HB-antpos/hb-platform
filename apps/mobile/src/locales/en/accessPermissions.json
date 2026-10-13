@@ -693,6 +693,10 @@
       "name": "Store Products Edit",
       "description": "Allows access to Store Products Edit."
     },
+    "StoreProducts.EditName": {
+      "name": "Store Products Edit Name",
+      "description": "Allows changing a product's Chinese name in mobile Product query. The name is global: it affects all stores and POS receipts/labels and is synced to HQ. Granted separately from editing store product prices."
+    },
     "StoreProducts.PriceUpdates": {
       "name": "Store Products Price Updates",
       "description": "Allows viewing this store's price update and label replacement notices, applying warehouse prices, and printing or marking labels in the mobile Price updates screen."

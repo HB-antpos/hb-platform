@@ -36,6 +36,7 @@ public static class ProductMaintenanceHqOperationKinds
 {
     public const string ProductCreated = "product-created";
     public const string ProductTypeUpdated = "product-type-updated";
+    public const string ProductNameUpdated = "product-name-updated";
     public const string StorePriceUpdated = "store-price-updated";
     public const string WarehousePriceSynced = "warehouse-price-synced";
     public const string ProductCodesUpdated = "product-codes-updated";
@@ -49,6 +50,8 @@ public static class ProductMaintenanceHqFieldMasks
 {
     public const string All = "all";
     public const string ProductType = "productType";
+    /// <summary>中文名称（Product.ProductName）；HQ 侧只更新「大写名称」列，英文显示名不受影响。</summary>
+    public const string ProductName = "productName";
     public const string StorePurchasePrice = "storePurchasePrice";
     public const string StoreRetailPrice = "storeRetailPrice";
     public const string StoreDiscountRate = "storeDiscountRate";

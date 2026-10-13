@@ -78,6 +78,7 @@ export const PERMISSIONS = {
     Create: "StoreProducts.Create",
     Edit: "StoreProducts.Edit",
     SyncToOtherStores: "StoreProducts.SyncToOtherStores",
+    EditName: "StoreProducts.EditName",
     PriceUpdates: "StoreProducts.PriceUpdates",
   },
   Container: {
