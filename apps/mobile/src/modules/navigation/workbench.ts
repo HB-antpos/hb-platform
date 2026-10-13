@@ -78,6 +78,9 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "permissions", labelKey: "routes.permissions", icon: "key-outline" },
       { routeName: "employee-profile", labelKey: "routes.employeeProfile", icon: "card-account-details-outline" },
       { routeName: "employee-profile-review", labelKey: "routes.employeeProfileReview", icon: "account-check-outline" },
+      // 人脸比对：名单维护与命中复核、门店档案与摄像头设置，均按各自权限显示（见后端 FullAppMenu）。
+      { routeName: "face-unwelcome", labelKey: "routes.faceUnwelcome", icon: "account-cancel-outline" },
+      { routeName: "face-match-settings", labelKey: "routes.faceMatchSettings", icon: "face-recognition" },
       { routeName: "device-management", labelKey: "routes.deviceManagement", icon: "cellphone-cog" },
       { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },
       // 版本发布中心：App 安装包 / OTA 与 WPF 收银端合并为一页；wpf-versions 路由仅保留为跳转到其 WPF 终端的旧入口。

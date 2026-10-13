@@ -88,6 +88,8 @@
     "permissions": "Permissions",
     "employeeProfile": "Employee",
     "employeeProfileReview": "Profile Review",
+    "faceUnwelcome": "Unwelcome list",
+    "faceMatchSettings": "Face match settings",
     "deviceManagement": "Devices",
     "settings": "Settings",
     "appInstall": "Install app",

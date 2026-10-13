@@ -1,0 +1,405 @@
+{
+  "messages": {
+    "notAllowed": "当前账号没有权限使用此功能。",
+    "reviewUnavailable": "审核模式不提供此功能。",
+    "noTabPermission": "当前账号没有可用的名单权限，请联系管理员。"
+  },
+  "states": {
+    "loading": "加载中…",
+    "loadFailed": "加载失败",
+    "loadMoreFailed": "加载更多失败，点击重试",
+    "end": "已经到底了"
+  },
+  "tabs": {
+    "entries": "名单条目",
+    "review": "命中复核"
+  },
+  "filters": {
+    "allStores": "全部门店",
+    "pickStore": "选择门店"
+  },
+  "disabled": {
+    "notice": "功能未开启。{{reason}} 当前只能查看，保存、提交、撤回、批准、复核等操作暂不可用。",
+    "reasons": {
+      "regionMissing": "原因：没有配置腾讯云处理地域。",
+      "regionNotAllowed": "原因：配置的处理地域不在允许范围内。",
+      "credentialsMissing": "原因：没有配置腾讯云管理凭据。",
+      "credentialsInvalid": "原因：腾讯云管理凭据格式不正确。",
+      "unknown": "原因：服务端配置不完整。"
+    }
+  },
+  "errors": {
+    "generic": "操作失败，请稍后重试",
+    "fieldSuffix": "（字段：{{field}}）",
+    "status": {
+      "401": "登录已过期，请重新登录",
+      "403": "没有权限执行该操作",
+      "404": "没有找到对应的记录",
+      "409": "当前状态不允许该操作，请刷新后重试",
+      "413": "上传的文件太大",
+      "503": "服务暂不可用，请检查功能是否已开启和配置"
+    },
+    "codes": {
+      "FACE_MATCH_DISABLED": "人脸比对功能未开启（缺少腾讯云处理地域或管理凭据）",
+      "FACE_MATCH_STORE_NOT_CONFIGURED": "照片私有存储桶尚未配置，暂时不能上传或查看照片",
+      "FACE_MATCH_FORBIDDEN": "没有权限执行该操作",
+      "FACE_MATCH_STORE_FORBIDDEN": "该门店不在你可操作的范围内",
+      "FACE_MATCH_STORE_INVALID": "门店编码不正确",
+      "FACE_MATCH_STORE_NOT_FOUND": "没有找到该门店",
+      "FACE_MATCH_FIELD_INVALID": "提交的内容不符合要求（含文件类型、大小或数量），请检查后重试",
+      "FACE_MATCH_NOT_FOUND": "没有找到对应的记录，或你无权操作它",
+      "FACE_MATCH_GATE_NOT_MET": "启用前置条件未满足：请先补全下方列出的缺项后再保存（合规记录缺口只是警告，不在此列）",
+      "FACE_MATCH_PHOTO_UNUSABLE": "照片无法使用（没有检测到清晰的单人正脸，或质量不合格），请更换照片",
+      "FACE_MATCH_TENCENT_AUTH": "腾讯云认证失败，请联系管理员检查管理凭据",
+      "FACE_MATCH_TENCENT_BUSY": "腾讯云繁忙，请稍后重试",
+      "FACE_MATCH_TENCENT_LIMIT": "已达到腾讯云人员或人脸数量上限，请联系管理员",
+      "FACE_MATCH_TENCENT_CONFLICT": "腾讯云侧数据冲突，请稍后重试；如反复出现请联系管理员",
+      "FACE_MATCH_TENCENT_UNAVAILABLE": "腾讯云服务暂不可用，请稍后重试",
+      "FACE_MATCH_TENCENT_ERROR": "腾讯云处理失败，请稍后重试；如反复失败请联系管理员",
+      "FACE_MATCH_ENTRY_NOT_PENDING": "该条目不是待批准状态，请刷新后重试",
+      "FACE_MATCH_APPROVER_IS_SUBMITTER": "提交人不能批准自己提交的条目（管理员除外）",
+      "FACE_MATCH_ALREADY_APPROVED_BY_YOU": "你已经批准过该条目，需要另一位不同的批准人",
+      "FACE_MATCH_ENTRY_EXPIRED": "该条目已到期，不能再批准",
+      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "条目的生效门店都还没有开启不受欢迎人员名单，暂时不能批准；请先在门店档案里开启",
+      "FACE_MATCH_ENTRY_CHANGED": "条目刚被别人修改，请刷新后重试",
+      "FACE_MATCH_TASK_CLOSED": "该复核任务已结束",
+      "FACE_MATCH_SAME_REVIEWER": "第二复核人必须不同于第一复核人，请换另一位有复核权限的同事确认",
+      "FACE_MATCH_TASK_CHANGED": "该任务刚被别人处理，请刷新后重试",
+      "FACE_MATCH_IMAGE_GONE": "图片已被清理或不存在，该任务不能再复核",
+      "FACE_MATCH_IMAGE_TOO_LARGE": "图片太大，无法显示",
+      "FACE_MATCH_IMAGE_UNSUPPORTED": "图片格式不支持",
+      "FACE_MATCH_STORE_DENIED": "图片存储拒绝访问，请联系管理员检查权限",
+      "FACE_MATCH_STORE_TIMEOUT": "读取图片超时，请稍后重试",
+      "FACE_MATCH_STORE_ERROR": "读取图片失败，请稍后重试",
+      "FACE_MATCH_AUDIT_FAILED": "审计记录写入失败，操作未完成（图片不会返回），请稍后重试",
+      "FACE_MATCH_TIMEZONE_UNAVAILABLE": "服务端无法确定门店时区，请联系管理员",
+      "FACE_CAMERA_ID_INVALID": "摄像机编号格式不正确",
+      "FACE_CAMERA_STORE_CODE_INVALID": "分店编码格式不正确",
+      "FACE_CAMERA_STORE_NOT_FOUND": "分店不存在，请选择已有的分店",
+      "FACE_CAMERA_FIELD_INVALID": "有字段不符合要求，请检查后重试",
+      "FACE_CAMERA_NOT_FOUND": "摄像机不存在，请刷新列表"
+    }
+  },
+  "validation": {
+    "categoryRequired": "请选择事件类别",
+    "categoryNoteRequired": "选择“其他”时必须填写说明",
+    "categoryNoteTooLong": "说明最多 {{max}} 个字符",
+    "evidenceRefRequired": "请填写证据编号",
+    "evidenceRefTooLong": "证据编号最多 {{max}} 个字符",
+    "storeScopeRequired": "请至少选择一家生效门店",
+    "expiresRequired": "请选择到期日",
+    "expiresPast": "到期日必须晚于今天",
+    "expiresTooFar": "到期日最晚为今天起 {{months}} 个月",
+    "photoCountRange": "请上传 {{min}}–{{max}} 张照片",
+    "photoEmpty": "有一张照片是空的，请重新选择",
+    "photoTooLarge": "照片不能超过 {{maxMb}}MB",
+    "textRequired": "请填写原因",
+    "textTooLong": "最多 {{max}} 个字符"
+  },
+  "unwelcome": {
+    "title": "不受欢迎人员名单",
+    "intro": "名单只用于严重事件：暴力或威胁、有组织或有记录的反复盗窃，或经批准人确认的其他情形；不用于一般偷窃。每个条目必须有证据编号和到期日（最长 12 个月），并经有批准权限的人批准后才生效。",
+    "objectStoreMissing": "照片私有存储桶尚未配置：暂时不能提交带照片的条目。",
+    "writeBlocked": "功能未开启，当前只能查看，不能提交条目。",
+    "empty": "没有名单条目",
+    "expiringSoon": "{{days}} 天后到期",
+    "cleanupPending": "清理中",
+    "category": {
+      "violence": "暴力或威胁（员工或顾客）",
+      "organisedTheft": "有组织或有记录的反复盗窃",
+      "other": "其他（需说明，另有批准要求）"
+    },
+    "status": {
+      "pending": "待批准",
+      "active": "已生效",
+      "expired": "已过期",
+      "withdrawn": "已撤回"
+    },
+    "filters": {
+      "all": "全部"
+    },
+    "fields": {
+      "evidenceRef": "证据编号",
+      "approvals": "批准进度",
+      "expiresAt": "到期日",
+      "submittedBy": "提交人 {{name}} · {{time}}",
+      "disputeNoteLine": "申诉备注：{{note}}"
+    },
+    "actions": {
+      "create": "提交条目",
+      "approve": "批准",
+      "dispute": "申诉备注",
+      "withdraw": "撤回"
+    },
+    "approve": {
+      "title": "批准该条目？",
+      "content": "批准后条目生效，该门店范围内的摄像机会开始对它做比对。",
+      "contentTwo": "该条目需要 {{needed}} 位不同的批准人，目前已有 {{done}} 位。你的批准会计入进度，满额后才生效；管理员一人批准即可直接生效。",
+      "ok": "确认批准",
+      "done": "已批准"
+    },
+    "withdraw": {
+      "title": "撤回条目",
+      "warning": "撤回后条目立即失效，腾讯云侧人脸数据和参考照片会被删除。此操作不可恢复。",
+      "reasonLabel": "撤回原因",
+      "ok": "确认撤回",
+      "done": "条目已撤回"
+    },
+    "dispute": {
+      "title": "申诉与更正备注",
+      "description": "被识别者提出查询或更正时，须在 30 天内处理。这里记录处理情况，不要写入姓名或隐私细节。",
+      "label": "备注",
+      "ok": "保存备注",
+      "done": "备注已保存"
+    }
+  },
+  "form": {
+    "title": "提交名单条目",
+    "scopeNotice": "请确认事件属于严重事件。条目只保存事件类别、证据编号和参考照片，不要在任何字段里填写姓名或隐私细节。提交后需有批准权限的人批准才会生效；管理员可自行批准，一人即可。",
+    "category": "事件类别",
+    "otherNeedsApproval": "选择“其他”的条目：非管理员需要两位不同的批准人才会生效，管理员一人批准即可。",
+    "categoryNote": "情形说明",
+    "evidenceRef": "证据编号",
+    "evidenceRefHint": "填写事件记录编号或警方报告编号，不要填写姓名或其他隐私细节。",
+    "storeScope": "生效门店",
+    "storeScopeHint": "默认只选事件发生的门店；至少选择一家（已选 {{count}} 家）。",
+    "noStores": "没有可选的门店",
+    "expiresOn": "到期日",
+    "expiresHint": "必填，最晚为今天起 {{months}} 个月（{{latest}}）；到期后自动停用并删除。",
+    "expiresPreset": "{{months}} 个月后",
+    "expiresPlaceholder": "选择到期日",
+    "photos": "参考照片",
+    "photosHint": "请上传 1–5 张（JPG 或 PNG，单张不超过 5MB）；只用于复核时并排比对，不要上传与事件无关的人物照片。",
+    "submit": "提交条目",
+    "confirmTitle": "确认提交？",
+    "confirmContent": "将提交一个生效门店 {{stores}} 家、参考照片 {{photos}} 张、到期日 {{expiresOn}} 的条目。提交后需有批准权限的人批准才会生效，照片会上传到私有存储。",
+    "confirmOk": "确认提交",
+    "submittedTitle": "已提交",
+    "submittedMessage": "条目已提交，等待批准人批准后生效。",
+    "uncertainNote": "请先回到列表确认条目是否已经提交，避免重复提交。"
+  },
+  "photo": {
+    "count": "{{count}} / {{max}}",
+    "thumbLabel": "第 {{index}} 张参考照片",
+    "remove": "移除第 {{index}} 张参考照片",
+    "add": {
+      "camera": "拍照",
+      "library": "相册"
+    },
+    "openSettings": "去设置开启权限",
+    "errors": {
+      "unsupportedType": "只支持 JPG 或 PNG 照片（iOS 的 HEIC 会自动转成 JPG），这张格式不支持。",
+      "sourceTooLarge": "这张照片文件太大，无法处理，请换一张。",
+      "decodeFailed": "这张照片无法读取，请换一张。",
+      "tooLarge": "这张照片压缩后仍超过 5MB，请换一张。",
+      "tooMany": "最多 {{max}} 张照片，多选的已忽略。",
+      "cameraPermission": "没有相机权限，无法拍照。",
+      "libraryPermission": "没有相册权限，无法选择照片。"
+    }
+  },
+  "leave": {
+    "discardTitle": "放弃未保存的内容？",
+    "discardMessage": "离开后已填写的内容和已选的照片会丢弃。",
+    "keepEditing": "继续编辑",
+    "discard": "放弃",
+    "busyTitle": "正在提交",
+    "busyMessage": "请等提交完成后再离开。"
+  },
+  "review": {
+    "intro": "复核任务来自摄像机抓拍与名单的疑似匹配。必须由两位不同的人分别核对现场抓拍和参考照片后确认；任何一方判断“不是同一个人”，任务即驳回。系统不会自动拒绝服务或通知警方。",
+    "sensitiveNotice": "疑似匹配，必须由两人人工确认。这是敏感的生物识别信息：查看会被记录，请勿截图外传；本页不显示姓名与事件细节，离开本页或切到后台时图片立即清除。",
+    "modalTitle": "复核疑似匹配",
+    "similarity": "相似度 {{percent}}%（不是同一个人的概率）",
+    "notProbability": "相似度只表示两张脸有多像，不代表是同一个人的把握有多大。",
+    "band": {
+      "high": "较高",
+      "normal": "一般"
+    },
+    "status": {
+      "pending": "待复核",
+      "dismissed": "已驳回",
+      "confirmed": "已确认"
+    },
+    "empty": "没有复核任务",
+    "imageDeleted": "图片已删除",
+    "reviewerFirst": "第一复核人：{{name}}",
+    "reviewerSecond": "第二复核人：{{name}}",
+    "actions": {
+      "review": "复核",
+      "view": "查看"
+    },
+    "step": {
+      "first": "待第一复核人核对并判断",
+      "second": "待第二复核人确认：须由不同于第一复核人的人确认",
+      "done": "已结束，不需要再复核"
+    },
+    "firstReviewer": "第一复核人 {{name}} 已判断为“是同一个人”。你作为第二复核人，需要独立核对后再确认。",
+    "blocked": {
+      "done": "该任务已结束。",
+      "imageGone": "抓拍图片已按保留期限删除，不能再复核。",
+      "readOnly": "功能未开启，当前只能查看，不能提交判断。",
+      "cannotReview": "你当前不能提交判断（没有该门店的复核权限，或你就是第一复核人）。"
+    },
+    "captureTitle": "现场抓拍",
+    "referenceTitle": "条目参考照片",
+    "referencePrev": "上一张",
+    "referenceNext": "下一张",
+    "noReference": "没有可用的参考照片（条目可能已撤回或到期）。",
+    "imageGone": "抓拍图片已按保留期限删除，该任务不能再复核。",
+    "loadingImage": "正在读取图片…",
+    "verdict": {
+      "match": "是同一个人",
+      "notMatch": "不是同一个人"
+    },
+    "confirmMatch": {
+      "title": "确认“是同一个人”？",
+      "content": "你将判断现场抓拍与参考照片是同一个人（相似度 {{percent}}%，不是同一个人的概率）。第二复核人确认后任务才会成立；系统不会自动拒绝服务或通知警方。"
+    },
+    "confirmNotMatch": {
+      "title": "确认“不是同一个人”？",
+      "content": "任一复核人判断“不是同一个人”，该任务即驳回并结束。"
+    },
+    "confirmBack": "返回",
+    "confirmOk": "确认提交",
+    "submittedMatch": "已记录：是同一个人",
+    "submittedNotMatch": "已记录：不是同一个人，任务已驳回",
+    "close": "关闭",
+    "imageErrors": {
+      "notConfigured": "图片读取尚未配置",
+      "forbidden": "没有权限查看该图片",
+      "unauthorized": "登录已过期，请重新登录后再试",
+      "missing": "图片不存在",
+      "failed": "图片读取失败，请稍后重试",
+      "gone": "图片已被清理或不存在"
+    }
+  },
+  "settings": {
+    "title": "人脸比对设置",
+    "store": "门店",
+    "pickStore": "选择门店",
+    "noStores": "没有可设置的门店",
+    "legalNotice": "重要：Match（比对）、顾客去重、不受欢迎人员名单这三项对真实顾客运行前，必须先有律师确认、隐私影响评估和告示等记录。这些记录现在只是红色警告，不阻止保存和启用；但法律上仍必须在对真实顾客运行前补齐。本页不能替代法律判断。",
+    "profile": {
+      "title": "门店档案",
+      "loadFailed": "门店档案加载失败",
+      "unsaved": "有未保存的修改",
+      "updatedAt": "最近保存：{{time}}，操作人 {{by}}",
+      "neverSaved": "该门店还没有保存过档案，当前是默认值（关闭）。",
+      "mode": {
+        "off": "关闭",
+        "capture": "Capture",
+        "match": "Match",
+        "offHint": "关闭：不处理该门店摄像机的抓拍。",
+        "captureHint": "Capture：全部留存并可在后台看图，只用于只拍知情同意内部人员的联调场景，建议填写“允许拍摄对象”。",
+        "matchHint": "Match：对抓拍做比对，不留存无命中的图片；律师确认等记录缺了会显示为红色警告（不阻止启用），对真实顾客运行前必须补齐。"
+      },
+      "sections": {
+        "switches": "要启用的功能"
+      },
+      "fields": {
+        "mode": "运行模式",
+        "evaluateMatch": "评估比对",
+        "staffExclusionEnabled": "员工排除",
+        "trafficDedupEnabled": "顾客去重",
+        "unwelcomeListEnabled": "启用不受欢迎人员名单",
+        "allowedSubjects": "允许拍摄对象",
+        "timeZoneId": "时区"
+      },
+      "hints": {
+        "evaluateMatch": "只评估、不对外生效，需要 Capture 模式。",
+        "staffExclusion": "客流统计里排除已登记员工；需要门店成员有有效的同意与登记。",
+        "trafficDedup": "对顾客做当日人脸去重统计，法律风险高。缺的去重专项律师确认等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。",
+        "unwelcomeList": "命中名单时提示店员并进入两人复核。缺的专项评估、律师确认、告示、培训等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。",
+        "allowedSubjects": "Capture 模式建议填写：说明镜头前只会出现哪些知情同意的人员（不填只给提示）。",
+        "timeZone": "留空则自动判断。当前生效时区：{{zone}}，所在州：{{jurisdiction}}。"
+      },
+      "timeZone": {
+        "auto": "自动判断",
+        "Australia/Sydney": "悉尼",
+        "Australia/Brisbane": "布里斯班",
+        "Australia/Melbourne": "墨尔本"
+      },
+      "complianceWarning": "合规记录未补齐（共 {{count}} 项）：可以保存并启用，有问题只给提示。",
+      "webOnly": "PIA、告示、律师确认、跨境审查、员工培训等合规记录不在手机上编辑，保存时会原样保留；请到网页后台「人脸比对 → 门店档案」补齐。",
+      "save": "保存档案",
+      "saved": "门店档案已保存",
+      "savedWithWarnings": "门店档案已保存，但还有 {{count}} 项合规记录未补齐：对真实顾客运行前必须完成",
+      "reset": "放弃修改",
+      "on": "开启",
+      "off": "关闭",
+      "confirmTitle": "保存 {{store}} 的人脸比对档案？",
+      "confirmMode": "运行模式：{{from}} → {{to}}",
+      "confirmSwitch": "{{name}}：{{state}}",
+      "confirmMatchWarning": "切换到 Match 后，该门店摄像机的真实抓拍会开始做比对。请确认合规记录已经补齐（见下方警告）。",
+      "confirmCaptureWarning": "切换到 Capture 后，该门店摄像机的抓拍会全部留存，只允许用于拍摄知情同意的内部人员。",
+      "confirmKeep": "其余合规记录原样保留，不会被改动。",
+      "confirmOk": "确认保存"
+    },
+    "gate": {
+      "title": "启用闸门",
+      "nothingRequested": "当前没有请求启用任何需要闸门的功能。",
+      "facetLine": "{{facet}}：{{status}}",
+      "satisfied": "保存所需的前置条件已满足",
+      "missingTitle": "还缺 {{count}} 项",
+      "warningTitle": "有 {{count}} 项提示，不会阻止保存和启用；其中合规记录对真实顾客运行前必须补齐",
+      "savedStateHint": "以上闸门状态按已保存的档案计算，未保存的修改不会立即改变它；保存后以服务端返回的结果为准。",
+      "facets": {
+        "capture": "Capture 模式（仅限内部知情人员）",
+        "match": "Match 模式（比对）",
+        "staffExclusion": "员工排除",
+        "trafficDedup": "顾客去重（唯一访客）",
+        "unwelcome": "不受欢迎人员名单"
+      },
+      "keys": {
+        "mode": "运行模式",
+        "allowedSubjects": "允许拍摄对象",
+        "piaReference": "隐私影响评估（PIA）编号",
+        "signageInstalledOn": "告示安装日期",
+        "staffNoticeDate": "NSW 员工通知日期",
+        "legalSignoffBy": "律师确认人",
+        "legalSignoffAt": "律师确认时间",
+        "dedupLegalSignoffBy": "去重律师确认人",
+        "dedupLegalSignoffAt": "去重律师确认时间",
+        "crossBorderRegion": "跨境披露审查地域",
+        "crossBorderReviewRef": "跨境审查编号",
+        "crossBorderReviewedBy": "跨境审查人",
+        "crossBorderReviewedAt": "跨境审查时间",
+        "timeZoneId": "时区",
+        "unwelcomeAssessmentRef": "名单专项评估编号",
+        "unwelcomeLegalSignoffBy": "名单律师确认人",
+        "unwelcomeLegalSignoffAt": "名单律师确认时间",
+        "staffTrainingDate": "员工培训日期",
+        "privacyContact": "隐私联系人",
+        "activeEnrollment": "该门店成员中还没有有效的同意与登记",
+        "regionMismatch": "跨境披露审查的地域与当前配置地域不一致，需要重新审查",
+        "staffNoticeTooRecent": "NSW 门店员工通知日期距今不足 14 天",
+        "modeOff": "运行模式不能是“关闭”",
+        "evaluateMatchRequiresCapture": "“评估比对”需要 Capture 模式"
+      }
+    },
+    "cameras": {
+      "title": "摄像头",
+      "loadFailed": "摄像头列表加载失败",
+      "pushNotice": "摄像头的启停最多 30 秒后在人脸接收服务生效。已启用且最近 {{minutes}} 分钟内有推送为「近期有推送」；摄像机只有检测到人脸时才推送，没人经过镜头时不会推送。抓拍数为近 {{hours}} 小时统计。",
+      "empty": "这家门店没有登记摄像头",
+      "emptyHint": "新建摄像头请到网页后台「人脸抓拍摄像机」。",
+      "summary": "共 {{total}} 台 · 近期有推送 {{active}} · 暂无推送 {{quiet}} · 已停用 {{disabled}}",
+      "webOnly": "新建摄像头、重置令牌等操作出于安全原因只能在网页后台进行，手机上不提供。",
+      "enabled": "启用",
+      "status": {
+        "recentlyActive": "近期有推送",
+        "noRecentPush": "暂无推送",
+        "disabled": "已停用"
+      },
+      "noRecentPushTip": "摄像机只有检测到人脸时才推送，没有人经过镜头时不会推送，所以“暂无推送”不代表断电或断网。",
+      "lastSeenAt": "最近推送：{{time}}",
+      "captures24h": "近期抓拍 {{count}} 次（24 小时）",
+      "parseFailures": "解析失败 {{count}}",
+      "enabledDone": "已启用",
+      "disabledDone": "已停用",
+      "confirmDisableTitle": "停用摄像头 {{name}}？",
+      "confirmDisableContent": "停用后人脸接收服务将不再接收该摄像头的推送（最多 30 秒后生效），可随时重新启用。",
+      "confirmDisableOk": "停用"
+    }
+  }
+}
