@@ -71,6 +71,8 @@ internal sealed class SchemaMigrationCoordinator
     internal const string StorePriceUpdateNoticeMigrationId = "20261015.001-store-price-notice";
     internal const string ContainerNewProductNoticeMigrationId =
         "20261015.002-container-new-product-notice";
+    internal const string AttendanceLocationSampleBatchMigrationId =
+        "20261015.003-attendance-location-sample-batch";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -252,6 +254,11 @@ internal sealed class SchemaMigrationCoordinator
             static (runtime, cancellationToken) =>
                 runtime.ApplyContainerNewProductNoticeAsync(cancellationToken)
         ),
+        new(
+            AttendanceLocationSampleBatchMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendanceLocationSampleBatchAsync(cancellationToken)
+        ),
     ];
 
     internal static readonly IReadOnlyList<SchemaMigrationStep> PosmMigrationSteps =
@@ -300,6 +307,8 @@ internal sealed class SchemaMigrationCoordinator
         "mobile-ota-runtime-targets-schema-signature";
     private const string LocalSupplierCategorySignatureId =
         "local-supplier-category-schema-signature";
+    private const string AttendanceLocationSampleBatchSignatureId =
+        "attendance-location-sample-batch-schema-signature";
     private const string LegacyEmployeeLogRiskSignatureId =
         "legacy-employee-log-risk-schema-signature";
     private const string PosOperationAuditRiskSignatureId =
@@ -438,6 +447,13 @@ internal sealed class SchemaMigrationCoordinator
                 SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible
             );
         }
+        catch (AttendanceLocationSampleBatchSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.AttendanceLocationSampleBatchIncompatible
+            );
+        }
         catch (LegacyEmployeeLogRiskSchemaMismatchException)
         {
             return SchemaOperationResult.Failure(
@@ -551,6 +567,13 @@ internal sealed class SchemaMigrationCoordinator
             return SchemaOperationResult.Failure(
                 SchemaExitCodes.SchemaNotReady,
                 SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible
+            );
+        }
+        catch (AttendanceLocationSampleBatchSchemaMismatchException)
+        {
+            return SchemaOperationResult.Failure(
+                SchemaExitCodes.SchemaNotReady,
+                SchemaDiagnosticCodes.AttendanceLocationSampleBatchIncompatible
             );
         }
         catch (LegacyEmployeeLogRiskSchemaMismatchException)
@@ -717,6 +740,7 @@ internal sealed class SchemaMigrationCoordinator
             await _runtime.VerifySalesDetailQueryProjectionAsync(cancellationToken);
             await VerifyMobileOtaRuntimeTargetsAsync(cancellationToken);
             await VerifyLocalSupplierCategoryAsync(cancellationToken);
+            await VerifyAttendanceLocationSampleBatchAsync(cancellationToken);
         }
         if (posmApplied)
         {
@@ -802,6 +826,39 @@ internal sealed class SchemaMigrationCoordinator
                     OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
                     LocalSupplierCategorySchemaMismatchException =>
                         SchemaDiagnosticCodes.LocalSupplierCategoryIncompatible,
+                    _ => SchemaDiagnosticCodes.DatabaseFailure,
+                }
+            );
+            throw;
+        }
+    }
+
+    private async Task VerifyAttendanceLocationSampleBatchAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await _runtime.VerifyAttendanceLocationSampleBatchAsync(cancellationToken);
+            LogResult(
+                MainScope,
+                AttendanceLocationSampleBatchSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Ready",
+                SchemaDiagnosticCodes.Ready
+            );
+        }
+        catch (Exception exception)
+        {
+            LogResult(
+                MainScope,
+                AttendanceLocationSampleBatchSignatureId,
+                stopwatch.ElapsedMilliseconds,
+                "Failed",
+                exception switch
+                {
+                    OperationCanceledException => SchemaDiagnosticCodes.Cancelled,
+                    AttendanceLocationSampleBatchSchemaMismatchException =>
+                        SchemaDiagnosticCodes.AttendanceLocationSampleBatchIncompatible,
                     _ => SchemaDiagnosticCodes.DatabaseFailure,
                 }
             );

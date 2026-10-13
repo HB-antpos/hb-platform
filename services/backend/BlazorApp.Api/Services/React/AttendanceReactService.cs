@@ -1797,59 +1797,28 @@ namespace BlazorApp.Api.Services.React
         {
             var storeTimeZone = await ResolveStoreTimeZoneAsync(storeCode, null);
             var capturedAtUtc = DateTime.SpecifyKind(capturedAt, DateTimeKind.Utc);
-            var localDayStartUtc = ConvertStoreLocalToUtc(
-                ConvertUtcToStoreLocal(capturedAtUtc, storeTimeZone).Date,
-                storeTimeZone
-            );
-            var maximumShiftStartUtc = capturedAtUtc.Subtract(TimeSpan.FromHours(10));
-            var validWindowStartUtc = localDayStartUtc > maximumShiftStartUtc
-                ? localDayStartUtc
-                : maximumShiftStartUtc;
+            var windowStartUtc = ResolveLocationSampleWindowStartUtc(capturedAtUtc, storeTimeZone);
 
-            var candidatePunches = await _db.Queryable<AttendancePunch>()
-                .Where(item =>
-                    !item.IsDeleted
-                    && item.UserGuid == userGuid
-                    && item.StoreCode == storeCode
-                    && item.PunchTimeUtc > validWindowStartUtc
-                    && item.PunchTimeUtc <= capturedAtUtc
-                )
-                .ToListAsync();
+            var candidatePunches = await LoadLocationSampleCandidatePunchesAsync(
+                userGuid,
+                storeCode,
+                windowStartUtc,
+                capturedAtUtc
+            );
             if (candidatePunches.Count == 0)
             {
                 return false;
             }
-            candidatePunches = candidatePunches
-                .OrderByDescending(item => item.PunchTimeUtc)
-                .ThenByDescending(item => item.Id)
-                .ToList();
 
-            var candidatePunchGuids = candidatePunches
-                .Select(item => item.PunchGuid)
-                .ToList();
-            var supersededPunchGuids = await _db.Queryable<AttendancePunch>()
-                .Where(item =>
-                    !item.IsDeleted
-                    && item.SupersedesPunchGuid != null
-                    && candidatePunchGuids.Contains(item.SupersedesPunchGuid)
-                )
-                .Select(item => item.SupersedesPunchGuid!)
-                .ToListAsync();
-            var supersededPunchGuidSet = supersededPunchGuids.ToHashSet(
-                StringComparer.Ordinal
+            var supersededPunchGuidSet = await LoadSupersededPunchGuidsAsync(candidatePunches);
+            // 只允许门店本地当日、10 小时以内的最后一条有效上班卡，且样本必须在该卡之后采集；
+            // 判定本体是与批量上传共用的纯函数，保证单条与批量对同一采集时刻结论一致。
+            return AttendanceLocationSampleShiftRules.IsShiftActiveAt(
+                candidatePunches,
+                supersededPunchGuidSet,
+                capturedAtUtc,
+                windowStartUtc
             );
-            var latestEffectivePunch = candidatePunches.FirstOrDefault(item =>
-                !supersededPunchGuidSet.Contains(item.PunchGuid)
-            );
-
-            // 只允许门店本地当日、10 小时以内的最后一条有效上班卡，且样本必须在该卡之后采集。
-            return string.Equals(
-                latestEffectivePunch?.PunchType,
-                "ClockIn",
-                StringComparison.OrdinalIgnoreCase
-            )
-                && latestEffectivePunch!.PunchTimeUtc
-                    <= capturedAtUtc;
         }
 
         public async Task<ApiResponse<List<AttendanceLeaveRequestDto>>> GetMyLeaveRequestsAsync()

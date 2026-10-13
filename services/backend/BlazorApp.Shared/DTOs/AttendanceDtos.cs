@@ -296,6 +296,66 @@ namespace BlazorApp.Shared.DTOs
         public DateTime? LocationCapturedAtUtc { get; set; }
     }
 
+    /// <summary>
+    /// 班中定位批量上传请求（POST api/react/v1/attendance/location-samples/batch）。
+    /// 客户端本地攒点后批量提交，可补传；门店与设备信息整单共用，逐点字段在 Samples 里。
+    /// 引用类型字段全部声明为可空：缺失/为 null 时由服务端按逐点错误码处理，而不是被模型绑定整单 400。
+    /// </summary>
+    public class AttendanceLocationSampleBatchRequestDto
+    {
+        public string? StoreCode { get; set; }
+        public string? HardwareId { get; set; }
+        public string? SystemDeviceNumber { get; set; }
+        public string? DeviceSystem { get; set; }
+
+        /// <summary>1～200 个采样点；为空或超过 200 个整单报 TOO_MANY_SAMPLES。</summary>
+        public List<AttendanceLocationSampleBatchItemDto?>? Samples { get; set; } = new();
+    }
+
+    public class AttendanceLocationSampleBatchItemDto
+    {
+        /// <summary>客户端生成的采样点 ID（GUID，1～50 字符），是幂等键：同一用户同一 ID 只入库一次。</summary>
+        public string? ClientSampleId { get; set; }
+
+        /// <summary>ShiftSample（默认）或 ShiftHeartbeat。</summary>
+        public string? EventType { get; set; } = "ShiftSample";
+
+        public double? LocationLatitude { get; set; }
+        public double? LocationLongitude { get; set; }
+        public double? LocationAccuracy { get; set; }
+        public bool? IsMocked { get; set; }
+        public string? LocationPermissionStatus { get; set; }
+        public DateTime? LocationCapturedAtUtc { get; set; }
+    }
+
+    /// <summary>
+    /// 批量上传结果。Accepted / Duplicates / Rejected 里的点客户端都会从本地队列删除；
+    /// 整单失败（ApiResponse.Error）、网络错误、5xx 则保留重试。
+    /// </summary>
+    public class AttendanceLocationSampleBatchResultDto
+    {
+        /// <summary>本次新入库的 ClientSampleId。</summary>
+        public List<string> Accepted { get; set; } = new();
+
+        /// <summary>该用户下已存在（含同请求内重复）的 ClientSampleId，视为幂等成功。</summary>
+        public List<string> Duplicates { get; set; } = new();
+
+        /// <summary>逐点拒绝（这些点重试也不会成功，客户端应丢弃）。</summary>
+        public List<AttendanceLocationSampleBatchRejectedDto> Rejected { get; set; } = new();
+    }
+
+    public class AttendanceLocationSampleBatchRejectedDto
+    {
+        public string ClientSampleId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// LOCATION_REQUIRED / SAMPLE_TOO_OLD / SAMPLE_IN_FUTURE / ACTIVE_SHIFT_REQUIRED / CLIENT_SAMPLE_ID_INVALID。
+        /// </summary>
+        public string ErrorCode { get; set; } = string.Empty;
+
+        public string Message { get; set; } = string.Empty;
+    }
+
     public class AttendanceLocationSampleQueryDto
     {
         public string? StoreCode { get; set; }

@@ -91,6 +91,10 @@ namespace BlazorApp.Api.Tests
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AppNotification_DedupeKey "
                 + "ON AppNotification(DedupeKey) WHERE DedupeKey IS NOT NULL");
+            // 班中定位批量上传的幂等键：生产由迁移 20261015.003 建过滤唯一索引（SQLite 同样支持部分索引）。
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AttendanceLocationSample_User_ClientSample "
+                + "ON AttendanceLocationSample(UserGuid, ClientSampleId) WHERE ClientSampleId IS NOT NULL");
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AttendanceMealBreak_OpenPerUser "
                 + "ON AttendanceMealBreak(UserGuid) WHERE EndUtc IS NULL");

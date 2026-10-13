@@ -163,6 +163,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyContainerNewProductNoticeAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendanceLocationSampleBatchAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceLocationSampleBatchAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -212,6 +216,8 @@ internal sealed class LinklyMultiTerminalSchemaMismatchException : Exception;
 internal sealed class MobileOtaRuntimeTargetsSchemaMismatchException : Exception;
 
 internal sealed class LocalSupplierCategorySchemaMismatchException : Exception;
+
+internal sealed class AttendanceLocationSampleBatchSchemaMismatchException : Exception;
 
 internal sealed class LegacyEmployeeLogRiskSchemaMismatchException : Exception;
 
@@ -982,6 +988,35 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
             _commandTimeoutSeconds,
             cancellationToken
         );
+    }
+
+    public async Task ApplyAttendanceLocationSampleBatchAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceLocationSampleBatchSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 班中定位批量上传：两列与过滤唯一索引签名通过后协调器才登记账本，同名但结构错误的列/索引不会被误标为完成。
+        await VerifyAttendanceLocationSampleBatchAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceLocationSampleBatchAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+                _mainDatabase.ConnectionString,
+                AttendanceLocationSampleBatchSchema.VerifySql,
+                _commandTimeoutSeconds,
+                cancellationToken
+            );
+        }
+        catch (SqlException exception) when (exception.Number is >= 52900 and <= 52909)
+        {
+            throw new AttendanceLocationSampleBatchSchemaMismatchException();
+        }
     }
 
     public async Task ApplyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)
