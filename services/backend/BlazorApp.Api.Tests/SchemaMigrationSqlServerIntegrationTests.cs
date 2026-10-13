@@ -1734,6 +1734,87 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 人脸比对九张表_可重复执行_每人仅一条有效登记_命中任务待提示索引_并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql));
+        Assert.Equal(52700, missing.Number);
+
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql);
+
+        // 门店档案只填主键即可：模式与各开关默认关闭（Off），接收端读不到档案或默认值都按 Off 处理。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.FaceStoreProfile (StoreCode) VALUES (N'1013');
+            IF NOT EXISTS (
+                SELECT 1 FROM dbo.FaceStoreProfile
+                WHERE StoreCode = N'1013' AND Mode = 0 AND EvaluateMatch = 0 AND StaffExclusionEnabled = 0
+                  AND TrafficDedupEnabled = 0 AND UnwelcomeListEnabled = 0)
+                THROW 50001, N'Profile defaults are not all off.', 1;
+            """);
+
+        // 同一员工同时只能有一条有效登记；撤回后可以再登记，已撤回的行不限条数。
+        var consent = new string('a', 32);
+        await ExecuteNonQueryAsync(main, $"""
+            INSERT dbo.FaceEnrollment (EnrollmentId, UserGuid, ConsentId, TencentPersonId, PhotoObjectKeysJson, Status, EnrolledAtUtc, EnrolledBy)
+            VALUES ('{new string('1', 32)}', N'user-1', '{consent}', N'p1', N'[]', 1, SYSUTCDATETIME(), N'tester');
+            INSERT dbo.FaceEnrollment (EnrollmentId, UserGuid, ConsentId, TencentPersonId, PhotoObjectKeysJson, Status, EnrolledAtUtc, EnrolledBy)
+            VALUES ('{new string('2', 32)}', N'user-1', '{consent}', N'p0', N'[]', 2, SYSUTCDATETIME(), N'tester'),
+                   ('{new string('3', 32)}', N'user-1', '{consent}', N'p00', N'[]', 2, SYSUTCDATETIME(), N'tester');
+            """);
+        var duplicateActive = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, $"""
+                INSERT dbo.FaceEnrollment (EnrollmentId, UserGuid, ConsentId, TencentPersonId, PhotoObjectKeysJson, Status, EnrolledAtUtc, EnrolledBy)
+                VALUES ('{new string('4', 32)}', N'user-1', '{consent}', N'p2', N'[]', 1, SYSUTCDATETIME(), N'tester');
+                """));
+        Assert.Equal(2601, duplicateActive.Number);
+
+        // 客流计数桶：联合主键（门店 + 整点），计数列默认 0。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.FaceTrafficBucket (StoreCode, BucketStartUtc) VALUES (N'1013', '2026-10-14T01:00:00');
+            """);
+        var duplicateBucket = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.FaceTrafficBucket (StoreCode, BucketStartUtc) VALUES (N'1013', '2026-10-14T01:00:00');
+                """));
+        Assert.Equal(2627, duplicateBucket.Number);
+
+        // 命中任务：接收端只写设计列（NotifiedAtUtc 留空）；审计表自增主键。
+        await ExecuteNonQueryAsync(main, $"""
+            INSERT dbo.FaceMatchTask (TaskId, StoreCode, CameraId, CapturedAtUtc, EntryId, Score, ImageObjectKey, ReviewStatus, ImageDeleteAtUtc)
+            VALUES ('{new string('5', 32)}', N'1013', N'cam-1', SYSUTCDATETIME(), '{new string('6', 32)}', 91.2345, N'face-match/hit/x.jpg', 0, SYSUTCDATETIME());
+            IF (SELECT COUNT(*) FROM dbo.FaceMatchTask WHERE NotifiedAtUtc IS NULL) <> 1
+                THROW 50002, N'New task should be un-notified.', 1;
+            INSERT dbo.FaceAuditLog (AtUtc, ActorId, ActorName, Action, Result)
+            VALUES (SYSUTCDATETIME(), N'u1', N'tester', N'profile.update', N'ok'),
+                   (SYSUTCDATETIME(), N'u1', N'tester', N'profile.update', N'ok');
+            IF (SELECT MAX(AuditId) - MIN(AuditId) FROM dbo.FaceAuditLog) <> 1
+                THROW 50003, N'AuditId should auto increment.', 1;
+            """);
+
+        // 列被改窄报 52701；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceStoreProfile ALTER COLUMN PiaReference nvarchar(50) NULL;");
+        var narrowed = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql));
+        Assert.Equal(52701, narrowed.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceStoreProfile ALTER COLUMN PiaReference nvarchar(100) NULL;");
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql);
+
+        // 有效登记唯一过滤索引被删报 52702；重跑迁移补回后通过。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_FaceEnrollment_UserGuid_Active ON dbo.FaceEnrollment;");
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql));
+        Assert.Equal(52702, indexMissing.Number);
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

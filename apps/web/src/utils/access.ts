@@ -122,6 +122,7 @@ function createEmptyAccess(): AccessControl {
     canViewDailyCloseRecords: false,
     canViewSeasonalCardStats: false,
     canManageFaceCameras: false,
+    canAccessFaceMatch: false,
     canManageSystemSettings: false,
     canManageScheduledTasks: false,
     canViewAppDownloads: false,
@@ -372,6 +373,14 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewSeasonalCardStats = isAdmin || hasPermission(P.SeasonalCards.Remaining.ViewAllStores)
   // 人脸抓拍摄像机管理只认独立权限码（会签发摄像机推送令牌），不挂在系统设置权限下。
   const canManageFaceCameras = isAdmin || hasPermission(P.FaceCapture.CamerasManage)
+  // 人脸比对页任一 FaceMatch.* 权限即可进入；各页签（档案 / 统计 / 名单 / 复核）页内再按各自权限码显示。
+  const canAccessFaceMatch =
+    isAdmin ||
+    hasPermission(P.FaceMatch.Manage) ||
+    hasPermission(P.FaceMatch.Traffic.View) ||
+    hasPermission(P.FaceMatch.Unwelcome.Manage) ||
+    hasPermission(P.FaceMatch.Unwelcome.Approve) ||
+    hasPermission(P.FaceMatch.Unwelcome.Review)
   // 合并页只要能看其中一个来源即可进入，页内只显示有权限的来源。
   const canViewEmployeeOperationLogs = canViewOperationAudits || canViewLegacyEmployeeLogs
   const canManageScheduledTasks = isAdmin || hasPermission(P.System.ManageScheduledTasks)
@@ -509,6 +518,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewDailyCloseRecords,
     canViewSeasonalCardStats,
     canManageFaceCameras,
+    canAccessFaceMatch,
     canManageScheduledTasks,
     canManageSystemSettings,
     canViewAppDownloads,

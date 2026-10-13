@@ -145,6 +145,17 @@ services:
       - FaceCapture__Cos__Region=${FACE_CAPTURE_COS_REGION:-}
       - FaceCapture__Cos__SecretId=${FACE_CAPTURE_COS_SECRET_ID:-}
       - FaceCapture__Cos__SecretKey=${FACE_CAPTURE_COS_SECRET_KEY:-}
+      # 门店人脸比对服务（管理端，docs/runbooks/face-ingest.md 第 16 节）：默认全部关闭，全部带 :- 默认值，
+      # 没有这些变量的主 API 部署不会失败；地域缺省 / 不在白名单（ap-guangzhou、ap-shanghai、ap-singapore）或管理凭据缺失时
+      # 功能整体关闭（管理接口返回 503、后台任务空转），绝不回退到上面的 TENCENT_* 主密钥，也不回退别的地域。
+      # 管理凭据是腾讯云 CAM 管理子账号（CreateGroup/CreatePerson/CreateFace/DeletePerson/DeleteGroup/GetPersonList/GetGroupList），与接收端搜索账号不是同一个。
+      - FaceMatch__Tencent__Region=${FACE_MATCH_TENCENT_REGION:-ap-guangzhou}
+      - FaceMatch__Tencent__AdminSecretId=${FACE_MATCH_ADMIN_SECRET_ID:-}
+      - FaceMatch__Tencent__AdminSecretKey=${FACE_MATCH_ADMIN_SECRET_KEY:-}
+      - FaceMatch__CaptureRetentionDays=${FACE_MATCH_CAPTURE_RETENTION_DAYS:-7}
+      - FaceMatch__EnrollmentQualityControl=${FACE_MATCH_ENROLLMENT_QUALITY_CONTROL:-2}
+      - FaceMatch__Unwelcome__HighBandScore=${FACE_MATCH_UNWELCOME_HIGH_BAND_SCORE:-90}
+      - FaceMatch__BackgroundEnabled=${FACE_MATCH_BACKGROUND_ENABLED:-true}
     volumes: &hb-api-volumes
       - hb-api-logs:/app/logs
       - ./data-protection-keys:/app/App_Data/DataProtectionKeys

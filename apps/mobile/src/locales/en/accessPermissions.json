@@ -285,6 +285,26 @@
       "name": "View face capture images",
       "description": "View the face and background images of face captures in the recent captures drawer on the web admin page /system/face-cameras. Images are sensitive biometric information and every view is logged. Granted separately from managing the cameras; the page itself also needs the manage permission."
     },
+    "FaceMatch.Manage": {
+      "name": "Manage face matching",
+      "description": "On the web admin page /system/face-match: maintain per-store face matching profiles and their enablement prerequisites, record staff consent, enrol and withdraw staff enrolment photos, and view the face matching audit log (sensitive biometric information)."
+    },
+    "FaceMatch.Traffic.View": {
+      "name": "View face matching traffic statistics",
+      "description": "On the web admin page /system/face-match (Traffic tab): view per-store counts of captures, staff, unique visitors (estimate), repeats and low-quality captures. Counts only, no biometric information."
+    },
+    "FaceMatch.Unwelcome.Manage": {
+      "name": "Manage unwelcome persons list",
+      "description": "On the web admin page /system/face-match (Unwelcome list tab): submit, view and withdraw unwelcome persons list entries and upload reference photos (sensitive biometric information)."
+    },
+    "FaceMatch.Unwelcome.Approve": {
+      "name": "Approve unwelcome persons list entries",
+      "description": "On the web admin page /system/face-match (Unwelcome list tab): approve entries onto the list. The approver must differ from the submitter, and entries in the Other category need two different approvers."
+    },
+    "FaceMatch.Unwelcome.Review": {
+      "name": "Review unwelcome persons list matches",
+      "description": "On the web admin page /system/face-match (Review tasks tab): receive possible-match alerts for assigned stores, compare the live capture and reference photo side by side, and take part in two-person review (sensitive biometric information, every view is logged)."
+    },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",
       "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."

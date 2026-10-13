@@ -151,6 +151,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyFaceCaptureAsync(CancellationToken cancellationToken);
 
+    Task ApplyFaceMatchAsync(CancellationToken cancellationToken);
+
+    Task VerifyFaceMatchAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -901,6 +905,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             FaceCaptureSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyFaceMatchAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            FaceMatchSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 人脸比对九张表：列、主键与索引签名通过后协调器才登记账本，结构不符的同名表不会被误标为完成。
+        await VerifyFaceMatchAsync(cancellationToken);
+    }
+
+    public async Task VerifyFaceMatchAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            FaceMatchSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

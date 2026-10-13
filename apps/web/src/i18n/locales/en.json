@@ -78,6 +78,7 @@
     "paymentTerminalSettings": "Payment Terminal Settings",
     "emergencyLoginKeys": "Emergency Login Keys",
     "faceCameras": "Face Capture Cameras",
+    "faceMatch": "Face Matching",
     "employeeProfiles": "Employee Profiles",
     "systemUsers": "Users",
     "systemRoles": "Roles",

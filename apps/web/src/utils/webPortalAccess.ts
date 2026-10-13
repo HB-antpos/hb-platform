@@ -156,6 +156,17 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.hasPermission(P.FaceCapture.CamerasManage),
   },
   {
+    // 人脸比对：只有五个 FaceMatch.* 权限之一的账号也要能进入后台；放在摄像机管理之后，组合权限用户沿用原默认入口。
+    defaultPath: '/system/face-match',
+    targetPrefixes: ['/system/face-match'],
+    canAccess: (access) =>
+      access.hasPermission(P.FaceMatch.Manage) ||
+      access.hasPermission(P.FaceMatch.Traffic.View) ||
+      access.hasPermission(P.FaceMatch.Unwelcome.Manage) ||
+      access.hasPermission(P.FaceMatch.Unwelcome.Approve) ||
+      access.hasPermission(P.FaceMatch.Unwelcome.Review),
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline'],

@@ -135,6 +135,35 @@ namespace BlazorApp.Shared.Constants
             }
         }
 
+        /// <summary>
+        /// 门店人脸比对服务：Web 后台 /system/face-match（门店档案、员工同意与登记、客流统计、不受欢迎人员名单）。
+        /// 全部只给管理员（Admin 角色靠角色放行，不挂任何角色模板）；刻意不放在 Permissions.PosTerminal.* 下。
+        /// 五个码互相独立：管理档案不自动包含看客流，批准条目的人不自动能复核命中。
+        /// </summary>
+        public static class FaceMatch
+        {
+            /// <summary>门店档案与闸门、员工同意、员工登记与撤回、审计查询。</summary>
+            public const string Manage = "FaceMatch.Manage";
+
+            public static class Traffic
+            {
+                /// <summary>客流统计页（计数，没有任何生物信息）。</summary>
+                public const string View = "FaceMatch.Traffic.View";
+            }
+
+            public static class Unwelcome
+            {
+                /// <summary>提交、查看、撤回不受欢迎人员名单条目。</summary>
+                public const string Manage = "FaceMatch.Unwelcome.Manage";
+
+                /// <summary>批准条目；批准人必须不同于提交人。</summary>
+                public const string Approve = "FaceMatch.Unwelcome.Approve";
+
+                /// <summary>收到命中提示并参与两人复核，可看命中图与参考照片（敏感生物识别信息，逐次审计）。</summary>
+                public const string Review = "FaceMatch.Unwelcome.Review";
+            }
+        }
+
         public static class PosTerminal
         {
             public static class Sales
