@@ -4324,6 +4324,8 @@ function ProductQueryContent() {
         accessibilityElementsHidden={Boolean(pendingScanPresentation)}
         importantForAccessibility={pendingScanPresentation ? "no-hide-descendants" : "auto"}
         contentContainerStyle={styles.content}
+        // 默认 never：条码框带着键盘时，点「添加」的第一下只会被用来收键盘，表现为按钮点不灵。
+        keyboardShouldPersistTaps="handled"
         pointerEvents={scannerInputBlocked ? "none" : "auto"}
       >
         {!storePrice ? (
