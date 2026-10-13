@@ -1122,6 +1122,8 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.FaceMatch.FaceTrafficService
 >();
 builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceMatchMaintenance>();
+// 门店分时客流投影（FaceTrafficBucket → FaceTrafficHourly，迁移 20261016.001-face-traffic-hourly）：由 FaceMatchBackgroundService 任务⑧每 10 分钟驱动。
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceTrafficHourlyProjector>();
 builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceHitNotifier>();
 builder.Services.AddHostedService<BlazorApp.Api.Features.FaceMatch.FaceMatchBackgroundService>();
 builder.Services.AddScoped<

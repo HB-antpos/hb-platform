@@ -52,7 +52,7 @@ internal sealed class FaceMatchTestDatabase : IDisposable
         Db.CodeFirst.InitTables(
             typeof(Store), typeof(User), typeof(UserStore),
             typeof(FaceStoreProfile), typeof(FaceConsentRecord), typeof(FaceEnrollment), typeof(FaceVisitGroup),
-            typeof(FaceTrafficBucket), typeof(FaceMatchEvaluation),
+            typeof(FaceTrafficBucket), typeof(FaceTrafficHourly), typeof(FaceMatchEvaluation),
             typeof(FaceUnwelcomeEntry), typeof(FaceMatchTask), typeof(FaceCaptureEvent),
             typeof(AppNotification), typeof(AppNotificationRecipient));
         // 与迁移 20261014.001-face-match 同名的过滤唯一索引：每个员工同时只能有一条有效登记。

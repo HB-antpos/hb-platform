@@ -167,6 +167,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAttendanceLocationSampleBatchAsync(CancellationToken cancellationToken);
 
+    Task ApplyFaceTrafficHourlyAsync(CancellationToken cancellationToken);
+
+    Task VerifyFaceTrafficHourlyAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1017,6 +1021,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         {
             throw new AttendanceLocationSampleBatchSchemaMismatchException();
         }
+    }
+
+    public async Task ApplyFaceTrafficHourlyAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            FaceTrafficHourlySchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 门店分时客流报表表：列、主键与日期索引签名通过后协调器才登记账本，结构不符的同名表不会被误标为完成。
+        await VerifyFaceTrafficHourlyAsync(cancellationToken);
+    }
+
+    public async Task VerifyFaceTrafficHourlyAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            FaceTrafficHourlySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
     }
 
     public async Task ApplyMobileOtaRuntimeTargetsAsync(CancellationToken cancellationToken)

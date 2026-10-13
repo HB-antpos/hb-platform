@@ -52,6 +52,7 @@
     <Compile Include="FaceUnwelcomeTests.cs" />
     <Compile Include="FaceMatchMaintenanceTests.cs" />
     <Compile Include="FaceTrafficTests.cs" />
+    <Compile Include="FaceTrafficHourlyTests.cs" />
     <Compile Include="FaceMatchControllerTests.cs" />
     <Compile Include="FaceMatchSqlServerTests.cs" />
     <Compile Include="NotificationHubTests.cs" />
