@@ -127,10 +127,13 @@ IF @VisitGroupId IS NOT NULL AND @VisitorsAdded > 0
 COMMIT TRANSACTION;
 """;
 
+    // 中文注释：只认已生效（Status=1 Active）的条目。主 API 撤回/到期时先把状态改掉再去腾讯云 DeletePerson，
+    // 这样在删除完成前的窗口里，接收端也不会再用已撤回的条目建复核任务（契约见主 API 侧 runbook 16.11）。
     internal const string FindUnwelcomeEntrySql = """
 SELECT TOP (1) [EntryId], [StoreScope], [ExpiresAtUtc]
 FROM [dbo].[FaceUnwelcomeEntry]
-WHERE [TencentPersonId] = @TencentPersonId;
+WHERE [TencentPersonId] = @TencentPersonId
+  AND [Status] = 1;
 """;
 
     /// <summary>命中任务：待复核（ReviewStatus 0 = Pending），NotifiedAtUtc 与两位复核人列都留空。</summary>
