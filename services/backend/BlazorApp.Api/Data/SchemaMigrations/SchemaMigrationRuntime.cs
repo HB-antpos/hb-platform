@@ -171,6 +171,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyFaceTrafficHourlyAsync(CancellationToken cancellationToken);
 
+    Task ApplyFaceUnwelcomeAutoConfirmAsync(CancellationToken cancellationToken);
+
+    Task VerifyFaceUnwelcomeAutoConfirmAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1040,6 +1044,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             FaceTrafficHourlySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyFaceUnwelcomeAutoConfirmAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            FaceUnwelcomeAutoConfirmSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 名单命中自动确认阈值列：类型 / 精度 / 可空性签名通过后协调器才登记账本。
+        await VerifyFaceUnwelcomeAutoConfirmAsync(cancellationToken);
+    }
+
+    public async Task VerifyFaceUnwelcomeAutoConfirmAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            FaceUnwelcomeAutoConfirmSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

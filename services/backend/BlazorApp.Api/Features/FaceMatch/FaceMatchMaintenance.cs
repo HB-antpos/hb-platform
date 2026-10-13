@@ -15,7 +15,8 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 4. 名单条目：到期自动停用 + DeletePerson + 删参考照片、到期前 30 天提醒、清理重试；
 /// 5. 命中图到期删除；
 /// 6. 撤回后的补偿：同意已撤回但腾讯云删除未完成的登记、已撤回登记留下的照片；
-/// 7. 地域改动后作废旧的跨境披露审查（只清空审查记录并写审计，不再关闭任何档案；缺口在页面显示为警告）。
+/// 7. 地域改动后作废旧的跨境披露审查（只清空审查记录并写审计，不再关闭任何档案；缺口在页面显示为警告）；
+/// 8. 高相似度命中自动确认（门店阈值 UnwelcomeAutoConfirmScore，默认 90，0 = 关闭；用户 2026-10-13 决定）。
 /// 空转原则：没有管理凭据时不发任何腾讯云请求；没有门店启用（所有档案都是 Off 或没有档案）时不做读取类与保留清理类工作。
 /// 已存在数据的删除类补偿（过期访客库、撤回后的清理）不依赖「有门店启用」，否则门店关闭后数据会无人清理；没有可删的行时它们只是一条廉价查询。
 /// </summary>
@@ -46,6 +47,88 @@ public sealed class FaceMatchMaintenance(
     public async Task<bool> AnyStoreEnabledAsync(CancellationToken cancellationToken)
     {
         return await _db.Queryable<FaceStoreProfile>().AnyAsync(p => p.Mode != FaceStoreMode.Off, cancellationToken);
+    }
+
+    // ---------- 8. 高相似度命中自动确认 ----------
+
+    /// <summary>
+    /// 命中任务自动确认（用户 2026-10-13 决定）：相似度达到或超过门店阈值（FaceStoreProfile.UnwelcomeAutoConfirmScore，
+    /// 默认 90，0 = 关闭）的任务不再等人工复核，由系统直接标为 Confirmed（复核人记为 system，页面显示「自动确认」）。
+    /// 1. 只处理已经提示过店员（NotifiedAtUtc 非空）、仍待复核、没人判断过、命中图还在的任务——提示一定先发出去，自动确认只是替人结案；
+    /// 2. 条件更新（仍是 Pending 且没有复核人才写）：与人工复核并发时谁先写谁生效，不会覆盖人工结论；
+    /// 3. 每个任务写一条审计（Result = auto:confirmed;min=阈值）；单条失败只记日志，下一轮重试；
+    /// 4. 「已确认」只是任务状态：系统不会因此拒绝服务或通知警方。
+    /// 返回本轮自动确认的任务数。
+    /// </summary>
+    public async Task<int> AutoConfirmHitsAsync(CancellationToken cancellationToken)
+    {
+        var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var pendingStatus = FaceMatchReviewStatus.Pending;
+        var tasks = await _db.Queryable<FaceMatchTask>()
+            .Where(t => t.ReviewStatus == pendingStatus
+                && t.FirstReviewerId == null
+                && t.NotifiedAtUtc != null
+                && t.ImageDeleteAtUtc > nowUtc)
+            .OrderBy(t => t.CapturedAtUtc)
+            .Take(BatchSize)
+            .ToListAsync(cancellationToken);
+        if (tasks.Count == 0)
+        {
+            return 0;
+        }
+
+        // 每店阈值：没有档案行（理论上不会有任务）按默认值。
+        var storeCodes = tasks.Select(t => t.StoreCode).Distinct().ToList();
+        var thresholds = (await _db.Queryable<FaceStoreProfile>()
+                .Where(p => storeCodes.Contains(p.StoreCode))
+                .Select(p => new { p.StoreCode, p.UnwelcomeAutoConfirmScore })
+                .ToListAsync(cancellationToken))
+            .ToDictionary(p => p.StoreCode, p => p.UnwelcomeAutoConfirmScore);
+
+        var confirmed = FaceMatchReviewStatus.Confirmed;
+        var actorId = SystemActor.Id;
+        var handled = 0;
+        foreach (var task in tasks)
+        {
+            var threshold = thresholds.TryGetValue(task.StoreCode, out var value)
+                ? value
+                : FaceStoreProfile.DefaultUnwelcomeAutoConfirmScore;
+            if (threshold <= 0m || task.Score < threshold)
+            {
+                continue;
+            }
+
+            try
+            {
+                // 表达式里只放局部变量：SqlSugar 会把三元表达式 / 方法调用翻译成 SQL。
+                var rows = await _db.Updateable<FaceMatchTask>()
+                    .SetColumns(t => new FaceMatchTask
+                    {
+                        FirstReviewerId = actorId,
+                        FirstReviewedAtUtc = nowUtc,
+                        ReviewStatus = confirmed,
+                    })
+                    .Where(t => t.TaskId == task.TaskId && t.ReviewStatus == pendingStatus && t.FirstReviewerId == null)
+                    .ExecuteCommandAsync(cancellationToken);
+                if (rows == 0)
+                {
+                    continue;   // 刚被人工复核了
+                }
+
+                handled++;
+                await audit.WriteAsync(
+                    SystemActor, FaceMatchAuditActions.TaskReview, task.StoreCode, task.TaskId,
+                    $"auto:confirmed;min={threshold.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}",
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 日志里只有任务编号与异常类型，不带相似度或门店以外的内容。
+                logger.LogWarning(ex, "命中任务自动确认失败，下一轮重试: Task={TaskId}", task.TaskId);
+            }
+        }
+
+        return handled;
     }
 
     // ---------- 1. 访客库 ----------

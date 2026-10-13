@@ -1,6 +1,6 @@
 import dayjs from 'dayjs'
 
-import { normalizeFaceGateReport } from '../../../services/faceMatchService'
+import { DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE, normalizeFaceGateReport } from '../../../services/faceMatchService'
 import type {
   CreateFaceConsentInput,
   CreateFaceUnwelcomeEntryInput,
@@ -104,6 +104,36 @@ export const PROFILE_MODE_OPTIONS = [
   { value: PROFILE_MODE_MATCH, labelKey: 'faceMatch.profile.mode.match', hintKey: 'faceMatch.profile.mode.matchHint' },
 ] as const
 
+// ───────────── 命中自动确认阈值 ─────────────
+
+/** 默认阈值（与后端一致）：档案行不存在或未设置时显示它。 */
+export const AUTO_CONFIRM_SCORE_DEFAULT = DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE
+/** 0 = 不自动确认。 */
+export const AUTO_CONFIRM_SCORE_OFF = 0
+/** 阈值的合法区间（含两端）；0 是区间之外唯一合法的值。 */
+export const AUTO_CONFIRM_SCORE_MIN = 50
+export const AUTO_CONFIRM_SCORE_MAX = 100
+
+/**
+ * 阈值校验（后端同样会校验，非法值返回 400 FACE_MATCH_FIELD_INVALID）：
+ * 必须是数字，且是 0，或 50–100 之间（含两端）、最多 2 位小数。
+ * 输入框清空（null）也算不合法：Web 保存时始终带上数字，不靠「省略 = 保持原值」。
+ */
+export function validateAutoConfirmScore(value: unknown): ValidationIssue | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return { key: 'faceMatch.validation.autoConfirmScoreRequired' }
+  if (value === AUTO_CONFIRM_SCORE_OFF) return null
+  const invalid = { key: 'faceMatch.validation.autoConfirmScoreInvalid', params: { min: AUTO_CONFIRM_SCORE_MIN, max: AUTO_CONFIRM_SCORE_MAX } }
+  if (value < AUTO_CONFIRM_SCORE_MIN || value > AUTO_CONFIRM_SCORE_MAX) return invalid
+  // 最多 2 位小数：放大 100 倍后应是整数（容许浮点误差，如 89.99 * 100 = 8998.999999999999）。
+  if (Math.abs(value * 100 - Math.round(value * 100)) > 1e-9) return invalid
+  return null
+}
+
+/** 合法的阈值原样返回，不合法（含空）返回 null：null 在请求里表示「保持库里原值」，永远不会把非法输入改写成别的数字。 */
+export function normalizeAutoConfirmScore(value: unknown): number | null {
+  return validateAutoConfirmScore(value) === null ? (value as number) : null
+}
+
 /** 表单值：文本一律是字符串（空串 = 未填写），日期是 yyyy-MM-dd，日期时间是 UTC ISO。 */
 export interface FaceProfileFormValues {
   mode: number
@@ -111,6 +141,8 @@ export interface FaceProfileFormValues {
   staffExclusionEnabled: boolean
   trafficDedupEnabled: boolean
   unwelcomeListEnabled: boolean
+  /** 命中自动确认阈值；输入框清空时是 null（校验不通过，不能保存）。 */
+  unwelcomeAutoConfirmScore: number | null
   allowedSubjects: string
   piaReference: string
   signageInstalledOn: string
@@ -145,6 +177,8 @@ export function profileToFormValues(
     staffExclusionEnabled: profile.staffExclusionEnabled,
     trafficDedupEnabled: profile.trafficDedupEnabled,
     unwelcomeListEnabled: profile.unwelcomeListEnabled,
+    // 后端的生效值（没有档案行时就是默认 90）；0 是合法值，不能用 || 兜底。
+    unwelcomeAutoConfirmScore: profile.unwelcomeAutoConfirmScore ?? AUTO_CONFIRM_SCORE_DEFAULT,
     allowedSubjects: profile.allowedSubjects ?? '',
     piaReference: profile.piaReference ?? '',
     signageInstalledOn: profile.signageInstalledOn ?? '',
@@ -174,6 +208,8 @@ export function buildProfileRequest(values: Partial<FaceProfileFormValues>): Fac
     staffExclusionEnabled: values.staffExclusionEnabled === true,
     trafficDedupEnabled: values.trafficDedupEnabled === true,
     unwelcomeListEnabled: values.unwelcomeListEnabled === true,
+    // 始终带这个字段：合法数字原样发送；输入当前不合法时为 null（仅闸门检查会走到，保存前页面先校验、不合法不会发出）。
+    unwelcomeAutoConfirmScore: normalizeAutoConfirmScore(values.unwelcomeAutoConfirmScore),
     allowedSubjects: normalizeText(values.allowedSubjects),
     piaReference: normalizeText(values.piaReference),
     signageInstalledOn: normalizeText(values.signageInstalledOn),
@@ -828,7 +864,7 @@ export function referenceIndexes(task: Pick<FaceUnwelcomeTask, 'referencePhotoCo
 
 // ───────────── 误报统计 ─────────────
 
-/** 驳回率 = 已驳回 / (已驳回 + 已确认)；没有已结束任务时为 null。 */
+/** 驳回率 = 已驳回 / (已驳回 + 人工确认)；系统自动确认的不计入；没有人工结案的任务时为 null。 */
 export function computeDismissRate(dismissed: number, confirmed: number): number | null {
   const finished = dismissed + confirmed
   return finished > 0 ? dismissed / finished : null

@@ -656,6 +656,65 @@ public sealed class FaceStoreProfileTests : IDisposable
 
     // ---------- 辅助 ----------
 
+    // ---------- 名单命中自动确认阈值（用户 2026-10-13 决定：高相似度自动通过，阈值可设置） ----------
+
+    [Fact]
+    public async Task 自动确认阈值_默认90_请求省略保持库里原值_0是关闭_改动写审计()
+    {
+        // 没有档案行：生效值是默认 90。
+        Assert.Equal(90m, (await _h.Profiles.GetAsync(Qld)).UnwelcomeAutoConfirmScore);
+
+        // 第一次保存不带阈值：落库默认 90，审计不追加 auto。
+        var first = await _h.Profiles.UpdateAsync(Qld, Req(), FaceMatchTestHarness.Admin);
+        Assert.Equal(90m, first.UnwelcomeAutoConfirmScore);
+        Assert.Equal(90m, (await _h.Db.Queryable<FaceStoreProfile>().SingleAsync()).UnwelcomeAutoConfirmScore);
+
+        // 设置 80.5：DTO、库、审计都反映。
+        var set = await _h.Profiles.UpdateAsync(Qld, Req() with { UnwelcomeAutoConfirmScore = 80.5m }, FaceMatchTestHarness.Admin);
+        Assert.Equal(80.5m, set.UnwelcomeAutoConfirmScore);
+        Assert.Equal(80.5m, (await _h.Db.Queryable<FaceStoreProfile>().SingleAsync()).UnwelcomeAutoConfirmScore);
+
+        // 旧版 App 整体替换保存时不带这个字段：必须保持 80.5，不能被清成默认或 0。
+        var omitted = await _h.Profiles.UpdateAsync(Qld, Req(allowedSubjects: "x"), FaceMatchTestHarness.Admin);
+        Assert.Equal(80.5m, omitted.UnwelcomeAutoConfirmScore);
+        Assert.Equal(80.5m, (await _h.Db.Queryable<FaceStoreProfile>().SingleAsync()).UnwelcomeAutoConfirmScore);
+        Assert.Equal(80.5m, (await _h.Profiles.GetAsync(Qld)).UnwelcomeAutoConfirmScore);
+
+        // 0 = 关闭；边界 50 与 100 合法。
+        Assert.Equal(0m, (await _h.Profiles.UpdateAsync(Qld, Req() with { UnwelcomeAutoConfirmScore = 0m }, FaceMatchTestHarness.Admin)).UnwelcomeAutoConfirmScore);
+        Assert.Equal(50m, (await _h.Profiles.UpdateAsync(Qld, Req() with { UnwelcomeAutoConfirmScore = 50m }, FaceMatchTestHarness.Admin)).UnwelcomeAutoConfirmScore);
+        Assert.Equal(100m, (await _h.Profiles.UpdateAsync(Qld, Req() with { UnwelcomeAutoConfirmScore = 100m }, FaceMatchTestHarness.Admin)).UnwelcomeAutoConfirmScore);
+
+        // 审计：只有改动的那几次才追加 ;auto=…，未改动（默认 90 → 默认 90、省略保持）不追加。
+        var results = (await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.ProfileUpdate).ToListAsync())
+            .OrderBy(a => a.AuditId).Select(a => a.Result).ToList();
+        Assert.Equal(["mode=0", "mode=0;auto=80.5", "mode=0", "mode=0;auto=0", "mode=0;auto=50", "mode=0;auto=100"], results);
+    }
+
+    [Theory]
+    [InlineData("49.99")]
+    [InlineData("1")]
+    [InlineData("-5")]
+    [InlineData("100.01")]
+    [InlineData("101")]
+    [InlineData("90.123")]
+    public async Task 自动确认阈值_非0且低于50_超过100_或超过两位小数_400并指出字段(string raw)
+    {
+        var value = decimal.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+        var request = Req() with { UnwelcomeAutoConfirmScore = value };
+
+        var save = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin));
+        var check = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.CheckAsync(Qld, request));
+
+        Assert.All(new[] { save, check }, ex =>
+        {
+            Assert.Equal(400, ex.StatusCode);
+            Assert.Equal("FACE_MATCH_FIELD_INVALID", ex.Code);
+            Assert.Contains("unwelcomeAutoConfirmScore", System.Text.Json.JsonSerializer.Serialize(ex.Details));
+        });
+        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());   // 非法值不写库
+    }
+
     private static FaceStoreProfileUpdateRequest Req(
         int mode = FaceStoreMode.Off,
         string? allowedSubjects = null,

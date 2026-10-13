@@ -74,6 +74,8 @@ internal sealed class SchemaMigrationCoordinator
     internal const string AttendanceLocationSampleBatchMigrationId =
         "20261015.003-attendance-location-sample-batch";
     internal const string FaceTrafficHourlyMigrationId = "20261016.001-face-traffic-hourly";
+    internal const string FaceUnwelcomeAutoConfirmMigrationId =
+        "20261016.002-face-unwelcome-auto-confirm";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -264,6 +266,11 @@ internal sealed class SchemaMigrationCoordinator
             FaceTrafficHourlyMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyFaceTrafficHourlyAsync(cancellationToken)
+        ),
+        new(
+            FaceUnwelcomeAutoConfirmMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyFaceUnwelcomeAutoConfirmAsync(cancellationToken)
         ),
     ];
 

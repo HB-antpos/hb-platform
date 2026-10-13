@@ -77,6 +77,20 @@ public sealed class FaceStoreProfile
     [SugarColumn(IsNullable = false)]
     public bool UnwelcomeListEnabled { get; set; }
 
+    /// <summary>
+    /// 名单命中自动确认阈值（相似度 0–100，用户 2026-10-13 决定）：命中任务的相似度达到或超过它，主 API 后台任务自动把任务标为
+    /// Confirmed，不再需要人工复核（店员仍会收到提示；系统不自动拒绝服务或通知警方）。0 = 不自动确认；默认 90。
+    /// 迁移 20261016.002-face-unwelcome-auto-confirm 新增：NOT NULL DEFAULT 90，CHECK（0 或 50–100）。
+    /// </summary>
+    [SugarColumn(IsNullable = false, Length = 5, DecimalDigits = 2)]
+    public decimal UnwelcomeAutoConfirmScore { get; set; } = DefaultUnwelcomeAutoConfirmScore;
+
+    /// <summary>自动确认阈值的默认值（未设置时的生效值）。</summary>
+    public const decimal DefaultUnwelcomeAutoConfirmScore = 90m;
+
+    /// <summary>自动确认阈值的下限：低于它的非零值不允许保存（0 表示关闭）。</summary>
+    public const decimal MinUnwelcomeAutoConfirmScore = 50m;
+
     [SugarColumn(IsNullable = true, Length = 200)]
     public string? AllowedSubjects { get; set; }
 

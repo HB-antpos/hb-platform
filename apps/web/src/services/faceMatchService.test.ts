@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 
 import { RequestError } from '../utils/request'
 import {
+  DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE,
   approveUnwelcomeEntry,
   buildFaceConsentFormData,
   buildFaceEnrollmentFormData,
+  buildProfileRequestBody,
   buildUnwelcomeEntryFormData,
   checkFaceStoreProfile,
   createFaceConsent,
@@ -27,6 +29,7 @@ import {
   normalizeFaceMatchConfig,
   normalizeFaceTraffic,
   normalizeFaceUnwelcomeEntry,
+  normalizeFaceUnwelcomeStats,
   normalizeFaceUnwelcomeTask,
   reviewUnwelcomeTask,
   setUnwelcomeDisputeNote,
@@ -77,6 +80,7 @@ const emptyProfileRequest: FaceStoreProfileUpdateRequest = {
   staffExclusionEnabled: true,
   trafficDedupEnabled: false,
   unwelcomeListEnabled: false,
+  unwelcomeAutoConfirmScore: 85,
   allowedSubjects: null,
   piaReference: 'PIA-1',
   signageInstalledOn: '2026-10-01',
@@ -209,6 +213,13 @@ try {
   assert.equal(profile.gates.canSave, false)
   assert.deepEqual(profile.gates.facets[0].missing, ['piaReference', 'legalSignoffAt'])
   assert.equal(profile.piaReference, null, '缺字段归一化为 null')
+  assert.equal(profile.unwelcomeAutoConfirmScore, 90, '老后端 / 没有档案行时没有阈值：取默认 90')
+  assert.equal(DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE, 90)
+  // 阈值的各种取值：生效值原样解析（0 = 不自动确认，不能被默认值盖掉）；不是数字的一律取默认
+  for (const [raw, expected] of [[0, 0], [75.5, 75.5], [100, 100], [95, 95], [null, 90], ['80', 90], [Number.NaN, 90], [{}, 90]] as const) {
+    responseFactory = () => json({ success: true, data: { storeCode: '1008', unwelcomeAutoConfirmScore: raw } })
+    assert.equal((await getFaceStoreProfile('1008')).unwelcomeAutoConfirmScore, expected, `后端阈值 ${String(raw)} 解析为 ${expected}`)
+  }
 
   responseFactory = () => json({ success: true, data: gatePayload })
   const abort = new AbortController()
@@ -225,6 +236,25 @@ try {
   assert.equal(lastCall().init?.method, 'PUT')
   assert.deepEqual(bodyOf(lastCall()), emptyProfileRequest)
   assert.equal(saved.gates.canSave, true)
+  // 保存请求体始终带命中自动确认阈值（数字）
+  assert.equal(bodyOf(lastCall()).unwelcomeAutoConfirmScore, 85)
+  assert.equal(bodyOf(lastCall()).mode, 2)
+  // 阈值 0（不自动确认）也要带上，不能因为是 falsy 被丢掉
+  await updateFaceStoreProfile('1008', { ...emptyProfileRequest, unwelcomeAutoConfirmScore: 0 })
+  assert.equal(bodyOf(lastCall()).unwelcomeAutoConfirmScore, 0)
+  assert.ok(String(lastCall().init?.body).includes('"unwelcomeAutoConfirmScore":0'))
+  // 实时闸门检查与保存共用同一个请求体构造
+  await checkFaceStoreProfile('1008', { ...emptyProfileRequest, unwelcomeAutoConfirmScore: 92.5 })
+  assert.equal(bodyOf(lastCall()).unwelcomeAutoConfirmScore, 92.5)
+  // 缺失 / 不是数字时写成 null（后端语义：保持库里原值），字段不省略；绝不改写成别的数字
+  const legacyRequest = { ...emptyProfileRequest } as Partial<FaceStoreProfileUpdateRequest>
+  delete legacyRequest.unwelcomeAutoConfirmScore
+  await updateFaceStoreProfile('1008', legacyRequest as FaceStoreProfileUpdateRequest)
+  assert.ok(String(lastCall().init?.body).includes('"unwelcomeAutoConfirmScore":null'), '缺失时请求体里仍有该字段（null）')
+  assert.equal(bodyOf(lastCall()).unwelcomeAutoConfirmScore, null)
+  assert.equal(buildProfileRequestBody({ ...emptyProfileRequest, unwelcomeAutoConfirmScore: Number.NaN }).unwelcomeAutoConfirmScore, null)
+  assert.equal(buildProfileRequestBody({ ...emptyProfileRequest, unwelcomeAutoConfirmScore: 90 }).unwelcomeAutoConfirmScore, 90)
+  assert.equal(buildProfileRequestBody(emptyProfileRequest).piaReference, 'PIA-1', '其余字段原样保留')
 
   // 闸门拒绝：409 + details，错误码与闸门报告都保留在 RequestError.payload 里
   responseFactory = () =>
@@ -446,6 +476,20 @@ try {
   assert.equal(tasks.items[2].secondReviewerName, 'Alex', 'secondReviewerName 仍解析（旧遗留任务）')
   assert.equal(tasks.items[2].canReview, true, 'canReview 以后端为准')
   assert.equal(normalizeFaceUnwelcomeTask({ referencePhotoCount: -3 }).referencePhotoCount, 0)
+  // 自动确认标志：老后端 / 缺字段按 false（人工复核）；只有明确的 true 才算系统自动确认
+  assert.equal(tasks.items[0].autoConfirmed, false, '缺少 autoConfirmed 字段按 false 解析')
+  assert.equal(normalizeFaceUnwelcomeTask({}).autoConfirmed, false)
+  assert.equal(normalizeFaceUnwelcomeTask({ autoConfirmed: 'true' }).autoConfirmed, false, '字符串 true 不算')
+  assert.equal(normalizeFaceUnwelcomeTask({ autoConfirmed: 1 }).autoConfirmed, false)
+  const autoTask = normalizeFaceUnwelcomeTask({
+    ...taskPayload, reviewStatus: 2, reviewStatusName: 'confirmed', firstReviewerName: null, firstReviewedAtUtc: null,
+    nextStep: 'none', canReview: false, autoConfirmed: true,
+  })
+  assert.equal(autoTask.autoConfirmed, true)
+  assert.equal(autoTask.reviewStatus, 2)
+  assert.equal(autoTask.reviewStatusName, 'confirmed')
+  assert.equal(autoTask.firstReviewerName, null)
+  assert.equal(autoTask.canReview, false, '自动确认的任务没有复核入口')
 
   responseFactory = () => json({ success: true, data: { ...taskPayload, reviewStatus: 1 } })
   await reviewUnwelcomeTask('T1', 'notMatch')
@@ -468,6 +512,48 @@ try {
   assert.equal(stats.entries[0].suggestReview, true)
   assert.equal(stats.entries[1].dismissRate, null)
   assert.equal(stats.scoreBuckets[0].from, 85)
+  // 老后端 / 字段缺失：三处 autoConfirmedCount 都按 0
+  assert.equal(stats.autoConfirmedCount, 0, '总体缺 autoConfirmedCount 按 0')
+  assert.equal(stats.entries[0].autoConfirmedCount, 0, '条目缺 autoConfirmedCount 按 0')
+  assert.equal(stats.entries[1].autoConfirmedCount, 0)
+  assert.equal(stats.scoreBuckets[0].autoConfirmedCount, 0, '相似度区间缺 autoConfirmedCount 按 0')
+  assert.equal(normalizeFaceUnwelcomeStats(undefined).autoConfirmedCount, 0)
+  // 新后端：自动确认单独计数，不算进「人工确认」；三处都解析
+  responseFactory = () =>
+    json({
+      success: true,
+      data: {
+        taskCount: 20, pendingCount: 2, dismissedCount: 8, confirmedCount: 2, autoConfirmedCount: 8, dismissRate: 0.8,
+        entries: [
+          { entryId: 'E1', taskCount: 12, pendingCount: 1, dismissedCount: 8, confirmedCount: 1, autoConfirmedCount: 2, dismissRate: 8 / 9, suggestReview: true },
+          { entryId: 'E2', taskCount: 8, autoConfirmedCount: 6, dismissRate: null },
+        ],
+        scoreBuckets: [
+          { from: 85, to: 89, total: 5, dismissedCount: 3, confirmedCount: 2, autoConfirmedCount: 0 },
+          { from: 95, to: 100, total: 6, dismissedCount: 0, confirmedCount: 0, autoConfirmedCount: 6 },
+        ],
+      },
+    })
+  const autoStats = await getUnwelcomeStats()
+  assert.equal(autoStats.autoConfirmedCount, 8)
+  assert.equal(autoStats.confirmedCount, 2, 'confirmedCount 只含人工确认')
+  assert.equal(
+    autoStats.taskCount,
+    autoStats.pendingCount + autoStats.dismissedCount + autoStats.confirmedCount + autoStats.autoConfirmedCount,
+    'taskCount = 待复核 + 已驳回 + 人工确认 + 自动确认',
+  )
+  assert.deepEqual(autoStats.entries.map((entry) => entry.autoConfirmedCount), [2, 6])
+  assert.equal(autoStats.entries[1].dismissRate, null, '没有人工结案的任务时驳回率为 null')
+  assert.deepEqual(autoStats.scoreBuckets.map((bucket) => bucket.autoConfirmedCount), [0, 6])
+  // 非数字 / 负数一律按 0，不能让页面显示 NaN 或负数
+  const dirtyStats = normalizeFaceUnwelcomeStats({
+    autoConfirmedCount: '8',
+    entries: [{ autoConfirmedCount: Number.NaN }, { autoConfirmedCount: -3 }, { autoConfirmedCount: null }],
+    scoreBuckets: [{ autoConfirmedCount: {} }, { autoConfirmedCount: 4 }],
+  })
+  assert.equal(dirtyStats.autoConfirmedCount, 0)
+  assert.deepEqual(dirtyStats.entries.map((entry) => entry.autoConfirmedCount), [0, 0, 0])
+  assert.deepEqual(dirtyStats.scoreBuckets.map((bucket) => bucket.autoConfirmedCount), [0, 4])
 
   // ───────── 复核图片：专用内容接口，只认 jpeg / png，带登录 Cookie 且 no-store ─────────
   const imageBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9, 9])

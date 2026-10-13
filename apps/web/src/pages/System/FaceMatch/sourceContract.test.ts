@@ -126,6 +126,18 @@ assert(!f('ReviewTaskModal.tsx').includes('firstReviewerName') && !f('ReviewTask
 assert(!f('logic.ts').includes('faceMatch.review.step.second') && f('logic.ts').includes("task.nextStep === 'second'"), '步骤提示没有待二审一项，旧的 second 当作待复核')
 assert(!/isFirstReviewer|SAME_REVIEWER/.test(f('ReviewTaskModal.tsx') + f('ReviewTasksTab.tsx')), '复核页不自己推算「是不是已判断过的人」，也不依赖 SAME_REVIEWER 流程')
 
+// 命中自动确认：列表上能看出哪些任务是系统自动确认的，且不给它加复核入口（入口完全由后端 canReview 决定）。
+assert(f('ReviewTasksTab.tsx').includes('record.autoConfirmed') && f('ReviewTasksTab.tsx').includes("t('faceMatch.review.autoConfirmedTag')"), '状态列在「已确认」旁加「自动确认」小标签')
+assert(f('ReviewTasksTab.tsx').includes("t('faceMatch.review.autoConfirmedBy')"), '自动确认的任务复核人列显示「系统自动确认」')
+assert(!/autoConfirmed/.test(f('ReviewTaskModal.tsx')) && !/autoConfirmed/.test(f('logic.ts')), '自动确认只影响列表展示，不改变复核入口 / 提交判断的规则（仍只看 canReview）')
+assert(f('ReviewTasksTab.tsx').includes('record.canReview && !writeBlocked'), '复核入口仍只由后端 canReview 决定')
+
+// 误报统计：自动确认单独一列，总体汇总 / 条目表 / 相似度区间表三处都有；驳回率仍由人工判断的任务算出（页面不把自动确认算进去）。
+const statsTab = f('StatsTab.tsx')
+assert((statsTab.match(/dataIndex: 'autoConfirmedCount'/g) ?? []).length === 2 && statsTab.includes('value={data.autoConfirmedCount}'), '汇总卡、条目表、相似度区间表都有「自动确认」')
+assert((statsTab.match(/faceMatch\.stats\.confirmedCount/g) ?? []).length === 3 && (statsTab.match(/faceMatch\.stats\.autoConfirmedCount/g) ?? []).length === 3, '「人工确认」与「自动确认」在三处成对出现')
+assert(statsTab.includes('computeDismissRate(record.dismissedCount, record.confirmedCount)') && !/computeDismissRate\([^)]*autoConfirmedCount/.test(statsTab), '区间驳回率只用已驳回与人工确认，不含自动确认')
+
 // ───────── 错误文案：统一经 describeFaceMatchError（已知码 → 状态码 → 通用），不直接展示后端消息文本 ─────────
 for (const [name, text] of Object.entries(files)) {
   if (!name.endsWith('.tsx')) continue
@@ -167,6 +179,14 @@ assert(f('shared.tsx').includes('storeOptionsFailed') && f('index.tsx').includes
 assert(f('ProfilesTab.tsx').includes('CHECK_DEBOUNCE_MS') && f('ProfilesTab.tsx').includes('abortRef.current?.abort()'), '闸门检查防抖且可取消')
 assert(f('ProfilesTab.tsx').includes('getGateReportFromError(error)'), '保存被 409 拒绝时展示 details 里的闸门报告')
 assert(f('ProfilesTab.tsx').includes('profileToFormValues(profile, config.region)'), '跨境审查地域预填当前配置地域')
+// 命中自动确认阈值：数字输入 + 客户端校验（输入框下提示，保存前先校验并阻止保存）；服务层保存时始终带该字段。
+assert(f('ProfilesTab.tsx').includes('<InputNumber') && f('ProfilesTab.tsx').includes("t('faceMatch.profile.fields.unwelcomeAutoConfirmScore')"), '档案表单有命中自动确认阈值输入框')
+assert((f('ProfilesTab.tsx').match(/validateAutoConfirmScore\(/g) ?? []).length >= 2, '阈值校验同时用于字段提示与保存前拦截')
+assert(
+  /const handleSave = async \(\) => \{[\s\S]*validateAutoConfirmScore\([\s\S]*?return[\s\S]*?updateFaceStoreProfile\(/.test(f('ProfilesTab.tsx')),
+  '保存前先校验阈值，不合法就 return，不会走到保存接口',
+)
+assert(service.includes('buildProfileRequestBody(payload)') && (service.match(/buildProfileRequestBody\(payload\)/g) ?? []).length === 2, '保存与闸门检查共用请求体构造，始终带 unwelcomeAutoConfirmScore')
 assert(existsSync(resolve(`${directory}/messages.zh.json`)) && existsSync(resolve(`${directory}/messages.en.json`)), '中英文页面消息文件都要有')
 
 // ───────── 用词：固定使用「不受欢迎人员名单」 ─────────

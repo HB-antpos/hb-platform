@@ -681,6 +681,111 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
             provider.GetRequiredService<IServiceScopeFactory>(), _h.Settings, clock, _h.Logs.CreateLogger<FaceMatchBackgroundService>());
     }
 
+    // ---------- 高相似度命中自动确认（用户 2026-10-13 决定） ----------
+
+    [Fact]
+    public async Task 自动确认_相似度达到门店阈值即标为已确认_复核人是系统_写审计_提示照发_幂等()
+    {
+        SeedProfile("1013", FaceStoreMode.Match, unwelcome: true);   // 阈值取默认 90
+        var high = SeedTask("face-match/hit/1013/a.jpg", deleteInDays: 7, score: 95m, capturedMinutesAgo: 30);
+        var edge = SeedTask("face-match/hit/1013/b.jpg", deleteInDays: 7, score: 90m, capturedMinutesAgo: 20);
+        var low = SeedTask("face-match/hit/1013/c.jpg", deleteInDays: 7, score: 89.99m, capturedMinutesAgo: 10);
+
+        // 先发提示（店员一定先收到），再自动确认。
+        Assert.Equal(3, await _h.Notifier.PublishPendingAsync(default));
+        Assert.Equal(3, _h.Publisher.Requests.Count);
+        var handled = await _h.Maintenance.AutoConfirmHitsAsync(default);
+
+        Assert.Equal(2, handled);   // 95 与恰好 90（达到即算）；89.99 不动
+        foreach (var id in new[] { high, edge })
+        {
+            var row = await LoadTask(id);
+            Assert.Equal(FaceMatchReviewStatus.Confirmed, row.ReviewStatus);
+            Assert.Equal(FaceMatchAuditActions.SystemActorId, row.FirstReviewerId);
+            Assert.Equal(FaceMatchTestDatabase.Now, row.FirstReviewedAtUtc);
+            Assert.Null(row.SecondReviewerId);
+            Assert.Equal(FaceMatchTestDatabase.Now.AddDays(7), row.ImageDeleteAtUtc);   // 命中图按原保留策略保留
+        }
+
+        var untouched = await LoadTask(low);
+        Assert.Equal(FaceMatchReviewStatus.Pending, untouched.ReviewStatus);
+        Assert.Null(untouched.FirstReviewerId);
+
+        var audits = (await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.TaskReview).ToListAsync())
+            .OrderBy(a => a.AuditId).ToList();
+        Assert.Equal(2, audits.Count);
+        Assert.All(audits, a =>
+        {
+            Assert.Equal("auto:confirmed;min=90", a.Result);
+            Assert.Equal("1013", a.StoreCode);
+            Assert.Equal(FaceMatchAuditActions.SystemActorId, a.ActorId);
+        });
+        Assert.Equal(new[] { high, edge }.OrderBy(x => x), audits.Select(a => a.TargetRef!).OrderBy(x => x));
+
+        // 幂等：再跑一轮什么都不会变，也不会重复写审计。
+        Assert.Equal(0, await _h.Maintenance.AutoConfirmHitsAsync(default));
+        Assert.Equal(2, await _h.Db.Queryable<FaceAuditLog>().CountAsync(a => a.Action == FaceMatchAuditActions.TaskReview));
+    }
+
+    [Fact]
+    public async Task 自动确认_阈值按门店档案生效_0关闭_调低后立即对待复核任务生效()
+    {
+        SeedProfile("1013", FaceStoreMode.Match, unwelcome: true);
+        var task = SeedTask("face-match/hit/1013/a.jpg", deleteInDays: 7, score: 85m);
+        await _h.Notifier.PublishPendingAsync(default);
+
+        // 默认 90：85 不够。
+        Assert.Equal(0, await _h.Maintenance.AutoConfirmHitsAsync(default));
+
+        // 关闭（0）：即使 100 分也不自动确认。
+        await SetAutoConfirmAsync(0m);
+        var perfect = SeedTask("face-match/hit/1013/b.jpg", deleteInDays: 7, score: 100m);
+        await _h.Notifier.PublishPendingAsync(default);
+        Assert.Equal(0, await _h.Maintenance.AutoConfirmHitsAsync(default));
+        Assert.Equal(FaceMatchReviewStatus.Pending, (await LoadTask(perfect)).ReviewStatus);
+
+        // 调到 80：两个待复核任务（85、100）一起被自动确认。
+        await SetAutoConfirmAsync(80m);
+        Assert.Equal(2, await _h.Maintenance.AutoConfirmHitsAsync(default));
+        Assert.Equal(FaceMatchReviewStatus.Confirmed, (await LoadTask(task)).ReviewStatus);
+        Assert.Equal(FaceMatchReviewStatus.Confirmed, (await LoadTask(perfect)).ReviewStatus);
+        Assert.Contains(await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.TaskReview).ToListAsync(), a => a.Result == "auto:confirmed;min=80");
+    }
+
+    [Fact]
+    public async Task 自动确认_店员还没收到提示的任务不处理_已有人工判断的不覆盖_命中图已到期的不处理()
+    {
+        SeedProfile("1013", FaceStoreMode.Match, unwelcome: true);
+        var notNotified = SeedTask("face-match/hit/1013/a.jpg", deleteInDays: 7, score: 99m);
+        Assert.Equal(0, await _h.Maintenance.AutoConfirmHitsAsync(default));   // 还没发提示：先不动
+        Assert.Equal(FaceMatchReviewStatus.Pending, (await LoadTask(notNotified)).ReviewStatus);
+
+        var legacy = SeedTask("face-match/hit/1013/b.jpg", deleteInDays: 7, score: 99m);
+        var expired = SeedTask("face-match/hit/1013/c.jpg", deleteInDays: 1, score: 99m);
+        var dismissed = SeedTask("face-match/hit/1013/d.jpg", deleteInDays: 7, score: 99m, status: FaceMatchReviewStatus.Dismissed);
+        await _h.Db.Updateable<FaceMatchTask>()
+            .SetColumns(t => new FaceMatchTask { FirstReviewerId = "rev-a", FirstReviewedAtUtc = FaceMatchTestDatabase.Now })   // 旧版「已一审待二审」
+            .Where(t => t.TaskId == legacy)
+            .ExecuteCommandAsync();
+        await _h.Notifier.PublishPendingAsync(default);
+        _h.Time.Now = _h.Time.Now.AddDays(2);   // expired 的命中图到期
+
+        var handled = await _h.Maintenance.AutoConfirmHitsAsync(default);
+
+        Assert.Equal(1, handled);   // 只有第一个任务（已提示、没人判断、图还在）
+        Assert.Equal(FaceMatchReviewStatus.Confirmed, (await LoadTask(notNotified)).ReviewStatus);
+        Assert.Equal(FaceMatchReviewStatus.Pending, (await LoadTask(legacy)).ReviewStatus);
+        Assert.Equal("rev-a", (await LoadTask(legacy)).FirstReviewerId);
+        Assert.Equal(FaceMatchReviewStatus.Pending, (await LoadTask(expired)).ReviewStatus);
+        Assert.Equal(FaceMatchReviewStatus.Dismissed, (await LoadTask(dismissed)).ReviewStatus);
+    }
+
+    private Task SetAutoConfirmAsync(decimal score) =>
+        _h.Db.Updateable<FaceStoreProfile>()
+            .SetColumns(p => new FaceStoreProfile { UnwelcomeAutoConfirmScore = score })
+            .Where(p => p.StoreCode == "1013")
+            .ExecuteCommandAsync();
+
     private void SeedProfile(
         string storeCode, byte mode, string? region = null, bool dedup = false, bool unwelcome = false, bool evaluate = false, bool staff = false) =>
         _h.Db.Insertable(new FaceStoreProfile

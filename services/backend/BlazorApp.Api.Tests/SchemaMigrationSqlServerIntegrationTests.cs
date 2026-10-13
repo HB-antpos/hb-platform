@@ -2194,6 +2194,84 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 名单命中自动确认阈值列_缺档案表报52830_可重复执行_已有档案行得到默认90_CHECK兜底_并识别列漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 档案表还没建（face-match 迁移未执行）：迁移与门禁都明确报 52830，而不是静默跳过。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.ApplySql));
+        Assert.Equal(52830, noTable.Number);
+        var noTableVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql));
+        Assert.Equal(52830, noTableVerify.Number);
+
+        // 先建档案表，放一行「迁移前就存在」的档案；列还不存在时门禁报 52831。
+        await ExecuteNonQueryAsync(main, FaceCaptureSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceMatchSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, "INSERT dbo.FaceStoreProfile (StoreCode) VALUES (N'1042');");
+        var noColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql));
+        Assert.Equal(52831, noColumn.Number);
+
+        // 执行迁移：旧行得到默认 90；可重复执行，不改已有值。
+        await ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT UnwelcomeAutoConfirmScore FROM dbo.FaceStoreProfile WHERE StoreCode = N'1042') <> 90
+                THROW 52839, 'Existing row did not get the default 90.', 1;
+            UPDATE dbo.FaceStoreProfile SET UnwelcomeAutoConfirmScore = 77.5 WHERE StoreCode = N'1042';
+            """);
+        await ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT UnwelcomeAutoConfirmScore FROM dbo.FaceStoreProfile WHERE StoreCode = N'1042') <> 77.5
+                THROW 52839, 'Re-running the migration changed an existing value.', 1;
+            """);
+
+        // 新插入的行（不带该列，旧版 API / 接收端的写法）取默认 90。
+        await ExecuteNonQueryAsync(main, "INSERT dbo.FaceStoreProfile (StoreCode) VALUES (N'1013');");
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT UnwelcomeAutoConfirmScore FROM dbo.FaceStoreProfile WHERE StoreCode = N'1013') <> 90
+                THROW 52839, 'New row without the column did not get the default 90.', 1;
+            """);
+
+        // CHECK 兜底：0 与 50–100 合法；49.99、100.01、负数被拒（547）。
+        foreach (var ok in new[] { "0", "50", "100" })
+        {
+            await ExecuteNonQueryAsync(main, $"UPDATE dbo.FaceStoreProfile SET UnwelcomeAutoConfirmScore = {ok} WHERE StoreCode = N'1013';");
+        }
+
+        foreach (var bad in new[] { "49.99", "100.01", "-1" })
+        {
+            var violation = await Assert.ThrowsAsync<SqlException>(() =>
+                ExecuteNonQueryAsync(main, $"UPDATE dbo.FaceStoreProfile SET UnwelcomeAutoConfirmScore = {bad} WHERE StoreCode = N'1013';"));
+            Assert.Equal(547, violation.Number);
+        }
+
+        // 列被改类型（decimal(5,2)→decimal(9,4)）报 52831；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceStoreProfile DROP CONSTRAINT CK_FaceStoreProfile_UnwelcomeAutoConfirmScore;
+            ALTER TABLE dbo.FaceStoreProfile DROP CONSTRAINT DF_FaceStoreProfile_UnwelcomeAutoConfirmScore;
+            ALTER TABLE dbo.FaceStoreProfile ALTER COLUMN UnwelcomeAutoConfirmScore decimal(9, 4) NOT NULL;
+            """);
+        var drift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql));
+        Assert.Equal(52831, drift.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.FaceStoreProfile ALTER COLUMN UnwelcomeAutoConfirmScore decimal(5, 2) NOT NULL;
+            """);
+        await ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql);
+
+        // 列变成可空同样不兼容。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.FaceStoreProfile ALTER COLUMN UnwelcomeAutoConfirmScore decimal(5, 2) NULL;");
+        var nullable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, FaceUnwelcomeAutoConfirmSchema.VerifySql));
+        Assert.Equal(52831, nullable.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

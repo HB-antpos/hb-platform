@@ -63,7 +63,8 @@ export default function StatsTab() {
       { title: t('faceMatch.stats.taskCount'), dataIndex: 'taskCount', align: 'right', width: 90, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
       { title: t('faceMatch.stats.pendingCount'), dataIndex: 'pendingCount', align: 'right', width: 90, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
       { title: t('faceMatch.stats.dismissedCount'), dataIndex: 'dismissedCount', align: 'right', width: 90, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
-      { title: t('faceMatch.stats.confirmedCount'), dataIndex: 'confirmedCount', align: 'right', width: 90, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
+      { title: t('faceMatch.stats.confirmedCount'), dataIndex: 'confirmedCount', align: 'right', width: 100, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
+      { title: t('faceMatch.stats.autoConfirmedCount'), dataIndex: 'autoConfirmedCount', align: 'right', width: 100, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
       { title: t('faceMatch.stats.dismissRate'), dataIndex: 'dismissRate', width: 190, render: (value: number | null) => <RateBar value={value} /> },
       {
         title: t('faceMatch.stats.suggestion'),
@@ -80,7 +81,8 @@ export default function StatsTab() {
       { title: t('faceMatch.stats.bucket'), key: 'bucket', width: 120, render: (_: unknown, record) => <span style={NUMERIC_STYLE}>{formatScoreBucket(record)}</span> },
       { title: t('faceMatch.stats.bucketTotal'), dataIndex: 'total', align: 'right', width: 100, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
       { title: t('faceMatch.stats.dismissedCount'), dataIndex: 'dismissedCount', align: 'right', width: 100, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
-      { title: t('faceMatch.stats.confirmedCount'), dataIndex: 'confirmedCount', align: 'right', width: 100, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
+      { title: t('faceMatch.stats.confirmedCount'), dataIndex: 'confirmedCount', align: 'right', width: 110, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
+      { title: t('faceMatch.stats.autoConfirmedCount'), dataIndex: 'autoConfirmedCount', align: 'right', width: 100, render: (value: number) => <span style={NUMERIC_STYLE}>{value}</span> },
       {
         title: t('faceMatch.stats.dismissRate'),
         key: 'rate',
@@ -106,10 +108,12 @@ export default function StatsTab() {
       {data ? (
         <>
           <Row gutter={[12, 12]}>
-            <Col xs={12} md={6}><Card size="small"><Statistic title={t('faceMatch.stats.taskCount')} value={data.taskCount} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title={t('faceMatch.stats.pendingCount')} value={data.pendingCount} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title={t('faceMatch.stats.dismissedCount')} value={data.dismissedCount} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title={t('faceMatch.stats.dismissRate')} value={formatRate(data.dismissRate)} /></Card></Col>
+            <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title={t('faceMatch.stats.taskCount')} value={data.taskCount} /></Card></Col>
+            <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title={t('faceMatch.stats.pendingCount')} value={data.pendingCount} /></Card></Col>
+            <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title={t('faceMatch.stats.dismissedCount')} value={data.dismissedCount} /></Card></Col>
+            <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title={t('faceMatch.stats.confirmedCount')} value={data.confirmedCount} /></Card></Col>
+            <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title={t('faceMatch.stats.autoConfirmedCount')} value={data.autoConfirmedCount} /></Card></Col>
+            <Col xs={12} md={8} xl={4}><Card size="small"><Statistic title={t('faceMatch.stats.dismissRate')} value={formatRate(data.dismissRate)} /></Card></Col>
           </Row>
           <Typography.Title level={5} style={{ margin: 0 }}>{t('faceMatch.stats.byEntry')}</Typography.Title>
           <MeasuredTable<FaceUnwelcomeStatsEntry>
@@ -119,7 +123,7 @@ export default function StatsTab() {
             dataSource={data.entries}
             columns={entryColumns}
             pagination={false}
-            scroll={{ x: 1000 }}
+            scroll={{ x: 1100 }}
             // 建议复核的条目整行高亮（同时有文字标签，不只靠颜色）。
             rowClassName={(record) => (record.suggestReview ? 'ant-table-row-selected' : '')}
             locale={{ emptyText: t('faceMatch.stats.empty') }}
@@ -133,7 +137,7 @@ export default function StatsTab() {
             dataSource={data.scoreBuckets}
             columns={bucketColumns}
             pagination={false}
-            scroll={{ x: 640 }}
+            scroll={{ x: 740 }}
             locale={{ emptyText: t('faceMatch.stats.empty') }}
           />
         </>

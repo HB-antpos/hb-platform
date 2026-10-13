@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import type { FaceStoreProfile } from '../../../types/faceMatch'
 import { RequestError } from '../../../utils/request'
 import {
+  AUTO_CONFIRM_SCORE_DEFAULT,
+  AUTO_CONFIRM_SCORE_MAX,
+  AUTO_CONFIRM_SCORE_MIN,
+  AUTO_CONFIRM_SCORE_OFF,
   BAND_LABEL_KEYS,
   CATEGORY_OTHER,
   FACE_MATCH_ERROR_KEYS,
@@ -41,6 +45,7 @@ import {
   isWriteBlocked,
   maxExpiryDay,
   minExpiryDay,
+  normalizeAutoConfirmScore,
   normalizeText,
   pickAcceptableFiles,
   pickEnrollableConsents,
@@ -48,6 +53,7 @@ import {
   referenceIndexes,
   summarizeGates,
   toRatio,
+  validateAutoConfirmScore,
   validateConsentForm,
   validateDisputeNote,
   validateFile,
@@ -88,7 +94,7 @@ assert.equal(isWriteBlocked(null), true, '没有配置时按只读处理')
 function profile(overrides: Partial<FaceStoreProfile> = {}): FaceStoreProfile {
   return {
     storeCode: '1008', storeName: 'Bankstown', exists: true, mode: 2, evaluateMatch: false, staffExclusionEnabled: true,
-    trafficDedupEnabled: false, unwelcomeListEnabled: false, allowedSubjects: null, piaReference: 'PIA-1', signageInstalledOn: '2026-10-01',
+    trafficDedupEnabled: false, unwelcomeListEnabled: false, unwelcomeAutoConfirmScore: 90, allowedSubjects: null, piaReference: 'PIA-1', signageInstalledOn: '2026-10-01',
     staffNoticeDate: null, legalSignoffBy: 'Lawyer', legalSignoffAt: '2026-10-02T00:00:00.000Z', dedupLegalSignoffBy: null, dedupLegalSignoffAt: null,
     crossBorderRegion: null, crossBorderReviewRef: null, crossBorderReviewedBy: null, crossBorderReviewedAt: null, timeZoneId: null,
     unwelcomeAssessmentRef: null, unwelcomeLegalSignoffBy: null, unwelcomeLegalSignoffAt: null, staffTrainingDate: null, privacyContact: null,
@@ -115,10 +121,64 @@ assert.equal(buildProfileRequest({}).mode, 0, '缺 mode 按关闭')
 assert.equal(buildProfileRequest({}).evaluateMatch, false)
 assert.equal(isSameProfileRequest(request, buildProfileRequest(values)), false)
 assert.equal(isSameProfileRequest(buildProfileRequest(values), buildProfileRequest(values)), true)
-// 请求体字段与后端 FaceStoreProfileUpdateRequest 完全一致（23 个字段）
-assert.equal(Object.keys(request).length, 23)
+// 请求体字段与后端 FaceStoreProfileUpdateRequest 完全一致（24 个字段，含命中自动确认阈值）
+assert.equal(Object.keys(request).length, 24)
 assert.equal(normalizeText('  a '), 'a')
 assert.equal(normalizeText(undefined), null)
+
+// ───────── 命中自动确认阈值：0 = 不自动确认，否则 50–100、最多 2 位小数 ─────────
+assert.equal(AUTO_CONFIRM_SCORE_DEFAULT, 90, '默认阈值 90')
+assert.equal(AUTO_CONFIRM_SCORE_OFF, 0)
+assert.equal(AUTO_CONFIRM_SCORE_MIN, 50)
+assert.equal(AUTO_CONFIRM_SCORE_MAX, 100)
+for (const ok of [0, 50, 50.5, 89.99, 90, 99.99, 100, 50.01, 75.5]) {
+  assert.equal(validateAutoConfirmScore(ok), null, `${ok} 合法`)
+}
+assert.equal(validateAutoConfirmScore(49.99)?.key, 'faceMatch.validation.autoConfirmScoreInvalid', '49.99 低于 50')
+assert.equal(validateAutoConfirmScore(49)?.key, 'faceMatch.validation.autoConfirmScoreInvalid', '1–49 之间不合法（只有 0 例外）')
+assert.equal(validateAutoConfirmScore(0.5)?.key, 'faceMatch.validation.autoConfirmScoreInvalid')
+assert.equal(validateAutoConfirmScore(1)?.key, 'faceMatch.validation.autoConfirmScoreInvalid')
+assert.equal(validateAutoConfirmScore(-1)?.key, 'faceMatch.validation.autoConfirmScoreInvalid', '负数不合法')
+assert.equal(validateAutoConfirmScore(100.01)?.key, 'faceMatch.validation.autoConfirmScoreInvalid', '100.01 超过 100')
+assert.equal(validateAutoConfirmScore(150)?.key, 'faceMatch.validation.autoConfirmScoreInvalid')
+assert.equal(validateAutoConfirmScore(90.001)?.key, 'faceMatch.validation.autoConfirmScoreInvalid', '3 位小数不合法')
+assert.equal(validateAutoConfirmScore(50.123)?.key, 'faceMatch.validation.autoConfirmScoreInvalid')
+assert.equal(validateAutoConfirmScore(99.995)?.key, 'faceMatch.validation.autoConfirmScoreInvalid')
+assert.deepEqual(validateAutoConfirmScore(49.99)?.params, { min: 50, max: 100 }, '提示里带区间')
+for (const empty of [null, undefined, Number.NaN, Number.POSITIVE_INFINITY, '90', '', {}]) {
+  assert.equal(validateAutoConfirmScore(empty)?.key, 'faceMatch.validation.autoConfirmScoreRequired', `${String(empty)} 视为没填数字`)
+}
+assert.equal(normalizeAutoConfirmScore(90), 90)
+assert.equal(normalizeAutoConfirmScore(0), 0, '0 是合法值，不能被当成空')
+assert.equal(normalizeAutoConfirmScore(49.99), null, '不合法的输入不会被改写成别的数字，只会是 null（保持原值）')
+assert.equal(normalizeAutoConfirmScore(null), null)
+
+// 加载档案：回填后端生效值；0（不自动确认）原样保留；没有档案行时后端给默认 90
+assert.equal(values.unwelcomeAutoConfirmScore, 90)
+assert.equal(profileToFormValues(profile({ unwelcomeAutoConfirmScore: 0 }), null).unwelcomeAutoConfirmScore, 0, '0 不会被默认值盖掉')
+assert.equal(profileToFormValues(profile({ unwelcomeAutoConfirmScore: 72.5 }), null).unwelcomeAutoConfirmScore, 72.5)
+assert.equal(profileToFormValues(profile({ exists: false, unwelcomeAutoConfirmScore: 90 }), null).unwelcomeAutoConfirmScore, 90, '档案行不存在时显示默认 90')
+
+// 请求体始终带这个字段：合法数字原样带上；0 也带；输入不合法 / 缺失时是 null（不省略，也不改写成别的数字）
+assert.equal(request.unwelcomeAutoConfirmScore, 90)
+assert.equal(buildProfileRequest({ ...values, unwelcomeAutoConfirmScore: 0 }).unwelcomeAutoConfirmScore, 0)
+assert.equal(buildProfileRequest({ ...values, unwelcomeAutoConfirmScore: 87.25 }).unwelcomeAutoConfirmScore, 87.25)
+for (const body of [
+  buildProfileRequest({}),
+  buildProfileRequest({ ...values, unwelcomeAutoConfirmScore: null }),
+  buildProfileRequest({ ...values, unwelcomeAutoConfirmScore: 30 }),
+  buildProfileRequest({ ...values, unwelcomeAutoConfirmScore: 90.001 }),
+]) {
+  assert.ok('unwelcomeAutoConfirmScore' in body, '字段始终存在')
+  assert.equal(body.unwelcomeAutoConfirmScore, null)
+  assert.ok(JSON.stringify(body).includes('"unwelcomeAutoConfirmScore":null'), 'null 会序列化进 JSON，而不是被丢掉')
+}
+assert.ok(JSON.stringify(request).includes('"unwelcomeAutoConfirmScore":90'))
+assert.equal(
+  isSameProfileRequest(buildProfileRequest({ ...values, unwelcomeAutoConfirmScore: 80 }), buildProfileRequest(values)),
+  false,
+  '只改阈值也算有未保存的修改',
+)
 
 // ───────── 闸门缺项 ─────────
 const report = {
