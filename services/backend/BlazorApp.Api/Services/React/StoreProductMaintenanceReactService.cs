@@ -1802,6 +1802,261 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
+        /// <summary>商品主档中文名称的最大长度，与 Product / DomesticProduct 的列长度一致。</summary>
+        internal const int ProductNameMaxLength = 200;
+
+        public async Task<ApiResponse<StoreProductNameUpdateResultDto>> UpdateProductNameAsync(
+            string productCode,
+            UpdateStoreProductNameDto request,
+            string updatedBy,
+            List<string>? accessibleStoreCodes
+        )
+        {
+            try
+            {
+                var normalizedProductCode = productCode?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedProductCode))
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error("商品编码不能为空");
+                }
+
+                var newName = request.ProductName?.Trim() ?? string.Empty;
+                if (newName.Length == 0)
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error("商品名称不能为空");
+                }
+                if (newName.Length > ProductNameMaxLength)
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error(
+                        $"商品名称不能超过 {ProductNameMaxLength} 个字符"
+                    );
+                }
+                // 名称会进入小票、标签与 HQ，换行/制表等控制字符会打乱排版，直接拒绝而不是悄悄改写。
+                if (newName.Any(char.IsControl))
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error("商品名称不能包含换行或控制字符");
+                }
+
+                var scopedStoreCodes = ResolveScopedStoreCodes(request.StoreCode, accessibleStoreCodes);
+                if (scopedStoreCodes != null && scopedStoreCodes.Count == 0)
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error("当前账号或设备无权修改该分店商品");
+                }
+
+                // 与改类型一致：商品名称是全局主档，但仍要求操作者在自己可访问的分店里「看得到」这个商品。
+                var storePriceEntity = await QueryStorePriceAsync(normalizedProductCode, scopedStoreCodes);
+                if (scopedStoreCodes != null && storePriceEntity == null)
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error("当前账号或设备无权修改该分店商品");
+                }
+
+                var product = await _db.Queryable<Product>()
+                    .Where(p => p.ProductCode == normalizedProductCode && !p.IsDeleted)
+                    .FirstAsync();
+                if (product == null)
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.Error("商品不存在");
+                }
+
+                // 名称没变就不写库、不记历史、不入队 HQ，避免无意义的全局改动与同步。
+                if (string.Equals(product.ProductName, newName, StringComparison.Ordinal))
+                {
+                    return ApiResponse<StoreProductNameUpdateResultDto>.OK(
+                        new StoreProductNameUpdateResultDto
+                        {
+                            ProductCode = normalizedProductCode,
+                            ProductName = newName,
+                            Changed = false,
+                        },
+                        "名称未变化"
+                    );
+                }
+
+                var now = DateTime.UtcNow;
+                var actorName = _currentUserService.GetCurrentUsername();
+                if (string.IsNullOrWhiteSpace(actorName))
+                {
+                    actorName = "System";
+                }
+                var actorUserGuid = _currentUserService.GetCurrentUserGuid();
+                var isSystemActor = string.IsNullOrWhiteSpace(actorUserGuid)
+                    && string.Equals(actorName, "System", StringComparison.OrdinalIgnoreCase);
+
+                ProductHqSyncOperationStatusDto? hqSync = null;
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    var lockScope = await SetChildPurchasePriceMutationLock.AcquireProductsAsync(
+                        _db,
+                        new[] { normalizedProductCode }
+                    );
+                    product = await _db.Queryable<Product>()
+                        .Where(item => item.ProductCode == normalizedProductCode && !item.IsDeleted)
+                        .FirstAsync();
+                    if (product == null)
+                    {
+                        throw new StoreProductMaintenanceBusinessException("商品在等待业务锁期间已变化");
+                    }
+                    var domesticProduct = await _db.Queryable<DomesticProduct>()
+                        .Where(item => item.ProductCode == normalizedProductCode && !item.IsDeleted)
+                        .FirstAsync();
+
+                    // 主档、国内商品镜像表与审计历史同一事务，避免名称在两张表不一致或历史缺失。
+                    var beforeSnapshots = await _changeHistoryService.CaptureSnapshotsAsync(
+                        new[] { normalizedProductCode }
+                    );
+
+                    product.ProductName = newName;
+                    product.UpdatedAt = now;
+                    product.UpdatedBy = actorName;
+                    await _db.Updateable(product)
+                        .UpdateColumns(p => new { p.ProductName, p.UpdatedAt, p.UpdatedBy })
+                        .ExecuteCommandAsync();
+
+                    if (domesticProduct != null)
+                    {
+                        domesticProduct.ProductName = newName;
+                        domesticProduct.UpdatedAt = now;
+                        domesticProduct.UpdatedBy = actorName;
+                        await _db.Updateable(domesticProduct)
+                            .UpdateColumns(dp => new { dp.ProductName, dp.UpdatedAt, dp.UpdatedBy })
+                            .ExecuteCommandAsync();
+                    }
+
+                    var afterSnapshots = await _changeHistoryService.CaptureSnapshotsAsync(
+                        new[] { normalizedProductCode }
+                    );
+                    await _changeHistoryService.RecordChangesAsync(
+                        beforeSnapshots,
+                        afterSnapshots,
+                        new WarehouseProductChangeHistoryContextDto
+                        {
+                            Action = "Update",
+                            Source = "StoreProductMaintenance",
+                            SourceReference = normalizedProductCode,
+                            ActorUserGuid = string.IsNullOrWhiteSpace(actorUserGuid)
+                                ? null
+                                : actorUserGuid,
+                            ActorName = actorName,
+                            ActorType = isSystemActor ? "System" : "User",
+                            OccurredAtUtc = now,
+                        }
+                    );
+                    hqSync = await EnqueueHqProjectionAsync(
+                        ProductMaintenanceHqOperationKinds.ProductNameUpdated,
+                        normalizedProductCode,
+                        Array.Empty<string>(),
+                        new[] { ProductMaintenanceHqFieldMasks.ProductName },
+                        "react-store-product-maintenance.update-product-name",
+                        updatedBy,
+                        accessibleStoreCodes
+                    );
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
+
+                return ApiResponse<StoreProductNameUpdateResultDto>.OK(
+                    new StoreProductNameUpdateResultDto
+                    {
+                        ProductCode = normalizedProductCode,
+                        ProductName = newName,
+                        Changed = true,
+                        HqSync = hqSync,
+                    },
+                    "保存成功"
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "更新商品名称失败: {ProductCode}", productCode);
+                if (SetChildPurchasePriceMutationLock.TryResolveConflict(ex, out _))
+                    return BuildSetChildPurchasePriceBusyResponse<StoreProductNameUpdateResultDto>();
+                return ApiResponse<StoreProductNameUpdateResultDto>.Error(
+                    ResolveSafeMutationFailureMessage(ex, "更新商品名称失败，请稍后重试")
+                );
+            }
+        }
+
+        public async Task<ApiResponse<StoreProductNameHistoryDto>> GetProductNameHistoryAsync(
+            string productCode,
+            string? storeCode,
+            int limit,
+            List<string>? accessibleStoreCodes
+        )
+        {
+            try
+            {
+                var normalizedProductCode = productCode?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedProductCode))
+                {
+                    return ApiResponse<StoreProductNameHistoryDto>.Error("商品编码不能为空");
+                }
+
+                var scopedStoreCodes = ResolveScopedStoreCodes(storeCode, accessibleStoreCodes);
+                if (scopedStoreCodes != null && scopedStoreCodes.Count == 0)
+                {
+                    return ApiResponse<StoreProductNameHistoryDto>.Error("当前账号或设备无权查看该分店商品");
+                }
+                // 与改名一致：只能查看自己可访问分店里「看得到」的商品的记录。
+                if (scopedStoreCodes != null
+                    && await QueryStorePriceAsync(normalizedProductCode, scopedStoreCodes) == null)
+                {
+                    return ApiResponse<StoreProductNameHistoryDto>.Error("当前账号或设备无权查看该分店商品");
+                }
+
+                var take = Math.Clamp(limit, 1, 50);
+                var items = new List<StoreProductNameHistoryItemDto>();
+                // 价格等其它字段的修改更频繁，名称变更混在其中：逐页翻（最多 10 页 × 100 条）直到凑够条数。
+                for (var page = 1; page <= 10 && items.Count < take; page++)
+                {
+                    var history = await _changeHistoryService.GetChangeHistoryAsync(
+                        normalizedProductCode,
+                        page,
+                        100
+                    );
+                    foreach (var evt in history.Events)
+                    {
+                        var change = evt.Changes.FirstOrDefault(item =>
+                            string.Equals(item.FieldKey, "productName", StringComparison.Ordinal)
+                        );
+                        if (change == null)
+                        {
+                            continue;
+                        }
+                        items.Add(new StoreProductNameHistoryItemDto
+                        {
+                            OccurredAtUtc = evt.OccurredAtUtc,
+                            ActorName = evt.ActorName,
+                            BeforeName = change.BeforeValue,
+                            AfterName = change.AfterValue,
+                            Source = evt.Source,
+                        });
+                        if (items.Count >= take)
+                        {
+                            break;
+                        }
+                    }
+                    if (page >= history.TotalPages)
+                    {
+                        break;
+                    }
+                }
+
+                return ApiResponse<StoreProductNameHistoryDto>.OK(
+                    new StoreProductNameHistoryDto { ProductCode = normalizedProductCode, Items = items }
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "读取商品名称修改记录失败: {ProductCode}", productCode);
+                return ApiResponse<StoreProductNameHistoryDto>.Error("读取名称修改记录失败，请稍后重试");
+            }
+        }
+
         public async Task<ApiResponse<StoreProductMultiCodeDto>> UpdateMultiCodeAsync(
             string uuid,
             UpdateStoreProductMultiCodeDto request,

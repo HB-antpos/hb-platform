@@ -27,6 +27,8 @@ interface ProductHeroCardProps {
   /** compact 摘要里显示的主零售价（已格式化，不含 $）。 */
   mainRetailPrice?: string | null;
   onPressProductType?: () => void;
+  /** 修改商品名称入口；不传（无权限、离线、设备模式）则不显示铅笔按钮。 */
+  onPressEditName?: () => void;
   /** 商品进销入口；不传则不显示图标按钮。 */
   onOpenInsights?: () => void;
   insightsDisabled?: boolean;
@@ -44,6 +46,7 @@ export const ProductHeroCard = memo(function ProductHeroCard({
   variant = "full",
   mainRetailPrice,
   onPressProductType,
+  onPressEditName,
   onOpenInsights,
   insightsDisabled = false,
 }: ProductHeroCardProps) {
@@ -60,6 +63,18 @@ export const ProductHeroCard = memo(function ProductHeroCard({
     : t("hero.productType.unknown");
   const supplierLine = [supplierCode, supplierName].filter(Boolean).join(" ") || t("common:na");
   const name = productName || t("hero.unnamedProduct");
+
+  const editNameButton = onPressEditName ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t("nameEdit.action")}
+      onPress={onPressEditName}
+      hitSlop={10}
+      style={({ pressed }) => [styles.editNameButton, pressed ? styles.pressed : null]}
+    >
+      <Icon source="pencil-outline" size={16} color={HB_COLORS.action} />
+    </Pressable>
+  ) : null;
 
   const typeChip = (
     <Pressable
@@ -94,6 +109,7 @@ export const ProductHeroCard = memo(function ProductHeroCard({
           <View style={styles.meta}>
             <View style={styles.compactNameRow}>
               <Text style={[styles.compactName, styles.compactNameText]} numberOfLines={1}>{name}</Text>
+              {editNameButton}
               {mainRetailPrice ? <Text style={styles.compactPrice}>${mainRetailPrice}</Text> : null}
             </View>
             <Text style={styles.metaText} numberOfLines={1}>{summary}</Text>
@@ -114,7 +130,10 @@ export const ProductHeroCard = memo(function ProductHeroCard({
             <View style={styles.image} />
           )}
           <View style={styles.meta}>
-            <Text style={styles.name} numberOfLines={2}>{name}</Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.name, styles.nameText]} numberOfLines={2}>{name}</Text>
+              {editNameButton}
+            </View>
             <Text style={styles.metaText} numberOfLines={1}>
               <Text style={styles.itemNumber}>{itemNumber || t("common:na")}</Text>
               {` · ${supplierLine}`}
@@ -209,6 +228,26 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: "700",
     color: HB_COLORS.textPrimary,
+  },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  nameText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  // 铅笔按钮视觉 28dp，靠 hitSlop 扩到约 48dp 的点击区；compact 行是 baseline 对齐，要显式居中。
+  editNameButton: {
+    alignSelf: "center",
+    flexShrink: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EAF2FF",
   },
   metaText: {
     fontSize: 12,

@@ -24,6 +24,7 @@ import { CreateSupplierSheet } from "@/components/product-maintenance/CreateSupp
 import { CreateBarcodeScanner } from "@/components/product-maintenance/CreateBarcodeScanner";
 import { CreateProductDialog } from "@/components/product-maintenance/CreateProductDialog";
 import { CodeAddSheet } from "@/components/product-maintenance/CodeAddSheet";
+import { ProductNameEditSheet } from "@/components/product-maintenance/ProductNameEditSheet";
 import { LookupResultSheet } from "@/components/product-maintenance/LookupResultSheet";
 import { LabelPrintCard } from "@/components/product-maintenance/LabelPrintCard";
 import { PrintSettingsModal } from "@/components/product-maintenance/PrintSettingsModal";
@@ -71,11 +72,13 @@ import {
   getProductCodes,
   getProductFastDetail,
   ensureStorePrice,
+  getProductNameHistory,
   lookupProducts,
   scanProductLabel,
   retryProductHqSyncOperation,
   updateMultiCode,
   updateSetCode,
+  updateProductName,
   updateProductType,
   updateStorePrice,
   upsertClearancePrice,
@@ -109,6 +112,7 @@ import type {
   ProductDetail,
   ProductHqSyncOperation,
   ProductLookupItem,
+  ProductNameHistoryItem,
   ScanLabelPrintTarget,
   ScanLabelResult,
 } from "@/modules/product-maintenance/types";
@@ -547,6 +551,13 @@ function ProductQueryContent() {
       selectedStoreCode,
       getManageableStoresForSession({ stores, isDeviceMode, isAdmin: access.isAdmin }),
     );
+  // 改商品名称：名称是全局主档，所以只对「已登录账号 + StoreProducts.EditName」开放；
+  // 设备模式（无登录）与离线态都不开放，后端同样拒绝匿名设备。
+  const canEditProductName =
+    !isDeviceMode &&
+    isAuthenticated &&
+    !offlineMode &&
+    access.hasPermission(PERMISSIONS.StoreProducts.EditName);
   const printerAutoReconnectPaused = usePrinterStore(
     (state) => state.autoReconnectPaused,
   );
@@ -623,6 +634,13 @@ function ProductQueryContent() {
   const [productTypeDialogVisible, setProductTypeDialogVisible] =
     useState(false);
   const [productTypeSaving, setProductTypeSaving] = useState(false);
+  const [nameEditVisible, setNameEditVisible] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameHistory, setNameHistory] = useState<ProductNameHistoryItem[]>([]);
+  const [nameHistoryLoading, setNameHistoryLoading] = useState(false);
+  const [nameHistoryFailed, setNameHistoryFailed] = useState(false);
+  // 打开弹层的递增序号：晚到的历史响应若不属于当前这次打开（已关闭或已换商品）就丢弃。
+  const nameHistoryRequestRef = useRef(0);
   const [storePurchaseInput, setStorePurchaseInput] = useState("");
   const [storeRetailInput, setStoreRetailInput] = useState("");
   const [clearancePriceInput, setClearancePriceInput] = useState("");
@@ -944,6 +962,7 @@ function ProductQueryContent() {
       Boolean(savingItemId) ||
       savingClearance ||
       productTypeSaving ||
+      nameSaving ||
       createProductBusy ||
       hqSyncRetrying,
     [
@@ -953,6 +972,7 @@ function ProductQueryContent() {
       lookupVisible,
       createProductBusy,
       hqSyncRetrying,
+      nameSaving,
       productTypeSaving,
       saving,
       savingClearance,
@@ -3116,6 +3136,107 @@ function ProductQueryContent() {
     ],
   );
 
+  /** 打开改名面板，并并行拉取该商品的名称修改记录（加载失败不影响改名本身）。 */
+  const handleOpenNameEdit = useCallback(() => {
+    if (!detail?.productCode) {
+      return;
+    }
+    const productCode = detail.productCode;
+    const requestId = ++nameHistoryRequestRef.current;
+    setNameEditVisible(true);
+    setNameHistory([]);
+    setNameHistoryFailed(false);
+    setNameHistoryLoading(true);
+    getProductNameHistory(productCode, selectedStoreCode)
+      .then((items) => {
+        if (nameHistoryRequestRef.current === requestId) {
+          setNameHistory(items);
+        }
+      })
+      .catch(() => {
+        if (nameHistoryRequestRef.current === requestId) {
+          setNameHistoryFailed(true);
+        }
+      })
+      .finally(() => {
+        if (nameHistoryRequestRef.current === requestId) {
+          setNameHistoryLoading(false);
+        }
+      });
+  }, [detail?.productCode, selectedStoreCode]);
+
+  const handleCloseNameEdit = useCallback(() => {
+    // 递增序号让还在路上的历史响应作废。
+    nameHistoryRequestRef.current += 1;
+    setNameEditVisible(false);
+    setNameHistoryLoading(false);
+  }, []);
+
+  const handleSaveProductName = useCallback(
+    async (nextName: string) => {
+      if (!detail?.productCode || !selectedStoreCode) {
+        return;
+      }
+      if (!ensureCurrentDetailStoreScope(detail)) {
+        return;
+      }
+
+      setNameSaving(true);
+      const scope = {
+        productCode: detail.productCode,
+        storeCode: selectedStoreCode,
+      };
+      const mutation = beginHqSyncMutation(scope.productCode, scope.storeCode);
+      try {
+        const result = await updateProductName(detail.productCode, {
+          productName: nextName,
+          storeCode: selectedStoreCode,
+        });
+
+        if (!detailRequestCoordinatorRef.current?.isScopeActive(scope)) {
+          return;
+        }
+        // 名称是全局主档字段：详情与「初始详情」（脏检查基线）一起更新，不能让它被判成未保存改动。
+        setDetail((current) =>
+          current ? { ...current, productName: result.productName } : current,
+        );
+        setInitialDetail((current) =>
+          current ? { ...current, productName: result.productName } : current,
+        );
+        setLookupItems((current) =>
+          current.map((item) =>
+            item.productCode === result.productCode
+              ? { ...item, productName: result.productName }
+              : item,
+          ),
+        );
+        presentHqSyncOperation(
+          mutation,
+          result.hqSync,
+          result.changed ? t("messages.productNameUpdated") : t("nameEdit.unchanged"),
+        );
+        handleCloseNameEdit();
+      } catch (error) {
+        hqSyncMutationCoordinatorRef.current?.fail(mutation);
+        setSnackbarMessage(
+          getErrorMessage(error, "messages.productNameUpdateFailed"),
+        );
+      } finally {
+        setNameSaving(false);
+      }
+    },
+    [
+      beginHqSyncMutation,
+      detail,
+      ensureCurrentDetailStoreScope,
+      getErrorMessage,
+      handleCloseNameEdit,
+      presentHqSyncOperation,
+      selectedStoreCode,
+      t,
+    ],
+  );
+
   const handleToggleAutoPricing = useCallback(
     async (value: boolean) => {
       if (!detail?.storePrice) {
@@ -3973,9 +4094,9 @@ function ProductQueryContent() {
 
   const isInvoiceExitBusy = useCallback(
     () => invoiceExitSavingRef.current || saving || Boolean(savingItemId) ||
-      savingClearance || productTypeSaving || createProductBusy || hqSyncRetrying ||
+      savingClearance || productTypeSaving || nameSaving || createProductBusy || hqSyncRetrying ||
       autoPricingDialogSaving || Boolean(printingAction),
-    [autoPricingDialogSaving, createProductBusy, hqSyncRetrying, printingAction,
+    [autoPricingDialogSaving, createProductBusy, hqSyncRetrying, nameSaving, printingAction,
       productTypeSaving, saving, savingClearance, savingItemId],
   );
 
@@ -4424,6 +4545,7 @@ function ProductQueryContent() {
               variant={hasCodeSection && editorTab === "codes" ? "compact" : "full"}
               mainRetailPrice={formatFixedDecimal(storePrice?.retailPrice)}
               onPressProductType={offlineMode ? undefined : handleOpenProductTypeDialog}
+              onPressEditName={canEditProductName ? handleOpenNameEdit : undefined}
               onOpenInsights={
                 isIosReviewSessionActive()
                   ? undefined
@@ -5039,6 +5161,17 @@ function ProductQueryContent() {
                 }}
               />
             ) : null}
+
+            <ProductNameEditSheet
+              visible={nameEditVisible}
+              currentName={detail?.productName ?? ""}
+              saving={nameSaving}
+              history={nameHistory}
+              historyLoading={nameHistoryLoading}
+              historyFailed={nameHistoryFailed}
+              onSubmit={(name) => void handleSaveProductName(name)}
+              onDismiss={handleCloseNameEdit}
+            />
 
             <Modal
               visible={productTypeDialogVisible}

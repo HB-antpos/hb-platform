@@ -212,6 +212,42 @@ namespace BlazorApp.Shared.DTOs
         public ProductHqSyncOperationStatusDto? HqSync { get; set; }
     }
 
+    /// <summary>修改商品主档中文名称（Product.ProductName，即各端显示的名称）。</summary>
+    public class UpdateStoreProductNameDto
+    {
+        /// <summary>新的中文名称；服务端会去掉首尾空白，不能为空，最长 200 个字符。</summary>
+        public string ProductName { get; set; } = string.Empty;
+
+        /// <summary>当前操作所在分店，用于校验账号对该商品的访问范围。</summary>
+        public string? StoreCode { get; set; }
+    }
+
+    public class StoreProductNameUpdateResultDto
+    {
+        public string ProductCode { get; set; } = string.Empty;
+        public string ProductName { get; set; } = string.Empty;
+        /// <summary>名称与原来相同、没有写库也没有触发 HQ 同步时为 false。</summary>
+        public bool Changed { get; set; }
+        public ProductHqSyncOperationStatusDto? HqSync { get; set; }
+    }
+
+    /// <summary>商品名称的一条修改记录：谁在什么时候把名称从什么改成什么。</summary>
+    public class StoreProductNameHistoryItemDto
+    {
+        public DateTime OccurredAtUtc { get; set; }
+        public string ActorName { get; set; } = string.Empty;
+        public string? BeforeName { get; set; }
+        public string? AfterName { get; set; }
+        /// <summary>修改来源，例如 StoreProductMaintenance（移动端商品查询）。</summary>
+        public string Source { get; set; } = string.Empty;
+    }
+
+    public class StoreProductNameHistoryDto
+    {
+        public string ProductCode { get; set; } = string.Empty;
+        public List<StoreProductNameHistoryItemDto> Items { get; set; } = new();
+    }
+
     public class UpdateStoreProductMultiCodeDto
     {
         public string? Barcode { get; set; }

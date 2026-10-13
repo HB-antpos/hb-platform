@@ -34,6 +34,7 @@ public sealed class ProductMaintenanceHqProjectionWriter : IProductMaintenanceHq
         {
             ProductMaintenanceHqFieldMasks.All,
             ProductMaintenanceHqFieldMasks.ProductType,
+            ProductMaintenanceHqFieldMasks.ProductName,
             ProductMaintenanceHqFieldMasks.StorePurchasePrice,
             ProductMaintenanceHqFieldMasks.StoreRetailPrice,
             ProductMaintenanceHqFieldMasks.StoreDiscountRate,
@@ -51,6 +52,7 @@ public sealed class ProductMaintenanceHqProjectionWriter : IProductMaintenanceHq
         {
             ProductMaintenanceHqOperationKinds.ProductCreated,
             ProductMaintenanceHqOperationKinds.ProductTypeUpdated,
+            ProductMaintenanceHqOperationKinds.ProductNameUpdated,
             ProductMaintenanceHqOperationKinds.StorePriceUpdated,
             ProductMaintenanceHqOperationKinds.WarehousePriceSynced,
             ProductMaintenanceHqOperationKinds.ProductCodesUpdated,
@@ -214,6 +216,11 @@ public sealed class ProductMaintenanceHqProjectionWriter : IProductMaintenanceHq
             if (fields.Contains(ProductMaintenanceHqFieldMasks.ProductType))
             {
                 delegatedFields.Add(ProductMaintenanceHqFieldMasks.ProductType);
+            }
+            if (fields.Contains(ProductMaintenanceHqFieldMasks.ProductName))
+            {
+                // 中文名走既有的 productName 字段推送：只更新 HQ「大写名称」，不碰英文显示名与其他列。
+                delegatedFields.Add(ProductMaintenanceHqFieldMasks.ProductName);
             }
             if (fields.Contains(ProductMaintenanceHqFieldMasks.ProductSetCodes))
             {

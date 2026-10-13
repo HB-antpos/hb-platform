@@ -85,7 +85,7 @@ async function mount(options: { dirty?: boolean; busy?: boolean; hasContext?: bo
       const isAuthenticated = useAuthStore.getState().isAuthenticated;
       const isDeviceMode = !!config.device;
       const saving = !!config.busy, savingItemId = null, savingClearance = false,
-        productTypeSaving = false, createProductBusy = false, hqSyncRetrying = false,
+        productTypeSaving = false, nameSaving = false, createProductBusy = false, hqSyncRetrying = false,
         autoPricingDialogSaving = false, printingAction = null;
       const warehousePriceSyncState = { phase: "idle" };
       ${exitCode}

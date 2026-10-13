@@ -415,6 +415,13 @@ namespace BlazorApp.Shared.Constants
             public const string SyncToOtherStores = "StoreProducts.SyncToOtherStores";
 
             /// <summary>
+            /// 移动端「商品查询」修改商品主档的中文名称（显示名称）。
+            /// 名称是全局主档，改动会影响所有分店、POS 小票/标签并同步 HQ，所以与 Edit 分开单独授权，
+            /// 持有 Edit（改价）不会自动获得改名权限。
+            /// </summary>
+            public const string EditName = "StoreProducts.EditName";
+
+            /// <summary>
             /// 移动端「价格更新」：查看本店通知、按仓库价更新本店价格、处理标签。
             /// 与 Edit 分开：持有者只能把价格改成仓库下发的目标值，不能随意改价。
             /// </summary>

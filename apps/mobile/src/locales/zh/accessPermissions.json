@@ -693,6 +693,10 @@
       "name": "编辑分店商品",
       "description": "Web 页面 /pos-admin/store-product-price - 编辑分店商品价格"
     },
+    "StoreProducts.EditName": {
+      "name": "修改商品名称",
+      "description": "移动端「商品查询」- 修改商品主档的中文名称（全局生效，影响所有分店与 POS 小票/标签，并同步 HQ）；与编辑分店商品价格权限分开授予"
+    },
     "StoreProducts.PriceUpdates": {
       "name": "处理价格更新通知",
       "description": "移动端「价格更新」- 查看本店价格更新与换标签通知，按仓库价更新本店零售价/折扣，打印或标记标签"

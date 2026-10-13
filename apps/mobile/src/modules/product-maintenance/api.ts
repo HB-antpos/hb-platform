@@ -21,6 +21,9 @@ import type {
   EvaluateAutoPricingRequest,
   EvaluateAutoPricingResult,
   UpdateSetCodeRequest,
+  ProductNameHistoryItem,
+  UpdateProductNameRequest,
+  UpdateProductNameResult,
   UpdateProductTypeRequest,
   UpdateProductTypeResult,
   UpdateMultiCodeRequest,
@@ -249,6 +252,37 @@ function normalizeProductTypeUpdate(payload: unknown): UpdateProductTypeResult {
   };
   const hqSync = normalizeHqSyncOperation(data.hqSync ?? data.HqSync);
   return hqSync ? { ...result, hqSync } : result;
+}
+
+function normalizeProductNameUpdate(payload: unknown): UpdateProductNameResult {
+  const data = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const result: UpdateProductNameResult = {
+    productCode: String(data.productCode ?? data.ProductCode ?? ""),
+    productName: String(data.productName ?? data.ProductName ?? ""),
+    changed: Boolean(data.changed ?? data.Changed),
+  };
+  const hqSync = normalizeHqSyncOperation(data.hqSync ?? data.HqSync);
+  return hqSync ? { ...result, hqSync } : result;
+}
+
+function normalizeProductNameHistory(payload: unknown): ProductNameHistoryItem[] {
+  const data = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const items = data.items ?? data.Items;
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.map((item) => {
+    const row = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const before = row.beforeName ?? row.BeforeName;
+    const after = row.afterName ?? row.AfterName;
+    return {
+      occurredAtUtc: String(row.occurredAtUtc ?? row.OccurredAtUtc ?? ""),
+      actorName: String(row.actorName ?? row.ActorName ?? ""),
+      beforeName: before == null ? null : String(before),
+      afterName: after == null ? null : String(after),
+      source: String(row.source ?? row.Source ?? ""),
+    };
+  });
 }
 
 export async function lookupProducts(
@@ -519,6 +553,38 @@ export async function updateProductType(
     buildRequestConfig()
   );
   return normalizeProductTypeUpdate(response.data);
+}
+
+/**
+ * 修改商品主档中文名称（全局生效，需要 StoreProducts.EditName；后端不对匿名设备放行）。
+ * 响应里的 hqSync 与改价、改类型一致，页面据此展示 HQ 同步状态。
+ */
+export async function updateProductName(
+  productCode: string,
+  payload: UpdateProductNameRequest
+): Promise<UpdateProductNameResult> {
+  const response = await apiClient.put(
+    `${BASE_PATH}/products/${encodeURIComponent(productCode)}/name`,
+    payload,
+    buildRequestConfig()
+  );
+  return normalizeProductNameUpdate(response.data);
+}
+
+/** 商品名称的修改记录（新的在前），改名弹层里展示。 */
+export async function getProductNameHistory(
+  productCode: string,
+  storeCode?: string | null,
+  limit = 20
+): Promise<ProductNameHistoryItem[]> {
+  const response = await apiClient.get(
+    `${BASE_PATH}/products/${encodeURIComponent(productCode)}/name-history`,
+    {
+      ...buildRequestConfig(),
+      params: { ...(storeCode ? { storeCode } : {}), limit },
+    }
+  );
+  return normalizeProductNameHistory(response.data);
 }
 
 export async function updateMultiCode(

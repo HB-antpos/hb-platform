@@ -366,6 +366,58 @@ namespace BlazorApp.Api.Controllers.React
             return BuildMutationResult(result);
         }
 
+        /// <summary>
+        /// 修改商品主档中文名称。名称是全局主档（影响所有分店、POS 小票/标签并同步 HQ），
+        /// 所以必须是已登录账号且持有 StoreProducts.EditName；与改价的 Edit 权限分开，也不对匿名绑定设备放行。
+        /// </summary>
+        [HttpPut("products/{productCode}/name")]
+        public async Task<IActionResult> UpdateProductName(
+            string productCode,
+            [FromBody] UpdateStoreProductNameDto request
+        )
+        {
+            var access = await ResolveAccessContextAsync();
+            if (!access.IsAllowed)
+            {
+                return Unauthorized(ApiResponse<StoreProductNameUpdateResultDto>.Error(access.Message));
+            }
+            var permissionFailure = await RequireEditNamePermissionAsync();
+            if (permissionFailure != null) return permissionFailure;
+
+            var result = await _service.UpdateProductNameAsync(
+                productCode,
+                request,
+                access.ActorLabel,
+                access.StoreCodes
+            );
+            return BuildMutationResult(result);
+        }
+
+        /// <summary>商品名称的修改记录（谁、何时、旧名 → 新名）。与改名同一权限，改名弹层里展示。</summary>
+        [HttpGet("products/{productCode}/name-history")]
+        public async Task<IActionResult> GetProductNameHistory(
+            string productCode,
+            [FromQuery] string? storeCode,
+            [FromQuery] int limit = 20
+        )
+        {
+            var access = await ResolveAccessContextAsync();
+            if (!access.IsAllowed)
+            {
+                return Unauthorized(ApiResponse<StoreProductNameHistoryDto>.Error(access.Message));
+            }
+            var permissionFailure = await RequireEditNamePermissionAsync();
+            if (permissionFailure != null) return permissionFailure;
+
+            var result = await _service.GetProductNameHistoryAsync(
+                productCode,
+                storeCode,
+                limit,
+                access.StoreCodes
+            );
+            return Ok(result);
+        }
+
         [HttpPut("multi-codes/{uuid}")]
         public async Task<IActionResult> UpdateMultiCode(
             string uuid,
@@ -667,6 +719,22 @@ namespace BlazorApp.Api.Controllers.React
                 User,
                 resource: null,
                 Permissions.StoreProducts.Edit
+            );
+            return authorized.Succeeded ? null : Forbid();
+        }
+
+        /// <summary>改名权限：未登录（含匿名绑定设备）一律拒绝，已登录必须持有 StoreProducts.EditName。</summary>
+        private async Task<IActionResult?> RequireEditNamePermissionAsync()
+        {
+            if (User?.Identity?.IsAuthenticated != true)
+            {
+                return Forbid();
+            }
+
+            var authorized = await _authorizationService.AuthorizeAsync(
+                User,
+                resource: null,
+                Permissions.StoreProducts.EditName
             );
             return authorized.Succeeded ? null : Forbid();
         }
