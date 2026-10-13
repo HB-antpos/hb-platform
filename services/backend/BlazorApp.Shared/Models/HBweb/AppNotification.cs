@@ -90,4 +90,7 @@ public static class AppNotificationTypes
 
     /// <summary>不受欢迎人员名单条目到期前 30 天的复核提醒（发给提交人与批准人，不含姓名与事件细节）。</summary>
     public const string FaceUnwelcomeExpiring = "face.unwelcome-expiring";
+
+    /// <summary>新品到店每日推送（门店本地 8 点）：只发给该店持有 Container.MobileNewProductsView 的人，Data 只带门店、本地日期与新增数量。</summary>
+    public const string ContainerNewProducts = "container.new_products";
 }

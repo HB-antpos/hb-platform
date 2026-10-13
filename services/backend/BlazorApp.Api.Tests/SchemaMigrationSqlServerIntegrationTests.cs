@@ -1815,6 +1815,69 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 新品到店推送两张表_可重复执行_主键兜底并发重复_并识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql));
+        Assert.Equal(52800, missing.Number);
+
+        await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
+
+        // 已见集合主键 (门店, 商品)：同店同商品重复写入报 2627，不同门店的同一商品可以共存。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.ContainerNewProductSeen (StoreCode, ProductCode, FirstLocalDate, ContainerCode, CreatedAtUtc)
+            VALUES (N'1013', N'P-1', '2026-10-15', N'C-1', SYSUTCDATETIME()),
+                   (N'1014', N'P-1', '2026-10-15', N'C-1', SYSUTCDATETIME());
+            """);
+        var duplicateSeen = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.ContainerNewProductSeen (StoreCode, ProductCode, FirstLocalDate, ContainerCode, CreatedAtUtc)
+                VALUES (N'1013', N'P-1', '2026-10-16', N'C-2', SYSUTCDATETIME());
+                """));
+        Assert.Equal(2627, duplicateSeen.Number);
+
+        // 处理记录主键 (门店, 本地日期)：同店同日重复报 2627，通知编号可空。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.ContainerNewProductRun (StoreCode, LocalDate, ProcessedAtUtc, NewCount, IsBaseline)
+            VALUES (N'1013', '2026-10-15', SYSUTCDATETIME(), 0, 1);
+            """);
+        var duplicateRun = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, """
+                INSERT dbo.ContainerNewProductRun (StoreCode, LocalDate, ProcessedAtUtc, NewCount, IsBaseline)
+                VALUES (N'1013', '2026-10-15', SYSUTCDATETIME(), 3, 0);
+                """));
+        Assert.Equal(2627, duplicateRun.Number);
+
+        // 列被改窄报 52801；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.ContainerNewProductSeen ALTER COLUMN ContainerCode nvarchar(20) NOT NULL;");
+        var narrowed = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql));
+        Assert.Equal(52801, narrowed.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.ContainerNewProductSeen ALTER COLUMN ContainerCode nvarchar(50) NOT NULL;");
+        await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
+
+        // 主键列顺序被换掉报 52802；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.ContainerNewProductRun DROP CONSTRAINT PK_ContainerNewProductRun;
+            ALTER TABLE dbo.ContainerNewProductRun ADD CONSTRAINT PK_ContainerNewProductRun PRIMARY KEY CLUSTERED (LocalDate, StoreCode);
+            """);
+        var wrongKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql));
+        Assert.Equal(52802, wrongKey.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.ContainerNewProductRun DROP CONSTRAINT PK_ContainerNewProductRun;
+            ALTER TABLE dbo.ContainerNewProductRun ADD CONSTRAINT PK_ContainerNewProductRun PRIMARY KEY CLUSTERED (StoreCode, LocalDate);
+            """);
+        await ExecuteNonQueryAsync(main, ContainerNewProductNoticeSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();
