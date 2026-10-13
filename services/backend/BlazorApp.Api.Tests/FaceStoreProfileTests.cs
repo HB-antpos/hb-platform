@@ -299,10 +299,10 @@ public sealed class FaceStoreProfileTests : IDisposable
     // ---------- 不受欢迎人员名单 ----------
 
     [Fact]
-    public async Task 名单开关缺任何前置条件都拒绝_材料齐全才放行()
+    public async Task 名单开关在Match下缺任何前置条件都拒绝_材料齐全才放行()
     {
         var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", unwelcome: true), FaceMatchTestHarness.Admin));
+            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, unwelcome: true), FaceMatchTestHarness.Admin));
         var missing = AssertMissing(ex, "unwelcome", "unwelcomeAssessmentRef");
         foreach (var key in new[]
                  {
@@ -313,18 +313,59 @@ public sealed class FaceStoreProfileTests : IDisposable
             Assert.Contains(key, missing);
         }
 
-        var saved = await _h.Profiles.UpdateAsync(Qld, UnwelcomeRequest(), FaceMatchTestHarness.Admin);
+        var saved = await _h.Profiles.UpdateAsync(Qld, UnwelcomeMatchRequest(), FaceMatchTestHarness.Admin);
+        Assert.Equal(FaceStoreMode.Match, saved.Mode);
         Assert.True(saved.UnwelcomeListEnabled);
         Assert.Equal("Orion Privacy Officer", saved.PrivacyContact);
     }
 
     [Fact]
-    public async Task 名单开关即使在Capture模式也要求跨境披露审查与地域一致()
+    public async Task 名单开关在Match下要求跨境披露审查与地域一致()
     {
         var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, UnwelcomeRequest() with { CrossBorderRegion = "ap-singapore" }, FaceMatchTestHarness.Admin));
+            () => _h.Profiles.UpdateAsync(Qld, UnwelcomeMatchRequest() with { CrossBorderRegion = "ap-singapore" }, FaceMatchTestHarness.Admin));
 
         AssertMissing(ex, "unwelcome", "regionMismatch");
+    }
+
+    [Fact]
+    public async Task 名单开关在Capture下只处理内部知情人员_不要求任何专项记录()
+    {
+        // 放宽规则：Capture 下的名单只用于上线前用内部员工照片做端到端测试，与顾客去重同一原则。
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", unwelcome: true), FaceMatchTestHarness.Admin);
+
+        Assert.Equal(FaceStoreMode.Capture, saved.Mode);
+        Assert.True(saved.UnwelcomeListEnabled);
+        Assert.True(saved.Gates.CanSave);
+        Assert.Null(saved.UnwelcomeAssessmentRef);
+        Assert.Null(saved.CrossBorderRegion);
+    }
+
+    [Fact]
+    public async Task 名单开关在Capture下仍要求声明内部知情人员_Off下不能开()
+    {
+        var noSubjects = await Assert.ThrowsAsync<FaceMatchException>(
+            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Capture, unwelcome: true), FaceMatchTestHarness.Admin));
+        AssertMissing(noSubjects, "capture", "allowedSubjects");
+
+        var off = await Assert.ThrowsAsync<FaceMatchException>(
+            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Off, unwelcome: true), FaceMatchTestHarness.Admin));
+        AssertMissing(off, "unwelcome", "modeOff");
+    }
+
+    [Fact]
+    public async Task 名单在Capture下开启后切到Match_会重新要求全部专项记录()
+    {
+        await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", unwelcome: true), FaceMatchTestHarness.Admin);
+
+        var ex = await Assert.ThrowsAsync<FaceMatchException>(
+            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, unwelcome: true), FaceMatchTestHarness.Admin));
+
+        var missing = AssertMissing(ex, "unwelcome", "unwelcomeAssessmentRef");
+        Assert.Contains("unwelcomeLegalSignoffBy", missing);
+        Assert.Contains("crossBorderRegion", missing);
     }
 
     // ---------- 字段校验 ----------
@@ -428,19 +469,14 @@ public sealed class FaceStoreProfileTests : IDisposable
         CrossBorderReviewedAt = _h.At(TimeSpan.FromDays(-2)),
     };
 
-    private FaceStoreProfileUpdateRequest UnwelcomeRequest() => Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", unwelcome: true) with
+    private FaceStoreProfileUpdateRequest UnwelcomeMatchRequest() => MatchRequest() with
     {
-        PiaReference = "PIA-2026-001",
-        SignageInstalledOn = "2026-09-01",
+        UnwelcomeListEnabled = true,
         UnwelcomeAssessmentRef = "UW-2026-001",
         UnwelcomeLegalSignoffBy = "Counsel B",
         UnwelcomeLegalSignoffAt = _h.At(TimeSpan.FromDays(-3)),
         StaffTrainingDate = "2026-09-10",
         PrivacyContact = "Orion Privacy Officer",
-        CrossBorderRegion = "ap-guangzhou",
-        CrossBorderReviewRef = "XB-2026-001",
-        CrossBorderReviewedBy = "Counsel A",
-        CrossBorderReviewedAt = _h.At(TimeSpan.FromDays(-2)),
     };
 
     /// <summary>断言 409 闸门错误里指定项缺了指定键，返回该项完整缺项列表。</summary>

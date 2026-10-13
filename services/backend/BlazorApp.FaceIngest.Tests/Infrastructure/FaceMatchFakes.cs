@@ -372,10 +372,19 @@ internal sealed class FakeUnwelcomeHitImageStore : IUnwelcomeHitImageStore
 {
     public bool Available { get; set; } = true;
 
+    /// <summary>接下来还要失败几次（模拟 COS 暂时不可用）；失败不记入 <see cref="Saved"/>。</summary>
+    public int FailuresRemaining { get; set; }
+
     public ConcurrentQueue<(UnwelcomeHitImage Image, string ObjectKey)> Saved { get; } = new();
 
     public Task<string> SaveAsync(UnwelcomeHitImage image, CancellationToken cancellationToken)
     {
+        if (FailuresRemaining > 0)
+        {
+            FailuresRemaining--;
+            throw new IOException("simulated COS failure");
+        }
+
         // 与真实 CosImageStore 同一前缀规则，便于断言「私有 COS 前缀 face-ingest/unwelcome-hits/」。
         var datePath = image.CapturedAtUtc.UtcDateTime.ToString("yyyy'/'MM'/'dd", System.Globalization.CultureInfo.InvariantCulture);
         var key = $"face-ingest/unwelcome-hits/{image.StoreCode}/{datePath}/{image.CameraId}/{image.TaskId}.jpg";

@@ -41,7 +41,8 @@ internal sealed record EffectiveStoreMode(
 /// 3. <c>Mode=Match</c> 但匹配不可用（缺凭据 / 地域非法）→ Off，绝不退回「全部留存」；
 /// 4. <c>Mode=Match</c> 且启用了员工排除 / 去重 / 名单，要求档案的 CrossBorderRegion 等于当前配置地域
 ///    且有跨境审查记录（地域改动后旧审查作废），否则降级：AllowedSubjects 非空 → Capture，否则 → Off，并记 Warning；
-/// 5. 名单只在 COS 可用（命中图要存私有 COS）且名单专项记录齐全时才生效，否则关掉名单这一块并记 Warning；
+/// 5. Match 下名单只在 COS 可用（命中图要存私有 COS）且名单专项记录齐全时才生效，否则关掉名单这一块并记 Warning；
+///    Capture 下名单只用于内部知情人员的测试：要求匹配可用、AllowedSubjects 非空、COS 可用，不要求专项记录；
 /// 6. 去重需要能解析门店时区（算营业日与访客库删除时间），解析不了就关掉去重并记 Warning。
 /// </summary>
 internal sealed class StoreModePolicy
@@ -118,9 +119,15 @@ internal sealed class StoreModePolicy
             Warn(profile.StoreCode, "capture-evaluate-disabled", "EvaluateMatch is on but matching is disabled by configuration; plain Capture is used.");
         }
 
+        // 名单在 Capture 下只用于「内部知情人员」的端到端测试：不要求专项记录（主 API 闸门同口径），
+        // 但仍要求匹配可用、档案声明了 AllowedSubjects、命中图有私有 COS 可存；缺任一项这一块关闭并记 Warning。
+        var unwelcome = ResolveCaptureUnwelcome(profile);
+
         if (!evaluate)
         {
-            return new EffectiveStoreMode(StoreModeKind.Capture, false, false, false, false, null, "profile-capture");
+            return new EffectiveStoreMode(
+                StoreModeKind.Capture, false, false, false, unwelcome, null,
+                unwelcome ? "profile-capture-unwelcome" : "profile-capture");
         }
 
         var dedup = profile.TrafficDedupEnabled && TryResolveTimeZone(profile) is not null;
@@ -129,9 +136,41 @@ internal sealed class StoreModePolicy
             true,
             profile.StaffExclusionEnabled,
             dedup,
-            false,
+            unwelcome,
             dedup ? profile.TimeZoneId!.Trim() : null,
-            "profile-capture-evaluate");
+            unwelcome ? "profile-capture-evaluate-unwelcome" : "profile-capture-evaluate");
+    }
+
+    /// <summary>
+    /// Capture 模式下名单是否生效。名单命中图要存私有 COS，且只允许在声明了「仅内部知情人员」的档案上做测试；
+    /// 不检查专项评估 / 律师确认等记录（那是对真实顾客运行 Match 前才要求的）。
+    /// </summary>
+    private bool ResolveCaptureUnwelcome(FaceStoreProfileRow profile)
+    {
+        if (!profile.UnwelcomeListEnabled)
+        {
+            return false;
+        }
+
+        if (!_matchSettings.MatcherEnabled)
+        {
+            Warn(profile.StoreCode, "capture-unwelcome-disabled", "UnwelcomeListEnabled is on but matching is disabled by configuration; the list is not used in Capture mode.");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(profile.AllowedSubjects))
+        {
+            Warn(profile.StoreCode, "capture-unwelcome-no-allowed-subjects", "UnwelcomeListEnabled in Capture mode requires AllowedSubjects (internal consenting people only); the list is not used.");
+            return false;
+        }
+
+        if (!_hitImageStore.Available)
+        {
+            Warn(profile.StoreCode, "unwelcome-no-cos", "UnwelcomeListEnabled is on but private COS is not enabled, so hit images cannot be stored; the list is not used.");
+            return false;
+        }
+
+        return true;
     }
 
     private EffectiveStoreMode ResolveMatch(FaceStoreProfileRow profile)

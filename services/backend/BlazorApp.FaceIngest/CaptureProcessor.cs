@@ -358,6 +358,12 @@ internal sealed partial class CaptureProcessor
                     // 中文注释：Capture 模式的匹配评估（阈值标定）。放在事件行写成功之后，失败只记日志，不影响本条的入库结果。
                     await TryEvaluateAsync(metadata, receivedAtUtc, bodySha256, parsed, storeMode, cancellationToken);
                 }
+
+                if (storeMode.Unwelcome && duplicateOf is null && _pipeline is not null)
+                {
+                    // 中文注释：Capture 模式的名单检查（仅内部知情人员的端到端测试）。同样放在事件行写成功之后，失败只记日志。
+                    await TryCheckUnwelcomeAsync(metadata, receivedAtUtc, bodySha256, parsed, storeMode, cancellationToken);
+                }
             }
             else
             {
@@ -544,6 +550,40 @@ internal sealed partial class CaptureProcessor
             {
                 _logger.LogWarning(
                     "Face match evaluation failed and was skipped camera={CameraId} store={StoreCode} error={Error} suppressedSinceLastLog={SuppressedCount}",
+                    metadata.CameraId,
+                    metadata.StoreCode,
+                    DescribeError(ex),
+                    suppressed);
+            }
+        }
+    }
+
+    /// <summary>Capture 模式的名单检查。任何异常（腾讯云 / 数据库 / COS）只记节流 Warning，绝不影响原有入库流程。</summary>
+    private async Task TryCheckUnwelcomeAsync(
+        CaptureMetadata metadata,
+        DateTimeOffset receivedAtUtc,
+        string bodySha256,
+        ParsedPush parsed,
+        EffectiveStoreMode mode,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _pipeline!.CheckUnwelcomeAsync(
+                new MatchCapture(metadata.CaptureId, metadata.CameraId, metadata.StoreCode, receivedAtUtc, bodySha256, BuildMatchFaces(parsed)),
+                mode,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (_failureLogGate.TryAcquire("capture-unwelcome:" + ex.GetType().Name, out var suppressed))
+            {
+                _logger.LogWarning(
+                    "Face match list check in Capture mode failed and was skipped camera={CameraId} store={StoreCode} error={Error} suppressedSinceLastLog={SuppressedCount}",
                     metadata.CameraId,
                     metadata.StoreCode,
                     DescribeError(ex),

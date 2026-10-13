@@ -477,7 +477,8 @@ public sealed class FaceMatchMaintenance(
             var dependsOnReview = profile.Mode == FaceStoreMode.Match
                 || (profile.StaffExclusionEnabled && profile.Mode != FaceStoreMode.Capture)
                 || (profile.TrafficDedupEnabled && profile.Mode != FaceStoreMode.Capture)
-                || profile.UnwelcomeListEnabled;
+                // Capture 下的名单只处理知情内部人员，不依赖跨境审查（与员工排除、去重同口径），不能被地域改动强制关掉。
+                || (profile.UnwelcomeListEnabled && profile.Mode != FaceStoreMode.Capture);
             profile.CrossBorderRegion = null;
             profile.CrossBorderReviewRef = null;
             profile.CrossBorderReviewedBy = null;
