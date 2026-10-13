@@ -28,18 +28,23 @@ internal static class IngestEndpoints
         var settings = context.RequestServices.GetRequiredService<FaceIngestSettingsMonitor>().Current;
         var store = context.RequestServices.GetRequiredService<RawCaptureStore>();
         var cameraSource = context.RequestServices.GetRequiredService<ICameraRegistrySource>();
+        var matchSettings = context.RequestServices.GetRequiredService<FaceMatchSettings>();
         // 中文注释：来源未就绪时 status 仍是 healthy（进程本身健康，容器不该被反复重启），由 cameraSourceReady 单独反映。
+        // 比对只暴露两个字段：是否可用与地域名（白名单内的固定字符串）；不暴露凭据、不暴露不可用原因（原因只进启动日志）。
         return context.Response.WriteAsJsonAsync(new HealthResponse(
             "healthy",
             settings.CaptureEnabled,
             store.StoredFileCount,
             store.StoredBytes,
             cameraSource.SourceName,
-            cameraSource.Current is not null));
+            cameraSource.Current is not null,
+            matchSettings.MatcherEnabled,
+            matchSettings.Region));
     }
 
     /// <summary>
-    /// 健康检查响应（camelCase）：status / captureEnabled / storedFileCount / storedBytes / cameraSource（json | database）/ cameraSourceReady。
+    /// 健康检查响应（camelCase）：status / captureEnabled / storedFileCount / storedBytes / cameraSource（json | database）/ cameraSourceReady /
+    /// matcherEnabled（腾讯云匹配是否可用）/ matcherRegion（配置的腾讯云地域名，非法或未配置时为空串）。
     /// </summary>
     internal sealed record HealthResponse(
         string Status,
@@ -47,5 +52,7 @@ internal static class IngestEndpoints
         long StoredFileCount,
         long StoredBytes,
         string CameraSource,
-        bool CameraSourceReady);
+        bool CameraSourceReady,
+        bool MatcherEnabled,
+        string MatcherRegion);
 }

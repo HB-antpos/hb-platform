@@ -37,6 +37,9 @@ internal sealed class FaceIngestAppOptions
     /// <summary>默认移除数据库摄像机来源的后台刷新；测试直接调用 <see cref="DatabaseCameraSource.RefreshAsync"/> 控制时序。</summary>
     public bool EnableCameraRefreshService { get; set; }
 
+    /// <summary>默认移除门店档案后台刷新；测试直接调用 <see cref="FaceStoreProfileSource.RefreshAsync"/> 控制时序，也避免后台去连假连接串。</summary>
+    public bool EnableProfileRefreshService { get; set; }
+
     /// <summary>额外的服务替换（在框架默认替换之后执行），例如注入假仓储 / 假写库器 / 假图片存储。</summary>
     public Action<IServiceCollection>? ConfigureServices { get; set; }
 
@@ -170,6 +173,11 @@ internal sealed class FaceIngestAppFactory : WebApplicationFactory<Program>
             if (!_options.EnableCameraRefreshService)
             {
                 RemoveHostedService<CameraRegistryRefreshService>(services);
+            }
+
+            if (!_options.EnableProfileRefreshService)
+            {
+                RemoveHostedService<FaceStoreProfileRefreshService>(services);
             }
 
             _options.ConfigureServices?.Invoke(services);

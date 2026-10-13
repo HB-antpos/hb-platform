@@ -93,6 +93,35 @@ builder.Services.AddSingleton<IImageStore>(services =>
 builder.Services.AddSingleton<ICaptureEventWriter>(services => new SqlCaptureEventWriter(
     services.GetRequiredService<FaceIngestSettingsMonitor>().Current.DatabaseConnectionString
     ?? throw new InvalidOperationException("FaceIngest:Database:ConnectionString is not configured.")));
+
+// 人脸比对（设计 docs/design/face-matching-service-20261012.md 第 13、15 节）：默认全部关闭。
+// 腾讯云凭据只认 FaceMatch:Tencent:SecretId/SecretKey（compose 由 FACE_MATCH_TENCENT_SECRET_ID/KEY 映射），不读 COS 密钥；
+// 地域取 FaceMatch:Tencent:Region（白名单）；缺凭据 / 地域非法时 MatcherEnabled=false，注册占位实现，绝不发任何网络请求。
+builder.Services.AddSingleton(services => FaceMatchSettings.Create(services.GetRequiredService<IConfiguration>()));
+builder.Services.AddHttpClient(TencentFaceClient.HttpClientName, client => client.Timeout = TencentFaceClient.RequestTimeout);
+builder.Services.AddSingleton<IFaceMatcher>(services =>
+{
+    var matchSettings = services.GetRequiredService<FaceMatchSettings>();
+    return matchSettings.MatcherEnabled
+        ? new TencentFaceClient(services.GetRequiredService<IHttpClientFactory>(), matchSettings, services.GetRequiredService<TimeProvider>())
+        : new DisabledFaceMatchService();
+});
+builder.Services.AddSingleton<IVisitorRegistry>(services => (IVisitorRegistry)services.GetRequiredService<IFaceMatcher>());
+builder.Services.AddSingleton<IUnwelcomeHitImageStore>(services =>
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.Cos.Enabled
+        ? services.GetRequiredService<CosImageStore>()
+        : new NoUnwelcomeHitImageStore());
+builder.Services.AddSingleton<IFaceStoreProfileRepository>(services => new SqlFaceStoreProfileRepository(
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.DatabaseConnectionString
+    ?? throw new InvalidOperationException("FaceIngest:Database:ConnectionString is not configured.")));
+builder.Services.AddSingleton<IFaceMatchStore>(services => new SqlFaceMatchStore(
+    services.GetRequiredService<FaceIngestSettingsMonitor>().Current.DatabaseConnectionString
+    ?? throw new InvalidOperationException("FaceIngest:Database:ConnectionString is not configured.")));
+builder.Services.AddSingleton<FaceStoreProfileSource>();
+builder.Services.AddSingleton<StoreModePolicy>();
+builder.Services.AddSingleton<FaceMatchPipeline>();
+builder.Services.AddHostedService<FaceStoreProfileRefreshService>();
+
 builder.Services.AddSingleton<CaptureProcessor>();
 builder.Services.AddHostedService<CaptureProcessingService>();
 
@@ -112,6 +141,22 @@ app.Logger.LogInformation(
     startupSettings.DatabaseConfigured,
     startupSettings.ProcessingEnabled,
     startupSettings.Cos.Enabled && startupSettings.Cos.UploadRawBody);
+
+// 中文注释：启动时就把比对配置解析出来并记一行状态（只含开关、地域名与不可用原因，绝不含密钥）。
+var matchStartup = app.Services.GetRequiredService<FaceMatchSettings>();
+if (matchStartup.MatcherEnabled)
+{
+    app.Logger.LogInformation("Face match configured matcherEnabled=true region={Region}", matchStartup.Region);
+}
+else if (matchStartup.CredentialsConfigured)
+{
+    // 配了凭据却不可用：多半是地域或格式写错，必须醒目（Error），否则会以为在比对其实全部按 Off 丢弃。
+    app.Logger.LogError("Face match is DISABLED despite credentials being configured: {Reason}", matchStartup.DisabledReason);
+}
+else
+{
+    app.Logger.LogInformation("Face match not configured matcherEnabled=false (no FaceMatch:Tencent credentials); store modes are not enforced");
+}
 
 app.MapFaceIngestEndpoints();
 
