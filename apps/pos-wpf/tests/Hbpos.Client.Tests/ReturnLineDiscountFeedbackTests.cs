@@ -15,10 +15,14 @@ namespace Hbpos.Client.Tests;
 /// 退货行折扣的反馈统一（接 #741）：数据层本来就拒绝给退货行折扣，但此前收银员得到的反馈不一致——
 /// 先弹授权（可能要主管 PIN），授权后百分比 / 快速折扣静默无反应，折扣金额因拿负毛额比较误报「折扣金额过高」，
 /// 改数量 / 改价对退货行同样是静默的空结果。现在改为：
-/// 1. 命令层（收银页）：选中退货行点折扣 / 改数量 / 改价，或整单模式下购物车含退货行点折扣，
+/// 1. 命令层（收银页）：选中退货行点折扣 / 改数量 / 改价，
 ///    在弹授权之前就直接在状态栏给出错误提示 + 错误音，不弹授权；
 /// 2. 工作流层：同样的输入直接调用折扣 / 改数量 / 改价方法，返回明确的拒绝提示，而不是静默或误报「折扣金额过高」；
 /// 3. 任何一条路径都不改购物车数据。
+///
+/// 后续改动（含退货行时允许整单折扣、跳过退货行）：整单模式不再被「有退货商品时不能使用整单折扣」拦截，
+/// 该提示键与对应拦截已移除；整单折扣的新行为（含退货行时对销售行打折）见 OrderDiscountWithReturnLinesTests，
+/// 本文件里原先断言整单被拦的用例已改成断言新行为，并钉住「整单模式下即使选中的是退货行也不被行级提示误拦」。
 ///
 /// 测试分两类（与 PR 描述一致）：
 /// 1. 失败对照：钉住本次的新行为，还原生产文件后应当失败（用例名与分区标题里标注「失败对照」）。
@@ -33,7 +37,7 @@ public sealed class ReturnLineDiscountFeedbackTests
     private const string StoreCode = "S001";
 
     private const string ReturnLineDiscountBlockedKey = "pos.status.returnLineDiscountBlocked";
-    private const string OrderDiscountBlockedKey = "pos.status.orderDiscountBlockedByReturn";
+    private const string OrderDiscountNoSaleLinesKey = "pos.status.orderDiscountNoSaleLines";
     private const string ReturnLineQuantityBlockedKey = "pos.status.returnLineQuantityBlocked";
     private const string ReturnLinePriceBlockedKey = "pos.status.returnLinePriceBlocked";
 
@@ -80,62 +84,130 @@ public sealed class ReturnLineDiscountFeedbackTests
     }
 
     [Theory]
-    [InlineData(DiscountAction.Amount)]
-    [InlineData(DiscountAction.Percent)]
-    [InlineData(DiscountAction.Quick10)]
-    [InlineData(DiscountAction.Quick50)]
-    public async Task Order_discount_command_with_return_line_in_cart_shows_notice_without_asking_authorization(DiscountAction action)
+    [InlineData(DiscountAction.Amount, Permissions.PosTerminal.Sales.OrderManualDiscount, 1)]
+    [InlineData(DiscountAction.Percent, Permissions.PosTerminal.Sales.OrderManualDiscount, 3)]
+    [InlineData(DiscountAction.Quick10, Permissions.PosTerminal.Sales.OrderQuickDiscount10Percent, 3)]
+    [InlineData(DiscountAction.Quick50, Permissions.PosTerminal.Sales.OrderQuickDiscount50Percent, 15)]
+    public async Task Order_discount_command_with_return_line_in_cart_asks_order_authorization_then_discounts_sale_line_only(
+        DiscountAction action,
+        string expectedPermission,
+        int expectedDiscount)
     {
-        using var harness = new Harness();
-        harness.ViewModel.IsWholeOrderOperation = true;
-        var before = harness.CaptureCart();
-
-        // 整单模式看的是整张购物车，与选中哪一行无关：分别在选中退货行、选中销售行、未选中三种情况下都一样。
-        foreach (var selected in new CartLine?[] { harness.ReturnLine, harness.SaleLine, null })
+        // 预期随新行为改变（原：含退货行时整单折扣在授权前被拦并提示）。
+        // 整单模式不看选中行：选中退货行 / 选中销售行 / 未选中三种情况都一样，先走整单折扣原有的权限码授权，
+        // 再只对销售行打折；选中的恰好是退货行时，也不会被行级的「退货商品不能修改折扣」误拦。
+        foreach (var selectedName in new[] { "return", "sale", "none" })
         {
-            harness.ViewModel.SelectedCartLine = selected;
+            using var harness = new Harness();
+            harness.ViewModel.IsWholeOrderOperation = true;
+            harness.ViewModel.SelectedCartLine = selectedName switch
+            {
+                "return" => harness.ReturnLine,
+                "sale" => harness.SaleLine,
+                _ => null
+            };
 
             await harness.ExecuteAsync(action);
 
-            Assert.Empty(harness.Authorization.RequestedPermissions);
-            Assert.Equal(harness.Text(OrderDiscountBlockedKey), harness.ViewModel.StatusMessage);
-            Assert.Equal(StatusFeedbackKind.Error, harness.ViewModel.StatusFeedbackKind);
-            AssertCartUnchanged(before, harness);
+            Assert.Equal([expectedPermission], harness.Authorization.RequestedPermissions);
+            Assert.Equal(harness.Text("pos.status.orderDiscountUpdated"), harness.ViewModel.StatusMessage);
+            Assert.NotEqual(harness.Text(ReturnLineDiscountBlockedKey), harness.ViewModel.StatusMessage);
+            Assert.Equal((decimal)expectedDiscount, harness.SaleLine.DiscountAmount);
             AssertNoDiscount(harness.ReturnLine);
-            AssertNoDiscount(harness.SaleLine);
-            // 提示不替收银员退出整单模式。
-            Assert.True(harness.ViewModel.IsWholeOrderOperation);
+            Assert.Equal((decimal)expectedDiscount, harness.Cart.DiscountAmount);
+            // 成功路径照旧会把整单模式复位，并产生一条购物车变更审计。
+            Assert.False(harness.ViewModel.IsWholeOrderOperation);
+            Assert.Single(harness.Audit.Events);
         }
-
-        Assert.Equal(
-            Enumerable.Repeat(UserFeedbackCue.OperationError, 3),
-            harness.Feedback.Cues);
-        Assert.Empty(harness.Audit.Events);
     }
 
     [Theory]
     [InlineData(DiscountAction.Amount)]
     [InlineData(DiscountAction.Percent)]
     [InlineData(DiscountAction.Quick10)]
-    public async Task Discount_command_on_cart_with_only_return_lines_shows_notice_instead_of_amount_too_high(DiscountAction action)
+    public async Task Line_discount_command_on_cart_with_only_return_lines_shows_notice_instead_of_amount_too_high(DiscountAction action)
     {
         // 只有退货行时合计为负：旧行为里折扣金额会拿正数去比负毛额，误报「折扣金额过高」。
-        foreach (var isWholeOrder in new[] { false, true })
+        // 行模式下选中退货行仍然是明确的「退货商品不能修改折扣」；整单模式在只有退货行时的提示见下面的 Order_discount_*_only_return_lines_* 用例。
+        using var harness = new Harness(withSaleLine: false);
+        harness.ViewModel.IsWholeOrderOperation = false;
+        harness.ViewModel.SelectedCartLine = harness.ReturnLine;
+        var before = harness.CaptureCart();
+
+        await harness.ExecuteAsync(action);
+
+        Assert.Empty(harness.Authorization.RequestedPermissions);
+        Assert.Equal(harness.Text(ReturnLineDiscountBlockedKey), harness.ViewModel.StatusMessage);
+        Assert.NotEqual(harness.Text("pos.status.discountAmountTooHigh"), harness.ViewModel.StatusMessage);
+        AssertCartUnchanged(before, harness);
+        AssertNoDiscount(harness.ReturnLine);
+    }
+
+    [Theory]
+    [InlineData(DiscountAction.Amount)]
+    [InlineData(DiscountAction.Percent)]
+    [InlineData(DiscountAction.Quick10)]
+    [InlineData(DiscountAction.Quick50)]
+    public async Task Order_discount_command_on_cart_with_only_return_lines_shows_notice_without_asking_authorization(DiscountAction action)
+    {
+        // 产品决定：购物车里只有退货行、没有可打折的销售行时，整单折扣无处可落，拒绝并给明确提示，
+        // 而且在弹授权 / 主管 PIN 之前就拦下（三个入口都一样）；不再出现「折扣金额过高」或误导的「整单折扣已应用」。
+        // 选中退货行和未选中两种情况结果一样：整单模式不看选中行，提示也不是行级的「退货商品不能修改折扣」。
+        foreach (var selectedReturnLine in new[] { true, false })
         {
             using var harness = new Harness(withSaleLine: false);
-            harness.ViewModel.IsWholeOrderOperation = isWholeOrder;
-            harness.ViewModel.SelectedCartLine = harness.ReturnLine;
+            harness.ViewModel.IsWholeOrderOperation = true;
+            harness.ViewModel.SelectedCartLine = selectedReturnLine ? harness.ReturnLine : null;
             var before = harness.CaptureCart();
 
             await harness.ExecuteAsync(action);
 
-            var expectedKey = isWholeOrder ? OrderDiscountBlockedKey : ReturnLineDiscountBlockedKey;
             Assert.Empty(harness.Authorization.RequestedPermissions);
-            Assert.Equal(harness.Text(expectedKey), harness.ViewModel.StatusMessage);
+            Assert.Equal(harness.Text(OrderDiscountNoSaleLinesKey), harness.ViewModel.StatusMessage);
+            Assert.NotEqual(harness.Text(ReturnLineDiscountBlockedKey), harness.ViewModel.StatusMessage);
             Assert.NotEqual(harness.Text("pos.status.discountAmountTooHigh"), harness.ViewModel.StatusMessage);
+            Assert.NotEqual(harness.Text("pos.status.orderDiscountUpdated"), harness.ViewModel.StatusMessage);
+            Assert.Equal(StatusFeedbackKind.Error, harness.ViewModel.StatusFeedbackKind);
+            Assert.Equal([UserFeedbackCue.OperationError], harness.Feedback.Cues);
+            // 数据完全不变（含修订号），整单模式和键盘输入原样保留，也没有购物车变更审计。
             AssertCartUnchanged(before, harness);
             AssertNoDiscount(harness.ReturnLine);
+            Assert.True(harness.ViewModel.IsWholeOrderOperation);
+            Assert.Equal(harness.KeypadBufferFor(action), harness.ViewModel.KeypadBuffer);
+            Assert.Empty(harness.Audit.Events);
         }
+    }
+
+    [Fact]
+    public async Task Order_discount_notice_for_only_return_lines_lifts_as_soon_as_a_sale_line_is_added()
+    {
+        using var harness = new Harness(withSaleLine: false);
+        harness.ViewModel.IsWholeOrderOperation = true;
+
+        await harness.ExecuteAsync(DiscountAction.Quick10);
+        Assert.Empty(harness.Authorization.RequestedPermissions);
+        Assert.Equal(harness.Text(OrderDiscountNoSaleLinesKey), harness.ViewModel.StatusMessage);
+
+        // 加入一个销售行后，同一个入口恢复为先走整单折扣的授权、再对销售行打折，退货行不被牵连。
+        var sale = harness.Cart.AddItem(CreateItem(lookupCode: "LK-SALE", price: 30m));
+        await harness.ExecuteAsync(DiscountAction.Quick10);
+
+        Assert.Equal([Permissions.PosTerminal.Sales.OrderQuickDiscount10Percent], harness.Authorization.RequestedPermissions);
+        Assert.Equal(harness.Text("pos.status.orderDiscountUpdated"), harness.ViewModel.StatusMessage);
+        Assert.Equal(3m, sale.DiscountAmount);
+        AssertNoDiscount(harness.ReturnLine);
+    }
+
+    [Fact]
+    public async Task Order_discount_no_sale_lines_notice_follows_the_current_ui_language()
+    {
+        using var harness = new Harness(cultureName: "zh-CN", withSaleLine: false);
+        harness.ViewModel.IsWholeOrderOperation = true;
+
+        await harness.ExecuteAsync(DiscountAction.Percent);
+
+        Assert.Equal("购物车里没有可打折的销售商品。", harness.ViewModel.StatusMessage);
+        Assert.Empty(harness.Authorization.RequestedPermissions);
     }
 
     [Fact]
@@ -146,10 +218,6 @@ public sealed class ReturnLineDiscountFeedbackTests
 
         await harness.ExecuteAsync(DiscountAction.Amount);
         Assert.Equal("退货商品不能修改折扣。", harness.ViewModel.StatusMessage);
-
-        harness.ViewModel.IsWholeOrderOperation = true;
-        await harness.ExecuteAsync(DiscountAction.Percent);
-        Assert.Equal("有退货商品时不能使用整单折扣。", harness.ViewModel.StatusMessage);
 
         Assert.Empty(harness.Authorization.RequestedPermissions);
     }
@@ -231,57 +299,149 @@ public sealed class ReturnLineDiscountFeedbackTests
     }
 
     [Fact]
-    public void Workflow_order_discount_with_return_line_in_cart_returns_explicit_notice_for_every_entry()
+    public void Workflow_order_discount_with_return_line_in_cart_applies_to_sale_line_for_every_entry_and_every_selection()
     {
-        var (cart, sale, returnLine) = CreateMixedCart();
-        var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), cart);
-        var before = CaptureCart(cart);
-
-        // 选中退货行 / 销售行 / 未选中，整单模式的结果都一样；整单折扣金额不超过合计时旧行为是静默的空结果。
-        foreach (var selected in new CartLine?[] { returnLine, sale, null })
+        // 预期随新行为改变（原：含退货行时整单折扣的每个入口都返回「有退货商品时不能使用整单折扣」）。
+        // 选中退货行 / 销售行 / 未选中，整单模式的结果都一样：成功、复位整单模式、清键盘，且只有销售行有折扣。
+        foreach (var selectedName in new[] { "return", "sale", "none" })
         {
-            var results = new[]
+            var (cart, sale, returnLine) = CreateMixedCart();
+            var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), cart);
+            CartLine? selected = selectedName switch
             {
-                service.ApplySelectedLineDiscountAmount(selected, "5", isWholeOrderOperation: true),
-                service.ApplySelectedLineDiscountAmount(selected, "5000", isWholeOrderOperation: true),
-                service.ApplySelectedLineDiscountPercent(selected, "10", isWholeOrderOperation: true),
-                service.ApplyQuickDiscountPercent(selected, "10", isWholeOrderOperation: true)
+                "return" => returnLine,
+                "sale" => sale,
+                _ => null
             };
 
-            foreach (var result in results)
-            {
-                Assert.Equal(OrderDiscountBlockedKey, result.StatusKey);
-                Assert.False(result.ClearKeypadBuffer);
-                // 不替收银员退出整单模式（成功路径才会把它复位为 false）。
-                Assert.Null(result.WholeOrderOperation);
-            }
-        }
+            var amountResult = service.ApplySelectedLineDiscountAmount(selected, "5", isWholeOrderOperation: true);
+            Assert.Equal(5m, sale.DiscountAmount);
+            var percentResult = service.ApplySelectedLineDiscountPercent(selected, "10", isWholeOrderOperation: true);
+            Assert.Equal(3m, sale.DiscountAmount);
+            var quickResult = service.ApplyQuickDiscountPercent(selected, "10", isWholeOrderOperation: true);
+            Assert.Equal(3m, sale.DiscountAmount);
 
-        Assert.Equal(before, CaptureCart(cart));
-        AssertNoDiscount(returnLine);
-        AssertNoDiscount(sale);
+            foreach (var result in new[] { amountResult, percentResult, quickResult })
+            {
+                Assert.Equal("pos.status.orderDiscountUpdated", result.StatusKey);
+                Assert.True(result.ClearKeypadBuffer);
+                Assert.False(result.WholeOrderOperation);
+                Assert.Null(result.SelectedCartLine);
+            }
+
+            AssertNoDiscount(returnLine);
+            Assert.Equal(1m, returnLine.Quantity);
+            Assert.Equal(8m, returnLine.UnitPrice);
+            Assert.Equal(19m, cart.ActualAmount);
+        }
     }
 
     [Fact]
-    public void Workflow_discount_on_cart_with_only_return_lines_never_reports_amount_too_high()
+    public void Workflow_order_discount_amount_cap_with_return_line_is_sale_gross_not_net_total()
+    {
+        // 金额上限按销售行毛额合计（30）比较，而不是含退货行负数的合计（22）：
+        // 25 超过合计 22 但没超过销售行 30，必须通过；30 恰好等于上限，也通过；30.01 才是「折扣金额过高」。
+        var (cart, sale, returnLine) = CreateMixedCart();
+        var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), cart);
+
+        Assert.Equal(
+            "pos.status.orderDiscountUpdated",
+            service.ApplySelectedLineDiscountAmount(sale, "25", isWholeOrderOperation: true).StatusKey);
+        Assert.Equal(25m, sale.DiscountAmount);
+        Assert.Equal(
+            "pos.status.orderDiscountUpdated",
+            service.ApplySelectedLineDiscountAmount(sale, "30", isWholeOrderOperation: true).StatusKey);
+        Assert.Equal(30m, sale.DiscountAmount);
+        Assert.Equal(-8m, cart.ActualAmount);
+
+        var before = CaptureCart(cart);
+        Assert.Equal(
+            "pos.status.discountAmountTooHigh",
+            service.ApplySelectedLineDiscountAmount(sale, "30.01", isWholeOrderOperation: true).StatusKey);
+        Assert.Equal(before, CaptureCart(cart));
+        AssertNoDiscount(returnLine);
+    }
+
+    [Fact]
+    public void Workflow_line_discount_on_cart_with_only_return_lines_never_reports_amount_too_high()
     {
         var cart = new PosCartService();
         var returnLine = cart.AddReturnLine(CreateReturnRequest("RET-1", unitPrice: 8m));
         var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), cart);
         var before = CaptureCart(cart);
 
+        // 行模式下选中退货行仍然是明确的拒绝提示；整单模式在只有退货行时的提示见下一个用例。
         Assert.Equal(
             ReturnLineDiscountBlockedKey,
             service.ApplySelectedLineDiscountAmount(returnLine, "1", isWholeOrderOperation: false).StatusKey);
-        Assert.Equal(
-            OrderDiscountBlockedKey,
-            service.ApplySelectedLineDiscountAmount(returnLine, "1", isWholeOrderOperation: true).StatusKey);
-        Assert.Equal(
-            OrderDiscountBlockedKey,
-            service.ApplySelectedLineDiscountAmount(null, "1", isWholeOrderOperation: true).StatusKey);
 
         Assert.Equal(before, CaptureCart(cart));
         AssertNoDiscount(returnLine);
+    }
+
+    [Fact]
+    public void Workflow_order_discount_on_cart_with_only_return_lines_returns_notice_for_every_entry_and_keeps_data()
+    {
+        var cart = new PosCartService();
+        var returnLine = cart.AddReturnLine(CreateReturnRequest("RET-1", unitPrice: 8m));
+        var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), cart);
+        var before = CaptureCart(cart);
+
+        // 三个入口、选中退货行 / 未选中：提示先于键盘输入 / 百分比范围 / 金额上限校验，所以无效输入、越界输入也是同一条提示。
+        foreach (var selected in new CartLine?[] { returnLine, null })
+        {
+            var results = new[]
+            {
+                service.ApplySelectedLineDiscountAmount(selected, "5", isWholeOrderOperation: true),
+                service.ApplySelectedLineDiscountAmount(selected, "0", isWholeOrderOperation: true),
+                service.ApplySelectedLineDiscountAmount(selected, "abc", isWholeOrderOperation: true),
+                service.ApplySelectedLineDiscountAmount(selected, "5000", isWholeOrderOperation: true),
+                service.ApplySelectedLineDiscountPercent(selected, "10", isWholeOrderOperation: true),
+                service.ApplySelectedLineDiscountPercent(selected, "150", isWholeOrderOperation: true),
+                service.ApplyQuickDiscountPercent(selected, "10", isWholeOrderOperation: true),
+                service.ApplyQuickDiscountPercent(selected, "50", isWholeOrderOperation: true)
+            };
+
+            foreach (var result in results)
+            {
+                Assert.Equal(OrderDiscountNoSaleLinesKey, result.StatusKey);
+                Assert.False(result.ClearKeypadBuffer);
+                // 不替收银员退出整单模式（成功路径才会把它复位为 false）。
+                Assert.Null(result.WholeOrderOperation);
+                Assert.Null(result.SelectedCartLine);
+            }
+        }
+
+        // 数据完全不变，包括修订号：没有任何购物车变更通知。
+        Assert.Equal(before, CaptureCart(cart));
+        AssertNoDiscount(returnLine);
+    }
+
+    [Fact]
+    public void Workflow_order_discount_notice_does_not_change_empty_cart_or_no_return_line_behavior()
+    {
+        // 特征化：空购物车仍是「请先选择商品行」；没有退货行的购物车（包括只含零价销售行）沿用既有行为，不出现新提示。
+        var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), new PosCartService());
+        Assert.Equal(
+            "pos.status.selectCartLine",
+            service.ApplySelectedLineDiscountAmount(null, "5", isWholeOrderOperation: true).StatusKey);
+        Assert.Equal(
+            "pos.status.selectCartLine",
+            service.ApplySelectedLineDiscountPercent(null, "10", isWholeOrderOperation: true).StatusKey);
+        Assert.Equal(
+            "pos.status.selectCartLine",
+            service.ApplyQuickDiscountPercent(null, "10", isWholeOrderOperation: true).StatusKey);
+
+        var zeroPriceCart = new PosCartService();
+        var zeroPriceLine = zeroPriceCart.AddItem(CreateItem(productCode: "SKU-ZERO", lookupCode: "LK-ZERO", price: 0m));
+        var zeroPriceService = new PosTerminalWorkflowService(new LocalSellableItemIndex(), zeroPriceCart);
+        Assert.Equal(
+            "pos.status.discountAmountTooHigh",
+            zeroPriceService.ApplySelectedLineDiscountAmount(zeroPriceLine, "5", isWholeOrderOperation: true).StatusKey);
+        Assert.Equal(
+            "pos.status.orderDiscountUpdated",
+            zeroPriceService.ApplySelectedLineDiscountPercent(zeroPriceLine, "10", isWholeOrderOperation: true).StatusKey);
+        AssertNoDiscount(zeroPriceLine);
     }
 
     [Fact]
@@ -325,9 +485,9 @@ public sealed class ReturnLineDiscountFeedbackTests
         Assert.Equal("Returned items cannot be discounted.", LocalizationService.Translate(ReturnLineDiscountBlockedKey, english));
         Assert.Equal("退货商品不能修改折扣。", LocalizationService.Translate(ReturnLineDiscountBlockedKey, chinese));
         Assert.Equal(
-            "Order discount is unavailable while the cart contains returned items.",
-            LocalizationService.Translate(OrderDiscountBlockedKey, english));
-        Assert.Equal("有退货商品时不能使用整单折扣。", LocalizationService.Translate(OrderDiscountBlockedKey, chinese));
+            "There are no sale items in the cart to discount.",
+            LocalizationService.Translate(OrderDiscountNoSaleLinesKey, english));
+        Assert.Equal("购物车里没有可打折的销售商品。", LocalizationService.Translate(OrderDiscountNoSaleLinesKey, chinese));
         Assert.Equal("Returned item quantity cannot be changed.", LocalizationService.Translate(ReturnLineQuantityBlockedKey, english));
         Assert.Equal("退货商品不能修改数量。", LocalizationService.Translate(ReturnLineQuantityBlockedKey, chinese));
         Assert.Equal("Returned item price cannot be changed.", LocalizationService.Translate(ReturnLinePriceBlockedKey, english));
@@ -446,7 +606,7 @@ public sealed class ReturnLineDiscountFeedbackTests
         Assert.Equal(harness.Text("pos.status.selectCartLine"), harness.ViewModel.StatusMessage);
         AssertCartUnchanged(before, harness);
 
-        // 空购物车 + 整单模式：没有退货行，不触发本次的整单拦截，照旧提示「请先选择商品行」。
+        // 空购物车 + 整单模式：照旧先授权，再提示「请先选择商品行」。
         using var emptyHarness = new Harness(withSaleLine: false, withReturnLine: false);
         emptyHarness.ViewModel.IsWholeOrderOperation = true;
         emptyHarness.ViewModel.KeypadBuffer = "1";

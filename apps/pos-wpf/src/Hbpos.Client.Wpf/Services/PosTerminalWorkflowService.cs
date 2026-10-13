@@ -122,8 +122,10 @@ public interface IPosTerminalWorkflowService
     PosTerminalWorkflowResult ApplyQuickDiscountPercent(CartLine? selectedLine, string? value, bool isWholeOrderOperation);
 
     /// <summary>
-    /// 折扣类操作（行折扣金额 / 百分比 / 快速折扣 / 整单折扣）的退货行门禁：选中退货行，或整单模式下购物车含退货行，
-    /// 返回应展示的拒绝提示；可以继续则返回 null。收银页在弹授权 / 主管 PIN 之前先问一次，避免为一个注定被拒绝的操作索要授权。
+    /// 折扣类操作（行折扣金额 / 百分比 / 快速折扣）的退货行门禁：行模式下选中退货行，返回应展示的拒绝提示；可以继续则返回 null。
+    /// 整单折扣只作用于销售行、跳过退货行，与选中哪一行无关，整单模式放行；
+    /// 只有购物车里仅有退货行、没有可打折的销售行时，整单模式给出「没有可打折的销售商品」的提示。
+    /// 收银页在弹授权 / 主管 PIN 之前先问一次，避免为一个注定被拒绝的操作索要授权。
     /// 默认实现一律放行，这样只实现了旧签名的替身 / 测试桩无需改动即可继续使用。
     /// </summary>
     PosTerminalWorkflowResult? GetDiscountRejection(CartLine? selectedLine, bool isWholeOrderOperation)
@@ -464,11 +466,13 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult? GetDiscountRejection(CartLine? selectedLine, bool isWholeOrderOperation)
     {
-        // 整单模式看的是整张购物车：只要含退货行就整单拒绝（PosCartService 对整单折扣是「全有或全无」），
-        // 与当前选中的是哪一行无关，所以提示也用整单文案，而不是行文案。
+        // 整单折扣只作用于销售行、跳过退货行（含退货行的购物车也能设置），而且作用于整张购物车、不看选中哪一行：
+        // 即使当前选中的恰好是退货行，整单模式也必须放行，不能被下面的「退货商品不能修改折扣」误拦。
+        // 唯一的例外：购物车里只有退货行、没有可打折的销售行，整单折扣无处可落，直接提示，
+        // 收银页据此在弹授权 / 主管 PIN 之前就拦下。空购物车、无退货行的购物车不受影响，仍走各自既有的提示。
         if (isWholeOrderOperation)
         {
-            return _cart.HasReturnLine ? Status("pos.status.orderDiscountBlockedByReturn") : null;
+            return _cart.HasNoOrderDiscountableSaleLine ? Status("pos.status.orderDiscountNoSaleLines") : null;
         }
 
         return selectedLine is { IsReturnLine: true } ? Status("pos.status.returnLineDiscountBlocked") : null;
@@ -547,8 +551,9 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ApplySelectedLineDiscountAmount(CartLine? selectedLine, string keypadBuffer, bool isWholeOrderOperation)
     {
-        // 退货行 / 含退货行的整单折扣一律拒绝并给出明确提示：
+        // 行模式下选中退货行一律拒绝并给出明确提示：
         // 退货行毛额为负，不拦的话会拿负数去比折扣金额，要么误报「折扣金额过高」，要么落到购物车的静默拒绝。
+        // 整单模式不看选中行，由购物车只对销售行分摊（见 GetDiscountRejection）。
         if (GetDiscountRejection(selectedLine, isWholeOrderOperation) is { } rejection)
         {
             return rejection;
@@ -603,7 +608,7 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
     public PosTerminalWorkflowResult ApplyQuickDiscountPercent(CartLine? selectedLine, string? value, bool isWholeOrderOperation)
     {
-        // 先于档位校验：退货行 / 含退货行的整单，无论点哪一档都不可能成功。
+        // 先于档位校验：行模式下选中退货行，无论点哪一档都不可能成功。
         if (GetDiscountRejection(selectedLine, isWholeOrderOperation) is { } rejection)
         {
             return rejection;
@@ -963,7 +968,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             return failure;
         }
 
-        if (value > _cart.TotalAmount)
+        // 上限是销售行毛额合计，不是含退货行负数的 TotalAmount（与 PosCartService.SetOrderDiscountAmount 的口径一致）。
+        if (value > _cart.OrderDiscountableAmount)
         {
             return Status("pos.status.discountAmountTooHigh");
         }

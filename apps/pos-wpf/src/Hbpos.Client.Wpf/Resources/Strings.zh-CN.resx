@@ -1433,8 +1433,8 @@
   <data name="pos.status.returnLineDiscountBlocked" xml:space="preserve">
     <value>退货商品不能修改折扣。</value>
   </data>
-  <data name="pos.status.orderDiscountBlockedByReturn" xml:space="preserve">
-    <value>有退货商品时不能使用整单折扣。</value>
+  <data name="pos.status.orderDiscountNoSaleLines" xml:space="preserve">
+    <value>购物车里没有可打折的销售商品。</value>
   </data>
   <data name="pos.status.returnLineQuantityBlocked" xml:space="preserve">
     <value>退货商品不能修改数量。</value>
