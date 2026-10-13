@@ -37,6 +37,8 @@
     <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
     <Compile Include="WarehousePickingControllerTests.cs" />
     <Compile Include="NotificationPlatformTests.cs" />
+    <Compile Include="StorePriceUpdateNotificationWorkerTests.cs" />
+    <Compile Include="StorePriceUpdateNotificationSqlServerTests.cs" />
     <Compile Include="FaceCameraAdminTests.cs" />
     <Compile Include="FaceCameraPipelineTests.cs" />
     <Compile Include="FaceCameraAdminSqlServerTests.cs" />
@@ -412,6 +414,8 @@
     <Compile Include="ContainerNewProductsControllerTests.cs" />
     <Compile Include="MobileAppInstallLinksControllerTests.cs" />
     <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
+    <Compile Include="ContainerNewProductNotificationTests.cs" />
+    <Compile Include="ContainerNewProductNotificationSqlServerTests.cs" />
     <Compile Include="DataSyncReactControllerLocationSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerProductSyncContractTests.cs" />
     <Compile Include="DataSyncReactControllerSyncResultContractTests.cs" />
