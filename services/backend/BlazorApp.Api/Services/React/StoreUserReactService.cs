@@ -215,7 +215,7 @@ namespace BlazorApp.Api.Services.React
                 var sendSetupEmail = dto.SendPasswordSetupEmail == true;
                 if (sendSetupEmail && !PasswordResetService.IsDeliverableEmail(dto.Email))
                 {
-                    return ApiResponse<StoreUserDetailDto>.Error("用邮件设置密码时必须填写员工邮箱", "VALIDATION_ERROR");
+                    return ApiResponse<StoreUserDetailDto>.Error("用邮件发送初始密码时必须填写员工邮箱", "VALIDATION_ERROR");
                 }
                 if (!sendSetupEmail && string.IsNullOrWhiteSpace(dto.Password))
                 {
@@ -251,7 +251,8 @@ namespace BlazorApp.Api.Services.React
                     UserGUID = userGuid,
                     Username = username,
                     Email = email,
-                    // 邮件设置密码时写入一个谁都不知道的随机密码，员工只能用邮件验证码自己设置。
+                    // 邮件发送初始密码时，建号这一步先写入一个谁都不知道的随机密码；
+                    // 提交后由 SendInitialPasswordAsync 换成系统生成的初始密码并发到员工邮箱。
                     PasswordHash = sendSetupEmail
                         ? PasswordHasher.HashPassword(Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
                         : PasswordHasher.HashSubmittedPassword(dto.Password!, dto.PasswordFormat),
@@ -306,10 +307,10 @@ namespace BlazorApp.Api.Services.React
                             UpdatedBy = createdBy,
                         }
                     ).ExecuteCommandAsync();
-                    if (!sendSetupEmail && (dto.RequirePasswordChange ?? true))
+                    if (sendSetupEmail || (dto.RequirePasswordChange ?? true))
                     {
                         // 与建号同事务：员工拿到初始密码后首次登录必须先改成自己的密码。
-                        // 邮件设置密码时员工本来就是自己设密码，不需要这个标记。
+                        // 邮件发送初始密码时无条件要求改密，不受 RequirePasswordChange 影响。
                         await UserPasswordChangeRequirements.RequireAsync(
                             _db,
                             userGuid,
@@ -333,7 +334,7 @@ namespace BlazorApp.Api.Services.React
                     // 账号已提交成功；发信失败不回滚建号，返回原因让店长稍后重发。
                     var invite = _passwordResetService == null
                         ? ApiResponse<PasswordSetupEmailResultDto>.Error("邮件服务未配置", "ACCOUNT_EMAIL_NOT_CONFIGURED")
-                        : await _passwordResetService.SendInviteAsync(userGuid, createdBy, null);
+                        : await _passwordResetService.SendInitialPasswordAsync(userGuid, createdBy);
                     if (invite.Success)
                     {
                         detail.PasswordSetupEmail = invite.Data;
@@ -730,7 +731,11 @@ namespace BlazorApp.Api.Services.React
                     }
                 }
 
-                return await _passwordResetService.SendInviteAsync(userGuid, requestedBy, null);
+                // 新建员工页的「重新发送」要求再发初始密码（InitialPassword）；
+                // 其余入口（重置密码、补邮箱）仍发验证码，员工自己设置。
+                return dto.InitialPassword == true
+                    ? await _passwordResetService.SendInitialPasswordAsync(userGuid, requestedBy)
+                    : await _passwordResetService.SendInviteAsync(userGuid, requestedBy, null);
             }
             catch (Exception ex)
             {

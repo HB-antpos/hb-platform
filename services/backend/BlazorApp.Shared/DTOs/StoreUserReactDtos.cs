@@ -61,7 +61,7 @@ namespace BlazorApp.Shared.DTOs
         public string? Email { get; set; }
 
         /// <summary>
-        /// 初始密码。SendPasswordSetupEmail=true 时可不传，由员工通过邮件验证码自己设置；
+        /// 初始密码。SendPasswordSetupEmail=true 时可不传，由系统生成初始密码并发到员工邮箱；
         /// 旧客户端仍按原方式提交初始密码。
         /// </summary>
         [StringLength(100, MinimumLength = 6, ErrorMessage = "密码长度必须在6-100个字符之间")]
@@ -89,7 +89,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>员工首次登录须先改密；未传时默认要求（旧客户端建号同样生效）。</summary>
         public bool? RequirePasswordChange { get; set; }
 
-        /// <summary>创建后给员工邮箱发设置密码验证码，店长不再经手密码；此时邮箱必填。</summary>
+        /// <summary>创建后由系统生成初始密码并发到员工邮箱，店长不经手密码；此时邮箱必填，员工首次登录须改密。</summary>
         public bool? SendPasswordSetupEmail { get; set; }
     }
 
@@ -101,6 +101,12 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>可选：老账号没有可用邮箱时，店长在此填写员工邮箱，先保存再发送。</summary>
         [StringLength(254)]
         public string? Email { get; set; }
+
+        /// <summary>
+        /// true 表示重新生成初始密码并发到员工邮箱（新建员工页的「重新发送」）；
+        /// 未传或 false 仍发送设置密码验证码。
+        /// </summary>
+        public bool? InitialPassword { get; set; }
     }
 
     public class UpdateStoreUserDto

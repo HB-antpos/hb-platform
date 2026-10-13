@@ -21,6 +21,15 @@ public interface IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>店长新建员工后，把系统生成的初始密码发到员工本人邮箱；员工首次登录必须改密。</summary>
+    Task<ApiResponse<bool>> SendInitialPasswordAsync(
+        string toEmail,
+        string displayName,
+        string loginName,
+        string initialPassword,
+        CancellationToken cancellationToken = default
+    );
+
     /// <summary>发送绑定 / 更换邮箱验证码到待验证的新邮箱。</summary>
     Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
         string toEmail,
@@ -34,7 +43,7 @@ public interface IAccountPasswordEmailSender
 
 /// <summary>
 /// 员工账号密码邮件：复用发票邮箱后台配置的公司 SMTP 账号（与监护人邮件同一套发件配置）。
-/// 正文中英双语，只放登录账号与验证码，不放密码或其他个人资料。
+/// 正文中英双语，只放登录账号与验证码（新建员工时为一次性初始密码），不放其他个人资料。
 /// </summary>
 public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
 {
@@ -89,6 +98,37 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
             $"<p>登录账号：<b>{Encode(loginName)}</b><br/>验证码：<b>{Encode(code)}</b>（{Encode(FormatValidityZh(expiresAtUtc))}内有效）</p>" +
             "<p>请打开 HB App，在登录页点「设置 / 忘记密码」，输入本邮箱和验证码，然后设置你自己的密码。请勿把验证码告诉任何人（包括店长）。</p>";
         return SendAsync(toEmail, subject, text, html, invite ? "password-invite" : "password-reset", cancellationToken);
+    }
+
+    public Task<ApiResponse<bool>> SendInitialPasswordAsync(
+        string toEmail,
+        string displayName,
+        string loginName,
+        string initialPassword,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var subject = "Your Hot Bargain app account / 你的 HB 员工账号";
+        var text =
+            $"Hi {displayName},\n\nAn account has been created for you in the Hot Bargain staff app.\n\n" +
+            $"Sign-in name: {loginName}\nInitial password: {initialPassword}\n\n" +
+            "Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.\n" +
+            "Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.\n\n" +
+            $"{displayName} 你好：\n店长已为你开通 Hot Bargain 员工 App 账号。\n登录账号：{loginName}\n初始密码：{initialPassword}\n\n" +
+            "请用以上账号和初始密码登录 HB App，首次登录时需要先设置你自己的密码。\n" +
+            "请勿把密码告诉任何人（包括店长）。如果这不是你本人的操作，忽略本邮件即可。\n";
+        var html =
+            $"<p>Hi {Encode(displayName)},</p><p>An account has been created for you in the Hot Bargain staff app.</p>" +
+            $"<p>Sign-in name: <b>{Encode(loginName)}</b></p>" +
+            "<p>Initial password:</p>" +
+            $"<p style=\"font-size:24px;font-weight:700;letter-spacing:2px;font-family:Consolas,monospace\">{Encode(initialPassword)}</p>" +
+            "<p>Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.</p>" +
+            "<p>Do not share this password with anyone, including your manager. If you did not expect this email, you can ignore it.</p>" +
+            $"<hr/><p>{Encode(displayName)} 你好：</p><p>店长已为你开通 Hot Bargain 员工 App 账号。</p>" +
+            $"<p>登录账号：<b>{Encode(loginName)}</b><br/>初始密码：<b style=\"font-family:Consolas,monospace\">{Encode(initialPassword)}</b></p>" +
+            "<p>请用以上账号和初始密码登录 HB App，首次登录时需要先设置你自己的密码。请勿把密码告诉任何人（包括店长）。</p>";
+        // 日志只记类型，SendAsync 不会输出正文，初始密码不会进入日志。
+        return SendAsync(toEmail, subject, text, html, "initial-password", cancellationToken);
     }
 
     public Task<ApiResponse<bool>> SendEmailChangeCodeAsync(

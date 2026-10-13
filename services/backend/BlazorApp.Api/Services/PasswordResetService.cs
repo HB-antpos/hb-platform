@@ -15,6 +15,12 @@ public interface IPasswordResetService
     /// <summary>店长新建或重置后给员工发邀请验证码；调用方负责权限与目标范围校验。</summary>
     Task<ApiResponse<PasswordSetupEmailResultDto>> SendInviteAsync(string userGuid, string requestedBy, string? requestIp);
 
+    /// <summary>
+    /// 店长新建员工后给员工邮箱发系统生成的初始密码：店长全程不经手密码，员工首次登录必须改密。
+    /// 发信失败会恢复原密码哈希，不会把已有密码改成谁都不知道的值。
+    /// </summary>
+    Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(string userGuid, string requestedBy);
+
     /// <summary>用邮箱 + 验证码设置新密码。成功后清除须改密标记并吊销该账号全部登录会话，并回传登录名。</summary>
     Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(string email, string code, string newPassword, string? requestIp);
 }
@@ -110,6 +116,125 @@ public sealed class PasswordResetService : IPasswordResetService
             return ApiResponse<PasswordSetupEmailResultDto>.Error(issued.Message, issued.ErrorCode ?? "ACCOUNT_EMAIL_SEND_FAILED");
         }
         return ApiResponse<PasswordSetupEmailResultDto>.OK(issued.Data!, $"设置密码邮件已发送到 {MaskEmail(user.Email)}");
+    }
+
+    public async Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(
+        string userGuid,
+        string requestedBy
+    )
+    {
+        var db = _context.Db;
+        var user = await db.Queryable<User>()
+            .FirstAsync(item => item.UserGUID == userGuid && !item.IsDeleted);
+        if (user is null)
+        {
+            return ApiResponse<PasswordSetupEmailResultDto>.Error("用户不存在", "USER_NOT_FOUND");
+        }
+        if (!IsDeliverableEmail(user.Email))
+        {
+            return ApiResponse<PasswordSetupEmailResultDto>.Error(
+                "该员工没有可用邮箱，请先编辑员工补充邮箱",
+                NoDeliverableEmailCode
+            );
+        }
+
+        var previousHash = user.PasswordHash;
+        var initialPassword = GenerateInitialPassword();
+        var newHash = PasswordHasher.HashSubmittedPassword(initialPassword, PasswordHasher.PasswordFormatRaw);
+        var now = DateTime.UtcNow;
+
+        // 关键逻辑：先写入新密码并打上「首次登录必须改密」标记，再发信。
+        // 邮件里是明文初始密码，员工用它登录后必须立刻改成自己的密码。
+        await db.Ado.BeginTranAsync();
+        try
+        {
+            await db.Updateable<User>()
+                .SetColumns(item => item.PasswordHash == newHash)
+                .SetColumns(item => item.UpdatedAt == now)
+                .Where(item => item.UserGUID == userGuid && !item.IsDeleted)
+                .ExecuteCommandAsync();
+            await UserPasswordChangeRequirements.RequireAsync(
+                db,
+                userGuid,
+                UserPasswordChangeRequirement.ReasonCreated,
+                requestedBy,
+                now
+            );
+            await db.Ado.CommitTranAsync();
+        }
+        catch
+        {
+            await db.Ado.RollbackTranAsync();
+            throw;
+        }
+
+        var send = await _emailSender.SendInitialPasswordAsync(
+            user.Email,
+            string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName!,
+            user.Username,
+            initialPassword
+        );
+        if (!send.Success)
+        {
+            // 没送达的初始密码立即作废：以新哈希为条件恢复，避免覆盖期间别处发生的改密。
+            await db.Updateable<User>()
+                .SetColumns(item => item.PasswordHash == previousHash)
+                .SetColumns(item => item.UpdatedAt == DateTime.UtcNow)
+                .Where(item => item.UserGUID == userGuid && item.PasswordHash == newHash)
+                .ExecuteCommandAsync();
+            return ApiResponse<PasswordSetupEmailResultDto>.Error(
+                send.Message,
+                send.ErrorCode ?? AccountPasswordEmailSender.AccountEmailSendFailedCode
+            );
+        }
+
+        // 初始密码已送达：未用的验证码不能再覆盖它，旧设备上的登录一并失效。
+        await db.Updateable<RefreshToken>()
+            .SetColumns(token => token.IsRevoked == true)
+            .SetColumns(token => token.UpdatedAt == now)
+            .Where(token => token.UserGUID == userGuid && !token.IsRevoked)
+            .ExecuteCommandAsync();
+        await db.Updateable<UserPasswordResetCode>()
+            .SetColumns(item => item.ConsumedAtUtc == now)
+            .Where(item => item.UserGUID == userGuid && item.ConsumedAtUtc == null)
+            .ExecuteCommandAsync();
+
+        _logger.LogInformation("已向员工邮箱发送初始密码，操作人：{RequestedBy}", requestedBy);
+        return ApiResponse<PasswordSetupEmailResultDto>.OK(
+            new PasswordSetupEmailResultDto { MaskedEmail = MaskEmail(user.Email) },
+            $"初始密码已发送到 {MaskEmail(user.Email)}"
+        );
+    }
+
+    /// <summary>
+    /// 生成 4 位字母 + 数字初始密码（无特殊符号）：去掉 0/O、1/l/I 这类易混字符，
+    /// 保证至少含一个字母和一个数字。员工要从邮件里手输，所以不用易看错的字符。
+    /// 登录接口与首次改密页都不限制「当前密码」的最小长度（只限制新密码 ≥ 6 位），4 位初始密码可正常登录并改密。
+    /// 使用系统加密随机数，只通过邮件送达员工，首次登录即被员工自设密码替换。
+    /// </summary>
+    internal static string GenerateInitialPassword()
+    {
+        const string letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+        const string digits = "23456789";
+        const string all = letters + digits;
+        const int length = 4;
+
+        var chars = new List<char>(length)
+        {
+            letters[RandomNumberGenerator.GetInt32(letters.Length)],
+            digits[RandomNumberGenerator.GetInt32(digits.Length)],
+        };
+        while (chars.Count < length)
+        {
+            chars.Add(all[RandomNumberGenerator.GetInt32(all.Length)]);
+        }
+        // Fisher-Yates 洗牌，避免「字母、数字」固定出现在开头两位。
+        for (var i = chars.Count - 1; i > 0; i--)
+        {
+            var j = RandomNumberGenerator.GetInt32(i + 1);
+            (chars[i], chars[j]) = (chars[j], chars[i]);
+        }
+        return new string(chars.ToArray());
     }
 
     public async Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(

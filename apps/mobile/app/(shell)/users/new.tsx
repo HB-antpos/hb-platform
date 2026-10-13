@@ -105,7 +105,7 @@ export default function CreateStaffScreen() {
         roleNames: [STORE_STAFF_ROLE],
         passwordFormat: "raw",
         employmentType: "casual",
-        // 关键逻辑：不提交任何密码，后端写入随机密码并给员工邮箱发设置密码验证码。
+        // 关键逻辑：不提交任何密码，后端生成初始密码并发到员工邮箱，店长不经手；员工首次登录须改密。
         sendPasswordSetupEmail: true,
       });
       setCreated(user);
@@ -125,7 +125,12 @@ export default function CreateStaffScreen() {
   const resendInvite = async () => {
     if (!created) return;
     try {
-      const result = await setupEmailMutation.mutateAsync({ userGuid: created.userGUID, storeCode: requestedStoreCode });
+      // 重发同样发初始密码（会重新生成），与首次创建的邮件保持一致，不混发验证码。
+      const result = await setupEmailMutation.mutateAsync({
+        userGuid: created.userGUID,
+        storeCode: requestedStoreCode,
+        initialPassword: true,
+      });
       setInviteResult(result);
       setInviteError("");
       setSnackbarMessage(t("create.inviteResent"));
@@ -189,7 +194,7 @@ export default function CreateStaffScreen() {
             </View>
           </View>
 
-          {/* 邮件状态：发送成功显示打码邮箱与有效期；失败显示原因，可重发。 */}
+          {/* 邮件状态：发送成功显示打码邮箱；失败显示原因，可重发。 */}
           {inviteResult ? (
             <View style={styles.inviteSent}>
               <MaterialCommunityIcons name="email-check-outline" size={20} color="#054F31" />

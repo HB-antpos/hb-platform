@@ -4558,7 +4558,7 @@ function registerUserRoutes(
     if (!username) {
       throw new Error("IOS_REVIEW_USER_USERNAME_REQUIRED");
     }
-    // 新版用邮件验证码设置密码，不提交密码；旧方式仍校验初始密码长度。
+    // 新版由系统生成初始密码并发到员工邮箱，不提交密码；旧方式仍校验初始密码长度。
     const sendSetupEmail = payload.sendPasswordSetupEmail === true;
     const email = String(payload.email ?? "").trim();
     if (sendSetupEmail ? !email.includes("@") : password.trim().length < 6 || password.length > 100) {

@@ -532,14 +532,14 @@
     "printBarcode": "打印个人码",
     "done": "完成",
     "emailRequired": "员工邮箱（必填）",
-    "emailHelper": "员工用它登录、接收设置密码验证码和找回密码",
+    "emailHelper": "员工用它登录、接收初始密码，并在忘记密码时找回",
     "usernameFromEmailHelper": "默认与邮箱相同，员工用它登录；需要时可修改（3–50 个字符）",
-    "successDescriptionEmail": "已给{{name}}的邮箱发送设置密码验证码。员工在 App 登录页点「设置 / 忘记密码」即可自己设置密码，你不需要转交任何密码。",
-    "inviteSent": "设置密码邮件已发送到 {{email}}，72 小时内有效。",
-    "inviteFailed": "账号已创建，但设置密码邮件没有发出：{{reason}}。可以稍后重新发送。",
+    "successDescriptionEmail": "已把初始密码发到{{name}}的邮箱。员工用它登录 App，首次登录时设置自己的密码，你不需要转交任何密码。",
+    "inviteSent": "初始密码已发送到 {{email}}。",
+    "inviteFailed": "账号已创建，但初始密码邮件没有发出：{{reason}}。可以稍后重新发送。",
     "inviteFailedFallback": "邮件发送失败",
-    "resendInvite": "重新发送设置密码邮件",
-    "inviteResent": "设置密码邮件已重新发送",
-    "nextStepEmail": "查收邮件，在登录页「设置 / 忘记密码」用验证码设置自己的密码"
+    "resendInvite": "重新发送初始密码",
+    "inviteResent": "初始密码已重新发送",
+    "nextStepEmail": "查收邮件，用初始密码登录 App，并设置自己的密码"
   }
 }

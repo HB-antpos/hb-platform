@@ -292,6 +292,73 @@ public sealed class PasswordResetServiceTests : IDisposable
         Assert.True((await reset.ConfirmAsync("staff@example.com", resetCode, "MyOwn4567", null)).Success);
     }
 
+    [Fact]
+    public async Task SendInitialPassword_发送系统生成的初始密码_并要求首次改密且作废旧验证码和旧登录()
+    {
+        var staff = await SeedUserAsync("staff", "staff@example.com");
+        await SeedRefreshTokenAsync(staff.UserGUID, "session-1");
+        var service = CreateService();
+        // 先留下一个未用的验证码，初始密码送达后它不能再覆盖员工的密码。
+        await service.RequestSelfServiceAsync("staff@example.com", null);
+
+        var result = await service.SendInitialPasswordAsync(staff.UserGUID, "manager-1");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("st***@example.com", result.Data!.MaskedEmail);
+        Assert.Null(result.Data.ExpiresAtUtc);
+        var sent = Assert.Single(_sender.InitialSent);
+        Assert.Equal("staff@example.com", sent.To);
+        Assert.Equal("staff", sent.LoginName);
+        Assert.Matches("^[A-Za-z0-9]{4}$", sent.Password);
+        var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == staff.UserGUID);
+        Assert.True(PasswordHasher.VerifyPassword(sent.Password, stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        Assert.False(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        var requirement = await _db.Queryable<UserPasswordChangeRequirement>().SingleAsync();
+        Assert.Equal(UserPasswordChangeRequirement.ReasonCreated, requirement.Reason);
+        Assert.True((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked);
+        Assert.All(await _db.Queryable<UserPasswordResetCode>().ToListAsync(), row => Assert.NotNull(row.ConsumedAtUtc));
+    }
+
+    [Fact]
+    public async Task SendInitialPassword_无可用邮箱或发信失败_不改动原密码()
+    {
+        var internalUser = await SeedUserAsync("internal", "internal@s001.store.local");
+        var staff = await SeedUserAsync("staff", "staff@example.com");
+        var originalHash = (await _db.Queryable<User>().SingleAsync(item => item.UserGUID == staff.UserGUID)).PasswordHash;
+        await SeedRefreshTokenAsync(staff.UserGUID, "session-1");
+        var service = CreateService();
+
+        var missing = await service.SendInitialPasswordAsync(internalUser.UserGUID, "manager-1");
+        _sender.FailNext = true;
+        var failed = await service.SendInitialPasswordAsync(staff.UserGUID, "manager-1");
+
+        Assert.False(missing.Success);
+        Assert.Equal(PasswordResetService.NoDeliverableEmailCode, missing.ErrorCode);
+        Assert.False(failed.Success);
+        Assert.Equal("ACCOUNT_EMAIL_SEND_FAILED", failed.ErrorCode);
+        Assert.Empty(_sender.InitialSent);
+        // 没送达就恢复原密码，已有密码的员工不会被锁在外面；登录会话也保持有效。
+        var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == staff.UserGUID);
+        Assert.Equal(originalHash, stored.PasswordHash);
+        Assert.False((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked);
+    }
+
+    [Fact]
+    public void GenerateInitialPassword_是4位字母数字_含字母和数字_无特殊符号和易混字符()
+    {
+        var all = Enumerable.Range(0, 2000).Select(_ => PasswordResetService.GenerateInitialPassword()).ToList();
+
+        Assert.All(all, password =>
+        {
+            Assert.Matches("^[A-Za-z0-9]{4}$", password);
+            Assert.Contains(password, char.IsLetter);
+            Assert.Contains(password, char.IsDigit);
+            Assert.DoesNotContain(password, ch => "0O1lI".Contains(ch));
+        });
+        // 不断言「全部不同」以免极小概率碰撞导致偶发失败；不同值远多于 1990 个即可说明不是固定值。
+        Assert.True(all.Distinct().Count() > 1990);
+    }
+
     private AccountEmailChangeService CreateEmailChangeService() =>
         new(CreateContext(_db), _sender, NullLogger<AccountEmailChangeService>.Instance);
 
@@ -350,6 +417,7 @@ public sealed class PasswordResetServiceTests : IDisposable
     {
         public List<(string To, string Code, bool Invite)> Sent { get; } = new();
         public List<(string To, string LoginName, string Code)> EmailChangeSent { get; } = new();
+        public List<(string To, string LoginName, string Password)> InitialSent { get; } = new();
         public bool FailNext { get; set; }
 
         public Task<ApiResponse<bool>> SendPasswordCodeAsync(
@@ -368,6 +436,23 @@ public sealed class PasswordResetServiceTests : IDisposable
                 return Task.FromResult(ApiResponse<bool>.Error("邮件发送失败，请稍后重试", "ACCOUNT_EMAIL_SEND_FAILED"));
             }
             Sent.Add((toEmail, code, invite));
+            return Task.FromResult(ApiResponse<bool>.OK(true));
+        }
+
+        public Task<ApiResponse<bool>> SendInitialPasswordAsync(
+            string toEmail,
+            string displayName,
+            string loginName,
+            string initialPassword,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (FailNext)
+            {
+                FailNext = false;
+                return Task.FromResult(ApiResponse<bool>.Error("邮件发送失败，请稍后重试", "ACCOUNT_EMAIL_SEND_FAILED"));
+            }
+            InitialSent.Add((toEmail, loginName, initialPassword));
             return Task.FromResult(ApiResponse<bool>.OK(true));
         }
 
