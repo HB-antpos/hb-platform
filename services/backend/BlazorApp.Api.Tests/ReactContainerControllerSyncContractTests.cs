@@ -2,6 +2,7 @@ using System.Reflection;
 using BlazorApp.Api.Controllers.React;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.Containers;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -24,19 +25,11 @@ public class ReactContainerControllerSyncContractTests
         var cache = new MemoryCache(new MemoryCacheOptions());
         var containerService = new Mock<IContainerReactService>();
         containerService
-            .Setup(service => service.GetContainersAsync(It.IsAny<ContainerQueryRequest>()))
-            .ReturnsAsync(
-                new ContainerListResponse
-                {
-                    Containers = new List<ContainerMainDto>
-                    {
-                        new ContainerMainDto { HGUID = "CACHED-SUMMARY", 货柜编号 = "CS-1" },
-                    },
-                    TotalCount = 1,
-                    Page = 1,
-                    PageSize = 100,
-                }
-            );
+            .Setup(service => service.GetComingSoonSummariesAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<ContainerMainDto>
+            {
+                new ContainerMainDto { HGUID = "CACHED-SUMMARY", 货柜编号 = "CS-1" },
+            });
 
         var firstController = CreateController(containerService: containerService.Object, cache: cache);
         var secondController = CreateController(containerService: containerService.Object, cache: cache);
@@ -46,47 +39,36 @@ public class ReactContainerControllerSyncContractTests
 
         Assert.IsType<OkObjectResult>(firstResponse);
         Assert.IsType<OkObjectResult>(secondResponse);
-        containerService.Verify(service => service.GetContainersAsync(It.IsAny<ContainerQueryRequest>()), Times.Exactly(2));
+        // 两个用户共用同一份缓存：服务层只被调用一次
+        containerService.Verify(service => service.GetComingSoonSummariesAsync(It.IsAny<DateTime>()), Times.Once);
         Assert.Equal(TimeSpan.FromMinutes(30), ReactContainerController.ComingSoonCacheDuration);
     }
 
     [Fact]
-    public async Task GetComingSoonContainerSummaries_同一请求内顺序查询避免共享连接并发()
+    public async Task GetComingSoonContainerSummaries_单次窗口查询_以悉尼今天为基准_不再走两段56天查询()
     {
-        var activeCalls = 0;
-        var maxActiveCalls = 0;
-        var containerService = new Mock<IContainerReactService>();
+        var calls = new List<DateTime>();
+        var containerService = new Mock<IContainerReactService>(MockBehavior.Strict);
         containerService
-            .Setup(service => service.GetContainersAsync(It.IsAny<ContainerQueryRequest>()))
-            .Returns(async (ContainerQueryRequest request) =>
+            .Setup(service => service.GetComingSoonSummariesAsync(It.IsAny<DateTime>()))
+            .Callback<DateTime>(localToday => calls.Add(localToday))
+            .ReturnsAsync(new List<ContainerMainDto>
             {
-                var currentCalls = Interlocked.Increment(ref activeCalls);
-                maxActiveCalls = Math.Max(maxActiveCalls, currentCalls);
-                await Task.Delay(20);
-                Interlocked.Decrement(ref activeCalls);
-
-                return new ContainerListResponse
-                {
-                    Containers = new List<ContainerMainDto>
-                    {
-                        new ContainerMainDto
-                        {
-                            HGUID = request.DateType,
-                            货柜编号 = request.DateType,
-                        },
-                    },
-                    TotalCount = 1,
-                    Page = 1,
-                    PageSize = 100,
-                };
+                new ContainerMainDto { HGUID = "G-1", 货柜编号 = "N-1" },
+                new ContainerMainDto { HGUID = "G-2", 货柜编号 = "N-2" },
             });
         var controller = CreateController(containerService: containerService.Object);
+        var before = ContainerWarehouseArrival.GetSydneyToday(DateTime.UtcNow);
 
         var response = await controller.GetComingSoonContainerSummaries();
 
-        Assert.IsType<OkObjectResult>(response);
-        Assert.Equal(1, maxActiveCalls);
-        containerService.Verify(service => service.GetContainersAsync(It.IsAny<ContainerQueryRequest>()), Times.Exactly(2));
+        var after = ContainerWarehouseArrival.GetSydneyToday(DateTime.UtcNow);
+        var ok = Assert.IsType<OkObjectResult>(response);
+        // 严格 Mock：若还去调 GetContainersAsync（旧的两段 56 天分页查询）会直接失败
+        var call = Assert.Single(calls);
+        Assert.Equal(call.Date, call);
+        Assert.True(call == before || call == after, $"窗口基准应为悉尼本地今天，实际 {call:yyyy-MM-dd}");
+        Assert.Equal(2, Assert.IsAssignableFrom<List<ContainerMainDto>>(GetPropertyValue<object>(ok.Value!, "data")).Count);
     }
 
     [Fact]
@@ -123,8 +105,8 @@ public class ReactContainerControllerSyncContractTests
     {
         var containerService = new Mock<IContainerReactService>();
         containerService
-            .Setup(service => service.GetContainersAsync(It.IsAny<ContainerQueryRequest>()))
-            .ReturnsAsync(new ContainerListResponse());
+            .Setup(service => service.GetComingSoonSummariesAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<ContainerMainDto>());
         containerService
             .Setup(service => service.GetContainerProductsAsync("CONTAINER-A"))
             .ReturnsAsync(new List<ContainerDetailDto>());

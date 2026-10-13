@@ -11,6 +11,7 @@ import {
 import type { ComingSoonHomeContainerSummary, ComingSoonHomeProduct } from '../../../types/container'
 
 import styles from './ComingSoonSection.module.css'
+import { getComingSoonDateTone } from './comingSoonWarehouseDate'
 
 const { Text, Title } = Typography
 const PRODUCT_PAGE_SIZE = 24
@@ -18,7 +19,6 @@ const PRODUCT_IMAGE_FALLBACK = `data:image/svg+xml;charset=UTF-8,${encodeURIComp
 const BARCODE_OPTIONS = { width: 1, height: 34, displayValue: false, margin: 0 }
 type FilterMode = 'all' | 'reorder' | 'new'
 type ProductLoadStatus = 'idle' | 'loading' | 'loaded' | 'error'
-type DateTone = 'arrived' | 'soon' | 'future' | 'unknown'
 interface ContainerProductState {
   status: ProductLoadStatus
   products: ComingSoonHomeProduct[]
@@ -43,23 +43,6 @@ function formatComingSoonRetailPrice(price?: number) {
     currency: 'AUD',
     minimumFractionDigits: 2,
   }).format(price)
-}
-function parseDate(value?: string) {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-function getComingSoonDateTone(container: ComingSoonHomeContainerSummary): DateTone {
-  if (parseDate(container.实际到货日期)) return 'arrived'
-  const eta = parseDate(container.预计到岸日期)
-  if (!eta) return 'unknown'
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  eta.setHours(0, 0, 0, 0)
-  const daysUntilEta = Math.round((eta.getTime() - today.getTime()) / 86_400_000)
-  if (daysUntilEta >= 0 && daysUntilEta <= 7) return 'soon'
-  if (daysUntilEta > 7) return 'future'
-  return 'unknown'
 }
 function matchesFilter(product: ComingSoonHomeProduct, mode: FilterMode) {
   return mode === 'all' || (mode === 'new' ? product.isNewProduct : !product.isNewProduct)

@@ -825,6 +825,36 @@ try {
     'Coming Soon 摘要应调用后端共享缓存专用接口',
   )
   assertEqual(capturedInit?.method, 'GET', 'Coming Soon 摘要应使用 GET 缓存接口')
+  assertDeepEqual(
+    summaries.map((item) => item.hguid),
+    ['ARRIVED-GUID', 'UPCOMING-GUID'],
+    'Coming Soon 摘要应按到仓库日期升序',
+  )
+
+  // 排序键 = 到仓库日期（实际到货日期优先，没有时用预计到岸日期），只比日期不比时间，
+  // 同一天保持后端给出的顺序，两个日期都没有的排最后——与后端 ContainerWarehouseArrival.OrderForDisplay 一致
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({
+      success: true,
+      data: [
+        { id: 1, hguid: 'NO-DATE', 货柜编号: 'N0' },
+        { id: 2, hguid: 'SAME-DAY-ACTUAL-LATE', 货柜编号: 'A1', 实际到货日期: '2026-10-20T15:30:00' },
+        { id: 3, hguid: 'SAME-DAY-EST-EARLY', 货柜编号: 'B2', 预计到岸日期: '2026-10-20T00:00:00' },
+        { id: 4, hguid: 'ACTUAL-BEATS-EST', 货柜编号: 'C3', 实际到货日期: '2026-10-08T00:00:00', 预计到岸日期: '2026-11-30T00:00:00' },
+        { id: 5, hguid: 'EST-ONLY', 货柜编号: 'D4', 预计到岸日期: '2026-10-14T00:00:00' },
+      ],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+
+  const ordered = await getComingSoonContainerSummaries()
+
+  assertDeepEqual(
+    ordered.map((item) => item.hguid),
+    ['ACTUAL-BEATS-EST', 'EST-ONLY', 'SAME-DAY-ACTUAL-LATE', 'SAME-DAY-EST-EARLY', 'NO-DATE'],
+    'Coming Soon 摘要按到仓库日期（日期部分）升序，同日保持后端顺序，无日期的排最后',
+  )
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     capturedUrl = String(input)

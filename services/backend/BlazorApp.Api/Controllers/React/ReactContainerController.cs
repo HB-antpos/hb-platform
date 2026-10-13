@@ -2,6 +2,7 @@ using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.Containers;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
@@ -139,59 +140,12 @@ namespace BlazorApp.Api.Controllers.React
                 .SetAbsoluteExpiration(ComingSoonCacheDuration);
         }
 
-        private static ContainerQueryRequest CreateComingSoonContainerQuery(
-            string dateType,
-            DateTime startDate,
-            DateTime endDate,
-            string sortDirection
-        )
-        {
-            return new ContainerQueryRequest
-            {
-                DateType = dateType,
-                StartDate = startDate,
-                EndDate = endDate,
-                Page = 1,
-                PageSize = 100,
-                SortBy = dateType,
-                SortDirection = sortDirection,
-            };
-        }
-
-        private async Task<List<ContainerMainDto>> LoadComingSoonSummariesAsync()
-        {
-            var today = DateTime.Today;
-            // SqlSugar 的 scoped 连接不能在同一个请求内并发打开，两段日期查询必须顺序执行。
-            var upcomingResult = await _containerReactService.GetContainersAsync(
-                CreateComingSoonContainerQuery(
-                    "预计到岸日期",
-                    today,
-                    today.AddDays(56),
-                    "asc"
-                )
-            );
-            var arrivedResult = await _containerReactService.GetContainersAsync(
-                CreateComingSoonContainerQuery(
-                    "实际到货日期",
-                    today.AddDays(-7),
-                    today,
-                    "desc"
-                )
-            );
-
-            var containerMap = new Dictionary<string, ContainerMainDto>();
-            foreach (var container in arrivedResult.Containers.Concat(upcomingResult.Containers))
-            {
-                if (!string.IsNullOrWhiteSpace(container.HGUID))
-                {
-                    containerMap[container.HGUID] = container;
-                }
-            }
-
-            return containerMap.Values
-                .OrderBy(container => container.实际到货日期 ?? container.预计到岸日期 ?? DateTime.MaxValue)
-                .ToList();
-        }
+        /// <summary>
+        /// 加载即将上新货柜摘要：货柜选取口径是「到仓库日期落在悉尼本地今天 -7 天 ~ +21 天」，
+        /// 与移动端 HB新品页（windowBasis=warehouse）共用 <see cref="ContainerWarehouseArrival"/>，由服务层一次查询取全并稳定排序。
+        /// </summary>
+        private Task<List<ContainerMainDto>> LoadComingSoonSummariesAsync(DateTime sydneyToday) =>
+            _containerReactService.GetComingSoonSummariesAsync(sydneyToday);
 
         private async Task<bool> HasAnyPermissionAsync(IEnumerable<string> permissions)
         {
@@ -905,6 +859,8 @@ namespace BlazorApp.Api.Controllers.React
 
         /// <summary>
         /// 获取 Coming Soon 货柜摘要（多用户共享 30 分钟缓存）。
+        /// 范围：到仓库日期（实际到货日期优先，没有时用预计到岸日期）落在悉尼本地今天 -7 天 ~ +21 天的货柜，
+        /// 按到仓库日期升序；与移动端 HB新品页同一口径。
         /// </summary>
         [HttpGet("coming-soon/summaries")]
         public async Task<IActionResult> GetComingSoonContainerSummaries()
@@ -913,13 +869,16 @@ namespace BlazorApp.Api.Controllers.React
 
             try
             {
-                var cacheKey = $"ComingSoon:Summaries:{DateTime.Today:yyyy-MM-dd}";
+                // 全局列表不分门店，统一用悉尼本地今天（与移动端 NSW 取日期同一函数）：
+                // 不能用 DateTime.Today，容器时区不确定会让窗口与缓存日错位。缓存键带悉尼日期，跨天自动失效。
+                var sydneyToday = ContainerWarehouseArrival.GetSydneyToday(DateTime.UtcNow);
+                var cacheKey = $"ComingSoon:Summaries:warehouse-window:{sydneyToday:yyyy-MM-dd}";
                 var result = await _cache.GetOrCreateAsync(
                     cacheKey,
                     async entry =>
                     {
                         entry.SetOptions(CreateComingSoonCacheOptions());
-                        return await LoadComingSoonSummariesAsync();
+                        return await LoadComingSoonSummariesAsync(sydneyToday);
                     }
                 ) ?? new List<ContainerMainDto>();
 
@@ -1851,8 +1810,8 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         /// <summary>
-        /// 获取即将到港的货柜及商品列表（Coming Soon 页面专用）
-        /// 返回：未来8周内预计到港 + 最近一周内实际到港的货柜及其商品
+        /// 获取即将上新的货柜及商品列表（历史兼容入口，前端当前走 summaries + products 两个接口）。
+        /// 货柜选取口径与 summaries 完全一致（到仓库日期 悉尼今天 -7 天 ~ +21 天）。
         /// </summary>
         [HttpGet("coming-soon")]
         public async Task<IActionResult> GetComingSoonContainers()
@@ -1861,7 +1820,7 @@ namespace BlazorApp.Api.Controllers.React
 
             try
             {
-                _logger.LogInformation("获取即将到港货柜列表 (Coming Soon)");
+                _logger.LogInformation("获取即将上新货柜列表 (Coming Soon)");
 
                 var result = await _containerReactService.GetComingSoonContainersAsync();
 
@@ -1876,7 +1835,7 @@ namespace BlazorApp.Api.Controllers.React
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "获取即将到港货柜列表失败");
+                _logger.LogError(ex, "获取即将上新货柜列表失败");
                 return StatusCode(500, new { success = false, message = "服务器内部错误" });
             }
         }
