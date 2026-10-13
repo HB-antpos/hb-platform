@@ -34,6 +34,7 @@ import { NetworkRecoveryProvider } from "@/shared/network";
 import { IosReviewBanner } from "@/modules/ios-review/IosReviewBanner";
 import { hbLightTheme } from "@/shared/theme/theme";
 import "@/modules/attendance/location-tracking";
+import { useAttendanceLocationRecovery } from "@/modules/attendance/use-attendance-location-recovery";
 
 const MIN_SPLASH_VISIBLE_MS = 900;
 
@@ -110,6 +111,8 @@ export default function RootLayout() {
     return installPrinterLinkDiagnostics();
   }, [sideEffectsEnabled]);
   usePrinterAutoConnect({ enabled: sideEffectsEnabled });
+  // 班中定位：启动就绪与每次回前台时自愈后台任务并补传本地队列。
+  useAttendanceLocationRecovery({ enabled: sideEffectsEnabled });
   // Android 原生包检查先注册 effect；共享互斥会让 APK 提示优先于 OTA optional。
   const nativeAppUpdate = useAutomaticNativeAppUpdate({ enabled: automaticUpdatesEnabled });
   const mobileOtaUpdate = useMobileOtaUpdate({
