@@ -1,5 +1,5 @@
 import { SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Col, DatePicker, Row, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Col, DatePicker, Row, Space, Statistic, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useMemo, useState } from 'react'
@@ -79,18 +79,18 @@ export default function TrafficTab({ context }: { context: FaceMatchTabContext }
   const hourRows: TrafficRow[] = (data?.hours ?? []).map((hour) => ({ key: String(hour.hour), label: formatHourRange(hour.hour), counts: hour.counts }))
 
   const renderTotalRow = (total: FaceTrafficCounts) => (
-    <Table.Summary fixed>
-      <Table.Summary.Row>
-        <Table.Summary.Cell index={0}>
+    <MeasuredTable.Summary fixed>
+      <MeasuredTable.Summary.Row>
+        <MeasuredTable.Summary.Cell index={0}>
           <Typography.Text strong>{t('faceMatch.traffic.total')}</Typography.Text>
-        </Table.Summary.Cell>
+        </MeasuredTable.Summary.Cell>
         {[total.captureCount, total.staffMatchCount, total.uniqueVisitorCount, total.repeatCount, total.lowQualityCount, total.apiFailureCount].map((value, index) => (
-          <Table.Summary.Cell key={index} index={index + 1} align="right">
+          <MeasuredTable.Summary.Cell key={index} index={index + 1} align="right">
             <Typography.Text strong style={NUMERIC_STYLE}>{value}</Typography.Text>
-          </Table.Summary.Cell>
+          </MeasuredTable.Summary.Cell>
         ))}
-      </Table.Summary.Row>
-    </Table.Summary>
+      </MeasuredTable.Summary.Row>
+    </MeasuredTable.Summary>
   )
 
   return (
