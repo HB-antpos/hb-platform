@@ -90,4 +90,10 @@ public static class AppNotificationTypes
 
     /// <summary>不受欢迎人员名单条目到期前 30 天的复核提醒（发给提交人与批准人，不含姓名与事件细节）。</summary>
     public const string FaceUnwelcomeExpiring = "face.unwelcome-expiring";
+
+    /// <summary>考勤审批已提交（请假 / 补卡 / 用餐加工时），发给有权审该门店的审批人；文案为英文，不含原因、备注等个人信息。</summary>
+    public const string ApprovalSubmitted = "approval.submitted";
+
+    /// <summary>考勤审批已处理（通过 / 驳回），发给申请人；文案为英文，不含审批意见。</summary>
+    public const string ApprovalDecided = "approval.decided";
 }

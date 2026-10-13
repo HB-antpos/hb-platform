@@ -409,8 +409,9 @@ namespace BlazorApp.Api.Services.React
         /// <summary>
         /// 审核 MealBreak 审批前的校验（在员工日锁内、审批 Serializable 事务里调用）。
         /// 返回 Error 时事务已提交或回滚；返回 Claim 时调用方继续走统一的审批领取与落库。
+        /// ApprovalCancelled 为 true 表示申请已失效、审批已被系统取消且事务<b>已提交</b>，调用方据此撤回审批人手里的待办通知。
         /// </summary>
-        private async Task<(AttendanceMealClaim? Claim, ApiResponse<AttendanceApprovalDto>? Error)>
+        private async Task<(AttendanceMealClaim? Claim, ApiResponse<AttendanceApprovalDto>? Error, bool ApprovalCancelled)>
             ValidateMealClaimReviewAsync(
                 AttendanceApproval approval,
                 string reviewStatus,
@@ -449,7 +450,7 @@ namespace BlazorApp.Api.Services.React
                 await _db.Ado.CommitTranAsync();
                 return (null, ApiResponse<AttendanceApprovalDto>.Error(
                     "用餐加工时申请已失效，不能处理",
-                    "MEAL_CLAIM_STALE"));
+                    "MEAL_CLAIM_STALE"), true);
             }
 
             if (reviewStatus == "Rejected" && string.IsNullOrWhiteSpace(reviewRemark))
@@ -457,10 +458,10 @@ namespace BlazorApp.Api.Services.React
                 await _db.Ado.RollbackTranAsync();
                 return (null, ApiResponse<AttendanceApprovalDto>.Error(
                     "拒绝用餐加工时必须填写审核备注",
-                    "REVIEW_REMARK_REQUIRED"));
+                    "REVIEW_REMARK_REQUIRED"), false);
             }
 
-            return (claim, null);
+            return (claim, null, false);
         }
 
         /// <summary>审批领取成功后把审核结果写回声明；批准时全额加回申请的分钟数。</summary>
@@ -478,19 +479,25 @@ namespace BlazorApp.Api.Services.React
             await _db.Updateable(claim).ExecuteCommandAsync();
         }
 
-        /// <summary>排班被取消/删除时，同步取消它名下待审的用餐加工时申请。</summary>
-        private async Task CancelMealClaimsForScheduleAsync(string scheduleGuid, string reason)
+        /// <summary>
+        /// 排班被取消/删除时，同步取消它名下待审的用餐加工时申请。
+        /// 返回被取消的申报 ClaimGuid（即对应审批的 SourceGuid），供调用方在事务提交后撤回审批人手里的待办通知。
+        /// </summary>
+        private async Task<List<string>> CancelMealClaimsForScheduleAsync(string scheduleGuid, string reason)
         {
             var claims = await _db.Queryable<AttendanceMealClaim>()
                 .Where(item => item.ScheduleGuid == scheduleGuid
                     && item.Status == AttendanceMealBreakRules.ClaimStatusPending)
                 .ToListAsync();
+            var cancelledClaimGuids = new List<string>(claims.Count);
             foreach (var claim in claims)
             {
                 claim.Status = AttendanceMealBreakRules.ClaimStatusCancelled;
                 await _db.Updateable(claim).ExecuteCommandAsync();
                 await CancelPendingApprovalsAsync("MealBreak", claim.ClaimGuid, reason);
+                cancelledClaimGuids.Add(claim.ClaimGuid);
             }
+            return cancelledClaimGuids;
         }
 
         /// <summary>今日接口：为有用餐要求的排班附上用餐状态（休息横幅、计时、下班前确认都读它）。</summary>

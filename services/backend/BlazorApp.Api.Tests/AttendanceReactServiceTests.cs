@@ -84,7 +84,13 @@ namespace BlazorApp.Api.Tests
                 // 用餐休息两张表生产由迁移 20261007.002 创建；测试库用 CodeFirst 建同样的表。
                 ,typeof(AttendanceMealBreak)
                 ,typeof(AttendanceMealClaim)
+                // 考勤审批推送（见 AttendanceReactServiceApprovalNotificationTests.cs）落库到通知平台的两张表。
+                ,typeof(AppNotification)
+                ,typeof(AppNotificationRecipient)
             );
+            _db.Ado.ExecuteCommand(
+                "CREATE UNIQUE INDEX UX_Test_AppNotification_DedupeKey "
+                + "ON AppNotification(DedupeKey) WHERE DedupeKey IS NOT NULL");
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AttendanceMealBreak_OpenPerUser "
                 + "ON AttendanceMealBreak(UserGuid) WHERE EndUtc IS NULL");
@@ -4828,7 +4834,9 @@ namespace BlazorApp.Api.Tests
                 _timeProvider,
                 _attendanceProtector,
                 _punchAuthorizationProtector,
-                new StubAuthorizationService(_deniedPermissions)
+                new StubAuthorizationService(_deniedPermissions),
+                // 默认 null：老用例不接通知平台；审批推送用例通过 UseApprovalNotifications 注入。
+                _approvalNotifier
             );
         }
 

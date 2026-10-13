@@ -36,6 +36,8 @@ namespace BlazorApp.Api.Services.React
         private readonly AttendanceQrKeyProtector _attendanceQrKeyProtector;
         private readonly AttendancePunchAuthorizationProtector _punchAuthorizationProtector;
         private readonly IAuthorizationService? _authorizationService;
+        // 审批推送（提交 / 结果 / 失效撤回）。可选依赖：为 null 时所有推送逻辑静默跳过，行为与未接入通知平台时完全一致。
+        private readonly IAttendanceApprovalNotifier? _approvalNotifier;
 
         public AttendanceReactService(
             SqlSugarContext context,
@@ -48,7 +50,8 @@ namespace BlazorApp.Api.Services.React
             TimeProvider? timeProvider = null,
             AttendanceQrKeyProtector? attendanceQrKeyProtector = null,
             AttendancePunchAuthorizationProtector? punchAuthorizationProtector = null,
-            IAuthorizationService? authorizationService = null
+            IAuthorizationService? authorizationService = null,
+            IAttendanceApprovalNotifier? approvalNotifier = null
         )
         {
             _db = context.Db;
@@ -64,6 +67,7 @@ namespace BlazorApp.Api.Services.React
             _punchAuthorizationProtector = punchAuthorizationProtector
                 ?? throw new ArgumentNullException(nameof(punchAuthorizationProtector));
             _authorizationService = authorizationService;
+            _approvalNotifier = approvalNotifier;
         }
 
         public async Task<ApiResponse<List<AttendanceScheduleDto>>> GetSchedulesAsync(
@@ -343,6 +347,8 @@ namespace BlazorApp.Api.Services.React
                 model.WorkDate);
             await using var processLock = await AttendanceDailyMutationLock.AcquireProcessAsync(
                 mutationResource);
+            // 排班失效时被一并取消的用餐申报；事务提交后据此撤回审批人手里的待办通知。
+            var cancelledMealClaimGuids = new List<string>();
             await _db.Ado.BeginTranAsync();
             try
             {
@@ -391,7 +397,7 @@ namespace BlazorApp.Api.Services.React
                 }
                 else
                 {
-                    await CancelScheduleDerivedApprovalsAsync(
+                    cancelledMealClaimGuids = await CancelScheduleDerivedApprovalsAsync(
                         model.ScheduleGuid,
                         "排班已失效，相关待审考勤已自动取消");
                 }
@@ -402,6 +408,10 @@ namespace BlazorApp.Api.Services.React
                 await _db.Ado.RollbackTranAsync();
                 throw;
             }
+            // 走到这里事务已提交；撤回推送在事务之外，失败只记日志。
+            await RevokeApprovalSubmittedNotificationsForSourcesAsync(
+                AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
+                cancelledMealClaimGuids);
             var result = ToDto(model);
             result.MinorCompliance = await EvaluateMinorEmploymentAsync(model.UserGuid, model);
             if (result.MinorCompliance != null)
@@ -480,6 +490,8 @@ namespace BlazorApp.Api.Services.React
                 model.WorkDate);
             await using var processLock = await AttendanceDailyMutationLock.AcquireProcessAsync(
                 mutationResource);
+            // 排班删除时被一并取消的用餐申报；事务提交后据此撤回审批人手里的待办通知。
+            var cancelledMealClaimGuids = new List<string>();
             await _db.Ado.BeginTranAsync();
             try
             {
@@ -497,7 +509,7 @@ namespace BlazorApp.Api.Services.React
                 model.UpdatedAt = DateTime.UtcNow;
                 model.UpdatedBy = _currentUserService.GetCurrentUsername();
                 await _db.Updateable(model).ExecuteCommandAsync();
-                await CancelScheduleDerivedApprovalsAsync(
+                cancelledMealClaimGuids = await CancelScheduleDerivedApprovalsAsync(
                     model.ScheduleGuid,
                     "排班已删除，相关待审考勤已自动取消");
                 await _db.Ado.CommitTranAsync();
@@ -507,6 +519,10 @@ namespace BlazorApp.Api.Services.React
                 await _db.Ado.RollbackTranAsync();
                 throw;
             }
+            // 走到这里事务已提交；撤回推送在事务之外，失败只记日志。
+            await RevokeApprovalSubmittedNotificationsForSourcesAsync(
+                AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
+                cancelledMealClaimGuids);
             return ApiResponse<bool>.OK(true, "排班已取消");
         }
 
@@ -1150,6 +1166,11 @@ namespace BlazorApp.Api.Services.React
                     request.MealDeclaration);
             }
             await _db.Ado.CommitTranAsync();
+            if (mealClaim?.Status == AttendanceMealBreakRules.ClaimStatusPending)
+            {
+                // 声明「没休息」产生了待审的用餐加工时审批：事务已提交，通知审批人；推送失败只记日志，打卡照常成功。
+                await NotifyApprovalSubmittedAsync("MealBreak", mealClaim.ClaimGuid);
+            }
             var resultDto = ToDto(punch, employeeName, storeName, serverNow);
             resultDto.MealClaim = mealClaim == null ? null : ToDto(mealClaim);
             resultDto.MinorCompliance = await EvaluateMinorEmploymentAsync(userGuid, schedule, punch);
@@ -1583,6 +1604,13 @@ namespace BlazorApp.Api.Services.React
                 throw;
             }
 
+            // 走到这里事务已提交。只有待审的补卡才有审批（店长代改 / 店长自补直接生效的不产生审批，不推）；
+            // 推送在事务之外，失败只记日志，不影响补卡结果。
+            if (adjustment!.Status == "Pending")
+            {
+                await NotifyApprovalSubmittedAsync("PunchAdjustment", adjustment.AdjustmentGuid);
+            }
+
             return ApiResponse<AttendancePunchAdjustmentDto>.OK(
                 ToDto(adjustment!),
                 adjustment!.Status == "Applied" ? "补卡已直接生效" : "补卡申请已提交");
@@ -1873,6 +1901,9 @@ namespace BlazorApp.Api.Services.React
 
             await _db.Insertable(model).ExecuteCommandAsync();
             await CreatePendingApprovalAsync("Leave", model.LeaveGuid, model.StoreCode, userGuid);
+            // 本人提交的请假通知能审该门店的人（无事务，审批已落库）；失败只记日志，不影响提交结果。
+            // 店长代提请假（CreateManagedLeaveRequestAsync）是店长自己操作的，不推。
+            await NotifyApprovalSubmittedAsync("Leave", model.LeaveGuid);
             return ApiResponse<AttendanceLeaveRequestDto>.OK(ToDto(model), "请假申请已提交");
         }
 
@@ -1962,6 +1993,8 @@ namespace BlazorApp.Api.Services.React
                 .SetColumns(item => item.ReviewStatus == "Cancelled")
                 .Where(item => item.SourceType == "Leave" && item.SourceGuid == leaveGuid && item.ReviewStatus == "Pending")
                 .ExecuteCommandAsync();
+            // 申请已撤销，审批人手里的待办失效（该方法无事务，上面的写入已落库）。
+            await RevokeApprovalSubmittedNotificationsForSourcesAsync("Leave", new[] { leaveGuid });
             return ApiResponse<bool>.OK(true, "请假申请已取消");
         }
 
@@ -2534,6 +2567,8 @@ namespace BlazorApp.Api.Services.React
                             model.ApprovalGuid,
                             "补卡申请已失效，待审记录已自动取消");
                         await _db.Ado.CommitTranAsync();
+                        // 事务已提交：审批已被系统取消，审批人手里的待办通知失效（撤回不会抛异常）。
+                        await RevokeApprovalSubmittedNotificationsAsync(new[] { model.ApprovalGuid });
                         return ApiResponse<AttendanceApprovalDto>.Error(
                             "补卡申请已失效，不能批准",
                             "ADJUSTMENT_NOT_FOUND");
@@ -2606,12 +2641,17 @@ namespace BlazorApp.Api.Services.React
                 if (model.SourceType == "MealBreak")
                 {
                     // 用餐加工时：进员工日锁后重读声明，排班或下班打卡已失效就自动取消；拒绝必须填备注。
-                    var (claim, claimError) = await ValidateMealClaimReviewAsync(
+                    var (claim, claimError, approvalCancelled) = await ValidateMealClaimReviewAsync(
                         model,
                         reviewStatus,
                         reviewRemark);
                     if (claimError != null)
                     {
+                        if (approvalCancelled)
+                        {
+                            // 申请已失效且事务已提交：审批被系统自动取消，其他审批人手里的待办一并撤回。
+                            await RevokeApprovalSubmittedNotificationsAsync(new[] { model.ApprovalGuid });
+                        }
                         return claimError;
                     }
                     mealClaim = claim;
@@ -2712,6 +2752,9 @@ namespace BlazorApp.Api.Services.React
                 throw;
             }
 
+            // 走到这里审批已通过 / 驳回且事务已提交（所有失败分支都已 return / throw）：
+            // 通知申请人结果并撤回审批人手里的待办。系统派生类（打卡 / 加班 / 漏下班）不推；推送失败只记日志。
+            await NotifyApprovalDecidedAsync(model);
             return ApiResponse<AttendanceApprovalDto>.OK(ToDto(model), "审核已处理");
         }
 
@@ -2834,7 +2877,11 @@ namespace BlazorApp.Api.Services.React
                 .ExecuteCommandAsync();
         }
 
-        private async Task CancelScheduleDerivedApprovalsAsync(
+        /// <summary>
+        /// 排班失效时取消它名下所有待审的派生记录。返回被取消的用餐申报 ClaimGuid：
+        /// 只有用餐申报是员工发起、会推送给审批人的审批，调用方在事务提交后据此撤回待办通知。
+        /// </summary>
+        private async Task<List<string>> CancelScheduleDerivedApprovalsAsync(
             string scheduleGuid,
             string reason)
         {
@@ -2848,7 +2895,7 @@ namespace BlazorApp.Api.Services.React
             }
             await CancelPendingApprovalsAsync("Overtime", scheduleGuid, reason);
             await CancelPendingApprovalsAsync("MissingClockOut", scheduleGuid, reason);
-            await CancelMealClaimsForScheduleAsync(scheduleGuid, reason);
+            return await CancelMealClaimsForScheduleAsync(scheduleGuid, reason);
         }
 
         private async Task ReconcileOvertimeApprovalAsync(
@@ -4087,6 +4134,29 @@ namespace BlazorApp.Api.Services.React
         private async Task ReconcileDerivedApprovalsUnderEmployeeLocksAsync(
             IEnumerable<AttendanceSchedule> scheduleSnapshots)
         {
+            // 对账会在读接口（GET 今日 / 排班列表）里顺手取消已失效排班名下的用餐申报。
+            // 收集「已提交事务」里被取消的申报，循环全部结束后统一撤回审批人手里的待办通知；
+            // 撤回在事务之外且绝不抛异常，GET 不会因为推送失败而报错。用 finally 保证中途某个员工的事务失败时，
+            // 前面已提交的取消也不会漏撤回。
+            var cancelledMealClaimGuids = new List<string>();
+            try
+            {
+                await ReconcileDerivedApprovalsUnderEmployeeLocksCoreAsync(
+                    scheduleSnapshots,
+                    cancelledMealClaimGuids);
+            }
+            finally
+            {
+                await RevokeApprovalSubmittedNotificationsForSourcesAsync(
+                    AttendanceApprovalNotificationPolicy.SourceTypeMealBreak,
+                    cancelledMealClaimGuids);
+            }
+        }
+
+        private async Task ReconcileDerivedApprovalsUnderEmployeeLocksCoreAsync(
+            IEnumerable<AttendanceSchedule> scheduleSnapshots,
+            List<string> committedCancelledMealClaimGuids)
+        {
             foreach (var userSchedules in scheduleSnapshots
                 .GroupBy(item => item.UserGuid, StringComparer.OrdinalIgnoreCase))
             {
@@ -4105,6 +4175,8 @@ namespace BlazorApp.Api.Services.React
                     default);
                 await using var processLock = await AttendanceDailyMutationLock.AcquireProcessAsync(
                     mutationResource);
+                // 本轮事务里被取消的用餐申报；提交成功后才并入 committedCancelledMealClaimGuids（回滚的不算）。
+                var iterationCancelledMealClaimGuids = new List<string>();
                 await _db.Ado.BeginTranAsync();
                 try
                 {
@@ -4122,9 +4194,9 @@ namespace BlazorApp.Api.Services.React
                     foreach (var staleScheduleGuid in scheduleGuids
                         .Where(scheduleGuid => !activeScheduleGuids.Contains(scheduleGuid)))
                     {
-                        await CancelScheduleDerivedApprovalsAsync(
+                        iterationCancelledMealClaimGuids.AddRange(await CancelScheduleDerivedApprovalsAsync(
                             staleScheduleGuid,
-                            "排班已失效，相关待审考勤已自动取消");
+                            "排班已失效，相关待审考勤已自动取消"));
                     }
 
                     if (activeSchedules.Count > 0)
@@ -4154,6 +4226,7 @@ namespace BlazorApp.Api.Services.React
                     }
 
                     await _db.Ado.CommitTranAsync();
+                    committedCancelledMealClaimGuids.AddRange(iterationCancelledMealClaimGuids);
                 }
                 catch
                 {
