@@ -185,6 +185,28 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetContainerProductsAsync_应单独返回主档商品名称且未建主档时为空()
+    {
+        await SeedContainerAsync("C-MASTER-NAME", "OOLU1234567");
+        // 已建主档：主档名 = 本地商品表 ProductName，国内商品名称仍在 商品名称 里，供前端兜底
+        await SeedDetailAsync("D-MASTER-HAS", "C-MASTER-NAME", "P-MASTER-HAS", "HB701", localExists: true);
+        // 未建主档（新品）：主档名为空，前端应回退国内商品名称
+        await SeedDetailAsync("D-MASTER-NEW", "C-MASTER-NAME", "P-MASTER-NEW", "HB702", localExists: false);
+        var service = CreateService();
+
+        var products = await service.GetContainerProductsAsync("C-MASTER-NAME");
+
+        var existing = products.Single(x => x.HGUID == "D-MASTER-HAS").商品信息;
+        Assert.NotNull(existing);
+        Assert.Equal("本地商品 HB701", existing!.主档商品名称);
+        Assert.Equal("商品 HB701", existing.商品名称);
+        var created = products.Single(x => x.HGUID == "D-MASTER-NEW").商品信息;
+        Assert.NotNull(created);
+        Assert.Null(created!.主档商品名称);
+        Assert.Equal("商品 HB702", created.商品名称);
+    }
+
+    [Fact]
     public async Task GetContainerDetailAsync_应只返回货柜头且不预加载明细()
     {
         await SeedContainerAsync("C-HEAD", "CSLU6099486");

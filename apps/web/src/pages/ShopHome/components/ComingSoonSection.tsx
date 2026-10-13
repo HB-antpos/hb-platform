@@ -1,5 +1,5 @@
 import { CalendarOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Image, Segmented, Skeleton, Spin, Switch, Tag, Typography } from 'antd'
+import { Alert, Button, Empty, Image, Segmented, Select, Skeleton, Spin, Switch, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -14,7 +14,9 @@ import styles from './ComingSoonSection.module.css'
 import { getComingSoonDateTone } from './comingSoonWarehouseDate'
 
 const { Text, Title } = Typography
-const PRODUCT_PAGE_SIZE = 24
+// 每页商品数：默认 50，可选 100 / 200。最大 200 是单页 DOM 的硬上限（卡片带图片与条码画布），不要再加更大的档位。
+const PRODUCT_PAGE_SIZE_OPTIONS = [50, 100, 200] as const
+const DEFAULT_PRODUCT_PAGE_SIZE: number = PRODUCT_PAGE_SIZE_OPTIONS[0]
 const PRODUCT_IMAGE_FALLBACK = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120" viewBox="0 0 160 120"><rect width="160" height="120" fill="#f5f7fa"/><path d="M52 82l23-27 15 18 12-14 17 23z" fill="#cbd5e1"/><circle cx="66" cy="40" r="8" fill="#94a3b8"/></svg>')}`
 const BARCODE_OPTIONS = { width: 1, height: 34, displayValue: false, margin: 0 }
 type FilterMode = 'all' | 'reorder' | 'new'
@@ -75,7 +77,8 @@ export default function ComingSoonSection() {
   const [containerFilterModes, setContainerFilterModes] = useState<Record<string, FilterMode>>({})
   const [productStates, setProductStates] = useState<Record<string, ContainerProductState>>({})
   const [selectedContainerGuid, setSelectedContainerGuid] = useState<string | null>(null)
-  const [showBarcode, setShowBarcode] = useState(false)
+  // 条码默认显示（订货时要核对条码），仍可用右上角开关临时关闭。
+  const [showBarcode, setShowBarcode] = useState(true)
   const loadStartedRef = useRef<Set<string>>(new Set())
   const requestTokensRef = useRef<Map<string, number>>(new Map())
   const summaryGenerationRef = useRef(0)
@@ -177,7 +180,8 @@ export default function ComingSoonSection() {
   const selectedProducts =
     selectedState?.products.filter((product) => matchesFilter(product, selectedFilterMode)) ?? []
   const [productPage, setProductPage] = useState(1)
-  const pageSize = PRODUCT_PAGE_SIZE
+  // 每页条数对所有货柜通用；切换货柜 / 筛选只回到第 1 页，不重置条数。
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PRODUCT_PAGE_SIZE)
   const pageCount = Math.max(1, Math.ceil(selectedProducts.length / pageSize))
   const pagedProducts = selectedProducts.slice((productPage - 1) * pageSize, productPage * pageSize)
   useEffect(() => {
@@ -234,6 +238,16 @@ export default function ComingSoonSection() {
     // 商品分页替代原卡片内滚动；翻页回到当前货柜顶部，避免停在长页底部。
     scrollToProducts()
   }
+  const changePageSize = (size: number) => {
+    // 条数变了，原页码对应的商品范围就不成立了，统一回到第 1 页并回到列表顶部。
+    setPageSize(size)
+    setProductPage(1)
+    scrollToProducts()
+  }
+  const pageSizeOptions = PRODUCT_PAGE_SIZE_OPTIONS.map((size) => ({
+    value: size,
+    label: t('shop.comingSoonWorkspace.perPage', { count: size }),
+  }))
 
   return (
     <section className={styles.section}>
@@ -433,10 +447,6 @@ export default function ComingSoonSection() {
                             </Text>
                           </div>
                           <div className={styles.productDetail}>
-                            <span>{t('shop.comingSoonWorkspace.quantity')}</span>
-                            <strong>{product.quantity ?? 0}</strong>
-                          </div>
-                          <div className={styles.productDetail}>
                             <span>{t('shop.rrp', 'RRP')}</span>
                             <strong>{formatComingSoonRetailPrice(product.retailPrice)}</strong>
                           </div>
@@ -465,6 +475,14 @@ export default function ComingSoonSection() {
                       })}
                     </span>
                     <div>
+                      <Select<number>
+                        size="small"
+                        className={styles.pageSizeSelect}
+                        value={pageSize}
+                        options={pageSizeOptions}
+                        onChange={changePageSize}
+                        aria-label={t('shop.comingSoonWorkspace.pageSize')}
+                      />
                       <Button disabled={productPage <= 1} onClick={() => changeProductPage(productPage - 1)}>
                         {t('shop.comingSoonWorkspace.previous')}
                       </Button>

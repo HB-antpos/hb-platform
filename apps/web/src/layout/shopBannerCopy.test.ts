@@ -18,14 +18,18 @@ assertEqual(
 )
 
 const comingSoonCopy = resolveShopBannerCopy('/shop/coming-soon')
-assertEqual(comingSoonCopy.titleKey, 'shop.comingSoon', '即将上新页标题应使用即将上新文案')
+assertEqual(comingSoonCopy.titleKey, 'shop.comingSoon', '仓库到货页标题应使用仓库到货文案')
 assertEqual(
   comingSoonCopy.subtitleKey,
   'shop.comingSoonBannerSubtitle',
-  '即将上新页副标题不应复用历史订单文案',
+  '仓库到货页副标题不应复用历史订单文案',
 )
-// 即将上新按货柜到仓库日期（过去 1 周～未来 3 周）统一口径：兜底文案须与中文资源一致，两种语言都要点明「到仓库 / warehouse」
-assertEqual(comingSoonCopy.subtitleFallback, zh.shop.comingSoonBannerSubtitle, '即将上新副标题兜底文案应与中文资源一致')
+// 页面由「即将上新」改名为「仓库到货」：键名与路由不变，只改显示值；兜底文案须与中文资源一致
+assertEqual(zh.shop.comingSoon, '仓库到货', '中文导航与标题应为仓库到货')
+assertEqual(en.shop.comingSoon, 'Warehouse Arrivals', '英文导航与标题应为 Warehouse Arrivals')
+assertEqual(comingSoonCopy.titleFallback, zh.shop.comingSoon, '仓库到货标题兜底文案应与中文资源一致')
+// 仓库到货按货柜到仓库日期（过去 1 周～未来 3 周）统一口径：兜底文案须与中文资源一致，两种语言都要点明「到仓库 / warehouse」
+assertEqual(comingSoonCopy.subtitleFallback, zh.shop.comingSoonBannerSubtitle, '仓库到货副标题兜底文案应与中文资源一致')
 assertEqual(zh.shop.comingSoonBannerSubtitle.includes('到仓库日期'), true, '中文副标题应说明按到仓库日期')
 assertEqual(en.shop.comingSoonBannerSubtitle.includes('warehouse arrival'), true, '英文副标题应说明按 warehouse arrival')
 

@@ -62,7 +62,7 @@ export function resolveShopBannerCopy(pathname: string): ShopBannerCopy {
   if (pathname.startsWith('/shop/coming-soon')) {
     return {
       titleKey: 'shop.comingSoon',
-      titleFallback: '即将上新',
+      titleFallback: '仓库到货',
       subtitleKey: 'shop.comingSoonBannerSubtitle',
       subtitleFallback: '按货柜到仓库日期：过去 1 周至未来 3 周，快速筛选补货和新品。',
     }
