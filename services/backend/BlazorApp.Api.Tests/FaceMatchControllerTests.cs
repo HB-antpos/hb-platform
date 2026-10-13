@@ -166,7 +166,17 @@ public sealed class FaceMatchControllerTests
     [Fact]
     public async Task 业务错误转成对应状态码与错误码_闸门缺项通过details返回()
     {
-        var report = new FaceGateReportDto { CanSave = false, Facets = [new FaceGateFacetDto { Facet = "match", Requested = true, Missing = ["piaReference"] }] };
+        // 仍阻塞的是结构性前提（如 Capture 缺 allowedSubjects）；Match 的合规记录缺口是 Warnings，不会触发 409。
+        var report = new FaceGateReportDto
+        {
+            CanSave = false,
+            HasWarnings = true,
+            Facets =
+            [
+                new FaceGateFacetDto { Facet = "capture", Requested = true, Missing = ["allowedSubjects"] },
+                new FaceGateFacetDto { Facet = "match", Requested = true, Warnings = ["piaReference"] },
+            ],
+        };
         _profiles.Setup(p => p.UpdateAsync("1013", It.IsAny<FaceStoreProfileUpdateRequest>(), It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FaceMatchException(409, "FACE_MATCH_GATE_NOT_MET", "启用前置条件不满足。", report));
 

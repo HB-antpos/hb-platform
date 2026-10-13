@@ -19,6 +19,7 @@ import {
   describeFaceMatchError,
   computeDismissRate,
   countMissing,
+  countWarnings,
   defaultTrafficRange,
   detectFileType,
   expiryToUtcIso,
@@ -91,7 +92,7 @@ function profile(overrides: Partial<FaceStoreProfile> = {}): FaceStoreProfile {
     crossBorderRegion: null, crossBorderReviewRef: null, crossBorderReviewedBy: null, crossBorderReviewedAt: null, timeZoneId: null,
     unwelcomeAssessmentRef: null, unwelcomeLegalSignoffBy: null, unwelcomeLegalSignoffAt: null, staffTrainingDate: null, privacyContact: null,
     updatedAtUtc: null, updatedBy: null, effectiveTimeZoneId: 'Australia/Sydney', jurisdiction: 'NSW', crossBorderReviewValid: false,
-    gates: { facets: [], canSave: true },
+    gates: { facets: [], canSave: true, hasWarnings: false },
     ...overrides,
   }
 }
@@ -121,22 +122,45 @@ assert.equal(normalizeText(undefined), null)
 // ───────── 闸门缺项 ─────────
 const report = {
   facets: [
-    { facet: 'capture', requested: false, missing: [] },
-    { facet: 'match', requested: true, missing: ['piaReference', 'staffNoticeTooRecent', 'brandNewKey'] },
-    { facet: 'staffExclusion', requested: true, missing: [] },
+    { facet: 'capture', requested: false, missing: [], warnings: [] },
+    { facet: 'match', requested: true, missing: ['piaReference', 'staffNoticeTooRecent', 'brandNewKey'], warnings: [] },
+    { facet: 'staffExclusion', requested: true, missing: [], warnings: [] },
   ],
   canSave: false,
+  hasWarnings: false,
 }
 const rows = summarizeGates(report)
 assert.equal(rows.length, 2, '只列出被请求启用的项')
 assert.equal(rows[0].facet, 'match')
 assert.equal(rows[0].facetLabelKey, 'faceMatch.gates.facets.match')
 assert.equal(countMissing(rows), 3)
+assert.equal(countWarnings(rows), 0, '没有警告时警告数为 0')
 assert.deepEqual(summarizeGates(null), [])
+
+// 合规记录警告：与阻塞缺项分开统计；未被请求启用的 facet 即使带警告也不计入
+const warningReport = {
+  facets: [
+    { facet: 'capture', requested: false, missing: [], warnings: ['piaReference'] },
+    { facet: 'match', requested: true, missing: [], warnings: ['piaReference', 'regionMismatch', 'staffNoticeTooRecent'] },
+    { facet: 'trafficDedup', requested: true, missing: ['modeOff'], warnings: ['dedupLegalSignoffBy', 'dedupLegalSignoffAt'] },
+    { facet: 'unwelcome', requested: true, missing: [], warnings: [] },
+  ],
+  canSave: false,
+  hasWarnings: true,
+}
+const warningRows = summarizeGates(warningReport)
+assert.equal(warningRows.length, 3)
+assert.deepEqual(warningRows[0].warnings, ['piaReference', 'regionMismatch', 'staffNoticeTooRecent'])
+assert.deepEqual(warningRows[1].missing, ['modeOff'], '同一 facet 的阻塞项与警告分列')
+assert.equal(countWarnings(warningRows), 5, '警告数是各被请求 facet 的警告之和（同一字段在不同 facet 分别计数）')
+assert.equal(countMissing(warningRows), 1, '阻塞缺项数不含警告')
+assert.equal(countWarnings([]), 0)
 assert.equal(getMissingLabelKey('piaReference'), 'faceMatch.profile.fields.piaReference', '字段键映射到字段名称')
 assert.equal(getMissingLabelKey('regionMismatch'), 'faceMatch.gates.special.regionMismatch', '特殊键有各自说明')
 assert.equal(getMissingLabelKey('brandNewKey'), null, '后端新增的键没有登记时返回 null，页面显示键名本身')
-assert.equal(summarizeGates({ facets: [{ facet: 'future', requested: true, missing: [] }], canSave: true })[0].facetLabelKey, null)
+assert.equal(summarizeGates({ facets: [{ facet: 'future', requested: true, missing: [], warnings: [] }], canSave: true, hasWarnings: false })[0].facetLabelKey, null)
+// 警告键复用同一套文案映射：字段键与 regionMismatch / staffNoticeTooRecent 都有文案
+assert.equal(getMissingLabelKey('staffNoticeTooRecent'), 'faceMatch.gates.special.staffNoticeTooRecent')
 // 契约里的每个字段键与特殊键都有文案
 for (const key of [
   'mode', 'allowedSubjects', 'piaReference', 'signageInstalledOn', 'staffNoticeDate', 'legalSignoffBy', 'legalSignoffAt',
@@ -227,6 +251,13 @@ const gateError = fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET', details: rep
 const extracted = getGateReportFromError(gateError)
 assert.equal(extracted?.canSave, false)
 assert.deepEqual(extracted?.facets[1].missing, ['piaReference', 'staffNoticeTooRecent', 'brandNewKey'])
+assert.deepEqual(extracted?.facets[1].warnings, [], '老后端的 details 没有 warnings：归一化为空数组')
+assert.equal(extracted?.hasWarnings, false)
+// 阻塞项与警告同时存在时，409 的 details 两者都保留
+const withWarnings = getGateReportFromError(fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET', details: warningReport }))
+assert.deepEqual(withWarnings?.facets[2].missing, ['modeOff'])
+assert.deepEqual(withWarnings?.facets[2].warnings, ['dedupLegalSignoffBy', 'dedupLegalSignoffAt'])
+assert.equal(withWarnings?.hasWarnings, true)
 assert.equal(getGateReportFromError(fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET' })), null, '没有 details 取不到')
 assert.equal(getGateReportFromError(fail(409, { errorCode: 'FACE_MATCH_ENTRY_CHANGED', details: report })), null, '别的错误码不取')
 assert.equal(getGateReportFromError(new Error('x')), null)

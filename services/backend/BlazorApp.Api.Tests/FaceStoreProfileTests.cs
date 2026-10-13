@@ -5,7 +5,10 @@ using Xunit;
 namespace BlazorApp.Api.Tests;
 
 /// <summary>
-/// 门店档案与启用闸门：缺项一律 409 并列出缺哪一项、地域与审查记录的关系、NSW 通知、默认全部关闭。
+/// 门店档案与启用闸门。2026-10-13 用户决定「Match 全部闸门改成警告」：
+/// 结构性 / 功能性前提（Capture 缺 allowedSubjects、评估匹配非 Capture、开关在 Off 下、员工排除缺登记）仍然 409 阻塞并列出缺哪一项；
+/// Match 的合规记录（PIA、告示、律师确认、跨境审查、NSW 员工通知、去重专项、名单专项）缺了只进 Warnings，照样保存成功，
+/// 审计 Result 记 "mode=N;warnings=M"。另外覆盖地域与审查记录的关系、NSW 通知、列表警告数、默认全部关闭。
 /// 「今天」固定为 2026-10-14 02:00 UTC（悉尼 / 布里斯班本地均为 10-14），用例不依赖机器时区。
 /// </summary>
 public sealed class FaceStoreProfileTests : IDisposable
@@ -28,7 +31,8 @@ public sealed class FaceStoreProfileTests : IDisposable
         Assert.Equal(FaceStoreMode.Off, profile.Mode);
         Assert.False(profile.EvaluateMatch || profile.StaffExclusionEnabled || profile.TrafficDedupEnabled || profile.UnwelcomeListEnabled);
         Assert.True(profile.Gates.CanSave);
-        Assert.All(profile.Gates.Facets, facet => Assert.False(facet.Requested));
+        Assert.False(profile.Gates.HasWarnings);
+        Assert.All(profile.Gates.Facets, facet => { Assert.False(facet.Requested); Assert.Empty(facet.Missing); Assert.Empty(facet.Warnings); });
         Assert.Equal("QLD", profile.Jurisdiction);
         Assert.Equal("Australia/Brisbane", profile.EffectiveTimeZoneId);
         Assert.False(profile.CrossBorderReviewValid);
@@ -68,6 +72,8 @@ public sealed class FaceStoreProfileTests : IDisposable
         var audits = await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.ProfileUpdate).ToListAsync();
         Assert.Equal(2, audits.Count);
         Assert.All(audits, a => { Assert.Equal(Qld, a.StoreCode); Assert.Equal("ok", a.Result.StartsWith("mode=") ? "ok" : a.Result); });
+        // 没有警告时审计结果保持原样，不带 warnings。
+        Assert.All(audits, a => Assert.Equal("mode=0", a.Result));
     }
 
     // ---------- Capture ----------
@@ -97,18 +103,44 @@ public sealed class FaceStoreProfileTests : IDisposable
         Assert.True(saved.EvaluateMatch);
     }
 
-    // ---------- Match ----------
+    [Fact]
+    public async Task 评估匹配在Match模式下仍然阻塞_这是功能前提不是合规记录()
+    {
+        var ex = await Assert.ThrowsAsync<FaceMatchException>(
+            () => _h.Profiles.UpdateAsync(Qld, MatchRequest() with { EvaluateMatch = true }, FaceMatchTestHarness.Admin));
+
+        AssertMissing(ex, "capture", "evaluateMatchRequiresCapture");
+        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
+    }
 
     [Fact]
-    public async Task Match模式材料齐全_QLD门店保存成功_审查有效()
+    public async Task Capture模式下去重和名单不产生任何合规警告_只处理内部知情人员()
+    {
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", dedup: true, unwelcome: true), FaceMatchTestHarness.Admin);
+
+        Assert.True(saved.Gates.CanSave);
+        Assert.False(saved.Gates.HasWarnings);
+        Assert.All(saved.Gates.Facets, facet => Assert.Empty(facet.Warnings));
+        var audit = Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync());
+        Assert.Equal("mode=1", audit.Result);
+    }
+
+    // ---------- Match：合规记录缺口是警告，不再阻塞 ----------
+
+    [Fact]
+    public async Task Match模式材料齐全_QLD门店保存成功_审查有效_没有警告()
     {
         var saved = await _h.Profiles.UpdateAsync(Qld, MatchRequest(), FaceMatchTestHarness.Admin);
 
         Assert.Equal(FaceStoreMode.Match, saved.Mode);
         Assert.True(saved.CrossBorderReviewValid);
         Assert.True(saved.Gates.CanSave);
+        Assert.False(saved.Gates.HasWarnings);
+        Assert.Empty(saved.Gates.Facets.Single(f => f.Facet == "match").Warnings);
         Assert.Equal("2026-09-01", saved.SignageInstalledOn);
         Assert.Equal("ap-guangzhou", saved.CrossBorderRegion);
+        Assert.Equal("mode=2", Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync()).Result);
     }
 
     [Theory]
@@ -120,7 +152,7 @@ public sealed class FaceStoreProfileTests : IDisposable
     [InlineData("crossBorderReviewRef")]
     [InlineData("crossBorderReviewedBy")]
     [InlineData("crossBorderReviewedAt")]
-    public async Task Match模式缺任何一项_409并列出缺哪一项_且不落库(string missingKey)
+    public async Task Match模式缺任何一项合规记录_照样保存成功_报告里是警告而不是阻塞_审计带警告数(string missingKey)
     {
         var request = missingKey switch
         {
@@ -134,39 +166,111 @@ public sealed class FaceStoreProfileTests : IDisposable
             _ => MatchRequest() with { CrossBorderReviewedAt = null },
         };
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin);
 
-        Assert.Equal(409, ex.StatusCode);
-        Assert.Equal("FACE_MATCH_GATE_NOT_MET", ex.Code);
-        AssertMissing(ex, "match", missingKey);
-        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
-        // 被拒绝的保存也进审计。
-        Assert.Contains(await _h.Db.Queryable<FaceAuditLog>().ToListAsync(), a => a.Result == "gate-not-met");
+        Assert.Equal(FaceStoreMode.Match, saved.Mode);
+        Assert.True(saved.Gates.CanSave);
+        Assert.True(saved.Gates.HasWarnings);
+        var match = saved.Gates.Facets.Single(f => f.Facet == "match");
+        Assert.True(match.Requested);
+        Assert.Empty(match.Missing);
+        Assert.Equal([missingKey], match.Warnings);
+        // 落库的就是用户填的（缺的保持为空），没有任何默认值或伪造值。
+        var row = await _h.Db.Queryable<FaceStoreProfile>().SingleAsync();
+        Assert.Equal(FaceStoreMode.Match, row.Mode);
+        Assert.Equal(missingKey == "piaReference", row.PiaReference == null);
+        Assert.Equal(missingKey == "crossBorderRegion", row.CrossBorderRegion == null);
+        // 审计留痕：带着缺口启用。
+        Assert.Equal("mode=2;warnings=1", Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync()).Result);
+        // 重新读取得到同样的警告。
+        Assert.Equal([missingKey], (await _h.Profiles.GetAsync(Qld)).Gates.Facets.Single(f => f.Facet == "match").Warnings);
     }
 
     [Fact]
-    public async Task 检查接口返回同样的报告_但不写任何数据()
+    public async Task Match模式什么记录都没填_照样保存成功_全部列为警告_审计警告数等于各facet警告之和()
+    {
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Match, dedup: true, unwelcome: true), FaceMatchTestHarness.Admin);
+
+        Assert.True(saved.Gates.CanSave);
+        Assert.True(saved.Gates.HasWarnings);
+        Assert.All(saved.Gates.Facets, facet => Assert.Empty(facet.Missing));
+        var total = saved.Gates.Facets.Sum(f => f.Warnings.Count);
+        // QLD 门店：match 8 + 去重 2 + 名单 11（同一字段在不同 facet 分别计数）。
+        Assert.Equal(8, saved.Gates.Facets.Single(f => f.Facet == "match").Warnings.Count);
+        Assert.Equal(2, saved.Gates.Facets.Single(f => f.Facet == "trafficDedup").Warnings.Count);
+        Assert.Equal(11, saved.Gates.Facets.Single(f => f.Facet == "unwelcome").Warnings.Count);
+        var audit = Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync());
+        Assert.Equal($"mode=2;warnings={total}", audit.Result);
+        Assert.True(audit.Result.Length <= 32);
+    }
+
+    [Fact]
+    public async Task 审计Result最坏情况_NSW门店全部缺失_仍不超过32个字符()
+    {
+        var saved = await _h.Profiles.UpdateAsync(
+            Nsw, Req(mode: FaceStoreMode.Match, dedup: true, unwelcome: true), FaceMatchTestHarness.Admin);
+
+        var total = saved.Gates.Facets.Sum(f => f.Warnings.Count);
+        Assert.Equal(22, total);
+        var audit = Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync());
+        Assert.Equal("mode=2;warnings=22", audit.Result);
+        Assert.True(audit.Result.Length <= 32);
+    }
+
+    [Fact]
+    public async Task 检查接口返回同样的报告_警告不阻塞_且不写任何数据()
     {
         var report = await _h.Profiles.CheckAsync(Qld, MatchRequest() with { PiaReference = null });
 
-        Assert.False(report.CanSave);
-        Assert.Contains("piaReference", report.Facets.Single(f => f.Facet == "match").Missing);
+        Assert.True(report.CanSave);
+        Assert.True(report.HasWarnings);
+        var match = report.Facets.Single(f => f.Facet == "match");
+        Assert.Contains("piaReference", match.Warnings);
+        Assert.Empty(match.Missing);
         Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
         Assert.Empty(await _h.Db.Queryable<FaceAuditLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 检查接口对仍然阻塞的项照常报缺项_CanSave为false()
+    {
+        var report = await _h.Profiles.CheckAsync(Qld, Req(mode: FaceStoreMode.Capture));
+
+        Assert.False(report.CanSave);
+        Assert.False(report.HasWarnings);
+        Assert.Equal(["allowedSubjects"], report.Facets.Single(f => f.Facet == "capture").Missing);
+    }
+
+    [Fact]
+    public async Task 阻塞项和警告同时存在时_409的details里两者都带上()
+    {
+        // Match + 员工排除：没有有效登记（阻塞），同时 Match 的合规记录也没填（警告）。
+        var ex = await Assert.ThrowsAsync<FaceMatchException>(
+            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, staff: true), FaceMatchTestHarness.Admin));
+
+        AssertMissing(ex, "staffExclusion", "activeEnrollment");
+        var report = Assert.IsType<FaceGateReportDto>(ex.Details);
+        Assert.True(report.HasWarnings);
+        Assert.NotEmpty(report.Facets.Single(f => f.Facet == "match").Warnings);
+        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
+        // 被拒绝的保存照旧进审计，且不带 warnings。
+        Assert.Equal("gate-not-met", Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync()).Result);
     }
 
     // ---------- NSW ----------
 
     [Fact]
-    public async Task NSW门店Match模式需要员工通知日期()
+    public async Task NSW门店Match模式缺员工通知日期_只是警告_QLD门店同样的材料没有这条警告()
     {
         var request = MatchRequest() with { StaffNoticeDate = null };
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Nsw, request, FaceMatchTestHarness.Admin));
+        var nsw = await _h.Profiles.UpdateAsync(Nsw, request, FaceMatchTestHarness.Admin);
+        var qld = await _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "match", "staffNoticeDate");
-        // 同样的材料用在 QLD 门店不需要通知日期。
-        await _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin);
+        Assert.True(nsw.Gates.CanSave);
+        Assert.Equal(["staffNoticeDate"], nsw.Gates.Facets.Single(f => f.Facet == "match").Warnings);
+        Assert.False(qld.Gates.HasWarnings);
     }
 
     [Theory]
@@ -174,56 +278,71 @@ public sealed class FaceStoreProfileTests : IDisposable
     [InlineData("2026-09-01", true)]
     [InlineData("2026-10-01", false)]   // 13 天：不满
     [InlineData("2026-10-14", false)]
-    public async Task NSW通知日期必须提前至少14天(string noticeDate, bool allowed)
+    public async Task NSW通知日期不满14天是警告_满14天没有警告_都能保存(string noticeDate, bool enough)
     {
         var request = MatchRequest() with { StaffNoticeDate = noticeDate };
 
-        if (allowed)
-        {
-            await _h.Profiles.UpdateAsync(Nsw, request, FaceMatchTestHarness.Admin);
-            return;
-        }
+        var saved = await _h.Profiles.UpdateAsync(Nsw, request, FaceMatchTestHarness.Admin);
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Nsw, request, FaceMatchTestHarness.Admin));
-        AssertMissing(ex, "match", "staffNoticeTooRecent");
+        Assert.True(saved.Gates.CanSave);
+        var warnings = saved.Gates.Facets.Single(f => f.Facet == "match").Warnings;
+        if (enough)
+        {
+            Assert.Empty(warnings);
+            Assert.False(saved.Gates.HasWarnings);
+        }
+        else
+        {
+            Assert.Equal(["staffNoticeTooRecent"], warnings);
+        }
     }
 
     // ---------- 跨境披露审查与地域 ----------
 
     [Fact]
-    public async Task 审查记录的地域必须等于当前配置地域()
+    public async Task 审查记录的地域不等于当前配置地域_是警告_仍可保存()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, MatchRequest() with { CrossBorderRegion = "ap-shanghai" }, FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, MatchRequest() with { CrossBorderRegion = "ap-shanghai" }, FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "match", "regionMismatch");
+        Assert.True(saved.Gates.CanSave);
+        Assert.Equal(["regionMismatch"], saved.Gates.Facets.Single(f => f.Facet == "match").Warnings);
+        Assert.False(saved.CrossBorderReviewValid);
+        Assert.Equal("ap-shanghai", saved.CrossBorderRegion);
     }
 
     [Fact]
-    public async Task 配置地域缺失_功能未开启_Match保存被拒绝()
+    public async Task 配置地域缺失_功能未开启_Match照样能保存_缺口显示为警告()
     {
         _h.Settings.Options.Tencent.Region = null;
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, MatchRequest(), FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(Qld, MatchRequest(), FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "match", "regionMismatch");
-        // 关闭模式不受影响：关掉功能永远可以。
+        Assert.Equal(FaceStoreMode.Match, saved.Mode);
+        Assert.Equal(["regionMismatch"], saved.Gates.Facets.Single(f => f.Facet == "match").Warnings);
+        // 关闭模式永远可以。
         await _h.Profiles.UpdateAsync(Qld, Req(), FaceMatchTestHarness.Admin);
     }
 
     [Fact]
-    public async Task 地域配置改动后_已保存的审查记录显示为无效()
+    public async Task 地域配置改动后_已保存的审查记录显示为无效_闸门是警告_列表带警告数()
     {
         await _h.Profiles.UpdateAsync(Qld, MatchRequest(), FaceMatchTestHarness.Admin);
         Assert.True((await _h.Profiles.GetAsync(Qld)).CrossBorderReviewValid);
+        Assert.Equal(0, Assert.Single(await _h.Profiles.ListAsync()).GateWarningCount);
 
         _h.Settings.Options.Tencent.Region = "ap-shanghai";
 
         var after = await _h.Profiles.GetAsync(Qld);
         Assert.False(after.CrossBorderReviewValid);
-        Assert.Contains("regionMismatch", after.Gates.Facets.Single(f => f.Facet == "match").Missing);
+        var match = after.Gates.Facets.Single(f => f.Facet == "match");
+        Assert.Contains("regionMismatch", match.Warnings);
+        Assert.Empty(match.Missing);
+        Assert.True(after.Gates.CanSave);
         var list = await _h.Profiles.ListAsync();
-        Assert.False(Assert.Single(list).CrossBorderReviewValid);
+        var item = Assert.Single(list);
+        Assert.False(item.CrossBorderReviewValid);
+        Assert.Equal(1, item.GateWarningCount);
     }
 
     [Fact]
@@ -234,6 +353,55 @@ public sealed class FaceStoreProfileTests : IDisposable
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal("FACE_MATCH_FIELD_INVALID", ex.Code);
+    }
+
+    // ---------- 列表：警告数 ----------
+
+    [Fact]
+    public async Task 列表的GateWarningCount_Match缺记录按警告数计_NSW多一条_Capture和齐全的为0_已删除门店不崩()
+    {
+        // 1013 QLD：Match，什么记录都没填 = match 8 条；2001 NSW：同样 + 员工通知日期 = 9 条。
+        await _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match), FaceMatchTestHarness.Admin);
+        await _h.Profiles.UpdateAsync(Nsw, Req(mode: FaceStoreMode.Match), FaceMatchTestHarness.Admin);
+        // 已删除门店也有档案行（门店后来被停用）：列表不能因为查不到门店而崩，按悉尼时区、非 NSW 计。
+        _h.Db.Insertable(new FaceStoreProfile
+        {
+            StoreCode = FaceMatchTestDatabase.DeletedStore,
+            Mode = FaceStoreMode.Match,
+            UpdatedAtUtc = FaceMatchTestDatabase.Now,
+        }).ExecuteCommand();
+
+        var list = (await _h.Profiles.ListAsync()).ToDictionary(i => i.StoreCode);
+
+        Assert.Equal(8, list[Qld].GateWarningCount);
+        Assert.Equal(9, list[Nsw].GateWarningCount);
+        Assert.Equal(8, list[FaceMatchTestDatabase.DeletedStore].GateWarningCount);
+        Assert.Null(list[FaceMatchTestDatabase.DeletedStore].StoreName);
+
+        // 补齐后归零；Capture 本来就不要求这些记录。
+        await _h.Profiles.UpdateAsync(Qld, MatchRequest(), FaceMatchTestHarness.Admin);
+        await _h.Profiles.UpdateAsync(Nsw, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", dedup: true, unwelcome: true), FaceMatchTestHarness.Admin);
+        var after = (await _h.Profiles.ListAsync()).ToDictionary(i => i.StoreCode);
+        Assert.Equal(0, after[Qld].GateWarningCount);
+        Assert.Equal(0, after[Nsw].GateWarningCount);
+    }
+
+    [Fact]
+    public async Task 闸门报告序列化后的字段名是前端依赖的_warnings_hasWarnings_gateWarningCount()
+    {
+        await _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match), FaceMatchTestHarness.Admin);
+
+        var profile = await _h.Profiles.GetAsync(Qld);
+        var list = await _h.Profiles.ListAsync();
+
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var profileJson = System.Text.Json.JsonSerializer.Serialize(profile.Gates, options);
+        var listJson = System.Text.Json.JsonSerializer.Serialize(list, options);
+        Assert.Contains("\"hasWarnings\":true", profileJson, StringComparison.Ordinal);
+        Assert.Contains("\"canSave\":true", profileJson, StringComparison.Ordinal);
+        Assert.Contains("\"warnings\":[\"piaReference\"", profileJson, StringComparison.Ordinal);
+        Assert.Contains("\"missing\":[]", profileJson, StringComparison.Ordinal);
+        Assert.Contains("\"gateWarningCount\":8", listJson, StringComparison.Ordinal);
     }
 
     // ---------- 员工排除 ----------
@@ -268,6 +436,34 @@ public sealed class FaceStoreProfileTests : IDisposable
     }
 
     [Fact]
+    public async Task 员工排除在Match下有登记即可保存_员工facet本身没有警告_Match合规缺口另算()
+    {
+        _h.Database.AddUser("u-1", "Alice", "s-1013");
+        SeedEnrollment("u-1", withdrawnConsent: false);
+
+        var saved = await _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, staff: true), FaceMatchTestHarness.Admin);
+
+        Assert.True(saved.StaffExclusionEnabled);
+        Assert.True(saved.Gates.CanSave);
+        Assert.Empty(saved.Gates.Facets.Single(f => f.Facet == "staffExclusion").Warnings);
+        Assert.NotEmpty(saved.Gates.Facets.Single(f => f.Facet == "match").Warnings);
+    }
+
+    [Theory]
+    [InlineData("staff")]
+    [InlineData("dedup")]
+    [InlineData("unwelcome")]
+    public async Task 三个开关在Off下仍然阻塞_modeOff是功能前提(string toggle)
+    {
+        var request = Req(staff: toggle == "staff", dedup: toggle == "dedup", unwelcome: toggle == "unwelcome");
+
+        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin));
+
+        AssertMissing(ex, toggle switch { "staff" => "staffExclusion", "dedup" => "trafficDedup", _ => "unwelcome" }, "modeOff");
+        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
+    }
+
+    [Fact]
     public async Task 开关要求模式不是Off()
     {
         var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, Req(dedup: true), FaceMatchTestHarness.Admin));
@@ -278,66 +474,82 @@ public sealed class FaceStoreProfileTests : IDisposable
     // ---------- 去重 ----------
 
     [Fact]
-    public async Task 去重在Match模式下需要专项律师确认_在Capture下仅内部验证不要求()
+    public async Task 去重在Match模式下缺专项律师确认是警告_在Capture下仅内部验证既不要求也不警告()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, MatchRequest() with { TrafficDedupEnabled = true }, FaceMatchTestHarness.Admin));
-        var missing = AssertMissing(ex, "trafficDedup", "dedupLegalSignoffBy");
-        Assert.Contains("dedupLegalSignoffAt", missing);
+        var withGaps = await _h.Profiles.UpdateAsync(
+            Qld, MatchRequest() with { TrafficDedupEnabled = true }, FaceMatchTestHarness.Admin);
+        Assert.True(withGaps.TrafficDedupEnabled);
+        Assert.True(withGaps.Gates.CanSave);
+        var dedup = withGaps.Gates.Facets.Single(f => f.Facet == "trafficDedup");
+        Assert.Empty(dedup.Missing);
+        Assert.Equal(["dedupLegalSignoffBy", "dedupLegalSignoffAt"], dedup.Warnings);
+        // match 本身材料齐全，所以总警告数就是去重这 2 条。
+        Assert.Equal("mode=2;warnings=2", (await _h.Db.Queryable<FaceAuditLog>().OrderByDescending(a => a.AuditId).FirstAsync()).Result);
 
         var inCapture = await _h.Profiles.UpdateAsync(
             Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", dedup: true), FaceMatchTestHarness.Admin);
         Assert.True(inCapture.TrafficDedupEnabled);
+        Assert.False(inCapture.Gates.HasWarnings);
 
         var full = await _h.Profiles.UpdateAsync(
             Qld,
             MatchRequest() with { TrafficDedupEnabled = true, DedupLegalSignoffBy = "Counsel", DedupLegalSignoffAt = _h.At(TimeSpan.FromDays(-1)) },
             FaceMatchTestHarness.Admin);
         Assert.True(full.TrafficDedupEnabled);
+        Assert.False(full.Gates.HasWarnings);
     }
 
     // ---------- 不受欢迎人员名单 ----------
 
     [Fact]
-    public async Task 名单开关在Match下缺任何前置条件都拒绝_材料齐全才放行()
+    public async Task 名单开关在Match下缺专项记录是警告_照样保存_材料齐全后警告消失()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, unwelcome: true), FaceMatchTestHarness.Admin));
-        var missing = AssertMissing(ex, "unwelcome", "unwelcomeAssessmentRef");
-        foreach (var key in new[]
-                 {
-                     "unwelcomeLegalSignoffBy", "unwelcomeLegalSignoffAt", "piaReference", "signageInstalledOn",
-                     "staffTrainingDate", "privacyContact", "crossBorderRegion", "crossBorderReviewRef",
-                 })
-        {
-            Assert.Contains(key, missing);
-        }
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Match, unwelcome: true), FaceMatchTestHarness.Admin);
 
-        var saved = await _h.Profiles.UpdateAsync(Qld, UnwelcomeMatchRequest(), FaceMatchTestHarness.Admin);
         Assert.Equal(FaceStoreMode.Match, saved.Mode);
         Assert.True(saved.UnwelcomeListEnabled);
-        Assert.Equal("Orion Privacy Officer", saved.PrivacyContact);
+        Assert.True(saved.Gates.CanSave);
+        var unwelcome = saved.Gates.Facets.Single(f => f.Facet == "unwelcome");
+        Assert.Empty(unwelcome.Missing);
+        foreach (var key in new[]
+                 {
+                     "unwelcomeAssessmentRef", "unwelcomeLegalSignoffBy", "unwelcomeLegalSignoffAt", "piaReference", "signageInstalledOn",
+                     "staffTrainingDate", "privacyContact", "crossBorderRegion", "crossBorderReviewRef", "crossBorderReviewedBy", "crossBorderReviewedAt",
+                 })
+        {
+            Assert.Contains(key, unwelcome.Warnings);
+        }
+
+        var full = await _h.Profiles.UpdateAsync(Qld, UnwelcomeMatchRequest(), FaceMatchTestHarness.Admin);
+        Assert.Equal(FaceStoreMode.Match, full.Mode);
+        Assert.True(full.UnwelcomeListEnabled);
+        Assert.False(full.Gates.HasWarnings);
+        Assert.Equal("Orion Privacy Officer", full.PrivacyContact);
     }
 
     [Fact]
-    public async Task 名单开关在Match下要求跨境披露审查与地域一致()
+    public async Task 名单开关在Match下审查地域与当前配置不一致_是警告_仍可保存()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, UnwelcomeMatchRequest() with { CrossBorderRegion = "ap-singapore" }, FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, UnwelcomeMatchRequest() with { CrossBorderRegion = "ap-singapore" }, FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "unwelcome", "regionMismatch");
+        Assert.True(saved.Gates.CanSave);
+        Assert.Equal(["regionMismatch"], saved.Gates.Facets.Single(f => f.Facet == "unwelcome").Warnings);
+        Assert.Equal(["regionMismatch"], saved.Gates.Facets.Single(f => f.Facet == "match").Warnings);
     }
 
     [Fact]
-    public async Task 名单开关在Capture下只处理内部知情人员_不要求任何专项记录()
+    public async Task 名单开关在Capture下只处理内部知情人员_不要求任何专项记录_也没有警告()
     {
-        // 放宽规则：Capture 下的名单只用于上线前用内部员工照片做端到端测试，与顾客去重同一原则。
+        // 放宽规则（#761）：Capture 下的名单只用于上线前用内部员工照片做端到端测试，与顾客去重同一原则。
         var saved = await _h.Profiles.UpdateAsync(
             Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", unwelcome: true), FaceMatchTestHarness.Admin);
 
         Assert.Equal(FaceStoreMode.Capture, saved.Mode);
         Assert.True(saved.UnwelcomeListEnabled);
         Assert.True(saved.Gates.CanSave);
+        Assert.False(saved.Gates.HasWarnings);
         Assert.Null(saved.UnwelcomeAssessmentRef);
         Assert.Null(saved.CrossBorderRegion);
     }
@@ -355,17 +567,20 @@ public sealed class FaceStoreProfileTests : IDisposable
     }
 
     [Fact]
-    public async Task 名单在Capture下开启后切到Match_会重新要求全部专项记录()
+    public async Task 名单在Capture下开启后切到Match_能保存_专项记录重新计算为警告()
     {
         await _h.Profiles.UpdateAsync(
             Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", unwelcome: true), FaceMatchTestHarness.Admin);
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, unwelcome: true), FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Match, unwelcome: true), FaceMatchTestHarness.Admin);
 
-        var missing = AssertMissing(ex, "unwelcome", "unwelcomeAssessmentRef");
-        Assert.Contains("unwelcomeLegalSignoffBy", missing);
-        Assert.Contains("crossBorderRegion", missing);
+        Assert.Equal(FaceStoreMode.Match, saved.Mode);
+        Assert.True(saved.Gates.CanSave);
+        var warnings = saved.Gates.Facets.Single(f => f.Facet == "unwelcome").Warnings;
+        Assert.Contains("unwelcomeAssessmentRef", warnings);
+        Assert.Contains("unwelcomeLegalSignoffBy", warnings);
+        Assert.Contains("crossBorderRegion", warnings);
     }
 
     // ---------- 字段校验 ----------

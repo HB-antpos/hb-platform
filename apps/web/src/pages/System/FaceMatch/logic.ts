@@ -250,7 +250,10 @@ export function getMissingLabelKey(missingKey: string): string | null {
 export interface GateRow {
   facet: string
   facetLabelKey: string | null
+  /** 仍然阻塞保存的缺项。 */
   missing: string[]
+  /** 不阻塞保存、但必须持续可见的合规记录缺口。 */
+  warnings: string[]
 }
 
 /** 只列出「被请求启用」的闸门项；Requested=false 的项不展示（没有要求也就谈不上缺项）。 */
@@ -258,11 +261,22 @@ export function summarizeGates(report: FaceGateReport | null | undefined): GateR
   if (!report) return []
   return report.facets
     .filter((facet) => facet.requested)
-    .map((facet) => ({ facet: facet.facet, facetLabelKey: FACET_LABEL_KEYS[facet.facet] ?? null, missing: facet.missing }))
+    .map((facet) => ({
+      facet: facet.facet,
+      facetLabelKey: FACET_LABEL_KEYS[facet.facet] ?? null,
+      missing: facet.missing,
+      warnings: facet.warnings,
+    }))
 }
 
+/** 仍然阻塞保存的缺项条数（不含警告）。 */
 export function countMissing(rows: ReadonlyArray<GateRow>): number {
   return rows.reduce((sum, row) => sum + row.missing.length, 0)
+}
+
+/** 合规记录警告条数（各 facet 之和，与后端 gateWarningCount 同口径）。 */
+export function countWarnings(rows: readonly GateRow[]): number {
+  return rows.reduce((sum, row) => sum + row.warnings.length, 0)
 }
 
 // ───────────── 错误分类 ─────────────

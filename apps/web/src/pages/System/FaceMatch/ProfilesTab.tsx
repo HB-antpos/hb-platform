@@ -22,6 +22,7 @@ import {
   buildProfileRequest,
   describeFaceMatchError,
   countMissing,
+  countWarnings,
   getGateReportFromError,
   getMissingLabelKey,
   isSameProfileRequest,
@@ -103,8 +104,15 @@ function ProfileForm({ context, profile, onSaved }: ProfileFormProps) {
     setSaving(true)
     setSaveError(null)
     try {
-      await updateFaceStoreProfile(profile.storeCode, buildProfileRequest(form.getFieldsValue(true) as FaceProfileFormValues))
-      void message.success(t('faceMatch.profile.saved'))
+      const saved = await updateFaceStoreProfile(profile.storeCode, buildProfileRequest(form.getFieldsValue(true) as FaceProfileFormValues))
+      // 保存成功后的闸门报告同样要显示警告：合规记录缺口不阻塞保存，但保存后必须继续可见（随后父组件会重新读取档案）。
+      setGates(saved.gates)
+      const savedWarningCount = countWarnings(summarizeGates(saved.gates))
+      if (savedWarningCount > 0) {
+        void message.warning(t('faceMatch.profile.savedWithWarnings', { count: savedWarningCount }))
+      } else {
+        void message.success(t('faceMatch.profile.saved'))
+      }
       onSaved()
     } catch (error) {
       // 409 FACE_MATCH_GATE_NOT_MET：details 就是闸门报告，与实时检查展示在同一处。
@@ -117,7 +125,9 @@ function ProfileForm({ context, profile, onSaved }: ProfileFormProps) {
   }
 
   const rows = summarizeGates(gates)
+  // 仍阻塞保存的缺项数（只看 missing）与不阻塞的合规记录警告数（只看 warnings）分开统计。
   const missingCount = countMissing(rows)
+  const warningCount = countWarnings(rows)
   const region = config.region
   const regionMismatch = profile.exists && !profile.crossBorderReviewValid
 
@@ -331,32 +341,51 @@ function ProfileForm({ context, profile, onSaved }: ProfileFormProps) {
               <Alert type="info" showIcon message={t('faceMatch.gates.nothingRequested')} />
             ) : (
               rows.map((row) => (
-                <Alert
-                  key={row.facet}
-                  type={row.missing.length === 0 ? 'success' : 'warning'}
-                  showIcon
-                  icon={row.missing.length === 0 ? <CheckCircleFilled /> : <CloseCircleFilled />}
-                  message={row.facetLabelKey ? t(row.facetLabelKey) : row.facet}
-                  description={
-                    row.missing.length === 0 ? (
-                      t('faceMatch.gates.satisfied')
-                    ) : (
-                      <div>
-                        <div>{t('faceMatch.gates.missingTitle', { count: row.missing.length })}</div>
-                        <ul style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
-                          {row.missing.map((key) => {
+                <div key={row.facet} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <Alert
+                    type={row.missing.length === 0 ? 'success' : 'warning'}
+                    showIcon
+                    icon={row.missing.length === 0 ? <CheckCircleFilled /> : <CloseCircleFilled />}
+                    message={row.facetLabelKey ? t(row.facetLabelKey) : row.facet}
+                    description={
+                      row.missing.length === 0 ? (
+                        t('faceMatch.gates.satisfied')
+                      ) : (
+                        <div>
+                          <div>{t('faceMatch.gates.missingTitle', { count: row.missing.length })}</div>
+                          <ul style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
+                            {row.missing.map((key) => {
+                              const labelKey = getMissingLabelKey(key)
+                              return <li key={key}>{labelKey ? t(labelKey) : key}</li>
+                            })}
+                          </ul>
+                        </div>
+                      )
+                    }
+                  />
+                  {/* 合规记录缺口（不阻塞保存）：单独一块红色提示，不与上面「阻塞项」混在一起，也不会被「所需条件已满足」盖住。 */}
+                  {row.warnings.length > 0 ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message={t('faceMatch.gates.warningTitle', { count: row.warnings.length })}
+                      description={
+                        <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                          {row.warnings.map((key) => {
                             const labelKey = getMissingLabelKey(key)
                             return <li key={key}>{labelKey ? t(labelKey) : key}</li>
                           })}
                         </ul>
-                      </div>
-                    )
-                  }
-                />
+                      }
+                    />
+                  ) : null}
+                </div>
               ))
             )}
             {saveError ? <Alert type="error" showIcon message={saveError} /> : null}
             {missingCount > 0 ? <Typography.Text type="warning">{t('faceMatch.gates.saveWillFail', { count: missingCount })}</Typography.Text> : null}
+            {/* 只要有合规记录警告就常驻显示，保存前后都在：可以保存并启用，但对真实顾客运行前法律上必须补齐。 */}
+            {warningCount > 0 ? <Typography.Text type="danger" strong>{t('faceMatch.gates.warningStanding', { count: warningCount })}</Typography.Text> : null}
             <Space>
               <Button type="primary" loading={saving} disabled={writeBlocked} onClick={() => void handleSave()}>
                 {t('faceMatch.profile.save')}
@@ -427,6 +456,8 @@ export default function ProfilesTab({ context }: { context: FaceMatchTabContext 
             {record.staffExclusionEnabled ? <Tag>{t('faceMatch.profile.fields.staffExclusionEnabled')}</Tag> : null}
             {record.trafficDedupEnabled ? <Tag>{t('faceMatch.profile.fields.trafficDedupEnabled')}</Tag> : null}
             {record.unwelcomeListEnabled ? <Tag>{t('faceMatch.profile.fields.unwelcomeListEnabled')}</Tag> : null}
+            {/* 合规记录缺口（不阻塞启用）：列表里始终可见的红色标记，条数与档案页各 facet 提示之和一致。 */}
+            {record.gateWarningCount > 0 ? <Tag color="red">{t('faceMatch.profile.overview.warningTag', { count: record.gateWarningCount })}</Tag> : null}
           </Space>
         ),
       },

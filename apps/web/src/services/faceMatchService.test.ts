@@ -185,6 +185,10 @@ try {
   assert.equal(profiles.length, 2)
   assert.equal(profiles[0].mode, 2)
   assert.equal(profiles[0].crossBorderReviewValid, true)
+  assert.equal(profiles[0].gateWarningCount, 0, '老后端的列表项没有 gateWarningCount：归一化为 0')
+  responseFactory = () => json({ success: true, data: [{ storeCode: '1008', mode: 2, gateWarningCount: 9 }, { storeCode: '1009', gateWarningCount: -3 }, { storeCode: '1010', gateWarningCount: 'x' }] })
+  const warned = await getFaceStoreProfiles()
+  assert.deepEqual(warned.map((item) => item.gateWarningCount), [9, 0, 0], '警告条数只认非负数字，其余按 0')
 
   const gatePayload = {
     facets: [
@@ -234,6 +238,40 @@ try {
       normalizeFaceGateReport((error.payload as { details?: unknown }).details).facets.length === 2,
   )
   assert.equal(normalizeFaceGateReport(null).canSave, false, '缺闸门报告按不可保存处理')
+  assert.equal(normalizeFaceGateReport(null).hasWarnings, false, '缺闸门报告没有警告')
+  // 老后端（还没有 warnings / hasWarnings）：缺省为空数组 / false，页面不崩
+  const legacyReport = normalizeFaceGateReport(gatePayload)
+  assert.deepEqual(legacyReport.facets[0].warnings, [])
+  assert.equal(legacyReport.hasWarnings, false)
+  // 新后端：警告与阻塞缺项并存，canSave 只由后端给的标志决定
+  const warnedReport = normalizeFaceGateReport({
+    facets: [
+      { facet: 'match', requested: true, missing: [], warnings: ['piaReference', 'regionMismatch', 7, ''] },
+      { facet: 'unwelcome', requested: true, missing: ['modeOff'] },
+    ],
+    canSave: true,
+    hasWarnings: true,
+  })
+  assert.deepEqual(warnedReport.facets[0].warnings, ['piaReference', 'regionMismatch'], '警告只保留非空字符串')
+  assert.deepEqual(warnedReport.facets[1].warnings, [])
+  assert.equal(warnedReport.canSave, true, '有警告但没有阻塞缺项时仍可保存')
+  assert.equal(warnedReport.hasWarnings, true)
+  assert.equal(
+    normalizeFaceGateReport({ facets: [{ facet: 'match', requested: true, warnings: ['piaReference'] }], canSave: true }).hasWarnings,
+    true,
+    '报告没带 hasWarnings 但 facet 有警告：以实际警告条目为准',
+  )
+
+  // 保存成功（200）的响应里带警告：归一化后保留
+  responseFactory = () =>
+    json({
+      success: true,
+      data: { storeCode: '1008', gates: { facets: [{ facet: 'match', requested: true, missing: [], warnings: ['piaReference'] }], canSave: true, hasWarnings: true } },
+    })
+  const savedWithWarnings = await updateFaceStoreProfile('1008', emptyProfileRequest)
+  assert.equal(savedWithWarnings.gates.canSave, true)
+  assert.equal(savedWithWarnings.gates.hasWarnings, true)
+  assert.deepEqual(savedWithWarnings.gates.facets[0].warnings, ['piaReference'])
 
   // ───────── 员工：查询参数 ─────────
   responseFactory = () => json({ success: true, data: [{ userGuid: 'u1', displayName: 'Ann', email: '', enrollmentState: 'active', requiresNswNotice: true }] })

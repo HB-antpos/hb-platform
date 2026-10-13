@@ -407,24 +407,26 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
     // ---------- 地域改动作废审查 ----------
 
     [Fact]
-    public async Task 地域改动后_依赖审查的真实顾客功能被关闭_审查记录清空_写审计()
+    public async Task 地域改动后_只清空审查记录并写审计_不再强制关闭任何档案()
     {
-        SeedProfile("1013", FaceStoreMode.Match, region: "ap-shanghai", dedup: true, unwelcome: true);
+        // 2026-10-13 用户决定 Match 闸门改为警告：作废审查不再把依赖它的档案关成 Off，模式与各开关原样保留。
+        SeedProfile("1013", FaceStoreMode.Match, region: "ap-shanghai", staff: true, dedup: true, unwelcome: true);
         SeedProfile("2001", FaceStoreMode.Capture, region: "ap-shanghai", evaluate: true);
-        // Capture 下开了名单（只处理内部知情人员，不依赖跨境审查）：只作废审查，名单开关保留。
+        // Capture 下开了名单（只处理内部知情人员，不依赖跨境审查）：同样只作废审查，名单开关保留。
         SeedProfile("2002", FaceStoreMode.Capture, region: "ap-shanghai", unwelcome: true);
-        SeedProfile("9001", FaceStoreMode.Match, region: "ap-guangzhou");
+        SeedProfile("9001", FaceStoreMode.Match, region: "ap-guangzhou", dedup: true);
 
         var count = await _h.Maintenance.InvalidateStaleCrossBorderReviewsAsync(default);
 
         Assert.Equal(3, count);
         var match = await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "1013");
-        Assert.Equal(FaceStoreMode.Off, match.Mode);
-        Assert.False(match.TrafficDedupEnabled || match.UnwelcomeListEnabled || match.StaffExclusionEnabled || match.EvaluateMatch);
+        Assert.Equal(FaceStoreMode.Match, match.Mode);
+        Assert.True(match.StaffExclusionEnabled && match.TrafficDedupEnabled && match.UnwelcomeListEnabled);
         Assert.Null(match.CrossBorderRegion);
         Assert.Null(match.CrossBorderReviewRef);
+        Assert.Null(match.CrossBorderReviewedBy);
         Assert.Null(match.CrossBorderReviewedAt);
-        // 仅内部知情人员验证的 Capture 档案：只作废审查，不改模式。
+        Assert.Equal("system", match.UpdatedBy);
         var capture = await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "2001");
         Assert.Equal(FaceStoreMode.Capture, capture.Mode);
         Assert.True(capture.EvaluateMatch);
@@ -433,13 +435,31 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
         Assert.Equal(FaceStoreMode.Capture, captureList.Mode);
         Assert.True(captureList.UnwelcomeListEnabled);
         Assert.Null(captureList.CrossBorderRegion);
-        // 地域一致的不动。
-        Assert.Equal(FaceStoreMode.Match, (await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "9001")).Mode);
+        // 地域一致的不动（连审查记录都保留）。
+        var untouched = await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "9001");
+        Assert.Equal(FaceStoreMode.Match, untouched.Mode);
+        Assert.True(untouched.TrafficDedupEnabled);
+        Assert.Equal("ap-guangzhou", untouched.CrossBorderRegion);
         var audits = await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.ProfileInvalidated).ToListAsync();
         Assert.Equal(3, audits.Count);
-        Assert.Contains(audits, a => a.StoreCode == "1013" && a.Result == "disabled");
-        Assert.Contains(audits, a => a.StoreCode == "2001" && a.Result == "review-cleared");
-        Assert.Contains(audits, a => a.StoreCode == "2002" && a.Result == "review-cleared");
+        // 审计结论一律是 review-cleared，不会再出现 disabled。
+        Assert.All(audits, a => Assert.Equal("review-cleared", a.Result));
+        Assert.Equal(["1013", "2001", "2002"], audits.Select(a => a.StoreCode ?? string.Empty).Order().ToArray());
+    }
+
+    [Fact]
+    public async Task 地域改动作废审查后_档案保存的闸门报告把审查缺口显示为警告_不阻塞()
+    {
+        SeedProfile("1013", FaceStoreMode.Match, region: "ap-shanghai", dedup: true);
+        await _h.Maintenance.InvalidateStaleCrossBorderReviewsAsync(default);
+
+        var profile = await _h.Profiles.GetAsync("1013");
+
+        Assert.Equal(FaceStoreMode.Match, profile.Mode);
+        Assert.True(profile.Gates.CanSave);
+        Assert.True(profile.Gates.HasWarnings);
+        Assert.Contains("crossBorderRegion", profile.Gates.Facets.Single(f => f.Facet == "match").Warnings);
+        Assert.Empty(profile.Gates.Facets.Single(f => f.Facet == "match").Missing);
     }
 
     [Fact]
@@ -660,12 +680,13 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
     }
 
     private void SeedProfile(
-        string storeCode, byte mode, string? region = null, bool dedup = false, bool unwelcome = false, bool evaluate = false) =>
+        string storeCode, byte mode, string? region = null, bool dedup = false, bool unwelcome = false, bool evaluate = false, bool staff = false) =>
         _h.Db.Insertable(new FaceStoreProfile
         {
             StoreCode = storeCode,
             Mode = mode,
             EvaluateMatch = evaluate,
+            StaffExclusionEnabled = staff,
             TrafficDedupEnabled = dedup,
             UnwelcomeListEnabled = unwelcome,
             CrossBorderRegion = region,

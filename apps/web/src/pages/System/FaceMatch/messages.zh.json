@@ -2,7 +2,7 @@
   "faceMatch": {
     "title": "人脸比对",
     "subtitle": "处理地域：{{region}}",
-    "legalNotice": "重要：Match（比对）、顾客去重、不受欢迎人员名单这三项对真实顾客运行前，必须先有律师确认、隐私影响评估和告示等记录。本页的“闸门”只是把这些记录和要求挡在前面，不能替代法律判断。",
+    "legalNotice": "重要：Match（比对）、顾客去重、不受欢迎人员名单这三项对真实顾客运行前，必须先有律师确认、隐私影响评估和告示等记录。这些记录现在只是红色警告，不再阻止保存和启用；但法律上仍必须在对真实顾客运行前补齐，本页不能替代法律判断。",
     "noPermission": "当前账号没有可用的人脸比对页签权限",
     "tabs": {
       "profiles": "门店档案",
@@ -54,7 +54,7 @@
       "FACE_MATCH_STORE_NOT_FOUND": "没有找到该门店",
       "FACE_MATCH_FIELD_INVALID": "提交的内容不符合要求（含文件类型、大小或数量），请检查后重试",
       "FACE_MATCH_NOT_FOUND": "没有找到对应的记录，或你无权操作它",
-      "FACE_MATCH_GATE_NOT_MET": "启用闸门未满足：请先补全右侧列出的缺项后再保存",
+      "FACE_MATCH_GATE_NOT_MET": "启用前置条件未满足：请先补全右侧列出的缺项后再保存（合规记录缺口只是警告，不在此列）",
       "FACE_MATCH_CONSENT_WITHDRAWN": "该同意已撤回，不能用于登记，请重新记录同意",
       "FACE_MATCH_NSW_NOTICE_REQUIRED": "NSW 门店员工必须填写书面通知日期",
       "FACE_MATCH_NSW_NOTICE_TOO_RECENT": "NSW 门店员工的书面通知日期距签署同意不足 14 天，不能登记",
@@ -71,7 +71,7 @@
       "FACE_MATCH_APPROVER_IS_SUBMITTER": "提交人不能批准自己提交的条目",
       "FACE_MATCH_ALREADY_APPROVED_BY_YOU": "你已经批准过该条目，需要另一位不同的批准人",
       "FACE_MATCH_ENTRY_EXPIRED": "该条目已到期，不能再批准",
-      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "条目的生效门店都没有通过不受欢迎人员名单的启用闸门，暂时不能批准；请先在门店档案里补全并启用",
+      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "条目的生效门店都还没有开启不受欢迎人员名单，暂时不能批准；请先在门店档案里开启",
       "FACE_MATCH_ENTRY_CHANGED": "条目刚被别人修改，请刷新后重试",
       "FACE_MATCH_TASK_CLOSED": "该复核任务已结束",
       "FACE_MATCH_SAME_REVIEWER": "第二复核人必须不同于第一复核人，请换另一位有复核权限的同事确认",
@@ -125,8 +125,10 @@
     "gates": {
       "title": "启用闸门",
       "nothingRequested": "当前没有请求启用任何需要闸门的功能。",
-      "satisfied": "所需记录齐全",
+      "satisfied": "保存所需的前置条件已满足",
       "missingTitle": "还缺 {{count}} 项：",
+      "warningTitle": "还有 {{count}} 项合规记录未补齐。不会阻止启用，但对真实顾客运行前必须完成",
+      "warningStanding": "合规记录未补齐（共 {{count}} 项）：可以保存并启用，但对真实顾客运行前法律上必须补齐。",
       "saveWillFail": "还有 {{count}} 项没有补齐：现在保存会被服务端拒绝（409）。",
       "facets": {
         "capture": "Capture 模式（仅限内部知情人员）",
@@ -149,6 +151,7 @@
       "formTitle": "门店档案：{{store}}",
       "save": "保存档案",
       "saved": "门店档案已保存",
+      "savedWithWarnings": "门店档案已保存，但还有 {{count}} 项合规记录未补齐：对真实顾客运行前必须完成",
       "reset": "放弃修改",
       "neverSaved": "该门店还没有保存过档案，当前是默认值（关闭）。",
       "updatedAt": "最近保存：{{time}}，操作人 {{by}}",
@@ -167,7 +170,7 @@
         "match": "Match",
         "offHint": "关闭：不处理该门店摄像机的抓拍。",
         "captureHint": "Capture：全部留存并可在后台看图，只允许用于只拍知情同意内部人员的联调场景，必须填写“允许拍摄对象”。",
-        "matchHint": "Match：对抓拍做比对，不留存无命中的图片；对真实顾客运行前必须有律师确认等记录。"
+        "matchHint": "Match：对抓拍做比对，不留存无命中的图片；律师确认等记录缺了会显示为红色警告（不阻止启用），对真实顾客运行前必须补齐。"
       },
       "fields": {
         "mode": "运行模式",
@@ -197,8 +200,8 @@
       "hints": {
         "evaluateMatch": "只评估、不对外生效，需要 Capture 模式。",
         "staffExclusion": "客流统计里排除已登记员工；需要门店成员有有效的同意与登记。",
-        "trafficDedup": "对顾客做当日人脸去重统计，法律风险高；需要去重专项律师确认。",
-        "unwelcomeList": "命中名单时提示店员并进入两人复核。Match 模式需要专项评估、律师确认、告示、培训记录；Capture 模式（仅内部知情人员）不要求这些记录，用于上线前内部测试，切到 Match 时会重新校验。",
+        "trafficDedup": "对顾客做当日人脸去重统计，法律风险高。缺的去重专项律师确认等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。Capture 模式仅限内部知情人员，不要求这些记录。",
+        "unwelcomeList": "命中名单时提示店员并进入两人复核。缺的专项评估、律师确认、告示、培训等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。Capture 模式仅限内部知情人员，不要求这些记录，用于上线前内部测试，切到 Match 时会重新计算警告。",
         "allowedSubjects": "Capture 模式必填：说明镜头前只会出现哪些知情同意的人员。",
         "signage": "告示须明确写出使用人脸识别技术。",
         "staffNoticeNsw": "该门店在 NSW：员工监控通知须至少提前 14 天。",
@@ -211,6 +214,7 @@
       },
       "overview": {
         "enabledItems": "已启用的功能",
+        "warningTag": "合规记录未齐（{{count}}）",
         "crossBorder": "跨境审查",
         "valid": "有效",
         "notValid": "无效或未填",

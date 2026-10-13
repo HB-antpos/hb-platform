@@ -91,7 +91,7 @@ FROM [dbo].[FaceStoreProfile];
 /// - 每 <c>FaceMatch:ProfileRefreshSeconds</c>（默认 30）秒整表读一次，内存缓存，整份替换快照；
 /// - <b>从未成功读取过</b>时 <see cref="Snapshot"/> 为 null，调用方一律按 Off；
 /// - 刷新失败 → 保留上一份快照继续使用，节流记 Error；
-/// - 本类只负责「读到什么」，怎么解释档案（降级、闸门）在 <see cref="StoreModePolicy"/>。
+/// - 本类只负责「读到什么」，怎么解释档案（模式折算、合规记录警告）在 <see cref="StoreModePolicy"/>。
 /// </summary>
 internal sealed class FaceStoreProfileSource
 {

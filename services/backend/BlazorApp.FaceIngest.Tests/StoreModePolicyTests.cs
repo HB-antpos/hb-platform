@@ -140,11 +140,19 @@ public sealed class StoreModePolicyTests
         Assert.Equal("Australia/Brisbane", mode.TimeZoneId);
     }
 
+    private const string LegalRecordsWarningKey = "match-without-legal-records";
+
+    private static bool HasLegalRecordsWarning(MatchHarness harness)
+        => harness.Factory.LogEntries.Any(log => log.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && log.Message.Contains(LegalRecordsWarningKey, StringComparison.Ordinal));
+
+    // ---- 2026-10-13 用户决定：Match 合规闸门全部改为警告。缺记录不再降级、不再关闭任何功能，只按门店节流记 Warning ----
+
     [Theory]
     [InlineData("staff")]
     [InlineData("dedup")]
     [InlineData("unwelcome")]
-    public async Task Match缺跨境审查地域不等于当前配置_降级_有允许对象则Capture否则Off_并记Warning(string feature)
+    public async Task Match缺跨境审查或地域不等于当前配置_照常生效_不降级_只记Warning(string feature)
     {
         var wrongRegion = Profile(
             staff: feature == "staff",
@@ -152,45 +160,102 @@ public sealed class StoreModePolicyTests
             unwelcome: feature == "unwelcome",
             crossBorderRegion: "ap-singapore",
             allowedSubjects: "仅内部测试员工");
+        // 有没有 AllowedSubjects 都一样：不再因为跨境审查而退回 Capture / Off。
         var wrongRegionNoSubjects = wrongRegion with { StoreCode = "S2", AllowedSubjects = null };
         var wrongRegionBlankSubjects = wrongRegion with { StoreCode = "S3", AllowedSubjects = "   " };
         using var harness = await MatchHarness.CreateAsync([wrongRegion, wrongRegionNoSubjects, wrongRegionBlankSubjects]);
 
-        var withSubjects = Resolve(harness);
-        var withoutSubjects = Resolve(harness, "S2");
-        var blankSubjects = Resolve(harness, "S3");
+        foreach (var store in new[] { "S1001", "S2", "S3" })
+        {
+            var mode = Resolve(harness, store);
+            Assert.Equal(StoreModeKind.Match, mode.Kind);
+            Assert.Equal("profile-match", mode.Reason);
+            Assert.Equal(feature == "staff", mode.StaffExclusion);
+            Assert.Equal(feature == "dedup", mode.TrafficDedup);
+            Assert.Equal(feature == "unwelcome", mode.Unwelcome);
+        }
 
-        Assert.Equal(StoreModeKind.Capture, withSubjects.Kind);
-        Assert.False(withSubjects.Evaluate);
-        Assert.False(withSubjects.StaffExclusion);
-        Assert.Equal("downgraded-to-capture", withSubjects.Reason);
-        Assert.Equal(StoreModeKind.Off, withoutSubjects.Kind);
-        Assert.Equal(StoreModeKind.Off, blankSubjects.Kind);
-        Assert.Contains(harness.Factory.LogEntries, log => log.Level == Microsoft.Extensions.Logging.LogLevel.Warning
-            && log.Message.Contains("cross-border-gate", StringComparison.Ordinal));
+        Assert.True(HasLegalRecordsWarning(harness));
     }
 
     [Fact]
-    public async Task 地域配置改动后旧审查作废_同一份档案换地域即降级()
+    public async Task 地域配置改动后旧审查对不上_同一份档案照常Match_只是多一条Warning()
     {
         var profiles = new[] { Profile(staff: true, crossBorderRegion: "ap-guangzhou", allowedSubjects: null) };
         using var guangzhou = await MatchHarness.CreateAsync(profiles);
         using var shanghai = await MatchHarness.CreateAsync(profiles, configure: s => s["FaceMatch:Tencent:Region"] = "ap-shanghai");
 
         Assert.Equal(StoreModeKind.Match, Resolve(guangzhou).Kind);
-        Assert.Equal(StoreModeKind.Off, Resolve(shanghai).Kind);
+        Assert.False(HasLegalRecordsWarning(guangzhou));
+        var mode = Resolve(shanghai);
+        Assert.Equal(StoreModeKind.Match, mode.Kind);
+        Assert.True(mode.StaffExclusion);
+        Assert.True(HasLegalRecordsWarning(shanghai));
     }
 
     [Fact]
-    public async Task 跨境审查记录缺失任一项同样降级()
+    public async Task 跨境审查记录缺失任一项同样照常Match_只记Warning()
     {
         using var harness = await MatchHarness.CreateAsync([Profile(staff: true, crossBorderReviewed: false)]);
 
-        Assert.Equal(StoreModeKind.Off, Resolve(harness).Kind);
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Match, mode.Kind);
+        Assert.True(mode.StaffExclusion);
+        Assert.True(HasLegalRecordsWarning(harness));
     }
 
     [Fact]
-    public async Task Match但没开任何比对_不要求跨境审查_只数抓拍数()
+    public async Task Match的合规记录齐全时不记缺记录Warning()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true, unwelcome: true)]);
+
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Match, mode.Kind);
+        Assert.True(mode.StaffExclusion && mode.TrafficDedup && mode.Unwelcome);
+        Assert.False(HasLegalRecordsWarning(harness));
+    }
+
+    [Fact]
+    public async Task 缺记录Warning按门店节流_同一店十分钟内只记一条_窗口过后再记_不同店各自记()
+    {
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(staff: true, crossBorderReviewed: false), Profile("S2", staff: true, crossBorderReviewed: false)]);
+
+        for (var i = 0; i < 5; i++)
+        {
+            Resolve(harness);
+        }
+
+        int Count(string store) => harness.Factory.LogEntries.Count(log => log.Message.Contains(LegalRecordsWarningKey, StringComparison.Ordinal)
+            && log.Message.Contains("store=" + store, StringComparison.Ordinal));
+        Assert.Equal(1, Count("S1001"));
+        Resolve(harness, "S2");
+        Assert.Equal(1, Count("S2"));
+
+        harness.Factory.Time.Advance(TimeSpan.FromMinutes(11));
+        Resolve(harness);
+        Assert.Equal(2, Count("S1001"));
+    }
+
+    [Fact]
+    public async Task 缺记录Warning的消息不含档案内容或个人信息()
+    {
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(staff: true, unwelcome: true, crossBorderRegion: "ap-singapore", unwelcomeRecord: false)]);
+
+        Resolve(harness);
+
+        var log = Assert.Single(harness.Factory.LogEntries, l => l.Message.Contains(LegalRecordsWarningKey, StringComparison.Ordinal));
+        Assert.Contains("Match mode is running without complete legal records", log.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("example.invalid", log.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("ap-singapore", log.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("XB-REVIEW", log.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Match但没开任何比对_不涉及跨境审查_不记缺记录Warning_只数抓拍数()
     {
         using var harness = await MatchHarness.CreateAsync([Profile(crossBorderRegion: null, crossBorderReviewed: false)]);
 
@@ -198,6 +263,7 @@ public sealed class StoreModePolicyTests
 
         Assert.Equal(StoreModeKind.Match, mode.Kind);
         Assert.False(mode.StaffExclusion || mode.TrafficDedup || mode.Unwelcome);
+        Assert.False(HasLegalRecordsWarning(harness));
     }
 
     [Fact]
@@ -230,28 +296,57 @@ public sealed class StoreModePolicyTests
         Assert.Contains(harness.Factory.LogEntries, log => log.Message.Contains("TimeZoneId", StringComparison.Ordinal));
     }
 
-    [Theory]
-    [InlineData(false, true, "unwelcome-gate")]
-    [InlineData(true, false, "unwelcome-no-cos")]
-    public async Task 名单是暗发布_专项记录不全或没有COS就不启用(bool recordComplete, bool cosAvailable, string expectedLogKey)
+    [Fact]
+    public async Task Match名单没有COS就不启用_这是功能前提_员工排除不受影响_并记Warning()
     {
-        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true, unwelcomeRecord: recordComplete)]);
-        harness.Hits.Available = cosAvailable;
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true)]);
+        harness.Hits.Available = false;
 
         var mode = Resolve(harness);
 
         Assert.Equal(StoreModeKind.Match, mode.Kind);
         Assert.True(mode.StaffExclusion);
         Assert.False(mode.Unwelcome);
-        Assert.Contains(harness.Factory.LogEntries, log => log.Message.Contains(expectedLogKey, StringComparison.Ordinal));
+        Assert.Contains(harness.Factory.LogEntries, log => log.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && log.Message.Contains("unwelcome-no-cos", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task 名单记录齐全且COS可用时才启用()
+    public async Task Match名单专项记录不全_名单照常启用_只记缺记录Warning()
+    {
+        // 2026-10-13 起专项记录缺失不再关掉名单（此前是 unwelcome-gate 兜底）。
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true, unwelcomeRecord: false)]);
+
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Match, mode.Kind);
+        Assert.True(mode.StaffExclusion);
+        Assert.True(mode.Unwelcome);
+        Assert.True(HasLegalRecordsWarning(harness));
+        Assert.DoesNotContain(harness.Factory.LogEntries, log => log.Message.Contains("unwelcome-gate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Match名单专项记录不全且没有COS_名单关闭的原因只是COS_缺记录另记Warning()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(unwelcome: true, unwelcomeRecord: false)]);
+        harness.Hits.Available = false;
+
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Match, mode.Kind);
+        Assert.False(mode.Unwelcome);
+        Assert.True(HasLegalRecordsWarning(harness));
+        Assert.Contains(harness.Factory.LogEntries, log => log.Message.Contains("unwelcome-no-cos", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task 名单记录齐全且COS可用时启用_且无缺记录Warning()
     {
         using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true)]);
 
         Assert.True(Resolve(harness).Unwelcome);
+        Assert.False(HasLegalRecordsWarning(harness));
     }
 
     // ---- 放宽规则：Capture 下名单只用于内部知情人员的测试，不要求专项记录与跨境审查 ----
@@ -310,15 +405,13 @@ public sealed class StoreModePolicyTests
     }
 
     [Fact]
-    public async Task Match下名单仍要求专项记录_放宽只限Capture()
+    public async Task Capture不涉及Match的合规记录警告_缺记录不记Warning()
     {
-        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true, unwelcomeRecord: false)]);
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(mode: 1, evaluate: true, staff: true, unwelcome: true, allowedSubjects: "仅内部测试员工", unwelcomeRecord: false, crossBorderRegion: null, crossBorderReviewed: false)]);
 
-        var mode = Resolve(harness);
-
-        Assert.Equal(StoreModeKind.Match, mode.Kind);
-        Assert.False(mode.Unwelcome);
-        Assert.Contains(harness.Factory.LogEntries, log => log.Message.Contains("unwelcome-gate", StringComparison.Ordinal));
+        Assert.Equal(StoreModeKind.Capture, Resolve(harness).Kind);
+        Assert.False(HasLegalRecordsWarning(harness));
     }
 
     [Fact]

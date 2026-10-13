@@ -55,7 +55,7 @@ public sealed class FaceMatchController(
     public Task<IActionResult> GetProfile(string storeCode, CancellationToken cancellationToken) =>
         RunAsync(() => profileService.GetAsync(storeCode, cancellationToken));
 
-    /// <summary>只算闸门、不保存：表单实时提示「缺哪一项」。</summary>
+    /// <summary>只算闸门、不保存：表单实时提示「哪些项仍阻塞保存」和「哪些合规记录还没补（警告，不阻塞）」。</summary>
     [HttpPost("profiles/{storeCode}/check")]
     [Authorize(Policy = Permissions.FaceMatch.Manage)]
     public Task<IActionResult> CheckProfile(
