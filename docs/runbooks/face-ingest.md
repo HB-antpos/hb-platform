@@ -900,8 +900,11 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 设计依据：`docs/design/face-matching-service-20261012.md` 第 13、14、15 节。本节只讲**主 API + Web 后台**这一侧（门店档案与闸门、员工同意与登记、客流统计、不受欢迎人员名单、复核、后台任务）；
 人脸接收服务里的「按档案模式搜索、建访客、写计数」是另一侧，见接收端自己的章节。**整套功能默认全部关闭**：没有门店档案、没有腾讯云管理凭据时，新代码上线不改变任何现有行为（摄像机后台、查看抓拍图片、Capture 试点都照旧）。
 
-> 合规提醒（不是法律意见）：闸门只是**记录**，不能替代法律判断。对真实顾客运行（Match 模式、顾客去重、不受欢迎人员名单）前，隐私影响评估、门口告示、律师确认、跨境披露审查必须真实完成；
+> 合规提醒（不是法律意见）：这些合规记录只是**记录**，不能替代法律判断。对真实顾客运行（Match 模式、顾客去重、不受欢迎人员名单）前，隐私影响评估、门口告示、律师确认、跨境披露审查必须真实完成；
 > 默认处理地域是中国大陆（`ap-guangzhou`），每张送检人脸（包括没匹配上的顾客）都在大陆处理，这是比新加坡更重的跨境披露【待律师确认】。
+>
+> **2026-10-13 起这些合规记录从「阻塞闸门」改为「警告」**（用户明确决定，风险由用户承担）：Match 下缺 PIA、告示、律师确认、跨境审查、NSW 员工通知、去重 / 名单专项记录，**不再阻止保存和启用**，
+> 但缺口始终可见（后台红色警告、门店列表「合规记录未齐」标记、审计 `profile.update` 的 `warnings=N`、接收端 Warning 日志）。**法律上，这些记录对真实顾客运行前仍然必须完成；警告不是豁免。**
 
 ### 16.1 入口、权限与接口
 
@@ -924,7 +927,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | 方法与路径 | 说明 |
 | --- | --- |
 | `GET /config` | 功能开关（`enabled` / `disabledReason`）、当前处理地域、私有桶是否已配置、`highBandScore`、本账号权限标志 |
-| `GET /profiles`、`GET/PUT /profiles/{storeCode}`、`POST /profiles/{storeCode}/check` | 门店档案；PUT 做全部闸门校验；check 只算「缺哪一项」不保存 |
+| `GET /profiles`、`GET/PUT /profiles/{storeCode}`、`POST /profiles/{storeCode}/check` | 门店档案；PUT 校验阻塞项（409）并报告合规记录警告；check 只算「哪些项阻塞 / 哪些记录有警告」不保存 |
 | `GET /staff?storeCode=` | 该门店的启用员工（登记用候选） |
 | `GET/POST /consents`、`POST /consents/{id}/withdraw` | 同意记录（multipart，文件字段 `scan`）与撤回 |
 | `GET/POST /enrollments`、`POST /enrollments/{id}/withdraw` | 员工登记（multipart，文件字段 `photos`，3–5 张）与撤回 |
@@ -949,7 +952,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 「功能关闭」时的表现：`GET /config` 返回 `enabled=false` 与原因（`region-missing` / `region-not-allowed` / `credentials-missing` / `credentials-invalid`）；
 登记、批准入名单等需要调用腾讯云的接口返回 **503 `FACE_MATCH_DISABLED`**；Web 页面仍可查看，写入按钮禁用；后台任务不发任何腾讯云请求。
-**改地域**会让所有门店已保存的跨境披露审查记录作废（16.4），须重新审查。
+**改地域**会让所有门店已保存的跨境披露审查记录被清空（16.3 / 16.7 任务⑦；不再关闭档案，缺口显示为警告），须重新审查。
 
 **私有对象存储（同意书扫描件、员工登记照、名单参考照片、命中图的读取）**沿用 `FaceCapture:Cos`（`FACE_CAPTURE_COS_BUCKET` / `_REGION` / `_SECRET_ID` / `_SECRET_KEY`，见 14.8）：
 桶与区域没有默认值、绝不回退主桶；密钥缺省时回退 `TENCENT_SECRET_*`（这是 COS 的既有做法，与 IAI 管理凭据无关）。未配置 → 上传类与看图类接口返回 **503 `FACE_MATCH_STORE_NOT_CONFIGURED`**。
@@ -971,16 +974,33 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 模式：`0 Off`（默认）、`1 Capture`（只拍知情同意的内部人员，必填 `AllowedSubjects`）、`2 Match`（生产）。档案不存在或读取失败，接收端一律按 `Off`。
 
-| 要启用的东西 | 后端强制的前置条件（缺任何一项 → 409 `FACE_MATCH_GATE_NOT_MET`，`details` 列出缺项） |
-| --- | --- |
-| `Capture` | `AllowedSubjects`；`EvaluateMatch`（标定评估）只允许在 Capture 下 |
-| `Match` | PIA 编号、门口告示安装日期、律师确认人与时间、**跨境披露审查**（地域 + 审查编号 + 审查人 + 审查时间）；**NSW 门店另需员工监控通知日期且距今至少 14 天** |
-| 员工排除 `StaffExclusionEnabled` | 模式不是 Off，且该门店成员中存在有效的同意与登记 |
-| 顾客去重 `TrafficDedupEnabled` | 模式不是 Off；在 Match 下另需去重专项律师确认人与时间（Capture 下仅内部知情人员验证，不要求） |
-| 不受欢迎人员名单 `UnwelcomeListEnabled` | 模式不是 Off；**Match** 下另需：专项评估编号、专项律师确认人与时间、PIA、告示日期、员工培训日期、隐私联系人、**跨境披露审查**。**Capture 下（只处理知情的内部人员，已填 `AllowedSubjects`）不要求这些专项记录**，用于上线前用内部员工照片做端到端测试（2026-10-13 用户决定，与顾客去重同一原则）；切到 Match 时重新校验，缺了就保存不了 |
+闸门报告（`GET /profiles/{storeCode}`、`POST .../check`、保存响应与 409 的 `details`）每个 facet 有两个列表：**`missing` = 仍然阻塞保存的项**，**`warnings` = 不阻塞但必须始终可见的合规记录缺口**；
+报告另有 `canSave`（只看 `missing`）与 `hasWarnings`；门店列表每行有 `gateWarningCount`（各 facet 警告条数之和，同一字段被多个 facet 要求时分别计数）。
 
-- **跨境披露审查的地域必须等于当前配置的处理地域**。配置地域被改动后：档案页显示审查无效；后台任务⑦会自动把所有地域不符的档案作废审查记录，
-  并**同时关闭**依赖它的真实顾客功能（Match 模式、员工排除、去重、名单）为 `Off`，写审计 `profile.region-invalidated`——宁可不识别，也不在失效的审查下运行。仅内部验证的 Capture 档案只作废审查、不改模式。
+**仍然阻塞（缺任何一项 → 409 `FACE_MATCH_GATE_NOT_MET`，`details` 列出缺项）——结构性 / 功能性前提，不是合规记录：**
+
+| 要启用的东西 | 阻塞项（`missing`） |
+| --- | --- |
+| `Capture` | `allowedSubjects`（必须声明只拍知情的内部人员）；`EvaluateMatch`（标定评估）只允许在 Capture 下（`evaluateMatchRequiresCapture`） |
+| 员工排除 `StaffExclusionEnabled` | 模式不是 Off（`modeOff`），且该门店成员中存在有效的同意与登记（`activeEnrollment`） |
+| 顾客去重 `TrafficDedupEnabled` | 模式不是 Off（`modeOff`） |
+| 不受欢迎人员名单 `UnwelcomeListEnabled` | 模式不是 Off（`modeOff`）；Capture 下另需 `allowedSubjects`（由 capture facet 强制） |
+
+字段格式 / 取值校验（400 `FACE_MATCH_FIELD_INVALID`）不变。
+
+**变为警告（不阻塞保存和启用，进入 `warnings`；2026-10-13 用户决定）：**
+
+| facet | 条件 | 警告项（`warnings`） |
+| --- | --- | --- |
+| `match` | `Mode=Match` | `piaReference`、`signageInstalledOn`、`legalSignoffBy`、`legalSignoffAt`；**跨境披露审查**：`crossBorderRegion`、`regionMismatch`（审查地域 ≠ 当前配置地域，或功能未开启）、`crossBorderReviewRef`、`crossBorderReviewedBy`、`crossBorderReviewedAt`；**NSW 门店另有** `staffNoticeDate`、`staffNoticeTooRecent`（员工监控通知日期距今不足 14 天） |
+| `trafficDedup` | `Mode=Match` | `dedupLegalSignoffBy`、`dedupLegalSignoffAt` |
+| `unwelcome` | `Mode=Match` | `unwelcomeAssessmentRef`、`unwelcomeLegalSignoffBy`、`unwelcomeLegalSignoffAt`、`piaReference`、`signageInstalledOn`、`staffTrainingDate`、`privacyContact`，以及跨境审查全套 |
+
+- **Capture 下这些记录本来就不要求，也没有警告**：只处理知情的内部人员（已填 `AllowedSubjects`）时，去重和名单不要求专项记录，用于上线前用内部员工照片做端到端测试（#761）；切到 Match 时警告重新计算。
+- **保存时的留痕**：保存成功且带警告时，审计 `profile.update` 的 `Result` 写 `mode=N;warnings=M`（`M` 为各 facet 警告之和，最坏约 22；列最长 32 字符）；没有警告保持 `mode=N`；被阻塞项拒绝仍是 `gate-not-met`。
+- **页面**：每个被请求的 facet 下另有一块红色提示「还有 N 项合规记录未补齐。不会阻止启用，但对真实顾客运行前必须完成」；有警告时保存按钮旁常驻红字；门店概览表在「已启用的功能」旁显示红色标记「合规记录未齐（N）」。
+- **跨境披露审查的地域应当等于当前配置的处理地域**（不等 → `regionMismatch` 警告）。配置地域被改动后：档案页显示审查无效；后台任务⑦把所有地域不符的档案**只清空审查记录**（地域、审查编号、审查人、审查时间）并写审计 `profile.region-invalidated`（`Result=review-cleared`）——
+  **不再强制关闭任何档案**，`Mode` 与各开关原样保留，该店的跨境审查显示为未补齐的警告，须重新审查并补录。
 - 关闭永远可以：保存 `Off`（以及把开关取消）不需要任何前置条件。
 - 门店时区：档案 → 门店表 → 州推导（NSW→Sydney、QLD→Brisbane）→ `Australia/Sydney`；用于客流按本地营业日归日、访客库午夜删除。
 
@@ -998,7 +1018,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 - **事件类别是枚举**：`ViolenceOrThreat`、`OrganisedOrRepeatTheft`、`Other`；**没有「一般偷窃」**。`Other` 必须填写说明，并需要**两位不同的批准人**（都不能是提交人）。
 - 证据引用必填（事件记录编号或警方报告编号，不填个人隐私细节）；到期日必填，**上限 12 个月**；到期前 30 天提醒复核；生效门店至少一个，非管理员只能为自己所属门店提交。
 - 流程：提交（Manage）→ 参考照片存私有桶 `face-match/unwelcome/{entryId}/`，**此时不会调用腾讯云** → 批准（Approve，提交人 ≠ 批准人）→
-  最后一位批准人通过时才读出参考照片、创建 `unwelcome` 人员库（幂等）并建人，条目变 Active。**批准要求至少一个生效门店已通过名单启用闸门（`UnwelcomeListEnabled`），否则 409 `FACE_MATCH_UNWELCOME_NOT_ENABLED`——闸门没开，照片不会发往腾讯云。**
+  最后一位批准人通过时才读出参考照片、创建 `unwelcome` 人员库（幂等）并建人，条目变 Active。**批准要求至少一个生效门店已开启名单（`UnwelcomeListEnabled`，只看这个开关；专项评估 / 律师确认等记录缺口在门店档案里是警告，不在批准时拦截），否则 409 `FACE_MATCH_UNWELCOME_NOT_ENABLED`——开关没开，照片不会发往腾讯云。**
 - 撤回 / 到期：**先把状态改成 Withdrawn / Expired**（接收端只用 Active 条目，立即停止匹配），再 `DeletePerson` 并删参考照片；删不干净的（条目上 `cleanupPending=true`）由后台任务④继续重试，参考照片键清空即清理完成。
 - 申诉 / 更正：条目上有「申诉说明」（`dispute-note`）；被识别者查询或更正须在 30 天内处理，固定流程由门店 / 法务制定。
 
@@ -1023,7 +1043,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | ④ 名单条目 | 10 分钟 | 到期（Pending / Active）自动改 Expired 并 `DeletePerson` + 删参考照片；重试撤回 / 到期后没清理干净的条目；到期前 30 天经通知平台提醒提交人与批准人（`unwelcome-expiry:{EntryId}`） | 没有到期 / 待清理条目时只是查询 |
 | ⑤ 命中图到期删除 | 10 分钟 | 删除 `ImageDeleteAtUtc` 已到（含已驳回提前到期）的命中图并把 `ImageObjectKey` 置空串；只删形态合法且不在管理端三个私有前缀下的键 | 私有桶未配置 |
 | ⑥ 命中提示发布 + 撤回补偿 | 每个节拍 / 10 分钟 | 发布命中提示（见 16.6）；重试「同意已撤回但腾讯云删除未完成」的登记、补删已撤回登记遗留的登记照 | 命中提示只是一条索引查询 |
-| ⑦ 地域改动作废审查 | 10 分钟 | 见 16.3 | 配置地域无效 / 功能未开启时什么都不动（配置写错不波及门店档案） |
+| ⑦ 地域改动作废审查 | 10 分钟 | 把审查地域 ≠ 当前配置地域的档案**只清空审查记录**并写审计 `profile.region-invalidated`（`Result=review-cleared`），**不再把任何档案关成 `Off`**（见 16.3） | 配置地域无效 / 功能未开启时什么都不动（配置写错不波及门店档案） |
 
 说明：已存在数据的**删除类补偿**（过期访客库、撤回后的清理、命中图到期）不依赖「有门店启用」，否则门店关闭后数据会无人清理；没有可删的行时它们只是廉价查询。
 
@@ -1046,7 +1066,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
    接收端连接须保持 `QUOTED_IDENTIFIER ON`（SqlClient 默认如此；`sqlcmd` 手工验证时要加 `-I`），因为这几张表有过滤索引。
 4. **部署主 API + Web**（先后端后前端；顺序与 `hotbargain-vip-deploy` 一致）。此时没有任何门店档案、没有管理凭据：页面显示「功能未开启」，一切照旧。
 5. **腾讯云与 `.env`**（16.9）→ 重建 `hb-api` 容器 → `GET /config` 应返回 `enabled=true` 与所选地域。
-6. 在角色管理里授权需要的账号；然后按 16.3 给试点门店逐项补齐闸门材料再切模式。每一步都可回退：门店档案保存 `Off` 即可立刻停止接收端对该店的一切比对。
+6. 在角色管理里授权需要的账号；然后按 16.3 给试点门店逐项补齐合规记录（缺口现在只是警告，不拦截，但对真实顾客运行前法律上必须补齐）再切模式。每一步都可回退：门店档案保存 `Off` 即可立刻停止接收端对该店的一切比对。
 - **回滚代码**：回滚主 API / Web 即可；九张表与权限行保留无害（没有任何调用方）。紧急停用：清空 `FACE_MATCH_ADMIN_SECRET_KEY` 并重建容器（接口 503、后台任务空转），或把相关门店档案改 `Off`，或 `FACE_MATCH_BACKGROUND_ENABLED=false`。
 - **nginx 请求体大小**：上传接口（登记照最多 5×5MB、名单参考照片同）整体约 26MB，经 Nginx 到 `/api/` 的路径需 `client_max_body_size` ≥ 30m（Kestrel 默认上限 30,000,000 字节）。
 
@@ -1092,6 +1112,8 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 - 持久审计表 `FaceAuditLog`（保留期由律师定，起步建议 2 年）：谁、何时、什么动作、对哪个编号、结果。动作包括：`profile.update`、`profile.region-invalidated`、`consent.create`、`consent.withdraw`、`enrollment.create`、`enrollment.withdraw`、`enrollment.integrity-mismatch`、
   `unwelcome.entry.submit` / `approve` / `withdraw` / `expire` / `dispute-note`、`unwelcome.task.review` / `view-capture` / `view-reference` / `image-delete`、`visit-group.delete`、`capture.retention-cleanup`。
   **不含图片、对象键、密钥、姓名、事件细节**；被拒绝的看图尝试 `Result` 为错误码；后台任务的操作人是 `system`。
+  `profile.update` 的 `Result`：`mode=N`（无合规记录警告）、`mode=N;warnings=M`（带着 M 条警告保存，留下「缺口下启用」的痕迹）、`gate-not-met`（被阻塞项拒绝）；
+  `profile.region-invalidated` 的 `Result` 固定为 `review-cleared`（只清空审查记录，不再有 `disabled`）。
 - 日志（容器日志 / 中心日志）同样不含密钥、签名、完整请求体、图片、对象键或腾讯云错误原文；腾讯云调用失败只记动作、HTTP 状态、错误码与 RequestId（可向腾讯云反查）。
 - 腾讯云只会收到：照片、不透明的人员库 / 人员编号（`staff`、`unwelcome`、`v{门店}_{日期}`、`st_{登记编号}`、`uw_{条目编号}`）；**没有姓名、员工编号、事件类别或证据编号**。
 
@@ -1101,13 +1123,14 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 - 数值约定：`FaceStoreProfile.Mode` 0 Off / 1 Capture / 2 Match；`FaceUnwelcomeEntry.Status` 0 Pending / **1 Active** / 2 Expired / 3 Withdrawn（**接收端只能使用 Active 条目**）；`IncidentCategory` 1 / 2 / 3；
   `FaceMatchTask.ReviewStatus` 0 Pending / 1 Dismissed / 2 ConfirmedBySecondPerson（接收端建任务时写 0，`NotifiedAtUtc` 留空，`ImageObjectKey` / `ImageDeleteAtUtc` 必填）；`FaceEnrollment.Status` 1 Active / 2 Withdrawn。
 - `FaceUnwelcomeEntry.StoreScope` 是英文逗号分隔、无空格的门店编码列表（如 `1013,2015`）；接收端命中后按 `TencentPersonId`（`uw_{EntryId}`）查条目，**条目不是 Active 或本店不在 StoreScope 内则忽略命中**。
-- 接收端读 `FaceStoreProfile` 时：`Mode=Match`、员工排除、去重、名单任一项对真实顾客生效，都必须同时满足 `CrossBorderRegion` 等于接收端自己配置的处理地域（且审查三列非空）；否则按 `Off`。主 API 的后台任务⑦会清理地域不符的档案，接收端这一层是第二道保险。
+- 接收端读 `FaceStoreProfile` 时：`Mode=Match` 下员工排除、去重、名单**不再**要求 `CrossBorderRegion` 等于接收端配置的处理地域、审查三列非空、名单专项记录齐全（2026-10-13 起这些是警告）；缺失时接收端只按门店节流记一条 Warning（`match-without-legal-records`），功能照常运行。
+  接收端仍保留的是功能前提：匹配可用、名单需要私有 COS、去重需要可解析的时区。主 API 的后台任务⑦只清空地域不符的审查记录，不再关闭档案。
 - 访客库 `FaceVisitGroup`：`GroupId` 即腾讯云库编号（`v{门店}_{yyyyMMdd}`），`BusinessDate` 为门店本地营业日，`DeleteAfterUtc` 不得早于本地营业日结束；`DeletedAtUtc` 只由主 API 写。
 - 命中图键：接收端写入 `FaceMatchTask.ImageObjectKey`，必须是安全字符的相对路径（`[A-Za-z0-9_.-/]`，不含 `..`），**不得**落在 `face-match/consent/`、`face-match/enrollment/`、`face-match/unwelcome/` 下；建议 `face-match/hit/{门店}/{yyyy}/{MM}/{dd}/{TaskId}.jpg`。
 
 ## 17. 人脸比对：接收端
 
-设计依据：`docs/design/face-matching-service-20261012.md` 第 5、8、13、14、15 节（**合规部分未经律师确认，对真实顾客运行前必须先过设计里的各道闸门**）。
+设计依据：`docs/design/face-matching-service-20261012.md` 第 5、8、13、14、15 节（**合规部分未经律师确认；2026-10-13 起设计里的各道合规闸门在 Match 下改为非阻塞警告，但对真实顾客运行前这些记录法律上仍然必须完成**）。
 本节只讲接收端（`BlazorApp.FaceIngest`）：按门店档案决定每条抓拍怎么处理、调用腾讯云人脸识别（IAI）做搜索、只累加计数、不留生物数据。
 门店档案、员工登记、统计页、访客库清理、名单条目与复核由**主 API / Web** 负责，不在本节。
 
@@ -1153,7 +1176,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `FACE_MATCH_TENCENT_REGION` | `ap-guangzhou` | 腾讯云地域，白名单 `ap-guangzhou` / `ap-shanghai` / `ap-singapore`。**不在白名单 → 匹配整体关闭**并在启动日志报 Error，不会回退到别的地域。改地域后所有门店的跨境审查作废（17.4） |
+| `FACE_MATCH_TENCENT_REGION` | `ap-guangzhou` | 腾讯云地域，白名单 `ap-guangzhou` / `ap-shanghai` / `ap-singapore`。**不在白名单 → 匹配整体关闭**并在启动日志报 Error，不会回退到别的地域。改地域后所有门店的跨境审查记录被主 API 清空（16.3），该店显示合规记录警告，接收端不降级 |
 | `FACE_MATCH_TENCENT_SECRET_ID` / `FACE_MATCH_TENCENT_SECRET_KEY` | 空 | **密钥**。接收端「搜索」子账号 `face-match-matcher`（17.6）。缺任一 → 匹配整体关闭 |
 | `FACE_MATCH_STAFF_THRESHOLD` | `85` | 员工相似度阈值（0–100，偏严） |
 | `FACE_MATCH_VISITOR_THRESHOLD` | `85` | 当日访客去重阈值（偏严） |
@@ -1167,7 +1190,7 @@ Match 处理失败上限（`MatchMaxAttempts=3`、`MatchMaxLocalAgeMinutes=15`�
 
 任一取值非法（阈值不在 0–100、格式错误等）→ 匹配整体关闭，原因（只含键名）记在启动日志；**不会让容器起不来**，接收落盘不受影响。
 
-### 17.4 有效模式与降级规则（接收端自己再校验一次）
+### 17.4 有效模式与功能前提（合规记录缺口只记 Warning，不再降级）
 
 | 情形 | 有效模式 |
 | --- | --- |
@@ -1177,9 +1200,9 @@ Match 处理失败上限（`MatchMaxAttempts=3`、`MatchMaxLocalAgeMinutes=15`�
 | 档案 `Mode=0` / 未知值 | `Off` |
 | `Mode=1` | `Capture`；`EvaluateMatch=1` 且匹配可用且开了员工排除或去重 → 同时做评估，否则不评估 |
 | `Mode=2` 但匹配整体不可用（缺凭据、地域非法等） | `Off`（**不是**退回全部留存） |
-| `Mode=2` 且开了员工排除 / 去重 / 名单，但 `CrossBorderRegion` ≠ 当前配置地域，或缺 `CrossBorderReviewRef/By/At` | **降级**：`AllowedSubjects` 非空 → `Capture`（不评估），否则 `Off`；记 Warning（`cross-border-gate`） |
+| `Mode=2` 且开了员工排除 / 去重 / 名单，但 `CrossBorderRegion` ≠ 当前配置地域、缺 `CrossBorderReviewRef/By/At`，或（名单开启时）缺名单专项记录（`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy/At`） | **照常按 `Match` 运行，不降级、不关任何功能**；按门店节流（每店 10 分钟一条）记 Warning `match-without-legal-records`（英文消息：Match mode is running without complete legal records; allowed by configuration, must be completed before relying on it；不含任何记录内容）。2026-10-13 用户决定：合规记录缺口是警告，风险由用户承担 |
 | `Mode=2` 且去重开启，但 `TimeZoneId` 为空或系统不认识 | 去重关闭，其余照常；记 Warning（接收端无权读门店表，所以档案里的 `TimeZoneId` 必须由主 API 填好） |
-| `Mode=Match` 且 `UnwelcomeListEnabled`，但缺名单专项记录（`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy/At`）或没开私有 COS | 名单这一块关闭；记 Warning |
+| `Mode=Match` 且 `UnwelcomeListEnabled`，但没开私有 COS（命中图存不下） | 名单这一块关闭；记 Warning（`unwelcome-no-cos`）——这是功能前提，不是合规记录 |
 | `Mode=Capture` 且 `UnwelcomeListEnabled`（内部知情人员测试） | 要求匹配可用、`AllowedSubjects` 非空、私有 COS 可用，**不要求专项记录与跨境审查**；缺任一项名单这一块关闭并记 Warning（`capture-unwelcome-*` / `unwelcome-no-cos`），Capture 的留存不变 |
 
 > 重要：**配置腾讯云凭据会让「没有档案的门店」从现状变成 `Off`（读完即删）**。给 1042 等仍在 `Capture` 试点的门店，必须先在 `FaceStoreProfile` 里建好 `Mode=1` 的档案，再配凭据。
@@ -1265,7 +1288,7 @@ sudo grep -c '^FACE_MATCH_TENCENT_SECRET_' .env       # 只核对行数应为 2�
 
 ### 17.8 名单命中（暗发布，默认关闭）
 
-- 只有档案 `UnwelcomeListEnabled=1`、名单专项记录齐全、并且**接收端开了私有 COS**（命中图要存私有桶）时才搜 `unwelcome` 库。
+- 只有档案 `UnwelcomeListEnabled=1`、并且**接收端开了私有 COS**（命中图要存私有桶）时才搜 `unwelcome` 库；Match 下名单专项记录不全只记 Warning（17.4），不阻止搜索。
 - 命中（分数 ≥ 名单阈值，条目未过期，条目 `StoreScope` 为空或包含本店）：命中图存 `face-ingest/unwelcome-hits/{店}/{yyyy}/{MM}/{dd}/{摄像机}/{TaskId}.jpg`（私有 ACL；沿用 `FACE_INGEST_COS_*` 的只写 PutObject 子账号，其资源范围 `face-ingest/*` 已覆盖），
   `FaceMatchTask` 新增一行待复核（`ImageDeleteAtUtc` = 现在 + 7 天）。**接收端不发通知**（通知发布器只在主 API）；主 API 的后台任务轮询 `NotifiedAtUtc IS NULL` 的新任务后发提示，文案固定为「疑似匹配，需要人工确认」，图片按 `ImageDeleteAtUtc` 由主 API 删除。
   建议再给 `face-ingest/unwelcome-hits/` 配 COS 生命周期（7–8 天）兜底。
@@ -1277,16 +1300,16 @@ sudo grep -c '^FACE_MATCH_TENCENT_SECRET_' .env       # 只核对行数应为 2�
 2. 在 `FaceStoreProfile` 为现有试点门店建 `Mode=1` 档案（17.4 的重要提示）。
 3. 重新构建并重建 face-ingest（第 5 节流程）。此时未配凭据，行为不变，`/health` 多出 `matcherEnabled=false`、`matcherRegion`。
 4. 完成 17.6，写凭据、重建容器，核对 `/health`。
-5. 内部人员门店先做阈值标定（17.5），再按设计的闸门（隐私影响评估、告示、律师确认、跨境审查）由主 API 把真实门店切到 `Match`。
+5. 内部人员门店先做阈值标定（17.5），再由主 API 把真实门店切到 `Match`。隐私影响评估、告示、律师确认、跨境审查等记录现在只是警告、不拦截切换，但对真实顾客运行前法律上必须完成。
 
 ### 17.10 排查
 
 | 现象 | 看什么 |
 | --- | --- |
 | `matcherEnabled=false` | 启动日志 `Face match …` 一行给出原因：地域缺失 / 不在白名单、SecretId/SecretKey 缺失或格式错、阈值非法。改 `.env` 后重建容器 |
-| 门店抓拍被丢弃 | 日志 `Face ingest capture discarded … mode=Off reason=…`：`profiles-unavailable`（档案读不到）/ `no-profile` / `profile-off` / `match-disabled-by-configuration` / `downgraded-no-allowed-subjects` |
+| 门店抓拍被丢弃 | 日志 `Face ingest capture discarded … mode=Off reason=…`：`profiles-unavailable`（档案读不到）/ `no-profile` / `profile-off` / `match-disabled-by-configuration` |
 | 档案读不到 | `Face store profile refresh failed`：连接、权限（17.7）、表是否已迁移。读不到期间已配凭据的门店按 `Off` |
-| 模式被降级 | Warning `Face match store mode degraded store=… reason=…`（`cross-border-gate`、`timezone`、`unwelcome-gate`、`unwelcome-no-cos`、`match-disabled-by-configuration`），每店每原因 10 分钟一条 |
+| 模式被降级 / 合规记录缺口提醒 | Warning `Face match store mode degraded store=… reason=…`（模板文字沿用，监控按它过滤的不必改）。`reason`：`timezone`、`unwelcome-no-cos`、`match-disabled-by-configuration`、`capture-unwelcome-*` 是功能前提不满足（会关掉对应功能）；**`match-without-legal-records` 只是提醒——Match 在缺合规记录下照常运行，需尽快补齐**。每店每原因 10 分钟一条。旧原因 `cross-border-gate`、`unwelcome-gate`、`downgraded-*` 已不再出现 |
 | 腾讯云调用失败 | Warning / Error `Face match API call failed and was dropped … code=…`（同一错误码 2 分钟一条）。账号级错误（`AuthFailure.*`、`ResourceUnavailable.*`）是 Error 并熔断 60 秒：检查密钥、策略、服务是否开通 / 欠费 |
 | 计数不涨 | `Face ingest capture matched … faces= staff= unique= repeat= lowQuality= apiFailure=`（每条一行，无敏感信息）；`Face ingest Match capture dropped after repeated failures` 表示数据库写失败被丢弃 |
 | 磁盘上有 Match 门店的报文 | 只应出现在处理间隔内；长期滞留说明处理器停了（`FACE_INGEST_PROCESSING_ENABLED=false`）或档案读取一直失败（启动等待） |

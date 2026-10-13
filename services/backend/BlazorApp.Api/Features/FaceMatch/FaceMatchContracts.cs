@@ -66,24 +66,44 @@ public sealed record FaceMatchConfigDto
 
 /// <summary>
 /// 闸门单项（facet 取值 capture / match / staffExclusion / trafficDedup / unwelcome）。
-/// Requested=false 表示该项当前没有被请求启用，Missing 为空。
-/// Missing 的元素是字段键（小驼峰，与请求体字段同名）或特殊键：
-/// activeEnrollment（门店成员中没有有效的同意与登记）、regionMismatch（CrossBorderRegion 不等于当前配置地域）、
-/// staffNoticeTooRecent（NSW 门店员工通知日期不满 14 天）、modeOff（开关要求模式不是 Off）、evaluateMatchRequiresCapture。
+/// Requested=false 表示该项当前没有被请求启用，Missing 与 Warnings 都为空。
+/// <para>
+/// Missing 是<b>仍然阻塞保存</b>的结构性 / 功能性前提（缺了 PUT 返回 409 FACE_MATCH_GATE_NOT_MET）：
+/// allowedSubjects（Capture 必须声明只拍知情的内部人员）、evaluateMatchRequiresCapture、
+/// modeOff（开关要求模式不是 Off）、activeEnrollment（门店成员中没有有效的同意与登记）。
+/// </para>
+/// <para>
+/// Warnings 是<b>不阻塞保存但必须始终可见</b>的合规记录缺口（2026-10-13 用户决定：Match 的全部合规闸门改为警告，风险由用户承担）：
+/// 字段键（小驼峰，与请求体字段同名，如 piaReference / signageInstalledOn / legalSignoffBy / crossBorderReviewRef …）
+/// 或特殊键 regionMismatch（CrossBorderRegion 不等于当前配置地域）、staffNoticeTooRecent（NSW 门店员工通知日期不满 14 天）。
+/// 只在 Mode=Match 的 match / trafficDedup / unwelcome 三个 facet 里出现；Capture 下这些记录本来就不要求。
+/// 同一个字段被多个 facet 要求时在各自 facet 里分别列出。
+/// </para>
 /// </summary>
 public sealed record FaceGateFacetDto
 {
     public string Facet { get; init; } = string.Empty;
     public bool Requested { get; init; }
+
+    /// <summary>仍然阻塞保存的缺项（见类型注释）。</summary>
     public IReadOnlyList<string> Missing { get; init; } = [];
+
+    /// <summary>不阻塞保存的合规记录缺口（见类型注释）；老客户端不认识这个字段时忽略即可。</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
 }
 
 public sealed record FaceGateReportDto
 {
     public IReadOnlyList<FaceGateFacetDto> Facets { get; init; } = [];
 
-    /// <summary>所有被请求的项都满足闸门。PUT 在 CanSave=false 时返回 409 FACE_MATCH_GATE_NOT_MET（details 即本对象）。</summary>
+    /// <summary>
+    /// 所有被请求的项都没有「阻塞缺项」（只看各 facet 的 Missing，不看 Warnings）。
+    /// PUT 在 CanSave=false 时返回 409 FACE_MATCH_GATE_NOT_MET（details 即本对象）。
+    /// </summary>
     public bool CanSave { get; init; }
+
+    /// <summary>任一被请求的 facet 有合规记录警告。可以保存，但页面须持续显示红色提示，保存时审计会记录警告数。</summary>
+    public bool HasWarnings { get; init; }
 }
 
 public sealed record FaceStoreProfileDto
@@ -131,7 +151,7 @@ public sealed record FaceStoreProfileDto
     /// <summary>已保存的 CrossBorderRegion 与当前配置地域一致（地域改动后为 false，须重新审查）。</summary>
     public bool CrossBorderReviewValid { get; init; }
 
-    /// <summary>按已保存的档案重新计算的闸门状态（页面「缺哪一项」的数据来源）。</summary>
+    /// <summary>按已保存的档案重新计算的闸门状态（页面「缺哪一项」「哪些记录还没补」的数据来源）。</summary>
     public FaceGateReportDto Gates { get; init; } = new();
 }
 
@@ -145,6 +165,13 @@ public sealed record FaceStoreProfileListItemDto
     public bool TrafficDedupEnabled { get; init; }
     public bool UnwelcomeListEnabled { get; init; }
     public bool CrossBorderReviewValid { get; init; }
+
+    /// <summary>
+    /// 合规记录警告条数（各 facet 的 Warnings 之和，与详情页各 facet 提示的条数相加一致）；&gt; 0 时列表打红色「合规记录未齐」标记。
+    /// 只算警告，不含仍然阻塞的缺项（已保存的档案不会有阻塞缺项）。
+    /// </summary>
+    public int GateWarningCount { get; init; }
+
     public DateTime? UpdatedAtUtc { get; init; }
 }
 

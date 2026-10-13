@@ -15,7 +15,7 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 4. 名单条目：到期自动停用 + DeletePerson + 删参考照片、到期前 30 天提醒、清理重试；
 /// 5. 命中图到期删除；
 /// 6. 撤回后的补偿：同意已撤回但腾讯云删除未完成的登记、已撤回登记留下的照片；
-/// 7. 地域改动后作废旧的跨境披露审查（并把依赖它的真实顾客功能关掉）。
+/// 7. 地域改动后作废旧的跨境披露审查（只清空审查记录并写审计，不再关闭任何档案；缺口在页面显示为警告）。
 /// 空转原则：没有管理凭据时不发任何腾讯云请求；没有门店启用（所有档案都是 Off 或没有档案）时不做读取类与保留清理类工作。
 /// 已存在数据的删除类补偿（过期访客库、撤回后的清理）不依赖「有门店启用」，否则门店关闭后数据会无人清理；没有可删的行时它们只是一条廉价查询。
 /// </summary>
@@ -454,8 +454,9 @@ public sealed class FaceMatchMaintenance(
     // ---------- 7. 地域改动后作废跨境披露审查 ----------
 
     /// <summary>
-    /// 当前配置的处理地域有效、而门店档案里的 CrossBorderRegion 与之不同：审查记录作废（清空地域与审查字段），
-    /// 并关闭依赖它的真实顾客功能（Match 模式、员工排除、去重、名单），宁可不识别也不在失效审查下运行。
+    /// 当前配置的处理地域有效、而门店档案里的 CrossBorderRegion 与之不同：审查记录作废（清空地域与审查字段）并写审计。
+    /// 2026-10-13 用户决定 Match 的合规闸门改为警告：<b>不再强制关闭任何档案</b>（Mode / 员工排除 / 去重 / 名单开关保持原样）；
+    /// 审查记录被清空后，Web 档案页与门店列表会把该店的跨境披露审查显示为未补齐的警告，须重新审查并补录。
     /// 配置地域无效 / 功能未开启时什么都不动（配置写错不应波及门店档案）。返回被作废的门店数。
     /// </summary>
     public async Task<int> InvalidateStaleCrossBorderReviewsAsync(CancellationToken cancellationToken)
@@ -474,34 +475,21 @@ public sealed class FaceMatchMaintenance(
         foreach (var profile in stale)
         {
             var oldRegion = profile.CrossBorderRegion;
-            var dependsOnReview = profile.Mode == FaceStoreMode.Match
-                || (profile.StaffExclusionEnabled && profile.Mode != FaceStoreMode.Capture)
-                || (profile.TrafficDedupEnabled && profile.Mode != FaceStoreMode.Capture)
-                // Capture 下的名单只处理知情内部人员，不依赖跨境审查（与员工排除、去重同口径），不能被地域改动强制关掉。
-                || (profile.UnwelcomeListEnabled && profile.Mode != FaceStoreMode.Capture);
+            // 只清空审查记录，不碰 Mode 与各开关：缺的审查记录由闸门计算为警告（不阻塞），而不是把门店关掉。
             profile.CrossBorderRegion = null;
             profile.CrossBorderReviewRef = null;
             profile.CrossBorderReviewedBy = null;
             profile.CrossBorderReviewedAt = null;
-            if (dependsOnReview)
-            {
-                profile.Mode = FaceStoreMode.Off;
-                profile.EvaluateMatch = false;
-                profile.StaffExclusionEnabled = false;
-                profile.TrafficDedupEnabled = false;
-                profile.UnwelcomeListEnabled = false;
-            }
-
             profile.UpdatedAtUtc = nowUtc;
             profile.UpdatedBy = FaceMatchAuditActions.SystemActorId;
             await _db.Updateable(profile).ExecuteCommandAsync(cancellationToken);
             logger.LogWarning(
-                "配置地域已改动，门店跨境披露审查作废: Store={StoreCode}, From={From}, To={To}, FeaturesDisabled={Disabled}",
-                profile.StoreCode, oldRegion, region, dependsOnReview);
-            // 审计 Result 只有 32 位：写结论（disabled = 同时关闭了依赖审查的真实顾客功能；review-cleared = 只作废审查记录）。
+                "配置地域已改动，门店跨境披露审查作废（不再强制关闭档案，该店将显示合规记录警告）: Store={StoreCode}, From={From}, To={To}, Mode={Mode}",
+                profile.StoreCode, oldRegion, region, profile.Mode);
+            // 审计 Result 只有 32 位：固定写 review-cleared（只作废审查记录，不改任何开关）。
             await audit.WriteAsync(
                 SystemActor, FaceMatchAuditActions.ProfileInvalidated, profile.StoreCode, profile.StoreCode,
-                dependsOnReview ? "disabled" : "review-cleared", cancellationToken);
+                "review-cleared", cancellationToken);
         }
 
         return stale.Count;

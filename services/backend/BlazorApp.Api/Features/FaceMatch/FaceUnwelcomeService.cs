@@ -8,8 +8,8 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 不受欢迎人员名单（原「黑名单」，设计第 14 节）。硬条件全部在这里强制：
 /// 1. 事件类别是枚举 ViolenceOrThreat / OrganisedOrRepeatTheft / Other，没有「一般偷窃」；Other 必须有说明且需要两位不同的批准人；
 /// 2. 证据引用必填、到期日必填且上限 12 个月；
-/// 3. 提交人 ≠ 批准人；批准后才在腾讯云建人，且至少一个生效门店已通过启用闸门（UnwelcomeListEnabled）——
-///    闸门没开之前，照片只留在私有桶里，不会发往腾讯云；
+/// 3. 提交人 ≠ 批准人；批准后才在腾讯云建人，且至少一个生效门店已开启名单（UnwelcomeListEnabled，只看这个开关；
+///    专项评估 / 律师确认等记录缺口在门店档案里是警告，不在这里拦截）——开关没开之前，照片只留在私有桶里，不会发往腾讯云；
 /// 4. 撤回 / 到期：先把状态改成 Withdrawn / Expired（接收端只用 Active 条目，立即停止匹配），再 DeletePerson 并删参考照片，
 ///    删不干净的由后台任务重试（照片键清空即清理完成的标志）；
 /// 5. 复核至少两人：第一复核人 ≠ 第二复核人，任何一方「不是同一个人」即 Dismissed，Dismissed 后命中图提前到期删除；
@@ -242,7 +242,7 @@ public sealed class FaceUnwelcomeService(
 
     /// <summary>
     /// 最后一位批准人通过：读私有桶里的参考照片 → 腾讯云建人 → 条目改 Active。
-    /// 没有任何生效门店通过启用闸门时拒绝（避免未经律师确认就把照片发往境外）；DB 更新失败或被并发改动时回滚腾讯云人员。
+    /// 没有任何生效门店开启名单（UnwelcomeListEnabled）时拒绝（开关没开就不把照片发往境外）；DB 更新失败或被并发改动时回滚腾讯云人员。
     /// </summary>
     private async Task ActivateAsync(FaceUnwelcomeEntry entry, FaceMatchActor actor, DateTime nowUtc, CancellationToken cancellationToken)
     {
@@ -265,7 +265,7 @@ public sealed class FaceUnwelcomeService(
         {
             throw new FaceMatchException(
                 409, "FACE_MATCH_UNWELCOME_NOT_ENABLED",
-                "生效门店都还没有通过「不受欢迎人员名单」启用闸门（专项评估、律师确认、告示、培训等），不能批准入名单。");
+                "生效门店都还没有开启「不受欢迎人员名单」，不能批准入名单；请先在门店档案里开启。");
         }
 
         var keys = FaceMatchRules.ParseKeys(entry.PhotoObjectKeysJson);

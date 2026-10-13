@@ -2,7 +2,7 @@
   "faceMatch": {
     "title": "Face Matching",
     "subtitle": "Processing region: {{region}}",
-    "legalNotice": "Important: before Match, customer de-duplication or the Unwelcome Persons List runs on real customers, the legal sign-off, privacy impact assessment and signage records must be in place. The gates on this page only put those records and requirements in front; they do not replace legal judgement.",
+    "legalNotice": "Important: before Match, customer de-duplication or the Unwelcome Persons List runs on real customers, the legal sign-off, privacy impact assessment and signage records must be in place. Missing records are now shown as red warnings and no longer block saving or enabling, but they are still legally required before running on real customers. This page does not replace legal judgement.",
     "noPermission": "This account has no permission for any Face Matching tab",
     "tabs": {
       "profiles": "Store profiles",
@@ -54,7 +54,7 @@
       "FACE_MATCH_STORE_NOT_FOUND": "The store was not found.",
       "FACE_MATCH_FIELD_INVALID": "The submitted content is not valid (including file type, size or count). Check it and try again.",
       "FACE_MATCH_NOT_FOUND": "The record was not found, or you cannot act on it.",
-      "FACE_MATCH_GATE_NOT_MET": "Enablement gate not met: fill in the missing items listed on the right, then save.",
+      "FACE_MATCH_GATE_NOT_MET": "Enablement prerequisites not met: fill in the missing items listed on the right, then save (missing compliance records are only warnings and are not listed here).",
       "FACE_MATCH_CONSENT_WITHDRAWN": "This consent has been withdrawn and cannot be used for enrolment. Record consent again.",
       "FACE_MATCH_NSW_NOTICE_REQUIRED": "NSW store staff need a written notice date.",
       "FACE_MATCH_NSW_NOTICE_TOO_RECENT": "For NSW store staff the written notice must be at least 14 days before consent was signed.",
@@ -71,7 +71,7 @@
       "FACE_MATCH_APPROVER_IS_SUBMITTER": "The submitter cannot approve their own entry.",
       "FACE_MATCH_ALREADY_APPROVED_BY_YOU": "You have already approved this entry; a different approver is needed.",
       "FACE_MATCH_ENTRY_EXPIRED": "This entry has expired and can no longer be approved.",
-      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "None of the entry's stores has passed the Unwelcome Persons List enablement gate, so it cannot be approved yet. Complete and enable it in the store profile first.",
+      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "None of the entry's stores has turned on the Unwelcome Persons List yet, so it cannot be approved. Turn it on in the store profile first.",
       "FACE_MATCH_ENTRY_CHANGED": "The entry was just changed by someone else. Refresh and try again.",
       "FACE_MATCH_TASK_CLOSED": "This review task is already finished.",
       "FACE_MATCH_SAME_REVIEWER": "The second reviewer must be a different person from the first. Ask another colleague with review permission.",
@@ -125,8 +125,10 @@
     "gates": {
       "title": "Enablement gates",
       "nothingRequested": "No feature that needs a gate is currently requested.",
-      "satisfied": "All required records are in place",
+      "satisfied": "Prerequisites for saving are met",
       "missingTitle": "{{count}} missing:",
+      "warningTitle": "{{count}} compliance record(s) still incomplete. This does not block enabling, but they must be completed before running on real customers",
+      "warningStanding": "Compliance records incomplete ({{count}} in total): you can save and enable, but they are legally required before running on real customers.",
       "saveWillFail": "{{count}} item(s) still missing: saving now will be rejected by the server (409).",
       "facets": {
         "capture": "Capture mode (informed internal people only)",
@@ -149,6 +151,7 @@
       "formTitle": "Store profile: {{store}}",
       "save": "Save profile",
       "saved": "Store profile saved",
+      "savedWithWarnings": "Store profile saved, but {{count}} compliance record(s) are still incomplete: they must be completed before running on real customers",
       "reset": "Discard changes",
       "neverSaved": "This store has no saved profile yet; the defaults (Off) apply.",
       "updatedAt": "Last saved: {{time}} by {{by}}",
@@ -167,7 +170,7 @@
         "match": "Match",
         "offHint": "Off: captures from this store's cameras are not processed.",
         "captureHint": "Capture: keeps everything and lets you view images in admin; only for integration testing where cameras capture informed, consenting internal people. Allowed subjects is required.",
-        "matchHint": "Match: matches captures and keeps no unmatched images; legal sign-off and related records are required before it runs on real customers."
+        "matchHint": "Match: matches captures and keeps no unmatched images. Missing legal sign-off and related records show as red warnings (they do not block enabling) and must be completed before it runs on real customers."
       },
       "fields": {
         "mode": "Mode",
@@ -197,8 +200,8 @@
       "hints": {
         "evaluateMatch": "Evaluate only, with no effect on the store; requires Capture mode.",
         "staffExclusion": "Excludes enrolled staff from traffic counts; needs store members with a valid consent and enrolment.",
-        "trafficDedup": "De-duplicates customers by face per day. High legal risk; needs a de-duplication-specific legal sign-off.",
-        "unwelcomeList": "Alerts staff on a list match and starts two-person review. Match mode needs an assessment, legal sign-off, signage and training records; Capture mode (consenting internal people only) does not, for pre-launch testing, and is re-checked when switched to Match.",
+        "trafficDedup": "De-duplicates customers by face per day. High legal risk. A missing de-duplication legal sign-off or other record shows as a red warning and does not block enabling, but it must be completed before running on real customers. Capture mode is for informed internal people only and does not need these records.",
+        "unwelcomeList": "Alerts staff on a list match and starts two-person review. Missing assessment, legal sign-off, signage or training records show as red warnings and do not block enabling, but they must be completed before running on real customers. Capture mode is for informed internal people only and does not need these records, for pre-launch testing; warnings are recalculated when you switch to Match.",
         "allowedSubjects": "Required for Capture mode: say who may appear in front of the cameras, all informed and consenting.",
         "signage": "The signage must state that face recognition technology is used.",
         "staffNoticeNsw": "This store is in NSW: staff surveillance notice must be given at least 14 days ahead.",
@@ -211,6 +214,7 @@
       },
       "overview": {
         "enabledItems": "Enabled features",
+        "warningTag": "Records incomplete ({{count}})",
         "crossBorder": "Cross-border review",
         "valid": "Valid",
         "notValid": "Invalid or missing",

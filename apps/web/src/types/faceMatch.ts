@@ -28,13 +28,24 @@ export interface FaceGateFacet {
   /** capture / match / staffExclusion / trafficDedup / unwelcome */
   facet: string
   requested: boolean
-  /** 字段键（小驼峰，与请求体同名）或特殊键：activeEnrollment / regionMismatch / staffNoticeTooRecent / modeOff / evaluateMatchRequiresCapture。 */
+  /**
+   * 仍然阻塞保存的缺项（结构性 / 功能性前提，缺了 PUT 返回 409）：allowedSubjects / evaluateMatchRequiresCapture / modeOff / activeEnrollment。
+   * 老后端也可能把合规记录键放在这里，页面照常按阻塞展示。
+   */
   missing: string[]
+  /**
+   * 不阻塞保存、但必须始终可见的合规记录缺口（2026-10-13 起 Match 的合规闸门改为警告）：
+   * 字段键（小驼峰，与请求体同名）或特殊键 regionMismatch / staffNoticeTooRecent。老后端没有这个字段，归一化为空数组。
+   */
+  warnings: string[]
 }
 
 export interface FaceGateReport {
   facets: FaceGateFacet[]
+  /** 只看 missing（阻塞项）；警告不影响。 */
   canSave: boolean
+  /** 任一 facet 有警告。老后端没有这个字段，归一化为 false。 */
+  hasWarnings: boolean
 }
 
 /** 档案可编辑字段（PUT /profiles/{storeCode} 与 POST .../check 共用的请求体）。 */
@@ -89,6 +100,8 @@ export interface FaceStoreProfileListItem {
   trafficDedupEnabled: boolean
   unwelcomeListEnabled: boolean
   crossBorderReviewValid: boolean
+  /** 合规记录警告条数（各 facet 警告之和）；> 0 时列表打红色「合规记录未齐」标记。老后端没有这个字段，归一化为 0。 */
+  gateWarningCount: number
   updatedAtUtc: string | null
 }
 

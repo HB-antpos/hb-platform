@@ -96,12 +96,21 @@ export function normalizeFaceMatchConfig(value: unknown): FaceMatchConfig {
 
 function normalizeGateFacet(value: unknown): FaceGateFacet {
   const raw = asRecord(value)
-  return { facet: asString(raw.facet), requested: raw.requested === true, missing: asStringArray(raw.missing) }
+  // warnings / hasWarnings 是 2026-10-13 新增字段：老后端没有，缺省为空数组 / false，页面不崩。
+  return {
+    facet: asString(raw.facet),
+    requested: raw.requested === true,
+    missing: asStringArray(raw.missing),
+    warnings: asStringArray(raw.warnings),
+  }
 }
 
 export function normalizeFaceGateReport(value: unknown): FaceGateReport {
   const raw = asRecord(value)
-  return { facets: asArray(raw.facets, normalizeGateFacet), canSave: raw.canSave === true }
+  const facets = asArray(raw.facets, normalizeGateFacet)
+  // 报告没带 hasWarnings 时按各 facet 的 warnings 推断（始终以实际警告条目为准，避免标志位与列表不一致）。
+  const hasWarnings = raw.hasWarnings === true || facets.some((facet) => facet.warnings.length > 0)
+  return { facets, canSave: raw.canSave === true, hasWarnings }
 }
 
 export function normalizeFaceStoreProfile(value: unknown): FaceStoreProfile {
@@ -153,6 +162,7 @@ function normalizeProfileListItem(value: unknown): FaceStoreProfileListItem {
     trafficDedupEnabled: raw.trafficDedupEnabled === true,
     unwelcomeListEnabled: raw.unwelcomeListEnabled === true,
     crossBorderReviewValid: raw.crossBorderReviewValid === true,
+    gateWarningCount: Math.max(0, Math.trunc(asNumber(raw.gateWarningCount))),
     updatedAtUtc: asNullableString(raw.updatedAtUtc),
   }
 }

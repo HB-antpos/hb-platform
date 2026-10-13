@@ -14,7 +14,7 @@ internal enum StoreModeKind
 }
 
 /// <summary>
-/// 某个门店此刻实际生效的处理模式与开关，已把档案、地域闸门、配置可用性全部折算进去：
+/// 某个门店此刻实际生效的处理模式与开关，已把档案、配置可用性（匹配开关、COS、时区）折算进去（合规记录缺口只记警告，不参与折算）：
 /// 下游（处理器、流水线）只看这个对象，不再自己解释档案。
 /// </summary>
 internal sealed record EffectiveStoreMode(
@@ -39,9 +39,10 @@ internal sealed record EffectiveStoreMode(
 ///    （宁可不识别，也不在读不到配置时放开留存），若完全没配凭据（功能未启用）则保持现状，
 ///    这样新代码上线、迁移 / 授权 / 凭据都没就绪时不改变 1042 等现有门店的行为；
 /// 3. <c>Mode=Match</c> 但匹配不可用（缺凭据 / 地域非法）→ Off，绝不退回「全部留存」；
-/// 4. <c>Mode=Match</c> 且启用了员工排除 / 去重 / 名单，要求档案的 CrossBorderRegion 等于当前配置地域
-///    且有跨境审查记录（地域改动后旧审查作废），否则降级：AllowedSubjects 非空 → Capture，否则 → Off，并记 Warning；
-/// 5. Match 下名单只在 COS 可用（命中图要存私有 COS）且名单专项记录齐全时才生效，否则关掉名单这一块并记 Warning；
+/// 4. <c>Mode=Match</c> 且启用了员工排除 / 去重 / 名单时，<b>合规记录不再是运行前提</b>（2026-10-13 用户决定：Match 闸门全部改为警告）：
+///    跨境披露审查缺失 / 地域不等于当前配置地域、或名单专项记录不全，都<b>不会</b>降级或关闭任何功能，
+///    只按门店节流记一条 Warning（<c>match-without-legal-records</c>），提醒对真实顾客依赖它之前必须补齐；
+/// 5. Match 下名单只在 COS 可用（命中图要存私有 COS）时才生效，否则关掉名单这一块并记 Warning——这是功能前提，不是合规记录；
 ///    Capture 下名单只用于内部知情人员的测试：要求匹配可用、AllowedSubjects 非空、COS 可用，不要求专项记录；
 /// 6. 去重需要能解析门店时区（算营业日与访客库删除时间），解析不了就关掉去重并记 Warning。
 /// </summary>
@@ -164,13 +165,7 @@ internal sealed class StoreModePolicy
             return false;
         }
 
-        if (!_hitImageStore.Available)
-        {
-            Warn(profile.StoreCode, "unwelcome-no-cos", "UnwelcomeListEnabled is on but private COS is not enabled, so hit images cannot be stored; the list is not used.");
-            return false;
-        }
-
-        return true;
+        return HitImageStoreAvailable(profile);
     }
 
     private EffectiveStoreMode ResolveMatch(FaceStoreProfileRow profile)
@@ -181,14 +176,8 @@ internal sealed class StoreModePolicy
             return WarnAndOff(profile, "match-disabled-by-configuration");
         }
 
-        var wantsMatching = profile.StaffExclusionEnabled || profile.TrafficDedupEnabled || profile.UnwelcomeListEnabled;
-        if (wantsMatching && !CrossBorderGatePasses(profile))
-        {
-            Warn(profile.StoreCode, "cross-border-gate", "Match mode requires CrossBorderRegion equal to the configured region plus a review record; the profile is downgraded.");
-            return string.IsNullOrWhiteSpace(profile.AllowedSubjects)
-                ? EffectiveStoreMode.Off("downgraded-no-allowed-subjects")
-                : new EffectiveStoreMode(StoreModeKind.Capture, false, false, false, false, null, "downgraded-to-capture");
-        }
+        // 中文注释：合规记录（跨境审查、名单专项记录）缺失只提醒不降级——2026-10-13 用户明确决定闸门改为警告，风险由用户承担。
+        WarnIfLegalRecordsIncomplete(profile);
 
         var dedup = profile.TrafficDedupEnabled;
         string? timeZoneId = null;
@@ -201,32 +190,49 @@ internal sealed class StoreModePolicy
             }
         }
 
-        var unwelcome = profile.UnwelcomeListEnabled;
-        if (unwelcome && !UnwelcomeGatePasses(profile))
-        {
-            unwelcome = false;
-        }
+        // 中文注释：名单只剩功能前提——命中图要存私有 COS，没开 COS 就关掉名单这一块（员工排除 / 去重不受影响）。
+        var unwelcome = profile.UnwelcomeListEnabled && HitImageStoreAvailable(profile);
 
         return new EffectiveStoreMode(StoreModeKind.Match, false, profile.StaffExclusionEnabled, dedup, unwelcome, timeZoneId, "profile-match");
     }
 
-    private bool CrossBorderGatePasses(FaceStoreProfileRow profile)
+    /// <summary>
+    /// Match 下开了员工排除 / 去重 / 名单，但跨境披露审查缺失 / 地域不等于当前配置地域，或名单专项记录不全：
+    /// 只按门店节流记 Warning，功能照常运行。消息不含任何记录内容或个人信息。
+    /// </summary>
+    private void WarnIfLegalRecordsIncomplete(FaceStoreProfileRow profile)
+    {
+        var wantsMatching = profile.StaffExclusionEnabled || profile.TrafficDedupEnabled || profile.UnwelcomeListEnabled;
+        if (!wantsMatching)
+        {
+            return;
+        }
+
+        var incomplete = !CrossBorderRecordComplete(profile)
+            || (profile.UnwelcomeListEnabled && !UnwelcomeRecordComplete(profile));
+        if (incomplete)
+        {
+            Warn(
+                profile.StoreCode,
+                "match-without-legal-records",
+                "Match mode is running without complete legal records; allowed by configuration, must be completed before relying on it.");
+        }
+    }
+
+    private bool CrossBorderRecordComplete(FaceStoreProfileRow profile)
         => string.Equals(profile.CrossBorderRegion?.Trim(), _matchSettings.Region, StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(profile.CrossBorderReviewRef)
             && !string.IsNullOrWhiteSpace(profile.CrossBorderReviewedBy)
             && profile.CrossBorderReviewedAt is not null;
 
-    private bool UnwelcomeGatePasses(FaceStoreProfileRow profile)
-    {
-        // 名单是「暗发布」功能（设计第 14.1 节）：主 API 负责强制闸门，接收端再兜一道底，缺任何一项都不启用名单。
-        if (string.IsNullOrWhiteSpace(profile.UnwelcomeAssessmentRef)
-            || string.IsNullOrWhiteSpace(profile.UnwelcomeLegalSignoffBy)
-            || profile.UnwelcomeLegalSignoffAt is null)
-        {
-            Warn(profile.StoreCode, "unwelcome-gate", "UnwelcomeListEnabled is on but the unwelcome assessment / legal sign-off record is incomplete; the list is not used.");
-            return false;
-        }
+    private static bool UnwelcomeRecordComplete(FaceStoreProfileRow profile)
+        => !string.IsNullOrWhiteSpace(profile.UnwelcomeAssessmentRef)
+            && !string.IsNullOrWhiteSpace(profile.UnwelcomeLegalSignoffBy)
+            && profile.UnwelcomeLegalSignoffAt is not null;
 
+    /// <summary>名单命中图要存私有 COS：没开 COS 返回 false 并记 Warning（功能前提，不是合规记录）。</summary>
+    private bool HitImageStoreAvailable(FaceStoreProfileRow profile)
+    {
         if (!_hitImageStore.Available)
         {
             Warn(profile.StoreCode, "unwelcome-no-cos", "UnwelcomeListEnabled is on but private COS is not enabled, so hit images cannot be stored; the list is not used.");

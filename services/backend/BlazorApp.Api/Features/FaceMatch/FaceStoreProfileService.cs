@@ -7,14 +7,20 @@ using SqlSugar;
 namespace BlazorApp.Api.Features.FaceMatch;
 
 /// <summary>
-/// 门店人脸比对档案与启用闸门。闸门全部在后端强制（设计 13.3、13.4、14.1、8.5）：
+/// 门店人脸比对档案与启用闸门（设计 13.3、13.4、14.1、8.5）。闸门分两类，都在后端计算：
+/// <para><b>阻塞（Missing，缺了保存返回 409 FACE_MATCH_GATE_NOT_MET）</b>——结构性 / 功能性前提，不是合规记录：
 /// 1. Mode=Capture 必填 AllowedSubjects（只拍知情的内部人员）；EvaluateMatch 只允许在 Capture 下；
-/// 2. Mode=Match 需 PIA、告示日期、律师确认 + 跨境披露审查；NSW 门店另需满 14 天的员工通知日期；
-/// 3. StaffExclusionEnabled 需门店成员里存在有效的同意与登记；TrafficDedupEnabled 在 Match 下另需去重专项律师确认；
-/// 4. UnwelcomeListEnabled：Match 下需专项评估 / 律师确认 / PIA / 告示 / 培训 / 隐私联系人 + 跨境披露审查；
-///    Capture 下（只处理知情的内部人员）只要求 Mode 不是 Off 且已填 AllowedSubjects，用于上线前内部测试，切到 Match 时重新校验；
-/// 5. 跨境披露审查的地域必须等于当前配置的处理地域（配置地域改动后旧审查作废）。
-/// 档案读取失败时接收端按 Off 处理，这里的保存只会写入通过闸门的状态。
+/// 2. 员工排除 / 去重 / 名单三个开关都要求模式不是 Off；
+/// 3. StaffExclusionEnabled 需门店成员里存在有效的同意与登记。</para>
+/// <para><b>警告（Warnings，不阻塞保存与启用，但必须始终可见）</b>——合规记录缺口。2026-10-13 用户明确决定
+/// 「Match 全部闸门改成警告，不再拦截」，风险由用户承担；系统不替代法律判断，对真实顾客（Match）运行前法律上仍须补齐：
+/// 4. Mode=Match：PIA、告示日期、律师确认、跨境披露审查（地域须等于当前配置的处理地域）；NSW 门店另需满 14 天的员工通知日期；
+/// 5. Match 下的顾客去重：去重专项律师确认；
+/// 6. Match 下的不受欢迎人员名单：专项评估 / 律师确认 / PIA / 告示 / 培训 / 隐私联系人 + 跨境披露审查。
+///    Capture 下（只处理知情的内部人员）这些记录本来就不要求，所以也没有警告；切到 Match 时重新计算。</para>
+/// 各 facet 的构造是不依赖数据库与时钟的静态纯函数（<see cref="BuildReport"/>），详情 / 检查 / 保存 / 列表共用同一套口径。
+/// 保存成功后若带警告，审计 Result 记 <c>mode=N;warnings=M</c>，留下「带着缺口启用」的痕迹。
+/// 档案读取失败时接收端按 Off 处理。
 /// </summary>
 public sealed class FaceStoreProfileService(
     SqlSugarContext context,
@@ -52,25 +58,37 @@ public sealed class FaceStoreProfileService(
         }
 
         var codes = profiles.Select(p => p.StoreCode).ToList();
-        var names = (await _db.Queryable<Store>()
+        // 门店名称之外顺带取时区与地址：算「合规记录警告数」要判断是否 NSW 门店（NSW 另需员工通知日期）。
+        var stores = (await _db.Queryable<Store>()
                 .Where(s => codes.Contains(s.StoreCode) && !s.IsDeleted)
-                .Select(s => new { s.StoreCode, s.StoreName })
+                .Select(s => new { s.StoreCode, s.StoreName, s.TimeZoneId, s.Address })
                 .ToListAsync(cancellationToken))
             .GroupBy(s => s.StoreCode)
-            .ToDictionary(g => g.Key, g => g.First().StoreName);
+            .ToDictionary(g => g.Key, g => g.First());
 
         var resolved = settingsProvider.Resolved;
-        return profiles.Select(p => new FaceStoreProfileListItemDto
+        var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        return profiles.Select(p =>
         {
-            StoreCode = p.StoreCode,
-            StoreName = names.GetValueOrDefault(p.StoreCode),
-            Mode = p.Mode,
-            EvaluateMatch = p.EvaluateMatch,
-            StaffExclusionEnabled = p.StaffExclusionEnabled,
-            TrafficDedupEnabled = p.TrafficDedupEnabled,
-            UnwelcomeListEnabled = p.UnwelcomeListEnabled,
-            CrossBorderReviewValid = IsCrossBorderReviewValid(p, resolved),
-            UpdatedAtUtc = FaceMatchRules.AsUtc(p.UpdatedAtUtc),
+            stores.TryGetValue(p.StoreCode, out var store);
+            // 与 GetAsync 同一套纯函数；员工登记数传 0——列表只关心警告，不关心「阻塞缺项」（已保存的档案已通过阻塞校验）。
+            var draft = DraftFromEntity(p);
+            var timeZoneId = FaceMatchRules.ResolveTimeZoneId(draft.TimeZoneId, store?.TimeZoneId, store?.Address);
+            var isNsw = FaceMatchRules.ResolveJurisdiction(draft.TimeZoneId, store?.TimeZoneId, store?.Address) == "NSW";
+            var report = BuildReport(draft, resolved, isNsw, FaceMatchRules.LocalDate(nowUtc, timeZoneId), activeEnrollments: 0);
+            return new FaceStoreProfileListItemDto
+            {
+                StoreCode = p.StoreCode,
+                StoreName = store?.StoreName,
+                Mode = p.Mode,
+                EvaluateMatch = p.EvaluateMatch,
+                StaffExclusionEnabled = p.StaffExclusionEnabled,
+                TrafficDedupEnabled = p.TrafficDedupEnabled,
+                UnwelcomeListEnabled = p.UnwelcomeListEnabled,
+                CrossBorderReviewValid = IsCrossBorderReviewValid(p, resolved),
+                GateWarningCount = CountWarnings(report),
+                UpdatedAtUtc = FaceMatchRules.AsUtc(p.UpdatedAtUtc),
+            };
         }).ToList();
     }
 
@@ -127,9 +145,14 @@ public sealed class FaceStoreProfileService(
             }
         }
 
+        // 带着合规记录缺口保存（Match 闸门已改为警告）要在审计里留痕：Result 列最长 32 位，
+        // "mode=2;warnings=NN" 最多 18 位；无警告时保持原来的 "mode=N"。
+        var auditResult = report.HasWarnings
+            ? $"mode={draft.Mode};warnings={CountWarnings(report)}"
+            : $"mode={draft.Mode}";
         await audit.WriteAsync(
             actor, FaceMatchAuditActions.ProfileUpdate, store.StoreCode, store.StoreCode,
-            $"mode={draft.Mode}", cancellationToken);
+            auditResult, cancellationToken);
         return ToDto(store, entity, report);
     }
 
@@ -238,17 +261,36 @@ public sealed class FaceStoreProfileService(
         var needsEnrollmentCheck = draft.StaffExclusionEnabled;
         var activeEnrollments = needsEnrollmentCheck ? await CountActiveEnrollmentsAsync(store.StoreCode, cancellationToken) : 0;
 
+        return BuildReport(draft, resolved, jurisdiction == "NSW", today, activeEnrollments);
+    }
+
+    /// <summary>
+    /// 把五个 facet 汇总成闸门报告（纯函数：不碰数据库与时钟，入参全部由调用方给）。
+    /// CanSave 只看 Missing（仍阻塞的项）；HasWarnings 看 Warnings（合规记录缺口，不阻塞）。
+    /// </summary>
+    private static FaceGateReportDto BuildReport(
+        ProfileDraft draft, FaceMatchResolvedSettings resolved, bool isNsw, DateTime today, int activeEnrollments)
+    {
         var facets = new List<FaceGateFacetDto>
         {
             CaptureFacet(draft),
-            MatchFacet(draft, resolved, jurisdiction == "NSW", today),
+            MatchFacet(draft, resolved, isNsw, today),
             StaffFacet(draft, activeEnrollments),
             DedupFacet(draft),
             UnwelcomeFacet(draft, resolved),
         };
-        return new FaceGateReportDto { Facets = facets, CanSave = facets.All(f => f.Missing.Count == 0) };
+        return new FaceGateReportDto
+        {
+            Facets = facets,
+            CanSave = facets.All(f => f.Missing.Count == 0),
+            HasWarnings = facets.Any(f => f.Warnings.Count > 0),
+        };
     }
 
+    /// <summary>各 facet 警告条数之和（同一字段被多个 facet 要求时分别计数，与页面各 facet 提示的条数相加一致）。</summary>
+    private static int CountWarnings(FaceGateReportDto report) => report.Facets.Sum(f => f.Warnings.Count);
+
+    /// <summary>阻塞：Capture 必须声明只拍知情的内部人员；评估匹配只允许在 Capture 下。</summary>
     private static FaceGateFacetDto CaptureFacet(ProfileDraft draft)
     {
         var requested = draft.Mode == FaceStoreMode.Capture || draft.EvaluateMatch;
@@ -269,35 +311,37 @@ public sealed class FaceStoreProfileService(
         return new FaceGateFacetDto { Facet = "capture", Requested = requested, Missing = missing };
     }
 
+    /// <summary>Match 模式的合规记录：全部是警告（不阻塞）。</summary>
     private static FaceGateFacetDto MatchFacet(ProfileDraft draft, FaceMatchResolvedSettings resolved, bool isNsw, DateTime today)
     {
         var requested = draft.Mode == FaceStoreMode.Match;
-        var missing = new List<string>();
+        var warnings = new List<string>();
         if (requested)
         {
-            AddIfBlank(missing, "piaReference", draft.PiaReference);
-            if (draft.SignageInstalledOn == null) missing.Add("signageInstalledOn");
-            AddIfBlank(missing, "legalSignoffBy", draft.LegalSignoffBy);
-            if (draft.LegalSignoffAt == null) missing.Add("legalSignoffAt");
+            AddIfBlank(warnings, "piaReference", draft.PiaReference);
+            if (draft.SignageInstalledOn == null) warnings.Add("signageInstalledOn");
+            AddIfBlank(warnings, "legalSignoffBy", draft.LegalSignoffBy);
+            if (draft.LegalSignoffAt == null) warnings.Add("legalSignoffAt");
             if (isNsw)
             {
                 if (draft.StaffNoticeDate == null)
                 {
-                    missing.Add("staffNoticeDate");
+                    warnings.Add("staffNoticeDate");
                 }
                 else if (draft.StaffNoticeDate.Value > today.AddDays(-FaceMatchRules.NswNoticeMinDays))
                 {
                     // NSW 工作场所监控法：员工须提前至少 14 天书面通知（条文原文未核实，【待律师确认】）。
-                    missing.Add("staffNoticeTooRecent");
+                    warnings.Add("staffNoticeTooRecent");
                 }
             }
 
-            AddCrossBorderMissing(missing, draft, resolved);
+            AddCrossBorderWarnings(warnings, draft, resolved);
         }
 
-        return new FaceGateFacetDto { Facet = "match", Requested = requested, Missing = missing };
+        return new FaceGateFacetDto { Facet = "match", Requested = requested, Warnings = warnings };
     }
 
+    /// <summary>阻塞：员工排除要求模式不是 Off，且该店至少一份有效登记（功能前提，不是法律记录）。</summary>
     private static FaceGateFacetDto StaffFacet(ProfileDraft draft, int activeEnrollments)
     {
         var requested = draft.StaffExclusionEnabled;
@@ -311,79 +355,83 @@ public sealed class FaceStoreProfileService(
         return new FaceGateFacetDto { Facet = "staffExclusion", Requested = requested, Missing = missing };
     }
 
+    /// <summary>阻塞：去重要求模式不是 Off。Match 下的去重专项律师确认是警告。</summary>
     private static FaceGateFacetDto DedupFacet(ProfileDraft draft)
     {
         var requested = draft.TrafficDedupEnabled;
         var missing = new List<string>();
+        var warnings = new List<string>();
         if (requested)
         {
             if (draft.Mode == FaceStoreMode.Off) missing.Add("modeOff");
-            // 对真实顾客（Match）运行前须有去重专项律师确认；Capture 下仅内部知情人员验证，不要求。
+            // 对真实顾客（Match）运行前须有去重专项律师确认——现在只是警告；Capture 下仅内部知情人员验证，不要求也不警告。
             if (draft.Mode == FaceStoreMode.Match)
             {
-                AddIfBlank(missing, "dedupLegalSignoffBy", draft.DedupLegalSignoffBy);
-                if (draft.DedupLegalSignoffAt == null) missing.Add("dedupLegalSignoffAt");
+                AddIfBlank(warnings, "dedupLegalSignoffBy", draft.DedupLegalSignoffBy);
+                if (draft.DedupLegalSignoffAt == null) warnings.Add("dedupLegalSignoffAt");
             }
         }
 
-        return new FaceGateFacetDto { Facet = "trafficDedup", Requested = requested, Missing = missing };
+        return new FaceGateFacetDto { Facet = "trafficDedup", Requested = requested, Missing = missing, Warnings = warnings };
     }
 
+    /// <summary>阻塞：名单要求模式不是 Off。Match 下的专项记录全部是警告；Capture 下不要求。</summary>
     private static FaceGateFacetDto UnwelcomeFacet(ProfileDraft draft, FaceMatchResolvedSettings resolved)
     {
         var requested = draft.UnwelcomeListEnabled;
         var missing = new List<string>();
+        var warnings = new List<string>();
         if (requested)
         {
             if (draft.Mode == FaceStoreMode.Off) missing.Add("modeOff");
-            // 对真实顾客（Match）运行前才要求专项记录；Capture 下只处理知情的内部人员（AllowedSubjects 由 capture 闸门强制），
-            // 名单参考照片与命中图都只涉及内部人员，与顾客去重同一原则：不要求专项评估、律师确认、PIA、告示、培训、隐私联系人和跨境审查，
-            // 用于上线前用内部员工的照片端到端测试名单。切到 Match 时这些记录会重新被要求，缺了就保存不了。
+            // 对真实顾客（Match）运行前才需要专项记录；Capture 下只处理知情的内部人员（AllowedSubjects 由 capture 闸门强制），
+            // 名单参考照片与命中图都只涉及内部人员，与顾客去重同一原则：不要求（也不警告）专项评估、律师确认、PIA、告示、培训、
+            // 隐私联系人和跨境审查，用于上线前用内部员工的照片端到端测试名单。切到 Match 时这些记录重新计算，缺了显示为警告。
             if (draft.Mode == FaceStoreMode.Match)
             {
-                AddIfBlank(missing, "unwelcomeAssessmentRef", draft.UnwelcomeAssessmentRef);
-                AddIfBlank(missing, "unwelcomeLegalSignoffBy", draft.UnwelcomeLegalSignoffBy);
-                if (draft.UnwelcomeLegalSignoffAt == null) missing.Add("unwelcomeLegalSignoffAt");
-                AddIfBlank(missing, "piaReference", draft.PiaReference);
-                if (draft.SignageInstalledOn == null) missing.Add("signageInstalledOn");
-                if (draft.StaffTrainingDate == null) missing.Add("staffTrainingDate");
-                AddIfBlank(missing, "privacyContact", draft.PrivacyContact);
+                AddIfBlank(warnings, "unwelcomeAssessmentRef", draft.UnwelcomeAssessmentRef);
+                AddIfBlank(warnings, "unwelcomeLegalSignoffBy", draft.UnwelcomeLegalSignoffBy);
+                if (draft.UnwelcomeLegalSignoffAt == null) warnings.Add("unwelcomeLegalSignoffAt");
+                AddIfBlank(warnings, "piaReference", draft.PiaReference);
+                if (draft.SignageInstalledOn == null) warnings.Add("signageInstalledOn");
+                if (draft.StaffTrainingDate == null) warnings.Add("staffTrainingDate");
+                AddIfBlank(warnings, "privacyContact", draft.PrivacyContact);
                 // Match 下名单要求跨境披露审查（名单照片与每张送检人脸都发往境外）。
-                AddCrossBorderMissing(missing, draft, resolved);
+                AddCrossBorderWarnings(warnings, draft, resolved);
             }
         }
 
-        return new FaceGateFacetDto { Facet = "unwelcome", Requested = requested, Missing = missing };
+        return new FaceGateFacetDto { Facet = "unwelcome", Requested = requested, Missing = missing, Warnings = warnings };
     }
 
-    private static void AddCrossBorderMissing(List<string> missing, ProfileDraft draft, FaceMatchResolvedSettings resolved)
+    private static void AddCrossBorderWarnings(List<string> warnings, ProfileDraft draft, FaceMatchResolvedSettings resolved)
     {
         if (string.IsNullOrEmpty(draft.CrossBorderRegion))
         {
-            AddOnce(missing, "crossBorderRegion");
+            AddOnce(warnings, "crossBorderRegion");
         }
         else if (!resolved.Enabled || !string.Equals(draft.CrossBorderRegion, resolved.Region, StringComparison.Ordinal))
         {
-            // 审查记录里的地域必须等于当前配置的处理地域；功能未开启（没有有效地域）时同样不通过。
-            AddOnce(missing, "regionMismatch");
+            // 审查记录里的地域必须等于当前配置的处理地域；功能未开启（没有有效地域）时同样算缺口。
+            AddOnce(warnings, "regionMismatch");
         }
 
-        AddIfBlank(missing, "crossBorderReviewRef", draft.CrossBorderReviewRef, once: true);
-        AddIfBlank(missing, "crossBorderReviewedBy", draft.CrossBorderReviewedBy, once: true);
-        if (draft.CrossBorderReviewedAt == null) AddOnce(missing, "crossBorderReviewedAt");
+        AddIfBlank(warnings, "crossBorderReviewRef", draft.CrossBorderReviewRef, once: true);
+        AddIfBlank(warnings, "crossBorderReviewedBy", draft.CrossBorderReviewedBy, once: true);
+        if (draft.CrossBorderReviewedAt == null) AddOnce(warnings, "crossBorderReviewedAt");
     }
 
-    private static void AddIfBlank(List<string> missing, string key, string? value, bool once = false)
+    private static void AddIfBlank(List<string> list, string key, string? value, bool once = false)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            if (once) AddOnce(missing, key); else missing.Add(key);
+            if (once) AddOnce(list, key); else list.Add(key);
         }
     }
 
-    private static void AddOnce(List<string> missing, string key)
+    private static void AddOnce(List<string> list, string key)
     {
-        if (!missing.Contains(key)) missing.Add(key);
+        if (!list.Contains(key)) list.Add(key);
     }
 
     /// <summary>门店成员里有效登记（Active 且同意未撤回）的人数。</summary>
