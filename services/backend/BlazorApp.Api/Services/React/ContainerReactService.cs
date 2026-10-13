@@ -7,6 +7,7 @@ using BlazorApp.Api.Features.SupplyNotices;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
+using BlazorApp.Api.Services.Containers;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -7070,61 +7071,46 @@ namespace BlazorApp.Api.Services.React
         }
 
         /// <summary>
-        /// 获取即将到港的货柜及其商品列表（Coming Soon 页面专用）
-        /// 条件：未来8周内预计到港 + 最近一周内实际到港
+        /// 获取即将上新的货柜及其商品列表（历史兼容入口，当前前端不再调用）。
+        /// 货柜选取口径与 <see cref="GetComingSoonSummariesAsync"/> 完全一致：到仓库日期（实际到货日期优先，
+        /// 没有时用预计到岸日期）落在悉尼本地今天 -7 天 ~ +21 天内；不再自己手写一套 8 周范围。
         /// </summary>
         public async Task<List<ComingSoonContainerDto>> GetComingSoonContainersAsync()
         {
             try
             {
-                var now = DateTime.Now;
-                var eightWeeksLater = now.AddDays(56); // 8周
-                var oneWeekAgo = now.AddDays(-7); // 一周前
+                var localToday = ContainerWarehouseArrival.GetSydneyToday(DateTime.UtcNow);
+                var (from, toExclusive) = ContainerWarehouseArrival.BuildWindow(localToday);
 
                 _logger.LogInformation(
-                    "[React] 获取即将到港货柜: 当前日期={Now}, 未来8周截止={EightWeeksLater}, 一周前={OneWeekAgo}",
-                    now,
-                    eightWeeksLater,
-                    oneWeekAgo
+                    "[React] 获取即将上新货柜: 悉尼今天={LocalToday}, 到仓库日期窗口=[{From}, {ToExclusive})",
+                    localToday,
+                    from,
+                    toExclusive
                 );
 
-                // 查询条件：
-                // 1. 未来8周内预计到港的货柜 (EstimatedArrivalDate 在 now 和 eightWeeksLater 之间，且 ActualArrivalDate 为空)
-                // 2. 最近一周内实际到港的货柜 (ActualArrivalDate 在 oneWeekAgo 和 now 之间)
-                var query = _context
+                var comingSoonContainers = await _context
                     .Db.Queryable<Container>()
-                    .Where(x => x.Status != null && x.Status > 0);
-
-                var containers = await query.ToListAsync();
-
-                // 过滤符合条件的货柜
-                var comingSoonContainers = containers
-                    .Where(c =>
-                        // 条件1: 未来8周内预计到港 且 未实际到港
-                        (
-                            c.EstimatedArrivalDate.HasValue
-                            && c.EstimatedArrivalDate >= now
-                            && c.EstimatedArrivalDate <= eightWeeksLater
-                            && !c.ActualArrivalDate.HasValue
-                        )
-                        ||
-                        // 条件2: 最近一周内实际到港
-                        (
-                            c.ActualArrivalDate.HasValue
-                            && c.ActualArrivalDate >= oneWeekAgo
-                            && c.ActualArrivalDate <= now
-                        )
-                    )
-                    .ToList();
+                    .WhereWarehouseArrivalIn(from, toExclusive)
+                    .ToListAsync();
 
                 _logger.LogInformation(
-                    "[React] 找到 {Count} 个即将到港/已到港货柜",
+                    "[React] 找到 {Count} 个即将上新货柜",
                     comingSoonContainers.Count
                 );
 
                 var result = new List<ComingSoonContainerDto>();
 
-                foreach (var container in comingSoonContainers)
+                // 与摘要接口同一排序：到仓库日期升序，同日按货柜编号、主键稳定排序
+                foreach (
+                    var container in ContainerWarehouseArrival.OrderByWarehouseArrival(
+                        comingSoonContainers,
+                        c => c.ActualArrivalDate,
+                        c => c.EstimatedArrivalDate,
+                        c => c.ContainerNumber,
+                        c => c.ContainerCode
+                    )
+                )
                 {
                     // 获取每个货柜的商品明细
                     var details = await _context
@@ -7160,17 +7146,42 @@ namespace BlazorApp.Api.Services.React
                     );
                 }
 
-                // 按预计到岸日期排序（已到港的排在前面）
-                result = result
-                    .OrderByDescending(x => x.实际到货日期.HasValue)
-                    .ThenBy(x => x.预计到岸日期)
-                    .ToList();
-
                 return result;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[React] 获取即将到港货柜失败");
+                _logger.LogError(ex, "[React] 获取即将上新货柜失败");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Web 订货前台「即将上新」货柜摘要。货柜选取、到仓库日期、窗口与排序都来自 <see cref="ContainerWarehouseArrival"/>，
+        /// 与移动端「HB新品」页（windowBasis=warehouse）是同一份规则。
+        /// 一次查询取全窗口内的货柜（窗口只有 29 天，没有分页上限，更不会静默截断）；
+        /// 只映射货柜主表字段（不预加载明细：前端按货柜另行懒加载商品，旧实现映射出的 Details 也恒为空）。
+        /// </summary>
+        public async Task<List<ContainerMainDto>> GetComingSoonSummariesAsync(DateTime localToday)
+        {
+            try
+            {
+                var (from, toExclusive) = ContainerWarehouseArrival.BuildWindow(localToday);
+                var containers = await _context
+                    .Db.Queryable<Container>()
+                    .WhereWarehouseArrivalIn(from, toExclusive)
+                    .ToListAsync();
+
+                return ContainerWarehouseArrival.OrderForDisplay(
+                    _mapper.Map<List<ContainerMainDto>>(containers)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "获取即将上新货柜摘要失败, LocalToday: {LocalToday}",
+                    localToday
+                );
                 throw;
             }
         }

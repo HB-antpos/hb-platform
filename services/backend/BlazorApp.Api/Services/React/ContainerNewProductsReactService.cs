@@ -2,6 +2,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.Attendance;
+using BlazorApp.Api.Services.Containers;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
@@ -69,18 +70,16 @@ public sealed class ContainerNewProductsReactService(
             throw new ContainerNewProductsStateUnknownException();
         }
 
-        var localToday = GetLocalToday(stateCode, nowUtc);
+        var localToday = ContainerWarehouseArrival.GetLocalToday(stateCode, nowUtc);
         var (from, toExclusive) = BuildWindow(localToday);
         var byWarehouseDate = windowBasis == ContainerNewProductsWindowBasis.WarehouseArrival;
         // 默认（StoreArrival）：窗口按「预计到店区间」算；区间 = 货柜日期 + [起, 止] 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤。
         // WarehouseArrival：窗口就是货柜到仓库日期本身（实际到货日期优先，没有时用预计到岸日期），粗筛窗口即精确窗口，不再做到店区间交集过滤。
         var (containerFrom, containerToExclusive) = byWarehouseDate ? (from, toExclusive) : BuildContainerQueryWindow(from, toExclusive);
         var (startWeekdays, endWeekdays) = GetStoreArrivalWeekdayRange(stateCode);
+        // 候选条件（未删除 + 到仓库日期落在区间内）与 Web 即将上新共用 ContainerWarehouseArrival.WhereWarehouseArrivalIn，不要在这里再手写一份
         var candidateContainers = await db.Queryable<Container>()
-            .Where(x => !x.IsDeleted)
-            .Where(x =>
-                (x.ActualArrivalDate != null && x.ActualArrivalDate >= containerFrom && x.ActualArrivalDate < containerToExclusive)
-                || (x.ActualArrivalDate == null && x.EstimatedArrivalDate != null && x.EstimatedArrivalDate >= containerFrom && x.EstimatedArrivalDate < containerToExclusive))
+            .WhereWarehouseArrivalIn(containerFrom, containerToExclusive)
             .Select(x => new ContainerDateRow
             {
                 ContainerCode = x.ContainerCode,
@@ -93,7 +92,7 @@ public sealed class ContainerNewProductsReactService(
         var containers = new List<ContainerDateRow>();
         foreach (var candidate in candidateContainers)
         {
-            var containerDate = (candidate.ActualArrivalDate ?? candidate.EstimatedArrivalDate)!.Value.Date;
+            var containerDate = ContainerWarehouseArrival.ResolveDate(candidate.ActualArrivalDate, candidate.EstimatedArrivalDate)!.Value;
             var storeArrival = (Start: AddWeekdays(containerDate, startWeekdays), End: AddWeekdays(containerDate, endWeekdays));
             // 到店区间与窗口有交集就显示：区间跨过窗口边界的货柜也可能在窗口内到店（到仓库日期口径下货柜日期已在粗筛里落在窗口内，无需再判）
             if (!byWarehouseDate && !OverlapsWindow(storeArrival.Start, storeArrival.End, from, toExclusive)) continue;
@@ -203,7 +202,7 @@ public sealed class ContainerNewProductsReactService(
                 EstimatedStoreArrivalDateEnd = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].End),
                 // 到仓库日期与上面推算到店区间用的是同一个日期：实际到货日期优先，没有时用预计到岸日期兜底；
                 // 候选货柜的筛选已保证二者至少有一个，所以这里一定有值
-                WarehouseArrivalDate = DateOnly.FromDateTime((container.ActualArrivalDate ?? container.EstimatedArrivalDate)!.Value.Date),
+                WarehouseArrivalDate = DateOnly.FromDateTime(ContainerWarehouseArrival.ResolveDate(container.ActualArrivalDate, container.EstimatedArrivalDate)!.Value),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
                 IsNewProduct = isNewProduct,
             });
@@ -267,9 +266,10 @@ public sealed class ContainerNewProductsReactService(
     internal static bool OverlapsWindow(DateTime start, DateTime end, DateTime from, DateTime toExclusive) =>
         end >= from && start < toExclusive;
 
-    // 预计到店日窗口：过去 1 周至未来 3 周，含今天前 7 天与后 21 天，上界为开区间
+    // 窗口：过去 1 周至未来 3 周，含今天前 7 天与后 21 天，上界为开区间。
+    // 常量与计算统一放在 ContainerWarehouseArrival（Web 即将上新同用），这里只保留同名入口给既有调用方与测试
     internal static (DateTime From, DateTime ToExclusive) BuildWindow(DateTime localToday) =>
-        (localToday.Date.AddDays(-7), localToday.Date.AddDays(22));
+        ContainerWarehouseArrival.BuildWindow(localToday);
 
     // 货柜日期粗筛窗口：到店区间结束日比货柜日期最多晚 7 个工作日（最多跨 11 个自然日），下界多放 14 天保证不漏；
     // 到店区间起始日不早于货柜日期，所以上界沿用到店窗口上界即可
@@ -299,9 +299,6 @@ public sealed class ContainerNewProductsReactService(
             ?? (Regex.IsMatch(text, @"(?:^|[\s,])(?:QLD|QUEENSLAND)(?:[\s,]|$)") ? "QLD" : null)
             ?? (Regex.IsMatch(text, @"(?:^|[\s,])(?:NSW|NEW SOUTH WALES)(?:[\s,]|$)") ? "NSW" : null);
     }
-
-    private static DateTime GetLocalToday(string state, DateTime nowUtc) =>
-        TimeZoneInfo.ConvertTimeFromUtc(nowUtc, TimeZoneInfo.FindSystemTimeZoneById(state == "QLD" ? "Australia/Brisbane" : "Australia/Sydney")).Date;
 
     private sealed class ContainerDateRow { public string ContainerCode { get; init; } = string.Empty; public string? ContainerNumber { get; init; } public DateTime? ActualArrivalDate { get; init; } public DateTime? EstimatedArrivalDate { get; init; } }
     private sealed class DetailRow { public string ContainerCode { get; init; } = string.Empty; public string ProductCode { get; init; } = string.Empty; public string? HbProductNo { get; init; } public decimal? LoadingQuantity { get; init; } public string? ImageUrl { get; init; } public string? Barcode { get; init; } public decimal? DetailRetailPrice { get; init; } }

@@ -64,7 +64,7 @@ export function resolveShopBannerCopy(pathname: string): ShopBannerCopy {
       titleKey: 'shop.comingSoon',
       titleFallback: '即将上新',
       subtitleKey: 'shop.comingSoonBannerSubtitle',
-      subtitleFallback: '查看即将到货货柜，快速筛选补货和新品。',
+      subtitleFallback: '按货柜到仓库日期：过去 1 周至未来 3 周，快速筛选补货和新品。',
     }
   }
 

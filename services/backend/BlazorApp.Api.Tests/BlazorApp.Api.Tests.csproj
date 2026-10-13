@@ -416,6 +416,7 @@
     <Compile Include="ContainerNewProductsControllerTests.cs" />
     <Compile Include="MobileAppInstallLinksControllerTests.cs" />
     <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
+    <Compile Include="ContainerWarehouseArrivalTests.cs" />
     <Compile Include="ContainerNewProductNotificationTests.cs" />
     <Compile Include="ContainerNewProductNotificationSqlServerTests.cs" />
     <Compile Include="DataSyncReactControllerLocationSyncContractTests.cs" />

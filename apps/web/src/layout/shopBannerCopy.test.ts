@@ -24,6 +24,10 @@ assertEqual(
   'shop.comingSoonBannerSubtitle',
   '即将上新页副标题不应复用历史订单文案',
 )
+// 即将上新按货柜到仓库日期（过去 1 周～未来 3 周）统一口径：兜底文案须与中文资源一致，两种语言都要点明「到仓库 / warehouse」
+assertEqual(comingSoonCopy.subtitleFallback, zh.shop.comingSoonBannerSubtitle, '即将上新副标题兜底文案应与中文资源一致')
+assertEqual(zh.shop.comingSoonBannerSubtitle.includes('到仓库日期'), true, '中文副标题应说明按到仓库日期')
+assertEqual(en.shop.comingSoonBannerSubtitle.includes('warehouse arrival'), true, '英文副标题应说明按 warehouse arrival')
 
 // 货号销量已并入进货销量分析的「粘贴数据查看」标签，独立导航文案不应再留在首屏主文案包。
 assertEqual((en.shop as Record<string, unknown>).batchProductSales, undefined, '英文主文案包不应保留货号销量导航文案')

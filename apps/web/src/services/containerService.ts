@@ -74,13 +74,12 @@ function normalizeHqTranslationResult(result: RawHqTranslationResult = {}): HqTr
   }
 }
 
-function toTimestamp(value?: string) {
-  if (!value) {
-    return Number.MAX_SAFE_INTEGER
-  }
-
-  const timestamp = new Date(value).getTime()
-  return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp
+// 货柜到仓库日期的排序键（YYYY-MM-DD）：实际到货日期优先，没有时用预计到岸日期，两者都没有的排最后。
+// 只比日期、不比时间，与后端 ContainerWarehouseArrival.OrderForDisplay 的口径一致；
+// 同一天保持后端给出的顺序（货柜编号），依赖 Array.prototype.sort 的稳定性，不要在这里另外发明排序规则。
+function toWarehouseDateKey(container: Pick<ContainerMain, '实际到货日期' | '预计到岸日期'>) {
+  const value = container.实际到货日期 || container.预计到岸日期
+  return value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : '9999-99-99'
 }
 
 function toComingSoonProduct(item: ContainerDetail): ComingSoonHomeProduct {
@@ -882,9 +881,9 @@ export async function getComingSoonContainerSummaries(): Promise<ComingSoonHomeC
   const containers = Array.isArray(response) ? response : response.data ?? []
 
   return containers.sort((left, right) => {
-    const leftDate = left.实际到货日期 || left.预计到岸日期
-    const rightDate = right.实际到货日期 || right.预计到岸日期
-    return toTimestamp(leftDate) - toTimestamp(rightDate)
+    const leftKey = toWarehouseDateKey(left)
+    const rightKey = toWarehouseDateKey(right)
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
   })
 }
 

@@ -165,7 +165,19 @@ namespace BlazorApp.Api.Interfaces.React
         /// <returns>成功删除的行数</returns>
         Task<int> BatchDeleteDetailsAsync(List<string> hguids);
 
+        /// <summary>
+        /// 即将上新货柜（含商品列表，历史兼容入口）：货柜选取口径与 <see cref="GetComingSoonSummariesAsync"/> 完全一致。
+        /// </summary>
         Task<List<ComingSoonContainerDto>> GetComingSoonContainersAsync();
+
+        /// <summary>
+        /// Web 订货前台「即将上新」货柜摘要：到仓库日期（实际到货日期优先，没有时用预计到岸日期）落在
+        /// [<paramref name="localToday"/> - 7 天, <paramref name="localToday"/> + 22 天) 内的货柜，
+        /// 与移动端「HB新品」页（windowBasis=warehouse）共用 <c>ContainerWarehouseArrival</c>；
+        /// 按到仓库日期升序、同日按货柜编号稳定排序，一次取全，不分页、不截断。
+        /// </summary>
+        /// <param name="localToday">窗口基准日（调用方传悉尼本地今天）。</param>
+        Task<List<ContainerMainDto>> GetComingSoonSummariesAsync(DateTime localToday);
 
         Task<SyncResult> SyncContainersWithDetailsFromHqAsync(DateTime? startDate = null);
 
