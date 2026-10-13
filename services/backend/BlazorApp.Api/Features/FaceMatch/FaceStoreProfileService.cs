@@ -11,7 +11,8 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 1. Mode=Capture 必填 AllowedSubjects（只拍知情的内部人员）；EvaluateMatch 只允许在 Capture 下；
 /// 2. Mode=Match 需 PIA、告示日期、律师确认 + 跨境披露审查；NSW 门店另需满 14 天的员工通知日期；
 /// 3. StaffExclusionEnabled 需门店成员里存在有效的同意与登记；TrafficDedupEnabled 在 Match 下另需去重专项律师确认；
-/// 4. UnwelcomeListEnabled 需专项评估 / 律师确认 / PIA / 告示 / 培训 / 隐私联系人 + 跨境披露审查；
+/// 4. UnwelcomeListEnabled：Match 下需专项评估 / 律师确认 / PIA / 告示 / 培训 / 隐私联系人 + 跨境披露审查；
+///    Capture 下（只处理知情的内部人员）只要求 Mode 不是 Off 且已填 AllowedSubjects，用于上线前内部测试，切到 Match 时重新校验；
 /// 5. 跨境披露审查的地域必须等于当前配置的处理地域（配置地域改动后旧审查作废）。
 /// 档案读取失败时接收端按 Off 处理，这里的保存只会写入通过闸门的状态。
 /// </summary>
@@ -335,15 +336,21 @@ public sealed class FaceStoreProfileService(
         if (requested)
         {
             if (draft.Mode == FaceStoreMode.Off) missing.Add("modeOff");
-            AddIfBlank(missing, "unwelcomeAssessmentRef", draft.UnwelcomeAssessmentRef);
-            AddIfBlank(missing, "unwelcomeLegalSignoffBy", draft.UnwelcomeLegalSignoffBy);
-            if (draft.UnwelcomeLegalSignoffAt == null) missing.Add("unwelcomeLegalSignoffAt");
-            AddIfBlank(missing, "piaReference", draft.PiaReference);
-            if (draft.SignageInstalledOn == null) missing.Add("signageInstalledOn");
-            if (draft.StaffTrainingDate == null) missing.Add("staffTrainingDate");
-            AddIfBlank(missing, "privacyContact", draft.PrivacyContact);
-            // 不受欢迎人员名单任何模式下都要求跨境披露审查（名单照片同样发往境外）。
-            AddCrossBorderMissing(missing, draft, resolved);
+            // 对真实顾客（Match）运行前才要求专项记录；Capture 下只处理知情的内部人员（AllowedSubjects 由 capture 闸门强制），
+            // 名单参考照片与命中图都只涉及内部人员，与顾客去重同一原则：不要求专项评估、律师确认、PIA、告示、培训、隐私联系人和跨境审查，
+            // 用于上线前用内部员工的照片端到端测试名单。切到 Match 时这些记录会重新被要求，缺了就保存不了。
+            if (draft.Mode == FaceStoreMode.Match)
+            {
+                AddIfBlank(missing, "unwelcomeAssessmentRef", draft.UnwelcomeAssessmentRef);
+                AddIfBlank(missing, "unwelcomeLegalSignoffBy", draft.UnwelcomeLegalSignoffBy);
+                if (draft.UnwelcomeLegalSignoffAt == null) missing.Add("unwelcomeLegalSignoffAt");
+                AddIfBlank(missing, "piaReference", draft.PiaReference);
+                if (draft.SignageInstalledOn == null) missing.Add("signageInstalledOn");
+                if (draft.StaffTrainingDate == null) missing.Add("staffTrainingDate");
+                AddIfBlank(missing, "privacyContact", draft.PrivacyContact);
+                // Match 下名单要求跨境披露审查（名单照片与每张送检人脸都发往境外）。
+                AddCrossBorderMissing(missing, draft, resolved);
+            }
         }
 
         return new FaceGateFacetDto { Facet = "unwelcome", Requested = requested, Missing = missing };

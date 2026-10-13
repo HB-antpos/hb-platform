@@ -198,7 +198,7 @@
         "evaluateMatch": "Evaluate only, with no effect on the store; requires Capture mode.",
         "staffExclusion": "Excludes enrolled staff from traffic counts; needs store members with a valid consent and enrolment.",
         "trafficDedup": "De-duplicates customers by face per day. High legal risk; needs a de-duplication-specific legal sign-off.",
-        "unwelcomeList": "Alerts staff on a list match and starts two-person review; needs an assessment, legal sign-off, signage and training records.",
+        "unwelcomeList": "Alerts staff on a list match and starts two-person review. Match mode needs an assessment, legal sign-off, signage and training records; Capture mode (consenting internal people only) does not, for pre-launch testing, and is re-checked when switched to Match.",
         "allowedSubjects": "Required for Capture mode: say who may appear in front of the cameras, all informed and consenting.",
         "signage": "The signage must state that face recognition technology is used.",
         "staffNoticeNsw": "This store is in NSW: staff surveillance notice must be given at least 14 days ahead.",

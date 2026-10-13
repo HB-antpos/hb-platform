@@ -977,7 +977,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | `Match` | PIA 编号、门口告示安装日期、律师确认人与时间、**跨境披露审查**（地域 + 审查编号 + 审查人 + 审查时间）；**NSW 门店另需员工监控通知日期且距今至少 14 天** |
 | 员工排除 `StaffExclusionEnabled` | 模式不是 Off，且该门店成员中存在有效的同意与登记 |
 | 顾客去重 `TrafficDedupEnabled` | 模式不是 Off；在 Match 下另需去重专项律师确认人与时间（Capture 下仅内部知情人员验证，不要求） |
-| 不受欢迎人员名单 `UnwelcomeListEnabled` | 模式不是 Off；专项评估编号、专项律师确认人与时间、PIA、告示日期、员工培训日期、隐私联系人、**跨境披露审查**（任何模式都要） |
+| 不受欢迎人员名单 `UnwelcomeListEnabled` | 模式不是 Off；**Match** 下另需：专项评估编号、专项律师确认人与时间、PIA、告示日期、员工培训日期、隐私联系人、**跨境披露审查**。**Capture 下（只处理知情的内部人员，已填 `AllowedSubjects`）不要求这些专项记录**，用于上线前用内部员工照片做端到端测试（2026-10-13 用户决定，与顾客去重同一原则）；切到 Match 时重新校验，缺了就保存不了 |
 
 - **跨境披露审查的地域必须等于当前配置的处理地域**。配置地域被改动后：档案页显示审查无效；后台任务⑦会自动把所有地域不符的档案作废审查记录，
   并**同时关闭**依赖它的真实顾客功能（Match 模式、员工排除、去重、名单）为 `Off`，写审计 `profile.region-invalidated`——宁可不识别，也不在失效的审查下运行。仅内部验证的 Capture 档案只作废审查、不改模式。
@@ -1124,7 +1124,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | 模式 | 调用腾讯云 | 本地报文 / 图片 | COS | 事件行（`FaceCaptureEvent/Image`） | 计数 |
 | --- | --- | --- | --- | --- | --- |
 | `Off` | 否 | **读完元数据即删**（`.json`、`.bin`、各类标记全删） | 不上传 | 不写 | 不写 |
-| `Capture` | 否；`EvaluateMatch=1` 且匹配可用时，入库成功后**额外**搜一次，把分数写 `FaceMatchEvaluation` | 与 P1 完全相同（存图、写 `.processed`，按保留期清理） | 按 P1 配置 | 照常写 | 不写 |
+| `Capture` | 否；`EvaluateMatch=1` 且匹配可用时，入库成功后**额外**搜一次，把分数写 `FaceMatchEvaluation`；**开了名单（见 17.4）时**另对每张人脸只搜 `unwelcome` 库（最低分 = 名单阈值），命中建 `FaceMatchTask` 并存命中图（私有 COS） | 与 P1 完全相同（存图、写 `.processed`，按保留期清理） | 按 P1 配置 | 照常写 | 不写 |
 | `Match` | 是（见下） | 处理完（无论结果）**全部删除**，不留 `.processed` 等任何残留 | **不上传**；唯一例外是名单命中任务的人脸图 | **不写** | 只写 `FaceTrafficBucket`（整点桶累加） |
 
 `Match` 的处理顺序（每张人脸一次 `SearchFacesReturnsByGroup`，`MaxFaceNum=1`，Base64 上传，`QualityControl=2`）：
@@ -1179,7 +1179,8 @@ Match 处理失败上限（`MatchMaxAttempts=3`、`MatchMaxLocalAgeMinutes=15`�
 | `Mode=2` 但匹配整体不可用（缺凭据、地域非法等） | `Off`（**不是**退回全部留存） |
 | `Mode=2` 且开了员工排除 / 去重 / 名单，但 `CrossBorderRegion` ≠ 当前配置地域，或缺 `CrossBorderReviewRef/By/At` | **降级**：`AllowedSubjects` 非空 → `Capture`（不评估），否则 `Off`；记 Warning（`cross-border-gate`） |
 | `Mode=2` 且去重开启，但 `TimeZoneId` 为空或系统不认识 | 去重关闭，其余照常；记 Warning（接收端无权读门店表，所以档案里的 `TimeZoneId` 必须由主 API 填好） |
-| `UnwelcomeListEnabled` 但缺名单专项记录（`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy/At`）或没开私有 COS | 名单这一块关闭；记 Warning |
+| `Mode=Match` 且 `UnwelcomeListEnabled`，但缺名单专项记录（`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy/At`）或没开私有 COS | 名单这一块关闭；记 Warning |
+| `Mode=Capture` 且 `UnwelcomeListEnabled`（内部知情人员测试） | 要求匹配可用、`AllowedSubjects` 非空、私有 COS 可用，**不要求专项记录与跨境审查**；缺任一项名单这一块关闭并记 Warning（`capture-unwelcome-*` / `unwelcome-no-cos`），Capture 的留存不变 |
 
 > 重要：**配置腾讯云凭据会让「没有档案的门店」从现状变成 `Off`（读完即删）**。给 1042 等仍在 `Capture` 试点的门店，必须先在 `FaceStoreProfile` 里建好 `Mode=1` 的档案，再配凭据。
 > 刚启动、第一次读档案还没尝试完时，处理器会先等一轮（报文留在盘上），不会因为「还没读」就误判成 `Off`。

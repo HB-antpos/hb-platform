@@ -164,6 +164,106 @@ public sealed class FaceMatchProcessingTests
         Assert.Equal(0, harness.Http.RequestCount);
     }
 
+    // ------------------------------------------------------------------ Capture：名单检查（仅内部知情人员的端到端测试）
+
+    [Fact]
+    public async Task Capture加名单_命中内部人员照片_建待复核任务_存命中图_原有留存不变_不写计数桶()
+    {
+        var listedFace = Face(7);
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(mode: 1, unwelcome: true, allowedSubjects: "仅内部测试员工", unwelcomeRecord: false, crossBorderRegion: null, crossBorderReviewed: false)]);
+        var personId = harness.Engine.Enroll(FaceGroups.Unwelcome, listedFace);
+        harness.Store.Entries[personId] = new UnwelcomeEntryInfo(new string('e', 32), null, Now.UtcDateTime.AddDays(30));
+        await harness.PostAsync(Capture(listedFace, 1));
+
+        var summary = await harness.RunAsync();
+
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), summary);
+        var task = Assert.Single(harness.Store.Tasks);
+        Assert.Equal(("S1001", "cam-front-01", new string('e', 32), 99m), (task.StoreCode, task.CameraId, task.EntryId, task.Score));
+        Assert.Equal(Now.UtcDateTime.AddDays(7), task.ImageDeleteAtUtc);
+        var (image, key) = Assert.Single(harness.Hits.Saved);
+        Assert.Equal(task.ImageObjectKey, key);
+        Assert.Equal(listedFace, image.Data.ToArray());
+        // 只搜名单库，且用名单阈值作最低分（不带最低分的是标定评估，这里不是）。
+        var search = Assert.Single(harness.Engine.Searches);
+        Assert.Equal([FaceGroups.Unwelcome], search.GroupIds.ToArray());
+        Assert.Equal(95d, search.MinScore);
+        // Capture 的留存完全不变：事件行 + 图片 + processed 标记；不写计数桶，不写评估行。
+        Assert.Single(harness.Writer.Events);
+        Assert.Equal(2, harness.Images.Calls.Count(call => call.StartsWith("image:", StringComparison.Ordinal)));
+        Assert.True(File.Exists(Assert.Single(P1TestSupport.CaptureBasePaths(harness.Factory)) + ".processed"));
+        Assert.Empty(harness.Store.Buckets);
+        Assert.Empty(harness.Store.Evaluations);
+    }
+
+    [Fact]
+    public async Task Capture加名单_没命中或条目过期_不建任务_照常入库()
+    {
+        var listedFace = Face(7);
+        using var harness = await MatchHarness.CreateAsync([Profile(mode: 1, unwelcome: true, allowedSubjects: "仅内部测试员工")]);
+        var personId = harness.Engine.Enroll(FaceGroups.Unwelcome, listedFace);
+        harness.Store.Entries[personId] = new UnwelcomeEntryInfo(new string('e', 32), null, Now.UtcDateTime.AddSeconds(-1));
+
+        await harness.PostAsync(Capture(Face(9), 1), Now);
+        await harness.PostAsync(Capture(listedFace, 2), Now.AddSeconds(1));
+        var summary = await harness.RunAsync();
+
+        Assert.Equal(new ProcessingSummary(2, 2, 0, 0), summary);
+        Assert.Empty(harness.Store.Tasks);
+        Assert.Empty(harness.Hits.Saved);
+        Assert.Equal(2, harness.Writer.Events.Count);
+    }
+
+    [Fact]
+    public async Task Capture加名单_腾讯云错误或存命中图失败_都不影响原有入库()
+    {
+        var listedFace = Face(7);
+        using var harness = await MatchHarness.CreateAsync([Profile(mode: 1, unwelcome: true, allowedSubjects: "仅内部测试员工")]);
+        var personId = harness.Engine.Enroll(FaceGroups.Unwelcome, listedFace);
+        harness.Store.Entries[personId] = new UnwelcomeEntryInfo(new string('e', 32), null, Now.UtcDateTime.AddDays(30));
+        // 第一条：腾讯云账号级错误。
+        harness.Engine.SearchFailures.Enqueue(new FaceMatchApiException(FaceMatchErrorKind.AccountFatal, "AuthFailure.SignatureFailure", "SearchFacesReturnsByGroup"));
+        await harness.PostAsync(Capture(listedFace, 1));
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await harness.RunAsync());
+
+        // 第二条：熔断冷却过后搜索命中，但存命中图时 COS 出错（异常被吞掉，只记日志）。
+        harness.Hits.FailuresRemaining = 1;
+        await harness.PostAsync(Capture(listedFace, 2), Now.AddSeconds(120));
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await harness.RunAsync());
+
+        Assert.Equal(2, harness.Writer.Events.Count);
+        Assert.All(P1TestSupport.CaptureBasePaths(harness.Factory), basePath => Assert.True(File.Exists(basePath + ".processed")));
+        Assert.Empty(harness.Store.Tasks);
+        Assert.Contains(harness.Factory.LogEntries, log => log.Level == LogLevel.Warning && log.Message.Contains("list check in Capture mode failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Capture加名单_只对非重复的新事件检查_重复报文不再调用腾讯云()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(mode: 1, unwelcome: true, allowedSubjects: "仅内部测试员工")]);
+        var body = Capture(Face(1), 1);
+        await harness.PostAsync(body);
+        await harness.PostAsync(body, Now.AddSeconds(5));
+
+        await harness.RunAsync();
+
+        Assert.Single(harness.Engine.Searches);
+    }
+
+    [Fact]
+    public async Task Capture没开名单_行为与之前完全一致_不搜名单库()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(mode: 1, allowedSubjects: "仅内部测试员工")]);
+        await harness.PostAsync(Capture(Face(1)));
+
+        await harness.RunAsync();
+
+        Assert.Empty(harness.Engine.Searches);
+        Assert.Equal(0, harness.Http.RequestCount);
+        Assert.Empty(harness.Store.Tasks);
+    }
+
     // ------------------------------------------------------------------ Match：数据残留
 
     [Fact]

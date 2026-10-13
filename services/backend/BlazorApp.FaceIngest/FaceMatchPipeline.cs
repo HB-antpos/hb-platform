@@ -348,6 +348,62 @@ internal sealed class FaceMatchPipeline
         }
     }
 
+    // ---------------------------------------------------------------- Capture 模式名单检查
+
+    /// <summary>
+    /// Capture 模式下的名单检查（只用于内部知情人员的端到端测试，设计第 14 节）：对这条抓拍的每张人脸
+    /// 只搜名单库，命中（相似度 ≥ 名单阈值，条目未过期且门店在范围内）就和 Match 一样存命中图并建复核任务。
+    /// 不写计数桶、不碰员工库和访客库，也不改变 Capture 原有的留存（事件行与图片照旧）。
+    /// 调用方负责吞掉这里的异常：名单检查失败不能影响原有入库流程。
+    /// </summary>
+    /// <returns>本条抓拍新建的复核任务数。</returns>
+    public async Task<int> CheckUnwelcomeAsync(MatchCapture capture, EffectiveStoreMode mode, CancellationToken cancellationToken)
+    {
+        if (!mode.Unwelcome)
+        {
+            return 0;
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var thresholds = _settings.ThresholdsFor(capture.StoreCode);
+        var tasks = 0;
+        foreach (var face in capture.Faces.Take(MaxFacesPerCapture))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!PassesQualityGate(face))
+            {
+                continue;
+            }
+
+            // 只搜名单库，且用名单阈值作最低分：没过阈值的候选腾讯云不会返回，也就不会有任何无关分数落下来。
+            var search = await CallAsync(
+                static (state, ct) => state.Matcher.SearchAsync(new FaceSearchRequest(state.Groups, state.Face.Data, state.MinScore), ct),
+                (Matcher: _matcher, Groups: (IReadOnlyList<string>)[FaceGroups.Unwelcome], Face: face, MinScore: (double?)thresholds.Unwelcome),
+                capture,
+                cancellationToken);
+            if (search.Error is not null)
+            {
+                // 账号级 / 请求级错误已在 CallAsync 里按节流告警并熔断；这里不再继续搜这条抓拍的其余人脸。
+                return tasks;
+            }
+
+            var result = search.Value!;
+            if (result.Status == FaceSearchStatus.NoUsableFace)
+            {
+                continue;
+            }
+
+            if (result.BestIn(FaceGroups.Unwelcome) is { } listHit
+                && listHit.Score >= thresholds.Unwelcome
+                && await TryCreateUnwelcomeTaskAsync(capture, face, listHit, now, cancellationToken))
+            {
+                tasks++;
+            }
+        }
+
+        return tasks;
+    }
+
     // ---------------------------------------------------------------- 访客库
 
     private async Task<VisitorGroupResolution> ResolveVisitorGroupAsync(

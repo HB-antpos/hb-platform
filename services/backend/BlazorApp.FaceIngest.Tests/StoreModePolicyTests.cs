@@ -254,6 +254,73 @@ public sealed class StoreModePolicyTests
         Assert.True(Resolve(harness).Unwelcome);
     }
 
+    // ---- 放宽规则：Capture 下名单只用于内部知情人员的测试，不要求专项记录与跨境审查 ----
+
+    [Fact]
+    public async Task Capture加名单_不要求专项记录与跨境审查_只要匹配可用且声明了内部知情人员()
+    {
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(mode: 1, unwelcome: true, allowedSubjects: "仅内部测试员工", unwelcomeRecord: false, crossBorderRegion: null, crossBorderReviewed: false)]);
+
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Capture, mode.Kind);
+        Assert.True(mode.Unwelcome);
+        Assert.False(mode.Evaluate);
+        Assert.False(mode.StaffExclusion || mode.TrafficDedup);
+        Assert.Equal("profile-capture-unwelcome", mode.Reason);
+    }
+
+    [Fact]
+    public async Task Capture加名单加评估_两件事互不影响()
+    {
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(mode: 1, evaluate: true, staff: true, unwelcome: true, allowedSubjects: "仅内部测试员工", unwelcomeRecord: false)]);
+
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Capture, mode.Kind);
+        Assert.True(mode.Evaluate);
+        Assert.True(mode.StaffExclusion);
+        Assert.True(mode.Unwelcome);
+        Assert.Equal("profile-capture-evaluate-unwelcome", mode.Reason);
+    }
+
+    [Theory]
+    [InlineData("no-subjects", "capture-unwelcome-no-allowed-subjects")]
+    [InlineData("blank-subjects", "capture-unwelcome-no-allowed-subjects")]
+    [InlineData("no-credentials", "capture-unwelcome-disabled")]
+    [InlineData("no-cos", "unwelcome-no-cos")]
+    public async Task Capture加名单缺允许对象_匹配被关闭_或没有COS_名单这一块关闭并记Warning(string scenario, string expectedLogKey)
+    {
+        var profile = Profile(
+            mode: 1,
+            unwelcome: true,
+            allowedSubjects: scenario == "no-subjects" ? null : scenario == "blank-subjects" ? "   " : "仅内部测试员工");
+        using var harness = await MatchHarness.CreateAsync([profile], credentials: scenario != "no-credentials");
+        harness.Hits.Available = scenario != "no-cos";
+
+        var mode = Resolve(harness);
+
+        // 名单这一块关掉，但 Capture 的现有行为不变（照常留存）。
+        Assert.Equal(StoreModeKind.Capture, mode.Kind);
+        Assert.False(mode.Unwelcome);
+        Assert.Contains(harness.Factory.LogEntries, log => log.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && log.Message.Contains(expectedLogKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Match下名单仍要求专项记录_放宽只限Capture()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true, unwelcomeRecord: false)]);
+
+        var mode = Resolve(harness);
+
+        Assert.Equal(StoreModeKind.Match, mode.Kind);
+        Assert.False(mode.Unwelcome);
+        Assert.Contains(harness.Factory.LogEntries, log => log.Message.Contains("unwelcome-gate", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task 档案门店编码大小写不敏感()
     {

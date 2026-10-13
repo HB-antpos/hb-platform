@@ -411,11 +411,13 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
     {
         SeedProfile("1013", FaceStoreMode.Match, region: "ap-shanghai", dedup: true, unwelcome: true);
         SeedProfile("2001", FaceStoreMode.Capture, region: "ap-shanghai", evaluate: true);
+        // Capture 下开了名单（只处理内部知情人员，不依赖跨境审查）：只作废审查，名单开关保留。
+        SeedProfile("2002", FaceStoreMode.Capture, region: "ap-shanghai", unwelcome: true);
         SeedProfile("9001", FaceStoreMode.Match, region: "ap-guangzhou");
 
         var count = await _h.Maintenance.InvalidateStaleCrossBorderReviewsAsync(default);
 
-        Assert.Equal(2, count);
+        Assert.Equal(3, count);
         var match = await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "1013");
         Assert.Equal(FaceStoreMode.Off, match.Mode);
         Assert.False(match.TrafficDedupEnabled || match.UnwelcomeListEnabled || match.StaffExclusionEnabled || match.EvaluateMatch);
@@ -427,12 +429,17 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
         Assert.Equal(FaceStoreMode.Capture, capture.Mode);
         Assert.True(capture.EvaluateMatch);
         Assert.Null(capture.CrossBorderRegion);
+        var captureList = await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "2002");
+        Assert.Equal(FaceStoreMode.Capture, captureList.Mode);
+        Assert.True(captureList.UnwelcomeListEnabled);
+        Assert.Null(captureList.CrossBorderRegion);
         // 地域一致的不动。
         Assert.Equal(FaceStoreMode.Match, (await _h.Db.Queryable<FaceStoreProfile>().SingleAsync(p => p.StoreCode == "9001")).Mode);
         var audits = await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.ProfileInvalidated).ToListAsync();
-        Assert.Equal(2, audits.Count);
+        Assert.Equal(3, audits.Count);
         Assert.Contains(audits, a => a.StoreCode == "1013" && a.Result == "disabled");
         Assert.Contains(audits, a => a.StoreCode == "2001" && a.Result == "review-cleared");
+        Assert.Contains(audits, a => a.StoreCode == "2002" && a.Result == "review-cleared");
     }
 
     [Fact]
