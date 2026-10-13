@@ -89,6 +89,11 @@ public sealed class NotificationMarkReadResultDto
 
 public interface INotificationPublisher
 {
+    /// <summary>
+    /// 发布通知。<b>必须在业务事务提交之后调用</b>：发布器内部自带事务，嵌套会破坏外层事务的回滚语义，
+    /// 当前连接上有未结束的事务时直接抛 <see cref="InvalidOperationException"/>。
+    /// 业务代码应在提交后用 try/catch 包住本调用，发布失败不能反过来影响已提交的业务结果。
+    /// </summary>
     Task<NotificationPublishResult> PublishAsync(
         NotificationPublishRequest request,
         CancellationToken cancellationToken = default

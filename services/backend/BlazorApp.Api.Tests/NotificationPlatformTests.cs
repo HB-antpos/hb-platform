@@ -126,6 +126,57 @@ public sealed class NotificationPlatformTests : IDisposable
     }
 
     [Fact]
+    public async Task Publish_在显式业务事务内调用_直接抛异常_外层回滚照常生效且不留通知()
+    {
+        await _db.Ado.ExecuteCommandAsync("CREATE TABLE BizProbe (Id INTEGER PRIMARY KEY)");
+        await _db.Ado.BeginTranAsync();
+        await _db.Ado.ExecuteCommandAsync("INSERT INTO BizProbe (Id) VALUES (1)");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreatePublisher().PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid))));
+        await _db.Ado.RollbackTranAsync();
+
+        // 没有防护时内层提交会把业务行一并提交，外层回滚形同虚设（SQL Server 实测）。
+        Assert.Equal(0, await _db.Ado.GetIntAsync("SELECT COUNT(*) FROM BizProbe"));
+        Assert.Equal(0, await _db.Queryable<AppNotification>().CountAsync());
+        Assert.Empty(_dispatcher.Sent);
+    }
+
+    [Fact]
+    public async Task Publish_在UseTranAsync回调内调用_直接抛异常_业务失败时整体回滚()
+    {
+        await _db.Ado.ExecuteCommandAsync("CREATE TABLE BizProbe (Id INTEGER PRIMARY KEY)");
+
+        var outer = await _db.Ado.UseTranAsync(async () =>
+        {
+            await _db.Ado.ExecuteCommandAsync("INSERT INTO BizProbe (Id) VALUES (1)");
+            // 业务代码若误把发布放进事务，异常会冒泡并让外层回滚，而不是留下半提交的数据。
+            await CreatePublisher().PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)));
+        });
+
+        Assert.False(outer.IsSuccess);
+        Assert.IsType<InvalidOperationException>(outer.ErrorException);
+        Assert.Equal(0, await _db.Ado.GetIntAsync("SELECT COUNT(*) FROM BizProbe"));
+        Assert.Equal(0, await _db.Queryable<AppNotification>().CountAsync());
+        Assert.Empty(_dispatcher.Sent);
+    }
+
+    [Fact]
+    public async Task Publish_业务事务提交之后调用_正常发布()
+    {
+        await _db.Ado.ExecuteCommandAsync("CREATE TABLE BizProbe (Id INTEGER PRIMARY KEY)");
+        await _db.Ado.BeginTranAsync();
+        await _db.Ado.ExecuteCommandAsync("INSERT INTO BizProbe (Id) VALUES (1)");
+        await _db.Ado.CommitTranAsync();
+
+        var result = await CreatePublisher().PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)));
+
+        Assert.NotNull(result.NotificationId);
+        Assert.Equal(1, await _db.Ado.GetIntAsync("SELECT COUNT(*) FROM BizProbe"));
+        Assert.Single(_dispatcher.Sent);
+    }
+
+    [Fact]
     public async Task Publish_实时投递失败不影响发布_站内消息仍可读()
     {
         _dispatcher.ThrowOnSend = true;

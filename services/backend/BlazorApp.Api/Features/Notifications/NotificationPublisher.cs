@@ -33,6 +33,16 @@ internal sealed class NotificationPublisher(
         CancellationToken cancellationToken = default
     )
     {
+        // 发布器自己用 UseTranAsync 落库，而 SqlSugar 不支持事务嵌套：内层一提交，外层已写的业务行就被一并提交，
+        // 外层随后的回滚或失败都不再生效，内层失败还会把外层的业务行悄悄回滚（SQL Server 实测，见 PR 说明）。
+        // 因此必须在业务事务提交之后再发布；这里把误用变成立刻可见的异常，而不是静默的数据错乱。
+        if (_db.Ado.IsAnyTran())
+        {
+            throw new InvalidOperationException(
+                "通知必须在业务事务提交之后发布：当前连接上已有未结束的事务。"
+            );
+        }
+
         var normalized = Normalize(request);
 
         if (normalized.DedupeKey != null)
