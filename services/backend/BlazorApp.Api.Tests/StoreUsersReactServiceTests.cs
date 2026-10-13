@@ -399,7 +399,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task CreateAsync_WithPasswordSetupEmail_RequiresEmailAndSendsInviteWithoutPassword()
+        public async Task CreateAsync_WithPasswordSetupEmail_RequiresEmailAndSendsInitialPasswordWithoutManagerSeeingIt()
         {
             await SeedStoreUserDataAsync();
             var invites = new FakePasswordResetService();
@@ -431,12 +431,15 @@ namespace BlazorApp.Api.Tests
             Assert.True(created.Success, created.Message);
             Assert.Equal("new.staff@example.com", created.Data!.Username);
             Assert.Equal("new.staff@example.com", created.Data.Email);
-            Assert.Equal(new[] { created.Data.UserGuid }, invites.Invited);
+            // 发的是初始密码而不是验证码；店长拿到的响应里没有任何密码。
+            Assert.Equal(new[] { created.Data.UserGuid }, invites.InitialSent);
+            Assert.Empty(invites.Invited);
             Assert.NotNull(created.Data.PasswordSetupEmail);
             Assert.Null(created.Data.PasswordSetupEmailError);
-            // 员工自己设密码，不再要求首次改密。
-            Assert.False(created.Data.MustChangePassword);
-            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+            // 员工拿到的是系统生成的初始密码，首次登录必须先改成自己的。
+            Assert.True(created.Data.MustChangePassword);
+            var requirement = await _db.Queryable<UserPasswordChangeRequirement>().SingleAsync();
+            Assert.Equal(created.Data.UserGuid, requirement.UserGUID);
         }
 
         [Fact]
@@ -459,6 +462,26 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("FORBIDDEN", self.Code);
             Assert.False(foreign.Success);
             Assert.Equal(new[] { "staff-1" }, invites.Invited);
+        }
+
+        [Fact]
+        public async Task SendPasswordSetupEmailAsync_WithInitialPasswordFlag_SendsInitialPasswordInsteadOfCode()
+        {
+            await SeedStoreUserDataAsync();
+            var invites = new FakePasswordResetService();
+            var service = CreateService("manager-1", invites, "StoreManager");
+
+            var resend = await service.SendPasswordSetupEmailAsync(
+                "staff-1", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", InitialPassword = true }, "manager-1");
+            var foreign = await service.SendPasswordSetupEmailAsync(
+                "staff-2", new SendStoreUserPasswordSetupEmailDto { StoreCode = "S001", InitialPassword = true }, "manager-1");
+
+            Assert.True(resend.Success, resend.Message);
+            Assert.Equal(new[] { "staff-1" }, invites.InitialSent);
+            Assert.Empty(invites.Invited);
+            // 范围校验与验证码路径一致：不能给别的分店员工重发。
+            Assert.False(foreign.Success);
+            Assert.Equal(new[] { "staff-1" }, invites.InitialSent);
         }
 
         [Fact]
@@ -581,6 +604,7 @@ namespace BlazorApp.Api.Tests
         private sealed class FakePasswordResetService : IPasswordResetService
         {
             public List<string> Invited { get; } = new();
+            public List<string> InitialSent { get; } = new();
 
             public Task<ApiResponse<bool>> RequestSelfServiceAsync(string email, string? requestIp) =>
                 Task.FromResult(ApiResponse<bool>.OK(true));
@@ -592,6 +616,15 @@ namespace BlazorApp.Api.Tests
                 {
                     MaskedEmail = "st***@example.com",
                     ExpiresAtUtc = DateTime.UtcNow.AddHours(72),
+                }));
+            }
+
+            public Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(string userGuid, string requestedBy)
+            {
+                InitialSent.Add(userGuid);
+                return Task.FromResult(ApiResponse<PasswordSetupEmailResultDto>.OK(new PasswordSetupEmailResultDto
+                {
+                    MaskedEmail = "st***@example.com",
                 }));
             }
 

@@ -61,10 +61,11 @@ namespace BlazorApp.Shared.DTOs
         public string Email { get; set; } = string.Empty;
     }
 
-    /// <summary>店长发送设置密码邮件的结果：只回传打码邮箱与有效期，不回传验证码。</summary>
+    /// <summary>店长发送设置密码 / 初始密码邮件的结果：只回传打码邮箱与有效期，不回传验证码或密码。</summary>
     public sealed class PasswordSetupEmailResultDto
     {
         public string MaskedEmail { get; set; } = string.Empty;
-        public DateTime ExpiresAtUtc { get; set; }
+        /// <summary>验证码邮件的失效时间；初始密码邮件没有有效期，为 null。</summary>
+        public DateTime? ExpiresAtUtc { get; set; }
     }
 }

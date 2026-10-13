@@ -532,14 +532,14 @@
     "printBarcode": "Print personal code",
     "done": "Done",
     "emailRequired": "Staff email (required)",
-    "emailHelper": "Used to sign in, receive the password set-up code and reset the password",
+    "emailHelper": "Used to sign in, receive the initial password and reset a forgotten password",
     "usernameFromEmailHelper": "Same as the email by default; the employee signs in with it. Edit if needed (3–50 characters)",
-    "successDescriptionEmail": "A password set-up code has been emailed to {{name}}. They can tap \"Set up / forgot password\" on the app sign-in screen to choose their own password — you don't need to hand over any password.",
-    "inviteSent": "Password set-up email sent to {{email}}, valid for 72 hours.",
-    "inviteFailed": "The account was created, but the password set-up email was not sent: {{reason}}. You can resend it later.",
+    "successDescriptionEmail": "The initial password has been emailed to {{name}}. They sign in to the app with it and choose their own password on first sign-in — you don't need to hand over any password.",
+    "inviteSent": "Initial password sent to {{email}}.",
+    "inviteFailed": "The account was created, but the initial password email was not sent: {{reason}}. You can resend it later.",
     "inviteFailedFallback": "Email could not be sent",
-    "resendInvite": "Resend password set-up email",
-    "inviteResent": "Password set-up email resent",
-    "nextStepEmail": "Check their email and set their own password with the code via \"Set up / forgot password\" on the sign-in screen"
+    "resendInvite": "Resend initial password",
+    "inviteResent": "Initial password resent",
+    "nextStepEmail": "Check their email, sign in with the initial password and set their own password"
   }
 }

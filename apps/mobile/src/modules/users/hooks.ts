@@ -95,7 +95,7 @@ export function useStoreUserMutations(storeCode?: string | null, keyword?: strin
 
   // 店长重置密码改为给员工发设置密码验证码邮件，店长不再经手新密码。
   const setupEmailMutation = useMutation({
-    mutationFn: (payload: { userGuid: string; storeCode: string; email?: string }) =>
+    mutationFn: (payload: { userGuid: string; storeCode: string; email?: string; initialPassword?: boolean }) =>
       sendStoreUserPasswordSetupEmail(payload),
     onSuccess: async (_, variables) => {
       // 补了邮箱时刷新列表与详情，界面上的「未设置」立即变成新邮箱。

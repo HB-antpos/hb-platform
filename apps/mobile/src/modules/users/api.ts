@@ -98,18 +98,24 @@ export async function createStoreUser(payload: StoreUserCreatePayload): Promise<
 }
 
 /**
- * 给店员邮箱发设置密码验证码（新建后重发，或代替手动重置密码）。
+ * 给店员邮箱发设置密码验证码（代替手动重置密码）。
  * 老账号没有可用邮箱时带上 email：后端先写入员工邮箱再发送，一步完成。
+ * initialPassword=true：新建员工页的「重新发送」，改为重新生成初始密码并发到员工邮箱。
  */
 export async function sendStoreUserPasswordSetupEmail(payload: {
   userGuid: string;
   storeCode: string;
   email?: string;
+  initialPassword?: boolean;
 }): Promise<PasswordSetupEmailResult> {
   const email = payload.email?.trim();
   const response = await apiClient.post(
     "/react/v1/store-users/" + encodeURIComponent(payload.userGuid) + "/password-setup-email",
-    email ? { storeCode: payload.storeCode, email } : { storeCode: payload.storeCode }
+    {
+      storeCode: payload.storeCode,
+      ...(email ? { email } : {}),
+      ...(payload.initialPassword ? { initialPassword: true } : {}),
+    }
   );
   const result = normalizePasswordSetupEmailResult(response.data);
   if (!result) {
