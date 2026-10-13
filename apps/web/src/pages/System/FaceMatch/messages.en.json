@@ -68,7 +68,7 @@
       "FACE_MATCH_TENCENT_UNAVAILABLE": "Tencent Cloud is unavailable. Try again later.",
       "FACE_MATCH_TENCENT_ERROR": "Tencent Cloud processing failed. Try again later; contact an administrator if it keeps failing.",
       "FACE_MATCH_ENTRY_NOT_PENDING": "This entry is not pending approval. Refresh and try again.",
-      "FACE_MATCH_APPROVER_IS_SUBMITTER": "The submitter cannot approve their own entry.",
+      "FACE_MATCH_APPROVER_IS_SUBMITTER": "The submitter cannot approve their own entry (administrators excepted).",
       "FACE_MATCH_ALREADY_APPROVED_BY_YOU": "You have already approved this entry; a different approver is needed.",
       "FACE_MATCH_ENTRY_EXPIRED": "This entry has expired and can no longer be approved.",
       "FACE_MATCH_UNWELCOME_NOT_ENABLED": "None of the entry's stores has turned on the Unwelcome Persons List yet, so it cannot be approved. Turn it on in the store profile first.",
@@ -362,10 +362,10 @@
       "form": {
         "title": "Submit an Unwelcome Persons List entry",
         "submit": "Submit entry",
-        "scopeNotice": "Confirm the incident is serious. An entry stores only the incident category, evidence reference and reference photos; do not enter names or private details in any field. It takes effect only after another person with approval permission approves it.",
+        "scopeNotice": "Confirm the incident is serious. An entry stores only the incident category, evidence reference and reference photos; do not enter names or private details in any field. It takes effect only after another person with approval permission approves it; an administrator can approve it alone.",
         "category": "Incident category",
         "categoryPlaceholder": "Select a category",
-        "otherNeedsTwo": "Entries with the Other category need two different approvers before they take effect.",
+        "otherNeedsTwo": "Entries with the Other category need two different approvers before they take effect; one administrator's approval is enough.",
         "categoryNote": "Description",
         "evidenceRef": "Evidence reference",
         "evidenceRefHint": "Enter the incident record or police report number. Do not enter names or other private details.",
@@ -380,7 +380,7 @@
       "approve": {
         "title": "Approve this entry?",
         "content": "Once approved the entry takes effect and cameras in the stores in scope start matching against it.",
-        "contentTwo": "This entry needs {{needed}} different approvers and has {{done}} so far. Your approval counts toward that; it takes effect only when complete.",
+        "contentTwo": "This entry needs {{needed}} different approvers and has {{done}} so far. Your approval counts toward that; it takes effect only when complete, except that one administrator's approval takes effect immediately.",
         "ok": "Approve",
         "done": "Approved"
       },

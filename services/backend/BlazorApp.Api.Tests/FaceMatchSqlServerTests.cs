@@ -170,7 +170,8 @@ VALUES (REPLICATE('2', 32), REPLICATE('f', 32), 0, 1, N'local', N'images/y.jpg',
         }
 
         server.ExecuteSync("INSERT dbo.FaceStoreProfile (StoreCode, Mode, UnwelcomeListEnabled) VALUES (N'1013', 1, 1)");
-        var submitter = new FaceMatchActor("sub-1", "sub-1", IsAdmin: true);
+        // 非管理员：「提交人 ≠ 批准人」「Other 需要两位不同的批准人」只对非管理员生效（管理员一个人批准即可）。
+        var submitter = new FaceMatchActor("sub-1", "sub-1");
         var entry = await h.Unwelcome.CreateEntryAsync(new FaceUnwelcomeEntryCreateRequest
         {
             IncidentCategory = FaceIncidentCategory.Other,
@@ -180,9 +181,9 @@ VALUES (REPLICATE('2', 32), REPLICATE('f', 32), 0, 1, N'local', N'images/y.jpg',
             ExpiresAtUtc = h.At(TimeSpan.FromDays(100)),
         }, FaceMatchTestHarness.Photos(2), submitter);
 
-        var first = await h.Unwelcome.ApproveEntryAsync(entry.EntryId, new FaceMatchActor("app-1", "app-1", true));
+        var first = await h.Unwelcome.ApproveEntryAsync(entry.EntryId, new FaceMatchActor("app-1", "app-1"));
         Assert.Equal("pending", first.StatusName);
-        var second = await h.Unwelcome.ApproveEntryAsync(entry.EntryId, new FaceMatchActor("app-2", "app-2", true));
+        var second = await h.Unwelcome.ApproveEntryAsync(entry.EntryId, new FaceMatchActor("app-2", "app-2"));
         Assert.Equal("active", second.StatusName);
         Assert.Equal("app-1", await server.ScalarAsync($"SELECT ApprovedBy FROM dbo.FaceUnwelcomeEntry WHERE EntryId = '{entry.EntryId}'"));
         Assert.Equal("app-2", await server.ScalarAsync($"SELECT SecondApprovedBy FROM dbo.FaceUnwelcomeEntry WHERE EntryId = '{entry.EntryId}'"));

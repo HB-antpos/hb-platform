@@ -6,9 +6,11 @@ namespace BlazorApp.Api.Features.FaceMatch;
 
 /// <summary>
 /// 不受欢迎人员名单（原「黑名单」，设计第 14 节）。硬条件全部在这里强制：
-/// 1. 事件类别是枚举 ViolenceOrThreat / OrganisedOrRepeatTheft / Other，没有「一般偷窃」；Other 必须有说明且需要两位不同的批准人；
+/// 1. 事件类别是枚举 ViolenceOrThreat / OrganisedOrRepeatTheft / Other，没有「一般偷窃」；Other 必须有说明，非管理员需要两位不同的批准人；
 /// 2. 证据引用必填、到期日必填且上限 12 个月；
-/// 3. 提交人 ≠ 批准人；批准后才在腾讯云建人，且至少一个生效门店已开启名单（UnwelcomeListEnabled，只看这个开关；
+/// 3. 非管理员：提交人 ≠ 批准人；<b>管理员一个人批准即可生效（2026-10-13 用户决定）</b>：可以批准自己提交的条目，
+///    Other 类别也只需一位管理员批准，自批 / 单人批准在审计里留痕（Result 为 active;self-approved / active;admin-solo）。
+///    批准后才在腾讯云建人，且至少一个生效门店已开启名单（UnwelcomeListEnabled，只看这个开关；
 ///    专项评估 / 律师确认等记录缺口在门店档案里是警告，不在这里拦截）——开关没开之前，照片只留在私有桶里，不会发往腾讯云；
 /// 4. 撤回 / 到期：先把状态改成 Withdrawn / Expired（接收端只用 Active 条目，立即停止匹配），再 DeletePerson 并删参考照片，
 ///    删不干净的由后台任务重试（照片键清空即清理完成的标志）；
@@ -192,12 +194,15 @@ public sealed class FaceUnwelcomeService(
             throw new FaceMatchException(409, "FACE_MATCH_ENTRY_NOT_PENDING", "该条目不是待批准状态。");
         }
 
-        if (string.Equals(entry.SubmittedBy, actor.Id, StringComparison.OrdinalIgnoreCase))
+        // 管理员一个人批准即可生效：不受「提交人 ≠ 批准人」和「Other 需要两位」的限制；非管理员规则不变。
+        var adminSolo = actor.IsAdmin;
+        var selfApproval = string.Equals(entry.SubmittedBy, actor.Id, StringComparison.OrdinalIgnoreCase);
+        if (selfApproval && !adminSolo)
         {
-            throw new FaceMatchException(409, "FACE_MATCH_APPROVER_IS_SUBMITTER", "批准人不能是提交人本人。");
+            throw new FaceMatchException(409, "FACE_MATCH_APPROVER_IS_SUBMITTER", "批准人不能是提交人本人（管理员除外）。");
         }
 
-        if (string.Equals(entry.ApprovedBy, actor.Id, StringComparison.OrdinalIgnoreCase))
+        if (!adminSolo && string.Equals(entry.ApprovedBy, actor.Id, StringComparison.OrdinalIgnoreCase))
         {
             throw new FaceMatchException(409, "FACE_MATCH_ALREADY_APPROVED_BY_YOU", "你已经批准过该条目，「其他」类别需要另一位批准人。");
         }
@@ -208,7 +213,8 @@ public sealed class FaceUnwelcomeService(
             throw new FaceMatchException(409, "FACE_MATCH_ENTRY_EXPIRED", "该条目已过到期日，不能再批准。");
         }
 
-        var needed = ApprovalsNeeded(entry);
+        var policyNeeded = ApprovalsNeeded(entry);
+        var needed = adminSolo ? 1 : policyNeeded;
         var done = ApprovalsDone(entry);
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -233,7 +239,11 @@ public sealed class FaceUnwelcomeService(
         else
         {
             await ActivateAsync(entry, actor, nowUtc, cancellationToken);
-            await audit.WriteAsync(actor, FaceMatchAuditActions.EntryApprove, null, entry.EntryId, "active", cancellationToken);
+            // 审计留痕：自批、管理员单人批准 Other 类别（本应两位）都要看得出来。Result 列最长 32 位。
+            var approvalResult = selfApproval
+                ? "active;self-approved"
+                : adminSolo && policyNeeded > 1 && done == 0 ? "active;admin-solo" : "active";
+            await audit.WriteAsync(actor, FaceMatchAuditActions.EntryApprove, null, entry.EntryId, approvalResult, cancellationToken);
         }
 
         await FillNamesAsync(names, [entry], cancellationToken);
@@ -930,13 +940,18 @@ public sealed class FaceUnwelcomeService(
         return due < nowUtc ? nowUtc : due;
     }
 
+    /// <summary>
+    /// 条目需要的批准数：Other 为 2。已生效但只有一位批准人（管理员单人批准）的 Other 条目按实际的 1 显示，
+    /// 避免页面出现「已生效 1 / 2」的矛盾。
+    /// </summary>
     private static int ApprovalsNeeded(FaceUnwelcomeEntry entry) =>
-        entry.IncidentCategory == FaceIncidentCategory.Other ? 2 : 1;
+        entry.IncidentCategory == FaceIncidentCategory.Other
+            && !(entry.Status == FaceUnwelcomeEntryStatus.Active && entry.SecondApprovedBy == null)
+            ? 2
+            : 1;
 
     private static int ApprovalsDone(FaceUnwelcomeEntry entry) =>
-        entry.Status == FaceUnwelcomeEntryStatus.Active
-            ? ApprovalsNeeded(entry)
-            : (entry.ApprovedBy != null ? 1 : 0) + (entry.SecondApprovedBy != null ? 1 : 0);
+        (entry.ApprovedBy != null ? 1 : 0) + (entry.SecondApprovedBy != null ? 1 : 0);
 
     // 状态筛选同时接受名称与数值（条目 0–3、任务 0–2），与 Web 页面传数字的做法兼容。
     private static byte? ParseEntryStatus(string? status) => status?.Trim().ToLowerInvariant() switch
@@ -992,10 +1007,12 @@ public sealed class FaceUnwelcomeService(
             DisputeNote = e.DisputeNote,
             ExpiringSoon = active && e.ExpiresAtUtc - nowUtc <= TimeSpan.FromDays(FaceMatchRules.ExpiryReminderDays),
             DaysToExpiry = daysToExpiry,
+            // 管理员一个人批准即可生效：不排除自己提交的，也不排除自己已批准过一次的；非管理员两条都排除。
             CanApprove = canApprove
                 && e.Status == FaceUnwelcomeEntryStatus.Pending
-                && !string.Equals(e.SubmittedBy, actor.Id, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(e.ApprovedBy, actor.Id, StringComparison.OrdinalIgnoreCase),
+                && (actor.IsAdmin
+                    || (!string.Equals(e.SubmittedBy, actor.Id, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(e.ApprovedBy, actor.Id, StringComparison.OrdinalIgnoreCase))),
             CleanupPending = e.Status is FaceUnwelcomeEntryStatus.Expired or FaceUnwelcomeEntryStatus.Withdrawn && photoKeys.Count > 0,
         };
     }

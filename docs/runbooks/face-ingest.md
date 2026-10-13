@@ -919,7 +919,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | `FaceMatch.Manage` | 门店档案与闸门、员工同意（含同意书扫描件）、员工登记与撤回、审计查询 |
 | `FaceMatch.Traffic.View` | 客流统计页（只有计数，没有任何生物信息）；非管理员只能看自己所属门店 |
 | `FaceMatch.Unwelcome.Manage` | 提交、查看、撤回不受欢迎人员名单条目（含参考照片上传）、录入申诉说明 |
-| `FaceMatch.Unwelcome.Approve` | 批准条目；批准人必须不同于提交人 |
+| `FaceMatch.Unwelcome.Approve` | 批准条目；非管理员的批准人必须不同于提交人，**管理员一个人批准即可生效**（可批准自己提交的条目） |
 | `FaceMatch.Unwelcome.Review` | 收到命中提示、两人复核、**服务端转发查看命中图与参考照片**（每次查看写持久审计）；非管理员只能处理自己所属门店的任务 |
 
 接口一览（`GET /config` 任一权限可读；`unwelcome/entries` 列表需 Manage 或 Approve；`unwelcome/stats` 需三个名单权限任一）：
@@ -1015,9 +1015,9 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 ### 16.5 不受欢迎人员名单（原「黑名单」，默认关闭、暗发布）
 
-- **事件类别是枚举**：`ViolenceOrThreat`、`OrganisedOrRepeatTheft`、`Other`；**没有「一般偷窃」**。`Other` 必须填写说明，并需要**两位不同的批准人**（都不能是提交人）。
+- **事件类别是枚举**：`ViolenceOrThreat`、`OrganisedOrRepeatTheft`、`Other`；**没有「一般偷窃」**。`Other` 必须填写说明；非管理员批准时需要**两位不同的批准人**（都不能是提交人），**管理员一个人批准即可**（2026-10-13 用户决定，见下）。
 - 证据引用必填（事件记录编号或警方报告编号，不填个人隐私细节）；到期日必填，**上限 12 个月**；到期前 30 天提醒复核；生效门店至少一个，非管理员只能为自己所属门店提交。
-- 流程：提交（Manage）→ 参考照片存私有桶 `face-match/unwelcome/{entryId}/`，**此时不会调用腾讯云** → 批准（Approve，提交人 ≠ 批准人）→
+- 流程：提交（Manage）→ 参考照片存私有桶 `face-match/unwelcome/{entryId}/`，**此时不会调用腾讯云** → 批准（Approve；非管理员须提交人 ≠ 批准人，**管理员一个人批准即可生效，可批准自己提交的条目，自批 / 单人批准在审计里记 `active;self-approved` / `active;admin-solo`**；命中后的两人复核**不受影响**）→
   最后一位批准人通过时才读出参考照片、创建 `unwelcome` 人员库（幂等）并建人，条目变 Active。**批准要求至少一个生效门店已开启名单（`UnwelcomeListEnabled`，只看这个开关；专项评估 / 律师确认等记录缺口在门店档案里是警告，不在批准时拦截），否则 409 `FACE_MATCH_UNWELCOME_NOT_ENABLED`——开关没开，照片不会发往腾讯云。**
 - 撤回 / 到期：**先把状态改成 Withdrawn / Expired**（接收端只用 Active 条目，立即停止匹配），再 `DeletePerson` 并删参考照片；删不干净的（条目上 `cleanupPending=true`）由后台任务④继续重试，参考照片键清空即清理完成。
 - 申诉 / 更正：条目上有「申诉说明」（`dispute-note`）；被识别者查询或更正须在 30 天内处理，固定流程由门店 / 法务制定。
