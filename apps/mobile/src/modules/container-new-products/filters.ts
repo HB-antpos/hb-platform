@@ -1,3 +1,4 @@
+import { resolveListDate } from "./arrival-range";
 import type { ContainerNewProductBasis, ContainerNewProductItem } from "./types";
 
 export type ProductTypeFilter = "new" | "existing" | "all";
@@ -52,14 +53,16 @@ export interface ContainerOption {
   /** 显示用柜号：优先 ContainerNumber，没有时用 ContainerCode */
   label: string;
   basis: ContainerNewProductBasis;
+  /** 货柜到仓库日期（actual = 实际，estimated = 预计兜底）；旧版后端不返回时为 null */
+  warehouseArrivalDate: string | null;
+  /** 预计到店起始日：界面不显示，只在旧版后端没有到仓库日期时作为排序兜底 */
   estimatedStoreArrivalDate: string;
-  estimatedStoreArrivalDateEnd: string | null;
   newKinds: number;
   existingKinds: number;
 }
 
 // 从商品列表汇总出货柜选项：同柜同商品已由后端合并成一行，这里按商品去重计数（忽略大小写）；
-// 按到店起始日、柜号排序，与列表顺序一致
+// 按到仓库日期（旧版后端没有时退回到店起始日）、柜号排序，与列表顺序一致
 export function summarizeContainers(items: readonly ContainerNewProductItem[]): ContainerOption[] {
   const byCode = new Map<string, { option: Omit<ContainerOption, "newKinds" | "existingKinds">; newCodes: Set<string>; existingCodes: Set<string> }>();
   for (const item of items) {
@@ -71,8 +74,8 @@ export function summarizeContainers(items: readonly ContainerNewProductItem[]): 
           containerCode: item.containerCode,
           label: item.containerNumber?.trim() || item.containerCode,
           basis: item.basis,
+          warehouseArrivalDate: item.warehouseArrivalDate,
           estimatedStoreArrivalDate: item.estimatedStoreArrivalDate,
-          estimatedStoreArrivalDateEnd: item.estimatedStoreArrivalDateEnd,
         },
         newCodes: new Set(),
         existingCodes: new Set(),
@@ -83,7 +86,7 @@ export function summarizeContainers(items: readonly ContainerNewProductItem[]): 
   }
   return [...byCode.values()]
     .map(({ option, newCodes, existingCodes }) => ({ ...option, newKinds: newCodes.size, existingKinds: existingCodes.size }))
-    .sort((a, b) => compareOrdinal(a.estimatedStoreArrivalDate, b.estimatedStoreArrivalDate) || compareOrdinal(a.label.toUpperCase(), b.label.toUpperCase()));
+    .sort((a, b) => compareOrdinal(resolveListDate(a), resolveListDate(b)) || compareOrdinal(a.label.toUpperCase(), b.label.toUpperCase()));
 }
 
 // 刷新或换店后，已选货柜可能不在新列表里了；只保留仍存在的，避免筛成空列表却看不到选中项

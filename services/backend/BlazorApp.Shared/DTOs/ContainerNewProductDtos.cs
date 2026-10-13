@@ -30,6 +30,12 @@ public sealed class ContainerNewProductItemDto
     public DateOnly EstimatedStoreArrivalDate { get; init; }
     /// <summary>预计到店区间结束日（含当天；NSW = 货柜日期 + 3 个工作日，QLD = + 7 个工作日）。</summary>
     public DateOnly EstimatedStoreArrivalDateEnd { get; init; }
+    /// <summary>
+    /// 货柜到仓库日期：已到仓取实际到货日期（ActualArrivalDate），否则取预计到岸日期（EstimatedArrivalDate）；
+    /// 与 <see cref="EstimatedStoreArrivalDate"/> 的推算基准是同一个日期，实际/预计由 <see cref="Basis"/> 区分。
+    /// 旧版后端不返回该字段，移动端据此平稳降级为不显示。
+    /// </summary>
+    public DateOnly? WarehouseArrivalDate { get; init; }
     public string Basis { get; init; } = string.Empty;
     /// <summary>是否新商品（仓库里没有、或由本柜提交时新建）；false 为补货的已有商品，只在请求带 includeExisting=true 时出现。</summary>
     public bool IsNewProduct { get; init; } = true;

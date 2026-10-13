@@ -5,6 +5,7 @@ using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
+using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Moq;
 using SqlSugar;
@@ -82,6 +83,47 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Contains(result.Items, x => x.ProductCode == "P-AUDIT" && x.Basis == "actual");
         Assert.Contains(result.Items, x => x.ProductCode == "P-NONE");
         Assert.Contains(result.Items, x => x.ProductCode == "P-FALLBACK" && x.Basis == "estimated");
+    }
+
+    [Fact]
+    public async Task GetAsync_返回货柜到仓库日期_已到仓取实际日期_在途取预计日期_两者都有以实际为准()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-7", StoreCode = "S-7", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-7", UserGUID = "user-7", StoreGUID = "store-7", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            // 两个日期都有：以实际到货日期为准（带时间部分，验证只取日期）；预计到岸日期故意差很远，不能被选中
+            new Container { ContainerCode = "C-BOTH", ContainerNumber = "BOTH", ActualArrivalDate = today.AddDays(1).AddHours(15), EstimatedArrivalDate = today.AddDays(-3) },
+            // 只有实际日期
+            new Container { ContainerCode = "C-ACT", ContainerNumber = "ACT", ActualArrivalDate = today.AddDays(2), EstimatedArrivalDate = null },
+            // 还在途：只有预计到岸日期，用预计日期兜底
+            new Container { ContainerCode = "C-EST", ContainerNumber = "EST", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(3) },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "W1", ContainerCode = "C-BOTH", ProductCode = "P-BOTH" },
+            new ContainerDetail { DetailCode = "W2", ContainerCode = "C-ACT", ProductCode = "P-ACT" },
+            new ContainerDetail { DetailCode = "W3", ContainerCode = "C-EST", ProductCode = "P-EST" },
+        }).ExecuteCommand();
+
+        var result = await CreateService("user-7").GetAsync("S-7");
+
+        var both = result.Items.Single(x => x.ProductCode == "P-BOTH");
+        Assert.Equal("actual", both.Basis);
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(1)), both.WarehouseArrivalDate);
+        var actual = result.Items.Single(x => x.ProductCode == "P-ACT");
+        Assert.Equal("actual", actual.Basis);
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(2)), actual.WarehouseArrivalDate);
+        var estimated = result.Items.Single(x => x.ProductCode == "P-EST");
+        Assert.Equal("estimated", estimated.Basis);
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(3)), estimated.WarehouseArrivalDate);
+        // 到仓库日期只是新增字段：到店区间仍由同一个日期推算（QLD 起始日 = +3 个工作日），Basis 语义不变
+        Assert.All(result.Items, x => Assert.NotNull(x.WarehouseArrivalDate));
+        Assert.Equal(
+            DateOnly.FromDateTime(ContainerNewProductsReactService.AddWeekdays(today.AddDays(1), 3)),
+            both.EstimatedStoreArrivalDate);
     }
 
     [Fact]
@@ -231,6 +273,162 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
         Assert.Equal(
             new[] { ("P-CREATED", true), ("P-FRESH", true), ("P-RESTOCK", false) },
             withExisting.Items.Select(x => (x.ProductCode, x.IsNewProduct)).OrderBy(x => x.ProductCode));
+    }
+
+    // ───────── 窗口依据 windowBasis ─────────
+
+    [Fact]
+    public async Task GetAsync_到仓库日期窗口_边界含今天减7与加21_不含减8与加22_实际日期优先于预计日期()
+    {
+        var today = SeedWindowDataset();
+
+        var result = await CreateService("user-win").GetAsync("S-WIN", windowBasis: ContainerNewProductsWindowBasis.WarehouseArrival);
+
+        // 窗口 = 到仓库日期在 [今天-7, 今天+22)：-7 含、-8 不含、+21 含（含带时间的 +21 当天 23 点）、+22 不含；
+        // 实际日期优先：P-ACT-OUT 实际 T-9（预计 T+3 不能把它救回来），P-ACT-IN 实际 T+2（预计 T-30 不能把它挤出去）；
+        // 没有实际日期的取预计：P-EST-IN 预计 T+5 在窗口内，P-EST-OUT 预计 T+30 不在
+        // 顺序 = 到仓库日期升序，同一天无货号时按 ProductCode（Ordinal，较短的在前）
+        Assert.Equal(
+            new[] { "P-M7", "P-ACT-IN", "P-EST-IN", "P-P21", "P-P21-LATE" },
+            result.Items.Select(x => x.ProductCode));
+        Assert.Equal(
+            new[]
+            {
+                (DateOnly.FromDateTime(today.AddDays(-7)), "actual"),
+                (DateOnly.FromDateTime(today.AddDays(2)), "actual"),
+                (DateOnly.FromDateTime(today.AddDays(5)), "estimated"),
+                (DateOnly.FromDateTime(today.AddDays(21)), "actual"),
+                (DateOnly.FromDateTime(today.AddDays(21)), "actual"),
+            },
+            result.Items.Select(x => (x.WarehouseArrivalDate!.Value, x.Basis)));
+        // 到店区间照常计算并返回（兼容旧 App）：QLD 起始日 = 到仓库日期 + 3 个工作日，结束日 = + 7 个工作日
+        Assert.All(result.Items, x =>
+        {
+            var warehouseDate = x.WarehouseArrivalDate!.Value.ToDateTime(TimeOnly.MinValue);
+            Assert.Equal(DateOnly.FromDateTime(ContainerNewProductsReactService.AddWeekdays(warehouseDate, 3)), x.EstimatedStoreArrivalDate);
+            Assert.Equal(DateOnly.FromDateTime(ContainerNewProductsReactService.AddWeekdays(warehouseDate, 7)), x.EstimatedStoreArrivalDateEnd);
+        });
+        Assert.Equal(DateOnly.FromDateTime(today), result.LocalToday);
+    }
+
+    [Fact]
+    public async Task GetAsync_默认与显式store口径结果完全一致_按预计到店区间过滤_与warehouse口径窗口不同()
+    {
+        SeedWindowDataset();
+        var service = CreateService("user-win");
+
+        var byDefault = await service.GetAsync("S-WIN");
+        var explicitStore = await service.GetAsync("S-WIN", windowBasis: ContainerNewProductsWindowBasis.StoreArrival);
+        var byWarehouse = await service.GetAsync("S-WIN", windowBasis: ContainerNewProductsWindowBasis.WarehouseArrival);
+
+        static object[] Project(ContainerNewProductsResponseDto result) => result.Items
+            .Select(x => (object)(x.ProductCode, x.ContainerCode, x.EstimatedStoreArrivalDate, x.EstimatedStoreArrivalDateEnd, x.WarehouseArrivalDate, x.Basis))
+            .ToArray();
+        // 不带参数 = 显式 StoreArrival：条目、顺序、每个字段逐一相同
+        Assert.Equal(Project(byDefault), Project(explicitStore));
+        Assert.Equal(byDefault.LocalToday, explicitStore.LocalToday);
+        Assert.Equal(byDefault.StateCode, explicitStore.StateCode);
+        // 改动前的口径：预计到店区间（QLD 到仓库日期 + 3~7 个工作日）与窗口 [今天-7, 今天+22) 有交集才显示，与到仓库日期是否在窗口内无关：
+        // 实际 T-8、T-9 的柜子到店区间结束日仍在窗口内（显示），T+21 的柜子到店起始日已晚于窗口（不显示）
+        Assert.Equal(
+            new[] { "P-ACT-IN", "P-ACT-OUT", "P-EST-IN", "P-M7", "P-M8" },
+            byDefault.Items.Select(x => x.ProductCode).Order());
+        // 排序仍按预计到店起始日
+        var storeDates = byDefault.Items.Select(x => x.EstimatedStoreArrivalDate).ToArray();
+        Assert.Equal(storeDates.Order(), storeDates);
+        // 两种口径的窗口确实不同
+        Assert.NotEqual(
+            byDefault.Items.Select(x => x.ProductCode).Order(),
+            byWarehouse.Items.Select(x => x.ProductCode).Order());
+    }
+
+    [Fact]
+    public async Task GetAsync_到仓库日期排序_到店日相同时仍按到仓日先后_同日按HB货号忽略大小写_无货号在末尾()
+    {
+        var today = BrisbaneToday();
+        database.Insertable(new Store { StoreGUID = "store-ord", StoreCode = "S-ORD", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-ord", UserGUID = "user-ord", StoreGUID = "store-ord", IsPrimary = false }).ExecuteCommand();
+        // 周六、周日到仓（今天起 7 天内最近的一个周六和紧随其后的周日）：QLD 都在 +3 个工作日后的同一个周三到店，
+        // 所以按到店日排会让两个柜子并列，按到仓库日期排则周六的柜子必须整体排在周日之前
+        var saturday = today.AddDays(((int)DayOfWeek.Saturday - (int)today.DayOfWeek + 7) % 7);
+        database.Insertable(new[]
+        {
+            new Container { ContainerCode = "C-EARLY", ContainerNumber = "EARLY", ActualArrivalDate = today.AddDays(-3) },
+            new Container { ContainerCode = "C-SAT", ContainerNumber = "SAT", ActualArrivalDate = saturday },
+            new Container { ContainerCode = "C-SUN", ContainerNumber = "SUN", ActualArrivalDate = saturday.AddDays(1) },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "O1", ContainerCode = "C-EARLY", ProductCode = "P-EARLY" },
+            new ContainerDetail { DetailCode = "O2", ContainerCode = "C-SAT", ProductCode = "P-SAT" },
+            new ContainerDetail { DetailCode = "O3", ContainerCode = "C-SAT", ProductCode = "P-SAT-LOW" },
+            new ContainerDetail { DetailCode = "O4", ContainerCode = "C-SAT", ProductCode = "P-NULL-B" },
+            new ContainerDetail { DetailCode = "O5", ContainerCode = "C-SAT", ProductCode = "P-NULL-A" },
+            new ContainerDetail { DetailCode = "O6", ContainerCode = "C-SUN", ProductCode = "P-SUN" },
+        }).ExecuteCommand();
+        // 货号故意与到仓日期顺序相反：最早到仓的 P-EARLY 货号最大，周日到仓的 P-SUN 货号最小
+        database.Insertable(new[]
+        {
+            new DomesticProduct { ProductCode = "P-EARLY", HBProductNo = "HB999" },
+            new DomesticProduct { ProductCode = "P-SAT", HBProductNo = "HB900" },
+            new DomesticProduct { ProductCode = "P-SAT-LOW", HBProductNo = "hb050" },
+            new DomesticProduct { ProductCode = "P-SUN", HBProductNo = "HB100" },
+        }).ExecuteCommand();
+        var service = CreateService("user-ord");
+
+        var byWarehouse = await service.GetAsync("S-ORD", windowBasis: ContainerNewProductsWindowBasis.WarehouseArrival);
+        var byStore = await service.GetAsync("S-ORD");
+
+        Assert.Equal(
+            new[] { "P-EARLY", "P-SAT-LOW", "P-SAT", "P-NULL-A", "P-NULL-B", "P-SUN" },
+            byWarehouse.Items.Select(x => x.ProductCode));
+        // 默认口径的排序保持原样：周六、周日的柜子到店日相同，于是整体按 HB 货号交错
+        Assert.Equal(
+            new[] { "P-EARLY", "P-SAT-LOW", "P-SUN", "P-SAT", "P-NULL-A", "P-NULL-B" },
+            byStore.Items.Select(x => x.ProductCode));
+        Assert.Equal(
+            byStore.Items.Single(x => x.ProductCode == "P-SAT").EstimatedStoreArrivalDate,
+            byStore.Items.Single(x => x.ProductCode == "P-SUN").EstimatedStoreArrivalDate);
+    }
+
+    private static DateTime BrisbaneToday() => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+        TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+
+    // 窗口依据测试共用的一批货柜（QLD 门店 S-WIN，用户 user-win），每个柜子一个商品 P-<名字>，都没有货号；返回门店本地今天
+    private DateTime SeedWindowDataset()
+    {
+        var today = BrisbaneToday();
+        database.Insertable(new Store { StoreGUID = "store-win", StoreCode = "S-WIN", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-win", UserGUID = "user-win", StoreGUID = "store-win", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            // 窗口边界：只有实际日期
+            new Container { ContainerCode = "C-M7", ContainerNumber = "M7", ActualArrivalDate = today.AddDays(-7) },
+            new Container { ContainerCode = "C-M8", ContainerNumber = "M8", ActualArrivalDate = today.AddDays(-8) },
+            new Container { ContainerCode = "C-P21", ContainerNumber = "P21", ActualArrivalDate = today.AddDays(21) },
+            new Container { ContainerCode = "C-P22", ContainerNumber = "P22", ActualArrivalDate = today.AddDays(22) },
+            // 带时间部分：只看日期，+21 当天 23 点仍在窗口内
+            new Container { ContainerCode = "C-P21-LATE", ContainerNumber = "P21LATE", ActualArrivalDate = today.AddDays(21).AddHours(23) },
+            // 只有预计日期：在途货柜用预计到岸日期兜底
+            new Container { ContainerCode = "C-EST-IN", ContainerNumber = "ESTIN", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(5) },
+            new Container { ContainerCode = "C-EST-OUT", ContainerNumber = "ESTOUT", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(30) },
+            // 两个日期都有：实际优先
+            new Container { ContainerCode = "C-ACT-OUT", ContainerNumber = "ACTOUT", ActualArrivalDate = today.AddDays(-9), EstimatedArrivalDate = today.AddDays(3) },
+            new Container { ContainerCode = "C-ACT-IN", ContainerNumber = "ACTIN", ActualArrivalDate = today.AddDays(2), EstimatedArrivalDate = today.AddDays(-30) },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "W1", ContainerCode = "C-M7", ProductCode = "P-M7" },
+            new ContainerDetail { DetailCode = "W2", ContainerCode = "C-M8", ProductCode = "P-M8" },
+            new ContainerDetail { DetailCode = "W3", ContainerCode = "C-P21", ProductCode = "P-P21" },
+            new ContainerDetail { DetailCode = "W4", ContainerCode = "C-P22", ProductCode = "P-P22" },
+            new ContainerDetail { DetailCode = "W5", ContainerCode = "C-P21-LATE", ProductCode = "P-P21-LATE" },
+            new ContainerDetail { DetailCode = "W6", ContainerCode = "C-EST-IN", ProductCode = "P-EST-IN" },
+            new ContainerDetail { DetailCode = "W7", ContainerCode = "C-EST-OUT", ProductCode = "P-EST-OUT" },
+            new ContainerDetail { DetailCode = "W8", ContainerCode = "C-ACT-OUT", ProductCode = "P-ACT-OUT" },
+            new ContainerDetail { DetailCode = "W9", ContainerCode = "C-ACT-IN", ProductCode = "P-ACT-IN" },
+        }).ExecuteCommand();
+        return today;
     }
 
     [Fact]

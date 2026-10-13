@@ -15,7 +15,7 @@ public sealed class ContainerNewProductsControllerTests
     public async Task UnknownState_Returns400WithStableErrorCode()
     {
         var service = new Mock<IContainerNewProductsReactService>();
-        service.Setup(x => x.GetAsync("S-1", It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        service.Setup(x => x.GetAsync("S-1", It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<ContainerNewProductsWindowBasis>()))
             .ThrowsAsync(new ContainerNewProductsStateUnknownException());
 
         var response = await new ContainerNewProductsController(service.Object).Get("S-1", CancellationToken.None);
@@ -28,7 +28,7 @@ public sealed class ContainerNewProductsControllerTests
     public async Task ForbiddenStore_Returns403()
     {
         var service = new Mock<IContainerNewProductsReactService>();
-        service.Setup(x => x.GetAsync("S-2", It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        service.Setup(x => x.GetAsync("S-2", It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<ContainerNewProductsWindowBasis>()))
             .ThrowsAsync(new ContainerNewProductsForbiddenException());
 
         var response = await new ContainerNewProductsController(service.Object).Get("S-2", CancellationToken.None);
@@ -42,15 +42,64 @@ public sealed class ContainerNewProductsControllerTests
     public async Task IncludeExisting_原样透传给服务(bool includeExisting)
     {
         var service = new Mock<IContainerNewProductsReactService>();
-        service.Setup(x => x.GetAsync("S-1", includeExisting, It.IsAny<CancellationToken>()))
+        service.Setup(x => x.GetAsync("S-1", includeExisting, It.IsAny<CancellationToken>(), It.IsAny<ContainerNewProductsWindowBasis>()))
             .ReturnsAsync(new ContainerNewProductsResponseDto { StoreCode = "S-1" });
 
         var response = await new ContainerNewProductsController(service.Object).Get("S-1", CancellationToken.None, includeExisting);
 
         Assert.IsType<OkObjectResult>(response);
-        service.Verify(x => x.GetAsync("S-1", includeExisting, It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(x => x.GetAsync("S-1", includeExisting, It.IsAny<CancellationToken>(), ContainerNewProductsWindowBasis.StoreArrival), Times.Once);
     }
 
+    [Theory]
+    [InlineData(null, ContainerNewProductsWindowBasis.StoreArrival)]
+    [InlineData("", ContainerNewProductsWindowBasis.StoreArrival)]
+    [InlineData("   ", ContainerNewProductsWindowBasis.StoreArrival)]
+    [InlineData("store", ContainerNewProductsWindowBasis.StoreArrival)]
+    [InlineData("STORE", ContainerNewProductsWindowBasis.StoreArrival)]
+    [InlineData("warehouse", ContainerNewProductsWindowBasis.WarehouseArrival)]
+    [InlineData("Warehouse", ContainerNewProductsWindowBasis.WarehouseArrival)]
+    [InlineData("WAREHOUSE", ContainerNewProductsWindowBasis.WarehouseArrival)]
+    [InlineData(" warehouse ", ContainerNewProductsWindowBasis.WarehouseArrival)]
+    public async Task WindowBasis_缺省为store_大小写不敏感_并透传给服务(string? windowBasis, ContainerNewProductsWindowBasis expected)
+    {
+        var service = new Mock<IContainerNewProductsReactService>();
+        service.Setup(x => x.GetAsync("S-1", It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<ContainerNewProductsWindowBasis>()))
+            .ReturnsAsync(new ContainerNewProductsResponseDto { StoreCode = "S-1" });
+
+        var response = await new ContainerNewProductsController(service.Object).Get("S-1", CancellationToken.None, false, windowBasis);
+
+        Assert.IsType<OkObjectResult>(response);
+        service.Verify(x => x.GetAsync("S-1", false, It.IsAny<CancellationToken>(), expected), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("foo")]
+    [InlineData("stores")]
+    [InlineData("warehouse,store")]
+    [InlineData("0")]
+    [InlineData("1")]
+    public async Task WindowBasis_非法值返回400且不调用服务(string windowBasis)
+    {
+        var service = new Mock<IContainerNewProductsReactService>();
+
+        var response = await new ContainerNewProductsController(service.Object).Get("S-1", CancellationToken.None, false, windowBasis);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(response);
+        Assert.Contains("WINDOW_BASIS_INVALID", System.Text.Json.JsonSerializer.Serialize(badRequest.Value));
+        service.Verify(x => x.GetAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<ContainerNewProductsWindowBasis>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task WindowBasis_门店编码缺失时仍先返回STORE_CODE_REQUIRED()
+    {
+        var service = new Mock<IContainerNewProductsReactService>();
+
+        var response = await new ContainerNewProductsController(service.Object).Get(null, CancellationToken.None, false, "foo");
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(response);
+        Assert.Contains("STORE_CODE_REQUIRED", System.Text.Json.JsonSerializer.Serialize(badRequest.Value));
+    }
 }
 
 public sealed class ContainerNewProductsRulesTests
