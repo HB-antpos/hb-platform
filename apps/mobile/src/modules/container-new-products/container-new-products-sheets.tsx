@@ -5,8 +5,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { formatArrivalDateRange } from "./arrival-range";
 import { matchesContainerSearch, PRODUCT_TYPE_FILTERS, WAREHOUSE_FILTERS, type ContainerOption, type ProductTypeFilter, type WarehouseFilter } from "./filters";
+import { getWarehouseDateText } from "./warehouse-date";
 
 function SectionLabel({ children }: { children: string }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
@@ -147,8 +147,8 @@ export function ContainerFilterSheet({ visible, options, selected, onApply, onDi
       </View>
       {group.items.map((option) => {
         const checked = draftSet.has(option.containerCode.toUpperCase());
-        const date = formatArrivalDateRange(option.estimatedStoreArrivalDate, option.estimatedStoreArrivalDateEnd);
-        const range = date.end ? `${date.start} – ${date.end}` : date.start;
+        // 柜号下方只显示货柜到仓库日期（已到仓 = 实际日期，在途 = 预计日期兜底），不再显示到店日期；没有日期不渲染这一行
+        const warehouseDate = getWarehouseDateText("containerSheet", option.basis, option.warehouseArrivalDate, option.estimatedStoreArrivalDate);
         return <Pressable
           key={option.containerCode}
           accessibilityRole="checkbox"
@@ -159,7 +159,7 @@ export function ContainerFilterSheet({ visible, options, selected, onApply, onDi
           <MaterialCommunityIcons name={checked ? "checkbox-marked" : "checkbox-blank-outline"} size={24} color={checked ? HB_COLORS.action : HB_COLORS.textSecondary} />
           <View style={styles.optionText}>
             <Text style={styles.optionTitle} numberOfLines={1}>{option.label}</Text>
-            <Text style={styles.optionHint}>{t(option.basis === "actual" ? "containerSheet.storeRange" : "containerSheet.storeRangeEstimated", { range })}</Text>
+            {warehouseDate ? <Text style={styles.optionHint} numberOfLines={1}>{t(warehouseDate.key, { date: warehouseDate.date })}</Text> : null}
           </View>
           <View style={styles.containerCounts}>
             <Text style={styles.newKinds}>{t("containerSheet.newKinds", { count: option.newKinds })}</Text>

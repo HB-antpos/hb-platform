@@ -85,6 +85,47 @@ public sealed class ContainerNewProductsServiceSqliteTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_返回货柜到仓库日期_已到仓取实际日期_在途取预计日期_两者都有以实际为准()
+    {
+        var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Australia/Brisbane")).Date;
+        database.Insertable(new Store { StoreGUID = "store-7", StoreCode = "S-7", StoreName = "S", Address = "Brisbane QLD 4000" }).ExecuteCommand();
+        database.Insertable(new UserStore { UserStoreGUID = "rel-7", UserGUID = "user-7", StoreGUID = "store-7", IsPrimary = false }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            // 两个日期都有：以实际到货日期为准（带时间部分，验证只取日期）；预计到岸日期故意差很远，不能被选中
+            new Container { ContainerCode = "C-BOTH", ContainerNumber = "BOTH", ActualArrivalDate = today.AddDays(1).AddHours(15), EstimatedArrivalDate = today.AddDays(-3) },
+            // 只有实际日期
+            new Container { ContainerCode = "C-ACT", ContainerNumber = "ACT", ActualArrivalDate = today.AddDays(2), EstimatedArrivalDate = null },
+            // 还在途：只有预计到岸日期，用预计日期兜底
+            new Container { ContainerCode = "C-EST", ContainerNumber = "EST", ActualArrivalDate = null, EstimatedArrivalDate = today.AddDays(3) },
+        }).ExecuteCommand();
+        database.Insertable(new[]
+        {
+            new ContainerDetail { DetailCode = "W1", ContainerCode = "C-BOTH", ProductCode = "P-BOTH" },
+            new ContainerDetail { DetailCode = "W2", ContainerCode = "C-ACT", ProductCode = "P-ACT" },
+            new ContainerDetail { DetailCode = "W3", ContainerCode = "C-EST", ProductCode = "P-EST" },
+        }).ExecuteCommand();
+
+        var result = await CreateService("user-7").GetAsync("S-7");
+
+        var both = result.Items.Single(x => x.ProductCode == "P-BOTH");
+        Assert.Equal("actual", both.Basis);
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(1)), both.WarehouseArrivalDate);
+        var actual = result.Items.Single(x => x.ProductCode == "P-ACT");
+        Assert.Equal("actual", actual.Basis);
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(2)), actual.WarehouseArrivalDate);
+        var estimated = result.Items.Single(x => x.ProductCode == "P-EST");
+        Assert.Equal("estimated", estimated.Basis);
+        Assert.Equal(DateOnly.FromDateTime(today.AddDays(3)), estimated.WarehouseArrivalDate);
+        // 到仓库日期只是新增字段：到店区间仍由同一个日期推算（QLD 起始日 = +3 个工作日），Basis 语义不变
+        Assert.All(result.Items, x => Assert.NotNull(x.WarehouseArrivalDate));
+        Assert.Equal(
+            DateOnly.FromDateTime(ContainerNewProductsReactService.AddWeekdays(today.AddDays(1), 3)),
+            both.EstimatedStoreArrivalDate);
+    }
+
+    [Fact]
     public async Task GetAsync_NSW到店区间为仓库日期当天至3个工作日_区间跨窗口下界仍显示()
     {
         var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,

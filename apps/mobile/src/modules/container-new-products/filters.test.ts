@@ -13,13 +13,13 @@ function item(overrides: Partial<ContainerNewProductItem>): ContainerNewProductI
   return {
     productCode: "P-1", hbProductNo: null, quantity: null, imageUrl: null, barcode: null, retailPrice: null,
     containerNumber: "CSNU 7012345", containerCode: "C-1", estimatedStoreArrivalDate: "2026-10-01",
-    estimatedStoreArrivalDateEnd: "2026-10-06", basis: "actual", isNewProduct: true, ...overrides,
+    estimatedStoreArrivalDateEnd: "2026-10-06", warehouseArrivalDate: "2026-09-28", basis: "actual", isNewProduct: true, ...overrides,
   };
 }
 
 const freshArrived = item({ productCode: "P-NEW", containerCode: "C-1", basis: "actual", isNewProduct: true });
 const restockArrived = item({ productCode: "P-OLD", containerCode: "C-1", basis: "actual", isNewProduct: false });
-const freshTransit = item({ productCode: "P-NEW2", containerCode: "C-2", containerNumber: null, basis: "estimated", isNewProduct: true, estimatedStoreArrivalDate: "2026-09-29" });
+const freshTransit = item({ productCode: "P-NEW2", containerCode: "C-2", containerNumber: null, basis: "estimated", isNewProduct: true, estimatedStoreArrivalDate: "2026-09-29", warehouseArrivalDate: "2026-09-24" });
 
 // 默认只显示新商品
 assert.equal(matchesFilters(freshArrived, DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS), true);
@@ -47,6 +47,22 @@ assert.deepEqual(options.map((option) => [option.label, option.newKinds, option.
   ["C-2", 1, 0, "estimated"],
   ["CSNU 7012345", 1, 1, "actual"],
 ]);
+
+// 仓库日期随商品行带到货柜选项（已到仓 = 实际日期，在途 = 预计日期，由 basis 区分）；排序仍按到店起始日，不受仓库日期影响
+assert.deepEqual(options.map((option) => [option.label, option.warehouseArrivalDate]), [
+  ["C-2", "2026-09-24"],
+  ["CSNU 7012345", "2026-09-28"],
+]);
+// 仓库日期故意与到店日期顺序相反：XXXU 到仓更晚但到店更早，仍应排在前面
+const reversed = summarizeContainers([
+  item({ productCode: "P-X", containerCode: "C-X", containerNumber: "XXXU 1", estimatedStoreArrivalDate: "2026-10-02", warehouseArrivalDate: "2026-09-30" }),
+  item({ productCode: "P-Y", containerCode: "C-Y", containerNumber: "YYYU 2", estimatedStoreArrivalDate: "2026-10-05", warehouseArrivalDate: "2026-09-01" }),
+]);
+assert.deepEqual(reversed.map((option) => option.label), ["XXXU 1", "YYYU 2"]);
+// 旧版后端不返回仓库日期：选项里为 null，其余汇总不受影响
+const legacy = summarizeContainers([item({ warehouseArrivalDate: null })]);
+assert.equal(legacy[0].warehouseArrivalDate, null);
+assert.equal(legacy[0].newKinds, 1);
 
 assert.deepEqual(pruneSelectedContainers(["C-1", "C-GONE"], options), ["C-1"]);
 assert.equal(matchesContainerSearch(options[1], "csnu70"), true);

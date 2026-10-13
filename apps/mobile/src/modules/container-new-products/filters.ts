@@ -52,6 +52,8 @@ export interface ContainerOption {
   /** 显示用柜号：优先 ContainerNumber，没有时用 ContainerCode */
   label: string;
   basis: ContainerNewProductBasis;
+  /** 货柜到仓库日期（actual = 实际，estimated = 预计兜底）；旧版后端不返回时为 null。仅用于显示，不参与排序 */
+  warehouseArrivalDate: string | null;
   estimatedStoreArrivalDate: string;
   estimatedStoreArrivalDateEnd: string | null;
   newKinds: number;
@@ -59,7 +61,7 @@ export interface ContainerOption {
 }
 
 // 从商品列表汇总出货柜选项：同柜同商品已由后端合并成一行，这里按商品去重计数（忽略大小写）；
-// 按到店起始日、柜号排序，与列表顺序一致
+// 按到店起始日、柜号排序，与列表顺序一致（仓库日期只带上用于显示，不改变排序）
 export function summarizeContainers(items: readonly ContainerNewProductItem[]): ContainerOption[] {
   const byCode = new Map<string, { option: Omit<ContainerOption, "newKinds" | "existingKinds">; newCodes: Set<string>; existingCodes: Set<string> }>();
   for (const item of items) {
@@ -71,6 +73,7 @@ export function summarizeContainers(items: readonly ContainerNewProductItem[]): 
           containerCode: item.containerCode,
           label: item.containerNumber?.trim() || item.containerCode,
           basis: item.basis,
+          warehouseArrivalDate: item.warehouseArrivalDate,
           estimatedStoreArrivalDate: item.estimatedStoreArrivalDate,
           estimatedStoreArrivalDateEnd: item.estimatedStoreArrivalDateEnd,
         },

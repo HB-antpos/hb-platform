@@ -196,6 +196,9 @@ public sealed class ContainerNewProductsReactService(
                 ContainerNumber = container.ContainerNumber,
                 EstimatedStoreArrivalDate = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].Start),
                 EstimatedStoreArrivalDateEnd = DateOnly.FromDateTime(storeArrivalByContainer[container.ContainerCode].End),
+                // 到仓库日期与上面推算到店区间用的是同一个日期：实际到货日期优先，没有时用预计到岸日期兜底；
+                // 候选货柜的筛选已保证二者至少有一个，所以这里一定有值
+                WarehouseArrivalDate = DateOnly.FromDateTime((container.ActualArrivalDate ?? container.EstimatedArrivalDate)!.Value.Date),
                 Basis = container.ActualArrivalDate.HasValue ? "actual" : "estimated",
                 IsNewProduct = isNewProduct,
             });

@@ -17,6 +17,8 @@ export interface ContainerNewProductItem {
   estimatedStoreArrivalDate: string;
   /** 预计到店区间结束日（含当天）；旧版后端不返回时为 null，按单一到店日显示 */
   estimatedStoreArrivalDateEnd: string | null;
+  /** 货柜到仓库日期（YYYY-MM-DD）：basis = actual 时是实际到货日期，estimated 时是预计到岸日期兜底；旧版后端不返回时为 null，页面不显示该行 */
+  warehouseArrivalDate: string | null;
   basis: ContainerNewProductBasis;
   /** 新商品（仓库里没有或由本柜新建）；false 为补货的已有商品。旧版后端不返回时按新商品处理（旧接口只返回新商品） */
   isNewProduct: boolean;

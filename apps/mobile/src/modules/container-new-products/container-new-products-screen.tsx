@@ -23,6 +23,7 @@ import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE, CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTI
 import { peekRememberedPageSize, readRememberedPageSize, rememberPageSize } from "./page-size-storage";
 import { countNewProductKinds } from "./summary";
 import type { ContainerNewProductItem } from "./types";
+import { getWarehouseDateText } from "./warehouse-date";
 
 const ACCENT_SOFT = "#EAF2FF";
 const SUCCESS_SOFT = "#ECFDF3";
@@ -52,6 +53,8 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   const date = formatArrivalDateRange(item.estimatedStoreArrivalDate, item.estimatedStoreArrivalDateEnd);
   const arrived = item.basis === "actual";
+  // 商品所在货柜的到仓库日期：已到仓 = 实际日期，在途 = 预计日期兜底；没有日期（旧版后端）不渲染这一行，也不回退去显示到店日期
+  const warehouseDate = getWarehouseDateText("labels", item.basis, item.warehouseArrivalDate, item.estimatedStoreArrivalDate);
   return <Card style={styles.card} contentStyle={styles.cardContent} mode="contained">
     <View style={styles.cardRow}>
       <View style={[styles.imageFrame, { width: imageSize, height: imageSize }]}>{item.imageUrl && item.imageUrl !== failedImageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="contain" onError={() => setFailedImageUrl(item.imageUrl)} /> : <Text style={styles.imagePlaceholder}>{t("states.noImage")}</Text>}</View>
@@ -59,6 +62,9 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
         <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
         {item.retailPrice !== null ? <Text variant="titleSmall" style={styles.retailPrice} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
         <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: item.containerNumber?.trim() || item.containerCode })}</Text>
+        {/* 仓库日期单独一行（不与货柜号同行：柜号本身就可能占满一行）；详情列在 360pt 宽下文字区约 92pt，
+            「预计到仓库 DD/MM」略超一点，所以允许等比缩小字号（最小 0.8）而不是截断日期，仍保证不溢出、不挤右侧「预计到店」块 */}
+        {warehouseDate ? <Text variant="bodySmall" style={styles.warehouseDate} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t(warehouseDate.key, { date: warehouseDate.date })}</Text> : null}
         {/* 不向门店展示到货数量：数量只在接口里保留，卡片上不显示 */}
         {/* 新品/已有 与到仓状态放同一行，不挤占货号；到仓状态即后端 basis：已到仓按到仓库日期推算到店日，在途按预计到岸推算 */}
         <View style={styles.tagRow}>
@@ -281,6 +287,7 @@ const styles = StyleSheet.create({
   typeTag: { color: HB_COLORS.action, backgroundColor: ACCENT_SOFT, fontSize: 12, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, overflow: "hidden" },
   typeTagExisting: { color: HB_COLORS.textSecondary, backgroundColor: HB_COLORS.surfaceMuted },
   containerCode: { color: HB_COLORS.textSecondary },
+  warehouseDate: { color: HB_COLORS.textSecondary },
   retailPrice: { color: HB_COLORS.action, fontWeight: "700" },
   statusPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: HB_SPACING.xs, paddingVertical: 3, borderRadius: 10 },
   statusArrived: { backgroundColor: SUCCESS_SOFT },
