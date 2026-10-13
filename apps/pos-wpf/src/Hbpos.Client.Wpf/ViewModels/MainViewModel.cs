@@ -1330,7 +1330,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>收银员登录弹窗在 Raw Input 扫码服务里的页面标识。</summary>
-    public const string CashierLoginScannerPageId = "CashierLogin";
+    public const string CashierLoginScannerPageId = RawScannerPageIds.CashierLogin;
 
     public bool TryProcessKeyboardScannerInput(string barcode)
     {
