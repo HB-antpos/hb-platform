@@ -69,6 +69,8 @@ internal sealed class SchemaMigrationCoordinator
     internal const string FaceCaptureMigrationId = "20261013.001-face-capture";
     internal const string FaceMatchMigrationId = "20261014.001-face-match";
     internal const string StorePriceUpdateNoticeMigrationId = "20261015.001-store-price-notice";
+    internal const string ContainerNewProductNoticeMigrationId =
+        "20261015.002-container-new-product-notice";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -244,6 +246,11 @@ internal sealed class SchemaMigrationCoordinator
             StorePriceUpdateNoticeMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyStorePriceUpdateNoticeAsync(cancellationToken)
+        ),
+        new(
+            ContainerNewProductNoticeMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyContainerNewProductNoticeAsync(cancellationToken)
         ),
     ];
 

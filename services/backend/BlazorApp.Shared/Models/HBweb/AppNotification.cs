@@ -102,4 +102,7 @@ public static class AppNotificationTypes
     /// 只发给该店持有 StoreProducts.PriceUpdates 的人；正文为英文，只带数量，不含商品与价格明细。
     /// </summary>
     public const string StorePriceUpdates = "store.price_updates";
+
+    /// <summary>新品到店每日推送（门店本地 8 点）：只发给该店持有 Container.MobileNewProductsView 的人，Data 只带门店、本地日期与新增数量。</summary>
+    public const string ContainerNewProducts = "container.new_products";
 }

@@ -1037,6 +1037,17 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.Notifications.INotificationInboxService,
     BlazorApp.Api.Features.Notifications.NotificationInboxService
 >();
+// 新品到店每日推送（门店本地 8 点，表由迁移 20261015.002-container-new-product-notice 创建）：
+// 复用「HB new arrivals」列表的无鉴权查询内核（后台没有请求上下文），只发给该店持有 Container.MobileNewProductsView 的人。
+// 默认开启；配置节 ContainerNewProductNotifications.Enabled=false 可整体关闭。部署须先执行 --schema=migrate。
+builder.Services.Configure<BlazorApp.Api.Services.Background.ContainerNewProductNotificationOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Services.Background.ContainerNewProductNotificationOptions.SectionName)
+);
+builder.Services.AddScoped<
+    BlazorApp.Api.Services.React.IContainerNewProductsQuery,
+    BlazorApp.Api.Services.React.ContainerNewProductsQuery
+>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.Background.ContainerNewProductNotificationWorker>();
 // 人脸抓拍摄像机后台管理（表由迁移 20261013.001-face-capture 创建，人脸接收服务读取）。
 builder.Services.AddScoped<
     BlazorApp.Api.Features.FaceCameras.IFaceCameraAdminService,

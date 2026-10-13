@@ -159,6 +159,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStorePriceUpdateNoticeAsync(CancellationToken cancellationToken);
 
+    Task ApplyContainerNewProductNoticeAsync(CancellationToken cancellationToken);
+
+    Task VerifyContainerNewProductNoticeAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -953,6 +957,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StorePriceUpdateNoticeSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyContainerNewProductNoticeAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            ContainerNewProductNoticeSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 新品到店推送两张表：列与主键签名通过后协调器才登记账本，结构不符的同名表不会被误标为完成。
+        await VerifyContainerNewProductNoticeAsync(cancellationToken);
+    }
+
+    public async Task VerifyContainerNewProductNoticeAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            ContainerNewProductNoticeSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

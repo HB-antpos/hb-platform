@@ -13,10 +13,13 @@ namespace BlazorApp.Api.Services.React;
 public sealed class ContainerNewProductsReactService(
     SqlSugarContext context,
     ICurrentUserManageableStoreScopeService storeScope,
-    ICurrentUserService currentUser
+    ICurrentUserService currentUser,
+    TimeProvider? timeProvider = null
 ) : IContainerNewProductsReactService
 {
     private readonly ISqlSugarClient _db = context.Db;
+    // 「本地今天」按它推算；生产由 DI 注入 TimeProvider.System，历史构造调用（测试）不传时也取系统时钟，行为与原先的 DateTime.UtcNow 一致。
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<ContainerNewProductsResponseDto> GetAsync(
         string storeCode,
@@ -38,18 +41,37 @@ public sealed class ContainerNewProductsReactService(
             throw new ContainerNewProductsStoreNotFoundException();
         }
 
+        // 鉴权与查门店到此为止；之后的查询逻辑是不依赖 HttpContext 的内核，后台任务（新品到店每日推送）共用同一份。
+        return await QueryForStoreAsync(
+            _db, store, normalizedStoreCode, includeExisting, _timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+    }
+
+    /// <summary>
+    /// 新品到店查询内核：不做任何鉴权，调用方必须已确认可以读取该门店（控制器路径走 <see cref="GetAsync"/>，
+    /// 后台推送走 <see cref="ContainerNewProductsQuery"/>）。<paramref name="normalizedStoreCode"/> 是查询用的门店编码，
+    /// GetAsync 传调用方裁剪后的原值，响应里的 StoreCode 与原先逐字一致；<paramref name="nowUtc"/> 决定「本地今天」，必须是 UTC。
+    /// </summary>
+    internal static async Task<ContainerNewProductsResponseDto> QueryForStoreAsync(
+        ISqlSugarClient db,
+        Store store,
+        string normalizedStoreCode,
+        bool includeExisting,
+        DateTime nowUtc,
+        CancellationToken cancellationToken
+    )
+    {
         var stateCode = ResolveState(store);
         if (stateCode == null)
         {
             throw new ContainerNewProductsStateUnknownException();
         }
 
-        var localToday = GetLocalToday(stateCode);
+        var localToday = GetLocalToday(stateCode, nowUtc);
         // 窗口按「预计到店区间」算；区间 = 货柜日期 + [起, 止] 个工作日，所以先按放宽后的货柜日期粗筛，再逐柜精确过滤
         var (from, toExclusive) = BuildWindow(localToday);
         var (containerFrom, containerToExclusive) = BuildContainerQueryWindow(from, toExclusive);
         var (startWeekdays, endWeekdays) = GetStoreArrivalWeekdayRange(stateCode);
-        var candidateContainers = await _db.Queryable<Container>()
+        var candidateContainers = await db.Queryable<Container>()
             .Where(x => !x.IsDeleted)
             .Where(x =>
                 (x.ActualArrivalDate != null && x.ActualArrivalDate >= containerFrom && x.ActualArrivalDate < containerToExclusive)
@@ -80,7 +102,7 @@ public sealed class ContainerNewProductsReactService(
         }
 
         var containerCodes = containers.Select(x => x.ContainerCode).ToList();
-        var details = await _db.Queryable<ContainerDetail>()
+        var details = await db.Queryable<ContainerDetail>()
             .Where(x => !x.IsDeleted && x.ProductCode != null && containerCodes.Contains(x.ContainerCode))
             .LeftJoin<DomesticProduct>((detail, product) => detail.ProductCode == product.ProductCode)
             .Select((detail, product) => new DetailRow
@@ -108,17 +130,17 @@ public sealed class ContainerNewProductsReactService(
         var storeRetailPrices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         foreach (var productCodeBatch in productCodes.Chunk(500))
         {
-            foreach (var code in await _db.Queryable<WarehouseProduct>()
+            foreach (var code in await db.Queryable<WarehouseProduct>()
                 .Where(x => productCodeBatch.Contains(x.ProductCode))
                 .Select(x => x.ProductCode)
                 .ToListAsync(cancellationToken)) existingProducts.Add(code);
 
-            foreach (var row in await _db.Queryable<WarehouseProductChangeHistory>()
+            foreach (var row in await db.Queryable<WarehouseProductChangeHistory>()
                 .Where(x => productCodeBatch.Contains(x.ProductCode) && x.Action == "Create" && x.Source == "ContainerSubmit" && x.SourceReference != null && containerCodes.Contains(x.SourceReference))
                 .Select(x => new HistoryRow { ProductCode = x.ProductCode, ContainerCode = x.SourceReference! })
                 .ToListAsync(cancellationToken)) historyKeys.Add(new HistoryKey(row.ProductCode, row.ContainerCode));
 
-            foreach (var row in await _db.Queryable<Product>()
+            foreach (var row in await db.Queryable<Product>()
                 .Where(x => !x.IsDeleted && x.ProductCode != null && productCodeBatch.Contains(x.ProductCode))
                 .Select(x => new LocalProductRow { ProductCode = x.ProductCode!, Barcode = x.Barcode, RetailPrice = x.RetailPrice })
                 .ToListAsync(cancellationToken))
@@ -132,7 +154,7 @@ public sealed class ContainerNewProductsReactService(
             }
 
             // 分店价被停用时 POS 按总部价卖，所以只认启用中的分店价
-            foreach (var row in await _db.Queryable<StoreRetailPrice>()
+            foreach (var row in await db.Queryable<StoreRetailPrice>()
                 .Where(x => !x.IsDeleted && x.IsActive && x.StoreCode == normalizedStoreCode
                     && x.ProductCode != null && productCodeBatch.Contains(x.ProductCode))
                 .Select(x => new StoreRetailPriceRow { ProductCode = x.ProductCode!, Price = x.StoreRetailPriceValue })
@@ -266,8 +288,8 @@ public sealed class ContainerNewProductsReactService(
             ?? (Regex.IsMatch(text, @"(?:^|[\s,])(?:NSW|NEW SOUTH WALES)(?:[\s,]|$)") ? "NSW" : null);
     }
 
-    private static DateTime GetLocalToday(string state) =>
-        TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(state == "QLD" ? "Australia/Brisbane" : "Australia/Sydney")).Date;
+    private static DateTime GetLocalToday(string state, DateTime nowUtc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(nowUtc, TimeZoneInfo.FindSystemTimeZoneById(state == "QLD" ? "Australia/Brisbane" : "Australia/Sydney")).Date;
 
     private sealed class ContainerDateRow { public string ContainerCode { get; init; } = string.Empty; public string? ContainerNumber { get; init; } public DateTime? ActualArrivalDate { get; init; } public DateTime? EstimatedArrivalDate { get; init; } }
     private sealed class DetailRow { public string ContainerCode { get; init; } = string.Empty; public string ProductCode { get; init; } = string.Empty; public string? HbProductNo { get; init; } public decimal? LoadingQuantity { get; init; } public string? ImageUrl { get; init; } public string? Barcode { get; init; } public decimal? DetailRetailPrice { get; init; } }
