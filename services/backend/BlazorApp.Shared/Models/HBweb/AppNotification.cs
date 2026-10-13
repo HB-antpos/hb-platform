@@ -85,7 +85,7 @@ public static class AppNotificationTypes
     /// <summary>后台「发一条测试通知给自己」，用于验证各端接收链路。</summary>
     public const string Test = "system.test";
 
-    /// <summary>不受欢迎人员名单疑似命中（需两人人工复核）；只发给该店持有 FaceMatch.Unwelcome.Review 的人，文案不含姓名与事件细节。</summary>
+    /// <summary>不受欢迎人员名单疑似命中（需人工复核）；只发给该店持有 FaceMatch.Unwelcome.Review 的人，文案不含姓名与事件细节。</summary>
     public const string FaceUnwelcomeHit = "face.unwelcome-hit";
 
     /// <summary>不受欢迎人员名单条目到期前 30 天的复核提醒（发给提交人与批准人，不含姓名与事件细节）。</summary>

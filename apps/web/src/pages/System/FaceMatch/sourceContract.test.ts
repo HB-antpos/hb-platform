@@ -120,7 +120,11 @@ assert(f('ReviewTaskModal.tsx').includes("t('faceMatch.review.suspectedNotice', 
 assert(f('ReviewTaskModal.tsx').includes('BAND_LABEL_KEYS[task.band]') && f('ReviewTasksTab.tsx').includes('BAND_LABEL_KEYS[record.band]'), '档位用后端 band 字段')
 assert(f('ReviewTaskModal.tsx').includes('getVerdictBlockReasonKey(task)') && f('logic.ts').includes('return task.canReview && task.imageAvailable'), '提交判断受后端 canReview 控制')
 assert(f('ReviewTaskModal.tsx').includes('modal.confirm(') && f('ReviewTaskModal.tsx').includes("reviewUnwelcomeTask(taskId, verdict)"), '复核判断提交前二次确认')
-assert(f('ReviewTaskModal.tsx').includes('task.firstReviewerName') && f('logic.ts').includes("second: 'faceMatch.review.step.second'"), '第二复核人提示第一复核人信息')
+// 单人复核：不再有二审流程——弹框不依赖 firstReviewerName 做提示，步骤提示只有「待复核」「已结束」，
+// 旧版遗留的 nextStep=second 与 first 同样按待复核处理；按钮是否可点只看后端 canReview。
+assert(!f('ReviewTaskModal.tsx').includes('firstReviewerName') && !f('ReviewTaskModal.tsx').includes('faceMatch.review.firstReviewer'), '复核弹框不再展示「前一位复核人已判断」横幅')
+assert(!f('logic.ts').includes('faceMatch.review.step.second') && f('logic.ts').includes("task.nextStep === 'second'"), '步骤提示没有待二审一项，旧的 second 当作待复核')
+assert(!/isFirstReviewer|SAME_REVIEWER/.test(f('ReviewTaskModal.tsx') + f('ReviewTasksTab.tsx')), '复核页不自己推算「是不是已判断过的人」，也不依赖 SAME_REVIEWER 流程')
 
 // ───────── 错误文案：统一经 describeFaceMatchError（已知码 → 状态码 → 通用），不直接展示后端消息文本 ─────────
 for (const [name, text] of Object.entries(files)) {

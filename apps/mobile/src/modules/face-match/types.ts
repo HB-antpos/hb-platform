@@ -138,21 +138,23 @@ export interface FaceUnwelcomeTask {
   cameraId: string;
   capturedAtUtc: string;
   entryId: string;
-  /** 相似度 0-100，不是「同一个人的概率」。 */
+  /** 相似度 0-100，不等于「是同一个人的概率」。 */
   score: number;
   scorePercent: number;
   band: FaceUnwelcomeBand;
-  /** 0 待复核、1 已驳回、2 已由第二人确认 */
+  /** 0 待复核、1 已驳回（判断「不是同一个人」）、2 已确认（判断「是同一个人」） */
   reviewStatus: number;
   reviewStatusName: string;
+  /** 复核人（新规则下一人判断即结束，只有这一位）。 */
   firstReviewerName: string | null;
   firstReviewedAtUtc: string | null;
+  /** 仅旧版遗留的、已有两位复核人的任务才有，展示为「补充复核人」。 */
   secondReviewerName: string | null;
   secondReviewedAtUtc: string | null;
   imageAvailable: boolean;
   imageDeleteAtUtc: string;
   referencePhotoCount: number;
-  /** first / second / none */
+  /** first（待复核）/ none（已结束）；旧后端还可能返回 second（旧版遗留的待二审），一律按待复核处理。 */
   nextStep: string;
   canReview: boolean;
 }

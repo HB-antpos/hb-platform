@@ -519,7 +519,7 @@ public sealed class FaceMatchMaintenance(
 /// 1. 发布在业务事务之外：通知发布器内部自带 UseTranAsync（N1），绝不能放进外层事务；
 /// 2. 每条任务单独 try/catch，失败只记日志（不含内容）、下轮重试，不阻塞其他任务；
 /// 3. DedupeKey = unwelcome-hit:{TaskId}（撤回后同键不可再发，所以这里从不撤回）；
-/// 4. 文案固定：「疑似匹配（相似度 NN%），不是同一个人的概率，必须由两人人工确认」，不含姓名与事件细节；
+/// 4. 文案固定且只用英文（用户 2026-10 的通知文案规则）："Possible match (similarity NN%). The score is not the probability that this is the same person; a reviewer must check it."，不含姓名与事件细节；
 /// 5. 没有接收人的任务在命中图到期前继续重试（也许稍后有人被授权）；已复核结束或图片已到期的任务直接标记已处理。
 /// </summary>
 public sealed class FaceHitNotifier(
@@ -558,8 +558,8 @@ public sealed class FaceHitNotifier(
                     var result = await notificationPublisher.PublishAsync(new NotificationPublishRequest
                     {
                         Type = AppNotificationTypes.FaceUnwelcomeHit,
-                        Title = "疑似匹配提示",
-                        Body = $"疑似匹配（相似度 {percent}%），不是同一个人的概率，必须由两人人工确认",
+                        Title = "Possible match alert",
+                        Body = $"Possible match (similarity {percent}%). The score is not the probability that this is the same person; a reviewer must check it.",
                         Audience = NotificationAudience.ForStore(task.StoreCode, Permissions.FaceMatch.Unwelcome.Review),
                         Priority = AppNotificationPriorities.High,
                         StoreCode = task.StoreCode,

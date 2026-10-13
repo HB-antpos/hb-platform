@@ -72,12 +72,13 @@ function ReviewImageView({ state, alt, onBroken, broken }: ReviewImageViewProps)
 }
 
 /**
- * 复核弹框（敏感生物识别信息）：并排显示现场抓拍与条目参考照片，由两位不同的人分别判断。
+ * 复核弹框（敏感生物识别信息）：并排显示现场抓拍与条目参考照片，由一位有复核权限的人判断一次即结束。
  * 约定（由 sourceContract / imageLogic 测试守住）：
  * 1. 挂载（用户点击「复核」）后才请求图片：先现场抓拍与第一张参考照片，其余参考照片切换时才取；
  * 2. 图片只以 Blob → objectURL 的形式存在于 state 里；关闭 / 切换 / 卸载时 effect 清理函数调用 session.dispose()；
- * 3. 不显示姓名与事件细节；相似度只写「相似度 NN%（不是同一个人的概率）」，档位用后端 band 字段，页面不自己算阈值；
- * 4. 第二复核人必须不同于第一复核人——由后端强制，页面只提示并按 canReview 控制按钮。
+ * 3. 不显示姓名与事件细节；相似度只写「相似度 NN%（不等于是同一个人的概率）」，档位用后端 band 字段，页面不自己算阈值；
+ * 4. 按钮是否可点只看后端 canReview（外加图片还在、任务未结束），页面不自己推算「是不是复核过的人」；
+ *    nextStep 为 first 或旧版遗留的 second 都显示「待复核」。
  */
 export default function ReviewTaskModal({ task, writeBlocked, onReviewed, onClose }: ReviewTaskModalProps) {
   const { t } = useTranslation()
@@ -240,16 +241,7 @@ export default function ReviewTaskModal({ task, writeBlocked, onReviewed, onClos
           <Alert type="warning" showIcon message={t('faceMatch.review.imageGone')} />
         )}
 
-        <Alert
-          type={step === 'done' ? 'success' : 'info'}
-          showIcon
-          message={t(REVIEW_STEP_HINT_KEYS[step])}
-          description={
-            step === 'second' && task.firstReviewerName
-              ? t('faceMatch.review.firstReviewer', { name: task.firstReviewerName })
-              : undefined
-          }
-        />
+        <Alert type={step === 'done' ? 'success' : 'info'} showIcon message={t(REVIEW_STEP_HINT_KEYS[step])} />
         {blockedKey && step !== 'done' ? <Typography.Text type="warning">{t(blockedKey)}</Typography.Text> : null}
         {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
       </Space>

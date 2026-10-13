@@ -201,14 +201,14 @@ VALUES ('{taskId}', N'1013', N'cam-1', '{FaceMatchTestDatabase.Now.AddMinutes(-5
 
         var listed = await h.Unwelcome.ListTasksAsync("pending", null, 1, 20, reviewerA);
         Assert.Equal(89, Assert.Single(listed.Items).ScorePercent);
-        var step1 = await h.Unwelcome.ReviewTaskAsync(taskId, new() { Verdict = "match" }, reviewerA);
-        Assert.Equal("second", step1.NextStep);
-        var same = await Assert.ThrowsAsync<FaceMatchException>(() => h.Unwelcome.ReviewTaskAsync(taskId, new() { Verdict = "match" }, reviewerA));
-        Assert.Equal("FACE_MATCH_SAME_REVIEWER", same.Code);
-        var done = await h.Unwelcome.ReviewTaskAsync(taskId, new() { Verdict = "notMatch" }, reviewerB);
+        // 一个人就够：第一位复核人判断「不是同一个人」即驳回；已结案后别人再提交是 409。
+        var done = await h.Unwelcome.ReviewTaskAsync(taskId, new() { Verdict = "notMatch" }, reviewerA);
         Assert.Equal("dismissed", done.ReviewStatusName);
+        Assert.Equal("none", done.NextStep);
         Assert.Equal("1", await server.ScalarAsync($"SELECT ReviewStatus FROM dbo.FaceMatchTask WHERE TaskId = '{taskId}'"));
-        Assert.Equal("rev-b", await server.ScalarAsync($"SELECT SecondReviewerId FROM dbo.FaceMatchTask WHERE TaskId = '{taskId}'"));
+        Assert.Equal("rev-a", await server.ScalarAsync($"SELECT FirstReviewerId FROM dbo.FaceMatchTask WHERE TaskId = '{taskId}'"));
+        var closed = await Assert.ThrowsAsync<FaceMatchException>(() => h.Unwelcome.ReviewTaskAsync(taskId, new() { Verdict = "match" }, reviewerB));
+        Assert.Equal("FACE_MATCH_TASK_CLOSED", closed.Code);
 
         var stats = await h.Unwelcome.GetStatsAsync(submitter);
         Assert.Equal(1, stats.DismissedCount);

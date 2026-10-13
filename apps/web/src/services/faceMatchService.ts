@@ -613,7 +613,7 @@ export async function getUnwelcomeTasks(
   return normalizePage(unwrapApiData(response), normalizeFaceUnwelcomeTask)
 }
 
-/** 两人复核：match = 是同一个人；notMatch = 不是（任何一方 notMatch 即驳回）。第二人必须不同于第一人，由后端强制。 */
+/** 单人复核：一个有复核权限的人判断一次即结束。match = 是同一个人 → 已确认；notMatch = 不是 → 已驳回。能否复核由后端 canReview 决定。 */
 export async function reviewUnwelcomeTask(taskId: string, verdict: FaceReviewVerdict): Promise<FaceUnwelcomeTask> {
   const response = await request.post<Envelope>(
     `${API_BASE}/unwelcome/tasks/${encodeURIComponent(taskId)}/review`,

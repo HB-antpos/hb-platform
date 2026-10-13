@@ -63,7 +63,7 @@
       "FACE_MATCH_UNWELCOME_NOT_ENABLED": "None of the entry's stores has turned on the Unwelcome Persons List yet, so it cannot be approved. Turn it on in the store profile first.",
       "FACE_MATCH_ENTRY_CHANGED": "The entry was just changed by someone else. Refresh and try again.",
       "FACE_MATCH_TASK_CLOSED": "This review task is already finished.",
-      "FACE_MATCH_SAME_REVIEWER": "The second reviewer must be a different person from the first. Ask another colleague with review permission.",
+      "FACE_MATCH_SAME_REVIEWER": "You have already given a decision on this task. Another colleague with review permission needs to handle it.",
       "FACE_MATCH_TASK_CHANGED": "The task was just handled by someone else. Refresh and try again.",
       "FACE_MATCH_IMAGE_GONE": "The image has been cleaned up or does not exist, so this task can no longer be reviewed.",
       "FACE_MATCH_IMAGE_TOO_LARGE": "The image is too large to display.",
@@ -206,8 +206,8 @@
     "busyMessage": "Wait for the submission to finish before leaving."
   },
   "review": {
-    "intro": "A review task comes from a possible match between a camera capture and the list. Two different people must each compare the live capture with the reference photos. If either says it is not the same person, the task is dismissed. The system never refuses service or notifies police automatically.",
-    "sensitiveNotice": "A suspected match that two people must confirm manually. This is sensitive biometric information: viewing is logged, do not screenshot or share it. Names and incident details are not shown, and images are cleared as soon as you leave this screen or switch to the background.",
+    "intro": "A review task comes from a possible match between a camera capture and the list. One colleague with review permission compares the live capture with the reference photos and decides once: same person confirms the task, not the same person dismisses it. The system never refuses service or notifies police automatically.",
+    "sensitiveNotice": "A suspected match that needs manual confirmation. This is sensitive biometric information: viewing is logged, do not screenshot or share it. Names and incident details are not shown, and images are cleared as soon as you leave this screen or switch to the background.",
     "modalTitle": "Review suspected match",
     "similarity": "Similarity {{percent}}% (not the probability of being the same person)",
     "notProbability": "Similarity only says how alike the two faces look; it does not say how likely they are the same person.",
@@ -222,23 +222,21 @@
     },
     "empty": "No review tasks",
     "imageDeleted": "Image deleted",
-    "reviewerFirst": "First reviewer: {{name}}",
-    "reviewerSecond": "Second reviewer: {{name}}",
+    "reviewerFirst": "Reviewer: {{name}}",
+    "reviewerSecond": "Additional reviewer: {{name}}",
     "actions": {
       "review": "Review",
       "view": "View"
     },
     "step": {
-      "first": "Waiting for the first reviewer to compare and decide",
-      "second": "Waiting for the second reviewer: must be a different person from the first reviewer",
+      "pending": "Waiting for review: compare the live capture with the reference photos and decide",
       "done": "Finished, no further review needed"
     },
-    "firstReviewer": "First reviewer {{name}} decided it is the same person. As the second reviewer, compare the photos independently before confirming.",
     "blocked": {
       "done": "This task is finished.",
       "imageGone": "The capture was deleted under the retention period, so it can no longer be reviewed.",
       "readOnly": "The feature is not enabled. View only; decisions cannot be submitted.",
-      "cannotReview": "You cannot submit a decision right now (no review permission for this store, or you are the first reviewer)."
+      "cannotReview": "You cannot submit a decision right now (no review permission for this store, or the task no longer needs your decision)."
     },
     "captureTitle": "Live capture",
     "referenceTitle": "List reference photo",
@@ -253,11 +251,11 @@
     },
     "confirmMatch": {
       "title": "Confirm \"Same person\"?",
-      "content": "You are deciding that the live capture and the reference photo show the same person (similarity {{percent}}%, not the probability of being the same person). The task only stands once the second reviewer confirms; the system never refuses service or notifies police automatically."
+      "content": "You are deciding that the live capture and the reference photo show the same person (similarity {{percent}}%, not the probability of being the same person). Once confirmed, the task ends; the system never refuses service or notifies police automatically."
     },
     "confirmNotMatch": {
       "title": "Confirm \"Not the same person\"?",
-      "content": "If either reviewer says it is not the same person, the task is dismissed and ends."
+      "content": "Once you decide it is not the same person, the task is dismissed and ends."
     },
     "confirmBack": "Back",
     "confirmOk": "Submit",
@@ -309,7 +307,7 @@
         "evaluateMatch": "Evaluate only, with no effect on the store; requires Capture mode.",
         "staffExclusion": "Excludes enrolled staff from traffic counts; needs store members with a valid consent and enrolment.",
         "trafficDedup": "De-duplicates customers by face per day. High legal risk. A missing de-duplication legal sign-off or other record shows as a red warning and does not block enabling, but it must be completed before running on real customers.",
-        "unwelcomeList": "Alerts staff on a list match and starts two-person review. Missing assessment, legal sign-off, signage or training records show as red warnings and do not block enabling, but they must be completed before running on real customers.",
+        "unwelcomeList": "Alerts staff on a list match and creates a review task for manual confirmation. Missing assessment, legal sign-off, signage or training records show as red warnings and do not block enabling, but they must be completed before running on real customers.",
         "allowedSubjects": "Recommended for Capture mode: say who may appear in front of the cameras, all informed and consenting (leaving it empty only shows a hint).",
         "timeZone": "Leave on Auto to detect automatically. Effective time zone: {{zone}}; state: {{jurisdiction}}."
       },

@@ -177,7 +177,7 @@ export function createFaceMatchApi(http: FaceMatchHttp) {
       return normalizeFaceUnwelcomeTaskPage(data(response));
     },
 
-    /** 两人复核：match = 是同一个人；notMatch = 不是（任何一方 notMatch 即驳回）。第二人必须不同于第一人，由后端强制。 */
+    /** 一人复核：match = 是同一个人（任务已确认）；notMatch = 不是（任务驳回）。判断一次即结束；谁能复核由后端的 canReview 决定。 */
     async reviewTask(taskId: string, verdict: FaceReviewVerdict): Promise<FaceUnwelcomeTask> {
       const path = `${FACE_MATCH_API_BASE}/unwelcome/tasks/${encodeURIComponent(taskId)}/review`;
       return normalizeFaceUnwelcomeTask(data(await http.post(path, { verdict }, json())));

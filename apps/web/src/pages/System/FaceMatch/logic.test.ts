@@ -10,6 +10,7 @@ import {
   INCIDENT_CATEGORY_OPTIONS,
   MISSING_KEY_LABEL_KEYS,
   PHOTO_MAX_BYTES,
+  REVIEW_STEP_HINT_KEYS,
   buildConsentInput,
   buildProfileRequest,
   buildUnwelcomeEntryInput,
@@ -419,11 +420,17 @@ assert.equal(BAND_LABEL_KEYS.high, 'faceMatch.review.band.high')
 assert.equal(BAND_LABEL_KEYS.normal, 'faceMatch.review.band.normal')
 
 assert.equal(getReviewStep({ nextStep: 'first' }), 'first')
-assert.equal(getReviewStep({ nextStep: 'second' }), 'second')
+assert.equal(getReviewStep({ nextStep: 'second' }), 'first', '旧版后端遗留的 second 当作待复核')
 assert.equal(getReviewStep({ nextStep: 'none' }), 'done')
 assert.equal(getReviewStep({ nextStep: 'something-new' }), 'done', '未知步骤按已结束，不给提交按钮')
+assert.deepEqual(Object.keys(REVIEW_STEP_HINT_KEYS).sort(), ['done', 'first'], '复核只剩「待复核」「已结束」两个状态')
+assert.equal(REVIEW_STEP_HINT_KEYS[getReviewStep({ nextStep: 'second' })], 'faceMatch.review.step.first', 'second 与 first 显示同一句话')
 const taskBase = { canReview: true, imageAvailable: true, nextStep: 'first' }
 assert.equal(canSubmitVerdict(taskBase), true)
+// 旧版遗留的 second 任务：按钮是否可点只看后端 canReview，不再因为「自己已判断过」被前端禁用
+assert.equal(canSubmitVerdict({ ...taskBase, nextStep: 'second' }), true)
+assert.equal(canSubmitVerdict({ ...taskBase, nextStep: 'second', canReview: false }), false)
+assert.equal(getVerdictBlockReasonKey({ ...taskBase, nextStep: 'second' }), null)
 assert.equal(canSubmitVerdict({ ...taskBase, canReview: false }), false, 'canReview 由后端决定')
 assert.equal(canSubmitVerdict({ ...taskBase, imageAvailable: false }), false)
 assert.equal(canSubmitVerdict({ ...taskBase, nextStep: 'none' }), false)

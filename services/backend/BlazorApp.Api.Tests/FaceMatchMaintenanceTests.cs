@@ -491,7 +491,7 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
         Assert.Equal(1, handled);
         var request = Assert.Single(_h.Publisher.Requests);
         Assert.Equal(AppNotificationTypes.FaceUnwelcomeHit, request.Type);
-        Assert.Equal("疑似匹配（相似度 88%），不是同一个人的概率，必须由两人人工确认", request.Body);
+        Assert.Equal("Possible match (similarity 88%). The score is not the probability that this is the same person; a reviewer must check it.", request.Body);
         Assert.Equal($"unwelcome-hit:{task}", request.DedupeKey);
         Assert.Equal("1013", request.Audience.StoreCode);
         Assert.Equal(Permissions.FaceMatch.Unwelcome.Review, request.Audience.RequiredPermission);
@@ -580,7 +580,7 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
         var notification = await _h.Db.Queryable<AppNotification>().SingleAsync();
         Assert.Equal($"unwelcome-hit:{task}", notification.DedupeKey);
         Assert.Equal("1013", notification.StoreCode);
-        Assert.Equal("疑似匹配（相似度 91%），不是同一个人的概率，必须由两人人工确认", notification.Body);
+        Assert.Equal("Possible match (similarity 91%). The score is not the probability that this is the same person; a reviewer must check it.", notification.Body);
         var recipients = await _h.Db.Queryable<AppNotificationRecipient>().ToListAsync();
         Assert.Equal(["rev-a"], recipients.Select(r => r.UserGUID));
 

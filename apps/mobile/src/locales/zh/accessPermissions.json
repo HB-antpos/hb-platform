@@ -303,7 +303,7 @@
     },
     "FaceMatch.Unwelcome.Review": {
       "name": "复核不受欢迎人员名单命中",
-      "description": "Web 页面 /system/face-match「复核任务」- 接收所属门店的疑似命中提示，并排查看现场抓拍与参考照片，参与两人复核（敏感生物识别信息，每次查看都会记审计）"
+      "description": "Web 页面 /system/face-match「复核任务」- 接收所属门店的疑似命中提示，并排查看现场抓拍与参考照片，判断是否为同一个人（敏感生物识别信息，每次查看都会记审计）"
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "打开钱箱",

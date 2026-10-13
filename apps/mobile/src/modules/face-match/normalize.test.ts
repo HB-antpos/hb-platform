@@ -123,6 +123,18 @@ import {
   // 缺少 scorePercent 时由 score 四舍五入
   assert.equal(normalizeFaceUnwelcomeTask({ score: 71.6 }).scorePercent, 72);
   assert.equal(normalizeFaceUnwelcomeTask({}).nextStep, "none");
+  // nextStep 原样保留：新后端 first / none；旧后端的 second 由 review-logic 折算成「待复核」，这里不改写
+  assert.equal(task.nextStep, "second");
+  assert.equal(normalizeFaceUnwelcomeTask({ nextStep: "first" }).nextStep, "first");
+  // 复核人姓名：新任务只有 firstReviewerName；旧版遗留任务才有 secondReviewerName
+  const reviewed = normalizeFaceUnwelcomeTask({ firstReviewerName: "Amy", firstReviewedAtUtc: "2026-10-01T00:00:00Z", secondReviewerName: "Bob", secondReviewedAtUtc: "2026-10-02T00:00:00Z" });
+  assert.equal(reviewed.firstReviewerName, "Amy");
+  assert.equal(reviewed.secondReviewerName, "Bob");
+  assert.equal(normalizeFaceUnwelcomeTask({}).firstReviewerName, null);
+  assert.equal(normalizeFaceUnwelcomeTask({}).secondReviewerName, null);
+  // canReview 只认服务端的布尔 true，不因复核人姓名推断
+  assert.equal(normalizeFaceUnwelcomeTask({ firstReviewerName: "Amy", canReview: true }).canReview, true);
+  assert.equal(normalizeFaceUnwelcomeTask({ firstReviewerName: "Amy", canReview: "true" }).canReview, false);
   assert.equal(normalizeFaceUnwelcomeTask({}).canReview, false);
   assert.equal(normalizeFaceUnwelcomeTask({ referencePhotoCount: -2 }).referencePhotoCount, 0);
   // 任务里没有姓名、事件细节字段：即使服务端误带也不会流入

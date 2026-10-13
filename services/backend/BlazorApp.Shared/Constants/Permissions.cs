@@ -159,7 +159,7 @@ namespace BlazorApp.Shared.Constants
                 /// <summary>批准条目；批准人必须不同于提交人。</summary>
                 public const string Approve = "FaceMatch.Unwelcome.Approve";
 
-                /// <summary>收到命中提示并参与两人复核，可看命中图与参考照片（敏感生物识别信息，逐次审计）。</summary>
+                /// <summary>收到命中提示并负责人工复核，可看命中图与参考照片（敏感生物识别信息，逐次审计）。</summary>
                 public const string Review = "FaceMatch.Unwelcome.Review";
             }
         }

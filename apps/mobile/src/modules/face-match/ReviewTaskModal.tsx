@@ -1,12 +1,12 @@
-// 复核弹框（敏感生物识别信息）：并排显示现场抓拍与条目参考照片，由两位不同的人分别判断。
+// 复核弹框（敏感生物识别信息）：并排显示现场抓拍与条目参考照片，由一位有复核权限的人判断一次即结束。
 //
 // 约定（由 source-contract / image-session 测试守住）：
 // 1. 弹框挂载（用户点击「复核」）后才请求图片：先现场抓拍与第一张参考照片，其余参考照片切换时才取；
 // 2. 图片只以 base64 data URI 的形式存在于本组件 state 里，不由应用自己写磁盘缓存、不进 react-query、不进日志；
 //    弹框关闭 / 卸载 / 应用离开前台（切后台、下拉通知栏、应用切换器）时立即丢弃；
 //    iOS 系统网络层会自行把响应写进缓存目录（即使 no-store），所以读取后另有清理器删除这些文件（缓解，非根治）；
-// 3. 不显示姓名与事件细节；相似度只写「相似度 NN%（不是同一个人的概率）」，档位用服务端 band 字段；
-// 4. 第二复核人必须不同于第一复核人——由服务端强制，页面按服务端 canReview 控制按钮并如实展示错误；
+// 3. 不显示姓名与事件细节；相似度只写「相似度 NN%（不等于是同一个人的概率）」，档位用服务端 band 字段；
+// 4. 谁能复核由服务端决定——页面只按服务端 canReview 控制按钮并如实展示错误，不自己推断；
 // 5. 判断提交前在弹框内再确认一步（原生 Modal 之上看不到 Paper 弹层，确认放在弹框本身里）。
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, Image, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
@@ -129,7 +129,7 @@ export function ReviewTaskModal({ task, storeLabel, writeBlocked, onClose, onRev
       .catch((error: unknown) => {
         setErrorText(describeError(error));
         setConfirming(null);
-        // 409：任务刚被别人处理或第二复核人不符，刷新列表让按钮回到真实状态。
+        // 409：任务刚被别人处理（已结束或状态已变化），刷新列表让按钮回到真实状态。
         if (extractHttpStatus(error) === 409) callbacks.current.onStale();
       })
       .finally(() => setSubmitting(false));
@@ -227,11 +227,8 @@ export function ReviewTaskModal({ task, storeLabel, writeBlocked, onClose, onRev
           <Notice
             tone={step === "done" ? "success" : "info"}
             text={t(REVIEW_STEP_HINT_KEYS[step])}
-            icon={step === "done" ? "check-circle-outline" : "account-multiple-check-outline"}
+            icon={step === "done" ? "check-circle-outline" : "account-check-outline"}
           />
-          {step === "second" && task.firstReviewerName ? (
-            <Text style={styles.muted}>{t("review.firstReviewer", { name: task.firstReviewerName })}</Text>
-          ) : null}
           {blockedKey && step !== "done" ? <Notice tone="warning" text={t(blockedKey)} /> : null}
           {errorText ? <Notice tone="danger" text={errorText} /> : null}
         </ScrollView>

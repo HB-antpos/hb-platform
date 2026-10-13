@@ -920,7 +920,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | `FaceMatch.Traffic.View` | 客流统计页（只有计数，没有任何生物信息）；非管理员只能看自己所属门店 |
 | `FaceMatch.Unwelcome.Manage` | 提交、查看、撤回不受欢迎人员名单条目（含参考照片上传）、录入申诉说明 |
 | `FaceMatch.Unwelcome.Approve` | 批准条目；非管理员的批准人必须不同于提交人，**管理员一个人批准即可生效**（可批准自己提交的条目） |
-| `FaceMatch.Unwelcome.Review` | 收到命中提示、两人复核、**服务端转发查看命中图与参考照片**（每次查看写持久审计）；非管理员只能处理自己所属门店的任务 |
+| `FaceMatch.Unwelcome.Review` | 收到命中提示、人工复核（一个人就够）、**服务端转发查看命中图与参考照片**（每次查看写持久审计）；非管理员只能处理自己所属门店的任务 |
 
 接口一览（`GET /config` 任一权限可读；`unwelcome/entries` 列表需 Manage 或 Approve；`unwelcome/stats` 需三个名单权限任一）：
 
@@ -934,7 +934,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | `GET /traffic?store&from&to` | 客流（按门店本地营业日；单日带分小时），**唯一访客数为估算** |
 | `GET /audit` | 持久审计查询 |
 | `GET/POST /unwelcome/entries`、`POST …/{id}/approve`、`…/withdraw`、`…/dispute-note` | 名单条目 |
-| `GET /unwelcome/tasks`、`POST …/{id}/review`、`GET …/{id}/image`、`GET …/{id}/reference/{index}` | 复核任务、两人复核、命中图、条目参考照片 |
+| `GET /unwelcome/tasks`、`POST …/{id}/review`、`GET …/{id}/image`、`GET …/{id}/reference/{index}` | 复核任务、一人复核、命中图、条目参考照片 |
 | `GET /unwelcome/stats` | 误报统计（按条目与相似度区间的驳回率） |
 
 ### 16.2 配置变量（服务器 `master-Vite/.env`，主 API 的 compose 环境变量）
@@ -1017,18 +1017,19 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 - **事件类别是枚举**：`ViolenceOrThreat`、`OrganisedOrRepeatTheft`、`Other`；**没有「一般偷窃」**。`Other` 必须填写说明；非管理员批准时需要**两位不同的批准人**（都不能是提交人），**管理员一个人批准即可**（2026-10-13 用户决定，见下）。
 - 证据引用必填（事件记录编号或警方报告编号，不填个人隐私细节）；到期日必填，**上限 12 个月**；到期前 30 天提醒复核；生效门店至少一个，非管理员只能为自己所属门店提交。
-- 流程：提交（Manage）→ 参考照片存私有桶 `face-match/unwelcome/{entryId}/`，**此时不会调用腾讯云** → 批准（Approve；非管理员须提交人 ≠ 批准人，**管理员一个人批准即可生效，可批准自己提交的条目，自批 / 单人批准在审计里记 `active;self-approved` / `active;admin-solo`**；命中后的两人复核**不受影响**）→
+- 流程：提交（Manage）→ 参考照片存私有桶 `face-match/unwelcome/{entryId}/`，**此时不会调用腾讯云** → 批准（Approve；非管理员须提交人 ≠ 批准人，**管理员一个人批准即可生效，可批准自己提交的条目，自批 / 单人批准在审计里记 `active;self-approved` / `active;admin-solo`**；命中后的复核另行规定（见 16.6，现在一个人就够）**不受影响**）→
   最后一位批准人通过时才读出参考照片、创建 `unwelcome` 人员库（幂等）并建人，条目变 Active。**批准要求至少一个生效门店已开启名单（`UnwelcomeListEnabled`，只看这个开关；专项评估 / 律师确认等记录缺口在门店档案里是警告，不在批准时拦截），否则 409 `FACE_MATCH_UNWELCOME_NOT_ENABLED`——开关没开，照片不会发往腾讯云。**
 - 撤回 / 到期：**先把状态改成 Withdrawn / Expired**（接收端只用 Active 条目，立即停止匹配），再 `DeletePerson` 并删参考照片；删不干净的（条目上 `cleanupPending=true`）由后台任务④继续重试，参考照片键清空即清理完成。
 - 申诉 / 更正：条目上有「申诉说明」（`dispute-note`）；被识别者查询或更正须在 30 天内处理，固定流程由门店 / 法务制定。
 
-### 16.6 命中提示与两人复核
+### 16.6 命中提示与一人复核
 
 - 接收端命中（相似度 ≥ 名单阈值）写 `FaceMatchTask`（`NotifiedAtUtc` 为空）。**接收端不能调用通知平台**；主 API 后台任务⑥轮询 `NotifiedAtUtc IS NULL` 的任务，提交后经通知平台发给**该店持有 `FaceMatch.Unwelcome.Review` 的人**，
   `DedupeKey = unwelcome-hit:{TaskId}`，**发布在业务事务之外**（通知发布器自带事务，不能被外层事务包住）、每条单独 try/catch，失败只记日志、下一轮重试。
-  文案固定：「疑似匹配（相似度 NN%），不是同一个人的概率，必须由两人人工确认」，不含姓名与事件细节。暂无接收人的任务在命中图到期前继续重试；已复核结束或图片已到期的直接标记已处理。
-- 复核页并排显示现场抓拍与条目参考照片，显示「相似度 NN%（不是同一个人的概率）」与「较高 / 一般」档位（后端按 `FACE_MATCH_UNWELCOME_HIGH_BAND_SCORE` 划分），**不显示姓名与事件细节**。
-- 两人复核：第一复核人「是同一个人」→ 等第二复核人；第二复核人**必须不同于第一人**；任何一方判断「不是」即 `Dismissed`，并把命中图提前到期（后台删除，只保留元数据与分数用于误报统计）；两人都确认 → `ConfirmedBySecondPerson`。
+  文案固定且**只用英文**（通知文案规则）：标题 `Possible match alert`，正文 `Possible match (similarity NN%). The score is not the probability that this is the same person; a reviewer must check it.`，不含姓名与事件细节。暂无接收人的任务在命中图到期前继续重试；已复核结束或图片已到期的直接标记已处理。
+- 复核页并排显示现场抓拍与条目参考照片，显示「相似度 NN%（不等于是同一个人的概率）」与「较高 / 一般」档位（后端按 `FACE_MATCH_UNWELCOME_HIGH_BAND_SCORE` 划分），**不显示姓名与事件细节**。
+- **复核一个人就够（2026-10-13 用户决定，原设计要两人）**：任何持有 Review 权限、在门店范围内的人判断一次即结案——「是同一个人」→ `Confirmed`（命中图按原保留期保留），「不是」→ `Dismissed`，并把命中图提前到期（后台删除，只保留元数据与分数用于误报统计）。不再有第二步，也不再要求第二人不同于第一人；接口 `nextStep` 只返回 `first` / `none`，错误码 `FACE_MATCH_SAME_REVIEWER` 不再产生。
+  **旧数据**：两人复核时代留下的「已一审、仍 Pending」任务，下一位复核人（含第一复核人本人）提交一次即结案，结案人写进 `SecondReviewerId`，审计 Result 为 `legacy-second:{verdict}`；新任务的审计 Result 为 `first:{verdict}`。
   **系统不自动拒绝服务、不自动通知警方**，店里怎么处置由门店流程与法务制定。命中图已被删除的任务不能再复核。
 - 看图（命中图 / 参考照片）：对象键只来自数据库、门店范围内才可见（越权与不存在共用 404）、仅持有 Review 权限者；**每次查看（含被拒绝的尝试）写持久审计**，且审计写不进去就不返回图片字节。
 - 误报统计：按条目的命中数 / 驳回率（已结束任务 ≥5 条且驳回率 ≥80% 提示复核该条目是否应出名单），以及按相似度每 5 分一档的驳回率，用于调阈值。
@@ -1123,7 +1124,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 - 表结构只由主 API 迁移 `20261014.001-face-match` 创建，列名、类型、可空性以设计 13.3 / 14.4 为准；未标可空的列都是 `NOT NULL`。主 API 额外加的列只有 `FaceUnwelcomeEntry.CategoryNote` / `SecondApprovedBy` / `SecondApprovedAtUtc`（接收端不读）。
 - 数值约定：`FaceStoreProfile.Mode` 0 Off / 1 Capture / 2 Match；`FaceUnwelcomeEntry.Status` 0 Pending / **1 Active** / 2 Expired / 3 Withdrawn（**接收端只能使用 Active 条目**）；`IncidentCategory` 1 / 2 / 3；
-  `FaceMatchTask.ReviewStatus` 0 Pending / 1 Dismissed / 2 ConfirmedBySecondPerson（接收端建任务时写 0，`NotifiedAtUtc` 留空，`ImageObjectKey` / `ImageDeleteAtUtc` 必填）；`FaceEnrollment.Status` 1 Active / 2 Withdrawn。
+  `FaceMatchTask.ReviewStatus` 0 Pending / 1 Dismissed / 2 Confirmed（接收端建任务时写 0，`NotifiedAtUtc` 留空，`ImageObjectKey` / `ImageDeleteAtUtc` 必填）；`FaceEnrollment.Status` 1 Active / 2 Withdrawn。
 - `FaceUnwelcomeEntry.StoreScope` 是英文逗号分隔、无空格的门店编码列表（如 `1013,2015`）；接收端命中后按 `TencentPersonId`（`uw_{EntryId}`）查条目，**条目不是 Active 或本店不在 StoreScope 内则忽略命中**。
 - 接收端读 `FaceStoreProfile` 时：`Mode=Match` 下员工排除、去重、名单**不再**要求 `CrossBorderRegion` 等于接收端配置的处理地域、审查三列非空、名单专项记录齐全（2026-10-13 起这些是警告）；缺失时接收端只按门店节流记一条 Warning（`match-without-legal-records`），功能照常运行。
   接收端仍保留的是功能前提：匹配可用、名单需要私有 COS、去重需要可解析的时区。主 API 的后台任务⑦只清空地域不符的审查记录，不再关闭档案。
