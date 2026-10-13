@@ -19,8 +19,11 @@ internal static class PromotionBundleAllocator
 {
     /// <summary>
     /// 计算一组的折扣并累加到 <paramref name="discountsByLine"/>。
-    /// getRemainingCapacity 返回某行还能再吃多少折扣（新引擎 = 行原价 - 已分摊折扣）；
-    /// 传 null 表示不按行封顶（旧引擎：多条规则先累加，最后由调用方整体截断到行原价，叠加封顶差异 D3 暂不统一）。
+    /// getRemainingCapacity 返回某行还能再吃多少折扣（新引擎、共享挂单重演 = 行原价 - 已累计折扣）；
+    /// 传 null 表示入账时不按行截断（旧引擎：多条规则先累加，最后由调用方整体截断到行原价）。
+    /// 叠加封顶（D3）三处口径一致：超出行原价的份额直接丢弃，不转给其它还有容量的行，
+    /// 逐行份额始终按「未封顶」口径算出，容量只决定入账多少。
+    /// 因此传容量等价于旧引擎的「先累加、再截断到行原价」：min(原价, min(原价, a) + b) = min(原价, a + b)。
     /// </summary>
     internal static void AllocateBundle<TLine>(
         IReadOnlyList<PromotionBundleUnit<TLine>> selectedUnits,
@@ -58,18 +61,16 @@ internal static class PromotionBundleAllocator
             return;
         }
 
-        // 已经没有折扣容量的行不再分摊；容量只在组开始时取一次（每行在一个组里只出现一次，循环中不会变）。
+        // 叠加封顶（D3）：已封顶的行仍占着它的份额和分母，超出行原价的部分丢弃（见方法注释），
+        // 既不把这一行从分母里剔除，也不把它的份额转给别的行——这与旧引擎（不传容量、最后统一截断到行原价）口径一致；
+        // 若剔除/转移，同一购物车在新旧引擎里的逐行折扣与总折扣就会不同。
+        // 容量只在组开始时取一次（每行在一个组里只出现一次，循环中不会变）。
         var candidates = groupedLines
             .Select(line => (Line: line, Capacity: getRemainingCapacity?.Invoke(line.Line) ?? decimal.MaxValue))
-            .Where(candidate => candidate.Capacity > 0m)
             .OrderBy(candidate => candidate.Line.SortOrder)
             .ToArray();
-        if (candidates.Length == 0)
-        {
-            return;
-        }
 
-        // 逐行分摊：每行按「剩余折扣 × 本行金额 / 剩余行金额」取整，最后一行吃掉余数，保证总折扣不变。
+        // 逐行分摊：每行按「剩余折扣 × 本行金额 / 剩余行金额」取整，最后一行吃掉余数，保证未封顶时总折扣不变。
         // 分母随已分摊的行递减（而不是始终用整组原价），与 iPad 的 pricing-cart.ts 一致；
         // Amount 均已舍入到分，递减与逐轮重新求和结果相同，且避免 O(n²)。
         var remainingDiscount = groupDiscount;
@@ -82,16 +83,19 @@ internal static class PromotionBundleAllocator
                 break;
             }
 
-            var lineDiscount = index == candidates.Length - 1
+            var share = index == candidates.Length - 1
                 ? remainingDiscount
                 : Round2(remainingDiscount * line.Amount / remainingAmount);
-            lineDiscount = Math.Clamp(lineDiscount, 0m, Math.Min(remainingDiscount, capacity));
-            if (lineDiscount > 0m)
+            share = Math.Clamp(share, 0m, remainingDiscount);
+            remainingDiscount -= share;
+
+            // 入账 = 份额与剩余容量取小，超出容量的部分直接丢弃。
+            var applied = Math.Min(share, Math.Max(0m, capacity));
+            if (applied > 0m)
             {
                 discountsByLine[line.Line] = discountsByLine.TryGetValue(line.Line, out var currentDiscount)
-                    ? Round2(currentDiscount + lineDiscount)
-                    : lineDiscount;
-                remainingDiscount -= lineDiscount;
+                    ? Round2(currentDiscount + applied)
+                    : applied;
             }
 
             remainingAmount = Round2(remainingAmount - line.Amount);

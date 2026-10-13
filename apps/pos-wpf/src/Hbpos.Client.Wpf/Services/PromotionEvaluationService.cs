@@ -82,7 +82,8 @@ public sealed class PromotionEvaluationService(ILocalPromotionRepository localPr
         // 所有选中规则先统一预检；任一超限都不允许留下部分自动促销结果。
         PromotionComputationBudget.EnsureOrderLimit(plans.Select(plan => plan.Budget));
         var discountsByLine = new Dictionary<CartLine, decimal>();
-        // 折扣容量 = 行原价 - 该行已累计的自动促销折扣；多条规则叠加不得超过行原价（D3：超出部分转给还有容量的行）。
+        // 折扣容量 = 行原价 - 该行已累计的自动促销折扣；多条规则叠加不得超过行原价。
+        // D3：超出容量的份额直接丢弃，不转给其它还有容量的行（与旧引擎「先累加、再截断到行原价」同口径）。
         Func<CartLine, decimal> getRemainingCapacity =
             line => GetRemainingLineDiscountCapacity(discountsByLine, line);
 
