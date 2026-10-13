@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Data;
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
 using BlazorApp.Shared.Helper;
@@ -91,6 +92,9 @@ public interface ICatalogService
         string? lookupCodeNormalized,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 特殊商品分页，实时读库，不经过整店目录缓存工件；门店不存在或已停用时返回 null。
+    /// </summary>
     Task<CatalogSpecialProductsPageResponse?> GetSpecialProductsPageAsync(
         string storeCode,
         string? cursor,
@@ -199,6 +203,15 @@ public sealed class CatalogService(
 
     internal static int StoreRetailPriceEnsureLockIndex(string key) =>
         (int)((uint)StringComparer.Ordinal.GetHashCode(key) % StoreRetailPriceEnsureLockStripes);
+
+    // 特殊商品实时查询单条 IN 的取值个数上限：SQL Server 单条命令最多 2100 个参数，留足余量。
+    private const int SpecialProductsQueryChunkSize = 500;
+
+    // 特殊商品实时查询的进程内并发上限：只为保护数据库连接池（同库还承载订单同步等写入），
+    // 超出时异步排队、不占连接，也不抛 CatalogCapacityBusyException，接口契约保持不变。
+    private const int SpecialProductsLiveQueryConcurrency = 8;
+    private static readonly SemaphoreSlim SpecialProductsLiveQueryGate =
+        new(SpecialProductsLiveQueryConcurrency, SpecialProductsLiveQueryConcurrency);
 
     public CatalogService(
         HbposSqlSugarContext dbContext,
@@ -849,14 +862,366 @@ public sealed class CatalogService(
         return new CatalogDirectLookupResult(response, matchedProduct);
     }
 
+    /// <summary>
+    /// 特殊商品分页（实时）：每次直接读库，不经过整店目录缓存工件（CatalogIndexCache），
+    /// 也不触发整店目录构建，因此后台管理、其他服务或直接改库造成的特殊商品/价格变化下一次请求即可见。
+    /// 结果与目录工件算出的特殊商品逐项一致：价格解析、同码决胜、按商品去重、排序与游标全部复用
+    /// <see cref="PriceIndexBuilder"/> 和 <see cref="CatalogSellableIndex.GetSpecialProductsPage"/>，
+    /// 这里只负责把输入收窄为“特殊商品及其同码竞争者”。游标仍是末项的 LookupCodeNormalized（严格大于续页），
+    /// 属于稳定排序键的 keyset 游标：翻页期间数据变化不会崩，只可能让本轮漏掉/多出变化的那几条，下次下载自愈。
+    /// </summary>
     public async Task<CatalogSpecialProductsPageResponse?> GetSpecialProductsPageAsync(
         string storeCode,
         string? cursor,
         int pageSize,
         CancellationToken cancellationToken)
     {
-        var index = await BuildSellableIndexAsync(storeCode, since: null, cancellationToken);
-        return index?.CatalogIndex.GetSpecialProductsPage(cursor, pageSize);
+        var totalStopwatch = Stopwatch.StartNew();
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        await SpecialProductsLiveQueryGate.WaitAsync(cancellationToken);
+        try
+        {
+            // 与目录工件相同：多条查询放在同一个 SNAPSHOT 事务里，读到的是同一时点的已提交数据，
+            // 不会读到管理端写了一半的数据（也不会因 NOLOCK 脏读）。
+            var index = await RunCatalogSnapshotReadAsync(
+                token => BuildSpecialProductsIndexAsync(normalizedStoreCode, token),
+                cancellationToken);
+            var response = index?.GetSpecialProductsPage(cursor, pageSize);
+            Log($"special products live completed store={normalizedStoreCode} found={index is not null} items={response?.Items.Count.ToString(CultureInfo.InvariantCulture) ?? "<null>"} total={response?.TotalCount.ToString(CultureInfo.InvariantCulture) ?? "<null>"} hasMore={response?.HasMore.ToString() ?? "<null>"} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return response;
+        }
+        finally
+        {
+            SpecialProductsLiveQueryGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 为特殊商品实时查询构建收窄后的目录索引；门店不存在或已停用返回 null。
+    /// 目录工件里一行是否进入特殊商品列表取决于两件事：商品在本店最新一条有效门店价是否带特殊标记，
+    /// 以及该行的查询码（条码/货号）在“全店所有来源”的同码决胜中是否胜出（清货码、多码、套装码、
+    /// 其他商品的条码货号都可能压过它）。因此除特殊商品自身外，还要取出与它们查询码相同的全部竞争行，
+    /// 再交给同一个 PriceIndexBuilder 决胜；与这些码无关的数据一概不读。
+    /// </summary>
+    private async Task<CatalogSellableIndex?> BuildSpecialProductsIndexAsync(
+        string normalizedStoreCode,
+        CancellationToken cancellationToken)
+    {
+        var totalStopwatch = Stopwatch.StartNew();
+        var db = dbContext.MainDb;
+
+        // 事务内的所有读取都要 With(SqlWith.Null) 去掉全局 NOLOCK：表提示会覆盖 SNAPSHOT 隔离级别。
+        var store = await db.Queryable<Store>()
+            .With(SqlWith.Null)
+            .FirstAsync(x => x.StoreCode == normalizedStoreCode && x.IsActive && !x.IsDeleted, cancellationToken);
+        if (store is null)
+        {
+            Log($"special products live store not found store={normalizedStoreCode} elapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return null;
+        }
+
+        // 第 1 步：本店带特殊标记的商品编码。这是超集——目录工件按“最新一条有效门店价”判定特殊，
+        // 下一步会取出这些商品的全部有效门店价行，由 PriceIndexBuilder 按同样规则裁决，宁多查不漏。
+        var flaggedProductCodes = (await db.Queryable<StoreRetailPrice>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    x.StoreCode == normalizedStoreCode &&
+                    x.IsActive &&
+                    !x.IsDeleted &&
+                    x.ProductCode != null &&
+                    x.IsSpecialProduct)
+                .Select(x => x.ProductCode)
+                .ToListAsync(cancellationToken))
+            .Where(HasText)
+            .Select(x => x!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        if (flaggedProductCodes.Length == 0)
+        {
+            Log($"special products live no flagged products store={store.StoreCode} elapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            return new CatalogSellableIndex(store.StoreCode, DateTimeOffset.UtcNow, []);
+        }
+
+        // 第 2 步：这些商品在本店全部有效门店价行（价格、折扣率、更新时间、特殊标记都由最新一行决定）。
+        var flaggedStorePrices = await QueryInChunksAsync(
+            flaggedProductCodes,
+            chunk => db.Queryable<StoreRetailPrice>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    x.StoreCode == normalizedStoreCode &&
+                    x.IsActive &&
+                    !x.IsDeleted &&
+                    x.ProductCode != null &&
+                    chunk.Contains(x.ProductCode))
+                .OrderBy(x => x.ProductCode)
+                .OrderBy(x => x.UUID)
+                .Select(x => new StoreRetailPrice
+                {
+                    ProductCode = x.ProductCode,
+                    StoreRetailPriceValue = x.StoreRetailPriceValue,
+                    UpdatedAt = x.UpdatedAt,
+                    CreatedAt = x.CreatedAt,
+                    UUID = x.UUID,
+                    DiscountRate = x.DiscountRate,
+                    IsSpecialProduct = x.IsSpecialProduct
+                })
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+
+        // 第 3 步：商品档案。口径与目录基础数据一致：只排除已删除商品，停用商品门店仍可销售。
+        var flaggedProducts = await QueryInChunksAsync(
+            flaggedProductCodes,
+            chunk => db.Queryable<Product>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    !x.IsDeleted &&
+                    x.ProductCode != null &&
+                    x.UUID != null &&
+                    chunk.Contains(x.ProductCode))
+                .Select(ProductSnapshotColumns)
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+
+        // 第 4 步：特殊商品的条码、货号就是它们会参与同码决胜的查询码。
+        // 同时带上原样/去空白/大写/小写四种写法，兼容区分大小写的库；生产库（不区分大小写）下重复值无副作用。
+        var lookupVariants = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var product in flaggedProducts)
+        {
+            AddLookupVariants(lookupVariants, product.Barcode);
+            AddLookupVariants(lookupVariants, product.ItemNumber);
+        }
+
+        var lookupVariantArray = lookupVariants.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+
+        // 第 5 步：与这些查询码相同的其他来源，筛选条件与目录构建一致。
+        // 价格来源等级 清货价(4) > 多码(3) > 套装码(2) > 分店零售价(1) > 商品主档(0)：特殊行只会是 1 或 0，
+        // 所以清货码、多码、套装码只要存在就必然压过它，这三类只需取出行本身，不必再带它们的价格、套装关联的多码等；
+        // 只有同为商品条码/货号的竞争行才要比价格来源和更新时间，下面单独带上其商品与门店价。
+        var clearanceEntities = await QueryInChunksAsync(
+            lookupVariantArray,
+            chunk => db.Queryable<StoreClearancePrice>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    x.StoreCode == normalizedStoreCode &&
+                    !x.IsDeleted &&
+                    x.ClearanceBarcode != null &&
+                    chunk.Contains(x.ClearanceBarcode))
+                .Select(x => new StoreClearancePrice
+                {
+                    ProductCode = x.ProductCode,
+                    ClearanceBarcode = x.ClearanceBarcode,
+                    ClearancePrice = x.ClearancePrice,
+                    UpdatedAt = x.UpdatedAt,
+                    CreatedAt = x.CreatedAt,
+                    UUID = x.UUID
+                })
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+
+        var multiCodeEntities = await QueryInChunksAsync(
+            lookupVariantArray,
+            chunk => db.Queryable<StoreMultiCodeProduct>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    x.StoreCode == normalizedStoreCode &&
+                    x.IsActive &&
+                    !x.IsDeleted &&
+                    x.MultiBarcode != null &&
+                    chunk.Contains(x.MultiBarcode))
+                .Select(x => new StoreMultiCodeProduct
+                {
+                    ProductCode = x.ProductCode,
+                    MultiCodeProductCode = x.MultiCodeProductCode,
+                    MultiBarcode = x.MultiBarcode,
+                    MultiCodeRetailPrice = x.MultiCodeRetailPrice,
+                    UpdatedAt = x.UpdatedAt,
+                    CreatedAt = x.CreatedAt,
+                    UUID = x.UUID,
+                    DiscountRate = x.DiscountRate
+                })
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+
+        var setCodeEntities = await QueryInChunksAsync(
+            lookupVariantArray,
+            chunk => db.Queryable<ProductSetCode>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    x.IsActive &&
+                    !x.IsDeleted &&
+                    x.SetBarcode != null &&
+                    chunk.Contains(x.SetBarcode))
+                .Select(x => new ProductSetCode
+                {
+                    ProductCode = x.ProductCode,
+                    SetProductCode = x.SetProductCode,
+                    SetBarcode = x.SetBarcode,
+                    SetRetailPrice = x.SetRetailPrice,
+                    UpdatedAt = x.UpdatedAt,
+                    CreatedAt = x.CreatedAt,
+                    SetCodeId = x.SetCodeId
+                })
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+
+        // 其他商品的条码/货号撞了特殊商品的查询码：它们的门店价决定其价格来源和更新时间，也要一起带上。
+        var competitorProducts = await QueryInChunksAsync(
+            lookupVariantArray,
+            chunk => db.Queryable<Product>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    !x.IsDeleted &&
+                    x.ProductCode != null &&
+                    x.UUID != null &&
+                    ((x.Barcode != null && chunk.Contains(x.Barcode)) ||
+                     (x.ItemNumber != null && chunk.Contains(x.ItemNumber))))
+                .Select(ProductSnapshotColumns)
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+        var loadedPriceProductCodes = new HashSet<string>(flaggedProductCodes, StringComparer.OrdinalIgnoreCase);
+        var competitorPriceProductCodes = competitorProducts
+            .Select(x => x.ProductCode)
+            .Where(HasText)
+            .Select(x => x!)
+            .Where(x => !loadedPriceProductCodes.Contains(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        var competitorStorePrices = await QueryInChunksAsync(
+            competitorPriceProductCodes,
+            chunk => db.Queryable<StoreRetailPrice>()
+                .With(SqlWith.Null)
+                .Where(x =>
+                    x.StoreCode == normalizedStoreCode &&
+                    x.IsActive &&
+                    !x.IsDeleted &&
+                    x.ProductCode != null &&
+                    chunk.Contains(x.ProductCode))
+                .OrderBy(x => x.ProductCode)
+                .OrderBy(x => x.UUID)
+                .Select(x => new StoreRetailPrice
+                {
+                    ProductCode = x.ProductCode,
+                    StoreRetailPriceValue = x.StoreRetailPriceValue,
+                    UpdatedAt = x.UpdatedAt,
+                    CreatedAt = x.CreatedAt,
+                    UUID = x.UUID,
+                    DiscountRate = x.DiscountRate,
+                    IsSpecialProduct = x.IsSpecialProduct
+                })
+                .ToListAsync(cancellationToken),
+            cancellationToken);
+
+        // 同一行可能被不同写法的查询码（大小写）重复命中，按主键去重；
+        // 商品按 (ProductCode, UUID) 排序，使同码、同价格来源、同更新时间的平局尽量与整店构建的读取顺序一致。
+        var input = new PriceIndexInput(
+            Since: null,
+            flaggedProducts
+                .Concat(competitorProducts)
+                .DistinctBy(x => x.UUID, StringComparer.Ordinal)
+                .OrderBy(x => x.ProductCode, StringComparer.Ordinal)
+                .ThenBy(x => x.UUID, StringComparer.Ordinal)
+                .Select(x => new ProductPriceRecord(
+                    x.ProductCode,
+                    x.ProductName,
+                    x.ItemNumber,
+                    x.Barcode,
+                    x.RetailPrice,
+                    ToOffset(x.UpdatedAt ?? x.CreatedAt),
+                    x.ProductImage,
+                    x.UUID))
+                .ToList(),
+            flaggedStorePrices
+                .Concat(competitorStorePrices)
+                .DistinctBy(x => x.UUID, StringComparer.Ordinal)
+                .Select(x => new StoreRetailPriceRecord(
+                    x.ProductCode,
+                    x.StoreRetailPriceValue,
+                    ToOffset(x.UpdatedAt ?? x.CreatedAt),
+                    x.UUID,
+                    x.DiscountRate,
+                    x.IsSpecialProduct))
+                .ToList(),
+            multiCodeEntities
+                .DistinctBy(x => x.UUID, StringComparer.Ordinal)
+                .Select(x => new StoreMultiCodeProductRecord(
+                    x.ProductCode,
+                    x.MultiCodeProductCode,
+                    x.MultiBarcode,
+                    x.MultiCodeRetailPrice,
+                    ToOffset(x.UpdatedAt ?? x.CreatedAt),
+                    x.UUID,
+                    x.DiscountRate))
+                .ToList(),
+            clearanceEntities
+                .DistinctBy(x => x.UUID, StringComparer.Ordinal)
+                .Select(x => new StoreClearancePriceRecord(
+                    x.ProductCode,
+                    x.ClearanceBarcode,
+                    x.ClearancePrice,
+                    ToOffset(x.UpdatedAt ?? x.CreatedAt),
+                    x.UUID))
+                .ToList(),
+            setCodeEntities
+                .DistinctBy(x => x.SetCodeId, StringComparer.Ordinal)
+                .Select(x => new ProductSetCodeRecord(
+                    x.ProductCode,
+                    x.SetProductCode,
+                    x.SetBarcode,
+                    x.SetRetailPrice,
+                    ToOffset(x.UpdatedAt ?? x.CreatedAt),
+                    x.SetCodeId))
+                .ToList());
+
+        var generatedAt = DateTimeOffset.UtcNow;
+        var items = priceIndexBuilder.Build(store.StoreCode, input);
+        Log($"special products live index built store={store.StoreCode} flaggedProducts={flaggedProductCodes.Length} products={input.Products.Count} storePrices={input.StoreRetailPrices.Count} lookupVariants={lookupVariantArray.Length} clearance={input.StoreClearancePrices.Count} multiCodes={input.StoreMultiCodeProducts.Count} setCodes={input.ProductSetCodes.Count} items={items.Count} elapsedMs={totalStopwatch.ElapsedMilliseconds}");
+        return new CatalogSellableIndex(store.StoreCode, generatedAt, items);
+    }
+
+    // 与目录构建读取商品时相同的列投影；SqlSugar 需要表达式树，不能写成普通方法调用。
+    private static readonly Expression<Func<Product, Product>> ProductSnapshotColumns = x => new Product
+    {
+        ProductCode = x.ProductCode,
+        ProductName = x.ProductName,
+        ItemNumber = x.ItemNumber,
+        Barcode = x.Barcode,
+        RetailPrice = x.RetailPrice,
+        UpdatedAt = x.UpdatedAt,
+        CreatedAt = x.CreatedAt,
+        ProductImage = x.ProductImage,
+        UUID = x.UUID
+    };
+
+    private static void AddLookupVariants(HashSet<string> variants, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var trimmed = value.Trim();
+        variants.Add(value);
+        variants.Add(trimmed);
+        variants.Add(trimmed.ToUpperInvariant());
+        variants.Add(trimmed.ToLowerInvariant());
+    }
+
+    /// <summary>把取值按固定大小分块依次查询并合并结果，避免 IN 超出 SQL Server 的参数个数上限。</summary>
+    private static async Task<List<T>> QueryInChunksAsync<T>(
+        string[] values,
+        Func<string[], Task<List<T>>> queryAsync,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<T>();
+        foreach (var chunk in values.Chunk(SpecialProductsQueryChunkSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            results.AddRange(await queryAsync(chunk));
+        }
+
+        return results;
     }
 
     public async Task<CatalogCodeConflictsResponse?> GetCodeConflictsAsync(
