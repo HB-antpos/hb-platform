@@ -79,38 +79,42 @@ public sealed class FaceStoreProfileTests : IDisposable
     // ---------- Capture ----------
 
     [Fact]
-    public async Task Capture模式必填AllowedSubjects()
+    public async Task Capture模式缺AllowedSubjects只给警告_仍可保存_声明后警告消失()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Capture), FaceMatchTestHarness.Admin));
+        var withoutSubjects = await _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Capture), FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "capture", "allowedSubjects");
-        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
+        Assert.Equal(FaceStoreMode.Capture, withoutSubjects.Mode);
+        AssertWarned(withoutSubjects, "capture", "allowedSubjects");
 
         var saved = await _h.Profiles.UpdateAsync(
             Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "仅内部测试员工"), FaceMatchTestHarness.Admin);
         Assert.Equal(FaceStoreMode.Capture, saved.Mode);
         Assert.Equal("仅内部测试员工", saved.AllowedSubjects);
+        Assert.Empty(saved.Gates.Facets.Single(f => f.Facet == "capture").Warnings);
     }
 
     [Fact]
-    public async Task 评估匹配只允许在Capture模式下()
+    public async Task 评估匹配在非Capture模式下只给警告_Capture下没有警告()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, Req(evaluateMatch: true), FaceMatchTestHarness.Admin));
+        var off = await _h.Profiles.UpdateAsync(Qld, Req(evaluateMatch: true), FaceMatchTestHarness.Admin);
+        Assert.True(off.EvaluateMatch);
+        AssertWarned(off, "capture", "evaluateMatchRequiresCapture");
 
-        AssertMissing(ex, "capture", "evaluateMatchRequiresCapture");
         var saved = await _h.Profiles.UpdateAsync(
             Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", evaluateMatch: true), FaceMatchTestHarness.Admin);
         Assert.True(saved.EvaluateMatch);
+        Assert.Empty(saved.Gates.Facets.Single(f => f.Facet == "capture").Warnings);
     }
 
     [Fact]
-    public async Task 评估匹配在Match模式下仍然阻塞_这是功能前提不是合规记录()
+    public async Task 评估匹配在Match模式下可以保存_只给警告_提示它在Match下不会执行()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, MatchRequest() with { EvaluateMatch = true }, FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(Qld, MatchRequest() with { EvaluateMatch = true }, FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "capture", "evaluateMatchRequiresCapture");
-        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
+        Assert.Equal(FaceStoreMode.Match, saved.Mode);
+        Assert.True(saved.EvaluateMatch);
+        AssertWarned(saved, "capture", "evaluateMatchRequiresCapture");
+        Assert.Single(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
     }
 
     [Fact]
@@ -233,32 +237,27 @@ public sealed class FaceStoreProfileTests : IDisposable
     }
 
     [Fact]
-    public async Task 检查接口对仍然阻塞的项照常报缺项_CanSave为false()
+    public async Task 检查接口对原来阻塞的项也只报警告_CanSave恒为true()
     {
         var report = await _h.Profiles.CheckAsync(Qld, Req(mode: FaceStoreMode.Capture));
 
-        Assert.False(report.CanSave);
-        Assert.False(report.HasWarnings);
-        Assert.Equal(["allowedSubjects"], report.Facets.Single(f => f.Facet == "capture").Missing);
+        Assert.True(report.CanSave);
+        Assert.True(report.HasWarnings);
+        var capture = report.Facets.Single(f => f.Facet == "capture");
+        Assert.Empty(capture.Missing);
+        Assert.Equal(["allowedSubjects"], capture.Warnings);
     }
 
     [Fact]
-    public async Task 阻塞项和警告同时存在时_409的details里两者都带上()
+    public async Task 员工排除没有登记在Match下也只给警告_与合规记录缺口一并列出()
     {
-        // Match + 员工排除：没有有效登记（阻塞），同时 Match 的合规记录也没填（警告）。
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, staff: true), FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Match, staff: true), FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "staffExclusion", "activeEnrollment");
-        var report = Assert.IsType<FaceGateReportDto>(ex.Details);
-        Assert.True(report.HasWarnings);
-        Assert.NotEmpty(report.Facets.Single(f => f.Facet == "match").Warnings);
-        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
-        // 被拒绝的保存照旧进审计，且不带 warnings。
-        Assert.Equal("gate-not-met", Assert.Single(await _h.Db.Queryable<FaceAuditLog>().ToListAsync()).Result);
+        Assert.True(saved.Gates.CanSave);
+        AssertWarned(saved, "staffExclusion", "activeEnrollment");
+        Assert.NotEmpty(saved.Gates.Facets.Single(f => f.Facet == "match").Warnings);
+        Assert.Single(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
     }
-
-    // ---------- NSW ----------
 
     [Fact]
     public async Task NSW门店Match模式缺员工通知日期_只是警告_QLD门店同样的材料没有这条警告()
@@ -407,18 +406,20 @@ public sealed class FaceStoreProfileTests : IDisposable
     // ---------- 员工排除 ----------
 
     [Fact]
-    public async Task 员工排除需要门店成员里存在有效的同意与登记()
+    public async Task 员工排除没有有效的同意与登记时只给警告_登记后警告消失()
     {
         var request = Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", staff: true);
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin));
-        AssertMissing(ex, "staffExclusion", "activeEnrollment");
+        var early = await _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin);
+        Assert.True(early.StaffExclusionEnabled);
+        AssertWarned(early, "staffExclusion", "activeEnrollment");
 
         _h.Database.AddUser("u-1", "Alice", "s-1013");
         SeedEnrollment("u-1", withdrawnConsent: false);
 
         var saved = await _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin);
         Assert.True(saved.StaffExclusionEnabled);
+        Assert.Empty(saved.Gates.Facets.Single(f => f.Facet == "staffExclusion").Warnings);
     }
 
     [Fact]
@@ -429,10 +430,10 @@ public sealed class FaceStoreProfileTests : IDisposable
         SeedEnrollment("u-1", withdrawnConsent: true);
         SeedEnrollment("u-2", withdrawnConsent: false);
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(
-            Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", staff: true), FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Capture, allowedSubjects: "内部", staff: true), FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "staffExclusion", "activeEnrollment");
+        AssertWarned(saved, "staffExclusion", "activeEnrollment");
     }
 
     [Fact]
@@ -453,22 +454,23 @@ public sealed class FaceStoreProfileTests : IDisposable
     [InlineData("staff")]
     [InlineData("dedup")]
     [InlineData("unwelcome")]
-    public async Task 三个开关在Off下仍然阻塞_modeOff是功能前提(string toggle)
+    public async Task 三个开关在Off下只给警告_仍可保存_提示它们不会生效(string toggle)
     {
         var request = Req(staff: toggle == "staff", dedup: toggle == "dedup", unwelcome: toggle == "unwelcome");
 
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(Qld, request, FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, toggle switch { "staff" => "staffExclusion", "dedup" => "trafficDedup", _ => "unwelcome" }, "modeOff");
-        Assert.Empty(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
+        Assert.Equal(FaceStoreMode.Off, saved.Mode);
+        AssertWarned(saved, toggle switch { "staff" => "staffExclusion", "dedup" => "trafficDedup", _ => "unwelcome" }, "modeOff");
+        Assert.Single(await _h.Db.Queryable<FaceStoreProfile>().ToListAsync());
     }
 
     [Fact]
-    public async Task 开关要求模式不是Off()
+    public async Task 开关要求模式不是Off_否则只给警告()
     {
-        var ex = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Profiles.UpdateAsync(Qld, Req(dedup: true), FaceMatchTestHarness.Admin));
+        var saved = await _h.Profiles.UpdateAsync(Qld, Req(dedup: true), FaceMatchTestHarness.Admin);
 
-        AssertMissing(ex, "trafficDedup", "modeOff");
+        AssertWarned(saved, "trafficDedup", "modeOff");
     }
 
     // ---------- 去重 ----------
@@ -555,15 +557,14 @@ public sealed class FaceStoreProfileTests : IDisposable
     }
 
     [Fact]
-    public async Task 名单开关在Capture下仍要求声明内部知情人员_Off下不能开()
+    public async Task 名单开关在Capture下缺允许对象或在Off下_只给警告_仍可保存()
     {
-        var noSubjects = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Capture, unwelcome: true), FaceMatchTestHarness.Admin));
-        AssertMissing(noSubjects, "capture", "allowedSubjects");
+        var noSubjects = await _h.Profiles.UpdateAsync(
+            Qld, Req(mode: FaceStoreMode.Capture, unwelcome: true), FaceMatchTestHarness.Admin);
+        AssertWarned(noSubjects, "capture", "allowedSubjects");
 
-        var off = await Assert.ThrowsAsync<FaceMatchException>(
-            () => _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Off, unwelcome: true), FaceMatchTestHarness.Admin));
-        AssertMissing(off, "unwelcome", "modeOff");
+        var off = await _h.Profiles.UpdateAsync(Qld, Req(mode: FaceStoreMode.Off, unwelcome: true), FaceMatchTestHarness.Admin);
+        AssertWarned(off, "unwelcome", "modeOff");
     }
 
     [Fact]
@@ -694,17 +695,15 @@ public sealed class FaceStoreProfileTests : IDisposable
         PrivacyContact = "Orion Privacy Officer",
     };
 
-    /// <summary>断言 409 闸门错误里指定项缺了指定键，返回该项完整缺项列表。</summary>
-    private static IReadOnlyList<string> AssertMissing(FaceMatchException ex, string facet, string key)
+    /// <summary>断言保存成功（CanSave）且指定项带有指定键的警告：所有闸门现在都只给提示，不拦截（用户 2026-10-13 决定）。</summary>
+    private static void AssertWarned(FaceStoreProfileDto saved, string facet, string key)
     {
-        Assert.Equal(409, ex.StatusCode);
-        Assert.Equal("FACE_MATCH_GATE_NOT_MET", ex.Code);
-        var report = Assert.IsType<FaceGateReportDto>(ex.Details);
-        Assert.False(report.CanSave);
-        var item = report.Facets.Single(f => f.Facet == facet);
+        Assert.True(saved.Gates.CanSave);
+        Assert.True(saved.Gates.HasWarnings);
+        var item = saved.Gates.Facets.Single(f => f.Facet == facet);
         Assert.True(item.Requested);
-        Assert.Contains(key, item.Missing);
-        return item.Missing;
+        Assert.Empty(item.Missing);
+        Assert.Contains(key, item.Warnings);
     }
 
     private void SeedEnrollment(string userGuid, bool withdrawnConsent)
