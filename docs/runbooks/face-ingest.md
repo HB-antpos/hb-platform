@@ -895,6 +895,216 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
   **日志里没有对象键、COS 地址、桶名、密钥、签名**。检索方式：`docker logs <hb-api 容器> 2>&1 | grep "人脸抓拍图片查看审计"`。
 - Information 级别默认不进中心日志，只在容器日志里，容器重建后会丢；Warning 会进中心日志。**生物信息查看建议后续补持久化审计表**（谁、何时、看了哪张），目前不具备长期追溯能力，权限授予要从严。
 
+## 16. 人脸比对：管理端
+
+设计依据：`docs/design/face-matching-service-20261012.md` 第 13、14、15 节。本节只讲**主 API + Web 后台**这一侧（门店档案与闸门、员工同意与登记、客流统计、不受欢迎人员名单、复核、后台任务）；
+人脸接收服务里的「按档案模式搜索、建访客、写计数」是另一侧，见接收端自己的章节。**整套功能默认全部关闭**：没有门店档案、没有腾讯云管理凭据时，新代码上线不改变任何现有行为（摄像机后台、查看抓拍图片、Capture 试点都照旧）。
+
+> 合规提醒（不是法律意见）：闸门只是**记录**，不能替代法律判断。对真实顾客运行（Match 模式、顾客去重、不受欢迎人员名单）前，隐私影响评估、门口告示、律师确认、跨境披露审查必须真实完成；
+> 默认处理地域是中国大陆（`ap-guangzhou`），每张送检人脸（包括没匹配上的顾客）都在大陆处理，这是比新加坡更重的跨境披露【待律师确认】。
+
+### 16.1 入口、权限与接口
+
+| 项目 | 值 |
+| --- | --- |
+| 页面 | Web 后台 → 系统 → **人脸比对**，路由 `/system/face-match`；页签按权限显示：门店档案、员工同意与登记、客流统计、不受欢迎人员名单、复核任务、误报统计、审计 |
+| 接口 | `/api/react/v1/face-match/...`，所有响应 `Cache-Control: no-store`；图片只经服务端转发（`Content-Type` 只会是 `image/jpeg` / `image/png`，`nosniff`），浏览器永远拿不到 COS 地址 |
+| 管理员 | Admin 角色靠角色放行；下面五个权限**都不挂任何角色模板**，其他账号只有被管理员在「角色管理」里显式授予才可见，五个码互相独立 |
+
+| 权限码 | 能做什么 |
+| --- | --- |
+| `FaceMatch.Manage` | 门店档案与闸门、员工同意（含同意书扫描件）、员工登记与撤回、审计查询 |
+| `FaceMatch.Traffic.View` | 客流统计页（只有计数，没有任何生物信息）；非管理员只能看自己所属门店 |
+| `FaceMatch.Unwelcome.Manage` | 提交、查看、撤回不受欢迎人员名单条目（含参考照片上传）、录入申诉说明 |
+| `FaceMatch.Unwelcome.Approve` | 批准条目；批准人必须不同于提交人 |
+| `FaceMatch.Unwelcome.Review` | 收到命中提示、两人复核、**服务端转发查看命中图与参考照片**（每次查看写持久审计）；非管理员只能处理自己所属门店的任务 |
+
+接口一览（`GET /config` 任一权限可读；`unwelcome/entries` 列表需 Manage 或 Approve；`unwelcome/stats` 需三个名单权限任一）：
+
+| 方法与路径 | 说明 |
+| --- | --- |
+| `GET /config` | 功能开关（`enabled` / `disabledReason`）、当前处理地域、私有桶是否已配置、`highBandScore`、本账号权限标志 |
+| `GET /profiles`、`GET/PUT /profiles/{storeCode}`、`POST /profiles/{storeCode}/check` | 门店档案；PUT 做全部闸门校验；check 只算「缺哪一项」不保存 |
+| `GET /staff?storeCode=` | 该门店的启用员工（登记用候选） |
+| `GET/POST /consents`、`POST /consents/{id}/withdraw` | 同意记录（multipart，文件字段 `scan`）与撤回 |
+| `GET/POST /enrollments`、`POST /enrollments/{id}/withdraw` | 员工登记（multipart，文件字段 `photos`，3–5 张）与撤回 |
+| `GET /traffic?store&from&to` | 客流（按门店本地营业日；单日带分小时），**唯一访客数为估算** |
+| `GET /audit` | 持久审计查询 |
+| `GET/POST /unwelcome/entries`、`POST …/{id}/approve`、`…/withdraw`、`…/dispute-note` | 名单条目 |
+| `GET /unwelcome/tasks`、`POST …/{id}/review`、`GET …/{id}/image`、`GET …/{id}/reference/{index}` | 复核任务、两人复核、命中图、条目参考照片 |
+| `GET /unwelcome/stats` | 误报统计（按条目与相似度区间的驳回率） |
+
+### 16.2 配置变量（服务器 `master-Vite/.env`，主 API 的 compose 环境变量）
+
+**全部带 `:-` 默认值，没有这些变量的主 API 部署不会失败。**
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `FACE_MATCH_TENCENT_REGION` | `ap-guangzhou` | 腾讯云人脸识别处理地域，只允许 `ap-guangzhou` / `ap-shanghai` / `ap-singapore`（精确匹配，区分大小写）。**缺省、为空或不在白名单 → 功能整体关闭，绝不回退到别的地域** |
+| `FACE_MATCH_ADMIN_SECRET_ID` / `FACE_MATCH_ADMIN_SECRET_KEY` | 空 | **密钥**。腾讯云 CAM「管理子账号」的密钥。缺任何一个或格式非法 → 功能整体关闭；**绝不回退到 `TENCENT_SECRET_*` 主密钥**，也与接收端搜索账号的密钥（`FACE_MATCH_TENCENT_SECRET_ID/KEY`）不是同一个 |
+| `FACE_MATCH_CAPTURE_RETENTION_DAYS` | `7` | `FaceCaptureEvent` / `FaceCaptureImage` 行的保留天数（后台任务③）；小于 1 视为 7 |
+| `FACE_MATCH_ENROLLMENT_QUALITY_CONTROL` | `2` | 员工登记照 / 名单参考照片的腾讯云质量控制等级（0 不控制 … 4 很高）；非法值回到 2 |
+| `FACE_MATCH_UNWELCOME_HIGH_BAND_SCORE` | `90` | 复核页「较高」档位的相似度下限（0–100）。**试点标定前的偏严占位值**，标定后改这里；页面本身不写死阈值 |
+| `FACE_MATCH_BACKGROUND_ENABLED` | `true` | 后台任务总开关（紧急停用用）；功能关闭时各任务本来就是空转 |
+
+「功能关闭」时的表现：`GET /config` 返回 `enabled=false` 与原因（`region-missing` / `region-not-allowed` / `credentials-missing` / `credentials-invalid`）；
+登记、批准入名单等需要调用腾讯云的接口返回 **503 `FACE_MATCH_DISABLED`**；Web 页面仍可查看，写入按钮禁用；后台任务不发任何腾讯云请求。
+**改地域**会让所有门店已保存的跨境披露审查记录作废（16.4），须重新审查。
+
+**私有对象存储（同意书扫描件、员工登记照、名单参考照片、命中图的读取）**沿用 `FaceCapture:Cos`（`FACE_CAPTURE_COS_BUCKET` / `_REGION` / `_SECRET_ID` / `_SECRET_KEY`，见 14.8）：
+桶与区域没有默认值、绝不回退主桶；密钥缺省时回退 `TENCENT_SECRET_*`（这是 COS 的既有做法，与 IAI 管理凭据无关）。未配置 → 上传类与看图类接口返回 **503 `FACE_MATCH_STORE_NOT_CONFIGURED`**。
+本功能的对象键前缀：
+
+| 前缀 | 内容 | 需要的 COS 权限 |
+| --- | --- | --- |
+| `face-match/consent/{consentId}/` | 同意书扫描件（撤回同意时**保留**，作为同意与撤回的证据） | PutObject |
+| `face-match/enrollment/{enrollmentId}/` | 员工登记照（撤回即删） | PutObject、DeleteObject |
+| `face-match/unwelcome/{entryId}/` | 名单条目参考照片（撤回 / 到期即删） | PutObject、DeleteObject、GetObject（批准时读出发往腾讯云、复核页并排显示） |
+| 命中图（接收端写入，键由接收端决定） | 命中抓拍，保留期默认 7 天 | GetObject（复核页）、DeleteObject（到期删除） |
+
+> **注意：14.8 推荐的「只授 `cos:GetObject` 于 `face-ingest/images/*`」的专用只读子账号不够用**。要么给它**追加**一条语句
+> `cos:PutObject`、`cos:DeleteObject`、`cos:GetObject`，资源限定 `qcs::cos:<region>:uid/<appid>:<bucket>/face-match/*`（命中图若不在 `face-match/` 下，再追加它所在前缀的 GetObject / DeleteObject），
+> 要么单独新建一个主 API 专用子账号。**不要**给接收端的「只写」子账号加 Get / Delete。命中图的键必须是安全字符的相对路径，
+> 且不会落在上面 `consent` / `enrollment` / `unwelcome` 三个前缀下（后台删除与看图都会拒绝，防止借命中任务读写别的照片）。
+
+### 16.3 门店档案与启用闸门（后端强制）
+
+模式：`0 Off`（默认）、`1 Capture`（只拍知情同意的内部人员，必填 `AllowedSubjects`）、`2 Match`（生产）。档案不存在或读取失败，接收端一律按 `Off`。
+
+| 要启用的东西 | 后端强制的前置条件（缺任何一项 → 409 `FACE_MATCH_GATE_NOT_MET`，`details` 列出缺项） |
+| --- | --- |
+| `Capture` | `AllowedSubjects`；`EvaluateMatch`（标定评估）只允许在 Capture 下 |
+| `Match` | PIA 编号、门口告示安装日期、律师确认人与时间、**跨境披露审查**（地域 + 审查编号 + 审查人 + 审查时间）；**NSW 门店另需员工监控通知日期且距今至少 14 天** |
+| 员工排除 `StaffExclusionEnabled` | 模式不是 Off，且该门店成员中存在有效的同意与登记 |
+| 顾客去重 `TrafficDedupEnabled` | 模式不是 Off；在 Match 下另需去重专项律师确认人与时间（Capture 下仅内部知情人员验证，不要求） |
+| 不受欢迎人员名单 `UnwelcomeListEnabled` | 模式不是 Off；专项评估编号、专项律师确认人与时间、PIA、告示日期、员工培训日期、隐私联系人、**跨境披露审查**（任何模式都要） |
+
+- **跨境披露审查的地域必须等于当前配置的处理地域**。配置地域被改动后：档案页显示审查无效；后台任务⑦会自动把所有地域不符的档案作废审查记录，
+  并**同时关闭**依赖它的真实顾客功能（Match 模式、员工排除、去重、名单）为 `Off`，写审计 `profile.region-invalidated`——宁可不识别，也不在失效的审查下运行。仅内部验证的 Capture 档案只作废审查、不改模式。
+- 关闭永远可以：保存 `Off`（以及把开关取消）不需要任何前置条件。
+- 门店时区：档案 → 门店表 → 州推导（NSW→Sydney、QLD→Brisbane）→ `Australia/Sydney`；用于客流按本地营业日归日、访客库午夜删除。
+
+### 16.4 员工同意与登记
+
+1. Web「员工同意与登记」→ 选门店与员工 → 记录同意：同意书版本、签署时间、方式（纸质必须上传扫描件 pdf/jpg/png ≤10MB；电子签可不传）。NSW 员工必须填书面通知日期且**距今满 14 天**，不满拒绝。
+2. 登记：选有效（未撤回）同意，上传 **3–5 张** jpg/png（单张 ≤5MB，按字节头判定类型）。每个员工同时只能有一条有效登记（库里过滤唯一索引兜底）。
+   流程：创建 `staff` 人员库（幂等）→ 登记照存私有桶 → 腾讯云建人（`PersonName` 只是登记编号，**不含姓名 / 员工编号**）→ 追加其余照片 → 写库 → 审计。任一步失败会回滚（DeletePerson + 删已上传照片），不留半成品。
+3. 撤回登记 / 撤回同意：先 `DeletePerson`，成功后标记已撤回并删登记照。**腾讯云删不掉时登记保持有效并如实报错（502 `FACE_MATCH_WITHDRAW_PENDING`），不会谎报已撤回**；
+   撤回同意时同意**先**标记撤回，再逐个处理该同意下的登记，处理不了的页面显示「待删除」，后台任务⑥会继续重试（凭据缺失时同样）。
+4. 不愿登记的员工仍会被拍到并计为「非员工」，需要给替代办法（见设计第 7 节）；撤回无任何不利后果。
+
+### 16.5 不受欢迎人员名单（原「黑名单」，默认关闭、暗发布）
+
+- **事件类别是枚举**：`ViolenceOrThreat`、`OrganisedOrRepeatTheft`、`Other`；**没有「一般偷窃」**。`Other` 必须填写说明，并需要**两位不同的批准人**（都不能是提交人）。
+- 证据引用必填（事件记录编号或警方报告编号，不填个人隐私细节）；到期日必填，**上限 12 个月**；到期前 30 天提醒复核；生效门店至少一个，非管理员只能为自己所属门店提交。
+- 流程：提交（Manage）→ 参考照片存私有桶 `face-match/unwelcome/{entryId}/`，**此时不会调用腾讯云** → 批准（Approve，提交人 ≠ 批准人）→
+  最后一位批准人通过时才读出参考照片、创建 `unwelcome` 人员库（幂等）并建人，条目变 Active。**批准要求至少一个生效门店已通过名单启用闸门（`UnwelcomeListEnabled`），否则 409 `FACE_MATCH_UNWELCOME_NOT_ENABLED`——闸门没开，照片不会发往腾讯云。**
+- 撤回 / 到期：**先把状态改成 Withdrawn / Expired**（接收端只用 Active 条目，立即停止匹配），再 `DeletePerson` 并删参考照片；删不干净的（条目上 `cleanupPending=true`）由后台任务④继续重试，参考照片键清空即清理完成。
+- 申诉 / 更正：条目上有「申诉说明」（`dispute-note`）；被识别者查询或更正须在 30 天内处理，固定流程由门店 / 法务制定。
+
+### 16.6 命中提示与两人复核
+
+- 接收端命中（相似度 ≥ 名单阈值）写 `FaceMatchTask`（`NotifiedAtUtc` 为空）。**接收端不能调用通知平台**；主 API 后台任务⑥轮询 `NotifiedAtUtc IS NULL` 的任务，提交后经通知平台发给**该店持有 `FaceMatch.Unwelcome.Review` 的人**，
+  `DedupeKey = unwelcome-hit:{TaskId}`，**发布在业务事务之外**（通知发布器自带事务，不能被外层事务包住）、每条单独 try/catch，失败只记日志、下一轮重试。
+  文案固定：「疑似匹配（相似度 NN%），不是同一个人的概率，必须由两人人工确认」，不含姓名与事件细节。暂无接收人的任务在命中图到期前继续重试；已复核结束或图片已到期的直接标记已处理。
+- 复核页并排显示现场抓拍与条目参考照片，显示「相似度 NN%（不是同一个人的概率）」与「较高 / 一般」档位（后端按 `FACE_MATCH_UNWELCOME_HIGH_BAND_SCORE` 划分），**不显示姓名与事件细节**。
+- 两人复核：第一复核人「是同一个人」→ 等第二复核人；第二复核人**必须不同于第一人**；任何一方判断「不是」即 `Dismissed`，并把命中图提前到期（后台删除，只保留元数据与分数用于误报统计）；两人都确认 → `ConfirmedBySecondPerson`。
+  **系统不自动拒绝服务、不自动通知警方**，店里怎么处置由门店流程与法务制定。命中图已被删除的任务不能再复核。
+- 看图（命中图 / 参考照片）：对象键只来自数据库、门店范围内才可见（越权与不存在共用 404）、仅持有 Review 权限者；**每次查看（含被拒绝的尝试）写持久审计**，且审计写不进去就不返回图片字节。
+- 误报统计：按条目的命中数 / 驳回率（已结束任务 ≥5 条且驳回率 ≥80% 提示复核该条目是否应出名单），以及按相似度每 5 分一档的驳回率，用于调阈值。
+
+### 16.7 后台任务（`FaceMatchBackgroundService`，节拍 60 秒，可注入时间，默认安全）
+
+| 任务 | 间隔 | 做什么 | 空转条件 |
+| --- | --- | --- | --- |
+| ① 访客库清理 | 5 分钟 | 门店本地营业日结束（本地次日 0 点）或接收端写的 `DeleteAfterUtc` 先到者即 `DeleteGroup`，更新 `FaceVisitGroup.DeletedAtUtc`；另每 6 小时扫描腾讯云里遗漏的过期访客库（命名 `v{门店}_{yyyyMMdd}`、早于两天、且库表登记过或门店确实存在才删，绝不碰 `staff` / `unwelcome` 或别的系统的库） | 无管理凭据不调用腾讯云；没有未删除的库时只是一条查询 |
+| ② 员工库完整性 | 24 小时 | 对比腾讯云员工库人数与 `Status=Active` 的登记数，不一致写审计 `enrollment.integrity-mismatch` 并记 Warning | 无管理凭据，或没有门店启用 |
+| ③ Capture 记录保留清理 | 1 小时 | 删除超过保留天数（默认 7）的 `FaceCaptureEvent` / `FaceCaptureImage` 行，分批（每轮约 1 万行）；只清理数据库行，COS 图片仍由接收端与桶生命周期清理 | **没有任何门店档案不是 Off 时不运行**（存量试点数据不会在功能未启用时被删） |
+| ④ 名单条目 | 10 分钟 | 到期（Pending / Active）自动改 Expired 并 `DeletePerson` + 删参考照片；重试撤回 / 到期后没清理干净的条目；到期前 30 天经通知平台提醒提交人与批准人（`unwelcome-expiry:{EntryId}`） | 没有到期 / 待清理条目时只是查询 |
+| ⑤ 命中图到期删除 | 10 分钟 | 删除 `ImageDeleteAtUtc` 已到（含已驳回提前到期）的命中图并把 `ImageObjectKey` 置空串；只删形态合法且不在管理端三个私有前缀下的键 | 私有桶未配置 |
+| ⑥ 命中提示发布 + 撤回补偿 | 每个节拍 / 10 分钟 | 发布命中提示（见 16.6）；重试「同意已撤回但腾讯云删除未完成」的登记、补删已撤回登记遗留的登记照 | 命中提示只是一条索引查询 |
+| ⑦ 地域改动作废审查 | 10 分钟 | 见 16.3 | 配置地域无效 / 功能未开启时什么都不动（配置写错不波及门店档案） |
+
+说明：已存在数据的**删除类补偿**（过期访客库、撤回后的清理、命中图到期）不依赖「有门店启用」，否则门店关闭后数据会无人清理；没有可删的行时它们只是廉价查询。
+
+### 16.8 部署顺序与回滚
+
+1. **迁移**：主 API 带 `--schema=migrate` 显式执行 `20261014.001-face-match`（建九张表：`FaceStoreProfile`、`FaceConsentRecord`、`FaceEnrollment`、`FaceVisitGroup`、`FaceTrafficBucket`、`FaceMatchEvaluation`、`FaceAuditLog`、`FaceUnwelcomeEntry`、`FaceMatchTask`；幂等，签名校验通过才登记账本）。
+   **API 启动只做只读 schema 检查，不迁移；账本里没有这条迁移时主 API 启动失败（容器退出并打印诊断码），所以必须先迁移、再部署新版本的主 API**（与其他版本号迁移相同）。
+2. **权限入库 SQL**（手工执行一次，规则同 14.2）：`services/backend/BlazorApp.Api/Data/Migrations/20261014_AddFaceMatchPermissions.sql`（登记五个权限码，幂等，`CreatedBy = Migration_20261014_FaceMatch`，不授予任何角色）。
+   ```bash
+   sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend/BlazorApp.Api/Data/Migrations/20261014_AddFaceMatchPermissions.sql
+   ```
+   首次执行 `InsertedPermissions` 应为 5（重复执行为 0）。回滚：按 `CreatedBy` 精确定位，先在「角色管理」取消授予，再把这几行 `IsDeleted` 置 1，**不要按码批量删除**。
+3. **接收端受限账号追加授权**（手工、不由代码执行，在第 2 步迁移之后；`face-ingest-db-login.sql` 须已执行过）：`services/backend/SqlScripts/face-match-db-grants.sql`。
+   ```bash
+   export MAIN_DATABASE=HBweb
+   sqlcmd -S <主库地址> -U <管理员账号> -I -b -i services/backend/SqlScripts/face-match-db-grants.sql
+   ```
+   追加的授权：`FaceStoreProfile` SELECT；`FaceTrafficBucket` SELECT / INSERT / UPDATE；`FaceVisitGroup` SELECT / INSERT / `UPDATE(VisitorCount)`；`FaceMatchEvaluation` INSERT；`FaceUnwelcomeEntry` SELECT；`FaceMatchTask` SELECT / INSERT。
+   仍不授 DELETE、不授角色；`FaceConsentRecord` / `FaceEnrollment` / `FaceAuditLog` 接收端无权访问。缺表或缺用户即中止（52750 / 52751），可重复执行；回退见脚本末尾的 REVOKE 清单。
+   接收端连接须保持 `QUOTED_IDENTIFIER ON`（SqlClient 默认如此；`sqlcmd` 手工验证时要加 `-I`），因为这几张表有过滤索引。
+4. **部署主 API + Web**（先后端后前端；顺序与 `hotbargain-vip-deploy` 一致）。此时没有任何门店档案、没有管理凭据：页面显示「功能未开启」，一切照旧。
+5. **腾讯云与 `.env`**（16.9）→ 重建 `hb-api` 容器 → `GET /config` 应返回 `enabled=true` 与所选地域。
+6. 在角色管理里授权需要的账号；然后按 16.3 给试点门店逐项补齐闸门材料再切模式。每一步都可回退：门店档案保存 `Off` 即可立刻停止接收端对该店的一切比对。
+- **回滚代码**：回滚主 API / Web 即可；九张表与权限行保留无害（没有任何调用方）。紧急停用：清空 `FACE_MATCH_ADMIN_SECRET_KEY` 并重建容器（接口 503、后台任务空转），或把相关门店档案改 `Off`，或 `FACE_MATCH_BACKGROUND_ENABLED=false`。
+- **nginx 请求体大小**：上传接口（登记照最多 5×5MB、名单参考照片同）整体约 26MB，经 Nginx 到 `/api/` 的路径需 `client_max_body_size` ≥ 30m（Kestrel 默认上限 30,000,000 字节）。
+
+### 16.9 腾讯云管理子账号与凭据写入（需账号持有人在控制台完成，不要把密钥贴进对话）
+
+1. 开通人脸识别服务并接受服务条款（账号持有人）；确认所选地域已开通（新加坡在当前中国站账号下未开通，探测返回 `ResourceUnavailable.NotExist`「计费状态未知」）。
+2. 新建 CAM 子账号「主 API 管理账号」（只勾**编程访问**），绑定下面的最小权限策略（与接收端搜索账号是**两个不同**的子账号）：
+   ```json
+   {
+     "version": "2.0",
+     "statement": [
+       {
+         "effect": "allow",
+         "action": [
+           "iai:CreateGroup",
+           "iai:CreatePerson",
+           "iai:CreateFace",
+           "iai:DeletePerson",
+           "iai:DeleteGroup",
+           "iai:GetPersonList",
+           "iai:GetGroupList"
+         ],
+         "resource": "*"
+       }
+     ]
+   }
+   ```
+   主 API 只调用这七个接口；不授 `DeleteFace`、`GetGroupInfo` 等其他管理动作。
+3. 密钥只写服务器 `master-Vite/.env`，**输入时不回显**，写完立刻清掉变量，不进 shell 历史、聊天或工单：
+   ```bash
+   cp -p master-Vite/.env master-Vite/.env.bak-$(date +%Y%m%d%H%M%S)
+   read -rs -p "AdminSecretId: " FM_ID; echo; read -rs -p "AdminSecretKey: " FM_KEY; echo
+   printf 'FACE_MATCH_TENCENT_REGION=ap-guangzhou\nFACE_MATCH_ADMIN_SECRET_ID=%s\nFACE_MATCH_ADMIN_SECRET_KEY=%s\n' "$FM_ID" "$FM_KEY" >> master-Vite/.env
+   unset FM_ID FM_KEY
+   chmod 600 master-Vite/.env
+   ```
+   若 `.env` 里已有同名变量，先删旧行再追加（避免重复定义）；然后按主 API 的常规方式重建 `hb-api` 容器。
+4. 给 14.8 / 16.2 所述的 COS 子账号追加 `face-match/*` 的 Put / Delete / Get。
+5. 向腾讯云**书面**确认设计第 9 节第 1、3 点（是否保存非库内图片、是否用于训练、能否关闭），并取得数据处理协议；这些是启用真实顾客功能的前置，系统只能记录，不能替你确认。
+
+### 16.10 审计、日志与隐私
+
+- 持久审计表 `FaceAuditLog`（保留期由律师定，起步建议 2 年）：谁、何时、什么动作、对哪个编号、结果。动作包括：`profile.update`、`profile.region-invalidated`、`consent.create`、`consent.withdraw`、`enrollment.create`、`enrollment.withdraw`、`enrollment.integrity-mismatch`、
+  `unwelcome.entry.submit` / `approve` / `withdraw` / `expire` / `dispute-note`、`unwelcome.task.review` / `view-capture` / `view-reference` / `image-delete`、`visit-group.delete`、`capture.retention-cleanup`。
+  **不含图片、对象键、密钥、姓名、事件细节**；被拒绝的看图尝试 `Result` 为错误码；后台任务的操作人是 `system`。
+- 日志（容器日志 / 中心日志）同样不含密钥、签名、完整请求体、图片、对象键或腾讯云错误原文；腾讯云调用失败只记动作、HTTP 状态、错误码与 RequestId（可向腾讯云反查）。
+- 腾讯云只会收到：照片、不透明的人员库 / 人员编号（`staff`、`unwelcome`、`v{门店}_{日期}`、`st_{登记编号}`、`uw_{条目编号}`）；**没有姓名、员工编号、事件类别或证据编号**。
+
+### 16.11 与接收端的契约（列名与取值，改动前必须双方同步）
+
+- 表结构只由主 API 迁移 `20261014.001-face-match` 创建，列名、类型、可空性以设计 13.3 / 14.4 为准；未标可空的列都是 `NOT NULL`。主 API 额外加的列只有 `FaceUnwelcomeEntry.CategoryNote` / `SecondApprovedBy` / `SecondApprovedAtUtc`（接收端不读）。
+- 数值约定：`FaceStoreProfile.Mode` 0 Off / 1 Capture / 2 Match；`FaceUnwelcomeEntry.Status` 0 Pending / **1 Active** / 2 Expired / 3 Withdrawn（**接收端只能使用 Active 条目**）；`IncidentCategory` 1 / 2 / 3；
+  `FaceMatchTask.ReviewStatus` 0 Pending / 1 Dismissed / 2 ConfirmedBySecondPerson（接收端建任务时写 0，`NotifiedAtUtc` 留空，`ImageObjectKey` / `ImageDeleteAtUtc` 必填）；`FaceEnrollment.Status` 1 Active / 2 Withdrawn。
+- `FaceUnwelcomeEntry.StoreScope` 是英文逗号分隔、无空格的门店编码列表（如 `1013,2015`）；接收端命中后按 `TencentPersonId`（`uw_{EntryId}`）查条目，**条目不是 Active 或本店不在 StoreScope 内则忽略命中**。
+- 接收端读 `FaceStoreProfile` 时：`Mode=Match`、员工排除、去重、名单任一项对真实顾客生效，都必须同时满足 `CrossBorderRegion` 等于接收端自己配置的处理地域（且审查三列非空）；否则按 `Off`。主 API 的后台任务⑦会清理地域不符的档案，接收端这一层是第二道保险。
+- 访客库 `FaceVisitGroup`：`GroupId` 即腾讯云库编号（`v{门店}_{yyyyMMdd}`），`BusinessDate` 为门店本地营业日，`DeleteAfterUtc` 不得早于本地营业日结束；`DeletedAtUtc` 只由主 API 写。
+- 命中图键：接收端写入 `FaceMatchTask.ImageObjectKey`，必须是安全字符的相对路径（`[A-Za-z0-9_.-/]`，不含 `..`），**不得**落在 `face-match/consent/`、`face-match/enrollment/`、`face-match/unwelcome/` 下；建议 `face-match/hit/{门店}/{yyyy}/{MM}/{dd}/{TaskId}.jpg`。
+
 ## 17. 人脸比对：接收端
 
 设计依据：`docs/design/face-matching-service-20261012.md` 第 5、8、13、14、15 节（**合规部分未经律师确认，对真实顾客运行前必须先过设计里的各道闸门**）。
@@ -1093,3 +1303,4 @@ sudo grep -c '^FACE_MATCH_TENCENT_SECRET_' .env       # 只核对行数应为 2�
 - 访客「唯一数」是估算：同一人被认成两人（偏高）或两人认成一人（偏低）都会发生；腾讯云新建人员后立刻搜索是否可见官方未说明，试点必须实测，必要时用「同摄像机 N 秒内合并」补偿。
 - Match 模式下计数写库失败的重试，可能让该条的「新访客」变成「重复」（重试时能搜到自己上次建的访客）：只影响极少数数据库抖动的抓拍。
 - 摄像机持续推送而档案读不到（已配凭据）时，抓拍会被丢弃而不是积压；这是「宁可不识别」的设计取舍。
+

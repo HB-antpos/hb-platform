@@ -1,0 +1,435 @@
+import assert from 'node:assert/strict'
+
+import type { FaceStoreProfile } from '../../../types/faceMatch'
+import { RequestError } from '../../../utils/request'
+import {
+  BAND_LABEL_KEYS,
+  CATEGORY_OTHER,
+  FACE_MATCH_ERROR_KEYS,
+  GENERIC_ERROR_KEY,
+  INCIDENT_CATEGORY_OPTIONS,
+  MISSING_KEY_LABEL_KEYS,
+  PHOTO_MAX_BYTES,
+  buildConsentInput,
+  buildProfileRequest,
+  buildUnwelcomeEntryInput,
+  canSubmitVerdict,
+  canWithdrawEntry,
+  classifyFaceMatchError,
+  describeFaceMatchError,
+  computeDismissRate,
+  countMissing,
+  defaultTrafficRange,
+  detectFileType,
+  expiryToUtcIso,
+  formatApprovalProgress,
+  formatFileSize,
+  formatRate,
+  formatScoreBucket,
+  formatSimilarityPercent,
+  getDisabledReasonKey,
+  getFaceMatchErrorCode,
+  getGateReportFromError,
+  getKnownFaceMatchErrorCode,
+  getMissingLabelKey,
+  getReviewStep,
+  getVerdictBlockReasonKey,
+  getVisibleTabs,
+  isSameProfileRequest,
+  isWriteBlocked,
+  maxExpiryDay,
+  minExpiryDay,
+  normalizeText,
+  pickAcceptableFiles,
+  pickEnrollableConsents,
+  profileToFormValues,
+  referenceIndexes,
+  summarizeGates,
+  toRatio,
+  validateConsentForm,
+  validateDisputeNote,
+  validateFile,
+  validatePhotoSet,
+  validateRequiredText,
+  validateTrafficQuery,
+  validateUnwelcomeEntryForm,
+  type FaceProfileFormValues,
+} from './logic'
+
+// 纯逻辑测试：全部用假数据，不连任何服务。
+// 注意：日期相关断言只用本地日历日，不依赖运行机器的时区。
+
+const none = { manage: false, trafficView: false, unwelcomeManage: false, unwelcomeApprove: false, unwelcomeReview: false }
+
+// ───────── 页签可见性：按权限，且顺序固定 ─────────
+assert.deepEqual(getVisibleTabs(none), [])
+assert.deepEqual(getVisibleTabs({ ...none, manage: true }), ['profiles', 'staff', 'audit'])
+assert.deepEqual(getVisibleTabs({ ...none, trafficView: true }), ['traffic'])
+assert.deepEqual(getVisibleTabs({ ...none, unwelcomeManage: true }), ['unwelcome', 'stats'])
+assert.deepEqual(getVisibleTabs({ ...none, unwelcomeApprove: true }), ['unwelcome', 'stats'], '批准权限可看条目与统计')
+assert.deepEqual(getVisibleTabs({ ...none, unwelcomeReview: true }), ['review', 'stats'], '复核权限看复核任务与统计，不看条目')
+assert.deepEqual(
+  getVisibleTabs({ manage: true, trafficView: true, unwelcomeManage: true, unwelcomeApprove: true, unwelcomeReview: true }),
+  ['profiles', 'staff', 'traffic', 'unwelcome', 'review', 'stats', 'audit'],
+)
+
+// ───────── 功能未开启 ─────────
+assert.equal(getDisabledReasonKey({ disabledReason: 'region-missing' }), 'faceMatch.disabled.reasons.regionMissing')
+assert.equal(getDisabledReasonKey({ disabledReason: 'credentials-invalid' }), 'faceMatch.disabled.reasons.credentialsInvalid')
+assert.equal(getDisabledReasonKey({ disabledReason: 'something-new' }), 'faceMatch.disabled.reasons.unknown', '未知原因走通用说明')
+assert.equal(getDisabledReasonKey({ disabledReason: null }), 'faceMatch.disabled.reasons.unknown')
+assert.equal(isWriteBlocked({ enabled: false }), true)
+assert.equal(isWriteBlocked({ enabled: true }), false)
+assert.equal(isWriteBlocked(null), true, '没有配置时按只读处理')
+
+// ───────── 门店档案：表单 ↔ 请求体 ─────────
+function profile(overrides: Partial<FaceStoreProfile> = {}): FaceStoreProfile {
+  return {
+    storeCode: '1008', storeName: 'Bankstown', exists: true, mode: 2, evaluateMatch: false, staffExclusionEnabled: true,
+    trafficDedupEnabled: false, unwelcomeListEnabled: false, allowedSubjects: null, piaReference: 'PIA-1', signageInstalledOn: '2026-10-01',
+    staffNoticeDate: null, legalSignoffBy: 'Lawyer', legalSignoffAt: '2026-10-02T00:00:00.000Z', dedupLegalSignoffBy: null, dedupLegalSignoffAt: null,
+    crossBorderRegion: null, crossBorderReviewRef: null, crossBorderReviewedBy: null, crossBorderReviewedAt: null, timeZoneId: null,
+    unwelcomeAssessmentRef: null, unwelcomeLegalSignoffBy: null, unwelcomeLegalSignoffAt: null, staffTrainingDate: null, privacyContact: null,
+    updatedAtUtc: null, updatedBy: null, effectiveTimeZoneId: 'Australia/Sydney', jurisdiction: 'NSW', crossBorderReviewValid: false,
+    gates: { facets: [], canSave: true },
+    ...overrides,
+  }
+}
+
+const values = profileToFormValues(profile(), 'ap-singapore')
+assert.equal(values.crossBorderRegion, 'ap-singapore', '地域为空时预填当前配置地域')
+assert.equal(values.piaReference, 'PIA-1')
+assert.equal(values.allowedSubjects, '', 'null 展示成空串')
+assert.equal(profileToFormValues(profile({ crossBorderRegion: 'ap-guangzhou' }), 'ap-singapore').crossBorderRegion, 'ap-guangzhou', '已保存的地域不被悄悄改写')
+assert.equal(profileToFormValues(profile(), null).crossBorderRegion, '')
+
+const request = buildProfileRequest({ ...values, piaReference: '  PIA-2  ', allowedSubjects: '   ', staffNoticeDate: '' })
+assert.equal(request.piaReference, 'PIA-2', '去首尾空白')
+assert.equal(request.allowedSubjects, null, '全空白规范成 null')
+assert.equal(request.staffNoticeDate, null, '空串规范成 null')
+assert.equal(request.mode, 2)
+assert.equal(request.crossBorderRegion, 'ap-singapore')
+assert.equal(buildProfileRequest({}).mode, 0, '缺 mode 按关闭')
+assert.equal(buildProfileRequest({}).evaluateMatch, false)
+assert.equal(isSameProfileRequest(request, buildProfileRequest(values)), false)
+assert.equal(isSameProfileRequest(buildProfileRequest(values), buildProfileRequest(values)), true)
+// 请求体字段与后端 FaceStoreProfileUpdateRequest 完全一致（23 个字段）
+assert.equal(Object.keys(request).length, 23)
+assert.equal(normalizeText('  a '), 'a')
+assert.equal(normalizeText(undefined), null)
+
+// ───────── 闸门缺项 ─────────
+const report = {
+  facets: [
+    { facet: 'capture', requested: false, missing: [] },
+    { facet: 'match', requested: true, missing: ['piaReference', 'staffNoticeTooRecent', 'brandNewKey'] },
+    { facet: 'staffExclusion', requested: true, missing: [] },
+  ],
+  canSave: false,
+}
+const rows = summarizeGates(report)
+assert.equal(rows.length, 2, '只列出被请求启用的项')
+assert.equal(rows[0].facet, 'match')
+assert.equal(rows[0].facetLabelKey, 'faceMatch.gates.facets.match')
+assert.equal(countMissing(rows), 3)
+assert.deepEqual(summarizeGates(null), [])
+assert.equal(getMissingLabelKey('piaReference'), 'faceMatch.profile.fields.piaReference', '字段键映射到字段名称')
+assert.equal(getMissingLabelKey('regionMismatch'), 'faceMatch.gates.special.regionMismatch', '特殊键有各自说明')
+assert.equal(getMissingLabelKey('brandNewKey'), null, '后端新增的键没有登记时返回 null，页面显示键名本身')
+assert.equal(summarizeGates({ facets: [{ facet: 'future', requested: true, missing: [] }], canSave: true })[0].facetLabelKey, null)
+// 契约里的每个字段键与特殊键都有文案
+for (const key of [
+  'mode', 'allowedSubjects', 'piaReference', 'signageInstalledOn', 'staffNoticeDate', 'legalSignoffBy', 'legalSignoffAt',
+  'dedupLegalSignoffBy', 'dedupLegalSignoffAt', 'crossBorderRegion', 'crossBorderReviewRef', 'crossBorderReviewedBy',
+  'crossBorderReviewedAt', 'timeZoneId', 'unwelcomeAssessmentRef', 'unwelcomeLegalSignoffBy', 'unwelcomeLegalSignoffAt',
+  'staffTrainingDate', 'privacyContact', 'activeEnrollment', 'regionMismatch', 'staffNoticeTooRecent', 'modeOff', 'evaluateMatchRequiresCapture',
+]) {
+  assert.ok(MISSING_KEY_LABEL_KEYS[key], `缺项键 ${key} 必须有文案`)
+}
+
+// ───────── 错误分类：已知码 → 状态码 → 通用 ─────────
+function fail(status: number, payload: unknown) {
+  return new RequestError('x', status, payload)
+}
+assert.equal(getFaceMatchErrorCode(fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET' })), 'FACE_MATCH_GATE_NOT_MET')
+assert.equal(getFaceMatchErrorCode(fail(409, { code: 'FACE_MATCH_DISABLED' })), 'FACE_MATCH_DISABLED')
+assert.equal(getFaceMatchErrorCode(new Error('x')), null)
+assert.equal(getFaceMatchErrorCode(fail(500, null)), null)
+assert.equal(getKnownFaceMatchErrorCode(fail(400, { errorCode: 'FACE_MATCH_UNHEARD_OF' })), null)
+assert.equal(classifyFaceMatchError(fail(503, { errorCode: 'FACE_MATCH_DISABLED' })), 'faceMatch.errors.FACE_MATCH_DISABLED', '已知码优先于状态码')
+assert.equal(classifyFaceMatchError(fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET' })), 'faceMatch.errors.FACE_MATCH_GATE_NOT_MET')
+assert.equal(classifyFaceMatchError(fail(409, { errorCode: 'FACE_MATCH_UNHEARD_OF', message: '后端文本不当唯一文案' })), 'faceMatch.errors.status409', '未知码按状态码给说明')
+assert.equal(classifyFaceMatchError(fail(403, null)), 'faceMatch.errors.status403')
+assert.equal(classifyFaceMatchError(fail(401, null)), 'faceMatch.errors.status401')
+assert.equal(classifyFaceMatchError(fail(503, null)), 'faceMatch.errors.status503')
+assert.equal(classifyFaceMatchError(fail(500, { errorCode: 'WHATEVER' })), GENERIC_ERROR_KEY, '再不行走通用文案')
+assert.equal(classifyFaceMatchError(new Error('network')), GENERIC_ERROR_KEY)
+assert.equal(classifyFaceMatchError(undefined), GENERIC_ERROR_KEY)
+for (const key of Object.values(FACE_MATCH_ERROR_KEYS)) assert.ok(key.startsWith('faceMatch.errors.FACE_MATCH_'))
+
+// 后端真实使用的错误码（HTTP 状态）：登记表必须与之一致，不多不少；已被替换的旧码不得残留
+const REAL_ERROR_CODES = [
+  'FACE_MATCH_DISABLED', 'FACE_MATCH_STORE_NOT_CONFIGURED',
+  'FACE_MATCH_FORBIDDEN', 'FACE_MATCH_STORE_FORBIDDEN', 'FACE_MATCH_STORE_INVALID', 'FACE_MATCH_STORE_NOT_FOUND',
+  'FACE_MATCH_FIELD_INVALID', 'FACE_MATCH_NOT_FOUND', 'FACE_MATCH_GATE_NOT_MET',
+  'FACE_MATCH_CONSENT_WITHDRAWN', 'FACE_MATCH_NSW_NOTICE_REQUIRED', 'FACE_MATCH_NSW_NOTICE_TOO_RECENT',
+  'FACE_MATCH_ENROLLMENT_EXISTS', 'FACE_MATCH_PHOTO_UNUSABLE', 'FACE_MATCH_WITHDRAW_PENDING',
+  'FACE_MATCH_TENCENT_AUTH', 'FACE_MATCH_TENCENT_BUSY', 'FACE_MATCH_TENCENT_LIMIT', 'FACE_MATCH_TENCENT_CONFLICT',
+  'FACE_MATCH_TENCENT_UNAVAILABLE', 'FACE_MATCH_TENCENT_ERROR',
+  'FACE_MATCH_ENTRY_NOT_PENDING', 'FACE_MATCH_APPROVER_IS_SUBMITTER', 'FACE_MATCH_ALREADY_APPROVED_BY_YOU',
+  'FACE_MATCH_ENTRY_EXPIRED', 'FACE_MATCH_UNWELCOME_NOT_ENABLED', 'FACE_MATCH_ENTRY_CHANGED',
+  'FACE_MATCH_TASK_CLOSED', 'FACE_MATCH_SAME_REVIEWER', 'FACE_MATCH_TASK_CHANGED',
+  'FACE_MATCH_IMAGE_GONE', 'FACE_MATCH_IMAGE_TOO_LARGE', 'FACE_MATCH_IMAGE_UNSUPPORTED',
+  'FACE_MATCH_STORE_DENIED', 'FACE_MATCH_STORE_TIMEOUT', 'FACE_MATCH_STORE_ERROR',
+  'FACE_MATCH_AUDIT_FAILED', 'FACE_MATCH_TIMEZONE_UNAVAILABLE',
+]
+assert.deepEqual(Object.keys(FACE_MATCH_ERROR_KEYS).sort(), [...REAL_ERROR_CODES].sort(), '错误码登记表与后端真实码一致')
+for (const code of REAL_ERROR_CODES) {
+  assert.equal(classifyFaceMatchError(fail(500, { errorCode: code })), `faceMatch.errors.${code}`, `${code} 有各自文案`)
+}
+for (const retired of [
+  'FACE_MATCH_OBJECT_STORE_NOT_CONFIGURED', 'FACE_MATCH_FILE_INVALID', 'FACE_MATCH_CONSENT_REQUIRED', 'FACE_MATCH_CONSENT_NOT_FOUND',
+  'FACE_MATCH_ENROLLMENT_NOT_FOUND', 'FACE_MATCH_ENTRY_NOT_FOUND', 'FACE_MATCH_TASK_NOT_FOUND', 'FACE_MATCH_ALREADY_ENROLLED',
+  'FACE_MATCH_PHOTO_QUALITY', 'FACE_MATCH_REMOTE_FAILED', 'FACE_MATCH_SELF_APPROVAL', 'FACE_MATCH_ALREADY_APPROVED',
+  'FACE_MATCH_STATE_CONFLICT', 'FACE_MATCH_REVIEW_SAME_PERSON', 'FACE_MATCH_IMAGE_EXPIRED', 'FACE_MATCH_IMAGE_NOT_FOUND',
+]) {
+  assert.equal(getKnownFaceMatchErrorCode(fail(409, { errorCode: retired })), null, `${retired} 已被后端替换，不应再登记`)
+}
+// 已退役的码即使还出现，也按状态码兜底
+assert.equal(classifyFaceMatchError(fail(409, { errorCode: 'FACE_MATCH_STATE_CONFLICT' })), 'faceMatch.errors.status409')
+
+// describeFaceMatchError：DISABLED 追加 details.reason 的具体原因，FIELD_INVALID 追加 details.field
+const echo = (key: string, params?: Record<string, unknown>) => (params ? `${key}|${JSON.stringify(params)}` : key)
+assert.equal(
+  describeFaceMatchError(echo, fail(503, { errorCode: 'FACE_MATCH_DISABLED', details: { reason: 'credentials-missing' } })),
+  'faceMatch.errors.FACE_MATCH_DISABLED faceMatch.disabled.reasons.credentialsMissing',
+)
+assert.equal(
+  describeFaceMatchError(echo, fail(503, { errorCode: 'FACE_MATCH_DISABLED', details: { reason: 'brand-new-reason' } })),
+  'faceMatch.errors.FACE_MATCH_DISABLED',
+  '未知 reason 不展示',
+)
+assert.equal(describeFaceMatchError(echo, fail(503, { errorCode: 'FACE_MATCH_DISABLED' })), 'faceMatch.errors.FACE_MATCH_DISABLED')
+assert.equal(
+  describeFaceMatchError(echo, fail(400, { errorCode: 'FACE_MATCH_FIELD_INVALID', details: { field: 'photos' } })),
+  'faceMatch.errors.FACE_MATCH_FIELD_INVALID' + 'faceMatch.errors.fieldSuffix|{"field":"photos"}',
+)
+assert.equal(
+  describeFaceMatchError(echo, fail(400, { errorCode: 'FACE_MATCH_FIELD_INVALID', details: { field: '<script>alert(1)</script>' } })),
+  'faceMatch.errors.FACE_MATCH_FIELD_INVALID',
+  '字段名不是普通标识符时不展示',
+)
+assert.equal(describeFaceMatchError(echo, fail(404, { errorCode: 'FACE_MATCH_NOT_FOUND', message: '后端文本' })), 'faceMatch.errors.FACE_MATCH_NOT_FOUND')
+assert.equal(describeFaceMatchError(echo, fail(502, { errorCode: 'UNKNOWN' })), GENERIC_ERROR_KEY, '未知码未知状态走通用文案')
+
+// 409 闸门拒绝：从 details 取闸门报告，其它错误取不到
+const gateError = fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET', details: report })
+const extracted = getGateReportFromError(gateError)
+assert.equal(extracted?.canSave, false)
+assert.deepEqual(extracted?.facets[1].missing, ['piaReference', 'staffNoticeTooRecent', 'brandNewKey'])
+assert.equal(getGateReportFromError(fail(409, { errorCode: 'FACE_MATCH_GATE_NOT_MET' })), null, '没有 details 取不到')
+assert.equal(getGateReportFromError(fail(409, { errorCode: 'FACE_MATCH_ENTRY_CHANGED', details: report })), null, '别的错误码不取')
+assert.equal(getGateReportFromError(new Error('x')), null)
+
+// ───────── 上传校验 ─────────
+const file = (name: string, type: string, size = 1000) => ({ name, type, size })
+assert.equal(detectFileType(file('a.JPG', '')), 'image/jpeg', 'MIME 缺失时按扩展名')
+assert.equal(detectFileType(file('a.png', '')), 'image/png')
+assert.equal(detectFileType(file('a.pdf', '')), 'application/pdf')
+assert.equal(detectFileType(file('a.exe', '')), '')
+assert.equal(detectFileType(file('a', 'image/jpg')), 'image/jpeg')
+assert.equal(validateFile(file('a.jpg', 'image/jpeg'), { types: ['image/jpeg', 'image/png'], maxBytes: PHOTO_MAX_BYTES }), null)
+assert.equal(validateFile(file('a.gif', 'image/gif'), { types: ['image/jpeg', 'image/png'], maxBytes: PHOTO_MAX_BYTES })?.key, 'faceMatch.validation.fileType')
+assert.equal(validateFile(file('a.jpg', 'image/jpeg', 0), { types: ['image/jpeg'], maxBytes: 10 })?.key, 'faceMatch.validation.fileEmpty')
+assert.equal(validateFile(file('a.jpg', 'image/jpeg', 6 * 1024 * 1024), { types: ['image/jpeg'], maxBytes: PHOTO_MAX_BYTES })?.key, 'faceMatch.validation.fileTooLarge')
+assert.equal(validateFile(file('a.jpg', 'image/jpeg', PHOTO_MAX_BYTES), { types: ['image/jpeg'], maxBytes: PHOTO_MAX_BYTES }), null, '恰好 5MB 通过')
+assert.equal(formatFileSize(512), '512 B')
+assert.equal(formatFileSize(2048), '2 KB')
+assert.equal(formatFileSize(5 * 1024 * 1024), '5.0 MB')
+
+const jpg = (n: number) => file(`p${n}.jpg`, 'image/jpeg')
+assert.equal(validatePhotoSet([jpg(1), jpg(2)], { min: 3, max: 5 })?.key, 'faceMatch.validation.photoCountRange', '少于 3 张')
+assert.equal(validatePhotoSet([jpg(1), jpg(2), jpg(3)], { min: 3, max: 5 }), null)
+assert.equal(validatePhotoSet([1, 2, 3, 4, 5, 6].map(jpg), { min: 3, max: 5 })?.key, 'faceMatch.validation.photoCountRange', '多于 5 张')
+assert.equal(validatePhotoSet([jpg(1), jpg(2), file('x.gif', 'image/gif')], { min: 3, max: 5 })?.key, 'faceMatch.validation.fileType', '逐张校验类型')
+assert.equal(validatePhotoSet([], { min: 1, max: 5 })?.params?.min, 1)
+
+const incoming = [jpg(1), file('bad.gif', 'image/gif'), jpg(2), jpg(3)] as unknown as File[]
+const picked = pickAcceptableFiles(incoming, 3, 5)
+assert.equal(picked.accepted.length, 2, '已有 3 张，最多再收 2 张')
+assert.equal(picked.issue?.key, 'faceMatch.validation.fileType', '第一条被拒原因')
+assert.equal(pickAcceptableFiles([jpg(1)] as unknown as File[], 5, 5).issue?.key, 'faceMatch.validation.photoTooMany')
+assert.equal(pickAcceptableFiles([jpg(1)] as unknown as File[], 0, 5).issue, null)
+
+// ───────── 同意：NSW 14 天、纸质必传扫描件 ─────────
+// 用本地时间构造，断言按本地日历日，任何时区下结果一致。
+const now = new Date(2026, 9, 13, 15, 0)
+const pdfScan = new File([new Uint8Array([1])], 'consent.pdf', { type: 'application/pdf' })
+const okConsent = {
+  consentVersion: 'v1',
+  signedAtUtc: new Date(2026, 9, 13, 12, 0).toISOString(),
+  method: 'paper' as const,
+  nswNoticeDate: '',
+  scan: pdfScan,
+}
+assert.deepEqual(validateConsentForm(okConsent, { requiresNswNotice: false }, now), {}, '非 NSW 员工不需要通知日期')
+assert.equal(validateConsentForm({ ...okConsent, consentVersion: '  ' }, { requiresNswNotice: false }, now).consentVersion?.key, 'faceMatch.validation.consentVersionRequired')
+assert.equal(validateConsentForm({ ...okConsent, consentVersion: 'v'.repeat(51) }, { requiresNswNotice: false }, now).consentVersion?.key, 'faceMatch.validation.consentVersionTooLong')
+assert.equal(validateConsentForm({ ...okConsent, signedAtUtc: '' }, { requiresNswNotice: false }, now).signedAtUtc?.key, 'faceMatch.validation.signedAtRequired')
+assert.equal(validateConsentForm({ ...okConsent, signedAtUtc: new Date(2026, 9, 14, 3, 0).toISOString() }, { requiresNswNotice: false }, now).signedAtUtc?.key, 'faceMatch.validation.signedAtFuture')
+assert.equal(validateConsentForm({ ...okConsent, scan: null }, { requiresNswNotice: false }, now).scan?.key, 'faceMatch.validation.scanRequiredForPaper', '纸质必传扫描件')
+assert.equal(validateConsentForm({ ...okConsent, method: 'electronic', scan: null }, { requiresNswNotice: false }, now).scan, undefined, '电子同意扫描件可选')
+assert.equal(validateConsentForm({ ...okConsent, method: undefined as never }, { requiresNswNotice: false }, now).method?.key, 'faceMatch.validation.methodRequired')
+const bigScan = new File([new Uint8Array(11 * 1024 * 1024)], 'big.pdf', { type: 'application/pdf' })
+assert.equal(validateConsentForm({ ...okConsent, scan: bigScan }, { requiresNswNotice: false }, now).scan?.key, 'faceMatch.validation.fileTooLarge', '扫描件超过 10MB')
+const exe = new File([new Uint8Array([1])], 'x.exe', { type: 'application/x-msdownload' })
+assert.equal(validateConsentForm({ ...okConsent, scan: exe }, { requiresNswNotice: false }, now).scan?.key, 'faceMatch.validation.fileType')
+
+const nsw = { requiresNswNotice: true }
+assert.equal(validateConsentForm(okConsent, nsw, now).nswNoticeDate?.key, 'faceMatch.validation.noticeDateRequired', 'NSW 员工必填通知日期')
+assert.equal(
+  validateConsentForm({ ...okConsent, nswNoticeDate: '2026-10-01' }, nsw, now).nswNoticeDate?.key,
+  'faceMatch.validation.noticeTooRecent',
+  '通知距签署 12 天，不满 14 天',
+)
+assert.equal(
+  validateConsentForm({ ...okConsent, nswNoticeDate: '2026-09-30' }, nsw, now).nswNoticeDate?.key,
+  'faceMatch.validation.noticeTooRecent',
+  '通知 9/30、签署 10/13 只隔 13 天，仍不满 14 天',
+)
+assert.equal(validateConsentForm({ ...okConsent, nswNoticeDate: '2026-09-29' }, nsw, now).nswNoticeDate, undefined, '恰好 14 天通过')
+assert.equal(validateConsentForm({ ...okConsent, nswNoticeDate: '2026-08-01' }, nsw, now).nswNoticeDate, undefined)
+
+// 请求入参：非 NSW 员工即使残留通知日期也不提交
+assert.equal(buildConsentInput('u1', { ...okConsent, nswNoticeDate: '2026-08-01', consentVersion: ' v1 ' }, { requiresNswNotice: false }).nswNoticeDate, null)
+assert.equal(buildConsentInput('u1', { ...okConsent, nswNoticeDate: '2026-08-01' }, nsw).nswNoticeDate, '2026-08-01')
+assert.equal(buildConsentInput('u1', { ...okConsent, consentVersion: ' v1 ' }, nsw).consentVersion, 'v1')
+assert.equal(buildConsentInput('u1', { ...okConsent, method: 'electronic', scan: null }, nsw).scan, null)
+
+// 登记可用同意：未撤回，新的在前
+const consentList = [
+  { id: 'a', active: true, signedAtUtc: '2026-01-01T00:00:00Z' },
+  { id: 'b', active: false, signedAtUtc: '2026-09-01T00:00:00Z' },
+  { id: 'c', active: true, signedAtUtc: '2026-06-01T00:00:00Z' },
+]
+assert.deepEqual(pickEnrollableConsents(consentList).map((item) => item.id), ['c', 'a'])
+
+// ───────── 不受欢迎人员名单：类别枚举没有「一般偷窃」 ─────────
+assert.deepEqual(INCIDENT_CATEGORY_OPTIONS.map((option) => option.value), [1, 2, 3])
+assert.equal(INCIDENT_CATEGORY_OPTIONS.length, 3, '只有三个类别')
+assert.equal(canWithdrawEntry({ status: 0 }), true)
+assert.equal(canWithdrawEntry({ status: 1 }), true)
+assert.equal(canWithdrawEntry({ status: 2 }), false)
+assert.equal(canWithdrawEntry({ status: 3 }), false)
+assert.equal(formatApprovalProgress({ approvalsDone: 1, approvalsNeeded: 2 }), '1 / 2')
+
+const photoFiles = (count: number) =>
+  Array.from({ length: count }, (_, index) => new File([new Uint8Array([index + 1])], `p${index}.jpg`, { type: 'image/jpeg' }))
+const validEntry = {
+  incidentCategory: 1,
+  categoryNote: '',
+  evidenceRef: 'POL-123',
+  storeScope: ['1008'],
+  expiresOn: '2027-01-15',
+  photos: photoFiles(2),
+}
+assert.deepEqual(validateUnwelcomeEntryForm(validEntry, now), {})
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: null }, now).incidentCategory?.key, 'faceMatch.validation.categoryRequired')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: 4 }, now).incidentCategory?.key, 'faceMatch.validation.categoryRequired', '枚举之外（含想象中的「一般偷窃」）不接受')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: 0 }, now).incidentCategory?.key, 'faceMatch.validation.categoryRequired')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: CATEGORY_OTHER }, now).categoryNote?.key, 'faceMatch.validation.categoryNoteRequired', 'Other 必须说明')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: CATEGORY_OTHER, categoryNote: ' ' }, now).categoryNote?.key, 'faceMatch.validation.categoryNoteRequired')
+assert.deepEqual(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: CATEGORY_OTHER, categoryNote: 'x'.repeat(200) }, now), {}, '说明 200 字符通过')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, incidentCategory: CATEGORY_OTHER, categoryNote: 'x'.repeat(201) }, now).categoryNote?.key, 'faceMatch.validation.categoryNoteTooLong')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, evidenceRef: '  ' }, now).evidenceRef?.key, 'faceMatch.validation.evidenceRefRequired', '证据编号必填')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, evidenceRef: 'x'.repeat(101) }, now).evidenceRef?.key, 'faceMatch.validation.evidenceRefTooLong')
+assert.deepEqual(validateUnwelcomeEntryForm({ ...validEntry, evidenceRef: 'x'.repeat(100) }, now), {})
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, storeScope: [] }, now).storeScope?.key, 'faceMatch.validation.storeScopeRequired', '至少一家门店')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, photos: [] }, now).photos?.key, 'faceMatch.validation.photoCountRange', '至少一张照片')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, photos: photoFiles(6) }, now).photos?.key, 'faceMatch.validation.photoCountRange', '至多五张照片')
+assert.deepEqual(validateUnwelcomeEntryForm({ ...validEntry, photos: photoFiles(5) }, now), {})
+
+// 到期日：必填、晚于今天、不超过 12 个月（按本地日历日）
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, expiresOn: '' }, now).expiresOn?.key, 'faceMatch.validation.expiresRequired')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, expiresOn: '2026-10-13' }, now).expiresOn?.key, 'faceMatch.validation.expiresPast', '今天不行')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, expiresOn: '2026-10-12' }, now).expiresOn?.key, 'faceMatch.validation.expiresPast')
+assert.deepEqual(validateUnwelcomeEntryForm({ ...validEntry, expiresOn: '2026-10-14' }, now), {}, '明天可以')
+assert.deepEqual(validateUnwelcomeEntryForm({ ...validEntry, expiresOn: '2027-10-13' }, now), {}, '恰好 12 个月可以')
+assert.equal(validateUnwelcomeEntryForm({ ...validEntry, expiresOn: '2027-10-14' }, now).expiresOn?.key, 'faceMatch.validation.expiresTooFar', '超过 12 个月不行')
+assert.equal(minExpiryDay(now).format('YYYY-MM-DD'), '2026-10-14')
+assert.equal(maxExpiryDay(now).format('YYYY-MM-DD'), '2027-10-13')
+// 到期时刻取所选日期当天本地 0 点：最晚一天也不会超过后端「现在起 12 个月」
+const expiryIso = expiryToUtcIso('2027-10-13')
+assert.equal(new Date(expiryIso).getTime(), new Date(2027, 9, 13, 0, 0, 0, 0).getTime())
+assert.ok(new Date(expiryIso).getTime() <= new Date(2027, 9, 13, 15, 0).getTime())
+
+// 请求入参：门店去重去空；非 Other 不带说明
+const entryInput = buildUnwelcomeEntryInput({ ...validEntry, categoryNote: 'leftover', storeScope: ['1008', ' 1008 ', '1010', ''] })
+assert.equal(entryInput.categoryNote, null, '非 Other 即使残留说明也不提交')
+assert.deepEqual(entryInput.storeScope, ['1008', '1010'])
+assert.equal(entryInput.evidenceRef, 'POL-123')
+assert.equal(entryInput.photos.length, 2)
+assert.equal(buildUnwelcomeEntryInput({ ...validEntry, incidentCategory: CATEGORY_OTHER, categoryNote: ' why ' }).categoryNote, 'why')
+
+// 必填说明 / 申诉备注
+assert.equal(validateRequiredText('  ', 200)?.key, 'faceMatch.validation.textRequired')
+assert.equal(validateRequiredText('x'.repeat(201), 200)?.key, 'faceMatch.validation.textTooLong')
+assert.equal(validateRequiredText('ok', 200), null)
+assert.equal(validateDisputeNote(''), null, '申诉备注可为空')
+assert.equal(validateDisputeNote('x'.repeat(501))?.key, 'faceMatch.validation.textTooLong')
+
+// ───────── 复核：相似度只展示整数百分比，档位以后端为准 ─────────
+assert.equal(formatSimilarityPercent({ scorePercent: 87 }), 87)
+assert.equal(formatSimilarityPercent({ scorePercent: 87.6 }), 88)
+assert.equal(formatSimilarityPercent({ scorePercent: 130 }), 100, '夹在 0-100')
+assert.equal(formatSimilarityPercent({ scorePercent: -5 }), 0)
+assert.equal(formatSimilarityPercent({ scorePercent: Number.NaN }), 0)
+assert.equal(BAND_LABEL_KEYS.high, 'faceMatch.review.band.high')
+assert.equal(BAND_LABEL_KEYS.normal, 'faceMatch.review.band.normal')
+
+assert.equal(getReviewStep({ nextStep: 'first' }), 'first')
+assert.equal(getReviewStep({ nextStep: 'second' }), 'second')
+assert.equal(getReviewStep({ nextStep: 'none' }), 'done')
+assert.equal(getReviewStep({ nextStep: 'something-new' }), 'done', '未知步骤按已结束，不给提交按钮')
+const taskBase = { canReview: true, imageAvailable: true, nextStep: 'first' }
+assert.equal(canSubmitVerdict(taskBase), true)
+assert.equal(canSubmitVerdict({ ...taskBase, canReview: false }), false, 'canReview 由后端决定')
+assert.equal(canSubmitVerdict({ ...taskBase, imageAvailable: false }), false)
+assert.equal(canSubmitVerdict({ ...taskBase, nextStep: 'none' }), false)
+assert.equal(getVerdictBlockReasonKey(taskBase), null)
+assert.equal(getVerdictBlockReasonKey({ ...taskBase, nextStep: 'none' }), 'faceMatch.review.blocked.done')
+assert.equal(getVerdictBlockReasonKey({ ...taskBase, imageAvailable: false }), 'faceMatch.review.blocked.imageGone')
+assert.equal(getVerdictBlockReasonKey({ ...taskBase, canReview: false }), 'faceMatch.review.blocked.cannotReview')
+assert.deepEqual(referenceIndexes({ referencePhotoCount: 3 }), [0, 1, 2])
+assert.deepEqual(referenceIndexes({ referencePhotoCount: 0 }), [])
+assert.deepEqual(referenceIndexes({ referencePhotoCount: -1 }), [])
+
+// ───────── 误报统计 ─────────
+assert.equal(computeDismissRate(8, 2), 0.8)
+assert.equal(computeDismissRate(0, 0), null, '没有已结束任务时为 null')
+assert.equal(computeDismissRate(0, 4), 0)
+assert.equal(toRatio(0.8), 0.8)
+assert.equal(toRatio(80), 0.8, '万一后端给的是百分数，也按百分数换算')
+assert.equal(toRatio(250), 1, '不超过 100%')
+assert.equal(toRatio(null), null)
+assert.equal(toRatio(-1), null)
+assert.equal(formatRate(0.8), '80%')
+assert.equal(formatRate(0.8333), '83.3%')
+assert.equal(formatRate(null), '-')
+assert.equal(formatScoreBucket({ from: 85, to: 89 }), '85–89')
+
+// ───────── 客流统计查询 ─────────
+assert.deepEqual(defaultTrafficRange(new Date(2026, 9, 13, 9, 0)), { from: '2026-10-07', to: '2026-10-13' }, '最近 7 天（含今天）')
+assert.equal(validateTrafficQuery(null, { from: '2026-10-01', to: '2026-10-02' })?.key, 'faceMatch.validation.storeRequired')
+assert.equal(validateTrafficQuery('1008', {})?.key, 'faceMatch.validation.rangeRequired')
+assert.equal(validateTrafficQuery('1008', { from: '2026-10-05', to: '2026-10-01' })?.key, 'faceMatch.validation.rangeInvalid')
+assert.equal(validateTrafficQuery('1008', { from: '2026-10-01', to: '2026-10-01' }), null, '单日合法（会返回分小时明细）')
+assert.equal(validateTrafficQuery('1008', { from: '2026-01-01', to: '2026-04-03' })?.key, 'faceMatch.validation.rangeTooLong', '93 天超过上限')
+assert.equal(validateTrafficQuery('1008', { from: '2026-01-01', to: '2026-04-03' })?.params?.days, 92)
+assert.equal(validateTrafficQuery('1008', { from: '2026-01-01', to: '2026-04-02' }), null, '恰好 92 天可以')
+
+// 表单值与请求体的键一一对应（编译期有类型保证，这里保证运行期不漏）
+const formKeys = Object.keys(values as FaceProfileFormValues).sort().join(',')
+assert.equal(formKeys, Object.keys(request).sort().join(','), '表单字段与请求体字段一一对应')
+
+console.log('FaceMatch logic.test: ok')

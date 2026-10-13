@@ -1058,6 +1058,58 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.FaceCameras.IFaceCaptureImageService,
     BlazorApp.Api.Features.FaceCameras.FaceCaptureImageService
 >();
+// 门店人脸比对服务（管理端，表由迁移 20261014.001-face-match 创建）。默认全部关闭：
+// 没有 FaceMatch:Tencent 地域 / 管理凭据时管理接口返回 503、后台任务空转；没有任何门店档案时一切照旧。
+builder.Services.Configure<BlazorApp.Api.Features.FaceMatch.FaceMatchOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.FaceMatch.FaceMatchOptions.SectionName)
+);
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.FaceMatch.IFaceMatchSettingsProvider,
+    BlazorApp.Api.Features.FaceMatch.FaceMatchSettingsProvider
+>();
+// 腾讯云人脸识别管理客户端与私有 COS 读写：总时限 15 秒，不跟随重定向（只面向固定域名，任何跳转都视为异常）。
+builder.Services.AddHttpClient(
+        BlazorApp.Api.Features.FaceMatch.TencentFaceLibrary.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(15)
+    )
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient(
+        BlazorApp.Api.Features.FaceMatch.CosFaceMatchObjectStore.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(15)
+    )
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.FaceMatch.IFaceLibrary,
+    BlazorApp.Api.Features.FaceMatch.TencentFaceLibrary
+>();
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.FaceMatch.IFaceMatchObjectStore,
+    BlazorApp.Api.Features.FaceMatch.CosFaceMatchObjectStore
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceMatch.IFaceMatchAudit,
+    BlazorApp.Api.Features.FaceMatch.FaceMatchAudit
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceMatch.IFaceStoreProfileService,
+    BlazorApp.Api.Features.FaceMatch.FaceStoreProfileService
+>();
+// 员工与名单服务同时以具体类型注册：后台维护任务要调用它们的内部补偿方法。
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceStaffService>();
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.IFaceStaffService>(
+    sp => sp.GetRequiredService<BlazorApp.Api.Features.FaceMatch.FaceStaffService>()
+);
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceUnwelcomeService>();
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.IFaceUnwelcomeService>(
+    sp => sp.GetRequiredService<BlazorApp.Api.Features.FaceMatch.FaceUnwelcomeService>()
+);
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceMatch.IFaceTrafficService,
+    BlazorApp.Api.Features.FaceMatch.FaceTrafficService
+>();
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceMatchMaintenance>();
+builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceHitNotifier>();
+builder.Services.AddHostedService<BlazorApp.Api.Features.FaceMatch.FaceMatchBackgroundService>();
 builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.React.IWarehouseRetailPriceChangeService,
     BlazorApp.Api.Services.React.WarehouseRetailPriceChangeService

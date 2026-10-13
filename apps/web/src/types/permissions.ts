@@ -201,6 +201,18 @@ export const P = {
     // 查看抓拍图片（敏感生物识别信息）：与管理摄像机分开授予；页面是否显示「查看图片」以后端返回的 canViewImages 为准。
     ImagesView: 'FaceCapture.Images.View',
   },
+  // 门店人脸比对服务（系统菜单「人脸比对」）：五个顶层权限码，与后端 Permissions.FaceMatch.* 完全一致（Admin 靠角色放行）。
+  FaceMatch: {
+    Manage: 'FaceMatch.Manage',
+    Traffic: {
+      View: 'FaceMatch.Traffic.View',
+    },
+    Unwelcome: {
+      Manage: 'FaceMatch.Unwelcome.Manage',
+      Approve: 'FaceMatch.Unwelcome.Approve',
+      Review: 'FaceMatch.Unwelcome.Review',
+    },
+  },
   Dashboard: {
     View: 'Dashboard',
   },

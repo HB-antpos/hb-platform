@@ -42,6 +42,16 @@
     <Compile Include="FaceCameraAdminSqlServerTests.cs" />
     <Compile Include="FaceCaptureImageTests.cs" />
     <Compile Include="FaceImageStoreTests.cs" />
+    <Compile Include="FaceMatchTestSupport.cs" />
+    <Compile Include="FaceMatchTencentTests.cs" />
+    <Compile Include="FaceMatchObjectStoreTests.cs" />
+    <Compile Include="FaceStoreProfileTests.cs" />
+    <Compile Include="FaceStaffTests.cs" />
+    <Compile Include="FaceUnwelcomeTests.cs" />
+    <Compile Include="FaceMatchMaintenanceTests.cs" />
+    <Compile Include="FaceTrafficTests.cs" />
+    <Compile Include="FaceMatchControllerTests.cs" />
+    <Compile Include="FaceMatchSqlServerTests.cs" />
     <Compile Include="NotificationHubTests.cs" />
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />

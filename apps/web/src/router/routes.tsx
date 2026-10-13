@@ -22,6 +22,7 @@ import {
   PictureOutlined,
   QrcodeOutlined,
   ReconciliationOutlined,
+  SafetyCertificateOutlined,
   ScheduleOutlined,
   SettingOutlined,
   ShopOutlined,
@@ -111,6 +112,7 @@ const SystemPerformanceBaselinePage = lazy(() => import('../pages/System/Perform
 const EmergencyLoginKeysPage = lazy(() => import('../pages/System/EmergencyLoginKeys'))
 // 门店人脸抓拍摄像机管理（页面文案随页面懒加载；会短暂持有一次性摄像机地址，路由不做 keepAlive）。
 const FaceCamerasPage = lazy(() => import('../pages/System/FaceCameras'))
+const FaceMatchPage = lazy(() => import('../pages/System/FaceMatch'))
 const InvoiceEmailSettingsPage = lazy(() => import('../pages/System/InvoiceEmailSettings'))
 const PaymentTerminalSettingsPage = lazy(() => import('../pages/System/PaymentTerminalSettings'))
 const SystemScheduledStatisticsPage = lazy(() => import('../pages/System/ScheduledStatistics'))
@@ -169,6 +171,7 @@ const iconMap = {
   TeamOutlined: <TeamOutlined />,
   NumberOutlined: <NumberOutlined />,
   ReconciliationOutlined: <ReconciliationOutlined />,
+  SafetyCertificateOutlined: <SafetyCertificateOutlined />,
   ScheduleOutlined: <ScheduleOutlined />,
   SettingOutlined: <SettingOutlined />,
   ShopOutlined: <ShopOutlined />,
@@ -293,6 +296,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canManageFaceCameras',
         },
         element: <FaceCamerasPage />,
+      },
+      {
+        path: '/system/face-match',
+        meta: {
+          title: 'menu.faceMatch',
+          icon: 'SafetyCertificateOutlined',
+          // 页面内存里会短暂持有复核用的抓拍 / 参考照片 objectURL 与登记照预览：离开页签即卸载，保证 URL 已撤销、不留在缓存页里。
+          keepAlive: false,
+          accessKey: 'canAccessFaceMatch',
+        },
+        element: <FaceMatchPage />,
       },
       {
         path: '/system/users',

@@ -97,6 +97,14 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canViewDailyCloseRecords: [P.DailyCloseRecords.View],
   canViewSeasonalCardStats: [P.SeasonalCards.Remaining.ViewAllStores],
   canManageFaceCameras: [P.FaceCapture.CamerasManage],
+  // 人脸比对页：任一权限可见；从菜单授予时只补第一个（管理），移除时五个权限码一并撤销。
+  canAccessFaceMatch: [
+    P.FaceMatch.Manage,
+    P.FaceMatch.Traffic.View,
+    P.FaceMatch.Unwelcome.Manage,
+    P.FaceMatch.Unwelcome.Approve,
+    P.FaceMatch.Unwelcome.Review,
+  ],
   canReadOrder: [P.Orders.View],
   canManageLocalPurchase: [P.LocalPurchase.View, 'LocalInvocie.View'],
   canEditLocalPurchase: [P.LocalPurchase.Edit, 'LocalInvocie.Edit'],
@@ -117,6 +125,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/system/payment-terminal-settings', title: 'menu.paymentTerminalSettings', accessKey: 'canManageSystemSettings' },
       { path: '/system/emergency-login-keys', title: 'menu.emergencyLoginKeys', accessKey: 'canManageSystemSettings' },
       { path: '/system/face-cameras', title: 'menu.faceCameras', accessKey: 'canManageFaceCameras' },
+      { path: '/system/face-match', title: 'menu.faceMatch', accessKey: 'canAccessFaceMatch' },
       { path: '/system/users', title: 'menu.systemUsers', accessKey: 'canReadUserConsole' },
       { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole' },
       { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole' },

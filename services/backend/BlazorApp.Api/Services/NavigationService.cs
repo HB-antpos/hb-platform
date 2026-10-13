@@ -84,6 +84,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/system/payment-terminal-settings", TitleKey = "menu.paymentTerminalSettings", Icon = "WalletOutlined", Permission = Permissions.System.ManageSettings },
                     new() { Path = "/system/emergency-login-keys", TitleKey = "menu.emergencyLoginKeys", Icon = "KeyOutlined", Permission = Permissions.System.ManageSettings },
                     new() { Path = "/system/face-cameras", TitleKey = "menu.faceCameras", Icon = "VideoCameraOutlined", Permission = Permissions.FaceCapture.Cameras.Manage },
+                    // 人脸比对：五个独立权限，任一即可见入口，页内再按各自权限显示页签。
+                    new() { Path = "/system/face-match", TitleKey = "menu.faceMatch", Icon = "SafetyCertificateOutlined", AnyPermissions = new List<string> { Permissions.FaceMatch.Manage, Permissions.FaceMatch.Traffic.View, Permissions.FaceMatch.Unwelcome.Manage, Permissions.FaceMatch.Unwelcome.Approve, Permissions.FaceMatch.Unwelcome.Review } },
                     new() { Path = "/system/device-registration", TitleKey = "menu.deviceRegistration", Icon = "BuildOutlined", Permission = Permissions.DeviceRegistration.View },
                     // 版本发布中心：App 原生 / OTA 与 WPF 安装包合并为一页，旧 /system/wpf-versions 由 Web 重定向到其 WPF 终端。
                     new() { Path = "/system/app-downloads", TitleKey = "menu.appDownloads", Icon = "QrcodeOutlined", Permission = Permissions.System.ViewAppDownloads },
@@ -761,6 +763,12 @@ namespace BlazorApp.Api.Services
                 Permissions.DailyCloseRecords.View,
                 // 人脸抓拍摄像机管理：只有该权限的账号也要能拿到后台菜单。
                 Permissions.FaceCapture.Cameras.Manage,
+                // 人脸比对：只有这五个权限之一的账号也要能拿到后台菜单。
+                Permissions.FaceMatch.Manage,
+                Permissions.FaceMatch.Traffic.View,
+                Permissions.FaceMatch.Unwelcome.Manage,
+                Permissions.FaceMatch.Unwelcome.Approve,
+                Permissions.FaceMatch.Unwelcome.Review,
                 // 现金管理页：只有该权限的店长 / 财务也要能拿到后台菜单，否则前端只能退回本地菜单。
                 Permissions.Cash.OverviewView,
                 // 节日贺卡分店填报统计：只有该权限的总部账号也要能拿到后台菜单。
