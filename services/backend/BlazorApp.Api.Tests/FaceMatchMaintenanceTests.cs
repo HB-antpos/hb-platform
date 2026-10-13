@@ -674,6 +674,8 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
             sp.GetRequiredService<FaceUnwelcomeService>(), _h.Publisher, sp.GetRequiredService<IFaceMatchAudit>(), clock,
             _h.Logs.CreateLogger<FaceMatchMaintenance>()));
         services.AddSingleton(sp => new FaceHitNotifier(_h.Database.Context, _h.Publisher, clock, _h.Logs.CreateLogger<FaceHitNotifier>()));
+        // 任务⑧（分时客流投影）也在同一个调度里；这里的用例不关心它，但必须注册，否则它每次到点都会因缺依赖而记 Error。
+        services.AddSingleton(sp => new FaceTrafficHourlyProjector(_h.Database.Context, clock, _h.Logs.CreateLogger<FaceTrafficHourlyProjector>()));
         var provider = services.BuildServiceProvider();
         return new FaceMatchBackgroundService(
             provider.GetRequiredService<IServiceScopeFactory>(), _h.Settings, clock, _h.Logs.CreateLogger<FaceMatchBackgroundService>());

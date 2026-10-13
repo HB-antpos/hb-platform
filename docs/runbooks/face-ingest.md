@@ -1044,6 +1044,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | ⑤ 命中图到期删除 | 10 分钟 | 删除 `ImageDeleteAtUtc` 已到（含已驳回提前到期）的命中图并把 `ImageObjectKey` 置空串；只删形态合法且不在管理端三个私有前缀下的键 | 私有桶未配置 |
 | ⑥ 命中提示发布 + 撤回补偿 | 每个节拍 / 10 分钟 | 发布命中提示（见 16.6）；重试「同意已撤回但腾讯云删除未完成」的登记、补删已撤回登记遗留的登记照 | 命中提示只是一条索引查询 |
 | ⑦ 地域改动作废审查 | 10 分钟 | 把审查地域 ≠ 当前配置地域的档案**只清空审查记录**并写审计 `profile.region-invalidated`（`Result=review-cleared`），**不再把任何档案关成 `Off`**（见 16.3） | 配置地域无效 / 功能未开启时什么都不动（配置写错不波及门店档案） |
+| ⑧ 分时客流投影 | 10 分钟 | 把最近 3 个门店本地日的 `FaceTrafficBucket`（UTC 整点桶）重算成 `FaceTrafficHourly`（门店本地「日期 + 小时」，与营业额同口径，见 16.12）；进程启动后第一次成功投影之后顺带补齐一次历史 | **不调用腾讯云、不依赖管理凭据，也不依赖「有门店启用」**（功能没开启时也把已有计数桶投影出来，免得报表缺数据）；最近 4 天内没有计数桶时只是一条查询；`FaceTrafficHourly` 表不存在（迁移未执行）时记一次 Warning 后跳过，不报错 |
 
 说明：已存在数据的**删除类补偿**（过期访客库、撤回后的清理、命中图到期）不依赖「有门店启用」，否则门店关闭后数据会无人清理；没有可删的行时它们只是廉价查询。
 
@@ -1051,6 +1052,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 1. **迁移**：主 API 带 `--schema=migrate` 显式执行 `20261014.001-face-match`（建九张表：`FaceStoreProfile`、`FaceConsentRecord`、`FaceEnrollment`、`FaceVisitGroup`、`FaceTrafficBucket`、`FaceMatchEvaluation`、`FaceAuditLog`、`FaceUnwelcomeEntry`、`FaceMatchTask`；幂等，签名校验通过才登记账本）。
    **API 启动只做只读 schema 检查，不迁移；账本里没有这条迁移时主 API 启动失败（容器退出并打印诊断码），所以必须先迁移、再部署新版本的主 API**（与其他版本号迁移相同）。
+   **分时客流表**：`20261016.001-face-traffic-hourly`（只建 `FaceTrafficHourly` 一张表，见 16.12）与上面同一次 `--schema=migrate` 一起执行，同样须先迁移、再部署主 API；没有新环境变量、没有新权限码、没有新接口。
 2. **权限入库 SQL**（手工执行一次，规则同 14.2）：`services/backend/BlazorApp.Api/Data/Migrations/20261014_AddFaceMatchPermissions.sql`（登记五个权限码，幂等，`CreatedBy = Migration_20261014_FaceMatch`，不授予任何角色）。
    ```bash
    sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend/BlazorApp.Api/Data/Migrations/20261014_AddFaceMatchPermissions.sql
@@ -1067,7 +1069,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 4. **部署主 API + Web**（先后端后前端；顺序与 `hotbargain-vip-deploy` 一致）。此时没有任何门店档案、没有管理凭据：页面显示「功能未开启」，一切照旧。
 5. **腾讯云与 `.env`**（16.9）→ 重建 `hb-api` 容器 → `GET /config` 应返回 `enabled=true` 与所选地域。
 6. 在角色管理里授权需要的账号；然后按 16.3 给试点门店逐项补齐合规记录（缺口现在只是警告，不拦截，但对真实顾客运行前法律上必须补齐）再切模式。每一步都可回退：门店档案保存 `Off` 即可立刻停止接收端对该店的一切比对。
-- **回滚代码**：回滚主 API / Web 即可；九张表与权限行保留无害（没有任何调用方）。紧急停用：清空 `FACE_MATCH_ADMIN_SECRET_KEY` 并重建容器（接口 503、后台任务空转），或把相关门店档案改 `Off`，或 `FACE_MATCH_BACKGROUND_ENABLED=false`。
+- **回滚代码**：回滚主 API / Web 即可；九张表、`FaceTrafficHourly` 表与权限行保留无害（没有任何调用方）。紧急停用：清空 `FACE_MATCH_ADMIN_SECRET_KEY` 并重建容器（接口 503、后台任务空转），或把相关门店档案改 `Off`，或 `FACE_MATCH_BACKGROUND_ENABLED=false`。
 - **nginx 请求体大小**：上传接口（登记照最多 5×5MB、名单参考照片同）整体约 26MB，经 Nginx 到 `/api/` 的路径需 `client_max_body_size` ≥ 30m（Kestrel 默认上限 30,000,000 字节）。
 
 ### 16.9 腾讯云管理子账号与凭据写入（需账号持有人在控制台完成，不要把密钥贴进对话）
@@ -1127,6 +1129,136 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
   接收端仍保留的是功能前提：匹配可用、名单需要私有 COS、去重需要可解析的时区。主 API 的后台任务⑦只清空地域不符的审查记录，不再关闭档案。
 - 访客库 `FaceVisitGroup`：`GroupId` 即腾讯云库编号（`v{门店}_{yyyyMMdd}`），`BusinessDate` 为门店本地营业日，`DeleteAfterUtc` 不得早于本地营业日结束；`DeletedAtUtc` 只由主 API 写。
 - 命中图键：接收端写入 `FaceMatchTask.ImageObjectKey`，必须是安全字符的相对路径（`[A-Za-z0-9_.-/]`，不含 `..`），**不得**落在 `face-match/consent/`、`face-match/enrollment/`、`face-match/unwelcome/` 下；建议 `face-match/hit/{门店}/{yyyy}/{MM}/{dd}/{TaskId}.jpg`。
+
+### 16.12 客流分时表与营业额对齐（`FaceTrafficHourly`）
+
+**为什么有这张表**：接收端把客流计数按 **UTC 整点**累加进 `FaceTrafficBucket`；而营业额（POSM `sales_order.OrderTime` → 主库 `HourlySalesStatistic`）是**门店本地墙钟时间**，悉尼 / 墨尔本有夏令时，
+两者直接按小时 JOIN 会整体错位 1 小时。所以主 API 的后台任务⑧把计数桶换算成「门店 + 本地日期 + 本地小时」落到 `FaceTrafficHourly`，报表可以直接按这三列 JOIN 营业额。
+本节只讲这张表和它的写入；报表本身不在此范围。迁移 `20261016.001-face-traffic-hourly` 只新建这一张表，不修改 `FaceTrafficBucket` 等任何现有表；接收端不读不写它；没有新增接口、权限码、环境变量。
+
+| 列 | 类型 | 含义 |
+| --- | --- | --- |
+| `StoreCode` | `nvarchar(32)` | 门店编码（与 `Store.StoreCode`、`FaceTrafficBucket.StoreCode`、营业额 `HourlySalesStatistic.BranchCode` 同一套编码） |
+| `StatDate` | `date` | 门店**本地**日期（墙钟，不是 UTC） |
+| `StatHour` | `tinyint` | 门店**本地**小时 0–23（`CHECK` 约束兜底） |
+| `CaptureCount` / `StaffMatchCount` / `UniqueVisitorCount` / `RepeatCount` / `LowQualityCount` / `ApiFailureCount` | `int NOT NULL`，默认 0 | 与 `FaceTrafficBucket` 同名列同含义，按本地小时求和 |
+| `VisitCount` | `int NOT NULL`，默认 0 | **派生列**：`max(0, CaptureCount − StaffMatchCount − LowQualityCount − ApiFailureCount)` |
+| `TimeZoneId` | `nvarchar(64) NOT NULL` | 换算所用的 IANA 时区（门店之后改了时区，历史行仍能追溯当时的依据） |
+| `ComputedAtUtc` | `datetime2 NOT NULL` | 该行内容最近一次写入（新建或数值 / 时区变化）的时间；内容没变的重算不会改它 |
+
+主键 `(StoreCode, StatDate, StatHour)`；另有 `IX_FaceTrafficHourly_StatDate_Store (StatDate, StoreCode)`，方便按日期区间扫全部门店。迁移的只读门禁错误号：`52820` 表缺失、`52821` 列签名不兼容、`52822` 主键 / 日期索引签名不兼容。
+
+**口径（报表使用前必读）**
+
+- **`VisitCount` = 非员工进店人次**：含当日重复出现的人（同一个人一天来三次算三次）。**`UniqueVisitorCount` = 该小时首次出现的当日新访客**：同一天各小时相加才是当日唯一访客数；两者口径不同，**不要相加**，也不要用 `UniqueVisitorCount` 当「进店人数」去除营业额。
+- **`UniqueVisitorCount` 恒为估算值**：同一个人换角度 / 戴口罩可能被当成两个人，漏识别也会少算；当日访客库以门店本地营业日为界，跨日不去重。
+- 受门店档案开关影响：**没开「顾客去重」的门店** `UniqueVisitorCount` / `RepeatCount` 恒为 0（`VisitCount` 仍有值）；**没开「员工排除」的门店** `StaffMatchCount` 恒为 0，此时 `VisitCount` 会把员工也算进去。
+- **只有 `Match` 模式的门店才有计数桶，因此只有这些门店才有分时行**（`Capture` / `Off` 不写计数）。没有计数桶的门店不产生行；某小时没有任何抓拍也没有行（不补零行），报表要自己对齐营业时间。
+- 保留策略：**永久保留**，没有清理任务；表里只有计数和时区，**没有任何生物信息**。数据量每店每天最多 24 行。
+
+**夏令时（悉尼 / 墨尔本）**
+
+- UTC 整点到本地整点用 .NET `TimeZoneInfo` 换算（不依赖服务器时区）。布里斯班无夏令时，恒为 UTC+10。
+- **开始日**（如 2026-10-04，本地 02:00→03:00）：本地 02 点不存在，该日没有 `StatHour = 2` 的行，全天只有 23 个小时。
+- **结束日**（如 2027-04-04，本地 03:00→02:00）：本地 02 点出现两次，两个 UTC 小时（`15:00Z` 与 `16:00Z`）的计数**相加**落在同一行 `StatHour = 2`——与营业额按 `OrderTime.Hour` 归并的口径一致，不是后写覆盖。
+
+**重算窗口与幂等**
+
+- 任务⑧每 10 分钟对每个最近 4 天内有计数桶的门店，重算「**最近 3 个门店本地日（含今天）**」涉及的全部小时：用窗口内全部 UTC 桶按（本地日期，本地小时）重新求和，与库里已有的行逐行对比，只写有变化的行（新增 / 整行覆盖 / 删除不再产生的行），一个事务内完成；内容没变的重算不写库。
+  不依赖增量水位，所以接收端晚到的计数、门店改时区后的重算都自然正确。单个门店失败只记 Warning、下一轮重试，不影响其他门店。
+- **门店改时区**：行里的 `TimeZoneId` 记当次换算所用时区。改时区后，重算窗口（最近 3 个本地日）内的行会被新时区**整体覆盖**（新时区下不再产生的行会被删除）；**窗口之外的历史行保持原样**，仍记着当时的时区，不会被追溯改写。这是有意的取舍：历史营业额已按当时的墙钟统计，不应因为之后改了门店配置而改变。
+- **首次部署 / 迁移晚于计数开始**：进程启动后第一次成功投影之后，会补齐一次历史——某门店最早的计数桶比最早的分时行还早时，把缺失的日期补出来（该门店还没有任何分时行时补到今天）；已有分时行的日期不会被改写。之后不再重复。
+- **API 停机超过 3 天后的中间缺口**不会被自动补，需要手工回填（下节）。
+
+**手工回填（应急；常规情况不需要）**
+
+`FaceTrafficHourlyProjector.RebuildAsync(storeCode?, fromDate, toDate)` 是与定期任务同一套逻辑的内部方法（区间内以重算结果为准，区间外不动，可重复执行），**按要求没有 HTTP / CLI 入口**（单元测试覆盖）。
+需要在生产手工补一段历史时，用下面的 SQL（单店单时区，事务内「先删后插」，口径与应用一致：同一本地小时的多个 UTC 桶相加、`VisitCount` 夹到 0）。
+`@WinZone`：悉尼 / 墨尔本用 `AUS Eastern Standard Time`，布里斯班用 `E. Australia Standard Time`；`@IanaZone` 必须是门店当前实际生效的时区（档案 → 门店表 → 州推导）。
+先在测试环境或用 `SELECT` 改写预览，确认再执行；回补前备份该门店该区间的现有分时行（`SELECT … INTO` 一张临时备份表）。
+
+<!-- sql:face-traffic-hourly-backfill -->
+```sql
+DECLARE @StoreCode nvarchar(32) = N'2001';
+DECLARE @IanaZone  nvarchar(64) = N'Australia/Sydney';
+DECLARE @WinZone   nvarchar(64) = N'AUS Eastern Standard Time';
+DECLARE @FromDate  date = '2027-04-02';   -- 本地日期，含
+DECLARE @ToDate    date = '2027-04-04';   -- 本地日期，含
+
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+
+DELETE FROM dbo.FaceTrafficHourly
+WHERE StoreCode = @StoreCode AND StatDate >= @FromDate AND StatDate <= @ToDate;
+
+INSERT dbo.FaceTrafficHourly
+    (StoreCode, StatDate, StatHour, CaptureCount, StaffMatchCount, UniqueVisitorCount, RepeatCount,
+     LowQualityCount, ApiFailureCount, VisitCount, TimeZoneId, ComputedAtUtc)
+SELECT @StoreCode, l.StatDate, l.StatHour,
+       SUM(b.CaptureCount), SUM(b.StaffMatchCount), SUM(b.UniqueVisitorCount), SUM(b.RepeatCount),
+       SUM(b.LowQualityCount), SUM(b.ApiFailureCount),
+       CASE WHEN SUM(b.CaptureCount) - SUM(b.StaffMatchCount) - SUM(b.LowQualityCount) - SUM(b.ApiFailureCount) > 0
+            THEN SUM(b.CaptureCount) - SUM(b.StaffMatchCount) - SUM(b.LowQualityCount) - SUM(b.ApiFailureCount)
+            ELSE 0 END,
+       @IanaZone, SYSUTCDATETIME()
+FROM dbo.FaceTrafficBucket AS b
+CROSS APPLY (SELECT CONVERT(datetime2(0), (b.BucketStartUtc AT TIME ZONE 'UTC') AT TIME ZONE @WinZone) AS LocalTime) AS t
+CROSS APPLY (SELECT CONVERT(date, t.LocalTime) AS StatDate, DATEPART(hour, t.LocalTime) AS StatHour) AS l
+WHERE b.StoreCode = @StoreCode
+  AND b.BucketStartUtc >= DATEADD(day, -1, CONVERT(datetime2, @FromDate))
+  AND b.BucketStartUtc <  DATEADD(day, 2, CONVERT(datetime2, @ToDate))
+  AND l.StatDate >= @FromDate AND l.StatDate <= @ToDate
+GROUP BY l.StatDate, l.StatHour;
+
+COMMIT TRANSACTION;
+```
+
+**与营业额按（门店，本地日期，小时）JOIN**
+
+营业额的分时来源是**主库**（和 `FaceTrafficHourly` 同库）的 `dbo.HourlySalesStatistic`——已核实（代码依据）：
+
+- 表 / 列：`HourlySalesStatistic(Date, Hour, BranchCode, BranchName, TotalAmount, TotalQuantity, OrderCount, CustomerCount, AverageOrderValue, UpdateTime)`，主键 `(Date, Hour, BranchCode)`（实体 `BlazorApp.Shared/Models/HBweb/Statistic/HourlySalesStatistic.cs`；`SalesDashboardReactService.RevenueSnapshot.SqlServer.cs` 在同一连接里同时读 `[dbo].[HourlySalesStatistic]` 与 `[dbo].[Store]`）。
+- 来源与口径：`SalesStatisticsHourlyRefresher` 按 POSM `sales_order.OrderTime` 的 `.Date` / `.Hour` 分组写入——`OrderTime` 是**门店本地墙钟**（不是 UTC），所以 `Date` / `Hour` 与 `FaceTrafficHourly.StatDate` / `StatHour` 天然同口径，夏令时结束日本地 02 点的两个小时也已合并在 `Hour = 2`。
+  `TotalAmount` = 支付明细金额合计，**含退款单（`Status = 3`，负数）即净额**；`OrderCount` 只数 `Status` 1 / 4 的订单。
+- 门店编码对应：`sales_order.BranchCode`（缺失时经设备编码映射）就是 `Store.StoreCode`；`SalesStatisticsHourlyRefresher` 用 `Store.StoreCode` 取门店名；`BranchCode = 'ALL'` 是全店汇总行，按门店 JOIN 时必须排除（下面示例按 `<> N'ALL'` 排除）。
+- 营业额统计可能没跑完（尤其今天）：以 `SalesStatisticRefreshState`（`StatisticType = 'HourlySales'`、`Date`、`Status`；`Fresh` 才算完整）为准。
+- POSM 原始表（`sales_order` / `payment_detail` / `sales_order_detail`，租户 `HBPOSM`）在**另一个数据库**，跨库 JOIN 既慢又重复统计口径，报表应用主库里的 `HourlySalesStatistic`。
+
+**未核实**（没有连生产库）：生产里 `HourlySalesStatistic.Date` 的实际列类型（实体没指定类型，按 CodeFirst 应是 `datetime`，示例用 `CONVERT(date, …)` 与范围过滤，`date` / `datetime` 都能跑）；生产里两张表 `StoreCode` / `BranchCode` 的排序规则是否一致（同库默认排序规则，应一致）；生产数据的逐店抽样对照（门店编码是否都对得上）。
+下面的示例已在 SQL Server 2022 容器上对 CodeFirst 建出的 `HourlySalesStatistic` 与迁移建出的 `FaceTrafficHourly` 实测通过（`FaceMatchSqlServerTests`）。
+
+<!-- sql:face-traffic-hourly-join -->
+```sql
+DECLARE @FromDate date = '2026-10-01';   -- 本地日期，含
+DECLARE @ToDate   date = '2026-10-14';   -- 本地日期，含
+
+WITH traffic AS (
+    SELECT StoreCode, StatDate, StatHour, VisitCount, UniqueVisitorCount
+    FROM dbo.FaceTrafficHourly
+    WHERE StatDate >= @FromDate AND StatDate <= @ToDate
+), sales AS (
+    SELECT BranchCode AS StoreCode, CONVERT(date, [Date]) AS StatDate, [Hour] AS StatHour,
+           TotalAmount, OrderCount
+    FROM dbo.HourlySalesStatistic
+    WHERE [Date] >= @FromDate AND [Date] < DATEADD(day, 1, @ToDate)
+      AND BranchCode IS NOT NULL AND BranchCode <> N'ALL'
+)
+SELECT COALESCE(t.StoreCode, s.StoreCode) AS StoreCode,
+       COALESCE(t.StatDate, s.StatDate)   AS StatDate,
+       COALESCE(t.StatHour, s.StatHour)   AS StatHour,
+       COALESCE(t.VisitCount, 0)          AS VisitCount,
+       COALESCE(t.UniqueVisitorCount, 0)  AS UniqueVisitorCount,
+       COALESCE(s.TotalAmount, 0)         AS TotalAmount,
+       COALESCE(s.OrderCount, 0)          AS OrderCount,
+       CASE WHEN t.VisitCount > 0
+            THEN CONVERT(decimal(9, 4), COALESCE(s.OrderCount, 0) * 1.0 / t.VisitCount) END AS OrdersPerVisit
+FROM traffic AS t
+FULL OUTER JOIN sales AS s
+    ON s.StoreCode = t.StoreCode AND s.StatDate = t.StatDate AND s.StatHour = t.StatHour
+ORDER BY StoreCode, StatDate, StatHour;
+```
+
+读法：`FULL OUTER JOIN` 保留「有客流没成交」和「有成交没抓到客流」两种小时；`OrdersPerVisit`（订单数 / 到店人次）只是示意——`VisitCount` 含重复到店，不是转化率的严格分母。
 
 ## 17. 人脸比对：接收端
 
