@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   ATTENDANCE_LOCATION_MAX_TRACKING_MS,
   evaluateAttendanceLocationBatch,
+  isAttendanceLocationWindowExpired,
   type AttendanceLocationTrackingWindow,
 } from "./location-tracking-window";
 
@@ -106,6 +107,31 @@ assert.deepEqual(
     capturedAtUtc: "2026-11-01T06:30:00Z",
   },
   "DST 回拨日必须按 UTC 时长和门店本地日期判断",
+);
+
+// 自愈/回前台检查：设备时钟略慢于服务端打卡时间时，不能把刚上班的任务误判为到期。
+assert.equal(
+  isAttendanceLocationWindowExpired(sydneyMorningShift, "2026-07-23T21:59:50Z"),
+  false,
+  "now 略早于 startedAt（设备时钟偏慢）时自愈检查不得判为到期",
+);
+assert.equal(
+  isAttendanceLocationWindowExpired(sydneyMorningShift, "2026-07-23T22:20:00Z"),
+  false,
+  "班次进行中不应到期",
+);
+assert.equal(
+  isAttendanceLocationWindowExpired(sydneyMorningShift, "2026-07-24T08:00:00Z"),
+  true,
+  "满 10 小时到期",
+);
+assert.equal(
+  isAttendanceLocationWindowExpired(
+    { ...sydneyMorningShift, workDate: "2026-07-23" },
+    "2026-07-23T22:20:00Z",
+  ),
+  true,
+  "窗口本身无效（工作日与上班日期不符）按到期处理",
 );
 
 console.log("location-tracking-window.test.ts: ok");

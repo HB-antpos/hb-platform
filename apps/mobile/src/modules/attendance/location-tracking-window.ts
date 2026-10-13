@@ -93,3 +93,22 @@ export function evaluateAttendanceLocationBatch(
     capturedAtUtc,
   };
 }
+
+/**
+ * 自愈/回前台检查用的“窗口是否已到期”判断。
+ *
+ * 与 evaluateAttendanceLocationBatch 的区别：startedAtUtc 来自服务端打卡时间，设备时钟略慢时
+ * now 会早于 startedAt，后者会因此报告 shouldStop；回前台检查不能把刚上班的任务误判为到期而停掉，
+ * 所以 now 早于 startedAt 时按 startedAt 计（任务回调自己的判断逻辑保持不变）。
+ */
+export function isAttendanceLocationWindowExpired(
+  window: AttendanceLocationTrackingWindow,
+  nowUtc: string,
+) {
+  const startedAt = utcTimestamp(window.startedAtUtc);
+  const now = utcTimestamp(nowUtc);
+  const effectiveNowUtc = startedAt !== undefined && now !== undefined && now < startedAt
+    ? window.startedAtUtc
+    : nowUtc;
+  return evaluateAttendanceLocationBatch(window, [], effectiveNowUtc).shouldStop;
+}
