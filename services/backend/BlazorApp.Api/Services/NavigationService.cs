@@ -476,6 +476,36 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "face-unwelcome",
+                TitleKey = "tabs.faceUnwelcome",
+                Icon = "account-cancel-outline",
+                // 移动端「不受欢迎人员名单」：条目维护 / 批准 / 命中复核共用 Web /system/face-match 的名单权限，三者任一即可见；
+                // 页内按钮再按 GET /face-match/config 返回的权限标志精确控制。不新增权限码。
+                // 参考照片和命中抓拍是生物识别信息，设备会话没有用户账号，设备模式菜单（按 DeviceBaseRouteNames 白名单挑选）不会包含此项。
+                AnyPermissions = new[]
+                {
+                    Permissions.FaceMatch.Unwelcome.Manage,
+                    Permissions.FaceMatch.Unwelcome.Approve,
+                    Permissions.FaceMatch.Unwelcome.Review,
+                },
+                Order = 58,
+            },
+            new()
+            {
+                RouteName = "face-match-settings",
+                TitleKey = "tabs.faceMatchSettings",
+                Icon = "face-recognition",
+                // 移动端「人脸比对设置」：门店档案区需要 FaceMatch.Manage，摄像头区需要 FaceCapture.Cameras.Manage，任一即可见；
+                // 页内两个区域各自再按所需权限显示。不新增权限码；设备模式菜单不包含此项。
+                AnyPermissions = new[]
+                {
+                    Permissions.FaceMatch.Manage,
+                    Permissions.FaceCapture.Cameras.Manage,
+                },
+                Order = 58,
+            },
+            new()
+            {
                 RouteName = "device-management",
                 TitleKey = "tabs.deviceManagement",
                 Icon = "cellphone-cog",

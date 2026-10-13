@@ -127,8 +127,8 @@
       "nothingRequested": "当前没有请求启用任何需要闸门的功能。",
       "satisfied": "保存所需的前置条件已满足",
       "missingTitle": "还缺 {{count}} 项：",
-      "warningTitle": "还有 {{count}} 项合规记录未补齐。不会阻止启用，但对真实顾客运行前必须完成",
-      "warningStanding": "合规记录未补齐（共 {{count}} 项）：可以保存并启用，但对真实顾客运行前法律上必须补齐。",
+      "warningTitle": "有 {{count}} 项提示，不会阻止保存和启用；其中合规记录对真实顾客运行前必须补齐",
+      "warningStanding": "合规记录未补齐（共 {{count}} 项）：可以保存并启用，有问题只给提示。",
       "saveWillFail": "还有 {{count}} 项没有补齐：现在保存会被服务端拒绝（409）。",
       "facets": {
         "capture": "Capture 模式（仅限内部知情人员）",

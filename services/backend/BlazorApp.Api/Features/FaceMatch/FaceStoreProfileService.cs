@@ -290,25 +290,28 @@ public sealed class FaceStoreProfileService(
     /// <summary>各 facet 警告条数之和（同一字段被多个 facet 要求时分别计数，与页面各 facet 提示的条数相加一致）。</summary>
     private static int CountWarnings(FaceGateReportDto report) => report.Facets.Sum(f => f.Warnings.Count);
 
-    /// <summary>阻塞：Capture 必须声明只拍知情的内部人员；评估匹配只允许在 Capture 下。</summary>
+    /// <summary>
+    /// 警告（不阻塞，用户 2026-10-13 决定「有问题只给提示」）：Capture 应声明只拍知情的内部人员；
+    /// 评估匹配只在 Capture 下生效（其它模式下接收端会忽略它）。
+    /// </summary>
     private static FaceGateFacetDto CaptureFacet(ProfileDraft draft)
     {
         var requested = draft.Mode == FaceStoreMode.Capture || draft.EvaluateMatch;
-        var missing = new List<string>();
+        var warnings = new List<string>();
         if (requested)
         {
             if (draft.Mode == FaceStoreMode.Capture && string.IsNullOrEmpty(draft.AllowedSubjects))
             {
-                missing.Add("allowedSubjects");
+                warnings.Add("allowedSubjects");
             }
 
             if (draft.EvaluateMatch && draft.Mode != FaceStoreMode.Capture)
             {
-                missing.Add("evaluateMatchRequiresCapture");
+                warnings.Add("evaluateMatchRequiresCapture");
             }
         }
 
-        return new FaceGateFacetDto { Facet = "capture", Requested = requested, Missing = missing };
+        return new FaceGateFacetDto { Facet = "capture", Requested = requested, Warnings = warnings };
     }
 
     /// <summary>Match 模式的合规记录：全部是警告（不阻塞）。</summary>
@@ -341,21 +344,24 @@ public sealed class FaceStoreProfileService(
         return new FaceGateFacetDto { Facet = "match", Requested = requested, Warnings = warnings };
     }
 
-    /// <summary>阻塞：员工排除要求模式不是 Off，且该店至少一份有效登记（功能前提，不是法律记录）。</summary>
+    /// <summary>
+    /// 警告（不阻塞）：员工排除在模式为 Off 时不会生效；该店没有有效的同意与登记时没有可排除的员工
+    /// （员工库此时可能还不存在，搜索可能报错并计入调用失败，登记后恢复）。
+    /// </summary>
     private static FaceGateFacetDto StaffFacet(ProfileDraft draft, int activeEnrollments)
     {
         var requested = draft.StaffExclusionEnabled;
-        var missing = new List<string>();
+        var warnings = new List<string>();
         if (requested)
         {
-            if (draft.Mode == FaceStoreMode.Off) missing.Add("modeOff");
-            if (activeEnrollments == 0) missing.Add("activeEnrollment");
+            if (draft.Mode == FaceStoreMode.Off) warnings.Add("modeOff");
+            if (activeEnrollments == 0) warnings.Add("activeEnrollment");
         }
 
-        return new FaceGateFacetDto { Facet = "staffExclusion", Requested = requested, Missing = missing };
+        return new FaceGateFacetDto { Facet = "staffExclusion", Requested = requested, Warnings = warnings };
     }
 
-    /// <summary>阻塞：去重要求模式不是 Off。Match 下的去重专项律师确认是警告。</summary>
+    /// <summary>警告（不阻塞）：去重在模式为 Off 时不会生效；Match 下的去重专项律师确认缺口。</summary>
     private static FaceGateFacetDto DedupFacet(ProfileDraft draft)
     {
         var requested = draft.TrafficDedupEnabled;
@@ -363,7 +369,7 @@ public sealed class FaceStoreProfileService(
         var warnings = new List<string>();
         if (requested)
         {
-            if (draft.Mode == FaceStoreMode.Off) missing.Add("modeOff");
+            if (draft.Mode == FaceStoreMode.Off) warnings.Add("modeOff");
             // 对真实顾客（Match）运行前须有去重专项律师确认——现在只是警告；Capture 下仅内部知情人员验证，不要求也不警告。
             if (draft.Mode == FaceStoreMode.Match)
             {
@@ -375,7 +381,7 @@ public sealed class FaceStoreProfileService(
         return new FaceGateFacetDto { Facet = "trafficDedup", Requested = requested, Missing = missing, Warnings = warnings };
     }
 
-    /// <summary>阻塞：名单要求模式不是 Off。Match 下的专项记录全部是警告；Capture 下不要求。</summary>
+    /// <summary>警告（不阻塞）：名单在模式为 Off 时不会生效；Match 下的专项记录缺口；Capture 下不要求。</summary>
     private static FaceGateFacetDto UnwelcomeFacet(ProfileDraft draft, FaceMatchResolvedSettings resolved)
     {
         var requested = draft.UnwelcomeListEnabled;
@@ -383,7 +389,7 @@ public sealed class FaceStoreProfileService(
         var warnings = new List<string>();
         if (requested)
         {
-            if (draft.Mode == FaceStoreMode.Off) missing.Add("modeOff");
+            if (draft.Mode == FaceStoreMode.Off) warnings.Add("modeOff");
             // 对真实顾客（Match）运行前才需要专项记录；Capture 下只处理知情的内部人员（AllowedSubjects 由 capture 闸门强制），
             // 名单参考照片与命中图都只涉及内部人员，与顾客去重同一原则：不要求（也不警告）专项评估、律师确认、PIA、告示、培训、
             // 隐私联系人和跨境审查，用于上线前用内部员工的照片端到端测试名单。切到 Match 时这些记录重新计算，缺了显示为警告。

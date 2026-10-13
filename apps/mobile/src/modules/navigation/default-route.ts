@@ -31,6 +31,8 @@ export type AppTabPath =
   | "/(shell)/permissions"
   | "/(shell)/employee-profile"
   | "/(shell)/employee-profile-review"
+  | "/(shell)/face-unwelcome"
+  | "/(shell)/face-match-settings"
   | "/(shell)/legacy-employee-logs"
   | "/(shell)/daily-closes"
   | "/(shell)/device-management"
@@ -73,6 +75,8 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   permissions: "/(shell)/permissions",
   "employee-profile": "/(shell)/employee-profile",
   "employee-profile-review": "/(shell)/employee-profile-review",
+  "face-unwelcome": "/(shell)/face-unwelcome",
+  "face-match-settings": "/(shell)/face-match-settings",
   "legacy-employee-logs": "/(shell)/legacy-employee-logs",
   "daily-closes": "/(shell)/daily-closes",
   "device-management": "/(shell)/device-management",
@@ -93,6 +97,9 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "attendance-personal",
   "attendance-management",
   "employee-profile-review",
+  // 参考照片与命中抓拍是生物识别信息，人脸比对相关接口按账号权限授权，设备会话没有用户账号，设备模式不展示这两个入口。
+  "face-unwelcome",
+  "face-match-settings",
   // 设备会话没有用户账号，老收银操作日志按账号可管理分店授权，设备模式不展示入口。
   "legacy-employee-logs",
   // 日结记录同样按账号权限与可查看分店授权，设备会话没有用户账号，设备模式不展示入口。

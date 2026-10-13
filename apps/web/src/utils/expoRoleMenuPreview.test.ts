@@ -81,6 +81,8 @@ const completePreview = buildPreview([
   P.Roles.View,
   P.EmployeeProfiles.View,
   'EmployeeProfiles.ReviewSensitiveManagedStore',
+  P.FaceMatch.Unwelcome.Manage,
+  P.FaceMatch.Manage,
   P.DeviceRegistration.View,
   P.Reports.ProductMovementView,
 ])
@@ -120,6 +122,8 @@ assertArrayEqual(
     'permissions',
     'employee-profile',
     'employee-profile-review',
+    'face-unwelcome',
+    'face-match-settings',
     'device-management',
     'reports',
     'app-install',
@@ -212,6 +216,40 @@ assertEqual(
   buildPreview([P.StoreProducts.PriceUpdates]).allRoutes.find((route) => route.routeName === 'price-updates')?.visible,
   true,
   '拥有 StoreProducts.PriceUpdates 时应显示价格更新入口',
+)
+
+// 不受欢迎人员名单：三个名单权限任一可见；档案管理 / 摄像机管理 / 客流统计权限都不能打开它（名单页展示生物识别照片）。
+for (const code of [P.FaceMatch.Unwelcome.Manage, P.FaceMatch.Unwelcome.Approve, P.FaceMatch.Unwelcome.Review]) {
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'face-unwelcome')?.visible,
+    true,
+    `拥有 ${code} 时应显示不受欢迎人员名单入口`,
+  )
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'face-match-settings')?.visible,
+    false,
+    `仅有 ${code} 时不应显示人脸比对设置入口`,
+  )
+}
+for (const code of [P.FaceMatch.Manage, P.FaceMatch.Traffic.View, P.FaceCapture.CamerasManage, P.FaceCapture.ImagesView]) {
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'face-unwelcome')?.visible,
+    false,
+    `仅有 ${code} 时不应显示不受欢迎人员名单入口`,
+  )
+}
+// 人脸比对设置：档案管理或摄像机管理任一可见，名单与客流统计权限不能打开它。
+for (const code of [P.FaceMatch.Manage, P.FaceCapture.CamerasManage]) {
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'face-match-settings')?.visible,
+    true,
+    `拥有 ${code} 时应显示人脸比对设置入口`,
+  )
+}
+assertEqual(
+  buildPreview([P.FaceMatch.Traffic.View]).allRoutes.find((route) => route.routeName === 'face-match-settings')?.visible,
+  false,
+  '仅有客流统计权限时不应显示人脸比对设置入口',
 )
 
 const warehouseRoute = completePreview.allRoutes.find((route) => route.routeName === 'warehouse')

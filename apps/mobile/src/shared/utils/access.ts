@@ -22,6 +22,18 @@ export const PERMISSIONS = {
   DailyCloseRecords: {
     View: "DailyCloseRecords.View",
   },
+  // 人脸比对（不受欢迎人员名单、门店档案）与摄像机管理：后端 Permissions.FaceMatch.* / FaceCapture.Cameras.Manage，Admin 靠角色放行。
+  FaceMatch: {
+    Manage: "FaceMatch.Manage",
+    Unwelcome: {
+      Manage: "FaceMatch.Unwelcome.Manage",
+      Approve: "FaceMatch.Unwelcome.Approve",
+      Review: "FaceMatch.Unwelcome.Review",
+    },
+  },
+  FaceCapture: {
+    CamerasManage: "FaceCapture.Cameras.Manage",
+  },
   EmployeeProfiles: {
     View: "EmployeeProfiles.View",
     Edit: "EmployeeProfiles.Edit",

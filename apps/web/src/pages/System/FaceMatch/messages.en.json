@@ -127,8 +127,8 @@
       "nothingRequested": "No feature that needs a gate is currently requested.",
       "satisfied": "Prerequisites for saving are met",
       "missingTitle": "{{count}} missing:",
-      "warningTitle": "{{count}} compliance record(s) still incomplete. This does not block enabling, but they must be completed before running on real customers",
-      "warningStanding": "Compliance records incomplete ({{count}} in total): you can save and enable, but they are legally required before running on real customers.",
+      "warningTitle": "{{count}} hint(s). They do not block saving or enabling; compliance records must be completed before running on real customers",
+      "warningStanding": "Compliance records incomplete ({{count}} in total): you can save and enable; problems are shown as hints only.",
       "saveWillFail": "{{count}} item(s) still missing: saving now will be rejected by the server (409).",
       "facets": {
         "capture": "Capture mode (informed internal people only)",

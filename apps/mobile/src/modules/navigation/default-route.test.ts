@@ -461,6 +461,34 @@ assertEqual(
   "账号会话必须保留后端下发的日结记录入口"
 );
 
+// 人脸比对两个入口：路径已登记；参考照片与命中抓拍是生物识别信息，设备会话没有用户账号，设备模式必须隐藏。
+assertEqual(
+  TAB_PATHS["face-unwelcome"],
+  "/(shell)/face-unwelcome",
+  "face unwelcome route is registered as a valid tab path"
+);
+assertEqual(
+  TAB_PATHS["face-match-settings"],
+  "/(shell)/face-match-settings",
+  "face match settings route is registered as a valid tab path"
+);
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["product-query", "face-unwelcome", "face-match-settings"],
+    isDeviceMode: true,
+  }).join(","),
+  "workbench,product-query,settings",
+  "设备模式收到显式人脸比对菜单时也必须隐藏这两个入口"
+);
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["daily-closes", "face-unwelcome", "face-match-settings"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,daily-closes,face-unwelcome,face-match-settings,settings",
+  "账号会话必须保留后端下发的人脸比对入口"
+);
+
 assertEqual(
   TAB_PATHS["seasonal-cards"],
   "/(shell)/seasonal-cards",

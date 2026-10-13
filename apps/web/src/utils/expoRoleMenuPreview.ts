@@ -169,6 +169,8 @@ const TAB_PATHS: Record<string, string> = {
   permissions: '/(shell)/permissions',
   'employee-profile': '/(shell)/employee-profile',
   'employee-profile-review': '/(shell)/employee-profile-review',
+  'face-unwelcome': '/(shell)/face-unwelcome',
+  'face-match-settings': '/(shell)/face-match-settings',
   'device-management': '/(shell)/device-management',
   'app-install': '/(shell)/app-install',
   'app-downloads': '/(shell)/app-downloads',
@@ -210,6 +212,8 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   permissions: { zhTitle: '权限管理', enTitle: 'Permission Management' },
   'employee-profile': { zhTitle: '员工', enTitle: 'Employee' },
   'employee-profile-review': { zhTitle: '员工资料审核', enTitle: 'Employee Profile Review' },
+  'face-unwelcome': { zhTitle: '不受欢迎名单', enTitle: 'Unwelcome list' },
+  'face-match-settings': { zhTitle: '人脸比对设置', enTitle: 'Face match settings' },
   'device-management': { zhTitle: '设备管理', enTitle: 'Devices' },
   'app-install': { zhTitle: 'App 安装', enTitle: 'Install app' },
   'app-downloads': { zhTitle: 'App 下载', enTitle: 'App Downloads' },
@@ -496,6 +500,24 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: ['EmployeeProfiles.ReviewSensitiveManagedStore'],
     order: 58,
     ...ROUTE_LABELS['employee-profile-review'],
+  },
+  {
+    routeName: 'face-unwelcome',
+    titleKey: 'tabs.faceUnwelcome',
+    icon: 'account-cancel-outline',
+    // 与后端 FullAppMenu 一致：移动端「不受欢迎人员名单」与 Web /system/face-match 的名单页签共用三个名单权限，任一即可见；不新增权限码。
+    permissionCodes: [P.FaceMatch.Unwelcome.Manage, P.FaceMatch.Unwelcome.Approve, P.FaceMatch.Unwelcome.Review],
+    order: 58,
+    ...ROUTE_LABELS['face-unwelcome'],
+  },
+  {
+    routeName: 'face-match-settings',
+    titleKey: 'tabs.faceMatchSettings',
+    icon: 'face-recognition',
+    // 与后端 FullAppMenu 一致：档案管理（FaceMatch.Manage）或摄像机管理（FaceCapture.Cameras.Manage）任一即可见。
+    permissionCodes: [P.FaceMatch.Manage, P.FaceCapture.CamerasManage],
+    order: 58,
+    ...ROUTE_LABELS['face-match-settings'],
   },
   {
     routeName: 'device-management',

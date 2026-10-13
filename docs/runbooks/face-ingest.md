@@ -974,12 +974,12 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 
 模式：`0 Off`（默认）、`1 Capture`（只拍知情同意的内部人员，必填 `AllowedSubjects`）、`2 Match`（生产）。档案不存在或读取失败，接收端一律按 `Off`。
 
-闸门报告（`GET /profiles/{storeCode}`、`POST .../check`、保存响应与 409 的 `details`）每个 facet 有两个列表：**`missing` = 仍然阻塞保存的项**，**`warnings` = 不阻塞但必须始终可见的合规记录缺口**；
+闸门报告（`GET /profiles/{storeCode}`、`POST .../check`、保存响应与 409 的 `details`）每个 facet 有两个列表：**`missing` = 阻塞保存的项**（2026-10-13 起**目前没有任何项会进入 `missing`**，保留给将来再出现的硬性前提），**`warnings` = 不阻塞但必须始终可见的提示**（合规记录缺口，以及下面表里的结构 / 功能性问题）；
 报告另有 `canSave`（只看 `missing`）与 `hasWarnings`；门店列表每行有 `gateWarningCount`（各 facet 警告条数之和，同一字段被多个 facet 要求时分别计数）。
 
-**仍然阻塞（缺任何一项 → 409 `FACE_MATCH_GATE_NOT_MET`，`details` 列出缺项）——结构性 / 功能性前提，不是合规记录：**
+**下列结构性 / 功能性问题原来是阻塞项，现在也只给警告（用户 2026-10-13 决定「有问题只给提示」），保存照常成功：**
 
-| 要启用的东西 | 阻塞项（`missing`） |
+| 要启用的东西 | 提示项（`warnings`），仍会显示但不拦截 |
 | --- | --- |
 | `Capture` | `allowedSubjects`（必须声明只拍知情的内部人员）；`EvaluateMatch`（标定评估）只允许在 Capture 下（`evaluateMatchRequiresCapture`） |
 | 员工排除 `StaffExclusionEnabled` | 模式不是 Off（`modeOff`），且该门店成员中存在有效的同意与登记（`activeEnrollment`） |
