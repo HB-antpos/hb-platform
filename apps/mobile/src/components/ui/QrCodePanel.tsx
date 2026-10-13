@@ -6,9 +6,11 @@ interface QrCodePanelProps {
   label: string;
   value: string;
   size?: number;
+  /** 二维码下方是否再显示一遍原文；调用方已在别处展示同一串值时可关闭，默认显示。 */
+  showValue?: boolean;
 }
 
-export function QrCodePanel({ label, value, size = 168 }: QrCodePanelProps) {
+export function QrCodePanel({ label, value, size = 168, showValue = true }: QrCodePanelProps) {
   const normalizedValue = value.trim();
 
   return (
@@ -32,9 +34,11 @@ export function QrCodePanel({ label, value, size = 168 }: QrCodePanelProps) {
           </View>
         )}
       </View>
-      <Text selectable variant="bodyMedium" style={styles.value}>
-        {normalizedValue || "--"}
-      </Text>
+      {showValue ? (
+        <Text selectable variant="bodyMedium" style={styles.value}>
+          {normalizedValue || "--"}
+        </Text>
+      ) : null}
     </Surface>
   );
 }

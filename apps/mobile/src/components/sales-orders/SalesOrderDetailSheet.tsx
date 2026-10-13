@@ -1,5 +1,6 @@
 import { ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Divider, Icon, Text } from "react-native-paper";
+import { QrCodePanel } from "@/components/ui/QrCodePanel";
 import { InsightSheet } from "@/components/warehouse-product-insights/InsightSheet";
 import type { InvoiceAction } from "@/modules/sales-orders/invoice";
 import { summarizeSalesOrderLines } from "@/modules/sales-orders/logic";
@@ -101,6 +102,15 @@ export function SalesOrderDetailSheet({
               </View>
             ) : null}
           </View>
+        ) : null}
+
+        {/*
+          订单二维码：载荷固定为完整 orderGuid，与 POS 小票上打印的机读码一致，
+          收银台可直接扫它调出这笔订单（退货等）。订单头已显示 GUID 原文，这里不再重复。
+          列表项先行展示订单头时即可显示，不必等明细加载完成。
+        */}
+        {order?.orderGuid ? (
+          <QrCodePanel label={t("detail.orderQr")} value={order.orderGuid} showValue={false} />
         ) : null}
 
         {loading ? (
