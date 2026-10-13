@@ -123,7 +123,8 @@ for (const { name, text } of sources) {
 
 // 8) 用词与口径（用户已定）：
 //    · 一律使用「不受欢迎人员名单」，不得出现「黑名单」/ blacklist；
-//    · 相似度不是「同一个人的概率」，疑似匹配的提示文案固定；
+//    · 相似度只能写成「不等于是同一个人的概率」（旧写法会被读成「不是同一个人」的概率，有歧义），疑似匹配的提示文案固定；
+//    · 命中复核只需一个有复核权限的人判断一次，复核场景不得再出现双人复核、复核人序数、须换人确认的说法；
 //    · 唯一访客数必须标注估算。
 {
   const everything = [JSON.stringify(pageMessages.zh), JSON.stringify(pageMessages.en), JSON.stringify(globalMessages.zh), JSON.stringify(globalMessages.en)]
@@ -138,30 +139,71 @@ for (const { name, text } of sources) {
   expectEqual(zh.faceMatch.tabs.unwelcome, '不受欢迎人员名单', '中文页签名')
   expectEqual(
     (zh.faceMatch.review as Record<string, string>).suspectedNotice,
-    '疑似匹配（相似度 {{percent}}%），不是同一个人的概率，必须由两人人工确认',
+    '疑似匹配（相似度 {{percent}}%，不等于是同一个人的概率），需要人工核对确认',
     '中文疑似匹配提示',
   )
   expectEqual(
     (zh.faceMatch.review as Record<string, string>).similarity,
-    '相似度 {{percent}}%（不是同一个人的概率）',
+    '相似度 {{percent}}%（不等于是同一个人的概率）',
     '中文相似度展示',
   )
+  expectEqual(
+    (zh.faceMatch.review.columns as Record<string, string>).similarity,
+    '相似度（不等于是同一个人的概率）',
+    '中文相似度列头',
+  )
+  // 复核弹框确认「是同一个人」的文案同样要写明口径
+  if (!String((zh.faceMatch.review.confirmMatch as Record<string, string>).content).includes('不等于是同一个人的概率')) {
+    throw new Error('复核确认弹框必须写明「相似度不等于是同一个人的概率」')
+  }
+  // 有歧义的旧写法（字面量拆开写，避免全仓库检索旧文案时命中本测试自身）
+  const ambiguousProbability = '不是同一个人' + '的概率'
+  if (JSON.stringify(pageMessages.zh).includes(ambiguousProbability)) {
+    throw new Error(`中文文案不得使用有歧义的旧写法，应写「不等于是同一个人的概率」: ${ambiguousProbability}`)
+  }
   const enSuspected = String((en.faceMatch.review as Record<string, string>).suspectedNotice)
-  if (!/Suspected match/.test(enSuspected) || !/not the probability/.test(enSuspected) || !/two people/.test(enSuspected)) {
-    throw new Error(`英文疑似匹配提示必须写清「疑似」「不是同一个人的概率」「两人确认」: ${enSuspected}`)
+  if (!/Suspected match/.test(enSuspected) || !/not the probability/.test(enSuspected) || /two people|second/i.test(enSuspected)) {
+    throw new Error(`英文疑似匹配提示必须含 Suspected match 与 not the probability，且不得再写双人确认: ${enSuspected}`)
   }
   const enSimilarity = String((en.faceMatch.review as Record<string, string>).similarity)
-  if (!/not the probability/.test(enSimilarity)) throw new Error('英文相似度展示必须写明不是同一个人的概率')
+  if (!/not the probability/.test(enSimilarity)) throw new Error('英文相似度展示必须写明 not the probability')
   // 档位文案
   expectEqual((zh.faceMatch.review.band as Record<string, string>).high, '较高', '中文档位')
   expectEqual((zh.faceMatch.review.band as Record<string, string>).normal, '一般', '中文档位')
   // 复核按钮文案
   expectEqual((zh.faceMatch.review.verdict as Record<string, string>).match, '是同一个人', '中文复核按钮')
   expectEqual((zh.faceMatch.review.verdict as Record<string, string>).notMatch, '不是同一个人', '中文复核按钮')
-  // 第二复核人必须是不同的人
-  if (!String((zh.faceMatch.review.step as Record<string, string>).second).includes('须由不同于第一复核人的人确认')) {
-    throw new Error('第二复核人步骤提示必须写明「须由不同于第一复核人的人确认」')
+  // 单人复核：复核状态与步骤文案固定，且复核场景（review 节点 + 门店档案名单说明 + 错误码文案）不再出现双人复核的说法。
+  expectEqual((zh.faceMatch.review.status as Record<string, string>).confirmed, '已确认', '中文已确认状态')
+  expectEqual((zh.faceMatch.review.status as Record<string, string>).pending, '待复核', '中文待复核状态')
+  expectEqual((zh.faceMatch.review.step as Record<string, string>).first, '待复核', '中文待复核步骤')
+  if ('second' in (zh.faceMatch.review.step as Record<string, string>) || 'second' in (en.faceMatch.review.step as Record<string, string>)) {
+    throw new Error('复核步骤不应再有 second 键（旧的待二审步骤）')
   }
+  if ('firstReviewer' in zh.faceMatch.review || 'firstReviewer' in en.faceMatch.review) {
+    throw new Error('不应再有「前一位复核人已判断，请后一位确认」的提示横幅文案 firstReviewer')
+  }
+  expectEqual((zh.faceMatch.review as Record<string, string>).reviewerFirst, '复核人：{{name}}', '中文复核人')
+  expectEqual((zh.faceMatch.review as Record<string, string>).reviewerSecond, '补充复核人：{{name}}', '中文补充复核人（仅旧遗留任务）')
+  if (!String((zh.faceMatch.review as Record<string, string>).intro).includes('系统不会自动拒绝服务或通知警方')) {
+    throw new Error('复核页说明必须写明系统不会自动拒绝服务或通知警方')
+  }
+  const reviewScope = [
+    JSON.stringify(zh.faceMatch.review),
+    JSON.stringify(en.faceMatch.review),
+    // 旧后端兼容：错误码文案表里保留 FACE_MATCH_SAME_REVIEWER，但措辞不再出现复核人序数
+    JSON.stringify((zh.faceMatch.errors as Record<string, unknown>).FACE_MATCH_SAME_REVIEWER),
+    JSON.stringify((en.faceMatch.errors as Record<string, unknown>).FACE_MATCH_SAME_REVIEWER),
+  ].join('\n')
+  // 复核人序数的中文禁用词用「序数 + 复核」拼出来，同样是避免全仓库检索旧文案时命中本测试自身。
+  const ordinalBanned = ['第二', '第一'].map((ordinal) => new RegExp(`${ordinal}复核`))
+  for (const banned of [...ordinalBanned, /两人/, /两位/, /不同于/, /已由第二人/, /second reviewer/i, /first reviewer/i, /two[- ]person/i, /two people/i, /different person/i, /second person/i]) {
+    if (banned.test(reviewScope)) throw new Error(`复核场景文案不得再出现双人复核的说法（命中 ${banned}）`)
+  }
+  // 门店档案里的名单说明：命中名单进入「人工复核」，不再写成双人复核
+  const zhUnwelcomeList = JSON.stringify(zh).match(/命中名单时提示店员并进入[^。]*。/)?.[0] ?? ''
+  if (zhUnwelcomeList !== '命中名单时提示店员并进入人工复核。') throw new Error(`门店档案名单说明应写「进入人工复核」，实际是「${zhUnwelcomeList}」`)
+  if (/two[- ]person review/i.test(JSON.stringify(en))) throw new Error('英文文案不得再写 two-person review')
   // 唯一访客数必须标注估算（中英文）
   if (!String(zh.faceMatch.traffic.uniqueVisitorEstimate).includes('估算')) throw new Error('中文唯一访客数列头必须含「估算」')
   if (!String(zh.faceMatch.traffic.estimateNotice).includes('估算值')) throw new Error('中文客流说明必须写明估算值')

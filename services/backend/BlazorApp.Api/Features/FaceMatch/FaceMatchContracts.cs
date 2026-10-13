@@ -415,7 +415,7 @@ public sealed record FaceUnwelcomeTaskDto
     /// <summary>high（较高）/ normal（一般），由配置 FaceMatch:Unwelcome:HighBandScore 划分。</summary>
     public string Band { get; init; } = "normal";
 
-    /// <summary>0 Pending、1 Dismissed、2 ConfirmedBySecondPerson。</summary>
+    /// <summary>0 Pending、1 Dismissed、2 Confirmed。</summary>
     public int ReviewStatus { get; init; }
 
     public string ReviewStatusName { get; init; } = string.Empty;
@@ -432,10 +432,10 @@ public sealed record FaceUnwelcomeTaskDto
     /// <summary>条目参考照片张数（并排显示用）；条目已撤回 / 过期时为 0。</summary>
     public int ReferencePhotoCount { get; init; }
 
-    /// <summary>first（待第一复核人）/ second（待第二复核人）/ none（已结束）。</summary>
+    /// <summary>first（待复核；也包括旧版遗留的「已一审待二审」任务）/ none（已结束）。2026-10-13 起一个人复核即可，不再返回 second。</summary>
     public string NextStep { get; init; } = "none";
 
-    /// <summary>当前登录人是否能做下一步（Review 权限、门店范围内、图片还在、第二复核人不同于第一复核人）。</summary>
+    /// <summary>当前登录人是否能复核（Review 权限、门店范围内、任务待复核、命中图还在）。</summary>
     public bool CanReview { get; init; }
 }
 

@@ -191,7 +191,8 @@ export function normalizeFaceUnwelcomeTask(value: unknown): FaceUnwelcomeTask {
     imageDeleteAtUtc: asString(raw.imageDeleteAtUtc),
     referencePhotoCount: Math.max(0, Math.trunc(asNumber(raw.referencePhotoCount))),
     nextStep: asString(raw.nextStep, "none"),
-    // 能否复核只认服务端的 canReview（含第二人必须不同于第一人）。
+    // 能否复核只认服务端的 canReview，App 不自己推断。
+    // nextStep 原样保留（first / none，旧后端可能还有 second），由 review-logic 统一折算成「待复核 / 已结束」。
     canReview: raw.canReview === true,
   };
 }

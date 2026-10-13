@@ -428,7 +428,10 @@ try {
   assert.deepEqual(bodyOf(lastCall()), { note: 'handled' })
 
   // ───────── 复核任务：列表 / 判断 / 统计 ─────────
-  responseFactory = () => json({ success: true, data: { items: [taskPayload, { taskId: 'x', score: 61.6, band: 'weird', nextStep: undefined }], page: 1, pageSize: 20, hasMore: true } })
+  // 第三条是旧版后端遗留的「已一审、待二审」任务：nextStep 仍是 second，原样解析（界面按「待复核」显示），
+  // 复核人姓名照常解析；canReview 完全以后端为准（这里是 true，前端不能因为已有复核人就改成 false）。
+  const legacySecondTask = { ...taskPayload, taskId: 'legacy', nextStep: 'second', firstReviewerName: 'Sam', secondReviewerName: 'Alex', canReview: true }
+  responseFactory = () => json({ success: true, data: { items: [taskPayload, { taskId: 'x', score: 61.6, band: 'weird', nextStep: undefined }, legacySecondTask], page: 1, pageSize: 20, hasMore: true } })
   const tasks = await getUnwelcomeTasks({ status: 0, page: 1, pageSize: 20 })
   assert.equal(lastCall().url, '/api/react/v1/face-match/unwelcome/tasks?status=0&page=1&pageSize=20')
   assert.equal(tasks.items[0].scorePercent, 87)
@@ -438,6 +441,10 @@ try {
   assert.equal(tasks.items[1].scorePercent, 62, '缺 scorePercent 时由分数四舍五入')
   assert.equal(tasks.items[1].nextStep, 'none', '缺 nextStep 视为已结束')
   assert.equal(tasks.items[1].canReview, false)
+  assert.equal(tasks.items[2].nextStep, 'second', '旧版遗留的 second 原样解析')
+  assert.equal(tasks.items[2].firstReviewerName, 'Sam')
+  assert.equal(tasks.items[2].secondReviewerName, 'Alex', 'secondReviewerName 仍解析（旧遗留任务）')
+  assert.equal(tasks.items[2].canReview, true, 'canReview 以后端为准')
   assert.equal(normalizeFaceUnwelcomeTask({ referencePhotoCount: -3 }).referencePhotoCount, 0)
 
   responseFactory = () => json({ success: true, data: { ...taskPayload, reviewStatus: 1 } })

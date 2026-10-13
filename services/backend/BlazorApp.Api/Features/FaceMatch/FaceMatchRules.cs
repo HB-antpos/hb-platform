@@ -187,7 +187,7 @@ internal static class FaceMatchRules
     {
         FaceMatchReviewStatus.Pending => "pending",
         FaceMatchReviewStatus.Dismissed => "dismissed",
-        FaceMatchReviewStatus.ConfirmedBySecondPerson => "confirmed",
+        FaceMatchReviewStatus.Confirmed => "confirmed",
         _ => "unknown",
     };
 

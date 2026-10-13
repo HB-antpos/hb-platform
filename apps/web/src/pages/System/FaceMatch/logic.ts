@@ -745,7 +745,7 @@ export function validateDisputeNote(value: string | null | undefined): Validatio
   return null
 }
 
-// ───────────── 复核任务：相似度、档位、两人复核流程 ─────────────
+// ───────────── 复核任务：相似度、档位、单人复核流程 ─────────────
 
 export const REVIEW_STATUS_PENDING = 0
 
@@ -784,18 +784,20 @@ export function formatSimilarityPercent(task: Pick<FaceUnwelcomeTask, 'scorePerc
   return Math.min(100, Math.max(0, Math.round(value)))
 }
 
-export type ReviewStep = 'first' | 'second' | 'done'
+/** 复核只有一步：first = 待复核，done = 已结束。 */
+export type ReviewStep = 'first' | 'done'
 
-/** nextStep：first 待第一复核人、second 待第二复核人、其余（none / 未知）视为已结束。 */
+/**
+ * nextStep：first 待复核；second 是旧版后端遗留的「已一审、待二审」任务，现在一个人判断即结束，
+ * 所以同样按「待复核」处理（界面不出现复核序数字样）；其余（none / 未知）视为已结束。
+ */
 export function getReviewStep(task: Pick<FaceUnwelcomeTask, 'nextStep'>): ReviewStep {
-  if (task.nextStep === 'first') return 'first'
-  if (task.nextStep === 'second') return 'second'
+  if (task.nextStep === 'first' || task.nextStep === 'second') return 'first'
   return 'done'
 }
 
 export const REVIEW_STEP_HINT_KEYS: Record<ReviewStep, string> = {
   first: 'faceMatch.review.step.first',
-  second: 'faceMatch.review.step.second',
   done: 'faceMatch.review.step.done',
 }
 

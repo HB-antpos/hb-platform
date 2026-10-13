@@ -301,10 +301,49 @@ for (const [tree, pattern] of [[zh, /在线|离线/], [en, /online|offline/i]] a
     assert.equal(pattern.test(text), false, `摄像头状态「${text}」不能写成在线 / 离线（摄像机没有心跳）`);
   }
 }
-// 相似度口径：任何展示相似度的文案都带「不是同一个人的概率」
-assert.ok((lookup(zh, "review.similarity") as string).includes("不是同一个人的概率"));
+// 相似度口径：任何展示相似度的文案都写「不等于是同一个人的概率」（旧写法少了「等于」二字，有歧义）
+assert.ok((lookup(zh, "review.similarity") as string).includes("不等于是同一个人的概率"));
 assert.ok((lookup(en, "review.similarity") as string).includes("not the probability"));
+const AMBIGUOUS_SIMILARITY_WORDING = new RegExp(["不是同一个人", "的概率"].join(""));
+for (const [key, value] of leaves(zh)) {
+  assert.equal(AMBIGUOUS_SIMILARITY_WORDING.test(value), false, `${key} 仍是有歧义的旧写法，请写成「不等于是同一个人的概率」`);
+}
+for (const key of ["review.confirmMatch.content"]) {
+  assert.ok((lookup(zh, key) as string).includes("不等于是同一个人的概率"), `${key} 要写明相似度不等于是同一个人的概率`);
+}
+// 状态文案
+assert.equal(lookup(zh, "review.status.confirmed"), "已确认");
+assert.equal(lookup(en, "review.status.confirmed"), "Confirmed");
 assert.ok((lookup(zh, "review.band.high") as string) === "较高" && (lookup(zh, "review.band.normal") as string) === "一般");
+
+// 命中复核：一个有复核权限的人判断一次即结束，界面（含旧后端兼容用的错误文案）不再出现先后复核人、需要多人的说法。
+// 名单条目批准（unwelcome.*：管理员一人批准、非管理员「其他」类别需两位）是另一件事，不在检查范围内。
+{
+  // 用拼接构造正则，避免这些被禁用的说法在源码里留下字面量
+  const TWO_PERSON_ZH = new RegExp(["两人", "两位", "第一", "第二", "二审", "一审", "不同于"].map((word) => (word === "第一" || word === "第二" ? `${word}复核` : word)).join("|"));
+  const TWO_PERSON_EN = new RegExp(["two-person", "two people", "two different", "second reviewer", "first reviewer", "different person"].join("|"), "i");
+  const reviewScope = (tree: Tree): [string, string][] => [
+    ...leaves((lookup(tree, "review") as Tree), "review."),
+    ["errors.codes.FACE_MATCH_SAME_REVIEWER", lookup(tree, "errors.codes.FACE_MATCH_SAME_REVIEWER") as string],
+    ["settings.profile.hints.unwelcomeList", lookup(tree, "settings.profile.hints.unwelcomeList") as string],
+  ];
+  for (const [key, value] of reviewScope(zh)) {
+    assert.equal(TWO_PERSON_ZH.test(value), false, `中文 ${key} 不应再出现多人复核的说法：${value}`);
+  }
+  for (const [key, value] of reviewScope(en)) {
+    assert.equal(TWO_PERSON_EN.test(value), false, `英文 ${key} 不应再出现多人复核的说法：${value}`);
+  }
+  // 复核人姓名文案：旧版遗留任务的 secondReviewerName 展示为「补充复核人」
+  assert.equal(lookup(zh, "review.reviewerFirst"), "复核人：{{name}}");
+  assert.equal(lookup(zh, "review.reviewerSecond"), "补充复核人：{{name}}");
+  // 针对后一位复核人的提示横幅与「待后一位复核」步骤文案已删除
+  assert.equal(lookup(zh, "review.firstReviewer"), undefined);
+  assert.equal(lookup(zh, "review.step.second"), undefined);
+  assert.equal(lookup(en, "review.firstReviewer"), undefined);
+  assert.equal(lookup(en, "review.step.second"), undefined);
+  // 弹框不再展示那条提示横幅
+  assert.equal(stripComments(sourceOf("ReviewTaskModal.tsx")).includes("review.firstReviewer"), false);
+}
 
 // ───────── 5. 路由薄壳只做转发 ─────────
 {

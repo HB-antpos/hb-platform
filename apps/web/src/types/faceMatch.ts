@@ -228,13 +228,13 @@ export interface FaceMatchPage<T> {
 
 // ───────────── 不受欢迎人员名单 ─────────────
 
-/** 1 暴力或威胁、2 有组织或有记录的反复盗窃、3 其他（须说明、需两位批准人）。没有「一般偷窃」。 */
+/** 1 暴力或威胁、2 有组织或有记录的反复盗窃、3 其他（须说明；非管理员提交需两位批准人，管理员一人即可）。没有「一般偷窃」。 */
 export type FaceUnwelcomeCategory = 1 | 2 | 3
 
 /** 0 待批准、1 生效中、2 已到期、3 已撤回。 */
 export type FaceUnwelcomeEntryStatus = 0 | 1 | 2 | 3
 
-/** 0 待复核、1 已驳回、2 已由第二人确认。 */
+/** 0 待复核、1 已驳回（判断「不是同一个人」）、2 已确认（判断「是同一个人」）。 */
 export type FaceUnwelcomeReviewStatus = 0 | 1 | 2
 
 export interface FaceUnwelcomeEntry {
@@ -285,7 +285,7 @@ export interface FaceUnwelcomeTask {
   cameraId: string
   capturedAtUtc: string
   entryId: string
-  /** 相似度 0-100，不是「同一个人的概率」。 */
+  /** 相似度 0-100，不等于是同一个人的概率。 */
   score: number
   scorePercent: number
   band: FaceUnwelcomeBand
@@ -293,12 +293,13 @@ export interface FaceUnwelcomeTask {
   reviewStatusName: string
   firstReviewerName: string | null
   firstReviewedAtUtc: string | null
+  /** 只有旧版遗留任务才有；展示时当作「补充复核人」。 */
   secondReviewerName: string | null
   secondReviewedAtUtc: string | null
   imageAvailable: boolean
   imageDeleteAtUtc: string
   referencePhotoCount: number
-  /** first / second / none */
+  /** first = 待复核；none = 已结束。旧版后端还会返回 second（已一审待二审的遗留任务），前端一律当作待复核。 */
   nextStep: string
   canReview: boolean
 }

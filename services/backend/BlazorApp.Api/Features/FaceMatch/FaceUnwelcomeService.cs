@@ -14,7 +14,8 @@ namespace BlazorApp.Api.Features.FaceMatch;
 ///    专项评估 / 律师确认等记录缺口在门店档案里是警告，不在这里拦截）——开关没开之前，照片只留在私有桶里，不会发往腾讯云；
 /// 4. 撤回 / 到期：先把状态改成 Withdrawn / Expired（接收端只用 Active 条目，立即停止匹配），再 DeletePerson 并删参考照片，
 ///    删不干净的由后台任务重试（照片键清空即清理完成的标志）；
-/// 5. 复核至少两人：第一复核人 ≠ 第二复核人，任何一方「不是同一个人」即 Dismissed，Dismissed 后命中图提前到期删除；
+/// 5. 复核一个人就够（2026-10-13 用户决定）：任何有复核权限的人判断一次即结案——「是同一个人」→ Confirmed，「不是」→ Dismissed，
+///    Dismissed 后命中图提前到期删除；旧版遗留的「已一审、待二审」任务由下一位复核人（含第一复核人本人）直接结案；
 /// 6. 命中图与参考照片只经服务端转发查看（对象键只来自数据库、归属校验、只给 Review 权限），每次查看都写持久审计。
 /// 全部响应不含姓名与事件细节。
 /// </summary>
@@ -512,17 +513,18 @@ public sealed class FaceUnwelcomeService(
         }
 
         var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var step = "first";
+        // 一个人就够：判断一次即结案。驳回后命中图不再有留存必要：提前到期，由后台任务删除（只保留元数据与分数用于误报统计）。
+        var dismissed = verdict == "notMatch";
+        var imageDeleteAt = dismissed && task.ImageDeleteAtUtc > nowUtc ? nowUtc : task.ImageDeleteAtUtc;
+        // 表达式里只放局部变量：SqlSugar 会把三元表达式 / 方法调用翻译成 SQL。
+        var newStatus = dismissed ? FaceMatchReviewStatus.Dismissed : FaceMatchReviewStatus.Confirmed;
+        var pendingStatus = FaceMatchReviewStatus.Pending;
+        var actorId = actor.Id;
+        string step;
         int rows;
         if (string.IsNullOrEmpty(task.FirstReviewerId))
         {
-            var dismissed = verdict == "notMatch";
-            // 驳回后命中图不再有留存必要：提前到期，由后台任务删除（只保留元数据与分数用于误报统计）。
-            var imageDeleteAt = dismissed && task.ImageDeleteAtUtc > nowUtc ? nowUtc : task.ImageDeleteAtUtc;
-            // 表达式里只放局部变量：SqlSugar 会把三元表达式 / 方法调用翻译成 SQL。
-            var newStatus = dismissed ? FaceMatchReviewStatus.Dismissed : FaceMatchReviewStatus.Pending;
-            var pendingStatus = FaceMatchReviewStatus.Pending;
-            var actorId = actor.Id;
+            step = "first";
             rows = await _db.Updateable<FaceMatchTask>()
                 .SetColumns(t => new FaceMatchTask
                 {
@@ -535,23 +537,13 @@ public sealed class FaceUnwelcomeService(
                 .ExecuteCommandAsync(cancellationToken);
             task.FirstReviewerId = actor.Id;
             task.FirstReviewedAtUtc = nowUtc;
-            task.ReviewStatus = newStatus;
-            task.ImageDeleteAtUtc = imageDeleteAt;
         }
         else
         {
-            step = "second";
-            if (string.Equals(task.FirstReviewerId, actor.Id, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new FaceMatchException(409, "FACE_MATCH_SAME_REVIEWER", "第二复核人必须不同于第一复核人。");
-            }
-
-            var dismissed = verdict == "notMatch";
-            var imageDeleteAt = dismissed && task.ImageDeleteAtUtc > nowUtc ? nowUtc : task.ImageDeleteAtUtc;
+            // 旧版遗留：第一复核人已判断「是同一个人」、还在等第二个人（两人复核已取消）。
+            // 现在由当前这位复核人直接结案（允许就是第一复核人本人），记在 Second* 列里留痕。
+            step = "legacy-second";
             var firstReviewer = task.FirstReviewerId;
-            var newStatus = dismissed ? FaceMatchReviewStatus.Dismissed : FaceMatchReviewStatus.ConfirmedBySecondPerson;
-            var pendingStatus = FaceMatchReviewStatus.Pending;
-            var actorId = actor.Id;
             rows = await _db.Updateable<FaceMatchTask>()
                 .SetColumns(t => new FaceMatchTask
                 {
@@ -567,9 +559,10 @@ public sealed class FaceUnwelcomeService(
                 .ExecuteCommandAsync(cancellationToken);
             task.SecondReviewerId = actor.Id;
             task.SecondReviewedAtUtc = nowUtc;
-            task.ReviewStatus = newStatus;
-            task.ImageDeleteAtUtc = imageDeleteAt;
         }
+
+        task.ReviewStatus = newStatus;
+        task.ImageDeleteAtUtc = imageDeleteAt;
 
         if (rows == 0)
         {
@@ -660,7 +653,7 @@ public sealed class FaceUnwelcomeService(
             .Select(g =>
             {
                 var dismissed = g.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Dismissed);
-                var confirmed = g.Count(t => t.ReviewStatus == FaceMatchReviewStatus.ConfirmedBySecondPerson);
+                var confirmed = g.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Confirmed);
                 var closed = dismissed + confirmed;
                 decimal? rate = closed == 0 ? null : Math.Round((decimal)dismissed / closed, 4);
                 return new FaceUnwelcomeStatsEntryDto
@@ -692,12 +685,12 @@ public sealed class FaceUnwelcomeService(
                 To = high == 100 ? 100 : high - 1,
                 Total = inBucket.Count,
                 DismissedCount = inBucket.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Dismissed),
-                ConfirmedCount = inBucket.Count(t => t.ReviewStatus == FaceMatchReviewStatus.ConfirmedBySecondPerson),
+                ConfirmedCount = inBucket.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Confirmed),
             });
         }
 
         var totalDismissed = tasks.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Dismissed);
-        var totalConfirmed = tasks.Count(t => t.ReviewStatus == FaceMatchReviewStatus.ConfirmedBySecondPerson);
+        var totalConfirmed = tasks.Count(t => t.ReviewStatus == FaceMatchReviewStatus.Confirmed);
         return new FaceUnwelcomeStatsDto
         {
             TaskCount = tasks.Count,
@@ -773,10 +766,10 @@ public sealed class FaceUnwelcomeService(
                 : 0;
             var imageAvailable = !string.IsNullOrEmpty(t.ImageObjectKey);
             var pending = t.ReviewStatus == FaceMatchReviewStatus.Pending;
-            var nextStep = !pending ? "none" : string.IsNullOrEmpty(t.FirstReviewerId) ? "first" : "second";
+            // 一个人就够：待复核的任务一律是 first（含旧版遗留的「已一审待二审」任务），不再返回 second，也不再排除第一复核人。
+            var nextStep = pending ? "first" : "none";
             var inScope = allowedStores == null || allowedStores.Contains(t.StoreCode);
-            var canReview = pending && imageAvailable && inScope
-                && !(nextStep == "second" && string.Equals(t.FirstReviewerId, actor.Id, StringComparison.OrdinalIgnoreCase));
+            var canReview = pending && imageAvailable && inScope;
             return new FaceUnwelcomeTaskDto
             {
                 TaskId = t.TaskId,
@@ -969,7 +962,7 @@ public sealed class FaceUnwelcomeService(
         null or "" or "all" => null,
         "pending" or "0" => FaceMatchReviewStatus.Pending,
         "dismissed" or "1" => FaceMatchReviewStatus.Dismissed,
-        "confirmed" or "2" => FaceMatchReviewStatus.ConfirmedBySecondPerson,
+        "confirmed" or "2" => FaceMatchReviewStatus.Confirmed,
         _ => throw FaceMatchErrors.Invalid("status", "状态筛选只能是 pending / dismissed / confirmed（或 0–2）。"),
     };
 

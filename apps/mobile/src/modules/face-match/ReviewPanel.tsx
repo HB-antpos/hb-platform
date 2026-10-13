@@ -178,13 +178,14 @@ function TaskCard({
         <Tag label={statusKey ? t(statusKey) : task.reviewStatusName} tone={reviewStatusTone(task.reviewStatus)} />
       </View>
       <Text style={[styles.time, MONO]}>{formatLocalDateTime(task.capturedAtUtc)}</Text>
-      {/* 口径写在文案里：这是相似度，不是同一个人的概率；任何位置都不单独出现一个裸百分比。 */}
+      {/* 口径写在文案里：这是相似度，不等于是同一个人的概率；任何位置都不单独出现一个裸百分比。 */}
       <Text style={[styles.similarity, MONO]}>{t("review.similarity", { percent })}</Text>
       <View style={styles.similarityRow}>
         <Tag label={t(BAND_LABEL_KEYS[task.band])} tone={task.band === "high" ? "danger" : "warning"} />
         {!task.imageAvailable ? <Tag label={t("review.imageDeleted")} /> : null}
       </View>
       <Text style={faceStyles.muted}>{t(REVIEW_STEP_HINT_KEYS[getReviewStep(task)])}</Text>
+      {/* 复核人：新任务只有一位；secondReviewerName 只会出现在旧版遗留的、已有两位复核人的任务上，按「补充复核人」展示。 */}
       {task.firstReviewerName ? (
         <Text style={faceStyles.muted}>{t("review.reviewerFirst", { name: task.firstReviewerName })}</Text>
       ) : null}

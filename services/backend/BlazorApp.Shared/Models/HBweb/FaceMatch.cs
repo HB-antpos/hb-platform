@@ -49,7 +49,8 @@ public static class FaceMatchReviewStatus
 {
     public const byte Pending = 0;
     public const byte Dismissed = 1;
-    public const byte ConfirmedBySecondPerson = 2;
+    /// <summary>已确认：一个复核人判断「是同一个人」即结案（2026-10-13 用户决定；原设计要第二复核人确认，数值不变，库里旧数据照旧有效）。</summary>
+    public const byte Confirmed = 2;
 }
 
 /// <summary>门店档案：每店一行，决定处理模式与各开关的前置条件记录。</summary>
@@ -410,7 +411,7 @@ public sealed class FaceMatchTask
     [SugarColumn(IsNullable = false, Length = 400)]
     public string ImageObjectKey { get; set; } = string.Empty;
 
-    /// <summary>0 Pending、1 Dismissed、2 ConfirmedBySecondPerson，见 <see cref="FaceMatchReviewStatus"/>。</summary>
+    /// <summary>0 Pending、1 Dismissed、2 Confirmed，见 <see cref="FaceMatchReviewStatus"/>。</summary>
     [SugarColumn(IsNullable = false)]
     public byte ReviewStatus { get; set; }
 

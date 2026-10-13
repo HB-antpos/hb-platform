@@ -6,7 +6,7 @@ namespace BlazorApp.Api.Tests;
 
 /// <summary>
 /// 不受欢迎人员名单：入名单硬条件、提交人 ≠ 批准人、「其他」两人批准、启用闸门、撤回 / 到期的清理、
-/// 两人复核状态机、命中图与参考照片的服务端转发与审计、误报统计。「今天」固定为 2026-10-14 02:00 UTC。
+/// 复核状态机（一个人就够）、命中图与参考照片的服务端转发与审计、误报统计。「今天」固定为 2026-10-14 02:00 UTC。
 /// </summary>
 public sealed class FaceUnwelcomeTests : IDisposable
 {
@@ -530,52 +530,72 @@ public sealed class FaceUnwelcomeTests : IDisposable
     }
 
     [Fact]
-    public async Task 两人复核_第一人确认等第二人_第二人必须不同_第二人确认才算确认()
+    public async Task 一人复核_判断是同一个人即确认结案_不再有第二步_命中图按原保留策略保留()
     {
         var task = await SeedTaskAsync(await SeedActiveEntryAsync());
 
-        var first = await _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "match" }, ReviewerA);
-        Assert.Equal("pending", first.ReviewStatusName);
-        Assert.Equal("second", first.NextStep);
-        Assert.Equal("Reviewer A", first.FirstReviewerName);
-        Assert.False(first.CanReview);   // 对第一复核人本人：不能自己再做第二步
+        var done = await _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "match" }, ReviewerA);
 
-        var same = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "match" }, ReviewerA));
-        Assert.Equal("FACE_MATCH_SAME_REVIEWER", same.Code);
-
-        var second = await _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "match" }, ReviewerB);
-        Assert.Equal("confirmed", second.ReviewStatusName);
-        Assert.Equal("none", second.NextStep);
-        Assert.Equal("Reviewer B", second.SecondReviewerName);
+        Assert.Equal("confirmed", done.ReviewStatusName);
+        Assert.Equal("none", done.NextStep);
+        Assert.Equal("Reviewer A", done.FirstReviewerName);
+        Assert.Null(done.SecondReviewerName);
         var row = await _h.Db.Queryable<FaceMatchTask>().SingleAsync(t => t.TaskId == task);
-        Assert.Equal(FaceMatchReviewStatus.ConfirmedBySecondPerson, row.ReviewStatus);
+        Assert.Equal(FaceMatchReviewStatus.Confirmed, row.ReviewStatus);
         Assert.Equal("rev-a", row.FirstReviewerId);
-        Assert.Equal("rev-b", row.SecondReviewerId);
+        Assert.Null(row.SecondReviewerId);
         // 确认的任务命中图按原保留策略保留，不提前删除。
         Assert.Equal(FaceMatchTestDatabase.Now.AddDays(7), row.ImageDeleteAtUtc);
 
+        // 已结案：任何人再提交都是 409，而不是进入第二步。
         var closed = await Assert.ThrowsAsync<FaceMatchException>(() => _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "match" }, ReviewerB));
         Assert.Equal("FACE_MATCH_TASK_CLOSED", closed.Code);
     }
 
     [Fact]
-    public async Task 任何一方判断不是同一个人_任务立即驳回_命中图提前到期()
+    public async Task 判断不是同一个人_任务立即驳回_命中图提前到期()
     {
-        var entry = await SeedActiveEntryAsync();
-        var firstSaysNo = await SeedTaskAsync(entry);
-        var secondSaysNo = await SeedTaskAsync(entry);
+        var firstSaysNo = await SeedTaskAsync(await SeedActiveEntryAsync());
 
         var a = await _h.Unwelcome.ReviewTaskAsync(firstSaysNo, new() { Verdict = "notMatch" }, ReviewerA);
+
         Assert.Equal("dismissed", a.ReviewStatusName);
         Assert.Equal("none", a.NextStep);
         var rowA = await _h.Db.Queryable<FaceMatchTask>().SingleAsync(t => t.TaskId == firstSaysNo);
         Assert.Null(rowA.SecondReviewerId);
         Assert.Equal(FaceMatchTestDatabase.Now, rowA.ImageDeleteAtUtc);
+    }
 
-        await _h.Unwelcome.ReviewTaskAsync(secondSaysNo, new() { Verdict = "match" }, ReviewerA);
-        var b = await _h.Unwelcome.ReviewTaskAsync(secondSaysNo, new() { Verdict = "notMatch" }, ReviewerB);
+    [Fact]
+    public async Task 旧版遗留的已一审待二审任务_列表按待复核显示_任何复核人包括第一复核人本人都能直接结案()
+    {
+        var entry = await SeedActiveEntryAsync();
+        var confirmByFirst = await SeedTaskAsync(entry);
+        var dismissBySecond = await SeedTaskAsync(entry);
+        // 模拟两人复核时代留下的数据：第一复核人已判断「是同一个人」，状态仍是 Pending。
+        foreach (var id in new[] { confirmByFirst, dismissBySecond })
+        {
+            await _h.Db.Updateable<FaceMatchTask>()
+                .SetColumns(t => new FaceMatchTask { FirstReviewerId = "rev-a", FirstReviewedAtUtc = FaceMatchTestDatabase.Now.AddMinutes(-3) })
+                .Where(t => t.TaskId == id)
+                .ExecuteCommandAsync();
+        }
+
+        var listed = (await _h.Unwelcome.ListTasksAsync("pending", null, 1, 20, ReviewerA)).Items;
+        Assert.All(listed, t =>
+        {
+            Assert.Equal("first", t.NextStep);   // 不再出现 second
+            Assert.True(t.CanReview);            // 第一复核人本人也能结案
+        });
+
+        var a = await _h.Unwelcome.ReviewTaskAsync(confirmByFirst, new() { Verdict = "match" }, ReviewerA);
+        Assert.Equal("confirmed", a.ReviewStatusName);
+        var b = await _h.Unwelcome.ReviewTaskAsync(dismissBySecond, new() { Verdict = "notMatch" }, ReviewerB);
         Assert.Equal("dismissed", b.ReviewStatusName);
-        var rowB = await _h.Db.Queryable<FaceMatchTask>().SingleAsync(t => t.TaskId == secondSaysNo);
+
+        var rowA = await _h.Db.Queryable<FaceMatchTask>().SingleAsync(t => t.TaskId == confirmByFirst);
+        Assert.Equal("rev-a", rowA.SecondReviewerId);   // 结案人记在 Second* 列
+        var rowB = await _h.Db.Queryable<FaceMatchTask>().SingleAsync(t => t.TaskId == dismissBySecond);
         Assert.Equal("rev-b", rowB.SecondReviewerId);
         Assert.Equal(FaceMatchTestDatabase.Now, rowB.ImageDeleteAtUtc);
     }
@@ -605,15 +625,18 @@ public sealed class FaceUnwelcomeTests : IDisposable
     [Fact]
     public async Task 复核写审计_只有任务编号与步骤结论()
     {
-        var task = await SeedTaskAsync(await SeedActiveEntryAsync());
+        var entry = await SeedActiveEntryAsync();
+        var taskA = await SeedTaskAsync(entry);
+        var taskB = await SeedTaskAsync(entry);
 
-        await _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "match" }, ReviewerA);
-        await _h.Unwelcome.ReviewTaskAsync(task, new() { Verdict = "notMatch" }, ReviewerB);
+        await _h.Unwelcome.ReviewTaskAsync(taskA, new() { Verdict = "match" }, ReviewerA);
+        await _h.Unwelcome.ReviewTaskAsync(taskB, new() { Verdict = "notMatch" }, ReviewerB);
 
         var audits = (await _h.Db.Queryable<FaceAuditLog>().Where(a => a.Action == FaceMatchAuditActions.TaskReview).ToListAsync())
             .OrderBy(a => a.AuditId).ToList();
-        Assert.Equal(["first:match", "second:notMatch"], audits.Select(a => a.Result));
-        Assert.All(audits, a => { Assert.Equal(task, a.TargetRef); Assert.Equal("1013", a.StoreCode); });
+        Assert.Equal(["first:match", "first:notMatch"], audits.Select(a => a.Result));
+        Assert.Equal([taskA, taskB], audits.Select(a => a.TargetRef));
+        Assert.All(audits, a => Assert.Equal("1013", a.StoreCode));
     }
 
     // ---------- 看图 ----------
@@ -706,7 +729,7 @@ public sealed class FaceUnwelcomeTests : IDisposable
         var noisy = await SeedActiveEntryAsync();
         var solid = await SeedActiveEntryAsync();
         for (var i = 0; i < 5; i++) await SeedTaskAsync(noisy, score: 62.5m + i, status: FaceMatchReviewStatus.Dismissed);
-        for (var i = 0; i < 4; i++) await SeedTaskAsync(solid, score: 96m, status: FaceMatchReviewStatus.ConfirmedBySecondPerson);
+        for (var i = 0; i < 4; i++) await SeedTaskAsync(solid, score: 96m, status: FaceMatchReviewStatus.Confirmed);
         await SeedTaskAsync(solid, score: 100m, status: FaceMatchReviewStatus.Dismissed);
         await SeedTaskAsync(solid, score: 91m);
 
@@ -812,7 +835,6 @@ public sealed class FaceUnwelcomeTests : IDisposable
             ImageObjectKey = imageKey ?? string.Empty,
             ReviewStatus = status,
             FirstReviewerId = status == FaceMatchReviewStatus.Pending ? null : "rev-a",
-            SecondReviewerId = status == FaceMatchReviewStatus.ConfirmedBySecondPerson ? "rev-b" : null,
             ImageDeleteAtUtc = FaceMatchTestDatabase.Now.AddDays(7),
         }).ExecuteCommandAsync();
         return id;

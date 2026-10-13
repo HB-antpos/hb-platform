@@ -64,7 +64,7 @@ export default function ReviewTasksTab({ context }: { context: FaceMatchTabConte
         ),
       },
       {
-        // 列头直接写明口径：这是相似度，不是同一个人的概率。
+        // 列头直接写明口径：这是相似度，不等于是同一个人的概率。
         title: t('faceMatch.review.columns.similarity'),
         key: 'similarity',
         width: 190,

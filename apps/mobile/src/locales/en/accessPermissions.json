@@ -303,7 +303,7 @@
     },
     "FaceMatch.Unwelcome.Review": {
       "name": "Review unwelcome persons list matches",
-      "description": "On the web admin page /system/face-match (Review tasks tab): receive possible-match alerts for assigned stores, compare the live capture and reference photo side by side, and take part in two-person review (sensitive biometric information, every view is logged)."
+      "description": "On the web admin page /system/face-match (Review tasks tab): receive possible-match alerts for assigned stores, compare the live capture and reference photo side by side, and decide whether they are the same person (sensitive biometric information, every view is logged)."
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
       "name": "Permissions Pos Terminal Cash Drawer Open",

@@ -64,7 +64,7 @@ export default function UnwelcomeEntriesTab({ context }: { context: FaceMatchTab
       return next
     })
 
-  // 批准：二次确认；两位批准人的条目（Other）会提示还需要另一位不同的批准人。
+  // 批准：二次确认；需要多位批准人的条目（非管理员提交的 Other）会提示还需要另一位不同的批准人，管理员一人批准即可生效。
   const approve = (entry: FaceUnwelcomeEntry) => {
     modal.confirm({
       title: t('faceMatch.unwelcome.approve.title'),

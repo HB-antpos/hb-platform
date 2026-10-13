@@ -391,7 +391,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.FaceMatch.Traffic.View, "查看人脸比对客流统计", "系统管理", "Web 页面 /system/face-match「客流统计」- 查看按门店汇总的抓拍、员工、唯一访客（估算）、重复、低质量计数（只有计数，没有任何生物信息）"),
                 new(Permissions.FaceMatch.Unwelcome.Manage, "管理不受欢迎人员名单", "系统管理", "Web 页面 /system/face-match「不受欢迎人员名单」- 提交、查看、撤回不受欢迎人员名单条目并上传参考照片（敏感生物识别信息）"),
                 new(Permissions.FaceMatch.Unwelcome.Approve, "批准不受欢迎人员名单条目", "系统管理", "Web 页面 /system/face-match「不受欢迎人员名单」- 批准条目入名单；批准人必须不同于提交人，「其他」类别需要两位不同的批准人"),
-                new(Permissions.FaceMatch.Unwelcome.Review, "复核不受欢迎人员名单命中", "系统管理", "Web 页面 /system/face-match「复核任务」- 接收所属门店的疑似命中提示，并排查看现场抓拍与参考照片，参与两人复核（敏感生物识别信息，每次查看都会记审计）"),
+                new(Permissions.FaceMatch.Unwelcome.Review, "复核不受欢迎人员名单命中", "系统管理", "Web 页面 /system/face-match「复核任务」- 接收所属门店的疑似命中提示，并排查看现场抓拍与参考照片，判断是否为同一个人（敏感生物识别信息，每次查看都会记审计）"),
                 new(Permissions.Promotions.View, "查看促销", "促销管理", "Web 页面 /pos-admin/promotions 与移动端「促销」- 查看促销活动"),
                 // 全局促销的写接口额外要求 Admin 角色，属有意设计；分店促销仅需本权限。
                 new(Permissions.Promotions.Edit, "编辑促销", "促销管理", "Web 页面 /pos-admin/promotions - 编辑分店促销；全局促销的新增、修改、删除、启停另需管理员角色"),

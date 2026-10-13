@@ -15,7 +15,7 @@
 4. **三个用途分开处理**：
    - **员工排除**：有明确路径（自愿同意），先做。
    - **顾客人脸去重客流**：**按用户决定纳入第一期**。调研认为对顾客做人脸去重没有已知的合法路径（对标 7-Eleven 2021），所以设计成「独立闸门」：对真实顾客运行前，必须记录单独的律师确认、隐私影响评估和门口告示，缺一后端拒绝打开；数据只在当天、当店的访客库里存在，次日删除，只留计数（第 8 节）。
-   - **不受欢迎人员名单提示**：**按用户决定与第一期同时开发，但默认关闭、「暗发布」**——代码上线，任何门店都不能打开，直到该门店记录了不受欢迎人员名单专项的律师确认与评估（第 14 节）。只提示「疑似」，不处置，必须两人复核；入名单有硬条件（严重事件、证据、批准、到期），不是每个小偷都能入。
+   - **不受欢迎人员名单提示**：**按用户决定与第一期同时开发，但默认关闭、「暗发布」**——代码上线，任何门店都不能打开，直到该门店记录了不受欢迎人员名单专项的律师确认与评估（第 14 节）。只提示「疑似」，不处置，必须有人工复核（2026-10-13 起一个人就够，原为两人）；入名单有硬条件（严重事件、证据、批准、到期），不是每个小偷都能入。
 5. **最小权限与两套凭据**：接收端只持有「搜索」权限的腾讯云子账号；员工库和不受欢迎人员名单库的增删由主 API 持有另一套「管理」权限的子账号，互相隔离。
 
 ## 2. 约束与已知事实
@@ -124,7 +124,7 @@
 - 到期自动停用并 `DeletePerson`；提供申诉与更正的受理字段（`DisputeNote`）。
 
 **FaceMatchTask**（命中的复核任务；员工命中不建任务）
-- `TaskId` PK、`StoreCode`、`CameraId`、`CapturedAtUtc`、`EntryId`、`Score`、`ImageObjectKey`（仅此类保留图）、`ReviewStatus`（Pending/ConfirmedBySecondPerson/Dismissed）、`ReviewedBy`、`ReviewedAtUtc`、`ImageDeleteAtUtc`
+- `TaskId` PK、`StoreCode`、`CameraId`、`CapturedAtUtc`、`EntryId`、`Score`、`ImageObjectKey`（仅此类保留图）、`ReviewStatus`（Pending/Confirmed/Dismissed）、`ReviewedBy`、`ReviewedAtUtc`、`ImageDeleteAtUtc`
 - 命中提示文案固定为「**疑似**匹配，需要人工确认」；确认流程至少两人（店员加经理）；不得自动拒绝服务。
 
 **FaceTrafficBucket**（只有计数，无生物信息）
@@ -321,7 +321,7 @@
 - 命中（分数 ≥ 名单阈值）：
   1. 建 `FaceMatchTask`（待复核），保存该张人脸图（私有桶，7 天）；
   2. 通过通知平台（#718）给**该店**持有 `FaceMatch.Unwelcome.Review` 权限的人发提示，文案固定：**「疑似匹配，需要人工确认」**，不显示姓名、不显示事件细节；
-  3. 复核**至少两个人**：店员核对 + 经理确认（`ConfirmedBySecondPerson`）；任何一方判断「不是」即 `Dismissed`；
+  3. 复核：**一个人就够（2026-10-13 用户决定，取代原先「至少两人：店员核对 + 经理确认」）**——有复核权限的人判断一次即结案，「是同一个人」→ `Confirmed`，「不是」→ `Dismissed`；旧数据里「已一审待二审」的任务由下一位复核人直接结案；
   4. **系统不自动拒绝服务、不自动通知警方**；店里怎么处置由门店流程与法务制定。
 - 未命中、命中后被驳回：图片按保留策略删除，驳回的任务只保留元数据与分数用于误报统计。
 - **误报监控**：按条目统计命中数、被驳回比例；某条目驳回率持续偏高，自动提示复核该条目是否应出名单。
@@ -331,7 +331,7 @@
 - **显示的是「相似度」，不是「是同一个人的概率」**：腾讯云返回 0–100 的相似度分数；官方对 3.0 库搜索没有分数与误识率的对照表。界面显示「相似度 87%」没问题，但**必须同时写明「这是相似度，不是同一个人的概率」**，否则店员容易把 87% 理解成「87% 就是这个人」。
 - **按标定后的阈值给档位**：试点标定后分「较高 / 一般」两档（低于不提示的阈值不出现）；页面同时显示相似度百分比与档位。档位阈值不照搬官方表，用本地数据标定。
 - **复核页并排显示两张照片**：现场抓拍 + 该条目的参考照片（仅持有 `FaceMatch.Unwelcome.Review` 的人在复核页可见，走服务端转发与审计）。没有并排对比，人工复核就名存实亡。
-- **提示文案**：「疑似匹配（相似度 87%），**不是同一个人的概率，必须由两人人工确认**」；不显示姓名与事件细节。
+- **提示文案**：「疑似匹配（相似度 87%，**不等于是同一个人的概率**），需要人工核对确认」（通知本身只用英文：`Possible match (similarity 87%). The score is not the probability that this is the same person; a reviewer must check it.`）；不显示姓名与事件细节。注意中文不要写成「不是同一个人的概率」——会被读成「不是同一个人」的概率，意思正好相反（2026-10-13 用户读成了这个意思，已统一改成「不等于是同一个人的概率」）。
 - **记录**：相似度写入 `FaceMatchTask.Score`；误报统计按相似度区间看驳回比例，用于调阈值。
 - **只给有权限的人看**：相似度与参考照片只在复核页与提示里出现；统计页只显示计数。
 
@@ -339,7 +339,7 @@
 
 **FaceUnwelcomeEntry**：`EntryId char(32)` PK；`TencentPersonId nvarchar(64)`；`IncidentCategory tinyint`；`EvidenceRef nvarchar(100)`；`StoreScope nvarchar(500)`（门店编码列表，空表示仅发生门店，由应用层写具体值）；`SubmittedBy`、`SubmittedAtUtc`；`ApprovedBy`、`ApprovedAtUtc`；`ReviewDueAtUtc`；`ExpiresAtUtc`（NOT NULL）；`Status tinyint`（Pending/Active/Expired/Withdrawn）；`PhotoObjectKeysJson nvarchar(2000)`；`DisputeNote nvarchar(500) NULL`。
 
-**FaceMatchTask**：`TaskId char(32)` PK；`StoreCode`；`CameraId`；`CapturedAtUtc`；`EntryId`；`Score decimal(9,4)`；`ImageObjectKey nvarchar(400)`（仅此类保留图）；`ReviewStatus tinyint`（Pending/Dismissed/ConfirmedBySecondPerson）；`FirstReviewerId`、`FirstReviewedAtUtc`；`SecondReviewerId`、`SecondReviewedAtUtc`；`ImageDeleteAtUtc`；`NotifiedAtUtc datetime2 NULL`（主 API 后台任务发出提示后写入）。
+**FaceMatchTask**：`TaskId char(32)` PK；`StoreCode`；`CameraId`；`CapturedAtUtc`；`EntryId`；`Score decimal(9,4)`；`ImageObjectKey nvarchar(400)`（仅此类保留图）；`ReviewStatus tinyint`（Pending/Dismissed/Confirmed；2026-10-13 起一人确认即 Confirmed，原名 ConfirmedBySecondPerson，数值不变）；`FirstReviewerId`、`FirstReviewedAtUtc`；`SecondReviewerId`、`SecondReviewedAtUtc`；`ImageDeleteAtUtc`；`NotifiedAtUtc datetime2 NULL`（主 API 后台任务发出提示后写入）。
 
 **FaceStoreProfile 追加列**：`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy`、`UnwelcomeLegalSignoffAt`、`StaffTrainingDate`、`PrivacyContact`。
 
