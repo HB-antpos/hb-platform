@@ -894,3 +894,202 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 - 每次**成功读取**记一条 Information、每次**被拒绝的尝试**（无权限、编号不存在或归属不一致、图片在本地、未配置、COS 失败等）记一条 Warning，类别 `BlazorApp.Api.Features.FaceCameras.FaceCaptureImageService`，消息以「人脸抓拍图片查看审计」开头，字段：`Result`（成功为 `ok`，否则为上表错误码）、`ActorId`、`ActorName`、`CameraId`、`CaptureId`、`ImageId`、`Bytes`、`AtUtc`（UTC）。
   **日志里没有对象键、COS 地址、桶名、密钥、签名**。检索方式：`docker logs <hb-api 容器> 2>&1 | grep "人脸抓拍图片查看审计"`。
 - Information 级别默认不进中心日志，只在容器日志里，容器重建后会丢；Warning 会进中心日志。**生物信息查看建议后续补持久化审计表**（谁、何时、看了哪张），目前不具备长期追溯能力，权限授予要从严。
+
+## 17. 人脸比对：接收端
+
+设计依据：`docs/design/face-matching-service-20261012.md` 第 5、8、13、14、15 节（**合规部分未经律师确认，对真实顾客运行前必须先过设计里的各道闸门**）。
+本节只讲接收端（`BlazorApp.FaceIngest`）：按门店档案决定每条抓拍怎么处理、调用腾讯云人脸识别（IAI）做搜索、只累加计数、不留生物数据。
+门店档案、员工登记、统计页、访客库清理、名单条目与复核由**主 API / Web** 负责，不在本节。
+
+### 17.1 一句话与默认状态
+
+- **默认全部关闭**。没有配置腾讯云凭据、也没有任何门店档案时，接收端与 P1 的行为完全相同（含 `Capture` 式的全部留存），`/health` 的 `matcherEnabled=false`。
+- 接收端点（P0）的鉴权、落盘、响应码**一概不变**；比对只发生在后台处理器里，腾讯云慢 / 挂不影响摄像机收到 200。
+- 腾讯云凭据只认 `FACE_MATCH_TENCENT_SECRET_ID/KEY` 这一对；**绝不**使用 COS 密钥（`FACE_INGEST_COS_*`）、主密钥（`TENCENT_*`）或任何别的密钥顶替；缺失时匹配整体关闭。
+
+### 17.2 三种模式的行为
+
+门店模式来自库表 `FaceStoreProfile.Mode`（0 Off、1 Capture、2 Match），接收端每 30 秒整表读一次。
+
+| 模式 | 调用腾讯云 | 本地报文 / 图片 | COS | 事件行（`FaceCaptureEvent/Image`） | 计数 |
+| --- | --- | --- | --- | --- | --- |
+| `Off` | 否 | **读完元数据即删**（`.json`、`.bin`、各类标记全删） | 不上传 | 不写 | 不写 |
+| `Capture` | 否；`EvaluateMatch=1` 且匹配可用时，入库成功后**额外**搜一次，把分数写 `FaceMatchEvaluation` | 与 P1 完全相同（存图、写 `.processed`，按保留期清理） | 按 P1 配置 | 照常写 | 不写 |
+| `Match` | 是（见下） | 处理完（无论结果）**全部删除**，不留 `.processed` 等任何残留 | **不上传**；唯一例外是名单命中任务的人脸图 | **不写** | 只写 `FaceTrafficBucket`（整点桶累加） |
+
+`Match` 的处理顺序（每张人脸一次 `SearchFacesReturnsByGroup`，`MaxFaceNum=1`，Base64 上传，`QualityControl=2`）：
+
+1. 同摄像机、同请求体哈希在 `DuplicateBodyWindowSeconds`（300 秒）内重复 → 不搜索、不计数（断网续传的重复推送）。
+2. 员工排除开启且该摄像机 `StaffSuppressSeconds`（30 秒）内刚命中过员工 → 直接计 `StaffMatchCount`，不搜索。
+3. 质量闸门（本地免费）：人脸图最短边 < `Quality:MinEdgePixels`（80）或体积 < `Quality:MinBytes`（4096 字节）或解析不出宽高 → `LowQualityCount+1`，不调用腾讯云。
+4. 一次搜索，groups 按档案开关：员工排除 → `staff`；去重 → 当日访客库 `v{店}_{yyyyMMdd}`；名单 → `unwelcome`。
+5. 判定：员工命中（≥ 员工阈值）→ `StaffMatchCount+1`；否则名单命中（≥ 名单阈值，且条目未过期、门店在范围内）→ 建 `FaceMatchTask`（见 17.8）；
+   去重开启时访客命中（≥ 访客阈值）→ `RepeatCount+1`，无命中 → 在当日访客库建一人并 `UniqueVisitorCount+1`、`FaceVisitGroup.VisitorCount+1`；
+   没开去重 → 只有 `CaptureCount`（「非员工」= 抓拍数 − 员工 − 低质量 − 调用失败）。
+6. 腾讯云调用失败：瞬时错误 / 限频指数退避重试（默认最多 3 次、起步 500ms、封顶 8s，限频起步 ×4），超限则**丢弃并 `ApiFailureCount+1`**，不因失败而留存图片。
+   质量类错误（无人脸等）不重试，计低质量。账号级错误（`AuthFailure.*`、`ResourceUnavailable.*` 欠费 / 未开通 等）告警、不重试，并**暂停调用 60 秒**（期间直接丢弃并计失败）。
+7. 数据库写失败（计数桶 / 访客库行 / 任务）：按处理器退避重试，最多 3 次或本地滞留超 15 分钟，之后**丢弃本条**并记 Error（`dropped after repeated failures`），不会进入 `.failed` 把图片留到保留期。
+
+其它口径：
+
+- **同一家店串行**（每店一把锁）：相邻两条抓拍不会同时判成「新访客」而重复建人；不同店互不阻塞。
+- `CaptureCount` 按**人脸张数**计（一条报文通常只有一张）。没有人脸图的报文（移动侦测、解析失败）只丢弃，不计数。
+- 访客库营业日 = 抓拍接收时刻在门店时区的本地日期；`FaceVisitGroup.DeleteAfterUtc` = 营业日次日本地 02:00 对应的 UTC。
+  处理时已过该时间的**迟到积压抓拍**不再建库建人（只计抓拍数），避免重建一个没人清理的库。
+- 访客 `PersonId` 由抓拍编号确定性哈希生成，重试遇到「已存在」视为成功，不会因重试多建人；访客没有姓名、性别、描述字段。
+- 接收端的腾讯云客户端只允许操作 `v{店}_{yyyyMMdd}` 形式的访客库；员工库、名单库的写入在代码里被拒绝（设计第 9 节第 10 点）。
+
+### 17.3 配置变量（`.env`，全部有默认值）
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `FACE_MATCH_TENCENT_REGION` | `ap-guangzhou` | 腾讯云地域，白名单 `ap-guangzhou` / `ap-shanghai` / `ap-singapore`。**不在白名单 → 匹配整体关闭**并在启动日志报 Error，不会回退到别的地域。改地域后所有门店的跨境审查作废（17.4） |
+| `FACE_MATCH_TENCENT_SECRET_ID` / `FACE_MATCH_TENCENT_SECRET_KEY` | 空 | **密钥**。接收端「搜索」子账号 `face-match-matcher`（17.6）。缺任一 → 匹配整体关闭 |
+| `FACE_MATCH_STAFF_THRESHOLD` | `85` | 员工相似度阈值（0–100，偏严） |
+| `FACE_MATCH_VISITOR_THRESHOLD` | `85` | 当日访客去重阈值（偏严） |
+| `FACE_MATCH_UNWELCOME_THRESHOLD` | `95` | 名单阈值（很严）。**不得低于员工 / 访客阈值**，否则匹配整体关闭 |
+| `FACE_MATCH_STAFF_SUPPRESS_SECONDS` | `30` | 员工命中后同摄像机抑制窗口；`0` 关闭 |
+| `FACE_MATCH_MIN_EDGE_PIXELS` / `FACE_MATCH_MIN_FACE_BYTES` | `80` / `4096` | 质量闸门 |
+
+不开放 `.env` 覆盖、沿用 appsettings 默认的项：重试次数 / 退避（`FaceMatch:Retry:*`）、熔断时长（`FatalCooldownSeconds=60`）、档案刷新（`ProfileRefreshSeconds=30`）、
+Match 处理失败上限（`MatchMaxAttempts=3`、`MatchMaxLocalAgeMinutes=15`）、命中图保留（`Unwelcome:ImageRetentionDays=7`）。
+**按门店覆盖阈值**需要改配置：在 `appsettings.json` 或额外挂载的配置里写 `FaceMatch:Stores:<门店编码>:StaffThreshold` / `VisitorThreshold` / `UnwelcomeThreshold`（环境变量写法 `FaceMatch__Stores__S1013__StaffThreshold`）。
+
+任一取值非法（阈值不在 0–100、格式错误等）→ 匹配整体关闭，原因（只含键名）记在启动日志；**不会让容器起不来**，接收落盘不受影响。
+
+### 17.4 有效模式与降级规则（接收端自己再校验一次）
+
+| 情形 | 有效模式 |
+| --- | --- |
+| 没配数据库连接串 | 与 P1 相同（无档案机制） |
+| 配了数据库，档案**从未读取成功**或**没有该店档案**，且已配置腾讯云凭据 | `Off`（宁可不识别，也不在读不到配置时放开留存） |
+| 同上，但**完全没配凭据**（功能未启用） | 保持 P1 现状，不改变现有门店行为 |
+| 档案 `Mode=0` / 未知值 | `Off` |
+| `Mode=1` | `Capture`；`EvaluateMatch=1` 且匹配可用且开了员工排除或去重 → 同时做评估，否则不评估 |
+| `Mode=2` 但匹配整体不可用（缺凭据、地域非法等） | `Off`（**不是**退回全部留存） |
+| `Mode=2` 且开了员工排除 / 去重 / 名单，但 `CrossBorderRegion` ≠ 当前配置地域，或缺 `CrossBorderReviewRef/By/At` | **降级**：`AllowedSubjects` 非空 → `Capture`（不评估），否则 `Off`；记 Warning（`cross-border-gate`） |
+| `Mode=2` 且去重开启，但 `TimeZoneId` 为空或系统不认识 | 去重关闭，其余照常；记 Warning（接收端无权读门店表，所以档案里的 `TimeZoneId` 必须由主 API 填好） |
+| `UnwelcomeListEnabled` 但缺名单专项记录（`UnwelcomeAssessmentRef`、`UnwelcomeLegalSignoffBy/At`）或没开私有 COS | 名单这一块关闭；记 Warning |
+
+> 重要：**配置腾讯云凭据会让「没有档案的门店」从现状变成 `Off`（读完即删）**。给 1042 等仍在 `Capture` 试点的门店，必须先在 `FaceStoreProfile` 里建好 `Mode=1` 的档案，再配凭据。
+> 刚启动、第一次读档案还没尝试完时，处理器会先等一轮（报文留在盘上），不会因为「还没读」就误判成 `Off`。
+
+### 17.5 阈值标定办法（在 `Capture` 模式的内部人员门店做）
+
+1. 档案：`Mode=1`、`AllowedSubjects` 写明「仅内部测试员工」、`EvaluateMatch=1`、`StaffExclusionEnabled=1`（以及要标定去重就 `TrafficDedupEnabled=1`，并填好 `TimeZoneId`）。员工库里要有真实登记的内部员工。
+2. 评估对每条（非重复）抓拍的第一张人脸搜一次，**不带最低分**，把员工库 / 当日访客库的最高分写进 `FaceMatchEvaluation`：
+
+| `Decision` | 含义 |
+| --- | --- |
+| 0 NoMatch | 没命中任何库且未开去重 |
+| 1 Staff | 员工分 ≥ 员工阈值 |
+| 2 RepeatVisitor | 访客分 ≥ 访客阈值（同一天同一人的重复抓拍） |
+| 3 NewVisitor | 开了去重且无命中：会被当新访客（评估时同样会在当日访客库建人，次日整库删） |
+| 4 LowQuality | 质量闸门不过，或腾讯云判定质量 / 无人脸（分数为空） |
+
+3. 让已知身份的人（员工本人、同一内部人员反复经过）产生数据，按 `CaptureId` 关联 `FaceCaptureEvent` 的抓拍时间与摄像机：
+   同一个人的重复抓拍里 `VisitScore` 的分布（下沿）决定访客阈值的上限，**不同人**之间的最高分（上沿）决定下限；员工同理看 `StaffScore`。
+   腾讯云对 3.0 库搜索没有官方分数–误识率对照表，阈值**只能用本地数据标定**；顾客以澳洲人为主，不要照搬官方表。
+4. 把标定结果写回 `FACE_MATCH_STAFF_THRESHOLD` / `VISITOR_THRESHOLD` / `UNWELCOME_THRESHOLD`（或按门店覆盖），重建容器生效。名单阈值保持明显高于另外两个。
+5. 评估失败（腾讯云错误、数据库错误）只记 Warning，**不影响**原有入库与留存。
+
+### 17.6 腾讯云子账号 `face-match-matcher` 与密钥写入（由账号持有人在控制台完成，我不代做）
+
+1. 控制台 → 访问管理 → 用户 → 新建**自定义策略**并新建子用户 `face-match-matcher`（**只勾「编程访问」**，不要控制台登录）。策略 JSON（若控制台策略生成器给出的 action 写法不同，以控制台为准）：
+
+```json
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "iai:SearchFacesReturnsByGroup",
+        "iai:CreateGroup",
+        "iai:CreatePerson"
+      ],
+      "resource": "*"
+    }
+  ]
+}
+```
+
+   - 只给这三个动作：搜索、建当日访客库、建访客。**不要**给 `DeletePerson`、`DeleteGroup`、`DeleteFace`、`CreateFace`、`GetPersonList` 等；这些属于主 API 的**另一个**管理子账号（`FACE_MATCH_ADMIN_SECRET_ID/KEY`），两套凭据必须是两个不同的子账号。
+   - `CreatePerson` 不支持按库限定资源（设计第 9 节第 10 点），所以子账号理论上能往任何库建人；补偿措施：代码只允许接收端往 `v{店}_{日期}` 库建人，员工库只经主 API 写，主 API 每日核对员工库人数。
+   - 地域：IAI 的地域是调用时的参数，不是策略条件；广州 / 上海已开通，新加坡当前报「计费状态未知」（账号层面未开通）。
+2. 把密钥写进服务器 `.env`，**输入时不回显、不进 shell 历史**，不要贴到对话 / 工单里：
+
+```bash
+cd /www/HBWeb/BackEnd/face-ingest
+read -rs -p 'SecretId: ' FM_ID; echo
+read -rs -p 'SecretKey: ' FM_KEY; echo
+sudo tee -a .env >/dev/null <<EOF
+FACE_MATCH_TENCENT_SECRET_ID=$FM_ID
+FACE_MATCH_TENCENT_SECRET_KEY=$FM_KEY
+EOF
+unset FM_ID FM_KEY
+sudo chmod 600 .env
+sudo grep -c '^FACE_MATCH_TENCENT_SECRET_' .env       # 只核对行数应为 2，不要 cat 整个文件
+```
+
+   重复追加会产生重复行：已写过先用 `sudo nano .env` 修改，不要再追加。写完后按第 6 节的方式重建容器。
+3. 生效核对：`curl -fsS http://127.0.0.1:5004/health` 应看到 `"matcherEnabled":true,"matcherRegion":"ap-guangzhou"`；
+   `docker logs hb-face-ingest 2>&1 | grep 'Face match'` 应是 `Face match configured matcherEnabled=true region=…`。若是 `DISABLED despite credentials being configured: …`，按原因（地域不在白名单、密钥格式、阈值非法等）修正。
+4. 上线前书面向腾讯云确认设计第 9 节第 1、3 点（不保留非库内图片、不用于训练），并取得数据处理协议；告示、隐私政策、员工同意书要写明数据在所选地域处理。
+
+### 17.7 数据库授权与读写的表 / 列（接收端 `face_ingest_app`）
+
+表与列由主 API 的迁移（`20261014.001-face-match`）创建，**接收端不写迁移、不增列**。`face_ingest_app` 的授权（不授 DELETE、不授角色）：
+
+| 表 | 权限 | 接收端的用法 |
+| --- | --- | --- |
+| `FaceStoreProfile` | `SELECT` | 每 30 秒读：`StoreCode, Mode, EvaluateMatch, StaffExclusionEnabled, TrafficDedupEnabled, UnwelcomeListEnabled, AllowedSubjects, CrossBorderRegion, CrossBorderReviewRef, CrossBorderReviewedBy, CrossBorderReviewedAt, TimeZoneId, UnwelcomeAssessmentRef, UnwelcomeLegalSignoffBy, UnwelcomeLegalSignoffAt` |
+| `FaceTrafficBucket` | `SELECT, INSERT, UPDATE` | 整点桶 UPSERT（`UPDATE … WITH (UPDLOCK, SERIALIZABLE)`，没命中再 `INSERT`，列加增量，并发安全） |
+| `FaceVisitGroup` | `SELECT, INSERT, UPDATE(VisitorCount)` | 首次建组 `INSERT`（`DeleteAfterUtc` = 营业日次日本地 02:00 的 UTC），之后只 `VisitorCount = VisitorCount + n` |
+| `FaceMatchEvaluation` | `INSERT` | 评估行；**只有 INSERT 没有 SELECT**，所以用直接插入并吞主键冲突实现幂等 |
+| `FaceUnwelcomeEntry` | `SELECT` | 按 `TencentPersonId` 取 `EntryId, StoreScope, ExpiresAtUtc`（`Status` 的数值含义设计未规定，接收端不依赖，靠腾讯云库成员与 `ExpiresAtUtc` 判定） |
+| `FaceMatchTask` | `SELECT, INSERT` | 名单命中建任务：`TaskId, StoreCode, CameraId, CapturedAtUtc, EntryId, Score, ImageObjectKey, ReviewStatus=0(Pending), ImageDeleteAtUtc`；`NotifiedAtUtc` 与复核人列留空 |
+
+另外沿用 P1：`FaceCamera`（`SELECT`、`UPDATE(LastSeenAtUtc)`）、`FaceCaptureEvent/Image`（`SELECT, INSERT`）。
+
+### 17.8 名单命中（暗发布，默认关闭）
+
+- 只有档案 `UnwelcomeListEnabled=1`、名单专项记录齐全、并且**接收端开了私有 COS**（命中图要存私有桶）时才搜 `unwelcome` 库。
+- 命中（分数 ≥ 名单阈值，条目未过期，条目 `StoreScope` 为空或包含本店）：命中图存 `face-ingest/unwelcome-hits/{店}/{yyyy}/{MM}/{dd}/{摄像机}/{TaskId}.jpg`（私有 ACL；沿用 `FACE_INGEST_COS_*` 的只写 PutObject 子账号，其资源范围 `face-ingest/*` 已覆盖），
+  `FaceMatchTask` 新增一行待复核（`ImageDeleteAtUtc` = 现在 + 7 天）。**接收端不发通知**（通知发布器只在主 API）；主 API 的后台任务轮询 `NotifiedAtUtc IS NULL` 的新任务后发提示，文案固定为「疑似匹配，需要人工确认」，图片按 `ImageDeleteAtUtc` 由主 API 删除。
+  建议再给 `face-ingest/unwelcome-hits/` 配 COS 生命周期（7–8 天）兜底。
+- 日志只记「命中任务已创建」、摄像机、门店、取整分数；不记对象键、`PersonId`、`TaskId`。
+
+### 17.9 部署顺序
+
+1. 主 API：显式迁移（`--schema=migrate`）建 `20261014.001-face-match` 的全部表；DBA 给 `face_ingest_app` 追加 17.7 的授权。**迁移 / 授权没做之前接收端读档案会失败**：每 5 分钟一条 Error（`Face store profile refresh failed`），行为按 17.4（未配置凭据时仍是 P1 现状）。
+2. 在 `FaceStoreProfile` 为现有试点门店建 `Mode=1` 档案（17.4 的重要提示）。
+3. 重新构建并重建 face-ingest（第 5 节流程）。此时未配凭据，行为不变，`/health` 多出 `matcherEnabled=false`、`matcherRegion`。
+4. 完成 17.6，写凭据、重建容器，核对 `/health`。
+5. 内部人员门店先做阈值标定（17.5），再按设计的闸门（隐私影响评估、告示、律师确认、跨境审查）由主 API 把真实门店切到 `Match`。
+
+### 17.10 排查
+
+| 现象 | 看什么 |
+| --- | --- |
+| `matcherEnabled=false` | 启动日志 `Face match …` 一行给出原因：地域缺失 / 不在白名单、SecretId/SecretKey 缺失或格式错、阈值非法。改 `.env` 后重建容器 |
+| 门店抓拍被丢弃 | 日志 `Face ingest capture discarded … mode=Off reason=…`：`profiles-unavailable`（档案读不到）/ `no-profile` / `profile-off` / `match-disabled-by-configuration` / `downgraded-no-allowed-subjects` |
+| 档案读不到 | `Face store profile refresh failed`：连接、权限（17.7）、表是否已迁移。读不到期间已配凭据的门店按 `Off` |
+| 模式被降级 | Warning `Face match store mode degraded store=… reason=…`（`cross-border-gate`、`timezone`、`unwelcome-gate`、`unwelcome-no-cos`、`match-disabled-by-configuration`），每店每原因 10 分钟一条 |
+| 腾讯云调用失败 | Warning / Error `Face match API call failed and was dropped … code=…`（同一错误码 2 分钟一条）。账号级错误（`AuthFailure.*`、`ResourceUnavailable.*`）是 Error 并熔断 60 秒：检查密钥、策略、服务是否开通 / 欠费 |
+| 计数不涨 | `Face ingest capture matched … faces= staff= unique= repeat= lowQuality= apiFailure=`（每条一行，无敏感信息）；`Face ingest Match capture dropped after repeated failures` 表示数据库写失败被丢弃 |
+| 磁盘上有 Match 门店的报文 | 只应出现在处理间隔内；长期滞留说明处理器停了（`FACE_INGEST_PROCESSING_ENABLED=false`）或档案读取一直失败（启动等待） |
+
+### 17.11 回滚
+
+- **关闭匹配、回到只留存**：清空 `FACE_MATCH_TENCENT_SECRET_ID/KEY` 并重建容器。注意 17.4：已有档案的门店仍按档案走，`Mode=2` 的门店在匹配不可用时按 `Off`（读完即删，不留生物数据）；
+  需要这些门店继续留存，先由主 API 把它们改回 `Mode=1`。
+- **某家店紧急停止**：主 API 把该店 `Mode` 改为 0（30 秒内生效，之后该店抓拍读完即删）；或 `Mode=1` 恢复留存。
+- **回滚代码**：用上一个镜像重建容器（第 5 节回滚流程）；新表和档案不影响旧版本，旧版本不读它们。已在腾讯云建的当日访客库由主 API 的清理任务删除；需要手工清理时用管理子账号 `DeleteGroup`，**接收端子账号没有删除权限，这是有意的**。
+- 腾讯云账号侧：停用 `face-match-matcher` 子账号或其密钥即可立刻切断调用，接收端会在 60 秒熔断后持续丢弃（计 `ApiFailureCount`），不会堆积本地生物数据。
+
+### 17.12 已知限制
+
+- 访客「唯一数」是估算：同一人被认成两人（偏高）或两人认成一人（偏低）都会发生；腾讯云新建人员后立刻搜索是否可见官方未说明，试点必须实测，必要时用「同摄像机 N 秒内合并」补偿。
+- Match 模式下计数写库失败的重试，可能让该条的「新访客」变成「重复」（重试时能搜到自己上次建的访客）：只影响极少数数据库抖动的抓拍。
+- 摄像机持续推送而档案读不到（已配凭据）时，抓拍会被丢弃而不是积压；这是「宁可不识别」的设计取舍。

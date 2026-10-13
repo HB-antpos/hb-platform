@@ -96,7 +96,7 @@ internal sealed class LocalImageStore : IImageStore
 /// - 成功判定：HTTP 200 且响应带 ETag；否则抛 <see cref="CosUploadException"/> 走重试；
 /// - 异常信息与日志里不出现预签名 URL（含 q-ak）与密钥。
 /// </summary>
-internal sealed class CosImageStore : IImageStore
+internal sealed class CosImageStore : IImageStore, IUnwelcomeHitImageStore
 {
     public const string Name = "cos";
 
@@ -145,6 +145,20 @@ internal sealed class CosImageStore : IImageStore
         var key = BuildKey("raw", request.StoreCode, request.ReceivedAtUtc, request.CameraId, request.CaptureId + CaptureFileNames.BodyExtension);
         await PutAsync(key, "raw", "application/octet-stream", request.Data, request.Sha256, request.CameraId, request.StoreCode, cancellationToken);
         return new StoredObject(Name, key);
+    }
+
+    /// <summary>COS 已启用即可存名单命中图（本类只有 COS 启用时才会被构造）。</summary>
+    public bool Available => true;
+
+    /// <summary>
+    /// 保存不受欢迎人员名单命中图（设计第 14.3 节）：键 <c>{KeyPrefix}/unwelcome-hits/{storeCode}/{yyyy}/{MM}/{dd}/{cameraId}/{taskId}.jpg</c>，
+    /// 仍是私有 ACL；TaskId 由抓拍编号确定性生成，重试覆盖写同一个键，幂等。
+    /// </summary>
+    public async Task<string> SaveAsync(UnwelcomeHitImage image, CancellationToken cancellationToken)
+    {
+        var key = BuildKey("unwelcome-hits", image.StoreCode, image.CapturedAtUtc, image.CameraId, image.TaskId + CaptureFileNames.ImageExtension);
+        await PutAsync(key, "unwelcome-hits", "image/jpeg", image.Data, image.Sha256, image.CameraId, image.StoreCode, cancellationToken);
+        return key;
     }
 
     /// <summary>对象键；各段都已在上游校验（门店 / 摄像机编号只含安全字符，captureId 为 32 位十六进制）。</summary>

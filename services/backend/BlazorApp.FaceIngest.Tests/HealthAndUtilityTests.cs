@@ -24,10 +24,13 @@ public sealed class HealthAndUtilityTests
             var json = await response.Content.ReadAsStringAsync();
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
-            // 中文注释：P1 按规格新增 cameraSource / cameraSourceReady 两个字段，其余与 P0 相同。
+            // 中文注释：P1 按规格新增 cameraSource / cameraSourceReady 两个字段；人脸比对再新增 matcherEnabled / matcherRegion，其余与 P0 相同。
             Assert.Equal(
-                ["cameraSource", "cameraSourceReady", "captureEnabled", "status", "storedBytes", "storedFileCount"],
+                ["cameraSource", "cameraSourceReady", "captureEnabled", "matcherEnabled", "matcherRegion", "status", "storedBytes", "storedFileCount"],
                 root.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
+            // 默认没配腾讯云凭据：匹配关闭；地域是出厂默认的白名单地域名。
+            Assert.False(root.GetProperty("matcherEnabled").GetBoolean());
+            Assert.Equal("ap-guangzhou", root.GetProperty("matcherRegion").GetString());
             Assert.Equal("json", root.GetProperty("cameraSource").GetString());
             Assert.True(root.GetProperty("cameraSourceReady").GetBoolean());
             Assert.Equal("healthy", root.GetProperty("status").GetString());

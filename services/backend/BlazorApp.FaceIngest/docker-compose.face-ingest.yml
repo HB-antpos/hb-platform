@@ -62,6 +62,23 @@ services:
       - FaceIngest__Cos__Region=${FACE_INGEST_COS_REGION:-}
       - FaceIngest__Cos__SecretId=${FACE_INGEST_COS_SECRET_ID:-}
       - FaceIngest__Cos__SecretKey=${FACE_INGEST_COS_SECRET_KEY:-}
+      # ---- 人脸比对（腾讯云 IAI，设计 docs/design/face-matching-service-20261012.md；详见 runbook 第 17 节）。----
+      # 全部有默认值、默认关闭：没有 SECRET_ID/KEY 时匹配整体关闭、一切保持 P1 现状。
+      # 腾讯云凭据只认下面这一对（接收端「搜索」子账号 face-match-matcher），绝不使用 COS 密钥或主密钥顶替。
+      # 地域必须在白名单内（ap-guangzhou / ap-shanghai / ap-singapore），否则匹配整体关闭并在启动日志里报错；不会回退到别的地域。
+      # 改地域后，所有门店的跨境披露审查记录作废，须重新审查（门店档案的 CrossBorderRegion 必须等于这里的地域）。
+      - FaceMatch__Tencent__Region=${FACE_MATCH_TENCENT_REGION:-ap-guangzhou}
+      - FaceMatch__Tencent__SecretId=${FACE_MATCH_TENCENT_SECRET_ID:-}
+      - FaceMatch__Tencent__SecretKey=${FACE_MATCH_TENCENT_SECRET_KEY:-}
+      # 相似度阈值（0-100，默认取偏严的值，由试点标定后再调；名单阈值不得低于员工 / 访客阈值，否则匹配整体关闭）。
+      - FaceMatch__StaffThreshold=${FACE_MATCH_STAFF_THRESHOLD:-85}
+      - FaceMatch__VisitorThreshold=${FACE_MATCH_VISITOR_THRESHOLD:-85}
+      - FaceMatch__Unwelcome__Threshold=${FACE_MATCH_UNWELCOME_THRESHOLD:-95}
+      # 员工命中后，同摄像机这么多秒内的相邻抓拍直接计员工、不再搜索；0 = 关闭抑制。
+      - FaceMatch__StaffSuppressSeconds=${FACE_MATCH_STAFF_SUPPRESS_SECONDS:-30}
+      # 质量闸门：人脸图最小边长（像素）与最小体积（字节），不达标不调用腾讯云、计低质量。
+      - FaceMatch__Quality__MinEdgePixels=${FACE_MATCH_MIN_EDGE_PIXELS:-80}
+      - FaceMatch__Quality__MinBytes=${FACE_MATCH_MIN_FACE_BYTES:-4096}
     volumes:
       - ${FACE_INGEST_STORAGE_HOST_PATH:?required}:/app/App_Data/FaceIngest
       - ${FACE_INGEST_CONFIG_HOST_PATH:?required}:/app/config:ro

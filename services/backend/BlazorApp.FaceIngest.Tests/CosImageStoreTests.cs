@@ -126,7 +126,7 @@ public sealed class CosImageStoreTests
         Assert.Equal("application/octet-stream", Assert.Single(handler.Requests).ContentType);
     }
 
-    private static CosImageStore CreateStore(CapturingHandler handler, string keyPrefix, bool uploadRawBody)
+    internal static CosImageStore CreateStore(CapturingHandler handler, string keyPrefix, bool uploadRawBody)
     {
         var options = new FaceIngestOptions
         {
