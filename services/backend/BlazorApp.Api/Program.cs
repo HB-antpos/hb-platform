@@ -993,6 +993,9 @@ builder.Services.AddScoped<
     BlazorApp.Api.Services.React.StorePriceUpdateTaskService
 >();
 builder.Services.AddHostedService<BlazorApp.Api.Services.Background.StorePriceUpdateTaskReconcileWorker>();
+// 门店价格更新合并推送（N3-a）：后台按门店合并未通知的任务，经通知平台发布；发布在事务之外，不碰任务服务热路径。
+// 表由迁移 20261015.001-store-price-notice 创建；配置节 StorePriceUpdateNotifications（Enabled / IntervalMinutes / MergeWindowMinutes）。
+builder.Services.AddHostedService<BlazorApp.Api.Services.Background.StorePriceUpdateNotificationWorker>();
 // 分店订货端：暂停供货商品的状态查询与“关注恢复订货”。
 builder.Services.AddScoped<
     BlazorApp.Api.Features.SupplyNotices.IStoreProductSupplyService,

@@ -90,4 +90,10 @@ public static class AppNotificationTypes
 
     /// <summary>不受欢迎人员名单条目到期前 30 天的复核提醒（发给提交人与批准人，不含姓名与事件细节）。</summary>
     public const string FaceUnwelcomeExpiring = "face.unwelcome-expiring";
+
+    /// <summary>
+    /// 门店价格更新合并推送：仓库调价后本店有商品需要改价或换货架标签（同一门店窗口内多条任务合并为一条）。
+    /// 只发给该店持有 StoreProducts.PriceUpdates 的人；正文为英文，只带数量，不含商品与价格明细。
+    /// </summary>
+    public const string StorePriceUpdates = "store.price_updates";
 }

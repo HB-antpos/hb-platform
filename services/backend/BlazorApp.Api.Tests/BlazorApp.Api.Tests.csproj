@@ -37,6 +37,8 @@
     <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
     <Compile Include="WarehousePickingControllerTests.cs" />
     <Compile Include="NotificationPlatformTests.cs" />
+    <Compile Include="StorePriceUpdateNotificationWorkerTests.cs" />
+    <Compile Include="StorePriceUpdateNotificationSqlServerTests.cs" />
     <Compile Include="FaceCameraAdminTests.cs" />
     <Compile Include="FaceCameraPipelineTests.cs" />
     <Compile Include="FaceCameraAdminSqlServerTests.cs" />
