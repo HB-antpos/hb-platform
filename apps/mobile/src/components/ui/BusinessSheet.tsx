@@ -5,7 +5,6 @@ import {
   findNodeHandle,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -60,10 +59,12 @@ export function BusinessSheet({
         if (target) AccessibilityInfo.setAccessibilityFocus(target);
       }}
     >
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      {/*
+        Android 也必须用 padding：Expo 54 默认开启边到边，Modal 的独立窗口不会随键盘 adjustResize，
+        behavior 为空时键盘会直接盖住底部弹层里的输入框。KeyboardAvoidingView 按「键盘与自身的实际重叠量」
+        补 padding，若某些机型窗口已被系统缩小则重叠为 0，不会重复避让。
+      */}
+      <KeyboardAvoidingView style={styles.overlay} behavior="padding">
         <Pressable
           style={styles.backdrop}
           onPress={close}
@@ -108,7 +109,8 @@ export function BusinessSheet({
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: "flex-end", alignItems: "center" },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(16,24,40,0.44)" },
-  sheet: { width: "100%", maxWidth: 680, backgroundColor: HB_COLORS.white, borderTopLeftRadius: HB_RADIUS.sheet, borderTopRightRadius: HB_RADIUS.sheet, overflow: "hidden" },
+  // flexShrink：键盘顶起后可用高度变小，弹层要允许收缩（内部 ScrollView 随之滚动），否则顶部会被挤出屏幕。
+  sheet: { width: "100%", maxWidth: 680, flexShrink: 1, backgroundColor: HB_COLORS.white, borderTopLeftRadius: HB_RADIUS.sheet, borderTopRightRadius: HB_RADIUS.sheet, overflow: "hidden" },
   handle: { width: 44, height: 4, marginTop: 10, marginBottom: 4, borderRadius: 2, backgroundColor: HB_COLORS.outline, alignSelf: "center" },
   header: { paddingLeft: HB_SPACING.md, paddingRight: HB_SPACING.xs, paddingVertical: HB_SPACING.xs, minHeight: 64, flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HB_COLORS.outlineMuted },
   heading: { flex: 1, minWidth: 0 },
