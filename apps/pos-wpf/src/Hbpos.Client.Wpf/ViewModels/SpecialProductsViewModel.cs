@@ -893,6 +893,8 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
         IsBusy = true;
         var totalStopwatch = Stopwatch.StartNew();
+        // 特殊商品列表是否已在价格索引重建之前显示出来（由下面工作流的「列表就绪」回调置位）。
+        var listShown = false;
         try
         {
             Log($"operation=download store={Session.StoreCode} stage=start");
@@ -909,14 +911,27 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
             var progress = new Progress<SpecialProductDownloadProgress>(ApplyDownloadProgress);
             var serviceStopwatch = Stopwatch.StartNew();
+            // 关键逻辑：下载写完本地库后，工作流先回调这里，立刻把特殊商品列表显示出来，
+            // 不等随后可能要几秒的价格索引整体重建；重建期间 IsBusy 仍为 true，下载、编辑等操作继续禁用，
+            // 重建完成（或失败）后才在 finally 复位。
             var result = await _workflowService.DownloadAsync(
                 Session.StoreCode,
                 cancellationToken,
-                progress);
+                progress,
+                specialItems =>
+                {
+                    ApplySpecialItems(specialItems, resetToFirstPage: true);
+                    listShown = true;
+                });
             serviceStopwatch.Stop();
 
             var replaceStopwatch = Stopwatch.StartNew();
-            ApplySpecialItems(result.SpecialItems, resetToFirstPage: true);
+            if (!listShown)
+            {
+                // 兜底：工作流没有回调（或回调里应用失败）时，用返回值显示一次。
+                ApplySpecialItems(result.SpecialItems, resetToFirstPage: true);
+            }
+
             replaceStopwatch.Stop();
 
             var searchStopwatch = Stopwatch.StartNew();
@@ -937,12 +952,12 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
                 result.DownloadResult.DownloadedCount,
                 result.DownloadResult.UnmarkedCount);
             totalStopwatch.Stop();
-            Log($"operation=download store={Session.StoreCode} stage=completed pages={result.DownloadResult.PageCount} downloaded={result.DownloadResult.DownloadedCount} upserted={result.DownloadResult.UpsertedCount} unmarked={result.DownloadResult.UnmarkedCount} serviceElapsedMs={serviceStopwatch.ElapsedMilliseconds} replaceElapsedMs={replaceStopwatch.ElapsedMilliseconds} searchElapsedMs={searchStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            Log($"operation=download store={Session.StoreCode} stage=completed listShownEarly={listShown} pages={result.DownloadResult.PageCount} downloaded={result.DownloadResult.DownloadedCount} upserted={result.DownloadResult.UpsertedCount} unmarked={result.DownloadResult.UnmarkedCount} serviceElapsedMs={serviceStopwatch.ElapsedMilliseconds} replaceElapsedMs={replaceStopwatch.ElapsedMilliseconds} searchElapsedMs={searchStopwatch.ElapsedMilliseconds} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
         }
         catch (Exception ex)
         {
             totalStopwatch.Stop();
-            Log($"operation=download store={Session.StoreCode} stage=failed totalElapsedMs={totalStopwatch.ElapsedMilliseconds} error={ex.Message}");
+            Log($"operation=download store={Session.StoreCode} stage=failed listShownEarly={listShown} totalElapsedMs={totalStopwatch.ElapsedMilliseconds} error={ex.Message}");
             SetStatusText(string.Format(
                 _localization.CurrentCulture,
                 T("specialProducts.status.downloadFailed"),
