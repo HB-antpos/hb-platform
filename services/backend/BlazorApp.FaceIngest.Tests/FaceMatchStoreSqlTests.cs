@@ -52,6 +52,14 @@ public sealed class FaceMatchStoreSqlTests
     }
 
     [Fact]
+    public void 名单条目查询只认已生效的条目_Status等于1()
+    {
+        // 主 API 撤回 / 到期时先把条目改成非 Active，再去腾讯云删人；接收端必须在这个窗口里就不再用该条目建复核任务。
+        Assert.Contains("[Status] = 1", SqlFaceMatchStore.FindUnwelcomeEntrySql, StringComparison.Ordinal);
+        Assert.Contains("[TencentPersonId] = @TencentPersonId", SqlFaceMatchStore.FindUnwelcomeEntrySql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void 访客库行只UPDATE_VisitorCount一列()
     {
         var updates = Regex.Matches(SqlFaceMatchStore.ApplyTrafficSql, @"UPDATE \[dbo\]\.\[FaceVisitGroup\] SET (?<set>.+?) WHERE", RegexOptions.CultureInvariant);
