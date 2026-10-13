@@ -1112,7 +1112,9 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
         var isWholeOrderSnapshot = IsWholeOrderOperation;
-        // 选中退货行（或整单模式下购物车含退货行）的折扣注定被拒绝：先提示，不弹授权 / 主管 PIN。
+        // 行模式下选中退货行的折扣注定被拒绝：先提示，不弹授权 / 主管 PIN。
+        // 整单模式不看选中行（整单折扣只作用于销售行、跳过退货行），工作流照常放行、弹授权；
+        // 唯一例外是购物车里只有退货行、没有可打折的销售行，同样先提示、不弹授权。
         if (TryShowRejectionBeforeAuthorization(_workflowService.GetDiscountRejection(lineSnapshot, isWholeOrderSnapshot)))
         {
             return;
@@ -2431,9 +2433,9 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos.status.discountAmountTooHigh" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.discountPercentOutOfRange" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.quantityMustBePositive" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
-            // 退货行 / 含退货行的整单折扣被拒绝：沿用其它校验失败的错误态与错误音，不新增音效。
+            // 退货行的折扣 / 数量 / 价格被拒绝：沿用其它校验失败的错误态与错误音，不新增音效。
             "pos.status.returnLineDiscountBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
-            "pos.status.orderDiscountBlockedByReturn" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.orderDiscountNoSaleLines" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.returnLineQuantityBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             "pos.status.returnLinePriceBlocked" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
             _ => (StatusFeedbackKind.Neutral, null)

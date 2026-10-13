@@ -114,22 +114,28 @@ public sealed class ReturnLineDiscountGuardTests
     }
 
     [Fact]
-    public void Whole_order_discount_is_rejected_for_the_entire_cart_when_a_return_line_exists()
+    public void Whole_order_discount_applies_to_sale_lines_and_skips_return_line_when_a_return_line_exists()
     {
+        // 预期随「含退货行时允许整单折扣、跳过退货行」改变（原：整张购物车一律拒绝）。
+        // 金额上限按销售行毛额合计（30）比较，而不是含退货行负数的合计（22）；退货行始终没有折扣。
         var cart = new PosCartService();
         var sale = cart.AddItem(CreateItem(lookupCode: "LK-A1", price: 30m));
         var returnLine = cart.AddReturnLine(CreateReturnRequest("RET-1", unitPrice: 8m));
-        var revisionBefore = cart.Revision;
 
-        Assert.False(cart.SetOrderDiscountAmount(5m));
-        Assert.False(cart.SetOrderDiscountAmount(0m));
-        Assert.False(cart.SetOrderDiscountPercent(10m));
-        Assert.False(cart.SetOrderDiscountPercent(0m));
-
-        // 整单折扣是「全有或全无」：有退货行时销售行也不会被部分分摊。
-        Assert.Equal(revisionBefore, cart.Revision);
+        Assert.True(cart.SetOrderDiscountAmount(5m));
+        Assert.Equal(5m, sale.DiscountAmount);
         AssertNoDiscount(returnLine);
+        Assert.Equal(17m, cart.ActualAmount);
+
+        Assert.True(cart.SetOrderDiscountPercent(10m));
+        Assert.Equal(3m, sale.DiscountAmount);
+        AssertNoDiscount(returnLine);
+        Assert.Equal(19m, cart.ActualAmount);
+
+        // 输入 0 清掉整单折扣，退货行依旧没有折扣。
+        Assert.True(cart.SetOrderDiscountAmount(0m));
         AssertNoDiscount(sale);
+        AssertNoDiscount(returnLine);
         Assert.Equal(22m, cart.ActualAmount);
     }
 
@@ -154,8 +160,9 @@ public sealed class ReturnLineDiscountGuardTests
         Assert.True(cart.RemoveLine(saleB));
         AssertNoDiscount(returnLine);
 
-        // 此时再要整单折扣仍被拒绝。
-        Assert.False(cart.SetOrderDiscountAmount(1m));
+        // 此时再设整单折扣（预期随新行为改变，原：被拒绝）：只在销售行之间分摊，退货行仍然没有折扣。
+        Assert.True(cart.SetOrderDiscountAmount(1m));
+        Assert.Equal(1m, cart.DiscountAmount);
         AssertNoDiscount(returnLine);
     }
 
@@ -189,51 +196,53 @@ public sealed class ReturnLineDiscountGuardTests
     }
 
     [Fact]
-    public void Workflow_whole_order_discount_commands_reject_cart_with_return_line()
+    public void Workflow_whole_order_discount_commands_discount_sale_line_and_skip_return_line_even_when_return_line_is_selected()
     {
+        // 预期随新行为改变（原：含退货行的整单折扣命令全部被拒绝）。
+        // 整单模式不看选中行：传入的选中行恰好是退货行，也照常对销售行打折，退货行没有折扣。
         var cart = new PosCartService();
         var sale = cart.AddItem(CreateItem(lookupCode: "LK-A1", price: 30m));
         var returnLine = cart.AddReturnLine(CreateReturnRequest("RET-1", unitPrice: 8m));
         var service = new PosTerminalWorkflowService(new LocalSellableItemIndex(), cart);
 
         var amountResult = service.ApplySelectedLineDiscountAmount(returnLine, "5", isWholeOrderOperation: true);
-        var percentResult = service.ApplySelectedLineDiscountPercent(returnLine, "10", isWholeOrderOperation: true);
-        var quickResult = service.ApplyQuickDiscountPercent(returnLine, "10", isWholeOrderOperation: true);
+        Assert.Equal("pos.status.orderDiscountUpdated", amountResult.StatusKey);
+        Assert.Equal(5m, sale.DiscountAmount);
 
-        foreach (var result in new[] { amountResult, percentResult, quickResult })
-        {
-            Assert.NotEqual("pos.status.orderDiscountUpdated", result.StatusKey);
-        }
+        var percentResult = service.ApplySelectedLineDiscountPercent(returnLine, "10", isWholeOrderOperation: true);
+        Assert.Equal("pos.status.orderDiscountUpdated", percentResult.StatusKey);
+        Assert.Equal(3m, sale.DiscountAmount);
+
+        var quickResult = service.ApplyQuickDiscountPercent(returnLine, "50", isWholeOrderOperation: true);
+        Assert.Equal("pos.status.orderDiscountUpdated", quickResult.StatusKey);
+        Assert.Equal(15m, sale.DiscountAmount);
 
         AssertNoDiscount(returnLine);
-        AssertNoDiscount(sale);
-        Assert.Equal(0m, cart.DiscountAmount);
+        Assert.Equal(15m, cart.DiscountAmount);
+        Assert.Equal(7m, cart.ActualAmount);
     }
 
     [Fact]
-    public void Pos_terminal_discount_commands_leave_selected_return_line_discount_free()
+    public void Pos_terminal_line_discount_commands_leave_selected_return_line_discount_free()
     {
-        // 视图模型层：收银员选中退货行后点「折扣金额 / 折扣% / 快速折扣」（行模式与整单模式），
-        // 命令照常走授权 -> 工作流 -> 购物车，最终购物车拒绝，退货行与销售行都没有折扣。
+        // 视图模型层（行模式）：收银员选中退货行后点「折扣金额 / 折扣% / 快速折扣」，
+        // 命令在授权前就被拦下，退货行与销售行都没有折扣。
         var cart = new PosCartService();
         var viewModel = new PosTerminalViewModel(new LocalSellableItemIndex(), cart, Session, onOpenPayment: null);
         var sale = cart.AddItem(CreateItem(lookupCode: "LK-SALE", price: 30m));
         var returnLine = cart.AddReturnLine(CreateReturnRequest("RET-1", lookupCode: "LK-RET", unitPrice: 8m));
         viewModel.SelectedCartLine = returnLine;
 
-        foreach (var isWholeOrder in new[] { false, true })
-        {
-            viewModel.IsWholeOrderOperation = isWholeOrder;
-            viewModel.KeypadBuffer = "1";
-            viewModel.ApplySelectedLineDiscountAmountCommand.Execute(null);
-            viewModel.KeypadBuffer = "10";
-            viewModel.ApplySelectedLineDiscountPercentCommand.Execute(null);
-            viewModel.ApplyQuickDiscountPercentCommand.Execute("10");
+        viewModel.IsWholeOrderOperation = false;
+        viewModel.KeypadBuffer = "1";
+        viewModel.ApplySelectedLineDiscountAmountCommand.Execute(null);
+        viewModel.KeypadBuffer = "10";
+        viewModel.ApplySelectedLineDiscountPercentCommand.Execute(null);
+        viewModel.ApplyQuickDiscountPercentCommand.Execute("10");
 
-            AssertNoDiscount(returnLine);
-            AssertNoDiscount(sale);
-            Assert.Equal(0m, viewModel.DiscountAmount);
-        }
+        AssertNoDiscount(returnLine);
+        AssertNoDiscount(sale);
+        Assert.Equal(0m, viewModel.DiscountAmount);
 
         // 对照：选中销售行后同一条命令照常生效，且仍不牵连退货行。
         viewModel.IsWholeOrderOperation = false;
@@ -593,7 +602,9 @@ public sealed class ReturnLineDiscountGuardTests
         AssertNoDiscount(returnLine);
 
         Assert.False(cart.SetLineDiscountPercent(returnLine, 10m));
-        Assert.False(cart.SetOrderDiscountPercent(10m));
+        // 整单折扣现在允许含退货行（预期随新行为改变，原：被拒绝）：只落销售行，退货行仍然没有折扣。
+        Assert.True(cart.SetOrderDiscountPercent(10m));
+        Assert.Equal(1m, Assert.Single(cart.Lines, line => !line.IsReturnLine).DiscountAmount);
         AssertNoDiscount(returnLine);
     }
 

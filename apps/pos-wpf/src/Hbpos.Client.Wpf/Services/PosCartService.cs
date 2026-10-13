@@ -533,10 +533,32 @@ public sealed class PosCartService
         }
     }
 
+    /// <summary>
+    /// 整单折扣的可打折基数：只统计销售行（非退货、毛额大于 0）的毛额合计。
+    /// 购物车含退货行时，退货行毛额为负，不能混进来：既不能把金额折扣的上限（TotalAmount 含退货行负数）拉低，
+    /// 也不能进百分比的计算基数和分摊比例的分母。无退货行时与 <see cref="TotalAmount"/> 一致。
+    /// </summary>
+    public decimal OrderDiscountableAmount => decimal.Round(
+        _lines.Where(IsOrderDiscountableLine).Sum(line => line.GrossAmount),
+        2,
+        MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// 购物车含退货行，但没有可打折的销售行（只有退货行，或销售行全是零价）：整单折扣无处可落，
+    /// 设置时一律拒绝，工作流据此在弹授权之前给出明确提示。空购物车、没有退货行的购物车不在此列，维持各自既有行为。
+    /// </summary>
+    public bool HasNoOrderDiscountableSaleLine => HasReturnLine && !_lines.Any(IsOrderDiscountableLine);
+
     public bool SetOrderDiscountAmount(decimal discountAmount)
     {
         using var mutation = EnterMutationScope();
-        if (_lines.Count == 0 || HasReturnLine || discountAmount < 0m || discountAmount > TotalAmount)
+        // 整单折扣只作用于销售行、跳过退货行，所以购物车含退货行也允许设置；
+        // 金额上限按销售行毛额合计比较，而不是含退货行负数的 TotalAmount。
+        // 只有退货行、没有销售行可打折时拒绝，数据与修订号都不动。
+        if (_lines.Count == 0 ||
+            HasNoOrderDiscountableSaleLine ||
+            discountAmount < 0m ||
+            discountAmount > OrderDiscountableAmount)
         {
             return false;
         }
@@ -549,12 +571,13 @@ public sealed class PosCartService
     public bool SetOrderDiscountPercent(decimal discountPercent)
     {
         using var mutation = EnterMutationScope();
-        if (_lines.Count == 0 || HasReturnLine || discountPercent < 0m || discountPercent > 100m)
+        if (_lines.Count == 0 || HasNoOrderDiscountableSaleLine || discountPercent < 0m || discountPercent > 100m)
         {
             return false;
         }
 
-        var discountAmount = decimal.Round(TotalAmount * discountPercent / 100m, 2, MidpointRounding.AwayFromZero);
+        // 百分比同样只按销售行毛额合计折算，退货行不参与。
+        var discountAmount = decimal.Round(OrderDiscountableAmount * discountPercent / 100m, 2, MidpointRounding.AwayFromZero);
         ApplyOrderDiscountAmount(
             discountAmount,
             preserveManualOverrideWhenZero: discountPercent > 0m);
@@ -1295,16 +1318,24 @@ public sealed class PosCartService
         return (value ?? string.Empty).Trim();
     }
 
+    /// <summary>整单折扣的可打折行：销售行且毛额大于 0；退货行（含任何异常的正毛额退货行）一律排除。</summary>
+    private static bool IsOrderDiscountableLine(CartLine line)
+    {
+        return !line.IsReturnLine && line.GrossAmount > 0m;
+    }
+
     private void ApplyOrderDiscountAmount(
         decimal discountAmount,
         bool preserveManualOverrideWhenZero)
     {
-        var totalGrossAmount = TotalAmount;
+        // 分摊基数与对象都只取销售行：退货行不被分摊、不进比例分母，保持无折扣。
+        // 分摊口径（毛额大于 0 的行，含手工 / 目录 / 促销折扣行与自由商品行）与加入退货行之前完全一致。
+        var totalGrossAmount = OrderDiscountableAmount;
         var remainingDiscount = Math.Clamp(
             decimal.Round(discountAmount, 2, MidpointRounding.AwayFromZero),
             0m,
             totalGrossAmount);
-        var discountableLines = _lines.Where(line => line.GrossAmount > 0m).ToList();
+        var discountableLines = _lines.Where(IsOrderDiscountableLine).ToList();
 
         if (discountableLines.Count == 0)
         {
