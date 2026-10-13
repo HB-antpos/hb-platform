@@ -1,5 +1,7 @@
+import { productThumbnailUri } from "../../shared/utils/product-image";
 import {
   getDetailGuid,
+  getDetailImageUrl,
   getDetailItemNumber,
   getDetailMatchType,
   getDetailProductName,
@@ -12,19 +14,37 @@ import type { ContainerDetail, ContainerDetailQueryMatchType, ContainerMain } fr
 /**
  * 货柜明细表格的列定义、尺寸与取值格式化（纯函数，无 React 依赖，便于单测）。
  *
- * 表格结构：左侧固定列（勾选 + 货号 + 名称）+ 右侧横向滚动列。
+ * 表格结构：左侧固定列（勾选 + 图片 + 货号/名称）+ 右侧横向滚动列。
  * 行高固定，这样 FlatList 可以用 getItemLayout 直接算出偏移，
  * 任意下标的 scrollToIndex（定位到该行）都是精确的，也不需要运行时测量。
  */
 
-/** 数据行固定高度（含底部分隔线）。 */
+/** 数据行固定高度（含底部分隔线）。图片 40 垂直居中，上下各留 6 的余量，行高不因加图片而变。 */
 export const CONTAINER_DETAIL_ROW_HEIGHT = 52;
 /** 表头固定高度。 */
 export const CONTAINER_DETAIL_HEADER_HEIGHT = 40;
-/** 左侧固定列宽：勾选框 44 + 货号/名称 84。 */
-export const CONTAINER_DETAIL_FIXED_COLUMN_WIDTH = 128;
+
+// ---- 左侧固定列的三段：勾选框 | 图片槽 | 货号/名称 ----
+// 固定列总宽由这三段推出；数据行与表头的固定单元都只用这组常量排版，列边界因此逐像素对齐。
+
 /** 固定列里勾选框触控区宽度（满足 44px 触控目标）。 */
 export const CONTAINER_DETAIL_CHECKBOX_WIDTH = 44;
+/** 商品图边长（正方形）。 */
+export const CONTAINER_DETAIL_IMAGE_SIZE = 40;
+/** 商品图与右侧货号/名称之间的间距。 */
+export const CONTAINER_DETAIL_IMAGE_GAP = 8;
+/** 图片槽宽 = 图片 + 间距；表头对应位置留空，占同样宽度。 */
+export const CONTAINER_DETAIL_IMAGE_SLOT_WIDTH = CONTAINER_DETAIL_IMAGE_SIZE + CONTAINER_DETAIL_IMAGE_GAP;
+/** 货号/名称文字区宽度。 */
+export const CONTAINER_DETAIL_PRODUCT_TEXT_WIDTH = 84;
+/** 左侧固定列宽 = 勾选框 + 图片槽 + 货号/名称（44 + 48 + 84 = 176）。 */
+export const CONTAINER_DETAIL_FIXED_COLUMN_WIDTH =
+  CONTAINER_DETAIL_CHECKBOX_WIDTH + CONTAINER_DETAIL_IMAGE_SLOT_WIDTH + CONTAINER_DETAIL_PRODUCT_TEXT_WIDTH;
+/**
+ * 请求缩略图的像素边长：按 3 倍屏取 120，覆盖 40pt 的显示尺寸；
+ * 图片是 COS 原图（单张 100KB+），列表一页最多 500 行，不缩略会白白吃流量和内存。
+ */
+export const CONTAINER_DETAIL_IMAGE_THUMBNAIL_PIXELS = CONTAINER_DETAIL_IMAGE_SIZE * 3;
 
 export type ContainerDetailScrollColumnKey =
   | "status"
@@ -91,6 +111,8 @@ export interface ContainerDetailRowCells {
   hguid: string;
   itemNumber: string;
   productName: string;
+  /** 固定列商品图的缩略图地址；没有图片地址为 null（显示占位）。 */
+  imageUri: string | null;
   /** 本柜新品（建档后仍为 true），仅用于展示；创建新商品的资格以 detail.是否新商品 为准。 */
   isNewProduct: boolean;
   isActive: boolean;
@@ -128,6 +150,7 @@ export function buildContainerDetailRowCells(detail: ContainerDetail): Container
     hguid: getDetailGuid(detail).trim(),
     itemNumber: getDetailItemNumber(detail) || detail.商品编码 || "",
     productName: getDetailProductName(detail),
+    imageUri: productThumbnailUri(getDetailImageUrl(detail), CONTAINER_DETAIL_IMAGE_THUMBNAIL_PIXELS),
     isNewProduct,
     isActive: detail.warehouseIsActive !== false,
     hasConflict,
