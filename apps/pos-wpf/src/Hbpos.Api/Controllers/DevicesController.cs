@@ -17,12 +17,15 @@ public sealed class DevicesController(
     IDeviceService deviceService,
     IOptions<DeviceActivationOptions>? deviceActivationOptions = null) : ControllerBase
 {
-    // AppVersion 可选：旧版客户端不带该字段，服务端保留库里上次上报的版本，不会被清空。
+    // AppVersion 与三项资源字段都可选：旧版客户端不带时，服务端保留库里上次上报的值，不会被清空。
     public sealed record DeviceRuntimeStatusRequest(
         bool IsOnline,
         string? CurrentCashierId,
         string? CurrentCashierName,
-        string? AppVersion = null);
+        string? AppVersion = null,
+        long? SystemUptimeSeconds = null,
+        int? ProcessWorkingSetMb = null,
+        int? ProcessHandleCount = null);
 
     [AllowAnonymous]
     [HttpPost("register")]
@@ -170,6 +173,10 @@ public sealed class DevicesController(
             request.CurrentCashierId,
             request.CurrentCashierName,
             request.AppVersion,
+            new DeviceResourceSnapshot(
+                request.SystemUptimeSeconds,
+                request.ProcessWorkingSetMb,
+                request.ProcessHandleCount),
             cancellationToken);
         if (!updated)
         {

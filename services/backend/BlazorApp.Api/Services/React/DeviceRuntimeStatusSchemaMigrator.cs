@@ -61,6 +61,25 @@ public static class DeviceRuntimeStatusSchemaMigrator
                 ALTER TABLE [dbo].[POSM_设备注册信息表]
                     ADD [应用版本] NVARCHAR(50) NULL;
             END;
+
+            -- 客户端（WPF）随心跳上报的机器开机秒数与本进程内存/句柄数；与 Hbpos.Api 的运行态初始化器保持同一定义。
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'系统开机秒数') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [系统开机秒数] BIGINT NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'客户端内存MB') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [客户端内存MB] INT NULL;
+            END;
+
+            IF COL_LENGTH(N'dbo.POSM_设备注册信息表', N'客户端句柄数') IS NULL
+            BEGIN
+                ALTER TABLE [dbo].[POSM_设备注册信息表]
+                    ADD [客户端句柄数] INT NULL;
+            END;
         END;
         """;
 

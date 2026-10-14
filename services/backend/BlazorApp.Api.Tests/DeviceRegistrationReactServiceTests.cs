@@ -94,6 +94,30 @@ public sealed class DeviceRegistrationReactServiceTests : IDisposable
     }
 
     [Fact]
+    public void DeviceMappingProfile_MapsReportedResourcesAndLeavesUnreportedEmpty()
+    {
+        var mapper = new MapperConfiguration(
+            config => config.AddProfile<DeviceMappingProfile>(),
+            NullLoggerFactory.Instance
+        ).CreateMapper();
+
+        var reported = mapper.Map<DeviceListItemDto>(new POSM_设备注册信息表
+        {
+            系统开机秒数 = 1_036_800,
+            客户端内存MB = 412,
+            客户端句柄数 = 3_650,
+        });
+        var unreported = mapper.Map<DeviceListItemDto>(new POSM_设备注册信息表());
+
+        Assert.Equal(1_036_800L, reported.SystemUptimeSeconds);
+        Assert.Equal(412, reported.ProcessWorkingSetMb);
+        Assert.Equal(3_650, reported.ProcessHandleCount);
+        Assert.Null(unreported.SystemUptimeSeconds);
+        Assert.Null(unreported.ProcessWorkingSetMb);
+        Assert.Null(unreported.ProcessHandleCount);
+    }
+
+    [Fact]
     public void DeviceMappingProfile_MarksRuntimeTimesAsUtcSoJsonCarriesZ()
     {
         var mapper = new MapperConfiguration(
@@ -147,6 +171,12 @@ public sealed class DeviceRegistrationReactServiceTests : IDisposable
 
         Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'应用版本') IS NULL", sql);
         Assert.Contains("ADD [应用版本] NVARCHAR(50) NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'系统开机秒数') IS NULL", sql);
+        Assert.Contains("ADD [系统开机秒数] BIGINT NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'客户端内存MB') IS NULL", sql);
+        Assert.Contains("ADD [客户端内存MB] INT NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'客户端句柄数') IS NULL", sql);
+        Assert.Contains("ADD [客户端句柄数] INT NULL", sql);
     }
 
     [Fact]

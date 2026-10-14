@@ -343,5 +343,37 @@ export function mergeDeviceDetailView(
     currentCashierName: device.currentCashierName,
     cashierLoginAt: device.cashierLoginAt,
     appVersion: device.appVersion,
+    systemUptimeSeconds: device.systemUptimeSeconds,
+    processWorkingSetMb: device.processWorkingSetMb,
+    processHandleCount: device.processHandleCount,
   }
+}
+
+/** 开机超过这么多天就提示「建议重启」：长期不重启会拖满桌面堆/句柄，表现为升级安装器无法启动等。 */
+export const LONG_UPTIME_WARNING_DAYS = 7
+
+export interface UptimeParts {
+  unit: 'minutes' | 'hours' | 'days'
+  count: number
+}
+
+/** 把开机秒数换成「N 分钟 / N 小时 / N 天」；未上报或非法值返回 null（0 秒是合法值：刚开机）。 */
+export function getUptimeParts(seconds: number | null | undefined): UptimeParts | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+    return null
+  }
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return { unit: 'minutes', count: minutes }
+  }
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    return { unit: 'hours', count: hours }
+  }
+  return { unit: 'days', count: Math.floor(hours / 24) }
+}
+
+export function isLongUptime(seconds: number | null | undefined): boolean {
+  const parts = getUptimeParts(seconds)
+  return parts !== null && parts.unit === 'days' && parts.count >= LONG_UPTIME_WARNING_DAYS
 }

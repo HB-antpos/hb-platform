@@ -45,6 +45,18 @@ function getNullableString(raw: Record<string, unknown>, ...keys: string[]) {
   return null
 }
 
+/** 取第一个有限数值（兼容数字与数字字符串）；都没有返回 null，用来区分「未上报」与 0。 */
+function getNullableNumber(raw: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = raw[key]
+    const numericValue = typeof value === 'string' && value.trim() ? Number(value) : value
+    if (typeof numericValue === 'number' && Number.isFinite(numericValue)) {
+      return numericValue
+    }
+  }
+  return null
+}
+
 function getBoolean(raw: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) {
     const value = raw[key]
@@ -183,6 +195,9 @@ function normalizeItem(raw: Record<string, unknown>): DeviceRegistrationItem {
     ),
     cashierLoginAt: getNullableString(raw, 'cashierLoginAt', 'CashierLoginAt', '收银员登录时间'),
     appVersion: getNullableString(raw, 'appVersion', 'AppVersion', '应用版本'),
+    systemUptimeSeconds: getNullableNumber(raw, 'systemUptimeSeconds', 'SystemUptimeSeconds', '系统开机秒数'),
+    processWorkingSetMb: getNullableNumber(raw, 'processWorkingSetMb', 'ProcessWorkingSetMb', '客户端内存MB'),
+    processHandleCount: getNullableNumber(raw, 'processHandleCount', 'ProcessHandleCount', '客户端句柄数'),
   }
 }
 
@@ -346,6 +361,9 @@ export function normalizeDeviceRegistrationDetail(
     ),
     cashierLoginAt: getNullableString(raw, 'cashierLoginAt', '收银员登录时间', 'CashierLoginAt'),
     appVersion: getNullableString(raw, 'appVersion', '应用版本', 'AppVersion'),
+    systemUptimeSeconds: getNullableNumber(raw, 'systemUptimeSeconds', '系统开机秒数', 'SystemUptimeSeconds'),
+    processWorkingSetMb: getNullableNumber(raw, 'processWorkingSetMb', '客户端内存MB', 'ProcessWorkingSetMb'),
+    processHandleCount: getNullableNumber(raw, 'processHandleCount', '客户端句柄数', 'ProcessHandleCount'),
   }
 }
 

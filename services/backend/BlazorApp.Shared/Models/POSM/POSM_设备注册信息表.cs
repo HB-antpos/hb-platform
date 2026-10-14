@@ -113,6 +113,24 @@ namespace BlazorApp.Shared.Models.POSM
         /// </summary>
         [SugarColumn(Length = 50, IsNullable = true)]
         public string? 应用版本 { get; set; }
+
+        /// <summary>
+        /// 收银机自开机起的秒数（WPF 随心跳上报）；开启「快速启动」时只有重启才会清零。老客户端不上报时为空
+        /// </summary>
+        [SugarColumn(IsNullable = true)]
+        public long? 系统开机秒数 { get; set; }
+
+        /// <summary>
+        /// WPF 进程工作集（MB，随心跳上报）；老客户端不上报时为空
+        /// </summary>
+        [SugarColumn(IsNullable = true)]
+        public int? 客户端内存MB { get; set; }
+
+        /// <summary>
+        /// WPF 进程句柄数（随心跳上报）；老客户端不上报时为空
+        /// </summary>
+        [SugarColumn(IsNullable = true)]
+        public int? 客户端句柄数 { get; set; }
         #endregion
 
         #region 审计字段

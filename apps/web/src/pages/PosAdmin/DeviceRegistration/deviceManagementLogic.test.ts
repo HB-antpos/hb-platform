@@ -9,6 +9,8 @@ import {
   getBatchActionTargets,
   getDeviceStatusActions,
   getRelativeTimeParts,
+  getUptimeParts,
+  isLongUptime,
   formatDateOnly,
   mergeDeviceDetailView,
   runWithConcurrency,
@@ -203,3 +205,44 @@ assertEqual(mergeDeviceDetailView(listRow, null).appVersion, '1.0.53', '详情�
 assertEqual(mergeDeviceDetailView(listRow, null).remark, '列表备注', '详情未加载时备注取列表行')
 
 console.log('deviceManagementLogic.test: ok')
+
+// 抽屉视图：开机时长/内存/句柄同样是运行态字段，详情接口不带，必须以列表行为准（上次版本字段就栽在这里）
+const resourceRow = device({
+  id: 43,
+  systemUptimeSeconds: 1_036_800,
+  processWorkingSetMb: 412,
+  processHandleCount: 3_650,
+})
+const resourceDetail = {
+  ...device({ id: 43 }),
+  isOnline: false,
+  lastHeartbeatAt: null,
+  currentCashierId: null,
+  currentCashierName: null,
+  cashierLoginAt: null,
+  appVersion: null,
+  systemUptimeSeconds: null,
+  processWorkingSetMb: null,
+  processHandleCount: null,
+}
+const mergedResources = mergeDeviceDetailView(resourceRow, resourceDetail)
+assertEqual(mergedResources.systemUptimeSeconds, 1_036_800, '详情没有开机秒数时保留列表的开机时长')
+assertEqual(mergedResources.processWorkingSetMb, 412, '详情没有内存时保留列表的客户端内存')
+assertEqual(mergedResources.processHandleCount, 3_650, '详情没有句柄数时保留列表的句柄数')
+
+// 开机时长：分钟 / 小时 / 天三档；未上报返回 null，0 秒是合法值（刚开机）
+assertEqual(getUptimeParts(null), null, '未上报没有开机时长')
+assertEqual(getUptimeParts(undefined), null, 'undefined 视为未上报')
+assertEqual(getUptimeParts(-1), null, '负数视为非法')
+assertEqual(getUptimeParts(Number.NaN), null, 'NaN 视为非法')
+assertEqual(JSON.stringify(getUptimeParts(0)), '{"unit":"minutes","count":0}', '0 秒是刚开机，不是未上报')
+assertEqual(JSON.stringify(getUptimeParts(59 * 60 + 59)), '{"unit":"minutes","count":59}', '不满 1 小时按分钟')
+assertEqual(JSON.stringify(getUptimeParts(60 * 60)), '{"unit":"hours","count":1}', '满 1 小时按小时')
+assertEqual(JSON.stringify(getUptimeParts(23 * 3600 + 3599)), '{"unit":"hours","count":23}', '不满 1 天按小时')
+assertEqual(JSON.stringify(getUptimeParts(12 * 86_400 + 5)), '{"unit":"days","count":12}', '满 1 天按天')
+
+// 「建议重启」阈值：满 7 天才提示；6 天 23 小时不提示，未上报也不提示
+assertEqual(isLongUptime(7 * 86_400), true, '满 7 天提示建议重启')
+assertEqual(isLongUptime(7 * 86_400 - 1), false, '不满 7 天不提示')
+assertEqual(isLongUptime(null), false, '未上报不提示')
+assertEqual(isLongUptime(0), false, '刚开机不提示')
