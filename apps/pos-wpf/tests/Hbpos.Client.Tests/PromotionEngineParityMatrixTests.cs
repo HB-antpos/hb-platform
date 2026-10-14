@@ -24,7 +24,7 @@ namespace Hbpos.Client.Tests;
 //   D4 亚分单价：组原价按「行」舍入一次（新引擎改为与购物车行原价同一口径），凑组实收恰为规则目标价 -> EQ-D4*；
 //   D5 负固定价：新引擎也整条忽略 -> EQ-D5*；
 //   D3 叠加封顶：用户拍板「多出来的份额丢弃」取旧引擎口径——新引擎、共享挂单重演不再把超出行原价的份额转给其它行 -> EQ-D3*。
-//   本矩阵里已没有 DIFF 格；S1 总部促销是规则源差异，不在本矩阵里（见 Hbpos.Api.Tests 的 PromotionRuleSourceParityTests）。
+//   本矩阵里已没有 DIFF 格；S1 总部促销（没有门店绑定）已拍板为「哪家都不生效」，两个规则源都不下发（见 Hbpos.Api.Tests 的 PromotionRuleSourceParityTests）。
 public sealed class PromotionEngineParityMatrixTests(ITestOutputHelper output)
 {
     // 现配置同构 = 单条规则 + 互斥 + 单店；扩展配置 = 多条/非互斥/叠加/特殊价格等。
