@@ -84,7 +84,12 @@ import {
   upsertClearancePrice,
 } from "@/modules/product-maintenance/api";
 import { resolveExternalQueryStore } from "@/modules/product-maintenance/external-query-store";
-import { validateCreateProductForm } from "@/modules/product-maintenance/create-product-validation";
+import {
+  resolveCreateProductServerError,
+  validateCreateProductForm,
+  type CreateProductDialogError,
+  type CreateProductErrorField,
+} from "@/modules/product-maintenance/create-product-validation";
 import {
   hasStoredDeviceSession,
   isOfflineProductQueryEligible,
@@ -631,6 +636,9 @@ function ProductQueryContent() {
   const [createSuppliersLoading, setCreateSuppliersLoading] = useState(false);
   const [createProductDraft, setCreateProductDraft] =
     useState<CreateProductDraft>(EMPTY_CREATE_PRODUCT_DRAFT);
+  // 创建弹层内的错误提示：弹层是 Paper Modal，页面级 Snackbar 被它盖住看不到，所以提示必须放在弹层里。
+  const [createProductError, setCreateProductError] =
+    useState<CreateProductDialogError | null>(null);
   const [productTypeDialogVisible, setProductTypeDialogVisible] =
     useState(false);
   const [productTypeSaving, setProductTypeSaving] = useState(false);
@@ -1502,6 +1510,14 @@ function ProductQueryContent() {
     [createProductDraft.localSupplierCode, createSuppliers],
   );
 
+  // 每次都生成新对象：弹层靠对象变化触发滚动定位，同一字段连续出错也会重新定位。
+  const showCreateProductError = useCallback(
+    (message: string, field: CreateProductErrorField | null = null) => {
+      setCreateProductError({ message, field });
+    },
+    [],
+  );
+
   const loadCreateSuppliers = useCallback(async () => {
     setCreateSuppliersLoading(true);
     try {
@@ -1513,19 +1529,21 @@ function ProductQueryContent() {
           : { ...current, localSupplierCode: suppliers[0].supplierCode },
       );
     } catch (error) {
-      setSnackbarMessage(
+      showCreateProductError(
         getErrorMessage(error, "createProduct.messages.suppliersLoadFailed"),
+        "supplier",
       );
     } finally {
       setCreateSuppliersLoading(false);
     }
-  }, [getErrorMessage]);
+  }, [getErrorMessage, showCreateProductError]);
 
   const openCreateProductModal = useCallback(() => {
     setCreateProductDraft({
       ...EMPTY_CREATE_PRODUCT_DRAFT,
       localSupplierCode: createSuppliers[0]?.supplierCode ?? "",
     });
+    setCreateProductError(null);
     setCreateProductVisible(true);
     if (!createSuppliers.length) {
       void loadCreateSuppliers();
@@ -1535,6 +1553,8 @@ function ProductQueryContent() {
   const updateCreateProductDraft = useCallback(
     (patch: Partial<CreateProductDraft>) => {
       setCreateProductDraft((current) => ({ ...current, ...patch }));
+      // 用户一改表单就撤掉旧错误，避免红字和红框停在已经修好的字段上。
+      setCreateProductError(null);
     },
     [],
   );
@@ -1543,6 +1563,7 @@ function ProductQueryContent() {
     setCreateSupplierPickerVisible(false);
     setCreateBarcodeScannerVisible(false);
     setCreateProductVisible(false);
+    setCreateProductError(null);
   }, []);
 
   const handleSelectCreateSupplier = useCallback(
@@ -1557,9 +1578,12 @@ function ProductQueryContent() {
     if (createProductBusy) return;
     const supplierCode = createProductDraft.localSupplierCode.trim();
     if (!supplierCode || supplierCode === "200") {
-      setSnackbarMessage(t(supplierCode === "200"
-        ? "createProduct.messages.supplierRestricted"
-        : "createProduct.selectSupplier"));
+      showCreateProductError(
+        t(supplierCode === "200"
+          ? "createProduct.messages.supplierRestricted"
+          : "createProduct.selectSupplier"),
+        "supplier",
+      );
       return;
     }
     setCreateBarcodeGenerating(true);
@@ -1568,19 +1592,27 @@ function ProductQueryContent() {
       const barcode = await generateLocalProductBarcode(supplierCode);
       updateCreateProductDraft({ barcode });
     } catch (error) {
-      setSnackbarMessage(getErrorMessage(error, "createProduct.messages.barcodeGenerateFailed"));
+      showCreateProductError(
+        getErrorMessage(error, "createProduct.messages.barcodeGenerateFailed"),
+        "barcode",
+      );
     } finally {
       setCreateBarcodeGenerating(false);
     }
-  }, [createProductBusy, createProductDraft.localSupplierCode, getErrorMessage, t, updateCreateProductDraft]);
+  }, [createProductBusy, createProductDraft.localSupplierCode, getErrorMessage, showCreateProductError, t, updateCreateProductDraft]);
 
   const handleCreateProductSubmit = useCallback(async () => {
     const validation = validateCreateProductForm(createProductDraft);
     if (!validation.ok) {
-      setSnackbarMessage(t(`createProduct.messages.${validation.reason}`));
+      // 弹层里看不到页面级 Snackbar：提示显示在弹层内，并把出错的输入框标红定位。
+      showCreateProductError(
+        t(`createProduct.messages.${validation.reason}`),
+        validation.field,
+      );
       return;
     }
 
+    setCreateProductError(null);
     setCreateProductSaving(true);
     let createdProductCode = "";
     const mutation = beginHqSyncMutation(
@@ -1597,6 +1629,7 @@ function ProductQueryContent() {
       setCreateSupplierPickerVisible(false);
       setCreateProductVisible(false);
       setCreateProductDraft(EMPTY_CREATE_PRODUCT_DRAFT);
+      setCreateProductError(null);
       setKeyword(nextKeyword);
       presentHqSyncOperation(
         mutation,
@@ -1605,8 +1638,13 @@ function ProductQueryContent() {
       );
     } catch (error) {
       hqSyncMutationCoordinatorRef.current?.fail(mutation);
-      setSnackbarMessage(
-        getErrorMessage(error, "createProduct.messages.createFailed"),
+      // 能明确指向某个输入框的服务端冲突（如货号已存在）标红该框；其余失败显示通用文案。
+      const conflict = resolveCreateProductServerError(error);
+      showCreateProductError(
+        conflict
+          ? t(conflict.messageKey)
+          : getErrorMessage(error, "createProduct.messages.createFailed"),
+        conflict?.field ?? null,
       );
       setCreateProductSaving(false);
       return;
@@ -1643,6 +1681,7 @@ function ProductQueryContent() {
     loadDetail,
     presentHqSyncOperation,
     selectedStoreCode,
+    showCreateProductError,
     t,
   ]);
 
@@ -4877,6 +4916,7 @@ function ProductQueryContent() {
               hasSuppliers={createSuppliers.length > 0}
               saving={createProductSaving}
               generating={createBarcodeGenerating}
+              error={createProductError}
               onChange={updateCreateProductDraft}
               onSelectSupplier={() => setCreateSupplierPickerVisible(true)}
               onReloadSuppliers={() => void loadCreateSuppliers()}

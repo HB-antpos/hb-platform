@@ -1,4 +1,4 @@
-import { memo, forwardRef, useEffect, useRef, useState } from "react";
+import { memo, forwardRef, useEffect, useRef, useState, type RefObject } from "react";
 import {
   Keyboard,
   Platform,
@@ -7,11 +7,16 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
   type TextInputProps,
 } from "react-native";
 import { Button, IconButton, Modal, Switch, Text } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { CreateProductFormValues } from "@/modules/product-maintenance/create-product-validation";
+import type {
+  CreateProductDialogError,
+  CreateProductErrorField,
+  CreateProductFormValues,
+} from "@/modules/product-maintenance/create-product-validation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS as C } from "@/shared/theme/tokens";
 
@@ -23,6 +28,11 @@ interface Props {
   hasSuppliers: boolean;
   saving: boolean;
   generating: boolean;
+  /**
+   * 校验失败、创建失败等错误必须显示在弹层里：弹层之上看不到页面级 Snackbar，
+   * 之前这些提示全被盖住，用户只看到「点了没反应」。
+   */
+  error: CreateProductDialogError | null;
   onChange: (patch: Partial<CreateProductFormValues>) => void;
   onSelectSupplier: () => void;
   onReloadSuppliers: () => void;
@@ -44,6 +54,17 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
   const retailRef = useRef<TextInput>(null);
   const busy = props.saving || props.generating;
   const restricted = props.values.localSupplierCode.trim() === "200";
+  const errorField = props.error?.field ?? null;
+  const scrollRef = useRef<ScrollView>(null);
+  // 各字段所在行在滚动内容里的纵坐标，出错时据此滚动定位。
+  const fieldYRef = useRef<Partial<Record<CreateProductErrorField, number>>>({});
+  const trackY =
+    (...keys: CreateProductErrorField[]) =>
+    (event: LayoutChangeEvent) => {
+      for (const key of keys) {
+        fieldYRef.current[key] = event.nativeEvent.layout.y;
+      }
+    };
 
   useEffect(() => {
     if (!props.visible) {
@@ -66,6 +87,39 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
       hide.remove();
     };
   }, [height, props.visible]);
+
+  // 出错时：滚动到出错字段并聚焦，用户一眼看到问题所在、可以直接改。
+  // 每次失败 parent 都会生成新的 error 对象，所以同一字段连续失败也会重新定位。
+  useEffect(() => {
+    if (!props.visible || !props.error?.field) {
+      return;
+    }
+    const target = props.error.field;
+    const inputs: Record<
+      Exclude<CreateProductErrorField, "supplier">,
+      RefObject<TextInput | null>
+    > = {
+      productName: nameRef,
+      itemNumber: itemRef,
+      barcode: barcodeRef,
+      purchasePrice: purchaseRef,
+      retailPrice: retailRef,
+    };
+    const scrollToTarget = () =>
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, (fieldYRef.current[target] ?? 0) - 12),
+        animated: true,
+      });
+
+    scrollToTarget();
+    // 供应商是选择按钮不是输入框，只滚动不聚焦。
+    if (target !== "supplier") {
+      inputs[target].current?.focus();
+    }
+    // 键盘弹出会让弹窗变矮：等布局稳定后再滚一次，避免出错字段被挤出可见区域。
+    const timer = setTimeout(scrollToTarget, 350);
+    return () => clearTimeout(timer);
+  }, [props.error, props.visible]);
 
   const field = (
     key:
@@ -116,6 +170,7 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
         />
       </View>
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
@@ -130,7 +185,7 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
             {t("createProduct.permissionWarning")}
           </Text>
         </View>
-        <View style={styles.field}>
+        <View style={styles.field} onLayout={trackY("supplier")}>
           <Text style={styles.label}>{t("createProduct.fields.supplier")}</Text>
           <Button
             mode="outlined"
@@ -141,7 +196,11 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
               if (props.hasSuppliers) props.onSelectSupplier();
               else props.onReloadSuppliers();
             }}
-            style={[styles.supplier, restricted && styles.restrictedBorder]}
+            style={[
+              styles.supplier,
+              restricted && styles.restrictedBorder,
+              errorField === "supplier" && styles.invalidBorder,
+            ]}
             contentStyle={styles.supplierContent}
             labelStyle={styles.supplierLabel}
           >
@@ -163,6 +222,8 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
         <Field
           ref={nameRef}
           {...field("productName")}
+          invalid={errorField === "productName"}
+          onFieldLayout={trackY("productName")}
           placeholder={t("createProduct.namePlaceholder")}
           returnKeyType="next"
           onSubmitEditing={() => itemRef.current?.focus()}
@@ -170,18 +231,21 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
         <Field
           ref={itemRef}
           {...field("itemNumber")}
+          invalid={errorField === "itemNumber"}
+          onFieldLayout={trackY("itemNumber")}
           placeholder={t("createProduct.itemPlaceholder")}
           autoCapitalize="characters"
           autoCorrect={false}
           returnKeyType="next"
           onSubmitEditing={() => barcodeRef.current?.focus()}
         />
-        <View style={styles.field}>
+        <View style={styles.field} onLayout={trackY("barcode")}>
           <Text style={styles.label}>{t("createProduct.fields.barcode")}</Text>
           <View style={styles.barcodeRow}>
             <Field
               ref={barcodeRef}
               {...field("barcode")}
+              invalid={errorField === "barcode"}
               hideLabel
               placeholder={t("createProduct.barcodePlaceholder")}
               autoCapitalize="none"
@@ -224,10 +288,14 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
             </Button>
           </View>
         </View>
-        <View style={styles.priceRow}>
+        <View
+          style={styles.priceRow}
+          onLayout={trackY("purchasePrice", "retailPrice")}
+        >
           <Field
             ref={purchaseRef}
             {...field("purchasePrice")}
+            invalid={errorField === "purchasePrice"}
             placeholder="0.00"
             keyboardType="decimal-pad"
             prefix="$"
@@ -235,6 +303,7 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
           <Field
             ref={retailRef}
             {...field("retailPrice")}
+            invalid={errorField === "retailPrice"}
             placeholder="0.00"
             keyboardType="decimal-pad"
             prefix="$"
@@ -281,6 +350,16 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
             {t("createProduct.keyboardDone")}
           </Button>
         ) : null}
+        {props.error ? (
+          // 放在固定的底栏里而不是滚动区：不管表单滚到哪，用户点完按钮都能立刻看到原因。
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            style={styles.errorText}
+          >
+            {props.error.message}
+          </Text>
+        ) : null}
         <View style={styles.actions}>
           <Button
             mode="outlined"
@@ -314,16 +393,28 @@ export const CreateProductDialog = memo(function CreateProductDialog(props: Prop
 
 const Field = forwardRef<
   TextInput,
-  TextInputProps & { label: string; hideLabel?: boolean; prefix?: string }
->(function Field({ label, hideLabel, prefix, ...props }, ref) {
+  TextInputProps & {
+    label: string;
+    hideLabel?: boolean;
+    prefix?: string;
+    /** 该字段是当前错误的出处：描边标红（优先于聚焦态，聚焦后红框仍然保留直到用户修改）。 */
+    invalid?: boolean;
+    /** 字段整行的布局回调，弹层用它记录纵坐标以便出错时滚动定位。 */
+    onFieldLayout?: (event: LayoutChangeEvent) => void;
+  }
+>(function Field(
+  { label, hideLabel, prefix, invalid, onFieldLayout, ...props },
+  ref,
+) {
   const [focused, setFocused] = useState(false);
   return (
-    <View style={styles.field}>
+    <View style={styles.field} onLayout={onFieldLayout}>
       {!hideLabel ? <Text style={styles.label}>{label}</Text> : null}
       <View
         style={[
           styles.inputFrame,
           focused && styles.inputFocused,
+          invalid && styles.invalidBorder,
           props.editable === false && styles.inputDisabled,
         ]}
       >
@@ -394,6 +485,14 @@ const styles = StyleSheet.create({
     marginVertical: 10,
   },
   restrictedBorder: { borderColor: C.warning },
+  invalidBorder: { borderColor: C.danger },
+  errorText: {
+    color: C.danger,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    marginBottom: 10,
+  },
   warning: {
     color: C.warning,
     backgroundColor: "#FFFAEB",
