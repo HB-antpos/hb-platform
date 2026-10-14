@@ -124,6 +124,68 @@ public sealed class SalesStatisticsJobServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task FullRefreshCurrentDay_个别门店缺商品明细对账不一致时仍发布全部门店营业额()
+    {
+        // 复现 2026-10-14：门店 1005 一台设备漏传了 109 张订单的明细（金额差 1039.77 > 100 容差），
+        // 对账失败曾让整张当天事务回滚，全部门店营业额停在上一次成功时刻，任务显示「更新失败」。
+        var today = SalesStatisticsBusinessDate.Today();
+        await SeedProductAsync("P-OK");
+        await SeedSaleAsync("ORDER-OK", "DETAIL-OK", "P-OK", "1004", today.AddHours(9), 2, 50m, "112");
+        // 1005：订单与支付都在，但没有任何商品明细。
+        await SeedOrderAsync("ORDER-NO-DETAIL", "1005", today.AddHours(9), 3);
+        await SeedPaymentAsync("PAY-NO-DETAIL", "ORDER-NO-DETAIL", 500m, today.AddHours(9).AddMinutes(1));
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        // 不抛异常：对账不一致是数据口径提示，不是刷新失败。
+        await service.FullRefreshCurrentDay(automatic: true, includeHistorical: false);
+
+        var storeRows = await _localDb.Queryable<StoreSalesStatistic>().Where(row => row.Date == today).ToListAsync();
+        Assert.Equal(50m, Assert.Single(storeRows, row => row.BranchCode == "1004").TotalAmount);
+        // 营业额以订单支付为准，缺明细的门店营业额依然正确发布。
+        Assert.Equal(500m, Assert.Single(storeRows, row => row.BranchCode == "1005").TotalAmount);
+
+        var states = await _localDb.Queryable<SalesStatisticRefreshState>()
+            .Where(state => state.Date == today)
+            .ToListAsync();
+        foreach (var type in new[]
+                 {
+                     SalesStatisticType.StoreSales,
+                     SalesStatisticType.ProductStoreDaily,
+                     SalesStatisticType.AustralianSupplierStoreSales,
+                     SalesStatisticType.ChinaSupplierStoreSales,
+                 })
+        {
+            var state = Assert.Single(states, row => row.StatisticType == type);
+            Assert.Equal(SalesStatisticRefreshStatus.Failed, state.Status);
+            Assert.True(ProductStoreDailyReconciliationCalculator.IsReconciliationFailure(state.ErrorMessage));
+            Assert.True(state.LastAggregatedAtUtc.HasValue);
+        }
+        // 报表快照照常发布，「最后成功时间」才会前进。
+        var published = Assert.Single(states, row => row.StatisticType == SalesStatisticType.RevenueReportPublished);
+        Assert.Equal(SalesStatisticRefreshStatus.Fresh, published.Status);
+    }
+
+    [Fact]
+    public async Task FullRefreshCurrentDay_当天刷新真失败时仍继续历史日补算并最终抛出失败()
+    {
+        var today = SalesStatisticsBusinessDate.Today();
+        // 当天：来源行没有有效分店/商品主键，属于真正的写入失败（非对账提示）。
+        await SeedOrderAsync("ORDER-TODAY-INVALID", string.Empty, today.AddHours(10), 1);
+        await SeedSaleDetailAsync("ORDER-TODAY-INVALID", "DETAIL-TODAY-INVALID", string.Empty, 1, 10m, "200");
+        // 历史日：总账水位落后，滚动补算应整天全量刷新（分店营业额 1.00 → 20.00）。
+        var (date, _) = await SeedRollingHistoricalDayAsync((_, source) => source.AddDays(-1));
+        using var serviceProvider = CreateRollingRefreshServiceProvider();
+        var service = CreateService(serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        await Assert.ThrowsAnyAsync<Exception>(() => service.FullRefreshCurrentDay());
+
+        var store = await LoadRollingStoreRowAsync(date);
+        Assert.NotNull(store);
+        Assert.Equal(20m, store!.TotalAmount);
+    }
+
+    [Fact]
     public async Task UpsertStatisticStateAsync_失败时应保留最后一次已提交统计水位()
     {
         var targetDate = new DateTime(2026, 9, 14);

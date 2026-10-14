@@ -1614,6 +1614,86 @@ public sealed class ProductStoreRecordsTests : IDisposable
         Assert.DoesNotContain(storePrices, item => item.StoreCode == "S03");
     }
 
+    private ReactProductsController CreateItemNumberTestController() =>
+        new(
+            CreateSqlSugarContext(_localDb),
+            NullLogger<ReactProductsController>.Instance,
+            WarehouseProductChangeHistoryTestDouble.CreateNoop(),
+            Mock.Of<ICurrentUserService>(),
+            CreateSuccessfulProjectionWriter()
+        )
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                    {
+                        new Claim(ClaimTypes.Name, "controller-user"),
+                    }, "TestAuth")),
+                },
+            },
+        };
+
+    [Theory]
+    [InlineData("ITEM-DUP")]
+    [InlineData("  ITEM-DUP  ")]
+    public async Task CreateWithPrices_货号已被存活商品占用时拒绝并返回错误码(string itemNumber)
+    {
+        await SeedProductAsync("existing-local", "ITEM-DUP");
+
+        var result = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
+        {
+            ProductName = "撞货号的新商品", ItemNumber = itemNumber, PurchasePrice = 1, RetailPrice = 2,
+        });
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Contains("ITEM_NUMBER_EXISTS", System.Text.Json.JsonSerializer.Serialize(conflict.Value));
+        // 校验失败必须整体回滚：不能多出商品，也不能留下分店价格。
+        Assert.Equal(1, await _localDb.Queryable<Product>().CountAsync());
+        Assert.Equal(0, await _localDb.Queryable<StoreRetailPrice>().CountAsync(x => x.ProductCode != "existing-local"));
+    }
+
+    [Fact]
+    public async Task CreateWithPrices_货号未被占用时正常创建并保存去掉空白的货号()
+    {
+        await SeedStoreAsync("S01", "启用分店");
+        // 同货号但已软删除的商品不算占用。
+        await SeedProductAsync("deleted-local", "ITEM-FREE");
+        await _localDb.Updateable<Product>()
+            .SetColumns(x => x.IsDeleted == true)
+            .Where(x => x.ProductCode == "deleted-local")
+            .ExecuteCommandAsync();
+
+        var result = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
+        {
+            ProductName = "货号空闲的新商品", ItemNumber = "  ITEM-FREE  ", PurchasePrice = 1, RetailPrice = 2,
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        var created = await _localDb.Queryable<Product>()
+            .SingleAsync(x => x.ProductName == "货号空闲的新商品");
+        Assert.Equal("ITEM-FREE", created.ItemNumber);
+    }
+
+    [Fact]
+    public async Task CreateWithPrices_未填货号时保持原行为不做货号校验()
+    {
+        await SeedStoreAsync("S01", "启用分店");
+
+        var first = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
+        {
+            ProductName = "无货号商品A", ItemNumber = null, PurchasePrice = 1, RetailPrice = 2,
+        });
+        var second = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
+        {
+            ProductName = "无货号商品B", ItemNumber = "   ", PurchasePrice = 1, RetailPrice = 2,
+        });
+
+        Assert.IsType<OkObjectResult>(first);
+        Assert.IsType<OkObjectResult>(second);
+    }
+
     [Fact]
     public async Task UpdatePurchase_本地更新与当前门店HQ入队共用事务并返回公开操作状态()
     {

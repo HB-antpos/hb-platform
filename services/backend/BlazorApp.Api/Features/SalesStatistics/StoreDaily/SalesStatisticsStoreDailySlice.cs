@@ -136,8 +136,30 @@ namespace BlazorApp.Api.Services
 
             _logger.LogInformation("开始全量刷新当天数据: {Date}", currentDay);
 
+            // 各日期互不影响：当天刷新失败不能让最近 7 天的滚动补算也跑不了，
+            // 某个历史日失败也不能中断后面的日期。失败先收集，全部日期尝试完毕后再统一抛出，
+            // 任务结果仍然是失败，运维可见，但其他日期的统计照常更新。
+            var failures = new List<Exception>();
+            void ThrowCollectedFailures()
+            {
+                if (failures.Count == 1)
+                    ExceptionDispatchInfo.Capture(failures[0]).Throw();
+                if (failures.Count > 1)
+                    throw new AggregateException("多个统计日期刷新失败", failures);
+            }
+
             // 当天主刷新也复用带数据库租约的完整路径，避免和手动补算抢同一天。
-            var refreshed = await RunLeasedFullRefreshForSingleDateAsync(currentDay, "当天");
+            bool refreshed;
+            try
+            {
+                refreshed = await RunLeasedFullRefreshForSingleDateAsync(currentDay, "当天");
+            }
+            catch (Exception ex) when (includeHistorical && ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "当天数据全量刷新失败，继续执行历史日滚动补算: {Date}", currentDay);
+                failures.Add(ex);
+                refreshed = true;
+            }
             if (!refreshed || !includeHistorical)
             {
                 return refreshed
@@ -156,12 +178,22 @@ namespace BlazorApp.Api.Services
                         currentDay,
                         offset
                     );
+                    ThrowCollectedFailures();
                     return SalesStatisticsRefreshExecutionResult.Completed();
                 }
 
-                await RunRollingHistoricalRefreshAsync(currentDay.AddDays(-offset));
+                try
+                {
+                    await RunRollingHistoricalRefreshAsync(currentDay.AddDays(-offset));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "历史日滚动补算失败，继续处理其余日期: {Date}", currentDay.AddDays(-offset));
+                    failures.Add(ex);
+                }
             }
 
+            ThrowCollectedFailures();
             _logger.LogInformation("当天数据全量刷新完成: {Date}", currentDay);
             return SalesStatisticsRefreshExecutionResult.Completed();
         }

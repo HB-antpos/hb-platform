@@ -197,6 +197,9 @@ import messagesZh from './messages.zh.json'
 // 供应商分类等本页新增文案随页面代码块懒注册，不进入首屏 i18n 包。
 registerPageMessages({ zh: messagesZh, en: messagesEn })
 
+// 后端创建商品遇到货号已存在时返回的错误码（ReactProductsController.CreateWithPrices）。
+const ITEM_NUMBER_EXISTS_ERROR_CODE = 'ITEM_NUMBER_EXISTS'
+
 type ProductRow = (PosProductDto & {
   warehouseCategoryGuid?: string
   domesticSupplierCode?: string
@@ -2266,8 +2269,11 @@ export default function ProductManagementPage() {
       setCreateVisible(false)
       createForm.resetFields()
       void loadData()
-    } catch {
-      message.error(t('posAdmin.products.createProductFailed', '创建商品失败'))
+    } catch (error) {
+      // 货号重复是用户能自己修正的错误，要明确告诉他，而不是笼统的「创建商品失败」。
+      message.error(readRequestErrorCode(error) === ITEM_NUMBER_EXISTS_ERROR_CODE
+        ? t('posAdmin.products.itemNumberExists', '货号已存在，请更换货号')
+        : t('posAdmin.products.createProductFailed', '创建商品失败'))
     } finally {
       setCreateSubmitting(false)
     }
