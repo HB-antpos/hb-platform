@@ -4334,11 +4334,18 @@ public sealed class LinklyBackendTerminalClientTests
 
         var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
 
-        // 新鲜的在途会话、或不是交易的会话（如结算）仍走原有的接管流程并中止本次付款。
+        // 新鲜的在途交易仍走原有的接管流程并中止本次付款；结算会话不属于“陈旧交易”，仍走结算会话原有的拦截路径。
         Assert.False(result.Approved);
-        Assert.Equal("linkly.backend.activeSessionRequiresRecovery", result.StatusKey);
-        Assert.Equal(1, takeoverCount);
         Assert.False(posted);
+        if (operationType == "Transaction")
+        {
+            Assert.Equal("linkly.backend.activeSessionRequiresRecovery", result.StatusKey);
+            Assert.Equal(1, takeoverCount);
+        }
+        else
+        {
+            Assert.Equal("linkly.backend.activeSettlementBlocksPayment", result.StatusKey);
+        }
     }
 
     [Fact]
