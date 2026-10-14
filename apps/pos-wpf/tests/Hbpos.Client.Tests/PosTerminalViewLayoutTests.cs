@@ -42,16 +42,31 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("34", (string?)inputValue.Attribute("FontSize"));
         Assert.Equal("Black", (string?)inputValue.Attribute("FontWeight"));
 
+        // 键盘区 = 外层 5 等分行的 Grid：数字键 UniformGrid（3×4，跨 4 行）+ 底部 $0.50 / $0.99 各占半行（第 5 行）。
+        // 整单开关已搬到下方操作区，键盘里不再有 ToggleButton；外层 Margin 与原来的 3×5 键盘一致，每键高度不变。
         var keypad = Assert.Single(view.Descendants(presentation + "UniformGrid").Where(grid =>
-            grid.Descendants(presentation + "Button").Any(button =>
-                (string?)button.Attribute("CommandParameter") == "QuickHalf")));
-        Assert.Equal("11,0,11,6", (string?)keypad.Attribute("Margin"));
-        Assert.Equal(14, keypad.Elements(presentation + "Button").Count());
+            (string?)grid.Attribute(x + "Name") == "CashierKeypad"));
+        var keypadHost = Assert.IsType<XElement>(keypad.Parent);
+        Assert.Equal(presentation + "Grid", keypadHost.Name);
+        Assert.Equal("11,0,11,6", (string?)keypadHost.Attribute("Margin"));
+        Assert.Equal(5, keypadHost.Element(presentation + "Grid.RowDefinitions")!.Elements().Count());
+        Assert.Equal("0", (string?)keypad.Attribute("Grid.Row"));
+        Assert.Equal("4", (string?)keypad.Attribute("Grid.RowSpan"));
+        Assert.Equal(12, keypad.Elements(presentation + "Button").Count());
         Assert.Contains(keypad.Elements(presentation + "Button"), button =>
             (string?)button.Attribute("Style") == "{StaticResource CashierNumberKeyStyle}");
+        Assert.Empty(keypad.Descendants(presentation + "ToggleButton"));
+
+        var quickAmountKeys = Assert.Single(view.Descendants(presentation + "UniformGrid").Where(grid =>
+            (string?)grid.Attribute(x + "Name") == "CashierQuickAmountKeys"));
+        Assert.Same(keypadHost, quickAmountKeys.Parent);
+        Assert.Equal("4", (string?)quickAmountKeys.Attribute("Grid.Row"));
+        Assert.Equal("2", (string?)quickAmountKeys.Attribute("Columns"));
         Assert.Equal(
-            "{StaticResource CashierWholeOrderToggleStyle}",
-            (string?)Assert.Single(keypad.Elements(presentation + "ToggleButton")).Attribute("Style"));
+            ["QuickHalf", "QuickNinetyNine"],
+            quickAmountKeys.Elements(presentation + "Button").Select(button => (string?)button.Attribute("CommandParameter")));
+        Assert.All(quickAmountKeys.Elements(presentation + "Button"), button =>
+            Assert.Equal("{StaticResource CashierQuickKeyStyle}", (string?)button.Attribute("Style")));
 
         var flatButtonBase = FindStyle(view, x, "CashierFlatButtonBaseStyle");
         var flatButtonBorder = Assert.Single(flatButtonBase.Descendants(presentation + "Border"));
@@ -73,18 +88,66 @@ public sealed class PosTerminalViewLayoutTests
             element => (string?)element.Attribute("Grid.Row") == "3" &&
                            element.Descendants(presentation + "Button").Any(button =>
                                ((string?)button.Attribute("Command"))?.Contains("ModifySelectedLineQuantityCommand", StringComparison.Ordinal) == true)));
-        Assert.Equal("9,0,9,0", (string?)middleActionGrid.Attribute("Margin"));
+        // 操作区外边距 12 = 原来 Grid 外边距 9 + 按钮外边距 3；底部 8 与改版前的功能区总占高（190）持平。
+        Assert.Equal("12,0,12,8", (string?)middleActionGrid.Attribute("Margin"));
+        Assert.Equal(
+            ["52", "6", "52", "6", "Auto"],
+            middleActionGrid.Element(presentation + "Grid.RowDefinitions")!.Elements().Select(row => (string?)row.Attribute("Height")));
+        Assert.Equal(
+            ["76", "6", "*", "6", "*"],
+            middleActionGrid.Element(presentation + "Grid.ColumnDefinitions")!.Elements().Select(column => (string?)column.Attribute("Width")));
+
+        // 整单开关是一次性的「就绪」开关：与折扣金额 / 折扣% 同在中行，开关在最左，直接绑定视图模型的 IsWholeOrderOperation。
+        var wholeOrderToggle = Assert.Single(middleActionGrid.Elements(presentation + "ToggleButton"));
+        Assert.Equal("2", (string?)wholeOrderToggle.Attribute("Grid.Row"));
+        Assert.Equal("0", (string?)wholeOrderToggle.Attribute("Grid.Column"));
+        Assert.Equal("{Binding IsWholeOrderOperation, Mode=TwoWay}", (string?)wholeOrderToggle.Attribute("IsChecked"));
+        Assert.Equal("{StaticResource CashierWholeOrderToggleStyle}", (string?)wholeOrderToggle.Attribute("Style"));
 
         var wholeOrderStyle = FindStyle(view, x, "CashierWholeOrderToggleStyle");
         var checkedTrigger = Assert.Single(wholeOrderStyle.Descendants(presentation + "Trigger").Where(trigger =>
             (string?)trigger.Attribute("Property") == "IsChecked" && (string?)trigger.Attribute("Value") == "True"));
         AssertTriggerSetter(checkedTrigger, "Background", "{DynamicResource PosPrimarySoftBrush}");
-        AssertTriggerSetter(checkedTrigger, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
         AssertTriggerSetter(checkedTrigger, "Foreground", "{DynamicResource PosPrimaryTextBrush}");
+        // 就绪态用虚线框 + 箭头表示（不只靠颜色）：实线边框让位，虚线框和箭头显示，且都取主题主色。
+        AssertTriggerSetter(checkedTrigger, "BorderThickness", "0");
+        Assert.Contains(checkedTrigger.Elements(presentation + "Setter"), setter =>
+            (string?)setter.Attribute("TargetName") == "ArmedFrame" &&
+            (string?)setter.Attribute("Property") == "Visibility" &&
+            (string?)setter.Attribute("Value") == "Visible");
+        Assert.Contains(checkedTrigger.Elements(presentation + "Setter"), setter =>
+            (string?)setter.Attribute("TargetName") == "ArmedArrow" &&
+            (string?)setter.Attribute("Property") == "Visibility" &&
+            (string?)setter.Attribute("Value") == "Visible");
+        var armedFrame = Assert.Single(wholeOrderStyle.Descendants(presentation + "Rectangle"));
+        Assert.Equal("ArmedFrame", (string?)armedFrame.Attribute(x + "Name"));
+        Assert.Equal("{DynamicResource PosPrimaryBrush}", (string?)armedFrame.Attribute("Stroke"));
+        Assert.Equal("Collapsed", (string?)armedFrame.Attribute("Visibility"));
+        var armedArrow = Assert.Single(wholeOrderStyle.Descendants(presentation + "Polygon"));
+        Assert.Equal("ArmedArrow", (string?)armedArrow.Attribute(x + "Name"));
+        Assert.Equal("{DynamicResource PosPrimaryBrush}", (string?)armedArrow.Attribute("Fill"));
+        Assert.Equal("Collapsed", (string?)armedArrow.Attribute("Visibility"));
+
+        // 折扣两键与快速折扣条随开关描蓝：DataTrigger 绑 IsWholeOrderOperation，颜色取主题画刷。
+        var scopedStyle = FindStyle(view, x, "CashierScopedFunctionButtonStyle");
+        Assert.Equal("{StaticResource CashierFunctionButtonStyle}", (string?)scopedStyle.Attribute("BasedOn"));
+        var scopedTrigger = Assert.Single(scopedStyle.Descendants(presentation + "DataTrigger"));
+        Assert.Equal("{Binding IsWholeOrderOperation}", (string?)scopedTrigger.Attribute("Binding"));
+        Assert.Equal("True", (string?)scopedTrigger.Attribute("Value"));
+        AssertTriggerSetter(scopedTrigger, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
+        AssertTriggerSetter(scopedTrigger, "Background", "{DynamicResource PosPrimarySoftBrush}");
+
+        var segmentStyle = FindStyle(view, x, "CashierQuickDiscountSegmentStyle");
+        AssertSetter(segmentStyle, "Background", "{DynamicResource PosSurfaceBrush}");
+        AssertSetter(segmentStyle, "BorderBrush", "{DynamicResource PosBorderBrush}");
+        var segmentTrigger = Assert.Single(segmentStyle.Descendants(presentation + "DataTrigger"));
+        Assert.Equal("{Binding IsWholeOrderOperation}", (string?)segmentTrigger.Attribute("Binding"));
+        AssertTriggerSetter(segmentTrigger, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
+        AssertTriggerSetter(segmentTrigger, "Background", "{DynamicResource PosPrimarySoftBrush}");
 
         var functionStyle = FindStyle(view, x, "CashierFunctionButtonStyle");
-        AssertSetter(functionStyle, "Height", "54");
-        AssertSetter(functionStyle, "Margin", "3");
+        AssertSetter(functionStyle, "Height", "52");
+        AssertSetter(functionStyle, "Margin", "0");
 
         var discountStyle = FindStyle(view, x, "CashierDiscountButtonStyle");
         AssertSetter(discountStyle, "Height", "64");
@@ -107,10 +170,15 @@ public sealed class PosTerminalViewLayoutTests
 
         var discountSegment = Assert.Single(view.Descendants(presentation + "Border").Where(border =>
             (string?)border.Attribute(x + "Name") == "QuickDiscountSegment"));
-        Assert.Equal("3,4,3,0", (string?)discountSegment.Attribute("Margin"));
+        // 快速折扣条占操作区最下一行、横跨五列；底色 / 边框写在样式里（本地值会盖住 DataTrigger），所以元素上不再有 Background / BorderBrush。
+        Assert.Equal("4", (string?)discountSegment.Attribute("Grid.Row"));
+        Assert.Equal("5", (string?)discountSegment.Attribute("Grid.ColumnSpan"));
+        Assert.Null(discountSegment.Attribute("Margin"));
+        Assert.Equal("{StaticResource CashierQuickDiscountSegmentStyle}", (string?)discountSegment.Attribute("Style"));
+        Assert.Null(discountSegment.Attribute("Background"));
+        Assert.Null(discountSegment.Attribute("BorderBrush"));
         Assert.Equal("5", (string?)discountSegment.Attribute("CornerRadius"));
         Assert.Null(discountSegment.Attribute("ClipToBounds"));
-        Assert.Equal("{DynamicResource PosBorderBrush}", (string?)discountSegment.Attribute("BorderBrush"));
         Assert.Equal("1", (string?)discountSegment.Attribute("BorderThickness"));
         var opacityMask = Assert.Single(discountSegment.Elements(presentation + "Border.OpacityMask"));
         var visualBrush = Assert.Single(opacityMask.Elements(presentation + "VisualBrush"));
@@ -131,18 +199,19 @@ public sealed class PosTerminalViewLayoutTests
         AssertSetter(noBarcodeStyle, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
         AssertSetter(noBarcodeStyle, "Foreground", "White");
 
+        // 修改数量 / 价格只管选中行，用普通功能键样式；折扣金额 / 折扣% 受整单开关管辖，用会随开关描蓝的样式。
         var functionCommands = new[]
         {
-            "ModifySelectedLineQuantityCommand",
-            "ModifySelectedLinePriceCommand",
-            "ApplySelectedLineDiscountAmountCommand",
-            "ApplySelectedLineDiscountPercentCommand"
+            ("ModifySelectedLineQuantityCommand", "{StaticResource CashierFunctionButtonStyle}"),
+            ("ModifySelectedLinePriceCommand", "{StaticResource CashierFunctionButtonStyle}"),
+            ("ApplySelectedLineDiscountAmountCommand", "{StaticResource CashierScopedFunctionButtonStyle}"),
+            ("ApplySelectedLineDiscountPercentCommand", "{StaticResource CashierScopedFunctionButtonStyle}")
         };
-        Assert.All(functionCommands, command =>
+        Assert.All(functionCommands, expected =>
         {
             var button = Assert.Single(view.Descendants(presentation + "Button").Where(element =>
-                ((string?)element.Attribute("Command"))?.Contains(command, StringComparison.Ordinal) == true));
-            Assert.Equal("{StaticResource CashierFunctionButtonStyle}", (string?)button.Attribute("Style"));
+                ((string?)element.Attribute("Command"))?.Contains(expected.Item1, StringComparison.Ordinal) == true));
+            Assert.Equal(expected.Item2, (string?)button.Attribute("Style"));
             Assert.Empty(button.Descendants().Where(element => element.Name.LocalName == "PackIcon"));
         });
     }

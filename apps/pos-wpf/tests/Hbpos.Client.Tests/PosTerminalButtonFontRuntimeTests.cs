@@ -39,12 +39,22 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
                 var parameter = (key as Button)?.CommandParameter as string;
                 var expected = parameter switch
                 {
-                    "Clear" or "QuickHalf" or "QuickNinetyNine" => 18d,
-                    null => 16d,
+                    "Clear" => 18d,
                     _ => 28d
                 };
                 AssertButtonText(key, expected);
             }
+
+            // $0.50 / $0.99 现在单独占键盘最下面半行；整单开关已搬到操作区，键盘里不再有 ToggleButton。
+            var quickAmountKeys = Assert.IsType<UniformGrid>(view.FindName("CashierQuickAmountKeys"));
+            Assert.Equal(2, quickAmountKeys.Children.OfType<ButtonBase>().Count());
+            foreach (var key in quickAmountKeys.Children.OfType<ButtonBase>())
+            {
+                AssertButtonText(key, 18);
+            }
+
+            // 整单开关（16 号字）与折扣两键同在操作区中行，文字都必须完整放进各自按钮。
+            AssertButtonText(Assert.Single(ToggleButtonsWithBinding(view, "IsWholeOrderOperation")), 16);
 
             var discountButtons = ButtonsWithCommand(view, "ApplyQuickDiscountPercentCommand");
             Assert.Equal(5, discountButtons.Count);
@@ -136,6 +146,14 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
         return PaymentViewRuntimeStaTestHost.FindVisualDescendants<ButtonBase>(view)
             .Where(button =>
                 System.Windows.Data.BindingOperations.GetBinding(button, ButtonBase.CommandProperty)?.Path?.Path == commandPath)
+            .ToList();
+    }
+
+    private static List<ToggleButton> ToggleButtonsWithBinding(FrameworkElement view, string path)
+    {
+        return PaymentViewRuntimeStaTestHost.FindVisualDescendants<ToggleButton>(view)
+            .Where(button =>
+                System.Windows.Data.BindingOperations.GetBinding(button, ToggleButton.IsCheckedProperty)?.Path?.Path == path)
             .ToList();
     }
 
