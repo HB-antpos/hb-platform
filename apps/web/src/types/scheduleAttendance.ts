@@ -32,6 +32,7 @@ export interface AttendanceQuery {
   storeTimeZone?: string
   status?: string
   keyword?: string
+  offset?: number
 }
 
 export interface AttendanceScheduleDto {
