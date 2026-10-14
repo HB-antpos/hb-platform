@@ -71,6 +71,10 @@ async function run() {
     ["abandoned", "t-1", "server", "later403", "laterBusiness", "slow", "menu"],
   );
 
+  // 登录前触发过 Keychain 自动清理的成功登录（即使很快）也要上传，用来确认线上有多少设备有此问题
+  const repaired = { ...finishLoginTrace(trace("repaired"), "success", t0 + 500), keychainRepair: "repaired" as const };
+  assert.deepEqual(selectLoginTracesToUpload([fast, repaired]).map((item) => item.traceId), ["repaired"]);
+
   // 只保留最近几条，同一 traceId 覆盖
   let stored: LoginTrace[] = [];
   for (let index = 0; index < MAX_STORED_LOGIN_TRACES + 2; index += 1) stored = upsertLoginTrace(stored, trace(`n-${index}`));

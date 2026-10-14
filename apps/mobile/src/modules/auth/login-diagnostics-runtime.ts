@@ -23,6 +23,10 @@ export interface LoginTraceRecorder {
   readonly traceId: string;
   mark(stage: LoginStage): void;
   markMenuTimedOut(): void;
+  /** 登录前 Keychain 自检触发了自动清理（healthy 不记）。 */
+  markKeychainRepair(result: "repaired" | "unrepaired"): void;
+  /** 最后一个已完成的阶段，用来判断失败发生在哪一步之后。 */
+  lastCompletedStage(): LoginStage | undefined;
   finish(outcome: LoginOutcome, error?: unknown): void;
 }
 
@@ -97,6 +101,13 @@ export function startLoginTrace(username: string): LoginTraceRecorder {
     },
     markMenuTimedOut() {
       trace = { ...trace, menuTimedOut: true };
+    },
+    markKeychainRepair(result) {
+      trace = { ...trace, keychainRepair: result };
+      persistTrace(trace);
+    },
+    lastCompletedStage() {
+      return trace.stages[trace.stages.length - 1]?.stage;
     },
     finish(outcome, error) {
       trace = finishLoginTrace(trace, outcome, Date.now(), error);
