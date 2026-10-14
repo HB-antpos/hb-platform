@@ -4,8 +4,9 @@ using Hbpos.Contracts.Orders;
 
 namespace Hbpos.Client.Tests;
 
-// H2：LocalIp / CloudDirectSync 在授权新的卡扣款前没有任何闸门——本机仍有未结的 Sale（结果未知、已批准未落单……）
-// 时，“移至异常中心并开始新单”后可以再次收款，重启后也只有角标。这里在发起扣款前按本机未结队列拦截。
+// 业务要求（2026-10-14）：无论本机还有多少未结的 Linkly 记录（结果未知、已批准未落单、终态化卡住……），
+// 都不能阻止下一单发起付款请求。10-02 刷卡机离线遗留的两条记录曾让 POS_1013_0222 连续多日无法刷卡。
+// 旧的“新扣款闸门”（H2）已改为只记日志；未结记录仍留在卡交易异常中心，由主管或自动恢复处理。
 public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-06-05T10:00:00+10:00");
@@ -17,7 +18,7 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
     [InlineData(LocalCardPaymentAttemptStatus.RequiresReview, "CloudDirectSync")]
     [InlineData(LocalCardPaymentAttemptStatus.Approved, "LocalIp")]
     [InlineData(LocalCardPaymentAttemptStatus.Recovering, "CloudBackendAsync")]
-    public async Task Unfinished_sale_attempt_blocks_a_new_card_charge_before_the_terminal_is_called(
+    public async Task Unfinished_sale_attempt_never_blocks_a_new_card_charge(
         LocalCardPaymentAttemptStatus status,
         string attemptMode)
     {
@@ -29,19 +30,16 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
 
         var result = await AddCardTenderAsync(fixture.Workflow, fixture);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey, result.StatusKey);
-        Assert.Contains("unfinished card transaction", result.StatusMessage, StringComparison.OrdinalIgnoreCase);
-        // 不是“新交易结果未知”：付款页不上锁，但会提示去异常中心。
-        Assert.False(result.CardResult?.RequiresRecovery);
-        Assert.Equal(CardPaymentErrorKind.ActiveSessionRequiresRecovery, result.CardResult?.ErrorKind);
-        Assert.Equal(0, cloudApi.SendCount);
-        var stillOpen = Assert.Single(await OpenAttemptsAsync(fixture));
-        Assert.Equal(open.AttemptGuid, stillOpen.AttemptGuid);
+        Assert.True(result.Succeeded);
+        Assert.NotEqual(CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey, result.StatusKey);
+        Assert.Equal(1, cloudApi.SendCount);
+        // 旧的未结记录原样保留在异常中心，没有被这次付款改动或悄悄结案。
+        var stillOpen = Assert.Single(await OpenAttemptsAsync(fixture), a => a.AttemptGuid == open.AttemptGuid);
+        Assert.Equal(status, stillOpen.Status);
     }
 
     [Fact]
-    public async Task Approved_but_unrecorded_active_session_blocks_a_new_card_charge()
+    public async Task Approved_but_unrecorded_active_session_never_blocks_a_new_card_charge()
     {
         var cloudApi = new ScriptedLinklyCloudApi(returnApprovalAfterRelease: true);
         cloudApi.ReleaseApprovedResult();
@@ -58,15 +56,14 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
 
         var result = await AddCardTenderAsync(fixture.Workflow, fixture);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey, result.StatusKey);
-        Assert.Equal(0, cloudApi.SendCount);
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, cloudApi.SendCount);
     }
 
     [Theory]
     [InlineData(LocalCardPaymentAttemptStatus.Approved, LocalCardPaymentAttemptStatus.OrderCompleted)]
     [InlineData(LocalCardPaymentAttemptStatus.Recovering, LocalCardPaymentAttemptStatus.Abandoned)]
-    public async Task Attempt_stuck_in_finalize_pending_blocks_a_new_card_charge(
+    public async Task Attempt_stuck_in_finalize_pending_never_blocks_a_new_card_charge(
         LocalCardPaymentAttemptStatus status,
         LocalCardPaymentAttemptStatus target)
     {
@@ -81,9 +78,8 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
 
         var result = await AddCardTenderAsync(fixture.Workflow, fixture);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey, result.StatusKey);
-        Assert.Equal(0, cloudApi.SendCount);
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, cloudApi.SendCount);
     }
 
     [Theory]
@@ -138,7 +134,7 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
     }
 
     [Fact]
-    public async Task Cloud_backend_mode_keeps_server_gate_and_takeover_for_cloud_backend_attempts_but_not_for_local_ones()
+    public async Task Cloud_backend_mode_does_not_block_on_either_cloud_backend_or_leftover_local_attempts()
     {
         var cloudApi = new ScriptedLinklyCloudApi(returnApprovalAfterRelease: true);
         cloudApi.ReleaseApprovedResult();
@@ -158,12 +154,12 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
                 SessionId = "SESSION-BACKEND-OPEN"
             });
 
-        // 同为 CloudBackendAsync：服务端会话闸门 + 接管流程负责，这里不拦截（保持原有行为）。
+        // 同为 CloudBackendAsync：客户端不拦截（服务端会话闸门与接管流程另行负责）。
         var backendResult = await AddCardTenderAsync(workflow, fixture);
         Assert.True(backendResult.Succeeded);
         Assert.Equal(1, terminal.AuthorizeCount);
 
-        // 换了连接模式后遗留的本地未结记录，服务端看不见，必须本地拦截。
+        // 换了连接模式后遗留的本地未结记录：客户端同样不再拦截下一单。
         await fixture.AttemptRepository.CreateAsync(
             CreateAttempt(fixture, LocalCardPaymentAttemptStatus.Recovering, "LocalIp") with
             {
@@ -171,13 +167,12 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
                 TxnRef = "P000000000000103"
             });
         var localResult = await AddCardTenderAsync(workflow, fixture);
-        Assert.False(localResult.Succeeded);
-        Assert.Equal(CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey, localResult.StatusKey);
-        Assert.Equal(1, terminal.AuthorizeCount);
+        Assert.True(localResult.Succeeded);
+        Assert.Equal(2, terminal.AuthorizeCount);
     }
 
     [Fact]
-    public async Task Unreadable_open_queue_fails_closed_without_calling_the_terminal()
+    public async Task Unreadable_open_queue_does_not_block_the_charge()
     {
         var cloudApi = new ScriptedLinklyCloudApi(returnApprovalAfterRelease: true);
         cloudApi.ReleaseApprovedResult();
@@ -193,9 +188,9 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
 
         var result = await AddCardTenderAsync(workflow, fixture);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(CashPaymentWorkflowService.OpenCardAttemptBlocksPaymentStatusKey, result.StatusKey);
-        Assert.Equal(0, terminal.AuthorizeCount);
+        // 读不到未结队列只是少一条日志，绝不能因此拒绝付款。
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, terminal.AuthorizeCount);
     }
 
     [Fact]
@@ -217,24 +212,6 @@ public sealed class CashPaymentWorkflowServiceOpenAttemptGateTests
 
         Assert.True(result.Succeeded);
         Assert.Equal(1, terminal.AuthorizeCount);
-    }
-
-    [Fact]
-    public async Task Gate_runs_before_attempt_creation_so_blocked_payments_leave_no_new_attempt()
-    {
-        var cloudApi = new ScriptedLinklyCloudApi(returnApprovalAfterRelease: true);
-        cloudApi.ReleaseApprovedResult();
-        await using var fixture = await PaymentFlowTestFixture.CreateAsync(cloudApi);
-        await fixture.AttemptRepository.CreateAsync(
-            CreateAttempt(fixture, LocalCardPaymentAttemptStatus.Recovering, "LocalIp"));
-
-        for (var i = 0; i < 3; i++)
-        {
-            var result = await AddCardTenderAsync(fixture.Workflow, fixture);
-            Assert.False(result.Succeeded);
-        }
-
-        Assert.Single(await fixture.AttemptRepository.GetRecentAttemptsAsync("S001", "POS-01", "Sandbox"));
     }
 
     private static Task<PaymentTenderAttemptResult> AddCardTenderAsync(

@@ -1507,6 +1507,10 @@ public sealed class LinklyTerminalClient(
                 returnedTxnRef,
                 response.AmtPurchase,
                 receipts);
+            // 中文注释：EFT-Client 正常回答了（Success=true），只是回包不是被查的这笔（引用对不上，如 JH / NOT FOUND）。
+            // 仍保持 ResultUnknown，但打上专用标记，让主管结案的实时核验能与“刷卡机没回答”区分；
+            // 引用对得上而金额/类型冲突的回包不打标记，仍按身份冲突失败关闭。
+            var answeredButNotThisTransaction = response.Success && !referenceMatches;
             return new PaymentAuthorizationResult(
                 false,
                 null,
@@ -1514,6 +1518,7 @@ public sealed class LinklyTerminalClient(
                     ? T("linkly.local.recoveryPinpadOffline", "The card terminal (PINpad) is offline, so the previous transaction could not be checked. Reconnect the card terminal and try again.")
                     : T("linkly.local.recoveryFailed", "ANZ Linkly recovery could not confirm the previous transaction."),
                 TxnType: ToResultTxnType(transactionType),
+                StatusKey: answeredButNotThisTransaction ? LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey : null,
                 ResultUnknown: true);
         }
 

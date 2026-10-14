@@ -48,7 +48,8 @@ public sealed partial class CardPaymentRecoveryServiceTests
         string responseCode,
         string responseText,
         bool resultUnknown = false,
-        string? returnedTxnRef = null)
+        string? returnedTxnRef = null,
+        string? statusKey = null)
     {
         var returned = returnedTxnRef ?? txnRef;
         return new PaymentAuthorizationResult(
@@ -65,6 +66,7 @@ public sealed partial class CardPaymentRecoveryServiceTests
             returned,
             responseCode,
             responseText,
+            StatusKey: statusKey,
             ResultUnknown: resultUnknown);
     }
 
@@ -420,6 +422,111 @@ public sealed partial class CardPaymentRecoveryServiceTests
 
         Assert.True(result.ResolutionPersisted);
         Assert.Equal(1, terminal.RecoverCallCount);
+    }
+
+    // 生产实测：10-02 刷卡机离线遗留的记录 12 天后，EFT-Client 回 Success=true、空 TxnRef、JH / NOT FOUND，
+    // 真实客户端把它映射成 ResultUnknown + 专用标记。老记录由主管凭银行证据结案，不能永远卡在“只能继续等待”。
+    [Theory]
+    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
+    public async Task ResolvePaymentAsync_local_ip_old_attempt_not_found_on_terminal_leaves_decision_to_supervisor(
+        CardPaymentSupervisorDecision decision)
+    {
+        var attempt = CreateLocalIpPendingAttempt() with
+        {
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-12)
+        };
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var terminal = new FakeLinklyTerminalClient(
+            LocalTerminalResult(
+                LocalIpTxnRef,
+                false,
+                "JH",
+                "NOT FOUND",
+                resultUnknown: true,
+                statusKey: LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey));
+        var service = CreateService(
+            attempts,
+            new FakeLocalOrderRepository(),
+            new FakeLinklyBackendTerminalClient(),
+            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
+            terminal);
+
+        var result = await service.ResolvePaymentAsync(
+            SupervisorResolution(attempt, decision, "BANK-REF"),
+            new PosCartService(),
+            Session);
+
+        Assert.True(result.ResolutionPersisted);
+        Assert.DoesNotContain("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, terminal.RecoverCallCount);
+    }
+
+    // 刚发起的记录：终端可能仍在处理这笔交易，查不到不能当作“已经没有迟到结果”，否则提前结案会留下孤儿扣款。
+    [Theory]
+    [InlineData(CardPaymentSupervisorDecision.ConfirmNotPaid)]
+    [InlineData(CardPaymentSupervisorDecision.ConfirmPaid)]
+    public async Task ResolvePaymentAsync_local_ip_fresh_attempt_not_found_on_terminal_still_fails_closed(
+        CardPaymentSupervisorDecision decision)
+    {
+        var attempt = CreateLocalIpPendingAttempt() with
+        {
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5)
+        };
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var terminal = new FakeLinklyTerminalClient(
+            LocalTerminalResult(
+                LocalIpTxnRef,
+                false,
+                "JH",
+                "NOT FOUND",
+                resultUnknown: true,
+                statusKey: LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey));
+        var service = CreateService(
+            attempts,
+            new FakeLocalOrderRepository(),
+            new FakeLinklyBackendTerminalClient(),
+            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
+            terminal);
+
+        var result = await service.ResolvePaymentAsync(
+            SupervisorResolution(attempt, decision, "BANK-REF"),
+            new PosCartService(),
+            Session);
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.ResolutionPersisted);
+        Assert.True(result.LockRetained);
+        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(attempts.LastPaymentJournal);
+    }
+
+    // 老记录但刷卡机根本没回答（离线/超时，无“回答了别的交易”标记）：仍然失败关闭。
+    [Fact]
+    public async Task ResolvePaymentAsync_local_ip_old_attempt_with_unanswered_terminal_still_fails_closed()
+    {
+        var attempt = CreateLocalIpPendingAttempt() with
+        {
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-12)
+        };
+        var attempts = new FakeCardPaymentAttemptRepository(attempt);
+        var terminal = new FakeLinklyTerminalClient(
+            LocalTerminalResult(LocalIpTxnRef, false, "PF", "PINpad Offline", resultUnknown: true));
+        var service = CreateService(
+            attempts,
+            new FakeLocalOrderRepository(),
+            new FakeLinklyBackendTerminalClient(),
+            new FakeCardTerminalSettingsProvider(LinklyConnectionMode.LocalIp),
+            terminal);
+
+        var result = await service.ResolvePaymentAsync(
+            SupervisorResolution(attempt, CardPaymentSupervisorDecision.ConfirmNotPaid, "BANK-REF"),
+            new PosCartService(),
+            Session);
+
+        Assert.False(result.ResolutionPersisted);
+        Assert.Contains("could not check", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(attempts.LastPaymentJournal);
     }
 
     [Fact]

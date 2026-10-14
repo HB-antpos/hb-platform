@@ -784,20 +784,16 @@ public sealed class CashPaymentWorkflowService(
         (LocalSquarePaymentAttempt? Attempt, bool Reused) squareAttemptSelection = (null, false);
         if (!isRefund && settingsSnapshot?.Processor == CardProcessorKind.Linkly)
         {
-            // 新扣款闸门：本机仍有未结的 Linkly 销售（结果未知、已批准未落单……）时不能再向终端发起扣款。
-            // LocalIp/CloudDirectSync 过去没有任何闸门；CloudBackendAsync 之间互相有服务端会话闸门兜底（并保留接管流程）。
-            var openAttemptBlocksPayment = await RunLocalStoreAsync(
-                () => HasBlockingOpenLinklyAttemptAsync(
+            // 中文注释：业务要求（2026-10-14）——无论本机还有多少未结的 Linkly 记录，都不能阻止下一单发起付款请求。
+            // 此前这里是“新扣款闸门”：未结记录会在请求发给终端之前直接拒绝（读库失败也拒绝），
+            // 10-02 刷卡机离线遗留的两条记录因此让 POS_1013_0222 连续多日无法刷卡。
+            // 现在只记录日志用于事后对账；未结记录仍留在卡交易异常中心，由主管或自动恢复处理。
+            await RunLocalStoreAsync(
+                () => LogOpenLinklyAttemptsBeforeNewPaymentAsync(
                     settingsSnapshot,
                     session,
                     persistenceCancellationToken),
                 persistenceCancellationToken);
-            if (openAttemptBlocksPayment)
-            {
-                return CreateCardFailureResult(
-                    OpenCardAttemptBlocksPaymentStatusKey,
-                    "This POS has an unfinished card transaction. Resolve it in Card Recovery before taking another card payment.");
-            }
         }
 
         if (settingsSnapshot?.Processor == CardProcessorKind.Linkly)
@@ -2099,7 +2095,9 @@ public sealed class CashPaymentWorkflowService(
         }
     }
 
-    /// <summary>付款页因本机未结刷卡交易而拒绝新扣款时使用的状态键；不是“结果未知”，不会锁住付款页。</summary>
+    /// <summary>
+    /// 旧版“未结刷卡交易挡住新扣款”使用的状态键。现在不再产生；保留常量是为了让策略/本地化对历史键仍可分类。
+    /// </summary>
     internal const string OpenCardAttemptBlocksPaymentStatusKey = "linkly.recovery.openAttemptBlocksPayment";
 
     private static readonly LocalCardPaymentAttemptStatus[] SettledAttemptStatuses =
@@ -2113,60 +2111,43 @@ public sealed class CashPaymentWorkflowService(
     ];
 
     /// <summary>
-    /// 本机是否还有会阻止新扣款的未结 Linkly 记录：销售或活动会话处于非终态（Pending/SessionStarted/Recovering/
-    /// RequiresReview/Approved，含已批准未落单的孤儿批准），或终态化仍卡在 FinalizePending。
-    /// 只差 ack 的记录（订单已完成未确认、明确失败未确认）不阻止——它们由接管/自动恢复静默补 ack，不涉及资金风险。
-    /// 当前模式是 CloudBackendAsync 时，同为 CloudBackendAsync 的未结记录由服务端会话闸门 + 接管流程处理（保持原行为）；
-    /// 其余组合（本地/直连的未结记录，或换了连接模式后遗留的记录）服务端看不见，只能靠这里拦截。
-    /// 读取失败按失败关闭，宁可让收银员去异常中心确认，也不冒重复扣款的风险。
+    /// 新的刷卡请求发出前，只记录本机仍有哪些未结的 Linkly 记录（销售或活动会话处于非终态，或终态化卡在 FinalizePending），
+    /// 绝不阻止付款：这些记录可能是迟到的已扣款，日志用于事后对账是否出现重复扣款。
+    /// 读取失败、仓储没有接线未结队列都只是少一条日志，不影响收款（异常中心里的记录不受影响）。
     /// </summary>
-    private async Task<bool> HasBlockingOpenLinklyAttemptAsync(
+    private async Task LogOpenLinklyAttemptsBeforeNewPaymentAsync(
         CardTerminalSettings settings,
         PosSessionState session,
         CancellationToken cancellationToken)
     {
-        var mode = CardTerminalSettings.NormalizeLinklyConnectionMode(settings.LinklyConnectionMode);
-        if (settings.Processor != CardProcessorKind.Linkly ||
-            cardPaymentAttemptRepository is null ||
-            (mode != LinklyConnectionMode.CloudBackendAsync &&
-             mode != LinklyConnectionMode.LocalIp &&
-             mode != LinklyConnectionMode.CloudDirectSync))
+        if (settings.Processor != CardProcessorKind.Linkly || cardPaymentAttemptRepository is null)
         {
-            return false;
+            return;
         }
 
-        IReadOnlyList<LocalCardPaymentAttempt> openAttempts;
         try
         {
-            openAttempts = await cardPaymentAttemptRepository.GetOpenAttemptsAsync(
+            var openAttempts = await cardPaymentAttemptRepository.GetOpenAttemptsAsync(
                 session.StoreCode,
                 session.DeviceCode,
                 settings.Environment.ToString(),
                 cancellationToken);
+            var unfinished = openAttempts.Where(IsBlockingForNewCardPayment).ToArray();
+            foreach (var attempt in unfinished.Take(5))
+            {
+                ConsoleLog.Write(
+                    "CardRecovery",
+                    $"new card payment proceeds despite open attempt attemptGuid={attempt.AttemptGuid} kind={attempt.OperationKind} status={attempt.Status} phase={attempt.RecoveryPhase} sessionId={LogValue(attempt.SessionId)} txnRef={LogValue(attempt.TxnRef)} openCount={unfinished.Length}");
+            }
         }
-        catch (NotSupportedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            // 仓储没有接线未结队列（精简实现/测试替身）：没有可核对的数据，不阻断。
-            return false;
+            // 仓储未接线（NotSupportedException）、读库失败，甚至用户取消，都不能阻止这次付款请求。
+            if (ex is not NotSupportedException and not OperationCanceledException)
+            {
+                LogCardRecoveryWarning("open-attempt-log", null, ex);
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException and not StackOverflowException)
-        {
-            LogCardRecoveryWarning("open-attempt-gate", null, ex);
-            return true;
-        }
-
-        var serverGateCoversBackendAttempts = mode == LinklyConnectionMode.CloudBackendAsync;
-        var blocker = openAttempts.FirstOrDefault(attempt =>
-            IsBlockingForNewCardPayment(attempt) &&
-            !(serverGateCoversBackendAttempts && IsCloudBackendAsyncAttempt(attempt)));
-        if (blocker is not null)
-        {
-            ConsoleLog.Write(
-                "CardRecovery",
-                $"new card payment blocked by open attempt attemptGuid={blocker.AttemptGuid} kind={blocker.OperationKind} status={blocker.Status} phase={blocker.RecoveryPhase} sessionId={LogValue(blocker.SessionId)} txnRef={LogValue(blocker.TxnRef)}");
-        }
-
-        return blocker is not null;
     }
 
     private static bool IsBlockingForNewCardPayment(LocalCardPaymentAttempt attempt)
