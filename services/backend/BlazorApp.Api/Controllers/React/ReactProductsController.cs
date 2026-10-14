@@ -124,13 +124,41 @@ IF @result < 0 THROW 51062, '获取本地商品条码创建锁失败', 1;
                             return Conflict(new { success = false, message = "条码已被使用，请重新生成条码" });
                         }
                     }
+                    // 货号必须在存活商品里唯一：此前这里不校验，已经建出和别的商品货号相同的不同商品。
+                    // 空货号保持原行为（不校验）；非空时去掉首尾空白后再比较和保存。
+                    var itemNumber = string.IsNullOrWhiteSpace(dto.ItemNumber)
+                        ? dto.ItemNumber
+                        : dto.ItemNumber.Trim();
+                    if (!string.IsNullOrWhiteSpace(itemNumber))
+                    {
+                        // 同一货号的并发创建必须串行，避免两个请求同时通过检查后各建一件。
+                        if (db.CurrentConnectionConfig.DbType == DbType.SqlServer)
+                        {
+                            await db.Ado.ExecuteCommandAsync("""
+DECLARE @result int;
+EXEC @result = sys.sp_getapplock @Resource = @resource, @LockMode = 'Exclusive',
+    @LockOwner = 'Transaction', @LockTimeout = 10000;
+IF @result < 0 THROW 51063, '获取本地商品货号创建锁失败', 1;
+""", new SugarParameter("@resource", $"LocalProductItemNumberCreate:{itemNumber}"));
+                        }
+                        if (await db.Queryable<Product>().AnyAsync(x => x.ItemNumber == itemNumber && x.IsDeleted == false))
+                        {
+                            await db.Ado.RollbackTranAsync();
+                            return Conflict(new
+                            {
+                                success = false,
+                                message = "货号已存在，请更换货号",
+                                errorCode = "ITEM_NUMBER_EXISTS",
+                            });
+                        }
+                    }
                     var product = new Product
                     {
                         UUID = UuidHelper.GenerateUuid7(),
                         ProductCode = Guid.NewGuid().ToString(),
                         ProductCategoryGUID = dto.ProductCategoryGUID,
                         LocalSupplierCode = localSupplierCode,
-                        ItemNumber = dto.ItemNumber,
+                        ItemNumber = itemNumber,
                         Barcode = dto.Barcode,
                         ProductName = dto.ProductName,
                         ProductImage = dto.ProductImage,
