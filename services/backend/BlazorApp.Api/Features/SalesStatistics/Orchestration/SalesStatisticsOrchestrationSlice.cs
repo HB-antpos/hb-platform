@@ -600,7 +600,19 @@ namespace BlazorApp.Api.Services
                             }
 
                             var productState = await _store.GetProductStoreDailyRefreshStateAsync(context, date);
-                            if (productState == null
+                            // 能走到这里说明写入没有抛异常；此时的 Failed 只可能是对账不一致（行已发布、状态带警告）。
+                            // 它是数据口径提示，不是刷新失败：照常发布报表快照，否则一家店的明细缺口会让整天营业额停更。
+                            if (productState != null
+                                && productState.Status == SalesStatisticRefreshStatus.Failed
+                                && ProductStoreDailyReconciliationCalculator.IsReconciliationFailure(productState.ErrorMessage))
+                            {
+                                logger.LogWarning(
+                                    "日期 {Date} 商品统计对账不一致，统计已发布并带警告: {Message}",
+                                    date.ToString("yyyy-MM-dd"),
+                                    productState.ErrorMessage
+                                );
+                            }
+                            else if (productState == null
                                 || productState.Status == SalesStatisticRefreshStatus.Failed)
                             {
                                 throw new InvalidOperationException(

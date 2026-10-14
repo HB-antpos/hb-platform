@@ -109,9 +109,13 @@ namespace BlazorApp.Api.Services
         DateTime targetDate,
         ProductStatisticStatusResult status,
         DateTime? lastSourceUploadTime,
-        bool overwriteLastSourceUploadTime = false
+        bool overwriteLastSourceUploadTime = false,
+        bool markAggregated = false
     )
     {
+        // markAggregated：对账不一致但分店与商品行已经实际发布时，状态虽是 Failed，仍要记录本次聚合时间，
+        // 否则当天首次刷新就对账失败的日期会因没有聚合时间被报表当成「尚未发布」。
+        var completed = IsCompletedProductStatus(status.Status) || markAggregated;
         var nextDate = targetDate.Date.AddDays(1);
         var existing = await context.Db.Queryable<SalesStatisticRefreshState>()
             // SQLite/SQL Server 的 DateTime 精度不同，按规范化日期范围读取已有状态。
@@ -137,7 +141,7 @@ namespace BlazorApp.Api.Services
                 : null;
             existing.LastCheckedAtUtc = DateTime.UtcNow;
             existing.ErrorMessage = status.ErrorMessage;
-            if (IsCompletedProductStatus(status.Status))
+            if (completed)
             {
                 existing.LastAggregatedAtUtc = DateTime.UtcNow;
                 existing.CompletedAtUtc = DateTime.UtcNow;
@@ -156,7 +160,7 @@ namespace BlazorApp.Api.Services
             existing.SourceProductVersion = status.SourceProductVersion;
         existing.LastCheckedAtUtc = DateTime.UtcNow;
         existing.ErrorMessage = status.ErrorMessage;
-        if (IsCompletedProductStatus(status.Status))
+        if (completed)
         {
             existing.LastAggregatedAtUtc = DateTime.UtcNow;
             existing.CompletedAtUtc = DateTime.UtcNow;
@@ -172,7 +176,8 @@ namespace BlazorApp.Api.Services
         DateTime? lastSourceUploadTime,
         string? errorMessage,
         bool overwriteLastSourceUploadTime = false,
-        string? sourceProductVersion = null
+        string? sourceProductVersion = null,
+        bool markAggregated = false
     )
     {
         var now = DateTime.UtcNow;
@@ -210,7 +215,7 @@ namespace BlazorApp.Api.Services
         {
             state.StartedAtUtc = now;
         }
-        else if (status == SalesStatisticRefreshStatus.Fresh || status == ProvisionalFreshStatus)
+        else if (status == SalesStatisticRefreshStatus.Fresh || status == ProvisionalFreshStatus || markAggregated)
         {
             state.LastAggregatedAtUtc = now;
             state.CompletedAtUtc = now;
@@ -246,12 +251,25 @@ namespace BlazorApp.Api.Services
             )
             .ToListAsync();
 
+        // 对账不一致（例如某店有订单表头但明细没上传）时分店与商品行已经整体发布，状态只是带警告的 Failed；
+        // 这类状态不能挡住报表快照发布，否则一家店的明细缺口会让全部门店的营业额停止更新。
+        // 真异常导致的 Failed 不会推进聚合时间，也不带对账前缀，仍然拒绝发布。
+        var reconciliationTypes = new[]
+        {
+            SalesStatisticType.StoreSales,
+            SalesStatisticType.ProductStoreDaily,
+            SalesStatisticType.AustralianSupplierStoreSales,
+            SalesStatisticType.ChinaSupplierStoreSales,
+        };
         var missingOrIncomplete = requiredTypes.Where(type =>
             !states.Any(state =>
                 state.StatisticType == type
-                && state.Status == SalesStatisticRefreshStatus.Fresh
                 && state.LastAggregatedAtUtc.HasValue
                 && state.CompletedAtUtc.HasValue
+                && (state.Status == SalesStatisticRefreshStatus.Fresh
+                    || (state.Status == SalesStatisticRefreshStatus.Failed
+                        && reconciliationTypes.Contains(type)
+                        && ProductStoreDailyReconciliationCalculator.IsReconciliationFailure(state.ErrorMessage)))
             )
         ).ToList();
         if (missingOrIncomplete.Count > 0)

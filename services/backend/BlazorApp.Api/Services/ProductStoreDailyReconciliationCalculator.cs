@@ -27,6 +27,14 @@ namespace BlazorApp.Api.Services
 
     internal static class ProductStoreDailyReconciliationCalculator
     {
+        /// <summary>对账不一致消息的固定前缀；调用方据此区分「数据已算好但对不上」与「写入过程抛出的真异常」。</summary>
+        internal const string FailureMessagePrefix = "商品统计与分店营业额统计不一致";
+
+        /// <summary>消息是否来自对账不一致（而非统计写入异常）。</summary>
+        internal static bool IsReconciliationFailure(string? errorMessage) =>
+            errorMessage != null
+            && errorMessage.StartsWith(FailureMessagePrefix, StringComparison.Ordinal);
+
         private const decimal AmountToleranceRate = 0.001m;
         private const decimal AmountAbsoluteTolerance = 100m;
 
@@ -125,14 +133,14 @@ namespace BlazorApp.Api.Services
                 if (store == null)
                 {
                     firstFailureMessage =
-                        $"商品统计与分店营业额统计不一致: {targetDate:yyyy-MM-dd} {branchCode}, 商品金额 {productAmount}, 分店营业额统计缺失, 金额差 {branchAmountDiff}";
+                        $"{FailureMessagePrefix}: {targetDate:yyyy-MM-dd} {branchCode}, 商品金额 {productAmount}, 分店营业额统计缺失, 金额差 {branchAmountDiff}";
                     continue;
                 }
 
                 if (product == null || branchAmountDiff > CalculateAmountTolerance(storeAmount))
                 {
                     firstFailureMessage =
-                        $"商品统计与分店营业额统计不一致: {targetDate:yyyy-MM-dd} {branchCode}, 商品金额 {productAmount}, 分店营业额 {storeAmount}, 金额差 {branchAmountDiff}{BuildDiagnosticSuffix(branchCode, diagnostics)}";
+                        $"{FailureMessagePrefix}: {targetDate:yyyy-MM-dd} {branchCode}, 商品金额 {productAmount}, 分店营业额 {storeAmount}, 金额差 {branchAmountDiff}{BuildDiagnosticSuffix(branchCode, diagnostics)}";
                 }
             }
 
