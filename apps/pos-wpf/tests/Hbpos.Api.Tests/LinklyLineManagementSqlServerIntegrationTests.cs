@@ -469,6 +469,179 @@ public sealed class LinklyLineManagementSqlServerIntegrationTests : IAsyncLifeti
         }
     }
 
+    // ---- 业务要求：遗留的陈旧会话不能挡住下一单付款（真实 SQL：原子顶替 + 并发只有一个赢家） ----
+
+    [LinklyLineSqlServerFact]
+    public async Task Stale_active_session_is_superseded_in_the_same_transaction_as_the_new_session_insert()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync("stale-active", "POS-A", lineA, "Pending", isActive: true, acknowledged: false, TimeSpan.FromMinutes(30));
+        var before = await ReadSessionAsync("stale-active");
+
+        var created = await BackendRepository().TryCreateSessionAsync(NewTransactionSession("POS-A"), default);
+
+        Assert.True(created);
+        var closed = await ReadSessionAsync("stale-active");
+        Assert.Equal("SupervisorResolved", closed.Status);
+        Assert.False(closed.IsActive);
+        Assert.NotNull(closed.AcknowledgedAt);
+        // 不改 UpdatedAt：孤儿对账按它判断年龄。
+        Assert.Equal(before.UpdatedAt, closed.UpdatedAt);
+        Assert.Equal(1, await CountAsync("SELECT COUNT(*) FROM [dbo].[POSM_LinklyCloudBackendSession] WHERE [IsActive] = 1"));
+    }
+
+    [LinklyLineSqlServerFact]
+    public async Task Fresh_active_session_still_blocks_a_new_transaction_session()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync("fresh-active", "POS-A", lineA, "Pending", isActive: true, acknowledged: false, TimeSpan.FromMinutes(2));
+
+        var created = await BackendRepository().TryCreateSessionAsync(NewTransactionSession("POS-A"), default);
+
+        Assert.False(created);
+        var untouched = await ReadSessionAsync("fresh-active");
+        Assert.Equal("Pending", untouched.Status);
+        Assert.True(untouched.IsActive);
+        Assert.Null(untouched.AcknowledgedAt);
+    }
+
+    [LinklyLineSqlServerFact]
+    public async Task Stale_unacknowledged_final_session_only_gets_an_acknowledgement_and_keeps_its_evidence()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync(
+            "stale-approved", "POS-A", lineA, "Completed", isActive: false, acknowledged: false,
+            TimeSpan.FromDays(12), txnRef: "TXN-APPROVED", transactionSuccess: true);
+        var before = await ReadSessionAsync("stale-approved");
+
+        var created = await BackendRepository().TryCreateSessionAsync(NewTransactionSession("POS-A"), default);
+
+        Assert.True(created);
+        var kept = await ReadSessionAsync("stale-approved");
+        Assert.Equal("Completed", kept.Status);
+        Assert.True(kept.TransactionSuccess);
+        Assert.NotNull(kept.AcknowledgedAt);
+        Assert.Equal(before.UpdatedAt, kept.UpdatedAt);
+    }
+
+    [LinklyLineSqlServerFact]
+    public async Task Stale_session_of_another_device_on_the_same_line_is_superseded()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync("stale-other", "POS-B", lineA, "Pending", isActive: true, acknowledged: false, TimeSpan.FromHours(3));
+
+        var created = await BackendRepository().TryCreateSessionAsync(NewTransactionSession("POS-A"), default);
+
+        Assert.True(created);
+        var closed = await ReadSessionAsync("stale-other");
+        Assert.Equal("SupervisorResolved", closed.Status);
+        Assert.False(closed.IsActive);
+    }
+
+    [LinklyLineSqlServerFact]
+    public async Task Settlement_session_creation_does_not_supersede_a_stale_active_session()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync("stale-active", "POS-A", lineA, "Pending", isActive: true, acknowledged: false, TimeSpan.FromMinutes(30));
+
+        var created = await BackendRepository().TryCreateSessionAsync(
+            NewTransactionSession("POS-A", operationType: "Settlement"), default);
+
+        Assert.False(created);
+        var untouched = await ReadSessionAsync("stale-active");
+        Assert.Equal("Pending", untouched.Status);
+        Assert.True(untouched.IsActive);
+    }
+
+    [LinklyLineSqlServerFact]
+    public async Task Txn_ref_collision_leaves_the_stale_session_untouched()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync("stale-active", "POS-A", lineA, "Pending", isActive: true, acknowledged: false, TimeSpan.FromMinutes(30));
+        // 另一台设备上已存在同一个 attempt 的 TxnRef（已确认的失败，不占用线路）。
+        await SeedAgedSessionAsync(
+            "same-attempt-earlier", "POS-C", null, "Failed", isActive: false, acknowledged: true,
+            TimeSpan.FromMinutes(20), txnRef: "P000000000000777");
+
+        var created = await BackendRepository().TryCreateSessionAsync(
+            NewTransactionSession("POS-A", txnRef: "P000000000000777"), default);
+
+        // 其它校验没过就不能先顶替：整个事务一个写入都不留下。
+        Assert.False(created);
+        var untouched = await ReadSessionAsync("stale-active");
+        Assert.Equal("Pending", untouched.Status);
+        Assert.True(untouched.IsActive);
+        Assert.Null(untouched.AcknowledgedAt);
+    }
+
+    [LinklyLineSqlServerFact]
+    public async Task Concurrent_transaction_creates_over_a_stale_session_have_only_one_winner()
+    {
+        await SeedSelectionAsync("POS-A", lineA, 101);
+        await SeedAgedSessionAsync("stale-active", "POS-A", lineA, "Pending", isActive: true, acknowledged: false, TimeSpan.FromMinutes(30));
+
+        var results = await Task.WhenAll(
+            BackendRepository().TryCreateSessionAsync(NewTransactionSession("POS-A"), default),
+            BackendRepository().TryCreateSessionAsync(NewTransactionSession("POS-A"), default));
+
+        // 第二个事务在 SERIALIZABLE 下等到第一个提交，随后看到的是一条新鲜的活动会话，只能被挡住。
+        Assert.Single(results, success => success);
+        Assert.Equal(1, await CountAsync("SELECT COUNT(*) FROM [dbo].[POSM_LinklyCloudBackendSession] WHERE [IsActive] = 1"));
+        Assert.Equal("SupervisorResolved", (await ReadSessionAsync("stale-active")).Status);
+    }
+
+    private LinklyCloudBackendSessionRecord NewTransactionSession(
+        string device, string operationType = "Transaction", string? txnRef = null) => new()
+    {
+        Environment = "Production", StoreCode = "S001", DeviceCode = device,
+        TerminalId = lineA, TerminalUpdatedAt = version, SelectionRevision = 101,
+        SessionId = Guid.NewGuid().ToString("D"), Status = "Pending", OperationType = operationType,
+        TxnRef = txnRef, IsActive = true, UpdatedAt = DateTime.UtcNow,
+    };
+
+    private Task SeedAgedSessionAsync(
+        string sessionId, string device, Guid? line, string status, bool isActive, bool acknowledged,
+        TimeSpan age, string? txnRef = null, bool? transactionSuccess = null) => ExecuteAsync("""
+        INSERT INTO [dbo].[POSM_LinklyCloudBackendSession]
+            ([Environment],[StoreCode],[DeviceCode],[TerminalId],[SessionId],[Status],[TxnRef],
+             [TransactionSuccess],[IsActive],[ClientAcknowledgedAt],[UpdatedAt])
+        VALUES (N'Production',N'S001',@Device,@Line,@Session,@Status,@TxnRef,@Success,@IsActive,@Ack,@UpdatedAt);
+        """, new("@Device", device), new("@Line", (object?)line ?? DBNull.Value),
+        new("@Session", sessionId), new("@Status", status), new("@TxnRef", (object?)txnRef ?? DBNull.Value),
+        new("@Success", (object?)transactionSuccess ?? DBNull.Value), new("@IsActive", isActive),
+        acknowledged
+            ? At("@Ack", DateTime.UtcNow)
+            : new SqlParameter("@Ack", System.Data.SqlDbType.DateTime2) { Value = DBNull.Value },
+        At("@UpdatedAt", DateTime.UtcNow - age));
+
+    private async Task<(string Status, bool IsActive, DateTime? AcknowledgedAt, DateTime UpdatedAt, bool? TransactionSuccess)>
+        ReadSessionAsync(string sessionId)
+    {
+        await using var sql = new SqlConnection(connection);
+        await sql.OpenAsync();
+        await using var command = new SqlCommand("""
+            SELECT [Status],[IsActive],[ClientAcknowledgedAt],[UpdatedAt],[TransactionSuccess]
+            FROM [dbo].[POSM_LinklyCloudBackendSession] WHERE [SessionId] = @Session;
+            """, sql);
+        command.Parameters.AddWithValue("@Session", sessionId);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync(), $"会话 {sessionId} 不存在");
+        return (
+            reader.GetString(0),
+            reader.GetBoolean(1),
+            reader.IsDBNull(2) ? null : reader.GetDateTime(2),
+            reader.GetDateTime(3),
+            reader.IsDBNull(4) ? null : reader.GetBoolean(4));
+    }
+
+    private async Task<int> CountAsync(string sql)
+    {
+        await using var sqlConnection = new SqlConnection(connection);
+        await sqlConnection.OpenAsync();
+        await using var command = new SqlCommand(sql, sqlConnection);
+        return (int)(await command.ExecuteScalarAsync())!;
+    }
+
     private Task AssignAsync(string caller, Guid line, string? owner, long sourceRevision,
         string? target, Guid? targetLine, long targetRevision, DateTime? expectedVersion = null) =>
         Repository().AssignTerminalAsync("Production", "S001", caller, line, expectedVersion ?? version,

@@ -633,6 +633,195 @@ namespace Hbpos.Api.Tests;
             service.StartTransactionAsync("S01", "POS-02", request, CancellationToken.None));
     }
 
+    // ---- 业务要求：遗留的陈旧会话不能挡住下一单付款（新鲜的占用仍按原样 409） ----
+
+    private static Task SeedLegacySessionAsync(
+        ILinklyCloudBackendAsyncRepository repository,
+        string sessionId,
+        TimeSpan age,
+        string status = "Pending",
+        bool isActive = true,
+        DateTimeOffset? acknowledgedAt = null,
+        string deviceCode = "POS-01",
+        Guid? terminalId = null,
+        bool? transactionSuccess = null,
+        string? txnRef = null)
+    {
+        return repository.UpsertSessionAsync(new LinklyCloudBackendSessionRecord
+        {
+            Environment = "Sandbox",
+            StoreCode = "S01",
+            DeviceCode = deviceCode,
+            TerminalId = terminalId,
+            SessionId = sessionId,
+            Status = status,
+            TxnRef = txnRef,
+            TransactionSuccess = transactionSuccess,
+            IsActive = isActive,
+            ClientAcknowledgedAt = acknowledgedAt,
+            UpdatedAt = DateTimeOffset.UtcNow - age
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartTransactionAsync_supersedes_stale_active_session_and_routes_its_late_result_to_late_final()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedLegacySessionAsync(service.Repository, "stale-active", TimeSpan.FromMinutes(30), txnRef: "TXN-STALE");
+        var before = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-active", CancellationToken.None);
+
+        var started = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateTransactionRequest(), CancellationToken.None);
+
+        Assert.NotEqual("stale-active", started.SessionId);
+        Assert.Equal("Pending", started.Status);
+        var closed = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-active", CancellationToken.None);
+        // 既有终态 SupervisorResolved + 已确认；UpdatedAt 不变（孤儿对账按它判断年龄）。
+        Assert.Equal("SupervisorResolved", closed!.Status);
+        Assert.False(closed.IsActive);
+        Assert.NotNull(closed.ClientAcknowledgedAt);
+        Assert.Equal(before!.UpdatedAt, closed.UpdatedAt);
+        var current = await service.Repository.GetActiveSessionAsync(
+            "Sandbox", "S01", "POS-01", CancellationToken.None);
+        Assert.Equal(started.SessionId, current!.SessionId);
+
+        // 被顶替的会话之后才到达的 Linkly 最终结果只进 LateFinal*，不改写 Status。
+        await service.ReceiveNotificationAsync(
+            "Sandbox", "stale-active", "transaction", "Bearer sandbox-notify",
+            CallbackPayload(true, "00", "APPROVED", "TXN-STALE"), CancellationToken.None);
+        var afterLate = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-active", CancellationToken.None);
+        Assert.Equal("SupervisorResolved", afterLate!.Status);
+        Assert.NotNull(afterLate.LateFinalAt);
+        Assert.True(afterLate.LateFinalTransactionSuccess);
+        Assert.Equal("00", afterLate.LateFinalResponseCode);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(9)]
+    public async Task StartTransactionAsync_still_blocks_when_the_active_session_is_fresh(int ageMinutes)
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedLegacySessionAsync(service.Repository, "fresh-active", TimeSpan.FromMinutes(ageMinutes));
+
+        await Assert.ThrowsAsync<LinklyCloudBackendActiveTransactionException>(() =>
+            service.StartTransactionAsync("S01", "POS-01", CreateTransactionRequest(), CancellationToken.None));
+
+        var untouched = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "fresh-active", CancellationToken.None);
+        Assert.Equal("Pending", untouched!.Status);
+        Assert.True(untouched.IsActive);
+        Assert.Null(untouched.ClientAcknowledgedAt);
+    }
+
+    [Fact]
+    public async Task StartTransactionAsync_supersedes_stale_unacknowledged_final_session_keeping_its_evidence()
+    {
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedLegacySessionAsync(
+            service.Repository,
+            "stale-approved",
+            TimeSpan.FromDays(12),
+            status: "Completed",
+            isActive: false,
+            transactionSuccess: true,
+            txnRef: "TXN-APPROVED");
+        var before = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-approved", CancellationToken.None);
+
+        var started = await service.StartTransactionAsync(
+            "S01", "POS-01", CreateTransactionRequest(), CancellationToken.None);
+
+        Assert.Equal("Pending", started.Status);
+        var kept = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-approved", CancellationToken.None);
+        // 已批准的终态会话只补确认时间：Status、成败位、引用都原样保留，孤儿扣款对账不受影响。
+        Assert.Equal("Completed", kept!.Status);
+        Assert.True(kept.TransactionSuccess);
+        Assert.Equal("TXN-APPROVED", kept.TxnRef);
+        Assert.NotNull(kept.ClientAcknowledgedAt);
+        Assert.Equal(before!.UpdatedAt, kept.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task StartTransactionAsync_supersedes_stale_session_of_another_device_on_the_same_terminal()
+    {
+        var terminalId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        var repository = new InMemoryLinklyCloudBackendAsyncRepository();
+        var service = CreateService(
+            new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted),
+            repository: repository,
+            terminalService: new FixedLinklyCloudTerminalService(terminalId, "Front Counter", 9));
+        await SeedLegacySessionAsync(
+            repository, "stale-other-device", TimeSpan.FromHours(3), deviceCode: "POS-02", terminalId: terminalId);
+
+        var started = await service.StartTransactionAsync(
+            "S01",
+            "POS-01",
+            new LinklyCloudBackendTransactionRequest("Sandbox", "P", 1000, null, terminalId, 9),
+            CancellationToken.None);
+
+        Assert.Equal("Pending", started.Status);
+        var closed = await repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-02", "stale-other-device", CancellationToken.None);
+        Assert.Equal("SupervisorResolved", closed!.Status);
+        Assert.False(closed.IsActive);
+    }
+
+    [Fact]
+    public async Task StartSettlementAsync_still_blocks_on_a_stale_active_transaction_session()
+    {
+        // 顶替只给“交易”付款用：结算等其它入口保持原闸门。
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedLegacySessionAsync(service.Repository, "stale-active", TimeSpan.FromMinutes(30));
+
+        await Assert.ThrowsAsync<LinklyCloudBackendActiveTransactionException>(() =>
+            service.StartSettlementAsync(
+                "S01", "POS-01", new LinklyCloudBackendSettlementRequest("Sandbox"), CancellationToken.None));
+
+        var untouched = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-active", CancellationToken.None);
+        Assert.Equal("Pending", untouched!.Status);
+        Assert.True(untouched.IsActive);
+    }
+
+    [Fact]
+    public async Task StartTransactionAsync_does_not_close_stale_session_when_the_attempt_was_already_submitted()
+    {
+        // 同一个 attempt 重复提交（TxnRef 已存在）本来就会被拒绝；此时不能先把陈旧会话误伤收口，
+        // 也不能把这次拒绝误报成“有未完成交易”。
+        var attemptGuid = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        var attemptTxnRef = LinklyAttemptTxnRef.Create('P', attemptGuid.ToString("D"));
+        var service = CreateService(new CapturingLinklyCloudBackendAsyncTransport(HttpStatusCode.Accepted));
+        await SeedLegacySessionAsync(service.Repository, "stale-active", TimeSpan.FromMinutes(30));
+        await SeedLegacySessionAsync(
+            service.Repository,
+            "same-attempt-earlier",
+            TimeSpan.FromMinutes(20),
+            status: "Failed",
+            isActive: false,
+            acknowledgedAt: DateTimeOffset.UtcNow.AddMinutes(-19),
+            deviceCode: "POS-09",
+            txnRef: attemptTxnRef);
+
+        var ex = await Assert.ThrowsAsync<LinklyCloudBackendValidationException>(() =>
+            service.StartTransactionAsync(
+                "S01",
+                "POS-01",
+                new LinklyCloudBackendTransactionRequest("Sandbox", "P", 1000, null, null, null, attemptGuid),
+                CancellationToken.None));
+
+        Assert.Contains("already been submitted", ex.Message, StringComparison.OrdinalIgnoreCase);
+        var untouched = await service.Repository.GetSessionAsync(
+            "Sandbox", "S01", "POS-01", "stale-active", CancellationToken.None);
+        Assert.Equal("Pending", untouched!.Status);
+        Assert.True(untouched.IsActive);
+        Assert.Null(untouched.ClientAcknowledgedAt);
+    }
+
     [Fact]
     public async Task RecoverAsync_uses_terminal_bound_to_existing_session()
     {
