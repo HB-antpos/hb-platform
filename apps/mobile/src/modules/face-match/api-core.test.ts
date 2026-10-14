@@ -55,13 +55,14 @@ async function run() {
     const api = createFaceMatchApi(http);
     await api.getProfile("10/08");
     assert.equal(calls[0].url, "/react/v1/face-match/profiles/10%2F08", "门店编码做 URL 编码");
-    const profile = normalizeFaceStoreProfile({ storeCode: "1008", mode: 2, piaReference: "PIA-1", legalSignoffAt: "2026-09-20T03:00:00Z" });
+    const profile = normalizeFaceStoreProfile({ storeCode: "1008", mode: 2, piaReference: "PIA-1", legalSignoffAt: "2026-09-20T03:00:00Z", unwelcomeAutoConfirmScore: 80 });
     const request = buildProfileUpdateRequest(profile, { ...profileToEditValues(profile), mode: 0 });
     await api.updateProfile("1008", request);
     assert.equal(calls[1].method, "put");
     assert.equal(calls[1].url, "/react/v1/face-match/profiles/1008");
     assert.deepEqual(calls[1].data, request, "PUT 请求体原样发送");
     assert.equal((calls[1].data as typeof request).piaReference, "PIA-1", "未编辑的合规字段随请求带回");
+    assert.equal((calls[1].data as typeof request).unwelcomeAutoConfirmScore, 80, "自动确认阈值随请求原样带回");
   }
 
   // ───────── 列表查询参数与 Web 一致 ─────────

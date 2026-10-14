@@ -1,5 +1,6 @@
 // 人脸比对接口响应的防御式规范化：字段缺失 / 类型漂移时界面不崩，且不放大授权（缺少权限标志一律当 false）。
 // apiClient 的响应拦截器已把 ApiResponse<T> 解包成 T；这里只关心 T 的形状。
+import { DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE } from "./constants";
 import type {
   FaceCamera,
   FaceCameraList,
@@ -111,6 +112,8 @@ export function normalizeFaceStoreProfile(value: unknown): FaceStoreProfile {
     unwelcomeLegalSignoffAt: asNullableString(raw.unwelcomeLegalSignoffAt),
     staffTrainingDate: asNullableString(raw.staffTrainingDate),
     privacyContact: asNullableString(raw.privacyContact),
+    // 0 是合法值（关闭自动确认），不能用 || 兜底；后端未返回（老版本 / 没有档案行）时取默认 90。
+    unwelcomeAutoConfirmScore: asNumber(raw.unwelcomeAutoConfirmScore, DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE),
     updatedAtUtc: asNullableString(raw.updatedAtUtc),
     updatedBy: asNullableString(raw.updatedBy),
     effectiveTimeZoneId: asString(raw.effectiveTimeZoneId),

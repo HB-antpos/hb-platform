@@ -49,5 +49,8 @@ export const PROFILE_MODE_OFF = 0;
 export const PROFILE_MODE_CAPTURE = 1;
 export const PROFILE_MODE_MATCH = 2;
 
+/** 命中自动确认阈值的默认值（后端 FaceStoreProfile.DefaultUnwelcomeAutoConfirmScore）；0 = 关闭，其余 50–100。 */
+export const DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE = 90;
+
 /** 后端允许的门店时区（StoreTimeZonePolicy）；空 = 自动判断。 */
 export const PROFILE_TIME_ZONES = ["Australia/Sydney", "Australia/Brisbane", "Australia/Melbourne"] as const;

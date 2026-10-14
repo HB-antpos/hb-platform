@@ -33,6 +33,7 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
     staffExclusionEnabled: true,
     trafficDedupEnabled: false,
     unwelcomeListEnabled: true,
+    unwelcomeAutoConfirmScore: 85,
     allowedSubjects: null,
     piaReference: "PIA-2026-07",
     signageInstalledOn: "2026-09-01",
@@ -80,9 +81,9 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
   assert.equal(request.staffExclusionEnabled, false);
   assert.equal(request.timeZoneId, "Australia/Brisbane");
 
-  // 16 个不编辑的字段原样带回——任何一个变成 null / 空串，PUT 都会把服务端的合规记录清空
+  // 17 个不编辑的字段原样带回——任何一个变成 null / 空串，PUT 都会把服务端的合规记录清空
   const untouched = PROFILE_REQUEST_KEYS.filter((key) => !(PROFILE_EDITABLE_FIELDS as readonly string[]).includes(key));
-  assert.equal(untouched.length, 16);
+  assert.equal(untouched.length, 17);
   for (const key of untouched) {
     assert.equal(request[key], profile[key], `${key} 必须原样带回服务端值`);
     assert.notEqual(request[key], null, `${key} 在这份样例档案里有值，不能被清空`);
@@ -91,6 +92,24 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
   assert.equal(request.signageInstalledOn, "2026-09-01");
   assert.equal(request.crossBorderRegion, "ap-singapore");
   assert.equal(request.privacyContact, "privacy@example.com");
+  assert.equal(request.unwelcomeAutoConfirmScore, 85, "自动确认阈值原样回传，不被重置成默认 90");
+}
+
+// 自动确认阈值：0（关闭）是合法值，必须原样带回；后端没返回（老版本 / 未建档）时取默认 90
+{
+  const off = fullProfile({ unwelcomeAutoConfirmScore: 0 });
+  assert.equal(off.unwelcomeAutoConfirmScore, 0, "0 不能被默认值盖掉");
+  assert.equal(buildProfileUpdateRequest(off, profileToEditValues(off)).unwelcomeAutoConfirmScore, 0);
+  const decimal = fullProfile({ unwelcomeAutoConfirmScore: 87.25 });
+  assert.equal(buildProfileUpdateRequest(decimal, profileToEditValues(decimal)).unwelcomeAutoConfirmScore, 87.25);
+  for (const raw of [undefined, null, "85", Number.NaN]) {
+    const missing = normalizeFaceStoreProfile({ storeCode: "1008", unwelcomeAutoConfirmScore: raw });
+    assert.equal(missing.unwelcomeAutoConfirmScore, 90, `阈值 ${String(raw)} 视为未返回，取默认 90`);
+  }
+  // 修改手机可编辑字段不影响阈值，也不让它变成「有未保存的修改」
+  const profile = fullProfile();
+  assert.equal(isProfileDirty(profile, profileToEditValues(profile)), false);
+  assert.equal(buildProfileUpdateRequest(profile, { ...profileToEditValues(profile), mode: 0 }).unwelcomeAutoConfirmScore, 85);
 }
 
 // 服务端值为 null 的字段仍然带 null，且绝不预填（例如跨境审查地域不能偷偷填成当前配置地域）
@@ -103,12 +122,12 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
   assert.equal(request.staffNoticeDate, null);
 }
 
-// 请求体恰好是 23 个字段：不多（不带 storeCode / gates 等只读字段），不少
+// 请求体恰好是 24 个字段：不多（不带 storeCode / gates 等只读字段），不少
 {
   const profile = fullProfile();
   const request = buildProfileUpdateRequest(profile, profileToEditValues(profile));
   assert.deepEqual(Object.keys(request).sort(), [...PROFILE_REQUEST_KEYS].sort());
-  assert.equal(PROFILE_REQUEST_KEYS.length, 23);
+  assert.equal(PROFILE_REQUEST_KEYS.length, 24);
   assert.equal("storeCode" in request, false);
   assert.equal("gates" in request, false);
   assert.equal("updatedAtUtc" in request, false);

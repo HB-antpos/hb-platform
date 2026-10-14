@@ -71,9 +71,16 @@ export interface FaceStoreProfileUpdateRequest {
   unwelcomeLegalSignoffAt: string | null;
   staffTrainingDate: string | null;
   privacyContact: string | null;
+  /**
+   * 命中任务自动确认阈值（相似度 0-100）：0 = 不自动确认；50–100 = 阈值。手机不编辑，保存时原样回传服务端当前值；
+   * 后端把 null / 省略当作「保持库里原值」，所以回传 null 也不会清掉它。
+   */
+  unwelcomeAutoConfirmScore: number | null;
 }
 
 export interface FaceStoreProfile extends FaceStoreProfileUpdateRequest {
+  /** 生效值：0 = 不自动确认；没有档案行或后端未返回时为默认 90。 */
+  unwelcomeAutoConfirmScore: number;
   storeCode: string;
   storeName: string | null;
   /** 档案行是否已存在；不存在时其余字段是默认值。 */

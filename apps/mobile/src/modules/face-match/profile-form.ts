@@ -2,7 +2,7 @@
 //
 // 关键约束：PUT /face-match/profiles/{storeCode} 是「整体替换」——请求体里没有的合规记录字段（PIA、告示日期、律师确认、
 // 跨境审查、培训日期、隐私联系人……）会被清空。所以请求体必须以服务端刚返回的档案为底，只覆盖手机可编辑的 7 个字段，
-// 其余 16 个字段原样带回（包括 null），绝不预填、不改写、不清空。
+// 其余 17 个字段原样带回（包括 null），绝不预填、不改写、不清空。
 import {
   ALLOWED_SUBJECTS_MAX_LENGTH,
   PROFILE_MODE_CAPTURE,
@@ -61,13 +61,14 @@ export function profileToEditValues(profile: FaceStoreProfile): ProfileEditValue
   };
 }
 
-/** 请求体里的全部字段名（23 个），用于测试「没有漏带、没有多带」。 */
+/** 请求体里的全部字段名（24 个），用于测试「没有漏带、没有多带」。 */
 export const PROFILE_REQUEST_KEYS = [
   "mode",
   "evaluateMatch",
   "staffExclusionEnabled",
   "trafficDedupEnabled",
   "unwelcomeListEnabled",
+  "unwelcomeAutoConfirmScore",
   "allowedSubjects",
   "piaReference",
   "signageInstalledOn",
@@ -107,6 +108,7 @@ export function buildProfileUpdateRequest(
     allowedSubjects: normalizeText(edits.allowedSubjects),
     timeZoneId: normalizeText(edits.timeZoneId),
     // —— 手机不编辑：原样带回服务端返回的值 ——
+    unwelcomeAutoConfirmScore: profile.unwelcomeAutoConfirmScore,
     piaReference: profile.piaReference,
     signageInstalledOn: profile.signageInstalledOn,
     staffNoticeDate: profile.staffNoticeDate,
