@@ -506,6 +506,24 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "face-capture-results",
+                TitleKey = "tabs.faceCaptureResults",
+                Icon = "face-recognition",
+                // 移动端「抓拍与比对」：留存抓拍 + 比对结果 + 名单命中与通知发送情况，照片是生物识别信息，只认 FaceCapture.Images.View
+                // （与 Web /system/face-match 的「抓拍与比对」页签同一权限，不新增权限码）；设备模式菜单不包含此项。
+                Permission = Permissions.FaceCapture.Images.View,
+                Order = 58,
+            },
+            new()
+            {
+                RouteName = "notifications",
+                TitleKey = "tabs.notifications",
+                Icon = "bell-outline",
+                // 站内通知收件箱（通知平台 N1 的客户端）：任何登录账号都可见，不需要权限；设备会话没有用户账号，设备模式菜单不包含此项。
+                Order = 59,
+            },
+            new()
+            {
                 RouteName = "device-management",
                 TitleKey = "tabs.deviceManagement",
                 Icon = "cellphone-cog",

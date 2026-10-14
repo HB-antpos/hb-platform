@@ -12,9 +12,11 @@ import {
   createFaceConsent,
   createFaceEnrollment,
   createUnwelcomeEntry,
+  fetchFaceCaptureResultImage,
   fetchUnwelcomeReferenceImage,
   fetchUnwelcomeTaskImage,
   getFaceAudit,
+  getFaceCaptureResults,
   getFaceConsents,
   getFaceEnrollments,
   getFaceMatchConfig,
@@ -25,6 +27,7 @@ import {
   getUnwelcomeEntries,
   getUnwelcomeStats,
   getUnwelcomeTasks,
+  normalizeFaceCaptureResult,
   normalizeFaceGateReport,
   normalizeFaceMatchConfig,
   normalizeFaceTraffic,
@@ -181,6 +184,11 @@ try {
   const emptyConfig = normalizeFaceMatchConfig(undefined)
   assert.equal(emptyConfig.enabled, false, '缺字段按未开启处理')
   assert.equal(emptyConfig.permissions.manage, false, '缺权限标志按无权限处理')
+  // resultsView（FaceCapture.Images.View）：老后端没有这个字段按无权限；只认明确的 true
+  assert.equal(config.permissions.resultsView, false, '老后端没有 resultsView：按 false，不显示「抓拍与比对」')
+  assert.equal(emptyConfig.permissions.resultsView, false)
+  assert.equal(normalizeFaceMatchConfig({ permissions: { resultsView: true } }).permissions.resultsView, true)
+  assert.equal(normalizeFaceMatchConfig({ permissions: { resultsView: 'true' } }).permissions.resultsView, false, '字符串 true 不算')
 
   // ───────── 档案：列表 / 详情 / check / 保存 ─────────
   responseFactory = () => json({ success: true, data: [{ storeCode: '1008', mode: 2, evaluateMatch: true, crossBorderReviewValid: true }, null] })
@@ -491,6 +499,23 @@ try {
   assert.equal(autoTask.firstReviewerName, null)
   assert.equal(autoTask.canReview, false, '自动确认的任务没有复核入口')
 
+  // 命中通知字段：老后端没有 → 排队中 / 0 人；新后端原样解析；负数、非数字按 0；未知状态保留原值供页面兜底
+  assert.equal(tasks.items[0].notifyState, 'pending', '缺 notifyState 按排队中')
+  assert.equal(tasks.items[0].notifiedAtUtc, null)
+  assert.equal(tasks.items[0].notifyRecipientCount, 0)
+  assert.equal(tasks.items[0].notifyReadCount, 0)
+  const notified = normalizeFaceUnwelcomeTask({ ...taskPayload, notifyState: 'sent', notifiedAtUtc: '2026-10-14T01:00:05Z', notifyRecipientCount: 3, notifyReadCount: 1 })
+  assert.deepEqual(
+    [notified.notifyState, notified.notifiedAtUtc, notified.notifyRecipientCount, notified.notifyReadCount],
+    ['sent', '2026-10-14T01:00:05Z', 3, 1],
+  )
+  const dirtyNotify = normalizeFaceUnwelcomeTask({ ...taskPayload, notifyState: '', notifiedAtUtc: 5, notifyRecipientCount: -2, notifyReadCount: 'x' })
+  assert.deepEqual(
+    [dirtyNotify.notifyState, dirtyNotify.notifiedAtUtc, dirtyNotify.notifyRecipientCount, dirtyNotify.notifyReadCount],
+    ['pending', null, 0, 0],
+  )
+  assert.equal(normalizeFaceUnwelcomeTask({ ...taskPayload, notifyState: 'someNewState' }).notifyState, 'someNewState', '未知状态保留原值')
+
   responseFactory = () => json({ success: true, data: { ...taskPayload, reviewStatus: 1 } })
   await reviewUnwelcomeTask('T1', 'notMatch')
   assert.equal(lastCall().url, '/api/react/v1/face-match/unwelcome/tasks/T1/review')
@@ -598,6 +623,104 @@ try {
     await assert.rejects(() => fetchUnwelcomeReferenceImage('T1', badIndex), (error: unknown) => error instanceof RequestError && error.status === 404)
   }
   assert.equal(calls.length, before, '非法编号 / 序号不应发出任何请求')
+
+  // ───────── 抓拍与比对结果：列表 ─────────
+  const hitPayload = {
+    taskId: 'T'.repeat(32), scorePercent: 87.4, reviewStatus: 0, reviewStatusName: 'pending', imageAvailable: true,
+    notifyState: 'sent', notifiedAtUtc: '2026-10-14T01:00:05Z', notifyRecipientCount: 3, notifyReadCount: 1,
+  }
+  const resultPayload = {
+    captureId: 'abc123', storeCode: '1042', storeName: 'TestStore', cameraId: 's1042-entrance-01', capturedAtUtc: '2026-10-14T01:00:03Z',
+    faceCount: 1, isDuplicate: false, evaluated: true, decision: 'newVisitor', staffScorePercent: 9, visitScorePercent: 30.6,
+    faceImageId: 'f1', sceneImageId: 's1', hit: hitPayload,
+  }
+  responseFactory = () =>
+    json({
+      success: true,
+      data: {
+        items: [
+          resultPayload,
+          { captureId: 'abc124', storeCode: '1042', cameraId: 'cam', capturedAtUtc: '2026-10-14T01:01:00Z', evaluated: false, decision: 'staff', hit: null },
+          { captureId: 'abc125', evaluated: true, decision: 'someNewDecision', staffScorePercent: 'x', visitScorePercent: 250, hit: { taskId: '' } },
+          null,
+        ],
+        page: 2, pageSize: 20, hasMore: true,
+      },
+    })
+  const results = await getFaceCaptureResults({
+    storeCode: '1042', cameraId: 's1042-entrance-01', decision: 'newVisitor', hitOnly: true,
+    fromUtc: '2026-10-13T13:00:00.000Z', toUtc: '2026-10-14T13:00:00.000Z', page: 2, pageSize: 20,
+  })
+  const resultUrl = new URL(lastCall().url, 'http://localhost')
+  assert.equal(resultUrl.pathname, '/api/react/v1/face-match/results')
+  assert.equal(lastCall().init?.method, 'GET')
+  assert.equal(lastCall().init?.cache, 'no-store')
+  assert.deepEqual(Object.fromEntries(resultUrl.searchParams), {
+    storeCode: '1042', cameraId: 's1042-entrance-01', decision: 'newVisitor', hitOnly: 'true',
+    fromUtc: '2026-10-13T13:00:00.000Z', toUtc: '2026-10-14T13:00:00.000Z', page: '2', pageSize: '20',
+  })
+  assert.equal(results.hasMore, true)
+  assert.equal(results.page, 2)
+  assert.equal(results.items.length, 4)
+  const [first, second, third] = results.items
+  assert.equal(first.captureId, 'abc123')
+  assert.equal(first.visitScorePercent, 31, '相似度四舍五入成整数')
+  assert.equal(first.faceImageId, 'f1')
+  assert.deepEqual(
+    [first.hit?.taskId.length, first.hit?.scorePercent, first.hit?.band, first.hit?.notifyState, first.hit?.notifyRecipientCount, first.hit?.notifyReadCount, first.hit?.imageAvailable],
+    [32, 87, null, 'sent', 3, 1, true],
+  )
+  assert.equal(second.decision, null, '未评估时不保留判定')
+  assert.equal(second.hit, null)
+  assert.equal(second.staffScorePercent, null)
+  assert.equal(second.faceImageId, null)
+  assert.equal(third.decision, 'someNewDecision', '未知判定保留原值，由页面兜底')
+  assert.equal(third.staffScorePercent, null, '非数字分数按没有分数')
+  assert.equal(third.visitScorePercent, 100, '分数夹在 0-100')
+  assert.equal(third.hit, null, '没有任务编号的命中当作没有命中')
+  assert.equal(results.items[3].captureId, '', '脏数据行不崩')
+  assert.equal(normalizeFaceCaptureResult(undefined).faceCount, 0)
+
+  // 空筛选：条件一个都不带；pageSize 夹在 1-50
+  responseFactory = () => json({ success: true, data: { items: [], page: 1, pageSize: 50, hasMore: false } })
+  await getFaceCaptureResults({ storeCode: '', cameraId: '', decision: '', hitOnly: false, page: 1, pageSize: 200 })
+  const emptyUrl = new URL(lastCall().url, 'http://localhost')
+  assert.deepEqual(Object.fromEntries(emptyUrl.searchParams), { page: '1', pageSize: '50' }, '空条件与 hitOnly=false 都不带；pageSize 上限 50')
+  await getFaceCaptureResults({ page: 1, pageSize: 0 })
+  assert.equal(new URL(lastCall().url, 'http://localhost').searchParams.get('pageSize'), '1')
+  const resultController = new AbortController()
+  await getFaceCaptureResults({ page: 1, pageSize: 20 }, resultController.signal)
+  assert.equal(lastCall().init?.signal, resultController.signal, '列表请求可中止')
+
+  // 权限不足：403 保留状态码与错误码
+  responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_MATCH_FORBIDDEN' }, 403)
+  await assert.rejects(() => getFaceCaptureResults({ page: 1, pageSize: 20 }), (error: unknown) => error instanceof RequestError && error.status === 403)
+
+  // ───────── 抓拍与比对结果：图片（按需、专用接口、写审计由服务端负责） ─────────
+  responseFactory = () => new Response(imageBytes, { status: 200, headers: { 'content-type': 'image/jpeg' } })
+  const resultBlob = await fetchFaceCaptureResultImage('abc123', 'f1')
+  assert.equal(lastCall().url, '/api/react/v1/face-match/results/abc123/images/f1')
+  assert.equal(lastCall().init?.credentials, 'include')
+  assert.equal(lastCall().init?.cache, 'no-store')
+  assert.equal(resultBlob.size, imageBytes.length)
+  const imageController = new AbortController()
+  await fetchFaceCaptureResultImage('abc123', 's1', imageController.signal)
+  assert.equal(lastCall().init?.signal, imageController.signal)
+  // 错误信封保留错误码（页面按 FACE_IMAGE_* 分类）
+  responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_IMAGE_FORBIDDEN' }, 403)
+  await assert.rejects(
+    () => fetchFaceCaptureResultImage('abc123', 'f1'),
+    (error: unknown) => error instanceof RequestError && error.status === 403 && (error.payload as { errorCode?: string }).errorCode === 'FACE_IMAGE_FORBIDDEN',
+  )
+  responseFactory = () => new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } })
+  await assert.rejects(() => fetchFaceCaptureResultImage('abc123', 'f1'), (error: unknown) => error instanceof RequestError && error.status === 502)
+  // 编号不合法：不发请求（防路径穿越）
+  const resultImageCalls = calls.length
+  for (const badId of ['../x', 'a/b', '', 'a b', 'x'.repeat(65)]) {
+    await assert.rejects(() => fetchFaceCaptureResultImage(badId, 'f1'), (error: unknown) => error instanceof RequestError && error.status === 404)
+    await assert.rejects(() => fetchFaceCaptureResultImage('abc123', badId), (error: unknown) => error instanceof RequestError && error.status === 404)
+  }
+  assert.equal(calls.length, resultImageCalls, '非法编号不应发出任何请求')
 
   // ───────── 业务错误码保留在 payload 里供页面映射 ─────────
   responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_MATCH_NSW_NOTICE_TOO_RECENT' }, 400)

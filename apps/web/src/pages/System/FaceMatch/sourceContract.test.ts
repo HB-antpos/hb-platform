@@ -68,12 +68,15 @@ for (const [name, text] of Object.entries(files)) {
 
 // ───────── 图片：只有两处 <img>，src 只能是 objectURL ─────────
 const imgOwners = Object.entries(files).filter(([, text]) => /<img\b/.test(text)).map(([name]) => name).sort()
-assert(imgOwners.join(',') === 'PhotoPicker.tsx,ReviewTaskModal.tsx', `只有 PhotoPicker 与 ReviewTaskModal 可以有 <img>，实际: ${imgOwners.join(',')}`)
+assert(
+  imgOwners.join(',') === 'PhotoPicker.tsx,ResultDetailDrawer.tsx,ReviewTaskModal.tsx',
+  `只有 PhotoPicker、ResultDetailDrawer 与 ReviewTaskModal 可以有 <img>，实际: ${imgOwners.join(',')}`,
+)
 assert((f('ReviewTaskModal.tsx').match(/<img\b/g) ?? []).length === 1, '复核弹框只有一处 <img>')
 assert(/<img[^>]*\bsrc=\{state\.url\}/.test(f('ReviewTaskModal.tsx')), '复核 <img> 的 src 必须是 state 里的 objectURL')
 assert((f('PhotoPicker.tsx').match(/<img\b/g) ?? []).length === 1, '照片选择器只有一处 <img>')
 assert(/const url = urls\.get\(item\.uid\)/.test(f('PhotoPicker.tsx')) && /<img[^>]*\bsrc=\{url\}/.test(f('PhotoPicker.tsx')), '预览 <img> 的 src 必须是登记表里的 objectURL')
-for (const name of ['ReviewTaskModal.tsx', 'PhotoPicker.tsx']) {
+for (const name of ['ReviewTaskModal.tsx', 'PhotoPicker.tsx', 'ResultDetailDrawer.tsx']) {
   assert(!/src=["']/.test(f(name)) && !/\/api\//.test(f(name)) && !/https?:/.test(f(name)), `${name} 图片地址不能写成后端地址或外链`)
   assert(!/\.(src|href)\s*=/.test(f(name)), `${name} 不得用命令式方式设置图片地址`)
 }
@@ -107,6 +110,40 @@ assert(f('ReviewTasksTab.tsx').includes('key={target.taskId}') && f('ReviewTasks
 assert(f('ReviewTasksTab.tsx').includes('onClose={() => setTarget(null)}'), '关闭弹框要卸载组件')
 assert(f('ReviewTaskModal.tsx').includes('if (!imageAvailable) return'), '命中图已删除时不发任何图片请求')
 assert(f('ReviewTaskModal.tsx').includes('void sessionRef.current?.loadReference(index)'), '参考照片切换时才按需读取')
+// 抓拍与比对：列表里没有任何真实照片（只有占位图标），详情抽屉里才有两处图片位（人脸小图 / 背景图共用同一个组件，源码里只有一处 <img>）。
+assert((f('ResultDetailDrawer.tsx').match(/<img\b/g) ?? []).length === 1, '结果抽屉只有一处 <img>（人脸小图与背景图共用 ResultImageView）')
+assert(/<img[^>]*\bsrc=\{state\.url\}/.test(f('ResultDetailDrawer.tsx')), '结果抽屉 <img> 的 src 必须是 state 里的 objectURL')
+assert(!/useState<[^>]*Blob/.test(f('ResultDetailDrawer.tsx')), '结果抽屉 state 里不保存 Blob')
+assert(!/<img\b/.test(f('ResultsTab.tsx')) && f('ResultsTab.tsx').includes('PictureOutlined'), '结果列表不放真实照片，缩略图位置只是占位图标')
+assert(service.includes('export async function fetchFaceCaptureResultImage(') && service.includes('export async function getFaceCaptureResults('), '服务层提供结果列表与按需读取单张图片的函数')
+assert(/\/results\/\$\{captureId\}\/images\/\$\{imageId\}/.test(service) && service.includes('IMAGE_PATH_TASK_ID.test(captureId)') && service.includes('IMAGE_PATH_TASK_ID.test(imageId)'), '结果图片只走专用内容接口，且编号先校验')
+for (const [name, text] of Object.entries(files)) {
+  if (name !== 'ResultDetailDrawer.tsx') assert(!text.includes('fetchFaceCaptureResultImage'), `${name} 不得直接读取结果图片（只能由详情抽屉按需读取）`)
+  if (name !== 'ResultsTab.tsx') assert(!text.includes('getFaceCaptureResults'), `${name} 不得直接请求结果列表`)
+}
+assert(f('ResultDetailDrawer.tsx').includes('fetchFaceCaptureResultImage(') && f('ResultsTab.tsx').includes('getFaceCaptureResults('), '抽屉读取图片、列表页签读取列表')
+assert(
+  /useEffect\(\(\) => \{[\s\S]*createResultImageSession\([\s\S]*void session\.start\(\)[\s\S]*session\.dispose\(\)[\s\S]*\}, \[captureId, faceImageId, sceneImageId\]\)/.test(f('ResultDetailDrawer.tsx')),
+  '结果抽屉卸载 / 切换抓拍时 effect 清理函数必须 dispose 会话',
+)
+assert(f('ResultsTab.tsx').includes('key={target.captureId}') && f('ResultsTab.tsx').includes('{target ? ('), '点击「查看」才挂载抽屉，切换抓拍重新挂载')
+assert(f('ResultsTab.tsx').includes('onClose={() => setTarget(null)}'), '关闭抽屉要卸载组件')
+assert(files['imageLogic.ts'].includes('createResultImageSession') && (files['imageLogic.ts'].match(/registry\.dispose\(\)/g) ?? []).length >= 2, '结果图片会话 dispose 同样撤销全部 objectURL')
+// 「去复核」只切换页签：不读写地址栏（上面的全局规则已禁），由页面级 goToReview 切到 review，命中图已删除或没有复核页签权限时按钮禁用。
+assert(f('index.tsx').includes("setSelectedTab('review')") && f('index.tsx').includes('activeKey={activeTab}'), '去复核通过受控页签切到复核任务')
+assert(f('ResultDetailDrawer.tsx').includes('canGoReview(result)') && f('ResultDetailDrawer.tsx').includes('disabled={!reviewable || !onGoReview}'), '去复核仅在有命中且命中图还在、且有复核页签时可点')
+assert(f('index.tsx').includes("case 'results':") && f('index.tsx').includes('<ResultsTab context={tabContext} />'), '页签渲染接入抓拍与比对')
+// 命中通知：只显示人数，不显示收件人姓名；通知文案是固定英文原文，来自逻辑层常量。
+assert(f('ReviewTasksTab.tsx').includes('<NotifyStateCell') && f('ResultsTab.tsx').includes('<NotifyStateCell'), '复核任务与抓拍结果共用命中通知单元格')
+for (const name of ['ResultsTab.tsx', 'ResultDetailDrawer.tsx', 'shared.tsx']) {
+  assert(!/recipientName|recipients\.map|readerName|userName|userGuid/.test(f(name)), `${name} 不得出现通知收件人姓名等字段`)
+}
+assert(f('ResultDetailDrawer.tsx').includes('HIT_NOTIFICATION_TITLE') && f('ResultDetailDrawer.tsx').includes('buildHitNotificationBody(hit.scorePercent)'), '通知文案区使用固定英文原文')
+assert(f('logic.ts').includes("'Possible match alert'") && f('logic.ts').includes('The score is not the probability that this is the same person; a reviewer must check it.'), '通知英文原文固定在逻辑层常量')
+// 命中行淡红底；档位不自己算（上面的 highBandScore 规则已守住）。
+assert(f('ResultsTab.tsx').includes('token.colorErrorBg') && f('ResultsTab.tsx').includes('record.hit ?'), '有名单命中的行淡红底')
+assert(f('ResultsTab.tsx').includes('record.hit.band ?') && f('ResultDetailDrawer.tsx').includes('hit.band ?'), '档位只显示后端给出的 band，没有就不显示')
+
 // 条件挂载：登记照 / 名单照片只在弹框打开时存在
 assert(f('StaffDetailDrawer.tsx').includes('{enrollOpen ? <EnrollmentModal') && f('UnwelcomeEntriesTab.tsx').includes('{createOpen ? <UnwelcomeEntryModal'), '登记 / 提交弹框按需挂载，关闭即卸载')
 assert(f('index.tsx').includes('destroyOnHidden'), '页签切走即卸载')

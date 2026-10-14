@@ -275,6 +275,80 @@
       "gone": "The image has been cleaned up or does not exist"
     }
   },
+  "capture": {
+    "title": "Captures and matches",
+    "notice": "A score is a similarity, not the probability that it is the same person. Photos are only loaded when you open a record.",
+    "filters": {
+      "all": "All",
+      "hitOnly": "Hits only",
+      "staff": "Staff",
+      "newVisitor": "New visitor",
+      "repeatVisitor": "Repeat visitor"
+    },
+    "range": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "last7Days": "Last 7 days"
+    },
+    "empty": "No captures in this period",
+    "decision": {
+      "staff": "Staff",
+      "repeatVisitor": "Repeat visitor",
+      "newVisitor": "New visitor",
+      "lowQuality": "Low quality",
+      "noMatch": "No match",
+      "notEvaluated": "Not compared",
+      "other": "Other result"
+    },
+    "score": {
+      "staff": "Staff {{percent}}%",
+      "visit": "Visitor {{percent}}%"
+    },
+    "hit": {
+      "tag": "Hit {{percent}}%"
+    },
+    "duplicate": "Duplicate capture",
+    "notify": {
+      "sent": "Notified {{count}} · {{read}} read",
+      "pending": "Queued, waiting to send",
+      "skipped": "Skipped, no notification sent"
+    },
+    "detail": {
+      "title": "Capture detail",
+      "sensitiveNotice": "Biometric information · this view is recorded",
+      "faceImage": "Face",
+      "sceneImage": "Scene",
+      "noImage": "No image to show",
+      "resultTitle": "Match result",
+      "fields": {
+        "timeCamera": "Time · camera",
+        "store": "Store",
+        "decision": "Result",
+        "scores": "Similarity",
+        "hit": "List hit",
+        "faceCount": "Faces"
+      },
+      "hitSimilarity": "Similarity {{percent}}%",
+      "notifyTitle": "Notification delivery",
+      "noHit": "This capture did not match the list.",
+      "goReview": "Go to review (side by side)",
+      "reviewHint": {
+        "noHit": "No hit, nothing to review.",
+        "imageGone": "The hit photo was deleted after its retention period and can no longer be reviewed.",
+        "noPermission": "Your account has no permission for the unwelcome list review."
+      }
+    },
+    "timeline": {
+      "created": "Hit task created",
+      "notified": "Notified {{count}} reviewers",
+      "read": "Read {{read}} / {{count}}",
+      "notifyPending": "Notification queued, waiting to send",
+      "notifySkipped": "Skipped, no notification sent",
+      "reviewPending": "Awaiting review",
+      "reviewDismissed": "Review dismissed",
+      "reviewConfirmed": "Review confirmed"
+    }
+  },
   "settings": {
     "title": "Face match settings",
     "store": "Store",

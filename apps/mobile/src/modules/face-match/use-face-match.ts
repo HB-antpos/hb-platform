@@ -11,7 +11,10 @@ import { faceMatchApi } from "./api";
 import { PAGE_SIZE } from "./constants";
 import { mergePages, nextPageParam } from "./entries-logic";
 import { extractHttpStatus } from "./errors";
-import type { FaceMatchPage, FaceUnwelcomeEntry, FaceUnwelcomeTask } from "./types";
+import type { FaceCaptureResult, FaceCaptureResultQuery, FaceMatchPage, FaceUnwelcomeEntry, FaceUnwelcomeTask } from "./types";
+
+/** 抓拍结果列表的筛选条件（不含分页）。 */
+export type CaptureResultFilters = Omit<FaceCaptureResultQuery, "page" | "pageSize">;
 
 export const faceMatchKeys = {
   all: ["face-match"] as const,
@@ -22,6 +25,8 @@ export const faceMatchKeys = {
   tasksRoot: (userGuid: string | null) => ["face-match", userGuid, "tasks"] as const,
   tasks: (userGuid: string | null, status: number | undefined, storeCode: string | null) =>
     ["face-match", userGuid, "tasks", status ?? "all", storeCode ?? "all"] as const,
+  captureResults: (userGuid: string | null, filters: CaptureResultFilters) =>
+    ["face-match", userGuid, "capture-results", filters.storeCode ?? "all", filters.decision ?? "all", filters.hitOnly ? "hit" : "any", filters.fromUtc ?? "", filters.toUtc ?? ""] as const,
   profile: (userGuid: string | null, storeCode: string | null) => ["face-match", userGuid, "profile", storeCode] as const,
   cameras: (userGuid: string | null) => ["face-match", userGuid, "cameras"] as const,
   stores: (userGuid: string | null) => ["face-match", userGuid, "stores"] as const,
@@ -102,6 +107,28 @@ export function useUnwelcomeTasks(status: number | undefined, storeCode: string 
     [pages],
   );
   const refresh = useRefreshFirstPage<FaceUnwelcomeTask>(queryKey, query.refetch);
+  return { query, items, refresh };
+}
+
+/** 抓拍与比对结果：缓存里只有结构化数据与图片编号，图片字节不经过 react-query（详情里按需读取）。 */
+export function useCaptureResults(filters: CaptureResultFilters, enabled: boolean) {
+  const userGuid = useUserGuid();
+  const queryKey = faceMatchKeys.captureResults(userGuid, filters);
+  const query = useInfiniteQuery({
+    queryKey,
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) => faceMatchApi.listCaptureResults({ ...filters, page: pageParam, pageSize: PAGE_SIZE }, signal),
+    getNextPageParam: nextPageParam,
+    enabled,
+    staleTime: 15_000,
+    retry: retryTransientOnly,
+  });
+  const pages = query.data?.pages;
+  const items = useMemo<FaceCaptureResult[]>(
+    () => (pages ? mergePages(pages, (result) => result.captureId) : []),
+    [pages],
+  );
+  const refresh = useRefreshFirstPage<FaceCaptureResult>(queryKey, query.refetch);
   return { query, items, refresh };
 }
 

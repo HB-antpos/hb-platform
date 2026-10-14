@@ -50,6 +50,7 @@
     <Compile Include="FaceStoreProfileTests.cs" />
     <Compile Include="FaceStaffTests.cs" />
     <Compile Include="FaceUnwelcomeTests.cs" />
+    <Compile Include="FaceCaptureResultServiceTests.cs" />
     <Compile Include="FaceMatchMaintenanceTests.cs" />
     <Compile Include="FaceTrafficTests.cs" />
     <Compile Include="FaceTrafficHourlyTests.cs" />

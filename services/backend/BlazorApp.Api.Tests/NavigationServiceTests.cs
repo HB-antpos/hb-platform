@@ -1009,10 +1009,12 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(40, menu.Count);
+        Assert.Equal(42, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
         Assert.Contains(menu, item => item.RouteName == "face-match-settings");
+        Assert.Contains(menu, item => item.RouteName == "face-capture-results");
+        Assert.Contains(menu, item => item.RouteName == "notifications");
         Assert.Contains(menu, item => item.RouteName == "app-install");
         Assert.Contains(menu, item => item.RouteName == "store-cash");
         Assert.Contains(menu, item => item.RouteName == "containers");
@@ -1689,6 +1691,30 @@ public class NavigationServiceTests
             _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
             menu => menu.RouteName == "face-unwelcome"
         );
+    }
+
+    [Fact]
+    public void BuildAppMenu_抓拍与比对_只认看图权限_其他人脸权限不能打开()
+    {
+        var item = Assert.Single(
+            _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.FaceCapture.Images.View))),
+            menu => menu.RouteName == "face-capture-results"
+        );
+        Assert.Equal("tabs.faceCaptureResults", item.TitleKey);
+        foreach (var other in new[] { Permissions.FaceMatch.Manage, Permissions.FaceMatch.Unwelcome.Review, Permissions.FaceCapture.Cameras.Manage })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", other))),
+                menu => menu.RouteName == "face-capture-results"
+            );
+        }
+    }
+
+    [Fact]
+    public void BuildAppMenu_通知收件箱_任何登录账号可见_设备菜单不含()
+    {
+        Assert.Contains(_service.BuildAppMenu(CreateUser()), menu => menu.RouteName == "notifications");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), menu => menu.RouteName is "notifications" or "face-capture-results");
     }
 
     [Fact]

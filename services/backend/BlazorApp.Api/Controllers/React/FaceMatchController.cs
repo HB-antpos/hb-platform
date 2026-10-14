@@ -24,6 +24,7 @@ public sealed class FaceMatchController(
     IFaceStaffService staffService,
     IFaceTrafficService trafficService,
     IFaceUnwelcomeService unwelcomeService,
+    IFaceCaptureResultService resultService,
     IAuthorizationService authorizationService) : ControllerBase
 {
     private const int MaxFormFiles = 6;
@@ -35,7 +36,8 @@ public sealed class FaceMatchController(
     public async Task<IActionResult> Config(CancellationToken cancellationToken)
     {
         var flags = await ResolveFlagsAsync();
-        if (!flags.Manage && !flags.TrafficView && !flags.UnwelcomeManage && !flags.UnwelcomeApprove && !flags.UnwelcomeReview)
+        if (!flags.Manage && !flags.TrafficView && !flags.UnwelcomeManage && !flags.UnwelcomeApprove && !flags.UnwelcomeReview
+            && !flags.ResultsView)
         {
             return Forbidden();
         }
@@ -249,6 +251,49 @@ public sealed class FaceMatchController(
     public Task<IActionResult> ReferencePhoto(string taskId, int index, CancellationToken cancellationToken) =>
         RunImageAsync(() => unwelcomeService.GetReferencePhotoAsync(taskId, index, ResolveActor(), cancellationToken));
 
+    // ---------- 抓拍与比对结果 ----------
+
+    /// <summary>
+    /// 抓拍与比对结果列表（Capture 模式留存的抓拍 + 评估分数 + 名单命中与通知发送情况）。
+    /// 需要 FaceCapture.Images.View（结果里的照片是生物识别信息）；非管理员只看自己关联门店。
+    /// </summary>
+    [HttpGet("results")]
+    [Authorize(Policy = Permissions.FaceCapture.Images.View)]
+    public Task<IActionResult> ListResults(
+        [FromQuery] string? storeCode,
+        [FromQuery] string? cameraId,
+        [FromQuery] string? decision,
+        [FromQuery] bool hitOnly,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default) =>
+        RunAsync(() => resultService.ListAsync(
+            new FaceCaptureResultQuery
+            {
+                StoreCode = storeCode,
+                CameraId = cameraId,
+                Decision = decision,
+                HitOnly = hitOnly,
+                FromUtc = fromUtc,
+                ToUtc = toUtc,
+                Page = page,
+                PageSize = pageSize,
+            },
+            ResolveActor(),
+            canViewImages: true,
+            cancellationToken));
+
+    /// <summary>抓拍图片（服务端转发字节）：先校验门店范围，再走与摄像机管理页同一套受保护读取，每次查看都有审计。</summary>
+    [HttpGet("results/{captureId}/images/{imageId}")]
+    public async Task<IActionResult> ResultImage(string captureId, string imageId, CancellationToken cancellationToken)
+    {
+        // 权限在动作内判定（不用 [Authorize]），无权限的尝试同样进入审计与统一错误信封。
+        var canView = await HasAsync(Permissions.FaceCapture.Images.View);
+        return await RunImageAsync(() => resultService.GetImageAsync(captureId, imageId, ResolveActor(), canView, cancellationToken));
+    }
+
     /// <summary>误报统计（只有计数与驳回率，没有照片）：Manage / Approve / Review 任一即可。</summary>
     [HttpGet("unwelcome/stats")]
     public async Task<IActionResult> Stats(CancellationToken cancellationToken)
@@ -271,6 +316,7 @@ public sealed class FaceMatchController(
         UnwelcomeManage = await HasAsync(Permissions.FaceMatch.Unwelcome.Manage),
         UnwelcomeApprove = await HasAsync(Permissions.FaceMatch.Unwelcome.Approve),
         UnwelcomeReview = await HasAsync(Permissions.FaceMatch.Unwelcome.Review),
+        ResultsView = await HasAsync(Permissions.FaceCapture.Images.View),
     };
 
     private async Task<bool> HasAsync(string permission) =>

@@ -1,5 +1,5 @@
 import { ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Spin, Tabs } from 'antd'
+import { Alert, Button, Empty, Spin, Tabs, Tag } from 'antd'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -12,6 +12,7 @@ import { describeFaceMatchError, getDisabledReasonKey, getVisibleTabs, isWriteBl
 import en from './messages.en.json'
 import zh from './messages.zh.json'
 import ProfilesTab from './ProfilesTab'
+import ResultsTab from './ResultsTab'
 import ReviewTasksTab from './ReviewTasksTab'
 import type { FaceMatchTabContext } from './shared'
 import StaffTab from './StaffTab'
@@ -30,6 +31,7 @@ const TAB_LABEL_KEYS: Record<FaceMatchTabKey, string> = {
   traffic: 'faceMatch.tabs.traffic',
   unwelcome: 'faceMatch.tabs.unwelcome',
   review: 'faceMatch.tabs.review',
+  results: 'faceMatch.tabs.results',
   stats: 'faceMatch.tabs.stats',
   audit: 'faceMatch.tabs.audit',
 }
@@ -60,9 +62,22 @@ export default function FaceMatchPage() {
   }, [hasConfig])
 
   const tabKeys = useMemo(() => (config ? getVisibleTabs(config.permissions) : []), [config])
+  // 受控页签：「抓拍与比对」的「去复核」要能切到「复核任务」。当前页签不在可见列表里（刚加载、权限变化）时回到第一个。
+  const [selectedTab, setSelectedTab] = useState<FaceMatchTabKey | null>(null)
+  const activeTab = selectedTab && tabKeys.includes(selectedTab) ? selectedTab : tabKeys[0]
+  const hasReviewTab = tabKeys.includes('review')
   const context = useMemo<FaceMatchTabContext | null>(
-    () => (config ? { config, storeOptions, storeOptionsFailed, writeBlocked: isWriteBlocked(config) } : null),
-    [config, storeOptions, storeOptionsFailed],
+    () =>
+      config
+        ? {
+            config,
+            storeOptions,
+            storeOptionsFailed,
+            writeBlocked: isWriteBlocked(config),
+            goToReview: hasReviewTab ? () => setSelectedTab('review') : undefined,
+          }
+        : null,
+    [config, storeOptions, storeOptionsFailed, hasReviewTab],
   )
 
   const renderTab = (key: FaceMatchTabKey, tabContext: FaceMatchTabContext): ReactNode => {
@@ -77,6 +92,8 @@ export default function FaceMatchPage() {
         return <UnwelcomeEntriesTab context={tabContext} />
       case 'review':
         return <ReviewTasksTab context={tabContext} />
+      case 'results':
+        return <ResultsTab context={tabContext} />
       case 'stats':
         return <StatsTab />
       case 'audit':
@@ -125,7 +142,20 @@ export default function FaceMatchPage() {
           ) : (
             <Tabs
               destroyOnHidden
-              items={tabKeys.map((key) => ({ key, label: t(TAB_LABEL_KEYS[key]), children: renderTab(key, context) }))}
+              activeKey={activeTab}
+              onChange={(key) => setSelectedTab(key as FaceMatchTabKey)}
+              items={tabKeys.map((key) => ({
+                key,
+                label:
+                  key === 'results' ? (
+                    <span>
+                      {t(TAB_LABEL_KEYS[key])} <Tag color="red" style={{ marginInlineEnd: 0 }}>{t('faceMatch.tabs.newBadge')}</Tag>
+                    </span>
+                  ) : (
+                    t(TAB_LABEL_KEYS[key])
+                  ),
+                children: renderTab(key, context),
+              }))}
             />
           )}
         </>

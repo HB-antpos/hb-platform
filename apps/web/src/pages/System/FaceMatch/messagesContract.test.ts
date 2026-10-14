@@ -286,6 +286,75 @@ for (const { name, text } of sources) {
   if (JSON.stringify(categories).includes('一般偷窃')) throw new Error('事件类别里不得有「一般偷窃」')
 }
 
+// 8b) 抓拍与比对（FaceCapture.Images.View）与命中通知：口径与固定文案
+{
+  const zh = pageMessages.zh as { faceMatch: Record<string, Record<string, unknown>> }
+  const en = pageMessages.en as { faceMatch: Record<string, Record<string, unknown>> }
+  const expectEqual = (actual: unknown, expected: string, what: string) => {
+    if (actual !== expected) throw new Error(`${what} 应为「${expected}」，实际是「${String(actual)}」`)
+  }
+  expectEqual(zh.faceMatch.tabs.results, '抓拍与比对', '中文页签名')
+  expectEqual(en.faceMatch.tabs.results, 'Captures & matches', '英文页签名')
+  const zhResults = zh.faceMatch.results as Record<string, unknown>
+  const enResults = en.faceMatch.results as Record<string, unknown>
+  const zhDrawer = zhResults.drawer as Record<string, unknown>
+  const enDrawer = enResults.drawer as Record<string, unknown>
+  // 相似度口径：页面说明与抽屉都要写明「相似度不等于是同一个人的概率」
+  for (const [what, text] of [['页面说明', zhResults.intro], ['抽屉比对说明', zhDrawer.scoreNote]] as const) {
+    if (!String(text).includes('相似度不等于是同一个人的概率')) throw new Error(`中文${what}必须写明「相似度不等于是同一个人的概率」`)
+  }
+  if (!String(zhDrawer.notProbability).includes('不等于是同一个人的概率')) throw new Error('中文抽屉名单命中旁必须写明「不等于是同一个人的概率」')
+  for (const [what, text] of [['页面说明', enResults.intro], ['抽屉比对说明', enDrawer.scoreNote], ['名单命中旁', enDrawer.notProbability]] as const) {
+    if (!/not the probability of being the same person/.test(String(text))) throw new Error(`英文${what}必须写明 not the probability of being the same person`)
+  }
+  // 页面说明要讲清：只显示 Capture 模式留存的抓拍，Match 模式处理完即删
+  if (!String(zhResults.intro).includes('Capture') || !String(zhResults.intro).includes('Match') || !String(zhResults.intro).includes('处理完即删除')) {
+    throw new Error('中文页面说明必须写明 Capture 模式留存、Match 模式处理完即删除')
+  }
+  if (!/Capture mode/.test(String(enResults.intro)) || !/Match mode/.test(String(enResults.intro)) || !/deleted right after processing/.test(String(enResults.intro))) {
+    throw new Error('英文页面说明必须写明 Capture mode 留存、Match mode 处理完即删除')
+  }
+  // 照片是生物识别信息：列表脚注与抽屉提示都要写明每次查看会被记录
+  if (!String(zhResults.footnote).includes('生物识别信息') || !String(zhResults.footnote).includes('被记录')) throw new Error('中文列表脚注必须写明生物识别信息与查看会被记录')
+  if (!String(zhDrawer.sensitiveNotice).includes('生物识别信息') || !String(zhDrawer.sensitiveNotice).includes('被记录')) throw new Error('中文抽屉提示必须写明生物识别信息与查看会被记录')
+  if (!/biometric/i.test(String(enResults.footnote)) || !/recorded/.test(String(enResults.footnote))) throw new Error('英文列表脚注必须写明 biometric 与 recorded')
+  if (!/biometric/i.test(String(enDrawer.sensitiveNotice)) || !/recorded/.test(String(enDrawer.sensitiveNotice))) throw new Error('英文抽屉提示必须写明 biometric 与 recorded')
+  // 判定与通知状态的固定中文文案（与设计一致）
+  const zhDecision = zhResults.decision as Record<string, string>
+  expectEqual(zhDecision.staff, '员工', '中文判定-员工')
+  expectEqual(zhDecision.repeatVisitor, '回头客', '中文判定-回头客')
+  expectEqual(zhDecision.newVisitor, '新访客', '中文判定-新访客')
+  expectEqual(zhDecision.lowQuality, '质量不足', '中文判定-质量不足')
+  expectEqual(zhDecision.notEvaluated, '未评估', '中文判定-未评估')
+  const zhNotify = zh.faceMatch.notify as Record<string, string>
+  expectEqual(zhNotify.sent, '已发送', '中文通知状态-已发送')
+  expectEqual(zhNotify.pending, '排队中', '中文通知状态-排队中')
+  expectEqual(zhNotify.skipped, '已跳过', '中文通知状态-已跳过')
+  expectEqual(zhNotify.counts, '{{recipients}} 人 · 已读 {{read}}', '中文已发送人数与已读')
+  expectEqual((zh.faceMatch.review.columns as Record<string, string>).notify, '命中通知', '中文复核任务「命中通知」列头')
+  // 通知只显示人数不显示姓名；通知文案区说明「仅英文，不含姓名与照片」
+  expectEqual(zhDrawer.notifyTextTitle, '通知文案（仅英文，不含姓名与照片）', '中文通知文案区标题')
+  if (!String((zhDrawer as Record<string, unknown>).goReview).includes('去复核')) throw new Error('抽屉要有「去复核」按钮')
+  const timeline = zhResults.timeline as Record<string, string>
+  if (!timeline.readHint.includes('只显示人数，不显示姓名')) throw new Error('通知已读行必须写明只显示人数，不显示姓名')
+  if (!/never names/.test(String((enResults.timeline as Record<string, string>).readHint))) throw new Error('英文已读说明必须写明 never names')
+  // 通知文案是固定英文原文，由代码里的常量展示，不进消息文件（中英文界面都原样展示，也就不会被误翻译）
+  for (const text of [JSON.stringify(zh), JSON.stringify(en)]) {
+    if (/Possible match alert/.test(text) || /Possible match \(similarity/.test(text)) throw new Error('通知英文原文不得放进页面消息文件（固定英文，不翻译）')
+  }
+  // 新增文案同样不得有有歧义的概率写法、双人复核说法
+  for (const text of [JSON.stringify(zhResults), JSON.stringify(zhNotify)]) {
+    for (const banned of [new RegExp('不是同一个人' + '的概率'), /两人/, /两位/, /黑名单/]) {
+      if (banned.test(text)) throw new Error(`抓拍与比对中文文案不得出现 ${banned}`)
+    }
+  }
+  for (const text of [JSON.stringify(enResults), JSON.stringify(en.faceMatch.notify)]) {
+    for (const banned of [/two people/i, /two[- ]person/i, /probability of not being/i, /black\s*-?\s*list/i]) {
+      if (banned.test(text)) throw new Error(`抓拍与比对英文文案不得出现 ${banned}`)
+    }
+  }
+}
+
 // 9) 页面文案不得进全局语言包：除菜单键外，全局包里没有任何与本页相关的键
 for (const language of ['zh', 'en'] as const) {
   const text = JSON.stringify(globalMessages[language])

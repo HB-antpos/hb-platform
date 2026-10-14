@@ -3,7 +3,7 @@ import { useCallback, useMemo } from "react";
 import type { Store } from "@/modules/shop/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { useAuthStore } from "@/store/auth-store";
-import { canViewFaceMatchSettings, canViewFaceUnwelcome } from "./access";
+import { canViewFaceCaptureResults, canViewFaceMatchSettings, canViewFaceUnwelcome } from "./access";
 import { describeFaceMatchError } from "./errors";
 import type { ValidationIssue } from "./entry-form";
 
@@ -28,6 +28,18 @@ export function useFaceSettingsGuard(): string | null {
   const review = useAuthStore((state) => state.iosReviewOfflineGuardActive) || sessionKind === "iosReview";
   if (review) return t("messages.reviewUnavailable");
   if (!canViewFaceMatchSettings(isAuthenticated, hasPermission, review)) return t("messages.notAllowed");
+  return null;
+}
+
+/** 「抓拍与比对」入口守卫：审核模式与无权限直接给出说明，不发请求。返回提示文案，null 表示放行。 */
+export function useFaceCaptureResultsGuard(): string | null {
+  const { t } = useAppTranslation("faceMatch");
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const hasPermission = useAuthStore((state) => state.access.hasPermission);
+  const sessionKind = useAuthStore((state) => state.sessionKind);
+  const review = useAuthStore((state) => state.iosReviewOfflineGuardActive) || sessionKind === "iosReview";
+  if (review) return t("messages.reviewUnavailable");
+  if (!canViewFaceCaptureResults(isAuthenticated, hasPermission, review)) return t("messages.notAllowed");
   return null;
 }
 

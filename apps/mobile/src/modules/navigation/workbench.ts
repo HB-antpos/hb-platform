@@ -63,6 +63,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "reports", labelKey: "routes.reports", icon: "chart-line" },
       { routeName: "legacy-employee-logs", labelKey: "routes.legacyEmployeeLogs", icon: "clipboard-text-clock-outline" },
       { routeName: "daily-closes", labelKey: "routes.dailyCloses", icon: "cash-register" },
+      { routeName: "notifications", labelKey: "routes.notifications", icon: "bell-outline" },
     ],
   },
   {
@@ -80,6 +81,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "employee-profile-review", labelKey: "routes.employeeProfileReview", icon: "account-check-outline" },
       // 人脸比对：名单维护与命中复核、门店档案与摄像头设置，均按各自权限显示（见后端 FullAppMenu）。
       { routeName: "face-unwelcome", labelKey: "routes.faceUnwelcome", icon: "account-cancel-outline" },
+      { routeName: "face-capture-results", labelKey: "routes.faceCaptureResults", icon: "face-recognition" },
       { routeName: "face-match-settings", labelKey: "routes.faceMatchSettings", icon: "face-recognition" },
       { routeName: "device-management", labelKey: "routes.deviceManagement", icon: "cellphone-cog" },
       { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },

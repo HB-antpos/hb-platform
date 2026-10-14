@@ -1,11 +1,11 @@
 import { LeftOutlined, RightOutlined } from '@ant-design/icons'
-import { Button, Input, Select, Space, Typography } from 'antd'
+import { Button, Input, Select, Space, Tag, Typography } from 'antd'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { StoreOption } from '../../../services/storeService'
 import type { FaceMatchConfig } from '../../../types/faceMatch'
-import { canGoNext, canGoPrev } from './logic'
+import { canGoNext, canGoPrev, clampReadCount, resolveNotifyState } from './logic'
 
 // 各页签共用的小组件与上下文类型。
 
@@ -17,6 +17,8 @@ export interface FaceMatchTabContext {
   storeOptionsFailed: boolean
   /** 功能未开启时只能查看，写入类操作禁用。 */
   writeBlocked: boolean
+  /** 切到「复核任务」页签（没有复核任务页签权限时为 undefined）。「抓拍与比对」的「去复核」只做切换，不深链到具体任务。 */
+  goToReview?: () => void
 }
 
 export const NUMERIC_STYLE = { fontVariantNumeric: 'tabular-nums' } as const
@@ -115,6 +117,32 @@ export function Pager({ page, hasMore, loading, onChange }: PagerProps) {
         {t('faceMatch.common.nextPage')}
         <RightOutlined />
       </Button>
+    </Space>
+  )
+}
+
+interface NotifyStateCellProps {
+  state: string
+  recipients: number
+  read: number
+}
+
+/** 命中通知状态单元格（复核任务列表与抓拍结果列表共用）：状态标签 + 已发送时的「N 人 · 已读 M」/ 其余状态的补充说明；只有人数，没有姓名。 */
+export function NotifyStateCell({ state, recipients, read }: NotifyStateCellProps) {
+  const { t } = useTranslation()
+  const view = resolveNotifyState(state)
+  return (
+    <Space size={6} wrap>
+      <Tag color={view.color} style={{ marginInlineEnd: 0 }}>
+        {t(view.labelKey)}
+      </Tag>
+      {view.showCounts ? (
+        <Typography.Text type="secondary" style={NUMERIC_STYLE}>
+          {t('faceMatch.notify.counts', { recipients, read: clampReadCount(recipients, read) })}
+        </Typography.Text>
+      ) : view.hintKey ? (
+        <Typography.Text type="secondary">{t(view.hintKey)}</Typography.Text>
+      ) : null}
     </Space>
   )
 }

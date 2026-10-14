@@ -719,8 +719,9 @@ const noPermissionExpoPreview = buildExpoRoleMenuPreview(noPermissionPreviewAcce
 
 assertEqual(
   noPermissionExpoPreview.visibleRoutes.map((route) => route.routeName).join(','),
-  'settings',
-  'Role preview without Expo app permissions should only show settings',
+  // 通知收件箱对所有登录账号可见（与后端 FullAppMenu 的 notifications 节点一致），所以无权限角色是「通知 + 设置」。
+  'notifications,settings',
+  'Role preview without Expo app permissions should only show notifications and settings',
 )
 
 assertEqual(
@@ -731,8 +732,8 @@ assertEqual(
 
 assertEqual(
   filterExpoRoutesByVisibility(noPermissionExpoPreview.allRoutes, 'visible').map((route) => route.routeName).join(','),
-  'settings',
-  'Visible HbwebExpo filter should only show settings for roles without app permissions',
+  'notifications,settings',
+  'Visible HbwebExpo filter should only show notifications and settings for roles without app permissions',
 )
 
 assertEqual(

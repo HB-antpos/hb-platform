@@ -34,6 +34,18 @@ export function canViewFaceMatchSettings(
   );
 }
 
+/**
+ * 「抓拍与比对」入口可见性：已登录、非 iOS 审核离线会话，且持有 FaceCapture.Images.View
+ * （结果里的照片是生物识别信息，与后端 FullAppMenu、接口策略同一权限）。
+ */
+export function canViewFaceCaptureResults(
+  isAuthenticated: boolean,
+  hasPermission: HasPermission,
+  isReview: boolean,
+): boolean {
+  return isAuthenticated && !isReview && hasPermission(FACE_MATCH_PERMISSIONS.imagesView);
+}
+
 export interface FaceSettingsSections {
   /** 门店档案区需要 FaceMatch.Manage。 */
   profile: boolean;

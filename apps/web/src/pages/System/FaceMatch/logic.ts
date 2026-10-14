@@ -1,9 +1,12 @@
-import dayjs from 'dayjs'
+import dayjs, { type Dayjs } from 'dayjs'
 
 import { DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE, normalizeFaceGateReport } from '../../../services/faceMatchService'
 import type {
   CreateFaceConsentInput,
   CreateFaceUnwelcomeEntryInput,
+  FaceCaptureResult,
+  FaceCaptureResultHit,
+  FaceCaptureResultQuery,
   FaceConsentMethod,
   FaceGateReport,
   FaceMatchConfig,
@@ -61,11 +64,11 @@ export function normalizeText(value: string | null | undefined): string | null {
 
 // ───────────── 页签可见性 ─────────────
 
-export type FaceMatchTabKey = 'profiles' | 'staff' | 'traffic' | 'unwelcome' | 'review' | 'stats' | 'audit'
+export type FaceMatchTabKey = 'profiles' | 'staff' | 'traffic' | 'unwelcome' | 'review' | 'results' | 'stats' | 'audit'
 
 /**
  * 按后端 /config 返回的权限标志决定页签（顺序即页面顺序）。
- * 名单条目：Manage 或 Approve；复核任务：Review；误报统计：三个名单权限任一；审计：Manage。
+ * 名单条目：Manage 或 Approve；复核任务：Review；抓拍与比对：resultsView（FaceCapture.Images.View，排在复核任务之后）；误报统计：三个名单权限任一；审计：Manage。
  */
 export function getVisibleTabs(permissions: FaceMatchPermissionFlags): FaceMatchTabKey[] {
   const tabs: FaceMatchTabKey[] = []
@@ -73,6 +76,7 @@ export function getVisibleTabs(permissions: FaceMatchPermissionFlags): FaceMatch
   if (permissions.trafficView) tabs.push('traffic')
   if (permissions.unwelcomeManage || permissions.unwelcomeApprove) tabs.push('unwelcome')
   if (permissions.unwelcomeReview) tabs.push('review')
+  if (permissions.resultsView) tabs.push('results')
   if (permissions.unwelcomeManage || permissions.unwelcomeApprove || permissions.unwelcomeReview) tabs.push('stats')
   if (permissions.manage) tabs.push('audit')
   return tabs
@@ -938,4 +942,203 @@ export function canGoNext(hasMore: boolean) {
 /** 请求结果后页面是否需要「写入类操作」被禁用：功能未开启时只能查看。 */
 export function isWriteBlocked(config: Pick<FaceMatchConfig, 'enabled'> | null | undefined): boolean {
   return !config?.enabled
+}
+
+// ───────────── 抓拍与比对结果 ─────────────
+
+/** 判定取值（后端 decision 字段）；顺序即筛选下拉的顺序。 */
+export const RESULT_DECISION_VALUES = ['staff', 'repeatVisitor', 'newVisitor', 'lowQuality', 'noMatch', 'notEvaluated'] as const
+export type FaceResultDecision = (typeof RESULT_DECISION_VALUES)[number]
+
+/** 文案键写成字面量映射而不是模板拼接：契约测试按字面量扫描键。 */
+export const RESULT_DECISION_LABEL_KEYS: Record<FaceResultDecision, string> = {
+  staff: 'faceMatch.results.decision.staff',
+  repeatVisitor: 'faceMatch.results.decision.repeatVisitor',
+  newVisitor: 'faceMatch.results.decision.newVisitor',
+  lowQuality: 'faceMatch.results.decision.lowQuality',
+  noMatch: 'faceMatch.results.decision.noMatch',
+  notEvaluated: 'faceMatch.results.decision.notEvaluated',
+}
+
+export const RESULT_DECISION_COLORS: Record<FaceResultDecision, string> = {
+  staff: 'green',
+  repeatVisitor: 'geekblue',
+  newVisitor: 'blue',
+  lowQuality: 'gold',
+  noMatch: 'default',
+  notEvaluated: 'default',
+}
+
+/** 后端以后新增判定取值时的兜底文案键（直接显示原始取值会让用户看到英文代号，所以统一写「其他」）。 */
+export const RESULT_DECISION_UNKNOWN_KEY = 'faceMatch.results.decision.unknown'
+
+function isKnownDecision(value: string): value is FaceResultDecision {
+  return (RESULT_DECISION_VALUES as readonly string[]).includes(value)
+}
+
+/** 一行抓拍的判定展示：没有评估行（未评估 / 重复抓拍 / 接口失败）统一显示「未评估」；未知取值走兜底，不崩。 */
+export function resolveResultDecision(result: Pick<FaceCaptureResult, 'evaluated' | 'decision'>): { labelKey: string; color: string } {
+  if (!result.evaluated || !result.decision) {
+    return { labelKey: RESULT_DECISION_LABEL_KEYS.notEvaluated, color: RESULT_DECISION_COLORS.notEvaluated }
+  }
+  if (isKnownDecision(result.decision)) {
+    return { labelKey: RESULT_DECISION_LABEL_KEYS[result.decision], color: RESULT_DECISION_COLORS[result.decision] }
+  }
+  return { labelKey: RESULT_DECISION_UNKNOWN_KEY, color: 'default' }
+}
+
+/** 相似度（0-100 整数）展示；没有分数（未评估 / 质量不足）显示「—」。口径始终是相似度，不是概率。 */
+export function formatResultPercent(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return `${Math.min(100, Math.max(0, Math.round(value)))}%`
+}
+
+/** 命中通知状态展示：sent 已发送 / pending 排队中 / skipped 已跳过；未知取值走兜底。 */
+export const NOTIFY_STATE_LABEL_KEYS: Record<string, string> = {
+  sent: 'faceMatch.notify.sent',
+  pending: 'faceMatch.notify.pending',
+  skipped: 'faceMatch.notify.skipped',
+}
+
+export const NOTIFY_STATE_COLORS: Record<string, string> = {
+  sent: 'green',
+  pending: 'gold',
+  skipped: 'default',
+}
+
+/** 状态旁的补充说明（设计图：排队中「等待发布」、已跳过「已先复核」）；已发送的说明是收件人数与已读数，另行展示。 */
+export const NOTIFY_STATE_HINT_KEYS: Record<string, string> = {
+  pending: 'faceMatch.notify.pendingHint',
+  skipped: 'faceMatch.notify.skippedHint',
+}
+
+export const NOTIFY_STATE_UNKNOWN_KEY = 'faceMatch.notify.unknown'
+
+export interface NotifyStateView {
+  labelKey: string
+  color: string
+  hintKey: string | null
+  /** 只有已发送才显示「N 人 · 已读 M」。 */
+  showCounts: boolean
+}
+
+export function resolveNotifyState(state: string | null | undefined): NotifyStateView {
+  const key = state ?? ''
+  // 用自有属性判断：状态来自后端，不能让 toString 之类原型属性名混进来。
+  if (Object.prototype.hasOwnProperty.call(NOTIFY_STATE_LABEL_KEYS, key)) {
+    return { labelKey: NOTIFY_STATE_LABEL_KEYS[key], color: NOTIFY_STATE_COLORS[key], hintKey: Object.prototype.hasOwnProperty.call(NOTIFY_STATE_HINT_KEYS, key) ? NOTIFY_STATE_HINT_KEYS[key] : null, showCounts: key === 'sent' }
+  }
+  return { labelKey: NOTIFY_STATE_UNKNOWN_KEY, color: 'default', hintKey: null, showCounts: false }
+}
+
+/** 已读数不会超过收件人数；脏数据（已读 > 收件人）夹回收件人数，页面不显示「已读 5 / 3」。 */
+export function clampReadCount(recipients: number, read: number): number {
+  return Math.min(Math.max(0, read), Math.max(0, recipients))
+}
+
+/**
+ * 命中通知文案的固定英文原文（通知平台只发英文、不含姓名与照片）：中英文界面都原样展示，不翻译。
+ * 必须与后端发出的通知一致；相似度来自命中摘要的整数百分比。
+ */
+export const HIT_NOTIFICATION_TITLE = 'Possible match alert'
+export function buildHitNotificationBody(scorePercent: number): string {
+  const percent = Math.min(100, Math.max(0, Math.round(Number.isFinite(scorePercent) ? scorePercent : 0)))
+  return `Possible match (similarity ${percent}%). The score is not the probability that this is the same person; a reviewer must check it.`
+}
+
+/** 「去复核」可点：必须有命中、命中图还在（图片到期后任务不能再复核）。能否真正提交判断仍由复核页的后端 canReview 决定。 */
+export function canGoReview(result: Pick<FaceCaptureResult, 'hit'>): boolean {
+  return result.hit !== null && result.hit.imageAvailable
+}
+
+/** 行上「查看」可点：至少有一张图片编号（没有权限时后端不返回编号）。 */
+export function hasResultImages(result: Pick<FaceCaptureResult, 'faceImageId' | 'sceneImageId'>): boolean {
+  return result.faceImageId !== null || result.sceneImageId !== null
+}
+
+/** 抓拍时间范围筛选（本地时区的起止时刻）。 */
+export interface ResultsTimeRange {
+  start: Dayjs
+  end: Dayjs
+}
+
+/** 默认：今天 00:00 ~ 今天 23:59（含到分钟）。 */
+export function defaultResultsRange(now: Date = new Date()): ResultsTimeRange {
+  const day = dayjs(now)
+  return { start: day.startOf('day'), end: day.endOf('day').startOf('minute') }
+}
+
+/** 范围 → 请求的 UTC 起止：起点含、终点不含，所以终点分钟本身也算在内（加一分钟）。 */
+export function resultsRangeToUtc(range: ResultsTimeRange | null | undefined): { fromUtc?: string; toUtc?: string } {
+  if (!range || !range.start.isValid() || !range.end.isValid()) return {}
+  return {
+    fromUtc: range.start.startOf('minute').toISOString(),
+    toUtc: range.end.startOf('minute').add(1, 'minute').toISOString(),
+  }
+}
+
+export interface ResultsFilters {
+  storeCode: string | null
+  cameraId: string | null
+  decision: string | null
+  hitOnly: boolean
+  range: ResultsTimeRange | null
+}
+
+/** 筛选条件 → 请求参数：空值不带；不认识的判定取值不发给后端（下拉只会给出已知取值，这是第二道防线）。 */
+export function buildResultsQuery(filters: ResultsFilters, page: number, pageSize: number): FaceCaptureResultQuery {
+  return {
+    storeCode: filters.storeCode || undefined,
+    cameraId: filters.cameraId || undefined,
+    decision: filters.decision && isKnownDecision(filters.decision) ? filters.decision : undefined,
+    hitOnly: filters.hitOnly || undefined,
+    ...resultsRangeToUtc(filters.range),
+    page,
+    pageSize,
+  }
+}
+
+/** 通知时间线的一步。atUtc 为 null 表示没有可靠时间（页面不编造时间）。 */
+export interface NotifyTimelineStep {
+  key: 'created' | 'sent' | 'read' | 'queued' | 'skipped' | 'unknown' | 'review'
+  labelKey: string
+  params?: Record<string, unknown>
+  atUtc: string | null
+  detailKey: string | null
+  /** 已完成的步骤画实心点，未完成的画空心点。 */
+  done: boolean
+}
+
+/**
+ * 命中通知发送时间线（抽屉里用）：任务已创建 → 通知（已发布 / 排队中 / 已跳过 / 未知）→ 已读人数（只有已发布才有）→ 复核状态。
+ * 只含人数与时间，没有收件人姓名；已读数夹在收件人数以内。
+ */
+export function buildNotifyTimeline(hit: Pick<FaceCaptureResultHit, 'notifyState' | 'notifiedAtUtc' | 'notifyRecipientCount' | 'notifyReadCount' | 'reviewStatus'>): NotifyTimelineStep[] {
+  const steps: NotifyTimelineStep[] = [
+    { key: 'created', labelKey: 'faceMatch.results.timeline.created', atUtc: null, detailKey: null, done: true },
+  ]
+  if (hit.notifyState === 'sent') {
+    const total = Math.max(0, hit.notifyRecipientCount)
+    const read = clampReadCount(total, hit.notifyReadCount)
+    steps.push(
+      { key: 'sent', labelKey: 'faceMatch.results.timeline.sent', params: { count: total }, atUtc: hit.notifiedAtUtc, detailKey: null, done: true },
+      { key: 'read', labelKey: 'faceMatch.results.timeline.read', params: { read, total }, atUtc: null, detailKey: 'faceMatch.results.timeline.readHint', done: read > 0 },
+    )
+  } else if (hit.notifyState === 'pending') {
+    steps.push({ key: 'queued', labelKey: 'faceMatch.results.timeline.queued', atUtc: null, detailKey: 'faceMatch.results.timeline.queuedHint', done: false })
+  } else if (hit.notifyState === 'skipped') {
+    steps.push({ key: 'skipped', labelKey: 'faceMatch.results.timeline.skipped', atUtc: null, detailKey: 'faceMatch.results.timeline.skippedHint', done: true })
+  } else {
+    steps.push({ key: 'unknown', labelKey: NOTIFY_STATE_UNKNOWN_KEY, atUtc: null, detailKey: null, done: false })
+  }
+  const reviewKey = REVIEW_STATUS_LABEL_KEYS[hit.reviewStatus]
+  const pending = hit.reviewStatus === REVIEW_STATUS_PENDING
+  steps.push({
+    key: 'review',
+    labelKey: reviewKey ?? 'faceMatch.results.timeline.reviewUnknown',
+    atUtc: null,
+    detailKey: pending ? 'faceMatch.results.timeline.reviewPendingHint' : reviewKey ? 'faceMatch.results.timeline.reviewDoneHint' : null,
+    done: !pending && reviewKey !== undefined,
+  })
+  return steps
 }

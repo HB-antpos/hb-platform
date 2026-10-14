@@ -7,6 +7,8 @@ export interface FaceMatchPermissionFlags {
   unwelcomeManage: boolean
   unwelcomeApprove: boolean
   unwelcomeReview: boolean
+  /** 持有 FaceCapture.Images.View：可看「抓拍与比对」页签。老后端没有这个字段，归一化为 false。 */
+  resultsView: boolean
 }
 
 export interface FaceMatchConfig {
@@ -315,6 +317,15 @@ export interface FaceUnwelcomeTask {
    * 老后端没有这个字段，归一化为 false。
    */
   autoConfirmed: boolean
+  /**
+   * 命中通知（经通知平台）发送状态：sent 已发布给收件人 / pending 排队中（暂无收件人会重试）/ skipped 发布前已被复核或图片到期而不再发。
+   * 后端可能新增取值，页面按未知值兜底；老后端没有这个字段，归一化为 pending。
+   */
+  notifyState: string
+  notifiedAtUtc: string | null
+  /** 收件人数（不含姓名）；未发布为 0。 */
+  notifyRecipientCount: number
+  notifyReadCount: number
 }
 
 export type FaceReviewVerdict = 'match' | 'notMatch'
@@ -357,4 +368,57 @@ export interface FaceUnwelcomeStats {
   dismissRate: number | null
   entries: FaceUnwelcomeStatsEntry[]
   scoreBuckets: FaceUnwelcomeStatsBucket[]
+}
+
+// ───────────── 抓拍与比对结果（FaceCapture.Images.View） ─────────────
+
+/** 抓拍对应的名单命中任务摘要（不含姓名与事件细节）。 */
+export interface FaceCaptureResultHit {
+  taskId: string
+  /** 相似度 0-100，不等于是同一个人的概率。 */
+  scorePercent: number
+  /** 档位由后端给出时才有（当前接口没有这个字段，页面不自己用阈值划档）。 */
+  band: FaceUnwelcomeBand | null
+  reviewStatus: number
+  reviewStatusName: string
+  /** 命中图是否还在（到期删除后为 false，不能再去复核）。 */
+  imageAvailable: boolean
+  notifyState: string
+  notifiedAtUtc: string | null
+  notifyRecipientCount: number
+  notifyReadCount: number
+}
+
+/**
+ * 一次抓拍及其比对结果。分数是相似度（0-100），不是「同一个人的概率」。
+ * decision 保留后端原始取值（staff / repeatVisitor / newVisitor / lowQuality / noMatch），未评估为 null；页面遇到未知取值要能展示。
+ * faceImageId / sceneImageId 只是图片编号（不是地址）：图片字节必须点「查看」后才按需读取并写审计。
+ */
+export interface FaceCaptureResult {
+  captureId: string
+  storeCode: string
+  storeName: string | null
+  cameraId: string
+  capturedAtUtc: string
+  faceCount: number
+  isDuplicate: boolean
+  evaluated: boolean
+  decision: string | null
+  staffScorePercent: number | null
+  visitScorePercent: number | null
+  faceImageId: string | null
+  sceneImageId: string | null
+  hit: FaceCaptureResultHit | null
+}
+
+/** GET /results 的查询条件；fromUtc 含、toUtc 不含；pageSize ≤ 50。 */
+export interface FaceCaptureResultQuery {
+  storeCode?: string
+  cameraId?: string
+  decision?: string
+  hitOnly?: boolean
+  fromUtc?: string
+  toUtc?: string
+  page: number
+  pageSize: number
 }

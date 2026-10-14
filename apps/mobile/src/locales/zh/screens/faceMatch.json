@@ -275,6 +275,80 @@
       "gone": "图片已被清理或不存在"
     }
   },
+  "capture": {
+    "title": "抓拍与比对",
+    "notice": "分数是相似度，不等于是同一个人的概率。照片需点开详情后才读取。",
+    "filters": {
+      "all": "全部",
+      "hitOnly": "仅命中",
+      "staff": "员工",
+      "newVisitor": "新访客",
+      "repeatVisitor": "回头客"
+    },
+    "range": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "last7Days": "最近 7 天"
+    },
+    "empty": "这个时间段没有抓拍记录",
+    "decision": {
+      "staff": "员工",
+      "repeatVisitor": "回头客",
+      "newVisitor": "新访客",
+      "lowQuality": "画质不足",
+      "noMatch": "未匹配",
+      "notEvaluated": "未比对",
+      "other": "其他判定"
+    },
+    "score": {
+      "staff": "员工 {{percent}}%",
+      "visit": "访客 {{percent}}%"
+    },
+    "hit": {
+      "tag": "命中 {{percent}}%"
+    },
+    "duplicate": "重复抓拍",
+    "notify": {
+      "sent": "已通知 {{count}} 人 · 已读 {{read}}",
+      "pending": "排队中，等待发布",
+      "skipped": "已跳过，未发送通知"
+    },
+    "detail": {
+      "title": "抓拍详情",
+      "sensitiveNotice": "生物识别信息 · 本次查看会被记录",
+      "faceImage": "人脸",
+      "sceneImage": "现场",
+      "noImage": "没有可显示的图片",
+      "resultTitle": "比对结果",
+      "fields": {
+        "timeCamera": "时间 · 摄像机",
+        "store": "门店",
+        "decision": "判定",
+        "scores": "相似度",
+        "hit": "名单命中",
+        "faceCount": "人脸数"
+      },
+      "hitSimilarity": "相似度 {{percent}}%",
+      "notifyTitle": "通知发送情况",
+      "noHit": "这次抓拍没有命中名单。",
+      "goReview": "去复核（并排对比）",
+      "reviewHint": {
+        "noHit": "没有命中，不需要复核。",
+        "imageGone": "命中抓拍图片已按保留期限删除，不能再复核。",
+        "noPermission": "你的账号没有名单复核相关权限。"
+      }
+    },
+    "timeline": {
+      "created": "命中任务已创建",
+      "notified": "已通知 {{count}} 位复核人",
+      "read": "已读 {{read}} / {{count}}",
+      "notifyPending": "通知排队中，等待发布",
+      "notifySkipped": "已跳过，未发送通知",
+      "reviewPending": "待复核",
+      "reviewDismissed": "复核已驳回",
+      "reviewConfirmed": "复核已确认"
+    }
+  },
   "settings": {
     "title": "人脸比对设置",
     "store": "门店",

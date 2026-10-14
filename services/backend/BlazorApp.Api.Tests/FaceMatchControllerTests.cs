@@ -22,6 +22,7 @@ public sealed class FaceMatchControllerTests
     private readonly Mock<IFaceStaffService> _staff = new(MockBehavior.Strict);
     private readonly Mock<IFaceTrafficService> _traffic = new(MockBehavior.Strict);
     private readonly Mock<IFaceUnwelcomeService> _unwelcome = new(MockBehavior.Strict);
+    private readonly Mock<IFaceCaptureResultService> _results = new(MockBehavior.Strict);
     private readonly Mock<IAuthorizationService> _authorization = new();
 
     private static readonly string[] AllCodes =
@@ -66,6 +67,7 @@ public sealed class FaceMatchControllerTests
         [nameof(FaceMatchController.ReviewTask), Permissions.FaceMatch.Unwelcome.Review],
         [nameof(FaceMatchController.TaskImage), Permissions.FaceMatch.Unwelcome.Review],
         [nameof(FaceMatchController.ReferencePhoto), Permissions.FaceMatch.Unwelcome.Review],
+        [nameof(FaceMatchController.ListResults), Permissions.FaceCapture.Images.View],
     ];
 
     [Theory]
@@ -81,7 +83,11 @@ public sealed class FaceMatchControllerTests
     [Fact]
     public void 任一权限类动作不挂单一策略_由动作内按权限判定_且每个公开动作都在清单里()
     {
-        var anyOf = new[] { nameof(FaceMatchController.Config), nameof(FaceMatchController.ListEntries), nameof(FaceMatchController.Stats) };
+        var anyOf = new[]
+        {
+            nameof(FaceMatchController.Config), nameof(FaceMatchController.ListEntries), nameof(FaceMatchController.Stats),
+            nameof(FaceMatchController.ResultImage),
+        };
         foreach (var name in anyOf)
         {
             Assert.Empty(typeof(FaceMatchController).GetMethod(name)!.GetCustomAttributes<AuthorizeAttribute>());
@@ -227,6 +233,62 @@ public sealed class FaceMatchControllerTests
         Assert.Equal("image/png", Assert.IsType<FileContentResult>(result).ContentType);
     }
 
+    [Fact]
+    public async Task 配置接口_只有看图权限也能进_并带出ResultsView标志()
+    {
+        FaceMatchPermissionFlagsDto? received = null;
+        _profiles.Setup(p => p.GetConfigAsync(It.IsAny<FaceMatchPermissionFlagsDto>(), It.IsAny<CancellationToken>()))
+            .Callback<FaceMatchPermissionFlagsDto, CancellationToken>((flags, _) => received = flags)
+            .ReturnsAsync(new FaceMatchConfigDto { Enabled = true });
+
+        var ok = await CreateController(Permissions.FaceCapture.Images.View).Config(default);
+
+        Assert.Equal(200, Assert.IsType<OkObjectResult>(ok).StatusCode);
+        Assert.Equal(new FaceMatchPermissionFlagsDto { ResultsView = true }, received);
+    }
+
+    [Fact]
+    public async Task 抓拍结果列表_把查询条件与操作人透传给服务_并声明可看图()
+    {
+        FaceCaptureResultQuery? query = null;
+        FaceMatchActor? actor = null;
+        bool? canViewImages = null;
+        _results.Setup(r => r.ListAsync(It.IsAny<FaceCaptureResultQuery>(), It.IsAny<FaceMatchActor>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<FaceCaptureResultQuery, FaceMatchActor, bool, CancellationToken>((q, a, v, _) => { query = q; actor = a; canViewImages = v; })
+            .ReturnsAsync(new FaceMatchPageDto<FaceCaptureResultDto>());
+        var from = new DateTime(2026, 10, 14, 0, 0, 0, DateTimeKind.Utc);
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View)
+            .ListResults("1042", "cam-1", "newVisitor", true, from, null, 2, 30, default);
+
+        Assert.Equal(200, Assert.IsType<OkObjectResult>(result).StatusCode);
+        Assert.Equal(new FaceCaptureResultQuery
+        {
+            StoreCode = "1042", CameraId = "cam-1", Decision = "newVisitor", HitOnly = true, FromUtc = from, Page = 2, PageSize = 30,
+        }, query);
+        Assert.Equal("u-1", actor!.Id);
+        Assert.True(canViewImages);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 抓拍图片接口_看图权限由动作内判定后传给服务_响应只含图片字节(bool granted)
+    {
+        bool? received = null;
+        _results.Setup(r => r.GetImageAsync("c1", "i1", It.IsAny<FaceMatchActor>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, FaceMatchActor, bool, CancellationToken>((_, _, _, v, _) => received = v)
+            .ReturnsAsync(new FaceMatchImageContent(FaceImageTestData.Jpeg, "image/jpeg"));
+        var controller = granted ? CreateController(Permissions.FaceCapture.Images.View) : CreateController();
+
+        var result = await controller.ResultImage("c1", "i1", default);
+
+        Assert.Equal(granted, received);
+        Assert.Equal("image/jpeg", Assert.IsType<FileContentResult>(result).ContentType);
+        Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
+        Assert.Equal("nosniff", controller.Response.Headers["X-Content-Type-Options"].ToString());
+    }
+
     // ---------- 操作人 ----------
 
     [Fact]
@@ -357,7 +419,7 @@ public sealed class FaceMatchControllerTests
         var claims = new List<Claim> { new(ClaimTypes.Name, "tester") };
         if (userId != null) claims.Add(new Claim("userId", userId));
         claims.AddRange((roles ?? []).Select(role => new Claim(ClaimTypes.Role, role)));
-        var controller = new FaceMatchController(_profiles.Object, _staff.Object, _traffic.Object, _unwelcome.Object, _authorization.Object)
+        var controller = new FaceMatchController(_profiles.Object, _staff.Object, _traffic.Object, _unwelcome.Object, _results.Object, _authorization.Object)
         {
             ControllerContext = new ControllerContext
             {

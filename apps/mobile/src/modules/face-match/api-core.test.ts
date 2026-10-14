@@ -186,6 +186,68 @@ async function run() {
     await assert.rejects(() => api.fetchTaskImage("t1"), (error) => classifyReviewImageError(error) === "forbidden");
   }
 
+  // ───────── 抓拍与比对结果：列表查询参数；图片接口只有编号、不带查询串 ─────────
+  {
+    const { http, calls } = fakeHttp(() => ({
+      items: [{ captureId: "c1", storeCode: "1042", faceImageId: "f1", sceneImageId: "s1", evaluated: true, decision: "staff" }],
+      page: 1,
+      pageSize: 20,
+      hasMore: false,
+    }));
+    const api = createFaceMatchApi(http);
+    const page = await api.listCaptureResults({
+      storeCode: "1042",
+      decision: "newVisitor",
+      hitOnly: false,
+      fromUtc: "2026-10-13T13:00:00.000Z",
+      toUtc: "2026-10-14T13:00:00.000Z",
+      page: 1,
+      pageSize: 20,
+    });
+    assert.equal(calls[0].url, "/react/v1/face-match/results");
+    assert.deepEqual(calls[0].config?.params, {
+      storeCode: "1042",
+      decision: "newVisitor",
+      hitOnly: undefined,
+      fromUtc: "2026-10-13T13:00:00.000Z",
+      toUtc: "2026-10-14T13:00:00.000Z",
+      page: 1,
+      pageSize: 20,
+    });
+    assert.equal((calls[0].config?.headers as Record<string, string>)["Cache-Control"], "no-store");
+    assert.equal(page.items[0].faceImageId, "f1");
+    await api.listCaptureResults({ hitOnly: true, page: 2, pageSize: 20 });
+    assert.deepEqual(calls[1].config?.params, {
+      storeCode: undefined,
+      decision: undefined,
+      hitOnly: true,
+      fromUtc: undefined,
+      toUtc: undefined,
+      page: 2,
+      pageSize: 20,
+    });
+  }
+  {
+    const { http, calls } = fakeHttp(() => JPEG.buffer.slice(0));
+    const api = createFaceMatchApi(http);
+    const uri = await api.fetchCaptureImage("a1B2c3", "img9");
+    assert.equal(uri, `data:image/jpeg;base64,${fromByteArray(JPEG)}`);
+    assert.equal(calls[0].url, "/react/v1/face-match/results/a1B2c3/images/img9");
+    assert.equal(calls[0].url.includes("?"), false, "图片地址不带任何查询串");
+    assert.equal(calls[0].config?.responseType, "arraybuffer");
+    assert.equal(calls[0].config?.params, undefined);
+    const headers = calls[0].config?.headers as Record<string, string>;
+    assert.equal(headers["Cache-Control"], "no-store");
+    assert.equal(headers["X-Skip-Center-Log"], "1", "图片请求不进中心日志上报");
+    assert.equal(calls[0].config?.timeout, IMAGE_TIMEOUT_MS);
+    // 编号只允许 1–32 位字母数字（与服务端 IdPattern 一致），非法编号不发请求
+    for (const bad of ["", "a/b", "../x", "a-b", "x".repeat(33), "t 1", "t?x=1"]) {
+      await assert.rejects(() => api.fetchCaptureImage(bad, "img9"), (error) => classifyReviewImageError(error) === "gone", bad);
+      await assert.rejects(() => api.fetchCaptureImage("a1B2c3", bad), (error) => classifyReviewImageError(error) === "gone", bad);
+    }
+    assert.equal(calls.length, 1, "校验失败不会向服务端发任何请求");
+  }
+
   // ───────── 摄像头：只读列表 + 启停（整体替换时带回其余字段） ─────────
   {
     const { http, calls } = fakeHttp((call) => (call.method === "get" ? { items: [{ cameraId: "c1", storeCode: "1008", enabled: true }] } : { cameraId: "c1", storeCode: "1008", enabled: false }));

@@ -33,6 +33,8 @@ export const PERMISSIONS = {
   },
   FaceCapture: {
     CamerasManage: "FaceCapture.Cameras.Manage",
+    // 「抓拍与比对」结果与抓拍图（生物识别信息，每次查看服务端都写审计）。
+    ImagesView: "FaceCapture.Images.View",
   },
   EmployeeProfiles: {
     View: "EmployeeProfiles.View",

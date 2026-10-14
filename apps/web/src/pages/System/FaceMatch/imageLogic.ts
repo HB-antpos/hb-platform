@@ -1,5 +1,5 @@
 import { RequestError } from '../../../utils/request'
-import { createObjectUrlRegistry, type ObjectUrlApi } from '../FaceCameras/imageLogic'
+import { classifyFaceImageError, createObjectUrlRegistry, type FaceImageErrorKind, type ObjectUrlApi } from '../FaceCameras/imageLogic'
 import { getFaceMatchErrorCode } from './logic'
 
 // 复核图片与登记照预览的纯逻辑（objectURL 登记表直接复用 FaceCameras/imageLogic，不复制代码）。
@@ -133,6 +133,107 @@ export function createReviewImageSession(options: ReviewImageSessionOptions): Re
   return {
     start,
     loadReference,
+    getStates: () => states,
+    dispose() {
+      if (disposed) return
+      disposed = true
+      controller.abort()
+      registry.dispose()
+      states = new Map()
+    },
+  }
+}
+
+// ───────────── 抓拍与比对结果的图片会话 ─────────────
+
+// 「抓拍与比对」详情抽屉只读两张图：人脸小图 + 背景大图。约束同上：用户点「查看」打开抽屉后才请求（列表里没有任何真实照片），
+// 逐张顺序读取、每次读取服务端都写审计；图片只以 objectURL 存在，抽屉关闭 / 切换 / 卸载（dispose）时撤销。
+
+export type ResultImageSlot = 'face' | 'scene'
+
+/** 失败分类沿用摄像机页的图片错误码（FACE_IMAGE_*）与状态码分类：未配置 / 暂未转存 / 无权限 / 登录过期 / 不存在 / 其余读取失败。 */
+export type ResultImageErrorKind = FaceImageErrorKind
+
+/** 文案键写成字面量映射而不是模板拼接：契约测试按字面量扫描键。 */
+export const RESULT_IMAGE_ERROR_KEYS: Record<ResultImageErrorKind, string> = {
+  notConfigured: 'faceMatch.results.imageErrors.notConfigured',
+  local: 'faceMatch.results.imageErrors.local',
+  forbidden: 'faceMatch.results.imageErrors.forbidden',
+  unauthorized: 'faceMatch.results.imageErrors.unauthorized',
+  missing: 'faceMatch.results.imageErrors.missing',
+  failed: 'faceMatch.results.imageErrors.failed',
+}
+
+export function classifyResultImageError(error: unknown): ResultImageErrorKind {
+  return classifyFaceImageError(error)
+}
+
+/** 这几类失败对同一抓拍的另一张图必然同样成立，不必再请求（审计也不必多记一次）。 */
+export function isSharedResultImageFailure(kind: ResultImageErrorKind) {
+  return kind === 'notConfigured' || kind === 'forbidden' || kind === 'unauthorized'
+}
+
+export type ResultImageState =
+  | { status: 'loading' }
+  | { status: 'loaded'; url: string }
+  | { status: 'error'; kind: ResultImageErrorKind }
+
+export type ResultImageStates = ReadonlyMap<ResultImageSlot, ResultImageState>
+
+export interface ResultImageSession {
+  /** 开始加载：先人脸小图，再背景大图；没有传 fetcher 的槽位不请求。 */
+  start: () => Promise<void>
+  dispose: () => void
+  getStates: () => ResultImageStates
+}
+
+export interface ResultImageSessionOptions {
+  fetchers: Partial<Record<ResultImageSlot, (signal: AbortSignal) => Promise<Blob>>>
+  onChange: (states: ResultImageStates) => void
+  urlApi?: ObjectUrlApi
+}
+
+export function createResultImageSession(options: ResultImageSessionOptions): ResultImageSession {
+  const registry = createObjectUrlRegistry(options.urlApi)
+  const controller = new AbortController()
+  let disposed = false
+  let states = new Map<ResultImageSlot, ResultImageState>()
+  let sharedFailure: ResultImageErrorKind | null = null
+
+  function update(slot: ResultImageSlot, state: ResultImageState) {
+    if (disposed) return
+    states = new Map(states).set(slot, state)
+    options.onChange(states)
+  }
+
+  async function load(slot: ResultImageSlot, fetcher: (signal: AbortSignal) => Promise<Blob>) {
+    if (disposed) return
+    if (sharedFailure) {
+      update(slot, { status: 'error', kind: sharedFailure })
+      return
+    }
+    update(slot, { status: 'loading' })
+    try {
+      const blob = await fetcher(controller.signal)
+      // 关闭后才返回的响应：registry 已 dispose，拿不到 URL，blob 随之丢弃。
+      const url = registry.set(slot, blob)
+      if (disposed || url === null) return
+      update(slot, { status: 'loaded', url })
+    } catch (error) {
+      if (disposed || controller.signal.aborted) return
+      const kind = classifyResultImageError(error)
+      if (isSharedResultImageFailure(kind)) sharedFailure = kind
+      update(slot, { status: 'error', kind })
+    }
+  }
+
+  return {
+    async start() {
+      for (const slot of ['face', 'scene'] as const) {
+        const fetcher = options.fetchers[slot]
+        if (fetcher) await load(slot, fetcher)
+      }
+    },
     getStates: () => states,
     dispose() {
       if (disposed) return

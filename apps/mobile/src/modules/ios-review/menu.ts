@@ -31,6 +31,9 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   // 不受欢迎人员名单与人脸比对设置涉及真实的生物识别照片与门店合规档案，审核模式没有离线演示数据，不展示。
   "face-unwelcome",
   "face-match-settings",
+  // 抓拍与比对含真实的生物识别照片，通知收件箱是真实账号的服务端消息，审核模式都没有离线演示数据，不展示。
+  "face-capture-results",
+  "notifications",
   "workbench",
 ] as const;
 

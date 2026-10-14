@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 
-import type { FaceStoreProfile } from '../../../types/faceMatch'
+import dayjs from 'dayjs'
+
+import type { FaceCaptureResult, FaceStoreProfile } from '../../../types/faceMatch'
 import { RequestError } from '../../../utils/request'
 import {
   AUTO_CONFIRM_SCORE_DEFAULT,
@@ -11,24 +13,36 @@ import {
   CATEGORY_OTHER,
   FACE_MATCH_ERROR_KEYS,
   GENERIC_ERROR_KEY,
+  HIT_NOTIFICATION_TITLE,
   INCIDENT_CATEGORY_OPTIONS,
   MISSING_KEY_LABEL_KEYS,
+  NOTIFY_STATE_LABEL_KEYS,
   PHOTO_MAX_BYTES,
+  RESULT_DECISION_LABEL_KEYS,
+  RESULT_DECISION_UNKNOWN_KEY,
+  RESULT_DECISION_VALUES,
   REVIEW_STEP_HINT_KEYS,
   buildConsentInput,
+  buildHitNotificationBody,
+  buildNotifyTimeline,
   buildProfileRequest,
+  buildResultsQuery,
   buildUnwelcomeEntryInput,
+  canGoReview,
   canSubmitVerdict,
   canWithdrawEntry,
   classifyFaceMatchError,
+  clampReadCount,
   describeFaceMatchError,
   computeDismissRate,
   countMissing,
   countWarnings,
+  defaultResultsRange,
   defaultTrafficRange,
   detectFileType,
   expiryToUtcIso,
   formatApprovalProgress,
+  formatResultPercent,
   formatFileSize,
   formatRate,
   formatScoreBucket,
@@ -41,6 +55,7 @@ import {
   getReviewStep,
   getVerdictBlockReasonKey,
   getVisibleTabs,
+  hasResultImages,
   isSameProfileRequest,
   isWriteBlocked,
   maxExpiryDay,
@@ -51,6 +66,9 @@ import {
   pickEnrollableConsents,
   profileToFormValues,
   referenceIndexes,
+  resolveNotifyState,
+  resolveResultDecision,
+  resultsRangeToUtc,
   summarizeGates,
   toRatio,
   validateAutoConfirmScore,
@@ -67,7 +85,7 @@ import {
 // 纯逻辑测试：全部用假数据，不连任何服务。
 // 注意：日期相关断言只用本地日历日，不依赖运行机器的时区。
 
-const none = { manage: false, trafficView: false, unwelcomeManage: false, unwelcomeApprove: false, unwelcomeReview: false }
+const none = { manage: false, trafficView: false, unwelcomeManage: false, unwelcomeApprove: false, unwelcomeReview: false, resultsView: false }
 
 // ───────── 页签可见性：按权限，且顺序固定 ─────────
 assert.deepEqual(getVisibleTabs(none), [])
@@ -77,9 +95,19 @@ assert.deepEqual(getVisibleTabs({ ...none, unwelcomeManage: true }), ['unwelcome
 assert.deepEqual(getVisibleTabs({ ...none, unwelcomeApprove: true }), ['unwelcome', 'stats'], '批准权限可看条目与统计')
 assert.deepEqual(getVisibleTabs({ ...none, unwelcomeReview: true }), ['review', 'stats'], '复核权限看复核任务与统计，不看条目')
 assert.deepEqual(
-  getVisibleTabs({ manage: true, trafficView: true, unwelcomeManage: true, unwelcomeApprove: true, unwelcomeReview: true }),
+  getVisibleTabs({ manage: true, trafficView: true, unwelcomeManage: true, unwelcomeApprove: true, unwelcomeReview: true, resultsView: false }),
   ['profiles', 'staff', 'traffic', 'unwelcome', 'review', 'stats', 'audit'],
+  '没有 resultsView 时不出现「抓拍与比对」',
 )
+// 抓拍与比对：只看 resultsView（FaceCapture.Images.View），排在复核任务之后、误报统计之前
+assert.deepEqual(getVisibleTabs({ ...none, resultsView: true }), ['results'], '只有看图权限：只能看抓拍与比对')
+assert.deepEqual(getVisibleTabs({ ...none, unwelcomeReview: true, resultsView: true }), ['review', 'results', 'stats'])
+assert.deepEqual(
+  getVisibleTabs({ manage: true, trafficView: true, unwelcomeManage: true, unwelcomeApprove: true, unwelcomeReview: true, resultsView: true }),
+  ['profiles', 'staff', 'traffic', 'unwelcome', 'review', 'results', 'stats', 'audit'],
+  '全部权限：抓拍与比对在复核任务与误报统计之间',
+)
+assert.deepEqual(getVisibleTabs({ ...none, manage: true, resultsView: true }), ['profiles', 'staff', 'results', 'audit'])
 
 // ───────── 功能未开启 ─────────
 assert.equal(getDisabledReasonKey({ disabledReason: 'region-missing' }), 'faceMatch.disabled.reasons.regionMissing')
@@ -525,6 +553,106 @@ assert.equal(validateTrafficQuery('1008', { from: '2026-10-01', to: '2026-10-01'
 assert.equal(validateTrafficQuery('1008', { from: '2026-01-01', to: '2026-04-03' })?.key, 'faceMatch.validation.rangeTooLong', '93 天超过上限')
 assert.equal(validateTrafficQuery('1008', { from: '2026-01-01', to: '2026-04-03' })?.params?.days, 92)
 assert.equal(validateTrafficQuery('1008', { from: '2026-01-01', to: '2026-04-02' }), null, '恰好 92 天可以')
+
+// ───────── 抓拍与比对：判定 / 通知 / 相似度展示 ─────────
+const capture = (overrides: Partial<FaceCaptureResult> = {}): FaceCaptureResult => ({
+  captureId: 'c1', storeCode: '1042', storeName: 'TestStore', cameraId: 'cam-1', capturedAtUtc: '2026-10-14T01:00:00Z',
+  faceCount: 1, isDuplicate: false, evaluated: true, decision: 'newVisitor', staffScorePercent: 9, visitScorePercent: 31,
+  faceImageId: 'f1', sceneImageId: 's1', hit: null, ...overrides,
+})
+for (const value of RESULT_DECISION_VALUES) {
+  assert.ok(RESULT_DECISION_LABEL_KEYS[value].startsWith('faceMatch.results.decision.'), `判定 ${value} 有文案键`)
+}
+assert.deepEqual([...RESULT_DECISION_VALUES], ['staff', 'repeatVisitor', 'newVisitor', 'lowQuality', 'noMatch', 'notEvaluated'])
+assert.equal(resolveResultDecision(capture({ decision: 'staff' })).labelKey, 'faceMatch.results.decision.staff')
+assert.equal(resolveResultDecision(capture({ decision: 'lowQuality' })).labelKey, 'faceMatch.results.decision.lowQuality')
+assert.equal(resolveResultDecision(capture({ evaluated: false, decision: null })).labelKey, 'faceMatch.results.decision.notEvaluated', '没有评估行显示未评估')
+assert.equal(resolveResultDecision(capture({ evaluated: false, decision: 'staff' })).labelKey, 'faceMatch.results.decision.notEvaluated', '未评估时即使带了判定也按未评估')
+assert.equal(resolveResultDecision(capture({ decision: null })).labelKey, 'faceMatch.results.decision.notEvaluated')
+assert.equal(resolveResultDecision(capture({ decision: 'brandNewValue' })).labelKey, RESULT_DECISION_UNKNOWN_KEY, '未知判定走兜底而不是崩')
+assert.equal(resolveResultDecision(capture({ decision: 'toString' })).labelKey, RESULT_DECISION_UNKNOWN_KEY, '原型属性名也不会被当成已知取值')
+
+assert.equal(formatResultPercent(91), '91%')
+assert.equal(formatResultPercent(8.6), '9%')
+assert.equal(formatResultPercent(null), '—', '没有分数显示 —')
+assert.equal(formatResultPercent(undefined), '—')
+assert.equal(formatResultPercent(Number.NaN), '—')
+assert.equal(formatResultPercent(130), '100%')
+assert.equal(formatResultPercent(-5), '0%')
+
+assert.deepEqual(Object.keys(NOTIFY_STATE_LABEL_KEYS).sort(), ['pending', 'sent', 'skipped'])
+assert.deepEqual(resolveNotifyState('sent'), { labelKey: 'faceMatch.notify.sent', color: 'green', hintKey: null, showCounts: true })
+assert.deepEqual(resolveNotifyState('pending'), { labelKey: 'faceMatch.notify.pending', color: 'gold', hintKey: 'faceMatch.notify.pendingHint', showCounts: false })
+assert.deepEqual(resolveNotifyState('skipped'), { labelKey: 'faceMatch.notify.skipped', color: 'default', hintKey: 'faceMatch.notify.skippedHint', showCounts: false })
+for (const unknown of ['weird', '', null, undefined, 'constructor']) {
+  assert.deepEqual(resolveNotifyState(unknown as string), { labelKey: 'faceMatch.notify.unknown', color: 'default', hintKey: null, showCounts: false }, `未知通知状态 ${String(unknown)} 走兜底`)
+}
+assert.equal(clampReadCount(3, 1), 1)
+assert.equal(clampReadCount(3, 9), 3, '已读数不超过收件人数')
+assert.equal(clampReadCount(0, 2), 0)
+assert.equal(clampReadCount(3, -1), 0)
+
+// 通知文案：固定英文原文，百分比取整并夹在 0-100
+assert.equal(HIT_NOTIFICATION_TITLE, 'Possible match alert')
+assert.equal(
+  buildHitNotificationBody(87),
+  'Possible match (similarity 87%). The score is not the probability that this is the same person; a reviewer must check it.',
+)
+assert.ok(buildHitNotificationBody(86.6).includes('similarity 87%'))
+assert.ok(buildHitNotificationBody(Number.NaN).includes('similarity 0%'))
+assert.ok(buildHitNotificationBody(180).includes('similarity 100%'))
+
+// 去复核 / 查看的可用性
+const hit = { taskId: 't1', scorePercent: 87, band: null, reviewStatus: 0, reviewStatusName: 'pending', imageAvailable: true, notifyState: 'sent', notifiedAtUtc: '2026-10-14T01:00:05Z', notifyRecipientCount: 3, notifyReadCount: 1 }
+assert.equal(canGoReview({ hit }), true)
+assert.equal(canGoReview({ hit: { ...hit, imageAvailable: false } }), false, '命中图已删除不能去复核')
+assert.equal(canGoReview({ hit: null }), false, '没有命中没有任务可复核')
+assert.equal(hasResultImages({ faceImageId: 'f', sceneImageId: null }), true)
+assert.equal(hasResultImages({ faceImageId: null, sceneImageId: null }), false)
+
+// 通知时间线：只含人数与时间，已读不超过收件人
+const sentSteps = buildNotifyTimeline(hit)
+assert.deepEqual(sentSteps.map((step) => step.key), ['created', 'sent', 'read', 'review'])
+assert.deepEqual(sentSteps[1].params, { count: 3 })
+assert.equal(sentSteps[1].atUtc, '2026-10-14T01:00:05Z')
+assert.deepEqual(sentSteps[2].params, { read: 1, total: 3 })
+assert.equal(sentSteps[2].done, true)
+assert.equal(sentSteps[3].labelKey, 'faceMatch.review.status.pending')
+assert.equal(sentSteps[3].done, false)
+assert.equal(sentSteps[3].detailKey, 'faceMatch.results.timeline.reviewPendingHint')
+assert.deepEqual(buildNotifyTimeline({ ...hit, notifyReadCount: 0 })[2].done, false, '一个人都没读：空心点')
+assert.deepEqual(buildNotifyTimeline({ ...hit, notifyReadCount: 99 })[2].params, { read: 3, total: 3 }, '脏数据：已读夹回收件人数')
+assert.deepEqual(buildNotifyTimeline({ ...hit, notifyState: 'pending', notifiedAtUtc: null, notifyRecipientCount: 0, notifyReadCount: 0 }).map((step) => step.key), ['created', 'queued', 'review'])
+assert.deepEqual(buildNotifyTimeline({ ...hit, notifyState: 'skipped', reviewStatus: 1 }).map((step) => step.key), ['created', 'skipped', 'review'])
+assert.equal(buildNotifyTimeline({ ...hit, notifyState: 'skipped', reviewStatus: 1 })[2].labelKey, 'faceMatch.review.status.dismissed')
+assert.equal(buildNotifyTimeline({ ...hit, reviewStatus: 2 })[3].done, true)
+const unknownSteps = buildNotifyTimeline({ ...hit, notifyState: 'weird', reviewStatus: 9 })
+assert.deepEqual(unknownSteps.map((step) => step.key), ['created', 'unknown', 'review'], '未知通知状态也能画出时间线')
+assert.equal(unknownSteps[2].labelKey, 'faceMatch.results.timeline.reviewUnknown', '未知复核状态不崩')
+assert.ok(!JSON.stringify(sentSteps).includes('Name'), '时间线里没有姓名字段')
+
+// 时间范围与查询条件：本地时区起止 → UTC；终点分钟含在内（后端终点不含，所以加一分钟）
+const defaultRange = defaultResultsRange(new Date(2026, 9, 14, 15, 30))
+assert.equal(defaultRange.start.format('YYYY-MM-DD HH:mm'), '2026-10-14 00:00')
+assert.equal(defaultRange.end.format('YYYY-MM-DD HH:mm'), '2026-10-14 23:59')
+assert.deepEqual(resultsRangeToUtc(defaultRange), {
+  fromUtc: dayjs(new Date(2026, 9, 14, 0, 0)).toISOString(),
+  toUtc: dayjs(new Date(2026, 9, 15, 0, 0)).toISOString(),
+})
+assert.deepEqual(resultsRangeToUtc(null), {}, '清空时间范围：不带起止')
+assert.deepEqual(resultsRangeToUtc({ start: dayjs('invalid'), end: dayjs() }), {})
+const emptyFilters = { storeCode: null, cameraId: null, decision: null, hitOnly: false, range: null }
+assert.deepEqual(buildResultsQuery(emptyFilters, 1, 20), {
+  storeCode: undefined, cameraId: undefined, decision: undefined, hitOnly: undefined, page: 1, pageSize: 20,
+}, '空筛选不带任何条件')
+const fullQuery = buildResultsQuery({ storeCode: '1042', cameraId: 'cam-1', decision: 'staff', hitOnly: true, range: defaultRange }, 3, 20)
+assert.equal(fullQuery.storeCode, '1042')
+assert.equal(fullQuery.cameraId, 'cam-1')
+assert.equal(fullQuery.decision, 'staff')
+assert.equal(fullQuery.hitOnly, true)
+assert.equal(fullQuery.page, 3)
+assert.equal(fullQuery.fromUtc, dayjs(new Date(2026, 9, 14, 0, 0)).toISOString())
+assert.equal(buildResultsQuery({ ...emptyFilters, decision: 'notAThing' }, 1, 20).decision, undefined, '不认识的判定不发给后端')
 
 // 表单值与请求体的键一一对应（编译期有类型保证，这里保证运行期不漏）
 const formKeys = Object.keys(values as FaceProfileFormValues).sort().join(',')

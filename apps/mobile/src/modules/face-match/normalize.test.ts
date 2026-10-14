@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   normalizeFaceCameraList,
+  normalizeFaceCaptureResult,
+  normalizeFaceCaptureResultPage,
   normalizeFaceGateReport,
   normalizeFaceMatchConfig,
   normalizeFaceStoreProfile,
@@ -176,3 +178,53 @@ import {
 }
 
 console.log("normalize.test.ts: ok");
+
+// ───────── 抓拍与比对结果：缺失字段不崩，未评估时没有判定，命中必须有任务编号 ─────────
+{
+  const full = normalizeFaceCaptureResult({
+    captureId: "c1",
+    storeCode: "1042",
+    storeName: "TestStore",
+    cameraId: "s1042-entrance-01",
+    capturedAtUtc: "2026-10-14T01:20:03Z",
+    faceCount: 2,
+    isDuplicate: false,
+    evaluated: true,
+    decision: "newVisitor",
+    staffScorePercent: 9,
+    visitScorePercent: 31,
+    faceImageId: "f1",
+    sceneImageId: "s1",
+    hit: {
+      taskId: "t1",
+      scorePercent: 87,
+      band: "high",
+      reviewStatus: 0,
+      reviewStatusName: "Pending",
+      imageAvailable: true,
+      notifyState: "sent",
+      notifiedAtUtc: "2026-10-14T01:21:02Z",
+      notifyRecipientCount: 3,
+      notifyReadCount: 1,
+    },
+  });
+  assert.equal(full.decision, "newVisitor");
+  assert.equal(full.staffScorePercent, 9);
+  assert.equal(full.hit?.band, "high");
+  assert.equal(full.hit?.notifyRecipientCount, 3);
+  assert.equal(full.hit?.notifiedAtUtc, "2026-10-14T01:21:02Z");
+
+  const bare = normalizeFaceCaptureResult({ captureId: "c2", evaluated: "yes", staffScorePercent: "9", hit: { scorePercent: 80 } });
+  assert.equal(bare.evaluated, false, "非 true 的值不算已评估");
+  assert.equal(bare.decision, null);
+  assert.equal(bare.staffScorePercent, null, "分数不是数字就当没有，不编造 0");
+  assert.equal(bare.faceImageId, null);
+  assert.equal(bare.hit, null, "没有任务编号的命中无法关联复核，当作没有命中");
+  assert.equal(normalizeFaceCaptureResult({ hit: { taskId: "t", band: "weird" } }).hit?.band, "normal", "未知档位按一般处理");
+
+  const page = normalizeFaceCaptureResultPage({ items: [{ captureId: "c1" }, { captureId: "c2" }], page: 2, pageSize: 20, hasMore: true });
+  assert.equal(page.items.length, 2);
+  assert.equal(page.page, 2);
+  assert.equal(page.hasMore, true);
+  assert.deepEqual(normalizeFaceCaptureResultPage(null).items, []);
+}

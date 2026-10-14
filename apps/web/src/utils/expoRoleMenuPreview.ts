@@ -171,6 +171,8 @@ const TAB_PATHS: Record<string, string> = {
   'employee-profile-review': '/(shell)/employee-profile-review',
   'face-unwelcome': '/(shell)/face-unwelcome',
   'face-match-settings': '/(shell)/face-match-settings',
+  'face-capture-results': '/(shell)/face-capture-results',
+  notifications: '/(shell)/notifications',
   'device-management': '/(shell)/device-management',
   'app-install': '/(shell)/app-install',
   'app-downloads': '/(shell)/app-downloads',
@@ -214,6 +216,8 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'employee-profile-review': { zhTitle: '员工资料审核', enTitle: 'Employee Profile Review' },
   'face-unwelcome': { zhTitle: '不受欢迎名单', enTitle: 'Unwelcome list' },
   'face-match-settings': { zhTitle: '人脸比对设置', enTitle: 'Face match settings' },
+  'face-capture-results': { zhTitle: '抓拍与比对', enTitle: 'Captures & matches' },
+  notifications: { zhTitle: '通知', enTitle: 'Notifications' },
   'device-management': { zhTitle: '设备管理', enTitle: 'Devices' },
   'app-install': { zhTitle: 'App 安装', enTitle: 'Install app' },
   'app-downloads': { zhTitle: 'App 下载', enTitle: 'App Downloads' },
@@ -518,6 +522,25 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.FaceMatch.Manage, P.FaceCapture.CamerasManage],
     order: 58,
     ...ROUTE_LABELS['face-match-settings'],
+  },
+  {
+    routeName: 'face-capture-results',
+    titleKey: 'tabs.faceCaptureResults',
+    icon: 'face-recognition',
+    // 与后端 FullAppMenu 一致：留存抓拍与比对结果含照片（生物识别信息），只认看图权限 FaceCapture.Images.View，不新增权限码。
+    permissionCodes: [P.FaceCapture.ImagesView],
+    order: 58,
+    ...ROUTE_LABELS['face-capture-results'],
+  },
+  {
+    routeName: 'notifications',
+    titleKey: 'tabs.notifications',
+    icon: 'bell-outline',
+    // 与后端 FullAppMenu 一致：站内通知收件箱，任何登录账号可见（不需要权限）。
+    permissionCodes: [],
+    order: 59,
+    fixed: true,
+    ...ROUTE_LABELS.notifications,
   },
   {
     routeName: 'device-management',

@@ -215,6 +215,57 @@ export interface UpdateFaceCameraRequest {
   enabled: boolean;
 }
 
+// ───────────── 抓拍与比对结果（GET /face-match/results） ─────────────
+
+/** 比对判定：服务端取值；新增取值时页面按「未识别的判定」兜底，不丢弃记录。 */
+export type FaceCaptureDecision = "staff" | "repeatVisitor" | "newVisitor" | "lowQuality" | "noMatch";
+
+/** 抓拍命中名单后的任务摘要（不含姓名与事件细节）。notifyState：sent / pending / skipped，其余取值页面不展示通知行。 */
+export interface FaceCaptureHit {
+  taskId: string;
+  scorePercent: number;
+  band: FaceUnwelcomeBand;
+  /** 0 待复核、1 已驳回、2 已确认。 */
+  reviewStatus: number;
+  reviewStatusName: string;
+  /** 命中抓拍图是否还在保留期内（决定能否去复核）。 */
+  imageAvailable: boolean;
+  notifyState: string;
+  notifiedAtUtc: string | null;
+  notifyRecipientCount: number;
+  notifyReadCount: number;
+}
+
+/** 一次抓拍及其比对结果。图片编号只在服务端确认有看图权限时才有；图片内容另走专用接口按需读取。 */
+export interface FaceCaptureResult {
+  captureId: string;
+  storeCode: string;
+  storeName: string | null;
+  cameraId: string;
+  capturedAtUtc: string;
+  faceCount: number;
+  isDuplicate: boolean;
+  /** false = 没有评估行（开关未开、重复抓拍、接口失败），此时 decision 为 null。 */
+  evaluated: boolean;
+  decision: string | null;
+  staffScorePercent: number | null;
+  visitScorePercent: number | null;
+  faceImageId: string | null;
+  sceneImageId: string | null;
+  hit: FaceCaptureHit | null;
+}
+
+export interface FaceCaptureResultQuery {
+  storeCode?: string;
+  /** staff / repeatVisitor / newVisitor / lowQuality / noMatch / notEvaluated，空 = 不限。 */
+  decision?: string;
+  hitOnly?: boolean;
+  fromUtc?: string;
+  toUtc?: string;
+  page: number;
+  pageSize: number;
+}
+
 // ───────────── 内存中的照片 ─────────────
 
 /**
