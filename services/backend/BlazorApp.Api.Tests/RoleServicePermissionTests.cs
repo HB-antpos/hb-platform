@@ -200,6 +200,27 @@ public sealed class RoleServicePermissionTests : IDisposable
     }
 
     [Fact]
+    public async Task GetPermissionCatalogAsync_FillsSurfacesForBuiltInAndPersistedPermissions()
+    {
+        await _db.Insertable(new SysPermission
+        {
+            Id = "perm-surface-pos",
+            Code = "Permissions.PosTerminal.Sales.AddItem",
+            Name = "添加扫码商品",
+            Category = "POS 销售",
+        }).ExecuteCommandAsync();
+
+        var result = await (await CreateAdminServiceAsync()).GetPermissionCatalogAsync();
+
+        var permissions = Assert.IsType<PermissionCatalogDto>(result.Data)
+            .Categories.SelectMany(category => category.Permissions)
+            .ToDictionary(permission => permission.Name, StringComparer.OrdinalIgnoreCase);
+        // 库里的行与运行时合并的内建权限都要带使用端
+        Assert.Equal(new[] { "pos" }, permissions["Permissions.PosTerminal.Sales.AddItem"].Surfaces);
+        Assert.Equal(new[] { "web" }, permissions["SalesDashboard.SalesData.View"].Surfaces);
+    }
+
+    [Fact]
     public async Task AssignPermissionsToUserAsync_AdminCanSaveBuiltInPermissionWithoutSeedRow()
     {
         await SeedUserWithRoleAsync("user-sales", "role-sales", "User");

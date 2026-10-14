@@ -249,28 +249,75 @@
   margin-left: auto;
 }
 
-.roles-ws-perm-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
-  gap: 2px 16px;
-  padding: 6px 0 10px;
+/* 权限清单：左侧分类导航 + 右侧选中分组的清单。窄屏时导航折到清单上方。 */
+.roles-ws-perm-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 20px;
 }
 
+.roles-ws-rail {
+  flex: 0 0 232px;
+  min-width: 0;
+  padding-right: 12px;
+  border-right: 1px solid #eef0f4;
+}
+
+@media (min-width: 900px) {
+  /* 与角色列表同样的吸顶口径：清单很长，滚动后仍能切换分类 */
+  .roles-ws-rail {
+    position: sticky;
+    top: 168px;
+    max-height: calc(100vh - 184px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 899px) {
+  .roles-ws-rail {
+    flex-basis: 100%;
+    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid #eef0f4;
+    padding-bottom: 8px;
+  }
+}
+
+.roles-ws-perm-list {
+  display: flex;
+  flex: 1 1 420px;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.roles-ws-perm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
+  gap: 8px;
+  padding: 10px 0 10px;
+}
+
+/* 每个权限一张小卡：中文名与英文编码上下两行，都完整显示、不省略 */
 .roles-ws-perm.ant-checkbox-wrapper {
   display: flex;
-  align-items: center;
-  min-height: 40px;
+  align-items: flex-start;
   margin-inline-start: 0;
-  padding: 0 10px;
+  padding: 9px 12px;
+  border: 1px solid #eef0f4;
   border-radius: 8px;
 }
 
+.roles-ws-perm.ant-checkbox-wrapper > .ant-checkbox {
+  margin-top: 3px;
+}
+
 .roles-ws-perm.ant-checkbox-wrapper > span:last-child {
-  display: flex;
+  display: block;
   flex: 1;
-  align-items: center;
-  gap: 10px;
   min-width: 0;
+  padding-inline: 10px 0;
 }
 
 .roles-ws-perm:hover {
@@ -279,15 +326,28 @@
 
 .roles-ws-perm-changed,
 .roles-ws-perm-changed:hover {
+  border-color: #b7d4ff;
   background: #f0f6ff;
 }
 
-.roles-ws-perm-name {
-  flex: 1;
+.roles-ws-perm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.roles-ws-perm-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.roles-ws-perm-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .roles-ws-badge {

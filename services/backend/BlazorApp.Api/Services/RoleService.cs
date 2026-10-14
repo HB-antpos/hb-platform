@@ -1544,6 +1544,7 @@ namespace BlazorApp.Api.Services
                         Description = p.Description,
                         Category = p.Category,
                         IsSystemPermission = false,
+                        Surfaces = PermissionSurfaceCatalog.ResolveNames(p.Code),
                         CreatedAt = p.CreatedAt,
                         CreatedBy = p.CreatedBy,
                         UpdatedAt = p.UpdatedAt,
@@ -1559,6 +1560,7 @@ namespace BlazorApp.Api.Services
                                 Description = seed.Description,
                                 Category = seed.Category,
                                 IsSystemPermission = true,
+                                Surfaces = PermissionSurfaceCatalog.ResolveNames(seed.Code),
                                 CreatedAt = DateTime.MinValue,
                                 CreatedBy = "System",
                             })

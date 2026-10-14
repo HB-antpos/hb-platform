@@ -1,5 +1,7 @@
 import type { PermissionAliasDto, PermissionCategoryDto, RoleDto } from '../../../types/role'
 import type { WebMenuPreviewNode } from '../../../utils/webMenuPreview'
+import { matchesPermissionSurface, resolvePermissionSurfaces } from '../permissionTaxonomy'
+import type { PermissionSurface, PermissionSurfaceFilter, TaxonomyEntry } from '../permissionTaxonomy'
 import { sortRolePermissionCategories } from './rolePermissionCategories'
 
 /**
@@ -54,6 +56,8 @@ export interface PermissionItemView {
   code: string
   displayName: string
   description?: string
+  /** 使用端（收银端 / 后台 / 移动端），一个权限可同时属于多个。 */
+  surfaces: PermissionSurface[]
   granted: boolean
   change: 'added' | 'removed' | null
 }
@@ -70,8 +74,9 @@ export interface PermissionGroupView {
 
 /**
  * 按模块分组构建权限清单视图。
- * 搜索与「已授予/未授予/已修改」筛选只影响显示的条目；分组统计始终按整组计算，
- * 分段控件上的数量按当前搜索结果计算，与列表保持一致。
+ * 搜索、使用端与「已授予/未授予/已修改」筛选只影响显示的条目；分组统计始终按整组计算，
+ * 分段控件上的数量按「搜索 + 使用端」后的结果计算，与列表保持一致。
+ * navEntries 是左侧分类导航的数据源：列表此刻能看到的全部条目（不受当前选中分组限制）。
  */
 export function buildPermissionGroupViews({
   categories,
@@ -79,18 +84,21 @@ export function buildPermissionGroupViews({
   baselineCodes,
   keyword,
   filter,
+  surface = 'all',
 }: {
   categories: PermissionCategoryDto[]
   draftCodes: string[]
   baselineCodes: string[]
   keyword: string
   filter: PermissionFilter
+  surface?: PermissionSurfaceFilter
 }) {
   const draftSet = new Set(draftCodes)
   const baselineSet = new Set(baselineCodes)
   const normalizedKeyword = keyword.trim().toLowerCase()
   const counts: Record<PermissionFilter, number> = { all: 0, granted: 0, ungranted: 0, changed: 0 }
   const groups: PermissionGroupView[] = []
+  const navEntries: TaxonomyEntry[] = []
 
   for (const category of sortRolePermissionCategories(categories)) {
     const allItems = category.permissions.map<PermissionItemView>((permission) => {
@@ -100,17 +108,18 @@ export function buildPermissionGroupViews({
         code: permission.name,
         displayName: permission.displayName || permission.name,
         description: permission.description,
+        surfaces: resolvePermissionSurfaces(permission.name, permission.surfaces),
         granted,
         change: granted === wasGranted ? null : granted ? 'added' : 'removed',
       }
     })
 
-    const searchMatched = normalizedKeyword
-      ? allItems.filter((item) =>
+    const searchMatched = allItems.filter((item) =>
+      matchesPermissionSurface(item.surfaces, surface) &&
+      (!normalizedKeyword ||
         item.code.toLowerCase().includes(normalizedKeyword) ||
-        item.displayName.toLowerCase().includes(normalizedKeyword),
-      )
-      : allItems
+        item.displayName.toLowerCase().includes(normalizedKeyword)),
+    )
 
     for (const item of searchMatched) {
       counts.all += 1
@@ -127,6 +136,10 @@ export function buildPermissionGroupViews({
     })
     if (!items.length) continue
 
+    for (const item of items) {
+      navEntries.push({ category: category.category, granted: item.granted })
+    }
+
     groups.push({
       key: category.category,
       displayName: category.displayName || category.category,
@@ -137,7 +150,7 @@ export function buildPermissionGroupViews({
     })
   }
 
-  return { groups, counts }
+  return { groups, counts, navEntries }
 }
 
 /** 展平菜单树为 key → 是否可见，用于对比草稿与已保存状态的可见性差异。 */

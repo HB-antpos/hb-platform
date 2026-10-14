@@ -1,0 +1,37 @@
+{
+  "system": {
+    "permissionTaxonomy": {
+      "title": "权限分类",
+      "all": "全部",
+      "surfaceLabel": "使用端",
+      "surfaces": {
+        "all": "全部",
+        "pos": "收银端",
+        "web": "后台",
+        "mobile": "移动端"
+      },
+      "sections": {
+        "pos": "收银端 POS",
+        "business": "后台 · 业务",
+        "system": "系统与人员",
+        "other": "其他"
+      },
+      "groups": {
+        "pos-sales": "销售",
+        "pos-payment": "收款",
+        "pos-return": "退货",
+        "pos-special": "特价商品",
+        "pos-installment": "分期",
+        "pos-daily-close": "日结",
+        "pos-history": "历史订单",
+        "pos-device": "设置 · 钱箱 · 小票 · 客显",
+        "pos-admin": "管理 · 同步 · 审计",
+        "biz-product": "商品与价格",
+        "biz-warehouse": "仓库与采购",
+        "biz-store": "分店运营",
+        "biz-report": "报表与营销",
+        "sys-access": "用户 · 角色 · 系统"
+      }
+    }
+  }
+}
