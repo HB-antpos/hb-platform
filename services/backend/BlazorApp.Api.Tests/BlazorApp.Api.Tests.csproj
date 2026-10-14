@@ -38,6 +38,13 @@
     <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
     <Compile Include="WarehousePickingControllerTests.cs" />
     <Compile Include="NotificationPlatformTests.cs" />
+    <Compile Include="ExpoPushTestSupport.cs" />
+    <Compile Include="ExpoPushContentTests.cs" />
+    <Compile Include="ExpoPushDeviceTests.cs" />
+    <Compile Include="ExpoPushPublisherTests.cs" />
+    <Compile Include="ExpoPushSenderTests.cs" />
+    <Compile Include="ExpoPushBackgroundServiceTests.cs" />
+    <Compile Include="ExpoPushSqlServerTests.cs" />
     <Compile Include="StorePriceUpdateNotificationWorkerTests.cs" />
     <Compile Include="StorePriceUpdateNotificationSqlServerTests.cs" />
     <Compile Include="FaceCameraAdminTests.cs" />

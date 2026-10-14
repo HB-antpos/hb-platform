@@ -620,6 +620,8 @@ VALUES ('{Hex32('7')}', N'1013', N'cam-1', '{Sql(at)}', '{Hex32('e')}', 90, N'{h
                          FaceTrafficHourlySchema.ApplySql, FaceTrafficHourlySchema.VerifySql,
                          // 新实体会 SELECT FaceStoreProfile.UnwelcomeAutoConfirmScore：与生产一样先执行这条迁移再用新版代码。
                          FaceUnwelcomeAutoConfirmSchema.ApplySql, FaceUnwelcomeAutoConfirmSchema.VerifySql,
+                         // App 系统推送的设备表与发件箱（迁移 20261017.001）：通知发布器在推送开关打开时会读写它们，与生产迁移序列保持一致。
+                         AppPushSchema.ApplySql, AppPushSchema.VerifySql,
                      })
             {
                 await database.ExecuteAsync(sql);

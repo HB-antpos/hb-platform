@@ -2272,6 +2272,163 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task App推送设备与发件箱_可重复执行_活动令牌过滤唯一_同通知同设备只入箱一次_并识别列键与过滤条件漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53500, missing.Number);
+
+        await ExecuteNonQueryAsync(main, AppPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AppPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 活动令牌唯一：同一令牌第二个活动行报 2601（唯一索引冲突）；已撤销的历史行不占用唯一性，
+        // 所以换人登录 = 撤销旧行 + 新建一行，这一序列必须能成功，同一令牌可以有任意多条历史行。
+        const string token = "ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]";
+        static string InsertDevice(string id, string user, string? revokeReason) => $"""
+            INSERT dbo.AppPushDevice (PushDeviceId, UserGUID, Platform, ExpoPushToken, CreatedAtUtc, LastSeenAtUtc, RevokedAtUtc, RevokeReason)
+            VALUES (N'{id}', N'{user}', N'ios', N'{token}', SYSUTCDATETIME(), SYSUTCDATETIME(), {(revokeReason == null ? "NULL" : "SYSUTCDATETIME()")}, {(revokeReason == null ? "NULL" : $"N'{revokeReason}'")});
+            """;
+        await ExecuteNonQueryAsync(main, InsertDevice("d1", "user-a", null));
+        var duplicateActive = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, InsertDevice("d2", "user-b", null)));
+        Assert.Equal(2601, duplicateActive.Number);
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.AppPushDevice SET RevokedAtUtc = SYSUTCDATETIME(), RevokeReason = N'reassigned' WHERE PushDeviceId = N'd1';
+            """);
+        await ExecuteNonQueryAsync(main, InsertDevice("d2", "user-b", null));
+        await ExecuteNonQueryAsync(main, InsertDevice("d3", "user-c", "logout"));
+        await ExecuteNonQueryAsync(main, InsertDevice("d4", "user-d", "logout"));
+
+        // 发件箱：(通知, 设备) 唯一；同一通知对不同设备、同一设备的不同通知可以共存。
+        static string InsertDelivery(string id, string notification, string device) => $"""
+            INSERT dbo.AppPushDelivery (DeliveryId, NotificationId, PushDeviceId, UserGUID, State, Attempts, NextAttemptAtUtc, CreatedAtUtc)
+            VALUES (N'{id}', N'{notification}', N'{device}', N'user-b', 0, 0, SYSUTCDATETIME(), SYSUTCDATETIME());
+            """;
+        await ExecuteNonQueryAsync(main, InsertDelivery("x1", "n1", "d2"));
+        await ExecuteNonQueryAsync(main, InsertDelivery("x2", "n1", "d3"));
+        await ExecuteNonQueryAsync(main, InsertDelivery("x3", "n2", "d2"));
+        var duplicateDelivery = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, InsertDelivery("x4", "n1", "d2")));
+        Assert.Equal(2601, duplicateDelivery.Number);
+
+        // 列漂移：令牌列变短报 53501；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice;
+            ALTER TABLE dbo.AppPushDevice ALTER COLUMN ExpoPushToken nvarchar(100) NOT NULL;
+            """);
+        var columnDrift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53501, columnDrift.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.AppPushDevice ALTER COLUMN ExpoPushToken nvarchar(200) NOT NULL;
+            """);
+        // 索引还没重建：门禁报 53502（索引缺失）；ApplySql 补建后通过（迁移可修复缺失的索引）。
+        var indexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53502, indexMissing.Number);
+        await ExecuteNonQueryAsync(main, AppPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 列可空性漂移同样不兼容。
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.AppPushDelivery SET LockedUntilUtc = SYSUTCDATETIME() WHERE LockedUntilUtc IS NULL;
+            ALTER TABLE dbo.AppPushDelivery ALTER COLUMN LockedUntilUtc datetime2 NOT NULL;
+            """);
+        var nullableDrift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53501, nullableDrift.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AppPushDelivery ALTER COLUMN LockedUntilUtc datetime2 NULL;");
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 活动令牌索引去掉过滤条件（变成令牌永久唯一）：53503；这会让换人登录撞唯一键，必须被门禁拦下。
+        // 历史撤销行里同一令牌有多行，无过滤的唯一索引建不出来，先清掉历史行再模拟漂移。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice;
+            DELETE FROM dbo.AppPushDevice WHERE RevokedAtUtc IS NOT NULL;
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice (ExpoPushToken);
+            """);
+        var noFilter = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53503, noFilter.Number);
+        // 过滤条件写错（RevokedAtUtc IS NOT NULL）同样不兼容。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice;
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice (ExpoPushToken) WHERE RevokedAtUtc IS NOT NULL;
+            """);
+        var wrongFilter = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53503, wrongFilter.Number);
+        // 活动令牌索引不唯一：53502。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice;
+            CREATE NONCLUSTERED INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice (ExpoPushToken) WHERE RevokedAtUtc IS NULL;
+            """);
+        var notUnique = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53502, notUnique.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice;
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AppPushDevice_ActiveToken ON dbo.AppPushDevice (ExpoPushToken) WHERE RevokedAtUtc IS NULL;
+            """);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 发件箱唯一索引键列换序 / 多一列：53502；改回后通过。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDelivery_Notification_Device ON dbo.AppPushDelivery;
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AppPushDelivery_Notification_Device ON dbo.AppPushDelivery (PushDeviceId, NotificationId);
+            """);
+        var reordered = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53502, reordered.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDelivery_Notification_Device ON dbo.AppPushDelivery;
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AppPushDelivery_Notification_Device ON dbo.AppPushDelivery (NotificationId, PushDeviceId, UserGUID);
+            """);
+        var extraKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53502, extraKey.Number);
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX UX_AppPushDelivery_Notification_Device ON dbo.AppPushDelivery;
+            CREATE UNIQUE NONCLUSTERED INDEX UX_AppPushDelivery_Notification_Device ON dbo.AppPushDelivery (NotificationId, PushDeviceId);
+            """);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 状态/到期索引缺失 → 53502；ApplySql 补建。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_AppPushDelivery_State_NextAttempt ON dbo.AppPushDelivery;");
+        var stateIndexMissing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53502, stateIndexMissing.Number);
+        await ExecuteNonQueryAsync(main, AppPushSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 发件箱主键变成复合键：53502。
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.AppPushDelivery DROP CONSTRAINT PK_AppPushDelivery;
+            ALTER TABLE dbo.AppPushDelivery ADD CONSTRAINT PK_AppPushDelivery PRIMARY KEY CLUSTERED (DeliveryId, NotificationId);
+            """);
+        var compositePk = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AppPushSchema.VerifySql));
+        Assert.Equal(53502, compositePk.Number);
+        await ExecuteNonQueryAsync(main, """
+            ALTER TABLE dbo.AppPushDelivery DROP CONSTRAINT PK_AppPushDelivery;
+            ALTER TABLE dbo.AppPushDelivery ADD CONSTRAINT PK_AppPushDelivery PRIMARY KEY CLUSTERED (DeliveryId);
+            """);
+        await ExecuteNonQueryAsync(main, AppPushSchema.VerifySql);
+
+        // 迁移只新建这两张表，不碰任何别的表。
+        await using var connection = new SqlConnection(main);
+        await connection.OpenAsync();
+        await using var command = new SqlCommand(
+            "SELECT COUNT(*) FROM sys.tables WHERE [name] NOT IN (N'AppPushDevice', N'AppPushDelivery')", connection);
+        Assert.Equal(0, Convert.ToInt32(await command.ExecuteScalarAsync()));
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 客显广告版式_POSAPI抢先InitTables补列后_迁移仍收敛到同一签名()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

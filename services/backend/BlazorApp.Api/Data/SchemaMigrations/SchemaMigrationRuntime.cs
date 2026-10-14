@@ -175,6 +175,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyFaceUnwelcomeAutoConfirmAsync(CancellationToken cancellationToken);
 
+    Task ApplyAppPushAsync(CancellationToken cancellationToken);
+
+    Task VerifyAppPushAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1066,6 +1070,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             FaceUnwelcomeAutoConfirmSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAppPushAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AppPushSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // App 推送设备与发件箱：列、主键、唯一索引与活动令牌过滤条件签名通过后协调器才登记账本，结构不符的同名表不会被误标为完成。
+        await VerifyAppPushAsync(cancellationToken);
+    }
+
+    public async Task VerifyAppPushAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AppPushSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
