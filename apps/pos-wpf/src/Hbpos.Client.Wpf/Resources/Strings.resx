@@ -216,7 +216,7 @@
   <data name="payment.method.refundCard" xml:space="preserve"><value>Refund Card</value></data>
   <data name="payment.method.refundVoucher" xml:space="preserve"><value>Refund Voucher</value></data>
   <data name="payment.method.account" xml:space="preserve"><value>Credit Account</value></data>
-  <data name="payment.method.installment" xml:space="preserve"><value>Installment</value></data>
+  <data name="payment.method.installment" xml:space="preserve"><value>Lay-by</value></data>
   <data name="payment.installment.switchHelp" xml:space="preserve"><value>Collect a deposit and customer details</value></data>
   <data name="payment.installment.customerName" xml:space="preserve"><value>Customer name *</value></data>
   <data name="payment.installment.customerNamePlaceholder" xml:space="preserve"><value>Enter customer name</value></data>
@@ -227,24 +227,24 @@
   <data name="payment.installment.customerMissingPhone" xml:space="preserve"><value>Customer phone required</value></data>
   <data name="payment.installment.editCustomer" xml:space="preserve"><value>Edit</value></data>
   <data name="payment.installment.customerDialogTitle" xml:space="preserve"><value>Edit customer information</value></data>
-  <data name="payment.installment.customerDialogHelp" xml:space="preserve"><value>Enter the required customer name and phone for this installment order.</value></data>
+  <data name="payment.installment.customerDialogHelp" xml:space="preserve"><value>Enter the required customer name and phone for this lay-by order.</value></data>
   <data name="payment.installment.saveCustomer" xml:space="preserve"><value>Save customer</value></data>
   <data name="payment.installment.outstanding" xml:space="preserve"><value>Outstanding</value></data>
-  <data name="payment.installment.confirmFullFirstPayment.title" xml:space="preserve"><value>Confirm installment order</value></data>
-  <data name="payment.installment.confirmFullFirstPayment.message" xml:space="preserve"><value>The first installment payment covers the full order amount. Continue creating an installment order?</value></data>
+  <data name="payment.installment.confirmFullFirstPayment.title" xml:space="preserve"><value>Confirm lay-by order</value></data>
+  <data name="payment.installment.confirmFullFirstPayment.message" xml:space="preserve"><value>The first lay-by payment covers the full order amount. Continue creating a lay-by order?</value></data>
   <data name="payment.installment.confirmPickupAfterPaidOff.title" xml:space="preserve"><value>Confirm pickup</value></data>
-  <data name="payment.installment.confirmPickupAfterPaidOff.message" xml:space="preserve"><value>This installment order is fully paid. Confirm customer pickup now?</value></data>
-  <data name="payment.installment.status.onlineRequired" xml:space="preserve"><value>Installment payment requires online mode.</value></data>
+  <data name="payment.installment.confirmPickupAfterPaidOff.message" xml:space="preserve"><value>This lay-by order is fully paid. Confirm customer pickup now?</value></data>
+  <data name="payment.installment.status.onlineRequired" xml:space="preserve"><value>Lay-by payment requires online mode.</value></data>
   <data name="payment.installment.status.customerRequired" xml:space="preserve"><value>Customer name and phone are required.</value></data>
-  <data name="payment.installment.status.firstPaymentBelowMinimum" xml:space="preserve"><value>First installment payment must be at least $20.00.</value></data>
-  <data name="payment.installment.status.totalBelowMinimum" xml:space="preserve"><value>Installment orders must be at least $50.00.</value></data>
-  <data name="payment.installment.status.invalidAmount" xml:space="preserve"><value>Installment payment amount must be greater than zero and not exceed the outstanding amount.</value></data>
-  <data name="payment.installment.status.singleTenderOnly" xml:space="preserve"><value>Installment mode accepts one payment at a time.</value></data>
-  <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve"><value>This installment order cannot receive more payments.</value></data>
-  <data name="payment.installment.status.actionFailed" xml:space="preserve"><value>Installment payment failed.</value></data>
-  <data name="payment.installment.status.created" xml:space="preserve"><value>Installment order created.</value></data>
-  <data name="payment.installment.status.repaymentRecorded" xml:space="preserve"><value>Installment repayment recorded.</value></data>
-  <data name="payment.installment.status.fullFirstPaymentCancelled" xml:space="preserve"><value>Full first-payment installment confirmation cancelled.</value></data>
+  <data name="payment.installment.status.firstPaymentBelowMinimum" xml:space="preserve"><value>First lay-by payment must be at least $20.00.</value></data>
+  <data name="payment.installment.status.totalBelowMinimum" xml:space="preserve"><value>Lay-by orders must be at least $50.00.</value></data>
+  <data name="payment.installment.status.invalidAmount" xml:space="preserve"><value>Lay-by payment amount must be greater than zero and not exceed the outstanding amount.</value></data>
+  <data name="payment.installment.status.singleTenderOnly" xml:space="preserve"><value>Lay-by mode accepts one payment at a time.</value></data>
+  <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve"><value>This lay-by order cannot receive more payments.</value></data>
+  <data name="payment.installment.status.actionFailed" xml:space="preserve"><value>Lay-by payment failed.</value></data>
+  <data name="payment.installment.status.created" xml:space="preserve"><value>Lay-by order created.</value></data>
+  <data name="payment.installment.status.repaymentRecorded" xml:space="preserve"><value>Lay-by repayment recorded.</value></data>
+  <data name="payment.installment.status.fullFirstPaymentCancelled" xml:space="preserve"><value>Full first-payment lay-by confirmation cancelled.</value></data>
   <data name="payment.installment.status.pickupConfirmFailed" xml:space="preserve"><value>Pickup confirmation failed; receipt printed as pending pickup. {0}</value></data>
   <data name="payment.action.addCash" xml:space="preserve"><value>Add Cash Tender</value></data>
   <data name="payment.voucher.code" xml:space="preserve"><value>Voucher code</value></data>
@@ -697,7 +697,7 @@
   <data name="pos.terminal.actions.exitApplication" xml:space="preserve"><value>Exit</value></data>
   <data name="history.source.local" xml:space="preserve"><value>Local</value></data>
   <data name="history.source.online" xml:space="preserve"><value>Online</value></data>
-  <data name="history.source.installments" xml:space="preserve"><value>Installments</value></data>
+  <data name="history.source.installments" xml:space="preserve"><value>Lay-bys</value></data>
   <data name="history.source.held" xml:space="preserve"><value>Held</value></data>
   <data name="history.held.localHold" xml:space="preserve"><value>Local hold</value></data>
   <data name="history.held.pendingPublish" xml:space="preserve"><value>Pending publish</value></data>
@@ -1059,20 +1059,20 @@
   <data name="linkly.backend.dialog.button.cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="installment.common.input.reference" xml:space="preserve"><value>Reference / voucher code</value></data>
   <data name="installment.common.input.voucherToken" xml:space="preserve"><value>Voucher reservation token</value></data>
-  <data name="installment.center.title" xml:space="preserve"><value>Installment Center</value></data>
-  <data name="installment.center.currentOrder.none" xml:space="preserve"><value>There is no current order available for a new installment.</value></data>
-  <data name="installment.center.currentOrder.amount" xml:space="preserve"><value>Current order amount {0:C2}. A new installment can be created.</value></data>
+  <data name="installment.center.title" xml:space="preserve"><value>Lay-by Center</value></data>
+  <data name="installment.center.currentOrder.none" xml:space="preserve"><value>There is no current order available for a new lay-by.</value></data>
+  <data name="installment.center.currentOrder.amount" xml:space="preserve"><value>Current order amount {0:C2}. A new lay-by can be created.</value></data>
   <data name="installment.center.action.backToPayment" xml:space="preserve"><value>Back to Payment</value></data>
   <data name="installment.center.action.search" xml:space="preserve"><value>Search</value></data>
-  <data name="installment.center.action.create" xml:space="preserve"><value>Create Installment</value></data>
+  <data name="installment.center.action.create" xml:space="preserve"><value>Create Lay-by</value></data>
   <data name="installment.center.action.repay" xml:space="preserve"><value>Add Repayment</value></data>
   <data name="installment.center.action.cancel" xml:space="preserve"><value>Cancel and Refund</value></data>
   <data name="installment.center.action.cancelToVoucher" xml:space="preserve"><value>Cancel and Refund as Voucher</value></data>
   <data name="installment.center.action.void" xml:space="preserve"><value>Void</value></data>
   <data name="installment.center.action.confirmPickup" xml:space="preserve"><value>Confirm Pickup</value></data>
   <data name="installment.center.search" xml:space="preserve"><value>Search order no., name, or phone</value></data>
-  <data name="installment.center.offline" xml:space="preserve"><value>Offline mode only supports local cached installment orders.</value></data>
-  <data name="installment.center.column.orderNumber" xml:space="preserve"><value>Installment No.</value></data>
+  <data name="installment.center.offline" xml:space="preserve"><value>Offline mode only supports local cached lay-by orders.</value></data>
+  <data name="installment.center.column.orderNumber" xml:space="preserve"><value>Lay-by No.</value></data>
   <data name="installment.center.column.customer" xml:space="preserve"><value>Customer</value></data>
   <data name="installment.center.column.phone" xml:space="preserve"><value>Phone</value></data>
   <data name="installment.center.column.total" xml:space="preserve"><value>Total</value></data>
@@ -1081,23 +1081,23 @@
   <data name="installment.center.column.status" xml:space="preserve"><value>Status</value></data>
   <data name="installment.center.column.terminal" xml:space="preserve"><value>Terminal</value></data>
   <data name="installment.center.column.updated" xml:space="preserve"><value>Updated</value></data>
-  <data name="installment.center.selected.none" xml:space="preserve"><value>No installment selected</value></data>
-  <data name="installment.center.selected.customer.empty" xml:space="preserve"><value>Select an installment order on the left</value></data>
+  <data name="installment.center.selected.none" xml:space="preserve"><value>No lay-by selected</value></data>
+  <data name="installment.center.selected.customer.empty" xml:space="preserve"><value>Select a lay-by order on the left</value></data>
   <data name="installment.center.selected.outstanding.empty" xml:space="preserve"><value>Outstanding -</value></data>
   <data name="installment.center.selected.outstanding" xml:space="preserve"><value>Outstanding {0:C2}</value></data>
   <data name="installment.center.input.repaymentAmount" xml:space="preserve"><value>Repayment amount</value></data>
   <data name="installment.center.input.voidReason" xml:space="preserve"><value>Void reason</value></data>
-  <data name="installment.center.status.ready" xml:space="preserve"><value>Select an installment order to create or process.</value></data>
-  <data name="installment.center.status.loaded" xml:space="preserve"><value>Loaded {0} installment orders.</value></data>
-  <data name="installment.center.status.searched" xml:space="preserve"><value>Found {0} installment orders.</value></data>
-  <data name="installment.center.status.empty" xml:space="preserve"><value>There are no installment orders.</value></data>
+  <data name="installment.center.status.ready" xml:space="preserve"><value>Select a lay-by order to create or process.</value></data>
+  <data name="installment.center.status.loaded" xml:space="preserve"><value>Loaded {0} lay-by orders.</value></data>
+  <data name="installment.center.status.searched" xml:space="preserve"><value>Found {0} lay-by orders.</value></data>
+  <data name="installment.center.status.empty" xml:space="preserve"><value>There are no lay-by orders.</value></data>
   <data name="installment.center.status.refreshFailed" xml:space="preserve"><value>{0} (refresh failed: {1})</value></data>
   <data name="installment.center.status.cardTerminalRequired" xml:space="preserve"><value>Configure a card terminal before adding a card repayment.</value></data>
   <data name="installment.center.status.cardNotAuthorized" xml:space="preserve"><value>Card repayment was not authorized.</value></data>
-  <data name="installment.create.title" xml:space="preserve"><value>Create Installment</value></data>
-  <data name="installment.create.action.back" xml:space="preserve"><value>Back to Installment Center</value></data>
-  <data name="installment.create.action.submit" xml:space="preserve"><value>Create Installment Order</value></data>
-  <data name="installment.create.offline" xml:space="preserve"><value>Installment orders cannot be created while offline.</value></data>
+  <data name="installment.create.title" xml:space="preserve"><value>Create Lay-by</value></data>
+  <data name="installment.create.action.back" xml:space="preserve"><value>Back to Lay-by Center</value></data>
+  <data name="installment.create.action.submit" xml:space="preserve"><value>Create Lay-by Order</value></data>
+  <data name="installment.create.offline" xml:space="preserve"><value>Lay-by orders cannot be created while offline.</value></data>
   <data name="installment.create.section.customer" xml:space="preserve"><value>Customer Information</value></data>
   <data name="installment.create.section.cart" xml:space="preserve"><value>Cart Details</value></data>
   <data name="installment.create.section.payment" xml:space="preserve"><value>Down Payment</value></data>
@@ -1107,9 +1107,9 @@
   <data name="installment.create.input.note" xml:space="preserve"><value>Note</value></data>
   <data name="installment.create.order.total" xml:space="preserve"><value>Order Total</value></data>
   <data name="installment.create.order.financed" xml:space="preserve"><value>Financed {0:C2}</value></data>
-  <data name="installment.create.status.ready" xml:space="preserve"><value>Complete the customer, down payment, and installment details.</value></data>
-  <data name="installment.create.status.missingCart" xml:space="preserve"><value>There is no current order available for installment creation.</value></data>
-  <data name="installment.create.status.totalBelowMinimum" xml:space="preserve"><value>Installment order total must be at least $50. Use regular payment for orders below $50.</value></data>
+  <data name="installment.create.status.ready" xml:space="preserve"><value>Complete the customer, down payment, and lay-by details.</value></data>
+  <data name="installment.create.status.missingCart" xml:space="preserve"><value>There is no current order available for lay-by creation.</value></data>
+  <data name="installment.create.status.totalBelowMinimum" xml:space="preserve"><value>Lay-by order total must be at least $50. Use regular payment for orders below $50.</value></data>
   <data name="installment.create.payment.status.offline" xml:space="preserve"><value>Offline mode cannot submit a down payment.</value></data>
   <data name="installment.create.payment.status.downPaymentBelowMinimum" xml:space="preserve"><value>First payment must be at least $20.</value></data>
   <data name="installment.create.payment.status.cash" xml:space="preserve"><value>Cash down payment does not require an additional reference.</value></data>

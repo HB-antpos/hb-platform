@@ -33,7 +33,7 @@ export type ReceiptProfileSyncTrigger =
 
 /**
  * 服务端下发的一版资料；version 由 API 适配器容错归一（缺失按 0），由本控制器拒绝无效版本。
- * voucherTerms / installmentTerms 是退款券「VOUCHER TERMS」与分期小票「INSTALLMENT TERMS」的自定义正文：
+ * voucherTerms / installmentTerms 是退款券「VOUCHER TERMS」与分期小票「LAY-BY TERMS」的自定义正文：
  * API 适配器把服务端的 null / 缺失归一为空串，空串（及纯空白）表示未定制、打印时用内置默认文案。
  * 它们与 returnPolicy 一样只做透传，由本机存储层统一校验（控制字符、长度上限）。
  */

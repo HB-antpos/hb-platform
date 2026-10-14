@@ -31,7 +31,7 @@ export type ReceiptPrinterSettings = Readonly<{
    * 旧数据缺省视为空串。
    */
   voucherTerms: string;
-  /** 进行中分期小票底部「INSTALLMENT TERMS」的自定义正文；规则同 voucherTerms。 */
+  /** 进行中分期小票底部「LAY-BY TERMS」的自定义正文；规则同 voucherTerms。 */
   installmentTerms: string;
   profileStoreCode: string;
   /**

@@ -99,7 +99,7 @@ public sealed partial class InstallmentCreateViewModel : ObservableObject, IDisp
         SubmitCommand = new AsyncRelayCommand(SubmitAsync, CanSubmit);
         BackToCenterCommand = new RelayCommand(BackToCenter);
         RefreshPaymentMethodOptions();
-        SetStatusResource("installment.create.status.ready", "Complete the customer, down payment, and installment details.");
+        SetStatusResource("installment.create.status.ready", "Complete the customer, down payment, and lay-by details.");
     }
 
     public ObservableCollection<PosCartLineServiceSnapshot> CartLines { get; } = [];
@@ -110,13 +110,13 @@ public sealed partial class InstallmentCreateViewModel : ObservableObject, IDisp
 
     public ObservableCollection<InstallmentPaymentMethodOption> PaymentMethodOptions { get; } = [];
 
-    public string PageTitleText => T("installment.create.title", "Create Installment");
+    public string PageTitleText => T("installment.create.title", "Create Lay-by");
 
-    public string BackToCenterText => T("installment.create.action.back", "Back to Installment Center");
+    public string BackToCenterText => T("installment.create.action.back", "Back to Lay-by Center");
 
-    public string SubmitText => T("installment.create.action.submit", "Create Installment Order");
+    public string SubmitText => T("installment.create.action.submit", "Create Lay-by Order");
 
-    public string OfflineNoticeText => T("installment.create.offline", "Installment orders cannot be created while offline.");
+    public string OfflineNoticeText => T("installment.create.offline", "Lay-by orders cannot be created while offline.");
 
     public string CustomerSectionText => T("installment.create.section.customer", "Customer Information");
 
@@ -242,11 +242,11 @@ public sealed partial class InstallmentCreateViewModel : ObservableObject, IDisp
         Note = string.Empty;
         if (cartSnapshot is null)
         {
-            SetStatusResource("installment.create.status.missingCart", "There is no current order available for installment creation.");
+            SetStatusResource("installment.create.status.missingCart", "There is no current order available for lay-by creation.");
         }
         else
         {
-            SetStatusResource("installment.create.status.ready", "Complete the customer, down payment, and installment details.");
+            SetStatusResource("installment.create.status.ready", "Complete the customer, down payment, and lay-by details.");
         }
 
         RaiseAmountStateChanged();
@@ -271,7 +271,7 @@ public sealed partial class InstallmentCreateViewModel : ObservableObject, IDisp
         var cartSnapshot = CartSnapshot;
         if (cartSnapshot is null)
         {
-            SetStatusResource("installment.create.status.missingCart", "There is no current order available for installment creation.");
+            SetStatusResource("installment.create.status.missingCart", "There is no current order available for lay-by creation.");
             return;
         }
 
@@ -461,7 +461,7 @@ public sealed partial class InstallmentCreateViewModel : ObservableObject, IDisp
         if (!IsValidInstallmentTotal())
         {
             // 中文说明：分期只服务达到最低金额门槛的订单，小额订单引导用户走普通支付。
-            return T("installment.create.status.totalBelowMinimum", "Installment order total must be at least $50. Use regular payment for orders below $50.");
+            return T("installment.create.status.totalBelowMinimum", "Lay-by order total must be at least $50. Use regular payment for orders below $50.");
         }
 
         if (DownPaymentAmount < MinimumDownPaymentAmount)

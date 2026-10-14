@@ -276,7 +276,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _receiptReturnPolicyText = string.Empty;
 
-    // 退款代金券「VOUCHER TERMS」/ 分期小票「INSTALLMENT TERMS」下面的定制正文；留空＝使用默认文案。
+    // 退款代金券「VOUCHER TERMS」/ 分期小票「LAY-BY TERMS」下面的定制正文；留空＝使用默认文案。
     // 与退货政策一样：总部下发后只读，未下发时可在本机编辑。
     [ObservableProperty]
     private string _receiptVoucherTermsText = string.Empty;

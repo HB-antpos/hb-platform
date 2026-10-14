@@ -1,7 +1,7 @@
 import type { ReceiptTermsBlock } from "./receipt-document";
 
 /**
- * 总部下发的「退款券使用说明（VOUCHER TERMS）/ 分期条款（INSTALLMENT TERMS）」自定义正文。
+ * 总部下发的「退款券使用说明（VOUCHER TERMS）/ 分期条款（LAY-BY TERMS）」自定义正文。
  *
  * - 内容是多行纯文本，一行一条；标题仍由收银端固定打印，字段只是标题下面的正文。
  * - 缺省 / null / 空串 / 纯空白 = 未定制，按内置默认文案打印（默认文案常量保持逐字不变）。
@@ -10,7 +10,7 @@ import type { ReceiptTermsBlock } from "./receipt-document";
 export type ReceiptCustomTermsText = Readonly<{
   /** 退款券券面底部「VOUCHER TERMS」的正文。 */
   voucherTerms?: string | null | undefined;
-  /** 进行中分期小票底部「INSTALLMENT TERMS」的正文。 */
+  /** 进行中分期小票底部「LAY-BY TERMS」的正文。 */
   installmentTerms?: string | null | undefined;
 }>;
 

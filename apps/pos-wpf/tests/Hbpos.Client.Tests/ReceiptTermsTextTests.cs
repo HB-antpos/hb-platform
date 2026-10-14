@@ -81,7 +81,7 @@ public sealed class ReceiptTermsTextTests
 
         Assert.Equal("VOUCHER TERMS", voucher.Title);
         Assert.Equal(["Voucher custom"], voucher.Lines);
-        Assert.Equal("INSTALLMENT TERMS", installment.Title);
+        Assert.Equal("LAY-BY TERMS", installment.Title);
         Assert.Equal(["Installment custom 1", "Installment custom 2"], installment.Lines);
     }
 

@@ -1178,15 +1178,15 @@ function PaymentContextPane({
     state.checkout.flow === "installment-create"
       ? locale === "zh"
         ? "新建分期"
-        : "New installment"
+        : "New lay-by"
       : state.checkout.flow === "installment-repayment"
         ? locale === "zh"
           ? "分期还款"
-          : "Installment repayment"
+          : "Lay-by repayment"
         : state.checkout.flow === "installment-recovery"
           ? locale === "zh"
             ? "恢复分期支付"
-            : "Recover installment"
+            : "Recover lay-by"
           : locale === "zh"
             ? "当前交易"
             : "Current transaction";
@@ -1243,7 +1243,7 @@ function PaymentContextPane({
           >
             <View style={styles.customerHeading}>
               <Text style={styles.customerTitle}>
-                {locale === "zh" ? "分期顾客" : "Installment customer"}
+                {locale === "zh" ? "分期顾客" : "Lay-by customer"}
               </Text>
               {customer.editable &&
               presenter.openInstallmentCustomerEditor ? (
@@ -1829,7 +1829,7 @@ function PaymentSummary({
                     ? t("action.confirmCashReceived")
                     : locale === "zh"
                       ? "确认分期付款"
-                      : "Confirm installment payment"
+                      : "Confirm lay-by payment"
                 }
                 onPress={onConfirm}
                 sound="danger"

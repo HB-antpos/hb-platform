@@ -2447,7 +2447,7 @@ test("分期开关保持 44pt、switch 语义和稳定失败提示", async () =>
   ).toBeGreaterThanOrEqual(PAYMENT_MIN_TOUCH_TARGET);
   expect(
     screen.getByText(
-      "Installment mode is unavailable. Return to sale and try again.",
+      "Lay-by mode is unavailable. Return to sale and try again.",
     ),
   ).toBeTruthy();
 

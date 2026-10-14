@@ -12,7 +12,7 @@ export interface StoreDto {
   returnPolicy?: string
   /** 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；未定制时服务端不返回，收银端按内置默认文案打印。 */
   voucherTerms?: string
-  /** 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；同上。 */
+  /** 分期条款（分期小票「LAY-BY TERMS」下方正文，一行一条）；同上。 */
   installmentTerms?: string
   isActive: boolean
   createdAt: string
@@ -46,7 +46,7 @@ export interface CreateStoreDto {
   returnPolicy?: string
   /** 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；未定制时服务端不返回，收银端按内置默认文案打印。 */
   voucherTerms?: string
-  /** 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；同上。 */
+  /** 分期条款（分期小票「LAY-BY TERMS」下方正文，一行一条）；同上。 */
   installmentTerms?: string
   isActive?: boolean
 }
@@ -64,7 +64,7 @@ export interface UpdateStoreDto {
   returnPolicy?: string
   /** 代金券使用说明（券面「VOUCHER TERMS」下方正文，一行一条）；未定制时服务端不返回，收银端按内置默认文案打印。 */
   voucherTerms?: string
-  /** 分期条款（分期小票「INSTALLMENT TERMS」下方正文，一行一条）；同上。 */
+  /** 分期条款（分期小票「LAY-BY TERMS」下方正文，一行一条）；同上。 */
   installmentTerms?: string
   isActive?: boolean
 }

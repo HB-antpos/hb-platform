@@ -1,6 +1,6 @@
 {
-  "title": "Installment Orders",
-  "subtitle": "View installment orders and payment records by store, status, customer phone, customer name, and date range",
+  "title": "Lay-by Orders",
+  "subtitle": "View lay-by orders and payment records by store, status, customer phone, customer name, and date range",
   "filters": {
     "storeCode": "Store",
     "status": "Status",
@@ -38,7 +38,7 @@
     "unknown": "Unknown cancellation type"
   },
   "labels": {
-    "orderQrCode": "Installment QR code",
+    "orderQrCode": "Lay-by QR code",
     "store": "Store",
     "status": "Status",
     "customer": "Customer",
@@ -78,9 +78,9 @@
     "loadMore": "Load more"
   },
   "messages": {
-    "empty": "No installment orders found",
-    "loadFailed": "Failed to load installment orders",
-    "detailsLoadFailed": "Failed to load installment order details",
+    "empty": "No lay-by orders found",
+    "loadFailed": "Failed to load lay-by orders",
+    "detailsLoadFailed": "Failed to load lay-by order details",
     "paymentRecordsEmpty": "No payment records",
     "orderLinesEmpty": "No order lines"
   }

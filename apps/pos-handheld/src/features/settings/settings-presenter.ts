@@ -209,7 +209,7 @@ export type SettingsReceiptProfileDraft = Readonly<{
   returnPolicy: string;
   /** 退款券「VOUCHER TERMS」自定义正文；空串 = 未定制（默认文案）。 */
   voucherTerms: string;
-  /** 分期小票「INSTALLMENT TERMS」自定义正文；空串 = 未定制（默认文案）。 */
+  /** 分期小票「LAY-BY TERMS」自定义正文；空串 = 未定制（默认文案）。 */
   installmentTerms: string;
 }>;
 
@@ -1520,7 +1520,7 @@ export class SettingsPresenter {
     });
   }
 
-  /** 分期小票「INSTALLMENT TERMS」自定义正文；规则同 setReceiptVoucherTerms。 */
+  /** 分期小票「LAY-BY TERMS」自定义正文；规则同 setReceiptVoucherTerms。 */
   public setReceiptInstallmentTerms(value: string): void {
     if (!this.canEditReceiptProfile()) return;
     this.patch({

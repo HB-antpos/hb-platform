@@ -3771,7 +3771,7 @@ export function receiptReprintSettings(
           abn: current.abn,
           returnPolicy: current.returnPolicy,
         },
-        // 分期小票底部「INSTALLMENT TERMS」的自定义正文；空串 = 未定制，打印层回落默认文案。
+        // 分期小票底部「LAY-BY TERMS」的自定义正文；空串 = 未定制，打印层回落默认文案。
         installmentTerms: current.installmentTerms,
       };
     },

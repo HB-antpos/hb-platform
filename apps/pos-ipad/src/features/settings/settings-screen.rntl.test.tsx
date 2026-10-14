@@ -2615,7 +2615,7 @@ describe("SettingsScreen", () => {
 
       const en = await openManagedCard("en");
       expect(en.screen.getAllByText("Voucher terms").length).toBeGreaterThan(0);
-      expect(en.screen.getAllByText("Installment terms").length).toBeGreaterThan(0);
+      expect(en.screen.getAllByText("Lay-by terms").length).toBeGreaterThan(0);
       expect(en.screen.getAllByText(/Leave blank to use the default wording\./u).length).toBeGreaterThan(0);
     });
 

@@ -89,7 +89,7 @@ test("resolveReceiptTermsBlock：定制时沿用默认标题，正文换成自�
   assert.ok(Object.isFrozen(voucher.lines));
 
   const installment = resolveReceiptTermsBlock(INSTALLMENT_RECEIPT_TERMS, "Deposit $30 minimum.");
-  assert.deepEqual(installment, { title: "INSTALLMENT TERMS", lines: ["Deposit $30 minimum."] });
+  assert.deepEqual(installment, { title: "LAY-BY TERMS", lines: ["Deposit $30 minimum."] });
 });
 
 test("resolveReceiptTermsBlock：不合规（含 ESC、超 600、非字符串）回退默认块，不抛错", () => {
@@ -109,7 +109,7 @@ test("默认文案常量逐字不变（业主审定稿）", () => {
     ],
   });
   assert.deepEqual(INSTALLMENT_RECEIPT_TERMS, {
-    title: "INSTALLMENT TERMS",
+    title: "LAY-BY TERMS",
     lines: [
       "Order total: $50.00 minimum.",
       "First payment: $20.00 minimum.",

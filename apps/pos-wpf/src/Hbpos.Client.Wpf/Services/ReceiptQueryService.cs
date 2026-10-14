@@ -142,7 +142,7 @@ public enum ReceiptTermsKind
     /// <summary>固定条款，正文不可定制。</summary>
     Fixed,
 
-    /// <summary>分期条款（INSTALLMENT TERMS），正文可由总部按门店定制。</summary>
+    /// <summary>分期条款（LAY-BY TERMS），正文可由总部按门店定制。</summary>
     Installment,
 
     /// <summary>退款代金券使用说明（VOUCHER TERMS），正文可由总部按门店定制。</summary>

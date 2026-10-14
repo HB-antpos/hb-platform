@@ -29,7 +29,7 @@
   <data name="settings.section.dataReset.description" xml:space="preserve"><value>Force a fresh local catalog rebuild when data looks stale, prices do not refresh, or the product index needs a clean reset.</value></data>
   <data name="settings.section.dataReset.action" xml:space="preserve"><value>Data Reset</value></data>
   <data name="settings.section.testSalesDataReset.title" xml:space="preserve"><value>Reset Test Sales Data</value></data>
-  <data name="settings.section.testSalesDataReset.description" xml:space="preserve"><value>Debug only. Deletes local test orders, payments, card transactions, sync queue items, installment orders, daily closes, and suspended orders.</value></data>
+  <data name="settings.section.testSalesDataReset.description" xml:space="preserve"><value>Debug only. Deletes local test orders, payments, card transactions, sync queue items, lay-by orders, daily closes, and suspended orders.</value></data>
   <data name="settings.section.testSalesDataReset.action" xml:space="preserve"><value>Reset Sales Data</value></data>
   <data name="settings.square.title" xml:space="preserve"><value>Square payment terminal</value></data>
   <data name="settings.square.description" xml:space="preserve"><value>Configure the Square location and terminal used when Square is the card provider.</value></data>
@@ -175,7 +175,7 @@
   <data name="settings.receiptPrinter.abn" xml:space="preserve"><value>ABN</value></data>
   <data name="settings.receiptPrinter.returnPolicy" xml:space="preserve"><value>Return Policy</value></data>
   <data name="settings.receiptPrinter.voucherTerms" xml:space="preserve"><value>Voucher Terms</value></data>
-  <data name="settings.receiptPrinter.installmentTerms" xml:space="preserve"><value>Installment Terms</value></data>
+  <data name="settings.receiptPrinter.installmentTerms" xml:space="preserve"><value>Lay-by Terms</value></data>
   <data name="settings.receiptPrinter.termsHelp" xml:space="preserve"><value>One line per item. Leave blank to use the default text.</value></data>
   <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>Print bank receipt on customer receipt</value></data>
   <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>When off, the customer receipt keeps only the card type, last 4 digits and amount, without the full EFTPOS bank receipt text. Signature, declined and settlement slips still print.</value></data>

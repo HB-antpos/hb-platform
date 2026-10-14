@@ -47,7 +47,7 @@ public static class StoreReceiptProfileValidator
 
         if (profile.InstallmentTerms is { Length: > TermsMaxLength })
         {
-            return "Installment terms exceed the maximum length of 600 characters.";
+            return "Lay-by terms exceed the maximum length of 600 characters.";
         }
 
         if (requireStoreName && string.IsNullOrWhiteSpace(profile.StoreName))
