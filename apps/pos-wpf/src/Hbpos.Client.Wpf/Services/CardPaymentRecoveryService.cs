@@ -2117,9 +2117,15 @@ public sealed class CardPaymentRecoveryService(
             // 查询失败按失败关闭。否则迟到的批准/拒绝会落在已结案的记录上，形成无人可见的孤儿扣款。
             var live = await QueryLivePaymentStateAsync(settings, session, attempt, cancellationToken);
             var liveRejection = BuildLiveResolutionRejection(live.Verdict, normalized.Decision);
-            if (liveRejection is not null)
+            if (liveRejection is { } rejection)
             {
-                return new CardPaymentSupervisorResolutionResult(false, liveRejection, LockRetained: true);
+                // 中文注释：实时核验拒绝了主管的结案决定。此前这里不留任何痕迹，事后无法从日志判断“为什么结不了案”
+                // （例如终端离线 / 查询失败 / 仍在处理 / 与终端结果矛盾），所以记下 attempt、决定、核验结论和拒绝文案的键。
+                ConsoleLog.WriteWarning(
+                    "CardRecovery",
+                    $"supervisor resolve rejected attemptGuid={attempt.AttemptGuid} decision={normalized.Decision} verdict={live.Verdict} rejectionKey={rejection.Key}",
+                    RecoveryLogContext(attempt.AttemptGuid.ToString("D")));
+                return new CardPaymentSupervisorResolutionResult(false, rejection.Message, LockRetained: true);
             }
 
             if (live.Status is not null &&
@@ -2305,25 +2311,28 @@ public sealed class CardPaymentRecoveryService(
         !IsSupervisorResolvedPayment(attempt) &&
         !string.Equals(attempt.RecoveryPhase, CardRecoveryPhases.FinalizePending, StringComparison.Ordinal);
 
-    private string? BuildLiveResolutionRejection(
+    // 返回本地化键与文案：键用于日志（supervisor resolve rejected），文案返回给主管。
+    private (string Key, string Message)? BuildLiveResolutionRejection(
         LiveResolutionVerdict verdict,
         CardPaymentSupervisorDecision decision) =>
         verdict switch
         {
-            LiveResolutionVerdict.Pending => T(
+            LiveResolutionVerdict.Pending => Rejection(
                 "cardRecovery.linkly.resolveLivePending",
                 "Linkly is still processing this card transaction, so it cannot be closed as paid or not paid yet. Choose Continue waiting and try again after the terminal shows a result."),
-            LiveResolutionVerdict.QueryFailed => T(
+            LiveResolutionVerdict.QueryFailed => Rejection(
                 "cardRecovery.linkly.resolveLiveQueryFailed",
                 "POS could not check the final result with Linkly or the card terminal, so the decision was not saved. Check the network or terminal connection and try again; until then only Continue waiting is available."),
-            LiveResolutionVerdict.Approved when decision == CardPaymentSupervisorDecision.ConfirmNotPaid => T(
+            LiveResolutionVerdict.Approved when decision == CardPaymentSupervisorDecision.ConfirmNotPaid => Rejection(
                 "cardRecovery.linkly.resolveLiveApproved",
                 "Linkly reports that this card transaction was approved (the customer was charged), so it cannot be closed as not paid. Run recovery so POS can handle the approved payment."),
-            LiveResolutionVerdict.Failed when decision == CardPaymentSupervisorDecision.ConfirmPaid => T(
+            LiveResolutionVerdict.Failed when decision == CardPaymentSupervisorDecision.ConfirmPaid => Rejection(
                 "cardRecovery.linkly.resolveLiveNotApproved",
                 "Linkly reports that this card transaction was not approved (no charge was made), so it cannot be closed as paid. Choose Confirmed not paid if the payment is being abandoned."),
             _ => null
         };
+
+    private (string Key, string Message) Rejection(string key, string fallback) => (key, T(key, fallback));
 
     private enum LiveResolutionVerdict
     {
