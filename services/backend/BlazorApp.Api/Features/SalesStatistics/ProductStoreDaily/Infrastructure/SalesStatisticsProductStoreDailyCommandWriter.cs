@@ -42,7 +42,8 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
         Func<Task>? validateSourceWatermarkBeforeCommitAsync,
         string? atomicSuccessStatusOverride,
         Guid? expectedJobId = null,
-        Func<Task>? validateExecutionOwnershipBeforeCommitAsync = null)
+        Func<Task>? validateExecutionOwnershipBeforeCommitAsync = null,
+        bool publishDespiteReconciliationFailure = false)
     {
         var rollbackCompleted = false;
         return PersistWithLockRetryAsync(
@@ -54,7 +55,8 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
                     sourceWatermarkOverride, validateSourceWatermarkBeforeCommitAsync,
                     atomicSuccessStatusOverride, expectedJobId,
                     validateExecutionOwnershipBeforeCommitAsync,
-                    () => rollbackCompleted = true);
+                    () => rollbackCompleted = true,
+                    publishDespiteReconciliationFailure);
             },
             // 当日与历史日期都重试：历史补算（HBSales 窗口的全分店原子刷新）与当日半点统计、
             // 持久队列会争同一批商品成本锁，一次 10 秒等不到就整日失败。来源签名回调重入是安全的：
@@ -105,13 +107,16 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
         string? atomicSuccessStatusOverride,
         Guid? expectedJobId,
         Func<Task>? validateExecutionOwnershipBeforeCommitAsync,
-        Action onRollbackCompleted)
+        Action onRollbackCompleted,
+        bool publishDespiteReconciliationFailure)
     {
         var effectiveSourceWatermark = sourceWatermarkOverride ?? input.LastSourceUploadTime;
         SupplierStoreStatisticBuildResult? supplierBuild = null;
         string? productVersion = null;
         ProductStoreDailyBatchFence? capturedBatchFence = null;
         SalesStatisticsProductStoreDailyStateSlice.ProductStatisticStatusResult status = null!;
+        // 对账不一致但仍整体发布分店与商品行（仅当天快照路径开启）；状态为带警告的 Failed。
+        var reconciliationFailedButPublished = false;
 
         if (validateSourceWatermarkBeforeCommitAsync != null)
             await validateSourceWatermarkBeforeCommitAsync();
@@ -223,7 +228,23 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
                         $"商品分店每日统计存在 {input.RawRows.Count} 条来源记录，但没有可写入的有效分店商品: {input.TargetDate:yyyy-MM-dd}");
                 }
                 if (atomicStoreStatistics != null && status.Status == SalesStatisticRefreshStatus.Failed)
-                    throw new InvalidOperationException(status.ErrorMessage ?? "2025 商品分店每日统计业务校验失败");
+                {
+                    // 当天某家店有订单表头却没有商品明细（POSM 明细漏传）时，分店营业额以订单为准是正确的，
+                    // 只是商品统计少了这部分。此时若抛出回滚，全部门店的营业额都会停在上一次成功的时刻，
+                    // 所以改为照常发布并保留带对账信息的 Failed 状态，由报表提示日期；其他失败仍然回滚。
+                    if (publishDespiteReconciliationFailure
+                        && ProductStoreDailyReconciliationCalculator.IsReconciliationFailure(status.ErrorMessage))
+                    {
+                        reconciliationFailedButPublished = true;
+                        logger.LogWarning(
+                            "商品统计与分店营业额对账不一致，仍发布当天统计 Date={Date:yyyy-MM-dd} Message={Message}",
+                            input.TargetDate, status.ErrorMessage);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(status.ErrorMessage ?? "2025 商品分店每日统计业务校验失败");
+                    }
+                }
                 if (atomicStoreStatistics != null && status.Status == SalesStatisticRefreshStatus.Fresh
                     && !string.IsNullOrWhiteSpace(atomicSuccessStatusOverride))
                 {
@@ -275,7 +296,8 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
                     input.TargetDate,
                     status,
                     effectiveSourceWatermark,
-                    overwriteLastSourceUploadTime: atomicStoreStatistics != null
+                    overwriteLastSourceUploadTime: atomicStoreStatistics != null,
+                    markAggregated: reconciliationFailedButPublished
                 );
                 if (productVersion == null)
                 {
@@ -301,8 +323,31 @@ internal sealed class SalesStatisticsProductStoreDailyCommandWriter
                         status.Status,
                         effectiveSourceWatermark,
                         status.ErrorMessage,
-                        overwriteLastSourceUploadTime: true
+                        overwriteLastSourceUploadTime: true,
+                        markAggregated: reconciliationFailedButPublished
                     );
+                    if (reconciliationFailedButPublished)
+                    {
+                        // 供应商拆分只在对账通过时重建；这里与商品、分店状态成对标记，
+                        // 保证四类状态齐全（下方 fence 要求）且读侧不会把旧供应商行当作与新商品行一致的快照。
+                        foreach (var supplierType in new[]
+                                 {
+                                     SalesStatisticType.AustralianSupplierStoreSales,
+                                     SalesStatisticType.ChinaSupplierStoreSales,
+                                 })
+                        {
+                            await SalesStatisticsProductStoreDailyStateSlice.UpsertStatisticStateAsync(
+                                context,
+                                supplierType,
+                                input.TargetDate,
+                                status.Status,
+                                effectiveSourceWatermark,
+                                status.ErrorMessage,
+                                overwriteLastSourceUploadTime: true,
+                                markAggregated: true
+                            );
+                        }
+                    }
 
                     // fence 在同一原子事务中、四类状态均已写入后捕获，避免提交后按日期重读时
                     // 被下一批替换，从而把 B 批误认为 A 批返回给批末 finalize/fail。

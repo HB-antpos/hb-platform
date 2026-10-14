@@ -109,7 +109,9 @@ namespace BlazorApp.Api.Services
                 sourceWatermarkValidator,
                 atomicSuccessStatusOverride,
                 expectedJobId,
-                validateExecutionOwnershipBeforeCommitAsync);
+                validateExecutionOwnershipBeforeCommitAsync,
+                // 仅当天营业中快照：对账不一致不回滚发布，避免个别门店的明细缺口拖住全部门店的营业额更新。
+                publishDespiteReconciliationFailure: useCurrentDaySnapshot);
             var status = persistResult.Status;
             logger.LogInformation(
                 "商品分店每日统计更新完成: {Date}, 总记录: {Total}, 状态: {Status}",
