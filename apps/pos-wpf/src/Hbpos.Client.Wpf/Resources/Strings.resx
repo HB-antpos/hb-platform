@@ -1253,6 +1253,9 @@
   <data name="shell.operationAuthorization.screenLabel" xml:space="preserve"><value>Screen:</value></data>
   <data name="shell.operationAuthorization.permissionLabel" xml:space="preserve"><value>Required permission:</value></data>
   <data name="shell.operationAuthorization.scanHint" xml:space="preserve"><value>Ask an authorized user to scan their cashier barcode.</value></data>
+  <data name="shell.operationAuthorization.rescanMessage" xml:space="preserve"><value>To confirm this operation, scan an authorized employee barcode again.</value></data>
+  <data name="shell.operationAuthorization.rescanPermissionLabel" xml:space="preserve"><value>Required permission:</value></data>
+  <data name="shell.operationAuthorization.rescanScanHint" xml:space="preserve"><value>Scan a barcode of an employee with this permission (your own works too).</value></data>
   <data name="operationAuthorization.noSession" xml:space="preserve"><value>No cashier session is active.</value></data>
   <data name="operationAuthorization.pending" xml:space="preserve"><value>Another operation is already waiting for authorization.</value></data>
   <data name="operationAuthorization.prompt" xml:space="preserve"><value>Scan an authorized employee barcode with permission {0}.</value></data>

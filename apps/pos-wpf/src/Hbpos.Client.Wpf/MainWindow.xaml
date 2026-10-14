@@ -1412,11 +1412,41 @@
                                        FontSize="22"
                                        FontWeight="Black"
                                        Foreground="{DynamicResource PosTextBrush}" />
-                            <TextBlock Text="{loc:Loc shell.operationAuthorization.message}"
+                            <!-- 「再次扫码确认」时当前收银员其实有权限，不能再提示「没有权限」：两句话按 IsRescanConfirmation 二选一显示 -->
+                            <TextBlock x:Name="OperationAuthorizationMessage"
+                                       Text="{loc:Loc shell.operationAuthorization.message}"
                                        Margin="0,4,0,0"
                                        FontSize="13"
                                        Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                       TextWrapping="Wrap" />
+                                       TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding OperationAuthorization.IsRescanConfirmation}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock x:Name="OperationAuthorizationRescanMessage"
+                                       Text="{loc:Loc shell.operationAuthorization.rescanMessage}"
+                                       Margin="0,4,0,0"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                       TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <!-- 默认值必须写在 Style 里：元素上的本地 Visibility 会压过触发器 -->
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding OperationAuthorization.IsRescanConfirmation}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </StackPanel>
                     </StackPanel>
 
@@ -1469,10 +1499,39 @@
                             CornerRadius="12"
                             Margin="0,0,0,14">
                         <StackPanel>
-                            <TextBlock FontSize="11"
+                            <!-- 标签随模式切换：再次扫码时是「所需权限」，不是「缺少权限」；两行二选一显示 -->
+                            <TextBlock x:Name="OperationAuthorizationMissingPermission"
+                                       FontSize="11"
                                        FontWeight="Black"
                                        Foreground="{DynamicResource PosWarningTextBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding OperationAuthorization.IsRescanConfirmation}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
                                 <Run Text="{loc:Loc shell.operationAuthorization.permissionLabel}" />
+                                <Run Text=" " />
+                                <Run Text="{Binding OperationAuthorization.PermissionCode, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock x:Name="OperationAuthorizationRequiredPermission"
+                                       FontSize="11"
+                                       FontWeight="Black"
+                                       Foreground="{DynamicResource PosWarningTextBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding OperationAuthorization.IsRescanConfirmation}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                                <Run Text="{loc:Loc shell.operationAuthorization.rescanPermissionLabel}" />
                                 <Run Text=" " />
                                 <Run Text="{Binding OperationAuthorization.PermissionCode, Mode=OneWay}" />
                             </TextBlock>
@@ -1493,11 +1552,39 @@
                                                          Height="22"
                                                          Foreground="{DynamicResource PosPrimaryTextBrush}"
                                                          Margin="0,0,10,0" />
-                                <TextBlock Text="{loc:Loc shell.operationAuthorization.scanHint}"
+                                <TextBlock x:Name="OperationAuthorizationScanHint"
+                                           Text="{loc:Loc shell.operationAuthorization.scanHint}"
                                            FontSize="13"
                                            FontWeight="Bold"
                                            Foreground="{DynamicResource PosTextBrush}"
-                                           VerticalAlignment="Center" />
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding OperationAuthorization.IsRescanConfirmation}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock x:Name="OperationAuthorizationRescanScanHint"
+                                           Text="{loc:Loc shell.operationAuthorization.rescanScanHint}"
+                                           FontSize="13"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource PosTextBrush}"
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding OperationAuthorization.IsRescanConfirmation}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
                             <ProgressBar Height="4"
                                          Margin="0,12,0,0"
