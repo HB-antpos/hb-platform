@@ -26,7 +26,7 @@
   font-weight: 400;
 }
 
-/* ---------- Square：按环境的全局设置，一行展示 ---------- */
+/* ---------- Square：共用 Token 一行 + 所选门店专用 Token 一行 ---------- */
 
 .pts-square > .ant-card-body {
   padding: 16px 20px;
@@ -38,6 +38,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px 24px;
+}
+
+/* 共用行与门店专用行之间用分隔线隔开。 */
+.pts-square-store {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eaecf0;
 }
 
 .pts-square-main {

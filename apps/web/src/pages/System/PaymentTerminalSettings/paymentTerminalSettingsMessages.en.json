@@ -12,7 +12,7 @@
     "squareClearConfirmDescription": "POS devices on this environment will not be able to take Square payments until a new token is set.",
     "squareCleared": "Square token cleared",
     "squareTokenModalTitle": "{{environment}} Square token",
-    "squareTokenModalHint": "The token is only sent when you save and is never shown again. Saving replaces the current {{environment}} token for all stores.",
+    "squareTokenModalHint": "The token is only sent when you save and is never shown again. Saving replaces the current shared {{environment}} token for every store that has no token of its own.",
     "linklyStoreScope": "Per store",
     "checklistTitle": "Before activating multi-terminal",
     "stepAddTerminals": "Add terminals",
@@ -48,6 +48,19 @@
     "elapsedHours": "{{count}} h ago",
     "elapsedDays": "{{count}} d ago",
     "notAssigned": "Not assigned",
-    "validationAccessToken": "Please enter the access token"
+    "validationAccessToken": "Please enter the access token",
+    "squareSharedTitle": "Shared token",
+    "squareStoreTitle": "Store-specific token",
+    "squareStoreScope": "Selected store only",
+    "squareStoreOverridden": "Set for this store",
+    "squareStoreUsesShared": "Using shared token",
+    "squareStoreSelectHint": "Select a store first, then set a token for that store.",
+    "squareStoreFallbackShared": "{{store}} has no token of its own and uses the shared token.",
+    "squareStoreNoToken": "{{store}} has no token of its own and there is no shared {{environment}} token, so it cannot take Square payments.",
+    "squareStoreClearConfirmTitle": "Clear the {{environment}} token for {{store}}?",
+    "squareStoreClearConfirmDescription": "This store will fall back to the shared token (if set). Other stores are not affected.",
+    "squareStoreCleared": "Store token cleared. This store now uses the shared token.",
+    "squareStoreTokenModalTitle": "{{store}} · {{environment}} Square token",
+    "squareStoreTokenModalHint": "The token is only sent when you save and is never shown again. It applies to {{store}} only; other stores keep using their own token or the shared token."
   }
 }

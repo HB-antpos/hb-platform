@@ -34,7 +34,11 @@ public sealed class PaymentTerminalSettingsSchemaMigratorTests
     {
         var sql = string.Join("\n", PaymentTerminalSettingsSchemaMigrator.SqlScriptsForTests);
 
-        Assert.Contains("UX_POSM_SquareToken_Environment_Enabled", sql);
+        // 旧的「每环境一条」索引被移除，换成按 (环境, 门店) 唯一，共用行 StoreCode 为 NULL。
+        Assert.Contains("DROP INDEX [UX_POSM_SquareToken_Environment_Enabled]", sql);
+        Assert.Contains("ADD [StoreCode] NVARCHAR(32) NULL", sql);
+        Assert.Contains("CREATE UNIQUE INDEX [UX_POSM_SquareToken_Environment_Store_Enabled]", sql);
+        Assert.Contains("([Environment], [StoreCode])", sql);
         Assert.Contains("WHERE [IsEnabled] = 1", sql);
         Assert.Contains("DF_POSM_LinklyCloudCredential_Environment", sql);
         Assert.Contains("DEFAULT (N'Production') FOR [Environment]", sql);

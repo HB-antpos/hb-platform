@@ -124,6 +124,160 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateSquareTokenAsync_StoreScopeWritesOnlyThatStoreAndKeepsSharedToken()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        SeedStore("002", "Beach Store");
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "shared-token" },
+            "admin"
+        );
+
+        var result = await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto
+            {
+                Environment = "Production",
+                AccessToken = "store-token",
+                TargetStoreCode = "001",
+            },
+            "admin",
+            "001"
+        );
+
+        var rows = await QuerySquareRowsAsync("Production");
+        Assert.True(result.Success);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("shared-token", rows.Single(row => row.StoreCode is null).AccessToken);
+        Assert.True(rows.Single(row => row.StoreCode is null).IsEnabled);
+        Assert.Equal("store-token", rows.Single(row => row.StoreCode == "001").AccessToken);
+        // 共用状态不受门店专用 Token 影响；所选门店的专用状态单独返回。
+        Assert.True(result.Data!.Square.Single(item => item.Environment == "Production").Configured);
+        Assert.True(result.Data.StoreSquare.Single(item => item.Environment == "Production").Configured);
+        Assert.False(result.Data.StoreSquare.Single(item => item.Environment == "Sandbox").Configured);
+    }
+
+    [Fact]
+    public async Task UpdateSquareTokenAsync_StoreScopeReplacementOnlyDisablesSameStoreRow()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        SeedStore("002", "Beach Store");
+        foreach (var (store, token) in new[] { ("001", "city-1"), ("002", "beach-1"), ("001", "city-2") })
+        {
+            await service.UpdateSquareTokenAsync(
+                new UpdateSquareTokenDto { Environment = "Sandbox", AccessToken = token, TargetStoreCode = store },
+                "admin"
+            );
+        }
+
+        var rows = await QuerySquareRowsAsync("Sandbox");
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("city-2", rows.Single(row => row.StoreCode == "001" && row.IsEnabled).AccessToken);
+        Assert.False(rows.Single(row => row.AccessToken == "city-1").IsEnabled);
+        Assert.True(rows.Single(row => row.AccessToken == "beach-1").IsEnabled);
+    }
+
+    [Fact]
+    public async Task UpdateSquareTokenAsync_StoreScopeClearFallsBackToSharedToken()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "shared-token" },
+            "admin"
+        );
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "store-token", TargetStoreCode = "001" },
+            "admin"
+        );
+
+        var result = await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", ClearToken = true, TargetStoreCode = "001" },
+            "admin",
+            "001"
+        );
+
+        var rows = await QuerySquareRowsAsync("Production");
+        var storeRow = rows.Single(row => row.StoreCode == "001");
+        Assert.False(storeRow.IsEnabled);
+        Assert.Equal(string.Empty, storeRow.AccessToken);
+        // 共用 Token 原样保留，POS 端清除专用 Token 后会回落到它。
+        var sharedRow = rows.Single(row => row.StoreCode is null);
+        Assert.True(sharedRow.IsEnabled);
+        Assert.Equal("shared-token", sharedRow.AccessToken);
+        Assert.False(result.Data!.StoreSquare.Single(item => item.Environment == "Production").Configured);
+        Assert.True(result.Data.Square.Single(item => item.Environment == "Production").Configured);
+    }
+
+    [Fact]
+    public async Task UpdateSquareTokenAsync_SharedClearDoesNotTouchStoreTokens()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "shared-token" },
+            "admin"
+        );
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "store-token", TargetStoreCode = "001" },
+            "admin"
+        );
+
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", ClearToken = true },
+            "admin"
+        );
+
+        var rows = await QuerySquareRowsAsync("Production");
+        Assert.False(rows.Single(row => row.StoreCode is null).IsEnabled);
+        Assert.True(rows.Single(row => row.StoreCode == "001").IsEnabled);
+        Assert.Equal("store-token", rows.Single(row => row.StoreCode == "001").AccessToken);
+    }
+
+    [Fact]
+    public async Task UpdateSquareTokenAsync_StoreScopeUsesCanonicalStoreCodeAndRejectsUnknownStore()
+    {
+        var service = CreateService();
+        SeedStore("A01", "Alpha Store");
+
+        var ok = await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "t1", TargetStoreCode = " a01 " },
+            "admin"
+        );
+        var unknown = await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "t2", TargetStoreCode = "ZZZ" },
+            "admin"
+        );
+
+        var rows = await QuerySquareRowsAsync("Production");
+        Assert.True(ok.Success);
+        Assert.Equal("A01", rows.Single().StoreCode);
+        Assert.False(unknown.Success);
+        Assert.Equal("PAYMENT_STORE_NOT_FOUND", unknown.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetSettingsAsync_ReportsStoreSquareStatusOnlyForSelectedStore()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        SeedStore("002", "Beach Store");
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "store-token", TargetStoreCode = "001" },
+            "admin"
+        );
+
+        var forStore1 = await service.GetSettingsAsync("001");
+        var forStore2 = await service.GetSettingsAsync("002");
+
+        Assert.True(forStore1.Data!.StoreSquare.Single(item => item.Environment == "Production").Configured);
+        Assert.False(forStore2.Data!.StoreSquare.Single(item => item.Environment == "Production").Configured);
+        // 门店专用 Token 不会被算成共用 Token。
+        Assert.False(forStore1.Data.Square.Single(item => item.Environment == "Production").Configured);
+    }
+
+    [Fact]
     public async Task UpdateSquareTokenAsync_ReturnsCurrentStoreSelectionWhenProvided()
     {
         var service = CreateService();
@@ -1745,6 +1899,7 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
             CREATE TABLE POSM_SquareToken (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 Environment TEXT NOT NULL,
+                StoreCode TEXT NULL,
                 AccessToken TEXT NOT NULL,
                 IsEnabled INTEGER NOT NULL,
                 UpdatedAt TEXT NOT NULL,
@@ -1892,7 +2047,7 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     {
         return _posmDb.Ado.SqlQueryAsync<SquareRow>(
             """
-            SELECT Id, Environment, AccessToken, IsEnabled, UpdatedAt, UpdatedBy
+            SELECT Id, Environment, StoreCode, AccessToken, IsEnabled, UpdatedAt, UpdatedBy
             FROM POSM_SquareToken
             WHERE Environment = @Environment
             ORDER BY Id
@@ -1968,6 +2123,7 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     {
         public long Id { get; set; }
         public string Environment { get; set; } = string.Empty;
+        public string? StoreCode { get; set; }
         public string AccessToken { get; set; } = string.Empty;
         public bool IsEnabled { get; set; }
         public DateTime UpdatedAt { get; set; }

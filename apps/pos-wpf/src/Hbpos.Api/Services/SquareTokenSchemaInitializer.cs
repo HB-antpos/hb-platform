@@ -30,22 +30,46 @@ public sealed class SqlSugarSquareTokenSchemaInitializer(
         END;
         """;
 
-    internal const string EnsureEnabledTokenIndexSql = """
-        IF NOT EXISTS (
+    // StoreCode 为 NULL 表示「全部门店共用」，既有生产行自动成为共用 token，无需数据迁移。
+    internal const string EnsureStoreCodeColumnSql = """
+        IF COL_LENGTH(N'[dbo].[POSM_SquareToken]', N'StoreCode') IS NULL
+        BEGIN
+            ALTER TABLE [dbo].[POSM_SquareToken] ADD [StoreCode] NVARCHAR(32) NULL;
+        END;
+        """;
+
+    // 旧索引只允许每个环境一条启用行，会挡住门店专用 token，需先移除再换成按 (环境, 门店) 唯一。
+    internal const string DropLegacyEnabledTokenIndexSql = """
+        IF EXISTS (
             SELECT 1 FROM sys.indexes
             WHERE name = N'UX_POSM_SquareToken_Environment_Enabled'
               AND object_id = OBJECT_ID(N'[dbo].[POSM_SquareToken]')
         )
         BEGIN
-            CREATE UNIQUE INDEX [UX_POSM_SquareToken_Environment_Enabled]
-            ON [dbo].[POSM_SquareToken]([Environment])
+            DROP INDEX [UX_POSM_SquareToken_Environment_Enabled] ON [dbo].[POSM_SquareToken];
+        END;
+        """;
+
+    // SQL Server 唯一索引把 NULL 视为同一个值：每个环境最多一条共用行，每家门店每个环境最多一条专用行。
+    internal const string EnsureEnabledTokenIndexSql = """
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE name = N'UX_POSM_SquareToken_Environment_Store_Enabled'
+              AND object_id = OBJECT_ID(N'[dbo].[POSM_SquareToken]')
+        )
+        BEGIN
+            CREATE UNIQUE INDEX [UX_POSM_SquareToken_Environment_Store_Enabled]
+            ON [dbo].[POSM_SquareToken]([Environment], [StoreCode])
             WHERE [IsEnabled] = 1;
         END;
         """;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        // 加列与建索引必须分批执行：同一批里引用刚加的列会在编译期报「列名无效」。
         await sqlExecutor.ExecuteAsync(EnsureTableSql, cancellationToken);
+        await sqlExecutor.ExecuteAsync(EnsureStoreCodeColumnSql, cancellationToken);
+        await sqlExecutor.ExecuteAsync(DropLegacyEnabledTokenIndexSql, cancellationToken);
         await sqlExecutor.ExecuteAsync(EnsureEnabledTokenIndexSql, cancellationToken);
     }
 }

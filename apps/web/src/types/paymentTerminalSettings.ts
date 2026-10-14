@@ -25,7 +25,10 @@ export interface LinklyCloudCredentialAdminDto {
 }
 
 export interface PaymentTerminalSettingsDto {
+  // 全部门店共用的 Square Token 状态
   square: PaymentTerminalEnvironmentStatusDto[]
+  // 当前所选门店的专用 Square Token 状态；configured=false 表示该店回落使用共用 Token
+  storeSquare: PaymentTerminalEnvironmentStatusDto[]
   stores: PaymentTerminalStoreOptionDto[]
   selectedStoreCode?: string | null
   linkly: LinklyCloudCredentialAdminDto[]
@@ -35,6 +38,8 @@ export interface UpdateSquareTokenRequest {
   environment: PaymentTerminalEnvironment
   accessToken?: string
   clearToken: boolean
+  // 不传 = 设置/清除共用 Token；传门店编码 = 只设置/清除该门店的专用 Token
+  targetStoreCode?: string
 }
 
 export interface LinklyTerminalAdminDto {

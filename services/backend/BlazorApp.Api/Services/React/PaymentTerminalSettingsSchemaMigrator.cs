@@ -31,15 +31,34 @@ public static class PaymentTerminalSettingsSchemaMigrator
         END;
         """;
 
-    private const string EnsureSquareTokenEnabledIndexSql = """
-        IF NOT EXISTS (
+    // 与 POS API 的 SquareTokenSchemaInitializer 保持同一组幂等 DDL。StoreCode 为 NULL = 全部门店共用。
+    private const string EnsureSquareTokenStoreCodeColumnSql = """
+        IF COL_LENGTH(N'[dbo].[POSM_SquareToken]', N'StoreCode') IS NULL
+        BEGIN
+            ALTER TABLE [dbo].[POSM_SquareToken] ADD [StoreCode] NVARCHAR(32) NULL;
+        END;
+        """;
+
+    private const string DropLegacySquareTokenEnabledIndexSql = """
+        IF EXISTS (
             SELECT 1 FROM sys.indexes
             WHERE name = N'UX_POSM_SquareToken_Environment_Enabled'
               AND object_id = OBJECT_ID(N'[dbo].[POSM_SquareToken]')
         )
         BEGIN
-            CREATE UNIQUE INDEX [UX_POSM_SquareToken_Environment_Enabled]
-            ON [dbo].[POSM_SquareToken]([Environment])
+            DROP INDEX [UX_POSM_SquareToken_Environment_Enabled] ON [dbo].[POSM_SquareToken];
+        END;
+        """;
+
+    private const string EnsureSquareTokenEnabledIndexSql = """
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE name = N'UX_POSM_SquareToken_Environment_Store_Enabled'
+              AND object_id = OBJECT_ID(N'[dbo].[POSM_SquareToken]')
+        )
+        BEGIN
+            CREATE UNIQUE INDEX [UX_POSM_SquareToken_Environment_Store_Enabled]
+            ON [dbo].[POSM_SquareToken]([Environment], [StoreCode])
             WHERE [IsEnabled] = 1;
         END;
         """;
@@ -782,6 +801,8 @@ public static class PaymentTerminalSettingsSchemaMigrator
     internal static IReadOnlyList<string> SqlScriptsForTests { get; } =
     [
         EnsureSquareTokenTableSql,
+        EnsureSquareTokenStoreCodeColumnSql,
+        DropLegacySquareTokenEnabledIndexSql,
         EnsureSquareTokenEnabledIndexSql,
         EnsureLinklyCredentialTableSql,
         EnsureLinklyEnvironmentColumnSql,
