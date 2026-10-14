@@ -3683,6 +3683,77 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task Receipt_printer_no_sale_cash_drawer_rescan_toggle_defaults_off_and_loads_and_saves()
+    {
+        var store = new FakeReceiptPrinterSettingsStore { Settings = ReceiptPrinterSettings.Default };
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptPrintService: new FakeReceiptPrintService());
+
+        // 默认关闭：加载前、加载后都是关。
+        Assert.False(viewModel.ReceiptNoSaleCashDrawerRequiresRescan);
+        await viewModel.LoadAsync();
+        Assert.False(viewModel.ReceiptNoSaleCashDrawerRequiresRescan);
+
+        viewModel.ReceiptNoSaleCashDrawerRequiresRescan = true;
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        Assert.True(store.SavedSettings?.NoSaleCashDrawerRequiresRescan);
+    }
+
+    [Fact]
+    public async Task Receipt_printer_returns_rescan_toggle_defaults_off_and_loads_and_saves_independently()
+    {
+        var store = new FakeReceiptPrinterSettingsStore { Settings = ReceiptPrinterSettings.Default };
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptPrintService: new FakeReceiptPrintService());
+
+        // 默认关闭：加载前、加载后都是关。
+        Assert.False(viewModel.ReceiptReturnsRequireRescan);
+        await viewModel.LoadAsync();
+        Assert.False(viewModel.ReceiptReturnsRequireRescan);
+
+        // 只开退货：钱箱开关保持关闭，两个开关互不影响。
+        viewModel.ReceiptReturnsRequireRescan = true;
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        Assert.True(store.SavedSettings?.ReturnsRequireRescan);
+        Assert.False(store.SavedSettings?.NoSaleCashDrawerRequiresRescan);
+    }
+
+    [Fact]
+    public async Task Receipt_printer_save_keeps_enabled_rescan_switches_when_other_fields_change()
+    {
+        var store = new FakeReceiptPrinterSettingsStore
+        {
+            Settings = ReceiptPrinterSettings.Default with
+            {
+                NoSaleCashDrawerRequiresRescan = true,
+                ReturnsRequireRescan = true
+            }
+        };
+        var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            receiptPrinterSettingsStore: store,
+            receiptPrintService: new FakeReceiptPrintService());
+
+        await viewModel.LoadAsync();
+        Assert.True(viewModel.ReceiptNoSaleCashDrawerRequiresRescan);
+        Assert.True(viewModel.ReceiptReturnsRequireRescan);
+
+        // 只改了别的字段再保存：已开启的开关不能因为保存时漏传字段被静默关掉。
+        viewModel.ReceiptStorePhoneText = "0730000000";
+        await viewModel.SaveReceiptPrinterCommand.ExecuteAsync(null);
+
+        Assert.True(store.SavedSettings?.NoSaleCashDrawerRequiresRescan);
+        Assert.True(store.SavedSettings?.ReturnsRequireRescan);
+        Assert.Equal("0730000000", store.SavedSettings?.StorePhone);
+    }
+
+    [Fact]
     public async Task TestReceiptPrinterCommand_calls_print_service()
     {
         var printService = new FakeReceiptPrintService
@@ -4840,7 +4911,9 @@ public sealed class SettingsViewModelTests
                 {
                     PrinterPort = settings.PrinterPort,
                     CutDistance = settings.CutDistance,
-                    PrintBankReceiptText = settings.PrintBankReceiptText
+                    PrintBankReceiptText = settings.PrintBankReceiptText,
+                    NoSaleCashDrawerRequiresRescan = settings.NoSaleCashDrawerRequiresRescan,
+                    ReturnsRequireRescan = settings.ReturnsRequireRescan
                 }
                 : settings with { ProfileVersion = 0 };
             return Task.CompletedTask;

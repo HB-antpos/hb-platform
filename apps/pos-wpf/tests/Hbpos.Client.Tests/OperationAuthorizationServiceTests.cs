@@ -46,6 +46,155 @@ public sealed class OperationAuthorizationServiceTests
     }
 
     [Fact]
+    public async Task AuthorizeAsync_require_fresh_scan_prompts_even_when_current_cashier_has_permission()
+    {
+        var requester = CreateCashier("REQUESTER", Permissions.PosTerminal.CashDrawer.Open);
+        var login = new FakeCashierLoginService(CashierLoginResult.Success(requester));
+        var logger = new RecordingAuditLogger();
+        var service = new OperationAuthorizationService(
+            login,
+            CreateCashierContext(requester),
+            logger,
+            new StubTimeProvider(Now));
+
+        var authorization = service.AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "pos-terminal",
+            "open-cash-drawer",
+            CreateState(requester),
+            requireFreshScan: true);
+
+        // 自己有权限也要弹出扫码提示；提示语说「再次扫码确认」，不是让人以为没有权限。
+        Assert.True(service.IsPromptOpen);
+        Assert.Equal(0, login.CallCount);
+        Assert.Contains("again", service.PromptMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(authorization.IsCompleted);
+
+        // 自己再扫一次自己的条码就能通过（授权人与请求人是同一个人）。
+        Assert.True(service.ProcessScannerBarcode("requester-barcode"));
+        using var scope = await authorization;
+
+        Assert.NotNull(scope);
+        Assert.True(scope.IsActive);
+        Assert.False(service.IsPromptOpen);
+        Assert.Equal(1, login.CallCount);
+        var audit = Assert.Single(logger.Events);
+        Assert.Equal("PERMISSION_OVERRIDE", audit.OperationType);
+        Assert.Equal("Succeeded", audit.Outcome);
+        // 审计里用原因码和「主管越权批准」区分开。
+        Assert.Equal("FRESH_SCAN_CONFIRMED", audit.ReasonCode);
+        Assert.Equal("REQUESTER", audit.Properties?["requestingCashierId"]);
+        Assert.Equal("REQUESTER", audit.Properties?["authorizingCashierId"]);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_require_fresh_scan_accepts_a_supervisor_with_permission_too()
+    {
+        var requester = CreateCashier("REQUESTER", Permissions.PosTerminal.CashDrawer.Open);
+        var supervisor = CreateCashier("SUPERVISOR", Permissions.PosTerminal.CashDrawer.Open);
+        var login = new FakeCashierLoginService(CashierLoginResult.Success(supervisor));
+        var logger = new RecordingAuditLogger();
+        var service = new OperationAuthorizationService(
+            login,
+            CreateCashierContext(requester),
+            logger,
+            new StubTimeProvider(Now));
+
+        var authorization = service.AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "pos-terminal",
+            "open-cash-drawer",
+            CreateState(requester),
+            requireFreshScan: true);
+        Assert.True(service.ProcessScannerBarcode("supervisor-barcode"));
+        using var scope = await authorization;
+
+        Assert.NotNull(scope);
+        var audit = Assert.Single(logger.Events);
+        Assert.Equal("REQUESTER", audit.Properties?["requestingCashierId"]);
+        Assert.Equal("SUPERVISOR", audit.Properties?["authorizingCashierId"]);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_require_fresh_scan_rejects_a_scanned_employee_without_the_permission()
+    {
+        var requester = CreateCashier("REQUESTER", Permissions.PosTerminal.CashDrawer.Open);
+        var other = CreateCashier("OTHER");
+        var login = new FakeCashierLoginService(CashierLoginResult.Success(other));
+        var service = new OperationAuthorizationService(
+            login,
+            CreateCashierContext(requester),
+            new RecordingAuditLogger(),
+            new StubTimeProvider(Now));
+
+        var authorization = service.AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "pos-terminal",
+            "open-cash-drawer",
+            CreateState(requester),
+            requireFreshScan: true);
+        Assert.True(service.ProcessScannerBarcode("other-barcode"));
+        await WaitUntilAsync(() => !service.IsBusy && login.CallCount == 1);
+
+        // 扫的人没有开钱箱权限：仍在等待，不会放行；收银员可以取消。
+        Assert.False(authorization.IsCompleted);
+        Assert.True(service.IsPromptOpen);
+        service.Cancel();
+        Assert.Null(await authorization);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_without_require_fresh_scan_still_skips_the_prompt_when_cashier_has_permission()
+    {
+        var requester = CreateCashier("REQUESTER", Permissions.PosTerminal.CashDrawer.Open);
+        var login = new FakeCashierLoginService();
+        var service = new OperationAuthorizationService(
+            login,
+            CreateCashierContext(requester),
+            new RecordingAuditLogger(),
+            new StubTimeProvider(Now));
+
+        using var scope = await service.AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "pos-terminal",
+            "open-cash-drawer",
+            CreateState(requester),
+            requireFreshScan: false);
+
+        Assert.NotNull(scope);
+        Assert.False(service.IsPromptOpen);
+        Assert.Equal(0, login.CallCount);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_require_fresh_scan_for_cashier_without_permission_prompts_once_with_normal_message()
+    {
+        var requester = CreateCashier("REQUESTER");
+        var supervisor = CreateCashier("SUPERVISOR", Permissions.PosTerminal.CashDrawer.Open);
+        var login = new FakeCashierLoginService(CashierLoginResult.Success(supervisor));
+        var service = new OperationAuthorizationService(
+            login,
+            CreateCashierContext(requester),
+            new RecordingAuditLogger(),
+            new StubTimeProvider(Now));
+
+        var authorization = service.AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "pos-terminal",
+            "open-cash-drawer",
+            CreateState(requester),
+            requireFreshScan: true);
+
+        // 当前收银员本来就没有权限：提示语还是原来的「扫描具备该权限的员工条码」，只需扫一次。
+        Assert.True(service.IsPromptOpen);
+        Assert.DoesNotContain("again", service.PromptMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(service.ProcessScannerBarcode("supervisor-barcode"));
+        using var scope = await authorization;
+        Assert.NotNull(scope);
+        Assert.Equal(1, login.CallCount);
+    }
+
+    [Fact]
     public async Task AuthorizeAsync_scanned_authorizer_creates_scope_and_records_audit_without_replacing_requester()
     {
         var requester = CreateCashier("REQUESTER");

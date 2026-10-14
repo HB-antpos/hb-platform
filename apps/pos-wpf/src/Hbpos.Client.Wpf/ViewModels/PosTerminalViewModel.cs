@@ -44,6 +44,10 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
     private readonly Func<Guid, PosSessionState, CancellationToken, Task>? _releaseSharedHeldOrderAsync;
+    // 设置页「无交易开钱箱需要再次扫码」的当前值；每次点开钱箱都现读，改设置后立即生效，不缓存。
+    private readonly Func<CancellationToken, Task<bool>>? _isNoSaleCashDrawerRescanRequiredAsync;
+    // 设置页「退货操作需要再次扫码」的当前值；同样每次点「退款」都现读。
+    private readonly Func<CancellationToken, Task<bool>>? _isReturnsRescanRequiredAsync;
     private readonly Func<string?, string, CancellationToken, IReadOnlyList<SellableItemDto>> _searchCatalogMatches;
     private string _statusKey = "pos.status.ready";
     private object[] _statusArgs = [];
@@ -143,9 +147,13 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         Func<string?, string, CancellationToken, IReadOnlyList<SellableItemDto>>? searchCatalogMatches = null,
         Func<Guid, PosSessionState, CancellationToken, Task>? releaseSharedHeldOrderAsync = null,
         Func<Task>? onOpenCardRecoveryCenterAsync = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Func<CancellationToken, Task<bool>>? isNoSaleCashDrawerRescanRequiredAsync = null,
+        Func<CancellationToken, Task<bool>>? isReturnsRescanRequiredAsync = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _isNoSaleCashDrawerRescanRequiredAsync = isNoSaleCashDrawerRescanRequiredAsync;
+        _isReturnsRescanRequiredAsync = isReturnsRescanRequiredAsync;
         _priceIndex = priceIndex;
         _searchCatalogMatches = searchCatalogMatches ?? ((storeCode, query, cancellationToken) =>
             _priceIndex.Search(storeCode, query, cancellationToken));
@@ -1534,7 +1542,13 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private async Task OpenReturnsAsync()
     {
-        using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Returns.View, "open-returns");
+        // 退货操作：设置里开启后，点侧栏「退款」进入退货页时，即使当前收银员自己有权限也要再扫一次员工条码确认；
+        // 进入退货页之后的加行、确认退货（ReceiptReturnsViewModel 里各自的授权）不再重复扫码。
+        var requireRescan = await IsReturnsRescanRequiredAsync();
+        using var permissionGrant = await AuthorizeAsync(
+            Permissions.PosTerminal.Returns.View,
+            "open-returns",
+            requireFreshScan: requireRescan);
         if (permissionGrant is null)
         {
             return;
@@ -1712,9 +1726,49 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             result.Succeeded ? null : UserFeedbackCue.OperationError);
     }
 
+    /// <summary>
+    /// 读设置页的「…需要再次扫码」开关（无交易开钱箱、退货共用）。没有设置来源时按「不需要」（旧行为）；
+    /// 读取失败时按「需要」处理：这是安全类开关，不知道配置时宁可多扫一次码，也不能悄悄放过。
+    /// </summary>
+    private static async Task<bool> ReadRescanRequirementAsync(
+        Func<CancellationToken, Task<bool>>? source,
+        string settingName)
+    {
+        if (source is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await source(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleLog.WriteError(
+                "RescanSetting",
+                $"read {settingName} rescan setting failed error={ex.GetType().Name}; requiring rescan",
+                null,
+                ex);
+            return true;
+        }
+    }
+
+    private Task<bool> IsNoSaleCashDrawerRescanRequiredAsync() =>
+        ReadRescanRequirementAsync(_isNoSaleCashDrawerRescanRequiredAsync, "no-sale cash drawer");
+
+    private Task<bool> IsReturnsRescanRequiredAsync() =>
+        ReadRescanRequirementAsync(_isReturnsRescanRequiredAsync, "returns");
+
     private async Task OpenCashDrawerAsync()
     {
-        using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.CashDrawer.Open, "open-cash-drawer");
+        // 无交易开钱箱（侧栏按钮）：设置里开启后，即使当前收银员自己有权限也要再扫一次员工条码确认。
+        // 收现金后的自动开钱箱走 MainViewModel 的另一条路径，不受影响。
+        var requireRescan = await IsNoSaleCashDrawerRescanRequiredAsync();
+        using var permissionGrant = await AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "open-cash-drawer",
+            requireFreshScan: requireRescan);
         if (permissionGrant is null)
         {
             return;
@@ -2396,7 +2450,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     private Task<ViewModelAuthorizationGrant?> AuthorizeAsync(
         string permissionCode,
         string action,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        bool requireFreshScan = false) =>
         ViewModelOperationAuthorization.AuthorizeAsync(
             _operationAuthorizationService,
             TryRequirePermission,
@@ -2404,7 +2459,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos-terminal",
             action,
             Session,
-            cancellationToken);
+            cancellationToken,
+            requireFreshScan);
 
     private static string? GetDeniedAuditOperationType(string permissionCode)
     {

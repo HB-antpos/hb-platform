@@ -179,6 +179,12 @@
   <data name="settings.receiptPrinter.termsHelp" xml:space="preserve"><value>One line per item. Leave blank to use the default text.</value></data>
   <data name="settings.receiptPrinter.printBankReceipt" xml:space="preserve"><value>Print bank receipt on customer receipt</value></data>
   <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>When off, the customer receipt keeps only the card type, last 4 digits and amount, without the full EFTPOS bank receipt text. Signature, declined and settlement slips still print.</value></data>
+  <data name="settings.receiptPrinter.noSaleDrawerRescan" xml:space="preserve"><value>Require another scan to open the cash drawer without a sale</value></data>
+  <data name="settings.receiptPrinter.noSaleDrawerRescan.help" xml:space="preserve"><value>When on, the Open Cash Drawer button (no sale) asks for an authorized employee barcode scan every time, even if the signed-in cashier already has permission. The drawer that opens automatically after a cash sale is not affected. Off by default.</value></data>
+  <data name="settings.receiptPrinter.rescan.title" xml:space="preserve"><value>Confirm with another scan</value></data>
+  <data name="settings.receiptPrinter.rescan.help" xml:space="preserve"><value>When on, the operation asks for an authorized employee barcode scan even if the signed-in cashier already has permission. All switches are off by default; click Save to apply.</value></data>
+  <data name="settings.receiptPrinter.returnsRescan" xml:space="preserve"><value>Require another scan to start a return</value></data>
+  <data name="settings.receiptPrinter.returnsRescan.help" xml:space="preserve"><value>When on, opening Returns from the sidebar asks for an authorized employee barcode scan first; the employee needs the returns permission. Adding lines and confirming the return inside the Returns page do not ask again. Off by default.</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>Save Receipt Printer</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>Test Print</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>Load from Store Profile</value></data>

@@ -36,6 +36,21 @@ public interface IOperationAuthorizationService : INotifyPropertyChanged
         PosSessionState session,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 与上面的 <see cref="AuthorizeAsync(string, string, string, PosSessionState, CancellationToken)"/> 相同，
+    /// 但 <paramref name="requireFreshScan"/> 为 true 时，即使当前收银员自己有该权限，也必须再扫一次有该权限的员工条码确认
+    /// （自己扫自己或主管扫都行）；当前收银员没有该权限时本来就要扫，行为与原来一致，只扫一次。
+    /// 默认实现忽略 requireFreshScan、直接走原逻辑，所以只实现旧方法的实现类与测试替身不用改。
+    /// </summary>
+    Task<OperationAuthorizationScope?> AuthorizeAsync(
+        string permissionCode,
+        string screen,
+        string action,
+        PosSessionState session,
+        bool requireFreshScan,
+        CancellationToken cancellationToken = default) =>
+        AuthorizeAsync(permissionCode, screen, action, session, cancellationToken);
+
     bool ProcessScannerBarcode(string barcode);
 
     void Cancel();
@@ -313,12 +328,30 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
         private set => SetProperty(ref _action, value);
     }
 
-    public async Task<OperationAuthorizationScope?> AuthorizeAsync(
+    public Task<OperationAuthorizationScope?> AuthorizeAsync(
         string permissionCode,
         string screen,
         string action,
         PosSessionState session,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        AuthorizeCoreAsync(permissionCode, screen, action, session, requireFreshScan: false, cancellationToken);
+
+    public Task<OperationAuthorizationScope?> AuthorizeAsync(
+        string permissionCode,
+        string screen,
+        string action,
+        PosSessionState session,
+        bool requireFreshScan,
+        CancellationToken cancellationToken = default) =>
+        AuthorizeCoreAsync(permissionCode, screen, action, session, requireFreshScan, cancellationToken);
+
+    private async Task<OperationAuthorizationScope?> AuthorizeCoreAsync(
+        string permissionCode,
+        string screen,
+        string action,
+        PosSessionState session,
+        bool requireFreshScan,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(permissionCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(screen);
@@ -337,7 +370,8 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
             generation = _revocationGeneration;
         }
 
-        if (_cashierSessionContext.HasPermission(permissionCode))
+        // 要求再次扫码时不走「自己有权限就直接放行」的捷径：无论有没有权限都要扫一次员工条码确认。
+        if (!requireFreshScan && _cashierSessionContext.HasPermission(permissionCode))
         {
             return CreateScope(requestingSession, permissionCode, screen, action, generation);
         }
@@ -356,14 +390,20 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
             {
                 return null;
             }
-            pending = new PendingAuthorization(permissionCode, screen, action, session, scope);
+            pending = new PendingAuthorization(permissionCode, screen, action, session, scope, requireFreshScan);
             _pending = pending;
         }
 
-        PromptMessage = T(
-            "operationAuthorization.prompt",
-            "Scan an authorized employee barcode with permission {0}.",
-            permissionCode);
+        // 当前收银员自己有权限、只是被要求再扫一次时，提示语说「再次扫码确认」，而不是让人以为自己没有权限。
+        PromptMessage = requireFreshScan && _cashierSessionContext.HasPermission(permissionCode)
+            ? T(
+                "operationAuthorization.rescanPrompt",
+                "Scan an authorized employee barcode again to confirm this operation. Permission: {0}.",
+                permissionCode)
+            : T(
+                "operationAuthorization.prompt",
+                "Scan an authorized employee barcode with permission {0}.",
+                permissionCode);
         PermissionCode = permissionCode;
         Screen = screen;
         Action = action;
@@ -579,7 +619,8 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
                 pending.Screen,
                 pending.Action,
                 "Succeeded",
-                reasonCode: null,
+                // 要求再次扫码的确认记一个原因码，审计里能和「主管越权批准」区分开（自己扫自己时授权人就是请求人）。
+                reasonCode: pending.RequiresFreshScan ? "FRESH_SCAN_CONFIRMED" : null,
                 authorizationMode: GetAuthorizationMode(authorizer));
             pending.Completion.TrySetResult(true);
             StatusMessage = T("operationAuthorization.success", "Authorization succeeded.");
@@ -719,7 +760,8 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
         string Screen,
         string Action,
         PosSessionState Session,
-        OperationAuthorizationScope Scope)
+        OperationAuthorizationScope Scope,
+        bool RequiresFreshScan = false)
     {
         public bool IsCompleting { get; set; }
 

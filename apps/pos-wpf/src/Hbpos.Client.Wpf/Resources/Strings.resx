@@ -1256,6 +1256,7 @@
   <data name="operationAuthorization.noSession" xml:space="preserve"><value>No cashier session is active.</value></data>
   <data name="operationAuthorization.pending" xml:space="preserve"><value>Another operation is already waiting for authorization.</value></data>
   <data name="operationAuthorization.prompt" xml:space="preserve"><value>Scan an authorized employee barcode with permission {0}.</value></data>
+  <data name="operationAuthorization.rescanPrompt" xml:space="preserve"><value>Scan an authorized employee barcode again to confirm this operation. Permission: {0}.</value></data>
   <data name="operationAuthorization.waiting" xml:space="preserve"><value>Waiting for authorization scan.</value></data>
   <data name="operationAuthorization.cancelled" xml:space="preserve"><value>Authorization cancelled.</value></data>
   <data name="operationAuthorization.verifying" xml:space="preserve"><value>Verifying authorized employee.</value></data>
