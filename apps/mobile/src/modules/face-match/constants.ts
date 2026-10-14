@@ -30,6 +30,14 @@ export const EVIDENCE_REF_MAX_LENGTH = 100;
 export const DISPUTE_NOTE_MAX_LENGTH = 500;
 export const REASON_MAX_LENGTH = 200;
 export const ALLOWED_SUBJECTS_MAX_LENGTH = 200;
+/**
+ * 名单命中自动确认阈值（与后端 FaceStoreProfile.UnwelcomeAutoConfirmScore、Web 一致）：
+ * 相似度达到或超过它，系统自动把命中任务标为「已确认」；0 = 不自动确认；非零值只允许 50–100、最多两位小数；默认 90。
+ */
+export const AUTO_CONFIRM_SCORE_OFF = 0;
+export const AUTO_CONFIRM_SCORE_MIN = 50;
+export const AUTO_CONFIRM_SCORE_MAX = 100;
+export const AUTO_CONFIRM_SCORE_DEFAULT = 90;
 export const PAGE_SIZE = 20;
 
 export const CATEGORY_VIOLENCE = 1;

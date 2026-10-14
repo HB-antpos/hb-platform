@@ -182,11 +182,15 @@ function TaskCard({
       <Text style={[styles.similarity, MONO]}>{t("review.similarity", { percent })}</Text>
       <View style={styles.similarityRow}>
         <Tag label={t(BAND_LABEL_KEYS[task.band])} tone={task.band === "high" ? "danger" : "warning"} />
+        {/* 系统按门店阈值自动确认的任务：没有人判断过，单独打标签，避免被误认为人工确认。 */}
+        {task.autoConfirmed ? <Tag label={t("review.autoConfirmedTag")} tone="info" icon="robot-outline" /> : null}
         {!task.imageAvailable ? <Tag label={t("review.imageDeleted")} /> : null}
       </View>
       <Text style={faceStyles.muted}>{t(REVIEW_STEP_HINT_KEYS[getReviewStep(task)])}</Text>
       {/* 复核人：新任务只有一位；secondReviewerName 只会出现在旧版遗留的、已有两位复核人的任务上，按「补充复核人」展示。 */}
-      {task.firstReviewerName ? (
+      {task.autoConfirmed ? (
+        <Text style={faceStyles.muted}>{t("review.autoConfirmedBy")}</Text>
+      ) : task.firstReviewerName ? (
         <Text style={faceStyles.muted}>{t("review.reviewerFirst", { name: task.firstReviewerName })}</Text>
       ) : null}
       {task.secondReviewerName ? (

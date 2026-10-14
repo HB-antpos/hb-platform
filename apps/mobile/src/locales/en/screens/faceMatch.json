@@ -94,7 +94,9 @@
     "photoEmpty": "One photo is empty. Pick it again",
     "photoTooLarge": "A photo cannot exceed {{maxMb}}MB",
     "textRequired": "Enter a reason",
-    "textTooLong": "At most {{max}} characters"
+    "textTooLong": "At most {{max}} characters",
+    "autoConfirmScoreRequired": "Enter the auto-confirm threshold (0 turns auto-confirm off)",
+    "autoConfirmScoreInvalid": "The auto-confirm threshold must be 0 (off) or a number from {{min}} to {{max}} with at most 2 decimal places"
   },
   "unwelcome": {
     "title": "Unwelcome persons list",
@@ -224,6 +226,8 @@
     "imageDeleted": "Image deleted",
     "reviewerFirst": "Reviewer: {{name}}",
     "reviewerSecond": "Additional reviewer: {{name}}",
+    "autoConfirmedTag": "Auto-confirmed",
+    "autoConfirmedBy": "Confirmed automatically by the system",
     "actions": {
       "review": "Review",
       "view": "View"
@@ -300,6 +304,7 @@
         "staffExclusionEnabled": "Staff exclusion",
         "trafficDedupEnabled": "Customer de-duplication",
         "unwelcomeListEnabled": "Enable Unwelcome Persons List",
+        "unwelcomeAutoConfirmScore": "Auto-confirm threshold (%)",
         "allowedSubjects": "Allowed subjects",
         "timeZoneId": "Time zone"
       },
@@ -308,6 +313,7 @@
         "staffExclusion": "Excludes enrolled staff from traffic counts; needs store members with a valid consent and enrolment.",
         "trafficDedup": "De-duplicates customers by face per day. High legal risk. A missing de-duplication legal sign-off or other record shows as a red warning and does not block enabling, but it must be completed before running on real customers.",
         "unwelcomeList": "Alerts staff on a list match and creates a review task for manual confirmation. Missing assessment, legal sign-off, signage or training records show as red warnings and do not block enabling, but they must be completed before running on real customers.",
+        "unwelcomeAutoConfirmScore": "When a task's similarity reaches or exceeds this value, the system automatically marks the task as Confirmed and no manual review is needed (staff still get the alert; the system never refuses service or notifies police automatically). Enter 0 to turn auto-confirm off; the default is 90. Similarity is not the probability of being the same person.",
         "allowedSubjects": "Recommended for Capture mode: say who may appear in front of the cameras, all informed and consenting (leaving it empty only shows a hint).",
         "timeZone": "Leave on Auto to detect automatically. Effective time zone: {{zone}}; state: {{jurisdiction}}."
       },
@@ -325,9 +331,11 @@
       "reset": "Discard changes",
       "on": "On",
       "off": "Off",
+      "autoConfirmOff": "Off",
       "confirmTitle": "Save the face match profile for {{store}}?",
       "confirmMode": "Mode: {{from}} → {{to}}",
       "confirmSwitch": "{{name}}: {{state}}",
+      "confirmAutoConfirm": "Auto-confirm threshold: {{from}} → {{to}}",
       "confirmMatchWarning": "After switching to Match, real captures from this store's cameras start being matched. Make sure the compliance records are complete (see the warnings below).",
       "confirmCaptureWarning": "After switching to Capture, every capture from this store's cameras is kept; it may only be used with informed, consenting internal people.",
       "confirmKeep": "All other compliance records are kept as they are and will not be changed.",

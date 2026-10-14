@@ -1,5 +1,6 @@
 // 人脸比对接口响应的防御式规范化：字段缺失 / 类型漂移时界面不崩，且不放大授权（缺少权限标志一律当 false）。
 // apiClient 的响应拦截器已把 ApiResponse<T> 解包成 T；这里只关心 T 的形状。
+import { AUTO_CONFIRM_SCORE_DEFAULT } from "./constants";
 import type {
   FaceCamera,
   FaceCameraList,
@@ -93,6 +94,8 @@ export function normalizeFaceStoreProfile(value: unknown): FaceStoreProfile {
     staffExclusionEnabled: raw.staffExclusionEnabled === true,
     trafficDedupEnabled: raw.trafficDedupEnabled === true,
     unwelcomeListEnabled: raw.unwelcomeListEnabled === true,
+    // 缺失 / 非数字取默认 90（0 是合法值，表示关闭，必须原样保留）。
+    unwelcomeAutoConfirmScore: asNullableNumber(raw.unwelcomeAutoConfirmScore) ?? AUTO_CONFIRM_SCORE_DEFAULT,
     allowedSubjects: asNullableString(raw.allowedSubjects),
     piaReference: asNullableString(raw.piaReference),
     signageInstalledOn: asNullableString(raw.signageInstalledOn),
@@ -194,6 +197,8 @@ export function normalizeFaceUnwelcomeTask(value: unknown): FaceUnwelcomeTask {
     // 能否复核只认服务端的 canReview，App 不自己推断。
     // nextStep 原样保留（first / none，旧后端可能还有 second），由 review-logic 统一折算成「待复核 / 已结束」。
     canReview: raw.canReview === true,
+    // 只认明确的 true；缺失（旧后端）按「人工任务」处理。
+    autoConfirmed: raw.autoConfirmed === true,
   };
 }
 

@@ -94,7 +94,9 @@
     "photoEmpty": "有一张照片是空的，请重新选择",
     "photoTooLarge": "照片不能超过 {{maxMb}}MB",
     "textRequired": "请填写原因",
-    "textTooLong": "最多 {{max}} 个字符"
+    "textTooLong": "最多 {{max}} 个字符",
+    "autoConfirmScoreRequired": "请填写命中自动确认阈值（填 0 表示不自动确认）",
+    "autoConfirmScoreInvalid": "命中自动确认阈值必须是 0（不自动确认），或 {{min}}–{{max}} 之间的数字（最多 2 位小数）"
   },
   "unwelcome": {
     "title": "不受欢迎人员名单",
@@ -224,6 +226,8 @@
     "imageDeleted": "图片已删除",
     "reviewerFirst": "复核人：{{name}}",
     "reviewerSecond": "补充复核人：{{name}}",
+    "autoConfirmedTag": "自动确认",
+    "autoConfirmedBy": "系统自动确认",
     "actions": {
       "review": "复核",
       "view": "查看"
@@ -300,6 +304,7 @@
         "staffExclusionEnabled": "员工排除",
         "trafficDedupEnabled": "顾客去重",
         "unwelcomeListEnabled": "启用不受欢迎人员名单",
+        "unwelcomeAutoConfirmScore": "命中自动确认阈值（%）",
         "allowedSubjects": "允许拍摄对象",
         "timeZoneId": "时区"
       },
@@ -308,6 +313,7 @@
         "staffExclusion": "客流统计里排除已登记员工；需要门店成员有有效的同意与登记。",
         "trafficDedup": "对顾客做当日人脸去重统计，法律风险高。缺的去重专项律师确认等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。",
         "unwelcomeList": "命中名单时提示店员并生成待人工复核的任务。缺的专项评估、律师确认、告示、培训等记录会显示为红色警告，不阻止启用；对真实顾客运行前必须补齐。",
+        "unwelcomeAutoConfirmScore": "命中任务的相似度达到或超过这个值时，系统自动把任务标为“已确认”，不再需要人工复核（店员仍会收到提示；系统不会自动拒绝服务或通知警方）。填 0 表示不自动确认，默认 90。相似度不等于是同一个人的概率。",
         "allowedSubjects": "Capture 模式建议填写：说明镜头前只会出现哪些知情同意的人员（不填只给提示）。",
         "timeZone": "留空则自动判断。当前生效时区：{{zone}}，所在州：{{jurisdiction}}。"
       },
@@ -325,9 +331,11 @@
       "reset": "放弃修改",
       "on": "开启",
       "off": "关闭",
+      "autoConfirmOff": "不自动确认",
       "confirmTitle": "保存 {{store}} 的人脸比对档案？",
       "confirmMode": "运行模式：{{from}} → {{to}}",
       "confirmSwitch": "{{name}}：{{state}}",
+      "confirmAutoConfirm": "命中自动确认阈值：{{from}} → {{to}}",
       "confirmMatchWarning": "切换到 Match 后，该门店摄像机的真实抓拍会开始做比对。请确认合规记录已经补齐（见下方警告）。",
       "confirmCaptureWarning": "切换到 Capture 后，该门店摄像机的抓拍会全部留存，只允许用于拍摄知情同意的内部人员。",
       "confirmKeep": "其余合规记录原样保留，不会被改动。",
