@@ -53,6 +53,23 @@ internal interface IScannerInputDeduplicator
     bool TryAcceptScanDelivery(string barcode, string source, DateTimeOffset timestamp);
 }
 
+/// <summary>
+/// Raw Input 扫码页面标识，以及对输入框焦点的取舍策略。
+/// </summary>
+internal static class RawScannerPageIds
+{
+    /// <summary>收银员登录弹窗的扫码页。</summary>
+    public const string CashierLogin = "CashierLogin";
+
+    /// <summary>
+    /// 输入框有焦点时仍以 Raw Input 扫码为准的页面（仅限回车收尾的纯数字条码，细则见 RawScannerService）。
+    /// 登录框里的字符取决于键盘布局：扫码枪给每个数字都带 Shift 时，输入框收到的是符号串，只有 Raw Input 按键码识别出的条码才是对的；
+    /// 其他页面（商品搜索框等）输入框里的字符与扫码一致，仍沿用「输入框处理、Raw Input 不重复投递」。
+    /// </summary>
+    public static bool IsRawPreferredOverFocusedTextInput(string? pageId) =>
+        string.Equals(pageId, CashierLogin, StringComparison.Ordinal);
+}
+
 internal sealed class ScannerInputDuplicateGuard
 {
     private static readonly TimeSpan CrossSourceDuplicateWindow = TimeSpan.FromMilliseconds(200);
@@ -103,6 +120,13 @@ public sealed class RawScannerService(
     private static readonly TimeSpan DiagnosticsInterval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan DiagnosticsSummaryInterval = TimeSpan.FromMinutes(10);
 
+    /// <summary>登录框提交在 <see cref="IScannerInputDeduplicator.TryAcceptScanDelivery"/> 里使用的来源标识。</summary>
+    internal const string LoginBoxScanSource = "login-box";
+
+    // Raw Input 的回车与登录框的回车是同一次按键，通常相隔几毫秒；留 1 秒余量应对界面线程卡顿，
+    // 且只抵消一次，超时后手输条码回车照常登录。
+    private static readonly TimeSpan RawPreferredBoxSubmissionWindow = TimeSpan.FromSeconds(1);
+
     private readonly Dictionary<string, Action<RawBarcodeScannedEventArgs>> _handlers = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _flushTimer = new() { Interval = TimeSpan.FromMilliseconds(40) };
     private readonly ScannerInputDuplicateGuard _duplicateGuard = new();
@@ -119,6 +143,8 @@ public sealed class RawScannerService(
     private bool _isBinding;
     private bool _isInitialized;
     private bool _loggedEmptyDevicePath;
+    // 登录页以 Raw Input 为准投递后，登录框随后到来的那次回车提交要被抵消；记录投递时刻，抵消一次后清空。所有入口都在 UI 线程。
+    private DateTimeOffset? _rawPreferredBoxSubmissionArmedAt;
 
     public bool IsActive { get; private set; }
 
@@ -127,6 +153,16 @@ public sealed class RawScannerService(
         string source,
         DateTimeOffset timestamp)
     {
+        if (ShouldSuppressLoginBoxSubmission(source, timestamp))
+        {
+            // 关键逻辑：登录页已用 Raw Input 的条码登录，登录框里的内容是同一次扫码的另一份拷贝；
+            // Shift+数字的扫码枪在框里是符号串，与条码对不上，不能靠内容比对，只能按时间窗口认定并丢弃，禁止用符号串再登录一次。
+            ConsoleLog.Write(
+                "RawScanner",
+                $"login box submission suppressed because raw scan was preferred over focused text input boxInfo={BarcodeLogFormatter.FormatBarcodeInfo(barcode)}");
+            return false;
+        }
+
         // 键盘通道收到扫码时附带一份 Raw Input 计数：两边对照能直接看出 WM_INPUT 是否送达本窗口。
         if (_diagnostics.ShouldReportNonRawDelivery(timestamp, DiagnosticsSummaryInterval))
         {
@@ -404,13 +440,23 @@ public sealed class RawScannerService(
             return;
         }
 
+        var preferredOverFocusedTextInput = false;
         if (windowActive && _isTextInputFocused?.Invoke() == true)
         {
-            // 前台焦点在输入框时，同一串按键已经进了输入框（如商品搜索框回车即加购）；Raw Input 不再重复投递，也不据此学习绑定。
+            if (!ShouldPreferRawScanOverFocusedTextInput(result))
+            {
+                // 前台焦点在输入框时，同一串按键已经进了输入框（如商品搜索框回车即加购）；Raw Input 不再重复投递，也不据此学习绑定。
+                ConsoleLog.Write(
+                    "RawScanner",
+                    $"raw scan left to focused text input barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} activePage={_activePageId}");
+                return;
+            }
+
+            // 关键逻辑：登录页不看输入框里的字符，直接用 Raw Input 按键码识别出的条码登录（输入框不会被读取或写入）。
+            preferredOverFocusedTextInput = true;
             ConsoleLog.Write(
                 "RawScanner",
-                $"raw scan left to focused text input barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} activePage={_activePageId}");
-            return;
+                $"raw scan preferred over focused text input barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} activePage={_activePageId}");
         }
 
         if (string.IsNullOrWhiteSpace(_boundDevicePath))
@@ -427,12 +473,43 @@ public sealed class RawScannerService(
             return;
         }
 
+        if (preferredOverFocusedTextInput)
+        {
+            // 登录框里这次扫码的回车紧随其后到达（符号串或同串数字），由 TryAcceptScanDelivery 抵消一次。
+            _rawPreferredBoxSubmissionArmedAt = completedAt;
+        }
+
         _diagnostics.RecordDispatched();
         var dispatchDelayMs = Math.Max(0, (dispatchAt - completedAt).TotalMilliseconds);
         ConsoleLog.Write(
             "RawScanner",
             $"scan accepted barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(result.Barcode)} completion={result.CompletionKind} activePage={_activePageId} dispatchDelayMs={dispatchDelayMs:0.###}");
         handler(scannedEvent);
+    }
+
+    private bool ShouldPreferRawScanOverFocusedTextInput(RawScannerInputResult result)
+    {
+        // 只认回车收尾的扫码：手输条码时按键间隔超过超时会被清掉，不会误成扫码；
+        // 超时收尾（没有回车）的短串可能只是键盘上快速敲了几个键，登录页不能拿它去试登录。
+        // 只认纯数字条码（收银员 EAN-13）：Raw Input 按键码映射会把字母一律变大写、丢掉多数符号，
+        // 紧急登录令牌（HBPOSE2- 开头的 Base64Url，区分大小写）等含字母/符号的内容只能靠输入框里的原文，仍留给输入框。
+        return RawScannerPageIds.IsRawPreferredOverFocusedTextInput(_activePageId) &&
+            result.CompletionKind == RawScannerCompletionKind.Enter &&
+            result.Barcode.Length > 0 &&
+            result.Barcode.All(char.IsAsciiDigit);
+    }
+
+    private bool ShouldSuppressLoginBoxSubmission(string source, DateTimeOffset timestamp)
+    {
+        if (_rawPreferredBoxSubmissionArmedAt is not { } armedAt ||
+            !string.Equals(source, LoginBoxScanSource, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // 无论是否命中窗口，这次登录框提交都消耗掉布防：窗口外的提交是手输条码，照常登录。
+        _rawPreferredBoxSubmissionArmedAt = null;
+        return (timestamp - armedAt).Duration() <= RawPreferredBoxSubmissionWindow;
     }
 
     private void OnThreadFilterMessage(ref MSG msg, ref bool handled)

@@ -190,9 +190,10 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 
         var input = _viewModel.CashierBarcodeInput.Trim();
         if (_rawScannerService is IScannerInputDeduplicator deduplicator &&
-            !deduplicator.TryAcceptScanDelivery(input, "login-box", DateTimeOffset.Now))
+            !deduplicator.TryAcceptScanDelivery(input, RawScannerService.LoginBoxScanSource, DateTimeOffset.Now))
         {
-            // 同一次扫码 Raw Input 已经提交过登录（扫码页切到登录弹窗），登录框里的同一串字符不能再登录一次。
+            // 同一次扫码 Raw Input 已经提交过登录（扫码页切到登录弹窗，或登录页以 Raw Input 为准），
+            // 登录框里的同一串字符（扫码枪带 Shift 时是符号串）不能再登录一次。
             ConsoleLog.Write("CashierLogin", "login box submission suppressed because raw scanner already delivered the same scan");
             _viewModel.CashierBarcodeInput = string.Empty;
             ClearCashierLoginOverlayInputAfterLogin();
