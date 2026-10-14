@@ -49,6 +49,7 @@ import {
     staffExclusionEnabled: true,
     trafficDedupEnabled: false,
     unwelcomeListEnabled: true,
+    unwelcomeAutoConfirmScore: 88.5,
     allowedSubjects: "",
     piaReference: "PIA-7",
     signageInstalledOn: "2026-09-01",
@@ -68,6 +69,12 @@ import {
   assert.equal(profile.staffNoticeDate, null);
   assert.equal(profile.crossBorderRegion, "ap-singapore");
   assert.equal(profile.crossBorderReviewValid, true);
+  // 命中自动确认阈值：服务端的数字原样保留；0（关闭）是合法值；缺失 / 非数字取默认 90
+  assert.equal(profile.unwelcomeAutoConfirmScore, 88.5);
+  assert.equal(normalizeFaceStoreProfile({ unwelcomeAutoConfirmScore: 0 }).unwelcomeAutoConfirmScore, 0);
+  assert.equal(normalizeFaceStoreProfile({}).unwelcomeAutoConfirmScore, 90);
+  assert.equal(normalizeFaceStoreProfile({ unwelcomeAutoConfirmScore: "70" }).unwelcomeAutoConfirmScore, 90);
+  assert.equal(normalizeFaceStoreProfile({ unwelcomeAutoConfirmScore: null }).unwelcomeAutoConfirmScore, 90);
 }
 
 // ───────── 条目 ─────────
@@ -136,6 +143,10 @@ import {
   assert.equal(normalizeFaceUnwelcomeTask({ firstReviewerName: "Amy", canReview: true }).canReview, true);
   assert.equal(normalizeFaceUnwelcomeTask({ firstReviewerName: "Amy", canReview: "true" }).canReview, false);
   assert.equal(normalizeFaceUnwelcomeTask({}).canReview, false);
+  // 自动确认标记：只认明确的 true，缺失（旧后端）按人工任务处理
+  assert.equal(normalizeFaceUnwelcomeTask({ autoConfirmed: true, reviewStatus: 2 }).autoConfirmed, true);
+  assert.equal(normalizeFaceUnwelcomeTask({ autoConfirmed: "true" }).autoConfirmed, false);
+  assert.equal(normalizeFaceUnwelcomeTask({}).autoConfirmed, false);
   assert.equal(normalizeFaceUnwelcomeTask({ referencePhotoCount: -2 }).referencePhotoCount, 0);
   // 任务里没有姓名、事件细节字段：即使服务端误带也不会流入
   const leaky = normalizeFaceUnwelcomeTask({ taskId: "t2", personName: "Zhang San", incidentDetail: "stole X", categoryNote: "n" }) as unknown as Record<string, unknown>;

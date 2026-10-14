@@ -345,6 +345,43 @@ assert.ok((lookup(zh, "review.band.high") as string) === "较高" && (lookup(zh,
   assert.equal(stripComments(sourceOf("ReviewTaskModal.tsx")).includes("review.firstReviewer"), false);
 }
 
+// ───────── 命中自动确认阈值与「自动确认」展示 ─────────
+{
+  const profileCode = stripComments(sourceOf("ProfileSection.tsx"));
+  // 阈值输入框：数字小数键盘、% 后缀、校验错误走 validateProfileEdits（不在页面里自己写规则）
+  assert.ok(profileCode.includes("settings.profile.fields.unwelcomeAutoConfirmScore"), "档案表单要有阈值输入框");
+  assert.ok(profileCode.includes('keyboardType="decimal-pad"'), "阈值输入用数字小数键盘");
+  assert.ok(profileCode.includes('<TextInput.Affix text="%"'), "阈值输入带 % 后缀");
+  assert.ok(profileCode.includes("errors.unwelcomeAutoConfirmScore"), "阈值校验错误要显示在输入框下");
+  // 保存确认框要写明阈值「原值 → 新值」（0 写成「不自动确认」）
+  assert.ok(profileCode.includes("settings.profile.confirmAutoConfirm") && profileCode.includes("settings.profile.autoConfirmOff"));
+  assert.ok(profileCode.includes("change.autoConfirmChange"));
+
+  // 复核卡片：自动确认的任务有标签，复核人行显示「系统自动确认」
+  const panelCode = stripComments(sourceOf("ReviewPanel.tsx"));
+  assert.ok(panelCode.includes("task.autoConfirmed"));
+  assert.ok(panelCode.includes("review.autoConfirmedTag") && panelCode.includes("review.autoConfirmedBy"));
+  // 复核弹框不为自动确认任务开任何入口：能否复核只看服务端 canReview，自动确认任务 canReview 为 false
+  assert.equal(stripComments(sourceOf("ReviewTaskModal.tsx")).includes("autoConfirmed"), false);
+
+  // 文案：与 Web 同一句；写明「不等于是同一个人的概率」；不出现有歧义的「不是同一个人的概率」；不承诺任何自动处置
+  const hintZh = lookup(zh, "settings.profile.hints.unwelcomeAutoConfirmScore") as string;
+  const hintEn = lookup(en, "settings.profile.hints.unwelcomeAutoConfirmScore") as string;
+  assert.ok(hintZh.includes("不等于是同一个人的概率") && !hintZh.includes("不是同一个人的概率"));
+  assert.ok(hintZh.includes("填 0 表示不自动确认") && hintZh.includes("默认 90"));
+  assert.ok(hintZh.includes("系统不会自动拒绝服务或通知警方"));
+  assert.ok(/not the probability of being the same person/i.test(hintEn) && /never refuses service or notifies police/i.test(hintEn));
+  assert.equal(lookup(zh, "review.autoConfirmedTag"), "自动确认");
+  assert.equal(lookup(zh, "review.autoConfirmedBy"), "系统自动确认");
+  assert.equal(lookup(en, "review.autoConfirmedTag"), "Auto-confirmed");
+  assert.equal(lookup(zh, "settings.profile.autoConfirmOff"), "不自动确认");
+  // 阈值常量与 Web / 后端一致
+  const constants = stripComments(sourceOf("constants.ts"));
+  for (const [name, value] of [["AUTO_CONFIRM_SCORE_OFF", 0], ["AUTO_CONFIRM_SCORE_MIN", 50], ["AUTO_CONFIRM_SCORE_MAX", 100], ["AUTO_CONFIRM_SCORE_DEFAULT", 90]] as const) {
+    assert.ok(new RegExp(`export const ${name} = ${value};`).test(constants), `${name} 应为 ${value}`);
+  }
+}
+
 // ───────── 5. 路由薄壳只做转发 ─────────
 {
   const routes: [string, string][] = [

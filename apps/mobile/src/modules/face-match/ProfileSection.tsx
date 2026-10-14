@@ -1,5 +1,5 @@
 // 「门店档案」区（需要 FaceMatch.Manage）：读取并修改一家门店的人脸比对档案。
-// 手机只编辑：运行模式、四个开关、允许拍摄对象、时区。其余合规记录（PIA、告示、律师确认、跨境审查等）不在手机上编辑，
+// 手机只编辑：运行模式、四个开关、命中自动确认阈值、允许拍摄对象、时区。其余合规记录（PIA、告示、律师确认、跨境审查等）不在手机上编辑，
 // 页面只展示服务端返回的「合规记录未补齐」警告条数并提示到网页后台补齐。
 // PUT 是整体替换：请求体由 buildProfileUpdateRequest 以服务端刚返回的档案为底构造，不编辑的字段原样带回，绝不清空。
 import { useEffect, useMemo, useState } from "react";
@@ -13,7 +13,7 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { isWriteBlocked } from "./access";
 import { faceMatchApi } from "./api";
-import { ALLOWED_SUBJECTS_MAX_LENGTH, PROFILE_MODE_CAPTURE, PROFILE_MODE_MATCH } from "./constants";
+import { ALLOWED_SUBJECTS_MAX_LENGTH, AUTO_CONFIRM_SCORE_OFF, PROFILE_MODE_CAPTURE, PROFILE_MODE_MATCH } from "./constants";
 import { formatLocalDateTime } from "./dates";
 import { getDisabledReasonKey, getGateReportFromError } from "./errors";
 import {
@@ -180,6 +180,9 @@ function ProfileForm({
     setConfirmOpen(true);
   };
 
+  // 阈值在确认框里的写法：0 = 「不自动确认」，其余带百分号。
+  const autoConfirmLabel = (score: number) => (score === AUTO_CONFIRM_SCORE_OFF ? t("settings.profile.autoConfirmOff") : `${score}%`);
+
   const modeLabel = (mode: number) => {
     const option = PROFILE_MODE_OPTIONS.find((candidate) => candidate.value === mode);
     return option ? t(option.labelKey) : String(mode);
@@ -226,6 +229,23 @@ function ProfileForm({
       <SwitchRow label={t("settings.profile.fields.staffExclusionEnabled")} hint={t("settings.profile.hints.staffExclusion")} value={edits.staffExclusionEnabled} disabled={readOnly} onChange={(staffExclusionEnabled) => patch({ staffExclusionEnabled })} />
       <SwitchRow label={t("settings.profile.fields.trafficDedupEnabled")} hint={t("settings.profile.hints.trafficDedup")} value={edits.trafficDedupEnabled} disabled={readOnly} onChange={(trafficDedupEnabled) => patch({ trafficDedupEnabled })} />
       <SwitchRow label={t("settings.profile.fields.unwelcomeListEnabled")} hint={t("settings.profile.hints.unwelcomeList")} value={edits.unwelcomeListEnabled} disabled={readOnly} onChange={(unwelcomeListEnabled) => patch({ unwelcomeListEnabled })} />
+
+      {/* 命中自动确认阈值：紧跟「启用不受欢迎人员名单」开关。输入框存文本，校验与解析见 profile-form；填 0 表示不自动确认。 */}
+      <TextInput
+        mode="outlined"
+        label={t("settings.profile.fields.unwelcomeAutoConfirmScore")}
+        value={edits.unwelcomeAutoConfirmScore}
+        onChangeText={(unwelcomeAutoConfirmScore) => patch({ unwelcomeAutoConfirmScore })}
+        keyboardType="decimal-pad"
+        maxLength={6}
+        right={<TextInput.Affix text="%" />}
+        error={showErrors && Boolean(errors.unwelcomeAutoConfirmScore)}
+        disabled={readOnly}
+        style={styles.input}
+      />
+      <HelperText type={showErrors && errors.unwelcomeAutoConfirmScore ? "error" : "info"} visible>
+        {showErrors && errors.unwelcomeAutoConfirmScore ? issueText(errors.unwelcomeAutoConfirmScore) : t("settings.profile.hints.unwelcomeAutoConfirmScore")}
+      </HelperText>
 
       <TextInput
         mode="outlined"
@@ -312,6 +332,14 @@ function ProfileForm({
                 })}
               </Text>
             ))}
+            {change.autoConfirmChange ? (
+              <Text style={styles.confirmLine}>
+                {t("settings.profile.confirmAutoConfirm", {
+                  from: autoConfirmLabel(change.autoConfirmChange.from),
+                  to: autoConfirmLabel(change.autoConfirmChange.to),
+                })}
+              </Text>
+            ) : null}
             {change.startsProcessing ? (
               <Text style={styles.confirmWarn}>
                 {t(edits.mode === PROFILE_MODE_MATCH ? "settings.profile.confirmMatchWarning" : "settings.profile.confirmCaptureWarning")}
