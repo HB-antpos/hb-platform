@@ -118,7 +118,30 @@ function stripComments(source: string): string {
       );
     }
   }
+  // 抓拍图读取函数同理：只有抓拍详情在打开后按需读取，列表 / 钩子 / 其他页面都不碰
+  for (const file of moduleFiles) {
+    const code = stripComments(read(file));
+    if (/fetchCaptureImage/.test(code)) {
+      assert.ok(
+        /CaptureResultDetail\.tsx$|api-core\.ts$/.test(file),
+        `${file} 不应读取抓拍图（只有抓拍详情在打开后按需读取）`,
+      );
+    }
+  }
+  const detail = stripComments(sourceOf("CaptureResultDetail.tsx"));
+  assert.ok(detail.includes("source={{ uri: state.uri }}"), "抓拍图 Image 的来源只能是内存里的 data URI");
+  assert.equal(/uri:\s*["'`]https?:/.test(detail), false);
+  assert.ok(detail.includes("AppState.addEventListener") && detail.includes('next !== "active"'), "离开前台（含 inactive）必须关闭详情并丢弃图片");
+  assert.ok(detail.includes("session.dispose()"));
+  assert.ok(detail.includes("createReviewImageScrubber()") && detail.includes("scrubber.release()"), "抓拍图读取也要经 iOS 缓存清理器并在关闭时释放");
+  assert.ok(/scrubber\.wrap\(\(\) => faceMatchApi\.fetchCaptureImage\(/.test(detail), "抓拍图读取须经清理器");
+  assert.equal(/useQuery|useMutation|useInfiniteQuery/.test(detail), false, "抓拍详情不用 react-query 取图");
+  const listScreen = stripComments(sourceOf("FaceCaptureResultsScreen.tsx"));
+  assert.equal(/<Image\b|source=\{\{/.test(listScreen), false, "抓拍列表里不放任何真实照片（缩略图位置只是占位图标）");
+  const captureSession = stripComments(sourceOf("capture-image-session.ts"));
+  assert.ok(captureSession.includes("controller.abort()"), "关闭时中止在途请求");
   const hooks = stripComments(sourceOf("use-face-match.ts"));
+  assert.equal(/fetchCaptureImage|capture-image-session/.test(hooks), false, "抓拍图字节不得经过 react-query 钩子");
   assert.equal(/fetchTaskImage|fetchReferenceImage|image-session/.test(hooks), false, "图片字节不得经过 react-query 钩子");
   assert.equal(/useQuery|useMutation|useInfiniteQuery/.test(modal), false, "复核弹框不用 react-query 取图");
 
@@ -169,6 +192,8 @@ function stripComments(source: string): string {
     '[HttpPost("unwelcome/tasks/{taskId}/review")]',
     '[HttpGet("unwelcome/tasks/{taskId}/image")]',
     '[HttpGet("unwelcome/tasks/{taskId}/reference/{index:int}")]',
+    '[HttpGet("results")]',
+    '[HttpGet("results/{captureId}/images/{imageId}")]',
   ]) {
     assert.ok(faceMatchController.includes(route), `后端缺少路由 ${route}`);
   }
@@ -184,6 +209,8 @@ function stripComments(source: string): string {
     "/unwelcome/tasks/${encodeURIComponent(taskId)}/review",
     "/unwelcome/tasks/${taskId}/image",
     "/unwelcome/tasks/${taskId}/reference/${index}",
+    "`${FACE_MATCH_API_BASE}/results`",
+    "/results/${captureId}/images/${imageId}",
   ]) {
     assert.ok(core.includes(path), `api-core 缺少接口 ${path}`);
   }
@@ -204,6 +231,13 @@ function stripComments(source: string): string {
     }
   }
   assert.ok(sourceOf("constants.ts").includes("PERMISSIONS.FaceMatch.Manage"));
+  // 「抓拍与比对」只认 FaceCapture.Images.View：后端权限码、移动端权限文案与常量一致
+  assert.ok(/=\s*"FaceCapture\.Images\.View"/.test(permissions), "后端没有权限码 FaceCapture.Images.View");
+  for (const lang of ["zh", "en"]) {
+    const labels = JSON.parse(read(join(mobileRoot, `src/locales/${lang}/accessPermissions.json`)));
+    assert.ok(JSON.stringify(labels).includes('"FaceCapture.Images.View"'), `移动端 ${lang}/accessPermissions.json 缺少 FaceCapture.Images.View 的文案`);
+  }
+  assert.ok(sourceOf("constants.ts").includes("PERMISSIONS.FaceCapture.ImagesView"));
 
   // 后端菜单：两个入口各自的权限口径，设备模式白名单不含它们
   const navigation = read(join(repoRoot, "services/backend/BlazorApp.Api/Services/NavigationService.cs"));
@@ -220,6 +254,9 @@ function stripComments(source: string): string {
   const settingsMenu = menuBlock("face-match-settings");
   assert.ok(settingsMenu.includes("Permissions.FaceMatch.Manage") && settingsMenu.includes("Permissions.FaceCapture.Cameras.Manage"));
   assert.equal(settingsMenu.includes("Unwelcome"), false);
+  const resultsMenu = menuBlock("face-capture-results");
+  assert.ok(/Permission\s*=\s*Permissions\.FaceCapture\.Images\.View/.test(resultsMenu), "抓拍与比对入口只认 FaceCapture.Images.View");
+  assert.equal(resultsMenu.includes("AnyPermissions"), false);
   const deviceBase = navigation.slice(navigation.indexOf("DeviceBaseRouteNames = new("), navigation.indexOf("WarehouseDeviceRouteNames = new("));
   assert.equal(deviceBase.includes("face-"), false);
 }
@@ -262,7 +299,7 @@ assert.equal(leaves(zh).length, leaves(en).length, "中英文键数量必须相�
 
 // 代码里用到的文案键
 const usedKeys = new Set<string>();
-const KEY_PREFIXES = /^(messages|states|tabs|filters|disabled|errors|validation|unwelcome|form|photo|leave|review|settings)\.[A-Za-z0-9_.]+$/;
+const KEY_PREFIXES = /^(messages|states|tabs|filters|disabled|errors|validation|unwelcome|form|photo|leave|review|settings|capture|timeline)\.[A-Za-z0-9_.]+$/;
 for (const file of moduleFiles) {
   const code = stripComments(read(file));
   for (const match of code.matchAll(/["'`]([A-Za-z][A-Za-z0-9_.]*\.[A-Za-z0-9_.]+)["'`]/g)) {
@@ -304,6 +341,12 @@ for (const [tree, pattern] of [[zh, /在线|离线/], [en, /online|offline/i]] a
 // 相似度口径：任何展示相似度的文案都写「不等于是同一个人的概率」（旧写法少了「等于」二字，有歧义）
 assert.ok((lookup(zh, "review.similarity") as string).includes("不等于是同一个人的概率"));
 assert.ok((lookup(en, "review.similarity") as string).includes("not the probability"));
+// 「抓拍与比对」页顶部提示同样写明口径；通知发送情况只有人数，文案里不出现姓名
+assert.ok((lookup(zh, "capture.notice") as string).includes("不等于是同一个人的概率"));
+assert.ok((lookup(en, "capture.notice") as string).includes("not the probability"));
+for (const key of ["capture.notify.sent", "capture.timeline.notified", "capture.timeline.read"]) {
+  assert.ok(!/\{\{name\}\}/.test(lookup(zh, key) as string), `${key} 不应出现姓名插值`);
+}
 const AMBIGUOUS_SIMILARITY_WORDING = new RegExp(["不是同一个人", "的概率"].join(""));
 for (const [key, value] of leaves(zh)) {
   assert.equal(AMBIGUOUS_SIMILARITY_WORDING.test(value), false, `${key} 仍是有歧义的旧写法，请写成「不等于是同一个人的概率」`);
@@ -351,6 +394,7 @@ assert.ok((lookup(zh, "review.band.high") as string) === "较高" && (lookup(zh,
     ["app/(shell)/face-unwelcome/index.tsx", "FaceUnwelcomeScreen"],
     ["app/(shell)/face-unwelcome/entry-new.tsx", "EntryFormScreen"],
     ["app/(shell)/face-match-settings.tsx", "FaceMatchSettingsScreen"],
+    ["app/(shell)/face-capture-results.tsx", "FaceCaptureResultsScreen"],
   ];
   for (const [file, component] of routes) {
     const path = join(mobileRoot, file);

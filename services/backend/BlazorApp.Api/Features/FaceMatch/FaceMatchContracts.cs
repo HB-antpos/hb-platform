@@ -36,6 +36,9 @@ public sealed record FaceMatchPermissionFlagsDto
     public bool UnwelcomeManage { get; init; }
     public bool UnwelcomeApprove { get; init; }
     public bool UnwelcomeReview { get; init; }
+
+    /// <summary>可看「抓拍与比对结果」页（持有 FaceCapture.Images.View：结果里的照片是生物识别信息）。</summary>
+    public bool ResultsView { get; init; }
 }
 
 /// <summary>
@@ -448,6 +451,100 @@ public sealed record FaceUnwelcomeTaskDto
 
     /// <summary>当前登录人是否能复核（Review 权限、门店范围内、任务待复核、命中图还在）。</summary>
     public bool CanReview { get; init; }
+
+    /// <summary>
+    /// 命中通知（经通知平台）的发送状态：sent = 已发布给收件人；pending = 尚未发布（排队中或暂时没有收件人，会重试）；
+    /// skipped = 发布前任务已被复核或图片已到期，系统不再发。
+    /// </summary>
+    public string NotifyState { get; init; } = FaceHitNotifyStates.Pending;
+
+    /// <summary>通知发布时间（UTC）；未发布为 null。</summary>
+    public DateTime? NotifiedAtUtc { get; init; }
+
+    /// <summary>通知的收件人数（不含姓名）；未发布为 0。</summary>
+    public int NotifyRecipientCount { get; init; }
+
+    /// <summary>已读收件人数。</summary>
+    public int NotifyReadCount { get; init; }
+}
+
+/// <summary>命中通知发送状态取值（Web / 移动端按字符串映射文案，新增取值时客户端需兜底）。</summary>
+public static class FaceHitNotifyStates
+{
+    public const string Sent = "sent";
+    public const string Pending = "pending";
+    public const string Skipped = "skipped";
+}
+
+/// <summary>「抓拍与比对结果」列表的查询条件；时间按抓拍时间（UTC）。</summary>
+public sealed record FaceCaptureResultQuery
+{
+    public string? StoreCode { get; init; }
+    public string? CameraId { get; init; }
+
+    /// <summary>staff / repeatVisitor / newVisitor / lowQuality / noMatch / notEvaluated，空 = 不限。</summary>
+    public string? Decision { get; init; }
+
+    /// <summary>true = 只看命中不受欢迎名单的抓拍。</summary>
+    public bool HitOnly { get; init; }
+
+    public DateTime? FromUtc { get; init; }
+    public DateTime? ToUtc { get; init; }
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = 20;
+}
+
+/// <summary>抓拍对应的名单命中任务摘要（不含姓名与事件细节）。</summary>
+public sealed record FaceCaptureResultHitDto
+{
+    public string TaskId { get; init; } = string.Empty;
+    public int ScorePercent { get; init; }
+
+    /// <summary>high（较高）/ normal（一般），与复核任务列表同一口径（配置 FaceMatch:Unwelcome:HighBandScore）。</summary>
+    public string Band { get; init; } = "normal";
+
+    public int ReviewStatus { get; init; }
+    public string ReviewStatusName { get; init; } = string.Empty;
+    public bool ImageAvailable { get; init; }
+    public string NotifyState { get; init; } = FaceHitNotifyStates.Pending;
+    public DateTime? NotifiedAtUtc { get; init; }
+    public int NotifyRecipientCount { get; init; }
+    public int NotifyReadCount { get; init; }
+}
+
+/// <summary>
+/// 一次抓拍及其比对结果。分数是相似度（0–100），不是「同一个人的概率」；没有评估行（开关未开、重复抓拍、接口失败）时
+/// Evaluated 为 false，Decision 为 null。图片 ID 只在调用者有看图权限时返回，图片内容另走接口按需读取并写审计。
+/// </summary>
+public sealed record FaceCaptureResultDto
+{
+    public string CaptureId { get; init; } = string.Empty;
+    public string StoreCode { get; init; } = string.Empty;
+    public string? StoreName { get; init; }
+    public string CameraId { get; init; } = string.Empty;
+    public DateTime CapturedAtUtc { get; init; }
+    public int FaceCount { get; init; }
+    public bool IsDuplicate { get; init; }
+    public bool Evaluated { get; init; }
+
+    /// <summary>staff / repeatVisitor / newVisitor / lowQuality / noMatch；未评估为 null。</summary>
+    public string? Decision { get; init; }
+
+    public int? StaffScorePercent { get; init; }
+    public int? VisitScorePercent { get; init; }
+    public string? FaceImageId { get; init; }
+    public string? SceneImageId { get; init; }
+    public FaceCaptureResultHitDto? Hit { get; init; }
+}
+
+public interface IFaceCaptureResultService
+{
+    Task<FaceMatchPageDto<FaceCaptureResultDto>> ListAsync(
+        FaceCaptureResultQuery query, FaceMatchActor actor, bool canViewImages, CancellationToken cancellationToken = default);
+
+    /// <summary>读一张抓拍图：先校验门店范围，再走与摄像机管理页相同的受保护读取（含审计）。</summary>
+    Task<FaceMatchImageContent> GetImageAsync(
+        string captureId, string imageId, FaceMatchActor actor, bool canViewImages, CancellationToken cancellationToken = default);
 }
 
 public sealed record FaceUnwelcomeReviewRequest

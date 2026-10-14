@@ -1,0 +1,27 @@
+{
+  "title": "通知",
+  "markAllRead": "全部已读",
+  "read": "已读",
+  "unread": "未读",
+  "empty": "暂无通知",
+  "priority": {
+    "high": "重要"
+  },
+  "storeLine": "门店 {{store}}",
+  "time": {
+    "yesterday": "昨天"
+  },
+  "states": {
+    "loading": "加载中…",
+    "loadFailed": "加载失败",
+    "loadMoreFailed": "加载更多失败，点击重试",
+    "end": "已经到底了"
+  },
+  "messages": {
+    "notAllowed": "当前账号没有权限使用此功能。",
+    "reviewUnavailable": "审核模式不提供此功能。"
+  },
+  "errors": {
+    "generic": "操作失败，请稍后重试"
+  }
+}

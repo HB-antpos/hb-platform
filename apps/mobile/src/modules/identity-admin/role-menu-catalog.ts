@@ -98,6 +98,8 @@ const MOBILE_MENU: MenuSource[] = ([
   // 与后端 FullAppMenu 的 AnyPermissions 一致：名单管理 / 批准 / 复核任一即可见；不新增权限码。
   ["face-unwelcome", "Unwelcome persons list", "不受欢迎人员名单", ["FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve", "FaceMatch.Unwelcome.Review"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：门店档案管理或摄像机管理任一即可见。
+  // 与后端 FullAppMenu 一致：抓拍与比对结果只认 FaceCapture.Images.View（结果里的照片是生物识别信息）。
+  ["face-capture-results", "Captures and matches", "抓拍与比对", ["FaceCapture.Images.View"]],
   ["face-match-settings", "Face match settings", "人脸比对设置", ["FaceMatch.Manage", "FaceCapture.Cameras.Manage"]],
   ["device-management", "Device management", "设备管理", ["DeviceRegistration.View"]],
   ["reports", "Reports", "报表", ["Reports.ProductMovement.View"]],
@@ -108,6 +110,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["app-install", "Install app", "App 安装", ["System.ViewMobileAppInstallLinks"]],
   ["app-downloads", "App downloads", "应用下载", ["System.ViewAppDownloads"], { requireAdmin: true }],
   ["wpf-versions", "WPF versions", "WPF 版本", ["System.ViewAppDownloads"], { requireAdmin: true }],
+  // 与后端 FullAppMenu 一致：通知收件箱对所有登录账号可见，不需要权限，不能在角色里取消。
+  ["notifications", "Notifications", "通知", [], { fixed: true }],
   ["settings", "Settings", "我的", [], { fixed: true }],
 ] as MenuRow[]).map(toSource("mobile"));
 

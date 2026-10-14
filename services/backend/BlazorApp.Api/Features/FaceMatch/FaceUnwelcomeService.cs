@@ -771,10 +771,13 @@ public sealed class FaceUnwelcomeService(
             _db, tasks.SelectMany(t => new[] { t.FirstReviewerId, t.SecondReviewerId }), cancellationToken);
         var highBand = settingsProvider.Options.Unwelcome.HighBandScore;
         var allowedStores = await GetAllowedStoresAsync(actor, cancellationToken);
+        // 命中通知的发送情况（发给几个人、几个人已读），与「抓拍与比对结果」页同一口径。
+        var notifyInfos = await FaceHitNotifyLookup.LoadAsync(_db, tasks, cancellationToken);
 
         return tasks.Select(t =>
         {
             entries.TryGetValue(t.EntryId, out var entry);
+            var notify = notifyInfos.GetValueOrDefault(t.TaskId);
             var referenceCount = entry is { Status: FaceUnwelcomeEntryStatus.Active or FaceUnwelcomeEntryStatus.Pending }
                 ? FaceMatchRules.ParseKeys(entry.PhotoObjectKeysJson).Count
                 : 0;
@@ -808,6 +811,10 @@ public sealed class FaceUnwelcomeService(
                 ReferencePhotoCount = referenceCount,
                 NextStep = nextStep,
                 CanReview = canReview,
+                NotifyState = notify?.State ?? FaceHitNotifyStates.Pending,
+                NotifiedAtUtc = notify?.NotifiedAtUtc,
+                NotifyRecipientCount = notify?.RecipientCount ?? 0,
+                NotifyReadCount = notify?.ReadCount ?? 0,
             };
         }).ToList();
     }
@@ -850,20 +857,8 @@ public sealed class FaceUnwelcomeService(
     }
 
     /// <summary>非管理员可见的门店编码集合；管理员返回 null（不限）。</summary>
-    private async Task<HashSet<string>?> GetAllowedStoresAsync(FaceMatchActor actor, CancellationToken cancellationToken)
-    {
-        if (actor.IsAdmin)
-        {
-            return null;
-        }
-
-        var codes = await _db.Queryable<UserStore>()
-            .InnerJoin<Store>((link, store) => link.StoreGUID == store.StoreGUID)
-            .Where((link, store) => link.UserGUID == actor.Id && !link.IsDeleted && !store.IsDeleted)
-            .Select((link, store) => store.StoreCode)
-            .ToListAsync(cancellationToken);
-        return codes.ToHashSet(StringComparer.Ordinal);
-    }
+    private Task<HashSet<string>?> GetAllowedStoresAsync(FaceMatchActor actor, CancellationToken cancellationToken) =>
+        FaceMatchScope.GetAllowedStoresAsync(_db, actor, cancellationToken);
 
     private async Task<List<string>> NormalizeStoreScopeAsync(
         IReadOnlyList<string>? requested, FaceMatchActor actor, CancellationToken cancellationToken)

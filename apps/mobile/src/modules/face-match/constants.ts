@@ -14,6 +14,7 @@ export const FACE_MATCH_PERMISSIONS = {
   unwelcomeApprove: PERMISSIONS.FaceMatch.Unwelcome.Approve,
   unwelcomeReview: PERMISSIONS.FaceMatch.Unwelcome.Review,
   camerasManage: PERMISSIONS.FaceCapture.CamerasManage,
+  imagesView: PERMISSIONS.FaceCapture.ImagesView,
 } as const;
 
 // ───────────── 字段与上传规则（与后端、Web 一致） ─────────────

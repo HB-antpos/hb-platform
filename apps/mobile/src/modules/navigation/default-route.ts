@@ -33,6 +33,8 @@ export type AppTabPath =
   | "/(shell)/employee-profile-review"
   | "/(shell)/face-unwelcome"
   | "/(shell)/face-match-settings"
+  | "/(shell)/face-capture-results"
+  | "/(shell)/notifications"
   | "/(shell)/legacy-employee-logs"
   | "/(shell)/daily-closes"
   | "/(shell)/device-management"
@@ -77,6 +79,8 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   "employee-profile-review": "/(shell)/employee-profile-review",
   "face-unwelcome": "/(shell)/face-unwelcome",
   "face-match-settings": "/(shell)/face-match-settings",
+  "face-capture-results": "/(shell)/face-capture-results",
+  notifications: "/(shell)/notifications",
   "legacy-employee-logs": "/(shell)/legacy-employee-logs",
   "daily-closes": "/(shell)/daily-closes",
   "device-management": "/(shell)/device-management",
@@ -100,6 +104,9 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   // 参考照片与命中抓拍是生物识别信息，人脸比对相关接口按账号权限授权，设备会话没有用户账号，设备模式不展示这两个入口。
   "face-unwelcome",
   "face-match-settings",
+  // 抓拍结果含生物识别照片、通知收件箱按用户账号计算，设备会话都没有对应身份，设备模式不展示。
+  "face-capture-results",
+  "notifications",
   // 设备会话没有用户账号，老收银操作日志按账号可管理分店授权，设备模式不展示入口。
   "legacy-employee-logs",
   // 日结记录同样按账号权限与可查看分店授权，设备会话没有用户账号，设备模式不展示入口。

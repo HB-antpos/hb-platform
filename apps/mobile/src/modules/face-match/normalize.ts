@@ -3,6 +3,8 @@
 import type {
   FaceCamera,
   FaceCameraList,
+  FaceCaptureHit,
+  FaceCaptureResult,
   FaceGateFacet,
   FaceGateReport,
   FaceMatchConfig,
@@ -203,6 +205,49 @@ export function normalizeFaceUnwelcomeEntryPage(value: unknown): FaceMatchPage<F
 
 export function normalizeFaceUnwelcomeTaskPage(value: unknown): FaceMatchPage<FaceUnwelcomeTask> {
   return normalizePage(value, normalizeFaceUnwelcomeTask);
+}
+
+function normalizeFaceCaptureHit(value: unknown): FaceCaptureHit | null {
+  const raw = asRecord(value);
+  const taskId = asString(raw.taskId);
+  // 没有任务编号的命中无法关联到复核页，当作没有命中。
+  if (!taskId) return null;
+  return {
+    taskId,
+    scorePercent: asNumber(raw.scorePercent),
+    band: asBand(raw.band),
+    reviewStatus: asNumber(raw.reviewStatus),
+    reviewStatusName: asString(raw.reviewStatusName),
+    imageAvailable: raw.imageAvailable === true,
+    notifyState: asString(raw.notifyState),
+    notifiedAtUtc: asNullableString(raw.notifiedAtUtc),
+    notifyRecipientCount: asNumber(raw.notifyRecipientCount),
+    notifyReadCount: asNumber(raw.notifyReadCount),
+  };
+}
+
+export function normalizeFaceCaptureResult(value: unknown): FaceCaptureResult {
+  const raw = asRecord(value);
+  return {
+    captureId: asString(raw.captureId),
+    storeCode: asString(raw.storeCode),
+    storeName: asNullableString(raw.storeName),
+    cameraId: asString(raw.cameraId),
+    capturedAtUtc: asString(raw.capturedAtUtc),
+    faceCount: asNumber(raw.faceCount),
+    isDuplicate: raw.isDuplicate === true,
+    evaluated: raw.evaluated === true,
+    decision: asNullableString(raw.decision),
+    staffScorePercent: asNullableNumber(raw.staffScorePercent),
+    visitScorePercent: asNullableNumber(raw.visitScorePercent),
+    faceImageId: asNullableString(raw.faceImageId),
+    sceneImageId: asNullableString(raw.sceneImageId),
+    hit: normalizeFaceCaptureHit(raw.hit),
+  };
+}
+
+export function normalizeFaceCaptureResultPage(value: unknown): FaceMatchPage<FaceCaptureResult> {
+  return normalizePage(value, normalizeFaceCaptureResult);
 }
 
 export function normalizeFaceCamera(value: unknown): FaceCamera {

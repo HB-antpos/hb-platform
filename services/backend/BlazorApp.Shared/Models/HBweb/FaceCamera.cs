@@ -57,6 +57,10 @@ public sealed class FaceCaptureEvent
     [SugarColumn(IsNullable = false, Length = 64)]
     public string CameraId { get; set; } = string.Empty;
 
+    /// <summary>门店编号（接收端按摄像机所属门店写入）；「抓拍与比对结果」按它做门店范围过滤。</summary>
+    [SugarColumn(IsNullable = false, Length = 32)]
+    public string StoreCode { get; set; } = string.Empty;
+
     [SugarColumn(IsNullable = false)]
     public DateTime ReceivedAtUtc { get; set; }
 

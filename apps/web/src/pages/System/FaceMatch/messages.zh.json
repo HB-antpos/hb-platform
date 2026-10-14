@@ -10,8 +10,10 @@
       "traffic": "客流统计",
       "unwelcome": "不受欢迎人员名单",
       "review": "复核任务",
+      "results": "抓拍与比对",
       "stats": "误报统计",
-      "audit": "审计"
+      "audit": "审计",
+      "newBadge": "新"
     },
     "disabled": {
       "title": "功能未开启",
@@ -428,7 +430,8 @@
         "capturedAt": "抓拍时间",
         "similarity": "相似度（不等于是同一个人的概率）",
         "nextStep": "下一步",
-        "reviewers": "复核人"
+        "reviewers": "复核人",
+        "notify": "命中通知"
       },
       "autoConfirmedTag": "自动确认",
       "autoConfirmedBy": "系统自动确认",
@@ -477,6 +480,111 @@
         "missing": "图片不存在",
         "failed": "图片读取失败，请稍后重试",
         "gone": "图片已被清理或不存在"
+      }
+    },
+    "notify": {
+      "sent": "已发送",
+      "pending": "排队中",
+      "skipped": "已跳过",
+      "unknown": "其他状态",
+      "pendingHint": "等待发布",
+      "skippedHint": "无需再发",
+      "counts": "{{recipients}} 人 · 已读 {{read}}"
+    },
+    "results": {
+      "intro": "本页显示 Capture（留存）模式下门店留存的抓拍及比对分数；Match（比对）模式处理完即删除，不会出现在这里（名单命中请到“复核任务”查看）。请注意：相似度不等于是同一个人的概率。",
+      "filters": {
+        "allStores": "全部门店",
+        "allCameras": "全部摄像机",
+        "allDecisions": "全部判定",
+        "rangeStart": "开始时间",
+        "rangeEnd": "结束时间",
+        "presetToday": "今天",
+        "presetLast24h": "最近 24 小时",
+        "presetLast7d": "最近 7 天",
+        "hitOnly": "只看名单命中"
+      },
+      "columns": {
+        "photo": "照片",
+        "capturedAt": "抓拍时间",
+        "storeCamera": "门店 / 摄像机",
+        "decision": "判定",
+        "staffScore": "员工相似度",
+        "visitScore": "访客相似度",
+        "hit": "名单命中",
+        "notify": "命中通知"
+      },
+      "view": "查看",
+      "photoPlaceholder": "照片需点“查看”后才会读取",
+      "duplicateTag": "重复抓拍",
+      "hitImageGone": "命中图已删除",
+      "empty": "没有符合条件的抓拍",
+      "footnote": "照片是生物识别信息：点“查看”才会按需读取，每次查看都会被记录（谁、何时、看了哪张）。",
+      "decision": {
+        "staff": "员工",
+        "repeatVisitor": "回头客",
+        "newVisitor": "新访客",
+        "lowQuality": "质量不足",
+        "noMatch": "无匹配",
+        "notEvaluated": "未评估",
+        "unknown": "其他"
+      },
+      "imageErrors": {
+        "notConfigured": "图片读取尚未配置",
+        "local": "图片暂未转存，请稍后再试",
+        "forbidden": "没有权限查看该图片",
+        "unauthorized": "登录已过期，请重新登录后再试",
+        "missing": "图片不存在或已被清理",
+        "failed": "图片读取失败，请稍后重试"
+      },
+      "drawer": {
+        "title": "抓拍详情 · {{store}}",
+        "sensitiveNotice": "照片是生物识别信息。本次查看会被记录（谁、何时、看了哪张），请勿截图外传。",
+        "imageCaption": "左：人脸小图　右：现场背景图",
+        "faceImage": "人脸小图",
+        "sceneImage": "现场背景图",
+        "noImage": "没有这张图片",
+        "loadingImage": "正在读取图片…",
+        "sections": {
+          "capture": "抓拍信息",
+          "compare": "比对结果",
+          "hit": "不受欢迎人员名单命中",
+          "notify": "通知发送情况"
+        },
+        "fields": {
+          "capturedAt": "抓拍时间",
+          "camera": "摄像机",
+          "faceCount": "人脸数",
+          "duplicate": "重复抓拍",
+          "decision": "判定",
+          "staffScore": "员工相似度",
+          "visitScore": "访客相似度",
+          "similarity": "相似度",
+          "reviewStatus": "复核状态"
+        },
+        "yes": "是",
+        "no": "否",
+        "scoreNote": "分数是相似度（0–100），相似度不等于是同一个人的概率。",
+        "notProbability": "（不等于是同一个人的概率）",
+        "noHit": "这张抓拍没有命中不受欢迎人员名单。",
+        "notifyTextTitle": "通知文案（仅英文，不含姓名与照片）",
+        "goReview": "去复核",
+        "goReviewImageGone": "命中图已删除，不能再复核",
+        "goReviewNoAccess": "你没有复核任务的查看权限",
+        "close": "关闭"
+      },
+      "timeline": {
+        "created": "命中任务已创建",
+        "sent": "通知已发布给 {{count}} 位收件人",
+        "read": "已读 {{read}} / {{total}}",
+        "readHint": "只显示人数，不显示姓名",
+        "queued": "通知排队中",
+        "queuedHint": "暂未发布，系统会自动重试",
+        "skipped": "通知已跳过",
+        "skippedHint": "发布前任务已被复核或命中图已到期，系统不再发送",
+        "reviewPendingHint": "复核后任务关闭，通知不再提醒",
+        "reviewDoneHint": "任务已结束",
+        "reviewUnknown": "复核状态未知"
       }
     },
     "stats": {

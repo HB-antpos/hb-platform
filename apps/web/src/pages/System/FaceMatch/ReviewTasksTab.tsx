@@ -21,7 +21,7 @@ import {
   formatSimilarityPercent,
   getReviewStep,
 } from './logic'
-import { NUMERIC_STYLE, Pager, StoreSelect, type FaceMatchTabContext } from './shared'
+import { NUMERIC_STYLE, NotifyStateCell, Pager, StoreSelect, type FaceMatchTabContext } from './shared'
 import ReviewTaskModal from './ReviewTaskModal'
 import { useRemote } from './useRemote'
 
@@ -88,6 +88,15 @@ export default function ReviewTasksTab({ context }: { context: FaceMatchTabConte
             {record.autoConfirmed ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{t('faceMatch.review.autoConfirmedTag')}</Tag> : null}
             {!record.imageAvailable ? <Tag style={{ marginInlineEnd: 0 }}>{t('faceMatch.review.imageDeleted')}</Tag> : null}
           </Space>
+        ),
+      },
+      {
+        // 命中通知（经通知平台）的发送状态：只显示人数，不显示收件人姓名。
+        title: t('faceMatch.review.columns.notify'),
+        key: 'notify',
+        width: 200,
+        render: (_: unknown, record) => (
+          <NotifyStateCell state={record.notifyState} recipients={record.notifyRecipientCount} read={record.notifyReadCount} />
         ),
       },
       {
@@ -170,7 +179,7 @@ export default function ReviewTasksTab({ context }: { context: FaceMatchTabConte
         dataSource={tasks.data?.items ?? []}
         columns={columns}
         pagination={false}
-        scroll={{ x: 1300 }}
+        scroll={{ x: 1500 }}
         locale={{ emptyText: t('faceMatch.review.empty') }}
       />
       <Pager page={page} hasMore={tasks.data?.hasMore === true} loading={tasks.loading} onChange={setPage} />

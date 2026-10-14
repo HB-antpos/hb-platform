@@ -4,6 +4,9 @@ import type {
   CreateFaceEnrollmentInput,
   CreateFaceUnwelcomeEntryInput,
   FaceAuditItem,
+  FaceCaptureResult,
+  FaceCaptureResultHit,
+  FaceCaptureResultQuery,
   FaceConsent,
   FaceConsentWithdrawResult,
   FaceEnrollment,
@@ -84,6 +87,8 @@ export function normalizeFaceMatchConfig(value: unknown): FaceMatchConfig {
     unwelcomeManage: permissions.unwelcomeManage === true,
     unwelcomeApprove: permissions.unwelcomeApprove === true,
     unwelcomeReview: permissions.unwelcomeReview === true,
+    // 老后端没有这个字段：按没有「抓拍与比对」权限处理。
+    resultsView: permissions.resultsView === true,
   }
   return {
     enabled: raw.enabled === true,
@@ -322,6 +327,16 @@ function asBand(value: unknown): FaceUnwelcomeBand {
   return value === 'high' ? 'high' : 'normal'
 }
 
+/** 命中通知的四个字段（复核任务与抓拍结果的命中摘要共用）：缺失按「排队中、0 人」，计数不为负。 */
+function normalizeNotifyFields(raw: Record<string, unknown>) {
+  return {
+    notifyState: asNullableString(raw.notifyState) ?? 'pending',
+    notifiedAtUtc: asNullableString(raw.notifiedAtUtc),
+    notifyRecipientCount: Math.max(0, Math.trunc(asNumber(raw.notifyRecipientCount))),
+    notifyReadCount: Math.max(0, Math.trunc(asNumber(raw.notifyReadCount))),
+  }
+}
+
 export function normalizeFaceUnwelcomeTask(value: unknown): FaceUnwelcomeTask {
   const raw = asRecord(value)
   const score = asNumber(raw.score)
@@ -349,6 +364,53 @@ export function normalizeFaceUnwelcomeTask(value: unknown): FaceUnwelcomeTask {
     canReview: raw.canReview === true,
     // 老后端没有这个字段：按「人工复核的任务」处理。
     autoConfirmed: raw.autoConfirmed === true,
+    ...normalizeNotifyFields(raw),
+  }
+}
+
+/** 相似度百分比：不是有限数字时为 null（页面显示「—」），否则四舍五入并夹在 0-100。 */
+function asPercent(value: unknown): number | null {
+  const number = asNullableNumber(value)
+  return number === null ? null : Math.min(100, Math.max(0, Math.round(number)))
+}
+
+function normalizeCaptureResultHit(value: unknown): FaceCaptureResultHit | null {
+  // 没有命中：null / 缺失 / 不是对象；没有任务编号的命中无法定位，也当作没有。
+  if (!value || typeof value !== 'object') return null
+  const raw = asRecord(value)
+  const taskId = asString(raw.taskId)
+  if (!taskId) return null
+  return {
+    taskId,
+    scorePercent: asPercent(raw.scorePercent) ?? 0,
+    // 档位只认后端明确给出的值；当前接口不返回，页面不自己用阈值划档。
+    band: raw.band === 'high' ? 'high' : raw.band === 'normal' ? 'normal' : null,
+    reviewStatus: asNumber(raw.reviewStatus),
+    reviewStatusName: asString(raw.reviewStatusName),
+    imageAvailable: raw.imageAvailable === true,
+    ...normalizeNotifyFields(raw),
+  }
+}
+
+export function normalizeFaceCaptureResult(value: unknown): FaceCaptureResult {
+  const raw = asRecord(value)
+  const evaluated = raw.evaluated === true
+  return {
+    captureId: asString(raw.captureId),
+    storeCode: asString(raw.storeCode),
+    storeName: asNullableString(raw.storeName),
+    cameraId: asString(raw.cameraId),
+    capturedAtUtc: asString(raw.capturedAtUtc),
+    faceCount: Math.max(0, Math.trunc(asNumber(raw.faceCount))),
+    isDuplicate: raw.isDuplicate === true,
+    evaluated,
+    // 判定保留原始取值（未知取值由页面兜底展示）；未评估一律没有判定。
+    decision: evaluated ? asNullableString(raw.decision) : null,
+    staffScorePercent: asPercent(raw.staffScorePercent),
+    visitScorePercent: asPercent(raw.visitScorePercent),
+    faceImageId: asNullableString(raw.faceImageId),
+    sceneImageId: asNullableString(raw.sceneImageId),
+    hit: normalizeCaptureResultHit(raw.hit),
   }
 }
 
@@ -698,4 +760,43 @@ export async function fetchUnwelcomeReferenceImage(taskId: string, index: number
     throw invalidImageTarget()
   }
   return fetchImageBlob(`${API_BASE}/unwelcome/tasks/${taskId}/reference/${index}`, signal)
+}
+
+// ───────────── 抓拍与比对结果 ─────────────
+
+/** 后端单页上限 50。 */
+export const RESULTS_PAGE_SIZE_MAX = 50
+
+/**
+ * 抓拍与比对结果列表（需要 FaceCapture.Images.View）。列表只有图片编号，没有任何图片字节。
+ * 条件里的空串 / false 不带上；fromUtc 含、toUtc 不含。
+ */
+export async function getFaceCaptureResults(
+  query: FaceCaptureResultQuery,
+  signal?: AbortSignal,
+): Promise<FaceMatchPage<FaceCaptureResult>> {
+  const response = await request.get<Envelope>(`${API_BASE}/results`, {
+    params: {
+      storeCode: query.storeCode || undefined,
+      cameraId: query.cameraId || undefined,
+      decision: query.decision || undefined,
+      hitOnly: query.hitOnly ? 'true' : undefined,
+      fromUtc: query.fromUtc || undefined,
+      toUtc: query.toUtc || undefined,
+      page: query.page,
+      pageSize: Math.min(RESULTS_PAGE_SIZE_MAX, Math.max(1, query.pageSize)),
+    },
+    signal,
+    ...NO_STORE,
+  })
+  return normalizePage(unwrapApiData(response), normalizeFaceCaptureResult)
+}
+
+/**
+ * 抓拍结果里的一张图片：GET /results/{captureId}/images/{imageId}（需 FaceCapture.Images.View，服务端每次读取都写审计）。
+ * 只能由用户点「查看」或打开详情后按需调用；编号发请求前先校验，非法编号不发请求。
+ */
+export async function fetchFaceCaptureResultImage(captureId: string, imageId: string, signal?: AbortSignal): Promise<Blob> {
+  if (!IMAGE_PATH_TASK_ID.test(captureId) || !IMAGE_PATH_TASK_ID.test(imageId)) throw invalidImageTarget()
+  return fetchImageBlob(`${API_BASE}/results/${captureId}/images/${imageId}`, signal)
 }

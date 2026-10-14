@@ -1121,6 +1121,11 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.FaceMatch.IFaceTrafficService,
     BlazorApp.Api.Features.FaceMatch.FaceTrafficService
 >();
+// 「抓拍与比对结果」读取服务：只读，图片经摄像机管理页同一套受保护读取（IFaceCaptureImageService）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceMatch.IFaceCaptureResultService,
+    BlazorApp.Api.Features.FaceMatch.FaceCaptureResultService
+>();
 builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceMatchMaintenance>();
 // 门店分时客流投影（FaceTrafficBucket → FaceTrafficHourly，迁移 20261016.001-face-traffic-hourly）：由 FaceMatchBackgroundService 任务⑧每 10 分钟驱动。
 builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceTrafficHourlyProjector>();

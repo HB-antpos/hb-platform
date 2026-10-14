@@ -210,6 +210,16 @@ assert.equal(
   "人脸比对设置从工作台进入，不能新增一级导航"
 );
 assert.equal(
+  compactPrimaryItems("face-capture-results", [...fullMenu, "face-capture-results"])[0]?.active,
+  true,
+  "抓拍与比对从工作台进入，不能新增一级导航"
+);
+assert.equal(
+  compactPrimaryItems("notifications", [...fullMenu, "notifications"])[0]?.active,
+  true,
+  "通知收件箱从工作台进入，不能新增一级导航"
+);
+assert.equal(
   compactPrimaryItems("attendance-management", fullMenu)[2]?.active,
   true,
   "考勤管理页也必须高亮打卡，而不是改变打卡的个人考勤目标"
@@ -555,6 +565,36 @@ assert.equal(zhWorkbench.routes.faceUnwelcome, "不受欢迎人员名单", "中�
 assert.equal(zhWorkbench.routes.faceMatchSettings, "人脸比对设置", "中文工作台必须显示人脸比对设置");
 assert.equal(enWorkbench.routes.faceUnwelcome, "Unwelcome persons list", "英文工作台必须显示 Unwelcome persons list");
 assert.equal(enWorkbench.routes.faceMatchSettings, "Face match settings", "英文工作台必须显示 Face match settings");
+assert.deepEqual(
+  buildWorkbenchSections(["face-unwelcome", "face-capture-results", "face-match-settings"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "people-management",
+      itemRouteNames: ["face-unwelcome", "face-capture-results", "face-match-settings"],
+    },
+  ],
+  "抓拍与比对必须归入人员与管理，紧跟不受欢迎人员名单，只依赖后端显式菜单"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["daily-closes", "notifications"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    {
+      key: "operations-reports",
+      itemRouteNames: ["daily-closes", "notifications"],
+    },
+  ],
+  "通知收件箱必须归入运营与报表，只依赖后端显式菜单"
+);
+assert.equal(zhWorkbench.routes.faceCaptureResults, "抓拍与比对", "中文工作台必须显示抓拍与比对");
+assert.equal(enWorkbench.routes.faceCaptureResults, "Captures and matches", "英文工作台必须显示 Captures and matches");
+assert.equal(zhWorkbench.routes.notifications, "通知", "中文工作台必须显示通知");
+assert.equal(enWorkbench.routes.notifications, "Notifications", "英文工作台必须显示 Notifications");
 assert.equal(zhWorkbench.routes.dailyCloses, "日结记录", "中文工作台必须显示日结记录");
 assert.equal(enWorkbench.routes.dailyCloses, "Daily closes", "英文工作台必须显示 Daily closes");
 assert.deepEqual(

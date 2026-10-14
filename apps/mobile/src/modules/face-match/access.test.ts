@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   canSubmitEntries,
+  canViewFaceCaptureResults,
   canViewFaceMatchSettings,
   canViewFaceUnwelcome,
   getVisibleUnwelcomeTabs,
@@ -19,6 +20,7 @@ assert.deepEqual(FACE_MATCH_PERMISSIONS, {
   unwelcomeApprove: "FaceMatch.Unwelcome.Approve",
   unwelcomeReview: "FaceMatch.Unwelcome.Review",
   camerasManage: "FaceCapture.Cameras.Manage",
+  imagesView: "FaceCapture.Images.View",
 });
 
 // ───────── 名单页入口：名单 Manage / Approve / Review 任一 ─────────
@@ -73,3 +75,11 @@ assert.equal(isWriteBlocked({ enabled: true }), false);
 }
 
 console.log("access.test.ts: ok");
+
+// ───────── 「抓拍与比对」入口：只认 FaceCapture.Images.View（结果里的照片是生物识别信息） ─────────
+assert.equal(canViewFaceCaptureResults(true, has("FaceCapture.Images.View"), false), true);
+for (const code of ["FaceMatch.Manage", "FaceMatch.Unwelcome.Review", "FaceCapture.Cameras.Manage", "FaceMatch.Traffic.View"]) {
+  assert.equal(canViewFaceCaptureResults(true, has(code), false), false, `${code} 不能打开抓拍与比对`);
+}
+assert.equal(canViewFaceCaptureResults(false, has("FaceCapture.Images.View"), false), false, "未登录不可见");
+assert.equal(canViewFaceCaptureResults(true, has("FaceCapture.Images.View"), true), false, "iOS 审核模式不可见");

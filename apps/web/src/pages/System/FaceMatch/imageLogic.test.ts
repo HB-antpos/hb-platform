@@ -4,7 +4,12 @@ import { RequestError } from '../../../utils/request'
 import type { ObjectUrlApi } from '../FaceCameras/imageLogic'
 import {
   CAPTURE_SLOT,
+  RESULT_IMAGE_ERROR_KEYS,
   REVIEW_IMAGE_ERROR_KEYS,
+  classifyResultImageError,
+  createResultImageSession,
+  isSharedResultImageFailure,
+  type ResultImageStates,
   classifyReviewImageError,
   createPreviewManager,
   createReviewImageSession,
@@ -302,6 +307,179 @@ assert.equal(isSharedImageFailure('failed'), false)
   assert.equal(afterDispose.size, 0, '卸载后不再创建 URL')
   assert.equal(fake.live.size, 0)
   manager.dispose() // 幂等
+}
+
+// ───────── 抓拍与比对：图片错误分类（沿用 FACE_IMAGE_* 错误码）─────────
+assert.equal(classifyResultImageError(failure(403, 'FACE_IMAGE_FORBIDDEN')), 'forbidden')
+assert.equal(classifyResultImageError(failure(403)), 'forbidden')
+assert.equal(classifyResultImageError(failure(401)), 'unauthorized')
+assert.equal(classifyResultImageError(failure(404, 'FACE_IMAGE_NOT_FOUND')), 'missing')
+assert.equal(classifyResultImageError(failure(404, 'FACE_IMAGE_OBJECT_MISSING')), 'missing')
+assert.equal(classifyResultImageError(failure(409, 'FACE_IMAGE_NOT_IN_COS')), 'local', '图片还在接收服务本地：暂未转存')
+assert.equal(classifyResultImageError(failure(503, 'FACE_IMAGE_STORE_NOT_CONFIGURED')), 'notConfigured')
+assert.equal(classifyResultImageError(failure(502, 'FACE_IMAGE_STORE_ERROR')), 'failed')
+assert.equal(classifyResultImageError(failure(500)), 'failed')
+assert.equal(classifyResultImageError(new Error('boom')), 'failed')
+assert.deepEqual(Object.keys(RESULT_IMAGE_ERROR_KEYS).sort(), ['failed', 'forbidden', 'local', 'missing', 'notConfigured', 'unauthorized'])
+assert.equal(isSharedResultImageFailure('forbidden'), true)
+assert.equal(isSharedResultImageFailure('notConfigured'), true)
+assert.equal(isSharedResultImageFailure('unauthorized'), true)
+assert.equal(isSharedResultImageFailure('missing'), false, '单张不存在不影响另一张')
+assert.equal(isSharedResultImageFailure('failed'), false)
+
+// ───────── 抓拍与比对：图片会话（先人脸小图再背景图、按需、dispose 撤销）─────────
+{
+  const fake = createFakeUrlApi()
+  const order: string[] = []
+  let last: ResultImageStates = new Map()
+  const session = createResultImageSession({
+    fetchers: {
+      scene: async () => {
+        order.push('scene')
+        return blob(2)
+      },
+      face: async () => {
+        order.push('face')
+        return blob(1)
+      },
+    },
+    onChange: (states) => {
+      last = states
+    },
+    urlApi: fake.api,
+  })
+  assert.equal(order.length, 0, '创建会话本身不请求任何图片')
+  await session.start()
+  assert.deepEqual(order, ['face', 'scene'], '先人脸小图，再背景图')
+  assert.equal(last.get('face')?.status, 'loaded')
+  assert.equal(last.get('scene')?.status, 'loaded')
+  assert.equal(fake.live.size, 2)
+  session.dispose()
+  assert.equal(fake.live.size, 0, 'dispose 撤销全部 objectURL')
+  assert.equal(fake.revoked.length, 2)
+  assert.equal(session.getStates().size, 0, 'dispose 清空状态')
+  session.dispose() // 幂等
+  assert.equal(fake.revoked.length, 2)
+}
+
+// 没有传 fetcher 的槽位不请求（后端没给图片编号）
+{
+  const fake = createFakeUrlApi()
+  const order: string[] = []
+  const session = createResultImageSession({
+    fetchers: { face: async () => (order.push('face'), blob(1)) },
+    onChange: () => undefined,
+    urlApi: fake.api,
+  })
+  await session.start()
+  assert.deepEqual(order, ['face'])
+  assert.equal(session.getStates().has('scene'), false)
+  session.dispose()
+  const empty = createResultImageSession({ fetchers: {}, onChange: () => undefined, urlApi: fake.api })
+  await empty.start()
+  assert.equal(empty.getStates().size, 0)
+  empty.dispose()
+}
+
+// 关闭后才返回的响应：拿不到 URL，不泄漏；并且不再请求下一张
+{
+  const fake = createFakeUrlApi()
+  let resolveFace: (value: Blob) => void = () => undefined
+  let sceneCalls = 0
+  const session = createResultImageSession({
+    fetchers: {
+      face: () => new Promise<Blob>((resolve) => {
+        resolveFace = resolve
+      }),
+      scene: async () => {
+        sceneCalls += 1
+        return blob(2)
+      },
+    },
+    onChange: () => undefined,
+    urlApi: fake.api,
+  })
+  const started = session.start()
+  session.dispose()
+  resolveFace(blob(1))
+  await started
+  await flush()
+  assert.equal(fake.created.length, 0, '关闭后才到达的响应不得创建 objectURL')
+  assert.equal(fake.live.size, 0)
+  assert.equal(sceneCalls, 0, '关闭后不再继续请求背景图')
+}
+
+// dispose 会中止在途请求
+{
+  const fake = createFakeUrlApi()
+  let seenSignal: AbortSignal | null = null
+  const session = createResultImageSession({
+    fetchers: {
+      face: (signal) => {
+        seenSignal = signal
+        return new Promise<Blob>((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+      },
+    },
+    onChange: () => undefined,
+    urlApi: fake.api,
+  })
+  const started = session.start()
+  assert.equal((seenSignal as AbortSignal | null)?.aborted, false)
+  session.dispose()
+  assert.equal((seenSignal as AbortSignal | null)?.aborted, true)
+  await started
+}
+
+// 失败：共享失败（无权限等）不再请求另一张；单张失败不影响另一张
+{
+  const fake = createFakeUrlApi()
+  const order: string[] = []
+  let last: ResultImageStates = new Map()
+  const forbidden = createResultImageSession({
+    fetchers: {
+      face: async () => {
+        order.push('face')
+        throw failure(403, 'FACE_IMAGE_FORBIDDEN')
+      },
+      scene: async () => {
+        order.push('scene')
+        return blob(2)
+      },
+    },
+    onChange: (states) => {
+      last = states
+    },
+    urlApi: fake.api,
+  })
+  await forbidden.start()
+  assert.deepEqual(order, ['face'], '无权限：不再请求背景图（也不多写一次审计）')
+  assert.deepEqual(last.get('face'), { status: 'error', kind: 'forbidden' })
+  assert.deepEqual(last.get('scene'), { status: 'error', kind: 'forbidden' })
+  forbidden.dispose()
+
+  order.length = 0
+  const partial = createResultImageSession({
+    fetchers: {
+      face: async () => {
+        order.push('face')
+        throw failure(404, 'FACE_IMAGE_OBJECT_MISSING')
+      },
+      scene: async () => {
+        order.push('scene')
+        return blob(2)
+      },
+    },
+    onChange: (states) => {
+      last = states
+    },
+    urlApi: fake.api,
+  })
+  await partial.start()
+  assert.deepEqual(order, ['face', 'scene'])
+  assert.deepEqual(last.get('face'), { status: 'error', kind: 'missing' })
+  assert.equal(last.get('scene')?.status, 'loaded')
+  partial.dispose()
+  assert.equal(fake.live.size, 0)
 }
 
 console.log('FaceMatch imageLogic.test: ok')

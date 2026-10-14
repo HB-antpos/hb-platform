@@ -70,7 +70,7 @@ CREATE TABLE FaceAuditLog (
     Result nvarchar(32) NOT NULL
 )
 """);
-        Db.Ado.ExecuteCommand("CREATE TABLE FaceCaptureImage (ImageId char(32) NOT NULL PRIMARY KEY, CaptureId char(32) NOT NULL)");
+        Db.Ado.ExecuteCommand("CREATE TABLE FaceCaptureImage (ImageId char(32) NOT NULL PRIMARY KEY, CaptureId char(32) NOT NULL, Kind tinyint NOT NULL DEFAULT 0, PartIndex int NOT NULL DEFAULT 0)");
         Context = FaceCameraAdminTests.CreateSqlSugarContext(Db);
         SeedStores();
     }

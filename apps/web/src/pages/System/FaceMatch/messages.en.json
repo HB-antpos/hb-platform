@@ -10,8 +10,10 @@
       "traffic": "Traffic",
       "unwelcome": "Unwelcome Persons List",
       "review": "Review tasks",
+      "results": "Captures & matches",
       "stats": "False-positive stats",
-      "audit": "Audit"
+      "audit": "Audit",
+      "newBadge": "New"
     },
     "disabled": {
       "title": "Feature not enabled",
@@ -428,7 +430,8 @@
         "capturedAt": "Captured at",
         "similarity": "Similarity (not the probability of being the same person)",
         "nextStep": "Next step",
-        "reviewers": "Reviewers"
+        "reviewers": "Reviewers",
+        "notify": "Match notification"
       },
       "autoConfirmedTag": "Auto-confirmed",
       "autoConfirmedBy": "Confirmed automatically by the system",
@@ -477,6 +480,111 @@
         "missing": "The image does not exist",
         "failed": "Failed to load the image. Try again later",
         "gone": "The image has been cleaned up or does not exist"
+      }
+    },
+    "notify": {
+      "sent": "Sent",
+      "pending": "Queued",
+      "skipped": "Skipped",
+      "unknown": "Other",
+      "pendingHint": "Waiting to publish",
+      "skippedHint": "No longer needed",
+      "counts": "{{recipients}} recipients · {{read}} read"
+    },
+    "results": {
+      "intro": "This page shows captures kept by stores in Capture mode, with their match scores. In Match mode captures are deleted right after processing and never appear here (see Review tasks for list hits). Note: similarity is not the probability of being the same person.",
+      "filters": {
+        "allStores": "All stores",
+        "allCameras": "All cameras",
+        "allDecisions": "All decisions",
+        "rangeStart": "Start time",
+        "rangeEnd": "End time",
+        "presetToday": "Today",
+        "presetLast24h": "Last 24 hours",
+        "presetLast7d": "Last 7 days",
+        "hitOnly": "List hits only"
+      },
+      "columns": {
+        "photo": "Photo",
+        "capturedAt": "Captured at",
+        "storeCamera": "Store / camera",
+        "decision": "Decision",
+        "staffScore": "Staff similarity",
+        "visitScore": "Visitor similarity",
+        "hit": "List hit",
+        "notify": "Match notification"
+      },
+      "view": "View",
+      "photoPlaceholder": "The photo is only read after you click View",
+      "duplicateTag": "Duplicate",
+      "hitImageGone": "Match image deleted",
+      "empty": "No captures match the filters",
+      "footnote": "Photos are biometric information: they are read on demand only when you click View, and every view is recorded (who, when, which photo).",
+      "decision": {
+        "staff": "Staff",
+        "repeatVisitor": "Repeat visitor",
+        "newVisitor": "New visitor",
+        "lowQuality": "Low quality",
+        "noMatch": "No match",
+        "notEvaluated": "Not evaluated",
+        "unknown": "Other"
+      },
+      "imageErrors": {
+        "notConfigured": "Image reading is not configured yet",
+        "local": "The image has not been moved to storage yet, try again later",
+        "forbidden": "You are not allowed to view this image",
+        "unauthorized": "Your session has expired, please sign in again",
+        "missing": "The image does not exist or has been cleaned up",
+        "failed": "Failed to read the image, please try again later"
+      },
+      "drawer": {
+        "title": "Capture details · {{store}}",
+        "sensitiveNotice": "Photos are biometric information. This view is recorded (who, when, which photo); do not screenshot or share it.",
+        "imageCaption": "Left: face crop. Right: scene image.",
+        "faceImage": "Face crop",
+        "sceneImage": "Scene image",
+        "noImage": "No image available",
+        "loadingImage": "Reading image…",
+        "sections": {
+          "capture": "Capture",
+          "compare": "Match result",
+          "hit": "Unwelcome Persons List hit",
+          "notify": "Notification status"
+        },
+        "fields": {
+          "capturedAt": "Captured at",
+          "camera": "Camera",
+          "faceCount": "Faces",
+          "duplicate": "Duplicate capture",
+          "decision": "Decision",
+          "staffScore": "Staff similarity",
+          "visitScore": "Visitor similarity",
+          "similarity": "Similarity",
+          "reviewStatus": "Review status"
+        },
+        "yes": "Yes",
+        "no": "No",
+        "scoreNote": "Scores are similarity (0–100); similarity is not the probability of being the same person.",
+        "notProbability": "(not the probability of being the same person)",
+        "noHit": "This capture did not hit the Unwelcome Persons List.",
+        "notifyTextTitle": "Notification text (English only, no names or photos)",
+        "goReview": "Go to review",
+        "goReviewImageGone": "The match image has been deleted; this task can no longer be reviewed",
+        "goReviewNoAccess": "You do not have access to Review tasks",
+        "close": "Close"
+      },
+      "timeline": {
+        "created": "Match task created",
+        "sent": "Notification published to {{count}} recipients",
+        "read": "{{read}} of {{total}} read",
+        "readHint": "Only counts are shown, never names",
+        "queued": "Notification queued",
+        "queuedHint": "Not published yet; the system will retry automatically",
+        "skipped": "Notification skipped",
+        "skippedHint": "The task was reviewed or its image expired before publishing, so nothing is sent",
+        "reviewPendingHint": "Once reviewed the task closes and no more reminders are sent",
+        "reviewDoneHint": "The task has ended",
+        "reviewUnknown": "Review status unknown"
       }
     },
     "stats": {

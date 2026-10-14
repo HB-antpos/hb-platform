@@ -489,6 +489,34 @@ assertEqual(
   "账号会话必须保留后端下发的人脸比对入口"
 );
 
+// 抓拍与比对、通知收件箱：路径已登记；抓拍结果含生物识别照片、收件箱按用户账号计算，设备会话必须隐藏，账号会话照后端菜单显示。
+assertEqual(
+  TAB_PATHS["face-capture-results"],
+  "/(shell)/face-capture-results",
+  "face capture results route is registered as a valid tab path"
+);
+assertEqual(
+  TAB_PATHS.notifications,
+  "/(shell)/notifications",
+  "notifications route is registered as a valid tab path"
+);
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["product-query", "face-capture-results", "notifications"],
+    isDeviceMode: true,
+  }).join(","),
+  "workbench,product-query,settings",
+  "设备模式收到显式抓拍与比对 / 通知菜单时也必须隐藏这两个入口"
+);
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["face-unwelcome", "face-capture-results", "notifications"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,face-unwelcome,face-capture-results,notifications,settings",
+  "账号会话必须保留后端下发的抓拍与比对和通知入口"
+);
+
 assertEqual(
   TAB_PATHS["seasonal-cards"],
   "/(shell)/seasonal-cards",

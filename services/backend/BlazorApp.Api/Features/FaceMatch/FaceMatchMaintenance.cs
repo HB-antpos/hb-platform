@@ -613,6 +613,9 @@ public sealed class FaceHitNotifier(
 {
     public const int BatchLimit = 50;
 
+    /// <summary>通知幂等键前缀；结果页按它回查「这条命中发给了几个人、几个人已读」，必须与发布时一致。</summary>
+    public const string DedupeKeyPrefix = "unwelcome-hit:";
+
     private readonly ISqlSugarClient _db = context.Db;
 
     /// <summary>发布一批待提示的命中任务；返回本轮标记为已处理的任务数。</summary>
@@ -647,7 +650,7 @@ public sealed class FaceHitNotifier(
                         Priority = AppNotificationPriorities.High,
                         StoreCode = task.StoreCode,
                         Data = new Dictionary<string, string> { ["taskId"] = task.TaskId, ["storeCode"] = task.StoreCode },
-                        DedupeKey = $"unwelcome-hit:{task.TaskId}",
+                        DedupeKey = $"{DedupeKeyPrefix}{task.TaskId}",
                         ExpiresAtUtc = task.ImageDeleteAtUtc,
                         CreatedBy = "system:face-match",
                     }, cancellationToken);

@@ -11,11 +11,13 @@ import { fromByteArray } from "base64-js";
 import { unwrapApiEnvelope } from "@/shared/api/api-envelope";
 import { FACE_CAMERAS_API_BASE, FACE_MATCH_API_BASE } from "./constants";
 import type { CreateEntryInput } from "./entry-form";
+import { buildCaptureListParams } from "./capture-logic";
 import { buildListParams } from "./entries-logic";
 import { buildCreateEntryMultipart } from "./multipart";
 import {
   normalizeFaceCamera,
   normalizeFaceCameraList,
+  normalizeFaceCaptureResultPage,
   normalizeFaceMatchConfig,
   normalizeFaceStoreProfile,
   normalizeFaceUnwelcomeEntry,
@@ -26,6 +28,8 @@ import {
 import type {
   FaceCamera,
   FaceCameraList,
+  FaceCaptureResult,
+  FaceCaptureResultQuery,
   FaceMatchConfig,
   FaceMatchPage,
   FaceReviewVerdict,
@@ -52,6 +56,8 @@ export const IMAGE_TIMEOUT_MS = 30_000;
 
 // 路径里的编号发请求前先校验，避免 ".." 之类被当成路径穿越而指向别的接口（编号来自服务端数据，这是第二道防线）。
 const IMAGE_PATH_TASK_ID = /^[A-Za-z0-9-]{1,64}$/;
+/** 抓拍编号与图片编号：服务端只接受 1–32 位字母数字（FaceCaptureResultService.IdPattern）。 */
+const CAPTURE_PATH_ID = /^[A-Za-z0-9]{1,32}$/;
 /** 参考照片最多 5 张（下标 0-4）；多留余量，真实上限以任务的 referencePhotoCount 为准。 */
 const MAX_REFERENCE_INDEX = 9;
 
@@ -195,6 +201,22 @@ export function createFaceMatchApi(http: FaceMatchHttp) {
         failImageTarget();
       }
       return fetchImageDataUri(`${FACE_MATCH_API_BASE}/unwelcome/tasks/${taskId}/reference/${index}`, signal);
+    },
+
+    // ───────── 抓拍与比对结果（FaceCapture.Images.View） ─────────
+    /** 列表只含结构化数据与图片编号（不含图片内容），可以进 react-query；照片另用 fetchCaptureImage 在详情里按需读取。 */
+    async listCaptureResults(query: FaceCaptureResultQuery, signal?: AbortSignal): Promise<FaceMatchPage<FaceCaptureResult>> {
+      const response = await http.get(
+        `${FACE_MATCH_API_BASE}/results`,
+        json({ params: buildCaptureListParams(query), signal }),
+      );
+      return normalizeFaceCaptureResultPage(data(response));
+    },
+
+    /** 抓拍图（人脸小图 / 背景图）：GET /results/{captureId}/images/{imageId}，服务端每次读取都写审计。返回 data URI，调用方只放组件 state。 */
+    async fetchCaptureImage(captureId: string, imageId: string, signal?: AbortSignal): Promise<string> {
+      if (!CAPTURE_PATH_ID.test(captureId) || !CAPTURE_PATH_ID.test(imageId)) failImageTarget();
+      return fetchImageDataUri(`${FACE_MATCH_API_BASE}/results/${captureId}/images/${imageId}`, signal);
     },
 
     // ───────── 摄像头（FaceCapture.Cameras.Manage）：只读列表与启停 ─────────

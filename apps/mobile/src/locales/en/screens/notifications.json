@@ -1,0 +1,27 @@
+{
+  "title": "Notifications",
+  "markAllRead": "Mark all read",
+  "read": "Read",
+  "unread": "Unread",
+  "empty": "No notifications",
+  "priority": {
+    "high": "High"
+  },
+  "storeLine": "Store {{store}}",
+  "time": {
+    "yesterday": "Yesterday"
+  },
+  "states": {
+    "loading": "Loading...",
+    "loadFailed": "Failed to load",
+    "loadMoreFailed": "Failed to load more. Tap to retry",
+    "end": "No more"
+  },
+  "messages": {
+    "notAllowed": "Your account is not allowed to use this feature.",
+    "reviewUnavailable": "Not available in review mode."
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again later."
+  }
+}
