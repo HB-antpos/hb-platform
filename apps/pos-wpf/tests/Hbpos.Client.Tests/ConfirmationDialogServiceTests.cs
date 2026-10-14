@@ -8,8 +8,8 @@ public sealed class ConfirmationDialogServiceTests
     [Theory]
     [InlineData("exit", "Exit", "Are you sure you want to exit the POS application?", "Exit", true)]
     [InlineData("reset", "Reset test sales data", "Delete all test sales data? This action cannot be undone.", "Reset", true)]
-    [InlineData("full-first-payment", "Confirm installment order", "The first installment payment covers the full order amount. Continue creating an installment order?", "Confirm", false)]
-    [InlineData("pickup", "Confirm pickup", "This installment order is fully paid. Confirm customer pickup now?", "Confirm", false)]
+    [InlineData("full-first-payment", "Confirm lay-by order", "The first lay-by payment covers the full order amount. Continue creating a lay-by order?", "Confirm", false)]
+    [InlineData("pickup", "Confirm pickup", "This lay-by order is fully paid. Confirm customer pickup now?", "Confirm", false)]
     [InlineData("linkly-settlement", "Confirm Linkly settlement", "Submit the Linkly settlement for 8/3/2026 to the card terminal and print the bank receipt?", "Settle & Print", true)]
     [InlineData("held-order-delete", "Delete held sale?", "This permanently removes the local hold. A shared hold is cancelled online first.", "Delete held sale", true)]
     public async Task Confirmation_scenarios_publish_expected_english_content(

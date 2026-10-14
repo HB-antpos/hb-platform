@@ -78,7 +78,7 @@ public sealed class ReceiptPrintingTests
 
         Assert.DoesNotContain("INSTALLMENT ORDER", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
-        Assert.Contains("Installment No: IO-20260704-0001", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("Lay-by No: IO-20260704-0001", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("IO-20260704-0001", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("Bob Buyer", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("0400111222", document.PlainText, StringComparison.Ordinal);
@@ -110,7 +110,7 @@ public sealed class ReceiptPrintingTests
         Assert.Equal("*** Paid - Pickup Pending ***", receipt.StatusText);
         Assert.Contains("TAX INVOICE", document.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("INSTALLMENT ORDER", document.PlainText, StringComparison.Ordinal);
-        Assert.Contains("Installment No: IO-20260704-0002", document.PlainText, StringComparison.Ordinal);
+        Assert.Contains("Lay-by No: IO-20260704-0002", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("Balance due: $0.00", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("Pickup: Pending", document.PlainText, StringComparison.Ordinal);
     }
@@ -167,7 +167,7 @@ public sealed class ReceiptPrintingTests
         var receipt = InstallmentReceiptMapper.CreateReceipt(order);
         var document = formatter.Build(receipt, ReceiptPrinterSettings.Default, order.CreatedAt);
 
-        Assert.Equal("*** Installment Cancelled ***", receipt.StatusText);
+        Assert.Equal("*** Lay-by Cancelled ***", receipt.StatusText);
         Assert.DoesNotContain("Pickup: Pending", document.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("Paid - Pickup Pending", document.PlainText, StringComparison.Ordinal);
     }
@@ -201,8 +201,8 @@ public sealed class ReceiptPrintingTests
         var receipt = InstallmentReceiptMapper.CreateReceipt(order);
         var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, order.CreatedAt);
 
-        Assert.Equal("INSTALLMENT TERMS", receipt.Terms?.Title);
-        Assert.Contains("INSTALLMENT TERMS", document.PlainText, StringComparison.Ordinal);
+        Assert.Equal("LAY-BY TERMS", receipt.Terms?.Title);
+        Assert.Contains("LAY-BY TERMS", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("Order total: $50.00 minimum.", document.PlainText, StringComparison.Ordinal);
         Assert.Contains("First payment: $20.00 minimum.", document.PlainText, StringComparison.Ordinal);
         // 第三条超过一行纸宽会被自动换行，所以按「折叠空白后的整句」断言，不绑定具体断行位置。
@@ -214,7 +214,7 @@ public sealed class ReceiptPrintingTests
         // 位置必须用元素序列判断：PlainText 不含条码文本，只比较 Print Time 抓不到「条款被挪到条码之后」。
         var elements = document.Elements;
         var paymentAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Payment:");
-        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "INSTALLMENT TERMS");
+        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "LAY-BY TERMS");
         var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
         Assert.True(paymentAt >= 0 && paymentAt < termsAt, "条款必须在付款明细之后");
         Assert.True(termsAt < barcodeAt, "条款必须在条码之前");
@@ -276,7 +276,7 @@ public sealed class ReceiptPrintingTests
         var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, order.CreatedAt);
 
         Assert.Null(receipt.Terms);
-        Assert.DoesNotContain("INSTALLMENT TERMS", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LAY-BY TERMS", document.PlainText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -300,9 +300,9 @@ public sealed class ReceiptPrintingTests
             ReceiptPrinterSettings.Default,
             order.CreatedAt);
 
-        Assert.DoesNotContain("INSTALLMENT TERMS", refundVoucherDocument.PlainText, StringComparison.Ordinal);
-        Assert.DoesNotContain("INSTALLMENT TERMS", balanceDocument.PlainText, StringComparison.Ordinal);
-        Assert.DoesNotContain("INSTALLMENT TERMS", regularDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LAY-BY TERMS", refundVoucherDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LAY-BY TERMS", balanceDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LAY-BY TERMS", regularDocument.PlainText, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------ 总部定制的条款正文
@@ -357,7 +357,7 @@ public sealed class ReceiptPrintingTests
     {
         var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), ReceiptPrinterSettings.Default);
 
-        var body = TermBodyLines(document, "INSTALLMENT TERMS");
+        var body = TermBodyLines(document, "LAY-BY TERMS");
         // 默认文案（含自动换行）与改动前逐字一致：折叠空白后能拼回三条原句。
         var collapsed = System.Text.RegularExpressions.Regex.Replace(string.Join(" ", body), @"\s+", " ");
         Assert.Equal(string.Join(" ", DefaultInstallmentTermLines), collapsed);
@@ -375,7 +375,7 @@ public sealed class ReceiptPrintingTests
 
         Assert.Equal(
             ["Deposit is non-refundable.", "Balance due within 30 days.", "Pick up with this slip."],
-            TermBodyLines(document, "INSTALLMENT TERMS"));
+            TermBodyLines(document, "LAY-BY TERMS"));
         // 定制后默认英文稿不再出现，标题仍由收银端固定印。
         Assert.DoesNotContain("Order total: $50.00 minimum.", document.PlainText, StringComparison.Ordinal);
     }
@@ -393,7 +393,7 @@ public sealed class ReceiptPrintingTests
 
         var elements = document.Elements;
         var policyAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Refunds and returns");
-        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "INSTALLMENT TERMS");
+        var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "LAY-BY TERMS");
         var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
         Assert.True(policyAt >= 0 && policyAt < termsAt && termsAt < barcodeAt);
         Assert.Equal(ReceiptPrintElementKind.Separator, elements[termsAt - 1].Kind);
@@ -426,7 +426,7 @@ public sealed class ReceiptPrintingTests
 
         var document = new ReceiptTextFormatter().Build(ActiveInstallmentReceipt(), settings);
 
-        var body = TermBodyLines(document, "INSTALLMENT TERMS");
+        var body = TermBodyLines(document, "LAY-BY TERMS");
         Assert.True(body.Count > 2, "两条长句都应被拆成多行");
         // 显示宽度按「中日韩字符占两列」计，每一行都不能超过 42 列纸宽。
         Assert.All(body, line => Assert.True(DisplayColumns(line) <= 42, line));
@@ -451,7 +451,7 @@ public sealed class ReceiptPrintingTests
         var regularDocument = formatter.Build(CreateReceipt(Guid.NewGuid()), settings);
 
         // 已付清 / 普通小票本来就没有条款块，定制正文不能凭空多印出来。
-        Assert.DoesNotContain("INSTALLMENT TERMS", finishedDocument.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("LAY-BY TERMS", finishedDocument.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("Custom installment line.", finishedDocument.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("Custom installment line.", regularDocument.PlainText, StringComparison.Ordinal);
         Assert.DoesNotContain("Custom voucher line.", regularDocument.PlainText, StringComparison.Ordinal);

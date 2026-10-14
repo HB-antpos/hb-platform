@@ -117,7 +117,7 @@ export class InstallmentReceiptReprintPreparationService {
         printedAtIso: this.options.nowIso(),
         extraInfoLines: installmentInfoLines(details, recordedPayments),
         // 中文注释：分期条款只印在进行中的分期上；未带条款时与原小票字节一致。
-        // 条款正文：总部下发了可打印的自定义正文就用它（标题固定为 INSTALLMENT TERMS），
+        // 条款正文：总部下发了可打印的自定义正文就用它（标题固定为 LAY-BY TERMS），
         // 否则（未定制、全空白、不合规被丢弃）逐字打印内置默认文案。
         ...(shouldPrintInstallmentTerms(details)
           ? {
@@ -182,7 +182,7 @@ function installmentInfoLines(
   recordedPayments: readonly InstallmentPayment[],
 ): readonly string[] {
   const lines = [
-    `Installment No: ${details.installmentNumber}`,
+    `Lay-by No: ${details.installmentNumber}`,
     `Customer: ${details.customerName}`,
     `Phone: ${details.customerPhone ?? ""}`,
     `Deposit paid: ${money(details.downPaymentCents)}`,
@@ -232,7 +232,7 @@ function statusText(details: InstallmentDetails): string {
     return "*** Paid - Picked Up ***";
   }
   if (details.status === "Cancelled") {
-    return "*** Installment Cancelled ***";
+    return "*** Lay-by Cancelled ***";
   }
   if (details.status === "PaidOff") {
     return "*** Paid - Pickup Pending ***";

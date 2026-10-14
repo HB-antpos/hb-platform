@@ -594,7 +594,7 @@ test("已完成与已取消详情仍可在标题工具区重打，按钮满足 4
       "Reprint receipt for IP-0001",
     );
     expect(button.props.accessibilityHint).toBe(
-      "Prints another copy of the existing installment receipt.",
+      "Prints another copy of the existing lay-by receipt.",
     );
     expect(screen.queryByTestId("installment-action-dock")).toBeNull();
     await fireEvent.press(button);

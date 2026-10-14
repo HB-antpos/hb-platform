@@ -119,7 +119,7 @@ public sealed class InstallmentOperationService(
                 // 同一终端只能推进一个未结创建；新请求必须等待原操作恢复或主管结案。
                 return new InstallmentOperationResult<InstallmentCreateResponse>(
                     false,
-                    Message: "A previous installment creation is still unresolved. Recover it before collecting payment again.",
+                    Message: "A previous lay-by creation is still unresolved. Recover it before collecting payment again.",
                     RequiresReview: true);
             }
 
@@ -1404,7 +1404,7 @@ public sealed class InstallmentOperationService(
                     DateTimeOffset.UtcNow,
                     terminalAttemptGuid: terminalAttemptGuid,
                     terminalProcessor: authorization.Processor ?? terminalAttempt.Processor,
-                    failureMessage: "Terminal approved amount did not match the persisted installment amount.",
+                    failureMessage: "Terminal approved amount did not match the persisted lay-by amount.",
                     cancellationToken: CancellationToken.None);
                 if (beginRepaymentClaim)
                 {

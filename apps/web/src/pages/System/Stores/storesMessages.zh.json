@@ -23,7 +23,7 @@
       "voucherTerms": "代金券使用说明",
       "installmentTerms": "分期条款",
       "voucherTermsHint": "印在退款代金券券面「VOUCHER TERMS」标题下方，一行一条。留空＝收银端使用默认文案（见输入框里的灰色示例）。点「下发小票资料」后才会到收银端。",
-      "installmentTermsHint": "印在进行中分期小票「INSTALLMENT TERMS」标题下方，一行一条。留空＝收银端使用默认文案（见输入框里的灰色示例）。点「下发小票资料」后才会到收银端。",
+      "installmentTermsHint": "印在进行中分期小票「LAY-BY TERMS」标题下方，一行一条。留空＝收银端使用默认文案（见输入框里的灰色示例）。点「下发小票资料」后才会到收银端。",
       "voucherTermsMaxLength": "代金券使用说明不能超过 600 个字符",
       "installmentTermsMaxLength": "分期条款不能超过 600 个字符",
       "termsUsingDefault": "收银端默认文案",

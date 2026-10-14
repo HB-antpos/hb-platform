@@ -218,7 +218,7 @@ test("列表以余额优先，详情展示付款进度并把续付金额放入�
   );
 
   await fireEvent.press(row);
-  expect(screen.getByText("Installment details")).toBeTruthy();
+  expect(screen.getByText("Lay-by details")).toBeTruthy();
   expect(screen.getByTestId("installment-details-body")).toBeTruthy();
   expect(screen.getByTestId("installment-balance-summary")).toBeTruthy();
   expect(screen.getByTestId("installment-balance-amount")).toHaveTextContent(
@@ -772,7 +772,7 @@ test("已完成与已取消详情仍可在标题工具区重打，按钮满足 4
       "Reprint receipt for IP-0001",
     );
     expect(button.props.accessibilityHint).toBe(
-      "Prints another copy of the existing installment receipt.",
+      "Prints another copy of the existing lay-by receipt.",
     );
     expect(screen.queryByTestId("installment-action-dock")).toBeNull();
     await fireEvent.press(button);

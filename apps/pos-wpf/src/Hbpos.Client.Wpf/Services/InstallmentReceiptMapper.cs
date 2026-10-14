@@ -22,7 +22,7 @@ internal static class InstallmentReceiptMapper
             .ToList();
         var extraInfoLines = new List<string>
         {
-            $"Installment No: {order.InstallmentNumber}",
+            $"Lay-by No: {order.InstallmentNumber}",
             $"Customer: {order.CustomerName}",
             $"Phone: {order.CustomerPhone}",
             $"Deposit paid: {Money(order.DownPaymentAmount)}",
@@ -72,7 +72,7 @@ internal static class InstallmentReceiptMapper
     /// 这里只是未定制时的默认正文；总部按门店定制后由 <see cref="ReceiptTextFormatter"/> 渲染时套用（见 <see cref="ReceiptTermsText"/>）。
     /// </summary>
     internal static readonly ReceiptTerms InstallmentTerms = new(
-        "INSTALLMENT TERMS",
+        "LAY-BY TERMS",
         [
             "Order total: $50.00 minimum.",
             "First payment: $20.00 minimum.",
@@ -149,7 +149,7 @@ internal static class InstallmentReceiptMapper
 
         if (order.Status == InstallmentStatus.Cancelled)
         {
-            return "*** Installment Cancelled ***";
+            return "*** Lay-by Cancelled ***";
         }
 
         if (order.Status == InstallmentStatus.PaidOff)

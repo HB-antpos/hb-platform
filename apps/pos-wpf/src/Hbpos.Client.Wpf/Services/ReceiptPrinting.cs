@@ -59,7 +59,7 @@ public sealed record ReceiptPrinterSettings(
     // 中文注释：本机已应用的总部下发版本，0 = 从未应用过下发（资料可手工编辑）。
     // 仅供设置页决定六个资料字段是否只读；打印路径不读取它，保存时存储层也忽略它（版本只由同步写入）。
     int ProfileVersion = 0,
-    // 中文注释：退款代金券「VOUCHER TERMS」/ 分期小票「INSTALLMENT TERMS」下面的定制正文（总部按门店下发，多行纯文本，一行一条）。
+    // 中文注释：退款代金券「VOUCHER TERMS」/ 分期小票「LAY-BY TERMS」下面的定制正文（总部按门店下发，多行纯文本，一行一条）。
     // 空串＝未定制，打印时走内置默认文案（取值规则见 ReceiptTermsText）；跟随门店资料一起按门店作用域保存。
     string VoucherTerms = "",
     string InstallmentTerms = "")

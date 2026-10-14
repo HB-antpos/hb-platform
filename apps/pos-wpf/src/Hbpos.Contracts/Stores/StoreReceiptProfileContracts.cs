@@ -11,7 +11,7 @@ namespace Hbpos.Contracts.Stores;
 /// </para>
 /// <para>
 /// VoucherTerms / InstallmentTerms 是退款代金券与进行中分期小票底部「使用说明 / 分期条款」的正文（一行一条，
-/// 标题 VOUCHER TERMS / INSTALLMENT TERMS 由收银端固定印）；null 或空白＝收银端按内置默认文案打印。
+/// 标题 VOUCHER TERMS / LAY-BY TERMS 由收银端固定印）；null 或空白＝收银端按内置默认文案打印。
 /// 与 ReturnPolicy 一样允许 CR/LF/TAB、拒绝其他控制字符，长度上限各 600；放在末尾并带默认值，
 /// 旧服务端（JSON 里没有这两个字段）与旧客户端（忽略未知字段）互相兼容。
 /// </para>

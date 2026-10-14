@@ -3,7 +3,7 @@
   "genericRoleDescription": "{{name}} role.",
   "unknownCategory": "Other permissions",
   "categories": {
-    "POS 分期": "POS instalments",
+    "POS 分期": "POS lay-bys",
     "POS 历史订单": "POS order history",
     "POS 同步": "POS sync",
     "POS 审计": "POS audit",
@@ -214,8 +214,8 @@
       "description": "View employee profile details."
     },
     "InstallmentOrders.View": {
-      "name": "Installment Orders View",
-      "description": "Allows access to Installment Orders View."
+      "name": "Lay-by Orders View",
+      "description": "Allows access to Lay-by Orders View."
     },
     "LocalPurchase.Edit": {
       "name": "Local Purchase Edit",
@@ -338,28 +338,28 @@
       "description": "Allows access to Permissions Pos Terminal History View."
     },
     "Permissions.PosTerminal.Installments.AddRepayment": {
-      "name": "Permissions Pos Terminal Installments Add Repayment",
-      "description": "Allows access to Permissions Pos Terminal Installments Add Repayment."
+      "name": "Permissions Pos Terminal Lay-bys Add Repayment",
+      "description": "Allows access to Permissions Pos Terminal Lay-bys Add Repayment."
     },
     "Permissions.PosTerminal.Installments.AmendLines": {
-      "name": "Permissions Pos Terminal Installments Amend Lines",
-      "description": "Allows access to Permissions Pos Terminal Installments Amend Lines."
+      "name": "Permissions Pos Terminal Lay-bys Amend Lines",
+      "description": "Allows access to Permissions Pos Terminal Lay-bys Amend Lines."
     },
     "Permissions.PosTerminal.Installments.Cancel": {
-      "name": "Permissions Pos Terminal Installments Cancel",
-      "description": "Allows access to Permissions Pos Terminal Installments Cancel."
+      "name": "Permissions Pos Terminal Lay-bys Cancel",
+      "description": "Allows access to Permissions Pos Terminal Lay-bys Cancel."
     },
     "Permissions.PosTerminal.Installments.ConfirmPickup": {
-      "name": "Permissions Pos Terminal Installments Confirm Pickup",
-      "description": "Allows access to Permissions Pos Terminal Installments Confirm Pickup."
+      "name": "Permissions Pos Terminal Lay-bys Confirm Pickup",
+      "description": "Allows access to Permissions Pos Terminal Lay-bys Confirm Pickup."
     },
     "Permissions.PosTerminal.Installments.Create": {
-      "name": "Permissions Pos Terminal Installments Create",
-      "description": "Allows access to Permissions Pos Terminal Installments Create."
+      "name": "Permissions Pos Terminal Lay-bys Create",
+      "description": "Allows access to Permissions Pos Terminal Lay-bys Create."
     },
     "Permissions.PosTerminal.Installments.View": {
-      "name": "Permissions Pos Terminal Installments View",
-      "description": "Allows access to Permissions Pos Terminal Installments View."
+      "name": "Permissions Pos Terminal Lay-bys View",
+      "description": "Allows access to Permissions Pos Terminal Lay-bys View."
     },
     "Permissions.PosTerminal.Payment.Confirm": {
       "name": "Permissions Pos Terminal Payment Confirm",

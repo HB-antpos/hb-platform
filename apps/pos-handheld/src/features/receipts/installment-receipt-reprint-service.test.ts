@@ -179,7 +179,7 @@ test("合法 VoidCancel 保留原定金和未付余额时仍可重打", async ()
   const prepared = await createService({ response: voided }).service.prepare(installmentGuid);
   const receipt = decoder.decode(prepared?.receiptBytes);
   assert.equal(prepared?.orderGuid, installmentGuid);
-  assert.match(receipt, /\*\*\* Installment Cancelled \*\*\*/u);
+  assert.match(receipt, /\*\*\* Lay-by Cancelled \*\*\*/u);
   assert.match(receipt, /Deposit paid: \$20\.00/u);
   assert.match(receipt, /Balance due: \$60\.00/u);
   assert.match(receipt, /Cash\s+\$20\.00/u);
@@ -386,7 +386,7 @@ test("prepare 点击时重读可信分期并按 WPF 字段生成带 REPRINT 的�
   assert.match(receipt, /\*\*\* REPRINT \*\*\*/u);
   assert.match(receipt, /\*\*\* Paid - Pickup Pending \*\*\*/u);
   assert.match(receipt, /Order: INS-100/u);
-  assert.match(receipt, /Installment No: INS-100/u);
+  assert.match(receipt, /Lay-by No: INS-100/u);
   assert.match(receipt, /Customer: Customer One/u);
   assert.match(receipt, /Phone: 0400000000/u);
   assert.match(receipt, /Deposit paid: \$40\.00/u);
@@ -450,7 +450,7 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
           reason: "Customer request",
         },
       }),
-      expected: "*** Installment Cancelled ***",
+      expected: "*** Lay-by Cancelled ***",
       showsTerms: false,
     },
   ] as const;
@@ -461,9 +461,9 @@ test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () =
     assert.match(receipt, new RegExp(scenario.expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     // 分期条款只在进行中（Active）的补打小票上打印；已付清、已提货、已取消都不带。
     if (scenario.showsTerms) {
-      assert.match(receipt, /INSTALLMENT TERMS/u, scenario.expected);
+      assert.match(receipt, /LAY-BY TERMS/u, scenario.expected);
     } else {
-      assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u, scenario.expected);
+      assert.doesNotMatch(receipt, /LAY-BY TERMS/u, scenario.expected);
       assert.doesNotMatch(receipt, /Order total: \$50\.00 minimum\./u, scenario.expected);
     }
   }
@@ -494,7 +494,7 @@ test("进行中分期补打在退货政策之后、条码之前追加英文分�
   const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
 
   const policy = receipt.indexOf("Refunds and returns");
-  const title = receipt.indexOf("INSTALLMENT TERMS");
+  const title = receipt.indexOf("LAY-BY TERMS");
   // 条款之后依次是分隔线、完整 GUID 的 QR 载荷与页脚，所以取条款后第一次出现的 GUID 比较。
   const machineCode = receipt.indexOf(installmentGuid, title);
   const printTime = receipt.indexOf("Print Time:");
@@ -504,7 +504,7 @@ test("进行中分期补打在退货政策之后、条码之前追加英文分�
   assert.match(receipt, /First payment: \$20\.00 minimum\./u);
   // 第三条在 80mm（42 字符）下于单词边界换成两行，不是手工拆行。
   assert.match(receipt, /Each later payment: \$5\.00 minimum, or the[\s\S]{1,12}remaining balance if it is lower\./u);
-  assert.equal(receipt.split("INSTALLMENT TERMS").length - 1, 1);
+  assert.equal(receipt.split("LAY-BY TERMS").length - 1, 1);
 });
 
 test("进行中分期在 zh-CN 与 58mm 下仍原样打印英文条款并按 32 字符换行", async () => {
@@ -515,7 +515,7 @@ test("进行中分期在 zh-CN 与 58mm 下仍原样打印英文条款并按 32 
 
   const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
 
-  assert.match(receipt, /INSTALLMENT TERMS/u);
+  assert.match(receipt, /LAY-BY TERMS/u);
   assert.match(receipt, /Order total: \$50\.00 minimum\./u);
   assert.match(receipt, /First payment: \$20\.00 minimum\./u);
   assert.match(receipt, /Each later payment: \$5\.00[\s\S]{1,12}minimum, or the remaining[\s\S]{1,12}balance if it is lower\./u);
@@ -528,10 +528,10 @@ test("状态为进行中但带提货信息的不一致数据不打印分期条�
     }),
   }).service.prepare(installmentGuid))?.receiptBytes);
 
-  assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u);
+  assert.doesNotMatch(receipt, /LAY-BY TERMS/u);
 });
 
-test("总部下发了分期条款正文：进行中补打标题仍是 INSTALLMENT TERMS，正文换成自定义行（空行丢弃、逐行 trim），默认条款不再出现", async () => {
+test("总部下发了分期条款正文：进行中补打标题仍是 LAY-BY TERMS，正文换成自定义行（空行丢弃、逐行 trim），默认条款不再出现", async () => {
   const harness = createService({
     response: activeInstallment(),
     settingValue: {
@@ -544,11 +544,11 @@ test("总部下发了分期条款正文：进行中补打标题仍是 INSTALLMEN
   const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
 
   const policy = receipt.indexOf("Refunds and returns");
-  const title = receipt.indexOf("INSTALLMENT TERMS");
+  const title = receipt.indexOf("LAY-BY TERMS");
   const machineCode = receipt.indexOf(installmentGuid, title);
   assert.ok(policy >= 0 && title > policy, "条款仍在退货政策之后");
   assert.ok(machineCode > title, "条款仍在条码/QR 之前");
-  assert.equal(receipt.split("INSTALLMENT TERMS").length - 1, 1);
+  assert.equal(receipt.split("LAY-BY TERMS").length - 1, 1);
   // 三行正文依次紧跟标题，空行被丢弃、行首尾空白被去掉。
   assert.ok(receipt.indexOf("Deposit $30 minimum.", title) > title);
   assert.ok(receipt.indexOf("Later payments from $10.", title) > receipt.indexOf("Deposit $30 minimum.", title));
@@ -618,7 +618,7 @@ test("自定义分期条款同样只印在进行中的分期上：已付清、�
     const receipt = decoder.decode(
       (await createService({ response, settingValue: customSettings }).service.prepare(installmentGuid))?.receiptBytes,
     );
-    assert.doesNotMatch(receipt, /INSTALLMENT TERMS/u);
+    assert.doesNotMatch(receipt, /LAY-BY TERMS/u);
     assert.doesNotMatch(receipt, /Custom installment rule\./u);
   }
 });
@@ -636,7 +636,7 @@ test("58mm 下自定义分期条款长句按 32 字符在单词边界换行，zh
 
   const receipt = decoder.decode((await harness.service.prepare(installmentGuid))?.receiptBytes);
 
-  assert.match(receipt, /INSTALLMENT TERMS/u);
+  assert.match(receipt, /LAY-BY TERMS/u);
   // 32 字符纸宽下在单词边界换行：不会把 non-refundable 拆开。
   assert.match(receipt, /Installment deposits are[\s\S]{1,12}non-refundable once goods are[\s\S]{1,12}set aside\./u);
   assert.doesNotMatch(receipt, /Order total/u);

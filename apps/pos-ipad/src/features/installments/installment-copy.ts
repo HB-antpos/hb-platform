@@ -1,15 +1,15 @@
 export const installmentEnglishCopy = {
   eyebrow: "STORE OPERATIONS",
-  title: "Installments",
-  subtitle: "Installment queries and operations require a live backend.",
+  title: "Lay-bys",
+  subtitle: "Lay-by queries and operations require a live backend.",
   online: "Online",
   offlineShort: "Offline",
   offline:
-    "Reconnect to load installments. It reloads automatically when the connection is restored. History, details and operations remain unavailable while offline.",
+    "Reconnect to load lay-bys. It reloads automatically when the connection is restored. History, details and operations remain unavailable while offline.",
   "action.recover": "Recover previous action",
   "action.back": "Back",
   "action.history": "History",
-  "action.new": "New installment",
+  "action.new": "New lay-by",
   "action.search": "Search",
   "action.refresh": "Refresh",
   "action.refreshing": "Refreshing…",
@@ -49,30 +49,30 @@ export const installmentEnglishCopy = {
   "scope.label": "Range",
   "scope.store": "This store",
   "scope.device": "This device",
-  "history.title": "Installment history",
+  "history.title": "Lay-by history",
   "history.count": "{{count}} items",
   "history.countOne": "1 item",
-  "search.accessibility": "Search installments",
+  "search.accessibility": "Search lay-bys",
   "search.placeholder": "Number, customer, phone",
   "history.loading": "Loading…",
-  "history.empty": "No installment records",
-  "history.emptyInitial": "No installments have been recorded yet.",
-  "history.emptyFiltered": "No installments match these filters.",
-  "history.failed": "Installment history could not be loaded.",
-  "history.permission": "You do not have permission to view installments.",
+  "history.empty": "No lay-by records",
+  "history.emptyInitial": "No lay-bys have been recorded yet.",
+  "history.emptyFiltered": "No lay-bys match these filters.",
+  "history.failed": "Lay-by history could not be loaded.",
+  "history.permission": "You do not have permission to view lay-bys.",
   "balance.label": "Balance",
   "details.loading": "Loading details…",
-  "details.empty": "Select an installment",
-  "details.failed": "Installment details could not be loaded.",
+  "details.empty": "Select a lay-by",
+  "details.failed": "Lay-by details could not be loaded.",
   "details.offlineHint":
-    "Details are unavailable. Refresh the selected installment and try again.",
+    "Details are unavailable. Refresh the selected lay-by and try again.",
   "details.crossDeviceRepaymentNotice":
     "Created on another device. You can continue payment here; cancellation, void, pickup and receipt reprint remain on the original device.",
   "details.crossDeviceActionNotice":
     "Created on another device. Only the server-authorized actions shown here are available; receipt reprint remains on the original device.",
   "reprint.accessibility": "Reprint receipt for {{installmentNumber}}",
   "reprint.hint":
-    "Prints another copy of the existing installment receipt.",
+    "Prints another copy of the existing lay-by receipt.",
   "reprint.succeeded": "Receipt reprinted.",
   "reprint.failed":
     "Receipt could not be reprinted. Check the printer and try again.",
@@ -117,7 +117,7 @@ export const installmentEnglishCopy = {
   "voucher.placeholder": "Voucher code",
   "voucher.help":
     "Enter the voucher code only; the online payment provider will query and lock it after submission.",
-  "cancel.title": "Cancel installment",
+  "cancel.title": "Cancel lay-by",
   "cancel.reasonAccessibility": "Cancellation reason",
   "cancel.reasonPlaceholder": "Refund-cancel reason",
   "cancel.refundModeLabel": "Refund method",
@@ -128,26 +128,26 @@ export const installmentEnglishCopy = {
   "cancel.refundModeHint.voucher":
     "Every payment, card included, is refunded as a new refund voucher for the same amount.",
   "cancel.cardRequiresVoucher":
-    "This installment has card payments, which cannot be refunded through the original route. All payments will be refunded as vouchers.",
+    "This lay-by has card payments, which cannot be refunded through the original route. All payments will be refunded as vouchers.",
   "void.reasonAccessibility": "Void reason",
   "void.reasonPlaceholder": "Void reason",
   "pickup.title": "Confirm pickup",
   "pickup.noteAccessibility": "Pickup note",
   "pickup.notePlaceholder": "ID check or note",
   "confirmation.cancel":
-    "All recorded payments, including a fully paid balance, will be refunded through the original route, then the installment will be cancelled after the result is known.",
+    "All recorded payments, including a fully paid balance, will be refunded through the original route, then the lay-by will be cancelled after the result is known.",
   "confirmation.cancelVoucher":
-    "Every recorded payment, including a fully paid balance, will be refunded in full as new refund vouchers, then the installment will be cancelled after the result is known.",
+    "Every recorded payment, including a fully paid balance, will be refunded in full as new refund vouchers, then the lay-by will be cancelled after the result is known.",
   "confirmation.void":
-    "Voiding does not refund; use it only for an incorrect installment that needs no refund.",
+    "Voiding does not refund; use it only for an incorrect lay-by that needs no refund.",
   "confirmation.pickup":
-    "The installment will be marked as picked up after confirmation.",
-  "blocked.offline": "Reconnect before continuing this installment operation.",
+    "The lay-by will be marked as picked up after confirmation.",
+  "blocked.offline": "Reconnect before continuing this lay-by operation.",
   "blocked.permission": "The current cashier does not have permission for this action.",
-  "blocked.busy": "Another installment operation is still running.",
+  "blocked.busy": "Another lay-by operation is still running.",
   "blocked.recovery": "Recover the unknown payment outcome before another action.",
   "blocked.unavailable": "The secure payment route is unavailable. Refresh and try again.",
-  "navigation.failed": "Payment could not be prepared. Nothing was charged; check the cart or installment and try again.",
+  "navigation.failed": "Payment could not be prepared. Nothing was charged; check the cart or lay-by and try again.",
   "cart.title": "Current cart",
   "cart.hint":
     "The composition root checks the cart revision again when creating. This screen snapshot cannot replace the live cart.",
@@ -157,13 +157,13 @@ export const installmentEnglishCopy = {
   "create.customerNamePlaceholder": "Customer name",
   "create.customerPhoneAccessibility": "Customer phone",
   "create.customerPhonePlaceholder": "Customer phone",
-  "create.noteAccessibility": "Installment note",
+  "create.noteAccessibility": "Lay-by note",
   "create.notePlaceholder": "Note",
   "create.downPayment": "Down payment",
   "create.downPaymentAccessibility": "Down payment amount",
   "create.voucherAccessibility": "Down payment voucher code",
   "create.minimums":
-    "Minimum installment total {{total}}; minimum down payment {{downPayment}}.",
+    "Minimum lay-by total {{total}}; minimum down payment {{downPayment}}.",
   "draft.count": "{{count}} items",
   "method.cash": "Cash",
   "method.card": "Card",
@@ -176,13 +176,13 @@ export const installmentEnglishCopy = {
   "paymentStatus.Voided": "Voided",
   "cancellation.RefundCancel": "Refunded and cancelled",
   "cancellation.VoidCancel": "Voided",
-  "unavailable.title": "Installments unavailable",
+  "unavailable.title": "Lay-bys unavailable",
   "unavailable.subtitle":
     "The trusted payment or cashier runtime is not configured.",
   "status.action-failed": "Operation failed. Check the state and try again.",
   "status.authorization-declined":
-    "Payment was declined; no installment change was made.",
-  "status.cancel-complete": "Installment refunded and cancelled.",
+    "Payment was declined; no lay-by change was made.",
+  "status.cancel-complete": "Lay-by refunded and cancelled.",
   "status.cancel-refund-method-unsupported":
     "Card payments cannot be refunded through the original route. Choose “All to voucher”; nothing was refunded.",
   "status.cancel-refund-mode-unsupported":
@@ -190,9 +190,9 @@ export const installmentEnglishCopy = {
   "status.claim-review-required":
     "Repayment claim mismatch. No payment was started; ask a supervisor to review the audit record.",
   "status.conflict": "Server state changed; refresh first.",
-  "status.create-complete": "Installment and down payment recorded.",
+  "status.create-complete": "Lay-by and down payment recorded.",
   "status.details-failed": "Unable to load details.",
-  "status.details-unavailable": "Installment details are unavailable.",
+  "status.details-unavailable": "Lay-by details are unavailable.",
   "status.history-failed": "Unable to load history.",
   "status.invalid-create":
     "Check the cart, customer, minimum AUD 50 total and minimum AUD 20 down payment.",
@@ -202,12 +202,12 @@ export const installmentEnglishCopy = {
   "status.payment-recovery-required":
     "Payment outcome unknown; recovery is required before any new action.",
   "status.permission-required": "Cashier permission is required.",
-  "status.service-unavailable": "The installment service is unavailable. Try again shortly.",
+  "status.service-unavailable": "The lay-by service is unavailable. Try again shortly.",
   "status.pickup-complete": "Pickup confirmed.",
   "status.repayment-complete": "Repayment recorded.",
   "status.recovery-complete":
-    "Previous payment and installment action recovered.",
-  "status.void-complete": "Installment voided.",
+    "Previous payment and lay-by action recovered.",
+  "status.void-complete": "Lay-by voided.",
 } as const;
 
 export type InstallmentCopyKey = keyof typeof installmentEnglishCopy;

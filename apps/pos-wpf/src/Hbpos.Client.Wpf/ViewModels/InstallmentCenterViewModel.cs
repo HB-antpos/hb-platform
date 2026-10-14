@@ -95,7 +95,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         BackToPaymentCommand = new RelayCommand(_backToPayment);
 
         RefreshPaymentMethodOptions();
-        SetStatusResource("installment.center.status.ready", "Select an installment order to create or process.");
+        SetStatusResource("installment.center.status.ready", "Select a lay-by order to create or process.");
     }
 
     public ObservableCollection<InstallmentOrderSummary> Orders { get; } = [];
@@ -120,11 +120,11 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public IAsyncRelayCommand SupervisorResolveRefundCommand { get; }
     public IRelayCommand BackToPaymentCommand { get; }
 
-    public string PageTitleText => T("installment.center.title", "Installment Center");
+    public string PageTitleText => T("installment.center.title", "Lay-by Center");
     public string CurrentOrderSummaryText => CartSnapshot is null
-        ? T("installment.center.currentOrder.none", "There is no current order available for a new installment.")
-        : string.Format(GetCulture(), T("installment.center.currentOrder.amount", "Current order amount {0:C2}. A new installment can be created."), CartSnapshot.ActualAmount);
-    public string CreateInstallmentText => T("installment.center.action.create", "Create Installment");
+        ? T("installment.center.currentOrder.none", "There is no current order available for a new lay-by.")
+        : string.Format(GetCulture(), T("installment.center.currentOrder.amount", "Current order amount {0:C2}. A new lay-by can be created."), CartSnapshot.ActualAmount);
+    public string CreateInstallmentText => T("installment.center.action.create", "Create Lay-by");
     public string AddRepaymentText => T("installment.center.action.repay", "Add Repayment");
     public string CancelWithRefundText => T("installment.center.action.cancel", "Cancel and Refund");
     public string CancelWithVoucherRefundText => T("installment.center.action.cancelToVoucher", "Cancel and Refund as Voucher");
@@ -134,9 +134,9 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public string SearchButtonText => T("installment.center.action.search", "Search");
     public string SearchTextLabel => T("installment.center.search", "Search order no., name, or phone");
     public string BackToPaymentText => T("installment.center.action.backToPayment", "Back to Payment");
-    public string OfflineNoticeText => T("installment.center.offline", "Offline mode only supports local cached installment orders.");
-    public string SelectedOrderNumberText => SelectedOrder?.OrderNumber ?? T("installment.center.selected.none", "No installment selected");
-    public string SelectedOrderCustomerText => SelectedOrder?.CustomerName ?? T("installment.center.selected.customer.empty", "Select an installment order on the left");
+    public string OfflineNoticeText => T("installment.center.offline", "Offline mode only supports local cached lay-by orders.");
+    public string SelectedOrderNumberText => SelectedOrder?.OrderNumber ?? T("installment.center.selected.none", "No lay-by selected");
+    public string SelectedOrderCustomerText => SelectedOrder?.CustomerName ?? T("installment.center.selected.customer.empty", "Select a lay-by order on the left");
     public string SelectedOrderOutstandingText => SelectedOrder is null
         ? T("installment.center.selected.outstanding.empty", "Outstanding -")
         : string.Format(GetCulture(), T("installment.center.selected.outstanding", "Outstanding {0:C2}"), SelectedOrder.OutstandingAmount);
@@ -201,10 +201,10 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         await LoadCoreAsync(
             () => _installmentOrderService.GetOrdersAsync(Session),
             "installment.center.status.loaded",
-            "Loaded {0} installment orders.",
+            "Loaded {0} lay-by orders.",
             recoveryWarning);
     }
-    public async Task SearchAsync() => await LoadCoreAsync(() => _installmentOrderService.SearchAsync(Session, SearchText), "installment.center.status.searched", "Found {0} installment orders.");
+    public async Task SearchAsync() => await LoadCoreAsync(() => _installmentOrderService.SearchAsync(Session, SearchText), "installment.center.status.searched", "Found {0} lay-by orders.");
 
     public async Task RecoverAsync()
     {
@@ -212,7 +212,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
         await LoadCoreAsync(
             () => _installmentOrderService.GetOrdersAsync(Session),
             "installment.center.status.loaded",
-            "Loaded {0} installment orders.",
+            "Loaded {0} lay-by orders.",
             recoveryWarning);
     }
 
@@ -258,7 +258,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             }
             else if (orders.Count == 0)
             {
-                SetStatusResource("installment.center.status.empty", "There are no installment orders.");
+                SetStatusResource("installment.center.status.empty", "There are no lay-by orders.");
             }
             else
             {
@@ -696,7 +696,7 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             SetLiteralStatus(result.Message);
             if (result.Succeeded)
             {
-                await LoadCoreAsync(() => _installmentOrderService.SearchAsync(Session, SearchText), "installment.center.status.searched", "Found {0} installment orders.", result.Message);
+                await LoadCoreAsync(() => _installmentOrderService.SearchAsync(Session, SearchText), "installment.center.status.searched", "Found {0} lay-by orders.", result.Message);
             }
 
             return result;

@@ -11,7 +11,7 @@ import type { ReceiptTermsBlock } from "./receipt-document";
  *   由分期补打服务经 resolveReceiptTermsBlock（receipt-terms-text.ts）换成「本块标题 + 自定义正文」。
  */
 export const INSTALLMENT_RECEIPT_TERMS: ReceiptTermsBlock = Object.freeze({
-  title: "INSTALLMENT TERMS",
+  title: "LAY-BY TERMS",
   lines: Object.freeze([
     "Order total: $50.00 minimum.",
     "First payment: $20.00 minimum.",

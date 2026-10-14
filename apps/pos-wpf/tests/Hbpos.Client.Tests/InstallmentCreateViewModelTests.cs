@@ -22,14 +22,14 @@ public sealed class InstallmentCreateViewModelTests
 
         viewModel.Prepare(CreateSession(), CreateCartSnapshot());
 
-        Assert.Equal("Create Installment", viewModel.PageTitleText);
+        Assert.Equal("Create Lay-by", viewModel.PageTitleText);
         Assert.Single(viewModel.CartLines);
         Assert.Equal(130m, viewModel.GoodsAmount);
         Assert.Equal(10m, viewModel.DiscountAmount);
         Assert.Equal(120m, viewModel.TotalAmount);
         Assert.Equal(20m, viewModel.DownPaymentAmount);
         Assert.Equal(100m, viewModel.FinancedAmount);
-        Assert.Equal("Complete the customer, down payment, and installment details.", viewModel.StatusMessage);
+        Assert.Equal("Complete the customer, down payment, and lay-by details.", viewModel.StatusMessage);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class InstallmentCreateViewModelTests
         Assert.Equal("VIP001", service.LastCreateRequest.DownPayment.Reference);
         Assert.Equal("LOCK-001", service.LastCreateRequest.DownPayment.ReservationToken);
         Assert.NotNull(createdOrder);
-        Assert.Equal("Installment order created.", viewModel.StatusMessage);
+        Assert.Equal("Lay-by order created.", viewModel.StatusMessage);
         var auditEvent = Assert.Single(auditLogger.Events);
         Assert.Equal("SALE_COMPLETE", auditEvent.OperationType);
         Assert.Equal("Installment+Voucher", auditEvent.PaymentMethod);
@@ -345,7 +345,7 @@ public sealed class InstallmentCreateViewModelTests
         public static InstallmentOrderCreateResult CreateSucceededResult() =>
             new(
                 true,
-                "Installment order created.",
+                "Lay-by order created.",
                 new InstallmentOrderSummary(
                     Guid.NewGuid(),
                     "IO-001",

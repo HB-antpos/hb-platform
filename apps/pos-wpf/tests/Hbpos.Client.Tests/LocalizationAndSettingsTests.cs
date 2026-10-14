@@ -360,8 +360,8 @@ public sealed class LocalizationAndSettingsTests : IDisposable
             Assert.False(localization.T(key).StartsWith("[[", StringComparison.Ordinal), key);
         }
 
-        Assert.Equal("Installment Center", localization.T("installment.center.title"));
-        Assert.Equal("Create Installment", localization.T("installment.create.title"));
+        Assert.Equal("Lay-by Center", localization.T("installment.center.title"));
+        Assert.Equal("Create Lay-by", localization.T("installment.create.title"));
         Assert.Equal("Payment due", localization.T("history.installment.status.paymentDue"));
 
         localization.SetCulture("zh-CN");

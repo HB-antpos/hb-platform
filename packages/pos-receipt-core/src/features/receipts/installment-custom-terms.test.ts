@@ -13,7 +13,7 @@ import { resolveReceiptTermsBlock } from "./receipt-terms-text";
 /**
  * 总部下发「分期条款」自定义正文后的分期小票：
  * 调用方用 resolveReceiptTermsBlock(INSTALLMENT_RECEIPT_TERMS, 自定义正文) 解析条款块再交给
- * buildSaleReceiptDocument；标题 INSTALLMENT TERMS 固定，未定制 / 全空白 / 不合规时与默认文案逐字一致。
+ * buildSaleReceiptDocument；标题 LAY-BY TERMS 固定，未定制 / 全空白 / 不合规时与默认文案逐字一致。
  */
 
 const installmentSale = {
@@ -68,13 +68,13 @@ test("未定制（null / undefined / 空串 / 纯空白）：与直接传默认�
   }
 });
 
-test("定制：标题固定为 INSTALLMENT TERMS，正文按行输出，空行被丢弃、每行 trim", () => {
+test("定制：标题固定为 LAY-BY TERMS，正文按行输出，空行被丢弃、每行 trim", () => {
   const lines = textLines(build("  Deposit $30 minimum.  \r\n\r\n   \nLater payments from $10.\rBalance due in 90 days."));
-  const titleIndex = lines.indexOf("INSTALLMENT TERMS");
+  const titleIndex = lines.indexOf("LAY-BY TERMS");
 
   assert.ok(titleIndex > lines.indexOf("Refunds and returns"), "条款仍在退货政策之后");
   assert.deepEqual(lines.slice(titleIndex, titleIndex + 4), [
-    "INSTALLMENT TERMS",
+    "LAY-BY TERMS",
     "Deposit $30 minimum.",
     "Later payments from $10.",
     "Balance due in 90 days.",
@@ -90,10 +90,10 @@ test("定制长句按纸宽在词边界换行（58mm=32、80mm=42），拼回去
   for (const [paper, width] of [["58mm", 32], ["80mm", 42]] as const) {
     const document = build(sentence, paper);
     const lines = textLines(document);
-    const titleIndex = lines.indexOf("INSTALLMENT TERMS");
+    const titleIndex = lines.indexOf("LAY-BY TERMS");
     // 条款之后紧跟分隔线（非 text），所以条款正文就是标题之后到下一条非条款文本之前的连续 text 行。
     const body: string[] = [];
-    const startLine = document.lines.findIndex((line) => line.kind === "text" && line.text === "INSTALLMENT TERMS");
+    const startLine = document.lines.findIndex((line) => line.kind === "text" && line.text === "LAY-BY TERMS");
     for (const line of document.lines.slice(startLine + 1)) {
       if (line.kind !== "text") break;
       body.push(line.text);
@@ -119,14 +119,14 @@ test("行内 TAB 换成空格，TAB 不会让文档构建抛错也不会进入�
   assert.equal(lines.some((line) => line.includes("\t")), false);
 });
 
-test("zh-CN 小票：标题仍为英文 INSTALLMENT TERMS，自定义正文按原文打印", () => {
+test("zh-CN 小票：标题仍为英文 LAY-BY TERMS，自定义正文按原文打印", () => {
   const document = buildSaleReceiptDocument({
     ...installmentSale,
     locale: "zh-CN",
     termsBlock: resolveReceiptTermsBlock(INSTALLMENT_RECEIPT_TERMS, "订单满 $50 起。"),
   });
   const lines = textLines(document);
-  const titleIndex = lines.indexOf("INSTALLMENT TERMS");
+  const titleIndex = lines.indexOf("LAY-BY TERMS");
 
   assert.ok(titleIndex > lines.indexOf("退款与退货"));
   assert.equal(lines[titleIndex + 1], "订单满 $50 起。");

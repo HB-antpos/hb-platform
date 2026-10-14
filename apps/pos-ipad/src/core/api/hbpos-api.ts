@@ -227,7 +227,7 @@ export type StoreReceiptProfile = Readonly<{
   returnPolicy: string;
   /** 退款券「VOUCHER TERMS」自定义正文；服务端 null / 缺失（旧服务端）归一为空串 = 未定制。 */
   voucherTerms: string;
-  /** 分期小票「INSTALLMENT TERMS」自定义正文；同上。 */
+  /** 分期小票「LAY-BY TERMS」自定义正文；同上。 */
   installmentTerms: string;
 }>;
 

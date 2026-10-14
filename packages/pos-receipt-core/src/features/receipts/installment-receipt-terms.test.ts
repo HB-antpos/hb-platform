@@ -118,7 +118,7 @@ function textLines(document: EscPosDocument): string[] {
 
 test("条款常量与业主审定的英文稿逐字一致，且不可被修改", () => {
   assert.deepEqual(INSTALLMENT_RECEIPT_TERMS, {
-    title: "INSTALLMENT TERMS",
+    title: "LAY-BY TERMS",
     lines: [
       "Order total: $50.00 minimum.",
       "First payment: $20.00 minimum.",
@@ -138,7 +138,7 @@ test("不传 termsBlock 时输出与改动前逐行、逐字节一致（58mm 金
     documentToEscPosBytes(withoutField),
     documentToEscPosBytes(golden),
   );
-  assert.equal(textLines(withoutField).some((line) => line.includes("INSTALLMENT TERMS")), false);
+  assert.equal(textLines(withoutField).some((line) => line.includes("LAY-BY TERMS")), false);
 });
 
 test("没有可打印内容的 termsBlock 不产生任何输出（不留空分隔线）", () => {
@@ -154,7 +154,7 @@ test("没有可打印内容的 termsBlock 不产生任何输出（不留空分�
 test("58mm 条款块位于退货政策之后、条码/QR/页脚之前，标题左对齐加粗、条款行左对齐", () => {
   const document = buildSaleReceiptDocument({ ...installmentSale, termsBlock: INSTALLMENT_RECEIPT_TERMS });
   const lines = document.lines;
-  const titleIndex = lines.findIndex((line) => line.kind === "text" && line.text === "INSTALLMENT TERMS");
+  const titleIndex = lines.findIndex((line) => line.kind === "text" && line.text === "LAY-BY TERMS");
   const policyIndex = lines.findIndex((line) => line.kind === "text" && line.text === "Refunds and returns");
   const qrIndex = lines.findIndex((line) => line.kind === "qr");
   const printTimeIndex = lines.findIndex((line) => line.kind === "text" && line.text.startsWith("Print Time:"));
@@ -164,7 +164,7 @@ test("58mm 条款块位于退货政策之后、条码/QR/页脚之前，标题�
   assert.ok(qrIndex < printTimeIndex);
   // 标题前后各一条分隔线：前一条与退货政策隔开，后一条沿用原有「条码前分隔线」。
   assert.equal(lines[titleIndex - 1]?.kind, "separator");
-  assert.deepEqual(lines[titleIndex], { kind: "text", text: "INSTALLMENT TERMS", align: "left", bold: true });
+  assert.deepEqual(lines[titleIndex], { kind: "text", text: "LAY-BY TERMS", align: "left", bold: true });
   assert.equal(lines[qrIndex - 1]?.kind, "separator");
 
   const termBodies = lines.slice(titleIndex + 1, qrIndex - 1);
@@ -194,12 +194,12 @@ test("80mm 条款块按 42 字符纸宽换行，三条条款文案原样保留",
     termsBlock: INSTALLMENT_RECEIPT_TERMS,
   });
   const lines = textLines(document);
-  const titleIndex = lines.indexOf("INSTALLMENT TERMS");
+  const titleIndex = lines.indexOf("LAY-BY TERMS");
   const policyIndex = lines.indexOf("Refunds and returns");
 
   assert.ok(policyIndex >= 0 && titleIndex > policyIndex);
   assert.deepEqual(lines.slice(titleIndex, titleIndex + 5), [
-    "INSTALLMENT TERMS",
+    "LAY-BY TERMS",
     "Order total: $50.00 minimum.",
     "First payment: $20.00 minimum.",
     "Each later payment: $5.00 minimum, or the",
@@ -215,7 +215,7 @@ test("无退货政策时条款仍紧跟付款块并以分隔线隔开", () => {
     termsBlock: INSTALLMENT_RECEIPT_TERMS,
   });
   const lines = document.lines;
-  const titleIndex = lines.findIndex((line) => line.kind === "text" && line.text === "INSTALLMENT TERMS");
+  const titleIndex = lines.findIndex((line) => line.kind === "text" && line.text === "LAY-BY TERMS");
   const refIndex = lines.findIndex((line) => line.kind === "text" && line.text === "  Ref: ****4321");
 
   assert.equal(lines[refIndex + 1]?.kind, "separator");
@@ -229,7 +229,7 @@ test("zh-CN 小票同样原样打印英文条款，不自行翻译", () => {
     termsBlock: INSTALLMENT_RECEIPT_TERMS,
   });
   const lines = textLines(document);
-  const titleIndex = lines.indexOf("INSTALLMENT TERMS");
+  const titleIndex = lines.indexOf("LAY-BY TERMS");
 
   assert.ok(titleIndex >= 0, "zh-CN 下条款标题仍为英文");
   assert.ok(titleIndex > lines.indexOf("退款与退货"), "条款在退货政策之后");

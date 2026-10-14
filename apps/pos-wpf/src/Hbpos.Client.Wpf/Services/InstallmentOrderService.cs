@@ -222,7 +222,7 @@ public sealed class InstallmentOrderService(
         var details = await apiClient.GetDetailsAsync(installmentGuid, cancellationToken);
         if (details.InstallmentGuid != installmentGuid)
         {
-            throw new InvalidOperationException("分期详情与查询订单不一致，已停止显示。 / Installment detail does not match the requested order.");
+            throw new InvalidOperationException("分期详情与查询订单不一致，已停止显示。 / Lay-by detail does not match the requested order.");
         }
 
         return await SaveSnapshotAsync(details, cancellationToken);
@@ -629,7 +629,7 @@ public sealed class InstallmentOrderService(
             {
                 return new InstallmentOrderCreateResult(
                     false,
-                    operation.Message ?? "Installment creation result is unknown. Do not collect payment again.",
+                    operation.Message ?? "Lay-by creation result is unknown. Do not collect payment again.",
                     RequiresReview: true);
             }
 
@@ -1050,7 +1050,7 @@ public sealed class InstallmentApiClient(HttpClient httpClient) : IInstallmentAp
                     }),
                 ex);
             throw new CatalogApiException(
-                "分期查询超过 2 秒，请缩小日期范围后重试。 / Installment search exceeded 2 seconds. Narrow the date range and retry.",
+                "分期查询超过 2 秒，请缩小日期范围后重试。 / Lay-by search exceeded 2 seconds. Narrow the date range and retry.",
                 HttpStatusCode.RequestTimeout,
                 "INSTALLMENT_HISTORY_QUERY_TIMEOUT",
                 ex);

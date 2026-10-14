@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Hbpos.Client.Wpf.Services;
 
 /// <summary>
-/// 小票底部条款块的正文取值规则：退款代金券的「VOUCHER TERMS」与进行中分期小票的「INSTALLMENT TERMS」，
+/// 小票底部条款块的正文取值规则：退款代金券的「VOUCHER TERMS」与进行中分期小票的「LAY-BY TERMS」，
 /// 标题由收银端固定打印，标题下面的正文可由总部按门店定制（与手持 / iPad / Web 同一套语义）。
 /// <list type="bullet">
 /// <item>null / 空串 / 纯空白＝未定制，按内置默认文案打印（默认文案逐字不变）。</item>

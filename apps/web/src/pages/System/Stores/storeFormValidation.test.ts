@@ -375,7 +375,7 @@ for (const [field, label] of [['voucherTerms', '代金券使用说明'], ['insta
 assertIncludes(zhPageMessages, '"voucherTermsMaxLength": "代金券使用说明不能超过 600 个字符"', '中文文案应明确说明代金券使用说明最大长度')
 assertIncludes(zhPageMessages, '"installmentTermsMaxLength": "分期条款不能超过 600 个字符"', '中文文案应明确说明分期条款最大长度')
 assertIncludes(enPageMessages, '"voucherTermsMaxLength": "Voucher terms cannot exceed 600 characters"', '英文文案应明确说明代金券使用说明最大长度')
-assertIncludes(enPageMessages, '"installmentTermsMaxLength": "Installment terms cannot exceed 600 characters"', '英文文案应明确说明分期条款最大长度')
+assertIncludes(enPageMessages, '"installmentTermsMaxLength": "Lay-by terms cannot exceed 600 characters"', '英文文案应明确说明分期条款最大长度')
 // 表单里的 placeholder 展示收银端内置默认文案，批量弹窗同理；长度上限与后端 / 收银端同值，只在常量文件里定义一次。
 assertIncludes(formFieldsSource, 'placeholder={DEFAULT_VOUCHER_TERMS_TEXT}', '代金券使用说明输入框应以默认文案作为占位提示')
 assertIncludes(formFieldsSource, 'placeholder={DEFAULT_INSTALLMENT_TERMS_TEXT}', '分期条款输入框应以默认文案作为占位提示')

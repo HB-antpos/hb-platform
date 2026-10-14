@@ -192,7 +192,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   advertisements: { zhTitle: '广告', enTitle: 'Advertisements' },
   promotions: { zhTitle: '促销', enTitle: 'Promotions' },
   reports: { zhTitle: '报表', enTitle: 'Reports' },
-  'installment-orders': { zhTitle: '分期订单', enTitle: 'Installments' },
+  'installment-orders': { zhTitle: '分期订单', enTitle: 'Lay-bys' },
   'store-vouchers': { zhTitle: '门店代金券', enTitle: 'Vouchers' },
   'store-cash': { zhTitle: '现金', enTitle: 'Cash' },
   'seasonal-cards': { zhTitle: '节日贺卡', enTitle: 'Seasonal Cards' },
