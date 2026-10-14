@@ -72,6 +72,7 @@ public sealed class FaceMatchControllerTests
         [nameof(FaceMatchController.ListResults), Permissions.FaceCapture.Images.View],
         [nameof(FaceMatchController.ListHits), Permissions.FaceCapture.Images.View],
         [nameof(FaceMatchController.HitSummary), Permissions.FaceCapture.Images.View],
+        [nameof(FaceMatchController.HitDetail), Permissions.FaceCapture.Images.View],
         [nameof(FaceMatchController.HitImage), Permissions.FaceCapture.Images.View],
         [nameof(FaceMatchController.Thumbnails), Permissions.FaceCapture.Images.View],
     ];
@@ -386,6 +387,52 @@ public sealed class FaceMatchControllerTests
             .ThrowsAsync(FaceMatchErrors.NotFound("任务"));
 
         var result = await CreateController(Permissions.FaceCapture.Images.View).MarkHitRead("nope", default);
+
+        Assert.Equal(404, StatusOf(result));
+        Assert.Equal("FACE_MATCH_NOT_FOUND", ErrorCode(result));
+    }
+
+    [Fact]
+    public void 命中详情_路由固定_只有GET_只挂看图权限一个策略()
+    {
+        var method = typeof(FaceMatchController).GetMethod(nameof(FaceMatchController.HitDetail))!;
+
+        var route = Assert.Single(method.GetCustomAttributes<HttpGetAttribute>());
+        Assert.Equal("results/hits/{taskId}/detail", route.Template);
+        Assert.Empty(method.GetCustomAttributes<HttpPostAttribute>());
+        Assert.Equal(Permissions.FaceCapture.Images.View, Assert.Single(method.GetCustomAttributes<AuthorizeAttribute>()).Policy);
+    }
+
+    [Fact]
+    public async Task 命中详情_把任务编号与操作人透传给服务_响应是统一信封()
+    {
+        string? taskId = null;
+        FaceMatchActor? actor = null;
+        _hits.Setup(h => h.GetDetailAsync(It.IsAny<string>(), It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .Callback<string, FaceMatchActor, CancellationToken>((t, a, _) => { taskId = t; actor = a; })
+            .ReturnsAsync(new FaceHitDetailDto
+            {
+                TaskId = "t1",
+                TargetPhotoCount = 2,
+                Recipients = [new FaceHitRecipientDto { DisplayName = "Alice", Read = false }],
+            });
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View).HitDetail("t1", default);
+
+        var envelope = Assert.IsType<ApiResponse<FaceHitDetailDto>>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(2, envelope.Data!.TargetPhotoCount);
+        Assert.Equal("Alice", Assert.Single(envelope.Data.Recipients).DisplayName);
+        Assert.Equal("t1", taskId);
+        Assert.Equal("u-1", actor!.Id);
+    }
+
+    [Fact]
+    public async Task 命中详情_任务不存在或越权的404原样映射_错误码与标已读一致()
+    {
+        _hits.Setup(h => h.GetDetailAsync("nope", It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(FaceMatchErrors.NotFound("任务"));
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View).HitDetail("nope", default);
 
         Assert.Equal(404, StatusOf(result));
         Assert.Equal("FACE_MATCH_NOT_FOUND", ErrorCode(result));

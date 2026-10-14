@@ -360,6 +360,17 @@ public sealed class FaceMatchController(
     }
 
     /// <summary>
+    /// 单条命中的详情补充（Web 抓拍详情抽屉用）：名单目标图张数 + 命中通知的收件人展示名与已读状态。
+    /// 权限 FaceCapture.Images.View，门店范围同命中流；任务编号格式不对 / 不存在 / 不在门店范围统一 404。
+    /// 不读图、不写审计（只有姓名与已读状态，没有生物识别信息）；响应不含 UserGUID、用户名、邮箱。
+    /// 目标图本身仍走复核页的参考照片接口（需 FaceMatch.Unwelcome.Review，每次查看写审计），本接口只告诉前端有几张。
+    /// </summary>
+    [HttpGet("results/hits/{taskId}/detail")]
+    [Authorize(Policy = Permissions.FaceCapture.Images.View)]
+    public Task<IActionResult> HitDetail(string taskId, CancellationToken cancellationToken) =>
+        RunAsync(() => hitService.GetDetailAsync(taskId, ResolveActor(), cancellationToken));
+
+    /// <summary>
     /// 命中图原图（服务端转发字节）：权限 FaceCapture.Images.View，复用复核页同一套读取（门店范围校验、对象键只来自数据库、
     /// 类型与大小校验、<see cref="FaceMatchAuditActions.TaskViewCapture"/> 每次读取写持久审计，被拒绝的尝试同样记）；图已删除返回同一个「已删除」错误。
     /// </summary>

@@ -13,6 +13,7 @@ import {
   createFaceEnrollment,
   createUnwelcomeEntry,
   fetchFaceCaptureResultImage,
+  fetchFaceHitDetail,
   fetchUnwelcomeReferenceImage,
   fetchUnwelcomeTaskImage,
   getFaceAudit,
@@ -29,6 +30,7 @@ import {
   getUnwelcomeTasks,
   normalizeFaceCaptureResult,
   normalizeFaceGateReport,
+  normalizeFaceHitDetail,
   normalizeFaceMatchConfig,
   normalizeFaceTraffic,
   normalizeFaceUnwelcomeEntry,
@@ -721,6 +723,94 @@ try {
     await assert.rejects(() => fetchFaceCaptureResultImage('abc123', badId), (error: unknown) => error instanceof RequestError && error.status === 404)
   }
   assert.equal(calls.length, resultImageCalls, '非法编号不应发出任何请求')
+
+  // ───────── 抓拍详情抽屉：命中详情（目标图张数 + 通知收件人姓名与已读状态） ─────────
+  const detailTaskId = 'a1'.repeat(16)
+  responseFactory = () =>
+    json({
+      success: true,
+      data: {
+        taskId: detailTaskId,
+        targetPhotoCount: 2,
+        notificationRevoked: false,
+        recipients: [
+          { displayName: 'Alice', read: false },
+          { displayName: 'Bob', read: false },
+          { displayName: 'Carol', read: false },
+          { displayName: '管理员', read: true, readAtUtc: '2026-10-15T01:23:45Z' },
+        ],
+      },
+    })
+  const detailController = new AbortController()
+  const detail = await fetchFaceHitDetail(detailTaskId, detailController.signal)
+  assert.equal(lastCall().url, `/api/react/v1/face-match/results/hits/${detailTaskId}/detail`)
+  assert.equal(lastCall().init?.method, 'GET')
+  assert.equal(lastCall().init?.cache, 'no-store', '含姓名的响应不让浏览器 HTTP 缓存保留')
+  assert.equal(lastCall().init?.signal, detailController.signal, '详情请求可中止（抽屉关闭 / 切换抓拍时中止）')
+  assert.equal(detail.taskId, detailTaskId)
+  assert.equal(detail.targetPhotoCount, 2)
+  assert.equal(detail.notificationRevoked, false)
+  assert.deepEqual(
+    detail.recipients.map((recipient) => [recipient.displayName, recipient.read, recipient.readAtUtc]),
+    [['Alice', false, null], ['Bob', false, null], ['Carol', false, null], ['管理员', true, '2026-10-15T01:23:45Z']],
+    '4 个收件人、只有管理员已读；未读的没有已读时间',
+  )
+  // 收件人对象只有三个字段，没有账号标识
+  assert.deepEqual(Object.keys(detail.recipients[0]).sort(), ['displayName', 'read', 'readAtUtc'])
+  assert.deepEqual(Object.keys(detail).sort(), ['notificationRevoked', 'recipients', 'targetPhotoCount', 'taskId'])
+
+  // 缺字段 / 脏数据按安全默认值：收件人为空、目标图 0 张（不显示目标图）、未撤回
+  for (const garbage of [undefined, null, 'x', 42, [], {}]) {
+    const safe = normalizeFaceHitDetail(garbage)
+    assert.deepEqual(safe, { taskId: '', targetPhotoCount: 0, notificationRevoked: false, recipients: [] })
+  }
+  assert.equal(normalizeFaceHitDetail({ targetPhotoCount: 'many' }).targetPhotoCount, 0, '张数不是数字：0')
+  assert.equal(normalizeFaceHitDetail({ targetPhotoCount: -3 }).targetPhotoCount, 0, '张数为负：0')
+  assert.equal(normalizeFaceHitDetail({ targetPhotoCount: Number.NaN }).targetPhotoCount, 0)
+  assert.equal(normalizeFaceHitDetail({ targetPhotoCount: 2.9 }).targetPhotoCount, 2, '张数取整')
+  assert.equal(normalizeFaceHitDetail({ targetPhotoCount: 99 }).targetPhotoCount, 10, '张数不超过读取函数允许的下标范围')
+  assert.equal(normalizeFaceHitDetail({ notificationRevoked: 'yes' }).notificationRevoked, false, '只有布尔 true 才算已撤回')
+  assert.equal(normalizeFaceHitDetail({ notificationRevoked: true }).notificationRevoked, true)
+  assert.deepEqual(normalizeFaceHitDetail({ recipients: 'nope' }).recipients, [], '收件人不是数组：空')
+  const dirty = normalizeFaceHitDetail({
+    recipients: [
+      null,
+      'text',
+      7,
+      { displayName: '  Alice  ', read: true, readAtUtc: '2026-10-15T02:00:00Z' },
+      { displayName: '', read: 'true' },
+      { displayName: 42, read: false, readAtUtc: '2026-10-15T03:00:00Z' },
+      { read: true },
+      { displayName: 'Bob', userGuid: 'secret-guid', username: 'bob-login', email: 'bob@example.test', read: true, readAtUtc: 42 },
+    ],
+  }).recipients
+  assert.deepEqual(
+    dirty.map((recipient) => [recipient.displayName, recipient.read, recipient.readAtUtc]),
+    [
+      ['Alice', true, '2026-10-15T02:00:00Z'],
+      ['-', false, null],            // 展示名为空：占位；read 不是布尔 true：未读
+      ['-', false, null],            // 展示名不是字符串：占位；未读却带了时间：丢弃时间
+      ['-', true, null],             // 缺展示名但已读：占位；没有时间
+      ['Bob', true, null],           // 已读时间不是字符串：没有时间
+    ],
+    '非对象项直接丢弃；展示名去空白、缺失为 -',
+  )
+  assert.ok(!JSON.stringify(dirty).includes('secret-guid') && !JSON.stringify(dirty).includes('bob-login') && !JSON.stringify(dirty).includes('bob@example'), '即使后端误返回账号标识也不会带进界面数据')
+
+  // 错误：403 / 404 保留状态码与错误码（页面静默提示，不弹错）
+  responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_MATCH_NOT_FOUND' }, 404)
+  await assert.rejects(
+    () => fetchFaceHitDetail(detailTaskId),
+    (error: unknown) => error instanceof RequestError && error.status === 404 && (error.payload as { errorCode?: string }).errorCode === 'FACE_MATCH_NOT_FOUND',
+  )
+  responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_MATCH_FORBIDDEN' }, 403)
+  await assert.rejects(() => fetchFaceHitDetail(detailTaskId), (error: unknown) => error instanceof RequestError && error.status === 403)
+  // 任务编号不合法：不发请求（防路径穿越），按任务不存在处理
+  const detailCalls = calls.length
+  for (const badId of ['../x', 'a/b', '', 'a b', 'x'.repeat(65), 'a?b=1']) {
+    await assert.rejects(() => fetchFaceHitDetail(badId), (error: unknown) => error instanceof RequestError && error.status === 404)
+  }
+  assert.equal(calls.length, detailCalls, '非法任务编号不应发出任何请求')
 
   // ───────── 业务错误码保留在 payload 里供页面映射 ─────────
   responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_MATCH_NSW_NOTICE_TOO_RECENT' }, 400)

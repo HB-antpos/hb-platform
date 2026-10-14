@@ -9,6 +9,7 @@ import type {
   FaceCaptureResultQuery,
   FaceConsentMethod,
   FaceGateReport,
+  FaceHitRecipient,
   FaceMatchConfig,
   FaceMatchPermissionFlags,
   FaceStaffCandidate,
@@ -1111,7 +1112,7 @@ export interface NotifyTimelineStep {
 
 /**
  * 命中通知发送时间线（抽屉里用）：任务已创建 → 通知（已发布 / 排队中 / 已跳过 / 未知）→ 已读人数（只有已发布才有）→ 复核状态。
- * 只含人数与时间，没有收件人姓名；已读数夹在收件人数以内。
+ * 时间线本身只含人数与时间；收件人姓名在时间线之外的「接收人」列表里显示（来自详情接口的 displayName）。已读数夹在收件人数以内。
  */
 export function buildNotifyTimeline(hit: Pick<FaceCaptureResultHit, 'notifyState' | 'notifiedAtUtc' | 'notifyRecipientCount' | 'notifyReadCount' | 'reviewStatus'>): NotifyTimelineStep[] {
   const steps: NotifyTimelineStep[] = [
@@ -1141,4 +1142,47 @@ export function buildNotifyTimeline(hit: Pick<FaceCaptureResultHit, 'notifyState
     done: !pending && reviewKey !== undefined,
   })
   return steps
+}
+
+// ───────────── 抓拍详情抽屉：接收人与名单目标图 ─────────────
+
+/** 接收人摘要「已读 x / y」：以接口返回的接收人逐人状态为准，已读数不会超过总数。 */
+export function summarizeRecipients(recipients: ReadonlyArray<Pick<FaceHitRecipient, 'read'>>): { total: number; read: number } {
+  const total = recipients.length
+  return { total, read: Math.min(total, recipients.filter((recipient) => recipient.read).length) }
+}
+
+/** 名单目标图区域的几种显示：没有复核权限 / 详情读取中 / 详情读取失败 / 目标图已清理或条目失效 / 有目标图。 */
+export type TargetAreaView = 'noPermission' | 'loading' | 'failed' | 'gone' | 'photos'
+
+/**
+ * 名单目标图区域显示什么。顺序即规则：
+ * 1. 没有复核权限（复核页签不可见）一律不读图，也不必等详情——直接提示需要复核权限；
+ * 2. 有权限：详情还在读取 / 读取失败时先显示对应提示（不知道有几张，不请求图片）；
+ * 3. 详情给出 0 张（条目已撤回 / 过期 / 照片已清空）显示「已清理或已失效」；大于 0 张才显示图片并请求。
+ */
+export function resolveTargetAreaView(input: {
+  canViewTarget: boolean
+  status: 'loading' | 'error' | 'ready'
+  targetPhotoCount: number
+}): TargetAreaView {
+  if (!input.canViewTarget) return 'noPermission'
+  if (input.status === 'loading') return 'loading'
+  if (input.status === 'error') return 'failed'
+  return input.targetPhotoCount > 0 ? 'photos' : 'gone'
+}
+
+/** 名单目标图区域除了「有目标图」以外的几种提示文案键（写成字面量映射：契约测试按字面量扫描键）。 */
+export const TARGET_NOTE_KEYS: Record<Exclude<TargetAreaView, 'photos'>, string> = {
+  noPermission: 'faceMatch.results.drawer.targetNoPermission',
+  loading: 'faceMatch.results.drawer.loadingImage',
+  failed: 'faceMatch.results.drawer.targetLoadFailed',
+  gone: 'faceMatch.results.drawer.targetGone',
+}
+
+/** 目标图上一张 / 下一张：下标夹在 0 .. count-1，没有照片时为 0。 */
+export function stepTargetIndex(index: number, delta: -1 | 1, count: number): number {
+  if (!Number.isInteger(count) || count <= 0) return 0
+  const next = (Number.isInteger(index) ? index : 0) + delta
+  return Math.min(count - 1, Math.max(0, next))
 }

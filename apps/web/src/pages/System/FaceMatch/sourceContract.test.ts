@@ -82,13 +82,15 @@ for (const name of ['ReviewTaskModal.tsx', 'PhotoPicker.tsx', 'ResultDetailDrawe
 }
 assert(!/useState<[^>]*Blob/.test(f('ReviewTaskModal.tsx')), '复核弹框 state 里不保存 Blob')
 
-// 读取：只经服务层专用函数，且只有复核弹框调用；其它文件都不直接读图
+// 读取：只经服务层专用函数；命中抓拍图只有复核弹框读，名单参考照片只有复核弹框与抓拍详情抽屉（名单目标图，见下方）读；其它文件都不直接读图
 assert(service.includes('export async function fetchUnwelcomeTaskImage(') && service.includes('export async function fetchUnwelcomeReferenceImage('), '服务层提供按需读取单张图片的函数')
 assert(service.includes("credentials: 'include'") && service.includes('...NO_STORE'), '读取图片带登录 Cookie 且 no-store')
 assert(/\/unwelcome\/tasks\/\$\{taskId\}\/image/.test(service) && /\/unwelcome\/tasks\/\$\{taskId\}\/reference\/\$\{index\}/.test(service), '图片只走两个专用内容接口')
 for (const [name, text] of Object.entries(files)) {
   if (name === 'ReviewTaskModal.tsx') continue
-  assert(!text.includes('fetchUnwelcomeTaskImage') && !text.includes('fetchUnwelcomeReferenceImage'), `${name} 不得直接读取复核图片（只能由复核弹框按需读取）`)
+  assert(!text.includes('fetchUnwelcomeTaskImage'), `${name} 不得直接读取命中抓拍图（只能由复核弹框按需读取）`)
+  if (name === 'ResultDetailDrawer.tsx') continue
+  assert(!text.includes('fetchUnwelcomeReferenceImage'), `${name} 不得直接读取名单参考照片（只能由复核弹框与抓拍详情抽屉按需读取）`)
 }
 assert(f('ReviewTaskModal.tsx').includes('fetchUnwelcomeTaskImage(') && f('ReviewTaskModal.tsx').includes('fetchUnwelcomeReferenceImage('), '复核弹框读取抓拍与参考照片')
 
@@ -133,10 +135,58 @@ assert(files['imageLogic.ts'].includes('createResultImageSession') && (files['im
 assert(f('index.tsx').includes("setSelectedTab('review')") && f('index.tsx').includes('activeKey={activeTab}'), '去复核通过受控页签切到复核任务')
 assert(f('ResultDetailDrawer.tsx').includes('canGoReview(result)') && f('ResultDetailDrawer.tsx').includes('disabled={!reviewable || !onGoReview}'), '去复核仅在有命中且命中图还在、且有复核页签时可点')
 assert(f('index.tsx').includes("case 'results':") && f('index.tsx').includes('<ResultsTab context={tabContext} />'), '页签渲染接入抓拍与比对')
-// 命中通知：只显示人数，不显示收件人姓名；通知文案是固定英文原文，来自逻辑层常量。
+// 命中通知：列表（复核任务 / 抓拍结果）只显示人数；收件人姓名只出现在抓拍详情抽屉的「接收人」列表里，
+// 且只来自详情接口的 displayName（姓名 + 已读状态 + 已读时间），任何文件都不得出现账号标识类字段；通知文案是固定英文原文，来自逻辑层常量。
 assert(f('ReviewTasksTab.tsx').includes('<NotifyStateCell') && f('ResultsTab.tsx').includes('<NotifyStateCell'), '复核任务与抓拍结果共用命中通知单元格')
-for (const name of ['ResultsTab.tsx', 'ResultDetailDrawer.tsx', 'shared.tsx']) {
-  assert(!/recipientName|recipients\.map|readerName|userName|userGuid/.test(f(name)), `${name} 不得出现通知收件人姓名等字段`)
+for (const name of ['ResultsTab.tsx', 'shared.tsx']) {
+  assert(!/recipientName|recipients\.map|readerName|userName|userGuid/.test(f(name)), `${name} 只显示通知人数，不得出现通知收件人姓名等字段`)
+}
+const ACCOUNT_IDENTIFIER = /user(guid|name|id)|readerName|recipientName|\bemail\b/i
+assert(!ACCOUNT_IDENTIFIER.test(f('ResultDetailDrawer.tsx')), '抽屉的接收人只显示姓名与已读状态，不得出现账号标识类字段')
+assert(
+  f('ResultDetailDrawer.tsx').includes('recipient.displayName') && f('ResultDetailDrawer.tsx').includes('recipient.read') && f('ResultDetailDrawer.tsx').includes('recipient.readAtUtc'),
+  '接收人列表显示姓名（displayName）、已读状态与已读时间',
+)
+{
+  const recipientType = read('src/types/faceMatch.ts').match(/export interface FaceHitRecipient \{[\s\S]*?\n\}/)?.[0] ?? ''
+  assert(recipientType !== '' && !ACCOUNT_IDENTIFIER.test(recipientType), '收件人类型只有展示名 / 已读状态 / 已读时间，没有账号标识')
+  const recipientNormalizer = service.match(/function normalizeFaceHitRecipient[\s\S]*?\n\}/)?.[0] ?? ''
+  assert(recipientNormalizer !== '' && !ACCOUNT_IDENTIFIER.test(recipientNormalizer), '收件人归一化不读取账号标识类字段')
+}
+// 命中详情（接收人 + 目标图张数）：抽屉里只有一处读取（挂在有命中时才渲染的 HitSections 里），服务函数先校验编号并带 no-store；其它文件不得读取。
+assert(service.includes('export async function fetchFaceHitDetail(') && /\/results\/hits\/\$\{taskId\}\/detail/.test(service), '服务层提供命中详情读取函数，路径固定')
+assert(/export async function fetchFaceHitDetail[\s\S]*?IMAGE_PATH_TASK_ID\.test\(taskId\)[\s\S]*?\.\.\.NO_STORE/.test(service), '命中详情先校验任务编号，请求带 no-store')
+for (const [name, text] of Object.entries(files)) {
+  if (name !== 'ResultDetailDrawer.tsx') assert(!text.includes('fetchFaceHitDetail'), `${name} 不得直接读取命中详情（只能由抓拍详情抽屉读取）`)
+}
+assert((f('ResultDetailDrawer.tsx').match(/fetchFaceHitDetail\(/g) ?? []).length === 1, '抽屉只在一处读取命中详情')
+assert(
+  /const loader = useCallback\(\(signal: AbortSignal\) => fetchFaceHitDetail\(taskId, signal\), \[taskId\]\)\s*const remote = useRemote<FaceHitDetail>\(loader\)/.test(f('ResultDetailDrawer.tsx')),
+  '命中详情经 useRemote 读取（挂载后一次、可中止、卸载 / 换抓拍即中止）',
+)
+assert(
+  /\{hit \? \(\s*<HitSections /.test(f('ResultDetailDrawer.tsx')) && (f('ResultDetailDrawer.tsx').match(/<HitSections\b/g) ?? []).length === 1,
+  '只有这条抓拍有命中时才挂载读取详情的 HitSections',
+)
+// 名单目标图：只在有复核权限（canViewTarget）且详情给出张数大于 0 时才挂载并读取；读取复用复核任务的参考照片接口；objectURL 随组件卸载撤销。
+{
+  const drawer = f('ResultDetailDrawer.tsx')
+  assert(drawer.includes('canViewTarget: boolean') && drawer.includes('resolveTargetAreaView({ canViewTarget'), '目标图是否显示由 canViewTarget 与详情张数共同决定')
+  assert((drawer.match(/<TargetPhotoBlock\b/g) ?? []).length === 1 && /targetView === 'photos' \? \(\s*<TargetPhotoBlock /.test(drawer), '只有判定为「有目标图」时才挂载目标图组件')
+  assert((drawer.match(/fetchUnwelcomeReferenceImage\(/g) ?? []).length === 1, '抽屉只在目标图组件里读取参考照片')
+  assert(/function TargetPhotoBlock[\s\S]*fetchUnwelcomeReferenceImage\(taskId, referenceIndex, signal\)/.test(drawer), '目标图读取的是这条命中的任务编号 + 下标')
+  assert(
+    /useEffect\(\(\) => \{[\s\S]*createReferenceImageSession\([\s\S]*void session\.start\(\)[\s\S]*session\.dispose\(\)[\s\S]*\}, \[taskId, count\]\)/.test(drawer),
+    '目标图组件卸载 / 切换抓拍时 effect 清理函数必须 dispose 会话（撤销 objectURL、中止在途请求）',
+  )
+  assert(drawer.includes('void sessionRef.current?.loadReference(next)') && !/for \(let|forEach\([^)]*loadReference/.test(drawer), '切换目标图时才按需读取对应那张，不预取')
+  assert(drawer.includes('errorKeys={REVIEW_IMAGE_ERROR_KEYS}') && drawer.includes('errorKeys={RESULT_IMAGE_ERROR_KEYS}'), '目标图错误提示与复核弹框同一套分类，抓拍图沿用抓拍的分类')
+  assert(drawer.includes('draggable={false}'), '图片不可拖拽')
+  assert(
+    files['imageLogic.ts'].includes('export function createReferenceImageSession(') && files['imageLogic.ts'].includes('if (options.fetchCapture) await load(CAPTURE_SLOT, options.fetchCapture)'),
+    '目标图会话复用复核会话（不带现场抓拍），不复制生命周期代码',
+  )
+  assert(f('ResultsTab.tsx').includes('canViewTarget={canViewTarget}') && f('index.tsx').includes('canViewTarget: hasReviewTab'), '目标图权限 = 复核页签权限，由页面经 ResultsTab 传给抽屉')
 }
 assert(f('ResultDetailDrawer.tsx').includes('HIT_NOTIFICATION_TITLE') && f('ResultDetailDrawer.tsx').includes('buildHitNotificationBody(hit.scorePercent)'), '通知文案区使用固定英文原文')
 assert(f('logic.ts').includes("'Possible match alert'") && f('logic.ts').includes('The score is not the probability that this is the same person; a reviewer must check it.'), '通知英文原文固定在逻辑层常量')

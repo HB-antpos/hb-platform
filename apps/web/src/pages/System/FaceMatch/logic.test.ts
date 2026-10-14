@@ -22,6 +22,7 @@ import {
   RESULT_DECISION_UNKNOWN_KEY,
   RESULT_DECISION_VALUES,
   REVIEW_STEP_HINT_KEYS,
+  TARGET_NOTE_KEYS,
   buildConsentInput,
   buildHitNotificationBody,
   buildNotifyTimeline,
@@ -68,8 +69,11 @@ import {
   referenceIndexes,
   resolveNotifyState,
   resolveResultDecision,
+  resolveTargetAreaView,
   resultsRangeToUtc,
+  stepTargetIndex,
   summarizeGates,
+  summarizeRecipients,
   toRatio,
   validateAutoConfirmScore,
   validateConsentForm,
@@ -653,6 +657,35 @@ assert.equal(fullQuery.hitOnly, true)
 assert.equal(fullQuery.page, 3)
 assert.equal(fullQuery.fromUtc, dayjs(new Date(2026, 9, 14, 0, 0)).toISOString())
 assert.equal(buildResultsQuery({ ...emptyFilters, decision: 'notAThing' }, 1, 20).decision, undefined, '不认识的判定不发给后端')
+
+// 抓拍详情抽屉：接收人摘要与名单目标图区域
+assert.deepEqual(summarizeRecipients([]), { total: 0, read: 0 })
+assert.deepEqual(summarizeRecipients([{ read: false }, { read: false }, { read: false }, { read: true }]), { total: 4, read: 1 }, '4 人 1 人已读：已读 1 / 4')
+assert.deepEqual(summarizeRecipients([{ read: true }, { read: true }]), { total: 2, read: 2 })
+
+// 没有复核权限：不管详情读到什么，一律不显示、不读目标图
+for (const status of ['loading', 'error', 'ready'] as const) {
+  assert.equal(resolveTargetAreaView({ canViewTarget: false, status, targetPhotoCount: 3 }), 'noPermission', `无复核权限 + ${status}`)
+}
+assert.equal(resolveTargetAreaView({ canViewTarget: true, status: 'loading', targetPhotoCount: 0 }), 'loading', '详情读取中：还不知道有几张，不读图')
+assert.equal(resolveTargetAreaView({ canViewTarget: true, status: 'error', targetPhotoCount: 0 }), 'failed', '详情读取失败：不读图')
+assert.equal(resolveTargetAreaView({ canViewTarget: true, status: 'ready', targetPhotoCount: 0 }), 'gone', '0 张：已清理或条目已失效')
+assert.equal(resolveTargetAreaView({ canViewTarget: true, status: 'ready', targetPhotoCount: 1 }), 'photos')
+assert.equal(resolveTargetAreaView({ canViewTarget: true, status: 'ready', targetPhotoCount: 5 }), 'photos')
+// 「photos」以外的每种提示都有文案键
+for (const view of ['noPermission', 'loading', 'failed', 'gone'] as const) {
+  assert.ok(TARGET_NOTE_KEYS[view].startsWith('faceMatch.results.drawer.'), `${view} 有提示文案键`)
+}
+assert.deepEqual(Object.keys(TARGET_NOTE_KEYS).sort(), ['failed', 'gone', 'loading', 'noPermission'])
+
+// 上一张 / 下一张：夹在 0 .. count-1，不越界；没有照片时为 0
+assert.equal(stepTargetIndex(0, 1, 3), 1)
+assert.equal(stepTargetIndex(2, 1, 3), 2, '最后一张再往后：停在最后一张')
+assert.equal(stepTargetIndex(0, -1, 3), 0, '第一张再往前：停在第一张')
+assert.equal(stepTargetIndex(2, -1, 3), 1)
+assert.equal(stepTargetIndex(1, 1, 0), 0)
+assert.equal(stepTargetIndex(Number.NaN, 1, 3), 1, '非法下标按 0 起算')
+assert.equal(stepTargetIndex(0, 1, 1), 0, '只有一张时哪也去不了')
 
 // 表单值与请求体的键一一对应（编译期有类型保证，这里保证运行期不漏）
 const formKeys = Object.keys(values as FaceProfileFormValues).sort().join(',')

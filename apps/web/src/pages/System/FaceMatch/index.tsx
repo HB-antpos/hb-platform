@@ -75,6 +75,7 @@ export default function FaceMatchPage() {
             storeOptionsFailed,
             writeBlocked: isWriteBlocked(config),
             goToReview: hasReviewTab ? () => setSelectedTab('review') : undefined,
+            canViewTarget: hasReviewTab,
           }
         : null,
     [config, storeOptions, storeOptionsFailed, hasReviewTab],

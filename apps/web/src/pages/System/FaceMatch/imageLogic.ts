@@ -63,7 +63,7 @@ export type ReviewImageState =
 export type ReviewImageStates = ReadonlyMap<string, ReviewImageState>
 
 export interface ReviewImageSession {
-  /** 开始加载：先现场抓拍，再第一张参考照片（其余参考照片在切换时才取）。 */
+  /** 开始加载：先现场抓拍（没有传 fetchCapture 则跳过），再第一张参考照片（其余参考照片在切换时才取）。 */
   start: () => Promise<void>
   /** 按需加载某张参考照片；已加载 / 加载中的不重复请求。 */
   loadReference: (index: number) => Promise<void>
@@ -74,7 +74,8 @@ export interface ReviewImageSession {
 
 export interface ReviewImageSessionOptions {
   referenceCount: number
-  fetchCapture: (signal: AbortSignal) => Promise<Blob>
+  /** 现场抓拍的读取；不传表示本会话只看参考照片（例如抓拍详情抽屉里已经有自己的人脸小图，只需要名单目标图）。 */
+  fetchCapture?: (signal: AbortSignal) => Promise<Blob>
   fetchReference: (index: number, signal: AbortSignal) => Promise<Blob>
   onChange: (states: ReviewImageStates) => void
   urlApi?: ObjectUrlApi
@@ -126,7 +127,7 @@ export function createReviewImageSession(options: ReviewImageSessionOptions): Re
   }
 
   async function start() {
-    await load(CAPTURE_SLOT, options.fetchCapture)
+    if (options.fetchCapture) await load(CAPTURE_SLOT, options.fetchCapture)
     if (options.referenceCount > 0) await loadReference(0)
   }
 
@@ -142,6 +143,17 @@ export function createReviewImageSession(options: ReviewImageSessionOptions): Re
       states = new Map()
     },
   }
+}
+
+export type ReferenceImageSessionOptions = Omit<ReviewImageSessionOptions, 'fetchCapture'>
+
+/**
+ * 只看名单参考照片（目标图）的会话：「抓拍与比对」详情抽屉用，抽屉自己已经有人脸小图与背景图，不需要再读命中抓拍。
+ * 就是不带 fetchCapture 的复核会话——开始时只取第 1 张，其余切换时才取，晚到的响应 / dispose 后的登记 / 共用失败的处理与复核弹框完全一致，
+ * 不另写一份生命周期代码。读取走复核任务的参考照片接口（需 FaceMatch.Unwelcome.Review，服务端每次读取写审计）。
+ */
+export function createReferenceImageSession(options: ReferenceImageSessionOptions): ReviewImageSession {
+  return createReviewImageSession(options)
 }
 
 // ───────────── 抓拍与比对结果的图片会话 ─────────────

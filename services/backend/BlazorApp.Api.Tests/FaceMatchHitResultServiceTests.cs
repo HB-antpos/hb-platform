@@ -449,6 +449,217 @@ public sealed class FaceMatchHitResultServiceTests : IDisposable
         Assert.Null(ReadAt(Id('1'), "qld-1"));                                              // 越权的尝试没有改任何行
     }
 
+    // ---------- 命中详情（抓拍详情抽屉用：目标图张数 + 通知收件人姓名与已读状态） ----------
+
+    [Fact]
+    public async Task 详情_收件人只有展示名与已读状态_未读在前再按展示名排序_已读时间带UTC标记()
+    {
+        _db.AddUser("u-zed", "Zed");
+        _db.AddUser("u-alice", "alice");                                                    // 小写：排序不区分大小写
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddHitNotification(Id('1'),
+            ("qld-1", null), ("qld-2", T0.AddMinutes(8)), ("u-zed", null), ("u-alice", T0.AddMinutes(3)));
+
+        var detail = await _service.GetDetailAsync(Id('1'), Admin);
+
+        Assert.Equal(Id('1'), detail.TaskId);
+        Assert.Equal(
+            [("Qld Manager", false), ("Zed", false), ("alice", true), ("Qld Peer", true)],
+            detail.Recipients.Select(r => (r.DisplayName, r.Read)));
+        Assert.All(detail.Recipients.Where(r => !r.Read), r => Assert.Null(r.ReadAtUtc));
+        var alice = detail.Recipients.Single(r => r.DisplayName == "alice");
+        Assert.Equal(T0.AddMinutes(3), alice.ReadAtUtc);
+        Assert.Equal(DateTimeKind.Utc, alice.ReadAtUtc!.Value.Kind);                         // 序列化出来带 Z，前端按 UTC 解析
+        Assert.False(detail.NotificationRevoked);
+    }
+
+    [Fact]
+    public async Task 详情_展示名回退_全名优先_全名空白用用户名_都空是横杠_用户记录不存在也是横杠_停用或已删除的用户仍显示名字()
+    {
+        AddRawUser("u-full", fullName: "  Charles  ", username: "charles-login");           // 首尾空白被去掉
+        AddRawUser("u-blank", fullName: "   ", username: "blank-login");                    // 全名只有空白：用用户名
+        AddRawUser("u-null", fullName: null, username: "null-login");
+        AddRawUser("u-empty", fullName: null, username: string.Empty);                      // 都没有：横杠
+        AddRawUser("u-off", fullName: "Disabled Dan", username: "dan", isActive: false);    // 停用：他确实收到过通知，仍显示
+        AddRawUser("u-del", fullName: "Deleted Dee", username: "dee", isDeleted: true);
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddHitNotification(Id('1'),
+            ("u-full", null), ("u-blank", null), ("u-null", null), ("u-empty", null), ("u-off", null), ("u-del", null), ("u-ghost", null));
+
+        var detail = await _service.GetDetailAsync(Id('1'), Admin);
+
+        // 全部未读：按展示名排序（"-" 在字母之前）。
+        Assert.Equal(
+            ["-", "-", "blank-login", "Charles", "Deleted Dee", "Disabled Dan", "null-login"],
+            detail.Recipients.Select(r => r.DisplayName));
+        Assert.Equal(7, detail.Recipients.Count);                                            // u-empty 与不存在的 u-ghost 各占一行，没有被吞掉
+    }
+
+    [Fact]
+    public async Task 详情_响应里没有任何账号标识_字段集合固定_序列化后不含UserGUID用户名邮箱()
+    {
+        AddRawUser("guid-secret-1", fullName: "Charles", username: "login-secret-1", email: "secret1@mail.example.test");
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddHitNotification(Id('1'), ("guid-secret-1", T0.AddMinutes(2)));
+
+        var detail = await _service.GetDetailAsync(Id('1'), Admin);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(detail, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        });
+        Assert.Contains("\"displayName\":\"Charles\"", json);
+        Assert.DoesNotContain("guid-secret-1", json);
+        Assert.DoesNotContain("login-secret-1", json);
+        Assert.DoesNotContain("secret1@mail", json);
+        Assert.DoesNotContain("userGuid", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("username", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("email", json, StringComparison.OrdinalIgnoreCase);
+        // DTO 的公开成员固定（新增字段必须有意识地改这里与 Web 的契约测试）。
+        Assert.Equal(
+            ["NotificationRevoked", "Recipients", "TargetPhotoCount", "TaskId"],
+            typeof(FaceHitDetailDto).GetProperties().Select(p => p.Name).Where(n => n != "EqualityContract").Order());
+        Assert.Equal(
+            ["DisplayName", "Read", "ReadAtUtc"],
+            typeof(FaceHitRecipientDto).GetProperties().Select(p => p.Name).Where(n => n != "EqualityContract").Order());
+    }
+
+    [Fact]
+    public async Task 详情_通知已撤回有标记_收件人仍然列出_没有通知行时收件人为空且不算撤回()
+    {
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddHitNotification(Id('1'), ("qld-1", null));
+        RevokeNotification(Id('1'), T0.AddMinutes(30));
+        AddTask('2', "1013", "cam-a", T0.AddMinutes(2), score: 90m);                         // 通知还没发
+
+        var revoked = await _service.GetDetailAsync(Id('1'), Admin);
+        var none = await _service.GetDetailAsync(Id('2'), Admin);
+
+        Assert.True(revoked.NotificationRevoked);
+        Assert.Equal("Qld Manager", Assert.Single(revoked.Recipients).DisplayName);
+        Assert.False(none.NotificationRevoked);
+        Assert.Empty(none.Recipients);
+        Assert.Equal(Id('2'), none.TaskId);
+    }
+
+    [Fact]
+    public async Task 详情_只列这一条命中自己的收件人_别的任务的通知不混进来()
+    {
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddHitNotification(Id('1'), ("qld-1", null));
+        AddTask('2', "1013", "cam-a", T0.AddMinutes(2), score: 90m);
+        AddHitNotification(Id('2'), ("qld-2", T0.AddMinutes(5)));
+
+        var first = await _service.GetDetailAsync(Id('1'), Admin);
+        var second = await _service.GetDetailAsync(Id('2'), Admin);
+
+        Assert.Equal(["Qld Manager"], first.Recipients.Select(r => r.DisplayName));
+        Assert.Equal(["Qld Peer"], second.Recipients.Select(r => r.DisplayName));
+    }
+
+    [Fact]
+    public async Task 详情_任务不存在_不在自己门店范围_编号格式不对_同一个404_管理员与范围内的人能看()
+    {
+        AddTask('1', "2001", "cam-b", T0.AddMinutes(1), score: 90m);                         // 别的门店
+        AddHitNotification(Id('1'), ("qld-1", null));
+        AddTask('2', "1013", "cam-a", T0.AddMinutes(2), score: 90m);
+        AddHitNotification(Id('2'), ("qld-2", null));
+
+        var outOfScope = await Assert.ThrowsAsync<FaceMatchException>(() => _service.GetDetailAsync(Id('1'), QldManager));
+        var missing = await Assert.ThrowsAsync<FaceMatchException>(() => _service.GetDetailAsync(Id('f'), QldManager));
+        var badFormat = await Assert.ThrowsAsync<FaceMatchException>(() => _service.GetDetailAsync("t1;DROP", QldManager));
+        var empty = await Assert.ThrowsAsync<FaceMatchException>(() => _service.GetDetailAsync(string.Empty, QldManager));
+
+        Assert.Equal(404, outOfScope.StatusCode);
+        foreach (var other in new[] { missing, badFormat, empty })
+        {
+            Assert.Equal(outOfScope.StatusCode, other.StatusCode);
+            Assert.Equal(outOfScope.Code, other.Code);
+            Assert.Equal(outOfScope.Message, other.Message);
+        }
+
+        Assert.Single((await _service.GetDetailAsync(Id('2'), QldManager)).Recipients);       // 范围内的人
+        Assert.Single((await _service.GetDetailAsync(Id('1'), Admin)).Recipients);            // 管理员不限门店
+    }
+
+    [Theory]
+    [InlineData(FaceUnwelcomeEntryStatus.Active, "[\"k/0.jpg\",\"k/1.jpg\",\"k/2.png\"]", 3)]
+    [InlineData(FaceUnwelcomeEntryStatus.Pending, "[\"k/0.jpg\",\"k/1.jpg\"]", 2)]
+    [InlineData(FaceUnwelcomeEntryStatus.Withdrawn, "[\"k/0.jpg\"]", 0)]                    // 已撤回：与读取参考照片一样不再提供
+    [InlineData(FaceUnwelcomeEntryStatus.Expired, "[\"k/0.jpg\"]", 0)]
+    [InlineData(FaceUnwelcomeEntryStatus.Active, "[]", 0)]                                  // 照片已清空
+    [InlineData(FaceUnwelcomeEntryStatus.Active, "", 0)]
+    [InlineData(FaceUnwelcomeEntryStatus.Active, "not-json", 0)]                            // 解析失败按没有照片
+    public async Task 详情_targetPhotoCount_条目状态是Active或Pending才计照片键数量(byte status, string keysJson, int expected)
+    {
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddEntry(status, keysJson);
+
+        var detail = await _service.GetDetailAsync(Id('1'), Admin);
+
+        Assert.Equal(expected, detail.TargetPhotoCount);
+    }
+
+    [Fact]
+    public async Task 详情_条目已不存在时targetPhotoCount为0_不报错()
+    {
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);                         // 没有种条目
+
+        var detail = await _service.GetDetailAsync(Id('1'), Admin);
+
+        Assert.Equal(0, detail.TargetPhotoCount);
+    }
+
+    [Theory]
+    [InlineData(FaceUnwelcomeEntryStatus.Active)]
+    [InlineData(FaceUnwelcomeEntryStatus.Withdrawn)]
+    public async Task 详情_与读取参考照片接口同口径_张数就是可读下标的个数_不可读时为0(byte status)
+    {
+        // 同一份种子分别让「详情」与「读取参考照片」判断：下标 0..张数-1 都读得到，张数及以后（或条目已失效时的任何下标）读不到。
+        var harness = new FaceMatchTestHarness(_db);                                         // 共用同一个库；库由本测试类统一释放
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        var keys = new[] { FaceMatchObjectKeys.Unwelcome(Id('e'), 0, "jpg"), FaceMatchObjectKeys.Unwelcome(Id('e'), 1, "jpg") };
+        AddEntry(status, FaceMatchRules.SerializeKeys(keys));
+        foreach (var key in keys)
+        {
+            harness.Store.Objects[key] = FaceImageTestData.Jpeg;
+        }
+
+        var detail = await _service.GetDetailAsync(Id('1'), Admin);
+        var readable = 0;
+        while (true)
+        {
+            try
+            {
+                await harness.Unwelcome.GetReferencePhotoAsync(Id('1'), readable, FaceMatchTestHarness.Admin);
+                readable++;
+            }
+            catch (FaceMatchException ex)
+            {
+                Assert.Equal("FACE_MATCH_IMAGE_GONE", ex.Code);
+                break;
+            }
+        }
+
+        Assert.Equal(readable, detail.TargetPhotoCount);
+        Assert.Equal(status == FaceUnwelcomeEntryStatus.Active ? 2 : 0, detail.TargetPhotoCount);
+    }
+
+    [Fact]
+    public async Task 详情_不读图不写审计_调用后审计表没有新增行()
+    {
+        AddTask('1', "1013", "cam-a", T0.AddMinutes(1), score: 90m);
+        AddEntry(FaceUnwelcomeEntryStatus.Active, "[\"k/0.jpg\"]");
+        AddHitNotification(Id('1'), ("qld-1", null));
+
+        await _service.GetDetailAsync(Id('1'), Admin);
+        await _service.GetDetailAsync(Id('1'), QldManager);
+        await Assert.ThrowsAsync<FaceMatchException>(() => _service.GetDetailAsync(Id('f'), QldManager));
+
+        Assert.Equal(0, _db.Db.Ado.GetInt("SELECT COUNT(*) FROM FaceAuditLog"));
+    }
+
     // ---------- 种子数据 ----------
 
     /// <summary>32 位小写十六进制的任务编号（与生产一致，char(32) 列在 SQL Server 上不会被空格补齐）。</summary>
@@ -486,6 +697,36 @@ public sealed class FaceMatchHitResultServiceTests : IDisposable
 
     private void AddEvaluation(string captureId, byte decision, decimal? staff, decimal? visit) =>
         _db.Db.Insertable(new FaceMatchEvaluation { CaptureId = captureId, Decision = decision, StaffScore = staff, VisitScore = visit }).ExecuteCommand();
+
+    /// <summary>名单条目：编号固定为 <c>Id('e')</c>（与 <see cref="AddTask"/> 默认挂的条目一致）。</summary>
+    private void AddEntry(byte status, string photoKeysJson) =>
+        _db.Db.Insertable(new FaceUnwelcomeEntry
+        {
+            EntryId = Id('e'),
+            TencentPersonId = "uw_" + Id('e'),
+            IncidentCategory = 1,
+            EvidenceRef = "ref-1",
+            StoreScope = "1013",
+            SubmittedBy = "qld-1",
+            SubmittedAtUtc = T0,
+            ReviewDueAtUtc = T0.AddDays(300),
+            ExpiresAtUtc = T0.AddDays(330),
+            Status = status,
+            PhotoObjectKeysJson = photoKeysJson,
+        }).ExecuteCommand();
+
+    /// <summary>可指定全名 / 用户名 / 状态的用户（<see cref="FaceMatchTestDatabase.AddUser"/> 的全名与用户名取值固定）。</summary>
+    private void AddRawUser(string guid, string? fullName, string username, bool isActive = true, bool isDeleted = false, string? email = null) =>
+        _db.Db.Insertable(new User
+        {
+            UserGUID = guid,
+            Username = username,
+            Email = email ?? $"{guid}@example.test",
+            PasswordHash = "x",
+            FullName = fullName,
+            IsActive = isActive,
+            IsDeleted = isDeleted,
+        }).ExecuteCommand();
 
     private static string NotificationId(string taskId) => $"n-{taskId}";
 

@@ -1285,6 +1285,7 @@ ORDER BY StoreCode, StatDate, StatHour;
 | `GET /face-match/results/hits` | `FaceCapture.Images.View` | **命中流**列表（以命中任务 `FaceMatchTask` 为主表）。查询：`storeCode`、`hitStatus`（`all` 默认 / `unread` / `pending` / `autoConfirmed` / `confirmed` / `dismissed`，其它值 400）、`fromUtc`、`toUtc`（按任务抓拍时间，左闭右开）、`page`、`pageSize`（默认 20，上限 50）；按抓拍时间倒序 |
 | `GET /face-match/results/hits/summary` | `FaceCapture.Images.View` | `{ total, unread, pending, autoConfirmed, confirmed, dismissed }`；只看 `storeCode / fromUtc / toUtc`；`total = pending + autoConfirmed + confirmed + dismissed`，`unread` 与之正交 |
 | `POST /face-match/results/hits/{taskId}/read` | 持有 `FaceCapture.Images.View` **或** `FaceMatch.Unwelcome.Review` 任一（动作内判断，都没有 403） | 把**当前登录人**那条命中通知标为已读（按去重键 `unwelcome-hit:{TaskId}` 找通知，只改本人的未读行，幂等），返回 `{ unreadCount }`（命中通知类型的剩余未读数）。任务不存在、编号格式不对、不在自己门店范围：同一个 404；没有通知行（不是收件人 / 通知还没发）也返回 200 |
+| `GET /face-match/results/hits/{taskId}/detail` | `FaceCapture.Images.View` | **抓拍详情抽屉的补充信息**（Web「抓拍与比对」详情用），见下方「命中详情接口」。不读图、不写审计；任务编号格式不对、不存在、不在自己门店范围：同一个 404 |
 | `GET /face-match/results/hits/{taskId}/image` | `FaceCapture.Images.View` | 命中图原图（服务端转发字节）。**复用复核页同一套读取**（门店范围校验、对象键只来自数据库、类型与大小校验），**每次读取写审计 `unwelcome.task.view-capture`**（被拒绝的尝试同样记，审计写不进去就不返回字节）；图已删除返回 `FACE_MATCH_IMAGE_GONE`（404） |
 | `POST /face-match/results/thumbnails` | `FaceCapture.Images.View` | 缩略图批量接口，见下 |
 | `GET /face-match/results`（原抓拍流） | `FaceCapture.Images.View` | 语义不变；`hit` 对象新增 `autoConfirmed`、`unread`、`notificationId`（含义同命中流） |
@@ -1308,6 +1309,37 @@ ORDER BY StoreCode, StatDate, StatHour;
 - **不用「待复核数」**：自动确认（相似度 ≥ 门店阈值，默认 90）的命中**不是待复核**（复核人 `system`，已是 `Confirmed`），最严重的命中反而不会计入待复核数；而这些恰恰是店员最该看到的。所以红色数字按「通知有没有被本人看过」算，不按任务状态算。
   待复核数仍然在命中流汇总里（`summary.pending`）和复核入口上，只是不当红色数字用。
 - 点开命中任务（或在通知收件箱点开命中通知）后，App 调 `POST …/hits/{taskId}/read` 把本人那条标为已读，并用返回的 `unreadCount` 直接写回红色数字的缓存。「全部标为已读」用 `POST /notifications/read-all?type=face.unwelcome-hit`（只标该类型，**不会连带清掉别的通知**）。
+
+**命中详情接口 `GET /face-match/results/hits/{taskId}/detail`（Web 抓拍详情抽屉）**
+
+- **为什么是单独的接口**：抽屉要显示「通知发给了谁、谁已读」和「名单目标图有几张」。这两样不能加进 `FaceHitResultDto` / 抓拍流 `hit` 对象：那两个 DTO 的字段集合是跨端契约（手机 App 的契约测试会拿它们的字段集合与 App 归一化后的对象逐项比对），加字段会让 App 侧测试变红。所以抽屉打开后**只发一次**这个详情请求。
+- 响应（`ApiResponse` 信封，驼峰，空值省略）：
+
+  ```json
+  {
+    "success": true,
+    "data": {
+      "taskId": "0123456789abcdef0123456789abcdef",
+      "targetPhotoCount": 2,
+      "notificationRevoked": false,
+      "recipients": [
+        { "displayName": "Alice", "read": false },
+        { "displayName": "Bob", "read": false },
+        { "displayName": "Carol", "read": false },
+        { "displayName": "管理员", "read": true, "readAtUtc": "2026-10-15T01:23:45Z" }
+      ]
+    }
+  }
+  ```
+
+- `targetPhotoCount`：名单条目参考照片的张数，口径与「读取参考照片」`GET /unwelcome/tasks/{taskId}/reference/{index}` 的可看条件一致——条目存在、状态为 Active 或 Pending、`PhotoObjectKeysJson` 非空才计，其余（已撤回 / 已过期 / 照片已清空 / 条目已不存在）一律 0；也与复核任务列表的 `referencePhotoCount` 同一口径。
+  Web 只在「有复核权限（`FaceMatch.Unwelcome.Review`，即复核任务页签可见）且 `targetPhotoCount > 0`」时才去读第 1 张目标图，多张时切换才读对应那张；**读图仍走复核页的参考照片接口，每次查看（含被拒绝的尝试）写持久审计 `unwelcome.task.view-reference`**，本接口不新增读图通道。
+- `notificationRevoked`：该命中通知（去重键 `unwelcome-hit:{TaskId}`）已被撤回。没有通知行（还没发 / 发布前任务已被处理）= `false` 且 `recipients` 为空数组。
+- `recipients`：通知的接收人行（`AppNotificationRecipient`）逐人一行。`displayName` = 用户全名（去首尾空白），为空回退用户名，再空为 `-`；用户记录已不存在也是 `-`。**用户已停用 / 已删除仍显示名字**（他确实收到过这条通知）。
+  **不返回 UserGUID、用户名、邮箱**——只有姓名与已读状态。排序：未读在前，再按 `displayName` 不区分大小写排序，同名再按已读时间。
+  接收人规则不变（门店关联且持有 `FaceMatch.Unwelcome.Review` 的启用账号，含超级管理员，见 `FaceHitNotifier`），本接口只是读出来。
+- **实现上姓名与接收人不做 SQL 联表**：`User` 表与通知接收人表的字符串列排序规则可能不同，联表比较 `UserGUID` 会报排序规则冲突（468）。服务先取接收人行，再按 `UserGUID IN (…)` 单独取用户的全名与用户名两列（不读密码哈希等其它列），在内存里按编号对应（与 `FaceMatchErrors.LoadUserNamesAsync` 同一做法）。SQL Server 门控测试故意把 `User.UserGUID` 改成二进制排序规则并断言直接联表会得到 468。
+- 隐私：只有姓名与已读状态（不是生物识别信息），所以**不写审计**；服务不依赖日志组件，日志里不会出现姓名。门店范围与命中流同一套（管理员不限，其他人只看自己关联门店）。
 
 **缩略图批量接口 `POST /face-match/results/thumbnails`**
 

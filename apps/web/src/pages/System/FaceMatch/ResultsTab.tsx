@@ -38,7 +38,7 @@ const RANGE_FORMAT = 'YYYY-MM-DD HH:mm'
 export default function ResultsTab({ context }: { context: FaceMatchTabContext }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const { storeOptions, storeOptionsFailed, goToReview } = context
+  const { storeOptions, storeOptionsFailed, goToReview, canViewTarget } = context
   const [filters, setFilters] = useState<ResultsFilters>(() => ({
     storeCode: null,
     cameraId: null,
@@ -281,6 +281,7 @@ export default function ResultsTab({ context }: { context: FaceMatchTabContext }
         <ResultDetailDrawer
           key={target.captureId}
           result={target}
+          canViewTarget={canViewTarget}
           onGoReview={
             goToReview
               ? () => {
