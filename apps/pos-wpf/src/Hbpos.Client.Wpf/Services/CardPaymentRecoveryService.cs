@@ -2128,6 +2128,12 @@ public sealed class CardPaymentRecoveryService(
                 return new CardPaymentSupervisorResolutionResult(false, rejection.Message, LockRetained: true);
             }
 
+            // 中文注释：实时核验放行了这次结案决定（含 Inconclusive：终端回答了别的交易 / 没有这笔，凭银行证据结案）。
+            // 与上面的 rejected 日志成对，事后能还原“核验结论是什么、为什么允许结案”。
+            TryWriteRecoveryLog(
+                $"supervisor resolve allowed attemptGuid={attempt.AttemptGuid} decision={normalized.Decision} verdict={live.Verdict}",
+                attemptGuid: attempt.AttemptGuid);
+
             if (live.Status is not null &&
                 NormalizeOptional(attempt.SessionId) is null &&
                 CanBindRecoveredSession(attempt, live.Status))
