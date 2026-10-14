@@ -95,6 +95,19 @@
     "empty": "请输入后端 IP 或域名",
     "saved": "后端地址已保存：{{host}}"
   },
+  "keychainReset": {
+    "title": "本机登录缓存",
+    "description": "登录一直失败、换账号也不行时，可清除这台手机上保存的登录凭据。不会影响服务器上的账号，也不会解除设备绑定。",
+    "button": "清除本机登录缓存",
+    "confirmTitle": "清除本机登录缓存？",
+    "confirmMessage": "将清除这台手机上保存的登录凭据，之后需要重新输入账号密码登录。",
+    "confirmAction": "清除",
+    "running": "正在清除并检测本机安全存储…",
+    "ok": "已清除，本机安全存储读写正常。请返回重新登录。",
+    "residual": "已清除，但本机安全存储里仍有残留（{{items}}）。请彻底关闭 App 后重试。",
+    "probeFailed": "已清除，但本机安全存储（Keychain）读写失败：{{message}}。请重启手机后重试。",
+    "failed": "清除失败：{{message}}"
+  },
   "errors": {
     "invalidCredentials": "用户名或密码不正确，请重新输入。",
     "accountUnavailable": "当前账号不可用，请联系管理员确认账号状态。",

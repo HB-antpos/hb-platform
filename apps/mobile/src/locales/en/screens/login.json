@@ -95,6 +95,19 @@
     "empty": "Enter a backend IP or domain.",
     "saved": "Backend address saved: {{host}}"
   },
+  "keychainReset": {
+    "title": "Saved sign-in data",
+    "description": "If sign-in keeps failing, even with other accounts, you can clear the sign-in credentials saved on this phone. Your server account and device binding are not affected.",
+    "button": "Clear saved sign-in data",
+    "confirmTitle": "Clear saved sign-in data?",
+    "confirmMessage": "This clears the sign-in credentials saved on this phone. You will need to sign in again with your username and password.",
+    "confirmAction": "Clear",
+    "running": "Clearing and checking secure storage…",
+    "ok": "Cleared. Secure storage on this phone works normally. Go back and sign in again.",
+    "residual": "Cleared, but secure storage still holds leftovers ({{items}}). Fully close the app and try again.",
+    "probeFailed": "Cleared, but reading or writing the phone's secure storage (Keychain) failed: {{message}}. Restart the phone and try again.",
+    "failed": "Could not clear: {{message}}"
+  },
   "errors": {
     "invalidCredentials": "The username or password is incorrect.",
     "accountUnavailable": "This account is unavailable. Ask an administrator to confirm the account status.",

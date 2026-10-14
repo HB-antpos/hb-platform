@@ -3,6 +3,7 @@ import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { HB_COLORS } from "@/shared/theme/tokens";
 import {
+  Alert,
   View,
   StyleSheet,
   Animated,
@@ -50,6 +51,11 @@ import { useAppNavigationStore } from "@/modules/navigation/store";
 import { i18n, setAppLanguage } from "@/shared/i18n/i18n";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { AppAsyncStorage } from "@/shared/storage/async-storage";
+import { SecureStorage } from "@/shared/storage/secure";
+import {
+  resetLocalKeychainSession,
+  type KeychainResetResult,
+} from "@/modules/auth/keychain-reset";
 import {
   API_HOST_PRESETS,
   getCurrentApiHost,
@@ -166,6 +172,9 @@ export default function Login() {
   const [apiHostDraft, setApiHostDraft] = useState(getCurrentApiHost());
   const [apiHostModalVisible, setApiHostModalVisible] = useState(false);
   const [apiHostError, setApiHostError] = useState("");
+  // 手动清除本机登录缓存：结果在弹窗内联展示（Snackbar 会被弹窗遮住）。
+  const [keychainResetRunning, setKeychainResetRunning] = useState(false);
+  const [keychainResetResult, setKeychainResetResult] = useState<KeychainResetResult | null>(null);
   const [activationVisible, setActivationVisible] = useState(false);
   const [activationMode, setActivationMode] = useState<MobileDeviceActivationMode>("redeem");
   const reviewBuildEnabled = isIosReviewBuildEnabled(getIosReviewBuildContext());
@@ -332,6 +341,48 @@ export default function Login() {
     await identifyRegisteredDevice();
   }
 
+  async function runKeychainReset() {
+    setKeychainResetRunning(true);
+    setKeychainResetResult(null);
+    try {
+      // clearLocalSession 自带互斥：已有在途清理时直接复用其结果，异常由 resetLocalKeychainSession 兜住。
+      setKeychainResetResult(
+        await resetLocalKeychainSession({
+          clearLocalSession: () => useAuthStore.getState().clearLocalSession(),
+          listResidue: () => SecureStorage.listAccountSessionResidue(),
+          probeReadWrite: () => SecureStorage.probeReadWrite(),
+        }),
+      );
+    } finally {
+      setKeychainResetRunning(false);
+    }
+  }
+
+  function handleKeychainResetPress() {
+    // 清除后必须重新输入账号密码，先二次确认避免误触。
+    Alert.alert(t("keychainReset.confirmTitle"), t("keychainReset.confirmMessage"), [
+      { text: t("common:actions.cancel"), style: "cancel" },
+      {
+        text: t("keychainReset.confirmAction"),
+        style: "destructive",
+        onPress: () => void runKeychainReset(),
+      },
+    ]);
+  }
+
+  function describeKeychainReset(result: KeychainResetResult) {
+    switch (result.status) {
+      case "ok":
+        return t("keychainReset.ok");
+      case "residual":
+        return t("keychainReset.residual", { items: result.items.join(", ") });
+      case "probeFailed":
+        return t("keychainReset.probeFailed", { message: result.message });
+      default:
+        return t("keychainReset.failed", { message: result.message });
+    }
+  }
+
   async function handleLogin() {
     const isReviewLoginAttempt =
       reviewBuildEnabled && isIosReviewUsername(username);
@@ -486,6 +537,7 @@ export default function Login() {
   const openApiHostSettings = () => {
     setApiHostDraft(apiHost);
     setApiHostError("");
+    setKeychainResetResult(null);
     setApiHostModalVisible(true);
   };
   const handleUsernameChange = (value: string) => {
@@ -870,6 +922,34 @@ export default function Login() {
             activeOutlineColor={BRAND_RED}
           />
           {apiHostError ? <Text accessibilityRole="alert" style={{ color: HB_COLORS.danger }}>{apiHostError}</Text> : null}
+
+          {/* 手动清理 Keychain：App 没有「首次安装清理」，iOS 卸载重装后凭据仍会保留。 */}
+          <View style={styles.keychainResetSection}>
+            <Text style={styles.apiHostValue}>{t("keychainReset.title")}</Text>
+            <Text style={styles.keychainResetDescription}>{t("keychainReset.description")}</Text>
+            <Button
+              mode="outlined"
+              textColor={HB_COLORS.danger}
+              style={styles.keychainResetButton}
+              loading={keychainResetRunning}
+              disabled={keychainResetRunning || loading || deviceLoginLoading}
+              onPress={handleKeychainResetPress}
+            >
+              {keychainResetRunning ? t("keychainReset.running") : t("keychainReset.button")}
+            </Button>
+            {keychainResetResult ? (
+              <Text
+                accessibilityRole="alert"
+                style={{
+                  color: keychainResetResult.status === "ok" ? HB_COLORS.success : HB_COLORS.danger,
+                  fontSize: 13,
+                  lineHeight: 19,
+                }}
+              >
+                {describeKeychainReset(keychainResetResult)}
+              </Text>
+            ) : null}
+          </View>
       </BusinessSheet>
 
       <DeviceActivationDialog
@@ -1055,6 +1135,15 @@ const styles = StyleSheet.create({
     borderColor: BRAND_RED,
     borderRadius: 12,
   },
+  keychainResetSection: {
+    borderTopColor: HB_COLORS.outlineMuted,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+    marginTop: 18,
+    paddingTop: 14,
+  },
+  keychainResetDescription: { color: "#777", fontSize: 12, lineHeight: 18 },
+  keychainResetButton: { borderColor: HB_COLORS.danger, borderRadius: 12 },
   apiHostModalActions: {
     flexDirection: "row",
     gap: 8,
