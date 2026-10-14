@@ -3265,6 +3265,9 @@
   <data name="shell.operationAuthorization.screenLabel" xml:space="preserve"><value>所在页面：</value></data>
   <data name="shell.operationAuthorization.permissionLabel" xml:space="preserve"><value>缺少权限：</value></data>
   <data name="shell.operationAuthorization.scanHint" xml:space="preserve"><value>请让有权限的用户扫描其收银员条码。</value></data>
+  <data name="shell.operationAuthorization.rescanMessage" xml:space="preserve"><value>为确认本次操作，请再扫一次授权员工条码。</value></data>
+  <data name="shell.operationAuthorization.rescanPermissionLabel" xml:space="preserve"><value>所需权限：</value></data>
+  <data name="shell.operationAuthorization.rescanScanHint" xml:space="preserve"><value>请扫描有该权限的员工条码（自己的也可以）。</value></data>
   <data name="operationAuthorization.noSession" xml:space="preserve"><value>当前没有收银员会话。</value></data>
   <data name="operationAuthorization.pending" xml:space="preserve"><value>已有操作正在等待授权。</value></data>
   <data name="operationAuthorization.prompt" xml:space="preserve"><value>请扫描具备 {0} 权限的授权员工条码。</value></data>

@@ -68,6 +68,8 @@ public sealed class OperationAuthorizationServiceTests
         Assert.True(service.IsPromptOpen);
         Assert.Equal(0, login.CallCount);
         Assert.Contains("again", service.PromptMessage, StringComparison.OrdinalIgnoreCase);
+        // 弹窗据此切换文案：有权限的店长不能看到「没有权限 / 缺少权限」。
+        Assert.True(service.IsRescanConfirmation);
         Assert.False(authorization.IsCompleted);
 
         // 自己再扫一次自己的条码就能通过（授权人与请求人是同一个人）。
@@ -77,6 +79,8 @@ public sealed class OperationAuthorizationServiceTests
         Assert.NotNull(scope);
         Assert.True(scope.IsActive);
         Assert.False(service.IsPromptOpen);
+        // 弹窗关闭后模式复位，不会把「再次扫码」文案带给下一次真正没权限的授权。
+        Assert.False(service.IsRescanConfirmation);
         Assert.Equal(1, login.CallCount);
         var audit = Assert.Single(logger.Events);
         Assert.Equal("PERMISSION_OVERRIDE", audit.OperationType);
@@ -188,6 +192,8 @@ public sealed class OperationAuthorizationServiceTests
         // 当前收银员本来就没有权限：提示语还是原来的「扫描具备该权限的员工条码」，只需扫一次。
         Assert.True(service.IsPromptOpen);
         Assert.DoesNotContain("again", service.PromptMessage, StringComparison.OrdinalIgnoreCase);
+        // 真的没有权限：弹窗保持原来的「没有权限 / 缺少权限」文案。
+        Assert.False(service.IsRescanConfirmation);
         Assert.True(service.ProcessScannerBarcode("supervisor-barcode"));
         using var scope = await authorization;
         Assert.NotNull(scope);

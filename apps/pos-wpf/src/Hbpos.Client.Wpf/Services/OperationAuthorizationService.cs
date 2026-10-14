@@ -17,6 +17,13 @@ public interface IOperationAuthorizationService : INotifyPropertyChanged
 
     string PromptMessage { get; }
 
+    /// <summary>
+    /// 当前弹窗是否属于「再次扫码确认」：收银员自己有权限，只是设置要求再扫一次员工条码。
+    /// 为 true 时弹窗不能再写「没有权限 / 缺少权限」，否则会让有权限的人以为自己被拒了。
+    /// 默认实现恒为 false，只实现旧成员的实现类与测试替身不用改。
+    /// </summary>
+    bool IsRescanConfirmation => false;
+
     string StatusMessage { get; }
 
     string PermissionCode { get; }
@@ -234,6 +241,7 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
     private bool _isPromptOpen;
     private bool _isBusy;
     private string _promptMessage = string.Empty;
+    private bool _isRescanConfirmation;
     private string _statusMessage = string.Empty;
     private string _permissionCode = string.Empty;
     private string _screen = string.Empty;
@@ -294,6 +302,12 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
     {
         get => _promptMessage;
         private set => SetProperty(ref _promptMessage, value);
+    }
+
+    public bool IsRescanConfirmation
+    {
+        get => _isRescanConfirmation;
+        private set => SetProperty(ref _isRescanConfirmation, value);
     }
 
     public string StatusMessage
@@ -395,7 +409,9 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
         }
 
         // 当前收银员自己有权限、只是被要求再扫一次时，提示语说「再次扫码确认」，而不是让人以为自己没有权限。
-        PromptMessage = requireFreshScan && _cashierSessionContext.HasPermission(permissionCode)
+        // 先定下弹窗模式再填文案：弹窗标题 / 权限标签 / 扫码提示都按它切换，避免有权限的店长看到「缺少权限」。
+        IsRescanConfirmation = requireFreshScan && _cashierSessionContext.HasPermission(permissionCode);
+        PromptMessage = IsRescanConfirmation
             ? T(
                 "operationAuthorization.rescanPrompt",
                 "Scan an authorized employee barcode again to confirm this operation. Permission: {0}.",
@@ -433,6 +449,7 @@ public sealed class OperationAuthorizationService : IOperationAuthorizationServi
 
             IsPromptOpen = false;
             IsBusy = false;
+            IsRescanConfirmation = false;
             PermissionCode = string.Empty;
             Screen = string.Empty;
             Action = string.Empty;

@@ -174,6 +174,81 @@ public sealed class NoSaleCashDrawerRescanTests
     }
 
     // ===================================================================================
+    // 三、操作授权弹窗：再次扫码时不能说「没有权限」
+    // ===================================================================================
+
+    [Fact]
+    public void Authorization_dialog_swaps_no_permission_texts_for_rescan_texts_in_rescan_mode()
+    {
+        var wpfRoot = WpfRoot();
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var window = XDocument.Load(Path.Combine(wpfRoot, "MainWindow.xaml"));
+        XElement Text(string name) => Assert.Single(window.Descendants(presentation + "TextBlock").Where(element =>
+            (string?)element.Attribute(x + "Name") == name));
+
+        // 「没有权限」那一组：再次扫码模式下隐藏（触发器置 Collapsed）。
+        foreach (var name in new[]
+                 {
+                     "OperationAuthorizationMessage",
+                     "OperationAuthorizationMissingPermission",
+                     "OperationAuthorizationScanHint"
+                 })
+        {
+            var block = Text(name);
+            Assert.Null(block.Attribute("Visibility"));
+            AssertTriggerSets(block, "Collapsed");
+        }
+
+        // 「再次扫码」那一组：默认隐藏必须写在 Style 里（元素上的本地值会压过触发器），再次扫码模式下显示。
+        foreach (var name in new[]
+                 {
+                     "OperationAuthorizationRescanMessage",
+                     "OperationAuthorizationRequiredPermission",
+                     "OperationAuthorizationRescanScanHint"
+                 })
+        {
+            var block = Text(name);
+            Assert.Null(block.Attribute("Visibility"));
+            var style = Assert.Single(block.Descendants(presentation + "Style"));
+            Assert.Single(style.Elements(presentation + "Setter").Where(setter =>
+                (string?)setter.Attribute("Property") == "Visibility" && (string?)setter.Attribute("Value") == "Collapsed"));
+            AssertTriggerSets(block, "Visible");
+        }
+
+        // 缺少权限的权限码行在两种模式下都要显示权限码。
+        Assert.Contains(
+            Text("OperationAuthorizationRequiredPermission").Descendants(presentation + "Run"),
+            run => (string?)run.Attribute("Text") == "{Binding OperationAuthorization.PermissionCode, Mode=OneWay}");
+
+        var keys = new[]
+        {
+            "shell.operationAuthorization.rescanMessage",
+            "shell.operationAuthorization.rescanPermissionLabel",
+            "shell.operationAuthorization.rescanScanHint"
+        };
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var resources = XDocument.Load(Path.Combine(wpfRoot, "Resources", file));
+            foreach (var key in keys)
+            {
+                var data = Assert.Single(resources.Descendants("data").Where(element => (string?)element.Attribute("name") == key));
+                Assert.False(string.IsNullOrWhiteSpace((string?)data.Element("value")), $"{file} 的 {key} 为空。");
+            }
+        }
+
+        void AssertTriggerSets(XElement block, string visibility)
+        {
+            var trigger = Assert.Single(block.Descendants(presentation + "DataTrigger"));
+            Assert.Equal("{Binding OperationAuthorization.IsRescanConfirmation}", (string?)trigger.Attribute("Binding"));
+            Assert.Equal("True", (string?)trigger.Attribute("Value"));
+            Assert.Single(trigger.Elements(presentation + "Setter").Where(setter =>
+                (string?)setter.Attribute("Property") == "Visibility" && (string?)setter.Attribute("Value") == visibility));
+        }
+    }
+
+    // ===================================================================================
     // 辅助
     // ===================================================================================
 
