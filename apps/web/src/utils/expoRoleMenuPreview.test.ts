@@ -124,6 +124,8 @@ assertArrayEqual(
     'employee-profile-review',
     'face-unwelcome',
     'face-match-settings',
+    'face-capture-results',
+    'notifications',
     'device-management',
     'reports',
     'app-install',
