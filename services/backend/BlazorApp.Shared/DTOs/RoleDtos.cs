@@ -205,6 +205,12 @@ namespace BlazorApp.Shared.DTOs
         public string Category { get; set; } = string.Empty;
         public bool IsSystemPermission { get; set; }
 
+        /// <summary>
+        /// 使用端：pos（收银端）/ web（后台）/ mobile（移动端），可同时包含多个。
+        /// 由 PermissionSurfaceCatalog 按权限码登记表解析，不落库。
+        /// </summary>
+        public List<string> Surfaces { get; set; } = new();
+
         // 审计字段
         public DateTime CreatedAt { get; set; }
         public string? CreatedBy { get; set; }

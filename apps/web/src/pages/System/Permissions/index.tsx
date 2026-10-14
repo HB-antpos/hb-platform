@@ -12,7 +12,6 @@ import {
   Space,
   Tag,
   Typography,
-  Tree,
   Transfer,
   message,
 } from 'antd'
@@ -37,6 +36,15 @@ import { getUsers } from '../../../services/userService'
 import type { CreateSysPermissionDto, PermissionCategoryDto, RoleOptionDto, SysPermissionDto } from '../../../types/role'
 import { useAuthStore } from '../../../store/auth'
 import { RequestError } from '../../../utils/request'
+import {
+  buildTaxonomyNav,
+  categoriesOfGroup,
+  matchesPermissionSurface,
+  resolveActiveGroupKey,
+  resolvePermissionSurfaces,
+} from '../permissionTaxonomy'
+import type { PermissionSurface, PermissionSurfaceFilter } from '../permissionTaxonomy'
+import { BreakableCode, PermissionTaxonomyNav, SurfaceBadges, SurfaceFilterBar } from '../PermissionTaxonomyUi'
 import { canManageSystemPermissions } from './permissionsAccess'
 import {
   buildPermissionUserDelta,
@@ -67,6 +75,8 @@ interface PermissionTableItem {
   name: string
   category: string
   description?: string
+  /** 使用端：收银端 / 后台 / 移动端，可同时属于多个。 */
+  surfaces: PermissionSurface[]
   deletable: boolean
 }
 
@@ -86,6 +96,7 @@ function buildPermissionTableItems(
         name: permission.displayName || sysPermission?.name || permission.name,
         category: category.displayName || permission.category || category.category,
         description: permission.description || sysPermission?.description,
+        surfaces: resolvePermissionSurfaces(permission.name, permission.surfaces),
         deletable: !permission.isSystemPermission && Boolean(sysPermission),
       })
     })
@@ -99,6 +110,8 @@ function buildPermissionTableItems(
       name: permission.name,
       category: permission.category,
       description: permission.description,
+      // 只在权限表里、不在权限目录里的行没有后端解析结果，按编码前缀兜底
+      surfaces: resolvePermissionSurfaces(permission.code),
       deletable: true,
     })
   })
@@ -112,7 +125,9 @@ export default function SystemPermissionsPage() {
   const canWritePermissions = canManageSystemPermissions(access)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<PermissionTableItem[]>([])
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  // null = 还没手动选过，落到第一个有内容的分组；'all' = 用户选了「全部」
+  const [requestedGroup, setRequestedGroup] = useState<string | null>(null)
+  const [surfaceFilter, setSurfaceFilter] = useState<PermissionSurfaceFilter>('all')
   const [keyword, setKeyword] = useState('')
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -157,42 +172,34 @@ export default function SystemPermissionsPage() {
     void loadData()
   }, [])
 
-  const categories = useMemo(() => [...new Set(data.map((item) => item.category))].sort(), [data])
-
-  useEffect(() => {
-    if (categoryFilter && !categories.includes(categoryFilter)) {
-      setCategoryFilter(null)
-    }
-  }, [categories, categoryFilter])
-
-  const treeData = useMemo(
-    () => [
-      {
-        key: 'all',
-        title: `${t('system.permissions.allCategories')} (${data.length})`,
-      },
-      ...categories.map((category) => ({
-        key: category,
-        title: `${category} (${data.filter((item) => item.category === category).length})`,
-      })),
-    ],
-    [categories, data, t],
-  )
-
   const normalizedKeyword = keyword.trim().toLowerCase()
 
-  const filteredData = useMemo(() => {
-    const byCategory = categoryFilter ? data.filter((item) => item.category === categoryFilter) : data
-    const byKeyword = normalizedKeyword
-      ? byCategory.filter((item) => {
-          const code = item.code.toLowerCase()
-          const name = item.name.toLowerCase()
-          return code.includes(normalizedKeyword) || name.includes(normalizedKeyword)
-        })
-      : byCategory
+  // 搜索 + 使用端先筛一遍，分类导航的数量与右侧表格保持一致
+  const visibleData = useMemo(
+    () =>
+      data.filter((item) => {
+        if (!matchesPermissionSurface(item.surfaces, surfaceFilter)) return false
+        if (!normalizedKeyword) return true
+        return (
+          item.code.toLowerCase().includes(normalizedKeyword) ||
+          item.name.toLowerCase().includes(normalizedKeyword)
+        )
+      }),
+    [data, normalizedKeyword, surfaceFilter],
+  )
+  const navSections = useMemo(
+    () => buildTaxonomyNav(visibleData.map((item) => ({ category: item.category }))),
+    [visibleData],
+  )
+  const activeGroupKey = resolveActiveGroupKey(requestedGroup, navSections)
 
-    return [...byKeyword].sort((a, b) => a.name.localeCompare(b.name))
-  }, [categoryFilter, data, normalizedKeyword])
+  const filteredData = useMemo(() => {
+    const activeCategories = categoriesOfGroup(activeGroupKey, navSections)
+    const byGroup = activeCategories
+      ? visibleData.filter((item) => activeCategories.has(item.category))
+      : visibleData
+    return [...byGroup].sort((a, b) => a.name.localeCompare(b.name))
+  }, [activeGroupKey, navSections, visibleData])
 
   const handleCreate = async () => {
     if (!canWritePermissions) {
@@ -357,40 +364,48 @@ export default function SystemPermissionsPage() {
   const columns: ColumnsType<PermissionTableItem> = [
     {
       title: '#',
-      width: 48,
+      width: 44,
       render: (_, __, index) => index + 1,
     },
     {
-      title: t('system.permissions.permissionCodeCol'),
-      dataIndex: 'code',
-      width: 220,
-      render: (value) => <Tag>{value}</Tag>,
-    },
-    {
-      title: t('system.permissions.permissionName'),
+      title: `${t('system.permissions.permissionName')} / ${t('system.permissions.permissionCodeCol')}`,
       dataIndex: 'name',
-      width: 180,
+      width: 300,
       sorter: (a, b) => a.name.localeCompare(b.name),
       defaultSortOrder: 'ascend',
+      // 中文名与英文编码上下两行，都完整显示，不用省略号
+      render: (_, record) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{record.name}</span>
+          <BreakableCode code={record.code} />
+        </div>
+      ),
     },
     {
       title: t('system.permissions.category'),
       dataIndex: 'category',
-      width: 130,
+      width: 110,
       render: (value) => <Tag color={CATEGORY_COLORS[value] || 'default'}>{value}</Tag>,
+    },
+    {
+      title: t('system.permissionTaxonomy.surfaceLabel', '使用端'),
+      dataIndex: 'surfaces',
+      width: 100,
+      render: (_, record) => <SurfaceBadges surfaces={record.surfaces} />,
     },
     {
       title: t('column.description'),
       dataIndex: 'description',
-      ellipsis: true,
-      render: (value) => value || '--',
+      width: 200,
+      render: (value) => <span style={{ overflowWrap: 'anywhere' }}>{value || '--'}</span>,
     },
     {
       title: t('column.action'),
       key: 'action',
-      width: 300,
+      width: 200,
       render: (_, record) => (
-        <Space size={0}>
+        // 三个操作按钮在窄列里允许折行，别把描述列挤没
+        <Space size={0} wrap>
           {canWritePermissions ? (
             <Button type="link" icon={<TeamOutlined />} onClick={() => void handleAssignRoles(record)}>
               {t('system.permissions.assignRoles')}
@@ -426,24 +441,25 @@ export default function SystemPermissionsPage() {
   return (
     <PageContainer title={t('system.permissions.pageTitle')} subtitle={t('system.permissions.pageSubtitle')}>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <Card title={t('system.permissions.categoryFilter')} style={{ width: 260, flexShrink: 0 }}>
-          {treeData.length ? (
+        <Card
+          title={t('system.permissionTaxonomy.title', '权限分类')}
+          style={{ width: 268, flexShrink: 0 }}
+          styles={{ body: { padding: '8px 10px 12px' } }}
+        >
+          {navSections.length ? (
             <div
               style={{
                 maxHeight: 'calc(100vh - 280px)',
                 overflowY: 'auto',
                 overflowX: 'hidden',
-                paddingRight: 4,
               }}
             >
-              <Tree
-                blockNode
-                selectedKeys={[categoryFilter ?? 'all']}
-                onSelect={(keys) => {
-                  const selectedKey = typeof keys[0] === 'string' ? keys[0] : 'all'
-                  setCategoryFilter(selectedKey === 'all' ? null : selectedKey)
-                }}
-                treeData={treeData}
+              <PermissionTaxonomyNav
+                sections={navSections}
+                activeKey={activeGroupKey}
+                allCount={String(visibleData.length)}
+                onSelect={setRequestedGroup}
+                showGranted={false}
               />
             </div>
           ) : (
@@ -461,6 +477,7 @@ export default function SystemPermissionsPage() {
               style={{ width: 280 }}
               allowClear
             />
+            <SurfaceFilterBar value={surfaceFilter} onChange={setSurfaceFilter} />
             {canWritePermissions ? (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
                 {t('system.permissions.newPermission')}
@@ -476,6 +493,8 @@ export default function SystemPermissionsPage() {
             loading={loading}
             columns={columns}
             dataSource={filteredData}
+            // 列宽合计的下限：容器更窄时横向滚动，而不是把描述列压成一个字宽
+            scroll={{ x: 954 }}
             pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'] }}
           />
         </Card>

@@ -5,6 +5,9 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PermissionCategoryDto } from '../../../types/role'
 import { NeutralChip } from '../accessAdminUi'
+import { buildTaxonomyNav, categoriesOfGroup, resolveActiveGroupKey } from '../permissionTaxonomy'
+import type { PermissionSurfaceFilter } from '../permissionTaxonomy'
+import { BreakableCode, PermissionTaxonomyNav, SurfaceBadges, SurfaceFilterBar } from '../PermissionTaxonomyUi'
 import { buildPermissionGroupViews } from './rolesWorkspaceLogic'
 import type { PermissionFilter } from './rolesWorkspaceLogic'
 
@@ -22,7 +25,8 @@ interface RolePermissionPanelProps {
 }
 
 /**
- * 角色权限清单（受控）：按模块分组的复选框，支持搜索与「已授予 / 未授予 / 已修改」筛选。
+ * 角色权限清单（受控）：左侧按「收银端 / 后台业务 / 系统与人员」分区导航，右侧是选中分组的复选框清单；
+ * 支持搜索、使用端与「已授予 / 未授予 / 已修改」筛选。
  * 勾选只改草稿，统一由工作区底部的待保存栏保存。
  */
 export default function RolePermissionPanel({
@@ -37,12 +41,22 @@ export default function RolePermissionPanel({
   const { t } = useTranslation()
   const [keyword, setKeyword] = useState('')
   const [filter, setFilter] = useState<PermissionFilter>('all')
+  const [surface, setSurface] = useState<PermissionSurfaceFilter>('all')
+  // null = 还没手动选过，落到第一个有内容的分组；'all' = 用户选了「全部」
+  const [requestedGroup, setRequestedGroup] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(() => new Set())
 
-  const { groups, counts } = useMemo(
-    () => buildPermissionGroupViews({ categories, draftCodes, baselineCodes, keyword, filter }),
-    [baselineCodes, categories, draftCodes, filter, keyword],
+  const { groups: allGroups, counts, navEntries } = useMemo(
+    () => buildPermissionGroupViews({ categories, draftCodes, baselineCodes, keyword, filter, surface }),
+    [baselineCodes, categories, draftCodes, filter, keyword, surface],
   )
+  const navSections = useMemo(() => buildTaxonomyNav(navEntries), [navEntries])
+  const activeGroupKey = resolveActiveGroupKey(requestedGroup, navSections)
+  // 右侧只展示选中分组下的分类；计数（全部 / 已授予 …）仍是全局口径
+  const groups = useMemo(() => {
+    const activeCategories = categoriesOfGroup(activeGroupKey, navSections)
+    return activeCategories ? allGroups.filter((group) => activeCategories.has(group.key)) : allGroups
+  }, [activeGroupKey, allGroups, navSections])
   // 搜索或筛选时强制展开，避免命中的权限藏在已收起的分组里。
   const isNarrowed = keyword.trim() !== '' || filter !== 'all'
 
@@ -87,6 +101,7 @@ export default function RolePermissionPanel({
             { label: filterLabel(t('system.rolesWorkspace.filterChanged', '已修改'), counts.changed), value: 'changed' },
           ]}
         />
+        <SurfaceFilterBar value={surface} onChange={setSurface} />
         <span className="roles-ws-toolbar-end">
           <Button size="small" type="text" disabled={isNarrowed} onClick={() => setCollapsedKeys(new Set())}>
             {t('system.rolesWorkspace.expandAll', '展开全部')}
@@ -102,6 +117,17 @@ export default function RolePermissionPanel({
         </span>
       </div>
 
+      <div className="roles-ws-perm-body">
+      <aside className="roles-ws-rail">
+        <PermissionTaxonomyNav
+          sections={navSections}
+          activeKey={activeGroupKey}
+          allCount={`${navEntries.filter((entry) => entry.granted).length} / ${navEntries.length}`}
+          onSelect={setRequestedGroup}
+          showGranted
+        />
+      </aside>
+      <div className="roles-ws-perm-list">
       {groups.length ? groups.map((group) => {
         const expanded = isNarrowed || !collapsedKeys.has(group.key)
         return (
@@ -149,17 +175,25 @@ export default function RolePermissionPanel({
                     disabled={readOnly}
                     onChange={(event) => onToggle(item.code, event.target.checked)}
                   >
-                    <span className="roles-ws-perm-name" title={item.description || item.displayName}>
-                      {item.displayName}
-                    </span>
-                    {item.change ? (
-                      <span className={item.change === 'added' ? 'roles-ws-badge roles-ws-badge-add' : 'roles-ws-badge roles-ws-badge-remove'}>
-                        {item.change === 'added'
-                          ? t('system.rolesWorkspace.badgeAdded', '+ 授予')
-                          : t('system.rolesWorkspace.badgeRemoved', '− 移除')}
+                    <span className="roles-ws-perm-text">
+                      <span className="roles-ws-perm-line">
+                        <span className="roles-ws-perm-name" title={item.description || undefined}>
+                          {item.displayName}
+                        </span>
+                        {item.change ? (
+                          <span className={item.change === 'added' ? 'roles-ws-badge roles-ws-badge-add' : 'roles-ws-badge roles-ws-badge-remove'}>
+                            {item.change === 'added'
+                              ? t('system.rolesWorkspace.badgeAdded', '+ 授予')
+                              : t('system.rolesWorkspace.badgeRemoved', '− 移除')}
+                          </span>
+                        ) : null}
+                        {/* 纯收银端权限所在分区已经标明端，不重复贴标签 */}
+                        {item.surfaces.length === 1 && item.surfaces[0] === 'pos' ? null : (
+                          <SurfaceBadges surfaces={item.surfaces} />
+                        )}
                       </span>
-                    ) : null}
-                    <span className="roles-ws-code">{item.code}</span>
+                      <BreakableCode code={item.code} />
+                    </span>
                   </Checkbox>
                 ))}
               </div>
@@ -169,6 +203,8 @@ export default function RolePermissionPanel({
       }) : (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('system.rolesWorkspace.noMatchedPermissions', '没有匹配的权限')} />
       )}
+      </div>
+      </div>
     </div>
   )
 }

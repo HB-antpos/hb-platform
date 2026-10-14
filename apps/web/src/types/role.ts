@@ -64,6 +64,8 @@ export interface PermissionDto {
   description?: string
   category: string
   isSystemPermission: boolean
+  /** 使用端：pos / web / mobile，可同时包含多个；旧后端没有该字段。 */
+  surfaces?: string[]
   createdAt: string
   createdBy?: string
   updatedAt?: string

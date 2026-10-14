@@ -111,6 +111,69 @@ assert.deepEqual(
   '可按中文名称搜索',
 )
 
+// 使用端：后端带 surfaces 就用后端的；没有时按编码前缀兜底（收银端前缀是 POS，其余是后台）
+const surfaceCategories: PermissionCategoryDto[] = [
+  {
+    category: 'POS 销售',
+    displayName: 'POS 销售',
+    permissions: [
+      { ...permission('Permissions.PosTerminal.Sales.AddItem', '添加扫码商品', 'POS 销售'), surfaces: ['pos'] },
+    ],
+  },
+  {
+    category: '排班考勤',
+    displayName: '排班考勤',
+    permissions: [
+      { ...permission('Attendance.Punch.Self', '本人打卡', '排班考勤'), surfaces: ['mobile'] },
+      { ...permission('Attendance.Schedule.ViewStore', '查看相关分店排班', '排班考勤'), surfaces: ['web', 'mobile'] },
+    ],
+  },
+  {
+    category: '用户管理',
+    displayName: '用户管理',
+    permissions: [permission('Users.View', '查看用户', '用户管理')],
+  },
+]
+const bySurface = (surface: 'all' | 'pos' | 'web' | 'mobile') =>
+  buildPermissionGroupViews({
+    categories: surfaceCategories,
+    draftCodes: ['Attendance.Punch.Self'],
+    baselineCodes: [],
+    keyword: '',
+    filter: 'all',
+    surface,
+  })
+assert.equal(bySurface('all').counts.all, 4)
+assert.deepEqual(
+  bySurface('mobile').groups.flatMap((group) => group.items.map((item) => item.code)),
+  ['Attendance.Punch.Self', 'Attendance.Schedule.ViewStore'],
+  '移动端筛选保留仅移动端与两端共用的权限',
+)
+assert.deepEqual(
+  bySurface('web').groups.flatMap((group) => group.items.map((item) => item.code)),
+  ['Attendance.Schedule.ViewStore', 'Users.View'],
+  '后台筛选保留两端共用的权限，且没有 surfaces 的旧数据兜底为后台',
+)
+assert.deepEqual(
+  bySurface('pos').groups.map((group) => group.key),
+  ['POS 销售'],
+  '收银端筛选只剩 POS 分类',
+)
+assert.deepEqual(bySurface('mobile').counts, { all: 2, granted: 1, ungranted: 1, changed: 1 }, '分段数量按使用端筛选结果统计')
+assert.deepEqual(
+  bySurface('mobile').navEntries,
+  [
+    { category: '排班考勤', granted: true },
+    { category: '排班考勤', granted: false },
+  ],
+  '导航数据源就是列表当前能看到的条目',
+)
+assert.deepEqual(
+  all.groups.flatMap((group) => group.items.map((item) => item.surfaces.join())),
+  ['web', 'web', 'web', 'web'],
+  '没有 surfaces 字段的旧后端数据按后台处理',
+)
+
 const node = (key: string, visible: boolean, children?: WebMenuPreviewNode[]): WebMenuPreviewNode => ({
   key,
   title: key,
