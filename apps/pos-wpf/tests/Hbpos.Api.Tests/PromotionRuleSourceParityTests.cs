@@ -11,7 +11,7 @@ namespace Hbpos.Api.Tests;
 // WPF 收银端有两套促销规则来源（C3 任务对照用的特征化测试，钉住「当前」服务端行为）：
 //   旧源 = CatalogService.GetPromotionRulesAsync（目录同步 /catalog/promotions，PosCartService 旧引擎用，iPad 也用它）；
 //   新源 = PromotionRuleService.GetRulesAsync（/promotions/rules，PromotionEvaluationService 新引擎用）。
-// 同一份库数据下两个来源返回的规则集合并不相同；这些差异在用户拍板「以哪个来源为准」之前不要改。
+// 同一份库数据下两个来源返回的规则集合仍有差异（负固定价 / 零数量 / 无商品 / 权重 0，见下）；没有门店绑定的促销已于 2026-10-14 拍板为「哪家都不生效」，两个来源一致不下发。
 // 生产现配置（1 条生效促销、绑定 1 家店）下两个来源返回同一条规则，差异只在下面这些扩展情形出现。
 public sealed class PromotionRuleSourceParityTests
 {
@@ -25,19 +25,18 @@ public sealed class PromotionRuleSourceParityTests
         // 绑定本店 / 绑定多店（含本店）：两个来源都应下发。
         await fixture.SeedPromotionAsync("BOUND-S01", now, priority: 5, isExclusive: true, stores: ["S01"], products: [("A", 1)]);
         await fixture.SeedPromotionAsync("MULTI-STORE", now, priority: 6, stores: ["S01", "S02"], products: [("A", 1)]);
-        // 绑定别的店 / 已停用 / 已过期：两个来源都不应下发。
+        // 绑定别的店 / 已停用 / 已过期 / 没有任何门店绑定（用户 2026-10-14 拍板：哪家都不生效）：两个来源都不应下发。
+        await fixture.SeedPromotionAsync("HQ-UNBOUND", now, priority: 4, stores: [], products: [("A", 1)]);
         await fixture.SeedPromotionAsync("OTHER-STORE", now, priority: 3, stores: ["S02"], products: [("A", 1)]);
         await fixture.SeedPromotionAsync("DISABLED", now, priority: 3, stores: ["S01"], products: [("A", 1)], isEnabled: false);
         await fixture.SeedPromotionAsync("EXPIRED", now, priority: 3, stores: ["S01"], products: [("A", 1)], startDays: -5, endDays: -1);
         // 只有新源会下发的扩展情形：
-        //  1) 没有任何门店绑定 = 后台口径的「总部促销，对所有门店可见」；旧源要求必须有本店绑定，不下发。
-        await fixture.SeedPromotionAsync("HQ-UNBOUND", now, priority: 4, stores: [], products: [("A", 1)]);
-        //  2) 固定价为负：旧源在服务端过滤 FixedPrice >= 0；新源不过滤，WPF 新引擎也不检查，会把整组折成 0 元。
+        //  1) 固定价为负：旧源在服务端过滤 FixedPrice >= 0；新源不过滤，WPF 新引擎也不检查，会把整组折成 0 元。
         await fixture.SeedPromotionAsync("NEG-FIXED", now, priority: 2, stores: ["S01"], products: [("A", 1)], fixedPrice: -1m);
-        //  3) ApplyQuantity <= 0、无商品明细：旧源在服务端过滤；新源照发，但两套 WPF 引擎都会忽略它们（无实际影响）。
+        //  2) ApplyQuantity <= 0、无商品明细：旧源在服务端过滤；新源照发，但两套 WPF 引擎都会忽略它们（无实际影响）。
         await fixture.SeedPromotionAsync("ZERO-QTY", now, priority: 1, stores: ["S01"], products: [("A", 1)], applyQuantity: 0);
         await fixture.SeedPromotionAsync("NO-PRODUCTS", now, priority: 0, stores: ["S01"], products: []);
-        //  4) UnitWeight 为 0：旧源下发时归一为 1；新源原样下发（WPF 新引擎再把 <= 0 当 1，实际等价）。
+        //  3) UnitWeight 为 0：旧源下发时归一为 1；新源原样下发（WPF 新引擎再把 <= 0 当 1，实际等价）。
         await fixture.SeedPromotionAsync("WEIGHT-ZERO", now, priority: -1, stores: ["S01"], products: [("A", 0)]);
 
         var catalogRules = (await fixture.CreateCatalogService().GetPromotionRulesAsync("S01", CancellationToken.None))!.Promotions;
@@ -49,9 +48,9 @@ public sealed class PromotionRuleSourceParityTests
             catalogRules.Select(rule => rule.PromotionId).ToArray());
         Assert.Equal(1, Assert.Single(catalogRules, rule => rule.PromotionId == "WEIGHT-ZERO").Products[0].UnitWeight);
 
-        // 新源：多出 HQ-UNBOUND（总部）、NEG-FIXED、ZERO-QTY、NO-PRODUCTS；按 Priority 降序。
+        // 新源：多出 NEG-FIXED、ZERO-QTY、NO-PRODUCTS；按 Priority 降序。
         Assert.Equal(
-            ["MULTI-STORE", "BOUND-S01", "HQ-UNBOUND", "NEG-FIXED", "ZERO-QTY", "NO-PRODUCTS", "WEIGHT-ZERO"],
+            ["MULTI-STORE", "BOUND-S01", "NEG-FIXED", "ZERO-QTY", "NO-PRODUCTS", "WEIGHT-ZERO"],
             promotionRules.Select(rule => rule.Id).ToArray());
         Assert.Equal(0, Assert.Single(promotionRules, rule => rule.Id == "WEIGHT-ZERO").Products[0].UnitWeight);
         Assert.Equal(-1m, Assert.Single(promotionRules, rule => rule.Id == "NEG-FIXED").FixedPrice);

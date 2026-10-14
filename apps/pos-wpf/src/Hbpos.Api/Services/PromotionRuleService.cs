@@ -28,7 +28,9 @@ public sealed class PromotionRuleService(
         var generatedAt = _timeProvider.GetUtcNow();
         var effectiveAtUtc = (asOf ?? generatedAt).ToUniversalTime().UtcDateTime;
 
-        // 只返回未软删除的有效促销；门店范围和总部规则判定都只看未软删除的绑定记录。
+        // 只返回未软删除的有效促销，且必须有未软删除的「本店」绑定记录才下发。
+        // 没有选任何门店的促销哪家都不生效（用户 2026-10-14 拍板），与目录来源 CatalogService.GetPromotionRulesAsync 一致；
+        // 要做全店活动就把全部门店都绑上。
         var promotions = await dbContext.MainDb.Queryable<Promotion>()
             .Where(promotion => !promotion.IsDeleted)
             .Where(promotion => promotion.IsEnabled)
@@ -41,12 +43,6 @@ public sealed class PromotionRuleService(
                         !store.IsDeleted
                         && store.PromotionId == promotion.Id
                         && store.StoreCode == normalizedStoreCode)
-                    .Any()
-                || !SqlFunc
-                    .Subqueryable<PromotionStore>()
-                    .Where(store =>
-                        !store.IsDeleted
-                        && store.PromotionId == promotion.Id)
                     .Any())
             .OrderBy(promotion => promotion.Priority, OrderByType.Desc)
             .OrderBy(promotion => promotion.EffectiveStart, OrderByType.Asc)

@@ -77,17 +77,14 @@ public sealed class PromotionRuleServiceTests
 
         Assert.Equal("S01", response.StoreCode);
         Assert.Equal(now, response.GeneratedAt);
-        Assert.Equal(["PROMO-STORE", "PROMO-HQ"], response.Rules.Select(rule => rule.Id).ToArray());
+        // 没有任何门店绑定的 PROMO-HQ 哪家都不生效，不下发。
+        Assert.Equal(["PROMO-STORE"], response.Rules.Select(rule => rule.Id).ToArray());
+        Assert.DoesNotContain(response.Rules, rule => rule.Id == "PROMO-HQ");
 
         var storeRule = Assert.Single(response.Rules, rule => rule.Id == "PROMO-STORE");
         Assert.Equal(2, storeRule.Products.Count);
         Assert.Equal(("SKU-STORE-1", 1), (storeRule.Products[0].ProductCode, storeRule.Products[0].UnitWeight));
         Assert.Equal(("SKU-STORE-2", 3), (storeRule.Products[1].ProductCode, storeRule.Products[1].UnitWeight));
-
-        var headquartersRule = Assert.Single(response.Rules, rule => rule.Id == "PROMO-HQ");
-        Assert.Single(headquartersRule.Products);
-        Assert.Equal("SKU-HQ-1", headquartersRule.Products[0].ProductCode);
-        Assert.Equal(2, headquartersRule.Products[0].UnitWeight);
     }
 
     [Fact]
@@ -148,6 +145,36 @@ public sealed class PromotionRuleServiceTests
                 }
             ]);
 
+        await fixture.SeedPromotionAsync(
+            CreatePromotion("PROMO-BOUND-WITH-DELETED-PRODUCT", "Bound With Deleted Product", now.UtcDateTime.AddDays(-1), now.UtcDateTime.AddDays(1)),
+            stores:
+            [
+                new PromotionStore
+                {
+                    Id = "PROMO-BOUND-WITH-DELETED-PRODUCT-S01",
+                    PromotionId = "PROMO-BOUND-WITH-DELETED-PRODUCT",
+                    StoreCode = "S01"
+                }
+            ],
+            products:
+            [
+                new PromotionProduct
+                {
+                    Id = "PROMO-BOUND-WITH-DELETED-PRODUCT-P01",
+                    PromotionId = "PROMO-BOUND-WITH-DELETED-PRODUCT",
+                    ProductCode = "SKU-ACTIVE",
+                    UnitWeight = 1
+                },
+                new PromotionProduct
+                {
+                    Id = "PROMO-BOUND-WITH-DELETED-PRODUCT-P02",
+                    PromotionId = "PROMO-BOUND-WITH-DELETED-PRODUCT",
+                    ProductCode = "SKU-DELETED",
+                    UnitWeight = 9,
+                    IsDeleted = true
+                }
+            ]);
+
         var service = new PromotionRuleService(fixture.DbContext, new MutableFakeTimeProvider(now));
 
         var response = await service.GetRulesAsync("S01", now, CancellationToken.None);
@@ -155,8 +182,11 @@ public sealed class PromotionRuleServiceTests
         Assert.DoesNotContain(response.Rules, rule => rule.Id == "PROMO-DELETED");
         Assert.DoesNotContain(response.Rules, rule => rule.Id == "PROMO-DELETED-STORE");
 
-        var headquartersRule = Assert.Single(response.Rules, rule => rule.Id == "PROMO-HQ-FROM-DELETED-STORE");
-        var product = Assert.Single(headquartersRule.Products);
+        // 唯一的本店绑定已软删除 = 没有有效绑定，不能退化成「总部促销」。
+        Assert.DoesNotContain(response.Rules, rule => rule.Id == "PROMO-HQ-FROM-DELETED-STORE");
+
+        var boundRule = Assert.Single(response.Rules, rule => rule.Id == "PROMO-BOUND-WITH-DELETED-PRODUCT");
+        var product = Assert.Single(boundRule.Products);
         Assert.Equal("SKU-ACTIVE", product.ProductCode);
     }
 
