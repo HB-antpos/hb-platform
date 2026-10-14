@@ -66,7 +66,10 @@ public sealed record ReceiptPrinterSettings(
     // 中文注释：无交易开钱箱（侧栏「开钱箱」按钮，不是收现金后的自动开）是否必须再扫一次员工条码确认；默认关闭，保持旧行为。
     // 开启后即使当前收银员自己有开钱箱权限也要扫码，扫码的员工同样需要有开钱箱权限（自己扫自己或主管扫都行）。
     // 与端口、切纸距离、银行收据开关一样按设备保存，不随门店资料作用域迁移，也不受总部下发影响。
-    bool NoSaleCashDrawerRequiresRescan = false)
+    bool NoSaleCashDrawerRequiresRescan = false,
+    // 中文注释：退货操作（侧栏「退款」进入退货页）是否必须再扫一次员工条码确认；默认关闭，保持旧行为。
+    // 规则、扫码人要求与保存方式同 NoSaleCashDrawerRequiresRescan；只管进入退货页这一下，页内加行、确认退货不再重复扫码。
+    bool ReturnsRequireRescan = false)
 {
     public const string DefaultPrinterPort = "USB,";
 
@@ -226,6 +229,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
     private const string PrintBankReceiptTextKey = Prefix + "PrintBankReceiptText";
     // 中文注释：同样按设备保存；缺失（升级前从未保存过）一律按 false 读，即默认关闭。
     private const string NoSaleCashDrawerRequiresRescanKey = Prefix + "NoSaleCashDrawerRequiresRescan";
+    private const string ReturnsRequireRescanKey = Prefix + "ReturnsRequireRescan";
     private const string ProfileStoreCodeKey = Prefix + "ProfileStoreCode";
     // 中文注释：总部下发版本与已回执版本。两个键不带门店作用域，有效性完全取决于 ProfileStoreCode
     // 是否等于当前门店：换店后旧值读出来一律按 0，重新绑定时在同一次批量写里清零。
@@ -281,6 +285,9 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
         var noSaleCashDrawerRequiresRescan = NormalizeFlag(
             ReadValue(values, NoSaleCashDrawerRequiresRescanKey),
             ReceiptPrinterSettings.Default.NoSaleCashDrawerRequiresRescan);
+        var returnsRequireRescan = NormalizeFlag(
+            ReadValue(values, ReturnsRequireRescanKey),
+            ReceiptPrinterSettings.Default.ReturnsRequireRescan);
 
         var settings = storeCode is null
             ? LoadLegacyUnscoped(values, port, cutDistance)
@@ -288,7 +295,8 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
         return settings with
         {
             PrintBankReceiptText = printBankReceiptText,
-            NoSaleCashDrawerRequiresRescan = noSaleCashDrawerRequiresRescan
+            NoSaleCashDrawerRequiresRescan = noSaleCashDrawerRequiresRescan,
+            ReturnsRequireRescan = returnsRequireRescan
         };
     }
 
@@ -404,12 +412,13 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
     /// </summary>
     private static string[] BuildLoadKeys(string? storeCode)
     {
-        var keys = new List<string>(storeCode is null ? 12 : 22)
+        var keys = new List<string>(storeCode is null ? 13 : 23)
         {
             PrinterPortKey,
             CutDistanceKey,
             PrintBankReceiptTextKey,
             NoSaleCashDrawerRequiresRescanKey,
+            ReturnsRequireRescanKey,
         };
         keys.AddRange(ProfileFieldSuffixes.Select(suffix => ProfileKey(null, suffix)));
         if (storeCode is not null)
@@ -606,6 +615,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
             [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
             [NoSaleCashDrawerRequiresRescanKey] = FormatFlag(settings.NoSaleCashDrawerRequiresRescan),
+            [ReturnsRequireRescanKey] = FormatFlag(settings.ReturnsRequireRescan),
         };
     }
 
@@ -625,6 +635,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
             [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
             [NoSaleCashDrawerRequiresRescanKey] = FormatFlag(settings.NoSaleCashDrawerRequiresRescan),
+            [ReturnsRequireRescanKey] = FormatFlag(settings.ReturnsRequireRescan),
         };
     }
 
@@ -636,6 +647,7 @@ public sealed class ReceiptPrinterSettingsStore : IReceiptPrinterSettingsStore, 
             [CutDistanceKey] = Math.Max(1, settings.CutDistance).ToString(CultureInfo.InvariantCulture),
             [PrintBankReceiptTextKey] = FormatFlag(settings.PrintBankReceiptText),
             [NoSaleCashDrawerRequiresRescanKey] = FormatFlag(settings.NoSaleCashDrawerRequiresRescan),
+            [ReturnsRequireRescanKey] = FormatFlag(settings.ReturnsRequireRescan),
             [ProfileStoreCodeKey] = storeCode,
             [ProfileKey(storeCode, "BrandName")] = NormalizeText(settings.BrandName, string.Empty),
             [ProfileKey(storeCode, "StoreName")] = NormalizeText(settings.StoreName, string.Empty),

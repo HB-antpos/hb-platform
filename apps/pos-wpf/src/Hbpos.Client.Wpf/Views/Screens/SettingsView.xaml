@@ -2522,9 +2522,10 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- 第 1 行放两张卡片（打印选项、再次扫码确认）上下排列，后面的卡片不用重新编号。 -->
+                            <StackPanel Grid.Row="1">
                             <!-- 打印选项：客人小票是否附带银行收据原文；与其他小票字段一样点“保存”后生效。 -->
-                            <Border Grid.Row="1"
-                                    Style="{StaticResource SettingsActionCardStyle}"
+                            <Border Style="{StaticResource SettingsActionCardStyle}"
                                     Margin="0,0,0,16">
                                 <StackPanel>
                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.options.title}" Style="{StaticResource SettingsSectionTitleStyle}" Margin="0,0,0,8" />
@@ -2562,11 +2563,17 @@
                                                       VerticalAlignment="Center">
                                         </ToggleButton>
                                     </Grid>
+                                </StackPanel>
+                            </Border>
 
-                                    <!-- 无交易开钱箱是否必须再扫一次员工条码：只管侧栏「开钱箱」按钮，收现金后的自动开钱箱不受影响；默认关闭。 -->
-                                    <Border Height="1"
-                                            Background="{DynamicResource PosDividerBrush}"
-                                            Margin="0,12,0,12" />
+                            <!-- 再次扫码确认：开启后，对应操作即使当前收银员自己有权限，也要再扫一次授权员工条码；各开关默认关闭，点“保存”后生效。 -->
+                            <Border Style="{StaticResource SettingsActionCardStyle}"
+                                    Margin="0,0,0,16">
+                                <StackPanel>
+                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.rescan.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.rescan.help}"
+                                               Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,8" />
+                                    <!-- 无交易开钱箱：只管侧栏「开钱箱」按钮，收现金后的自动开钱箱不受影响。 -->
                                     <Grid MinHeight="72">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -2602,8 +2609,49 @@
                                                       VerticalAlignment="Center">
                                         </ToggleButton>
                                     </Grid>
+
+                                    <!-- 退货操作：只管侧栏「退款」进入退货页那一下；进入后加行、确认退货不再重复扫码。 -->
+                                    <Border Height="1"
+                                            Background="{DynamicResource PosDividerBrush}"
+                                            Margin="0,12,0,12" />
+                                    <Grid MinHeight="72">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="44" Height="44" CornerRadius="12"
+                                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                                Margin="0,0,14,0" VerticalAlignment="Center">
+                                            <materialDesign:PackIcon Kind="CashRefund" Width="22" Height="22"
+                                                                     Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan}"
+                                                       FontSize="16"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource PosTextBrush}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan.help}"
+                                                       FontSize="12.5"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ToggleButton Grid.Column="2"
+                                                      x:Name="ReturnsRescanToggle"
+                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                      IsChecked="{Binding ReceiptReturnsRequireRescan, Mode=TwoWay}"
+                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.returnsRescan}"
+                                                      MinHeight="48"
+                                                      MinWidth="56"
+                                                      VerticalAlignment="Center">
+                                        </ToggleButton>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
+                            </StackPanel>
 
                             <!-- 门店信息：总部下发后只读，提示去 Web 分店管理修改；可随时“立即同步”。 -->
                             <Border Grid.Row="2"

@@ -103,6 +103,56 @@ public sealed class ReceiptPrinterProfileTests
     }
 
     [Fact]
+    public async Task Returns_rescan_flag_defaults_to_off_and_round_trips_per_device_independent_of_the_cash_drawer_flag()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository, NewAuth("S001"));
+
+        // 旧设备没有该键：默认关闭，进入退货页保持原来的「有权限就直接进」。
+        Assert.False(ReceiptPrinterSettings.Default.ReturnsRequireRescan);
+        Assert.False((await store.LoadAsync()).ReturnsRequireRescan);
+
+        // 只开退货：钱箱开关不受影响。
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { ReturnsRequireRescan = true });
+        Assert.Equal("true", await repository.GetValueAsync("ReceiptPrinter:ReturnsRequireRescan"));
+        var loaded = await store.LoadAsync();
+        Assert.True(loaded.ReturnsRequireRescan);
+        Assert.False(loaded.NoSaleCashDrawerRequiresRescan);
+
+        // 按设备保存：设备改店后仍沿用。
+        var movedStore = new ReceiptPrinterSettingsStore(repository, NewAuth("S002"));
+        Assert.True((await movedStore.LoadAsync()).ReturnsRequireRescan);
+
+        // 两个开关各管各的：再单独打开钱箱，退货的值不被冲掉。
+        await store.SaveAsync(loaded with { NoSaleCashDrawerRequiresRescan = true });
+        var both = await store.LoadAsync();
+        Assert.True(both.ReturnsRequireRescan);
+        Assert.True(both.NoSaleCashDrawerRequiresRescan);
+
+        // 关掉退货：写入 false，钱箱保持开启。
+        await store.SaveAsync(both with { ReturnsRequireRescan = false });
+        Assert.Equal("false", await repository.GetValueAsync("ReceiptPrinter:ReturnsRequireRescan"));
+        var afterOff = await store.LoadAsync();
+        Assert.False(afterOff.ReturnsRequireRescan);
+        Assert.True(afterOff.NoSaleCashDrawerRequiresRescan);
+
+        // 值损坏时回退默认（关闭）。
+        await repository.SetValueAsync("ReceiptPrinter:ReturnsRequireRescan", "garbage");
+        Assert.False((await store.LoadAsync()).ReturnsRequireRescan);
+    }
+
+    [Fact]
+    public async Task Legacy_unscoped_store_persists_returns_rescan_flag()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository);
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { ReturnsRequireRescan = true });
+
+        Assert.True((await store.LoadAsync()).ReturnsRequireRescan);
+    }
+
+    [Fact]
     public async Task Legacy_unscoped_store_persists_no_sale_cash_drawer_rescan_flag()
     {
         var repository = new InMemorySettingsRepository();

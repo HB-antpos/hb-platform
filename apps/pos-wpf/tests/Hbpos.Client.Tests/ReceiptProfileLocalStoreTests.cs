@@ -330,20 +330,27 @@ public sealed class ReceiptProfileLocalStoreTests
     }
 
     [Fact]
-    public async Task Save_while_profile_is_headquarters_managed_still_saves_the_no_sale_cash_drawer_rescan_flag()
+    public async Task Save_while_profile_is_headquarters_managed_still_saves_the_rescan_flags()
     {
         var repository = new ProfileTestSettingsRepository();
         var store = new ReceiptPrinterSettingsStore(repository, ProfileTestData.Auth("S001"));
         await store.ApplyHeadquartersProfileAsync("S001", SampleFields, 3);
 
-        // 总部下发后资料只读、保存只落硬件设置：无交易开钱箱开关是按设备保存的硬件类设置，必须仍能保存。
-        await store.SaveAsync(ReceiptPrinterSettings.Default with { NoSaleCashDrawerRequiresRescan = true });
-        Assert.True((await store.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+        // 总部下发后资料只读、保存只落硬件设置：两个「再次扫码」开关（无交易开钱箱、退货）都是按设备保存的设置，必须仍能保存。
+        await store.SaveAsync(ReceiptPrinterSettings.Default with
+        {
+            NoSaleCashDrawerRequiresRescan = true,
+            ReturnsRequireRescan = true
+        });
+        var saved = await store.LoadAsync();
+        Assert.True(saved.NoSaleCashDrawerRequiresRescan);
+        Assert.True(saved.ReturnsRequireRescan);
 
-        // 总部再次下发资料不会把它冲掉。
+        // 总部再次下发资料不会把它们冲掉。
         await store.ApplyHeadquartersProfileAsync("S001", SampleFields, 4);
         var loaded = await store.LoadAsync();
         Assert.True(loaded.NoSaleCashDrawerRequiresRescan);
+        Assert.True(loaded.ReturnsRequireRescan);
         Assert.Equal(4, loaded.ProfileVersion);
     }
 

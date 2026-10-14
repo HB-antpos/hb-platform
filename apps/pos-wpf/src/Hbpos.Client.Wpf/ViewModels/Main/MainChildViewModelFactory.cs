@@ -329,6 +329,11 @@ internal sealed class MainChildViewModelFactory
                 ? null
                 : async cancellationToken =>
                     (await _receiptPrinterSettingsStore.LoadAsync(cancellationToken)).NoSaleCashDrawerRequiresRescan,
+            // 设置页「退货操作需要再次扫码」：每次点「退款」都现读，改设置后立即生效。
+            isReturnsRescanRequiredAsync: _receiptPrinterSettingsStore is null
+                ? null
+                : async cancellationToken =>
+                    (await _receiptPrinterSettingsStore.LoadAsync(cancellationToken)).ReturnsRequireRescan,
             releaseSharedHeldOrderAsync: _sharedHeldOrderCoordinator is null
                 ? null
                 : (claimId, currentSession, cancellationToken) =>

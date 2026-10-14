@@ -12,7 +12,7 @@ using Hbpos.Contracts.Cashiers;
 namespace Hbpos.Client.Tests;
 
 /// <summary>
-/// 设置页「无交易开钱箱需要再次扫码」（默认关闭）。
+/// 设置页「无交易开钱箱需要再次扫码」（默认关闭）。同一张「再次扫码确认」卡片里的退货开关见 ReturnsRescanTests。
 ///
 /// 规则：
 /// 1. 只管侧栏「开钱箱」按钮（没有交易时手动开）；收现金后的自动开钱箱走 MainViewModel 的另一条路径，不受影响。
@@ -115,30 +115,51 @@ public sealed class NoSaleCashDrawerRescanTests
     // ===================================================================================
 
     [Fact]
-    public void Settings_page_has_the_toggle_bound_to_the_view_model_and_both_languages_have_the_strings()
+    public void Settings_page_has_both_rescan_toggles_in_their_own_card_and_both_languages_have_the_strings()
     {
         var wpfRoot = WpfRoot();
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
 
         var view = XDocument.Load(Path.Combine(wpfRoot, "Views", "Screens", "SettingsView.xaml"));
-        var toggle = Assert.Single(view.Descendants(presentation + "ToggleButton").Where(element =>
-            (string?)element.Attribute(x + "Name") == "NoSaleCashDrawerRescanToggle"));
-        Assert.Equal("{Binding ReceiptNoSaleCashDrawerRequiresRescan, Mode=TwoWay}", (string?)toggle.Attribute("IsChecked"));
+        XElement Toggle(string name) => Assert.Single(view.Descendants(presentation + "ToggleButton").Where(element =>
+            (string?)element.Attribute(x + "Name") == name));
+
+        var cashDrawerToggle = Toggle("NoSaleCashDrawerRescanToggle");
+        Assert.Equal("{Binding ReceiptNoSaleCashDrawerRequiresRescan, Mode=TwoWay}", (string?)cashDrawerToggle.Attribute("IsChecked"));
         Assert.Equal(
             "{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}",
-            (string?)toggle.Attribute("AutomationProperties.Name"));
-        // 与银行收据开关同在「打印与钱箱选项」卡片里，随小票打印机设置一起点保存生效。
-        var bankReceiptToggle = Assert.Single(view.Descendants(presentation + "ToggleButton").Where(element =>
-            (string?)element.Attribute(x + "Name") == "PrintBankReceiptTextToggle"));
-        var card = bankReceiptToggle.Ancestors(presentation + "Border").First(border =>
-            (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}");
-        Assert.Contains(card, toggle.Ancestors(presentation + "Border"));
+            (string?)cashDrawerToggle.Attribute("AutomationProperties.Name"));
+        var returnsToggle = Toggle("ReturnsRescanToggle");
+        Assert.Equal("{Binding ReceiptReturnsRequireRescan, Mode=TwoWay}", (string?)returnsToggle.Attribute("IsChecked"));
+        Assert.Equal(
+            "{loc:Loc settings.receiptPrinter.returnsRescan}",
+            (string?)returnsToggle.Attribute("AutomationProperties.Name"));
 
+        // 两个「再次扫码」开关同在「再次扫码确认」卡片里；银行收据开关在另一张「打印选项」卡片里。
+        // 两张卡片放在小票打印机页第 1 行的同一个 StackPanel 里上下排列，后面的卡片不用重新编号。
+        XElement Card(XElement toggle) => toggle.Ancestors(presentation + "Border").First(border =>
+            (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}");
+        var printCard = Card(Toggle("PrintBankReceiptTextToggle"));
+        var rescanCard = Card(cashDrawerToggle);
+        Assert.NotSame(printCard, rescanCard);
+        Assert.Same(rescanCard, Card(returnsToggle));
+        Assert.Same(printCard.Parent, rescanCard.Parent);
+        Assert.Equal("1", (string?)printCard.Parent!.Attribute("Grid.Row"));
+
+        var rescanKeys = new[]
+        {
+            "settings.receiptPrinter.rescan.title",
+            "settings.receiptPrinter.rescan.help",
+            "settings.receiptPrinter.noSaleDrawerRescan",
+            "settings.receiptPrinter.noSaleDrawerRescan.help",
+            "settings.receiptPrinter.returnsRescan",
+            "settings.receiptPrinter.returnsRescan.help"
+        };
         foreach (var (file, keys) in new[]
                  {
-                     ("SettingsStrings.resx", new[] { "settings.receiptPrinter.noSaleDrawerRescan", "settings.receiptPrinter.noSaleDrawerRescan.help" }),
-                     ("SettingsStrings.zh-CN.resx", new[] { "settings.receiptPrinter.noSaleDrawerRescan", "settings.receiptPrinter.noSaleDrawerRescan.help" }),
+                     ("SettingsStrings.resx", rescanKeys),
+                     ("SettingsStrings.zh-CN.resx", rescanKeys),
                      ("Strings.resx", new[] { "operationAuthorization.rescanPrompt" }),
                      ("Strings.zh-CN.resx", new[] { "operationAuthorization.rescanPrompt" })
                  })
@@ -203,101 +224,6 @@ public sealed class NoSaleCashDrawerRescanTests
         public void Record(OperationAuditEventDto auditEvent)
         {
             Events.Add(auditEvent);
-        }
-    }
-
-    /// <summary>
-    /// 记录每次授权请求及其是否要求「再次扫码」的授权替身：approve = true 恒批准；false 模拟没扫码确认（返回 null）。
-    /// 旧方法与带 requireFreshScan 的新重载都实现，才能区分调用方走的是哪一个。
-    /// </summary>
-    private sealed class RescanAwareAuthorizationService(bool approve) : IOperationAuthorizationService
-    {
-        public event PropertyChangedEventHandler? PropertyChanged
-        {
-            add { }
-            remove { }
-        }
-
-        public event EventHandler? StatusChanged
-        {
-            add { }
-            remove { }
-        }
-
-        public string ScannerPageId => "NoSaleCashDrawerRescanTest";
-
-        public bool IsPromptOpen => false;
-
-        public bool IsBusy => false;
-
-        public string PromptMessage => string.Empty;
-
-        public string StatusMessage => string.Empty;
-
-        public string PermissionCode => string.Empty;
-
-        public string Screen => string.Empty;
-
-        public string Action => string.Empty;
-
-        public IRelayCommand CancelCommand { get; } = new RelayCommand(() => { });
-
-        public List<(string Permission, bool RequireFreshScan)> Requests { get; } = [];
-
-        public Task<OperationAuthorizationScope?> AuthorizeAsync(
-            string permissionCode,
-            string screen,
-            string action,
-            PosSessionState session,
-            CancellationToken cancellationToken = default) =>
-            Record(permissionCode, screen, action, session, requireFreshScan: false);
-
-        public Task<OperationAuthorizationScope?> AuthorizeAsync(
-            string permissionCode,
-            string screen,
-            string action,
-            PosSessionState session,
-            bool requireFreshScan,
-            CancellationToken cancellationToken = default) =>
-            Record(permissionCode, screen, action, session, requireFreshScan);
-
-        private Task<OperationAuthorizationScope?> Record(
-            string permissionCode,
-            string screen,
-            string action,
-            PosSessionState session,
-            bool requireFreshScan)
-        {
-            Requests.Add((permissionCode, requireFreshScan));
-            if (!approve)
-            {
-                return Task.FromResult<OperationAuthorizationScope?>(null);
-            }
-
-            var requestingSession = new CashierSessionDto(
-                session.CashierId,
-                session.CashierId,
-                session.CashierName,
-                session.StoreCode,
-                session.DeviceCode,
-                [],
-                [],
-                [session.StoreCode],
-                false,
-                false,
-                false);
-            return Task.FromResult<OperationAuthorizationScope?>(
-                new OperationAuthorizationScope(requestingSession, permissionCode, screen, action));
-        }
-
-        public bool ProcessScannerBarcode(string barcode) => false;
-
-        public void Cancel()
-        {
-        }
-
-        public void RevokeAll()
-        {
         }
     }
 }

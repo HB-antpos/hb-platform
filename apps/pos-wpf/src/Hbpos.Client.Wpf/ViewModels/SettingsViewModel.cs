@@ -291,6 +291,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _receiptNoSaleCashDrawerRequiresRescan = ReceiptPrinterSettings.Default.NoSaleCashDrawerRequiresRescan;
 
+    // 退货操作（侧栏「退款」进入退货页）是否必须再扫一次员工条码；默认关闭，保存方式同上。
+    [ObservableProperty]
+    private bool _receiptReturnsRequireRescan = ReceiptPrinterSettings.Default.ReturnsRequireRescan;
+
     [ObservableProperty]
     private string _receiptPrinterTestStatusMessage = string.Empty;
 
@@ -2714,6 +2718,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ReceiptInstallmentTermsText = settings.InstallmentTerms;
         ReceiptPrintBankReceiptText = settings.PrintBankReceiptText;
         ReceiptNoSaleCashDrawerRequiresRescan = settings.NoSaleCashDrawerRequiresRescan;
+        ReceiptReturnsRequireRescan = settings.ReturnsRequireRescan;
         ReceiptProfileVersion = settings.ProfileVersion;
     }
 
@@ -2733,8 +2738,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptProfileVersion,
             ReceiptVoucherTermsText,
             ReceiptInstallmentTermsText,
-            // 不传会落回默认值 false，保存时把已开启的开关静默关掉。
-            ReceiptNoSaleCashDrawerRequiresRescan);
+            // 两个「再次扫码」开关都必须显式传入：不传会落回默认值 false，保存时把已开启的开关静默关掉。
+            ReceiptNoSaleCashDrawerRequiresRescan,
+            ReceiptReturnsRequireRescan);
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

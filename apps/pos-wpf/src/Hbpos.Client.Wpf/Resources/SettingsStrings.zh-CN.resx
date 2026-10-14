@@ -181,6 +181,10 @@
   <data name="settings.receiptPrinter.printBankReceipt.help" xml:space="preserve"><value>关闭后客人小票只保留卡类型、卡号后四位和金额，不再附带整段刷卡银行收据，小票更短。签名单、拒付单和结算单照常打印。</value></data>
   <data name="settings.receiptPrinter.noSaleDrawerRescan" xml:space="preserve"><value>无交易开钱箱需要再次扫码</value></data>
   <data name="settings.receiptPrinter.noSaleDrawerRescan.help" xml:space="preserve"><value>开启后，点击「开钱箱」（没有交易时）每次都要扫一次授权员工条码确认，即使当前收银员自己有开钱箱权限。收现金后自动弹开的钱箱不受影响。默认关闭。</value></data>
+  <data name="settings.receiptPrinter.rescan.title" xml:space="preserve"><value>再次扫码确认</value></data>
+  <data name="settings.receiptPrinter.rescan.help" xml:space="preserve"><value>开启后，对应操作即使当前收银员自己有权限，也要再扫一次授权员工条码。各开关默认都关闭，点保存后生效。</value></data>
+  <data name="settings.receiptPrinter.returnsRescan" xml:space="preserve"><value>退货操作需要再次扫码</value></data>
+  <data name="settings.receiptPrinter.returnsRescan.help" xml:space="preserve"><value>开启后，点击侧栏「退款」进入退货页时，要先扫一次授权员工条码，扫码的员工需要有退货权限；进入退货页后的加行、确认退货不再重复扫码。默认关闭。</value></data>
   <data name="settings.receiptPrinter.save" xml:space="preserve"><value>&#x4FDD;&#x5B58;&#x5C0F;&#x7968;&#x6253;&#x5370;&#x673A;</value></data>
   <data name="settings.receiptPrinter.test" xml:space="preserve"><value>&#x6D4B;&#x8BD5;&#x6253;&#x5370;</value></data>
   <data name="settings.receiptPrinter.loadFromStore" xml:space="preserve"><value>&#x4ECE;&#x5206;&#x5E97;&#x8D44;&#x6599;&#x8F7D;&#x5165;</value></data>
@@ -447,7 +451,7 @@
   <data name="settings.receiptPrinter.connection.title" xml:space="preserve"><value>打印机连接</value></data>
   <data name="settings.receiptPrinter.connection.help" xml:space="preserve"><value>默认使用 USB 连接。仅在技术支持指导下修改端口。</value></data>
   <data name="settings.receiptPrinter.port.advanced" xml:space="preserve"><value>打印机端口（高级）</value></data>
-  <data name="settings.receiptPrinter.options.title" xml:space="preserve"><value>打印与钱箱选项</value></data>
+  <data name="settings.receiptPrinter.options.title" xml:space="preserve"><value>打印选项</value></data>
   <data name="settings.receiptPrinter.storeInfo.title" xml:space="preserve"><value>门店信息</value></data>
   <data name="settings.receiptPrinter.storeInfo.help" xml:space="preserve"><value>打印在每张小票顶部。</value></data>
   <data name="settings.receiptPrinter.terms.title" xml:space="preserve"><value>小票条款</value></data>
