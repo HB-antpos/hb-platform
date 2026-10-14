@@ -12,14 +12,19 @@ internal static class ViewModelOperationAuthorization
         string screen,
         string action,
         PosSessionState session,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireFreshScan = false)
     {
         if (service is null)
         {
+            // 没有授权服务（单元测试 / 未接入授权的场景）时无从扫码，只能按原来的权限检查放行。
             return fallbackPermissionCheck(permissionCode) ? new ViewModelAuthorizationGrant(null) : null;
         }
 
-        var scope = await service.AuthorizeAsync(permissionCode, screen, action, session, cancellationToken);
+        // requireFreshScan 放在末尾且默认 false：现有二十多个调用方都不用改，行为与原来完全一致。
+        var scope = requireFreshScan
+            ? await service.AuthorizeAsync(permissionCode, screen, action, session, requireFreshScan: true, cancellationToken)
+            : await service.AuthorizeAsync(permissionCode, screen, action, session, cancellationToken);
         if (scope is null)
         {
             return null;

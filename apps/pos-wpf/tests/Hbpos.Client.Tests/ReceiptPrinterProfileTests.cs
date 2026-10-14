@@ -74,6 +74,46 @@ public sealed class ReceiptPrinterProfileTests
     }
 
     [Fact]
+    public async Task No_sale_cash_drawer_rescan_flag_defaults_to_off_and_round_trips_per_device()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository, NewAuth("S001"));
+
+        // 旧设备没有该键：默认关闭，无交易开钱箱保持原来的「有权限就直接开」。
+        Assert.False(ReceiptPrinterSettings.Default.NoSaleCashDrawerRequiresRescan);
+        Assert.False((await store.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { NoSaleCashDrawerRequiresRescan = true });
+
+        Assert.Equal("true", await repository.GetValueAsync("ReceiptPrinter:NoSaleCashDrawerRequiresRescan"));
+        Assert.True((await store.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+
+        // 按设备保存：设备改店后仍沿用该设置，不随门店资料作用域回退。
+        var movedStore = new ReceiptPrinterSettingsStore(repository, NewAuth("S002"));
+        Assert.True((await movedStore.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+
+        // 再关掉：写入 false，读回 false。
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { NoSaleCashDrawerRequiresRescan = false });
+        Assert.Equal("false", await repository.GetValueAsync("ReceiptPrinter:NoSaleCashDrawerRequiresRescan"));
+        Assert.False((await store.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+
+        // 值损坏时回退默认（关闭）。
+        await repository.SetValueAsync("ReceiptPrinter:NoSaleCashDrawerRequiresRescan", "garbage");
+        Assert.False((await store.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+    }
+
+    [Fact]
+    public async Task Legacy_unscoped_store_persists_no_sale_cash_drawer_rescan_flag()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new ReceiptPrinterSettingsStore(repository);
+
+        await store.SaveAsync(ReceiptPrinterSettings.Default with { NoSaleCashDrawerRequiresRescan = true });
+
+        Assert.True((await store.LoadAsync()).NoSaleCashDrawerRequiresRescan);
+    }
+
+    [Fact]
     public async Task Explicit_empty_brand_name_persists_empty_not_default()
     {
         var repository = new InMemorySettingsRepository();

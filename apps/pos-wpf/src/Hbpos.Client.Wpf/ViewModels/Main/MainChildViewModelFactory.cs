@@ -324,6 +324,11 @@ internal sealed class MainChildViewModelFactory
             onLockCashierAsync: onLockCashierAsync,
             operationAuthorizationService: _operationAuthorizationService,
             onOpenCardRecoveryCenterAsync: onOpenCardRecoveryCenterAsync,
+            // 设置页「无交易开钱箱需要再次扫码」：每次点开钱箱都现读小票设置仓储，改设置后立即生效。
+            isNoSaleCashDrawerRescanRequiredAsync: _receiptPrinterSettingsStore is null
+                ? null
+                : async cancellationToken =>
+                    (await _receiptPrinterSettingsStore.LoadAsync(cancellationToken)).NoSaleCashDrawerRequiresRescan,
             releaseSharedHeldOrderAsync: _sharedHeldOrderCoordinator is null
                 ? null
                 : (claimId, currentSession, cancellationToken) =>

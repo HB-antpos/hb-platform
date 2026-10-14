@@ -3268,6 +3268,7 @@
   <data name="operationAuthorization.noSession" xml:space="preserve"><value>当前没有收银员会话。</value></data>
   <data name="operationAuthorization.pending" xml:space="preserve"><value>已有操作正在等待授权。</value></data>
   <data name="operationAuthorization.prompt" xml:space="preserve"><value>请扫描具备 {0} 权限的授权员工条码。</value></data>
+  <data name="operationAuthorization.rescanPrompt" xml:space="preserve"><value>请再扫描一次授权员工条码以确认本次操作（权限：{0}）。</value></data>
   <data name="operationAuthorization.waiting" xml:space="preserve"><value>等待授权扫码。</value></data>
   <data name="operationAuthorization.cancelled" xml:space="preserve"><value>授权已取消。</value></data>
   <data name="operationAuthorization.verifying" xml:space="preserve"><value>正在验证授权员工。</value></data>

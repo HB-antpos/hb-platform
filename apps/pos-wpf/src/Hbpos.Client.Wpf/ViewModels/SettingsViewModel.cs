@@ -287,6 +287,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _receiptPrintBankReceiptText = ReceiptPrinterSettings.Default.PrintBankReceiptText;
 
+    // 无交易开钱箱是否必须再扫一次员工条码；默认关闭。随小票打印机设置一起点「保存」生效，按设备保存。
+    [ObservableProperty]
+    private bool _receiptNoSaleCashDrawerRequiresRescan = ReceiptPrinterSettings.Default.NoSaleCashDrawerRequiresRescan;
+
     [ObservableProperty]
     private string _receiptPrinterTestStatusMessage = string.Empty;
 
@@ -2709,6 +2713,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ReceiptVoucherTermsText = settings.VoucherTerms;
         ReceiptInstallmentTermsText = settings.InstallmentTerms;
         ReceiptPrintBankReceiptText = settings.PrintBankReceiptText;
+        ReceiptNoSaleCashDrawerRequiresRescan = settings.NoSaleCashDrawerRequiresRescan;
         ReceiptProfileVersion = settings.ProfileVersion;
     }
 
@@ -2727,7 +2732,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             // 版本只由同步写入；存储层保存时也不会读取它，这里带上仅为让保存后回显与界面状态一致。
             ReceiptProfileVersion,
             ReceiptVoucherTermsText,
-            ReceiptInstallmentTermsText);
+            ReceiptInstallmentTermsText,
+            // 不传会落回默认值 false，保存时把已开启的开关静默关掉。
+            ReceiptNoSaleCashDrawerRequiresRescan);
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

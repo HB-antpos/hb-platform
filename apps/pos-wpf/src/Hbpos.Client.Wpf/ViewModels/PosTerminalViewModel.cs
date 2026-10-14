@@ -44,6 +44,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
     private readonly Func<Guid, PosSessionState, CancellationToken, Task>? _releaseSharedHeldOrderAsync;
+    // 设置页「无交易开钱箱需要再次扫码」的当前值；每次点开钱箱都现读，改设置后立即生效，不缓存。
+    private readonly Func<CancellationToken, Task<bool>>? _isNoSaleCashDrawerRescanRequiredAsync;
     private readonly Func<string?, string, CancellationToken, IReadOnlyList<SellableItemDto>> _searchCatalogMatches;
     private string _statusKey = "pos.status.ready";
     private object[] _statusArgs = [];
@@ -143,9 +145,11 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         Func<string?, string, CancellationToken, IReadOnlyList<SellableItemDto>>? searchCatalogMatches = null,
         Func<Guid, PosSessionState, CancellationToken, Task>? releaseSharedHeldOrderAsync = null,
         Func<Task>? onOpenCardRecoveryCenterAsync = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Func<CancellationToken, Task<bool>>? isNoSaleCashDrawerRescanRequiredAsync = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _isNoSaleCashDrawerRescanRequiredAsync = isNoSaleCashDrawerRescanRequiredAsync;
         _priceIndex = priceIndex;
         _searchCatalogMatches = searchCatalogMatches ?? ((storeCode, query, cancellationToken) =>
             _priceIndex.Search(storeCode, query, cancellationToken));
@@ -1679,9 +1683,41 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             result.Succeeded ? null : UserFeedbackCue.OperationError);
     }
 
+    /// <summary>
+    /// 读设置页的「无交易开钱箱需要再次扫码」。读取失败时按「需要」处理：这是安全类开关，
+    /// 不知道配置时宁可多扫一次码，也不能悄悄放过。
+    /// </summary>
+    private async Task<bool> IsNoSaleCashDrawerRescanRequiredAsync()
+    {
+        if (_isNoSaleCashDrawerRescanRequiredAsync is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await _isNoSaleCashDrawerRescanRequiredAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleLog.WriteError(
+                "CashDrawer",
+                $"read no-sale cash drawer rescan setting failed error={ex.GetType().Name}; requiring rescan",
+                null,
+                ex);
+            return true;
+        }
+    }
+
     private async Task OpenCashDrawerAsync()
     {
-        using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.CashDrawer.Open, "open-cash-drawer");
+        // 无交易开钱箱（侧栏按钮）：设置里开启后，即使当前收银员自己有权限也要再扫一次员工条码确认。
+        // 收现金后的自动开钱箱走 MainViewModel 的另一条路径，不受影响。
+        var requireRescan = await IsNoSaleCashDrawerRescanRequiredAsync();
+        using var permissionGrant = await AuthorizeAsync(
+            Permissions.PosTerminal.CashDrawer.Open,
+            "open-cash-drawer",
+            requireFreshScan: requireRescan);
         if (permissionGrant is null)
         {
             return;
@@ -2361,7 +2397,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     private Task<ViewModelAuthorizationGrant?> AuthorizeAsync(
         string permissionCode,
         string action,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        bool requireFreshScan = false) =>
         ViewModelOperationAuthorization.AuthorizeAsync(
             _operationAuthorizationService,
             TryRequirePermission,
@@ -2369,7 +2406,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             "pos-terminal",
             action,
             Session,
-            cancellationToken);
+            cancellationToken,
+            requireFreshScan);
 
     private static string? GetDeniedAuditOperationType(string permissionCode)
     {

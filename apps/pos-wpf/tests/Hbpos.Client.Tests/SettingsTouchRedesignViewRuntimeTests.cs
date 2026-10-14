@@ -111,6 +111,10 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
             AssertTouchButton(view, vm.LoadReceiptProfileCommand, 52);
             var toggle = Assert.IsType<ToggleButton>(view.FindName("PrintBankReceiptTextToggle"));
             Assert.True(toggle.ActualHeight >= 48);
+            // 「无交易开钱箱需要再次扫码」开关与银行收据开关同在打印选项卡片里，同样要满足触控高度，且默认关闭。
+            var rescanToggle = Assert.IsType<ToggleButton>(view.FindName("NoSaleCashDrawerRescanToggle"));
+            Assert.True(rescanToggle.ActualHeight >= 48);
+            Assert.False(rescanToggle.IsChecked);
             Save(view, $"receipt-{culture}");
         }
         finally
