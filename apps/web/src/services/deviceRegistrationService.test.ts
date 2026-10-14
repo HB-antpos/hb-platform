@@ -158,6 +158,32 @@ assertEqual(
   '2026-07-01T10:00:00Z',
   'Should normalize last heartbeat time',
 )
+
+// 开机时长/内存/句柄：数字与数字字符串都接受；缺失必须是 null（未上报），不能被当成 0
+const normalizedResources = normalizeDeviceRegistrationDetail({
+  id: 15,
+  hardwareId: 'HW-RUN-02',
+  systemDeviceNumber: 'POS-RUN-02',
+  deviceType: 'POS',
+  deviceSystem: 'Windows',
+  status: 1,
+  systemUptimeSeconds: 1036800,
+  processWorkingSetMb: '412',
+  processHandleCount: 0,
+})
+assertEqual(normalizedResources.systemUptimeSeconds, 1036800, 'Should normalize system uptime seconds')
+assertEqual(normalizedResources.processWorkingSetMb, 412, 'Should accept numeric strings for client memory')
+assertEqual(normalizedResources.processHandleCount, 0, 'Should keep a reported zero instead of treating it as missing')
+assertEqual(
+  normalizedRuntimeDetail.systemUptimeSeconds,
+  null,
+  'Should leave uptime empty when the client never reported one',
+)
+assertEqual(
+  normalizedRuntimeDetail.processWorkingSetMb,
+  null,
+  'Should leave client memory empty when the client never reported one',
+)
 assertEqual(
   normalizedRuntimeDetail.currentCashierName,
   'Alice',

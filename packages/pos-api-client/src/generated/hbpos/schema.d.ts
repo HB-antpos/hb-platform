@@ -6148,6 +6148,12 @@ export interface components {
             currentCashierId?: string | null;
             currentCashierName?: string | null;
             appVersion?: string | null;
+            /** Format: int64 */
+            systemUptimeSeconds?: number | null;
+            /** Format: int32 */
+            processWorkingSetMb?: number | null;
+            /** Format: int32 */
+            processHandleCount?: number | null;
         };
         DeviceVerifyRequest: {
             deviceCode?: string | null;

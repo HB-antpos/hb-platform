@@ -1630,6 +1630,7 @@ public sealed class DeviceServiceTests
             "CASHIER-1",
             "Alice",
             null,
+            null,
             CancellationToken.None);
         var secondResult = await new DeviceService(repository, LoadStoreAsync, () => secondNow)
             .UpdateRuntimeStatusAsync(
@@ -1639,6 +1640,7 @@ public sealed class DeviceServiceTests
                 true,
                 "CASHIER-1",
                 "Alice",
+                null,
                 null,
                 CancellationToken.None);
 
@@ -1654,6 +1656,7 @@ public sealed class DeviceServiceTests
                 "POS-001",
                 "1002",
                 false,
+                null,
                 null,
                 null,
                 null,
@@ -1673,18 +1676,63 @@ public sealed class DeviceServiceTests
         var service = new DeviceService(repository, LoadStoreAsync, () => new DateTime(2026, 10, 8, 10, 0, 0));
 
         await service.UpdateRuntimeStatusAsync(
-            "HW-001", "POS-001", "1002", true, null, null, "  1.0.51  ", CancellationToken.None);
+            "HW-001", "POS-001", "1002", true, null, null, "  1.0.51  ", null, CancellationToken.None);
         Assert.Equal("1.0.51", repository.LastRuntimeStatus!.AppVersion);
 
         // 旧版客户端的心跳不带版本：库里已有的版本必须保留，不能被清空。
         await service.UpdateRuntimeStatusAsync(
-            "HW-001", "POS-001", "1002", true, null, null, null, CancellationToken.None);
+            "HW-001", "POS-001", "1002", true, null, null, null, null, CancellationToken.None);
         Assert.Equal("1.0.51", repository.LastRuntimeStatus!.AppVersion);
 
         // 升级后上报新版本：覆盖旧值。
         await service.UpdateRuntimeStatusAsync(
-            "HW-001", "POS-001", "1002", true, null, null, "1.0.52", CancellationToken.None);
+            "HW-001", "POS-001", "1002", true, null, null, "1.0.52", null, CancellationToken.None);
         Assert.Equal("1.0.52", repository.LastRuntimeStatus!.AppVersion);
+    }
+
+    [Fact]
+    public async Task UpdateRuntimeStatusAsync_StoresResourcesAndKeepsEachItemWhenLaterReportOmitsIt()
+    {
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(repository, LoadStoreAsync, () => new DateTime(2026, 10, 14, 10, 0, 0));
+
+        await service.UpdateRuntimeStatusAsync(
+            "HW-001", "POS-001", "1002", true, null, null, null,
+            new DeviceResourceSnapshot(1_036_800, 412, 3_650), CancellationToken.None);
+        Assert.Equal(1_036_800L, repository.LastRuntimeStatus!.SystemUptimeSeconds);
+        Assert.Equal(412, repository.LastRuntimeStatus.ProcessWorkingSetMb);
+        Assert.Equal(3_650, repository.LastRuntimeStatus.ProcessHandleCount);
+
+        // 旧版客户端的心跳不带资源：库里已有的值必须保留，不能被清空或写成 0。
+        await service.UpdateRuntimeStatusAsync(
+            "HW-001", "POS-001", "1002", true, null, null, null, null, CancellationToken.None);
+        Assert.Equal(1_036_800L, repository.LastRuntimeStatus!.SystemUptimeSeconds);
+        Assert.Equal(412, repository.LastRuntimeStatus.ProcessWorkingSetMb);
+        Assert.Equal(3_650, repository.LastRuntimeStatus.ProcessHandleCount);
+
+        // 只上报部分项：只覆盖上报的那一项。
+        await service.UpdateRuntimeStatusAsync(
+            "HW-001", "POS-001", "1002", true, null, null, null,
+            new DeviceResourceSnapshot(null, 500, null), CancellationToken.None);
+        Assert.Equal(1_036_800L, repository.LastRuntimeStatus!.SystemUptimeSeconds);
+        Assert.Equal(500, repository.LastRuntimeStatus.ProcessWorkingSetMb);
+        Assert.Equal(3_650, repository.LastRuntimeStatus.ProcessHandleCount);
+    }
+
+    [Fact]
+    public void NormalizeResources_DropsNegativeAndAbsurdValuesWithoutRewritingThem()
+    {
+        Assert.Null(DeviceService.NormalizeResources(null));
+
+        // 全部非法：整体视为未上报。
+        Assert.Null(DeviceService.NormalizeResources(new DeviceResourceSnapshot(-1, -5, int.MaxValue)));
+
+        // 部分非法：只丢弃非法项，合法项原样保留；0 是合法值（刚开机）。
+        var partial = DeviceService.NormalizeResources(new DeviceResourceSnapshot(0, -1, 3_650));
+        Assert.NotNull(partial);
+        Assert.Equal(0L, partial!.SystemUptimeSeconds);
+        Assert.Null(partial.ProcessWorkingSetMb);
+        Assert.Equal(3_650, partial.ProcessHandleCount);
     }
 
     [Theory]
@@ -2164,7 +2212,11 @@ public sealed class DeviceServiceTests
                 nextCashierId,
                 nextCashierName,
                 cashierLoginAt,
-                request.AppVersion ?? LastRuntimeStatus?.AppVersion);
+                request.AppVersion ?? LastRuntimeStatus?.AppVersion,
+                // 与 SQL 的 COALESCE 保持一致：本次没上报的项保留上一次的值。
+                request.Resources?.SystemUptimeSeconds ?? LastRuntimeStatus?.SystemUptimeSeconds,
+                request.Resources?.ProcessWorkingSetMb ?? LastRuntimeStatus?.ProcessWorkingSetMb,
+                request.Resources?.ProcessHandleCount ?? LastRuntimeStatus?.ProcessHandleCount);
             return Task.FromResult(1);
         }
 
@@ -2202,5 +2254,8 @@ public sealed class DeviceServiceTests
         string? CashierId,
         string? CashierName,
         DateTime? CashierLoginAt,
-        string? AppVersion = null);
+        string? AppVersion = null,
+        long? SystemUptimeSeconds = null,
+        int? ProcessWorkingSetMb = null,
+        int? ProcessHandleCount = null);
 }

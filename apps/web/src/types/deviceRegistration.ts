@@ -21,6 +21,12 @@ export interface DeviceRegistrationItem {
   cashierLoginAt?: string | null
   /** 客户端程序版本（WPF 随心跳上报）；老版本客户端未上报时为空 */
   appVersion?: string | null
+  /** 收银机自开机起的秒数（WPF 随心跳上报）；快速启动下只有重启才清零，老版本客户端未上报时为空 */
+  systemUptimeSeconds?: number | null
+  /** WPF 进程工作集（MB，随心跳上报） */
+  processWorkingSetMb?: number | null
+  /** WPF 进程句柄数（随心跳上报） */
+  processHandleCount?: number | null
 }
 
 export interface DeviceRegistrationDetail extends DeviceRegistrationItem {}

@@ -1,7 +1,7 @@
 import { Tag, Tooltip } from 'antd'
 import type { TFunction } from 'i18next'
 
-import { getDeviceStatusTone, getRelativeTimeParts } from './deviceManagementLogic'
+import { getDeviceStatusTone, getRelativeTimeParts, getUptimeParts } from './deviceManagementLogic'
 
 export const EMPTY_VALUE = '--'
 
@@ -34,6 +34,12 @@ export function formatRelativeTime(value: string | null | undefined, t: TFunctio
     return parts.date.toLocaleDateString()
   }
   return t(`posAdmin.devices.mgmt.relative.${parts.unit}`, { count: parts.count })
+}
+
+/** 开机时长文案（N 分钟 / N 小时 / N 天）；未上报返回 null。 */
+export function formatUptime(seconds: number | null | undefined, t: TFunction) {
+  const parts = getUptimeParts(seconds)
+  return parts ? t(`posAdmin.devices.mgmt.uptime.${parts.unit}`, { count: parts.count }) : null
 }
 
 /** 相对时间 + Tooltip 完整时间；空值显示占位。 */

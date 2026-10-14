@@ -26,6 +26,12 @@
         },
         "heartbeatNever": "Never reported",
         "cashier": "Cashier {{name}}",
+        "uptime": {
+          "listLong": "Up {{count}}d",
+          "minutes": "{{count}} min",
+          "hours": "{{count}} h",
+          "days": "{{count}} d"
+        },
         "relative": {
           "justNow": "just now",
           "minutes": "{{count}} min ago",
@@ -46,6 +52,10 @@
           "sectionSettings": "Settings",
           "lastHeartbeat": "Last heartbeat",
           "cashierLoginAt": "Cashier signed in",
+          "uptime": "Uptime",
+          "clientMemory": "Client memory",
+          "clientHandles": "Client handles",
+          "restartHint": "Restart recommended",
           "readOnlyHint": "You have view-only access and cannot change device settings or status."
         },
         "appSummaryUnknown": "Unknown OS",
