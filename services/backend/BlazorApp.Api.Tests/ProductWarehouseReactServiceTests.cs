@@ -2205,6 +2205,51 @@ namespace BlazorApp.Api.Tests
             Assert.False(await _db.Queryable<DomesticProduct>().AnyAsync(x => x.ProductCode == productCode));
         }
 
+        [Theory]
+        [InlineData("200", false)]
+        [InlineData("202", true)]
+        public async Task CreateSingleProductAsync_货号唯一性按供应商判定_同供应商拒绝_其他供应商可创建(
+            string existingSupplierCode,
+            bool expectSuccess
+        )
+        {
+            await _db.Insertable(new Product
+            {
+                UUID = "uuid-existing-item",
+                ProductCode = "P-EXISTING-ITEM",
+                ItemNumber = "ITEM-SUPPLIER-SCOPE",
+                LocalSupplierCode = existingSupplierCode,
+                ProductName = "已有商品",
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            // 本路径创建的商品固定归属本地供应商 200。
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(
+                    new CreateSingleProductRequestDto
+                    {
+                        ProductCode = "P-NEW-ITEM",
+                        ItemNumber = "ITEM-SUPPLIER-SCOPE",
+                        Barcode = "BAR-SUPPLIER-SCOPE",
+                        ChineseName = "新建商品",
+                        OEMPrice = 2.99m,
+                        ImportPrice = 1m,
+                    },
+                    "创建人"
+                );
+
+            Assert.Equal(expectSuccess, result.Success);
+            if (!expectSuccess)
+            {
+                Assert.Contains("货号已存在", result.Message);
+            }
+            Assert.Equal(
+                expectSuccess,
+                await _db.Queryable<Product>().AnyAsync(x => x.ProductCode == "P-NEW-ITEM")
+            );
+        }
+
         [Fact]
         public async Task CreateSingleProductAsync_套装创建后统一分摊总部和门店子项成本()
         {

@@ -9,6 +9,9 @@ namespace BlazorApp.Api.Features.ProductWarehouse;
 /// </summary>
 internal static class WarehouseProductSingleCreationEntityMapper
 {
+    /// <summary>本路径创建的商品固定归属的本地供应商编码；货号唯一性按「供应商+货号」判定。</summary>
+    internal const string LocalSupplierCode = "200";
+
     internal static Product CreateProduct(
         string productCode,
         string itemNumber,
@@ -23,7 +26,7 @@ internal static class WarehouseProductSingleCreationEntityMapper
             ProductCode = productCode,
             ItemNumber = itemNumber,
             Barcode = barcode,
-            LocalSupplierCode = "200",
+            LocalSupplierCode = LocalSupplierCode,
             ProductName = request.ChineseName,
             EnglishName = request.EnglishName,
             PurchasePrice = request.ImportPrice,
