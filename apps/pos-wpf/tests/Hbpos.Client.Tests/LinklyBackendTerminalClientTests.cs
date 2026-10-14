@@ -4219,6 +4219,135 @@ public sealed class LinklyBackendTerminalClientTests
             request.RequestUri!.AbsolutePath.EndsWith("/transactions", StringComparison.Ordinal));
     }
 
+    // 业务要求：遗留的陈旧会话不能挡住下一单付款。服务端创建新交易会话时会原子地顶替它，
+    // 客户端预检不再把它当成需要接管的在途交易而中止本次付款。
+    private static string ActiveSessionJsonCreatedAt(string sessionId, string txnRef, DateTimeOffset createdAt, string operationType = "Transaction")
+    {
+        return $$"""
+            {
+              "success": true,
+              "data": {
+                "environment": "Sandbox",
+                "storeCode": "S01",
+                "deviceCode": "TERM-1",
+                "sessionId": "{{sessionId}}",
+                "status": "Pending",
+                "operationType": "{{operationType}}",
+                "txnRef": "{{txnRef}}",
+                "responseCode": null,
+                "responseText": null,
+                "displayText": "Processing",
+                "recoveryCount": 0,
+                "lastHttpStatus": 202,
+                "createdAt": "{{createdAt:O}}",
+                "notifications": []
+              }
+            }
+            """;
+    }
+
+    [Fact]
+    public async Task PurchaseAsync_skips_preflight_takeover_for_a_stale_active_transaction_session_and_starts_the_new_payment()
+    {
+        var takeoverCount = 0;
+        var posted = false;
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var handler = new StubHttpMessageHandler(
+            (request, cancellationToken) =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                if (path.EndsWith("/active", StringComparison.Ordinal))
+                {
+                    return Task.FromResult(JsonResponse(ActiveSessionJsonCreatedAt(
+                        "stale-session-1", "TXN-STALE", DateTimeOffset.UtcNow.AddDays(-12))));
+                }
+
+                if (path.EndsWith("/transactions", StringComparison.Ordinal) && request.Method == HttpMethod.Post)
+                {
+                    posted = true;
+                    return Task.FromResult(JsonResponse(PendingSessionJson("new-session-1", "TXN-NEW")));
+                }
+
+                if (path.Contains("/transactions/new-session-1", StringComparison.Ordinal))
+                {
+                    return Task.FromResult(JsonResponse(ApprovedSessionJson("new-session-1", "TXN-NEW")));
+                }
+
+                throw new InvalidOperationException($"Unexpected request {request.RequestUri}");
+            },
+            (request, cancellationToken) => ReadyHealthResponse());
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService(), TimeSpan.Zero, null, null, accessor);
+        using var scope = accessor.Begin(new LinklyPaymentAttemptContext(
+            Guid.Parse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+            (_, _, _, _) => Task.CompletedTask,
+            TakeOverActiveSessionAsync: (_, _, _) =>
+            {
+                takeoverCount++;
+                return Task.FromResult(LinklyActiveSessionTakeoverResult.Success);
+            }));
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        Assert.True(result.Approved);
+        Assert.True(posted);
+        Assert.Equal(0, takeoverCount);
+    }
+
+    [Theory]
+    [InlineData(2, "Transaction")]
+    [InlineData(9, "Transaction")]
+    [InlineData(60, "Settlement")]
+    public async Task PurchaseAsync_still_takes_over_a_fresh_or_non_transaction_active_session_before_starting_a_new_payment(
+        int ageMinutes,
+        string operationType)
+    {
+        var takeoverCount = 0;
+        var posted = false;
+        var accessor = new LinklyPaymentAttemptContextAccessor();
+        var handler = new StubHttpMessageHandler(
+            (request, cancellationToken) =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                if (path.EndsWith("/active", StringComparison.Ordinal))
+                {
+                    return Task.FromResult(JsonResponse(ActiveSessionJsonCreatedAt(
+                        "active-session-2", "TXN-PREVIOUS", DateTimeOffset.UtcNow.AddMinutes(-ageMinutes), operationType)));
+                }
+
+                if (path.EndsWith("/transactions", StringComparison.Ordinal) && request.Method == HttpMethod.Post)
+                {
+                    posted = true;
+                }
+
+                throw new InvalidOperationException($"Unexpected request {request.RequestUri}");
+            },
+            (request, cancellationToken) => ReadyHealthResponse());
+        var client = CreateClient(handler, new FakeLinklyTerminalDialogService(), TimeSpan.Zero, null, null, accessor);
+        using var scope = accessor.Begin(new LinklyPaymentAttemptContext(
+            Guid.Parse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+            (_, _, _, _) => Task.CompletedTask,
+            TakeOverActiveSessionAsync: (_, _, _) =>
+            {
+                takeoverCount++;
+                return Task.FromResult(LinklyActiveSessionTakeoverResult.Success);
+            }));
+
+        var result = await client.PurchaseAsync(10m, CreateSession(), CreateSettings());
+
+        // 新鲜的在途交易仍走原有的接管流程并中止本次付款；结算会话不属于“陈旧交易”，仍走结算会话原有的拦截路径。
+        Assert.False(result.Approved);
+        Assert.False(posted);
+        if (operationType == "Transaction")
+        {
+            Assert.Equal("linkly.backend.activeSessionRequiresRecovery", result.StatusKey);
+            Assert.Equal(1, takeoverCount);
+        }
+        else
+        {
+            Assert.Equal("linkly.backend.activeSettlementBlocksPayment", result.StatusKey);
+        }
+    }
+
     [Fact]
     public async Task PurchaseAsync_rejects_active_session_after_conflict_without_generic_backend_failure()
     {

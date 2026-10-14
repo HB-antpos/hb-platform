@@ -271,12 +271,14 @@ public class LinklyCloudBackendAsyncService(
                 request.TerminalId,
                 request.SelectionRevision,
                 cancellationToken);
+        // 业务要求：遗留的陈旧会话不能挡住下一单付款。陈旧（久无更新）的占用在这里放行，
+        // 由下面创建新交易会话时的原子闸门顶替；仍然新鲜的占用照旧 409，交给客户端接管流程。
         var activeSession = await GetActiveSessionUnlessSettlementTimedOutAsync(
             environment,
             normalizedStoreCode,
             normalizedDeviceCode,
             cancellationToken);
-        if (activeSession is not null)
+        if (activeSession is not null && !IsStaleSupersedableSession(activeSession))
         {
             throw new LinklyCloudBackendActiveTransactionException(activeSession.SessionId);
         }
@@ -288,7 +290,7 @@ public class LinklyCloudBackendAsyncService(
                 normalizedStoreCode,
                 terminalContext.Terminal.TerminalId,
                 cancellationToken);
-            if (activeTerminalSession is not null)
+            if (activeTerminalSession is not null && !IsStaleSupersedableSession(activeTerminalSession))
             {
                 throw new LinklyCloudBackendActiveTransactionException(activeTerminalSession.SessionId);
             }
@@ -1589,12 +1591,15 @@ public class LinklyCloudBackendAsyncService(
                 return session;
             }
 
+            // 新交易会话只被“新鲜”的占用挡住；陈旧占用本来就会被原子闸门顶替，这里拒绝的原因就是别的（如 TxnRef 碰撞），
+            // 不能再把它误报成“有未完成交易”。结算等其它会话保持原闸门。
+            var supersedesStale = string.Equals(operationType, OperationTypeTransaction, StringComparison.OrdinalIgnoreCase);
             var resumable = await repository.GetResumableSessionAsync(
                 environment,
                 storeCode,
                 deviceCode,
                 cancellationToken);
-            if (resumable is not null)
+            if (resumable is not null && !(supersedesStale && IsStaleSupersedableSession(resumable)))
             {
                 throw new LinklyCloudBackendActiveTransactionException(resumable.SessionId);
             }
@@ -1606,7 +1611,7 @@ public class LinklyCloudBackendAsyncService(
                     storeCode,
                     terminalContext.Terminal.TerminalId,
                     cancellationToken);
-                if (blockingTerminal is not null)
+                if (blockingTerminal is not null && !(supersedesStale && IsStaleSupersedableSession(blockingTerminal)))
                 {
                     throw new LinklyCloudBackendActiveTransactionException(blockingTerminal.SessionId);
                 }
@@ -1874,6 +1879,18 @@ public class LinklyCloudBackendAsyncService(
             session.OperationSuccess is null &&
             string.Equals(session.Status, StatusPending, StringComparison.OrdinalIgnoreCase) &&
             DateTimeOffset.UtcNow - session.UpdatedAt >= LinklyTimeoutConstants.SettlementCallbackTimeout;
+    }
+
+    /// <summary>
+    /// 遗留会话久无更新（超过 <see cref="LinklyTimeoutConstants.StaleSessionSupersedeAfter"/>）：它不可能还有人在刷卡，
+    /// 不能再挡住新的交易付款。创建新交易会话时由仓储在同一个原子事务里顶替它
+    /// （<see cref="SqlSugarLinklyCloudBackendAsyncRepository.TryCreateSessionSql"/>：仍活动的收口为 SupervisorResolved，
+    /// 已终态但从未确认的只补确认时间），之后迟到的 Linkly 结果走既有 LateFinal* 记录与告警。
+    /// 判定口径必须与 SQL 的 @SupersedeBefore 和内存仓储一致。
+    /// </summary>
+    private static bool IsStaleSupersedableSession(LinklyCloudBackendSessionRecord session)
+    {
+        return DateTimeOffset.UtcNow - session.UpdatedAt >= LinklyTimeoutConstants.StaleSessionSupersedeAfter;
     }
 
     // 以下两个查询给“新付款/新结算前的占用检查”用：已超时的结算先收口再判断，避免它永久占住 POS 和终端。
@@ -6100,8 +6117,17 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
     {
         lock (_gate)
         {
+            // 与 SQL（TryCreateSessionSql）同口径：只有“交易”会话创建才顶替陈旧占用，结算等保持原闸门；
+            // 陈旧 = UpdatedAt 早于新会话时刻往前推 StaleSessionSupersedeAfter。
+            var supersedes = string.IsNullOrWhiteSpace(session.OperationType) ||
+                string.Equals(session.OperationType, "Transaction", StringComparison.OrdinalIgnoreCase);
+            var staleBefore = session.UpdatedAt - LinklyTimeoutConstants.StaleSessionSupersedeAfter;
+            bool IsSupersededStale(LinklyCloudBackendSessionRecord existing) =>
+                supersedes && existing.UpdatedAt < staleBefore;
+
             if (_sessions.Values.Any(existing =>
                 existing.IsActive &&
+                !IsSupersededStale(existing) &&
                 SameTerminal(existing, session.Environment, session.StoreCode, session.DeviceCode)))
             {
                 return Task.FromResult(false);
@@ -6109,6 +6135,7 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
 
             if (session.TerminalId.HasValue && _sessions.Values.Any(existing =>
                 existing.IsActive &&
+                !IsSupersededStale(existing) &&
                 existing.TerminalId == session.TerminalId &&
                 string.Equals(existing.Environment, session.Environment, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(existing.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase)))
@@ -6123,6 +6150,31 @@ public sealed class InMemoryLinklyCloudBackendAsyncRepository : ILinklyCloudBack
                 string.Equals(existing.TxnRef, session.TxnRef, StringComparison.OrdinalIgnoreCase)))
             {
                 return Task.FromResult(false);
+            }
+
+            if (supersedes)
+            {
+                // 其它校验都通过后才顶替：仍活动的非终态收口为 SupervisorResolved，已终态的保留 Status 与结果证据，
+                // 只补确认时间；不改 UpdatedAt（与 SQL 一致，孤儿对账按它判断年龄）。
+                foreach (var stale in _sessions.Values
+                    .Where(existing =>
+                        existing.UpdatedAt < staleBefore &&
+                        string.Equals(existing.Environment, session.Environment, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(existing.StoreCode, session.StoreCode, StringComparison.OrdinalIgnoreCase) &&
+                        (string.Equals(existing.DeviceCode, session.DeviceCode, StringComparison.OrdinalIgnoreCase) ||
+                            (session.TerminalId.HasValue && existing.TerminalId == session.TerminalId)) &&
+                        (existing.IsActive ||
+                            (IsFinalForClientRecovery(existing) && existing.ClientAcknowledgedAt is null)))
+                    .ToList())
+                {
+                    if (!IsFinalForClientRecovery(stale))
+                    {
+                        stale.Status = StatusSupervisorResolved;
+                    }
+
+                    stale.IsActive = false;
+                    stale.ClientAcknowledgedAt ??= session.UpdatedAt;
+                }
             }
 
             var created = Clone(session);
@@ -6569,6 +6621,11 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
         DECLARE @StoredTerminalId UNIQUEIDENTIFIER = NULL;
         DECLARE @StoredSelectionRevision BIGINT = NULL;
 
+        -- 业务要求：遗留的陈旧会话（UpdatedAt 早于 @SupersedeBefore）不能挡住下一单付款。
+        -- 只有“交易”会话创建才顶替陈旧占用（结算等其它会话保持原闸门）；仍然新鲜的占用照旧挡住。
+        -- @SupersedeBefore 为 NULL 时（旧调用方未传）比较结果为未知，等同于没有陈旧占用，保持原行为。
+        DECLARE @CanSupersede BIT = CASE WHEN ISNULL(@OperationType, N'Transaction') = N'Transaction' THEN 1 ELSE 0 END;
+
         -- 固定锁序：会话（设备、实体终端、TxnRef）-> 终端 -> 选择 -> 模式。
         IF EXISTS (
             SELECT TOP (1) 1
@@ -6582,7 +6639,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                       [Status] IN (N'Completed', N'Cancelled', N'Failed', N'NotSubmitted')
                       AND [ClientAcknowledgedAt] IS NULL
                   )
-              ))
+              )
+              AND NOT (@CanSupersede = 1 AND [UpdatedAt] < @SupersedeBefore))
             SET @CanCreate = 0;
 
         IF @CanCreate = 1 AND @TerminalId IS NOT NULL AND EXISTS (
@@ -6597,7 +6655,8 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
                       [Status] IN (N'Completed', N'Cancelled', N'Failed', N'NotSubmitted')
                       AND [ClientAcknowledgedAt] IS NULL
                   )
-              ))
+              )
+              AND NOT (@CanSupersede = 1 AND [UpdatedAt] < @SupersedeBefore))
             SET @CanCreate = 0;
 
         IF @CanCreate = 1 AND @TxnRef IS NOT NULL AND EXISTS (
@@ -6652,6 +6711,32 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
             (@TerminalId IS NULL AND ISNULL(@Mode, N'Legacy') = N'Active')
             OR (@TerminalId IS NOT NULL AND ISNULL(@Mode, N'Legacy') <> N'Active'))
             SET @CanCreate = 0;
+
+        -- 其它校验都通过、确定要插入新交易会话时，才顶替陈旧占用（同一事务内先收口再插入，不会先误伤后又创建失败）：
+        --  · 仍活动的：非终态收口为 SupervisorResolved（既有终态，之后迟到的 Linkly 结果只写 LateFinal* 并告警），IsActive 清零；
+        --  · 已终态但客户端从未确认的：Status 与结果证据原样保留（孤儿扣款对账不受影响），只补确认时间。
+        -- 不改 UpdatedAt：孤儿对账按它判断年龄，顶替不能让“已批准未回链订单”的会话重新变新。
+        IF @CanCreate = 1 AND @CanSupersede = 1
+        BEGIN
+            UPDATE [dbo].[POSM_LinklyCloudBackendSession]
+            SET [Status] = CASE
+                    WHEN [Status] IN (N'Completed', N'Cancelled', N'Failed', N'NotSubmitted') THEN [Status]
+                    ELSE N'SupervisorResolved'
+                END,
+                [IsActive] = 0,
+                [ClientAcknowledgedAt] = COALESCE([ClientAcknowledgedAt], @UpdatedAt)
+            WHERE [Environment] = @Environment
+              AND [StoreCode] = @StoreCode
+              AND ([DeviceCode] = @DeviceCode OR (@TerminalId IS NOT NULL AND [TerminalId] = @TerminalId))
+              AND (
+                  [IsActive] = 1
+                  OR (
+                      [Status] IN (N'Completed', N'Cancelled', N'Failed', N'NotSubmitted')
+                      AND [ClientAcknowledgedAt] IS NULL
+                  )
+              )
+              AND [UpdatedAt] < @SupersedeBefore;
+        END;
 
         IF @CanCreate = 1
         BEGIN
@@ -6801,9 +6886,16 @@ public sealed class SqlSugarLinklyCloudBackendAsyncRepository(
     {
         try
         {
+            // 陈旧占用的判定线：新会话创建时刻往前推 StaleSessionSupersedeAfter，UpdatedAt 早于它的遗留会话由闸门顶替。
+            // 与服务层 IsStaleSupersedableSession、内存仓储同口径。
+            var parameters = ToSessionParameters(session)
+                .Append(new SugarParameter(
+                    "@SupersedeBefore",
+                    (session.UpdatedAt - LinklyTimeoutConstants.StaleSessionSupersedeAfter).UtcDateTime))
+                .ToArray();
             var affected = await dbContext.PosmDb.Ado.ExecuteCommandAsync(
                 TryCreateSessionSql,
-                ToSessionParameters(session));
+                parameters);
             return affected > 0;
         }
         catch (Exception ex) when (IsUniqueConstraintViolation(ex))

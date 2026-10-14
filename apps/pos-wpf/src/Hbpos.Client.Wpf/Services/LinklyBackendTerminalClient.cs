@@ -830,6 +830,14 @@ public sealed class LinklyBackendTerminalClient(
             }
 
             var preflightActive = await GetActiveSessionWithHttpTimeoutAsync(settings, cancellationToken);
+            if (preflightActive is not null && IsStaleActiveTransactionSession(preflightActive))
+            {
+                // 业务要求：遗留的陈旧会话不能挡住下一单付款。服务端创建新交易会话时会原子地顶替它
+                // （收口为 SupervisorResolved，之后迟到的 Linkly 结果只记入 LateFinal*），这里不再强制接管并中止本次付款。
+                Log($"preflight active session is stale; the server will supersede it sessionId={preflightActive.SessionId}");
+                preflightActive = null;
+            }
+
             if (preflightActive is not null)
             {
                 // 发现活动中的 Linkly session 时先接管（查询/落库/ack），成功后才允许新扣款。
@@ -2500,6 +2508,19 @@ public sealed class LinklyBackendTerminalClient(
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(LinklyTimeoutPolicy.HttpTimeout);
         return await GetActiveSessionAsync(settings, timeoutCts.Token);
+    }
+
+    /// <summary>
+    /// 遗留的交易会话已经陈旧：创建时间早于 <see cref="LinklyTimeoutConstants.StaleSessionSupersedeAfter"/>，仍被当作活动会话。
+    /// 一条真实在途的交易最长约 180 秒业务等待 + 240 秒 HTTP 超时，不可能这么久；服务端会在创建新交易会话时顶替它。
+    /// 响应里没有 UpdatedAt，只能看创建时间；缺失（旧数据）或不是交易会话时保守地返回 false，仍走原有的接管流程。
+    /// 即使这里误判，服务端对仍然新鲜的占用会返回 409，随后同样走原有的接管流程，不会因此多扣款。
+    /// </summary>
+    private bool IsStaleActiveTransactionSession(LinklyCloudBackendSessionResponse session)
+    {
+        return string.Equals(session.OperationType, "Transaction", StringComparison.OrdinalIgnoreCase) &&
+            session.CreatedAt is { } createdAt &&
+            _timeProvider.GetUtcNow() - createdAt >= LinklyTimeoutConstants.StaleSessionSupersedeAfter;
     }
 
     private async Task<LinklyCloudBackendSessionResponse?> GetResumableSessionWithHttpTimeoutAsync(
