@@ -1919,6 +1919,292 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("仓库员C2", warehouseProduct.UpdatedBy);
         }
 
+        private IConfiguration BuildCreateSingleConfiguration() =>
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["ConnectionStrings:DefaultConnection"] = _sqliteConnection.ConnectionString,
+                    }
+                )
+                .Build();
+
+        [Fact]
+        public async Task CreateSingleProductAsync_前端按storeCode发送分店价格_写入真实分店代码()
+        {
+            const string productCode = "P-CREATE-STORE-CODE";
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreAsync("S02", isActive: true, isDeleted: false);
+            // 与 Web 新建商品弹窗发送的 JSON 完全一致（camelCase、字段名 storeCode）：
+            // 此前后端只认整数 StoreId，storeCode 被静默忽略，所有行都落成分店 "0"。
+            var request = System.Text.Json.JsonSerializer.Deserialize<CreateSingleProductRequestDto>(
+                """
+                {
+                  "productCode": "P-CREATE-STORE-CODE",
+                  "itemNumber": "ITEM-CREATE-STORE-CODE",
+                  "barcode": "BAR-CREATE-STORE-CODE",
+                  "chineseName": "分店代码商品",
+                  "oemPrice": 2.99,
+                  "importPrice": 1,
+                  "storePrices": [
+                    { "storeCode": "S01", "purchasePrice": 1, "retailPrice": 2.99, "discountRate": 0, "autoPricing": false, "isSpecialProduct": false, "isActive": true },
+                    { "storeCode": "S02", "purchasePrice": 1, "retailPrice": 2.99, "discountRate": 0, "autoPricing": false, "isSpecialProduct": false, "isActive": true }
+                  ]
+                }
+                """,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+            )!;
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(request, "创建人");
+
+            Assert.True(result.Success, result.Message);
+            var rows = await _db.Queryable<StoreRetailPrice>()
+                .Where(x => x.ProductCode == productCode && !x.IsDeleted)
+                .OrderBy(x => x.StoreCode)
+                .ToListAsync();
+            Assert.Equal(new[] { "S01", "S02" }, rows.Select(x => x.StoreCode));
+            Assert.Equal(
+                new[] { "S01" + productCode, "S02" + productCode },
+                rows.Select(x => x.StoreProductCode)
+            );
+            Assert.All(rows, row =>
+            {
+                Assert.Equal(1m, row.PurchasePrice);
+                Assert.Equal(2.99m, row.StoreRetailPriceValue);
+            });
+        }
+
+        [Fact]
+        public async Task CreateSingleProductAsync_兼容旧StoreId字段_转成分店代码字符串()
+        {
+            const string productCode = "P-CREATE-LEGACY-STORE-ID";
+            await SeedStoreAsync("1001", isActive: true, isDeleted: false);
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(
+                    new CreateSingleProductRequestDto
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-CREATE-LEGACY-STORE-ID",
+                        Barcode = "BAR-CREATE-LEGACY-STORE-ID",
+                        ChineseName = "旧StoreId商品",
+                        OEMPrice = 2.99m,
+                        ImportPrice = 1m,
+                        StorePrices = new List<StorePriceDto>
+                        {
+                            new() { StoreId = 1001, PurchasePrice = 1m, RetailPrice = 2.99m },
+                        },
+                    },
+                    "创建人"
+                );
+
+            Assert.True(result.Success, result.Message);
+            var row = await _db.Queryable<StoreRetailPrice>()
+                .SingleAsync(x => x.ProductCode == productCode && !x.IsDeleted);
+            Assert.Equal("1001", row.StoreCode);
+            Assert.Equal("1001" + productCode, row.StoreProductCode);
+        }
+
+        [Theory]
+        [InlineData(null, 0)]
+        [InlineData("", 0)]
+        [InlineData("   ", 0)]
+        [InlineData("0", 0)]
+        public async Task CreateSingleProductAsync_分店价格缺少有效分店代码_拒绝且不写入任何数据(
+            string? storeCode,
+            int storeId
+        )
+        {
+            const string productCode = "P-CREATE-NO-STORE-CODE";
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(
+                    new CreateSingleProductRequestDto
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-CREATE-NO-STORE-CODE",
+                        Barcode = "BAR-CREATE-NO-STORE-CODE",
+                        ChineseName = "缺分店代码商品",
+                        OEMPrice = 2.99m,
+                        ImportPrice = 1m,
+                        StorePrices = new List<StorePriceDto>
+                        {
+                            new()
+                            {
+                                StoreCode = storeCode,
+                                StoreId = storeId,
+                                PurchasePrice = 1m,
+                                RetailPrice = 2.99m,
+                            },
+                        },
+                    },
+                    "创建人"
+                );
+
+            Assert.False(result.Success);
+            Assert.Contains("分店代码", result.Message);
+            Assert.False(await _db.Queryable<Product>().AnyAsync(x => x.ProductCode == productCode));
+            Assert.False(
+                await _db.Queryable<StoreRetailPrice>().AnyAsync(x => x.ProductCode == productCode)
+            );
+        }
+
+        [Fact]
+        public async Task CreateSingleProductAsync_分店价格里同一分店重复_拒绝且不写入任何数据()
+        {
+            const string productCode = "P-CREATE-DUP-STORE-CODE";
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(
+                    new CreateSingleProductRequestDto
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-CREATE-DUP-STORE-CODE",
+                        Barcode = "BAR-CREATE-DUP-STORE-CODE",
+                        ChineseName = "重复分店商品",
+                        OEMPrice = 2.99m,
+                        ImportPrice = 1m,
+                        StorePrices = new List<StorePriceDto>
+                        {
+                            new() { StoreCode = "S01", PurchasePrice = 1m, RetailPrice = 2.99m },
+                            new() { StoreCode = " s01 ", PurchasePrice = 1m, RetailPrice = 3.99m },
+                        },
+                    },
+                    "创建人"
+                );
+
+            Assert.False(result.Success);
+            Assert.Contains("重复", result.Message);
+            Assert.False(await _db.Queryable<Product>().AnyAsync(x => x.ProductCode == productCode));
+        }
+
+        [Fact]
+        public async Task CreateSingleProductAsync_前端发送规格装箱数中包数_写入国内商品和仓库商品()
+        {
+            const string productCode = "P-CREATE-PACKAGING";
+            // 与 Web 新建商品弹窗发送的 JSON 一致，包含目前没有对应存储列的 packingSize/material/remarks，
+            // 它们必须仍能被正常反序列化（忽略即可），不能因此让创建失败。
+            var request = System.Text.Json.JsonSerializer.Deserialize<CreateSingleProductRequestDto>(
+                """
+                {
+                  "productCode": "P-CREATE-PACKAGING",
+                  "itemNumber": "ITEM-CREATE-PACKAGING",
+                  "barcode": "BAR-CREATE-PACKAGING",
+                  "chineseName": "装箱商品",
+                  "oemPrice": 2.99,
+                  "importPrice": 1,
+                  "productSpecification": "  30cm 蓝色  ",
+                  "packingQuantity": 24,
+                  "middlePackQuantity": 6,
+                  "packingSize": "50x40x30",
+                  "material": "塑料",
+                  "remarks": "备注",
+                  "categoryGuid": "cat-guid"
+                }
+                """,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+            )!;
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(request, "创建人");
+
+            Assert.True(result.Success, result.Message);
+            var domestic = await _db.Queryable<DomesticProduct>().SingleAsync(x => x.ProductCode == productCode);
+            Assert.Equal("30cm 蓝色", domestic.ProductSpecification);
+            Assert.Equal(24, domestic.PackingQuantity);
+            Assert.Equal(6, domestic.MiddlePackQuantity);
+            var warehouse = await _db.Queryable<WarehouseProduct>().SingleAsync(x => x.ProductCode == productCode);
+            Assert.Equal(24, warehouse.PackingQuantity);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task CreateSingleProductAsync_已有国内和仓库商品时_未传的装箱字段保留_传了的才覆盖(
+            bool provideFields
+        )
+        {
+            const string productCode = "P-CREATE-PACKAGING-UPDATE";
+            await _db.Insertable(new DomesticProduct
+            {
+                ProductCode = productCode,
+                ProductSpecification = "旧规格",
+                PackingQuantity = 12,
+                MiddlePackQuantity = 3,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new WarehouseProduct
+            {
+                ProductCode = productCode,
+                PackingQuantity = 12,
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(
+                    new CreateSingleProductRequestDto
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-CREATE-PACKAGING-UPDATE",
+                        Barcode = "BAR-CREATE-PACKAGING-UPDATE",
+                        ChineseName = "已有商品补建",
+                        OEMPrice = 2.99m,
+                        ImportPrice = 1m,
+                        ProductSpecification = provideFields ? "新规格" : null,
+                        PackingQuantity = provideFields ? 48 : null,
+                        MiddlePackQuantity = provideFields ? 8 : null,
+                    },
+                    "创建人"
+                );
+
+            Assert.True(result.Success, result.Message);
+            var domestic = await _db.Queryable<DomesticProduct>().SingleAsync(x => x.ProductCode == productCode);
+            var warehouse = await _db.Queryable<WarehouseProduct>().SingleAsync(x => x.ProductCode == productCode);
+            Assert.Equal(provideFields ? "新规格" : "旧规格", domestic.ProductSpecification);
+            Assert.Equal(provideFields ? 48 : 12, domestic.PackingQuantity);
+            Assert.Equal(provideFields ? 8 : 3, domestic.MiddlePackQuantity);
+            Assert.Equal(provideFields ? 48 : 12, warehouse.PackingQuantity);
+        }
+
+        [Theory]
+        [InlineData(0, null, "装箱数")]
+        [InlineData(-1, null, "装箱数")]
+        [InlineData(null, 0, "中包数量")]
+        [InlineData(null, -5, "中包数量")]
+        public async Task CreateSingleProductAsync_装箱数或中包数小于1_拒绝且不写入任何数据(
+            int? packingQuantity,
+            int? middlePackQuantity,
+            string expectedMessagePart
+        )
+        {
+            const string productCode = "P-CREATE-BAD-PACKAGING";
+
+            var result = await CreateService(configuration: BuildCreateSingleConfiguration())
+                .CreateSingleProductAsync(
+                    new CreateSingleProductRequestDto
+                    {
+                        ProductCode = productCode,
+                        ItemNumber = "ITEM-CREATE-BAD-PACKAGING",
+                        Barcode = "BAR-CREATE-BAD-PACKAGING",
+                        ChineseName = "非法装箱商品",
+                        OEMPrice = 2.99m,
+                        ImportPrice = 1m,
+                        PackingQuantity = packingQuantity,
+                        MiddlePackQuantity = middlePackQuantity,
+                    },
+                    "创建人"
+                );
+
+            Assert.False(result.Success);
+            Assert.Contains(expectedMessagePart, result.Message);
+            Assert.False(await _db.Queryable<Product>().AnyAsync(x => x.ProductCode == productCode));
+            Assert.False(await _db.Queryable<DomesticProduct>().AnyAsync(x => x.ProductCode == productCode));
+        }
+
         [Fact]
         public async Task CreateSingleProductAsync_套装创建后统一分摊总部和门店子项成本()
         {

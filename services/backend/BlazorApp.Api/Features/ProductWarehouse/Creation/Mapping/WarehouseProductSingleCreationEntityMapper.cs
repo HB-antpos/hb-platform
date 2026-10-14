@@ -58,6 +58,9 @@ internal static class WarehouseProductSingleCreationEntityMapper
             OEMPrice = request.OEMPrice,
             ImportPrice = request.ImportPrice,
             UnitVolume = request.Volume,
+            ProductSpecification = NormalizeSpecification(request.ProductSpecification),
+            PackingQuantity = request.PackingQuantity,
+            MiddlePackQuantity = request.MiddlePackQuantity,
             ProductType = (int)request.ProductType,
             ProductImage = imageUrl,
             IsActive = true,
@@ -83,6 +86,20 @@ internal static class WarehouseProductSingleCreationEntityMapper
         domesticProduct.OEMPrice = request.OEMPrice;
         domesticProduct.ImportPrice = request.ImportPrice;
         domesticProduct.UnitVolume = request.Volume;
+        // 规格/装箱数/中包数量是可选项：请求没传就保留库里已有值，不能当作清空。
+        var specification = NormalizeSpecification(request.ProductSpecification);
+        if (specification != null)
+        {
+            domesticProduct.ProductSpecification = specification;
+        }
+        if (request.PackingQuantity.HasValue)
+        {
+            domesticProduct.PackingQuantity = request.PackingQuantity;
+        }
+        if (request.MiddlePackQuantity.HasValue)
+        {
+            domesticProduct.MiddlePackQuantity = request.MiddlePackQuantity;
+        }
         domesticProduct.ProductType = (int)request.ProductType;
         domesticProduct.UpdatedAt = now;
         domesticProduct.UpdatedBy = updatedBy;
@@ -101,6 +118,7 @@ internal static class WarehouseProductSingleCreationEntityMapper
             OEMPrice = request.OEMPrice,
             ImportPrice = request.ImportPrice,
             Volume = request.Volume,
+            PackingQuantity = request.PackingQuantity,
             StockQuantity = 0,
             IsActive = request.IsActive,
             IsDeleted = false,
@@ -121,6 +139,10 @@ internal static class WarehouseProductSingleCreationEntityMapper
         warehouseProduct.OEMPrice = request.OEMPrice;
         warehouseProduct.ImportPrice = request.ImportPrice;
         warehouseProduct.Volume = request.Volume;
+        if (request.PackingQuantity.HasValue)
+        {
+            warehouseProduct.PackingQuantity = request.PackingQuantity;
+        }
         warehouseProduct.IsActive = request.IsActive;
         warehouseProduct.UpdatedAt = now;
         warehouseProduct.UpdatedBy = updatedBy;
@@ -231,12 +253,17 @@ internal static class WarehouseProductSingleCreationEntityMapper
         string productCode,
         StorePriceDto storePrice,
         DateTime now
-    ) =>
-        new()
+    )
+    {
+        // 入口已用 ValidateStorePrices 拦截无效分店；这里再兜底，宁可抛错也不写 "0" 号分店。
+        var storeCode =
+            WarehouseProductSingleCreationValidator.ResolveStoreCode(storePrice)
+            ?? throw new InvalidOperationException("分店价格缺少有效的分店代码");
+        return new()
         {
             ProductCode = productCode,
-            StoreCode = storePrice.StoreId.ToString(),
-            StoreProductCode = storePrice.StoreId.ToString() + productCode,
+            StoreCode = storeCode,
+            StoreProductCode = storeCode + productCode,
             SupplierCode = "200",
             PurchasePrice = storePrice.PurchasePrice,
             StoreRetailPriceValue = storePrice.RetailPrice,
@@ -248,6 +275,7 @@ internal static class WarehouseProductSingleCreationEntityMapper
             CreatedAt = now,
             UpdatedAt = now,
         };
+    }
 
     internal static StoreRetailPrice CreateDefaultStorePrice(
         string productCode,
@@ -272,6 +300,10 @@ internal static class WarehouseProductSingleCreationEntityMapper
             CreatedAt = now,
             UpdatedAt = now,
         };
+
+    /// <summary>规格去掉首尾空白，全空白视为未填写。</summary>
+    private static string? NormalizeSpecification(string? specification) =>
+        string.IsNullOrWhiteSpace(specification) ? null : specification.Trim();
 
     private static bool IsCostDerivedSetType(int setType) => setType is 1 or 2;
 }

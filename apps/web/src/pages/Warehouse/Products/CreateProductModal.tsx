@@ -711,12 +711,12 @@ export default function CreateProductModal({ open, suppliers, onCancel, onSucces
               </Col>
               <Col span={8}>
                 <Form.Item name="packingQuantity" label={t('warehouse.packingQuantity')}>
-                  <InputNumber min={0} precision={0} style={{ width: '100%' }} />
+                  <InputNumber min={1} precision={0} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col span={8}>
                 <Form.Item name="middlePackQuantity" label={t('warehouse.middlePackQuantity')}>
-                  <InputNumber min={0} precision={0} style={{ width: '100%' }} />
+                  <InputNumber min={1} precision={0} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col span={8}>

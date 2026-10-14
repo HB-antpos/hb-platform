@@ -197,6 +197,15 @@ namespace BlazorApp.Shared.DTOs
     /// </summary>
     public class StorePriceDto
     {
+        /// <summary>
+        /// 分店代码（如 "1001"）。Web 新建商品弹窗发送的就是这个字段，优先于 StoreId。
+        /// </summary>
+        public string? StoreCode { get; set; }
+
+        /// <summary>
+        /// 旧字段，仅为兼容保留：未传 StoreCode 时才会用它的字符串形式。
+        /// 缺省值是 0，不是有效分店，创建时会被拒绝。
+        /// </summary>
         public int StoreId { get; set; }
         public string? SupplierCode { get; set; }
         public decimal? PurchasePrice { get; set; }
@@ -223,6 +232,12 @@ namespace BlazorApp.Shared.DTOs
         public decimal OEMPrice { get; set; }
         public decimal ImportPrice { get; set; }
         public decimal? Volume { get; set; }
+        /// <summary>规格，写入国内商品 ProductSpecification</summary>
+        public string? ProductSpecification { get; set; }
+        /// <summary>装箱数，同时写入国内商品和仓库商品；未传则不写</summary>
+        public int? PackingQuantity { get; set; }
+        /// <summary>中包数量，写入国内商品；未传则不写</summary>
+        public int? MiddlePackQuantity { get; set; }
         public int? CategoryId { get; set; }
         public bool IsLocalSupplier { get; set; }
         public int? SupplierId { get; set; }

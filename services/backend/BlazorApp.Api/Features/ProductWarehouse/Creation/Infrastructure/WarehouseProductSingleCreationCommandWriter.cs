@@ -78,6 +78,30 @@ internal sealed class WarehouseProductSingleCreationCommandWriter : ProductWareh
                 return response;
             }
 
+            // 分店价格必须带有效且不重复的分店代码，否则在写库前直接拒绝。
+            var storePriceValidationError =
+                WarehouseProductSingleCreationValidator.ValidateStorePrices(request);
+            if (storePriceValidationError != null)
+            {
+                WarehouseProductSingleCreationResultAssembler.Reject(
+                    response,
+                    storePriceValidationError
+                );
+                return response;
+            }
+
+            // 装箱数、中包数量传了就必须 ≥ 1，否则在写库前直接拒绝。
+            var packagingValidationError =
+                WarehouseProductSingleCreationValidator.ValidatePackaging(request);
+            if (packagingValidationError != null)
+            {
+                WarehouseProductSingleCreationResultAssembler.Reject(
+                    response,
+                    packagingValidationError
+                );
+                return response;
+            }
+
             // 1.1 规范化图片地址：如果为空或不是 http(s)，按货号规则生成
             var finalImageUrl = ProductImageUrlHelper.EnsureImageUrl(
                 request.ImageUrl,
@@ -276,6 +300,9 @@ internal sealed class WarehouseProductSingleCreationCommandWriter : ProductWareh
                         dp.OEMPrice,
                         dp.ImportPrice,
                         dp.UnitVolume,
+                        dp.ProductSpecification,
+                        dp.PackingQuantity,
+                        dp.MiddlePackQuantity,
                         dp.ProductType,
                         dp.UpdatedAt,
                         dp.UpdatedBy,
@@ -310,6 +337,7 @@ internal sealed class WarehouseProductSingleCreationCommandWriter : ProductWareh
                         wp.OEMPrice,
                         wp.ImportPrice,
                         wp.Volume,
+                        wp.PackingQuantity,
                         wp.IsActive,
                         wp.UpdatedAt,
                         wp.UpdatedBy,
