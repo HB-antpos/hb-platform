@@ -2339,6 +2339,10 @@ public sealed class CardPaymentRecoveryService(
         QueryFailed
     }
 
+    // 终端“没有这笔交易 / 最近一笔是别的”要被当作无结论，记录至少要老到终端不可能还在处理它：
+    // 刷卡超时默认只有几十秒，30 分钟远大于任何合理的终端处理耗时。
+    private static readonly TimeSpan LiveCheckNotMatchedMinAttemptAge = TimeSpan.FromMinutes(30);
+
     private sealed record LiveResolutionCheck(
         LiveResolutionVerdict Verdict,
         LinklyCloudBackendSessionResponse? Status = null);
@@ -2495,6 +2499,20 @@ public sealed class CardPaymentRecoveryService(
         // 无法证明没有迟到的结果，失败关闭。
         if (authorization.ResultUnknown)
         {
+            // 例外：EFT-Client 已正常回答，只是回包不是被查的这笔（生产实测：10-02 刷卡机离线期间遗留的记录，
+            // 12 天后查询回 JH / NOT FOUND、空 TxnRef），而且这条记录早已过了终端处理一笔交易的最长耗时。
+            // 此时与上面“终端最近一笔是别的交易”同口径：既不证明也不否定，由主管凭银行证据结案；
+            // 否则这类记录永远无法结案，会一直留在异常中心的待处理队列里。
+            // 刚发起的记录仍失败关闭，避免终端还在处理时被提前结案而留下孤儿扣款。
+            if (string.Equals(
+                    authorization.StatusKey,
+                    LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey,
+                    StringComparison.Ordinal) &&
+                DateTimeOffset.UtcNow - attempt.CreatedAt >= LiveCheckNotMatchedMinAttemptAge)
+            {
+                return new LiveResolutionCheck(LiveResolutionVerdict.Inconclusive);
+            }
+
             return new LiveResolutionCheck(LiveResolutionVerdict.QueryFailed);
         }
 

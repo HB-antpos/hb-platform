@@ -488,6 +488,8 @@ public sealed class LinklyTerminalClientTests
         Assert.False(result.Approved);
         Assert.True(result.ResultUnknown);
         Assert.Contains("offline", result.Message, StringComparison.OrdinalIgnoreCase);
+        // 刷卡机离线是“没回答”，不能被当成“回答了别的交易”：主管结案的实时核验必须继续失败关闭。
+        Assert.Null(result.StatusKey);
     }
 
     [Fact]
@@ -1365,6 +1367,8 @@ public sealed class LinklyTerminalClientTests
 
         Assert.False(result.Approved);
         Assert.True(result.ResultUnknown);
+        // 查询本身没成功（Success=false）：不能打“终端回答了别的交易”标记，主管结案仍须失败关闭。
+        Assert.Null(result.StatusKey);
     }
 
     [Fact]
@@ -1405,6 +1409,52 @@ public sealed class LinklyTerminalClientTests
 
         Assert.False(result.Approved);
         Assert.True(result.ResultUnknown);
+        // EFT-Client 正常回答了，只是最近一笔不是被查的这笔：打专用标记，主管结案的实时核验据此视为“无结论”。
+        Assert.Equal(LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey, result.StatusKey);
+    }
+
+    [Fact]
+    public async Task RecoverLastTransactionAsync_marks_not_found_answer_with_blank_reference_as_not_matched()
+    {
+        // 生产实测（POS_1013_0222，10-02 遗留的老记录 12 天后查询）：Success=true、TxnRef 为 16 个空格、JH / NOT FOUND。
+        var eftClient = new FakeLinklyEftClient(new EFTGetLastTransactionResponse
+        {
+            Success = true,
+            LastTransactionSuccess = false,
+            TxnRef = new string(' ', 16),
+            AmtPurchase = 1m,
+            ResponseCode = "JH",
+            ResponseText = "NOT FOUND           "
+        });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.RecoverLastTransactionAsync(0.99m, CreateSession(), CreateSettings(), "PB5VHFN68PASVP4P");
+
+        // 恢复流程仍然只能当作“结果未知”，绝不能据此自动结案。
+        Assert.False(result.Approved);
+        Assert.True(result.ResultUnknown);
+        Assert.Equal(LinklyLocalTxnRef.LastTransactionNotMatchedStatusKey, result.StatusKey);
+    }
+
+    [Fact]
+    public async Task RecoverLastTransactionAsync_does_not_mark_matching_reference_with_conflicting_amount_as_not_matched()
+    {
+        // 引用对得上但金额冲突：这是身份冲突而不是“不是这笔”，必须继续按失败关闭处理，不能打放行标记。
+        var eftClient = new FakeLinklyEftClient(new EFTGetLastTransactionResponse
+        {
+            Success = true,
+            LastTransactionSuccess = true,
+            TxnRef = "LOCAL-TXN-001",
+            AmtPurchase = 99m,
+            ResponseCode = "00",
+            ResponseText = "APPROVED"
+        });
+        var client = new LinklyTerminalClient(new FakeLinklyEftClientFactory(eftClient));
+
+        var result = await client.RecoverLastTransactionAsync(10m, CreateSession(), CreateSettings(), "LOCAL-TXN-001");
+
+        Assert.True(result.ResultUnknown);
+        Assert.Null(result.StatusKey);
     }
 
     [Fact]
