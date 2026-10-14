@@ -457,6 +457,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             // 换门店 / 设备 / 收银员：此前扫码发起的补查结果不属于新会话，作废。
             _sessionIdentity = sessionIdentity;
             _workflowService.AdvanceCartGeneration("session-changed");
+            // 一次性整单开关不能带进另一位收银员 / 另一台设备的会话。
+            IsWholeOrderOperation = false;
         }
 
         if (value.CashierSession is not null)
@@ -593,18 +595,25 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             // 购物车变空：不论是本页清空，还是付款完成 / 挂单 / 其它流程清空了共享购物车，都意味着换了一单。
             // 此前扫码发起、还没回来的补查结果不能落进下一单。
             _workflowService.AdvanceCartGeneration("cart-emptied");
+            // 一次性整单开关随这一单结束：清空购物车、挂单、付款完成后都不能把「整单」带给下一位顾客。
+            IsWholeOrderOperation = false;
         }
 
         _cartChangedSequence++;
         RefreshCartCore("cart-changed", _activeScanTraceId, _activeScanStartedAt);
     }
 
+    /// <param name="isWholeOrderOperation">
+    /// 折扣类操作发起时的整单开关快照。整单开关是一次性的，按下折扣键就已复位，
+    /// 所以审计类型（整单折扣 / 单品折扣）必须用快照，不能再读当前属性。
+    /// </param>
     private PosTerminalWorkflowResult ExecuteCartMutation(
         string reason,
-        Func<PosTerminalWorkflowResult> operation)
+        Func<PosTerminalWorkflowResult> operation,
+        bool isWholeOrderOperation = false)
     {
         var before = OperationAuditEvents.CaptureCart(_cart.Lines);
-        var operationType = MapCartOperationType(reason, IsWholeOrderOperation);
+        var operationType = MapCartOperationType(reason, isWholeOrderOperation);
         var previousSequence = _cartChangedSequence;
         PosTerminalWorkflowResult result;
         try
@@ -1104,14 +1113,25 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         ExecuteCartMutation("modify-price", () => _workflowService.ModifySelectedLinePrice(lineSnapshot, keypadBufferSnapshot));
     }
 
+    /// <summary>
+    /// 整单开关是一次性的：按下任一折扣键就用掉这一次，取走当前值并立即复位。
+    /// 与后续成败无关——被拒绝（金额超限、没有可打折商品）、主管授权被取消或未通过，开关都已回到默认。
+    /// </summary>
+    private bool ConsumeWholeOrderOperation()
+    {
+        var snapshot = IsWholeOrderOperation;
+        IsWholeOrderOperation = false;
+        return snapshot;
+    }
+
     private async Task ApplySelectedLineDiscountAmountAsync()
     {
-        var permissionCode = IsWholeOrderOperation
+        var isWholeOrderSnapshot = ConsumeWholeOrderOperation();
+        var permissionCode = isWholeOrderSnapshot
             ? Permissions.PosTerminal.Sales.OrderManualDiscount
             : Permissions.PosTerminal.Sales.LineManualDiscount;
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
-        var isWholeOrderSnapshot = IsWholeOrderOperation;
         // 行模式下选中退货行的折扣注定被拒绝：先提示，不弹授权 / 主管 PIN。
         // 整单模式不看选中行（整单折扣只作用于销售行、跳过退货行），工作流照常放行、弹授权；
         // 唯一例外是购物车里只有退货行、没有可打折的销售行，同样先提示、不弹授权。
@@ -1127,17 +1147,20 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         using var authorizationActivation = permissionGrant.Activate();
-        ExecuteCartMutation("manual-discount-amount", () => _workflowService.ApplySelectedLineDiscountAmount(lineSnapshot, keypadBufferSnapshot, isWholeOrderSnapshot));
+        ExecuteCartMutation(
+            "manual-discount-amount",
+            () => _workflowService.ApplySelectedLineDiscountAmount(lineSnapshot, keypadBufferSnapshot, isWholeOrderSnapshot),
+            isWholeOrderSnapshot);
     }
 
     private async Task ApplySelectedLineDiscountPercentAsync()
     {
-        var permissionCode = IsWholeOrderOperation
+        var isWholeOrderSnapshot = ConsumeWholeOrderOperation();
+        var permissionCode = isWholeOrderSnapshot
             ? Permissions.PosTerminal.Sales.OrderManualDiscount
             : Permissions.PosTerminal.Sales.LineManualDiscount;
         var lineSnapshot = SelectedCartLine;
         var keypadBufferSnapshot = KeypadBuffer;
-        var isWholeOrderSnapshot = IsWholeOrderOperation;
         if (TryShowRejectionBeforeAuthorization(_workflowService.GetDiscountRejection(lineSnapshot, isWholeOrderSnapshot)))
         {
             return;
@@ -1150,12 +1173,16 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         using var authorizationActivation = permissionGrant.Activate();
-        ExecuteCartMutation("manual-discount-percent", () => _workflowService.ApplySelectedLineDiscountPercent(lineSnapshot, keypadBufferSnapshot, isWholeOrderSnapshot));
+        ExecuteCartMutation(
+            "manual-discount-percent",
+            () => _workflowService.ApplySelectedLineDiscountPercent(lineSnapshot, keypadBufferSnapshot, isWholeOrderSnapshot),
+            isWholeOrderSnapshot);
     }
 
     private async Task ApplyQuickDiscountPercentAsync(string? value)
     {
-        var permissionCode = GetQuickDiscountPermissionCode(value, IsWholeOrderOperation);
+        var isWholeOrderSnapshot = ConsumeWholeOrderOperation();
+        var permissionCode = GetQuickDiscountPermissionCode(value, isWholeOrderSnapshot);
         if (permissionCode is null)
         {
             // 快速入口固定为五个档位，禁止通过命令参数绕过逐档权限。
@@ -1167,7 +1194,6 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         var lineSnapshot = SelectedCartLine;
-        var isWholeOrderSnapshot = IsWholeOrderOperation;
         var valueSnapshot = value;
         if (TryShowRejectionBeforeAuthorization(_workflowService.GetDiscountRejection(lineSnapshot, isWholeOrderSnapshot)))
         {
@@ -1181,7 +1207,10 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         using var authorizationActivation = permissionGrant.Activate();
-        ExecuteCartMutation("quick-discount-percent", () => _workflowService.ApplyQuickDiscountPercent(lineSnapshot, valueSnapshot, isWholeOrderSnapshot));
+        ExecuteCartMutation(
+            "quick-discount-percent",
+            () => _workflowService.ApplyQuickDiscountPercent(lineSnapshot, valueSnapshot, isWholeOrderSnapshot),
+            isWholeOrderSnapshot);
     }
 
     private static string? GetQuickDiscountPermissionCode(string? value, bool isWholeOrderOperation)
@@ -1542,6 +1571,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
         // 挂单会持久化金额，必须先等当前促销重算完成。
         using var authorizationActivation = permissionGrant.Activate();
+        // 挂单意味着这一单结束：一次性整单开关不带到下一单（购物车被清空时事件里也会复位，这里先显式收口）。
+        IsWholeOrderOperation = false;
         await WaitForPendingPromotionEvaluationAsync();
         // 挂单保存的是此刻的购物车：此后才回来的补查结果不能再混进这一单（保存完购物车就被清空，商品会凭空丢失）。
         _workflowService.AdvanceCartGeneration("hold-order");
@@ -1568,6 +1599,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         using var authorizationActivation = permissionGrant.Activate();
         // 取单会把另一单恢复进购物车，属于换单：作废取单前发起的在途补查。
         _workflowService.AdvanceCartGeneration("recall-order");
+        // 换单也要复位一次性整单开关，别让取单前点亮的「整单」落到恢复出来的那一单上。
+        IsWholeOrderOperation = false;
         if (_actions.RecallOrderAsync is not null)
         {
             // 这里仅导航到暂存订单列表，真实取单成功由 TransactionHistoryViewModel 记录。
@@ -1776,6 +1809,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private async Task LockCashierAsync()
     {
+        // 锁屏后可能由同一位收银员解锁（会话身份不变，不会触发 OnSessionChanged 的复位），这里显式复位。
+        IsWholeOrderOperation = false;
         if (_actions.LockCashierAsync is not null)
         {
             await _actions.LockCashierAsync();

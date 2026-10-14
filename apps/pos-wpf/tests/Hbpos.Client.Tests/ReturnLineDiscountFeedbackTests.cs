@@ -169,10 +169,11 @@ public sealed class ReturnLineDiscountFeedbackTests
             Assert.NotEqual(harness.Text("pos.status.orderDiscountUpdated"), harness.ViewModel.StatusMessage);
             Assert.Equal(StatusFeedbackKind.Error, harness.ViewModel.StatusFeedbackKind);
             Assert.Equal([UserFeedbackCue.OperationError], harness.Feedback.Cues);
-            // 数据完全不变（含修订号），整单模式和键盘输入原样保留，也没有购物车变更审计。
+            // 数据完全不变（含修订号），键盘输入原样保留，也没有购物车变更审计。
+            // 整单开关是一次性的：按下折扣键就用掉这一次，被拒绝也一样回到默认。
             AssertCartUnchanged(before, harness);
             AssertNoDiscount(harness.ReturnLine);
-            Assert.True(harness.ViewModel.IsWholeOrderOperation);
+            Assert.False(harness.ViewModel.IsWholeOrderOperation);
             Assert.Equal(harness.KeypadBufferFor(action), harness.ViewModel.KeypadBuffer);
             Assert.Empty(harness.Audit.Events);
         }
@@ -189,6 +190,9 @@ public sealed class ReturnLineDiscountFeedbackTests
         Assert.Equal(harness.Text(OrderDiscountNoSaleLinesKey), harness.ViewModel.StatusMessage);
 
         // 加入一个销售行后，同一个入口恢复为先走整单折扣的授权、再对销售行打折，退货行不被牵连。
+        // 第一次被拒绝已经用掉一次性整单开关，要重新点亮。
+        Assert.False(harness.ViewModel.IsWholeOrderOperation);
+        harness.ViewModel.IsWholeOrderOperation = true;
         var sale = harness.Cart.AddItem(CreateItem(lookupCode: "LK-SALE", price: 30m));
         await harness.ExecuteAsync(DiscountAction.Quick10);
 

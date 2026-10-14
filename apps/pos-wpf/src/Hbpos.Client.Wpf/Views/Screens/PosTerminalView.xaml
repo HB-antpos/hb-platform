@@ -349,9 +349,9 @@
                     <Setter Property="TextAlignment" Value="Center" />
                 </Style>
             </Style.Resources>
-            <Setter Property="MinHeight" Value="44" />
-            <Setter Property="Margin" Value="2" />
-            <Setter Property="Padding" Value="6,4" />
+            <!-- 整单开关现在与折扣键同处一行（高度由行定义给出，不再自带 MinHeight / 外边距）；内边距收窄，76 宽里「整单操作」四个汉字单行放得下。 -->
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="2,2" />
             <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
@@ -361,31 +361,56 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type ToggleButton}">
-                        <Border x:Name="Root"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="5"
-                                SnapsToDevicePixels="True">
-                            <ContentPresenter Margin="{TemplateBinding Padding}"
-                                              HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"
-                                              TextBlock.Foreground="{TemplateBinding Foreground}">
-                                <ContentPresenter.Resources>
-                                    <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}">
-                                        <Setter Property="TextWrapping" Value="Wrap" />
-                                        <Setter Property="TextAlignment" Value="Center" />
-                                    </Style>
-                                </ContentPresenter.Resources>
-                            </ContentPresenter>
-                        </Border>
+                        <Grid>
+                            <Border x:Name="Root"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="5"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  TextBlock.Foreground="{TemplateBinding Foreground}">
+                                    <ContentPresenter.Resources>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}">
+                                            <Setter Property="TextWrapping" Value="Wrap" />
+                                            <Setter Property="TextAlignment" Value="Center" />
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                            </Border>
+                            <!-- 一次性「就绪」态：虚线蓝框 + 指向右侧折扣键的箭头（除颜色外的两个形状信号）。
+                                 按下任一折扣键就用掉这一次，视图模型会把 IsChecked 复位，这两个元素随之收起。 -->
+                            <Rectangle x:Name="ArmedFrame"
+                                       Margin="1"
+                                       RadiusX="4"
+                                       RadiusY="4"
+                                       Fill="Transparent"
+                                       Stroke="{DynamicResource PosPrimaryBrush}"
+                                       StrokeThickness="2"
+                                       StrokeDashArray="3 2"
+                                       IsHitTestVisible="False"
+                                       Visibility="Collapsed" />
+                            <Polygon x:Name="ArmedArrow"
+                                     Points="0,0 7,5 0,10"
+                                     Fill="{DynamicResource PosPrimaryBrush}"
+                                     HorizontalAlignment="Right"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,-9,0"
+                                     IsHitTestVisible="False"
+                                     Visibility="Collapsed" />
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                                <!-- 实线边框让位给虚线框，避免实线 + 虚线叠成一条实线。 -->
+                                <Setter TargetName="Root" Property="BorderThickness" Value="0" />
+                                <Setter TargetName="ArmedFrame" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="ArmedArrow" Property="Visibility" Value="Visible" />
                                 <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -397,13 +422,39 @@
             </Setter>
         </Style>
 
+        <!-- 操作区五个按钮的行高 52、间距 6 由外层 Grid 的行列定义给出，所以按钮自身不再带外边距；
+             内边距收窄（4,2），让 84 宽（最小列宽 280px）里的英文两行文字也放得进 52 高。 -->
         <Style x:Key="CashierFunctionButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
-            <Setter Property="Height" Value="54" />
-            <Setter Property="Margin" Value="3" />
-            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Height" Value="52" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
             <Setter Property="FontSize" Value="16" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <!-- 折扣金额 / 折扣% 两键：整单开关处于「就绪」时描蓝，提示下一次折扣按整单算。
+             IsWholeOrderOperation 是一次性的，由视图模型在按下任一折扣键时复位。 -->
+        <Style x:Key="CashierScopedFunctionButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFunctionButtonStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsWholeOrderOperation}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 10%–50% 快速折扣条的外框：同样随整单开关描蓝。底色与边框必须在样式里设置，
+             写成元素上的本地值会盖住触发器。 -->
+        <Style x:Key="CashierQuickDiscountSegmentStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsWholeOrderOperation}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="CashierNoBarcodeButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
@@ -1421,25 +1472,37 @@
                 </Grid>
             </Border>
 
-            <UniformGrid x:Name="CashierKeypad" Grid.Row="1" Columns="3" Rows="5" Margin="11,0,11,6" VerticalAlignment="Stretch">
-                <Button Content="1" Command="{Binding KeypadInputCommand}" CommandParameter="1" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="2" Command="{Binding KeypadInputCommand}" CommandParameter="2" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="3" Command="{Binding KeypadInputCommand}" CommandParameter="3" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="4" Command="{Binding KeypadInputCommand}" CommandParameter="4" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="5" Command="{Binding KeypadInputCommand}" CommandParameter="5" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="6" Command="{Binding KeypadInputCommand}" CommandParameter="6" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="7" Command="{Binding KeypadInputCommand}" CommandParameter="7" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="8" Command="{Binding KeypadInputCommand}" CommandParameter="8" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="9" Command="{Binding KeypadInputCommand}" CommandParameter="9" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="{loc:Loc Clear}" Command="{Binding KeypadInputCommand}" CommandParameter="Clear" Style="{StaticResource CashierClearKeyStyle}" />
-                <Button Content="0" Command="{Binding KeypadInputCommand}" CommandParameter="0" Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="." Command="{Binding KeypadInputCommand}" CommandParameter="." Style="{StaticResource CashierNumberKeyStyle}" />
-                <Button Content="{loc:Loc pos.terminal.quickHalf}" Command="{Binding KeypadInputCommand}" CommandParameter="QuickHalf" Style="{StaticResource CashierQuickKeyStyle}" />
-                <Button Content="{loc:Loc pos.terminal.quickNinetyNine}" Command="{Binding KeypadInputCommand}" CommandParameter="QuickNinetyNine" Style="{StaticResource CashierQuickKeyStyle}" />
-                <ToggleButton Content="{loc:Loc pos.terminal.actions.wholeOrderToggle}"
-                              IsChecked="{Binding IsWholeOrderOperation, Mode=TwoWay}"
-                              Style="{StaticResource CashierWholeOrderToggleStyle}" />
-            </UniformGrid>
+            <!-- 键盘区拆成「数字键 4 行」+「$0.50 / $0.99 各占半行」：整单开关搬去了下方的操作区，键盘最后一格不再有按钮。
+                 外层 5 等分行，数字键 UniformGrid 跨 4 行、快捷金额键占第 5 行，每个键的高度与原来 3×5 的键盘完全一致。 -->
+            <Grid Grid.Row="1" Margin="11,0,11,6" VerticalAlignment="Stretch">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <UniformGrid x:Name="CashierKeypad" Grid.Row="0" Grid.RowSpan="4" Columns="3" Rows="4" VerticalAlignment="Stretch">
+                    <Button Content="1" Command="{Binding KeypadInputCommand}" CommandParameter="1" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="2" Command="{Binding KeypadInputCommand}" CommandParameter="2" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="3" Command="{Binding KeypadInputCommand}" CommandParameter="3" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="4" Command="{Binding KeypadInputCommand}" CommandParameter="4" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="5" Command="{Binding KeypadInputCommand}" CommandParameter="5" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="6" Command="{Binding KeypadInputCommand}" CommandParameter="6" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="7" Command="{Binding KeypadInputCommand}" CommandParameter="7" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="8" Command="{Binding KeypadInputCommand}" CommandParameter="8" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="9" Command="{Binding KeypadInputCommand}" CommandParameter="9" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="{loc:Loc Clear}" Command="{Binding KeypadInputCommand}" CommandParameter="Clear" Style="{StaticResource CashierClearKeyStyle}" />
+                    <Button Content="0" Command="{Binding KeypadInputCommand}" CommandParameter="0" Style="{StaticResource CashierNumberKeyStyle}" />
+                    <Button Content="." Command="{Binding KeypadInputCommand}" CommandParameter="." Style="{StaticResource CashierNumberKeyStyle}" />
+                </UniformGrid>
+
+                <UniformGrid x:Name="CashierQuickAmountKeys" Grid.Row="4" Columns="2" VerticalAlignment="Stretch">
+                    <Button Content="{loc:Loc pos.terminal.quickHalf}" Command="{Binding KeypadInputCommand}" CommandParameter="QuickHalf" Style="{StaticResource CashierQuickKeyStyle}" />
+                    <Button Content="{loc:Loc pos.terminal.quickNinetyNine}" Command="{Binding KeypadInputCommand}" CommandParameter="QuickNinetyNine" Style="{StaticResource CashierQuickKeyStyle}" />
+                </UniformGrid>
+            </Grid>
 
             <Button Grid.Row="2"
                     Command="{Binding AddOpenItemCommand}"
@@ -1448,36 +1511,69 @@
                 <TextBlock Text="{loc:Loc pos.terminal.actions.noBarcode}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
             </Button>
 
-            <Grid Grid.Row="3" Margin="9,0,9,0" VerticalAlignment="Top">
+            <!-- 操作区：修改数量 / 价格（只管选中行）→ 整单开关 + 折扣金额 / 折扣% → 10–50% 快速折扣。
+                 整单开关是一次性的「就绪」开关，只管下一次折扣，紧挨它管辖的折扣键。
+                 总占高 52+6+52+6+66 + 底部 8 = 190，与改版前的功能区相同，所以键盘区高度不变。
+                 外边距 12 = 原来 Grid 外边距 9 + 按钮外边距 3，左右对齐保持不变。 -->
+            <Grid Grid.Row="3" Margin="12,0,12,8" VerticalAlignment="Top">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="52" />
+                    <RowDefinition Height="6" />
+                    <RowDefinition Height="52" />
+                    <RowDefinition Height="6" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="76" />
+                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-                <UniformGrid Grid.Row="0" Columns="2">
-                    <Button Command="{Binding ModifySelectedLineQuantityCommand}"
+                <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Command="{Binding ModifySelectedLineQuantityCommand}"
                             Style="{StaticResource CashierFunctionButtonStyle}">
                         <TextBlock Text="{loc:Loc pos.terminal.actions.modifyQty}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                     </Button>
-                    <Button Command="{Binding ModifySelectedLinePriceCommand}"
+                    <Button Grid.Column="2"
+                            Command="{Binding ModifySelectedLinePriceCommand}"
                             Style="{StaticResource CashierFunctionButtonStyle}">
                         <TextBlock Text="{loc:Loc Price}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                     </Button>
-                    <Button Command="{Binding ApplySelectedLineDiscountAmountCommand}"
-                            Style="{StaticResource CashierFunctionButtonStyle}">
-                        <TextBlock Text="{loc:Loc pos.terminal.actions.discountAmount}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
-                    </Button>
-                    <Button Command="{Binding ApplySelectedLineDiscountPercentCommand}"
-                            Style="{StaticResource CashierFunctionButtonStyle}">
-                        <TextBlock Text="{loc:Loc pos.terminal.actions.discountPercent}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
-                    </Button>
-                </UniformGrid>
+                </Grid>
+
+                <!-- Panel.ZIndex：就绪态箭头会越过 6px 间距探进右侧折扣键，要画在它上面。 -->
+                <ToggleButton Grid.Row="2"
+                              Grid.Column="0"
+                              Panel.ZIndex="1"
+                              Content="{loc:Loc pos.terminal.actions.wholeOrderToggle}"
+                              IsChecked="{Binding IsWholeOrderOperation, Mode=TwoWay}"
+                              Style="{StaticResource CashierWholeOrderToggleStyle}" />
+                <Button Grid.Row="2"
+                        Grid.Column="2"
+                        Command="{Binding ApplySelectedLineDiscountAmountCommand}"
+                        Style="{StaticResource CashierScopedFunctionButtonStyle}">
+                    <TextBlock Text="{loc:Loc pos.terminal.actions.discountAmount}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                </Button>
+                <Button Grid.Row="2"
+                        Grid.Column="4"
+                        Command="{Binding ApplySelectedLineDiscountPercentCommand}"
+                        Style="{StaticResource CashierScopedFunctionButtonStyle}">
+                    <TextBlock Text="{loc:Loc pos.terminal.actions.discountPercent}" FontSize="16" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                </Button>
 
                 <Border x:Name="QuickDiscountSegment"
-                        Grid.Row="1"
-                        Margin="3,4,3,0"
-                        Background="{DynamicResource PosSurfaceBrush}"
-                        BorderBrush="{DynamicResource PosBorderBrush}"
+                        Grid.Row="4"
+                        Grid.Column="0"
+                        Grid.ColumnSpan="5"
+                        Style="{StaticResource CashierQuickDiscountSegmentStyle}"
                         BorderThickness="1"
                         CornerRadius="5">
                     <Border.OpacityMask>

@@ -1885,7 +1885,8 @@ public sealed class PosTerminalCashPaymentViewModelTests
         viewModel.KeypadInputCommand.Execute("1");
         viewModel.ApplySelectedLineDiscountAmountCommand.Execute(null);
 
-        Assert.True(viewModel.IsWholeOrderOperation);
+        // 整单开关是一次性的：按下折扣键就用掉这一次，被拒绝也一样；输入缓冲保留，方便改数后重试。
+        Assert.False(viewModel.IsWholeOrderOperation);
         Assert.Equal("11", viewModel.KeypadBuffer);
         Assert.Equal(0m, viewModel.DiscountAmount);
         Assert.Equal("pos.status.discountAmountTooHigh", viewModel.StatusMessage);
@@ -1894,9 +1895,11 @@ public sealed class PosTerminalCashPaymentViewModelTests
         viewModel.KeypadInputCommand.Execute("1");
         viewModel.KeypadInputCommand.Execute("0");
         viewModel.KeypadInputCommand.Execute("1");
+        // 重试要再点一次「整单操作」。
+        viewModel.IsWholeOrderOperation = true;
         viewModel.ApplySelectedLineDiscountPercentCommand.Execute(null);
 
-        Assert.True(viewModel.IsWholeOrderOperation);
+        Assert.False(viewModel.IsWholeOrderOperation);
         Assert.Equal("101", viewModel.KeypadBuffer);
         Assert.Equal(0m, viewModel.DiscountAmount);
         Assert.Equal("pos.status.discountPercentOutOfRange", viewModel.StatusMessage);
@@ -2054,7 +2057,8 @@ public sealed class PosTerminalCashPaymentViewModelTests
         viewModel.IsWholeOrderOperation = true;
         viewModel.ApplyQuickDiscountPercentCommand.Execute("10");
 
-        Assert.True(viewModel.IsWholeOrderOperation);
+        // 购物车为空时整单折扣被拒绝，但这一次整单开关照样用掉。
+        Assert.False(viewModel.IsWholeOrderOperation);
         Assert.Equal("pos.status.selectCartLine", viewModel.StatusMessage);
     }
 

@@ -1118,6 +1118,8 @@ public sealed class CashierPermissionTests
 
         viewModel.KeypadBuffer = "1";
         viewModel.ApplySelectedLineDiscountAmountCommand.Execute(null);
+        // 整单开关是一次性的：上一次按键已用掉它，第二次要重新点亮，才仍按同一个范围（整单 / 单行）校验权限。
+        viewModel.IsWholeOrderOperation = isWholeOrderOperation;
         viewModel.KeypadBuffer = "10";
         viewModel.ApplySelectedLineDiscountPercentCommand.Execute(null);
 
@@ -1147,6 +1149,8 @@ public sealed class CashierPermissionTests
         var (viewModel, workflow, line) = CreateDiscountViewModel(permissionCode, isWholeOrderOperation);
 
         viewModel.ApplyQuickDiscountPercentCommand.Execute(grantedPercent);
+        // 整单开关是一次性的：第一次按键已用掉它，第二次要重新点亮，才仍按同一个范围（整单 / 单行）校验权限。
+        viewModel.IsWholeOrderOperation = isWholeOrderOperation;
         viewModel.ApplyQuickDiscountPercentCommand.Execute(deniedPercent);
 
         Assert.Equal([grantedPercent], workflow.QuickDiscountPercentValues);
