@@ -12,7 +12,7 @@
     "squareClearConfirmDescription": "清除后，使用该环境的 POS 将无法发起 Square 收款，直到重新设置 Token。",
     "squareCleared": "Square Token 已清除",
     "squareTokenModalTitle": "{{environment}}环境 Square Token",
-    "squareTokenModalHint": "Token 只在保存时提交，保存后页面不会再显示明文。保存即覆盖{{environment}}环境当前的 Token，对全部门店生效。",
+    "squareTokenModalHint": "Token 只在保存时提交，保存后页面不会再显示明文。保存即覆盖{{environment}}环境当前的共用 Token，对所有没有单独设置 Token 的门店生效。",
     "linklyStoreScope": "按门店配置",
     "checklistTitle": "启用多终端前的检查",
     "stepAddTerminals": "添加终端",
@@ -48,6 +48,19 @@
     "elapsedHours": "{{count}} 小时前",
     "elapsedDays": "{{count}} 天前",
     "notAssigned": "未分配",
-    "validationAccessToken": "请输入 Access token"
+    "validationAccessToken": "请输入 Access token",
+    "squareSharedTitle": "共用 Token",
+    "squareStoreTitle": "门店专用 Token",
+    "squareStoreScope": "仅所选门店",
+    "squareStoreOverridden": "已单独设置",
+    "squareStoreUsesShared": "使用共用 Token",
+    "squareStoreSelectHint": "请先选择门店，再为该店单独设置 Token。",
+    "squareStoreFallbackShared": "{{store}} 未单独设置，使用共用 Token 收款。",
+    "squareStoreNoToken": "{{store}} 未单独设置，且{{environment}}环境没有共用 Token，该店无法发起 Square 收款。",
+    "squareStoreClearConfirmTitle": "清除 {{store}} 的{{environment}}专用 Token？",
+    "squareStoreClearConfirmDescription": "清除后，该店回落使用共用 Token（如已设置），其他门店不受影响。",
+    "squareStoreCleared": "已清除该店专用 Token，回落使用共用 Token",
+    "squareStoreTokenModalTitle": "{{store}} · {{environment}}环境专用 Square Token",
+    "squareStoreTokenModalHint": "Token 只在保存时提交，保存后页面不会再显示明文。保存后仅对 {{store}} 生效，其他门店仍使用各自的专用 Token 或共用 Token。"
   }
 }

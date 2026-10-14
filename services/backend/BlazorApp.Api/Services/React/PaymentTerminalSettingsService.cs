@@ -35,6 +35,9 @@ public sealed class PaymentTerminalSettingsService(
         var settings = new PaymentTerminalSettingsDto
         {
             Square = await GetSquareStatusesAsync(),
+            StoreSquare = string.IsNullOrWhiteSpace(selectedStoreCode)
+                ? new List<PaymentTerminalEnvironmentStatusDto>()
+                : await GetSquareStatusesAsync(selectedStoreCode),
             Stores = stores,
             SelectedStoreCode = selectedStoreCode,
             Linkly = string.IsNullOrWhiteSpace(selectedStoreCode)
@@ -62,11 +65,33 @@ public sealed class PaymentTerminalSettingsService(
             );
         }
 
+        // 目标门店为空 = 共用 Token（StoreCode IS NULL）；有值 = 该门店专用 Token。两个作用域互不影响。
+        string? targetStoreCode = null;
+        var requestedStoreCode = NormalizeOptional(request.TargetStoreCode);
+        if (requestedStoreCode is not null)
+        {
+            var stores = await GetStoreOptionsAsync();
+            var store = stores.FirstOrDefault(item =>
+                string.Equals(item.StoreCode, requestedStoreCode, StringComparison.OrdinalIgnoreCase));
+            if (store is null)
+            {
+                return ApiResponse<PaymentTerminalSettingsDto>.Error(
+                    "门店不存在或已停用",
+                    "PAYMENT_STORE_NOT_FOUND"
+                );
+            }
+
+            // 用库里的规范写法落库，避免大小写不同的同一门店各存一条。
+            targetStoreCode = store.StoreCode;
+        }
+
         var now = DateTime.UtcNow;
         var updater = NormalizeOptional(updatedBy);
-        var existingRows = await posmContext.Db.Queryable<PaymentSquareTokenRecord>()
-            .Where(row => row.Environment == environment)
-            .ToListAsync();
+        var scopedQuery = posmContext.Db.Queryable<PaymentSquareTokenRecord>()
+            .Where(row => row.Environment == environment);
+        var existingRows = targetStoreCode is null
+            ? await scopedQuery.Where(row => row.StoreCode == null).ToListAsync()
+            : await scopedQuery.Where(row => row.StoreCode == targetStoreCode).ToListAsync();
 
         if (request.ClearToken)
         {
@@ -106,6 +131,7 @@ public sealed class PaymentTerminalSettingsService(
             await posmContext.Db.Insertable(new PaymentSquareTokenRecord
             {
                 Environment = environment,
+                StoreCode = targetStoreCode,
                 AccessToken = accessToken,
                 IsEnabled = true,
                 UpdatedAt = now,
@@ -1031,11 +1057,14 @@ public sealed class PaymentTerminalSettingsService(
             .ToListAsync();
     }
 
-    private async Task<List<PaymentTerminalEnvironmentStatusDto>> GetSquareStatusesAsync()
+    // storeCode 为空：统计共用 Token；有值：统计该门店的专用 Token。
+    private async Task<List<PaymentTerminalEnvironmentStatusDto>> GetSquareStatusesAsync(string? storeCode = null)
     {
-        var rows = await posmContext.Db.Queryable<PaymentSquareTokenRecord>()
-            .Where(row => row.Environment == "Production" || row.Environment == "Sandbox")
-            .ToListAsync();
+        var scopedQuery = posmContext.Db.Queryable<PaymentSquareTokenRecord>()
+            .Where(row => row.Environment == "Production" || row.Environment == "Sandbox");
+        var rows = storeCode is null
+            ? await scopedQuery.Where(row => row.StoreCode == null).ToListAsync()
+            : await scopedQuery.Where(row => row.StoreCode == storeCode).ToListAsync();
 
         return PaymentEnvironments
             .Select(environment =>
@@ -1570,6 +1599,9 @@ public sealed class PaymentTerminalSettingsService(
         public long Id { get; set; }
 
         public string Environment { get; set; } = string.Empty;
+
+        // NULL = 全部门店共用。
+        public string? StoreCode { get; set; }
 
         public string AccessToken { get; set; } = string.Empty;
 

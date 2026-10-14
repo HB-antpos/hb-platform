@@ -9,6 +9,7 @@ import {
   ExperimentOutlined,
   PlusOutlined,
   ReloadOutlined,
+  ShopOutlined,
   WalletOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
@@ -263,6 +264,8 @@ export default function PaymentTerminalSettingsPage() {
   const [editingTerminal, setEditingTerminal] = useState<LinklyTerminalAdminDto | null>(null)
   const [terminalModalOpen, setTerminalModalOpen] = useState(false)
   const [squareModalOpen, setSquareModalOpen] = useState(false)
+  // 弹窗/清除操作的目标：共用 Token，或当前所选门店的专用 Token。
+  const [squareTarget, setSquareTarget] = useState<'shared' | 'store'>('shared')
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [linklyLoading, setLinklyLoading] = useState(false)
   const [savingSquare, setSavingSquare] = useState(false)
@@ -274,6 +277,10 @@ export default function PaymentTerminalSettingsPage() {
 
   const squareStatus = useMemo(
     () => getEnvironmentStatus(settings?.square ?? [], environment),
+    [settings, environment],
+  )
+  const storeSquareStatus = useMemo(
+    () => getEnvironmentStatus(settings?.storeSquare ?? [], environment),
     [settings, environment],
   )
   const checklist = useMemo(() => buildLinklyActivationChecklist(linklyManagement), [linklyManagement])
@@ -353,7 +360,12 @@ export default function PaymentTerminalSettingsPage() {
   }
 
   // 更换与清除共用同一个保存接口：清除不需要输入，更换只校验 token 输入框。
-  const submitSquareToken = async (clearToken: boolean) => {
+  const submitSquareToken = async (clearToken: boolean, target: 'shared' | 'store') => {
+    // 门店专用操作必须有所选门店，否则不发请求，避免误改共用 Token。
+    if (target === 'store' && !selectedStoreCode) {
+      return
+    }
+
     let accessToken = ''
     if (!clearToken) {
       try {
@@ -368,7 +380,11 @@ export default function PaymentTerminalSettingsPage() {
     setSavingSquare(true)
     try {
       const result = await saveSquareToken(
-        buildSquareTokenPayload(environment, { accessToken, clearToken }),
+        buildSquareTokenPayload(
+          environment,
+          { accessToken, clearToken },
+          target === 'store' ? selectedStoreCode : undefined,
+        ),
         selectedStoreCode,
       )
       if (requestSequence === settingsRequestSequence.current) {
@@ -376,7 +392,10 @@ export default function PaymentTerminalSettingsPage() {
         setSelectedStoreCode(result.selectedStoreCode ?? selectedStoreCode)
       }
       setSquareModalOpen(false)
-      message.success(clearToken ? t('paymentTerminalSettings.squareCleared') : t('paymentTerminalSettings.saveSuccess'))
+      const clearedText = target === 'store'
+        ? t('paymentTerminalSettings.squareStoreCleared')
+        : t('paymentTerminalSettings.squareCleared')
+      message.success(clearToken ? clearedText : t('paymentTerminalSettings.saveSuccess'))
     } catch (error) {
       console.error(error)
       message.error(resolvePaymentTerminalSettingsErrorMessage(error, t('paymentTerminalSettings.saveFailed')))
@@ -521,6 +540,11 @@ export default function PaymentTerminalSettingsPage() {
   const devices = linklyManagement?.devices ?? []
   const mode = linklyManagement?.mode ?? 'Legacy'
   const squareConfigured = isConfiguredStatus(squareStatus)
+  const storeSquareConfigured = isConfiguredStatus(storeSquareStatus)
+  const selectedStore = (settings?.stores ?? []).find((store) => store.storeCode === selectedStoreCode)
+  const selectedStoreLabel = selectedStore
+    ? `${selectedStore.storeCode} - ${selectedStore.storeName}`
+    : selectedStoreCode ?? ''
 
   const terminalLabel = (terminalId: string) => {
     const terminal = terminals.find((item) => item.terminalId === terminalId)
@@ -723,6 +747,37 @@ export default function PaymentTerminalSettingsPage() {
     },
   ]
 
+  // Square 门店专用行与 Linkly 卡片共用同一个门店选择，切换任一处两边同步。
+  const storeSelect = (
+    <Select
+      showSearch
+      optionFilterProp="label"
+      style={{ width: 260 }}
+      placeholder={t('paymentTerminalSettings.store')}
+      aria-label={t('paymentTerminalSettings.store')}
+      value={selectedStoreCode}
+      options={(settings?.stores ?? []).map((store) => ({
+        value: store.storeCode,
+        label: `${store.storeCode} - ${store.storeName}`,
+      }))}
+      onChange={handleStoreChange}
+      loading={settingsLoading}
+    />
+  )
+
+  const storeSquareMeta = !selectedStoreCode
+    ? t('paymentTerminalSettings.squareStoreSelectHint')
+    : storeSquareConfigured
+      ? (storeSquareStatus?.updatedBy
+        ? t('paymentTerminalSettings.squareUpdatedBy', {
+          time: formatUserLocalDateTime(storeSquareStatus.updatedAtUtc),
+          user: storeSquareStatus.updatedBy,
+        })
+        : t('paymentTerminalSettings.squareUpdatedAtOnly', { time: formatUserLocalDateTime(storeSquareStatus?.updatedAtUtc) }))
+      : squareConfigured
+        ? t('paymentTerminalSettings.squareStoreFallbackShared', { store: selectedStoreLabel })
+        : t('paymentTerminalSettings.squareStoreNoToken', { store: selectedStoreLabel, environment: environmentLabel })
+
   const squareMeta = squareConfigured
     ? (squareStatus?.updatedBy
       ? t('paymentTerminalSettings.squareUpdatedBy', {
@@ -764,9 +819,9 @@ export default function PaymentTerminalSettingsPage() {
           <Alert showIcon type="warning" message={t('paymentTerminalSettings.noPermission')} />
         ) : null}
 
-        {/* Square 按环境全局生效，与门店无关，所以放在门店选择之外单独一行。 */}
+        {/* Square：共用 Token 对全部门店生效；某店设置了专用 Token 后，该店优先使用专用的，清除后回落共用。 */}
         <Card className="pts-square" loading={settingsLoading && !settings}>
-          <div className="pts-square-row">
+          <div className="pts-square-row pts-square-shared">
             <div className="pts-square-main">
               <span className="pts-square-icon" aria-hidden="true"><WalletOutlined /></span>
               <div>
@@ -783,7 +838,10 @@ export default function PaymentTerminalSettingsPage() {
             <Space wrap>
               <Button
                 type={squareConfigured ? 'default' : 'primary'}
-                onClick={() => setSquareModalOpen(true)}
+                onClick={() => {
+                  setSquareTarget('shared')
+                  setSquareModalOpen(true)
+                }}
                 disabled={!canManageSettings}
               >
                 {squareConfigured
@@ -794,7 +852,63 @@ export default function PaymentTerminalSettingsPage() {
                 <Popconfirm
                   title={t('paymentTerminalSettings.squareClearConfirmTitle', { environment: environmentLabel })}
                   description={t('paymentTerminalSettings.squareClearConfirmDescription')}
-                  onConfirm={() => void submitSquareToken(true)}
+                  onConfirm={() => void submitSquareToken(true, 'shared')}
+                  okText={t('paymentTerminalSettings.squareClear')}
+                  okButtonProps={{ danger: true }}
+                  cancelText={t('common.cancel')}
+                  disabled={!canManageSettings}
+                >
+                  <Button danger loading={savingSquare && !squareModalOpen} disabled={!canManageSettings}>
+                    {t('paymentTerminalSettings.squareClear')}
+                  </Button>
+                </Popconfirm>
+              ) : null}
+            </Space>
+          </div>
+
+          <div className="pts-square-row pts-square-store">
+            <div className="pts-square-main">
+              <span className="pts-square-icon" aria-hidden="true"><ShopOutlined /></span>
+              <div>
+                <div className="pts-square-title">
+                  <span>{t('paymentTerminalSettings.squareStoreTitle')}</span>
+                  {selectedStoreCode ? (
+                    storeSquareConfigured
+                      ? <Tag color="green">{t('paymentTerminalSettings.squareStoreOverridden')}</Tag>
+                      : <Tag>{t('paymentTerminalSettings.squareStoreUsesShared')}</Tag>
+                  ) : null}
+                  <span className="pts-scope">{t('paymentTerminalSettings.squareStoreScope')}</span>
+                </div>
+                <div
+                  className={selectedStoreCode && !storeSquareConfigured && !squareConfigured
+                    ? 'pts-square-meta pts-square-meta-warning'
+                    : 'pts-square-meta'}
+                >
+                  {storeSquareMeta}
+                </div>
+              </div>
+            </div>
+            <Space wrap>
+              {storeSelect}
+              <Button
+                onClick={() => {
+                  setSquareTarget('store')
+                  setSquareModalOpen(true)
+                }}
+                disabled={!canManageSettings || !selectedStoreCode}
+              >
+                {storeSquareConfigured
+                  ? t('paymentTerminalSettings.squareReplaceToken')
+                  : t('paymentTerminalSettings.squareSetToken')}
+              </Button>
+              {storeSquareConfigured ? (
+                <Popconfirm
+                  title={t('paymentTerminalSettings.squareStoreClearConfirmTitle', {
+                    environment: environmentLabel,
+                    store: selectedStoreLabel,
+                  })}
+                  description={t('paymentTerminalSettings.squareStoreClearConfirmDescription')}
+                  onConfirm={() => void submitSquareToken(true, 'store')}
                   okText={t('paymentTerminalSettings.squareClear')}
                   okButtonProps={{ danger: true }}
                   cancelText={t('common.cancel')}
@@ -823,22 +937,7 @@ export default function PaymentTerminalSettingsPage() {
               <span className="pts-scope">{t('paymentTerminalSettings.linklyStoreScope')}</span>
             </span>
           )}
-          extra={(
-            <Select
-              showSearch
-              optionFilterProp="label"
-              style={{ width: 260 }}
-              placeholder={t('paymentTerminalSettings.store')}
-              aria-label={t('paymentTerminalSettings.store')}
-              value={selectedStoreCode}
-              options={(settings?.stores ?? []).map((store) => ({
-                value: store.storeCode,
-                label: `${store.storeCode} - ${store.storeName}`,
-              }))}
-              onChange={handleStoreChange}
-              loading={settingsLoading}
-            />
-          )}
+          extra={storeSelect}
         >
           {mode === 'Active' ? (
             <div className="pts-active-summary">
@@ -951,10 +1050,12 @@ export default function PaymentTerminalSettingsPage() {
 
       <Modal
         open={squareModalOpen}
-        title={t('paymentTerminalSettings.squareTokenModalTitle', { environment: environmentLabel })}
+        title={squareTarget === 'store'
+          ? t('paymentTerminalSettings.squareStoreTokenModalTitle', { environment: environmentLabel, store: selectedStoreLabel })
+          : t('paymentTerminalSettings.squareTokenModalTitle', { environment: environmentLabel })}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
-        onOk={() => void submitSquareToken(false)}
+        onOk={() => void submitSquareToken(false, squareTarget)}
         onCancel={() => setSquareModalOpen(false)}
         confirmLoading={savingSquare}
         destroyOnClose
@@ -962,7 +1063,9 @@ export default function PaymentTerminalSettingsPage() {
         <Alert
           showIcon
           type={environment === 'Sandbox' ? 'warning' : 'info'}
-          message={t('paymentTerminalSettings.squareTokenModalHint', { environment: environmentLabel })}
+          message={squareTarget === 'store'
+            ? t('paymentTerminalSettings.squareStoreTokenModalHint', { store: selectedStoreLabel })
+            : t('paymentTerminalSettings.squareTokenModalHint', { environment: environmentLabel })}
           style={{ marginBottom: 16 }}
         />
         {/* preserve=false：关闭弹窗即丢弃输入，token 明文不在表单里留存。 */}

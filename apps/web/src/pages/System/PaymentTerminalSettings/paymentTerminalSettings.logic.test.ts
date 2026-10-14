@@ -77,6 +77,17 @@ assert('accessToken' in clearSquare === false, 'clear Square payload should not 
 const saveSquare = buildSquareTokenPayload('Sandbox', { accessToken: ' sandbox-secret ', clearToken: false })
 assertEqual(saveSquare.accessToken, 'sandbox-secret', 'Square token should be trimmed before submit')
 
+// 共用 Token：不带 targetStoreCode；门店专用 Token：带（去空白后的）门店编码，清除时也一样。
+assert('targetStoreCode' in saveSquare === false, 'shared Square payload should not carry a target store')
+const storeSquare = buildSquareTokenPayload('Production', { accessToken: ' store-secret ', clearToken: false }, ' 1042 ')
+assertEqual(storeSquare.targetStoreCode, '1042', 'store Square payload should carry the trimmed store code')
+assertEqual(storeSquare.accessToken, 'store-secret', 'store Square token should be trimmed before submit')
+const storeClear = buildSquareTokenPayload('Production', { accessToken: '', clearToken: true }, '1042')
+assertEqual(storeClear.targetStoreCode, '1042', 'clearing a store token should still target that store')
+assertEqual(storeClear.clearToken, true, 'clearing a store token should set clearToken=true')
+const blankTarget = buildSquareTokenPayload('Production', { accessToken: 'x', clearToken: false }, '   ')
+assert('targetStoreCode' in blankTarget === false, 'blank target store must fall back to the shared token, not a store row')
+
 const linklyForm = createLinklyCredentialFormValues({
   storeCode: '001',
   environment: 'Production',
@@ -363,12 +374,22 @@ assertEqual(hoursAgo.kind === 'hours' ? hoursAgo.count : -1, 2, 'hours are floor
 const daysAgo = describeElapsedSince('2026-10-03T09:00:00Z', healthNow)
 assertEqual(daysAgo.kind === 'days' ? daysAgo.count : -1, 3, 'days are floored')
 
-// 页面结构契约：Square 是按环境的全局设置，不能再挂在门店选择器之下。
+// 页面结构契约：Square 卡片先放「共用 Token」行，再放「门店专用 Token」行；
+// 共用行的保存/清除一律按 shared 目标提交，不能依赖门店选择。
 const pageSource = readFileSync('src/pages/System/PaymentTerminalSettings/index.tsx', 'utf8')
 const squareCardIndex = pageSource.indexOf('className="pts-square"')
-const storeSelectIndex = pageSource.indexOf('onChange={handleStoreChange}')
-assert(squareCardIndex > 0 && storeSelectIndex > 0, 'page should render the Square card and the store selector')
-assert(squareCardIndex < storeSelectIndex, 'Square card should render before (outside) the Linkly store selector')
+const sharedRowIndex = pageSource.indexOf('pts-square-row pts-square-shared')
+const storeRowIndex = pageSource.indexOf('pts-square-row pts-square-store')
+const linklyCardIndex = pageSource.indexOf('paymentTerminalSettings.linklyTerminalsTitle')
+assert(squareCardIndex > 0 && sharedRowIndex > squareCardIndex, 'page should render the shared Square row inside the Square card')
+assert(storeRowIndex > sharedRowIndex && storeRowIndex < linklyCardIndex, 'store-specific Square row should follow the shared row, before the Linkly card')
+assert(pageSource.includes("submitSquareToken(true, 'shared')"), 'shared clear should target the shared token')
+assert(pageSource.includes("submitSquareToken(true, 'store')"), 'store clear should target the store token')
+assert(
+  pageSource.includes("target === 'store' ? selectedStoreCode : undefined"),
+  'only store-target saves may carry the selected store code',
+)
+assert(pageSource.includes('extra={storeSelect}'), 'Linkly card should reuse the same store selector as the Square store row')
 assert(
   pageSource.includes("environment === 'Sandbox'") && pageSource.includes('pts-env-banner'),
   'sandbox environment should show a banner',

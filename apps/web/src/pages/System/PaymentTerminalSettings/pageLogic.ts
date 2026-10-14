@@ -62,10 +62,17 @@ export function createLinklyTerminalFormValues(
 export function buildSquareTokenPayload(
   environment: PaymentTerminalEnvironment,
   values: SquareTokenFormValues,
+  targetStoreCode?: string,
 ): UpdateSquareTokenRequest {
   const payload: UpdateSquareTokenRequest = {
     environment,
     clearToken: values.clearToken,
+  }
+
+  // 只有操作「门店专用 Token」时才带门店编码；缺省即共用 Token，避免误写成某店专用。
+  const storeCode = targetStoreCode?.trim()
+  if (storeCode) {
+    payload.targetStoreCode = storeCode
   }
 
   // 清除或留空时不提交 token 明文；后端据此清除或保留原 token。

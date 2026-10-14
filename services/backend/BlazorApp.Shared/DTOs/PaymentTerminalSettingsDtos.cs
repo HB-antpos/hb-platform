@@ -4,7 +4,10 @@ namespace BlazorApp.Shared.DTOs
 {
     public class PaymentTerminalSettingsDto
     {
+        // 全部门店共用的 Square Token 状态（StoreCode 为空的行）。
         public List<PaymentTerminalEnvironmentStatusDto> Square { get; set; } = new();
+        // 当前所选门店的专用 Square Token 状态；Configured=false 表示该店回落使用共用 Token。
+        public List<PaymentTerminalEnvironmentStatusDto> StoreSquare { get; set; } = new();
         public List<PaymentTerminalStoreOptionDto> Stores { get; set; } = new();
         public string? SelectedStoreCode { get; set; }
         public List<LinklyCloudCredentialAdminDto> Linkly { get; set; } = new();
@@ -45,6 +48,10 @@ namespace BlazorApp.Shared.DTOs
         public string? AccessToken { get; set; }
 
         public bool ClearToken { get; set; }
+
+        // 为空表示设置/清除「全部门店共用」的 Token；有值表示只设置/清除该门店的专用 Token。
+        [StringLength(32, ErrorMessage = "门店编码长度不能超过32个字符")]
+        public string? TargetStoreCode { get; set; }
     }
 
     public class LinklyTerminalManagementDto
