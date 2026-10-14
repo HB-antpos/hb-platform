@@ -322,7 +322,7 @@
       "apiFailureCount": "API failures"
     },
     "audit": {
-      "intro": "Every management action is recorded here for compliance audit: profile changes, consent, enrolment, list entries and reviews.",
+      "intro": "Every management action is recorded here for compliance audit: profile changes, consent, enrolment, list entries and reviews. Viewing capture or hit thumbnails in the mobile app is recorded as capture.thumbnails.view: one record per batch request (n= is the number of thumbnails shown), never one per image, with no capture or task numbers; opening a full-size image is still recorded separately.",
       "allStores": "All stores",
       "actionPlaceholder": "Filter by action",
       "time": "Time",

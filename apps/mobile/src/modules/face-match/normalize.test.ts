@@ -4,8 +4,14 @@ import {
   normalizeFaceCaptureResult,
   normalizeFaceCaptureResultPage,
   normalizeFaceGateReport,
+  normalizeFaceHitReadAllResult,
+  normalizeFaceHitResult,
+  normalizeFaceHitResultPage,
+  normalizeFaceHitSummary,
+  normalizeFaceHitUnreadCount,
   normalizeFaceMatchConfig,
   normalizeFaceStoreProfile,
+  normalizeFaceThumbnailResults,
   normalizeFaceUnwelcomeEntry,
   normalizeFaceUnwelcomeEntryPage,
   normalizeFaceUnwelcomeTask,
@@ -177,7 +183,6 @@ import {
   assert.equal(list.statsWindowHours, 24);
 }
 
-console.log("normalize.test.ts: ok");
 
 // ───────── 抓拍与比对结果：缺失字段不崩，未评估时没有判定，命中必须有任务编号 ─────────
 {
@@ -228,3 +233,192 @@ console.log("normalize.test.ts: ok");
   assert.equal(page.hasMore, true);
   assert.deepEqual(normalizeFaceCaptureResultPage(null).items, []);
 }
+
+// ───────── 抓拍流里 hit 的新增字段：autoConfirmed / unread / notificationId（缺失、类型漂移都不崩） ─────────
+{
+  const full = normalizeFaceCaptureResult({ captureId: "c1", hit: { taskId: "t1", autoConfirmed: true, unread: true, notificationId: "n-1" } });
+  assert.equal(full.hit?.autoConfirmed, true);
+  assert.equal(full.hit?.unread, true);
+  assert.equal(full.hit?.notificationId, "n-1");
+  // 旧后端没有这三个字段：不是自动确认、不是未读、没有通知编号
+  const legacy = normalizeFaceCaptureResult({ captureId: "c2", hit: { taskId: "t2", scorePercent: 90 } });
+  assert.equal(legacy.hit?.autoConfirmed, false);
+  assert.equal(legacy.hit?.unread, false);
+  assert.equal(legacy.hit?.notificationId, null);
+  // 只认明确的 true：字符串 "true" / 数字 1 / null 都不算
+  const drift = normalizeFaceCaptureResult({ captureId: "c3", hit: { taskId: "t3", autoConfirmed: "true", unread: 1, notificationId: 42 } });
+  assert.equal(drift.hit?.autoConfirmed, false);
+  assert.equal(drift.hit?.unread, false);
+  assert.equal(drift.hit?.notificationId, null, "通知编号只接受非空字符串");
+  assert.equal(normalizeFaceCaptureResult({ captureId: "c4", hit: { taskId: "t4", notificationId: "  " } }).hit?.notificationId, null);
+}
+
+// ───────── 命中流的一行：契约 §2.1 的全部字段 ─────────
+{
+  const row = normalizeFaceHitResult({
+    taskId: "a".repeat(32),
+    captureId: "c1",
+    storeCode: "1042",
+    storeName: "TestStore",
+    cameraId: "cam-1",
+    capturedAtUtc: "2026-10-14T08:40:22Z",
+    scorePercent: 87,
+    band: "high",
+    reviewStatus: 2,
+    reviewStatusName: "confirmed",
+    autoConfirmed: true,
+    imageAvailable: true,
+    unread: true,
+    notificationId: "n1",
+    notifyState: "sent",
+    notifiedAtUtc: "2026-10-14T08:40:30Z",
+    notifyRecipientCount: 4,
+    notifyReadCount: 1,
+    canReview: true,
+    decision: "repeatVisitor",
+    staffScorePercent: 3,
+    visitScorePercent: 100,
+    faceCount: 1,
+  });
+  assert.equal(row.taskId, "a".repeat(32));
+  assert.equal(row.captureId, "c1");
+  assert.equal(row.storeName, "TestStore");
+  assert.equal(row.band, "high");
+  assert.equal(row.reviewStatus, 2);
+  assert.equal(row.autoConfirmed, true);
+  assert.equal(row.unread, true);
+  assert.equal(row.notificationId, "n1");
+  assert.equal(row.notifiedAtUtc, "2026-10-14T08:40:30Z");
+  assert.equal(row.canReview, true);
+  assert.equal(row.decision, "repeatVisitor");
+  assert.equal(row.visitScorePercent, 100);
+  assert.equal(row.faceCount, 1);
+  // 字段名集合固定（跨端契约测试会拿它和后端 FaceHitResultDto 比对）
+  assert.deepEqual(Object.keys(normalizeFaceHitResult({})).sort(), [
+    "autoConfirmed", "band", "cameraId", "canReview", "captureId", "capturedAtUtc", "decision", "faceCount", "imageAvailable", "notificationId",
+    "notifiedAtUtc", "notifyReadCount", "notifyRecipientCount", "notifyState", "reviewStatus", "reviewStatusName", "scorePercent",
+    "staffScorePercent", "storeCode", "storeName", "taskId", "unread", "visitScorePercent",
+  ]);
+
+  // 缺失字段：Match 模式没有留存抓拍（captureId 为 null）、没有评估（decision / 分数 / faceCount 为 null）；布尔一律 false
+  const bare = normalizeFaceHitResult({ taskId: "t" });
+  assert.equal(bare.captureId, null);
+  assert.equal(bare.storeName, null);
+  assert.equal(bare.decision, null);
+  assert.equal(bare.staffScorePercent, null);
+  assert.equal(bare.visitScorePercent, null);
+  assert.equal(bare.faceCount, null);
+  assert.equal(bare.notificationId, null);
+  assert.equal(bare.notifiedAtUtc, null);
+  assert.equal(bare.band, "normal");
+  assert.equal(bare.unread, false);
+  assert.equal(bare.canReview, false, "能否复核只认服务端的 canReview，缺失当 false，不放大授权");
+  assert.equal(bare.imageAvailable, false);
+  assert.equal(bare.autoConfirmed, false);
+  assert.equal(bare.scorePercent, 0);
+  assert.equal(bare.notifyState, "");
+  // 类型漂移不崩：只认明确的 true / 数字 / 字符串
+  const drift = normalizeFaceHitResult({
+    taskId: "t",
+    unread: "true",
+    canReview: 1,
+    imageAvailable: "yes",
+    autoConfirmed: "true",
+    scorePercent: "88",
+    reviewStatus: "2",
+    faceCount: "1",
+    staffScorePercent: Number.NaN,
+    band: "weird",
+    captureId: 7,
+  });
+  assert.equal(drift.unread, false);
+  assert.equal(drift.canReview, false);
+  assert.equal(drift.imageAvailable, false);
+  assert.equal(drift.autoConfirmed, false);
+  assert.equal(drift.scorePercent, 0);
+  assert.equal(drift.reviewStatus, 0);
+  assert.equal(drift.faceCount, null);
+  assert.equal(drift.staffScorePercent, null);
+  assert.equal(drift.band, "normal", "未知档位按一般处理");
+  assert.equal(drift.captureId, null);
+  assert.equal(normalizeFaceHitResult(null).taskId, "");
+  assert.equal(normalizeFaceHitResult("oops").taskId, "");
+
+  // 分页：没有任务编号的行无法打开 / 标记已读 / 取缩略图，丢弃；其余字段照常
+  const page = normalizeFaceHitResultPage({ items: [{ taskId: "t1" }, { storeCode: "no-id" }, { taskId: "t2" }, null, 5], page: 2, pageSize: 50, hasMore: true });
+  assert.deepEqual(page.items.map((item) => item.taskId), ["t1", "t2"]);
+  assert.equal(page.page, 2);
+  assert.equal(page.pageSize, 50);
+  assert.equal(page.hasMore, true);
+  assert.deepEqual(normalizeFaceHitResultPage(null).items, []);
+  assert.equal(normalizeFaceHitResultPage({ items: "nope" }).items.length, 0);
+}
+
+// ───────── 命中流汇总：缺失 / 漂移的数字按 0；total 缺失用四个状态之和；unread 与之正交 ─────────
+{
+  assert.deepEqual(normalizeFaceHitSummary({ total: 5, unread: 3, pending: 2, autoConfirmed: 2, confirmed: 0, dismissed: 1 }), {
+    total: 5,
+    unread: 3,
+    pending: 2,
+    autoConfirmed: 2,
+    confirmed: 0,
+    dismissed: 1,
+  });
+  assert.deepEqual(normalizeFaceHitSummary(null), { total: 0, unread: 0, pending: 0, autoConfirmed: 0, confirmed: 0, dismissed: 0 });
+  assert.deepEqual(normalizeFaceHitSummary({ unread: 4, pending: 1, autoConfirmed: 1, confirmed: 1, dismissed: 1 }), {
+    total: 4,
+    unread: 4,
+    pending: 1,
+    autoConfirmed: 1,
+    confirmed: 1,
+    dismissed: 1,
+  }, "total 缺失时 = 四个状态之和（unread 不计入）");
+  const drift = normalizeFaceHitSummary({ total: "9", unread: -3, pending: 2.9, autoConfirmed: Number.NaN, confirmed: null, dismissed: "1" });
+  assert.equal(drift.unread, 0, "负数按 0");
+  assert.equal(drift.pending, 2, "取整");
+  assert.equal(drift.autoConfirmed, 0);
+  assert.equal(drift.total, 2, "total 不是数字时用四个状态之和");
+}
+
+// ───────── 标记已读的返回值 ─────────
+assert.deepEqual(normalizeFaceHitReadAllResult({ updated: 3, unreadCount: 0 }), { updated: 3, unreadCount: 0 });
+assert.deepEqual(normalizeFaceHitReadAllResult({ unreadCount: 2 }), { updated: 0, unreadCount: 2 });
+assert.deepEqual(normalizeFaceHitReadAllResult(null), { updated: 0, unreadCount: 0 });
+assert.deepEqual(normalizeFaceHitReadAllResult({ updated: -1, unreadCount: "4" }), { updated: 0, unreadCount: 0 });
+assert.equal(normalizeFaceHitUnreadCount({ unreadCount: 7 }), 7);
+assert.equal(normalizeFaceHitUnreadCount({ unreadCount: -1 }), 0);
+assert.equal(normalizeFaceHitUnreadCount(null), 0);
+assert.equal(normalizeFaceHitUnreadCount(5), 0, "返回体不是对象按 0（不信任裸数字，避免把别的接口的数写进红色数字）");
+
+// ───────── 缩略图响应：imageBase64 只接受字符串；状态不认识按 none；kind 不认识的项丢弃 ─────────
+{
+  const results = normalizeFaceThumbnailResults({
+    items: [
+      { kind: "capture", id: "c1", status: "ok", imageBase64: "/9j/AAAA" },
+      { kind: "hit", id: "t1", status: "none", imageBase64: null },
+      { kind: "hit", id: "t2", status: "gone" },
+      { kind: "capture", id: "c3", status: "denied", imageBase64: "should-be-dropped" },
+    ],
+  });
+  assert.deepEqual(results, [
+    { kind: "capture", id: "c1", status: "ok", imageBase64: "/9j/AAAA" },
+    { kind: "hit", id: "t1", status: "none", imageBase64: null },
+    { kind: "hit", id: "t2", status: "gone", imageBase64: null },
+    { kind: "capture", id: "c3", status: "denied", imageBase64: null },
+  ], "只有 ok 才保留图片内容");
+  // ok 但没有可用图片（缺失 / 空串 / 不是字符串）→ none
+  for (const bad of [undefined, null, "", 42, { a: 1 }, ["/9j/"]]) {
+    assert.deepEqual(normalizeFaceThumbnailResults({ items: [{ kind: "capture", id: "c1", status: "ok", imageBase64: bad }] }), [
+      { kind: "capture", id: "c1", status: "none", imageBase64: null },
+    ], `imageBase64=${JSON.stringify(bad)}`);
+  }
+  // 状态不认识 → none（占位，不声称已删除）
+  assert.deepEqual(normalizeFaceThumbnailResults({ items: [{ kind: "hit", id: "t", status: "teapot", imageBase64: "/9j/" }] }), [{ kind: "hit", id: "t", status: "none", imageBase64: null }]);
+  // kind 不认识 / id 缺失的项丢弃
+  assert.deepEqual(normalizeFaceThumbnailResults({ items: [{ kind: "face", id: "x", status: "ok", imageBase64: "/9j/" }, { kind: "hit", status: "ok", imageBase64: "/9j/" }, null, "x"] }), []);
+  assert.deepEqual(normalizeFaceThumbnailResults(null), []);
+  assert.deepEqual(normalizeFaceThumbnailResults({ items: "nope" }), []);
+  assert.deepEqual(Object.keys(normalizeFaceThumbnailResults({ items: [{ kind: "hit", id: "t", status: "none" }] })[0]).sort(), ["id", "imageBase64", "kind", "status"]);
+}
+
+console.log("normalize.test.ts: ok");

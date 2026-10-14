@@ -327,6 +327,155 @@ public sealed class NotificationPlatformTests : IDisposable
         Assert.Equal(1, await inbox.GetUnreadCountAsync(OtherStoreGuid));
     }
 
+    // ---------- 按类型过滤（人脸比对合并入口的红色数字：unread-count?type=face.unwelcome-hit） ----------
+
+    [Fact]
+    public async Task Inbox_按类型统计未读_缺省是全部_已撤回与已过期的不计()
+    {
+        var publisher = CreatePublisher();
+        for (var i = 0; i < 3; i++)
+        {
+            await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)) with
+            {
+                Type = AppNotificationTypes.FaceUnwelcomeHit,
+                DedupeKey = $"unwelcome-hit:t{i}",
+            });
+        }
+
+        await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)));   // price.changed
+        await publisher.PublishAsync(Request(NotificationAudience.ForUsers(OtherStoreGuid)) with { Type = AppNotificationTypes.FaceUnwelcomeHit });
+        var inbox = CreateInbox();
+
+        Assert.Equal(4, await inbox.GetUnreadCountAsync(ManagerGuid));                                           // 缺省 = 全部（原行为）
+        Assert.Equal(3, await inbox.GetUnreadCountAsync(ManagerGuid, AppNotificationTypes.FaceUnwelcomeHit));
+        Assert.Equal(1, await inbox.GetUnreadCountAsync(ManagerGuid, "price.changed"));
+        Assert.Equal(0, await inbox.GetUnreadCountAsync(ManagerGuid, "no.such.type"));
+        Assert.Equal(1, await inbox.GetUnreadCountAsync(OtherStoreGuid, AppNotificationTypes.FaceUnwelcomeHit));
+
+        // 撤回一条：与收件箱同一可见口径，类型未读数跟着减少。
+        Assert.True(await publisher.RevokeAsync("unwelcome-hit:t0"));
+        Assert.Equal(2, await inbox.GetUnreadCountAsync(ManagerGuid, AppNotificationTypes.FaceUnwelcomeHit));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("a b")]
+    [InlineData("face/unwelcome")]
+    [InlineData("face'unwelcome")]
+    [InlineData("中文")]
+    public async Task Inbox_类型格式不合法_未读数与全部已读都抛ArgumentException(string type)
+    {
+        var inbox = CreateInbox();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => inbox.GetUnreadCountAsync(ManagerGuid, type));
+        await Assert.ThrowsAsync<ArgumentException>(() => inbox.MarkAllReadAsync(ManagerGuid, type));
+    }
+
+    [Fact]
+    public async Task Inbox_类型长度上限64_超过抛异常()
+    {
+        var inbox = CreateInbox();
+
+        Assert.Equal(0, await inbox.GetUnreadCountAsync(ManagerGuid, new string('a', 64)));
+        await Assert.ThrowsAsync<ArgumentException>(() => inbox.GetUnreadCountAsync(ManagerGuid, new string('a', 65)));
+    }
+
+    [Fact]
+    public async Task Inbox_按类型全部已读_只标该类型_返回该类型剩余未读数_不带类型时行为不变()
+    {
+        var publisher = CreatePublisher();
+        for (var i = 0; i < 3; i++)
+        {
+            await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid, OtherStoreGuid)) with
+            {
+                Type = AppNotificationTypes.FaceUnwelcomeHit,
+                DedupeKey = $"unwelcome-hit:t{i}",
+            });
+        }
+
+        await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)));   // price.changed
+        var inbox = CreateInbox();
+
+        var byType = await inbox.MarkAllReadAsync(ManagerGuid, AppNotificationTypes.FaceUnwelcomeHit);
+
+        Assert.Equal(3, byType.Updated);
+        Assert.Equal(0, byType.UnreadCount);                                                    // 返回的是该类型的剩余未读数
+        Assert.Equal(1, await inbox.GetUnreadCountAsync(ManagerGuid));                          // 其他类型没被动
+        Assert.Equal(3, await inbox.GetUnreadCountAsync(OtherStoreGuid, AppNotificationTypes.FaceUnwelcomeHit));   // 别人的行没被动
+
+        // 再标一次：幂等，什么都不更新。
+        var again = await inbox.MarkAllReadAsync(ManagerGuid, AppNotificationTypes.FaceUnwelcomeHit);
+        Assert.Equal(0, again.Updated);
+
+        // 不带类型：原行为，标全部，unreadCount 是总未读数。
+        var all = await inbox.MarkAllReadAsync(ManagerGuid);
+        Assert.Equal(1, all.Updated);
+        Assert.Equal(0, all.UnreadCount);
+    }
+
+    [Fact]
+    public async Task Inbox_按类型全部已读_未读很多时分批更新也能全部标完()
+    {
+        var count = 1200;   // 超过单批 500 的分块大小
+        _db.Insertable(Enumerable.Range(0, count).Select(i => new AppNotification
+        {
+            NotificationId = $"n{i:D6}",
+            Type = AppNotificationTypes.FaceUnwelcomeHit,
+            Title = "t",
+            Body = "b",
+            CreatedAtUtc = _time.Now,
+            CreatedBy = "test",
+        }).ToList()).ExecuteCommand();
+        _db.Insertable(Enumerable.Range(0, count).Select(i => new AppNotificationRecipient
+        {
+            NotificationId = $"n{i:D6}",
+            UserGUID = ManagerGuid,
+            CreatedAtUtc = _time.Now,
+        }).ToList()).ExecuteCommand();
+        var inbox = CreateInbox();
+        Assert.Equal(count, await inbox.GetUnreadCountAsync(ManagerGuid, AppNotificationTypes.FaceUnwelcomeHit));
+
+        var result = await inbox.MarkAllReadAsync(ManagerGuid, AppNotificationTypes.FaceUnwelcomeHit);
+
+        Assert.Equal(count, result.Updated);
+        Assert.Equal(0, result.UnreadCount);
+    }
+
+    [Fact]
+    public async Task 控制器_未读数与全部已读的type参数格式不合法返回400_合法时透传类型()
+    {
+        var publisher = CreatePublisher();
+        await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)) with { Type = AppNotificationTypes.FaceUnwelcomeHit });
+        await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)));
+        var controller = new BlazorApp.Api.Controllers.React.NotificationsController(
+            CreateInbox(), Mock.Of<INotificationPublisher>(), NullLogger<BlazorApp.Api.Controllers.React.NotificationsController>.Instance)
+        {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+                {
+                    User = new System.Security.Claims.ClaimsPrincipal(
+                        new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim("userId", ManagerGuid)], "test")),
+                },
+            },
+        };
+
+        Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(await controller.UnreadCount("bad type!", default));
+        Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(await controller.MarkAllRead("a/b", default));
+
+        var total = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.UnreadCount(null, default));
+        Assert.Equal(2, Assert.IsType<ApiResponse<int>>(total.Value).Data);
+        var typed = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.UnreadCount(AppNotificationTypes.FaceUnwelcomeHit, default));
+        Assert.Equal(1, Assert.IsType<ApiResponse<int>>(typed.Value).Data);
+
+        var read = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.MarkAllRead(AppNotificationTypes.FaceUnwelcomeHit, default));
+        var readData = Assert.IsType<ApiResponse<NotificationMarkReadResultDto>>(read.Value).Data!;
+        Assert.Equal(1, readData.Updated);
+        Assert.Equal(0, readData.UnreadCount);                       // 该类型的剩余未读数
+        Assert.Equal(1, await CreateInbox().GetUnreadCountAsync(ManagerGuid));   // 另一类型仍未读
+    }
+
     [Fact]
     public async Task Inbox_一次标记超过上限时拒绝()
     {

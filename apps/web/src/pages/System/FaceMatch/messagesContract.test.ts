@@ -401,4 +401,11 @@ for (const language of ['zh', 'en'] as const) {
   }
 }
 
+// 9) 审计页签的说明文案要写明缩略图查看的审计口径（后端动作 capture.thumbnails.view：每次批量请求一条、不逐张记、不含编号），中英文都要有。
+//    审计表里的动作名是原样字符串（页面没有逐个动作的文案映射），所以新动作靠说明文案让管理员读懂。
+for (const language of ['zh', 'en'] as const) {
+  const intro = getLeaf(pageMessages[language], 'faceMatch.audit.intro')
+  if (!intro.includes('capture.thumbnails.view')) throw new Error(`${language} 审计页签说明里缺少缩略图查看动作 capture.thumbnails.view`)
+}
+
 console.log('FaceMatch messagesContract.test: ok')

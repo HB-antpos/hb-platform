@@ -2,6 +2,7 @@
 // 本期只做拉取：下拉刷新、回前台刷新、点击即标已读；没有 SignalR 与系统推送。
 import { useMemo } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { faceHitUnreadQueryKey, writeFaceHitUnreadCount } from "@/modules/face-match/hit-unread";
 import { useAuthStore } from "@/store/auth-store";
 import { notificationsApi } from "./api";
 import {
@@ -59,6 +60,8 @@ export function useMarkNotificationsRead() {
       queryClient.setQueryData<NotificationInfiniteData>(notificationKeys.list(userGuid), (data) =>
         applyMarkRead(data, ids, result.unreadCount, new Date().toISOString()),
       );
+      // 这里返回的是「全部类型」的未读总数，不能直接当黑名单命中的数；让红色数字重新取一次（没启用的查询只会被标成过期）。
+      void queryClient.invalidateQueries({ queryKey: faceHitUnreadQueryKey(userGuid) });
     },
   });
 }
@@ -72,6 +75,9 @@ export function useMarkAllNotificationsRead() {
       queryClient.setQueryData<NotificationInfiniteData>(notificationKeys.list(userGuid), (data) =>
         applyMarkAllRead(data, result.unreadCount, new Date().toISOString()),
       );
+      // 全部已读后总未读为 0 就意味着命中通知也是 0，直接写回红色数字；期间又来了新通知（总数 > 0）则重新取，不猜。
+      if (result.unreadCount === 0) writeFaceHitUnreadCount(queryClient, userGuid, 0);
+      else void queryClient.invalidateQueries({ queryKey: faceHitUnreadQueryKey(userGuid) });
     },
   });
 }

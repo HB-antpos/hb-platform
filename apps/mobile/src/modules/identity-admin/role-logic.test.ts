@@ -90,7 +90,15 @@ assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 49);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 39);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 40);
+// 「人脸比对」合并入口：与后端 FullAppMenu 的 any-of 一致，六个码任一即可见；旧三项目录项保留（旧版 App 兼容）
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "face-hub")?.permissionCodes,
+  ["FaceCapture.Images.View", "FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve", "FaceMatch.Unwelcome.Review", "FaceMatch.Manage", "FaceCapture.Cameras.Manage"]
+);
+for (const legacyKey of ["face-unwelcome", "face-match-settings", "face-capture-results"]) {
+  assert.ok(fullMenus.some((item) => item.platform === "mobile" && item.key === legacyKey), `旧入口 ${legacyKey} 的目录项保留`);
+}
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "app-install")?.permissionCodes,
   ["System.ViewMobileAppInstallLinks"]

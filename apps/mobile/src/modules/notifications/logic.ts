@@ -1,5 +1,6 @@
 // 通知收件箱的纯逻辑：类型 → 跳转判定、已读状态写回缓存、时间展示、分页合并。不依赖 React Native，可在 Node 下测试。
 import type { InfiniteData } from "@tanstack/react-query";
+import type { FaceHubParams } from "../navigation/face-hub";
 import type { NotificationItem, NotificationPage } from "./types";
 
 export const NOTIFICATION_PAGE_SIZE = 20;
@@ -16,15 +17,31 @@ export function isHighPriority(item: Pick<NotificationItem, "priority">): boolea
   return item.priority >= NOTIFICATION_PRIORITY_HIGH;
 }
 
-export type NotificationTarget = { kind: "route"; routeName: "face-unwelcome" } | { kind: "none" };
+/** 点开通知后的去向：只有「人脸比对」合并页（face-hub），页签与筛选由 tab / sub / filter / hitStatus 指定。 */
+export type NotificationTarget =
+  | { kind: "route"; routeName: "face-hub"; params: FaceHubParams }
+  | { kind: "none" };
+
+/** 打开合并页所需的页签权限：抓拍页签（FaceCapture.Images.View）与名单页签（名单 Manage / Approve / Review 任一）。 */
+export interface NotificationTargetAccess {
+  canViewCapture: boolean;
+  canViewList: boolean;
+}
 
 /**
- * 点击后的去向：疑似命中通知进「不受欢迎人员名单」页（名单页没有按任务定位的入口，进列表即可；Data 里的 taskId 暂不使用），
- * 账号打不开该页（没有名单权限）就不跳转；其他类型（含将来新增的）一律是未知类型，只标已读、不跳转。
+ * 点击后的去向：疑似命中通知进「人脸比对」合并页——
+ * - 有 FaceCapture.Images.View：「抓拍」页签，选中「黑名单」并只看未读（命中通知只发给持 Review 的人，数字也是这类通知的未读数）；
+ * - 否则有名单页签权限：「名单」页签的「命中复核」；
+ * - 两者都没有（权限被收回）就不跳转，只标已读。
+ * 其他类型（含将来新增的）一律是未知类型，只标已读、不跳转。
  */
-export function resolveNotificationTarget(item: Pick<NotificationItem, "type">, canOpenUnwelcome: boolean): NotificationTarget {
-  if (item.type === NOTIFICATION_TYPE_FACE_UNWELCOME_HIT && canOpenUnwelcome) {
-    return { kind: "route", routeName: "face-unwelcome" };
+export function resolveNotificationTarget(item: Pick<NotificationItem, "type">, access: NotificationTargetAccess): NotificationTarget {
+  if (item.type !== NOTIFICATION_TYPE_FACE_UNWELCOME_HIT) return { kind: "none" };
+  if (access.canViewCapture) {
+    return { kind: "route", routeName: "face-hub", params: { tab: "capture", filter: "blacklist", hitStatus: "unread" } };
+  }
+  if (access.canViewList) {
+    return { kind: "route", routeName: "face-hub", params: { tab: "list", sub: "review" } };
   }
   return { kind: "none" };
 }

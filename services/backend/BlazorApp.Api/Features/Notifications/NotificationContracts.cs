@@ -121,7 +121,11 @@ public interface INotificationInboxService
         CancellationToken cancellationToken = default
     );
 
-    Task<int> GetUnreadCountAsync(string userGuid, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// 未读数。<paramref name="type"/> 为空 = 全部类型（原行为）；非空时只统计该业务类型（如 face.unwelcome-hit），
+    /// 格式必须是 <c>^[A-Za-z0-9._-]{1,64}$</c>，否则抛 <see cref="ArgumentException"/>（控制器转成 400）。
+    /// </summary>
+    Task<int> GetUnreadCountAsync(string userGuid, string? type = null, CancellationToken cancellationToken = default);
 
     Task<NotificationMarkReadResultDto> MarkReadAsync(
         string userGuid,
@@ -129,8 +133,13 @@ public interface INotificationInboxService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// 全部标为已读。<paramref name="type"/> 为空 = 全部类型（原行为，返回总未读数）；
+    /// 非空时只标该类型，返回的 <see cref="NotificationMarkReadResultDto.UnreadCount"/> 是<b>该类型</b>剩余未读数。
+    /// </summary>
     Task<NotificationMarkReadResultDto> MarkAllReadAsync(
         string userGuid,
+        string? type = null,
         CancellationToken cancellationToken = default
     );
 }

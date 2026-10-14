@@ -19,7 +19,8 @@ namespace BlazorApp.Api.Features.FaceMatch;
 public sealed class FaceCaptureResultService(
     SqlSugarContext context,
     IFaceCaptureImageService imageService,
-    IFaceMatchSettingsProvider settingsProvider) : IFaceCaptureResultService
+    IFaceMatchSettingsProvider settingsProvider,
+    TimeProvider? timeProvider = null) : IFaceCaptureResultService
 {
     public const int MaxPageSize = 50;
 
@@ -30,6 +31,7 @@ public sealed class FaceCaptureResultService(
     private const byte ImageKindBackground = 1;
 
     private readonly ISqlSugarClient _db = context.Db;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<FaceMatchPageDto<FaceCaptureResultDto>> ListAsync(
         FaceCaptureResultQuery query, FaceMatchActor actor, bool canViewImages, CancellationToken cancellationToken = default)
@@ -82,7 +84,7 @@ public sealed class FaceCaptureResultService(
         var pageRows = rows.Take(size).ToList();
         return new FaceMatchPageDto<FaceCaptureResultDto>
         {
-            Items = await BuildDtosAsync(pageRows, canViewImages, cancellationToken),
+            Items = await BuildDtosAsync(pageRows, actor, canViewImages, cancellationToken),
             Page = number,
             PageSize = size,
             HasMore = rows.Count > size,
@@ -127,7 +129,7 @@ public sealed class FaceCaptureResultService(
     }
 
     private async Task<List<FaceCaptureResultDto>> BuildDtosAsync(
-        IReadOnlyList<ResultRow> rows, bool canViewImages, CancellationToken cancellationToken)
+        IReadOnlyList<ResultRow> rows, FaceMatchActor actor, bool canViewImages, CancellationToken cancellationToken)
     {
         if (rows.Count == 0)
         {
@@ -145,7 +147,7 @@ public sealed class FaceCaptureResultService(
         var images = canViewImages
             ? await LoadImagesAsync(rows.Select(r => r.CaptureId).ToList(), cancellationToken)
             : new Dictionary<string, (string? Face, string? Background)>();
-        var hits = await MatchHits(rows, cancellationToken);
+        var hits = await MatchHits(rows, actor, cancellationToken);
 
         return rows.Select(r =>
         {
@@ -177,7 +179,7 @@ public sealed class FaceCaptureResultService(
     /// 同一抓拍有多张脸命中时只展示相似度最高的一条。
     /// </summary>
     private async Task<Dictionary<string, FaceCaptureResultHitDto>> MatchHits(
-        IReadOnlyList<ResultRow> rows, CancellationToken cancellationToken)
+        IReadOnlyList<ResultRow> rows, FaceMatchActor actor, CancellationToken cancellationToken)
     {
         var cameraIds = rows.Select(r => r.CameraId).Distinct().ToList();
         // 时间只用范围条件取回（避免给 IN 传一串 datetime 参数），精确对应在内存里按「摄像机 + 完全相同的时间」再筛。
@@ -192,6 +194,9 @@ public sealed class FaceCaptureResultService(
         }
 
         var notify = await FaceHitNotifyLookup.LoadAsync(_db, tasks, cancellationToken);
+        // 当前登录人自己的那条命中通知（未读与通知编号），与命中流、App 红色数字同一口径。
+        var reads = await FaceHitReadLookup.LoadAsync(
+            _db, actor.Id, tasks.Select(t => t.TaskId).ToList(), _timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
         var highBand = settingsProvider.Options.Unwelcome.HighBandScore;
         var result = new Dictionary<string, FaceCaptureResultHitDto>(StringComparer.Ordinal);
         foreach (var row in rows)
@@ -206,6 +211,7 @@ public sealed class FaceCaptureResultService(
             }
 
             var info = notify.GetValueOrDefault(best.TaskId);
+            reads.TryGetValue(best.TaskId, out var read);
             result[row.CaptureId] = new FaceCaptureResultHitDto
             {
                 TaskId = best.TaskId,
@@ -213,7 +219,10 @@ public sealed class FaceCaptureResultService(
                 Band = best.Score >= highBand ? "high" : "normal",
                 ReviewStatus = best.ReviewStatus,
                 ReviewStatusName = FaceMatchRules.ReviewStatusName(best.ReviewStatus),
+                AutoConfirmed = FaceMatchRules.IsAutoConfirmed(best.ReviewStatus, best.FirstReviewerId),
                 ImageAvailable = !string.IsNullOrEmpty(best.ImageObjectKey),
+                Unread = read?.Unread ?? false,
+                NotificationId = read?.NotificationId,
                 NotifyState = info?.State ?? FaceHitNotifyStates.Pending,
                 NotifiedAtUtc = info?.NotifiedAtUtc,
                 NotifyRecipientCount = info?.RecipientCount ?? 0,

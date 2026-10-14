@@ -1,5 +1,7 @@
 // 「人脸比对设置」页（分店维度）：选一家门店 → 修改该店人脸比对档案（需要 FaceMatch.Manage）+ 管理该店摄像头启停（需要 FaceCapture.Cameras.Manage）。
 // 入口只要两者任一；进来后每个区域按自己的权限显示。门店选择沿用 App 现有的门店服务与选择弹层，不改动全局已选门店。
+// 内容抽成 SettingsPanel（不含页面框架与权限守卫），供「人脸比对」合并页（FaceHubScreen）的「设置」页签嵌入；
+// FaceMatchSettingsScreen 保留原页面外壳（框架 + 守卫）。旧路由 face-match-settings 现在重定向到合并页，外壳不再被路由使用。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
@@ -25,10 +27,18 @@ export function FaceMatchSettingsScreen() {
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/workbench"));
   if (blocked) return <FaceScreenMessage message={blocked} backLabel={t("common:actions.back")} onBack={goBack} />;
   // 账号变化时重建页面状态，避免把上一个账号的编辑值留在屏幕上。
-  return <SettingsContent key={userGuid} onBack={goBack} />;
+  return (
+    <FaceScreenFrame title={t("settings.title")} onBack={goBack}>
+      <SettingsPanel key={userGuid} />
+    </FaceScreenFrame>
+  );
 }
 
-function SettingsContent({ onBack }: { onBack: () => void }) {
+/**
+ * 「设置」内容面板：不含页面框架与权限守卫，由外壳（单页或「人脸比对」合并页）负责。
+ * 档案有未保存修改时，离开页面仍由 useLeaveGuard 拦截；合并页切换页签不卸载本面板，编辑中的值不会丢。
+ */
+export function SettingsPanel() {
   const { t } = useAppTranslation(["faceMatch", "common"]);
   const hasPermission = useAuthStore((state) => state.access.hasPermission);
   const sections = resolveSettingsSections(hasPermission);
@@ -40,6 +50,13 @@ function SettingsContent({ onBack }: { onBack: () => void }) {
   const [profileDirty, setProfileDirty] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const allowLeaveRef = useRef(false);
+  // 键盘避让要知道本区域顶部离窗口顶部多远：嵌进合并页后上面多了页签条，KeyboardAvoidingView 自己只量得出相对父容器的位置，
+  // 所以在外层容器上量一次「窗口内 y」当作 keyboardVerticalOffset（布局变化、页签重新显示时都会重新量）。
+  const areaRef = useRef<View>(null);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const measureArea = useCallback(() => {
+    areaRef.current?.measureInWindow((_x, y) => setKeyboardOffset((previous) => (previous === y ? previous : y)));
+  }, []);
 
   // 默认选 App 当前已选门店（在可选列表里才用），否则第一家；只读取，不改全局已选门店。
   useEffect(() => {
@@ -108,10 +125,16 @@ function SettingsContent({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <FaceScreenFrame title={t("settings.title")} onBack={onBack}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        {body}
-      </KeyboardAvoidingView>
+    <>
+      <View ref={areaRef} style={styles.flex} onLayout={measureArea}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={keyboardOffset}
+        >
+          {body}
+        </KeyboardAvoidingView>
+      </View>
       <StorePickerModal
         presentation="sheet"
         visible={pickerOpen}
@@ -125,7 +148,7 @@ function SettingsContent({ onBack }: { onBack: () => void }) {
       <Snackbar visible={snack !== ""} onDismiss={() => setSnack("")} duration={4000}>
         {snack}
       </Snackbar>
-    </FaceScreenFrame>
+    </>
   );
 }
 

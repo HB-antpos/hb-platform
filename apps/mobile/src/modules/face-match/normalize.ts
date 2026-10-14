@@ -8,9 +8,15 @@ import type {
   FaceCaptureResult,
   FaceGateFacet,
   FaceGateReport,
+  FaceHitReadAllResult,
+  FaceHitResult,
+  FaceHitSummary,
   FaceMatchConfig,
   FaceMatchPage,
   FaceStoreProfile,
+  FaceThumbnailKind,
+  FaceThumbnailResult,
+  FaceThumbnailStatus,
   FaceUnwelcomeBand,
   FaceUnwelcomeEntry,
   FaceUnwelcomeTask,
@@ -228,6 +234,10 @@ function normalizeFaceCaptureHit(value: unknown): FaceCaptureHit | null {
     notifiedAtUtc: asNullableString(raw.notifiedAtUtc),
     notifyRecipientCount: asNumber(raw.notifyRecipientCount),
     notifyReadCount: asNumber(raw.notifyReadCount),
+    // 只认明确的 true：旧后端没有这三个字段，缺失时「不是自动确认、不是未读、没有通知编号」。
+    autoConfirmed: raw.autoConfirmed === true,
+    unread: raw.unread === true,
+    notificationId: asNullableString(raw.notificationId),
   };
 }
 
@@ -253,6 +263,106 @@ export function normalizeFaceCaptureResult(value: unknown): FaceCaptureResult {
 
 export function normalizeFaceCaptureResultPage(value: unknown): FaceMatchPage<FaceCaptureResult> {
   return normalizePage(value, normalizeFaceCaptureResult);
+}
+
+// ───────────── 命中流 ─────────────
+
+/** 命中流的一行；没有任务编号的行无法打开 / 标记已读 / 取缩略图，由分页归一化丢弃。 */
+export function normalizeFaceHitResult(value: unknown): FaceHitResult {
+  const raw = asRecord(value);
+  return {
+    taskId: asString(raw.taskId),
+    captureId: asNullableString(raw.captureId),
+    storeCode: asString(raw.storeCode),
+    storeName: asNullableString(raw.storeName),
+    cameraId: asString(raw.cameraId),
+    capturedAtUtc: asString(raw.capturedAtUtc),
+    scorePercent: asNumber(raw.scorePercent),
+    band: asBand(raw.band),
+    reviewStatus: asNumber(raw.reviewStatus),
+    reviewStatusName: asString(raw.reviewStatusName),
+    autoConfirmed: raw.autoConfirmed === true,
+    imageAvailable: raw.imageAvailable === true,
+    unread: raw.unread === true,
+    notificationId: asNullableString(raw.notificationId),
+    notifyState: asString(raw.notifyState),
+    notifiedAtUtc: asNullableString(raw.notifiedAtUtc),
+    notifyRecipientCount: asNumber(raw.notifyRecipientCount),
+    notifyReadCount: asNumber(raw.notifyReadCount),
+    // 能否复核只认服务端的 canReview，App 不自己推断。
+    canReview: raw.canReview === true,
+    decision: asNullableString(raw.decision),
+    staffScorePercent: asNullableNumber(raw.staffScorePercent),
+    visitScorePercent: asNullableNumber(raw.visitScorePercent),
+    faceCount: asNullableNumber(raw.faceCount),
+  };
+}
+
+export function normalizeFaceHitResultPage(value: unknown): FaceMatchPage<FaceHitResult> {
+  const page = normalizePage(value, normalizeFaceHitResult);
+  return { ...page, items: page.items.filter((item) => item.taskId !== "") };
+}
+
+function asCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+/** 命中流汇总：缺失 / 类型漂移的数字一律按 0；total 缺失时用四个状态之和。 */
+export function normalizeFaceHitSummary(value: unknown): FaceHitSummary {
+  const raw = asRecord(value);
+  const pending = asCount(raw.pending);
+  const autoConfirmed = asCount(raw.autoConfirmed);
+  const confirmed = asCount(raw.confirmed);
+  const dismissed = asCount(raw.dismissed);
+  return {
+    total: typeof raw.total === "number" && Number.isFinite(raw.total) ? asCount(raw.total) : pending + autoConfirmed + confirmed + dismissed,
+    unread: asCount(raw.unread),
+    pending,
+    autoConfirmed,
+    confirmed,
+    dismissed,
+  };
+}
+
+/** 标记已读的返回值：{ unreadCount } 或 { updated, unreadCount }；缺失按 0。 */
+export function normalizeFaceHitReadAllResult(value: unknown): FaceHitReadAllResult {
+  const raw = asRecord(value);
+  return { updated: asCount(raw.updated), unreadCount: asCount(raw.unreadCount) };
+}
+
+/** POST /results/hits/{taskId}/read 只返回 { unreadCount }。 */
+export function normalizeFaceHitUnreadCount(value: unknown): number {
+  return asCount(asRecord(value).unreadCount);
+}
+
+// ───────────── 缩略图 ─────────────
+
+const THUMBNAIL_KINDS: readonly FaceThumbnailKind[] = ["capture", "hit"];
+const THUMBNAIL_STATUSES: readonly FaceThumbnailStatus[] = ["ok", "none", "gone", "denied"];
+
+/**
+ * 缩略图批量响应：与请求同序，但调用方按 kind + id 对应，不依赖顺序。
+ * - kind 不认识的项丢弃（不编造对应关系）；status 不认识按 none（占位图标，不声称「已删除」）；
+ * - imageBase64 只接受非空字符串，且只在 status=ok 时保留；ok 却没有图的按 none。
+ */
+export function normalizeFaceThumbnailResults(value: unknown): FaceThumbnailResult[] {
+  const raw = asRecord(value);
+  const results: FaceThumbnailResult[] = [];
+  if (!Array.isArray(raw.items)) return results;
+  for (const entry of raw.items) {
+    const item = asRecord(entry);
+    const kind = THUMBNAIL_KINDS.find((candidate) => candidate === item.kind);
+    const id = asString(item.id);
+    if (!kind || !id) continue;
+    const status = THUMBNAIL_STATUSES.find((candidate) => candidate === item.status) ?? "none";
+    const imageBase64 = typeof item.imageBase64 === "string" && item.imageBase64 !== "" ? item.imageBase64 : null;
+    if (status === "ok") {
+      results.push(imageBase64 ? { kind, id, status, imageBase64 } : { kind, id, status: "none", imageBase64: null });
+    } else {
+      results.push({ kind, id, status, imageBase64: null });
+    }
+  }
+  return results;
 }
 
 export function normalizeFaceCamera(value: unknown): FaceCamera {

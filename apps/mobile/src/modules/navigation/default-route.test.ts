@@ -461,39 +461,87 @@ assertEqual(
   "账号会话必须保留后端下发的日结记录入口"
 );
 
-// 人脸比对两个入口：路径已登记；参考照片与命中抓拍是生物识别信息，设备会话没有用户账号，设备模式必须隐藏。
+// 「人脸比对」合并入口 face-hub：路径已登记；参考照片与命中抓拍是生物识别信息，设备会话没有用户账号，设备模式必须隐藏。
+// 旧三个入口（名单 / 设置 / 抓拍与比对）路径保留（深链、旧通知、历史书签），但新版菜单可见集合里不再出现——后端为兼容旧版 App 仍会下发它们。
+assertEqual(
+  TAB_PATHS["face-hub"],
+  "/(shell)/face-hub",
+  "face hub route is registered as a valid tab path"
+);
 assertEqual(
   TAB_PATHS["face-unwelcome"],
   "/(shell)/face-unwelcome",
-  "face unwelcome route is registered as a valid tab path"
+  "legacy face unwelcome route path is kept for deep links"
 );
 assertEqual(
   TAB_PATHS["face-match-settings"],
   "/(shell)/face-match-settings",
-  "face match settings route is registered as a valid tab path"
+  "legacy face match settings route path is kept for deep links"
 );
 assertEqual(
   getVisibleTabRouteNames({
-    routeNames: ["product-query", "face-unwelcome", "face-match-settings"],
+    routeNames: ["product-query", "face-hub", "face-unwelcome", "face-match-settings", "face-capture-results"],
     isDeviceMode: true,
   }).join(","),
   "workbench,product-query,settings",
-  "设备模式收到显式人脸比对菜单时也必须隐藏这两个入口"
+  "设备模式收到显式人脸比对菜单时必须隐藏合并入口与旧三个入口"
+);
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["daily-closes", "face-hub", "face-unwelcome", "face-match-settings", "face-capture-results"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,daily-closes,face-hub,settings",
+  "账号会话只显示合并入口 face-hub，旧三个入口不再出现在可见集合里"
 );
 assertEqual(
   getVisibleTabRouteNames({
     routeNames: ["daily-closes", "face-unwelcome", "face-match-settings"],
     isDeviceMode: false,
   }).join(","),
-  "workbench,daily-closes,face-unwelcome,face-match-settings,settings",
-  "账号会话必须保留后端下发的人脸比对入口"
+  "workbench,daily-closes,settings",
+  "后端没有下发 face-hub 时也不显示旧三个入口（须先部署后端再发新版 App）"
 );
 
-// 抓拍与比对、通知收件箱：路径已登记；抓拍结果含生物识别照片、收件箱按用户账号计算，设备会话必须隐藏，账号会话照后端菜单显示。
+// 旧三个路由是重定向壳：页面自己会跳到合并页，路由纠偏不能抢在它之前把深链弹回默认页
+for (const legacyRouteName of ["face-unwelcome", "face-match-settings", "face-capture-results"]) {
+  assertEqual(
+    resolveTabRouteCorrection({
+      currentRouteName: legacyRouteName,
+      hasAppliedDefaultRoute: true,
+      isDeviceMode: false,
+      routeNames: ["home", "face-hub", "settings"],
+    }),
+    null,
+    `${legacyRouteName} 旧路由不被纠偏抢走，交给页面重定向到合并页`
+  );
+}
+assertEqual(
+  resolveTabRouteCorrection({
+    currentRouteName: "face-hub",
+    hasAppliedDefaultRoute: true,
+    isDeviceMode: false,
+    routeNames: ["home", "face-hub", "settings"],
+  }),
+  null,
+  "合并页在菜单里时允许停留"
+);
+assertEqual(
+  resolveTabRouteCorrection({
+    currentRouteName: "face-hub",
+    hasAppliedDefaultRoute: true,
+    isDeviceMode: false,
+    routeNames: ["home", "face-unwelcome", "settings"],
+  }),
+  "/(shell)/workbench",
+  "没有合并入口（无任何人脸比对权限）时深链到合并页被纠偏回默认入口"
+);
+
+// 抓拍与比对（旧路由）、通知收件箱：路径已登记；收件箱按用户账号计算，设备会话必须隐藏，账号会话照后端菜单显示。
 assertEqual(
   TAB_PATHS["face-capture-results"],
   "/(shell)/face-capture-results",
-  "face capture results route is registered as a valid tab path"
+  "legacy face capture results route path is kept for deep links"
 );
 assertEqual(
   TAB_PATHS.notifications,
@@ -510,11 +558,11 @@ assertEqual(
 );
 assertEqual(
   getVisibleTabRouteNames({
-    routeNames: ["face-unwelcome", "face-capture-results", "notifications"],
+    routeNames: ["face-hub", "notifications"],
     isDeviceMode: false,
   }).join(","),
-  "workbench,face-unwelcome,face-capture-results,notifications,settings",
-  "账号会话必须保留后端下发的抓拍与比对和通知入口"
+  "workbench,face-hub,notifications,settings",
+  "账号会话必须保留后端下发的合并入口和通知入口"
 );
 
 assertEqual(

@@ -1009,8 +1009,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(42, menu.Count);
+        Assert.Equal(43, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
+        Assert.Contains(menu, item => item.RouteName == "face-hub");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
         Assert.Contains(menu, item => item.RouteName == "face-match-settings");
         Assert.Contains(menu, item => item.RouteName == "face-capture-results");
@@ -1657,6 +1658,88 @@ public class NavigationServiceTests
         var menu = _service.BuildDeviceAppMenu("Mobile");
 
         Assert.DoesNotContain(menu, item => item.RouteName == "daily-closes");
+    }
+
+    // ---------- 人脸比对合并入口 face-hub ----------
+
+    [Theory]
+    [InlineData(Permissions.FaceCapture.Images.View)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Manage)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Approve)]
+    [InlineData(Permissions.FaceMatch.Unwelcome.Review)]
+    [InlineData(Permissions.FaceMatch.Manage)]
+    [InlineData(Permissions.FaceCapture.Cameras.Manage)]
+    public void BuildAppMenu_人脸比对合并入口_六个权限码任一就可见(string permission)
+    {
+        var menu = _service.BuildAppMenu(CreateUser(new Claim("permission", permission)));
+
+        var item = Assert.Single(menu, entry => entry.RouteName == "face-hub");
+        Assert.Equal("tabs.faceHub", item.TitleKey);
+        Assert.Equal("face-recognition", item.Icon);
+    }
+
+    [Fact]
+    public void BuildAppMenu_人脸比对合并入口_没有任何人脸权限不可见_客流统计权限不算()
+    {
+        Assert.DoesNotContain(_service.BuildAppMenu(CreateUser()), entry => entry.RouteName == "face-hub");
+        // 客流统计权限（FaceMatch.Traffic.View）与 Users.View 都不在六个码里：不能顺带打开合并入口。
+        foreach (var other in new[] { Permissions.FaceMatch.Traffic.View, Permissions.Users.View })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", other))),
+                entry => entry.RouteName == "face-hub"
+            );
+        }
+    }
+
+    [Fact]
+    public void BuildAppMenu_人脸比对合并入口_管理员别名都可见_设备菜单不含()
+    {
+        foreach (var role in new[] { "Admin", "管理员", "SuperAdmin", "超级管理员" })
+        {
+            Assert.Contains(
+                _service.BuildAppMenu(CreateUser(new Claim(ClaimTypes.Role, role))),
+                entry => entry.RouteName == "face-hub"
+            );
+        }
+
+        // 生物识别入口：设备会话没有用户账号与权限，设备模式菜单（含仓库设备）不能暴露合并入口。
+        foreach (var deviceType in new[] { "Mobile", "Warehouse", "PDA-Warehouse" })
+        {
+            Assert.DoesNotContain(_service.BuildDeviceAppMenu(deviceType), entry => entry.RouteName == "face-hub");
+        }
+    }
+
+    [Fact]
+    public void BuildAppMenu_人脸比对合并入口_旧三个入口保持原权限口径不变_兼容旧版App()
+    {
+        // 只有看图权限：看得到合并入口与旧的「抓拍与比对」，看不到旧的名单与设置入口。
+        var imagesOnly = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.FaceCapture.Images.View)));
+        Assert.Contains(imagesOnly, entry => entry.RouteName == "face-hub");
+        Assert.Contains(imagesOnly, entry => entry.RouteName == "face-capture-results");
+        Assert.DoesNotContain(imagesOnly, entry => entry.RouteName is "face-unwelcome" or "face-match-settings");
+
+        // 名单权限：旧名单入口仍在，旧设置入口仍不在。
+        var review = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.FaceMatch.Unwelcome.Review)));
+        Assert.Contains(review, entry => entry.RouteName == "face-hub");
+        Assert.Contains(review, entry => entry.RouteName == "face-unwelcome");
+        Assert.DoesNotContain(review, entry => entry.RouteName is "face-match-settings" or "face-capture-results");
+
+        // 设置权限：旧设置入口仍在。
+        var manage = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.FaceMatch.Manage)));
+        Assert.Contains(manage, entry => entry.RouteName == "face-hub");
+        Assert.Contains(manage, entry => entry.RouteName == "face-match-settings");
+        Assert.DoesNotContain(manage, entry => entry.RouteName is "face-unwelcome" or "face-capture-results");
+    }
+
+    [Fact]
+    public void BuildAppMenu_人脸比对合并入口_排在旧三项之前()
+    {
+        // Web 角色菜单预览（expoRoleMenuPreview.ts）按本菜单的源码顺序逐项对照，顺序变了那边的测试会失败。
+        var names = _service.BuildAppMenu(CreateUser(new Claim(ClaimTypes.Role, "Admin"))).Select(entry => entry.RouteName).ToList();
+
+        Assert.True(names.IndexOf("face-hub") >= 0);
+        Assert.True(names.IndexOf("face-hub") < names.IndexOf("face-unwelcome"));
     }
 
     [Theory]

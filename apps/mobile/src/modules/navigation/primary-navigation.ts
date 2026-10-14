@@ -1,3 +1,5 @@
+import { FACE_HUB_ROUTE_NAME, isLegacyFaceRouteName } from "./face-hub";
+
 export type PrimaryNavigationKey =
   | "workbench"
   | "scan"
@@ -69,7 +71,7 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     return "scan";
   }
 
-  // 商品进销、仓库商品进销、订单拣货、销售订单查询、员工操作日志、日结记录、人脸比对三个入口与通知收件箱都从工作台进入，是子页，不额外占用一级导航。
+  // 商品进销、仓库商品进销、订单拣货、销售订单查询、员工操作日志、日结记录、人脸比对（合并入口 face-hub 与保留的旧三个路由）与通知收件箱都从工作台进入，是子页，不额外占用一级导航。
   if (
     routeName === "product-insights" ||
     routeName === "warehouse-picking" ||
@@ -77,9 +79,8 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
     routeName === "sales-orders" ||
     routeName === "legacy-employee-logs" ||
     routeName === "daily-closes" ||
-    routeName === "face-unwelcome" ||
-    routeName === "face-match-settings" ||
-    routeName === "face-capture-results" ||
+    routeName === FACE_HUB_ROUTE_NAME ||
+    isLegacyFaceRouteName(routeName) ||
     routeName === "notifications"
   ) {
     return "workbench";
@@ -206,4 +207,48 @@ export function resolveMeTabLabel({
   }
 
   return fullName?.trim() || username?.trim() || fallbackLabel;
+}
+
+// ───────────── 底部导航徽标（红色数字） ─────────────
+
+/** 徽标封顶值：超过显示「99+」（与设计稿、工作台入口角标一致）。 */
+export const PRIMARY_TAB_BADGE_MAX = 99;
+
+/** 供底部导航徽标使用的各类计数；目前只有「工作台」页签挂「黑名单命中未读数」。 */
+export interface PrimaryTabBadgeCounts {
+  /** 当前登录人还没看的「黑名单命中」通知数（只有持 FaceMatch.Unwelcome.Review 的人才会 > 0）。 */
+  faceHitUnreadCount: number;
+}
+
+/** 把计数规整成非负整数：负数、NaN、Infinity 一律按 0。 */
+function normalizeBadgeCount(count: number): number {
+  return Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0;
+}
+
+/** 徽标文字：> 0 才有；超过 99 显示「99+」；否则 null（不显示徽标）。 */
+export function formatUnreadBadgeText(count: number, max: number = PRIMARY_TAB_BADGE_MAX): string | null {
+  const safe = normalizeBadgeCount(count);
+  if (safe <= 0) return null;
+  return safe > max ? `${max}+` : String(safe);
+}
+
+export interface PrimaryTabBadge {
+  /** 真实数字（给无障碍标签读，不封顶）。 */
+  count: number;
+  /** 徽标上显示的文字（已封顶）。 */
+  text: string;
+}
+
+/**
+ * 某个一级页签要不要挂徽标、挂什么。
+ * 只有「工作台」页签挂红色数字：工作台里的「人脸比对」入口行有同一个数字，底部导航把它带到每个页面上。
+ */
+export function resolvePrimaryTabBadge(
+  key: PrimaryNavigationKey,
+  counts: PrimaryTabBadgeCounts,
+): PrimaryTabBadge | null {
+  if (key !== "workbench") return null;
+  const count = normalizeBadgeCount(counts.faceHitUnreadCount);
+  const text = formatUnreadBadgeText(count);
+  return text ? { count, text } : null;
 }

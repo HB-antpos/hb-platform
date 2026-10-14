@@ -16,6 +16,12 @@ export const FACE_SOFT = {
   danger: "#FEF3F2",
 } as const;
 
+/** 黑名单命中的强调色（设计稿 badgeSolid / hitBorder）：实心红标签与角标、未读红条、命中卡片描边。 */
+export const FACE_HIT = {
+  solid: "#D92D20",
+  border: "#FDA29B",
+} as const;
+
 export type FaceTone = StatusTone | "info";
 
 const TONES: Record<FaceTone, { background: string; foreground: string }> = {
@@ -73,12 +79,15 @@ export function Notice({
   text,
   icon,
   action,
+  trailing,
   style,
 }: {
   tone?: FaceTone;
   text: string;
   icon?: IconName;
   action?: { label: string; onPress: () => void };
+  /** 提示条最右侧的附加控件（例如抓拍页的「眼睛」按钮）。 */
+  trailing?: ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
   const palette = TONES[tone];
@@ -92,15 +101,16 @@ export function Notice({
           <Text style={[styles.noticeAction, { color: palette.foreground }]}>{action.label}</Text>
         </Pressable>
       ) : null}
+      {trailing}
     </View>
   );
 }
 
-/** 状态标签。 */
-export function Tag({ label, tone = "neutral", icon }: { label: string; tone?: FaceTone; icon?: IconName }) {
-  const palette = TONES[tone];
+/** 状态标签。solid：实心强调（仅 danger 有实心样式：红底白字，用于「黑名单命中」）。 */
+export function Tag({ label, tone = "neutral", icon, solid, style }: { label: string; tone?: FaceTone; icon?: IconName; solid?: boolean; style?: StyleProp<ViewStyle> }) {
+  const palette = solid && tone === "danger" ? { background: FACE_HIT.solid, foreground: HB_COLORS.white } : TONES[tone];
   return (
-    <View style={[styles.tag, { backgroundColor: palette.background }]}>
+    <View style={[styles.tag, { backgroundColor: palette.background }, style]}>
       {icon ? <MaterialCommunityIcons name={icon} size={12} color={palette.foreground} /> : null}
       <Text style={[styles.tagText, { color: palette.foreground }]} numberOfLines={1}>
         {label}
@@ -109,32 +119,66 @@ export function Tag({ label, tone = "neutral", icon }: { label: string; tone?: F
   );
 }
 
-/** 筛选 chip：选中态用品牌色，触控高度不小于 36。 */
+/**
+ * 筛选 chip：选中态用品牌色，触控高度不小于 36（compact 的二级筛选 32，外加 hitSlop 补足触控区）。
+ * tone="danger"：红色描边（黑名单）；选中为淡红底、红边、粗体。badge：右侧红色实心数字（null / 空不显示）。
+ */
 export function FilterChip({
   label,
   selected,
   onPress,
   icon,
   disabled,
+  tone = "default",
+  badge,
+  compact,
+  accessibilityLabel,
 }: {
   label: string;
   selected?: boolean;
   onPress: () => void;
   icon?: IconName;
   disabled?: boolean;
+  tone?: "default" | "danger";
+  badge?: string | null;
+  compact?: boolean;
+  accessibilityLabel?: string;
 }) {
+  const danger = tone === "danger";
+  const iconColor = danger ? HB_COLORS.danger : selected ? HB_COLORS.action : HB_COLORS.textSecondary;
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected: Boolean(selected), disabled: Boolean(disabled) }}
       disabled={disabled}
+      hitSlop={compact ? { top: 2, bottom: 2 } : undefined}
       onPress={onPress}
-      style={[styles.chip, selected ? styles.chipOn : null, disabled ? styles.disabled : null]}
+      style={[
+        styles.chip,
+        compact ? styles.chipCompact : null,
+        danger ? styles.chipDanger : null,
+        selected ? (danger ? styles.chipDangerOn : styles.chipOn) : null,
+        disabled ? styles.disabled : null,
+      ]}
     >
-      {icon ? <MaterialCommunityIcons name={icon} size={15} color={selected ? HB_COLORS.action : HB_COLORS.textSecondary} /> : null}
-      <Text style={[styles.chipText, selected ? styles.chipTextOn : null]} numberOfLines={1}>
+      {icon ? <MaterialCommunityIcons name={icon} size={compact ? 14 : 16} color={iconColor} /> : null}
+      <Text
+        style={[
+          styles.chipText,
+          compact ? styles.chipTextCompact : null,
+          danger ? styles.chipTextDanger : null,
+          selected ? (danger ? styles.chipTextDangerOn : styles.chipTextOn) : null,
+        ]}
+        numberOfLines={1}
+      >
         {label}
       </Text>
+      {badge ? (
+        <View style={styles.chipBadge}>
+          <Text style={styles.chipBadgeText}>{badge}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -218,8 +262,24 @@ const styles = StyleSheet.create({
     backgroundColor: HB_COLORS.white,
   },
   chipOn: { borderColor: HB_COLORS.action, backgroundColor: FACE_SOFT.accent },
+  chipCompact: { minHeight: 32, paddingHorizontal: 11 },
+  chipDanger: { borderColor: FACE_HIT.border },
+  chipDangerOn: { borderColor: HB_COLORS.danger, backgroundColor: FACE_SOFT.danger },
   chipText: { fontSize: 13, color: HB_COLORS.textPrimary, flexShrink: 1 },
+  chipTextCompact: { fontSize: 13 },
   chipTextOn: { color: HB_COLORS.action, fontWeight: "700" },
+  chipTextDanger: { color: HB_COLORS.danger },
+  chipTextDangerOn: { color: HB_COLORS.danger, fontWeight: "700" },
+  chipBadge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: FACE_HIT.solid,
+  },
+  chipBadgeText: { fontSize: 11, fontWeight: "800", color: HB_COLORS.white, fontVariant: ["tabular-nums"] },
   disabled: { opacity: 0.5 },
   card: {
     marginHorizontal: HB_SPACING.md,

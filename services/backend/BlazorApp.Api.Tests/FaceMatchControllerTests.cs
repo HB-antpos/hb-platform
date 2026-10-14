@@ -23,6 +23,8 @@ public sealed class FaceMatchControllerTests
     private readonly Mock<IFaceTrafficService> _traffic = new(MockBehavior.Strict);
     private readonly Mock<IFaceUnwelcomeService> _unwelcome = new(MockBehavior.Strict);
     private readonly Mock<IFaceCaptureResultService> _results = new(MockBehavior.Strict);
+    private readonly Mock<IFaceHitResultService> _hits = new(MockBehavior.Strict);
+    private readonly Mock<IFaceThumbnailService> _thumbnails = new(MockBehavior.Strict);
     private readonly Mock<IAuthorizationService> _authorization = new();
 
     private static readonly string[] AllCodes =
@@ -68,6 +70,10 @@ public sealed class FaceMatchControllerTests
         [nameof(FaceMatchController.TaskImage), Permissions.FaceMatch.Unwelcome.Review],
         [nameof(FaceMatchController.ReferencePhoto), Permissions.FaceMatch.Unwelcome.Review],
         [nameof(FaceMatchController.ListResults), Permissions.FaceCapture.Images.View],
+        [nameof(FaceMatchController.ListHits), Permissions.FaceCapture.Images.View],
+        [nameof(FaceMatchController.HitSummary), Permissions.FaceCapture.Images.View],
+        [nameof(FaceMatchController.HitImage), Permissions.FaceCapture.Images.View],
+        [nameof(FaceMatchController.Thumbnails), Permissions.FaceCapture.Images.View],
     ];
 
     [Theory]
@@ -86,7 +92,7 @@ public sealed class FaceMatchControllerTests
         var anyOf = new[]
         {
             nameof(FaceMatchController.Config), nameof(FaceMatchController.ListEntries), nameof(FaceMatchController.Stats),
-            nameof(FaceMatchController.ResultImage),
+            nameof(FaceMatchController.ResultImage), nameof(FaceMatchController.MarkHitRead),
         };
         foreach (var name in anyOf)
         {
@@ -289,6 +295,153 @@ public sealed class FaceMatchControllerTests
         Assert.Equal("nosniff", controller.Response.Headers["X-Content-Type-Options"].ToString());
     }
 
+    // ---------- 命中流与缩略图（人脸比对合并入口） ----------
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 命中流列表_把查询条件与操作人透传_canReview只看Review权限_看图权限不顶替(bool hasReview)
+    {
+        FaceHitResultQuery? query = null;
+        FaceMatchActor? actor = null;
+        bool? canReview = null;
+        _hits.Setup(h => h.ListAsync(It.IsAny<FaceHitResultQuery>(), It.IsAny<FaceMatchActor>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<FaceHitResultQuery, FaceMatchActor, bool, CancellationToken>((q, a, r, _) => { query = q; actor = a; canReview = r; })
+            .ReturnsAsync(new FaceMatchPageDto<FaceHitResultDto>());
+        var from = new DateTime(2026, 10, 14, 0, 0, 0, DateTimeKind.Utc);
+        var granted = hasReview
+            ? new[] { Permissions.FaceCapture.Images.View, Permissions.FaceMatch.Unwelcome.Review }
+            : new[] { Permissions.FaceCapture.Images.View };
+
+        var result = await CreateController(granted).ListHits("1042", "unread", from, null, 2, 30, default);
+
+        Assert.Equal(200, Assert.IsType<OkObjectResult>(result).StatusCode);
+        Assert.Equal(new FaceHitResultQuery { StoreCode = "1042", HitStatus = "unread", FromUtc = from, Page = 2, PageSize = 30 }, query);
+        Assert.Equal("u-1", actor!.Id);
+        Assert.Equal(hasReview, canReview);
+    }
+
+    [Fact]
+    public async Task 命中流列表_状态取值不对的业务错误转成400_错误码是字段无效()
+    {
+        _hits.Setup(h => h.ListAsync(It.IsAny<FaceHitResultQuery>(), It.IsAny<FaceMatchActor>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(FaceMatchErrors.Invalid("hitStatus", "命中状态取值不正确。"));
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View).ListHits(null, "nonsense", null, null, 1, 20, default);
+
+        Assert.Equal(400, StatusOf(result));
+        Assert.Equal("FACE_MATCH_FIELD_INVALID", ErrorCode(result));
+    }
+
+    [Fact]
+    public async Task 命中流汇总_透传门店与时间条件()
+    {
+        FaceHitResultQuery? query = null;
+        _hits.Setup(h => h.GetSummaryAsync(It.IsAny<FaceHitResultQuery>(), It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .Callback<FaceHitResultQuery, FaceMatchActor, CancellationToken>((q, _, _) => query = q)
+            .ReturnsAsync(new FaceHitSummaryDto { Total = 5, Unread = 3 });
+        var from = new DateTime(2026, 10, 14, 0, 0, 0, DateTimeKind.Utc);
+        var to = from.AddDays(1);
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View).HitSummary("1042", from, to, default);
+
+        var envelope = Assert.IsType<ApiResponse<FaceHitSummaryDto>>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(3, envelope.Data!.Unread);
+        Assert.Equal(new FaceHitResultQuery { StoreCode = "1042", FromUtc = from, ToUtc = to }, query);
+    }
+
+    [Theory]
+    [InlineData(new string[0], false)]
+    [InlineData(new[] { Permissions.FaceMatch.Unwelcome.Manage }, false)]      // 名单管理不等于能看命中通知
+    [InlineData(new[] { Permissions.FaceMatch.Traffic.View }, false)]
+    [InlineData(new[] { Permissions.FaceCapture.Images.View }, true)]
+    [InlineData(new[] { Permissions.FaceMatch.Unwelcome.Review }, true)]        // 命中通知只发给持有 Review 的人，他们不一定有看图权限
+    [InlineData(new[] { Permissions.FaceCapture.Images.View, Permissions.FaceMatch.Unwelcome.Review }, true)]
+    public async Task 命中通知标已读_看图或复核任一权限即可_都没有返回403(string[] granted, bool allowed)
+    {
+        FaceMatchActor? actor = null;
+        _hits.Setup(h => h.MarkReadAsync("t1", It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .Callback<string, FaceMatchActor, CancellationToken>((_, a, _) => actor = a)
+            .ReturnsAsync(new FaceHitReadResultDto { UnreadCount = 2 });
+
+        var result = await CreateController(granted).MarkHitRead("t1", default);
+
+        Assert.Equal(allowed ? 200 : 403, StatusOf(result));
+        if (allowed)
+        {
+            Assert.Equal(2, Assert.IsType<ApiResponse<FaceHitReadResultDto>>(Assert.IsType<OkObjectResult>(result).Value).Data!.UnreadCount);
+            Assert.Equal("u-1", actor!.Id);
+        }
+        else
+        {
+            Assert.Equal("FACE_MATCH_FORBIDDEN", ErrorCode(result));
+            Assert.Null(actor);                                                  // 没有权限时根本不进服务层
+        }
+    }
+
+    [Fact]
+    public async Task 命中通知标已读_任务不存在或越权的404原样映射()
+    {
+        _hits.Setup(h => h.MarkReadAsync("nope", It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(FaceMatchErrors.NotFound("任务"));
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View).MarkHitRead("nope", default);
+
+        Assert.Equal(404, StatusOf(result));
+        Assert.Equal("FACE_MATCH_NOT_FOUND", ErrorCode(result));
+    }
+
+    [Fact]
+    public async Task 命中图原图_复用复核页同一套读取与审计_只返回字节_已删除是404信封()
+    {
+        _unwelcome.Setup(u => u.GetTaskImageAsync("t1", It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FaceMatchImageContent(FaceImageTestData.Jpeg, "image/jpeg"));
+        _unwelcome.Setup(u => u.GetTaskImageAsync("gone", It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FaceMatchException(404, "FACE_MATCH_IMAGE_GONE", "图片不存在或已被清理。"));
+        var controller = CreateController(Permissions.FaceCapture.Images.View);
+
+        var ok = await controller.HitImage("t1", default);
+
+        Assert.Equal("image/jpeg", Assert.IsType<FileContentResult>(ok).ContentType);
+        Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
+        Assert.Equal("nosniff", controller.Response.Headers["X-Content-Type-Options"].ToString());
+        var gone = await CreateController(Permissions.FaceCapture.Images.View).HitImage("gone", default);
+        Assert.Equal(404, StatusOf(gone));
+        Assert.Equal("FACE_MATCH_IMAGE_GONE", ErrorCode(gone));
+    }
+
+    [Fact]
+    public async Task 缩略图批量接口_请求体透传给服务_没有请求体按空请求处理_请求体大小受限()
+    {
+        FaceThumbnailRequest? received = null;
+        _thumbnails.Setup(t => t.GetThumbnailsAsync(It.IsAny<FaceThumbnailRequest>(), It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .Callback<FaceThumbnailRequest, FaceMatchActor, CancellationToken>((r, _, _) => received = r)
+            .ReturnsAsync(new FaceThumbnailResponse { Items = [new FaceThumbnailItemDto { Kind = "hit", Id = "t1", Status = "none" }] });
+        var request = new FaceThumbnailRequest { Items = [new FaceThumbnailRequestItem { Kind = "hit", Id = "t1" }] };
+
+        var ok = await CreateController(Permissions.FaceCapture.Images.View).Thumbnails(request, default);
+        Assert.Equal(200, StatusOf(ok));
+        Assert.Same(request, received);
+
+        await CreateController(Permissions.FaceCapture.Images.View).Thumbnails(null, default);
+        Assert.Null(received!.Items);                                            // 空请求交给服务层按 400 处理
+
+        var limit = typeof(FaceMatchController).GetMethod(nameof(FaceMatchController.Thumbnails))!.GetCustomAttribute<RequestSizeLimitAttribute>();
+        Assert.NotNull(limit);
+    }
+
+    [Fact]
+    public async Task 缩略图批量接口_条数不对的业务错误转成400()
+    {
+        _thumbnails.Setup(t => t.GetThumbnailsAsync(It.IsAny<FaceThumbnailRequest>(), It.IsAny<FaceMatchActor>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(FaceMatchErrors.Invalid("items", "一次请求需要 1 到 30 项。"));
+
+        var result = await CreateController(Permissions.FaceCapture.Images.View).Thumbnails(new FaceThumbnailRequest(), default);
+
+        Assert.Equal(400, StatusOf(result));
+        Assert.Equal("FACE_MATCH_FIELD_INVALID", ErrorCode(result));
+    }
+
     // ---------- 操作人 ----------
 
     [Fact]
@@ -419,7 +572,8 @@ public sealed class FaceMatchControllerTests
         var claims = new List<Claim> { new(ClaimTypes.Name, "tester") };
         if (userId != null) claims.Add(new Claim("userId", userId));
         claims.AddRange((roles ?? []).Select(role => new Claim(ClaimTypes.Role, role)));
-        var controller = new FaceMatchController(_profiles.Object, _staff.Object, _traffic.Object, _unwelcome.Object, _results.Object, _authorization.Object)
+        var controller = new FaceMatchController(
+            _profiles.Object, _staff.Object, _traffic.Object, _unwelcome.Object, _results.Object, _hits.Object, _thumbnails.Object, _authorization.Object)
         {
             ControllerContext = new ControllerContext
             {

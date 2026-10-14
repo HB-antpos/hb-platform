@@ -14,6 +14,15 @@
     "entries": "名单条目",
     "review": "命中复核"
   },
+  "hub": {
+    "title": "人脸比对",
+    "tabs": {
+      "capture": "抓拍",
+      "list": "名单",
+      "settings": "设置"
+    },
+    "unreadBadge": "{{label}}，{{count}} 条未读黑名单命中"
+  },
   "filters": {
     "allStores": "全部门店",
     "pickStore": "选择门店"
@@ -277,13 +286,13 @@
   },
   "capture": {
     "title": "抓拍与比对",
-    "notice": "分数是相似度，不等于是同一个人的概率。照片需点开详情后才读取。",
+    "notice": "分数是相似度，不等于是同一个人的概率。照片只在本页显示，离开页面即销毁，每次读取都会记审计。",
     "filters": {
       "all": "全部",
-      "hitOnly": "仅命中",
       "staff": "员工",
       "newVisitor": "新访客",
-      "repeatVisitor": "回头客"
+      "repeatVisitor": "回头客",
+      "blacklist": "黑名单"
     },
     "range": {
       "today": "今天",
@@ -305,7 +314,7 @@
       "visit": "访客 {{percent}}%"
     },
     "hit": {
-      "tag": "命中 {{percent}}%"
+      "tag": "黑名单命中 {{percent}}%"
     },
     "duplicate": "重复抓拍",
     "notify": {
@@ -326,7 +335,8 @@
         "decision": "判定",
         "scores": "相似度",
         "hit": "名单命中",
-        "faceCount": "人脸数"
+        "faceCount": "人脸数",
+        "reviewStatus": "复核状态"
       },
       "hitSimilarity": "相似度 {{percent}}%",
       "notifyTitle": "通知发送情况",
@@ -336,7 +346,8 @@
         "noHit": "没有命中，不需要复核。",
         "imageGone": "命中抓拍图片已按保留期限删除，不能再复核。",
         "noPermission": "你的账号没有名单复核相关权限。"
-      }
+      },
+      "hitImage": "命中图"
     },
     "timeline": {
       "created": "命中任务已创建",
@@ -481,5 +492,28 @@
       "confirmDisableContent": "停用后人脸接收服务将不再接收该摄像头的推送（最多 30 秒后生效），可随时重新启用。",
       "confirmDisableOk": "停用"
     }
+  },
+  "hits": {
+    "filters": {
+      "all": "全部",
+      "unread": "未读",
+      "pending": "待复核",
+      "autoConfirmed": "自动确认",
+      "confirmed": "已确认",
+      "dismissed": "已驳回"
+    },
+    "bar": {
+      "total": "共 {{count}} 条",
+      "unread": "未读 {{count}}"
+    },
+    "markAll": "全部标为已读",
+    "markAllFailed": "标记已读失败，请稍后重试",
+    "empty": "这个时间段没有黑名单命中记录"
+  },
+  "thumb": {
+    "deleted": "已删除",
+    "hide": "隐藏头像缩略图",
+    "show": "显示头像缩略图",
+    "hint": "一键隐藏或显示列表里全部头像缩略图，会记住你的选择"
   }
 }

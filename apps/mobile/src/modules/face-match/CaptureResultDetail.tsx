@@ -1,16 +1,17 @@
-// 抓拍详情（敏感生物识别信息）：并排显示人脸小图与背景图，下面是比对结果、名单命中与通知发送情况。
+// 抓拍详情（敏感生物识别信息）：抓拍流的行并排显示人脸小图与背景图；命中流的行（留存抓拍可能不存在）只显示命中图；
+// 下面是比对结果、名单命中与通知发送情况。
 //
 // 约定（由 source-contract / capture-image-session 测试守住）：
-// 1. 详情挂载（用户点击某条抓拍）后才请求图片，列表里没有任何照片；每次读取服务端都写审计；
+// 1. 详情挂载（用户点击某条）后才请求整图（列表里只有 128px 缩略图，见 thumbnail-loader）；每次读取服务端都写审计；
 // 2. 图片只以 base64 data URI 的形式存在于本组件 state 里，不由应用自己写磁盘缓存、不进 react-query、不进日志；
 //    详情关闭 / 卸载 / 应用离开前台（切后台、下拉通知栏、应用切换器）时立即丢弃；
 //    iOS 系统网络层会自行把响应写进缓存目录（即使 no-store），所以读取后另有清理器删除这些文件（缓解，非根治）；
 // 3. 不显示姓名与事件细节；通知发送情况只有人数；服务端没有给出的时间不显示，不编造；
-// 4. 「去复核」只跳转到名单页（默认待复核分区），复核本身仍在那里完成。
+// 4. 「去复核」只跳转到合并页的名单分区（命中复核），复核本身仍在那里完成；命中流的行只在服务端说 canReview 时才显示这个按钮。
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, AppState, Image, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { Button, IconButton, Text } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -22,8 +23,10 @@ import {
   buildHitTimeline,
   captureScoreParts,
   describeDecision,
+  describeHitStatusTag,
   formatCaptureFullTime,
-  resolveReviewJump,
+  resolveDetailReviewAction,
+  type CaptureRow,
   type HitTimelineStep,
 } from "./capture-logic";
 import {
@@ -34,13 +37,13 @@ import {
 } from "./capture-image-session";
 import { createReviewImageScrubber } from "./http-cache-scrub-runtime";
 import type { ReviewImageState } from "./image-session";
+import { FACE_MATCH_PERMISSIONS } from "./constants";
 import { BAND_LABEL_KEYS } from "./review-logic";
-import type { FaceCaptureResult } from "./types";
 import { FACE_SOFT, MONO, Notice, Tag } from "./ui";
 
 interface Props {
-  /** 要查看的抓拍快照；父组件只在点击后才挂载本组件。 */
-  result: FaceCaptureResult;
+  /** 要查看的行（抓拍流或命中流）；父组件只在点击后才挂载本组件。 */
+  result: CaptureRow;
   storeLabel: string;
   onClose: () => void;
 }
@@ -59,14 +62,18 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
   onCloseRef.current = onClose;
 
   const { captureId, faceImageId, sceneImageId } = result;
+  // 命中流的行只有命中图可读；命中图已过保留期（imageAvailable=false）时不请求，直接显示「已被清理」。
+  const hitTaskId = result.source === "hit" && result.hit?.imageAvailable ? result.hit.taskId : null;
+  const hitGone = result.source === "hit" && !hitTaskId;
 
   useEffect(() => {
     // iOS 的系统 HTTP 缓存会把图片响应写进应用缓存目录（即使 no-store），读取后由清理器删掉（局限见 http-cache-scrub.ts）。
     const scrubber = createReviewImageScrubber();
     const session: CaptureImageSession = createCaptureImageSession({
       fetchers: {
-        face: faceImageId ? (signal) => scrubber.wrap(() => faceMatchApi.fetchCaptureImage(captureId, faceImageId, signal)) : null,
-        scene: sceneImageId ? (signal) => scrubber.wrap(() => faceMatchApi.fetchCaptureImage(captureId, sceneImageId, signal)) : null,
+        face: captureId && faceImageId ? (signal) => scrubber.wrap(() => faceMatchApi.fetchCaptureImage(captureId, faceImageId, signal)) : null,
+        scene: captureId && sceneImageId ? (signal) => scrubber.wrap(() => faceMatchApi.fetchCaptureImage(captureId, sceneImageId, signal)) : null,
+        hit: hitTaskId ? (signal) => scrubber.wrap(() => faceMatchApi.fetchHitImage(hitTaskId, signal)) : null,
       },
       onChange: setStates,
     });
@@ -77,7 +84,7 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
       void scrubber.release();
       setStates(new Map());
     };
-  }, [captureId, faceImageId, sceneImageId]);
+  }, [captureId, faceImageId, sceneImageId, hitTaskId]);
 
   // 应用离开前台（含 iOS 的 inactive：下拉通知、应用切换器快照前）就关闭详情，图片随之丢弃。
   useEffect(() => {
@@ -88,16 +95,23 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
   }, []);
 
   const markBroken = (slot: CaptureImageSlot) => setBroken((current) => new Set(current).add(slot));
-  const hasAnyImage = Boolean(faceImageId || sceneImageId);
+  const isHitRow = result.source === "hit";
+  const hasAnyImage = isHitRow || Boolean(faceImageId || sceneImageId);
   const decision = describeDecision(result);
   const scoreParts = captureScoreParts(result);
   const { hit } = result;
-  const jump = resolveReviewJump(hit, canViewFaceUnwelcome(isAuthenticated, hasPermission, false));
+  const statusTag = hit ? describeHitStatusTag(hit) : null;
+  const reviewAction = resolveDetailReviewAction(result, {
+    canOpenUnwelcome: canViewFaceUnwelcome(isAuthenticated, hasPermission, false),
+    hasReviewPermission: hasPermission(FACE_MATCH_PERMISSIONS.unwelcomeReview),
+  });
   const timeline = hit ? buildHitTimeline(hit) : [];
+  // 命中图已过保留期：不发请求，直接给出「图片已被清理」的状态。
+  const hitState = hitGone ? ({ status: "error", kind: "gone" } as const) : states.get("hit");
 
   const goReview = () => {
     onClose();
-    router.push("/(shell)/face-unwelcome");
+    router.push(reviewAction.href as Href);
   };
 
   return (
@@ -123,7 +137,11 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
         <ScrollView contentContainerStyle={styles.body}>
           <Notice tone="warning" text={t("capture.detail.sensitiveNotice")} icon="shield-lock-outline" />
 
-          {hasAnyImage ? (
+          {isHitRow ? (
+            <View style={styles.hitImageRow}>
+              <ImageSlot state={hitState} hasId alt={t("capture.detail.hitImage")} isBroken={broken.has("hit")} onBroken={() => markBroken("hit")} onPress={() => setZoomSlot("hit")} />
+            </View>
+          ) : hasAnyImage ? (
             <View style={styles.imageRow}>
               <View style={styles.faceBox}>
                 <ImageSlot state={states.get("face")} hasId={Boolean(faceImageId)} isBroken={broken.has("face")} alt={t("capture.detail.faceImage")} onBroken={() => markBroken("face")} onPress={() => setZoomSlot("face")} />
@@ -144,18 +162,21 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
             <Row label={t("capture.detail.fields.store")}>
               <Text style={styles.value}>{storeLabel}</Text>
             </Row>
-            <Row label={t("capture.detail.fields.decision")}>
-              <View style={styles.tagRow}>
-                {result.isDuplicate ? <Tag label={t("capture.duplicate")} /> : null}
-                <Tag label={t(decision.labelKey)} tone={decision.tone} />
-              </View>
-            </Row>
+            {/* 命中流的行没有评估（Match 模式不留存抓拍）时不显示判定行，免得写成「未比对」造成误解。 */}
+            {result.source === "capture" || result.decision ? (
+              <Row label={t("capture.detail.fields.decision")}>
+                <View style={styles.tagRow}>
+                  {result.isDuplicate ? <Tag label={t("capture.duplicate")} /> : null}
+                  <Tag label={t(decision.labelKey)} tone={decision.tone} />
+                </View>
+              </Row>
+            ) : null}
             {scoreParts.length > 0 ? (
               <Row label={t("capture.detail.fields.scores")}>
                 <Text style={[styles.value, MONO]}>{scoreParts.map((part) => t(part.labelKey, { percent: part.percent })).join(" · ")}</Text>
               </Row>
             ) : null}
-            {result.faceCount > 0 ? (
+            {result.faceCount !== null && result.faceCount > 0 ? (
               <Row label={t("capture.detail.fields.faceCount")}>
                 <Text style={[styles.value, MONO]}>{result.faceCount}</Text>
               </Row>
@@ -166,6 +187,11 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
                   <Text style={[styles.value, MONO]}>{t("capture.detail.hitSimilarity", { percent: hit.scorePercent })}</Text>
                   <Tag label={t(BAND_LABEL_KEYS[hit.band])} tone={hit.band === "high" ? "danger" : "warning"} />
                 </View>
+              </Row>
+            ) : null}
+            {statusTag ? (
+              <Row label={t("capture.detail.fields.reviewStatus")}>
+                <Tag label={t(statusTag.labelKey)} tone={statusTag.tone} icon={statusTag.icon ?? undefined} />
               </Row>
             ) : null}
           </View>
@@ -184,12 +210,14 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
           </View>
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, HB_SPACING.sm) }]}>
-          {jump.hintKey ? <Text style={styles.muted}>{t(jump.hintKey)}</Text> : null}
-          <Button mode="contained" disabled={!jump.enabled} onPress={goReview}>
-            {t("capture.detail.goReview")}
-          </Button>
-        </View>
+        {reviewAction.visible ? (
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, HB_SPACING.sm) }]}>
+            {reviewAction.hintKey ? <Text style={styles.muted}>{t(reviewAction.hintKey)}</Text> : null}
+            <Button mode="contained" disabled={!reviewAction.enabled} onPress={goReview}>
+              {t("capture.detail.goReview")}
+            </Button>
+          </View>
+        ) : null}
 
         {/* 放大查看：同一个详情内的覆盖层，关闭即不再持有额外引用（图片仍只在 states 里）。 */}
         {zoomSlot ? (
@@ -197,10 +225,10 @@ export function CaptureResultDetail({ result, storeLabel, onClose }: Props) {
             <IconButton icon="close" iconColor={HB_COLORS.white} accessibilityLabel={t("review.close")} onPress={() => setZoomSlot(null)} style={styles.zoomClose} />
             <ImageSlot
               large
-              state={states.get(zoomSlot)}
+              state={zoomSlot === "hit" ? hitState : states.get(zoomSlot)}
               hasId
               isBroken={broken.has(zoomSlot)}
-              alt={zoomSlot === "face" ? t("capture.detail.faceImage") : t("capture.detail.sceneImage")}
+              alt={zoomSlot === "face" ? t("capture.detail.faceImage") : zoomSlot === "hit" ? t("capture.detail.hitImage") : t("capture.detail.sceneImage")}
               onBroken={() => markBroken(zoomSlot)}
               onPress={() => setZoomSlot(null)}
             />
@@ -295,6 +323,7 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 48 },
   body: { padding: HB_SPACING.md, gap: HB_SPACING.sm },
   imageRow: { flexDirection: "row", gap: HB_SPACING.xs, height: 180 },
+  hitImageRow: { height: 220, borderRadius: HB_RADIUS.control, overflow: "hidden", backgroundColor: HB_COLORS.surfaceMuted },
   faceBox: { width: 135, borderRadius: HB_RADIUS.control, overflow: "hidden", backgroundColor: HB_COLORS.surfaceMuted },
   sceneBox: { flex: 1, borderRadius: HB_RADIUS.control, overflow: "hidden", backgroundColor: HB_COLORS.surfaceMuted },
   imageFill: { flex: 1, width: "100%" },

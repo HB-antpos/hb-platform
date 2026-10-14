@@ -1126,6 +1126,16 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.FaceMatch.IFaceCaptureResultService,
     BlazorApp.Api.Features.FaceMatch.FaceCaptureResultService
 >();
+// 「命中流」读取服务（人脸比对合并入口的「黑名单」视图，以命中任务为主表，红色数字背后的列表）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceMatch.IFaceHitResultService,
+    BlazorApp.Api.Features.FaceMatch.FaceHitResultService
+>();
+// 抓拍 / 命中图缩略图批量读取：一次请求恰好一条审计（capture.thumbnails.view），不逐张记。
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.FaceMatch.IFaceThumbnailService,
+    BlazorApp.Api.Features.FaceMatch.FaceThumbnailService
+>();
 builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceMatchMaintenance>();
 // 门店分时客流投影（FaceTrafficBucket → FaceTrafficHourly，迁移 20261016.001-face-traffic-hourly）：由 FaceMatchBackgroundService 任务⑧每 10 分钟驱动。
 builder.Services.AddScoped<BlazorApp.Api.Features.FaceMatch.FaceTrafficHourlyProjector>();

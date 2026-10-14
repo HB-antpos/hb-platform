@@ -1,13 +1,13 @@
 // 通知收件箱：按时间倒序的站内消息，下拉刷新、无限滚动、回到前台刷新；点击即标已读，右上「全部已读」。
 // 标题与正文是后端固定的英文文案，中英文界面都原样展示；只有界面文字（已读、优先级、门店、时间）走 i18n。
-// 点击疑似命中通知进「不受欢迎人员名单」页，其他类型按未知类型兜底（只标已读，不跳转）。本期不做 SignalR 与系统推送。
+// 点击疑似命中通知进「人脸比对」合并页（有抓拍权限进抓拍的黑名单未读，否则进名单的命中复核），其他类型按未知类型兜底（只标已读，不跳转）。本期不做 SignalR 与系统推送。
 import { useEffect, useState } from "react";
 import { AppState, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { ActivityIndicator, Button, Snackbar, Text } from "react-native-paper";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { canViewFaceUnwelcome } from "@/modules/face-match/access";
 import { FACE_SOFT, FaceCard, FaceScreenFrame, FaceScreenMessage, Tag, faceStyles } from "@/modules/face-match/ui";
+import { buildFaceHubRoute, resolveFaceHubTabs } from "@/modules/navigation/face-hub";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
@@ -42,7 +42,9 @@ function NotificationsContent({ onBack }: { onBack: () => void }) {
   const markAllRead = useMarkAllNotificationsRead();
   const [refreshing, setRefreshing] = useState(false);
   const [snack, setSnack] = useState("");
-  const canOpenUnwelcome = canViewFaceUnwelcome(isAuthenticated, hasPermission, false);
+  // 合并页的页签各按各自权限显示：抓拍页签、名单页签各自能不能打开决定点开命中通知后去哪一页。
+  const hubTabs = isAuthenticated ? resolveFaceHubTabs(hasPermission) : [];
+  const targetAccess = { canViewCapture: hubTabs.includes("capture"), canViewList: hubTabs.includes("list") };
 
   const describeError = (error: unknown) =>
     resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "errors.generic", allowRawMessageInChinese: false });
@@ -70,8 +72,8 @@ function NotificationsContent({ onBack }: { onBack: () => void }) {
     if (isUnread(item)) {
       markRead.mutate([item.id], { onError: (error) => setSnack(describeError(error)) });
     }
-    const target = resolveNotificationTarget(item, canOpenUnwelcome);
-    if (target.kind === "route") router.push("/(shell)/face-unwelcome");
+    const target = resolveNotificationTarget(item, targetAccess);
+    if (target.kind === "route") router.push(buildFaceHubRoute(target.params));
   };
 
   const onMarkAll = () => {

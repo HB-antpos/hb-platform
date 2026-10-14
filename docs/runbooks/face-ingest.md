@@ -1124,7 +1124,8 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 ### 16.10 审计、日志与隐私
 
 - 持久审计表 `FaceAuditLog`（保留期由律师定，起步建议 2 年）：谁、何时、什么动作、对哪个编号、结果。动作包括：`profile.update`、`profile.region-invalidated`、`consent.create`、`consent.withdraw`、`enrollment.create`、`enrollment.withdraw`、`enrollment.integrity-mismatch`、
-  `unwelcome.entry.submit` / `approve` / `withdraw` / `expire` / `dispute-note`、`unwelcome.task.review` / `view-capture` / `view-reference` / `image-delete`、`visit-group.delete`、`capture.retention-cleanup`。
+  `unwelcome.entry.submit` / `approve` / `withdraw` / `expire` / `dispute-note`、`unwelcome.task.review` / `view-capture` / `view-reference` / `image-delete`、`visit-group.delete`、`capture.retention-cleanup`、
+  `capture.thumbnails.view`（手机端列表缩略图，**每次批量请求一条**，口径见 16.13）。
   **不含图片、对象键、密钥、姓名、事件细节**；被拒绝的看图尝试 `Result` 为错误码；后台任务的操作人是 `system`。
   `profile.update` 的 `Result`：`mode=N`（无合规记录警告）、`mode=N;warnings=M`（带着 M 条警告保存，留下「缺口下启用」的痕迹）、`gate-not-met`（被阻塞项拒绝）；
   `profile.region-invalidated` 的 `Result` 固定为 `review-cleared`（只清空审查记录，不再有 `disabled`）。
@@ -1271,6 +1272,72 @@ ORDER BY StoreCode, StatDate, StatHour;
 ```
 
 读法：`FULL OUTER JOIN` 保留「有客流没成交」和「有成交没抓到客流」两种小时；`OrdersPerVisit`（订单数 / 到店人次）只是示意——`VisitCount` 含重复到店，不是转化率的严格分母。
+
+### 16.13 「人脸比对」合并入口：命中流、缩略图、红色数字（后端接口与口径）
+
+**背景**：手机 App 工作台里「抓拍与比对 / 不受欢迎人员名单 / 人脸比对设置」三个入口合并成一个「人脸比对」（路由名 `face-hub`，进去是「抓拍 / 名单 / 设置」三个一级页签，各页签与页内操作仍按各自的权限显示，**不合并权限码、不新增权限码**）。
+后端为它新增了下面这些接口；**没有数据库迁移、没有新权限码、没有新配置变量**。
+
+| 方法与路径（`/api/react/v1` 下） | 权限 | 说明 |
+| --- | --- | --- |
+| `GET /notifications/unread-count?type=` | 登录即可（只读本人） | 可选 `type` 只统计某个通知类型；缺省 = 全部（原行为）。`type` 必须匹配 `^[A-Za-z0-9._-]{1,64}$`，否则 400 |
+| `POST /notifications/read-all?type=` | 登录即可（只改本人） | 带 `type` 时只标该类型，返回 `{ updated, unreadCount }`，**`unreadCount` 是该类型的剩余未读数**；不带 `type` 行为不变（`unreadCount` = 总未读） |
+| `GET /face-match/results/hits` | `FaceCapture.Images.View` | **命中流**列表（以命中任务 `FaceMatchTask` 为主表）。查询：`storeCode`、`hitStatus`（`all` 默认 / `unread` / `pending` / `autoConfirmed` / `confirmed` / `dismissed`，其它值 400）、`fromUtc`、`toUtc`（按任务抓拍时间，左闭右开）、`page`、`pageSize`（默认 20，上限 50）；按抓拍时间倒序 |
+| `GET /face-match/results/hits/summary` | `FaceCapture.Images.View` | `{ total, unread, pending, autoConfirmed, confirmed, dismissed }`；只看 `storeCode / fromUtc / toUtc`；`total = pending + autoConfirmed + confirmed + dismissed`，`unread` 与之正交 |
+| `POST /face-match/results/hits/{taskId}/read` | 持有 `FaceCapture.Images.View` **或** `FaceMatch.Unwelcome.Review` 任一（动作内判断，都没有 403） | 把**当前登录人**那条命中通知标为已读（按去重键 `unwelcome-hit:{TaskId}` 找通知，只改本人的未读行，幂等），返回 `{ unreadCount }`（命中通知类型的剩余未读数）。任务不存在、编号格式不对、不在自己门店范围：同一个 404；没有通知行（不是收件人 / 通知还没发）也返回 200 |
+| `GET /face-match/results/hits/{taskId}/image` | `FaceCapture.Images.View` | 命中图原图（服务端转发字节）。**复用复核页同一套读取**（门店范围校验、对象键只来自数据库、类型与大小校验），**每次读取写审计 `unwelcome.task.view-capture`**（被拒绝的尝试同样记，审计写不进去就不返回字节）；图已删除返回 `FACE_MATCH_IMAGE_GONE`（404） |
+| `POST /face-match/results/thumbnails` | `FaceCapture.Images.View` | 缩略图批量接口，见下 |
+| `GET /face-match/results`（原抓拍流） | `FaceCapture.Images.View` | 语义不变；`hit` 对象新增 `autoConfirmed`、`unread`、`notificationId`（含义同命中流） |
+
+所有响应都带 `Cache-Control: no-store`（控制器级过滤器）；非管理员只看自己关联的门店（与抓拍流、复核任务同一套门店范围）。
+
+**命中流为什么以任务为主表，不能用留存抓拍**：Match 模式（真实顾客）**不留存抓拍**，但命中通知照发。如果「黑名单」视图依赖留存抓拍，就会出现「红色数字写 3、点进去是空的」。
+所以命中流以 `FaceMatchTask` 为准，留存抓拍与评估只是「有就带上」：`captureId` / `decision` / `staffScorePercent` / `visitScorePercent` / `faceCount` 用「同摄像机 + 同接收时间」对应（接收端建任务时就是用抓拍的这两列），没有对应抓拍（Match 模式）就是 `null`。
+
+命中流单条（`FaceHitResultDto`，JSON 驼峰）：`taskId`、`captureId?`、`storeCode`、`storeName?`、`cameraId`、`capturedAtUtc`、`scorePercent`（0–100，相似度，**不是同一个人的概率**）、`band`（`high` / `normal`）、`reviewStatus`（0 待复核 / 1 已驳回 / 2 已确认）、`reviewStatusName`、
+`autoConfirmed`（已确认且复核人是 `system`）、`imageAvailable`（`ImageObjectKey` 非空 = 命中图还在保留期）、`unread`、`notificationId?`、`notifyState`（`sent` / `pending` / `skipped`）、`notifiedAtUtc?`、`notifyRecipientCount`、`notifyReadCount`、
+`canReview`（持有 `FaceMatch.Unwelcome.Review` + 在门店范围 + 任务待复核 + 命中图还在）、`decision?`、`staffScorePercent?`、`visitScorePercent?`、`faceCount?`。不含姓名、事件细节、对象键与图片。
+`hitStatus` 语义：`unread` = 我的通知未读；`pending` = `ReviewStatus` 0；`autoConfirmed` = 已确认且复核人 `system`；`confirmed` = **人工**确认（已确认且不是系统自动确认，复核人为空的旧数据算人工）；`dismissed` = `ReviewStatus` 1。
+
+**「红色数字」的口径（以及为什么不用待复核数）**
+
+- 红色数字 = **当前登录人还没看的「黑名单命中」通知数**，即通知类型 `face.unwelcome-hit`（`AppNotificationTypes.FaceUnwelcomeHit`）的本人未读数，App 用 `GET /notifications/unread-count?type=face.unwelcome-hit` 取；显示在工作台「人脸比对」入口行、底部「工作台」页签、「抓拍」页签与「黑名单」筛选 chip 上。
+  命中通知本来只发给持有 `FaceMatch.Unwelcome.Review` 的人，所以只有这类人有数字，App 只对他们启用这个查询。
+- **未读** = 本人那条接收行 `ReadAtUtc` 为空，**并且通知仍可见（未撤回、未过期）**——与收件箱列表、总未读数同一口径；命中流的 `unread` / `hitStatus=unread` / `summary.unread`、抓拍流的 `hit.unread` 都用同一个回查，所以红色数字、汇总、「未读」筛选三者一致。
+  一个已知的小偏差：账号被移出某门店后，那家店的命中通知仍在他的收件箱里（红色数字计入），但命中流按门店范围过滤、不再给他看那家店的命中；只会出现在换店 / 离店的账号上。
+- **不用「待复核数」**：自动确认（相似度 ≥ 门店阈值，默认 90）的命中**不是待复核**（复核人 `system`，已是 `Confirmed`），最严重的命中反而不会计入待复核数；而这些恰恰是店员最该看到的。所以红色数字按「通知有没有被本人看过」算，不按任务状态算。
+  待复核数仍然在命中流汇总里（`summary.pending`）和复核入口上，只是不当红色数字用。
+- 点开命中任务（或在通知收件箱点开命中通知）后，App 调 `POST …/hits/{taskId}/read` 把本人那条标为已读，并用返回的 `unreadCount` 直接写回红色数字的缓存。「全部标为已读」用 `POST /notifications/read-all?type=face.unwelcome-hit`（只标该类型，**不会连带清掉别的通知**）。
+
+**缩略图批量接口 `POST /face-match/results/thumbnails`**
+
+- 请求 `{ "items": [ { "kind": "capture" | "hit", "id": "<抓拍编号 | 任务编号>" } ] }`，**1–30 项**，否则 400；`kind` 不是 `capture` / `hit` 也是 400；`id` 格式不对的那一项按 `denied` 处理（不整体报错）。请求体上限 16KB。
+- 响应 `{ "items": [ { "kind", "id", "status", "imageBase64" } ] }`，**与请求同序**；`status`：
+  `ok`（`imageBase64` 是 JPEG 的 base64，不带 `data:` 前缀）/ `none`（没有可用的留存图：抓拍没有人脸小图、图片还在接收端本地磁盘、任务的命中图键为空）/
+  `gone`（已过保留期或读取不到：对象已被清理、存储暂时失败、内容不是合法图片、声明大小或尺寸超限、命中图键形态不合法）/
+  `denied`（编号格式不对、不存在或不在自己的门店范围，**对外同一口径，不泄露编号是否存在**）。
+- 来源：`capture` → 该抓拍的**人脸小图**（`FaceCaptureImage.Kind = 0`，取序号最小的一张；背景大图不参与）；`hit` → 任务命中图（`IFaceMatchObjectStore`，键必须通过 `IsAllowedHitImageKey`，不能指向登记照 / 同意书 / 参考照片）。对象键**只来自数据库**。
+- 处理：服务端读取（与整图读取同一套校验：存储必须是 COS、声明大小 ≤ 5MB、类型只认 jpeg / png 且字节头相符）→ 解码前先看头部尺寸（边长 > 8192 或总像素 > 1600 万拒绝解码，防解压炸弹）→ 按 EXIF 方向转正 → **最长边缩到 128 像素（不放大）** → **去掉全部元数据（EXIF / ICC / IPTC / XMP）** → JPEG 质量约 70；单张通常几 KB。
+- 并发与失败：并发读取存储最多 4 路；单项失败只让该项 `gone`，不拖垮整批；日志只按原因（错误码 / 异常类型）汇总计数，**不含编号、对象键与图片**。
+- **审计（B 方案：每次批量请求记一条，不逐张记）**：一次请求恰好写 1 条 `capture.thumbnails.view`——`StoreCode` = 本批解析到的项全部同一家店时填该店，否则为空；`TargetRef` 为空（**不放任何抓拍 / 任务编号**）；`Result` = `n=<成功生成的张数>`（一张都没成功也记 `n=0`）；不含图片与对象键。
+  校验失败（条数不对、`kind` 不认识）的请求没有看任何图，不记审计。审计写不进去则整个请求失败、不返回任何图片字节。
+  它**不调用**摄像机管理页的整图读取（那条路径逐张写带抓拍 / 图片编号的结构化日志，批量调用会违反「一次请求一条、不含编号」），而是复用它的校验函数与同一个对象存储读取器。
+  **点开详情看大图**仍然是按需读取并**单独审计**（抓拍整图走 14.8 的读取与 `GET /results/{captureId}/images/{imageId}`；命中图走 `…/hits/{taskId}/image`，审计动作 `unwelcome.task.view-capture`）。
+- 隐私要求（与手机端约定）：缩略图只放内存（组件 state / ref），不写磁盘、不进缓存、不进日志；离开页面或切后台立即销毁；页头「眼睛」按钮可一键隐藏全部缩略图。没有 `FaceCapture.Images.View`、没留存照片（Match 模式）、已过保留期（命中图 7 天）的行显示占位图标。
+
+**菜单与旧入口**
+
+- 后端 `FullAppMenu` 新增 `face-hub`（`tabs.faceHub`，图标 `face-recognition`）：持有 `FaceCapture.Images.View` / `FaceMatch.Unwelcome.Manage` / `FaceMatch.Unwelcome.Approve` / `FaceMatch.Unwelcome.Review` / `FaceMatch.Manage` / `FaceCapture.Cameras.Manage` **任一**即可见（`FaceMatch.Traffic.View` 不算）；管理员靠角色放行；设备模式菜单不含此项。
+- 旧三项 `face-unwelcome` / `face-match-settings` / `face-capture-results` **保持原样不动**（旧版 App 还在用），源码里已加注释；新版 App 不再显示它们（路由保留并重定向到 `face-hub`，只供深链 / 通知跳转），**待新版普及后再清理**。
+- Web 的「角色菜单预览」（`apps/web/src/utils/expoRoleMenuPreview.ts`）与后端按源码顺序逐项对照，新增项必须两边同步（测试会核对）。
+
+**部署顺序与回滚**
+
+1. **先部署后端（主 API），后发 App OTA。** 后端新增的接口与菜单项不影响旧版 App 与 Web：旧版 App 菜单里碰到不认识的 `face-hub` 会直接忽略，旧三项照旧。无迁移、无新权限码，部署前后都不需要 SQL。
+2. 若先发了 OTA 而后端还没上：新版 App 调新接口会得到 404 / 菜单里没有 `face-hub`，「人脸比对」入口不出现；后端上线后恢复。
+3. 回滚后端代码即可（没有 schema 变化）；回滚后 `face-hub` 菜单项消失，**新版 App 因为不再显示旧三项，会暂时没有人脸比对入口**——要么同时回退 OTA，要么尽快把后端重新部署上去。
+4. 上线后核对：用持有 `FaceMatch.Unwelcome.Review` 的账号调 `GET /notifications/unread-count?type=face.unwelcome-hit`（应与「命中流汇总的未读数」一致，除了上面说的移出门店的偏差）；
+   用持有 `FaceCapture.Images.View` 的账号调一次缩略图接口后，在 Web「审计」页签按 `capture.thumbnails.view` 筛选，应看到**恰好一条**，`TargetRef` 为空、`Result` 为 `n=…`。
 
 ## 17. 人脸比对：接收端
 

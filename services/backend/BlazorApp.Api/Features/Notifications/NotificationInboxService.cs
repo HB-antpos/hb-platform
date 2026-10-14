@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using BlazorApp.Api.Data;
 using BlazorApp.Shared.Models;
 using SqlSugar;
@@ -16,6 +17,11 @@ internal sealed class NotificationInboxService(SqlSugarContext context, TimeProv
     internal const int DefaultPageSize = 20;
     internal const int MaxPageSize = 50;
     internal const int MaxMarkReadIds = 200;
+    private const int MarkReadChunkSize = 500;
+
+    // 通知类型过滤：只允许字母数字与 . _ -（与 AppNotificationTypes 里的取值同一字符集），防止把任意字符串带进查询。
+    private static readonly Regex TypePattern = new(
+        @"^[A-Za-z0-9._-]{1,64}\z", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly ISqlSugarClient _db = context.Db;
 
@@ -67,15 +73,21 @@ internal sealed class NotificationInboxService(SqlSugarContext context, TimeProv
         {
             Items = page.Select(row => NotificationMapper.ToDto(row.ToEntity(), row.ReadAtUtc)).ToList(),
             NextCursor = hasMore ? EncodeCursor(page[^1].ToEntity()) : null,
-            UnreadCount = await GetUnreadCountAsync(userGuid, cancellationToken),
+            UnreadCount = await GetUnreadCountAsync(userGuid, null, cancellationToken),
         };
     }
 
-    public async Task<int> GetUnreadCountAsync(string userGuid, CancellationToken cancellationToken = default)
+    public async Task<int> GetUnreadCountAsync(
+        string userGuid,
+        string? type = null,
+        CancellationToken cancellationToken = default
+    )
     {
+        var normalizedType = NormalizeType(type);
         var now = timeProvider.GetUtcNow().UtcDateTime;
         return await VisibleQuery(userGuid, now)
             .Where((recipient, notification) => recipient.ReadAtUtc == null)
+            .WhereIF(normalizedType != null, (recipient, notification) => notification.Type == normalizedType)
             .CountAsync(cancellationToken);
     }
 
@@ -112,26 +124,75 @@ internal sealed class NotificationInboxService(SqlSugarContext context, TimeProv
         return new NotificationMarkReadResultDto
         {
             Updated = updated,
-            UnreadCount = await GetUnreadCountAsync(userGuid, cancellationToken),
+            UnreadCount = await GetUnreadCountAsync(userGuid, null, cancellationToken),
         };
     }
 
     public async Task<NotificationMarkReadResultDto> MarkAllReadAsync(
         string userGuid,
+        string? type = null,
         CancellationToken cancellationToken = default
     )
     {
+        var normalizedType = NormalizeType(type);
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        var updated = await _db.Updateable<AppNotificationRecipient>()
-            .SetColumns(recipient => recipient.ReadAtUtc == now)
-            .Where(recipient => recipient.UserGUID == userGuid && recipient.ReadAtUtc == null)
-            .ExecuteCommandAsync(cancellationToken);
+        int updated;
+        if (normalizedType == null)
+        {
+            updated = await _db.Updateable<AppNotificationRecipient>()
+                .SetColumns(recipient => recipient.ReadAtUtc == now)
+                .Where(recipient => recipient.UserGUID == userGuid && recipient.ReadAtUtc == null)
+                .ExecuteCommandAsync(cancellationToken);
+        }
+        else
+        {
+            // 只标该类型：先取出本人该类型的未读通知编号，再按编号更新（不依赖更新语句里的联表 / 子查询，两种数据库行为一致）。
+            // 仍然只改本人的未读行，别人的行与其他类型的行都改不到。
+            var ids = await _db.Queryable<AppNotificationRecipient>()
+                .InnerJoin<AppNotification>((recipient, notification) =>
+                    recipient.NotificationId == notification.NotificationId)
+                .Where((recipient, notification) =>
+                    recipient.UserGUID == userGuid
+                    && recipient.ReadAtUtc == null
+                    && notification.Type == normalizedType)
+                .Select((recipient, notification) => recipient.NotificationId)
+                .ToListAsync(cancellationToken);
+            updated = 0;
+            // 分批更新，避免一次 IN 列表超过 SQL Server 的参数上限（2100）。
+            foreach (var chunk in ids.Chunk(MarkReadChunkSize))
+            {
+                var batch = chunk.ToList();
+                updated += await _db.Updateable<AppNotificationRecipient>()
+                    .SetColumns(recipient => recipient.ReadAtUtc == now)
+                    .Where(recipient =>
+                        recipient.UserGUID == userGuid
+                        && batch.Contains(recipient.NotificationId)
+                        && recipient.ReadAtUtc == null)
+                    .ExecuteCommandAsync(cancellationToken);
+            }
+        }
 
         return new NotificationMarkReadResultDto
         {
             Updated = updated,
-            UnreadCount = await GetUnreadCountAsync(userGuid, cancellationToken),
+            UnreadCount = await GetUnreadCountAsync(userGuid, normalizedType, cancellationToken),
         };
+    }
+
+    /// <summary>空 = 不过滤；非空必须符合类型格式，否则抛 <see cref="ArgumentException"/>（控制器转成 400）。</summary>
+    internal static string? NormalizeType(string? type)
+    {
+        if (type == null)
+        {
+            return null;
+        }
+
+        if (!TypePattern.IsMatch(type))
+        {
+            throw new ArgumentException("通知类型格式不正确。");
+        }
+
+        return type;
     }
 
     private ISugarQueryable<AppNotificationRecipient, AppNotification> VisibleQuery(string userGuid, DateTime now)

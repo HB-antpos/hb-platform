@@ -1,5 +1,6 @@
 using BlazorApp.Api.Data.SchemaMigrations;
 using BlazorApp.Api.Features.FaceMatch;
+using BlazorApp.Api.Features.Notifications;
 using BlazorApp.Shared.Models;
 using Microsoft.Data.SqlClient;
 using SqlSugar;
@@ -406,6 +407,167 @@ SELECT N'1013', DATEADD(hour, i, '2026-09-30 14:00:00'), 1, 0, 0, 0, 0, 0 FROM n
         server.ExecuteSync("DELETE FROM dbo.FaceTrafficHourly");
         server.ExecuteSync(ReadRunbookSql("face-traffic-hourly-backfill"));
         Assert.Equal(appRows, await server.ScalarAsync(snapshot));
+    }
+
+    // ---------- 人脸比对合并入口：命中流与缩略图（真实 SQL Server） ----------
+
+    private static string Hex32(char ch) => new(ch, 32);
+
+    private static string Sql(DateTime value) => value.ToString("yyyy-MM-dd HH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture);
+
+    [FaceMatchSqlServerFact]
+    public async Task SQLServer_命中流_列表_汇总_未读嵌套子查询_抓拍与评估按精确时刻对应_标已读_类型未读数一致()
+    {
+        await using var server = await ServerDatabase.CreateAsync();
+        using var h = server.CreateHarness();
+        h.Database.AddUser("qld-1", "Qld One", "s-1013");
+        h.Database.AddUser("qld-2", "Qld Two", "s-1013");
+        var inbox = new NotificationInboxService(h.Database.Context, h.Time);
+        var service = new FaceHitResultService(h.Database.Context, h.Settings, inbox, h.Time);
+        var t0 = FaceMatchTestDatabase.Now.AddHours(-1);
+        var preciseAt = t0.AddMinutes(4).AddTicks(1234567 % 10_000_000);      // 带亚毫秒位的时刻：对应关系不能因 datetime 精度而丢
+
+        string TaskSql(char id, string store, string camera, DateTime at, int review, string? reviewer, decimal score) => $"""
+INSERT dbo.FaceMatchTask (TaskId, StoreCode, CameraId, CapturedAtUtc, EntryId, Score, ImageObjectKey, ReviewStatus, FirstReviewerId, ImageDeleteAtUtc, NotifiedAtUtc)
+VALUES ('{Hex32(id)}', N'{store}', N'{camera}', '{Sql(at)}', '{Hex32('e')}', {score}, N'face-match/hit/{store}/{id}.jpg', {review}, {(reviewer == null ? "NULL" : $"N'{reviewer}'")}, '{Sql(at.AddDays(7))}', '{Sql(at)}');
+""";
+        string Notice(char taskId, string recipients, DateTime? revokedAt = null) => $"""
+INSERT dbo.AppNotification (NotificationId, Type, Priority, Title, Body, DedupeKey, CreatedAtUtc, RevokedAtUtc, CreatedBy)
+VALUES (N'n-{taskId}', N'face.unwelcome-hit', 1, N'Possible match alert', N'Possible match', N'unwelcome-hit:{Hex32(taskId)}', '{Sql(t0)}', {(revokedAt == null ? "NULL" : $"'{Sql(revokedAt.Value)}'")}, N'system:face-match');
+{recipients}
+""";
+        string Recipient(char taskId, string user, bool read) =>
+            $"INSERT dbo.AppNotificationRecipient (NotificationId, UserGUID, CreatedAtUtc, ReadAtUtc) VALUES (N'n-{taskId}', N'{user}', '{Sql(t0)}', {(read ? $"'{Sql(t0.AddMinutes(30))}'" : "NULL")});";
+
+        server.ExecuteSync(string.Join("\n", new[]
+        {
+            TaskSql('a', "1013", "cam-1", t0.AddMinutes(1), 0, null, 70m),
+            Notice('a', Recipient('a', "qld-1", false) + Recipient('a', "qld-2", true)),
+            TaskSql('b', "1013", "cam-1", t0.AddMinutes(2), 2, "system", 99m),
+            Notice('b', Recipient('b', "qld-1", false)),
+            TaskSql('c', "1013", "cam-2", t0.AddMinutes(3), 2, "qld-2", 85m),
+            Notice('c', Recipient('c', "qld-1", false), revokedAt: t0.AddMinutes(10)),
+            TaskSql('d', "1013", "cam-1", preciseAt, 1, "qld-2", 60m),
+            TaskSql('e', "2001", "cam-3", t0.AddMinutes(5), 0, null, 70m),
+            Notice('e', Recipient('e', "qld-1", false)),
+            // 与任务 d 同摄像机、同一精确时刻的留存抓拍 + 评估；另有同摄像机差 1 秒的抓拍不对应。
+            $"""
+INSERT dbo.FaceCaptureEvent (CaptureId, CameraId, StoreCode, ReceivedAtUtc, BodySha256, BodyBytes, FaceCount, ParseStatus, RawStorage, CreatedAtUtc)
+VALUES ('{Hex32('d')}', N'cam-1', N'1013', '{Sql(preciseAt)}', REPLICATE('a', 64), 10, 2, 0, N'cos', '{Sql(t0)}'),
+       ('{Hex32('9')}', N'cam-1', N'1013', '{Sql(preciseAt.AddSeconds(1))}', REPLICATE('a', 64), 10, 1, 0, N'cos', '{Sql(t0)}');
+INSERT dbo.FaceMatchEvaluation (CaptureId, StaffScore, VisitScore, Decision) VALUES ('{Hex32('d')}', 12.3, 45.6, 3);
+""",
+        }));
+
+        var manager = new FaceMatchActor("qld-1", "Qld One");
+        var peer = new FaceMatchActor("qld-2", "Qld Two");
+        async Task<List<char>> Ids(FaceMatchActor actor, string? status = null) =>
+            (await service.ListAsync(new FaceHitResultQuery { HitStatus = status }, actor, canReview: true)).Items.Select(i => i.TaskId[0]).ToList();
+
+        // 列表：倒序、门店范围、各状态。
+        Assert.Equal(['e', 'd', 'c', 'b', 'a'], await Ids(FaceMatchTestHarness.Admin));
+        Assert.Equal(['d', 'c', 'b', 'a'], await Ids(manager));
+        Assert.Equal(['a'], await Ids(manager, "pending"));
+        Assert.Equal(['b'], await Ids(manager, "autoConfirmed"));
+        Assert.Equal(['c'], await Ids(manager, "confirmed"));
+        Assert.Equal(['d'], await Ids(manager, "dismissed"));
+        // 未读（嵌套子查询：通知 → 本人接收行）：qld-1 的 c 通知已撤回、e 不在门店范围；qld-2 只有 a 的通知且已读。
+        Assert.Equal(['b', 'a'], await Ids(manager, "unread"));
+        Assert.Empty(await Ids(peer, "unread"));
+
+        // 抓拍与评估按「同摄像机 + 同一精确时刻」对应（亚毫秒位也对得上）。
+        var page = await service.ListAsync(new FaceHitResultQuery(), manager, canReview: true);
+        var d = page.Items.Single(i => i.TaskId == Hex32('d'));
+        Assert.Equal(Hex32('d'), d.CaptureId);
+        Assert.Equal("newVisitor", d.Decision);
+        Assert.Equal(12, d.StaffScorePercent);
+        Assert.Equal(46, d.VisitScorePercent);
+        Assert.Equal(2, d.FaceCount);
+        Assert.All(page.Items.Where(i => i.TaskId != Hex32('d')), i => Assert.Null(i.CaptureId));
+        var a = page.Items.Single(i => i.TaskId == Hex32('a'));
+        Assert.True(a.Unread);
+        Assert.Equal("n-a", a.NotificationId);
+        Assert.Equal(2, a.NotifyRecipientCount);
+        Assert.Equal(1, a.NotifyReadCount);
+        Assert.True(a.CanReview);
+        Assert.False(page.Items.Single(i => i.TaskId == Hex32('d')).CanReview);
+
+        // 汇总：total = 四个状态之和，未读与「未读」筛选的条数一致。
+        var summary = await service.GetSummaryAsync(new FaceHitResultQuery(), manager);
+        Assert.Equal(new FaceHitSummaryDto { Total = 4, Unread = 2, Pending = 1, AutoConfirmed = 1, Confirmed = 1, Dismissed = 1 }, summary);
+        Assert.Equal(summary.Unread, (await Ids(manager, "unread")).Count);
+        // 收件箱按类型的未读数（红色数字）多出的那 1 条是门店范围外的 e：只有账号被移出门店后才会出现，命中流不会把别店的命中给他看。
+        Assert.Equal(summary.Unread + 1, await inbox.GetUnreadCountAsync("qld-1", AppNotificationTypes.FaceUnwelcomeHit));
+        Assert.Equal(5, (await service.GetSummaryAsync(new FaceHitResultQuery(), FaceMatchTestHarness.Admin)).Total);
+
+        // 标已读：只改本人的未读行，幂等，返回命中类型的剩余未读数（e 在门店范围外但仍是 qld-1 的未读通知，所以收件箱口径是 2）。
+        var marked = await service.MarkReadAsync(Hex32('a'), manager);
+        Assert.Equal(2, marked.UnreadCount);                                                  // 剩 b 与 e
+        Assert.Equal(2, (await service.MarkReadAsync(Hex32('a'), manager)).UnreadCount);       // 幂等
+        Assert.Equal("1", await server.ScalarAsync("SELECT COUNT(*) FROM dbo.AppNotificationRecipient WHERE NotificationId = N'n-a' AND ReadAtUtc IS NOT NULL AND UserGUID = N'qld-1'"));
+        Assert.Equal(['b'], await Ids(manager, "unread"));
+        // 按类型全部已读：只标该类型的本人未读（b、e 与已撤回的 c 都是该类型）。
+        var all = await inbox.MarkAllReadAsync("qld-1", AppNotificationTypes.FaceUnwelcomeHit);
+        Assert.Equal(3, all.Updated);
+        Assert.Equal(0, all.UnreadCount);
+        Assert.Empty(await Ids(manager, "unread"));
+        // 越权 / 不存在：同一个 404。
+        Assert.Equal(404, (await Assert.ThrowsAsync<FaceMatchException>(() => service.MarkReadAsync(Hex32('e'), manager))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<FaceMatchException>(() => service.MarkReadAsync(Hex32('f'), manager))).StatusCode);
+    }
+
+    [FaceMatchSqlServerFact]
+    public async Task SQLServer_缩略图_定长参数解析抓拍与命中图_一次请求一条审计_不含编号与键()
+    {
+        await using var server = await ServerDatabase.CreateAsync();
+        using var h = server.CreateHarness();
+        h.Database.AddUser("qld-1", "Qld One", "s-1013");
+        var captureStore = new FakeFaceImageStore { Respond = _ => FaceCaptureThumbnailServiceTests.MakeJpeg(300, 200) };
+        var service = new FaceThumbnailService(h.Database.Context, captureStore, h.Store, h.Audit, h.Logs.CreateLogger<FaceThumbnailService>());
+        var at = FaceMatchTestDatabase.Now.AddHours(-1);
+        const string captureKey = "face-ingest/images/1013/2026/10/14/cam-1/capture-secret.jpg";
+        const string hitKey = "face-match/hit/1013/hit-secret.jpg";
+        server.ExecuteSync($"""
+INSERT dbo.FaceCaptureEvent (CaptureId, CameraId, StoreCode, ReceivedAtUtc, BodySha256, BodyBytes, FaceCount, ParseStatus, RawStorage, CreatedAtUtc)
+VALUES ('{Hex32('1')}', N'cam-1', N'1013', '{Sql(at)}', REPLICATE('a', 64), 10, 1, 0, N'cos', '{Sql(at)}'),
+       ('{Hex32('2')}', N'cam-1', N'1013', '{Sql(at)}', REPLICATE('b', 64), 10, 1, 0, N'cos', '{Sql(at)}'),
+       ('{Hex32('3')}', N'cam-9', N'2001', '{Sql(at)}', REPLICATE('c', 64), 10, 1, 0, N'cos', '{Sql(at)}');
+INSERT dbo.FaceCaptureImage (ImageId, CaptureId, Kind, PartIndex, Storage, ObjectKey, ContentType, ByteSize, Sha256, CreatedAtUtc)
+VALUES ('{Hex32('a')}', '{Hex32('1')}', 0, 0, N'cos', N'{captureKey}', N'image/jpeg', 2048, REPLICATE('a', 64), '{Sql(at)}'),
+       ('{Hex32('b')}', '{Hex32('2')}', 1, 0, N'cos', N'{captureKey}', N'image/jpeg', 2048, REPLICATE('b', 64), '{Sql(at)}'),
+       ('{Hex32('c')}', '{Hex32('3')}', 0, 0, N'cos', N'{captureKey}', N'image/jpeg', 2048, REPLICATE('c', 64), '{Sql(at)}');
+INSERT dbo.FaceMatchTask (TaskId, StoreCode, CameraId, CapturedAtUtc, EntryId, Score, ImageObjectKey, ReviewStatus, ImageDeleteAtUtc)
+VALUES ('{Hex32('7')}', N'1013', N'cam-1', '{Sql(at)}', '{Hex32('e')}', 90, N'{hitKey}', 0, '{Sql(at.AddDays(7))}'),
+       ('{Hex32('8')}', N'1013', N'cam-1', '{Sql(at)}', '{Hex32('e')}', 90, N'', 0, '{Sql(at.AddDays(7))}');
+""");
+        h.Store.Objects[hitKey] = FaceCaptureThumbnailServiceTests.MakeJpeg(80, 160);
+
+        var response = await service.GetThumbnailsAsync(
+            new FaceThumbnailRequest
+            {
+                Items =
+                [
+                    new() { Kind = "capture", Id = Hex32('1') },      // ok
+                    new() { Kind = "capture", Id = Hex32('2') },      // 只有背景图 → none
+                    new() { Kind = "capture", Id = Hex32('3') },      // 他店 → denied
+                    new() { Kind = "hit", Id = Hex32('7') },          // ok
+                    new() { Kind = "hit", Id = Hex32('8') },          // 命中图键为空 → none
+                    new() { Kind = "hit", Id = Hex32('f') },          // 不存在 → denied
+                ],
+            },
+            new FaceMatchActor("qld-1", "Qld One"));
+
+        Assert.Equal(["ok", "none", "denied", "ok", "none", "denied"], response.Items.Select(i => i.Status));
+        var captureThumb = SixLabors.ImageSharp.Image.Identify(Convert.FromBase64String(response.Items[0].ImageBase64!));
+        Assert.Equal((128, 85), (captureThumb.Width, captureThumb.Height));
+        var hitThumb = SixLabors.ImageSharp.Image.Identify(Convert.FromBase64String(response.Items[3].ImageBase64!));
+        Assert.Equal((64, 128), (hitThumb.Width, hitThumb.Height));
+        Assert.Equal(1, captureStore.Keys.Count);
+
+        // 一次请求恰好一条审计：门店 1013（解析到的项都在 1013；他店的 denied 不计入），Result 是成功张数，TargetRef 为空，没有编号与键。
+        var audit = await server.QueryRowsAsync("SELECT Action, ISNULL(StoreCode, N'<null>'), ISNULL(TargetRef, N'<null>'), Result FROM dbo.FaceAuditLog");
+        Assert.Equal([["capture.thumbnails.view", "1013", "<null>", "n=2"]], audit);
+        Assert.DoesNotContain("secret", h.Logs.Dump(), StringComparison.Ordinal);
     }
 
     /// <summary>读取 runbook 里带 <c>&lt;!-- sql:名字 --&gt;</c> 标记的 SQL 代码块：文档里的示例必须真的能跑。</summary>

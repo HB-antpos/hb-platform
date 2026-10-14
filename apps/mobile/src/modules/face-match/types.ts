@@ -234,6 +234,12 @@ export interface FaceCaptureHit {
   notifiedAtUtc: string | null;
   notifyRecipientCount: number;
   notifyReadCount: number;
+  /** 系统按门店阈值自动确认（复核人为 system 且已确认）；缺失按 false。 */
+  autoConfirmed: boolean;
+  /** 当前登录人对应的命中通知是否还没读；没有通知行 / 缺失按 false。 */
+  unread: boolean;
+  /** 当前登录人那条命中通知的编号；没有为 null。 */
+  notificationId: string | null;
 }
 
 /** 一次抓拍及其比对结果。图片编号只在服务端确认有看图权限时才有；图片内容另走专用接口按需读取。 */
@@ -264,6 +270,92 @@ export interface FaceCaptureResultQuery {
   toUtc?: string;
   page: number;
   pageSize: number;
+}
+
+// ───────────── 命中流（GET /face-match/results/hits）：按命中任务查，不依赖留存抓拍 ─────────────
+
+/** 命中流的状态筛选（与后端 hitStatus 取值一致）。 */
+export type FaceHitStatusKey = "all" | "unread" | "pending" | "autoConfirmed" | "confirmed" | "dismissed";
+
+/**
+ * 命中流的一行（字段与后端 FaceHitResultDto 完全一致，跨端契约测试会比对字段名集合）。
+ * Match 模式不留存抓拍，所以 captureId 可能为 null；有对应抓拍与评估才有 decision / 分数 / faceCount。
+ */
+export interface FaceHitResult {
+  taskId: string;
+  captureId: string | null;
+  storeCode: string;
+  storeName: string | null;
+  cameraId: string;
+  capturedAtUtc: string;
+  scorePercent: number;
+  band: FaceUnwelcomeBand;
+  /** 0 待复核、1 已驳回、2 已确认。 */
+  reviewStatus: number;
+  reviewStatusName: string;
+  autoConfirmed: boolean;
+  /** 命中图是否还在保留期内。 */
+  imageAvailable: boolean;
+  unread: boolean;
+  notificationId: string | null;
+  notifyState: string;
+  notifiedAtUtc: string | null;
+  notifyRecipientCount: number;
+  notifyReadCount: number;
+  /** 服务端算好：持有 Review + 在门店范围 + 任务待复核 + 图还在。App 不自己推断。 */
+  canReview: boolean;
+  decision: string | null;
+  staffScorePercent: number | null;
+  visitScorePercent: number | null;
+  faceCount: number | null;
+}
+
+export interface FaceHitResultQuery {
+  storeCode?: string;
+  hitStatus?: FaceHitStatusKey;
+  fromUtc?: string;
+  toUtc?: string;
+  page: number;
+  pageSize: number;
+}
+
+export type FaceHitSummaryQuery = Omit<FaceHitResultQuery, "hitStatus" | "page" | "pageSize">;
+
+/** GET /results/hits/summary：各状态条数；total = pending + autoConfirmed + confirmed + dismissed，unread 与之正交。 */
+export interface FaceHitSummary {
+  total: number;
+  unread: number;
+  pending: number;
+  autoConfirmed: number;
+  confirmed: number;
+  dismissed: number;
+}
+
+/** POST /notifications/read-all?type=face.unwelcome-hit 的返回：本次标记条数与该类型剩余未读数。 */
+export interface FaceHitReadAllResult {
+  updated: number;
+  unreadCount: number;
+}
+
+// ───────────── 缩略图（POST /face-match/results/thumbnails） ─────────────
+
+export type FaceThumbnailKind = "capture" | "hit";
+
+export interface FaceThumbnailRequestItem {
+  kind: FaceThumbnailKind;
+  /** capture = 抓拍编号；hit = 命中任务编号。 */
+  id: string;
+}
+
+/** ok = 有图；none = 没有可用的留存图；gone = 已过保留期或读取不到；denied = 不存在或不在自己门店范围。 */
+export type FaceThumbnailStatus = "ok" | "none" | "gone" | "denied";
+
+export interface FaceThumbnailResult {
+  kind: FaceThumbnailKind;
+  id: string;
+  status: FaceThumbnailStatus;
+  /** JPEG（最长边 ≤128px）的 base64，不带 data: 前缀；只有 status=ok 才有。只放内存。 */
+  imageBase64: string | null;
 }
 
 // ───────────── 内存中的照片 ─────────────

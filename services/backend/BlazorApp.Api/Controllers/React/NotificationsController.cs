@@ -29,10 +29,11 @@ public sealed class NotificationsController(
         RunAsync<NotificationPageDto>(nameof(List), userGuid =>
             inboxService.ListAsync(userGuid, cursor, take, unreadOnly, cancellationToken), cancellationToken);
 
+    /// <summary>未读数；可选 <c>type</c> 只统计某个业务类型（如 face.unwelcome-hit），格式不合法返回 400。</summary>
     [HttpGet("unread-count")]
-    public Task<IActionResult> UnreadCount(CancellationToken cancellationToken) =>
+    public Task<IActionResult> UnreadCount([FromQuery] string? type, CancellationToken cancellationToken) =>
         RunAsync<int>(nameof(UnreadCount), userGuid =>
-            inboxService.GetUnreadCountAsync(userGuid, cancellationToken), cancellationToken);
+            inboxService.GetUnreadCountAsync(userGuid, type, cancellationToken), cancellationToken);
 
     [HttpPost("read")]
     public Task<IActionResult> MarkRead(
@@ -42,10 +43,11 @@ public sealed class NotificationsController(
         RunAsync<NotificationMarkReadResultDto>(nameof(MarkRead), userGuid =>
             inboxService.MarkReadAsync(userGuid, request?.Ids ?? [], cancellationToken), cancellationToken);
 
+    /// <summary>全部标为已读；可选 <c>type</c> 只标该类型，并返回该类型的剩余未读数（不带 type 时返回总未读数）。</summary>
     [HttpPost("read-all")]
-    public Task<IActionResult> MarkAllRead(CancellationToken cancellationToken) =>
+    public Task<IActionResult> MarkAllRead([FromQuery] string? type, CancellationToken cancellationToken) =>
         RunAsync<NotificationMarkReadResultDto>(nameof(MarkAllRead), userGuid =>
-            inboxService.MarkAllReadAsync(userGuid, cancellationToken), cancellationToken);
+            inboxService.MarkAllReadAsync(userGuid, type, cancellationToken), cancellationToken);
 
     /// <summary>给自己发一条测试通知，用于验证 App、收银端的实时通道与收件箱链路。</summary>
     [HttpPost("test")]

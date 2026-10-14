@@ -1,5 +1,7 @@
-// 「不受欢迎人员名单」入口页：名单条目 / 命中复核两个分区。
+// 「不受欢迎人员名单」：名单条目 / 命中复核两个分区。
 // 分区与按钮由 GET /face-match/config 返回的权限标志精确控制（入口本身只要求名单 Manage / Approve / Review 任一权限）。
+// 内容抽成 UnwelcomePanel（不含页面框架与权限守卫），供「人脸比对」合并页（FaceHubScreen）的「名单」页签嵌入；
+// FaceUnwelcomeScreen 保留原页面外壳（框架 + 守卫）。旧路由 face-unwelcome 现在重定向到合并页，外壳不再被路由使用。
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
@@ -24,18 +26,33 @@ export function FaceUnwelcomeScreen() {
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/workbench"));
   if (blocked) return <FaceScreenMessage message={blocked} backLabel={t("common:actions.back")} onBack={goBack} />;
   // 账号变化时重建页面状态，避免把上一个账号的筛选与结果留在屏幕上。
-  return <FaceUnwelcomeContent key={userGuid} onBack={goBack} />;
+  return (
+    <FaceScreenFrame title={t("unwelcome.title")} onBack={goBack}>
+      <UnwelcomePanel key={userGuid} />
+    </FaceScreenFrame>
+  );
 }
 
-function FaceUnwelcomeContent({ onBack }: { onBack: () => void }) {
+export interface UnwelcomePanelProps {
+  /** 初始分区（合并页的 sub 参数）；该分区当前账号不可见时退回第一个可见分区。 */
+  initialTab?: FaceUnwelcomeTabKey;
+}
+
+/** 「名单」内容面板：不含页面框架与权限守卫，由外壳（单页或「人脸比对」合并页）负责。 */
+export function UnwelcomePanel({ initialTab }: UnwelcomePanelProps = {}) {
   const { t } = useAppTranslation(["faceMatch", "common"]);
   const describeError = useFaceErrorMessage();
   const configQuery = useFaceMatchConfig(true);
   const { stores } = useFaceStoreOptions();
   const config = configQuery.data;
   const tabs = useMemo(() => (config ? getVisibleUnwelcomeTabs(config.permissions) : []), [config]);
-  const [tab, setTab] = useState<FaceUnwelcomeTabKey>("entries");
+  const [tab, setTab] = useState<FaceUnwelcomeTabKey>(initialTab ?? "entries");
   const activeTab: FaceUnwelcomeTabKey = tabs.includes(tab) ? tab : (tabs[0] ?? "entries");
+
+  // 面板常驻时（合并页切页签不卸载）路由参数可能变化：外部指定了新的分区就跟过去。
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   // 权限标志变化后当前分区不再可见时，退回第一个可见分区。
   useEffect(() => {
@@ -91,11 +108,7 @@ function FaceUnwelcomeContent({ onBack }: { onBack: () => void }) {
     );
   }
 
-  return (
-    <FaceScreenFrame title={t("unwelcome.title")} onBack={onBack}>
-      {body}
-    </FaceScreenFrame>
-  );
+  return <>{body}</>;
 }
 
 const styles = StyleSheet.create({
