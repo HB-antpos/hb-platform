@@ -25,6 +25,8 @@ public sealed class FaceMatchController(
     IFaceTrafficService trafficService,
     IFaceUnwelcomeService unwelcomeService,
     IFaceCaptureResultService resultService,
+    IFaceHitResultService hitService,
+    IFaceThumbnailService thumbnailService,
     IAuthorizationService authorizationService) : ControllerBase
 {
     private const int MaxFormFiles = 6;
@@ -293,6 +295,88 @@ public sealed class FaceMatchController(
         var canView = await HasAsync(Permissions.FaceCapture.Images.View);
         return await RunImageAsync(() => resultService.GetImageAsync(captureId, imageId, ResolveActor(), canView, cancellationToken));
     }
+
+    // ---------- 命中流（「人脸比对」合并入口的「黑名单」视图） ----------
+    // 以命中任务为主表：Match 模式不留存抓拍、但命中通知照发，所以不能依赖上面的抓拍流，否则会「红色写 3、点进去是空的」。
+
+    /// <summary>
+    /// 命中流列表（权限 FaceCapture.Images.View，门店范围同抓拍流）。hitStatus：all（默认）/ unread / pending / autoConfirmed / confirmed / dismissed，
+    /// 其它值 400；unread 只看<b>当前登录人</b>自己的命中通知。canReview 按 FaceMatch.Unwelcome.Review 单独判定。
+    /// </summary>
+    [HttpGet("results/hits")]
+    [Authorize(Policy = Permissions.FaceCapture.Images.View)]
+    public async Task<IActionResult> ListHits(
+        [FromQuery] string? storeCode,
+        [FromQuery] string? hitStatus,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var canReview = await HasAsync(Permissions.FaceMatch.Unwelcome.Review);
+        return await RunAsync(() => hitService.ListAsync(
+            new FaceHitResultQuery
+            {
+                StoreCode = storeCode,
+                HitStatus = hitStatus,
+                FromUtc = fromUtc,
+                ToUtc = toUtc,
+                Page = page,
+                PageSize = pageSize,
+            },
+            ResolveActor(),
+            canReview,
+            cancellationToken));
+    }
+
+    /// <summary>命中流各状态的数量（total / unread / pending / autoConfirmed / confirmed / dismissed），门店与时间条件同列表。</summary>
+    [HttpGet("results/hits/summary")]
+    [Authorize(Policy = Permissions.FaceCapture.Images.View)]
+    public Task<IActionResult> HitSummary(
+        [FromQuery] string? storeCode,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        CancellationToken cancellationToken = default) =>
+        RunAsync(() => hitService.GetSummaryAsync(
+            new FaceHitResultQuery { StoreCode = storeCode, FromUtc = fromUtc, ToUtc = toUtc },
+            ResolveActor(),
+            cancellationToken));
+
+    /// <summary>
+    /// 把当前登录人那条命中通知标为已读（幂等，只改本人的未读行），返回命中通知类型的剩余未读数。
+    /// 权限在动作内判定：持有 FaceCapture.Images.View 或 FaceMatch.Unwelcome.Review 任一即可（命中通知本来只发给持有 Review 的人，
+    /// 他们不一定有看图权限，所以不能只认看图权限）；都没有返回 403。
+    /// </summary>
+    [HttpPost("results/hits/{taskId}/read")]
+    public async Task<IActionResult> MarkHitRead(string taskId, CancellationToken cancellationToken)
+    {
+        if (!await HasAsync(Permissions.FaceCapture.Images.View) && !await HasAsync(Permissions.FaceMatch.Unwelcome.Review))
+        {
+            return Forbidden();
+        }
+
+        return await RunAsync(() => hitService.MarkReadAsync(taskId, ResolveActor(), cancellationToken));
+    }
+
+    /// <summary>
+    /// 命中图原图（服务端转发字节）：权限 FaceCapture.Images.View，复用复核页同一套读取（门店范围校验、对象键只来自数据库、
+    /// 类型与大小校验、<see cref="FaceMatchAuditActions.TaskViewCapture"/> 每次读取写持久审计，被拒绝的尝试同样记）；图已删除返回同一个「已删除」错误。
+    /// </summary>
+    [HttpGet("results/hits/{taskId}/image")]
+    [Authorize(Policy = Permissions.FaceCapture.Images.View)]
+    public Task<IActionResult> HitImage(string taskId, CancellationToken cancellationToken) =>
+        RunImageAsync(() => unwelcomeService.GetTaskImageAsync(taskId, ResolveActor(), cancellationToken));
+
+    /// <summary>
+    /// 缩略图批量接口：1–30 项，最长边 128 像素的 JPEG（base64）；单项失败不影响整批；<b>一次请求恰好一条审计</b>（capture.thumbnails.view，不逐张记、不含编号）。
+    /// 响应带 no-store（控制器级过滤器）；请求体很小，限制 16KB。
+    /// </summary>
+    [HttpPost("results/thumbnails")]
+    [Authorize(Policy = Permissions.FaceCapture.Images.View)]
+    [RequestSizeLimit(16 * 1024)]
+    public Task<IActionResult> Thumbnails([FromBody] FaceThumbnailRequest? request, CancellationToken cancellationToken) =>
+        RunAsync(() => thumbnailService.GetThumbnailsAsync(request ?? new FaceThumbnailRequest(), ResolveActor(), cancellationToken));
 
     /// <summary>误报统计（只有计数与驳回率，没有照片）：Manage / Approve / Review 任一即可。</summary>
     [HttpGet("unwelcome/stats")]

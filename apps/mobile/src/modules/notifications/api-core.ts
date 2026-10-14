@@ -30,8 +30,13 @@ export function createNotificationsApi(http: NotificationsHttp) {
       return normalizeNotificationPage(data(await http.get(NOTIFICATIONS_API_BASE, { params, signal })));
     },
 
-    async unreadCount(signal?: AbortSignal): Promise<number> {
-      return normalizeUnreadCount(data(await http.get(`${NOTIFICATIONS_API_BASE}/unread-count`, { signal })));
+    /**
+     * 未读数；带 type 时只统计该类型（如命中通知 face.unwelcome-hit，红色数字用），不带 = 全部。
+     * 响应宽松解析：不是数字一律当 0（取数失败由调用方的查询层保持上一次的数，这里不吞错误）。
+     */
+    async unreadCount(type?: string, signal?: AbortSignal): Promise<number> {
+      const params = type ? { type } : undefined;
+      return normalizeUnreadCount(data(await http.get(`${NOTIFICATIONS_API_BASE}/unread-count`, { params, signal })));
     },
 
     /** 只会改到本人的未读记录；返回值里的 unreadCount 是最新的服务端未读总数。 */

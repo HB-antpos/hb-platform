@@ -70,7 +70,8 @@ CREATE TABLE FaceAuditLog (
     Result nvarchar(32) NOT NULL
 )
 """);
-        Db.Ado.ExecuteCommand("CREATE TABLE FaceCaptureImage (ImageId char(32) NOT NULL PRIMARY KEY, CaptureId char(32) NOT NULL, Kind tinyint NOT NULL DEFAULT 0, PartIndex int NOT NULL DEFAULT 0)");
+        // 与迁移 20261013.001-face-capture 的列同名（只建测试用得到的列）：缩略图服务读取 Storage / ObjectKey / ContentType / ByteSize。
+        Db.Ado.ExecuteCommand("CREATE TABLE FaceCaptureImage (ImageId char(32) NOT NULL PRIMARY KEY, CaptureId char(32) NOT NULL, Kind tinyint NOT NULL DEFAULT 0, PartIndex int NOT NULL DEFAULT 0, Storage nvarchar(16) NOT NULL DEFAULT 'cos', ObjectKey nvarchar(400) NOT NULL DEFAULT '', ContentType nvarchar(64) NULL, ByteSize int NOT NULL DEFAULT 0)");
         Context = FaceCameraAdminTests.CreateSqlSugarContext(Db);
         SeedStores();
     }

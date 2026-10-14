@@ -1,27 +1,30 @@
-// 抓拍详情图片会话（敏感生物识别信息）：一次「抓拍详情」对应一个会话，只有两个槽位——人脸小图与背景图。
+// 抓拍详情图片会话（敏感生物识别信息）：一次「抓拍详情」对应一个会话，有三个槽位——抓拍的人脸小图、背景图，以及命中图
+// （命中流的行没有留存抓拍时，详情只显示命中图；hit 槽位只有命中流的行才会传读取函数）。
 //
 // 约束（与 image-session.ts 同一套，由 capture-image-session.test / source-contract.test 守住）：
-// 1. 只在用户打开详情后才请求，列表没有缩略图、不预加载；
+// 1. 只在用户打开详情后才请求整图（列表里的缩略图是另一套：thumbnail-loader，只放内存、最长边 128px）；
 // 2. 图片只以 base64 data URI 的形式存在于会话状态里（组件 state），不写磁盘缓存、不进 react-query 缓存、不进日志；
 // 3. 关闭 / 切换 / 卸载 / 应用退到后台时调用 dispose()：中止在途请求并清空全部状态引用，此后不再回调。
 import { classifyReviewImageError } from "./errors";
 import type { ReviewImageState } from "./image-session";
 
-export type CaptureImageSlot = "face" | "scene";
+export type CaptureImageSlot = "face" | "scene" | "hit";
 
 export type CaptureImageStates = ReadonlyMap<CaptureImageSlot, ReviewImageState>;
 
 export interface CaptureImageSession {
-  /** 并行读取存在编号的槽位；没有编号的槽位不请求、也不出现在状态里。 */
+  /** 并行读取存在读取函数的槽位；没有的槽位不请求、也不出现在状态里。 */
   start: () => Promise<void>;
   /** 关闭 / 切换 / 卸载：中止在途请求，清空状态，此后不再回调。 */
   dispose: () => void;
   getStates: () => CaptureImageStates;
 }
 
+export type CaptureImageFetcher = (signal: AbortSignal) => Promise<string>;
+
 export interface CaptureImageSessionOptions {
-  /** 槽位 → 读取函数（返回 data URI）；传 null 表示该槽位没有图片编号。 */
-  fetchers: Record<CaptureImageSlot, ((signal: AbortSignal) => Promise<string>) | null>;
+  /** 槽位 → 读取函数（返回 data URI）；传 null / 省略表示该槽位没有图片（hit 槽位可省略）。 */
+  fetchers: { face: CaptureImageFetcher | null; scene: CaptureImageFetcher | null; hit?: CaptureImageFetcher | null };
   onChange: (states: CaptureImageStates) => void;
 }
 
@@ -53,7 +56,7 @@ export function createCaptureImageSession(options: CaptureImageSessionOptions): 
 
   return {
     start: async () => {
-      await Promise.all([load("face"), load("scene")]);
+      await Promise.all([load("face"), load("scene"), load("hit")]);
     },
     getStates: () => states,
     dispose() {

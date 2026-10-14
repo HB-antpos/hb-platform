@@ -3,10 +3,14 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  PRIMARY_TAB_BADGE_MAX,
   buildPrimaryNavigation,
+  formatUnreadBadgeText,
   resolveMeTabLabel,
   resolvePrimaryNavigationAction,
+  resolvePrimaryTabBadge,
   shouldHidePrimaryTabBar,
+  type PrimaryNavigationKey,
 } from "./primary-navigation";
 import {
   areAllWorkbenchSectionsCollapsed,
@@ -200,17 +204,22 @@ assert.equal(
   "日结记录从工作台进入，不能新增一级导航"
 );
 assert.equal(
-  compactPrimaryItems("face-unwelcome", [...fullMenu, "face-unwelcome"])[0]?.active,
+  compactPrimaryItems("face-hub", [...fullMenu, "face-hub"])[0]?.active,
   true,
-  "不受欢迎人员名单从工作台进入，不能新增一级导航"
+  "人脸比对合并入口从工作台进入，不能新增一级导航"
 );
 assert.equal(
-  compactPrimaryItems("face-match-settings", [...fullMenu, "face-match-settings"])[0]?.active,
+  compactPrimaryItems("face-unwelcome", [...fullMenu, "face-hub"])[0]?.active,
+  true,
+  "旧的不受欢迎人员名单路由（重定向壳）同样归工作台上下文"
+);
+assert.equal(
+  compactPrimaryItems("face-match-settings", [...fullMenu, "face-hub"])[0]?.active,
   true,
   "人脸比对设置从工作台进入，不能新增一级导航"
 );
 assert.equal(
-  compactPrimaryItems("face-capture-results", [...fullMenu, "face-capture-results"])[0]?.active,
+  compactPrimaryItems("face-capture-results", [...fullMenu, "face-hub"])[0]?.active,
   true,
   "抓拍与比对从工作台进入，不能新增一级导航"
 );
@@ -549,35 +558,30 @@ assert.deepEqual(
   "日结记录必须归入运营与报表并紧跟员工操作日志，只依赖后端显式菜单"
 );
 assert.deepEqual(
-  buildWorkbenchSections(["employee-profile-review", "face-unwelcome", "face-match-settings", "device-management"]).map((section) => ({
+  buildWorkbenchSections(["employee-profile-review", "face-hub", "device-management"]).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
   })),
   [
     {
       key: "people-management",
-      itemRouteNames: ["employee-profile-review", "face-unwelcome", "face-match-settings", "device-management"],
+      itemRouteNames: ["employee-profile-review", "face-hub", "device-management"],
     },
   ],
-  "人脸比对两个入口必须归入人员与管理，紧跟资料审核，只依赖后端显式菜单"
+  "人脸比对合并入口必须归入人员与管理，紧跟资料审核，只依赖后端显式菜单"
 );
-assert.equal(zhWorkbench.routes.faceUnwelcome, "不受欢迎人员名单", "中文工作台必须用正式名称显示不受欢迎人员名单");
-assert.equal(zhWorkbench.routes.faceMatchSettings, "人脸比对设置", "中文工作台必须显示人脸比对设置");
-assert.equal(enWorkbench.routes.faceUnwelcome, "Unwelcome persons list", "英文工作台必须显示 Unwelcome persons list");
-assert.equal(enWorkbench.routes.faceMatchSettings, "Face match settings", "英文工作台必须显示 Face match settings");
 assert.deepEqual(
-  buildWorkbenchSections(["face-unwelcome", "face-capture-results", "face-match-settings"]).map((section) => ({
-    key: section.key,
-    itemRouteNames: section.items.map((item) => item.routeName),
-  })),
-  [
-    {
-      key: "people-management",
-      itemRouteNames: ["face-unwelcome", "face-capture-results", "face-match-settings"],
-    },
-  ],
-  "抓拍与比对必须归入人员与管理，紧跟不受欢迎人员名单，只依赖后端显式菜单"
+  buildWorkbenchSections(["face-unwelcome", "face-capture-results", "face-match-settings"]),
+  [],
+  "旧三个人脸比对入口不再出现在工作台（新版只显示 face-hub）"
 );
+assert.equal(
+  buildWorkbenchSections(["face-hub"])[0]?.items[0]?.icon,
+  "face-recognition",
+  "人脸比对入口使用 face-recognition 图标"
+);
+assert.equal(zhWorkbench.routes.faceHub, "人脸比对", "中文工作台必须显示人脸比对");
+assert.equal(enWorkbench.routes.faceHub, "Face matching", "英文工作台必须显示 Face matching");
 assert.deepEqual(
   buildWorkbenchSections(["daily-closes", "notifications"]).map((section) => ({
     key: section.key,
@@ -591,8 +595,6 @@ assert.deepEqual(
   ],
   "通知收件箱必须归入运营与报表，只依赖后端显式菜单"
 );
-assert.equal(zhWorkbench.routes.faceCaptureResults, "抓拍与比对", "中文工作台必须显示抓拍与比对");
-assert.equal(enWorkbench.routes.faceCaptureResults, "Captures and matches", "英文工作台必须显示 Captures and matches");
 assert.equal(zhWorkbench.routes.notifications, "通知", "中文工作台必须显示通知");
 assert.equal(enWorkbench.routes.notifications, "Notifications", "英文工作台必须显示 Notifications");
 assert.equal(zhWorkbench.routes.dailyCloses, "日结记录", "中文工作台必须显示日结记录");
@@ -801,4 +803,42 @@ assert.equal(
   assert.equal(formatWorkbenchBadgeCount(100), "99+");
   assert.equal(formatWorkbenchBadgeCount(1000, 999), "999+");
   assert.equal(formatWorkbenchBadgeCount(137, 999), "137");
+}
+
+// ───────── 底部导航徽标（红色数字）：> 0 才显示、99+ 封顶、只挂「工作台」 ─────────
+{
+  assert.equal(PRIMARY_TAB_BADGE_MAX, 99);
+  assert.equal(formatUnreadBadgeText(0), null, "0 不显示徽标");
+  assert.equal(formatUnreadBadgeText(-3), null, "负数按 0 处理");
+  assert.equal(formatUnreadBadgeText(Number.NaN), null, "NaN 按 0 处理");
+  assert.equal(formatUnreadBadgeText(Number.POSITIVE_INFINITY), null, "Infinity 按 0 处理，不显示 Infinity+");
+  assert.equal(formatUnreadBadgeText(1), "1");
+  assert.equal(formatUnreadBadgeText(3.9), "3", "小数取整");
+  assert.equal(formatUnreadBadgeText(99), "99", "恰好 99 不加 +");
+  assert.equal(formatUnreadBadgeText(100), "99+", "超过 99 封顶显示 99+");
+  assert.equal(formatUnreadBadgeText(12345), "99+");
+
+  assert.deepEqual(resolvePrimaryTabBadge("workbench", { faceHitUnreadCount: 3 }), { count: 3, text: "3" });
+  assert.deepEqual(
+    resolvePrimaryTabBadge("workbench", { faceHitUnreadCount: 250 }),
+    { count: 250, text: "99+" },
+    "徽标文字封顶，但无障碍标签用真实数字"
+  );
+  assert.equal(resolvePrimaryTabBadge("workbench", { faceHitUnreadCount: 0 }), null);
+  assert.equal(resolvePrimaryTabBadge("workbench", { faceHitUnreadCount: -1 }), null);
+  for (const key of ["scan", "attendance", "reports", "me"] as PrimaryNavigationKey[]) {
+    assert.equal(resolvePrimaryTabBadge(key, { faceHitUnreadCount: 5 }), null, `${key} 页签不挂黑名单命中徽标`);
+  }
+
+  // 底栏源码：徽标样式按设计稿（红底 #D92D20、白字 11px 加粗、白色 1.5px 描边、最小 18×18），无障碍标签带数字，中英文案齐全
+  const tabBar = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../components/navigation/PrimaryTabBar.tsx"), "utf8");
+  assert.ok(tabBar.includes("resolvePrimaryTabBadge(item.key, { faceHitUnreadCount })"));
+  assert.ok(tabBar.includes('"tabs.unreadHitsLabel"') && tabBar.includes("count: badge.count"), "无障碍标签带上真实数字");
+  assert.ok(/backgroundColor:\s*"#D92D20"/.test(tabBar) && /borderWidth:\s*1\.5/.test(tabBar) && /minWidth:\s*18/.test(tabBar) && /fontSize:\s*11/.test(tabBar));
+  const zhCommon = JSON.parse(readFileSync(resolve(localeRoot, "zh/common.json"), "utf8"));
+  const enCommon = JSON.parse(readFileSync(resolve(localeRoot, "en/common.json"), "utf8"));
+  assert.equal(zhCommon.tabs.unreadHitsLabel, "{{label}}，{{count}} 条未读黑名单命中");
+  assert.equal(enCommon.tabs.unreadHitsLabel, "{{label}}, {{count}} unread blacklist hits");
+  assert.equal(zhCommon.tabs.faceHub, "人脸比对");
+  assert.equal(enCommon.tabs.faceHub, "Face matching");
 }

@@ -8,6 +8,7 @@ import {
   buildPrimaryNavigation,
   resolveMeTabLabel,
   resolvePrimaryNavigationAction,
+  resolvePrimaryTabBadge,
 } from "@/modules/navigation/primary-navigation";
 import { markReportHubNavigationStart } from "@/modules/reports/report-load-performance";
 import { useAuthStore } from "@/store/auth-store";
@@ -22,7 +23,7 @@ export function PrimaryTabBar({ activeRouteName }: PrimaryTabBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation("common");
-  const { orderedVisibleRouteNames, isDeviceMode } = useAppNavigationAccess();
+  const { orderedVisibleRouteNames, isDeviceMode, faceHitUnreadCount } = useAppNavigationAccess();
   const fullName = useAuthStore((state) => state.user?.fullName);
   const username = useAuthStore((state) => state.user?.username);
   const items = buildPrimaryNavigation({
@@ -48,7 +49,12 @@ export function PrimaryTabBar({ activeRouteName }: PrimaryTabBarProps) {
           item.key === "me"
             ? resolveMeTabLabel({ fullName, username, isDeviceMode, fallbackLabel: baseLabel })
             : baseLabel;
-        const accessibilityLabel = label === baseLabel ? baseLabel : `${baseLabel} ${label}`;
+        const baseAccessibilityLabel = label === baseLabel ? baseLabel : `${baseLabel} ${label}`;
+        // 红色数字徽标（> 0 才有，99 封顶）：无障碍标签带上真实数字，读屏不依赖视觉上的红点。
+        const badge = resolvePrimaryTabBadge(item.key, { faceHitUnreadCount });
+        const accessibilityLabel = badge
+          ? t("tabs.unreadHitsLabel", { label: baseAccessibilityLabel, count: badge.count })
+          : baseAccessibilityLabel;
         const iconColor = item.active ? HB_COLORS.brand : HB_COLORS.textSecondary;
         const labelColor = item.active ? HB_COLORS.action : HB_COLORS.textSecondary;
 
@@ -88,6 +94,13 @@ export function PrimaryTabBar({ activeRouteName }: PrimaryTabBarProps) {
             <View style={styles.iconArea}>
               {item.active ? <View style={styles.activeIndicator} /> : null}
               <MaterialCommunityIcons name={item.icon} color={iconColor} size={23} />
+              {badge ? (
+                <View style={styles.badge} pointerEvents="none">
+                  <Text allowFontScaling={false} style={styles.badgeText}>
+                    {badge.text}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             <Text
               allowFontScaling
@@ -140,6 +153,29 @@ const styles = StyleSheet.create({
     height: 3,
     borderRadius: 2,
     backgroundColor: HB_COLORS.brand,
+  },
+  // 红色数字徽标：挂在图标右上角，红底白字、白色描边，不挤占标签宽度（设计稿 01/02：#D92D20、11px 加粗、最小 18×18）。
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -3,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: HB_COLORS.surface,
+    backgroundColor: "#D92D20",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: {
+    color: HB_COLORS.white,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+    includeFontPadding: false,
   },
   label: {
     marginTop: 1,

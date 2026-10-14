@@ -1,3 +1,5 @@
+import { filterLegacyFaceRouteNames, isLegacyFaceRouteName } from "./face-hub";
+
 export type AppTabPath =
   | "/(shell)/workbench"
   | "/(shell)/home"
@@ -31,6 +33,7 @@ export type AppTabPath =
   | "/(shell)/permissions"
   | "/(shell)/employee-profile"
   | "/(shell)/employee-profile-review"
+  | "/(shell)/face-hub"
   | "/(shell)/face-unwelcome"
   | "/(shell)/face-match-settings"
   | "/(shell)/face-capture-results"
@@ -77,6 +80,8 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   permissions: "/(shell)/permissions",
   "employee-profile": "/(shell)/employee-profile",
   "employee-profile-review": "/(shell)/employee-profile-review",
+  // 「人脸比对」合并入口：新版 App 菜单里只出现它。下面旧三个路由名保留在路径表里（深链、旧通知、历史书签），页面会重定向到合并页对应页签。
+  "face-hub": "/(shell)/face-hub",
   "face-unwelcome": "/(shell)/face-unwelcome",
   "face-match-settings": "/(shell)/face-match-settings",
   "face-capture-results": "/(shell)/face-capture-results",
@@ -101,7 +106,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "attendance-personal",
   "attendance-management",
   "employee-profile-review",
-  // 参考照片与命中抓拍是生物识别信息，人脸比对相关接口按账号权限授权，设备会话没有用户账号，设备模式不展示这两个入口。
+  // 参考照片与命中抓拍是生物识别信息，人脸比对相关接口按账号权限授权，设备会话没有用户账号，设备模式不展示合并入口（及旧三个入口）。
+  "face-hub",
   "face-unwelcome",
   "face-match-settings",
   // 抓拍结果含生物识别照片、通知收件箱按用户账号计算，设备会话都没有对应身份，设备模式不展示。
@@ -193,9 +199,11 @@ export function getVisibleTabRouteNames({
     routeNames,
     canViewAttendanceManagement ?? canManageAttendance
   );
+  // 旧版 App 仍靠后端下发的「抓拍与比对 / 不受欢迎人员名单 / 人脸比对设置」三项；新版统一用 face-hub 一个入口，菜单里去掉旧三项。
+  const menuRouteNames = filterLegacyFaceRouteNames(orderedRouteNames);
   const filteredRouteNames = isDeviceMode
-    ? orderedRouteNames.filter((routeName) => !DEVICE_MODE_BLOCKED_ROUTE_NAMES.has(routeName))
-    : orderedRouteNames;
+    ? menuRouteNames.filter((routeName) => !DEVICE_MODE_BLOCKED_ROUTE_NAMES.has(routeName))
+    : menuRouteNames;
 
   // 工作台和设置属于本地安全壳，不代表任何业务权限；业务入口仍完全来自后端菜单。
   return [
@@ -283,6 +291,12 @@ export function resolveTabRouteCorrection({
 
   if (!currentRoute) {
     // 非 Tab 栈页面（例如货柜列表/明细）由根 Stack 接管，不能被 Tab 默认页纠偏抢走。
+    return null;
+  }
+
+  if (isLegacyFaceRouteName(currentRouteName)) {
+    // 旧三个人脸比对路由只是跳转壳：页面自己会重定向到 face-hub 对应页签，纠偏交给合并页
+    // （没有权限时由合并页的可见性判断退回默认入口）。这里不能按「不在可见集合」直接纠偏，否则会抢在重定向之前把深链弹回默认页。
     return null;
   }
 

@@ -105,6 +105,69 @@ async function run() {
     assert.equal(session.getStates().size, 0, "迟到的图片不进入状态");
   }
 
+  // ───────── 命中流的行：只有命中图一个槽位（hit），face / scene 没有读取函数；hit 槽位省略时与旧行为一致 ─────────
+  {
+    const calls: string[] = [];
+    const session = createCaptureImageSession({
+      fetchers: {
+        face: null,
+        scene: null,
+        hit: async (signal) => {
+          assert.equal(signal.aborted, false);
+          calls.push("hit");
+          return "data:image/jpeg;base64,HIT";
+        },
+      },
+      onChange: () => undefined,
+    });
+    await session.start();
+    assert.deepEqual(calls, ["hit"]);
+    assert.deepEqual(session.getStates().get("hit"), { status: "loaded", uri: "data:image/jpeg;base64,HIT" });
+    assert.equal(session.getStates().has("face"), false);
+    assert.equal(session.getStates().has("scene"), false);
+    session.dispose();
+    assert.equal(session.getStates().size, 0, "dispose 后命中图引用也被清空");
+
+    // 命中图读取失败按类别归类，不影响其他槽位
+    const failing = createCaptureImageSession({
+      fetchers: {
+        face: async () => "data:image/jpeg;base64,FACE",
+        scene: null,
+        hit: async () => {
+          throw httpError(410, "FACE_MATCH_IMAGE_GONE");
+        },
+      },
+      onChange: () => undefined,
+    });
+    await failing.start();
+    assert.equal(failing.getStates().get("face")?.status, "loaded");
+    assert.equal(failing.getStates().get("hit")?.status, "error");
+    failing.dispose();
+
+    // 关闭时中止命中图的在途请求，迟到的响应丢弃
+    const pending = deferred<string>();
+    let aborted = false;
+    const late = createCaptureImageSession({
+      fetchers: {
+        face: null,
+        scene: null,
+        hit: (signal) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          return pending.promise;
+        },
+      },
+      onChange: () => undefined,
+    });
+    const started = late.start();
+    late.dispose();
+    assert.equal(aborted, true);
+    pending.resolve("data:image/jpeg;base64,LATE");
+    await started;
+    assert.equal(late.getStates().size, 0);
+  }
+
   // ───────── 关闭后失败也不再回调 ─────────
   {
     const pending = deferred<string>();

@@ -163,6 +163,70 @@ public sealed class FaceCaptureResultServiceTests : IDisposable
         Assert.Equal("t-high", page.Items.Single().Hit!.TaskId);
     }
 
+    [Fact]
+    public async Task 命中带自动确认_未读_通知编号_只看当前登录人自己的那条通知()
+    {
+        AddCapture("h1", "1013", "cam-a", T0.AddMinutes(1));
+        AddTask("task-auto", "1013", "cam-a", T0.AddMinutes(1), score: 99m, notifiedAt: T0.AddMinutes(2),
+            review: FaceMatchReviewStatus.Confirmed, reviewer: FaceMatchAuditActions.SystemActorId);
+        AddNotification("task-auto", recipients: 0, read: 0, createdAt: T0.AddMinutes(2));
+        AddRecipient("task-auto", QldManager.Id, readAt: null);              // 我没读
+        AddRecipient("task-auto", "other-user", readAt: T0.AddMinutes(3));    // 别人读了，不影响我
+        AddCapture("h2", "1013", "cam-a", T0.AddMinutes(5));
+        AddTask("task-manual", "1013", "cam-a", T0.AddMinutes(5), score: 80m, notifiedAt: T0.AddMinutes(6),
+            review: FaceMatchReviewStatus.Confirmed, reviewer: "someone");
+        AddNotification("task-manual", recipients: 0, read: 0, createdAt: T0.AddMinutes(6));
+        AddRecipient("task-manual", QldManager.Id, readAt: T0.AddMinutes(7));  // 我读过了
+        AddCapture("h3", "1013", "cam-a", T0.AddMinutes(9));
+        AddTask("task-nonotify", "1013", "cam-a", T0.AddMinutes(9), score: 70m, notifiedAt: null);   // 通知还没发
+
+        var mine = await _service.ListAsync(new FaceCaptureResultQuery(), QldManager, canViewImages: false);
+        var admin = await _service.ListAsync(new FaceCaptureResultQuery(), Admin, canViewImages: false);
+
+        var auto = mine.Items.Single(i => i.CaptureId == "h1").Hit!;
+        Assert.True(auto.AutoConfirmed);
+        Assert.True(auto.Unread);
+        Assert.Equal("n-task-auto", auto.NotificationId);
+        var manual = mine.Items.Single(i => i.CaptureId == "h2").Hit!;
+        Assert.False(manual.AutoConfirmed);                                    // 人工确认不是自动确认
+        Assert.False(manual.Unread);
+        Assert.Equal("n-task-manual", manual.NotificationId);                   // 读过了也给通知编号
+        var nothing = mine.Items.Single(i => i.CaptureId == "h3").Hit!;
+        Assert.False(nothing.Unread);
+        Assert.Null(nothing.NotificationId);
+        // 管理员不是这几条通知的收件人：没有通知行 → 不未读、没有通知编号。
+        Assert.All(admin.Items.Select(i => i.Hit!), hit => { Assert.False(hit.Unread); Assert.Null(hit.NotificationId); });
+    }
+
+    [Fact]
+    public async Task 抓拍流的未读与命中流同一口径_撤回与过期的通知不算未读()
+    {
+        var time = new FaceCameraAdminTests.MutableTimeProvider(T0.AddHours(1));
+        var service = new FaceCaptureResultService(_db.Context, _images.Object, new FakeFaceMatchSettings(), time);
+        AddCapture("h1", "1013", "cam-a", T0.AddMinutes(1));
+        AddTask("t-revoked", "1013", "cam-a", T0.AddMinutes(1), score: 80m, notifiedAt: T0);
+        AddNotification("t-revoked", recipients: 0, read: 0, createdAt: T0);
+        AddRecipient("t-revoked", QldManager.Id, readAt: null);
+        var revokedAt = T0;
+        _db.Db.Updateable<AppNotification>().SetColumns(n => n.RevokedAtUtc == revokedAt).Where(n => n.NotificationId == "n-t-revoked").ExecuteCommand();
+        AddCapture("h2", "1013", "cam-a", T0.AddMinutes(2));
+        AddTask("t-expired", "1013", "cam-a", T0.AddMinutes(2), score: 80m, notifiedAt: T0);
+        AddNotification("t-expired", recipients: 0, read: 0, createdAt: T0);
+        AddRecipient("t-expired", QldManager.Id, readAt: null);
+        var expiresAt = T0.AddMinutes(30);
+        _db.Db.Updateable<AppNotification>().SetColumns(n => n.ExpiresAtUtc == expiresAt).Where(n => n.NotificationId == "n-t-expired").ExecuteCommand();
+        AddCapture("h3", "1013", "cam-a", T0.AddMinutes(3));
+        AddTask("t-live", "1013", "cam-a", T0.AddMinutes(3), score: 80m, notifiedAt: T0);
+        AddNotification("t-live", recipients: 0, read: 0, createdAt: T0);
+        AddRecipient("t-live", QldManager.Id, readAt: null);
+
+        var page = await service.ListAsync(new FaceCaptureResultQuery(), QldManager, canViewImages: false);
+
+        Assert.False(page.Items.Single(i => i.CaptureId == "h1").Hit!.Unread);
+        Assert.False(page.Items.Single(i => i.CaptureId == "h2").Hit!.Unread);
+        Assert.True(page.Items.Single(i => i.CaptureId == "h3").Hit!.Unread);
+    }
+
     // ---------- 图片编号 ----------
 
     [Fact]
@@ -266,7 +330,9 @@ public sealed class FaceCaptureResultServiceTests : IDisposable
     private void AddEvaluation(string captureId, byte decision, decimal? staff, decimal? visit) =>
         _db.Db.Insertable(new FaceMatchEvaluation { CaptureId = captureId, Decision = decision, StaffScore = staff, VisitScore = visit }).ExecuteCommand();
 
-    private void AddTask(string taskId, string store, string camera, DateTime capturedAt, decimal score, DateTime? notifiedAt) =>
+    private void AddTask(
+        string taskId, string store, string camera, DateTime capturedAt, decimal score, DateTime? notifiedAt,
+        byte review = FaceMatchReviewStatus.Pending, string? reviewer = null) =>
         _db.Db.Insertable(new FaceMatchTask
         {
             TaskId = taskId,
@@ -276,9 +342,20 @@ public sealed class FaceCaptureResultServiceTests : IDisposable
             EntryId = "entry-1",
             Score = score,
             ImageObjectKey = "face-match/hit/x.jpg",
-            ReviewStatus = FaceMatchReviewStatus.Pending,
+            ReviewStatus = review,
+            FirstReviewerId = reviewer,
             ImageDeleteAtUtc = capturedAt.AddDays(7),
             NotifiedAtUtc = notifiedAt,
+        }).ExecuteCommand();
+
+    /// <summary>给某条命中通知加一个指定账号的接收行（readAt 为空 = 未读）。</summary>
+    private void AddRecipient(string taskId, string userGuid, DateTime? readAt) =>
+        _db.Db.Insertable(new AppNotificationRecipient
+        {
+            NotificationId = $"n-{taskId}",
+            UserGUID = userGuid,
+            CreatedAtUtc = T0,
+            ReadAtUtc = readAt,
         }).ExecuteCommand();
 
     /// <summary>与 <see cref="FaceHitNotifier"/> 发布时一致：DedupeKey = 前缀 + TaskId，每个收件人一行，前 read 个已读。</summary>

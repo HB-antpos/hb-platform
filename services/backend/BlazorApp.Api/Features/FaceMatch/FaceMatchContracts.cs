@@ -505,7 +505,18 @@ public sealed record FaceCaptureResultHitDto
 
     public int ReviewStatus { get; init; }
     public string ReviewStatusName { get; init; } = string.Empty;
+
+    /// <summary>true = 系统按门店阈值自动确认的（ReviewStatus 为 Confirmed 且复核人记为 system，没有人判断过）。</summary>
+    public bool AutoConfirmed { get; init; }
+
     public bool ImageAvailable { get; init; }
+
+    /// <summary>当前登录人对应的命中通知是否还未读（口径同 App 红色数字）；没有通知行 = false。</summary>
+    public bool Unread { get; init; }
+
+    /// <summary>当前登录人的那条命中通知编号；没有则为 null。</summary>
+    public string? NotificationId { get; init; }
+
     public string NotifyState { get; init; } = FaceHitNotifyStates.Pending;
     public DateTime? NotifiedAtUtc { get; init; }
     public int NotifyRecipientCount { get; init; }

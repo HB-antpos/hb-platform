@@ -11,6 +11,7 @@ import {
   resolveNotificationTarget,
   type NotificationInfiniteData,
 } from "./logic";
+import { buildFaceHubRoute, parseFaceHubParams } from "../navigation/face-hub";
 import type { NotificationItem, NotificationPage } from "./types";
 
 const item = (id: string, patch: Partial<NotificationItem> = {}): NotificationItem => ({
@@ -34,12 +35,39 @@ assert.equal(isUnread(item("a", { readAtUtc: "2026-10-14T02:00:00Z" })), false);
 assert.equal(isHighPriority(item("a", { priority: 1 })), true);
 assert.equal(isHighPriority(item("a", { priority: 0 })), false);
 
-// ───────── 点击去向：疑似命中进名单页，其余未知类型只标已读 ─────────
+// ───────── 点击去向：疑似命中进「人脸比对」合并页，其余未知类型只标已读 ─────────
 assert.equal(NOTIFICATION_TYPE_FACE_UNWELCOME_HIT, "face.unwelcome-hit");
-assert.deepEqual(resolveNotificationTarget({ type: "face.unwelcome-hit" }, true), { kind: "route", routeName: "face-unwelcome" });
-assert.deepEqual(resolveNotificationTarget({ type: "face.unwelcome-hit" }, false), { kind: "none" }, "打不开名单页的账号不跳转");
+const hit = { type: "face.unwelcome-hit" };
+assert.deepEqual(
+  resolveNotificationTarget(hit, { canViewCapture: true, canViewList: true }),
+  { kind: "route", routeName: "face-hub", params: { tab: "capture", filter: "blacklist", hitStatus: "unread" } },
+  "有抓拍权限：进抓拍页签，选中黑名单并只看未读",
+);
+assert.deepEqual(
+  resolveNotificationTarget(hit, { canViewCapture: true, canViewList: false }),
+  { kind: "route", routeName: "face-hub", params: { tab: "capture", filter: "blacklist", hitStatus: "unread" } },
+  "只有抓拍权限同样进抓拍页签",
+);
+assert.deepEqual(
+  resolveNotificationTarget(hit, { canViewCapture: false, canViewList: true }),
+  { kind: "route", routeName: "face-hub", params: { tab: "list", sub: "review" } },
+  "没有抓拍权限：进名单页签的命中复核",
+);
+assert.deepEqual(resolveNotificationTarget(hit, { canViewCapture: false, canViewList: false }), { kind: "none" }, "两个页签都打不开的账号不跳转");
 for (const type of ["system.test", "face.unwelcome-expiring", "approval.submitted", "", "FACE.UNWELCOME-HIT", "face.unwelcome-hit.v2"]) {
-  assert.deepEqual(resolveNotificationTarget({ type }, true), { kind: "none" }, `${type || "(空)"} 按未知类型兜底`);
+  assert.deepEqual(resolveNotificationTarget({ type }, { canViewCapture: true, canViewList: true }), { kind: "none" }, `${type || "(空)"} 按未知类型兜底`);
+}
+// 跳转参数能被合并页原样解析（页签 / 筛选 / 状态都在白名单内）
+{
+  const target = resolveNotificationTarget(hit, { canViewCapture: true, canViewList: true });
+  assert.equal(target.kind, "route");
+  if (target.kind === "route") {
+    assert.deepEqual(parseFaceHubParams(target.params), target.params);
+    assert.deepEqual(buildFaceHubRoute(target.params), {
+      pathname: "/(shell)/face-hub",
+      params: { tab: "capture", filter: "blacklist", hitStatus: "unread" },
+    });
+  }
 }
 
 // ───────── 已读状态写回缓存 ─────────

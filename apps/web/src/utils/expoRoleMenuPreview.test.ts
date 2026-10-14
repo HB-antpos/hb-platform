@@ -122,6 +122,7 @@ assertArrayEqual(
     'permissions',
     'employee-profile',
     'employee-profile-review',
+    'face-hub',
     'face-unwelcome',
     'face-match-settings',
     'face-capture-results',
@@ -252,6 +253,46 @@ assertEqual(
   buildPreview([P.FaceMatch.Traffic.View]).allRoutes.find((route) => route.routeName === 'face-match-settings')?.visible,
   false,
   '仅有客流统计权限时不应显示人脸比对设置入口',
+)
+
+// 人脸比对合并入口 face-hub：六个权限码任一即可见；客流统计权限（FaceMatch.Traffic.View）与无权限都不可见；
+// 旧三项（face-unwelcome / face-match-settings / face-capture-results）保持原权限口径不变（旧版 App 兼容）。
+const faceHubCodes = [
+  P.FaceCapture.ImagesView,
+  P.FaceMatch.Unwelcome.Manage,
+  P.FaceMatch.Unwelcome.Approve,
+  P.FaceMatch.Unwelcome.Review,
+  P.FaceMatch.Manage,
+  P.FaceCapture.CamerasManage,
+]
+for (const code of faceHubCodes) {
+  assertEqual(
+    buildPreview([code]).allRoutes.find((route) => route.routeName === 'face-hub')?.visible,
+    true,
+    `拥有 ${code} 时应显示人脸比对合并入口`,
+  )
+}
+for (const codes of [[], [P.FaceMatch.Traffic.View], [P.Users.View]]) {
+  assertEqual(
+    buildPreview(codes).allRoutes.find((route) => route.routeName === 'face-hub')?.visible,
+    false,
+    `仅有 ${codes.join(',') || '无权限'} 时不应显示人脸比对合并入口`,
+  )
+}
+assertArrayEqual(
+  [...(completePreview.allRoutes.find((route) => route.routeName === 'face-hub')?.permissionCodes ?? [])].sort(),
+  [...faceHubCodes].sort(),
+  '人脸比对合并入口应声明与后端 FullAppMenu 完全一致的六个权限码',
+)
+assertEqual(
+  buildPreview([P.FaceCapture.ImagesView]).allRoutes.find((route) => route.routeName === 'face-capture-results')?.visible,
+  true,
+  '旧的抓拍与比对入口仍只认看图权限',
+)
+assertEqual(
+  buildPreview([P.FaceCapture.ImagesView]).allRoutes.find((route) => route.routeName === 'face-unwelcome')?.visible,
+  false,
+  '看图权限不能顺带打开旧的名单入口',
 )
 
 const warehouseRoute = completePreview.allRoutes.find((route) => route.routeName === 'warehouse')

@@ -194,6 +194,7 @@ export function WorkbenchScreen() {
     pendingProfileReviewCount,
     pendingPriceUpdateCount,
     newProductKindCount,
+    faceHitUnreadCount,
     isDeviceMode,
     isWarehouseStaffOnly,
   } = useAppNavigationAccess();
@@ -202,6 +203,8 @@ export function WorkbenchScreen() {
     "employee-profile-review": pendingProfileReviewCount,
     "price-updates": pendingPriceUpdateCount,
     "container-new-products": newProductKindCount,
+    // 「人脸比对」入口：当前登录人还没看的黑名单命中通知数（沿用浅红胶囊角标；折叠分组汇总会自动累加）。
+    "face-hub": faceHitUnreadCount,
   };
   const maxCountByRouteName: Record<string, number> = {
     "container-new-products": 999,

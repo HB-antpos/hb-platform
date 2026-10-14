@@ -95,6 +95,12 @@ const MOBILE_MENU: MenuSource[] = ([
   ["permissions", "Permission management", "权限管理", ["Roles.View"]],
   ["employee-profile", "Employee profile", "员工档案", ["EmployeeProfiles.View"]],
   ["employee-profile-review", "Profile review", "档案审核", ["EmployeeProfiles.ReviewSensitiveManagedStore"]],
+  // 「人脸比对」合并入口：与后端 FullAppMenu 的 face-hub 一致，持有下面六个码任一即可见（合并的是入口不是权限，页签与区域仍各按各自的码）。
+  ["face-hub", "Face matching", "人脸比对", [
+    "FaceCapture.Images.View", "FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve",
+    "FaceMatch.Unwelcome.Review", "FaceMatch.Manage", "FaceCapture.Cameras.Manage",
+  ]],
+  // 下面旧三项仅为兼容旧版 App（后端 FullAppMenu 仍下发，新版 App 不显示），待旧版普及更新后与后端一起清理。
   // 与后端 FullAppMenu 的 AnyPermissions 一致：名单管理 / 批准 / 复核任一即可见；不新增权限码。
   ["face-unwelcome", "Unwelcome persons list", "不受欢迎人员名单", ["FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve", "FaceMatch.Unwelcome.Review"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：门店档案管理或摄像机管理任一即可见。

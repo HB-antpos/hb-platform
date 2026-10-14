@@ -1,20 +1,41 @@
 // 人脸比对页面共用的数据钩子（react-query）。
-// 缓存里只有列表 / 档案 / 摄像头的结构化数据；图片字节绝不经过 react-query（见 image-session.ts）。
+// 缓存里只有列表 / 汇总 / 档案 / 摄像头的结构化数据；图片字节（含列表缩略图）绝不经过 react-query（见 image-session.ts、thumbnail-loader.ts）。
 // 查询键都带账号编号：切换账号后不会读到上一个账号的缓存（登出时全局缓存也会清空）。
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryKey } from "@tanstack/react-query";
 import { getAllStores } from "@/modules/shop/api";
 import type { Store } from "@/modules/shop/types";
 import { useStores } from "@/modules/shop/use-stores";
 import { useAuthStore } from "@/store/auth-store";
 import { faceMatchApi } from "./api";
+import { markCaptureResultHitRead, markHitResultRead, mapPagesItems } from "./capture-logic";
 import { PAGE_SIZE } from "./constants";
 import { mergePages, nextPageParam } from "./entries-logic";
 import { extractHttpStatus } from "./errors";
-import type { FaceCaptureResult, FaceCaptureResultQuery, FaceMatchPage, FaceUnwelcomeEntry, FaceUnwelcomeTask } from "./types";
+import { writeFaceHitUnreadCount } from "./hit-unread";
+import type {
+  FaceCaptureResult,
+  FaceCaptureResultQuery,
+  FaceHitReadAllResult,
+  FaceHitResult,
+  FaceHitResultQuery,
+  FaceHitSummaryQuery,
+  FaceMatchPage,
+  FaceUnwelcomeEntry,
+  FaceUnwelcomeTask,
+} from "./types";
 
 /** 抓拍结果列表的筛选条件（不含分页）。 */
 export type CaptureResultFilters = Omit<FaceCaptureResultQuery, "page" | "pageSize">;
+
+/** 命中流（黑名单）列表的筛选条件（不含分页）。 */
+export type HitResultFilters = Omit<FaceHitResultQuery, "page" | "pageSize">;
+
+type HitPages = InfiniteData<FaceMatchPage<FaceHitResult>, number>;
+type CapturePages = InfiniteData<FaceMatchPage<FaceCaptureResult>, number>;
+
+/** 命中流汇总的筛选条件：只有门店与时间范围。 */
+export type HitSummaryFilters = FaceHitSummaryQuery;
 
 export const faceMatchKeys = {
   all: ["face-match"] as const,
@@ -27,6 +48,13 @@ export const faceMatchKeys = {
     ["face-match", userGuid, "tasks", status ?? "all", storeCode ?? "all"] as const,
   captureResults: (userGuid: string | null, filters: CaptureResultFilters) =>
     ["face-match", userGuid, "capture-results", filters.storeCode ?? "all", filters.decision ?? "all", filters.hitOnly ? "hit" : "any", filters.fromUtc ?? "", filters.toUtc ?? ""] as const,
+  captureResultsRoot: (userGuid: string | null) => ["face-match", userGuid, "capture-results"] as const,
+  hitResultsRoot: (userGuid: string | null) => ["face-match", userGuid, "hit-results"] as const,
+  hitResults: (userGuid: string | null, filters: HitResultFilters) =>
+    ["face-match", userGuid, "hit-results", filters.storeCode ?? "all", filters.hitStatus ?? "all", filters.fromUtc ?? "", filters.toUtc ?? ""] as const,
+  hitSummaryRoot: (userGuid: string | null) => ["face-match", userGuid, "hit-summary"] as const,
+  hitSummary: (userGuid: string | null, filters: HitSummaryFilters) =>
+    ["face-match", userGuid, "hit-summary", filters.storeCode ?? "all", filters.fromUtc ?? "", filters.toUtc ?? ""] as const,
   profile: (userGuid: string | null, storeCode: string | null) => ["face-match", userGuid, "profile", storeCode] as const,
   cameras: (userGuid: string | null) => ["face-match", userGuid, "cameras"] as const,
   stores: (userGuid: string | null) => ["face-match", userGuid, "stores"] as const,
@@ -130,6 +158,75 @@ export function useCaptureResults(filters: CaptureResultFilters, enabled: boolea
   );
   const refresh = useRefreshFirstPage<FaceCaptureResult>(queryKey, query.refetch);
   return { query, items, refresh };
+}
+
+/** 黑名单命中流：缓存里只有结构化数据（含通知编号 / 未读标志），图片字节不经过 react-query（详情里按需读取）。 */
+export function useHitResults(filters: HitResultFilters, enabled: boolean) {
+  const userGuid = useUserGuid();
+  const queryKey = faceMatchKeys.hitResults(userGuid, filters);
+  const query = useInfiniteQuery({
+    queryKey,
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) => faceMatchApi.listHits({ ...filters, page: pageParam, pageSize: PAGE_SIZE }, signal),
+    getNextPageParam: nextPageParam,
+    enabled,
+    staleTime: 15_000,
+    retry: retryTransientOnly,
+  });
+  const pages = query.data?.pages;
+  const items = useMemo<FaceHitResult[]>(() => (pages ? mergePages(pages, (hit) => hit.taskId) : []), [pages]);
+  const refresh = useRefreshFirstPage<FaceHitResult>(queryKey, query.refetch);
+  return { query, items, refresh };
+}
+
+/** 命中流各状态条数（「黑名单」chip 的红色数字、二级筛选的数字、列表条）；与列表同样的门店与时间条件。 */
+export function useHitSummary(filters: HitSummaryFilters, enabled: boolean) {
+  const userGuid = useUserGuid();
+  return useQuery({
+    queryKey: faceMatchKeys.hitSummary(userGuid, filters),
+    queryFn: ({ signal }) => faceMatchApi.getHitSummary(filters, signal),
+    enabled,
+    staleTime: 15_000,
+    retry: retryTransientOnly,
+  });
+}
+
+/**
+ * 命中通知「已读」动作：
+ * - markRead(taskId)：打开详情时调用。成功后用接口返回的剩余未读数写回红色数字缓存（导航徽标立刻变化），
+ *   就地把缓存里（命中流与抓拍流）那一行的 unread 改成 false（行仍留在当前列表里，下拉刷新才按筛选重排），并让汇总重新取；
+ * - markAllRead()：「全部标为已读」。成功后写回剩余未读数，并刷新汇总与两种列表。
+ * 失败原样抛给调用方（打开详情时静默，全部已读时给轻提示）。
+ */
+export function useHitReadActions() {
+  const queryClient = useQueryClient();
+  const userGuid = useUserGuid();
+  const markRead = useCallback(
+    async (taskId: string): Promise<number> => {
+      const unreadCount = await faceMatchApi.markHitRead(taskId);
+      writeFaceHitUnreadCount(queryClient, userGuid, unreadCount);
+      queryClient.setQueriesData<HitPages>({ queryKey: faceMatchKeys.hitResultsRoot(userGuid) }, (data) =>
+        mapPagesItems<FaceHitResult, HitPages>(data, (item) => markHitResultRead(item, taskId)),
+      );
+      queryClient.setQueriesData<CapturePages>({ queryKey: faceMatchKeys.captureResultsRoot(userGuid) }, (data) =>
+        mapPagesItems<FaceCaptureResult, CapturePages>(data, (item) => markCaptureResultHitRead(item, taskId)),
+      );
+      void queryClient.invalidateQueries({ queryKey: faceMatchKeys.hitSummaryRoot(userGuid) });
+      return unreadCount;
+    },
+    [queryClient, userGuid],
+  );
+  const markAllRead = useCallback(async (): Promise<FaceHitReadAllResult> => {
+    const result = await faceMatchApi.markAllHitsRead();
+    writeFaceHitUnreadCount(queryClient, userGuid, result.unreadCount);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: faceMatchKeys.hitSummaryRoot(userGuid) }),
+      queryClient.invalidateQueries({ queryKey: faceMatchKeys.hitResultsRoot(userGuid) }),
+      queryClient.invalidateQueries({ queryKey: faceMatchKeys.captureResultsRoot(userGuid) }),
+    ]);
+    return result;
+  }, [queryClient, userGuid]);
+  return { markRead, markAllRead };
 }
 
 export function useFaceProfile(storeCode: string | null, enabled: boolean) {

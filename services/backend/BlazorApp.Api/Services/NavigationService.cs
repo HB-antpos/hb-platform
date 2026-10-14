@@ -476,6 +476,32 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "face-hub",
+                TitleKey = "tabs.faceHub",
+                Icon = "face-recognition",
+                // 移动端「人脸比对」合并入口：把下面「不受欢迎人员名单 / 人脸比对设置 / 抓拍与比对」三个入口合成一个，
+                // 进去是「抓拍 / 名单 / 设置」三个一级页签，页签与页内操作仍按各自的权限显示。
+                // 六个权限码任一即可见，不合并成一个码、不新增权限码：
+                //   抓拍 = FaceCapture.Images.View；名单 = FaceMatch.Unwelcome.Manage / Approve（条目）、Review（命中复核）；
+                //   设置 = FaceMatch.Manage（门店档案）、FaceCapture.Cameras.Manage（摄像头）。
+                // 命中通知红色数字只给持有 FaceMatch.Unwelcome.Review 的人（通知本来只发给他们），由客户端按权限决定是否取数。
+                // 参考照片与命中抓拍是生物识别信息，设备会话没有用户账号，设备模式菜单（按 DeviceBaseRouteNames 白名单挑选）不会包含此项。
+                AnyPermissions = new[]
+                {
+                    Permissions.FaceCapture.Images.View,
+                    Permissions.FaceMatch.Unwelcome.Manage,
+                    Permissions.FaceMatch.Unwelcome.Approve,
+                    Permissions.FaceMatch.Unwelcome.Review,
+                    Permissions.FaceMatch.Manage,
+                    Permissions.FaceCapture.Cameras.Manage,
+                },
+                Order = 58,
+            },
+            // 下面三项（face-unwelcome / face-match-settings / face-capture-results）是合并入口 face-hub 之前的旧入口：
+            // 为兼容还没升级的旧版 App 保持原样不动；新版 App 不再显示它们（路由保留并重定向到 face-hub，只供深链 / 通知跳转），
+            // 待新版普及后再清理这三项。
+            new()
+            {
                 RouteName = "face-unwelcome",
                 TitleKey = "tabs.faceUnwelcome",
                 Icon = "account-cancel-outline",

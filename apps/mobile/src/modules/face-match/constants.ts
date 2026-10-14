@@ -3,6 +3,8 @@ import { PERMISSIONS } from "@/shared/utils/access";
 /** apiClient 的 baseURL 已带 /api，业务路径与其他 mobile API 一致，不再加 /api 前缀。 */
 export const FACE_MATCH_API_BASE = "/react/v1/face-match";
 export const FACE_CAMERAS_API_BASE = "/react/v1/face-cameras";
+/** 通知收件箱（只用于「黑名单命中」通知的全部已读）；与 notifications 模块同一后端路径。 */
+export const FACE_NOTIFICATIONS_API_BASE = "/react/v1/notifications";
 
 /**
  * 后端 Permissions.FaceMatch.* / FaceCapture.Cameras.Manage（本期不新增权限码）。
@@ -40,6 +42,10 @@ export const AUTO_CONFIRM_SCORE_MIN = 50;
 export const AUTO_CONFIRM_SCORE_MAX = 100;
 export const AUTO_CONFIRM_SCORE_DEFAULT = 90;
 export const PAGE_SIZE = 20;
+/** 缩略图批量接口一次最多 30 项（超出服务端返回 400）。 */
+export const THUMBNAIL_BATCH_MAX = 30;
+/** 缩略图在列表里的显示尺寸（设计图 06：56×56，服务端缩到最长边 128px）。 */
+export const THUMBNAIL_SIZE = 56;
 
 export const CATEGORY_VIOLENCE = 1;
 export const CATEGORY_ORGANISED_THEFT = 2;

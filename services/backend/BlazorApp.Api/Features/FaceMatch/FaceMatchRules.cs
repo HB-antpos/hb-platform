@@ -183,6 +183,13 @@ internal static class FaceMatchRules
         _ => "unknown",
     };
 
+    /// <summary>
+    /// 系统自动确认的任务：已确认且复核人记为 system（没有人判断过）。复核任务 / 误报统计 / 命中流 / 抓拍流共用这一口径。
+    /// </summary>
+    public static bool IsAutoConfirmed(byte reviewStatus, string? firstReviewerId) =>
+        reviewStatus == FaceMatchReviewStatus.Confirmed
+        && string.Equals(firstReviewerId, FaceMatchAuditActions.SystemActorId, StringComparison.Ordinal);
+
     public static string ReviewStatusName(byte status) => status switch
     {
         FaceMatchReviewStatus.Pending => "pending",

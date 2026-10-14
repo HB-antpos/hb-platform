@@ -14,6 +14,15 @@
     "entries": "List entries",
     "review": "Match review"
   },
+  "hub": {
+    "title": "Face matching",
+    "tabs": {
+      "capture": "Captures",
+      "list": "List",
+      "settings": "Settings"
+    },
+    "unreadBadge": "{{label}}, {{count}} unread blacklist hits"
+  },
   "filters": {
     "allStores": "All stores",
     "pickStore": "Select a store"
@@ -277,13 +286,13 @@
   },
   "capture": {
     "title": "Captures and matches",
-    "notice": "A score is a similarity, not the probability that it is the same person. Photos are only loaded when you open a record.",
+    "notice": "A score is a similarity, not the probability that it is the same person. Photos are only shown on this page and are destroyed when you leave it; every read is audited.",
     "filters": {
       "all": "All",
-      "hitOnly": "Hits only",
       "staff": "Staff",
       "newVisitor": "New visitor",
-      "repeatVisitor": "Repeat visitor"
+      "repeatVisitor": "Repeat visitor",
+      "blacklist": "Blacklist"
     },
     "range": {
       "today": "Today",
@@ -305,7 +314,7 @@
       "visit": "Visitor {{percent}}%"
     },
     "hit": {
-      "tag": "Hit {{percent}}%"
+      "tag": "Blacklist hit {{percent}}%"
     },
     "duplicate": "Duplicate capture",
     "notify": {
@@ -326,7 +335,8 @@
         "decision": "Result",
         "scores": "Similarity",
         "hit": "List hit",
-        "faceCount": "Faces"
+        "faceCount": "Faces",
+        "reviewStatus": "Review status"
       },
       "hitSimilarity": "Similarity {{percent}}%",
       "notifyTitle": "Notification delivery",
@@ -336,7 +346,8 @@
         "noHit": "No hit, nothing to review.",
         "imageGone": "The hit photo was deleted after its retention period and can no longer be reviewed.",
         "noPermission": "Your account has no permission for the unwelcome list review."
-      }
+      },
+      "hitImage": "Hit photo"
     },
     "timeline": {
       "created": "Hit task created",
@@ -481,5 +492,28 @@
       "confirmDisableContent": "The face ingest service will stop accepting pushes from this camera (within 30 seconds). You can enable it again at any time.",
       "confirmDisableOk": "Disable"
     }
+  },
+  "hits": {
+    "filters": {
+      "all": "All",
+      "unread": "Unread",
+      "pending": "Pending review",
+      "autoConfirmed": "Auto-confirmed",
+      "confirmed": "Confirmed",
+      "dismissed": "Dismissed"
+    },
+    "bar": {
+      "total": "{{count}} total",
+      "unread": "{{count}} unread"
+    },
+    "markAll": "Mark all as read",
+    "markAllFailed": "Could not mark as read. Try again later.",
+    "empty": "No blacklist hits in this period"
+  },
+  "thumb": {
+    "deleted": "Deleted",
+    "hide": "Hide face thumbnails",
+    "show": "Show face thumbnails",
+    "hint": "Hides or shows all face thumbnails in the list and remembers your choice"
   }
 }

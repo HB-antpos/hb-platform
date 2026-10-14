@@ -9,6 +9,11 @@ export interface AppNavigationAccessValue {
   pendingPriceUpdateCount: number;
   /** 当前分店 HB新品 列表里的商品品种数（按商品去重），用于工作台入口角标。 */
   newProductKindCount: number;
+  /**
+   * 当前登录人还没看的「黑名单命中」通知数（GET /notifications/unread-count?type=face.unwelcome-hit），
+   * 用于工作台「人脸比对」入口角标、底部「工作台」页签红色徽标、合并页「抓拍 / 名单」页签。没有权限或取不到时为 0。
+   */
+  faceHitUnreadCount: number;
   isDeviceMode: boolean;
   isWarehouseStaffOnly: boolean;
 }

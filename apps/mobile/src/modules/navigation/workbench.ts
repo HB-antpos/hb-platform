@@ -79,10 +79,9 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "permissions", labelKey: "routes.permissions", icon: "key-outline" },
       { routeName: "employee-profile", labelKey: "routes.employeeProfile", icon: "card-account-details-outline" },
       { routeName: "employee-profile-review", labelKey: "routes.employeeProfileReview", icon: "account-check-outline" },
-      // 人脸比对：名单维护与命中复核、门店档案与摄像头设置，均按各自权限显示（见后端 FullAppMenu）。
-      { routeName: "face-unwelcome", labelKey: "routes.faceUnwelcome", icon: "account-cancel-outline" },
-      { routeName: "face-capture-results", labelKey: "routes.faceCaptureResults", icon: "face-recognition" },
-      { routeName: "face-match-settings", labelKey: "routes.faceMatchSettings", icon: "face-recognition" },
+      // 人脸比对：抓拍 / 名单 / 设置三个页签合并成一个入口（持有其中任一权限即显示，页签与区域仍按各自权限，见后端 FullAppMenu）。
+      // 旧的「抓拍与比对 / 不受欢迎人员名单 / 人脸比对设置」三个入口只给旧版 App 用，新版菜单里已去掉（见 default-route 的 getVisibleTabRouteNames）。
+      { routeName: "face-hub", labelKey: "routes.faceHub", icon: "face-recognition" },
       { routeName: "device-management", labelKey: "routes.deviceManagement", icon: "cellphone-cog" },
       { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },
       // 版本发布中心：App 安装包 / OTA 与 WPF 收银端合并为一页；wpf-versions 路由仅保留为跳转到其 WPF 终端的旧入口。

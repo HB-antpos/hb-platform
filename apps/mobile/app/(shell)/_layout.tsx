@@ -23,6 +23,10 @@ import {
 } from "@/modules/employee-profile-review/access";
 import { getEmployeeProfileReviewRequestsApi } from "@/modules/employee-profile-review/api";
 import { AppNavigationAccessProvider } from "@/modules/navigation/access-context";
+import { FACE_HUB_ROUTE_NAME, shouldFetchFaceHitUnread } from "@/modules/navigation/face-hub";
+import { FACE_HIT_NOTIFICATION_TYPE, faceHitUnreadQueryKey } from "@/modules/face-match/hit-unread";
+import { FACE_MATCH_PERMISSIONS } from "@/modules/face-match/constants";
+import { getUnreadCount } from "@/modules/notifications/api";
 import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
 import { getPriceUpdatePendingCount } from "@/modules/price-updates/api";
 import { priceUpdateCountQueryKey } from "@/modules/price-updates/query-keys";
@@ -42,6 +46,9 @@ export const unstable_settings = {
 const OFFLINE_DEVICE_REVALIDATE_INTERVAL_MS = 60_000;
 const PRICE_UPDATES_ROUTE = "price-updates";
 const CONTAINER_NEW_PRODUCTS_ROUTE = "container-new-products";
+/** 「黑名单命中未读数」（红色数字）：30 秒内视为新鲜，前台每 60 秒轮询一次，回到前台立即刷新。 */
+const FACE_HIT_UNREAD_STALE_MS = 30_000;
+const FACE_HIT_UNREAD_REFETCH_INTERVAL_MS = 60_000;
 
 export default function ShellLayout() {
   const router = useRouter();
@@ -71,6 +78,10 @@ export default function ShellLayout() {
   const isAdmin = useAuthStore((state) => state.access.isAdmin);
   const canReadUsers = useAuthStore((state) => state.access.hasPermission("Users.View"));
   const canReadRoles = useAuthStore((state) => state.access.hasPermission("Roles.View"));
+  // 黑名单命中通知只发给持有 FaceMatch.Unwelcome.Review 的人：没有它的人没有红色数字，也不必请求。
+  const hasFaceUnwelcomeReview = useAuthStore((state) =>
+    state.access.hasPermission(FACE_MATCH_PERMISSIONS.unwelcomeReview)
+  );
   const iosReviewOfflineGuardActive = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   const versionManagementAllowed = canAccessVersionManagement({ isAdmin, isAuthenticated, sessionKind });
   const isWarehouseStaffOnly = useAuthStore((state) => state.access.isWarehouseStaffOnly);
@@ -450,6 +461,39 @@ export default function ShellLayout() {
     () => countNewProductKinds(newProductsQuery.data?.items ?? []),
     [newProductsQuery.data?.items]
   );
+  // 红色数字：当前登录人还没看的黑名单命中通知数。仅当导航就绪、face-hub 可见且持有 Review 时才取；
+  // 失败时 react-query 保留上一次的数据，数字不会闪成 0；账号切换靠查询键里的账号编号隔离。
+  const faceHitUnreadEnabled = shouldFetchFaceHitUnread({
+    navigationReady,
+    isAuthenticated,
+    isReviewSession: isIosReviewSession || iosReviewOfflineGuardActive,
+    isDeviceMode,
+    faceHubVisible: visibleRouteNames.has(FACE_HUB_ROUTE_NAME),
+    hasUnwelcomeReview: hasFaceUnwelcomeReview,
+  });
+  const [appActive, setAppActive] = useState(() => AppState.currentState === "active");
+  const wasAppActiveRef = useRef(appActive);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (next) => setAppActive(next === "active"));
+    return () => subscription.remove();
+  }, []);
+  const faceHitUnreadQuery = useQuery({
+    queryKey: faceHitUnreadQueryKey(userGuid),
+    enabled: faceHitUnreadEnabled,
+    queryFn: ({ signal }) => getUnreadCount(FACE_HIT_NOTIFICATION_TYPE, signal),
+    staleTime: FACE_HIT_UNREAD_STALE_MS,
+    // 只在前台轮询：切到后台后停止，回前台由下面的 effect 立即刷新。
+    refetchInterval: appActive ? FACE_HIT_UNREAD_REFETCH_INTERVAL_MS : false,
+  });
+  const refetchFaceHitUnread = faceHitUnreadQuery.refetch;
+  useEffect(() => {
+    const wasActive = wasAppActiveRef.current;
+    wasAppActiveRef.current = appActive;
+    // 只在「后台 → 前台」的那一刻刷新；首次挂载由 useQuery 自己取，不重复请求。
+    if (appActive && !wasActive && faceHitUnreadEnabled) {
+      void refetchFaceHitUnread();
+    }
+  }, [appActive, faceHitUnreadEnabled, refetchFaceHitUnread]);
   const shouldWaitForNavigation =
     (hasUserSession || isDeviceMode) && (!navigationReady || navigationLoading);
   const preferredDefaultRoute = resolvePreferredDefaultTabRoute({
@@ -557,6 +601,7 @@ export default function ShellLayout() {
         pendingProfileReviewCount: pendingReviewQuery.data?.total ?? 0,
         pendingPriceUpdateCount: pendingPriceUpdateQuery.data ?? 0,
         newProductKindCount,
+        faceHitUnreadCount: faceHitUnreadEnabled ? (faceHitUnreadQuery.data ?? 0) : 0,
         isDeviceMode,
         isWarehouseStaffOnly,
       }}

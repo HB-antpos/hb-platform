@@ -7,8 +7,10 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { HIT_STATUS_KEYS } from "./capture-logic";
 import { PROFILE_TIME_ZONES } from "./constants";
 import { FACE_MATCH_ERROR_CODES, STATUS_ERROR_CODES } from "./errors";
+import { normalizeFaceCaptureResult, normalizeFaceHitResult, normalizeFaceHitSummary, normalizeFaceThumbnailResults } from "./normalize";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const mobileRoot = resolve(moduleDir, "../../..");
@@ -62,10 +64,28 @@ function stripComments(source: string): string {
     "analytics",
   ];
   const FORBIDDEN_IMAGE_CACHES = ["Image.prefetch", "Image.queryCache", "\"expo-image\"", "FastImage", "react-native-fast-image", "cache: \"force-cache\"", "cache: 'force-cache'", "cache: \"reload\"", "cache: 'reload'", "cache: \"default\""];
+  // 唯一例外：thumbnail-preference.ts 用 AsyncStorage 只存一个布尔偏好（「缩略图是否显示」），不含任何人脸数据。
+  const isPreferenceFile = (file: string) => /thumbnail-preference\.ts$/.test(file);
   for (const file of moduleFiles) {
     const code = stripComments(read(file));
     for (const term of [...FORBIDDEN_STORAGE, ...FORBIDDEN_LOGGING, ...FORBIDDEN_IMAGE_CACHES]) {
+      if (isPreferenceFile(file) && (term === "AsyncStorage" || term === "AppAsyncStorage")) continue;
       assert.equal(code.includes(term), false, `${file} 不应出现 ${term}（生物识别照片不得落盘 / 进日志 / 进缓存）`);
+    }
+  }
+  {
+    // 偏好文件只存「缩略图是否显示」这一个布尔值：固定的键、只读写字符串 "1" / "0"，不碰对象存取，也不接触任何缩略图字节
+    const preference = stripComments(sourceOf("thumbnail-preference.ts"));
+    assert.ok(preference.includes('THUMBNAILS_VISIBLE_STORAGE_KEY = "faceMatch.thumbnails.visible"'));
+    assert.ok(preference.includes('from "@/shared/storage/async-storage"') && !preference.includes("@react-native-async-storage"));
+    assert.equal(/getObject|setObject|JSON\.stringify|base64|uri|data:/i.test(preference), false, "偏好文件不应处理对象 / 图片内容");
+    assert.ok(preference.includes('visible ? "1" : "0"'));
+    // 除偏好文件外，没有任何文件能引用偏好文件之外的存储（上面的循环已守住）；偏好只被钩子文件使用
+    for (const file of moduleFiles) {
+      if (/thumbnail-preference\.ts$|thumbnail-preference\.test\.ts$/.test(file)) continue;
+      if (stripComments(read(file)).includes("thumbnail-preference")) {
+        assert.ok(/use-thumbnails\.ts$/.test(file), `${file} 不应直接读写缩略图偏好（只有 use-thumbnails 钩子使用）`);
+      }
     }
   }
 
@@ -136,14 +156,57 @@ function stripComments(source: string): string {
   assert.ok(detail.includes("createReviewImageScrubber()") && detail.includes("scrubber.release()"), "抓拍图读取也要经 iOS 缓存清理器并在关闭时释放");
   assert.ok(/scrubber\.wrap\(\(\) => faceMatchApi\.fetchCaptureImage\(/.test(detail), "抓拍图读取须经清理器");
   assert.equal(/useQuery|useMutation|useInfiniteQuery/.test(detail), false, "抓拍详情不用 react-query 取图");
-  const listScreen = stripComments(sourceOf("FaceCaptureResultsScreen.tsx"));
-  assert.equal(/<Image\b|source=\{\{/.test(listScreen), false, "抓拍列表里不放任何真实照片（缩略图位置只是占位图标）");
+  // 列表里的真实图片只有 128px 缩略图：<Image> 只允许出现在 CaptureThumb.tsx，来源只能是内存里的 data URI；
+  // 列表屏与卡片都不直接渲染图片，整图（人脸 / 背景 / 命中图）只在详情里按需读取。
+  for (const name of ["FaceCaptureResultsScreen.tsx", "CaptureCard.tsx"]) {
+    assert.equal(/<Image\b|source=\{\{/.test(stripComments(sourceOf(name))), false, `${name} 不直接渲染图片（缩略图统一经 CaptureThumb）`);
+  }
+  const thumbView = stripComments(sourceOf("CaptureThumb.tsx"));
+  assert.ok(thumbView.includes("source={{ uri: display.uri }}"), "缩略图 Image 的来源只能是内存里的 data URI");
+  assert.equal(/uri:\s*["'`]https?:/.test(thumbView), false);
+  assert.equal(/faceMatchApi|from "\.\/api"|useQuery|useInfiniteQuery|QueryClient|react-query/.test(thumbView), false, "缩略图组件不取数、不进 react-query");
   const captureSession = stripComments(sourceOf("capture-image-session.ts"));
   assert.ok(captureSession.includes("controller.abort()"), "关闭时中止在途请求");
   const hooks = stripComments(sourceOf("use-face-match.ts"));
   assert.equal(/fetchCaptureImage|capture-image-session/.test(hooks), false, "抓拍图字节不得经过 react-query 钩子");
   assert.equal(/fetchTaskImage|fetchReferenceImage|image-session/.test(hooks), false, "图片字节不得经过 react-query 钩子");
   assert.equal(/useQuery|useMutation|useInfiniteQuery/.test(modal), false, "复核弹框不用 react-query 取图");
+
+  // 命中图整图读取：只有详情在打开后按需读取（经清理器），列表 / 钩子 / 其他页面都不碰
+  for (const file of moduleFiles) {
+    const code = stripComments(read(file));
+    if (/fetchHitImage/.test(code)) {
+      assert.ok(/CaptureResultDetail\.tsx$|api-core\.ts$/.test(file), `${file} 不应读取命中图（只有详情在打开后按需读取）`);
+    }
+  }
+  assert.ok(/scrubber\.wrap\(\(\) => faceMatchApi\.fetchHitImage\(/.test(detail), "命中图读取须经清理器");
+  assert.equal(/fetchHitImage|fetchThumbnails|thumbnail-loader|use-thumbnails|thumbnail-preference/.test(hooks), false, "命中图 / 缩略图字节不得经过 react-query 钩子");
+
+  // 缩略图：只放内存（组件 state / 加载器的 Map），不走 react-query、不落盘、不进日志；批请求只有缩略图钩子发起
+  for (const file of moduleFiles) {
+    const code = stripComments(read(file));
+    if (/fetchThumbnails/.test(code)) {
+      assert.ok(/use-thumbnails\.ts$|api-core\.ts$/.test(file), `${file} 不应发起缩略图批请求（只有 use-thumbnails 钩子）`);
+    }
+  }
+  for (const name of ["thumbnail-loader.ts", "use-thumbnails.ts", "CaptureThumb.tsx", "CaptureCard.tsx"]) {
+    const code = stripComments(sourceOf(name));
+    assert.equal(/useQuery|useMutation|useInfiniteQuery|useQueryClient|QueryClient|@tanstack\/react-query/.test(code), false, `${name} 不用 react-query（缩略图不得进查询缓存）`);
+    assert.equal(/expo-file-system|FileSystem\b|writeAsStringAsync|documentDirectory|cacheDirectory/.test(code), false, `${name} 不碰文件系统（缩略图只放内存）`);
+  }
+  const loader = stripComments(sourceOf("thumbnail-loader.ts"));
+  assert.ok(loader.includes("controller?.abort()") && loader.includes("batchGeneration !== generation"), "清空 / 销毁时中止在途请求，迟到的响应丢弃");
+  assert.ok(loader.includes("THUMBNAIL_BATCH_MAX"), "一批最多 30 项");
+  const thumbHook = stripComments(sourceOf("use-thumbnails.ts"));
+  assert.ok(thumbHook.includes("AppState.addEventListener") && thumbHook.includes('next !== "active"'), "切后台（含 inactive）立即清空缩略图");
+  assert.ok(thumbHook.includes("loader.dispose()") && thumbHook.includes("loaderRef.current?.clear()"), "卸载 / 隐藏 / 切后台都销毁缩略图");
+  // 列表屏：只加载屏幕可见的行（onViewableItemsChanged），「眼睛」隐藏时先同步清空；失败只在下拉刷新时重试
+  const listCode = stripComments(sourceOf("FaceCaptureResultsScreen.tsx"));
+  assert.ok(listCode.includes("onViewableItemsChanged") && listCode.includes("collectThumbnailTargets"), "只加载屏幕里看得到的行");
+  assert.ok(/if \(thumbsVisible\) thumbs\.clear\(\)/.test(listCode), "点「眼睛」隐藏时同步清空缩略图并中止请求");
+  assert.ok(/thumbs\.retryFailed\(\)/.test(listCode), "失败的缩略图在下拉刷新时重试");
+  assert.ok(/useIsFocused\(\)/.test(listCode), "离开页面（失焦）销毁缩略图");
+  assert.ok(/hit\?\.unread[\s\S]{0,60}markRead\(/.test(listCode), "打开未读的命中详情时标记已读（失败静默）");
 
   // 请求层：no-store、图片请求不进中心日志、图片地址不带查询串
   const core = stripComments(sourceOf("api-core.ts"));
@@ -152,6 +215,17 @@ function stripComments(source: string): string {
   assert.ok(core.includes('responseType: "arraybuffer"'));
   assert.equal(/\/image\?|\/reference\/\$\{index\}\?/.test(core), false, "图片地址不得带查询串");
   assert.equal(/params:/.test(core.slice(core.indexOf("async function fetchImageDataUri"), core.indexOf("return {", core.indexOf("async function fetchImageDataUri")))), false);
+
+  // 缩略图批请求：编号只放请求体（不拼 URL）、no-store（经 json()）、不进中心日志、有超时；一批 ≤ 30 项
+  {
+    const start = core.indexOf("async fetchThumbnails");
+    const thumbnailCall = core.slice(start, core.indexOf("// ─────────", start));
+    assert.ok(start > 0 && thumbnailCall.includes("`${FACE_MATCH_API_BASE}/results/thumbnails`"));
+    assert.ok(thumbnailCall.includes('"X-Skip-Center-Log": "1"') && thumbnailCall.includes("json({"), "缩略图批请求不进中心日志且带 no-store");
+    assert.ok(thumbnailCall.includes("IMAGE_TIMEOUT_MS") && thumbnailCall.includes("THUMBNAIL_BATCH_MAX"));
+    assert.equal(/http\.post\(\s*(`[^`]*`)/.exec(thumbnailCall)?.[1], "`${FACE_MATCH_API_BASE}/results/thumbnails`", "缩略图编号只放请求体，不拼进 URL");
+    assert.ok(/export const THUMBNAIL_BATCH_MAX = 30;/.test(stripComments(sourceOf("constants.ts"))));
+  }
 
   // 提交条目：请求体是内存里的字节，不用 RN 的 FormData（它要求文件落盘）
   assert.equal(/new FormData|FormData\(/.test(core), false);
@@ -194,6 +268,12 @@ function stripComments(source: string): string {
     '[HttpGet("unwelcome/tasks/{taskId}/reference/{index:int}")]',
     '[HttpGet("results")]',
     '[HttpGet("results/{captureId}/images/{imageId}")]',
+    // 合并入口的「黑名单」命中流与缩略图
+    '[HttpGet("results/hits")]',
+    '[HttpGet("results/hits/summary")]',
+    '[HttpPost("results/hits/{taskId}/read")]',
+    '[HttpGet("results/hits/{taskId}/image")]',
+    '[HttpPost("results/thumbnails")]',
   ]) {
     assert.ok(faceMatchController.includes(route), `后端缺少路由 ${route}`);
   }
@@ -211,12 +291,26 @@ function stripComments(source: string): string {
     "/unwelcome/tasks/${taskId}/reference/${index}",
     "`${FACE_MATCH_API_BASE}/results`",
     "/results/${captureId}/images/${imageId}",
+    "`${FACE_MATCH_API_BASE}/results/hits`",
+    "`${FACE_MATCH_API_BASE}/results/hits/summary`",
+    "/results/hits/${taskId}/read",
+    "/results/hits/${taskId}/image",
+    "`${FACE_MATCH_API_BASE}/results/thumbnails`",
+    "`${FACE_NOTIFICATIONS_API_BASE}/read-all`",
   ]) {
     assert.ok(core.includes(path), `api-core 缺少接口 ${path}`);
   }
   assert.ok(core.includes('"/react/v1/face-match"') === false, "基础路径来自 constants");
   const constants = stripComments(sourceOf("constants.ts"));
   assert.ok(constants.includes('"/react/v1/face-match"') && constants.includes('"/react/v1/face-cameras"'));
+  // 「全部标为已读」只标命中通知：POST /notifications/read-all?type=face.unwelcome-hit（后端该动作接受 type 查询参数）
+  assert.ok(constants.includes('"/react/v1/notifications"'));
+  assert.ok(core.includes("params: { type: FACE_HIT_NOTIFICATION_TYPE }"), "全部已读必须带 type 过滤，只标命中通知");
+  assert.ok(/export const FACE_HIT_NOTIFICATION_TYPE = "face\.unwelcome-hit";/.test(stripComments(sourceOf("hit-unread.ts"))));
+  const notificationsController = read(join(repoRoot, "services/backend/BlazorApp.Api/Controllers/React/NotificationsController.cs"));
+  assert.ok(/\[HttpPost\("read-all"\)\][\s\S]{0,160}string\? type/.test(notificationsController), "后端 read-all 必须接受 type 查询参数，否则会把全部通知标为已读");
+  // 类型常量与后端 AppNotificationTypes.FaceUnwelcomeHit 一致
+  assert.ok(/FaceUnwelcomeHit\s*=\s*"face\.unwelcome-hit"/.test(read(join(repoRoot, "services/backend/BlazorApp.Shared/Models/HBweb/AppNotification.cs"))), "后端命中通知类型常量与 App 不一致");
 
   // 权限码与后端 Permissions.cs 完全一致（本期不新增权限码）
   const permissions = read(join(repoRoot, "services/backend/BlazorApp.Shared/Constants/Permissions.cs"));
@@ -259,6 +353,105 @@ function stripComments(source: string): string {
   assert.equal(resultsMenu.includes("AnyPermissions"), false);
   const deviceBase = navigation.slice(navigation.indexOf("DeviceBaseRouteNames = new("), navigation.indexOf("WarehouseDeviceRouteNames = new("));
   assert.equal(deviceBase.includes("face-"), false);
+
+  // 合并入口 face-hub：any-of 六个权限码（持有任一即显示），标题键 tabs.faceHub，图标 face-recognition；旧三项保留给旧版 App
+  const hubMenu = menuBlock("face-hub");
+  for (const code of [
+    "FaceCapture.Images.View",
+    "FaceMatch.Unwelcome.Manage",
+    "FaceMatch.Unwelcome.Approve",
+    "FaceMatch.Unwelcome.Review",
+    "FaceMatch.Manage",
+    "FaceCapture.Cameras.Manage",
+  ]) {
+    assert.ok(hubMenu.includes(`Permissions.${code}`), `face-hub 菜单缺少权限 ${code}`);
+  }
+  assert.ok(hubMenu.includes("AnyPermissions"), "face-hub 只用 AnyPermissions（任一权限即可见）");
+  assert.equal(/Permission\s*=\s*Permissions/.test(hubMenu.replace(/AnyPermissions[\s\S]*/, "")), false, "face-hub 不能有单一 Permission 放行");
+  assert.ok(hubMenu.includes('"tabs.faceHub"') && hubMenu.includes('"face-recognition"'));
+  // 移动端合并入口的 any-of 与后端一致（同一组码，不多不少）
+  const hubAccess = stripComments(read(join(mobileRoot, "src/modules/navigation/face-hub.ts")));
+  const hubAccessBlock = hubAccess.slice(hubAccess.indexOf("FACE_HUB_ACCESS_PERMISSIONS = ["), hubAccess.indexOf("] as const", hubAccess.indexOf("FACE_HUB_ACCESS_PERMISSIONS = [")));
+  assert.equal(hubAccessBlock.split("FACE_MATCH_PERMISSIONS.").length - 1, 6, "合并入口的 any-of 是六个权限码");
+}
+
+// ───────── 2b. 跨端契约：App 端字段名集合与后端 DTO 一致（后端文件里有对应 record 才断言，没有则跳过并注明） ─────────
+{
+  const featureDir = join(repoRoot, "services/backend/BlazorApp.Api/Features/FaceMatch");
+  const backendSources = existsSync(featureDir) ? readdirSync(featureDir).filter((name) => name.endsWith(".cs")).map((name) => read(join(featureDir, name))) : [];
+  const camel = (name: string) => name.charAt(0).toLowerCase() + name.slice(1);
+
+  /** 读 C# record 的成员名（支持属性式 `public T Name { get; init; }` 与位置式 `record X(T Name, ...)`），转驼峰；找不到 record 返回 null。 */
+  function backendRecordFields(recordName: string): string[] | null {
+    for (const source of backendSources) {
+      const match = new RegExp(`record\\s+${recordName}\\b`).exec(source);
+      if (!match) continue;
+      let index = match.index + match[0].length;
+      while (/\s/.test(source[index] ?? "")) index += 1;
+      if (source[index] === "(") {
+        // 位置式：按括号配对取参数表，逗号只在最外层分隔（类型里可能有泛型的逗号）
+        let depth = 0;
+        let end = index;
+        for (; end < source.length; end += 1) {
+          if (source[end] === "(" || source[end] === "<") depth += 1;
+          if (source[end] === ")" || source[end] === ">") depth -= 1;
+          if (depth === 0) break;
+        }
+        const parts: string[] = [];
+        let level = 0;
+        let current = "";
+        for (const char of source.slice(index + 1, end)) {
+          if (char === "<") level += 1;
+          if (char === ">") level -= 1;
+          if (char === "," && level === 0) {
+            parts.push(current);
+            current = "";
+          } else current += char;
+        }
+        parts.push(current);
+        return parts.map((part) => part.trim().split(/\s+/).pop() ?? "").filter(Boolean).map(camel);
+      }
+      const open = source.indexOf("{", index);
+      let depth = 0;
+      let end = open;
+      for (; end < source.length; end += 1) {
+        if (source[end] === "{") depth += 1;
+        if (source[end] === "}") depth -= 1;
+        if (depth === 0) break;
+      }
+      const body = source.slice(open + 1, end);
+      return Array.from(body.matchAll(/public\s+[^;{}=]+?\s+(\w+)\s*\{\s*get;/g), (item) => camel(item[1]));
+    }
+    return null;
+  }
+
+  const sameSet = (actual: string[], expected: string[], label: string) =>
+    assert.deepEqual([...actual].sort(), [...expected].sort(), `${label} 的字段名集合与后端不一致`);
+  const skipped: string[] = [];
+  const checks: [string, string[]][] = [
+    ["FaceHitResultDto", Object.keys(normalizeFaceHitResult({}))],
+    ["FaceHitSummaryDto", Object.keys(normalizeFaceHitSummary({}))],
+    ["FaceCaptureResultHitDto", Object.keys((normalizeFaceCaptureResult({ hit: { taskId: "t" } }).hit ?? {}) as object)],
+    ["FaceThumbnailItemDto", Object.keys(normalizeFaceThumbnailResults({ items: [{ kind: "capture", id: "a", status: "none" }] })[0] ?? {})],
+    ["FaceHitReadResultDto", ["unreadCount"]],
+  ];
+  for (const [recordName, appFields] of checks) {
+    const backendFields = backendRecordFields(recordName);
+    if (backendFields === null) {
+      skipped.push(recordName);
+      continue;
+    }
+    sameSet(appFields, backendFields, recordName);
+  }
+  if (skipped.length > 0) console.log(`source-contract.test.ts: 后端暂无 ${skipped.join("、")}，跨端字段契约检查已跳过`);
+  // 命中流筛选取值：App 的二级筛选与后端 FaceHitStatuses 一致（后端有这个类才断言）
+  const statusSource = backendSources.find((source) => source.includes("class FaceHitStatuses"));
+  if (statusSource) {
+    const classStart = statusSource.indexOf("class FaceHitStatuses");
+    const classBody = statusSource.slice(classStart, statusSource.indexOf("\n}", classStart));
+    const backendStatuses = Array.from(classBody.matchAll(/const string \w+ = "(\w+)";/g), (item) => item[1]);
+    assert.deepEqual([...HIT_STATUS_KEYS].sort(), [...backendStatuses].sort(), "命中流 hitStatus 取值与后端 FaceHitStatuses 不一致");
+  }
 }
 
 // ───────── 3. 页面不硬编码中文 ─────────
@@ -299,7 +492,7 @@ assert.equal(leaves(zh).length, leaves(en).length, "中英文键数量必须相�
 
 // 代码里用到的文案键
 const usedKeys = new Set<string>();
-const KEY_PREFIXES = /^(messages|states|tabs|filters|disabled|errors|validation|unwelcome|form|photo|leave|review|settings|capture|timeline)\.[A-Za-z0-9_.]+$/;
+const KEY_PREFIXES = /^(messages|states|tabs|hub|filters|disabled|errors|validation|unwelcome|form|photo|leave|review|settings|capture|timeline|hits|thumb)\.[A-Za-z0-9_.]+$/;
 for (const file of moduleFiles) {
   const code = stripComments(read(file));
   for (const match of code.matchAll(/["'`]([A-Za-z][A-Za-z0-9_.]*\.[A-Za-z0-9_.]+)["'`]/g)) {
@@ -341,6 +534,20 @@ for (const [tree, pattern] of [[zh, /在线|离线/], [en, /online|offline/i]] a
 // 相似度口径：任何展示相似度的文案都写「不等于是同一个人的概率」（旧写法少了「等于」二字，有歧义）
 assert.ok((lookup(zh, "review.similarity") as string).includes("不等于是同一个人的概率"));
 assert.ok((lookup(en, "review.similarity") as string).includes("not the probability"));
+// 「抓拍」页顶部提示：写明口径，并说明「照片只在本页显示、离开即销毁、每次读取记审计」；旧的「点开详情后才读取」说法已作废
+{
+  const noticeZh = lookup(zh, "capture.notice") as string;
+  const noticeEn = lookup(en, "capture.notice") as string;
+  assert.equal(noticeZh, "分数是相似度，不等于是同一个人的概率。照片只在本页显示，离开页面即销毁，每次读取都会记审计。");
+  assert.ok(/not the probability/.test(noticeEn) && /only shown on this page/.test(noticeEn) && /destroyed/.test(noticeEn) && /audited/.test(noticeEn));
+  assert.equal(/点开详情后才读取|opened/.test(noticeZh + noticeEn), false);
+  // 筛选条：第 2 个是「黑名单」，「仅命中」已去掉；命中标签写「黑名单命中 N%」
+  assert.equal(lookup(zh, "capture.filters.blacklist"), "黑名单");
+  assert.equal(lookup(zh, "capture.filters.hitOnly"), undefined);
+  assert.equal(lookup(en, "capture.filters.hitOnly"), undefined);
+  assert.equal(lookup(zh, "capture.hit.tag"), "黑名单命中 {{percent}}%");
+  assert.equal(lookup(zh, "thumb.deleted"), "已删除");
+}
 // 「抓拍与比对」页顶部提示同样写明口径；通知发送情况只有人数，文案里不出现姓名
 assert.ok((lookup(zh, "capture.notice") as string).includes("不等于是同一个人的概率"));
 assert.ok((lookup(en, "capture.notice") as string).includes("not the probability"));
@@ -428,10 +635,8 @@ assert.ok((lookup(zh, "review.band.high") as string) === "较高" && (lookup(zh,
 // ───────── 5. 路由薄壳只做转发 ─────────
 {
   const routes: [string, string][] = [
-    ["app/(shell)/face-unwelcome/index.tsx", "FaceUnwelcomeScreen"],
+    ["app/(shell)/face-hub.tsx", "FaceHubScreen"],
     ["app/(shell)/face-unwelcome/entry-new.tsx", "EntryFormScreen"],
-    ["app/(shell)/face-match-settings.tsx", "FaceMatchSettingsScreen"],
-    ["app/(shell)/face-capture-results.tsx", "FaceCaptureResultsScreen"],
   ];
   for (const [file, component] of routes) {
     const path = join(mobileRoot, file);
@@ -442,6 +647,54 @@ assert.ok((lookup(zh, "review.band.high") as string) === "较高" && (lookup(zh,
     assert.ok(source.split("\n").length <= 8, `${file} 只做转发`);
   }
   assert.ok(existsSync(join(mobileRoot, "app/(shell)/face-unwelcome/_layout.tsx")));
+
+  // 旧三个入口只是重定向壳：落到合并页对应页签（深链、旧通知、历史书签仍可用），页面本身不再渲染旧屏幕
+  const legacy: [string, string, string][] = [
+    ["app/(shell)/face-capture-results.tsx", "face-capture-results", "capture"],
+    ["app/(shell)/face-unwelcome/index.tsx", "face-unwelcome", "list"],
+    ["app/(shell)/face-match-settings.tsx", "face-match-settings", "settings"],
+  ];
+  for (const [file, routeName] of legacy) {
+    const path = join(mobileRoot, file);
+    assert.ok(existsSync(path), `缺少路由文件 ${file}（旧入口要保留并重定向）`);
+    const code = stripComments(read(path));
+    assert.ok(code.includes("<Redirect "), `${file} 必须是重定向壳`);
+    assert.ok(code.includes(`resolveLegacyFaceRedirectParams("${routeName}")`), `${file} 要按路由名重定向到合并页对应页签`);
+    assert.equal(/Screen\b/.test(code), false, `${file} 不再渲染旧页面`);
+  }
+}
+
+// ───────── 6. 「人脸比对」合并页 ─────────
+{
+  const hub = stripComments(sourceOf("FaceHubScreen.tsx"));
+  // 三个面板都来自各自的内容面板（不含框架与守卫），页面框架与入口守卫只在合并页里有一份
+  assert.ok(hub.includes("<CapturePanel") && hub.includes("<UnwelcomePanel") && hub.includes("<SettingsPanel"));
+  assert.ok(/export function UnwelcomePanel\(/.test(stripComments(sourceOf("FaceUnwelcomeScreen.tsx"))));
+  assert.ok(/export function SettingsPanel\(/.test(stripComments(sourceOf("FaceMatchSettingsScreen.tsx"))));
+  assert.ok(hub.includes("canViewFaceHub(") && hub.includes("resolveFaceHubTabs(hasPermission)"), "合并页入口与页签都按权限判断");
+  assert.ok(hub.includes("useLocalSearchParams") && hub.includes("parseFaceHubParams("), "路由参数经过白名单解析");
+  assert.ok(hub.includes("initialFilter={params.filter}") && hub.includes("initialHitStatus={params.hitStatus}"), "筛选参数透传给抓拍面板");
+  assert.ok(hub.includes("initialTab={params.sub}"), "sub 参数透传给名单面板");
+  // 红色数字：来自导航上下文，只挂在 resolveFaceHubBadgeTab 选出的页签上，封顶文字走共用函数
+  assert.ok(hub.includes("faceHitUnreadCount") && hub.includes("resolveFaceHubBadgeTab(tabs)") && hub.includes("formatUnreadBadgeText("));
+  // 抓拍面板不常驻：缩略图只放内存、离开即销毁，切走页签必须卸载（名单 / 设置才允许隐藏常驻）
+  assert.ok(hub.includes('key !== "capture" && visited.has(key)'), "抓拍面板切走页签即卸载");
+  assert.ok(hub.includes('display: "none"'), "名单 / 设置面板隐藏而不卸载");
+  // 合并页不读取任何图片字节、不碰存储
+  assert.equal(/fetchCaptureImage|fetchTaskImage|fetchReferenceImage|<Image\b/.test(hub), false);
+  // 导航登记：路径、可见集合、工作台入口、角色菜单目录、审核模式排除都有 face-hub
+  assert.ok(read(join(mobileRoot, "src/modules/navigation/default-route.ts")).includes('"face-hub": "/(shell)/face-hub"'));
+  assert.ok(read(join(mobileRoot, "src/modules/navigation/workbench.ts")).includes('routeName: "face-hub"'));
+  assert.ok(/\["face-hub", "Face matching", "人脸比对", \[/.test(read(join(mobileRoot, "src/modules/identity-admin/role-menu-catalog.ts"))));
+  assert.ok(/IOS_REVIEW_EXCLUDED_ROUTE_NAMES[\s\S]*"face-hub"[\s\S]*\] as const/.test(read(join(mobileRoot, "src/modules/ios-review/menu.ts"))), "iOS 审核离线壳里隐藏 face-hub");
+  // 页签名 / 提示文案中英文都有（其余 hub.* 文案键由上面的「用到的键 + 死键」检查守住）
+  assert.equal(lookup(zh, "hub.tabs.capture"), "抓拍");
+  assert.equal(lookup(zh, "hub.tabs.list"), "名单");
+  assert.equal(lookup(zh, "hub.tabs.settings"), "设置");
+  assert.equal(lookup(zh, "hub.title"), "人脸比对");
+  assert.equal(lookup(en, "hub.title"), "Face matching");
+  assert.equal(lookup(commonZh, "tabs.faceHub"), "人脸比对");
+  assert.equal(lookup(commonEn, "tabs.faceHub"), "Face matching");
 }
 
 console.log("source-contract.test.ts: ok");

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import type { AxiosRequestConfig } from "axios";
 import { fromByteArray } from "base64-js";
 import { CREATE_ENTRY_TIMEOUT_MS, IMAGE_TIMEOUT_MS, createFaceMatchApi, detectImageMime, type FaceMatchHttp } from "./api-core";
+import { THUMBNAIL_BATCH_MAX } from "./constants";
+import { FACE_HIT_NOTIFICATION_TYPE } from "./hit-unread";
 import { buildCameraEnabledRequest } from "./cameras-logic";
 import type { CreateEntryInput } from "./entry-form";
 import { classifyReviewImageError } from "./errors";
@@ -246,6 +248,190 @@ async function run() {
       await assert.rejects(() => api.fetchCaptureImage("a1B2c3", bad), (error) => classifyReviewImageError(error) === "gone", bad);
     }
     assert.equal(calls.length, 1, "校验失败不会向服务端发任何请求");
+  }
+
+  // ───────── 黑名单命中流：列表参数 / 汇总 / 标记已读 / 命中图 / 全部已读 ─────────
+  {
+    const { http, calls } = fakeHttp(() => ({
+      items: [{ taskId: "a".repeat(32), captureId: null, unread: true, notificationId: "n1", canReview: true }, { storeCode: "no-task-id" }],
+      page: 1,
+      pageSize: 20,
+      hasMore: true,
+    }));
+    const api = createFaceMatchApi(http);
+    const page = await api.listHits({ storeCode: "1042", hitStatus: "unread", fromUtc: "2026-10-13T13:00:00.000Z", toUtc: "2026-10-14T13:00:00.000Z", page: 1, pageSize: 20 });
+    assert.equal(calls[0].method, "get");
+    assert.equal(calls[0].url, "/react/v1/face-match/results/hits");
+    assert.deepEqual(calls[0].config?.params, {
+      storeCode: "1042",
+      hitStatus: "unread",
+      fromUtc: "2026-10-13T13:00:00.000Z",
+      toUtc: "2026-10-14T13:00:00.000Z",
+      page: 1,
+      pageSize: 20,
+    });
+    assert.equal((calls[0].config?.headers as Record<string, string>)["Cache-Control"], "no-store");
+    assert.equal(page.items.length, 1, "没有任务编号的行被丢弃");
+    assert.equal(page.items[0].unread, true);
+    assert.equal(page.items[0].canReview, true);
+    assert.equal(page.hasMore, true);
+    await api.listHits({ hitStatus: "all", page: 2, pageSize: 20 });
+    assert.deepEqual(calls[1].config?.params, { storeCode: undefined, hitStatus: undefined, fromUtc: undefined, toUtc: undefined, page: 2, pageSize: 20 }, "全部状态是默认值，不发");
+  }
+  {
+    const { http, calls } = fakeHttp(() => ({ total: 5, unread: 3, pending: 2, autoConfirmed: 2, confirmed: 0, dismissed: 1 }));
+    const api = createFaceMatchApi(http);
+    const summary = await api.getHitSummary({ storeCode: "1042", fromUtc: "2026-10-13T13:00:00.000Z", toUtc: "2026-10-14T13:00:00.000Z" });
+    assert.equal(calls[0].url, "/react/v1/face-match/results/hits/summary");
+    assert.deepEqual(calls[0].config?.params, { storeCode: "1042", fromUtc: "2026-10-13T13:00:00.000Z", toUtc: "2026-10-14T13:00:00.000Z" }, "汇总只带门店与时间");
+    assert.deepEqual(summary, { total: 5, unread: 3, pending: 2, autoConfirmed: 2, confirmed: 0, dismissed: 1 });
+    await api.getHitSummary({});
+    assert.deepEqual(calls[1].config?.params, { storeCode: undefined, fromUtc: undefined, toUtc: undefined });
+  }
+  {
+    const taskId = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+    const { http, calls } = fakeHttp(() => ({ unreadCount: 2 }));
+    const api = createFaceMatchApi(http);
+    const unreadCount = await api.markHitRead(taskId);
+    assert.equal(unreadCount, 2, "返回该类型的剩余未读数");
+    assert.equal(calls[0].method, "post");
+    assert.equal(calls[0].url, `/react/v1/face-match/results/hits/${taskId}/read`);
+    assert.equal(calls[0].data, undefined, "标记已读没有请求体");
+    assert.equal((calls[0].config?.headers as Record<string, string>)["Cache-Control"], "no-store");
+    // 编号校验：非法编号不发请求
+    for (const bad of ["", "a/b", "../x", "a b", "t?x=1", "x".repeat(65)]) {
+      await assert.rejects(() => api.markHitRead(bad), (error) => (error as { code?: string }).code === "FACE_MATCH_INVALID_ID", JSON.stringify(bad));
+    }
+    assert.equal(calls.length, 1, "校验失败不会向服务端发任何请求");
+  }
+  {
+    const taskId = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+    const { http, calls } = fakeHttp(() => JPEG.buffer.slice(0));
+    const api = createFaceMatchApi(http);
+    const uri = await api.fetchHitImage(taskId);
+    assert.equal(uri, `data:image/jpeg;base64,${fromByteArray(JPEG)}`);
+    assert.equal(calls[0].method, "get");
+    assert.equal(calls[0].url, `/react/v1/face-match/results/hits/${taskId}/image`);
+    assert.equal(calls[0].url.includes("?"), false, "图片地址不带任何查询串");
+    assert.equal(calls[0].config?.responseType, "arraybuffer");
+    assert.equal(calls[0].config?.params, undefined);
+    const headers = calls[0].config?.headers as Record<string, string>;
+    assert.equal(headers["Cache-Control"], "no-store");
+    assert.equal(headers["X-Skip-Center-Log"], "1", "命中图请求不进中心日志上报");
+    assert.equal(calls[0].config?.timeout, IMAGE_TIMEOUT_MS);
+    for (const bad of ["", "a/b", "../x", "a b", "t?x=1", "x".repeat(65)]) {
+      await assert.rejects(() => api.fetchHitImage(bad), (error) => classifyReviewImageError(error) === "gone", JSON.stringify(bad));
+    }
+    assert.equal(calls.length, 1, "校验失败不会向服务端发任何请求");
+    // 响应不是图片：不当图片显示
+    const html = fakeHttp(() => new TextEncoder().encode("<html>").buffer.slice(0));
+    await assert.rejects(() => createFaceMatchApi(html.http).fetchHitImage(taskId), (error) => classifyReviewImageError(error) === "failed");
+  }
+  {
+    // 「全部标为已读」：POST /notifications/read-all?type=face.unwelcome-hit（只标命中通知），返回条数与该类型的剩余未读数
+    const { http, calls } = fakeHttp(() => ({ updated: 3, unreadCount: 0 }));
+    const api = createFaceMatchApi(http);
+    const result = await api.markAllHitsRead();
+    assert.deepEqual(result, { updated: 3, unreadCount: 0 });
+    assert.equal(FACE_HIT_NOTIFICATION_TYPE, "face.unwelcome-hit");
+    assert.equal(calls[0].method, "post");
+    assert.equal(calls[0].url, "/react/v1/notifications/read-all");
+    assert.deepEqual(calls[0].config?.params, { type: "face.unwelcome-hit" });
+    assert.equal(calls[0].data, undefined);
+  }
+
+  // ───────── 缩略图批量接口：POST /results/thumbnails，≤30 项，编号只放请求体 ─────────
+  {
+    const { http, calls } = fakeHttp((call) => ({
+      items: (call.data as { items: { kind: string; id: string }[] }).items.map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        status: item.id === "gone1" ? "gone" : item.id === "none1" ? "none" : "ok",
+        imageBase64: item.id === "gone1" || item.id === "none1" ? null : "/9j/AAAA",
+      })),
+    }));
+    const api = createFaceMatchApi(http);
+    const controller = new AbortController();
+    const results = await api.fetchThumbnails(
+      [
+        { kind: "capture", id: "c1" },
+        { kind: "hit", id: "0a1b2c3d4e5f60718293a4b5c6d7e8f9" },
+        { kind: "capture", id: "gone1" },
+        { kind: "capture", id: "none1" },
+      ],
+      controller.signal,
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "post");
+    assert.equal(calls[0].url, "/react/v1/face-match/results/thumbnails");
+    assert.equal(calls[0].url.includes("?"), false);
+    assert.deepEqual(calls[0].data, {
+      items: [
+        { kind: "capture", id: "c1" },
+        { kind: "hit", id: "0a1b2c3d4e5f60718293a4b5c6d7e8f9" },
+        { kind: "capture", id: "gone1" },
+        { kind: "capture", id: "none1" },
+      ],
+    });
+    const headers = calls[0].config?.headers as Record<string, string>;
+    assert.equal(headers["Cache-Control"], "no-store");
+    assert.equal(headers["X-Skip-Center-Log"], "1", "缩略图批请求不进中心日志上报");
+    assert.equal(calls[0].config?.timeout, IMAGE_TIMEOUT_MS);
+    assert.equal(calls[0].config?.signal, controller.signal, "清空时可中止在途请求");
+    assert.deepEqual(results.map((item) => [item.kind, item.id, item.status]), [
+      ["capture", "c1", "ok"],
+      ["hit", "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "ok"],
+      ["capture", "gone1", "gone"],
+      ["capture", "none1", "none"],
+    ]);
+    assert.equal(results[0].imageBase64, "/9j/AAAA");
+    assert.equal(results[2].imageBase64, null);
+  }
+  {
+    // 恰好 30 项可以发；31 项是调用方的编程错误，直接抛错而不是悄悄截断，也不发请求
+    const { http, calls } = fakeHttp(() => ({ items: [] }));
+    const api = createFaceMatchApi(http);
+    assert.equal(THUMBNAIL_BATCH_MAX, 30);
+    const thirty = Array.from({ length: 30 }, (_, index) => ({ kind: "capture" as const, id: `c${index}` }));
+    await api.fetchThumbnails(thirty);
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0].data as { items: unknown[] }).items.length, 30);
+    await assert.rejects(() => api.fetchThumbnails([...thirty, { kind: "capture", id: "c30" }]), (error) => (error as { code?: string }).code === "FACE_MATCH_THUMBNAIL_BATCH_TOO_LARGE");
+    assert.equal(calls.length, 1, "超限不发请求");
+    // 空入参不发请求
+    assert.deepEqual(await api.fetchThumbnails([]), []);
+    assert.equal(calls.length, 1);
+  }
+  {
+    // 编号格式不对的项不发给服务端，按 denied 处理（保持入参顺序）；其余项照常请求
+    const { http, calls } = fakeHttp((call) => ({
+      items: (call.data as { items: { kind: string; id: string }[] }).items.map((item) => ({ kind: item.kind, id: item.id, status: "ok", imageBase64: "/9j/AAAA" })),
+    }));
+    const api = createFaceMatchApi(http);
+    const results = await api.fetchThumbnails([
+      { kind: "capture", id: "a/b" },
+      { kind: "capture", id: "ok1" },
+      { kind: "hit", id: "../x" },
+      { kind: "capture", id: "x".repeat(33) },
+    ]);
+    assert.deepEqual((calls[0].data as { items: unknown[] }).items, [{ kind: "capture", id: "ok1" }], "只发合法的项");
+    assert.deepEqual(results.map((item) => [item.id, item.status]), [["a/b", "denied"], ["ok1", "ok"], ["../x", "denied"], ["x".repeat(33), "denied"]]);
+    assert.equal(results[0].imageBase64, null);
+    // 全都不合法：不发请求
+    const none = fakeHttp(() => ({ items: [] }));
+    const denied = await createFaceMatchApi(none.http).fetchThumbnails([{ kind: "hit", id: "" }]);
+    assert.equal(none.calls.length, 0);
+    assert.deepEqual(denied, [{ kind: "hit", id: "", status: "denied", imageBase64: null }]);
+    // 请求体只含 kind + id，入参里多带的字段不会被发出去
+    const extra = fakeHttp(() => ({ items: [] }));
+    await createFaceMatchApi(extra.http).fetchThumbnails([{ kind: "capture", id: "c1", note: "x", imageBase64: "leak" } as never]);
+    assert.deepEqual(extra.calls[0].data, { items: [{ kind: "capture", id: "c1" }] });
+  }
+  {
+    // 服务端少回了一项：结果里不编造它（调用方把缺失项当作没有图）；多回了不在请求里的项：忽略
+    const { http } = fakeHttp(() => ({ items: [{ kind: "capture", id: "c1", status: "ok", imageBase64: "/9j/AAAA" }, { kind: "capture", id: "stranger", status: "ok", imageBase64: "/9j/BBBB" }] }));
+    const results = await createFaceMatchApi(http).fetchThumbnails([{ kind: "capture", id: "c1" }, { kind: "capture", id: "c2" }]);
+    assert.deepEqual(results.map((item) => item.id), ["c1"]);
   }
 
   // ───────── 摄像头：只读列表 + 启停（整体替换时带回其余字段） ─────────

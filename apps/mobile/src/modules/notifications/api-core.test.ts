@@ -50,12 +50,24 @@ async function run() {
     assert.equal("page" in params || "pageSize" in params, false, "通知分页没有页码参数");
   }
 
-  // ───────── 未读数：data 是整数 ─────────
+  // ───────── 未读数：data 是整数；type 可选（缺省 = 全部，不带任何查询参数） ─────────
   {
     const { http, calls } = fakeHttp(() => envelope(5));
     const api = createNotificationsApi(http);
     assert.equal(await api.unreadCount(), 5);
     assert.equal(calls[0].url, "/react/v1/notifications/unread-count");
+    assert.equal(calls[0].config?.params, undefined, "不传 type 就不带查询参数（原行为不变）");
+    assert.equal(await api.unreadCount("face.unwelcome-hit"), 5);
+    assert.deepEqual(calls[1].config?.params, { type: "face.unwelcome-hit" }, "按类型统计命中通知的未读数");
+    const controller = new AbortController();
+    await api.unreadCount("face.unwelcome-hit", controller.signal);
+    assert.equal(calls[2].config?.signal, controller.signal, "取消信号透传");
+  }
+
+  // 未读数宽松解析：不是数字（字符串、null、对象、缺失）一律当 0，负数当 0，小数取整
+  for (const [raw, expected] of [["7", 0], [null, 0], [{ count: 3 }, 0], [undefined, 0], [-2, 0], [4.8, 4]] as const) {
+    const { http } = fakeHttp(() => envelope(raw));
+    assert.equal(await createNotificationsApi(http).unreadCount("face.unwelcome-hit"), expected, `data=${JSON.stringify(raw)}`);
   }
 
   // ───────── 标记已读：POST /read { ids }，去重去空 ─────────

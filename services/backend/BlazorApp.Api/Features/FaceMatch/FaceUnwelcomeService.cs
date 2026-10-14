@@ -632,8 +632,7 @@ public sealed class FaceUnwelcomeService(
 
     /// <summary>系统自动确认的任务（复核人记为 system）：没有人判断过，误报统计里单独计数，不进驳回率。</summary>
     private static bool IsAutoConfirmed(byte reviewStatus, string? firstReviewerId) =>
-        reviewStatus == FaceMatchReviewStatus.Confirmed
-        && string.Equals(firstReviewerId, FaceMatchAuditActions.SystemActorId, StringComparison.Ordinal);
+        FaceMatchRules.IsAutoConfirmed(reviewStatus, firstReviewerId);
 
     /// <summary>人工确认的任务（Confirmed 且不是系统自动确认）。</summary>
     private static bool IsManuallyConfirmed(byte reviewStatus, string? firstReviewerId) =>

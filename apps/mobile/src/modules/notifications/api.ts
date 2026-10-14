@@ -4,3 +4,6 @@ import { apiClient } from "@/shared/api/client";
 import { createNotificationsApi, type NotificationsHttp } from "./api-core";
 
 export const notificationsApi = createNotificationsApi(apiClient as unknown as NotificationsHttp);
+
+/** 某一类通知的未读数（GET /notifications/unread-count?type=）；type 缺省 = 全部。 */
+export const getUnreadCount = (type?: string, signal?: AbortSignal): Promise<number> => notificationsApi.unreadCount(type, signal);

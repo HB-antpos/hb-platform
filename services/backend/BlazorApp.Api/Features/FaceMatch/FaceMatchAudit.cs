@@ -4,7 +4,7 @@ using SqlSugar;
 
 namespace BlazorApp.Api.Features.FaceMatch;
 
-/// <summary>FaceAuditLog.Action 取值（页面按它筛选，增删需同步 Web 文案）。</summary>
+/// <summary>FaceAuditLog.Action 取值（页面按它筛选，增删需同步 Web 审计页签的说明文案与运维手册 16.10）。</summary>
 public static class FaceMatchAuditActions
 {
     public const string ProfileUpdate = "profile.update";
@@ -25,6 +25,12 @@ public static class FaceMatchAuditActions
     public const string TaskImageDelete = "unwelcome.task.image-delete";
     public const string VisitGroupDelete = "visit-group.delete";
     public const string CaptureRetention = "capture.retention-cleanup";
+
+    /// <summary>
+    /// 抓拍 / 命中图缩略图批量查看：<b>每次批量请求记一条</b>（不逐张记）。StoreCode = 本批全部同一家店时填该店，否则为空；
+    /// TargetRef 不放任何抓拍 / 任务编号；Result 是 <c>n=成功生成的张数</c>。点开详情看大图仍走各自的看图动作并单独审计。
+    /// </summary>
+    public const string ThumbnailsView = "capture.thumbnails.view";
 
     /// <summary>后台任务的操作人。</summary>
     public const string SystemActorId = "system";

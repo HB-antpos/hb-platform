@@ -169,6 +169,7 @@ const TAB_PATHS: Record<string, string> = {
   permissions: '/(shell)/permissions',
   'employee-profile': '/(shell)/employee-profile',
   'employee-profile-review': '/(shell)/employee-profile-review',
+  'face-hub': '/(shell)/face-hub',
   'face-unwelcome': '/(shell)/face-unwelcome',
   'face-match-settings': '/(shell)/face-match-settings',
   'face-capture-results': '/(shell)/face-capture-results',
@@ -214,6 +215,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   permissions: { zhTitle: '权限管理', enTitle: 'Permission Management' },
   'employee-profile': { zhTitle: '员工', enTitle: 'Employee' },
   'employee-profile-review': { zhTitle: '员工资料审核', enTitle: 'Employee Profile Review' },
+  'face-hub': { zhTitle: '人脸比对', enTitle: 'Face match' },
   'face-unwelcome': { zhTitle: '不受欢迎名单', enTitle: 'Unwelcome list' },
   'face-match-settings': { zhTitle: '人脸比对设置', enTitle: 'Face match settings' },
   'face-capture-results': { zhTitle: '抓拍与比对', enTitle: 'Captures & matches' },
@@ -505,6 +507,24 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     order: 58,
     ...ROUTE_LABELS['employee-profile-review'],
   },
+  {
+    routeName: 'face-hub',
+    titleKey: 'tabs.faceHub',
+    icon: 'face-recognition',
+    // 与后端 FullAppMenu 一致：「人脸比对」合并入口（抓拍 / 名单 / 设置三个一级页签），六个权限码任一即可见，不合并成一个码、不新增权限码：
+    // 抓拍 FaceCapture.Images.View；名单 FaceMatch.Unwelcome.Manage / Approve（条目）、Review（命中复核）；设置 FaceMatch.Manage（门店档案）、FaceCapture.Cameras.Manage（摄像头）。
+    permissionCodes: [
+      P.FaceCapture.ImagesView,
+      P.FaceMatch.Unwelcome.Manage,
+      P.FaceMatch.Unwelcome.Approve,
+      P.FaceMatch.Unwelcome.Review,
+      P.FaceMatch.Manage,
+      P.FaceCapture.CamerasManage,
+    ],
+    order: 58,
+    ...ROUTE_LABELS['face-hub'],
+  },
+  // 下面三项是合并入口之前的旧入口：为兼容旧版 App 保持原样；新版 App 不再显示它们，待新版普及后再清理。
   {
     routeName: 'face-unwelcome',
     titleKey: 'tabs.faceUnwelcome',

@@ -5,21 +5,29 @@
 // 2. 所有请求带 Cache-Control: no-store（服务端同样返回 no-store），不让系统 HTTP 缓存保留含生物识别信息的响应；
 // 3. 图片请求带 Authorization（由 apiClient 拦截器加）取字节，立即转成 base64 data URI 交给调用方放进组件 state，
 //    绝不写磁盘、不进 react-query 缓存、不拼进 URL 查询串；图片请求关闭中心日志上报（X-Skip-Center-Log）；
-// 4. 本文件禁止出现 console.*，由 source-contract 测试静态守住。
+// 4. 列表缩略图走 POST /results/thumbnails（一批最多 30 项、响应是 base64 JPEG）：同样 no-store、不进中心日志，
+//    编号只放请求体；返回值只交给调用方放内存（use-thumbnails），绝不进 react-query / 磁盘 / 日志；
+// 5. 本文件禁止出现 console.*，由 source-contract 测试静态守住。
 import type { AxiosRequestConfig } from "axios";
 import { fromByteArray } from "base64-js";
 import { unwrapApiEnvelope } from "@/shared/api/api-envelope";
-import { FACE_CAMERAS_API_BASE, FACE_MATCH_API_BASE } from "./constants";
+import { FACE_CAMERAS_API_BASE, FACE_MATCH_API_BASE, FACE_NOTIFICATIONS_API_BASE, THUMBNAIL_BATCH_MAX } from "./constants";
 import type { CreateEntryInput } from "./entry-form";
-import { buildCaptureListParams } from "./capture-logic";
+import { buildCaptureListParams, buildHitListParams, buildHitSummaryParams } from "./capture-logic";
 import { buildListParams } from "./entries-logic";
+import { FACE_HIT_NOTIFICATION_TYPE } from "./hit-unread";
 import { buildCreateEntryMultipart } from "./multipart";
 import {
   normalizeFaceCamera,
   normalizeFaceCameraList,
   normalizeFaceCaptureResultPage,
+  normalizeFaceHitReadAllResult,
+  normalizeFaceHitResultPage,
+  normalizeFaceHitSummary,
+  normalizeFaceHitUnreadCount,
   normalizeFaceMatchConfig,
   normalizeFaceStoreProfile,
+  normalizeFaceThumbnailResults,
   normalizeFaceUnwelcomeEntry,
   normalizeFaceUnwelcomeEntryPage,
   normalizeFaceUnwelcomeTask,
@@ -30,11 +38,18 @@ import type {
   FaceCameraList,
   FaceCaptureResult,
   FaceCaptureResultQuery,
+  FaceHitReadAllResult,
+  FaceHitResult,
+  FaceHitResultQuery,
+  FaceHitSummary,
+  FaceHitSummaryQuery,
   FaceMatchConfig,
   FaceMatchPage,
   FaceReviewVerdict,
   FaceStoreProfile,
   FaceStoreProfileUpdateRequest,
+  FaceThumbnailRequestItem,
+  FaceThumbnailResult,
   FaceUnwelcomeEntry,
   FaceUnwelcomeListQuery,
   FaceUnwelcomeTask,
@@ -58,6 +73,13 @@ export const IMAGE_TIMEOUT_MS = 30_000;
 const IMAGE_PATH_TASK_ID = /^[A-Za-z0-9-]{1,64}$/;
 /** 抓拍编号与图片编号：服务端只接受 1–32 位字母数字（FaceCaptureResultService.IdPattern）。 */
 const CAPTURE_PATH_ID = /^[A-Za-z0-9]{1,32}$/;
+/** 缩略图项目的编号校验：抓拍编号同抓拍图（1–32 位字母数字），命中任务编号同任务图。不合法的项不发给服务端，当作 denied。 */
+function isValidThumbnailItem(item: FaceThumbnailRequestItem): boolean {
+  if (item.kind === "capture") return CAPTURE_PATH_ID.test(item.id);
+  if (item.kind === "hit") return IMAGE_PATH_TASK_ID.test(item.id);
+  return false;
+}
+
 /** 参考照片最多 5 张（下标 0-4）；多留余量，真实上限以任务的 referencePhotoCount 为准。 */
 const MAX_REFERENCE_INDEX = 9;
 
@@ -71,6 +93,10 @@ function entryPath(entryId: string): string {
 
 function cameraPath(cameraId: string): string {
   return `${FACE_CAMERAS_API_BASE}/${encodeURIComponent(cameraId)}`;
+}
+
+function failInvalidId(): never {
+  throw Object.assign(new Error("FACE_MATCH_INVALID_ID"), { code: "FACE_MATCH_INVALID_ID" });
 }
 
 function failImageTarget(): never {
@@ -217,6 +243,75 @@ export function createFaceMatchApi(http: FaceMatchHttp) {
     async fetchCaptureImage(captureId: string, imageId: string, signal?: AbortSignal): Promise<string> {
       if (!CAPTURE_PATH_ID.test(captureId) || !CAPTURE_PATH_ID.test(imageId)) failImageTarget();
       return fetchImageDataUri(`${FACE_MATCH_API_BASE}/results/${captureId}/images/${imageId}`, signal);
+    },
+
+    // ───────── 黑名单命中流（FaceCapture.Images.View）：按命中任务查，不依赖留存抓拍 ─────────
+    /** 列表只含结构化数据（不含图片内容、对象键），可以进 react-query；命中图另用 fetchHitImage 在详情里按需读取。 */
+    async listHits(query: FaceHitResultQuery, signal?: AbortSignal): Promise<FaceMatchPage<FaceHitResult>> {
+      const response = await http.get(`${FACE_MATCH_API_BASE}/results/hits`, json({ params: buildHitListParams(query), signal }));
+      return normalizeFaceHitResultPage(data(response));
+    },
+
+    /** 各状态条数（同样的门店范围与时间条件）。 */
+    async getHitSummary(query: FaceHitSummaryQuery, signal?: AbortSignal): Promise<FaceHitSummary> {
+      const response = await http.get(`${FACE_MATCH_API_BASE}/results/hits/summary`, json({ params: buildHitSummaryParams(query), signal }));
+      return normalizeFaceHitSummary(data(response));
+    },
+
+    /** 把当前登录人那条命中通知标为已读（幂等）；返回该类型的剩余未读数，调用方用它写回红色数字缓存。 */
+    async markHitRead(taskId: string): Promise<number> {
+      if (!IMAGE_PATH_TASK_ID.test(taskId)) failInvalidId();
+      return normalizeFaceHitUnreadCount(data(await http.post(`${FACE_MATCH_API_BASE}/results/hits/${taskId}/read`, undefined, json())));
+    },
+
+    /** 命中图原图：GET /results/hits/{taskId}/image，服务端每次读取都写审计。返回 data URI，调用方只放组件 state。 */
+    async fetchHitImage(taskId: string, signal?: AbortSignal): Promise<string> {
+      if (!IMAGE_PATH_TASK_ID.test(taskId)) failImageTarget();
+      return fetchImageDataUri(`${FACE_MATCH_API_BASE}/results/hits/${taskId}/image`, signal);
+    },
+
+    /**
+     * 「全部标为已读」：只标「黑名单命中」类通知（type 查询参数），返回本次条数与该类型剩余未读数。
+     * 注意它标的是当前登录人的全部命中通知，不受列表上的门店 / 时间筛选限制。
+     */
+    async markAllHitsRead(): Promise<FaceHitReadAllResult> {
+      const response = await http.post(`${FACE_NOTIFICATIONS_API_BASE}/read-all`, undefined, json({ params: { type: FACE_HIT_NOTIFICATION_TYPE } }));
+      return normalizeFaceHitReadAllResult(data(response));
+    },
+
+    // ───────── 缩略图（FaceCapture.Images.View）：一批最多 30 项，服务端每个请求只记一条审计 ─────────
+    /**
+     * 批量取缩略图（最长边 ≤128px 的 JPEG，base64）。结果按入参顺序返回，只含服务端回了的项：
+     * - 编号不合法的项不发给服务端，直接当 denied；全都不合法 / 入参为空时不发请求；
+     * - 一批超过 30 项属于调用方的编程错误，直接抛错而不是悄悄截断；
+     * - 请求带 no-store、不进中心日志；返回值只能放内存（组件 state / ref），不得进 react-query、磁盘或日志。
+     */
+    async fetchThumbnails(items: readonly FaceThumbnailRequestItem[], signal?: AbortSignal): Promise<FaceThumbnailResult[]> {
+      if (items.length === 0) return [];
+      if (items.length > THUMBNAIL_BATCH_MAX) {
+        throw Object.assign(new Error("FACE_MATCH_THUMBNAIL_BATCH_TOO_LARGE"), { code: "FACE_MATCH_THUMBNAIL_BATCH_TOO_LARGE" });
+      }
+      const valid = items.filter(isValidThumbnailItem);
+      let returned: FaceThumbnailResult[] = [];
+      if (valid.length > 0) {
+        const response = await http.post(
+          `${FACE_MATCH_API_BASE}/results/thumbnails`,
+          { items: valid.map(({ kind, id }) => ({ kind, id })) },
+          json({ signal, timeout: IMAGE_TIMEOUT_MS, headers: { "X-Skip-Center-Log": "1" } }),
+        );
+        returned = normalizeFaceThumbnailResults(data(response));
+      }
+      const byKey = new Map(returned.map((result) => [`${result.kind}:${result.id}`, result]));
+      const ordered: FaceThumbnailResult[] = [];
+      for (const item of items) {
+        if (!isValidThumbnailItem(item)) {
+          ordered.push({ kind: item.kind, id: item.id, status: "denied", imageBase64: null });
+          continue;
+        }
+        const found = byKey.get(`${item.kind}:${item.id}`);
+        if (found) ordered.push(found);
+      }
+      return ordered;
     },
 
     // ───────── 摄像头（FaceCapture.Cameras.Manage）：只读列表与启停 ─────────
