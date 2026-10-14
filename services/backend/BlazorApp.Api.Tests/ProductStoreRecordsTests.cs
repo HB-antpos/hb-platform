@@ -1638,13 +1638,13 @@ public sealed class ProductStoreRecordsTests : IDisposable
     [Theory]
     [InlineData("ITEM-DUP")]
     [InlineData("  ITEM-DUP  ")]
-    public async Task CreateWithPrices_货号已被存活商品占用时拒绝并返回错误码(string itemNumber)
+    public async Task CreateWithPrices_同供应商货号已被存活商品占用时拒绝并返回错误码(string itemNumber)
     {
-        await SeedProductAsync("existing-local", "ITEM-DUP");
+        await SeedProductAsync("existing-local", "ITEM-DUP", localSupplierCode: "SUP01");
 
         var result = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
         {
-            ProductName = "撞货号的新商品", ItemNumber = itemNumber, PurchasePrice = 1, RetailPrice = 2,
+            ProductName = "撞货号的新商品", LocalSupplierCode = "SUP01", ItemNumber = itemNumber, PurchasePrice = 1, RetailPrice = 2,
         });
 
         var conflict = Assert.IsType<ConflictObjectResult>(result);
@@ -1659,7 +1659,7 @@ public sealed class ProductStoreRecordsTests : IDisposable
     {
         await SeedStoreAsync("S01", "启用分店");
         // 同货号但已软删除的商品不算占用。
-        await SeedProductAsync("deleted-local", "ITEM-FREE");
+        await SeedProductAsync("deleted-local", "ITEM-FREE", localSupplierCode: "SUP01");
         await _localDb.Updateable<Product>()
             .SetColumns(x => x.IsDeleted == true)
             .Where(x => x.ProductCode == "deleted-local")
@@ -1667,13 +1667,29 @@ public sealed class ProductStoreRecordsTests : IDisposable
 
         var result = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
         {
-            ProductName = "货号空闲的新商品", ItemNumber = "  ITEM-FREE  ", PurchasePrice = 1, RetailPrice = 2,
+            ProductName = "货号空闲的新商品", LocalSupplierCode = "SUP01", ItemNumber = "  ITEM-FREE  ", PurchasePrice = 1, RetailPrice = 2,
         });
 
         Assert.IsType<OkObjectResult>(result);
         var created = await _localDb.Queryable<Product>()
             .SingleAsync(x => x.ProductName == "货号空闲的新商品");
         Assert.Equal("ITEM-FREE", created.ItemNumber);
+    }
+
+    [Fact]
+    public async Task CreateWithPrices_不同供应商可以使用相同货号()
+    {
+        await SeedStoreAsync("S01", "启用分店");
+        await SeedProductAsync("other-supplier", "ITEM-SHARED", localSupplierCode: "SUP02");
+
+        var result = await CreateItemNumberTestController().CreateWithPrices(new CreateProductWithPricesDto
+        {
+            ProductName = "另一供应商的同货号商品", LocalSupplierCode = "SUP01", ItemNumber = "ITEM-SHARED",
+            PurchasePrice = 1, RetailPrice = 2,
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, await _localDb.Queryable<Product>().CountAsync(x => x.ItemNumber == "ITEM-SHARED"));
     }
 
     [Fact]
