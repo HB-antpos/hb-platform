@@ -27,6 +27,7 @@ import { FACE_HUB_ROUTE_NAME, shouldFetchFaceHitUnread } from "@/modules/navigat
 import { FACE_HIT_NOTIFICATION_TYPE, faceHitUnreadQueryKey } from "@/modules/face-match/hit-unread";
 import { FACE_MATCH_PERMISSIONS } from "@/modules/face-match/constants";
 import { getUnreadCount } from "@/modules/notifications/api";
+import { usePushRegistration } from "@/modules/push/use-push-registration";
 import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
 import { getPriceUpdatePendingCount } from "@/modules/price-updates/api";
 import { priceUpdateCountQueryKey } from "@/modules/price-updates/query-keys";
@@ -567,6 +568,20 @@ export default function ShellLayout() {
     shouldWaitForNavigation,
     visibleRouteNames,
   ]);
+
+  // 系统推送（Expo 推送服务）：只有个人账号会话、非 iOS 审核态才处理；主界面就绪（菜单加载完、不在改密流程）后才注册令牌和响应点击。
+  // 必须放在上面的「默认入口纠偏」effect 之后：冷启动点击推送要导航到目标页，不能被默认入口的 replace 抢回去。
+  // 旧安装包 / PDA / 模拟器上这里什么都不会发生（见 push-native.ts）。
+  usePushRegistration({
+    eligible: hasUserSession && sessionKind === "account" && !isIosReviewSession && !iosReviewOfflineGuardActive,
+    ready:
+      hasUserSession &&
+      navigationReady &&
+      !shouldWaitForNavigation &&
+      !boundAccountRestorePending &&
+      !mustChangePassword,
+    userGuid,
+  });
 
   if (
     boundAccountRestorePending ||

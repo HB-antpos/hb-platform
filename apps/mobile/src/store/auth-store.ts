@@ -21,6 +21,7 @@ import {
   type LoginTraceRecorder,
 } from "@/modules/auth/login-diagnostics-runtime";
 import { stopAttendanceLocationTracking } from "@/modules/attendance/location-tracking-control";
+import { runPushLogoutHook } from "@/modules/push/push-logout-hook";
 import {
   loginApi,
   getCurrentUserApi,
@@ -352,12 +353,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
+    // 尽力注销本机推送设备（最长 3 秒、失败吞掉，runPushLogoutHook 永不抛错）。
+    // 与服务端登出并行：登出只撤销刷新令牌，访问令牌仍有效，两者互不依赖，所以不会拖慢退出；
+    // 但必须等它结束后再清会话——清会话会删除访问令牌，之后就发不出带身份的 DELETE 了。
+    const pushUnregistered = runPushLogoutHook();
     try {
       const rt = await SecureStorage.getRefreshToken();
       if (rt) {
         await logoutApi(rt);
       }
     } finally {
+      await pushUnregistered;
       await get().clearLocalSession();
     }
   },

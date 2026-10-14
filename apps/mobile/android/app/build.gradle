@@ -182,3 +182,10 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+// 推送（FCM）：构建环境提供了 google-services.json 才启用 Google Services 插件。
+// 文件由 EAS 文件型环境变量 GOOGLE_SERVICES_JSON 在构建前复制到本目录（scripts/prepare-android-google-services.mjs），
+// 且已被 .gitignore 忽略、不入库。没有该文件的构建（本地调试、没配置凭据）保持原样：Android 推送令牌取不到，JS 侧静默跳过。
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
