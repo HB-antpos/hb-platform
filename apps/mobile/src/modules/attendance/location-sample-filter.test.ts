@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   LOCATION_HEARTBEAT_INTERVAL_MS,
-  LOCATION_KEEP_DISTANCE_METERS,
   LOCATION_KEEP_INTERVAL_MS,
-  distanceMeters,
   filterShiftLocationFixes,
   type LastKeptLocationPoint,
   type RawLocationFix,
@@ -37,15 +35,8 @@ function run(fixes: RawLocationFix[], lastKept?: LastKeptLocationPoint, nowUtc =
 }
 
 test("阈值常量与需求一致", () => {
-  assert.equal(LOCATION_KEEP_DISTANCE_METERS, 50);
   assert.equal(LOCATION_KEEP_INTERVAL_MS, 60_000);
   assert.equal(LOCATION_HEARTBEAT_INTERVAL_MS, 5 * 60_000);
-});
-
-test("distanceMeters 对已知经纬度差给出合理米数", () => {
-  assert.equal(distanceMeters({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 0 }), 0);
-  const d = distanceMeters({ latitude: LAT0, longitude: LNG0 }, { latitude: LAT0 + 0.001, longitude: LNG0 });
-  assert.ok(d > 110 && d < 112.5, `0.001 度纬度应约 111 米，实际 ${d}`);
 });
 
 test("没有上一个保留点时第一个点必定保留，且为 ShiftSample", () => {
@@ -60,21 +51,26 @@ test("没有上一个保留点时第一个点必定保留，且为 ShiftSample",
   });
 });
 
-test("相隔不足 60 秒且位移不足 50 米的点被丢弃", () => {
-  const result = run([fix(0), fix(30), fix(59, { latitude: LAT0 + 0.0003 })]);
+test("相隔不足 60 秒的点被丢弃", () => {
+  const result = run([fix(0), fix(30), fix(59)]);
   assert.deepEqual(result.samples.map((sample) => sample.capturedAtUtc), ["2026-10-13T02:00:00.000Z"]);
 });
 
-test("相隔恰好 60 秒保留（满足其一即保留）", () => {
+test("相隔恰好 60 秒保留", () => {
   const result = run([fix(0), fix(60)]);
   assert.equal(result.samples.length, 2);
   assert.equal(result.samples[1].eventType, "ShiftSample");
 });
 
-test("位移 ≥ 50 米即使不足 60 秒也保留", () => {
-  const result = run([fix(0), fix(10, { latitude: LAT0 + 0.0005 })]);
-  assert.equal(result.samples.length, 2);
-  assert.equal(result.samples[1].eventType, "ShiftSample");
+test("不按位移加密：行车途中每秒一个点、位移远超 50 米，也只按 60 秒保留", () => {
+  // 每秒向北移动约 0.0003 度（约 33 米/秒，约 120 km/h），共 150 秒。
+  const fixes = Array.from({ length: 151 }, (_, second) =>
+    fix(second, { latitude: LAT0 + 0.0003 * second }));
+  const result = run(fixes);
+  assert.deepEqual(
+    result.samples.map((sample) => sample.capturedAtUtc),
+    ["2026-10-13T02:00:00.000Z", "2026-10-13T02:01:00.000Z", "2026-10-13T02:02:00.000Z"],
+  );
 });
 
 test("相隔 ≥ 5 分钟即使位移为 0 也保留，并标记 ShiftHeartbeat", () => {
