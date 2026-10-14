@@ -7,15 +7,13 @@ import type { AttendanceLocationSampleEventType } from "@/modules/attendance/loc
 // 班中定位的“逐点过滤”：纯函数，不依赖原生模块。
 // 后台任务一次回调可能带来一批坐标，这里按时间升序逐点判断是否保留，
 // 保留规则以“上一个保留点”为基准（该基准持久化在班次上下文里，跨回调、跨进程延续）。
+// 只按时间采样（约 1 分钟一个点），不再按位移加密：行车途中位移触发会让数据量暴增
+// （实测一个班段 1297 点，其中 800 多个点相隔仅数秒），而 1 分钟一点已足够还原轨迹。
 
-/** 与上一个保留点的位移达到该值（米）即保留。 */
-export const LOCATION_KEEP_DISTANCE_METERS = 50;
 /** 与上一个保留点相隔达到该时长即保留。 */
 export const LOCATION_KEEP_INTERVAL_MS = 60 * 1000;
-/** 与上一个保留点相隔达到该时长，即使位移很小也保留，并标记为心跳点。 */
+/** 与上一个保留点相隔达到该时长，标记为心跳点（说明期间设备一直没有回调）。 */
 export const LOCATION_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
-
-const EARTH_RADIUS_METERS = 6_371_008.8;
 
 /** 一个原始定位（由 expo-location 的 LocationObject 转换而来）。 */
 export interface RawLocationFix {
@@ -61,21 +59,6 @@ function isValidCoordinate(latitude: number, longitude: number) {
   );
 }
 
-/** 两点球面距离（米），haversine 公式。 */
-export function distanceMeters(
-  from: { latitude: number; longitude: number },
-  to: { latitude: number; longitude: number },
-) {
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const deltaLatitude = toRadians(to.latitude - from.latitude);
-  const deltaLongitude = toRadians(to.longitude - from.longitude);
-  const a = Math.sin(deltaLatitude / 2) ** 2
-    + Math.cos(toRadians(from.latitude))
-      * Math.cos(toRadians(to.latitude))
-      * Math.sin(deltaLongitude / 2) ** 2;
-  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(a)));
-}
-
 /** 用现有窗口规则判断单个坐标是否落在班次窗口内（10 小时上限 + 门店本地跨天）。 */
 export function isCapturedWithinTrackingWindow(
   window: AttendanceLocationTrackingWindow,
@@ -105,7 +88,7 @@ function parseLastKept(lastKept: LastKeptLocationPoint | undefined) {
  *    - 没有上一个保留点：保留（ShiftSample）；
  *    - 比上一个保留点更早或同一时刻：丢弃（乱序/重复回调）；
  *    - 相隔 ≥ 5 分钟：保留且标记 ShiftHeartbeat（不论位移大小）；
- *    - 位移 ≥ 50 米，或相隔 ≥ 60 秒：保留（ShiftSample）；
+ *    - 相隔 ≥ 60 秒：保留（ShiftSample）；
  *    - 其余丢弃。
  */
 export function filterShiftLocationFixes(input: {
@@ -143,10 +126,7 @@ export function filterShiftLocationFixes(input: {
       }
       if (elapsedMs >= LOCATION_HEARTBEAT_INTERVAL_MS) {
         eventType = "ShiftHeartbeat";
-      } else if (
-        elapsedMs >= LOCATION_KEEP_INTERVAL_MS
-        || distanceMeters(previous, fix) >= LOCATION_KEEP_DISTANCE_METERS
-      ) {
+      } else if (elapsedMs >= LOCATION_KEEP_INTERVAL_MS) {
         eventType = "ShiftSample";
       }
     }
