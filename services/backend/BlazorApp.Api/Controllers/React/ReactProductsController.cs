@@ -124,7 +124,8 @@ IF @result < 0 THROW 51062, '获取本地商品条码创建锁失败', 1;
                             return Conflict(new { success = false, message = "条码已被使用，请重新生成条码" });
                         }
                     }
-                    // 货号必须在存活商品里唯一：此前这里不校验，已经建出和别的商品货号相同的不同商品。
+                    // 业务口径：「供应商 + 货号」在存活商品里必须唯一（不同供应商可以有相同货号）。
+                    // 此前这里完全不校验，已经建出同供应商下货号相同的不同商品。
                     // 空货号保持原行为（不校验）；非空时去掉首尾空白后再比较和保存。
                     var itemNumber = string.IsNullOrWhiteSpace(dto.ItemNumber)
                         ? dto.ItemNumber
@@ -139,15 +140,15 @@ DECLARE @result int;
 EXEC @result = sys.sp_getapplock @Resource = @resource, @LockMode = 'Exclusive',
     @LockOwner = 'Transaction', @LockTimeout = 10000;
 IF @result < 0 THROW 51063, '获取本地商品货号创建锁失败', 1;
-""", new SugarParameter("@resource", $"LocalProductItemNumberCreate:{itemNumber}"));
+""", new SugarParameter("@resource", $"LocalProductItemNumberCreate:{localSupplierCode}:{itemNumber}"));
                         }
-                        if (await db.Queryable<Product>().AnyAsync(x => x.ItemNumber == itemNumber && x.IsDeleted == false))
+                        if (await db.Queryable<Product>().AnyAsync(x => x.LocalSupplierCode == localSupplierCode && x.ItemNumber == itemNumber && x.IsDeleted == false))
                         {
                             await db.Ado.RollbackTranAsync();
                             return Conflict(new
                             {
                                 success = false,
-                                message = "货号已存在，请更换货号",
+                                message = "该供应商下货号已存在，请更换货号",
                                 errorCode = "ITEM_NUMBER_EXISTS",
                             });
                         }

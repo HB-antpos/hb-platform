@@ -2272,7 +2272,7 @@ export default function ProductManagementPage() {
     } catch (error) {
       // 货号重复是用户能自己修正的错误，要明确告诉他，而不是笼统的「创建商品失败」。
       message.error(readRequestErrorCode(error) === ITEM_NUMBER_EXISTS_ERROR_CODE
-        ? t('posAdmin.products.itemNumberExists', '货号已存在，请更换货号')
+        ? t('posAdmin.products.itemNumberExists', '该供应商下货号已存在，请更换货号')
         : t('posAdmin.products.createProductFailed', '创建商品失败'))
     } finally {
       setCreateSubmitting(false)
