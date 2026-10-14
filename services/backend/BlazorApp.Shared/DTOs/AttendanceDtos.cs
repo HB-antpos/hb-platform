@@ -363,6 +363,8 @@ namespace BlazorApp.Shared.DTOs
         public DateTime? FromDate { get; set; }
         public DateTime? ToDate { get; set; }
         public string? StoreTimeZone { get; set; }
+        // 分页偏移：单日样本超过单次上限（1000）时，管理端按偏移继续取下一页，直到取完。
+        public int? Offset { get; set; }
     }
 
     public class AttendanceLocationSampleDto

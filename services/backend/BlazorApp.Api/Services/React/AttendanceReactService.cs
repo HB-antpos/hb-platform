@@ -2090,7 +2090,10 @@ namespace BlazorApp.Api.Services.React
                 .WhereIF(!string.IsNullOrWhiteSpace(query.UserGuid), item => item.UserGuid == query.UserGuid!.Trim())
                 .Where(item => item.LocationCapturedAtUtc >= fromUtc)
                 .Where(item => item.LocationCapturedAtUtc < toExclusiveUtc)
+                // 同一采集时刻可能有多条，追加 Id 作为次级排序，保证偏移分页稳定、不重不漏。
                 .OrderByDescending(item => item.LocationCapturedAtUtc)
+                .OrderByDescending(item => item.Id)
+                .Skip(Math.Max(0, query.Offset ?? 0))
                 .Take(1000)
                 .ToListAsync();
             return ApiResponse<List<AttendanceLocationSampleDto>>.OK(rows.Select(ToDto).ToList());

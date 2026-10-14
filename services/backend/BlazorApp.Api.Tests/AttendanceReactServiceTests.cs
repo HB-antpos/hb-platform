@@ -4395,6 +4395,46 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetLocationSamplesAsync_WhenDayExceedsPageLimit_OffsetPagesCoverEverySampleOnce()
+        {
+            await SeedStoreScopeAsync();
+            var service = CreateService("manager-user", "manager", "StoreManager");
+            // 布里斯班 UTC+10：2026-01-01 本地 00:00 = 2025-12-31T14:00Z；造 1205 条（>单页 1000），每分钟一条。
+            var baseUtc = DateTime.Parse("2025-12-31T14:00:00Z").ToUniversalTime();
+            var rows = Enumerable.Range(0, 1205).Select(index => new AttendanceLocationSample
+            {
+                SampleGuid = $"dense-{index:D4}",
+                UserGuid = "staff-user",
+                StoreCode = "BRI",
+                EventType = "ShiftSample",
+                LocationLatitude = -27.4705,
+                LocationLongitude = 153.0260,
+                LocationCapturedAtUtc = baseUtc.AddMinutes(index),
+                CreatedAt = baseUtc.AddMinutes(index),
+            }).ToList();
+            await _db.Insertable(rows).ExecuteCommandAsync();
+
+            AttendanceLocationSampleQueryDto Query(int offset) => new()
+            {
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                FromDate = new DateTime(2026, 1, 1),
+                ToDate = new DateTime(2026, 1, 1),
+                Offset = offset,
+            };
+
+            var first = await service.GetLocationSamplesAsync(Query(0));
+            var second = await service.GetLocationSamplesAsync(Query(1000));
+
+            Assert.True(first.Success);
+            Assert.True(second.Success);
+            Assert.Equal(1000, first.Data!.Count);
+            Assert.Equal(205, second.Data!.Count);
+            var all = first.Data.Concat(second.Data).Select(item => item.SampleGuid).ToList();
+            Assert.Equal(1205, all.Distinct().Count());
+        }
+
+        [Fact]
         public async Task CreateManagedLeaveRequestAsync_WhenValidAnnualLeave_CreatesPendingLeaveAndApproval()
         {
             await SeedStoreScopeAsync();

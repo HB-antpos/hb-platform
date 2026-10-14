@@ -208,6 +208,8 @@ const initialListState = {
 }
 
 const ATTENDANCE_LOCATION_SAMPLE_LIMIT = 1000
+// 翻页上限：最多 30 页（3 万点），远超一个班段的正常点数。
+const ATTENDANCE_LOCATION_SAMPLE_MAX_PAGES = 30
 const ATTENDANCE_LOCATION_SAMPLES_TRUNCATED = 'ATTENDANCE_LOCATION_SAMPLES_TRUNCATED'
 
 function formatDate(value?: string) {
@@ -1665,32 +1667,23 @@ export default function ScheduleAttendancePage() {
       const dateRanges = splitAttendanceSampleDateRange(boundaryResult.fromDate, boundaryResult.toDate)
       for (const range of dateRanges) {
         if (sampleRequestIdRef.current !== requestId) return
-        const rangeSamples = await getAttendanceLocationSamples({
-          storeCode: record.storeCode,
-          userGuid: record.userGuid,
-          fromDate: range.fromDate,
-          toDate: range.toDate,
-          storeTimeZone: trajectoryTimeZone,
-        })
-
-        // 接口最多返回 1000 条；命中上限时拆为单日重查，避免长期开放班段静默丢失早期点位。
-        const batches = rangeSamples.length >= ATTENDANCE_LOCATION_SAMPLE_LIMIT
-          ? await Promise.all(splitAttendanceSampleDateRange(range.fromDate, range.toDate, 1).map(async (dayRange) => {
-            const daySamples = await getAttendanceLocationSamples({
-              storeCode: record.storeCode,
-              userGuid: record.userGuid,
-              fromDate: dayRange.fromDate,
-              toDate: dayRange.toDate,
-              storeTimeZone: trajectoryTimeZone,
-            })
-            if (daySamples.length >= ATTENDANCE_LOCATION_SAMPLE_LIMIT) {
-              throw new Error(ATTENDANCE_LOCATION_SAMPLES_TRUNCATED)
-            }
-            return daySamples
-          }))
-          : [rangeSamples]
-        for (const batch of batches) {
-          for (const sample of batch) samplesByGuid.set(sample.sampleGuid, sample)
+        // 接口单次最多返回 1000 条（按采集时间倒序）；满页就按偏移继续取下一页，直到取完，
+        // 单日样本再密也能完整加载。仅在超过页数上限（防异常数据无限翻页）时才放弃。
+        for (let page = 0; ; page += 1) {
+          if (sampleRequestIdRef.current !== requestId) return
+          if (page >= ATTENDANCE_LOCATION_SAMPLE_MAX_PAGES) {
+            throw new Error(ATTENDANCE_LOCATION_SAMPLES_TRUNCATED)
+          }
+          const pageSamples = await getAttendanceLocationSamples({
+            storeCode: record.storeCode,
+            userGuid: record.userGuid,
+            fromDate: range.fromDate,
+            toDate: range.toDate,
+            storeTimeZone: trajectoryTimeZone,
+            offset: page * ATTENDANCE_LOCATION_SAMPLE_LIMIT,
+          })
+          for (const sample of pageSamples) samplesByGuid.set(sample.sampleGuid, sample)
+          if (pageSamples.length < ATTENDANCE_LOCATION_SAMPLE_LIMIT) break
         }
       }
       if (sampleRequestIdRef.current !== requestId) return
