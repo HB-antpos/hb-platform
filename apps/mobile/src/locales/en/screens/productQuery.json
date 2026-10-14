@@ -39,6 +39,7 @@
       "priceInvalid": "Purchase price and retail price must be valid numbers greater than or equal to 0.",
       "manualRetailPriceInvalid": "Retail price must be greater than 0 when auto pricing is off.",
       "itemNumberTooShort": "Item number must be at least 5 characters.",
+      "itemNumberExists": "This supplier already has a product with this item number. Use a different item number.",
       "barcodeTooShort": "Barcode must be at least 7 characters.",
       "retailPriceTooLow": "Retail price must be at least 2 times the purchase price when auto pricing is off.",
       "suppliersLoading": "Loading suppliers...",

@@ -39,6 +39,7 @@
       "priceInvalid": "进货价和零售价必须是大于等于 0 的数字",
       "manualRetailPriceInvalid": "关闭自动价格时零售价必须大于 0",
       "itemNumberTooShort": "货号不能少于 5 个字符",
+      "itemNumberExists": "该供应商下货号已存在，请更换货号",
       "barcodeTooShort": "条码不能少于 7 个字符",
       "retailPriceTooLow": "关闭自动价格时，零售价不能小于进货价的 2 倍",
       "suppliersLoading": "正在加载供应商...",
