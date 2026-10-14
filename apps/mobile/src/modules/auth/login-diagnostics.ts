@@ -57,6 +57,8 @@ export interface LoginTrace {
   /** 服务端以 HTTP 200 + success:false 明确拒绝（如密码错误），拦截器解包后没有 HTTP 状态码。 */
   apiBusinessError?: boolean;
   menuTimedOut?: boolean;
+  /** 登录前 Keychain 自检触发了自动清理：repaired 已修好，unrepaired 清理后仍不正常。 */
+  keychainRepair?: "repaired" | "unrepaired";
   totalMs?: number;
 }
 
@@ -161,7 +163,10 @@ export function selectLoginTracesToUpload(traces: LoginTrace[], currentTraceId?:
   return traces.filter((trace) => {
     if (trace.traceId === currentTraceId) return false;
     if (!trace.outcome) return true;
-    if (trace.outcome === "success") return (trace.totalMs ?? 0) >= SLOW_LOGIN_THRESHOLD_MS || Boolean(trace.menuTimedOut);
+    // 发生过 Keychain 自动修复的成功登录也要上传，用来确认线上有多少设备真的有 Keychain 问题。
+    if (trace.outcome === "success") {
+      return (trace.totalMs ?? 0) >= SLOW_LOGIN_THRESHOLD_MS || Boolean(trace.menuTimedOut) || Boolean(trace.keychainRepair);
+    }
     return !isCredentialRejection(trace);
   });
 }
@@ -190,6 +195,7 @@ function describeTrace(trace: LoginTrace) {
   if (!trace.outcome) return `移动端登录未完成：App 关闭前停在 ${lastStage}`;
   if (trace.outcome === "timeout") return `移动端登录超时：${trace.failedStage ?? lastStage} 未完成`;
   if (trace.outcome === "failed") return `移动端登录失败：${lastStage} 之后出错`;
+  if (trace.keychainRepair) return `移动端登录成功，登录前已自动清理 Keychain（${trace.keychainRepair}）`;
   return trace.menuTimedOut
     ? `移动端登录成功但菜单加载超时（${trace.totalMs}ms）`
     : `移动端登录耗时过长（${trace.totalMs}ms）`;
@@ -218,6 +224,7 @@ export function buildLoginDiagnosticLogItems(traces: LoginTrace[], environment: 
       errorMessage: trace.errorMessage,
       httpStatus: trace.httpStatus,
       menuTimedOut: trace.menuTimedOut,
+      keychainRepair: trace.keychainRepair,
       runtimeVersion: trace.runtimeVersion,
       updateId: trace.updateId,
       platform: trace.platform,

@@ -66,6 +66,17 @@ export const SecureStorage = {
     }
     return names;
   },
+  /**
+   * 尽力逐项删除账号会话项与自检键，单项失败不影响其余、整体不抛错。
+   * 登录前自动修复专用：绕开收银打印记录的会话代际逻辑，直接按键删除。
+   */
+  async forceClearAccountSession() {
+    await Promise.allSettled(
+      [KEYS.ACCESS_TOKEN, KEYS.REFRESH_TOKEN, KEYS.USER, KEYS.CASHIER_BARCODE_PRINT_PENDING, KEYS.PROBE].map((key) =>
+        SecureStore.deleteItemAsync(key),
+      ),
+    );
+  },
   /** Keychain 写入 → 读回 → 删除的自检；任一步失败或读回不一致都会抛错。 */
   async probeReadWrite() {
     const value = `probe-${Date.now()}`;

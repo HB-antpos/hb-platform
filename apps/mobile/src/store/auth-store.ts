@@ -62,6 +62,8 @@ import {
 } from "@/modules/device-activation/auth-session-marker";
 import { deriveEffectiveAuthSessionKind } from "@/modules/device-activation/device-account-request-policy";
 import { resolveOfflineSessionRestore } from "@/modules/auth/offline-session-restore";
+import { isKeychainSuspectLoginFailure } from "@/modules/auth/keychain-self-heal";
+import { markKeychainDirty, prepareKeychainForLogin } from "@/modules/auth/keychain-self-heal-runtime";
 
 export function getIosReviewBuildContext(): IosReviewBuildContext {
   return {
@@ -195,6 +197,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     get().beginStandardAuth();
     set({ isLoading: true });
     try {
+      // 联网前先自检 Keychain：异常或上次在 Keychain 步骤失败（有标记）就先自动清理；
+      // 自检自带超时且不抛错，修不好也继续登录，只把结果记进诊断。
+      const keychainState = await prepareKeychainForLogin();
+      if (keychainState !== "healthy") trace?.markKeychainRepair(keychainState);
       // 每一步都加超时：本机 Keychain 读写或请求拦截器若卡住，登录会报错恢复按钮，而不是一直转圈到重启 App。
       const tokenRes = await withLoginStepTimeout(
         loginApi({
@@ -259,6 +265,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       trace?.finish("success");
       void flushLoginDiagnostics();
     } catch (error) {
+      // 失败在 Keychain 写入步骤：留标记，下次登录前强制清理（本次下面的清理若也失败，标记仍在）。
+      if (isKeychainSuspectLoginFailure(trace?.lastCompletedStage(), error)) {
+        await markKeychainDirty();
+      }
       trace?.finish(error instanceof LoginStepTimeoutError ? "timeout" : "failed", error);
       // 清理同样可能卡在 Keychain：超时就放弃等待，保证登录页能恢复。
       await withLoginStepTimeout(
@@ -437,9 +447,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return false;
       }
 
+      // 读令牌本身抛错说明 Keychain 项已损坏：留标记，下次登录前自动清理（随后 catch 里会清会话）。
+      const markDirtyAndRethrow = async (error: unknown): Promise<never> => {
+        await markKeychainDirty();
+        throw error;
+      };
       const [token, refreshToken, storedSessionKind, deviceAccountBinding] = await Promise.all([
-        SecureStorage.getToken(),
-        SecureStorage.getRefreshToken(),
+        SecureStorage.getToken().catch(markDirtyAndRethrow),
+        SecureStorage.getRefreshToken().catch(markDirtyAndRethrow),
         getAuthSessionMarker(),
         DeviceAccountStorage.loadBinding().catch(() => null),
       ]);
