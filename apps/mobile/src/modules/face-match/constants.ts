@@ -30,6 +30,14 @@ export const EVIDENCE_REF_MAX_LENGTH = 100;
 export const DISPUTE_NOTE_MAX_LENGTH = 500;
 export const REASON_MAX_LENGTH = 200;
 export const ALLOWED_SUBJECTS_MAX_LENGTH = 200;
+/**
+ * 名单命中自动确认阈值（与后端 FaceStoreProfile.UnwelcomeAutoConfirmScore、Web 一致）：
+ * 相似度达到或超过它，系统自动把命中任务标为「已确认」；0 = 不自动确认；非零值只允许 50–100、最多两位小数；默认 90。
+ */
+export const AUTO_CONFIRM_SCORE_OFF = 0;
+export const AUTO_CONFIRM_SCORE_MIN = 50;
+export const AUTO_CONFIRM_SCORE_MAX = 100;
+export const AUTO_CONFIRM_SCORE_DEFAULT = 90;
 export const PAGE_SIZE = 20;
 
 export const CATEGORY_VIOLENCE = 1;
@@ -48,9 +56,6 @@ export const REVIEW_STATUS_CONFIRMED = 2;
 export const PROFILE_MODE_OFF = 0;
 export const PROFILE_MODE_CAPTURE = 1;
 export const PROFILE_MODE_MATCH = 2;
-
-/** 命中自动确认阈值的默认值（后端 FaceStoreProfile.DefaultUnwelcomeAutoConfirmScore）；0 = 关闭，其余 50–100。 */
-export const DEFAULT_UNWELCOME_AUTO_CONFIRM_SCORE = 90;
 
 /** 后端允许的门店时区（StoreTimeZonePolicy）；空 = 自动判断。 */
 export const PROFILE_TIME_ZONES = ["Australia/Sydney", "Australia/Brisbane", "Australia/Melbourne"] as const;

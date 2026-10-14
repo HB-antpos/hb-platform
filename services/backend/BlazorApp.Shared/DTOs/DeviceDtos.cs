@@ -193,6 +193,21 @@ namespace BlazorApp.Shared.DTOs
         /// 客户端程序版本（WPF 随心跳上报），未上报时为空
         /// </summary>
         public string? AppVersion { get; set; }
+
+        /// <summary>
+        /// 收银机自开机起的秒数（WPF 随心跳上报），未上报时为空
+        /// </summary>
+        public long? SystemUptimeSeconds { get; set; }
+
+        /// <summary>
+        /// WPF 进程工作集（MB），未上报时为空
+        /// </summary>
+        public int? ProcessWorkingSetMb { get; set; }
+
+        /// <summary>
+        /// WPF 进程句柄数，未上报时为空
+        /// </summary>
+        public int? ProcessHandleCount { get; set; }
     }
 
     /// <summary>

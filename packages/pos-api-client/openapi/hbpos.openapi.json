@@ -8665,6 +8665,21 @@
           "appVersion": {
             "type": "string",
             "nullable": true
+          },
+          "systemUptimeSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "processWorkingSetMb": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "processHandleCount": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false

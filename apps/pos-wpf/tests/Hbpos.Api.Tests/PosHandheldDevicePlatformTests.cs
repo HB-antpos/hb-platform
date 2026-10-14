@@ -539,6 +539,7 @@ public sealed class PosHandheldDevicePlatformTests
             string? cashierId,
             string? cashierName,
             string? appVersion,
+            DeviceResourceSnapshot? resources,
             CancellationToken cancellationToken) =>
             Task.FromResult(true);
     }

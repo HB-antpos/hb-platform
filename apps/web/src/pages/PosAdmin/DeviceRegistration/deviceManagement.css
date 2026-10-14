@@ -159,6 +159,11 @@
   font-size: 12px;
 }
 
+/* 开机太久、建议重启的提示色；沿用 antd 警告色并保留深色模式回退。 */
+.dev-mgmt-warn {
+  color: var(--ant-color-warning, #d48806);
+}
+
 .dev-mgmt-faint {
   color: var(--ant-color-text-quaternary, rgba(0, 0, 0, 0.25));
 }

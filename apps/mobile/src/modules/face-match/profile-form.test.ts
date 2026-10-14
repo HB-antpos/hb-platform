@@ -10,11 +10,14 @@ import {
   buildProfileUpdateRequest,
   countMissing,
   countWarnings,
+  formatAutoConfirmScore,
   gateKeyLabelKey,
   isProfileDirty,
+  parseAutoConfirmScore,
   profileToEditValues,
   summarizeGates,
   summarizeProfileChange,
+  validateAutoConfirmScore,
   validateProfileEdits,
 } from "./profile-form";
 import type { FaceStoreProfile } from "./types";
@@ -33,7 +36,7 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
     staffExclusionEnabled: true,
     trafficDedupEnabled: false,
     unwelcomeListEnabled: true,
-    unwelcomeAutoConfirmScore: 85,
+    unwelcomeAutoConfirmScore: 85.5,
     allowedSubjects: null,
     piaReference: "PIA-2026-07",
     signageInstalledOn: "2026-09-01",
@@ -80,10 +83,12 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
   assert.equal(request.allowedSubjects, "内部员工测试");
   assert.equal(request.staffExclusionEnabled, false);
   assert.equal(request.timeZoneId, "Australia/Brisbane");
+  // 命中自动确认阈值：没改就按服务端原值（数字）带回，不丢小数
+  assert.equal(request.unwelcomeAutoConfirmScore, 85.5);
 
-  // 17 个不编辑的字段原样带回——任何一个变成 null / 空串，PUT 都会把服务端的合规记录清空
+  // 16 个不编辑的字段原样带回——任何一个变成 null / 空串，PUT 都会把服务端的合规记录清空
   const untouched = PROFILE_REQUEST_KEYS.filter((key) => !(PROFILE_EDITABLE_FIELDS as readonly string[]).includes(key));
-  assert.equal(untouched.length, 17);
+  assert.equal(untouched.length, 16);
   for (const key of untouched) {
     assert.equal(request[key], profile[key], `${key} 必须原样带回服务端值`);
     assert.notEqual(request[key], null, `${key} 在这份样例档案里有值，不能被清空`);
@@ -92,24 +97,6 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
   assert.equal(request.signageInstalledOn, "2026-09-01");
   assert.equal(request.crossBorderRegion, "ap-singapore");
   assert.equal(request.privacyContact, "privacy@example.com");
-  assert.equal(request.unwelcomeAutoConfirmScore, 85, "自动确认阈值原样回传，不被重置成默认 90");
-}
-
-// 自动确认阈值：0（关闭）是合法值，必须原样带回；后端没返回（老版本 / 未建档）时取默认 90
-{
-  const off = fullProfile({ unwelcomeAutoConfirmScore: 0 });
-  assert.equal(off.unwelcomeAutoConfirmScore, 0, "0 不能被默认值盖掉");
-  assert.equal(buildProfileUpdateRequest(off, profileToEditValues(off)).unwelcomeAutoConfirmScore, 0);
-  const decimal = fullProfile({ unwelcomeAutoConfirmScore: 87.25 });
-  assert.equal(buildProfileUpdateRequest(decimal, profileToEditValues(decimal)).unwelcomeAutoConfirmScore, 87.25);
-  for (const raw of [undefined, null, "85", Number.NaN]) {
-    const missing = normalizeFaceStoreProfile({ storeCode: "1008", unwelcomeAutoConfirmScore: raw });
-    assert.equal(missing.unwelcomeAutoConfirmScore, 90, `阈值 ${String(raw)} 视为未返回，取默认 90`);
-  }
-  // 修改手机可编辑字段不影响阈值，也不让它变成「有未保存的修改」
-  const profile = fullProfile();
-  assert.equal(isProfileDirty(profile, profileToEditValues(profile)), false);
-  assert.equal(buildProfileUpdateRequest(profile, { ...profileToEditValues(profile), mode: 0 }).unwelcomeAutoConfirmScore, 85);
 }
 
 // 服务端值为 null 的字段仍然带 null，且绝不预填（例如跨境审查地域不能偷偷填成当前配置地域）
@@ -177,6 +164,7 @@ function fullProfile(overrides: Record<string, unknown> = {}): FaceStoreProfile 
     staffExclusionEnabled: false,
     trafficDedupEnabled: false,
     unwelcomeListEnabled: false,
+    unwelcomeAutoConfirmScore: "90",
     allowedSubjects: "",
     timeZoneId: "",
   });
@@ -234,3 +222,63 @@ assert.deepEqual(
 }
 
 console.log("profile-form.test.ts: ok");
+
+// ───────── 命中自动确认阈值：解析、校验、请求体、脏判断、确认摘要 ─────────
+{
+  // 解析：非负十进制、最多两位小数；逗号小数点按点处理；其余一律 null
+  assert.equal(parseAutoConfirmScore("90"), 90);
+  assert.equal(parseAutoConfirmScore(" 85.5 "), 85.5);
+  assert.equal(parseAutoConfirmScore("89,99"), 89.99);
+  assert.equal(parseAutoConfirmScore("0"), 0);
+  assert.equal(parseAutoConfirmScore("100"), 100);
+  for (const bad of ["", "  ", "abc", "-5", "1e2", "90.123", "90.", ".5", "1000", "9 0", "90%"]) {
+    assert.equal(parseAutoConfirmScore(bad), null, `「${bad}」不是合法的阈值文本`);
+  }
+  assert.equal(formatAutoConfirmScore(90), "90");
+  assert.equal(formatAutoConfirmScore(89.5), "89.5");
+  assert.equal(formatAutoConfirmScore(0), "0");
+
+  // 校验：0 = 关闭；50–100；空串 = 必填；其余 invalid（与后端 / Web 同一口径）
+  assert.equal(validateAutoConfirmScore("0"), null);
+  assert.equal(validateAutoConfirmScore("50"), null);
+  assert.equal(validateAutoConfirmScore("90"), null);
+  assert.equal(validateAutoConfirmScore("99.99"), null);
+  assert.equal(validateAutoConfirmScore("100"), null);
+  assert.equal(validateAutoConfirmScore("")?.key, "validation.autoConfirmScoreRequired");
+  assert.equal(validateAutoConfirmScore("   ")?.key, "validation.autoConfirmScoreRequired");
+  for (const bad of ["49.99", "1", "100.01", "101", "90.123", "-1", "abc"]) {
+    const issue = validateAutoConfirmScore(bad);
+    assert.equal(issue?.key, "validation.autoConfirmScoreInvalid", bad);
+    assert.deepEqual(issue?.params, { min: 50, max: 100 });
+  }
+
+  // 编辑值回填、请求体、脏判断
+  const profile = fullProfile();
+  const values = profileToEditValues(profile);
+  assert.equal(values.unwelcomeAutoConfirmScore, "85.5");
+  assert.equal(isProfileDirty(profile, values), false);
+  assert.equal(isProfileDirty(profile, { ...values, unwelcomeAutoConfirmScore: "85.50" }), false, "数值相同不算修改");
+  assert.equal(isProfileDirty(profile, { ...values, unwelcomeAutoConfirmScore: "90" }), true);
+  assert.equal(isProfileDirty(profile, { ...values, unwelcomeAutoConfirmScore: "0" }), true);
+  assert.equal(isProfileDirty(profile, { ...values, unwelcomeAutoConfirmScore: "" }), true, "清空也算修改（校验会拦住保存）");
+  assert.equal(buildProfileUpdateRequest(profile, { ...values, unwelcomeAutoConfirmScore: "92" }).unwelcomeAutoConfirmScore, 92);
+  assert.equal(buildProfileUpdateRequest(profile, { ...values, unwelcomeAutoConfirmScore: "0" }).unwelcomeAutoConfirmScore, 0, "0 是合法值（关闭），不能被当成「没填」");
+  assert.equal(
+    buildProfileUpdateRequest(profile, { ...values, unwelcomeAutoConfirmScore: "abc" }).unwelcomeAutoConfirmScore,
+    null,
+    "不合法文本发 null（服务端保持原值），绝不改写成别的数字",
+  );
+
+  // validateProfileEdits：阈值不合法要报错，且与允许拍摄对象的错误互不影响
+  assert.equal(validateProfileEdits({ ...values, unwelcomeAutoConfirmScore: "49" }).unwelcomeAutoConfirmScore?.key, "validation.autoConfirmScoreInvalid");
+  assert.equal(validateProfileEdits({ ...values, unwelcomeAutoConfirmScore: "" }).unwelcomeAutoConfirmScore?.key, "validation.autoConfirmScoreRequired");
+  assert.deepEqual(validateProfileEdits({ ...values, unwelcomeAutoConfirmScore: "0" }), {});
+  assert.equal(validateProfileEdits({ ...values, allowedSubjects: "x".repeat(201) }).unwelcomeAutoConfirmScore, undefined);
+
+  // 保存前确认摘要：阈值有改动才有 autoConfirmChange
+  assert.deepEqual(summarizeProfileChange(profile, { ...values, unwelcomeAutoConfirmScore: "90" }).autoConfirmChange, { from: 85.5, to: 90 });
+  assert.deepEqual(summarizeProfileChange(profile, { ...values, unwelcomeAutoConfirmScore: "0" }).autoConfirmChange, { from: 85.5, to: 0 });
+  assert.equal(summarizeProfileChange(profile, values).autoConfirmChange, null);
+  assert.equal(summarizeProfileChange(profile, { ...values, unwelcomeAutoConfirmScore: "85.50" }).autoConfirmChange, null);
+  assert.equal(summarizeProfileChange(profile, { ...values, unwelcomeAutoConfirmScore: "abc" }).autoConfirmChange, null);
+}

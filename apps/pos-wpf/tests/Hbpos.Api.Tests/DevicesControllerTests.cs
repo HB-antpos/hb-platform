@@ -311,6 +311,37 @@ public sealed class DevicesControllerTests
         Assert.Null(service.LastRuntimeStatusAppVersion);
     }
 
+    [Fact]
+    public async Task ReportRuntimeStatus_PassesResourceSnapshotToService()
+    {
+        var service = new FakeDeviceService();
+        var controller = CreateRuntimeStatusController(service);
+
+        var result = await controller.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(
+                true, "CASHIER-1", "Alice", "1.0.65",
+                SystemUptimeSeconds: 1_036_800, ProcessWorkingSetMb: 412, ProcessHandleCount: 3_650),
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(new DeviceResourceSnapshot(1_036_800, 412, 3_650), service.LastRuntimeStatusResources);
+    }
+
+    [Fact]
+    public async Task ReportRuntimeStatus_OldClientPayloadYieldsEmptyResourceSnapshot()
+    {
+        // 旧版客户端不带资源字段：三项都是 null，交给服务层按「未上报」处理。
+        var service = new FakeDeviceService();
+        var controller = CreateRuntimeStatusController(service);
+
+        var result = await controller.ReportRuntimeStatus(
+            new DevicesController.DeviceRuntimeStatusRequest(true, null, null),
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(new DeviceResourceSnapshot(null, null, null), service.LastRuntimeStatusResources);
+    }
+
     private static DevicesController CreateRuntimeStatusController(FakeDeviceService service) =>
         new(service)
         {
@@ -383,6 +414,8 @@ public sealed class DevicesControllerTests
 
         public string? LastRuntimeStatusAppVersion { get; private set; }
 
+        public DeviceResourceSnapshot? LastRuntimeStatusResources { get; private set; }
+
         public Task<bool> UpdateRuntimeStatusAsync(
             string hardwareId,
             string deviceCode,
@@ -391,9 +424,11 @@ public sealed class DevicesControllerTests
             string? cashierId,
             string? cashierName,
             string? appVersion,
+            DeviceResourceSnapshot? resources,
             CancellationToken cancellationToken)
         {
             LastRuntimeStatusAppVersion = appVersion;
+            LastRuntimeStatusResources = resources;
             return Task.FromResult(true);
         }
 

@@ -37,6 +37,12 @@ public sealed class DeviceRuntimeStatusSchemaInitializerTests
         Assert.Contains("ADD [收银员登录时间] DATETIME2(7) NULL", sql);
         Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'应用版本') IS NULL", sql);
         Assert.Contains("ADD [应用版本] NVARCHAR(50) NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'系统开机秒数') IS NULL", sql);
+        Assert.Contains("ADD [系统开机秒数] BIGINT NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'客户端内存MB') IS NULL", sql);
+        Assert.Contains("ADD [客户端内存MB] INT NULL", sql);
+        Assert.Contains("COL_LENGTH(N'dbo.POSM_设备注册信息表', N'客户端句柄数') IS NULL", sql);
+        Assert.Contains("ADD [客户端句柄数] INT NULL", sql);
         Assert.Contains("IX_POSM_DeviceRegistration_HardwareId", sql);
         Assert.Contains("([设备硬件识别码])", sql);
         Assert.Contains("IX_POSM_DeviceRegistration_StoreCode_Status", sql);

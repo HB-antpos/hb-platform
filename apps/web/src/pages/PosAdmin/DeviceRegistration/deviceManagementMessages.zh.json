@@ -26,6 +26,12 @@
         },
         "heartbeatNever": "从未上报",
         "cashier": "收银员 {{name}}",
+        "uptime": {
+          "listLong": "已开机 {{count}} 天",
+          "minutes": "{{count}} 分钟",
+          "hours": "{{count}} 小时",
+          "days": "{{count}} 天"
+        },
         "relative": {
           "justNow": "刚刚",
           "minutes": "{{count}} 分钟前",
@@ -46,6 +52,10 @@
           "sectionSettings": "设备设置",
           "lastHeartbeat": "最后心跳",
           "cashierLoginAt": "收银员登录",
+          "uptime": "开机时长",
+          "clientMemory": "客户端内存",
+          "clientHandles": "客户端句柄数",
+          "restartHint": "建议重启",
           "readOnlyHint": "当前账号只有查看权限，不能修改设备设置或状态。"
         },
         "appSummaryUnknown": "系统未知",

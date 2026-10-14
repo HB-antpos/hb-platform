@@ -21,10 +21,12 @@ import {
   RelativeTime,
   formatDateTime,
   formatStoreLabel,
+  formatUptime,
 } from './deviceCells'
 import {
   collectDistinctOptions,
   getDeviceStatusActions,
+  isLongUptime,
   mergeDeviceDetailView,
   type DeviceStatusAction,
 } from './deviceManagementLogic'
@@ -242,6 +244,29 @@ export default function DeviceDetailDrawer({
                       ? <span className="dev-mgmt-mono">{view.appVersion}</span>
                       : <span className="dev-mgmt-faint">{EMPTY_VALUE}</span>}
                   </dd>
+                </>
+              ) : null}
+              {view.systemUptimeSeconds != null ? (
+                <>
+                  <dt>{t('posAdmin.devices.mgmt.drawer.uptime')}</dt>
+                  <dd>
+                    {formatUptime(view.systemUptimeSeconds, t)}
+                    {isLongUptime(view.systemUptimeSeconds) ? (
+                      <span className="dev-mgmt-warn"> · {t('posAdmin.devices.mgmt.drawer.restartHint')}</span>
+                    ) : null}
+                  </dd>
+                </>
+              ) : null}
+              {view.processWorkingSetMb != null ? (
+                <>
+                  <dt>{t('posAdmin.devices.mgmt.drawer.clientMemory')}</dt>
+                  <dd className="dev-mgmt-mono">{view.processWorkingSetMb} MB</dd>
+                </>
+              ) : null}
+              {view.processHandleCount != null ? (
+                <>
+                  <dt>{t('posAdmin.devices.mgmt.drawer.clientHandles')}</dt>
+                  <dd className="dev-mgmt-mono">{view.processHandleCount}</dd>
                 </>
               ) : null}
               <dt>{t('posAdmin.devices.currentCashier')}</dt>

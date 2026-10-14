@@ -53,6 +53,11 @@ export interface FaceStoreProfileUpdateRequest {
   staffExclusionEnabled: boolean;
   trafficDedupEnabled: boolean;
   unwelcomeListEnabled: boolean;
+  /**
+   * 名单命中自动确认阈值：0 = 不自动确认，50–100 = 阈值。请求里省略 / null 表示「保持库里原值」（旧版 App 不带它），
+   * 本版 App 保存时始终带上用户填的数字；服务端返回的档案里一定是数字（见 FaceStoreProfile）。
+   */
+  unwelcomeAutoConfirmScore: number | null;
   allowedSubjects: string | null;
   piaReference: string | null;
   signageInstalledOn: string | null;
@@ -71,15 +76,10 @@ export interface FaceStoreProfileUpdateRequest {
   unwelcomeLegalSignoffAt: string | null;
   staffTrainingDate: string | null;
   privacyContact: string | null;
-  /**
-   * 命中任务自动确认阈值（相似度 0-100）：0 = 不自动确认；50–100 = 阈值。手机不编辑，保存时原样回传服务端当前值；
-   * 后端把 null / 省略当作「保持库里原值」，所以回传 null 也不会清掉它。
-   */
-  unwelcomeAutoConfirmScore: number | null;
 }
 
-export interface FaceStoreProfile extends FaceStoreProfileUpdateRequest {
-  /** 生效值：0 = 不自动确认；没有档案行或后端未返回时为默认 90。 */
+export interface FaceStoreProfile extends Omit<FaceStoreProfileUpdateRequest, "unwelcomeAutoConfirmScore"> {
+  /** 名单命中自动确认阈值（生效值）：0 = 不自动确认；没有档案行或后端未返回时取默认 90。 */
   unwelcomeAutoConfirmScore: number;
   storeCode: string;
   storeName: string | null;
@@ -164,6 +164,8 @@ export interface FaceUnwelcomeTask {
   /** first（待复核）/ none（已结束）；旧后端还可能返回 second（旧版遗留的待二审），一律按待复核处理。 */
   nextStep: string;
   canReview: boolean;
+  /** true = 系统按门店阈值自动确认的任务（reviewStatus 为 2、没有复核人姓名、不可再复核）。 */
+  autoConfirmed: boolean;
 }
 
 export type FaceReviewVerdict = "match" | "notMatch";

@@ -124,7 +124,11 @@ internal sealed class WarehouseProductSingleCreationCommandWriter : ProductWareh
             {
                 using var conn = SqlSugarContext.CreateConcurrentConnection(_configuration);
                 return await conn.Queryable<Product>()
-                    .Where(p => p.ItemNumber == itemNumber && !p.IsDeleted)
+                    .Where(p =>
+                        p.LocalSupplierCode == WarehouseProductSingleCreationEntityMapper.LocalSupplierCode
+                        && p.ItemNumber == itemNumber
+                        && !p.IsDeleted
+                    )
                     .FirstAsync();
             };
             var queryByBarcode = async () =>
@@ -194,7 +198,11 @@ internal sealed class WarehouseProductSingleCreationCommandWriter : ProductWareh
             }
 
             var existingProductByItemNumberWithinLock = await _context.Db.Queryable<Product>()
-                .Where(p => p.ItemNumber == itemNumber && !p.IsDeleted)
+                .Where(p =>
+                        p.LocalSupplierCode == WarehouseProductSingleCreationEntityMapper.LocalSupplierCode
+                        && p.ItemNumber == itemNumber
+                        && !p.IsDeleted
+                    )
                 .FirstAsync();
             if (existingProductByItemNumberWithinLock != null)
             {

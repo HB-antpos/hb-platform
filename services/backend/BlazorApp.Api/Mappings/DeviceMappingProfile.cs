@@ -69,7 +69,10 @@ namespace BlazorApp.Api.Mappings
                 .ForMember(dest => dest.CurrentCashierId, opt => opt.MapFrom(src => src.当前收银员ID))
                 .ForMember(dest => dest.CurrentCashierName, opt => opt.MapFrom(src => src.当前收银员姓名))
                 .ForMember(dest => dest.CashierLoginAt, opt => opt.MapFrom(src => DeviceRuntimeTime.AsUtc(src.收银员登录时间)))
-                .ForMember(dest => dest.AppVersion, opt => opt.MapFrom(src => src.应用版本));
+                .ForMember(dest => dest.AppVersion, opt => opt.MapFrom(src => src.应用版本))
+                .ForMember(dest => dest.SystemUptimeSeconds, opt => opt.MapFrom(src => src.系统开机秒数))
+                .ForMember(dest => dest.ProcessWorkingSetMb, opt => opt.MapFrom(src => src.客户端内存MB))
+                .ForMember(dest => dest.ProcessHandleCount, opt => opt.MapFrom(src => src.客户端句柄数));
         }
 
         /// <summary>

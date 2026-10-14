@@ -399,6 +399,7 @@ public static class ServiceRegistration
         services.AddSingleton<IMainShellStartupService, MainShellStartupService>();
         services.AddSingleton<IShellSyncCenterService, ShellSyncCenterService>();
         services.AddSingleton<IAppVersionProvider, AppVersionProvider>();
+        services.AddSingleton<IRuntimeResourceSampler, RuntimeResourceSampler>();
         services.AddSingleton(serviceProvider =>
         {
             var state = new AppUpdateState();

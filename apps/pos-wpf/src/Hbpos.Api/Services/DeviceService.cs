@@ -35,6 +35,7 @@ public interface IDeviceService
         string? cashierId,
         string? cashierName,
         string? appVersion,
+        DeviceResourceSnapshot? resources,
         CancellationToken cancellationToken);
 }
 
@@ -298,13 +299,26 @@ public sealed record DeviceRuntimeStatusUpdateRequest(
     string? CashierId,
     string? CashierName,
     DateTime ReportedAt,
-    string? AppVersion = null);
+    string? AppVersion = null,
+    DeviceResourceSnapshot? Resources = null);
+
+/// <summary>
+/// 心跳随带的机器/进程资源快照；各项为 null 表示本次未上报，仓储层保留库里上次的值。
+/// </summary>
+public sealed record DeviceResourceSnapshot(
+    long? SystemUptimeSeconds,
+    int? ProcessWorkingSetMb,
+    int? ProcessHandleCount);
 
 public sealed class DeviceService : IDeviceService
 {
     private const int MinimumProvisioningCodeLength = 16;
     // 与 POSM_设备注册信息表.应用版本 的列宽（NVARCHAR(50)）保持一致。
     private const int MaxAppVersionLength = 50;
+    // 资源快照的合理上限：超出视为脏数据直接丢弃，避免异常上报污染后台展示。
+    private const long MaxSystemUptimeSeconds = 10L * 365 * 24 * 60 * 60;
+    private const int MaxProcessWorkingSetMb = 1_048_576;
+    private const int MaxProcessHandleCount = 10_000_000;
     private const int PendingStatus = -1;
     private const int DisabledStatus = 0;
     private const int EnabledStatus = 1;
@@ -1004,6 +1018,7 @@ public sealed class DeviceService : IDeviceService
         string? cashierId,
         string? cashierName,
         string? appVersion,
+        DeviceResourceSnapshot? resources,
         CancellationToken cancellationToken)
     {
         var normalizedHardwareId = Normalize(hardwareId);
@@ -1025,9 +1040,37 @@ public sealed class DeviceService : IDeviceService
                 NormalizeOptional(cashierId),
                 NormalizeOptional(cashierName),
                 nowProvider(),
-                NormalizeAppVersion(appVersion)),
+                NormalizeAppVersion(appVersion),
+                NormalizeResources(resources)),
             cancellationToken);
         return rows > 0;
+    }
+
+    /// <summary>
+    /// 资源快照逐项校验：负数或超出合理上限的值丢弃为 null（保留库里旧值），不截断也不改写成 0。
+    /// </summary>
+    internal static DeviceResourceSnapshot? NormalizeResources(DeviceResourceSnapshot? resources)
+    {
+        if (resources is null)
+        {
+            return null;
+        }
+
+        var normalized = new DeviceResourceSnapshot(
+            resources.SystemUptimeSeconds is >= 0 and <= MaxSystemUptimeSeconds
+                ? resources.SystemUptimeSeconds
+                : null,
+            resources.ProcessWorkingSetMb is >= 0 and <= MaxProcessWorkingSetMb
+                ? resources.ProcessWorkingSetMb
+                : null,
+            resources.ProcessHandleCount is >= 0 and <= MaxProcessHandleCount
+                ? resources.ProcessHandleCount
+                : null);
+        return normalized.SystemUptimeSeconds is null
+            && normalized.ProcessWorkingSetMb is null
+            && normalized.ProcessHandleCount is null
+            ? null
+            : normalized;
     }
 
     /// <summary>
@@ -1799,12 +1842,15 @@ public sealed class SqlSugarDeviceRegistrationRepository(HbposSqlSugarContext db
         CancellationToken cancellationToken)
     {
         // 关键逻辑：心跳只更新当前授权设备的运行态字段；同一收银员连续上报时保留原登录时间。
-        // 应用版本用 COALESCE：旧版客户端不带版本时保留库里已有值，只有新上报的非空版本才覆盖。
+        // 应用版本与三项资源快照都用 COALESCE：旧版客户端不带这些字段时保留库里已有值，只有新上报的非空值才覆盖。
         const string sql = """
             UPDATE [POSM_设备注册信息表]
             SET [是否在线] = @IsOnline,
                 [最后心跳时间] = @ReportedAt,
                 [应用版本] = COALESCE(@AppVersion, [应用版本]),
+                [系统开机秒数] = COALESCE(@SystemUptimeSeconds, [系统开机秒数]),
+                [客户端内存MB] = COALESCE(@ProcessWorkingSetMb, [客户端内存MB]),
+                [客户端句柄数] = COALESCE(@ProcessHandleCount, [客户端句柄数]),
                 [收银员登录时间] = CASE
                     WHEN @HasCashier = 0 THEN NULL
                     WHEN ISNULL([当前收银员ID], '') = ISNULL(@CashierId, '')
@@ -1827,6 +1873,9 @@ public sealed class SqlSugarDeviceRegistrationRepository(HbposSqlSugarContext db
             new SugarParameter("@CashierId", request.CashierId),
             new SugarParameter("@CashierName", request.CashierName),
             new SugarParameter("@AppVersion", request.AppVersion),
+            new SugarParameter("@SystemUptimeSeconds", request.Resources?.SystemUptimeSeconds),
+            new SugarParameter("@ProcessWorkingSetMb", request.Resources?.ProcessWorkingSetMb),
+            new SugarParameter("@ProcessHandleCount", request.Resources?.ProcessHandleCount),
             new SugarParameter("@HardwareId", request.HardwareId),
             new SugarParameter("@DeviceCode", request.DeviceCode),
             new SugarParameter("@StoreCode", request.StoreCode));
