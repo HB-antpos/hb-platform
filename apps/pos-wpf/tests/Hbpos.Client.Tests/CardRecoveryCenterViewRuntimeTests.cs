@@ -54,21 +54,26 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
                 PaymentViewRuntimeStaTestHost.Realize(view, width, height);
                 PaymentViewRuntimeStaTestHost.Realize(view, width, height);
 
+                // 窄屏（1024 宽）进入紧凑模式，宽屏保持左信息列。
+                Assert.Equal(width < CardRecoveryCenterView.CompactWidthThreshold, view.IsCompact);
+
+                // Square 退款处理中：不允许手工结案，首屏只有“立即检查”“返回”“刷新”，没有结果卡片。
                 Assert.Equal(squareRefund.Key, viewModel.SelectedAttempt?.Key);
                 AssertCommandButtonOnScreen(view, viewModel.RecoverCommand, width, height);
                 AssertCommandButtonOnScreen(view, viewModel.BackCommand, width, height);
-                AssertCommandButtonOnScreen(view, viewModel.OpenManualCommand, width, height);
+                AssertCommandButtonOnScreen(view, viewModel.RefreshCommand, width, height);
                 SaveScreenshot(view, width, height, $"overview-{culture}");
 
-                // 人工核对面板：选中允许主管结案的交易后打开，三个结果卡片都要在屏幕内可点。
+                // 人工核实区常驻：选中允许主管结案的交易后无需再“打开面板”，
+                // 三个结果卡片与“立即检查”都要直接出现在首屏内、保持触屏尺寸。
                 viewModel.SelectedRow = viewModel.OpenAttemptRows.Single(row => row.Key == linklySale.Key);
-                viewModel.IsManualExpanded = true;
                 PaymentViewRuntimeStaTestHost.Realize(view, width, height);
                 PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                AssertCommandButtonOnScreen(view, viewModel.RecoverCommand, width, height);
                 foreach (var command in new[] { viewModel.ConfirmPaidCommand, viewModel.ConfirmNotPaidCommand, viewModel.ContinueWaitingCommand })
                 {
+                    AssertCommandButtonOnScreen(view, command, width, height);
                     var button = FindCommandButton(view, command);
-                    Assert.True(button.ActualHeight >= 48, "结果卡片应保持触屏高度。");
                     Assert.True(button.ActualWidth > 120, $"结果卡片过窄：{button.ActualWidth}");
                 }
 
@@ -122,19 +127,14 @@ public sealed class CardRecoveryCenterViewRuntimeTests(PaymentViewRuntimeStaTest
                 // 被 Square 拒绝：待处理里只有它，详情提示改用其他方式退款，人工核对只剩一个结果。
                 Assert.Equal(rejected.Key, viewModel.SelectedAttempt?.Key);
                 Assert.True(viewModel.CanShowSupervisorResolution);
-                AssertCommandButtonOnScreen(view, viewModel.OpenManualCommand, width, height);
-                SaveScreenshot(view, width, height, $"settlement-rejected-{culture}");
-
-                viewModel.IsManualExpanded = true;
-                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
-                PaymentViewRuntimeStaTestHost.Realize(view, width, height);
+                // 唯一的结果卡片直接在首屏内，并占满整行（不再是三分之一宽）。
+                AssertCommandButtonOnScreen(view, viewModel.ConfirmPaidCommand, width, height);
                 var confirm = FindCommandButton(view, viewModel.ConfirmPaidCommand);
                 Assert.True(confirm.ActualHeight >= 48);
                 Assert.DoesNotContain(
                     PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(view),
                     button => ReferenceEquals(button.Command, viewModel.ContinueWaitingCommand) && button.ActualHeight > 0);
-                SaveScreenshot(view, width, height, $"settlement-rejected-sheet-{culture}");
-                viewModel.IsManualExpanded = false;
+                SaveScreenshot(view, width, height, $"settlement-rejected-{culture}");
 
                 // 结算中：在“已处理”里，可手动查询，没有主管操作。
                 viewModel.FilterCommand.Execute("resolved");
