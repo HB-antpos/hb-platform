@@ -28,8 +28,9 @@ import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
 
 /**
- * 店长新建本店店员（整页）。邮箱必填，默认作为用户名；创建后系统给员工邮箱发设置密码验证码，
- * 员工在登录页「设置 / 忘记密码」里自己设密码，店长全程不经手密码。
+ * 店长新建本店店员（整页）。邮箱必填，默认作为用户名；「允许登录 Web / App」默认关闭——
+ * 关闭时只建账号与资料（考勤、排班等照常使用），不发密码邮件；开启时系统给员工邮箱发初始密码，
+ * 员工用它登录并自己设密码，店长全程不经手密码。
  * 账号固定为本店店员、临时工，前后端都强制；页面只做只读说明，不提供角色或分店选择。
  */
 export default function CreateStaffScreen() {
@@ -50,6 +51,10 @@ export default function CreateStaffScreen() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [enabled, setEnabled] = useState(true);
+  // 允许登录 Web / App：默认关闭，由店长在需要员工自己登录时再打开。
+  const [loginEnabled, setLoginEnabled] = useState(false);
+  // 成功页要按「提交那一刻」的开关值展示，不能跟随之后可能变化的状态。
+  const [createdWithLogin, setCreatedWithLogin] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [created, setCreated] = useState<StoreUserDetail | null>(null);
@@ -105,10 +110,13 @@ export default function CreateStaffScreen() {
         roleNames: [STORE_STAFF_ROLE],
         passwordFormat: "raw",
         employmentType: "casual",
-        // 关键逻辑：不提交任何密码，后端生成初始密码并发到员工邮箱，店长不经手；员工首次登录须改密。
-        sendPasswordSetupEmail: true,
+        loginEnabled,
+        // 关键逻辑：不提交任何密码。允许登录时后端生成初始密码并发到员工邮箱，店长不经手，员工首次登录须改密；
+        // 不允许登录时不发邮件、不生成可用密码，账号暂时无法登录。
+        ...(loginEnabled ? { sendPasswordSetupEmail: true } : {}),
       });
       setCreated(user);
+      setCreatedWithLogin(loginEnabled);
       setInviteResult(user.passwordSetupEmail ?? null);
       setInviteError(user.passwordSetupEmail ? "" : user.passwordSetupEmailError || t("create.inviteFailedFallback"));
     } catch (error) {
@@ -179,7 +187,11 @@ export default function CreateStaffScreen() {
               <MaterialCommunityIcons name="check" size={32} color={HB_COLORS.success} />
             </View>
             <Text variant="headlineSmall" style={styles.successTitle}>{t("create.successHeadline")}</Text>
-            <Text variant="bodyMedium" style={styles.centerSecondary}>{t("create.successDescriptionEmail", { name: createdName })}</Text>
+            <Text variant="bodyMedium" style={styles.centerSecondary}>
+              {createdWithLogin
+                ? t("create.successDescriptionEmail", { name: createdName })
+                : t("create.successDescriptionNoLogin", { name: createdName })}
+            </Text>
           </View>
 
           <View style={styles.card}>
@@ -194,8 +206,13 @@ export default function CreateStaffScreen() {
             </View>
           </View>
 
-          {/* 邮件状态：发送成功显示打码邮箱；失败显示原因，可重发。 */}
-          {inviteResult ? (
+          {/* 邮件状态：发送成功显示打码邮箱；失败显示原因，可重发。不允许登录时不发邮件，只提示暂不能登录。 */}
+          {!createdWithLogin ? (
+            <View style={styles.warning}>
+              <MaterialCommunityIcons name="lock-outline" size={20} color="#7A2E0E" />
+              <Text variant="bodySmall" style={styles.warningText}>{t("create.loginDisabledNotice")}</Text>
+            </View>
+          ) : inviteResult ? (
             <View style={styles.inviteSent}>
               <MaterialCommunityIcons name="email-check-outline" size={20} color="#054F31" />
               <Text variant="bodySmall" style={styles.inviteSentText}>{t("create.inviteSent", { email: inviteResult.maskedEmail })}</Text>
@@ -206,19 +223,23 @@ export default function CreateStaffScreen() {
               <Text variant="bodySmall" style={styles.warningText}>{t("create.inviteFailed", { reason: inviteError })}</Text>
             </View>
           )}
-          <Button mode="text" icon="email-sync-outline" onPress={() => void resendInvite()} loading={setupEmailMutation.isPending} disabled={setupEmailMutation.isPending}>
-            {t("create.resendInvite")}
-          </Button>
+          {createdWithLogin ? (
+            <>
+              <Button mode="text" icon="email-sync-outline" onPress={() => void resendInvite()} loading={setupEmailMutation.isPending} disabled={setupEmailMutation.isPending}>
+                {t("create.resendInvite")}
+              </Button>
 
-          <View style={styles.card}>
-            <Text variant="titleSmall" style={styles.cardTitle}>{t("create.nextStepsTitle")}</Text>
-            {["create.nextStepEmail", "create.nextStepBasic", "create.nextStepSensitive"].map((key, index) => (
-              <View key={key} style={styles.stepRow}>
-                <View style={styles.stepBadge}><Text variant="labelSmall" style={styles.stepBadgeText}>{index + 1}</Text></View>
-                <Text variant="bodyMedium" style={styles.flex}>{t(key)}</Text>
+              <View style={styles.card}>
+                <Text variant="titleSmall" style={styles.cardTitle}>{t("create.nextStepsTitle")}</Text>
+                {["create.nextStepEmail", "create.nextStepBasic", "create.nextStepSensitive"].map((key, index) => (
+                  <View key={key} style={styles.stepRow}>
+                    <View style={styles.stepBadge}><Text variant="labelSmall" style={styles.stepBadgeText}>{index + 1}</Text></View>
+                    <Text variant="bodyMedium" style={styles.flex}>{t(key)}</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            </>
+          ) : null}
         </ScrollView>
         <View style={styles.footerRowBar}>
           {canPrintBarcode ? (
@@ -270,6 +291,15 @@ export default function CreateStaffScreen() {
           </View>
 
           <Text variant="labelLarge" style={styles.sectionTitle}>{t("create.loginSection")}</Text>
+          <View style={[styles.card, styles.switchCard]}>
+            <View style={styles.flex}>
+              <Text variant="bodyLarge">{t("create.loginEnabled")}</Text>
+              <Text variant="bodySmall" style={styles.secondary}>
+                {loginEnabled ? t("create.loginEnabledOnHelper") : t("create.loginEnabledOffHelper")}
+              </Text>
+            </View>
+            <Switch value={loginEnabled} onValueChange={setLoginEnabled} accessibilityLabel={t("create.loginEnabled")} />
+          </View>
           <View style={[styles.card, styles.cardPadded]}>
             <TextInput
               mode="outlined"
@@ -282,7 +312,9 @@ export default function CreateStaffScreen() {
               textContentType="emailAddress"
               maxLength={254}
             />
-            <HelperText type="info" visible style={styles.helper}>{t("create.emailHelper")}</HelperText>
+            <HelperText type="info" visible style={styles.helper}>
+              {loginEnabled ? t("create.emailHelper") : t("create.emailHelperNoLogin")}
+            </HelperText>
             <TextInput
               mode="outlined"
               label={t("fields.username")}
@@ -292,7 +324,9 @@ export default function CreateStaffScreen() {
               autoCorrect={false}
               maxLength={50}
             />
-            <HelperText type="info" visible style={styles.helper}>{t("create.usernameFromEmailHelper")}</HelperText>
+            <HelperText type="info" visible style={styles.helper}>
+              {loginEnabled ? t("create.usernameFromEmailHelper") : t("create.usernameFromEmailHelperNoLogin")}
+            </HelperText>
           </View>
 
           <Text variant="labelLarge" style={styles.sectionTitle}>{t("create.contactSection")}</Text>

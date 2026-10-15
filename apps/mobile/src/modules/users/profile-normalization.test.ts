@@ -48,3 +48,8 @@ assertEqual(profile.lastLoginTime, "2024-05-01T09:15:00Z", "normalizes last logi
 assertEqual(profile.lastLoginIp, "203.0.113.9", "normalizes last login ip");
 assertEqual(profile.mustChangePassword, true, "normalizes must-change-password flag");
 assertEqual(normalizeStoreUserProfile({ UserGuid: "user-2" }).mustChangePassword, false, "missing flag defaults to false");
+// 登录开关：只有后端明确返回 false 才算「不能登录」；字段缺失（旧后端）与 true 都按允许处理。
+assertEqual(normalizeStoreUserProfile({ UserGuid: "user-3", LoginEnabled: false }).loginEnabled, false, "explicit false disables login");
+assertEqual(normalizeStoreUserProfile({ userGuid: "user-3", loginEnabled: false }).loginEnabled, false, "camelCase false disables login");
+assertEqual(normalizeStoreUserProfile({ UserGuid: "user-4", LoginEnabled: true }).loginEnabled, true, "explicit true allows login");
+assertEqual(normalizeStoreUserProfile({ UserGuid: "user-5" }).loginEnabled, true, "missing field defaults to allowed");
