@@ -39,6 +39,11 @@ export interface StorePriceUpdateTask {
   completedBy?: string | null
   completedAtUtc?: string | null
   labelPrintCount: number
+  /** Reverted / NoLongerApplicable（系统自动取消）/ ManualCancel（Web 手动撤销）；仅已取消任务有值。 */
+  cancelReason?: string | null
+  cancelledBy?: string | null
+  cancelledAtUtc?: string | null
+  cancelNote?: string | null
   hqSyncOperationId?: string | null
   hqSyncStatus?: string | null
 }
@@ -162,6 +167,28 @@ export async function getStorePriceUpdateTasks(params: Query, options: ReadOptio
     page: Number(page?.page ?? 1),
     pageSize: Number(page?.pageSize ?? 30),
     hqSyncEnabled: page?.hqSyncEnabled === true,
+  }
+}
+
+/** 撤销入参二选一：任务 ID（至多 200 个）或商品编码（可用 storeCodes 限定分店）。 */
+export type CancelStorePriceUpdateTasksPayload =
+  | { taskIds: number[]; note?: string }
+  | { productCode: string; storeCodes?: string; note?: string }
+
+export interface CancelStorePriceUpdateTasksResult {
+  items: { taskId: number; success: boolean; code: string; message?: string | null }[]
+  cancelledCount: number
+  skippedCount: number
+}
+
+/** 手动撤销未完成任务：只改任务状态，不改任何价格。 */
+export async function cancelStorePriceUpdateTasks(payload: CancelStorePriceUpdateTasksPayload): Promise<CancelStorePriceUpdateTasksResult> {
+  const response = await request.post<ApiResponse<CancelStorePriceUpdateTasksResult>>(`${API_BASE}/cancel`, payload)
+  const data = unwrapApiData(response)
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    cancelledCount: Number(data?.cancelledCount ?? 0),
+    skippedCount: Number(data?.skippedCount ?? 0),
   }
 }
 

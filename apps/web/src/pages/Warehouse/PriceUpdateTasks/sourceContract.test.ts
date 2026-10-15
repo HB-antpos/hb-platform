@@ -44,10 +44,16 @@ assert(
   '仓库商品页必须在零售价变化入口旁提供价格变更任务入口，并复用 canManageWarehouseProducts 权限',
 )
 
-// 只读监控页：不得出现代分店改价/标记完成的写接口。
+// 监控页不得代分店改价/标记完成：这些执行动作只发生在移动端，保证「谁处理的」记录真实。
+// 唯一允许的写操作是「撤销未完成任务」，它走 service 里的 cancelStorePriceUpdateTasks，页面本身不直接发写请求。
 for (const forbidden of ['price-update-tasks/apply', 'price-update-tasks/keep', 'price-update-tasks/labels', 'request.post', 'request.put']) {
-  assert(!pageSource.includes(forbidden), `监控页必须只读，不应包含 ${forbidden}`)
+  assert(!pageSource.includes(forbidden), `监控页不应包含代分店执行的写接口 ${forbidden}`)
 }
+assert(pageSource.includes('cancelStorePriceUpdateTasks('), '监控页必须通过 service 提供撤销未完成任务入口')
+assert(
+  pageSource.includes("getCheckboxProps: (task) => ({ disabled: task.status !== 'Pending' })"),
+  '任务明细只有未完成的任务可勾选撤销，已完成/已取消行必须置灰',
+)
 assert(pageSource.includes('summary.hqSyncEnabled ?'), '未启用总部同步时必须隐藏总部同步失败指标卡')
 assert(pageSource.includes('taskHqSyncEnabled ? [{'), '未启用总部同步时必须隐藏任务明细的总部同步列')
 assert(pageSource.includes('parsePriceUpdateTasksSearch(location.search)'), '页面必须支持通过 URL query 初始化页签与筛选')
