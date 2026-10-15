@@ -96,6 +96,46 @@ assert.match(source, /!isDeviceMode && canEditUsers && managedStoreCode/, "纯�
 assert.match(source, /canManageStaffBarcode\(/, "个人码入口必须复用统一资格判断，停用员工不得获得写入口");
 assert.match(source, /setSelectedUserGuids\(new Set\(\)\)[\s\S]{0,120}setBatchSelecting\(false\)/, "换店必须清空批量选择");
 
+// 员工管理入口改认 Users.ViewStoreStaff；Users.View（canReadUser）持有者同样放行，user-admin 不受影响。
+assert.match(
+  source,
+  /const canViewUsers = access\.isAdmin\s*\|\|\s*access\.canReadUser\s*\|\|\s*access\.hasPermission\(PERMISSIONS\.Users\.ViewStoreStaff\)/,
+  "员工列表可见性必须是 ViewStoreStaff 或 View"
+);
+const roleMenuCatalogSource = readFileSync(resolve(currentDirectory, "../identity-admin/role-menu-catalog.ts"), "utf8");
+assert.match(roleMenuCatalogSource, /\["users", "Users", "[^"]+", \["Users\.ViewStoreStaff"\]\]/, "users 路由必须认 Users.ViewStoreStaff");
+assert.match(roleMenuCatalogSource, /\["user-admin", "User management", "用户管理", \["Users\.View"\]\]/, "user-admin 仍然是 Users.View");
+const iosReviewMenuSource = readFileSync(resolve(currentDirectory, "../ios-review/menu.ts"), "utf8");
+assert.match(iosReviewMenuSource, /routeName: "users"[^}]*permission: "Users\.ViewStoreStaff"/, "审核模式菜单的 users 必须同步新权限码");
+
+// 「我」分组：本人行置顶、带「我」标签，且不提供编辑/停用/重置密码/个人码等入口（后端会拒绝）。
+assert.match(source, /t\("list\.me"\)/, "列表必须有「我」分组");
+assert.match(source, /t\("list\.staffSection"/, "列表必须有「店员」分组标题");
+assert.match(source, /t\("list\.onlyStaffNote"\)/, "列表底部必须说明不显示其他店长");
+assert.match(source, /t\("list\.meBadge"\)/, "本人行必须带「我」标签");
+assert.match(source, /onPress=\{isSelf \? undefined :/, "本人行不得进入员工详情");
+assert.match(source, /canUseBarcode = !isSelf && canManageUserBarcode\(item\)/, "本人行不得出现个人码入口");
+assert.match(source, /\{isSelf \? null : \(\s*<IconButton/, "本人行不得出现更多操作（编辑/停用/重置密码）");
+assert.match(source, /storeCode: resolveUserStoreCode\(user\) \?\? ""/, "进入权限页必须带上所属分店，供复制权限列出同事");
+
+// 复制权限：入口、保护与确认流程。
+const accessScreenSource = readFileSync(resolve(currentDirectory, "access-management-screen.tsx"), "utf8");
+const copySheetSource = readFileSync(resolve(currentDirectory, "permission-copy-sheet.tsx"), "utf8");
+assert.match(accessScreenSource, /openCopySheet\("toOthers"\)/, "权限页必须有「复制给他人」入口");
+assert.match(accessScreenSource, /openCopySheet\("fromColleague"\)/, "权限页必须有「从同事复制」入口");
+assert.match(
+  accessScreenSource,
+  /if \(permissionsDirty\) \{[\s\S]{0,200}accessManagement\.copy\.dirtyBlocked/,
+  "存在未保存的权限草稿时必须先拦截，避免被复制结果静默覆盖"
+);
+assert.match(accessScreenSource, /previewCopyMutation\.isPending \|\|\s*copyPermissionsMutation\.isPending/, "复制进行中必须计入忙碌状态，阻止离页与重复保存");
+assert.match(accessScreenSource, /\{!implicitAll \? \(\s*<View style=\{styles\.copyActions\}>/, "管理员默认拥有全部权限时不显示复制入口");
+assert.match(copySheetSource, /onPreview\(input\)/, "先预览差异");
+assert.match(copySheetSource, /onCommit\(input\)/, "确认后才写入");
+assert.match(copySheetSource, /!previewCurrent \|\| !summary\?\.hasChanges/, "预览过期或没有变化时不得确认复制");
+assert.match(copySheetSource, /dismissable=\{!submitting\}/, "提交中不得关闭弹层");
+assert.match(copySheetSource, /useStoreUsers\(hasStoreCode \? storeCode : undefined, ""\)/, "无分店时不得查询全部分店");
+
 const barcodeDialogSource = readFileSync(
   resolve(currentDirectory, "staff-barcode/StaffBarcodeDialogs.tsx"),
   "utf8"

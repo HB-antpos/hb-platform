@@ -809,6 +809,10 @@
       "name": "View users",
       "description": "View user lists and details in the mobile staff and user management pages."
     },
+    "Users.ViewStoreStaff": {
+      "name": "View store staff",
+      "description": "Mobile staff management - view the store staff list and details (excludes Web global user management)."
+    },
     "Users.ViewWebConsole": {
       "name": "View Web user management",
       "description": "Show and open the Web admin user management page."

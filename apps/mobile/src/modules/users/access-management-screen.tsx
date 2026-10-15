@@ -41,6 +41,8 @@ import {
   useAssignUserAccessRoles,
   useAssignUserAccessStores,
   useAssignUserDirectPermissions,
+  useCopyUserDirectPermissions,
+  usePreviewCopyUserDirectPermissions,
   useUserAccessPermissionAccess,
   useUserAccessRoles,
   useUserAccessStores,
@@ -62,6 +64,8 @@ import {
   setUserAccessStoreState,
   toggleDirectPermission,
 } from "./access-management";
+import { createPermissionNameResolver } from "./access-permission-copy";
+import { PermissionCopySheet } from "./permission-copy-sheet";
 import {
   localizeAccessPermission,
   localizeAccessPermissionCategory,
@@ -70,6 +74,8 @@ import {
 } from "./access-permission-presentation";
 import type {
   AccessStoreOption,
+  CopyPermissionDirection,
+  CopyUserDirectPermissionsInput,
   DirectPermissionDraft,
   UserAccessErrorKind,
   UserAccessRole,
@@ -145,6 +151,7 @@ export default function AccessManagementScreen() {
   const { t, language } = useAppTranslation(["userManagement", "common"]);
   const params = useLocalSearchParams<{
     userGuid?: string | string[];
+    storeCode?: string | string[];
     userName?: string | string[];
     username?: string | string[];
     targetStatus?: string | string[];
@@ -156,6 +163,8 @@ export default function AccessManagementScreen() {
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const userGuid = firstParam(params.userGuid)?.trim() ?? "";
   const username = firstParam(params.username)?.trim() ?? "";
+  // 员工列表带入的所属分店，用于「复制权限」列出同店同事；深链进入时为空，下面再回退。
+  const routeStoreCode = firstParam(params.storeCode)?.trim() ?? "";
   const userName =
     firstParam(params.userName)?.trim() ||
     username ||
@@ -197,6 +206,8 @@ export default function AccessManagementScreen() {
   const [allowRemove, setAllowRemove] = useState(false);
   const [authRedirectRequested, setAuthRedirectRequested] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [copyDirection, setCopyDirection] =
+    useState<CopyPermissionDirection | null>(null);
   const [roleMutationForbidden, setRoleMutationForbidden] = useState(false);
   const [permissionMutationForbidden, setPermissionMutationForbidden] =
     useState(false);
@@ -314,6 +325,8 @@ export default function AccessManagementScreen() {
   const assignStoresMutation = useAssignUserAccessStores();
   const assignRolesMutation = useAssignUserAccessRoles();
   const assignPermissionsMutation = useAssignUserDirectPermissions();
+  const previewCopyMutation = usePreviewCopyUserDirectPermissions();
+  const copyPermissionsMutation = useCopyUserDirectPermissions();
   const [storeAssignments, setStoreAssignments] = useState<
     UserAccessStoreAssignment[]
   >([]);
@@ -331,7 +344,9 @@ export default function AccessManagementScreen() {
   const busy =
     assignStoresMutation.isPending ||
     assignRolesMutation.isPending ||
-    assignPermissionsMutation.isPending;
+    assignPermissionsMutation.isPending ||
+    previewCopyMutation.isPending ||
+    copyPermissionsMutation.isPending;
   const storesDirty = !areAccessCodeSetsEqual(
     encodeStoreAssignments(storeAssignments),
     encodeStoreAssignments(baselineStoreAssignments),
@@ -691,6 +706,61 @@ export default function AccessManagementScreen() {
     t,
     userGuid,
   ]);
+
+  // 复制权限的候选同事按分店列出：优先路由带入，其次目标员工已分配的分店，最后操作者自己的管理分店。
+  const copyStoreCode =
+    routeStoreCode ||
+    storesQuery.data?.[0]?.storeCode ||
+    managedStoreCodes?.[0] ||
+    "";
+  const actorUserGuid = currentUser?.userGUID || currentUser?.userGuid || "";
+  const permissionNameResolver = useMemo(
+    () =>
+      createPermissionNameResolver(
+        (permissionAccessQuery.data?.categories ?? []).flatMap((category) =>
+          category.permissions.map((permission) => ({
+            code: permission.name,
+            name: localizeAccessPermission(permission, language).name,
+          })),
+        ),
+      ),
+    [language, permissionAccessQuery.data?.categories],
+  );
+
+  const openCopySheet = useCallback(
+    (direction: CopyPermissionDirection) => {
+      if (busy) return;
+      if (permissionsDirty) {
+        // 复制成功后会重新拉取权限覆盖界面，存在未保存草稿时必须先处理，避免被静默覆盖。
+        setSnackbarMessage(t("accessManagement.copy.dirtyBlocked"));
+        return;
+      }
+      setCopyDirection(direction);
+    },
+    [busy, permissionsDirty, t],
+  );
+
+  const handleCopied = useCallback(
+    (result: { targets: { added: string[]; removed: string[] }[] }) => {
+      const changed = result.targets.filter(
+        (target) => target.added.length > 0 || target.removed.length > 0,
+      ).length;
+      setCopyDirection(null);
+      setSnackbarMessage(t("accessManagement.copy.success", { count: changed }));
+    },
+    [t],
+  );
+
+  const handlePreviewCopy = useCallback(
+    (input: CopyUserDirectPermissionsInput) =>
+      previewCopyMutation.mutateAsync(input),
+    [previewCopyMutation],
+  );
+  const handleCommitCopy = useCallback(
+    (input: CopyUserDirectPermissionsInput) =>
+      copyPermissionsMutation.mutateAsync(input),
+    [copyPermissionsMutation],
+  );
 
   const handleSavePermissions = useCallback(async () => {
     if (
@@ -1116,6 +1186,32 @@ export default function AccessManagementScreen() {
             direct: permissionDraft.selectedCodes.length,
           })}
         </Text>
+        {!implicitAll ? (
+          <View style={styles.copyActions}>
+            <Button
+              mode="outlined"
+              compact
+              icon="account-multiple-plus-outline"
+              disabled={busy}
+              onPress={() => openCopySheet("toOthers")}
+              style={styles.copyButton}
+              accessibilityLabel={t("accessManagement.copy.toOthersAction")}
+            >
+              {t("accessManagement.copy.toOthersAction")}
+            </Button>
+            <Button
+              mode="outlined"
+              compact
+              icon="account-arrow-left-outline"
+              disabled={busy}
+              onPress={() => openCopySheet("fromColleague")}
+              style={styles.copyButton}
+              accessibilityLabel={t("accessManagement.copy.fromColleagueAction")}
+            >
+              {t("accessManagement.copy.fromColleagueAction")}
+            </Button>
+          </View>
+        ) : null}
         {categories.map((category) => {
           const localizedCategory = localizeAccessPermissionCategory(
             category.category || category.displayName,
@@ -1372,6 +1468,20 @@ export default function AccessManagementScreen() {
         </Text>
       </Surface>
       <View style={styles.body}>{content}</View>
+      {copyDirection ? (
+        <PermissionCopySheet
+          direction={copyDirection}
+          currentEmployeeGuid={userGuid}
+          currentEmployeeName={userName}
+          storeCode={copyStoreCode}
+          actorUserGuid={actorUserGuid}
+          resolvePermissionName={permissionNameResolver}
+          onPreview={handlePreviewCopy}
+          onCommit={handleCommitCopy}
+          onDismiss={() => setCopyDirection(null)}
+          onCopied={handleCopied}
+        />
+      ) : null}
       <Snackbar
         visible={Boolean(snackbarMessage)}
         duration={2800}
@@ -1454,6 +1564,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: HB_COLORS.outlineMuted,
   },
+  copyActions: { flexDirection: "row", gap: HB_SPACING.xs },
+  copyButton: { flex: 1, borderRadius: HB_RADIUS.control },
   saveButton: { ...BUSINESS_UI.button, alignSelf: "stretch", marginTop: HB_SPACING.xxs },
   secondaryText: { color: HB_COLORS.textSecondary },
 });

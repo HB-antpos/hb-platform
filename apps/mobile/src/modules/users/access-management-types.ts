@@ -81,6 +81,38 @@ export interface AssignUserDirectPermissionsInput {
   permissions: string[];
 }
 
+/** 复制权限方式：merge 在对方现有直接权限上叠加；replace 用来源的直接权限整体覆盖。 */
+export type CopyPermissionMode = "merge" | "replace";
+
+/** toOthers：当前员工是来源、选中的多人是目标；fromColleague：所选同事是来源、当前员工是唯一目标。 */
+export type CopyPermissionDirection = "toOthers" | "fromColleague";
+
+export interface CopyUserDirectPermissionsInput {
+  sourceUserGuid: string;
+  targetUserGuids: string[];
+  mode: CopyPermissionMode;
+}
+
+export interface UserDirectPermissionCopyTarget {
+  userGuid: string;
+  added: string[];
+  removed: string[];
+  unchangedCount: number;
+}
+
+export interface UserDirectPermissionCopyResult {
+  sourceUserGuid: string;
+  mode: CopyPermissionMode;
+  preview: boolean;
+  /** 来源的全部直接权限。 */
+  sourceDirectPermissionCodes: string[];
+  /** 来源直接权限中，当前操作者允许分配的部分。 */
+  transferablePermissionCodes: string[];
+  /** 操作者不能分配而被自动跳过的权限。 */
+  skippedPermissionCodes: string[];
+  targets: UserDirectPermissionCopyTarget[];
+}
+
 export type UserAccessSectionMode = "hidden" | "readOnly" | "editable";
 
 export type UserAccessEligibilityReason =

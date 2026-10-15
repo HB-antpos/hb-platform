@@ -3,6 +3,7 @@ import {
   assignUserAccessRoles,
   assignUserAccessStores,
   assignUserDirectPermissions,
+  copyUserDirectPermissions,
   fetchAccessPermissionCatalog,
   fetchAccessRoleCatalog,
   fetchAccessStoreCatalog,
@@ -10,11 +11,13 @@ import {
   fetchUserAccessPermissionAccess,
   fetchUserAccessRoles,
   fetchUserAccessStores,
+  previewCopyUserDirectPermissions,
 } from "./access-management-api";
 import type {
   AssignUserAccessRolesInput,
   AssignUserAccessStoresInput,
   AssignUserDirectPermissionsInput,
+  CopyUserDirectPermissionsInput,
 } from "./access-management-types";
 
 const USER_ACCESS_QUERY_ROOT = "userAccessManagement";
@@ -167,6 +170,39 @@ export function useAssignUserDirectPermissions() {
       await queryClient.invalidateQueries({
         queryKey: userAccessPermissionAccessQueryKey(input.userGuid),
       });
+    },
+  });
+}
+
+/** 复制权限第一步：只算差异不写库，不触发任何缓存失效。 */
+export function usePreviewCopyUserDirectPermissions() {
+  return useMutation({
+    mutationFn: (input: CopyUserDirectPermissionsInput) =>
+      previewCopyUserDirectPermissions(input),
+  });
+}
+
+/** 复制权限第二步：原子写入；成功后刷新来源与所有目标的权限数据以及员工列表。 */
+export function useCopyUserDirectPermissions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CopyUserDirectPermissionsInput) =>
+      copyUserDirectPermissions(input),
+    onSuccess: async (_, input) => {
+      const involvedGuids = Array.from(
+        new Set([input.sourceUserGuid, ...input.targetUserGuids]),
+      );
+      await Promise.all([
+        ...involvedGuids.flatMap((guid) => [
+          queryClient.invalidateQueries({
+            queryKey: userAccessPermissionStateQueryKey(guid),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: userAccessPermissionAccessQueryKey(guid),
+          }),
+        ]),
+        queryClient.invalidateQueries({ queryKey: ["storeUsers"] }),
+      ]);
     },
   });
 }
