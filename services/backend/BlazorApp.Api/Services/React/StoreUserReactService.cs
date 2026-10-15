@@ -647,6 +647,14 @@ namespace BlazorApp.Api.Services.React
             string? storeCode
         )
         {
+            // 与列表同口径：非管理员读不到其他店长 / 管理员的详情（即使对方同时挂着 StoreStaff 角色）。
+            if (!scope.IsAdmin
+                && !userGuid.Equals(scope.UserGuid, StringComparison.OrdinalIgnoreCase)
+                && await UserAccessMutationSecurity.IsHighPrivilegeTargetAsync(_db, userGuid))
+            {
+                return null;
+            }
+
             var normalizedStoreCode = storeCode?.Trim();
             var rows = await _db.Queryable<User>()
                 .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)

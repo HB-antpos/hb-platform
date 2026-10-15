@@ -192,7 +192,9 @@ namespace BlazorApp.Api.Tests
                     PermissionSeedData.RolePermissionTemplates,
                     item => item.RoleName == roleName
                 );
-                Assert.Contains("Users.View", template.PermissionCodes);
+                // 店长模板：员工管理用 ViewStoreStaff；Users.View 只留给「用户管理」，不再授予店长。
+                Assert.Contains("Users.ViewStoreStaff", template.PermissionCodes);
+                Assert.DoesNotContain("Users.View", template.PermissionCodes);
                 Assert.Contains("Users.ManagePosTerminalPermissions", template.PermissionCodes);
             }
 
