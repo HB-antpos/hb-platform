@@ -115,6 +115,10 @@ interface PendingProductLocationUnbindState {
 
 interface PendingRetailPriceSyncState {
   retailPrice: string;
+  /** 直接把各启用分店零售价改成新价（默认开）。 */
+  syncStoreRetailPrices: boolean;
+  /** 给分店生成价格任务、通知分店（默认开）。 */
+  generateTasks: boolean;
 }
 
 interface WarehouseCameraScanSession {
@@ -343,7 +347,10 @@ export default function WarehouseScreen() {
   const router = useRouter();
   const { t, language } = useAppTranslation(["warehouse", "common", "supplyNotice"]);
   const { t: tPriceUpdates } = useAppTranslation("priceUpdates");
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // 零售价确认弹窗的内容区高度：窗口高度减去弹窗边距/内边距、标题、底部按钮与安全区的占用，
+  // 留不下时至少保 160 让内容可滚动，上限与其它弹窗的 modalScroll 一致。
+  const retailSyncScrollMaxHeight = Math.max(160, Math.min(460, windowHeight - 260));
   const access = useAuthStore((state) => state.access);
   const deviceSession = useDeviceStore((state) => state.session);
   const hasStoredDeviceSession = Boolean(deviceSession?.hardwareId && deviceSession?.authCode);
@@ -826,7 +833,12 @@ export default function WarehouseScreen() {
 
   const handleSaveProductPatch = useCallback(async (
     patch: Partial<typeof productForm>,
-    options?: { field?: WarehouseProductPatchField; syncStoreRetailPrices?: boolean; supplyNotice?: SupplyNoticeInput }
+    options?: {
+      field?: WarehouseProductPatchField;
+      syncStoreRetailPrices?: boolean;
+      generateTasks?: boolean;
+      supplyNotice?: SupplyNoticeInput;
+    }
   ) => {
     if (!product) {
       return;
@@ -841,6 +853,7 @@ export default function WarehouseScreen() {
         buildWarehouseProductPatchRequest(nextForm, parseNullableNumber, {
           field: patchField,
           syncStoreRetailPrices: options?.syncStoreRetailPrices,
+          generateTasks: options?.generateTasks,
           supplyNotice: options?.supplyNotice,
         })
       );
@@ -866,7 +879,12 @@ export default function WarehouseScreen() {
     }
 
     if (numericInputModal.field === "retailPrice") {
-      setPendingRetailPriceSync({ retailPrice: numericInputModal.value });
+      // 每次打开确认弹窗都从默认值（同步分店价 + 生成价格任务，均开启）重新开始，不沿用上一次的选择。
+      setPendingRetailPriceSync({
+        retailPrice: numericInputModal.value,
+        syncStoreRetailPrices: true,
+        generateTasks: true,
+      });
       dismissNumericInputModal();
       return;
     }
@@ -885,15 +903,27 @@ export default function WarehouseScreen() {
     setPendingRetailPriceSync(null);
   }, [busy]);
 
-  const handleConfirmRetailPriceSync = useCallback(async (syncStoreRetailPrices: boolean) => {
+  const updatePendingRetailPriceSync = useCallback(
+    (changes: Partial<Pick<PendingRetailPriceSyncState, "syncStoreRetailPrices" | "generateTasks">>) => {
+      setPendingRetailPriceSync((current) => (current ? { ...current, ...changes } : current));
+    },
+    []
+  );
+
+  const handleConfirmRetailPriceSync = useCallback(async () => {
     if (!pendingRetailPriceSync) {
       return;
     }
 
     try {
+      // 两个开关的最终取值随零售价一起提交，后端据此决定改不改分店价、发不发价格任务。
       await handleSaveProductPatch(
         { retailPrice: pendingRetailPriceSync.retailPrice },
-        { field: "retailPrice", syncStoreRetailPrices }
+        {
+          field: "retailPrice",
+          syncStoreRetailPrices: pendingRetailPriceSync.syncStoreRetailPrices,
+          generateTasks: pendingRetailPriceSync.generateTasks,
+        }
       );
     } finally {
       setPendingRetailPriceSync(null);
@@ -2415,25 +2445,62 @@ export default function WarehouseScreen() {
           contentContainerStyle={styles.modal}
         >
           <Text variant="titleMedium" style={styles.modalTitle}>{t("product.retailSyncConfirmTitle")}</Text>
-          <Text variant="bodyMedium" style={styles.secondaryText}>
-            {t("product.retailSyncConfirmDescription")}
-          </Text>
-          {product && pendingRetailPriceSync ? (
-            <RetailPriceNotificationPreview
-              productCode={product.productCode}
-              retailPrice={pendingRetailPriceSync.retailPrice}
-            />
-          ) : null}
+          {/* 内容区限高可滚动，标题与底部按钮固定在外，小屏或大字号下按钮也不会被挤出屏幕。 */}
+          <ScrollView
+            style={{ maxHeight: retailSyncScrollMaxHeight }}
+            contentContainerStyle={styles.retailSyncContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text variant="bodyMedium" style={styles.secondaryText}>
+              {t("product.retailSyncConfirmDescription")}
+            </Text>
+            {product && pendingRetailPriceSync ? (
+              <RetailPriceNotificationPreview
+                productCode={product.productCode}
+                retailPrice={pendingRetailPriceSync.retailPrice}
+                syncStoreRetailPrices={pendingRetailPriceSync.syncStoreRetailPrices}
+                generateTasks={pendingRetailPriceSync.generateTasks}
+              />
+            ) : null}
+            <View style={styles.retailSyncOption}>
+              <View style={[styles.switchRow, styles.modalSwitchRow]}>
+                <Text variant="bodyMedium" style={styles.retailSyncOptionLabel}>
+                  {t("product.retailSyncStoresLabel")}
+                </Text>
+                <Switch
+                  accessibilityLabel={t("product.retailSyncStoresLabel")}
+                  value={pendingRetailPriceSync?.syncStoreRetailPrices ?? true}
+                  onValueChange={(value) => updatePendingRetailPriceSync({ syncStoreRetailPrices: value })}
+                  disabled={busy}
+                />
+              </View>
+              <Text variant="bodySmall" style={styles.retailSyncOptionHelper}>
+                {t("product.retailSyncStoresHelper")}
+              </Text>
+            </View>
+            <View style={styles.retailSyncOption}>
+              <View style={[styles.switchRow, styles.modalSwitchRow]}>
+                <Text variant="bodyMedium" style={styles.retailSyncOptionLabel}>
+                  {t("product.retailGenerateTasksLabel")}
+                </Text>
+                <Switch
+                  accessibilityLabel={t("product.retailGenerateTasksLabel")}
+                  value={pendingRetailPriceSync?.generateTasks ?? true}
+                  onValueChange={(value) => updatePendingRetailPriceSync({ generateTasks: value })}
+                  disabled={busy}
+                />
+              </View>
+              <Text variant="bodySmall" style={styles.retailSyncOptionHelper}>
+                {t("product.retailGenerateTasksHelper")}
+              </Text>
+            </View>
+          </ScrollView>
           <View style={styles.sheetFooter}>
-            <Button onPress={() => void handleConfirmRetailPriceSync(false)} disabled={busy}>
-              {t("product.retailSyncProductOnly")}
+            <Button onPress={closeRetailPriceSyncConfirm} disabled={busy}>
+              {t("common:actions.cancel")}
             </Button>
-            <Button
-              mode="contained"
-              onPress={() => void handleConfirmRetailPriceSync(true)}
-              disabled={busy}
-            >
-              {t("product.retailSyncStores")}
+            <Button mode="contained" onPress={() => void handleConfirmRetailPriceSync()} disabled={busy}>
+              {t("common:actions.save")}
             </Button>
           </View>
         </Modal>
@@ -3385,6 +3452,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 8,
+  },
+  retailSyncContent: {
+    gap: 10,
+  },
+  retailSyncOption: {
+    gap: 4,
+  },
+  retailSyncOptionLabel: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  retailSyncOptionHelper: {
+    color: "#64748B",
+    paddingHorizontal: 10,
   },
   bindResultCard: {
     backgroundColor: "#FFFFFF",

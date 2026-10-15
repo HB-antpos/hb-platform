@@ -37,7 +37,10 @@ export interface WarehouseProductPatchRequest {
   isActive?: boolean;
   purchasePrice?: number | null;
   retailPrice?: number | null;
+  /** 零售价保存时是否把各启用分店的零售价直接改成新价；后端缺省按 true 处理。 */
   syncStoreRetailPrices?: boolean;
+  /** 零售价保存时是否给分店生成价格任务（通知分店）；后端缺省按 true 处理。 */
+  generateTasks?: boolean;
   domesticPrice?: number | null;
   oemPrice?: number | null;
   importPrice?: number | null;
