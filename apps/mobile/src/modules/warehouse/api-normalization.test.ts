@@ -37,12 +37,18 @@ function run() {
     retailPrice: 12.99,
     oemPrice: 12.99,
     syncStoreRetailPrices: true,
+    generateTasks: false,
   };
 
   assert.equal(
     retailSyncPatch.syncStoreRetailPrices,
     true,
     "零售价同步分店价格表必须使用 camelCase PATCH 字段"
+  );
+  assert.equal(
+    retailSyncPatch.generateTasks,
+    false,
+    "是否生成价格任务必须使用 camelCase PATCH 字段 generateTasks"
   );
 
   console.log("api-normalization.test.ts: ok");

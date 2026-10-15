@@ -228,8 +228,6 @@
     "invalid": "建议折扣需在 0~100 之间",
     "helper": "留空 = 不比较分店折扣；填 0 = 明确无折扣。建议折扣不会自动下发，由分店在「价格更新」中确认。",
     "saved": "建议折扣已保存",
-    "saveFailed": "建议折扣保存失败",
-    "previewWhenSync": "同步分店：{{message}}",
-    "previewWhenProductOnly": "仅改商品：{{message}}"
+    "saveFailed": "建议折扣保存失败"
   }
 }
