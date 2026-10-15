@@ -753,6 +753,169 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
         Assert.Equal(3, after.OverdueDays);
     }
 
+    // ---------------------------------------------------------------------
+    // 页面设置（Web「价格变更任务」页的「设置」入口）：超期天数优先读设置表，缺表 / 无记录时回退配置
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task 页面设置_设置表不存在或没有记录_沿用配置默认值且不抛错()
+    {
+        // 设置表还没迁移：读取静默降级，所有走超期口径的查询照常工作。
+        var service = CreateService();
+        var missingTable = await service.GetSettingsAsync();
+        Assert.Equal(7, missingTable.OverdueDays);
+        Assert.Equal(7, missingTable.DefaultOverdueDays);
+        Assert.False(missingTable.IsCustomized);
+        Assert.Null(missingTable.UpdatedBy);
+        Assert.Equal(1, missingTable.MinOverdueDays);
+        Assert.Equal(90, missingTable.MaxOverdueDays);
+        Assert.Equal(7, (await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null)).OverdueDays);
+
+        // 表已建但没有保存过：同样用配置值。
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        _settings["StorePriceUpdateTasks:OverdueDays"] = "3";
+        var configured = await CreateService().GetSettingsAsync();
+        Assert.Equal(3, configured.OverdueDays);
+        Assert.Equal(3, configured.DefaultOverdueDays);
+        Assert.False(configured.IsCustomized);
+    }
+
+    [Fact]
+    public async Task 页面设置_保存后超期口径立即按新天数计算且已有任务不重新计时()
+    {
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-5));
+
+        var before = await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null);
+        Assert.False(Assert.Single(before.Items).IsOverdue);
+        Assert.Equal(0, before.PendingOverdueCount);
+
+        var saved = await service.UpdateSettingsAsync(
+            new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = 3 },
+            "  admin  "
+        );
+        Assert.Equal(3, saved.OverdueDays);
+        Assert.True(saved.IsCustomized);
+        Assert.Equal("admin", saved.UpdatedBy);
+        Assert.NotNull(saved.UpdatedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, saved.UpdatedAtUtc!.Value.Kind);
+        Assert.Equal(7, saved.DefaultOverdueDays);
+
+        // 创建 5 天、新时限 3 天：现在算超期 2 天；列表、汇总、Web 监控汇总三处口径一致。
+        var after = await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null);
+        var task = Assert.Single(after.Items);
+        Assert.True(task.IsOverdue);
+        Assert.Equal(2, task.OverdueByDays);
+        Assert.Equal(1, after.PendingOverdueCount);
+        Assert.Equal(3, after.OverdueDays);
+        var storeSummary = await service.GetStoreSummariesAsync(null);
+        Assert.Equal(3, storeSummary.OverdueDays);
+        Assert.Equal(1, storeSummary.Stores.Single(row => row.StoreCode == "1001").OverdueCount);
+        var monitor = await service.GetSummaryAsync(new StorePriceUpdateTaskQueryDto());
+        Assert.Equal(3, monitor.OverdueDays);
+        Assert.Equal(1, monitor.OverdueCount);
+
+        // 改回更长的时限：已有任务的创建时间没变，也就不再算超期。
+        await service.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = 10 }, "admin");
+        var relaxed = await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null);
+        Assert.False(Assert.Single(relaxed.Items).IsOverdue);
+        Assert.Equal(0, relaxed.PendingOverdueCount);
+    }
+
+    [Fact]
+    public async Task 页面设置_缓存在保存后立即失效_其它服务实例共用缓存也能看到新值()
+    {
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        using var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var writer = CreateService(cache: cache);
+        var reader = CreateService(cache: cache);
+
+        // 先读一次，把默认值 7 放进缓存。
+        Assert.Equal(7, (await reader.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null)).OverdueDays);
+
+        await writer.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = 14 }, "admin");
+
+        // 不等缓存过期：保存时主动清掉了缓存，读取方下一次请求就是新值。
+        Assert.Equal(14, (await reader.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null)).OverdueDays);
+        Assert.Equal(14, (await reader.GetStoreSummariesAsync(null)).OverdueDays);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-3)]
+    [InlineData(91)]
+    public async Task 页面设置_超出范围被拒绝且不写入(int days)
+    {
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        var service = CreateService();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = days }, "admin"));
+
+        Assert.Equal(0, await _db.Queryable<StorePriceUpdateSetting>().CountAsync());
+        Assert.False((await service.GetSettingsAsync()).IsCustomized);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(90)]
+    public async Task 页面设置_边界值可以保存(int days)
+    {
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        var service = CreateService();
+
+        var saved = await service.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = days }, "admin");
+
+        Assert.Equal(days, saved.OverdueDays);
+    }
+
+    [Fact]
+    public async Task 页面设置_设置表尚未创建时保存明确失败而不是假装成功()
+    {
+        var service = CreateService();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = 10 }, "admin"));
+
+        Assert.Contains("--schema=migrate", error.Message);
+    }
+
+    [Fact]
+    public async Task 页面设置_重复保存只更新同一行并记录最后修改人()
+    {
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        var service = CreateService();
+
+        await service.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = 10 }, "alice");
+        var second = await service.UpdateSettingsAsync(new UpdateStorePriceUpdateTaskSettingsRequestDto { OverdueDays = 20 }, "bob");
+
+        var row = Assert.Single(await _db.Queryable<StorePriceUpdateSetting>().ToListAsync());
+        Assert.Equal(StorePriceUpdateSetting.SingletonId, row.Id);
+        Assert.Equal(20, row.OverdueDays);
+        Assert.Equal("bob", row.UpdatedBy);
+        Assert.Equal(20, second.OverdueDays);
+        Assert.Equal("bob", second.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task 页面设置_库里的值被手工改到范围外时按范围收敛()
+    {
+        _db.CodeFirst.InitTables(typeof(StorePriceUpdateSetting));
+        await _db.Insertable(new StorePriceUpdateSetting { Id = 1, OverdueDays = 500, UpdatedAtUtc = DateTime.UtcNow, UpdatedBy = "dba" })
+            .ExecuteCommandAsync();
+        var service = CreateService();
+
+        Assert.Equal(90, (await service.GetSettingsAsync()).OverdueDays);
+        Assert.Equal(90, (await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null)).OverdueDays);
+
+        await _db.Updateable<StorePriceUpdateSetting>().SetColumns(setting => setting.OverdueDays == 0).Where(setting => setting.Id == 1).ExecuteCommandAsync();
+        Assert.Equal(1, (await CreateService().GetSettingsAsync()).OverdueDays);
+    }
+
     [Fact]
     public async Task 已完成的任务不算超期()
     {
@@ -866,7 +1029,9 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
 
     // ---------------------------------------------------------------------
 
-    private StorePriceUpdateTaskService CreateService(IWarehouseStorePriceHqSyncEnqueuer? hqEnqueuer = null)
+    private StorePriceUpdateTaskService CreateService(
+        IWarehouseStorePriceHqSyncEnqueuer? hqEnqueuer = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(_settings).Build();
         var provider = new Mock<IServiceProvider>();
@@ -894,7 +1059,8 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
             NullLogger<StorePriceUpdateTaskService>.Instance,
             configuration,
             _summary,
-            provider.Object
+            provider.Object,
+            cache
         );
         return service;
     }

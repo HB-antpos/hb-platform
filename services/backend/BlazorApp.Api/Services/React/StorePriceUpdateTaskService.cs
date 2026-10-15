@@ -3,6 +3,7 @@ using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,8 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
     private readonly IConfiguration _configuration;
     private readonly IPriceNotificationSummaryAccessor _summary;
     private readonly IServiceProvider _serviceProvider;
+    // 可选：页面设置（超期天数）的读取缓存。不传则每次直接读设置表（只有测试里会这样）。
+    private readonly IMemoryCache? _cache;
     private bool? _schemaReady;
 
     public StorePriceUpdateTaskService(
@@ -35,7 +38,8 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         ILogger<StorePriceUpdateTaskService> logger,
         IConfiguration configuration,
         IPriceNotificationSummaryAccessor summary,
-        IServiceProvider serviceProvider
+        IServiceProvider serviceProvider,
+        IMemoryCache? cache = null
     )
     {
         _db = context.Db;
@@ -43,25 +47,146 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         _configuration = configuration;
         _summary = summary;
         _serviceProvider = serviceProvider;
+        _cache = cache;
     }
 
     /// <summary>通知页改价是否同步 HQ 数据库。后期取消同步时只需改配置，无需发版。</summary>
     public bool IsHqSyncEnabled =>
         _configuration.GetValue("StorePriceUpdateTasks:SyncToHq", true);
 
+    // 页面设置的读取缓存：移动端汇总接口每个客户端每几分钟就会调用一次，不能每次都查设置表。
+    // 30 秒的有效期是兜底（保存时会主动清掉缓存，保存后的下一次请求就是新值）。
+    private const string OverdueDaysCacheKey = "StorePriceUpdateTasks:OverdueDays:v1";
+    private static readonly TimeSpan OverdueDaysCacheTtl = TimeSpan.FromSeconds(30);
+
     /// <summary>
-    /// 任务必须在发起后多少天内完成，超过即「超期」。默认 7 天（原默认 3 天只用于 Web 监控页的提示，
-    /// 现在与移动端「超期锁定报表」共用同一口径，避免两边数字对不上）。
+    /// 配置里的默认超期天数（StorePriceUpdateTasks:OverdueDays，默认 7 天；原默认 3 天只用于 Web 监控页的提示，
+    /// 现在与移动端「超期锁定报表」共用同一口径，避免两边数字对不上）。页面没有保存过设置时用它。
     /// </summary>
-    private int OverdueDays =>
+    private int ConfiguredOverdueDays =>
         Math.Max(1, _configuration.GetValue("StorePriceUpdateTasks:OverdueDays", 7));
+
+    private static int ClampOverdueDays(int days) =>
+        Math.Clamp(days, StorePriceUpdateTaskSettingsDto.MinAllowedOverdueDays, StorePriceUpdateTaskSettingsDto.MaxAllowedOverdueDays);
+
+    /// <summary>
+    /// 当前生效的超期天数：页面保存的设置优先，没有设置（或设置表尚未创建、读取失败）就用配置默认值。
+    /// 读取失败只降级、绝不抛错——这个值在汇总、列表等所有查询里都要用，不能因为一张设置表挡住它们。
+    /// </summary>
+    private async Task<int> GetOverdueDaysAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cache != null && _cache.TryGetValue(OverdueDaysCacheKey, out int cached))
+        {
+            return cached;
+        }
+
+        var row = await TryReadSettingRowAsync();
+        var days = row != null ? ClampOverdueDays(row.OverdueDays) : ConfiguredOverdueDays;
+        _cache?.Set(OverdueDaysCacheKey, days, OverdueDaysCacheTtl);
+        return days;
+    }
 
     /// <summary>
     /// 超期截止时间：CreatedAtUtc 早于它的未完成任务算超期。
     /// 用 CreatedAtUtc 而不是 InitiatedAtUtc：任务被刷新（仓库再次改价）时会重写 InitiatedAtUtc，
     /// 按它算等于每次改价都重新计时，催办就失效了；CreatedAtUtc 只在任务首次生成时写入。
     /// </summary>
-    private DateTime OverdueCutoffUtc() => DateTime.UtcNow.AddDays(-OverdueDays);
+    private async Task<DateTime> OverdueCutoffUtcAsync(CancellationToken cancellationToken = default) =>
+        DateTime.UtcNow.AddDays(-await GetOverdueDaysAsync(cancellationToken));
+
+    /// <summary>读设置行；表不存在、没有记录或读取失败都返回 null（调用方回退到配置默认值）。</summary>
+    private async Task<StorePriceUpdateSetting?> TryReadSettingRowAsync()
+    {
+        try
+        {
+            if (!_db.DbMaintenance.IsAnyTable("StorePriceUpdateSetting", false))
+            {
+                return null;
+            }
+
+            var singletonId = StorePriceUpdateSetting.SingletonId;
+            return await _db.Queryable<StorePriceUpdateSetting>().Where(setting => setting.Id == singletonId).FirstAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "读取价格变更任务设置失败，超期天数沿用配置默认值");
+            return null;
+        }
+    }
+
+    private StorePriceUpdateTaskSettingsDto BuildSettingsDto(StorePriceUpdateSetting? row) =>
+        new()
+        {
+            OverdueDays = row != null ? ClampOverdueDays(row.OverdueDays) : ConfiguredOverdueDays,
+            DefaultOverdueDays = ConfiguredOverdueDays,
+            IsCustomized = row != null,
+            UpdatedBy = row?.UpdatedBy,
+            UpdatedAtUtc = row == null ? null : DateTime.SpecifyKind(row.UpdatedAtUtc, DateTimeKind.Utc),
+        };
+
+    public async Task<StorePriceUpdateTaskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default) =>
+        BuildSettingsDto(await TryReadSettingRowAsync());
+
+    public async Task<StorePriceUpdateTaskSettingsDto> UpdateSettingsAsync(
+        UpdateStorePriceUpdateTaskSettingsRequestDto request,
+        string actorDisplayName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var days = request.OverdueDays;
+        if (days < StorePriceUpdateTaskSettingsDto.MinAllowedOverdueDays || days > StorePriceUpdateTaskSettingsDto.MaxAllowedOverdueDays)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                $"超期天数必须在 {StorePriceUpdateTaskSettingsDto.MinAllowedOverdueDays}～{StorePriceUpdateTaskSettingsDto.MaxAllowedOverdueDays} 天之间"
+            );
+        }
+
+        // 写入必须明确失败（和读取的「静默降级」相反）：表不存在时让操作人知道要先迁移，而不是假装保存成功。
+        if (!_db.DbMaintenance.IsAnyTable("StorePriceUpdateSetting", false))
+        {
+            throw new InvalidOperationException("价格变更任务设置表尚未创建，请先执行数据库迁移（--schema=migrate）后再保存。");
+        }
+
+        var previous = await TryReadSettingRowAsync();
+        var now = DateTime.UtcNow;
+        var actor = Truncate(string.IsNullOrWhiteSpace(actorDisplayName) ? "System" : actorDisplayName.Trim(), 100);
+        var singletonId = StorePriceUpdateSetting.SingletonId;
+
+        // 先更新、没有行再插入；两个管理员同时第一次保存时后插入的会撞主键，回头再更新一次即可。
+        async Task<int> UpdateRowAsync() =>
+            await _db.Updateable<StorePriceUpdateSetting>()
+                .SetColumns(setting => new StorePriceUpdateSetting { OverdueDays = days, UpdatedAtUtc = now, UpdatedBy = actor })
+                .Where(setting => setting.Id == singletonId)
+                .ExecuteCommandAsync();
+
+        var rows = await UpdateRowAsync();
+        if (rows == 0)
+        {
+            try
+            {
+                await _db.Insertable(new StorePriceUpdateSetting { Id = singletonId, OverdueDays = days, UpdatedAtUtc = now, UpdatedBy = actor })
+                    .ExecuteCommandAsync();
+            }
+            catch (Exception)
+            {
+                // 并发的另一次保存刚插入了这一行：改为更新；仍更新不到（不是并发撞键）就把原异常抛出去。
+                if (await UpdateRowAsync() == 0)
+                {
+                    throw;
+                }
+            }
+        }
+
+        _cache?.Remove(OverdueDaysCacheKey);
+        _logger.LogInformation(
+            "价格变更任务超期天数由 {Actor} 改为 {Days} 天（原 {Previous} 天）",
+            actor,
+            days,
+            previous?.OverdueDays ?? ConfiguredOverdueDays
+        );
+        return BuildSettingsDto(await TryReadSettingRowAsync());
+    }
 
     private int RetentionDays =>
         Math.Max(7, _configuration.GetValue("StorePriceUpdateTasks:RetentionDays", 90));
@@ -731,7 +856,8 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         CancellationToken cancellationToken = default
     )
     {
-        var result = new StorePriceUpdateTaskStoreSummaryListDto { OverdueDays = OverdueDays };
+        var overdueDays = await GetOverdueDaysAsync(cancellationToken);
+        var result = new StorePriceUpdateTaskStoreSummaryListDto { OverdueDays = overdueDays };
         if (!await IsSchemaReadyAsync())
         {
             return result;
@@ -760,7 +886,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
 
         var storeCodes = stores.Select(store => store.StoreCode).ToList();
         var pendingStatus = StorePriceUpdateTaskStatuses.Pending;
-        var overdueCutoff = OverdueCutoffUtc();
+        var overdueCutoff = DateTime.UtcNow.AddDays(-overdueDays);
         // 两次分组查询：未完成按「分店 + 形态」计数，超期按分店计数。数据量是分店数 × 2 行，不会随任务数增长。
         var pendingGroups = await _db.Queryable<StorePriceUpdateTask>()
             .Where(task => task.Status == pendingStatus && storeCodes.Contains(task.StoreCode))
@@ -815,12 +941,13 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
     {
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize);
+        var overdueDays = await GetOverdueDaysAsync(cancellationToken);
         var result = new StorePriceUpdateTaskPageDto
         {
             Page = page,
             PageSize = pageSize,
             HqSyncEnabled = IsHqSyncEnabled,
-            OverdueDays = OverdueDays,
+            OverdueDays = overdueDays,
         };
         if (!await IsSchemaReadyAsync())
         {
@@ -862,7 +989,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
                 .CountAsync();
             result.PendingLabelOnlyCount = result.PendingCount - result.PendingPriceUpdateCount;
             result.CompletedCount = await scope.Clone().Where(task => task.Status == completedStatus).CountAsync();
-            var overdueCutoff = OverdueCutoffUtc();
+            var overdueCutoff = DateTime.UtcNow.AddDays(-overdueDays);
             result.PendingOverdueCount = await scope.Clone()
                 .Where(task => task.Status == pendingStatus && task.CreatedAtUtc < overdueCutoff)
                 .CountAsync();
@@ -910,7 +1037,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         {
             // 超期只针对未完成任务，与 Status 参数无关。
             var overduePending = StorePriceUpdateTaskStatuses.Pending;
-            var overdueCutoff = OverdueCutoffUtc();
+            var overdueCutoff = await OverdueCutoffUtcAsync();
             filtered = filtered.Where(task => task.Status == overduePending && task.CreatedAtUtc < overdueCutoff);
         }
 
@@ -1031,7 +1158,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         }
 
         var now = DateTime.UtcNow;
-        var overdueLimitDays = OverdueDays;
+        var overdueLimitDays = await GetOverdueDaysAsync();
         var overdueCutoff = now.AddDays(-overdueLimitDays);
 
         return tasks.Select(task =>
@@ -1553,10 +1680,11 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         CancellationToken cancellationToken = default
     )
     {
+        var overdueDays = await GetOverdueDaysAsync(cancellationToken);
         var summary = new StorePriceUpdateTaskSummaryDto
         {
             HqSyncEnabled = IsHqSyncEnabled,
-            OverdueDays = OverdueDays,
+            OverdueDays = overdueDays,
         };
         if (!await IsSchemaReadyAsync())
         {
@@ -1574,7 +1702,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             : Math.Round((decimal)summary.CompletedCount / denominator, 4);
 
         // 超期与移动端同口径：从任务首次生成（CreatedAtUtc）起算，仓库再次改价不会让它重新计时。
-        var overdueCutoff = OverdueCutoffUtc();
+        var overdueCutoff = DateTime.UtcNow.AddDays(-overdueDays);
         var overdueRows = rows.Where(row => row.OldestPendingAtUtc.HasValue && row.OldestPendingAtUtc < overdueCutoff).ToList();
         summary.OverdueStoreCount = overdueRows.Count;
         var pendingStatus = StorePriceUpdateTaskStatuses.Pending;

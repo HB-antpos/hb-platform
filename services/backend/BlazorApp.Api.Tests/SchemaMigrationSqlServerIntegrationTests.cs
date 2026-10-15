@@ -944,6 +944,37 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 价格变更任务设置表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, StorePriceUpdateSettingSchema.VerifySql));
+        Assert.Equal(53700, missing.Number);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, StorePriceUpdateSettingSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, StorePriceUpdateSettingSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.StorePriceUpdateSetting (Id, OverdueDays, UpdatedAtUtc, UpdatedBy)
+            VALUES (1, 10, SYSUTCDATETIME(), N'manager-1');
+            """);
+        // 重复执行不得丢失已保存的设置（否则超期天数会悄悄回到默认值）。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, StorePriceUpdateSettingSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.StorePriceUpdateSetting WHERE Id = 1 AND OverdueDays = 10) <> 1
+                THROW 53709, 'Existing price update setting row was lost.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.StorePriceUpdateSetting ALTER COLUMN UpdatedBy nvarchar(200) NULL;"
+        );
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, StorePriceUpdateSettingSchema.VerifySql));
+        Assert.Equal(53701, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发两张表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

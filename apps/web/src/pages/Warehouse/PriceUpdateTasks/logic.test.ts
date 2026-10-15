@@ -30,12 +30,14 @@ import {
   getPendingAgeDays,
   getProductChangeLines,
   getTaskPriceChange,
+  isOverdueDaysChanged,
   parsePriceUpdateTasksSearch,
   resolveCancelReasonLabel,
   resolveInitiatorName,
   resolveInitiatorSourceLabel,
   storeCodeToSelection,
   toPercent,
+  validateOverdueDays,
   type TableSortOrder,
 } from './logic'
 
@@ -165,6 +167,43 @@ assertEqual(manualInfo.length, 4, '手动撤销应显示原因、撤销人、时
 assertEqual(manualInfo[1], 'cancel.info.by{"name":"initiator.system"}', '撤销人沿用发起人的名称解析')
 assertEqual(manualInfo[3], 'cancel.info.note{"note":"测试店"}', '备注去空白')
 assertEqual(resolveCancelReasonLabel('BrandNew', t), 'BrandNew', '未知取消原因原样显示')
+
+// ---------- 任务超期天数设置 ----------
+const overdueRange = { min: 1, max: 90 }
+assertDeepEqual(validateOverdueDays(7, overdueRange), { ok: true, value: 7 }, '范围内的整数合法')
+assertDeepEqual(validateOverdueDays(1, overdueRange), { ok: true, value: 1 }, '下限 min 合法')
+assertDeepEqual(validateOverdueDays(90, overdueRange), { ok: true, value: 90 }, '上限 max 合法')
+assertDeepEqual(validateOverdueDays(0, overdueRange), { ok: false, reason: 'tooSmall' }, 'min-1 过小')
+assertDeepEqual(validateOverdueDays(91, overdueRange), { ok: false, reason: 'tooLarge' }, 'max+1 过大')
+assertDeepEqual(validateOverdueDays(-5, overdueRange), { ok: false, reason: 'tooSmall' }, '负数过小')
+assertDeepEqual(validateOverdueDays(7.5, overdueRange), { ok: false, reason: 'notInteger' }, '小数不是整数')
+assertDeepEqual(validateOverdueDays(0.5, overdueRange), { ok: false, reason: 'notInteger' }, '范围外的小数先报非整数，不报过小')
+assertDeepEqual(validateOverdueDays(100.5, overdueRange), { ok: false, reason: 'notInteger' }, '超上限的小数同样先报非整数')
+assertDeepEqual(validateOverdueDays(null, overdueRange), { ok: false, reason: 'empty' }, 'null = 空')
+assertDeepEqual(validateOverdueDays(undefined, overdueRange), { ok: false, reason: 'empty' }, 'undefined = 空')
+assertDeepEqual(validateOverdueDays('', overdueRange), { ok: false, reason: 'empty' }, '空串 = 空')
+assertDeepEqual(validateOverdueDays('   ', overdueRange), { ok: false, reason: 'empty' }, '纯空白 = 空')
+assertDeepEqual(validateOverdueDays(Number.NaN, overdueRange), { ok: false, reason: 'notInteger' }, 'NaN 不是合法整数')
+assertDeepEqual(validateOverdueDays(Number.POSITIVE_INFINITY, overdueRange), { ok: false, reason: 'notInteger' }, 'Infinity 不是合法整数')
+assertDeepEqual(validateOverdueDays('14', overdueRange), { ok: true, value: 14 }, '数字字符串按数字校验')
+assertDeepEqual(validateOverdueDays(' 14 ', overdueRange), { ok: true, value: 14 }, '字符串先去空白')
+assertDeepEqual(validateOverdueDays('1', overdueRange), { ok: true, value: 1 }, '字符串下限合法')
+assertDeepEqual(validateOverdueDays('90', overdueRange), { ok: true, value: 90 }, '字符串上限合法')
+assertDeepEqual(validateOverdueDays('0', overdueRange), { ok: false, reason: 'tooSmall' }, '字符串 min-1 过小')
+assertDeepEqual(validateOverdueDays('91', overdueRange), { ok: false, reason: 'tooLarge' }, '字符串 max+1 过大')
+assertDeepEqual(validateOverdueDays('7.5', overdueRange), { ok: false, reason: 'notInteger' }, '字符串小数不是整数')
+assertDeepEqual(validateOverdueDays('7.0', overdueRange), { ok: true, value: 7 }, '数值上是整数的小数写法合法')
+assertDeepEqual(validateOverdueDays('abc', overdueRange), { ok: false, reason: 'notInteger' }, '非数字文本不合法')
+assertDeepEqual(validateOverdueDays('0x10', overdueRange), { ok: false, reason: 'notInteger' }, '十六进制写法不接受')
+assertDeepEqual(validateOverdueDays('1e1', overdueRange), { ok: false, reason: 'notInteger' }, '科学计数法不接受')
+assertDeepEqual(validateOverdueDays({}, overdueRange), { ok: false, reason: 'notInteger' }, '非数字非字符串类型不合法')
+assertDeepEqual(validateOverdueDays(5, { min: 5, max: 5 }), { ok: true, value: 5 }, '后端范围收窄到 min=max 时仍按接口值判断')
+assertDeepEqual(validateOverdueDays(7, { min: 10, max: 30 }), { ok: false, reason: 'tooSmall' }, '范围取自接口而非写死')
+assertEqual(isOverdueDaysChanged(14, 7), true, '不同值 = 已修改')
+assertEqual(isOverdueDaysChanged(7, 7), false, '相同值 = 未修改')
+assertEqual(isOverdueDaysChanged(null, 7), false, '空输入不算修改（由校验拦截）')
+assertEqual(isOverdueDaysChanged(undefined, 7), false, 'undefined 不算修改')
+assertEqual(isOverdueDaysChanged(Number.NaN, 7), false, 'NaN 不算修改')
 
 // ---------- 展示 ----------
 assertEqual(formatDiscount(null, t), '--', '折扣 null = 未设置')

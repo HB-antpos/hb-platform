@@ -271,6 +271,36 @@ public sealed class CancelStorePriceUpdateTasksResultDto
     public int SkippedCount { get; set; }
 }
 
+/// <summary>
+/// Web「价格变更任务」页的设置：目前只有任务超期天数。
+/// 范围固定为 <see cref="MinAllowedOverdueDays"/>～<see cref="MaxAllowedOverdueDays"/> 天，接口把范围一并返回，前端不写死。
+/// </summary>
+public sealed class StorePriceUpdateTaskSettingsDto
+{
+    public const int MinAllowedOverdueDays = 1;
+    public const int MaxAllowedOverdueDays = 90;
+
+    /// <summary>当前生效的超期天数（移动端锁定、红标与 Web 监控页共用）。</summary>
+    public int OverdueDays { get; set; }
+
+    /// <summary>没有自定义时的默认值（来自配置 StorePriceUpdateTasks:OverdueDays，默认 7）。</summary>
+    public int DefaultOverdueDays { get; set; }
+
+    public int MinOverdueDays { get; set; } = MinAllowedOverdueDays;
+    public int MaxOverdueDays { get; set; } = MaxAllowedOverdueDays;
+
+    /// <summary>是否已在页面上保存过（false = 仍在用默认值）。</summary>
+    public bool IsCustomized { get; set; }
+
+    public string? UpdatedBy { get; set; }
+    public DateTime? UpdatedAtUtc { get; set; }
+}
+
+public sealed class UpdateStorePriceUpdateTaskSettingsRequestDto
+{
+    public int OverdueDays { get; set; }
+}
+
 public sealed class StorePriceUpdateTaskSummaryDto
 {
     public int PendingCount { get; set; }

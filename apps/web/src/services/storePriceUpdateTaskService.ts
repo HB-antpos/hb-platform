@@ -192,6 +192,44 @@ export async function cancelStorePriceUpdateTasks(payload: CancelStorePriceUpdat
   }
 }
 
+/** 价格变更任务设置：目前只有「任务超期天数」。 */
+export interface StorePriceUpdateTaskSettings {
+  /** 当前生效的超期天数。 */
+  overdueDays: number
+  /** 没有自定义时的默认天数。 */
+  defaultOverdueDays: number
+  /** 允许设置的最小 / 最大天数（含）。 */
+  minOverdueDays: number
+  maxOverdueDays: number
+  /** 是否已在页面保存过；false = 仍用默认值。 */
+  isCustomized: boolean
+  updatedBy: string | null
+  updatedAtUtc: string | null
+}
+
+function normalizeSettings(data: StorePriceUpdateTaskSettings): StorePriceUpdateTaskSettings {
+  return {
+    overdueDays: Number(data?.overdueDays),
+    defaultOverdueDays: Number(data?.defaultOverdueDays),
+    minOverdueDays: Number(data?.minOverdueDays),
+    maxOverdueDays: Number(data?.maxOverdueDays),
+    isCustomized: data?.isCustomized === true,
+    updatedBy: data?.updatedBy ?? null,
+    updatedAtUtc: data?.updatedAtUtc ?? null,
+  }
+}
+
+export async function getStorePriceUpdateTaskSettings(options: ReadOptions = {}): Promise<StorePriceUpdateTaskSettings> {
+  const response = await request.get<ApiResponse<StorePriceUpdateTaskSettings>>(`${API_BASE}/settings`, { signal: options.signal })
+  return normalizeSettings(unwrapApiData(response))
+}
+
+/** 保存超期天数；超出范围时后端返回 400 与中文提示，由 request 抛出的错误信息原样带出。 */
+export async function updateStorePriceUpdateTaskSettings(overdueDays: number): Promise<StorePriceUpdateTaskSettings> {
+  const response = await request.put<ApiResponse<StorePriceUpdateTaskSettings>>(`${API_BASE}/settings`, { overdueDays })
+  return normalizeSettings(unwrapApiData(response))
+}
+
 export async function previewPriceNotification(
   params: { productCode: string; retailPrice?: number; suggestedDiscountSpecified: boolean; suggestedDiscountRate?: number | null },
   options: ReadOptions = {},

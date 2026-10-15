@@ -79,6 +79,8 @@ internal sealed class SchemaMigrationCoordinator
     internal const string AppPushMigrationId = "20261017.001-app-push";
     internal const string UserLoginRestrictionMigrationId =
         "20261017.002-user-login-restriction";
+    internal const string StorePriceUpdateSettingMigrationId =
+        "20261017.003-store-price-update-setting";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -284,6 +286,11 @@ internal sealed class SchemaMigrationCoordinator
             UserLoginRestrictionMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyUserLoginRestrictionAsync(cancellationToken)
+        ),
+        new(
+            StorePriceUpdateSettingMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyStorePriceUpdateSettingAsync(cancellationToken)
         ),
     ];
 

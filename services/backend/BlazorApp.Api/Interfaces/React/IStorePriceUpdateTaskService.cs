@@ -153,6 +153,22 @@ public interface IStorePriceUpdateTaskService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// 读取页面设置（任务超期天数）。设置表不存在或没有记录时返回配置默认值（IsCustomized=false），不会抛错。
+    /// </summary>
+    Task<StorePriceUpdateTaskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 保存页面设置。超天数范围（1～90）抛 <see cref="ArgumentOutOfRangeException"/>，设置表尚未创建抛
+    /// <see cref="InvalidOperationException"/>（需先执行 --schema=migrate）。保存后缓存立即失效，
+    /// 移动端锁定 / 红标与 Web 监控页下一次请求就按新天数计算；任务本身的创建时间不变，不会重新计时。
+    /// </summary>
+    Task<StorePriceUpdateTaskSettingsDto> UpdateSettingsAsync(
+        UpdateStorePriceUpdateTaskSettingsRequestDto request,
+        string actorDisplayName,
+        CancellationToken cancellationToken = default
+    );
+
     Task<StorePriceUpdateTaskSummaryDto> GetSummaryAsync(
         StorePriceUpdateTaskQueryDto query,
         CancellationToken cancellationToken = default

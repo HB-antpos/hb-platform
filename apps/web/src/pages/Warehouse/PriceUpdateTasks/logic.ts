@@ -303,6 +303,43 @@ export function describeCancelInfo(
   return lines
 }
 
+// ---------- 任务超期天数设置 ----------
+
+export type OverdueDaysInvalidReason = 'empty' | 'notInteger' | 'tooSmall' | 'tooLarge'
+export type OverdueDaysValidation = { ok: true; value: number } | { ok: false; reason: OverdueDaysInvalidReason }
+
+// 字符串只接受「可选负号 + 数字 + 可选小数」，避免 Number() 把 0x10、1e1 之类当成合法天数。
+const PLAIN_NUMBER_PATTERN = /^-?\d+(?:\.\d+)?$/
+
+/**
+ * 校验超期天数输入（数字或数字字符串）：必须是 [min, max] 内的整数。
+ * 判断顺序：空 → 非整数（含 NaN、Infinity、非数字文本）→ 过小 → 过大；
+ * 所以 0.5 报「非整数」而不是「过小」，先让用户改成整数再看范围。
+ */
+export function validateOverdueDays(value: unknown, range: { min: number; max: number }): OverdueDaysValidation {
+  let parsed: number
+  if (value === null || value === undefined) return { ok: false, reason: 'empty' }
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) return { ok: false, reason: 'empty' }
+    if (!PLAIN_NUMBER_PATTERN.test(text)) return { ok: false, reason: 'notInteger' }
+    parsed = Number(text)
+  } else if (typeof value === 'number') {
+    parsed = value
+  } else {
+    return { ok: false, reason: 'notInteger' }
+  }
+  if (!Number.isInteger(parsed)) return { ok: false, reason: 'notInteger' }
+  if (parsed < range.min) return { ok: false, reason: 'tooSmall' }
+  if (parsed > range.max) return { ok: false, reason: 'tooLarge' }
+  return { ok: true, value: parsed }
+}
+
+/** 输入值是否与当前生效值不同；空、NaN 等无法比较的输入视为未变化（由 validateOverdueDays 负责拦截）。 */
+export function isOverdueDaysChanged(next: number | null | undefined, current: number): boolean {
+  return typeof next === 'number' && Number.isFinite(next) && next !== current
+}
+
 export type TableSortOrder ='ascend' | 'descend' | null | undefined
 
 /**
