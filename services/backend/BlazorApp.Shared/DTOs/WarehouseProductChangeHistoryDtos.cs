@@ -15,6 +15,12 @@ public sealed class WarehouseProductChangeHistoryContextDto
     public string? ActorName { get; init; }
     public string? ActorType { get; init; }
     public DateTime? OccurredAtUtc { get; init; }
+
+    /// <summary>
+    /// 为 true 时，本次改动不触发分店价格更新任务（操作人取消勾选「生成价格任务」）。
+    /// 默认 false，已有调用保持原行为。
+    /// </summary>
+    public bool SkipPriceTasks { get; init; }
 }
 
 /// <summary>

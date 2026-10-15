@@ -30,7 +30,8 @@ internal sealed record ProductWarehouseSliceContext(
     IDataSyncFullService DataSyncFullService,
     IWarehouseProductChangeHistoryService ChangeHistoryService,
     ITranslationService? TranslationService,
-    IStorePriceUpdateTaskService? PriceTaskService = null
+    IStorePriceUpdateTaskService? PriceTaskService = null,
+    IWarehouseStorePriceHqSyncEnqueuer? HqPriceSyncEnqueuer = null
 );
 
 internal abstract class ProductWarehouseSliceBase
@@ -38,6 +39,10 @@ internal abstract class ProductWarehouseSliceBase
     protected const int PickingLocationType = 1;
     protected const string SystemUpdatedBy = "System";
     protected const string MobileWarehousePricePatchUpdatedBy = "MobileWarehousePricePatch";
+    // HQ 同步 outbox 的来源标识：区分「Web 完整编辑」「单字段改价（Web PATCH / 移动端仓库维护）」与「批量修改」。
+    protected const string WarehouseFullUpdateHqSource = "warehouse-product-full-update";
+    protected const string WarehousePricePatchHqSource = "warehouse-product-price-patch";
+    protected const string WarehouseBatchUpdateHqSource = "warehouse-product-batch-update";
 
     protected readonly SqlSugarContext _context;
     // Feature 仅依赖抽象日志接口，禁止反向依赖 React 兼容门面类型。
@@ -48,6 +53,7 @@ internal abstract class ProductWarehouseSliceBase
     protected readonly IWarehouseProductChangeHistoryService _changeHistoryService;
     protected readonly ITranslationService? _translationService;
     protected readonly IStorePriceUpdateTaskService? _priceTaskService;
+    protected readonly IWarehouseStorePriceHqSyncEnqueuer? _hqPriceSyncEnqueuer;
 
     protected ProductWarehouseSliceBase(ProductWarehouseSliceContext context)
     {
@@ -59,6 +65,7 @@ internal abstract class ProductWarehouseSliceBase
         _changeHistoryService = context.ChangeHistoryService;
         _translationService = context.TranslationService;
         _priceTaskService = context.PriceTaskService;
+        _hqPriceSyncEnqueuer = context.HqPriceSyncEnqueuer;
     }
 
     protected sealed record ImportProductNameResolution(
@@ -233,7 +240,9 @@ internal abstract class ProductWarehouseSliceBase
         string actorName,
         Guid? batchGuid = null,
         string? sourceReference = null,
-        string? actorUserGuid = null
+        string? actorUserGuid = null,
+        // 操作人取消勾选「生成价格任务」时为 true：本次改动不触发分店价格更新任务。
+        bool skipPriceTasks = false
     )
     {
         var normalizedCodes = productCodes
@@ -258,6 +267,7 @@ internal abstract class ProductWarehouseSliceBase
                 BatchGuid = batchGuid,
                 ActorUserGuid = actorUserGuid,
                 ActorName = ResolveUpdatedBy(actorName),
+                SkipPriceTasks = skipPriceTasks,
             }
         );
     }
@@ -268,10 +278,11 @@ internal abstract class ProductWarehouseSliceBase
     /// </summary>
     protected async Task RecordStorePriceOverwritesAsync(
         IReadOnlyCollection<StorePriceOverwrite> overwrites,
-        string updatedBy
+        string updatedBy,
+        bool generateTasks = true
     )
     {
-        if (_priceTaskService == null || overwrites.Count == 0)
+        if (!generateTasks || _priceTaskService == null || overwrites.Count == 0)
         {
             return;
         }
@@ -294,9 +305,12 @@ internal abstract class ProductWarehouseSliceBase
         decimal? purchasePrice,
         decimal? retailPrice,
         DateTime now,
-        string updatedBy
+        string updatedBy,
+        // 仅对零售价覆盖生效：不生成任务就不登记待换标签；不生成任务又直接改了分店价则当下同步 HQ。
+        WarehousePriceSyncPolicy? policy = null
     )
     {
+        var effectivePolicy = policy ?? WarehousePriceSyncPolicy.Default;
         if (string.IsNullOrWhiteSpace(product.ProductCode))
         {
             return;
@@ -375,7 +389,11 @@ internal abstract class ProductWarehouseSliceBase
                 update = update.SetColumns(price => price.StoreRetailPriceValue == retailPrice);
             }
             await update.ExecuteCommandAsync();
-            await RecordStorePriceOverwritesAsync(overwrittenPrices, updatedBy);
+            await RecordStorePriceOverwritesAsync(
+                overwrittenPrices,
+                updatedBy,
+                effectivePolicy.GenerateTasks
+            );
         }
 
         var insertPrices = activeStoreCodes
@@ -405,5 +423,44 @@ internal abstract class ProductWarehouseSliceBase
         {
             await _context.Db.Insertable(insertPrices).ExecuteCommandAsync();
         }
+
+        // 只有「直接改了分店零售价、又不生成价格任务」才需要在改价当下同步 HQ：
+        // 生成任务时 HQ 随分店店员执行任务（换标签 / 改价）再同步，未执行的分店 HQ 保持不变。
+        if (
+            retailPrice.HasValue
+            && effectivePolicy.ShouldSyncHqImmediately
+            && (existingPrices.Any() || insertPrices.Any())
+        )
+        {
+            await EnqueueStorePriceHqSyncAsync(
+                product.ProductCode,
+                activeStoreCodes,
+                new[] { ProductMaintenanceHqFieldMasks.StoreRetailPrice },
+                updatedBy,
+                WarehousePricePatchHqSource
+            );
+        }
     }
+
+    /// <summary>
+    /// 仓库改写分店价后，在同一事务内登记「分店价 → HQ」同步任务。
+    /// 与「待换标签」通知不同，这里不吞异常：入队失败必须让整笔改价一起回滚，否则 HBweb 与 HQ 会悄悄分叉。
+    /// </summary>
+    protected Task EnqueueStorePriceHqSyncAsync(
+        string productCode,
+        IEnumerable<string?> storeCodes,
+        IReadOnlyCollection<string> fieldMask,
+        string updatedBy,
+        string source
+    ) =>
+        _hqPriceSyncEnqueuer == null
+            ? Task.CompletedTask
+            : _hqPriceSyncEnqueuer.EnqueueAsync(
+                _context.Db,
+                productCode,
+                storeCodes,
+                fieldMask,
+                updatedBy,
+                source
+            );
 }

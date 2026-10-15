@@ -300,7 +300,9 @@ internal sealed class ProductWarehouseMobileSlice
             "RRP"
         );
         var shouldSyncStorePurchasePrice = syncedPurchasePrice.HasValue;
-        var shouldSyncStoreRetailPrice = dto.SyncStoreRetailPrices == true
+        // 不传 = 同步（统一默认勾选）；旧版 App 会显式传 false，行为保持「不动分店价」。
+        var priceSyncPolicy = WarehousePriceSyncPolicy.From(dto.SyncStoreRetailPrices, dto.GenerateTasks);
+        var shouldSyncStoreRetailPrice = priceSyncPolicy.SyncStoreRetailPrices
             && syncedRetailPrice.HasValue;
 
         if (syncedPurchasePrice.HasValue)
@@ -645,7 +647,8 @@ internal sealed class ProductWarehouseMobileSlice
                     purchasePrice: null,
                     retailPrice: syncedRetailPrice,
                     now,
-                    MobileWarehousePricePatchUpdatedBy
+                    MobileWarehousePricePatchUpdatedBy,
+                    priceSyncPolicy
                 );
             }
 
@@ -670,7 +673,8 @@ internal sealed class ProductWarehouseMobileSlice
                 new[] { productCode },
                 action: "Patch",
                 source: "MobileWarehouse",
-                actorName: effectiveUpdatedBy
+                actorName: effectiveUpdatedBy,
+                skipPriceTasks: !priceSyncPolicy.GenerateTasks
             );
 
             await _context.Db.Ado.CommitTranAsync();

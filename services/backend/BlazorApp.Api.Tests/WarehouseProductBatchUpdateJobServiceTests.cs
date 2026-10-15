@@ -504,6 +504,87 @@ public sealed class WarehouseProductBatchUpdateJobServiceTests
         );
     }
 
+    [Fact]
+    public async Task 启动任务_仅价格开关不同时不得复用正在执行的Job且开关走带选项重载()
+    {
+        var release = new TaskCompletionSource<WarehouseProductBatchUpdateResultDto>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var captured = new List<(bool? Sync, bool? Tasks)>();
+        // Strict：只改了价格开关（没有图片、没有供货说明）时若仍走旧的无选项重载，调用会直接失败。
+        var localService = new Mock<IProductWarehouseReactService>(MockBehavior.Strict);
+        localService
+            .Setup(service => service.BatchUpdateAsync(
+                It.IsAny<List<UpdateItemDto>>(),
+                It.IsAny<string?>(),
+                It.IsAny<WarehouseProductBatchUpdateOptionsDto>()
+            ))
+            .Returns((List<UpdateItemDto> _, string? _, WarehouseProductBatchUpdateOptionsDto options) =>
+            {
+                lock (captured)
+                {
+                    captured.Add((options.SyncStoreRetailPrices, options.GenerateTasks));
+                    return captured.Count == 1
+                        ? release.Task
+                        : Task.FromResult(new WarehouseProductBatchUpdateResultDto { Success = true, SuccessCount = 1 });
+                }
+            });
+        var service = CreateService(localService.Object, Mock.Of<IProductHqSyncService>());
+
+        var first = await service.StartJobAsync(CreatePriceJobRequest(syncStoreRetailPrices: false, generateTasks: true), "操作员甲");
+        var second = await service.StartJobAsync(CreatePriceJobRequest(syncStoreRetailPrices: true, generateTasks: false), "操作员甲");
+
+        // 同样的商品与零售价、只是开关不同：若被合并，第二次的选择会被静默丢弃。
+        Assert.NotEqual(first.JobId, second.JobId);
+        Assert.False(second.IsDuplicateRequest);
+        release.SetResult(new WarehouseProductBatchUpdateResultDto { Success = true, SuccessCount = 1 });
+        await WaitForJobAsync(service, first.JobId);
+        await WaitForJobAsync(service, second.JobId);
+        Assert.Equal(
+            new[] { (false, true), (true, false) }.OrderBy(x => x.Item1).ToArray(),
+            captured.Select(x => (x.Sync == true, x.Tasks == true)).OrderBy(x => x.Item1).ToArray()
+        );
+    }
+
+    [Fact]
+    public async Task 启动任务_价格开关与默认值一致时按相同请求复用Job()
+    {
+        var release = new TaskCompletionSource<WarehouseProductBatchUpdateResultDto>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var localService = new Mock<IProductWarehouseReactService>();
+        localService
+            .Setup(service => service.BatchUpdateAsync(It.IsAny<List<UpdateItemDto>>(), It.IsAny<string?>()))
+            .Returns(release.Task.ContinueWith(task => new BatchOperationResultDto
+            {
+                Success = task.Result.Success,
+                SuccessCount = task.Result.SuccessCount,
+            }));
+        var service = CreateService(localService.Object, Mock.Of<IProductHqSyncService>());
+
+        // 旧客户端不传开关：两次完全相同的请求仍然合并为同一个任务（指纹不因新字段而变）。
+        var first = await service.StartJobAsync(CreatePriceJobRequest(null, null), "操作员甲");
+        var second = await service.StartJobAsync(CreatePriceJobRequest(null, null), "操作员甲");
+
+        Assert.Equal(first.JobId, second.JobId);
+        Assert.True(second.IsDuplicateRequest);
+        release.SetResult(new WarehouseProductBatchUpdateResultDto { Success = true, SuccessCount = 1 });
+        await WaitForJobAsync(service, first.JobId);
+    }
+
+    private static WarehouseProductBatchUpdateJobRequestDto CreatePriceJobRequest(
+        bool? syncStoreRetailPrices,
+        bool? generateTasks
+    )
+    {
+        return new WarehouseProductBatchUpdateJobRequestDto
+        {
+            Items = [new UpdateItemDto { ProductCode = "P-PRICE", OEMPrice = 9.99m }],
+            SyncStoreRetailPrices = syncStoreRetailPrices,
+            GenerateTasks = generateTasks,
+        };
+    }
+
     private static WarehouseProductBatchUpdateJobRequestDto CreateDelistJobRequest(string storeNote)
     {
         return new WarehouseProductBatchUpdateJobRequestDto

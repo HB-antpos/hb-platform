@@ -359,6 +359,8 @@ namespace BlazorApp.Api.Controllers.React
                     ImageBaseUrl = request.ImageBaseUrl,
                     SyncImageToHq = request.SyncImageToHq,
                     SupplyNotice = request.SupplyNotice,
+                    SyncStoreRetailPrices = request.SyncStoreRetailPrices,
+                    GenerateTasks = request.GenerateTasks,
                 };
                 if (options.GenerateImageUrls)
                 {
@@ -379,8 +381,12 @@ namespace BlazorApp.Api.Controllers.React
 
                 var currentUsername = GetCurrentUsername();
                 WarehouseProductBatchUpdateResultDto resp;
-                // 带供货说明的下架也必须走带选项的重载，否则说明会在旧重载里被丢弃。
-                if (options.GenerateImageUrls || options.SupplyNotice != null)
+                // 带供货说明的下架、或取消了价格开关，也必须走带选项的重载，否则会在旧重载里被丢弃。
+                if (
+                    options.GenerateImageUrls
+                    || options.SupplyNotice != null
+                    || options.UsesNonDefaultPriceSync
+                )
                 {
                     resp = await _service.BatchUpdateAsync(
                         request.Items,
@@ -508,6 +514,8 @@ namespace BlazorApp.Api.Controllers.React
                         ImageBaseUrl = request.ImageBaseUrl,
                         SyncImageToHq = request.SyncImageToHq,
                         SupplyNotice = request.SupplyNotice,
+                        SyncStoreRetailPrices = request.SyncStoreRetailPrices,
+                        GenerateTasks = request.GenerateTasks,
                     },
                     GetCurrentUsername(),
                     cancellationToken
@@ -1279,6 +1287,12 @@ namespace BlazorApp.Api.Controllers.React
             /// 是否同步更新分店进货价；为空时保持旧行为。
             /// </summary>
             public bool? SyncStorePurchasePrice { get; set; }
+
+            /// <summary>同步分店零售价（默认 true）：本次改了零售价的商品，直接把各启用分店零售价改成新价。</summary>
+            public bool? SyncStoreRetailPrices { get; set; }
+
+            /// <summary>生成价格任务（默认 true）：勾选 = 给分店生成价格更新任务；不勾 = 不通知分店。</summary>
+            public bool? GenerateTasks { get; set; }
 
             /// <summary>
             /// 是否按数据库中的货号批量覆盖商品图片地址。

@@ -5504,6 +5504,10 @@ export default function ContainerDetailPage() {
         const warehouseResult = await batchUpdateWarehouseProducts(warehouseUpdates, {
           // 货柜页已把分店进货价拆成独立勾选项，避免主表进口价默认联动分店表。
           syncStorePurchasePrice: shouldUpdate('storePurchasePrice'),
+          // 分店零售价在本页由独立的「分店零售价」勾选项经 upsertRetailForActiveStores 单独处理，
+          // 这里显式不让后端联动分店零售价，保持原有行为；generateTasks 取与后端默认一致的 true。后端不传即两项都按 true 处理，所以必须显式传 false。
+          syncStoreRetailPrices: false,
+          generateTasks: true,
         })
         const warehouseFailedCount = Number(
           warehouseResult.failedCount
@@ -5587,7 +5591,8 @@ export default function ContainerDetailPage() {
     try {
       const result = await batchUpdateWarehouseProducts(
         updates.map((item): WarehouseProductBatchUpdateItem => ({ ProductCode: item.productCode, ImportPrice: item.importPrice })),
-        { syncStorePurchasePrice: false },
+        // 只改进货价，不涉及零售价；显式固定零售价同步开关，避免依赖后端默认值。
+        { syncStorePurchasePrice: false, syncStoreRetailPrices: false, generateTasks: true },
       )
       const failedCount = Number(result.failedCount ?? result.FailedCount ?? result.failed ?? result.Failed ?? 0)
       if (failedCount > 0) {

@@ -436,7 +436,11 @@ public sealed class WarehouseProductChangeHistoryService : IWarehouseProductChan
             .Insertable(histories)
             .PageSize(HistoryInsertPageSize)
             .ExecuteCommandAsync();
-        await NotifyStorePriceChangesAsync(priceChangedCodes, context, actor.Name, occurredAtUtc, cancellationToken);
+        // 操作人取消勾选「生成价格任务」时只记审计，不触发分店价格更新任务。
+        if (!context.SkipPriceTasks)
+        {
+            await NotifyStorePriceChangesAsync(priceChangedCodes, context, actor.Name, occurredAtUtc, cancellationToken);
+        }
         return histories.Count;
     }
 

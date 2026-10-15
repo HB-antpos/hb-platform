@@ -1231,6 +1231,7 @@ builder.Services.Configure<ProductHqSyncOutboxOptions>(
 );
 builder.Services.AddScoped<IProductHqSyncOutboxQueue, ProductHqSyncOutboxQueue>();
 builder.Services.AddScoped<IProductMaintenanceHqProjectionWriter, ProductMaintenanceHqProjectionWriter>();
+builder.Services.AddScoped<IWarehouseStorePriceHqSyncEnqueuer, WarehouseStorePriceHqSyncEnqueuer>(); // 仓库改价 → HQ outbox 入队
 builder.Services.AddScoped<IProductHqSyncOutboxExecutor, ProductMaintenanceHqSyncOutboxExecutor>();
 builder.Services.AddHostedService<ProductHqSyncOutboxWorker>();
 builder.Services.AddScoped<IWarehouseStorePriceSyncService, WarehouseStorePriceSyncService>();

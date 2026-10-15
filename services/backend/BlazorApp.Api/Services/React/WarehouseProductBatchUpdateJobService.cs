@@ -177,10 +177,16 @@ public sealed class WarehouseProductBatchUpdateJobService
             ImageBaseUrl = request.ImageBaseUrl,
             SyncImageToHq = request.SyncImageToHq,
             SupplyNotice = request.SupplyNotice,
+            SyncStoreRetailPrices = request.SyncStoreRetailPrices,
+            GenerateTasks = request.GenerateTasks,
         };
         WarehouseProductBatchUpdateResultDto result;
-        // 带供货说明时必须走带选项的重载，旧重载不会把说明传到写入器。
-        if (options.GenerateImageUrls || options.SupplyNotice != null)
+        // 带供货说明、或取消了价格开关时必须走带选项的重载，旧重载不会把它们传到写入器。
+        if (
+            options.GenerateImageUrls
+            || options.SupplyNotice != null
+            || options.UsesNonDefaultPriceSync
+        )
         {
             result = await localService.BatchUpdateAsync(request.Items, updatedBy, options);
         }
@@ -459,7 +465,11 @@ public sealed class WarehouseProductBatchUpdateJobService
             + $"|image={request.GenerateImageUrls}"
             + $"|base={request.ImageBaseUrl}"
             + $"|hq={request.SyncImageToHq}"
-            + $"|notice={BuildSupplyNoticeOperationPart(request.SupplyNotice)}";
+            + $"|notice={BuildSupplyNoticeOperationPart(request.SupplyNotice)}"
+            // 价格开关纳入去重指纹：只有开关不同的两次提交不能被合并成同一个任务。
+            // 仅在显式传值时追加，保持旧客户端请求的指纹不变。
+            + (request.SyncStoreRetailPrices.HasValue ? $"|syncRetail={request.SyncStoreRetailPrices.Value}" : "")
+            + (request.GenerateTasks.HasValue ? $"|tasks={request.GenerateTasks.Value}" : "");
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return $"warehouse-product-batch-update:{Convert.ToHexString(hash).ToLowerInvariant()}";
     }
@@ -545,6 +555,8 @@ public sealed class WarehouseProductBatchUpdateJobService
             ImageBaseUrl = request.ImageBaseUrl,
             SyncImageToHq = request.SyncImageToHq,
             SupplyNotice = CloneSupplyNotice(request.SupplyNotice),
+            SyncStoreRetailPrices = request.SyncStoreRetailPrices,
+            GenerateTasks = request.GenerateTasks,
         };
     }
 
