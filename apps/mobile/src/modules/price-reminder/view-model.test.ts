@@ -56,17 +56,16 @@ const locked = buildPriceReminderViewModel({
 });
 assert.ok(locked);
 assert.equal(locked.variant, "multi");
-assert.equal(locked.totalPending, 190);
-assert.equal(locked.storeCount, 4);
+assert.equal(locked.totalPending, 170, "合计只算管理分店 A 128 + C 42；B 是只能查看的关联分店，不计入");
+assert.equal(locked.storeCount, 3, "「共管理 N 家分店」的 N 只数管理分店（A、C、D）");
 assert.deepEqual(locked.lock, { overdueCount: 28 }, "锁定框的超期数只算管理分店（15 + 13），不含 B 的 9");
 assert.deepEqual(
   locked.rows.map((item) => item.storeCode),
-  ["A", "C", "B", "D"],
-  "管理分店有超期的先（超期多的在前），再按待办数，全部完成的最后"
+  ["A", "C", "D"],
+  "弹窗只列管理分店；有超期的先（超期多的在前），全部完成的最后；只能查看的 B 不出现"
 );
 assert.equal(locked.rows[0].isCurrent, true);
-assert.equal(locked.rows[2].overdueCount, 0, "B 店不是管理分店，超期不标红");
-assert.equal(locked.rows[3].done, true);
+assert.equal(locked.rows[2].done, true);
 assert.deepEqual(
   locked.primaryAction,
   { kind: "overdue", storeCode: "A", overdueOnly: true },
@@ -82,6 +81,8 @@ const unlocked = buildPriceReminderViewModel({
 assert.ok(unlocked);
 assert.equal(unlocked.lock, null);
 assert.deepEqual(unlocked.primaryAction, { kind: "default", storeCode: "C", overdueOnly: false });
+assert.deepEqual(unlocked.rows.map((item) => item.storeCode), ["C", "A"], "B 是只能查看的分店，不进弹窗");
+assert.equal(unlocked.totalPending, 9);
 
 // ---- 只有关联分店超期：不锁，也不标红 ----
 const viewOnlyOverdue = buildPriceReminderViewModel({
@@ -93,6 +94,26 @@ assert.ok(viewOnlyOverdue);
 assert.equal(viewOnlyOverdue.lock, null);
 assert.equal(viewOnlyOverdue.primaryAction.kind, "default");
 assert.ok(viewOnlyOverdue.rows.every((item) => item.overdueCount === 0));
+assert.deepEqual(viewOnlyOverdue.rows.map((item) => item.storeCode), ["A"], "只能查看的 B 不出现在弹窗里");
+assert.equal(viewOnlyOverdue.variant, "single", "只剩一家管理分店时用单店布局，不必列一行的列表");
+assert.equal(viewOnlyOverdue.single?.storeCode, "A");
+
+// ---- 账号只有只能查看的关联分店：就算有待办也不提醒 ----
+assert.equal(
+  buildPriceReminderViewModel({
+    overview: buildPriceTaskOverview({
+      summary: { stores: [row("B", { pendingLabelOnlyCount: 5, overdueCount: 4 })], overdueDays: 7 },
+      stores: [{ storeCode: "B", storeName: "Store B", isPrimary: false }],
+      isDeviceMode: false,
+      deviceBoundStore: null,
+      isAdmin: false,
+    }),
+    currentStoreCode: "B",
+    isDeviceMode: false,
+  }),
+  null,
+  "没有任何管理分店：这些待办不归这位账号负责，不弹提醒"
+);
 
 // ---- 单分店账号：用单店布局，标题口径按两类数量决定 ----
 function singleAccount(patch: Partial<StorePriceUpdateStoreSummary>) {

@@ -57,7 +57,9 @@ assert.deepEqual(mixed.manageableStoreCodes, ["A", "C"], "非管理员 = isPrima
 assert.equal(mixed.manageableOverdueCount, 2, "B 店的 5 项超期不计入：它不是这位店长管理的分店");
 assert.equal(mixed.reportsLocked, true);
 assert.equal(mixed.firstOverdueStoreCode, "C");
-assert.equal(mixed.totalPending, 9, "角标合计 = 名下全部分店（含只能查看的 B）");
+assert.deepEqual(mixed.rows.map((item) => item.storeCode), ["A", "B", "C"], "rows 仍是名下全部可见分店：价格页分店条要看到 B 的数量");
+assert.deepEqual(mixed.managedRows.map((item) => item.storeCode), ["A", "C"], "managedRows 只含管理分店，弹窗只列它们");
+assert.equal(mixed.totalPending, 5, "角标 / 提醒合计只算管理分店（A 3 + C 2）；只能查看的 B 的 4 项不算");
 
 const onlyViewOnlyOverdue = buildPriceTaskOverview({
   ...base,
@@ -75,6 +77,18 @@ const multiOverdue = buildPriceTaskOverview({
 assert.equal(multiOverdue.firstOverdueStoreCode, "A");
 assert.equal(multiOverdue.manageableOverdueCount, 6);
 
+// ---- 只有只读关联分店：没有任何管理分店 → 不提醒、不计角标，但分店条的数据还在 ----
+const viewOnly = buildPriceTaskOverview({
+  ...base,
+  stores: [{ storeCode: "B", storeName: "Store B", isPrimary: false }],
+  summary: summary([row("B", { pendingLabelOnlyCount: 6, overdueCount: 3 })]),
+});
+assert.equal(viewOnly.ready, true);
+assert.deepEqual(viewOnly.managedRows, []);
+assert.equal(viewOnly.totalPending, 0, "全是只能查看的分店：没有要这位账号负责的待办");
+assert.equal(viewOnly.reportsLocked, false);
+assert.equal(viewOnly.rows.length, 1, "价格页的分店条仍能看到这家分店的数量");
+
 // ---- 管理员不豁免：管理分店 = 他可见的全部分店 ----
 const admin = buildPriceTaskOverview({
   ...base,
@@ -82,6 +96,7 @@ const admin = buildPriceTaskOverview({
   summary: summary([row("B", { pendingLabelOnlyCount: 2, overdueCount: 2 })]),
 });
 assert.deepEqual(admin.manageableStoreCodes, ["A", "B", "C"]);
+assert.deepEqual(admin.managedRows.map((item) => item.storeCode), ["B"], "管理员的管理分店 = 可见全部，汇总里有哪家就列哪家");
 assert.equal(admin.reportsLocked, true, "管理员不豁免：B 店超期也会锁");
 
 // ---- 设备（PDA）：没有报表入口，永不锁定；管理分店 = 绑定分店 ----
@@ -95,6 +110,8 @@ const device = buildPriceTaskOverview({
 });
 assert.deepEqual(device.manageableStoreCodes, ["A"]);
 assert.equal(device.manageableOverdueCount, 3, "PDA 的超期要统计出来（弹窗里显示红色提示行）");
+assert.equal(device.totalPending, 5, "PDA 绑定分店就是它的管理分店，待办照常计入");
+assert.deepEqual(device.managedRows.map((item) => item.storeCode), ["A"]);
 assert.equal(device.reportsLocked, false, "设备永不锁定任何功能");
 
 // ---- 分店列表还没加载：没有管理分店，不会误锁 ----

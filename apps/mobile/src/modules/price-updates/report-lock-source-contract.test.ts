@@ -48,6 +48,14 @@ assert.match(host, /AppState\.addEventListener\("change"/, "回到前台先刷�
 assert.match(host, /isPriceLabelPrintBusy\(\)/, "打印中不弹");
 assert.match(host, /AppAsyncStorage\.setString\(/, "弹出时间记在本机");
 
+// ---- 弹窗只列管理分店；分店条仍用全部可见分店的 rows ----
+assert.match(
+  read("src/modules/price-reminder/view-model.ts"),
+  /sortStoreSummaries\(overview\.managedRows,/,
+  "每小时提醒弹窗只列店长管理的分店，只能查看的关联分店不进弹窗"
+);
+assert.match(screen, /priceTasks\.rows\.map\(/, "价格页分店条仍用名下全部可见分店的数据");
+
 // ---- 后端接口路径与前端一致 ----
 const api = read("src/modules/price-updates/api.ts");
 assert.match(api, /price-update-tasks\/summary/);

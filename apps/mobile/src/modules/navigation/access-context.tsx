@@ -6,7 +6,7 @@ export interface AppNavigationAccessValue {
   navigationErrorMessage: string | null;
   navigationLoading: boolean;
   pendingProfileReviewCount: number;
-  /** 价格和标签未完成任务合计（账号 = 名下全部分店，设备 = 绑定分店），用于工作台入口角标。 */
+  /** 价格和标签未完成任务合计（账号 = 管理分店合计，设备 = 绑定分店），用于工作台入口角标。 */
   pendingPriceUpdateCount: number;
   /**
    * 价格和标签任务概览：每家分店的未完成 / 超期数，以及「管理分店有超期 → 报表锁定」的判定。

@@ -12,10 +12,18 @@ export const DEFAULT_OVERDUE_DAYS = 7;
 export interface PriceTaskOverview {
   /** 汇总已拿到。没拿到（加载中 / 接口失败）时一律不提醒、不锁定：接口故障不能把人挡在报表外。 */
   ready: boolean;
-  /** 账号 / 设备可访问的全部分店（后端口径）。 */
+  /**
+   * 账号名下全部可见分店（含只能查看的关联分店）的汇总行。「价格和标签」页顶部的分店条用它：
+   * 在页面里切到只能查看的分店，数量仍然要看得到。
+   */
   rows: StorePriceUpdateStoreSummary[];
+  /**
+   * 其中「管理分店」的汇总行。每小时提醒弹窗只列这些分店：只能查看的关联分店不是这位店长的责任，
+   * 不该打扰他（用户 10-16 明确：弹窗也只显示管理分店）。
+   */
+  managedRows: StorePriceUpdateStoreSummary[];
   overdueDays: number;
-  /** 全部可访问分店的未完成合计，用于工作台角标。 */
+  /** 管理分店的未完成合计：工作台角标和「要不要弹提醒」都看它，与弹窗里显示的数字一致。 */
   totalPending: number;
   /** 本人「管理分店」里已超期的任务合计（锁报表只看它，不含只能查看的关联分店）。 */
   manageableOverdueCount: number;
@@ -29,6 +37,7 @@ export interface PriceTaskOverview {
 export const EMPTY_PRICE_TASK_OVERVIEW: PriceTaskOverview = {
   ready: false,
   rows: [],
+  managedRows: [],
   overdueDays: DEFAULT_OVERDUE_DAYS,
   totalPending: 0,
   manageableOverdueCount: 0,
@@ -77,8 +86,9 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
   return {
     ready: true,
     rows,
+    managedRows: manageableRows,
     overdueDays: input.summary.overdueDays > 0 ? input.summary.overdueDays : DEFAULT_OVERDUE_DAYS,
-    totalPending: rows.reduce((sum, row) => sum + row.pendingCount, 0),
+    totalPending: manageableRows.reduce((sum, row) => sum + row.pendingCount, 0),
     manageableOverdueCount,
     manageableStoreCodes,
     reportsLocked: !input.isDeviceMode && manageableOverdueCount > 0,
