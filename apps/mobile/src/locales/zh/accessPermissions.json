@@ -809,6 +809,10 @@
       "name": "查看用户",
       "description": "移动端「员工列表」「用户管理」与用户查询接口 - 查看用户列表与详情；Web 后台 /system/users 菜单另由 Users.ViewWebConsole 控制"
     },
+    "Users.ViewStoreStaff": {
+      "name": "查看本店员工",
+      "description": "移动端「员工管理」- 查看本店店员列表与详情（不含 Web 全局用户管理）"
+    },
     "Users.ViewWebConsole": {
       "name": "查看 Web 用户管理",
       "description": "Web 页面 /system/users - 显示并进入 Web 后台用户管理页"

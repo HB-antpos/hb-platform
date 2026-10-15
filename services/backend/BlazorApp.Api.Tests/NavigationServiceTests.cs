@@ -1544,6 +1544,30 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildAppMenu_仅有ViewStoreStaff时只显示员工管理_不显示用户管理()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.Users.ViewStoreStaff));
+
+        var menu = _service.BuildAppMenu(user);
+
+        Assert.Contains(menu, item => item.RouteName == "users");
+        Assert.DoesNotContain(menu, item => item.RouteName == "user-admin");
+    }
+
+    [Fact]
+    public void BuildAppMenu_持有UsersView时经别名同时显示员工管理与用户管理()
+    {
+        var user = CreateUser(new Claim("permission", Permissions.Users.View));
+
+        var menu = _service.BuildAppMenu(user);
+
+        Assert.Contains(menu, item => item.RouteName == "users");
+        Assert.Contains(menu, item => item.RouteName == "user-admin");
+        Assert.Equal(Permissions.Users.ViewStoreStaff, Assert.Single(menu, item => item.RouteName == "users").Permission);
+        Assert.Equal(Permissions.Users.View, Assert.Single(menu, item => item.RouteName == "user-admin").Permission);
+    }
+
+    [Fact]
     public void BuildAppMenu_员工操作日志_老收银或新收银任一查看权限可见()
     {
         var legacyOnly = CreateUser(new Claim("permission", Permissions.LegacyEmployeeLogs.View));
@@ -2085,14 +2109,14 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void StoreUsersGrid_RequiresUsersViewPermission()
+    public void StoreUsersGrid_RequiresViewStoreStaffPermission()
     {
         var authorizeAttribute = GetMethodAuthorizeAttribute(
             typeof(ReactStoreUsersController),
             nameof(ReactStoreUsersController.Grid)
         );
 
-        Assert.Equal(Permissions.Users.View, authorizeAttribute.Policy);
+        Assert.Equal(Permissions.Users.ViewStoreStaff, authorizeAttribute.Policy);
     }
 
     [Fact]

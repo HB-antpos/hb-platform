@@ -270,6 +270,52 @@
       "notFoundDescription": "员工账号可能已被删除或移出你的范围，请返回店员管理刷新。",
       "networkTitle": "账号授权加载失败",
       "networkDescription": "暂时无法连接服务器，请检查网络后重试。"
+    },
+    "copy": {
+      "toOthersAction": "复制给他人",
+      "fromColleagueAction": "从同事复制",
+      "toOthersTitle": "把 {{name}} 的权限复制给…",
+      "fromColleagueTitle": "复制同事的权限给 {{name}}",
+      "subtitle": "本店：{{store}}",
+      "close": "关闭",
+      "searchPlaceholder": "搜索本店店员",
+      "unavailable": "无法确定所属分店，暂时不能选择同事。",
+      "listFailed": "同事列表加载失败",
+      "empty": "本店没有可选的店员（已停用的员工和店长不在此列）。",
+      "noMatch": "没有匹配的店员",
+      "modeTitle": "复制方式",
+      "mode": {
+        "merge": "合并（推荐）",
+        "mergeShort": "合并",
+        "mergeDescription": "保留对方现有的直接权限，再加上来源的直接权限",
+        "replace": "覆盖",
+        "replaceShort": "覆盖",
+        "replaceDescription": "对方的直接权限整体换成来源的直接权限，多出的会被移除"
+      },
+      "help": "只复制「直接权限」；角色权限不复制；你本人不能分配的权限会自动跳过。",
+      "nextToOthers_one": "下一步 · 复制给 {{count}} 人",
+      "nextToOthers_other": "下一步 · 复制给 {{count}} 人",
+      "nextFromColleague": "下一步",
+      "nextIdle": "选择人员后继续",
+      "previewFailed": "无法计算权限变化，请稍后重试",
+      "copyFailed": "复制失败，所有人的权限都没有被改动",
+      "dirtyBlocked": "请先保存或放弃当前未保存的权限修改，再复制权限",
+      "success_one": "已复制，{{count}} 人的权限已更新",
+      "success_other": "已复制，{{count}} 人的权限已更新",
+      "confirm": {
+        "title": "确认复制",
+        "source": "来源：{{name}}",
+        "sourceMeta_one": "{{count}} 项直接权限 · 方式：{{mode}}",
+        "sourceMeta_other": "{{count}} 项直接权限 · 方式：{{mode}}",
+        "changesTitle": "将发生的变化（{{count}} 人）",
+        "noChange": "无变化",
+        "unchanged": "另有 {{count}} 项保持不变",
+        "nothingToCopy": "所选人员的直接权限与来源一致，没有需要复制的内容。",
+        "skippedTitle": "已跳过",
+        "skipped": "「{{names}}」超出你可分配的范围，已自动跳过，不会复制给任何人。",
+        "back": "返回",
+        "submit": "确认复制"
+      }
     }
   },
   "statuses": {
@@ -300,6 +346,15 @@
     "lastLoginValue": "最近登录：{{value}}",
     "lastLoginIpValue": "登录 IP：{{value}}",
     "updatedAtValue": "最近更新：{{value}}"
+  },
+  "list": {
+    "me": "我",
+    "meBadge": "我",
+    "staffSection": "店员（{{count}}）",
+    "sortedByName": "按姓名",
+    "peopleCount_one": "{{count}} 人",
+    "peopleCount_other": "{{count}} 人",
+    "onlyStaffNote": "本页仅显示本店店员与你本人，其他店长的信息不在此显示。"
   },
   "filters": {
     "sortByName": "按姓名排序",

@@ -55,7 +55,7 @@ export const IOS_REVIEW_MENU_ITEMS: ReadonlyArray<AppNavigationMenuItem> = [
   { routeName: "attendance-personal", titleKey: "tabs.attendancePersonal", icon: "calendar-clock", permission: "Attendance.Schedule.ViewSelf", order: 55 },
   { routeName: "attendance-management", titleKey: "tabs.attendanceManagement", icon: "calendar-clock", permission: "Attendance.Schedule.ViewStore", order: 56 },
   { routeName: "seasonal-cards", titleKey: "tabs.seasonalCards", icon: "gift-outline", permission: "SeasonalCards.Remaining.ViewManagedStore", order: 56 },
-  { routeName: "users", titleKey: "tabs.users", icon: "account-group-outline", permission: "Users.View", order: 57 },
+  { routeName: "users", titleKey: "tabs.users", icon: "account-group-outline", permission: "Users.ViewStoreStaff", order: 57 },
   { routeName: "employee-profile", titleKey: "tabs.employeeProfile", icon: "card-account-details-outline", permission: "EmployeeProfiles.View", order: 58 },
   { routeName: "device-management", titleKey: "tabs.deviceManagement", icon: "cellphone-cog", permission: "DeviceRegistration.View", order: 59 },
   { routeName: "reports", titleKey: "tabs.reports", icon: "chart-box-outline", permission: "Reports.ProductMovement.View", order: 59 },

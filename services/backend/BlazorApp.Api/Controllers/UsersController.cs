@@ -588,6 +588,40 @@ namespace BlazorApp.Api.Controllers
         }
 
         /// <summary>
+        /// 把该员工的直接权限复制给其他员工（preview=true 只返回差异）。
+        /// 控制器要求 Users.ManagePosTerminalPermissions（与个人码、POS 权限同一口径）；
+        /// 服务层再按操作者身份（管理员/店长）、目标范围和可委派权限逐项收口。
+        /// </summary>
+        [HttpPost("guid/{guid}/permissions/copy")]
+        [Authorize(Policy = Permissions.Users.ManagePosTerminalPermissions)]
+        public async Task<IActionResult> CopyUserPermissions(
+            string guid,
+            [FromBody] CopyUserPermissionsRequestDto dto
+        )
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(
+                        ApiResponse<CopyUserPermissionsResultDto>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState)
+                    );
+                }
+
+                var result = await _roleService.CopyUserDirectPermissionsAsync(guid, dto);
+                return ToUserAccessActionResult(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "复制用户直接权限失败，UserGUID: {UserGUID}", guid);
+                return StatusCode(
+                    500,
+                    ApiResponse<CopyUserPermissionsResultDto>.Error("服务器内部错误", "INTERNAL_SERVER_ERROR")
+                );
+            }
+        }
+
+        /// <summary>
         /// 为用户分配分店
         /// 关键逻辑：控制器要求 Users.ManageStores，与移除分店接口、前端「分店分配」入口口径一致；
         /// 服务层再按角色（管理员 / 有主分店的店长）与目标分店范围收口。

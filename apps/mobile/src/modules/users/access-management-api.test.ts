@@ -52,6 +52,7 @@ async function run() {
     assignUserAccessRoles,
     assignUserAccessStores,
     assignUserDirectPermissions,
+    copyUserDirectPermissions,
     fetchAccessPermissionCatalog,
     fetchAccessRoleCatalog,
     fetchAccessStoreCatalog,
@@ -64,6 +65,8 @@ async function run() {
     normalizeUserAccessPermissionState,
     normalizeUserAccessPermissionAccess,
     normalizeUserAccessStoreList,
+    normalizeUserDirectPermissionCopyResult,
+    previewCopyUserDirectPermissions,
   } = await import("./access-management-api");
   const {
     accessPermissionCatalogQueryKey,
@@ -186,6 +189,25 @@ async function run() {
   }) as typeof apiClient.get;
   apiClient.post = (async (url: string, body?: unknown) => {
     requests.push({ body, method: "post", url });
+    if (url.endsWith("/permissions/copy")) {
+      const payload = body as { preview: boolean; mode: string };
+      return {
+        data: {
+          success: true,
+          data: {
+            SourceUserGuid: "src/1",
+            Mode: payload.mode,
+            Preview: payload.preview,
+            SourceDirectPermissionCodes: ["A.View", "B.Edit", "C.Manage"],
+            TransferablePermissionCodes: ["A.View", "B.Edit"],
+            SkippedPermissionCodes: ["C.Manage"],
+            Targets: [
+              { UserGuid: "t-1", Added: ["A.View", "B.Edit"], Removed: [], UnchangedCount: 1 },
+            ],
+          },
+        },
+      };
+    }
     return { data: { success: true, data: true } };
   }) as typeof apiClient.post;
 
@@ -346,6 +368,89 @@ async function run() {
         body: { permissions: ["Users.View"] },
       },
     ]);
+    // 复制权限：先预览（preview=true）再写入（preview=false），路径与请求体契约固定。
+    requests.length = 0;
+    const previewResult = await previewCopyUserDirectPermissions({
+      sourceUserGuid: " src/1 ",
+      targetUserGuids: ["t-1", " t-1 ", "SRC/1", "", "t-2"],
+      mode: "merge",
+    });
+    const copyResult = await copyUserDirectPermissions({
+      sourceUserGuid: "src/1",
+      targetUserGuids: ["t-1"],
+      mode: "replace",
+    });
+    assert.deepEqual(requests, [
+      {
+        method: "post",
+        url: "/Users/guid/src%2F1/permissions/copy",
+        body: { targetUserGuids: ["t-1", "t-2"], mode: "merge", preview: true },
+      },
+      {
+        method: "post",
+        url: "/Users/guid/src%2F1/permissions/copy",
+        body: { targetUserGuids: ["t-1"], mode: "replace", preview: false },
+      },
+    ], "目标去重并剔除来源自身；预览与写入只差 preview 标记");
+    assert.equal(previewResult.preview, true);
+    assert.equal(copyResult.preview, false);
+    assert.deepEqual(previewResult, {
+      sourceUserGuid: "src/1",
+      mode: "merge",
+      preview: true,
+      sourceDirectPermissionCodes: ["A.View", "B.Edit", "C.Manage"],
+      transferablePermissionCodes: ["A.View", "B.Edit"],
+      skippedPermissionCodes: ["C.Manage"],
+      targets: [{ userGuid: "t-1", added: ["A.View", "B.Edit"], removed: [], unchangedCount: 1 }],
+    }, "PascalCase 响应被规范化为 camelCase");
+    await assert.rejects(
+      () => previewCopyUserDirectPermissions({ sourceUserGuid: "src/1", targetUserGuids: ["src/1", " "], mode: "merge" }),
+      /Target user GUID is required/,
+      "没有有效目标时不发请求",
+    );
+    await assert.rejects(
+      () => copyUserDirectPermissions({ sourceUserGuid: " ", targetUserGuids: ["t-1"], mode: "merge" }),
+      /User GUID is required/,
+    );
+    await assert.rejects(
+      () => copyUserDirectPermissions({ sourceUserGuid: "src/1", targetUserGuids: ["t-1"], mode: "append" as never }),
+      /Copy mode is invalid/,
+    );
+    assert.equal(requests.length, 2, "非法入参不应产生请求");
+
+    const validCopy = {
+      sourceUserGuid: "s",
+      mode: "merge",
+      preview: true,
+      sourceDirectPermissionCodes: [],
+      transferablePermissionCodes: [],
+      skippedPermissionCodes: [],
+      targets: [{ userGuid: "t", added: [], removed: [], unchangedCount: 0 }],
+    };
+    assert.equal(normalizeUserDirectPermissionCopyResult(validCopy).targets[0]?.userGuid, "t");
+    assert.throws(
+      () => normalizeUserDirectPermissionCopyResult({ success: false, message: "denied" }),
+      /denied/,
+    );
+    assert.throws(
+      () => normalizeUserDirectPermissionCopyResult({ ...validCopy, mode: "other" }),
+      /Invalid access management response/,
+      "未知复制方式视为非法响应",
+    );
+    assert.throws(
+      () => normalizeUserDirectPermissionCopyResult({ ...validCopy, targets: [{ userGuid: "t", added: [], removed: [] }] }),
+      /Invalid access management response/,
+      "缺少 unchangedCount 视为非法响应",
+    );
+    assert.throws(
+      () => normalizeUserDirectPermissionCopyResult({ ...validCopy, preview: "yes" }),
+      /Invalid access management response/,
+    );
+    assert.throws(
+      () => normalizeUserDirectPermissionCopyResult({ ...validCopy, skippedPermissionCodes: "x" }),
+      /Invalid access management response/,
+    );
+
     requests.forEach(({ url }) => {
       assert.equal(url.startsWith("/api"), false, `${url} 不应重复添加 /api`);
     });

@@ -2,6 +2,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Utils;
+using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -57,6 +58,11 @@ namespace BlazorApp.Api.Services.React
                 var keyword = request.Keyword?.Trim();
                 var statusFilter = request.Status;
 
+                // 关键逻辑：员工管理只列本店店员 + 登录店长本人。店长本人行靠「本人 + 店长角色」命中；
+                // 管理员不是店长，不会混入本人行。其他店长（含同时挂了店员角色的）在下方整体剔除。
+                var managerRoleNames = Permissions.StoreManagerRoleNames;
+                var selfGuid = scope.IsStoreManager && !scope.IsAdmin ? scope.UserGuid : string.Empty;
+
                 var rows = await _db.Queryable<User>()
                     .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
                     .InnerJoin<Role>((u, ur, r) => ur.RoleGUID == r.RoleGUID)
@@ -69,7 +75,10 @@ namespace BlazorApp.Api.Services.React
                         && !r.IsDeleted
                         && !us.IsDeleted
                         && !s.IsDeleted
-                        && r.RoleName == StoreStaffRoleName
+                        && (
+                            r.RoleName == StoreStaffRoleName
+                            || (u.UserGUID == selfGuid && managerRoleNames.Contains(r.RoleName))
+                        )
                     )
                     .WhereIF(
                         !scope.IsAdmin && string.IsNullOrWhiteSpace(normalizedStoreCode),
@@ -111,6 +120,30 @@ namespace BlazorApp.Api.Services.React
                         EmployeeType = profile.EmployeeType,
                     })
                     .ToListAsync();
+
+                // 剔除「同时拥有店长/管理员角色」的其他账号：只看店员角色那一行判断不出，需单独查角色。
+                if (rows.Count > 0)
+                {
+                    var rowUserGuids = rows.Select(item => item.UserGUID).Distinct().ToList();
+                    var highRoleNames = Permissions.HighPrivilegeRoleNames;
+                    var highRoleUserGuids = (await _db.Queryable<UserRole>()
+                            .InnerJoin<Role>((ur, r) => ur.RoleGUID == r.RoleGUID)
+                            .Where((ur, r) =>
+                                rowUserGuids.Contains(ur.UserGUID)
+                                && !ur.IsDeleted
+                                && !r.IsDeleted
+                                && highRoleNames.Contains(r.RoleName)
+                            )
+                            .Select((ur, r) => ur.UserGUID)
+                            .ToListAsync())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    rows = rows
+                        .Where(item =>
+                            !highRoleUserGuids.Contains(item.UserGUID)
+                            || string.Equals(item.UserGUID, selfGuid, StringComparison.OrdinalIgnoreCase)
+                        )
+                        .ToList();
+                }
 
                 var grouped = rows
                     .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
