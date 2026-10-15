@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
   Button,
+  Checkbox,
   Chip,
   Dialog,
+  IconButton,
+  Menu,
   Portal,
   SegmentedButtons,
   Snackbar,
@@ -19,6 +23,7 @@ import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StoreChip } from "@/components/ui/StoreChip";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
+import { useAppNavigationAccess } from "@/modules/navigation/access-context";
 import {
   getSavedPrinter,
   printDiscountLabelPayload,
@@ -51,7 +56,11 @@ import {
 import { buildPriceUpdateLabelJob } from "./label-print";
 import { PriceLabelPrintBusyError, runPriceLabelPrintExclusive } from "./price-label-print-lock";
 import { groupCompletedTasksByDay, mergeUniqueTasks, summarizeSelection } from "./presentation";
+import { parsePriceUpdatesParams } from "./navigation";
+import { isStoreOverdueFlagged } from "./overview";
 import { PriceUpdateProgressSheet } from "./price-update-progress-sheet";
+import { loadAllTasks, resolveSelectAllState, resolveSelectedTasks } from "./selection";
+import { PriceUpdateStoreStrip, type PriceUpdateStoreStripItem } from "./store-strip";
 import { CompletedTaskCard, PendingTaskCard } from "./price-update-task-cards";
 import { priceUpdateCountQueryKey, priceUpdateTasksQueryKey } from "./query-keys";
 import type {
@@ -62,7 +71,8 @@ import type {
 } from "./types";
 
 type TabValue = "pending" | "completed";
-type KindFilter = "all" | PriceUpdateTaskKind;
+/** overdue = 只看已超期的未完成任务（后端按首次发起时间从早到晚排序）。 */
+type KindFilter = "all" | PriceUpdateTaskKind | "overdue";
 type ListRow =
   | { type: "header"; key: string; label: string }
   | { type: "task"; key: string; task: StorePriceUpdateTask };
@@ -81,7 +91,9 @@ function resolvePrinterChip(status: PrinterConnectionState, hasPrinter: boolean)
 
 export function PriceUpdatesScreen() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams();
   const queryClient = useQueryClient();
+  const { priceTasks, orderedVisibleRouteNames } = useAppNavigationAccess();
   const { t, language } = useAppTranslation(["priceUpdates", "common"]);
   const access = useAuthStore((state) => state.access);
   const {
@@ -104,6 +116,14 @@ export function PriceUpdatesScreen() {
   const [smallLabel, setSmallLabel] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // 「全选」时从后端拉回的当前筛选下全部任务：列表页只加载了前几十条，批量处理靠它还原没滚到的任务。
+  const [selectionPool, setSelectionPool] = useState<ReadonlyMap<number, StorePriceUpdateTask>>(() => new Map());
+  const [selectAllBusy, setSelectAllBusy] = useState(false);
+  const selectAllTokenRef = useRef(0);
+  const [batchMenuVisible, setBatchMenuVisible] = useState(false);
+  // 本页期间报表从「锁定」变为「已解锁」：留一条绿色提示 + 去看报表入口。
+  const [justUnlocked, setJustUnlocked] = useState(false);
+  const wasLockedRef = useRef(false);
   const [storePickerVisible, setStorePickerVisible] = useState(false);
   const [snackbar, setSnackbar] = useState("");
   const [busy, setBusy] = useState(false);
@@ -130,6 +150,11 @@ export function PriceUpdatesScreen() {
   const canSwitchStore = !isDeviceMode && stores.length > 1;
 
   const clearSelection = useCallback(() => {
+    // 让进行中的「全选」加载作废：期间切了筛选 / 分店 / 退出批量，拉回来的结果不能再套到新的列表上。
+    selectAllTokenRef.current += 1;
+    setSelectAllBusy(false);
+    setSelectionPool(new Map());
+    setBatchMenuVisible(false);
     setSelecting(false);
     setSelectedIds(new Set());
   }, []);
@@ -139,19 +164,61 @@ export function PriceUpdatesScreen() {
     clearSelection();
   }, [clearSelection, storeCode]);
 
+  // 从工作台红条、被锁的报表入口、每小时提醒进来时会带参数：选中「超期」筛选 / 指定分店。
+  // 参数只在这里解释一次（见 navigation.ts），每个值只应用一次，之后用户自己改筛选不会被覆盖。
+  const routeTarget = parsePriceUpdatesParams(routeParams as Record<string, string | string[] | undefined>);
+  const appliedOverdueParamRef = useRef(false);
+  useEffect(() => {
+    if (!routeTarget.overdueOnly || appliedOverdueParamRef.current) return;
+    appliedOverdueParamRef.current = true;
+    setTab("pending");
+    setHqSyncFailedOnly(false);
+    setKindFilter("overdue");
+  }, [routeTarget.overdueOnly]);
+  const appliedStoreParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    const target = routeTarget.storeCode;
+    if (!target || isDeviceMode || appliedStoreParamRef.current === target) return;
+    const store = sessionStores.find((item) => item.storeCode === target);
+    // 分店列表还没加载好就等 sessionStores 变化后再试；不在可见范围内的分店直接忽略。
+    if (!store) return;
+    appliedStoreParamRef.current = target;
+    if (store.storeCode !== storeCode) {
+      void selectStore(store).catch(() => undefined);
+    }
+  }, [isDeviceMode, routeTarget.storeCode, selectStore, sessionStores, storeCode]);
+
+  // 报表锁定状态：被锁过、现在解锁了 → 本页显示绿色「报表已解锁」。
+  useEffect(() => {
+    if (priceTasks.reportsLocked) {
+      wasLockedRef.current = true;
+      setJustUnlocked(false);
+    } else if (wasLockedRef.current && priceTasks.ready) {
+      wasLockedRef.current = false;
+      setJustUnlocked(true);
+    }
+  }, [priceTasks.ready, priceTasks.reportsLocked]);
+
+  // 列表滚动分页与「全选」逐页拉全共用同一组筛选条件，保证全选选中的就是当前筛选下的任务。
+  const fetchTaskPage = useCallback(
+    (page: number, pageSize: number) =>
+      getPriceUpdateTasks({
+        storeCode: storeCode!,
+        status: tab === "pending" ? "Pending" : "Completed",
+        kind: tab === "pending" && kindFilter !== "all" && kindFilter !== "overdue" ? kindFilter : undefined,
+        overdueOnly: tab === "pending" && kindFilter === "overdue",
+        hqSyncFailedOnly: tab === "completed" && hqSyncFailedOnly,
+        page,
+        pageSize,
+      }),
+    [hqSyncFailedOnly, kindFilter, storeCode, tab]
+  );
+
   const tasksQuery = useInfiniteQuery({
     queryKey: priceUpdateTasksQueryKey(storeCode, tab, kindFilter, hqSyncFailedOnly),
     enabled: Boolean(storeCode),
     initialPageParam: 1,
-    queryFn: ({ pageParam }) =>
-      getPriceUpdateTasks({
-        storeCode: storeCode!,
-        status: tab === "pending" ? "Pending" : "Completed",
-        kind: tab === "pending" && kindFilter !== "all" ? kindFilter : undefined,
-        hqSyncFailedOnly: tab === "completed" && hqSyncFailedOnly,
-        page: pageParam,
-        pageSize: PAGE_SIZE,
-      }),
+    queryFn: ({ pageParam }) => fetchTaskPage(pageParam, PAGE_SIZE),
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.pageSize < lastPage.total ? lastPage.page + 1 : undefined,
   });
@@ -197,7 +264,14 @@ export function PriceUpdatesScreen() {
       ...group.items.map((task) => ({ type: "task" as const, key: `task-${task.id}`, task })),
     ]);
   }, [now, t, tab, tasks]);
-  const selectionSummary = useMemo(() => summarizeSelection(tasks, selectedIds), [selectedIds, tasks]);
+  const selectedTasks = useMemo(
+    () => resolveSelectedTasks(selectedIds, selectionPool, tasks),
+    [selectedIds, selectionPool, tasks]
+  );
+  const selectionSummary = useMemo(
+    () => summarizeSelection(selectedTasks, selectedIds),
+    [selectedIds, selectedTasks]
+  );
 
   const getErrorMessage = useCallback(
     (error: unknown, fallbackKey: string) =>
@@ -453,6 +527,42 @@ export function PriceUpdatesScreen() {
     });
   }, []);
 
+  // 全选 = 当前筛选下的全部未完成任务，包括还没滚动加载出来的。
+  const selectableTotal = firstPage?.total ?? tasks.length;
+  const selectAllState = resolveSelectAllState(selectedIds.size, selectableTotal);
+  const handleToggleSelectAll = useCallback(async () => {
+    if (selectAllBusy || !storeCode) return;
+    if (selectAllState === "all") {
+      // 再点一次 = 取消全选
+      setSelectedIds(new Set());
+      return;
+    }
+    if (tasks.length >= selectableTotal) {
+      setSelectedIds(new Set(tasks.map((task) => task.id)));
+      return;
+    }
+
+    // 还有没加载的：逐页拉齐再全选。期间若切了筛选 / 分店 / 退出批量，token 变化，结果直接丢弃。
+    const token = ++selectAllTokenRef.current;
+    setSelectAllBusy(true);
+    try {
+      const all = await loadAllTasks(fetchTaskPage, {
+        shouldCancel: () => selectAllTokenRef.current !== token,
+      });
+      if (selectAllTokenRef.current !== token) return;
+      setSelectionPool(new Map(all.map((task) => [task.id, task])));
+      setSelectedIds(new Set(all.map((task) => task.id)));
+    } catch (error) {
+      if (selectAllTokenRef.current === token) {
+        setSnackbar(getErrorMessage(error, "selection.loadAllFailed"));
+      }
+    } finally {
+      if (selectAllTokenRef.current === token) {
+        setSelectAllBusy(false);
+      }
+    }
+  }, [fetchTaskPage, getErrorMessage, selectAllBusy, selectAllState, selectableTotal, storeCode, tasks]);
+
   const handleSelectStore = useCallback(
     async (store: Store | null) => {
       setStorePickerVisible(false);
@@ -466,6 +576,12 @@ export function PriceUpdatesScreen() {
       }
     },
     [clearSelection, getErrorMessage, selectStore, storeCode]
+  );
+  const handleStripSelect = useCallback(
+    (targetStoreCode: string) => {
+      void handleSelectStore(sessionStores.find((store) => store.storeCode === targetStoreCode) ?? null);
+    },
+    [handleSelectStore, sessionStores]
   );
 
   const handleApplyOnly = useCallback(
@@ -487,8 +603,23 @@ export function PriceUpdatesScreen() {
     [handleRetryHqSync]
   );
 
-  const selectedTasks = useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [selectedIds, tasks]);
   const printerChip = resolvePrinterChip(printerStatus, Boolean(savedPrinter?.address));
+  // 店长账号（名下多家分店）顶部用分店条切换；PDA 绑定单店、单店账号仍是带锁的分店标签。
+  const showStoreStrip = !isDeviceMode && sessionStores.length > 1;
+  const stripItems = useMemo<PriceUpdateStoreStripItem[]>(() => {
+    const rowByStore = new Map(priceTasks.rows.map((row) => [row.storeCode, row]));
+    // 顺序跟随分店列表而不是按待办排序：数字变化时按钮不会跳来跳去。
+    return sessionStores.map((store) => {
+      const row = rowByStore.get(store.storeCode);
+      return {
+        storeCode: store.storeCode,
+        storeName: store.storeName,
+        selected: store.storeCode === storeCode,
+        pendingCount: row ? row.pendingCount : null,
+        overdueFlag: row ? isStoreOverdueFlagged(row, priceTasks.manageableStoreCodes) : false,
+      };
+    });
+  }, [priceTasks.manageableStoreCodes, priceTasks.rows, sessionStores, storeCode]);
   const showMultiSelect = canOperate && tab === "pending" && tasks.length > 0;
 
   const renderRow = useCallback(
@@ -550,28 +681,59 @@ export function PriceUpdatesScreen() {
     <View style={styles.header}>
       <View style={BUSINESS_UI.headerRow}>
         <Text style={BUSINESS_UI.title}>{t("title")}</Text>
-        <View style={styles.storeChip}>
-          <StoreChip
-            compact
-            store={selectedStore}
-            onPress={() => {
-              if (canSwitchStore) setStorePickerVisible(true);
-              else if (isDeviceMode) setSnackbar(t("store.lockedToDevice"));
-            }}
-          />
-        </View>
+        {showStoreStrip && !selecting ? null : (
+          <View style={styles.storeChip}>
+            <StoreChip
+              compact
+              store={selectedStore}
+              onPress={() => {
+                if (canSwitchStore) setStorePickerVisible(true);
+                else if (isDeviceMode) setSnackbar(t("store.lockedToDevice"));
+              }}
+            />
+          </View>
+        )}
       </View>
 
+      {/* 批量处理期间分店条收起：批量只在当前这一家店里进行（标签贴在这家店的货架上，不跨店）。 */}
+      {showStoreStrip && !selecting ? (
+        <PriceUpdateStoreStrip items={stripItems} onSelect={handleStripSelect} />
+      ) : null}
+
       {selecting ? (
-        <View style={styles.headerSecondRow}>
-          <Text variant="titleSmall" style={styles.flex}>
-            {t("selection.selectedCount", { count: selectedIds.size })}
-          </Text>
-          <Button compact mode="text" onPress={() => setSelectedIds(new Set(tasks.map((task) => task.id)))}>
-            {t("selection.selectAll")}
-          </Button>
+        <View style={styles.selectAllRow}>
+          <Checkbox.Android
+            status={selectAllState === "all" ? "checked" : selectAllState === "some" ? "indeterminate" : "unchecked"}
+            disabled={selectAllBusy || selectableTotal === 0}
+            onPress={() => void handleToggleSelectAll()}
+            color={HB_COLORS.action}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={selectAllBusy || selectableTotal === 0}
+            onPress={() => void handleToggleSelectAll()}
+            style={styles.selectAllCopy}
+          >
+            {selectAllBusy ? (
+              <View style={styles.selectAllLoading}>
+                <ActivityIndicator size={14} />
+                <Text variant="bodyMedium" style={styles.secondary}>{t("selection.loadingAll")}</Text>
+              </View>
+            ) : (
+              <>
+                <Text variant="titleSmall" style={styles.selectAllLabel}>
+                  {selectAllState === "all"
+                    ? t("selection.allSelected", { count: selectableTotal })
+                    : selectAllState === "some"
+                      ? t("selection.partSelected", { selected: selectedIds.size, total: selectableTotal })
+                      : t("selection.selectAll")}
+                </Text>
+                <Text variant="bodySmall" style={styles.secondary}>{t("selection.selectAllHint")}</Text>
+              </>
+            )}
+          </Pressable>
           <Button compact mode="text" onPress={clearSelection}>
-            {t("common:actions.cancel")}
+            {t("selection.exit")}
           </Button>
         </View>
       ) : (
@@ -598,7 +760,13 @@ export function PriceUpdatesScreen() {
           </Chip>
           <View style={styles.flex} />
           {showMultiSelect ? (
-            <Button compact mode="text" disabled={busy} onPress={() => setSelecting(true)}>
+            <Button
+              compact
+              mode="text"
+              icon="checkbox-multiple-marked-outline"
+              disabled={busy}
+              onPress={() => setSelecting(true)}
+            >
               {t("selection.enter")}
             </Button>
           ) : null}
@@ -629,6 +797,16 @@ export function PriceUpdatesScreen() {
             </Chip>
             <Chip compact selected={kindFilter === "LabelOnly"} showSelectedOverlay onPress={() => { setKindFilter("LabelOnly"); clearSelection(); }}>
               {t("filters.labelOnly", { count: summary?.pendingLabelOnlyCount ?? 0 })}
+            </Chip>
+            <Chip
+              compact
+              selected={kindFilter === "overdue"}
+              showSelectedOverlay
+              selectedColor={HB_COLORS.danger}
+              textStyle={styles.overdueChipText}
+              onPress={() => { setKindFilter("overdue"); clearSelection(); }}
+            >
+              {t("filters.overdue", { count: summary?.pendingOverdueCount ?? 0 })}
             </Chip>
           </>
         ) : (
@@ -712,8 +890,16 @@ export function PriceUpdatesScreen() {
         ) : null}
         ListEmptyComponent={(
           <EmptyState
-            title={t(tab === "pending" ? "list.emptyPending" : "list.emptyCompleted")}
-            description={t(tab === "pending" ? "list.emptyPendingDescription" : "list.emptyCompletedDescription")}
+            title={
+              tab === "pending" && kindFilter === "overdue"
+                ? t("overdueEmpty.title")
+                : t(tab === "pending" ? "list.emptyPending" : "list.emptyCompleted")
+            }
+            description={
+              tab === "pending" && kindFilter === "overdue"
+                ? t("overdueEmpty.description", { days: priceTasks.overdueDays })
+                : t(tab === "pending" ? "list.emptyPendingDescription" : "list.emptyCompletedDescription")
+            }
             primaryAction={{ label: t("common:actions.refresh"), icon: "refresh", onPress: () => void refreshAll() }}
           />
         )}
@@ -721,44 +907,71 @@ export function PriceUpdatesScreen() {
     );
   }
 
+  // 报表锁定提示：管理分店有超期任务时一直显示，告诉人原因和数量；处理完解锁后留一条绿色提示。
+  const reportsAvailable = orderedVisibleRouteNames.includes("reports");
+  const lockBanner = priceTasks.reportsLocked ? (
+    <View style={[styles.banner, styles.bannerDanger]} accessibilityRole="alert">
+      <MaterialCommunityIcons name="lock-alert-outline" size={22} color={HB_COLORS.danger} />
+      <View style={styles.bannerBody}>
+        <Text variant="titleSmall" style={styles.bannerDangerTitle}>{t("lock.title")}</Text>
+        <Text variant="bodySmall" style={styles.bannerDangerText}>
+          {t("lock.description", { count: priceTasks.manageableOverdueCount, days: priceTasks.overdueDays })}
+        </Text>
+      </View>
+    </View>
+  ) : justUnlocked ? (
+    <View style={[styles.banner, styles.bannerOk]}>
+      <MaterialCommunityIcons name="lock-open-variant-outline" size={22} color={HB_COLORS.success} />
+      <View style={styles.bannerBody}>
+        <Text variant="titleSmall" style={styles.bannerOkTitle}>{t("lock.unlockedTitle")}</Text>
+        <Text variant="bodySmall" style={styles.bannerOkText}>{t("lock.unlockedDescription")}</Text>
+      </View>
+      {reportsAvailable ? (
+        <Button
+          compact
+          mode="text"
+          onPress={() => router.push("/(shell)/reports" as Parameters<typeof router.push>[0])}
+        >
+          {t("lock.openReports")}
+        </Button>
+      ) : null}
+    </View>
+  ) : null;
+
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       {header}
+      {lockBanner}
       <View style={styles.flex}>{body}</View>
 
       {selecting && canOperate ? (
         <Surface style={styles.footer} elevation={3}>
-          <Text variant="bodyMedium" style={styles.footerSummary}>
-            {t("selection.summaryByKind", {
-              priceUpdate: selectionSummary.applyCount,
-              labelOnly: selectionSummary.labelOnlyCount,
-            })}
-          </Text>
+          <View style={styles.footerSummaryRow}>
+            <Text variant="titleSmall" style={styles.footerSummary}>
+              {t("selection.selectedTitle", { count: selectedIds.size })}
+            </Text>
+            <Text variant="bodySmall" style={styles.secondary}>
+              {t("selection.summaryByKind", {
+                priceUpdate: selectionSummary.applyCount,
+                labelOnly: selectionSummary.labelOnlyCount,
+              })}
+            </Text>
+          </View>
           {hqSyncEnabled && selectionSummary.applyCount > 0 ? (
             <Text variant="bodySmall" style={styles.secondary}>{t("selection.hqSyncHint")}</Text>
           ) : null}
-          {/* 按选中任务的类型匹配可用操作：需改价 → 仅更新/保持本店价；待换标签 → 标记已换。 */}
+          {/* 按选中任务的类型给按钮：需改价 → 仅更新；待换标签 → 标记已换；不常用的「保持本店价」收进「⋯」防误触。 */}
           {selectionSummary.applyCount > 0 || selectionSummary.labelOnlyCount > 0 ? (
             <View style={styles.footerSecondaryButtons}>
               {selectionSummary.applyCount > 0 ? (
-                <>
-                  <Button
-                    compact
-                    mode="outlined"
-                    disabled={busy}
-                    onPress={() => void startRun(selectedTasks, "applyOnly")}
-                  >
-                    {t("selection.applyOnly", { count: selectionSummary.applyCount })}
-                  </Button>
-                  <Button
-                    compact
-                    mode="outlined"
-                    disabled={busy}
-                    onPress={() => setKeepTargets(selectedTasks.filter((task) => task.kind === "PriceUpdate"))}
-                  >
-                    {t("selection.keepStorePrice", { count: selectionSummary.applyCount })}
-                  </Button>
-                </>
+                <Button
+                  compact
+                  mode="outlined"
+                  disabled={busy}
+                  onPress={() => void startRun(selectedTasks, "applyOnly")}
+                >
+                  {t("selection.applyOnly", { count: selectionSummary.applyCount })}
+                </Button>
               ) : null}
               {selectionSummary.labelOnlyCount > 0 ? (
                 <Button
@@ -769,6 +982,31 @@ export function PriceUpdatesScreen() {
                 >
                   {t("selection.markReplaced", { count: selectionSummary.labelOnlyCount })}
                 </Button>
+              ) : null}
+              {selectionSummary.applyCount > 0 ? (
+                <Menu
+                  visible={batchMenuVisible}
+                  onDismiss={() => setBatchMenuVisible(false)}
+                  anchor={(
+                    <IconButton
+                      icon="dots-horizontal"
+                      mode="outlined"
+                      size={18}
+                      disabled={busy}
+                      accessibilityLabel={t("selection.more")}
+                      onPress={() => setBatchMenuVisible(true)}
+                    />
+                  )}
+                >
+                  <Menu.Item
+                    leadingIcon="hand-back-right-outline"
+                    title={t("selection.keepStorePrice", { count: selectionSummary.applyCount })}
+                    onPress={() => {
+                      setBatchMenuVisible(false);
+                      setKeepTargets(selectedTasks.filter((task) => task.kind === "PriceUpdate"));
+                    }}
+                  />
+                </Menu>
               ) : null}
             </View>
           ) : null}
@@ -853,5 +1091,19 @@ const styles = StyleSheet.create({
   pageLoader: { paddingVertical: HB_SPACING.md },
   footer: BUSINESS_UI.footer,
   footerSummary: { fontWeight: "700", color: HB_COLORS.textPrimary },
+  footerSummaryRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: HB_SPACING.xs },
+  selectAllRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xxs, minHeight: 48 },
+  selectAllCopy: { flex: 1, minWidth: 0, justifyContent: "center" },
+  selectAllLabel: { fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
+  selectAllLoading: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
+  overdueChipText: { color: HB_COLORS.danger },
+  banner: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs, paddingHorizontal: HB_SPACING.md, paddingVertical: 10 },
+  bannerBody: { flex: 1, minWidth: 0 },
+  bannerDanger: { backgroundColor: "#FEE4E2" },
+  bannerDangerTitle: { color: HB_COLORS.danger, fontWeight: "700" },
+  bannerDangerText: { color: "#7A271A" },
+  bannerOk: { backgroundColor: "#DCFAE6" },
+  bannerOkTitle: { color: HB_COLORS.success, fontWeight: "700" },
+  bannerOkText: { color: HB_COLORS.success },
   footerSecondaryButtons: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
 });

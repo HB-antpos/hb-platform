@@ -3,6 +3,7 @@ import {
   normalizePriceNotificationPreview,
   normalizePriceUpdateBatchResult,
   normalizePriceUpdatePendingCount,
+  normalizePriceUpdateSummary,
   normalizePriceUpdateTask,
   normalizePriceUpdateTaskPage,
   normalizeSuggestedDiscountLookup,
@@ -148,5 +149,76 @@ assert.equal(lookup.get("P001"), 0, "0 = 明确无折扣，不能被当成未设
 assert.equal(lookup.get("P002"), null);
 assert.equal(lookup.get("P003"), 0.25);
 assert.equal(normalizeSuggestedDiscountLookup({}).size, 0);
+
+// ---- 超期字段：从首次发起起算，旧后端没有这些字段时按「未超期」处理（不会误锁报表） ----
+const overdueTask = normalizePriceUpdateTask({
+  id: 9,
+  storeCode: "1001",
+  productCode: "P009",
+  initiatedAtUtc: "2026-10-14T00:00:00Z",
+  firstInitiatedAtUtc: "2026-10-01T00:00:00Z",
+  waitingDays: 14,
+  isOverdue: true,
+  overdueByDays: 7,
+});
+assert.equal(overdueTask.firstInitiatedAtUtc, "2026-10-01T00:00:00Z", "首次发起时间要与（会被刷新的）发起时间区分开");
+assert.equal(overdueTask.waitingDays, 14);
+assert.equal(overdueTask.isOverdue, true);
+assert.equal(overdueTask.overdueByDays, 7);
+
+const legacyTask = normalizePriceUpdateTask({
+  id: 10,
+  storeCode: "1001",
+  productCode: "P010",
+  initiatedAtUtc: "2026-10-14T00:00:00Z",
+});
+assert.equal(legacyTask.firstInitiatedAtUtc, "2026-10-14T00:00:00Z", "旧后端没有首次发起时间：回退到发起时间");
+assert.equal(legacyTask.isOverdue, false, "旧后端没有超期字段：一律按未超期，绝不能因缺字段锁住报表");
+assert.equal(legacyTask.waitingDays, 0);
+assert.equal(legacyTask.overdueByDays, 0);
+assert.equal(
+  normalizePriceUpdateTask({ id: 11, storeCode: "1001", productCode: "P011", IsOverdue: true, OverdueByDays: 2 }).isOverdue,
+  true,
+  "兼容 PascalCase 响应"
+);
+assert.equal(
+  normalizePriceUpdateTask({ id: 12, storeCode: "1001", productCode: "P012", isOverdue: "true" }).isOverdue,
+  false,
+  "只认布尔 true：字符串 \"true\" 不算超期，避免脏数据误锁"
+);
+
+const overduePage = normalizePriceUpdateTaskPage({
+  items: [{ id: 1, storeCode: "1001", productCode: "P001" }],
+  total: 1,
+  pendingCount: 1,
+  pendingOverdueCount: 1,
+  overdueDays: 7,
+});
+assert.equal(overduePage.pendingOverdueCount, 1);
+assert.equal(overduePage.overdueDays, 7);
+assert.equal(normalizePriceUpdateTaskPage({}).pendingOverdueCount, 0);
+assert.equal(normalizePriceUpdateTaskPage({}).overdueDays, 0, "没返回时限时为 0，由调用方回退到默认 7 天");
+
+// ---- 按分店汇总 ----
+const summary = normalizePriceUpdateSummary({
+  overdueDays: 7,
+  stores: [
+    { storeCode: "1001", storeName: " Brisbane ", pendingPriceUpdateCount: 3, pendingLabelOnlyCount: 2, pendingCount: 99, overdueCount: 1 },
+    { StoreCode: "1002", PendingPriceUpdateCount: 0, PendingLabelOnlyCount: 4, OverdueCount: 0 },
+    { storeName: "没有分店代码的行会被丢弃" },
+  ],
+});
+assert.equal(summary.overdueDays, 7);
+assert.deepEqual(
+  summary.stores.map((row) => row.storeCode),
+  ["1001", "1002"],
+  "没有分店代码的行必须丢弃，避免后续按分店匹配出现空键"
+);
+assert.equal(summary.stores[0].storeName, "Brisbane");
+assert.equal(summary.stores[0].pendingCount, 5, "合计以两类之和为准，不信后端的合计字段，避免角标和列表对不上");
+assert.equal(summary.stores[0].overdueCount, 1);
+assert.equal(summary.stores[1].storeName, "1002", "没有分店名时回退为分店代码");
+assert.equal(summary.stores[1].pendingCount, 4);
+assert.deepEqual(normalizePriceUpdateSummary(null), { stores: [], overdueDays: 0 });
 
 console.log("price-updates/normalize.test.ts: ok");

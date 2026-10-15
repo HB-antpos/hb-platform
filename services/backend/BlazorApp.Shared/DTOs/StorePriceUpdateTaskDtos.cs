@@ -52,6 +52,21 @@ public sealed class StorePriceUpdateTaskDto
     public DateTime InitiatedAtUtc { get; set; }
     public int ChangeCount { get; set; }
 
+    /// <summary>
+    /// 任务首次生成的时间（UTC）。「超期」从它起算：仓库再次改价只刷新 InitiatedAtUtc，
+    /// 不会让任务重新计时。
+    /// </summary>
+    public DateTime FirstInitiatedAtUtc { get; set; }
+
+    /// <summary>未完成任务已等待的整天数；已完成 / 已取消为 0。</summary>
+    public int WaitingDays { get; set; }
+
+    /// <summary>未完成且已超过时限（见 OverdueDays 配置，默认 7 天）。</summary>
+    public bool IsOverdue { get; set; }
+
+    /// <summary>超出时限的天数（至少 1）；未超期为 0。</summary>
+    public int OverdueByDays { get; set; }
+
     public string? PriceAppliedBy { get; set; }
     public DateTime? PriceAppliedAtUtc { get; set; }
     public string? CompletionMode { get; set; }
@@ -85,6 +100,9 @@ public sealed class StorePriceUpdateTaskQueryDto
     public string? Keyword { get; set; }
     public string? InitiatorName { get; set; }
     public bool? HqSyncFailedOnly { get; set; }
+
+    /// <summary>只看未完成且已超期的任务；此时按首次发起时间从早到晚排序（超期最久的在最前）。</summary>
+    public bool? OverdueOnly { get; set; }
     public DateTime? FromUtc { get; set; }
     public DateTime? ToUtc { get; set; }
     public int Page { get; set; } = 1;
@@ -127,6 +145,12 @@ public sealed class StorePriceUpdateTaskPageDto
     public int PendingLabelOnlyCount { get; set; }
     public int CompletedCount { get; set; }
 
+    /// <summary>该分店未完成任务中已超期的数量（仅传 StoreCode 时返回）。</summary>
+    public int PendingOverdueCount { get; set; }
+
+    /// <summary>超期时限（天）。前端用它写「应在 N 天内完成」，避免把 7 写死在客户端。</summary>
+    public int OverdueDays { get; set; }
+
     /// <summary>通知页改价是否同步 HQ 数据库；关闭后前端隐藏所有总部同步提示。</summary>
     public bool HqSyncEnabled { get; set; }
 }
@@ -134,6 +158,27 @@ public sealed class StorePriceUpdateTaskPageDto
 public sealed class StorePriceUpdateTaskCountDto
 {
     public int PendingCount { get; set; }
+}
+
+/// <summary>移动端「按分店汇总」的一行：该分店未完成任务的数量与其中超期的数量。</summary>
+public sealed class StorePriceUpdateTaskStoreSummaryDto
+{
+    public string StoreCode { get; set; } = string.Empty;
+    public string? StoreName { get; set; }
+    public int PendingPriceUpdateCount { get; set; }
+    public int PendingLabelOnlyCount { get; set; }
+    public int PendingCount { get; set; }
+
+    /// <summary>未完成且超过时限的数量（从首次发起起算）。</summary>
+    public int OverdueCount { get; set; }
+}
+
+public sealed class StorePriceUpdateTaskStoreSummaryListDto
+{
+    /// <summary>当前账号 / 设备可访问的全部启用分店，没有任务的分店也会返回（各计数为 0）。</summary>
+    public List<StorePriceUpdateTaskStoreSummaryDto> Stores { get; set; } = new();
+
+    public int OverdueDays { get; set; }
 }
 
 public sealed class ApplyStorePriceUpdateTasksRequestDto

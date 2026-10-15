@@ -33,20 +33,20 @@ assert.equal(
   false
 );
 
-assert.equal(readJson("src/locales/zh/common.json").tabs.priceUpdates, "价格更新");
-assert.equal(readJson("src/locales/en/common.json").tabs.priceUpdates, "Price updates");
-assert.equal(readJson("src/locales/zh/screens/workbench.json").routes.priceUpdates, "价格更新");
-assert.equal(readJson("src/locales/en/screens/workbench.json").routes.priceUpdates, "Price updates");
+assert.equal(readJson("src/locales/zh/common.json").tabs.priceUpdates, "价格和标签");
+assert.equal(readJson("src/locales/en/common.json").tabs.priceUpdates, "Prices & labels");
+assert.equal(readJson("src/locales/zh/screens/workbench.json").routes.priceUpdates, "价格和标签");
+assert.equal(readJson("src/locales/en/screens/workbench.json").routes.priceUpdates, "Prices & labels");
 
 const i18nSource = read("src/shared/i18n/i18n.ts");
 assert.match(i18nSource, /priceUpdates: priceUpdatesZh/);
 assert.match(i18nSource, /priceUpdates: priceUpdatesEn/);
 assert.match(i18nSource, /ns: \[[^\]]*"priceUpdates"/, "新命名空间必须登记到 ns 列表");
 
-// 工作台角标链路：layout 查 count → access-context → workbench 按路由名查表
+// 工作台角标链路：layout 按分店汇总（名下全部分店合计）→ access-context → workbench 按路由名查表
 const layoutSource = read("app/(shell)/_layout.tsx");
-assert.match(layoutSource, /getPriceUpdatePendingCount/);
-assert.match(layoutSource, /pendingPriceUpdateCount: pendingPriceUpdateQuery\.data \?\? 0/);
+assert.match(layoutSource, /usePriceTaskOverview\(/);
+assert.match(layoutSource, /pendingPriceUpdateCount: priceTaskOverview\.totalPending/);
 assert.match(read("src/modules/navigation/access-context.tsx"), /pendingPriceUpdateCount: number/);
 const workbenchSource = read("src/modules/workbench/workbench-screen.tsx");
 assert.match(workbenchSource, /"price-updates": pendingPriceUpdateCount/);

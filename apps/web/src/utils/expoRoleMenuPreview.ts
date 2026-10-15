@@ -216,7 +216,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'attendance-personal': { zhTitle: '考勤', enTitle: 'Attendance' },
   'attendance-management': { zhTitle: '考勤管理', enTitle: 'Attendance Management' },
   'product-query': { zhTitle: '商品维护', enTitle: 'Products' },
-  'price-updates': { zhTitle: '价格更新', enTitle: 'Price updates' },
+  'price-updates': { zhTitle: '价格和标签', enTitle: 'Prices & labels' },
   'product-insights': { zhTitle: '商品进销', enTitle: 'Product Insights' },
   'warehouse-product-insights': { zhTitle: '仓库商品进销', enTitle: 'Warehouse Insights' },
   'seasonal-product-insights': { zhTitle: '季节商品查询', enTitle: 'Seasonal Products' },

@@ -1,5 +1,5 @@
 {
-  "title": "Price updates",
+  "title": "Prices & labels",
   "tabs": {
     "pending": "To do {{count}}",
     "completed": "Done {{count}}"
@@ -8,7 +8,8 @@
     "all": "All",
     "priceUpdate": "Price change {{count}}",
     "labelOnly": "Relabel {{count}}",
-    "hqSyncFailed": "HQ sync failed"
+    "hqSyncFailed": "HQ sync failed",
+    "overdue": "Overdue {{count}}"
   },
   "kinds": {
     "priceUpdate": "Price change",
@@ -28,7 +29,9 @@
     "finalPrice": "{{price}} after discount",
     "deltaUp": "Up {{amount}}",
     "deltaDown": "Down {{amount}}",
-    "changeCount": "{{count}} changes"
+    "changeCount": "{{count}} changes",
+    "overdueTag": "{{days}} days late",
+    "waiting": "Waiting {{days}} days"
   },
   "discount": {
     "off": "{{percent}}% off",
@@ -87,17 +90,25 @@
     "handled": "By {{name}} {{time}}"
   },
   "selection": {
-    "enter": "Select",
+    "enter": "Batch",
     "selectedCount": "{{count}} selected",
     "selectAll": "Select all",
     "summary": "{{apply}} price changes · {{print}} labels",
     "hqSyncHint": "Price changes will sync to the HQ database",
     "applyOnly": "Update only ({{count}})",
     "applyAndPrint": "Update & print ({{count}})",
-    "summaryByKind": "Price update {{priceUpdate}} · Label pending {{labelOnly}}",
+    "summaryByKind": "Price change {{priceUpdate}} · Relabel {{labelOnly}}",
     "keepStorePrice": "Keep store price ({{count}})",
     "markReplaced": "Mark replaced ({{count}})",
-    "printLabels": "Print labels ({{count}})"
+    "printLabels": "Print labels ({{count}})",
+    "exit": "Exit",
+    "allSelected": "All {{count}} selected",
+    "partSelected": "{{selected}} of {{total}} selected",
+    "selectAllHint": "Includes items not loaded yet",
+    "loadingAll": "Loading all tasks…",
+    "loadAllFailed": "Could not load all tasks. Try again",
+    "selectedTitle": "{{count}} selected",
+    "more": "More actions"
   },
   "printer": {
     "notConfigured": "No label printer",
@@ -110,20 +121,20 @@
   },
   "store": {
     "lockedToDevice": "This device is bound to one store",
-    "readOnly": "This store is view-only; price updates cannot be handled here",
+    "readOnly": "This store is view-only; prices & labels cannot be handled here",
     "requiredTitle": "Select a store",
-    "requiredDescription": "Choose a store to see its price update notices"
+    "requiredDescription": "Choose a store to see its prices & labels tasks"
   },
   "list": {
-    "loading": "Loading price updates",
-    "loadFailed": "Could not load price updates",
+    "loading": "Loading prices & labels",
+    "loadFailed": "Could not load prices & labels",
     "retryHint": "Check the network and try again",
     "loadingMore": "Loading more",
     "loadMoreFailed": "Could not load more. Tap to retry",
-    "emptyPending": "No price updates to do",
+    "emptyPending": "No prices & labels to do",
     "emptyPendingDescription": "Warehouse price changes and syncs from other stores will show up here",
     "emptyCompleted": "Nothing completed yet",
-    "emptyCompletedDescription": "Handled price updates are listed here by date"
+    "emptyCompletedDescription": "Handled prices & labels are listed here by date"
   },
   "messages": {
     "operationFailed": "Action failed. Try again",
@@ -226,8 +237,60 @@
     "editorTitle": "Suggested discount (%)",
     "inputHint": "Enter 0-100; clear = not set",
     "invalid": "Suggested discount must be between 0 and 100",
-    "helper": "Empty = store discounts are not compared; 0 = explicitly no discount. Suggested discounts are never pushed automatically; stores confirm them in Price updates.",
+    "helper": "Empty = store discounts are not compared; 0 = explicitly no discount. Suggested discounts are never pushed automatically; stores confirm them in Prices & labels.",
     "saved": "Suggested discount saved",
     "saveFailed": "Could not save the suggested discount"
+  },
+  "lock": {
+    "title": "Reports locked",
+    "description": "{{count}} items over {{days}} days. Unlocks when done.",
+    "unlockedTitle": "Reports unlocked",
+    "unlockedDescription": "All overdue items are done",
+    "openReports": "Open reports"
+  },
+  "overdueEmpty": {
+    "title": "Nothing overdue",
+    "description": "Finish tasks within {{days}} days and Reports stay unlocked"
+  },
+  "strip": {
+    "accessibility": "{{store}}, {{count}} to do",
+    "accessibilityOverdue": "{{store}}, {{count}} to do, has overdue tasks",
+    "accessibilityDone": "{{store}}, all done"
+  },
+  "reminder": {
+    "accessibility": "Prices & labels reminder",
+    "titleMulti": "{{count}} items to do",
+    "subMulti": "{{stores}} of {{total}} stores · Due within {{days}} days",
+    "titleBoth": "{{count}} items to do today",
+    "titleLabelOnly": "{{count}} labels to replace today",
+    "titlePriceOnly": "{{count}} price changes to do today",
+    "subBoth": "{{store}} · Warehouse prices changed",
+    "subLabelOnly": "{{store}} · Prices done, old labels on shelf",
+    "subPriceOnly": "{{store}} · Warehouse prices changed",
+    "tilePriceUpdate": "Price change",
+    "tilePriceUpdateHint": "Update price",
+    "tileLabelOnly": "Relabel",
+    "tileLabelOnlyHint": "Replace label",
+    "tileLabelOnlyWideHint": "Print, or mark replaced",
+    "rowPrice": "Price {{count}}",
+    "rowLabel": "Relabel {{count}}",
+    "current": "Current",
+    "overdueTag": "Overdue {{count}}",
+    "allDone": "All done",
+    "lockTitle": "Reports locked",
+    "lockBody": "{{count}} items over {{days}} days\nReports unlock when all are done",
+    "overdueRow": "{{count}} items waiting over {{days}} days",
+    "printerReady": "Printer connected, ready to print",
+    "printerOffline": "Printer offline",
+    "printerConnect": "Connect",
+    "primaryDefault": "Handle now",
+    "primaryOverdue": "Handle overdue ({{count}})",
+    "later": "Later",
+    "footer": "Every hour · Stops when all done"
+  },
+  "workbench": {
+    "lockStrip": "{{count}} tasks over {{days}} days · Reports locked",
+    "lockAction": "Handle",
+    "lockedTile": "{{title}}, locked. Handle overdue tasks first"
   }
 }

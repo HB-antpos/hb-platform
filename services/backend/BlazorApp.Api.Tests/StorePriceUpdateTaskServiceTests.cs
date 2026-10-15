@@ -698,6 +698,173 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
+    // 超期（任务须在 7 天内完成）：从首次发起起算，移动端提醒 / 锁报表与 Web 监控共用同一口径
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task 超期从首次发起算_仓库再次改价不重新计时()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-8));
+
+        // 仓库再次改价：任务被刷新（InitiatedAtUtc 重写、ChangeCount 加一），但首次发起时间不能被重置。
+        await SetWarehouseRetailAsync(13m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("李四", "WarehouseProducts"));
+
+        var page = await service.GetPageAsync(
+            new StorePriceUpdateTaskQueryDto { StoreCode = "1001", OverdueOnly = true },
+            null
+        );
+        var task = Assert.Single(page.Items);
+        Assert.Equal(2, task.ChangeCount);
+        Assert.True(task.InitiatedAtUtc > task.FirstInitiatedAtUtc.AddDays(7), "刷新后的发起时间应明显晚于首次发起时间");
+        Assert.True(task.IsOverdue);
+        Assert.Equal(8, task.WaitingDays);
+        Assert.Equal(1, task.OverdueByDays);
+        Assert.Equal(1, page.PendingOverdueCount);
+        Assert.Equal(7, page.OverdueDays);
+    }
+
+    [Fact]
+    public async Task 超期时限默认7天_可用配置调整_未超期的任务不计入()
+    {
+        await SetWarehouseRetailAsync(12m);
+        var defaultService = CreateService();
+        await defaultService.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-5));
+
+        var before = await defaultService.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null);
+        var notOverdue = Assert.Single(before.Items);
+        Assert.False(notOverdue.IsOverdue);
+        Assert.Equal(0, notOverdue.OverdueByDays);
+        Assert.Equal(5, notOverdue.WaitingDays);
+        Assert.Equal(0, before.PendingOverdueCount);
+        Assert.Empty((await defaultService.GetPageAsync(
+            new StorePriceUpdateTaskQueryDto { StoreCode = "1001", OverdueOnly = true }, null)).Items);
+
+        _settings["StorePriceUpdateTasks:OverdueDays"] = "3";
+        var strictService = CreateService();
+        var after = await strictService.GetPageAsync(new StorePriceUpdateTaskQueryDto { StoreCode = "1001" }, null);
+        var overdue = Assert.Single(after.Items);
+        Assert.True(overdue.IsOverdue);
+        Assert.Equal(2, overdue.OverdueByDays);
+        Assert.Equal(3, after.OverdueDays);
+    }
+
+    [Fact]
+    public async Task 已完成的任务不算超期()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-30));
+        var taskId = (await _db.Queryable<StorePriceUpdateTask>().Where(t => t.StoreCode == "1001").SingleAsync()).Id;
+        await service.KeepStorePriceAsync(new StorePriceUpdateTaskIdsRequestDto { StoreCode = "1001", TaskIds = { taskId } }, "王五");
+
+        var completed = await service.GetPageAsync(
+            new StorePriceUpdateTaskQueryDto { StoreCode = "1001", Status = "Completed" },
+            null
+        );
+        var task = Assert.Single(completed.Items);
+        Assert.False(task.IsOverdue);
+        Assert.Equal(0, task.WaitingDays);
+        Assert.Equal(0, task.OverdueByDays);
+        var summaries = await service.GetStoreSummariesAsync(null);
+        Assert.Equal(0, summaries.Stores.Single(row => row.StoreCode == "1001").OverdueCount);
+    }
+
+    [Fact]
+    public async Task 按分店汇总_统计未完成与超期_只返回可访问的启用分店()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-8));
+
+        var all = await service.GetStoreSummariesAsync(null);
+        Assert.Equal(7, all.OverdueDays);
+        // 没有任务的分店（1003 是特殊商品，被跳过）也要返回，各计数为 0，方便前端显示「全部完成」。
+        Assert.Equal(new[] { "1001", "1002", "1003" }, all.Stores.Select(row => row.StoreCode).ToArray());
+        var store1001 = all.Stores.Single(row => row.StoreCode == "1001");
+        Assert.Equal("分店1001", store1001.StoreName);
+        Assert.Equal(1, store1001.PendingPriceUpdateCount);
+        Assert.Equal(0, store1001.PendingLabelOnlyCount);
+        Assert.Equal(1, store1001.PendingCount);
+        Assert.Equal(1, store1001.OverdueCount);
+        var store1002 = all.Stores.Single(row => row.StoreCode == "1002");
+        Assert.Equal(1, store1002.PendingCount);
+        Assert.Equal(0, store1002.OverdueCount);
+        var store1003 = all.Stores.Single(row => row.StoreCode == "1003");
+        Assert.Equal(0, store1003.PendingCount);
+        Assert.Equal(0, store1003.OverdueCount);
+
+        var scoped = await service.GetStoreSummariesAsync(new[] { "1002", "9999" });
+        Assert.Equal("1002", Assert.Single(scoped.Stores).StoreCode);
+        Assert.Empty((await service.GetStoreSummariesAsync(Array.Empty<string>())).Stores);
+    }
+
+    [Fact]
+    public async Task 按分店汇总_区分需改价与待换标签_停用分店不返回()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        // 1002 店员先把价格改成与仓库一致：任务变成待换标签（货架标签仍是旧价）
+        await SetStoreRetailAsync("1002", 12m);
+        await service.ReconcilePendingAsync("1002");
+        _db.Ado.ExecuteCommand("UPDATE Store SET IsActive = 0 WHERE StoreCode = '1003'");
+
+        var summaries = await service.GetStoreSummariesAsync(null);
+        Assert.Equal(new[] { "1001", "1002" }, summaries.Stores.Select(row => row.StoreCode).ToArray());
+        var store1002 = summaries.Stores.Single(row => row.StoreCode == "1002");
+        Assert.Equal(0, store1002.PendingPriceUpdateCount);
+        Assert.Equal(1, store1002.PendingLabelOnlyCount);
+        Assert.Equal(1, store1002.PendingCount);
+    }
+
+    [Fact]
+    public async Task 超期筛选_等得最久的排最前_不限分店时跨店排序()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-8));
+        await SetTaskCreatedAtAsync("1002", DateTime.UtcNow.AddDays(-10));
+
+        var page = await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { OverdueOnly = true }, null);
+
+        Assert.Equal(new[] { "1002", "1001" }, page.Items.Select(item => item.StoreCode).ToArray());
+        Assert.Equal(2, page.Total);
+        Assert.Equal(new[] { 3, 1 }, page.Items.Select(item => item.OverdueByDays).ToArray());
+    }
+
+    [Fact]
+    public async Task Web监控的超期数与移动端同口径_按首次发起起算()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetTaskCreatedAtAsync("1001", DateTime.UtcNow.AddDays(-8));
+        // 再次改价刷新发起时间：旧口径（按 InitiatedAtUtc）会因此把它算成「刚发起」，不再超期。
+        await SetWarehouseRetailAsync(13m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("李四", "WarehouseProducts"));
+
+        var summary = await service.GetSummaryAsync(new StorePriceUpdateTaskQueryDto());
+
+        Assert.Equal(7, summary.OverdueDays);
+        Assert.Equal(1, summary.OverdueCount);
+        Assert.Equal(1, summary.OverdueStoreCount);
+    }
+
+    private Task SetTaskCreatedAtAsync(string storeCode, DateTime createdAtUtc) =>
+        _db.Updateable<StorePriceUpdateTask>()
+            .SetColumns(task => task.CreatedAtUtc == createdAtUtc)
+            .Where(task => task.StoreCode == storeCode)
+            .ExecuteCommandAsync();
+
+    // ---------------------------------------------------------------------
 
     private StorePriceUpdateTaskService CreateService(IWarehouseStorePriceHqSyncEnqueuer? hqEnqueuer = null)
     {

@@ -7,6 +7,8 @@ import type {
   PriceUpdateHqSyncStatus,
   PriceUpdateTaskKind,
   PriceUpdateTaskStatus,
+  StorePriceUpdateStoreSummary,
+  StorePriceUpdateSummary,
   StorePriceUpdateTask,
   StorePriceUpdateTaskPage,
   SyncTargetStore,
@@ -115,6 +117,12 @@ export function normalizePriceUpdateTask(payload: unknown): StorePriceUpdateTask
     initiatorReference: toText(pick(data, "initiatorReference")),
     initiatedAtUtc: toText(pick(data, "initiatedAtUtc")) ?? "",
     changeCount: Math.max(1, toCount(pick(data, "changeCount"))),
+    // 旧后端没有这些字段：首次发起时间回退到发起时间，等待 / 超期按未超期处理（不会误锁报表）。
+    firstInitiatedAtUtc:
+      toText(pick(data, "firstInitiatedAtUtc")) ?? toText(pick(data, "initiatedAtUtc")) ?? "",
+    waitingDays: toCount(pick(data, "waitingDays")),
+    isOverdue: pick(data, "isOverdue") === true,
+    overdueByDays: toCount(pick(data, "overdueByDays")),
     priceAppliedBy: toText(pick(data, "priceAppliedBy")),
     priceAppliedAtUtc: toText(pick(data, "priceAppliedAtUtc")),
     completionMode: completionMode && COMPLETION_MODES.has(completionMode) ? completionMode : null,
@@ -140,7 +148,37 @@ export function normalizePriceUpdateTaskPage(payload: unknown): StorePriceUpdate
     pendingPriceUpdateCount: toCount(pick(data, "pendingPriceUpdateCount")),
     pendingLabelOnlyCount: toCount(pick(data, "pendingLabelOnlyCount")),
     completedCount: toCount(pick(data, "completedCount")),
+    pendingOverdueCount: toCount(pick(data, "pendingOverdueCount")),
+    overdueDays: toCount(pick(data, "overdueDays")),
     hqSyncEnabled: Boolean(pick(data, "hqSyncEnabled")),
+  };
+}
+
+function normalizeStoreSummary(payload: unknown): StorePriceUpdateStoreSummary {
+  const data = asRecord(payload);
+  const storeCode = toText(pick(data, "storeCode")) ?? "";
+  const pendingPriceUpdateCount = toCount(pick(data, "pendingPriceUpdateCount"));
+  const pendingLabelOnlyCount = toCount(pick(data, "pendingLabelOnlyCount"));
+  return {
+    storeCode,
+    storeName: toText(pick(data, "storeName")) ?? storeCode,
+    pendingPriceUpdateCount,
+    pendingLabelOnlyCount,
+    // 以两类之和为准：后端的合计字段与明细不一致时，宁可信明细，避免角标和列表对不上。
+    pendingCount: pendingPriceUpdateCount + pendingLabelOnlyCount,
+    overdueCount: toCount(pick(data, "overdueCount")),
+  };
+}
+
+/** 按分店汇总：没有分店代码的行直接丢弃，避免后续按分店匹配时出现空键。 */
+export function normalizePriceUpdateSummary(payload: unknown): StorePriceUpdateSummary {
+  const data = asRecord(payload);
+  const rawStores = pick(data, "stores");
+  return {
+    stores: Array.isArray(rawStores)
+      ? rawStores.map(normalizeStoreSummary).filter((item) => item.storeCode)
+      : [],
+    overdueDays: toCount(pick(data, "overdueDays")),
   };
 }
 

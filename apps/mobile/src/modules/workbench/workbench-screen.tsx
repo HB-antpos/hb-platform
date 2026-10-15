@@ -32,6 +32,7 @@ import {
   toggleWorkbenchSectionCollapsed,
   type WorkbenchNavigationItem,
 } from "@/modules/navigation/workbench";
+import { buildPriceUpdatesRoute } from "@/modules/price-updates/navigation";
 import { useCartSummary } from "@/modules/shop/use-cart-summary";
 import { useStores } from "@/modules/shop/use-stores";
 import type { Store } from "@/modules/shop/types";
@@ -76,6 +77,9 @@ interface FunctionButtonProps {
   maxCount?: number;
   onPress: () => void;
   compact?: boolean;
+  /** 入口被锁（如超期任务锁定报表中心）：灰显并带锁标，点击仍会走 onPress 由上层决定去哪。 */
+  locked?: boolean;
+  lockedAccessibilityLabel?: string;
 }
 
 function FunctionButton({
@@ -85,6 +89,8 @@ function FunctionButton({
   maxCount = WORKBENCH_BADGE_DEFAULT_MAX,
   onPress,
   compact = false,
+  locked = false,
+  lockedAccessibilityLabel,
 }: FunctionButtonProps) {
   const { t } = useAppTranslation("workbench");
   const visiblePendingCount = formatWorkbenchBadgeCount(pendingCount, maxCount);
@@ -92,7 +98,11 @@ function FunctionButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={t("accessibility.openFunction", { title: label })}
+      accessibilityLabel={
+        locked && lockedAccessibilityLabel
+          ? lockedAccessibilityLabel
+          : t("accessibility.openFunction", { title: label })
+      }
       onPress={onPress}
       style={({ pressed }) => [
         compact ? styles.quickAction : styles.functionRow,
@@ -102,11 +112,16 @@ function FunctionButton({
       <View style={compact ? styles.quickIcon : styles.rowIcon}>
         <MaterialCommunityIcons
           name={item.icon as MaterialIconName}
-          color={HB_COLORS.action}
+          color={locked ? HB_COLORS.outline : HB_COLORS.action}
           size={compact ? 23 : 21}
         />
+        {compact && locked ? (
+          <View style={[styles.countBadge, styles.iconCornerBadge]}>
+            <MaterialCommunityIcons name="lock" size={11} color={HB_COLORS.danger} />
+          </View>
+        ) : null}
         {/* 常用功能格子窄：角标挂在图标右上角，不挤占文字宽度（英文 Price updates 否则会折行）。 */}
-        {compact && pendingCount > 0 ? (
+        {compact && !locked && pendingCount > 0 ? (
           <View style={[styles.countBadge, styles.iconCornerBadge]}>
             <Text variant="labelSmall" style={styles.countBadgeText}>
               {visiblePendingCount}
@@ -116,11 +131,19 @@ function FunctionButton({
       </View>
       <Text
         variant={compact ? "labelLarge" : "bodyMedium"}
-        style={compact ? styles.quickLabel : styles.functionLabel}
+        style={[
+          compact ? styles.quickLabel : styles.functionLabel,
+          locked ? styles.lockedLabel : null,
+        ]}
       >
         {label}
       </Text>
-      {!compact && pendingCount > 0 ? (
+      {!compact && locked ? (
+        <View style={styles.countBadge}>
+          <MaterialCommunityIcons name="lock" size={13} color={HB_COLORS.danger} />
+        </View>
+      ) : null}
+      {!compact && !locked && pendingCount > 0 ? (
         <View style={styles.countBadge}>
           <Text variant="labelSmall" style={styles.countBadgeText}>
             {visiblePendingCount}
@@ -187,12 +210,14 @@ function AccessState({ kind, onRetry }: AccessStateProps) {
 export function WorkbenchScreen() {
   const router = useRouter();
   const { t } = useAppTranslation(["workbench", "common"]);
+  const { t: tPrice } = useAppTranslation("priceUpdates");
   const {
     orderedVisibleRouteNames,
     navigationErrorMessage,
     navigationLoading,
     pendingProfileReviewCount,
     pendingPriceUpdateCount,
+    priceTasks,
     newProductKindCount,
     faceHitUnreadCount,
     isDeviceMode,
@@ -251,6 +276,8 @@ export function WorkbenchScreen() {
     () => new Map(allItems.map((item) => [item.routeName, item])),
     [allItems]
   );
+  // 超期任务锁定报表中心：只有账号真的有「报表中心」入口时才提示和灰显。
+  const reportsLocked = priceTasks.reportsLocked && itemsByRoute.has("reports");
   const quickActions = useMemo(
     () =>
       QUICK_ACTION_ROUTE_ORDER.map((routeName) => itemsByRoute.get(routeName))
@@ -331,10 +358,27 @@ export function WorkbenchScreen() {
       ) {
         return;
       }
+      // 管理分店有超期任务时报表中心被锁：不进报表，直接去「价格和标签」处理超期任务。
+      if (routeName === "reports" && priceTasks.reportsLocked) {
+        router.push(
+          buildPriceUpdatesRoute({
+            storeCode: priceTasks.firstOverdueStoreCode,
+            overdueOnly: true,
+          }) as Parameters<typeof router.push>[0]
+        );
+        return;
+      }
       // 工作台功能是 Shell Stack 的二级页面，push 后才能使用原生手势逐级返回。
       router.push(path as Parameters<typeof router.push>[0]);
     },
-    [itemsByRoute, navigationErrorMessage, navigationLoading, router]
+    [
+      itemsByRoute,
+      navigationErrorMessage,
+      navigationLoading,
+      priceTasks.firstOverdueStoreCode,
+      priceTasks.reportsLocked,
+      router,
+    ]
   );
 
   const handleSelectStore = useCallback(
@@ -549,6 +593,25 @@ export function WorkbenchScreen() {
           </View>
         </Surface>
 
+        {reportsLocked && !accessState ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => navigateTo("reports")}
+            style={({ pressed }) => [styles.lockStrip, pressed ? styles.pressed : null]}
+          >
+            <MaterialCommunityIcons name="lock-alert-outline" size={20} color={HB_COLORS.danger} />
+            <Text variant="bodySmall" style={styles.lockStripText}>
+              {tPrice("workbench.lockStrip", {
+                count: priceTasks.manageableOverdueCount,
+                days: priceTasks.overdueDays,
+              })}
+            </Text>
+            <Text variant="labelLarge" style={styles.lockStripAction}>
+              {tPrice("workbench.lockAction")}
+            </Text>
+          </Pressable>
+        ) : null}
+
         {accessState ? (
           <AccessState
             kind={accessState}
@@ -575,6 +638,8 @@ export function WorkbenchScreen() {
                       pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
                       maxCount={maxCountByRouteName[item.routeName]}
                       compact
+                      locked={reportsLocked && item.routeName === "reports"}
+                      lockedAccessibilityLabel={tPrice("workbench.lockedTile", { title: t(item.labelKey) })}
                       onPress={() => navigateTo(item.routeName)}
                     />
                   ))}
@@ -693,6 +758,8 @@ export function WorkbenchScreen() {
                               label={t(item.labelKey)}
                               pendingCount={pendingCountByRouteName[item.routeName] ?? 0}
                               maxCount={maxCountByRouteName[item.routeName]}
+                              locked={reportsLocked && item.routeName === "reports"}
+                              lockedAccessibilityLabel={tPrice("workbench.lockedTile", { title: t(item.labelKey) })}
                               onPress={() => navigateTo(item.routeName)}
                             />
                           </View>
@@ -1007,6 +1074,26 @@ const styles = StyleSheet.create({
   groupDivider: {
     height: 1,
     backgroundColor: HB_COLORS.outline,
+  },
+  lockedLabel: {
+    color: HB_COLORS.textSecondary,
+  },
+  lockStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.xs,
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: 10,
+    borderRadius: HB_RADIUS.surface,
+    backgroundColor: "#FEE4E2",
+  },
+  lockStripText: {
+    flex: 1,
+    color: HB_COLORS.danger,
+  },
+  lockStripAction: {
+    color: HB_COLORS.danger,
+    fontWeight: "700",
   },
   countBadge: {
     minWidth: 24,

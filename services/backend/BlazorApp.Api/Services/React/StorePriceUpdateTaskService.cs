@@ -49,8 +49,19 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
     public bool IsHqSyncEnabled =>
         _configuration.GetValue("StorePriceUpdateTasks:SyncToHq", true);
 
+    /// <summary>
+    /// 任务必须在发起后多少天内完成，超过即「超期」。默认 7 天（原默认 3 天只用于 Web 监控页的提示，
+    /// 现在与移动端「超期锁定报表」共用同一口径，避免两边数字对不上）。
+    /// </summary>
     private int OverdueDays =>
-        Math.Max(1, _configuration.GetValue("StorePriceUpdateTasks:OverdueDays", 3));
+        Math.Max(1, _configuration.GetValue("StorePriceUpdateTasks:OverdueDays", 7));
+
+    /// <summary>
+    /// 超期截止时间：CreatedAtUtc 早于它的未完成任务算超期。
+    /// 用 CreatedAtUtc 而不是 InitiatedAtUtc：任务被刷新（仓库再次改价）时会重写 InitiatedAtUtc，
+    /// 按它算等于每次改价都重新计时，催办就失效了；CreatedAtUtc 只在任务首次生成时写入。
+    /// </summary>
+    private DateTime OverdueCutoffUtc() => DateTime.UtcNow.AddDays(-OverdueDays);
 
     private int RetentionDays =>
         Math.Max(7, _configuration.GetValue("StorePriceUpdateTasks:RetentionDays", 90));
@@ -715,6 +726,87 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             .CountAsync();
     }
 
+    public async Task<StorePriceUpdateTaskStoreSummaryListDto> GetStoreSummariesAsync(
+        IReadOnlyCollection<string>? accessibleStoreCodes,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var result = new StorePriceUpdateTaskStoreSummaryListDto { OverdueDays = OverdueDays };
+        if (!await IsSchemaReadyAsync())
+        {
+            return result;
+        }
+
+        var storesQuery = _db.Queryable<Store>().Where(store => store.IsActive && !store.IsDeleted);
+        if (accessibleStoreCodes != null)
+        {
+            var accessible = accessibleStoreCodes
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code.Trim())
+                .Distinct()
+                .ToList();
+            if (accessible.Count == 0)
+            {
+                return result;
+            }
+            storesQuery = storesQuery.Where(store => accessible.Contains(store.StoreCode));
+        }
+
+        var stores = await storesQuery.Select(store => new { store.StoreCode, store.StoreName }).ToListAsync();
+        if (stores.Count == 0)
+        {
+            return result;
+        }
+
+        var storeCodes = stores.Select(store => store.StoreCode).ToList();
+        var pendingStatus = StorePriceUpdateTaskStatuses.Pending;
+        var overdueCutoff = OverdueCutoffUtc();
+        // 两次分组查询：未完成按「分店 + 形态」计数，超期按分店计数。数据量是分店数 × 2 行，不会随任务数增长。
+        var pendingGroups = await _db.Queryable<StorePriceUpdateTask>()
+            .Where(task => task.Status == pendingStatus && storeCodes.Contains(task.StoreCode))
+            .GroupBy(task => new { task.StoreCode, task.Kind })
+            .Select(task => new
+            {
+                task.StoreCode,
+                task.Kind,
+                Count = SqlFunc.AggregateCount(task.Id),
+            })
+            .ToListAsync();
+        var overdueGroups = await _db.Queryable<StorePriceUpdateTask>()
+            .Where(task =>
+                task.Status == pendingStatus
+                && storeCodes.Contains(task.StoreCode)
+                && task.CreatedAtUtc < overdueCutoff
+            )
+            .GroupBy(task => task.StoreCode)
+            .Select(task => new { task.StoreCode, Count = SqlFunc.AggregateCount(task.Id) })
+            .ToListAsync();
+
+        foreach (var store in stores)
+        {
+            var pending = pendingGroups.Where(group => group.StoreCode == store.StoreCode).ToList();
+            var row = new StorePriceUpdateTaskStoreSummaryDto
+            {
+                StoreCode = store.StoreCode,
+                StoreName = store.StoreName,
+                PendingPriceUpdateCount = pending
+                    .Where(group => group.Kind == StorePriceUpdateTaskKinds.PriceUpdate)
+                    .Sum(group => group.Count),
+                PendingLabelOnlyCount = pending
+                    .Where(group => group.Kind == StorePriceUpdateTaskKinds.LabelOnly)
+                    .Sum(group => group.Count),
+                OverdueCount = overdueGroups
+                    .Where(group => group.StoreCode == store.StoreCode)
+                    .Sum(group => group.Count),
+            };
+            row.PendingCount = row.PendingPriceUpdateCount + row.PendingLabelOnlyCount;
+            result.Stores.Add(row);
+        }
+
+        result.Stores = result.Stores.OrderBy(row => row.StoreCode, StringComparer.Ordinal).ToList();
+        return result;
+    }
+
     public async Task<StorePriceUpdateTaskPageDto> GetPageAsync(
         StorePriceUpdateTaskQueryDto query,
         IReadOnlyCollection<string>? accessibleStoreCodes,
@@ -728,6 +820,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             Page = page,
             PageSize = pageSize,
             HqSyncEnabled = IsHqSyncEnabled,
+            OverdueDays = OverdueDays,
         };
         if (!await IsSchemaReadyAsync())
         {
@@ -747,9 +840,12 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
 
         var filtered = await BuildFilteredQueryAsync(query, accessibleStoreCodes, applyStatus: true);
         RefAsync<int> total = 0;
-        var ordered = status == StorePriceUpdateTaskStatuses.Pending
-            ? filtered.OrderBy(task => task.InitiatedAtUtc, OrderByType.Desc).OrderBy(task => task.Id, OrderByType.Desc)
-            : filtered.OrderBy(task => task.CompletedAtUtc, OrderByType.Desc).OrderBy(task => task.Id, OrderByType.Desc);
+        // 超期筛选：等得最久的排最前，催办时先处理最老的；其余沿用「最近发起的在前」。
+        var ordered = query.OverdueOnly == true
+            ? filtered.OrderBy(task => task.CreatedAtUtc, OrderByType.Asc).OrderBy(task => task.Id, OrderByType.Asc)
+            : status == StorePriceUpdateTaskStatuses.Pending
+                ? filtered.OrderBy(task => task.InitiatedAtUtc, OrderByType.Desc).OrderBy(task => task.Id, OrderByType.Desc)
+                : filtered.OrderBy(task => task.CompletedAtUtc, OrderByType.Desc).OrderBy(task => task.Id, OrderByType.Desc);
         var tasks = await ordered.ToPageListAsync(page, pageSize, total);
         result.Total = total;
         result.Items = await MapTasksAsync(tasks);
@@ -766,6 +862,10 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
                 .CountAsync();
             result.PendingLabelOnlyCount = result.PendingCount - result.PendingPriceUpdateCount;
             result.CompletedCount = await scope.Clone().Where(task => task.Status == completedStatus).CountAsync();
+            var overdueCutoff = OverdueCutoffUtc();
+            result.PendingOverdueCount = await scope.Clone()
+                .Where(task => task.Status == pendingStatus && task.CreatedAtUtc < overdueCutoff)
+                .CountAsync();
         }
         return result;
     }
@@ -804,6 +904,14 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         if (!string.IsNullOrWhiteSpace(kind))
         {
             filtered = filtered.Where(task => task.Kind == kind);
+        }
+
+        if (query.OverdueOnly == true)
+        {
+            // 超期只针对未完成任务，与 Status 参数无关。
+            var overduePending = StorePriceUpdateTaskStatuses.Pending;
+            var overdueCutoff = OverdueCutoffUtc();
+            filtered = filtered.Where(task => task.Status == overduePending && task.CreatedAtUtc < overdueCutoff);
         }
 
         var initiator = query.InitiatorName?.Trim();
@@ -922,8 +1030,18 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             }
         }
 
+        var now = DateTime.UtcNow;
+        var overdueLimitDays = OverdueDays;
+        var overdueCutoff = now.AddDays(-overdueLimitDays);
+
         return tasks.Select(task =>
         {
+            // 等待天数与超期都只对未完成任务有意义，且与列表筛选 / 汇总共用同一个判据（CreatedAtUtc < 截止时间）。
+            var firstInitiatedAt = DateTime.SpecifyKind(task.CreatedAtUtc, DateTimeKind.Utc);
+            var isPending = task.Status == StorePriceUpdateTaskStatuses.Pending;
+            var waitingDays = isPending ? Math.Max(0, (int)Math.Floor((now - firstInitiatedAt).TotalDays)) : 0;
+            var isOverdue = isPending && firstInitiatedAt < overdueCutoff;
+
             productByCode.TryGetValue(task.ProductCode, out var product);
             storeNames.TryGetValue(task.StoreCode, out var storeName);
             uuidByKey.TryGetValue(Key(task.StoreCode, task.ProductCode), out var uuid);
@@ -972,6 +1090,11 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
                 InitiatorReference = task.InitiatorReference,
                 InitiatedAtUtc = DateTime.SpecifyKind(task.InitiatedAtUtc, DateTimeKind.Utc),
                 ChangeCount = task.ChangeCount,
+                FirstInitiatedAtUtc = firstInitiatedAt,
+                WaitingDays = waitingDays,
+                IsOverdue = isOverdue,
+                // 刚好过线（等了 7 天零几小时）时整天数还是 7，此时也至少显示「超期 1 天」。
+                OverdueByDays = isOverdue ? Math.Max(1, waitingDays - overdueLimitDays) : 0,
                 PriceAppliedBy = task.PriceAppliedBy,
                 PriceAppliedAtUtc = AsUtc(task.PriceAppliedAtUtc),
                 CompletionMode = task.CompletionMode,
@@ -1450,12 +1573,13 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             ? 0m
             : Math.Round((decimal)summary.CompletedCount / denominator, 4);
 
-        var overdueCutoff = DateTime.UtcNow.AddDays(-OverdueDays);
+        // 超期与移动端同口径：从任务首次生成（CreatedAtUtc）起算，仓库再次改价不会让它重新计时。
+        var overdueCutoff = OverdueCutoffUtc();
         var overdueRows = rows.Where(row => row.OldestPendingAtUtc.HasValue && row.OldestPendingAtUtc < overdueCutoff).ToList();
         summary.OverdueStoreCount = overdueRows.Count;
         var pendingStatus = StorePriceUpdateTaskStatuses.Pending;
         var overdueQuery = _db.Queryable<StorePriceUpdateTask>()
-            .Where(task => task.Status == pendingStatus && task.InitiatedAtUtc < overdueCutoff);
+            .Where(task => task.Status == pendingStatus && task.CreatedAtUtc < overdueCutoff);
         var overdueStoreCodes = query.ResolveStoreCodes();
         if (overdueStoreCodes.Count > 0)
         {
@@ -1515,7 +1639,8 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
                 task.StoreCode,
                 task.Kind,
                 Count = SqlFunc.AggregateCount(task.Id),
-                Oldest = SqlFunc.AggregateMin(task.InitiatedAtUtc),
+                // 「最久未处理」按首次生成时间算，与超期判据一致（OverdueStoreCount 用它比较截止时间）。
+                Oldest = SqlFunc.AggregateMin(task.CreatedAtUtc),
             })
             .ToListAsync();
         var completedGroups = await baseQuery.Clone()
