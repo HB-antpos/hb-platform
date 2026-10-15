@@ -100,8 +100,8 @@ assert.deepEqual(admin.managedRows.map((item) => item.storeCode), ["B"], "管理
 assert.equal(admin.manageableOverdueCount, 2, "超期数照常统计（用于红色超期标签），但不用来锁");
 assert.equal(admin.reportsLocked, false, "管理员弹提醒但不锁报表（用户 10-16 决定）");
 
-// ---- 仓库管理员：关联分店全算管理分店（弹窗、角标要覆盖它们），但不锁报表 ----
-// 他们关联的多是仓库（isPrimary=false），按店长口径会一家管理分店都没有、永远收不到提醒。
+// ---- 仓库管理员：管理分店与店长同口径（只算 isPrimary），只关联的店不弹、不计角标；且不锁报表 ----
+// 用户 10-16 决定：「不要把只关联的店也弹」。注意这里 C 店有超期——换成店长就会被锁，仓库管理员不锁。
 const warehouseManager = buildPriceTaskOverview({
   ...base,
   isWarehouseManager: true,
@@ -113,45 +113,38 @@ const warehouseManager = buildPriceTaskOverview({
 });
 assert.deepEqual(
   warehouseManager.manageableStoreCodes,
-  ["A", "B", "C"],
-  "仓库管理员：关联分店全算管理分店（含 isPrimary=false 的 B）"
+  ["A", "C"],
+  "仓库管理员：只算 isPrimary 的分店，只关联的 B 不算管理分店"
 );
-assert.equal(warehouseManager.managedRows.length, 3);
-assert.equal(warehouseManager.totalPending, 9, "角标 / 提醒按全部关联分店合计");
-assert.equal(warehouseManager.manageableOverdueCount, 7, "超期数照常统计（用于红色超期标签），但不用来锁");
-assert.equal(warehouseManager.reportsLocked, false, "仓库管理员弹提醒，但不锁报表");
+assert.deepEqual(warehouseManager.managedRows.map((item) => item.storeCode), ["A", "C"], "弹窗只列管理分店，B 不出现");
+assert.equal(warehouseManager.totalPending, 5, "角标 / 提醒只算管理分店（A 3 + C 2），B 的 4 项不算");
+assert.equal(warehouseManager.manageableOverdueCount, 2, "超期数只算管理分店（C 的 2），B 的 5 不算");
+assert.deepEqual(warehouseManager.rows.map((item) => item.storeCode), ["A", "B", "C"], "价格页的分店条仍能看到 B 的数量");
+assert.equal(warehouseManager.reportsLocked, false, "仓库管理员管理分店有超期也不锁报表");
 
-// 只关联了仓库（isPrimary=false）：店长口径没有管理分店，仓库管理员口径有
+// 只关联了仓库（isPrimary=false）：仓库管理员没有管理分店 → 不弹、不计角标（分店条数据还在）
 const warehouseOnly: Store[] = [{ storeCode: "W", storeName: "HB WARE HOUSE", isPrimary: false }];
-const warehouseSummary = summary([row("W", { pendingLabelOnlyCount: 3, overdueCount: 3 })]);
 const warehouseOnlyAsWarehouseManager = buildPriceTaskOverview({
   stores: warehouseOnly,
   isDeviceMode: false,
   deviceBoundStore: null,
   isAdmin: false,
   isWarehouseManager: true,
-  summary: warehouseSummary,
+  summary: summary([row("W", { pendingLabelOnlyCount: 3, overdueCount: 3 })]),
 });
-assert.equal(warehouseOnlyAsWarehouseManager.totalPending, 3, "只关联仓库的仓库管理员也要收到提醒");
+assert.deepEqual(warehouseOnlyAsWarehouseManager.managedRows, []);
+assert.equal(warehouseOnlyAsWarehouseManager.totalPending, 0, "只关联仓库的仓库管理员：这些待办不弹窗、不计角标");
+assert.equal(warehouseOnlyAsWarehouseManager.rows.length, 1);
 assert.equal(warehouseOnlyAsWarehouseManager.reportsLocked, false);
-const warehouseOnlyAsStoreManager = buildPriceTaskOverview({
-  stores: warehouseOnly,
-  isDeviceMode: false,
-  deviceBoundStore: null,
-  isAdmin: false,
-  isWarehouseManager: false,
-  summary: warehouseSummary,
-});
-assert.equal(warehouseOnlyAsStoreManager.totalPending, 0, "对照：不是仓库管理员时没有管理分店 → 不提醒");
 
-// 既是管理员又是仓库管理员：弹提醒（管理分店口径），同样不锁
+// 既是管理员又是仓库管理员：按管理员口径（可见全部分店都算管理分店），同样不锁
 const adminAndWarehouseManager = buildPriceTaskOverview({
   ...base,
   isAdmin: true,
   isWarehouseManager: true,
   summary: summary([row("B", { pendingLabelOnlyCount: 2, overdueCount: 2 })]),
 });
-assert.equal(adminAndWarehouseManager.totalPending, 2, "既是管理员又是仓库管理员：照常收到提醒");
+assert.equal(adminAndWarehouseManager.totalPending, 2, "既是管理员又是仓库管理员：按管理员口径，B 也算管理分店");
 assert.equal(adminAndWarehouseManager.reportsLocked, false, "既是管理员又是仓库管理员：弹提醒但不锁报表");
 
 // ---- 设备（PDA）：没有报表入口，永不锁定；管理分店 = 绑定分店 ----
