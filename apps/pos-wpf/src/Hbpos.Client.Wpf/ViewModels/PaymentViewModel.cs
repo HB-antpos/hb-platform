@@ -1308,6 +1308,14 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     private async Task ApplyQuickCashAsync(QuickCashOption? option)
     {
+        // 中文注释：已有现金付款项时，快捷金额累加进这一条（连点 $50、$20 得到一条 $70），
+        // 不再另开第二条现金行：整单现金仍只有一条，找零、5 分凑整和小票口径都不变。
+        if (option is not null && FindAccumulableCashTender() is { } existingCash)
+        {
+            await AddTenderCoreAsync(PaymentMethodKind.Cash, existingCash, option.Amount);
+            return;
+        }
+
         await _tenderController.ApplyQuickCashAsync(
             option,
             amountText => TenderAmountText = amountText,
@@ -1535,7 +1543,16 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         InstallmentCustomerDraftName = update(InstallmentCustomerDraftName);
     }
 
-    private async Task AddTenderByMethodAsync(PaymentMethodKind method)
+    private Task AddTenderByMethodAsync(PaymentMethodKind method) => AddTenderCoreAsync(method);
+
+    /// <summary>
+    /// 新增一条付款项。<paramref name="accumulateInto"/> 非空时是「快捷现金累加」：
+    /// 本次金额 <paramref name="accumulateDelta"/> 并入这条已有现金，成功后原地替换为累加后的新现金行。
+    /// </summary>
+    private async Task AddTenderCoreAsync(
+        PaymentMethodKind method,
+        PaymentTender? accumulateInto = null,
+        decimal accumulateDelta = 0m)
     {
         if (!EnsurePaymentMethodEnabled(method)) return;
         if (method == PaymentMethodKind.Card && _requiresAlternativeRefundMethod)
@@ -1554,11 +1571,18 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
 
         if (!TryApplyAddTenderPlan(
-                _tenderController.CreateAddTenderPlan(BuildAddTenderRequest(method)),
+                _tenderController.CreateAddTenderPlan(BuildAddTenderRequest(method, allowExistingTender: accumulateInto is not null)),
                 out var amountText,
                 out var referenceText))
         {
             return;
+        }
+
+        if (accumulateInto is not null)
+        {
+            // 中文注释：累加后的现金总额 = 原现金 + 本次快捷金额；下面按「去掉原现金行」的付款集合重算剩余，
+            // 成功后再用新现金行替换原行，避免原现金被重复计入。
+            amountText = (accumulateInto.Amount + accumulateDelta).ToString("0.00");
         }
 
         if (IsInstallmentPaymentEnabled &&
@@ -1584,7 +1608,10 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var attemptedPaymentAmount = ResolveAttemptedPaymentAmount(amountText);
+        // 累加时授权与审计都按本次实际新收的金额，而不是累加后的总额。
+        var attemptedPaymentAmount = accumulateInto is null
+            ? ResolveAttemptedPaymentAmount(amountText)
+            : accumulateDelta;
         using var tenderPermissionGrant = await AuthorizeAsync(
             GetTenderPermission(method),
             $"add-tender-{method.ToString().ToLowerInvariant()}",
@@ -1646,7 +1673,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                     method,
                     Session,
                     GetPaymentTargetAmount(),
-                    PaymentTenders.ToList(),
+                    PaymentTenders.Where(tender => !ReferenceEquals(tender, accumulateInto)).ToList(),
                     amountText,
                     referenceText,
                     isCard ? cardPaymentCts?.Token ?? CancellationToken.None : CancellationToken.None,
@@ -1858,7 +1885,23 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             _cardSession.SetResultUnknownRecoveryRequired(false);
         }
 
-        PaymentTenders.Add(result.Tender);
+        if (accumulateInto is null)
+        {
+            PaymentTenders.Add(result.Tender);
+        }
+        else
+        {
+            // 授权/计算期间原现金行若已被移除，放弃本次累加，不能凭旧金额再补回一条。
+            var accumulateIndex = PaymentTenders.IndexOf(accumulateInto);
+            if (accumulateIndex < 0)
+            {
+                NotifyPaymentCommandStates();
+                return;
+            }
+
+            PaymentTenders[accumulateIndex] = result.Tender;
+        }
+
         OperationAuditEvents.RecordAction(
             _operationAuditLogger,
             OperationAuditTypes.PaymentTenderAdd,
@@ -1867,7 +1910,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             OperationAuditEvents.CaptureCart(_cart.Lines),
             reasonCode: IsRefundMode ? "REFUND" : "SALE",
             paymentMethod: result.Tender.Method.ToString(),
-            paymentAmount: result.Tender.Amount);
+            paymentAmount: accumulateInto is null ? result.Tender.Amount : accumulateDelta);
         if (method == PaymentMethodKind.Voucher)
         {
             VoucherCodeText = string.Empty;
@@ -2849,7 +2892,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
     }
 
-    private bool CanAddTender(PaymentMethodKind method, bool allowDefaultAmount)
+    private bool CanAddTender(PaymentMethodKind method, bool allowDefaultAmount, bool allowAccumulateCash = false)
     {
         if (!IsPaymentMethodEnabled(method)) return false;
         if (IsManualCardDialogOpen) return false;
@@ -2880,7 +2923,11 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        if (HasTenderForMethod(method) && !(IsRefundMode && method == PaymentMethodKind.Card))
+        // 快捷现金允许继续累加到已有的现金行；仍未收够（下面的剩余金额检查）时才可点。
+        var canAccumulateIntoCash = allowAccumulateCash &&
+            method == PaymentMethodKind.Cash &&
+            FindAccumulableCashTender() is not null;
+        if (HasTenderForMethod(method) && !(IsRefundMode && method == PaymentMethodKind.Card) && !canAccumulateIntoCash)
         {
             return false;
         }
@@ -3027,7 +3074,22 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     private bool CanApplyQuickCash(QuickCashOption? option)
     {
-        return option is not null && CanAddTender(PaymentMethodKind.Cash, allowDefaultAmount: true);
+        return option is not null &&
+            CanAddTender(PaymentMethodKind.Cash, allowDefaultAmount: true, allowAccumulateCash: true);
+    }
+
+    /// <summary>
+    /// 快捷现金可累加的目标：销售付款页（非退款、非分期）里已存在的那一条现金付款项；没有则返回 null。
+    /// 退款与分期仍保持「每种付款方式只有一条」的原规则。
+    /// </summary>
+    private PaymentTender? FindAccumulableCashTender()
+    {
+        if (!IsPaymentMode || IsRefundMode || IsInstallmentPaymentEnabled || IsInstallmentRepaymentMode)
+        {
+            return null;
+        }
+
+        return PaymentTenders.FirstOrDefault(tender => tender.Method == PaymentMethodKind.Cash);
     }
 
     private string ResolveTenderAmountText(PaymentMethodKind method)
@@ -3963,7 +4025,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         await _cardSession.ExecuteErrorPrimaryActionAsync();
     }
 
-    private PaymentTenderAddRequest BuildAddTenderRequest(PaymentMethodKind method)
+    private PaymentTenderAddRequest BuildAddTenderRequest(PaymentMethodKind method, bool allowExistingTender = false)
     {
         return new PaymentTenderAddRequest(
             method,
@@ -3972,7 +4034,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             _pendingVoucherUploadOrderGuid is not null,
             IsRefundMode,
             IsOfflineVoucherRefundUnavailable(method),
-            HasTenderForMethod(method) && !(IsRefundMode && method == PaymentMethodKind.Card),
+            HasTenderForMethod(method) && !allowExistingTender && !(IsRefundMode && method == PaymentMethodKind.Card),
             GetBlockingCartIssueStatusKey(),
             VoucherCodeText,
             ResolveTenderAmountText,
