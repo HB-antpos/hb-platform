@@ -898,8 +898,10 @@
                             <Button Grid.Column="0" Content="{loc:Loc Clear}" Command="{Binding NumberInputCommand}" CommandParameter="Clear" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
                             <Button Grid.Column="1" Content="{loc:Loc common.space}" Command="{Binding NumberInputCommand}" CommandParameter="Space" Style="{StaticResource PosStitchNumberButtonStyle}" />
                             <Button Grid.Column="2" Content="-" Command="{Binding NumberInputCommand}" CommandParameter="-" Style="{StaticResource PosStitchNumberButtonStyle}" />
-                            <!-- Button 内容会按访问键解析，单个 _ 会被当作前缀吞掉；写成 __ 才显示一个下划线。 -->
-                            <Button Grid.Column="3" Content="__" Command="{Binding NumberInputCommand}" CommandParameter="_" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                            <!-- 下划线键用 TextBlock 作内容：Button 的字符串内容会按访问键解析，单个 _ 会被当作前缀吞掉。 -->
+                            <Button Grid.Column="3" Command="{Binding NumberInputCommand}" CommandParameter="_" Style="{StaticResource PosStitchNumberButtonStyle}">
+                                <TextBlock Text="_" />
+                            </Button>
                             <Button Grid.Column="4" Content="/" Command="{Binding NumberInputCommand}" CommandParameter="/" Style="{StaticResource PosStitchNumberButtonStyle}" />
                             <Button Grid.Column="5" Content="." Command="{Binding NumberInputCommand}" CommandParameter="." Style="{StaticResource PosStitchNumberButtonStyle}" />
                             <Button Grid.Column="6" Content="{Binding SearchButtonText}" Command="{Binding NumberInputCommand}" CommandParameter="Enter" Style="{StaticResource PosStitchQuickButtonStyle}" />

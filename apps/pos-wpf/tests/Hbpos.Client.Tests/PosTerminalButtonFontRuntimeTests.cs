@@ -130,7 +130,7 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
                 AssertButtonText(key, expected);
             }
 
-            // 符号键必须真的显示出符号（单个 _ 在 WPF 里是访问键前缀，写成 Content="_" 会显示为空）。
+            // 符号键必须真的显示出符号（字符串内容里的单个 _ 会被访问键解析吞掉）。
             foreach (var symbol in new[] { "-", "_", "/", "." })
             {
                 var key = keys.Single(button => (button as Button)?.CommandParameter as string == symbol);
@@ -148,7 +148,9 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
         var texts = PaymentViewRuntimeStaTestHost.FindVisualDescendants<TextBlock>(button)
             .Where(text => !string.IsNullOrEmpty(text.Text))
             .ToList();
-        Assert.NotEmpty(texts);
+        Assert.True(
+            texts.Count > 0,
+            $"键 CommandParameter={(button as Button)?.CommandParameter} 没有可见文字。");
         foreach (var text in texts)
         {
             Assert.True(
