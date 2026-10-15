@@ -23,9 +23,13 @@ export interface PushNativeOptions {
   getChannelName: () => string;
 }
 
-function mapPermission(response: { status?: string; granted?: boolean }): PushPermissionStatus {
+function mapPermission(response: { status?: string; granted?: boolean; canAskAgain?: boolean }): PushPermissionStatus {
   if (response.granted === true || response.status === "granted") return "granted";
   if (response.status === "undetermined") return "undetermined";
+  // Android 13+ 在「从未询问过」时也返回 denied，区别只在 canAskAgain 为 true（iOS 有真正的 undetermined，不受影响）。
+  // 若把这种初始 denied 当成「用户已拒绝」，就永远不会弹出系统授权框，推送在 Android 13+ 的手机上永远注册不了；
+  // 用户真的拒绝到不能再问（canAskAgain 为 false）后才算 denied，之后交给系统设置。
+  if (response.status === "denied" && response.canAskAgain === true) return "undetermined";
   return "denied";
 }
 

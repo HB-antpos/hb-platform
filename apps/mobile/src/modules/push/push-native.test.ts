@@ -80,6 +80,9 @@ async function run() {
       [{ status: "granted", granted: true }, "granted"],
       [{ status: "undetermined", granted: false }, "undetermined"],
       [{ status: "denied", granted: false }, "denied"],
+      // Android 13+ 从未询问过：denied 但 canAskAgain 为 true → 必须当作未决定，否则永远不会弹授权框
+      [{ status: "denied", granted: false, canAskAgain: true }, "undetermined"],
+      [{ status: "denied", granted: false, canAskAgain: false }, "denied"],
       [{ status: "denied", granted: true }, "granted"],
       [{}, "denied"],
     ];
