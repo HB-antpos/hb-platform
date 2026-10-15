@@ -306,6 +306,21 @@ export function buildPendingContainerDetailSavePlan(
   }
 }
 
+/**
+ * 待保存草稿里「会改仓库零售价」的条数：只有已有商品的零售价会回写仓库价、再联动分店价；
+ * 新商品的零售价只存货柜明细（建档时才使用），不需要「同步分店零售价 / 生成价格任务」两个开关。
+ * 草稿对应的行不在当前已加载页里时无法判断，按已有商品算（宁可多问一次，也不静默按默认覆盖分店价）。
+ */
+export function countPendingExistingProductRetailPrices(
+  patches: ReadonlyArray<Pick<PendingContainerDetailPatch, 'hguid' | '贴牌价格'>>,
+  rows: ReadonlyArray<Pick<ContainerDetail, 'hguid' | '是否新商品'>>,
+): number {
+  const newProductHguids = new Set(
+    rows.filter((row) => row.hguid && row.是否新商品).map((row) => row.hguid as string),
+  )
+  return patches.filter((patch) => patch.贴牌价格 != null && !newProductHguids.has(patch.hguid)).length
+}
+
 function hasValidationError(
   validationErrors: ContainerDetailSaveValidationError[],
   hguid: string,

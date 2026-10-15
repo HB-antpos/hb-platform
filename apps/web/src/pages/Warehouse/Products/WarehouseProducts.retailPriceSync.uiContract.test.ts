@@ -65,6 +65,11 @@ for (const key of Object.keys(zhSync)) {
 for (const key of ['syncStoreRetailPrices', 'syncStoreRetailPricesHint', 'generateTasks', 'generateTasksHint']) {
   assert(fieldSource.includes(`warehouseUi.products.retailPriceSync.${key}`), `勾选组件应使用页面级文案 ${key}`)
 }
+// 货柜明细页（复用该组件）通过 messageKeys 指向自己页面文件里的文案；组件默认键仍是仓库商品页的页面级消息。
+assert(
+  fieldSource.includes('messageKeys = PRODUCTS_RETAIL_PRICE_SYNC_MESSAGE_KEYS') && fieldSource.includes('t(messageKeys.syncStoreRetailPrices)'),
+  '勾选组件应通过 messageKeys 取文案，默认指向仓库商品页的页面级消息',
+)
 assert(
   fieldSource.includes('<Checkbox checked={value.syncStoreRetailPrices}') && fieldSource.includes('<Checkbox checked={value.generateTasks}'),
   '勾选组件应是两个受控 Checkbox',
@@ -142,16 +147,20 @@ assert(
   '批量修改提交时应只在填了零售价时带上两个开关',
 )
 
-// 6. 货柜明细页没有合适的零售价确认位置：两处批量调用显式固定「不同步分店零售价、仍生成任务」
+// 6. 货柜明细页：改零售价的流程已接入同一组开关（保存明细 / 批量设价 / 更新已有商品），不再写死 sync=false、tasks=true
 const containerUpdateSection = extractSection(containerDetailSource, 'const updateExistingPurchase = async () => {', 'const updateWarehouseImportPrice = async () => {')
 assert(
-  containerUpdateSection.includes('syncStoreRetailPrices: false,') && containerUpdateSection.includes('generateTasks: true,'),
-  '货柜明细「更新已有商品」的批量修改应显式传 syncStoreRetailPrices: false, generateTasks: true',
+  !containerUpdateSection.includes('syncStoreRetailPrices: false') &&
+    containerUpdateSection.includes('...buildRetailPriceSyncFields(') &&
+    containerUpdateSection.includes("selectedFields.includes('oemPrice')"),
+  '货柜明细「更新已有商品」的批量修改应由「零售价」字段触发开关并随请求发送，不能再写死 false/true',
 )
 const containerImportSection = extractSection(containerDetailSource, 'const updateWarehouseImportPrice = async () => {', '删除明细后后端已按剩余明细重算')
 assert(
-  containerImportSection.includes('syncStoreRetailPrices: false, generateTasks: true'),
-  '货柜明细「更新仓库进货价」的批量修改应显式传 syncStoreRetailPrices: false, generateTasks: true',
+  containerImportSection.includes('{ syncStorePurchasePrice: false }') &&
+    !containerImportSection.includes('syncStoreRetailPrices') &&
+    !containerImportSection.includes('generateTasks'),
+  '货柜明细「更新仓库进货价」只改进货价，不涉及零售价，不应带两个开关',
 )
 
 console.log('WarehouseProducts.retailPriceSync.uiContract.test: ok')

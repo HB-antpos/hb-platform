@@ -1,5 +1,6 @@
 import type { SupplyNoticeInput } from '../types/supplyNotice'
 import type { ApiResponse } from '../types/api'
+import type { WarehouseRetailPriceSyncOptions } from './warehouseProductService'
 import type {
   AlignDomesticProductCodePreview,
   AlignDomesticProductCodeRequest,
@@ -368,11 +369,15 @@ export async function applyContainerPricesByScope(
   scope: ContainerDetailBatchScope,
   prices: { importPrice?: number | null; oemPrice?: number | null },
   previewToken: string,
+  retailPriceSync?: WarehouseRetailPriceSyncOptions,
 ): Promise<ContainerDetailBatchActionResult> {
   return postContainerDetailAction(containerGuid, 'apply-prices', {
     ...scope,
     importPrice: prices.importPrice,
     oemPrice: prices.oemPrice,
+    // 两个开关只决定改零售价后的副作用（覆盖分店价 / 发任务），不进预览参数；本次没改零售价时不带。
+    ...(retailPriceSync?.syncStoreRetailPrices === undefined ? {} : { syncStoreRetailPrices: retailPriceSync.syncStoreRetailPrices }),
+    ...(retailPriceSync?.generateTasks === undefined ? {} : { generateTasks: retailPriceSync.generateTasks }),
     previewToken,
   }, '批量改价失败')
 }
@@ -470,9 +475,22 @@ export async function updateContainer(containerGuid: string, data: UpdateContain
   return true
 }
 
+/**
+ * 把「同步分店零售价 / 生成价格任务」两个开关转成查询串：批量保存的请求体是明细数组，开关是整批级别的，
+ * 所以放在 query 上。没有传（本次不涉及零售价）就不带任何参数，后端按默认（都勾选）处理。
+ */
+export function buildContainerRetailPriceSyncQuery(options?: WarehouseRetailPriceSyncOptions): string {
+  const params = new URLSearchParams()
+  if (options?.syncStoreRetailPrices !== undefined) params.set('syncStoreRetailPrices', String(options.syncStoreRetailPrices))
+  if (options?.generateTasks !== undefined) params.set('generateTasks', String(options.generateTasks))
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
 export async function batchUpdateDetails(
   containerGuid: string,
   updates: UpdateContainerDetailRequest[],
+  retailPriceSync?: WarehouseRetailPriceSyncOptions,
 ): Promise<ContainerDetailBatchUpdateResult> {
   const normalizedContainerGuid = containerGuid.trim()
   if (!normalizedContainerGuid) {
@@ -546,7 +564,7 @@ export async function batchUpdateDetails(
       message?: string
       }>
     }
-  }>(`${API_BASE}/${encodeURIComponent(normalizedContainerGuid)}/batch-update-details`, {
+  }>(`${API_BASE}/${encodeURIComponent(normalizedContainerGuid)}/batch-update-details${buildContainerRetailPriceSyncQuery(retailPriceSync)}`, {
     method: 'POST',
     data: serializedUpdates,
   })
