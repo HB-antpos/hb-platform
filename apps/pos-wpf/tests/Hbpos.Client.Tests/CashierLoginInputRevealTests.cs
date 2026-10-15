@@ -71,7 +71,7 @@ public sealed class CashierLoginInputRevealTests
     {
         var reveal = ExtractMethod(
             "private void UpdateCashierLoginInputReveal(",
-            "private void CashierLoginOverlayButtonClick(");
+            "private void CashierLoginOverlayKeyboardButtonClick(");
 
         // 恢复用 ClearValue，回到主题/样式原值而不是写死颜色。
         Assert.Contains("ClearValue(Control.ForegroundProperty)", reveal, StringComparison.Ordinal);
