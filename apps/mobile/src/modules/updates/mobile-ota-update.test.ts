@@ -7,7 +7,6 @@ import { createAppUpdateMutualExclusion } from "./app-update-mutual-exclusion";
 import {
   MOBILE_OTA_REQUIRED_CACHE_KEY,
   checkMobileOtaUpdate,
-  getMobileOtaBoundaryMode,
   readCachedMobileOtaRequiredDecision,
   tryClaimMobileOtaOptionalPrompt,
   type MobileOtaUpdateContext,
@@ -122,7 +121,7 @@ test("可选 OTA 重启失败后保留同一目标去重，手动检查仍可重
   );
 });
 
-test("hook 的 reload 失败路径只提示一次并保留目标去重", () => {
+test("hook 的 reload 失败路径静默：不弹任何失败提示并保留目标去重", () => {
   const source = readFileSync(
     new URL("./use-mobile-ota-update.ts", import.meta.url),
     "utf8",
@@ -132,27 +131,28 @@ test("hook 的 reload 失败路径只提示一次并保留目标去重", () => {
   )?.[0];
   assert.ok(failurePath);
   assert.match(failurePath, /releasePrompt\("ota"\)/);
-  assert.match(failurePath, /reloadAttempted && decision\.state === "optional"/);
-  assert.match(failurePath, /mobileOtaRestartFailedTitle/);
-  assert.match(failurePath, /mobileOtaRestartFailedMessage/);
+  assert.doesNotMatch(failurePath, /Alert\.alert|mobileOtaRestartFailed/);
   assert.doesNotMatch(failurePath, /updateCheckFailedTitle|updateCheckFailedMessage/);
   assert.doesNotMatch(failurePath, /optionalPromptTargetRef\.current\s*=\s*null/);
-  assert.match(source, /reloadAttempted = true;\s*await port\.reload\(\)/);
+  assert.match(source, /await port\.reload\(\)/);
 });
 
-test("启用后的首次 render 在策略初始化前保持 checking，required 后不渲染业务内容", () => {
-  assert.equal(
-    getMobileOtaBoundaryMode({ enabled: true, initialized: false, state: null }),
-    "checking",
-  );
-  assert.equal(
-    getMobileOtaBoundaryMode({ enabled: true, initialized: true, state: "required" }),
-    "required",
-  );
-  assert.equal(
-    getMobileOtaBoundaryMode({ enabled: true, initialized: true, state: "optional" }),
-    "content",
-  );
+test("OTA 全程后台静默：边界组件不占屏，hook 只在下载完成后提醒且失败不提示", () => {
+  const boundary = readFileSync(new URL("./MobileOtaUpdateBoundary.tsx", import.meta.url), "utf8");
+  const hook = readFileSync(new URL("./use-mobile-ota-update.ts", import.meta.url), "utf8");
+
+  // 不再有「检查中」整屏或「必须更新」拦截面板：边界只提供手动检查上下文并直接渲染业务页面。
+  assert.doesNotMatch(boundary, /ActivityIndicator|SafeAreaView|Button|accessibilityViewIsModal/);
+  assert.match(boundary, /MobileOtaManualCheckContext\.Provider value=\{onManualCheck\}/);
+  // 强制 OTA 也不再点亮拦截门禁，也没有面板专用的下载/重启入口。
+  assert.doesNotMatch(hook, /setOtaRequiredGate\(\s*(decision|snapshotRef)/);
+  assert.doesNotMatch(hook, /downloadRequired|restartRequired/);
+  // 提醒只出现在下载成功之后，required 与 optional 共用同一个提醒。
+  assert.match(hook, /patchSnapshot\(\{ downloading: false, downloaded: true, lastError: null \}\);\s*promptRestart\(decision\);/);
+  // 下载失败/未就绪只记录状态，不弹窗。
+  const notDownloaded = hook.match(/if \(result\.state !== "downloaded"\) \{[\s\S]*?return;\s*\}/)?.[0];
+  assert.ok(notDownloaded);
+  assert.doesNotMatch(notDownloaded, /Alert/);
 });
 
 const context: MobileOtaUpdateContext = {
