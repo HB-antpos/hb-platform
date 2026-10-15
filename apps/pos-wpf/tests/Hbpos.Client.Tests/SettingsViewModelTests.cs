@@ -83,10 +83,12 @@ public sealed class SettingsViewModelTests
     {
         var methods = new FakePaymentMethodSettingsService { FailSave = true };
         using var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService(), paymentMethodSettingsService: methods)
-        { UseManualCard = true, VoucherEnabled = true };
+        { UseManualCard = true, VoucherEnabled = true, ShowOrderList = false };
         await viewModel.SavePaymentMethodsCommand.ExecuteAsync(null);
         Assert.True(viewModel.UseManualCard);
         Assert.True(viewModel.VoucherEnabled);
+        // 订单列表开关与另外两个开关同属一份草稿：保存失败后保持用户改的值，便于直接重试。
+        Assert.False(viewModel.ShowOrderList);
         Assert.Equal(new PaymentMethodSettings(), methods.Current);
         Assert.Contains("save failed", viewModel.StatusMessage);
         Assert.True(viewModel.SavePaymentMethodsCommand.CanExecute(null));
@@ -98,10 +100,154 @@ public sealed class SettingsViewModelTests
         var methods = new FakePaymentMethodSettingsService();
         using var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService(),
             enforcePermissionsWhenNoCashier: true, paymentMethodSettingsService: methods)
-        { UseManualCard = true, VoucherEnabled = true };
+        { UseManualCard = true, VoucherEnabled = true, ShowOrderList = false };
         await viewModel.SavePaymentMethodsCommand.ExecuteAsync(null);
         Assert.Equal(0, methods.SaveCalls);
         Assert.Equal(new PaymentMethodSettings(), methods.Current);
+    }
+
+    [Fact]
+    public async Task Payment_method_order_list_switch_defaults_on_loads_saved_value_and_saves_with_other_switches()
+    {
+        // 未加载时开关与 PaymentMethodSettings 的默认值一致（显示订单列表），不会先闪成「关」。
+        using var fresh = new SettingsViewModel(new FakeCardTerminalSetupService(),
+            paymentMethodSettingsService: new FakePaymentMethodSettingsService());
+        Assert.True(fresh.ShowOrderList);
+
+        var methods = new FakePaymentMethodSettingsService { Current = new(false, true, false) };
+        using var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService(), paymentMethodSettingsService: methods);
+        await viewModel.LoadAsync();
+        Assert.False(viewModel.UseManualCard);
+        Assert.True(viewModel.VoucherEnabled);
+        Assert.False(viewModel.ShowOrderList);
+
+        // 只改订单列表：保存前不生效；保存后另外两个开关原样写回，且一次保存只写一次。
+        viewModel.ShowOrderList = true;
+        Assert.Equal(new PaymentMethodSettings(false, true, false), methods.Current);
+        Assert.True(viewModel.SavePaymentMethodsCommand.CanExecute(null));
+        await viewModel.SavePaymentMethodsCommand.ExecuteAsync(null);
+        Assert.Equal(new PaymentMethodSettings(false, true, true), methods.Current);
+        Assert.Equal(1, methods.SaveCalls);
+
+        viewModel.ShowOrderList = false;
+        await viewModel.SavePaymentMethodsCommand.ExecuteAsync(null);
+        Assert.Equal(new PaymentMethodSettings(false, true, false), methods.Current);
+        Assert.Equal(2, methods.SaveCalls);
+    }
+
+    [Fact]
+    public async Task Payment_method_order_list_switch_round_trips_through_real_settings_service()
+    {
+        // 端到端（真实服务 + 内存仓库）：升级前只有两个开关的旧 JSON 加载后订单列表仍显示；
+        // 关闭并保存后，新建服务（模拟重启）读回仍为关闭，其余开关不变。
+        var repository = new CatalogSyncStatusServiceTests.InMemoryAppSettingsRepository();
+        repository.Values[PaymentMethodSettingsService.SettingsKey] = "{\"UseManualCard\":true,\"VoucherEnabled\":false}";
+        using var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService(),
+            paymentMethodSettingsService: new PaymentMethodSettingsService(repository));
+
+        await viewModel.LoadAsync();
+        Assert.True(viewModel.UseManualCard);
+        Assert.False(viewModel.VoucherEnabled);
+        Assert.True(viewModel.ShowOrderList);
+
+        viewModel.ShowOrderList = false;
+        await viewModel.SavePaymentMethodsCommand.ExecuteAsync(null);
+
+        var reloaded = await new PaymentMethodSettingsService(repository).LoadAsync();
+        Assert.Equal(new PaymentMethodSettings(true, false, false), reloaded);
+    }
+
+    [Fact]
+    public void Settings_page_has_order_list_switch_between_voucher_and_save_in_payment_methods_card()
+    {
+        var wpfRoot = Path.GetFullPath(Path.Combine(
+            Path.GetDirectoryName(SourceFilePath())!, "..", "..", "src", "Hbpos.Client.Wpf"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var view = XDocument.Load(Path.Combine(wpfRoot, "Views", "Screens", "SettingsView.xaml"));
+
+        XElement Toggle(string name) => Assert.Single(view.Descendants(presentation + "ToggleButton").Where(element =>
+            (string?)element.Attribute(x + "Name") == name));
+        var manual = Toggle("ManualCardSettingToggle");
+        var voucher = Toggle("VoucherSettingToggle");
+        var orderList = Toggle("OrderListSettingToggle");
+
+        // 绑定、无障碍名称与开关样式。
+        Assert.Equal("{Binding ShowOrderList, Mode=TwoWay}", (string?)orderList.Attribute("IsChecked"));
+        Assert.Equal("{loc:Loc settings.payment.methods.orderList}",
+            (string?)orderList.Attribute("AutomationProperties.Name"));
+        Assert.Equal("{StaticResource MaterialDesignSwitchToggleButton}", (string?)orderList.Attribute("Style"));
+        Assert.True(double.Parse((string)orderList.Attribute("MinHeight")!) >= 48);
+        // 它只是付款页布局偏好，不受环境锁（CanChangeEnvironment）影响：不得绑定 IsEnabled；
+        // 另外两个开关仍沿用环境锁，行为不变。
+        Assert.Null(orderList.Attribute("IsEnabled"));
+        Assert.Equal("{Binding CanChangeEnvironment}", (string?)manual.Attribute("IsEnabled"));
+        Assert.Equal("{Binding CanChangeEnvironment}", (string?)voucher.Attribute("IsEnabled"));
+
+        // 同一张「付款方式」卡片、同一个保存按钮；行顺序：手动刷卡 → 代金券 → 订单列表 → 保存按钮。
+        var card = manual.Ancestors(presentation + "StackPanel").First();
+        Assert.Same(card, voucher.Ancestors(presentation + "StackPanel").First());
+        Assert.Same(card, orderList.Ancestors(presentation + "StackPanel").First());
+        var rows = card.Elements().ToList();
+        var manualRow = rows.Single(row => row.Descendants().Contains(manual));
+        var voucherRow = rows.Single(row => row.Descendants().Contains(voucher));
+        var orderListRow = rows.Single(row => row.Descendants().Contains(orderList));
+        var saveButton = rows.Single(row => row.Name == presentation + "Button" &&
+            (string?)row.Attribute("Command") == "{Binding SavePaymentMethodsCommand}");
+        Assert.True(rows.IndexOf(manualRow) < rows.IndexOf(voucherRow));
+        Assert.True(rows.IndexOf(voucherRow) < rows.IndexOf(orderListRow));
+        Assert.True(rows.IndexOf(orderListRow) < rows.IndexOf(saveButton));
+        // 与上一行（代金券）之间同样有分隔线。
+        Assert.Equal(presentation + "Border", rows[rows.IndexOf(orderListRow) - 1].Name);
+        Assert.Equal("1", (string?)rows[rows.IndexOf(orderListRow) - 1].Attribute("Height"));
+
+        // 行内：图标块 + 标题 / 说明文案，样式与上一行一致。
+        // PackIcon 来自 materialDesign 命名空间，这里按本地名匹配。
+        Assert.Contains(orderListRow.Descendants(), icon =>
+            icon.Name.LocalName == "PackIcon" && (string?)icon.Attribute("Kind") == "FormatListBulleted");
+        var texts = orderListRow.Descendants(presentation + "TextBlock")
+            .Select(text => (string?)text.Attribute("Text")).ToArray();
+        Assert.Contains("{loc:Loc settings.payment.methods.orderList}", texts);
+        Assert.Contains("{loc:Loc settings.payment.methods.orderList.help}", texts);
+        Assert.Equal((string?)voucherRow.Attribute("MinHeight"), (string?)orderListRow.Attribute("MinHeight"));
+
+        // 颜色全部走色板 DynamicResource，行内不得出现硬编码十六进制颜色。
+        var hardcoded = orderListRow.DescendantsAndSelf().SelectMany(element => element.Attributes())
+            .Where(attribute => System.Text.RegularExpressions.Regex.IsMatch(attribute.Value, "^#[0-9A-Fa-f]{6,8}$"));
+        Assert.Empty(hardcoded);
+    }
+
+    [Theory]
+    [InlineData("en-US", "Show order list on payment page")]
+    [InlineData("zh-CN", "付款页显示订单列表")]
+    public void Payment_method_order_list_copy_is_available_in_english_and_chinese(string culture, string expectedTitle)
+    {
+        var keys = new[] { "settings.payment.methods.orderList", "settings.payment.methods.orderList.help" };
+        var wpfRoot = Path.GetFullPath(Path.Combine(
+            Path.GetDirectoryName(SourceFilePath())!, "..", "..", "src", "Hbpos.Client.Wpf"));
+        foreach (var file in new[] { "SettingsStrings.resx", "SettingsStrings.zh-CN.resx" })
+        {
+            var resx = XDocument.Load(Path.Combine(wpfRoot, "Resources", file));
+            foreach (var key in keys)
+            {
+                Assert.Contains(resx.Descendants("data"), element => (string?)element.Attribute("name") == key);
+            }
+        }
+
+        var localization = new LocalizationService();
+        try
+        {
+            localization.SetCulture(culture);
+            Assert.Equal(expectedTitle, localization.T(keys[0]));
+            Assert.All(keys, key => Assert.DoesNotContain("[[", localization.T(key), StringComparison.Ordinal));
+            // 说明文案要点：默认开启、只影响本机。
+            Assert.Contains(culture == "zh-CN" ? "默认开启" : "On by default", localization.T(keys[1]), StringComparison.Ordinal);
+            Assert.Contains(culture == "zh-CN" ? "只影响本机" : "this device only", localization.T(keys[1]), StringComparison.Ordinal);
+        }
+        finally
+        {
+            localization.SetCulture("en-US");
+        }
     }
 
     private sealed class FakePaymentMethodSettingsService : IPaymentMethodSettingsService

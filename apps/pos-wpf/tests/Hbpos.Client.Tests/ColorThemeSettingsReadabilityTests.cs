@@ -24,6 +24,7 @@ public sealed class ColorThemeSettingsReadabilityTests(PaymentViewRuntimeStaTest
     [InlineData(PosColorTheme.Paper)]
     [InlineData(PosColorTheme.Graphite)]
     [InlineData(PosColorTheme.Celadon)]
+    [InlineData(PosColorTheme.Elder)]
     public Task Settings_inputs_and_icons_stay_readable_in_every_color_theme(PosColorTheme theme) => host.RunAsync(async _ =>
     {
         var localization = new LocalizationService();

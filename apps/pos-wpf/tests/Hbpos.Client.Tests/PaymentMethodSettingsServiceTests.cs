@@ -39,6 +39,96 @@ public sealed class PaymentMethodSettingsServiceTests
     }
 
     [Fact]
+    public void Order_list_is_shown_by_default()
+    {
+        // 付款页订单列表默认显示：record 默认值、服务初始值都必须是 true。
+        Assert.True(new PaymentMethodSettings().ShowOrderList);
+        Assert.True(new PaymentMethodSettings(UseManualCard: true).ShowOrderList);
+        Assert.True(new PaymentMethodSettingsService(new SettingsRepository()).Current.ShowOrderList);
+    }
+
+    [Theory]
+    [InlineData("{\"UseManualCard\":true,\"VoucherEnabled\":false}", true, false)]
+    [InlineData("{\"UseManualCard\":false,\"VoucherEnabled\":true}", false, true)]
+    [InlineData("{\"UseManualCard\":true,\"VoucherEnabled\":true}", true, true)]
+    public async Task Legacy_json_without_order_list_field_loads_as_shown(string legacyJson, bool manual, bool voucher)
+    {
+        // 升级前保存的 JSON 没有 ShowOrderList；System.Text.Json 对缺失的构造参数取参数默认值（true），
+        // 其余两个开关保持原值，升级不会让付款页订单列表突然消失。
+        var service = new PaymentMethodSettingsService(new SettingsRepository { Value = legacyJson });
+        var notifications = 0;
+        service.Changed += (_, _) => notifications++;
+
+        var loaded = await service.LoadAsync();
+
+        Assert.True(loaded.ShowOrderList);
+        Assert.Equal(manual, loaded.UseManualCard);
+        Assert.Equal(voucher, loaded.VoucherEnabled);
+        Assert.Equal(loaded, service.Current);
+        // 三组数据里至少有一个旧开关为开，加载结果与初始默认值不同，会通知一次。
+        Assert.Equal(1, notifications);
+    }
+
+    [Theory]
+    [InlineData("broken")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("{\"UseManualCard\":\"true\"}")]
+    public async Task Missing_or_corrupt_json_falls_back_to_order_list_shown(string value)
+    {
+        var service = new PaymentMethodSettingsService(new SettingsRepository { Value = value });
+
+        var loaded = await service.LoadAsync();
+
+        Assert.True(loaded.ShowOrderList);
+        Assert.True(service.Current.ShowOrderList);
+    }
+
+    [Fact]
+    public async Task Saved_order_list_off_persists_reloads_and_notifies_once()
+    {
+        var repository = new SettingsRepository();
+        var service = new PaymentMethodSettingsService(repository);
+        var notifications = 0;
+        service.Changed += (_, _) => notifications++;
+        var hidden = new PaymentMethodSettings(UseManualCard: true, VoucherEnabled: false, ShowOrderList: false);
+
+        await service.SaveAsync(hidden);
+
+        Assert.False(service.Current.ShowOrderList);
+        Assert.Equal(1, notifications);
+        Assert.Contains("\"ShowOrderList\":false", repository.Value, StringComparison.Ordinal);
+
+        // 重复保存同一份配置不再通知；重新创建服务（模拟重启）后读回仍是 false，其余开关不变。
+        await service.SaveAsync(hidden);
+        Assert.Equal(1, notifications);
+        var reloaded = await new PaymentMethodSettingsService(repository).LoadAsync();
+        Assert.False(reloaded.ShowOrderList);
+        Assert.True(reloaded.UseManualCard);
+        Assert.False(reloaded.VoucherEnabled);
+
+        // 再改回显示：同样会保存并通知。
+        await service.SaveAsync(hidden with { ShowOrderList = true });
+        Assert.True(service.Current.ShowOrderList);
+        Assert.Equal(2, notifications);
+        Assert.True((await new PaymentMethodSettingsService(repository).LoadAsync()).ShowOrderList);
+    }
+
+    [Fact]
+    public async Task Loading_saved_order_list_off_replaces_default_and_notifies()
+    {
+        var service = new PaymentMethodSettingsService(new SettingsRepository { Value = "{\"ShowOrderList\":false}" });
+        var notifications = 0;
+        service.Changed += (_, _) => notifications++;
+
+        var loaded = await service.LoadAsync();
+
+        Assert.False(loaded.ShowOrderList);
+        Assert.False(service.Current.ShowOrderList);
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
     public async Task Failed_save_keeps_last_applied_settings_and_does_not_notify()
     {
         var repository = new SettingsRepository();

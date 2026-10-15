@@ -3,6 +3,12 @@
                     xmlns:converters="clr-namespace:Hbpos.Client.Wpf.Converters"
                     xmlns:services="clr-namespace:Hbpos.Client.Wpf.Services"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <ResourceDictionary.MergedDictionaries>
+        <!-- 尺寸标准值：始终加载；长者主题的放大值由 WpfColorThemeApplier 追加到应用资源末尾覆盖。 -->
+        <ResourceDictionary Source="Metrics/Home.Standard.xaml" />
+        <ResourceDictionary Source="Metrics/Payment.Standard.xaml" />
+    </ResourceDictionary.MergedDictionaries>
+
     <!-- 收银主界面的颜色都在 Themes/Palettes/*.xaml 色板中，按主题整体替换；本文件只能用 DynamicResource 引用它们。 -->
 
     <!-- 客显使用独立深色调色板，不随收银主界面的配色主题切换。 -->
