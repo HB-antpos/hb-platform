@@ -28,7 +28,10 @@ export interface PriceTaskOverview {
   /** 本人「管理分店」里已超期的任务合计（锁报表只看它，不含只能查看的关联分店）。 */
   manageableOverdueCount: number;
   manageableStoreCodes: string[];
-  /** 店长账号：管理分店有超期任务 → 不能进入报表。设备没有报表入口，永不锁定。 */
+  /**
+   * 店长 / 管理员账号：管理分店有超期任务 → 不能进入报表。设备没有报表入口，永不锁定；
+   * 仓库管理员会弹提醒、会标红超期，但同样不锁（用户 10-16 决定）。
+   */
   reportsLocked: boolean;
   /** 管理分店里超期最多的一家，被锁后跳转到价格和标签时默认选中它。 */
   firstOverdueStoreCode: string | null;
@@ -53,6 +56,12 @@ export interface PriceTaskOverviewInput {
   isDeviceMode: boolean;
   deviceBoundStore: Store | null;
   isAdmin: boolean;
+  /**
+   * 仓库管理员（WarehouseManager / 仓库经理 / 仓库管理员 …）。他们关联的多是仓库、isPrimary 为 false，
+   * 按店长口径会一家管理分店都没有、永远收不到提醒。用户 10-16 决定：按管理员口径提醒
+   * （关联分店全算管理分店），但**不锁报表**。同时也是管理员的账号仍按管理员处理（管理员不豁免）。
+   */
+  isWarehouseManager?: boolean;
 }
 
 export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTaskOverview {
@@ -69,12 +78,15 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
     : input.summary.stores.filter((row) => visibleStoreCodes.has(row.storeCode));
   // 「管理分店」与商品查询、用户管理等页面同一口径：设备 = 绑定分店；管理员 = 全部；其余 = isPrimary 的分店。
   // 关联但只能查看的分店不算：它们有超期不应该锁住这位店长的报表。
+  // 仓库管理员只在「弹窗 / 角标 / 红色超期标签」的范围上按管理员处理（关联分店全算），见下面的 reportsLockExempt。
   const manageableStoreCodes = getManageableStoresForSession({
     stores: [...input.stores],
     isDeviceMode: input.isDeviceMode,
     deviceBoundStore: input.deviceBoundStore,
-    isAdmin: input.isAdmin,
+    isAdmin: input.isAdmin || Boolean(input.isWarehouseManager),
   }).map((store) => store.storeCode);
+  // 弹窗范围和锁定范围是两件事：仓库管理员要被提醒，但不被锁报表；既是管理员又是仓库管理员的，管理员不豁免。
+  const reportsLockExempt = Boolean(input.isWarehouseManager) && !input.isAdmin;
   const manageable = new Set(manageableStoreCodes);
 
   const manageableRows = rows.filter((row) => manageable.has(row.storeCode));
@@ -91,7 +103,7 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
     totalPending: manageableRows.reduce((sum, row) => sum + row.pendingCount, 0),
     manageableOverdueCount,
     manageableStoreCodes,
-    reportsLocked: !input.isDeviceMode && manageableOverdueCount > 0,
+    reportsLocked: !input.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0,
     firstOverdueStoreCode: firstOverdue?.storeCode ?? null,
   };
 }

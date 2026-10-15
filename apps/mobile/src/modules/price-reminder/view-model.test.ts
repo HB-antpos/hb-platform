@@ -115,6 +115,42 @@ assert.equal(
   "没有任何管理分店：这些待办不归这位账号负责，不弹提醒"
 );
 
+// ---- 仓库管理员：关联分店全算管理分店，弹窗列出全部；有超期只标红，不出现锁定框 ----
+const warehouseManagerVm = buildPriceReminderViewModel({
+  overview: buildPriceTaskOverview({
+    summary: {
+      stores: [
+        row("A", { pendingPriceUpdateCount: 5, overdueCount: 2 }),
+        row("B", { pendingLabelOnlyCount: 20, overdueCount: 9 }), // isPrimary=false 的关联分店
+        row("D"), // 全部完成
+      ],
+      overdueDays: 7,
+    },
+    stores: managerStores,
+    isDeviceMode: false,
+    deviceBoundStore: null,
+    isAdmin: false,
+    isWarehouseManager: true,
+  }),
+  currentStoreCode: "A",
+  isDeviceMode: false,
+});
+assert.ok(warehouseManagerVm);
+assert.equal(warehouseManagerVm.variant, "multi");
+assert.equal(warehouseManagerVm.totalPending, 25, "按全部关联分店合计，B 店也算");
+assert.deepEqual(
+  warehouseManagerVm.rows.map((item) => item.storeCode),
+  ["B", "A", "D"],
+  "B 虽然 isPrimary=false，但对仓库管理员算管理分店：超期多的排前面"
+);
+assert.equal(warehouseManagerVm.rows[0].overdueCount, 9, "超期红色标签保留，用来催办");
+assert.equal(warehouseManagerVm.lock, null, "仓库管理员不出现报表锁定框");
+assert.deepEqual(
+  warehouseManagerVm.primaryAction,
+  { kind: "default", storeCode: "B", overdueOnly: false },
+  "没有锁定：主按钮是「去处理」，不是「去处理超期任务」"
+);
+
 // ---- 单分店账号：用单店布局，标题口径按两类数量决定 ----
 function singleAccount(patch: Partial<StorePriceUpdateStoreSummary>) {
   return buildPriceReminderViewModel({

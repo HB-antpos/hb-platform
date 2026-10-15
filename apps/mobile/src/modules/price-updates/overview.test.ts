@@ -99,6 +99,59 @@ assert.deepEqual(admin.manageableStoreCodes, ["A", "B", "C"]);
 assert.deepEqual(admin.managedRows.map((item) => item.storeCode), ["B"], "管理员的管理分店 = 可见全部，汇总里有哪家就列哪家");
 assert.equal(admin.reportsLocked, true, "管理员不豁免：B 店超期也会锁");
 
+// ---- 仓库管理员：关联分店全算管理分店（弹窗、角标要覆盖它们），但不锁报表 ----
+// 他们关联的多是仓库（isPrimary=false），按店长口径会一家管理分店都没有、永远收不到提醒。
+const warehouseManager = buildPriceTaskOverview({
+  ...base,
+  isWarehouseManager: true,
+  summary: summary([
+    row("A", { pendingPriceUpdateCount: 3 }),
+    row("B", { pendingLabelOnlyCount: 4, overdueCount: 5 }), // isPrimary=false 的关联分店
+    row("C", { pendingPriceUpdateCount: 2, overdueCount: 2 }),
+  ]),
+});
+assert.deepEqual(
+  warehouseManager.manageableStoreCodes,
+  ["A", "B", "C"],
+  "仓库管理员：关联分店全算管理分店（含 isPrimary=false 的 B）"
+);
+assert.equal(warehouseManager.managedRows.length, 3);
+assert.equal(warehouseManager.totalPending, 9, "角标 / 提醒按全部关联分店合计");
+assert.equal(warehouseManager.manageableOverdueCount, 7, "超期数照常统计（用于红色超期标签），但不用来锁");
+assert.equal(warehouseManager.reportsLocked, false, "仓库管理员弹提醒，但不锁报表");
+
+// 只关联了仓库（isPrimary=false）：店长口径没有管理分店，仓库管理员口径有
+const warehouseOnly: Store[] = [{ storeCode: "W", storeName: "HB WARE HOUSE", isPrimary: false }];
+const warehouseSummary = summary([row("W", { pendingLabelOnlyCount: 3, overdueCount: 3 })]);
+const warehouseOnlyAsWarehouseManager = buildPriceTaskOverview({
+  stores: warehouseOnly,
+  isDeviceMode: false,
+  deviceBoundStore: null,
+  isAdmin: false,
+  isWarehouseManager: true,
+  summary: warehouseSummary,
+});
+assert.equal(warehouseOnlyAsWarehouseManager.totalPending, 3, "只关联仓库的仓库管理员也要收到提醒");
+assert.equal(warehouseOnlyAsWarehouseManager.reportsLocked, false);
+const warehouseOnlyAsStoreManager = buildPriceTaskOverview({
+  stores: warehouseOnly,
+  isDeviceMode: false,
+  deviceBoundStore: null,
+  isAdmin: false,
+  isWarehouseManager: false,
+  summary: warehouseSummary,
+});
+assert.equal(warehouseOnlyAsStoreManager.totalPending, 0, "对照：不是仓库管理员时没有管理分店 → 不提醒");
+
+// 既是管理员又是仓库管理员：管理员不豁免，照常锁
+const adminAndWarehouseManager = buildPriceTaskOverview({
+  ...base,
+  isAdmin: true,
+  isWarehouseManager: true,
+  summary: summary([row("B", { pendingLabelOnlyCount: 2, overdueCount: 2 })]),
+});
+assert.equal(adminAndWarehouseManager.reportsLocked, true, "管理员不豁免：同时是仓库管理员也照常锁");
+
 // ---- 设备（PDA）：没有报表入口，永不锁定；管理分店 = 绑定分店 ----
 const bound: Store = { storeCode: "A", storeName: "Store A" };
 const device = buildPriceTaskOverview({

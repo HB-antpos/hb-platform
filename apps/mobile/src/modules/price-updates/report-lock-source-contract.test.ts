@@ -79,4 +79,19 @@ for (const group of ["reminder", "lock", "overdueEmpty", "strip", "workbench"]) 
 assert.equal(readJson("src/locales/zh/screens/priceUpdates.json").title, "价格和标签");
 assert.equal(readJson("src/locales/en/screens/priceUpdates.json").title, "Prices & labels");
 
+// ---- 仓库管理员：弹窗按管理员口径提醒，但不锁报表 ----
+assert.match(layout, /isWarehouseManager/, "布局把仓库管理员身份传给概览");
+const overviewSource = read("src/modules/price-updates/overview.ts");
+assert.match(
+  overviewSource,
+  /isAdmin: input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\)/,
+  "仓库管理员：关联分店全算管理分店（弹窗 / 角标范围）"
+);
+assert.match(overviewSource, /reportsLockExempt/, "仓库管理员不锁报表");
+assert.match(
+  overviewSource,
+  /reportsLocked: !input\.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0/,
+  "锁定判定要排除仓库管理员"
+);
+
 console.log("price-updates/report-lock-source-contract.test.ts: ok");
