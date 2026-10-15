@@ -115,7 +115,14 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
             PaymentViewRuntimeStaTestHost.Realize(keyboard, 620, 400);
 
             var keys = PaymentViewRuntimeStaTestHost.FindVisualDescendants<ButtonBase>(keyboard).ToList();
-            Assert.Equal(41, keys.Count);
+            // 41 个原有键 + 底行新增的 - _ / 三个符号键（「.」原本就有）。
+            Assert.Equal(44, keys.Count);
+            var parameters = keys.Select(key => (key as Button)?.CommandParameter as string).ToHashSet();
+            foreach (var symbol in new[] { "-", "_", "/", "." })
+            {
+                Assert.Contains(symbol, parameters);
+            }
+
             foreach (var key in keys)
             {
                 var parameter = (key as Button)?.CommandParameter as string;
