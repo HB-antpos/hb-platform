@@ -493,7 +493,7 @@ export default function ShopLayout() {
               className={`shop-primary-nav__item${isComingSoonPage ? ' active' : ''}`}
               aria-current={isComingSoonPage ? 'page' : undefined}
             >
-              {t('shop.comingSoon', 'Warehouse Arrivals')}
+              {t('shop.comingSoon', 'Containers')}
             </Link>
             <Link
               to="/shop/orders"
@@ -887,7 +887,7 @@ export default function ShopLayout() {
             onClick={() => setMobileMoreVisible(false)}
             aria-current={isComingSoonPage ? 'page' : undefined}
           >
-            <AppstoreOutlined /><span>{t('shop.comingSoon', 'Warehouse Arrivals')}</span>
+            <AppstoreOutlined /><span>{t('shop.comingSoon', 'Containers')}</span>
           </Link>
           <Link
             to="/shop/local-supplier-invoices"

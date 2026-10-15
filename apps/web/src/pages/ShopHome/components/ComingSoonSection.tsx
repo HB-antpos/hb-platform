@@ -249,6 +249,44 @@ export default function ComingSoonSection() {
     label: t('shop.comingSoonWorkspace.perPage', { count: size }),
   }))
 
+  // 分页条在商品网格上下各放一份（上方免去翻到底部才能翻页）；两份共用同一套状态，行为完全一致。
+  const renderPagination = (position: 'top' | 'bottom') => (
+    <div
+          className={`${styles.pagination} ${position === 'top' ? styles.paginationTop : ''}`}
+          aria-label={t('shop.comingSoonWorkspace.pages')}
+        >
+      <span>
+        {t('shop.comingSoonWorkspace.pageInfo', {
+          from: (productPage - 1) * pageSize + 1,
+          to: Math.min(productPage * pageSize, selectedProducts.length),
+          total: selectedProducts.length,
+        })}
+      </span>
+      <div>
+        <Select<number>
+          size="small"
+          className={styles.pageSizeSelect}
+          value={pageSize}
+          options={pageSizeOptions}
+          onChange={changePageSize}
+          aria-label={t('shop.comingSoonWorkspace.pageSize')}
+        />
+        <Button disabled={productPage <= 1} onClick={() => changeProductPage(productPage - 1)}>
+          {t('shop.comingSoonWorkspace.previous')}
+        </Button>
+        <span aria-live="polite">
+          {t('shop.comingSoonWorkspace.page', { page: productPage, pages: pageCount })}
+        </span>
+        <Button
+          disabled={productPage >= pageCount}
+          onClick={() => changeProductPage(productPage + 1)}
+        >
+          {t('shop.comingSoonWorkspace.next')}
+        </Button>
+      </div>
+    </div>
+  )
+
   return (
     <section className={styles.section}>
       <div className={styles.header}>
@@ -406,6 +444,7 @@ export default function ComingSoonSection() {
                 />
               ) : selectedProducts.length ? (
                 <>
+                  {renderPagination('top')}
                   <div className={styles.productGrid}>
                     {pagedProducts.map((product) => (
                       <article
@@ -466,37 +505,7 @@ export default function ComingSoonSection() {
                       </article>
                     ))}
                   </div>
-                  <div className={styles.pagination} aria-label={t('shop.comingSoonWorkspace.pages')}>
-                    <span>
-                      {t('shop.comingSoonWorkspace.pageInfo', {
-                        from: (productPage - 1) * pageSize + 1,
-                        to: Math.min(productPage * pageSize, selectedProducts.length),
-                        total: selectedProducts.length,
-                      })}
-                    </span>
-                    <div>
-                      <Select<number>
-                        size="small"
-                        className={styles.pageSizeSelect}
-                        value={pageSize}
-                        options={pageSizeOptions}
-                        onChange={changePageSize}
-                        aria-label={t('shop.comingSoonWorkspace.pageSize')}
-                      />
-                      <Button disabled={productPage <= 1} onClick={() => changeProductPage(productPage - 1)}>
-                        {t('shop.comingSoonWorkspace.previous')}
-                      </Button>
-                      <span aria-live="polite">
-                        {t('shop.comingSoonWorkspace.page', { page: productPage, pages: pageCount })}
-                      </span>
-                      <Button
-                        disabled={productPage >= pageCount}
-                        onClick={() => changeProductPage(productPage + 1)}
-                      >
-                        {t('shop.comingSoonWorkspace.next')}
-                      </Button>
-                    </div>
-                  </div>
+                  {renderPagination('bottom')}
                 </>
               ) : (
                 <Empty

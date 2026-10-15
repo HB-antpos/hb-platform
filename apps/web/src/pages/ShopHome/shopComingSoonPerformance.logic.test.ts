@@ -22,6 +22,10 @@ assert.match(source, /loadStartedRef.current.has\(containerGuid\)/, '同一货�
 assert.match(source, /loadStartedRef.current.delete\(containerGuid\)/, '失败货柜必须能重试')
 assert.match(source, /summaryGenerationRef.current !== generation/, '废弃摘要结果不得回写商品')
 assert.match(source, /requestTokensRef.current.get\(containerGuid\) !== token/, '失效请求不得覆盖新结果')
+// 分页条在商品网格上方和下方各一份，共用同一个渲染函数，避免两处行为分叉
+assert.match(source, /renderPagination\('top'\)/, '商品网格上方应有分页条')
+assert.match(source, /renderPagination\('bottom'\)/, '商品网格下方应有分页条')
+assert.ok(css.includes('.paginationTop'), '上方分页条应有独立留白样式')
 // 每页条数：默认 50，可选 50 / 100 / 200；200 是单页 DOM（图片 + 条码画布）的硬上限
 assert.match(
   source,
@@ -138,10 +142,10 @@ for (const locale of locales) {
   assert.ok(locale.shop.comingSoonWorkspace.perPage.includes('{{count}}'), '每页条数文案应带 count 占位')
   assert.equal(locale.shop.comingSoonWorkspace.quantity, undefined, '装柜数量文案已不再使用，不应留在首屏主文案包')
 }
-// 页面改名「仓库到货」：键名 shop.comingSoon 不变（路由 /shop/coming-soon 也不变），只改显示值
-assert.equal(zh.shop.comingSoon, '仓库到货')
-assert.equal(en.shop.comingSoon, 'Warehouse Arrivals')
-assert.equal(zh.shop.comingSoonWorkspace.loadFailed, '仓库到货数据加载失败。')
+// 页面改名「货柜商品 / Containers」：键名 shop.comingSoon 不变（路由 /shop/coming-soon 也不变），只改显示值
+assert.equal(zh.shop.comingSoon, '货柜商品')
+assert.equal(en.shop.comingSoon, 'Containers')
+assert.equal(zh.shop.comingSoonWorkspace.loadFailed, '货柜商品数据加载失败。')
 assert.equal(zh.shop.comingSoonWorkspace.perPage, '每页 {{count}} 条')
 assert.equal(en.shop.comingSoonWorkspace.perPage, '{{count}} per page')
 assert.doesNotMatch(JSON.stringify(zh.shop), /即将上新/, '订货前台不应再出现「即将上新」')
