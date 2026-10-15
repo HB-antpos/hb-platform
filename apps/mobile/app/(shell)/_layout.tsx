@@ -77,6 +77,7 @@ export default function ShellLayout() {
   );
   const canCreateOrder = useAuthStore((state) => state.access.canCreateOrder);
   const isAdmin = useAuthStore((state) => state.access.isAdmin);
+  const isWarehouseManager = useAuthStore((state) => state.access.isWarehouseManager);
   const canReadUsers = useAuthStore((state) => state.access.hasPermission("Users.View"));
   const canReadRoles = useAuthStore((state) => state.access.hasPermission("Roles.View"));
   // 黑名单命中通知只发给持有 FaceMatch.Unwelcome.Review 的人：没有它的人没有红色数字，也不必请求。
@@ -459,6 +460,7 @@ export default function ShellLayout() {
     isDeviceMode,
     deviceBoundStore,
     isAdmin,
+    isWarehouseManager,
   });
   // HB新品角标与页面共用查询和缓存；清单一天内变化很少，5 分钟内回到工作台不重复拉取
   const hasNewProductsPermission = useAuthStore((state) => state.access.hasPermission);
