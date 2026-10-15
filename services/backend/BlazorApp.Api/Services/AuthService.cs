@@ -83,6 +83,13 @@ namespace BlazorApp.Api.Services
                     return new LoginResponse { Success = false, Message = "用户名或密码错误" };
                 }
 
+                // 🚫 账号被标记为「不允许登录 Web / App」：密码正确也拒绝，且不更新最后登录时间。
+                // 放在密码校验之后，凭据不对的人看不出账号是否存在或被限制。
+                if (await UserLoginRestrictions.IsRestrictedAsync(_dbContext.Db, user.UserGUID))
+                {
+                    return new LoginResponse { Success = false, Message = "该账号未开通登录权限，请联系店长" };
+                }
+
                 // 🔍 调试：检查用户角色信息
                 Console.WriteLine($"用户 {user.Username} 登录成功");
                 Console.WriteLine($"用户GUID: {user.UserGUID}");
@@ -397,7 +404,7 @@ namespace BlazorApp.Api.Services
                     && item.IsActive
                     && !item.IsDeleted
                 );
-            if (user == null)
+            if (user == null || await UserLoginRestrictions.IsRestrictedAsync(_dbContext.Db, user.UserGUID))
             {
                 return null;
             }
@@ -522,6 +529,12 @@ namespace BlazorApp.Api.Services
             if (user == null)
             {
                 return null; // 用户不存在或已被删除
+            }
+
+            // 登录权限被关闭后，已持有刷新令牌的会话也不能再续期。
+            if (await UserLoginRestrictions.IsRestrictedAsync(_dbContext.Db, user.UserGUID))
+            {
+                return null;
             }
 
             // 🔄 生成新的令牌对

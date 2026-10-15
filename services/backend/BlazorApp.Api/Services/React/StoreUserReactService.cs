@@ -148,9 +148,15 @@ namespace BlazorApp.Api.Services.React
                     _db,
                     grouped.Select(item => item.UserGuid).ToList()
                 );
+                // 同样一次批量查询标注「不允许登录」的账号；无标记＝允许登录。
+                var loginRestricted = await UserLoginRestrictions.GetRestrictedUserGuidsAsync(
+                    _db,
+                    grouped.Select(item => item.UserGuid).ToList()
+                );
                 foreach (var item in grouped)
                 {
                     item.MustChangePassword = mustChange.Contains(item.UserGuid);
+                    item.LoginEnabled = !loginRestricted.Contains(item.UserGuid);
                 }
 
                 return GridResponseDto<StoreUserListDto>.OK(grouped, grouped.Count, "获取店员列表成功");
@@ -212,12 +218,15 @@ namespace BlazorApp.Api.Services.React
                     return ApiResponse<StoreUserDetailDto>.Error("没有权限为该分店创建店员", "FORBIDDEN");
                 }
 
-                var sendSetupEmail = dto.SendPasswordSetupEmail == true;
+                // 未传 LoginEnabled 视为允许登录，保持旧客户端（Web 等）行为不变。
+                var loginEnabled = dto.LoginEnabled ?? true;
+                // 不允许登录的账号不生成可用密码：既不要求密码，也不发初始密码邮件。
+                var sendSetupEmail = loginEnabled && dto.SendPasswordSetupEmail == true;
                 if (sendSetupEmail && !PasswordResetService.IsDeliverableEmail(dto.Email))
                 {
                     return ApiResponse<StoreUserDetailDto>.Error("用邮件发送初始密码时必须填写员工邮箱", "VALIDATION_ERROR");
                 }
-                if (!sendSetupEmail && string.IsNullOrWhiteSpace(dto.Password))
+                if (loginEnabled && !sendSetupEmail && string.IsNullOrWhiteSpace(dto.Password))
                 {
                     return ApiResponse<StoreUserDetailDto>.Error("密码不能为空", "VALIDATION_ERROR");
                 }
@@ -253,7 +262,8 @@ namespace BlazorApp.Api.Services.React
                     Email = email,
                     // 邮件发送初始密码时，建号这一步先写入一个谁都不知道的随机密码；
                     // 提交后由 SendInitialPasswordAsync 换成系统生成的初始密码并发到员工邮箱。
-                    PasswordHash = sendSetupEmail
+                    // 不允许登录且未给密码时同样写入随机密码；之后开启登录须再给员工发初始密码。
+                    PasswordHash = sendSetupEmail || string.IsNullOrWhiteSpace(dto.Password)
                         ? PasswordHasher.HashPassword(Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
                         : PasswordHasher.HashSubmittedPassword(dto.Password!, dto.PasswordFormat),
                     FullName = dto.FullName?.Trim(),
@@ -307,7 +317,12 @@ namespace BlazorApp.Api.Services.React
                             UpdatedBy = createdBy,
                         }
                     ).ExecuteCommandAsync();
-                    if (sendSetupEmail || (dto.RequirePasswordChange ?? true))
+                    if (!loginEnabled)
+                    {
+                        // 与建号同事务写入「不允许登录」标记，账号从创建那一刻起就无法登录。
+                        await UserLoginRestrictions.RestrictAsync(_db, userGuid, createdBy, now);
+                    }
+                    else if (sendSetupEmail || (dto.RequirePasswordChange ?? true))
                     {
                         // 与建号同事务：员工拿到初始密码后首次登录必须先改成自己的密码。
                         // 邮件发送初始密码时无条件要求改密，不受 RequirePasswordChange 影响。
@@ -446,6 +461,18 @@ namespace BlazorApp.Api.Services.React
                         await PasswordResetService.InvalidateOutstandingCodesAsync(_db, userGuid, now);
                     }
                     await UpsertEmployeeProfilePhoneAsync(userGuid, dto.Phone, updatedBy, now);
+                    if (dto.LoginEnabled.HasValue)
+                    {
+                        // 与资料更新同事务切换登录权限；未传则不动，旧客户端编辑资料不会误改。
+                        if (dto.LoginEnabled.Value)
+                        {
+                            await UserLoginRestrictions.AllowAsync(_db, userGuid);
+                        }
+                        else
+                        {
+                            await UserLoginRestrictions.RestrictAsync(_db, userGuid, updatedBy, now);
+                        }
+                    }
                     // 关键逻辑：编辑只改账号资料，不动分店关联。LoadManagedUserAsync 已确认员工属于目标分店；
                     // 旧实现会硬删该员工全部分店关联再插回一条非主分店记录，导致多分店员工丢失其他分店和主分店标记。
 
@@ -682,6 +709,7 @@ namespace BlazorApp.Api.Services.React
             if (detail != null)
             {
                 detail.MustChangePassword = await UserPasswordChangeRequirements.IsRequiredAsync(_db, detail.UserGuid);
+                detail.LoginEnabled = !await UserLoginRestrictions.IsRestrictedAsync(_db, detail.UserGuid);
             }
 
             return detail;

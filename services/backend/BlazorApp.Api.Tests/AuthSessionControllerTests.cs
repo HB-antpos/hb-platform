@@ -45,7 +45,7 @@ public sealed class AuthSessionControllerTests : IDisposable
 
         _db.CodeFirst.InitTables<User, Role, UserRole, SysRolePermission>();
         _db.CodeFirst.InitTables<SysUserPermission, SysPermission>();
-        _db.CodeFirst.InitTables<UserPasswordChangeRequirement, RefreshToken>();
+        _db.CodeFirst.InitTables<UserPasswordChangeRequirement, RefreshToken, UserLoginRestriction>();
     }
 
     [Fact]

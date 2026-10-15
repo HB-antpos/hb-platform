@@ -48,6 +48,7 @@ namespace BlazorApp.Api.Tests
                 typeof(UserStore),
                 typeof(EmployeeProfile),
                 typeof(UserPasswordChangeRequirement),
+                typeof(UserLoginRestriction),
                 typeof(UserPasswordResetCode),
                 typeof(SysRolePermission),
                 typeof(SysUserPermission)
@@ -159,6 +160,114 @@ namespace BlazorApp.Api.Tests
             Assert.True(result.Success);
             Assert.False(result.Data!.MustChangePassword);
             Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenLoginDisabled_NeedsNoPasswordAndMarksAccountRestricted()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            // 不传密码、不发邮件：登录关闭的账号只建资料，不生成可用密码。
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_no_login",
+                    Email = "staff_no_login@example.com",
+                    StoreCode = "S001",
+                    Status = 1,
+                    SendPasswordSetupEmail = true,
+                    LoginEnabled = false,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.False(result.Data!.LoginEnabled);
+            Assert.Null(result.Data.PasswordSetupEmail);
+            Assert.Null(result.Data.PasswordSetupEmailError);
+            var restriction = await _db.Queryable<UserLoginRestriction>()
+                .SingleAsync(item => item.UserGUID == result.Data.UserGuid);
+            Assert.Equal("manager-1", restriction.RestrictedBy);
+            // 登录关闭时不要求首次改密。
+            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+
+            var grid = await service.GetGridDataAsync(new StoreUserGridRequestDto { StoreCode = "S001" });
+            Assert.False(grid.Items!.Single(item => item.UserGuid == result.Data.UserGuid).LoginEnabled);
+            Assert.True(grid.Items!.Single(item => item.UserGuid == "staff-1").LoginEnabled);
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenLoginEnabledNotSent_KeepsLegacyBehavior()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_legacy",
+                    Password = "Secret123",
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success);
+            Assert.True(result.Data!.LoginEnabled);
+            Assert.False(await _db.Queryable<UserLoginRestriction>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenLoginEnabledWithoutPassword_StillRequiresPassword()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_need_pwd",
+                    StoreCode = "S001",
+                    Status = 1,
+                    LoginEnabled = true,
+                },
+                "manager-1"
+            );
+
+            Assert.False(result.Success);
+            Assert.False(await _db.Queryable<UserLoginRestriction>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task UpdateAsync_TogglesLoginRestrictionOnlyWhenLoginEnabledSent()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            UpdateStoreUserDto Build(bool? loginEnabled) => new()
+            {
+                Username = "staff_one",
+                StoreCode = "S001",
+                Status = 1,
+                LoginEnabled = loginEnabled,
+            };
+
+            var disabled = await service.UpdateAsync("staff-1", Build(false), "manager-1");
+            Assert.True(disabled.Success, disabled.Message);
+            Assert.False(disabled.Data!.LoginEnabled);
+            Assert.True(await _db.Queryable<UserLoginRestriction>().AnyAsync(item => item.UserGUID == "staff-1"));
+
+            // 未传 LoginEnabled（旧客户端编辑资料）不得改动登录权限。
+            var untouched = await service.UpdateAsync("staff-1", Build(null), "manager-1");
+            Assert.True(untouched.Success);
+            Assert.False(untouched.Data!.LoginEnabled);
+
+            var enabled = await service.UpdateAsync("staff-1", Build(true), "manager-1");
+            Assert.True(enabled.Success);
+            Assert.True(enabled.Data!.LoginEnabled);
+            Assert.False(await _db.Queryable<UserLoginRestriction>().AnyAsync());
         }
 
         [Fact]

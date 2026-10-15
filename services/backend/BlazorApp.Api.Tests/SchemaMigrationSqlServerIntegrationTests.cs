@@ -913,6 +913,37 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 不允许登录标记表_可重复执行且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserLoginRestrictionSchema.VerifySql));
+        Assert.Equal(53600, missing.Number);
+
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserLoginRestrictionSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserLoginRestrictionSchema.VerifySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            INSERT dbo.UserLoginRestriction (UserGUID, RestrictedAtUtc, RestrictedBy)
+            VALUES (N'user-1', SYSUTCDATETIME(), N'manager-1');
+            """);
+        // 重复执行不得丢失已有标记（否则会让被禁止登录的账号重新可登录）。
+        await ExecuteNonQueryAsync(databases.MainConnectionString, UserLoginRestrictionSchema.ApplySql);
+        await ExecuteNonQueryAsync(databases.MainConnectionString, """
+            IF (SELECT COUNT(*) FROM dbo.UserLoginRestriction WHERE UserGUID = N'user-1') <> 1
+                THROW 53609, 'Existing login restriction row was lost.', 1;
+            """);
+
+        await ExecuteNonQueryAsync(
+            databases.MainConnectionString,
+            "ALTER TABLE dbo.UserLoginRestriction ALTER COLUMN RestrictedBy nvarchar(200) NULL;"
+        );
+        var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(databases.MainConnectionString, UserLoginRestrictionSchema.VerifySql));
+        Assert.Equal(53601, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发两张表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

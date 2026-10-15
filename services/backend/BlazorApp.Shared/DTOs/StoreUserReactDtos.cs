@@ -32,6 +32,8 @@ namespace BlazorApp.Shared.DTOs
         public DateTime? UpdatedAt { get; set; }
         /// <summary>员工还未把店长给的初始/重置密码改成自己的密码。</summary>
         public bool MustChangePassword { get; set; }
+        /// <summary>是否允许该账号登录 Web / App；false 时账号仍可用于考勤、排班、收银条码等。老账号默认 true。</summary>
+        public bool LoginEnabled { get; set; } = true;
     }
 
     public class StoreUserDetailDto : StoreUserListDto
@@ -91,6 +93,12 @@ namespace BlazorApp.Shared.DTOs
 
         /// <summary>创建后由系统生成初始密码并发到员工邮箱，店长不经手密码；此时邮箱必填，员工首次登录须改密。</summary>
         public bool? SendPasswordSetupEmail { get; set; }
+
+        /// <summary>
+        /// 是否允许登录 Web / App。未传时按 true（旧客户端行为不变）；传 false 时只建账号与资料，
+        /// 不要求密码、不发初始密码邮件、不要求改密，账号无法登录直到被开启。
+        /// </summary>
+        public bool? LoginEnabled { get; set; }
     }
 
     public class SendStoreUserPasswordSetupEmailDto
@@ -128,6 +136,9 @@ namespace BlazorApp.Shared.DTOs
         public int Status { get; set; } = 1;
 
         public List<string>? RoleNames { get; set; }
+
+        /// <summary>是否允许登录 Web / App；未传表示不修改，旧客户端编辑资料不会改动登录权限。</summary>
+        public bool? LoginEnabled { get; set; }
     }
 
     public class UpdateStoreUserStatusDto
