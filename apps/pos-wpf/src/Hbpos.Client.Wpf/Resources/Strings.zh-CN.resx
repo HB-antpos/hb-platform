@@ -1544,6 +1544,9 @@
   <data name="specialProducts.status.addedToCart" xml:space="preserve">
     <value>已加入购物车：{0}</value>
   </data>
+  <data name="specialProducts.status.addFailed" xml:space="preserve">
+    <value>加入购物车失败：{0}</value>
+  </data>
   <data name="specialProducts.status.marked" xml:space="preserve">
     <value>已设为特殊商品：{0}</value>
   </data>

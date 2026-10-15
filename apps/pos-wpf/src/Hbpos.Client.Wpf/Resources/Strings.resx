@@ -545,6 +545,7 @@
   <data name="specialProducts.status.noSearchResults" xml:space="preserve"><value>No matching non-special products.</value></data>
   <data name="specialProducts.status.searchResults" xml:space="preserve"><value>Found {0} products that can be marked special.</value></data>
   <data name="specialProducts.status.addedToCart" xml:space="preserve"><value>Added {0} to cart.</value></data>
+  <data name="specialProducts.status.addFailed" xml:space="preserve"><value>Could not add to cart: {0}</value></data>
   <data name="specialProducts.status.marked" xml:space="preserve"><value>{0} is now a special product.</value></data>
   <data name="specialProducts.status.unmarked" xml:space="preserve"><value>{0} removed from special products.</value></data>
   <data name="specialProducts.status.markFailed" xml:space="preserve"><value>Special product update failed: {0}</value></data>
