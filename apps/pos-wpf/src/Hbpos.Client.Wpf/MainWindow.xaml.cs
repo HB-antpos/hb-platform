@@ -153,6 +153,43 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         _viewModel.CashierBarcodeInput = nextValue;
         CashierLoginOverlayPasswordBox.Focus();
         Keyboard.Focus(CashierLoginOverlayPasswordBox);
+        // 关键逻辑：给 Password 赋值会让 PasswordBox 把光标重置到开头，点完屏幕键盘后再用扫码枪/物理键盘输入就会插到最前面。
+        MoveCaretToEnd(CashierLoginOverlayPasswordBox);
+    }
+
+    // PasswordBox 没有公开的光标 API；内部的 Select(start, length) 是社区通用做法，反射取一次缓存。
+    private static readonly System.Reflection.MethodInfo? PasswordBoxSelectMethod = typeof(PasswordBox).GetMethod(
+        "Select",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+        binder: null,
+        types: [typeof(int), typeof(int)],
+        modifiers: null);
+
+    private static bool _passwordBoxCaretFailureLogged;
+
+    /// <summary>把 PasswordBox 的光标移到已输入内容的末尾；反射不可用或调用失败时只记一次日志并保持现状，不影响登录。</summary>
+    internal static bool MoveCaretToEnd(PasswordBox passwordBox)
+    {
+        try
+        {
+            if (PasswordBoxSelectMethod is null)
+            {
+                throw new MissingMethodException(nameof(PasswordBox), "Select(int, int)");
+            }
+
+            PasswordBoxSelectMethod.Invoke(passwordBox, [passwordBox.Password.Length, 0]);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (!_passwordBoxCaretFailureLogged)
+            {
+                _passwordBoxCaretFailureLogged = true;
+                ConsoleLog.WriteWarning("CashierLogin", $"move password box caret to end failed: {ex.GetType().Name}");
+            }
+
+            return false;
+        }
     }
 
     internal static string ApplyCashierBarcodeKeyboardInput(string current, string? key)
