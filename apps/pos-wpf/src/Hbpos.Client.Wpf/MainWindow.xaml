@@ -1252,6 +1252,20 @@
                                  PasswordChanged="CashierLoginOverlayPasswordBoxPasswordChanged"
                                  KeyDown="CashierLoginOverlayPasswordBoxKeyDown" />
 
+                    <!-- 关键逻辑：「刚输入的内容短暂明文显示」的只读叠层。
+                         不可聚焦、不参与命中测试，焦点始终留在上面的 PasswordBox（扫码枪焦点判断不受影响）；
+                         显示期间由代码把 PasswordBox 的圆点与光标设为透明，超时/清空/弹窗开关时自动收回。 -->
+                    <TextBlock x:Name="CashierLoginOverlayRevealText"
+                               Grid.Row="1"
+                               Visibility="Collapsed"
+                               Focusable="False"
+                               IsHitTestVisible="False"
+                               Margin="13,0"
+                               FontSize="16"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource PosTextBrush}" />
+
                     <!-- 关键逻辑：屏幕数字键盘只写入收银员登录弹窗，不复用商品/金额键盘命令。 -->
                     <UniformGrid Grid.Row="2"
                                  Columns="3"

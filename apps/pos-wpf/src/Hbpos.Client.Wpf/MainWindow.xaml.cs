@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
@@ -129,7 +130,61 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         if (sender is PasswordBox passwordBox)
         {
             _viewModel.CashierBarcodeInput = passwordBox.Password;
+            // 物理键盘、扫码枪、屏幕键盘（整串赋值 Password）以及 Clear() 都会走到这里，统一在这一处刷新明文闪显。
+            UpdateCashierLoginInputReveal(passwordBox.Password);
         }
+    }
+
+    // 收银员条码输入后明文闪显的时长；每次新输入都会重新计时，停手后自动恢复圆点。
+    internal static readonly TimeSpan CashierLoginRevealDuration = TimeSpan.FromSeconds(2);
+
+    private DispatcherTimer? _cashierLoginRevealTimer;
+
+    /// <summary>
+    /// 有内容就在输入框上叠一层明文并启动/重置回隐计时；内容为空则立即收回。
+    /// 输入框本身（PasswordBox）始终是唯一的焦点元素，明文层只负责显示，所以不影响扫码焦点与重复登录判断。
+    /// 明文只放进叠层 TextBlock，不写日志、不进 ViewModel 之外的任何地方。
+    /// </summary>
+    private void UpdateCashierLoginInputReveal(string password)
+    {
+        if (string.IsNullOrEmpty(password))
+        {
+            HideCashierLoginInputReveal();
+            return;
+        }
+
+        CashierLoginOverlayRevealText.Text = password;
+        if (CashierLoginOverlayRevealText.Visibility != Visibility.Visible)
+        {
+            CashierLoginOverlayRevealText.Visibility = Visibility.Visible;
+            // 圆点与光标一并透明：圆点宽度和数字宽度不同，留着光标会和明文错位。
+            CashierLoginOverlayPasswordBox.Foreground = Brushes.Transparent;
+            CashierLoginOverlayPasswordBox.CaretBrush = Brushes.Transparent;
+        }
+
+        if (_cashierLoginRevealTimer is null)
+        {
+            _cashierLoginRevealTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+            {
+                Interval = CashierLoginRevealDuration
+            };
+            _cashierLoginRevealTimer.Tick += (_, _) => HideCashierLoginInputReveal();
+        }
+
+        // Stop 再 Start 才会从头计时；扫码枪一次连发多位字符时只是反复重置，开销可忽略。
+        _cashierLoginRevealTimer.Stop();
+        _cashierLoginRevealTimer.Start();
+    }
+
+    /// <summary>收回明文：停计时、清叠层文本、恢复 PasswordBox 原有的前景/光标样式。可重复调用。</summary>
+    private void HideCashierLoginInputReveal()
+    {
+        _cashierLoginRevealTimer?.Stop();
+        CashierLoginOverlayRevealText.Text = string.Empty;
+        CashierLoginOverlayRevealText.Visibility = Visibility.Collapsed;
+        // ClearValue 回到样式/主题给的值，而不是写死某个颜色，深浅色主题都适用。
+        CashierLoginOverlayPasswordBox.ClearValue(Control.ForegroundProperty);
+        CashierLoginOverlayPasswordBox.ClearValue(PasswordBox.CaretBrushProperty);
     }
 
     private void CashierLoginOverlayPasswordBoxKeyDown(object sender, KeyEventArgs e)
@@ -248,6 +303,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
     private void ClearCashierLoginOverlayInputAfterLogin()
     {
         // 关键逻辑：PasswordBox 不能普通绑定，登录命令清空 VM 后还要同步清掉屏幕上的敏感输入。
+        // 明文闪显立即收回，不等 Background 优先级的 Clear，避免上一位收银员的条码在界面上多停留。
+        HideCashierLoginInputReveal();
         _ = Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(CashierLoginOverlayPasswordBox.Clear));
@@ -257,6 +314,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
     {
         // 关键逻辑：弹窗开关都清空输入框，上一次残留的半截条码不能拼进下一次扫码导致「条码无效」。
         CashierLoginOverlayPasswordBox.Clear();
+        // 输入框本来就空时 Clear() 不会触发 PasswordChanged，所以这里显式收回，确保明文状态不留给下一位收银员。
+        HideCashierLoginInputReveal();
         if (e.NewValue is not true)
         {
             return;
