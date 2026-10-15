@@ -325,6 +325,45 @@ public sealed class ContainerReactServiceDetailQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetContainersAsync_关键字应同时匹配货柜编号与柜内商品()
+    {
+        // 柜号含「KWN」的货柜无任何命中明细；另一柜明细货号含「KWN」，两者都应出现在结果里
+        await SeedContainerAsync("C-KWN-1", "KWNU0000001", status: 1);
+        await SeedContainerAsync("C-KWN-2", "ZZZU0000002", status: 1);
+        await SeedContainerAsync("C-KWN-3", "ZZZU0000003", status: 1);
+        await SeedDetailAsync("D-KWN-1", "C-KWN-1", "P-KWN-1", "ZZ101");
+        await SeedDetailAsync("D-KWN-2", "C-KWN-2", "P-KWN-2", "KWN201");
+        await SeedDetailAsync("D-KWN-3", "C-KWN-3", "P-KWN-3", "ZZ301");
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest { Page = 1, PageSize = 20, ProductKeyword = " kwn " }
+        );
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(
+            new[] { "C-KWN-1", "C-KWN-2" },
+            result.Containers.Select(x => x.HGUID).OrderBy(x => x).ToArray()
+        );
+    }
+
+    [Fact]
+    public async Task GetContainersAsync_关键字只命中货柜编号且无明细命中时仍应返回该货柜()
+    {
+        await SeedContainerAsync("C-KWO-1", "KWOU0000001", status: 1);
+        await SeedContainerAsync("C-KWO-2", "ZZZU0000009", status: 1);
+        await SeedDetailAsync("D-KWO-2", "C-KWO-2", "P-KWO-2", "ZZ201");
+        var service = CreateService(CreateContainerListMapper());
+
+        var result = await service.GetContainersAsync(
+            new ContainerQueryRequest { Page = 1, PageSize = 20, ProductKeyword = "KWOU0000001" }
+        );
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal("C-KWO-1", Assert.Single(result.Containers).HGUID);
+    }
+
+    [Fact]
     public async Task GetContainersAsync_实际到货日期结束日应包含整天()
     {
         await SeedContainerAsync(

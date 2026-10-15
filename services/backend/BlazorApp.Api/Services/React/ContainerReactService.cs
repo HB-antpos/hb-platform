@@ -1083,7 +1083,8 @@ namespace BlazorApp.Api.Services.React
                     query = query.Where(x => x.Status.HasValue && statuses.Contains(x.Status.Value));
                 }
 
-                // 柜内商品筛选：货号（ItemNumberFilter，移动端沿用）与商品关键字（ProductKeyword）同时给出时按「且」处理
+                // 柜内商品筛选：货号（ItemNumberFilter，移动端沿用）与关键字（ProductKeyword）同时给出时按「且」处理；
+                // 关键字本身覆盖「货柜编号 或 柜内商品」
                 var productKeyword = NormalizeKeyword(request.ProductKeyword);
                 if (!string.IsNullOrEmpty(request.ItemNumberFilter) || productKeyword != null)
                 {
@@ -1118,6 +1119,35 @@ namespace BlazorApp.Api.Services.React
                         .Select((cd, p, lp) => cd.ContainerCode)
                         .Distinct()
                         .ToListAsync();
+
+                    // 关键字同时匹配货柜编号：编号命中的货柜与柜内商品命中的货柜取并集（「或」）。
+                    // 若同时给了货号精确筛选，编号命中的货柜仍须含有该货号，保持「且」语义不被关键字绕过。
+                    if (productKeyword != null)
+                    {
+                        var numberMatchedCodes = await _context
+                            .Db.Queryable<Container>()
+                            .Where(c => c.ContainerNumber != null && c.ContainerNumber.Contains(productKeyword))
+                            .Select(c => c.ContainerCode)
+                            .ToListAsync();
+
+                        if (numberMatchedCodes.Count > 0 && !string.IsNullOrEmpty(request.ItemNumberFilter))
+                        {
+                            var itemFilter = request.ItemNumberFilter;
+                            var withItemFilter = await _context
+                                .Db.Queryable<ContainerDetail>()
+                                .LeftJoin<DomesticProduct>((cd, p) => cd.ProductCode == p.ProductCode)
+                                .Where(
+                                    (cd, p) =>
+                                        !cd.IsDeleted && p.HBProductNo != null && p.HBProductNo.Contains(itemFilter)
+                                )
+                                .Select((cd, p) => cd.ContainerCode)
+                                .Distinct()
+                                .ToListAsync();
+                            numberMatchedCodes = numberMatchedCodes.Intersect(withItemFilter).ToList();
+                        }
+
+                        containerCodesWithItem = containerCodesWithItem.Union(numberMatchedCodes).ToList();
+                    }
 
                     if (containerCodesWithItem.Any())
                     {
