@@ -210,7 +210,9 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
             1.0)
         {
             MaxTextWidth = Math.Min(label.MaxWidth, label.ActualWidth > 0 ? label.ActualWidth : label.MaxWidth),
-            LineHeight = double.IsNaN(label.LineHeight) ? 0 : label.LineHeight
+            // 真实渲染时 TextBlock 的 LineStackingStrategy=MaxHeight 按字体自然行高叠行、LineHeight 不生效，
+            // 所以这里不能套 label.LineHeight（否则 13px 两行只算 32，测不出第二行被截）。
+            LineHeight = 0
         };
         return formatted.Height;
     }
