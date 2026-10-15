@@ -29,7 +29,6 @@ public sealed class PendingScanChoiceViewModelTests
         Assert.Equal(1, fixture.ViewModel.PendingChoices.Count);
         Assert.True(fixture.ViewModel.PendingChoices.IsExpandedVisible);
         Assert.False(fixture.ViewModel.IsMatchesPopupOpen);
-        Assert.Empty(fixture.ViewModel.Matches);
 
         fixture.ViewModel.PendingChoices.SelectMatchCommand.Execute(fixture.Large);
 

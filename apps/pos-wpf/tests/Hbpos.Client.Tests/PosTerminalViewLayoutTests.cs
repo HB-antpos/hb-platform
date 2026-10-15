@@ -322,7 +322,7 @@ public sealed class PosTerminalViewLayoutTests
         var pendingPanel = Assert.Single(view.Descendants(presentation + "StackPanel").Where(panel =>
             (string?)panel.Attribute("AutomationProperties.AutomationId") == "PendingScanChoicePanel"));
         Assert.Equal("{Binding PendingChoices}", (string?)pendingPanel.Attribute("DataContext"));
-        Assert.Equal("{Binding HasPending, Converter={StaticResource BoolToVis}}", (string?)pendingPanel.Attribute("Visibility"));
+        Assert.Equal("{Binding HasPending, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}", (string?)pendingPanel.Attribute("Visibility"));
         Assert.Empty(pendingPanel.Ancestors(presentation + "Popup"));
         Assert.Same(
             searchHost.Ancestors(presentation + "Border").First(),
@@ -348,7 +348,7 @@ public sealed class PosTerminalViewLayoutTests
         var prompt = Assert.Single(view.Descendants(presentation + "Grid").Where(grid =>
             (string?)grid.Attribute("AutomationProperties.AutomationId") == "PendingScanChoicePrompt"));
         Assert.Equal("3", (string?)prompt.Attribute("Grid.ColumnSpan"));
-        Assert.Equal("{Binding IsPromptOpen, Converter={StaticResource BoolToVis}}", (string?)prompt.Attribute("Visibility"));
+        Assert.Equal("{Binding IsPromptOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}", (string?)prompt.Attribute("Visibility"));
         Assert.Equal(
             ["{Binding ConfirmPromptCommand}", "{Binding CancelPromptCommand}"],
             prompt.Descendants(presentation + "Button").Select(button => (string?)button.Attribute("Command")));

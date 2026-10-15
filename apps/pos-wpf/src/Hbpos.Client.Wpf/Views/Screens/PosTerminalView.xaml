@@ -831,9 +831,9 @@
                 <StackPanel DataContext="{Binding PendingChoices}"
                             Margin="0,8,0,0"
                             AutomationProperties.AutomationId="PendingScanChoicePanel"
-                            Visibility="{Binding HasPending, Converter={StaticResource BoolToVis}}">
+                            Visibility="{Binding HasPending, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
                     <!-- 展开形态：队首的候选卡片 -->
-                    <Border Visibility="{Binding IsExpandedVisible, Converter={StaticResource BoolToVis}}"
+                    <Border Visibility="{Binding IsExpandedVisible, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
                             Background="{DynamicResource PosWarningSoftBrush}"
                             BorderBrush="{DynamicResource PosWarningBrush}"
                             BorderThickness="1.5"
@@ -892,6 +892,7 @@
                                 </StackPanel>
                             </Grid>
                             <ScrollViewer Margin="0,6,0,0"
+                                          Style="{StaticResource PosHorizontalTouchScrollViewerStyle}"
                                           VerticalScrollBarVisibility="Disabled"
                                           HorizontalScrollBarVisibility="Auto"
                                           CanContentScroll="False"
@@ -912,11 +913,11 @@
                                 <Button DockPanel.Dock="Right"
                                         Command="{Binding AbandonAllCommand}"
                                         Content="{Binding AbandonAllText}"
-                                        Visibility="{Binding CanAbandonAll, Converter={StaticResource BoolToVis}}"
+                                        Visibility="{Binding CanAbandonAll, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
                                         Style="{StaticResource PendingChoiceActionButtonStyle}"
                                         AutomationProperties.AutomationId="PendingChoiceAbandonAllButton" />
                                 <TextBlock Text="{Binding SameBarcodeText}"
-                                           Visibility="{Binding ShowSameBarcodeHint, Converter={StaticResource BoolToVis}}"
+                                           Visibility="{Binding ShowSameBarcodeHint, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
                                            Margin="0,0,12,0"
                                            FontSize="11.5"
                                            FontWeight="SemiBold"
@@ -931,7 +932,7 @@
                     </Border>
 
                     <!-- 收起形态：只剩一条细条，没处理完不会消失，点一下展开 -->
-                    <Button Visibility="{Binding IsCollapsedBarVisible, Converter={StaticResource BoolToVis}}"
+                    <Button Visibility="{Binding IsCollapsedBarVisible, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
                             Command="{Binding ToggleCollapsedCommand}"
                             Style="{StaticResource PosSearchSegmentButtonStyle}"
                             HorizontalContentAlignment="Stretch"
@@ -1892,7 +1893,7 @@
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
                             <!-- 有待选商品没处理时常驻一枚橙色徽章，状态栏文字会被下一次扫码刷新，徽章不会。 -->
                             <Border Margin="0,0,4,0" Padding="6,2"
-                                    Visibility="{Binding PendingChoices.HasPending, Converter={StaticResource BoolToVis}}"
+                                    Visibility="{Binding PendingChoices.HasPending, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
                                     Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBrush}" BorderThickness="1" CornerRadius="3"
                                     AutomationProperties.AutomationId="PendingChoiceStatusBadge">
                                 <TextBlock Text="{Binding PendingChoices.StatusHintText}" Foreground="{DynamicResource PosWarningTextBrush}" FontSize="9" FontWeight="Black" />
@@ -2171,7 +2172,7 @@
         <!-- 有待选时点付款 / 挂单 / 取单 / 退出，或点「全部放弃」：必须先处理，或明确放弃。遮罩吞掉点击，扫码照常进入（待选数量实时更新）。 -->
         <Grid Grid.ColumnSpan="3"
               DataContext="{Binding PendingChoices}"
-              Visibility="{Binding IsPromptOpen, Converter={StaticResource BoolToVis}}"
+              Visibility="{Binding IsPromptOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}"
               Background="#66000000"
               Panel.ZIndex="100"
               AutomationProperties.AutomationId="PendingScanChoicePrompt">
