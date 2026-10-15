@@ -32,7 +32,10 @@ function harness(initial: PushSessionPhase = "ready") {
   return { controller, clock, state, log };
 }
 
-const HIT_TARGET: PushTarget = { kind: "face-hub", params: { tab: "list", sub: "review" } };
+const HIT_TARGET: PushTarget = {
+  kind: "face-hub",
+  params: { tab: "capture", filter: "blacklist", hitStatus: "unread", sub: "review" },
+};
 const INBOX: PushTarget = { kind: "notifications" };
 
 // ───────── 前台策略：不弹横幅、不响铃、不改角标 ─────────
