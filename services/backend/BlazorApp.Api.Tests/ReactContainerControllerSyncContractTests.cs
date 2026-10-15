@@ -322,10 +322,11 @@ public class ReactContainerControllerSyncContractTests
             .Setup(service =>
                 service.BatchUpdateDetailsDetailedAsync(
                     "CONTAINER-GUID",
-                    It.IsAny<List<UpdateContainerDetailDto>>()
+                    It.IsAny<List<UpdateContainerDetailDto>>(),
+                    It.IsAny<WarehousePriceSyncPolicy>()
                 )
             )
-            .Callback<string, List<UpdateContainerDetailDto>>((_, updates) => actualUpdates = updates)
+            .Callback<string, List<UpdateContainerDetailDto>, WarehousePriceSyncPolicy>((_, updates, _) => actualUpdates = updates)
             .ReturnsAsync(
                 new ContainerDetailBatchUpdateResultDto
                 {
@@ -372,7 +373,8 @@ public class ReactContainerControllerSyncContractTests
             service =>
                 service.BatchUpdateDetailsDetailedAsync(
                     "CONTAINER-GUID",
-                    It.IsAny<List<UpdateContainerDetailDto>>()
+                    It.IsAny<List<UpdateContainerDetailDto>>(),
+                    It.IsAny<WarehousePriceSyncPolicy>()
                 ),
             Times.Once
         );
@@ -403,7 +405,8 @@ public class ReactContainerControllerSyncContractTests
             .Setup(service =>
                 service.BatchUpdateDetailsDetailedAsync(
                     "CONTAINER-GUID",
-                    It.IsAny<List<UpdateContainerDetailDto>>()
+                    It.IsAny<List<UpdateContainerDetailDto>>(),
+                    It.IsAny<WarehousePriceSyncPolicy>()
                 )
             )
             .ReturnsAsync(
@@ -453,7 +456,7 @@ public class ReactContainerControllerSyncContractTests
     {
         var containerService = new Mock<IContainerReactService>();
         containerService
-            .Setup(service => service.BatchUpdateDetailsDetailedAsync(It.IsAny<List<UpdateContainerDetailDto>>()))
+            .Setup(service => service.BatchUpdateDetailsDetailedAsync(It.IsAny<List<UpdateContainerDetailDto>>(), It.IsAny<WarehousePriceSyncPolicy>()))
             .ReturnsAsync(new ContainerDetailBatchUpdateResultDto
             {
                 TotalUpdated = 1,
@@ -480,13 +483,14 @@ public class ReactContainerControllerSyncContractTests
 
         var ok = Assert.IsType<OkObjectResult>(response);
         containerService.Verify(
-            service => service.BatchUpdateDetailsDetailedAsync(It.IsAny<List<UpdateContainerDetailDto>>()),
+            service => service.BatchUpdateDetailsDetailedAsync(It.IsAny<List<UpdateContainerDetailDto>>(), It.IsAny<WarehousePriceSyncPolicy>()),
             Times.Once
         );
         containerService.Verify(
             service => service.BatchUpdateDetailsDetailedAsync(
                 It.IsAny<string>(),
-                It.IsAny<List<UpdateContainerDetailDto>>()
+                It.IsAny<List<UpdateContainerDetailDto>>(),
+                    It.IsAny<WarehousePriceSyncPolicy>()
             ),
             Times.Never
         );

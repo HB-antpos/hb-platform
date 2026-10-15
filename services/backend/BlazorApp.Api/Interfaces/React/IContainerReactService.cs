@@ -72,7 +72,8 @@ namespace BlazorApp.Api.Interfaces.React
         /// 兼容旧客户端的无货柜范围部分成功入口。
         /// </summary>
         Task<ContainerDetailBatchUpdateResultDto> BatchUpdateDetailsDetailedAsync(
-            List<UpdateContainerDetailDto> updates
+            List<UpdateContainerDetailDto> updates,
+            WarehousePriceSyncPolicy priceSyncPolicy
         );
 
         /// <summary>
@@ -80,7 +81,8 @@ namespace BlazorApp.Api.Interfaces.React
         /// </summary>
         Task<ContainerDetailBatchUpdateResultDto> BatchUpdateDetailsDetailedAsync(
             string containerGuid,
-            List<UpdateContainerDetailDto> updates
+            List<UpdateContainerDetailDto> updates,
+            WarehousePriceSyncPolicy priceSyncPolicy
         );
 
         /// <summary>

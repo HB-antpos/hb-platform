@@ -48,6 +48,8 @@ public sealed class ContainerReactServiceBatchUpdateDetailsTests : IDisposable
             typeof(DomesticProductCreationLog),
             typeof(WarehouseProduct),
             typeof(Product),
+            // 默认策略下改零售价会查启用分店以覆盖分店价；本类不种启用分店，覆盖语义见 ContainerDetailRetailPriceSyncTests。
+            typeof(Store),
             typeof(StoreRetailPrice),
             typeof(ProductSetCode),
             typeof(StoreMultiCodeProduct),

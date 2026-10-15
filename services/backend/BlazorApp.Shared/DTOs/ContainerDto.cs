@@ -591,6 +591,15 @@ namespace BlazorApp.Shared.DTOs
     {
         public decimal? ImportPrice { get; set; }
         public decimal? OemPrice { get; set; }
+
+        /// <summary>
+        /// 同步分店零售价：改了零售价（OemPrice）时，是否把各启用分店零售价直接改成新价。
+        /// 不传（旧客户端）视同勾选，语义见 <see cref="WarehousePriceSyncPolicy"/>。
+        /// </summary>
+        public bool? SyncStoreRetailPrices { get; set; }
+
+        /// <summary>生成价格任务：是否给分店生成价格更新任务。不传视同勾选。</summary>
+        public bool? GenerateTasks { get; set; }
     }
 
     /// <summary>
