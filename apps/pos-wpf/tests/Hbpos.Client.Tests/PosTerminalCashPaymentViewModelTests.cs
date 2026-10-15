@@ -4115,6 +4115,90 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Payment_page_quick_cash_accumulates_into_one_cash_tender_until_covered()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-155", "Accumulate Tea", "930155", PriceSourceKind.StoreRetailPrice, 88m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashCheckoutService(),
+            new InMemoryOrderRepository(),
+            new InMemorySyncQueueRepository(),
+            Session);
+        var quickFifty = viewModel.QuickCashAmounts.Single(option => option.Amount == 50m);
+        var quickTwenty = viewModel.QuickCashAmounts.Single(option => option.Amount == 20m);
+
+        await viewModel.QuickCashCommand.ExecuteAsync(quickFifty);
+        Assert.Equal(50m, Assert.Single(viewModel.PaymentTenders).Amount);
+        // 已有现金行时快捷键仍可点（以前会被「每种付款方式一条」挡成灰色）。
+        Assert.True(viewModel.QuickCashCommand.CanExecute(quickTwenty));
+
+        await viewModel.QuickCashCommand.ExecuteAsync(quickTwenty);
+        var cashTender = Assert.Single(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Cash, cashTender.Method);
+        Assert.Equal(70m, cashTender.Amount);
+        Assert.Equal(18m, viewModel.RemainingAmount);
+        Assert.Equal(0m, viewModel.ChangeDue);
+        Assert.True(viewModel.QuickCashCommand.CanExecute(quickTwenty));
+
+        await viewModel.QuickCashCommand.ExecuteAsync(quickTwenty);
+        cashTender = Assert.Single(viewModel.PaymentTenders);
+        Assert.Equal(90m, cashTender.Amount);
+        Assert.Equal(0m, viewModel.RemainingAmount);
+        Assert.Equal(2m, viewModel.ChangeDue);
+        // 已收够后不再接受累加，避免收银员误点把找零越加越大。
+        Assert.False(viewModel.QuickCashCommand.CanExecute(quickTwenty));
+    }
+
+    [Fact]
+    public async Task Payment_page_quick_cash_adds_to_manually_entered_cash_tender_but_cash_button_stays_single()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-156", "Manual Then Quick Tea", "930156", PriceSourceKind.StoreRetailPrice, 88m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashCheckoutService(),
+            new InMemoryOrderRepository(),
+            new InMemorySyncQueueRepository(),
+            Session)
+        {
+            TenderAmountText = "30"
+        };
+        await viewModel.SelectCashCommand.ExecuteAsync(null);
+        var quickTwenty = viewModel.QuickCashAmounts.Single(option => option.Amount == 20m);
+
+        await viewModel.QuickCashCommand.ExecuteAsync(quickTwenty);
+
+        Assert.Equal(50m, Assert.Single(viewModel.PaymentTenders).Amount);
+        // 大按钮「Cash」仍是每种付款方式一条的原规则，只放开快捷金额累加。
+        viewModel.TenderAmountText = "5";
+        Assert.False(viewModel.SelectCashCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Payment_page_quick_cash_accumulate_replaces_the_cash_row_instead_of_adding_a_second_one()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-157", "Replace Cash Row Tea", "930157", PriceSourceKind.StoreRetailPrice, 100m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new CashCheckoutService(),
+            new InMemoryOrderRepository(),
+            new InMemorySyncQueueRepository(),
+            Session);
+        var quickTen = viewModel.QuickCashAmounts.Single(option => option.Amount == 10m);
+        await viewModel.QuickCashCommand.ExecuteAsync(quickTen);
+        var cashBefore = Assert.Single(viewModel.PaymentTenders);
+
+        await viewModel.QuickCashCommand.ExecuteAsync(quickTen);
+
+        var cashAfter = Assert.Single(viewModel.PaymentTenders);
+        Assert.NotSame(cashBefore, cashAfter);
+        Assert.Equal(20m, cashAfter.Amount);
+        Assert.Equal(80m, viewModel.RemainingAmount);
+    }
+
+    [Fact]
     public async Task Payment_page_allows_only_one_tender_per_payment_method_and_reenables_after_remove()
     {
         var cart = new PosCartService();

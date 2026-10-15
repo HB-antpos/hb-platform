@@ -1020,7 +1020,7 @@
                     </Style>
                 </Grid.Style>
 
-                <!-- 五个面额从左到右 $100/$50/$20/$10/$5，宽度按 1 : .956 : .911 : .867 : .82 分配；点击行为仍是 QuickCashCommand（立即加一条现金付款）。 -->
+                <!-- 五个面额从左到右 $100/$50/$20/$10/$5，宽度按 1 : .956 : .911 : .867 : .82 分配；点击行为仍是 QuickCashCommand（立即加一条现金付款；已有现金行时累加进这一条，直到收够为止）。 -->
                 <ItemsControl Grid.Row="0"
                               ItemsSource="{Binding QuickCashAmounts}"
                               AutomationProperties.AutomationId="PaymentQuickCashAmounts"
