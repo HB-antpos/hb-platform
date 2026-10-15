@@ -242,6 +242,43 @@ public sealed class MainChildViewModelFactorySharedHeldOrderTests
         Assert.Equal("Awaiting share", refreshed.ShareStatusLabel);
     }
 
+    [Fact]
+    public async Task Factory_injects_held_order_today_count_service_into_pos_terminal()
+    {
+        var counter = new FakeHeldOrderTodayCountService { Count = 3 };
+        var factory = new MainChildViewModelFactory(
+            deviceRegistrationWorkflowService: null!,
+            receiptQueryService: new EmptyReceiptQueryService(),
+            suspendedOrderService: new StubSuspendedOrderService(),
+            remoteOrderHistoryService: new EmptyRemoteOrderHistoryService(),
+            receiptTextFormatter: null!,
+            receiptPrinterSettingsStore: null,
+            installmentOrderService: null!,
+            localization: new TestLocalization(),
+            cardTerminalClient: null,
+            priceIndex: new LocalSellableItemIndex(),
+            cart: new PosCartService(),
+            catalogRepository: null!,
+            specialProductService: null!,
+            specialProductsWorkflowService: null!,
+            receiptReturnsWorkflowService: null!,
+            cashPaymentWorkflowService: null!,
+            cardTerminalSetupService: null,
+            rawScannerService: null!,
+            dailyCloseService: null!,
+            dailyClosePrintService: null!,
+            heldOrderTodayCountService: counter);
+
+        using var pos = factory.CreatePosTerminalViewModel(Session(), onOpenPayment: null);
+        pos.OnScreenShown();
+        await pos.LastHeldOrderCountRefreshTask!;
+
+        // 首页 VM 拿到的就是工厂注入的统计服务：进入首页即刷新出角标数字。
+        Assert.Equal(3, pos.HeldOrderTodayCount);
+        Assert.Equal("3", pos.HeldOrderBadgeText);
+        Assert.Equal(1, counter.CallCount);
+    }
+
     private static SuspendedOrderSummary HeldSummary(
         Guid guid,
         string deviceCode,

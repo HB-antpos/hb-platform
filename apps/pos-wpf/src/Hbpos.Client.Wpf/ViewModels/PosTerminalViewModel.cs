@@ -149,9 +149,13 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         Func<Task>? onOpenCardRecoveryCenterAsync = null,
         TimeProvider? timeProvider = null,
         Func<CancellationToken, Task<bool>>? isNoSaleCashDrawerRescanRequiredAsync = null,
-        Func<CancellationToken, Task<bool>>? isReturnsRescanRequiredAsync = null)
+        Func<CancellationToken, Task<bool>>? isReturnsRescanRequiredAsync = null,
+        IHeldOrderTodayCountService? heldOrderTodayCountService = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        // 「取单」按钮角标的统计服务；为 null（测试 / 预览）时不显示角标、不起定时器。
+        _heldOrderTodayCountService = heldOrderTodayCountService;
+        _heldOrderCountScope = (session.StoreCode, session.DeviceCode, session.IsOnline);
         _isNoSaleCashDrawerRescanRequiredAsync = isNoSaleCashDrawerRescanRequiredAsync;
         _isReturnsRescanRequiredAsync = isReturnsRescanRequiredAsync;
         _priceIndex = priceIndex;
@@ -422,6 +426,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         PendingChoices.Dispose();
         CancelMatchesRefresh();
         CancelManualSearch();
+        // 停掉挂单角标的定时刷新并作废在途统计，页面销毁后不再写属性。
+        DisposeHeldOrderCount();
         if (_localization is not null)
         {
             _localization.CultureChanged -= OnCultureChanged;
@@ -499,6 +505,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
         OnPropertyChanged(nameof(OnlineText));
         OnPropertyChanged(nameof(PendingSyncText));
+        // 换门店 / 设备或联机状态变化时重算「取单」角标（首页可见时才刷新）。
+        OnSessionChangedForHeldOrderCount(value);
     }
 
     partial void OnCardRecoveryOpenCountChanged(int value)
@@ -1682,6 +1690,9 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
                 _actions.HoldOrderAsync,
                 snapshot,
                 "HOLD");
+            // 挂单落库后立即重算首页「取单」角标：只读本机 + 缓存的共享汇总，不等远端；
+            // 刷新失败只记日志，不影响挂单结果（刷新方法本身永不抛出）。
+            LastHeldOrderCountRefreshTask = RefreshHeldOrderTodayCountAsync();
         }
     }
 

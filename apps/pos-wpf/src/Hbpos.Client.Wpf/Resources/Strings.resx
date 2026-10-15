@@ -150,7 +150,7 @@
   <data name="pos.terminal.actions.dataDownload" xml:space="preserve"><value>Data Download</value></data>
   <data name="pos.terminal.actions.catalogReset" xml:space="preserve"><value>Data Reset</value></data>
   <data name="pos.terminal.actions.discount" xml:space="preserve"><value>Discount</value></data>
-  <data name="pos.terminal.actions.noBarcode" xml:space="preserve"><value>No Barcode</value></data>
+  <data name="pos.terminal.actions.noBarcode" xml:space="preserve"><value>Open Item</value></data>
   <data name="pos.terminal.actions.qtyPlus" xml:space="preserve"><value>Qty +</value></data>
   <data name="pos.terminal.actions.qtyMinus" xml:space="preserve"><value>Qty -</value></data>
   <data name="pos.terminal.actions.modifyQty" xml:space="preserve"><value>Modify Qty</value></data>

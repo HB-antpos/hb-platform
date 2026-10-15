@@ -819,7 +819,8 @@ public sealed class WpfViewLifecycleTests
         var sidebar = Assert.IsType<System.Windows.Controls.Grid>(view.FindName("AttendanceQrSidebar"));
         var actionGrid = Assert.Single(sidebar.Children.OfType<System.Windows.Controls.Primitives.UniformGrid>());
         var actionButtons = actionGrid.Children.OfType<System.Windows.Controls.Button>().ToArray();
-        Assert.Equal(10, actionButtons.Length);
+        // 12 个功能键（Card Recovery / Attendance QR 已并入网格），每个都要保持触控尺寸。
+        Assert.Equal(12, actionButtons.Length);
         Assert.All(actionButtons, button =>
         {
             var minimumWidth = targetWidth == 1366 ? 90 : 76;

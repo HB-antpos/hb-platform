@@ -123,11 +123,11 @@
     <!-- 首页 Clear 键底色 -->
     <SolidColorBrush x:Key="PosClearKeyBrush" Color="#FFFBE9E7" />
     <!-- 无条码按钮底色 -->
-    <SolidColorBrush x:Key="PosNoBarcodeBrush" Color="#FFE3ECF9" />
+    <SolidColorBrush x:Key="PosNoBarcodeBrush" Color="#FF1E3A8A" />
     <!-- 无条码按钮文字色 -->
-    <SolidColorBrush x:Key="PosNoBarcodeForegroundBrush" Color="#FF1E3A8A" />
+    <SolidColorBrush x:Key="PosNoBarcodeForegroundBrush" Color="#FFFFFFFF" />
     <!-- 无条码按钮按下底色 -->
-    <SolidColorBrush x:Key="PosNoBarcodePressedBrush" Color="#FFC9DCF3" />
+    <SolidColorBrush x:Key="PosNoBarcodePressedBrush" Color="#FF12255C" />
     <!-- 无条码按钮禁用底色 -->
     <SolidColorBrush x:Key="PosNoBarcodeDisabledBrush" Color="#FFE3E6EB" />
     <!-- 功能区按钮底色 -->
@@ -170,6 +170,24 @@
     <SolidColorBrush x:Key="PosSegmentSeparatorBrush" Color="#FF9AA6B6" />
     <!-- 屏幕键盘 / 搜索候选弹层的描边（旧主题＝PosDividerBrush；长者主题内容区无描边，但浮层必须有边界） -->
     <SolidColorBrush x:Key="PosPopupBorderBrush" Color="#FF9AA6B6" />
+    <!-- 功能区警示键底色（刷卡恢复有待处理卡交易时） -->
+    <SolidColorBrush x:Key="PosSidebarWarnButtonBrush" Color="#FFF2B01E" />
+    <!-- 功能区警示键文字/图标色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnForegroundBrush" Color="#FF3B2300" />
+    <!-- 功能区警示键描边色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnBorderBrush" Color="#FF8A5300" />
+    <!-- 功能区警示键悬停底色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnHoverBrush" Color="#FFF5BE45" />
+    <!-- 功能区警示键按下底色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnPressedBrush" Color="#FFD99A0F" />
+    <!-- 功能区按钮角标底色（挂单数量、二维码秒数） -->
+    <SolidColorBrush x:Key="PosSidebarBadgeBrush" Color="#FFFFFFFF" />
+    <!-- 功能区按钮角标文字色 -->
+    <SolidColorBrush x:Key="PosSidebarBadgeForegroundBrush" Color="#FF1E3A8A" />
+    <!-- 功能区警示角标底色（待处理卡交易数量，白字） -->
+    <SolidColorBrush x:Key="PosSidebarBadgeAlertBrush" Color="#FFB3261E" />
+    <!-- Open Item（原 No Barcode）按钮禁用时的文字色：与禁用底色配成「灰块灰字」，明显区别于可用态 -->
+    <SolidColorBrush x:Key="PosNoBarcodeDisabledForegroundBrush" Color="#FF4B5563" />
     <!-- 支付方式语义色：现金=琥珀棕、刷卡=深蓝、代金券=紫；Fill 选中实心 / On 实心上的字 / Soft 未选浅块 / Ink 浅块上的字与图标 -->
     <SolidColorBrush x:Key="PosMethodCashFillBrush" Color="#FF9A4500" />
     <SolidColorBrush x:Key="PosMethodCashOnBrush" Color="#FFFFFFFF" />

@@ -62,6 +62,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IStoreReceiptProfileApiClient? _storeReceiptProfileApiClient;
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
     private readonly IMobileAppDownloadService? _mobileAppDownloadService;
+    private readonly IHeldOrderTodayCountService? _heldOrderTodayCountService;
     private readonly ILinklyBankReceiptPrinter? _linklyBankReceiptPrinter;
     private readonly IInstallmentOrderService _installmentOrderService;
     private readonly ISuspendedOrderService? _suspendedOrderService;
@@ -449,7 +450,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
-        IMobileAppDownloadService? mobileAppDownloadService = null)
+        IMobileAppDownloadService? mobileAppDownloadService = null,
+        IHeldOrderTodayCountService? heldOrderTodayCountService = null)
     {
         _core = core;
         _infra = infra;
@@ -480,6 +482,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _storeReceiptProfileApiClient = storeReceiptProfileApiClient;
         _receiptProfileSyncService = receiptProfileSyncService;
         _mobileAppDownloadService = mobileAppDownloadService;
+        _heldOrderTodayCountService = heldOrderTodayCountService;
         _linklyBankReceiptPrinter = print.LinklyBankReceiptPrinter;
         _installmentOrderService = installmentOrderService ?? NoopInstallmentOrderService.Instance;
         _suspendedOrderService = suspendedOrderService;
@@ -694,7 +697,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
              paymentMethodSettingsService: _paymentMethodSettingsService,
              catalogSyncStatusService: _catalogSyncStatusService,
              receiptProfileSyncService: _receiptProfileSyncService,
-             mobileAppDownloadService: _mobileAppDownloadService);
+             mobileAppDownloadService: _mobileAppDownloadService,
+             heldOrderTodayCountService: _heldOrderTodayCountService);
 
     private CardRecoveryPresenter CreateCardRecoveryPresenter() =>
         new(

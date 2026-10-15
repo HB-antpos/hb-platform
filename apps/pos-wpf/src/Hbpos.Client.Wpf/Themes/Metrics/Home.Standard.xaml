@@ -68,18 +68,11 @@
     <sys:Double x:Key="PosHomeSidebarLabelMaxWidth">88</sys:Double>  <!-- 标签最大宽 -->
     <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">32</sys:Double>  <!-- 标签最大高（两行） -->
 
-    <!-- 功能区：状态卡 / 考勤二维码按钮 -->
-    <sys:Double x:Key="PosHomeStatusCardHeight">154</sys:Double>  <!-- 状态卡高（同时用作 MaxHeight） -->
+    <!-- 功能区：状态卡（Card Recovery / Attendance QR 已改成功能键网格里的同款功能键，状态卡只留标题 + 标签 + 状态消息） -->
+    <sys:Double x:Key="PosHomeStatusCardHeight">96</sys:Double>  <!-- 状态卡高（同时用作 MaxHeight）；此键为功能区改版新定值 96（改前 154），其余键仍是改前字面量 -->
     <sys:Double x:Key="PosHomeStatusTitleFontSize">11</sys:Double>  <!-- 状态卡标题 -->
     <sys:Double x:Key="PosHomeStatusBodyFontSize">10</sys:Double>  <!-- 状态卡正文 -->
     <sys:Double x:Key="PosHomeStatusTagFontSize">9</sys:Double>  <!-- 状态卡标签（Synced） -->
-    <sys:Double x:Key="PosHomeCardRecoveryFontSize">11</sys:Double>  <!-- Card Recovery 入口文字 -->
-    <sys:Double x:Key="PosHomeCardRecoveryMinHeight">44</sys:Double>  <!-- Card Recovery 入口最小高 -->
-    <Thickness x:Key="PosHomeCardRecoveryMargin">0,10,0,0</Thickness>  <!-- Card Recovery 入口与状态消息的间距 -->
-    <sys:Double x:Key="PosHomeAttendanceButtonHeight">62</sys:Double>  <!-- 考勤二维码按钮高 -->
-    <sys:Double x:Key="PosHomeAttendanceTitleFontSize">11</sys:Double>  <!-- 考勤按钮标题 -->
-    <sys:Double x:Key="PosHomeAttendanceStatusFontSize">9</sys:Double>  <!-- 考勤按钮状态行 -->
-    <sys:Double x:Key="PosHomeAttendanceSecondsFontSize">14</sys:Double>  <!-- 考勤按钮剩余秒数 -->
 
     <!-- 描边粗细 / 键帽厚度（Thickness） -->
     <Thickness x:Key="PosHomeColoredBorderThickness">1</Thickness>  <!-- 语义色细边（Clear 键、± 按钮、Pay Now、屏幕键盘 Clear/Enter）：旧主题 1px，长者主题无边框 -->
