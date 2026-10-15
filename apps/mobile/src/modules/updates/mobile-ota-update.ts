@@ -255,13 +255,3 @@ export async function checkMobileOtaUpdate(input: {
     storageError,
   });
 }
-
-export function getMobileOtaBoundaryMode(input: {
-  enabled: boolean;
-  initialized: boolean;
-  state: MobileOtaUpdateState | null;
-}): "content" | "checking" | "required" {
-  if (!input.enabled) return "content";
-  if (!input.initialized) return "checking";
-  return input.state === "required" ? "required" : "content";
-}

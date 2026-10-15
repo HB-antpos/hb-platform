@@ -134,16 +134,26 @@ async function run() {
     assert.equal(prompts.length, 1);
     appUpdateMutualExclusion.releasePrompt("native");
 
+    // 检查阶段就失败（门店网络抖动、请求没连上）时设备多半已是最新版：不得弹「安装包更新暂未完成」。
+    await act(async () => { current.retry(); });
+    assert.equal(operations.length, 4);
+    assert.equal(current.phase, "checking");
+    await act(async () => { operations[3].reject(new Error("Network Error")); });
+    assert.equal(current.phase, null, "检查阶段失败不显示更新失败横幅");
+    assert.doesNotMatch(view(), /nativeUpdate/);
+    assert.equal(prompts.length, 1, "静默失败不弹任何框");
+    assert.ok(warnings.some((entry) => String(entry[0]).includes("automatic APK update check failed")), "仍记录日志便于排查");
+
     appUpdateMutualExclusion.setOtaRequiredGate(true);
     await act(async () => { current.retry(); });
-    assert.equal(operations.length, 3, "重试不能绕过强制 OTA 门禁");
+    assert.equal(operations.length, 4, "重试不能绕过强制 OTA 门禁");
     await render(false);
     appUpdateMutualExclusion.setOtaRequiredGate(false);
     assert.equal(current.phase, null);
     platform.OS = "ios";
     await render(true);
     assert.equal(current.phase, null, "iOS 不出现 APK 状态条");
-    assert.equal(operations.length, 3);
+    assert.equal(operations.length, 4);
   } finally {
     await act(async () => { root.unmount(); });
     console.warn = originalWarn;
