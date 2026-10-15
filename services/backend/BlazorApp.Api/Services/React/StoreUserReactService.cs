@@ -56,6 +56,12 @@ namespace BlazorApp.Api.Services.React
 
                 var keyword = request.Keyword?.Trim();
                 var statusFilter = request.Status;
+                // 员工管理的范围 = 本人可管理分店的店员 + 店长本人（置顶只读）；其他店长 / 管理员不出现。
+                // 管理员（Users.View）仍按原口径看到全部店员，不受影响。
+                var actorGuid = scope.UserGuid;
+                var includeSelf = !scope.IsAdmin
+                    && scope.IsStoreManager
+                    && !string.IsNullOrWhiteSpace(actorGuid);
 
                 var rows = await _db.Queryable<User>()
                     .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
@@ -69,7 +75,10 @@ namespace BlazorApp.Api.Services.React
                         && !r.IsDeleted
                         && !us.IsDeleted
                         && !s.IsDeleted
-                        && r.RoleName == StoreStaffRoleName
+                        && (
+                            r.RoleName == StoreStaffRoleName
+                            || (includeSelf && u.UserGUID == actorGuid)
+                        )
                     )
                     .WhereIF(
                         !scope.IsAdmin && string.IsNullOrWhiteSpace(normalizedStoreCode),
@@ -111,6 +120,20 @@ namespace BlazorApp.Api.Services.React
                         EmployeeType = profile.EmployeeType,
                     })
                     .ToListAsync();
+
+                // 非管理员看不到其他店长 / 管理员：即使对方同时挂着 StoreStaff 角色，也按高权限账号排除（本人除外）。
+                if (!scope.IsAdmin && rows.Count > 0)
+                {
+                    var highPrivilege = await UserAccessMutationSecurity.GetHighPrivilegeUserGuidsAsync(
+                        _db,
+                        rows.Select(item => item.UserGUID).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                    );
+                    rows = rows
+                        .Where(item =>
+                            item.UserGUID.Equals(actorGuid, StringComparison.OrdinalIgnoreCase)
+                            || !highPrivilege.Contains(item.UserGUID))
+                        .ToList();
+                }
 
                 var grouped = rows
                     .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
@@ -614,6 +637,14 @@ namespace BlazorApp.Api.Services.React
             string? storeCode
         )
         {
+            // 与列表同口径：非管理员读不到其他店长 / 管理员的详情（即使对方同时挂着 StoreStaff 角色）。
+            if (!scope.IsAdmin
+                && !userGuid.Equals(scope.UserGuid, StringComparison.OrdinalIgnoreCase)
+                && await UserAccessMutationSecurity.IsHighPrivilegeTargetAsync(_db, userGuid))
+            {
+                return null;
+            }
+
             var normalizedStoreCode = storeCode?.Trim();
             var rows = await _db.Queryable<User>()
                 .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)

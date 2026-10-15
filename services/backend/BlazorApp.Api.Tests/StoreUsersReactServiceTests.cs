@@ -305,10 +305,43 @@ namespace BlazorApp.Api.Tests
                 StoreCode = "S001",
             });
 
+            // 员工管理范围 = 本店店员 + 店长本人；店长本人也在列表里（置顶只读由前端处理）。
             Assert.True(result.Success);
-            Assert.Single(result.Items!);
+            Assert.Equal(2, result.Items!.Count);
             Assert.All(result.Items!, item => Assert.Equal("store-1", item.StoreGuid));
-            Assert.All(result.Items!, item => Assert.Contains("StoreStaff", item.RoleNames));
+            Assert.Contains(result.Items!, item => item.UserGuid == "manager-1" && item.RoleNames.Contains("StoreManager"));
+            Assert.Contains(result.Items!, item => item.UserGuid == "staff-1" && item.RoleNames.Contains("StoreStaff"));
+        }
+
+        [Fact]
+        public async Task GetGridDataAsync_WhenStoreManager_HidesOtherManagersEvenWithStoreStaffRole()
+        {
+            await SeedStoreUserDataAsync();
+            // 另一位店长同时挂着 StoreStaff 角色：旧口径会把他当店员列出来，新口径必须排除。
+            await _db.Insertable(CreateUser("manager-2", "manager_2", "manager2@example.com")).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("manager-2", "role-manager"),
+                CreateUserRole("manager-2", "role-staff"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserStore("manager-2", "store-1", false)).ExecuteCommandAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.GetGridDataAsync(new StoreUserGridRequestDto { StoreCode = "S001" });
+
+            Assert.True(result.Success);
+            Assert.DoesNotContain(result.Items!, item => item.UserGuid == "manager-2");
+            Assert.Contains(result.Items!, item => item.UserGuid == "manager-1");
+            Assert.Contains(result.Items!, item => item.UserGuid == "staff-1");
+
+            // 详情同口径：读不到其他店长。
+            var detail = await service.GetByUserGuidAsync("manager-2", "S001");
+            Assert.False(detail.Success);
+
+            // 管理员仍按原口径看到全部店员（含挂着 StoreStaff 的店长），不受影响。
+            var adminResult = await CreateService("admin-1", "Admin")
+                .GetGridDataAsync(new StoreUserGridRequestDto { StoreCode = "S001" });
+            Assert.Contains(adminResult.Items!, item => item.UserGuid == "manager-2");
         }
 
         [Fact]
@@ -320,7 +353,9 @@ namespace BlazorApp.Api.Tests
             var result = await service.GetGridDataAsync(new StoreUserGridRequestDto());
 
             Assert.True(result.Success);
-            var staff = Assert.Single(result.Items!);
+            Assert.Equal(2, result.Items!.Count);
+            Assert.Contains(result.Items!, item => item.UserGuid == "manager-1");
+            var staff = Assert.Single(result.Items!, item => item.UserGuid == "staff-1");
             Assert.Equal("staff-1", staff.UserGuid);
             Assert.Equal("S001", staff.StoreCode);
             Assert.Equal("store-1", staff.StoreGuid);
@@ -382,8 +417,7 @@ namespace BlazorApp.Api.Tests
             });
 
             Assert.True(gridResult.Success);
-            var staff = Assert.Single(gridResult.Items!);
-            Assert.Equal("staff-1", staff.UserGuid);
+            var staff = Assert.Single(gridResult.Items!, item => item.UserGuid == "staff-1");
             Assert.Equal(0, staff.Status);
         }
 

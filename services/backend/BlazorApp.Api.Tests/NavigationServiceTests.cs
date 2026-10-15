@@ -2085,14 +2085,29 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void StoreUsersGrid_RequiresUsersViewPermission()
+    public void StoreUsersGrid_RequiresViewStoreStaffPermission()
     {
         var authorizeAttribute = GetMethodAuthorizeAttribute(
             typeof(ReactStoreUsersController),
             nameof(ReactStoreUsersController.Grid)
         );
 
-        Assert.Equal(Permissions.Users.View, authorizeAttribute.Policy);
+        // 员工管理接口用店员专用查看权限；Users.View 通过别名自动包含它。
+        Assert.Equal(Permissions.Users.ViewStoreStaff, authorizeAttribute.Policy);
+    }
+
+    [Fact]
+    public void UsersViewImpliesViewStoreStaff_ButNotTheOtherWayAround()
+    {
+        // 老管理员（Users.View）无需重新授权即可进入员工管理；店长只持有 ViewStoreStaff 不会获得「用户管理」。
+        Assert.Contains(
+            Permissions.Users.ViewStoreStaff,
+            Permissions.ExpandPermissionCodes(new[] { Permissions.Users.View })
+        );
+        Assert.DoesNotContain(
+            Permissions.Users.View,
+            Permissions.ExpandPermissionCodes(new[] { Permissions.Users.ViewStoreStaff })
+        );
     }
 
     [Fact]

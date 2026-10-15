@@ -50,6 +50,8 @@ export const PERMISSIONS = {
     CreateStoreStaff: "Users.CreateStoreStaff",
     EditStoreStaff: "Users.EditStoreStaff",
     ResetStoreStaffPassword: "Users.ResetStoreStaffPassword",
+    // 移动端「员工管理」入口与店员列表读取专用；「用户管理」仍用 Users.View（持有 Users.View 自动包含本权限）。
+    ViewStoreStaff: "Users.ViewStoreStaff",
     ManageRoles: "Users.ManageRoles",
     ManageStores: "Users.ManageStores",
     ManagePos: "Users.ManagePosTerminalPermissions",

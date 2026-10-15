@@ -37,6 +37,7 @@ import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/sta
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
 import { getUserAccessEligibility } from "@/modules/users/access-management";
 import { getDisplayableEmail, hasDeliverableEmail } from "@/modules/users/staff-email-username";
+import { isSelfStaffRow, splitSelfAndStaff } from "@/modules/users/staff-list-scope";
 import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { validateStoreUserForm } from "@/modules/users/validation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
@@ -111,7 +112,10 @@ export default function UsersScreen() {
     selectedStoreCode: rememberedStoreCode,
   });
 
-  const canViewUsers = access.isAdmin || access.canReadUser;
+  // 员工管理入口用「查看本店店员」；持有 Users.View（用户管理）同样可进入。
+  const canViewUsers = access.isAdmin
+    || access.canReadUser
+    || access.hasPermission(PERMISSIONS.Users.ViewStoreStaff);
   // 店长持有本店店员专用权限；全局用户权限（Users.Create 等）同样可以管理店员。
   const canCreateUsers = access.isAdmin
     || access.hasPermission(PERMISSIONS.Users.Create)
@@ -509,8 +513,14 @@ export default function UsersScreen() {
     t,
   ]);
 
+  // 店长本人单独置顶（只读），不参与状态筛选与计数；列表范围由后端收口，这里只做展示分组。
+  const { self: selfUser, staff: staffUsers } = useMemo(
+    () => splitSelfAndStaff(usersQuery.data ?? [], actorGuid),
+    [actorGuid, usersQuery.data]
+  );
+
   const filteredUsers = useMemo(() => {
-    const items = usersQuery.data ?? [];
+    const items = staffUsers;
     const filtered = items.filter((item) => {
       if (statusFilter === "active") {
         return item.status === 1;
@@ -528,18 +538,20 @@ export default function UsersScreen() {
       return true;
     });
 
-    return [...filtered].sort((left, right) =>
+    const sorted = [...filtered].sort((left, right) =>
       (left.fullName || left.username).localeCompare(right.fullName || right.username)
     );
-  }, [statusFilter, usersQuery.data]);
+    // 本人只在「全部」下置顶显示；其他筛选下只看店员。
+    return selfUser && statusFilter === "all" ? [selfUser, ...sorted] : sorted;
+  }, [selfUser, staffUsers, statusFilter]);
 
   const statusCounts = useMemo(() => {
-    const items = usersQuery.data ?? [];
+    const items = staffUsers;
     const active = items.filter((item) => item.status === 1).length;
     const pendingFirstLogin = items.filter((item) => item.mustChangePassword === true).length;
     const noEmail = items.filter((item) => !hasDeliverableEmail(item.email)).length;
     return { all: items.length, active, disabled: items.length - active, pendingFirstLogin, noEmail };
-  }, [usersQuery.data]);
+  }, [staffUsers]);
 
   const selectedUsers = useMemo(
     () => (usersQuery.data ?? []).filter(
@@ -613,7 +625,9 @@ export default function UsersScreen() {
       const employmentType = item.employmentType
         ? t(`detail.employmentTypes.${item.employmentType}`, item.employmentType)
         : t("fields.positionValue");
-      const canUseBarcode = canManageUserBarcode(item);
+      // 本人行只读：不可点进详情、不可批量、没有更多操作 / 个人码。
+      const isSelf = isSelfStaffRow(item, actorGuid);
+      const canUseBarcode = !isSelf && canManageUserBarcode(item);
 
       const toggleSelection = () => setSelectedUserGuids((current) => {
         const next = new Set(current);
@@ -624,9 +638,9 @@ export default function UsersScreen() {
 
       return (
         <Card
-          style={styles.userCard}
+          style={[styles.userCard, isSelf ? styles.selfCard : null]}
           mode="contained"
-          onPress={() => batchSelecting && canUseBarcode ? toggleSelection() : openStaffDetail(item)}
+          onPress={isSelf ? undefined : () => batchSelecting && canUseBarcode ? toggleSelection() : openStaffDetail(item)}
           testID="compact-staff-row"
         >
           <Card.Content style={styles.userCardContent}>
@@ -649,6 +663,9 @@ export default function UsersScreen() {
                   {item.loginEnabled === false ? (
                     <Text variant="labelSmall" style={styles.secondaryText}>{t("statuses.loginDisabled")}</Text>
                   ) : null}
+                  {isSelf ? (
+                    <Text variant="labelSmall" style={styles.secondaryText}>{t("fields.selfReadOnlyHint")}</Text>
+                  ) : null}
                   {!managedStoreCode && item.storeCode ? (
                     <Text variant="labelSmall" style={styles.secondaryText} numberOfLines={1}>
                       {item.storeName || item.storeCode} · {item.storeCode}
@@ -657,7 +674,9 @@ export default function UsersScreen() {
                 </View>
               </View>
               <View style={styles.cardMenuActions}>
-                {item.mustChangePassword && item.status === 1 ? (
+                {isSelf ? (
+                  <Chip compact style={styles.activeChip}>{t("statuses.self")}</Chip>
+                ) : item.mustChangePassword && item.status === 1 ? (
                   <Chip compact style={styles.pendingChip}>{t("statuses.pendingFirstLogin")}</Chip>
                 ) : (
                   <Chip compact style={item.status === 1 ? styles.activeChip : styles.inactiveChip}>
@@ -675,12 +694,14 @@ export default function UsersScreen() {
                     <Text variant="labelSmall" style={styles.codeActionText}>{t("staffBarcode.actions.open")}</Text>
                   </Pressable>
                 ) : null}
-                <IconButton
-                  icon="dots-vertical"
-                  size={20}
-                  accessibilityLabel={`${item.fullName || item.username} · ${t("actions.more")}`}
-                  onPress={() => setMoreUser(item)}
-                />
+                {isSelf ? null : (
+                  <IconButton
+                    icon="dots-vertical"
+                    size={20}
+                    accessibilityLabel={`${item.fullName || item.username} · ${t("actions.more")}`}
+                    onPress={() => setMoreUser(item)}
+                  />
+                )}
               </View>
             </View>
           </Card.Content>
@@ -688,6 +709,7 @@ export default function UsersScreen() {
       );
     },
     [
+      actorGuid,
       batchSelecting,
       canManageUserBarcode,
       managedStoreCode,
@@ -1171,6 +1193,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 4,
     justifyContent: "space-between",
+  },
+  selfCard: {
+    backgroundColor: "#F5F9FF",
+    borderColor: "#B2CCFF",
+    borderWidth: StyleSheet.hairlineWidth,
   },
   userTitleWrap: {
     flex: 1,

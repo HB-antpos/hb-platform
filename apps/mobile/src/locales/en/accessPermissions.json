@@ -807,7 +807,11 @@
     },
     "Users.View": {
       "name": "View users",
-      "description": "View user lists and details in the mobile staff and user management pages."
+      "description": "View all user lists and details in the mobile user management page (includes viewing store staff)."
+    },
+    "Users.ViewStoreStaff": {
+      "name": "View store staff",
+      "description": "Mobile staff management - view staff of your managed stores and yourself (excludes other managers, admins and user management); included automatically by Users.View."
     },
     "Users.ViewWebConsole": {
       "name": "View Web user management",

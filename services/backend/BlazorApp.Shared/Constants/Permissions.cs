@@ -45,6 +45,9 @@ namespace BlazorApp.Shared.Constants
             public const string CreateStoreStaff = "Users.CreateStoreStaff";
             public const string EditStoreStaff = "Users.EditStoreStaff";
             public const string ResetStoreStaffPassword = "Users.ResetStoreStaffPassword";
+            // 移动端「员工管理」入口与店员列表/详情读取专用：只看本人可管理分店的店员与店长自己。
+            // 与「用户管理」（Users.View，全局用户）分开；Users.View 通过别名自动包含本权限。
+            public const string ViewStoreStaff = "Users.ViewStoreStaff";
         }
 
         public static class EmployeeProfiles
@@ -489,6 +492,8 @@ namespace BlazorApp.Shared.Constants
                 [Users.CreateStoreStaff] = [Users.Create],
                 [Users.EditStoreStaff] = [Users.Edit],
                 [Users.ResetStoreStaffPassword] = [Users.ResetPassword],
+                // 全局查看用户天然可以查看店员；反向不成立，店长只持有 ViewStoreStaff 看不到「用户管理」。
+                [Users.ViewStoreStaff] = [Users.View],
             };
 
         public static class AustralianSuppliers

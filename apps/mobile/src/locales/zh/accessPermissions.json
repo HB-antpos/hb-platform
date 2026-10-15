@@ -807,7 +807,11 @@
     },
     "Users.View": {
       "name": "查看用户",
-      "description": "移动端「员工列表」「用户管理」与用户查询接口 - 查看用户列表与详情；Web 后台 /system/users 菜单另由 Users.ViewWebConsole 控制"
+      "description": "移动端「用户管理」与用户查询接口 - 查看全部用户列表与详情（自动包含「查看本店店员」）；Web 后台 /system/users 菜单另由 Users.ViewWebConsole 控制"
+    },
+    "Users.ViewStoreStaff": {
+      "name": "查看本店店员",
+      "description": "移动端「员工管理」- 查看本人可管理分店的店员与店长本人（不含其他店长、管理员，也不含「用户管理」）；持有 Users.View 自动包含"
     },
     "Users.ViewWebConsole": {
       "name": "查看 Web 用户管理",

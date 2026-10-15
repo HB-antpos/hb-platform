@@ -276,7 +276,8 @@
     "active": "启用中",
     "disabled": "已停用",
     "pendingFirstLogin": "待首次登录",
-    "loginDisabled": "不能登录"
+    "loginDisabled": "不能登录",
+    "self": "本人"
   },
   "fields": {
     "username": "账号",
@@ -286,6 +287,7 @@
     "enabled": "启用状态",
     "loginEnabled": "允许登录 Web / App",
     "loginEnabledHelper": "关闭后该员工无法登录 Web 和 App，已登录的设备也会立即失效；考勤、排班等不受影响",
+    "selfReadOnlyHint": "本人账号只读：不能在这里停用、重置密码或修改权限",
     "initialPassword": "初始密码",
     "newPassword": "新密码",
     "fixedRoleHint": "此页面创建的账号固定为店员，绑定到所选管理分店，员工类型默认为临时。",

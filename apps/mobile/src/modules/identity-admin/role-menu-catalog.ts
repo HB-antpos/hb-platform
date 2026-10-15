@@ -88,7 +88,7 @@ const MOBILE_MENU: MenuSource[] = ([
     "Attendance.Leave.ReviewManagedStore", "Attendance.Settings.Edit", "Attendance.Admin.View",
   ]],
   ["seasonal-cards", "Seasonal cards", "节庆卡", ["SeasonalCards.Remaining.ViewManagedStore", "SeasonalCards.Remaining.SubmitManagedStore"]],
-  ["users", "Users", "用户", ["Users.View"]],
+  ["users", "Users", "员工", ["Users.ViewStoreStaff"]],
   ["user-admin", "User management", "用户管理", ["Users.View"]],
   ["cash-register-users", "Cash register barcodes", "收银用户条码", ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]],
   ["roles", "Role management", "角色管理", ["Roles.View"]],

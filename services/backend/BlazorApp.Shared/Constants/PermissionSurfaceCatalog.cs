@@ -121,6 +121,7 @@ namespace BlazorApp.Shared.Constants
             "Users.CreateStoreStaff",
             "Users.EditStoreStaff",
             "Users.ResetStoreStaffPassword",
+            "Users.ViewStoreStaff",
             "Warehouse.Picking",
         };
 

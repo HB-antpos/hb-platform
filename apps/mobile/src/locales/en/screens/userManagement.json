@@ -276,7 +276,8 @@
     "active": "Active",
     "disabled": "Disabled",
     "pendingFirstLogin": "First sign-in pending",
-    "loginDisabled": "Cannot sign in"
+    "loginDisabled": "Cannot sign in",
+    "self": "You"
   },
   "fields": {
     "username": "Username",
@@ -286,6 +287,7 @@
     "enabled": "Enabled",
     "loginEnabled": "Allow web / app sign-in",
     "loginEnabledHelper": "When off, this employee cannot sign in to the web or app and signed-in devices stop working immediately; attendance and rosters are unaffected",
+    "selfReadOnlyHint": "Your own account is read-only here: you can't disable it, reset its password or change its permissions",
     "initialPassword": "Initial password",
     "newPassword": "New password",
     "fixedRoleHint": "Accounts created here are always staff accounts, assigned to the selected managed store, and set as casual staff.",

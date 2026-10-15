@@ -403,6 +403,7 @@ namespace BlazorApp.Api.Services
                     Permissions.Users.CreateStoreStaff,
                     Permissions.Users.EditStoreStaff,
                     Permissions.Users.ResetStoreStaffPassword,
+                    Permissions.Users.ViewStoreStaff,
                     Permissions.Roles.Create,
                     Permissions.Roles.View,
                     Permissions.Roles.Edit,

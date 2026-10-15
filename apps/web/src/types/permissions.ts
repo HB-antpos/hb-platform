@@ -21,6 +21,8 @@ export const P = {
     CreateStoreStaff: 'Users.CreateStoreStaff',
     EditStoreStaff: 'Users.EditStoreStaff',
     ResetStoreStaffPassword: 'Users.ResetStoreStaffPassword',
+    // 移动端「员工管理」入口与店员列表读取专用；持有 Users.View 自动包含（单向别名，见 expoRoleMenuPreview）。
+    ViewStoreStaff: 'Users.ViewStoreStaff',
   },
   Roles: {
     View: 'Roles.View',
