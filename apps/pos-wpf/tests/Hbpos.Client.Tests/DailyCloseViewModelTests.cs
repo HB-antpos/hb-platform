@@ -329,6 +329,93 @@ public sealed class DailyCloseViewModelTests
     }
 
     [Fact]
+    public async Task SaveAndPrintCommand_prompts_restart_after_save_and_defers_return_until_prompt_finishes()
+    {
+        var order = new List<string>();
+        var coordinator = new RecordingRestartCoordinator(order);
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => order.Add("return"),
+            restartCoordinatorProvider: () => coordinator);
+        coordinator.Owner = viewModel;
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
+        viewModel.KeypadInputCommand.Execute("1");
+        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        // 先提示重启（此时日结页已不忙，安全检查不会被自己拦住），提示结束后才回收银台。
+        Assert.Equal(["prompt", "return"], order);
+        Assert.Equal(DateTime.Today, coordinator.BusinessDate);
+        Assert.False(coordinator.WasBusyDuringPrompt);
+    }
+
+    [Fact]
+    public async Task SaveAndPrintCommand_goes_to_pos_when_restart_prompt_asks_for_it_even_if_print_failed()
+    {
+        var returned = false;
+        var coordinator = new RecordingRestartCoordinator([]) { Outcome = RestartFlowOutcome.GoToPos };
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService { PrintResult = new ReceiptPrintResult(false, "paper out") },
+            CreateSession(),
+            returnToPos: () => returned = true,
+            restartCoordinatorProvider: () => coordinator);
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
+        viewModel.KeypadInputCommand.Execute("1");
+        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, coordinator.Calls);
+        Assert.True(returned);
+    }
+
+    [Fact]
+    public async Task SaveAndPrintCommand_does_not_prompt_restart_when_saving_fails()
+    {
+        var coordinator = new RecordingRestartCoordinator([]);
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService { SaveException = new InvalidOperationException("db locked") },
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            restartCoordinatorProvider: () => coordinator);
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
+        viewModel.KeypadInputCommand.Execute("1");
+        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, coordinator.Calls);
+    }
+
+    [Fact]
+    public async Task SaveAndPrintCommand_survives_a_throwing_restart_coordinator()
+    {
+        var returned = false;
+        var viewModel = new DailyCloseViewModel(
+            new FakeDailyCloseService(),
+            new FakeDailyClosePrintService(),
+            CreateSession(),
+            returnToPos: () => returned = true,
+            restartCoordinatorProvider: () => new RecordingRestartCoordinator([]) { Exception = new InvalidOperationException("boom") });
+        await OpenNewDailyCloseDraftAsync(viewModel);
+        viewModel.OpenCashCountDialogCommand.Execute(viewModel.Denominations.Single(item => item.Label == "$20"));
+        viewModel.KeypadInputCommand.Execute("1");
+        viewModel.ApplyDenominationCommand.Execute(viewModel.SelectedCashDenomination);
+
+        await viewModel.SaveAndPrintCommand.ExecuteAsync(null);
+
+        // 重启提示是附加功能：它出错不能影响日结与回收银台。
+        Assert.True(returned);
+    }
+
+    [Fact]
     public async Task SaveAndPrintCommand_print_failure_clears_cash_and_opens_saved_archive_history()
     {
         var service = new FakeDailyCloseService();
@@ -1408,6 +1495,35 @@ public sealed class DailyCloseViewModelTests
     private static PosSessionState CreateSession()
     {
         return new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+    }
+
+    private sealed class RecordingRestartCoordinator(List<string> order) : IPostDailyCloseRestartCoordinator
+    {
+        public RestartFlowOutcome Outcome { get; init; } = RestartFlowOutcome.NotDue;
+
+        public Exception? Exception { get; init; }
+
+        public int Calls { get; private set; }
+
+        public DateTime? BusinessDate { get; private set; }
+
+        public bool WasBusyDuringPrompt { get; private set; } = true;
+
+        public DailyCloseViewModel? Owner { get; set; }
+
+        public Task<RestartFlowOutcome> RunAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            BusinessDate = businessDate;
+            WasBusyDuringPrompt = Owner?.IsBusy ?? true;
+            order.Add("prompt");
+            return Exception is not null
+                ? Task.FromException<RestartFlowOutcome>(Exception)
+                : Task.FromResult(Outcome);
+        }
     }
 
     private sealed class FakeDailyCloseService : IDailyCloseService

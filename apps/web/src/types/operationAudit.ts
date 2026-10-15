@@ -7,7 +7,7 @@ import type {
   LegacyRuleCode,
 } from './legacyEmployeeLog'
 
-export type OperationAuditOutcome = 'Succeeded' | 'Denied' | 'Failed'
+export type OperationAuditOutcome = 'Succeeded' | 'Denied' | 'Failed' | 'Skipped'
 export type OperationAuditDeviceSystem = 'Windows' | 'iPadOS' | 'Unknown'
 export type OperationAuditSortField =
   | 'occurredAtUtc'

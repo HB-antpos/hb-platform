@@ -821,6 +821,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _syncOrchestrator?.ConfigureAudit(logOutboxStore, operationAuditUploadService, deviceAuthorizationState);
     }
 
+    /// <summary>配置日结后「重启提示」协调器（见 <see cref="MainChildViewModelFactory.RestartCoordinatorProvider"/>）。</summary>
+    internal void ConfigureRestartPrompt(
+        Func<IPostDailyCloseRestartCoordinator?> coordinatorProvider,
+        ISystemRestartSettingsStore? settingsStore = null)
+    {
+        _mainChildViewModelFactory.RestartCoordinatorProvider = coordinatorProvider;
+        _mainChildViewModelFactory.SystemRestartSettingsStore = settingsStore;
+    }
+
     private ScreenNavigator CreateScreenNavigator() =>
         new(
             _mainChildViewModelFactory,

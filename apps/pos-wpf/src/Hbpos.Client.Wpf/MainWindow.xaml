@@ -2415,6 +2415,11 @@
             </Grid>
         </Border>
 
+        <!-- 日结后重启提示浮层：提示 / 倒计时 / 阻止 / 失败四种状态，DataContext 在构造函数里设为 WpfRestartPromptService。 -->
+        <controls:RestartPromptOverlay x:Name="RestartPromptOverlay"
+                                       Grid.RowSpan="3"
+                                       Panel.ZIndex="98" />
+
         <!-- 全局确认遮罩：统一承接退出、测试数据与分期确认，背景点击不关闭。 -->
         <Grid Grid.RowSpan="3"
               Panel.ZIndex="99"

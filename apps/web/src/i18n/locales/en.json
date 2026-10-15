@@ -3939,7 +3939,8 @@
     "outcomes": {
       "succeeded": "Succeeded",
       "denied": "Denied",
-      "failed": "Failed"
+      "failed": "Failed",
+      "skipped": "Skipped"
     },
     "presets": {
       "today": "Today",
@@ -4012,7 +4013,8 @@
       "testSalesDataReset": "Test Sales Data Reset",
       "deviceReregister": "Device Reregistered",
       "apiServerChange": "API Server Changed",
-      "remoteMaintenanceInstall": "Remote Maintenance Install"
+      "remoteMaintenanceInstall": "Remote Maintenance Install",
+      "systemRestart": "POS restart"
     }
   },
   "performanceBaseline": {

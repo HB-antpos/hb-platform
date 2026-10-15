@@ -151,6 +151,7 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   DEVICE_REREGISTER: 'operationLogs.operations.deviceReregister',
   API_SERVER_CHANGE: 'operationLogs.operations.apiServerChange',
   REMOTE_MAINTENANCE_INSTALL: 'operationLogs.operations.remoteMaintenanceInstall',
+  SYSTEM_RESTART: 'operationLogs.operations.systemRestart',
 }
 
 export function normalizeOperationAuditPage<T>(payload: {

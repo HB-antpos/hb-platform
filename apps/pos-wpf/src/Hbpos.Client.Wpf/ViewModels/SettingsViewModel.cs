@@ -326,9 +326,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IOperationAuditLogger? operationAuditLogger = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
-        IMobileAppDownloadService? mobileAppDownloadService = null)
+        IMobileAppDownloadService? mobileAppDownloadService = null,
+        ISystemRestartSettingsStore? systemRestartSettingsStore = null)
     {
         _setupService = setupService;
+        _systemRestartSettingsStore = systemRestartSettingsStore;
         _receiptProfileSyncService = receiptProfileSyncService;
         _operationAuditLogger = operationAuditLogger;
         _paymentMethodSettingsService = paymentMethodSettingsService;
@@ -811,6 +813,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         await RunBusyAsync(async () =>
         {
             await LoadPaymentMethodsAsync();
+            await LoadRestartPromptAsync();
             _loadedConfiguration = await _setupService.LoadConfigurationAsync();
             await LoadReceiptPrinterSettingsAsync();
             IsSquareSandbox = _loadedConfiguration.Environment == CardTerminalEnvironment.Sandbox;

@@ -46,6 +46,9 @@ internal static class OperationAuditTypes
     public const string DeviceReregister = "DEVICE_REREGISTER";
     public const string ApiServerChange = "API_SERVER_CHANGE";
     public const string RemoteMaintenanceInstall = "REMOTE_MAINTENANCE_INSTALL";
+
+    // 日结后提示并重启收银机；Outcome 取 Succeeded（已下发重启）/ Failed（命令失败）/ Skipped（稍后、取消、被拦）。
+    public const string SystemRestart = "SYSTEM_RESTART";
 }
 
 internal sealed record OperationAuditCartSnapshot(

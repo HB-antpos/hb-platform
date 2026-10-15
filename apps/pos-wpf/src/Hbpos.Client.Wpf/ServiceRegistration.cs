@@ -598,6 +598,31 @@ public static class ServiceRegistration
         services.AddSingleton<IConfirmationDialogService>(sp => sp.GetRequiredService<WpfConfirmationDialogService>());
         services.AddSingleton<IConfirmationDialogPresenter>(sp => sp.GetRequiredService<WpfConfirmationDialogService>());
         services.AddSingleton<ICardRecoveryResultDialogService, CardRecoveryResultDialogService>();
+
+        // 日结后「开机超过 7 天提示重启」：选项来自 appsettings Maintenance:RestartPrompt，开关与每营业日一次的状态存本机 AppSettings。
+        services.AddSingleton(sp => SystemRestartOptions.FromConfiguration(
+            sp.GetService<IConfiguration>() ?? new ConfigurationBuilder().Build()));
+        services.AddSingleton<ISystemRestartSettingsStore, SystemRestartSettingsStore>();
+        services.AddSingleton<IProcessRunner, ProcessRunner>();
+        services.AddSingleton<IRestartAutoLaunchRegistrar, RunOnceAutoLaunchRegistrar>();
+        services.AddSingleton<ISystemRestartService>(sp => new SystemRestartService(
+            sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<IRestartAutoLaunchRegistrar>()));
+        services.AddSingleton<IRestartSafetyProbe, ShellRestartSafetyProbe>();
+        services.AddSingleton<IRestartSafetyChecker>(sp => new RestartSafetyChecker(
+            sp.GetRequiredService<IRestartSafetyProbe>()));
+        services.AddSingleton<WpfRestartPromptService>();
+        services.AddSingleton<IRestartPromptUi>(sp => sp.GetRequiredService<WpfRestartPromptService>());
+        services.AddSingleton<IPostDailyCloseRestartCoordinator>(sp => new PostDailyCloseRestartCoordinator(
+            sp.GetRequiredService<IRuntimeResourceSampler>(),
+            sp.GetRequiredService<ISystemRestartSettingsStore>(),
+            sp.GetRequiredService<IRestartSafetyChecker>(),
+            sp.GetRequiredService<ISystemRestartService>(),
+            sp.GetRequiredService<IRestartPromptUi>(),
+            sp.GetRequiredService<IApplicationExitService>(),
+            sp.GetRequiredService<SystemRestartOptions>(),
+            sp.GetRequiredService<ILocalSqliteCheckpointService>(),
+            sp.GetService<IOperationAuditLogger>()));
         services.AddSingleton<WpfLinklyTerminalDialogService>();
         services.AddSingleton<ILinklyTerminalDialogService>(sp => sp.GetRequiredService<WpfLinklyTerminalDialogService>());
         services.AddSingleton<ILinklyTerminalDialogPresenter>(sp => sp.GetRequiredService<WpfLinklyTerminalDialogService>());
@@ -712,6 +737,9 @@ public static class ServiceRegistration
                 catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>(),
                 receiptProfileSyncService: sp.GetRequiredService<IReceiptProfileSyncService>(),
                 mobileAppDownloadService: sp.GetRequiredService<IMobileAppDownloadService>());
+            viewModel.ConfigureRestartPrompt(
+                () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
+                sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureAuditSyncCenter(
                 sp.GetRequiredService<ClientLogOutboxStore>(),
                 sp.GetRequiredService<OperationAuditUploadService>(),

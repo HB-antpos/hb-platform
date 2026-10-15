@@ -201,6 +201,7 @@ public sealed class PosOperationAuditRiskEvaluatorTests
     [InlineData(C.ReceiptReprint, null, false)]
     [InlineData(C.SaleComplete, "order-1", false)]
     [InlineData("TEST_SALES_DATA_RESET", null, true)]
+    [InlineData("SYSTEM_RESTART", null, false)] // 收银机重启是日常运维事件，只留痕不算风险
     public void 危险操作口径_手动开钱箱算_自动开钱箱与重打印不算(string type, string? orderGuid, bool expected) =>
         Assert.Equal(expected, C.IsDanger(type, orderGuid));
 
