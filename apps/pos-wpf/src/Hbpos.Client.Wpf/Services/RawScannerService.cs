@@ -72,8 +72,17 @@ internal static class RawScannerPageIds
 
 internal sealed class ScannerInputDuplicateGuard
 {
+    /// <summary>来源标识：Raw Input 通道；其余来源（键盘兜底、输入框回车等）都是同一次扫码的另一份拷贝。</summary>
+    private const string RawSource = "raw";
+
     private static readonly TimeSpan CrossSourceDuplicateWindow = TimeSpan.FromMilliseconds(200);
+
+    // 键盘通道的 Enter 经 WPF 输入队列到达，实测比 Raw Input 晚 200～530ms（10-14 POS_1004_0613 / POS_1013_0222 日志），
+    // 固定 200ms 窗口会漏掉而让同一次扫码加购两次；配对额度留 1.5 秒余量，过期未被配对的额度作废，不会吞掉之后的真实扫码。
+    private static readonly TimeSpan RawPairingMaxAge = TimeSpan.FromMilliseconds(1500);
+
     private readonly object _gate = new();
+    private readonly List<(string Barcode, DateTimeOffset AcceptedAt)> _unpairedRawDeliveries = [];
     private string? _lastBarcode;
     private string? _lastSource;
     private DateTimeOffset _lastAcceptedAt = DateTimeOffset.MinValue;
@@ -86,8 +95,17 @@ internal sealed class ScannerInputDuplicateGuard
             return true;
         }
 
+        var isRaw = string.Equals(source, RawSource, StringComparison.OrdinalIgnoreCase);
         lock (_gate)
         {
+            if (!isRaw && TryPairWithRawDelivery(normalizedBarcode, timestamp))
+            {
+                // 关键逻辑：按次配对——每次 Raw 投递只抵消随后到来的一份同条码拷贝，与到达延迟无关；
+                // 连续快速扫同一商品时 Raw 额度逐次累积，拷贝逐个消耗，不会把真实的第二次扫码吞掉；
+                // 被抵消的拷贝不是新的投递，不更新「最近一次接受」，免得下一次真实 Raw 扫码被误判成跨来源重复。
+                return false;
+            }
+
             var isCrossSourceDuplicate =
                 !string.Equals(_lastSource, source, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(_lastBarcode, normalizedBarcode, StringComparison.OrdinalIgnoreCase) &&
@@ -101,8 +119,39 @@ internal sealed class ScannerInputDuplicateGuard
             _lastBarcode = normalizedBarcode;
             _lastSource = source;
             _lastAcceptedAt = timestamp;
+            if (isRaw)
+            {
+                // Raw 投递成功：登记一次待配对额度，等它的键盘 / 输入框拷贝来抵消。
+                PruneExpiredRawDeliveries(timestamp);
+                _unpairedRawDeliveries.Add((normalizedBarcode, timestamp));
+            }
+
             return true;
         }
+    }
+
+    /// <summary>尝试用一次待配对的 Raw 投递抵消这份拷贝；调用方须已持有 <c>_gate</c>。</summary>
+    private bool TryPairWithRawDelivery(string normalizedBarcode, DateTimeOffset timestamp)
+    {
+        PruneExpiredRawDeliveries(timestamp);
+        for (var index = 0; index < _unpairedRawDeliveries.Count; index++)
+        {
+            var (barcode, acceptedAt) = _unpairedRawDeliveries[index];
+            if (string.Equals(barcode, normalizedBarcode, StringComparison.OrdinalIgnoreCase) &&
+                (timestamp - acceptedAt).Duration() <= RawPairingMaxAge)
+            {
+                // 先到先配：最早的同条码额度先消耗，对应「第 N 次 Raw 配第 N 份拷贝」。
+                _unpairedRawDeliveries.RemoveAt(index);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void PruneExpiredRawDeliveries(DateTimeOffset now)
+    {
+        _unpairedRawDeliveries.RemoveAll(entry => (now - entry.AcceptedAt) > RawPairingMaxAge);
     }
 }
 

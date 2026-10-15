@@ -48,6 +48,30 @@ public sealed class RawScannerServiceTests
     }
 
     [Fact]
+    public void DispatchResultForDiagnostics_suppresses_keyboard_copy_arriving_after_the_old_200ms_window()
+    {
+        using var logs = new ConsoleLogCapture();
+        var service = new RawScannerService(new FakeScannerBindingService(), new RawScannerInputProcessor());
+        var deliveryCount = 0;
+        var now = DateTimeOffset.UtcNow;
+        service.Subscribe("pos", _ => deliveryCount++);
+        service.SetActivePage("pos");
+
+        service.DispatchResultForDiagnostics(new RawScannerInputResult(
+            "9351972009975",
+            "scanner-device",
+            RawScannerCompletionKind.Enter,
+            now));
+        var keyboardAccepted = ((IScannerInputDeduplicator)service).TryAcceptScanDelivery(
+            "9351972009975",
+            "keyboard-fallback",
+            now.AddMilliseconds(277));
+
+        Assert.Equal(1, deliveryCount);
+        Assert.False(keyboardAccepted);
+    }
+
+    [Fact]
     public void DispatchResultForDiagnostics_global_interceptor_suppresses_before_page_delivery_or_binding()
     {
         using var logs = new ConsoleLogCapture();
