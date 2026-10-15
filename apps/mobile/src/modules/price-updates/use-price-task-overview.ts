@@ -17,7 +17,7 @@ export interface UsePriceTaskOverviewOptions {
   isDeviceMode: boolean;
   deviceBoundStore: Store | null;
   isAdmin: boolean;
-  /** 仓库管理员：弹窗按管理员口径（关联分店全算），但不锁报表，见 buildPriceTaskOverview。 */
+  /** 仓库管理员：管理分店与店长同口径（只算 isPrimary），且不锁报表，见 buildPriceTaskOverview。 */
   isWarehouseManager: boolean;
 }
 
