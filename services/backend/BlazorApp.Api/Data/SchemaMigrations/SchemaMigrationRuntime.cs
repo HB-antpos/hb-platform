@@ -179,6 +179,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAppPushAsync(CancellationToken cancellationToken);
 
+    Task ApplyUserLoginRestrictionAsync(CancellationToken cancellationToken);
+
+    Task VerifyUserLoginRestrictionAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1092,6 +1096,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             AppPushSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyUserLoginRestrictionAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserLoginRestrictionSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但结构错误的表不会被误标为完成。
+        await VerifyUserLoginRestrictionAsync(cancellationToken);
+    }
+
+    public async Task VerifyUserLoginRestrictionAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserLoginRestrictionSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

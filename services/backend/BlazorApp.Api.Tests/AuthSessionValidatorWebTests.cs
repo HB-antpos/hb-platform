@@ -26,7 +26,7 @@ public sealed class AuthSessionValidatorWebTests : IDisposable
             IsAutoCloseConnection = false,
             InitKeyType = InitKeyType.Attribute,
         });
-        _db.CodeFirst.InitTables<User, Role, UserRole, RefreshToken>();
+        _db.CodeFirst.InitTables<User, Role, UserRole, RefreshToken, UserLoginRestriction>();
     }
 
     [Fact]

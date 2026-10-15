@@ -101,6 +101,19 @@ async function run() {
     ]);
     assert.equal(created.userGUID, "user-created");
     assert.deepEqual(created.roleNames, ["StoreStaff"]);
+    // 登录关闭时 loginEnabled:false 原样透传，且不带密码 / 邮件发密码字段。
+    requests.length = 0;
+    await createStoreUser({
+      username: "staff003",
+      email: "staff3@example.com",
+      status: 1,
+      storeCode: "S001",
+      loginEnabled: false,
+    });
+    assert.equal((requests[0].body as Record<string, unknown>).loginEnabled, false);
+    assert.equal("password" in (requests[0].body as Record<string, unknown>), false);
+    assert.equal("sendPasswordSetupEmail" in (requests[0].body as Record<string, unknown>), false);
+    requests.length = 0;
 
     const initialPassword = "must-never-enter-logs";
     const safeErrorLog = toSafeStoreUserErrorLog({

@@ -56,6 +56,8 @@ export function normalizeStoreUser(raw: ApiRecord): StoreUserListItem {
     createdAt: asString(raw.createdAt ?? raw.CreatedAt),
     updatedAt: asString(raw.updatedAt ?? raw.UpdatedAt),
     mustChangePassword: raw.mustChangePassword === true || raw.MustChangePassword === true,
+    // 只有后端明确返回 false 才视为不能登录；字段缺失（旧后端）按允许处理，避免误标。
+    loginEnabled: (raw.loginEnabled ?? raw.LoginEnabled) !== false,
   };
 }
 

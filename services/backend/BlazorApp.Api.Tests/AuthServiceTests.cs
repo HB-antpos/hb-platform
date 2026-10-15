@@ -570,6 +570,8 @@ namespace BlazorApp.Api.Tests
 
         private void CreateLegacyUserSchemaWithoutPhone()
         {
+            // 登录会读「不允许登录」标记表，旧结构测试库也要有这张表。
+            _db.CodeFirst.InitTables<UserLoginRestriction>();
             _db.Ado.ExecuteCommand(
                 """
                 CREATE TABLE [User] (
@@ -618,6 +620,8 @@ namespace BlazorApp.Api.Tests
 
         private void CreateLegacyUserSchemaWithoutLastLoginIp()
         {
+            // 登录会读「不允许登录」标记表，旧结构测试库也要有这张表。
+            _db.CodeFirst.InitTables<UserLoginRestriction>();
             _db.Ado.ExecuteCommand(
                 """
                 CREATE TABLE [User] (
@@ -819,7 +823,7 @@ namespace BlazorApp.Api.Tests
         private Task CreateCurrentAuthSchemaAsync()
         {
             _db.CodeFirst.InitTables<User, Role, UserRole, RefreshToken, SysRolePermission>();
-            _db.CodeFirst.InitTables<SysUserPermission>();
+            _db.CodeFirst.InitTables<SysUserPermission, UserLoginRestriction>();
             return Task.CompletedTask;
         }
 

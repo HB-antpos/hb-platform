@@ -275,7 +275,8 @@
   "statuses": {
     "active": "Active",
     "disabled": "Disabled",
-    "pendingFirstLogin": "First sign-in pending"
+    "pendingFirstLogin": "First sign-in pending",
+    "loginDisabled": "Cannot sign in"
   },
   "fields": {
     "username": "Username",
@@ -283,6 +284,8 @@
     "email": "Email",
     "phone": "Phone",
     "enabled": "Enabled",
+    "loginEnabled": "Allow web / app sign-in",
+    "loginEnabledHelper": "When off, this employee cannot sign in to the web or app and signed-in devices stop working immediately; attendance and rosters are unaffected",
     "initialPassword": "Initial password",
     "newPassword": "New password",
     "fixedRoleHint": "Accounts created here are always staff accounts, assigned to the selected managed store, and set as casual staff.",
@@ -540,6 +543,13 @@
     "inviteFailedFallback": "Email could not be sent",
     "resendInvite": "Resend initial password",
     "inviteResent": "Initial password resent",
-    "nextStepEmail": "Check their email, sign in with the initial password and set their own password"
+    "nextStepEmail": "Check their email, sign in with the initial password and set their own password",
+    "loginEnabled": "Allow web / app sign-in",
+    "loginEnabledOnHelper": "When on, the initial password is emailed to the employee, who uses it to sign in to the web and the app",
+    "loginEnabledOffHelper": "Off by default: the account still works for attendance, rosters and so on, but cannot sign in to the web or app and no password email is sent. You can turn it on later when editing",
+    "emailHelperNoLogin": "Used for contact and account recovery only; the account cannot sign in yet",
+    "usernameFromEmailHelperNoLogin": "Same as the email by default; used to sign in once sign-in is allowed (3–50 characters)",
+    "successDescriptionNoLogin": "{{name}}'s account was created. They cannot sign in to the web or app yet, and no password email was sent.",
+    "loginDisabledNotice": "This employee cannot sign in yet. When needed, edit them in the staff list and turn on \"Allow web / app sign-in\"; you will be offered to send the initial password."
   }
 }

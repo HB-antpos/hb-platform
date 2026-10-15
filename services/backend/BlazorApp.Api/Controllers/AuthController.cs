@@ -273,6 +273,12 @@ namespace BlazorApp.Api.Controllers
                     return ApiResponse<UserDto>.Error("用户不存在");
                 }
 
+                // 登录权限被关闭的账号同样 fail closed，不返回任何会话载荷。
+                if (await UserLoginRestrictions.IsRestrictedAsync(_dbContext.Db, user.UserGUID))
+                {
+                    return ApiResponse<UserDto>.Error("用户不存在");
+                }
+
                 // 会话角色/权限以实时快照为唯一来源，避免停用/软删除角色被聚合进菜单权限。
                 var snapshotResult = await _roleService.GetUserPermissionSnapshotAsync(userId);
                 if (snapshotResult?.Success != true || snapshotResult.Data == null)
