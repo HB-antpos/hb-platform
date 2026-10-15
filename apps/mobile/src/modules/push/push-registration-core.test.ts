@@ -121,6 +121,29 @@ async function run() {
     assert.equal(h.counters.uploads.length, 1);
   }
   {
+    // iOS：真机实测权限没被询问过时苹果不回调设备令牌（取令牌悬着），必须先请求权限、再取令牌
+    const h = createRegistrationHarness({ platform: "ios", permission: "undetermined", permissionAfterRequest: "granted" });
+    assert.deepEqual(await registerPushToken({ deps: h.deps }), { status: "registered" });
+    assert.deepEqual(h.fake.calls, ["getPermission", "requestPermission", "channel", "getToken"], "iOS 先弹授权框，授权后才取令牌");
+    assert.equal(h.counters.uploads.length, 1);
+  }
+  {
+    // iOS 授权框被拒绝：不取令牌、不上报，之后不再弹
+    const h = createRegistrationHarness({ platform: "ios", permission: "undetermined", permissionAfterRequest: "denied" });
+    assert.deepEqual(await registerPushToken({ deps: h.deps }), skipped("permission-denied"));
+    assert.equal(h.fake.calls.includes("getToken"), false, "没授权就不取令牌");
+    assert.equal(h.counters.uploads.length, 0);
+    h.fake.calls.length = 0;
+    assert.deepEqual(await registerPushToken({ deps: h.deps }), skipped("permission-denied"));
+    assert.deepEqual(h.fake.calls, ["getPermission"], "被拒绝后不再反复弹窗");
+  }
+  {
+    // iOS 已授权：不再请求权限，直接取令牌
+    const h = createRegistrationHarness({ platform: "ios", permission: "granted" });
+    assert.deepEqual(await registerPushToken({ deps: h.deps }), { status: "registered" });
+    assert.equal(h.fake.calls.includes("requestPermission"), false);
+  }
+  {
     // 弹窗被拒绝：不上报；之后状态变成 denied，不再弹
     const h = createRegistrationHarness({ permission: "undetermined", permissionAfterRequest: "denied" });
     assert.deepEqual(await registerPushToken({ deps: h.deps }), skipped("permission-denied"));

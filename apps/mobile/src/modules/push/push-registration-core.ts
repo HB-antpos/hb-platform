@@ -145,6 +145,19 @@ async function attempt(deps: PushRegistrationDeps): Promise<PushRegistrationResu
   // 已被拒绝就不再反复弹（交给系统设置）；也不浪费一次取令牌。
   if (permission === "denied") return skipped("permission-denied");
 
+  // iOS 必须「先请求权限、再取令牌」：真机实测，通知权限还没被询问过时，苹果不回调 APNs 设备令牌（取令牌一直悬着，
+  // 既不成功也不报错），于是授权框永远弹不出来、推送永远注册不上；授权后设备令牌 2 秒内就回来。
+  // Android 保持「先取令牌、后弹授权框」：没有 Google Play 服务的 PDA 取令牌就失败，从头到尾都看不到授权框。
+  if (platform === "ios" && permission === "undetermined") {
+    try {
+      permission = await native.requestPermission();
+    } catch {
+      return skipped("permission-denied");
+    }
+    if (permission !== "granted") return skipped("permission-denied");
+    if (!stillSameSession()) return skipped("session-changed");
+  }
+
   let token = state.held?.accountGuid === accountGuid ? state.held.token : null;
   if (!token) {
     // Android 13+ 要求先有通知渠道才会弹授权框；渠道创建失败不影响取令牌（系统会退回默认渠道）。
