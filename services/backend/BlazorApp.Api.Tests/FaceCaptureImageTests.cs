@@ -86,7 +86,7 @@ internal sealed class FaceImageTestDatabase : IDisposable
             IsAutoCloseConnection = false,
             InitKeyType = InitKeyType.Attribute,
         });
-        Db.CodeFirst.InitTables(typeof(Store), typeof(FaceCamera), typeof(FaceCaptureEvent));
+        Db.CodeFirst.InitTables(typeof(Store), typeof(FaceCamera), typeof(FaceCaptureEvent), typeof(FaceStoreProfile));
         Db.Ado.ExecuteCommand("""
 CREATE TABLE FaceCaptureImage (
     ImageId char(32) NOT NULL PRIMARY KEY,

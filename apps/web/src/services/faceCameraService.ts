@@ -154,6 +154,9 @@ export function normalizeFaceCapturePage(value: unknown): FaceCapturePage {
     pageSize: asCount(raw.pageSize) || 20,
     hasMore: raw.hasMore === true,
     canViewImages,
+    // 只认三个已知取值；缺失 / 未知（老后端、没有档案行）一律 null，页面不显示模式提示。
+    storeMode: raw.storeMode === 'off' || raw.storeMode === 'capture' || raw.storeMode === 'match' ? raw.storeMode : null,
+    lastSeenAtUtc: asNullableString(raw.lastSeenAtUtc),
   }
 }
 

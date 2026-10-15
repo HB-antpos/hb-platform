@@ -326,6 +326,10 @@ public sealed class FaceMatchMaintenance(
             // 图片行在 SQL Server 上随外键级联删除；显式先删一遍，不依赖级联（也兼容没有外键的环境）。
             var parameters = ids.Select((id, index) => new SugarParameter($"@p{index}", id)).ToList();
             var placeholders = string.Join(",", parameters.Select(p => p.ParameterName));
+            // 评估行（判定与分数）与事件同生命周期：表上没有外键、不会级联，必须按同一批 CaptureId 显式删。
+            // Match 模式每条抓拍都会写评估行（Capture 开了 EvaluateMatch 也写），漏删会在事件到期后一直留着。
+            // 顺序：评估 → 图片 → 事件（事件最后删，中途失败下一轮还能按事件行重新选中同一批）。
+            await _db.Ado.ExecuteCommandAsync($"DELETE FROM FaceMatchEvaluation WHERE CaptureId IN ({placeholders})", parameters);
             await _db.Ado.ExecuteCommandAsync($"DELETE FROM FaceCaptureImage WHERE CaptureId IN ({placeholders})", parameters);
             await _db.Ado.ExecuteCommandAsync($"DELETE FROM FaceCaptureEvent WHERE CaptureId IN ({placeholders})", parameters);
             total += ids.Count;

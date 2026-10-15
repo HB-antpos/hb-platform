@@ -239,6 +239,18 @@ try {
   const missingFlag = await getFaceCameraCaptures('cam-1', 1, 20)
   assert.equal(missingFlag.canViewImages, false)
   assert.deepEqual(missingFlag.items[0].images, [])
+  assert.equal(missingFlag.storeMode, null, '老后端没有 storeMode：按 null（不显示模式提示）')
+  assert.equal(missingFlag.lastSeenAtUtc, null)
+
+  // 本店当前模式与摄像机最后推送时间：只认 off / capture / match 三个取值
+  responseFactory = () => json({ success: true, data: { items: [], storeMode: 'off', lastSeenAtUtc: '2026-10-16T08:29:42Z' } })
+  const offPage = await getFaceCameraCaptures('cam-1', 1, 20)
+  assert.equal(offPage.storeMode, 'off')
+  assert.equal(offPage.lastSeenAtUtc, '2026-10-16T08:29:42Z')
+  responseFactory = () => json({ success: true, data: { items: [], storeMode: 'Weird', lastSeenAtUtc: '' } })
+  const weirdPage = await getFaceCameraCaptures('cam-1', 1, 20)
+  assert.equal(weirdPage.storeMode, null, '未知模式按 null')
+  assert.equal(weirdPage.lastSeenAtUtc, null)
 
   // ───────── 读取图片内容：专用接口 + 带登录 Cookie + no-store，返回 Blob ─────────
   const imageBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00])

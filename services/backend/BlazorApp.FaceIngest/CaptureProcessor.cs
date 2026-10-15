@@ -16,7 +16,9 @@ namespace BlazorApp.FaceIngest;
 /// 人脸比对（设计 docs/design/face-matching-service-20261012.md 第 13.5 节）：解析元数据后先按 <see cref="StoreModePolicy"/> 取该店有效模式：
 /// - Off：不调用腾讯云、不存图、不写事件行，读完即删本地报文（不留生物数据）；
 /// - Capture：上面描述的现有行为<b>完全不变</b>；档案开了评估时，入库成功后再做一次匹配评估并写 FaceMatchEvaluation，评估失败只记日志；
-/// - Match：解析 → <see cref="FaceMatchPipeline"/> 匹配并只累加计数 → 无论结果都删除该条报文的全部本地文件，不上传 COS、不写事件行。
+/// - Match：2026-10-16 起与 Capture 一样留存抓拍照片与记录（存图、事件行 + 图片行、原始报文、重试 / .processed / .failed 语义、保留期都同 Capture），
+///   入库成功且是新的非重复事件后，再交给 <see cref="FaceMatchPipeline"/> 累加客流计数、当日访客去重、名单比对，并写一行 FaceMatchEvaluation；
+///   这一步失败只记节流 Warning，不影响已成功的入库（不重试整条，否则会重复存图）。Match 下不再另做 Capture 的评估 / 名单检查。
 /// 抽成独立类是为了测试能直接调用 <see cref="RunOnceAsync"/>，不依赖真实时钟等待。
 /// </summary>
 internal sealed partial class CaptureProcessor
@@ -37,8 +39,8 @@ internal sealed partial class CaptureProcessor
     private readonly IImageStore _imageStore;
     private readonly ICaptureEventWriter? _writer;
     private readonly StoreModePolicy _modePolicy;
-    private readonly FaceMatchSettings _matchSettings;
     private readonly FaceMatchPipeline? _pipeline;
+    private readonly IFaceMatchStore? _matchStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CaptureProcessor> _logger;
     private readonly ThrottledLogGate _failureLogGate;
@@ -53,7 +55,6 @@ internal sealed partial class CaptureProcessor
         IImageStore imageStore,
         IServiceProvider services,
         StoreModePolicy modePolicy,
-        FaceMatchSettings matchSettings,
         TimeProvider timeProvider,
         ILogger<CaptureProcessor> logger)
     {
@@ -64,8 +65,9 @@ internal sealed partial class CaptureProcessor
         _writer = settings.Current.DatabaseConfigured ? services.GetRequiredService<ICaptureEventWriter>() : null;
         // 中文注释：门店档案与计数都在库里，没配数据库就没有 Off / Match，处理器保持 P1 现状。
         _modePolicy = modePolicy;
-        _matchSettings = matchSettings;
         _pipeline = settings.Current.DatabaseConfigured ? services.GetRequiredService<FaceMatchPipeline>() : null;
+        // 中文注释：Match 的评估行由处理器按流水线带回的判定写入（同 Capture 评估用的 InsertEvaluationAsync，主键冲突即已记过）。
+        _matchStore = settings.Current.DatabaseConfigured ? services.GetRequiredService<IFaceMatchStore>() : null;
         _timeProvider = timeProvider;
         _logger = logger;
         _failureLogGate = new ThrottledLogGate(timeProvider, TimeSpan.FromSeconds(60));
@@ -263,16 +265,12 @@ internal sealed partial class CaptureProcessor
             return FailPermanently(candidate, basePath, attempts, ex);
         }
 
-        // 关键逻辑：先按门店档案取有效模式。Off / Match 不走下面的「存图 + 写事件行」，也不会留下 .processed 等本地残留。
+        // 关键逻辑：先按门店档案取有效模式。Off 不走下面的「存图 + 写事件行」，也不会留下 .processed 等本地残留；
+        // Capture 与 Match（2026-10-16 起）都走完整入库，Match 只在入库成功后多做计数 / 去重 / 名单。
         var storeMode = _modePolicy.Resolve(metadata.StoreCode);
         if (storeMode.Kind == StoreModeKind.Off)
         {
             return await DiscardWithoutProcessingAsync(basePath, metadata, receivedAtUtc, storeMode, startTimestamp, cancellationToken);
-        }
-
-        if (storeMode.Kind == StoreModeKind.Match && _pipeline is not null)
-        {
-            return await ProcessMatchModeAsync(candidate, basePath, metadata, receivedAtUtc, storeMode, attempts, settings, startTimestamp, cancellationToken);
         }
 
         try
@@ -280,12 +278,6 @@ internal sealed partial class CaptureProcessor
             var body = await File.ReadAllBytesAsync(basePath + CaptureFileNames.BodyExtension, cancellationToken);
             var bodySha256 = Convert.ToHexStringLower(SHA256.HashData(body));
             var parsed = HikvisionPushParser.Parse(body, metadata.ContentType);
-            var parseNote = parsed.Note;
-            if (!string.Equals(bodySha256, metadata.BodySha256, StringComparison.OrdinalIgnoreCase))
-            {
-                // 中文注释：落盘后被改动或磁盘损坏；以实际内容为准并记在 note 里。
-                parseNote = JoinNote("body sha256 differs from metadata; actual content used", parseNote);
-            }
 
             var createdAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
             var imageRecords = new List<CaptureImageRecord>();
@@ -325,27 +317,15 @@ internal sealed partial class CaptureProcessor
             var rawStored = await _imageStore.SaveRawBodyAsync(
                 new RawBodyWriteRequest(metadata.CaptureId, metadata.CameraId, metadata.StoreCode, receivedAtUtc, body, bodySha256),
                 cancellationToken);
-            var captureEvent = new CaptureEventRecord
-            {
-                CaptureId = metadata.CaptureId,
-                CameraId = metadata.CameraId,
-                StoreCode = metadata.StoreCode,
-                ReceivedAtUtc = receivedAtUtc.UtcDateTime,
-                CameraEventTime = parsed.CameraEventTime,
-                EventType = parsed.EventType,
-                EventState = parsed.EventState,
-                CameraMac = parsed.MacAddress,
-                CameraChannel = parsed.Channel,
-                BodySha256 = bodySha256,
-                BodyBytes = body.LongLength,
-                IsRetransmission = parsed.IsRetransmission,
-                FaceCount = parsed.FaceCount,
-                ParseStatus = parsed.Status,
-                ParseNote = Truncate(parseNote, 500),
-                RawStorage = rawStored?.Storage ?? LocalImageStore.Name,
-                RawObjectKey = rawStored?.ObjectKey,
-                CreatedAtUtc = createdAtUtc,
-            };
+            var captureEvent = BuildCaptureEvent(
+                metadata,
+                receivedAtUtc,
+                body.LongLength,
+                bodySha256,
+                parsed,
+                rawStored?.Storage ?? LocalImageStore.Name,
+                rawStored?.ObjectKey,
+                createdAtUtc);
 
             string? duplicateOf = null;
             if (_writer is not null)
@@ -353,13 +333,23 @@ internal sealed partial class CaptureProcessor
                 var outcome = await _writer.WriteAsync(captureEvent, imageRecords, cancellationToken);
                 duplicateOf = outcome.DuplicateOfCaptureId;
                 await TouchLastSeenAsync(metadata.CameraId, captureEvent.ReceivedAtUtc, cancellationToken);
-                if (storeMode.Evaluate && duplicateOf is null && _pipeline is not null)
+                if (storeMode.Kind == StoreModeKind.Match)
+                {
+                    // 中文注释：Match 的计数 / 去重 / 名单只对「本次新插入、且不是重复报文」的事件做一次：
+                    // 重复报文不重复计数；事件行已存在（上次入库成功但没写成 .processed 而重处理）也不再计，宁少计不重复计。
+                    if (outcome.EventInserted && duplicateOf is null && _pipeline is not null)
+                    {
+                        await TryProcessMatchAsync(metadata, receivedAtUtc, bodySha256, parsed, storeMode, cancellationToken);
+                    }
+                }
+                else if (storeMode.Evaluate && duplicateOf is null && _pipeline is not null)
                 {
                     // 中文注释：Capture 模式的匹配评估（阈值标定）。放在事件行写成功之后，失败只记日志，不影响本条的入库结果。
                     await TryEvaluateAsync(metadata, receivedAtUtc, bodySha256, parsed, storeMode, cancellationToken);
                 }
 
-                if (storeMode.Unwelcome && duplicateOf is null && _pipeline is not null)
+                // 中文注释：Match 的名单已在 TryProcessMatchAsync 的那一次搜索里做过，这里只给 Capture，避免重复搜索、重复建任务。
+                if (storeMode.Kind != StoreModeKind.Match && storeMode.Unwelcome && duplicateOf is null && _pipeline is not null)
                 {
                     // 中文注释：Capture 模式的名单检查（仅内部知情人员的端到端测试）。同样放在事件行写成功之后，失败只记日志。
                     await TryCheckUnwelcomeAsync(metadata, receivedAtUtc, bodySha256, parsed, storeMode, cancellationToken);
@@ -443,56 +433,26 @@ internal sealed partial class CaptureProcessor
     }
 
     /// <summary>
-    /// Match：匹配 → 只累加计数 → 删除全部本地残留。处理失败（数据库暂时不可用等）有限次重试，
-    /// 超过次数或本地滞留超时即<b>丢弃</b>（宁可少一条计数，也不让生物数据长期留在盘上）。
-    /// 腾讯云调用失败不会走到这里的异常分支：流水线内部已退避重试并计入 ApiFailureCount。
+    /// Match 模式在入库成功之后的比对：<see cref="FaceMatchPipeline.ProcessAsync"/>（客流计数 + 当日访客去重 + 名单命中建任务），
+    /// 再按流水线带回的判定写一行 FaceMatchEvaluation。照片与记录已经按 Capture 口径留存，所以这里任何异常（腾讯云 / 数据库 / COS）
+    /// 只记节流 Warning、不重试、不抛出（取消除外）——重试整条会重复存图；代价是这条抓拍可能少计（见 runbook 17.2）。
     /// </summary>
-    private async Task<ItemOutcome> ProcessMatchModeAsync(
-        Candidate candidate,
-        string basePath,
+    private async Task TryProcessMatchAsync(
         CaptureMetadata metadata,
         DateTimeOffset receivedAtUtc,
+        string bodySha256,
+        ParsedPush parsed,
         EffectiveStoreMode mode,
-        int attempts,
-        FaceIngestSettings settings,
-        long startTimestamp,
         CancellationToken cancellationToken)
     {
+        MatchOutcome outcome;
         try
         {
-            var body = await File.ReadAllBytesAsync(basePath + CaptureFileNames.BodyExtension, cancellationToken);
-            var bodySha256 = Convert.ToHexStringLower(SHA256.HashData(body));
-            var parsed = HikvisionPushParser.Parse(body, metadata.ContentType);
-            var capture = new MatchCapture(
-                metadata.CaptureId,
-                metadata.CameraId,
-                metadata.StoreCode,
-                receivedAtUtc,
-                bodySha256,
-                BuildMatchFaces(parsed));
-            var outcome = await _pipeline!.ProcessAsync(capture, mode, cancellationToken);
-            if (_writer is not null)
-            {
-                await TouchLastSeenAsync(metadata.CameraId, receivedAtUtc.UtcDateTime, cancellationToken);
-            }
-
-            await FinishLocalDiscardAsync(basePath, metadata.CaptureId, cancellationToken);
-            var delta = outcome.Delta;
-            _logger.LogInformation(
-                "Face ingest capture matched camera={CameraId} store={StoreCode} mode=Match duplicate={Duplicate} faces={Faces} staff={Staff} unique={Unique} repeat={Repeat} lowQuality={LowQuality} apiFailure={ApiFailure} unwelcomeTasks={UnwelcomeTasks} attempts={Attempts} durationMs={DurationMs}",
-                metadata.CameraId,
-                metadata.StoreCode,
-                outcome.Duplicate,
-                delta.Capture,
-                delta.StaffMatch,
-                delta.UniqueVisitor,
-                delta.Repeat,
-                delta.LowQuality,
-                delta.ApiFailure,
-                outcome.UnwelcomeTasks,
-                attempts,
-                Math.Round(_timeProvider.GetElapsedTime(startTimestamp).TotalMilliseconds, 1));
-            return ItemOutcome.Processed;
+            // 中文注释：ReceivedAtUtc 与事件行同一个值，名单命中任务的 CapturedAtUtc 因此与事件行完全相同（主 API 按「摄像机 + 时间」关联）。
+            outcome = await _pipeline!.ProcessAsync(
+                new MatchCapture(metadata.CaptureId, metadata.CameraId, metadata.StoreCode, receivedAtUtc, bodySha256, BuildMatchFaces(parsed)),
+                mode,
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -500,27 +460,58 @@ internal sealed partial class CaptureProcessor
         }
         catch (Exception ex)
         {
-            var localAge = _timeProvider.GetUtcNow() - receivedAtUtc;
-            // 中文注释：取两个上限的较小者，保证不会走到「写 .failed 并保留原始报文」的路径（那会让生物数据留到保留期）。
-            if (attempts < Math.Min(_matchSettings.MatchMaxAttempts, settings.ProcessingMaxAttempts) && localAge <= TimeSpan.FromMinutes(_matchSettings.MatchMaxLocalAgeMinutes))
+            if (_failureLogGate.TryAcquire("match:" + ex.GetType().Name, out var suppressed))
             {
-                return await RecordFailureAsync(candidate, basePath, attempts, settings, ex, cancellationToken);
-            }
-
-            // 中文注释：重试用尽 / 本地滞留超时：丢弃本条。生物数据不能因为后端故障长期留在盘上。
-            await FinishLocalDiscardAsync(basePath, metadata.CaptureId, cancellationToken);
-            if (_failureLogGate.TryAcquire("match-dropped:" + ex.GetType().Name, out var suppressed))
-            {
-                _logger.LogError(
-                    "Face ingest Match capture dropped after repeated failures capture={CaptureIdPrefix} camera={CameraId} attempts={Attempts} error={Error} suppressedSinceLastLog={SuppressedCount}",
-                    metadata.CaptureId[..8],
+                _logger.LogWarning(
+                    "Face match processing in Match mode failed and was skipped; the capture is stored but its counts may be missing camera={CameraId} store={StoreCode} error={Error} suppressedSinceLastLog={SuppressedCount}",
                     metadata.CameraId,
-                    attempts,
+                    metadata.StoreCode,
                     DescribeError(ex),
                     suppressed);
             }
 
-            return ItemOutcome.Failed;
+            return;
+        }
+
+        var delta = outcome.Delta;
+        _logger.LogInformation(
+            "Face ingest capture matched camera={CameraId} store={StoreCode} mode=Match duplicate={Duplicate} faces={Faces} staff={Staff} unique={Unique} repeat={Repeat} lowQuality={LowQuality} apiFailure={ApiFailure} unwelcomeTasks={UnwelcomeTasks} decision={Decision}",
+            metadata.CameraId,
+            metadata.StoreCode,
+            outcome.Duplicate,
+            delta.Capture,
+            delta.StaffMatch,
+            delta.UniqueVisitor,
+            delta.Repeat,
+            delta.LowQuality,
+            delta.ApiFailure,
+            outcome.UnwelcomeTasks,
+            outcome.Evaluation?.Decision.ToString() ?? "none");
+
+        if (outcome.Evaluation is not { } evaluation)
+        {
+            return;
+        }
+
+        try
+        {
+            await _matchStore!.InsertEvaluationAsync(evaluation, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (_failureLogGate.TryAcquire("match-evaluation:" + ex.GetType().Name, out var suppressed))
+            {
+                _logger.LogWarning(
+                    "Face match evaluation row in Match mode failed and was skipped; counts are unaffected camera={CameraId} store={StoreCode} error={Error} suppressedSinceLastLog={SuppressedCount}",
+                    metadata.CameraId,
+                    metadata.StoreCode,
+                    DescribeError(ex),
+                    suppressed);
+            }
         }
     }
 
@@ -596,6 +587,50 @@ internal sealed partial class CaptureProcessor
         => [.. parsed.Images
             .Where(static image => image.Kind == CaptureImageKind.Face)
             .Select(static image => new MatchFace(image.PartIndex, image.Data, image.Width, image.Height))];
+
+    /// <summary>
+    /// 事件行拼装。ReceivedAtUtc 取元数据里的接收时间——Match 下与名单命中任务 FaceMatchTask.CapturedAtUtc 是同一个值，
+    /// 主 API 按「摄像机 + 完全相同时间」关联命中。
+    /// </summary>
+    private static CaptureEventRecord BuildCaptureEvent(
+        CaptureMetadata metadata,
+        DateTimeOffset receivedAtUtc,
+        long bodyBytes,
+        string bodySha256,
+        ParsedPush parsed,
+        string rawStorage,
+        string? rawObjectKey,
+        DateTime createdAtUtc)
+    {
+        var parseNote = parsed.Note;
+        if (!string.Equals(bodySha256, metadata.BodySha256, StringComparison.OrdinalIgnoreCase))
+        {
+            // 中文注释：落盘后被改动或磁盘损坏；以实际内容为准并记在 note 里。
+            parseNote = JoinNote("body sha256 differs from metadata; actual content used", parseNote);
+        }
+
+        return new CaptureEventRecord
+        {
+            CaptureId = metadata.CaptureId,
+            CameraId = metadata.CameraId,
+            StoreCode = metadata.StoreCode,
+            ReceivedAtUtc = receivedAtUtc.UtcDateTime,
+            CameraEventTime = parsed.CameraEventTime,
+            EventType = parsed.EventType,
+            EventState = parsed.EventState,
+            CameraMac = parsed.MacAddress,
+            CameraChannel = parsed.Channel,
+            BodySha256 = bodySha256,
+            BodyBytes = bodyBytes,
+            IsRetransmission = parsed.IsRetransmission,
+            FaceCount = parsed.FaceCount,
+            ParseStatus = parsed.Status,
+            ParseNote = Truncate(parseNote, 500),
+            RawStorage = rawStorage,
+            RawObjectKey = rawObjectKey,
+            CreatedAtUtc = createdAtUtc,
+        };
+    }
 
     /// <summary>
     /// 删除一条报文的全部本地文件并同步容量统计。若 .json 都删不掉（权限 / 盘故障），写一个 .processed 标记防止被反复处理

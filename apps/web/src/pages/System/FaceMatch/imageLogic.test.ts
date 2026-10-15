@@ -4,6 +4,10 @@ import { RequestError } from '../../../utils/request'
 import type { ObjectUrlApi } from '../FaceCameras/imageLogic'
 import {
   CAPTURE_SLOT,
+  createHitImageSession,
+  createHitThumbnailSession,
+  decodeThumbnailBase64,
+  type HitThumbnailStates,
   RESULT_IMAGE_ERROR_KEYS,
   REVIEW_IMAGE_ERROR_KEYS,
   classifyResultImageError,
@@ -589,6 +593,83 @@ assert.equal(isSharedResultImageFailure('failed'), false)
   assert.equal(last.get('scene')?.status, 'loaded')
   partial.dispose()
   assert.equal(fake.live.size, 0)
+}
+
+// ───────── 命中图（名单命中视图的详情抽屉）─────────
+{
+  const urls = createFakeUrlApi()
+  let states: ReviewImageStates = new Map()
+  const session = createHitImageSession({ fetchHit: async () => blob(7), onChange: (next) => (states = next), urlApi: urls.api })
+  await session.start()
+  assert.equal(states.get(CAPTURE_SLOT)?.status, 'loaded', '命中图放在唯一的槽位里')
+  assert.equal(urls.live.size, 1)
+  session.dispose()
+  assert.equal(urls.live.size, 0, 'dispose 撤销命中图 objectURL')
+
+  const gone = createHitImageSession({ fetchHit: async () => { throw failure(404, 'FACE_MATCH_IMAGE_GONE') }, onChange: (next) => (states = next), urlApi: urls.api })
+  await gone.start()
+  const goneState = states.get(CAPTURE_SLOT)
+  assert.equal(goneState?.status === 'error' ? goneState.kind : null, 'gone', '命中图已清理按复核口径分类')
+}
+
+// ───────── 命中图缩略图 ─────────
+assert.deepEqual(Array.from(decodeThumbnailBase64('AQID') ?? []), [1, 2, 3])
+assert.equal(decodeThumbnailBase64(''), null)
+assert.equal(decodeThumbnailBase64(null), null)
+assert.equal(decodeThumbnailBase64('data:image/jpeg;base64,AQID'), null, '只认裸 base64，不接受 data: 地址')
+{
+  const urls = createFakeUrlApi()
+  let states: HitThumbnailStates = new Map()
+  const batches: string[][] = []
+  const session = createHitThumbnailSession({
+    taskIds: ['t1', 't2', 't3'],
+    fetchBatch: async (ids) => {
+      batches.push([...ids])
+      return [
+        { taskId: 't1', status: 'ok', imageBase64: 'AQID' },
+        { taskId: 't2', status: 'gone', imageBase64: null },
+        { taskId: 't3', status: 'ok', imageBase64: '%%%' },
+      ]
+    },
+    onChange: (next) => (states = next),
+    urlApi: urls.api,
+  })
+  await session.start()
+  assert.deepEqual(batches, [['t1', 't2', 't3']], '一页只发一次批量请求')
+  assert.equal(states.get('t1')?.status, 'loaded')
+  assert.equal(states.get('t2')?.status, 'none', '过期 / 读不到的按占位处理')
+  assert.equal(states.get('t3')?.status, 'none', '非法 base64 不登记 objectURL')
+  assert.equal(urls.live.size, 1)
+  session.dispose()
+  assert.equal(urls.live.size, 0, 'dispose 撤销全部缩略图 objectURL')
+  assert.equal(session.getStates().size, 0)
+
+  // dispose 之后才到的响应：不登记、不回调
+  let resolveLate: (items: { taskId: string; status: string; imageBase64: string | null }[]) => void = () => undefined
+  let lateCalls = 0
+  const late = createHitThumbnailSession({
+    taskIds: ['t9'],
+    fetchBatch: () => new Promise((resolve) => (resolveLate = resolve)),
+    onChange: () => (lateCalls += 1),
+    urlApi: urls.api,
+  })
+  const pending = late.start()
+  late.dispose()
+  const callsBefore = lateCalls
+  resolveLate([{ taskId: 't9', status: 'ok', imageBase64: 'AQID' }])
+  await pending
+  assert.equal(lateCalls, callsBefore, 'dispose 后不再回调')
+  assert.equal(urls.live.size, 0, '晚到的缩略图不会留下 objectURL')
+
+  // 整批失败：全部退回占位
+  const failed = createHitThumbnailSession({ taskIds: ['a'], fetchBatch: async () => { throw failure(500) }, onChange: (next) => (states = next), urlApi: urls.api })
+  await failed.start()
+  assert.equal(states.get('a')?.status, 'none')
+
+  // 空列表不发请求
+  let emptyCalls = 0
+  await createHitThumbnailSession({ taskIds: [], fetchBatch: async () => { emptyCalls += 1; return [] }, onChange: () => undefined, urlApi: urls.api }).start()
+  assert.equal(emptyCalls, 0)
 }
 
 console.log('FaceMatch imageLogic.test: ok')

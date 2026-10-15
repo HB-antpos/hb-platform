@@ -29,17 +29,22 @@ internal sealed record MatchCapture(
     string BodySha256,
     IReadOnlyList<MatchFace> Faces);
 
-/// <summary>一条抓拍的处理结果（仅用于日志与测试断言，不含任何生物信息）。</summary>
-internal sealed record MatchOutcome(bool Duplicate, TrafficDelta Delta, int UnwelcomeTasks);
+/// <summary>
+/// 一条抓拍的处理结果（不含任何生物信息）。<paramref name="Evaluation"/> 是这条抓拍的判定与员工 / 访客相似度，
+/// 处理器据此写一行 FaceMatchEvaluation（2026-10-16 起 Match 与 Capture 一样留存照片与事件行，另做计数与名单比对）；
+/// 为 null 表示「没有可记的判定」（重复报文、没有人脸、没开任何比对、腾讯云调用失败 / 熔断），此时不写评估行（主 API 显示为未评估）。
+/// </summary>
+internal sealed record MatchOutcome(bool Duplicate, TrafficDelta Delta, int UnwelcomeTasks, EvaluationRecord? Evaluation = null);
 
 /// <summary>
-/// 「匹配后丢弃」流水线（设计第 5、8、14.3 节）。业务口径：
+/// Match 比对流水线（设计第 5、8、14.3 节；原「匹配后丢弃」，2026-10-16 起照片与记录由处理器按 Capture 口径先留存，本类只做比对）。业务口径：
 /// - 同一家店的处理<b>串行</b>（每店一把锁）：相邻两条抓拍不会同时判成「新访客」而重复建人；
 /// - 每张人脸只发<b>一次</b> SearchFacesReturnsByGroup，groups 按档案开关：员工排除 → staff；去重 → 当日访客库；名单 → unwelcome；
 /// - 员工命中优先；去重开启且无访客命中、质量达标 → 在当日访客库建一人并计「唯一访客」，命中则计「重复」；
 ///   名单命中（≥ 名单阈值，且条目有效）→ 存命中图到私有 COS 并建待复核任务（NotifiedAtUtc 留空，通知由主 API 发）；
-/// - 质量不达标 → 低质量计数；腾讯云调用失败 → 有限次退避重试，超限<b>丢弃</b>并计失败，不因调用失败而留存生物数据；
-/// - 只写计数（FaceTrafficBucket）；本类不接触本地文件，删除本地报文由处理器负责；
+/// - 质量不达标 → 低质量计数；腾讯云调用失败 → 有限次退避重试，超限放弃这张人脸的比对并计失败；
+/// - 只写计数（FaceTrafficBucket）；本类不接触本地文件，也不写事件行 / 图片行（由处理器按 Capture 口径入库）；
+///   同时把这条抓拍的判定与分数随 <see cref="MatchOutcome"/> 带回（口径同 Capture 评估：只看第一张人脸），由处理器写评估行；
 /// - 同摄像机短时间相同请求体哈希不重复搜索也不重复计数；员工命中后同摄像机 StaffSuppressSeconds 内的相邻抓拍直接计员工；
 /// - 日志只含摄像机 / 门店 / 结果枚举 / 取整分数 / 计数，不含图片、对象键、密钥、PersonId。
 /// 同一个类也承担 Capture 模式的「评估」（只记分数，不写计数桶）。
@@ -86,7 +91,10 @@ internal sealed class FaceMatchPipeline
 
     // ---------------------------------------------------------------- Match 模式
 
-    /// <summary>处理一条 Match 模式的抓拍。成功返回后，调用方即可删除全部本地报文。失败（数据库 / COS 异常）抛异常，由处理器决定重试或丢弃。</summary>
+    /// <summary>
+    /// 处理一条 Match 模式的抓拍（处理器在事件行入库成功后调用）。成功返回计数增量与判定；
+    /// 失败（数据库 / COS 异常）抛异常，处理器只记日志、不重试（照片与记录已留存，重试整条会重复存图）。
+    /// </summary>
     public async Task<MatchOutcome> ProcessAsync(MatchCapture capture, EffectiveStoreMode mode, CancellationToken cancellationToken)
     {
         var storeLock = _storeLocks.GetOrAdd(capture.StoreCode, static _ => new SemaphoreSlim(1, 1));
@@ -107,7 +115,8 @@ internal sealed class FaceMatchPipeline
         var bodyKey = capture.CameraId + "|" + capture.BodySha256;
         if (_recentBodies.TryGetValue(bodyKey, out var expiresAt) && expiresAt > now)
         {
-            // 中文注释：同摄像机短时间内相同请求体 = 断网续传 / 重复推送，不重复搜索、也不重复计数。
+            // 中文注释：同摄像机短时间内相同请求体 = 断网续传 / 重复推送，不重复搜索、也不重复计数；
+            // 也没有新的判定可记（Evaluation 为 null）。处理器侧库里「同摄像机同哈希 24 小时」的重复判定通常已先挡掉。
             return new MatchOutcome(true, new TrafficDelta(), 0);
         }
 
@@ -118,20 +127,36 @@ internal sealed class FaceMatchPipeline
         var visitorsAdded = 0;
         var unwelcomeTasks = 0;
 
+        // 关键逻辑：抓拍记录的判定与分数只取第一张人脸（与 Capture 评估 EvaluateAsync 同一口径，海康正常一条一张）；
+        // 计数仍按每张人脸累加，不受影响。第一张脸走到「调用失败」等没有判定的分支时 evaluation 保持 null。
+        EvaluationRecord? evaluation = null;
+        var faceIndex = -1;
+        void Judge(EvaluationDecision decision, double? staffScore, double? visitScore)
+        {
+            if (faceIndex == 0)
+            {
+                evaluation = new EvaluationRecord(capture.CaptureId, ToScore(staffScore), ToScore(visitScore), decision);
+            }
+        }
+
         foreach (var face in capture.Faces.Take(MaxFacesPerCapture))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            faceIndex++;
             counters.Capture++;
 
             if (mode.StaffExclusion && IsStaffSuppressed(capture))
             {
+                // 员工抑制窗口内直接计员工、不搜索，所以没有分数。
                 counters.StaffMatch++;
+                Judge(EvaluationDecision.Staff, null, null);
                 continue;
             }
 
             if (!PassesQualityGate(face))
             {
                 counters.LowQuality++;
+                Judge(EvaluationDecision.LowQuality, null, null);
                 continue;
             }
 
@@ -179,6 +204,12 @@ internal sealed class FaceMatchPipeline
             if (search.Error is { } searchError)
             {
                 RecordFailure(counters, searchError);
+                // 中文注释：质量类错误与计数口径一致记「质量不足」；其余失败（瞬时超限 / 账号级 / 熔断）没有判定，不写评估行。
+                if (searchError.Kind == FaceMatchErrorKind.Quality)
+                {
+                    Judge(EvaluationDecision.LowQuality, null, null);
+                }
+
                 continue;
             }
 
@@ -186,14 +217,21 @@ internal sealed class FaceMatchPipeline
             if (result.Status == FaceSearchStatus.NoUsableFace)
             {
                 counters.LowQuality++;
+                Judge(EvaluationDecision.LowQuality, null, null);
                 continue;
             }
+
+            // 分数口径同 EvaluateAsync：员工分只在开了员工排除时取，访客分只在有当日访客库时取。
+            // 注意 Match 的搜索带最低阈值，低于阈值的候选腾讯云不返回，所以分数可能为空（Capture 评估不带阈值）。
+            var staffScore = mode.StaffExclusion ? result.BestIn(FaceGroups.Staff)?.Score : null;
+            var visitScore = visitorGroup is not null ? result.BestIn(visitorGroup.GroupId)?.Score : null;
 
             // 员工命中优先：员工不计入访客，也不触发名单。
             if (mode.StaffExclusion && result.BestIn(FaceGroups.Staff) is { } staffHit && staffHit.Score >= thresholds.Staff)
             {
                 counters.StaffMatch++;
                 _lastStaffHit[capture.CameraId] = capture.ReceivedAtUtc;
+                Judge(EvaluationDecision.Staff, staffScore, visitScore);
                 continue;
             }
 
@@ -210,23 +248,32 @@ internal sealed class FaceMatchPipeline
                 if (result.BestIn(visitorGroup.GroupId) is { } visitHit && visitHit.Score >= thresholds.Visitor)
                 {
                     counters.Repeat++;
+                    Judge(EvaluationDecision.RepeatVisitor, staffScore, visitScore);
                 }
                 else
                 {
+                    // 判定跟着实际计数走：建人成功 = 新访客；建人质量不过 = 质量不足；建人调用失败 = 没有判定。
                     switch (await CreateVisitorAsync(capture, face, visitorGroup.GroupId, cancellationToken))
                     {
                         case VisitorCreation.Created:
                             counters.UniqueVisitor++;
                             visitorsAdded++;
+                            Judge(EvaluationDecision.NewVisitor, staffScore, visitScore);
                             break;
                         case VisitorCreation.LowQuality:
                             counters.LowQuality++;
+                            Judge(EvaluationDecision.LowQuality, staffScore, visitScore);
                             break;
                         default:
                             counters.ApiFailure++;
                             break;
                     }
                 }
+            }
+            else
+            {
+                // 没有访客库（未开去重 / 迟到积压抓拍）且不是员工：与 EvaluateAsync 一致记 NoMatch（名单命中不单独成判定，命中看任务表）。
+                Judge(EvaluationDecision.NoMatch, staffScore, visitScore);
             }
         }
 
@@ -241,7 +288,7 @@ internal sealed class FaceMatchPipeline
 
         // 只有落库成功才登记「已处理的请求体」，失败重试时不会被当成重复而漏计。
         RememberBody(bodyKey, now);
-        return new MatchOutcome(false, delta, unwelcomeTasks);
+        return new MatchOutcome(false, delta, unwelcomeTasks, evaluation);
     }
 
     // ---------------------------------------------------------------- Capture 模式评估

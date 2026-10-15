@@ -333,7 +333,7 @@
       "empty": "No audit records"
     },
     "unwelcome": {
-      "intro": "The Unwelcome Persons List is for serious incidents only: violence or threats, organised or documented repeat theft, or other approved cases; never for ordinary shoplifting. Every entry needs an evidence reference and an expiry date (at most 12 months). One administrator's approval is enough for an entry to take effect (self-approval allowed); for entries submitted by non-administrators the approver must be someone other than the submitter, and the \u201cOther\u201d category needs two different approvers.",
+      "intro": "The Unwelcome Persons List is for serious incidents only: violence or threats, organised or documented repeat theft, or other approved cases; never for ordinary shoplifting. Every entry needs an evidence reference and an expiry date (at most 12 months). One administrator's approval is enough for an entry to take effect (self-approval allowed); for entries submitted by non-administrators the approver must be someone other than the submitter, and the “Other” category needs two different approvers.",
       "objectStoreMissing": "The private photo bucket is not configured, so entries with photos cannot be submitted.",
       "allStatuses": "All statuses",
       "allStores": "All stores",
@@ -492,7 +492,7 @@
       "counts": "{{recipients}} recipients · {{read}} read"
     },
     "results": {
-      "intro": "This page shows captures kept by stores in Capture mode, with their match scores. In Match mode captures are deleted right after processing and never appear here (see Review tasks for list hits). Note: similarity is not the probability of being the same person.",
+      "intro": "Both Capture and Match mode keep capture photos and match scores (kept for 7 days); Match mode also counts towards traffic statistics. For list hits, see the List hits view. Note: similarity is not the probability of being the same person.",
       "filters": {
         "allStores": "All stores",
         "allCameras": "All cameras",
@@ -588,7 +588,10 @@
           "loading": "Loading recipients…",
           "failed": "Failed to load recipients"
         },
-        "close": "Close"
+        "close": "Close",
+        "hitImage": "Hit image",
+        "hitImageCaption": "List hit image (kept for 7 days; every view is logged)",
+        "hitOnlyNotice": "Opened from List hits: only the hit image is shown here. View the original capture photos under All captures."
       },
       "timeline": {
         "created": "Match task created",
@@ -602,7 +605,14 @@
         "reviewPendingHint": "Once reviewed the task closes and no more reminders are sent",
         "reviewDoneHint": "The task has ended",
         "reviewUnknown": "Review status unknown"
-      }
+      },
+      "views": {
+        "all": "All captures",
+        "hits": "List hits",
+        "unreadTitle": "{{count}} unread hits"
+      },
+      "hitThumbAlt": "List hit thumbnail",
+      "hitThumbUnavailable": "Hit image unavailable or expired"
     },
     "stats": {
       "intro": "Review outcomes by entry and by similarity range: dismiss rate = dismissed / (dismissed + manually confirmed). The dismiss rate counts only tasks decided by a person; tasks the system auto-confirmed are not included. A persistently high rate means many false positives; review whether the entry should stay on the list or raise the matching threshold. Counts only, no images or names.",
@@ -622,6 +632,30 @@
       "bucket": "Similarity range",
       "bucketTotal": "Tasks",
       "empty": "No statistics yet"
+    },
+    "hits": {
+      "status": {
+        "all": "All",
+        "unread": "Unread",
+        "pending": "Pending review",
+        "autoConfirmed": "Auto-confirmed",
+        "confirmed": "Confirmed",
+        "dismissed": "Dismissed"
+      },
+      "columns": {
+        "image": "Hit image",
+        "similarity": "Similarity",
+        "reviewStatus": "Review status",
+        "myNotification": "My notification"
+      },
+      "myUnread": "Unread",
+      "myRead": "Read",
+      "review": "Review",
+      "markAll": "Mark all as read",
+      "markAllConfirm": "Mark all of your list hit notifications as read? (Not limited by the store and time filters on this page.)",
+      "markAllDone": "All marked as read",
+      "empty": "No list hits in this period",
+      "footnote": "This view is based on hit tasks, so hits from Match mode before this change (which have no capture record) are included. Hit thumbnails and images are biometric information; every read is logged."
     }
   }
 }

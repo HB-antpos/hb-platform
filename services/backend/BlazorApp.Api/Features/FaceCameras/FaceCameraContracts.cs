@@ -121,6 +121,31 @@ public sealed record FaceCapturePageDto
 
     /// <summary>调用者是否持有 FaceCapture.Images.View；为 false 时每条记录的 Images 都是空数组。</summary>
     public bool CanViewImages { get; init; }
+
+    /// <summary>
+    /// 摄像机所属门店档案里<b>当前配置</b>的模式：off / capture / match；该店没有档案行时为 null
+    /// （没有档案时接收端按自身配置折算，后台不替它猜）。用于抽屉顶部提示「本店未开启处理、不留记录」（off 时）。
+    /// </summary>
+    public string? StoreMode { get; init; }
+
+    /// <summary>摄像机最后一次有效推送时间（FaceCamera.LastSeenAtUtc，接收端约 5 分钟节流更新一次）；从未推送为 null。</summary>
+    public DateTime? LastSeenAtUtc { get; init; }
+}
+
+/// <summary><see cref="FaceCapturePageDto.StoreMode"/> 的取值。</summary>
+public static class FaceCaptureStoreModes
+{
+    public const string Off = "off";
+    public const string Capture = "capture";
+    public const string Match = "match";
+
+    /// <summary>档案 Mode 值（0/1/2）转成对外取值；未知值按 off（与接收端「不认识的模式一律不处理」一致）。</summary>
+    public static string FromProfileMode(byte mode) => mode switch
+    {
+        BlazorApp.Shared.Models.FaceStoreMode.Capture => Capture,
+        BlazorApp.Shared.Models.FaceStoreMode.Match => Match,
+        _ => Off,
+    };
 }
 
 /// <summary>操作人，仅用于审计日志。</summary>

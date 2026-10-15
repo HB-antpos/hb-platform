@@ -492,7 +492,7 @@
       "counts": "{{recipients}} 人 · 已读 {{read}}"
     },
     "results": {
-      "intro": "本页显示 Capture（留存）模式下门店留存的抓拍及比对分数；Match（比对）模式处理完即删除，不会出现在这里（名单命中请到“复核任务”查看）。请注意：相似度不等于是同一个人的概率。",
+      "intro": "Capture（留存）与 Match（比对）模式都会留存抓拍照片及比对分数（保留 7 天）；Match 另外计入客流统计。名单命中另见「名单命中」视图。请注意：相似度不等于是同一个人的概率。",
       "filters": {
         "allStores": "全部门店",
         "allCameras": "全部摄像机",
@@ -588,7 +588,10 @@
           "loading": "正在读取接收人…",
           "failed": "接收人加载失败"
         },
-        "close": "关闭"
+        "close": "关闭",
+        "hitImage": "命中图",
+        "hitImageCaption": "名单命中图（保留 7 天，每次查看都会被记录）",
+        "hitOnlyNotice": "从「名单命中」打开：这里只显示命中图；抓拍原图请在「全部抓拍」里查看。"
       },
       "timeline": {
         "created": "命中任务已创建",
@@ -602,7 +605,14 @@
         "reviewPendingHint": "复核后任务关闭，通知不再提醒",
         "reviewDoneHint": "任务已结束",
         "reviewUnknown": "复核状态未知"
-      }
+      },
+      "views": {
+        "all": "全部抓拍",
+        "hits": "名单命中",
+        "unreadTitle": "{{count}} 条未读命中"
+      },
+      "hitThumbAlt": "名单命中图缩略图",
+      "hitThumbUnavailable": "命中图暂时读不到或已过期"
     },
     "stats": {
       "intro": "按条目和相似度区间统计复核结果：驳回率 = 已驳回 ÷（已驳回 + 人工确认）。驳回率只统计人工判断的任务，系统自动确认的不计入。驳回率持续偏高说明误报多，应复核该条目是否该出名单，或调高比对阈值。这里只有计数，没有图片和姓名。",
@@ -622,6 +632,30 @@
       "bucket": "相似度区间",
       "bucketTotal": "任务数",
       "empty": "还没有统计数据"
+    },
+    "hits": {
+      "status": {
+        "all": "全部",
+        "unread": "未读",
+        "pending": "待复核",
+        "autoConfirmed": "自动确认",
+        "confirmed": "已确认",
+        "dismissed": "已驳回"
+      },
+      "columns": {
+        "image": "命中图",
+        "similarity": "相似度",
+        "reviewStatus": "复核状态",
+        "myNotification": "我的通知"
+      },
+      "myUnread": "未读",
+      "myRead": "已读",
+      "review": "复核",
+      "markAll": "全部标为已读",
+      "markAllConfirm": "把你的全部名单命中通知标为已读？（不受本页门店与时间筛选限制）",
+      "markAllDone": "已全部标为已读",
+      "empty": "这个时间段没有名单命中",
+      "footnote": "本视图以命中任务为准，改版前 Match 模式下没有抓拍记录的命中也在这里。命中图缩略图与原图都是生物识别信息，每次读取都会被记录。"
     }
   }
 }

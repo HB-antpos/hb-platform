@@ -114,7 +114,10 @@
       "prev": "Previous",
       "next": "Next",
       "pageLabel": "Page {{page}}",
-      "images": "Images"
+      "images": "Images",
+      "lastSeen": "Last push: {{time}} (accurate to about 5 minutes)",
+      "neverSeen": "Last push: no push received from this camera yet",
+      "storeOff": "This store ({{store}}) is not processing captures: captures are deleted right after being read and no records are kept."
     },
     "images": {
       "view": "View images",

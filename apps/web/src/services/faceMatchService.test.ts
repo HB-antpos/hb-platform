@@ -14,6 +14,12 @@ import {
   createUnwelcomeEntry,
   fetchFaceCaptureResultImage,
   fetchFaceHitDetail,
+  fetchFaceHitImage,
+  fetchFaceHitThumbnails,
+  getFaceHitSummary,
+  getFaceHits,
+  markAllFaceHitsRead,
+  markFaceHitRead,
   fetchUnwelcomeReferenceImage,
   fetchUnwelcomeTaskImage,
   getFaceAudit,
@@ -811,6 +817,98 @@ try {
     await assert.rejects(() => fetchFaceHitDetail(badId), (error: unknown) => error instanceof RequestError && error.status === 404)
   }
   assert.equal(calls.length, detailCalls, '非法任务编号不应发出任何请求')
+
+  // ───────── 名单命中流 ─────────
+  const hitTaskId = 'H'.repeat(32)
+  responseFactory = () =>
+    json({
+      success: true,
+      data: {
+        items: [
+          {
+            taskId: hitTaskId, captureId: null, storeCode: '1042', storeName: 'TestStore', cameraId: 'cam', capturedAtUtc: '2026-10-16T08:19:08Z',
+            scorePercent: 99.6, band: 'high', reviewStatus: 2, reviewStatusName: 'confirmed', autoConfirmed: true, imageAvailable: true,
+            unread: true, notificationId: 'n-1', notifyState: 'sent', notifiedAtUtc: '2026-10-16T08:19:10Z', notifyRecipientCount: 4, notifyReadCount: 1,
+            canReview: false, decision: null, staffScorePercent: null, visitScorePercent: null, faceCount: null,
+          },
+          { taskId: 'x', band: 'weird', faceCount: 'n/a', notificationId: '  ' },
+        ],
+        page: 1, pageSize: 20, hasMore: false,
+      },
+    })
+  const hitPage = await getFaceHits({ storeCode: '1042', hitStatus: 'unread', fromUtc: '2026-10-09T14:00:00.000Z', toUtc: '2026-10-16T14:00:00.000Z', page: 1, pageSize: 99 })
+  const hitUrl = new URL(lastCall().url, 'http://localhost')
+  assert.equal(hitUrl.pathname, '/api/react/v1/face-match/results/hits')
+  assert.equal(lastCall().init?.cache, 'no-store')
+  assert.deepEqual(Object.fromEntries(hitUrl.searchParams), {
+    storeCode: '1042', hitStatus: 'unread', fromUtc: '2026-10-09T14:00:00.000Z', toUtc: '2026-10-16T14:00:00.000Z', page: '1', pageSize: '50',
+  })
+  const [firstHit, dirtyHit] = hitPage.items
+  assert.deepEqual(
+    [firstHit.scorePercent, firstHit.band, firstHit.autoConfirmed, firstHit.unread, firstHit.notificationId, firstHit.captureId, firstHit.notifyRecipientCount],
+    [100, 'high', true, true, 'n-1', null, 4],
+  )
+  assert.deepEqual([dirtyHit.band, dirtyHit.faceCount, dirtyHit.notificationId, dirtyHit.unread, dirtyHit.canReview], [null, null, null, false, false], '脏数据按安全默认值')
+  await getFaceHits({ hitStatus: 'all', page: 1, pageSize: 20 })
+  assert.equal(new URL(lastCall().url, 'http://localhost').searchParams.get('hitStatus'), null, 'all 不带状态')
+
+  responseFactory = () => json({ success: true, data: { total: 19, unread: 3, pending: 0, autoConfirmed: 19, confirmed: -1, dismissed: 'x' } })
+  const hitSummary = await getFaceHitSummary({ storeCode: '1042' })
+  assert.equal(new URL(lastCall().url, 'http://localhost').pathname, '/api/react/v1/face-match/results/hits/summary')
+  assert.deepEqual(hitSummary, { total: 19, unread: 3, pending: 0, autoConfirmed: 19, confirmed: 0, dismissed: 0 }, '计数不为负、非数字按 0')
+
+  responseFactory = () => json({ success: true, data: { unreadCount: 2 } })
+  assert.equal(await markFaceHitRead(hitTaskId), 2)
+  assert.equal(lastCall().init?.method, 'POST')
+  assert.equal(new URL(lastCall().url, 'http://localhost').pathname, `/api/react/v1/face-match/results/hits/${hitTaskId}/read`)
+  const readCalls = calls.length
+  await assert.rejects(() => markFaceHitRead('../x'), (error: unknown) => error instanceof RequestError && error.status === 404)
+  assert.equal(calls.length, readCalls, '非法任务编号不发标已读请求')
+
+  responseFactory = () => json({ success: true, data: { updatedCount: 3, unreadCount: 0 } })
+  await markAllFaceHitsRead()
+  const readAllUrl = new URL(lastCall().url, 'http://localhost')
+  assert.equal(readAllUrl.pathname, '/api/react/v1/notifications/read-all')
+  assert.equal(readAllUrl.searchParams.get('type'), 'face.unwelcome-hit', '全部已读必须带 type，只标命中通知')
+  assert.equal(lastCall().init?.method, 'POST')
+
+  // 命中图原图：专用内容接口、带 Cookie、no-store；编号非法不发请求
+  responseFactory = () => new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { 'content-type': 'image/jpeg' } })
+  const hitImage = await fetchFaceHitImage(hitTaskId)
+  assert.equal(hitImage.type, 'image/jpeg')
+  assert.equal(new URL(lastCall().url, 'http://localhost').pathname, `/api/react/v1/face-match/results/hits/${hitTaskId}/image`)
+  assert.equal(lastCall().init?.credentials, 'include')
+  assert.equal(lastCall().init?.cache, 'no-store')
+  const imageCalls = calls.length
+  await assert.rejects(() => fetchFaceHitImage('a/b'), (error: unknown) => error instanceof RequestError && error.status === 404)
+  assert.equal(calls.length, imageCalls)
+
+  // 缩略图：只请求 kind=hit，编号放请求体、去重；非法编号不发、按 denied 返回；与入参同序
+  responseFactory = () =>
+    json({ success: true, data: { items: [{ kind: 'hit', id: hitTaskId, status: 'ok', imageBase64: 'AQID' }, { kind: 'capture', id: 'zzz', status: 'ok', imageBase64: 'AQID' }] } })
+  const thumbs = await fetchFaceHitThumbnails([hitTaskId, '../bad', hitTaskId, 'B'.repeat(32)])
+  assert.equal(new URL(lastCall().url, 'http://localhost').pathname, '/api/react/v1/face-match/results/thumbnails')
+  assert.equal(lastCall().init?.method, 'POST')
+  assert.equal(lastCall().init?.cache, 'no-store')
+  assert.deepEqual(bodyOf(lastCall()), { items: [{ kind: 'hit', id: hitTaskId }, { kind: 'hit', id: 'B'.repeat(32) }] })
+  assert.deepEqual(thumbs.map((item) => [item.taskId, item.status, item.imageBase64]), [
+    [hitTaskId, 'ok', 'AQID'],
+    ['../bad', 'denied', null],
+    [hitTaskId, 'ok', 'AQID'],
+    ['B'.repeat(32), 'denied', null],
+  ])
+  const thumbCalls = calls.length
+  assert.deepEqual(await fetchFaceHitThumbnails([]), [])
+  assert.deepEqual((await fetchFaceHitThumbnails(['../x'])).map((item) => item.status), ['denied'])
+  assert.equal(calls.length, thumbCalls, '没有合法编号时不发请求')
+  await assert.rejects(() => fetchFaceHitThumbnails(Array.from({ length: 31 }, (_, i) => `T${i}`)), /BATCH_TOO_LARGE/)
+
+  // 抓拍结果里的命中摘要：自动确认与本人未读（老后端没有这两个字段按 false）
+  assert.deepEqual(
+    [normalizeFaceCaptureResult({ hit: { taskId: 't', autoConfirmed: true, unread: true } }).hit?.autoConfirmed, normalizeFaceCaptureResult({ hit: { taskId: 't', autoConfirmed: true, unread: true } }).hit?.unread],
+    [true, true],
+  )
+  assert.equal(normalizeFaceCaptureResult({ hit: { taskId: 't' } }).hit?.unread, false)
 
   // ───────── 业务错误码保留在 payload 里供页面映射 ─────────
   responseFactory = () => json({ success: false, message: 'x', errorCode: 'FACE_MATCH_NSW_NOTICE_TOO_RECENT' }, 400)

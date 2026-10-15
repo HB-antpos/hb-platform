@@ -150,12 +150,18 @@ INSERT dbo.FaceCaptureImage (ImageId, CaptureId, Kind, PartIndex, Storage, Objec
 SELECT RIGHT(REPLICATE('1', 32), 32), RIGHT(REPLICATE('0', 32) + '5', 32), 0, 1, N'local', N'images/x.jpg', 3, REPLICATE('b', 64), SYSUTCDATETIME();
 INSERT dbo.FaceCaptureImage (ImageId, CaptureId, Kind, PartIndex, Storage, ObjectKey, ByteSize, Sha256, CreatedAtUtc)
 VALUES (REPLICATE('2', 32), REPLICATE('f', 32), 0, 1, N'local', N'images/y.jpg', 3, REPLICATE('b', 64), SYSUTCDATETIME());
+-- 评估行（没有外键）：过期抓拍的两条 + 未过期抓拍 'f' 的一条。
+INSERT dbo.FaceMatchEvaluation (CaptureId, Decision) VALUES (RIGHT(REPLICATE('0', 32) + '7', 32), 3);
+INSERT dbo.FaceMatchEvaluation (CaptureId, Decision) VALUES (RIGHT(REPLICATE('0', 32) + '9', 32), 2);
+INSERT dbo.FaceMatchEvaluation (CaptureId, Decision) VALUES (REPLICATE('f', 32), 3);
 """);
         h.Time.Now = DateTime.UtcNow;   // 真实库里用 SYSUTCDATETIME 造的数据，用真实当前时间作为「现在」
 
         var deleted = await h.Maintenance.CleanupCaptureRecordsAsync(default);
 
         Assert.Equal(1200, deleted);
+        // 评估行没有外键、不级联：随同一批 CaptureId 显式删掉，只剩未过期抓拍的那条。
+        Assert.Equal("1", await server.ScalarAsync("SELECT COUNT(*) FROM dbo.FaceMatchEvaluation"));
         Assert.Equal("1", await server.ScalarAsync("SELECT COUNT(*) FROM dbo.FaceCaptureEvent"));
         Assert.Equal("1", await server.ScalarAsync("SELECT COUNT(*) FROM dbo.FaceCaptureImage"));
         Assert.Equal("1", await server.ScalarAsync("SELECT COUNT(*) FROM dbo.FaceAuditLog WHERE Action = 'capture.retention-cleanup'"));

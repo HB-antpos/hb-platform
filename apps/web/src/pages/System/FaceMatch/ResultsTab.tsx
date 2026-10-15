@@ -1,5 +1,5 @@
 import { PictureOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Checkbox, DatePicker, Input, Select, Space, Tag, Typography, theme } from 'antd'
+import { Alert, Badge, Button, Checkbox, DatePicker, Input, Segmented, Select, Space, Tag, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useMemo, useState } from 'react'
@@ -7,9 +7,9 @@ import { useTranslation } from 'react-i18next'
 
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import { getFaceCameras } from '../../../services/faceCameraService'
-import { getFaceCaptureResults } from '../../../services/faceMatchService'
+import { getFaceCaptureResults, getFaceHitSummary, markFaceHitRead } from '../../../services/faceMatchService'
 import type { FaceCamera } from '../../../types/faceCamera'
-import type { FaceCaptureResult, FaceMatchPage } from '../../../types/faceMatch'
+import type { FaceCaptureResult, FaceHitSummary, FaceMatchPage } from '../../../types/faceMatch'
 import { formatDateTime } from '../FaceCameras/logic'
 import {
   BAND_COLORS,
@@ -25,20 +25,32 @@ import {
   type ResultsFilters,
   type ResultsTimeRange,
 } from './logic'
+import HitsView from './HitsView'
 import ResultDetailDrawer from './ResultDetailDrawer'
 import { NUMERIC_STYLE, NotifyStateCell, Pager, StoreSelect, type FaceMatchTabContext } from './shared'
 import { useRemote } from './useRemote'
 
 const RANGE_FORMAT = 'YYYY-MM-DD HH:mm'
 
+type ResultsView = 'all' | 'hits'
+
+// 未读命中汇总（不带门店 / 时间条件 = 当前登录人在自己门店范围内的全部未读命中通知，口径同 App 红色数字）。
+const loadUnreadSummary = (signal: AbortSignal) => getFaceHitSummary({}, signal)
+
 /**
- * 抓拍与比对页签（FaceCapture.Images.View）：Capture 模式留存的抓拍 + 评估分数 + 名单命中与通知发送情况。
- * 列表里没有任何真实照片（缩略图位置只是占位图标）：点「查看」打开详情抽屉后才按需读取图片，每次读取服务端都写审计。
+ * 抓拍与比对页签（FaceCapture.Images.View），顶部分段切换两个视图：
+ * 1. 全部抓拍：Capture 与 Match 模式留存的抓拍 + 评估分数 + 名单命中与通知发送情况。
+ *    列表里没有任何真实照片（缩略图位置只是占位图标）：点「查看」打开详情抽屉后才按需读取图片，每次读取服务端都写审计。
+ * 2. 名单命中：以命中任务为主表（改版前 Match 期间没有抓拍记录的命中也在），见 HitsView。
  */
 export default function ResultsTab({ context }: { context: FaceMatchTabContext }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { storeOptions, storeOptionsFailed, goToReview, canViewTarget } = context
+  const [view, setView] = useState<ResultsView>('all')
+  const unreadSummary = useRemote<FaceHitSummary>(loadUnreadSummary)
+  const unreadCount = unreadSummary.data?.unread ?? 0
+  const reloadUnread = unreadSummary.reload
   const [filters, setFilters] = useState<ResultsFilters>(() => ({
     storeCode: null,
     cameraId: null,
@@ -61,7 +73,19 @@ export default function ResultsTab({ context }: { context: FaceMatchTabContext }
     () => (signal: AbortSignal) => getFaceCaptureResults(buildResultsQuery(filters, page, PAGE_SIZE), signal),
     [filters, page],
   )
-  const results = useRemote<FaceMatchPage<FaceCaptureResult>>(loader)
+  const results = useRemote<FaceMatchPage<FaceCaptureResult>>(view === 'all' ? loader : null)
+  const items = useMemo(() => results.data?.items ?? [], [results.data])
+
+  // 打开详情：未读的命中顺手标为已读（与 App 打开详情一致），成功后刷新分段上的红色数字；失败静默。
+  const openDetail = useCallback(
+    (record: FaceCaptureResult) => {
+      setTarget(record)
+      if (record.hit?.unread) {
+        markFaceHitRead(record.hit.taskId).then(reloadUnread, () => undefined)
+      }
+    },
+    [reloadUnread],
+  )
 
   // 摄像机下拉：摄像机列表需要摄像机管理权限，拿不到（403 等）时降级成手填摄像机编号。
   const cameraLoader = useCallback((signal: AbortSignal) => getFaceCameras(signal), [])
@@ -178,7 +202,7 @@ export default function ResultsTab({ context }: { context: FaceMatchTabContext }
         width: 80,
         fixed: 'right',
         render: (_: unknown, record) => (
-          <Button type="link" size="small" onClick={() => setTarget(record)}>
+          <Button type="link" size="small" onClick={() => openDetail(record)}>
             {t('faceMatch.results.view')}
           </Button>
         ),
@@ -189,12 +213,41 @@ export default function ResultsTab({ context }: { context: FaceMatchTabContext }
       ...column,
       onCell: (record: FaceCaptureResult) => (record.hit ? { style: { background: token.colorErrorBg } } : {}),
     }))
-  }, [t, token])
+  }, [t, token, openDetail])
+
+  const viewSwitch = (
+    <Segmented<ResultsView>
+      value={view}
+      onChange={setView}
+      options={[
+        { value: 'all', label: t('faceMatch.results.views.all') },
+        {
+          value: 'hits',
+          label: (
+            <Space size={6}>
+              <span>{t('faceMatch.results.views.hits')}</span>
+              {unreadCount > 0 ? <Badge count={unreadCount} size="small" overflowCount={99} title={t('faceMatch.results.views.unreadTitle', { count: unreadCount })} /> : null}
+            </Space>
+          ),
+        },
+      ]}
+    />
+  )
+
+  if (view === 'hits') {
+    return (
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Alert type="info" showIcon message={t('faceMatch.results.intro')} />
+        <HitsView context={context} viewSwitch={viewSwitch} onUnreadChanged={reloadUnread} />
+      </Space>
+    )
+  }
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Alert type="info" showIcon message={t('faceMatch.results.intro')} />
       <Space wrap>
+        {viewSwitch}
         <StoreSelect
           options={storeOptions}
           failed={storeOptionsFailed}
@@ -265,7 +318,7 @@ export default function ResultsTab({ context }: { context: FaceMatchTabContext }
         rowKey="captureId"
         size="small"
         loading={results.loading && !results.data}
-        dataSource={results.data?.items ?? []}
+        dataSource={items}
         columns={columns}
         pagination={false}
         scroll={{ x: 1250 }}

@@ -86,10 +86,12 @@ internal sealed partial class FaceMatchSettings
     /// <summary>账号级致命错误（认证失败、欠费、服务未开通）后暂停调用腾讯云的秒数，避免每条抓拍都去撞同一个错误。</summary>
     public int FatalCooldownSeconds { get; private set; } = 60;
 
-    /// <summary>Match 模式单条报文处理失败（比如数据库暂时不可用）最多尝试次数，超过即丢弃，不让生物数据在本地滞留。</summary>
+    /// <summary>
+    /// 旧 Match「匹配后丢弃」的单条最多尝试次数。2026-10-16 起 Match 走 Capture 入库（重试按 ProcessingMaxAttempts），本项不再使用，仅保留配置兼容。
+    /// </summary>
     public int MatchMaxAttempts { get; private set; } = 3;
 
-    /// <summary>Match 模式报文在本地最长滞留分钟数（以接收时间计），超过且处理失败即丢弃。</summary>
+    /// <summary>旧 Match 报文本地最长滞留分钟数。2026-10-16 起不再使用（Match 与 Capture 同一留存口径），仅保留配置兼容。</summary>
     public int MatchMaxLocalAgeMinutes { get; private set; } = 15;
 
     /// <summary>名单命中任务的人脸图保留天数（设计第 14.3 节为 7 天）。</summary>

@@ -124,6 +124,19 @@ assert(files.viewer.includes('fetchFaceCaptureImage('), '图片只由查看弹�
 for (const name of ['page', 'form', 'secret', 'drawer', 'logic', 'imageLogic'] as const) {
   assert(!files[name].includes('fetchFaceCaptureImage'), `${name} 不得直接读取图片（只能由查看弹框按需读取）`)
 }
+// 抓拍抽屉：图片列在第 2 列；列宽合计不超过 960 抽屉的内容区（约 912），桌面上不出现横向滚动；
+// 顶部常驻最后推送时间，只有本店 Off 时显示黄色提示（Capture / Match 都留存照片，不另提示）。
+{
+  const widths = files.drawer.match(/const COLUMN_WIDTHS = \{([\s\S]*?)\} as const/)?.[1] ?? ''
+  const total = [...widths.matchAll(/:\s*(\d+)/g)].reduce((sum, match) => sum + Number(match[1]), 0)
+  assert(total > 0 && total <= 912, `抓拍抽屉列宽合计 ${total} 必须不超过 912`)
+  assert(files.drawer.includes('TABLE_WIDTH_WITHOUT_IMAGES + COLUMN_WIDTHS.images') && !/scroll=\{\{ x: canViewImages \? \d+/.test(files.drawer), 'scroll.x 由列宽常量算出')
+  const order = ['receivedAtUtc', "key: 'images'", 'cameraEventTime', "dataIndex: 'eventType'", "dataIndex: 'faceCount'", "dataIndex: 'parseStatus'", "dataIndex: 'parseNote'"].map((marker) => files.drawer.indexOf(marker))
+  assert(order.every((index, position) => index >= 0 && (position === 0 || index > order[position - 1])), '列顺序：接收时间、图片、事件时间、类型、人脸、解析状态、备注')
+  assert(files.drawer.includes('formatShortDateTime(value)'), '抽屉时间列去掉年份')
+  assert(files.drawer.includes("result?.storeMode === 'off'") && !files.drawer.includes("storeMode === 'match'"), '只有 Off 显示模式提示')
+  assert(files.drawer.includes("t('faceCameras.captures.lastSeen'"), '顶部常驻最后推送时间')
+}
 // 入口：列表只在后端返回 canViewImages 且该行有图片时才出现入口，点击才挂载弹框
 assert(files.drawer.includes('getRowImageAction(canViewImages, record.images)'), '行内入口按 canViewImages 与该行图片元数据判定')
 assert(files.drawer.includes('const canViewImages = result?.canViewImages === true'), '入口开关来自后端返回的 canViewImages')

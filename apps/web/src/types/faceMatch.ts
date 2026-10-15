@@ -387,6 +387,10 @@ export interface FaceCaptureResultHit {
   notifiedAtUtc: string | null
   notifyRecipientCount: number
   notifyReadCount: number
+  /** 系统按门店阈值自动确认（没有人判断过）；老后端没有这个字段，按 false。 */
+  autoConfirmed: boolean
+  /** 当前登录人自己的那条命中通知是否未读（口径同 App 红色数字）；没有通知行 = false。 */
+  unread: boolean
 }
 
 /**
@@ -409,6 +413,70 @@ export interface FaceCaptureResult {
   faceImageId: string | null
   sceneImageId: string | null
   hit: FaceCaptureResultHit | null
+}
+
+/** 「名单命中」视图的状态筛选（与后端 FaceHitStatuses 一致）。 */
+export type FaceHitStatus = 'all' | 'unread' | 'pending' | 'autoConfirmed' | 'confirmed' | 'dismissed'
+
+/** GET /results/hits 的查询条件：时间按命中任务的抓拍时间（UTC），fromUtc 含、toUtc 不含；pageSize ≤ 50。 */
+export interface FaceHitResultQuery {
+  storeCode?: string
+  hitStatus?: FaceHitStatus
+  fromUtc?: string
+  toUtc?: string
+  page: number
+  pageSize: number
+}
+
+/**
+ * 命中流里的一条（以命中任务为主表，改版前 Match 期间没有抓拍记录的命中也在）。
+ * 不含姓名、事件细节、对象键与图片；分数是相似度，不是「同一个人的概率」。
+ */
+export interface FaceHitResult {
+  taskId: string
+  /** 对应的抓拍记录（同摄像机 + 同时间）；没有记录时为 null。 */
+  captureId: string | null
+  storeCode: string
+  storeName: string | null
+  cameraId: string
+  capturedAtUtc: string
+  scorePercent: number
+  band: FaceUnwelcomeBand | null
+  reviewStatus: number
+  reviewStatusName: string
+  autoConfirmed: boolean
+  imageAvailable: boolean
+  unread: boolean
+  /** 当前登录人的那条命中通知编号；不是这条命中的收件人时为 null（「我的通知」显示 —）。 */
+  notificationId: string | null
+  notifyState: string
+  notifiedAtUtc: string | null
+  notifyRecipientCount: number
+  notifyReadCount: number
+  /** 后端判定：持有复核权限 + 门店范围内 + 待复核 + 命中图还在。 */
+  canReview: boolean
+  decision: string | null
+  staffScorePercent: number | null
+  visitScorePercent: number | null
+  faceCount: number | null
+}
+
+/** 命中流各状态条数：total = pending + autoConfirmed + confirmed + dismissed；unread 与之正交。 */
+export interface FaceHitSummary {
+  total: number
+  unread: number
+  pending: number
+  autoConfirmed: number
+  confirmed: number
+  dismissed: number
+}
+
+/** 命中图缩略图（POST /results/thumbnails 的一项，kind 固定为 hit）。 */
+export interface FaceHitThumbnail {
+  taskId: string
+  /** ok / none / gone / denied；只有 ok 时 imageBase64 有值。 */
+  status: string
+  imageBase64: string | null
 }
 
 /** 命中通知的一位收件人：只有展示名与已读状态，没有账号标识（用户编号、用户名、邮箱）。 */

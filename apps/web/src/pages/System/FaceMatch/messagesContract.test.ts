@@ -307,12 +307,15 @@ for (const { name, text } of sources) {
   for (const [what, text] of [['页面说明', enResults.intro], ['抽屉比对说明', enDrawer.scoreNote], ['名单命中旁', enDrawer.notProbability]] as const) {
     if (!/not the probability of being the same person/.test(String(text))) throw new Error(`英文${what}必须写明 not the probability of being the same person`)
   }
-  // 页面说明要讲清：只显示 Capture 模式留存的抓拍，Match 模式处理完即删
-  if (!String(zhResults.intro).includes('Capture') || !String(zhResults.intro).includes('Match') || !String(zhResults.intro).includes('处理完即删除')) {
-    throw new Error('中文页面说明必须写明 Capture 模式留存、Match 模式处理完即删除')
+  // 页面说明要讲清：Capture 与 Match 模式都留存抓拍照片（保留 7 天），名单命中另见「名单命中」视图（用词不出现「黑名单」）
+  if (!String(zhResults.intro).includes('Capture') || !String(zhResults.intro).includes('Match') || !String(zhResults.intro).includes('都会留存抓拍照片') || !String(zhResults.intro).includes('7 天')) {
+    throw new Error('中文页面说明必须写明 Capture 与 Match 模式都会留存抓拍照片（保留 7 天）')
   }
-  if (!/Capture mode/.test(String(enResults.intro)) || !/Match mode/.test(String(enResults.intro)) || !/deleted right after processing/.test(String(enResults.intro))) {
-    throw new Error('英文页面说明必须写明 Capture mode 留存、Match mode 处理完即删除')
+  if (!/Capture and Match mode keep capture photos/.test(String(enResults.intro)) || !/7 days/.test(String(enResults.intro))) {
+    throw new Error('英文页面说明必须写明 Capture and Match mode keep capture photos（7 days）')
+  }
+  if (String(zhResults.intro).includes('处理完即删除') || /deleted right after processing/.test(String(enResults.intro))) {
+    throw new Error('页面说明不能再写「Match 处理完即删除」（Match 也留存照片）')
   }
   // 照片是生物识别信息：列表脚注与抽屉提示都要写明每次查看会被记录
   if (!String(zhResults.footnote).includes('生物识别信息') || !String(zhResults.footnote).includes('被记录')) throw new Error('中文列表脚注必须写明生物识别信息与查看会被记录')

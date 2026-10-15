@@ -265,7 +265,14 @@ export function formatDateTime(value: string | null | undefined): string {
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
-/** 解析状态的展示元数据：颜色（不只靠颜色，页面同时显示中英文标签）。 */
+/** 抓拍抽屉里的短时间（同页都在近 7 天内，省掉年份以免撑宽列）：MM-DD HH:mm:ss，本地时区。 */
+export function formatShortDateTime(value: string | null | undefined): string {
+  if (!value) return '-'
+  const parsed = dayjs(value)
+  return parsed.isValid() ? parsed.format('MM-DD HH:mm:ss') : '-'
+}
+
+/** 解析状态的展示元数据：颜色（不只靠颜色，页面同时显示文字标签）。 */
 export const PARSE_STATUS_COLORS: Record<FaceCaptureParseStatus, string> = {
   0: 'green',
   1: 'orange',

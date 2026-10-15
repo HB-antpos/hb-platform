@@ -7,7 +7,8 @@ using static BlazorApp.FaceIngest.Tests.Infrastructure.MatchSamples;
 namespace BlazorApp.FaceIngest.Tests;
 
 /// <summary>
-/// 处理器三种模式（Off / Capture / Match）的行为与数据残留：Match 下不得留下本地文件、COS 对象（命中任务除外）、事件行。
+/// 处理器三种模式（Off / Capture / Match）的行为与数据残留。2026-10-16 起 Match 与 Capture 一样留存照片与记录（存图、事件行 + 图片行、
+/// 原始报文与 .processed 标记），入库成功后另做计数 / 访客去重 / 名单比对并写评估行；Off 仍不留任何东西。
 /// 时间相关用例（营业日、DeleteAfterUtc）与进程时区无关，应在 TZ=UTC 与 TZ=America/Los_Angeles 下各跑一遍。
 /// </summary>
 public sealed class FaceMatchProcessingTests
@@ -34,6 +35,8 @@ public sealed class FaceMatchProcessingTests
         Assert.Empty(harness.Engine.Searches);
         Assert.Equal(0, harness.Http.RequestCount);
         Assert.Empty(harness.Store.Buckets);
+        Assert.Equal(0, harness.Writer.WriteCalls);
+        Assert.Empty(harness.Store.Evaluations);
         // 摄像机最近推送时间仍照常更新（不涉及生物信息）。
         Assert.Single(harness.Writer.Touches);
         // 容量统计同步扣减。
@@ -267,10 +270,10 @@ public sealed class FaceMatchProcessingTests
     // ------------------------------------------------------------------ Match：数据残留
 
     [Fact]
-    public async Task Match_处理完无论结果_本地无任何残留_不上传COS_不写事件行()
+    public async Task Match_与Capture一样留存_存图写事件行和图片行_写processed_另累加计数与评估()
     {
         var staffFace = Face(1);
-        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)]);
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)], configure: s => s["FaceMatch:StaffSuppressSeconds"] = "0");
         harness.Engine.Enroll(FaceGroups.Staff, staffFace);
         await harness.PostAsync(Capture(staffFace, 1));
         await harness.PostAsync(Capture(Face(2), 2));
@@ -280,25 +283,31 @@ public sealed class FaceMatchProcessingTests
         var summary = await harness.RunAsync();
 
         Assert.Equal(new ProcessingSummary(4, 4, 0, 0), summary);
-        Assert.Empty(harness.LeftoverFiles());
-        Assert.Empty(harness.Writer.Events);
-        Assert.Empty(harness.Writer.Images);
-        Assert.Empty(harness.Images.Calls);
+        AssertStoredLikeCapture(harness);
+        // 与 Capture 同一留存：每条一行事件（含解析失败的那条），三条人脸抓拍各两张图（人脸 + 背景），原始报文按 Capture 配置保存。
+        Assert.Equal(4, harness.Writer.Events.Count);
+        Assert.Equal(6, harness.Writer.Images.Count);
+        Assert.Equal(6, harness.Images.Calls.Count(call => call.StartsWith("image:", StringComparison.Ordinal)));
+        Assert.Equal(4, harness.Images.Calls.Count(call => call.StartsWith("raw:", StringComparison.Ordinal)));
         Assert.Empty(harness.Hits.Saved);
-        Assert.Equal(0, harness.Factory.GetService<RawCaptureStore>().StoredFileCount);
-        Assert.Equal(0, harness.Factory.GetService<RawCaptureStore>().StoredBytes);
+        // 另外照旧累加计数，并给三条人脸抓拍各写一行评估（解析失败、没有人脸的那条没有判定）。
+        var total = harness.Store.Total();
+        Assert.Equal((3, 1, 1, 1), (total.Capture, total.StaffMatch, total.UniqueVisitor, total.Repeat));
+        Assert.Equal(3, harness.Store.Evaluations.Count);
         Assert.Equal(new ProcessingSummary(0, 0, 0, 0), await harness.RunAsync());
     }
 
     [Fact]
-    public async Task Match_没有人脸图的报文只丢弃不计数()
+    public async Task Match_没有人脸图的报文照常入库_不计数_不写评估行()
     {
         using var harness = await MatchHarness.CreateAsync([Profile(staff: true)]);
         await harness.PostAsync(HikvisionSamples.XmlVmdMultipart());
 
         await harness.RunAsync();
 
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
+        Assert.Single(harness.Writer.Events);
+        Assert.Empty(harness.Store.Evaluations);
         Assert.Empty(harness.Store.Buckets);
         Assert.Empty(harness.Engine.Searches);
     }
@@ -344,7 +353,7 @@ public sealed class FaceMatchProcessingTests
         Assert.Equal(1, harness.Store.VisitorCounts[BrisbaneGroup]);
         // 计数落在抓拍接收时刻所在的 UTC 整点桶。
         Assert.Contains(harness.Store.Buckets.Keys, key => key.StoreCode == "S1001" && key.Bucket == new DateTime(2026, 10, 12, 1, 0, 0, DateTimeKind.Utc));
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Fact]
@@ -379,7 +388,7 @@ public sealed class FaceMatchProcessingTests
         Assert.Empty(harness.Engine.Searches);
         Assert.Equal(0, harness.Http.RequestCount);
         Assert.Equal(1, harness.Store.Total().Capture);
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Fact]
@@ -435,13 +444,15 @@ public sealed class FaceMatchProcessingTests
         Assert.Single(harness.Engine.Searches);
         Assert.Equal(1, harness.Store.Total().Capture);
         Assert.Equal(1, harness.Store.Total().UniqueVisitor);
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
 
-        // 窗口（默认 300 秒）过后同样的请求体视为新抓拍。
+        // 2026-10-16 起 Match 先按 Capture 入库：入库层「同摄像机同哈希 24 小时」判成重复的报文不再交给流水线，
+        // 所以流水线 300 秒窗口之外、24 小时之内的同一请求体也不会再计数。
         await harness.PostAsync(body, Now.AddSeconds(400));
         harness.Factory.Time.SetUtcNow(Now.AddSeconds(400));
         await harness.RunAsync();
-        Assert.Equal(2, harness.Store.Total().Capture);
+        Assert.Equal(1, harness.Store.Total().Capture);
+        Assert.Single(harness.Engine.Searches);
     }
 
     // ------------------------------------------------------------------ Match：串行
@@ -509,7 +520,7 @@ public sealed class FaceMatchProcessingTests
         Assert.Empty(harness.Engine.CreatedGroups);
         var total = harness.Store.Total();
         Assert.Equal((1, 1), (total.Capture, total.LowQuality));
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Fact]
@@ -584,8 +595,10 @@ public sealed class FaceMatchProcessingTests
         var total = harness.Store.Total();
         Assert.Equal((1, 1, 0, 0), (total.Capture, total.ApiFailure, total.UniqueVisitor, total.StaffMatch));
         Assert.Empty(harness.Engine.CreatedPersons);
-        Assert.Empty(harness.LeftoverFiles());
-        Assert.Empty(harness.Images.Calls);
+        // 调用失败只影响比对：照片与事件行照常留存，没有判定所以不写评估行。
+        AssertStoredLikeCapture(harness);
+        Assert.Single(harness.Writer.Events);
+        Assert.Empty(harness.Store.Evaluations);
         Assert.Contains(harness.Factory.LogEntries, log => log.Level == LogLevel.Warning && log.Message.Contains($"code={code}", StringComparison.Ordinal));
         AssertLogsClean(harness);
     }
@@ -628,7 +641,7 @@ public sealed class FaceMatchProcessingTests
         await harness.RunAsync();
         Assert.Single(harness.Engine.Searches);
         Assert.Equal(2, harness.Store.Total().ApiFailure);
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
 
         // 冷却结束后恢复调用。
         await harness.PostAsync(Capture(Face(4), 3), Now.AddSeconds(70));
@@ -651,7 +664,7 @@ public sealed class FaceMatchProcessingTests
 
         Assert.Equal(1, harness.Http.RequestCount);
         Assert.Equal(1, harness.Store.Total().ApiFailure);
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Fact]
@@ -700,56 +713,267 @@ public sealed class FaceMatchProcessingTests
         Assert.Single(harness.Engine.Searches);
     }
 
-    // ------------------------------------------------------------------ Match：数据库失败的有限重试
+    // ------------------------------------------------------------------ Match：失败语义（2026-10-16 起入库与比对分开）
 
     [Fact]
-    public async Task 计数写库短暂失败_按退避重试一次后成功_只计一次()
+    public async Task 计数写库失败_入库结果仍成功_不重试_只记节流日志_该条少计()
     {
         using var harness = await MatchHarness.CreateAsync([Profile(staff: true)]);
-        harness.Store.ApplyFailuresRemaining = 1;
+        harness.Store.ApplyFailuresRemaining = int.MaxValue;
+        await harness.PostAsync(Capture(Face(2), 1));
+        await harness.PostAsync(Capture(Face(3), 2), Now.AddSeconds(1));
+
+        Assert.Equal(new ProcessingSummary(2, 2, 0, 0), await harness.RunAsync());
+
+        AssertStoredLikeCapture(harness);
+        Assert.Equal(2, harness.Writer.Events.Count);
+        Assert.Equal(4, harness.Writer.Images.Count);
+        Assert.Empty(harness.Store.Buckets);
+        // 流水线失败就没有判定，评估行也不写；两条同类失败只记一条 Warning（节流）。
+        Assert.Empty(harness.Store.Evaluations);
+        Assert.Single(harness.Factory.LogEntries, log => log.Level == LogLevel.Warning && log.Message.Contains("failed and was skipped; the capture is stored", StringComparison.Ordinal));
+        // 不重试整条：下一轮没有候选，也不会重复存图。
+        harness.Factory.Time.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(new ProcessingSummary(0, 0, 0, 0), await harness.RunAsync());
+        Assert.Equal(2, harness.Store.ApplyCalls);
+        Assert.Equal(4, harness.Images.Calls.Count(call => call.StartsWith("image:", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task 评估行写失败_计数照加_入库结果仍成功()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)]);
+        harness.Store.EvaluationFailuresRemaining = 1;
+        await harness.PostAsync(Capture(Face(2)));
+
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await harness.RunAsync());
+
+        Assert.Equal(1, harness.Store.Total().UniqueVisitor);
+        Assert.Empty(harness.Store.Evaluations);
+        Assert.Contains(harness.Factory.LogEntries, log => log.Level == LogLevel.Warning && log.Message.Contains("evaluation row in Match mode failed", StringComparison.Ordinal));
+        AssertStoredLikeCapture(harness);
+    }
+
+    [Fact]
+    public async Task 入库失败按Capture退避重试_失败期间不比对不计数_成功后只计一次()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true)]);
+        harness.Writer.FailuresRemaining = 1;
         await harness.PostAsync(Capture(Face(2)));
 
         Assert.Equal(new ProcessingSummary(1, 0, 1, 0), await harness.RunAsync());
         var basePath = Assert.Single(P1TestSupport.CaptureBasePaths(harness.Factory));
         Assert.True(File.Exists(basePath + ".retry"));
+        Assert.Empty(harness.Engine.Searches);
+        Assert.Empty(harness.Store.Buckets);
 
         harness.Factory.Time.Advance(TimeSpan.FromMinutes(1));
         Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await harness.RunAsync());
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
+        Assert.Single(harness.Engine.Searches);
         Assert.Equal(1, harness.Store.Total().Capture);
     }
 
     [Fact]
-    public async Task 计数写库一直失败_达到次数上限即丢弃_不让生物数据滞留()
+    public async Task 入库一直失败_按Capture写failed并保留原始报文_从不比对()
     {
-        using var harness = await MatchHarness.CreateAsync([Profile(staff: true)]);
-        harness.Store.ApplyFailuresRemaining = int.MaxValue;
+        using var harness = await MatchHarness.CreateAsync(
+            [Profile(staff: true)],
+            configure: s => s["FaceIngest:ProcessingMaxAttempts"] = "2");
+        harness.Writer.FailuresRemaining = int.MaxValue;
         await harness.PostAsync(Capture(Face(2)));
 
-        Assert.Equal(1, (await harness.RunAsync()).Retried);
-        harness.Factory.Time.Advance(TimeSpan.FromMinutes(2));
-        Assert.Equal(1, (await harness.RunAsync()).Retried);
-        harness.Factory.Time.Advance(TimeSpan.FromMinutes(2));
+        await harness.RunAsync();
+        harness.Factory.Time.Advance(TimeSpan.FromMinutes(5));
         var last = await harness.RunAsync();
 
-        Assert.Equal(new ProcessingSummary(1, 0, 0, 1), last);
-        Assert.Empty(harness.LeftoverFiles());
-        Assert.Contains(harness.Factory.LogEntries, log => log.Level == LogLevel.Error && log.Message.Contains("dropped after repeated failures", StringComparison.Ordinal));
-        Assert.Equal(new ProcessingSummary(0, 0, 0, 0), await harness.RunAsync());
+        Assert.Equal(1, last.Failed);
+        var basePath = Assert.Single(P1TestSupport.CaptureBasePaths(harness.Factory));
+        Assert.True(File.Exists(basePath + ".failed"));
+        Assert.True(File.Exists(basePath + ".bin"));
+        Assert.Empty(harness.Engine.Searches);
+        Assert.Empty(harness.Store.Buckets);
     }
 
     [Fact]
-    public async Task 本地滞留超过上限且处理失败_立即丢弃()
+    public async Task 已入库的报文被重处理_事件行已存在_不重复计数不重复搜索()
     {
-        using var harness = await MatchHarness.CreateAsync([Profile(staff: true)], configure: s => s["FaceMatch:MatchMaxLocalAgeMinutes"] = "15");
-        harness.Store.ApplyFailuresRemaining = int.MaxValue;
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)]);
         await harness.PostAsync(Capture(Face(2)));
-        harness.Factory.Time.Advance(TimeSpan.FromMinutes(16));
+        await harness.RunAsync();
+        // 模拟「入库成功但 .processed 没写成」：删掉标记让它被重处理。
+        var basePath = Assert.Single(P1TestSupport.CaptureBasePaths(harness.Factory));
+        File.Delete(basePath + ".processed");
 
-        var summary = await harness.RunAsync();
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await harness.RunAsync());
 
-        Assert.Equal(new ProcessingSummary(1, 0, 0, 1), summary);
-        Assert.Empty(harness.LeftoverFiles());
+        Assert.Single(harness.Engine.Searches);
+        Assert.Equal((1, 1), (harness.Store.Total().Capture, harness.Store.Total().UniqueVisitor));
+        Assert.Single(harness.Writer.Events);
+        Assert.Single(harness.Store.Evaluations);
+    }
+
+    // ------------------------------------------------------------------ Match：记录内容（2026-10-16）
+
+    [Fact]
+    public async Task Match记录_事件行与图片行和Capture对同一请求体逐字段一致_另有评估行()
+    {
+        var body = Capture(Face(2), 1);
+        using var match = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)]);
+        using var capture = await MatchHarness.CreateAsync([Profile(mode: 1, allowedSubjects: "仅内部测试员工")]);
+        var at = Now.AddTicks(1_234_567);
+        await match.PostAsync(body, at);
+        await capture.PostAsync(body, at);
+
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await match.RunAsync());
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await capture.RunAsync());
+
+        var matchEvent = Assert.Single(match.Writer.Events).Value.Event;
+        var captureEvent = Assert.Single(capture.Writer.Events).Value.Event;
+        // 只有抓拍编号与写入时间不同（两个宿主各自生成）；存储名、对象键口径、时间、哈希、解析结果都相同。
+        Assert.Equal(captureEvent with { CaptureId = "x", CreatedAtUtc = default }, matchEvent with { CaptureId = "x", CreatedAtUtc = default });
+        Assert.Equal(at.UtcDateTime, matchEvent.ReceivedAtUtc);
+        static object Normalize(CaptureImageRecord image) => image with
+        {
+            ImageId = "x",
+            CaptureId = "x",
+            ObjectKey = image.ObjectKey.Replace(image.CaptureId, "x", StringComparison.Ordinal),
+            CreatedAtUtc = default,
+        };
+        Assert.Equal(
+            capture.Writer.Images.Values.OrderBy(i => i.PartIndex).Select(Normalize),
+            match.Writer.Images.Values.OrderBy(i => i.PartIndex).Select(Normalize));
+        Assert.Equal(2, match.Writer.Images.Count);
+        Assert.Equal(capture.Images.Calls.Count, match.Images.Calls.Count);
+
+        // Match 多出来的：计数与评估行（Capture 没开评估，两者都没有）。
+        var evaluation = Assert.Single(match.Store.Evaluations);
+        Assert.Equal(matchEvent.CaptureId, evaluation.CaptureId);
+        Assert.Equal(EvaluationDecision.NewVisitor, evaluation.Decision);
+        Assert.Equal(1, match.Store.Total().UniqueVisitor);
+        Assert.Empty(capture.Store.Evaluations);
+        Assert.Empty(capture.Store.Buckets);
+        // 两边本地都只剩同样的留存文件（.json / .bin / .processed）。
+        AssertStoredLikeCapture(match);
+        AssertStoredLikeCapture(capture);
+    }
+
+    [Fact]
+    public async Task Match记录_判定与分数_员工_新访客_回头客_质量不足_调用失败不写评估行()
+    {
+        var staffFace = Face(1);
+        var visitorFace = Face(2);
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)], configure: s => s["FaceMatch:StaffSuppressSeconds"] = "0");
+        harness.Engine.Enroll(FaceGroups.Staff, staffFace);
+        await harness.PostAsync(Capture(staffFace, 1));
+        await harness.PostAsync(Capture(visitorFace, 2), Now.AddSeconds(10));
+        await harness.PostAsync(Capture(visitorFace, 3), Now.AddSeconds(20));
+        await harness.PostAsync(Capture(Face(3, 60, 60), 4), Now.AddSeconds(30));
+        harness.Factory.Time.SetUtcNow(Now.AddSeconds(40));
+        await harness.RunAsync();
+        // 第五条：账号级错误（不重试），没有判定。
+        harness.Engine.SearchFailures.Enqueue(new FaceMatchApiException(FaceMatchErrorKind.AccountFatal, "AuthFailure.SignatureFailure", "SearchFacesReturnsByGroup"));
+        await harness.PostAsync(Capture(Face(4), 5), Now.AddSeconds(50));
+        await harness.RunAsync();
+
+        var events = harness.Writer.Events.Values.Select(v => v.Event).OrderBy(e => e.ReceivedAtUtc).ToList();
+        Assert.Equal(5, events.Count);
+        EvaluationRecord? EvalOf(int i) => harness.Store.Evaluations.SingleOrDefault(e => e.CaptureId == events[i].CaptureId);
+
+        Assert.Equal(new EvaluationRecord(events[0].CaptureId, 99m, null, EvaluationDecision.Staff), EvalOf(0));
+        // 新访客：Match 的搜索带最低阈值，没过阈值的候选不会返回，所以分数为空（与 Capture 评估不带阈值不同）。
+        Assert.Equal(new EvaluationRecord(events[1].CaptureId, null, null, EvaluationDecision.NewVisitor), EvalOf(1));
+        Assert.Equal(new EvaluationRecord(events[2].CaptureId, null, 99m, EvaluationDecision.RepeatVisitor), EvalOf(2));
+        Assert.Equal(new EvaluationRecord(events[3].CaptureId, null, null, EvaluationDecision.LowQuality), EvalOf(3));
+        Assert.Null(EvalOf(4));
+        var total = harness.Store.Total();
+        Assert.Equal((5, 1, 1, 1, 1, 1), (total.Capture, total.StaffMatch, total.UniqueVisitor, total.Repeat, total.LowQuality, total.ApiFailure));
+    }
+
+    [Fact]
+    public async Task Match记录_多张人脸按第一张判定_计数仍按每张累加()
+    {
+        var staffFace = Face(1);
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)]);
+        harness.Engine.Enroll(FaceGroups.Staff, staffFace);
+        var json = Encoding.UTF8.GetBytes("""
+            {"eventType":"faceCapture","eventState":"active","dateTime":"2026-10-12T12:00:00+11:00","channelID":"1",
+             "faceCapture":[{"faces":[{"faceId":"A1","contentID":"facePicture1"},{"faceId":"A2","contentID":"facePicture2"}]}]}
+            """);
+        var body = HikvisionSamples.BuildMultipart(
+            "boundary",
+            "\r\n",
+            new HikvisionSamples.SamplePart("Content-Disposition: form-data; name=\"faceCapture\"\nContent-Type: application/json", json),
+            new HikvisionSamples.SamplePart("Content-Disposition: form-data; name=\"facePicture1\"; filename=\"facePicture1.jpg\"\nContent-Type: image/jpeg", Face(2)),
+            new HikvisionSamples.SamplePart("Content-Disposition: form-data; name=\"facePicture2\"; filename=\"facePicture2.jpg\"\nContent-Type: image/jpeg", staffFace));
+        await harness.PostAsync(body);
+
+        await harness.RunAsync();
+
+        var total = harness.Store.Total();
+        Assert.Equal((2, 1, 1), (total.Capture, total.UniqueVisitor, total.StaffMatch));
+        Assert.Equal(2, Assert.Single(harness.Writer.Events).Value.Event.FaceCount);
+        // 第一张是新访客；第二张的员工命中只进计数，不覆盖这条抓拍的判定（与 Capture 评估只看第一张同一口径）。
+        Assert.Equal(EvaluationDecision.NewVisitor, Assert.Single(harness.Store.Evaluations).Decision);
+    }
+
+    [Fact]
+    public async Task Match重复报文_每条都按Capture入库并标成重复_只比对计数一次_只写一行评估()
+    {
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true)]);
+        var body = Capture(Face(2), 1);
+        await harness.PostAsync(body);
+        await harness.PostAsync(body, Now.AddSeconds(5));
+        await harness.PostAsync(body, Now.AddSeconds(10));
+
+        await harness.RunAsync();
+
+        Assert.Equal((1, 1), (harness.Store.Total().Capture, harness.Store.Total().UniqueVisitor));
+        Assert.Single(harness.Engine.Searches);
+        var rows = harness.Writer.Events.Values.OrderBy(v => v.Event.ReceivedAtUtc).ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.Null(rows[0].DuplicateOf);
+        Assert.All(rows.Skip(1), row => Assert.Equal(rows[0].Event.CaptureId, row.DuplicateOf));
+        Assert.Equal(rows[0].Event.CaptureId, Assert.Single(harness.Store.Evaluations).CaptureId);
+        // 存图口径与 Capture 相同：入库层在写事件行时才判出重复，所以每条重复报文的图仍各存一份。
+        Assert.Equal(6, harness.Writer.Images.Count);
+        AssertStoredLikeCapture(harness);
+    }
+
+    [Fact]
+    public async Task Match记录_名单命中任务时间与事件ReceivedAtUtc完全相同_摄像机相同()
+    {
+        var listedFace = Face(7);
+        using var harness = await MatchHarness.CreateAsync([Profile(staff: true, dedup: true, unwelcome: true)]);
+        var personId = harness.Engine.Enroll(FaceGroups.Unwelcome, listedFace);
+        harness.Store.Entries[personId] = new UnwelcomeEntryInfo(new string('e', 32), null, Now.UtcDateTime.AddDays(30));
+        // 带亚毫秒的接收时间：两边必须来自同一个值，主 API 才能按「摄像机 + 完全相同时间」关联上。
+        await harness.PostAsync(Capture(listedFace, 1), Now.AddTicks(7_654_321));
+
+        await harness.RunAsync();
+
+        var task = Assert.Single(harness.Store.Tasks);
+        var matchEvent = Assert.Single(harness.Writer.Events).Value.Event;
+        Assert.Equal(task.CapturedAtUtc.Ticks, matchEvent.ReceivedAtUtc.Ticks);
+        Assert.Equal(task.CameraId, matchEvent.CameraId);
+        Assert.Equal(EvaluationDecision.NewVisitor, Assert.Single(harness.Store.Evaluations).Decision);
+    }
+
+    [Fact]
+    public async Task Match下不再另做Capture的评估与名单检查_每条只搜一次_只建一个任务()
+    {
+        var listedFace = Face(7);
+        using var harness = await MatchHarness.CreateAsync([Profile(evaluate: true, staff: true, unwelcome: true, allowedSubjects: "仅内部测试员工")]);
+        var personId = harness.Engine.Enroll(FaceGroups.Unwelcome, listedFace);
+        harness.Store.Entries[personId] = new UnwelcomeEntryInfo(new string('e', 32), null, Now.UtcDateTime.AddDays(30));
+        await harness.PostAsync(Capture(listedFace, 1));
+
+        await harness.RunAsync();
+
+        Assert.Single(harness.Engine.Searches);
+        Assert.Single(harness.Store.Tasks);
+        Assert.Single(harness.Hits.Saved);
+        Assert.Single(harness.Store.Evaluations);
     }
 
     [Fact]
@@ -799,12 +1023,16 @@ public sealed class FaceMatchProcessingTests
         Assert.Equal(3, search.GroupIds.Count);
         Assert.Contains(FaceGroups.Unwelcome, search.GroupIds);
         Assert.Equal(1, harness.Store.Total().UniqueVisitor);
-        Assert.Empty(harness.LeftoverFiles());
-        Assert.Empty(harness.Images.Calls);
+        AssertStoredLikeCapture(harness);
+        // 原图照 Capture 留存，命中图另存在 unwelcome-hits 前缀（复核流程用）。
+        Assert.Equal(2, harness.Images.Calls.Count(call => call.StartsWith("image:", StringComparison.Ordinal)));
+        var matchEvent = Assert.Single(harness.Writer.Events).Value.Event;
+        Assert.Equal(task.CapturedAtUtc, matchEvent.ReceivedAtUtc);
+        Assert.Equal(task.CameraId, matchEvent.CameraId);
     }
 
     [Fact]
-    public async Task 名单命中重试幂等_同一抓拍的任务编号确定()
+    public async Task 名单命中后计数写失败_任务已建_不重试也不重复存命中图()
     {
         var listedFace = Face(7);
         using var harness = await MatchHarness.CreateAsync([Profile(staff: true, unwelcome: true)]);
@@ -813,14 +1041,14 @@ public sealed class FaceMatchProcessingTests
         harness.Store.ApplyFailuresRemaining = 1;
         await harness.PostAsync(Capture(listedFace, 1));
 
-        await harness.RunAsync();
+        Assert.Equal(new ProcessingSummary(1, 1, 0, 0), await harness.RunAsync());
         harness.Factory.Time.Advance(TimeSpan.FromMinutes(1));
-        await harness.RunAsync();
+        Assert.Equal(new ProcessingSummary(0, 0, 0, 0), await harness.RunAsync());
 
-        // 重试时命中图重存一次（同一个键，覆盖写），任务只有一条。
+        // 任务在写计数之前已建好：计数写失败只少计这一条，不重试整条，所以命中图只存一次、任务只有一条。
         Assert.Single(harness.Store.Tasks);
-        Assert.Equal(2, harness.Hits.Saved.Count);
-        Assert.Single(harness.Hits.Saved.Select(saved => saved.ObjectKey).Distinct());
+        Assert.Single(harness.Hits.Saved);
+        Assert.Empty(harness.Store.Buckets);
     }
 
     [Fact]
@@ -840,7 +1068,7 @@ public sealed class FaceMatchProcessingTests
         Assert.Empty(harness.Hits.Saved);
         Assert.Single(harness.Engine.Searches);
         Assert.Equal(1, harness.Store.Total().Capture);
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Theory]
@@ -866,7 +1094,7 @@ public sealed class FaceMatchProcessingTests
 
         Assert.Empty(harness.Store.Tasks);
         Assert.Empty(harness.Hits.Saved);
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Fact]
@@ -964,7 +1192,7 @@ public sealed class FaceMatchProcessingTests
         Assert.Empty(harness.Store.VisitGroups);
         var total = harness.Store.Total();
         Assert.Equal((1, 0, 0), (total.Capture, total.UniqueVisitor, total.Repeat));
-        Assert.Empty(harness.LeftoverFiles());
+        AssertStoredLikeCapture(harness);
     }
 
     [Fact]
@@ -1009,6 +1237,21 @@ public sealed class FaceMatchProcessingTests
         Assert.DoesNotContain(listedPerson, health, StringComparison.Ordinal);
         // 日志里应当看得到正常的结果枚举与计数。
         Assert.Contains(harness.Factory.LogEntries, log => log.Message.Contains("mode=Match", StringComparison.Ordinal) && log.Message.Contains("unwelcomeTasks=1", StringComparison.Ordinal));
+    }
+
+    /// <summary>与 Capture 同一留存：每条报文都还在（.json + .bin）且已写 .processed，没有 .retry / .failed。</summary>
+    private static void AssertStoredLikeCapture(MatchHarness harness)
+    {
+        var basePaths = P1TestSupport.CaptureBasePaths(harness.Factory).ToList();
+        Assert.NotEmpty(basePaths);
+        foreach (var basePath in basePaths)
+        {
+            Assert.True(File.Exists(basePath + ".json"), "metadata kept");
+            Assert.True(File.Exists(basePath + ".bin"), "raw body kept");
+            Assert.True(File.Exists(basePath + ".processed"), "processed marker written");
+            Assert.False(File.Exists(basePath + ".retry"));
+            Assert.False(File.Exists(basePath + ".failed"));
+        }
     }
 
     private static void AssertLogsClean(MatchHarness harness, params string[] extraSecrets)

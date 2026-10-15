@@ -67,6 +67,15 @@ public sealed class FaceCameraAdminSqlServerTests
         Assert.True(page.HasMore);
         Assert.Equal(TimeSpan.FromHours(10), page.Items[0].CameraEventTime!.Value.Offset);
         Assert.True(page.Items[1].IsDuplicate);
+        Assert.Null(page.StoreMode);                                                     // 还没有档案行
+        Assert.Equal(Now.AddMinutes(-9), page.LastSeenAtUtc);
+
+        // 档案 Mode=2（Match）：接口按真实表读出本店当前模式。
+        await ExecuteAsync(database, "INSERT INTO dbo.FaceStoreProfile (StoreCode, Mode) VALUES ('1013', 2)");
+        var matchPage = await service.ListCapturesAsync("cam-2", 1, 20, includeImages: true);
+        Assert.Equal("match", matchPage.StoreMode);
+        Assert.Null(matchPage.LastSeenAtUtc);
+        Assert.Equal(["e05"], matchPage.Items.Select(item => item.CaptureId));
 
         // 库里只有哈希，不含明文。
         var stored = await database.ScalarAsync("SELECT TokenSha256 FROM dbo.FaceCamera WHERE CameraId = 'cam-1'");
@@ -160,6 +169,8 @@ VALUES
             // 真实迁移建表脚本：列类型、主键、唯一索引与生产一致，并跑一遍只读门禁。
             await database.ExecuteAsync(FaceCaptureSchema.ApplySql);
             await database.ExecuteAsync(FaceCaptureSchema.VerifySql);
+            // 门店档案表（抓拍接口要读本店当前模式）：同样用真实迁移脚本。
+            await database.ExecuteAsync(FaceMatchSchema.ApplySql);
             return database;
         }
 

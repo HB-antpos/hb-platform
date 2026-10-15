@@ -66,12 +66,40 @@ for (const [name, text] of Object.entries(files)) {
   if (name.endsWith('.tsx')) assert(!/^(let|var) /m.test(text), `${name} 不得有可变模块级变量`)
 }
 
-// ───────── 图片：只有两处 <img>，src 只能是 objectURL ─────────
+// ───────── 图片：只有这几处 <img>，src 只能是 objectURL ─────────
 const imgOwners = Object.entries(files).filter(([, text]) => /<img\b/.test(text)).map(([name]) => name).sort()
 assert(
-  imgOwners.join(',') === 'PhotoPicker.tsx,ResultDetailDrawer.tsx,ReviewTaskModal.tsx',
-  `只有 PhotoPicker、ResultDetailDrawer 与 ReviewTaskModal 可以有 <img>，实际: ${imgOwners.join(',')}`,
+  imgOwners.join(',') === 'HitThumbnail.tsx,PhotoPicker.tsx,ResultDetailDrawer.tsx,ReviewTaskModal.tsx',
+  `只有 HitThumbnail、PhotoPicker、ResultDetailDrawer 与 ReviewTaskModal 可以有 <img>，实际: ${imgOwners.join(',')}`,
 )
+// 名单命中图缩略图（列表里唯一的真实图片）：只在「名单命中」视图里出现；一页一次批量请求（服务端一条审计），
+// base64 只在内存里解码成 Blob → objectURL（登记表创建，换页 / 卸载 dispose 撤销），不拼 data: 地址。
+{
+  const thumb = f('HitThumbnail.tsx')
+  assert((thumb.match(/<img\b/g) ?? []).length === 1 && /<img[^>]*\bsrc=\{state\.url\}/.test(thumb), '缩略图只有一处 <img>，src 是会话里的 objectURL')
+  assert(thumb.includes('draggable={false}') && !/src=["']/.test(thumb) && !/\/api\//.test(thumb) && !/https?:|data:/.test(thumb), '缩略图地址不能是后端地址、外链或 data: 地址')
+  for (const [name, text] of Object.entries(files)) {
+    if (name !== 'useHitThumbnails.ts') assert(!text.includes('fetchFaceHitThumbnails'), `${name} 不得直接请求缩略图（只经 useHitThumbnails）`)
+    if (name !== 'HitsView.tsx' && name !== 'useHitThumbnails.ts') assert(!/<HitThumbnail\b/.test(text) && !text.includes('useHitThumbnails('), `${name} 不得放命中图缩略图（只有名单命中视图有）`)
+  }
+  assert(
+    /useEffect\(\(\) => \{[\s\S]*createHitThumbnailSession\([\s\S]*void session\.start\(\)[\s\S]*session\.dispose\(\)[\s\S]*\}, \[ids\]\)/.test(f('useHitThumbnails.ts')),
+    '缩略图会话在编号变化 / 卸载时 dispose（中止请求、撤销 objectURL）',
+  )
+  assert((f('HitsView.tsx').match(/useHitThumbnails\(/g) ?? []).length === 1, '名单命中视图每页只取一批缩略图')
+  assert(files['imageLogic.ts'].includes('export function createHitThumbnailSession(') && files['imageLogic.ts'].includes('registry.set(taskId, new Blob('), '缩略图经登记表转 objectURL')
+  assert(/fetchFaceHitThumbnails[\s\S]*?kind: 'hit'/.test(service) && service.includes('HIT_THUMBNAIL_BATCH_MAX = 30'), '缩略图只请求命中图（kind=hit），一批最多 30 项')
+}
+// 命中图原图：只有详情抽屉（从名单命中视图打开时）按需读取，走 results/hits/{taskId}/image（服务端每次读取写审计）。
+assert(/\/results\/hits\/\$\{taskId\}\/image/.test(service) && /export async function fetchFaceHitImage[\s\S]*?IMAGE_PATH_TASK_ID\.test\(taskId\)/.test(service), '命中图走专用内容接口且编号先校验')
+for (const [name, text] of Object.entries(files)) {
+  if (name !== 'ResultDetailDrawer.tsx') assert(!text.includes('fetchFaceHitImage'), `${name} 不得直接读取命中图（只能由详情抽屉按需读取）`)
+}
+assert(
+  /useEffect\(\(\) => \{[\s\S]*createHitImageSession\([\s\S]*void session\.start\(\)[\s\S]*session\.dispose\(\)[\s\S]*\}, \[hitImageTaskId\]\)/.test(f('ResultDetailDrawer.tsx')),
+  '抽屉的命中图会话卸载 / 切换时 dispose',
+)
+assert(f('ResultDetailDrawer.tsx').includes("const hitOnly = origin === 'hits'") && f('ResultDetailDrawer.tsx').includes('hitOnly && result.hit?.imageAvailable'), '只有从名单命中视图打开且命中图还在时才读命中图')
 assert((f('ReviewTaskModal.tsx').match(/<img\b/g) ?? []).length === 1, '复核弹框只有一处 <img>')
 assert(/<img[^>]*\bsrc=\{state\.url\}/.test(f('ReviewTaskModal.tsx')), '复核 <img> 的 src 必须是 state 里的 objectURL')
 assert((f('PhotoPicker.tsx').match(/<img\b/g) ?? []).length === 1, '照片选择器只有一处 <img>')
@@ -112,7 +140,7 @@ assert(f('ReviewTasksTab.tsx').includes('key={target.taskId}') && f('ReviewTasks
 assert(f('ReviewTasksTab.tsx').includes('onClose={() => setTarget(null)}'), '关闭弹框要卸载组件')
 assert(f('ReviewTaskModal.tsx').includes('if (!imageAvailable) return'), '命中图已删除时不发任何图片请求')
 assert(f('ReviewTaskModal.tsx').includes('void sessionRef.current?.loadReference(index)'), '参考照片切换时才按需读取')
-// 抓拍与比对：列表里没有任何真实照片（只有占位图标），详情抽屉里才有两处图片位（人脸小图 / 背景图共用同一个组件，源码里只有一处 <img>）。
+// 抓拍与比对（全部抓拍）：列表里没有任何真实照片（只有占位图标），详情抽屉里才有图片位（人脸小图 / 背景图 / 命中图共用同一个组件，源码里只有一处 <img>）。
 assert((f('ResultDetailDrawer.tsx').match(/<img\b/g) ?? []).length === 1, '结果抽屉只有一处 <img>（人脸小图与背景图共用 ResultImageView）')
 assert(/<img[^>]*\bsrc=\{state\.url\}/.test(f('ResultDetailDrawer.tsx')), '结果抽屉 <img> 的 src 必须是 state 里的 objectURL')
 assert(!/useState<[^>]*Blob/.test(f('ResultDetailDrawer.tsx')), '结果抽屉 state 里不保存 Blob')
@@ -187,6 +215,15 @@ assert(
     '目标图会话复用复核会话（不带现场抓拍），不复制生命周期代码',
   )
   assert(f('ResultsTab.tsx').includes('canViewTarget={canViewTarget}') && f('index.tsx').includes('canViewTarget: hasReviewTab'), '目标图权限 = 复核页签权限，由页面经 ResultsTab 传给抽屉')
+}
+// 名单命中视图：未读红数来自 summary.unread（本人未读命中通知）；「全部标为已读」必须带 type 只标命中通知；「复核」按复核权限显示。
+assert(f('ResultsTab.tsx').includes('getFaceHitSummary({}, signal)') && f('ResultsTab.tsx').includes('unreadSummary.data?.unread'), '分段上的红色数字是本人未读命中通知数')
+assert(f('ResultsTab.tsx').includes('<Segmented') && f('ResultsTab.tsx').includes('<HitsView '), '顶部分段切换全部抓拍 / 名单命中')
+assert(/markAllFaceHitsRead[\s\S]*?params: \{ type: FACE_HIT_NOTIFICATION_TYPE \}/.test(service) && service.includes("FACE_HIT_NOTIFICATION_TYPE = 'face.unwelcome-hit'"), '全部已读只标命中通知类型')
+assert(f('HitsView.tsx').includes('<Popconfirm') && f('HitsView.tsx').includes('markAllFaceHitsRead()'), '全部标为已读要二次确认')
+assert(f('HitsView.tsx').includes('canReviewPermission && goToReview') && f('HitsView.tsx').includes('config.permissions.unwelcomeReview'), '「复核」只给有复核权限的人')
+for (const name of ['HitsView.tsx']) {
+  assert(!/recipientName|recipients\.map|readerName|userName|userGuid/.test(f(name)), `${name} 只显示通知人数，不得出现通知收件人姓名等字段`)
 }
 assert(f('ResultDetailDrawer.tsx').includes('HIT_NOTIFICATION_TITLE') && f('ResultDetailDrawer.tsx').includes('buildHitNotificationBody(hit.scorePercent)'), '通知文案区使用固定英文原文')
 assert(f('logic.ts').includes("'Possible match alert'") && f('logic.ts').includes('The score is not the probability that this is the same person; a reviewer must check it.'), '通知英文原文固定在逻辑层常量')
