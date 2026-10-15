@@ -45,3 +45,6 @@ yarn-error.*
 
 # generated iOS folder
 /ios
+
+# 推送凭据（Firebase / FCM 配置）：由 EAS 文件型环境变量 GOOGLE_SERVICES_JSON 在构建时提供，绝不入库
+google-services.json

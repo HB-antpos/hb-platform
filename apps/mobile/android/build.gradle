@@ -9,6 +9,8 @@ buildscript {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    // 推送（FCM）：Google Services 插件只在 app 模块存在 google-services.json 时才会应用，见 app/build.gradle 末尾。
+    classpath('com.google.gms:google-services:4.4.1')
   }
 }
 

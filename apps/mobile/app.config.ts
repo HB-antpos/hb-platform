@@ -20,6 +20,10 @@ const nativeAppInstallerTrustedOrigins = Array.from(new Set([
 ]));
 // 仅供 development 手工验证中央更新策略；production 固定使用代码中的可信地址。
 const nativeIosUpdateCenterUrl = process.env.EXPO_PUBLIC_IOS_UPDATE_CENTER_URL?.trim() || "";
+// Android 推送（FCM）凭据：EAS 的文件型环境变量 GOOGLE_SERVICES_JSON 会给出文件路径。
+// 有值才写入 android.googleServicesFile；没有（本地开发、OTA 发布、没配置的构建）就不写，保持原行为，
+// 这类构建里 Android 推送令牌取不到，JS 侧静默跳过。密钥文件本身绝不入库（见 .gitignore）。
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON?.trim() || "";
 
 export default {
   expo: {
@@ -27,6 +31,7 @@ export default {
     runtimeVersion: nativeRuntimeVersion,
     android: {
       ...baseExpoConfig.android,
+      ...(googleServicesFile ? { googleServicesFile } : {}),
       // 无构建 profile 时也使用 Android 独立运行时；显式 OTA 参数仍可选择目标运行时。
       runtimeVersion: process.env.EXPO_PUBLIC_RUNTIME_VERSION?.trim()
         || baseExpoConfig.android.runtimeVersion
