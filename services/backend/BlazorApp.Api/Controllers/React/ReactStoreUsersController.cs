@@ -25,7 +25,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("grid")]
-        [Authorize(Policy = Permissions.Users.View)]
+        [Authorize(Policy = Permissions.Users.ViewStoreStaff)]
         public async Task<IActionResult> Grid([FromBody] StoreUserGridRequestDto request)
         {
             var result = await _service.GetGridDataAsync(request);
@@ -52,7 +52,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpGet("{userGuid}")]
-        [Authorize(Policy = Permissions.Users.View)]
+        [Authorize(Policy = Permissions.Users.ViewStoreStaff)]
         public async Task<IActionResult> GetByUserGuid(string userGuid, [FromQuery] string? storeCode)
         {
             var result = await _service.GetByUserGuidAsync(userGuid, storeCode);
@@ -60,7 +60,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpGet("{userGuid}/profile")]
-        [Authorize(Policy = Permissions.Users.View)]
+        [Authorize(Policy = Permissions.Users.ViewStoreStaff)]
         public async Task<IActionResult> GetProfile(string userGuid, [FromQuery] string? storeCode)
         {
             var result = await _service.GetByUserGuidAsync(userGuid, storeCode);

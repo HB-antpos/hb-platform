@@ -394,7 +394,8 @@ namespace BlazorApp.Api.Services
                 RouteName = "users",
                 TitleKey = "tabs.users",
                 Icon = "account-group-outline",
-                Permission = Permissions.Users.View,
+                // 「员工管理」只认 ViewStoreStaff（Users.View 通过别名满足）；「用户管理」user-admin 仍用 Users.View。
+                Permission = Permissions.Users.ViewStoreStaff,
                 Order = 57,
             },
             new()

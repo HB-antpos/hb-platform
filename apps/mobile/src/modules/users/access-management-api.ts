@@ -10,6 +10,10 @@ import type {
   AssignUserAccessRolesInput,
   AssignUserAccessStoresInput,
   AssignUserDirectPermissionsInput,
+  CopyPermissionMode,
+  CopyUserDirectPermissionsInput,
+  UserDirectPermissionCopyResult,
+  UserDirectPermissionCopyTarget,
   UserAccessPermissionInheritedSource,
   UserAccessPermissionAccess,
   UserAccessPermissionState,
@@ -271,6 +275,70 @@ export function normalizeUserAccessPermissionAccess(
   };
 }
 
+function readRequiredCount(source: Record<string, unknown>, ...keys: string[]) {
+  const value = readValue(source, ...keys);
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(INVALID_RESPONSE_MESSAGE);
+  }
+  return value;
+}
+
+function readCopyMode(source: Record<string, unknown>): CopyPermissionMode {
+  const value = readValue(source, "mode", "Mode");
+  if (value !== "merge" && value !== "replace") {
+    throw new Error(INVALID_RESPONSE_MESSAGE);
+  }
+  return value;
+}
+
+function normalizeCopyTarget(value: unknown): UserDirectPermissionCopyTarget {
+  if (!isRecord(value)) throw new Error(INVALID_RESPONSE_MESSAGE);
+  return {
+    userGuid: readRequiredString(value, "userGuid", "UserGuid", "UserGUID"),
+    added: normalizeStringArray(readValue(value, "added", "Added")),
+    removed: normalizeStringArray(readValue(value, "removed", "Removed")),
+    unchangedCount: readRequiredCount(value, "unchangedCount", "UnchangedCount"),
+  };
+}
+
+export function normalizeUserDirectPermissionCopyResult(
+  value: unknown,
+): UserDirectPermissionCopyResult {
+  const unwrapped = unwrapAccessEnvelope(value);
+  if (!isRecord(unwrapped)) throw new Error(INVALID_RESPONSE_MESSAGE);
+  const targets = readValue(unwrapped, "targets", "Targets");
+  if (!Array.isArray(targets)) throw new Error(INVALID_RESPONSE_MESSAGE);
+
+  return {
+    sourceUserGuid: readRequiredString(
+      unwrapped,
+      "sourceUserGuid",
+      "SourceUserGuid",
+      "SourceUserGUID",
+    ),
+    mode: readCopyMode(unwrapped),
+    preview: readRequiredBoolean(unwrapped, "preview", "Preview"),
+    sourceDirectPermissionCodes: normalizeStringArray(
+      readValue(
+        unwrapped,
+        "sourceDirectPermissionCodes",
+        "SourceDirectPermissionCodes",
+      ),
+    ),
+    transferablePermissionCodes: normalizeStringArray(
+      readValue(
+        unwrapped,
+        "transferablePermissionCodes",
+        "TransferablePermissionCodes",
+      ),
+    ),
+    skippedPermissionCodes: normalizeStringArray(
+      readValue(unwrapped, "skippedPermissionCodes", "SkippedPermissionCodes"),
+    ),
+    targets: targets.map(normalizeCopyTarget),
+  };
+}
+
 function normalizeMutationResult(value: unknown) {
   const unwrapped = unwrapAccessEnvelope(value);
   if (typeof unwrapped !== "boolean") throw new Error(INVALID_RESPONSE_MESSAGE);
@@ -372,4 +440,41 @@ export async function assignUserDirectPermissions({
     config,
   );
   return normalizeMutationResult(response.data);
+}
+
+async function requestCopyUserDirectPermissions(
+  { sourceUserGuid, targetUserGuids, mode }: CopyUserDirectPermissionsInput,
+  preview: boolean,
+  config?: AxiosRequestConfig,
+) {
+  if (mode !== "merge" && mode !== "replace") {
+    throw new Error("Copy mode is invalid");
+  }
+  const source = sourceUserGuid.trim();
+  // 目标去重并剔除来源自身，避免把权限“复制给自己”。
+  const targets = normalizeStringArray(targetUserGuids).filter(
+    (guid) => guid.toLowerCase() !== source.toLowerCase(),
+  );
+  if (!targets.length) throw new Error("Target user GUID is required");
+  const response = await apiClient.post(
+    buildUserAccessPath(sourceUserGuid, "permissions/copy"),
+    // preview=true 只算差异不写库；preview=false 由后端原子写入（全成功或全失败）。
+    { targetUserGuids: targets, mode, preview },
+    config,
+  );
+  return normalizeUserDirectPermissionCopyResult(response.data);
+}
+
+export function previewCopyUserDirectPermissions(
+  input: CopyUserDirectPermissionsInput,
+  config?: AxiosRequestConfig,
+) {
+  return requestCopyUserDirectPermissions(input, true, config);
+}
+
+export function copyUserDirectPermissions(
+  input: CopyUserDirectPermissionsInput,
+  config?: AxiosRequestConfig,
+) {
+  return requestCopyUserDirectPermissions(input, false, config);
 }

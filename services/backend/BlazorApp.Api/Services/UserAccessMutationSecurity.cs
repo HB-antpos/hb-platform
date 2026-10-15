@@ -400,6 +400,7 @@ namespace BlazorApp.Api.Services
                     Permissions.Users.ManageStores,
                     Permissions.Users.ManagePosTerminalPermissions,
                     Permissions.Users.ResetPassword,
+                    Permissions.Users.ViewStoreStaff,
                     Permissions.Users.CreateStoreStaff,
                     Permissions.Users.EditStoreStaff,
                     Permissions.Users.ResetStoreStaffPassword,

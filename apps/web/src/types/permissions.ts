@@ -21,6 +21,7 @@ export const P = {
     CreateStoreStaff: 'Users.CreateStoreStaff',
     EditStoreStaff: 'Users.EditStoreStaff',
     ResetStoreStaffPassword: 'Users.ResetStoreStaffPassword',
+    ViewStoreStaff: 'Users.ViewStoreStaff',
   },
   Roles: {
     View: 'Roles.View',
