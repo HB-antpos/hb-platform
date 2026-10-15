@@ -133,6 +133,16 @@ public interface IStorePriceUpdateTaskService
 
     // ---------- Web 监控 ----------
 
+    /// <summary>
+    /// 手动撤销未完成任务：只把 Pending 改为 Cancelled（ManualCancel）并留痕，不改任何价格、不影响 HQ 同步；
+    /// 并发安全（更新带 Status = Pending 条件，分店同时处理时先到先得）。
+    /// </summary>
+    Task<CancelStorePriceUpdateTasksResultDto> CancelAsync(
+        CancelStorePriceUpdateTasksRequestDto request,
+        string actorDisplayName,
+        CancellationToken cancellationToken = default
+    );
+
     Task<StorePriceUpdateTaskSummaryDto> GetSummaryAsync(
         StorePriceUpdateTaskQueryDto query,
         CancellationToken cancellationToken = default

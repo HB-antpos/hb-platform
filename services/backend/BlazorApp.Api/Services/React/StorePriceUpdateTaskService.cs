@@ -732,14 +732,15 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             return result;
         }
 
-        var storeCode = query.StoreCode?.Trim();
+        var storeCodes = query.ResolveStoreCodes();
         var status = string.IsNullOrWhiteSpace(query.Status)
             ? StorePriceUpdateTaskStatuses.Pending
             : query.Status.Trim();
-        if (!string.IsNullOrWhiteSpace(storeCode) && status == StorePriceUpdateTaskStatuses.Pending && page == 1)
+        if (storeCodes.Count == 1 && status == StorePriceUpdateTaskStatuses.Pending && page == 1)
         {
             // 兜底对账：返回前先用实时价格复核，保证"改回去自动取消"即使漏了事件也成立。
-            await ReconcilePendingAsync(storeCode, cancellationToken);
+            // 仅单店时触发（移动端按店查看的场景）；多店/全部与原先「不按店过滤」一致，交给后台对账任务。
+            await ReconcilePendingAsync(storeCodes[0], cancellationToken);
         }
 
         var filtered = await BuildFilteredQueryAsync(query, accessibleStoreCodes, applyStatus: true);
@@ -751,12 +752,12 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         result.Total = total;
         result.Items = await MapTasksAsync(tasks);
 
-        if (!string.IsNullOrWhiteSpace(storeCode))
+        if (storeCodes.Count > 0)
         {
             var pendingStatus = StorePriceUpdateTaskStatuses.Pending;
             var completedStatus = StorePriceUpdateTaskStatuses.Completed;
             var priceKind = StorePriceUpdateTaskKinds.PriceUpdate;
-            var scope = _db.Queryable<StorePriceUpdateTask>().Where(task => task.StoreCode == storeCode);
+            var scope = _db.Queryable<StorePriceUpdateTask>().Where(task => storeCodes.Contains(task.StoreCode));
             result.PendingCount = await scope.Clone().Where(task => task.Status == pendingStatus).CountAsync();
             result.PendingPriceUpdateCount = await scope.Clone()
                 .Where(task => task.Status == pendingStatus && task.Kind == priceKind)
@@ -780,10 +781,10 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             filtered = filtered.Where(task => accessible.Contains(task.StoreCode));
         }
 
-        var storeCode = query.StoreCode?.Trim();
-        if (!string.IsNullOrWhiteSpace(storeCode))
+        var storeCodes = query.ResolveStoreCodes();
+        if (storeCodes.Count > 0)
         {
-            filtered = filtered.Where(task => task.StoreCode == storeCode);
+            filtered = filtered.Where(task => storeCodes.Contains(task.StoreCode));
         }
 
         if (applyStatus)
@@ -975,6 +976,10 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
                 CompletedBy = task.CompletedBy,
                 CompletedAtUtc = AsUtc(task.CompletedAtUtc),
                 LabelPrintCount = task.LabelPrintCount,
+                CancelReason = task.Status == StorePriceUpdateTaskStatuses.Cancelled ? task.CancelReason : null,
+                CancelledBy = task.CancelledBy,
+                CancelledAtUtc = AsUtc(task.CancelledAtUtc),
+                CancelNote = task.CancelNote,
                 HqSyncOperationId = IsHqSyncEnabled ? task.HqSyncOperationKey : null,
                 HqSyncStatus = hqStatus,
             };
@@ -1254,6 +1259,120 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
     // Web 监控
     // =====================================================================
 
+    public async Task<CancelStorePriceUpdateTasksResultDto> CancelAsync(
+        CancelStorePriceUpdateTasksRequestDto request,
+        string actorDisplayName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var result = new CancelStorePriceUpdateTasksResultDto();
+        if (!await IsSchemaReadyAsync())
+        {
+            return result;
+        }
+
+        var pendingStatus = StorePriceUpdateTaskStatuses.Pending;
+        var cancelledStatus = StorePriceUpdateTaskStatuses.Cancelled;
+        var manualReason = StorePriceUpdateTaskCancelReasons.ManualCancel;
+        var actor = Truncate(actorDisplayName, 100) ?? "System";
+        var note = Truncate(request.Note, CancelStorePriceUpdateTasksRequestDto.MaxNoteLength);
+
+        // 1) 解析要撤销的任务 id：勾选 id 优先；否则按商品取其全部未完成任务（可限定分店）。
+        var ids = new List<long>();
+        var missingIds = new List<long>();
+        var pendingBefore = new HashSet<long>();
+        if (request.TaskIds.Count > 0)
+        {
+            ids = request.TaskIds.Distinct().ToList();
+            var existing = await _db.Queryable<StorePriceUpdateTask>()
+                .Where(task => ids.Contains(task.Id))
+                .Select(task => new { task.Id, task.Status })
+                .ToListAsync();
+            var existingIds = existing.Select(row => row.Id).ToHashSet();
+            missingIds = ids.Where(id => !existingIds.Contains(id)).ToList();
+            foreach (var row in existing.Where(row => row.Status == pendingStatus))
+            {
+                pendingBefore.Add(row.Id);
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(request.ProductCode))
+        {
+            var productCode = request.ProductCode.Trim();
+            var storeCodes = (request.StoreCodes ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var query = _db.Queryable<StorePriceUpdateTask>()
+                .Where(task => task.ProductCode == productCode && task.Status == pendingStatus);
+            if (storeCodes.Count > 0)
+            {
+                query = query.Where(task => storeCodes.Contains(task.StoreCode));
+            }
+            ids = await query.Select(task => task.Id).ToListAsync();
+            pendingBefore = ids.ToHashSet();
+        }
+
+        foreach (var id in missingIds)
+        {
+            result.Items.Add(Fail(id, StorePriceUpdateTaskResultCodes.NotFound, "任务不存在"));
+        }
+        foreach (var id in ids.Where(id => !missingIds.Contains(id) && !pendingBefore.Contains(id)))
+        {
+            result.Items.Add(Fail(id, StorePriceUpdateTaskResultCodes.NotPending, "任务已处理或已取消"));
+        }
+
+        // 2) 条件更新：带 Status = Pending 守卫，分店恰好同时处理时先到先得，已完成的任务绝不会被改写。
+        var toCancel = ids.Where(pendingBefore.Contains).ToList();
+        var now = DateTime.UtcNow;
+        foreach (var chunk in toCancel.Chunk(CancelStorePriceUpdateTasksRequestDto.MaxTaskIds))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var chunkIds = chunk.ToList();
+            await _db.Updateable<StorePriceUpdateTask>()
+                .SetColumns(task => new StorePriceUpdateTask
+                {
+                    Status = cancelledStatus,
+                    CancelReason = manualReason,
+                    CancelledBy = actor,
+                    CancelledAtUtc = now,
+                    CancelNote = note,
+                    UpdatedAtUtc = now,
+                })
+                .Where(task => chunkIds.Contains(task.Id) && task.Status == pendingStatus)
+                .ExecuteCommandAsync();
+        }
+
+        // 3) 以更新后的真实状态逐条回报（而不是信任受影响行数），竞争落败的算「已处理」。
+        var cancelledNow = toCancel.Count == 0
+            ? new HashSet<long>()
+            : (
+                await _db.Queryable<StorePriceUpdateTask>()
+                    .Where(task => toCancel.Contains(task.Id) && task.Status == cancelledStatus && task.CancelReason == manualReason)
+                    .Select(task => task.Id)
+                    .ToListAsync()
+            ).ToHashSet();
+        foreach (var id in toCancel)
+        {
+            result.Items.Add(
+                cancelledNow.Contains(id)
+                    ? new StorePriceUpdateTaskItemResultDto { TaskId = id, Success = true }
+                    : Fail(id, StorePriceUpdateTaskResultCodes.NotPending, "任务已处理或已取消")
+            );
+        }
+
+        result.CancelledCount = result.Items.Count(item => item.Success);
+        result.SkippedCount = result.Items.Count - result.CancelledCount;
+        _logger.LogInformation(
+            "价格更新任务手动撤销：操作人 {Actor}，撤销 {Cancelled}/{Total}，商品 {ProductCode}，备注 {Note}",
+            actor,
+            result.CancelledCount,
+            result.Items.Count,
+            request.ProductCode,
+            note
+        );
+        return result;
+    }
+
     public async Task<StorePriceUpdateTaskSummaryDto> GetSummaryAsync(
         StorePriceUpdateTaskQueryDto query,
         CancellationToken cancellationToken = default
@@ -1285,10 +1404,10 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         var pendingStatus = StorePriceUpdateTaskStatuses.Pending;
         var overdueQuery = _db.Queryable<StorePriceUpdateTask>()
             .Where(task => task.Status == pendingStatus && task.InitiatedAtUtc < overdueCutoff);
-        var storeCode = query.StoreCode?.Trim();
-        if (!string.IsNullOrWhiteSpace(storeCode))
+        var overdueStoreCodes = query.ResolveStoreCodes();
+        if (overdueStoreCodes.Count > 0)
         {
-            overdueQuery = overdueQuery.Where(task => task.StoreCode == storeCode);
+            overdueQuery = overdueQuery.Where(task => overdueStoreCodes.Contains(task.StoreCode));
         }
         summary.OverdueCount = await overdueQuery.CountAsync();
 
@@ -1328,6 +1447,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             new StorePriceUpdateTaskQueryDto
             {
                 StoreCode = query.StoreCode,
+                StoreCodes = query.StoreCodes,
                 Kind = query.Kind,
                 InitiatorName = query.InitiatorName,
                 Keyword = query.Keyword,
@@ -1358,10 +1478,10 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             .ToListAsync();
 
         var storesQuery = _db.Queryable<Store>().Where(store => store.IsActive && !store.IsDeleted);
-        var storeFilter = query.StoreCode?.Trim();
-        if (!string.IsNullOrWhiteSpace(storeFilter))
+        var storeFilter = query.ResolveStoreCodes();
+        if (storeFilter.Count > 0)
         {
-            storesQuery = storesQuery.Where(store => store.StoreCode == storeFilter);
+            storesQuery = storesQuery.Where(store => storeFilter.Contains(store.StoreCode));
         }
         var stores = await storesQuery.Select(store => new { store.StoreCode, store.StoreName }).ToListAsync();
 
@@ -1432,6 +1552,7 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
             new StorePriceUpdateTaskQueryDto
             {
                 StoreCode = query.StoreCode,
+                StoreCodes = query.StoreCodes,
                 Kind = query.Kind,
                 InitiatorName = query.InitiatorName,
                 Keyword = query.Keyword,
@@ -1577,7 +1698,9 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         {
             _schemaReady =
                 _db.DbMaintenance.IsAnyTable("StorePriceUpdateTask", false)
-                && _db.DbMaintenance.IsAnyTable("ProductSuggestedDiscount", false);
+                && _db.DbMaintenance.IsAnyTable("ProductSuggestedDiscount", false)
+                // 手动撤销新增的留痕列：迁移前降级为「无任务」，避免实体查询直接抛错。
+                && _db.DbMaintenance.IsAnyColumn("StorePriceUpdateTask", "CancelledBy", false);
         }
         catch (Exception ex)
         {

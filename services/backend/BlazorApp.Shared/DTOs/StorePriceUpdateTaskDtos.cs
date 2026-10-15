@@ -59,6 +59,12 @@ public sealed class StorePriceUpdateTaskDto
     public DateTime? CompletedAtUtc { get; set; }
     public int LabelPrintCount { get; set; }
 
+    /// <summary>取消原因：Reverted / NoLongerApplicable（系统自动）/ ManualCancel（Web 手动撤销）；非已取消任务为 null。</summary>
+    public string? CancelReason { get; set; }
+    public string? CancelledBy { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public string? CancelNote { get; set; }
+
     /// <summary>HQ 同步操作 Id（即 outbox OperationKey），可直接用于现有的 hq-sync 重试接口。</summary>
     public string? HqSyncOperationId { get; set; }
 
@@ -68,7 +74,12 @@ public sealed class StorePriceUpdateTaskDto
 
 public sealed class StorePriceUpdateTaskQueryDto
 {
+    /// <summary>单个分店（链接跳转、行点击使用，保持向后兼容）。</summary>
     public string? StoreCode { get; set; }
+
+    /// <summary>多个分店，英文逗号分隔（如 "1003,1004"）；与 <see cref="StoreCode"/> 取并集，均为空表示全部分店。</summary>
+    public string? StoreCodes { get; set; }
+
     public string? Status { get; set; }
     public string? Kind { get; set; }
     public string? Keyword { get; set; }
@@ -78,6 +89,31 @@ public sealed class StorePriceUpdateTaskQueryDto
     public DateTime? ToUtc { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 30;
+
+    /// <summary>
+    /// 合并 <see cref="StoreCode"/> 与 <see cref="StoreCodes"/>，去空、去重（忽略大小写）后返回；
+    /// 空列表表示不按分店过滤。统一在此解析，避免各查询各写一套。
+    /// </summary>
+    public List<string> ResolveStoreCodes()
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? raw)
+        {
+            var code = raw?.Trim();
+            if (!string.IsNullOrEmpty(code) && seen.Add(code))
+            {
+                result.Add(code);
+            }
+        }
+
+        Add(StoreCode);
+        foreach (var part in (StoreCodes ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            Add(part);
+        }
+        return result;
+    }
 }
 
 public sealed class StorePriceUpdateTaskPageDto
@@ -159,6 +195,36 @@ public sealed class StorePriceUpdateTaskBatchResultDto
 }
 
 // ---------- Web 监控页 ----------
+
+/// <summary>
+/// 手动撤销未完成任务。两种入参二选一：
+/// <see cref="TaskIds"/>（任务明细勾选，至多 <see cref="MaxTaskIds"/> 个）或
+/// <see cref="ProductCode"/>（撤销该商品所有未完成任务，可用 <see cref="StoreCodes"/> 限定分店）。
+/// </summary>
+public sealed class CancelStorePriceUpdateTasksRequestDto
+{
+    public const int MaxTaskIds = 200;
+    public const int MaxNoteLength = 200;
+
+    public List<long> TaskIds { get; set; } = new();
+    public string? ProductCode { get; set; }
+
+    /// <summary>仅与 <see cref="ProductCode"/> 搭配；英文逗号分隔，空表示该商品的全部分店。</summary>
+    public string? StoreCodes { get; set; }
+
+    /// <summary>撤销备注（可选，超过 <see cref="MaxNoteLength"/> 个字符会被截断）。</summary>
+    public string? Note { get; set; }
+}
+
+public sealed class CancelStorePriceUpdateTasksResultDto
+{
+    /// <summary>逐条结果：成功、已处理（不再是未完成）、不存在。</summary>
+    public List<StorePriceUpdateTaskItemResultDto> Items { get; set; } = new();
+    public int CancelledCount { get; set; }
+
+    /// <summary>未被撤销的条数（已完成/已取消/不存在）。</summary>
+    public int SkippedCount { get; set; }
+}
 
 public sealed class StorePriceUpdateTaskSummaryDto
 {

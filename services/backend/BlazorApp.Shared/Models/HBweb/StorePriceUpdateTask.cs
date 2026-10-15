@@ -94,6 +94,16 @@ public sealed class StorePriceUpdateTask
     [SugarColumn(IsNullable = true, Length = 40)]
     public string? CancelReason { get; set; }
 
+    /// <summary>手动撤销人（仅 <see cref="StorePriceUpdateTaskCancelReasons.ManualCancel"/> 时有值，系统自动取消为 null）。</summary>
+    [SugarColumn(IsNullable = true, Length = 100)]
+    public string? CancelledBy { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? CancelledAtUtc { get; set; }
+
+    [SugarColumn(IsNullable = true, Length = 200)]
+    public string? CancelNote { get; set; }
+
     [SugarColumn(IsNullable = false)]
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
@@ -131,4 +141,7 @@ public static class StorePriceUpdateTaskCancelReasons
 
     /// <summary>分店商品被标记为特殊商品或记录已不存在。</summary>
     public const string NoLongerApplicable = "NoLongerApplicable";
+
+    /// <summary>管理员在 Web 监控页手动撤销（任务本身不需要再执行）。</summary>
+    public const string ManualCancel = "ManualCancel";
 }
