@@ -53,7 +53,7 @@
     "checkIn": "Check in",
     "reports": "Reports",
     "me": "Me",
-    "unreadHitsLabel": "{{label}}, {{count}} unread blacklist hits",
+    "unreadHitsLabel": "{{label}}, {{count}} unread unwelcome hits",
     "home": "Home",
     "store": "Store",
     "orders": "Orders",

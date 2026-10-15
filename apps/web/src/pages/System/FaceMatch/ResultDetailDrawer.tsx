@@ -3,12 +3,14 @@ import { Alert, Button, Descriptions, Drawer, Space, Spin, Tag, Timeline, Toolti
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { fetchFaceCaptureResultImage, fetchFaceHitDetail, fetchUnwelcomeReferenceImage } from '../../../services/faceMatchService'
+import { fetchFaceCaptureResultImage, fetchFaceHitDetail, fetchFaceHitImage, fetchUnwelcomeReferenceImage } from '../../../services/faceMatchService'
 import type { FaceCaptureResult, FaceCaptureResultHit, FaceHitDetail } from '../../../types/faceMatch'
 import { formatDateTime } from '../FaceCameras/logic'
 import {
+  CAPTURE_SLOT,
   RESULT_IMAGE_ERROR_KEYS,
   REVIEW_IMAGE_ERROR_KEYS,
+  createHitImageSession,
   createReferenceImageSession,
   createResultImageSession,
   referenceSlot,
@@ -44,6 +46,10 @@ interface ResultDetailDrawerProps {
   /** 切到复核任务页签；没有复核任务页签权限时为 undefined（按钮禁用）。 */
   onGoReview?: () => void
   onClose: () => void
+  /**
+   * 从哪个视图打开：results = 全部抓拍（默认）；hits = 名单命中视图（命中流没有抓拍图片编号，只看命中图，提示文案不同）。
+   */
+  origin?: 'results' | 'hits'
 }
 
 /**
@@ -122,6 +128,8 @@ interface TargetPhotoBlockProps {
   count: number
   /** 抓拍人脸小图（与抽屉顶部同一份 objectURL 的另一处视图，不另发请求）：放在目标图旁并排对照。 */
   faceCrop: ReactNode
+  /** faceCrop 下的说明文字（Match 行放的是命中图，不是人脸小图）。 */
+  faceCaption: string
 }
 
 /**
@@ -129,7 +137,7 @@ interface TargetPhotoBlockProps {
  * 图片读取复用复核任务的参考照片接口（每次查看服务端写审计），会话复用复核弹框的生命周期：
  * 挂载后只取第 1 张，切换到哪张才取哪张（不预取）；卸载 / 切换抓拍时 effect 清理函数 dispose 会话：中止在途请求并撤销全部 objectURL。
  */
-function TargetPhotoBlock({ taskId, count, faceCrop }: TargetPhotoBlockProps) {
+function TargetPhotoBlock({ taskId, count, faceCrop, faceCaption }: TargetPhotoBlockProps) {
   const { t } = useTranslation()
   const [states, setStates] = useState<ReviewImageStates>(() => new Map())
   // 字节已拿到但浏览器解码失败（内容损坏）的图片槽位。
@@ -172,7 +180,7 @@ function TargetPhotoBlock({ taskId, count, faceCrop }: TargetPhotoBlockProps) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           {faceCrop}
-          <div style={{ marginTop: 4 }}>{caption(t('faceMatch.results.drawer.faceImage'))}</div>
+          <div style={{ marginTop: 4 }}>{caption(faceCaption)}</div>
         </div>
         <div style={{ minWidth: 0 }}>
           <ResultImageView
@@ -276,13 +284,14 @@ interface HitSectionsProps {
   hit: FaceCaptureResultHit
   canViewTarget: boolean
   faceCrop: ReactNode
+  faceCaption: string
 }
 
 /**
  * 「不受欢迎人员名单命中」区下半部：名单目标图（与人脸小图并排）、相似度与复核状态、通知时间线、固定英文通知文案、接收人。
  * 只在这条抓拍有命中时挂载；挂载后只发一次命中详情请求（接收人 + 目标图张数），卸载 / 切换抓拍即中止。
  */
-function HitSections({ hit, canViewTarget, faceCrop }: HitSectionsProps) {
+function HitSections({ hit, canViewTarget, faceCrop, faceCaption }: HitSectionsProps) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const taskId = hit.taskId
@@ -299,7 +308,7 @@ function HitSections({ hit, canViewTarget, faceCrop }: HitSectionsProps) {
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {targetView === 'photos' ? (
-        <TargetPhotoBlock taskId={taskId} count={targetPhotoCount} faceCrop={faceCrop} />
+        <TargetPhotoBlock taskId={taskId} count={targetPhotoCount} faceCrop={faceCrop} faceCaption={faceCaption} />
       ) : (
         <Typography.Text type="secondary">{t(TARGET_NOTE_KEYS[targetView])}</Typography.Text>
       )}
@@ -364,7 +373,7 @@ function HitSections({ hit, canViewTarget, faceCrop }: HitSectionsProps) {
  *    名单目标图只在有复核权限（canViewTarget）且详情给出张数大于 0 时才读取，复用复核任务的参考照片接口（每次查看服务端写审计）；
  * 4. 相似度只写「不等于是同一个人的概率」；「去复核」只是切到复核任务页签，是否能判断仍由复核页的后端 canReview 决定。
  */
-export default function ResultDetailDrawer({ result, canViewTarget, onGoReview, onClose }: ResultDetailDrawerProps) {
+export default function ResultDetailDrawer({ result, canViewTarget, onGoReview, onClose, origin = 'results' }: ResultDetailDrawerProps) {
   const { t } = useTranslation()
   const [states, setStates] = useState<ResultImageStates>(() => new Map())
   // 字节已拿到但浏览器解码失败（内容损坏）的图片槽位。
@@ -387,6 +396,22 @@ export default function ResultDetailDrawer({ result, canViewTarget, onGoReview, 
     return () => session.dispose()
   }, [captureId, faceImageId, sceneImageId])
 
+  // 从「名单命中」视图打开：命中流不带抓拍图片编号，这里改读命中图（命中图还在时；每次读取服务端写审计）。
+  const hitOnly = origin === 'hits'
+  const hitImageTaskId = hitOnly && result.hit?.imageAvailable ? result.hit.taskId : null
+  const [hitStates, setHitStates] = useState<ReviewImageStates>(() => new Map())
+  const [hitBroken, setHitBroken] = useState(false)
+  useEffect(() => {
+    if (!hitImageTaskId) return
+    const session = createHitImageSession({
+      fetchHit: (signal) => fetchFaceHitImage(hitImageTaskId, signal),
+      onChange: setHitStates,
+    })
+    void session.start()
+    // 关闭 / 切换 / 卸载：中止在途请求并 revoke objectURL。
+    return () => session.dispose()
+  }, [hitImageTaskId])
+
   const markBroken = (slot: ResultImageSlot) => setBroken((current) => new Set(current).add(slot))
 
   const decision = resolveResultDecision(result)
@@ -405,6 +430,20 @@ export default function ResultDetailDrawer({ result, canViewTarget, onGoReview, 
       errorKeys={RESULT_IMAGE_ERROR_KEYS}
     />
   )
+
+  // 命中图视图（只在名单命中视图打开时出现）：抽屉顶部与「名单目标图」旁各放一处，共用同一份 objectURL。
+  const hitView = (
+    <ResultImageView
+      hasImage={hitImageTaskId !== null}
+      state={hitStates.get(CAPTURE_SLOT)}
+      alt={t('faceMatch.results.drawer.hitImage')}
+      broken={hitBroken}
+      onBroken={() => setHitBroken(true)}
+      errorKeys={REVIEW_IMAGE_ERROR_KEYS}
+    />
+  )
+  const primaryView = hitOnly ? hitView : faceView
+  const primaryCaption = hitOnly ? t('faceMatch.results.drawer.hitImage') : t('faceMatch.results.drawer.faceImage')
 
   const goReviewButton =
     hit !== null ? (
@@ -434,22 +473,36 @@ export default function ResultDetailDrawer({ result, canViewTarget, onGoReview, 
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Alert type="warning" showIcon message={t('faceMatch.results.drawer.sensitiveNotice')} />
 
-        <div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2.2fr)', gap: 12 }}>
-            {faceView}
-            <ResultImageView
-              hasImage={sceneImageId !== null}
-              state={states.get('scene')}
-              alt={t('faceMatch.results.drawer.sceneImage')}
-              broken={broken.has('scene')}
-              onBroken={() => markBroken('scene')}
-              errorKeys={RESULT_IMAGE_ERROR_KEYS}
-            />
+        {!hitOnly ? (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 2.2fr)', gap: 12 }}>
+              {faceView}
+              <ResultImageView
+                hasImage={sceneImageId !== null}
+                state={states.get('scene')}
+                alt={t('faceMatch.results.drawer.sceneImage')}
+                broken={broken.has('scene')}
+                onBroken={() => markBroken('scene')}
+                errorKeys={RESULT_IMAGE_ERROR_KEYS}
+              />
+            </div>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('faceMatch.results.drawer.imageCaption')}
+            </Typography.Text>
           </div>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {t('faceMatch.results.drawer.imageCaption')}
-          </Typography.Text>
-        </div>
+        ) : (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Alert type="info" showIcon message={t('faceMatch.results.drawer.hitOnlyNotice')} />
+            {hit ? (
+              <div style={{ maxWidth: 240 }}>
+                {hitView}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('faceMatch.results.drawer.hitImageCaption')}
+                </Typography.Text>
+              </div>
+            ) : null}
+          </Space>
+        )}
 
         <SectionTitle text={t('faceMatch.results.drawer.sections.capture')} />
         <Descriptions column={1} size="small" colon={false} labelStyle={{ width: 110 }}>
@@ -483,7 +536,7 @@ export default function ResultDetailDrawer({ result, canViewTarget, onGoReview, 
 
         <SectionTitle text={t('faceMatch.results.drawer.sections.hit')} />
         {hit ? (
-          <HitSections hit={hit} canViewTarget={canViewTarget} faceCrop={faceView} />
+          <HitSections hit={hit} canViewTarget={canViewTarget} faceCrop={primaryView} faceCaption={primaryCaption} />
         ) : (
           <Typography.Text type="secondary">{t('faceMatch.results.drawer.noHit')}</Typography.Text>
         )}

@@ -14,6 +14,11 @@ import type {
   FaceGateReport,
   FaceHitDetail,
   FaceHitRecipient,
+  FaceHitResult,
+  FaceHitResultQuery,
+  FaceHitStatus,
+  FaceHitSummary,
+  FaceHitThumbnail,
   FaceMatchConfig,
   FaceMatchPage,
   FaceMatchPermissionFlags,
@@ -35,6 +40,10 @@ import request, { RequestError, unwrapApiData } from '../utils/request'
 
 // 门店人脸比对服务管理接口。返回 ApiResponse 信封，字段 camelCase；权限见各函数注释（Admin 靠角色放行）。
 const API_BASE = '/api/react/v1/face-match'
+/** 通知收件箱接口：「名单命中」视图的「全部标为已读」只用它的 read-all（带 type，只标命中通知）。 */
+const NOTIFICATIONS_API_BASE = '/api/react/v1/notifications'
+/** 命中通知类型，与后端 AppNotificationTypes.FaceUnwelcomeHit、App FACE_HIT_NOTIFICATION_TYPE 一致。 */
+export const FACE_HIT_NOTIFICATION_TYPE = 'face.unwelcome-hit'
 
 /**
  * 安全约定：
@@ -391,6 +400,9 @@ function normalizeCaptureResultHit(value: unknown): FaceCaptureResultHit | null 
     reviewStatusName: asString(raw.reviewStatusName),
     imageAvailable: raw.imageAvailable === true,
     ...normalizeNotifyFields(raw),
+    // 老后端没有这两个字段：按「人工复核」「已读」处理（不凭空显示未读标记）。
+    autoConfirmed: raw.autoConfirmed === true,
+    unread: raw.unread === true,
   }
 }
 
@@ -413,6 +425,46 @@ export function normalizeFaceCaptureResult(value: unknown): FaceCaptureResult {
     faceImageId: asNullableString(raw.faceImageId),
     sceneImageId: asNullableString(raw.sceneImageId),
     hit: normalizeCaptureResultHit(raw.hit),
+  }
+}
+
+/** 命中流一条：缺字段按安全默认值（不未读、不可复核、命中图不在）；百分比夹在 0-100。 */
+export function normalizeFaceHitResult(value: unknown): FaceHitResult {
+  const raw = asRecord(value)
+  return {
+    taskId: asString(raw.taskId),
+    captureId: asNullableString(raw.captureId),
+    storeCode: asString(raw.storeCode),
+    storeName: asNullableString(raw.storeName),
+    cameraId: asString(raw.cameraId),
+    capturedAtUtc: asString(raw.capturedAtUtc),
+    scorePercent: asPercent(raw.scorePercent) ?? 0,
+    band: raw.band === 'high' ? 'high' : raw.band === 'normal' ? 'normal' : null,
+    reviewStatus: asNumber(raw.reviewStatus),
+    reviewStatusName: asString(raw.reviewStatusName),
+    autoConfirmed: raw.autoConfirmed === true,
+    imageAvailable: raw.imageAvailable === true,
+    unread: raw.unread === true,
+    notificationId: asNullableString(raw.notificationId),
+    ...normalizeNotifyFields(raw),
+    canReview: raw.canReview === true,
+    decision: asNullableString(raw.decision),
+    staffScorePercent: asPercent(raw.staffScorePercent),
+    visitScorePercent: asPercent(raw.visitScorePercent),
+    faceCount: asNullableNumber(raw.faceCount) === null ? null : Math.max(0, Math.trunc(asNumber(raw.faceCount))),
+  }
+}
+
+export function normalizeFaceHitSummary(value: unknown): FaceHitSummary {
+  const raw = asRecord(value)
+  const count = (field: unknown) => Math.max(0, Math.trunc(asNumber(field)))
+  return {
+    total: count(raw.total),
+    unread: count(raw.unread),
+    pending: count(raw.pending),
+    autoConfirmed: count(raw.autoConfirmed),
+    confirmed: count(raw.confirmed),
+    dismissed: count(raw.dismissed),
   }
 }
 
@@ -845,4 +897,90 @@ export async function fetchFaceHitDetail(taskId: string, signal?: AbortSignal): 
 export async function fetchFaceCaptureResultImage(captureId: string, imageId: string, signal?: AbortSignal): Promise<Blob> {
   if (!IMAGE_PATH_TASK_ID.test(captureId) || !IMAGE_PATH_TASK_ID.test(imageId)) throw invalidImageTarget()
   return fetchImageBlob(`${API_BASE}/results/${captureId}/images/${imageId}`, signal)
+}
+
+// ───────────── 名单命中流（以命中任务为主表，FaceCapture.Images.View） ─────────────
+
+const HIT_STATUSES: readonly FaceHitStatus[] = ['all', 'unread', 'pending', 'autoConfirmed', 'confirmed', 'dismissed']
+
+/** 命中流列表：空条件不带；hitStatus=all 等于不带；不认识的状态不发给后端（会 400）。列表只有结构化数据，没有图片。 */
+export async function getFaceHits(query: FaceHitResultQuery, signal?: AbortSignal): Promise<FaceMatchPage<FaceHitResult>> {
+  const status = query.hitStatus && HIT_STATUSES.includes(query.hitStatus) && query.hitStatus !== 'all' ? query.hitStatus : undefined
+  const response = await request.get<Envelope>(`${API_BASE}/results/hits`, {
+    params: {
+      storeCode: query.storeCode || undefined,
+      hitStatus: status,
+      fromUtc: query.fromUtc || undefined,
+      toUtc: query.toUtc || undefined,
+      page: query.page,
+      pageSize: Math.min(RESULTS_PAGE_SIZE_MAX, Math.max(1, query.pageSize)),
+    },
+    signal,
+    ...NO_STORE,
+  })
+  return normalizePage(unwrapApiData(response), normalizeFaceHitResult)
+}
+
+/** 命中流各状态条数（门店与时间条件同列表）；unread 是当前登录人自己的未读命中通知数。 */
+export async function getFaceHitSummary(
+  query: Pick<FaceHitResultQuery, 'storeCode' | 'fromUtc' | 'toUtc'>,
+  signal?: AbortSignal,
+): Promise<FaceHitSummary> {
+  const response = await request.get<Envelope>(`${API_BASE}/results/hits/summary`, {
+    params: { storeCode: query.storeCode || undefined, fromUtc: query.fromUtc || undefined, toUtc: query.toUtc || undefined },
+    signal,
+    ...NO_STORE,
+  })
+  return normalizeFaceHitSummary(unwrapApiData(response))
+}
+
+/** 把当前登录人那条命中通知标为已读（幂等）；返回命中通知类型的剩余未读数。编号非法不发请求。 */
+export async function markFaceHitRead(taskId: string): Promise<number> {
+  if (!IMAGE_PATH_TASK_ID.test(taskId)) {
+    throw new RequestError('FACE_MATCH_NOT_FOUND', 404, { success: false, errorCode: 'FACE_MATCH_NOT_FOUND' })
+  }
+  const response = await request.post<Envelope>(`${API_BASE}/results/hits/${taskId}/read`, undefined, NO_STORE)
+  return Math.max(0, Math.trunc(asNumber(asRecord(unwrapApiData(response)).unreadCount)))
+}
+
+/**
+ * 「全部标为已读」：POST /notifications/read-all?type=face.unwelcome-hit，只标命中通知（必须带 type，否则会把全部通知标为已读）。
+ * 标的是当前登录人的全部命中通知，不受列表上门店 / 时间筛选的限制。
+ */
+export async function markAllFaceHitsRead(): Promise<void> {
+  await request.post<Envelope>(`${NOTIFICATIONS_API_BASE}/read-all`, undefined, { params: { type: FACE_HIT_NOTIFICATION_TYPE }, ...NO_STORE })
+}
+
+/** 命中图原图：GET /results/hits/{taskId}/image（FaceCapture.Images.View，服务端每次读取写审计）。只由详情抽屉按需调用。 */
+export async function fetchFaceHitImage(taskId: string, signal?: AbortSignal): Promise<Blob> {
+  if (!IMAGE_PATH_TASK_ID.test(taskId)) throw invalidImageTarget()
+  return fetchImageBlob(`${API_BASE}/results/hits/${taskId}/image`, signal)
+}
+
+/** 后端缩略图接口一批最多 30 项。 */
+export const HIT_THUMBNAIL_BATCH_MAX = 30
+
+/**
+ * 命中图缩略图批量读取：POST /results/thumbnails，只请求 kind=hit（任务编号只放请求体）；服务端每个请求只写一条审计。
+ * 编号不合法的项不发给服务端，结果按 denied 返回；全不合法 / 入参为空不发请求；超过 30 项属于调用方错误，直接抛错。
+ * 返回值是最长边 ≤128 的 JPEG base64：只能交给调用方转成 objectURL 放内存，不得写缓存、存储或日志。
+ */
+export async function fetchFaceHitThumbnails(taskIds: readonly string[], signal?: AbortSignal): Promise<FaceHitThumbnail[]> {
+  if (taskIds.length > HIT_THUMBNAIL_BATCH_MAX) throw new Error('FACE_MATCH_THUMBNAIL_BATCH_TOO_LARGE')
+  const valid = [...new Set(taskIds.filter((id) => IMAGE_PATH_TASK_ID.test(id)))]
+  const returned = new Map<string, FaceHitThumbnail>()
+  if (valid.length > 0) {
+    const response = await request.post<Envelope>(
+      `${API_BASE}/results/thumbnails`,
+      { items: valid.map((id) => ({ kind: 'hit', id })) },
+      { signal, ...NO_STORE },
+    )
+    for (const item of asArray(asRecord(unwrapApiData(response)).items, asRecord)) {
+      if (item.kind !== 'hit') continue
+      const taskId = asString(item.id)
+      const status = asString(item.status, 'denied')
+      returned.set(taskId, { taskId, status, imageBase64: status === 'ok' ? asNullableString(item.imageBase64) : null })
+    }
+  }
+  return taskIds.map((taskId) => returned.get(taskId) ?? { taskId, status: 'denied', imageBase64: null })
 }

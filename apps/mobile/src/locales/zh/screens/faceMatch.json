@@ -21,7 +21,7 @@
       "list": "名单",
       "settings": "设置"
     },
-    "unreadBadge": "{{label}}，{{count}} 条未读黑名单命中"
+    "unreadBadge": "{{label}}，{{count}} 条未读不受欢迎命中"
   },
   "filters": {
     "allStores": "全部门店",
@@ -292,7 +292,7 @@
       "staff": "员工",
       "newVisitor": "新访客",
       "repeatVisitor": "回头客",
-      "blacklist": "黑名单"
+      "blacklist": "不受欢迎"
     },
     "range": {
       "today": "今天",
@@ -314,7 +314,7 @@
       "visit": "访客 {{percent}}%"
     },
     "hit": {
-      "tag": "黑名单命中 {{percent}}%"
+      "tag": "不受欢迎命中 {{percent}}%"
     },
     "duplicate": "重复抓拍",
     "notify": {
@@ -334,7 +334,7 @@
         "store": "门店",
         "decision": "判定",
         "scores": "相似度",
-        "hit": "名单命中",
+        "hit": "不受欢迎命中",
         "faceCount": "人脸数",
         "reviewStatus": "复核状态"
       },
@@ -508,7 +508,7 @@
     },
     "markAll": "全部标为已读",
     "markAllFailed": "标记已读失败，请稍后重试",
-    "empty": "这个时间段没有黑名单命中记录"
+    "empty": "这个时间段没有不受欢迎命中记录"
   },
   "thumb": {
     "deleted": "已删除",

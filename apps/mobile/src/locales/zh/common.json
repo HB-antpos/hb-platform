@@ -53,7 +53,7 @@
     "checkIn": "打卡",
     "reports": "报表",
     "me": "我的",
-    "unreadHitsLabel": "{{label}}，{{count}} 条未读黑名单命中",
+    "unreadHitsLabel": "{{label}}，{{count}} 条未读不受欢迎命中",
     "home": "商品",
     "store": "门店",
     "orders": "订单",

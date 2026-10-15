@@ -104,17 +104,20 @@
       "parseNote": "解析备注",
       "duplicate": "重复报文",
       "parse": {
-        "parsed": "已解析 · Parsed",
-        "partial": "部分解析 · Partial",
-        "unparsed": "未解析 · Unparsed",
-        "notFace": "非人脸事件 · Not face"
+        "parsed": "已解析",
+        "partial": "部分解析",
+        "unparsed": "未解析",
+        "notFace": "非人脸事件"
       },
       "empty": "暂无抓拍记录",
       "loadFailed": "抓拍记录加载失败",
       "prev": "上一页",
       "next": "下一页",
       "pageLabel": "第 {{page}} 页",
-      "images": "图片"
+      "images": "图片",
+      "lastSeen": "最后推送：{{time}}（约 5 分钟精度）",
+      "neverSeen": "最后推送：还没有收到过这台摄像机的推送",
+      "storeOff": "本店（{{store}}）当前未开启处理：抓拍读完即删除，不留记录。"
     },
     "images": {
       "view": "查看图片",

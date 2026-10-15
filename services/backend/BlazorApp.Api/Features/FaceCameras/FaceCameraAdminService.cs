@@ -234,6 +234,12 @@ public sealed class FaceCameraAdminService(
             ? await QueryImageMetaAsync(pageRows.Select(row => row.CaptureId.TrimEnd()).ToList(), cancellationToken)
             : null;
 
+        // 本店档案当前模式（只读一列，按主键查）；没有档案行 → null。
+        var profileModes = await _db.Queryable<FaceStoreProfile>()
+            .Where(profile => profile.StoreCode == entity.StoreCode)
+            .Select(profile => profile.Mode)
+            .ToListAsync(cancellationToken);
+
         return new FaceCapturePageDto
         {
             Items = pageRows.Select(row =>
@@ -257,6 +263,8 @@ public sealed class FaceCameraAdminService(
             PageSize = size,
             HasMore = rows.Count > size,
             CanViewImages = includeImages,
+            StoreMode = profileModes.Count > 0 ? FaceCaptureStoreModes.FromProfileMode(profileModes[0]) : null,
+            LastSeenAtUtc = AsUtc(entity.LastSeenAtUtc),
         };
     }
 

@@ -541,11 +541,11 @@ assert.ok((lookup(en, "review.similarity") as string).includes("not the probabil
   assert.equal(noticeZh, "分数是相似度，不等于是同一个人的概率。照片只在本页显示，离开页面即销毁，每次读取都会记审计。");
   assert.ok(/not the probability/.test(noticeEn) && /only shown on this page/.test(noticeEn) && /destroyed/.test(noticeEn) && /audited/.test(noticeEn));
   assert.equal(/点开详情后才读取|opened/.test(noticeZh + noticeEn), false);
-  // 筛选条：第 2 个是「黑名单」，「仅命中」已去掉；命中标签写「黑名单命中 N%」
-  assert.equal(lookup(zh, "capture.filters.blacklist"), "黑名单");
+  // 筛选条：第 2 个是「不受欢迎」（内部键仍叫 blacklist，跳转参数兼容旧链接），「仅命中」已去掉；命中标签写「不受欢迎命中 N%」（2026-10-16 与 Web 统一用词）
+  assert.equal(lookup(zh, "capture.filters.blacklist"), "不受欢迎");
   assert.equal(lookup(zh, "capture.filters.hitOnly"), undefined);
   assert.equal(lookup(en, "capture.filters.hitOnly"), undefined);
-  assert.equal(lookup(zh, "capture.hit.tag"), "黑名单命中 {{percent}}%");
+  assert.equal(lookup(zh, "capture.hit.tag"), "不受欢迎命中 {{percent}}%");
   assert.equal(lookup(zh, "thumb.deleted"), "已删除");
 }
 // 「抓拍与比对」页顶部提示同样写明口径；通知发送情况只有人数，文案里不出现姓名

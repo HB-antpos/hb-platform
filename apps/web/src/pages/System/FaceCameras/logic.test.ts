@@ -15,6 +15,7 @@ import {
   countCameraStatuses,
   createLatestGuard,
   formatDateTime,
+  formatShortDateTime,
   getCameraStatus,
   getFaceCameraErrorCode,
   hasParseFailures,
@@ -197,6 +198,9 @@ assert.equal(formatDateTime(null), '-')
 assert.equal(formatDateTime(''), '-')
 assert.equal(formatDateTime('not-a-date'), '-')
 assert.match(formatDateTime('2026-10-12T01:02:03Z'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+assert.match(formatShortDateTime('2026-10-12T01:02:03Z'), /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, '抽屉短时间不带年份')
+assert.equal(formatShortDateTime(null), '-')
+assert.equal(formatShortDateTime('not-a-date'), '-')
 
 // ───────── 分页：没有总数，hasMore 控制下一页，页码最大 100 ─────────
 assert.equal(canGoPrevPage(1), false)

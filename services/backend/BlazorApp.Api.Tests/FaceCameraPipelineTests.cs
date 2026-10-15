@@ -58,7 +58,7 @@ public sealed class FaceCameraPipelineTests : IDisposable
             IsAutoCloseConnection = false,
             InitKeyType = InitKeyType.Attribute,
         });
-        _db.CodeFirst.InitTables(typeof(Store), typeof(FaceCamera), typeof(FaceCaptureEvent));
+        _db.CodeFirst.InitTables(typeof(Store), typeof(FaceCamera), typeof(FaceCaptureEvent), typeof(FaceStoreProfile));
         _db.Ado.ExecuteCommand("CREATE UNIQUE INDEX UX_FaceCamera_TokenSha256 ON FaceCamera (TokenSha256)");
         _db.Insertable(new Store { StoreGUID = "s-1013", StoreCode = "1013", StoreName = "Parramatta" }).ExecuteCommand();
 

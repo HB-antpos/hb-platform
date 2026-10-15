@@ -847,7 +847,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | --- | --- |
 | 权限码 | `FaceCapture.Images.View`（中文名「查看人脸抓拍图片」，分类「系统管理」） |
 | 谁能用 | 管理员（Admin 角色靠角色放行）；其他账号必须被管理员在「角色管理」里**显式授予**。与 `FaceCapture.Cameras.Manage` **分开授予**：管理摄像机**不**自动包含查看图片，只有查看权限没有管理权限也进不了该页面（页面入口仍是管理权限） |
-| 列表 | `GET /api/react/v1/face-cameras/{cameraId}/captures`：只在调用者同时持有查看权限时，每条抓拍才带 `images` 元数据（图片编号、种类、存储位置、宽高、大小、人脸框、评分，**不含对象键和任何地址**）并返回 `canViewImages=true`；否则 `images` 恒为空数组、`canViewImages=false`，页面不显示任何图片入口 |
+| 列表 | `GET /api/react/v1/face-cameras/{cameraId}/captures`：只在调用者同时持有查看权限时，每条抓拍才带 `images` 元数据（图片编号、种类、存储位置、宽高、大小、人脸框、评分，**不含对象键和任何地址**）并返回 `canViewImages=true`；否则 `images` 恒为空数组、`canViewImages=false`，页面不显示任何图片入口。响应另带 `storeMode`（摄像机所属门店档案当前配置的模式 `off` / `capture` / `match`，没有档案行为 `null`）与 `lastSeenAtUtc`（摄像机最后一次有效推送，约 5 分钟精度）：抽屉顶部常驻「最后推送」，`off` 时黄色提示本店不处理、不留记录（权限不变） |
 | 内容 | `GET /api/react/v1/face-cameras/{cameraId}/captures/{captureId}/images/{imageId}/content`：对象键**只来自数据库**，客户端只传三个编号；`imageId → captureId → cameraId` 任一不一致都是同一个 404；响应只有图片字节，`Content-Type` 只会是 `image/jpeg` / `image/png`，带 `Cache-Control: no-store`、`Pragma: no-cache`、`X-Content-Type-Options: nosniff`、`Content-Disposition: inline`，不带 ETag 和任何 COS 响应头 |
 
 | 状态码 | 错误码 | 含义 / 页面提示 |
@@ -1048,7 +1048,7 @@ sqlcmd -S <主库地址> -d HBweb -U <管理员账号> -I -b -i services/backend
 | --- | --- | --- | --- |
 | ① 访客库清理 | 5 分钟 | 门店本地营业日结束（本地次日 0 点）或接收端写的 `DeleteAfterUtc` 先到者即 `DeleteGroup`，更新 `FaceVisitGroup.DeletedAtUtc`；另每 6 小时扫描腾讯云里遗漏的过期访客库（命名 `v{门店}_{yyyyMMdd}`、早于两天、且库表登记过或门店确实存在才删，绝不碰 `staff` / `unwelcome` 或别的系统的库） | 无管理凭据不调用腾讯云；没有未删除的库时只是一条查询 |
 | ② 员工库完整性 | 24 小时 | 对比腾讯云员工库人数与 `Status=Active` 的登记数，不一致写审计 `enrollment.integrity-mismatch` 并记 Warning | 无管理凭据，或没有门店启用 |
-| ③ Capture 记录保留清理 | 1 小时 | 删除超过保留天数（默认 7）的 `FaceCaptureEvent` / `FaceCaptureImage` 行，分批（每轮约 1 万行）；只清理数据库行，COS 图片仍由接收端与桶生命周期清理 | **没有任何门店档案不是 Off 时不运行**（存量试点数据不会在功能未启用时被删） |
+| ③ Capture 记录保留清理 | 1 小时 | 删除超过保留天数（默认 7）的 `FaceCaptureEvent` / `FaceCaptureImage` 行及同一批 `CaptureId` 的 `FaceMatchEvaluation` 评估行（评估表没有外键、不级联，按评估 → 图片 → 事件显式删；2026-10-16 之前已孤立的评估行不在此范围内），分批（每轮约 1 万行）；只清理数据库行，COS 图片仍由接收端与桶生命周期清理 | **没有任何门店档案不是 Off 时不运行**（存量试点数据不会在功能未启用时被删） |
 | ④ 名单条目 | 10 分钟 | 到期（Pending / Active）自动改 Expired 并 `DeletePerson` + 删参考照片；重试撤回 / 到期后没清理干净的条目；到期前 30 天经通知平台提醒提交人与批准人（`unwelcome-expiry:{EntryId}`） | 没有到期 / 待清理条目时只是查询 |
 | ⑤ 命中图到期删除 | 10 分钟 | 删除 `ImageDeleteAtUtc` 已到（含已驳回提前到期）的命中图并把 `ImageObjectKey` 置空串；只删形态合法且不在管理端三个私有前缀下的键 | 私有桶未配置 |
 | ⑥ 命中提示发布 + 撤回补偿 | 每个节拍 / 10 分钟 | 发布命中提示（见 16.6）；重试「同意已撤回但腾讯云删除未完成」的登记、补删已撤回登记遗留的登记照 | 命中提示只是一条索引查询 |
@@ -1292,8 +1292,8 @@ ORDER BY StoreCode, StatDate, StatHour;
 
 所有响应都带 `Cache-Control: no-store`（控制器级过滤器）；非管理员只看自己关联的门店（与抓拍流、复核任务同一套门店范围）。
 
-**命中流为什么以任务为主表，不能用留存抓拍**：Match 模式（真实顾客）**不留存抓拍**，但命中通知照发。如果「黑名单」视图依赖留存抓拍，就会出现「红色数字写 3、点进去是空的」。
-所以命中流以 `FaceMatchTask` 为准，留存抓拍与评估只是「有就带上」：`captureId` / `decision` / `staffScorePercent` / `visitScorePercent` / `faceCount` 用「同摄像机 + 同接收时间」对应（接收端建任务时就是用抓拍的这两列），没有对应抓拍（Match 模式）就是 `null`。
+**命中流为什么以任务为主表，不能用留存抓拍**：2026-10-16 之前 Match 模式（真实顾客）**不留存抓拍**，但命中通知照发；如果「黑名单」视图依赖留存抓拍，那段时间的命中就会出现「红色数字写 3、点进去是空的」。2026-10-16 起 Match 也与 Capture 一样留存抓拍，新命中一般都能对应到抓拍记录，但历史命中仍没有。
+所以命中流以 `FaceMatchTask` 为准，留存抓拍与评估只是「有就带上」：`captureId` / `decision` / `staffScorePercent` / `visitScorePercent` / `faceCount` 用「同摄像机 + 同接收时间」对应（接收端建任务时就是用抓拍的这两列），没有对应抓拍（改版前的 Match 命中、抓拍已过保留期）就是 `null`；有抓拍但没有评估行（未评估）时判定与分数为 `null`。
 
 命中流单条（`FaceHitResultDto`，JSON 驼峰）：`taskId`、`captureId?`、`storeCode`、`storeName?`、`cameraId`、`capturedAtUtc`、`scorePercent`（0–100，相似度，**不是同一个人的概率**）、`band`（`high` / `normal`）、`reviewStatus`（0 待复核 / 1 已驳回 / 2 已确认）、`reviewStatusName`、
 `autoConfirmed`（已确认且复核人是 `system`）、`imageAvailable`（`ImageObjectKey` 非空 = 命中图还在保留期）、`unread`、`notificationId?`、`notifyState`（`sent` / `pending` / `skipped`）、`notifiedAtUtc?`、`notifyRecipientCount`、`notifyReadCount`、
@@ -1355,7 +1355,8 @@ ORDER BY StoreCode, StatDate, StatHour;
   校验失败（条数不对、`kind` 不认识）的请求没有看任何图，不记审计。审计写不进去则整个请求失败、不返回任何图片字节。
   它**不调用**摄像机管理页的整图读取（那条路径逐张写带抓拍 / 图片编号的结构化日志，批量调用会违反「一次请求一条、不含编号」），而是复用它的校验函数与同一个对象存储读取器。
   **点开详情看大图**仍然是按需读取并**单独审计**（抓拍整图走 14.8 的读取与 `GET /results/{captureId}/images/{imageId}`；命中图走 `…/hits/{taskId}/image`，审计动作 `unwelcome.task.view-capture`）。
-- 隐私要求（与手机端约定）：缩略图只放内存（组件 state / ref），不写磁盘、不进缓存、不进日志；离开页面或切后台立即销毁；页头「眼睛」按钮可一键隐藏全部缩略图。没有 `FaceCapture.Images.View`、没留存照片（Match 模式）、已过保留期（命中图 7 天）的行显示占位图标。
+- 隐私要求（与手机端约定）：缩略图只放内存（组件 state / ref），不写磁盘、不进缓存、不进日志；离开页面或切后台立即销毁；页头「眼睛」按钮可一键隐藏全部缩略图。没有 `FaceCapture.Images.View`、没有可用的留存图（抓拍没有人脸小图 / 图片还在接收端本地）、已过保留期（命中图 7 天）的行显示占位图标。2026-10-16 起 Match 模式与 Capture 一样留存照片，不再有「Match 行不留照片」的占位。
+- Web（`/system/face-match` 的「抓拍与比对」页签）：「全部抓拍」列表仍不加载任何真实照片（只有占位图标，点「查看」才按需读取）；「名单命中」视图（顶部分段切换，红色数字 = 当前登录人未读命中通知数）以命中流为准，**每页一次**批量取命中图缩略图（只请求 `kind=hit`，审计同样一次请求一条），详情抽屉里命中图走 `…/hits/{taskId}/image`。
 
 **菜单与旧入口**
 
@@ -1391,9 +1392,11 @@ ORDER BY StoreCode, StatDate, StatHour;
 | --- | --- | --- | --- | --- | --- |
 | `Off` | 否 | **读完元数据即删**（`.json`、`.bin`、各类标记全删） | 不上传 | 不写 | 不写 |
 | `Capture` | 否；`EvaluateMatch=1` 且匹配可用时，入库成功后**额外**搜一次，把分数写 `FaceMatchEvaluation`；**开了名单（见 17.4）时**另对每张人脸只搜 `unwelcome` 库（最低分 = 名单阈值），命中建 `FaceMatchTask` 并存命中图（私有 COS） | 与 P1 完全相同（存图、写 `.processed`，按保留期清理） | 按 P1 配置 | 照常写 | 不写 |
-| `Match` | 是（见下） | 处理完（无论结果）**全部删除**，不留 `.processed` 等任何残留 | **不上传**；唯一例外是名单命中任务的人脸图 | **不写** | 只写 `FaceTrafficBucket`（整点桶累加） |
+| `Match` | 是（见下） | 2026-10-16 起与 `Capture` 相同（存图、写 `.processed`，按保留期清理） | 按 P1 配置；名单命中图另存私有 COS | 2026-10-16 起照常写（另写 `FaceMatchEvaluation`） | 写 `FaceTrafficBucket`（整点桶累加） |
 
-`Match` 的处理顺序（每张人脸一次 `SearchFacesReturnsByGroup`，`MaxFaceNum=1`，Base64 上传，`QualityControl=2`）：
+**2026-10-16 起 `Match` 模式与 `Capture` 一样留存抓拍照片与记录（保留期同 `Capture`），另外累加客流计数与名单比对**：先按 `Capture` 完整入库（重试 / `.processed` / `.failed` 语义不变），事件行**本次新插入且不是重复报文**时，再做下面的比对并按第一张人脸的判定写一行 `FaceMatchEvaluation`；不再另做 `Capture` 的评估 / 名单检查。
+
+`Match` 的比对顺序（每张人脸一次 `SearchFacesReturnsByGroup`，`MaxFaceNum=1`，Base64 上传，`QualityControl=2`）：
 
 1. 同摄像机、同请求体哈希在 `DuplicateBodyWindowSeconds`（300 秒）内重复 → 不搜索、不计数（断网续传的重复推送）。
 2. 员工排除开启且该摄像机 `StaffSuppressSeconds`（30 秒）内刚命中过员工 → 直接计 `StaffMatchCount`，不搜索。
@@ -1402,14 +1405,14 @@ ORDER BY StoreCode, StatDate, StatHour;
 5. 判定：员工命中（≥ 员工阈值）→ `StaffMatchCount+1`；否则名单命中（≥ 名单阈值，且条目未过期、门店在范围内）→ 建 `FaceMatchTask`（见 17.8）；
    去重开启时访客命中（≥ 访客阈值）→ `RepeatCount+1`，无命中 → 在当日访客库建一人并 `UniqueVisitorCount+1`、`FaceVisitGroup.VisitorCount+1`；
    没开去重 → 只有 `CaptureCount`（「非员工」= 抓拍数 − 员工 − 低质量 − 调用失败）。
-6. 腾讯云调用失败：瞬时错误 / 限频指数退避重试（默认最多 3 次、起步 500ms、封顶 8s，限频起步 ×4），超限则**丢弃并 `ApiFailureCount+1`**，不因失败而留存图片。
+6. 腾讯云调用失败：瞬时错误 / 限频指数退避重试（默认最多 3 次、起步 500ms、封顶 8s，限频起步 ×4），超限则**放弃这张人脸的比对并 `ApiFailureCount+1`**（照片已按 Capture 留存）。
    质量类错误（无人脸等）不重试，计低质量。账号级错误（`AuthFailure.*`、`ResourceUnavailable.*` 欠费 / 未开通 等）告警、不重试，并**暂停调用 60 秒**（期间直接丢弃并计失败）。
-7. 数据库写失败（计数桶 / 访客库行 / 任务）：按处理器退避重试，最多 3 次或本地滞留超 15 分钟，之后**丢弃本条**并记 Error（`dropped after repeated failures`），不会进入 `.failed` 把图片留到保留期。
+7. 入库失败（存图 / 事件行）：按 `Capture` 退避重试，用尽写 `.failed`；入库成功前不比对、不计数。2026-10-16 起比对这一步（计数桶 / 访客库行 / 任务 / 命中图 / 评估行）写失败**只记节流 Warning、不重试整条**（重试会重复存图），这条抓拍因此少计：Warning 为 `Face match processing in Match mode failed and was skipped` 或 `Face match evaluation row in Match mode failed`。入库成功但没写成 `.processed` 而被重处理时，事件行已存在，也不再计数（宁少计不重复计）。
 
 其它口径：
 
 - **同一家店串行**（每店一把锁）：相邻两条抓拍不会同时判成「新访客」而重复建人；不同店互不阻塞。
-- `CaptureCount` 按**人脸张数**计（一条报文通常只有一张）。没有人脸图的报文（移动侦测、解析失败）只丢弃，不计数。
+- `CaptureCount` 按**人脸张数**计（一条报文通常只有一张）。没有人脸图的报文（移动侦测、解析失败）照 `Capture` 入库，不计数、不写评估行。
 - 访客库营业日 = 抓拍接收时刻在门店时区的本地日期；`FaceVisitGroup.DeleteAfterUtc` = 营业日次日本地 02:00 对应的 UTC。
   处理时已过该时间的**迟到积压抓拍**不再建库建人（只计抓拍数），避免重建一个没人清理的库。
 - 访客 `PersonId` 由抓拍编号确定性哈希生成，重试遇到「已存在」视为成功，不会因重试多建人；访客没有姓名、性别、描述字段。
@@ -1428,7 +1431,7 @@ ORDER BY StoreCode, StatDate, StatHour;
 | `FACE_MATCH_MIN_EDGE_PIXELS` / `FACE_MATCH_MIN_FACE_BYTES` | `80` / `4096` | 质量闸门 |
 
 不开放 `.env` 覆盖、沿用 appsettings 默认的项：重试次数 / 退避（`FaceMatch:Retry:*`）、熔断时长（`FatalCooldownSeconds=60`）、档案刷新（`ProfileRefreshSeconds=30`）、
-Match 处理失败上限（`MatchMaxAttempts=3`、`MatchMaxLocalAgeMinutes=15`）、命中图保留（`Unwelcome:ImageRetentionDays=7`）。
+Match 处理失败上限（`MatchMaxAttempts=3`、`MatchMaxLocalAgeMinutes=15`；2026-10-16 起不再使用，入库重试按 `ProcessingMaxAttempts`）、命中图保留（`Unwelcome:ImageRetentionDays=7`）。
 **按门店覆盖阈值**需要改配置：在 `appsettings.json` 或额外挂载的配置里写 `FaceMatch:Stores:<门店编码>:StaffThreshold` / `VisitorThreshold` / `UnwelcomeThreshold`（环境变量写法 `FaceMatch__Stores__S1013__StaffThreshold`）。
 
 任一取值非法（阈值不在 0–100、格式错误等）→ 匹配整体关闭，原因（只含键名）记在启动日志；**不会让容器起不来**，接收落盘不受影响。
@@ -1554,7 +1557,7 @@ sudo grep -c '^FACE_MATCH_TENCENT_SECRET_' .env       # 只核对行数应为 2�
 | 档案读不到 | `Face store profile refresh failed`：连接、权限（17.7）、表是否已迁移。读不到期间已配凭据的门店按 `Off` |
 | 模式被降级 / 合规记录缺口提醒 | Warning `Face match store mode degraded store=… reason=…`（模板文字沿用，监控按它过滤的不必改）。`reason`：`timezone`、`unwelcome-no-cos`、`match-disabled-by-configuration`、`capture-unwelcome-*` 是功能前提不满足（会关掉对应功能）；**`match-without-legal-records` 只是提醒——Match 在缺合规记录下照常运行，需尽快补齐**。每店每原因 10 分钟一条。旧原因 `cross-border-gate`、`unwelcome-gate`、`downgraded-*` 已不再出现 |
 | 腾讯云调用失败 | Warning / Error `Face match API call failed and was dropped … code=…`（同一错误码 2 分钟一条）。账号级错误（`AuthFailure.*`、`ResourceUnavailable.*`）是 Error 并熔断 60 秒：检查密钥、策略、服务是否开通 / 欠费 |
-| 计数不涨 | `Face ingest capture matched … faces= staff= unique= repeat= lowQuality= apiFailure=`（每条一行，无敏感信息）；`Face ingest Match capture dropped after repeated failures` 表示数据库写失败被丢弃 |
+| 计数不涨 | `Face ingest capture matched … faces= staff= unique= repeat= lowQuality= apiFailure=`（每条一行，无敏感信息）；`Face ingest Match capture dropped after repeated failures` 表示数据库写失败被丢弃（2026-10-16 前的口径）；2026-10-16 起看 `Face match processing in Match mode failed and was skipped`（入库已成功、这条少计） |
 | 磁盘上有 Match 门店的报文 | 只应出现在处理间隔内；长期滞留说明处理器停了（`FACE_INGEST_PROCESSING_ENABLED=false`）或档案读取一直失败（启动等待） |
 
 ### 17.11 回滚

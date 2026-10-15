@@ -105,4 +105,13 @@ export interface FaceCapturePage {
   hasMore: boolean
   /** 调用者是否持有 FaceCapture.Images.View；为 false 时每条记录的 images 都是空数组。 */
   canViewImages: boolean
+  /**
+   * 摄像机所属门店档案当前配置的模式：off / capture / match；该店没有档案行（或老后端没有这个字段）时为 null。
+   * 只有 off 时抽屉显示「本店未开启处理、不留记录」提示。
+   */
+  storeMode: FaceCaptureStoreMode | null
+  /** 摄像机最后一次有效推送时间（UTC，接收端约 5 分钟节流更新）；从未推送为 null。 */
+  lastSeenAtUtc: string | null
 }
+
+export type FaceCaptureStoreMode = 'off' | 'capture' | 'match'

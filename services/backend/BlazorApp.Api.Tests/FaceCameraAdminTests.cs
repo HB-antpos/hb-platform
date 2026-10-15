@@ -62,7 +62,7 @@ public sealed class FaceCameraAdminTests : IDisposable
             IsAutoCloseConnection = false,
             InitKeyType = InitKeyType.Attribute,
         });
-        _db.CodeFirst.InitTables(typeof(Store), typeof(FaceCamera), typeof(FaceCaptureEvent));
+        _db.CodeFirst.InitTables(typeof(Store), typeof(FaceCamera), typeof(FaceCaptureEvent), typeof(FaceStoreProfile));
         _db.Ado.ExecuteCommand("CREATE UNIQUE INDEX UX_FaceCamera_TokenSha256 ON FaceCamera (TokenSha256)");
         _db.Insertable(new List<Store>
         {
@@ -630,6 +630,31 @@ public sealed class FaceCameraAdminTests : IDisposable
 
         Assert.False(page.CanViewImages);
         Assert.Empty(page.Items.Single().Images);
+    }
+
+    [Fact]
+    public async Task Captures_带本店档案模式与最后推送时间_没有档案为null()
+    {
+        var seen = Now.AddMinutes(-4);
+        await SeedCameraAsync("cam-1", lastSeen: seen);
+        await SeedCameraAsync("cam-2", storeCode: "2001");
+        await _db.Insertable(new FaceStoreProfile { StoreCode = StoreCode, Mode = FaceStoreMode.Match }).ExecuteCommandAsync();
+        await SeedEventAsync("e01", "cam-1", Now.AddMinutes(-1), faceCount: 1, parseStatus: 0);
+
+        var page = await CreateService().ListCapturesAsync("cam-1", 1, 20);
+        var noProfile = await CreateService().ListCapturesAsync("cam-2", 1, 20);
+
+        Assert.Equal(FaceCaptureStoreModes.Match, page.StoreMode);
+        Assert.Equal(seen, page.LastSeenAtUtc);
+        Assert.Equal(DateTimeKind.Utc, page.LastSeenAtUtc!.Value.Kind);
+        Assert.Equal(["e01"], page.Items.Select(item => item.CaptureId));
+        Assert.Null(noProfile.StoreMode);                                                // 没有档案行：不替接收端猜
+        Assert.Null(noProfile.LastSeenAtUtc);
+
+        await _db.Updateable<FaceStoreProfile>().SetColumns(profile => profile.Mode == FaceStoreMode.Off).Where(profile => profile.StoreCode == StoreCode).ExecuteCommandAsync();
+        Assert.Equal(FaceCaptureStoreModes.Off, (await CreateService().ListCapturesAsync("cam-1", 1, 20)).StoreMode);
+        await _db.Updateable<FaceStoreProfile>().SetColumns(profile => profile.Mode == FaceStoreMode.Capture).Where(profile => profile.StoreCode == StoreCode).ExecuteCommandAsync();
+        Assert.Equal(FaceCaptureStoreModes.Capture, (await CreateService().ListCapturesAsync("cam-1", 1, 20)).StoreMode);
     }
 
     [Fact]

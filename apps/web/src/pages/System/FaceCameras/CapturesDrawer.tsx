@@ -16,6 +16,7 @@ import {
   canGoPrevPage,
   createLatestGuard,
   formatDateTime,
+  formatShortDateTime,
 } from './logic'
 
 // 文案键写成字面量映射而不是模板拼接：契约测试按字面量扫描键。
@@ -25,6 +26,19 @@ const PARSE_STATUS_KEYS: Record<FaceCaptureParseStatus, string> = {
   2: 'faceCameras.captures.parse.unparsed',
   3: 'faceCameras.captures.parse.notFace',
 }
+
+// 列宽：抽屉 960 宽、内容区约 912，合计控制在内容区以内，桌面上不出现横向滚动（窄屏仍可横向滚动）。
+const COLUMN_WIDTHS = {
+  receivedAt: 124,
+  images: 120,
+  eventTime: 124,
+  eventType: 120,
+  faceCount: 64,
+  parseStatus: 150,
+  parseNote: 140,
+} as const
+const TABLE_WIDTH_WITHOUT_IMAGES =
+  COLUMN_WIDTHS.receivedAt + COLUMN_WIDTHS.eventTime + COLUMN_WIDTHS.eventType + COLUMN_WIDTHS.faceCount + COLUMN_WIDTHS.parseStatus + COLUMN_WIDTHS.parseNote
 
 interface CapturesDrawerProps {
   /** 要查看的摄像机。父组件仅在选中摄像机时挂载本组件，换摄像机会重新挂载，页码与数据天然从头开始。 */
@@ -88,62 +102,17 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
       {
         title: t('faceCameras.captures.receivedAt'),
         dataIndex: 'receivedAtUtc',
-        width: 160,
-        render: (value: string) => formatDateTime(value),
+        width: COLUMN_WIDTHS.receivedAt,
+        // 同页都在近几天内：去掉年份（悬停看完整时间）。
+        render: (value: string) => <span title={formatDateTime(value)}>{formatShortDateTime(value)}</span>,
       },
-      {
-        title: t('faceCameras.captures.eventTime'),
-        dataIndex: 'cameraEventTime',
-        width: 160,
-        render: (value: string | null) => formatDateTime(value),
-      },
-      {
-        title: t('faceCameras.captures.eventType'),
-        dataIndex: 'eventType',
-        width: 120,
-        ellipsis: true,
-        render: (value: string | null) => value ?? '-',
-      },
-      {
-        title: t('faceCameras.captures.faceCount'),
-        dataIndex: 'faceCount',
-        width: 80,
-        align: 'right',
-      },
-      {
-        title: t('faceCameras.captures.parseStatus'),
-        dataIndex: 'parseStatus',
-        width: 190,
-        render: (_: unknown, record) => (
-          <Space size={4} wrap>
-            <Tag color={PARSE_STATUS_COLORS[record.parseStatus]} style={{ marginInlineEnd: 0 }}>
-              {t(PARSE_STATUS_KEYS[record.parseStatus])}
-            </Tag>
-            {record.isDuplicate ? <Tag color="blue">{t('faceCameras.captures.duplicate')}</Tag> : null}
-          </Space>
-        ),
-      },
-      {
-        title: t('faceCameras.captures.parseNote'),
-        dataIndex: 'parseNote',
-        width: 180,
-        ellipsis: { showTitle: false },
-        render: (value: string | null) =>
-          value ? (
-            <Tooltip title={value} placement="topLeft">
-              <span>{value}</span>
-            </Tooltip>
-          ) : (
-            '-'
-          ),
-      },
-      // 没有查看图片权限时后端不返回图片元数据，这一列整列不出现，页面上看不出图片结构。
+      // 图片列放第 2 列（不用横向滚动就能看到）。没有查看图片权限时后端不返回图片元数据，这一列整列不出现，页面上看不出图片结构。
       ...(canViewImages
         ? [
             {
               title: t('faceCameras.captures.images'),
               key: 'images',
-              width: 120,
+              width: COLUMN_WIDTHS.images,
               render: (_: unknown, record: FaceCapture) => {
                 const action = getRowImageAction(canViewImages, record.images)
                 if (action === 'view') {
@@ -165,6 +134,52 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
             },
           ]
         : []),
+      {
+        title: t('faceCameras.captures.eventTime'),
+        dataIndex: 'cameraEventTime',
+        width: COLUMN_WIDTHS.eventTime,
+        render: (value: string | null) => <span title={formatDateTime(value)}>{formatShortDateTime(value)}</span>,
+      },
+      {
+        title: t('faceCameras.captures.eventType'),
+        dataIndex: 'eventType',
+        width: COLUMN_WIDTHS.eventType,
+        ellipsis: true,
+        render: (value: string | null) => value ?? '-',
+      },
+      {
+        title: t('faceCameras.captures.faceCount'),
+        dataIndex: 'faceCount',
+        width: COLUMN_WIDTHS.faceCount,
+        align: 'right',
+      },
+      {
+        title: t('faceCameras.captures.parseStatus'),
+        dataIndex: 'parseStatus',
+        width: COLUMN_WIDTHS.parseStatus,
+        render: (_: unknown, record) => (
+          <Space size={4} wrap>
+            <Tag color={PARSE_STATUS_COLORS[record.parseStatus]} style={{ marginInlineEnd: 0 }}>
+              {t(PARSE_STATUS_KEYS[record.parseStatus])}
+            </Tag>
+            {record.isDuplicate ? <Tag color="blue">{t('faceCameras.captures.duplicate')}</Tag> : null}
+          </Space>
+        ),
+      },
+      {
+        title: t('faceCameras.captures.parseNote'),
+        dataIndex: 'parseNote',
+        width: COLUMN_WIDTHS.parseNote,
+        ellipsis: { showTitle: false },
+        render: (value: string | null) =>
+          value ? (
+            <Tooltip title={value} placement="topLeft">
+              <span>{value}</span>
+            </Tooltip>
+          ) : (
+            '-'
+          ),
+      },
     ],
     [canViewImages, t],
   )
@@ -183,6 +198,17 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
       }
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        {/* 本店未开启处理（档案 Mode=Off）：接收端读完即删，下面不会再有新记录。Capture / Match 都留存照片，不另做提示。 */}
+        {result?.storeMode === 'off' ? (
+          <Alert type="warning" showIcon message={t('faceCameras.captures.storeOff', { store: camera.storeCode })} />
+        ) : null}
+        {result ? (
+          <Typography.Text type="secondary">
+            {result.lastSeenAtUtc
+              ? t('faceCameras.captures.lastSeen', { time: formatDateTime(result.lastSeenAtUtc) })
+              : t('faceCameras.captures.neverSeen')}
+          </Typography.Text>
+        ) : null}
         <Typography.Text type="secondary">
           {canViewImages ? t('faceCameras.captures.imagesOnDemand') : t('faceCameras.captures.metadataOnly')}
         </Typography.Text>
@@ -206,7 +232,7 @@ export default function CapturesDrawer({ camera, onClose }: CapturesDrawerProps)
           dataSource={result?.items ?? []}
           columns={columns}
           pagination={false}
-          scroll={{ x: canViewImages ? 1010 : 890 }}
+          scroll={{ x: canViewImages ? TABLE_WIDTH_WITHOUT_IMAGES + COLUMN_WIDTHS.images : TABLE_WIDTH_WITHOUT_IMAGES }}
           locale={{ emptyText: loading ? ' ' : <Empty description={t('faceCameras.captures.empty')} /> }}
         />
         <Space style={{ justifyContent: 'flex-end', width: '100%' }}>

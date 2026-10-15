@@ -199,6 +199,23 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
     }
 
     [Fact]
+    public async Task 保留清理_评估行随事件一起删_没有评估行的抓拍照常清_未过期的保留()
+    {
+        SeedProfile("1013", FaceStoreMode.Match);
+        SeedCapture("old-eval", daysAgo: 9);                                                   // 有图片行 + 评估行（Capture 开评估 / Match 都会写）
+        SeedEvaluation("old-eval");
+        SeedCapture("old-plain", daysAgo: 8);                                                  // 没有评估行（未评估、重复报文等）
+        SeedCapture("new-eval", daysAgo: 1);
+        SeedEvaluation("new-eval");
+
+        Assert.Equal(2, await _h.Maintenance.CleanupCaptureRecordsAsync(default));
+
+        Assert.Equal(["new-eval"], (await _h.Db.Queryable<FaceCaptureEvent>().ToListAsync()).Select(e => e.CaptureId));
+        Assert.Equal(["new-eval"], (await _h.Db.Queryable<FaceMatchEvaluation>().ToListAsync()).Select(e => e.CaptureId));
+        Assert.Equal(["img-new-eval"], await _h.Db.Ado.SqlQueryAsync<string>("SELECT ImageId FROM FaceCaptureImage"));
+    }
+
+    [Fact]
     public async Task 保留清理_大量过期行分批删完()
     {
         SeedProfile("1013", FaceStoreMode.Capture);
@@ -859,6 +876,9 @@ public sealed class FaceMatchMaintenanceTests : IDisposable
         }).ExecuteCommand();
         _h.Db.Ado.ExecuteCommand($"INSERT INTO FaceCaptureImage (ImageId, CaptureId) VALUES ('img-{captureId}', '{captureId}')");
     }
+
+    private void SeedEvaluation(string captureId) =>
+        _h.Db.Insertable(new FaceMatchEvaluation { CaptureId = captureId, Decision = 2, VisitScore = 99m }).ExecuteCommand();
 
     private string SeedEntry(byte status, int expiresInDays, int photos, int reviewDueInDays = 0)
     {

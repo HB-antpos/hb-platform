@@ -2,8 +2,18 @@ import assert from 'node:assert/strict'
 
 import dayjs from 'dayjs'
 
-import type { FaceCaptureResult, FaceStoreProfile } from '../../../types/faceMatch'
+import type { FaceCaptureResult, FaceHitResult, FaceStoreProfile } from '../../../types/faceMatch'
 import { RequestError } from '../../../utils/request'
+import {
+  HIT_STATUS_LABEL_KEYS,
+  HIT_STATUS_VALUES,
+  buildHitSummaryQuery,
+  buildHitsQuery,
+  collectThumbnailTaskIds,
+  defaultHitsRange,
+  hitStatusCount,
+  hitToCaptureResult,
+} from './hitsLogic'
 import {
   AUTO_CONFIRM_SCORE_DEFAULT,
   AUTO_CONFIRM_SCORE_MAX,
@@ -607,7 +617,7 @@ assert.ok(buildHitNotificationBody(Number.NaN).includes('similarity 0%'))
 assert.ok(buildHitNotificationBody(180).includes('similarity 100%'))
 
 // 去复核 / 查看的可用性
-const hit = { taskId: 't1', scorePercent: 87, band: null, reviewStatus: 0, reviewStatusName: 'pending', imageAvailable: true, notifyState: 'sent', notifiedAtUtc: '2026-10-14T01:00:05Z', notifyRecipientCount: 3, notifyReadCount: 1 }
+const hit = { taskId: 't1', scorePercent: 87, band: null, reviewStatus: 0, reviewStatusName: 'pending', imageAvailable: true, notifyState: 'sent', notifiedAtUtc: '2026-10-14T01:00:05Z', notifyRecipientCount: 3, notifyReadCount: 1, autoConfirmed: false, unread: false }
 assert.equal(canGoReview({ hit }), true)
 assert.equal(canGoReview({ hit: { ...hit, imageAvailable: false } }), false, '命中图已删除不能去复核')
 assert.equal(canGoReview({ hit: null }), false, '没有命中没有任务可复核')
@@ -690,5 +700,37 @@ assert.equal(stepTargetIndex(0, 1, 1), 0, '只有一张时哪也去不了')
 // 表单值与请求体的键一一对应（编译期有类型保证，这里保证运行期不漏）
 const formKeys = Object.keys(values as FaceProfileFormValues).sort().join(',')
 assert.equal(formKeys, Object.keys(request).sort().join(','), '表单字段与请求体字段一一对应')
+
+// ───────── 名单命中视图 ─────────
+assert.deepEqual([...HIT_STATUS_VALUES], ['all', 'unread', 'pending', 'autoConfirmed', 'confirmed', 'dismissed'], '状态取值与后端 FaceHitStatuses 一致、顺序即按钮顺序')
+assert.ok(HIT_STATUS_VALUES.every((status) => HIT_STATUS_LABEL_KEYS[status].startsWith('faceMatch.hits.status.')))
+const hitSummary = { total: 19, unread: 3, pending: 0, autoConfirmed: 19, confirmed: 0, dismissed: 0 }
+assert.equal(hitStatusCount(hitSummary, 'all'), 19, '全部 = total')
+assert.equal(hitStatusCount(hitSummary, 'unread'), 3)
+assert.equal(hitStatusCount(null, 'all'), null, '汇总还没到不显示数字')
+const hitsRange = defaultHitsRange(new Date(2026, 9, 16, 9, 30))
+assert.equal(hitsRange.start.format('YYYY-MM-DD HH:mm'), '2026-10-10 00:00', '默认最近 7 天（含今天）')
+assert.equal(hitsRange.end.format('YYYY-MM-DD HH:mm'), '2026-10-16 23:59')
+const hitsQuery = buildHitsQuery({ storeCode: '1042', status: 'unread', range: hitsRange }, 2, 20)
+assert.equal(hitsQuery.hitStatus, 'unread')
+assert.equal(hitsQuery.storeCode, '1042')
+assert.equal(hitsQuery.page, 2)
+assert.equal(hitsQuery.toUtc, hitsRange.end.add(1, 'minute').toISOString(), '终点分钟含在内')
+assert.equal(buildHitsQuery({ storeCode: null, status: 'all', range: null }, 1, 20).hitStatus, undefined, 'all 不带状态')
+assert.equal(buildHitsQuery({ storeCode: '', status: 'weird' as never, range: null }, 1, 20).hitStatus, undefined, '不认识的状态不发给后端')
+assert.deepEqual(buildHitSummaryQuery({ storeCode: null, range: null }), { storeCode: undefined }, '汇总只有门店与时间')
+assert.deepEqual(collectThumbnailTaskIds(['a', null, 'b', 'a', undefined, 'c'], 2), ['a', 'b'], '缩略图编号去重、保序、限量')
+const hitRow: FaceHitResult = {
+  taskId: 'T1', captureId: null, storeCode: '1042', storeName: 'TestStore', cameraId: 'cam', capturedAtUtc: '2026-10-16T08:19:08Z',
+  scorePercent: 100, band: 'high', reviewStatus: 2, reviewStatusName: 'confirmed', autoConfirmed: true, imageAvailable: true,
+  unread: true, notificationId: 'n1', notifyState: 'sent', notifiedAtUtc: '2026-10-16T08:19:10Z', notifyRecipientCount: 4, notifyReadCount: 1,
+  canReview: false, decision: null, staffScorePercent: null, visitScorePercent: null, faceCount: null,
+}
+const adapted = hitToCaptureResult(hitRow)
+assert.equal(adapted.captureId, 'T1', '没有抓拍记录时用任务编号作抽屉的 key')
+assert.equal(adapted.faceImageId, null, '命中流不带抓拍图片编号，抽屉不读抓拍图')
+assert.equal(adapted.evaluated, false, '没有对应抓拍记录 → 未评估')
+assert.deepEqual([adapted.hit?.taskId, adapted.hit?.autoConfirmed, adapted.hit?.unread, adapted.hit?.notifyRecipientCount], ['T1', true, true, 4])
+assert.equal(hitToCaptureResult({ ...hitRow, captureId: 'C1', decision: 'repeatVisitor', visitScorePercent: 99 }).evaluated, true)
 
 console.log('FaceMatch logic.test: ok')

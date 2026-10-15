@@ -837,8 +837,8 @@ assert.equal(
   assert.ok(/backgroundColor:\s*"#D92D20"/.test(tabBar) && /borderWidth:\s*1\.5/.test(tabBar) && /minWidth:\s*18/.test(tabBar) && /fontSize:\s*11/.test(tabBar));
   const zhCommon = JSON.parse(readFileSync(resolve(localeRoot, "zh/common.json"), "utf8"));
   const enCommon = JSON.parse(readFileSync(resolve(localeRoot, "en/common.json"), "utf8"));
-  assert.equal(zhCommon.tabs.unreadHitsLabel, "{{label}}，{{count}} 条未读黑名单命中");
-  assert.equal(enCommon.tabs.unreadHitsLabel, "{{label}}, {{count}} unread blacklist hits");
+  assert.equal(zhCommon.tabs.unreadHitsLabel, "{{label}}，{{count}} 条未读不受欢迎命中");
+  assert.equal(enCommon.tabs.unreadHitsLabel, "{{label}}, {{count}} unread unwelcome hits");
   assert.equal(zhCommon.tabs.faceHub, "人脸比对");
   assert.equal(enCommon.tabs.faceHub, "Face matching");
 }

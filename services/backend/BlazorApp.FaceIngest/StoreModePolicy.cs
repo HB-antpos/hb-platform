@@ -9,7 +9,10 @@ internal enum StoreModeKind
     /// <summary>现有 P1 行为完全不变（全部留存）；可选再做匹配评估写 FaceMatchEvaluation。</summary>
     Capture,
 
-    /// <summary>匹配后丢弃：质量闸门 → 一次搜索 → 只累加计数 → 删除全部本地报文，不上传 COS（名单命中图除外）。</summary>
+    /// <summary>
+    /// 2026-10-16 起与 Capture 一样留存抓拍照片与记录（存图、事件行 + 图片行、原始报文，保留期同 Capture），
+    /// 另外累加客流计数（质量闸门 → 一次搜索 → 计数 / 当日访客去重）与名单比对（命中图另存私有 COS，所以名单仍要求 COS 可用）。
+    /// </summary>
     Match,
 }
 

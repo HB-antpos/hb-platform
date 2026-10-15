@@ -257,6 +257,117 @@ export function createResultImageSession(options: ResultImageSessionOptions): Re
   }
 }
 
+// ───────────── 名单命中图（Match 行没有抓拍照片，只看命中图） ─────────────
+
+export interface HitImageSessionOptions {
+  /** 读取命中图原图（GET /results/hits/{taskId}/image，服务端每次读取写审计）。 */
+  fetchHit: (signal: AbortSignal) => Promise<Blob>
+  onChange: (states: ReviewImageStates) => void
+  urlApi?: ObjectUrlApi
+}
+
+/**
+ * 详情抽屉里的命中图：就是只有「现场抓拍」一个槽位（CAPTURE_SLOT）的复核会话，不带参考照片。
+ * 生命周期（晚到响应丢弃、dispose 撤销 objectURL、失败分类）与复核弹框完全一致，不另写一份。
+ */
+export function createHitImageSession(options: HitImageSessionOptions): ReviewImageSession {
+  return createReviewImageSession({
+    referenceCount: 0,
+    fetchCapture: options.fetchHit,
+    fetchReference: () => Promise.reject(new Error('no reference')),
+    onChange: options.onChange,
+    urlApi: options.urlApi,
+  })
+}
+
+// ───────────── 命中图缩略图（列表里唯一的真实图片） ─────────────
+// 约束（由 sourceContract / imageLogic 测试守住）：
+// 1. 只给「有名单命中、命中图还在」的行取，Capture 行仍是占位图标；一页只发一次批量请求（服务端一次请求只写一条审计）；
+// 2. 后端返回最长边 ≤128 的 JPEG base64：这里解码成 Blob → objectURL（不拼 data: 地址），只放内存；
+// 3. 换页 / 换筛选 / 卸载（dispose）时中止请求、撤销全部 objectURL；dispose 之后到达的响应直接丢弃。
+
+export type HitThumbnailState = { status: 'loading' } | { status: 'loaded'; url: string } | { status: 'none' }
+
+export type HitThumbnailStates = ReadonlyMap<string, HitThumbnailState>
+
+export interface HitThumbnailItem {
+  taskId: string
+  status: string
+  imageBase64: string | null
+}
+
+export interface HitThumbnailSessionOptions {
+  taskIds: readonly string[]
+  fetchBatch: (taskIds: readonly string[], signal: AbortSignal) => Promise<HitThumbnailItem[]>
+  onChange: (states: HitThumbnailStates) => void
+  urlApi?: ObjectUrlApi
+}
+
+export interface HitThumbnailSession {
+  start: () => Promise<void>
+  dispose: () => void
+  getStates: () => HitThumbnailStates
+}
+
+/** base64 → 字节；不是合法 base64（或为空）返回 null。只在内存里解码，不经过 data: 地址。 */
+export function decodeThumbnailBase64(base64: string | null | undefined): Uint8Array<ArrayBuffer> | null {
+  if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return null
+  try {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    return bytes
+  } catch {
+    return null
+  }
+}
+
+export function createHitThumbnailSession(options: HitThumbnailSessionOptions): HitThumbnailSession {
+  const registry = createObjectUrlRegistry(options.urlApi)
+  const controller = new AbortController()
+  let disposed = false
+  let states: Map<string, HitThumbnailState> = new Map(options.taskIds.map((id) => [id, { status: 'loading' } as HitThumbnailState]))
+
+  function publish(next: Map<string, HitThumbnailState>) {
+    if (disposed) return
+    states = next
+    options.onChange(states)
+  }
+
+  return {
+    async start() {
+      if (disposed || options.taskIds.length === 0) return
+      options.onChange(states)
+      try {
+        const items = await options.fetchBatch(options.taskIds, controller.signal)
+        if (disposed) return
+        const byId = new Map(items.map((item) => [item.taskId, item]))
+        const next = new Map<string, HitThumbnailState>()
+        for (const taskId of options.taskIds) {
+          const item = byId.get(taskId)
+          const bytes = item && item.status === 'ok' ? decodeThumbnailBase64(item.imageBase64) : null
+          // 缩略图服务端固定输出 JPEG；dispose 后 registry 不再登记（返回 null），一律按没有图处理。
+          const url = bytes ? registry.set(taskId, new Blob([bytes], { type: 'image/jpeg' })) : null
+          next.set(taskId, url ? { status: 'loaded', url } : { status: 'none' })
+        }
+        publish(next)
+      } catch {
+        // 整批失败（网络 / 权限 / 审计写入失败）：全部退回占位，不弹错、不重试（列表其余内容不受影响）。
+        if (disposed || controller.signal.aborted) return
+        publish(new Map(options.taskIds.map((id) => [id, { status: 'none' } as HitThumbnailState])))
+      }
+    },
+    getStates: () => states,
+    dispose() {
+      if (disposed) return
+      disposed = true
+      controller.abort()
+      registry.dispose()
+      states = new Map()
+    },
+  }
+}
+
 // ───────────── 登记照 / 名单照片上传预览 ─────────────
 
 export interface PreviewItem {

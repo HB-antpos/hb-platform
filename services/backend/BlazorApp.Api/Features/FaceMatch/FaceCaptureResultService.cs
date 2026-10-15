@@ -11,7 +11,7 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 「抓拍与比对结果」读取服务：把留存的抓拍（FaceCaptureEvent）、比对评估（FaceMatchEvaluation）、
 /// 名单命中任务（FaceMatchTask）与命中通知的发送情况放在同一行里看。
 /// 1. 只读；门店范围与复核任务一致（管理员不限，其他人只看自己关联的门店）；
-/// 2. 只列 Capture 模式留存下来的抓拍——Match 模式处理完即删，不会出现在这里（命中任务另见复核页）；
+/// 2. Capture 与 Match 模式都会留存抓拍（含照片），都在这里列出；名单命中以命中任务为主表的视图另见命中流（FaceHitResultService）；
 /// 3. 抓拍与命中任务没有外键：任务是用「同一摄像机 + 同一接收时间」生成的，所以按这两列对应（见 <see cref="MatchHits"/>）；
 /// 4. 图片内容不在列表里返回：列表只给图片编号（且只在有看图权限时），内容走 <see cref="GetImageAsync"/>，
 ///    它先校验门店范围，再交给摄像机管理页同一套受保护读取（对象键只来自数据库、类型与字节头校验、大小上限、审计）。
