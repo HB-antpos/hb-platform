@@ -156,6 +156,11 @@ services:
       - FaceMatch__EnrollmentQualityControl=${FACE_MATCH_ENROLLMENT_QUALITY_CONTROL:-2}
       - FaceMatch__Unwelcome__HighBandScore=${FACE_MATCH_UNWELCOME_HIGH_BAND_SCORE:-90}
       - FaceMatch__BackgroundEnabled=${FACE_MATCH_BACKGROUND_ENABLED:-true}
+      # App 系统推送（走 Expo 推送服务，docs/runbooks/notification-push.md）：默认关闭，两项都带 :- 默认值，
+      # 没有这些变量的主 API 部署不会失败。上线顺序：先 --schema=migrate、再部署，最后才在服务器 .env 把 EXPO_PUSH_ENABLED 改成 true。
+      # EXPO_ACCESS_TOKEN 是 EAS 账号的访问令牌（可空；EAS 项目开启「增强推送安全」时必填），只从服务器 .env 注入，不写进仓库。
+      - Push__Expo__Enabled=${EXPO_PUSH_ENABLED:-false}
+      - Push__Expo__AccessToken=${EXPO_ACCESS_TOKEN:-}
     volumes: &hb-api-volumes
       - hb-api-logs:/app/logs
       - ./data-protection-keys:/app/App_Data/DataProtectionKeys

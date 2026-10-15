@@ -1037,6 +1037,28 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.Notifications.INotificationInboxService,
     BlazorApp.Api.Features.Notifications.NotificationInboxService
 >();
+// App 系统推送（走 Expo 推送服务，表由迁移 20261017.001-app-push 创建）：令牌注册接口始终可用；
+// 发件箱写入与后台发送由配置节 Push:Expo:Enabled 控制，默认关闭（关闭时发布器不写发件箱、后台任务不发任何请求）。
+// 后台任务同时遵守 ScheduledTasks:Enabled（临时实例不参与）。部署须先执行 --schema=migrate，最后才打开开关。
+builder.Services.Configure<BlazorApp.Api.Features.Notifications.ExpoPushOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.Notifications.ExpoPushOptions.SectionName)
+);
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.Notifications.IAppPushDeviceService,
+    BlazorApp.Api.Features.Notifications.AppPushDeviceService
+>();
+// Expo 推送客户端：总时限 30 秒；不跟随重定向（请求带 Authorization，任何跳转都视为异常）；启用 gzip / deflate 解压（Expo 推荐）。
+builder.Services.AddHttpClient(
+        BlazorApp.Api.Features.Notifications.ExpoPushSender.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(30)
+    )
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+    });
+builder.Services.AddScoped<BlazorApp.Api.Features.Notifications.ExpoPushSender>();
+builder.Services.AddHostedService<BlazorApp.Api.Features.Notifications.ExpoPushBackgroundService>();
 // 新品到店每日推送（门店本地 8 点，表由迁移 20261015.002-container-new-product-notice 创建）：
 // 复用「HB new arrivals」列表的无鉴权查询内核（后台没有请求上下文），只发给该店持有 Container.MobileNewProductsView 的人。
 // 默认开启；配置节 ContainerNewProductNotifications.Enabled=false 可整体关闭。部署须先执行 --schema=migrate。

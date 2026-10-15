@@ -1,20 +1,27 @@
 using System.Text.Json;
 using BlazorApp.Api.Data;
 using BlazorApp.Shared.Models;
+using Microsoft.Extensions.Options;
 using SqlSugar;
 
 namespace BlazorApp.Api.Features.Notifications;
 
 /// <summary>
 /// 通知平台的唯一发布入口：先把通知与接收人落库（站内消息以库为准），提交后再走实时通道。
-/// 实时投递失败不影响发布结果，客户端重连后按收件箱补齐；后续的 App 推送同样挂在提交之后。
+/// 实时投递失败不影响发布结果，客户端重连后按收件箱补齐。
+/// <para>
+/// App 系统推送（走 Expo 推送服务）采用发件箱：开启 <c>Push:Expo:Enabled</c> 时，把「通知 × 接收人的活动推送设备」
+/// 作为 <see cref="AppPushDelivery"/> 行与通知、接收人<b>在同一个事务里</b>写入，由 <see cref="ExpoPushBackgroundService"/> 之后发送并按需重试，
+/// 进程重启不丢。关闭（默认）时发布器不查设备表、不写发件箱，行为与没有推送功能时完全一致。
+/// </para>
 /// </summary>
 internal sealed class NotificationPublisher(
     SqlSugarContext context,
     INotificationRecipientResolver recipientResolver,
     INotificationRealtimeDispatcher realtimeDispatcher,
     TimeProvider timeProvider,
-    ILogger<NotificationPublisher> logger
+    ILogger<NotificationPublisher> logger,
+    IOptionsMonitor<ExpoPushOptions>? pushOptions = null
 ) : INotificationPublisher
 {
     internal const int MaxTypeLength = 64;
@@ -90,16 +97,23 @@ internal sealed class NotificationPublisher(
             })
             .ToList();
 
+        // 推送发件箱行在事务之外先算好（设备表查询失败不能污染事务），再随通知一起在同一个事务里落库。
+        var pushDeliveries = await BuildPushDeliveriesAsync(notification, recipients, now, cancellationToken);
+
         var transaction = await _db.Ado.UseTranAsync(async () =>
         {
             await _db.Insertable(notification).ExecuteCommandAsync(cancellationToken);
             await _db.Insertable(rows).ExecuteCommandAsync(cancellationToken);
+            if (pushDeliveries.Count > 0)
+            {
+                await _db.Insertable(pushDeliveries).ExecuteCommandAsync(cancellationToken);
+            }
         });
         if (!transaction.IsSuccess)
         {
             var error = transaction.ErrorException ?? new InvalidOperationException("保存通知失败");
             // 并发下同一幂等键被别的请求抢先写入：以先写入的那条为准，本次不再投递。
-            if (normalized.DedupeKey != null && IsUniqueViolation(error))
+            if (normalized.DedupeKey != null && SqlErrorClassifier.IsUniqueViolation(error))
             {
                 var winnerId = await FindIdByDedupeKeyAsync(normalized.DedupeKey, cancellationToken);
                 if (winnerId != null)
@@ -129,6 +143,72 @@ internal sealed class NotificationPublisher(
             .Where(notification => notification.DedupeKey == key && notification.RevokedAtUtc == null)
             .ExecuteCommandAsync(cancellationToken);
         return updated > 0;
+    }
+
+    /// <summary>
+    /// 为这批接收人的每个活动推送设备生成一行发件箱记录（State=Pending，立即可发）。
+    /// 不写发件箱（返回空）的情况：推送未启用、通知已过期、接收人没有活动设备、设备查询失败。
+    /// 设备查询失败（典型是开关打开但迁移没跑、表不存在）只记一条 Warning，通知照常发布——不能因为推送拖垮所有通知。
+    /// </summary>
+    private async Task<List<AppPushDelivery>> BuildPushDeliveriesAsync(
+        AppNotification notification,
+        IReadOnlyCollection<string> recipients,
+        DateTime now,
+        CancellationToken cancellationToken
+    )
+    {
+        if (pushOptions?.CurrentValue is not { Enabled: true })
+        {
+            return [];
+        }
+
+        if (notification.ExpiresAtUtc != null && notification.ExpiresAtUtc <= now)
+        {
+            return [];
+        }
+
+        try
+        {
+            var devices = new List<AppPushDevice>();
+            // IN 列表分块，避免大范围广播时超过参数上限。
+            foreach (var chunk in recipients.Chunk(500))
+            {
+                var part = await _db.Queryable<AppPushDevice>()
+                    .Where(device => chunk.Contains(device.UserGUID) && device.RevokedAtUtc == null)
+                    .ToListAsync(cancellationToken);
+                devices.AddRange(part);
+            }
+
+            return devices
+                .DistinctBy(device => device.PushDeviceId, StringComparer.Ordinal)
+                .Select(device => new AppPushDelivery
+                {
+                    DeliveryId = Guid.NewGuid().ToString("N"),
+                    NotificationId = notification.NotificationId,
+                    PushDeviceId = device.PushDeviceId,
+                    UserGUID = device.UserGUID,
+                    State = AppPushDeliveryStates.Pending,
+                    Attempts = 0,
+                    NextAttemptAtUtc = now,
+                    CreatedAtUtc = now,
+                })
+                .ToList();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 只记异常类型与是否「表不存在」，不传异常对象：SqlSugar 的异常消息会带 SQL 与参数。
+            logger.LogWarning(
+                "App 推送设备查询失败，通知照常发布但不写推送发件箱: Type={Type}, Error={ErrorType}, SchemaMissing={SchemaMissing}",
+                notification.Type,
+                ex.GetType().Name,
+                SqlErrorClassifier.IsMissingObject(ex)
+            );
+            return [];
+        }
     }
 
     private async Task DispatchRealtimeAsync(IReadOnlyCollection<string> recipients, NotificationDto dto)
@@ -221,24 +301,6 @@ internal sealed class NotificationPublisher(
         }
 
         return json;
-    }
-
-    private static bool IsUniqueViolation(Exception exception)
-    {
-        for (var current = exception; current != null; current = current.InnerException)
-        {
-            if (current is Microsoft.Data.SqlClient.SqlException { Number: 2601 or 2627 })
-            {
-                return true;
-            }
-
-            if (current.Message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private sealed record NormalizedRequest(

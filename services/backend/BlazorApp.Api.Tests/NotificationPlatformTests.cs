@@ -449,7 +449,7 @@ public sealed class NotificationPlatformTests : IDisposable
         await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)) with { Type = AppNotificationTypes.FaceUnwelcomeHit });
         await publisher.PublishAsync(Request(NotificationAudience.ForUsers(ManagerGuid)));
         var controller = new BlazorApp.Api.Controllers.React.NotificationsController(
-            CreateInbox(), Mock.Of<INotificationPublisher>(), NullLogger<BlazorApp.Api.Controllers.React.NotificationsController>.Instance)
+            CreateInbox(), Mock.Of<INotificationPublisher>(), Mock.Of<IAppPushDeviceService>(), NullLogger<BlazorApp.Api.Controllers.React.NotificationsController>.Instance)
         {
             ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
             {
