@@ -28,6 +28,12 @@ public sealed record PosTerminalWorkflowResult
     public bool ClearKeypadBuffer { get; init; }
 
     public bool PaymentAllowed { get; init; }
+
+    /// <summary>
+    /// 扫码枪扫到「一码多商品」并已记入待选队列（或队列已满被拒收）：搜索框里的条码已经处理完，界面要清空它。
+    /// 不复用 <see cref="ClearScanText"/>，因为后者在扫码日志里表示「已自动加购」，会让运维统计把待选误算成加购。
+    /// </summary>
+    public bool ScanConflictHandled { get; init; }
 }
 
 public sealed class PosTerminalCatalogReloadedEventArgs : EventArgs
@@ -99,6 +105,31 @@ public interface IPosTerminalWorkflowService
     /// </summary>
     void AdvanceCartGeneration(string reason)
     {
+    }
+
+    /// <summary>
+    /// 扫码枪扫到「一码多商品」时入队等待收银员选择的待选队列；与购物车世代无关（世代只管在途补查），
+    /// 只有选定 / 放弃 / 清空购物车 / 会话切换 / 页面销毁才会让条目离开队列。默认实现为 null（不启用待选），
+    /// 这样只实现了旧签名的替身 / 测试桩无需改动即可继续使用。
+    /// </summary>
+    PendingScanChoiceQueue? PendingChoices => null;
+
+    /// <summary>把收银员选定的商品加入购物车并让该待选出队；加购失败时条目保留。默认实现什么也不做。</summary>
+    PosTerminalWorkflowResult ResolvePendingChoice(PosSessionState session, long choiceId, SellableItemDto item)
+    {
+        return new PosTerminalWorkflowResult();
+    }
+
+    /// <summary>放弃一个待选（不加入购物车）。条目已不存在返回 false。默认实现什么也不做。</summary>
+    bool AbandonPendingChoice(long choiceId, string reason)
+    {
+        return false;
+    }
+
+    /// <summary>放弃全部待选，返回被放弃的个数。默认实现什么也不做。</summary>
+    int AbandonAllPendingChoices(string reason)
+    {
+        return 0;
     }
 
     PosTerminalWorkflowResult AddSelectedItem(PosSessionState session, SellableItemDto item, bool clearScanText, bool closeMatchesPopup, string operation);
@@ -173,6 +204,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
     // 购物车世代：每发生一次「这一单的购物车已经不是扫码时那一单」的事件就加一。
     // 补查发起时记下当时的世代，结果回来时比对，不一致就丢弃，不依赖时间判断。
     private long _cartGeneration;
+    // 扫码枪「一码多商品」待选队列：与购物车世代无关，生命周期跟随本工作流实例（页面重建即丢弃，销毁时会记日志）。
+    private readonly PendingScanChoiceQueue _pendingChoices;
 
     public PosTerminalWorkflowService(
         LocalSellableItemIndex priceIndex,
@@ -190,9 +223,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         _uiPriorityCoordinator = uiPriorityCoordinator ?? UiPriorityCoordinator.Noop;
         _isCatalogSyncActive = isCatalogSyncActive ?? (() => false);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _pendingChoices = new PendingScanChoiceQueue(_timeProvider);
     }
 
     public event EventHandler<PosTerminalCatalogReloadedEventArgs>? CatalogReloaded;
+
+    public PendingScanChoiceQueue? PendingChoices => _pendingChoices;
 
     public PosTerminalWorkflowResult ProcessScan(PosSessionState session, string scanText, bool preferExactLookup, string source, string? traceId = null)
     {
@@ -231,7 +267,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
                 }
             }
 
-            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd, traceId);
+            // preferExactLookup 即扫码枪入口：多商品命中不再弹下拉覆盖上一个，而是记入待选队列（手工输入走下面的 else 分支，沿用下拉）。
+            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd, traceId, source, queueConflicts: true);
             matchCount = matches.Count;
             autoAdded = result.ClearScanText;
         }
@@ -255,7 +292,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             searchStopwatch.Stop();
             searchElapsedMs = searchStopwatch.ElapsedMilliseconds;
 
-            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId);
+            // 手工输入的码精确命中多个商品（码冲突）同样记入待选队列，不选不消失；关键词模糊搜索（非精确冲突）仍用下拉，那是在浏览。
+            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId, source, queueConflicts: hasDuplicateExactMatch);
             matchCount = matches.Count;
             autoAdded = result.ClearScanText;
         }
@@ -352,7 +390,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         PosTerminalWorkflowResult result;
         using (_uiPriorityCoordinator.BeginUiOperation("process-scan"))
         {
-            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId);
+            // 手工输入的码精确命中多个商品（码冲突）同样记入待选队列，不选不消失；关键词模糊搜索（非精确冲突）仍用下拉，那是在浏览。
+            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId, source, queueConflicts: hasDuplicateExactMatch);
         }
 
         totalStopwatch.Stop();
@@ -660,7 +699,9 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         IReadOnlyList<SellableItemDto> matches,
         string submittedScanText,
         bool allowAutoAdd,
-        string? traceId = null)
+        string? traceId = null,
+        string? scanSource = null,
+        bool queueConflicts = false)
     {
         var selectedItem = matches.FirstOrDefault();
         if (selectedItem is null)
@@ -683,12 +724,127 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             };
         }
 
+        if (queueConflicts)
+        {
+            return EnqueuePendingChoice(session, matches, submittedScanText, scanSource, traceId);
+        }
+
         return Status("pos.status.multipleMatches", matches.Count) with
         {
             Matches = matches,
             SelectedItem = selectedItem,
             MatchesPopupOpen = true
         };
+    }
+
+    /// <summary>
+    /// 扫码枪扫到多商品码：记入待选队列，不碰搜索下拉、不加购。之后继续扫的商品照常加购，待选一直保留到收银员选定或放弃。
+    /// 入队发生在去重（ScannerInputDuplicateGuard）之后，这里每一次调用都是一次真实扫码，所以不再做任何合并。
+    /// </summary>
+    private PosTerminalWorkflowResult EnqueuePendingChoice(
+        PosSessionState session,
+        IReadOnlyList<SellableItemDto> matches,
+        string submittedScanText,
+        string? scanSource,
+        string? traceId)
+    {
+        var source = string.IsNullOrWhiteSpace(scanSource) ? "scan" : scanSource;
+        var entry = _pendingChoices.TryEnqueue(submittedScanText, source, traceId, session.StoreCode, matches);
+        if (entry is null)
+        {
+            ConsoleLog.Write(
+                "PosScan",
+                $"{FormatTraceId(traceId)}pending choice rejected reason=queue-full capacity={PendingScanChoiceQueue.Capacity} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(submittedScanText)} source={source} candidates={matches.Count}");
+            return Status("pos.status.pendingChoiceFull", PendingScanChoiceQueue.Capacity) with
+            {
+                Matches = [],
+                SelectedItem = null,
+                MatchesPopupOpen = false,
+                ScanConflictHandled = true
+            };
+        }
+
+        ConsoleLog.Write(
+            "PosScan",
+            $"{FormatTraceId(traceId)}pending choice created id={entry.Id} queueLength={_pendingChoices.Count} candidates={matches.Count} sameAsPrevious={FormatBool(entry.SameBarcodeAsPrevious)} barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(submittedScanText)} source={source} storeCode={session.StoreCode} candidateProducts={FormatCandidateProducts(matches)}");
+        return Status("pos.status.pendingChoiceQueued", matches.Count, _pendingChoices.Count) with
+        {
+            // 清掉上一次手工搜索遗留的下拉与候选，避免两套候选同时出现。
+            Matches = [],
+            SelectedItem = null,
+            MatchesPopupOpen = false,
+            ScanConflictHandled = true
+        };
+    }
+
+    public PosTerminalWorkflowResult ResolvePendingChoice(PosSessionState session, long choiceId, SellableItemDto item)
+    {
+        using var uiOperation = _uiPriorityCoordinator.BeginUiOperation("scan-choice-select");
+        var entry = _pendingChoices.TryGet(choiceId);
+        if (entry is null || !entry.Candidates.Contains(item))
+        {
+            // 条目已被选定 / 放弃 / 清空（例如重复点击），或点的不是这一条的候选：不加购，只提示。
+            ConsoleLog.Write(
+                "PosScan",
+                $"pending choice resolve skipped id={choiceId} reason={(entry is null ? "not-found" : "not-candidate")} productCode={LogValue(item.ProductCode)}");
+            return Status("pos.status.pendingChoiceGone");
+        }
+
+        // 选定沿用手工选择的全局合并规则（同商品那一行数量 +1，否则追加末尾），与「立即选择」的既有行为一致。
+        var addResult = AddItem(session, item, clearScanText: false, closeMatchesPopup: false, "scan-choice-select", entry.TraceId);
+        if (!string.Equals(addResult.StatusKey, "pos.status.added", StringComparison.Ordinal))
+        {
+            // 加购失败（如数量非整数）：条目保留，收银员可改选或放弃。
+            return addResult;
+        }
+
+        _pendingChoices.Remove(choiceId);
+        var remaining = _pendingChoices.Count;
+        var waitedMs = Math.Max(0, (long)(_timeProvider.GetLocalNow() - entry.CreatedAt).TotalMilliseconds);
+        ConsoleLog.Write(
+            "PosScan",
+            $"{FormatTraceId(entry.TraceId)}pending choice resolved id={entry.Id} waitedMs={waitedMs} productCode={LogValue(item.ProductCode)} lookupCode={LogValue(item.LookupCode)} lineQuantity={FormatAmount(addResult.SelectedCartLine?.Quantity ?? 0m)} queueLength={remaining}");
+        return addResult with
+        {
+            StatusKey = remaining > 0 ? "pos.status.pendingChoiceResolved" : "pos.status.pendingChoiceResolvedLast",
+            StatusArgs = [item.DisplayName, addResult.SelectedCartLine?.Quantity ?? 0m, remaining]
+        };
+    }
+
+    public bool AbandonPendingChoice(long choiceId, string reason)
+    {
+        var entry = _pendingChoices.TryGet(choiceId);
+        if (entry is null || !_pendingChoices.Remove(choiceId))
+        {
+            return false;
+        }
+
+        LogAbandoned(entry, reason, _pendingChoices.Count);
+        return true;
+    }
+
+    public int AbandonAllPendingChoices(string reason)
+    {
+        var removed = _pendingChoices.Clear();
+        foreach (var entry in removed)
+        {
+            LogAbandoned(entry, reason, queueLength: 0);
+        }
+
+        return removed.Count;
+    }
+
+    private void LogAbandoned(PendingScanChoice entry, string reason, int queueLength)
+    {
+        var waitedMs = Math.Max(0, (long)(_timeProvider.GetLocalNow() - entry.CreatedAt).TotalMilliseconds);
+        ConsoleLog.Write(
+            "PosScan",
+            $"{FormatTraceId(entry.TraceId)}pending choice abandoned id={entry.Id} reason={reason} waitedMs={waitedMs} candidates={entry.Candidates.Count} candidateProducts={FormatCandidateProducts(entry.Candidates)} queueLength={queueLength}");
+    }
+
+    private static string FormatCandidateProducts(IReadOnlyList<SellableItemDto> candidates)
+    {
+        return string.Join(',', candidates.Take(5).Select(candidate => LogValue(candidate.ProductCode)));
     }
 
     private PosTerminalWorkflowResult AddItem(

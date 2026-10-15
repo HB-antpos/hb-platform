@@ -1155,11 +1155,16 @@ public sealed class PosTerminalCashPaymentViewModelTests
 
         scanner.Emit("930114");
 
+        // 扫码枪的多商品命中记入待选条：不加购、不弹手工搜索下拉，条码处理完即清出搜索框。
         Assert.Empty(viewModel.CartLines);
-        Assert.Equal(2, viewModel.Matches.Count);
-        Assert.True(viewModel.IsMatchesPopupOpen);
-        Assert.Equal("930114", viewModel.ScanText);
-        Assert.Equal("Scan 930114: Found 2 items. Select one to add.", viewModel.StatusMessage);
+        Assert.Empty(viewModel.Matches);
+        Assert.False(viewModel.IsMatchesPopupOpen);
+        Assert.Empty(viewModel.ScanText);
+        Assert.Equal(1, viewModel.PendingChoices.Count);
+        Assert.Equal(2, viewModel.PendingChoices.CurrentCandidates.Count);
+        Assert.Equal(
+            "Scan 930114: This barcode matches 2 items. Queued for selection (1 pending).",
+            viewModel.StatusMessage);
     }
 
     [Fact]

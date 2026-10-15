@@ -180,6 +180,14 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             onLockCashierAsync,
             onOpenCardRecoveryCenterAsync);
         _scanController = new PosTerminalScanController(cart);
+        // 待选条：只做界面投影，加购 / 放弃都回到本页的方法（授权、审计、状态栏都在这里统一处理）。
+        PendingChoices = new PendingScanChoicePanelViewModel(
+            _workflowService.PendingChoices,
+            localization,
+            _timeProvider,
+            SelectPendingChoiceAsync,
+            AbandonPendingChoice,
+            AbandonAllPendingChoices);
         _session = session;
         _sessionIdentity = GetSessionIdentity(session);
         _localization = localization;
@@ -251,6 +259,9 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     }
 
     public ObservableCollection<SellableItemDto> Matches { get; } = [];
+
+    /// <summary>扫码枪扫到「一码多商品」后的待选条（先进先出，不选不消失，期间继续扫的商品照常加购）。</summary>
+    public PendingScanChoicePanelViewModel PendingChoices { get; }
 
     public ObservableCollection<CartLine> CartLines { get; } = [];
 
@@ -406,6 +417,9 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         _disposed = true;
         // 页面销毁后（重新登录、锁定重建等）旧页面里仍在途的补查结果不得再改动共享购物车。
         _workflowService.AdvanceCartGeneration("view-model-disposed");
+        // 页面销毁（重新登录 / 重建页面）：待选随页面丢弃，留一条日志说明丢了几个。
+        _workflowService.AbandonAllPendingChoices(PendingChoiceReasons.Disposed);
+        PendingChoices.Dispose();
         CancelMatchesRefresh();
         CancelManualSearch();
         if (_localization is not null)
@@ -462,9 +476,18 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         var sessionIdentity = GetSessionIdentity(value);
         if (sessionIdentity != _sessionIdentity)
         {
+            // 换门店 / 设备：待选商品属于旧门店的目录，不能带到新会话；只换收银员（锁屏后换人登录）时购物车也保留，待选随购物车保留。
+            var storeOrDeviceChanged =
+                sessionIdentity.StoreCode != _sessionIdentity.StoreCode ||
+                sessionIdentity.DeviceCode != _sessionIdentity.DeviceCode;
             // 换门店 / 设备 / 收银员：此前扫码发起的补查结果不属于新会话，作废。
             _sessionIdentity = sessionIdentity;
             _workflowService.AdvanceCartGeneration("session-changed");
+            if (storeOrDeviceChanged)
+            {
+                _workflowService.AbandonAllPendingChoices(PendingChoiceReasons.Session);
+            }
+
             // 一次性整单开关不能带进另一位收银员 / 另一台设备的会话。
             IsWholeOrderOperation = false;
         }
@@ -615,10 +638,15 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     /// 折扣类操作发起时的整单开关快照。整单开关是一次性的，按下折扣键就已复位，
     /// 所以审计类型（整单折扣 / 单品折扣）必须用快照，不能再读当前属性。
     /// </param>
+    /// <param name="traceId">
+    /// 可选的关联 traceId：待选选定入车时传入原扫码的 traceId，让购物车审计与扫码日志串得起来；
+    /// 不传则沿用原行为（审计里不带 traceId）。
+    /// </param>
     private PosTerminalWorkflowResult ExecuteCartMutation(
         string reason,
         Func<PosTerminalWorkflowResult> operation,
-        bool isWholeOrderOperation = false)
+        bool isWholeOrderOperation = false,
+        string? traceId = null)
     {
         var before = OperationAuditEvents.CaptureCart(_cart.Lines);
         var operationType = MapCartOperationType(reason, isWholeOrderOperation);
@@ -662,7 +690,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
                 Session,
                 before,
                 after,
-                reasonCode: reason);
+                reasonCode: reason,
+                traceId: traceId);
         }
 
         return result;
@@ -672,7 +701,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     {
         return reason switch
         {
-            "add-open-item" or "manual-add-selected" or "manual-select-match" => OperationAuditTypes.CartItemAdd,
+            "add-open-item" or "manual-add-selected" or "manual-select-match" or "scan-choice-select" => OperationAuditTypes.CartItemAdd,
             "remove-line" => OperationAuditTypes.CartItemRemove,
             "increase-line" or "decrease-line" or "modify-quantity" => OperationAuditTypes.CartItemQuantityChange,
             "modify-price" => OperationAuditTypes.CartItemPriceChange,
@@ -992,6 +1021,46 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             clearScanText: true,
             closeMatchesPopup: true,
             operation: "manual-select-match"));
+    }
+
+    /// <summary>
+    /// 收银员在待选条里选定了某个候选商品：先过「加购」授权，再由工作流服务加购并让该待选出队。
+    /// 选定的商品在此刻入车（追加末尾 / 合并到同商品行），审计带原扫码的 traceId。
+    /// </summary>
+    private async Task SelectPendingChoiceAsync(PendingScanChoice choice, SellableItemDto item)
+    {
+        using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Sales.AddItem, "select-pending-choice");
+        if (permissionGrant is null)
+        {
+            return;
+        }
+
+        using var authorizationActivation = permissionGrant.Activate();
+        ExecuteCartMutation(
+            "scan-choice-select",
+            () => _workflowService.ResolvePendingChoice(Session, choice.Id, item),
+            traceId: choice.TraceId);
+    }
+
+    private void AbandonPendingChoice(PendingScanChoice choice)
+    {
+        if (!_workflowService.AbandonPendingChoice(choice.Id, PendingChoiceReasons.Cashier))
+        {
+            return;
+        }
+
+        var remaining = _workflowService.PendingChoices?.Count ?? 0;
+        SetStatusCore("pos.status.pendingChoiceAbandoned", [remaining], StatusFeedbackKind.Warning);
+    }
+
+    /// <summary>放弃全部待选（付款 / 挂单 / 取单 / 退出前的确认，或「全部放弃」）；提示放弃了几个。</summary>
+    private void AbandonAllPendingChoices(string reason)
+    {
+        var abandoned = _workflowService.AbandonAllPendingChoices(reason);
+        if (abandoned > 0)
+        {
+            SetStatusCore("pos.status.pendingChoiceAbandonedAll", [abandoned], StatusFeedbackKind.Warning);
+        }
     }
 
     private async Task RemoveLineAsync(CartLine? line)
@@ -1379,6 +1448,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         ExecuteCartMutation("clear-cart", () => _workflowService.ClearCart());
+        // 清空购物车即换单：这一单扫到、还没选的商品一并作废（日志留痕，避免静默丢）。
+        _workflowService.AbandonAllPendingChoices(PendingChoiceReasons.ClearCart);
     }
 
     private bool IsLastBoundSharedHeldOrderLine(CartLine? line)
@@ -1432,6 +1503,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     {
         // 补查期间收款会先等待，这段时间内重复点击不能把付款页打开两次。
         if (_isOpeningPayment)
+        {
+            return;
+        }
+
+        // 还有待选商品没处理：现在付款这些实物会漏收。先弹确认（返回处理 / 放弃后付款），放在授权之前，免得白弹一次授权。
+        if (PendingChoices.TryBlock(PendingChoiceReasons.Pay, OpenPaymentAsync))
         {
             return;
         }
@@ -1577,6 +1654,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private async Task HoldOrderAsync()
     {
+        // 挂单保存的是此刻的购物车，待选商品不在里面：先让收银员处理或确认放弃。
+        if (PendingChoices.TryBlock(PendingChoiceReasons.Hold, HoldOrderAsync))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Sales.HoldOrder, "hold-order");
         if (permissionGrant is null)
         {
@@ -1604,6 +1687,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private async Task RecallOrderAsync()
     {
+        // 取单会换成另一单：待选商品属于当前这位顾客，不能悄悄带到别人的订单上。
+        if (PendingChoices.TryBlock(PendingChoiceReasons.Recall, RecallOrderAsync))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Sales.RecallOrder, "recall-order");
         if (permissionGrant is null)
         {
@@ -1855,6 +1944,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     private async Task ExitApplicationAsync()
     {
+        // 退出应用会丢弃内存里的待选：先确认。
+        if (PendingChoices.TryBlock(PendingChoiceReasons.Exit, ExitApplicationAsync))
+        {
+            return;
+        }
+
         if (_actions.ExitApplicationAsync is not null)
         {
             await _actions.ExitApplicationAsync();
@@ -2011,6 +2106,12 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
             applyStopwatch.Start();
             ApplyWorkflowResult(result, statusTextOverrideFactory?.Invoke(result));
+            if (result.ScanConflictHandled)
+            {
+                // 多商品码已记入待选队列（或队列已满被拒收）：条码处理完了，别留在搜索框里被下一次手工输入拼接。
+                ScanText = string.Empty;
+            }
+
             applyStopwatch.Stop();
             // 远程补查已发起却没有加购（超时、未找到、结果被丢弃）时，这次扫码并没有改动购物车：
             // 等待期间购物车的变化属于别的操作，不能触发促销排队，也不能记成这次扫码的审计。
@@ -2509,6 +2610,14 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         {
             "pos.status.added" => (StatusFeedbackKind.Success, UserFeedbackCue.ScanAdded),
             "pos.status.multipleMatches" => (StatusFeedbackKind.Warning, UserFeedbackCue.ScanMultipleMatches),
+            // 多商品码记入待选：与旧弹窗同一提示音（提醒收银员这里有个选择要做）；选定入车沿用「已加入」成功音。
+            "pos.status.pendingChoiceQueued" => (StatusFeedbackKind.Warning, UserFeedbackCue.ScanMultipleMatches),
+            "pos.status.pendingChoiceResolved" => (StatusFeedbackKind.Success, UserFeedbackCue.ScanAdded),
+            "pos.status.pendingChoiceResolvedLast" => (StatusFeedbackKind.Success, UserFeedbackCue.ScanAdded),
+            // 队列已满：这次扫码没有被记录，必须用错误音让收银员注意到。
+            "pos.status.pendingChoiceFull" => (StatusFeedbackKind.Error, UserFeedbackCue.OperationError),
+            "pos.status.pendingChoiceGone" => (StatusFeedbackKind.Warning, null),
+            "pos.status.pendingChoiceAbandoned" => (StatusFeedbackKind.Warning, null),
             "pos.status.noLocalMatch" => (StatusFeedbackKind.Error, UserFeedbackCue.ScanNoMatch),
             // 远程补查开始：沿用现有的按键点击音作为「扫码已受理」，不新增音效；加购成功时仍会播 ScanAdded。
             "pos.status.remoteLookupStarted" => (StatusFeedbackKind.Neutral, UserFeedbackCue.ButtonClick),
