@@ -500,7 +500,8 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
                 return;
         }
 
-        if (value.Length == 1 && value[0] is >= 'A' and <= 'Z')
+        // 商品描述键盘含字母、数字行与 - . / 符号键（如 ITEM 2、T-SHIRT）；其余字符一律忽略。
+        if (value.Length == 1 && value[0] is (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '-' or '.' or '/')
         {
             OpenItemDisplayName += value;
         }

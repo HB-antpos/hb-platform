@@ -884,17 +884,27 @@
                             <Button Content="N" Command="{Binding NumberInputCommand}" CommandParameter="N" Style="{StaticResource PosStitchNumberButtonStyle}" />
                             <Button Content="M" Command="{Binding NumberInputCommand}" CommandParameter="M" Style="{StaticResource PosStitchNumberButtonStyle}" />
                         </UniformGrid>
+                        <!-- 底行：货号/规格常含 - _ /，与「.」一并放在 Space 与搜索键之间；符号键与字母键同走 NumberInputCommand。 -->
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="1.2*" />
-                                <ColumnDefinition Width="2.4*" />
-                                <ColumnDefinition Width="1.2*" />
-                                <ColumnDefinition Width="1.2*" />
+                                <ColumnDefinition Width="1.3*" />
+                                <ColumnDefinition Width="1.7*" />
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="1.4*" />
                             </Grid.ColumnDefinitions>
                             <Button Grid.Column="0" Content="{loc:Loc Clear}" Command="{Binding NumberInputCommand}" CommandParameter="Clear" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
                             <Button Grid.Column="1" Content="{loc:Loc common.space}" Command="{Binding NumberInputCommand}" CommandParameter="Space" Style="{StaticResource PosStitchNumberButtonStyle}" />
-                            <Button Grid.Column="2" Content="." Command="{Binding NumberInputCommand}" CommandParameter="." Style="{StaticResource PosStitchNumberButtonStyle}" />
-                            <Button Grid.Column="3" Content="{Binding SearchButtonText}" Command="{Binding NumberInputCommand}" CommandParameter="Enter" Style="{StaticResource PosStitchQuickButtonStyle}" />
+                            <Button Grid.Column="2" Content="-" Command="{Binding NumberInputCommand}" CommandParameter="-" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                            <!-- 下划线键用 TextBlock 作内容：Button 的字符串内容会按访问键解析，单个 _ 会被当作前缀吞掉。 -->
+                            <Button Grid.Column="3" Command="{Binding NumberInputCommand}" CommandParameter="_" Style="{StaticResource PosStitchNumberButtonStyle}">
+                                <TextBlock Text="_" />
+                            </Button>
+                            <Button Grid.Column="4" Content="/" Command="{Binding NumberInputCommand}" CommandParameter="/" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                            <Button Grid.Column="5" Content="." Command="{Binding NumberInputCommand}" CommandParameter="." Style="{StaticResource PosStitchNumberButtonStyle}" />
+                            <Button Grid.Column="6" Content="{Binding SearchButtonText}" Command="{Binding NumberInputCommand}" CommandParameter="Enter" Style="{StaticResource PosStitchQuickButtonStyle}" />
                         </Grid>
                         </StackPanel>
                     </Border>
