@@ -68,7 +68,8 @@ export function buildPriceReminderViewModel(input: {
     return null;
   }
 
-  const sorted = sortStoreSummaries(overview.rows, overview.manageableStoreCodes);
+  // 只列管理分店：只能查看的关联分店不进弹窗（它们的待办也不计入 totalPending）。
+  const sorted = sortStoreSummaries(overview.managedRows, overview.manageableStoreCodes);
   const rows: PriceReminderRowViewModel[] = sorted.map((row) => ({
     storeCode: row.storeCode,
     storeName: row.storeName,

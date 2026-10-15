@@ -48,6 +48,14 @@ assert.match(host, /AppState\.addEventListener\("change"/, "回到前台先刷�
 assert.match(host, /isPriceLabelPrintBusy\(\)/, "打印中不弹");
 assert.match(host, /AppAsyncStorage\.setString\(/, "弹出时间记在本机");
 
+// ---- 弹窗只列管理分店；分店条仍用全部可见分店的 rows ----
+assert.match(
+  read("src/modules/price-reminder/view-model.ts"),
+  /sortStoreSummaries\(overview\.managedRows,/,
+  "每小时提醒弹窗只列店长管理的分店，只能查看的关联分店不进弹窗"
+);
+assert.match(screen, /priceTasks\.rows\.map\(/, "价格页分店条仍用名下全部可见分店的数据");
+
 // ---- 后端接口路径与前端一致 ----
 const api = read("src/modules/price-updates/api.ts");
 assert.match(api, /price-update-tasks\/summary/);
@@ -70,5 +78,29 @@ for (const group of ["reminder", "lock", "overdueEmpty", "strip", "workbench"]) 
 }
 assert.equal(readJson("src/locales/zh/screens/priceUpdates.json").title, "价格和标签");
 assert.equal(readJson("src/locales/en/screens/priceUpdates.json").title, "Prices & labels");
+
+// ---- 仓库管理员：管理分店与店长同口径（不放宽到关联分店），且不锁报表 ----
+assert.match(layout, /isWarehouseManager/, "布局把仓库管理员身份传给概览");
+const overviewSource = read("src/modules/price-updates/overview.ts");
+assert.doesNotMatch(
+  overviewSource,
+  /isAdmin: input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\)/,
+  "仓库管理员不能把管理分店范围放宽成全部关联分店（用户 10-16：不要弹只关联的店）"
+);
+assert.match(
+  overviewSource,
+  /getManageableStoresForSession\(\{[^}]*isAdmin: input\.isAdmin,/s,
+  "管理分店范围只看 isAdmin：管理员 = 可见全部，其余（含仓库管理员）= isPrimary"
+);
+assert.match(
+  overviewSource,
+  /reportsLockExempt = input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\)/,
+  "管理员、仓库管理员（含两者兼任）都不锁报表，只有店长口径才锁"
+);
+assert.match(
+  overviewSource,
+  /reportsLocked: !input\.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0/,
+  "锁定判定要排除管理员与仓库管理员"
+);
 
 console.log("price-updates/report-lock-source-contract.test.ts: ok");

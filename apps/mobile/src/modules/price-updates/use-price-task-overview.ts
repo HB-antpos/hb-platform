@@ -17,6 +17,8 @@ export interface UsePriceTaskOverviewOptions {
   isDeviceMode: boolean;
   deviceBoundStore: Store | null;
   isAdmin: boolean;
+  /** 仓库管理员：管理分店与店长同口径（只算 isPrimary），且不锁报表，见 buildPriceTaskOverview。 */
+  isWarehouseManager: boolean;
 }
 
 /**
@@ -28,7 +30,7 @@ export function usePriceTaskOverview(options: UsePriceTaskOverviewOptions): {
   overview: PriceTaskOverview;
   refresh: () => Promise<PriceTaskOverview | null>;
 } {
-  const { enabled, scopeKey, stores, isDeviceMode, deviceBoundStore, isAdmin } = options;
+  const { enabled, scopeKey, stores, isDeviceMode, deviceBoundStore, isAdmin, isWarehouseManager } = options;
   const query = useQuery({
     queryKey: [...priceUpdateSummaryQueryKey(), scopeKey],
     enabled,
@@ -39,8 +41,8 @@ export function usePriceTaskOverview(options: UsePriceTaskOverviewOptions): {
 
   const summary = query.data;
   const overview = useMemo(
-    () => buildPriceTaskOverview({ summary, stores, isDeviceMode, deviceBoundStore, isAdmin }),
-    [deviceBoundStore, isAdmin, isDeviceMode, stores, summary]
+    () => buildPriceTaskOverview({ summary, stores, isDeviceMode, deviceBoundStore, isAdmin, isWarehouseManager }),
+    [deviceBoundStore, isAdmin, isDeviceMode, isWarehouseManager, stores, summary]
   );
 
   const { refetch } = query;
@@ -49,9 +51,16 @@ export function usePriceTaskOverview(options: UsePriceTaskOverviewOptions): {
     if (!enabled) return null;
     const result = await refetch();
     return result.data
-      ? buildPriceTaskOverview({ summary: result.data, stores, isDeviceMode, deviceBoundStore, isAdmin })
+      ? buildPriceTaskOverview({
+          summary: result.data,
+          stores,
+          isDeviceMode,
+          deviceBoundStore,
+          isAdmin,
+          isWarehouseManager,
+        })
       : null;
-  }, [deviceBoundStore, enabled, isAdmin, isDeviceMode, refetch, stores]);
+  }, [deviceBoundStore, enabled, isAdmin, isDeviceMode, isWarehouseManager, refetch, stores]);
 
   return { overview, refresh };
 }

@@ -12,15 +12,27 @@ export const DEFAULT_OVERDUE_DAYS = 7;
 export interface PriceTaskOverview {
   /** 汇总已拿到。没拿到（加载中 / 接口失败）时一律不提醒、不锁定：接口故障不能把人挡在报表外。 */
   ready: boolean;
-  /** 账号 / 设备可访问的全部分店（后端口径）。 */
+  /**
+   * 账号名下全部可见分店（含只能查看的关联分店）的汇总行。「价格和标签」页顶部的分店条用它：
+   * 在页面里切到只能查看的分店，数量仍然要看得到。
+   */
   rows: StorePriceUpdateStoreSummary[];
+  /**
+   * 其中「管理分店」的汇总行。每小时提醒弹窗只列这些分店：只能查看的关联分店不是这位店长的责任，
+   * 不该打扰他（用户 10-16 明确：弹窗也只显示管理分店）。
+   */
+  managedRows: StorePriceUpdateStoreSummary[];
   overdueDays: number;
-  /** 全部可访问分店的未完成合计，用于工作台角标。 */
+  /** 管理分店的未完成合计：工作台角标和「要不要弹提醒」都看它，与弹窗里显示的数字一致。 */
   totalPending: number;
   /** 本人「管理分店」里已超期的任务合计（锁报表只看它，不含只能查看的关联分店）。 */
   manageableOverdueCount: number;
   manageableStoreCodes: string[];
-  /** 店长账号：管理分店有超期任务 → 不能进入报表。设备没有报表入口，永不锁定。 */
+  /**
+   * 只有店长（既不是管理员、也不是仓库管理员）：管理分店有超期任务 → 不能进入报表。
+   * 管理员、仓库管理员（含两者兼任）会弹提醒、会标红超期，但**不锁**；
+   * 设备没有报表入口，永不锁定（用户 10-16 决定）。
+   */
   reportsLocked: boolean;
   /** 管理分店里超期最多的一家，被锁后跳转到价格和标签时默认选中它。 */
   firstOverdueStoreCode: string | null;
@@ -29,6 +41,7 @@ export interface PriceTaskOverview {
 export const EMPTY_PRICE_TASK_OVERVIEW: PriceTaskOverview = {
   ready: false,
   rows: [],
+  managedRows: [],
   overdueDays: DEFAULT_OVERDUE_DAYS,
   totalPending: 0,
   manageableOverdueCount: 0,
@@ -44,6 +57,12 @@ export interface PriceTaskOverviewInput {
   isDeviceMode: boolean;
   deviceBoundStore: Store | null;
   isAdmin: boolean;
+  /**
+   * 仓库管理员（WarehouseManager / 仓库经理 / 仓库管理员 …）。用户 10-16 决定：他们的「管理分店」
+   * 与店长同口径（只算 isPrimary 的分店），只关联、不管理的分店（含仓库）不弹也不计角标；
+   * 同时和管理员一样**不锁报表**。所以这个标志只用来免锁，不会放宽管理分店范围。
+   */
+  isWarehouseManager?: boolean;
 }
 
 export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTaskOverview {
@@ -59,13 +78,17 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
     ? input.summary.stores
     : input.summary.stores.filter((row) => visibleStoreCodes.has(row.storeCode));
   // 「管理分店」与商品查询、用户管理等页面同一口径：设备 = 绑定分店；管理员 = 全部；其余 = isPrimary 的分店。
-  // 关联但只能查看的分店不算：它们有超期不应该锁住这位店长的报表。
+  // 关联但只能查看的分店不算：它们既不进弹窗、不计角标，也不锁这位账号的报表。
+  // 仓库管理员不在这里放宽：他们和店长一样只算 isPrimary 的分店（用户 10-16 决定，不要弹只关联的店）。
   const manageableStoreCodes = getManageableStoresForSession({
     stores: [...input.stores],
     isDeviceMode: input.isDeviceMode,
     deviceBoundStore: input.deviceBoundStore,
     isAdmin: input.isAdmin,
   }).map((store) => store.storeCode);
+  // 弹窗范围和锁定范围是两件事：管理员、仓库管理员（含两者兼任）都按各自的管理分店被提醒，但都不被锁报表；
+  // 只有店长口径（既不是管理员也不是仓库管理员）才锁。设备由下面 reportsLocked 里的 isDeviceMode 排除。
+  const reportsLockExempt = input.isAdmin || Boolean(input.isWarehouseManager);
   const manageable = new Set(manageableStoreCodes);
 
   const manageableRows = rows.filter((row) => manageable.has(row.storeCode));
@@ -77,11 +100,12 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
   return {
     ready: true,
     rows,
+    managedRows: manageableRows,
     overdueDays: input.summary.overdueDays > 0 ? input.summary.overdueDays : DEFAULT_OVERDUE_DAYS,
-    totalPending: rows.reduce((sum, row) => sum + row.pendingCount, 0),
+    totalPending: manageableRows.reduce((sum, row) => sum + row.pendingCount, 0),
     manageableOverdueCount,
     manageableStoreCodes,
-    reportsLocked: !input.isDeviceMode && manageableOverdueCount > 0,
+    reportsLocked: !input.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0,
     firstOverdueStoreCode: firstOverdue?.storeCode ?? null,
   };
 }
