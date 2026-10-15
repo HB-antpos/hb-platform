@@ -2,7 +2,11 @@ using System.Text.Json;
 
 namespace Hbpos.Client.Wpf.Services;
 
-public sealed record PaymentMethodSettings(bool UseManualCard = false, bool VoucherEnabled = false);
+/// <summary>
+/// 本机付款方式与付款页显示设置。<paramref name="ShowOrderList"/> 默认 true（付款页左侧显示订单商品列表）；
+/// 旧版本保存的 JSON 里没有这个字段时，反序列化按构造参数默认值得到 true，不会因升级而隐藏列表。
+/// </summary>
+public sealed record PaymentMethodSettings(bool UseManualCard = false, bool VoucherEnabled = false, bool ShowOrderList = true);
 
 public interface IPaymentMethodSettingsService
 {
@@ -59,7 +63,7 @@ public sealed class PaymentMethodSettingsService(ILocalAppSettingsRepository set
         bool changed;
         try
         {
-            // 两个开关作为同一配置原子保存，成功后才改变当前支付入口。
+            // 各开关作为同一配置原子保存，成功后才改变当前支付入口与付款页布局。
             await settingsRepository.SetValueAsync(SettingsKey, JsonSerializer.Serialize(settings), cancellationToken);
             changed = Current != settings;
             Current = settings;

@@ -483,4 +483,6 @@
   <data name="mobileApp.status.offline" xml:space="preserve"><value>无法连接总部：二维码仍可正常扫码，版本信息暂不可用</value></data>
   <data name="mobileApp.enlarge.hint" xml:space="preserve"><value>点任意位置关闭 · 放大后更容易扫</value></data>
   <data name="mobileApp.enlarge.open" xml:space="preserve"><value>放大二维码</value></data>
+  <data name="settings.payment.methods.orderList" xml:space="preserve"><value>付款页显示订单列表</value></data>
+  <data name="settings.payment.methods.orderList.help" xml:space="preserve"><value>默认开启。关闭后付款页左侧只保留应付金额和小计 / 折扣，不列出商品明细；收银区随之加宽。只影响本机。</value></data>
 </root>

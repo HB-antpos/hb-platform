@@ -15,6 +15,8 @@ public partial class PaymentViewModel
     public bool IsIntegratedCardPaymentVisible => !_paymentMethodSettings.UseManualCard;
     public bool IsManualCardPaymentVisible => _paymentMethodSettings.UseManualCard;
     public bool IsVoucherPaymentVisible => _paymentMethodSettings.VoucherEnabled;
+    // 付款页左侧订单商品列表是否显示（设置页「付款页显示订单列表」，默认显示）；只影响布局，不影响金额与支付流程。
+    public bool IsOrderListVisible => _paymentMethodSettings.ShowOrderList;
 
     private void InitializePaymentMethodSettings(IPaymentMethodSettingsService? service)
     {
@@ -82,6 +84,7 @@ public partial class PaymentViewModel
         OnPropertyChanged(nameof(IsIntegratedCardPaymentVisible));
         OnPropertyChanged(nameof(IsManualCardPaymentVisible));
         OnPropertyChanged(nameof(IsVoucherPaymentVisible));
+        OnPropertyChanged(nameof(IsOrderListVisible));
         OnPropertyChanged(nameof(IsVoucherCodeEntryVisible));
         OnPropertyChanged(nameof(IsPaymentInteractionEnabled));
         OnPropertyChanged(nameof(IsLinklyCloudTerminalSelectorVisible));

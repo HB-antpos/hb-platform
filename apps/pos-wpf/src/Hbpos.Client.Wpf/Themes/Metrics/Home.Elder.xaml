@@ -1,0 +1,87 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <!-- 长者模式下收银首页的放大尺寸；仅在选中长者主题时由 WpfColorThemeApplier 追加到应用资源末尾，覆盖标准值。
+         只放要变的键（必须是 Home.Standard.xaml 里已有的键）。 -->
+    <sys:String x:Key="PosMetricsElderId">Home</sys:String>
+
+    <!-- 购物车表头与行 -->
+    <sys:Double x:Key="PosHomeCartHeaderFontSize">16</sys:Double>
+    <sys:Double x:Key="PosHomeCartHeaderHeight">40</sys:Double>
+    <sys:Double x:Key="PosHomeCartMinRowHeight">72</sys:Double>
+    <sys:Double x:Key="PosHomeCartIndexFontSize">16</sys:Double>
+    <sys:Double x:Key="PosHomeCartNameFontSize">21</sys:Double>
+    <sys:Double x:Key="PosHomeCartMetaFontSize">15</sys:Double>
+    <sys:Double x:Key="PosHomeCartPriceFontSize">19</sys:Double>
+    <sys:Double x:Key="PosHomeCartDiscountFontSize">17</sys:Double>
+    <sys:Double x:Key="PosHomeCartThumbSize">56</sys:Double>
+    <GridLength x:Key="PosHomeCartThumbColumnWidth">68</GridLength>
+
+    <!-- 购物车数量列 -->
+    <sys:Double x:Key="PosHomeCartStepButtonSize">42</sys:Double>
+    <sys:Double x:Key="PosHomeCartStepIconSize">24</sys:Double>
+    <sys:Double x:Key="PosHomeCartQtyBoxWidth">60</sys:Double>
+    <sys:Double x:Key="PosHomeCartQtyBoxHeight">42</sys:Double>
+    <sys:Double x:Key="PosHomeCartQtyFontSize">25</sys:Double>
+    <GridLength x:Key="PosHomeCartQtyColumnWidth">64</GridLength>
+
+    <!-- 汇总区与 Pay Now -->
+    <GridLength x:Key="PosHomeSummaryBoxHeight">100</GridLength>
+    <GridLength x:Key="PosHomeSummaryCountRowHeight">38</GridLength>
+    <GridLength x:Key="PosHomeSummaryTotalsRowHeight">62</GridLength>
+    <sys:Double x:Key="PosHomeSummaryLabelFontSize">16</sys:Double>
+    <sys:Double x:Key="PosHomeSummaryCountFontSize">19</sys:Double>
+    <sys:Double x:Key="PosHomeSummaryValueFontSize">21</sys:Double>
+    <sys:Double x:Key="PosHomeSummaryTotalLabelFontSize">19</sys:Double>
+    <sys:Double x:Key="PosHomeSummaryDueFontSize">36</sys:Double>
+    <GridLength x:Key="PosHomePayRowHeight">72</GridLength>
+    <sys:Double x:Key="PosHomePayHeight">72</sys:Double>
+    <sys:Double x:Key="PosHomePayFontSize">30</sys:Double>
+    <sys:Double x:Key="PosHomePayIconSize">34</sys:Double>
+
+    <!-- 搜索行 -->
+    <sys:Double x:Key="PosHomeSearchRowHeight">56</sys:Double>
+    <sys:Double x:Key="PosHomeSearchFontSize">19</sys:Double>
+    <sys:Double x:Key="PosHomeSearchKeyboardIconSize">28</sys:Double>
+    <sys:Double x:Key="PosHomeSearchAddFontSize">19</sys:Double>
+
+    <!-- 键盘列：输入缓冲 / 数字键 / No Barcode -->
+    <sys:Double x:Key="PosHomeInputBoxHeight">92</sys:Double>
+    <sys:Double x:Key="PosHomeInputFontSize">44</sys:Double>
+    <sys:Double x:Key="PosHomeInputLabelFontSize">13</sys:Double>
+    <sys:Double x:Key="PosHomeBackspaceSize">56</sys:Double>
+    <sys:Double x:Key="PosHomeKeyFontSize">38</sys:Double>
+    <sys:Double x:Key="PosHomeKeySmallFontSize">22</sys:Double>
+    <sys:Double x:Key="PosHomeNoBarcodeHeight">56</sys:Double>
+    <sys:Double x:Key="PosHomeNoBarcodeFontSize">21</sys:Double>
+
+    <!-- 键盘列：操作区与折扣条 -->
+    <GridLength x:Key="PosHomeOpsRowHeight">56</GridLength>
+    <sys:Double x:Key="PosHomeOpsButtonHeight">56</sys:Double>
+    <sys:Double x:Key="PosHomeOpsFontSize">19</sys:Double>
+    <sys:Double x:Key="PosHomeDiscountHeight">60</sys:Double>
+    <sys:Double x:Key="PosHomeDiscountFontSize">21</sys:Double>
+
+    <!-- 功能区：图标 / 标签 -->
+    <sys:Double x:Key="PosHomeSidebarIconSize">28</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarIconHostSize">32</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelFontSize">16</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelLineHeight">18</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelMaxWidth">96</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">40</sys:Double>
+
+    <!-- 功能区：状态卡 / 考勤二维码按钮 -->
+    <sys:Double x:Key="PosHomeStatusCardHeight">140</sys:Double>
+    <sys:Double x:Key="PosHomeStatusTitleFontSize">15</sys:Double>
+    <sys:Double x:Key="PosHomeStatusBodyFontSize">14</sys:Double>
+    <sys:Double x:Key="PosHomeStatusTagFontSize">13</sys:Double>
+    <sys:Double x:Key="PosHomeCardRecoveryFontSize">15</sys:Double>
+    <sys:Double x:Key="PosHomeAttendanceButtonHeight">60</sys:Double>
+    <sys:Double x:Key="PosHomeAttendanceTitleFontSize">15</sys:Double>
+    <sys:Double x:Key="PosHomeAttendanceStatusFontSize">12</sys:Double>
+    <sys:Double x:Key="PosHomeAttendanceSecondsFontSize">18</sys:Double>
+
+    <!-- 描边粗细 / 键帽厚度（Thickness） -->
+    <Thickness x:Key="PosHomeColoredBorderThickness">0</Thickness>
+    <Thickness x:Key="PosHomeKeyDepth">0,0,0,3</Thickness>
+</ResourceDictionary>

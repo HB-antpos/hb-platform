@@ -419,6 +419,8 @@
   <data name="shell.colorTheme.graphite.hint" xml:space="preserve"><value>Evening shifts and dim light</value></data>
   <data name="shell.colorTheme.celadon" xml:space="preserve"><value>Celadon</value></data>
   <data name="shell.colorTheme.celadon.hint" xml:space="preserve"><value>Soft all-day comfort</value></data>
+  <data name="shell.colorTheme.elder" xml:space="preserve"><value>Easy View</value></data>
+  <data name="shell.colorTheme.elder.hint" xml:space="preserve"><value>Large text, clear zones, high contrast</value></data>
   <data name="shell.languageToggle" xml:space="preserve"><value>中 / EN</value></data>
   <data name="shell.language.saveFailedRestartMayRevert" xml:space="preserve"><value>Language changed for this session, but saving failed. It may revert after restart.</value></data>
   <data name="shell.cashierLogin.overlayTitle" xml:space="preserve"><value>Cashier login required</value></data>

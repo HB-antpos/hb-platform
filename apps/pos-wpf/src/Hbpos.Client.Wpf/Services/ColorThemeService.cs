@@ -12,7 +12,9 @@ public enum PosColorTheme
     Paper,
     Graphite,
     Celadon,
-    Blue
+    Blue,
+    // 长者模式：高对比、大字、首页三区分色、内容区无描边；除色板外还会追加放大尺寸字典（见 WpfColorThemeApplier）。
+    Elder
 }
 
 public interface IColorThemeService
@@ -107,6 +109,13 @@ public sealed class ColorThemeService : IColorThemeService
 public sealed class WpfColorThemeApplier : IColorThemeApplier
 {
     internal const string PaletteIdKey = "PosPaletteId";
+
+    // 长者模式的尺寸字典都带这个标记键，用来在切换主题时找到并整体移除。
+    internal const string ElderMetricsIdKey = "PosMetricsElderId";
+
+    // 标准尺寸写在 PosTheme.xaml 合并的 Metrics/*.Standard.xaml（始终加载，与改版前字面量一致）；
+    // 长者模式把下面这些字典追加到应用资源末尾，同名键后加载者生效，因此只需覆盖要变的尺寸。
+    private static readonly string[] ElderMetricsDictionaries = ["Home", "Payment"];
     private const string PaletteIsDarkKey = "PosPaletteIsDark";
     private const string PaletteMaterialPrimaryKey = "PosPaletteMaterialPrimaryColor";
 
@@ -122,6 +131,7 @@ public sealed class WpfColorThemeApplier : IColorThemeApplier
 
         var palette = new ResourceDictionary { Source = GetPaletteUri(theme) };
         ReplacePalette(application.Resources, palette);
+        ReplaceElderMetrics(application.Resources, theme == PosColorTheme.Elder);
         ApplyMaterialTheme(palette);
     }
 
@@ -130,6 +140,39 @@ public sealed class WpfColorThemeApplier : IColorThemeApplier
         return new Uri(
             $"pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Palettes/{theme}.xaml",
             UriKind.Absolute);
+    }
+
+    internal static Uri GetElderMetricsUri(string area)
+    {
+        return new Uri(
+            $"pack://application:,,,/Hbpos.Client.Wpf;component/Themes/Metrics/{area}.Elder.xaml",
+            UriKind.Absolute);
+    }
+
+    /// <summary>
+    /// 长者模式：先移除旧的放大尺寸字典，再按需追加到合并字典末尾（覆盖 PosTheme 里的标准尺寸）；
+    /// 其它主题只移除，尺寸回到标准值。DynamicResource 引用随字典增删自动刷新。
+    /// </summary>
+    internal static void ReplaceElderMetrics(ResourceDictionary resources, bool enable)
+    {
+        var merged = resources.MergedDictionaries;
+        for (var index = merged.Count - 1; index >= 0; index--)
+        {
+            if (merged[index].Contains(ElderMetricsIdKey))
+            {
+                merged.RemoveAt(index);
+            }
+        }
+
+        if (!enable)
+        {
+            return;
+        }
+
+        foreach (var area in ElderMetricsDictionaries)
+        {
+            merged.Add(new ResourceDictionary { Source = GetElderMetricsUri(area) });
+        }
     }
 
     /// <summary>用新色板替换资源中的旧色板；所有 DynamicResource 引用随之刷新。</summary>

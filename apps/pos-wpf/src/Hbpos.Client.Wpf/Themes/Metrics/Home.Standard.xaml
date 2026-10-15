@@ -1,0 +1,85 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <!-- 收银首页的尺寸（字号、行高、按钮高度…）标准值：与改版前的字面量完全一致。由 PosTheme.xaml 合并，始终加载。 -->
+
+    <!-- 购物车表头与行 -->
+    <sys:Double x:Key="PosHomeCartHeaderFontSize">12</sys:Double>  <!-- 表头字号 -->
+    <sys:Double x:Key="PosHomeCartHeaderHeight">36</sys:Double>  <!-- 表头高（DataGrid.ColumnHeaderHeight） -->
+    <sys:Double x:Key="PosHomeCartMinRowHeight">67</sys:Double>  <!-- 行最小高（DataGrid.MinRowHeight） -->
+    <sys:Double x:Key="PosHomeCartIndexFontSize">13</sys:Double>  <!-- 行序号 -->
+    <sys:Double x:Key="PosHomeCartNameFontSize">13</sys:Double>  <!-- 商品名 -->
+    <sys:Double x:Key="PosHomeCartMetaFontSize">11</sys:Double>  <!-- 货号 / 条码 -->
+    <sys:Double x:Key="PosHomeCartPriceFontSize">13</sys:Double>  <!-- 单价 / 小计 -->
+    <sys:Double x:Key="PosHomeCartDiscountFontSize">10</sys:Double>  <!-- 折扣小字 -->
+    <sys:Double x:Key="PosHomeCartThumbSize">52</sys:Double>  <!-- 缩略图边长 -->
+    <GridLength x:Key="PosHomeCartThumbColumnWidth">64</GridLength>  <!-- 缩略图列宽（缩略图 + 12 间距） -->
+
+    <!-- 购物车数量列 -->
+    <sys:Double x:Key="PosHomeCartStepButtonSize">32</sys:Double>  <!-- ± 按钮边长 -->
+    <sys:Double x:Key="PosHomeCartStepIconSize">18</sys:Double>  <!-- ± 图标 -->
+    <sys:Double x:Key="PosHomeCartQtyBoxWidth">50</sys:Double>  <!-- 数量框宽 -->
+    <sys:Double x:Key="PosHomeCartQtyBoxHeight">32</sys:Double>  <!-- 数量框高 -->
+    <sys:Double x:Key="PosHomeCartQtyFontSize">16</sys:Double>  <!-- 数量数字 -->
+    <GridLength x:Key="PosHomeCartQtyColumnWidth">58</GridLength>  <!-- 数量框所在列宽（数量框宽 + 8） -->
+
+    <!-- 汇总区与 Pay Now -->
+    <GridLength x:Key="PosHomeSummaryBoxHeight">92</GridLength>  <!-- 汇总块总高（＝上行 + 下行） -->
+    <GridLength x:Key="PosHomeSummaryCountRowHeight">34</GridLength>  <!-- 汇总上行（件数 / SKU） -->
+    <GridLength x:Key="PosHomeSummaryTotalsRowHeight">58</GridLength>  <!-- 汇总下行（小计 / 折扣 / 应付） -->
+    <sys:Double x:Key="PosHomeSummaryLabelFontSize">12</sys:Double>  <!-- 汇总标签 -->
+    <sys:Double x:Key="PosHomeSummaryCountFontSize">13</sys:Double>  <!-- 件数 / SKU 数值 -->
+    <sys:Double x:Key="PosHomeSummaryValueFontSize">14</sys:Double>  <!-- 小计 / 折扣金额 -->
+    <sys:Double x:Key="PosHomeSummaryTotalLabelFontSize">15</sys:Double>  <!-- 合计标签 -->
+    <sys:Double x:Key="PosHomeSummaryDueFontSize">24</sys:Double>  <!-- 应付合计金额 -->
+    <GridLength x:Key="PosHomePayRowHeight">64</GridLength>  <!-- Pay Now 所在行高 -->
+    <sys:Double x:Key="PosHomePayHeight">64</sys:Double>  <!-- Pay Now 按钮高 -->
+    <sys:Double x:Key="PosHomePayFontSize">22</sys:Double>  <!-- Pay Now 字号 -->
+    <sys:Double x:Key="PosHomePayIconSize">26</sys:Double>  <!-- Pay Now 图标 -->
+
+    <!-- 搜索行 -->
+    <sys:Double x:Key="PosHomeSearchRowHeight">48</sys:Double>  <!-- 搜索行高 -->
+    <sys:Double x:Key="PosHomeSearchFontSize">14</sys:Double>  <!-- 搜索框字号 -->
+    <sys:Double x:Key="PosHomeSearchKeyboardIconSize">22</sys:Double>  <!-- 屏幕键盘按钮图标 -->
+    <sys:Double x:Key="PosHomeSearchAddFontSize">16</sys:Double>  <!-- Add 按钮字号 -->
+
+    <!-- 键盘列：输入缓冲 / 数字键 / No Barcode -->
+    <sys:Double x:Key="PosHomeInputBoxHeight">78</sys:Double>  <!-- 输入缓冲框高 -->
+    <sys:Double x:Key="PosHomeInputFontSize">34</sys:Double>  <!-- 输入缓冲数字 -->
+    <sys:Double x:Key="PosHomeInputLabelFontSize">11</sys:Double>  <!-- 输入缓冲标签 -->
+    <sys:Double x:Key="PosHomeBackspaceSize">44</sys:Double>  <!-- 退格键边长 -->
+    <sys:Double x:Key="PosHomeKeyFontSize">28</sys:Double>  <!-- 数字键字号 -->
+    <sys:Double x:Key="PosHomeKeySmallFontSize">18</sys:Double>  <!-- Clear / $0.50 / $0.99 字号 -->
+    <sys:Double x:Key="PosHomeNoBarcodeHeight">50</sys:Double>  <!-- No Barcode 高 -->
+    <sys:Double x:Key="PosHomeNoBarcodeFontSize">18</sys:Double>  <!-- No Barcode 字号 -->
+
+    <!-- 键盘列：操作区与折扣条 -->
+    <GridLength x:Key="PosHomeOpsRowHeight">52</GridLength>  <!-- 操作区两行的行高（改数量 / 价格；整单 / 折扣金额 / 折扣%） -->
+    <sys:Double x:Key="PosHomeOpsButtonHeight">52</sys:Double>  <!-- 操作区按钮高（与行高一致） -->
+    <sys:Double x:Key="PosHomeOpsFontSize">16</sys:Double>  <!-- 操作区按钮字号（整单开关保持 16，不走此键） -->
+    <sys:Double x:Key="PosHomeDiscountHeight">64</sys:Double>  <!-- 10%–50% 折扣条高 -->
+    <sys:Double x:Key="PosHomeDiscountFontSize">18</sys:Double>  <!-- 折扣条字号 -->
+
+    <!-- 功能区：图标 / 标签 -->
+    <sys:Double x:Key="PosHomeSidebarIconSize">24</sys:Double>  <!-- 功能按钮图标 -->
+    <sys:Double x:Key="PosHomeSidebarIconHostSize">28</sys:Double>  <!-- 图标容器（比图标大 4） -->
+    <sys:Double x:Key="PosHomeSidebarLabelFontSize">13</sys:Double>  <!-- 功能按钮标签字号 -->
+    <sys:Double x:Key="PosHomeSidebarLabelLineHeight">16</sys:Double>  <!-- 标签行高 -->
+    <sys:Double x:Key="PosHomeSidebarLabelMaxWidth">88</sys:Double>  <!-- 标签最大宽 -->
+    <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">32</sys:Double>  <!-- 标签最大高（两行） -->
+
+    <!-- 功能区：状态卡 / 考勤二维码按钮 -->
+    <sys:Double x:Key="PosHomeStatusCardHeight">154</sys:Double>  <!-- 状态卡高（同时用作 MaxHeight） -->
+    <sys:Double x:Key="PosHomeStatusTitleFontSize">11</sys:Double>  <!-- 状态卡标题 -->
+    <sys:Double x:Key="PosHomeStatusBodyFontSize">10</sys:Double>  <!-- 状态卡正文 -->
+    <sys:Double x:Key="PosHomeStatusTagFontSize">9</sys:Double>  <!-- 状态卡标签（Synced） -->
+    <sys:Double x:Key="PosHomeCardRecoveryFontSize">11</sys:Double>  <!-- Card Recovery 入口文字 -->
+    <sys:Double x:Key="PosHomeAttendanceButtonHeight">62</sys:Double>  <!-- 考勤二维码按钮高 -->
+    <sys:Double x:Key="PosHomeAttendanceTitleFontSize">11</sys:Double>  <!-- 考勤按钮标题 -->
+    <sys:Double x:Key="PosHomeAttendanceStatusFontSize">9</sys:Double>  <!-- 考勤按钮状态行 -->
+    <sys:Double x:Key="PosHomeAttendanceSecondsFontSize">14</sys:Double>  <!-- 考勤按钮剩余秒数 -->
+
+    <!-- 描边粗细 / 键帽厚度（Thickness） -->
+    <Thickness x:Key="PosHomeColoredBorderThickness">1</Thickness>  <!-- 语义色细边（Clear 键、± 按钮、Pay Now、屏幕键盘 Clear/Enter）：旧主题 1px，长者主题无边框 -->
+    <Thickness x:Key="PosHomeKeyDepth">0</Thickness>  <!-- 键帽厚度：键面底部留出的边（露出下层 PosKeyShadowBrush 厚度层）；旧主题为 0，厚度色本身也透明 -->
+</ResourceDictionary>

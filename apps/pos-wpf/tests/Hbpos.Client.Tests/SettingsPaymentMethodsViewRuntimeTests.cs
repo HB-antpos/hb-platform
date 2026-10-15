@@ -49,15 +49,20 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
             PaymentViewRuntimeStaTestHost.Realize(view, width, height);
             var manual = Assert.IsType<ToggleButton>(view.FindName("ManualCardSettingToggle"));
             var voucher = Assert.IsType<ToggleButton>(view.FindName("VoucherSettingToggle"));
+            var orderList = Assert.IsType<ToggleButton>(view.FindName("OrderListSettingToggle"));
             var save = Assert.Single(PaymentViewRuntimeStaTestHost.FindVisualDescendants<Button>(view)
                 .Where(button => ReferenceEquals(button.Command, vm.SavePaymentMethodsCommand)));
             AssertInBounds(view, manual, width, height);
             AssertInBounds(view, voucher, width, height);
+            AssertInBounds(view, orderList, width, height);
             AssertInBounds(view, save, width, height);
             Assert.False(manual.IsChecked);
             Assert.False(voucher.IsChecked);
+            // 付款页订单列表默认开启，且不受环境锁影响始终可切换。
+            Assert.True(orderList.IsChecked);
             Assert.True(manual.IsEnabled);
             Assert.True(voucher.IsEnabled);
+            Assert.True(orderList.IsEnabled);
             Assert.True(save.IsEnabled);
             var saveText = Assert.IsType<TextBlock>(save.Content);
             Assert.Equal(localization.T("settings.payment.methods.save"), saveText.Text);
@@ -77,12 +82,14 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
 
             manual.IsChecked = true;
             voucher.IsChecked = true;
+            orderList.IsChecked = false;
             PaymentViewRuntimeStaTestHost.Realize(view, width, height);
             Assert.True(vm.UseManualCard);
             Assert.True(vm.VoucherEnabled);
+            Assert.False(vm.ShowOrderList);
             Assert.Equal(new PaymentMethodSettings(), methods.Current);
             await vm.SavePaymentMethodsCommand.ExecuteAsync(null);
-            Assert.Equal(new PaymentMethodSettings(true, true), methods.Current);
+            Assert.Equal(new PaymentMethodSettings(true, true, false), methods.Current);
             Assert.Equal(1, methods.SaveCalls);
             // 修改付款方式只保存本地开关，不追加终端测试或配置写入。
             Assert.Equal(setupCallsAfterLoad, ((UnavailableTerminalSetup)setup).Calls);
@@ -97,13 +104,14 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
     [Fact]
     public Task Saved_payment_methods_load_before_terminal_configuration_failure() => host.RunAsync(async _ =>
     {
-        var methods = new MethodSettingsFake { Current = new(true, true) };
+        var methods = new MethodSettingsFake { Current = new(true, true, false) };
         var setup = DispatchProxy.Create<ICardTerminalSetupService, UnavailableTerminalSetup>();
         ((UnavailableTerminalSetup)setup).FailLoad = true;
         using var vm = new SettingsViewModel(setup, paymentMethodSettingsService: methods);
         await vm.LoadAsync();
         Assert.True(vm.UseManualCard);
         Assert.True(vm.VoucherEnabled);
+        Assert.False(vm.ShowOrderList);
         Assert.Equal("Terminal unavailable", vm.StatusMessage);
         Assert.True(vm.SavePaymentMethodsCommand.CanExecute(null));
     });

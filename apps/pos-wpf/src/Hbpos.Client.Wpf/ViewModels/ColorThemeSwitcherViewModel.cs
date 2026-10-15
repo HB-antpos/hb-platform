@@ -42,7 +42,9 @@ public sealed partial class ColorThemeSwitcherViewModel : ObservableObject
         (PosColorTheme.Default, ["#FFF3F3F7", "#FF0056D2", "#FFFF8F00"]),
         (PosColorTheme.Paper, ["#FFEDE9E1", "#FF1E5E59", "#FFAE4519"]),
         (PosColorTheme.Graphite, ["#FF14171B", "#FF2F76B8", "#FFEFC05A"]),
-        (PosColorTheme.Celadon, ["#FFE1E8E3", "#FF245A74", "#FFF0E2A2"])
+        (PosColorTheme.Celadon, ["#FFE1E8E3", "#FF245A74", "#FFF0E2A2"]),
+        // 长者模式：购物车灰白、深蓝、支付绿
+        (PosColorTheme.Elder, ["#FFE9EDF2", "#FF1E3A8A", "#FF05652A"])
     ];
 
     private async Task SelectAsync(PosColorTheme theme)

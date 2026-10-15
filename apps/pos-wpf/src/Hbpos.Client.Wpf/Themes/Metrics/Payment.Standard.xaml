@@ -1,0 +1,78 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <!-- 支付页的尺寸标准值：与改版前的字面量完全一致。由 PosTheme.xaml 合并，始终加载。
+         长者主题的放大值在 Payment.Elder.xaml 中同名覆盖（长者键必须是本字典键的子集）。
+         命名规则：PosPay + 区域 + 属性；字号/尺寸=sys:Double，边框=Thickness，Opacity 开关=sys:Double（0 隐藏/1 显示）。 -->
+
+    <!-- ── 左列：返回、件数、订单表格 ── -->
+    <sys:Double x:Key="PosPayBackButtonMinHeight">44</sys:Double>
+    <sys:Double x:Key="PosPayBackButtonFontSize">15</sys:Double>
+    <sys:Double x:Key="PosPayBackIconSize">16</sys:Double>
+    <!-- 「N Items」徽标与订单摘要小字 -->
+    <sys:Double x:Key="PosPayItemsLabelFontSize">10</sys:Double>
+    <sys:Double x:Key="PosPayCartFontSize">14</sys:Double>
+    <sys:Double x:Key="PosPayCartRowHeight">54</sys:Double>
+    <sys:Double x:Key="PosPayCartHeaderFontSize">12</sys:Double>
+    <!-- 表头最小高度：0 等于不限制，保持原先由字号 + 内边距撑开的高度 -->
+    <sys:Double x:Key="PosPayCartHeaderMinHeight">0</sys:Double>
+    <!-- DataGridColumn 不是 FrameworkElement，Width 无法用 DynamicResource；数量/合计列改为 Auto 宽度，由表头最小宽度控制 -->
+    <sys:Double x:Key="PosPayCartQtyColumnMinWidth">58</sys:Double>
+    <sys:Double x:Key="PosPayCartTotalColumnMinWidth">82</sys:Double>
+    <!-- 斑马纹开关：0=不交替（原样），2=隔行交替 -->
+    <sys:Int32 x:Key="PosPayCartAlternationCount">0</sys:Int32>
+    <!-- 汇总区（小计/折扣/应付） -->
+    <sys:Double x:Key="PosPaySummaryLabelFontSize">11</sys:Double>
+    <sys:Double x:Key="PosPaySummaryValueFontSize">14</sys:Double>
+    <sys:Double x:Key="PosPayDueLabelFontSize">14</sys:Double>
+    <sys:Double x:Key="PosPayDueAmountFontSize">28</sys:Double>
+    <!-- 汇总区底色衬板透明度：旧主题 0（卡片原样），长者 1（灰底） -->
+    <sys:Double x:Key="PosPaySummaryPlateOpacity">0</sys:Double>
+    <!-- 返回按钮底色衬板透明度：旧主题 0，长者 1（浅蓝底） -->
+    <sys:Double x:Key="PosPayBackPlateOpacity">0</sys:Double>
+    <!-- 订单列表关闭时左列中央的大号应付金额 -->
+    <sys:Double x:Key="PosPayDueBigLabelFontSize">15</sys:Double>
+    <sys:Double x:Key="PosPayDueBigAmountFontSize">44</sys:Double>
+
+    <!-- ── 中列：待付/找零、当前支付金额、数字键、快捷现金 ── -->
+    <sys:Double x:Key="PosPayAmountLabelFontSize">16</sys:Double>
+    <sys:Double x:Key="PosPayChangeAmountFontSize">40</sys:Double>
+    <!-- 找零为 0 时的底色衬板透明度：旧主题 0（透明），长者 1（保持浅蓝灰底） -->
+    <sys:Double x:Key="PosPayChangeIdlePlateOpacity">0</sys:Double>
+    <sys:Double x:Key="PosPayTenderLabelFontSize">15</sys:Double>
+    <sys:Double x:Key="PosPayTenderInputFontSize">36</sys:Double>
+    <sys:Double x:Key="PosPayTenderInputMinHeight">62</sys:Double>
+    <Thickness x:Key="PosPayTenderInputBorderThickness">1</Thickness>
+    <sys:Double x:Key="PosPayBackspaceWidth">64</sys:Double>
+    <sys:Double x:Key="PosPayBackspaceMinHeight">62</sys:Double>
+    <sys:Double x:Key="PosPayBackspaceIconSize">30</sys:Double>
+    <!-- 退格键底色衬板透明度：旧主题 0（白键），长者 1（浅红底） -->
+    <sys:Double x:Key="PosPayBackspacePlateOpacity">0</sys:Double>
+    <sys:Double x:Key="PosPayKeypadNumberFontSize">34</sys:Double>
+    <sys:Double x:Key="PosPayKeypadClearFontSize">24</sys:Double>
+    <Thickness x:Key="PosPayClearKeyBorderThickness">1</Thickness>
+    <!-- 快捷现金（方案 B）：字号、「$」上标字号、按钮高度、整行高度（按钮高 + 6 间隔） -->
+    <sys:Double x:Key="PosPayQuickCashFontSize">32</sys:Double>
+    <sys:Double x:Key="PosPayQuickCashDollarFontSize">18</sys:Double>
+    <sys:Double x:Key="PosPayQuickCashButtonHeight">78</sys:Double>
+    <sys:Double x:Key="PosPayQuickCashRowHeight">84</sys:Double>
+
+    <!-- ── 右列：支付方式、已付款项、取消/确认 ── -->
+    <sys:Double x:Key="PosPayMethodTitleFontSize">20</sys:Double>
+    <sys:Double x:Key="PosPayMethodLabelFontSize">15</sys:Double>
+    <sys:Double x:Key="PosPayTendersTitleFontSize">16</sys:Double>
+    <sys:Double x:Key="PosPayTenderNameFontSize">15</sys:Double>
+    <sys:Double x:Key="PosPayTenderAmountFontSize">16</sys:Double>
+    <sys:Double x:Key="PosPayTenderNoteFontSize">10</sys:Double>
+    <sys:Double x:Key="PosPayTenderIconBlockSize">38</sys:Double>
+    <sys:Double x:Key="PosPayTenderIconSize">22</sys:Double>
+    <sys:Double x:Key="PosPayCancelButtonHeight">54</sys:Double>
+    <sys:Double x:Key="PosPayCancelFontSize">15</sys:Double>
+    <sys:Double x:Key="PosPayConfirmButtonHeight">60</sys:Double>
+    <sys:Double x:Key="PosPayConfirmFontSize">17</sys:Double>
+    <sys:Double x:Key="PosPayConfirmIconSize">20</sys:Double>
+    <!-- 确认按钮里「图标列」的宽度（原 26，图标放大后随之加宽） -->
+    <GridLength x:Key="PosPayConfirmIconColumnWidth">26</GridLength>
+    <!-- 找零底色衬板圆角：旧主题保持原来的直角，长者主题右侧圆角。 -->
+    <CornerRadius x:Key="PosPayChangePlateCornerRadius">0</CornerRadius>
+</ResourceDictionary>

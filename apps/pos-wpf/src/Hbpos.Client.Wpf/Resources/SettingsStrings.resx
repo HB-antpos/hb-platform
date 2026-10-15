@@ -483,4 +483,6 @@
   <data name="mobileApp.status.offline" xml:space="preserve"><value>Can't reach HQ: QR codes still work, but version info is unavailable</value></data>
   <data name="mobileApp.enlarge.hint" xml:space="preserve"><value>Tap anywhere to close · a bigger code is easier to scan</value></data>
   <data name="mobileApp.enlarge.open" xml:space="preserve"><value>Enlarge QR code</value></data>
+  <data name="settings.payment.methods.orderList" xml:space="preserve"><value>Show order list on payment page</value></data>
+  <data name="settings.payment.methods.orderList.help" xml:space="preserve"><value>On by default. When off, the left side of the payment page shows only the amount due and the subtotal / discount, without the item list, and the payment area gets wider. Applies to this device only.</value></data>
 </root>

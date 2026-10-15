@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Hbpos.Client.Wpf.Services;
@@ -25,21 +26,21 @@ public sealed class PosTerminalViewLayoutTests
         var backspaceButton = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
             (string?)button.Attribute("CommandParameter") == "Back" &&
             ((string?)button.Attribute("Command"))?.Contains("KeypadInputCommand", StringComparison.Ordinal) == true));
-        Assert.Equal("44", (string?)backspaceButton.Attribute("Height"));
+        Assert.Equal("44", Metric((string?)backspaceButton.Attribute("Height")));
 
         var inputBorder = Assert.Single(view.Descendants(presentation + "Border").Where(border =>
             border.Descendants(presentation + "TextBlock").Any(text =>
                 ((string?)text.Attribute("Text"))?.Contains("pos.terminal.inputBuffer", StringComparison.Ordinal) == true)));
-        Assert.Equal("78", (string?)inputBorder.Attribute("Height"));
+        Assert.Equal("78", Metric((string?)inputBorder.Attribute("Height")));
         Assert.Equal("12,6", (string?)inputBorder.Attribute("Padding"));
         Assert.Equal("13,10,13,8", (string?)inputBorder.Attribute("Margin"));
         Assert.Equal("6", (string?)inputBorder.Attribute("CornerRadius"));
         var inputLabel = Assert.Single(inputBorder.Descendants(presentation + "TextBlock").Where(text =>
             ((string?)text.Attribute("Text"))?.Contains("pos.terminal.inputBuffer", StringComparison.Ordinal) == true));
-        Assert.Equal("11", (string?)inputLabel.Attribute("FontSize"));
+        Assert.Equal("11", Metric((string?)inputLabel.Attribute("FontSize")));
         var inputValue = Assert.Single(inputBorder.Descendants(presentation + "TextBlock").Where(text =>
             ((string?)text.Attribute("Text"))?.Contains("{Binding KeypadBuffer", StringComparison.Ordinal) == true));
-        Assert.Equal("34", (string?)inputValue.Attribute("FontSize"));
+        Assert.Equal("34", Metric((string?)inputValue.Attribute("FontSize")));
         Assert.Equal("Black", (string?)inputValue.Attribute("FontWeight"));
 
         // 键盘区 = 外层 5 等分行的 Grid：数字键 UniformGrid（3×4，跨 4 行）+ 底部 $0.50 / $0.99 各占半行（第 5 行）。
@@ -69,19 +70,25 @@ public sealed class PosTerminalViewLayoutTests
             Assert.Equal("{StaticResource CashierQuickKeyStyle}", (string?)button.Attribute("Style")));
 
         var flatButtonBase = FindStyle(view, x, "CashierFlatButtonBaseStyle");
-        var flatButtonBorder = Assert.Single(flatButtonBase.Descendants(presentation + "Border"));
+        // 键面 Root 之下多了一层「键帽厚度」KeyShadow（旧主题透明、PosHomeKeyDepth 为 0，视觉不变）。
+        var flatButtonBorder = Assert.Single(flatButtonBase.Descendants(presentation + "Border").Where(border =>
+            (string?)border.Attribute(x + "Name") == "Root"));
         Assert.Equal("5", (string?)flatButtonBorder.Attribute("CornerRadius"));
+        Assert.Equal("0", Metric((string?)flatButtonBorder.Attribute("Margin")));
+        var keyShadow = Assert.Single(flatButtonBase.Descendants(presentation + "Border").Where(border =>
+            (string?)border.Attribute(x + "Name") == "KeyShadow"));
+        Assert.Equal("{DynamicResource PosKeyShadowBrush}", (string?)keyShadow.Attribute("Background"));
         Assert.Empty(flatButtonBase.Descendants(presentation + "DropShadowEffect"));
         var numberStyle = FindStyle(view, x, "CashierNumberKeyStyle");
         AssertSetter(numberStyle, "MinHeight", "44");
         AssertSetter(numberStyle, "Margin", "2");
-        AssertSetter(numberStyle, "FontSize", "28");
+        AssertMetricSetter(numberStyle, "FontSize", "28");
         AssertSetter(numberStyle, "FontWeight", "Black");
         var clearStyle = FindStyle(view, x, "CashierClearKeyStyle");
-        AssertSetter(clearStyle, "FontSize", "18");
+        AssertMetricSetter(clearStyle, "FontSize", "18");
         AssertSetter(clearStyle, "FontWeight", "Medium");
         var quickStyle = FindStyle(view, x, "CashierQuickKeyStyle");
-        AssertSetter(quickStyle, "FontSize", "18");
+        AssertMetricSetter(quickStyle, "FontSize", "18");
         AssertSetter(quickStyle, "FontWeight", "SemiBold");
 
         var middleActionGrid = Assert.Single(view.Descendants(presentation + "Grid").Where(
@@ -92,7 +99,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("12,0,12,8", (string?)middleActionGrid.Attribute("Margin"));
         Assert.Equal(
             ["52", "6", "52", "6", "Auto"],
-            middleActionGrid.Element(presentation + "Grid.RowDefinitions")!.Elements().Select(row => (string?)row.Attribute("Height")));
+            middleActionGrid.Element(presentation + "Grid.RowDefinitions")!.Elements().Select(row => Metric((string?)row.Attribute("Height"))));
         Assert.Equal(
             ["76", "6", "*", "6", "*"],
             middleActionGrid.Element(presentation + "Grid.ColumnDefinitions")!.Elements().Select(column => (string?)column.Attribute("Width")));
@@ -139,18 +146,18 @@ public sealed class PosTerminalViewLayoutTests
 
         var segmentStyle = FindStyle(view, x, "CashierQuickDiscountSegmentStyle");
         AssertSetter(segmentStyle, "Background", "{DynamicResource PosSurfaceBrush}");
-        AssertSetter(segmentStyle, "BorderBrush", "{DynamicResource PosBorderBrush}");
+        AssertSetter(segmentStyle, "BorderBrush", "{DynamicResource PosKeyBorderBrush}");
         var segmentTrigger = Assert.Single(segmentStyle.Descendants(presentation + "DataTrigger"));
         Assert.Equal("{Binding IsWholeOrderOperation}", (string?)segmentTrigger.Attribute("Binding"));
         AssertTriggerSetter(segmentTrigger, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
         AssertTriggerSetter(segmentTrigger, "Background", "{DynamicResource PosPrimarySoftBrush}");
 
         var functionStyle = FindStyle(view, x, "CashierFunctionButtonStyle");
-        AssertSetter(functionStyle, "Height", "52");
+        AssertMetricSetter(functionStyle, "Height", "52");
         AssertSetter(functionStyle, "Margin", "0");
 
         var discountStyle = FindStyle(view, x, "CashierDiscountButtonStyle");
-        AssertSetter(discountStyle, "Height", "64");
+        AssertMetricSetter(discountStyle, "Height", "64");
         AssertSetter(discountStyle, "Margin", "0");
         AssertSetter(discountStyle, "Background", "Transparent");
         AssertSetter(discountStyle, "BorderThickness", "0,0,1,0");
@@ -195,9 +202,10 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal(ancestorForeground, (string?)Assert.Single(noBarcodeButton.Descendants(presentation + "TextBlock")).Attribute("Foreground"));
         Assert.Equal("{StaticResource CashierNoBarcodeButtonStyle}", (string?)noBarcodeButton.Attribute("Style"));
         var noBarcodeStyle = FindStyle(view, x, "CashierNoBarcodeButtonStyle");
-        AssertSetter(noBarcodeStyle, "Background", "{DynamicResource PosPrimaryBrush}");
-        AssertSetter(noBarcodeStyle, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
-        AssertSetter(noBarcodeStyle, "Foreground", "White");
+        // 配色全部走 PosNoBarcode* 键：旧主题取值＝原来的主色实心 + 白字，长者主题＝浅蓝底深蓝字。
+        AssertSetter(noBarcodeStyle, "Background", "{DynamicResource PosNoBarcodeBrush}");
+        AssertSetter(noBarcodeStyle, "BorderBrush", "{DynamicResource PosNoBarcodeBrush}");
+        AssertSetter(noBarcodeStyle, "Foreground", "{DynamicResource PosNoBarcodeForegroundBrush}");
 
         // 修改数量 / 价格只管选中行，用普通功能键样式；折扣金额 / 折扣% 受整单开关管辖，用会随开关描蓝的样式。
         var functionCommands = new[]
@@ -380,7 +388,7 @@ public sealed class PosTerminalViewLayoutTests
         var searchHost = Assert.Single(view.Descendants(presentation + "Border").Where(element =>
             (string?)element.Attribute(x + "Name") == "SearchBoxHost"));
         Assert.Equal("{DynamicResource PosSurfaceBrush}", (string?)searchHost.Attribute("Background"));
-        Assert.Equal("{DynamicResource PosBorderBrush}", (string?)searchHost.Attribute("BorderBrush"));
+        Assert.Equal("{DynamicResource PosKeyBorderBrush}", (string?)searchHost.Attribute("BorderBrush"));
         Assert.Equal("1", (string?)searchHost.Attribute("BorderThickness"));
 
         var itemColumn = Assert.Single(view.Descendants(presentation + "DataGridTemplateColumn").Where(column =>
@@ -399,7 +407,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("Horizontal", (string?)itemMetadataLine.Attribute("Orientation"));
         var itemNumberValue = Assert.Single(itemColumn.Descendants(presentation + "TextBlock").Where(text =>
             (string?)text.Attribute("Text") == "{Binding ItemNumber}" &&
-            (string?)text.Attribute("FontSize") == "11"));
+            Metric((string?)text.Attribute("FontSize")) == "11"));
         Assert.Equal(
             "{Binding ItemNumber, Converter={StaticResource StringHasValueToVis}}",
             (string?)itemNumberValue.Attribute("Visibility"));
@@ -407,7 +415,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Null(itemNumberValue.Attribute("TextTrimming"));
         var barcodeValue = Assert.Single(itemColumn.Descendants(presentation + "TextBlock").Where(text =>
             (string?)text.Attribute("Text") == "{Binding LookupCode}" &&
-            (string?)text.Attribute("FontSize") == "11"));
+            Metric((string?)text.Attribute("FontSize")) == "11"));
         Assert.Equal(
             "{Binding LookupCode, Converter={StaticResource StringHasValueToVis}}",
             (string?)barcodeValue.Attribute("Visibility"));
@@ -419,7 +427,7 @@ public sealed class PosTerminalViewLayoutTests
             (string?)panel.Attribute(x + "Name") is not null));
         var missingMetadataValues = itemColumn.Descendants(presentation + "TextBlock").Where(text =>
             (string?)text.Attribute("Text") == "-" &&
-            (string?)text.Attribute("FontSize") == "11").ToArray();
+            Metric((string?)text.Attribute("FontSize")) == "11").ToArray();
         Assert.Equal(2, missingMetadataValues.Length);
         Assert.Contains(missingMetadataValues, text =>
             (string?)text.Attribute("Visibility") ==
@@ -430,8 +438,8 @@ public sealed class PosTerminalViewLayoutTests
         var cartGrid = Assert.Single(view.Descendants(presentation + "DataGrid").Where(element =>
             (string?)element.Attribute("AutomationProperties.AutomationId") == "CartItemsGrid"));
         Assert.Null(cartGrid.Attribute("RowHeight"));
-        Assert.Equal("67", (string?)cartGrid.Attribute("MinRowHeight"));
-        Assert.Equal("36", (string?)cartGrid.Attribute("ColumnHeaderHeight"));
+        Assert.Equal("67", Metric((string?)cartGrid.Attribute("MinRowHeight")));
+        Assert.Equal("36", Metric((string?)cartGrid.Attribute("ColumnHeaderHeight")));
         Assert.Equal("1000000", (string?)cartGrid.Attribute("AlternationCount"));
         var cartColumns = Assert.Single(cartGrid.Elements(presentation + "DataGrid.Columns"))
             .Elements()
@@ -447,7 +455,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal(
             "{Binding RelativeSource={RelativeSource AncestorType=DataGridRow}, Path=(ItemsControl.AlternationIndex), Converter={StaticResource RowNumberConverter}}",
             (string?)rowNumberText.Attribute("Text"));
-        Assert.Equal("13", (string?)rowNumberText.Attribute("FontSize"));
+        Assert.Equal("13", Metric((string?)rowNumberText.Attribute("FontSize")));
         Assert.Equal("SemiBold", (string?)rowNumberText.Attribute("FontWeight"));
         Assert.Equal("Center", (string?)rowNumberText.Attribute("TextAlignment"));
         Assert.Equal("Stretch", (string?)rowNumberText.Attribute("HorizontalAlignment"));
@@ -457,15 +465,16 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("122", (string?)cartColumns[3].Attribute("MinWidth"));
         var finalAmount = Assert.Single(view.Descendants(presentation + "TextBlock").Where(text =>
             ((string?)text.Attribute("Text"))?.Contains("{Binding ActualAmount", StringComparison.Ordinal) == true &&
-            (string?)text.Attribute("FontSize") == "24"));
-        Assert.Equal("{DynamicResource PosAccentBrush}", (string?)finalAmount.Attribute("Foreground"));
+            Metric((string?)text.Attribute("FontSize")) == "24"));
+        // 应付合计金额色改走 PosDueAmountBrush：旧主题取值＝PosAccentBrush，长者主题是近黑色。
+        Assert.Equal("{DynamicResource PosDueAmountBrush}", (string?)finalAmount.Attribute("Foreground"));
         var summaryPanel = Assert.Single(view.Descendants(presentation + "Border").Where(element =>
             (string?)element.Attribute(x + "Name") == "CartSummaryPanel"));
         var summaryRows = Assert.Single(summaryPanel.Elements(presentation + "Grid"))
             .Element(presentation + "Grid.RowDefinitions")!
             .Elements(presentation + "RowDefinition")
             .ToArray();
-        Assert.Equal(["34", "58"], summaryRows.Select(row => (string?)row.Attribute("Height")));
+        Assert.Equal(["34", "58"], summaryRows.Select(row => Metric((string?)row.Attribute("Height"))));
         var countSummaryRow = Assert.Single(view.Descendants(presentation + "Border").Where(element =>
             (string?)element.Attribute(x + "Name") == "CartCountSummaryRow"));
         Assert.Equal("0", (string?)countSummaryRow.Attribute("Grid.Row"));
@@ -528,7 +537,7 @@ public sealed class PosTerminalViewLayoutTests
         var actionStyle = FindStyle(view, x, "PosSidebarActionButtonStyle");
         AssertSetter(actionStyle, "MinHeight", "62");
         AssertSetter(actionStyle, "Margin", "3");
-        AssertSetter(actionStyle, "BorderBrush", "{DynamicResource PosBorderBrush}");
+        AssertSetter(actionStyle, "BorderBrush", "{DynamicResource PosKeyBorderBrush}");
         var labelStyle = FindStyle(view, x, "PosSidebarActionLabelStyle");
         AssertSetter(labelStyle, "TextAlignment", "Center");
         AssertSetter(labelStyle, "TextWrapping", "Wrap");
@@ -557,8 +566,8 @@ public sealed class PosTerminalViewLayoutTests
         var sidebar = Assert.Single(view.Descendants().Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrSidebar"));
         var statusCard = Assert.Single(sidebar.Elements(presentation + "ContentControl"));
-        Assert.Equal("154", (string?)statusCard.Attribute("Height"));
-        Assert.Equal("154", (string?)statusCard.Attribute("MaxHeight"));
+        Assert.Equal("154", Metric((string?)statusCard.Attribute("Height")));
+        Assert.Equal("154", Metric((string?)statusCard.Attribute("MaxHeight")));
         Assert.Null(statusCard.Element(presentation + "ContentControl.Style"));
 
         var statusLayout = Assert.Single(statusCard.Elements(presentation + "Grid").Where(grid =>
@@ -585,7 +594,7 @@ public sealed class PosTerminalViewLayoutTests
         var buttonStyle = Assert.Single(entry.Elements(presentation + "Button.Style"))
             .Element(presentation + "Style")!;
         AssertSetter(buttonStyle, "Background", "{DynamicResource PosSurfaceBrush}");
-        AssertSetter(buttonStyle, "BorderBrush", "{DynamicResource PosBorderBrush}");
+        AssertSetter(buttonStyle, "BorderBrush", "{DynamicResource PosKeyBorderBrush}");
         AssertSetter(buttonStyle, "Foreground", "{DynamicResource PosTextBrush}");
         Assert.DoesNotContain(buttonStyle.Elements(presentation + "Setter"), setter =>
             (string?)setter.Attribute("Property") == "FocusVisualStyle"
@@ -677,12 +686,12 @@ public sealed class PosTerminalViewLayoutTests
         var status = Assert.Single(sidebar.Elements(presentation + "ContentControl"));
         var launcher = Assert.Single(sidebar.Elements(presentation + "Button").Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrLauncher"));
-        Assert.True((double)launcher.Attribute("Height")! <= 62);
+        Assert.True(MetricDouble(launcher, "Height") <= 62);
         var requiredHeight = (5 * (62 + actionButtonMargin))
             + ParseVerticalMargin((string?)actionGrid.Attribute("Margin"))
-            + (double)status.Attribute("MaxHeight")!
+            + MetricDouble(status, "MaxHeight")
             + ParseVerticalMargin((string?)status.Attribute("Margin"))
-            + (double)launcher.Attribute("Height")!
+            + MetricDouble(launcher, "Height")
             + ParseVerticalMargin((string?)launcher.Attribute("Margin"));
         Assert.True(requiredHeight <= logicalHeight - 54 - 42);
     }
@@ -769,7 +778,7 @@ public sealed class PosTerminalViewLayoutTests
             (string?)element.Attribute(x + "Name") == "AttendanceQrCard");
         var launcher = Assert.Single(sidebar.Elements().Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrLauncher"));
-        Assert.Equal("62", (string?)launcher.Attribute("Height"));
+        Assert.Equal("62", Metric((string?)launcher.Attribute("Height")));
         Assert.Equal("AttendanceQrLauncher_Click", (string?)launcher.Attribute("Click"));
 
         var overlay = Assert.Single(view.Descendants().Where(element =>
@@ -813,6 +822,40 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Contains(english.Descendants("data"), element => (string?)element.Attribute("name") == "attendance.qr.closeHelp");
         Assert.Contains(chinese.Descendants("data"), element => (string?)element.Attribute("name") == "attendance.qr.closeHelp");
     }
+
+    // 首页的字号 / 行高 / 按钮高已改走 Themes/Metrics/Home.Standard.xaml 的 DynamicResource 键，
+    // 标准值＝改版前的字面量。下面把 {DynamicResource PosHomeXxx} 解析回标准值，保持「老主题尺寸不变」的断言原意；
+    // 色板画刷键（…Brush）不在尺寸字典里，原样返回。
+    private static readonly Lazy<Dictionary<string, string>> StandardHomeMetrics = new(LoadStandardHomeMetrics);
+
+    private static Dictionary<string, string> LoadStandardHomeMetrics()
+    {
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Themes", "Metrics", "Home.Standard.xaml"));
+        return document.Root!.Elements()
+            .Where(element => element.Attribute(x + "Key") is not null)
+            .ToDictionary(element => (string)element.Attribute(x + "Key")!, element => element.Value.Trim());
+    }
+
+    private static string? Metric(string? raw)
+    {
+        const string prefix = "{DynamicResource ";
+        if (raw is null || !raw.StartsWith(prefix, StringComparison.Ordinal) || !raw.EndsWith('}'))
+        {
+            return raw;
+        }
+
+        var key = raw[prefix.Length..^1];
+        return StandardHomeMetrics.Value.TryGetValue(key, out var value) ? value : raw;
+    }
+
+    private static double MetricDouble(XElement element, string attribute) =>
+        double.Parse(Metric((string?)element.Attribute(attribute))!, CultureInfo.InvariantCulture);
+
+    private static void AssertMetricSetter(XElement style, string property, string standardValue) =>
+        Assert.Contains(style.Elements().Where(element => element.Name.LocalName == "Setter"), setter =>
+            (string?)setter.Attribute("Property") == property && Metric((string?)setter.Attribute("Value")) == standardValue);
 
     private static XElement FindStyle(XDocument document, XNamespace x, string key) =>
         Assert.Single(document.Descendants().Where(element =>

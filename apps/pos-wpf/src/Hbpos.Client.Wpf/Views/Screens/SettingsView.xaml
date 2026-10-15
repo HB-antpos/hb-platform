@@ -876,7 +876,7 @@
                                        Style="{StaticResource SettingsPageDescriptionStyle}" />
                         </StackPanel>
 
-                        <!-- 付款方式：两个大开关，独立保存（不触发终端配置写入）。 -->
+                        <!-- 付款方式：三个大开关（手动刷卡 / 代金券 / 付款页订单列表），共用一个保存按钮（不触发终端配置写入）。 -->
                         <Border Grid.Row="1" Grid.Column="0"
                                 Style="{StaticResource SettingsActionCardStyle}"
                                 Margin="0,0,0,16">
@@ -936,6 +936,35 @@
                                                   IsChecked="{Binding VoucherEnabled, Mode=TwoWay}"
                                                   IsEnabled="{Binding CanChangeEnvironment}"
                                                   AutomationProperties.Name="{loc:Loc settings.payment.methods.voucher}"
+                                                  MinHeight="48" MinWidth="56" VerticalAlignment="Center">
+                                    </ToggleButton>
+                                </Grid>
+                                <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6" />
+                                <!-- 付款页显示订单列表：默认开启，按本机保存，与上面两项共用同一个保存按钮。
+                                     它只是付款页的布局偏好，不涉及支付环境，所以不绑定 CanChangeEnvironment，始终可切换。 -->
+                                <Grid MinHeight="72">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="44" Height="44" CornerRadius="12"
+                                            Background="{DynamicResource PosSurfaceAltBrush}"
+                                            Margin="0,0,14,0" VerticalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="FormatListBulleted" Width="22" Height="22"
+                                                                 Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:Loc settings.payment.methods.orderList}" FontSize="16" FontWeight="SemiBold" />
+                                        <TextBlock Text="{loc:Loc settings.payment.methods.orderList.help}"
+                                                   TextWrapping="Wrap" FontSize="12.5"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <ToggleButton Grid.Column="2" x:Name="OrderListSettingToggle"
+                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                  IsChecked="{Binding ShowOrderList, Mode=TwoWay}"
+                                                  AutomationProperties.Name="{loc:Loc settings.payment.methods.orderList}"
                                                   MinHeight="48" MinWidth="56" VerticalAlignment="Center">
                                     </ToggleButton>
                                 </Grid>
