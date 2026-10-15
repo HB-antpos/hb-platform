@@ -37,6 +37,21 @@ namespace BlazorApp.Api.Controllers.React
             );
         }
 
+        /// <summary>
+        /// 按分店汇总：当前账号 / 设备可访问的每家启用分店的未完成数与超期数（超期从首次发起起算）。
+        /// 不需要传分店：设备只会得到绑定的那一家；管理员得到全部启用分店。
+        /// 每小时提醒、分店切换条、工作台角标和报表锁定都读这个接口，客户端据此自行判定「管理分店」范围。
+        /// </summary>
+        [HttpGet("price-update-tasks/summary")]
+        public async Task<IActionResult> GetPriceUpdateTaskStoreSummaries()
+        {
+            var guard = await GuardPriceTaskAccessAsync(null, requireStoreCode: false);
+            if (guard.Failure != null) return guard.Failure;
+
+            var summaries = await _priceTaskService!.GetStoreSummariesAsync(guard.Access!.StoreCodes);
+            return Ok(ApiResponse<StorePriceUpdateTaskStoreSummaryListDto>.OK(summaries, "查询成功"));
+        }
+
         [HttpPost("price-update-tasks/apply")]
         public async Task<IActionResult> ApplyPriceUpdateTasks([FromBody] ApplyStorePriceUpdateTasksRequestDto request)
         {
@@ -191,7 +206,7 @@ namespace BlazorApp.Api.Controllers.React
 
         private sealed record PriceTaskGuard(StoreAccessContext? Access, IActionResult? Failure);
 
-        private async Task<PriceTaskGuard> GuardPriceTaskAccessAsync(string? storeCode)
+        private async Task<PriceTaskGuard> GuardPriceTaskAccessAsync(string? storeCode, bool requireStoreCode = true)
         {
             if (_priceTaskService == null)
             {
@@ -203,16 +218,19 @@ namespace BlazorApp.Api.Controllers.React
             {
                 return new PriceTaskGuard(null, Unauthorized(ApiResponse<object>.Error(access.Message)));
             }
-            if (string.IsNullOrWhiteSpace(storeCode))
+            if (requireStoreCode)
             {
-                return new PriceTaskGuard(null, BadRequest(ApiResponse<object>.Error("缺少分店代码")));
-            }
-            if (
-                access.StoreCodes != null
-                && !access.StoreCodes.Contains(storeCode.Trim(), StringComparer.OrdinalIgnoreCase)
-            )
-            {
-                return new PriceTaskGuard(null, Forbid());
+                if (string.IsNullOrWhiteSpace(storeCode))
+                {
+                    return new PriceTaskGuard(null, BadRequest(ApiResponse<object>.Error("缺少分店代码")));
+                }
+                if (
+                    access.StoreCodes != null
+                    && !access.StoreCodes.Contains(storeCode.Trim(), StringComparer.OrdinalIgnoreCase)
+                )
+                {
+                    return new PriceTaskGuard(null, Forbid());
+                }
             }
 
             if (User?.Identity?.IsAuthenticated == true)

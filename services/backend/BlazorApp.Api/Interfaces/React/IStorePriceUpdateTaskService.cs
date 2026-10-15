@@ -111,6 +111,16 @@ public interface IStorePriceUpdateTaskService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// 按分店汇总未完成数量与超期数量（超期从任务首次发起起算）。
+    /// accessibleStoreCodes 为 null 表示不限分店（管理员），否则只返回名单内的分店。
+    /// 移动端每小时提醒、分店切换条、工作台角标、报表锁定都读这一份，避免逐店查询。
+    /// </summary>
+    Task<StorePriceUpdateTaskStoreSummaryListDto> GetStoreSummariesAsync(
+        IReadOnlyCollection<string>? accessibleStoreCodes,
+        CancellationToken cancellationToken = default
+    );
+
     Task<StorePriceUpdateTaskBatchResultDto> ApplyAsync(
         ApplyStorePriceUpdateTasksRequestDto request,
         string updatedBy,

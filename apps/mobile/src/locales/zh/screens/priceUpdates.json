@@ -1,5 +1,5 @@
 {
-  "title": "价格更新",
+  "title": "价格和标签",
   "tabs": {
     "pending": "未完成 {{count}}",
     "completed": "已完成 {{count}}"
@@ -8,7 +8,8 @@
     "all": "全部",
     "priceUpdate": "需改价 {{count}}",
     "labelOnly": "待换标签 {{count}}",
-    "hqSyncFailed": "总部同步失败"
+    "hqSyncFailed": "总部同步失败",
+    "overdue": "超期 {{count}}"
   },
   "kinds": {
     "priceUpdate": "需改价",
@@ -28,7 +29,9 @@
     "finalPrice": "折后 {{price}}",
     "deltaUp": "涨 {{amount}}",
     "deltaDown": "降 {{amount}}",
-    "changeCount": "共 {{count}} 次"
+    "changeCount": "共 {{count}} 次",
+    "overdueTag": "超期 {{days}} 天",
+    "waiting": "已等待 {{days}} 天"
   },
   "discount": {
     "off": "减 {{percent}}%",
@@ -87,7 +90,7 @@
     "handled": "处理 {{name}} {{time}}"
   },
   "selection": {
-    "enter": "多选",
+    "enter": "批量处理",
     "selectedCount": "已选 {{count}} 项",
     "selectAll": "全选",
     "summary": "改价 {{apply}} 项 · 打印 {{print}} 张",
@@ -97,7 +100,15 @@
     "summaryByKind": "需改价 {{priceUpdate}} · 待换标签 {{labelOnly}}",
     "keepStorePrice": "保持本店价 ({{count}})",
     "markReplaced": "标记已换 ({{count}})",
-    "printLabels": "打印标签 ({{count}})"
+    "printLabels": "打印标签 ({{count}})",
+    "exit": "退出",
+    "allSelected": "全选 {{count}} 项",
+    "partSelected": "已选 {{selected}} / {{total}}",
+    "selectAllHint": "含还没滚动加载的任务",
+    "loadingAll": "正在加载全部任务…",
+    "loadAllFailed": "加载全部任务失败，请重试",
+    "selectedTitle": "已选 {{count}} 项",
+    "more": "更多操作"
   },
   "printer": {
     "notConfigured": "未设置标签机",
@@ -110,20 +121,20 @@
   },
   "store": {
     "lockedToDevice": "设备已绑定分店，不能切换",
-    "readOnly": "当前分店仅可查看，不能处理价格更新",
+    "readOnly": "当前分店仅可查看，不能处理价格和标签",
     "requiredTitle": "请选择分店",
-    "requiredDescription": "选择分店后查看该店的价格更新通知"
+    "requiredDescription": "选择分店后查看该店的价格和标签任务"
   },
   "list": {
-    "loading": "正在加载价格更新",
-    "loadFailed": "价格更新加载失败",
+    "loading": "正在加载价格和标签",
+    "loadFailed": "价格和标签加载失败",
     "retryHint": "请检查网络后重试",
     "loadingMore": "正在加载更多",
     "loadMoreFailed": "加载更多失败，点击重试",
-    "emptyPending": "没有未完成的价格更新",
+    "emptyPending": "没有未完成的价格和标签",
     "emptyPendingDescription": "仓库改价或其它分店同步后，会在这里提醒本店改价、换标签",
     "emptyCompleted": "还没有已完成的记录",
-    "emptyCompletedDescription": "处理过的价格更新会按日期显示在这里"
+    "emptyCompletedDescription": "处理过的价格和标签会按日期显示在这里"
   },
   "messages": {
     "operationFailed": "操作失败，请重试",
@@ -226,10 +237,62 @@
     "editorTitle": "建议折扣（%）",
     "inputHint": "输入 0~100；清空 = 未设置",
     "invalid": "建议折扣需在 0~100 之间",
-    "helper": "留空 = 不比较分店折扣；填 0 = 明确无折扣。建议折扣不会自动下发，由分店在「价格更新」中确认。",
+    "helper": "留空 = 不比较分店折扣；填 0 = 明确无折扣。建议折扣不会自动下发，由分店在「价格和标签」中确认。",
     "saved": "建议折扣已保存",
     "saveFailed": "建议折扣保存失败",
     "previewWhenSync": "同步分店：{{message}}",
     "previewWhenProductOnly": "仅改商品：{{message}}"
+  },
+  "lock": {
+    "title": "报表已锁定",
+    "description": "{{count}} 项超过 {{days}} 天，处理完自动解锁",
+    "unlockedTitle": "报表已解锁",
+    "unlockedDescription": "超期任务已全部处理",
+    "openReports": "去看报表"
+  },
+  "overdueEmpty": {
+    "title": "没有超期任务",
+    "description": "任务发起后 {{days}} 天内处理完，就不会锁定报表"
+  },
+  "strip": {
+    "accessibility": "{{store}}，未完成 {{count}} 项",
+    "accessibilityOverdue": "{{store}}，未完成 {{count}} 项，有超期任务",
+    "accessibilityDone": "{{store}}，已全部完成"
+  },
+  "reminder": {
+    "accessibility": "价格和标签提醒",
+    "titleMulti": "{{stores}} 家分店还有 {{count}} 项待处理",
+    "subMulti": "共管理 {{total}} 家分店 · 任务 {{days}} 天内必须完成",
+    "titleBoth": "今天还有 {{count}} 项待处理",
+    "titleLabelOnly": "今天还有 {{count}} 张标签要换",
+    "titlePriceOnly": "今天还有 {{count}} 项要改价",
+    "subBoth": "{{store}} · 仓库调价后，请改价、换标签",
+    "subLabelOnly": "{{store}} · 价格已改好，货架还是旧标签",
+    "subPriceOnly": "{{store}} · 仓库调价后，请改价",
+    "tilePriceUpdate": "需改价",
+    "tilePriceUpdateHint": "按仓库价改价",
+    "tileLabelOnly": "待换标签",
+    "tileLabelOnlyHint": "价格已改，换标签",
+    "tileLabelOnlyWideHint": "打印新标签，或换好后标记已换",
+    "rowPrice": "需改价 {{count}}",
+    "rowLabel": "待换标签 {{count}}",
+    "current": "当前",
+    "overdueTag": "超期 {{count}}",
+    "allDone": "全部完成",
+    "lockTitle": "报表已锁定",
+    "lockBody": "{{count}} 项已超过 {{days}} 天\n全部处理完，报表自动解锁",
+    "overdueRow": "{{count}} 项已超过 {{days}} 天未处理",
+    "printerReady": "标签机已连接，可直接更新并打印",
+    "printerOffline": "标签机未连接",
+    "printerConnect": "去连接",
+    "primaryDefault": "去处理",
+    "primaryOverdue": "去处理超期任务 ({{count}})",
+    "later": "稍后",
+    "footer": "每小时提醒一次 · 全部处理完就不再提醒"
+  },
+  "workbench": {
+    "lockStrip": "{{count}} 项任务超过 {{days}} 天，报表已锁定",
+    "lockAction": "去处理",
+    "lockedTile": "{{title}}，已锁定，请先处理超期任务"
   }
 }

@@ -32,7 +32,7 @@
   "routes": {
     "productQuery": "Product lookup",
     "productInsights": "Product activity",
-    "priceUpdates": "Price updates",
+    "priceUpdates": "Prices & labels",
     "storeOrdering": "Store ordering",
     "cart": "Cart",
     "orders": "HB Orders",

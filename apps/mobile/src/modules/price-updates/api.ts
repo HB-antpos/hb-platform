@@ -1,10 +1,12 @@
 import type { AxiosRequestConfig } from "axios";
 import { apiClient } from "@/shared/api/client";
 import { useDeviceStore } from "@/store/device-store";
+import { runBatchInChunks } from "./batch-chunks";
 import {
   normalizePriceNotificationPreview,
   normalizePriceUpdateBatchResult,
   normalizePriceUpdatePendingCount,
+  normalizePriceUpdateSummary,
   normalizePriceUpdateTaskPage,
   normalizeSuggestedDiscountLookup,
   normalizeSyncTargets,
@@ -16,6 +18,7 @@ import type {
   PriceUpdateBatchResult,
   PriceUpdateLabelMode,
   PriceUpdateTaskQuery,
+  StorePriceUpdateSummary,
   StorePriceUpdateTaskPage,
   SuggestedDiscountSource,
   SyncTargetsResult,
@@ -47,6 +50,7 @@ export async function getPriceUpdateTasks(query: PriceUpdateTaskQuery): Promise<
       storeCode: query.storeCode,
       status: query.status,
       ...(query.kind ? { kind: query.kind } : {}),
+      ...(query.overdueOnly ? { overdueOnly: true } : {}),
       ...(query.keyword?.trim() ? { keyword: query.keyword.trim() } : {}),
       ...(query.hqSyncFailedOnly ? { hqSyncFailedOnly: true } : {}),
       page: query.page,
@@ -64,28 +68,50 @@ export async function getPriceUpdatePendingCount(storeCode: string): Promise<num
   return normalizePriceUpdatePendingCount(response.data);
 }
 
+/**
+ * 按分店汇总：当前账号 / 设备可访问的每家分店的未完成数与超期数。
+ * 每小时提醒、分店切换条、工作台角标和报表锁定都读这一份，不用逐店查询。
+ */
+export async function getPriceUpdateSummary(): Promise<StorePriceUpdateSummary> {
+  const response = await apiClient.get(`${BASE_PATH}/price-update-tasks/summary`, buildRequestConfig());
+  return normalizePriceUpdateSummary(response.data);
+}
+
+// 下面三个批量接口都按 200 条一批串行提交，见 runBatchInChunks。
 export async function applyPriceUpdateTasks(
   storeCode: string,
   items: PriceUpdateApplyItem[]
 ): Promise<PriceUpdateBatchResult> {
-  const response = await apiClient.post(
-    `${BASE_PATH}/price-update-tasks/apply`,
-    { storeCode, items },
-    buildRequestConfig()
-  );
-  return normalizePriceUpdateBatchResult(response.data);
+  return runBatchInChunks({
+    items,
+    taskIdOf: (item) => item.taskId,
+    call: async (chunk) => {
+      const response = await apiClient.post(
+        `${BASE_PATH}/price-update-tasks/apply`,
+        { storeCode, items: chunk },
+        buildRequestConfig()
+      );
+      return normalizePriceUpdateBatchResult(response.data);
+    },
+  });
 }
 
 export async function keepStorePriceForTasks(
   storeCode: string,
   taskIds: number[]
 ): Promise<PriceUpdateBatchResult> {
-  const response = await apiClient.post(
-    `${BASE_PATH}/price-update-tasks/keep`,
-    { storeCode, taskIds },
-    buildRequestConfig()
-  );
-  return normalizePriceUpdateBatchResult(response.data);
+  return runBatchInChunks({
+    items: taskIds,
+    taskIdOf: (taskId) => taskId,
+    call: async (chunk) => {
+      const response = await apiClient.post(
+        `${BASE_PATH}/price-update-tasks/keep`,
+        { storeCode, taskIds: chunk },
+        buildRequestConfig()
+      );
+      return normalizePriceUpdateBatchResult(response.data);
+    },
+  });
 }
 
 export async function completePriceUpdateLabels(
@@ -93,12 +119,18 @@ export async function completePriceUpdateLabels(
   taskIds: number[],
   mode: PriceUpdateLabelMode
 ): Promise<PriceUpdateBatchResult> {
-  const response = await apiClient.post(
-    `${BASE_PATH}/price-update-tasks/labels`,
-    { storeCode, taskIds, mode },
-    buildRequestConfig()
-  );
-  return normalizePriceUpdateBatchResult(response.data);
+  return runBatchInChunks({
+    items: taskIds,
+    taskIdOf: (taskId) => taskId,
+    call: async (chunk) => {
+      const response = await apiClient.post(
+        `${BASE_PATH}/price-update-tasks/labels`,
+        { storeCode, taskIds: chunk, mode },
+        buildRequestConfig()
+      );
+      return normalizePriceUpdateBatchResult(response.data);
+    },
+  });
 }
 
 export async function getSyncTargets(productCode: string, sourceStoreCode: string): Promise<SyncTargetsResult> {
