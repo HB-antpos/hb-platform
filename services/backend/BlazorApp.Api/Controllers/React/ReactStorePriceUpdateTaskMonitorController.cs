@@ -7,8 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace BlazorApp.Api.Controllers.React
 {
     /// <summary>
-    /// Web 端「价格变更任务」监控页：只读地查看各分店的执行情况。
-    /// 执行动作（改价、处理标签）只发生在移动端，保证"谁处理的"记录真实。
+    /// Web 端「价格变更任务」监控页：查看各分店的执行情况，并可手动撤销不需要再执行的未完成任务。
+    /// 执行动作（改价、处理标签）只发生在移动端，保证"谁处理的"记录真实；
+    /// 撤销单独记为已取消（ManualCancel，含撤销人/时间/备注），不会冒充成分店完成，也不修改任何价格。
     /// </summary>
     [ApiController]
     [Route("api/react/v1/store-price-update-tasks")]
@@ -57,6 +58,34 @@ namespace BlazorApp.Api.Controllers.React
             // 监控页面向管理者，不按分店范围裁剪（accessibleStoreCodes = null）。
             var page = await _service.GetPageAsync(query, null, HttpContext.RequestAborted);
             return Ok(ApiResponse<StorePriceUpdateTaskPageDto>.OK(page, "查询成功"));
+        }
+
+        /// <summary>
+        /// 手动撤销未完成任务（任务本身不需要再执行时使用）。
+        /// 只把未完成任务标记为已取消并记录撤销人，不修改任何价格；已完成/已取消的任务会被跳过并逐条回报。
+        /// 入参二选一：taskIds（至多 200 个）或 productCode（该商品所有未完成任务，storeCodes 可限定分店）。
+        /// </summary>
+        [HttpPost("cancel")]
+        [Authorize(Policy = Permissions.Warehouse.ManageProducts)]
+        public async Task<IActionResult> Cancel([FromBody] CancelStorePriceUpdateTasksRequestDto request)
+        {
+            var hasIds = request.TaskIds.Count > 0;
+            var hasProduct = !string.IsNullOrWhiteSpace(request.ProductCode);
+            if (hasIds == hasProduct)
+            {
+                return BadRequest(ApiResponse<object>.Error("请选择要撤销的任务（任务 ID 与商品二选一）"));
+            }
+            if (request.TaskIds.Distinct().Count() > CancelStorePriceUpdateTasksRequestDto.MaxTaskIds)
+            {
+                return BadRequest(ApiResponse<object>.Error($"单次最多撤销 {CancelStorePriceUpdateTasksRequestDto.MaxTaskIds} 个任务"));
+            }
+
+            var result = await _service.CancelAsync(
+                request,
+                User.Identity?.Name ?? "System",
+                HttpContext.RequestAborted
+            );
+            return Ok(ApiResponse<CancelStorePriceUpdateTasksResultDto>.OK(result, "处理完成"));
         }
 
         /// <summary>

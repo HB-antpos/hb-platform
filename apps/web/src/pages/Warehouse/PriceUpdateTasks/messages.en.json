@@ -1,7 +1,33 @@
 {
   "warehouse": {
     "priceUpdateTasks": {
-      "subtitle": "Monitor how stores apply warehouse price changes and replace shelf labels (read-only)",
+      "subtitle": "Monitor how stores apply warehouse price changes and replace shelf labels; pending tasks that no longer need to be done can be cancelled",
+      "cancel": {
+        "button": "Cancel selected ({{count}})",
+        "rowAction": "Cancel pending",
+        "modalTitle": "Cancel pending tasks",
+        "byIds": "{{count}} selected pending task(s) will be cancelled.",
+        "byProduct": "Pending tasks for \"{{name}}\" in {{count}} store(s) will be cancelled.",
+        "warning": "Cancelling only removes the task reminders and never changes any store price: stores that already updated the price but have not replaced the label keep the new price. This cannot be undone; a new warehouse price change creates new tasks.",
+        "noteLabel": "Note (optional)",
+        "notePlaceholder": "e.g. Test store, no action needed",
+        "confirm": "Confirm cancel",
+        "success": "{{count}} task(s) cancelled",
+        "partial": "{{cancelled}} cancelled; {{skipped}} skipped because they were already handled or no longer exist",
+        "nothing": "No pending tasks to cancel; they may already have been handled",
+        "failed": "Failed to cancel tasks",
+        "reason": {
+          "Reverted": "Warehouse price reverted, cancelled automatically",
+          "NoLongerApplicable": "Product no longer applicable, cancelled automatically",
+          "ManualCancel": "Cancelled manually"
+        },
+        "info": {
+          "reason": "Reason: {{reason}}",
+          "by": "Cancelled by: {{name}}",
+          "at": "Cancelled at: {{time}}",
+          "note": "Note: {{note}}"
+        }
+      },
       "loadFailed": "Failed to load price update tasks",
       "empty": "No data for the current filters",
       "total": "{{count}} records",
@@ -12,6 +38,7 @@
       },
       "filters": {
         "store": "All stores",
+        "selectAllStores": "Select all ({{selected}}/{{total}})",
         "allKinds": "All types",
         "initiator": "Initiator",
         "keyword": "Item no. / name / barcode",
@@ -53,6 +80,7 @@
         "clickToView": "Click to view"
       },
       "columns": {
+        "actions": "Actions",
         "store": "Store",
         "storeCode": "Store code",
         "storeName": "Store name",

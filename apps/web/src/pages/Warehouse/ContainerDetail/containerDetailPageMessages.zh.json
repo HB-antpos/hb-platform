@@ -91,7 +91,13 @@
       "warehouseImportPriceUpdateFailed": "更新仓库进货价失败",
       "importPriceGapHint": "本次进口价比已有进口价 {{percent}}，差额超过 30%",
       "retailPriceGapHint": "本次零售价比已有零售价 {{percent}}，差额超过 30%",
-      "formulaHint": "计算公式"
+      "formulaHint": "计算公式",
+      "retailPriceSync": {
+        "syncStoreRetailPrices": "同步分店零售价",
+        "syncStoreRetailPricesHint": "勾选后直接把各分店零售价改成新价并通知换标签；不勾选则不动分店价，由分店确认改价",
+        "generateTasks": "生成价格任务",
+        "generateTasksHint": "勾选后给分店生成价格更新任务；不勾选则不通知分店（同步分店价时会立即同步总部 HQ）"
+      }
     }
   }
 }

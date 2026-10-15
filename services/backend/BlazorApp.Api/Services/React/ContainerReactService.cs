@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Features.ProductWarehouse;
 using BlazorApp.Api.Features.SupplyNotices;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
@@ -33,6 +34,11 @@ namespace BlazorApp.Api.Services.React
         private readonly IWarehouseProductChangeHistoryService _changeHistoryService;
         private readonly ICurrentUserService _currentUserService;
         private readonly IDataProtector _batchPreviewProtector;
+        // 改仓库零售价时「同步分店零售价 / 生成价格任务」两个开关的落地依赖；可空以兼容不关心价格联动的调用方与测试。
+        private readonly IStorePriceUpdateTaskService? _priceTaskService;
+        private readonly IWarehouseStorePriceHqSyncEnqueuer? _hqPriceSyncEnqueuer;
+        // 货柜明细改价的 HQ 同步 outbox 来源标识（仅「同步 + 不生成任务」时在改价当下入队）。
+        private const string ContainerDetailHqSource = "container-detail-price";
 
         public ContainerReactService(
             SqlSugarContext context,
@@ -45,10 +51,14 @@ namespace BlazorApp.Api.Services.React
             ITranslationService translationService,
             IWarehouseProductChangeHistoryService changeHistoryService,
             ICurrentUserService currentUserService,
-            IDataProtectionProvider? dataProtectionProvider = null
+            IDataProtectionProvider? dataProtectionProvider = null,
+            IStorePriceUpdateTaskService? priceTaskService = null,
+            IWarehouseStorePriceHqSyncEnqueuer? hqPriceSyncEnqueuer = null
         )
         {
             _context = context;
+            _priceTaskService = priceTaskService;
+            _hqPriceSyncEnqueuer = hqPriceSyncEnqueuer;
             _hqContext = hqContext;
             _hbSalesContext = hbSalesContext;
             _configuration = configuration;
@@ -3072,13 +3082,22 @@ namespace BlazorApp.Api.Services.React
         /// </summary>
         public Task<ContainerDetailBatchUpdateResultDto> BatchUpdateDetailsDetailedAsync(
             List<UpdateContainerDetailDto> updates
+        ) => BatchUpdateDetailsDetailedAsync(updates, WarehousePriceSyncPolicy.Default);
+
+        /// <summary>
+        /// 兼容旧客户端的无货柜范围部分成功入口；改仓库零售价时按两个开关联动分店价 / 价格任务。
+        /// </summary>
+        public Task<ContainerDetailBatchUpdateResultDto> BatchUpdateDetailsDetailedAsync(
+            List<UpdateContainerDetailDto> updates,
+            WarehousePriceSyncPolicy priceSyncPolicy
         )
         {
             return BatchUpdateDetailsCoreAsync(
                 updates,
                 countValidNoOps: true,
                 repairMissingStoreRelations: true,
-                containerGuid: null
+                containerGuid: null,
+                priceSyncPolicy: priceSyncPolicy
             );
         }
 
@@ -3088,13 +3107,23 @@ namespace BlazorApp.Api.Services.React
         public Task<ContainerDetailBatchUpdateResultDto> BatchUpdateDetailsDetailedAsync(
             string containerGuid,
             List<UpdateContainerDetailDto> updates
+        ) => BatchUpdateDetailsDetailedAsync(containerGuid, updates, WarehousePriceSyncPolicy.Default);
+
+        /// <summary>
+        /// 在指定货柜范围内批量更新明细；改仓库零售价时按两个开关联动分店价 / 价格任务。
+        /// </summary>
+        public Task<ContainerDetailBatchUpdateResultDto> BatchUpdateDetailsDetailedAsync(
+            string containerGuid,
+            List<UpdateContainerDetailDto> updates,
+            WarehousePriceSyncPolicy priceSyncPolicy
         )
         {
             return BatchUpdateDetailsCoreAsync(
                 updates,
                 countValidNoOps: true,
                 repairMissingStoreRelations: true,
-                containerGuid
+                containerGuid: containerGuid,
+                priceSyncPolicy: priceSyncPolicy
             );
         }
 
@@ -3339,7 +3368,8 @@ namespace BlazorApp.Api.Services.React
             List<UpdateContainerDetailDto> updates,
             bool countValidNoOps,
             bool repairMissingStoreRelations,
-            string? containerGuid
+            string? containerGuid,
+            WarehousePriceSyncPolicy? priceSyncPolicy = null
         )
         {
             if (IsContainerDetailConcurrencyTokenRequired() && HasMissingExpectedFieldTokens(updates))
@@ -3354,7 +3384,8 @@ namespace BlazorApp.Api.Services.React
                     countValidNoOps,
                     repairMissingStoreRelations,
                     containerGuid,
-                    mutationLock: null
+                    mutationLock: null,
+                    priceSyncPolicy: priceSyncPolicy
                 );
             }
 
@@ -3388,7 +3419,8 @@ namespace BlazorApp.Api.Services.React
                         countValidNoOps,
                         repairMissingStoreRelations,
                         containerGuid,
-                        mutationLock
+                        mutationLock,
+                        priceSyncPolicy: priceSyncPolicy
                     );
                     await _context.Db.Ado.CommitTranAsync();
                     return result;
@@ -3555,11 +3587,14 @@ namespace BlazorApp.Api.Services.React
             bool repairMissingStoreRelations,
             string? containerGuid,
             ContainerMutationLockScope? mutationLock,
-            SetChildPurchasePriceLockScope? preAcquiredSetChildPurchasePriceLock = null
+            SetChildPurchasePriceLockScope? preAcquiredSetChildPurchasePriceLock = null,
+            // 改仓库零售价时的两个开关；null（内部调用方、旧入口）按默认勾选处理。
+            WarehousePriceSyncPolicy? priceSyncPolicy = null
         )
         {
             try
             {
+                var effectivePriceSyncPolicy = priceSyncPolicy ?? WarehousePriceSyncPolicy.Default;
                 var result = new ContainerDetailBatchUpdateResultDto
                 {
                     TotalRequested = updates?.Count ?? 0,
@@ -5151,6 +5186,31 @@ namespace BlazorApp.Api.Services.React
                             );
                             await UpdateStoreRetailPricesForContainerDetailAsync(productSyncPlans);
 
+                            // 「同步分店零售价」：本次改了零售价（贴牌价格）的商品，把各启用分店零售价直接改成新价。
+                            // 与仓库表回写同事务：覆盖 / 入队 HQ 任一步失败，整笔货柜明细保存一起回滚。
+                            // 不勾选时分店价原样保留，分店由下面的变更历史（价格漏斗）收到「改价格」任务。
+                            var retailByCode = productSyncPlans
+                                .Where(plan => plan.OEMPrice.HasValue)
+                                .ToDictionary(
+                                    plan => plan.ProductCode,
+                                    plan => plan.OEMPrice!.Value,
+                                    StringComparer.OrdinalIgnoreCase
+                                );
+                            if (effectivePriceSyncPolicy.SyncStoreRetailPrices && retailByCode.Count > 0)
+                            {
+                                await new WarehouseStoreRetailPriceOverwriter(
+                                    _context.Db,
+                                    _priceTaskService,
+                                    _hqPriceSyncEnqueuer,
+                                    _logger
+                                ).OverwriteAsync(
+                                    retailByCode,
+                                    effectivePriceSyncPolicy,
+                                    string.IsNullOrWhiteSpace(auditActorName) ? "System" : auditActorName,
+                                    ContainerDetailHqSource
+                                );
+                            }
+
                             var importPriceUpdates = productSyncPlans
                                 .Where(plan => plan.ImportPrice.HasValue)
                                 .ToList();
@@ -5262,6 +5322,8 @@ namespace BlazorApp.Api.Services.React
                                 BatchGuid = auditBatchGuid,
                                 ActorUserGuid = auditActorGuid,
                                 ActorName = auditActorName,
+                                // 操作人取消勾选「生成价格任务」：只记审计，不触发分店价格更新任务。
+                                SkipPriceTasks = !effectivePriceSyncPolicy.GenerateTasks,
                             }
                         );
                     }
@@ -5991,7 +6053,8 @@ namespace BlazorApp.Api.Services.React
             Func<Container?, List<ContainerDetail>, List<UpdateContainerDetailDto>> buildUpdates,
             string operation,
             string parameters,
-            Func<List<ContainerDetail>, Task>? afterUpdate = null
+            Func<List<ContainerDetail>, Task>? afterUpdate = null,
+            WarehousePriceSyncPolicy? priceSyncPolicy = null
         )
         {
             var deadlockRetryCount = 0;
@@ -6090,7 +6153,8 @@ namespace BlazorApp.Api.Services.React
                         repairMissingStoreRelations: false,
                         containerGuid: containerGuid,
                         mutationLock: mutationLock,
-                        preAcquiredSetChildPurchasePriceLock: scopedImportLock
+                        preAcquiredSetChildPurchasePriceLock: scopedImportLock,
+                        priceSyncPolicy: priceSyncPolicy
                     );
                     if (afterUpdate != null)
                     {
@@ -6294,7 +6358,12 @@ namespace BlazorApp.Api.Services.React
                         .ToList();
                 },
                 "apply-prices",
-                $"importPrice={request.ImportPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"}&oemPrice={request.OemPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"}"
+                $"importPrice={request.ImportPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"}&oemPrice={request.OemPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"}",
+                // 开关只决定改零售价后的副作用（覆盖分店价 / 发任务），不改变命中的明细，所以不进预览指纹。
+                priceSyncPolicy: WarehousePriceSyncPolicy.From(
+                    request.SyncStoreRetailPrices,
+                    request.GenerateTasks
+                )
             );
         }
 

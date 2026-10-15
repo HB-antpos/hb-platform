@@ -1,5 +1,5 @@
 import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Button, Card, Checkbox, Col, DatePicker, Empty, Image, Input, Progress, Row, Segmented, Select, Space, Statistic, Tabs, Tag, Tooltip, Typography, message, theme } from 'antd'
+import { Button, Card, Checkbox, Col, DatePicker, Divider, Empty, Image, Input, Progress, Row, Segmented, Select, Space, Statistic, Tabs, Tag, Tooltip, Typography, message, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
@@ -11,6 +11,7 @@ import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getActiveStores, type StoreOption } from '../../../services/storeService'
 import {
+  cancelStorePriceUpdateTasks,
   getStorePriceUpdateTaskSummary,
   getStorePriceUpdateTasks,
   getStorePriceUpdateTasksByProduct,
@@ -22,17 +23,25 @@ import {
   type StorePriceUpdateTaskSummary,
 } from '../../../services/storePriceUpdateTaskService'
 import { PRICE_UPDATE_TASKS_PATH } from '../../../utils/priceNotification'
+import CancelTasksModal from './CancelTasksModal'
 import {
   buildByProductCsvRows,
   buildByStoreCsvRows,
+  buildCancelByIdsPayload,
+  buildCancelByProductPayload,
   buildCsvContent,
   buildPriceUpdateTasksCsvFileName,
   buildPriceUpdateTasksQuery,
   buildStoreProgressSegments,
   buildTasksCsvRows,
   collectAllPages,
+  compareLastCompleted,
+  compareOldestPending,
+  compareStoreCode,
   createDefaultPriceUpdateTasksFilters,
+  countPendingStores,
   createPriceUpdateTasksRequestCoordinator,
+  describeCancelInfo,
   describeLabelStatus,
   describeProductStore,
   formatLocalDateTime,
@@ -46,6 +55,7 @@ import {
   parsePriceUpdateTasksSearch,
   resolveInitiatorName,
   resolveInitiatorSourceLabel,
+  storeCodeToSelection,
   toPercent,
   type PriceUpdateTaskKindFilter,
   type PriceUpdateTaskStatusFilter,
@@ -83,6 +93,11 @@ function downloadCsv(fileName: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
+/** 待确认的撤销范围：任务明细勾选的 ID，或某商品（在当前分店筛选内）的全部未完成任务。 */
+type CancelTarget =
+  | { kind: 'ids'; ids: number[] }
+  | { kind: 'product'; productCode: string; productName: string; storeCodes: string[]; storeCount: number }
+
 function ProductCell({ image, name, itemNumber }: { image?: string | null; name?: string | null; itemNumber?: string | null }) {
   return (
     <Space size={8} align="center">
@@ -111,7 +126,7 @@ export default function PriceUpdateTasksPage() {
   const initialFilters = useMemo<PriceUpdateTasksFilters>(() => ({
     ...createDefaultPriceUpdateTasksFilters(),
     keyword: initialState.keyword,
-    storeCode: initialState.storeCode,
+    storeCodes: storeCodeToSelection(initialState.storeCode),
   }), [initialState])
 
   const [tab, setTab] = useState<PriceUpdateTasksTab>(initialState.tab)
@@ -138,6 +153,12 @@ export default function PriceUpdateTasksPage() {
   const [taskTotal, setTaskTotal] = useState(0)
   const [taskHqSyncEnabled, setTaskHqSyncEnabled] = useState(false)
 
+  // 手动撤销：任务明细勾选的 ID（仅当前页）与待确认的撤销范围。
+  const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([])
+  const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+
+  const appliedStoreCodes = appliedFilters.storeCodes
   const baseQuery = useMemo(() => buildPriceUpdateTasksQuery(appliedFilters), [appliedFilters])
   const taskQuery = useMemo(() => ({
     ...baseQuery,
@@ -171,6 +192,8 @@ export default function PriceUpdateTasksPage() {
         const result = await getStorePriceUpdateTasks({ ...taskQuery, ...taskPaging }, { signal })
         if (!coordinatorRef.current.isLatest(requestId)) return
         setTaskRows(result.items)
+        // 列表重新加载后，旧勾选可能指向已不在当前页/已变状态的任务，直接清空。
+        setSelectedTaskIds([])
         setTaskTotal(result.total)
         setTaskHqSyncEnabled(result.hqSyncEnabled)
       }
@@ -203,7 +226,7 @@ export default function PriceUpdateTasksPage() {
     setTab(linked.tab)
     setHqSyncFailedOnly(linked.hqSyncFailedOnly)
     if (linked.hqSyncFailedOnly) setTaskStatus('All')
-    applyFilters({ ...createDefaultPriceUpdateTasksFilters(), keyword: linked.keyword, storeCode: linked.storeCode })
+    applyFilters({ ...createDefaultPriceUpdateTasksFilters(), keyword: linked.keyword, storeCodes: storeCodeToSelection(linked.storeCode) })
   }, [active, applyFilters, location.key, location.pathname, location.search])
 
   const openTasksTab = (overrides: { storeCode?: string; hqSyncFailedOnly?: boolean; kind?: PriceUpdateTaskKindFilter }) => {
@@ -212,10 +235,36 @@ export default function PriceUpdateTasksPage() {
     setTaskStatus(overrides.hqSyncFailedOnly ? 'All' : 'Pending')
     applyFilters({
       ...draftFilters,
-      ...(overrides.storeCode !== undefined ? { storeCode: overrides.storeCode } : {}),
+      ...(overrides.storeCode !== undefined ? { storeCodes: storeCodeToSelection(overrides.storeCode) } : {}),
       ...(overrides.kind !== undefined ? { kind: overrides.kind } : {}),
     })
     setTab('tasks')
+  }
+
+  const handleConfirmCancel = async (note: string) => {
+    if (!cancelTarget) return
+    setCancelling(true)
+    try {
+      const payload = cancelTarget.kind === 'ids'
+        ? buildCancelByIdsPayload(cancelTarget.ids, note)
+        : buildCancelByProductPayload(cancelTarget.productCode, cancelTarget.storeCodes, note)
+      const result = await cancelStorePriceUpdateTasks(payload)
+      if (result.cancelledCount === 0) {
+        message.warning(t(`${I18N}.cancel.nothing`))
+      } else if (result.skippedCount > 0) {
+        message.warning(t(`${I18N}.cancel.partial`, { cancelled: result.cancelledCount, skipped: result.skippedCount }))
+      } else {
+        message.success(t(`${I18N}.cancel.success`, { count: result.cancelledCount }))
+      }
+      setCancelTarget(null)
+      setSelectedTaskIds([])
+      // 状态变了：各页签的统计与列表都要重新取（只有成功撤销才需要，但「已被处理」时重新取也能让界面追上真实状态）。
+      setRefreshToken((value) => value + 1)
+    } catch (cancelError) {
+      message.error(getErrorMessage(cancelError, t(`${I18N}.cancel.failed`)))
+    } finally {
+      setCancelling(false)
+    }
   }
 
   const handleExport = async () => {
@@ -261,11 +310,13 @@ export default function PriceUpdateTasksPage() {
     return [
       {
         title: t(`${I18N}.columns.store`), key: 'store', width: 220,
+        sorter: compareStoreCode,
         render: (_, row) => <Space size={6}><Typography.Text type="secondary">{row.storeCode}</Typography.Text><span>{row.storeName || '--'}</span></Space>,
       },
       {
+        // 数值/时间列首次点击先降序（最大/最新在前），更符合「找积压最多的店」的用法。
         title: t(`${I18N}.columns.pendingPriceUpdate`), key: 'pendingPriceUpdate', width: 120, align: 'right',
-        sorter: (a, b) => a.pendingPriceUpdateCount - b.pendingPriceUpdateCount,
+        sorter: (a, b) => a.pendingPriceUpdateCount - b.pendingPriceUpdateCount, sortDirections: ['descend', 'ascend'],
         render: (_, row) => (
           <Typography.Text strong={row.pendingPriceUpdateCount > 0} style={{ color: row.pendingPriceUpdateCount > 0 ? token.colorWarning : token.colorTextQuaternary }}>
             {row.pendingPriceUpdateCount}
@@ -274,16 +325,20 @@ export default function PriceUpdateTasksPage() {
       },
       {
         title: t(`${I18N}.columns.pendingLabelOnly`), key: 'pendingLabelOnly', width: 120, align: 'right',
-        sorter: (a, b) => a.pendingLabelOnlyCount - b.pendingLabelOnlyCount,
+        sorter: (a, b) => a.pendingLabelOnlyCount - b.pendingLabelOnlyCount, sortDirections: ['descend', 'ascend'],
         render: (_, row) => (
           <Typography.Text strong={row.pendingLabelOnlyCount > 0} style={{ color: row.pendingLabelOnlyCount > 0 ? token.colorInfo : token.colorTextQuaternary }}>
             {row.pendingLabelOnlyCount}
           </Typography.Text>
         ),
       },
-      { title: t(`${I18N}.columns.completed`), dataIndex: 'completedCount', key: 'completed', width: 100, align: 'right' },
+      {
+        title: t(`${I18N}.columns.completed`), dataIndex: 'completedCount', key: 'completed', width: 100, align: 'right',
+        sorter: (a, b) => a.completedCount - b.completedCount, sortDirections: ['descend', 'ascend'],
+      },
       {
         title: t(`${I18N}.columns.completionRate`), key: 'completionRate', width: 200,
+        sorter: (a, b) => a.completionRate - b.completionRate, sortDirections: ['descend', 'ascend'],
         render: (_, row) => {
           const color = getCompletionRateColor(row.completionRate)
           const strokeColor = color === 'red' ? token.colorError : color === 'orange' ? token.colorWarning : token.colorSuccess
@@ -292,6 +347,8 @@ export default function PriceUpdateTasksPage() {
       },
       {
         title: t(`${I18N}.columns.oldestPending`), key: 'oldestPending', width: 130,
+        // 无未完成任务（显示 --）的店无论升降序都排在最后。
+        sorter: (a, b, sortOrder) => compareOldestPending(a, b, sortOrder), sortDirections: ['descend', 'ascend'],
         render: (_, row) => {
           const days = getPendingAgeDays(row.oldestPendingAtUtc, now)
           const overdue = days !== null && summary !== null && days >= summary.overdueDays
@@ -300,6 +357,7 @@ export default function PriceUpdateTasksPage() {
       },
       {
         title: t(`${I18N}.columns.lastCompleted`), key: 'lastCompleted', width: 200,
+        sorter: (a, b, sortOrder) => compareLastCompleted(a, b, sortOrder), sortDirections: ['descend', 'ascend'],
         render: (_, row) => row.lastCompletedAtUtc
           ? <Tooltip title={formatLocalDateTime(row.lastCompletedAtUtc)}><span>{resolveInitiatorName(row.lastCompletedBy, t)} · {formatRelativeTime(row.lastCompletedAtUtc, now, t)}</span></Tooltip>
           : '--',
@@ -351,8 +409,27 @@ export default function PriceUpdateTasksPage() {
           </Space>
         ),
       },
+      {
+        // 撤销范围 = 当前分店筛选内该商品的全部未完成任务；没有未完成分店的商品不显示入口。
+        title: t(`${I18N}.columns.actions`), key: 'actions', width: 120, fixed: 'right',
+        render: (_, row) => {
+          const storeCount = countPendingStores(row)
+          if (storeCount === 0) return '--'
+          return (
+            <Button type="link" danger size="small" onClick={() => setCancelTarget({
+              kind: 'product',
+              productCode: row.productCode,
+              productName: row.productName || row.itemNumber || row.productCode,
+              storeCodes: appliedStoreCodes,
+              storeCount,
+            })}>
+              {t(`${I18N}.cancel.rowAction`)}
+            </Button>
+          )
+        },
+      },
     ]
-  }, [stateColors, t])
+  }, [appliedStoreCodes, stateColors, t])
 
   const taskColumns = useMemo<ColumnsType<StorePriceUpdateTask>>(() => [
     {
@@ -395,7 +472,12 @@ export default function PriceUpdateTasksPage() {
     { title: t(`${I18N}.columns.initiatedAt`), key: 'initiatedAt', width: 150, render: (_, task) => formatLocalDateTime(task.initiatedAtUtc) },
     {
       title: t(`${I18N}.columns.status`), key: 'status', width: 100,
-      render: (_, task) => <Tag color={task.status === 'Completed' ? 'success' : task.status === 'Cancelled' ? 'default' : 'warning'}>{t(`${I18N}.status.${task.status}`)}</Tag>,
+      render: (_, task) => {
+        const tag = <Tag color={task.status === 'Completed' ? 'success' : task.status === 'Cancelled' ? 'default' : 'warning'}>{t(`${I18N}.status.${task.status}`)}</Tag>
+        // 已取消任务悬浮显示原因（系统自动 / 手动撤销）、撤销人、时间与备注。
+        const info = describeCancelInfo(task, t)
+        return info.length > 0 ? <Tooltip title={info.map((line) => <div key={line}>{line}</div>)}>{tag}</Tooltip> : tag
+      },
     },
     { title: t(`${I18N}.columns.completedBy`), key: 'completedBy', width: 120, render: (_, task) => task.completedBy ? resolveInitiatorName(task.completedBy, t) : '--' },
     { title: t(`${I18N}.columns.completedAt`), key: 'completedAt', width: 150, render: (_, task) => formatLocalDateTime(task.completedAtUtc) },
@@ -441,6 +523,17 @@ export default function PriceUpdateTasksPage() {
 
   const rangeValue: [Dayjs, Dayjs] = [dayjs(draftFilters.startDate), dayjs(draftFilters.endDate)]
   const storeOptions = useMemo(() => stores.map((store) => ({ value: store.value, label: `${store.value} ${store.label}` })), [stores])
+  // 「全选」只统计下拉里真实存在的分店（URL 带来的已停用分店不计入），避免勾选状态与选项对不上。
+  const selectedStoreCount = useMemo(() => {
+    const picked = new Set(draftFilters.storeCodes)
+    return storeOptions.filter((option) => picked.has(option.value)).length
+  }, [draftFilters.storeCodes, storeOptions])
+  const allStoresSelected = storeOptions.length > 0 && selectedStoreCount === storeOptions.length
+  const someStoresSelected = selectedStoreCount > 0
+  const toggleAllStores = () => setDraftFilters((current) => ({
+    ...current,
+    storeCodes: allStoresSelected ? [] : storeOptions.map((option) => option.value),
+  }))
 
   const summaryCards = summary ? (
     <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
@@ -498,8 +591,19 @@ export default function PriceUpdateTasksPage() {
             if (!start || !end) return
             setDraftFilters((current) => ({ ...current, startDate: start.format('YYYY-MM-DD'), endDate: end.format('YYYY-MM-DD') }))
           }} />
-          <Select allowClear showSearch optionFilterProp="label" placeholder={t(`${I18N}.filters.store`)} style={{ width: 200 }} options={storeOptions}
-            value={draftFilters.storeCode || undefined} onChange={(storeCode) => setDraftFilters((current) => ({ ...current, storeCode: storeCode ?? '' }))} />
+          <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" placeholder={t(`${I18N}.filters.store`)} style={{ width: 280 }} options={storeOptions}
+            value={draftFilters.storeCodes} onChange={(storeCodes) => setDraftFilters((current) => ({ ...current, storeCodes }))}
+            popupRender={(menu) => (
+              <>
+                <div style={{ padding: '4px 12px 0' }}>
+                  <Checkbox checked={allStoresSelected} indeterminate={someStoresSelected && !allStoresSelected} onChange={toggleAllStores}>
+                    {t(`${I18N}.filters.selectAllStores`, { selected: selectedStoreCount, total: storeOptions.length })}
+                  </Checkbox>
+                </div>
+                <Divider style={{ margin: '4px 0' }} />
+                {menu}
+              </>
+            )} />
           <Select style={{ width: 128 }} value={draftFilters.kind} onChange={(kind) => setDraftFilters((current) => ({ ...current, kind }))} options={[
             { value: '', label: t(`${I18N}.filters.allKinds`) },
             { value: 'PriceUpdate', label: t(`${I18N}.kind.PriceUpdate`) },
@@ -555,7 +659,7 @@ export default function PriceUpdateTasksPage() {
                   </Space>
                   <MeasuredTable metricId="warehouse.price-update-tasks.by-product"
                     size="small" loading={loading} rowKey="productCode" columns={productColumns} dataSource={productRows}
-                    locale={{ emptyText: renderEmpty(t(`${I18N}.empty`)) }} scroll={{ x: 1100 }}
+                    locale={{ emptyText: renderEmpty(t(`${I18N}.empty`)) }} scroll={{ x: 1220 }}
                     expandable={{ expandedRowRender: renderProductStores, rowExpandable: (row) => row.stores.length > 0 }}
                     pagination={{
                       current: productPaging.page, pageSize: productPaging.pageSize, total: productTotal, showSizeChanger: true, pageSizeOptions: [20, 30, 50, 100],
@@ -587,9 +691,18 @@ export default function PriceUpdateTasksPage() {
                         {t(`${I18N}.filters.hqSyncFailedOnly`)}
                       </Checkbox>
                     ) : null}
+                    <Button danger disabled={selectedTaskIds.length === 0} onClick={() => setCancelTarget({ kind: 'ids', ids: selectedTaskIds })}>
+                      {t(`${I18N}.cancel.button`, { count: selectedTaskIds.length })}
+                    </Button>
                   </Space>
                   <MeasuredTable metricId="warehouse.price-update-tasks.tasks"
                     size="small" loading={loading} rowKey="id" columns={taskColumns} dataSource={taskRows}
+                    // 只有未完成的任务可以撤销；已完成/已取消行的勾选框置灰。
+                    rowSelection={{
+                      selectedRowKeys: selectedTaskIds,
+                      onChange: (keys) => setSelectedTaskIds(keys.map(Number)),
+                      getCheckboxProps: (task) => ({ disabled: task.status !== 'Pending' }),
+                    }}
                     locale={{ emptyText: renderEmpty(t(`${I18N}.empty`)) }} scroll={{ x: 1800 }}
                     pagination={{
                       current: taskPaging.page, pageSize: taskPaging.pageSize, total: taskTotal, showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200],
@@ -603,6 +716,15 @@ export default function PriceUpdateTasksPage() {
           ]}
         />
       </Card>
+      <CancelTasksModal
+        open={cancelTarget !== null}
+        loading={cancelling}
+        description={cancelTarget?.kind === 'product'
+          ? t(`${I18N}.cancel.byProduct`, { name: cancelTarget.productName, count: cancelTarget.storeCount })
+          : t(`${I18N}.cancel.byIds`, { count: cancelTarget?.ids.length ?? 0 })}
+        onConfirm={(note) => void handleConfirmCancel(note)}
+        onClose={() => setCancelTarget(null)}
+      />
     </PageContainer>
   )
 }

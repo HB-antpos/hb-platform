@@ -91,7 +91,13 @@
       "warehouseImportPriceUpdateFailed": "Failed to update the warehouse purchase price",
       "importPriceGapHint": "Import price is {{percent}} vs. the existing import price (over 30% difference)",
       "retailPriceGapHint": "Retail price is {{percent}} vs. the existing retail price (over 30% difference)",
-      "formulaHint": "Formulas"
+      "formulaHint": "Formulas",
+      "retailPriceSync": {
+        "syncStoreRetailPrices": "Sync store retail prices",
+        "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away and stores are asked to swap labels. When unchecked, store prices stay as they are and each store confirms the price change.",
+        "generateTasks": "Create price tasks",
+        "generateTasksHint": "When checked, price update tasks are created for stores. When unchecked, stores are not notified (store prices that are synced are pushed to HQ immediately)."
+      }
     }
   }
 }

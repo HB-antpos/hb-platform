@@ -250,7 +250,6 @@
       "oemPrice": "RRP (Warehouse Master)",
       "volume": "Unit Volume (Warehouse Master)",
       "storePurchasePrice": "Store Purchase Price",
-      "storeRetailPrice": "Store Retail Price",
       "storeMultiCodePurchasePrice": "Store Multi-Code Purchase Price",
       "storeMultiCodeRetailPrice": "Store Multi-Code Retail Price",
       "hqItemNumber": "Item No.",

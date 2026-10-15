@@ -569,6 +569,134 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
         Assert.Equal(0.5m, summary.CompletionRate);
     }
 
+    [Fact]
+    public async Task Web监控_多店过滤_StoreCodes与StoreCode取并集()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+
+        // 全部：1001 与 1002 各一条未完成
+        Assert.Equal(2, (await service.GetByStoreAsync(new StorePriceUpdateTaskQueryDto())).Count);
+
+        // 逗号分隔的多店（含空白、重复、空段）只保留所选分店
+        var picked = new StorePriceUpdateTaskQueryDto { StoreCodes = " 1001 ,,1001," };
+        var byStore = await service.GetByStoreAsync(picked);
+        Assert.Equal("1001", Assert.Single(byStore).StoreCode);
+        Assert.Equal(1, (await service.GetSummaryAsync(picked)).PendingCount);
+        var tasks = await service.GetPageAsync(picked, null);
+        Assert.Equal("1001", Assert.Single(tasks.Items).StoreCode);
+        Assert.Equal(1, tasks.PendingCount);
+
+        // 旧的单店参数与新的多店参数合并（并集），选满两家即等同全部
+        var union = new StorePriceUpdateTaskQueryDto { StoreCode = "1001", StoreCodes = "1002" };
+        Assert.Equal(2, (await service.GetByStoreAsync(union)).Count);
+        Assert.Equal(2, (await service.GetPageAsync(union, null)).Total);
+        var byProduct = await service.GetByProductAsync(union, onlyIncomplete: true);
+        Assert.Equal(2, Assert.Single(byProduct.Items).StoreCount);
+    }
+
+    // ---------- 手动撤销 ----------
+
+    [Fact]
+    public async Task 撤销_勾选任务_只撤销未完成_已完成与不存在的逐条回报_且不改任何价格()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        var task1001 = await _db.Queryable<StorePriceUpdateTask>().Where(t => t.StoreCode == "1001").SingleAsync();
+        var task1002 = await _db.Queryable<StorePriceUpdateTask>().Where(t => t.StoreCode == "1002").SingleAsync();
+        await service.KeepStorePriceAsync(new StorePriceUpdateTaskIdsRequestDto { StoreCode = "1001", TaskIds = { task1001.Id } }, "王五");
+
+        var result = await service.CancelAsync(
+            new CancelStorePriceUpdateTasksRequestDto { TaskIds = { task1001.Id, task1002.Id, 999999 }, Note = new string('备', 300) },
+            "管理员A"
+        );
+
+        Assert.Equal(1, result.CancelledCount);
+        Assert.Equal(2, result.SkippedCount);
+        Assert.Equal(StorePriceUpdateTaskResultCodes.NotPending, result.Items.Single(i => i.TaskId == task1001.Id).Code);
+        Assert.Equal(StorePriceUpdateTaskResultCodes.NotFound, result.Items.Single(i => i.TaskId == 999999).Code);
+        Assert.True(result.Items.Single(i => i.TaskId == task1002.Id).Success);
+
+        var cancelled = await _db.Queryable<StorePriceUpdateTask>().Where(t => t.Id == task1002.Id).SingleAsync();
+        Assert.Equal(StorePriceUpdateTaskStatuses.Cancelled, cancelled.Status);
+        Assert.Equal(StorePriceUpdateTaskCancelReasons.ManualCancel, cancelled.CancelReason);
+        Assert.Equal("管理员A", cancelled.CancelledBy);
+        Assert.NotNull(cancelled.CancelledAtUtc);
+        Assert.Equal(CancelStorePriceUpdateTasksRequestDto.MaxNoteLength, cancelled.CancelNote!.Length);
+
+        // 已完成的任务原样保留，且撤销不碰价格
+        var completed = await _db.Queryable<StorePriceUpdateTask>().Where(t => t.Id == task1001.Id).SingleAsync();
+        Assert.Equal(StorePriceUpdateTaskStatuses.Completed, completed.Status);
+        Assert.Null(completed.CancelledBy);
+        var prices = await _db.Queryable<StoreRetailPrice>().ToListAsync();
+        Assert.All(prices, price => Assert.True(price.StoreRetailPriceValue is 10m or 9m));
+    }
+
+    [Fact]
+    public async Task 撤销_按商品_可限定分店_重复撤销不再命中()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+
+        var first = await service.CancelAsync(
+            new CancelStorePriceUpdateTasksRequestDto { ProductCode = ProductCode, StoreCodes = "1001" },
+            "管理员A"
+        );
+        Assert.Equal(1, first.CancelledCount);
+        Assert.Equal(
+            StorePriceUpdateTaskStatuses.Pending,
+            (await _db.Queryable<StorePriceUpdateTask>().Where(t => t.StoreCode == "1002").SingleAsync()).Status
+        );
+
+        // 1001 已无未完成任务：再次撤销什么也不命中
+        var again = await service.CancelAsync(
+            new CancelStorePriceUpdateTasksRequestDto { ProductCode = ProductCode, StoreCodes = "1001" },
+            "管理员A"
+        );
+        Assert.Empty(again.Items);
+
+        // 不限定分店：撤销该商品剩余的全部未完成任务
+        var rest = await service.CancelAsync(new CancelStorePriceUpdateTasksRequestDto { ProductCode = ProductCode }, "管理员A");
+        Assert.Equal(1, rest.CancelledCount);
+        Assert.Equal(0, await _db.Queryable<StorePriceUpdateTask>().Where(t => t.Status == StorePriceUpdateTaskStatuses.Pending).CountAsync());
+    }
+
+    [Fact]
+    public async Task 撤销后_对账不复活_不计入完成率分母_明细可见撤销留痕_仓库再改价会生成新任务()
+    {
+        var service = CreateService();
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await service.CancelAsync(new CancelStorePriceUpdateTasksRequestDto { ProductCode = ProductCode }, "管理员A");
+
+        // 后台对账只看 Pending：已撤销的任务不会被复活
+        await service.ReconcilePendingAsync(null);
+        Assert.Equal(0, await _db.Queryable<StorePriceUpdateTask>().Where(t => t.Status == StorePriceUpdateTaskStatuses.Pending).CountAsync());
+
+        var summary = await service.GetSummaryAsync(new StorePriceUpdateTaskQueryDto());
+        Assert.Equal(0, summary.PendingCount);
+        Assert.Equal(0, summary.CompletedCount);
+        Assert.Equal(0m, summary.CompletionRate);
+
+        var page = await service.GetPageAsync(new StorePriceUpdateTaskQueryDto { Status = "All" }, null);
+        Assert.Equal(2, page.Total);
+        Assert.All(page.Items, item =>
+        {
+            Assert.Equal(StorePriceUpdateTaskStatuses.Cancelled, item.Status);
+            Assert.Equal(StorePriceUpdateTaskCancelReasons.ManualCancel, item.CancelReason);
+            Assert.Equal("管理员A", item.CancelledBy);
+            Assert.NotNull(item.CancelledAtUtc);
+        });
+
+        // 仓库再次改价：同店同商品可重新生成 Pending（过滤唯一索引只约束 Pending，不冲突）
+        await SetWarehouseRetailAsync(13m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        Assert.Equal(2, await _db.Queryable<StorePriceUpdateTask>().Where(t => t.Status == StorePriceUpdateTaskStatuses.Pending).CountAsync());
+    }
+
     // ---------------------------------------------------------------------
     // 超期（任务须在 7 天内完成）：从首次发起起算，移动端提醒 / 锁报表与 Web 监控共用同一口径
     // ---------------------------------------------------------------------

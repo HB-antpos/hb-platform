@@ -250,7 +250,6 @@
       "oemPrice": "零售价（仓库主表）",
       "volume": "单件体积（仓库主表）",
       "storePurchasePrice": "分店进货价",
-      "storeRetailPrice": "分店零售价",
       "storeMultiCodePurchasePrice": "分店多码进货价",
       "storeMultiCodeRetailPrice": "分店多码零售价",
       "hqItemNumber": "货号",

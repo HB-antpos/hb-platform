@@ -33,6 +33,7 @@ import {
   buildContainerDetailMatchedDomesticDataUpdates,
   buildContainerDetailMatchStatusUpdates,
   buildPendingContainerDetailSavePlan,
+  countPendingExistingProductRetailPrices,
   filterSuccessfullySavedContainerDetailUpdates,
   countSuccessfullySavedContainerDetailRows,
   canUseContainerDetailLocalTagFilters,
@@ -3991,10 +3992,10 @@ assertEqual(
 )
 assertEqual(
   pageSource.includes('item.OEMPrice = oemPrice') &&
-    pageSource.includes('item.StoreRetailPriceValue = oemPrice') &&
+    !pageSource.includes('item.StoreRetailPriceValue = oemPrice') &&
     pageSource.includes('item.MultiCodeRetailPrice = oemPrice'),
   true,
-  '更新已有商品价格应同时提交有效零售价，补齐商品主表和分店零售价',
+  '更新已有商品价格应提交有效零售价；分店零售价改由「同步分店零售价」开关经批量更新统一处理，不再单独 upsert 零售价',
 )
 assertEqual(
   pageSource.includes('const oemPrice = getContainerDetailVisibleOemPrice(row)') &&
@@ -4978,7 +4979,7 @@ assertEqual(
     pageSource.includes('const [detailSaveSubmitting, setDetailSaveSubmitting] = useState(false)') &&
     pageSource.includes('const markPendingDetailPatch = (') &&
     pageSource.includes('const buildPendingDetailSavePlan = (): PendingContainerDetailPageSavePlan | null => {') &&
-    pageSource.includes('const confirmSavePendingDetails = (plan: PendingContainerDetailPageSavePlan) => new Promise<boolean>') &&
+    pageSource.includes('const confirmSavePendingDetails = (plan: PendingContainerDetailPageSavePlan) => new Promise<{ retailPriceSync: WarehouseRetailPriceSyncOptions } | null>') &&
     pageSource.includes('const executePendingDetailSavePlan = async (\n    plan: PendingContainerDetailPageSavePlan,\n  ): Promise<PendingContainerDetailSaveExecutionResult> => {') &&
     pageSource.includes('const savePendingDetails = async () => {'),
   true,
@@ -4989,12 +4990,12 @@ assertEqual(
     containerDetailLogicSource.includes('CONTAINER_DETAIL_DRAFT_FIELDS.forEach((field) => {') &&
     containerDetailLogicSource.includes('update.英文名称 = englishName') &&
     containerDetailLogicSource.includes('update.ClearEnglishName = true') &&
-    pageSource.includes('batchUpdateDetails(saveContainerGuid, plan.detailUpdates),') &&
+    pageSource.includes('batchUpdateDetails(saveContainerGuid, plan.detailUpdates, plan.retailPriceSync),') &&
     pageSource.includes('failedPendingDetailSaveKeysRef.current,') &&
     !pageSource.includes('await batchUpdateWarehouseProducts(plan.warehouseUpdates)') &&
     !pageSource.includes("t('containers.messages.missingWarehouseProductCodeForRetailPrice'") &&
     pageSource.includes('const confirmed = await confirmSavePendingDetails(savePlan)') &&
-    pageSource.includes('await executePendingDetailSavePlan(savePlan)') &&
+    pageSource.includes('await executePendingDetailSavePlan({ ...savePlan, retailPriceSync: confirmed.retailPriceSync })') &&
     pageSource.includes('settleContainerDetailDraftSaveSuccess(') &&
     pageSource.includes('clearContainerDetailDraftFieldsIfVersionMatches(') &&
     pageSource.includes("t('containers.messages.detailsSaved'"),
@@ -5149,7 +5150,7 @@ assertEqual(
   '批量和行内仓库状态更新都应复用同商品编码本地更新 helper',
 )
 assertEqual(
-  pageSource.includes('applyContainerPricesByScope(containerGuid, scope, prices, previewToken)') &&
+  pageSource.includes('applyContainerPricesByScope(\n        containerGuid,\n        scope,\n        prices,\n        previewToken,\n        buildRetailPriceSyncFields(batchRetailPriceSync, batchOemPrice != null),\n      )') &&
     pageSource.includes("const scopedRows = await confirmBatchRows(t(isActive ? 'containers.actions.batchActivate' : 'containers.actions.batchDeactivate'))") &&
     pageSource.includes('return await fetchAllRowsForCurrentQuery()') &&
     pageSource.includes('const productCodes = eligibleRows'),
@@ -6222,6 +6223,129 @@ assertEqual(
       !pageSource.includes('alignDomesticProductCodeConflictHint'),
     true,
     '对齐编码应先预览再确认，只有合并模式才带合并标记，旧的「目标已存在会拒绝」提示应移除',
+  )
+}
+
+// ---------- 货柜明细改零售价：「同步分店零售价 / 生成价格任务」两个开关 ----------
+{
+  // 待保存草稿里只有已有商品的零售价才需要两个开关；新商品零售价只存货柜明细。
+  const patches = [
+    { hguid: 'D-EXISTING', 贴牌价格: 5 },
+    { hguid: 'D-NEW', 贴牌价格: 6 },
+    { hguid: 'D-IMPORT-ONLY' },
+    { hguid: 'D-UNLOADED', 贴牌价格: 7 },
+  ]
+  const rows = [
+    { hguid: 'D-EXISTING', 是否新商品: false },
+    { hguid: 'D-NEW', 是否新商品: true },
+    { hguid: 'D-IMPORT-ONLY', 是否新商品: false },
+  ]
+  assertEqual(
+    countPendingExistingProductRetailPrices(patches, rows),
+    2,
+    '已有商品与未加载行的零售价草稿计入，新商品和没改零售价的草稿不计',
+  )
+  assertEqual(
+    countPendingExistingProductRetailPrices([{ hguid: 'D-NEW', 贴牌价格: 6 }], rows),
+    0,
+    '只有新商品零售价草稿时不出现两个开关',
+  )
+}
+{
+  const retailSwitchKeys = ['syncStoreRetailPrices', 'syncStoreRetailPricesHint', 'generateTasks', 'generateTasksHint']
+  const zhPage = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailPageMessages.zh.json', 'utf8'))
+  const enPage = JSON.parse(readFileSync('src/pages/Warehouse/ContainerDetail/containerDetailPageMessages.en.json', 'utf8'))
+  const zhProducts = JSON.parse(readFileSync('src/pages/Warehouse/Products/warehouseProductsMessages.zh.json', 'utf8'))
+  const zhSwitch = zhPage.warehouseUi.containerDetail.retailPriceSync
+  const enSwitch = enPage.warehouseUi.containerDetail.retailPriceSync
+  const productsSwitch = zhProducts.warehouseUi.products.retailPriceSync
+  for (const key of retailSwitchKeys) {
+    assertEqual(typeof zhSwitch[key] === 'string' && zhSwitch[key].length > 0, true, `货柜页中文文案 ${key} 应存在`)
+    assertEqual(typeof enSwitch[key] === 'string' && enSwitch[key].length > 0, true, `货柜页英文文案 ${key} 应存在`)
+    assertEqual(zhSwitch[key], productsSwitch[key], `货柜页开关文案 ${key} 应与仓库商品页完全一致`)
+  }
+  const zhGlobal = JSON.parse(readFileSync('src/i18n/locales/zh.json', 'utf8'))
+  assertEqual(
+    zhGlobal.containers.updateFields.storeRetailPrice,
+    undefined,
+    '「分店零售价」字段已被「同步分店零售价」开关取代，全局语言包不应再留这条文案',
+  )
+
+  assertEqual(
+    pageSource.includes('const CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS: RetailPriceSyncMessageKeys = {') &&
+      retailSwitchKeys.every((key) => pageSource.includes(`'warehouseUi.containerDetail.retailPriceSync.${key}'`)) &&
+      pageSource.includes("from '../Products/RetailPriceSyncOptionsField'"),
+    true,
+    '货柜页应复用仓库商品页的开关组件，文案放本页页面级消息',
+  )
+  // 保存明细确认框：只在有已有商品零售价草稿时出现，默认都勾选，确认后随请求带上
+  const confirmSaveSource = pageSource.slice(
+    pageSource.indexOf('const confirmSavePendingDetails = '),
+    pageSource.indexOf('const executePendingDetailSavePlan = async ('),
+  )
+  assertEqual(
+    confirmSaveSource.includes('countPendingExistingProductRetailPrices(plan.pendingPatches, rowsRef.current)') &&
+      confirmSaveSource.includes('let retailPriceSyncChoice: RetailPriceSyncChoice = { ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE }') &&
+      confirmSaveSource.includes('{existingRetailPriceCount > 0 ? (') &&
+      confirmSaveSource.includes('<UncontrolledRetailPriceSyncOptions') &&
+      confirmSaveSource.includes('buildRetailPriceSyncFields(retailPriceSyncChoice, existingRetailPriceCount > 0)') &&
+      confirmSaveSource.includes('resolve(null)') &&
+      !confirmSaveSource.includes('resolve(false)'),
+    true,
+    '保存明细确认框应在有已有商品零售价草稿时展示两个默认勾选的开关，取消返回 null',
+  )
+  // 批量设价：填了零售价才出现，打开弹窗重置默认，预览参数不含开关
+  const openBatchPricesSource = pageSource.slice(
+    pageSource.indexOf('const openBatchPricesModal = async () => {'),
+    pageSource.indexOf('const submitBatchPrices = async () => {'),
+  )
+  assertEqual(
+    openBatchPricesSource.includes('setBatchRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE })') &&
+      pageSource.includes('{batchOemPrice != null ? (\n            <RetailPriceSyncOptionsField') &&
+      pageSource.includes('messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}'),
+    true,
+    '批量设价弹窗填了零售价才展示两个开关，每次打开回到默认勾选',
+  )
+  const submitBatchPricesSource = pageSource.slice(
+    pageSource.indexOf('const submitBatchPrices = async () => {'),
+    pageSource.indexOf('const applyActive = async ('),
+  )
+  assertEqual(
+    submitBatchPricesSource.includes("confirmPreviewedContainerDetailAction(\n        'apply-prices', scope, prices,") &&
+      !submitBatchPricesSource.includes('prices = {\n      importPrice: batchImportPrice,\n      oemPrice: batchOemPrice,\n      syncStoreRetailPrices'),
+    true,
+    '两个开关只决定副作用，不进批量改价预览参数',
+  )
+  // 更新已有商品：旧「分店零售价」勾选被取代，选了零售价才出现开关，并随批量更新传给后端
+  const updateExistingSource = pageSource.slice(
+    pageSource.indexOf('const updateExistingPurchase = async () => {'),
+    pageSource.indexOf('const updateWarehouseImportPrice = async () => {'),
+  )
+  assertEqual(
+    !updateExistingSource.includes('storeRetailPrice') &&
+      !updateExistingSource.includes('StoreRetailPriceValue') &&
+      updateExistingSource.includes("selectedFields.includes('oemPrice')") &&
+      updateExistingSource.includes('<UncontrolledRetailPriceSyncOptions') &&
+      updateExistingSource.includes('...buildRetailPriceSyncFields(') &&
+      !updateExistingSource.includes('syncStoreRetailPrices: false'),
+    true,
+    '更新已有商品应由「零售价」字段触发两个开关，不再保留单独的分店零售价勾选，也不再写死 sync=false',
+  )
+  assertEqual(
+    !pageSource.includes("| 'storeRetailPrice'") && !pageSource.includes("'storeRetailPrice',"),
+    true,
+    '字段清单和默认勾选里都不应再有 storeRetailPrice',
+  )
+  const importPriceOnlySource = pageSource.slice(
+    pageSource.indexOf('const updateWarehouseImportPrice = async () => {'),
+    pageSource.indexOf('const recalculateCostsAfterDetailDelete = async ('),
+  )
+  assertEqual(
+    importPriceOnlySource.includes('{ syncStorePurchasePrice: false }') &&
+      !importPriceOnlySource.includes('syncStoreRetailPrices') &&
+      !importPriceOnlySource.includes('generateTasks'),
+    true,
+    '只改进货价的入口不涉及零售价，不应再写死两个零售价开关',
   )
 }
 

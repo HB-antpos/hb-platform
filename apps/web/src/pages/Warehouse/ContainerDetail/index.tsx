@@ -130,6 +130,7 @@ import {
   batchUpdateWarehouseProducts,
   detectProducts,
   type WarehouseProductBatchUpdateItem,
+  type WarehouseRetailPriceSyncOptions,
 } from '../../../services/warehouseProductService'
 import { useAuthStore } from '../../../store/auth'
 import { useTabsStore } from '../../../store/tabs'
@@ -152,6 +153,7 @@ import {
   buildContainerDetailSaveFailureKeys,
   buildContainerDetailSuccessfulEnglishNameUpdates,
   buildPendingContainerDetailSavePlan,
+  countPendingExistingProductRetailPrices,
   buildContainerDetailTagStats,
   buildContainerDetailHqPushSelection,
   buildCreatedProductsHqPushPlan,
@@ -256,6 +258,8 @@ import {
 } from './containerDetailLogic'
 import { buildWarehouseCategoryLookup, formatWarehouseCategoryNodeName, getWarehouseProductCategoryTooltip } from '../Products/categoryPath'
 import CategoryTreePicker from '../Products/CategoryTreePicker'
+import RetailPriceSyncOptionsField, { UncontrolledRetailPriceSyncOptions, type RetailPriceSyncMessageKeys } from '../Products/RetailPriceSyncOptionsField'
+import { DEFAULT_RETAIL_PRICE_SYNC_CHOICE, buildRetailPriceSyncFields, type RetailPriceSyncChoice } from '../Products/retailPriceSyncOptions'
 import WarehouseProductChangeHistoryDrawer from '../Products/WarehouseProductChangeHistoryDrawer'
 import {
   defaultPushProductsToHqUpdateFields,
@@ -371,7 +375,16 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 type TextColumnFilterKey = 'itemNumber' | 'barcode' | 'productName' | 'englishName' | 'remark'
 type NumberColumnFilterKey = 'containerPieces' | 'middlePackQuantity' | 'containerQuantity' | 'packingQuantity' | 'unitVolume' | 'domesticPrice' | 'floatRate' | 'transportCost' | 'unitTransportCost' | 'warehouseImportPrice' | 'lastOEMPrice' | 'importPrice' | 'oemPrice'
 type EnumColumnFilterKey = 'productTypes' | 'newProductStates' | 'matchTypes' | 'warehouseStatus'
+// 改零售价的两个勾选项复用仓库商品页的组件，文案放在本页的页面级消息里（warehouseUi.containerDetail.retailPriceSync）。
+const CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS: RetailPriceSyncMessageKeys = {
+  syncStoreRetailPrices: 'warehouseUi.containerDetail.retailPriceSync.syncStoreRetailPrices',
+  syncStoreRetailPricesHint: 'warehouseUi.containerDetail.retailPriceSync.syncStoreRetailPricesHint',
+  generateTasks: 'warehouseUi.containerDetail.retailPriceSync.generateTasks',
+  generateTasksHint: 'warehouseUi.containerDetail.retailPriceSync.generateTasksHint',
+}
 type PendingContainerDetailPageSavePlan = PendingContainerDetailSavePlan & {
+  /** 「保存明细」确认框里操作人对「同步分店零售价 / 生成价格任务」的选择；没改已有商品零售价时为空对象，不带参数。 */
+  retailPriceSync?: WarehouseRetailPriceSyncOptions
   saveKeys: string[]
   draftContext: ContainerDetailDraftContext
   draftFieldVersionSnapshot: Record<string, string>
@@ -410,7 +423,6 @@ type ContainerExistingProductUpdateField =
   | 'oemPrice'
   | 'volume'
   | 'storePurchasePrice'
-  | 'storeRetailPrice'
   | 'storeMultiCodePurchasePrice'
   | 'storeMultiCodeRetailPrice'
 
@@ -432,6 +444,8 @@ interface UpdateFieldSelectorProps<T extends string> {
   defaultFields: T[]
   onChange: (values: T[]) => void
   hint?: ReactNode
+  /** 按当前已选字段渲染的页脚（如选了零售价才出现的「同步分店零售价 / 生成价格任务」）。 */
+  footer?: (selectedFields: T[]) => ReactNode
 }
 
 function formatDate(value?: string) {
@@ -523,7 +537,6 @@ const containerExistingProductUpdateFields: readonly UpdateFieldOption<Container
   { value: 'oemPrice', labelKey: 'containers.updateFields.oemPrice', fallbackLabel: '零售价（仓库主表）' },
   { value: 'volume', labelKey: 'containers.updateFields.volume', fallbackLabel: '单件体积（仓库主表）' },
   { value: 'storePurchasePrice', labelKey: 'containers.updateFields.storePurchasePrice', fallbackLabel: '分店进货价' },
-  { value: 'storeRetailPrice', labelKey: 'containers.updateFields.storeRetailPrice', fallbackLabel: '分店零售价' },
   { value: 'storeMultiCodePurchasePrice', labelKey: 'containers.updateFields.storeMultiCodePurchasePrice', fallbackLabel: '分店多码进货价' },
   { value: 'storeMultiCodeRetailPrice', labelKey: 'containers.updateFields.storeMultiCodeRetailPrice', fallbackLabel: '分店多码零售价' },
 ]
@@ -532,7 +545,6 @@ const defaultContainerExistingProductUpdateFields: ContainerExistingProductUpdat
   'importPrice',
   'oemPrice',
   'storePurchasePrice',
-  'storeRetailPrice',
   'storeMultiCodePurchasePrice',
   'storeMultiCodeRetailPrice',
 ]
@@ -543,6 +555,7 @@ function UpdateFieldSelector<T extends string>({
   defaultFields,
   onChange,
   hint,
+  footer,
 }: UpdateFieldSelectorProps<T>) {
   const allValues = useMemo(() => fields.map((field) => field.value), [fields])
   const [selectedFields, setSelectedFields] = useState<T[]>(defaultFields)
@@ -578,6 +591,7 @@ function UpdateFieldSelector<T extends string>({
           ))}
         </Space>
       </Checkbox.Group>
+      {footer?.(selectedFields)}
     </Space>
   )
 }
@@ -1012,6 +1026,8 @@ export default function ContainerDetailPage() {
   const [batchFloatRate, setBatchFloatRate] = useState<number | null>(null)
   const [batchImportPrice, setBatchImportPrice] = useState<number | null>(null)
   const [batchOemPrice, setBatchOemPrice] = useState<number | null>(null)
+  // 批量设价填了零售价时的两个开关；每次打开弹窗都回到默认（都勾选），不持久化。
+  const [batchRetailPriceSync, setBatchRetailPriceSync] = useState<RetailPriceSyncChoice>({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE })
   const [batchFloatRateModalOpen, setBatchFloatRateModalOpen] = useState(false)
   const [batchFloatRateSaving, setBatchFloatRateSaving] = useState(false)
   const [batchPricesModalOpen, setBatchPricesModalOpen] = useState(false)
@@ -2671,6 +2687,7 @@ export default function ContainerDetailPage() {
     defaultFields: T[],
     onChange: (values: T[]) => void,
     hint?: ReactNode,
+    footer?: (selectedFields: T[]) => ReactNode,
   ) => (
     <UpdateFieldSelector
       t={t}
@@ -2678,6 +2695,7 @@ export default function ContainerDetailPage() {
       defaultFields={defaultFields}
       onChange={onChange}
       hint={hint}
+      footer={footer}
     />
   )
 
@@ -2692,12 +2710,13 @@ export default function ContainerDetailPage() {
     fields: readonly UpdateFieldOption<T>[],
     defaultFields: T[],
     hint?: ReactNode,
+    footer?: (selectedFields: T[]) => ReactNode,
   ): Promise<{ rows: ContainerDetail[]; fields: T[] } | null> => {
     let selectedFields = [...defaultFields]
     const rows = await confirmBatchRows(actionName, {
       extra: renderUpdateFieldSelector(fields, defaultFields, (values) => {
         selectedFields = values
-      }, hint),
+      }, hint, footer),
       beforeConfirm: () => requireSelectedUpdateFields(selectedFields),
     })
     return rows ? { rows, fields: selectedFields } : null
@@ -3582,10 +3601,14 @@ export default function ContainerDetailPage() {
     }
   }
 
-  const confirmSavePendingDetails = (plan: PendingContainerDetailPageSavePlan) => new Promise<boolean>((resolve) => {
+  // 确认后返回操作人选择的改价开关；取消返回 null。
+  const confirmSavePendingDetails = (plan: PendingContainerDetailPageSavePlan) => new Promise<{ retailPriceSync: WarehouseRetailPriceSyncOptions } | null>((resolve) => {
     const invalidEnglishNameCount = plan.pendingPatches.filter((patch) => (
       Boolean(getPendingContainerDetailEnglishNameError(patch))
     )).length
+    // 只有已有商品的零售价才会回写仓库价并联动分店价；新商品零售价只存货柜明细，不需要两个开关。
+    const existingRetailPriceCount = countPendingExistingProductRetailPrices(plan.pendingPatches, rowsRef.current)
+    let retailPriceSyncChoice: RetailPriceSyncChoice = { ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE }
     Modal.confirm({
       title: t('containers.modals.savePendingDetailsTitle', '确认保存明细'),
       content: (
@@ -3612,6 +3635,13 @@ export default function ContainerDetailPage() {
               <Typography.Text type="secondary">
                 {t('containers.modals.savePendingDetailsNewRetailHint', '新商品零售价只保存到本货柜明细，后续创建商品时继续使用该价格。')}
               </Typography.Text>
+              {existingRetailPriceCount > 0 ? (
+                <UncontrolledRetailPriceSyncOptions
+                  initialValue={retailPriceSyncChoice}
+                  messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}
+                  onChange={(next) => { retailPriceSyncChoice = next }}
+                />
+              ) : null}
             </>
           ) : null}
           {invalidEnglishNameCount > 0 ? (
@@ -3633,12 +3663,12 @@ export default function ContainerDetailPage() {
       onOk: () => {
         if (!isCurrentDetailDraftContext(plan.draftContext)) {
           message.warning(t('containers.messages.draftContextChanged', '用户或货柜已切换，已取消本次保存'))
-          resolve(false)
+          resolve(null)
           return
         }
-        resolve(true)
+        resolve({ retailPriceSync: buildRetailPriceSyncFields(retailPriceSyncChoice, existingRetailPriceCount > 0) })
       },
-      onCancel: () => resolve(false),
+      onCancel: () => resolve(null),
     })
   })
 
@@ -3663,7 +3693,7 @@ export default function ContainerDetailPage() {
       const saveRequest = plan.detailUpdates.length
         ? trackDetailSavePromise(
             plan.saveKeys,
-            batchUpdateDetails(saveContainerGuid, plan.detailUpdates),
+            batchUpdateDetails(saveContainerGuid, plan.detailUpdates, plan.retailPriceSync),
             failedPendingDetailSaveKeysRef.current,
             saveContainerGuid,
             saveDraftIdentity,
@@ -3864,7 +3894,7 @@ export default function ContainerDetailPage() {
     if (!savePlan) return
     const confirmed = await confirmSavePendingDetails(savePlan)
     if (!confirmed) return
-    await executePendingDetailSavePlan(savePlan)
+    await executePendingDetailSavePlan({ ...savePlan, retailPriceSync: confirmed.retailPriceSync })
   }
 
   const startEditingProductName = (row: ContainerDetail) => {
@@ -4502,6 +4532,7 @@ export default function ContainerDetailPage() {
     setBatchModalScopeRows(scopedRows)
     setBatchImportPrice(null)
     setBatchOemPrice(null)
+    setBatchRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE })
     setBatchPricesModalOpen(true)
   }
 
@@ -4522,7 +4553,14 @@ export default function ContainerDetailPage() {
         'apply-prices', scope, prices, t('containers.actions.batchUpdatePrices', '批量修改价格'),
       )
       if (!previewToken) return
-      const result = await applyContainerPricesByScope(containerGuid, scope, prices, previewToken)
+      // 只有填了零售价才带两个开关；只改进口价时不传，后端按默认处理且不会碰分店零售价。
+      const result = await applyContainerPricesByScope(
+        containerGuid,
+        scope,
+        prices,
+        previewToken,
+        buildRetailPriceSyncFields(batchRetailPriceSync, batchOemPrice != null),
+      )
       await reloadCurrentDetailRef.current()
       setBatchPricesModalOpen(false)
       setBatchModalTargetCount(0)
@@ -5453,10 +5491,21 @@ export default function ContainerDetailPage() {
 
   const updateExistingPurchase = async () => {
     if (!ensureNoPendingDetails()) return
+    // 选了「零售价（仓库主表）」才会改零售价，这时才出现「同步分店零售价 / 生成价格任务」两个开关（默认都勾选）；
+    // 它取代了原来单独的「分店零售价」勾选项：同步分店价改由后端统一执行（跳过特殊商品 / 自动定价 / 停用分店）。
+    let retailPriceSyncChoice: RetailPriceSyncChoice = { ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE }
     const confirmed = await confirmBatchRowsWithUpdateFields(
       t('containers.actions.updateExistingPurchase'),
       containerExistingProductUpdateFields,
       defaultContainerExistingProductUpdateFields,
+      undefined,
+      (selectedFields) => (selectedFields.includes('oemPrice') ? (
+        <UncontrolledRetailPriceSyncOptions
+          initialValue={retailPriceSyncChoice}
+          messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}
+          onChange={(next) => { retailPriceSyncChoice = next }}
+        />
+      ) : null),
     )
     if (!confirmed) return
     if (!await drainAutoSavesBeforeAction()) return
@@ -5478,7 +5527,6 @@ export default function ContainerDetailPage() {
         || (shouldUpdate('oemPrice') && hasPositiveOemPrice(row))
         || (shouldUpdate('volume') && row.单件体积 != null)
         || (shouldUpdate('storePurchasePrice') && hasPositiveImportPrice(row))
-        || (shouldUpdate('storeRetailPrice') && hasPositiveOemPrice(row))
         || (shouldUpdate('storeMultiCodePurchasePrice') && hasPositiveImportPrice(row))
         || (shouldUpdate('storeMultiCodeRetailPrice') && hasPositiveOemPrice(row))
       )
@@ -5504,10 +5552,11 @@ export default function ContainerDetailPage() {
         const warehouseResult = await batchUpdateWarehouseProducts(warehouseUpdates, {
           // 货柜页已把分店进货价拆成独立勾选项，避免主表进口价默认联动分店表。
           syncStorePurchasePrice: shouldUpdate('storePurchasePrice'),
-          // 分店零售价在本页由独立的「分店零售价」勾选项经 upsertRetailForActiveStores 单独处理，
-          // 这里显式不让后端联动分店零售价，保持原有行为；generateTasks 取与后端默认一致的 true。后端不传即两项都按 true 处理，所以必须显式传 false。
-          syncStoreRetailPrices: false,
-          generateTasks: true,
+          // 本次带了零售价才传「同步分店零售价 / 生成价格任务」；由操作人在上面的对话框决定，不再写死。
+          ...buildRetailPriceSyncFields(
+            retailPriceSyncChoice,
+            warehouseUpdates.some((item) => item.OEMPrice !== undefined),
+          ),
         })
         const warehouseFailedCount = Number(
           warehouseResult.failedCount
@@ -5527,14 +5576,13 @@ export default function ContainerDetailPage() {
         }
       }
 
-      if (shouldUpdate('storePurchasePrice') || shouldUpdate('storeRetailPrice')) {
+      // 分店零售价不再在这里 upsert：已统一由上面的批量更新按「同步分店零售价」开关处理；这里只写分店进货价。
+      if (shouldUpdate('storePurchasePrice')) {
         const retailUpdates = updates.map((row) => {
           const item: StoreRetailPriceUpsertActiveItem = {
             ProductCode: row.商品编码 || row.商品信息?.商品编码 || '',
           }
-          const oemPrice = getContainerDetailVisibleOemPrice(row)
-          if (shouldUpdate('storePurchasePrice') && hasPositiveImportPrice(row)) item.PurchasePrice = row.进口价格
-          if (shouldUpdate('storeRetailPrice') && hasPositiveOemPrice(row)) item.StoreRetailPriceValue = oemPrice
+          if (hasPositiveImportPrice(row)) item.PurchasePrice = row.进口价格
           return item
         }).filter((item) => Object.keys(item).length > 1)
         if (retailUpdates.length) {
@@ -5591,8 +5639,8 @@ export default function ContainerDetailPage() {
     try {
       const result = await batchUpdateWarehouseProducts(
         updates.map((item): WarehouseProductBatchUpdateItem => ({ ProductCode: item.productCode, ImportPrice: item.importPrice })),
-        // 只改进货价，不涉及零售价；显式固定零售价同步开关，避免依赖后端默认值。
-        { syncStorePurchasePrice: false, syncStoreRetailPrices: false, generateTasks: true },
+        // 只改进货价，不涉及零售价，不需要也不传「同步分店零售价 / 生成价格任务」。
+        { syncStorePurchasePrice: false },
       )
       const failedCount = Number(result.failedCount ?? result.FailedCount ?? result.failed ?? result.Failed ?? 0)
       if (failedCount > 0) {
@@ -7468,6 +7516,14 @@ export default function ContainerDetailPage() {
             style={{ width: '100%' }}
             onChange={setBatchOemPrice}
           />
+          {batchOemPrice != null ? (
+            <RetailPriceSyncOptionsField
+              value={batchRetailPriceSync}
+              onChange={setBatchRetailPriceSync}
+              disabled={batchPricesSaving}
+              messageKeys={CONTAINER_RETAIL_PRICE_SYNC_MESSAGE_KEYS}
+            />
+          ) : null}
         </Space>
       </Modal>
       <Modal

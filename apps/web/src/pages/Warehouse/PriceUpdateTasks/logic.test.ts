@@ -1,13 +1,22 @@
 import type { StorePriceUpdateTask, StorePriceUpdateTaskProductStore } from '../../../services/storePriceUpdateTaskService'
 import {
+  CANCEL_NOTE_MAX_LENGTH,
   buildByStoreCsvRows,
+  buildCancelByIdsPayload,
+  buildCancelByProductPayload,
   buildCsvContent,
   buildPriceUpdateTasksQuery,
   buildStoreProgressSegments,
   buildTasksCsvRows,
   collectAllPages,
+  compareLastCompleted,
+  compareNullableNumber,
+  compareOldestPending,
+  compareStoreCode,
+  countPendingStores,
   createDefaultPriceUpdateTasksFilters,
   createPriceUpdateTasksRequestCoordinator,
+  describeCancelInfo,
   describeLabelStatus,
   describeProductStore,
   formatCsvCell,
@@ -22,9 +31,12 @@ import {
   getProductChangeLines,
   getTaskPriceChange,
   parsePriceUpdateTasksSearch,
+  resolveCancelReasonLabel,
   resolveInitiatorName,
   resolveInitiatorSourceLabel,
+  storeCodeToSelection,
   toPercent,
+  type TableSortOrder,
 } from './logic'
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
@@ -84,15 +96,75 @@ assertDeepEqual(
   { startDate: '2026-02-25', endDate: '2026-03-03' },
   '默认范围应正确跨月',
 )
-const query = buildPriceUpdateTasksQuery({ ...createDefaultPriceUpdateTasksFilters(now), keyword: '  HB001 ', initiatorName: ' bob ', storeCode: '1001', kind: 'LabelOnly' })
+const query = buildPriceUpdateTasksQuery({ ...createDefaultPriceUpdateTasksFilters(now), keyword: '  HB001 ', initiatorName: ' bob ', storeCodes: ['1001', '1003'], kind: 'LabelOnly' })
 assertEqual(query.fromUtc, new Date(2026, 8, 13, 0, 0, 0, 0).toISOString(), 'fromUtc = 起始日本地零点')
 assertEqual(query.toUtc, new Date(2026, 8, 19, 23, 59, 59, 999).toISOString(), 'toUtc = 结束日本地最后一毫秒')
 assertEqual(query.keyword, 'HB001', '关键字应去空白')
 assertEqual(query.initiatorName, 'bob', '发起人应去空白')
-assertEqual(query.storeCode, '1001', '应带分店')
+assertEqual(query.storeCodes, '1001,1003', '多选分店应以逗号拼成 storeCodes')
+assertEqual('storeCode' in query, false, '不再传单店参数 storeCode')
 assertEqual(query.kind, 'LabelOnly', '应带类型')
 const emptyQuery = buildPriceUpdateTasksQuery(createDefaultPriceUpdateTasksFilters(now))
 assertDeepEqual(Object.keys(emptyQuery).sort(), ['fromUtc', 'toUtc'], '空筛选不应传多余参数')
+assertDeepEqual(storeCodeToSelection(' 1001 '), ['1001'], 'URL 单店转为多选初始值并去空白')
+assertDeepEqual(storeCodeToSelection(''), [], 'URL 无分店 = 全部（空数组）')
+
+// ---------- 排序（模拟 antd：降序时把比较结果整体取反） ----------
+function antdSort<T>(rows: T[], compare: (a: T, b: T, order?: TableSortOrder) => number, order: 'ascend' | 'descend'): T[] {
+  return [...rows].sort((a, b) => {
+    const result = compare(a, b, order)
+    return result === 0 ? 0 : order === 'ascend' ? result : -result
+  })
+}
+assertEqual(compareNullableNumber(1, 2) < 0, true, '数值升序')
+assertDeepEqual(
+  antdSort([{ storeCode: '1010' }, { storeCode: '1003' }, { storeCode: '2010' }, { storeCode: '1004' }], compareStoreCode, 'ascend').map((row) => row.storeCode),
+  ['1003', '1004', '1010', '2010'],
+  '分店代码按数字顺序而非字典序',
+)
+const pendingRows = [
+  { id: 'none', oldestPendingAtUtc: null },
+  { id: 'new', oldestPendingAtUtc: '2026-09-18T05:00:00Z' },
+  { id: 'old', oldestPendingAtUtc: '2026-08-20T05:00:00Z' },
+  { id: 'mid', oldestPendingAtUtc: '2026-09-10T05:00:00Z' },
+]
+assertDeepEqual(antdSort(pendingRows, compareOldestPending, 'descend').map((row) => row.id), ['old', 'mid', 'new', 'none'], '最久未处理降序：等待最久在前，无任务排最后')
+assertDeepEqual(antdSort(pendingRows, compareOldestPending, 'ascend').map((row) => row.id), ['new', 'mid', 'old', 'none'], '最久未处理升序：无任务仍排最后')
+const completedRows = [
+  { id: 'never', lastCompletedAtUtc: null },
+  { id: 'older', lastCompletedAtUtc: '2026-09-10T05:00:00Z' },
+  { id: 'latest', lastCompletedAtUtc: '2026-09-18T05:00:00Z' },
+]
+assertDeepEqual(antdSort(completedRows, compareLastCompleted, 'descend').map((row) => row.id), ['latest', 'older', 'never'], '最近处理降序：最新在前，从未处理排最后')
+assertDeepEqual(antdSort(completedRows, compareLastCompleted, 'ascend').map((row) => row.id), ['older', 'latest', 'never'], '最近处理升序：从未处理仍排最后')
+assertEqual(compareOldestPending({ oldestPendingAtUtc: null }, { oldestPendingAtUtc: null }), 0, '两个空值视为相等')
+
+// ---------- 手动撤销 ----------
+assertDeepEqual(buildCancelByIdsPayload([3, 1, 3], '  测试店  '), { taskIds: [3, 1], note: '测试店' }, '按 ID 撤销：去重并去备注空白')
+assertDeepEqual(buildCancelByIdsPayload([1], '   '), { taskIds: [1] }, '空备注不传')
+assertEqual((buildCancelByIdsPayload([1], '备'.repeat(300)) as { note: string }).note.length, CANCEL_NOTE_MAX_LENGTH, '备注按后端上限截断')
+assertDeepEqual(
+  buildCancelByProductPayload(' P001 ', ['1003', '1042'], ''),
+  { productCode: 'P001', storeCodes: '1003,1042' },
+  '按商品撤销：带上当前筛选的分店（逗号拼接），空备注不传',
+)
+assertDeepEqual(buildCancelByProductPayload('P001', [], '备注'), { productCode: 'P001', note: '备注' }, '未选分店 = 不传 storeCodes（该商品全部分店）')
+assertEqual(
+  countPendingStores({ stores: [{ storeCode: '1', state: 'LabelOnly' }, { storeCode: '2', state: 'PriceUpdate' }, { storeCode: '3', state: 'Completed' }, { storeCode: '4', state: 'Skipped' }] }),
+  2,
+  '只统计待换标签与需改价的分店',
+)
+assertDeepEqual(describeCancelInfo({ status: 'Pending', cancelReason: null }, t), [], '非已取消任务没有撤销说明')
+assertDeepEqual(
+  describeCancelInfo({ status: 'Cancelled', cancelReason: 'Reverted', cancelledBy: null, cancelledAtUtc: null, cancelNote: null }, t),
+  ['cancel.info.reason{"reason":"cancel.reason.Reverted"}'],
+  '系统自动取消只显示原因',
+)
+const manualInfo = describeCancelInfo({ status: 'Cancelled', cancelReason: 'ManualCancel', cancelledBy: 'System', cancelledAtUtc: '2026-09-19T01:00:00Z', cancelNote: ' 测试店 ' }, t)
+assertEqual(manualInfo.length, 4, '手动撤销应显示原因、撤销人、时间与备注')
+assertEqual(manualInfo[1], 'cancel.info.by{"name":"initiator.system"}', '撤销人沿用发起人的名称解析')
+assertEqual(manualInfo[3], 'cancel.info.note{"note":"测试店"}', '备注去空白')
+assertEqual(resolveCancelReasonLabel('BrandNew', t), 'BrandNew', '未知取消原因原样显示')
 
 // ---------- 展示 ----------
 assertEqual(formatDiscount(null, t), '--', '折扣 null = 未设置')

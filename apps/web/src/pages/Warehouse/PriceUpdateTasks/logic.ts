@@ -1,5 +1,6 @@
 import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import type {
+  CancelStorePriceUpdateTasksPayload,
   StorePriceUpdateCompletionMode,
   StorePriceUpdateTask,
   StorePriceUpdateTaskProductRow,
@@ -17,7 +18,8 @@ export interface PriceUpdateTasksFilters {
   /** 本地日期 YYYY-MM-DD（含首尾两天）。 */
   startDate: string
   endDate: string
-  storeCode: string
+  /** 多选分店；空数组表示全部分店。 */
+  storeCodes: string[]
   kind: PriceUpdateTaskKindFilter
   initiatorName: string
   keyword: string
@@ -68,7 +70,13 @@ export function getDefaultPriceUpdateTasksRange(now = new Date()) {
 }
 
 export function createDefaultPriceUpdateTasksFilters(now = new Date()): PriceUpdateTasksFilters {
-  return { ...getDefaultPriceUpdateTasksRange(now), storeCode: '', kind: '', initiatorName: '', keyword: '' }
+  return { ...getDefaultPriceUpdateTasksRange(now), storeCodes: [], kind: '', initiatorName: '', keyword: '' }
+}
+
+/** URL 里的单个 storeCode → 分店多选的初始值（空串表示全部）。 */
+export function storeCodeToSelection(storeCode: string): string[] {
+  const code = storeCode.trim()
+  return code ? [code] : []
 }
 
 /** 供仓库商品保存提示、指标卡等链接跳转时通过 URL query 初始化页签与筛选。 */
@@ -92,7 +100,8 @@ export function buildPriceUpdateTasksQuery(filters: PriceUpdateTasksFilters): Re
   return {
     ...(from ? { fromUtc: from.toISOString() } : {}),
     ...(to ? { toUtc: to.toISOString() } : {}),
-    ...(filters.storeCode ? { storeCode: filters.storeCode } : {}),
+    // 多店用英文逗号拼成一个参数，避免依赖 axios 对数组的序列化格式（后端按逗号拆分）。
+    ...(filters.storeCodes.length > 0 ? { storeCodes: filters.storeCodes.join(',') } : {}),
     ...(filters.kind ? { kind: filters.kind } : {}),
     ...(initiatorName ? { initiatorName } : {}),
     ...(keyword ? { keyword } : {}),
@@ -241,6 +250,101 @@ export function getPendingAgeDays(oldestPendingAtUtc: string | null | undefined,
   const date = parseUtc(oldestPendingAtUtc)
   if (!date) return null
   return Math.max(0, Math.floor((now.getTime() - date.getTime()) / DAY_MS))
+}
+
+// ---------- 手动撤销 ----------
+
+/** 与后端 CancelStorePriceUpdateTasksRequestDto.MaxNoteLength 保持一致。 */
+export const CANCEL_NOTE_MAX_LENGTH = 200
+
+const KNOWN_CANCEL_REASONS = new Set(['Reverted', 'NoLongerApplicable', 'ManualCancel'])
+
+/** 按商品撤销时，该商品「还没完成」的分店数（待换标签 + 需改价；已完成与已跳过不算）。 */
+export function countPendingStores(row: Pick<StorePriceUpdateTaskProductRow, 'stores'>): number {
+  return row.stores.filter((store) => store.state === 'LabelOnly' || store.state === 'PriceUpdate').length
+}
+
+function normalizeCancelNote(note: string): { note?: string } {
+  const trimmed = note.trim().slice(0, CANCEL_NOTE_MAX_LENGTH)
+  return trimmed ? { note: trimmed } : {}
+}
+
+/** 任务明细勾选撤销：去重任务 ID，备注去空白并按后端上限截断，空备注不传。 */
+export function buildCancelByIdsPayload(taskIds: number[], note: string): CancelStorePriceUpdateTasksPayload {
+  return { taskIds: [...new Set(taskIds)], ...normalizeCancelNote(note) }
+}
+
+/** 按商品一键撤销：带上当前筛选的分店，保证撤销范围与页面上看到的一致；未选分店 = 该商品全部分店。 */
+export function buildCancelByProductPayload(productCode: string, storeCodes: string[], note: string): CancelStorePriceUpdateTasksPayload {
+  return {
+    productCode: productCode.trim(),
+    ...(storeCodes.length > 0 ? { storeCodes: storeCodes.join(',') } : {}),
+    ...normalizeCancelNote(note),
+  }
+}
+
+/** 取消原因 → 展示名；后端新增原因时原样显示，避免出现空白。 */
+export function resolveCancelReasonLabel(reason: string, t: Translate): string {
+  return KNOWN_CANCEL_REASONS.has(reason) ? t(`${I18N}.cancel.reason.${reason}`) : reason
+}
+
+/** 已取消任务的悬浮说明（原因 / 撤销人 / 时间 / 备注）；非已取消或无信息返回空数组。 */
+export function describeCancelInfo(
+  task: Pick<StorePriceUpdateTask, 'status' | 'cancelReason' | 'cancelledBy' | 'cancelledAtUtc' | 'cancelNote'>,
+  t: Translate,
+): string[] {
+  if (task.status !== 'Cancelled') return []
+  const lines: string[] = []
+  const reason = (task.cancelReason ?? '').trim()
+  if (reason) lines.push(t(`${I18N}.cancel.info.reason`, { reason: resolveCancelReasonLabel(reason, t) }))
+  if (task.cancelledBy) lines.push(t(`${I18N}.cancel.info.by`, { name: resolveInitiatorName(task.cancelledBy, t) }))
+  if (task.cancelledAtUtc) lines.push(t(`${I18N}.cancel.info.at`, { time: formatLocalDateTime(task.cancelledAtUtc) }))
+  if (task.cancelNote?.trim()) lines.push(t(`${I18N}.cancel.info.note`, { note: task.cancelNote.trim() }))
+  return lines
+}
+
+export type TableSortOrder ='ascend' | 'descend' | null | undefined
+
+/**
+ * 数值比较，空值恒排在最后。antd 在降序时会把比较结果整体取反，
+ * 所以空值在降序下要反向返回，取反后才仍然落在末尾。
+ */
+export function compareNullableNumber(a: number | null, b: number | null, sortOrder?: TableSortOrder): number {
+  if (a === null && b === null) return 0
+  if (a === null) return sortOrder === 'descend' ? -1 : 1
+  if (b === null) return sortOrder === 'descend' ? 1 : -1
+  return a - b
+}
+
+/** 分店代码按数字顺序比较（1003 < 1010 < 2010），非数字部分按字典序。 */
+export function compareStoreCode(a: Pick<StorePriceUpdateTaskStoreRow, 'storeCode'>, b: Pick<StorePriceUpdateTaskStoreRow, 'storeCode'>): number {
+  return a.storeCode.localeCompare(b.storeCode, undefined, { numeric: true })
+}
+
+function toTimestamp(value: string | null | undefined): number | null {
+  return parseUtc(value)?.getTime() ?? null
+}
+
+/** 「最久未处理」：等待越久越大，升序即等待最短在前；没有未完成任务的排最后。 */
+export function compareOldestPending(
+  a: Pick<StorePriceUpdateTaskStoreRow, 'oldestPendingAtUtc'>,
+  b: Pick<StorePriceUpdateTaskStoreRow, 'oldestPendingAtUtc'>,
+  sortOrder?: TableSortOrder,
+): number {
+  const waiting = (row: Pick<StorePriceUpdateTaskStoreRow, 'oldestPendingAtUtc'>) => {
+    const ts = toTimestamp(row.oldestPendingAtUtc)
+    return ts === null ? null : -ts
+  }
+  return compareNullableNumber(waiting(a), waiting(b), sortOrder)
+}
+
+/** 「最近处理」：时间越新越大；从未处理的排最后。 */
+export function compareLastCompleted(
+  a: Pick<StorePriceUpdateTaskStoreRow, 'lastCompletedAtUtc'>,
+  b: Pick<StorePriceUpdateTaskStoreRow, 'lastCompletedAtUtc'>,
+  sortOrder?: TableSortOrder,
+): number {
+  return compareNullableNumber(toTimestamp(a.lastCompletedAtUtc), toTimestamp(b.lastCompletedAtUtc), sortOrder)
 }
 
 export function formatPendingAge(days: number | null, t: Translate): string {

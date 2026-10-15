@@ -61,11 +61,25 @@ BEGIN
         [LabelPrintCount] int NOT NULL CONSTRAINT [DF_StorePriceUpdateTask_LabelPrintCount] DEFAULT(0),
         [HqSyncOperationKey] nvarchar(200) NULL,
         [CancelReason] nvarchar(40) NULL,
+        [CancelledBy] nvarchar(100) NULL,
+        [CancelledAtUtc] datetime2 NULL,
+        [CancelNote] nvarchar(200) NULL,
         [CreatedAtUtc] datetime2 NOT NULL CONSTRAINT [DF_StorePriceUpdateTask_CreatedAtUtc] DEFAULT(SYSUTCDATETIME()),
         [UpdatedAtUtc] datetime2 NOT NULL CONSTRAINT [DF_StorePriceUpdateTask_UpdatedAtUtc] DEFAULT(SYSUTCDATETIME()),
         CONSTRAINT [CK_StorePriceUpdateTask_Status] CHECK ([Status] IN (N'Pending', N'Completed', N'Cancelled')),
         CONSTRAINT [CK_StorePriceUpdateTask_Kind] CHECK ([Kind] IN (N'PriceUpdate', N'LabelOnly'))
     );
+END;
+
+-- 手动撤销（Web 监控页）留痕：谁、何时、备注。均为可空新列，旧数据不受影响；已存在则跳过，可重复执行。
+IF OBJECT_ID(N'[dbo].[StorePriceUpdateTask]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'[dbo].[StorePriceUpdateTask]', N'CancelledBy') IS NULL
+        ALTER TABLE [dbo].[StorePriceUpdateTask] ADD [CancelledBy] nvarchar(100) NULL;
+    IF COL_LENGTH(N'[dbo].[StorePriceUpdateTask]', N'CancelledAtUtc') IS NULL
+        ALTER TABLE [dbo].[StorePriceUpdateTask] ADD [CancelledAtUtc] datetime2 NULL;
+    IF COL_LENGTH(N'[dbo].[StorePriceUpdateTask]', N'CancelNote') IS NULL
+        ALTER TABLE [dbo].[StorePriceUpdateTask] ADD [CancelNote] nvarchar(200) NULL;
 END;
 
 -- 同一「分店 + 商品」最多一条 Pending：由过滤唯一索引在数据库层兜底。
@@ -173,6 +187,9 @@ CREATE TABLE IF NOT EXISTS "StorePriceUpdateTask" (
     "LabelPrintCount" INTEGER NOT NULL DEFAULT 0,
     "HqSyncOperationKey" TEXT NULL,
     "CancelReason" TEXT NULL,
+    "CancelledBy" TEXT NULL,
+    "CancelledAtUtc" TEXT NULL,
+    "CancelNote" TEXT NULL,
     "CreatedAtUtc" TEXT NOT NULL,
     "UpdatedAtUtc" TEXT NOT NULL
 );

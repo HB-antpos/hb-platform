@@ -201,6 +201,12 @@
     },
     "validationLine": "{{field}}：{{message}}"
   },
+  "retailSync": {
+    "storesLabel": "同步分店零售价",
+    "storesHelper": "开启后直接把各分店零售价改成新价并通知换标签；关闭则不动分店价，由分店确认改价",
+    "tasksLabel": "生成价格任务",
+    "tasksHelper": "开启后给分店生成价格更新任务；关闭则不通知分店（同步分店价时会立即同步总部 HQ）"
+  },
   "bulk": {
     "title": "批量操作",
     "button": "批量操作",
