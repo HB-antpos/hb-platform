@@ -25,6 +25,8 @@ export interface StoreUserListItem {
   updatedAt?: string;
   /** 员工还没把店长给的初始/重置密码改成自己的密码。 */
   mustChangePassword?: boolean;
+  /** 是否允许登录 Web / App；后端缺省（旧后端）视为允许。 */
+  loginEnabled?: boolean;
 }
 
 export interface PasswordSetupEmailResult {
@@ -64,6 +66,8 @@ export interface StoreUserMutationInput {
   password?: string;
   passwordFormat?: "raw" | "clientSha256";
   status: number;
+  /** 是否允许登录 Web / App；不传表示不修改（更新）/ 按允许处理（创建）。 */
+  loginEnabled?: boolean;
 }
 
 export interface StoreUserUpdatePayload extends StoreUserMutationInput {
@@ -103,6 +107,8 @@ export interface StoreUserFormValues {
   email: string;
   phone: string;
   status: boolean;
+  /** 是否允许登录 Web / App。 */
+  loginEnabled?: boolean;
 }
 
 export interface StaffCashierBarcodeResponse {

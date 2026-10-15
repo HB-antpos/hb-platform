@@ -54,6 +54,7 @@ const EMPTY_FORM: StoreUserFormValues = {
   email: "",
   phone: "",
   status: true,
+  loginEnabled: true,
 };
 
 function getInitials(user: StoreUserListItem) {
@@ -96,6 +97,8 @@ export default function UsersScreen() {
   const [editingUserGuid, setEditingUserGuid] = useState<string | null>(null);
   const [editingStoreCode, setEditingStoreCode] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<StoreUserFormValues>(EMPTY_FORM);
+  // 打开编辑时该员工原本是否允许登录；用于判断这次保存是不是「从不能登录改为能登录」。
+  const [editingLoginWasEnabled, setEditingLoginWasEnabled] = useState(true);
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
   const [passwordUser, setPasswordUser] = useState<StoreUserListItem | null>(null);
   const [moreUser, setMoreUser] = useState<StoreUserListItem | null>(null);
@@ -224,7 +227,9 @@ export default function UsersScreen() {
       email: getDisplayableEmail(detailQuery.data.email),
       phone: detailQuery.data.phone ?? "",
       status: detailQuery.data.status === 1,
+      loginEnabled: detailQuery.data.loginEnabled !== false,
     });
+    setEditingLoginWasEnabled(detailQuery.data.loginEnabled !== false);
   }, [detailQuery.data, detailQuery.isSuccess, dialogVisible]);
 
   const resetDialogState = useCallback(() => {
@@ -267,7 +272,9 @@ export default function UsersScreen() {
         email: getDisplayableEmail(user.email),
         phone: user.phone ?? "",
         status: user.status === 1,
+        loginEnabled: user.loginEnabled !== false,
       });
+      setEditingLoginWasEnabled(user.loginEnabled !== false);
       setDialogVisible(true);
     },
     [canModifyUserStore, resolveUserStoreCode, t]
@@ -372,20 +379,30 @@ export default function UsersScreen() {
       email: formValues.email.trim() || undefined,
       phone: formValues.phone.trim() || undefined,
       status: formValues.status ? 1 : 0,
+      // 登录开关只在与打开时不同才提交，避免保存资料时无意改动登录权限。
+      ...(formValues.loginEnabled !== editingLoginWasEnabled ? { loginEnabled: formValues.loginEnabled } : {}),
       storeCode: targetStoreCode,
       roleNames: [STORE_STAFF_ROLE],
     };
 
     try {
-      await updateMutation.mutateAsync({ ...payload, userGuid: editingUserGuid });
+      const updated = await updateMutation.mutateAsync({ ...payload, userGuid: editingUserGuid });
       setSnackbarMessage(t("messages.userUpdated"));
       resetDialogState();
+      // 从「不能登录」改为「能登录」：账号可能还没有可用密码，直接打开设置密码邮件弹窗，
+      // 员工收到验证码后自己设密码（邮箱缺失时弹窗会让店长补填）。无重置密码权限则不弹。
+      if (!editingLoginWasEnabled && payload.loginEnabled === true && canResetUserPassword(updated)) {
+        setPasswordUser(updated);
+        setResetPasswordVisible(true);
+      }
     } catch (error) {
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
       setSnackbarMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "messages.saveFailed" }));
     }
   }, [
     canEditUsers,
+    canResetUserPassword,
+    editingLoginWasEnabled,
     editingStoreCode,
     editingUserGuid,
     formValues,
@@ -629,6 +646,9 @@ export default function UsersScreen() {
                   <Text variant="bodySmall" style={styles.secondaryText}>
                     @{item.username} · {employmentType}
                   </Text>
+                  {item.loginEnabled === false ? (
+                    <Text variant="labelSmall" style={styles.secondaryText}>{t("statuses.loginDisabled")}</Text>
+                  ) : null}
                   {!managedStoreCode && item.storeCode ? (
                     <Text variant="labelSmall" style={styles.secondaryText} numberOfLines={1}>
                       {item.storeName || item.storeCode} · {item.storeCode}
@@ -878,6 +898,18 @@ export default function UsersScreen() {
                   value={formValues.status}
                   onValueChange={(value) => setFormValues((current) => ({ ...current, status: value }))}
                   disabled={isBusy}
+                />
+              </View>
+              <View style={styles.switchRow}>
+                <View style={styles.userTitleWrap}>
+                  <Text variant="bodyLarge">{t("fields.loginEnabled")}</Text>
+                  <Text variant="bodySmall" style={styles.secondaryText}>{t("fields.loginEnabledHelper")}</Text>
+                </View>
+                <Switch
+                  value={formValues.loginEnabled !== false}
+                  onValueChange={(value) => setFormValues((current) => ({ ...current, loginEnabled: value }))}
+                  disabled={isBusy}
+                  accessibilityLabel={t("fields.loginEnabled")}
                 />
               </View>
               <Text variant="bodySmall" style={styles.secondaryText}>

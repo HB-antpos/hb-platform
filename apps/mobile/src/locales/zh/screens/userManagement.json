@@ -275,7 +275,8 @@
   "statuses": {
     "active": "启用中",
     "disabled": "已停用",
-    "pendingFirstLogin": "待首次登录"
+    "pendingFirstLogin": "待首次登录",
+    "loginDisabled": "不能登录"
   },
   "fields": {
     "username": "账号",
@@ -283,6 +284,8 @@
     "email": "邮箱",
     "phone": "电话",
     "enabled": "启用状态",
+    "loginEnabled": "允许登录 Web / App",
+    "loginEnabledHelper": "关闭后该员工无法登录 Web 和 App，已登录的设备也会立即失效；考勤、排班等不受影响",
     "initialPassword": "初始密码",
     "newPassword": "新密码",
     "fixedRoleHint": "此页面创建的账号固定为店员，绑定到所选管理分店，员工类型默认为临时。",
@@ -540,6 +543,13 @@
     "inviteFailedFallback": "邮件发送失败",
     "resendInvite": "重新发送初始密码",
     "inviteResent": "初始密码已重新发送",
-    "nextStepEmail": "查收邮件，用初始密码登录 App，并设置自己的密码"
+    "nextStepEmail": "查收邮件，用初始密码登录 App，并设置自己的密码",
+    "loginEnabled": "允许登录 Web / App",
+    "loginEnabledOnHelper": "开启后会给员工邮箱发初始密码，员工用它登录 Web 和 App",
+    "loginEnabledOffHelper": "默认关闭：员工账号照常用于考勤、排班等，但不能登录 Web 和 App，也不会发密码邮件。之后可在编辑里开启",
+    "emailHelperNoLogin": "仅作联系与找回账号用；账号暂不能登录",
+    "usernameFromEmailHelperNoLogin": "默认与邮箱相同；开启登录后员工用它登录（3–50 个字符）",
+    "successDescriptionNoLogin": "已为{{name}}创建账号。该员工暂不能登录 Web 和 App，没有发送任何密码邮件。",
+    "loginDisabledNotice": "该员工暂不能登录。需要时在员工列表编辑该员工，打开「允许登录 Web / App」，系统会提示发送初始密码。"
   }
 }
