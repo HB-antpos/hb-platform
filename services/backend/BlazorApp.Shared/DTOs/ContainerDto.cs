@@ -902,7 +902,7 @@ namespace BlazorApp.Shared.DTOs
         public string? ItemNumberFilter { get; set; }
 
         /// <summary>
-        /// 柜内商品关键字：货号、商品名称、英文名称或条码任一包含即命中该货柜
+        /// 搜索关键字：货柜编号，或柜内商品的货号、商品名称、英文名称、条码任一包含即命中该货柜
         /// </summary>
         public string? ProductKeyword { get; set; }
 
