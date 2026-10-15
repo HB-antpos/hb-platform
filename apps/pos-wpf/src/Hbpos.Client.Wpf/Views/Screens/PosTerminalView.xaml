@@ -585,6 +585,147 @@
                                   ContentStringFormat="{TemplateBinding ContentStringFormat}" />
             </Border>
         </ControlTemplate>
+        <!-- 候选商品卡片：手工搜索下拉与「待选条」共用。Button 的 Command 绑定取祖先 ItemsControl 的 DataContext.SelectMatchCommand，
+             两处的 DataContext 各自提供同名命令（PosTerminalViewModel / PendingScanChoicePanelViewModel）。 -->
+        <DataTemplate x:Key="MatchCandidateCardTemplate">
+            <!-- 码冲突时多个候选的码相同，靠商品图与货号区分；图片走与购物车行相同的异步缩略图缓存，不阻塞扫码。 -->
+            <Button x:Name="MatchCandidateCard"
+                    Width="264"
+                    Height="80"
+                    Margin="0,0,10,10"
+                    Padding="0"
+                    Background="Transparent"
+                     BorderThickness="0"
+                     Style="{StaticResource PosSearchSegmentButtonStyle}"
+                     Command="{Binding DataContext.SelectMatchCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                     CommandParameter="{Binding}">
+                <Border Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosDividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="56"
+                                Height="56"
+                                Background="{DynamicResource PosPrimarySoftBrush}"
+                                CornerRadius="6"
+                                Margin="0,0,10,0"
+                                VerticalAlignment="Center"
+                                SnapsToDevicePixels="True"
+                                UseLayoutRounding="True"
+                                ClipToBounds="True">
+                            <Grid>
+                                <Rectangle RadiusX="5"
+                                           RadiusY="5"
+                                           Margin="2"
+                                           SnapsToDevicePixels="True"
+                                           RenderOptions.BitmapScalingMode="HighQuality"
+                                           Panel.ZIndex="1">
+                                    <Rectangle.Fill>
+                                        <ImageBrush converters:ProductThumbnailImageSourceConverter.AsyncSourceText="{Binding ProductImage}"
+                                                    converters:ProductThumbnailImageSourceConverter.AsyncDecodePixelWidth="80"
+                                                    Stretch="Uniform" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                                <materialDesign:PackIcon Kind="Shopping"
+                                                         Width="22"
+                                                         Height="22"
+                                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"
+                                                         Panel.ZIndex="0" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding DisplayName}" FontSize="12" FontWeight="Black" TextTrimming="CharacterEllipsis" />
+                            <DockPanel Margin="0,3,0,0" LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Left" Text="{loc:Loc ItemNumber}" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock DockPanel.Dock="Left" Text=":" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <Grid Margin="4,0,0,0">
+                                    <TextBlock Text="{Binding ItemNumber}"
+                                               Visibility="{Binding ItemNumber, Converter={StaticResource StringHasValueToVis}}"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="-"
+                                               Visibility="{Binding ItemNumber, Converter={StaticResource StringIsEmptyToVis}}"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                </Grid>
+                            </DockPanel>
+                            <DockPanel Margin="0,3,0,0" LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="{Binding RetailPrice, StringFormat={}{0:C2}}"
+                                           FontSize="15"
+                                           FontWeight="Black"
+                                           Foreground="{DynamicResource PosAccentBrush}"
+                                           VerticalAlignment="Bottom"
+                                           Margin="8,0,0,0" />
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="{Binding LookupCode}"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding PriceSourceLabel}"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="6,0,0,0"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Button>
+        </DataTemplate>
+
+        <!-- 待选条上的小按钮：圆角描边，放弃按钮第一次点击后变红实心（「再点一次放弃」）。 -->
+        <Style x:Key="PendingChoiceActionButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSearchSegmentButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="11,6" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PendingChoiceAbandonButtonStyle" TargetType="Button" BasedOn="{StaticResource PendingChoiceActionButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAbandonArmed}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PosDangerBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBrush}" />
+                    <Setter Property="Foreground" Value="White" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -602,6 +743,7 @@
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0" Padding="17,16,12,8" Background="{DynamicResource PosSurfaceAltBrush}">
+                <StackPanel>
                 <Grid Height="48">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -683,6 +825,131 @@
                         </Button>
                     </Border>
                 </Grid>
+
+                <!-- 待选条：扫码枪扫到「一码多商品」后记入队列，先进先出；不是 Popup（点别处不会关、不会盖到授权弹窗之上），
+                     占布局位置所以不遮挡购物车，继续扫的商品照常出现在下面。不选不消失，只能「选定」或「放弃」。 -->
+                <StackPanel DataContext="{Binding PendingChoices}"
+                            Margin="0,8,0,0"
+                            AutomationProperties.AutomationId="PendingScanChoicePanel"
+                            Visibility="{Binding HasPending, Converter={StaticResource BoolToVis}}">
+                    <!-- 展开形态：队首的候选卡片 -->
+                    <Border Visibility="{Binding IsExpandedVisible, Converter={StaticResource BoolToVis}}"
+                            Background="{DynamicResource PosWarningSoftBrush}"
+                            BorderBrush="{DynamicResource PosWarningBrush}"
+                            BorderThickness="1.5"
+                            CornerRadius="10"
+                            Padding="10,8,10,6">
+                        <StackPanel>
+                            <Grid MinHeight="30">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Background="{DynamicResource PosWarningBrush}" CornerRadius="999" Padding="10,3" Margin="0,0,10,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding BadgeText}" Foreground="White" FontSize="12" FontWeight="Black" />
+                                    </Border>
+                                    <TextBlock Text="{Binding TitleText}" FontSize="14" FontWeight="Black" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" />
+                                    <TextBlock Text="{Binding ScannedAtText}" Margin="10,0,0,0" FontSize="11.5" Foreground="{DynamicResource PosWarningTextBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
+                                    <TextBlock Text="{Binding QueueLabelText}" FontSize="11" Foreground="{DynamicResource PosWarningTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ItemsControl ItemsSource="{Binding QueueDots}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border x:Name="QueueDot" Width="22" Height="22" Margin="0,0,5,0" CornerRadius="11"
+                                                        Background="{DynamicResource PosSurfaceBrush}"
+                                                        BorderBrush="{DynamicResource PosWarningBrush}"
+                                                        BorderThickness="1.5">
+                                                    <TextBlock Text="{Binding Label}" FontSize="11" FontWeight="Black" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource PosWarningTextBrush}" />
+                                                </Border>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                        <Setter TargetName="QueueDot" Property="Background" Value="{DynamicResource PosWarningBrush}" />
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Command="{Binding ToggleCollapsedCommand}"
+                                            Content="{Binding CollapseText}"
+                                            Style="{StaticResource PendingChoiceActionButtonStyle}"
+                                            Margin="0,0,8,0"
+                                            AutomationProperties.AutomationId="PendingChoiceCollapseButton" />
+                                    <Button x:Name="PendingChoiceAbandonButton"
+                                            Command="{Binding AbandonCommand}"
+                                            Content="{Binding AbandonText}"
+                                            Style="{StaticResource PendingChoiceAbandonButtonStyle}"
+                                            AutomationProperties.AutomationId="PendingChoiceAbandonButton" />
+                                </StackPanel>
+                            </Grid>
+                            <ScrollViewer Margin="0,6,0,0"
+                                          VerticalScrollBarVisibility="Disabled"
+                                          HorizontalScrollBarVisibility="Auto"
+                                          CanContentScroll="False"
+                                          PanningMode="HorizontalOnly"
+                                          PanningDeceleration="0.0008"
+                                          PanningRatio="1.0">
+                                <ItemsControl ItemsSource="{Binding CurrentCandidates}"
+                                              ItemTemplate="{StaticResource MatchCandidateCardTemplate}"
+                                              AutomationProperties.AutomationId="PendingChoiceCandidates">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <DockPanel LastChildFill="False" Margin="0,-4,0,0">
+                                <Button DockPanel.Dock="Right"
+                                        Command="{Binding AbandonAllCommand}"
+                                        Content="{Binding AbandonAllText}"
+                                        Visibility="{Binding CanAbandonAll, Converter={StaticResource BoolToVis}}"
+                                        Style="{StaticResource PendingChoiceActionButtonStyle}"
+                                        AutomationProperties.AutomationId="PendingChoiceAbandonAllButton" />
+                                <TextBlock Text="{Binding SameBarcodeText}"
+                                           Visibility="{Binding ShowSameBarcodeHint, Converter={StaticResource BoolToVis}}"
+                                           Margin="0,0,12,0"
+                                           FontSize="11.5"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PosDangerTextBrush}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding HintText}"
+                                           FontSize="11.5"
+                                           Foreground="{DynamicResource PosWarningTextBrush}"
+                                           VerticalAlignment="Center" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 收起形态：只剩一条细条，没处理完不会消失，点一下展开 -->
+                    <Button Visibility="{Binding IsCollapsedBarVisible, Converter={StaticResource BoolToVis}}"
+                            Command="{Binding ToggleCollapsedCommand}"
+                            Style="{StaticResource PosSearchSegmentButtonStyle}"
+                            HorizontalContentAlignment="Stretch"
+                            AutomationProperties.AutomationId="PendingChoiceCollapsedBar">
+                        <Border Background="{DynamicResource PosWarningSoftBrush}"
+                                BorderBrush="{DynamicResource PosWarningBrush}"
+                                BorderThickness="1.5"
+                                CornerRadius="10"
+                                Height="40"
+                                Padding="12,0">
+                            <DockPanel VerticalAlignment="Center">
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding ExpandText}" FontSize="12" Foreground="{DynamicResource PosWarningTextBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding CollapsedBarText}" FontSize="13" FontWeight="Black" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                        </Border>
+                    </Button>
+                </StackPanel>
+                </StackPanel>
             </Border>
 
             <Popup x:Name="MatchesPopup"
@@ -713,109 +980,13 @@
                                   PanningMode="VerticalOnly"
                                   PanningDeceleration="0.0008"
                                   PanningRatio="1.0">
-                        <ItemsControl ItemsSource="{Binding Matches}">
+                        <ItemsControl ItemsSource="{Binding Matches}"
+                                      ItemTemplate="{StaticResource MatchCandidateCardTemplate}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <WrapPanel />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <!-- 码冲突时多个候选的码相同，靠商品图与货号区分；图片走与购物车行相同的异步缩略图缓存，不阻塞扫码。 -->
-                                    <Button x:Name="MatchCandidateCard"
-                                            Width="264"
-                                            Height="80"
-                                            Margin="0,0,10,10"
-                                            Padding="0"
-                                            Background="Transparent"
-                                             BorderThickness="0"
-                                             Style="{StaticResource PosSearchSegmentButtonStyle}"
-                                             Command="{Binding DataContext.SelectMatchCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                             CommandParameter="{Binding}">
-                                        <Border Background="{DynamicResource PosSurfaceBrush}"
-                                                BorderBrush="{DynamicResource PosDividerBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="10"
-                                                Padding="10">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <Border Width="56"
-                                                        Height="56"
-                                                        Background="{DynamicResource PosPrimarySoftBrush}"
-                                                        CornerRadius="6"
-                                                        Margin="0,0,10,0"
-                                                        VerticalAlignment="Center"
-                                                        SnapsToDevicePixels="True"
-                                                        UseLayoutRounding="True"
-                                                        ClipToBounds="True">
-                                                    <Grid>
-                                                        <Rectangle RadiusX="5"
-                                                                   RadiusY="5"
-                                                                   Margin="2"
-                                                                   SnapsToDevicePixels="True"
-                                                                   RenderOptions.BitmapScalingMode="HighQuality"
-                                                                   Panel.ZIndex="1">
-                                                            <Rectangle.Fill>
-                                                                <ImageBrush converters:ProductThumbnailImageSourceConverter.AsyncSourceText="{Binding ProductImage}"
-                                                                            converters:ProductThumbnailImageSourceConverter.AsyncDecodePixelWidth="80"
-                                                                            Stretch="Uniform" />
-                                                            </Rectangle.Fill>
-                                                        </Rectangle>
-                                                        <materialDesign:PackIcon Kind="Shopping"
-                                                                                 Width="22"
-                                                                                 Height="22"
-                                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                                 HorizontalAlignment="Center"
-                                                                                 VerticalAlignment="Center"
-                                                                                 Panel.ZIndex="0" />
-                                                    </Grid>
-                                                </Border>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding DisplayName}" FontSize="12" FontWeight="Black" TextTrimming="CharacterEllipsis" />
-                                                    <DockPanel Margin="0,3,0,0" LastChildFill="True">
-                                                        <TextBlock DockPanel.Dock="Left" Text="{loc:Loc ItemNumber}" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                                        <TextBlock DockPanel.Dock="Left" Text=":" FontSize="10" Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                                        <Grid Margin="4,0,0,0">
-                                                            <TextBlock Text="{Binding ItemNumber}"
-                                                                       Visibility="{Binding ItemNumber, Converter={StaticResource StringHasValueToVis}}"
-                                                                       FontSize="10"
-                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                                       TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="-"
-                                                                       Visibility="{Binding ItemNumber, Converter={StaticResource StringIsEmptyToVis}}"
-                                                                       FontSize="10"
-                                                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                                        </Grid>
-                                                    </DockPanel>
-                                                    <DockPanel Margin="0,3,0,0" LastChildFill="True">
-                                                        <TextBlock DockPanel.Dock="Right"
-                                                                   Text="{Binding RetailPrice, StringFormat={}{0:C2}}"
-                                                                   FontSize="15"
-                                                                   FontWeight="Black"
-                                                                   Foreground="{DynamicResource PosAccentBrush}"
-                                                                   VerticalAlignment="Bottom"
-                                                                   Margin="8,0,0,0" />
-                                                        <TextBlock DockPanel.Dock="Left"
-                                                                   Text="{Binding LookupCode}"
-                                                                   FontSize="10"
-                                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                                   VerticalAlignment="Center" />
-                                                        <TextBlock Text="{Binding PriceSourceLabel}"
-                                                                   FontSize="9"
-                                                                   Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                   VerticalAlignment="Center"
-                                                                   Margin="6,0,0,0"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                    </DockPanel>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
                 </Border>
@@ -1718,9 +1889,18 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="{loc:Loc common.status}" FontSize="11" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Padding="6,2" Background="{DynamicResource PosSuccessSoftBrush}" BorderBrush="{DynamicResource PosSuccessBorderBrush}" BorderThickness="1" CornerRadius="3">
-                            <TextBlock Text="{Binding PendingSyncText}" Foreground="{DynamicResource PosSuccessTextBrush}" FontSize="9" FontWeight="SemiBold" />
-                        </Border>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <!-- 有待选商品没处理时常驻一枚橙色徽章，状态栏文字会被下一次扫码刷新，徽章不会。 -->
+                            <Border Margin="0,0,4,0" Padding="6,2"
+                                    Visibility="{Binding PendingChoices.HasPending, Converter={StaticResource BoolToVis}}"
+                                    Background="{DynamicResource PosWarningSoftBrush}" BorderBrush="{DynamicResource PosWarningBrush}" BorderThickness="1" CornerRadius="3"
+                                    AutomationProperties.AutomationId="PendingChoiceStatusBadge">
+                                <TextBlock Text="{Binding PendingChoices.StatusHintText}" Foreground="{DynamicResource PosWarningTextBrush}" FontSize="9" FontWeight="Black" />
+                            </Border>
+                            <Border Padding="6,2" Background="{DynamicResource PosSuccessSoftBrush}" BorderBrush="{DynamicResource PosSuccessBorderBrush}" BorderThickness="1" CornerRadius="3">
+                                <TextBlock Text="{Binding PendingSyncText}" Foreground="{DynamicResource PosSuccessTextBrush}" FontSize="9" FontWeight="SemiBold" />
+                            </Border>
+                        </StackPanel>
                     </Grid>
                     <TextBlock x:Name="PosTerminalStatusMessage"
                                Grid.Row="1"
@@ -1985,6 +2165,46 @@
                         </StackPanel>
                     </Grid>
                 </Grid>
+            </Border>
+        </Grid>
+
+        <!-- 有待选时点付款 / 挂单 / 取单 / 退出，或点「全部放弃」：必须先处理，或明确放弃。遮罩吞掉点击，扫码照常进入（待选数量实时更新）。 -->
+        <Grid Grid.ColumnSpan="3"
+              DataContext="{Binding PendingChoices}"
+              Visibility="{Binding IsPromptOpen, Converter={StaticResource BoolToVis}}"
+              Background="#66000000"
+              Panel.ZIndex="100"
+              AutomationProperties.AutomationId="PendingScanChoicePrompt">
+            <Border Width="460"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="22,20">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="28" ShadowDepth="6" Opacity="0.3" />
+                </Border.Effect>
+                <StackPanel>
+                    <TextBlock Text="{Binding PromptTitleText}" FontSize="18" FontWeight="Black" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding PromptBodyText}" Margin="0,10,0,0" FontSize="14" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                        <Button Command="{Binding ConfirmPromptCommand}"
+                                Content="{Binding PromptConfirmText}"
+                                Style="{StaticResource PosDangerButtonStyle}"
+                                MinHeight="44"
+                                Padding="16,0"
+                                Margin="0,0,10,0"
+                                AutomationProperties.AutomationId="PendingChoicePromptConfirm" />
+                        <Button Command="{Binding CancelPromptCommand}"
+                                Content="{Binding PromptBackText}"
+                                Style="{StaticResource PosPrimaryButtonStyle}"
+                                MinHeight="44"
+                                Padding="16,0"
+                                AutomationProperties.AutomationId="PendingChoicePromptBack" />
+                    </StackPanel>
+                </StackPanel>
             </Border>
         </Grid>
     </Grid>

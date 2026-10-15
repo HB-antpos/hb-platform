@@ -41,10 +41,15 @@ public sealed class PosTerminalWorkflowServiceTests
 
         var result = service.ProcessScan(Session, "930211", preferExactLookup: true, source: "raw");
 
-        Assert.Equal("pos.status.multipleMatches", result.StatusKey);
+        // 扫码枪的多商品命中记入待选队列：不加购、不弹手工搜索下拉，搜索框由界面按 ScanConflictHandled 清空。
+        Assert.Equal("pos.status.pendingChoiceQueued", result.StatusKey);
+        Assert.Equal(new object[] { 2, 1 }, result.StatusArgs);
+        Assert.True(result.ScanConflictHandled);
         Assert.False(result.ClearScanText);
-        Assert.True(result.MatchesPopupOpen);
-        Assert.Equal(2, Assert.IsAssignableFrom<IReadOnlyList<SellableItemDto>>(result.Matches).Count);
+        Assert.False(result.MatchesPopupOpen);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<SellableItemDto>>(result.Matches));
+        var pending = Assert.Single(service.PendingChoices!.Snapshot());
+        Assert.Equal(["SKU-211", "SKU-212"], pending.Candidates.Select(item => item.ProductCode).Order());
         Assert.Empty(cart.Lines);
     }
 
@@ -78,14 +83,14 @@ public sealed class PosTerminalWorkflowServiceTests
 
         var firstScan = await service.ProcessScanAsync(Session, conflictCode, preferExactLookup: true, source: "raw");
 
-        Assert.Equal("pos.status.multipleMatches", firstScan.StatusKey);
-        Assert.True(firstScan.MatchesPopupOpen);
+        Assert.Equal("pos.status.pendingChoiceQueued", firstScan.StatusKey);
+        var firstChoice = Assert.Single(service.PendingChoices!.Snapshot());
         Assert.Equal(
             ["P-FLOWER", "P-FLY"],
-            Assert.IsAssignableFrom<IReadOnlyList<SellableItemDto>>(firstScan.Matches).Select(item => item.ProductCode).Order());
+            firstChoice.Candidates.Select(item => item.ProductCode).Order());
         Assert.Empty(cart.Lines);
 
-        service.AddSelectedItem(Session, flower, clearScanText: true, closeMatchesPopup: true, operation: "manual-select-match");
+        service.ResolvePendingChoice(Session, firstChoice.Id, flower);
         await WaitUntilAsync(() => refreshApplied.Task.IsCompleted);
 
         // 回查结果是另一个商品，不能改写收银员选中的 flower，也不能把 flower 从候选里冲掉。
@@ -96,11 +101,11 @@ public sealed class PosTerminalWorkflowServiceTests
 
         var secondScan = await service.ProcessScanAsync(Session, conflictCode, preferExactLookup: true, source: "raw");
 
-        Assert.Equal("pos.status.multipleMatches", secondScan.StatusKey);
-        Assert.True(secondScan.MatchesPopupOpen);
+        Assert.Equal("pos.status.pendingChoiceQueued", secondScan.StatusKey);
+        var secondChoice = Assert.Single(service.PendingChoices!.Snapshot());
         Assert.Equal(
             ["P-FLOWER", "P-FLY"],
-            Assert.IsAssignableFrom<IReadOnlyList<SellableItemDto>>(secondScan.Matches).Select(item => item.ProductCode).Order());
+            secondChoice.Candidates.Select(item => item.ProductCode).Order());
         Assert.Single(cart.Lines);
     }
 
@@ -118,8 +123,9 @@ public sealed class PosTerminalWorkflowServiceTests
         foreach (var chosen in new[] { fly, flower, fly })
         {
             var scan = await service.ProcessScanAsync(Session, conflictCode, preferExactLookup: true, source: "raw");
-            Assert.True(scan.MatchesPopupOpen);
-            service.AddSelectedItem(Session, chosen, clearScanText: true, closeMatchesPopup: true, operation: "manual-select-match");
+            Assert.Equal("pos.status.pendingChoiceQueued", scan.StatusKey);
+            var choice = Assert.Single(service.PendingChoices!.Snapshot());
+            service.ResolvePendingChoice(Session, choice.Id, chosen);
         }
 
         // 依次选 Fly、flower、Fly：Fly 两次并成一行，flower 单独一行，合计 8.99×2 + 2.99。

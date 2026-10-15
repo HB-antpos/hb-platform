@@ -3963,4 +3963,100 @@
   <data name="settings.restartTest.button" xml:space="preserve">
     <value>重启电脑</value>
   </data>
+  <data name="pos.status.pendingChoiceQueued" xml:space="preserve">
+    <value>该条码有 {0} 个商品，已记入待选（共 {1} 项待处理）。</value>
+  </data>
+  <data name="pos.status.pendingChoiceResolved" xml:space="preserve">
+    <value>已加入 {0}（该行数量 {1}）· 还有 {2} 个待选</value>
+  </data>
+  <data name="pos.status.pendingChoiceResolvedLast" xml:space="preserve">
+    <value>已加入 {0}（该行数量 {1}）</value>
+  </data>
+  <data name="pos.status.pendingChoiceGone" xml:space="preserve">
+    <value>该待选已不存在，请查看购物车。</value>
+  </data>
+  <data name="pos.status.pendingChoiceFull" xml:space="preserve">
+    <value>待选队列已满（{0}），请先处理待选商品；这次扫码没有被记录。</value>
+  </data>
+  <data name="pos.status.pendingChoiceAbandoned" xml:space="preserve">
+    <value>已放弃一个待选（还剩 {0} 个）。</value>
+  </data>
+  <data name="pos.status.pendingChoiceAbandonedAll" xml:space="preserve">
+    <value>已放弃 {0} 个待选。</value>
+  </data>
+  <data name="pendingChoice.badge" xml:space="preserve">
+    <value>待选 {0} / {1}</value>
+  </data>
+  <data name="pendingChoice.title" xml:space="preserve">
+    <value>条码 …{0} 有 {1} 个商品，请选择</value>
+  </data>
+  <data name="pendingChoice.scannedAt" xml:space="preserve">
+    <value>{0} 扫码</value>
+  </data>
+  <data name="pendingChoice.sameBarcode" xml:space="preserve">
+    <value>与上一项是同一条码（可能重复扫码）</value>
+  </data>
+  <data name="pendingChoice.hint" xml:space="preserve">
+    <value>继续扫码不受影响：其他商品照常加入购物车</value>
+  </data>
+  <data name="pendingChoice.queue" xml:space="preserve">
+    <value>队列</value>
+  </data>
+  <data name="pendingChoice.collapse" xml:space="preserve">
+    <value>收起 ▴</value>
+  </data>
+  <data name="pendingChoice.expandAction" xml:space="preserve">
+    <value>点击展开处理 ▾</value>
+  </data>
+  <data name="pendingChoice.collapsedBar" xml:space="preserve">
+    <value>待选 {0} 项 · 最早 {1} · 条码 …{2}</value>
+  </data>
+  <data name="pendingChoice.abandon" xml:space="preserve">
+    <value>放弃此项</value>
+  </data>
+  <data name="pendingChoice.abandonConfirm" xml:space="preserve">
+    <value>再点一次放弃</value>
+  </data>
+  <data name="pendingChoice.abandonAll" xml:space="preserve">
+    <value>全部放弃（{0}）…</value>
+  </data>
+  <data name="pendingChoice.statusHint" xml:space="preserve">
+    <value>待选 {0}</value>
+  </data>
+  <data name="pendingChoice.prompt.title" xml:space="preserve">
+    <value>还有 {0} 个待选商品未处理</value>
+  </data>
+  <data name="pendingChoice.prompt.back" xml:space="preserve">
+    <value>返回处理</value>
+  </data>
+  <data name="pendingChoice.prompt.body.pay" xml:space="preserve">
+    <value>它们还没有加入购物车，现在付款不会包含这些商品。请先选择具体商品，或确认放弃。</value>
+  </data>
+  <data name="pendingChoice.prompt.body.hold" xml:space="preserve">
+    <value>它们还没有加入购物车，现在挂单不会包含这些商品。请先选择具体商品，或确认放弃。</value>
+  </data>
+  <data name="pendingChoice.prompt.body.recall" xml:space="preserve">
+    <value>取单会换成另一单，这些待选商品不会带过去。请先选择具体商品，或确认放弃。</value>
+  </data>
+  <data name="pendingChoice.prompt.body.exit" xml:space="preserve">
+    <value>退出后这些待选商品会被丢弃。请先选择具体商品，或确认放弃。</value>
+  </data>
+  <data name="pendingChoice.prompt.body.all" xml:space="preserve">
+    <value>放弃后这些商品不会加入购物车。</value>
+  </data>
+  <data name="pendingChoice.prompt.confirm.pay" xml:space="preserve">
+    <value>放弃 {0} 项并付款</value>
+  </data>
+  <data name="pendingChoice.prompt.confirm.hold" xml:space="preserve">
+    <value>放弃 {0} 项并挂单</value>
+  </data>
+  <data name="pendingChoice.prompt.confirm.recall" xml:space="preserve">
+    <value>放弃 {0} 项并取单</value>
+  </data>
+  <data name="pendingChoice.prompt.confirm.exit" xml:space="preserve">
+    <value>放弃 {0} 项并退出</value>
+  </data>
+  <data name="pendingChoice.prompt.confirm.all" xml:space="preserve">
+    <value>放弃 {0} 项</value>
+  </data>
 </root>
