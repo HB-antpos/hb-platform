@@ -285,6 +285,11 @@
   align-items: center;
   gap: 12px;
 }
+/* 上方分页条：留白放到下侧，与下方分页条（留白在上侧）镜像对称 */
+.paginationTop {
+  padding-top: 0;
+  padding-bottom: 14px;
+}
 /* 每页条数选择器：「每页 200 条」/「200 per page」最长，固定最小宽度避免切换时抖动 */
 .pageSizeSelect {
   min-width: 120px;
