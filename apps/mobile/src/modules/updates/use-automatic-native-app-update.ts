@@ -94,8 +94,11 @@ function getNativeAppInstallerTrustedOrigins(
 export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
   const [phase, setPhaseState] = useState<NativeAppUpdatePhase | "failed" | null>(null);
   const [progress, setProgress] = useState<NativeAppDownloadProgress | null>(null);
+  // 同步记录最近一次阶段：catch 里要据此判断失败发生在「还没确认有新版」还是「已在下载/校验」。
+  const phaseRef = useRef<NativeAppUpdatePhase | "failed" | null>(null);
   // 进度只属于当前这次下载：任何阶段切换都先清空，等新下载的进度事件再填。
   const setPhase = (next: NativeAppUpdatePhase | "failed" | null) => {
+    phaseRef.current = next;
     setProgress(null);
     setPhaseState(next);
   };
@@ -392,7 +395,13 @@ export function useAutomaticNativeAppUpdate(options: { enabled: boolean }) {
         promptedBuildIdRef.current = result.build.easBuildId;
       }
     } catch (error) {
-      setPhase("failed");
+      // 关键逻辑：只有确认有新安装包（强制更新，或已进入下载/校验）后失败才提示「更新暂未完成」。
+      // 还在检查阶段就失败（多为门店网络抖动、请求没连上服务器）时，设备多半已是最新版，
+      // 弹这条横幅会误导门店以为安装失败；静默清除，下次启动/回前台/定时补查会自动重试。
+      const updateKnownPending = requiredRef.current
+        || phaseRef.current === "downloading"
+        || phaseRef.current === "verifying";
+      setPhase(updateKnownPending ? "failed" : null);
       console.warn("[updates] automatic APK update check failed", error);
     } finally {
       inFlightRef.current = false;

@@ -257,26 +257,7 @@ export default function RootLayout() {
                   onInstall={nativeAppUpdate.installRequired}
                   onRetry={nativeAppUpdate.retry}
                 >
-                <MobileOtaUpdateBoundary
-                  enabled={mobileOtaUpdate.enabled}
-                  initialized={mobileOtaUpdate.initialized}
-                  checking={mobileOtaUpdate.checking}
-                  downloading={mobileOtaUpdate.downloading}
-                  applying={mobileOtaUpdate.applying}
-                  downloaded={mobileOtaUpdate.downloaded}
-                  decision={mobileOtaUpdate.decision}
-                  lastError={mobileOtaUpdate.lastError}
-                  onManualCheck={mobileOtaUpdate.checkManually}
-                  onDownload={() => {
-                    void mobileOtaUpdate.downloadRequired();
-                  }}
-                  onRestart={() => {
-                    void mobileOtaUpdate.restartRequired();
-                  }}
-                  onRetry={() => {
-                    void mobileOtaUpdate.recheck();
-                  }}
-                >
+                <MobileOtaUpdateBoundary onManualCheck={mobileOtaUpdate.checkManually}>
                   <View style={styles.appContent}>
                     <NativeAppUpdateStatus
                       phase={nativeAppUpdate.phase}

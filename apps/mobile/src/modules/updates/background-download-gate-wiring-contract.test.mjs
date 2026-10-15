@@ -14,11 +14,11 @@ const [otaHookSource, nativeHookSource, layoutSource, installerTypesSource, modu
   ),
 ]);
 
-test("只有可选 OTA 受登录后空闲闸门约束，强制 OTA 与手动检查立即下载", () => {
+test("OTA 自动下载（含强制 OTA）一律受登录后空闲闸门约束，仅手动检查立即下载", () => {
   const gateCheck = otaHookSource.match(
-    /if \(\s*decision\.state === "optional"\s*&& !manualCheckRef\.current\s*&& !backgroundDownloadGate\.isOpen\(\)\s*\) \{\s*deferredByIdleGateRef\.current = true;\s*return;\s*\}/,
+    /if \(\s*!manualCheckRef\.current\s*&& !backgroundDownloadGate\.isOpen\(\)\s*\) \{\s*deferredByIdleGateRef\.current = true;\s*return;\s*\}/,
   );
-  assert.ok(gateCheck, "闸门判定必须同时限定 optional 与非手动检查");
+  assert.ok(gateCheck, "闸门判定必须限定非手动检查，且不再按 optional/required 区分");
   assert.ok(
     otaHookSource.indexOf(gateCheck[0]) < otaHookSource.indexOf("await downloadDecision(decision, isCurrent);"),
     "闸门判定必须在自动下载之前",

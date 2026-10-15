@@ -11,7 +11,6 @@ import { backgroundDownloadGate } from "./background-download-gate";
 import { useForegroundUpdateCheckInterval } from "./foreground-update-interval";
 import {
   checkMobileOtaUpdate,
-  readCachedMobileOtaRequiredDecision,
   tryClaimMobileOtaOptionalPrompt,
   type MobileOtaManualCheckResult,
   type MobileOtaUpdateContext,
@@ -87,8 +86,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     promise: Promise<void>;
   } | null>(null);
   const runCheckRef = useRef<() => Promise<void>>(async () => undefined);
-  const downloadRequiredRef = useRef<() => Promise<void>>(async () => undefined);
-  const restartRequiredRef = useRef<() => Promise<void>>(async () => undefined);
 
   optionsRef.current = options;
   enabledRef.current = effectiveEnabled;
@@ -121,7 +118,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     const port = portRef.current;
     if (!enabledRef.current || !context || !port || !port.isReady(decision)) return;
     patchSnapshot({ applying: true, lastError: null });
-    let reloadAttempted = false;
     try {
       if (!await passNativeBarrier()) {
         throw new Error("native update barrier changed");
@@ -139,7 +135,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
       const lease = appUpdateMutualExclusion.tryStartOperation("ota");
       if (!lease) throw new Error("another app update operation is active");
       try {
-        reloadAttempted = true;
         await port.reload();
       } finally {
         lease.finish();
@@ -148,13 +143,8 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
       console.warn("[updates] apply controlled Mobile OTA failed", error);
       // reload 失败后保留当前可选目标的去重身份。释放 prompt 锁会同步通知
       // 订阅者；清空 ref 会让同一个已下载目标在失败后立即再次弹窗。
+      // 重启失败同样静默：不弹任何失败提示，已下载的更新保留，下次重启/回前台再试。
       appUpdateMutualExclusion.releasePrompt("ota");
-      if (reloadAttempted && decision.state === "optional") {
-        Alert.alert(
-          i18n.t("settings:dialogs.mobileOtaRestartFailedTitle"),
-          i18n.t("settings:dialogs.mobileOtaRestartFailedMessage"),
-        );
-      }
       const downloadedStillReady = port.isReady(decision);
       patchSnapshot({
         applying: false,
@@ -166,7 +156,9 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     }
   }
 
-  function promptOptionalRestart(decision: MobileOtaUpdateDecision) {
+  // 关键逻辑：OTA 一律后台静默下载，完整下载并校验通过后才提醒一次重启；
+  // required 与 optional 共用同一个提醒（可选择「稍后」），不再占屏拦截，失败/断网也不提示。
+  function promptRestart(decision: MobileOtaUpdateDecision) {
     const identity = decisionTargetIdentity(decision);
     if (!tryClaimMobileOtaOptionalPrompt(
       optionalPromptTargetRef,
@@ -221,7 +213,7 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
         return;
       }
       patchSnapshot({ downloading: false, downloaded: true, lastError: null });
-      if (decision.state === "optional") promptOptionalRestart(decision);
+      promptRestart(decision);
     } finally {
       lease.finish();
     }
@@ -257,9 +249,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
         });
         if (!isCurrent()) return;
         const decision = outcome.decision;
-        appUpdateMutualExclusion.setOtaRequiredGate(
-          decision?.state === "required",
-        );
         commitSnapshot(Object.freeze({
           ...snapshotRef.current,
           enabled: true,
@@ -272,13 +261,12 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
         if (outcome.storageError) {
           console.warn("[updates] persist Mobile OTA required state failed", outcome.storageError);
         }
-        // 先发布 required/optional 判定，再放行原生 lane；required 会继续阻止 APK optional。
+        // 先发布判定再放行原生 lane。
         appUpdateMutualExclusion.setOtaInitializationPending(false);
         if (decision && decision.state !== "none" && !portRef.current?.isReady(decision)) {
-          // 可选 OTA 等登录完成并空闲后再下载，不和开机、登录抢带宽；强制 OTA 与手动检查照常立即下载。
+          // OTA 等登录完成并空闲后再静默下载，不和开机、登录抢带宽；仅手动检查立即下载。
           if (
-            decision.state === "optional"
-            && !manualCheckRef.current
+            !manualCheckRef.current
             && !backgroundDownloadGate.isOpen()
           ) {
             deferredByIdleGateRef.current = true;
@@ -295,9 +283,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
           checking: false,
           lastError: errorMessage(error),
         });
-        appUpdateMutualExclusion.setOtaRequiredGate(
-          snapshotRef.current.decision?.state === "required",
-        );
         appUpdateMutualExclusion.setOtaInitializationPending(false);
       }
     })().finally(() => {
@@ -307,21 +292,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     });
     inFlightRef.current = { generation, controller, promise };
     return promise;
-  };
-
-  downloadRequiredRef.current = async () => {
-    const decision = snapshotRef.current.decision;
-    const generation = generationRef.current;
-    if (!decision || decision.state !== "required") return;
-    await downloadDecision(decision, () => (
-      enabledRef.current && generationRef.current === generation
-    ));
-  };
-
-  restartRequiredRef.current = async () => {
-    const decision = snapshotRef.current.decision;
-    if (!decision || decision.state !== "required") return;
-    await applyDownloadedDecision(decision);
   };
 
   useEffect(() => {
@@ -368,20 +338,6 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
             reloadAsync: () => Updates.reloadAsync(),
           },
         });
-        const cached = await readCachedMobileOtaRequiredDecision(
-          AppAsyncStorage,
-          context,
-        );
-        if (!enabledRef.current || generationRef.current !== generation) return;
-        if (cached) {
-          appUpdateMutualExclusion.setOtaRequiredGate(true);
-          commitSnapshot(Object.freeze({
-            ...snapshotRef.current,
-            enabled: true,
-            initialized: true,
-            decision: cached,
-          }));
-        }
         await runCheckRef.current();
       } catch (error) {
         if (!enabledRef.current || generationRef.current !== generation) return;
@@ -407,8 +363,8 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     const unsubscribe = appUpdateMutualExclusion.subscribe(() => {
       if (!enabledRef.current) return;
       const decision = snapshotRef.current.decision;
-      if (decision?.state === "optional" && snapshotRef.current.downloaded) {
-        promptOptionalRestart(decision);
+      if (decision && decision.state !== "none" && snapshotRef.current.downloaded) {
+        promptRestart(decision);
       } else if (
         !inFlightRef.current
         && operationRetryGateRef.current.consumeRetry()
@@ -469,14 +425,11 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     if (!current.decision || current.decision.state === "none") {
       return Object.freeze({ status: "not-available" });
     }
-    if (current.decision.state === "required") {
-      return Object.freeze({ status: "required" });
-    }
     if (!current.downloaded) {
       return Object.freeze({ status: "failed" });
     }
 
-    promptOptionalRestart(current.decision);
+    promptRestart(current.decision);
     return Object.freeze({ status: "update-ready" });
   }
 
@@ -486,7 +439,5 @@ export function useMobileOtaUpdate(options: UseMobileOtaUpdateOptions) {
     enabled: effectiveEnabled,
     recheck: () => runCheckRef.current(),
     checkManually,
-    downloadRequired: () => downloadRequiredRef.current(),
-    restartRequired: () => restartRequiredRef.current(),
   };
 }
