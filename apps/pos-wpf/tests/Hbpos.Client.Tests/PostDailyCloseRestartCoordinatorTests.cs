@@ -265,6 +265,85 @@ public sealed class PostDailyCloseRestartCoordinatorTests
         Assert.Equal(0, harness.Restart.Calls);
     }
 
+    // ---------- 设置页「重启电脑」测试入口 ----------
+
+    [Fact]
+    public async Task Test_run_ignores_switch_uptime_and_daily_limit_and_skips_the_prompt()
+    {
+        // 开关关、开机才 1 小时、今天已提示过：测试入口都不受影响。
+        var harness = new Harness { UptimeSeconds = 3600 };
+        await harness.Store.SetPromptEnabledAsync(false);
+        await harness.Store.MarkPromptedAsync(DateOnly.FromDateTime(BusinessDate));
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Initiated, outcome);
+        Assert.Equal(0, harness.Ui.PromptShown);          // 不再弹「建议重启」
+        Assert.Equal(1, harness.Ui.CountdownShown);       // 仍有可取消倒计时
+        Assert.Equal(1, harness.Restart.Calls);
+        Assert.Equal(1, harness.Exit.Calls);
+        var audit = Assert.Single(harness.Audit.Events);
+        Assert.Equal("INITIATED", audit.ReasonCode);
+        Assert.Contains("test=true", audit.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Test_run_does_not_consume_the_business_day_prompt_quota()
+    {
+        var harness = new Harness();
+        harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
+
+        await harness.RunTestWithClockAsync();
+
+        Assert.Null(await harness.Store.GetLastPromptBusinessDateAsync());
+    }
+
+    [Fact]
+    public async Task Test_run_still_blocks_on_hard_issues_without_go_to_pos_option()
+    {
+        var harness = new Harness();
+        harness.Checker.Report = Report(Hard(RestartSafetyIssueCode.CartNotEmpty, 2));
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Blocked, outcome);
+        Assert.Equal(1, harness.Ui.BlockedShown);
+        Assert.False(harness.Ui.LastBlockedCanGoToPos);   // 设置页里不提供「回到收银台」
+        Assert.Equal(0, harness.Restart.Calls);
+        var audit = Assert.Single(harness.Audit.Events);
+        Assert.Equal("BLOCKED_CART", audit.ReasonCode);
+        Assert.Contains("test=true", audit.SafeMessage);
+    }
+
+    [Fact]
+    public async Task Test_run_cancel_is_audited_as_test()
+    {
+        var harness = new Harness();
+        harness.Ui.CountdownAction = RestartCountdownAction.Cancel;
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Cancelled, outcome);
+        var audit = Assert.Single(harness.Audit.Events);
+        Assert.Equal("COUNTDOWN_CANCELLED", audit.ReasonCode);
+        Assert.Contains("test=true", audit.SafeMessage);
+        Assert.Equal(0, harness.Restart.Calls);
+    }
+
+    [Fact]
+    public async Task Test_run_command_failure_shows_failure_and_keeps_running()
+    {
+        var harness = new Harness();
+        harness.Restart.Result = new SystemRestartResult(SystemRestartStatus.Failed, 5, "denied");
+
+        var outcome = await harness.RunTestWithClockAsync();
+
+        Assert.Equal(RestartFlowOutcome.Failed, outcome);
+        Assert.Single(harness.Ui.Failures);
+        Assert.Equal(0, harness.Exit.Calls);
+        Assert.Contains("test=true", Assert.Single(harness.Audit.Events).SafeMessage);
+    }
+
     // ---------- 工具 ----------
 
     private static RestartSafetyIssue Hard(RestartSafetyIssueCode code, int count = 0) =>
@@ -294,6 +373,13 @@ public sealed class PostDailyCloseRestartCoordinatorTests
 
         public Task<RestartFlowOutcome> RunAsync(DateTime? businessDate = null) => CreateCoordinator()
             .RunAsync(Session(), businessDate ?? BusinessDate);
+
+        public async Task<RestartFlowOutcome> RunTestWithClockAsync()
+        {
+            var task = CreateCoordinator().RunTestAsync(Session());
+            await SystemRestartFoundationTests.AdvanceUntilCompletedAsync(task, _time);
+            return await task;
+        }
 
         public async Task<RestartFlowOutcome> RunWithClockAsync()
         {
@@ -432,6 +518,8 @@ public sealed class PostDailyCloseRestartCoordinatorTests
 
         public int BlockedShown { get; private set; }
 
+        public bool LastBlockedCanGoToPos { get; private set; } = true;
+
         public int CountdownShown { get; private set; }
 
         public int CountdownTotal { get; private set; }
@@ -456,6 +544,7 @@ public sealed class PostDailyCloseRestartCoordinatorTests
             CancellationToken cancellationToken)
         {
             BlockedShown++;
+            LastBlockedCanGoToPos = canGoToPos;
             return Task.FromResult(
                 BlockedChoices.Count > 0 ? BlockedChoices.Dequeue() : RestartBlockedChoice.Dismiss);
         }

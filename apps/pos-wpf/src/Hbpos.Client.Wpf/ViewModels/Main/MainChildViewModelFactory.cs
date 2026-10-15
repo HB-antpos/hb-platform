@@ -480,7 +480,8 @@ internal sealed class MainChildViewModelFactory
             operationAuditLogger: _operationAuditLogger,
             receiptProfileSyncService: _receiptProfileSyncService,
             mobileAppDownloadService: _mobileAppDownloadService,
-            systemRestartSettingsStore: SystemRestartSettingsStore);
+            systemRestartSettingsStore: SystemRestartSettingsStore,
+            restartCoordinatorProvider: RestartCoordinatorProvider);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()

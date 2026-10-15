@@ -1,4 +1,6 @@
+using BlazorApp.Shared.Constants;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Services;
 
 namespace Hbpos.Client.Wpf.ViewModels;
@@ -7,6 +9,7 @@ namespace Hbpos.Client.Wpf.ViewModels;
 public sealed partial class SettingsViewModel
 {
     private readonly ISystemRestartSettingsStore? _systemRestartSettingsStore;
+    private readonly Func<IPostDailyCloseRestartCoordinator?>? _restartCoordinatorProvider;
     private bool _isLoadingRestartPrompt;
 
     [ObservableProperty]
@@ -14,6 +17,37 @@ public sealed partial class SettingsViewModel
 
     /// <summary>没有存储（例如测试里不注入）时整张卡片隐藏。</summary>
     public bool IsRestartPromptSettingVisible => _systemRestartSettingsStore is not null;
+
+    /// <summary>「重启电脑」测试按钮：没有协调器（例如测试里不注入）时隐藏。</summary>
+    public bool IsRestartComputerTestVisible => _restartCoordinatorProvider is not null;
+
+    /// <summary>
+    /// 设置页「重启电脑」测试：走与日结后提示相同的安全检查与可取消倒计时，通过后真的重启本机。
+    /// 需要设备管理权限（没有权限时由授权流程要求主管扫码），避免收银员随手重启。
+    /// </summary>
+    public IAsyncRelayCommand RestartComputerCommand { get; }
+
+    private bool CanRestartComputer() => !IsBusy && _restartCoordinatorProvider is not null;
+
+    private async Task RestartComputerAsync(CancellationToken cancellationToken)
+    {
+        var coordinator = _restartCoordinatorProvider?.Invoke();
+        if (coordinator is null)
+        {
+            return;
+        }
+
+        using var permissionGrant = await AuthorizeAsync(
+            Permissions.PosTerminal.Settings.DeviceRegistration, "restart-computer");
+        if (permissionGrant is null)
+        {
+            return;
+        }
+
+        using var authorizationActivation = permissionGrant.Activate();
+        // 流程自己用浮层展示进度与结果；成功时应用随后退出，这里不需要再设状态文案。
+        await coordinator.RunTestAsync(Session, cancellationToken);
+    }
 
     private async Task LoadRestartPromptAsync()
     {

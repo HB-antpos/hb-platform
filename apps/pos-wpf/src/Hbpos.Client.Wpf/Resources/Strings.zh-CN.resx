@@ -3951,4 +3951,13 @@
   <data name="settings.restartPrompt.toggle.help" xml:space="preserve">
     <value>只有收银员确认且所有安全检查通过才会重启，仅保存在本机。</value>
   </data>
+  <data name="settings.restartTest.title" xml:space="preserve">
+    <value>重启电脑（测试）</value>
+  </data>
+  <data name="settings.restartTest.help" xml:space="preserve">
+    <value>走一遍与日结后提醒相同的流程：先做安全检查，再 30 秒可取消倒计时，通过后真的重启这台电脑。</value>
+  </data>
+  <data name="settings.restartTest.button" xml:space="preserve">
+    <value>重启电脑</value>
+  </data>
 </root>

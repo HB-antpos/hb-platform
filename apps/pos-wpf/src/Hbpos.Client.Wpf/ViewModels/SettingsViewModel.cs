@@ -327,10 +327,13 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         IOperationAuditLogger? operationAuditLogger = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
         IMobileAppDownloadService? mobileAppDownloadService = null,
-        ISystemRestartSettingsStore? systemRestartSettingsStore = null)
+        ISystemRestartSettingsStore? systemRestartSettingsStore = null,
+        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null)
     {
         _setupService = setupService;
         _systemRestartSettingsStore = systemRestartSettingsStore;
+        _restartCoordinatorProvider = restartCoordinatorProvider;
+        RestartComputerCommand = new AsyncRelayCommand(RestartComputerAsync, CanRestartComputer);
         _receiptProfileSyncService = receiptProfileSyncService;
         _operationAuditLogger = operationAuditLogger;
         _paymentMethodSettingsService = paymentMethodSettingsService;
@@ -3120,6 +3123,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         TestReceiptPrinterCommand.NotifyCanExecuteChanged();
         DownloadCatalogCommand.NotifyCanExecuteChanged();
         ResetCatalogCommand.NotifyCanExecuteChanged();
+        RestartComputerCommand.NotifyCanExecuteChanged();
         ResetTestSalesDataCommand.NotifyCanExecuteChanged();
         ReregisterDeviceCommand.NotifyCanExecuteChanged();
         CheckForAppUpdateCommand.NotifyCanExecuteChanged();

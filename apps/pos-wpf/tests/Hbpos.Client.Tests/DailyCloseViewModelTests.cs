@@ -1524,6 +1524,11 @@ public sealed class DailyCloseViewModelTests
                 ? Task.FromException<RestartFlowOutcome>(Exception)
                 : Task.FromResult(Outcome);
         }
+
+        public Task<RestartFlowOutcome> RunTestAsync(
+            PosSessionState session,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RestartFlowOutcome.NotDue);
     }
 
     private sealed class FakeDailyCloseService : IDailyCloseService

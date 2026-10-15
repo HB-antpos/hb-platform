@@ -86,6 +86,14 @@ public interface IPostDailyCloseRestartCoordinator
         PosSessionState session,
         DateTime businessDate,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 设置页「重启电脑」测试入口：跳过开关、开机时长与每营业日一次的限制，也不再弹「建议重启」提示，
+    /// 直接走「安全检查 → 倒计时 → 冲刷上传 → 重启」；安全检查、可取消倒计时、日志与审计与正式流程完全一致（审计带 test=true）。
+    /// </summary>
+    Task<RestartFlowOutcome> RunTestAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class PostDailyCloseRestartCoordinator(
@@ -172,7 +180,7 @@ public sealed class PostDailyCloseRestartCoordinator(
             }
 
             ConsoleLog.WriteInformation(LogCategory, "confirmed", log);
-            return await ConfirmedFlowAsync(session, uptime, correlation, log, cancellationToken);
+            return await ConfirmedFlowAsync(session, uptime, correlation, log, isTest: false, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -188,11 +196,38 @@ public sealed class PostDailyCloseRestartCoordinator(
         }
     }
 
+    public async Task<RestartFlowOutcome> RunTestAsync(
+        PosSessionState session,
+        CancellationToken cancellationToken = default)
+    {
+        var correlation = OperationAuditEvents.CreateCorrelation();
+        var log = new ApplicationLogContext(TraceId: correlation.TraceId);
+        try
+        {
+            var uptimeSeconds = resourceSampler.Capture().SystemUptimeSeconds ?? 0;
+            var uptime = TimeSpan.FromSeconds(uptimeSeconds);
+            ConsoleLog.WriteInformation(LogCategory, $"test-started uptimeSeconds={uptimeSeconds}", log);
+            return await ConfirmedFlowAsync(session, uptime, correlation, log, isTest: true, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            HideQuietly();
+            return RestartFlowOutcome.Cancelled;
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteError(LogCategory, $"restart test failed error={ex.GetType().Name} message={ex.Message}", log, ex);
+            HideQuietly();
+            return RestartFlowOutcome.Failed;
+        }
+    }
+
     private async Task<RestartFlowOutcome> ConfirmedFlowAsync(
         PosSessionState session,
         TimeSpan uptime,
         (string CorrelationId, string TraceId) correlation,
         ApplicationLogContext log,
+        bool isTest,
         CancellationToken cancellationToken)
     {
         while (true)
@@ -202,8 +237,9 @@ public sealed class PostDailyCloseRestartCoordinator(
             if (!report.IsSafe)
             {
                 LogBlocked("blocked", report, log);
-                RecordAudit(session, "Skipped", report.HardIssues[0].ReasonCode, Describe(uptime, report), correlation);
-                var blocked = await ui.ShowBlockedAsync(report, canGoToPos: true, cancellationToken);
+                RecordAudit(session, "Skipped", report.HardIssues[0].ReasonCode, Describe(uptime, report, isTest), correlation);
+                // 设置页测试时不提供「回到收银台」（当前就不在收银流程里）。
+                var blocked = await ui.ShowBlockedAsync(report, canGoToPos: !isTest, cancellationToken);
                 if (blocked == RestartBlockedChoice.Recheck)
                 {
                     continue;
@@ -220,7 +256,7 @@ public sealed class PostDailyCloseRestartCoordinator(
             {
                 ui.Hide();
                 ConsoleLog.WriteInformation(LogCategory, "countdown-cancelled", log);
-                RecordAudit(session, "Skipped", "COUNTDOWN_CANCELLED", Describe(uptime, null), correlation);
+                RecordAudit(session, "Skipped", "COUNTDOWN_CANCELLED", Describe(uptime, null, isTest), correlation);
                 return RestartFlowOutcome.Cancelled;
             }
 
@@ -233,7 +269,7 @@ public sealed class PostDailyCloseRestartCoordinator(
             break;
         }
 
-        return await ExecuteRestartAsync(session, uptime, correlation, log, cancellationToken);
+        return await ExecuteRestartAsync(session, uptime, correlation, log, isTest, cancellationToken);
     }
 
     private enum CountdownEnd
@@ -283,6 +319,7 @@ public sealed class PostDailyCloseRestartCoordinator(
         TimeSpan uptime,
         (string CorrelationId, string TraceId) correlation,
         ApplicationLogContext log,
+        bool isTest,
         CancellationToken cancellationToken)
     {
         ui.ShowWorking();
@@ -323,7 +360,7 @@ public sealed class PostDailyCloseRestartCoordinator(
                 session,
                 "Succeeded",
                 flush.Remaining > 0 ? "UPLOAD_PENDING_PROCEEDED" : "INITIATED",
-                $"uptimeDays={FormatDays(uptime)};thresholdDays={options.UptimeThresholdDays};exitCode={result.ExitCode};uploadRemaining={flush.Remaining}",
+                $"uptimeDays={FormatDays(uptime)};thresholdDays={options.UptimeThresholdDays};exitCode={result.ExitCode};uploadRemaining={flush.Remaining}{TestSuffix(isTest)}",
                 correlation);
 
             // 界面保持在「正在重启」状态；Exit() 走正常关闭路径（取消终端、登出审计、停后台服务、刷日志）。
@@ -340,7 +377,7 @@ public sealed class PostDailyCloseRestartCoordinator(
             session,
             "Failed",
             "COMMAND_FAILED",
-            $"uptimeDays={FormatDays(uptime)};exitCode={result.ExitCode};ref={reference}",
+            $"uptimeDays={FormatDays(uptime)};exitCode={result.ExitCode};ref={reference}{TestSuffix(isTest)}",
             correlation);
         await ui.ShowFailureAsync(
             new RestartFailureInfo(result.ExitCode, result.Message, reference, uptime),
@@ -381,7 +418,7 @@ public sealed class PostDailyCloseRestartCoordinator(
         ConsoleLog.WriteInformation(LogCategory, $"{stage} issues={issues}", log);
     }
 
-    private string Describe(TimeSpan uptime, RestartSafetyReport? report)
+    private string Describe(TimeSpan uptime, RestartSafetyReport? report, bool isTest = false)
     {
         var message = $"uptimeDays={FormatDays(uptime)};thresholdDays={options.UptimeThresholdDays}";
         if (report is not null)
@@ -389,8 +426,11 @@ public sealed class PostDailyCloseRestartCoordinator(
             message += ";issues=" + string.Join('|', report.HardIssues.Select(issue => issue.Code));
         }
 
-        return message;
+        return message + TestSuffix(isTest);
     }
+
+    // 设置页测试触发的流程在审计里带 test=true，便于和日结后的正式提示区分。
+    private static string TestSuffix(bool isTest) => isTest ? ";test=true" : string.Empty;
 
     private static string FormatDays(TimeSpan uptime) =>
         uptime.TotalDays.ToString("0.0", CultureInfo.InvariantCulture);

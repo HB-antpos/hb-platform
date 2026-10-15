@@ -791,6 +791,7 @@
                                 Style="{StaticResource SettingsActionCardStyle}"
                                 Margin="0,16,0,0"
                                 Visibility="{Binding IsRestartPromptSettingVisible, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
                             <Grid MinHeight="72">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
@@ -819,6 +820,40 @@
                                               AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
                                               MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
                             </Grid>
+                            <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6"
+                                    Visibility="{Binding IsRestartComputerTestVisible, Converter={StaticResource BoolToVis}}" />
+                            <Grid MinHeight="72"
+                                  Visibility="{Binding IsRestartComputerTestVisible, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="12"
+                                        Background="{DynamicResource PosSurfaceAltBrush}"
+                                        Margin="0,0,14,0" VerticalAlignment="Center">
+                                    <materialDesign:PackIcon Kind="PowerCycle" Width="22" Height="22"
+                                                             Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{loc:Loc settings.restartTest.title}" FontSize="16" FontWeight="SemiBold" />
+                                    <TextBlock Text="{loc:Loc settings.restartTest.help}"
+                                               TextWrapping="Wrap" FontSize="12.5"
+                                               Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="2" x:Name="RestartComputerTestButton"
+                                        Command="{Binding RestartComputerCommand}"
+                                        Style="{StaticResource PosSecondaryButtonStyle}"
+                                        MinHeight="48" MinWidth="168" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Restart" Width="18" Height="18" Margin="0,0,8,0"
+                                                                 Foreground="{DynamicResource PosDangerTextBrush}" />
+                                        <TextBlock Text="{loc:Loc settings.restartTest.button}" Foreground="{DynamicResource PosDangerTextBrush}" FontWeight="Bold" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            </StackPanel>
                         </Border>
                     </Grid>
 
