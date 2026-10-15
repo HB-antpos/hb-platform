@@ -33,11 +33,11 @@
     <sys:Double x:Key="PosHomeSummaryCountFontSize">19</sys:Double>
     <sys:Double x:Key="PosHomeSummaryValueFontSize">21</sys:Double>
     <sys:Double x:Key="PosHomeSummaryTotalLabelFontSize">19</sys:Double>
-    <sys:Double x:Key="PosHomeSummaryDueFontSize">36</sys:Double>
-    <GridLength x:Key="PosHomePayRowHeight">72</GridLength>
-    <sys:Double x:Key="PosHomePayHeight">72</sys:Double>
-    <sys:Double x:Key="PosHomePayFontSize">30</sys:Double>
-    <sys:Double x:Key="PosHomePayIconSize">34</sys:Double>
+    <sys:Double x:Key="PosHomeSummaryDueFontSize">32</sys:Double>
+    <GridLength x:Key="PosHomePayRowHeight">64</GridLength>
+    <sys:Double x:Key="PosHomePayHeight">64</sys:Double>
+    <sys:Double x:Key="PosHomePayFontSize">26</sys:Double>
+    <sys:Double x:Key="PosHomePayIconSize">30</sys:Double>
 
     <!-- 搜索行 -->
     <sys:Double x:Key="PosHomeSearchRowHeight">56</sys:Double>
@@ -46,31 +46,32 @@
     <sys:Double x:Key="PosHomeSearchAddFontSize">19</sys:Double>
 
     <!-- 键盘列：输入缓冲 / 数字键 / No Barcode -->
-    <sys:Double x:Key="PosHomeInputBoxHeight">92</sys:Double>
-    <sys:Double x:Key="PosHomeInputFontSize">44</sys:Double>
+    <sys:Double x:Key="PosHomeInputBoxHeight">78</sys:Double>
+    <sys:Double x:Key="PosHomeInputFontSize">36</sys:Double>
     <sys:Double x:Key="PosHomeInputLabelFontSize">13</sys:Double>
-    <sys:Double x:Key="PosHomeBackspaceSize">56</sys:Double>
-    <sys:Double x:Key="PosHomeKeyFontSize">38</sys:Double>
-    <sys:Double x:Key="PosHomeKeySmallFontSize">22</sys:Double>
-    <sys:Double x:Key="PosHomeNoBarcodeHeight">56</sys:Double>
-    <sys:Double x:Key="PosHomeNoBarcodeFontSize">21</sys:Double>
+    <sys:Double x:Key="PosHomeBackspaceSize">50</sys:Double>
+    <sys:Double x:Key="PosHomeKeyFontSize">30</sys:Double>
+    <sys:Double x:Key="PosHomeKeySmallFontSize">20</sys:Double>
+    <sys:Double x:Key="PosHomeNoBarcodeHeight">50</sys:Double>
+    <sys:Double x:Key="PosHomeNoBarcodeFontSize">19</sys:Double>
 
     <!-- 键盘列：操作区与折扣条 -->
-    <GridLength x:Key="PosHomeOpsRowHeight">56</GridLength>
-    <sys:Double x:Key="PosHomeOpsButtonHeight">56</sys:Double>
-    <sys:Double x:Key="PosHomeOpsFontSize">19</sys:Double>
-    <sys:Double x:Key="PosHomeDiscountHeight">60</sys:Double>
-    <sys:Double x:Key="PosHomeDiscountFontSize">21</sys:Double>
+    <GridLength x:Key="PosHomeOpsRowHeight">50</GridLength>
+    <sys:Double x:Key="PosHomeOpsButtonHeight">50</sys:Double>
+    <sys:Double x:Key="PosHomeOpsFontSize">17</sys:Double>
+    <sys:Double x:Key="PosHomeDiscountHeight">54</sys:Double>
+    <sys:Double x:Key="PosHomeDiscountFontSize">19</sys:Double>
 
     <!-- 功能区：图标 / 标签 -->
     <sys:Double x:Key="PosHomeSidebarIconSize">24</sys:Double>
     <sys:Double x:Key="PosHomeSidebarIconHostSize">26</sys:Double>
-    <sys:Double x:Key="PosHomeSidebarLabelFontSize">15</sys:Double>
-    <sys:Double x:Key="PosHomeSidebarLabelLineHeight">18</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelFontSize">13</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelLineHeight">16</sys:Double>
     <sys:Double x:Key="PosHomeSidebarLabelMaxWidth">100</sys:Double>
-    <!-- 两行文字的真实行高（WPF 默认 LineStackingStrategy=MaxHeight 时按字体自然行高 ≈ 字号×1.33）：15px×2≈40，再留余量；
-         原来设成 40 时 16px 两行要 42.6，第二行被截掉，英文「Special Items」等只剩首词加省略号。 -->
-    <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">46</sys:Double>
+    <!-- 两行文字的真实行高（WPF 默认 LineStackingStrategy=MaxHeight 时按字体自然行高 ≈ 字号×1.33）：13px×2≈34.8，留到 36。
+         真机（1366×768 带任务栏，窗口只有约 728 高）上 15 号字 + 大键盘把数字键压到 50px 高，数字被截；
+         所以长者主题键盘列的固定高度总和收到不超过标准，数字键字号只比标准大 2；功能区标签与标准同为 13。 -->
+    <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">36</sys:Double>
 
     <!-- 功能区：状态卡 -->
     <!-- 状态卡只剩标题 + 标签 + 状态消息（Card Recovery / Attendance QR 已并入功能键网格，网格 2×6），

@@ -466,6 +466,32 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
+    public void Elder_keyboard_column_needs_no_more_height_than_standard_and_digits_fit_their_keys()
+    {
+        // 真机（1366×768 带任务栏，窗口只有约 728 高）上，长者主题曾因输入框/操作区/折扣条加高、数字键 38 号字，
+        // 把 4 行数字键压到约 50px 高，数字下半截被切掉。键盘列的固定高度总和不能超过标准，数字键字号的自然行高
+        // （≈ 字号×1.34）必须小于按 50px 键高留出的余量。
+        double Sum(string file, Func<Func<string, double>, double> total)
+        {
+            var doc = XDocument.Load(Path.Combine(WpfRoot(), "Themes", "Metrics", file));
+            double Value(string key) => double.Parse(
+                doc.Descendants().Single(element => (string?)element.Attribute(Xaml + "Key") == key).Value.Trim(),
+                CultureInfo.InvariantCulture);
+            return total(Value);
+        }
+
+        double Fixed(Func<string, double> v) =>
+            v("PosHomeInputBoxHeight") + v("PosHomeNoBarcodeHeight") + 2 * v("PosHomeOpsButtonHeight") + v("PosHomeDiscountHeight");
+
+        Assert.True(
+            Sum("Home.Elder.xaml", Fixed) <= Sum("Home.Standard.xaml", Fixed),
+            "长者主题键盘列的固定高度总和超过标准，会把数字键压扁。");
+        Assert.True(
+            Sum("Home.Elder.xaml", v => v("PosHomeKeyFontSize")) * 1.34 <= 42,
+            "长者主题数字键字号过大，在约 50px 高的键里会被截掉下半截。");
+    }
+
+    [Fact]
     public void Non_brush_theme_resources_referenced_by_views_exist_in_the_standard_dictionaries()
     {
         // 视图里的尺寸资源（字号、行高…）必须有标准值，否则旧主题下 DynamicResource 找不到会退回 WPF 默认值。
