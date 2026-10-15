@@ -194,7 +194,7 @@ public sealed class ReactContainerControllerConcurrencyContractTests
     {
         var service = new Mock<IContainerReactService>();
         service
-            .Setup(item => item.BatchUpdateDetailsDetailedAsync(It.IsAny<List<UpdateContainerDetailDto>>()))
+            .Setup(item => item.BatchUpdateDetailsDetailedAsync(It.IsAny<List<UpdateContainerDetailDto>>(), It.IsAny<WarehousePriceSyncPolicy>()))
             .ThrowsAsync(new ContainerDetailConcurrencyTokenRequiredException());
         var controller = CreateController(service.Object);
 

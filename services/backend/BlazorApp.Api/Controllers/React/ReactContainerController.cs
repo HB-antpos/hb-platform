@@ -1010,11 +1010,15 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         /// <param name="updates">明细更新列表</param>
+        /// <param name="syncStoreRetailPrices">改了零售价时是否同步分店零售价；不传视同勾选</param>
+        /// <param name="generateTasks">改了零售价时是否生成价格任务；不传视同勾选</param>
         /// <returns>更新结果</returns>
         [HttpPost("batch-update-details")]
         [Authorize(Policy = Permissions.Container.Edit)]
         public async Task<IActionResult> BatchUpdateDetails(
-            [FromBody] List<UpdateContainerDetailDto> updates
+            [FromBody] List<UpdateContainerDetailDto> updates,
+            [FromQuery] bool? syncStoreRetailPrices = null,
+            [FromQuery] bool? generateTasks = null
         )
         {
             try
@@ -1024,7 +1028,10 @@ namespace BlazorApp.Api.Controllers.React
                     return BadRequest(new { success = false, message = "更新列表不能为空" });
                 }
 
-                var result = await _containerReactService.BatchUpdateDetailsDetailedAsync(updates);
+                var result = await _containerReactService.BatchUpdateDetailsDetailedAsync(
+                    updates,
+                    WarehousePriceSyncPolicy.From(syncStoreRetailPrices, generateTasks)
+                );
 
                 return Ok(
                     new
@@ -1069,7 +1076,9 @@ namespace BlazorApp.Api.Controllers.React
         [Authorize(Policy = Permissions.Container.Edit)]
         public async Task<IActionResult> BatchUpdateDetailsScoped(
             string containerGuid,
-            [FromBody] List<UpdateContainerDetailDto> updates
+            [FromBody] List<UpdateContainerDetailDto> updates,
+            [FromQuery] bool? syncStoreRetailPrices = null,
+            [FromQuery] bool? generateTasks = null
         )
         {
             try
@@ -1081,7 +1090,8 @@ namespace BlazorApp.Api.Controllers.React
 
                 var result = await _containerReactService.BatchUpdateDetailsDetailedAsync(
                     containerGuid,
-                    updates
+                    updates,
+                    WarehousePriceSyncPolicy.From(syncStoreRetailPrices, generateTasks)
                 );
                 return Ok(
                     new

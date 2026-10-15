@@ -1,5 +1,6 @@
 import type { AxiosResponse } from "axios";
 import { apiClient } from "@/shared/api/client";
+import { buildRetailPriceSyncQuery, type RetailPriceSyncRequestFields } from "./retail-price-sync";
 import type {
   AlignDomesticProductCodePreview,
   AlignDomesticProductCodeRequest,
@@ -335,10 +336,12 @@ export async function updateContainer(containerGuid: string, data: UpdateContain
 export async function batchUpdateDetails(
   containerGuid: string,
   updates: UpdateContainerDetailRequest[],
+  // 本次改了已有商品零售价时随请求带上「同步分店零售价 / 生成价格任务」；不传则后端按默认（都开）处理。
+  retailPriceSync?: RetailPriceSyncRequestFields,
 ): Promise<ContainerDetailBatchUpdateResult> {
   try {
     const response = await apiClient.post(
-      `${CONTAINERS_PATH}/${encodeURIComponent(containerGuid)}/batch-update-details`,
+      `${CONTAINERS_PATH}/${encodeURIComponent(containerGuid)}/batch-update-details${buildRetailPriceSyncQuery(retailPriceSync)}`,
       updates.map(mapDetailUpdate),
     );
     ensureSuccess(response.data, "批量更新货柜明细失败");
@@ -395,8 +398,10 @@ export async function applyPrices(
   scope: ContainerDetailBatchScope,
   prices: { importPrice?: number | null; oemPrice?: number | null },
   previewToken: string,
+  // 两个开关只决定改零售价后的副作用，不进预览参数；没改零售价时不传。
+  retailPriceSync?: RetailPriceSyncRequestFields,
 ) {
-  return postContainerAction(containerGuid, "apply-prices", { ...scope, ...prices, previewToken });
+  return postContainerAction(containerGuid, "apply-prices", { ...scope, ...prices, ...retailPriceSync, previewToken });
 }
 
 export async function recalculate(containerGuid: string, scope: ContainerDetailBatchScope, previewToken: string) {

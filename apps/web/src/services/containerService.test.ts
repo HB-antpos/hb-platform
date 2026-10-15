@@ -1,5 +1,7 @@
 import {
   alignDomesticProductCode,
+  applyContainerPricesByScope,
+  buildContainerRetailPriceSyncQuery,
   previewAlignDomesticProductCode,
   assignContainerDetailCategoryByScope,
   batchUpdateDetails,
@@ -1039,6 +1041,65 @@ try {
     () => updateContainerDomesticSetCodePrices('P-FAIL', [{ setProductCode: 'SET-FAIL', retailPrice: 1, purchasePrice: 2 }]),
     '保存失败',
     'updateContainerDomesticSetCodePrices 应透传后端失败消息',
+  )
+
+  // ---------- 改零售价的两个开关：同步分店零售价 / 生成价格任务 ----------
+  assertEqual(buildContainerRetailPriceSyncQuery(), '', '本次不涉及零售价时不带任何开关参数')
+  assertEqual(buildContainerRetailPriceSyncQuery({}), '', '空对象同样不带参数')
+  assertEqual(
+    buildContainerRetailPriceSyncQuery({ syncStoreRetailPrices: false, generateTasks: true }),
+    '?syncStoreRetailPrices=false&generateTasks=true',
+    '两个开关显式发送，不勾选就是 false，不依赖后端默认值',
+  )
+
+  const okBatchResponse = () => new Response(JSON.stringify({
+    success: true,
+    data: { totalUpdated: 1, totalRequested: 1, validationErrors: [] },
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capturedUrl = String(input)
+    capturedInit = init
+    return okBatchResponse()
+  }) as typeof fetch
+  await batchUpdateDetails('container-123', [{ hguid: 'D-RETAIL', 贴牌价格: 6.66 }], { syncStoreRetailPrices: true, generateTasks: false })
+  assertEqual(
+    capturedUrl,
+    '/api/react/v1/containers/container-123/batch-update-details?syncStoreRetailPrices=true&generateTasks=false',
+    '保存明细改零售价时两个开关应放在 query 上（请求体是明细数组）',
+  )
+  await batchUpdateDetails('container-123', [{ hguid: 'D-IMPORT', 进口价格: 4.2 }])
+  assertEqual(
+    capturedUrl,
+    '/api/react/v1/containers/container-123/batch-update-details',
+    '没传开关（旧调用方 / 自动保存）时 URL 保持不变',
+  )
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capturedUrl = String(input)
+    capturedInit = init
+    return new Response(JSON.stringify({ success: true, data: { totalUpdated: 2 } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+  await applyContainerPricesByScope(
+    'container-123',
+    { selectedHguids: ['D-1', 'D-2'] },
+    { oemPrice: 7.77 },
+    'preview-token',
+    { syncStoreRetailPrices: false, generateTasks: false },
+  )
+  assertEqual(capturedUrl, '/api/react/v1/containers/container-123/actions/apply-prices', '批量设价路由不变')
+  assertDeepEqual(
+    JSON.parse(String(capturedInit?.body)),
+    { selectedHguids: ['D-1', 'D-2'], oemPrice: 7.77, syncStoreRetailPrices: false, generateTasks: false, previewToken: 'preview-token' },
+    '批量设价应把两个开关放进请求体（不进预览参数）',
+  )
+  await applyContainerPricesByScope('container-123', { selectedHguids: ['D-1'] }, { importPrice: 4.2 }, 'preview-token')
+  assertDeepEqual(
+    JSON.parse(String(capturedInit?.body)),
+    { selectedHguids: ['D-1'], importPrice: 4.2, previewToken: 'preview-token' },
+    '只改进口价（没传开关）时请求体不带这两个字段',
   )
 } finally {
   globalThis.fetch = originalFetch
