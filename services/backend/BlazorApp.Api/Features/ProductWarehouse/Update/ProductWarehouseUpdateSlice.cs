@@ -385,6 +385,19 @@ internal sealed class ProductWarehouseUpdateSlice
                     })
                     .ExecuteCommandAsync();
                 await RecordStorePriceOverwritesAsync(overwrittenStorePrices, effectiveUpdatedBy);
+                // 分店价被整体覆盖，HQ 里对应分店的价格也要同步，否则 HQ 一直停留在旧价。
+                // 入队只带启用分店（HQ 没有停用分店），并与上面的改价同事务提交。
+                await EnqueueStorePriceHqSyncAsync(
+                    productCode,
+                    storeRetailPrices.Select(srp => srp.StoreCode),
+                    new[]
+                    {
+                        ProductMaintenanceHqFieldMasks.StorePurchasePrice,
+                        ProductMaintenanceHqFieldMasks.StoreRetailPrice,
+                    },
+                    effectiveUpdatedBy,
+                    WarehouseFullUpdateHqSource
+                );
             }
 
             // 6. 强联动：批量更新 StoreMultiCodeProduct

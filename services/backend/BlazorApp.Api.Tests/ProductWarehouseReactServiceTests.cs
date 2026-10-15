@@ -6413,6 +6413,263 @@ namespace BlazorApp.Api.Tests
             Assert.True(result!.Success, result.Message);
         }
 
+        // ---------- 仓库改价 → HQ 同步 outbox 入队 ----------
+
+        /// <summary>记录入队调用的替身：同时记录调用时是否仍在调用方事务内，验证「改价与入队同事务」。</summary>
+        private sealed class RecordingHqPriceSyncEnqueuer : IWarehouseStorePriceHqSyncEnqueuer
+        {
+            public List<HqEnqueueCall> Calls { get; } = new();
+            public Exception? ThrowOnEnqueue { get; set; }
+
+            public Task EnqueueAsync(
+                ISqlSugarClient transactionDb,
+                string productCode,
+                IEnumerable<string?> storeCodes,
+                IReadOnlyCollection<string> fieldMask,
+                string updatedBy,
+                string source,
+                System.Threading.CancellationToken cancellationToken = default
+            )
+            {
+                Calls.Add(
+                    new HqEnqueueCall(
+                        productCode,
+                        storeCodes.Where(code => code != null).Select(code => code!).OrderBy(code => code).ToList(),
+                        fieldMask.ToList(),
+                        updatedBy,
+                        source,
+                        transactionDb.Ado.Transaction != null
+                    )
+                );
+                if (ThrowOnEnqueue != null)
+                {
+                    throw ThrowOnEnqueue;
+                }
+                return Task.CompletedTask;
+            }
+        }
+
+        private sealed record HqEnqueueCall(
+            string ProductCode,
+            List<string> StoreCodes,
+            List<string> FieldMask,
+            string UpdatedBy,
+            string Source,
+            bool InTransaction
+        );
+
+        [Fact]
+        public async Task PatchAsync_OEMPrice_EnqueuesHqRetailPriceSyncForActiveStoresInsideTransaction()
+        {
+            const string productCode = "P-PATCH-HQ-OEM";
+            await SeedPatchProductAsync(
+                productCode,
+                oemPrice: 2.2m,
+                importPrice: 3.3m,
+                productPurchasePrice: 3.3m,
+                productRetailPrice: 2.2m
+            );
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreAsync("S02", isActive: true, isDeleted: false);
+            await SeedStoreAsync("S03", isActive: false, isDeleted: false);
+            await SeedStoreRetailPriceAsync("S01", productCode, purchasePrice: 3.3m, retailPrice: 2.2m);
+            await SeedStoreRetailPriceAsync("S03", productCode, purchasePrice: 3.3m, retailPrice: 2.2m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer();
+
+            var result = await CreateService(hqPriceSyncEnqueuer: enqueuer).PatchAsync(
+                productCode,
+                new WarehouseProductPatchDto { OEMPrice = 6.66m },
+                "仓库员HQ1"
+            );
+
+            Assert.NotNull(result);
+            Assert.True(result!.Success, result.Message);
+            var call = Assert.Single(enqueuer.Calls);
+            Assert.Equal(productCode, call.ProductCode);
+            // 启用分店全部带上（含被补建行的 S02），停用的 S03 不在其中。
+            Assert.Equal(new[] { "S01", "S02" }, call.StoreCodes);
+            Assert.Equal(
+                new[] { ProductMaintenanceHqFieldMasks.StoreRetailPrice },
+                call.FieldMask
+            );
+            Assert.Equal("warehouse-product-price-patch", call.Source);
+            Assert.True(call.InTransaction, "入队必须发生在改价事务内");
+        }
+
+        [Fact]
+        public async Task PatchAsync_ImportPrice_EnqueuesHqPurchasePriceSync()
+        {
+            const string productCode = "P-PATCH-HQ-IMPORT";
+            await SeedPatchProductAsync(
+                productCode,
+                oemPrice: 2.2m,
+                importPrice: 3.3m,
+                productPurchasePrice: 3.3m,
+                productRetailPrice: 2.2m
+            );
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreRetailPriceAsync("S01", productCode, purchasePrice: 3.3m, retailPrice: 2.2m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer();
+
+            var result = await CreateService(hqPriceSyncEnqueuer: enqueuer).PatchAsync(
+                productCode,
+                new WarehouseProductPatchDto { ImportPrice = 5.55m },
+                "仓库员HQ2"
+            );
+
+            Assert.NotNull(result);
+            Assert.True(result!.Success, result.Message);
+            var call = Assert.Single(enqueuer.Calls);
+            Assert.Equal(new[] { "S01" }, call.StoreCodes);
+            Assert.Equal(
+                new[] { ProductMaintenanceHqFieldMasks.StorePurchasePrice },
+                call.FieldMask
+            );
+        }
+
+        [Fact]
+        public async Task PatchAsync_NonPriceField_DoesNotEnqueueHqSync()
+        {
+            const string productCode = "P-PATCH-HQ-NONPRICE";
+            await SeedPatchProductAsync(productCode, domesticPrice: 1.1m);
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreRetailPriceAsync("S01", productCode, purchasePrice: 3.3m, retailPrice: 2.2m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer();
+
+            var result = await CreateService(hqPriceSyncEnqueuer: enqueuer).PatchAsync(
+                productCode,
+                new WarehouseProductPatchDto { DomesticPrice = 2.5m },
+                "仓库员HQ3"
+            );
+
+            Assert.NotNull(result);
+            Assert.True(result!.Success, result.Message);
+            Assert.Empty(enqueuer.Calls);
+        }
+
+        [Fact]
+        public async Task PatchAsync_WhenHqEnqueueFails_RollsBackStorePrice()
+        {
+            const string productCode = "P-PATCH-HQ-ROLLBACK";
+            await SeedPatchProductAsync(
+                productCode,
+                oemPrice: 2.2m,
+                importPrice: 3.3m,
+                productPurchasePrice: 3.3m,
+                productRetailPrice: 2.2m
+            );
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreRetailPriceAsync("S01", productCode, purchasePrice: 3.3m, retailPrice: 2.2m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer
+            {
+                ThrowOnEnqueue = new ProductMaintenanceHqEnqueueException("HQ 同步任务创建失败，请稍后重试"),
+            };
+
+            await Assert.ThrowsAsync<ProductMaintenanceHqEnqueueException>(() =>
+                CreateService(hqPriceSyncEnqueuer: enqueuer).PatchAsync(
+                    productCode,
+                    new WarehouseProductPatchDto { OEMPrice = 6.66m },
+                    "仓库员HQ4"
+                )
+            );
+
+            // 入队失败必须连带回滚改价，否则 HBweb 已改而 HQ 永远收不到。
+            var price = await _db.Queryable<StoreRetailPrice>()
+                .SingleAsync(x => x.ProductCode == productCode && x.StoreCode == "S01");
+            Assert.Equal(2.2m, price.StoreRetailPriceValue);
+            var product = await _db.Queryable<Product>().SingleAsync(x => x.ProductCode == productCode);
+            Assert.Equal(2.2m, product.RetailPrice);
+        }
+
+        [Fact]
+        public async Task FullUpdateAsync_PriceChange_EnqueuesHqSyncForOverwrittenStoreRowsInsideTransaction()
+        {
+            const string productCode = "P-FULL-HQ";
+            await SeedPatchProductAsync(
+                productCode,
+                oemPrice: 3.99m,
+                importPrice: 0.94m,
+                productPurchasePrice: 0.94m,
+                productRetailPrice: 3.99m
+            );
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreAsync("S02", isActive: true, isDeleted: false);
+            await SeedStoreAsync("S03", isActive: false, isDeleted: false);
+            await SeedStoreRetailPriceAsync("S01", productCode, purchasePrice: 0.94m, retailPrice: 3.99m);
+            await SeedStoreRetailPriceAsync("S02", productCode, purchasePrice: 0.94m, retailPrice: 3.99m);
+            await SeedStoreRetailPriceAsync("S03", productCode, purchasePrice: 0.94m, retailPrice: 3.99m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer();
+
+            var result = await CreateService(hqPriceSyncEnqueuer: enqueuer).FullUpdateAsync(
+                productCode,
+                new WarehouseProductFullUpdateDto { OEMPrice = 5.99m, IsActive = true },
+                "仓库员HQ5"
+            );
+
+            Assert.True(result.Success, result.Message);
+            var call = Assert.Single(enqueuer.Calls);
+            Assert.Equal(productCode, call.ProductCode);
+            // 被覆盖的分店行全部交给入队器；剔除停用分店是入队器的职责（见 WarehouseStorePriceHqSyncEnqueuerTests）。
+            Assert.Equal(new[] { "S01", "S02", "S03" }, call.StoreCodes);
+            Assert.Equal(
+                new[]
+                {
+                    ProductMaintenanceHqFieldMasks.StorePurchasePrice,
+                    ProductMaintenanceHqFieldMasks.StoreRetailPrice,
+                },
+                call.FieldMask
+            );
+            Assert.Equal("warehouse-product-full-update", call.Source);
+            Assert.True(call.InTransaction, "入队必须发生在改价事务内");
+        }
+
+        [Fact]
+        public async Task FullUpdateAsync_WithoutStoreRows_DoesNotEnqueueHqSync()
+        {
+            const string productCode = "P-FULL-HQ-NOROWS";
+            await SeedPatchProductAsync(productCode, oemPrice: 3.99m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer();
+
+            var result = await CreateService(hqPriceSyncEnqueuer: enqueuer).FullUpdateAsync(
+                productCode,
+                new WarehouseProductFullUpdateDto { OEMPrice = 5.99m, IsActive = true },
+                "仓库员HQ6"
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Empty(enqueuer.Calls);
+        }
+
+        [Fact]
+        public async Task FullUpdateAsync_WhenHqEnqueueFails_RollsBackStorePrice()
+        {
+            const string productCode = "P-FULL-HQ-ROLLBACK";
+            await SeedPatchProductAsync(
+                productCode,
+                oemPrice: 3.99m,
+                importPrice: 0.94m,
+                productPurchasePrice: 0.94m,
+                productRetailPrice: 3.99m
+            );
+            await SeedStoreAsync("S01", isActive: true, isDeleted: false);
+            await SeedStoreRetailPriceAsync("S01", productCode, purchasePrice: 0.94m, retailPrice: 3.99m);
+            var enqueuer = new RecordingHqPriceSyncEnqueuer
+            {
+                ThrowOnEnqueue = new ProductMaintenanceHqEnqueueException("HQ 同步任务创建失败，请稍后重试"),
+            };
+
+            var result = await CreateService(hqPriceSyncEnqueuer: enqueuer).FullUpdateAsync(
+                productCode,
+                new WarehouseProductFullUpdateDto { OEMPrice = 5.99m, IsActive = true },
+                "仓库员HQ7"
+            );
+
+            Assert.False(result.Success);
+            var price = await _db.Queryable<StoreRetailPrice>()
+                .SingleAsync(x => x.ProductCode == productCode && x.StoreCode == "S01");
+            Assert.Equal(3.99m, price.StoreRetailPriceValue);
+        }
+
         [Theory]
         [MemberData(nameof(InvalidPatchDtos))]
         public async Task PatchAsync_InvalidDto_ThrowsInvalidOperationException(WarehouseProductPatchDto dto)
@@ -7112,7 +7369,8 @@ namespace BlazorApp.Api.Tests
             IConfiguration? configuration = null,
             ILogger<ProductWarehouseReactService>? logger = null,
             ISqlSugarClient? database = null,
-            IWarehouseProductChangeHistoryService? changeHistoryService = null
+            IWarehouseProductChangeHistoryService? changeHistoryService = null,
+            IWarehouseStorePriceHqSyncEnqueuer? hqPriceSyncEnqueuer = null
         )
         {
             configuration ??= new ConfigurationBuilder().Build();
@@ -7132,7 +7390,8 @@ namespace BlazorApp.Api.Tests
                 Mock.Of<IMapper>(),
                 Mock.Of<IDataSyncFullService>(),
                 changeHistoryService ?? CreateNoopChangeHistoryService(),
-                translationService ?? CreateDefaultTranslationService()
+                translationService ?? CreateDefaultTranslationService(),
+                hqPriceSyncEnqueuer: hqPriceSyncEnqueuer
             );
         }
 
