@@ -220,6 +220,7 @@ assertDeepEqual(
     'DEVICE_REREGISTER',
     'API_SERVER_CHANGE',
     'REMOTE_MAINTENANCE_INSTALL',
+    'SYSTEM_RESTART',
   ],
   '固定事件代码应完整覆盖核心收银链路',
 )
@@ -273,6 +274,19 @@ assertEqual(
   '切换服务器地址',
   '切换服务器地址应提供中文文案',
 )
+assertEqual(
+  zhLocale.operationLogs.operations.systemRestart,
+  '收银机重启',
+  '收银机重启应提供中文文案',
+)
+assertEqual(
+  enLocale.operationLogs.operations.systemRestart,
+  'POS restart',
+  '收银机重启应提供英文文案',
+)
+// 收银机重启被拦下时 Outcome 为 Skipped，页面标签与筛选依赖 outcomes.skipped 文案。
+assertEqual(zhLocale.operationLogs.outcomes.skipped, '已跳过', 'Skipped 应提供中文文案')
+assertEqual(enLocale.operationLogs.outcomes.skipped, 'Skipped', 'Skipped 应提供英文文案')
 assertEqual(
   zhLocale.operationLogs.operations.linklySettlement,
   'Linkly 结算',

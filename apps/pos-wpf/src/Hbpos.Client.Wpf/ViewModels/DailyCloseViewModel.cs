@@ -26,6 +26,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     private readonly IOperationAuditLogger? _operationAuditLogger;
     private readonly IOperationAuthorizationService? _operationAuthorizationService;
     private readonly Func<DateTime, Task<bool>>? _confirmLinklySettlementAsync;
+    private readonly Func<IPostDailyCloseRestartCoordinator?>? _restartCoordinatorProvider;
     private DailyCloseReport? _currentReport;
     private DailyCloseDraftScope? _dailyCloseDraftScope;
     private int _archivePreviewVersion;
@@ -98,7 +99,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         IOperationAuditLogger? operationAuditLogger = null,
         IOperationAuthorizationService? operationAuthorizationService = null,
         ILinklySettlementService? linklySettlementService = null,
-        Func<DateTime, Task<bool>>? confirmLinklySettlementAsync = null)
+        Func<DateTime, Task<bool>>? confirmLinklySettlementAsync = null,
+        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null)
     {
         _dailyCloseService = dailyCloseService;
         _dailyClosePrintService = dailyClosePrintService;
@@ -110,6 +112,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         _operationAuthorizationService = operationAuthorizationService;
         _linklySettlementService = linklySettlementService;
         _confirmLinklySettlementAsync = confirmLinklySettlementAsync;
+        _restartCoordinatorProvider = restartCoordinatorProvider;
         if (session.CashierSession is not null)
         {
             _cashierSessionContext.SetCurrent(session.CashierSession);
@@ -610,6 +613,11 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
 
         var auditRecorded = false;
         var correlation = OperationAuditEvents.CreateCorrelation();
+
+        // 日结保存成功后才可能提示重启（开机超过阈值天数）；提示放在 finally 里 IsBusy 复位之后，
+        // 这样「日结页忙」不会把重启安全检查自己拦住。
+        DateTime? restartPromptBusinessDate = null;
+        var returnToPosDeferred = false;
         try
         {
             var archive = await _dailyCloseService.SaveAsync(Session, BusinessDate, BuildCashCounts(), cancellationToken);
@@ -624,6 +632,7 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 correlation.CorrelationId,
                 correlation.TraceId);
             auditRecorded = true;
+            restartPromptBusinessDate = archive.Report.BusinessDate;
             ClearDailyCloseDraft(clearReportSnapshot: true);
             SelectedTabIndex = HistoryTabIndex;
 
@@ -670,7 +679,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
                 }
                 else
                 {
-                    _returnToPos.Invoke();
+                    // 先不立刻回收银台：若随后要提示重启，浮层应盖在日结页上（日结页没有扫码输入，倒计时期间更安全）。
+                    returnToPosDeferred = true;
                 }
 
                 return;
@@ -705,6 +715,48 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         finally
         {
             IsBusy = false;
+            if (restartPromptBusinessDate is { } businessDate &&
+                await RunRestartPromptAsync(businessDate, cancellationToken))
+            {
+                // 被安全检查拦下后，收银员选择回到收银台处理购物车/付款。
+                returnToPosDeferred = true;
+            }
+
+            if (returnToPosDeferred)
+            {
+                _returnToPos?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 日结保存之后提示重启（是否提示、检查、倒计时、重启都在协调器里）。返回 true 表示收银员选择了「回到收银台」。
+    /// 任何异常都在这里吞掉：提示是附加功能，不能影响日结本身。
+    /// </summary>
+    private async Task<bool> RunRestartPromptAsync(DateTime businessDate, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var coordinator = _restartCoordinatorProvider?.Invoke();
+            if (coordinator is null)
+            {
+                return false;
+            }
+
+            var outcome = await coordinator.RunAsync(Session, businessDate, cancellationToken);
+            return outcome == RestartFlowOutcome.GoToPos;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleLog.WriteError(
+                "RestartAfterClose",
+                $"restart prompt after daily close failed error={ex.GetType().Name}",
+                exception: ex);
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 

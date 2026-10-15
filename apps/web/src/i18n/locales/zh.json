@@ -3939,7 +3939,8 @@
     "outcomes": {
       "succeeded": "成功",
       "denied": "已拒绝",
-      "failed": "失败"
+      "failed": "失败",
+      "skipped": "已跳过"
     },
     "presets": {
       "today": "今天",
@@ -4012,7 +4013,8 @@
       "testSalesDataReset": "重置测试销售数据",
       "deviceReregister": "设备换绑门店",
       "apiServerChange": "切换服务器地址",
-      "remoteMaintenanceInstall": "安装远程维护"
+      "remoteMaintenanceInstall": "安装远程维护",
+      "systemRestart": "收银机重启"
     }
   },
   "performanceBaseline": {

@@ -955,7 +955,7 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
                 <Form.Item label={t('operationLogs.filters.outcome')} name="outcome">
                   <Select
                     allowClear
-                    options={(['Succeeded', 'Denied', 'Failed'] as OperationAuditOutcome[]).map((value) => ({
+                    options={(['Succeeded', 'Denied', 'Failed', 'Skipped'] as OperationAuditOutcome[]).map((value) => ({
                       value,
                       label: outcomeLabel(value),
                     }))}

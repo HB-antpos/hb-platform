@@ -326,9 +326,14 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IOperationAuditLogger? operationAuditLogger = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
-        IMobileAppDownloadService? mobileAppDownloadService = null)
+        IMobileAppDownloadService? mobileAppDownloadService = null,
+        ISystemRestartSettingsStore? systemRestartSettingsStore = null,
+        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null)
     {
         _setupService = setupService;
+        _systemRestartSettingsStore = systemRestartSettingsStore;
+        _restartCoordinatorProvider = restartCoordinatorProvider;
+        RestartComputerCommand = new AsyncRelayCommand(RestartComputerAsync, CanRestartComputer);
         _receiptProfileSyncService = receiptProfileSyncService;
         _operationAuditLogger = operationAuditLogger;
         _paymentMethodSettingsService = paymentMethodSettingsService;
@@ -811,6 +816,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         await RunBusyAsync(async () =>
         {
             await LoadPaymentMethodsAsync();
+            await LoadRestartPromptAsync();
             _loadedConfiguration = await _setupService.LoadConfigurationAsync();
             await LoadReceiptPrinterSettingsAsync();
             IsSquareSandbox = _loadedConfiguration.Environment == CardTerminalEnvironment.Sandbox;
@@ -3117,6 +3123,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         TestReceiptPrinterCommand.NotifyCanExecuteChanged();
         DownloadCatalogCommand.NotifyCanExecuteChanged();
         ResetCatalogCommand.NotifyCanExecuteChanged();
+        RestartComputerCommand.NotifyCanExecuteChanged();
         ResetTestSalesDataCommand.NotifyCanExecuteChanged();
         ReregisterDeviceCommand.NotifyCanExecuteChanged();
         CheckForAppUpdateCommand.NotifyCanExecuteChanged();

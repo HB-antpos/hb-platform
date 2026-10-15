@@ -72,7 +72,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         ColorThemeSwitcherViewModel? colorThemeSwitcher = null,
         AppUpdateBackgroundCheckScheduler? appUpdateBackgroundCheckScheduler = null,
         AppUpdateUnattendedInstallScheduler? appUpdateUnattendedInstallScheduler = null,
-        StartupProgressTracker? startupProgress = null)
+        StartupProgressTracker? startupProgress = null,
+        WpfRestartPromptService? restartPrompt = null)
     {
         _viewModel = viewModel;
         _startupOptions = startupOptions;
@@ -99,6 +100,9 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         {
             ColorThemeSwitcher.DataContext = colorThemeSwitcher;
         }
+        // 日结后重启提示浮层：未注册（例如测试里手工构造）时 DataContext 为空，浮层保持隐藏。
+        RestartPromptOverlay.DataContext = restartPrompt;
+        RestartPromptOverlay.Shown += RestartPromptOverlayShown;
         SourceInitialized += MainWindowSourceInitialized;
         _rawScannerService.ConfigureForegroundState(
             () => IsActive,
@@ -771,6 +775,13 @@ public partial class MainWindow : Window, IDisplayMovableWindow
     {
         return e.SystemKey == Key.F4 ||
             e.Key == Key.F4 && Keyboard.Modifiers.HasFlag(ModifierKeys.Alt);
+    }
+
+    private void RestartPromptOverlayShown(object? sender, EventArgs e)
+    {
+        // 关键逻辑：重启浮层出现时同样清空键盘兜底与 Raw Input 残留，避免倒计时期间的扫码被派发到购物车。
+        _keyboardScannerFallback.Clear();
+        _rawScannerService.ClearPendingInput();
     }
 
     private void ConfirmationDialogIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)

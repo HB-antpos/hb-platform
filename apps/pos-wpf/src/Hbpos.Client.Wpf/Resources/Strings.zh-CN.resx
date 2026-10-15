@@ -3803,4 +3803,161 @@
   <data name="cardRecovery.settlement.outcome.refundedOther" xml:space="preserve">
     <value>已用现金等其他方式把钱退给顾客。</value>
   </data>
+  <data name="restart.prompt.title" xml:space="preserve">
+    <value>建议重启这台收银机</value>
+  </data>
+  <data name="restart.prompt.subtitle" xml:space="preserve">
+    <value>日结已完成 · 现在是重启的好时机</value>
+  </data>
+  <data name="restart.prompt.body" xml:space="preserve">
+    <value>这台收银机已经连续运行 {0} 没有重启。长时间不重启会占满内存和系统资源，容易出现变卡、打印或刷卡变慢。重启大约需要 2–3 分钟。</value>
+  </data>
+  <data name="restart.prompt.factUptime" xml:space="preserve">
+    <value>已开机</value>
+  </data>
+  <data name="restart.prompt.factUploads" xml:space="preserve">
+    <value>日结与订单上传</value>
+  </data>
+  <data name="restart.prompt.factCart" xml:space="preserve">
+    <value>购物车 / 刷卡</value>
+  </data>
+  <data name="restart.prompt.uploadsDone" xml:space="preserve">
+    <value>已完成</value>
+  </data>
+  <data name="restart.prompt.uploadsPending" xml:space="preserve">
+    <value>还有 {0} 条待传</value>
+  </data>
+  <data name="restart.prompt.cartClear" xml:space="preserve">
+    <value>无未完成</value>
+  </data>
+  <data name="restart.prompt.note" xml:space="preserve">
+    <value>选「稍后」今天不会再提醒，下次日结会再次提示。重启后 HB POS 会自动打开（需要先登录 Windows）。</value>
+  </data>
+  <data name="restart.action.later" xml:space="preserve">
+    <value>稍后</value>
+  </data>
+  <data name="restart.action.now" xml:space="preserve">
+    <value>立即重启</value>
+  </data>
+  <data name="restart.uptime.daysHours" xml:space="preserve">
+    <value>{0} 天 {1} 小时</value>
+  </data>
+  <data name="restart.uptime.days" xml:space="preserve">
+    <value>{0} 天</value>
+  </data>
+  <data name="restart.countdown.title" xml:space="preserve">
+    <value>即将重启收银机</value>
+  </data>
+  <data name="restart.countdown.subtitle" xml:space="preserve">
+    <value>倒计时结束前可以随时取消</value>
+  </data>
+  <data name="restart.countdown.seconds" xml:space="preserve">
+    <value>秒后重启</value>
+  </data>
+  <data name="restart.countdown.body" xml:space="preserve">
+    <value>重启前会确认没有未完成的操作，并保存本地数据。请不要在收银机上继续操作。</value>
+  </data>
+  <data name="restart.countdown.check.cart" xml:space="preserve">
+    <value>收银台购物车为空，没有进行中的付款</value>
+  </data>
+  <data name="restart.countdown.check.card" xml:space="preserve">
+    <value>没有未确认的刷卡结果，刷卡结算已完成</value>
+  </data>
+  <data name="restart.countdown.check.final" xml:space="preserve">
+    <value>倒计时结束时将再检查一遍，上传剩余记录并保存本地数据</value>
+  </data>
+  <data name="restart.countdown.cancel" xml:space="preserve">
+    <value>取消重启</value>
+  </data>
+  <data name="restart.working.title" xml:space="preserve">
+    <value>正在重启…</value>
+  </data>
+  <data name="restart.working.subtitle" xml:space="preserve">
+    <value>正在保存数据，请不要操作收银机</value>
+  </data>
+  <data name="restart.working.body" xml:space="preserve">
+    <value>正在上传剩余记录并保存本地数据，随后收银机会自动重启。</value>
+  </data>
+  <data name="restart.blocked.title" xml:space="preserve">
+    <value>现在不能重启</value>
+  </data>
+  <data name="restart.blocked.subtitle" xml:space="preserve">
+    <value>还有 {0} 件事需要先处理，收银机没有重启</value>
+  </data>
+  <data name="restart.blocked.tagMust" xml:space="preserve">
+    <value>必须处理</value>
+  </data>
+  <data name="restart.blocked.note" xml:space="preserve">
+    <value>处理完以上问题后，可以点「重新检查」继续重启；不处理也没关系，下次日结会再次提示。</value>
+  </data>
+  <data name="restart.blocked.recheck" xml:space="preserve">
+    <value>重新检查</value>
+  </data>
+  <data name="restart.blocked.dismiss" xml:space="preserve">
+    <value>知道了</value>
+  </data>
+  <data name="restart.blocked.goPos" xml:space="preserve">
+    <value>回到收银台</value>
+  </data>
+  <data name="restart.issue.cart" xml:space="preserve">
+    <value>收银台还有 {0} 件商品没有结账</value>
+  </data>
+  <data name="restart.issue.payment" xml:space="preserve">
+    <value>有付款正在进行或尚未完成</value>
+  </data>
+  <data name="restart.issue.cardTerminal" xml:space="preserve">
+    <value>刷卡终端正在处理交易</value>
+  </data>
+  <data name="restart.issue.cardRecovery" xml:space="preserve">
+    <value>有 {0} 笔刷卡结果还没确认</value>
+  </data>
+  <data name="restart.issue.settlement" xml:space="preserve">
+    <value>刷卡结算还没完成</value>
+  </data>
+  <data name="restart.issue.dailyClose" xml:space="preserve">
+    <value>日结页面正在处理</value>
+  </data>
+  <data name="restart.issue.update" xml:space="preserve">
+    <value>应用更新正在进行</value>
+  </data>
+  <data name="restart.issue.checkFailed" xml:space="preserve">
+    <value>无法确认当前状态，为安全起见不重启</value>
+  </data>
+  <data name="restart.failed.title" xml:space="preserve">
+    <value>重启没有成功</value>
+  </data>
+  <data name="restart.failed.subtitle" xml:space="preserve">
+    <value>收银机没有重启，HB POS 可以继续正常使用</value>
+  </data>
+  <data name="restart.failed.body" xml:space="preserve">
+    <value>Windows 没有执行重启命令。这不会影响今天的日结和数据。请联系维护人员，或稍后手动重启：开始 → 电源 → 重启。</value>
+  </data>
+  <data name="restart.failed.detail" xml:space="preserve">
+    <value>code={0} · uptime={1}
+已写入日志，编号 {2}</value>
+  </data>
+  <data name="restart.failed.ok" xml:space="preserve">
+    <value>知道了</value>
+  </data>
+  <data name="settings.restartPrompt.title" xml:space="preserve">
+    <value>重启提醒</value>
+  </data>
+  <data name="settings.restartPrompt.description" xml:space="preserve">
+    <value>日结完成后，如果这台收银机已连续运行 7 天以上，提醒重启。</value>
+  </data>
+  <data name="settings.restartPrompt.toggle" xml:space="preserve">
+    <value>日结后提醒重启</value>
+  </data>
+  <data name="settings.restartPrompt.toggle.help" xml:space="preserve">
+    <value>只有收银员确认且所有安全检查通过才会重启，仅保存在本机。</value>
+  </data>
+  <data name="settings.restartTest.title" xml:space="preserve">
+    <value>重启电脑（测试）</value>
+  </data>
+  <data name="settings.restartTest.help" xml:space="preserve">
+    <value>走一遍与日结后提醒相同的流程：先做安全检查，再 30 秒可取消倒计时，通过后真的重启这台电脑。</value>
+  </data>
+  <data name="settings.restartTest.button" xml:space="preserve">
+    <value>重启电脑</value>
+  </data>
 </root>

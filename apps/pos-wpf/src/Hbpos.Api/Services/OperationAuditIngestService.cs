@@ -39,10 +39,18 @@ public sealed class SqlSugarOperationAuditIngestService(
         "DAILY_CLOSE_SAVE", "DAILY_CLOSE_REPRINT",
         "LINKLY_SETTLEMENT", "LINKLY_SETTLEMENT_REPRINT", "PERMISSION_OVERRIDE",
         "INSTALLMENT_PICKUP_CONFIRM", "INSTALLMENT_LINES_AMEND", "SPECIAL_PRODUCT_PRICE_CHANGE",
-        // 收银端系统级操作：重置商品目录、重置测试销售数据、设备换绑、切换服务器地址、安装远程维护。
+        // 收银端系统级操作：重置商品目录、重置测试销售数据、设备换绑、切换服务器地址、安装远程维护、收银机重启。
         "CATALOG_RESET", "TEST_SALES_DATA_RESET", "DEVICE_REREGISTER", "API_SERVER_CHANGE",
-        "REMOTE_MAINTENANCE_INSTALL"
+        "REMOTE_MAINTENANCE_INSTALL", "SYSTEM_RESTART"
     };
+
+    // 仅个别操作类型才允许的额外 Outcome：收银机重启可能被购物车/付款/更新等条件拦下，记为 Skipped。
+    // 不放进通用 AllowedOutcomes，避免其他操作类型误带 Skipped 也被放行。
+    private static readonly Dictionary<string, string> OperationSpecificOutcomes =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SYSTEM_RESTART"] = "Skipped"
+        };
 
     private static readonly HashSet<string> AllowedPropertyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -196,6 +204,7 @@ public sealed class SqlSugarOperationAuditIngestService(
 
         if (string.IsNullOrWhiteSpace(auditEvent.Outcome) ||
             (!AllowedOutcomes.Contains(auditEvent.Outcome.Trim()) &&
+             !IsOperationSpecificOutcome(auditEvent.OperationType, auditEvent.Outcome) &&
              !ShouldNormalizeOutcomeToSucceeded(auditEvent.OperationType, auditEvent.Outcome)))
         {
             return ("INVALID_OUTCOME", "outcome must be Succeeded, Denied or Failed");
@@ -232,7 +241,7 @@ public sealed class SqlSugarOperationAuditIngestService(
             OperationType = CanonicalOperationType(source.OperationType),
             Outcome = ShouldNormalizeOutcomeToSucceeded(source.OperationType, source.Outcome)
                 ? "Succeeded"
-                : CanonicalOutcome(source.Outcome),
+                : CanonicalOutcome(source.OperationType, source.Outcome),
             CashierId = CleanStructured(source.CashierId, 100),
             UserGuid = CleanStructured(source.UserGuid, 100),
             CashierName = CleanStructured(source.CashierName, 128),
@@ -296,8 +305,20 @@ public sealed class SqlSugarOperationAuditIngestService(
         };
     }
 
-    private static string CanonicalOutcome(string value)
+    private static bool IsOperationSpecificOutcome(string operationType, string outcome)
     {
+        return OperationSpecificOutcomes.TryGetValue(operationType.Trim(), out var allowed) &&
+               string.Equals(allowed, outcome.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CanonicalOutcome(string operationType, string value)
+    {
+        // 类型专属的 Outcome（如 SYSTEM_RESTART 的 Skipped）原样保留规范写法，不归一化成 Succeeded。
+        if (IsOperationSpecificOutcome(operationType, value))
+        {
+            return OperationSpecificOutcomes[operationType.Trim()];
+        }
+
         return AllowedOutcomes.First(x => string.Equals(x, value.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 

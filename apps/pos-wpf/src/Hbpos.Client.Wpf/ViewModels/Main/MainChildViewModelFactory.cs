@@ -413,6 +413,15 @@ internal sealed class MainChildViewModelFactory
             paymentMethodSettingsService: _paymentMethodSettingsService);
     }
 
+    /// <summary>
+    /// 日结后重启提示的协调器提供者。用委托延迟解析：协调器依赖 MainViewModel，而 MainViewModel 在构造时就创建本工厂，
+    /// 直接注入会形成循环依赖，所以由 ServiceRegistration 在 MainViewModel 构造完成后再配置。
+    /// </summary>
+    public Func<IPostDailyCloseRestartCoordinator?>? RestartCoordinatorProvider { get; set; }
+
+    /// <summary>设置页「日结后提醒重启」开关的存储；同样在 MainViewModel 构造完成后配置。</summary>
+    public ISystemRestartSettingsStore? SystemRestartSettingsStore { get; set; }
+
     public DailyCloseViewModel CreateDailyCloseViewModel(
         PosSessionState session,
         Action? returnToPos = null,
@@ -429,7 +438,8 @@ internal sealed class MainChildViewModelFactory
             _operationAuditLogger,
             _operationAuthorizationService,
             _linklySettlementService,
-            confirmLinklySettlementAsync);
+            confirmLinklySettlementAsync,
+            RestartCoordinatorProvider);
     }
 
     public SettingsViewModel CreateSettingsViewModel(
@@ -469,7 +479,9 @@ internal sealed class MainChildViewModelFactory
             catalogSyncStatusService: _catalogSyncStatusService,
             operationAuditLogger: _operationAuditLogger,
             receiptProfileSyncService: _receiptProfileSyncService,
-            mobileAppDownloadService: _mobileAppDownloadService);
+            mobileAppDownloadService: _mobileAppDownloadService,
+            systemRestartSettingsStore: SystemRestartSettingsStore,
+            restartCoordinatorProvider: RestartCoordinatorProvider);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()

@@ -84,6 +84,16 @@ public interface ILocalDailyCloseUploadRepository
         DateTimeOffset staleBefore,
         DateTimeOffset nextUploadAt,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 当前设备范围内「现在就该上传」的日结条数：Uploading，加上已到期的 Pending（退避中的不算，等不到）。
+    /// 重启前冲刷上传时用它判断是否还有积压；默认实现返回 0，让只实现旧方法的测试替身无需改动。
+    /// </summary>
+    Task<int> CountDueUploadsAsync(
+        string storeCode,
+        string deviceCode,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default) => Task.FromResult(0);
 }
 
 public sealed partial class LocalDailyCloseRepository : ILocalDailyCloseUploadRepository
@@ -296,6 +306,30 @@ public sealed partial class LocalDailyCloseRepository : ILocalDailyCloseUploadRe
         command.Parameters.AddWithValue("$UploadErrorCode", (object?)errorCode ?? DBNull.Value);
         command.Parameters.AddWithValue("$UploadErrorMessage", (object?)errorMessage ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<int> CountDueUploadsAsync(
+        string storeCode,
+        string deviceCode,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM LocalDailyCloses
+            WHERE StoreCode = $StoreCode
+              AND DeviceCode = $DeviceCode
+              AND (
+                    UploadStatus = 'Uploading'
+                    OR (UploadStatus = 'Pending' AND (NextUploadAt IS NULL OR NextUploadAt <= $Now))
+                  );
+            """;
+        command.Parameters.AddWithValue("$StoreCode", storeCode);
+        command.Parameters.AddWithValue("$DeviceCode", deviceCode);
+        command.Parameters.AddWithValue("$Now", FormatUtc(now));
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task RecoverExpiredUploadingAsync(

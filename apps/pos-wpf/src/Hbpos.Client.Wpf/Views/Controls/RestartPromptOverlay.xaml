@@ -1,0 +1,301 @@
+<UserControl x:Class="Hbpos.Client.Wpf.Views.Controls.RestartPromptOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:Hbpos.Client.Wpf.Converters"
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+             FocusManager.IsFocusScope="True"
+             KeyboardNavigation.TabNavigation="Cycle"
+             KeyboardNavigation.ControlTabNavigation="Cycle">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <converters:RestartCountdownDashConverter x:Key="CountdownDash" />
+
+        <!-- 提示 / 倒计时界面里的「已确认」检查行。 -->
+        <Style x:Key="RestartCheckRowStyle" TargetType="Border">
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+    </UserControl.Resources>
+
+    <!-- 全屏遮罩：与全局确认弹窗同色同层级逻辑，背景点击不关闭。 -->
+    <Grid Background="#66000000"
+          Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}}">
+        <Border Width="560"
+                Padding="26"
+                Background="{DynamicResource PosSurfaceBrush}"
+                CornerRadius="12"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="6" Opacity="0.22" />
+            </Border.Effect>
+            <StackPanel>
+                <!-- 标题行：图标块随模式变色（普通蓝 / 阻止黄 / 失败红）。 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <Border Width="54" Height="54" CornerRadius="12" Margin="0,0,14,0">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsWarningTone}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsDangerTone}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <materialDesign:PackIcon Width="34" Height="34"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <materialDesign:PackIcon.Style>
+                                <Style TargetType="materialDesign:PackIcon">
+                                    <Setter Property="Kind" Value="Restart" />
+                                    <Setter Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsWarningTone}" Value="True">
+                                            <Setter Property="Kind" Value="AlertOutline" />
+                                            <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsDangerTone}" Value="True">
+                                            <Setter Property="Kind" Value="AlertCircleOutline" />
+                                            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </materialDesign:PackIcon.Style>
+                        </materialDesign:PackIcon>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" MaxWidth="440">
+                        <TextBlock Text="{Binding TitleText}"
+                                   FontSize="22" FontWeight="Black"
+                                   Foreground="{DynamicResource PosTextBrush}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SubtitleText}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                   TextWrapping="Wrap" Margin="0,3,0,0" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ① 日结后提示 -->
+                <StackPanel Visibility="{Binding IsPromptMode, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="{Binding BodyText}"
+                               FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap" Margin="0,0,0,18" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Padding="12,9" CornerRadius="8" BorderThickness="1"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding PromptFactUptimeLabel}" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding UptimeFactText}" FontSize="17" FontWeight="ExtraBold"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="2" Padding="12,9" CornerRadius="8" BorderThickness="1"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding PromptFactUploadsLabel}" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding UploadsFactText}" FontSize="17" FontWeight="ExtraBold">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding UploadsFactTone}" Value="Warn">
+                                                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="4" Padding="12,9" CornerRadius="8" BorderThickness="1"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding PromptFactCartLabel}" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBlock Text="{Binding PromptFactCartText}" FontSize="17" FontWeight="ExtraBold"
+                                           Foreground="{DynamicResource PosSuccessTextBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                    <TextBlock Text="{Binding NoteText}"
+                               FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap" Margin="0,14,0,0" />
+                </StackPanel>
+
+                <!-- ② 确认并倒计时 -->
+                <StackPanel Visibility="{Binding IsCountdownMode, Converter={StaticResource BoolToVis}}">
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="132" Height="132" Margin="0,0,22,0">
+                            <Ellipse Width="132" Height="132" StrokeThickness="10"
+                                     Stroke="{DynamicResource PosDividerBrush}" />
+                            <Ellipse Width="132" Height="132" StrokeThickness="10"
+                                     Stroke="{DynamicResource PosPrimaryBrush}"
+                                     StrokeDashCap="Flat"
+                                     StrokeDashArray="{Binding CountdownProgress, Converter={StaticResource CountdownDash}, ConverterParameter='132,10'}"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <RotateTransform Angle="-90" />
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding CountdownRemaining}"
+                                           FontSize="44" FontWeight="Black"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                                <TextBlock Text="{Binding CountdownLabelText}"
+                                           FontSize="12" FontWeight="Bold"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding BodyText}"
+                                   FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </Grid>
+                    <Border CornerRadius="8" BorderThickness="1"
+                            Background="{DynamicResource PosSurfaceAltBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}">
+                        <StackPanel>
+                            <Border Style="{StaticResource RestartCheckRowStyle}">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="CheckCircle" Width="22" Height="22"
+                                                             Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                    <TextBlock Text="{Binding CountdownCheckCartText}" Margin="10,0,0,0"
+                                               FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource RestartCheckRowStyle}">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="CheckCircle" Width="22" Height="22"
+                                                             Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                    <TextBlock Text="{Binding CountdownCheckCardText}" Margin="10,0,0,0"
+                                               FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource RestartCheckRowStyle}" BorderThickness="0">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="ProgressClock" Width="22" Height="22"
+                                                             Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                    <TextBlock Text="{Binding CountdownCheckFinalText}" Margin="10,0,0,0"
+                                               FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"
+                                               TextWrapping="Wrap" MaxWidth="440" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ③ 不安全，阻止 -->
+                <StackPanel Visibility="{Binding IsBlockedMode, Converter={StaticResource BoolToVis}}">
+                    <Border CornerRadius="8" BorderThickness="1"
+                            Background="{DynamicResource PosSurfaceAltBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}">
+                        <ItemsControl ItemsSource="{Binding Issues}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="14,10" Background="{DynamicResource PosDangerSoftBrush}"
+                                            BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <materialDesign:PackIcon Kind="CloseCircle" Width="22" Height="22"
+                                                                     VerticalAlignment="Center"
+                                                                     Foreground="{DynamicResource PosDangerTextBrush}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Text}" Margin="10,0,10,0"
+                                                       FontSize="14" FontWeight="SemiBold"
+                                                       TextWrapping="Wrap" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding DataContext.BlockedTagText, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                       FontSize="11" FontWeight="Bold" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource PosDangerTextBrush}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                    <TextBlock Text="{Binding NoteText}"
+                               FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap" Margin="0,14,0,0" />
+                </StackPanel>
+
+                <!-- 倒计时结束后：冲刷上传、保存数据，界面锁定。 -->
+                <StackPanel Visibility="{Binding IsWorkingMode, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="{Binding BodyText}"
+                               FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap" Margin="0,0,0,16" />
+                    <ProgressBar IsIndeterminate="True" Height="6" />
+                </StackPanel>
+
+                <!-- ④ 命令失败 -->
+                <StackPanel Visibility="{Binding IsFailedMode, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="{Binding BodyText}"
+                               FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap" Margin="0,0,0,14" />
+                    <Border Padding="12,10" CornerRadius="8" BorderThickness="1"
+                            Background="{DynamicResource PosSurfaceAltBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}">
+                        <TextBlock Text="{Binding FailureDetailText}"
+                                   FontFamily="Consolas" FontSize="12"
+                                   Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+                </StackPanel>
+
+                <!-- 按钮行：左侧「回到收银台」仅阻止界面出现；默认焦点在安全的一侧（稍后 / 取消 / 知道了）。 -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0"
+                            Visibility="{Binding HasPrimary, Converter={StaticResource BoolToVis}}">
+                    <Button Command="{Binding TertiaryCommand}"
+                            Visibility="{Binding HasTertiary, Converter={StaticResource BoolToVis}}"
+                            MinWidth="132" Height="48" Margin="0,0,10,0"
+                            Style="{StaticResource PosSecondaryButtonStyle}">
+                        <TextBlock Text="{Binding TertiaryText}" FontWeight="Bold" />
+                    </Button>
+                    <Button x:Name="SecondaryButton"
+                            Command="{Binding SecondaryCommand}"
+                            Visibility="{Binding HasSecondary, Converter={StaticResource BoolToVis}}"
+                            MinWidth="132" Height="48" Margin="0,0,10,0"
+                            Style="{StaticResource PosSecondaryButtonStyle}">
+                        <TextBlock Text="{Binding SecondaryText}" FontWeight="Bold" />
+                    </Button>
+                    <Button x:Name="PrimaryButton"
+                            Command="{Binding PrimaryCommand}"
+                            MinWidth="176" Height="48"
+                            Style="{StaticResource PosPrimaryButtonStyle}">
+                        <TextBlock Text="{Binding PrimaryText}" Foreground="White" FontWeight="Bold" />
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

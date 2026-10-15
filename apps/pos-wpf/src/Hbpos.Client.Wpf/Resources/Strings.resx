@@ -1665,4 +1665,57 @@
   <data name="cardRecovery.settlement.instructions" xml:space="preserve"><value>Refund the customer by cash or another method first, then record it here. Optionally add a note, such as how much was paid and the receipt number.</value></data>
   <data name="cardRecovery.settlement.field.note" xml:space="preserve"><value>Note (optional)</value></data>
   <data name="cardRecovery.settlement.outcome.refundedOther" xml:space="preserve"><value>The customer was paid back by cash or another method.</value></data>
+  <data name="restart.prompt.title" xml:space="preserve"><value>Restart this POS?</value></data>
+  <data name="restart.prompt.subtitle" xml:space="preserve"><value>Daily close is done, a good time to restart</value></data>
+  <data name="restart.prompt.body" xml:space="preserve"><value>This POS has been running for {0} without a restart. Running for a long time uses up memory and system resources and can slow down the screen, printing and card payments. A restart takes about 2-3 minutes.</value></data>
+  <data name="restart.prompt.factUptime" xml:space="preserve"><value>Uptime</value></data>
+  <data name="restart.prompt.factUploads" xml:space="preserve"><value>Daily close &amp; order upload</value></data>
+  <data name="restart.prompt.factCart" xml:space="preserve"><value>Cart / card payment</value></data>
+  <data name="restart.prompt.uploadsDone" xml:space="preserve"><value>Done</value></data>
+  <data name="restart.prompt.uploadsPending" xml:space="preserve"><value>{0} waiting</value></data>
+  <data name="restart.prompt.cartClear" xml:space="preserve"><value>Nothing pending</value></data>
+  <data name="restart.prompt.note" xml:space="preserve"><value>Choose Later and you will not be asked again today; you will be asked again at the next daily close. After the restart HB POS opens by itself (you need to sign in to Windows first).</value></data>
+  <data name="restart.action.later" xml:space="preserve"><value>Later</value></data>
+  <data name="restart.action.now" xml:space="preserve"><value>Restart now</value></data>
+  <data name="restart.uptime.daysHours" xml:space="preserve"><value>{0} d {1} h</value></data>
+  <data name="restart.uptime.days" xml:space="preserve"><value>{0} days</value></data>
+  <data name="restart.countdown.title" xml:space="preserve"><value>Restarting this POS soon</value></data>
+  <data name="restart.countdown.subtitle" xml:space="preserve"><value>You can cancel at any time before the countdown ends</value></data>
+  <data name="restart.countdown.seconds" xml:space="preserve"><value>seconds left</value></data>
+  <data name="restart.countdown.body" xml:space="preserve"><value>Before restarting we confirm nothing is unfinished and save local data. Please do not use the POS now.</value></data>
+  <data name="restart.countdown.check.cart" xml:space="preserve"><value>The cart is empty and no payment is in progress</value></data>
+  <data name="restart.countdown.check.card" xml:space="preserve"><value>No unconfirmed card result and card settlement is done</value></data>
+  <data name="restart.countdown.check.final" xml:space="preserve"><value>When the countdown ends we check once more, upload what is left and save local data</value></data>
+  <data name="restart.countdown.cancel" xml:space="preserve"><value>Cancel restart</value></data>
+  <data name="restart.working.title" xml:space="preserve"><value>Restarting...</value></data>
+  <data name="restart.working.subtitle" xml:space="preserve"><value>Saving data. Please do not use the POS</value></data>
+  <data name="restart.working.body" xml:space="preserve"><value>Uploading remaining records and saving local data. The POS will restart by itself in a moment.</value></data>
+  <data name="restart.blocked.title" xml:space="preserve"><value>Cannot restart now</value></data>
+  <data name="restart.blocked.subtitle" xml:space="preserve"><value>{0} thing(s) need attention first. The POS was not restarted</value></data>
+  <data name="restart.blocked.tagMust" xml:space="preserve"><value>Must fix</value></data>
+  <data name="restart.blocked.note" xml:space="preserve"><value>After fixing the above, tap Check again to continue. If you leave it, you will be asked again at the next daily close.</value></data>
+  <data name="restart.blocked.recheck" xml:space="preserve"><value>Check again</value></data>
+  <data name="restart.blocked.dismiss" xml:space="preserve"><value>Got it</value></data>
+  <data name="restart.blocked.goPos" xml:space="preserve"><value>Back to checkout</value></data>
+  <data name="restart.issue.cart" xml:space="preserve"><value>{0} item(s) in the cart are not paid yet</value></data>
+  <data name="restart.issue.payment" xml:space="preserve"><value>A payment is in progress or not finished</value></data>
+  <data name="restart.issue.cardTerminal" xml:space="preserve"><value>The card terminal is processing a transaction</value></data>
+  <data name="restart.issue.cardRecovery" xml:space="preserve"><value>{0} card result(s) are not confirmed yet</value></data>
+  <data name="restart.issue.settlement" xml:space="preserve"><value>A card settlement is not finished</value></data>
+  <data name="restart.issue.dailyClose" xml:space="preserve"><value>The daily close page is busy</value></data>
+  <data name="restart.issue.update" xml:space="preserve"><value>An app update is in progress</value></data>
+  <data name="restart.issue.checkFailed" xml:space="preserve"><value>The current state could not be confirmed, so the POS is not restarted for safety</value></data>
+  <data name="restart.failed.title" xml:space="preserve"><value>Restart did not work</value></data>
+  <data name="restart.failed.subtitle" xml:space="preserve"><value>The POS was not restarted. HB POS can keep running normally</value></data>
+  <data name="restart.failed.body" xml:space="preserve"><value>Windows did not run the restart command. Today's daily close and data are not affected. Please contact the maintenance team, or restart by hand later: Start - Power - Restart.</value></data>
+  <data name="restart.failed.detail" xml:space="preserve"><value>code={0} · uptime={1}
+Logged with reference {2}</value></data>
+  <data name="restart.failed.ok" xml:space="preserve"><value>Got it</value></data>
+  <data name="settings.restartPrompt.title" xml:space="preserve"><value>Restart reminder</value></data>
+  <data name="settings.restartPrompt.description" xml:space="preserve"><value>After daily close, remind to restart this POS when it has been running for 7 days or more.</value></data>
+  <data name="settings.restartPrompt.toggle" xml:space="preserve"><value>Remind to restart after daily close</value></data>
+  <data name="settings.restartPrompt.toggle.help" xml:space="preserve"><value>The POS only restarts after the cashier confirms and every safety check passes. Saved for this device only.</value></data>
+  <data name="settings.restartTest.title" xml:space="preserve"><value>Restart computer (test)</value></data>
+  <data name="settings.restartTest.help" xml:space="preserve"><value>Runs the same flow as the reminder after daily close: safety checks, a 30-second countdown you can cancel, then a real restart of this computer.</value></data>
+  <data name="settings.restartTest.button" xml:space="preserve"><value>Restart computer</value></data>
 </root>

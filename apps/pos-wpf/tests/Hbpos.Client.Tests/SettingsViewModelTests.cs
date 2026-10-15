@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Xml.Linq;
 using BlazorApp.Shared.DTOs;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
@@ -4107,6 +4109,161 @@ public sealed class SettingsViewModelTests
         Assert.True(viewModel.IsMobileAppDownloadSelected);
         Assert.False(string.IsNullOrWhiteSpace(viewModel.MobileAppDownload.AndroidQrPayload));
         Assert.False(viewModel.MobileAppDownload.IsLoading);
+    }
+
+    // ---------- 日结后提醒重启：设置页开关与「重启电脑」测试按钮 ----------
+
+    [Fact]
+    public async Task Restart_prompt_toggle_defaults_on_loads_stored_value_and_saves_changes_immediately()
+    {
+        var store = new FakeRestartSettingsStore { Enabled = false };
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            systemRestartSettingsStore: store);
+        Assert.True(viewModel.IsRestartPromptSettingVisible);
+        Assert.True(viewModel.IsRestartPromptEnabled);   // 加载前沿用默认开启
+
+        await viewModel.LoadAsync();
+
+        Assert.False(viewModel.IsRestartPromptEnabled);  // 读到本机已保存的「关」
+        Assert.Equal(0, store.SaveCalls);                // 加载期间赋值不能回写
+
+        viewModel.IsRestartPromptEnabled = true;
+
+        await WaitUntilAsync(() => store.SaveCalls == 1);
+        Assert.True(store.Enabled);
+    }
+
+    [Fact]
+    public void Restart_prompt_card_and_test_button_are_hidden_without_services()
+    {
+        using var viewModel = new SettingsViewModel(new FakeCardTerminalSetupService());
+
+        Assert.False(viewModel.IsRestartPromptSettingVisible);
+        Assert.False(viewModel.IsRestartComputerTestVisible);
+        Assert.False(viewModel.RestartComputerCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Restart_computer_test_button_runs_the_test_flow_with_the_current_session()
+    {
+        var coordinator = new FakeRestartCoordinator();
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            session: session,
+            systemRestartSettingsStore: new FakeRestartSettingsStore(),
+            restartCoordinatorProvider: () => coordinator);
+        Assert.True(viewModel.IsRestartComputerTestVisible);
+        Assert.True(viewModel.RestartComputerCommand.CanExecute(null));
+
+        await viewModel.RestartComputerCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, coordinator.TestCalls);
+        Assert.Equal("POS-01", coordinator.LastSession?.DeviceCode);
+        Assert.Equal(0, coordinator.RunCalls);           // 不走「日结后」正式入口
+    }
+
+    [Fact]
+    public async Task Restart_computer_test_button_does_nothing_when_coordinator_is_unavailable()
+    {
+        using var viewModel = new SettingsViewModel(
+            new FakeCardTerminalSetupService(),
+            restartCoordinatorProvider: () => null);
+
+        await viewModel.RestartComputerCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsRestartComputerTestVisible);
+    }
+
+    [Fact]
+    public void Settings_page_has_restart_toggle_and_test_button_and_both_languages_have_the_strings()
+    {
+        var wpfRoot = Path.GetFullPath(Path.Combine(
+            Path.GetDirectoryName(SourceFilePath())!, "..", "..", "src", "Hbpos.Client.Wpf"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var view = XDocument.Load(Path.Combine(wpfRoot, "Views", "Screens", "SettingsView.xaml"));
+
+        var toggle = Assert.Single(view.Descendants(presentation + "ToggleButton").Where(element =>
+            (string?)element.Attribute(x + "Name") == "RestartPromptSettingToggle"));
+        Assert.Equal("{Binding IsRestartPromptEnabled, Mode=TwoWay}", (string?)toggle.Attribute("IsChecked"));
+
+        var button = Assert.Single(view.Descendants(presentation + "Button").Where(element =>
+            (string?)element.Attribute(x + "Name") == "RestartComputerTestButton"));
+        Assert.Equal("{Binding RestartComputerCommand}", (string?)button.Attribute("Command"));
+        // 触屏最小高度，且和重启提醒开关在同一张卡片里。
+        Assert.True(double.Parse((string)button.Attribute("MinHeight")!) >= 44);
+        Assert.Same(
+            toggle.Ancestors(presentation + "Border").First(border =>
+                (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}"),
+            button.Ancestors(presentation + "Border").Last(border =>
+                (string?)border.Attribute("Style") == "{StaticResource SettingsActionCardStyle}"));
+
+        var keys = new[]
+        {
+            "settings.restartPrompt.toggle", "settings.restartPrompt.toggle.help", "settings.restartPrompt.description",
+            "settings.restartTest.title", "settings.restartTest.help", "settings.restartTest.button"
+        };
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var resx = XDocument.Load(Path.Combine(wpfRoot, "Resources", file));
+            foreach (var key in keys)
+            {
+                Assert.Contains(resx.Descendants("data"), element => (string?)element.Attribute("name") == key);
+            }
+        }
+    }
+
+    private static string SourceFilePath([CallerFilePath] string path = "") => path;
+
+    private sealed class FakeRestartSettingsStore : ISystemRestartSettingsStore
+    {
+        public bool Enabled { get; set; } = true;
+
+        public int SaveCalls { get; private set; }
+
+        public Task<bool> IsPromptEnabledAsync(CancellationToken cancellationToken = default) => Task.FromResult(Enabled);
+
+        public Task SetPromptEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+        {
+            Enabled = enabled;
+            SaveCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Task<DateOnly?> GetLastPromptBusinessDateAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<DateOnly?>(null);
+
+        public Task MarkPromptedAsync(DateOnly businessDate, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class FakeRestartCoordinator : IPostDailyCloseRestartCoordinator
+    {
+        public int RunCalls { get; private set; }
+
+        public int TestCalls { get; private set; }
+
+        public PosSessionState? LastSession { get; private set; }
+
+        public Task<RestartFlowOutcome> RunAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default)
+        {
+            RunCalls++;
+            return Task.FromResult(RestartFlowOutcome.NotDue);
+        }
+
+        public Task<RestartFlowOutcome> RunTestAsync(
+            PosSessionState session,
+            CancellationToken cancellationToken = default)
+        {
+            TestCalls++;
+            LastSession = session;
+            return Task.FromResult(RestartFlowOutcome.Cancelled);
+        }
     }
 
     private sealed class FakeCardTerminalSetupService(

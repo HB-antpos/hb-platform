@@ -241,6 +241,10 @@ public sealed class OperationAuditIngestServiceTests
     [InlineData("DEVICE_REREGISTER", "Succeeded", "ACTIVATION_REBIND")]
     [InlineData("API_SERVER_CHANGE", "Denied", "BLOCKED")]
     [InlineData("REMOTE_MAINTENANCE_INSTALL", "Succeeded", "SETTINGS")]
+    [InlineData("SYSTEM_RESTART", "Succeeded", "INITIATED")]
+    [InlineData("SYSTEM_RESTART", "Failed", "COMMAND_FAILED")]
+    [InlineData("SYSTEM_RESTART", "Skipped", "BLOCKED_PAYMENT")]
+    [InlineData("SYSTEM_RESTART", "Skipped", "PROMPT_LATER")]
     public async Task IngestAsync_accepts_system_operation_types(
         string operationType,
         string outcome,
@@ -262,6 +266,46 @@ public sealed class OperationAuditIngestServiceTests
         Assert.Equal(operationType, persisted.OperationType);
         Assert.Equal(outcome, persisted.Outcome);
         Assert.Equal(reasonCode, persisted.ReasonCode);
+    }
+
+    [Fact]
+    public async Task IngestAsync_keeps_system_restart_skipped_outcome_as_is()
+    {
+        // Skipped 不能被归一化成 Succeeded，否则「被拦下没重启」会在审计里显示为已重启。
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = "SYSTEM_RESTART";
+        request.Events[0].Outcome = "skipped";
+        request.Events[0].ReasonCode = "BLOCKED_CART";
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.AcceptedCount);
+        var persisted = Assert.Single(await fixture.PosmDb.Queryable<PosOperationAudit>().ToListAsync());
+        Assert.Equal("SYSTEM_RESTART", persisted.OperationType);
+        Assert.Equal("Skipped", persisted.Outcome);
+        Assert.Equal("BLOCKED_CART", persisted.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData("PAYMENT_CANCEL")]
+    [InlineData("API_SERVER_CHANGE")]
+    public async Task IngestAsync_rejects_skipped_outcome_for_other_operation_types(string operationType)
+    {
+        // Skipped 只对 SYSTEM_RESTART 开放，其他类型仍按三态校验。
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = operationType;
+        request.Events[0].Outcome = "Skipped";
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.RejectedCount);
+        Assert.Equal("INVALID_OUTCOME", Assert.Single(result.Results).ErrorCode);
     }
 
     [Fact]
