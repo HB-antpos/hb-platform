@@ -374,7 +374,8 @@ public sealed class HeldOrderTodayCountServiceTests
 
     private static FakeTimeProvider CreateClock(DateTimeOffset now)
     {
-        var clock = new FakeTimeProvider(now);
+        // FakeTimeProvider 会把起点的 Ticks 当 UTC 再套本地时区偏移：必须传 UTC 时刻，否则本地时间会多偏一次（+10h）。
+        var clock = new FakeTimeProvider(now.ToUniversalTime());
         clock.SetLocalTimeZone(StoreTimeZone);
         return clock;
     }
