@@ -204,6 +204,8 @@
       "createProducts": "Create products",
       "createAllPending": "Create all new {{count}}",
       "executeOtherPending": "Run other pending {{count}}",
+      "executeChecked": "Execute checked ({{count}})",
+      "createChecked": "Create checked new {{count}}",
       "createProductsConfirmTitle": "Create products?",
       "createProductsConfirmContent": "Create products for {{count}} rows and set up prices for all active stores.",
       "createProductsConfirmOk": "Create",

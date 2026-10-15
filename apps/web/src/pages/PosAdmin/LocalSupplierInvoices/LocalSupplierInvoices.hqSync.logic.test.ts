@@ -831,6 +831,10 @@ async function main() {
     // 待执行拆成「新建商品」与其余操作两组，各自经未保存守卫提交。
     assert(editPageSource.includes('splitCreateProductDetailGuids(pendingExecutionDetailGuids, details, rowActions)'), '执行全部待执行应拆成新建商品与其余操作两组')
     assert(editPageSource.includes('runAfterUnsavedGuard(() => handleBatchExecute(guids, mode))'), '执行全部待执行前应先处理未保存修改')
+    // 有勾选商品时进度区改显示「执行勾选」（只执行勾选行），无勾选才显示「执行全部待执行」。
+    assert(editPageSource.includes('checkedExecutionSplit'), '有勾选时应按勾选行拆分新建商品与其余操作')
+    assert(editPageSource.includes("t('posAdmin.invoiceWorkbench.executeChecked'"), '有勾选时进度区应显示「执行勾选」')
+    assert(editPageSource.includes('selectedCount === 0 && pendingExecutionSplit.otherGuids.length > 0'), '有勾选时不应再显示「执行全部待执行」')
     assert(!editPageSource.includes('statusStatsTagColors'), '旧的约 21 个状态统计标签不应再出现')
     assert(!editPageSource.includes("t('posAdmin.invoiceDetail.statusStatsTitle'"), '不应再显示旧的状态统计栏标题')
   })
