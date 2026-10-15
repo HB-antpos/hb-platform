@@ -429,6 +429,22 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
+    public void Elder_sidebar_labels_have_room_for_two_natural_text_lines()
+    {
+        // WPF 的 TextBlock 默认按字体自然行高（≈ 字号×1.33）叠行，LineHeight 并不生效：
+        // MaxHeight 小于两行的自然高度时，第二行会被截掉，英文「Special Items」「Hold Order」只剩首词加省略号（真机截图发现）。
+        // 长者主题字号更大，必须按它自己的字号核对；标准值保持改版前的数字，不在此约束。
+        var elder = XDocument.Load(Path.Combine(WpfRoot(), "Themes", "Metrics", "Home.Elder.xaml"));
+        double Value(string key) => double.Parse(
+            elder.Descendants().Single(element => (string?)element.Attribute(Xaml + "Key") == key).Value,
+            CultureInfo.InvariantCulture);
+
+        Assert.True(
+            Value("PosHomeSidebarLabelMaxHeight") >= 2 * Value("PosHomeSidebarLabelFontSize") * 1.34,
+            "长者主题功能区标签的 MaxHeight 装不下两行文字。");
+    }
+
+    [Fact]
     public void Non_brush_theme_resources_referenced_by_views_exist_in_the_standard_dictionaries()
     {
         // 视图里的尺寸资源（字号、行高…）必须有标准值，否则旧主题下 DynamicResource 找不到会退回 WPF 默认值。

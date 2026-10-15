@@ -74,6 +74,8 @@
     <sys:Double x:Key="PosHomeStatusBodyFontSize">10</sys:Double>  <!-- 状态卡正文 -->
     <sys:Double x:Key="PosHomeStatusTagFontSize">9</sys:Double>  <!-- 状态卡标签（Synced） -->
     <sys:Double x:Key="PosHomeCardRecoveryFontSize">11</sys:Double>  <!-- Card Recovery 入口文字 -->
+    <sys:Double x:Key="PosHomeCardRecoveryMinHeight">44</sys:Double>  <!-- Card Recovery 入口最小高 -->
+    <Thickness x:Key="PosHomeCardRecoveryMargin">0,10,0,0</Thickness>  <!-- Card Recovery 入口与状态消息的间距 -->
     <sys:Double x:Key="PosHomeAttendanceButtonHeight">62</sys:Double>  <!-- 考勤二维码按钮高 -->
     <sys:Double x:Key="PosHomeAttendanceTitleFontSize">11</sys:Double>  <!-- 考勤按钮标题 -->
     <sys:Double x:Key="PosHomeAttendanceStatusFontSize">9</sys:Double>  <!-- 考勤按钮状态行 -->

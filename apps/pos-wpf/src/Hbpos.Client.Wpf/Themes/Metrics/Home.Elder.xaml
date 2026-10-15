@@ -63,20 +63,25 @@
     <sys:Double x:Key="PosHomeDiscountFontSize">21</sys:Double>
 
     <!-- 功能区：图标 / 标签 -->
-    <sys:Double x:Key="PosHomeSidebarIconSize">28</sys:Double>
-    <sys:Double x:Key="PosHomeSidebarIconHostSize">32</sys:Double>
-    <sys:Double x:Key="PosHomeSidebarLabelFontSize">16</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarIconSize">24</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarIconHostSize">26</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelFontSize">15</sys:Double>
     <sys:Double x:Key="PosHomeSidebarLabelLineHeight">18</sys:Double>
-    <sys:Double x:Key="PosHomeSidebarLabelMaxWidth">96</sys:Double>
-    <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">40</sys:Double>
+    <sys:Double x:Key="PosHomeSidebarLabelMaxWidth">100</sys:Double>
+    <!-- 两行文字的真实行高（WPF 默认 LineStackingStrategy=MaxHeight 时按字体自然行高 ≈ 字号×1.33）：15px×2≈40，再留余量；
+         原来设成 40 时 16px 两行要 42.6，第二行被截掉，英文「Special Items」等只剩首词加省略号。 -->
+    <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">46</sys:Double>
 
     <!-- 功能区：状态卡 / 考勤二维码按钮 -->
-    <sys:Double x:Key="PosHomeStatusCardHeight">140</sys:Double>
+    <!-- 状态卡加高给状态消息留出约三行（Card Recovery 入口压矮、考勤按钮压矮、功能键图标略缩来平衡 1366×768 的侧栏高度）。 -->
+    <sys:Double x:Key="PosHomeStatusCardHeight">148</sys:Double>
     <sys:Double x:Key="PosHomeStatusTitleFontSize">15</sys:Double>
     <sys:Double x:Key="PosHomeStatusBodyFontSize">14</sys:Double>
     <sys:Double x:Key="PosHomeStatusTagFontSize">13</sys:Double>
-    <sys:Double x:Key="PosHomeCardRecoveryFontSize">15</sys:Double>
-    <sys:Double x:Key="PosHomeAttendanceButtonHeight">60</sys:Double>
+    <sys:Double x:Key="PosHomeCardRecoveryFontSize">12</sys:Double>
+    <sys:Double x:Key="PosHomeCardRecoveryMinHeight">38</sys:Double>
+    <Thickness x:Key="PosHomeCardRecoveryMargin">0,6,0,0</Thickness>
+    <sys:Double x:Key="PosHomeAttendanceButtonHeight">52</sys:Double>
     <sys:Double x:Key="PosHomeAttendanceTitleFontSize">15</sys:Double>
     <sys:Double x:Key="PosHomeAttendanceStatusFontSize">12</sys:Double>
     <sys:Double x:Key="PosHomeAttendanceSecondsFontSize">18</sys:Double>

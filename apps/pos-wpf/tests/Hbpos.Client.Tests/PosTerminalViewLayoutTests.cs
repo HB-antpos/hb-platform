@@ -588,7 +588,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("CardRecoveryCenterEntryButton", (string?)entry.Attribute("AutomationProperties.AutomationId"));
         Assert.Equal("{Binding CardRecoveryCenterAutomationName}", (string?)entry.Attribute("AutomationProperties.Name"));
         Assert.Equal("2", (string?)entry.Attribute("Grid.Row"));
-        Assert.Equal("44", (string?)entry.Attribute("MinHeight"));
+        Assert.Equal("44", Metric((string?)entry.Attribute("MinHeight")));
         Assert.Null(entry.Attribute("Visibility"));
 
         var buttonStyle = Assert.Single(entry.Elements(presentation + "Button.Style"))

@@ -2054,8 +2054,8 @@
                     <!-- 入口固定保留；仅在存在待处理卡交易时切换警告样式与数量徽标。 -->
                     <Button x:Name="CardRecoveryCenterEntryButton"
                             Grid.Row="2"
-                            Margin="0,10,0,0"
-                            MinHeight="44"
+                            Margin="{DynamicResource PosHomeCardRecoveryMargin}"
+                            MinHeight="{DynamicResource PosHomeCardRecoveryMinHeight}"
                             Padding="10,6"
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Center"
