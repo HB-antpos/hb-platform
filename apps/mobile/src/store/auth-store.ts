@@ -39,6 +39,7 @@ import {
   tryAuthenticateIosReview,
   type IosReviewBuildContext,
 } from "@/modules/ios-review/config";
+import { shouldReleaseIosReviewGuard } from "@/modules/ios-review/guard-invariant";
 import {
   beginStandardAuthentication,
   clearIosReviewSession,
@@ -707,6 +708,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 }));
+
+// 一致性自愈：已认证的真实会话不允许审核守卫为真。
+// 退出 → 换账号登录时，迟到的重新布防可能在登录成功之后把守卫置回真，
+// 导致人脸比对 / 通知 / 推送注册等都误判成审核模式，只有重启才恢复。
+// 审核会话（sessionKind=iosReview 或 marker 仍在）与未认证阶段不受影响，仍保持 fail-closed。
+useAuthStore.subscribe((state) => {
+  if (shouldReleaseIosReviewGuard(state, isIosReviewSessionActive())) {
+    useAuthStore.setState({ iosReviewOfflineGuardActive: false });
+  }
+});
 
 subscribeUnauthenticatedSession(() => {
   void useAuthStore.getState().clearLocalSession();
