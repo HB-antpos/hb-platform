@@ -1,6 +1,12 @@
 import { createPriceNotificationCapture } from '../utils/priceNotification'
 import { getWarehouseProductBatchUpdateJob, patchWarehouseProduct, updateWarehouseProductFull } from './warehouseProductService'
-import { lookupSuggestedDiscounts, previewPriceNotification, setSuggestedDiscounts } from './storePriceUpdateTaskService'
+import {
+  getStorePriceUpdateTaskSettings,
+  lookupSuggestedDiscounts,
+  previewPriceNotification,
+  setSuggestedDiscounts,
+  updateStorePriceUpdateTaskSettings,
+} from './storePriceUpdateTaskService'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -13,11 +19,18 @@ let capturedMethod: string | undefined
 let capturedBody: unknown
 let nextData: unknown = {}
 let nextHeader: string | null = null
+let nextFailure: { status: number; message: string } | null = null
 
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   capturedUrl = String(input)
   capturedMethod = init?.method
   capturedBody = init?.body ? JSON.parse(String(init.body)) : undefined
+  if (nextFailure) {
+    return new Response(JSON.stringify({ success: false, message: nextFailure.message }), {
+      status: nextFailure.status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
   return new Response(JSON.stringify({ success: true, data: nextData }), {
     status: 200,
     headers: { 'Content-Type': 'application/json', ...(nextHeader ? { 'X-Price-Notification': nextHeader } : {}) },
@@ -78,6 +91,39 @@ try {
   assert(job.priceNotification?.needsPriceUpdateStores === 6, '任务快照应归一化 priceNotification')
   nextData = { jobId: 'job-1', status: 'Succeeded' }
   assert((await getWarehouseProductBatchUpdateJob('job-1')).priceNotification === null, '任务快照缺失 priceNotification = 未涉及通知')
+
+  // 任务超期天数设置：GET / PUT 同一路径 /settings，PUT 请求体为 { overdueDays }。
+  const settingsData = {
+    overdueDays: 14, defaultOverdueDays: 7, minOverdueDays: 1, maxOverdueDays: 90,
+    isCustomized: true, updatedBy: 'amy', updatedAtUtc: '2026-10-16T01:02:03Z',
+  }
+  nextData = settingsData
+  const settings = await getStorePriceUpdateTaskSettings()
+  assert(capturedUrl.endsWith('/api/react/v1/store-price-update-tasks/settings'), '读取设置应调用 /settings')
+  assert(String(capturedMethod) === 'GET', '读取设置应使用 GET')
+  assert(JSON.stringify(settings) === JSON.stringify(settingsData), '应原样返回设置的各字段')
+
+  nextData = { ...settingsData, overdueDays: 10, updatedBy: 'bob' }
+  const saved = await updateStorePriceUpdateTaskSettings(10)
+  assert(capturedUrl.endsWith('/api/react/v1/store-price-update-tasks/settings'), '保存设置应调用 /settings')
+  assert(String(capturedMethod) === 'PUT', '保存设置应使用 PUT')
+  assert(JSON.stringify(capturedBody) === JSON.stringify({ overdueDays: 10 }), '保存设置的请求体应为 { overdueDays }')
+  assert(saved.overdueDays === 10 && saved.updatedBy === 'bob', '保存后应返回后端给出的最新设置')
+
+  nextData = { overdueDays: 7, defaultOverdueDays: 7, minOverdueDays: 1, maxOverdueDays: 90, isCustomized: false }
+  const defaults = await getStorePriceUpdateTaskSettings()
+  assert(!defaults.isCustomized && defaults.updatedBy === null && defaults.updatedAtUtc === null, '未自定义时修改人与修改时间归一化为 null')
+
+  // 超出范围时后端返回 400 与中文提示：错误信息必须原样抛给调用方展示。
+  nextFailure = { status: 400, message: '超期天数必须在 1 到 90 之间' }
+  let failureMessage = ''
+  try {
+    await updateStorePriceUpdateTaskSettings(120)
+  } catch (error) {
+    failureMessage = error instanceof Error ? error.message : ''
+  }
+  nextFailure = null
+  assert(failureMessage === '超期天数必须在 1 到 90 之间', '保存失败应抛出后端的错误信息')
 
   console.log('storePriceUpdateTaskService.test: ok')
 } finally {

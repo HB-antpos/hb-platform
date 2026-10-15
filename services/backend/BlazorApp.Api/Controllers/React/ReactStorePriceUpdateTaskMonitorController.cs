@@ -89,6 +89,49 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         /// <summary>
+        /// 页面设置（任务超期天数）。与撤销同一权限：它决定移动端店长的「报表中心」何时被锁定，
+        /// 所以不放宽到「仅登录」。没有保存过设置时返回配置默认值（IsCustomized=false）。
+        /// </summary>
+        [HttpGet("settings")]
+        [Authorize(Policy = Permissions.Warehouse.ManageProducts)]
+        public async Task<IActionResult> GetSettings()
+        {
+            var settings = await _service.GetSettingsAsync(HttpContext.RequestAborted);
+            return Ok(ApiResponse<StorePriceUpdateTaskSettingsDto>.OK(settings, "查询成功"));
+        }
+
+        /// <summary>
+        /// 保存超期天数（1～90）。保存后移动端锁定 / 红标与 Web 监控页按新天数计算，已有任务的创建时间不变（不重新计时）。
+        /// 超出范围 400；设置表尚未创建（还没执行 --schema=migrate）409。
+        /// </summary>
+        [HttpPut("settings")]
+        [Authorize(Policy = Permissions.Warehouse.ManageProducts)]
+        public async Task<IActionResult> UpdateSettings([FromBody] UpdateStorePriceUpdateTaskSettingsRequestDto request)
+        {
+            try
+            {
+                var settings = await _service.UpdateSettingsAsync(
+                    request,
+                    User.Identity?.Name ?? "System",
+                    HttpContext.RequestAborted
+                );
+                return Ok(ApiResponse<StorePriceUpdateTaskSettingsDto>.OK(settings, "已保存"));
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return BadRequest(
+                    ApiResponse<object>.Error(
+                        $"超期天数必须在 {StorePriceUpdateTaskSettingsDto.MinAllowedOverdueDays}～{StorePriceUpdateTaskSettingsDto.MaxAllowedOverdueDays} 天之间"
+                    )
+                );
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(ApiResponse<object>.Error(ex.Message));
+            }
+        }
+
+        /// <summary>
         /// 改价保存前的预告：当前有多少分店会收到通知。只读、只返回计数，
         /// Web 仓库商品编辑与移动端仓库维护共用，因此仅要求已登录。
         /// </summary>

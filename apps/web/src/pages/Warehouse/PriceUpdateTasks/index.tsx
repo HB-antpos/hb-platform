@@ -1,4 +1,4 @@
-import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { DownloadOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons'
 import { Button, Card, Checkbox, Col, DatePicker, Divider, Empty, Image, Input, Progress, Row, Segmented, Select, Space, Statistic, Tabs, Tag, Tooltip, Typography, message, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -64,6 +64,7 @@ import {
 } from './logic'
 import messagesEn from './messages.en.json'
 import messagesZh from './messages.zh.json'
+import SettingsModal from './SettingsModal'
 
 // 本页文案随页面代码块懒注册，不进入首屏 i18n 包（首屏只保留路由标题与入口按钮两条）。
 registerPageMessages({ zh: messagesZh, en: messagesEn })
@@ -157,6 +158,9 @@ export default function PriceUpdateTasksPage() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([])
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null)
   const [cancelling, setCancelling] = useState(false)
+
+  // 设置弹窗（任务超期天数）：保存成功后刷新各页签，让「超期」统计按新天数重算。
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const appliedStoreCodes = appliedFilters.storeCodes
   const baseQuery = useMemo(() => buildPriceUpdateTasksQuery(appliedFilters), [appliedFilters])
@@ -581,6 +585,7 @@ export default function PriceUpdateTasksPage() {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => setRefreshToken((value) => value + 1)}>{t('common.refresh', '刷新')}</Button>
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void handleExport()}>{t(`${I18N}.export.button`)}</Button>
+          <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>{t(`${I18N}.settings.button`)}</Button>
         </Space>
       )}
     >
@@ -724,6 +729,11 @@ export default function PriceUpdateTasksPage() {
           : t(`${I18N}.cancel.byIds`, { count: cancelTarget?.ids.length ?? 0 })}
         onConfirm={(note) => void handleConfirmCancel(note)}
         onClose={() => setCancelTarget(null)}
+      />
+      <SettingsModal
+        open={settingsOpen}
+        onSaved={() => setRefreshToken((value) => value + 1)}
+        onClose={() => setSettingsOpen(false)}
       />
     </PageContainer>
   )

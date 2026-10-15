@@ -199,6 +199,24 @@
         "success": "已导出 {{count}} 条记录",
         "failed": "导出失败",
         "fileName": "价格变更任务"
+      },
+      "settings": {
+        "button": "设置",
+        "title": "价格变更任务设置",
+        "description": "未完成的任务从首次生成起，超过这个天数就算「超期」。移动端店长的管理分店有超期任务时，会被锁定「报表中心」，需先处理完才能进入；管理员和仓库管理员不会被锁。保存后服务端立即按新天数计算；App 端在下次刷新时更新（通常几分钟内），已有任务不会重新计时。",
+        "overdueDaysLabel": "任务超期天数",
+        "daysSuffix": "天",
+        "defaultHint": "默认 {{days}} 天，可设置 {{min}}–{{max}} 天",
+        "lastModified": "最后修改：{{name}} · {{time}}",
+        "error": {
+          "empty": "请输入天数",
+          "notInteger": "请输入整数天数",
+          "tooSmall": "不能小于 {{min}} 天",
+          "tooLarge": "不能大于 {{max}} 天"
+        },
+        "loadFailed": "加载设置失败",
+        "saved": "已保存",
+        "saveFailed": "保存失败"
       }
     }
   }

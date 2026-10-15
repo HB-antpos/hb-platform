@@ -199,6 +199,24 @@
         "success": "Exported {{count}} records",
         "failed": "Export failed",
         "fileName": "price-update-tasks"
+      },
+      "settings": {
+        "button": "Settings",
+        "title": "Price update task settings",
+        "description": "A pending task counts as \"overdue\" once this many days have passed since it was first created. While a store manager has overdue tasks in a store they manage, the mobile app locks \"Reports\" until they are handled; admins and warehouse admins are never locked. Changes apply on the server immediately; the mobile app picks them up on its next refresh (usually within a few minutes). Existing tasks do not restart the clock.",
+        "overdueDaysLabel": "Task overdue after",
+        "daysSuffix": "days",
+        "defaultHint": "Default: {{days}} days. Allowed range: {{min}}–{{max}} days",
+        "lastModified": "Last modified: {{name}} · {{time}}",
+        "error": {
+          "empty": "Enter a number of days",
+          "notInteger": "Enter a whole number of days",
+          "tooSmall": "Must be at least {{min}} days",
+          "tooLarge": "Must be at most {{max}} days"
+        },
+        "loadFailed": "Failed to load settings",
+        "saved": "Saved",
+        "saveFailed": "Failed to save"
       }
     }
   }
