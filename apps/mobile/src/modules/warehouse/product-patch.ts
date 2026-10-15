@@ -27,7 +27,10 @@ export type WarehouseProductPatchField =
 interface WarehouseProductPatchOptions {
   field?: WarehouseProductPatchField;
   statusOnly?: boolean;
+  /** 仅 retailPrice 单字段保存使用；缺省 = 同步分店零售价。 */
   syncStoreRetailPrices?: boolean;
+  /** 仅 retailPrice 单字段保存使用；缺省 = 给分店生成价格任务。 */
+  generateTasks?: boolean;
   supplyNotice?: SupplyNoticeInput;
 }
 
@@ -51,10 +54,13 @@ export function buildWarehouseProductPatchRequest(
       }
       case "retailPrice": {
         const retailPrice = parseNullableNumber(form.retailPrice);
+        // 默认直接同步分店零售价并生成价格任务；只有操作人在确认弹窗里关掉开关才会传 false。
+        // 字段只在零售价保存时携带，进货价等其它字段的保存不带这两个字段。
         return {
           retailPrice,
           oemPrice: retailPrice,
-          syncStoreRetailPrices: options.syncStoreRetailPrices ?? false,
+          syncStoreRetailPrices: options.syncStoreRetailPrices ?? true,
+          generateTasks: options.generateTasks ?? true,
         };
       }
       case "domesticPrice":
@@ -77,6 +83,10 @@ export function buildWarehouseProductPatchRequest(
     importPrice: parseNullableNumber(form.purchasePrice),
     retailPrice: parseNullableNumber(form.retailPrice),
     oemPrice: parseNullableNumber(form.retailPrice),
+    // 整表保存没有确认弹窗，不能依赖后端「不传 = true」的新默认值去改分店价；
+    // 显式保持原行为：不动分店价，由分店收到改价任务后自行确认。
+    syncStoreRetailPrices: false,
+    generateTasks: true,
     domesticPrice: parseNullableNumber(form.domesticPrice),
     stockQuantity: parseNullableNumber(form.stockQuantity),
     middlePackageQuantity: parseNullableNumber(form.middlePackageQuantity),

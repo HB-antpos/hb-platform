@@ -18,6 +18,19 @@ public sealed class WarehouseProductBatchUpdateOptionsDto
     /// 未设状态或设为上架的行忽略。旧客户端不传，保持原状。
     /// </summary>
     public WarehouseProductSupplyNoticeInputDto? SupplyNotice { get; set; }
+
+    /// <summary>同步分店零售价（默认 true）：勾选 = 本次改了零售价的商品，直接把各启用分店零售价改成新价。</summary>
+    public bool? SyncStoreRetailPrices { get; set; }
+
+    /// <summary>生成价格任务（默认 true）：勾选 = 给分店生成价格更新任务；不勾 = 不通知分店。</summary>
+    public bool? GenerateTasks { get; set; }
+
+    /// <summary>两个开关解析后的策略（null 视同勾选）。</summary>
+    public WarehousePriceSyncPolicy PriceSyncPolicy =>
+        WarehousePriceSyncPolicy.From(SyncStoreRetailPrices, GenerateTasks);
+
+    /// <summary>任一开关被显式取消：此时必须走带选项的重载，旧重载不会把开关传到写入器。</summary>
+    public bool UsesNonDefaultPriceSync => !PriceSyncPolicy.Equals(WarehousePriceSyncPolicy.Default);
 }
 
 /// <summary>
@@ -95,6 +108,12 @@ public sealed class WarehouseProductBatchUpdateJobRequestDto
     /// 显式设为下架的商品随任务登记的供货说明；为空时不登记。
     /// </summary>
     public WarehouseProductSupplyNoticeInputDto? SupplyNotice { get; set; }
+
+    /// <summary>同步分店零售价（默认 true）。</summary>
+    public bool? SyncStoreRetailPrices { get; set; }
+
+    /// <summary>生成价格任务（默认 true）。</summary>
+    public bool? GenerateTasks { get; set; }
 }
 
 /// <summary>

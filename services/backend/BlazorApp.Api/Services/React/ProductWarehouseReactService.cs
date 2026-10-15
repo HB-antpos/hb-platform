@@ -43,7 +43,9 @@ public class ProductWarehouseReactService : IProductWarehouseReactService
         IWarehouseProductChangeHistoryService changeHistoryService,
         ITranslationService? translationService = null,
         // 可选：用于在仓库自动下发分店价时登记「待换标签」通知；缺省时该功能静默关闭。
-        IStorePriceUpdateTaskService? priceTaskService = null
+        IStorePriceUpdateTaskService? priceTaskService = null,
+        // 可选：仓库覆盖分店价后同事务登记「分店价 → HQ」同步任务；缺省时不同步 HQ。
+        IWarehouseStorePriceHqSyncEnqueuer? hqPriceSyncEnqueuer = null
     )
         : this(
             ProductWarehouseLegacyFactory.Create(
@@ -56,7 +58,8 @@ public class ProductWarehouseReactService : IProductWarehouseReactService
                 dataSyncFullService,
                 changeHistoryService,
                 translationService,
-                priceTaskService
+                priceTaskService,
+                hqPriceSyncEnqueuer
             )
         ) { }
 

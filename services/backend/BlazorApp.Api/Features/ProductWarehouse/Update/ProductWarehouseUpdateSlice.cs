@@ -353,38 +353,71 @@ internal sealed class ProductWarehouseUpdateSlice
             );
 
             // 5. 强联动：批量更新 StoreRetailPrice（主表零售价/进货价覆盖）
+            // 「同步分店零售价」不勾选时只联动进货价，分店零售价原样保留，由分店按「改价格」任务自己确认。
+            var policy = WarehousePriceSyncPolicy.From(dto.SyncStoreRetailPrices, dto.GenerateTasks);
             var mainRetail = dto.OEMPrice ?? product.RetailPrice;
             var mainPurchase = dto.ImportPrice ?? product.PurchasePrice;
             // 覆盖前的分店零售价就是货架标签上的价格，下面的循环会就地改写，必须先留存，
             // 否则无法为分店登记「待换标签」通知。
-            var overwrittenStorePrices = storeRetailPrices
-                .Where(srp => !string.IsNullOrWhiteSpace(srp.StoreCode))
-                .Select(srp => new StorePriceOverwrite(
-                    srp.StoreCode!,
-                    productCode,
-                    srp.StoreRetailPriceValue,
-                    srp.DiscountRate
-                ))
-                .ToList();
+            var overwrittenStorePrices = policy.SyncStoreRetailPrices
+                ? storeRetailPrices
+                    .Where(srp => !string.IsNullOrWhiteSpace(srp.StoreCode))
+                    .Select(srp => new StorePriceOverwrite(
+                        srp.StoreCode!,
+                        productCode,
+                        srp.StoreRetailPriceValue,
+                        srp.DiscountRate
+                    ))
+                    .ToList()
+                : new List<StorePriceOverwrite>();
             foreach (var srp in storeRetailPrices)
             {
-                srp.StoreRetailPriceValue = mainRetail;
+                if (policy.SyncStoreRetailPrices)
+                {
+                    srp.StoreRetailPriceValue = mainRetail;
+                }
                 srp.PurchasePrice = mainPurchase;
                 // 分店价的启用状态属于门店销售侧，仓库保存只覆盖价格。
                 srp.UpdatedAt = now;
             }
             if (storeRetailPrices.Any())
             {
-                await _context
-                    .Db.Updateable(storeRetailPrices)
-                    .UpdateColumns(srp => new
+                if (policy.SyncStoreRetailPrices)
+                {
+                    await _context
+                        .Db.Updateable(storeRetailPrices)
+                        .UpdateColumns(srp => new
+                        {
+                            srp.StoreRetailPriceValue,
+                            srp.PurchasePrice,
+                            srp.UpdatedAt,
+                        })
+                        .ExecuteCommandAsync();
+                    await RecordStorePriceOverwritesAsync(
+                        overwrittenStorePrices,
+                        effectiveUpdatedBy,
+                        policy.GenerateTasks
+                    );
+                    if (policy.ShouldSyncHqImmediately)
                     {
-                        srp.StoreRetailPriceValue,
-                        srp.PurchasePrice,
-                        srp.UpdatedAt,
-                    })
-                    .ExecuteCommandAsync();
-                await RecordStorePriceOverwritesAsync(overwrittenStorePrices, effectiveUpdatedBy);
+                        // 直接改了分店价又不生成任务：没有「任务执行」可等，改价当下同事务入队同步 HQ。
+                        // 入队器只带启用分店（HQ 没有停用分店）。
+                        await EnqueueStorePriceHqSyncAsync(
+                            productCode,
+                            storeRetailPrices.Select(srp => srp.StoreCode),
+                            new[] { ProductMaintenanceHqFieldMasks.StoreRetailPrice },
+                            effectiveUpdatedBy,
+                            WarehouseFullUpdateHqSource
+                        );
+                    }
+                }
+                else
+                {
+                    await _context
+                        .Db.Updateable(storeRetailPrices)
+                        .UpdateColumns(srp => new { srp.PurchasePrice, srp.UpdatedAt })
+                        .ExecuteCommandAsync();
+                }
             }
 
             // 6. 强联动：批量更新 StoreMultiCodeProduct
@@ -407,7 +440,11 @@ internal sealed class ProductWarehouseUpdateSlice
                     || !activeSetChildCodes.Contains(mcp.MultiCodeProductCode)
                 )
                 {
-                    mcp.MultiCodeRetailPrice = mainRetail;
+                    // 多码零售价同样是分店价：不勾选「同步分店零售价」时保持原价，只联动进货价。
+                    if (policy.SyncStoreRetailPrices)
+                    {
+                        mcp.MultiCodeRetailPrice = mainRetail;
+                    }
                     mcp.PurchasePrice = mainPurchase;
                 }
                 mcp.UpdatedAt = now;
@@ -547,7 +584,8 @@ internal sealed class ProductWarehouseUpdateSlice
                 new[] { productCode },
                 action: "Update",
                 source: "WarehouseProducts",
-                actorName: effectiveUpdatedBy
+                actorName: effectiveUpdatedBy,
+                skipPriceTasks: !policy.GenerateTasks
             );
 
             _context.Db.Ado.CommitTran();
@@ -600,6 +638,8 @@ internal sealed class ProductWarehouseUpdateSlice
 
         var effectiveUpdatedBy = ResolveUpdatedBy(updatedBy);
         var now = DateTime.Now;
+        // 两个开关只对零售价（OEMPrice）补丁生效；其它字段补丁不涉及分店零售价与价格任务。
+        var patchPolicy = WarehousePriceSyncPolicy.From(dto.SyncStoreRetailPrices, dto.GenerateTasks);
 
         await _context.Db.Ado.BeginTranAsync();
         try
@@ -787,13 +827,18 @@ internal sealed class ProductWarehouseUpdateSlice
                     await _context.Db.Ado.RollbackTranAsync();
                     return null;
                 }
-                await UpsertActiveStoreRetailPricesAsync(
-                    product,
-                    purchasePrice: null,
-                    retailPrice: dto.OEMPrice,
-                    now,
-                    effectiveUpdatedBy
-                );
+                // 「同步分店零售价」不勾选时只改仓库价，分店价不动，分店会收到「改价格」任务。
+                if (patchPolicy.SyncStoreRetailPrices)
+                {
+                    await UpsertActiveStoreRetailPricesAsync(
+                        product,
+                        purchasePrice: null,
+                        retailPrice: dto.OEMPrice,
+                        now,
+                        effectiveUpdatedBy,
+                        patchPolicy
+                    );
+                }
             }
 
             if (dto.ImportPrice.HasValue)
@@ -817,7 +862,8 @@ internal sealed class ProductWarehouseUpdateSlice
                 new[] { productCode },
                 action: "Patch",
                 source: "WarehouseProducts",
-                actorName: effectiveUpdatedBy
+                actorName: effectiveUpdatedBy,
+                skipPriceTasks: !patchPolicy.GenerateTasks
             );
 
             await _context.Db.Ado.CommitTranAsync();

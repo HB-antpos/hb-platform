@@ -49,6 +49,8 @@ import CreateProductModal from './CreateProductModal';
 import CategoryTreePicker from './CategoryTreePicker';
 import CategoryFilterPanel from './CategoryFilterPanel';
 import ColumnSettingsButton from './ColumnSettingsButton';
+import RetailPriceSyncOptionsField from './RetailPriceSyncOptionsField';
+import { DEFAULT_RETAIL_PRICE_SYNC_CHOICE, buildRetailPriceSyncFields, isBatchRetailPriceFilled, isRetailPriceChanged, type RetailPriceSyncChoice, } from './retailPriceSyncOptions';
 import { WAREHOUSE_PRODUCT_STATUS_TAB_KEYS, buildSupplyNoticeSummary, buildWarehouseProductMetaParts, buildWarehouseProductStatusCountQuery, formatWarehouseProductCount, isWarehouseProductRetailPriceMissing, planWarehouseProductStatusCounts, resolveWarehouseProductStatusTab, warehouseProductStatusTabToIsActive, type WarehouseProductStatusCounts, type WarehouseProductStatusTabKey, } from './warehouseProductsListView';
 import ContainerCategoryManageModal from '../ContainerDetail/ContainerCategoryManageModal';
 import { resolveContainerCategorySelectionAfterRefresh, resolveContainerCategoryTargetAfterMutation, type ContainerCategoryChange, } from '../ContainerDetail/containerCategoryManageLogic';
@@ -439,13 +441,16 @@ function renderWarehouseProductCategoryCell(record: WarehouseProductListItem, ca
       <div className="warehouse-products-category-cell">{displayName}</div>
     </Tooltip>);
 }
-function ProductFormModal({ open, saving, editingItem, suppliers, form, suggestedDiscount, onCancel, onSubmit, }: {
+function ProductFormModal({ open, saving, editingItem, suppliers, form, suggestedDiscount, retailPriceSync, onRetailPriceSyncChange, onCancel, onSubmit, }: {
     open: boolean;
     saving: boolean;
     editingItem: WarehouseProductListItem | null;
     suppliers: SupplierOption[];
     form: ReturnType<typeof Form.useForm<ProductFormValues>>[0];
     suggestedDiscount: EditingSuggestedDiscountState;
+    // 「同步分店零售价 / 生成价格任务」勾选状态由页面持有（保存时随请求发送），仅在本次确实改了零售价时展示。
+    retailPriceSync: RetailPriceSyncChoice;
+    onRetailPriceSyncChange: (next: RetailPriceSyncChoice) => void;
     onCancel: () => void;
     onSubmit: () => void;
 }) {
@@ -484,7 +489,11 @@ function ProductFormModal({ open, saving, editingItem, suppliers, form, suggeste
             controller.abort();
         };
     }, [open, productCode, originalRetailPrice, suggestedDiscount.loaded, suggestedDiscount.percent, watchedRetailPrice, watchedSuggestedDiscountPercent]);
-    const pricePreviewText = pricePreview
+    // 零售价相对原值变化了才出现两个勾选项；改回原值或清空时收起（勾选状态保留在页面 state 中）。
+    const retailPriceWillChange = Boolean(editingItem) && isRetailPriceChanged(watchedRetailPrice, originalRetailPrice);
+    // 零售价预告文案描述的是默认行为（直接下发分店价并通知换标签）；操作人取消任一勾选后它不再准确，改为不显示。
+    const retailPreviewMatchesChoice = retailPriceSync.syncStoreRetailPrices && retailPriceSync.generateTasks;
+    const pricePreviewText = pricePreview && (!pricePreview.retailPriceChanged || retailPreviewMatchesChoice)
         ? buildPriceNotificationPreviewText(pricePreview.preview, pricePreview.retailPriceChanged, t)
         : null;
     const suggestedDiscountedPrice = computeSuggestedDiscountedPrice(
@@ -537,6 +546,10 @@ function ProductFormModal({ open, saving, editingItem, suppliers, form, suggeste
             <InputNumber min={0} precision={2} style={{ width: '100%' }}/>
           </Form.Item>
         </Space>
+
+        {retailPriceWillChange ? (<div style={{ marginBottom: 16 }}>
+          <RetailPriceSyncOptionsField value={retailPriceSync} onChange={onRetailPriceSyncChange} disabled={saving}/>
+        </div>) : null}
 
         {editingItem ? (<>
           <Space size={16} style={{ display: 'flex' }} align="start">
@@ -673,12 +686,19 @@ export default function WarehouseProductsPage() {
     const batchGenerateImageUrls = Form.useWatch('generateImageUrls', batchEditForm) === true;
     const batchImageBaseUrl = Form.useWatch('imageBaseUrl', batchEditForm);
     const batchSetSuggestedDiscount = Form.useWatch('setSuggestedDiscount', batchEditForm) === true;
+    // 批量修改里填了零售价才会改零售价，此时才展示「同步分店零售价 / 生成价格任务」。
+    const batchRetailPriceFilled = isBatchRetailPriceFilled(Form.useWatch('oemPrice', batchEditForm));
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<WarehouseProductListItem | null>(null);
     const [editingSuggestedDiscount, setEditingSuggestedDiscount] = useState<EditingSuggestedDiscountState>({ loaded: false, percent: null });
+    // 改零售价时的「同步分店零售价 / 生成价格任务」勾选：编辑弹窗、批量修改弹窗、行内改价确认各一份，都只存组件 state，每次打开重置为默认全勾选。
+    const [editRetailPriceSync, setEditRetailPriceSync] = useState<RetailPriceSyncChoice>({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
+    const [batchRetailPriceSync, setBatchRetailPriceSync] = useState<RetailPriceSyncChoice>({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
+    // 行内改零售价的确认框：关闭后仍保留数据直到下次打开，避免弹窗淡出动画期间内容被清空闪一下。
+    const [inlineRetailPriceConfirm, setInlineRetailPriceConfirm] = useState<{ open: boolean; cell: WarehouseProductInlineEditCell; value: number; sync: RetailPriceSyncChoice } | null>(null);
     const editingProductCodeRef = useRef<string | null>(null);
     const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
     const [localSupplierNameMap, setLocalSupplierNameMap] = useState<Record<string, string>>({});
@@ -1373,6 +1393,7 @@ export default function WarehouseProductsPage() {
         setEditingItem(record);
         editingProductCodeRef.current = record.productCode;
         setEditingSuggestedDiscount({ loaded: false, percent: null });
+        setEditRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
         lookupSuggestedDiscounts([record.productCode])
             .then((items) => {
             // 期间用户可能已关闭弹窗或改开了另一个商品，过期结果不能回填。
@@ -1422,6 +1443,8 @@ export default function WarehouseProductsPage() {
             setSaving(true);
             // 一次保存可能连发两个请求，通知汇总以最后一个带头的响应为准（不相加）。
             const priceNotificationCapture = createPriceNotificationCapture();
+            // 只有这次真的改了零售价才发送「同步分店零售价 / 生成价格任务」，不改零售价的保存请求体保持不变。
+            const retailPriceChanged = isRetailPriceChanged(values.oemPrice, editingItem.labelPrice);
             await updateWarehouseProductFull(editingItem.productCode, {
                 productName: values.productName,
                 englishName: values.englishProductName,
@@ -1441,6 +1464,7 @@ export default function WarehouseProductsPage() {
                 // 说明只在下架时有意义；上架时即使残留也不提交。
                 ...(supplyNotice && !values.isActive ? { supplyNotice } : {}),
                 supplierCode: values.supplierCode,
+                ...buildRetailPriceSyncFields(editRetailPriceSync, retailPriceChanged),
             }, { onResponse: priceNotificationCapture.onResponse });
             const nextSuggestedDiscountPercent = values.suggestedDiscountPercent ?? null;
             const suggestedDiscountChanged = editingSuggestedDiscount.loaded
@@ -1460,7 +1484,6 @@ export default function WarehouseProductsPage() {
                 }
             }
             message.success(t('warehouse.updateProductSuccess'));
-            const retailPriceChanged = typeof values.oemPrice === 'number' && values.oemPrice !== (editingItem.labelPrice ?? null);
             showPriceNotification(priceNotificationCapture.getSummary(), {
                 keyword: editingItem.itemNumber,
                 lines: [
@@ -1511,37 +1534,9 @@ export default function WarehouseProductsPage() {
         inlineCancelledCellRef.current = getInlineCellKey(cell);
         setInlineEditingCell(null);
     };
-    const handleInlineSave = async (cell: WarehouseProductInlineEditCell) => {
+    // 真正发送行内 PATCH 并收尾。调用方必须已占用 inlineSaveLockRef（Enter 之后紧跟 blur，锁要在第一个 await 前占好，确保只发一次 PATCH）。
+    const commitInlineSave = async (cell: WarehouseProductInlineEditCell, value: number, payload: PatchWarehouseProductPayload) => {
         const cellKey = getInlineCellKey(cell);
-        if (inlineCancelledCellRef.current === cellKey) {
-            inlineCancelledCellRef.current = null;
-            return;
-        }
-        if (inlineSaveLockRef.current) return;
-        const value = cell.value;
-        if (value === null || value === undefined) {
-            setInlineEditingCell(null);
-            return;
-        }
-        if (value < 0) {
-            message.error(t('warehouse.nonNegativeValueRequired', '请输入非负数'));
-            return;
-        }
-        if (value === cell.originalValue) {
-            setInlineEditingCell(null);
-            return;
-        }
-
-        const payload: PatchWarehouseProductPayload = cell.field === 'minOrderQuantity'
-            ? { minOrderQuantity: value }
-            : cell.field === 'domesticPrice'
-                ? { domesticPrice: value }
-                : cell.field === 'importPrice'
-                    ? { importPrice: value }
-                    : { oemPrice: value };
-
-        // Enter 可能紧接着触发 blur；ref 锁必须在第一个 await 前占用，确保只发一次 PATCH。
-        inlineSaveLockRef.current = cellKey;
         setInlineSavingCellKey(cellKey);
         try {
             const priceNotificationCapture = createPriceNotificationCapture();
@@ -1584,6 +1579,65 @@ export default function WarehouseProductsPage() {
             }
         }
     };
+    const handleInlineSave = async (cell: WarehouseProductInlineEditCell) => {
+        const cellKey = getInlineCellKey(cell);
+        if (inlineCancelledCellRef.current === cellKey) {
+            inlineCancelledCellRef.current = null;
+            return;
+        }
+        if (inlineSaveLockRef.current) return;
+        const value = cell.value;
+        if (value === null || value === undefined) {
+            setInlineEditingCell(null);
+            return;
+        }
+        if (value < 0) {
+            message.error(t('warehouse.nonNegativeValueRequired', '请输入非负数'));
+            return;
+        }
+        if (value === cell.originalValue) {
+            setInlineEditingCell(null);
+            return;
+        }
+
+        // Enter 可能紧接着触发 blur；ref 锁必须在第一个 await 前占用，确保只发一次 PATCH。
+        inlineSaveLockRef.current = cellKey;
+        // 改零售价要让操作人决定「同步分店零售价 / 生成价格任务」：先弹确认框，锁保持到确认保存或取消，
+        // 期间编辑框失焦触发的 blur 会因锁而被忽略，不会重复弹框。
+        if (cell.field === 'labelPrice') {
+            setInlineRetailPriceConfirm({ open: true, cell, value, sync: { ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE } });
+            return;
+        }
+
+        const payload: PatchWarehouseProductPayload = cell.field === 'minOrderQuantity'
+            ? { minOrderQuantity: value }
+            : cell.field === 'domesticPrice'
+                ? { domesticPrice: value }
+                : { importPrice: value };
+        await commitInlineSave(cell, value, payload);
+    };
+    const handleInlineRetailPriceConfirmOk = () => {
+        const pending = inlineRetailPriceConfirm;
+        // 淡出动画期间按钮仍可点，open 为 false 说明这一轮确认已经处理过，不能重复提交。
+        if (!pending?.open) return;
+        setInlineRetailPriceConfirm({ ...pending, open: false });
+        void commitInlineSave(pending.cell, pending.value, {
+            oemPrice: pending.value,
+            ...buildRetailPriceSyncFields(pending.sync, true),
+        });
+    };
+    const handleInlineRetailPriceConfirmCancel = () => {
+        const pending = inlineRetailPriceConfirm;
+        if (!pending?.open) return;
+        setInlineRetailPriceConfirm({ ...pending, open: false });
+        // 与按 Esc 取消一致：丢弃本次输入、忽略随后可能到来的 blur，并释放确认期间占用的锁。
+        inlineCancelledCellRef.current = getInlineCellKey(pending.cell);
+        setInlineEditingCell(null);
+        inlineSaveLockRef.current = null;
+    };
+    const inlineRetailPriceConfirmRecord = inlineRetailPriceConfirm
+        ? data.find((item) => item.productCode === inlineRetailPriceConfirm.cell.productCode)
+        : undefined;
     const renderInlineEditableNumberCell = (record: WarehouseProductListItem, field: WarehouseProductInlineEditField) => {
         const cellKey = getInlineCellKey({ productCode: record.productCode, field });
         const cell = inlineEditingCell && getInlineCellKey(inlineEditingCell) === cellKey
@@ -1849,6 +1903,7 @@ export default function WarehouseProductsPage() {
             imageBaseUrl: WAREHOUSE_PRODUCT_IMAGE_DEFAULT_BASE_URL,
             syncImageToHq: false,
         });
+        setBatchRetailPriceSync({ ...DEFAULT_RETAIL_PRICE_SYNC_CHOICE });
         setBatchEditOpen(true);
     };
     const handleCategoryMutationCommitted = (change: ContainerCategoryChange) => {
@@ -1919,6 +1974,9 @@ export default function WarehouseProductsPage() {
         syncImageToHq?: boolean;
         // 批量设为下架时的供货说明，随后台任务同一请求提交，只登记显式设为下架的商品。
         supplyNotice?: SupplyNoticeInput;
+        // 填了零售价时才有：同步分店零售价 / 生成价格任务（不填零售价则不带这两个字段）。
+        syncStoreRetailPrices?: boolean;
+        generateTasks?: boolean;
     }, suggestedDiscount?: { rate: number | null }) => {
         if (!selectedRowKeys.length) {
             message.warning(t('warehouse.selectProductsFirst', '请先选择商品'));
@@ -2080,6 +2138,7 @@ export default function WarehouseProductsPage() {
                     imageBaseUrl,
                     syncImageToHq,
                     ...(supplyNotice && values.isActive === false ? { supplyNotice } : {}),
+                    ...buildRetailPriceSyncFields(batchRetailPriceSync, isBatchRetailPriceFilled(values.oemPrice)),
                 }, suggestedDiscount)
                 : submitBatchSuggestedDiscountOnly(suggestedDiscount!),
         });
@@ -3081,7 +3140,24 @@ export default function WarehouseProductsPage() {
           </section>
         </div>
 
-      <ProductFormModal open={modalOpen} saving={saving} editingItem={editingItem} suppliers={suppliers} form={form} suggestedDiscount={editingSuggestedDiscount} onCancel={handleCloseModal} onSubmit={() => void handleSave()}/>
+      <ProductFormModal open={modalOpen} saving={saving} editingItem={editingItem} suppliers={suppliers} form={form} suggestedDiscount={editingSuggestedDiscount} retailPriceSync={editRetailPriceSync} onRetailPriceSyncChange={setEditRetailPriceSync} onCancel={handleCloseModal} onSubmit={() => void handleSave()}/>
+
+      <Modal title={t('warehouseUi.products.retailPriceSync.inlineConfirmTitle')} open={inlineRetailPriceConfirm?.open === true} width={520} maskClosable={false} okText={t('common.save')} cancelText={t('common.cancel')} onOk={handleInlineRetailPriceConfirmOk} onCancel={handleInlineRetailPriceConfirmCancel}>
+        {inlineRetailPriceConfirm ? (<Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div>
+            <Typography.Text strong>
+              {[inlineRetailPriceConfirmRecord?.itemNumber, inlineRetailPriceConfirmRecord?.name].filter(Boolean).join(' · ') || inlineRetailPriceConfirm.cell.productCode}
+            </Typography.Text>
+            <div>
+              {t('warehouse.priceNotification.retailPriceLine', {
+                from: inlineRetailPriceConfirm.cell.originalValue == null ? '--' : `$${Number(inlineRetailPriceConfirm.cell.originalValue).toFixed(2)}`,
+                to: `$${inlineRetailPriceConfirm.value.toFixed(2)}`,
+            })}
+            </div>
+          </div>
+          <RetailPriceSyncOptionsField value={inlineRetailPriceConfirm.sync} onChange={(sync) => setInlineRetailPriceConfirm((current) => (current ? { ...current, sync } : current))}/>
+        </Space>) : null}
+      </Modal>
 
       <CreateProductModal open={createModalOpen} suppliers={suppliers} onCancel={() => setCreateModalOpen(false)} onSuccess={() => {
             setCreateModalOpen(false);
@@ -3145,6 +3221,9 @@ export default function WarehouseProductsPage() {
               <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder={t('warehouse.batchEditKeepEmpty', '留空不修改')}/>
             </Form.Item>
           </Space>
+          {batchRetailPriceFilled ? (<div style={{ marginBottom: 16 }}>
+            <RetailPriceSyncOptionsField value={batchRetailPriceSync} onChange={setBatchRetailPriceSync} disabled={batchEditSaving}/>
+          </div>) : null}
           <Space size={16} style={{ display: 'flex' }} align="start">
             <Form.Item name="setSuggestedDiscount" valuePropName="checked" label={t('warehouse.priceNotification.suggestedDiscount')} style={{ flex: 1 }}>
               <Checkbox>{t('warehouse.priceNotification.batchSetSuggestedDiscount')}</Checkbox>

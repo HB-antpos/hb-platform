@@ -45,7 +45,8 @@ internal static class ProductWarehouseLegacyFactory
         IDataSyncFullService dataSyncFullService,
         IWarehouseProductChangeHistoryService changeHistoryService,
         ITranslationService? translationService,
-        IStorePriceUpdateTaskService? priceTaskService = null
+        IStorePriceUpdateTaskService? priceTaskService = null,
+        IWarehouseStorePriceHqSyncEnqueuer? hqPriceSyncEnqueuer = null
     )
     {
         var sliceContext = new ProductWarehouseSliceContext(
@@ -58,7 +59,8 @@ internal static class ProductWarehouseLegacyFactory
             dataSyncFullService,
             changeHistoryService,
             translationService,
-            priceTaskService
+            priceTaskService,
+            hqPriceSyncEnqueuer
         );
 
         return new ProductWarehouseSlices(

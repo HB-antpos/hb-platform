@@ -23,7 +23,14 @@
       "activate": "Put on shelf",
       "deactivate": "Take off shelf…",
       "selectionSetCategory": "Change category",
-      "pushToHq": "Send to HQ"
+      "pushToHq": "Send to HQ",
+      "retailPriceSync": {
+        "syncStoreRetailPrices": "Sync store retail prices",
+        "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away and stores are asked to swap labels. When unchecked, store prices stay as they are and each store confirms the price change.",
+        "generateTasks": "Create price tasks",
+        "generateTasksHint": "When checked, price update tasks are created for stores. When unchecked, stores are not notified (store prices that are synced are pushed to HQ immediately).",
+        "inlineConfirmTitle": "Change retail price"
+      }
     }
   }
 }

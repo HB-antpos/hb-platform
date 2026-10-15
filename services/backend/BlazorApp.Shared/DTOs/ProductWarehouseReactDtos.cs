@@ -403,6 +403,12 @@ namespace BlazorApp.Shared.DTOs
 
         // ---------- 商品类型≠0 时：条码→套装价/进货价明细（前端编辑后提交，同步 ProductSetCode / StoreMultiCodeProduct）----------
         public List<BarcodePriceItemDto>? BarcodePrices { get; set; }
+
+        /// <summary>同步分店零售价（默认 true）：勾选 = 直接把各分店零售价改成新价；不勾 = 不动分店价。见 WarehousePriceSyncPolicy。</summary>
+        public bool? SyncStoreRetailPrices { get; set; }
+
+        /// <summary>生成价格任务（默认 true）：勾选 = 给分店生成价格更新任务；不勾 = 不通知分店。</summary>
+        public bool? GenerateTasks { get; set; }
     }
 
     /// <summary>
@@ -423,6 +429,12 @@ namespace BlazorApp.Shared.DTOs
         public decimal? DomesticPrice { get; set; }
         public decimal? ImportPrice { get; set; }
         public decimal? OEMPrice { get; set; }
+
+        /// <summary>同步分店零售价（默认 true）：勾选 = 直接把各分店零售价改成新价；不勾 = 不动分店价。见 WarehousePriceSyncPolicy。</summary>
+        public bool? SyncStoreRetailPrices { get; set; }
+
+        /// <summary>生成价格任务（默认 true）：勾选 = 给分店生成价格更新任务；不勾 = 不通知分店。</summary>
+        public bool? GenerateTasks { get; set; }
 
         /// <summary>
         /// 校验 PATCH 请求：无字段、多字段或负值返回错误消息，合法返回 null。
@@ -605,9 +617,12 @@ namespace BlazorApp.Shared.DTOs
         public decimal? PurchasePrice { get; set; }
         public decimal? RetailPrice { get; set; }
         /// <summary>
-        /// 零售价保存时是否同步所有启用分店的零售价。
+        /// 零售价保存时是否同步所有启用分店的零售价；不传 = true（旧版 App 会显式传 false，行为不变）。
         /// </summary>
         public bool? SyncStoreRetailPrices { get; set; }
+
+        /// <summary>生成价格任务（默认 true）：勾选 = 给分店生成价格更新任务；不勾 = 不通知分店。</summary>
+        public bool? GenerateTasks { get; set; }
         public decimal? DomesticPrice { get; set; }
         public decimal? OEMPrice { get; set; }
         public decimal? ImportPrice { get; set; }

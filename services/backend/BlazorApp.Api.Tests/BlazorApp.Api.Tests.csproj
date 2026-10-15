@@ -184,6 +184,8 @@
     <Compile Include="StoreProductPriceMultiStoreGridTests.cs" />
     <Compile Include="WarehouseStorePriceSyncServiceTests.cs" />
     <Compile Include="WarehouseStorePriceHqSyncTests.cs" />
+    <Compile Include="WarehouseStorePriceHqSyncEnqueuerTests.cs" />
+    <Compile Include="WarehousePriceSyncPolicyTests.cs" />
     <Compile Include="WarehouseStorePriceSyncJobServiceTests.cs" />
     <Compile Include="DataSyncFullServiceWarehouseProductsTests.cs" />
     <Compile Include="DataSyncIncrementalPosmSupplierMappingsTests.cs" />
