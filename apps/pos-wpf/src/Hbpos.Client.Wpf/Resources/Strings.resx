@@ -547,6 +547,7 @@
   <data name="specialProducts.status.noSearchResults" xml:space="preserve"><value>No matching non-special products.</value></data>
   <data name="specialProducts.status.searchResults" xml:space="preserve"><value>Found {0} products that can be marked special.</value></data>
   <data name="specialProducts.status.addedToCart" xml:space="preserve"><value>Added {0} to cart.</value></data>
+  <data name="specialProducts.status.addFailed" xml:space="preserve"><value>Could not add to cart: {0}</value></data>
   <data name="specialProducts.status.marked" xml:space="preserve"><value>{0} is now a special product.</value></data>
   <data name="specialProducts.status.unmarked" xml:space="preserve"><value>{0} removed from special products.</value></data>
   <data name="specialProducts.status.markFailed" xml:space="preserve"><value>Special product update failed: {0}</value></data>
@@ -1720,4 +1721,36 @@ Logged with reference {2}</value></data>
   <data name="settings.restartTest.title" xml:space="preserve"><value>Restart computer (test)</value></data>
   <data name="settings.restartTest.help" xml:space="preserve"><value>Runs the same flow as the reminder after daily close: safety checks, a 30-second countdown you can cancel, then a real restart of this computer.</value></data>
   <data name="settings.restartTest.button" xml:space="preserve"><value>Restart computer</value></data>
+  <data name="pos.status.pendingChoiceQueued" xml:space="preserve"><value>This barcode matches {0} items. Queued for selection ({1} pending).</value></data>
+  <data name="pos.status.pendingChoiceResolved" xml:space="preserve"><value>Added {0} (line quantity {1}). {2} still pending.</value></data>
+  <data name="pos.status.pendingChoiceResolvedLast" xml:space="preserve"><value>Added {0} (line quantity {1}).</value></data>
+  <data name="pos.status.pendingChoiceGone" xml:space="preserve"><value>That pending item is no longer available. Please check the cart.</value></data>
+  <data name="pos.status.pendingChoiceFull" xml:space="preserve"><value>The pending selection queue is full ({0}). Handle the pending items first - this scan was NOT recorded.</value></data>
+  <data name="pos.status.pendingChoiceAbandoned" xml:space="preserve"><value>Discarded a pending item ({0} left).</value></data>
+  <data name="pos.status.pendingChoiceAbandonedAll" xml:space="preserve"><value>Discarded {0} pending item(s).</value></data>
+  <data name="pendingChoice.badge" xml:space="preserve"><value>Pending {0} / {1}</value></data>
+  <data name="pendingChoice.title" xml:space="preserve"><value>Barcode ...{0} matches {1} items. Choose one.</value></data>
+  <data name="pendingChoice.scannedAt" xml:space="preserve"><value>{0} scanned</value></data>
+  <data name="pendingChoice.sameBarcode" xml:space="preserve"><value>Same barcode as the previous pending item</value></data>
+  <data name="pendingChoice.hint" xml:space="preserve"><value>Keep scanning: other items are added as usual.</value></data>
+  <data name="pendingChoice.queue" xml:space="preserve"><value>Queue</value></data>
+  <data name="pendingChoice.collapse" xml:space="preserve"><value>Collapse</value></data>
+  <data name="pendingChoice.expandAction" xml:space="preserve"><value>Tap to expand</value></data>
+  <data name="pendingChoice.collapsedBar" xml:space="preserve"><value>{0} pending - earliest {1} - barcode ...{2}</value></data>
+  <data name="pendingChoice.abandon" xml:space="preserve"><value>Discard this</value></data>
+  <data name="pendingChoice.abandonConfirm" xml:space="preserve"><value>Tap again to discard</value></data>
+  <data name="pendingChoice.abandonAll" xml:space="preserve"><value>Discard all ({0})...</value></data>
+  <data name="pendingChoice.statusHint" xml:space="preserve"><value>{0} pending</value></data>
+  <data name="pendingChoice.prompt.title" xml:space="preserve"><value>{0} pending item(s) not handled</value></data>
+  <data name="pendingChoice.prompt.back" xml:space="preserve"><value>Go back</value></data>
+  <data name="pendingChoice.prompt.body.pay" xml:space="preserve"><value>These items are not in the cart yet. Paying now will NOT include them. Choose the products first, or confirm discarding them.</value></data>
+  <data name="pendingChoice.prompt.body.hold" xml:space="preserve"><value>These items are not in the cart yet. Holding the order now will NOT include them. Choose the products first, or confirm discarding them.</value></data>
+  <data name="pendingChoice.prompt.body.recall" xml:space="preserve"><value>Recalling another order replaces this one, and these pending items will not come along. Choose the products first, or confirm discarding them.</value></data>
+  <data name="pendingChoice.prompt.body.exit" xml:space="preserve"><value>Exiting discards these pending items. Choose the products first, or confirm discarding them.</value></data>
+  <data name="pendingChoice.prompt.body.all" xml:space="preserve"><value>Discarded items will not be added to the cart.</value></data>
+  <data name="pendingChoice.prompt.confirm.pay" xml:space="preserve"><value>Discard {0} and pay</value></data>
+  <data name="pendingChoice.prompt.confirm.hold" xml:space="preserve"><value>Discard {0} and hold</value></data>
+  <data name="pendingChoice.prompt.confirm.recall" xml:space="preserve"><value>Discard {0} and recall</value></data>
+  <data name="pendingChoice.prompt.confirm.exit" xml:space="preserve"><value>Discard {0} and exit</value></data>
+  <data name="pendingChoice.prompt.confirm.all" xml:space="preserve"><value>Discard {0}</value></data>
 </root>

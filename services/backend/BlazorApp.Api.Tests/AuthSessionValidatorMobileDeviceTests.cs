@@ -318,6 +318,7 @@ public sealed class AuthSessionValidatorMobileDeviceTests
                 InitKeyType = InitKeyType.Attribute,
             });
             database.CodeFirst.InitTables<User, Store, UserStore, UserRole, Role>();
+            database.CodeFirst.InitTables<UserLoginRestriction>();
             var now = DateTime.UtcNow;
             await database.Insertable(new User
             {

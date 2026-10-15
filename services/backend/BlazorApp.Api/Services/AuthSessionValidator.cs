@@ -117,7 +117,11 @@ namespace BlazorApp.Api.Services
                 .Where((user, userStore, store, userRole, role) =>
                     user.UserGUID == userGuid
                     && user.IsActive
-                    && !user.IsDeleted)
+                    && !user.IsDeleted
+                    // 被标记「不允许登录」的账号，已签发的设备会话也立即失效。
+                    && SqlFunc.Subqueryable<UserLoginRestriction>()
+                        .Where(restriction => restriction.UserGUID == userGuid)
+                        .NotAny())
                 .Select((user, userStore, store, userRole, role) => new AuthMobileDeviceRoleRow
                 {
                     UserGuid = user.UserGUID,
@@ -190,7 +194,11 @@ namespace BlazorApp.Api.Services
                 .Where((user, session, userRole, role) =>
                     user.UserGUID == userGuid
                     && user.IsActive
-                    && !user.IsDeleted)
+                    && !user.IsDeleted
+                    // 被标记「不允许登录」的账号，已签发的 Web 会话也立即失效。
+                    && SqlFunc.Subqueryable<UserLoginRestriction>()
+                        .Where(restriction => restriction.UserGUID == userGuid)
+                        .NotAny())
                 .Select((user, session, userRole, role) => new AuthWebSessionRoleRow
                 {
                     UserGuid = user.UserGUID,

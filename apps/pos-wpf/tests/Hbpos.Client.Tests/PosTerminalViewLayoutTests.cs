@@ -268,10 +268,22 @@ public sealed class PosTerminalViewLayoutTests
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
 
+        // 候选卡片模板抽成共享资源：手工搜索下拉（MatchesPopup）与「待选条」都引用同一份，卡片外观不会两边各改各的。
+        var cardTemplate = Assert.Single(view.Descendants(presentation + "DataTemplate").Where(template =>
+            (string?)template.Attribute(x + "Key") == "MatchCandidateCardTemplate"));
         var matchesPopup = Assert.Single(view.Descendants(presentation + "Popup").Where(popup =>
             (string?)popup.Attribute(x + "Name") == "MatchesPopup"));
-        var card = Assert.Single(matchesPopup.Descendants(presentation + "Button").Where(button =>
+        var popupItems = Assert.Single(matchesPopup.Descendants(presentation + "ItemsControl"));
+        Assert.Equal("{StaticResource MatchCandidateCardTemplate}", (string?)popupItems.Attribute("ItemTemplate"));
+        var pendingPanel = Assert.Single(view.Descendants(presentation + "StackPanel").Where(panel =>
+            (string?)panel.Attribute("AutomationProperties.AutomationId") == "PendingScanChoicePanel"));
+        var pendingCandidates = Assert.Single(pendingPanel.Descendants(presentation + "ItemsControl").Where(items =>
+            (string?)items.Attribute("AutomationProperties.AutomationId") == "PendingChoiceCandidates"));
+        Assert.Equal("{Binding CurrentCandidates}", (string?)pendingCandidates.Attribute("ItemsSource"));
+        Assert.Equal("{StaticResource MatchCandidateCardTemplate}", (string?)pendingCandidates.Attribute("ItemTemplate"));
+        var card = Assert.Single(cardTemplate.Descendants(presentation + "Button").Where(button =>
             (string?)button.Attribute(x + "Name") == "MatchCandidateCard"));
+        // 两处 ItemsControl 的 DataContext 各自提供同名命令（PosTerminalViewModel / PendingScanChoicePanelViewModel）。
         Assert.Contains("SelectMatchCommand", (string?)card.Attribute("Command"));
 
         // 码冲突时各候选的码相同，必须靠商品图与货号区分；图片走异步缩略图路径，不能同步加载阻塞扫码。
@@ -294,6 +306,60 @@ public sealed class PosTerminalViewLayoutTests
             (string?)text.Attribute("Text") == "{Binding LookupCode}");
         Assert.Contains(card.Descendants(presentation + "TextBlock"), text =>
             (string?)text.Attribute("Text") == "{Binding RetailPrice, StringFormat={}{0:C2}}");
+    }
+
+    [Fact]
+    public void Pending_scan_choice_strip_sits_in_the_layout_not_in_a_popup_and_has_a_blocking_prompt()
+    {
+        var repoRoot = FindRepoRoot();
+        var view = XDocument.Load(Path.Combine(
+            repoRoot,
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "Views",
+            "Screens",
+            "PosTerminalView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        // 待选条在搜索框所在的行里（占布局位置、不遮挡购物车），不是 Popup：Popup 点别处会关、还会浮在授权弹窗之上。
+        var searchHost = Assert.Single(view.Descendants(presentation + "Border").Where(element =>
+            (string?)element.Attribute(x + "Name") == "SearchBoxHost"));
+        var pendingPanel = Assert.Single(view.Descendants(presentation + "StackPanel").Where(panel =>
+            (string?)panel.Attribute("AutomationProperties.AutomationId") == "PendingScanChoicePanel"));
+        Assert.Equal("{Binding PendingChoices}", (string?)pendingPanel.Attribute("DataContext"));
+        Assert.Equal("{Binding HasPending, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}", (string?)pendingPanel.Attribute("Visibility"));
+        Assert.Empty(pendingPanel.Ancestors(presentation + "Popup"));
+        Assert.Same(
+            searchHost.Ancestors(presentation + "Border").First(),
+            pendingPanel.Ancestors(presentation + "Border").First());
+
+        // 放弃按钮、收起按钮、条上的常驻状态徽章都有稳定的自动化标识，便于 UI 自动化与真机巡检。
+        foreach (var id in new[]
+                 {
+                     "PendingChoiceCollapseButton",
+                     "PendingChoiceAbandonButton",
+                     "PendingChoiceAbandonAllButton",
+                     "PendingChoiceCollapsedBar"
+                 })
+        {
+            Assert.Contains(pendingPanel.Descendants(), element =>
+                (string?)element.Attribute("AutomationProperties.AutomationId") == id);
+        }
+
+        Assert.Contains(view.Descendants(presentation + "Border"), border =>
+            (string?)border.Attribute("AutomationProperties.AutomationId") == "PendingChoiceStatusBadge");
+
+        // 付款 / 挂单 / 取单 / 退出被拦时的确认遮罩：盖住整个收银页，只有「放弃并继续」与「返回处理」两个出口。
+        var prompt = Assert.Single(view.Descendants(presentation + "Grid").Where(grid =>
+            (string?)grid.Attribute("AutomationProperties.AutomationId") == "PendingScanChoicePrompt"));
+        Assert.Equal("3", (string?)prompt.Attribute("Grid.ColumnSpan"));
+        Assert.Equal("{Binding IsPromptOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}", (string?)prompt.Attribute("Visibility"));
+        Assert.Equal(
+            ["{Binding ConfirmPromptCommand}", "{Binding CancelPromptCommand}"],
+            prompt.Descendants(presentation + "Button").Select(button => (string?)button.Attribute("Command")));
     }
 
     [Fact]

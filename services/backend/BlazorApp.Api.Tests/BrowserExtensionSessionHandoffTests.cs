@@ -58,7 +58,7 @@ public sealed class BrowserExtensionSessionHandoffTests : IDisposable
             InitKeyType = InitKeyType.Attribute,
         });
         _db.Ado.ExecuteCommand("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
-        _db.CodeFirst.InitTables<User, Role, UserRole, RefreshToken>();
+        _db.CodeFirst.InitTables<User, Role, UserRole, RefreshToken, UserLoginRestriction>();
         _db.CodeFirst.InitTables<BrowserExtensionSessionGrantEntity>();
 
         _dbContext = CreateSqlSugarContext(_db);

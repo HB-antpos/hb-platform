@@ -175,15 +175,15 @@ public class ControllerAuthorizationMetadataTests
     {
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.Grid),
-            Permissions.Users.View
+            Permissions.Users.ViewStoreStaff
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.GetByUserGuid),
-            Permissions.Users.View
+            Permissions.Users.ViewStoreStaff
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.GetProfile),
-            Permissions.Users.View
+            Permissions.Users.ViewStoreStaff
         );
         yield return Policy<ReactStoreUsersController>(
             nameof(ReactStoreUsersController.Create),

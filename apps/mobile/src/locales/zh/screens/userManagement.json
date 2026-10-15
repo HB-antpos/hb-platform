@@ -270,12 +270,59 @@
       "notFoundDescription": "员工账号可能已被删除或移出你的范围，请返回店员管理刷新。",
       "networkTitle": "账号授权加载失败",
       "networkDescription": "暂时无法连接服务器，请检查网络后重试。"
+    },
+    "copy": {
+      "toOthersAction": "复制给他人",
+      "fromColleagueAction": "从同事复制",
+      "toOthersTitle": "把 {{name}} 的权限复制给…",
+      "fromColleagueTitle": "复制同事的权限给 {{name}}",
+      "subtitle": "本店：{{store}}",
+      "close": "关闭",
+      "searchPlaceholder": "搜索本店店员",
+      "unavailable": "无法确定所属分店，暂时不能选择同事。",
+      "listFailed": "同事列表加载失败",
+      "empty": "本店没有可选的店员（已停用的员工和店长不在此列）。",
+      "noMatch": "没有匹配的店员",
+      "modeTitle": "复制方式",
+      "mode": {
+        "merge": "合并（推荐）",
+        "mergeShort": "合并",
+        "mergeDescription": "保留对方现有的直接权限，再加上来源的直接权限",
+        "replace": "覆盖",
+        "replaceShort": "覆盖",
+        "replaceDescription": "对方的直接权限整体换成来源的直接权限，多出的会被移除"
+      },
+      "help": "只复制「直接权限」；角色权限不复制；你本人不能分配的权限会自动跳过。",
+      "nextToOthers_one": "下一步 · 复制给 {{count}} 人",
+      "nextToOthers_other": "下一步 · 复制给 {{count}} 人",
+      "nextFromColleague": "下一步",
+      "nextIdle": "选择人员后继续",
+      "previewFailed": "无法计算权限变化，请稍后重试",
+      "copyFailed": "复制失败，所有人的权限都没有被改动",
+      "dirtyBlocked": "请先保存或放弃当前未保存的权限修改，再复制权限",
+      "success_one": "已复制，{{count}} 人的权限已更新",
+      "success_other": "已复制，{{count}} 人的权限已更新",
+      "confirm": {
+        "title": "确认复制",
+        "source": "来源：{{name}}",
+        "sourceMeta_one": "{{count}} 项直接权限 · 方式：{{mode}}",
+        "sourceMeta_other": "{{count}} 项直接权限 · 方式：{{mode}}",
+        "changesTitle": "将发生的变化（{{count}} 人）",
+        "noChange": "无变化",
+        "unchanged": "另有 {{count}} 项保持不变",
+        "nothingToCopy": "所选人员的直接权限与来源一致，没有需要复制的内容。",
+        "skippedTitle": "已跳过",
+        "skipped": "「{{names}}」超出你可分配的范围，已自动跳过，不会复制给任何人。",
+        "back": "返回",
+        "submit": "确认复制"
+      }
     }
   },
   "statuses": {
     "active": "启用中",
     "disabled": "已停用",
-    "pendingFirstLogin": "待首次登录"
+    "pendingFirstLogin": "待首次登录",
+    "loginDisabled": "不能登录"
   },
   "fields": {
     "username": "账号",
@@ -283,6 +330,8 @@
     "email": "邮箱",
     "phone": "电话",
     "enabled": "启用状态",
+    "loginEnabled": "允许登录 Web / App",
+    "loginEnabledHelper": "关闭后该员工无法登录 Web 和 App，已登录的设备也会立即失效；考勤、排班等不受影响",
     "initialPassword": "初始密码",
     "newPassword": "新密码",
     "fixedRoleHint": "此页面创建的账号固定为店员，绑定到所选管理分店，员工类型默认为临时。",
@@ -297,6 +346,15 @@
     "lastLoginValue": "最近登录：{{value}}",
     "lastLoginIpValue": "登录 IP：{{value}}",
     "updatedAtValue": "最近更新：{{value}}"
+  },
+  "list": {
+    "me": "我",
+    "meBadge": "我",
+    "staffSection": "店员（{{count}}）",
+    "sortedByName": "按姓名",
+    "peopleCount_one": "{{count}} 人",
+    "peopleCount_other": "{{count}} 人",
+    "onlyStaffNote": "本页仅显示本店店员与你本人，其他店长的信息不在此显示。"
   },
   "filters": {
     "sortByName": "按姓名排序",
@@ -540,6 +598,13 @@
     "inviteFailedFallback": "邮件发送失败",
     "resendInvite": "重新发送初始密码",
     "inviteResent": "初始密码已重新发送",
-    "nextStepEmail": "查收邮件，用初始密码登录 App，并设置自己的密码"
+    "nextStepEmail": "查收邮件，用初始密码登录 App，并设置自己的密码",
+    "loginEnabled": "允许登录 Web / App",
+    "loginEnabledOnHelper": "开启后会给员工邮箱发初始密码，员工用它登录 Web 和 App",
+    "loginEnabledOffHelper": "默认关闭：员工账号照常用于考勤、排班等，但不能登录 Web 和 App，也不会发密码邮件。之后可在编辑里开启",
+    "emailHelperNoLogin": "仅作联系与找回账号用；账号暂不能登录",
+    "usernameFromEmailHelperNoLogin": "默认与邮箱相同；开启登录后员工用它登录（3–50 个字符）",
+    "successDescriptionNoLogin": "已为{{name}}创建账号。该员工暂不能登录 Web 和 App，没有发送任何密码邮件。",
+    "loginDisabledNotice": "该员工暂不能登录。需要时在员工列表编辑该员工，打开「允许登录 Web / App」，系统会提示发送初始密码。"
   }
 }

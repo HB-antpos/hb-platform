@@ -220,6 +220,15 @@ namespace BlazorApp.Api.Interfaces
         );
 
         /// <summary>
+        /// 把源员工的直接权限复制给一个或多个目标员工（可预览差异，写入为原子操作）。
+        /// 受限操作者（店长）只能复制自己持有的 POS 收银业务权限，其余自动跳过。
+        /// </summary>
+        Task<ApiResponse<CopyUserPermissionsResultDto>> CopyUserDirectPermissionsAsync(
+            string sourceUserGuid,
+            CopyUserPermissionsRequestDto dto
+        );
+
+        /// <summary>
         /// 复制角色
         /// </summary>
         /// <param name="sourceRoleGuid">源角色GUID</param>

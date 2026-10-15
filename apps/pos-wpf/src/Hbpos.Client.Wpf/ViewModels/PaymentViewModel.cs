@@ -1485,7 +1485,9 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
 
         var character = key[0];
-        if (IsInstallmentCustomerNameDraftActive && char.IsLetterOrDigit(character))
+        // 姓名键盘除字母数字外还有 - ' .（Mary-Anne、O'Brien、Jr.），符号不受大小写转换影响。
+        if (IsInstallmentCustomerNameDraftActive &&
+            (char.IsLetterOrDigit(character) || character is '-' or '\'' or '.'))
         {
             InstallmentCustomerDraftName += char.ToUpperInvariant(character);
             return;

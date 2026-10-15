@@ -48,6 +48,7 @@ namespace BlazorApp.Api.Tests
                 typeof(UserStore),
                 typeof(EmployeeProfile),
                 typeof(UserPasswordChangeRequirement),
+                typeof(UserLoginRestriction),
                 typeof(UserPasswordResetCode),
                 typeof(SysRolePermission),
                 typeof(SysUserPermission)
@@ -162,6 +163,114 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CreateAsync_WhenLoginDisabled_NeedsNoPasswordAndMarksAccountRestricted()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            // 不传密码、不发邮件：登录关闭的账号只建资料，不生成可用密码。
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_no_login",
+                    Email = "staff_no_login@example.com",
+                    StoreCode = "S001",
+                    Status = 1,
+                    SendPasswordSetupEmail = true,
+                    LoginEnabled = false,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.False(result.Data!.LoginEnabled);
+            Assert.Null(result.Data.PasswordSetupEmail);
+            Assert.Null(result.Data.PasswordSetupEmailError);
+            var restriction = await _db.Queryable<UserLoginRestriction>()
+                .SingleAsync(item => item.UserGUID == result.Data.UserGuid);
+            Assert.Equal("manager-1", restriction.RestrictedBy);
+            // 登录关闭时不要求首次改密。
+            Assert.False(await _db.Queryable<UserPasswordChangeRequirement>().AnyAsync());
+
+            var grid = await service.GetGridDataAsync(new StoreUserGridRequestDto { StoreCode = "S001" });
+            Assert.False(grid.Items!.Single(item => item.UserGuid == result.Data.UserGuid).LoginEnabled);
+            Assert.True(grid.Items!.Single(item => item.UserGuid == "staff-1").LoginEnabled);
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenLoginEnabledNotSent_KeepsLegacyBehavior()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_legacy",
+                    Password = "Secret123",
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success);
+            Assert.True(result.Data!.LoginEnabled);
+            Assert.False(await _db.Queryable<UserLoginRestriction>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenLoginEnabledWithoutPassword_StillRequiresPassword()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "staff_need_pwd",
+                    StoreCode = "S001",
+                    Status = 1,
+                    LoginEnabled = true,
+                },
+                "manager-1"
+            );
+
+            Assert.False(result.Success);
+            Assert.False(await _db.Queryable<UserLoginRestriction>().AnyAsync());
+        }
+
+        [Fact]
+        public async Task UpdateAsync_TogglesLoginRestrictionOnlyWhenLoginEnabledSent()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            UpdateStoreUserDto Build(bool? loginEnabled) => new()
+            {
+                Username = "staff_one",
+                StoreCode = "S001",
+                Status = 1,
+                LoginEnabled = loginEnabled,
+            };
+
+            var disabled = await service.UpdateAsync("staff-1", Build(false), "manager-1");
+            Assert.True(disabled.Success, disabled.Message);
+            Assert.False(disabled.Data!.LoginEnabled);
+            Assert.True(await _db.Queryable<UserLoginRestriction>().AnyAsync(item => item.UserGUID == "staff-1"));
+
+            // 未传 LoginEnabled（旧客户端编辑资料）不得改动登录权限。
+            var untouched = await service.UpdateAsync("staff-1", Build(null), "manager-1");
+            Assert.True(untouched.Success);
+            Assert.False(untouched.Data!.LoginEnabled);
+
+            var enabled = await service.UpdateAsync("staff-1", Build(true), "manager-1");
+            Assert.True(enabled.Success);
+            Assert.True(enabled.Data!.LoginEnabled);
+            Assert.False(await _db.Queryable<UserLoginRestriction>().AnyAsync());
+        }
+
+        [Fact]
         public async Task UpdatePasswordAsync_WhenStoreManagerResetsManagedStaff_RequiresPasswordChange()
         {
             await SeedStoreUserDataAsync();
@@ -196,10 +305,77 @@ namespace BlazorApp.Api.Tests
                 StoreCode = "S001",
             });
 
+            // 员工管理只列本店店员 + 店长本人，其余店长不出现。
             Assert.True(result.Success);
-            Assert.Single(result.Items!);
+            Assert.Equal(new[] { "manager-1", "staff-1" }, result.Items!.Select(item => item.UserGuid).OrderBy(item => item).ToArray());
             Assert.All(result.Items!, item => Assert.Equal("store-1", item.StoreGuid));
-            Assert.All(result.Items!, item => Assert.Contains("StoreStaff", item.RoleNames));
+            Assert.Contains("StoreStaff", result.Items!.Single(item => item.UserGuid == "staff-1").RoleNames);
+            Assert.Contains("StoreManager", result.Items!.Single(item => item.UserGuid == "manager-1").RoleNames);
+        }
+
+        [Fact]
+        public async Task GetGridDataAsync_WhenStoreManager_HidesOtherManagersEvenWithStaffRole()
+        {
+            await SeedStoreUserDataAsync();
+            // manager-2 是同店的另一位店长，且同时挂了店员角色；staff-3 是普通店员。
+            await _db.Insertable(CreateUser("manager-2", "manager_2", "manager2@example.com")).ExecuteCommandAsync();
+            await _db.Insertable(CreateUser("staff-3", "staff_3", "staff3@example.com")).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("manager-2", "role-manager"),
+                CreateUserRole("manager-2", "role-staff"),
+                CreateUserRole("staff-3", "role-staff"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserStore("manager-2", "store-1", true),
+                CreateUserStore("staff-3", "store-1", false),
+            }).ExecuteCommandAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.GetGridDataAsync(new StoreUserGridRequestDto { StoreCode = "S001" });
+
+            Assert.True(result.Success);
+            Assert.DoesNotContain(result.Items!, item => item.UserGuid == "manager-2");
+            Assert.Equal(
+                new[] { "manager-1", "staff-1", "staff-3" },
+                result.Items!.Select(item => item.UserGuid).OrderBy(item => item).ToArray());
+        }
+
+        [Fact]
+        public async Task GetByUserGuidAsync_WhenStoreManager_CannotReadOtherManagerEvenWithStaffRole()
+        {
+            await SeedStoreUserDataAsync();
+            // 与列表同口径：另一位店长（同时挂着店员角色）的详情也读不到；管理员不受限。
+            await _db.Insertable(CreateUser("manager-2", "manager_2", "manager2@example.com")).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("manager-2", "role-manager"),
+                CreateUserRole("manager-2", "role-staff"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserStore("manager-2", "store-1", true)).ExecuteCommandAsync();
+
+            var managerView = await CreateService("manager-1", "StoreManager").GetByUserGuidAsync("manager-2", "S001");
+            Assert.False(managerView.Success);
+
+            var adminView = await CreateService("admin-1", "Admin").GetByUserGuidAsync("manager-2", "S001");
+            Assert.True(adminView.Success);
+        }
+
+        [Fact]
+        public async Task GetGridDataAsync_WhenKeywordDoesNotMatchSelf_DoesNotReturnManagerRow()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.GetGridDataAsync(new StoreUserGridRequestDto
+            {
+                StoreCode = "S001",
+                Keyword = "staff_1",
+            });
+
+            Assert.True(result.Success);
+            Assert.Equal("staff-1", Assert.Single(result.Items!).UserGuid);
         }
 
         [Fact]
@@ -211,7 +387,10 @@ namespace BlazorApp.Api.Tests
             var result = await service.GetGridDataAsync(new StoreUserGridRequestDto());
 
             Assert.True(result.Success);
-            var staff = Assert.Single(result.Items!);
+            // 店长未指定分店时：本店店员 + 店长本人（本人主分店 S001 行）。
+            var staff = Assert.Single(result.Items!, item => item.UserGuid == "staff-1");
+            Assert.Contains(result.Items!, item => item.UserGuid == "manager-1");
+            Assert.Equal(2, result.Items!.Count);
             Assert.Equal("staff-1", staff.UserGuid);
             Assert.Equal("S001", staff.StoreCode);
             Assert.Equal("store-1", staff.StoreGuid);
@@ -273,7 +452,7 @@ namespace BlazorApp.Api.Tests
             });
 
             Assert.True(gridResult.Success);
-            var staff = Assert.Single(gridResult.Items!);
+            var staff = Assert.Single(gridResult.Items!, item => item.UserGuid == "staff-1");
             Assert.Equal("staff-1", staff.UserGuid);
             Assert.Equal(0, staff.Status);
         }

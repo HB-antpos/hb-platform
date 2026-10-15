@@ -4777,6 +4777,60 @@ function registerUserRoutes(
       return { data: true };
     },
   );
+  // 复制直接权限（审核模式的合成数据）：preview=true 只返回差异，preview=false 才写入合成用户。
+  register(
+    transport,
+    ["POST"],
+    /^\/Users\/guid\/([^/]+)\/permissions\/copy$/i,
+    ({ match, body }) => {
+      const sourceId = decodeURIComponent(match?.[1] ?? "");
+      const source = findByAnyId(state().users, sourceId);
+      if (!source) throw new Error(`IOS_REVIEW_USER_NOT_FOUND: ${sourceId}`);
+      const payload = asRecord(body);
+      const mode = payload.mode === "replace" ? "replace" : "merge";
+      const preview = payload.preview !== false;
+      const sourceCodes: string[] = Array.isArray(source.directPermissionCodes)
+        ? source.directPermissionCodes.map(String)
+        : [];
+      const targetIds: string[] = Array.isArray(payload.targetUserGuids)
+        ? payload.targetUserGuids.map(String)
+        : [];
+      const targets = targetIds.map((targetId) => {
+        const target = findByAnyId(state().users, targetId);
+        if (!target) throw new Error(`IOS_REVIEW_USER_NOT_FOUND: ${targetId}`);
+        const current: string[] = Array.isArray(target.directPermissionCodes)
+          ? target.directPermissionCodes.map(String)
+          : [];
+        const next =
+          mode === "replace"
+            ? [...sourceCodes]
+            : Array.from(new Set([...current, ...sourceCodes]));
+        const added = next.filter((code) => !current.includes(code));
+        const removed = current.filter((code) => !next.includes(code));
+        if (!preview) {
+          target.directPermissionCodes = next;
+          mirrorUpdate(state(), dataStore, "users", targetId, "User direct access");
+        }
+        return {
+          userGuid: targetId,
+          added,
+          removed,
+          unchangedCount: next.length - added.length,
+        };
+      });
+      return {
+        data: {
+          sourceUserGuid: sourceId,
+          mode,
+          preview,
+          sourceDirectPermissionCodes: sourceCodes,
+          transferablePermissionCodes: sourceCodes,
+          skippedPermissionCodes: [],
+          targets,
+        },
+      };
+    },
+  );
   register(
     transport,
     ["GET", "PUT", "DELETE"],

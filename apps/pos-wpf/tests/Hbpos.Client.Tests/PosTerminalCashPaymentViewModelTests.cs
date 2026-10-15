@@ -876,6 +876,45 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public void Pos_terminal_touch_keyboard_types_hyphenated_product_codes_and_keeps_edit_keys_working()
+    {
+        var viewModel = new PosTerminalViewModel(
+            new LocalSellableItemIndex(),
+            new PosCartService(),
+            Session,
+            onOpenPayment: null);
+
+        // 货号常含连字符：HB249-SG-021 必须能完整点出，且与扫码兜底通道无关（仅走屏幕键盘命令）。
+        foreach (var key in new[] { "H", "B", "2", "4", "9", "-", "S", "G", "-", "0", "2", "1" })
+        {
+            viewModel.NumberInputCommand.Execute(key);
+        }
+
+        Assert.Equal("HB249-SG-021", viewModel.ScanText);
+
+        // 新增的 _ / . 与字母数字走同一条注入路径，连续输入按顺序追加。
+        foreach (var key in new[] { "_", "/", "." })
+        {
+            viewModel.NumberInputCommand.Execute(key);
+        }
+
+        Assert.Equal("HB249-SG-021_/.", viewModel.ScanText);
+
+        // Back 逐字符回退（包括符号），Space 追加空格，Clear 清空。
+        viewModel.NumberInputCommand.Execute("Back");
+        viewModel.NumberInputCommand.Execute("Back");
+        viewModel.NumberInputCommand.Execute("Back");
+        Assert.Equal("HB249-SG-021", viewModel.ScanText);
+
+        viewModel.NumberInputCommand.Execute("Space");
+        viewModel.NumberInputCommand.Execute("-");
+        Assert.Equal("HB249-SG-021 -", viewModel.ScanText);
+
+        viewModel.NumberInputCommand.Execute("Clear");
+        Assert.Empty(viewModel.ScanText);
+    }
+
+    [Fact]
     public void Pos_terminal_keeps_touch_keyboard_and_main_keypad_buffers_separate()
     {
         var cart = new PosCartService();
@@ -1116,11 +1155,16 @@ public sealed class PosTerminalCashPaymentViewModelTests
 
         scanner.Emit("930114");
 
+        // 扫码枪的多商品命中记入待选条：不加购、不弹手工搜索下拉，条码处理完即清出搜索框。
         Assert.Empty(viewModel.CartLines);
-        Assert.Equal(2, viewModel.Matches.Count);
-        Assert.True(viewModel.IsMatchesPopupOpen);
-        Assert.Equal("930114", viewModel.ScanText);
-        Assert.Equal("Scan 930114: Found 2 items. Select one to add.", viewModel.StatusMessage);
+        Assert.Empty(viewModel.Matches);
+        Assert.False(viewModel.IsMatchesPopupOpen);
+        Assert.Empty(viewModel.ScanText);
+        Assert.Equal(1, viewModel.PendingChoices.Count);
+        Assert.Equal(2, viewModel.PendingChoices.CurrentCandidates.Count);
+        Assert.Equal(
+            "Scan 930114: This barcode matches 2 items. Queued for selection (1 pending).",
+            viewModel.StatusMessage);
     }
 
     [Fact]
@@ -7074,6 +7118,45 @@ public sealed class PosTerminalCashPaymentViewModelTests
         Assert.False(viewModel.IsInstallmentCustomerDialogOpen);
         Assert.Equal("BOB 2", viewModel.InstallmentCustomerName);
         Assert.Equal("04+2", viewModel.InstallmentCustomerPhone);
+    }
+
+    [Fact]
+    public void Payment_page_installment_customer_name_keyboard_accepts_hyphen_apostrophe_and_dot()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-INST-NAME-SYMBOLS", "Name Symbols Tea", "939008", PriceSourceKind.StoreRetailPrice, 55m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new FakeCashPaymentWorkflowService(),
+            Session,
+            installmentOrderService: new FakeInstallmentOrderService())
+        {
+            IsInstallmentPaymentEnabled = true
+        };
+
+        viewModel.OpenInstallmentCustomerDialogCommand.Execute(null);
+        viewModel.SelectInstallmentCustomerFieldCommand.Execute("Name");
+        viewModel.InstallmentCustomerKeyCommand.Execute("Clear");
+        foreach (var key in new[] { "m", "A", "-", "B", "Space", "O", "'", "B", "Space", "J", "R", "." })
+        {
+            viewModel.InstallmentCustomerKeyCommand.Execute(key);
+        }
+
+        Assert.Equal("MA-B O'B JR.", viewModel.InstallmentCustomerDraftName);
+
+        // Back 对符号同样逐字符回退。
+        viewModel.InstallmentCustomerKeyCommand.Execute("Back");
+        Assert.Equal("MA-B O'B JR", viewModel.InstallmentCustomerDraftName);
+
+        // 电话页键盘只有数字与 + -，「.」「'」不会被写入。
+        viewModel.SelectInstallmentCustomerFieldCommand.Execute("Phone");
+        viewModel.InstallmentCustomerKeyCommand.Execute("Clear");
+        foreach (var key in new[] { "0", "4", "-", ".", "'", "1" })
+        {
+            viewModel.InstallmentCustomerKeyCommand.Execute(key);
+        }
+
+        Assert.Equal("04-1", viewModel.InstallmentCustomerDraftPhone);
     }
 
     [Fact]

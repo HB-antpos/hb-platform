@@ -115,12 +115,29 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
             PaymentViewRuntimeStaTestHost.Realize(keyboard, 620, 400);
 
             var keys = PaymentViewRuntimeStaTestHost.FindVisualDescendants<ButtonBase>(keyboard).ToList();
-            Assert.Equal(41, keys.Count);
+            // 41 个原有键 + 底行新增的 - _ / 三个符号键（「.」原本就有）。
+            Assert.Equal(44, keys.Count);
+            var parameters = keys.Select(key => (key as Button)?.CommandParameter as string).ToHashSet();
+            foreach (var symbol in new[] { "-", "_", "/", "." })
+            {
+                Assert.Contains(symbol, parameters);
+            }
+
             foreach (var key in keys)
             {
                 var parameter = (key as Button)?.CommandParameter as string;
                 var expected = parameter == "Enter" ? 16d : 20d;
                 AssertButtonText(key, expected);
+            }
+
+            // 符号键必须真的显示出符号（字符串内容里的单个 _ 会被访问键解析吞掉）。
+            foreach (var symbol in new[] { "-", "_", "/", "." })
+            {
+                var key = keys.Single(button => (button as Button)?.CommandParameter as string == symbol);
+                var shown = PaymentViewRuntimeStaTestHost.FindVisualDescendants<TextBlock>(key)
+                    .Select(text => text.Text)
+                    .FirstOrDefault(text => !string.IsNullOrEmpty(text));
+                Assert.Equal(symbol, shown);
             }
 
             return Task.CompletedTask;
@@ -131,7 +148,9 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
         var texts = PaymentViewRuntimeStaTestHost.FindVisualDescendants<TextBlock>(button)
             .Where(text => !string.IsNullOrEmpty(text.Text))
             .ToList();
-        Assert.NotEmpty(texts);
+        Assert.True(
+            texts.Count > 0,
+            $"键 CommandParameter={(button as Button)?.CommandParameter} 没有可见文字。");
         foreach (var text in texts)
         {
             Assert.True(

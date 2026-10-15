@@ -2660,6 +2660,26 @@ async function run() {
     "PosTerminal.Sales.AddItem",
   ]);
 
+  // 复制直接权限：预览只算差异不写入，确认后才写入目标。
+  await request("POST", "/Users/guid/review-pos-staff-1/permissions", { permissions: [] });
+  const copyBody = { targetUserGuids: ["review-pos-staff-1"], mode: "merge" };
+  const copyPreview = await request("POST", "/Users/guid/review-staff-001/permissions/copy", { ...copyBody, preview: true });
+  assert.equal(copyPreview.preview, true);
+  assert.deepEqual(copyPreview.targets, [
+    { userGuid: "review-pos-staff-1", added: ["PosTerminal.Sales.AddItem"], removed: [], unchangedCount: 0 },
+  ]);
+  assert.deepEqual(
+    (await request("GET", "/Users/guid/review-pos-staff-1/permissions/state")).directPermissionCodes,
+    [],
+    "预览不得写入审核数据",
+  );
+  const copyCommit = await request("POST", "/Users/guid/review-staff-001/permissions/copy", { ...copyBody, preview: false });
+  assert.equal(copyCommit.preview, false);
+  assert.deepEqual(
+    (await request("GET", "/Users/guid/review-pos-staff-1/permissions/state")).directPermissionCodes,
+    ["PosTerminal.Sales.AddItem"],
+  );
+
   const profile = await request("PUT", "/EmployeeProfiles/me", {
     displayName: "Updated Demo Reviewer",
   });

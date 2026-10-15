@@ -2,6 +2,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Utils;
+using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -57,6 +58,11 @@ namespace BlazorApp.Api.Services.React
                 var keyword = request.Keyword?.Trim();
                 var statusFilter = request.Status;
 
+                // 关键逻辑：员工管理只列本店店员 + 登录店长本人。店长本人行靠「本人 + 店长角色」命中；
+                // 管理员不是店长，不会混入本人行。其他店长（含同时挂了店员角色的）在下方整体剔除。
+                var managerRoleNames = Permissions.StoreManagerRoleNames;
+                var selfGuid = scope.IsStoreManager && !scope.IsAdmin ? scope.UserGuid : string.Empty;
+
                 var rows = await _db.Queryable<User>()
                     .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
                     .InnerJoin<Role>((u, ur, r) => ur.RoleGUID == r.RoleGUID)
@@ -69,7 +75,10 @@ namespace BlazorApp.Api.Services.React
                         && !r.IsDeleted
                         && !us.IsDeleted
                         && !s.IsDeleted
-                        && r.RoleName == StoreStaffRoleName
+                        && (
+                            r.RoleName == StoreStaffRoleName
+                            || (u.UserGUID == selfGuid && managerRoleNames.Contains(r.RoleName))
+                        )
                     )
                     .WhereIF(
                         !scope.IsAdmin && string.IsNullOrWhiteSpace(normalizedStoreCode),
@@ -112,6 +121,30 @@ namespace BlazorApp.Api.Services.React
                     })
                     .ToListAsync();
 
+                // 剔除「同时拥有店长/管理员角色」的其他账号：只看店员角色那一行判断不出，需单独查角色。
+                if (rows.Count > 0)
+                {
+                    var rowUserGuids = rows.Select(item => item.UserGUID).Distinct().ToList();
+                    var highRoleNames = Permissions.HighPrivilegeRoleNames;
+                    var highRoleUserGuids = (await _db.Queryable<UserRole>()
+                            .InnerJoin<Role>((ur, r) => ur.RoleGUID == r.RoleGUID)
+                            .Where((ur, r) =>
+                                rowUserGuids.Contains(ur.UserGUID)
+                                && !ur.IsDeleted
+                                && !r.IsDeleted
+                                && highRoleNames.Contains(r.RoleName)
+                            )
+                            .Select((ur, r) => ur.UserGUID)
+                            .ToListAsync())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    rows = rows
+                        .Where(item =>
+                            !highRoleUserGuids.Contains(item.UserGUID)
+                            || string.Equals(item.UserGUID, selfGuid, StringComparison.OrdinalIgnoreCase)
+                        )
+                        .ToList();
+                }
+
                 var grouped = rows
                     .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
                     .Select(group =>
@@ -148,9 +181,15 @@ namespace BlazorApp.Api.Services.React
                     _db,
                     grouped.Select(item => item.UserGuid).ToList()
                 );
+                // 同样一次批量查询标注「不允许登录」的账号；无标记＝允许登录。
+                var loginRestricted = await UserLoginRestrictions.GetRestrictedUserGuidsAsync(
+                    _db,
+                    grouped.Select(item => item.UserGuid).ToList()
+                );
                 foreach (var item in grouped)
                 {
                     item.MustChangePassword = mustChange.Contains(item.UserGuid);
+                    item.LoginEnabled = !loginRestricted.Contains(item.UserGuid);
                 }
 
                 return GridResponseDto<StoreUserListDto>.OK(grouped, grouped.Count, "获取店员列表成功");
@@ -212,12 +251,15 @@ namespace BlazorApp.Api.Services.React
                     return ApiResponse<StoreUserDetailDto>.Error("没有权限为该分店创建店员", "FORBIDDEN");
                 }
 
-                var sendSetupEmail = dto.SendPasswordSetupEmail == true;
+                // 未传 LoginEnabled 视为允许登录，保持旧客户端（Web 等）行为不变。
+                var loginEnabled = dto.LoginEnabled ?? true;
+                // 不允许登录的账号不生成可用密码：既不要求密码，也不发初始密码邮件。
+                var sendSetupEmail = loginEnabled && dto.SendPasswordSetupEmail == true;
                 if (sendSetupEmail && !PasswordResetService.IsDeliverableEmail(dto.Email))
                 {
                     return ApiResponse<StoreUserDetailDto>.Error("用邮件发送初始密码时必须填写员工邮箱", "VALIDATION_ERROR");
                 }
-                if (!sendSetupEmail && string.IsNullOrWhiteSpace(dto.Password))
+                if (loginEnabled && !sendSetupEmail && string.IsNullOrWhiteSpace(dto.Password))
                 {
                     return ApiResponse<StoreUserDetailDto>.Error("密码不能为空", "VALIDATION_ERROR");
                 }
@@ -253,7 +295,8 @@ namespace BlazorApp.Api.Services.React
                     Email = email,
                     // 邮件发送初始密码时，建号这一步先写入一个谁都不知道的随机密码；
                     // 提交后由 SendInitialPasswordAsync 换成系统生成的初始密码并发到员工邮箱。
-                    PasswordHash = sendSetupEmail
+                    // 不允许登录且未给密码时同样写入随机密码；之后开启登录须再给员工发初始密码。
+                    PasswordHash = sendSetupEmail || string.IsNullOrWhiteSpace(dto.Password)
                         ? PasswordHasher.HashPassword(Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
                         : PasswordHasher.HashSubmittedPassword(dto.Password!, dto.PasswordFormat),
                     FullName = dto.FullName?.Trim(),
@@ -307,7 +350,12 @@ namespace BlazorApp.Api.Services.React
                             UpdatedBy = createdBy,
                         }
                     ).ExecuteCommandAsync();
-                    if (sendSetupEmail || (dto.RequirePasswordChange ?? true))
+                    if (!loginEnabled)
+                    {
+                        // 与建号同事务写入「不允许登录」标记，账号从创建那一刻起就无法登录。
+                        await UserLoginRestrictions.RestrictAsync(_db, userGuid, createdBy, now);
+                    }
+                    else if (sendSetupEmail || (dto.RequirePasswordChange ?? true))
                     {
                         // 与建号同事务：员工拿到初始密码后首次登录必须先改成自己的密码。
                         // 邮件发送初始密码时无条件要求改密，不受 RequirePasswordChange 影响。
@@ -446,6 +494,18 @@ namespace BlazorApp.Api.Services.React
                         await PasswordResetService.InvalidateOutstandingCodesAsync(_db, userGuid, now);
                     }
                     await UpsertEmployeeProfilePhoneAsync(userGuid, dto.Phone, updatedBy, now);
+                    if (dto.LoginEnabled.HasValue)
+                    {
+                        // 与资料更新同事务切换登录权限；未传则不动，旧客户端编辑资料不会误改。
+                        if (dto.LoginEnabled.Value)
+                        {
+                            await UserLoginRestrictions.AllowAsync(_db, userGuid);
+                        }
+                        else
+                        {
+                            await UserLoginRestrictions.RestrictAsync(_db, userGuid, updatedBy, now);
+                        }
+                    }
                     // 关键逻辑：编辑只改账号资料，不动分店关联。LoadManagedUserAsync 已确认员工属于目标分店；
                     // 旧实现会硬删该员工全部分店关联再插回一条非主分店记录，导致多分店员工丢失其他分店和主分店标记。
 
@@ -587,6 +647,14 @@ namespace BlazorApp.Api.Services.React
             string? storeCode
         )
         {
+            // 与列表同口径：非管理员读不到其他店长 / 管理员的详情（即使对方同时挂着 StoreStaff 角色）。
+            if (!scope.IsAdmin
+                && !userGuid.Equals(scope.UserGuid, StringComparison.OrdinalIgnoreCase)
+                && await UserAccessMutationSecurity.IsHighPrivilegeTargetAsync(_db, userGuid))
+            {
+                return null;
+            }
+
             var normalizedStoreCode = storeCode?.Trim();
             var rows = await _db.Queryable<User>()
                 .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
@@ -682,6 +750,7 @@ namespace BlazorApp.Api.Services.React
             if (detail != null)
             {
                 detail.MustChangePassword = await UserPasswordChangeRequirements.IsRequiredAsync(_db, detail.UserGuid);
+                detail.LoginEnabled = !await UserLoginRestrictions.IsRestrictedAsync(_db, detail.UserGuid);
             }
 
             return detail;

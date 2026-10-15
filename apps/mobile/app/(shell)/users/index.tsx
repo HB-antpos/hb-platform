@@ -36,6 +36,7 @@ import {
 import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
 import { getUserAccessEligibility } from "@/modules/users/access-management";
+import { localizeAccessRoleName } from "@/modules/users/access-permission-presentation";
 import { getDisplayableEmail, hasDeliverableEmail } from "@/modules/users/staff-email-username";
 import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { validateStoreUserForm } from "@/modules/users/validation";
@@ -48,12 +49,18 @@ import { useAuthStore } from "@/store/auth-store";
 
 type StatusFilter = "all" | "active" | "disabled" | "pendingFirstLogin" | "noEmail";
 
+/** 列表行：分组标题（我 / 店员）或员工行。 */
+type ListRow =
+  | { kind: "header"; key: string; label: string; hint?: string }
+  | { kind: "user"; key: string; user: StoreUserListItem; isSelf: boolean };
+
 const EMPTY_FORM: StoreUserFormValues = {
   username: "",
   fullName: "",
   email: "",
   phone: "",
   status: true,
+  loginEnabled: true,
 };
 
 function getInitials(user: StoreUserListItem) {
@@ -96,6 +103,8 @@ export default function UsersScreen() {
   const [editingUserGuid, setEditingUserGuid] = useState<string | null>(null);
   const [editingStoreCode, setEditingStoreCode] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<StoreUserFormValues>(EMPTY_FORM);
+  // 打开编辑时该员工原本是否允许登录；用于判断这次保存是不是「从不能登录改为能登录」。
+  const [editingLoginWasEnabled, setEditingLoginWasEnabled] = useState(true);
   const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
   const [passwordUser, setPasswordUser] = useState<StoreUserListItem | null>(null);
   const [moreUser, setMoreUser] = useState<StoreUserListItem | null>(null);
@@ -108,7 +117,10 @@ export default function UsersScreen() {
     selectedStoreCode: rememberedStoreCode,
   });
 
-  const canViewUsers = access.isAdmin || access.canReadUser;
+  // 员工管理入口认 Users.ViewStoreStaff；Users.View（全局用户查看）持有者同样放行。
+  const canViewUsers = access.isAdmin
+    || access.canReadUser
+    || access.hasPermission(PERMISSIONS.Users.ViewStoreStaff);
   // 店长持有本店店员专用权限；全局用户权限（Users.Create 等）同样可以管理店员。
   const canCreateUsers = access.isAdmin
     || access.hasPermission(PERMISSIONS.Users.Create)
@@ -224,7 +236,9 @@ export default function UsersScreen() {
       email: getDisplayableEmail(detailQuery.data.email),
       phone: detailQuery.data.phone ?? "",
       status: detailQuery.data.status === 1,
+      loginEnabled: detailQuery.data.loginEnabled !== false,
     });
+    setEditingLoginWasEnabled(detailQuery.data.loginEnabled !== false);
   }, [detailQuery.data, detailQuery.isSuccess, dialogVisible]);
 
   const resetDialogState = useCallback(() => {
@@ -267,7 +281,9 @@ export default function UsersScreen() {
         email: getDisplayableEmail(user.email),
         phone: user.phone ?? "",
         status: user.status === 1,
+        loginEnabled: user.loginEnabled !== false,
       });
+      setEditingLoginWasEnabled(user.loginEnabled !== false);
       setDialogVisible(true);
     },
     [canModifyUserStore, resolveUserStoreCode, t]
@@ -295,6 +311,8 @@ export default function UsersScreen() {
         pathname: "/users/[userGuid]/access",
         params: {
           userGuid: user.userGUID,
+          // 复制权限要按员工所属分店列出同事。
+          storeCode: resolveUserStoreCode(user) ?? "",
           userName: user.fullName || user.username,
           username: user.username,
           targetStatus: String(user.status),
@@ -302,7 +320,7 @@ export default function UsersScreen() {
         },
       } as unknown as Parameters<typeof router.push>[0]);
     },
-    [router]
+    [resolveUserStoreCode, router]
   );
 
   const closeResetPasswordDialog = useCallback(() => {
@@ -372,20 +390,30 @@ export default function UsersScreen() {
       email: formValues.email.trim() || undefined,
       phone: formValues.phone.trim() || undefined,
       status: formValues.status ? 1 : 0,
+      // 登录开关只在与打开时不同才提交，避免保存资料时无意改动登录权限。
+      ...(formValues.loginEnabled !== editingLoginWasEnabled ? { loginEnabled: formValues.loginEnabled } : {}),
       storeCode: targetStoreCode,
       roleNames: [STORE_STAFF_ROLE],
     };
 
     try {
-      await updateMutation.mutateAsync({ ...payload, userGuid: editingUserGuid });
+      const updated = await updateMutation.mutateAsync({ ...payload, userGuid: editingUserGuid });
       setSnackbarMessage(t("messages.userUpdated"));
       resetDialogState();
+      // 从「不能登录」改为「能登录」：账号可能还没有可用密码，直接打开设置密码邮件弹窗，
+      // 员工收到验证码后自己设密码（邮箱缺失时弹窗会让店长补填）。无重置密码权限则不弹。
+      if (!editingLoginWasEnabled && payload.loginEnabled === true && canResetUserPassword(updated)) {
+        setPasswordUser(updated);
+        setResetPasswordVisible(true);
+      }
     } catch (error) {
       console.warn("[store-users] save failed", toSafeStoreUserErrorLog(error));
       setSnackbarMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "messages.saveFailed" }));
     }
   }, [
     canEditUsers,
+    canResetUserPassword,
+    editingLoginWasEnabled,
     editingStoreCode,
     editingUserGuid,
     formValues,
@@ -516,6 +544,32 @@ export default function UsersScreen() {
     );
   }, [statusFilter, usersQuery.data]);
 
+  // 「我」分组置顶：后端只返回本店店员 + 登录店长本人；本人行的编辑/停用等接口会被拒绝，所以不提供任何操作。
+  const listRows = useMemo<ListRow[]>(() => {
+    const actorKey = actorGuid.trim().toLowerCase();
+    const selfUsers = actorKey
+      ? filteredUsers.filter((user) => user.userGUID.trim().toLowerCase() === actorKey)
+      : [];
+    const staffUsers = actorKey
+      ? filteredUsers.filter((user) => user.userGUID.trim().toLowerCase() !== actorKey)
+      : filteredUsers;
+    const rows: ListRow[] = [];
+    if (selfUsers.length) {
+      rows.push({ kind: "header", key: "header-me", label: t("list.me") });
+      selfUsers.forEach((user) => rows.push({ kind: "user", key: user.userGUID, user, isSelf: true }));
+    }
+    if (staffUsers.length) {
+      rows.push({
+        kind: "header",
+        key: "header-staff",
+        label: t("list.staffSection", { count: staffUsers.length }),
+        hint: t("list.sortedByName"),
+      });
+      staffUsers.forEach((user) => rows.push({ kind: "user", key: user.userGUID, user, isSelf: false }));
+    }
+    return rows;
+  }, [actorGuid, filteredUsers, t]);
+
   const statusCounts = useMemo(() => {
     const items = usersQuery.data ?? [];
     const active = items.filter((item) => item.status === 1).length;
@@ -592,11 +646,26 @@ export default function UsersScreen() {
   );
 
   const renderUserCard = useCallback(
-    ({ item }: { item: StoreUserListItem }) => {
+    ({ item: row }: { item: ListRow }) => {
+      if (row.kind === "header") {
+        return (
+          <View style={styles.sectionHeader}>
+            <Text variant="labelLarge" style={styles.sectionHeaderText}>{row.label}</Text>
+            {row.hint ? <Text variant="labelSmall" style={styles.secondaryText}>{row.hint}</Text> : null}
+          </View>
+        );
+      }
+
+      const item = row.user;
+      const isSelf = row.isSelf;
       const employmentType = item.employmentType
         ? t(`detail.employmentTypes.${item.employmentType}`, item.employmentType)
         : t("fields.positionValue");
-      const canUseBarcode = canManageUserBarcode(item);
+      // 本人行显示角色（如店长），店员行沿用雇佣类型。
+      const roleSummary = item.roleNames.length
+        ? item.roleNames.map((roleName) => localizeAccessRoleName(roleName, language)).join(" / ")
+        : employmentType;
+      const canUseBarcode = !isSelf && canManageUserBarcode(item);
 
       const toggleSelection = () => setSelectedUserGuids((current) => {
         const next = new Set(current);
@@ -609,7 +678,7 @@ export default function UsersScreen() {
         <Card
           style={styles.userCard}
           mode="contained"
-          onPress={() => batchSelecting && canUseBarcode ? toggleSelection() : openStaffDetail(item)}
+          onPress={isSelf ? undefined : () => batchSelecting && canUseBarcode ? toggleSelection() : openStaffDetail(item)}
           testID="compact-staff-row"
         >
           <Card.Content style={styles.userCardContent}>
@@ -625,10 +694,16 @@ export default function UsersScreen() {
               <View style={styles.identityRow}>
                 <Avatar.Text size={38} label={getInitials(item)} style={styles.avatar} />
                 <View style={styles.userTitleWrap}>
-                  <Text variant="titleSmall" numberOfLines={1}>{item.fullName || item.username}</Text>
+                  <View style={styles.nameRow}>
+                    <Text variant="titleSmall" numberOfLines={1} style={styles.nameText}>{item.fullName || item.username}</Text>
+                    {isSelf ? <Chip compact style={styles.selfChip} textStyle={styles.selfChipText}>{t("list.meBadge")}</Chip> : null}
+                  </View>
                   <Text variant="bodySmall" style={styles.secondaryText}>
-                    @{item.username} · {employmentType}
+                    @{item.username} · {isSelf ? roleSummary : employmentType}
                   </Text>
+                  {item.loginEnabled === false ? (
+                    <Text variant="labelSmall" style={styles.secondaryText}>{t("statuses.loginDisabled")}</Text>
+                  ) : null}
                   {!managedStoreCode && item.storeCode ? (
                     <Text variant="labelSmall" style={styles.secondaryText} numberOfLines={1}>
                       {item.storeName || item.storeCode} · {item.storeCode}
@@ -655,12 +730,14 @@ export default function UsersScreen() {
                     <Text variant="labelSmall" style={styles.codeActionText}>{t("staffBarcode.actions.open")}</Text>
                   </Pressable>
                 ) : null}
-                <IconButton
-                  icon="dots-vertical"
-                  size={20}
-                  accessibilityLabel={`${item.fullName || item.username} · ${t("actions.more")}`}
-                  onPress={() => setMoreUser(item)}
-                />
+                {isSelf ? null : (
+                  <IconButton
+                    icon="dots-vertical"
+                    size={20}
+                    accessibilityLabel={`${item.fullName || item.username} · ${t("actions.more")}`}
+                    onPress={() => setMoreUser(item)}
+                  />
+                )}
               </View>
             </View>
           </Card.Content>
@@ -670,6 +747,7 @@ export default function UsersScreen() {
     [
       batchSelecting,
       canManageUserBarcode,
+      language,
       managedStoreCode,
       openStaffDetail,
       selectedUserGuids,
@@ -696,8 +774,8 @@ export default function UsersScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
       <FlatList
-        data={filteredUsers}
-        keyExtractor={(item) => item.userGUID}
+        data={listRows}
+        keyExtractor={(item) => item.key}
         renderItem={renderUserCard}
         refreshControl={
           <RefreshControl refreshing={usersQuery.isFetching && !usersQuery.isLoading} onRefresh={handleRefresh} />
@@ -710,6 +788,9 @@ export default function UsersScreen() {
                 <Text variant="headlineSmall">{t("title")}</Text>
                 <View style={styles.storeStatusRow}>
                   <Text variant="bodyMedium" style={styles.secondaryText}>{storeCaption}</Text>
+                  {!usersQuery.isLoading && !usersQuery.isError ? (
+                    <Text variant="labelSmall" style={styles.secondaryText}>{t("list.peopleCount", { count: statusCounts.all })}</Text>
+                  ) : null}
                   {managedStoreCode ? (
                     <Text variant="labelSmall" style={isStoreManageable(managedStoreCode, manageableStores) ? styles.manageableText : styles.readOnlyHint}>
                       {isStoreManageable(managedStoreCode, manageableStores) ? t("currentStore.manageableBadge") : t("currentStore.viewOnlyBadge")}
@@ -831,6 +912,12 @@ export default function UsersScreen() {
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
             </View>
+          ) : !usersQuery.isError ? (
+            // 后端不返回其他店长；明示这一点，避免店长误以为名单不全。
+            <View style={styles.onlyStaffNote} testID="staff-scope-note">
+              <Icon source="lock-outline" size={16} color={HB_COLORS.textSecondary} />
+              <Text variant="bodySmall" style={[styles.secondaryText, styles.onlyStaffNoteText]}>{t("list.onlyStaffNote")}</Text>
+            </View>
           ) : null
         }
       />
@@ -878,6 +965,18 @@ export default function UsersScreen() {
                   value={formValues.status}
                   onValueChange={(value) => setFormValues((current) => ({ ...current, status: value }))}
                   disabled={isBusy}
+                />
+              </View>
+              <View style={styles.switchRow}>
+                <View style={styles.userTitleWrap}>
+                  <Text variant="bodyLarge">{t("fields.loginEnabled")}</Text>
+                  <Text variant="bodySmall" style={styles.secondaryText}>{t("fields.loginEnabledHelper")}</Text>
+                </View>
+                <Switch
+                  value={formValues.loginEnabled !== false}
+                  onValueChange={(value) => setFormValues((current) => ({ ...current, loginEnabled: value }))}
+                  disabled={isBusy}
+                  accessibilityLabel={t("fields.loginEnabled")}
                 />
               </View>
               <Text variant="bodySmall" style={styles.secondaryText}>
@@ -1086,6 +1185,45 @@ const styles = StyleSheet.create({
   },
   secondaryText: {
     color: "#6B7280",
+  },
+  sectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    paddingTop: 4,
+  },
+  sectionHeaderText: {
+    color: HB_COLORS.textSecondary,
+    fontWeight: "700",
+  },
+  nameRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  nameText: {
+    flexShrink: 1,
+  },
+  selfChip: {
+    backgroundColor: HB_COLORS.action,
+  },
+  selfChipText: {
+    color: HB_COLORS.white,
+    fontSize: 11,
+    lineHeight: 14,
+    marginVertical: 2,
+    marginHorizontal: 6,
+  },
+  onlyStaffNote: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 4,
+    paddingTop: 8,
+  },
+  onlyStaffNoteText: {
+    flex: 1,
   },
   storePickerButtonContent: {
     justifyContent: "flex-start",

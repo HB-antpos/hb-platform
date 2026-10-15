@@ -2702,6 +2702,217 @@ namespace BlazorApp.Api.Services
         }
 
         /// <summary>
+        /// 复制用户直接权限：校验与保存单个用户的权限沿用同一套操作者/目标校验，
+        /// 多个目标在同一个 Serializable 事务里写入，任何一人校验失败整体不写。
+        /// </summary>
+        public async Task<ApiResponse<CopyUserPermissionsResultDto>> CopyUserDirectPermissionsAsync(
+            string sourceUserGuid,
+            CopyUserPermissionsRequestDto dto
+        )
+        {
+            try
+            {
+                var mode = (dto.Mode ?? string.Empty).Trim().ToLowerInvariant();
+                if (mode != CopyUserPermissionsRequestDto.ModeMerge && mode != CopyUserPermissionsRequestDto.ModeReplace)
+                {
+                    return ApiResponse<CopyUserPermissionsResultDto>.Error("复制方式只能是合并或覆盖", "VALIDATION_ERROR");
+                }
+
+                var targetGuids = (dto.TargetUserGuids ?? new List<string>())
+                    .Where(item => !string.IsNullOrWhiteSpace(item))
+                    .Select(item => item.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (targetGuids.Count == 0)
+                {
+                    return ApiResponse<CopyUserPermissionsResultDto>.Error("请至少选择一位目标员工", "VALIDATION_ERROR");
+                }
+                if (targetGuids.Count > 50)
+                {
+                    return ApiResponse<CopyUserPermissionsResultDto>.Error("一次最多复制给 50 位员工", "VALIDATION_ERROR");
+                }
+                if (targetGuids.Any(item => string.Equals(item, sourceUserGuid, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return ApiResponse<CopyUserPermissionsResultDto>.Error("目标员工不能包含来源员工", "VALIDATION_ERROR");
+                }
+
+                var db = _context.Db;
+                if (dto.Preview)
+                {
+                    var preview = await BuildCopyPlanAsync(db, sourceUserGuid, targetGuids, mode, true);
+                    return preview.Error ?? ApiResponse<CopyUserPermissionsResultDto>.OK(preview.Result!, "复制权限预览成功");
+                }
+
+                // 写入使用串行化事务，避免操作者/目标权限在复验与写入之间漂移；事务内重新计算，不信任预览结果。
+                await db.Ado.BeginTranAsync(IsolationLevel.Serializable);
+                try
+                {
+                    var plan = await BuildCopyPlanAsync(db, sourceUserGuid, targetGuids, mode, false);
+                    if (plan.Error != null)
+                    {
+                        await db.Ado.RollbackTranAsync();
+                        return plan.Error;
+                    }
+
+                    var now = DateTime.Now;
+                    var username = GetCurrentUsername();
+                    foreach (var target in plan.Result!.Targets)
+                    {
+                        var touched = target.Added.Concat(target.Removed).ToList();
+                        if (touched.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        // 与保存单个用户权限一致：先物理清掉将变动的行（含历史软删行，避免重复键），再插入新增。
+                        await db.Deleteable<SysUserPermission>()
+                            .Where(item => item.UserGuid == target.UserGuid && touched.Contains(item.PermissionCode))
+                            .ExecuteCommandAsync();
+                        if (target.Added.Count > 0)
+                        {
+                            var rows = target.Added.Select(code => new SysUserPermission
+                            {
+                                Id = UuidHelper.GenerateUuid7(),
+                                UserGuid = target.UserGuid,
+                                PermissionCode = code,
+                                CreatedAt = now,
+                                CreatedBy = username,
+                                UpdatedAt = now,
+                                UpdatedBy = username,
+                                IsDeleted = false,
+                            }).ToList();
+                            await db.Insertable(rows).ExecuteCommandAsync();
+                        }
+                    }
+
+                    await db.Ado.CommitTranAsync();
+                    _logger.LogInformation(
+                        "复制用户直接权限成功，Source: {Source}, Targets: {TargetCount}, Mode: {Mode}, Operator: {Operator}",
+                        sourceUserGuid,
+                        targetGuids.Count,
+                        mode,
+                        username
+                    );
+                    return ApiResponse<CopyUserPermissionsResultDto>.OK(plan.Result, "复制权限成功");
+                }
+                catch
+                {
+                    await db.Ado.RollbackTranAsync();
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "复制用户直接权限失败，SourceUserGUID: {SourceUserGUID}", sourceUserGuid);
+                return ApiResponse<CopyUserPermissionsResultDto>.Error("复制权限失败", "COPY_USER_PERMISSIONS_FAILED");
+            }
+        }
+
+        /// <summary>
+        /// 计算复制计划：操作者与源/目标校验、可复制集合、每人新增与移除。预览与写入共用，保证两者口径一致。
+        /// </summary>
+        private async Task<(ApiResponse<CopyUserPermissionsResultDto>? Error, CopyUserPermissionsResultDto? Result)> BuildCopyPlanAsync(
+            ISqlSugarClient db,
+            string sourceUserGuid,
+            IReadOnlyList<string> targetGuids,
+            string mode,
+            bool preview
+        )
+        {
+            static (ApiResponse<CopyUserPermissionsResultDto>?, CopyUserPermissionsResultDto?) Fail(string message, string code) =>
+                (ApiResponse<CopyUserPermissionsResultDto>.Error(message, code), null);
+
+            var actor = await UserAccessMutationSecurity.ResolveActorAsync(db, _manageableStoreScopeService);
+            if (actor.Kind == UserAccessMutationActorKind.Denied)
+            {
+                return Fail("当前账号不能分配员工访问权限", "ACCESS_DELEGATOR_DENIED");
+            }
+
+            var isRestricted = !actor.IsSuperAdmin;
+            // 来源与目标都走同一套校验：不能是本人、高权限账号或范围外账号；店长只能涉及员工。
+            foreach (var guid in new[] { sourceUserGuid }.Concat(targetGuids))
+            {
+                var exists = await db.Queryable<User>().AnyAsync(item => item.UserGUID == guid && !item.IsDeleted);
+                if (!exists)
+                {
+                    return Fail("用户不存在", "USER_NOT_FOUND");
+                }
+
+                var decision = await UserAccessMutationSecurity.ValidateGlobalTargetAsync(db, actor, guid);
+                if (!decision.IsAllowed)
+                {
+                    return Fail(decision.Message, decision.ErrorCode);
+                }
+
+                if (isRestricted && !await UserAccessMutationSecurity.IsEmployeeTargetAsync(db, guid))
+                {
+                    return Fail("店长只能维护员工的 POS 收银权限", "EMPLOYEE_TARGET_REQUIRED");
+                }
+            }
+
+            var sourceCodes = await db.Queryable<SysUserPermission>()
+                .Where(item => item.UserGuid == sourceUserGuid && !item.IsDeleted)
+                .Select(item => item.PermissionCode)
+                .ToListAsync();
+            sourceCodes = sourceCodes.Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // 可复制范围：管理员不限；店长只能是「POS 收银业务权限 ∩ 自己持有」，与保存单个员工权限的约束一致。
+            HashSet<string>? delegated = null;
+            if (isRestricted)
+            {
+                var actorCodes = await UserAccessMutationSecurity.GetEffectivePermissionCodesAsync(db, actor.UserGuid);
+                delegated = PermissionSeedData.PosTerminalBusinessPermissionCodes
+                    .Where(actorCodes.Contains)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+
+            // 只复制仍存在的权限定义（内置销售看板码例外），已被删除的旧码不再扩散。
+            var knownCodes = sourceCodes.Count == 0
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : (await db.Queryable<SysPermission>()
+                        .Where(item => sourceCodes.Contains(item.Code) && !item.IsDeleted)
+                        .Select(item => item.Code)
+                        .ToListAsync())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var transferable = sourceCodes
+                .Where(code => (delegated == null || delegated.Contains(code))
+                    && (knownCodes.Contains(code) || IsBuiltInSalesDashboardPermission(code)))
+                .ToList();
+            var skipped = sourceCodes.Except(transferable, StringComparer.OrdinalIgnoreCase).ToList();
+
+            var result = new CopyUserPermissionsResultDto
+            {
+                SourceUserGuid = sourceUserGuid,
+                Mode = mode,
+                Preview = preview,
+                SourceDirectPermissionCodes = sourceCodes,
+                TransferablePermissionCodes = transferable,
+                SkippedPermissionCodes = skipped,
+            };
+
+            var replace = mode == CopyUserPermissionsRequestDto.ModeReplace;
+            foreach (var targetGuid in targetGuids)
+            {
+                var existing = await db.Queryable<SysUserPermission>()
+                    .Where(item => item.UserGuid == targetGuid && !item.IsDeleted)
+                    .Select(item => item.PermissionCode)
+                    .ToListAsync();
+                var plan = UserPermissionCopyPlanner.Plan(targetGuid, existing, transferable, replace, delegated);
+                result.Targets.Add(new CopyUserPermissionsTargetResultDto
+                {
+                    UserGuid = plan.UserGuid,
+                    Added = plan.Added.ToList(),
+                    Removed = plan.Removed.ToList(),
+                    UnchangedCount = plan.UnchangedCount,
+                });
+            }
+
+            return (null, result);
+        }
+
+        /// <summary>
         /// 复制角色
         /// </summary>
         public async Task<ApiResponse<RoleDto>> DuplicateRoleAsync(

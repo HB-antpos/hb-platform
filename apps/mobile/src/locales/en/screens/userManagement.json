@@ -270,12 +270,59 @@
       "notFoundDescription": "The staff account may have been removed or moved outside your scope. Return to Staff Management and refresh.",
       "networkTitle": "Could not load account access",
       "networkDescription": "The server cannot be reached right now. Check your connection and try again."
+    },
+    "copy": {
+      "toOthersAction": "Copy to others",
+      "fromColleagueAction": "Copy from colleague",
+      "toOthersTitle": "Copy {{name}}'s permissions to…",
+      "fromColleagueTitle": "Copy a colleague's permissions to {{name}}",
+      "subtitle": "Store: {{store}}",
+      "close": "Close",
+      "searchPlaceholder": "Search store staff",
+      "unavailable": "The store could not be determined, so colleagues cannot be listed.",
+      "listFailed": "Failed to load colleagues",
+      "empty": "No eligible staff in this store (disabled accounts and store managers are not listed).",
+      "noMatch": "No matching staff",
+      "modeTitle": "Copy method",
+      "mode": {
+        "merge": "Merge (recommended)",
+        "mergeShort": "merge",
+        "mergeDescription": "Keep their current direct permissions and add the source's direct permissions",
+        "replace": "Replace",
+        "replaceShort": "replace",
+        "replaceDescription": "Replace their direct permissions with the source's; any extras are removed"
+      },
+      "help": "Only direct permissions are copied. Role permissions are not copied. Permissions you cannot grant yourself are skipped automatically.",
+      "nextToOthers_one": "Next · copy to {{count}} person",
+      "nextToOthers_other": "Next · copy to {{count}} people",
+      "nextFromColleague": "Next",
+      "nextIdle": "Select people to continue",
+      "previewFailed": "Could not work out the permission changes. Please try again later.",
+      "copyFailed": "Copy failed. Nobody's permissions were changed.",
+      "dirtyBlocked": "Save or discard your unsaved permission changes before copying permissions.",
+      "success_one": "Copied. Permissions updated for {{count}} person",
+      "success_other": "Copied. Permissions updated for {{count}} people",
+      "confirm": {
+        "title": "Confirm copy",
+        "source": "Source: {{name}}",
+        "sourceMeta_one": "{{count}} direct permission · method: {{mode}}",
+        "sourceMeta_other": "{{count}} direct permissions · method: {{mode}}",
+        "changesTitle": "Changes to apply ({{count}})",
+        "noChange": "No change",
+        "unchanged": "{{count}} more unchanged",
+        "nothingToCopy": "The selected people already match the source's direct permissions. Nothing to copy.",
+        "skippedTitle": "Skipped",
+        "skipped": "\"{{names}}\" is outside what you can grant, so it was skipped and will not be copied to anyone.",
+        "back": "Back",
+        "submit": "Confirm copy"
+      }
     }
   },
   "statuses": {
     "active": "Active",
     "disabled": "Disabled",
-    "pendingFirstLogin": "First sign-in pending"
+    "pendingFirstLogin": "First sign-in pending",
+    "loginDisabled": "Cannot sign in"
   },
   "fields": {
     "username": "Username",
@@ -283,6 +330,8 @@
     "email": "Email",
     "phone": "Phone",
     "enabled": "Enabled",
+    "loginEnabled": "Allow web / app sign-in",
+    "loginEnabledHelper": "When off, this employee cannot sign in to the web or app and signed-in devices stop working immediately; attendance and rosters are unaffected",
     "initialPassword": "Initial password",
     "newPassword": "New password",
     "fixedRoleHint": "Accounts created here are always staff accounts, assigned to the selected managed store, and set as casual staff.",
@@ -297,6 +346,15 @@
     "lastLoginValue": "Last login: {{value}}",
     "lastLoginIpValue": "Login IP: {{value}}",
     "updatedAtValue": "Updated: {{value}}"
+  },
+  "list": {
+    "me": "Me",
+    "meBadge": "Me",
+    "staffSection": "Staff ({{count}})",
+    "sortedByName": "By name",
+    "peopleCount_one": "{{count}} person",
+    "peopleCount_other": "{{count}} people",
+    "onlyStaffNote": "This page only shows store staff and you. Other store managers are not listed here."
   },
   "filters": {
     "sortByName": "Sort by name",
@@ -540,6 +598,13 @@
     "inviteFailedFallback": "Email could not be sent",
     "resendInvite": "Resend initial password",
     "inviteResent": "Initial password resent",
-    "nextStepEmail": "Check their email, sign in with the initial password and set their own password"
+    "nextStepEmail": "Check their email, sign in with the initial password and set their own password",
+    "loginEnabled": "Allow web / app sign-in",
+    "loginEnabledOnHelper": "When on, the initial password is emailed to the employee, who uses it to sign in to the web and the app",
+    "loginEnabledOffHelper": "Off by default: the account still works for attendance, rosters and so on, but cannot sign in to the web or app and no password email is sent. You can turn it on later when editing",
+    "emailHelperNoLogin": "Used for contact and account recovery only; the account cannot sign in yet",
+    "usernameFromEmailHelperNoLogin": "Same as the email by default; used to sign in once sign-in is allowed (3–50 characters)",
+    "successDescriptionNoLogin": "{{name}}'s account was created. They cannot sign in to the web or app yet, and no password email was sent.",
+    "loginDisabledNotice": "This employee cannot sign in yet. When needed, edit them in the staff list and turn on \"Allow web / app sign-in\"; you will be offered to send the initial password."
   }
 }
