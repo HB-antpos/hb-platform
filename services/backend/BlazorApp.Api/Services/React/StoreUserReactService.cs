@@ -2,6 +2,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Utils;
+using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -56,12 +57,11 @@ namespace BlazorApp.Api.Services.React
 
                 var keyword = request.Keyword?.Trim();
                 var statusFilter = request.Status;
-                // 员工管理的范围 = 本人可管理分店的店员 + 店长本人（置顶只读）；其他店长 / 管理员不出现。
-                // 管理员（Users.View）仍按原口径看到全部店员，不受影响。
-                var actorGuid = scope.UserGuid;
-                var includeSelf = !scope.IsAdmin
-                    && scope.IsStoreManager
-                    && !string.IsNullOrWhiteSpace(actorGuid);
+
+                // 关键逻辑：员工管理只列本店店员 + 登录店长本人。店长本人行靠「本人 + 店长角色」命中；
+                // 管理员不是店长，不会混入本人行。其他店长（含同时挂了店员角色的）在下方整体剔除。
+                var managerRoleNames = Permissions.StoreManagerRoleNames;
+                var selfGuid = scope.IsStoreManager && !scope.IsAdmin ? scope.UserGuid : string.Empty;
 
                 var rows = await _db.Queryable<User>()
                     .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)
@@ -77,7 +77,7 @@ namespace BlazorApp.Api.Services.React
                         && !s.IsDeleted
                         && (
                             r.RoleName == StoreStaffRoleName
-                            || (includeSelf && u.UserGUID == actorGuid)
+                            || (u.UserGUID == selfGuid && managerRoleNames.Contains(r.RoleName))
                         )
                     )
                     .WhereIF(
@@ -121,17 +121,27 @@ namespace BlazorApp.Api.Services.React
                     })
                     .ToListAsync();
 
-                // 非管理员看不到其他店长 / 管理员：即使对方同时挂着 StoreStaff 角色，也按高权限账号排除（本人除外）。
-                if (!scope.IsAdmin && rows.Count > 0)
+                // 剔除「同时拥有店长/管理员角色」的其他账号：只看店员角色那一行判断不出，需单独查角色。
+                if (rows.Count > 0)
                 {
-                    var highPrivilege = await UserAccessMutationSecurity.GetHighPrivilegeUserGuidsAsync(
-                        _db,
-                        rows.Select(item => item.UserGUID).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
-                    );
+                    var rowUserGuids = rows.Select(item => item.UserGUID).Distinct().ToList();
+                    var highRoleNames = Permissions.HighPrivilegeRoleNames;
+                    var highRoleUserGuids = (await _db.Queryable<UserRole>()
+                            .InnerJoin<Role>((ur, r) => ur.RoleGUID == r.RoleGUID)
+                            .Where((ur, r) =>
+                                rowUserGuids.Contains(ur.UserGUID)
+                                && !ur.IsDeleted
+                                && !r.IsDeleted
+                                && highRoleNames.Contains(r.RoleName)
+                            )
+                            .Select((ur, r) => ur.UserGUID)
+                            .ToListAsync())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
                     rows = rows
                         .Where(item =>
-                            item.UserGUID.Equals(actorGuid, StringComparison.OrdinalIgnoreCase)
-                            || !highPrivilege.Contains(item.UserGUID))
+                            !highRoleUserGuids.Contains(item.UserGUID)
+                            || string.Equals(item.UserGUID, selfGuid, StringComparison.OrdinalIgnoreCase)
+                        )
                         .ToList();
                 }
 
@@ -637,14 +647,6 @@ namespace BlazorApp.Api.Services.React
             string? storeCode
         )
         {
-            // 与列表同口径：非管理员读不到其他店长 / 管理员的详情（即使对方同时挂着 StoreStaff 角色）。
-            if (!scope.IsAdmin
-                && !userGuid.Equals(scope.UserGuid, StringComparison.OrdinalIgnoreCase)
-                && await UserAccessMutationSecurity.IsHighPrivilegeTargetAsync(_db, userGuid))
-            {
-                return null;
-            }
-
             var normalizedStoreCode = storeCode?.Trim();
             var rows = await _db.Queryable<User>()
                 .InnerJoin<UserRole>((u, ur) => u.UserGUID == ur.UserGUID)

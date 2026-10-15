@@ -43,6 +43,8 @@ export const PERMISSIONS = {
   },
   Users: {
     View: "Users.View",
+    // 移动端「员工管理」入口专用：只看本店店员 + 本人；Users.View 持有者由后端别名自动满足。
+    ViewStoreStaff: "Users.ViewStoreStaff",
     Create: "Users.Create",
     Edit: "Users.Edit",
     ResetPassword: "Users.ResetPassword",
@@ -50,8 +52,6 @@ export const PERMISSIONS = {
     CreateStoreStaff: "Users.CreateStoreStaff",
     EditStoreStaff: "Users.EditStoreStaff",
     ResetStoreStaffPassword: "Users.ResetStoreStaffPassword",
-    // 移动端「员工管理」入口与店员列表读取专用；「用户管理」仍用 Users.View（持有 Users.View 自动包含本权限）。
-    ViewStoreStaff: "Users.ViewStoreStaff",
     ManageRoles: "Users.ManageRoles",
     ManageStores: "Users.ManageStores",
     ManagePos: "Users.ManagePosTerminalPermissions",

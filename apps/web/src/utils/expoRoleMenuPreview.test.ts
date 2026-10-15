@@ -272,15 +272,6 @@ for (const code of faceHubCodes) {
     `拥有 ${code} 时应显示人脸比对合并入口`,
   )
 }
-// 员工管理（users）认 Users.ViewStoreStaff，用户管理（user-admin）认 Users.View：
-// 店长只有前者只看到员工管理；持有 Users.View 的管理员两个都看到（单向别名）。
-const routeVisible = (codes: string[], routeName: string) =>
-  buildPreview(codes).allRoutes.find((route) => route.routeName === routeName)?.visible
-assertEqual(routeVisible([P.Users.ViewStoreStaff], 'users'), true, '仅有 ViewStoreStaff 应显示员工管理')
-assertEqual(routeVisible([P.Users.ViewStoreStaff], 'user-admin'), false, '仅有 ViewStoreStaff 不应显示用户管理')
-assertEqual(routeVisible([P.Users.View], 'users'), true, 'Users.View 通过别名包含 ViewStoreStaff，应显示员工管理')
-assertEqual(routeVisible([P.Users.View], 'user-admin'), true, 'Users.View 应显示用户管理')
-
 for (const codes of [[], [P.FaceMatch.Traffic.View], [P.Users.View]]) {
   assertEqual(
     buildPreview(codes).allRoutes.find((route) => route.routeName === 'face-hub')?.visible,

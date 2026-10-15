@@ -36,8 +36,8 @@ import {
 import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
 import { getUserAccessEligibility } from "@/modules/users/access-management";
+import { localizeAccessRoleName } from "@/modules/users/access-permission-presentation";
 import { getDisplayableEmail, hasDeliverableEmail } from "@/modules/users/staff-email-username";
-import { isSelfStaffRow, splitSelfAndStaff } from "@/modules/users/staff-list-scope";
 import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { validateStoreUserForm } from "@/modules/users/validation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
@@ -48,6 +48,11 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 
 type StatusFilter = "all" | "active" | "disabled" | "pendingFirstLogin" | "noEmail";
+
+/** 列表行：分组标题（我 / 店员）或员工行。 */
+type ListRow =
+  | { kind: "header"; key: string; label: string; hint?: string }
+  | { kind: "user"; key: string; user: StoreUserListItem; isSelf: boolean };
 
 const EMPTY_FORM: StoreUserFormValues = {
   username: "",
@@ -112,7 +117,7 @@ export default function UsersScreen() {
     selectedStoreCode: rememberedStoreCode,
   });
 
-  // 员工管理入口用「查看本店店员」；持有 Users.View（用户管理）同样可进入。
+  // 员工管理入口认 Users.ViewStoreStaff；Users.View（全局用户查看）持有者同样放行。
   const canViewUsers = access.isAdmin
     || access.canReadUser
     || access.hasPermission(PERMISSIONS.Users.ViewStoreStaff);
@@ -306,6 +311,8 @@ export default function UsersScreen() {
         pathname: "/users/[userGuid]/access",
         params: {
           userGuid: user.userGUID,
+          // 复制权限要按员工所属分店列出同事。
+          storeCode: resolveUserStoreCode(user) ?? "",
           userName: user.fullName || user.username,
           username: user.username,
           targetStatus: String(user.status),
@@ -313,7 +320,7 @@ export default function UsersScreen() {
         },
       } as unknown as Parameters<typeof router.push>[0]);
     },
-    [router]
+    [resolveUserStoreCode, router]
   );
 
   const closeResetPasswordDialog = useCallback(() => {
@@ -513,14 +520,8 @@ export default function UsersScreen() {
     t,
   ]);
 
-  // 店长本人单独置顶（只读），不参与状态筛选与计数；列表范围由后端收口，这里只做展示分组。
-  const { self: selfUser, staff: staffUsers } = useMemo(
-    () => splitSelfAndStaff(usersQuery.data ?? [], actorGuid),
-    [actorGuid, usersQuery.data]
-  );
-
   const filteredUsers = useMemo(() => {
-    const items = staffUsers;
+    const items = usersQuery.data ?? [];
     const filtered = items.filter((item) => {
       if (statusFilter === "active") {
         return item.status === 1;
@@ -538,20 +539,44 @@ export default function UsersScreen() {
       return true;
     });
 
-    const sorted = [...filtered].sort((left, right) =>
+    return [...filtered].sort((left, right) =>
       (left.fullName || left.username).localeCompare(right.fullName || right.username)
     );
-    // 本人只在「全部」下置顶显示；其他筛选下只看店员。
-    return selfUser && statusFilter === "all" ? [selfUser, ...sorted] : sorted;
-  }, [selfUser, staffUsers, statusFilter]);
+  }, [statusFilter, usersQuery.data]);
+
+  // 「我」分组置顶：后端只返回本店店员 + 登录店长本人；本人行的编辑/停用等接口会被拒绝，所以不提供任何操作。
+  const listRows = useMemo<ListRow[]>(() => {
+    const actorKey = actorGuid.trim().toLowerCase();
+    const selfUsers = actorKey
+      ? filteredUsers.filter((user) => user.userGUID.trim().toLowerCase() === actorKey)
+      : [];
+    const staffUsers = actorKey
+      ? filteredUsers.filter((user) => user.userGUID.trim().toLowerCase() !== actorKey)
+      : filteredUsers;
+    const rows: ListRow[] = [];
+    if (selfUsers.length) {
+      rows.push({ kind: "header", key: "header-me", label: t("list.me") });
+      selfUsers.forEach((user) => rows.push({ kind: "user", key: user.userGUID, user, isSelf: true }));
+    }
+    if (staffUsers.length) {
+      rows.push({
+        kind: "header",
+        key: "header-staff",
+        label: t("list.staffSection", { count: staffUsers.length }),
+        hint: t("list.sortedByName"),
+      });
+      staffUsers.forEach((user) => rows.push({ kind: "user", key: user.userGUID, user, isSelf: false }));
+    }
+    return rows;
+  }, [actorGuid, filteredUsers, t]);
 
   const statusCounts = useMemo(() => {
-    const items = staffUsers;
+    const items = usersQuery.data ?? [];
     const active = items.filter((item) => item.status === 1).length;
     const pendingFirstLogin = items.filter((item) => item.mustChangePassword === true).length;
     const noEmail = items.filter((item) => !hasDeliverableEmail(item.email)).length;
     return { all: items.length, active, disabled: items.length - active, pendingFirstLogin, noEmail };
-  }, [staffUsers]);
+  }, [usersQuery.data]);
 
   const selectedUsers = useMemo(
     () => (usersQuery.data ?? []).filter(
@@ -621,12 +646,25 @@ export default function UsersScreen() {
   );
 
   const renderUserCard = useCallback(
-    ({ item }: { item: StoreUserListItem }) => {
+    ({ item: row }: { item: ListRow }) => {
+      if (row.kind === "header") {
+        return (
+          <View style={styles.sectionHeader}>
+            <Text variant="labelLarge" style={styles.sectionHeaderText}>{row.label}</Text>
+            {row.hint ? <Text variant="labelSmall" style={styles.secondaryText}>{row.hint}</Text> : null}
+          </View>
+        );
+      }
+
+      const item = row.user;
+      const isSelf = row.isSelf;
       const employmentType = item.employmentType
         ? t(`detail.employmentTypes.${item.employmentType}`, item.employmentType)
         : t("fields.positionValue");
-      // 本人行只读：不可点进详情、不可批量、没有更多操作 / 个人码。
-      const isSelf = isSelfStaffRow(item, actorGuid);
+      // 本人行显示角色（如店长），店员行沿用雇佣类型。
+      const roleSummary = item.roleNames.length
+        ? item.roleNames.map((roleName) => localizeAccessRoleName(roleName, language)).join(" / ")
+        : employmentType;
       const canUseBarcode = !isSelf && canManageUserBarcode(item);
 
       const toggleSelection = () => setSelectedUserGuids((current) => {
@@ -638,7 +676,7 @@ export default function UsersScreen() {
 
       return (
         <Card
-          style={[styles.userCard, isSelf ? styles.selfCard : null]}
+          style={styles.userCard}
           mode="contained"
           onPress={isSelf ? undefined : () => batchSelecting && canUseBarcode ? toggleSelection() : openStaffDetail(item)}
           testID="compact-staff-row"
@@ -656,15 +694,15 @@ export default function UsersScreen() {
               <View style={styles.identityRow}>
                 <Avatar.Text size={38} label={getInitials(item)} style={styles.avatar} />
                 <View style={styles.userTitleWrap}>
-                  <Text variant="titleSmall" numberOfLines={1}>{item.fullName || item.username}</Text>
+                  <View style={styles.nameRow}>
+                    <Text variant="titleSmall" numberOfLines={1} style={styles.nameText}>{item.fullName || item.username}</Text>
+                    {isSelf ? <Chip compact style={styles.selfChip} textStyle={styles.selfChipText}>{t("list.meBadge")}</Chip> : null}
+                  </View>
                   <Text variant="bodySmall" style={styles.secondaryText}>
-                    @{item.username} · {employmentType}
+                    @{item.username} · {isSelf ? roleSummary : employmentType}
                   </Text>
                   {item.loginEnabled === false ? (
                     <Text variant="labelSmall" style={styles.secondaryText}>{t("statuses.loginDisabled")}</Text>
-                  ) : null}
-                  {isSelf ? (
-                    <Text variant="labelSmall" style={styles.secondaryText}>{t("fields.selfReadOnlyHint")}</Text>
                   ) : null}
                   {!managedStoreCode && item.storeCode ? (
                     <Text variant="labelSmall" style={styles.secondaryText} numberOfLines={1}>
@@ -674,9 +712,7 @@ export default function UsersScreen() {
                 </View>
               </View>
               <View style={styles.cardMenuActions}>
-                {isSelf ? (
-                  <Chip compact style={styles.activeChip}>{t("statuses.self")}</Chip>
-                ) : item.mustChangePassword && item.status === 1 ? (
+                {item.mustChangePassword && item.status === 1 ? (
                   <Chip compact style={styles.pendingChip}>{t("statuses.pendingFirstLogin")}</Chip>
                 ) : (
                   <Chip compact style={item.status === 1 ? styles.activeChip : styles.inactiveChip}>
@@ -709,9 +745,9 @@ export default function UsersScreen() {
       );
     },
     [
-      actorGuid,
       batchSelecting,
       canManageUserBarcode,
+      language,
       managedStoreCode,
       openStaffDetail,
       selectedUserGuids,
@@ -738,8 +774,8 @@ export default function UsersScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
       <FlatList
-        data={filteredUsers}
-        keyExtractor={(item) => item.userGUID}
+        data={listRows}
+        keyExtractor={(item) => item.key}
         renderItem={renderUserCard}
         refreshControl={
           <RefreshControl refreshing={usersQuery.isFetching && !usersQuery.isLoading} onRefresh={handleRefresh} />
@@ -752,6 +788,9 @@ export default function UsersScreen() {
                 <Text variant="headlineSmall">{t("title")}</Text>
                 <View style={styles.storeStatusRow}>
                   <Text variant="bodyMedium" style={styles.secondaryText}>{storeCaption}</Text>
+                  {!usersQuery.isLoading && !usersQuery.isError ? (
+                    <Text variant="labelSmall" style={styles.secondaryText}>{t("list.peopleCount", { count: statusCounts.all })}</Text>
+                  ) : null}
                   {managedStoreCode ? (
                     <Text variant="labelSmall" style={isStoreManageable(managedStoreCode, manageableStores) ? styles.manageableText : styles.readOnlyHint}>
                       {isStoreManageable(managedStoreCode, manageableStores) ? t("currentStore.manageableBadge") : t("currentStore.viewOnlyBadge")}
@@ -872,6 +911,12 @@ export default function UsersScreen() {
           usersQuery.isLoading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
+            </View>
+          ) : !usersQuery.isError ? (
+            // 后端不返回其他店长；明示这一点，避免店长误以为名单不全。
+            <View style={styles.onlyStaffNote} testID="staff-scope-note">
+              <Icon source="lock-outline" size={16} color={HB_COLORS.textSecondary} />
+              <Text variant="bodySmall" style={[styles.secondaryText, styles.onlyStaffNoteText]}>{t("list.onlyStaffNote")}</Text>
             </View>
           ) : null
         }
@@ -1141,6 +1186,45 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: "#6B7280",
   },
+  sectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    paddingTop: 4,
+  },
+  sectionHeaderText: {
+    color: HB_COLORS.textSecondary,
+    fontWeight: "700",
+  },
+  nameRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  nameText: {
+    flexShrink: 1,
+  },
+  selfChip: {
+    backgroundColor: HB_COLORS.action,
+  },
+  selfChipText: {
+    color: HB_COLORS.white,
+    fontSize: 11,
+    lineHeight: 14,
+    marginVertical: 2,
+    marginHorizontal: 6,
+  },
+  onlyStaffNote: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 4,
+    paddingTop: 8,
+  },
+  onlyStaffNoteText: {
+    flex: 1,
+  },
   storePickerButtonContent: {
     justifyContent: "flex-start",
   },
@@ -1193,11 +1277,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 4,
     justifyContent: "space-between",
-  },
-  selfCard: {
-    backgroundColor: "#F5F9FF",
-    borderColor: "#B2CCFF",
-    borderWidth: StyleSheet.hairlineWidth,
   },
   userTitleWrap: {
     flex: 1,

@@ -7,7 +7,7 @@ type MenuRow = [string, string, string, string[], Partial<MenuSource>?];
 const WEB_MENU: MenuSource[] = ([
   ["/dashboard", "Dashboard", "数据看板", ["Dashboard"]],
   ["/system/stores", "Stores", "分店管理", ["Stores.View"]],
-  // 与 NavigationService 一致：Web 用户管理菜单只认 Users.ViewWebConsole，移动端 users / user-admin 仍用 Users.View。
+  // 与 NavigationService 一致：Web 用户管理菜单只认 Users.ViewWebConsole，移动端 users（员工管理）用 Users.ViewStoreStaff，user-admin（用户管理）仍用 Users.View。
   ["/system/users", "Users", "用户管理", ["Users.ViewWebConsole"]],
   ["/system/employee-profiles", "Employee profiles", "员工档案", ["EmployeeProfiles.View"]],
   ["/system/roles", "Roles", "角色管理", ["Roles.View"]],
@@ -88,7 +88,8 @@ const MOBILE_MENU: MenuSource[] = ([
     "Attendance.Leave.ReviewManagedStore", "Attendance.Settings.Edit", "Attendance.Admin.View",
   ]],
   ["seasonal-cards", "Seasonal cards", "节庆卡", ["SeasonalCards.Remaining.ViewManagedStore", "SeasonalCards.Remaining.SubmitManagedStore"]],
-  ["users", "Users", "员工", ["Users.ViewStoreStaff"]],
+  // 「员工管理」(users) 只认 Users.ViewStoreStaff（Users.View 持有者经后端别名自动满足）；「用户管理」(user-admin) 仍是 Users.View。
+  ["users", "Users", "用户", ["Users.ViewStoreStaff"]],
   ["user-admin", "User management", "用户管理", ["Users.View"]],
   ["cash-register-users", "Cash register barcodes", "收银用户条码", ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]],
   ["roles", "Role management", "角色管理", ["Roles.View"]],

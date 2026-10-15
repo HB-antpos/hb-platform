@@ -111,14 +111,7 @@ const ATTENDANCE_MANAGEMENT_PERMISSION_CODES = [
   P.Attendance.AdminView,
 ]
 
-interface PermissionAliasGroup {
-  canonicalCode: string
-  aliasCodes: readonly string[]
-  // 单向别名：持有别名码即满足 canonicalCode，反过来不成立（如 Users.View ⊇ Users.ViewStoreStaff，店长只有后者看不到「用户管理」）。
-  oneWay?: boolean
-}
-
-const PERMISSION_ALIAS_GROUPS: readonly PermissionAliasGroup[] = [
+const PERMISSION_ALIAS_GROUPS = [
   {
     canonicalCode: P.LocalPurchase.View,
     aliasCodes: ['LocalInvocie.View'],
@@ -131,20 +124,13 @@ const PERMISSION_ALIAS_GROUPS: readonly PermissionAliasGroup[] = [
     canonicalCode: P.Warehouse.ManageProducts,
     aliasCodes: [P.Warehouse.Manage],
   },
-  {
-    canonicalCode: P.Users.ViewStoreStaff,
-    aliasCodes: [P.Users.View],
-    oneWay: true,
-  },
-]
+] as const
 
 const permissionAliasMap = new Map<string, string[]>()
 
-PERMISSION_ALIAS_GROUPS.forEach(({ canonicalCode, aliasCodes, oneWay }) => {
+PERMISSION_ALIAS_GROUPS.forEach(({ canonicalCode, aliasCodes }) => {
   const equivalentCodes = [canonicalCode, ...aliasCodes]
-  // 单向别名只给 canonicalCode 登记：声明 Users.View 的「用户管理」路由不会因此接受 ViewStoreStaff。
-  const lookupCodes = oneWay ? [canonicalCode] : equivalentCodes
-  lookupCodes.forEach((permissionCode) => {
+  equivalentCodes.forEach((permissionCode) => {
     permissionAliasMap.set(permissionCode.toLowerCase(), equivalentCodes)
   })
 })
@@ -447,8 +433,7 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     routeName: 'users',
     titleKey: 'tabs.users',
     icon: 'account-group-outline',
-    // 与后端 FullAppMenu 一致：员工管理只认 Users.ViewStoreStaff（Users.View 通过单向别名包含它）。
-    permissionCodes: [P.Users.ViewStoreStaff],
+    permissionCodes: [P.Users.View],
     order: 57,
     ...ROUTE_LABELS.users,
   },

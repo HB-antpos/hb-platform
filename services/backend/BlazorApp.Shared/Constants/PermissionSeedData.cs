@@ -91,6 +91,7 @@ namespace BlazorApp.Shared.Constants
             new[]
             {
                 Permissions.PosTerminal.Audit.View,
+                Permissions.Users.View,
                 Permissions.Users.ViewStoreStaff,
                 Permissions.Users.ManagePosTerminalPermissions,
                 Permissions.Users.CreateStoreStaff,
@@ -129,6 +130,7 @@ namespace BlazorApp.Shared.Constants
                 Permissions.DeviceRegistration.Manage,
                 Permissions.PosTerminal.Audit.View,
                 Permissions.DailyCloseRecords.View,
+                Permissions.Users.View,
                 Permissions.Users.ViewStoreStaff,
                 Permissions.Users.ManagePosTerminalPermissions,
                 Permissions.Users.CreateStoreStaff,
@@ -252,10 +254,10 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Users.ManageStores, "管理用户分店", "用户管理", "Web 页面 /system/users - 维护用户关联分店"),
                 new(Permissions.Users.ManagePosTerminalPermissions, "管理分店 POS 权限", "用户管理", "Web 页面 /system/users - 按分店维护收银员 POS 终端业务权限"),
                 new(Permissions.Users.ResetPassword, "重置密码", "用户管理", "Web 页面 /system/users - 重置用户登录密码"),
+                new(Permissions.Users.ViewStoreStaff, "查看本店员工", "用户管理", "移动端「员工管理」- 查看本店店员列表与详情（不含 Web 全局用户管理）"),
                 new(Permissions.Users.CreateStoreStaff, "新建本店店员", "用户管理", "移动端「员工列表」- 为本人主分店新建店员账号（不含 Web 全局用户管理）"),
                 new(Permissions.Users.EditStoreStaff, "编辑本店店员", "用户管理", "移动端「员工列表」- 编辑、停用本人主分店店员并管理其个人码（不含 Web 全局用户管理）"),
                 new(Permissions.Users.ResetStoreStaffPassword, "重置本店店员密码", "用户管理", "移动端「员工列表」- 重置本人主分店店员密码并要求其首次登录改密（不含 Web 全局用户管理）"),
-                new(Permissions.Users.ViewStoreStaff, "查看本店店员", "用户管理", "移动端「员工管理」- 查看本人可管理分店的店员与店长本人（不含其他店长、管理员，也不含「用户管理」）；持有 Users.View 自动包含"),
                 new(Permissions.EmployeeProfiles.View, "查看员工个人信息", "用户管理", "Web 页面 /system/employee-profiles 与移动端「员工资料」- 查看员工个人信息列表与详情"),
                 new(Permissions.EmployeeProfiles.Edit, "维护员工个人信息", "用户管理", "移动端「员工资料」编辑本人资料；Web 页面 /system/employee-profiles 后台编辑另需管理员角色 - 维护身份、银行、养老金、地址等资料"),
                 new(Permissions.EmployeeProfiles.EditPositionType, "修改职位类型", "用户管理", "个人信息 - 修改全职、兼职、临时工等职位类型，保存时仍需维护员工个人信息权限"),

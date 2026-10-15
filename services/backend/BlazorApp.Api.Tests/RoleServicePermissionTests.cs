@@ -1421,6 +1421,201 @@ public sealed class RoleServicePermissionTests : IDisposable
         Assert.Equal("EMPLOYEE_TARGET_REQUIRED", writeResult.ErrorCode);
     }
 
+    private async Task<RoleService> SeedStoreManagerCopyScenarioAsync(params string[] managerOwnedCodes)
+    {
+        await SeedUserWithRoleAsync("manager-1", "role-manager", "StoreManager");
+        await SeedUserWithRoleAsync("staff-a", "role-staff", "StoreStaff");
+        await SeedUserWithRoleAsync("staff-b", "role-staff-b", "StoreStaff");
+        await _db.Insertable(new Store
+        {
+            StoreGUID = "store-1",
+            StoreCode = "S001",
+            StoreName = "Store 1",
+            IsActive = true,
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            CreateUserStore("manager-1", "store-1", true),
+            CreateUserStore("staff-a", "store-1", false),
+            CreateUserStore("staff-b", "store-1", false),
+        }).ExecuteCommandAsync();
+        foreach (var code in managerOwnedCodes)
+        {
+            await InsertRolePermissionAsync("role-manager", code);
+        }
+
+        return CreateService(
+            "manager-1",
+            new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true,
+                IsAuthenticated = true,
+                UserGuid = "manager-1",
+                StoreGuids = new[] { "store-1" },
+            })
+        );
+    }
+
+    [Fact]
+    public async Task CopyUserDirectPermissionsAsync_StoreManagerOnlyCopiesOwnedPosPermissionsAndSkipsRest()
+    {
+        var owned = Permissions.PosTerminal.Sales.AddItem;
+        var notOwned = Permissions.PosTerminal.Sales.RemoveLine;
+        Assert.Contains(owned, PermissionSeedData.PosTerminalBusinessPermissionCodes);
+        Assert.Contains(notOwned, PermissionSeedData.PosTerminalBusinessPermissionCodes);
+        foreach (var code in new[] { owned, notOwned, Permissions.Reports.View })
+        {
+            await InsertPermissionAsync(code);
+        }
+        var service = await SeedStoreManagerCopyScenarioAsync(owned);
+        foreach (var code in new[] { owned, notOwned, Permissions.Reports.View })
+        {
+            await InsertUserPermissionAsync("staff-a", code);
+        }
+
+        var result = await service.CopyUserDirectPermissionsAsync(
+            "staff-a",
+            new CopyUserPermissionsRequestDto { TargetUserGuids = new() { "staff-b" }, Mode = "merge" }
+        );
+
+        Assert.True(result.Success, result.Message);
+        var data = result.Data!;
+        // 店长只能复制自己持有的 POS 收银业务权限：另一项 POS 权限与非 POS 权限都被跳过。
+        Assert.Equal(new[] { owned }, data.TransferablePermissionCodes);
+        Assert.Equal(new[] { notOwned, Permissions.Reports.View }.OrderBy(c => c).ToArray(), data.SkippedPermissionCodes.OrderBy(c => c).ToArray());
+        var target = Assert.Single(data.Targets);
+        Assert.Equal(new[] { owned }, target.Added);
+        var stored = await _db.Queryable<SysUserPermission>()
+            .Where(item => item.UserGuid == "staff-b" && !item.IsDeleted)
+            .Select(item => item.PermissionCode)
+            .ToListAsync();
+        Assert.Equal(new[] { owned }, stored);
+    }
+
+    [Fact]
+    public async Task CopyUserDirectPermissionsAsync_PreviewDoesNotWriteAndReplaceOnlyTouchesDelegatedSubset()
+    {
+        var owned = Permissions.PosTerminal.Sales.AddItem;
+        var other = Permissions.PosTerminal.Sales.RemoveLine;
+        foreach (var code in new[] { owned, other, Permissions.Reports.View })
+        {
+            await InsertPermissionAsync(code);
+        }
+        var service = await SeedStoreManagerCopyScenarioAsync(owned);
+        await InsertUserPermissionAsync("staff-a", owned);
+        // 目标已有：一项店长可委派的（会被覆盖移除）、一项店长无权动的（必须保留）。
+        await InsertUserPermissionAsync("staff-b", Permissions.Reports.View);
+        await InsertUserPermissionAsync("staff-b", other);
+
+        var preview = await service.CopyUserDirectPermissionsAsync(
+            "staff-a",
+            new CopyUserPermissionsRequestDto { TargetUserGuids = new() { "staff-b" }, Mode = "replace", Preview = true }
+        );
+
+        Assert.True(preview.Success, preview.Message);
+        Assert.True(preview.Data!.Preview);
+        Assert.Equal(new[] { owned }, preview.Data.Targets.Single().Added);
+        // 预览不写库。
+        Assert.Equal(2, await _db.Queryable<SysUserPermission>().CountAsync(item => item.UserGuid == "staff-b"));
+
+        // 店长只持有 owned：覆盖时 other 不在其可委派范围内，不能被移除；Reports.View 同理保留。
+        var applied = await service.CopyUserDirectPermissionsAsync(
+            "staff-a",
+            new CopyUserPermissionsRequestDto { TargetUserGuids = new() { "staff-b" }, Mode = "replace" }
+        );
+        Assert.True(applied.Success, applied.Message);
+        Assert.Empty(applied.Data!.Targets.Single().Removed);
+        var stored = await _db.Queryable<SysUserPermission>()
+            .Where(item => item.UserGuid == "staff-b" && !item.IsDeleted)
+            .Select(item => item.PermissionCode)
+            .ToListAsync();
+        Assert.Equal(new[] { owned, other, Permissions.Reports.View }.OrderBy(c => c).ToArray(), stored.OrderBy(c => c).ToArray());
+    }
+
+    [Fact]
+    public async Task CopyUserDirectPermissionsAsync_AnyInvalidTargetRejectsWholeRequestWithoutWriting()
+    {
+        var owned = Permissions.PosTerminal.Sales.AddItem;
+        await InsertPermissionAsync(owned);
+        var service = await SeedStoreManagerCopyScenarioAsync(owned);
+        await InsertUserPermissionAsync("staff-a", owned);
+        // 另一位店长不能作为目标（高权限账号）。
+        await SeedUserWithRoleAsync("manager-2", "role-manager-2", "StoreManager");
+        await _db.Insertable(CreateUserStore("manager-2", "store-1", true)).ExecuteCommandAsync();
+
+        var result = await service.CopyUserDirectPermissionsAsync(
+            "staff-a",
+            new CopyUserPermissionsRequestDto { TargetUserGuids = new() { "staff-b", "manager-2" }, Mode = "merge" }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("HIGH_PRIVILEGE_TARGET_DENIED", result.ErrorCode);
+        Assert.False(await _db.Queryable<SysUserPermission>().AnyAsync(item => item.UserGuid == "staff-b"));
+    }
+
+    [Theory]
+    [InlineData("staff-a", "VALIDATION_ERROR")]
+    [InlineData("manager-1", "SELF_ACCESS_MANAGEMENT_DENIED")]
+    public async Task CopyUserDirectPermissionsAsync_RejectsSourceAsTargetAndSelf(string target, string expectedCode)
+    {
+        var service = await SeedStoreManagerCopyScenarioAsync();
+
+        var result = await service.CopyUserDirectPermissionsAsync(
+            "staff-a",
+            new CopyUserPermissionsRequestDto { TargetUserGuids = new() { target }, Mode = "merge" }
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal(expectedCode, result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CopyUserDirectPermissionsAsync_AdminCopiesAllDirectPermissionsAndReplaceRemovesExtras()
+    {
+        foreach (var code in new[] { Permissions.Reports.View, Permissions.Users.View, Permissions.Warehouse.Picking })
+        {
+            await InsertPermissionAsync(code);
+        }
+        await SeedUserWithRoleAsync("staff-a", "role-a", "User");
+        await SeedUserWithRoleAsync("staff-b", "role-b", "User");
+        await InsertUserPermissionAsync("staff-a", Permissions.Reports.View);
+        await InsertUserPermissionAsync("staff-a", Permissions.Users.View);
+        await InsertUserPermissionAsync("staff-b", Permissions.Warehouse.Picking);
+        var admin = await CreateAdminServiceAsync();
+
+        var result = await admin.CopyUserDirectPermissionsAsync(
+            "staff-a",
+            new CopyUserPermissionsRequestDto { TargetUserGuids = new() { "staff-b" }, Mode = "replace" }
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.Empty(result.Data!.SkippedPermissionCodes);
+        var target = result.Data.Targets.Single();
+        Assert.Equal(new[] { Permissions.Reports.View, Permissions.Users.View }.OrderBy(c => c).ToArray(), target.Added.OrderBy(c => c).ToArray());
+        Assert.Equal(new[] { Permissions.Warehouse.Picking }, target.Removed);
+        var stored = await _db.Queryable<SysUserPermission>()
+            .Where(item => item.UserGuid == "staff-b" && !item.IsDeleted)
+            .Select(item => item.PermissionCode)
+            .ToListAsync();
+        Assert.Equal(new[] { Permissions.Reports.View, Permissions.Users.View }.OrderBy(c => c).ToArray(), stored.OrderBy(c => c).ToArray());
+    }
+
+    [Fact]
+    public void UserPermissionCopyPlanner_MergeNeverRemovesAndCountsUnchanged()
+    {
+        var plan = UserPermissionCopyPlanner.Plan(
+            "u1",
+            existing: new[] { "A", "X" },
+            transferable: new[] { "A", "B" },
+            replace: false,
+            managedScope: null
+        );
+
+        Assert.Equal(new[] { "B" }, plan.Added);
+        Assert.Empty(plan.Removed);
+        Assert.Equal(1, plan.UnchangedCount);
+    }
+
     [Fact]
     public async Task GetUserAccessPermissionsAsync_AdminReceivesFullStateAndCatalog()
     {

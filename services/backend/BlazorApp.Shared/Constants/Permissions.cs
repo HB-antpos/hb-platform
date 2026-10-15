@@ -42,12 +42,12 @@ namespace BlazorApp.Shared.Constants
             // 移动端「员工列表」只管理本人主分店的普通店员（/react/v1/store-users）。
             // 与上面的全局用户权限分开：店长只授予这三项，Web 全局用户接口仍不可用。
             // 原全局权限通过别名自动包含对应店员权限，已授权的角色无需重新授权。
+            // 「员工管理」入口与店员列表/详情的查看权限，与「用户管理」入口的 Users.View 分开授权；
+            // Users.View 持有者通过别名自动满足，已授权角色无需重新授权。
+            public const string ViewStoreStaff = "Users.ViewStoreStaff";
             public const string CreateStoreStaff = "Users.CreateStoreStaff";
             public const string EditStoreStaff = "Users.EditStoreStaff";
             public const string ResetStoreStaffPassword = "Users.ResetStoreStaffPassword";
-            // 移动端「员工管理」入口与店员列表/详情读取专用：只看本人可管理分店的店员与店长自己。
-            // 与「用户管理」（Users.View，全局用户）分开；Users.View 通过别名自动包含本权限。
-            public const string ViewStoreStaff = "Users.ViewStoreStaff";
         }
 
         public static class EmployeeProfiles
@@ -489,11 +489,10 @@ namespace BlazorApp.Shared.Constants
                 // 能编辑管理分店排班的人天然可以查看排班，避免「能改不能看」导致排班页 403。
                 [Attendance.Schedule.ViewStore] = [Attendance.Schedule.EditManagedStore],
                 // 全局用户权限天然包含对应的店员管理权限；反向不成立，店员权限不会获得全局用户接口。
+                [Users.ViewStoreStaff] = [Users.View],
                 [Users.CreateStoreStaff] = [Users.Create],
                 [Users.EditStoreStaff] = [Users.Edit],
                 [Users.ResetStoreStaffPassword] = [Users.ResetPassword],
-                // 全局查看用户天然可以查看店员；反向不成立，店长只持有 ViewStoreStaff 看不到「用户管理」。
-                [Users.ViewStoreStaff] = [Users.View],
             };
 
         public static class AustralianSuppliers
