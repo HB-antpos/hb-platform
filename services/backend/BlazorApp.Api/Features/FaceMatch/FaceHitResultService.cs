@@ -12,7 +12,8 @@ namespace BlazorApp.Api.Features.FaceMatch;
 /// 2. 门店范围与抓拍流 / 复核任务同一套 <see cref="FaceMatchScope"/>（管理员不限，其他人只看自己关联的门店）；
 /// 3. 「未读」只看当前登录人自己的那条命中通知（去重键 <c>unwelcome-hit:{TaskId}</c>，见 <see cref="FaceHitReadLookup"/>），
 ///    与 App 红色数字（<c>unread-count?type=face.unwelcome-hit</c>）同一口径；别人读没读不影响我的未读；
-/// 4. 不含姓名、事件细节、对象键与图片；命中图原图仍走独立接口并写审计（本服务不读图）。
+/// 4. 列表 / 汇总 / 标已读不含姓名、事件细节、对象键与图片；命中图原图仍走独立接口并写审计（本服务不读图）；
+///    唯一带姓名的是 <see cref="GetDetailAsync"/>：只返回命中通知收件人的展示名与已读状态（不含账号标识），供 Web 抓拍详情抽屉使用。
 /// </summary>
 public sealed class FaceHitResultService(
     SqlSugarContext context,
@@ -21,6 +22,9 @@ public sealed class FaceHitResultService(
     TimeProvider timeProvider) : IFaceHitResultService
 {
     public const int MaxPageSize = 50;
+
+    /// <summary>收件人没有全名也没有用户名、或用户记录已不存在时的展示名。</summary>
+    public const string UnknownDisplayName = "-";
 
     // 抓拍与任务按「同摄像机 + 同接收时间」对应：SQL 里只用 ±10 毫秒的范围取回候选（对 datetime / datetime2 的精度差都不敏感，
     // 且不会给 IN 传一串 datetime 参数），精确对应在内存里按完全相同的时间再筛。
@@ -118,6 +122,100 @@ public sealed class FaceHitResultService(
         {
             UnreadCount = await inboxService.GetUnreadCountAsync(actor.Id, AppNotificationTypes.FaceUnwelcomeHit, cancellationToken),
         };
+    }
+
+    public async Task<FaceHitDetailDto> GetDetailAsync(
+        string taskId, FaceMatchActor actor, CancellationToken cancellationToken = default)
+    {
+        // 编号格式不对、任务不存在、不在自己的门店范围：同一个 404，不泄露「某个编号是否存在」（与 MarkReadAsync 一致）。
+        if (!FaceMatchObjectKeys.IsValidId(taskId))
+        {
+            throw FaceMatchErrors.NotFound("任务");
+        }
+
+        var task = await _db.Queryable<FaceMatchTask>().FirstAsync(t => t.TaskId == taskId, cancellationToken);
+        var allowedStores = await FaceMatchScope.GetAllowedStoresAsync(_db, actor, cancellationToken);
+        if (task == null || (allowedStores != null && !allowedStores.Contains(task.StoreCode)))
+        {
+            throw FaceMatchErrors.NotFound("任务");
+        }
+
+        var targetPhotoCount = await CountTargetPhotosAsync(task.EntryId, cancellationToken);
+
+        // 命中通知：按去重键回查（与发布、已读、发送情况同一把键）。没有通知行 = 还没发 / 发布前任务已被处理：收件人为空、未撤回。
+        var dedupeKey = FaceHitNotifier.DedupeKeyPrefix + task.TaskId;
+        var notification = await _db.Queryable<AppNotification>()
+            .Where(n => n.DedupeKey == dedupeKey)
+            .OrderBy(n => n.CreatedAtUtc)
+            .Select(n => new NotificationRow { NotificationId = n.NotificationId, RevokedAtUtc = n.RevokedAtUtc })
+            .FirstAsync(cancellationToken);
+        if (notification == null)
+        {
+            return new FaceHitDetailDto { TaskId = task.TaskId, TargetPhotoCount = targetPhotoCount };
+        }
+
+        var notificationId = notification.NotificationId;
+        var recipients = await _db.Queryable<AppNotificationRecipient>()
+            .Where(r => r.NotificationId == notificationId)
+            .Select(r => new RecipientRow { UserGUID = r.UserGUID, ReadAtUtc = r.ReadAtUtc })
+            .ToListAsync(cancellationToken);
+
+        // 姓名单独按编号取，不与接收人表做 SQL 联表：User 表与通知表的字符串列排序规则可能不同，联表比较会触发 collation 冲突；
+        // 分两次查、在内存里按编号对应（与 FaceMatchErrors.LoadUserNamesAsync 同一做法）。只取全名与用户名两列，不碰密码哈希等字段。
+        var userGuids = recipients.Select(r => r.UserGUID).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var users = userGuids.Count == 0
+            ? []
+            : await _db.Queryable<User>()
+                .Where(u => userGuids.Contains(u.UserGUID))
+                .Select(u => new UserNameRow { UserGUID = u.UserGUID, FullName = u.FullName, Username = u.Username })
+                .ToListAsync(cancellationToken);
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var user in users)
+        {
+            names[user.UserGUID] = ToDisplayName(user.FullName, user.Username);
+        }
+
+        return new FaceHitDetailDto
+        {
+            TaskId = task.TaskId,
+            TargetPhotoCount = targetPhotoCount,
+            NotificationRevoked = notification.RevokedAtUtc != null,
+            // 未读在前，再按展示名稳定排序（LINQ 排序是稳定的；最后按已读时间兜底，保证同名时顺序也固定）。
+            Recipients = recipients
+                .Select(r => new FaceHitRecipientDto
+                {
+                    DisplayName = names.GetValueOrDefault(r.UserGUID) ?? UnknownDisplayName,
+                    Read = r.ReadAtUtc != null,
+                    ReadAtUtc = FaceMatchRules.AsUtc(r.ReadAtUtc),
+                })
+                .OrderBy(r => r.Read)
+                .ThenBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.ReadAtUtc)
+                .ToList(),
+        };
+    }
+
+    /// <summary>展示名：全名（去首尾空白）优先，其次用户名，都为空则 "-"。用户已停用 / 已删除不影响显示（他们确实收到过这条通知）。</summary>
+    private static string ToDisplayName(string? fullName, string? username)
+    {
+        if (!string.IsNullOrWhiteSpace(fullName))
+        {
+            return fullName.Trim();
+        }
+
+        return !string.IsNullOrWhiteSpace(username) ? username.Trim() : UnknownDisplayName;
+    }
+
+    /// <summary>
+    /// 名单条目参考照片张数，口径与「读取参考照片」的可看条件、复核任务列表的 referencePhotoCount 一致：
+    /// 条目存在且状态为 Active / Pending 才算，已撤回 / 已过期 / 条目已不存在 = 0，再按照片键列表数量（清空为 []）计数。
+    /// </summary>
+    private async Task<int> CountTargetPhotosAsync(string entryId, CancellationToken cancellationToken)
+    {
+        var entry = await _db.Queryable<FaceUnwelcomeEntry>().FirstAsync(e => e.EntryId == entryId, cancellationToken);
+        return entry is { Status: FaceUnwelcomeEntryStatus.Active or FaceUnwelcomeEntryStatus.Pending }
+            ? FaceMatchRules.ParseKeys(entry.PhotoObjectKeysJson).Count
+            : 0;
     }
 
     // ---------- 查询条件 ----------
@@ -381,6 +479,25 @@ public sealed class FaceHitResultService(
         public DateTime ReceivedAtUtc { get; set; }
         public int FaceCount { get; set; }
         public string? DuplicateOfCaptureId { get; set; }
+    }
+
+    private sealed class NotificationRow
+    {
+        public string NotificationId { get; set; } = string.Empty;
+        public DateTime? RevokedAtUtc { get; set; }
+    }
+
+    private sealed class RecipientRow
+    {
+        public string UserGUID { get; set; } = string.Empty;
+        public DateTime? ReadAtUtc { get; set; }
+    }
+
+    private sealed class UserNameRow
+    {
+        public string UserGUID { get; set; } = string.Empty;
+        public string? FullName { get; set; }
+        public string? Username { get; set; }
     }
 
     private sealed class EvaluationRow

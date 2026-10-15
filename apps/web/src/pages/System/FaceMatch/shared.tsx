@@ -19,6 +19,11 @@ export interface FaceMatchTabContext {
   writeBlocked: boolean
   /** 切到「复核任务」页签（没有复核任务页签权限时为 undefined）。「抓拍与比对」的「去复核」只做切换，不深链到具体任务。 */
   goToReview?: () => void
+  /**
+   * 能否查看名单目标图（条目参考照片）：等于有「复核任务」页签权限（FaceMatch.Unwelcome.Review）。
+   * 目标图走复核任务的参考照片接口，该接口只认复核权限；「抓拍与比对」只有看图权限时不读、也不显示目标图。
+   */
+  canViewTarget: boolean
 }
 
 export const NUMERIC_STYLE = { fontVariantNumeric: 'tabular-nums' } as const

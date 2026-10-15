@@ -332,12 +332,31 @@ for (const { name, text } of sources) {
   expectEqual(zhNotify.skipped, '已跳过', '中文通知状态-已跳过')
   expectEqual(zhNotify.counts, '{{recipients}} 人 · 已读 {{read}}', '中文已发送人数与已读')
   expectEqual((zh.faceMatch.review.columns as Record<string, string>).notify, '命中通知', '中文复核任务「命中通知」列头')
-  // 通知只显示人数不显示姓名；通知文案区说明「仅英文，不含姓名与照片」
+  // 通知文案区说明「仅英文，不含姓名与照片」（通知内容本身不含姓名；收件人姓名在下方「接收人」列表里，来自命中详情接口）
   expectEqual(zhDrawer.notifyTextTitle, '通知文案（仅英文，不含姓名与照片）', '中文通知文案区标题')
   if (!String((zhDrawer as Record<string, unknown>).goReview).includes('去复核')) throw new Error('抽屉要有「去复核」按钮')
+  // 时间线的已读行只给人数，并指向下方的接收人列表（用户 2026-10 要求显示收件人姓名与已读状态，不再写「不显示姓名」）
   const timeline = zhResults.timeline as Record<string, string>
-  if (!timeline.readHint.includes('只显示人数，不显示姓名')) throw new Error('通知已读行必须写明只显示人数，不显示姓名')
-  if (!/never names/.test(String((enResults.timeline as Record<string, string>).readHint))) throw new Error('英文已读说明必须写明 never names')
+  expectEqual(timeline.readHint, '具体姓名见下方「接收人」', '中文已读行说明')
+  expectEqual((enResults.timeline as Record<string, string>).readHint, 'Recipient names are listed below', '英文已读行说明')
+  // 接收人列表：姓名 + 已读状态；通知撤回有标记；没有接收人、读取中、读取失败各有提示
+  const zhRecipients = zhDrawer.recipients as Record<string, string>
+  const enRecipients = enDrawer.recipients as Record<string, string>
+  expectEqual(zhRecipients.title, '接收人', '中文接收人标题')
+  expectEqual(zhRecipients.summary, '已读 {{read}} / {{total}}', '中文接收人摘要')
+  expectEqual(zhRecipients.read, '已读', '中文已读标签')
+  expectEqual(zhRecipients.unread, '未读', '中文未读标签')
+  expectEqual(zhRecipients.revoked, '通知已撤回', '中文通知已撤回标签')
+  expectEqual(zhRecipients.empty, '没有接收人记录', '中文没有接收人提示')
+  expectEqual(zhRecipients.failed, '接收人加载失败', '中文接收人加载失败提示')
+  expectEqual(enRecipients.summary, '{{read}} of {{total}} read', '英文接收人摘要')
+  expectEqual(enRecipients.revoked, 'Notification revoked', '英文通知已撤回标签')
+  // 名单目标图：没有复核权限、已清理 / 已失效、第 i / n 张的口径固定
+  expectEqual(zhDrawer.targetImage, '名单目标图', '中文目标图标题')
+  expectEqual(zhDrawer.targetNoPermission, '查看名单目标图需要复核权限', '中文目标图无权限提示')
+  expectEqual(zhDrawer.targetGone, '名单目标图已清理或条目已失效', '中文目标图已清理提示')
+  expectEqual(zhDrawer.targetPosition, '第 {{index}} / {{total}} 张', '中文目标图张数')
+  if (!/review permission/i.test(String(enDrawer.targetNoPermission))) throw new Error('英文目标图无权限提示必须写明 review permission')
   // 通知文案是固定英文原文，由代码里的常量展示，不进消息文件（中英文界面都原样展示，也就不会被误翻译）
   for (const text of [JSON.stringify(zh), JSON.stringify(en)]) {
     if (/Possible match alert/.test(text) || /Possible match \(similarity/.test(text)) throw new Error('通知英文原文不得放进页面消息文件（固定英文，不翻译）')

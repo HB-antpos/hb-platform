@@ -411,6 +411,28 @@ export interface FaceCaptureResult {
   hit: FaceCaptureResultHit | null
 }
 
+/** 命中通知的一位收件人：只有展示名与已读状态，没有账号标识（用户编号、用户名、邮箱）。 */
+export interface FaceHitRecipient {
+  /** 全名；后端已按「全名 → 用户名 → -」回退，这里再兜底成 -。 */
+  displayName: string
+  read: boolean
+  /** 已读时间（UTC）；未读为 null。 */
+  readAtUtc: string | null
+}
+
+/**
+ * 抓拍详情抽屉的补充信息（GET /results/hits/{taskId}/detail，需 FaceCapture.Images.View）。
+ * 单独一个接口，不加进命中摘要 FaceCaptureResultHit：那份字段集合是跨端契约。
+ * targetPhotoCount 是名单条目参考照片的张数（条目已撤回 / 过期 / 照片已清空为 0）；图片本身仍走复核任务的参考照片接口。
+ */
+export interface FaceHitDetail {
+  taskId: string
+  targetPhotoCount: number
+  notificationRevoked: boolean
+  /** 没有通知行（还没发）时为空数组；后端已按未读在前、展示名排序。 */
+  recipients: FaceHitRecipient[]
+}
+
 /** GET /results 的查询条件；fromUtc 含、toUtc 不含；pageSize ≤ 50。 */
 export interface FaceCaptureResultQuery {
   storeCode?: string

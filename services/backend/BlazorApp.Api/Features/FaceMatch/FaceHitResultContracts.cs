@@ -107,6 +107,43 @@ public sealed record FaceHitReadResultDto
     public int UnreadCount { get; init; }
 }
 
+/// <summary>
+/// 命中详情里的一位通知收件人：只有展示名与已读状态，<b>没有账号标识</b>（不返回 UserGUID / 用户名 / 邮箱）。
+/// 展示名 = 全名，为空回退用户名，再空为 "-"；用户记录已不存在时也是 "-"。
+/// </summary>
+public sealed record FaceHitRecipientDto
+{
+    public string DisplayName { get; init; } = FaceHitResultService.UnknownDisplayName;
+
+    /// <summary>该收件人是否已读（ReadAtUtc 非空）。</summary>
+    public bool Read { get; init; }
+
+    /// <summary>已读时间（UTC）；未读为 null（序列化时省略）。</summary>
+    public DateTime? ReadAtUtc { get; init; }
+}
+
+/// <summary>
+/// 「抓拍详情抽屉」补充信息：名单目标图张数与命中通知的收件人及已读情况。
+/// 单独成一个接口而不是给 <see cref="FaceHitResultDto"/> / 抓拍流的命中摘要加字段：那两个 DTO 的字段集合是跨端契约（App 归一化后逐字段对照），
+/// 加字段会让 App 侧契约测试变红。本 DTO 不含图片、对象键、事件细节，也不含任何账号标识。
+/// </summary>
+public sealed record FaceHitDetailDto
+{
+    public string TaskId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 名单条目参考照片的张数；与「读取参考照片」的可看条件一致：条目存在、状态为 Active 或 Pending、照片键列表非空，否则为 0
+    /// （已撤回 / 已过期 / 照片已清空 / 条目已不存在）。大于 0 时 Web 才会（凭复核权限）去读第 1 张。
+    /// </summary>
+    public int TargetPhotoCount { get; init; }
+
+    /// <summary>该命中通知已被撤回（收件箱不再显示）；没有通知行时为 false。</summary>
+    public bool NotificationRevoked { get; init; }
+
+    /// <summary>通知收件人；没有通知行（还没发 / 发布前已被处理）= 空数组。未读在前，再按展示名排序。</summary>
+    public IReadOnlyList<FaceHitRecipientDto> Recipients { get; init; } = [];
+}
+
 public interface IFaceHitResultService
 {
     /// <summary>
@@ -121,6 +158,12 @@ public interface IFaceHitResultService
 
     /// <summary>把<b>当前登录人</b>的那条命中通知标为已读（幂等，只改本人的未读行）；任务不存在或不在门店范围 → 404。</summary>
     Task<FaceHitReadResultDto> MarkReadAsync(string taskId, FaceMatchActor actor, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 单条命中的详情补充：名单目标图张数、命中通知收件人（只有展示名与已读状态）。
+    /// 不读任何图片、不写审计；任务编号格式不对、不存在、不在门店范围：同一个 404（不泄露编号是否存在）。
+    /// </summary>
+    Task<FaceHitDetailDto> GetDetailAsync(string taskId, FaceMatchActor actor, CancellationToken cancellationToken = default);
 }
 
 // ---------- 缩略图 ----------

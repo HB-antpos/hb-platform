@@ -12,6 +12,8 @@ import type {
   FaceEnrollment,
   FaceGateFacet,
   FaceGateReport,
+  FaceHitDetail,
+  FaceHitRecipient,
   FaceMatchConfig,
   FaceMatchPage,
   FaceMatchPermissionFlags,
@@ -414,6 +416,37 @@ export function normalizeFaceCaptureResult(value: unknown): FaceCaptureResult {
   }
 }
 
+/** 展示名缺失（后端没给或是空白）时的占位，与后端 FaceHitResultService.UnknownDisplayName 一致。 */
+const UNKNOWN_RECIPIENT_NAME = '-'
+
+function normalizeFaceHitRecipient(value: unknown): FaceHitRecipient {
+  const raw = asRecord(value)
+  const read = raw.read === true
+  return {
+    displayName: asNullableString(raw.displayName)?.trim() ?? UNKNOWN_RECIPIENT_NAME,
+    read,
+    // 已读时间只在已读时有意义；未读却带了时间的脏数据按没有时间处理。
+    readAtUtc: read ? asNullableString(raw.readAtUtc) : null,
+  }
+}
+
+/**
+ * 命中详情归一化：缺字段按安全默认值——收件人缺失 / 不是数组为空、目标图张数非法为 0（不显示目标图）、未撤回。
+ * 张数夹在读取函数允许的下标范围内（最多 MAX_REFERENCE_INDEX + 1 张），避免点到永远读不了的下标。
+ */
+export function normalizeFaceHitDetail(value: unknown): FaceHitDetail {
+  const raw = asRecord(value)
+  return {
+    taskId: asString(raw.taskId),
+    targetPhotoCount: Math.min(MAX_REFERENCE_INDEX + 1, Math.max(0, Math.trunc(asNumber(raw.targetPhotoCount)))),
+    notificationRevoked: raw.notificationRevoked === true,
+    // 不是对象的数组项（null、字符串等）直接丢弃，不当成「-」收件人显示。
+    recipients: Array.isArray(raw.recipients)
+      ? raw.recipients.filter((item) => item !== null && typeof item === 'object').map(normalizeFaceHitRecipient)
+      : [],
+  }
+}
+
 function normalizeStatsEntry(value: unknown): FaceUnwelcomeStatsEntry {
   const raw = asRecord(value)
   return {
@@ -790,6 +823,19 @@ export async function getFaceCaptureResults(
     ...NO_STORE,
   })
   return normalizePage(unwrapApiData(response), normalizeFaceCaptureResult)
+}
+
+/**
+ * 抓拍详情抽屉的补充信息：GET /results/hits/{taskId}/detail（需 FaceCapture.Images.View，门店范围同命中流）。
+ * 名单目标图张数 + 命中通知的收件人姓名与已读状态；不含图片、不含账号标识，服务端不写审计。
+ * 只在抽屉打开且这条抓拍有命中时调用一次；任务编号发请求前先校验，非法编号不发请求（按「任务不存在」处理）。
+ */
+export async function fetchFaceHitDetail(taskId: string, signal?: AbortSignal): Promise<FaceHitDetail> {
+  if (!IMAGE_PATH_TASK_ID.test(taskId)) {
+    throw new RequestError('FACE_MATCH_NOT_FOUND', 404, { success: false, errorCode: 'FACE_MATCH_NOT_FOUND' })
+  }
+  const response = await request.get<Envelope>(`${API_BASE}/results/hits/${taskId}/detail`, { signal, ...NO_STORE })
+  return normalizeFaceHitDetail(unwrapApiData(response))
 }
 
 /**

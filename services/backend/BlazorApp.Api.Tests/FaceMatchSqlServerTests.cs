@@ -517,6 +517,104 @@ INSERT dbo.FaceMatchEvaluation (CaptureId, StaffScore, VisitScore, Decision) VAL
     }
 
     [FaceMatchSqlServerFact]
+    public async Task SQLServer_命中详情_收件人姓名分两次查_User表排序规则与通知表不同也不冲突_排序_撤回_目标图张数_门店范围()
+    {
+        await using var server = await ServerDatabase.CreateAsync();
+        using var h = server.CreateHarness();
+
+        // 让 User 表的主键列（UserGUID）用与库默认（Chinese_PRC_90_CI_AS）不同的二进制排序规则，
+        // 模拟生产上 User 表与通知接收人表排序规则不一致：此时 SQL 联表比较两列会报排序规则冲突（468）。
+        server.ExecuteSync("""
+DECLARE @pk sysname = (SELECT name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID('dbo.[User]') AND type = 'PK');
+DECLARE @drop nvarchar(400) = N'ALTER TABLE dbo.[User] DROP CONSTRAINT ' + QUOTENAME(@pk);
+EXEC (@drop);
+ALTER TABLE dbo.[User] ALTER COLUMN UserGUID nvarchar(255) COLLATE Latin1_General_100_BIN2 NOT NULL;
+ALTER TABLE dbo.[User] ADD CONSTRAINT PK_User_HitDetailTest PRIMARY KEY (UserGUID);
+""");
+        h.Database.AddUser("qld-1", "Qld One", "s-1013");
+        h.Database.AddUser("qld-2", "Qld Two", "s-1013");
+        h.Database.AddUser("u-alice", "Alice");
+        h.Db.Insertable(new User { UserGUID = "u-nofull", Username = "nofull-login", Email = "n@example.test", PasswordHash = "x", FullName = null, IsActive = false }).ExecuteCommand();
+
+        var t0 = FaceMatchTestDatabase.Now.AddHours(-1);
+        string Id(char ch) => new(ch, 32);
+        // 任务 a（门店 1013，条目 Active 两张照片）、任务 b（门店 2001，范围外）、任务 c（条目已撤回，通知已撤回）、任务 d（还没发通知）。
+        foreach (var (ch, store, entry) in new[] { ('a', "1013", 'e'), ('b', "2001", 'e'), ('c', "1013", 'w'), ('d', "1013", 'e') })
+        {
+            h.Db.Insertable(new FaceMatchTask
+            {
+                TaskId = Id(ch), StoreCode = store, CameraId = "cam-1", CapturedAtUtc = t0, EntryId = Id(entry), Score = 90m,
+                ImageObjectKey = "face-match/hit/x.jpg", ReviewStatus = 0, ImageDeleteAtUtc = t0.AddDays(7), NotifiedAtUtc = t0,
+            }).ExecuteCommand();
+        }
+
+        foreach (var (entryId, status, keys) in new[] { ('e', FaceUnwelcomeEntryStatus.Active, "[\"a/0.jpg\",\"a/1.jpg\"]"), ('w', FaceUnwelcomeEntryStatus.Withdrawn, "[]") })
+        {
+            h.Db.Insertable(new FaceUnwelcomeEntry
+            {
+                EntryId = Id(entryId), TencentPersonId = "uw_" + Id(entryId), IncidentCategory = 1, EvidenceRef = "r", StoreScope = "1013,2001",
+                SubmittedBy = "qld-1", SubmittedAtUtc = t0, ReviewDueAtUtc = t0.AddDays(300), ExpiresAtUtc = t0.AddDays(330),
+                Status = status, PhotoObjectKeysJson = keys,
+            }).ExecuteCommand();
+        }
+
+        void Notify(char ch, DateTime? revokedAt, params (string User, DateTime? ReadAt)[] recipients)
+        {
+            h.Db.Insertable(new AppNotification
+            {
+                NotificationId = $"n-{ch}", Type = AppNotificationTypes.FaceUnwelcomeHit, Priority = 1, Title = "Possible match alert", Body = "Possible match",
+                DedupeKey = FaceHitNotifier.DedupeKeyPrefix + Id(ch), CreatedAtUtc = t0, RevokedAtUtc = revokedAt, CreatedBy = "system:face-match",
+            }).ExecuteCommand();
+            foreach (var (user, readAt) in recipients)
+            {
+                h.Db.Insertable(new AppNotificationRecipient { NotificationId = $"n-{ch}", UserGUID = user, CreatedAtUtc = t0, ReadAtUtc = readAt }).ExecuteCommand();
+            }
+        }
+
+        Notify('a', null, ("qld-1", null), ("qld-2", t0.AddMinutes(30)), ("u-alice", null), ("u-nofull", t0.AddMinutes(10)), ("u-ghost", null));
+        Notify('b', null, ("qld-1", null));
+        Notify('c', t0.AddMinutes(5), ("qld-2", t0.AddMinutes(6)));
+
+        // 对照：直接把接收人表和 User 表按 UserGUID 联表比较，在这个库里确实会排序规则冲突（所以服务不能这样写）。
+        var conflict = await Assert.ThrowsAsync<SqlException>(() => server.QueryRowsAsync(
+            "SELECT u.FullName FROM dbo.AppNotificationRecipient r INNER JOIN dbo.[User] u ON u.UserGUID = r.UserGUID"));
+        Assert.Equal(468, conflict.Number);
+
+        var service = new FaceHitResultService(h.Database.Context, h.Settings, new NotificationInboxService(h.Database.Context, h.Time), h.Time);
+        var manager = new FaceMatchActor("qld-1", "Qld One");
+
+        // 任务 a：两张目标图；5 个收件人，u-ghost 没有用户记录（-）、u-nofull 没有全名（用户名，且已停用仍显示）；
+        // 未读在前（按展示名排序）、已读在后；SQL Server 的 datetime2 往返后仍是 UTC。
+        var detail = await service.GetDetailAsync(Id('a'), manager);
+        Assert.Equal(2, detail.TargetPhotoCount);
+        Assert.False(detail.NotificationRevoked);
+        Assert.Equal(
+            [("-", false), ("Alice", false), ("Qld One", false), ("nofull-login", true), ("Qld Two", true)],
+            detail.Recipients.Select(r => (r.DisplayName, r.Read)));
+        var nofull = detail.Recipients.Single(r => r.DisplayName == "nofull-login");
+        Assert.Equal(t0.AddMinutes(10), nofull.ReadAtUtc);
+        Assert.Equal(DateTimeKind.Utc, nofull.ReadAtUtc!.Value.Kind);
+
+        // 任务 c：条目已撤回 → 0 张；通知已撤回但收件人仍列出。任务 d：没有通知行 → 空列表。
+        var revoked = await service.GetDetailAsync(Id('c'), manager);
+        Assert.Equal(0, revoked.TargetPhotoCount);
+        Assert.True(revoked.NotificationRevoked);
+        Assert.Equal("Qld Two", Assert.Single(revoked.Recipients).DisplayName);
+        var unsent = await service.GetDetailAsync(Id('d'), manager);
+        Assert.Empty(unsent.Recipients);
+        Assert.False(unsent.NotificationRevoked);
+
+        // 门店范围：范围外 / 不存在 / 格式不对同一个 404；管理员不限门店。
+        Assert.Equal(404, (await Assert.ThrowsAsync<FaceMatchException>(() => service.GetDetailAsync(Id('b'), manager))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<FaceMatchException>(() => service.GetDetailAsync(Id('f'), manager))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<FaceMatchException>(() => service.GetDetailAsync("x'; DROP TABLE dbo.[User];--", manager))).StatusCode);
+        Assert.Equal("Qld One", Assert.Single((await service.GetDetailAsync(Id('b'), FaceMatchTestHarness.Admin)).Recipients).DisplayName);
+
+        // 不写审计。
+        Assert.Equal("0", await server.ScalarAsync("SELECT COUNT(*) FROM dbo.FaceAuditLog"));
+    }
+
+    [FaceMatchSqlServerFact]
     public async Task SQLServer_缩略图_定长参数解析抓拍与命中图_一次请求一条审计_不含编号与键()
     {
         await using var server = await ServerDatabase.CreateAsync();

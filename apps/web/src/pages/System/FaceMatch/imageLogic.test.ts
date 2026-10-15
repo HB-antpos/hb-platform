@@ -12,6 +12,7 @@ import {
   type ResultImageStates,
   classifyReviewImageError,
   createPreviewManager,
+  createReferenceImageSession,
   createReviewImageSession,
   isSharedImageFailure,
   nextPreviewUid,
@@ -137,6 +138,114 @@ assert.equal(isSharedImageFailure('failed'), false)
   assert.equal(order.length, 3, 'dispose 后不再请求')
   session.dispose() // 幂等
   assert.equal(fake.revoked.length, 3)
+}
+
+// ───────── 名单目标图会话（抓拍详情抽屉）：不带现场抓拍，开始只取第 1 张，切换才取对应那张，dispose 撤销全部 ─────────
+{
+  const fake = createFakeUrlApi()
+  const order: string[] = []
+  const signals: AbortSignal[] = []
+  let last: ReviewImageStates = new Map()
+  const session = createReferenceImageSession({
+    referenceCount: 3,
+    fetchReference: async (index, signal) => {
+      order.push(`reference-${index}`)
+      signals.push(signal)
+      return blob(20 + index)
+    },
+    onChange: (states) => {
+      last = states
+    },
+    urlApi: fake.api,
+  })
+  await session.start()
+  assert.deepEqual(order, ['reference-0'], '开始只取第 1 张目标图：没有现场抓拍请求，也没有预取其余几张')
+  assert.equal(last.has(CAPTURE_SLOT), false, '目标图会话里没有现场抓拍槽位')
+  assert.equal(last.get(referenceSlot(0))?.status, 'loaded')
+  assert.equal(last.has(referenceSlot(1)), false)
+  assert.equal(fake.live.size, 1)
+
+  await session.loadReference(2)
+  assert.deepEqual(order, ['reference-0', 'reference-2'], '切换到第 3 张才请求它')
+  await session.loadReference(2)
+  await session.loadReference(0)
+  assert.equal(order.length, 2, '已加载的不重复请求')
+  await session.loadReference(3)
+  await session.loadReference(-1)
+  assert.equal(order.length, 2, '越界下标不请求')
+
+  // 状态里只有 URL 字符串，不含 Blob
+  const state = last.get(referenceSlot(2))
+  assert.ok(state && state.status === 'loaded' && typeof state.url === 'string' && state.url.startsWith('blob:fake/'))
+  assert.equal(fake.live.size, 2)
+
+  session.dispose()
+  assert.equal(fake.live.size, 0, 'dispose 撤销全部目标图 objectURL')
+  assert.equal(fake.revoked.length, 2)
+  assert.equal(session.getStates().size, 0)
+  assert.ok(signals.every((signal) => signal.aborted), 'dispose 中止请求信号')
+  await session.loadReference(1)
+  assert.equal(order.length, 2, 'dispose 后不再请求')
+  session.dispose()
+  assert.equal(fake.revoked.length, 2, '重复 dispose 幂等')
+}
+// 目标图会话：张数为 0 时什么也不请求；第 1 张还没返回就 dispose（用户关了抽屉 / 换了抓拍）：不泄漏 URL
+{
+  const fake = createFakeUrlApi()
+  let calls = 0
+  const empty = createReferenceImageSession({
+    referenceCount: 0,
+    fetchReference: async () => {
+      calls += 1
+      return blob(1)
+    },
+    onChange: () => undefined,
+    urlApi: fake.api,
+  })
+  await empty.start()
+  assert.equal(calls, 0, '没有目标图时不请求')
+
+  let resolveFirst: (value: Blob) => void = () => undefined
+  const pending = createReferenceImageSession({
+    referenceCount: 2,
+    fetchReference: () => new Promise<Blob>((resolve) => {
+      resolveFirst = resolve
+    }),
+    onChange: () => undefined,
+    urlApi: fake.api,
+  })
+  const started = pending.start()
+  pending.dispose()
+  resolveFirst(blob(1))
+  await started
+  await flush()
+  assert.equal(fake.created.length, 0, 'dispose 后才返回的目标图不得创建 objectURL')
+  assert.equal(fake.live.size, 0)
+}
+// 目标图会话：无权限（403）这类对其余张同样成立的失败，后续各张直接标同样的失败，不再逐张重试；错误按复核弹框同一套分类
+{
+  const fake = createFakeUrlApi()
+  let calls = 0
+  let last: ReviewImageStates = new Map()
+  const session = createReferenceImageSession({
+    referenceCount: 3,
+    fetchReference: async () => {
+      calls += 1
+      throw failure(403, 'FACE_MATCH_FORBIDDEN')
+    },
+    onChange: (states) => {
+      last = states
+    },
+    urlApi: fake.api,
+  })
+  await session.start()
+  await session.loadReference(1)
+  await session.loadReference(2)
+  assert.equal(calls, 1, '共享失败只请求一次')
+  assert.deepEqual(last.get(referenceSlot(0)), { status: 'error', kind: 'forbidden' })
+  assert.deepEqual(last.get(referenceSlot(2)), { status: 'error', kind: 'forbidden' })
+  assert.equal(fake.created.length, 0)
+  session.dispose()
 }
 
 // ───────── 没有参考照片：只取抓拍 ─────────
