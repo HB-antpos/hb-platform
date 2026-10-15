@@ -343,6 +343,26 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetByUserGuidAsync_WhenStoreManager_CannotReadOtherManagerEvenWithStaffRole()
+        {
+            await SeedStoreUserDataAsync();
+            // 与列表同口径：另一位店长（同时挂着店员角色）的详情也读不到；管理员不受限。
+            await _db.Insertable(CreateUser("manager-2", "manager_2", "manager2@example.com")).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("manager-2", "role-manager"),
+                CreateUserRole("manager-2", "role-staff"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserStore("manager-2", "store-1", true)).ExecuteCommandAsync();
+
+            var managerView = await CreateService("manager-1", "StoreManager").GetByUserGuidAsync("manager-2", "S001");
+            Assert.False(managerView.Success);
+
+            var adminView = await CreateService("admin-1", "Admin").GetByUserGuidAsync("manager-2", "S001");
+            Assert.True(adminView.Success);
+        }
+
+        [Fact]
         public async Task GetGridDataAsync_WhenKeywordDoesNotMatchSelf_DoesNotReturnManagerRow()
         {
             await SeedStoreUserDataAsync();

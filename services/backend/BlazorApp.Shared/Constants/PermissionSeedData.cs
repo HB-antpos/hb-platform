@@ -91,7 +91,6 @@ namespace BlazorApp.Shared.Constants
             new[]
             {
                 Permissions.PosTerminal.Audit.View,
-                Permissions.Users.View,
                 Permissions.Users.ViewStoreStaff,
                 Permissions.Users.ManagePosTerminalPermissions,
                 Permissions.Users.CreateStoreStaff,
@@ -130,7 +129,6 @@ namespace BlazorApp.Shared.Constants
                 Permissions.DeviceRegistration.Manage,
                 Permissions.PosTerminal.Audit.View,
                 Permissions.DailyCloseRecords.View,
-                Permissions.Users.View,
                 Permissions.Users.ViewStoreStaff,
                 Permissions.Users.ManagePosTerminalPermissions,
                 Permissions.Users.CreateStoreStaff,
