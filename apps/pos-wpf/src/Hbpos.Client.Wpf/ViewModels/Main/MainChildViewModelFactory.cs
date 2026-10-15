@@ -54,6 +54,7 @@ internal sealed class MainChildViewModelFactory
     private readonly ICatalogSyncStatusService? _catalogSyncStatusService;
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
     private readonly IMobileAppDownloadService? _mobileAppDownloadService;
+    private readonly IHeldOrderTodayCountService? _heldOrderTodayCountService;
 
     public MainChildViewModelFactory(
         IDeviceRegistrationWorkflowService deviceRegistrationWorkflowService,
@@ -99,7 +100,8 @@ internal sealed class MainChildViewModelFactory
         IPaymentMethodSettingsService? paymentMethodSettingsService = null,
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
-        IMobileAppDownloadService? mobileAppDownloadService = null)
+        IMobileAppDownloadService? mobileAppDownloadService = null,
+        IHeldOrderTodayCountService? heldOrderTodayCountService = null)
     {
         _deviceRegistrationWorkflowService = deviceRegistrationWorkflowService;
         _receiptQueryService = receiptQueryService;
@@ -145,6 +147,7 @@ internal sealed class MainChildViewModelFactory
         _catalogSyncStatusService = catalogSyncStatusService;
         _receiptProfileSyncService = receiptProfileSyncService;
         _mobileAppDownloadService = mobileAppDownloadService;
+        _heldOrderTodayCountService = heldOrderTodayCountService;
     }
 
     public DeviceRegistrationViewModel CreateDeviceRegistrationViewModel(
@@ -324,6 +327,8 @@ internal sealed class MainChildViewModelFactory
             onLockCashierAsync: onLockCashierAsync,
             operationAuthorizationService: _operationAuthorizationService,
             onOpenCardRecoveryCenterAsync: onOpenCardRecoveryCenterAsync,
+            // 首页「取单」按钮角标：今天仍可取的挂单数量（本机 + 本店共享）。
+            heldOrderTodayCountService: _heldOrderTodayCountService,
             // 设置页「无交易开钱箱需要再次扫码」：每次点开钱箱都现读小票设置仓储，改设置后立即生效。
             isNoSaleCashDrawerRescanRequiredAsync: _receiptPrinterSettingsStore is null
                 ? null

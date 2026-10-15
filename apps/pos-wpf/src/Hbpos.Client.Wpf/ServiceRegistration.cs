@@ -455,6 +455,12 @@ public static class ServiceRegistration
         services.AddSingleton<ISquareRefundSettlementService, SquareRefundSettlementService>();
         services.AddSingleton<ICardPaymentRecoveryService, CardPaymentRecoveryCoordinator>();
         services.AddSingleton<ISuspendedOrderService, SuspendedOrderService>();
+        // 首页「取单」按钮角标：今天仍可取的挂单数量（本机暂存 + 本店共享；远端带超时、短缓存、失败降级只算本机）。
+        services.AddSingleton<IHeldOrderTodayCountService>(sp => new HeldOrderTodayCountService(
+            sp.GetRequiredService<ISuspendedOrderService>(),
+            sp.GetRequiredService<ISharedHeldOrderRepository>(),
+            sp.GetRequiredService<ISharedHeldOrderApiClient>(),
+            TimeProvider.System));
         services.AddSingleton<IRemoteOrderHistoryService, RemoteOrderHistoryService>();
         services.AddSingleton<IReceiptQueryService, ReceiptQueryService>();
         // 中文注释：小票设置存储同时承担总部下发资料的本机读写，两个接口必须解析到同一个单例（共用写入互斥）。
@@ -736,7 +742,8 @@ public static class ServiceRegistration
                 paymentMethodSettingsService: sp.GetRequiredService<IPaymentMethodSettingsService>(),
                 catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>(),
                 receiptProfileSyncService: sp.GetRequiredService<IReceiptProfileSyncService>(),
-                mobileAppDownloadService: sp.GetRequiredService<IMobileAppDownloadService>());
+                mobileAppDownloadService: sp.GetRequiredService<IMobileAppDownloadService>(),
+                heldOrderTodayCountService: sp.GetRequiredService<IHeldOrderTodayCountService>());
             viewModel.ConfigureRestartPrompt(
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());

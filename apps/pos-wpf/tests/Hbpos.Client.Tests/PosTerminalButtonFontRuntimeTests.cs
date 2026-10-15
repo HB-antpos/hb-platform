@@ -79,13 +79,13 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
             var sidebarLabels = PaymentViewRuntimeStaTestHost.FindVisualDescendants<TextBlock>(view)
                 .Where(text => ReferenceEquals(text.Style, sidebarLabelStyle))
                 .ToList();
-            Assert.Equal(10, sidebarLabels.Count);
+            Assert.Equal(12, sidebarLabels.Count);
             foreach (var label in sidebarLabels)
             {
                 Assert.Equal(13, label.FontSize);
                 var tile = FindAncestor<ButtonBase>(label);
                 AssertInside(FindAncestor<StackPanel>(label), tile);
-                // 两行英文标签必须完整显示，不能被 MaxHeight 截掉第二行。
+                // 功能区 12 块（含 Card Recovery / Attendance QR 功能砖）；两行英文标签必须完整显示，不能被 MaxHeight 截掉第二行。
                 Assert.True(
                     MeasureWrappedHeight(label) <= label.MaxHeight + 0.5,
                     $"{label.Text} 在 {width}×{windowHeight} {culture} 下超出 {label.MaxHeight} 高。");
@@ -210,7 +210,9 @@ public sealed class PosTerminalButtonFontRuntimeTests(PaymentViewRuntimeStaTestH
             1.0)
         {
             MaxTextWidth = Math.Min(label.MaxWidth, label.ActualWidth > 0 ? label.ActualWidth : label.MaxWidth),
-            LineHeight = double.IsNaN(label.LineHeight) ? 0 : label.LineHeight
+            // 真实渲染时 TextBlock 的 LineStackingStrategy=MaxHeight 按字体自然行高叠行、LineHeight 不生效，
+            // 所以这里不能套 label.LineHeight（否则 13px 两行只算 32，测不出第二行被截）。
+            LineHeight = 0
         };
         return formatted.Height;
     }

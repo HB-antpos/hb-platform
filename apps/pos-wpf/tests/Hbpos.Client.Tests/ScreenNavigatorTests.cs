@@ -5,6 +5,7 @@ using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Contracts.Catalog;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Hbpos.Client.Tests;
 
@@ -152,6 +153,44 @@ public sealed class ScreenNavigatorTests : IDisposable
 
         Assert.Same(pos, navigator.CurrentScreen);
         Assert.Equal(new[] { "main.suspendedRecalled" }, _statusMessages);
+    }
+
+    [Fact]
+    public async Task Pos_visibility_drives_held_order_badge_refresh_and_recall_forces_remote_refresh()
+    {
+        var navigator = CreateNavigator();
+        var counter = new FakeHeldOrderTodayCountService { Count = 2 };
+        var clock = new FakeTimeProvider();
+        var pos = new PosTerminalViewModel(
+            new LocalSellableItemIndex(),
+            _cart,
+            Session,
+            onOpenPayment: null,
+            localization: _localization,
+            timeProvider: clock,
+            heldOrderTodayCountService: counter);
+        _disposables.Add(pos);
+        navigator.PosTerminal = pos;
+        navigator.SetCachedPosTerminalScreen(pos);
+
+        // 进入首页：立即做一次普通刷新（远端走缓存）。
+        navigator.ShowPos();
+        await pos.LastHeldOrderCountRefreshTask!;
+        Assert.Equal(2, pos.HeldOrderTodayCount);
+        Assert.False(Assert.Single(counter.Calls).Force);
+
+        // 去别的页面（取单页）再取单成功回来：必须带一次强制刷新，角标立即反映少了一张。
+        navigator.SetCurrentScreen(new object());
+        counter.Count = 1;
+        await navigator.OnSuspendedOrderRecalledAsync();
+        Assert.Contains(counter.Calls, call => call.Force);
+        Assert.Equal(1, pos.HeldOrderTodayCount);
+
+        // 离开首页后不再轮询。
+        navigator.SetCurrentScreen(new object());
+        var callsWhileHidden = counter.CallCount;
+        clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(callsWhileHidden, counter.CallCount);
     }
 
     [Fact]

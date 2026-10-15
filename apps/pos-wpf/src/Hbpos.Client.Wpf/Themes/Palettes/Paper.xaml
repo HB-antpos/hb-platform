@@ -129,7 +129,7 @@
     <!-- 无条码按钮按下底色 -->
     <SolidColorBrush x:Key="PosNoBarcodePressedBrush" Color="#FF174A46" />
     <!-- 无条码按钮禁用底色 -->
-    <SolidColorBrush x:Key="PosNoBarcodeDisabledBrush" Color="#FF8FB0AB" />
+    <SolidColorBrush x:Key="PosNoBarcodeDisabledBrush" Color="#FFE3DDD1" />
     <!-- 功能区按钮底色 -->
     <SolidColorBrush x:Key="PosSidebarButtonBrush" Color="#FFFAF8F4" />
     <!-- 功能区按钮文字色 -->
@@ -170,6 +170,24 @@
     <SolidColorBrush x:Key="PosSegmentSeparatorBrush" Color="#FFD2CABA" />
     <!-- 屏幕键盘 / 搜索候选弹层的描边（旧主题＝PosDividerBrush；长者主题内容区无描边，但浮层必须有边界） -->
     <SolidColorBrush x:Key="PosPopupBorderBrush" Color="#FFE6E0D4" />
+    <!-- 功能区警示键底色（刷卡恢复有待处理卡交易时） -->
+    <SolidColorBrush x:Key="PosSidebarWarnButtonBrush" Color="#FFF5E8C8" />
+    <!-- 功能区警示键文字/图标色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnForegroundBrush" Color="#FF855500" />
+    <!-- 功能区警示键描边色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnBorderBrush" Color="#FFD9A441" />
+    <!-- 功能区警示键悬停底色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnHoverBrush" Color="#FFF5E8C8" />
+    <!-- 功能区警示键按下底色 -->
+    <SolidColorBrush x:Key="PosSidebarWarnPressedBrush" Color="#FFE3C98F" />
+    <!-- 功能区按钮角标底色（挂单数量、二维码秒数） -->
+    <SolidColorBrush x:Key="PosSidebarBadgeBrush" Color="#FF1E5E59" />
+    <!-- 功能区按钮角标文字色 -->
+    <SolidColorBrush x:Key="PosSidebarBadgeForegroundBrush" Color="#FFFFFFFF" />
+    <!-- 功能区警示角标底色（待处理卡交易数量，白字） -->
+    <SolidColorBrush x:Key="PosSidebarBadgeAlertBrush" Color="#FFA3342D" />
+    <!-- Open Item（原 No Barcode）按钮禁用时的文字色：与禁用底色配成「灰块灰字」，明显区别于可用态 -->
+    <SolidColorBrush x:Key="PosNoBarcodeDisabledForegroundBrush" Color="#FF6B655A" />
     <!-- 支付方式语义色：现金=琥珀棕、刷卡=深蓝、代金券=紫；Fill 选中实心 / On 实心上的字 / Soft 未选浅块 / Ink 浅块上的字与图标 -->
     <SolidColorBrush x:Key="PosMethodCashFillBrush" Color="#FF8F4A1C" />
     <SolidColorBrush x:Key="PosMethodCashOnBrush" Color="#FFFFFFFF" />

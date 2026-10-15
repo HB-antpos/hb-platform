@@ -72,19 +72,13 @@
          原来设成 40 时 16px 两行要 42.6，第二行被截掉，英文「Special Items」等只剩首词加省略号。 -->
     <sys:Double x:Key="PosHomeSidebarLabelMaxHeight">46</sys:Double>
 
-    <!-- 功能区：状态卡 / 考勤二维码按钮 -->
-    <!-- 状态卡加高给状态消息留出约三行（Card Recovery 入口压矮、考勤按钮压矮、功能键图标略缩来平衡 1366×768 的侧栏高度）。 -->
-    <sys:Double x:Key="PosHomeStatusCardHeight">148</sys:Double>
+    <!-- 功能区：状态卡 -->
+    <!-- 状态卡只剩标题 + 标签 + 状态消息（Card Recovery / Attendance QR 已并入功能键网格，网格 2×6），
+         112 给状态消息留出约 3~4 行；功能键图标略缩来平衡 1366×768 的侧栏高度。 -->
+    <sys:Double x:Key="PosHomeStatusCardHeight">112</sys:Double>
     <sys:Double x:Key="PosHomeStatusTitleFontSize">15</sys:Double>
     <sys:Double x:Key="PosHomeStatusBodyFontSize">14</sys:Double>
     <sys:Double x:Key="PosHomeStatusTagFontSize">13</sys:Double>
-    <sys:Double x:Key="PosHomeCardRecoveryFontSize">12</sys:Double>
-    <sys:Double x:Key="PosHomeCardRecoveryMinHeight">38</sys:Double>
-    <Thickness x:Key="PosHomeCardRecoveryMargin">0,6,0,0</Thickness>
-    <sys:Double x:Key="PosHomeAttendanceButtonHeight">52</sys:Double>
-    <sys:Double x:Key="PosHomeAttendanceTitleFontSize">15</sys:Double>
-    <sys:Double x:Key="PosHomeAttendanceStatusFontSize">12</sys:Double>
-    <sys:Double x:Key="PosHomeAttendanceSecondsFontSize">18</sys:Double>
 
     <!-- 描边粗细 / 键帽厚度（Thickness） -->
     <Thickness x:Key="PosHomeColoredBorderThickness">0</Thickness>

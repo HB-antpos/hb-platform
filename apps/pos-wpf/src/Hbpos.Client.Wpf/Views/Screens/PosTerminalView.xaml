@@ -482,7 +482,7 @@
             </Style.Triggers>
         </Style>
 
-        <!-- No Barcode：配色全部走 PosNoBarcode* 键（旧主题＝原来的主色实心 + 白字，长者主题＝浅蓝底深蓝字）。
+        <!-- Open Item（原 No Barcode）：配色全部走 PosNoBarcode* 键（可用＝主色 / 深蓝实心 + 白字；禁用＝灰块 + 灰字，不再只是淡一点的蓝）。
              悬停保持原底色不变；按下 / 禁用分别取 Pressed / Disabled 键。 -->
         <Style x:Key="CashierNoBarcodeButtonStyle" TargetType="Button" BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
             <Style.Resources>
@@ -531,6 +531,9 @@
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosNoBarcodeDisabledBrush}" />
                                 <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosNoBarcodeDisabledBrush}" />
+                                <!-- 禁用时文字也换成灰字：只换底色的话，长者主题的白字 / 深蓝字压在灰底上，看起来像可用。 -->
+                                <Setter TargetName="KeyShadow" Property="Visibility" Value="Collapsed" />
+                                <Setter Property="Foreground" Value="{DynamicResource PosNoBarcodeDisabledForegroundBrush}" />
                                 <Setter Property="Opacity" Value="1" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -644,7 +647,46 @@
             </ControlTemplate.Triggers>
         </ControlTemplate>
 
-        <!-- 右侧操作区保持五行两列与真实触控边界，视觉改为规范图中的扁平卡片。 -->
+        <!-- 警示键模板（Card Recovery 有待处理卡交易时换用）：与普通功能键同构，悬停 / 按下改取 PosSidebarWarn* 专用键。
+             不能沿用普通功能键的悬停色：长者主题的普通键是深蓝底，琥珀警示键悬停若变成深蓝会和「警示」语义冲突；
+             悬停时也不改描边（保持琥珀描边），键帽厚度层取警示描边色（长者主题底边是深琥珀，旧主题厚度为 0 看不见）。 -->
+        <ControlTemplate x:Key="PosSidebarWarnButtonTemplate" TargetType="{x:Type Button}">
+            <Grid>
+                <Border x:Name="KeyShadow"
+                        Background="{DynamicResource PosSidebarWarnBorderBrush}"
+                        CornerRadius="5" />
+                <Border x:Name="Root"
+                        Margin="{DynamicResource PosHomeKeyDepth}"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="5"
+                        SnapsToDevicePixels="True">
+                    <ContentPresenter Margin="{TemplateBinding Padding}"
+                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                      RecognizesAccessKey="True"
+                                      TextBlock.Foreground="{TemplateBinding Foreground}">
+                        <ContentPresenter.Resources>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource PosButtonContentTextStyle}" />
+                        </ContentPresenter.Resources>
+                    </ContentPresenter>
+                </Border>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSidebarWarnHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter TargetName="Root" Property="Background" Value="{DynamicResource PosSidebarWarnPressedBrush}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.48" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- 右侧操作区保持六行两列与真实触控边界，视觉改为规范图中的扁平卡片。 -->
         <Style x:Key="PosSidebarActionButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource CashierFlatButtonBaseStyle}">
@@ -689,6 +731,73 @@
             <Setter Property="TextAlignment" Value="Center" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <!-- Card Recovery 功能键：平时与「设置」等普通功能键完全一致；存在待处理卡交易（HasOpenCardRecoveryAttempts）时
+             换成琥珀警示键——底 / 描边 / 字色取 PosSidebarWarn*，并换用悬停 / 按下取警示专用键的模板。
+             图标与标签文字的颜色在各自元素上跟随（图标见 PosSidebarCardRecoveryIconStyle，标签直接取本按钮的前景色）。 -->
+        <Style x:Key="PosSidebarCardRecoveryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource PosSidebarActionButtonStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PosSidebarWarnButtonBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource PosSidebarWarnBorderBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosSidebarWarnForegroundBrush}" />
+                    <Setter Property="Template" Value="{StaticResource PosSidebarWarnButtonTemplate}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Card Recovery 图标：平时 CreditCardSearchOutline + 普通功能键图标色，警示时换 AlertCircleOutline + 警示字色。
+             图标色不能写在元素本地值上（本地值会盖过样式触发器），所以走样式。 -->
+        <Style x:Key="PosSidebarCardRecoveryIconStyle" TargetType="{x:Type materialDesign:PackIcon}">
+            <Setter Property="Width" Value="{DynamicResource PosHomeSidebarIconSize}" />
+            <Setter Property="Height" Value="{DynamicResource PosHomeSidebarIconSize}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Kind" Value="CreditCardSearchOutline" />
+            <Setter Property="Foreground" Value="{DynamicResource PosSidebarIconBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
+                    <Setter Property="Kind" Value="AlertCircleOutline" />
+                    <Setter Property="Foreground" Value="{DynamicResource PosSidebarWarnForegroundBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 功能键右上角的圆形 / 胶囊角标（Recall Order 挂单数、Attendance QR 剩余秒数）：贴在按钮内容区右上角，
+             不拦截点击（整个按钮仍然是一个触控目标）。字号 13 Black，两个主题一致，不走尺寸字典。 -->
+        <Style x:Key="PosSidebarBadgeStyle" TargetType="Border">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="0,2,3,0" />
+            <Setter Property="MinWidth" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="CornerRadius" Value="11" />
+            <Setter Property="Background" Value="{DynamicResource PosSidebarBadgeBrush}" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
+
+        <Style x:Key="PosSidebarBadgeTextStyle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Black" />
+            <Setter Property="Foreground" Value="{DynamicResource PosSidebarBadgeForegroundBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+        </Style>
+
+        <!-- Card Recovery 的红色数量角标：平时折叠，仅存在待处理卡交易时显示（数字绑定 CardRecoveryOpenCount）。 -->
+        <Style x:Key="PosSidebarCardRecoveryBadgeStyle" TargetType="Border" BasedOn="{StaticResource PosSidebarBadgeStyle}">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Setter Property="Background" Value="{DynamicResource PosSidebarBadgeAlertBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <!-- 搜索框旁屏幕键盘 Popup 的按键：沿用键盘区的风格（白色块、长者主题无描边）。
@@ -1922,11 +2031,11 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- 关键逻辑：右侧操作区固定五行两列，避免不同语言下按钮顺序和状态卡位置漂移。 -->
-            <UniformGrid Grid.Row="0" Columns="2" Rows="5" Margin="8,13,8,6">
+            <!-- 关键逻辑：右侧操作区固定六行两列（Card Recovery / Attendance QR 与「设置」同款，已并入网格），
+                 避免不同语言下按钮顺序和状态卡位置漂移；底部只剩状态卡，没有额外的整行入口。 -->
+            <UniformGrid Grid.Row="0" Columns="2" Rows="6" Margin="8,13,8,8">
                 <Button Command="{Binding OpenSpecialProductsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
@@ -1951,13 +2060,25 @@
                         <TextBlock Text="{Binding HoldOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{Binding RecallOrderCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
-                    <StackPanel>
-                        <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                            <materialDesign:PackIcon Kind="FileDocumentOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <!-- Recall Order：右上角圆形角标显示今天仍挂着的单数（HeldOrderBadgeText 0 单时为空、超过 99 为 99+；
+                     IsHeldOrderBadgeVisible 为假或属性缺失时折叠）。内容放进 Grid 并让按钮内容撑满，角标才能贴到右上角。 -->
+                <Button Command="{Binding RecallOrderCommand}"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch"
+                        Style="{StaticResource PosSidebarActionButtonStyle}">
+                    <Grid>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
+                                <materialDesign:PackIcon Kind="FileDocumentOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="{Binding RecallOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
+                        </StackPanel>
+                        <Border x:Name="RecallOrderCountBadge"
+                                Style="{StaticResource PosSidebarBadgeStyle}"
+                                Visibility="{Binding IsHeldOrderBadgeVisible, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                            <TextBlock Text="{Binding HeldOrderBadgeText}" Style="{StaticResource PosSidebarBadgeTextStyle}" />
                         </Border>
-                        <TextBlock Text="{Binding RecallOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
-                    </StackPanel>
+                    </Grid>
                 </Button>
                 <Button Command="{Binding OpenCashDrawerCommand}" services:ButtonFeedback.Cue="CashDrawer" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
@@ -1991,6 +2112,58 @@
                         <TextBlock Text="{Binding DailyCloseText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
+                <!-- Card Recovery：入口固定保留；平时是普通功能键，存在待处理卡交易时变琥珀警示键 + 右上角红色数量角标。
+                     图标 / 标签文字 / 角标的颜色都跟随 HasOpenCardRecoveryAttempts（见 PosSidebarCardRecovery* 样式）。 -->
+                <Button x:Name="CardRecoveryCenterEntryButton"
+                        Command="{Binding OpenCardRecoveryCenterCommand}"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch"
+                        Style="{StaticResource PosSidebarCardRecoveryButtonStyle}"
+                        AutomationProperties.AutomationId="CardRecoveryCenterEntryButton"
+                        AutomationProperties.Name="{Binding CardRecoveryCenterAutomationName}">
+                    <Grid>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
+                                <materialDesign:PackIcon x:Name="CardRecoveryCenterStateIcon" Style="{StaticResource PosSidebarCardRecoveryIconStyle}" />
+                            </Border>
+                            <!-- 标签字色直接取所在按钮的前景色：平时 = 普通功能键字色，警示时 = 警示字色。 -->
+                            <TextBlock x:Name="CardRecoveryCenterTitle"
+                                       Text="{Binding CardRecoveryCenterText}"
+                                       Style="{StaticResource PosSidebarActionLabelStyle}"
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                        </StackPanel>
+                        <Border x:Name="CardRecoveryOpenCountBadge" Style="{StaticResource PosSidebarCardRecoveryBadgeStyle}">
+                            <TextBlock Text="{Binding CardRecoveryOpenCount}" Style="{StaticResource PosSidebarBadgeTextStyle}" Foreground="White" />
+                        </Border>
+                    </Grid>
+                </Button>
+                <!-- Attendance QR：点击仍由代码后置的 AttendanceQrLauncher_Click 打开二维码弹窗；
+                     右上角胶囊角标显示剩余秒数，原来占一行的「Online verified …」说明文字改放按钮提示（ToolTip）。 -->
+                <Button x:Name="AttendanceQrLauncher"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch"
+                        Style="{StaticResource PosSidebarActionButtonStyle}"
+                        Click="AttendanceQrLauncher_Click"
+                        AutomationProperties.Name="{loc:Loc attendance.qr.open}">
+                    <Button.ToolTip>
+                        <TextBlock TextWrapping="Wrap" MaxWidth="320">
+                            <Run Text="{Binding AttendanceQrPanel.VerificationStatusText, Mode=OneWay}" />
+                            <Run Text=" " />
+                            <Run Text="{Binding AttendanceQrPanel.MessageText, Mode=OneWay}" />
+                        </TextBlock>
+                    </Button.ToolTip>
+                    <Grid>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
+                                <materialDesign:PackIcon Kind="Qrcode" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="{loc:Loc attendance.qr.title}" Style="{StaticResource PosSidebarActionLabelStyle}" />
+                        </StackPanel>
+                        <Border x:Name="AttendanceQrSecondsBadge" Style="{StaticResource PosSidebarBadgeStyle}">
+                            <TextBlock Text="{Binding AttendanceQrPanel.SecondsRemaining, StringFormat={}{0}s}" Style="{StaticResource PosSidebarBadgeTextStyle}" />
+                        </Border>
+                    </Grid>
+                </Button>
                 <Button Command="{Binding OpenSettingsCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
@@ -2009,9 +2182,11 @@
                 </Button>
             </UniformGrid>
 
+            <!-- 状态卡现在是功能区最底部的一块：只留「Status 标题 + Synced / Pending 标签 + 状态消息」，
+                 高度走 PosHomeStatusCardHeight（标准 96、长者 112），腾出的空间全给状态消息（多行换行）。 -->
             <ContentControl Grid.Row="1"
                             x:Name="PosTerminalStatusCard"
-                            Margin="8,0,8,8"
+                            Margin="8,0,8,12"
                             Height="{DynamicResource PosHomeStatusCardHeight}"
                             MaxHeight="{DynamicResource PosHomeStatusCardHeight}"
                             Padding="9,7"
@@ -2021,7 +2196,6 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0">
                         <Grid.ColumnDefinitions>
@@ -2051,173 +2225,8 @@
                                FontWeight="SemiBold"
                                FontSize="{DynamicResource PosHomeStatusBodyFontSize}"
                                VerticalAlignment="Top" />
-                    <!-- 入口固定保留；仅在存在待处理卡交易时切换警告样式与数量徽标。 -->
-                    <Button x:Name="CardRecoveryCenterEntryButton"
-                            Grid.Row="2"
-                            Margin="{DynamicResource PosHomeCardRecoveryMargin}"
-                            MinHeight="{DynamicResource PosHomeCardRecoveryMinHeight}"
-                            Padding="10,6"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Center"
-                            Command="{Binding OpenCardRecoveryCenterCommand}"
-                            AutomationProperties.AutomationId="CardRecoveryCenterEntryButton"
-                            AutomationProperties.Name="{Binding CardRecoveryCenterAutomationName}">
-                        <Button.Style>
-                            <Style TargetType="Button">
-                                <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
-                                <Setter Property="BorderBrush" Value="{DynamicResource PosKeyBorderBrush}" />
-                                <Setter Property="BorderThickness" Value="1" />
-                                <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
-                                <Setter Property="Cursor" Value="Hand" />
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="{x:Type Button}">
-                                            <Border x:Name="Root"
-                                                    Background="{TemplateBinding Background}"
-                                                    BorderBrush="{TemplateBinding BorderBrush}"
-                                                    BorderThickness="{TemplateBinding BorderThickness}"
-                                                    CornerRadius="5"
-                                                    SnapsToDevicePixels="True">
-                                                <ContentPresenter Margin="{TemplateBinding Padding}"
-                                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                                                  RecognizesAccessKey="True"
-                                                                  TextBlock.Foreground="{TemplateBinding Foreground}" />
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Root" Property="Opacity" Value="0.92" />
-                                                </Trigger>
-                                                <Trigger Property="IsPressed" Value="True">
-                                                    <Setter TargetName="Root" Property="Opacity" Value="0.82" />
-                                                </Trigger>
-                                                <Trigger Property="IsKeyboardFocused" Value="True">
-                                                    <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource PosPrimaryBrush}" />
-                                                    <Setter TargetName="Root" Property="BorderThickness" Value="2" />
-                                                </Trigger>
-                                                <Trigger Property="IsEnabled" Value="False">
-                                                    <Setter TargetName="Root" Property="Opacity" Value="0.48" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
-                                        <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
-                                        <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBrush}" />
-                                        <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <materialDesign:PackIcon x:Name="CardRecoveryCenterStateIcon"
-                                                     Width="18"
-                                                     Height="18"
-                                                     VerticalAlignment="Center">
-                                <materialDesign:PackIcon.Style>
-                                    <Style TargetType="{x:Type materialDesign:PackIcon}">
-                                        <Setter Property="Kind" Value="CreditCardSearchOutline" />
-                                        <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
-                                                <Setter Property="Kind" Value="AlertCircleOutline" />
-                                                <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </materialDesign:PackIcon.Style>
-                            </materialDesign:PackIcon>
-                            <TextBlock x:Name="CardRecoveryCenterTitle"
-                                       Grid.Column="1"
-                                       Margin="8,0"
-                                       Text="{Binding CardRecoveryCenterText}"
-                                       TextWrapping="Wrap"
-                                       FontSize="{DynamicResource PosHomeCardRecoveryFontSize}"
-                                       FontWeight="Bold"
-                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                       VerticalAlignment="Center" />
-                            <Border x:Name="CardRecoveryOpenCountBadge"
-                                    Grid.Column="2"
-                                    MinWidth="22"
-                                    Margin="4,0,8,0"
-                                    Padding="6,2"
-                                    CornerRadius="9"
-                                    VerticalAlignment="Center">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                                <Setter Property="Background" Value="{DynamicResource PosWarningStrongBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <TextBlock Text="{Binding CardRecoveryOpenCount}"
-                                           Foreground="White"
-                                           FontSize="10"
-                                           FontWeight="Black"
-                                           TextAlignment="Center" />
-                            </Border>
-                            <materialDesign:PackIcon Grid.Column="3"
-                                                     Kind="ChevronRight"
-                                                     Width="18"
-                                                     Height="18"
-                                                     VerticalAlignment="Center">
-                                <materialDesign:PackIcon.Style>
-                                    <Style TargetType="{x:Type materialDesign:PackIcon}">
-                                        <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasOpenCardRecoveryAttempts}" Value="True">
-                                                <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </materialDesign:PackIcon.Style>
-                            </materialDesign:PackIcon>
-                        </Grid>
-                    </Button>
                 </Grid>
             </ContentControl>
-
-            <Button x:Name="AttendanceQrLauncher"
-                    Grid.Row="2"
-                    Height="{DynamicResource PosHomeAttendanceButtonHeight}"
-                    Margin="8,0,8,16"
-                    Padding="8,6"
-                    HorizontalContentAlignment="Stretch"
-                    Background="{DynamicResource PosSurfaceBrush}"
-                    BorderBrush="{DynamicResource PosKeyBorderBrush}"
-                    BorderThickness="1"
-                    Click="AttendanceQrLauncher_Click"
-                    AutomationProperties.Name="{loc:Loc attendance.qr.open}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <materialDesign:PackIcon Kind="Qrcode" Width="22" Height="22" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Margin="6,0" VerticalAlignment="Center">
-                        <TextBlock Text="{loc:Loc attendance.qr.title}" FontSize="{DynamicResource PosHomeAttendanceTitleFontSize}" FontWeight="Black" TextTrimming="CharacterEllipsis" />
-                        <TextBlock FontSize="{DynamicResource PosHomeAttendanceStatusFontSize}" Foreground="{DynamicResource PosMutedForegroundBrush}" TextTrimming="CharacterEllipsis">
-                            <Run Text="{Binding AttendanceQrPanel.VerificationStatusText, Mode=OneWay}" />
-                            <Run Text=" " />
-                            <Run Text="{Binding AttendanceQrPanel.MessageText, Mode=OneWay}" />
-                        </TextBlock>
-                    </StackPanel>
-                    <TextBlock Grid.Column="2" Text="{Binding AttendanceQrPanel.SecondsRemaining}" FontSize="{DynamicResource PosHomeAttendanceSecondsFontSize}" FontWeight="Black" Foreground="{DynamicResource PosPrimaryTextBrush}" VerticalAlignment="Center" />
-                </Grid>
-            </Button>
         </Grid>
 
         <Border Grid.Column="0"

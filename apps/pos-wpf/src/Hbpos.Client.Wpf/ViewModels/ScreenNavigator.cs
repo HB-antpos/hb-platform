@@ -126,6 +126,29 @@ internal sealed class ScreenNavigator
     {
         _currentScreen = screen;
         _setScreen(screen);
+        SyncPosTerminalVisibility();
+    }
+
+    /// <summary>
+    /// 首页可见性通知：挂单角标只在首页显示时刷新 / 轮询。
+    /// 以 _setScreen 之后的 _currentScreen 为准（API 切换冻结时回调内会把屏幕改回冻结屏）；
+    /// 通知只改标志、起停定时器并发起异步刷新，不抛异常、不阻塞导航。
+    /// </summary>
+    private void SyncPosTerminalVisibility()
+    {
+        if (PosTerminal is not { } posTerminal)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_currentScreen, posTerminal))
+        {
+            posTerminal.OnScreenShown();
+        }
+        else
+        {
+            posTerminal.OnScreenHidden();
+        }
     }
 
     public PosTerminalViewModel? CachedPosTerminalScreen => _cachedPosTerminalScreen;
@@ -479,6 +502,9 @@ internal sealed class ScreenNavigator
     {
         PosTerminal?.RefreshCart();
         CashPayment?.RefreshCart();
+        // 取单成功：本机 / 共享挂单少了一张，立即重算首页「取单」角标（绕过远端缓存取最新）。
+        // 先于 ShowPos 发起，这样进入首页时的普通刷新会并入这次强制刷新，不重复请求。
+        _ = PosTerminal?.RefreshHeldOrderTodayCountAsync(forceRemoteRefresh: true);
         ShowPos();
         _setStatusMessage(_localization.T("main.suspendedRecalled"));
         return Task.CompletedTask;

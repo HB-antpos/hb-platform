@@ -202,7 +202,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal(ancestorForeground, (string?)Assert.Single(noBarcodeButton.Descendants(presentation + "TextBlock")).Attribute("Foreground"));
         Assert.Equal("{StaticResource CashierNoBarcodeButtonStyle}", (string?)noBarcodeButton.Attribute("Style"));
         var noBarcodeStyle = FindStyle(view, x, "CashierNoBarcodeButtonStyle");
-        // 配色全部走 PosNoBarcode* 键：旧主题取值＝原来的主色实心 + 白字，长者主题＝浅蓝底深蓝字。
+        // 配色全部走 PosNoBarcode* 键：可用＝主色（长者深蓝）实心 + 白字；禁用＝灰块 + 灰字。
         AssertSetter(noBarcodeStyle, "Background", "{DynamicResource PosNoBarcodeBrush}");
         AssertSetter(noBarcodeStyle, "BorderBrush", "{DynamicResource PosNoBarcodeBrush}");
         AssertSetter(noBarcodeStyle, "Foreground", "{DynamicResource PosNoBarcodeForegroundBrush}");
@@ -514,7 +514,10 @@ public sealed class PosTerminalViewLayoutTests
         var sidebar = Assert.Single(view.Descendants().Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrSidebar"));
         var actionGrid = Assert.Single(sidebar.Elements(presentation + "UniformGrid"));
-        Assert.Equal("8,13,8,6", (string?)actionGrid.Attribute("Margin"));
+        // 功能区网格 2×6：Card Recovery / Attendance QR 与「设置」同款，已并入网格；底部不再有整行入口。
+        Assert.Equal("2", (string?)actionGrid.Attribute("Columns"));
+        Assert.Equal("6", (string?)actionGrid.Attribute("Rows"));
+        Assert.Equal("8,13,8,8", (string?)actionGrid.Attribute("Margin"));
         var actionButtons = actionGrid.Elements(presentation + "Button").ToArray();
         Assert.Equal(
             [
@@ -526,13 +529,26 @@ public sealed class PosTerminalViewLayoutTests
                 "{Binding PrintLastReceiptCommand}",
                 "{Binding LockCashierCommand}",
                 "{Binding OpenDailyCloseCommand}",
+                "{Binding OpenCardRecoveryCenterCommand}",
+                "AttendanceQrLauncher_Click",
                 "{Binding OpenSettingsCommand}",
                 "{Binding ExitApplicationCommand}",
             ],
-            actionButtons.Select(button => (string?)button.Attribute("Command")));
-        Assert.All(actionButtons[..^1], button =>
-            Assert.Equal("{StaticResource PosSidebarActionButtonStyle}", (string?)button.Attribute("Style")));
-        Assert.Equal("{StaticResource PosSidebarExitButtonStyle}", (string?)actionButtons[^1].Attribute("Style"));
+            // Attendance QR 走代码后置的 Click 事件（没有 Command），其余按钮走 Command。
+            actionButtons.Select(button => (string?)button.Attribute("Command") ?? (string?)button.Attribute("Click")));
+        for (var index = 0; index < actionButtons.Length; index++)
+        {
+            var expectedStyle = index switch
+            {
+                8 => "{StaticResource PosSidebarCardRecoveryButtonStyle}",
+                11 => "{StaticResource PosSidebarExitButtonStyle}",
+                _ => "{StaticResource PosSidebarActionButtonStyle}",
+            };
+            Assert.Equal(expectedStyle, (string?)actionButtons[index].Attribute("Style"));
+        }
+
+        // 状态卡之外功能区不再有直接挂在侧栏上的按钮（旧的 Attendance QR 大条已撤掉）。
+        Assert.Empty(sidebar.Elements(presentation + "Button"));
 
         var actionStyle = FindStyle(view, x, "PosSidebarActionButtonStyle");
         AssertSetter(actionStyle, "MinHeight", "62");
@@ -543,12 +559,13 @@ public sealed class PosTerminalViewLayoutTests
         AssertSetter(labelStyle, "TextWrapping", "Wrap");
         var iconHostStyle = FindStyle(view, x, "PosSidebarActionIconHostStyle");
         AssertSetter(iconHostStyle, "Background", "Transparent");
-        Assert.Equal(10, actionGrid.Descendants(presentation + "TextBlock").Count(text =>
+        // 12 个功能键的文字标签都用同一个标签样式（Card Recovery 只是另外把前景色绑到所在按钮上）。
+        Assert.Equal(12, actionGrid.Descendants(presentation + "TextBlock").Count(text =>
             (string?)text.Attribute("Style") == "{StaticResource PosSidebarActionLabelStyle}"));
     }
 
     [Fact]
-    public void Card_recovery_center_entry_stays_visible_and_only_warns_for_open_attempts()
+    public void Card_recovery_center_entry_is_a_sidebar_tile_that_only_warns_for_open_attempts()
     {
         var repoRoot = FindRepoRoot();
         var view = XDocument.Load(Path.Combine(
@@ -565,10 +582,15 @@ public sealed class PosTerminalViewLayoutTests
 
         var sidebar = Assert.Single(view.Descendants().Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrSidebar"));
+        var actionGrid = Assert.Single(sidebar.Elements(presentation + "UniformGrid"));
+
+        // 状态卡只留「Status 标题 + Synced / Pending 标签 + 状态消息」，高度走尺寸键（标准 96）。
         var statusCard = Assert.Single(sidebar.Elements(presentation + "ContentControl"));
-        Assert.Equal("154", Metric((string?)statusCard.Attribute("Height")));
-        Assert.Equal("154", Metric((string?)statusCard.Attribute("MaxHeight")));
+        Assert.Equal("96", Metric((string?)statusCard.Attribute("Height")));
+        Assert.Equal("96", Metric((string?)statusCard.Attribute("MaxHeight")));
+        Assert.Equal("8,0,8,12", (string?)statusCard.Attribute("Margin"));
         Assert.Null(statusCard.Element(presentation + "ContentControl.Style"));
+        Assert.Empty(statusCard.Descendants(presentation + "Button"));
 
         var statusLayout = Assert.Single(statusCard.Elements(presentation + "Grid").Where(grid =>
             (string?)grid.Attribute(x + "Name") == "PosTerminalStatusCardLayout"));
@@ -576,74 +598,180 @@ public sealed class PosTerminalViewLayoutTests
         var statusRows = statusLayout.Element(presentation + "Grid.RowDefinitions")!
             .Elements(presentation + "RowDefinition")
             .ToArray();
-        Assert.Equal(["Auto", "*", "Auto"], statusRows.Select(row => (string?)row.Attribute("Height")));
+        Assert.Equal(["Auto", "*"], statusRows.Select(row => (string?)row.Attribute("Height")));
         var statusMessage = Assert.Single(statusLayout.Elements(presentation + "TextBlock").Where(text =>
             (string?)text.Attribute(x + "Name") == "PosTerminalStatusMessage"));
         Assert.Equal("1", (string?)statusMessage.Attribute("Grid.Row"));
         Assert.Equal("Wrap", (string?)statusMessage.Attribute("TextWrapping"));
         Assert.Equal("CharacterEllipsis", (string?)statusMessage.Attribute("TextTrimming"));
+        // 状态卡里仍保留待选商品徽章和同步标签。
+        Assert.Contains(statusCard.Descendants(presentation + "Border"), border =>
+            (string?)border.Attribute("AutomationProperties.AutomationId") == "PendingChoiceStatusBadge");
+        Assert.Contains(statusCard.Descendants(presentation + "TextBlock"), text =>
+            (string?)text.Attribute("Text") == "{Binding PendingSyncText}");
 
-        var entry = Assert.Single(statusCard.Descendants(presentation + "Button").Where(button =>
+        // 入口：网格里的功能键，AutomationId / 命令 / 自动化名称不变，始终可见。
+        var entry = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
             (string?)button.Attribute("Command") == "{Binding OpenCardRecoveryCenterCommand}"));
+        Assert.Same(actionGrid, entry.Parent);
+        Assert.Equal("CardRecoveryCenterEntryButton", (string?)entry.Attribute(x + "Name"));
         Assert.Equal("CardRecoveryCenterEntryButton", (string?)entry.Attribute("AutomationProperties.AutomationId"));
         Assert.Equal("{Binding CardRecoveryCenterAutomationName}", (string?)entry.Attribute("AutomationProperties.Name"));
-        Assert.Equal("2", (string?)entry.Attribute("Grid.Row"));
-        Assert.Equal("44", Metric((string?)entry.Attribute("MinHeight")));
+        Assert.Equal("{StaticResource PosSidebarCardRecoveryButtonStyle}", (string?)entry.Attribute("Style"));
+        Assert.Equal("Stretch", (string?)entry.Attribute("HorizontalContentAlignment"));
         Assert.Null(entry.Attribute("Visibility"));
+        Assert.Null(entry.Attribute("Grid.Row"));
 
-        var buttonStyle = Assert.Single(entry.Elements(presentation + "Button.Style"))
-            .Element(presentation + "Style")!;
-        AssertSetter(buttonStyle, "Background", "{DynamicResource PosSurfaceBrush}");
-        AssertSetter(buttonStyle, "BorderBrush", "{DynamicResource PosKeyBorderBrush}");
-        AssertSetter(buttonStyle, "Foreground", "{DynamicResource PosTextBrush}");
-        Assert.DoesNotContain(buttonStyle.Elements(presentation + "Setter"), setter =>
-            (string?)setter.Attribute("Property") == "FocusVisualStyle"
-            && (string?)setter.Attribute("Value") == "{x:Null}");
-        var buttonTemplate = Assert.Single(buttonStyle.Descendants(presentation + "ControlTemplate"));
-        var keyboardFocusTrigger = Assert.Single(buttonTemplate.Descendants(presentation + "Trigger").Where(trigger =>
-            (string?)trigger.Attribute("Property") == "IsKeyboardFocused"
-            && (string?)trigger.Attribute("Value") == "True"));
-        AssertTriggerSetter(keyboardFocusTrigger, "BorderBrush", "{DynamicResource PosPrimaryBrush}");
-        AssertTriggerSetter(keyboardFocusTrigger, "BorderThickness", "2");
+        // 警示键：底 / 描边 / 字色取 PosSidebarWarn*，并换成悬停 / 按下取警示专用键的模板。
+        var buttonStyle = FindStyle(view, x, "PosSidebarCardRecoveryButtonStyle");
+        Assert.Equal("{StaticResource PosSidebarActionButtonStyle}", (string?)buttonStyle.Attribute("BasedOn"));
         var warningTrigger = Assert.Single(
             buttonStyle.Element(presentation + "Style.Triggers")!
                 .Elements(presentation + "DataTrigger")
                 .Where(trigger =>
                     (string?)trigger.Attribute("Binding") == "{Binding HasOpenCardRecoveryAttempts}"
                     && (string?)trigger.Attribute("Value") == "True"));
-        AssertTriggerSetter(warningTrigger, "Background", "{DynamicResource PosWarningSoftBrush}");
-        AssertTriggerSetter(warningTrigger, "BorderBrush", "{DynamicResource PosWarningBrush}");
-        AssertTriggerSetter(warningTrigger, "Foreground", "{DynamicResource PosWarningTextBrush}");
+        AssertTriggerSetter(warningTrigger, "Background", "{DynamicResource PosSidebarWarnButtonBrush}");
+        AssertTriggerSetter(warningTrigger, "BorderBrush", "{DynamicResource PosSidebarWarnBorderBrush}");
+        AssertTriggerSetter(warningTrigger, "Foreground", "{DynamicResource PosSidebarWarnForegroundBrush}");
+        AssertTriggerSetter(warningTrigger, "Template", "{StaticResource PosSidebarWarnButtonTemplate}");
 
+        var warnTemplate = Assert.Single(view.Descendants(presentation + "ControlTemplate").Where(template =>
+            (string?)template.Attribute(x + "Key") == "PosSidebarWarnButtonTemplate"));
+        var hoverTrigger = Assert.Single(warnTemplate.Descendants(presentation + "Trigger").Where(trigger =>
+            (string?)trigger.Attribute("Property") == "IsMouseOver" && (string?)trigger.Attribute("Value") == "True"));
+        AssertTriggerSetter(hoverTrigger, "Background", "{DynamicResource PosSidebarWarnHoverBrush}");
+        var pressedTrigger = Assert.Single(warnTemplate.Descendants(presentation + "Trigger").Where(trigger =>
+            (string?)trigger.Attribute("Property") == "IsPressed" && (string?)trigger.Attribute("Value") == "True"));
+        AssertTriggerSetter(pressedTrigger, "Background", "{DynamicResource PosSidebarWarnPressedBrush}");
+        // 警示键的悬停 / 按下不能取普通功能键的悬停色（长者主题的普通键是深蓝，琥珀警示键悬停变深蓝会冲突语义）。
+        var warnTemplateText = warnTemplate.ToString();
+        Assert.DoesNotContain("PosSidebarButtonHoverBrush", warnTemplateText);
+        Assert.DoesNotContain("PosSidebarButtonPressedBrush", warnTemplateText);
+
+        // 标签：与其它功能键同一个标签样式，字色跟随所在按钮（警示时随按钮变成警示字色）。
         var title = Assert.Single(entry.Descendants(presentation + "TextBlock").Where(text =>
             (string?)text.Attribute(x + "Name") == "CardRecoveryCenterTitle"));
         Assert.Equal("{Binding CardRecoveryCenterText}", (string?)title.Attribute("Text"));
+        Assert.Equal("{StaticResource PosSidebarActionLabelStyle}", (string?)title.Attribute("Style"));
+        Assert.Equal(
+            "{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}",
+            (string?)title.Attribute("Foreground"));
 
+        // 图标：平时 CreditCardSearchOutline，警示时 AlertCircleOutline + 警示字色（颜色走样式，不能写成本地值）。
         var leadingIcon = Assert.Single(entry.Descendants().Where(element =>
             element.Name.LocalName == "PackIcon"
             && (string?)element.Attribute(x + "Name") == "CardRecoveryCenterStateIcon"));
-        var leadingIconStyle = Assert.Single(leadingIcon.Elements().Where(element =>
-            element.Name.LocalName == "PackIcon.Style")).Element(presentation + "Style")!;
+        Assert.Equal("{StaticResource PosSidebarCardRecoveryIconStyle}", (string?)leadingIcon.Attribute("Style"));
+        Assert.Null(leadingIcon.Attribute("Foreground"));
+        var leadingIconStyle = FindStyle(view, x, "PosSidebarCardRecoveryIconStyle");
         AssertSetter(leadingIconStyle, "Kind", "CreditCardSearchOutline");
-        AssertSetter(leadingIconStyle, "Foreground", "{DynamicResource PosMutedForegroundBrush}");
+        AssertSetter(leadingIconStyle, "Foreground", "{DynamicResource PosSidebarIconBrush}");
+        AssertSetter(leadingIconStyle, "Width", "{DynamicResource PosHomeSidebarIconSize}");
         var warningIconTrigger = Assert.Single(leadingIconStyle.Descendants(presentation + "DataTrigger").Where(trigger =>
             (string?)trigger.Attribute("Binding") == "{Binding HasOpenCardRecoveryAttempts}"
             && (string?)trigger.Attribute("Value") == "True"));
         AssertTriggerSetter(warningIconTrigger, "Kind", "AlertCircleOutline");
-        AssertTriggerSetter(warningIconTrigger, "Foreground", "{DynamicResource PosWarningTextBrush}");
+        AssertTriggerSetter(warningIconTrigger, "Foreground", "{DynamicResource PosSidebarWarnForegroundBrush}");
 
+        // 红色数量角标：右上角，平时折叠，仅存在待处理卡交易时显示；白字，不拦截点击。
         var badge = Assert.Single(entry.Descendants(presentation + "Border").Where(border =>
             (string?)border.Attribute(x + "Name") == "CardRecoveryOpenCountBadge"));
-        var badgeStyle = Assert.Single(badge.Elements(presentation + "Border.Style"))
-            .Element(presentation + "Style")!;
+        Assert.Equal("{StaticResource PosSidebarCardRecoveryBadgeStyle}", (string?)badge.Attribute("Style"));
+        var badgeStyle = FindStyle(view, x, "PosSidebarCardRecoveryBadgeStyle");
+        Assert.Equal("{StaticResource PosSidebarBadgeStyle}", (string?)badgeStyle.Attribute("BasedOn"));
         AssertSetter(badgeStyle, "Visibility", "Collapsed");
+        AssertSetter(badgeStyle, "Background", "{DynamicResource PosSidebarBadgeAlertBrush}");
         var badgeTrigger = Assert.Single(badgeStyle.Descendants(presentation + "DataTrigger").Where(trigger =>
             (string?)trigger.Attribute("Binding") == "{Binding HasOpenCardRecoveryAttempts}"
             && (string?)trigger.Attribute("Value") == "True"));
         AssertTriggerSetter(badgeTrigger, "Visibility", "Visible");
-        AssertTriggerSetter(badgeTrigger, "Background", "{DynamicResource PosWarningStrongBrush}");
         var badgeText = Assert.Single(badge.Descendants(presentation + "TextBlock"));
         Assert.Equal("{Binding CardRecoveryOpenCount}", (string?)badgeText.Attribute("Text"));
+        Assert.Equal("White", (string?)badgeText.Attribute("Foreground"));
+        Assert.Equal("{StaticResource PosSidebarBadgeTextStyle}", (string?)badgeText.Attribute("Style"));
+    }
+
+    [Fact]
+    public void Sidebar_badges_sit_at_the_top_right_and_never_intercept_clicks()
+    {
+        var repoRoot = FindRepoRoot();
+        var view = XDocument.Load(Path.Combine(
+            repoRoot,
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "Views",
+            "Screens",
+            "PosTerminalView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        // 三种角标共用同一个外形：右上角、22 高的圆形 / 胶囊、13 Black 字，不拦截点击。
+        var badgeStyle = FindStyle(view, x, "PosSidebarBadgeStyle");
+        AssertSetter(badgeStyle, "HorizontalAlignment", "Right");
+        AssertSetter(badgeStyle, "VerticalAlignment", "Top");
+        AssertSetter(badgeStyle, "Margin", "0,2,3,0");
+        AssertSetter(badgeStyle, "MinWidth", "22");
+        AssertSetter(badgeStyle, "Height", "22");
+        AssertSetter(badgeStyle, "CornerRadius", "11");
+        AssertSetter(badgeStyle, "IsHitTestVisible", "False");
+        AssertSetter(badgeStyle, "Background", "{DynamicResource PosSidebarBadgeBrush}");
+        var badgeTextStyle = FindStyle(view, x, "PosSidebarBadgeTextStyle");
+        AssertSetter(badgeTextStyle, "FontSize", "13");
+        AssertSetter(badgeTextStyle, "FontWeight", "Black");
+        AssertSetter(badgeTextStyle, "Foreground", "{DynamicResource PosSidebarBadgeForegroundBrush}");
+
+        // Recall Order：圆形数量角标绑定 HeldOrderBadgeText / IsHeldOrderBadgeVisible，缺失时折叠不显示。
+        var recall = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
+            (string?)button.Attribute("Command") == "{Binding RecallOrderCommand}"));
+        Assert.Equal("Stretch", (string?)recall.Attribute("HorizontalContentAlignment"));
+        Assert.Equal("Stretch", (string?)recall.Attribute("VerticalContentAlignment"));
+        var recallBadge = Assert.Single(recall.Descendants(presentation + "Border").Where(border =>
+            (string?)border.Attribute(x + "Name") == "RecallOrderCountBadge"));
+        Assert.Equal("{StaticResource PosSidebarBadgeStyle}", (string?)recallBadge.Attribute("Style"));
+        Assert.Equal(
+            "{Binding IsHeldOrderBadgeVisible, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}",
+            (string?)recallBadge.Attribute("Visibility"));
+        var recallBadgeText = Assert.Single(recallBadge.Elements(presentation + "TextBlock"));
+        Assert.Equal("{Binding HeldOrderBadgeText}", (string?)recallBadgeText.Attribute("Text"));
+        Assert.Equal("{StaticResource PosSidebarBadgeTextStyle}", (string?)recallBadgeText.Attribute("Style"));
+
+        // Attendance QR：保留 x:Name / Click / 自动化名称；右上角胶囊角标显示剩余秒数；原状态说明文字改放 ToolTip。
+        var launcher = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
+            (string?)button.Attribute(x + "Name") == "AttendanceQrLauncher"));
+        Assert.Equal("AttendanceQrLauncher_Click", (string?)launcher.Attribute("Click"));
+        Assert.Equal("{loc:Loc attendance.qr.open}", (string?)launcher.Attribute("AutomationProperties.Name"));
+        Assert.Equal("{StaticResource PosSidebarActionButtonStyle}", (string?)launcher.Attribute("Style"));
+        Assert.Null(launcher.Attribute("Height"));
+        Assert.Equal("Stretch", (string?)launcher.Attribute("HorizontalContentAlignment"));
+        Assert.Contains(launcher.Descendants(), element =>
+            element.Name.LocalName == "PackIcon" && (string?)element.Attribute("Kind") == "Qrcode");
+        Assert.Contains(launcher.Descendants(presentation + "TextBlock"), text =>
+            (string?)text.Attribute("Text") == "{loc:Loc attendance.qr.title}"
+            && (string?)text.Attribute("Style") == "{StaticResource PosSidebarActionLabelStyle}");
+        var secondsBadge = Assert.Single(launcher.Descendants(presentation + "Border").Where(border =>
+            (string?)border.Attribute(x + "Name") == "AttendanceQrSecondsBadge"));
+        Assert.Equal("{StaticResource PosSidebarBadgeStyle}", (string?)secondsBadge.Attribute("Style"));
+        var secondsText = Assert.Single(secondsBadge.Elements(presentation + "TextBlock"));
+        Assert.Equal(
+            "{Binding AttendanceQrPanel.SecondsRemaining, StringFormat={}{0}s}",
+            (string?)secondsText.Attribute("Text"));
+        var toolTipRuns = Assert.Single(launcher.Elements(presentation + "Button.ToolTip"))
+            .Descendants(presentation + "Run")
+            .Select(run => (string?)run.Attribute("Text"))
+            .ToArray();
+        Assert.Equal(
+            [
+                "{Binding AttendanceQrPanel.VerificationStatusText, Mode=OneWay}",
+                " ",
+                "{Binding AttendanceQrPanel.MessageText, Mode=OneWay}",
+            ],
+            toolTipRuns);
+        // 按钮本体上不再直接显示验证状态 / 提示文字（只在 ToolTip 里）。
+        Assert.Empty(launcher.Descendants(presentation + "Run").Where(run =>
+            !run.Ancestors(presentation + "Button.ToolTip").Any()));
     }
 
     [Theory]
@@ -653,7 +781,7 @@ public sealed class PosTerminalViewLayoutTests
     [InlineData(1080, 720)]
     [InlineData(1366, 768)]
     [InlineData(1920, 1080)]
-    public void Attendance_sidebar_keeps_five_action_rows_touchable_at_supported_sizes(int width, int height)
+    public void Attendance_sidebar_keeps_six_action_rows_touchable_at_supported_sizes(int width, int height)
     {
         var repoRoot = FindRepoRoot();
         var mainWindow = XDocument.Load(Path.Combine(repoRoot, "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "MainWindow.xaml"));
@@ -682,18 +810,27 @@ public sealed class PosTerminalViewLayoutTests
 
         var sidebar = Assert.Single(view.Descendants().Where(element => (string?)element.Attribute(x + "Name") == "AttendanceQrSidebar"));
         var actionGrid = Assert.Single(sidebar.Elements(presentation + "UniformGrid"));
-        Assert.Equal(10, actionGrid.Elements(presentation + "Button").Count());
+        Assert.Equal(12, actionGrid.Elements(presentation + "Button").Count());
+        Assert.Empty(sidebar.Elements(presentation + "Button"));
         var status = Assert.Single(sidebar.Elements(presentation + "ContentControl"));
-        var launcher = Assert.Single(sidebar.Elements(presentation + "Button").Where(element =>
-            (string?)element.Attribute(x + "Name") == "AttendanceQrLauncher"));
-        Assert.True(MetricDouble(launcher, "Height") <= 62);
-        var requiredHeight = (5 * (62 + actionButtonMargin))
-            + ParseVerticalMargin((string?)actionGrid.Attribute("Margin"))
-            + MetricDouble(status, "MaxHeight")
-            + ParseVerticalMargin((string?)status.Attribute("Margin"))
-            + MetricDouble(launcher, "Height")
-            + ParseVerticalMargin((string?)launcher.Attribute("Margin"));
-        Assert.True(requiredHeight <= logicalHeight - 54 - 42);
+
+        // 六行按钮（每行至少 62 + 上下外边距）+ 网格上下边距 + 状态卡（含外边距）必须放得进可用高度。
+        // 标准主题和长者主题的状态卡高度不同（96 / 112），两套都要核对。
+        var chromeHeight = 54 + 42;
+        var gridAndRows = (6 * (62 + actionButtonMargin)) + ParseVerticalMargin((string?)actionGrid.Attribute("Margin"));
+        var statusMargin = ParseVerticalMargin((string?)status.Attribute("Margin"));
+        Assert.True(gridAndRows + MetricDouble(status, "MaxHeight") + statusMargin <= logicalHeight - chromeHeight);
+        Assert.True(gridAndRows + ElderHomeMetric("PosHomeStatusCardHeight") + statusMargin <= logicalHeight - chromeHeight);
+    }
+
+    // 长者主题的尺寸字典：只放覆盖标准值的键；这里读出某个键的长者取值。
+    private static double ElderHomeMetric(string key)
+    {
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Themes", "Metrics", "Home.Elder.xaml"));
+        var element = Assert.Single(document.Root!.Elements().Where(candidate => (string?)candidate.Attribute(x + "Key") == key));
+        return double.Parse(element.Value.Trim(), CultureInfo.InvariantCulture);
     }
 
     private static double ParseVerticalMargin(string? value)
@@ -771,14 +908,17 @@ public sealed class PosTerminalViewLayoutTests
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         var sidebar = Assert.Single(view.Descendants().Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrSidebar"));
+        // 底部只剩状态卡：不再有单独的 Attendance QR 大条，启动器是功能键网格里的一个同款功能键。
         var rows = Assert.Single(sidebar.Elements().Where(element => element.Name.LocalName == "Grid.RowDefinitions")).Elements().ToArray();
-        Assert.Equal(["*", "Auto", "Auto"], rows.Select(row => (string?)row.Attribute("Height")));
+        Assert.Equal(["*", "Auto"], rows.Select(row => (string?)row.Attribute("Height")));
 
         Assert.DoesNotContain(sidebar.Descendants(), element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrCard");
-        var launcher = Assert.Single(sidebar.Elements().Where(element =>
+        var actionGrid = Assert.Single(sidebar.Elements(presentation + "UniformGrid"));
+        var launcher = Assert.Single(sidebar.Descendants().Where(element =>
             (string?)element.Attribute(x + "Name") == "AttendanceQrLauncher"));
-        Assert.Equal("62", Metric((string?)launcher.Attribute("Height")));
+        Assert.Same(actionGrid, launcher.Parent);
+        Assert.Null(launcher.Attribute("Height"));
         Assert.Equal("AttendanceQrLauncher_Click", (string?)launcher.Attribute("Click"));
 
         var overlay = Assert.Single(view.Descendants().Where(element =>

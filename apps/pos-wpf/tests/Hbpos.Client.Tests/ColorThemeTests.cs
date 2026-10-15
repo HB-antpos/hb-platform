@@ -310,7 +310,9 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             ("PosClearKeyBrush", "PosSurfaceBrush"),
             ("PosNoBarcodeBrush", "PosPrimaryBrush"),
             ("PosNoBarcodePressedBrush", "PosPrimaryStrongBrush"),
-            ("PosNoBarcodeDisabledBrush", "PosPrimaryDisabledBrush"),
+            // 禁用态改成灰块灰字（原来是比可用态淡一点的蓝，不够明显）。
+            ("PosNoBarcodeDisabledBrush", "PosSurfaceStrongBrush"),
+            ("PosNoBarcodeDisabledForegroundBrush", "PosMutedForegroundBrush"),
             ("PosSidebarButtonBrush", "PosSurfaceBrush"),
             ("PosSidebarButtonForegroundBrush", "PosTextBrush"),
             ("PosSidebarButtonHoverBrush", "PosSurfaceAltBrush"),
@@ -330,7 +332,14 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             ("PosQtyPlusForegroundBrush", "PosSuccessTextBrush"),
             ("PosDiscountKeyForegroundBrush", "PosTextBrush"),
             ("PosSegmentSeparatorBrush", "PosBorderBrush"),
-            ("PosPopupBorderBrush", "PosDividerBrush")
+            ("PosPopupBorderBrush", "PosDividerBrush"),
+            ("PosSidebarWarnButtonBrush", "PosWarningSoftBrush"),
+            ("PosSidebarWarnForegroundBrush", "PosWarningTextBrush"),
+            ("PosSidebarWarnBorderBrush", "PosWarningBrush"),
+            ("PosSidebarWarnHoverBrush", "PosWarningSoftBrush"),
+            ("PosSidebarWarnPressedBrush", "PosWarningBorderBrush"),
+            ("PosSidebarBadgeBrush", "PosPrimaryBrush"),
+            ("PosSidebarBadgeAlertBrush", "PosDangerBrush")
         };
 
         foreach (var (key, legacy) in equivalents)
@@ -339,6 +348,7 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
         }
 
         Assert.Equal(Colors.White, colors["PosNoBarcodeForegroundBrush"]);
+        Assert.Equal(Colors.White, colors["PosSidebarBadgeForegroundBrush"]);
         // 投影键在旧主题里完全透明（不画任何厚度）。
         Assert.Equal(0, colors["PosKeyShadowBrush"].A);
         Assert.Equal(0, colors["PosConfirmPaymentShadowBrush"].A);
@@ -367,6 +377,11 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             if (Contrast(fill, surface) < 3) failures.Add($"{method} 实心块对卡片底色 {Contrast(fill, surface):F2}");
         }
 
+        // 功能区警示键（刷卡恢复有待处理卡交易）与角标（挂单数量、二维码秒数、待处理数量）必须可读。
+        if (Contrast(colors["PosSidebarWarnForegroundBrush"], colors["PosSidebarWarnButtonBrush"]) < 4.5) failures.Add("警示键文字");
+        if (Contrast(colors["PosSidebarBadgeForegroundBrush"], colors["PosSidebarBadgeBrush"]) < 4.5) failures.Add("角标文字");
+        if (Contrast(Colors.White, colors["PosSidebarBadgeAlertBrush"]) < 4.5) failures.Add("警示角标文字");
+
         foreach (var amount in new[] { 100, 50, 20, 10, 5 })
         {
             var fill = colors[$"PosNote{amount}FillBrush"];
@@ -391,6 +406,9 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
         Require("功能按钮白字", "PosSidebarButtonForegroundBrush", "PosSidebarButtonBrush", 7);
         Require("退出按钮白字", "PosSidebarExitForegroundBrush", "PosSidebarExitButtonBrush", 4.5);
         Require("无条码按钮文字", "PosNoBarcodeForegroundBrush", "PosNoBarcodeBrush", 7);
+        Require("Open Item 禁用态文字", "PosNoBarcodeDisabledForegroundBrush", "PosNoBarcodeDisabledBrush", 4.5);
+        // 可用（深蓝）与禁用（浅灰）的底色必须一眼分得开。
+        Assert.True(Contrast(colors["PosNoBarcodeBrush"], colors["PosNoBarcodeDisabledBrush"]) >= 4.5, "Open Item 可用 / 禁用底色区分度不足。");
         Require("取消按钮文字", "PosCancelButtonForegroundBrush", "PosCancelButtonBrush", 7);
         Require("Clear 键文字", "PosDangerTextBrush", "PosClearKeyBrush", 7);
         Require("找零文字", "PosChangeDueForegroundBrush", "PosChangeDueBackgroundBrush", 7);
@@ -429,19 +447,22 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
     }
 
     [Fact]
-    public void Elder_sidebar_labels_have_room_for_two_natural_text_lines()
+    public void Sidebar_labels_have_room_for_two_natural_text_lines_in_every_metrics_set()
     {
         // WPF 的 TextBlock 默认按字体自然行高（≈ 字号×1.33）叠行，LineHeight 并不生效：
         // MaxHeight 小于两行的自然高度时，第二行会被截掉，英文「Special Items」「Hold Order」只剩首词加省略号（真机截图发现）。
-        // 长者主题字号更大，必须按它自己的字号核对；标准值保持改版前的数字，不在此约束。
-        var elder = XDocument.Load(Path.Combine(WpfRoot(), "Themes", "Metrics", "Home.Elder.xaml"));
-        double Value(string key) => double.Parse(
-            elder.Descendants().Single(element => (string?)element.Attribute(Xaml + "Key") == key).Value,
-            CultureInfo.InvariantCulture);
+        // 标准（旧五套主题共用）与长者两套尺寸都要按各自字号核对。
+        foreach (var file in new[] { "Home.Standard.xaml", "Home.Elder.xaml" })
+        {
+            var metrics = XDocument.Load(Path.Combine(WpfRoot(), "Themes", "Metrics", file));
+            double Value(string key) => double.Parse(
+                metrics.Descendants().Single(element => (string?)element.Attribute(Xaml + "Key") == key).Value.Trim(),
+                CultureInfo.InvariantCulture);
 
-        Assert.True(
-            Value("PosHomeSidebarLabelMaxHeight") >= 2 * Value("PosHomeSidebarLabelFontSize") * 1.34,
-            "长者主题功能区标签的 MaxHeight 装不下两行文字。");
+            Assert.True(
+                Value("PosHomeSidebarLabelMaxHeight") >= 2 * Value("PosHomeSidebarLabelFontSize") * 1.34,
+                $"{file} 功能区标签的 MaxHeight 装不下两行文字。");
+        }
     }
 
     [Fact]
@@ -514,18 +535,24 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
         var sidebarButtons = view.Descendants(Presentation + "Button")
             .Where(button => ((string?)button.Attribute("Style"))?.Contains("PosSidebar", StringComparison.Ordinal) == true)
             .ToArray();
-        Assert.Equal(10, sidebarButtons.Length);
+        // 12 个功能键（含 Card Recovery / Attendance QR）；Attendance QR 走 Click 事件、没有 Command，改用 x:Name 当键。
+        Assert.Equal(12, sidebarButtons.Length);
 
         var iconColors = sidebarButtons.ToDictionary(
-            button => (string)button.Attribute("Command")!,
+            button => (string?)button.Attribute("Command") ?? (string)button.Attribute(Xaml + "Name")!,
             button => (string?)button.Descendants(materialDesign + "PackIcon").Single().Attribute("Foreground"));
 
         Assert.Equal("{DynamicResource PosSidebarRefundIconBrush}", iconColors["{Binding OpenReturnsCommand}"]);
         Assert.Equal("{DynamicResource PosSidebarHoldIconBrush}", iconColors["{Binding HoldOrderCommand}"]);
         // 退出图标改走 PosSidebarExitForegroundBrush：旧主题取值＝PosDangerTextBrush（仍是危险红），长者主题是红底上的白色。
         Assert.Equal("{DynamicResource PosSidebarExitForegroundBrush}", iconColors["{Binding ExitApplicationCommand}"]);
+        // Card Recovery 的图标颜色随「有待处理卡交易」切换，只能走样式（本地值会盖过样式触发器），所以没有 Foreground 属性。
+        Assert.Null(iconColors["{Binding OpenCardRecoveryCenterCommand}"]);
+        Assert.Equal("{DynamicResource PosSidebarIconBrush}", iconColors["AttendanceQrLauncher"]);
         Assert.All(
-            iconColors.Where(pair => pair.Key is not ("{Binding OpenReturnsCommand}" or "{Binding HoldOrderCommand}" or "{Binding ExitApplicationCommand}")),
+            iconColors.Where(pair => pair.Key is not (
+                "{Binding OpenReturnsCommand}" or "{Binding HoldOrderCommand}" or "{Binding ExitApplicationCommand}"
+                or "{Binding OpenCardRecoveryCenterCommand}")),
             pair => Assert.Equal("{DynamicResource PosSidebarIconBrush}", pair.Value));
     }
 
