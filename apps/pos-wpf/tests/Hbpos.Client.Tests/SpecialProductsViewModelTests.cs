@@ -182,20 +182,98 @@ public sealed class SpecialProductsViewModelTests
     }
 
     [Fact]
-    public async Task SpecialItemCardCommand_normal_mode_adds_tapped_special_product()
+    public async Task SpecialItemCardCommand_normal_mode_adds_tapped_special_product_and_returns_to_cart_directly()
     {
         var cart = new PosCartService();
         var backCallCount = 0;
+        CartLine? revealedLine = null;
         var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
         var repository = new FakeCatalogRepository { SpecialItems = [item] };
-        var viewModel = CreateViewModel(cart: cart, repository: repository, onBack: () => backCallCount++);
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: repository,
+            onBack: () => backCallCount++,
+            onCartLineAdded: line => revealedLine = line);
         await viewModel.LoadAsync();
 
         viewModel.SpecialItemCardCommand.Execute(item);
 
+        // 点卡片直接加购并回到收银台：不停留页内、不弹确认，购物车行被定位出来。
         var line = Assert.Single(cart.Lines);
         Assert.Equal("SKU-001", line.ProductCode);
+        Assert.Equal(1, backCallCount);
+        Assert.Same(line, revealedLine);
+        // 返回时清掉页内提示条与撤销状态，下次进入是干净页面。
+        Assert.False(viewModel.IsToastVisible);
+        Assert.False(viewModel.UndoAddCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task SpecialItemCardCommand_rapid_double_tap_adds_only_one_unit_until_page_is_entered_again()
+    {
+        var cart = new PosCartService();
+        var backCallCount = 0;
+        var revealedLines = new List<CartLine>();
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var repository = new FakeCatalogRepository { SpecialItems = [item] };
+        var viewModel = CreateViewModel(
+            cart: cart,
+            repository: repository,
+            onBack: () => backCallCount++,
+            onCartLineAdded: revealedLines.Add);
+        await viewModel.LoadAsync();
+
+        viewModel.SpecialItemCardCommand.Execute(item);
+        viewModel.SpecialItemCardCommand.Execute(item);
+
+        // 快速连点同一商品（含离开页面后残留的点击事件）只加一件、只返回一次。
+        Assert.Equal(1m, Assert.Single(cart.Lines).Quantity);
+        Assert.Equal(1, backCallCount);
+        Assert.Single(revealedLines);
+
+        // 下一次重新进入特殊商品页后恢复可点。
+        viewModel.ActivateForEntry();
+        viewModel.SpecialItemCardCommand.Execute(item);
+
+        Assert.Equal(2m, Assert.Single(cart.Lines).Quantity);
+        Assert.Equal(2, backCallCount);
+    }
+
+    [Fact]
+    public async Task SpecialItemCardCommand_failed_add_stays_on_page_shows_message_and_allows_retry()
+    {
+        var cart = new PosCartService();
+        var backCallCount = 0;
+        var item = CreateItem("SKU-001", "Alpha", "930001", isSpecialProduct: true);
+        var workflow = new FakeSpecialProductsWorkflowService
+        {
+            LoadResult = new SpecialProductsLoadResult("S001", [item]),
+            AddToCartException = new InvalidOperationException("item unavailable")
+        };
+        var logger = new RecordingOperationAuditLogger();
+        var viewModel = CreateViewModel(
+            cart: cart,
+            workflow: workflow,
+            onBack: () => backCallCount++,
+            operationAuditLogger: logger);
+        await viewModel.LoadAsync();
+
+        viewModel.SpecialItemCardCommand.Execute(item);
+
+        // 失败：不返回收银台，状态栏与提示条都给出明确原因（提示条不带撤销），并留下失败审计。
         Assert.Equal(0, backCallCount);
+        Assert.Contains("item unavailable", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.True(viewModel.IsToastVisible);
+        Assert.Contains("item unavailable", viewModel.ToastText, StringComparison.Ordinal);
+        Assert.False(viewModel.CanUndoToast);
+        var failedAudit = Assert.Single(logger.Events);
+        Assert.Equal("Failed", failedAudit.Outcome);
+
+        // 失败不会把页面锁死：问题消除后再点一次即可加购并返回。
+        workflow.AddToCartException = null;
+        viewModel.SpecialItemCardCommand.Execute(item);
+
+        Assert.Equal(1, backCallCount);
     }
 
     [Fact]
@@ -1939,8 +2017,16 @@ public sealed class SpecialProductsViewModelTests
         public Func<string, IReadOnlyList<SellableItemDto>, string, int, SpecialProductsReorderWorkflowResult?> ReorderResultFactory { get; init; } =
             (storeCode, items, productCode, _) => new SpecialProductsReorderWorkflowResult(storeCode, items, productCode);
 
+        // 非空时 AddToCart 抛出该异常，用来模拟加购失败。
+        public Exception? AddToCartException { get; set; }
+
         public SpecialProductsAddToCartResult AddToCart(SellableItemDto item)
         {
+            if (AddToCartException is not null)
+            {
+                throw AddToCartException;
+            }
+
             return new SpecialProductsAddToCartResult(new CartLine(item), 1);
         }
 

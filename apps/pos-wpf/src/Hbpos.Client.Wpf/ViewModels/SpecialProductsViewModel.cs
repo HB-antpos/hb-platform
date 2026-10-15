@@ -56,6 +56,9 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     // 最近一次加购（仅这一次可撤销）与「返回收银后需要定位的购物车行」。
     private LastAddInfo? _lastAdd;
     private CartLine? _pendingRevealLine;
+    // 点卡片加购并返回收银的防重入锁：从开始加购到下次进入本页（ActivateForEntry）期间不再接受新的点击，
+    // 避免快速连点或离开页面的事件尾巴把同一商品加两次；加购失败/未授权时立即解锁，允许重试。
+    private bool _cardAddLocked;
     private SellableItemDto? _priceEditorTarget;
     private bool _priceInputIsFresh;
     private CancellationTokenSource? _thumbnailEnableCts;
@@ -542,6 +545,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         HideToast();
         _lastAdd = null;
         _pendingRevealLine = null;
+        _cardAddLocked = false;
         _displayLimit = DisplayChunkSize;
         UndoAddCommand.NotifyCanExecuteChanged();
         if (DisplayedCards.Count == 0)
@@ -806,23 +810,56 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             return;
         }
 
-        await AddToCartAsync(item);
+        // 关键逻辑：浏览模式点卡片 = 直接加购并返回收银台，不再停留页内或二次确认；
+        // 加购失败/未授权时留在本页（TryAddToCartAsync 已给出提示），允许重试。
+        if (_cardAddLocked)
+        {
+            return;
+        }
+
+        _cardAddLocked = true;
+        var leftPage = false;
+        try
+        {
+            if (await TryAddToCartAsync(item))
+            {
+                // Back 会定位到刚加入的购物车行（_pendingRevealLine），并清掉提示与撤销状态。
+                Back();
+                leftPage = true;
+            }
+        }
+        finally
+        {
+            if (!leftPage)
+            {
+                _cardAddLocked = false;
+            }
+        }
     }
 
     private async Task AddToCartAsync(SellableItemDto? item)
+    {
+        await TryAddToCartAsync(item);
+    }
+
+    /// <summary>
+    /// 授权 → 加入购物车 → 补记审计。返回 true 表示已加入购物车；
+    /// false 表示未加入（未授权、空商品或加购失败），失败时已写入状态栏与提示条，调用方应留在本页。
+    /// </summary>
+    private async Task<bool> TryAddToCartAsync(SellableItemDto? item)
     {
         var itemSnapshot = item;
         using var authorization = await AuthorizeAsync(Permissions.PosTerminal.SpecialProducts.AddToCart, "add-to-cart");
         if (authorization is null)
         {
-            return;
+            return false;
         }
         using var authorizationActivation = authorization.Activate();
 
         if (itemSnapshot is null)
         {
             Log($"operation=add-to-cart store={Session.StoreCode} success=false reason=null-item totalElapsedMs=0");
-            return;
+            return false;
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -845,7 +882,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             }
 
             cartAuditRecorded = true;
-            // 关键逻辑：加购后留在本页连续点选；仅最近一次加购可撤销，返回收银时再定位到最后加入的购物车行。
+            // 仅最近一次加购可撤销；返回收银时（Back）再定位到最后加入的购物车行。
             _lastAdd = new LastAddInfo(result.Line, itemSnapshot.QuantityFactor, itemSnapshot.DisplayName);
             _pendingRevealLine = result.Line;
             UndoAddCommand.NotifyCanExecuteChanged();
@@ -853,27 +890,35 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             ShowToast(string.Format(_localization.CurrentCulture, T("specialProducts.toast.added"), itemSnapshot.DisplayName), canUndo: true);
             HighlightJustAdded(itemSnapshot.ProductCode);
             stopwatch.Stop();
-            Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} lookupCode={itemSnapshot.LookupCode} success=true revealRequested={_onCartLineAdded is not null} stayOnPage=true cartLines={result.CartLineCount} totalElapsedMs={stopwatch.ElapsedMilliseconds}");
+            Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} lookupCode={itemSnapshot.LookupCode} success=true revealRequested={_onCartLineAdded is not null} cartLines={result.CartLineCount} totalElapsedMs={stopwatch.ElapsedMilliseconds}");
+            return true;
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            // 加购成功后的返回/定位回调异常不能把已成功的加购再记成失败。
-            if (!cartAuditRecorded)
+            // 购物车已写入后的 UI 提示异常不能把已成功的加购再记成失败，也不能让页面误判为没加上。
+            if (cartAuditRecorded)
             {
-                OperationAuditEvents.RecordCartChange(
-                    _operationAuditLogger,
-                    OperationAuditTypes.CartItemAdd,
-                    Session,
-                    before,
-                    OperationAuditEvents.CaptureCart(_cart.Lines),
-                    outcome: "Failed",
-                    reasonCode: "special-products",
-                    safeMessage: ex.GetType().Name);
+                Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} success=true postAddUiError={ex.Message}");
+                return true;
             }
 
+            OperationAuditEvents.RecordCartChange(
+                _operationAuditLogger,
+                OperationAuditTypes.CartItemAdd,
+                Session,
+                before,
+                OperationAuditEvents.CaptureCart(_cart.Lines),
+                outcome: "Failed",
+                reasonCode: "special-products",
+                safeMessage: ex.GetType().Name);
+
             Log($"operation=add-to-cart store={Session.StoreCode} productCode={itemSnapshot.ProductCode} lookupCode={itemSnapshot.LookupCode} success=false totalElapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
-            throw;
+            // 失败要让收银员看见：状态栏 + 提示条（无撤销），并留在本页。
+            var message = string.Format(_localization.CurrentCulture, T("specialProducts.status.addFailed"), ex.Message);
+            SetStatusText(message);
+            ShowToast(message, canUndo: false);
+            return false;
         }
     }
 
