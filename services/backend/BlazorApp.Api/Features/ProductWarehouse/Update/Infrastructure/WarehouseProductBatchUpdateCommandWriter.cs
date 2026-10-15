@@ -221,6 +221,8 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
             var toCreateWp = new List<WarehouseProduct>();
             var codesWithImportPrice = new List<string>();
             var codesWithStorePurchasePrice = new List<string>();
+            // 本次改了零售价（OEMPrice）的商品 → 新价；「同步分店零售价」勾选时据此覆盖各启用分店的零售价。
+            var retailByCode = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
             var packingQuantityByCode = new Dictionary<string, int>();
             var supplierCodeByProductCode = new Dictionary<string, string>(
                 StringComparer.OrdinalIgnoreCase
@@ -352,6 +354,11 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
                         $"未找到商品主档，无法设置国内供应商: ProductCode={targetCode}"
                     );
                     continue;
+                }
+
+                if (item.OEMPrice.HasValue)
+                {
+                    retailByCode[targetCode] = item.OEMPrice.Value;
                 }
 
                 if (wp == null)
@@ -716,13 +723,26 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
                 );
             }
 
+            // 「同步分店零售价」：本次改了零售价的商品，把各启用分店零售价直接改成新价。
+            // 不勾选时分店价原样保留，分店会收到「改价格」任务（由价格变更任务机制按实时值推导）。
+            var batchPriceSyncPolicy = options.PriceSyncPolicy;
+            if (batchPriceSyncPolicy.SyncStoreRetailPrices && retailByCode.Count > 0)
+            {
+                await OverwriteStoreRetailPricesAsync(
+                    retailByCode,
+                    batchPriceSyncPolicy,
+                    effectiveUpdatedBy
+                );
+            }
+
             await RecordProductChangeHistoryAsync(
                 beforeSnapshots,
                 auditProductCodes,
                 action: "BatchUpdate",
                 source: "WarehouseProducts",
                 actorName: effectiveUpdatedBy,
-                batchGuid: batchGuid
+                batchGuid: batchGuid,
+                skipPriceTasks: !batchPriceSyncPolicy.GenerateTasks
             );
 
             _context.Db.Ado.CommitTran();
@@ -739,5 +759,114 @@ internal sealed class WarehouseProductBatchUpdateCommandWriter : ProductWarehous
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 把本次改了零售价的商品的各启用分店零售价直接改成新价，并按开关登记待换标签任务 / 当下同步 HQ。
+    /// 特殊商品（分店刻意定价）与自动定价行（零售价由进价策略推导，改了也会被立刻重算）不覆盖；
+    /// 新价与分店现价相同的行不动，也就不会产生无意义的任务。
+    /// </summary>
+    private async Task OverwriteStoreRetailPricesAsync(
+        IReadOnlyDictionary<string, decimal> retailByCode,
+        WarehousePriceSyncPolicy policy,
+        string updatedBy
+    )
+    {
+        var activeStoreCodes = (
+            await _context
+                .Db.Queryable<Store>()
+                .Where(store => store.IsActive && !store.IsDeleted)
+                .Select(store => store.StoreCode)
+                .ToListAsync()
+        )
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Distinct()
+            .ToList();
+        if (activeStoreCodes.Count == 0)
+        {
+            return;
+        }
+
+        var rows = new List<StoreRetailPrice>();
+        foreach (var codeBatch in retailByCode.Keys.Chunk(500))
+        {
+            var batch = codeBatch.ToList();
+            rows.AddRange(
+                await _context
+                    .Db.Queryable<StoreRetailPrice>()
+                    .Where(price =>
+                        price.ProductCode != null
+                        && batch.Contains(price.ProductCode)
+                        && price.StoreCode != null
+                        && activeStoreCodes.Contains(price.StoreCode)
+                        && !price.IsDeleted
+                        && !price.IsSpecialProduct
+                        && !price.IsAutoPricing
+                    )
+                    .ToListAsync()
+            );
+        }
+
+        var now = DateTime.Now;
+        var overwrites = new List<StorePriceOverwrite>();
+        var changed = new List<StoreRetailPrice>();
+        foreach (var row in rows)
+        {
+            if (!retailByCode.TryGetValue(row.ProductCode!, out var newPrice))
+            {
+                continue;
+            }
+            if (row.StoreRetailPriceValue == newPrice)
+            {
+                continue;
+            }
+
+            // 覆盖前的分店零售价就是货架标签上的价格，必须在就地改写前留存，否则无法登记「待换标签」。
+            overwrites.Add(
+                new StorePriceOverwrite(
+                    row.StoreCode!,
+                    row.ProductCode!,
+                    row.StoreRetailPriceValue,
+                    row.DiscountRate
+                )
+            );
+            row.StoreRetailPriceValue = newPrice;
+            row.UpdatedAt = now;
+            row.UpdatedBy = updatedBy;
+            changed.Add(row);
+        }
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var chunk in changed.Chunk(200))
+        {
+            await _context
+                .Db.Updateable(chunk.ToList())
+                .UpdateColumns(price => new
+                {
+                    price.StoreRetailPriceValue,
+                    price.UpdatedAt,
+                    price.UpdatedBy,
+                })
+                .ExecuteCommandAsync();
+        }
+        await RecordStorePriceOverwritesAsync(overwrites, updatedBy, policy.GenerateTasks);
+
+        if (policy.ShouldSyncHqImmediately)
+        {
+            // 直接改了分店价又不生成任务：没有「任务执行」可等，改价当下同事务入队同步 HQ。
+            foreach (var group in changed.GroupBy(price => price.ProductCode!))
+            {
+                await EnqueueStorePriceHqSyncAsync(
+                    group.Key,
+                    group.Select(price => price.StoreCode),
+                    new[] { ProductMaintenanceHqFieldMasks.StoreRetailPrice },
+                    updatedBy,
+                    WarehouseBatchUpdateHqSource
+                );
+            }
+        }
     }
 }

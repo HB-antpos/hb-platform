@@ -1,4 +1,5 @@
 using BlazorApp.Api.Interfaces.React;
+using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using SqlSugar;
@@ -28,7 +29,7 @@ public sealed class WarehouseStorePriceHqSyncEnqueuer : IWarehouseStorePriceHqSy
     private bool IsHqSyncEnabled =>
         _configuration.GetValue("StorePriceUpdateTasks:SyncToHq", true);
 
-    public async Task EnqueueAsync(
+    public async Task<ProductHqSyncOperationStatusDto?> EnqueueAsync(
         ISqlSugarClient transactionDb,
         string productCode,
         IEnumerable<string?> storeCodes,
@@ -41,7 +42,7 @@ public sealed class WarehouseStorePriceHqSyncEnqueuer : IWarehouseStorePriceHqSy
         ArgumentNullException.ThrowIfNull(transactionDb);
         if (!IsHqSyncEnabled || string.IsNullOrWhiteSpace(productCode))
         {
-            return;
+            return null;
         }
 
         var candidates = storeCodes
@@ -51,7 +52,7 @@ public sealed class WarehouseStorePriceHqSyncEnqueuer : IWarehouseStorePriceHqSy
             .ToList();
         if (candidates.Count == 0)
         {
-            return;
+            return null;
         }
 
         // HQ 只有启用分店；HBweb 里停用的 20xx 系列分店不在 HQ 分店表中。
@@ -70,7 +71,7 @@ public sealed class WarehouseStorePriceHqSyncEnqueuer : IWarehouseStorePriceHqSy
             .ToList();
         if (activeStoreCodes.Count == 0)
         {
-            return;
+            return null;
         }
 
         // outbox 要求「用户」与「设备」二选一：后台任务等没有登录用户的入口用系统标识兜底。
@@ -79,7 +80,7 @@ public sealed class WarehouseStorePriceHqSyncEnqueuer : IWarehouseStorePriceHqSy
 
         // 入队失败（ProductMaintenanceHqEnqueueException）不吞掉：它跑在调用方事务内，
         // 抛出后价格改写一并回滚，避免 HBweb 改了价而 HQ 永远收不到。
-        await _writer.EnqueueAsync(
+        return await _writer.EnqueueAsync(
             transactionDb,
             new ProductMaintenanceHqMutationRequest
             {

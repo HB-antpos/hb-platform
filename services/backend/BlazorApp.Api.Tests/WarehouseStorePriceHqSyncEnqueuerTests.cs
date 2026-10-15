@@ -12,8 +12,8 @@ using Xunit;
 namespace BlazorApp.Api.Tests;
 
 /// <summary>
-/// 仓库改价后「分店价 → HQ」入队器：重点验证它只带 HQ 里存在的启用分店、
-/// 兜底请求人、遵守开关，并且入队失败不被吞掉（调用方依赖异常来回滚改价）。
+/// 「分店价 → HQ」入队器：重点验证它只带 HQ 里存在的启用分店、
+/// 兜底请求人、遵守开关、把 outbox 操作号返回给调用方，并且入队失败不被吞掉（调用方依赖异常来回滚）。
 /// </summary>
 public sealed class WarehouseStorePriceHqSyncEnqueuerTests : IDisposable
 {
@@ -166,6 +166,29 @@ public sealed class WarehouseStorePriceHqSyncEnqueuerTests : IDisposable
     }
 
     [Fact]
+    public async Task 入队成功_返回outbox操作号_供调用方记到价格任务上()
+    {
+        await SeedStoreAsync("1005", isActive: true, isDeleted: false);
+        var (enqueuer, _) = CreateEnqueuer(userGuid: "user-1");
+
+        var operation = await enqueuer.EnqueueAsync(_db, ProductCode, new[] { "1005" }, RetailMask, "admin", "unit-test");
+
+        Assert.Equal("op-from-writer", operation?.OperationId);
+    }
+
+    [Fact]
+    public async Task 没有可同步的分店或开关关闭_返回null()
+    {
+        await SeedStoreAsync("2001", isActive: false, isDeleted: false);
+        var (enqueuer, _) = CreateEnqueuer(userGuid: "user-1");
+        var (disabled, _) = CreateEnqueuer(userGuid: "user-1", syncToHq: false);
+        await SeedStoreAsync("1005", isActive: true, isDeleted: false);
+
+        Assert.Null(await enqueuer.EnqueueAsync(_db, ProductCode, new[] { "2001" }, RetailMask, "admin", "unit-test"));
+        Assert.Null(await disabled.EnqueueAsync(_db, ProductCode, new[] { "1005" }, RetailMask, "admin", "unit-test"));
+    }
+
+    [Fact]
     public async Task 入队失败_异常原样向上抛_由调用方回滚改价()
     {
         await SeedStoreAsync("1005", isActive: true, isDeleted: false);
@@ -204,7 +227,7 @@ public sealed class WarehouseStorePriceHqSyncEnqueuerTests : IDisposable
             .Callback<ISqlSugarClient, ProductMaintenanceHqMutationRequest, CancellationToken>(
                 (_, request, _) => captured.Add(request)
             )
-            .ReturnsAsync(new ProductHqSyncOperationStatusDto());
+            .ReturnsAsync(new ProductHqSyncOperationStatusDto { OperationId = "op-from-writer" });
         return (CreateEnqueuer(writer.Object, userGuid, syncToHq), captured);
     }
 

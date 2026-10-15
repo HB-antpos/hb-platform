@@ -329,6 +329,169 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
         Assert.False(second.HqSyncEnabled);
     }
 
+    private sealed class RecordingHqEnqueuer : IWarehouseStorePriceHqSyncEnqueuer
+    {
+        public List<(string ProductCode, List<string> StoreCodes, List<string> FieldMask, string Source, bool InTransaction)> Calls { get; } = new();
+        public Exception? ThrowOnEnqueue { get; set; }
+
+        public Task<ProductHqSyncOperationStatusDto?> EnqueueAsync(
+            ISqlSugarClient transactionDb,
+            string productCode,
+            IEnumerable<string?> storeCodes,
+            IReadOnlyCollection<string> fieldMask,
+            string updatedBy,
+            string source,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add((
+                productCode,
+                storeCodes.Where(code => code != null).Select(code => code!).ToList(),
+                fieldMask.ToList(),
+                source,
+                transactionDb.Ado.Transaction != null));
+            if (ThrowOnEnqueue != null)
+            {
+                throw ThrowOnEnqueue;
+            }
+            return Task.FromResult<ProductHqSyncOperationStatusDto?>(
+                new ProductHqSyncOperationStatusDto { OperationId = $"label-op-{Calls.Count}" });
+        }
+    }
+
+    /// <summary>仓库改价后 1001 / 1002 各有一条待办任务；把 1001 的价改成一致，使其成为「待换标签」。</summary>
+    private async Task<(long LabelTaskId, long OtherTaskId)> PrepareLabelOnlyTaskForStore1001Async(StorePriceUpdateTaskService service)
+    {
+        await SetWarehouseRetailAsync(12m);
+        await service.OnWarehousePriceChangedAsync(new[] { ProductCode }, new PriceTaskInitiator("张伟", "WarehouseProducts"));
+        await SetStoreRetailAsync("1001", 12m);
+        await service.ReconcilePendingAsync("1001");
+        var labelId = (await _db.Queryable<StorePriceUpdateTask>().Where(t => t.StoreCode == "1001").SingleAsync()).Id;
+        var otherId = (await _db.Queryable<StorePriceUpdateTask>().Where(t => t.StoreCode == "1002").SingleAsync()).Id;
+        return (labelId, otherId);
+    }
+
+    [Fact]
+    public async Task 标记换标签完成时才把该分店商品同步HQ_未执行的分店不入队()
+    {
+        var enqueuer = new RecordingHqEnqueuer();
+        var service = CreateService(enqueuer);
+        var (labelTaskId, otherTaskId) = await PrepareLabelOnlyTaskForStore1001Async(service);
+
+        var marked = await service.MarkLabelsAsync(
+            new MarkStorePriceUpdateTaskLabelsRequestDto { StoreCode = "1001", TaskIds = { labelTaskId } }, "李四");
+
+        Assert.True(Assert.Single(marked.Items).Success);
+        Assert.Equal(1, marked.HqSyncSubmittedCount);
+        var call = Assert.Single(enqueuer.Calls);
+        Assert.Equal(ProductCode, call.ProductCode);
+        Assert.Equal(new[] { "1001" }, call.StoreCodes);
+        Assert.Contains(ProductMaintenanceHqFieldMasks.StoreRetailPrice, call.FieldMask);
+        Assert.Contains(ProductMaintenanceHqFieldMasks.StoreDiscountRate, call.FieldMask);
+        Assert.Equal("price-task-label-done", call.Source);
+        Assert.True(call.InTransaction, "入队必须与标记完成同事务");
+
+        var done = await _db.Queryable<StorePriceUpdateTask>().SingleAsync(t => t.Id == labelTaskId);
+        Assert.Equal(StorePriceUpdateTaskStatuses.Completed, done.Status);
+        Assert.Equal("label-op-1", done.HqSyncOperationKey);
+        // 1002 的任务没人执行：保持待办，也没有任何 HQ 入队。
+        var untouched = await _db.Queryable<StorePriceUpdateTask>().SingleAsync(t => t.Id == otherTaskId);
+        Assert.Equal(StorePriceUpdateTaskStatuses.Pending, untouched.Status);
+        Assert.Null(untouched.HqSyncOperationKey);
+    }
+
+    [Fact]
+    public async Task 标记换标签时入队失败_任务保持待办并提示重试()
+    {
+        var enqueuer = new RecordingHqEnqueuer { ThrowOnEnqueue = new InvalidOperationException("outbox 不可用") };
+        var service = CreateService(enqueuer);
+        var (labelTaskId, _) = await PrepareLabelOnlyTaskForStore1001Async(service);
+
+        var marked = await service.MarkLabelsAsync(
+            new MarkStorePriceUpdateTaskLabelsRequestDto { StoreCode = "1001", TaskIds = { labelTaskId } }, "李四");
+
+        var item = Assert.Single(marked.Items);
+        Assert.False(item.Success);
+        Assert.Equal(StorePriceUpdateTaskResultCodes.Failed, item.Code);
+        var task = await _db.Queryable<StorePriceUpdateTask>().SingleAsync(t => t.Id == labelTaskId);
+        Assert.Equal(StorePriceUpdateTaskStatuses.Pending, task.Status);
+        Assert.Null(task.CompletionMode);
+        Assert.Null(task.HqSyncOperationKey);
+    }
+
+    [Fact]
+    public async Task 总部同步开关关闭_标记换标签照常完成但不入队()
+    {
+        _settings["StorePriceUpdateTasks:SyncToHq"] = "false";
+        var enqueuer = new RecordingHqEnqueuer();
+        var service = CreateService(enqueuer);
+        var (labelTaskId, _) = await PrepareLabelOnlyTaskForStore1001Async(service);
+
+        var marked = await service.MarkLabelsAsync(
+            new MarkStorePriceUpdateTaskLabelsRequestDto { StoreCode = "1001", TaskIds = { labelTaskId } }, "李四");
+
+        Assert.True(Assert.Single(marked.Items).Success);
+        Assert.Empty(enqueuer.Calls);
+        Assert.Equal(0, marked.HqSyncSubmittedCount);
+    }
+
+    [Fact]
+    public async Task 通知页已改价且已入过HQ队列的任务_标记换标签不重复入队()
+    {
+        var enqueuer = new RecordingHqEnqueuer();
+        var service = CreateService(enqueuer);
+        var (labelTaskId, _) = await PrepareLabelOnlyTaskForStore1001Async(service);
+        await _db.Updateable<StorePriceUpdateTask>()
+            .SetColumns(t => new StorePriceUpdateTask { PriceAppliedAtUtc = DateTime.UtcNow, HqSyncOperationKey = "applied-op" })
+            .Where(t => t.Id == labelTaskId)
+            .ExecuteCommandAsync();
+
+        var marked = await service.MarkLabelsAsync(
+            new MarkStorePriceUpdateTaskLabelsRequestDto { StoreCode = "1001", TaskIds = { labelTaskId } }, "李四");
+
+        Assert.True(Assert.Single(marked.Items).Success);
+        Assert.Empty(enqueuer.Calls);
+        var task = await _db.Queryable<StorePriceUpdateTask>().SingleAsync(t => t.Id == labelTaskId);
+        Assert.Equal("applied-op", task.HqSyncOperationKey);
+    }
+
+    [Fact]
+    public async Task 已完成任务再打一张标签_只累加打印次数不再入队()
+    {
+        var enqueuer = new RecordingHqEnqueuer();
+        var service = CreateService(enqueuer);
+        var (labelTaskId, _) = await PrepareLabelOnlyTaskForStore1001Async(service);
+        var request = new MarkStorePriceUpdateTaskLabelsRequestDto { StoreCode = "1001", TaskIds = { labelTaskId } };
+
+        await service.MarkLabelsAsync(request, "李四");
+        await service.MarkLabelsAsync(request, "李四");
+
+        Assert.Single(enqueuer.Calls);
+        var task = await _db.Queryable<StorePriceUpdateTask>().SingleAsync(t => t.Id == labelTaskId);
+        Assert.Equal(2, task.LabelPrintCount);
+    }
+
+    [Fact]
+    public async Task 审计收口挂钩_取消生成价格任务时只记审计不建任务()
+    {
+        var taskService = CreateService();
+        var history = new WarehouseProductChangeHistoryService(
+            CreateContext(), NullLogger<WarehouseProductChangeHistoryService>.Instance,
+            Mock.Of<ICurrentUserService>(), taskService);
+
+        var before = await history.CaptureSnapshotsAsync(new[] { ProductCode });
+        await SetWarehouseRetailAsync(12m);
+        var after = await history.CaptureSnapshotsAsync(new[] { ProductCode });
+        var recorded = await history.RecordChangesAsync(
+            before, after,
+            new WarehouseProductChangeHistoryContextDto
+            {
+                Action = "Update", Source = "WarehouseProducts", ActorName = "张伟", SkipPriceTasks = true,
+            });
+
+        Assert.Equal(1, recorded); // 审计照记
+        Assert.Empty(await _db.Queryable<StorePriceUpdateTask>().ToListAsync());
+    }
+
     [Fact]
     public async Task 审计收口挂钩_记录零售价变更时同步生成任务_新建商品不生成()
     {
@@ -408,13 +571,20 @@ public sealed class StorePriceUpdateTaskServiceTests : IDisposable
 
     // ---------------------------------------------------------------------
 
-    private StorePriceUpdateTaskService CreateService()
+    private StorePriceUpdateTaskService CreateService(IWarehouseStorePriceHqSyncEnqueuer? hqEnqueuer = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(_settings).Build();
         var provider = new Mock<IServiceProvider>();
         provider
             .Setup(p => p.GetService(typeof(IStoreProductMaintenanceReactService)))
             .Returns(_maintenance.Object);
+        if (hqEnqueuer != null)
+        {
+            // 与生产一致：任务服务通过容器延迟取入队器（入队器依赖链会回到本服务，不能构造期注入）。
+            provider
+                .Setup(p => p.GetService(typeof(IWarehouseStorePriceHqSyncEnqueuer)))
+                .Returns(hqEnqueuer);
+        }
         StorePriceUpdateTaskService? service = null;
         // 与生产一致：审计服务依赖任务服务，任务服务再通过容器延迟取回审计服务。
         provider

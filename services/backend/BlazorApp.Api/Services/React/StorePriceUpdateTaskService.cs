@@ -20,6 +20,8 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
     private const int CodeBatchSize = 500;
     private const int MaxPageSize = 200;
     private const string HqSyncBlockedStatus = "blocked";
+    // 分店标记换标签 / 打印完成时入 HQ 同步队列的来源标识。
+    private const string PriceTaskLabelDoneHqSource = "price-task-label-done";
 
     private readonly ISqlSugarClient _db;
     private readonly ILogger<StorePriceUpdateTaskService> _logger;
@@ -1199,26 +1201,76 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
                 continue;
             }
 
-            Close(task, StorePriceUpdateTaskStatuses.Completed, now);
-            task.CompletionMode = printed
-                ? StorePriceUpdateTaskCompletionModes.Printed
-                : StorePriceUpdateTaskCompletionModes.MarkedReplaced;
-            task.CompletedBy = Truncate(actorDisplayName, 100);
-            if (printed)
+            // 价格变更任务口径：执行过（换标签 / 打印）的「分店 + 商品」才同步 HQ，未执行的分店 HQ 不变。
+            // 通知页已改过价的任务当时就入过 HQ 队列，这里不再重复入队。
+            // 入队与标记完成放同一事务：入队失败则任务保持待办、提示重试，不会出现「已完成但 HQ 永远不知道」。
+            var hqEnqueuer = IsHqSyncEnabled && !(task.PriceAppliedAtUtc.HasValue && !string.IsNullOrEmpty(task.HqSyncOperationKey))
+                ? _serviceProvider.GetService<IWarehouseStorePriceHqSyncEnqueuer>()
+                : null;
+            if (hqEnqueuer != null)
             {
-                task.LabelPrintCount += 1;
+                await _db.Ado.BeginTranAsync();
             }
-            await _db.Updateable(task)
-                .UpdateColumns(t => new
+            try
+            {
+                if (hqEnqueuer != null)
                 {
-                    t.Status,
-                    t.CompletionMode,
-                    t.CompletedBy,
-                    t.CompletedAtUtc,
-                    t.LabelPrintCount,
-                    t.UpdatedAtUtc,
-                })
-                .ExecuteCommandAsync();
+                    var operation = await hqEnqueuer.EnqueueAsync(
+                        _db,
+                        task.ProductCode,
+                        new[] { task.StoreCode },
+                        new[]
+                        {
+                            ProductMaintenanceHqFieldMasks.StoreRetailPrice,
+                            ProductMaintenanceHqFieldMasks.StoreDiscountRate,
+                        },
+                        actorDisplayName,
+                        PriceTaskLabelDoneHqSource,
+                        cancellationToken
+                    );
+                    if (!string.IsNullOrWhiteSpace(operation?.OperationId))
+                    {
+                        task.HqSyncOperationKey = Truncate(operation.OperationId, 200);
+                        result.HqSyncSubmittedCount += 1;
+                    }
+                }
+
+                Close(task, StorePriceUpdateTaskStatuses.Completed, now);
+                task.CompletionMode = printed
+                    ? StorePriceUpdateTaskCompletionModes.Printed
+                    : StorePriceUpdateTaskCompletionModes.MarkedReplaced;
+                task.CompletedBy = Truncate(actorDisplayName, 100);
+                if (printed)
+                {
+                    task.LabelPrintCount += 1;
+                }
+                await _db.Updateable(task)
+                    .UpdateColumns(t => new
+                    {
+                        t.Status,
+                        t.CompletionMode,
+                        t.CompletedBy,
+                        t.CompletedAtUtc,
+                        t.LabelPrintCount,
+                        t.UpdatedAtUtc,
+                        t.HqSyncOperationKey,
+                    })
+                    .ExecuteCommandAsync();
+                if (hqEnqueuer != null)
+                {
+                    await _db.Ado.CommitTranAsync();
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (hqEnqueuer != null)
+                {
+                    await _db.Ado.RollbackTranAsync();
+                }
+                _logger.LogError(ex, "标记换标签时同步 HQ 失败: TaskId={TaskId}", id);
+                result.Items.Add(Fail(id, StorePriceUpdateTaskResultCodes.Failed, "同步总部 HQ 失败，请稍后重试"));
+                continue;
+            }
             result.Items.Add(new StorePriceUpdateTaskItemResultDto { TaskId = id, Success = true });
         }
 

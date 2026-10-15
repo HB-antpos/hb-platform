@@ -39,9 +39,10 @@ internal abstract class ProductWarehouseSliceBase
     protected const int PickingLocationType = 1;
     protected const string SystemUpdatedBy = "System";
     protected const string MobileWarehousePricePatchUpdatedBy = "MobileWarehousePricePatch";
-    // HQ 同步 outbox 的来源标识：区分「Web 完整编辑」与「单字段改价（Web PATCH / 移动端仓库维护）」。
+    // HQ 同步 outbox 的来源标识：区分「Web 完整编辑」「单字段改价（Web PATCH / 移动端仓库维护）」与「批量修改」。
     protected const string WarehouseFullUpdateHqSource = "warehouse-product-full-update";
     protected const string WarehousePricePatchHqSource = "warehouse-product-price-patch";
+    protected const string WarehouseBatchUpdateHqSource = "warehouse-product-batch-update";
 
     protected readonly SqlSugarContext _context;
     // Feature 仅依赖抽象日志接口，禁止反向依赖 React 兼容门面类型。
@@ -239,7 +240,9 @@ internal abstract class ProductWarehouseSliceBase
         string actorName,
         Guid? batchGuid = null,
         string? sourceReference = null,
-        string? actorUserGuid = null
+        string? actorUserGuid = null,
+        // 操作人取消勾选「生成价格任务」时为 true：本次改动不触发分店价格更新任务。
+        bool skipPriceTasks = false
     )
     {
         var normalizedCodes = productCodes
@@ -264,6 +267,7 @@ internal abstract class ProductWarehouseSliceBase
                 BatchGuid = batchGuid,
                 ActorUserGuid = actorUserGuid,
                 ActorName = ResolveUpdatedBy(actorName),
+                SkipPriceTasks = skipPriceTasks,
             }
         );
     }
@@ -274,10 +278,11 @@ internal abstract class ProductWarehouseSliceBase
     /// </summary>
     protected async Task RecordStorePriceOverwritesAsync(
         IReadOnlyCollection<StorePriceOverwrite> overwrites,
-        string updatedBy
+        string updatedBy,
+        bool generateTasks = true
     )
     {
-        if (_priceTaskService == null || overwrites.Count == 0)
+        if (!generateTasks || _priceTaskService == null || overwrites.Count == 0)
         {
             return;
         }
@@ -300,9 +305,12 @@ internal abstract class ProductWarehouseSliceBase
         decimal? purchasePrice,
         decimal? retailPrice,
         DateTime now,
-        string updatedBy
+        string updatedBy,
+        // 仅对零售价覆盖生效：不生成任务就不登记待换标签；不生成任务又直接改了分店价则当下同步 HQ。
+        WarehousePriceSyncPolicy? policy = null
     )
     {
+        var effectivePolicy = policy ?? WarehousePriceSyncPolicy.Default;
         if (string.IsNullOrWhiteSpace(product.ProductCode))
         {
             return;
@@ -381,7 +389,11 @@ internal abstract class ProductWarehouseSliceBase
                 update = update.SetColumns(price => price.StoreRetailPriceValue == retailPrice);
             }
             await update.ExecuteCommandAsync();
-            await RecordStorePriceOverwritesAsync(overwrittenPrices, updatedBy);
+            await RecordStorePriceOverwritesAsync(
+                overwrittenPrices,
+                updatedBy,
+                effectivePolicy.GenerateTasks
+            );
         }
 
         var insertPrices = activeStoreCodes
@@ -412,22 +424,18 @@ internal abstract class ProductWarehouseSliceBase
             await _context.Db.Insertable(insertPrices).ExecuteCommandAsync();
         }
 
-        // 本方法覆盖/补建了全部启用分店的价格，HQ 里这些分店的价格也要跟着变（同事务入队，由 outbox 异步写 HQ）。
-        var hqFieldMask = new List<string>();
-        if (purchasePrice.HasValue)
-        {
-            hqFieldMask.Add(ProductMaintenanceHqFieldMasks.StorePurchasePrice);
-        }
-        if (retailPrice.HasValue)
-        {
-            hqFieldMask.Add(ProductMaintenanceHqFieldMasks.StoreRetailPrice);
-        }
-        if (hqFieldMask.Count > 0 && (existingPrices.Any() || insertPrices.Any()))
+        // 只有「直接改了分店零售价、又不生成价格任务」才需要在改价当下同步 HQ：
+        // 生成任务时 HQ 随分店店员执行任务（换标签 / 改价）再同步，未执行的分店 HQ 保持不变。
+        if (
+            retailPrice.HasValue
+            && effectivePolicy.ShouldSyncHqImmediately
+            && (existingPrices.Any() || insertPrices.Any())
+        )
         {
             await EnqueueStorePriceHqSyncAsync(
                 product.ProductCode,
                 activeStoreCodes,
-                hqFieldMask,
+                new[] { ProductMaintenanceHqFieldMasks.StoreRetailPrice },
                 updatedBy,
                 WarehousePricePatchHqSource
             );

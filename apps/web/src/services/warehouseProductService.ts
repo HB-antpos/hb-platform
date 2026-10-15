@@ -303,13 +303,26 @@ export interface UpdateWarehouseProductFullPayload {
   warehouseCategoryGUID?: string
   supplierCode?: string
   localSupplierCode?: string
+  /** 同步分店零售价（后端不传 = true）；只在本次保存确实改了零售价时才应传。 */
+  syncStoreRetailPrices?: boolean
+  /** 生成价格任务（后端不传 = true）；只在本次保存确实改了零售价时才应传。 */
+  generateTasks?: boolean
 }
 
+/** 仓库改零售价时由操作人决定的两个开关；字段不传 = 后端按默认（都为 true）处理。 */
+export interface WarehouseRetailPriceSyncOptions {
+  /** 勾选 = 后端直接把各分店零售价改成新价并生成「待换标签」任务；不勾 = 不动分店价，分店收到「改价格」任务。 */
+  syncStoreRetailPrices?: boolean
+  /** 勾选 = 给分店生成价格更新任务；不勾 = 不通知分店。 */
+  generateTasks?: boolean
+}
+
+// 同步分店价 / 生成任务两个开关只对零售价（oemPrice）补丁有意义，其它补丁在类型上就禁止携带。
 export type PatchWarehouseProductPayload =
-  | { minOrderQuantity: number; domesticPrice?: never; importPrice?: never; oemPrice?: never }
-  | { minOrderQuantity?: never; domesticPrice: number; importPrice?: never; oemPrice?: never }
-  | { minOrderQuantity?: never; domesticPrice?: never; importPrice: number; oemPrice?: never }
-  | { minOrderQuantity?: never; domesticPrice?: never; importPrice?: never; oemPrice: number }
+  | { minOrderQuantity: number; domesticPrice?: never; importPrice?: never; oemPrice?: never; syncStoreRetailPrices?: never; generateTasks?: never }
+  | { minOrderQuantity?: never; domesticPrice: number; importPrice?: never; oemPrice?: never; syncStoreRetailPrices?: never; generateTasks?: never }
+  | { minOrderQuantity?: never; domesticPrice?: never; importPrice: number; oemPrice?: never; syncStoreRetailPrices?: never; generateTasks?: never }
+  | ({ minOrderQuantity?: never; domesticPrice?: never; importPrice?: never; oemPrice: number } & WarehouseRetailPriceSyncOptions)
 
 export interface BatchToggleWarehouseProductsActivePayload {
   productCodes: string[]
@@ -398,7 +411,7 @@ export interface WarehouseProductBatchUpdateItem {
   IsActive?: boolean
 }
 
-export interface WarehouseProductBatchUpdateOptions {
+export interface WarehouseProductBatchUpdateOptions extends WarehouseRetailPriceSyncOptions {
   syncStorePurchasePrice?: boolean
   /** 开启后按货号批量生成本地商品图片地址（Product.ProductImage）。 */
   generateImageUrls?: boolean
@@ -916,6 +929,9 @@ export async function batchUpdateWarehouseProducts(
     data: {
       Items: items,
       ...(options.syncStorePurchasePrice === undefined ? {} : { SyncStorePurchasePrice: options.syncStorePurchasePrice }),
+      // 零售价同步开关与 SyncStorePurchasePrice 同样「未传不发」，由后端按默认值（都为 true）处理。
+      ...(options.syncStoreRetailPrices === undefined ? {} : { SyncStoreRetailPrices: options.syncStoreRetailPrices }),
+      ...(options.generateTasks === undefined ? {} : { GenerateTasks: options.generateTasks }),
       ...(options.generateImageUrls === undefined ? {} : { GenerateImageUrls: options.generateImageUrls }),
       ...(options.imageBaseUrl === undefined ? {} : { ImageBaseUrl: options.imageBaseUrl }),
       ...(options.syncImageToHq === undefined ? {} : { SyncImageToHq: options.syncImageToHq }),
@@ -962,6 +978,9 @@ export async function createWarehouseProductBatchUpdateJob(
     {
       Items: items,
       ...(options.syncStorePurchasePrice === undefined ? {} : { SyncStorePurchasePrice: options.syncStorePurchasePrice }),
+      // 零售价同步开关与 SyncStorePurchasePrice 同样「未传不发」，由后端按默认值（都为 true）处理。
+      ...(options.syncStoreRetailPrices === undefined ? {} : { SyncStoreRetailPrices: options.syncStoreRetailPrices }),
+      ...(options.generateTasks === undefined ? {} : { GenerateTasks: options.generateTasks }),
       ...(options.generateImageUrls === undefined ? {} : { GenerateImageUrls: options.generateImageUrls }),
       ...(options.imageBaseUrl === undefined ? {} : { ImageBaseUrl: options.imageBaseUrl }),
       ...(options.syncImageToHq === undefined ? {} : { SyncImageToHq: options.syncImageToHq }),
@@ -1135,6 +1154,9 @@ export async function updateWarehouseProductFull(
       ImportPrice: payload.importPrice,
       IsActive: payload.isActive,
       ...(payload.supplyNotice === undefined ? {} : { SupplyNotice: payload.supplyNotice }),
+      // 两个开关只在调用方明确传入（本次保存确实改了零售价）时才随请求发送，其它保存保持原请求体。
+      ...(payload.syncStoreRetailPrices === undefined ? {} : { SyncStoreRetailPrices: payload.syncStoreRetailPrices }),
+      ...(payload.generateTasks === undefined ? {} : { GenerateTasks: payload.generateTasks }),
       ProductImage: payload.productImage,
       ProductType: payload.productType,
       MiddlePackQuantity: payload.middlePackQuantity,
@@ -1156,6 +1178,13 @@ export async function patchWarehouseProduct(
     ...(payload.domesticPrice !== undefined ? { DomesticPrice: payload.domesticPrice } : {}),
     ...(payload.importPrice !== undefined ? { ImportPrice: payload.importPrice } : {}),
     ...(payload.oemPrice !== undefined ? { OEMPrice: payload.oemPrice } : {}),
+    // 开关只跟零售价补丁一起发送；类型上其它补丁已禁止携带，这里再按 oemPrice 守一层。
+    ...(payload.oemPrice !== undefined && payload.syncStoreRetailPrices !== undefined
+      ? { SyncStoreRetailPrices: payload.syncStoreRetailPrices }
+      : {}),
+    ...(payload.oemPrice !== undefined && payload.generateTasks !== undefined
+      ? { GenerateTasks: payload.generateTasks }
+      : {}),
   }, { onResponse: requestOptions.onResponse })
 }
 
