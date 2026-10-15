@@ -89,7 +89,7 @@ assert.equal(viewOnly.totalPending, 0, "全是只能查看的分店：没有要�
 assert.equal(viewOnly.reportsLocked, false);
 assert.equal(viewOnly.rows.length, 1, "价格页的分店条仍能看到这家分店的数量");
 
-// ---- 管理员不豁免：管理分店 = 他可见的全部分店 ----
+// ---- 管理员：管理分店 = 他可见的全部分店，弹窗 / 角标覆盖它们，但不锁报表 ----
 const admin = buildPriceTaskOverview({
   ...base,
   isAdmin: true,
@@ -97,7 +97,8 @@ const admin = buildPriceTaskOverview({
 });
 assert.deepEqual(admin.manageableStoreCodes, ["A", "B", "C"]);
 assert.deepEqual(admin.managedRows.map((item) => item.storeCode), ["B"], "管理员的管理分店 = 可见全部，汇总里有哪家就列哪家");
-assert.equal(admin.reportsLocked, true, "管理员不豁免：B 店超期也会锁");
+assert.equal(admin.manageableOverdueCount, 2, "超期数照常统计（用于红色超期标签），但不用来锁");
+assert.equal(admin.reportsLocked, false, "管理员弹提醒但不锁报表（用户 10-16 决定）");
 
 // ---- 仓库管理员：关联分店全算管理分店（弹窗、角标要覆盖它们），但不锁报表 ----
 // 他们关联的多是仓库（isPrimary=false），按店长口径会一家管理分店都没有、永远收不到提醒。
@@ -143,14 +144,15 @@ const warehouseOnlyAsStoreManager = buildPriceTaskOverview({
 });
 assert.equal(warehouseOnlyAsStoreManager.totalPending, 0, "对照：不是仓库管理员时没有管理分店 → 不提醒");
 
-// 既是管理员又是仓库管理员：管理员不豁免，照常锁
+// 既是管理员又是仓库管理员：弹提醒（管理分店口径），同样不锁
 const adminAndWarehouseManager = buildPriceTaskOverview({
   ...base,
   isAdmin: true,
   isWarehouseManager: true,
   summary: summary([row("B", { pendingLabelOnlyCount: 2, overdueCount: 2 })]),
 });
-assert.equal(adminAndWarehouseManager.reportsLocked, true, "管理员不豁免：同时是仓库管理员也照常锁");
+assert.equal(adminAndWarehouseManager.totalPending, 2, "既是管理员又是仓库管理员：照常收到提醒");
+assert.equal(adminAndWarehouseManager.reportsLocked, false, "既是管理员又是仓库管理员：弹提醒但不锁报表");
 
 // ---- 设备（PDA）：没有报表入口，永不锁定；管理分店 = 绑定分店 ----
 const bound: Store = { storeCode: "A", storeName: "Store A" };

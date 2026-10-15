@@ -29,8 +29,9 @@ export interface PriceTaskOverview {
   manageableOverdueCount: number;
   manageableStoreCodes: string[];
   /**
-   * 店长 / 管理员账号：管理分店有超期任务 → 不能进入报表。设备没有报表入口，永不锁定；
-   * 仓库管理员会弹提醒、会标红超期，但同样不锁（用户 10-16 决定）。
+   * 只有店长（既不是管理员、也不是仓库管理员）：管理分店有超期任务 → 不能进入报表。
+   * 管理员、仓库管理员（含两者兼任）会弹提醒、会标红超期，但**不锁**；
+   * 设备没有报表入口，永不锁定（用户 10-16 决定）。
    */
   reportsLocked: boolean;
   /** 管理分店里超期最多的一家，被锁后跳转到价格和标签时默认选中它。 */
@@ -59,7 +60,7 @@ export interface PriceTaskOverviewInput {
   /**
    * 仓库管理员（WarehouseManager / 仓库经理 / 仓库管理员 …）。他们关联的多是仓库、isPrimary 为 false，
    * 按店长口径会一家管理分店都没有、永远收不到提醒。用户 10-16 决定：按管理员口径提醒
-   * （关联分店全算管理分店），但**不锁报表**。同时也是管理员的账号仍按管理员处理（管理员不豁免）。
+   * （关联分店全算管理分店），但**不锁报表**；管理员、仓库管理员、两者兼任都一样：弹窗、不锁。
    */
   isWarehouseManager?: boolean;
 }
@@ -85,8 +86,9 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
     deviceBoundStore: input.deviceBoundStore,
     isAdmin: input.isAdmin || Boolean(input.isWarehouseManager),
   }).map((store) => store.storeCode);
-  // 弹窗范围和锁定范围是两件事：仓库管理员要被提醒，但不被锁报表；既是管理员又是仓库管理员的，管理员不豁免。
-  const reportsLockExempt = Boolean(input.isWarehouseManager) && !input.isAdmin;
+  // 弹窗范围和锁定范围是两件事：管理员、仓库管理员（含两者兼任）都要被提醒，但都不被锁报表；
+  // 只有店长口径（既不是管理员也不是仓库管理员）才锁。设备由下面 reportsLocked 里的 isDeviceMode 排除。
+  const reportsLockExempt = input.isAdmin || Boolean(input.isWarehouseManager);
   const manageable = new Set(manageableStoreCodes);
 
   const manageableRows = rows.filter((row) => manageable.has(row.storeCode));

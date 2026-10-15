@@ -151,6 +151,30 @@ assert.deepEqual(
   "没有锁定：主按钮是「去处理」，不是「去处理超期任务」"
 );
 
+// ---- 管理员（含兼任仓库管理员）：弹窗列出可见全部分店、超期标红，但不出现锁定框，主按钮也不是「去处理超期任务」 ----
+for (const isWarehouseManager of [false, true]) {
+  const adminVm = buildPriceReminderViewModel({
+    overview: buildPriceTaskOverview({
+      summary: {
+        stores: [row("A", { pendingPriceUpdateCount: 5, overdueCount: 2 }), row("B", { pendingLabelOnlyCount: 20, overdueCount: 9 })],
+        overdueDays: 7,
+      },
+      stores: managerStores,
+      isDeviceMode: false,
+      deviceBoundStore: null,
+      isAdmin: true,
+      isWarehouseManager,
+    }),
+    currentStoreCode: "A",
+    isDeviceMode: false,
+  });
+  assert.ok(adminVm);
+  assert.equal(adminVm.lock, null, "管理员不出现报表锁定框（用户 10-16 决定）");
+  assert.equal(adminVm.rows[0].storeCode, "B", "超期多的排前面");
+  assert.equal(adminVm.rows[0].overdueCount, 9, "超期红色标签保留，用来催办");
+  assert.equal(adminVm.primaryAction.kind, "default", "不锁：主按钮是「去处理」");
+}
+
 // ---- 单分店账号：用单店布局，标题口径按两类数量决定 ----
 function singleAccount(patch: Partial<StorePriceUpdateStoreSummary>) {
   return buildPriceReminderViewModel({

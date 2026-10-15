@@ -87,11 +87,15 @@ assert.match(
   /isAdmin: input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\)/,
   "仓库管理员：关联分店全算管理分店（弹窗 / 角标范围）"
 );
-assert.match(overviewSource, /reportsLockExempt/, "仓库管理员不锁报表");
+assert.match(
+  overviewSource,
+  /reportsLockExempt = input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\)/,
+  "管理员、仓库管理员（含两者兼任）都不锁报表，只有店长口径才锁"
+);
 assert.match(
   overviewSource,
   /reportsLocked: !input\.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0/,
-  "锁定判定要排除仓库管理员"
+  "锁定判定要排除管理员与仓库管理员"
 );
 
 console.log("price-updates/report-lock-source-contract.test.ts: ok");
