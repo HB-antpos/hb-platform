@@ -1521,6 +1521,10 @@
                             <Button Content="X" Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="X" Style="{StaticResource VoucherEntryKeyButtonStyle}" />
                             <Button Content="Y" Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="Y" Style="{StaticResource VoucherEntryKeyButtonStyle}" />
                             <Button Content="Z" Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="Z" Style="{StaticResource VoucherEntryKeyButtonStyle}" />
+                            <!-- 姓名常含连字符/撇号/缩写点（Mary-Anne、O'Brien、Jr.）；补满 6 列第 7 行。 -->
+                            <Button Content="-" Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="-" Style="{StaticResource VoucherEntryKeyButtonStyle}" />
+                            <Button Content="'" Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="'" Style="{StaticResource VoucherEntryKeyButtonStyle}" />
+                            <Button Content="." Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="." Style="{StaticResource VoucherEntryKeyButtonStyle}" />
                             <Button Command="{Binding InstallmentCustomerKeyCommand}" CommandParameter="Clear" Style="{StaticResource VoucherEntryKeyButtonStyle}">
                                 <materialDesign:PackIcon Kind="CloseCircleOutline" Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Button>

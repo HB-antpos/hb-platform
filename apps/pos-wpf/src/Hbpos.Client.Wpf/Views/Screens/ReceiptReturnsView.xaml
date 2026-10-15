@@ -426,6 +426,20 @@
 
                     <Grid Grid.Row="2" Margin="0,0,0,18">
                         <StackPanel Visibility="{Binding IsOpenItemDescriptionKeyboardVisible, Converter={StaticResource BoolToVis}}">
+                            <!-- 数字行：商品描述允许数字（如 ITEM 2），Back 上移到此行，与收银主界面屏幕键盘一致。 -->
+                            <UniformGrid Columns="11">
+                                <Button Content="1" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="1" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="2" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="2" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="3" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="3" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="4" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="4" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="5" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="5" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="6" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="6" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="7" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="7" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="8" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="8" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="9" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="9" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="0" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="0" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="{loc:Loc Backspace}" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="Back" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
+                            </UniformGrid>
                             <UniformGrid Columns="10">
                                 <Button Content="Q" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="Q" Style="{StaticResource PosStitchNumberButtonStyle}" />
                                 <Button Content="W" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="W" Style="{StaticResource PosStitchNumberButtonStyle}" />
@@ -460,13 +474,17 @@
                             </UniformGrid>
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="1.2*" />
+                                    <ColumnDefinition Width="1.3*" />
                                     <ColumnDefinition Width="3*" />
-                                    <ColumnDefinition Width="1.2*" />
+                                    <ColumnDefinition Width="1*" />
+                                    <ColumnDefinition Width="1*" />
+                                    <ColumnDefinition Width="1*" />
                                 </Grid.ColumnDefinitions>
                                 <Button Grid.Column="0" Content="{loc:Loc Clear}" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="Clear" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
                                 <Button Grid.Column="1" Content="{loc:Loc common.space}" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="Space" Style="{StaticResource PosStitchNumberButtonStyle}" />
-                                <Button Grid.Column="2" Content="{loc:Loc Backspace}" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="Back" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
+                                <Button Grid.Column="2" Content="-" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="-" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Grid.Column="3" Content="." Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="." Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Grid.Column="4" Content="/" Command="{Binding OpenItemKeyboardInputCommand}" CommandParameter="/" Style="{StaticResource PosStitchNumberButtonStyle}" />
                             </Grid>
                         </StackPanel>
 

@@ -425,6 +425,38 @@ public sealed class ReceiptReturnsViewModelTests
     }
 
     [Fact]
+    public void OpenItemKeyboardInputCommand_description_accepts_digits_and_hyphen_dot_slash_only()
+    {
+        var viewModel = new ReceiptReturnsViewModel(
+            new FakeReceiptReturnsWorkflowService(),
+            CreateSession(),
+            () => { });
+
+        viewModel.IsNoReceiptMode = true;
+        viewModel.OpenNoReceiptOpenItemDialogCommand.Execute(null);
+        viewModel.OpenItemKeyboardInputCommand.Execute("Clear");
+        foreach (var key in new[] { "T", "-", "S", "H", "I", "R", "T", "Space", "2", "/", "3", ".", "5" })
+        {
+            viewModel.OpenItemKeyboardInputCommand.Execute(key);
+        }
+
+        Assert.Equal("T-SHIRT 2/3.5", viewModel.OpenItemDisplayName);
+
+        // 键盘上没有的字符（如 # + 小写）仍被忽略，避免任意字符进入小票描述。
+        foreach (var key in new[] { "#", "+", "a", "AB" })
+        {
+            viewModel.OpenItemKeyboardInputCommand.Execute(key);
+        }
+
+        Assert.Equal("T-SHIRT 2/3.5", viewModel.OpenItemDisplayName);
+
+        viewModel.OpenItemKeyboardInputCommand.Execute("Back");
+        Assert.Equal("T-SHIRT 2/3.", viewModel.OpenItemDisplayName);
+        viewModel.OpenItemKeyboardInputCommand.Execute("Clear");
+        Assert.Empty(viewModel.OpenItemDisplayName);
+    }
+
+    [Fact]
     public void OpenItemKeyboardInputCommand_updates_amount_with_two_decimal_limit()
     {
         var viewModel = new ReceiptReturnsViewModel(
