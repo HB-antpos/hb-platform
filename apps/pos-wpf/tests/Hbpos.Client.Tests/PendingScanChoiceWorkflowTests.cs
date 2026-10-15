@@ -163,17 +163,25 @@ public sealed class PendingScanChoiceWorkflowTests
     }
 
     [Fact]
-    public void Manually_entered_conflicting_code_keeps_the_dropdown_and_does_not_queue()
+    public async Task Manually_entered_conflicting_code_is_queued_too_but_keyword_search_keeps_the_dropdown()
     {
         var fixture = CreateFixture();
 
         var manual = fixture.Service.ProcessScan(Session, ConflictA, preferExactLookup: false, source: "manual");
+        var manualAsync = await fixture.Service.ProcessScanAsync(Session, ConflictB, preferExactLookup: false, source: "manual");
 
-        // 手工输入回车时收银员正盯着下拉，沿用现有行为；只有扫码枪来源才进待选队列。
-        Assert.Equal("pos.status.multipleMatches", manual.StatusKey);
-        Assert.True(manual.MatchesPopupOpen);
-        Assert.False(manual.ScanConflictHandled);
-        Assert.Equal(0, fixture.Service.PendingChoices!.Count);
+        // 手工输入的码精确命中多个商品：和扫码枪一样记入待选，不选不消失（同步 / 异步两条路径都一样）。
+        Assert.Equal("pos.status.pendingChoiceQueued", manual.StatusKey);
+        Assert.Equal("pos.status.pendingChoiceQueued", manualAsync.StatusKey);
+        Assert.True(manual.ScanConflictHandled);
+        Assert.False(manual.MatchesPopupOpen);
+        Assert.Equal(2, fixture.Service.PendingChoices!.Count);
+
+        // 关键词模糊搜索（不是精确码冲突）是在浏览：沿用下拉，不入队。
+        var keyword = fixture.Service.ProcessScan(Session, "Plain", preferExactLookup: false, source: "manual");
+        Assert.Equal("pos.status.multipleMatches", keyword.StatusKey);
+        Assert.True(keyword.MatchesPopupOpen);
+        Assert.Equal(2, fixture.Service.PendingChoices!.Count);
     }
 
     [Fact]

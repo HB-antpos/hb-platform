@@ -163,9 +163,10 @@ public sealed class PosTerminalWorkflowServiceTests
             ? await service.ProcessScanAsync(Session, sharedCode, preferExactLookup: false, source: "manual")
             : service.ProcessScan(Session, sharedCode, preferExactLookup: false, source: "manual");
 
-        Assert.Equal("pos.status.multipleMatches", result.StatusKey);
-        Assert.True(result.MatchesPopupOpen);
-        var matches = Assert.IsAssignableFrom<IReadOnlyList<SellableItemDto>>(result.Matches);
+        // 手工输入的精确码冲突也记入待选队列（不选不消失），候选仍是每个商品各一次、不受搜索条数上限影响。
+        Assert.Equal("pos.status.pendingChoiceQueued", result.StatusKey);
+        Assert.False(result.MatchesPopupOpen);
+        var matches = Assert.Single(service.PendingChoices!.Snapshot()).Candidates;
         Assert.Equal(ownRows.Select(row => row.ProductCode), matches.Select(item => item.ProductCode).Order());
         Assert.All(matches, item => Assert.Equal(sharedCode, item.LookupCode));
         Assert.Empty(cart.Lines);

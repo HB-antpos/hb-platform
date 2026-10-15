@@ -292,7 +292,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             searchStopwatch.Stop();
             searchElapsedMs = searchStopwatch.ElapsedMilliseconds;
 
-            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId);
+            // 手工输入的码精确命中多个商品（码冲突）同样记入待选队列，不选不消失；关键词模糊搜索（非精确冲突）仍用下拉，那是在浏览。
+            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId, source, queueConflicts: hasDuplicateExactMatch);
             matchCount = matches.Count;
             autoAdded = result.ClearScanText;
         }
@@ -389,7 +390,8 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
         PosTerminalWorkflowResult result;
         using (_uiPriorityCoordinator.BeginUiOperation("process-scan"))
         {
-            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId);
+            // 手工输入的码精确命中多个商品（码冲突）同样记入待选队列，不选不消失；关键词模糊搜索（非精确冲突）仍用下拉，那是在浏览。
+            result = ApplyScanMatches(session, matches, submittedScanText, allowAutoAdd: !hasDuplicateExactMatch, traceId, source, queueConflicts: hasDuplicateExactMatch);
         }
 
         totalStopwatch.Stop();
