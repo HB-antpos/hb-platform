@@ -228,8 +228,6 @@
     "invalid": "Suggested discount must be between 0 and 100",
     "helper": "Empty = store discounts are not compared; 0 = explicitly no discount. Suggested discounts are never pushed automatically; stores confirm them in Price updates.",
     "saved": "Suggested discount saved",
-    "saveFailed": "Could not save the suggested discount",
-    "previewWhenSync": "Sync stores: {{message}}",
-    "previewWhenProductOnly": "Product only: {{message}}"
+    "saveFailed": "Could not save the suggested discount"
   }
 }

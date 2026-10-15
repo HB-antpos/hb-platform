@@ -178,13 +178,23 @@ interface RetailPriceNotificationPreviewProps {
   productCode: string;
   /** 待保存的新零售价（输入框原文）。 */
   retailPrice: string;
+  /** 确认弹窗里「同步分店零售价」开关的当前取值；缺省按默认值（开）处理。 */
+  syncStoreRetailPrices?: boolean;
+  /** 确认弹窗里「生成价格任务」开关的当前取值；缺省按默认值（开）处理。 */
+  generateTasks?: boolean;
 }
 
 /**
- * 仓库零售价保存前的预告。该页的零售价在确认弹窗里二选一（同步分店 / 仅改商品），
- * 所以两种选择的后果并列展示；受影响分店为 0 时不显示。
+ * 仓库零售价保存前的预告。确认弹窗有「同步分店零售价」与「生成价格任务」两个开关，
+ * 预告只展示当前选择的后果：生成价格任务关闭时不会通知任何分店，所以不显示；
+ * 开启时按是否同步分店价显示「自动更新 + 待换标签」或「需改价」，受影响分店为 0 时不显示。
  */
-export function RetailPriceNotificationPreview({ productCode, retailPrice }: RetailPriceNotificationPreviewProps) {
+export function RetailPriceNotificationPreview({
+  productCode,
+  retailPrice,
+  syncStoreRetailPrices = true,
+  generateTasks = true,
+}: RetailPriceNotificationPreviewProps) {
   const { t } = useAppTranslation("priceUpdates");
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const [preview, setPreview] = useState<PriceNotificationPreview | null>(null);
@@ -209,20 +219,15 @@ export function RetailPriceNotificationPreview({ productCode, retailPrice }: Ret
     };
   }, [isAuthenticated, productCode, retailPrice]);
 
-  const syncMessage = buildPriceNotificationPreviewMessage(preview, true, t);
-  const productOnlyMessage = buildPriceNotificationPreviewMessage(preview, false, t);
-  if (!syncMessage || !productOnlyMessage) {
+  // 不生成价格任务就不会通知分店，没有可预告的内容。
+  const message = generateTasks ? buildPriceNotificationPreviewMessage(preview, syncStoreRetailPrices, t) : null;
+  if (!message) {
     return null;
   }
 
   return (
     <View style={styles.previewBox}>
-      <Text variant="bodySmall" style={styles.previewText}>
-        {t("suggestedDiscount.previewWhenSync", { message: syncMessage })}
-      </Text>
-      <Text variant="bodySmall" style={styles.previewText}>
-        {t("suggestedDiscount.previewWhenProductOnly", { message: productOnlyMessage })}
-      </Text>
+      <Text variant="bodySmall" style={styles.previewText}>{message}</Text>
     </View>
   );
 }
