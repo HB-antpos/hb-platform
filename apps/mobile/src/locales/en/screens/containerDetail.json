@@ -201,6 +201,12 @@
     },
     "validationLine": "{{field}}: {{message}}"
   },
+  "retailSync": {
+    "storesLabel": "Sync branch retail prices",
+    "storesHelper": "On: set every active branch's retail price to the new price and notify branches to relabel. Off: branch prices stay unchanged and branches confirm the change themselves.",
+    "tasksLabel": "Generate price tasks",
+    "tasksHelper": "On: create price update tasks for branches. Off: branches are not notified (when syncing branch prices, HQ is synced immediately)."
+  },
   "bulk": {
     "title": "Bulk actions",
     "button": "Bulk actions",
