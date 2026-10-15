@@ -204,6 +204,8 @@
       "createProducts": "新建商品",
       "createAllPending": "新建全部新品 {{count}}",
       "executeOtherPending": "执行其余待执行 {{count}}",
+      "executeChecked": "执行勾选 ({{count}})",
+      "createChecked": "新建勾选新品 {{count}}",
       "createProductsConfirmTitle": "确认新建商品？",
       "createProductsConfirmContent": "将为 {{count}} 条明细新建商品，并为所有启用分店建立分店价。",
       "createProductsConfirmOk": "确认新建",

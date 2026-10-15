@@ -1026,6 +1026,16 @@ export default function InvoiceEditPage() {
     }),
     [details, deferredSearchText, priceFilter, productTypeFilter, productStatusFilter, barcodeStatusFilter, actionTypeFilter, rowActions, progressBucketFilter, specialProductFilter],
   )
+  // 有勾选时，进度区的执行按钮改为「执行勾选」：目标行只取勾选且当前可见的行（与 handleBatchExecute 口径一致），
+  // 并同样拆成「新建商品」与其余操作两组。
+  const checkedExecutionSplit = useMemo(
+    () => splitCreateProductDetailGuids(
+      constrainSelectedRowKeysToVisibleDetails(selectedRowKeys, filteredDetails).map(String),
+      details,
+      rowActions,
+    ),
+    [selectedRowKeys, filteredDetails, details, rowActions],
+  )
   const inlineNavigationDetails = useMemo(
     () =>
       buildInvoiceDetailInlineNavigationDetails(
@@ -4027,7 +4037,30 @@ export default function InvoiceEditPage() {
                   )
                 })}
               <span className="lsi-wb-spacer" />
-              {canRunGlobalLocalPurchaseBatchActions && pendingExecutionSplit.createGuids.length > 0 && (
+              {/* 有勾选商品：显示「执行勾选」，只执行勾选行；没有勾选才回到「执行全部待执行」。 */}
+              {canRunGlobalLocalPurchaseBatchActions && selectedCount > 0 && checkedExecutionSplit.createGuids.length > 0 && (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={executing ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                  disabled={executing}
+                  onClick={() => runAfterUnsavedGuard(() => handleBatchExecute(undefined, 'createProducts'))}
+                >
+                  {t('posAdmin.invoiceWorkbench.createChecked', { count: checkedExecutionSplit.createGuids.length })}
+                </Button>
+              )}
+              {canRunGlobalLocalPurchaseBatchActions && selectedCount > 0 && checkedExecutionSplit.otherGuids.length > 0 && (
+                <Button
+                  type={checkedExecutionSplit.createGuids.length > 0 ? 'default' : 'primary'}
+                  size="small"
+                  icon={executing ? <LoadingOutlined /> : <PlayCircleOutlined />}
+                  disabled={executing}
+                  onClick={() => runAfterUnsavedGuard(() => handleBatchExecute())}
+                >
+                  {t('posAdmin.invoiceWorkbench.executeChecked', { count: checkedExecutionSplit.otherGuids.length })}
+                </Button>
+              )}
+              {canRunGlobalLocalPurchaseBatchActions && selectedCount === 0 && pendingExecutionSplit.createGuids.length > 0 && (
                 <Button
                   type="primary"
                   size="small"
@@ -4038,7 +4071,7 @@ export default function InvoiceEditPage() {
                   {t('posAdmin.invoiceWorkbench.createAllPending', { count: pendingExecutionSplit.createGuids.length })}
                 </Button>
               )}
-              {canRunGlobalLocalPurchaseBatchActions && pendingExecutionSplit.otherGuids.length > 0 && (
+              {canRunGlobalLocalPurchaseBatchActions && selectedCount === 0 && pendingExecutionSplit.otherGuids.length > 0 && (
                 <Button
                   type={pendingExecutionSplit.createGuids.length > 0 ? 'default' : 'primary'}
                   size="small"
