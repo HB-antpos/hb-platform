@@ -180,7 +180,7 @@ export const PendingTaskCard = memo(function PendingTaskCard({
   return (
     <Card
       mode="outlined"
-      style={[styles.card, selected ? styles.cardSelected : null]}
+      style={[styles.card, task.isOverdue ? styles.cardOverdue : null, selected ? styles.cardSelected : null]}
       onPress={selecting ? () => onToggleSelected(task) : undefined}
       accessibilityLabel={title}
     >
@@ -199,13 +199,25 @@ export const PendingTaskCard = memo(function PendingTaskCard({
               <Text variant="titleSmall" style={styles.title} numberOfLines={selecting ? 1 : 2}>
                 {title}
               </Text>
-              <Tag
-                label={t(isPriceUpdate ? "kinds.priceUpdate" : "kinds.labelOnly")}
-                tone={isPriceUpdate ? "warning" : "brand"}
-              />
+              {/* 类型标签和超期标签纵向叠放：英文标签更长，并排会把商品名挤没。 */}
+              <View style={styles.tagColumn}>
+                <Tag
+                  label={t(isPriceUpdate ? "kinds.priceUpdate" : "kinds.labelOnly")}
+                  tone={isPriceUpdate ? "warning" : "brand"}
+                />
+                {task.isOverdue ? (
+                  <Tag label={t("card.overdueTag", { days: task.overdueByDays })} tone="danger" />
+                ) : null}
+              </View>
             </View>
-            <Text variant="bodySmall" style={styles.secondary} numberOfLines={1}>
-              {`${task.itemNumber || task.productCode} · ${t(`changedFields.${resolveChangedFieldsKind(task)}`)}`}
+            <Text
+              variant="bodySmall"
+              style={task.isOverdue ? styles.overdueMeta : styles.secondary}
+              numberOfLines={1}
+            >
+              {task.isOverdue
+                ? `${task.itemNumber || task.productCode} · ${t("card.waiting", { days: task.waitingDays })}`
+                : `${task.itemNumber || task.productCode} · ${t(`changedFields.${resolveChangedFieldsKind(task)}`)}`}
             </Text>
           </View>
         </View>
@@ -376,6 +388,9 @@ export const CompletedTaskCard = memo(function CompletedTaskCard({
 const styles = StyleSheet.create({
   card: { backgroundColor: HB_COLORS.white, borderColor: HB_COLORS.outlineMuted, borderRadius: HB_RADIUS.surface },
   cardSelected: { borderColor: HB_COLORS.brand, backgroundColor: "#F5F9FF" },
+  cardOverdue: { borderColor: "#FDA29B" },
+  tagColumn: { alignItems: "flex-end", gap: 4 },
+  overdueMeta: { color: HB_COLORS.danger, fontWeight: "600", fontVariant: ["tabular-nums"] },
   cardContent: { gap: HB_SPACING.xs, paddingVertical: HB_SPACING.sm },
   cardContentCompact: { gap: HB_SPACING.xs, paddingVertical: HB_SPACING.xs },
   topRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },

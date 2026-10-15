@@ -32,7 +32,7 @@
   "routes": {
     "productQuery": "商品查询",
     "productInsights": "商品进销查询",
-    "priceUpdates": "价格更新",
+    "priceUpdates": "价格和标签",
     "storeOrdering": "门店订货",
     "cart": "购物车",
     "orders": "HB订单",

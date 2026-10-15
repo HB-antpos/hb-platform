@@ -42,6 +42,14 @@ export interface StorePriceUpdateTask {
   initiatorReference: string | null;
   initiatedAtUtc: string;
   changeCount: number;
+  /** 任务首次生成的时间。超期从它起算：仓库再次改价只刷新 initiatedAtUtc，不会让任务重新计时。 */
+  firstInitiatedAtUtc: string;
+  /** 未完成任务已等待的整天数；已完成 / 已取消为 0。 */
+  waitingDays: number;
+  /** 未完成且已超过时限（默认 7 天）。 */
+  isOverdue: boolean;
+  /** 超出时限的天数（至少 1）；未超期为 0。 */
+  overdueByDays: number;
   priceAppliedBy: string | null;
   priceAppliedAtUtc: string | null;
   completionMode: PriceUpdateCompletionMode | null;
@@ -61,13 +69,35 @@ export interface StorePriceUpdateTaskPage {
   pendingPriceUpdateCount: number;
   pendingLabelOnlyCount: number;
   completedCount: number;
+  /** 当前分店未完成任务里已超期的数量。 */
+  pendingOverdueCount: number;
+  /** 超期时限（天），由后端配置决定，用于写「应在 N 天内完成」。 */
+  overdueDays: number;
   hqSyncEnabled: boolean;
+}
+
+/** 「按分店汇总」的一行：该分店未完成数量与其中超期的数量。 */
+export interface StorePriceUpdateStoreSummary {
+  storeCode: string;
+  storeName: string;
+  pendingPriceUpdateCount: number;
+  pendingLabelOnlyCount: number;
+  pendingCount: number;
+  overdueCount: number;
+}
+
+export interface StorePriceUpdateSummary {
+  /** 当前账号 / 设备可访问的全部启用分店，没有任务的分店也在其中（各计数为 0）。 */
+  stores: StorePriceUpdateStoreSummary[];
+  overdueDays: number;
 }
 
 export interface PriceUpdateTaskQuery {
   storeCode: string;
   status: "Pending" | "Completed";
   kind?: PriceUpdateTaskKind;
+  /** 只看未完成且已超期的任务；后端按首次发起时间从早到晚排序。 */
+  overdueOnly?: boolean;
   keyword?: string;
   hqSyncFailedOnly?: boolean;
   page: number;

@@ -28,8 +28,8 @@ import { FACE_HIT_NOTIFICATION_TYPE, faceHitUnreadQueryKey } from "@/modules/fac
 import { FACE_MATCH_PERMISSIONS } from "@/modules/face-match/constants";
 import { getUnreadCount } from "@/modules/notifications/api";
 import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
-import { getPriceUpdatePendingCount } from "@/modules/price-updates/api";
-import { priceUpdateCountQueryKey } from "@/modules/price-updates/query-keys";
+import { usePriceTaskOverview } from "@/modules/price-updates/use-price-task-overview";
+import { PriceReminderHost } from "@/modules/price-reminder/PriceReminderHost";
 import { canViewContainerNewProducts } from "@/modules/container-new-products/access";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "@/modules/container-new-products/api";
 import { countNewProductKinds } from "@/modules/container-new-products/summary";
@@ -432,18 +432,32 @@ export default function ShellLayout() {
     }),
     staleTime: 30_000,
   });
-  // 角标跟随当前分店：设备模式固定为绑定分店，账号模式取全局选中的分店。
+  // 设备模式固定为绑定分店，账号模式取全局选中的分店（HB新品等按当前分店查询的入口仍用它）。
   const priceUpdateStoreCode = isDeviceMode
     ? deviceSession?.storeCode ?? null
     : selectedStoreCode ?? null;
-  const pendingPriceUpdateQuery = useQuery({
-    queryKey: priceUpdateCountQueryKey(priceUpdateStoreCode),
-    enabled:
-      navigationReady
-      && Boolean(priceUpdateStoreCode)
-      && visibleRouteNames.has(PRICE_UPDATES_ROUTE),
-    queryFn: () => getPriceUpdatePendingCount(priceUpdateStoreCode!),
-    staleTime: 30_000,
+  // 价格和标签：一次按分店汇总，角标 = 名下全部分店的合计（不再只看当前分店），
+  // 同时算出「管理分店有超期 → 报表锁定」，经导航上下文分发给工作台、报表页和每小时提醒。
+  const accountStores = useCartStore((state) => state.userStores);
+  const deviceBoundStore = useMemo(
+    () =>
+      deviceSession?.storeCode
+        ? {
+            storeCode: deviceSession.storeCode,
+            storeName: deviceSession.storeName || deviceSession.storeCode,
+          }
+        : null,
+    [deviceSession?.storeCode, deviceSession?.storeName]
+  );
+  const { overview: priceTaskOverview, refresh: refreshPriceTasks } = usePriceTaskOverview({
+    enabled: navigationReady && visibleRouteNames.has(PRICE_UPDATES_ROUTE),
+    scopeKey: isDeviceMode
+      ? `device:${deviceSession?.hardwareId ?? ""}:${deviceSession?.storeCode ?? ""}`
+      : `account:${userGuid ?? ""}`,
+    stores: accountStores,
+    isDeviceMode,
+    deviceBoundStore,
+    isAdmin,
   });
   // HB新品角标与页面共用查询和缓存；清单一天内变化很少，5 分钟内回到工作台不重复拉取
   const hasNewProductsPermission = useAuthStore((state) => state.access.hasPermission);
@@ -599,7 +613,9 @@ export default function ShellLayout() {
         navigationErrorMessage,
         navigationLoading,
         pendingProfileReviewCount: pendingReviewQuery.data?.total ?? 0,
-        pendingPriceUpdateCount: pendingPriceUpdateQuery.data ?? 0,
+        pendingPriceUpdateCount: priceTaskOverview.totalPending,
+        priceTasks: priceTaskOverview,
+        refreshPriceTasks,
         newProductKindCount,
         faceHitUnreadCount: faceHitUnreadEnabled ? (faceHitUnreadQuery.data ?? 0) : 0,
         isDeviceMode,
@@ -616,6 +632,11 @@ export default function ShellLayout() {
           />
         </View>
         {shouldHidePrimaryTabBar(pathname) ? null : <PrimaryTabBar activeRouteName={currentRouteName} />}
+        {/* 每小时提醒：放在导航上下文里，随时读到最新的待办与超期数。iOS 审核态不提醒。 */}
+        <PriceReminderHost
+          suppressed={isIosReviewSession || iosReviewOfflineGuardActive}
+          isDeviceMode={isDeviceMode}
+        />
       </View>
     </AppNavigationAccessProvider>
   );
