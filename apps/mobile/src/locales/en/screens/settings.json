@@ -3,10 +3,10 @@
   "groups": {
     "app": "App settings",
     "printers": "Printers",
-    "devices": "Devices and connections",
-    "preferences": "Preferences and security",
+    "devices": "Devices & printing",
+    "preferences": "Preferences",
     "support": "App and support",
-    "account": "Account"
+    "account": "Account & security"
   },
   "overview": {
     "diagnostics": "Diagnostics",
@@ -28,7 +28,10 @@
     "aboutDescription": "Version, runtime information, and troubleshooting",
     "buildFooter": "Version {{version}} · {{channel}}",
     "dangerZone": "Danger zone",
-    "printerDetailsDescription": "Manage label and receipt printers separately. Bluetooth operations run one at a time."
+    "printerDetailsDescription": "Manage label and receipt printers separately. Bluetooth operations run one at a time.",
+    "connectionAllGood": "All good",
+    "connectionAttention": "{{count}} to review",
+    "currentDeviceSubtitle": "{{device}} · {{store}}"
   },
   "floatingLanguage": {
     "title": "Floating language button",
@@ -55,7 +58,11 @@
     "expandPersonalCode": "Tap to enlarge · View and print your code",
     "personalCodeBusy": "A personal code is printing. Wait for the current job to finish.",
     "changePassword": "Change password",
-    "changePasswordHelper": "Use a password only you know"
+    "changePasswordHelper": "Use a password only you know",
+    "viewProfile": "Profile",
+    "personalCodeLine": "Personal code {{code}}",
+    "notLoggedIn": "Not signed in",
+    "deviceModeShort": "Using device authorization"
   },
   "language": {
     "description": "Change the app display language and apply it immediately."
@@ -342,5 +349,15 @@
   },
   "messages": {
     "profileLoginRequired": "Sign in with an account before opening your profile."
+  },
+  "more": {
+    "title": "More settings",
+    "summary": "Updates · Server · Privacy · About & diagnostics",
+    "back": "Back",
+    "connectionGroup": "Connection",
+    "privacyGroup": "Privacy",
+    "dataRights": "Data rights",
+    "dataRightsExpand": "Show data rights details",
+    "dataRightsCollapse": "Hide data rights details"
   }
 }
