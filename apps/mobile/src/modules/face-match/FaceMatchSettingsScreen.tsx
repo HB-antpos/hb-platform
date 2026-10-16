@@ -119,7 +119,7 @@ export function SettingsPanel() {
             onNotify={notify}
           />
         ) : null}
-        {sections.cameras ? <CamerasSection storeCode={storeCode} onNotify={notify} /> : null}
+        {sections.cameras ? <CamerasSection storeCode={storeCode} stores={stores} onNotify={notify} /> : null}
       </ScrollView>
     );
   }

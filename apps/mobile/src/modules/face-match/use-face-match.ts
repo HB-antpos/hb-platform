@@ -9,11 +9,13 @@ import { useStores } from "@/modules/shop/use-stores";
 import { useAuthStore } from "@/store/auth-store";
 import { faceMatchApi } from "./api";
 import { markCaptureResultHitRead, markHitResultRead, mapPagesItems } from "./capture-logic";
+import { CAMERA_CAPTURE_PAGE_SIZE, nextCapturePage } from "./cameras-logic";
 import { PAGE_SIZE } from "./constants";
 import { mergePages, nextPageParam } from "./entries-logic";
 import { extractHttpStatus } from "./errors";
 import { writeFaceHitUnreadCount } from "./hit-unread";
 import type {
+  FaceCameraCapturePage,
   FaceCaptureResult,
   FaceCaptureResultQuery,
   FaceHitReadAllResult,
@@ -57,6 +59,7 @@ export const faceMatchKeys = {
     ["face-match", userGuid, "hit-summary", filters.storeCode ?? "all", filters.fromUtc ?? "", filters.toUtc ?? ""] as const,
   profile: (userGuid: string | null, storeCode: string | null) => ["face-match", userGuid, "profile", storeCode] as const,
   cameras: (userGuid: string | null) => ["face-match", userGuid, "cameras"] as const,
+  cameraCaptures: (userGuid: string | null, cameraId: string) => ["face-match", userGuid, "camera-captures", cameraId] as const,
   stores: (userGuid: string | null) => ["face-match", userGuid, "stores"] as const,
 };
 
@@ -238,6 +241,37 @@ export function useFaceProfile(storeCode: string | null, enabled: boolean) {
     staleTime: 0,
     retry: retryTransientOnly,
   });
+}
+
+/**
+ * 某台摄像头的最近抓拍（只有元数据，图片字节不经过这里）。按页累加，到页码上限后不再有「加载更多」。
+ * 打开抓拍弹框才启用；关闭（enabled=false）后缓存按默认时间回收。
+ */
+export function useFaceCameraCaptures(cameraId: string | null, enabled: boolean) {
+  const userGuid = useUserGuid();
+  const queryKey = faceMatchKeys.cameraCaptures(userGuid, cameraId ?? "");
+  const query = useInfiniteQuery({
+    queryKey,
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) => faceMatchApi.listCameraCaptures(cameraId!, pageParam, CAMERA_CAPTURE_PAGE_SIZE, signal),
+    getNextPageParam: nextCapturePage,
+    enabled: enabled && Boolean(cameraId),
+    staleTime: 0,
+    // 抓拍记录是生物识别相关的元数据：弹框关闭（没有观察者）就立刻丢缓存，重新打开从第 1 页开始，不会把缓存里的所有分页逐页重发。
+    gcTime: 0,
+    retry: retryTransientOnly,
+  });
+  // 刷新只重取第一页：先把缓存截到第一页，避免 refetch 把已滚过的（最多 100 页）逐页重发。
+  const queryClient = useQueryClient();
+  const { refetch } = query;
+  const refresh = useCallback(async () => {
+    queryClient.setQueryData<InfiniteData<FaceCameraCapturePage, number>>(queryKey, (data) =>
+      data ? { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) } : data,
+    );
+    await refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- queryKey 由 userGuid + cameraId 决定，下面两项已覆盖
+  }, [queryClient, refetch, userGuid, cameraId]);
+  return { query, refresh };
 }
 
 export function useFaceCameras(enabled: boolean) {

@@ -86,7 +86,10 @@
       "FACE_CAMERA_STORE_CODE_INVALID": "分店编码格式不正确",
       "FACE_CAMERA_STORE_NOT_FOUND": "分店不存在，请选择已有的分店",
       "FACE_CAMERA_FIELD_INVALID": "有字段不符合要求，请检查后重试",
-      "FACE_CAMERA_NOT_FOUND": "摄像机不存在，请刷新列表"
+      "FACE_CAMERA_NOT_FOUND": "摄像机不存在，请刷新列表",
+      "FACE_CAMERA_ID_EXISTS": "该摄像头编号已存在，请换一个编号",
+      "FACE_CAMERA_TOKEN_CONFLICT": "生成令牌时冲突，请重试",
+      "FACE_CAMERA_SECRET_MISSING": "服务返回的结果不完整，摄像头可能已创建或已重新生成令牌，请刷新列表确认，必要时重新生成令牌"
     }
   },
   "validation": {
@@ -473,9 +476,8 @@
       "loadFailed": "摄像头列表加载失败",
       "pushNotice": "摄像头的启停最多 30 秒后在人脸接收服务生效。已启用且最近 {{minutes}} 分钟内有推送为「近期有推送」；摄像机只有检测到人脸时才推送，没人经过镜头时不会推送。抓拍数为近 {{hours}} 小时统计。",
       "empty": "这家门店没有登记摄像头",
-      "emptyHint": "新建摄像头请到网页后台「人脸抓拍摄像机」。",
+      "emptyHint": "点上方「新增摄像头」添加；编号和所属门店必填。",
       "summary": "共 {{total}} 台 · 近期有推送 {{active}} · 暂无推送 {{quiet}} · 已停用 {{disabled}}",
-      "webOnly": "新建摄像头、重置令牌等操作出于安全原因只能在网页后台进行，手机上不提供。",
       "enabled": "启用",
       "status": {
         "recentlyActive": "近期有推送",
@@ -490,7 +492,93 @@
       "disabledDone": "已停用",
       "confirmDisableTitle": "停用摄像头 {{name}}？",
       "confirmDisableContent": "停用后人脸接收服务将不再接收该摄像头的推送（最多 30 秒后生效），可随时重新启用。",
-      "confirmDisableOk": "停用"
+      "confirmDisableOk": "停用",
+      "add": "新增摄像头",
+      "edit": "编辑",
+      "rotate": "重新生成令牌",
+      "viewCaptures": "最近抓拍",
+      "form": {
+        "titleCreate": "新增摄像头",
+        "titleEdit": "编辑摄像头",
+        "submitCreate": "创建并生成地址",
+        "submitSave": "保存",
+        "cameraId": "摄像头编号",
+        "cameraIdPlaceholder": "例如 store1008-door-01",
+        "cameraIdHint": "小写字母、数字和横线，不能以横线开头，最长 64 位；创建后不可修改。",
+        "storeCode": "所属门店",
+        "pickStore": "选择门店",
+        "deviceModel": "型号",
+        "macAddress": "MAC 地址",
+        "note": "备注"
+      },
+      "validation": {
+        "cameraIdRequired": "请输入摄像头编号",
+        "cameraIdInvalid": "只能使用小写字母、数字和横线，不能以横线开头，最长 64 位",
+        "storeCodeRequired": "请选择所属门店",
+        "storeCodeTooLong": "门店编码最长 32 位",
+        "storeCodeInvalid": "门店编码只能包含字母、数字、下划线和横线",
+        "noteTooLong": "备注最长 200 字",
+        "deviceModelTooLong": "型号最长 64 字",
+        "macAddressTooLong": "MAC 地址最长 32 字",
+        "controlChars": "不能包含换行、制表符等控制字符"
+      },
+      "secret": {
+        "titleCreated": "摄像头已创建",
+        "titleRotated": "令牌已重新生成",
+        "onceOnly": "此地址只显示这一次，关闭后无法再次查看，丢失只能重新生成令牌。",
+        "createdNote": "摄像头 {{cameraId}} 的推送地址如下。",
+        "rotatedNote": "摄像头 {{cameraId}} 的旧令牌已失效（最多 30 秒内），请把下面的新地址重新配置到摄像头。",
+        "urlLabel": "摄像头地址",
+        "copy": "复制地址",
+        "copied": "已复制到剪贴板",
+        "copyFailed": "复制失败，请点「显示」后长按地址手动复制。",
+        "hide": "隐藏",
+        "show": "显示",
+        "usage": "请把该地址填入摄像头的事件推送（HTTP 监听）地址。地址等同于密码：不要发到聊天群，也不要截图留存；切到后台或关闭窗口会自动清除。",
+        "close": "我已保存，关闭"
+      },
+      "confirmRotate": {
+        "title": "重新生成 {{name}} 的令牌？",
+        "content": "旧令牌最多 30 秒内失效，摄像头需要用新地址重新配置，否则推送会被拒绝。新地址只显示一次。",
+        "ok": "重新生成"
+      },
+      "messages": {
+        "saved": "已保存"
+      },
+      "captures": {
+        "title": "最近抓拍 · {{name}}",
+        "metadataOnly": "这里只显示推送报文的元数据，不含图片；查看抓拍图片需要单独的「查看人脸抓拍图片」权限。",
+        "imagesOnDemand": "图片是敏感的生物识别信息：只在点「查看图片」后按需读取，关闭即丢弃，每次查看都会被记录。",
+        "eventTime": "摄像头事件时间：{{time}}",
+        "eventType": "事件类型：{{type}}",
+        "faceCount": "人脸数 {{count}}",
+        "parseNote": "解析备注：{{note}}",
+        "duplicate": "重复报文",
+        "parse": {
+          "parsed": "已解析",
+          "partial": "部分解析",
+          "unparsed": "未解析",
+          "notFace": "非人脸事件",
+          "unknown": "未知"
+        },
+        "empty": "暂无抓拍记录",
+        "loadFailed": "抓拍记录加载失败",
+        "loadMore": "加载更多",
+        "loadingMore": "加载中…",
+        "end": "没有更多了",
+        "viewImages": "查看图片",
+        "viewerTitle": "抓拍图片",
+        "imageFace": "人脸 {{index}}",
+        "imageBackground": "背景图 {{index}}",
+        "imageOther": "图片 {{index}}",
+        "imageLoading": "正在读取图片…",
+        "imageFailed": "图片读取失败",
+        "imageGone": "图片已被删除或还在接收服务本地，后台读不到",
+        "lastSeen": "最后推送：{{time}}（约 5 分钟精度）",
+        "neverSeen": "最后推送：还没有收到过这台摄像头的推送",
+        "storeOff": "本店（{{store}}）当前未开启处理：抓拍读完即删除，不留记录。",
+        "close": "关闭"
+      }
     }
   },
   "hits": {

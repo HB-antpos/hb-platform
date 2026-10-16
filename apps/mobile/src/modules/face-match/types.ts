@@ -215,6 +215,63 @@ export interface UpdateFaceCameraRequest {
   enabled: boolean;
 }
 
+/** POST /face-cameras：新增摄像头。编号创建后不可修改；其余字段已规范化（去首尾空白、空串转 null）。 */
+export interface CreateFaceCameraRequest {
+  cameraId: string;
+  storeCode: string;
+  note: string | null;
+  deviceModel: string | null;
+  macAddress: string | null;
+}
+
+// ───────────── 摄像头最近抓拍（GET /face-cameras/{id}/captures） ─────────────
+
+/** 0 已解析 / 1 部分解析 / 2 未解析 / 3 非人脸事件；服务端新增取值时页面按「未知」兜底。 */
+export type FaceCameraParseStatus = 0 | 1 | 2 | 3;
+
+/** 0 人脸图 / 1 背景图 / 2 其他。 */
+export type FaceCameraImageKind = 0 | 1 | 2;
+
+/** 单张图片的元数据：没有对象键 / COS 地址 / 哈希，图片字节只能经内容接口由服务端转发（需要 FaceCapture.Images.View）。 */
+export interface FaceCameraCaptureImage {
+  imageId: string;
+  kind: FaceCameraImageKind;
+  /** cos | local；local 表示图片还在接收服务本地磁盘，后台读不到。 */
+  storage: string;
+  width: number | null;
+  height: number | null;
+  byteSize: number;
+  faceIndex: number | null;
+}
+
+export interface FaceCameraCapture {
+  captureId: string;
+  receivedAtUtc: string;
+  cameraEventTime: string | null;
+  eventType: string | null;
+  faceCount: number;
+  parseStatus: FaceCameraParseStatus | null;
+  parseNote: string | null;
+  isDuplicate: boolean;
+  /** 只有调用者持有 FaceCapture.Images.View 时才可能非空。 */
+  images: FaceCameraCaptureImage[];
+}
+
+export type FaceCameraStoreMode = "off" | "capture" | "match";
+
+export interface FaceCameraCapturePage {
+  items: FaceCameraCapture[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  /** 调用者是否持有 FaceCapture.Images.View；为 false 时每条记录的 images 都是空数组。 */
+  canViewImages: boolean;
+  /** 摄像头所属门店档案当前的处理模式；没有档案（或老后端没有这个字段）为 null。只有 off 时提示「本店未开启处理」。 */
+  storeMode: FaceCameraStoreMode | null;
+  /** 摄像头最后一次有效推送（UTC，接收端约 5 分钟节流更新）；从未推送为 null。 */
+  lastSeenAtUtc: string | null;
+}
+
 // ───────────── 抓拍与比对结果（GET /face-match/results） ─────────────
 
 /** 比对判定：服务端取值；新增取值时页面按「未识别的判定」兜底，不丢弃记录。 */

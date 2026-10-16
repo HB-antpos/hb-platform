@@ -86,7 +86,10 @@
       "FACE_CAMERA_STORE_CODE_INVALID": "The store code format is invalid",
       "FACE_CAMERA_STORE_NOT_FOUND": "The store does not exist. Choose an existing store.",
       "FACE_CAMERA_FIELD_INVALID": "A field is invalid. Check it and try again.",
-      "FACE_CAMERA_NOT_FOUND": "The camera does not exist. Refresh the list."
+      "FACE_CAMERA_NOT_FOUND": "The camera does not exist. Refresh the list.",
+      "FACE_CAMERA_ID_EXISTS": "This camera ID already exists. Choose another one.",
+      "FACE_CAMERA_TOKEN_CONFLICT": "Token generation conflicted. Please try again.",
+      "FACE_CAMERA_SECRET_MISSING": "The response was incomplete. The camera may already have been created or its token rotated; refresh the list to check and rotate the token again if needed."
     }
   },
   "validation": {
@@ -473,9 +476,8 @@
       "loadFailed": "Failed to load the camera list",
       "pushNotice": "Enabling or disabling a camera takes effect in the face ingest service within 30 seconds. An enabled camera that pushed within the last {{minutes}} minutes is \"Recently active\"; a camera only pushes when it detects a face and sends nothing when nobody passes by. Capture counts cover the last {{hours}} hours.",
       "empty": "No cameras are registered for this store",
-      "emptyHint": "Add cameras in the web admin under Face capture cameras.",
+      "emptyHint": "Tap \"Add camera\" above. Camera ID and store are required.",
       "summary": "{{total}} total · Recently active {{active}} · No recent pushes {{quiet}} · Disabled {{disabled}}",
-      "webOnly": "Adding cameras and rotating tokens can only be done in the web admin for security reasons; they are not available on the phone.",
       "enabled": "Enabled",
       "status": {
         "recentlyActive": "Recently active",
@@ -490,7 +492,93 @@
       "disabledDone": "Disabled",
       "confirmDisableTitle": "Disable camera {{name}}?",
       "confirmDisableContent": "The face ingest service will stop accepting pushes from this camera (within 30 seconds). You can enable it again at any time.",
-      "confirmDisableOk": "Disable"
+      "confirmDisableOk": "Disable",
+      "add": "Add camera",
+      "edit": "Edit",
+      "rotate": "Rotate token",
+      "viewCaptures": "Recent captures",
+      "form": {
+        "titleCreate": "Add camera",
+        "titleEdit": "Edit camera",
+        "submitCreate": "Create and generate address",
+        "submitSave": "Save",
+        "cameraId": "Camera ID",
+        "cameraIdPlaceholder": "e.g. store1008-door-01",
+        "cameraIdHint": "Lowercase letters, digits and hyphens; must not start with a hyphen; up to 64 characters. Cannot be changed after creation.",
+        "storeCode": "Store",
+        "pickStore": "Select store",
+        "deviceModel": "Model",
+        "macAddress": "MAC address",
+        "note": "Note"
+      },
+      "validation": {
+        "cameraIdRequired": "Enter a camera ID",
+        "cameraIdInvalid": "Use lowercase letters, digits and hyphens only; must not start with a hyphen; up to 64 characters",
+        "storeCodeRequired": "Select a store",
+        "storeCodeTooLong": "Store code is at most 32 characters",
+        "storeCodeInvalid": "Store code may only contain letters, digits, underscores and hyphens",
+        "noteTooLong": "Note is at most 200 characters",
+        "deviceModelTooLong": "Model is at most 64 characters",
+        "macAddressTooLong": "MAC address is at most 32 characters",
+        "controlChars": "Line breaks, tabs and other control characters are not allowed"
+      },
+      "secret": {
+        "titleCreated": "Camera created",
+        "titleRotated": "Token rotated",
+        "onceOnly": "This address is shown only once. After you close this dialog it cannot be viewed again; if it is lost, the token must be rotated.",
+        "createdNote": "Push address for camera {{cameraId}}.",
+        "rotatedNote": "The old token of camera {{cameraId}} stops working within 30 seconds. Configure the new address below on the camera.",
+        "urlLabel": "Camera address",
+        "copy": "Copy address",
+        "copied": "Copied to clipboard",
+        "copyFailed": "Copy failed. Tap \"Show\" and long-press the address to copy it manually.",
+        "hide": "Hide",
+        "show": "Show",
+        "usage": "Enter this address as the camera's event push (HTTP listening) address. It works like a password: do not paste it into chats or keep screenshots. It is cleared automatically when you switch apps or close this window.",
+        "close": "I have saved it, close"
+      },
+      "confirmRotate": {
+        "title": "Rotate the token of {{name}}?",
+        "content": "The old token stops working within 30 seconds. The camera must be reconfigured with the new address or its pushes will be rejected. The new address is shown only once.",
+        "ok": "Rotate"
+      },
+      "messages": {
+        "saved": "Saved"
+      },
+      "captures": {
+        "title": "Recent captures · {{name}}",
+        "metadataOnly": "Only push-message metadata is shown here, no images. Viewing capture images needs the separate \"View face capture images\" permission.",
+        "imagesOnDemand": "Images are sensitive biometric information: they are loaded on demand after you tap \"View images\", discarded when you close them, and every view is logged.",
+        "eventTime": "Camera event time: {{time}}",
+        "eventType": "Event type: {{type}}",
+        "faceCount": "Faces {{count}}",
+        "parseNote": "Parse note: {{note}}",
+        "duplicate": "Duplicate",
+        "parse": {
+          "parsed": "Parsed",
+          "partial": "Partially parsed",
+          "unparsed": "Unparsed",
+          "notFace": "Not a face event",
+          "unknown": "Unknown"
+        },
+        "empty": "No captures yet",
+        "loadFailed": "Failed to load captures",
+        "loadMore": "Load more",
+        "loadingMore": "Loading…",
+        "end": "No more",
+        "viewImages": "View images",
+        "viewerTitle": "Capture images",
+        "imageFace": "Face {{index}}",
+        "imageBackground": "Background {{index}}",
+        "imageOther": "Image {{index}}",
+        "imageLoading": "Loading image…",
+        "imageFailed": "Failed to load the image",
+        "imageGone": "The image was deleted or is still on the receiver's local disk and cannot be read",
+        "lastSeen": "Last push: {{time}} (accurate to about 5 minutes)",
+        "neverSeen": "Last push: no push received from this camera yet",
+        "storeOff": "This store ({{store}}) is not processing captures: captures are deleted right after being read and no records are kept.",
+        "close": "Close"
+      }
     }
   },
   "hits": {
