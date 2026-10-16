@@ -29,6 +29,7 @@ import {
   decodeLocalSupplierInvoicesReturnParams,
 } from "@/modules/local-supplier-invoices/navigation";
 import { getInvoiceInboundStatusLabel } from "@/modules/local-supplier-invoices/types";
+import { getDefaultListDateRange } from "@/shared/utils/default-list-date-range";
 import {
   clearInvoiceDateRange,
   formatInvoiceDateRangeDisplay,
@@ -269,9 +270,16 @@ function buildInvoiceListRequestKey({
     filters.inboundStatus ?? "",
     filters.orderDateFrom ?? "",
     filters.orderDateTo ?? "",
+    filters.productKeyword ?? "",
     sort.colId,
     sort.direction,
   ]);
+}
+
+/** 进货单列表默认只查最近 6 个月；用户可在日期弹窗里清除区间看全部。 */
+function buildDefaultInvoiceDateFilters(): Pick<InvoiceGridFilters, "orderDateFrom" | "orderDateTo"> {
+  const range = getDefaultListDateRange();
+  return toInvoiceOrderDateFilters({ from: range.from, to: range.to });
 }
 
 function pad2(value: number) {
@@ -524,8 +532,8 @@ export default function LocalSupplierInvoicesScreen() {
     returnSortColId?: string | string[];
     returnSortDirection?: string | string[];
   }>();
-  const [draftFilters, setDraftFilters] = useState<InvoiceGridFilters>({});
-  const [filters, setFilters] = useState<InvoiceGridFilters>({});
+  const [draftFilters, setDraftFilters] = useState<InvoiceGridFilters>(buildDefaultInvoiceDateFilters);
+  const [filters, setFilters] = useState<InvoiceGridFilters>(buildDefaultInvoiceDateFilters);
   const [sort, setSort] = useState<InvoiceGridSort>({ colId: "OrderDate", direction: "desc" });
   const [sortMenuVisible, setSortMenuVisible] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -700,6 +708,18 @@ export default function LocalSupplierInvoicesScreen() {
       }
     ).text;
   }, [draftFilters.orderDateFrom, draftFilters.orderDateTo, t]);
+  const productKeywordApplied =
+    Boolean(filters.productKeyword?.trim())
+    && (draftFilters.productKeyword ?? "").trim() === filters.productKeyword?.trim();
+  const appliedDateRangeLabel = useMemo(() => formatInvoiceDateRangeDisplay(
+    { from: normalizeMonthDate(filters.orderDateFrom), to: normalizeMonthDate(filters.orderDateTo) },
+    {
+      allDatesLabel: t("filters.allDates"),
+      formatFrom: (date) => t("filters.dateRangeFrom", { date }),
+      formatTo: (date) => t("filters.dateRangeTo", { date }),
+      rangeSeparator: " ~ ",
+    }
+  ).text, [filters.orderDateFrom, filters.orderDateTo, t]);
 
   const bindDeviceStore = useCallback(
     (nextFilters: InvoiceGridFilters) =>
@@ -996,7 +1016,10 @@ export default function LocalSupplierInvoicesScreen() {
     )
       ? selectedStoreCode
       : undefined;
-    const initialFilters = initialStoreCode ? { storeCode: initialStoreCode } : {};
+    const initialFilters: InvoiceGridFilters = {
+      ...buildDefaultInvoiceDateFilters(),
+      ...(initialStoreCode ? { storeCode: initialStoreCode } : {}),
+    };
     setDraftFilters(initialFilters);
     setFilters(initialFilters);
     initialStoreScopeAppliedRef.current = true;
@@ -1065,8 +1088,16 @@ export default function LocalSupplierInvoicesScreen() {
     setPage(1);
   }, [bindDeviceStore, filters]);
 
+  const clearProductKeyword = useCallback(() => {
+    // 清空商品匹配立即生效：输入框的 × 与「搜索」按钮行为一致，不需要再点一次搜索。
+    setDraftFilters((current) => ({ ...current, productKeyword: undefined }));
+    setFilters((current) => bindDeviceStore({ ...current, productKeyword: undefined }));
+    setPage(1);
+  }, [bindDeviceStore]);
+
   const clearFilters = useCallback(() => {
-    const emptyFilters = bindDeviceStore({});
+    // 「清除」回到默认条件（最近 6 个月），而不是全历史；要看全部日期请在日期弹窗里清除区间。
+    const emptyFilters = bindDeviceStore(buildDefaultInvoiceDateFilters());
     setDraftFilters(emptyFilters);
     setFilters(emptyFilters);
     setPage(1);
@@ -1359,6 +1390,32 @@ export default function LocalSupplierInvoicesScreen() {
             style={styles.quickFilterButton}
           />
         </View>
+
+        <View style={styles.quickSearchRow}>
+          <TextInput
+            dense
+            mode="outlined"
+            placeholder={t("filters.productKeywordPlaceholder")}
+            value={draftFilters.productKeyword ?? ""}
+            onChangeText={(value) => setDraftFilters((current) => ({ ...current, productKeyword: value }))}
+            onSubmitEditing={applyFilters}
+            left={<TextInput.Icon icon="barcode" />}
+            // 已生效的关键字显示 ×（一键清除并重新查询）；还在编辑、与已生效值不同时显示 →（点击或回车搜索）。
+            right={
+              productKeywordApplied
+                ? <TextInput.Icon icon="close" onPress={clearProductKeyword} />
+                : <TextInput.Icon icon="arrow-right" onPress={applyFilters} />
+            }
+            style={styles.quickSearchInput}
+          />
+        </View>
+
+        {/* 默认带 6 个月日期区间且日期入口收在「更多筛选」里，这里把已生效的区间显式写出来，避免用户不知道只查了一部分。 */}
+        <Pressable onPress={() => setFiltersExpanded(true)}>
+          <Text variant="bodySmall" style={styles.appliedDateHint}>
+            {t("filters.appliedDateRange", { range: appliedDateRangeLabel })}
+          </Text>
+        </Pressable>
 
         <ScrollView
           horizontal
@@ -2080,6 +2137,10 @@ const styles = StyleSheet.create({
     minWidth: 150,
   },
   disabledField: { opacity: 0.8 },
+  appliedDateHint: {
+    color: "#667085",
+    paddingHorizontal: 4,
+  },
   filterActions: {
     alignItems: "center",
     flexDirection: "row",

@@ -115,6 +115,7 @@ function normalizeFilters(filters: InvoiceGridFilters): InvoiceGridFilters {
         : undefined,
     orderDateFrom: firstParam(filters.orderDateFrom),
     orderDateTo: firstParam(filters.orderDateTo),
+    productKeyword: firstParam(filters.productKeyword),
   };
 }
 
@@ -139,6 +140,7 @@ export function buildLocalSupplierInvoicesReturnParams(
     returnFilterInboundStatus: filters.inboundStatus == null ? "" : String(filters.inboundStatus),
     returnFilterOrderDateFrom: filters.orderDateFrom ?? "",
     returnFilterOrderDateTo: filters.orderDateTo ?? "",
+    returnFilterProductKeyword: filters.productKeyword ?? "",
     returnSortColId: input.sort.colId,
     returnSortDirection: input.sort.direction,
   };
@@ -194,6 +196,7 @@ export function decodeLocalSupplierInvoicesReturnParams(
       inboundStatus,
       orderDateFrom: firstParam(params.returnFilterOrderDateFrom),
       orderDateTo: firstParam(params.returnFilterOrderDateTo),
+      productKeyword: firstParam(params.returnFilterProductKeyword),
     }),
     sort: {
       colId: sortColId,
