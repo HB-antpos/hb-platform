@@ -47,7 +47,12 @@
       "loginRecordsTotal": "{{count}} sign-in records",
       "noRoles": "No roles available",
       "noStores": "No stores linked yet",
-      "effectivePermissions": "Effective permissions"
+      "effectivePermissions": "Effective permissions",
+      "familyName": "Family name",
+      "givenName": "Given name",
+      "middleName": "Middle name",
+      "nickname": "Nickname",
+      "fullNameAutoHint": "When you fill in or change the family, given or middle name below, the full name is regenerated on save"
     },
     "usersBatch": {
       "listSeparator": ", ",

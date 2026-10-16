@@ -53,6 +53,11 @@ export async function createUser(payload: CreateUserDto): Promise<UserDto> {
     Password: payload.password,
     PasswordFormat: payload.passwordFormat,
     FullName: payload.fullName ?? null,
+    // 姓名拆分字段：创建时未填写即为 null（后端按「名 / 中间名 / 姓」是否有值决定是否重算 FullName）。
+    GivenName: payload.givenName ?? null,
+    MiddleName: payload.middleName ?? null,
+    FamilyName: payload.familyName ?? null,
+    Nickname: payload.nickname ?? null,
     IsActive: payload.isActive ?? true,
     RoleGuids: payload.roleGuids ?? [],
     StoreGuids: payload.storeGuids ?? [],
@@ -100,6 +105,11 @@ export async function getUserStores(guid: string): Promise<UserStoreDto[]> {
   return (unwrapApiData(response) ?? []).map(mapUserStore)
 }
 
+/**
+ * 更新用户资料。payload 原样作为请求体：
+ * givenName / middleName / familyName / nickname 的语义是 undefined 或 null = 不修改、空串 = 清空、非空 = 设置，
+ * 调用方应只传有变化的字段（见 usersPageLogic 的 diffUserNameParts），不要把未变化的旧值回传。
+ */
 export async function updateUser(guid: string, payload: UpdateUserDto): Promise<UserDetailDto> {
   const response = await request.put<ApiResponse<UserDetailDto>>(`/api/Users/guid/${guid}`, payload)
   return unwrapApiData(response)

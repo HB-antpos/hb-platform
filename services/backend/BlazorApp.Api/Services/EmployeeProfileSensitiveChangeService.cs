@@ -334,6 +334,10 @@ public sealed class EmployeeProfileSensitiveChangeService
                 request.UserGUID.Contains(search)
                 || user.Username.Contains(search)
                 || (user.FullName != null && user.FullName.Contains(search))
+                || (user.GivenName != null && user.GivenName.Contains(search))
+                || (user.MiddleName != null && user.MiddleName.Contains(search))
+                || (user.FamilyName != null && user.FamilyName.Contains(search))
+                || (user.Nickname != null && user.Nickname.Contains(search))
             );
         }
         var total = await source.CountAsync();

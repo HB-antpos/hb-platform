@@ -745,6 +745,314 @@ namespace BlazorApp.Api.Tests
             }
         }
 
+        // ---------------- 姓名拆分（名 / 中间名 / 姓 / 昵称） ----------------
+
+        /// <summary>给 staff-1 直接写入四个拆分字段（模拟已经设置过拆分姓名的存量账号）。</summary>
+        private async Task SeedStaffNamePartsAsync()
+        {
+            var staff = await _db.Queryable<User>().InSingleAsync("staff-1");
+            staff!.FullName = "Mary Jane Smith";
+            staff.GivenName = "Mary";
+            staff.MiddleName = "Jane";
+            staff.FamilyName = "Smith";
+            staff.Nickname = "MJ";
+            await _db.Updateable(staff).ExecuteCommandAsync();
+        }
+
+        private async Task<User> LoadStaffAsync() =>
+            (await _db.Queryable<User>().InSingleAsync("staff-1"))!;
+
+        private static UpdateStoreUserDto BuildUpdate(
+            string? fullName = null,
+            string? given = null,
+            string? middle = null,
+            string? family = null,
+            string? nickname = null) => new()
+            {
+                Username = "staff_1",
+                FullName = fullName,
+                GivenName = given,
+                MiddleName = middle,
+                FamilyName = family,
+                Nickname = nickname,
+                StoreCode = "S001",
+                Status = 1,
+            };
+
+        [Fact]
+        public async Task CreateAsync_WithNameParts_ComposesFullNameAndStoresParts()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "name_parts_en",
+                    Email = "name_parts_en@example.com",
+                    Password = "Secret123",
+                    FullName = "ignored when parts are sent",
+                    GivenName = " Mary ",
+                    MiddleName = "Jane",
+                    FamilyName = "Smith",
+                    Nickname = "MJ",
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("Mary Jane Smith", result.Data!.FullName);
+            Assert.Equal("Mary", result.Data.GivenName);
+            Assert.Equal("Jane", result.Data.MiddleName);
+            Assert.Equal("Smith", result.Data.FamilyName);
+            Assert.Equal("MJ", result.Data.Nickname);
+
+            var stored = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == result.Data.UserGuid);
+            Assert.Equal("Mary Jane Smith", stored.FullName);
+            Assert.Equal("MJ", stored.Nickname);
+
+            var chinese = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "name_parts_zh",
+                    Email = "name_parts_zh@example.com",
+                    Password = "Secret123",
+                    GivenName = "小明",
+                    FamilyName = "王",
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+            Assert.True(chinese.Success, chinese.Message);
+            Assert.Equal("王小明", chinese.Data!.FullName);
+        }
+
+        [Fact]
+        public async Task CreateAsync_WithOnlyFullName_KeepsLegacyBehaviorAndLeavesPartsEmpty()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "legacy_only",
+                    Email = "legacy_only@example.com",
+                    Password = "Secret123",
+                    FullName = "  Legacy Only ",
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("Legacy Only", result.Data!.FullName);
+            Assert.Null(result.Data.GivenName);
+            Assert.Null(result.Data.MiddleName);
+            Assert.Null(result.Data.FamilyName);
+            Assert.Null(result.Data.Nickname);
+        }
+
+        [Fact]
+        public async Task CreateAsync_WhenComposedNameTooLong_ReturnsValidationErrorAndCreatesNothing()
+        {
+            await SeedStoreUserDataAsync();
+            var service = CreateService("manager-1", "StoreManager");
+            var forty = new string('a', 40);
+
+            var result = await service.CreateAsync(
+                new CreateStoreUserDto
+                {
+                    Username = "too_long",
+                    Email = "too_long@example.com",
+                    Password = "Secret123",
+                    GivenName = forty,
+                    MiddleName = forty,
+                    FamilyName = forty,
+                    StoreCode = "S001",
+                    Status = 1,
+                },
+                "manager-1"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+            Assert.Contains("100", result.Message ?? string.Empty);
+            Assert.False(await _db.Queryable<User>().AnyAsync(item => item.Username == "too_long"));
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenLegacyClientSendsOnlyFullName_DoesNotWipeNamePartColumns()
+        {
+            // 关键回归点：整实体 Updateable，老版移动端不带新字段时，四列不能被刷成 null。
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync(
+                "staff-1",
+                BuildUpdate(fullName: "Mary Jane Smith"),
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            var stored = await LoadStaffAsync();
+            Assert.Equal("Mary Jane Smith", stored.FullName);
+            Assert.Equal("Mary", stored.GivenName);
+            Assert.Equal("Jane", stored.MiddleName);
+            Assert.Equal("Smith", stored.FamilyName);
+            Assert.Equal("MJ", stored.Nickname);
+            Assert.Equal("Mary", result.Data!.GivenName);
+            Assert.Equal("MJ", result.Data.Nickname);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenLegacyClientChangesFullName_ClearsPartsButKeepsNickname()
+        {
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync(
+                "staff-1",
+                BuildUpdate(fullName: "Totally Different"),
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            var stored = await LoadStaffAsync();
+            Assert.Equal("Totally Different", stored.FullName);
+            Assert.Null(stored.GivenName);
+            Assert.Null(stored.MiddleName);
+            Assert.Null(stored.FamilyName);
+            Assert.Equal("MJ", stored.Nickname);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenOnlyNicknameSent_DoesNotTouchFullNameOrParts()
+        {
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync("staff-1", BuildUpdate(nickname: "Emmy"), "manager-1");
+
+            Assert.True(result.Success, result.Message);
+            var stored = await LoadStaffAsync();
+            Assert.Equal("Emmy", stored.Nickname);
+            Assert.Equal("Mary Jane Smith", stored.FullName);
+            Assert.Equal("Mary", stored.GivenName);
+            Assert.Equal("Jane", stored.MiddleName);
+            Assert.Equal("Smith", stored.FamilyName);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenPartialPartsSent_RecomputesFullNameFromEffectiveParts()
+        {
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync("staff-1", BuildUpdate(given: "Maria"), "manager-1");
+
+            Assert.True(result.Success, result.Message);
+            var stored = await LoadStaffAsync();
+            Assert.Equal("Maria Jane Smith", stored.FullName);
+            Assert.Equal("Maria", stored.GivenName);
+            Assert.Equal("Jane", stored.MiddleName);
+            Assert.Equal("Smith", stored.FamilyName);
+            Assert.Equal("MJ", stored.Nickname);
+            Assert.Equal("Maria Jane Smith", result.Data!.FullName);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenBlankPartSent_ClearsThatPartAndRecomputesFullName()
+        {
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var result = await service.UpdateAsync(
+                "staff-1",
+                BuildUpdate(middle: "  ", nickname: ""),
+                "manager-1"
+            );
+
+            Assert.True(result.Success, result.Message);
+            var stored = await LoadStaffAsync();
+            Assert.Null(stored.MiddleName);
+            Assert.Null(stored.Nickname);
+            Assert.Equal("Mary Smith", stored.FullName);
+            Assert.Equal("Mary", stored.GivenName);
+            Assert.Equal("Smith", stored.FamilyName);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_WhenComposedNameTooLong_ReturnsValidationErrorAndKeepsStoredValues()
+        {
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+            var forty = new string('b', 40);
+
+            var result = await service.UpdateAsync(
+                "staff-1",
+                BuildUpdate(given: forty, middle: forty, family: forty, nickname: "NewNick"),
+                "manager-1"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+            Assert.Contains("100", result.Message ?? string.Empty);
+            var stored = await LoadStaffAsync();
+            Assert.Equal("Mary Jane Smith", stored.FullName);
+            Assert.Equal("Mary", stored.GivenName);
+            Assert.Equal("MJ", stored.Nickname);
+        }
+
+        [Fact]
+        public async Task GetGridDataAsync_ReturnsNamePartsAndSearchMatchesNicknameGivenAndFamilyName()
+        {
+            await SeedStoreUserDataAsync();
+            await SeedStaffNamePartsAsync();
+            var service = CreateService("manager-1", "StoreManager");
+
+            var all = await service.GetGridDataAsync(new StoreUserGridRequestDto { StoreCode = "S001" });
+            var row = all.Items!.Single(item => item.UserGuid == "staff-1");
+            Assert.Equal("Mary", row.GivenName);
+            Assert.Equal("Jane", row.MiddleName);
+            Assert.Equal("Smith", row.FamilyName);
+            Assert.Equal("MJ", row.Nickname);
+
+            // 让 FullName 与拆分字段脱钩：关键词只出现在拆分字段里（FullName / 用户名 / 邮箱都不含），也要能命中。
+            await SetStaffNameAsync(fullName: "Display Only", nickname: "Zebrafish");
+            foreach (var keyword in new[] { "Zebrafish", "Mary", "Jane", "Smith" })
+            {
+                var found = await service.GetGridDataAsync(new StoreUserGridRequestDto
+                {
+                    StoreCode = "S001",
+                    Keyword = keyword,
+                });
+                Assert.Contains(found.Items!, item => item.UserGuid == "staff-1");
+            }
+
+            var detail = await service.GetByUserGuidAsync("staff-1", "S001");
+            Assert.Equal("Zebrafish", detail.Data!.Nickname);
+            Assert.Equal("Mary", detail.Data.GivenName);
+        }
+
+        private async Task SetStaffNameAsync(string? fullName, string? nickname)
+        {
+            var staff = await LoadStaffAsync();
+            staff.FullName = fullName;
+            staff.Nickname = nickname;
+            await _db.Updateable(staff).ExecuteCommandAsync();
+        }
+
         private StoreUserReactService CreateService(string userGuid, params string[] roles) =>
             CreateService(userGuid, null, roles);
 

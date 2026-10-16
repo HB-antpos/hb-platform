@@ -114,13 +114,16 @@ import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
 import {
   STALE_LOGIN_DAYS,
   USER_BATCH_SELECTION_LIMIT,
+  USER_NAME_PART_MAX_LENGTH,
   describeLastLogin,
   diffAssignmentKeys,
   diffStoreAssignment,
+  diffUserNameParts,
   getUserDisplayName,
   getUserInitial,
   getUserSecondaryLine,
   mergeSelectedUsers,
+  pickUserNamePartFormValues,
   splitVisibleStores,
   toIsActiveQuery,
 } from './usersPageLogic'
@@ -886,6 +889,7 @@ export default function SystemUsersPage() {
             username: detail.username,
             email: detail.email,
             fullName: detail.fullName,
+            ...pickUserNamePartFormValues(detail),
             isActive: detail.isActive,
           })
           void loadRoleData(record.userGUID)
@@ -918,12 +922,22 @@ export default function SystemUsersPage() {
       if (!isCurrentEditingSession(targetUserGuid, editSessionId)) return
 
       setEditLoading(true)
-      const updated = await updateUser(targetUserGuid, values)
+      const updated = await updateUser(targetUserGuid, {
+        username: values.username,
+        email: values.email,
+        // 仍照旧发送 FullName（兼容旧后端 / 旧语义）；只要下面姓、名、中间名有变化，后端会用它们重算 FullName。
+        fullName: values.fullName,
+        isActive: values.isActive,
+        // 姓 / 名 / 中间名 / 昵称只发与加载时原值相比有变化的字段，未变化的不发，避免误写旧数据。
+        ...diffUserNameParts(editingUser, values),
+      })
       void loadData(page, pageSize, sortBy, sortOrder)
       if (!isCurrentEditingSession(targetUserGuid, editSessionId)) return
 
       message.success(t('system.users.updateSuccess', '用户信息已更新'))
       setEditingUser(updated)
+      // 后端可能重算了 FullName（或在只改 FullName 时清空了拆分字段），表单回填以服务端结果为准。
+      form.setFieldsValue({ fullName: updated.fullName, ...pickUserNamePartFormValues(updated) })
       if (detailUser?.userGUID === updated.userGUID) {
         setDetailUser(updated)
       }
@@ -1485,6 +1499,8 @@ export default function SystemUsersPage() {
         password: values.password,
         passwordFormat: 'raw',
         fullName: values.fullName,
+        // 创建时没有原值：diff 的结果就是用户实际填写了的姓 / 名 / 中间名 / 昵称。
+        ...diffUserNameParts(undefined, values),
         isActive: values.isActive ?? true,
         roleGuids: createRoleTargetKeys,
         storeGuids: createStoreTargetKeys,
@@ -1937,6 +1953,25 @@ export default function SystemUsersPage() {
       : '',
   ].filter(Boolean).join(' · ')
 
+  // 姓、名、中间名、昵称四个可选输入（创建 / 编辑表单共用）。后端每个字段最长 50 字符。
+  // 作为 Fragment 返回，放进编辑表单的 CSS 网格时每项直接成为网格子项。
+  const userNamePartItems = (
+    <>
+      <Form.Item label={t('system.usersWorkspace.familyName', '姓')} name="familyName">
+        <Input maxLength={USER_NAME_PART_MAX_LENGTH} />
+      </Form.Item>
+      <Form.Item label={t('system.usersWorkspace.givenName', '名')} name="givenName">
+        <Input maxLength={USER_NAME_PART_MAX_LENGTH} />
+      </Form.Item>
+      <Form.Item label={t('system.usersWorkspace.middleName', '中间名')} name="middleName">
+        <Input maxLength={USER_NAME_PART_MAX_LENGTH} />
+      </Form.Item>
+      <Form.Item label={t('system.usersWorkspace.nickname', '昵称')} name="nickname">
+        <Input maxLength={USER_NAME_PART_MAX_LENGTH} />
+      </Form.Item>
+    </>
+  )
+
   const editTabItems = [
     {
       key: 'info',
@@ -1962,9 +1997,14 @@ export default function SystemUsersPage() {
                 >
                   <Input />
                 </Form.Item>
-                <Form.Item label={t('system.users.fullName', '姓名')} name="fullName">
+                <Form.Item
+                  label={t('system.users.fullName', '姓名')}
+                  name="fullName"
+                  extra={t('system.usersWorkspace.fullNameAutoHint', '填写或修改下方的姓、名、中间名后，保存时姓名会按它们自动生成')}
+                >
                   <Input />
                 </Form.Item>
+                {userNamePartItems}
                 <Form.Item label={t('common.status', '状态')} name="isActive" valuePropName="checked">
                   <Switch checkedChildren={t('common.active', '启用')} unCheckedChildren={t('common.inactive', '停用')} />
                 </Form.Item>
@@ -3041,9 +3081,15 @@ export default function SystemUsersPage() {
                   >
                     <Input.Password />
                   </Form.Item>
-                  <Form.Item label={t('system.users.fullName', '姓名')} name="fullName">
+                  <Form.Item
+                    label={t('system.users.fullName', '姓名')}
+                    name="fullName"
+                    extra={t('system.usersWorkspace.fullNameAutoHint', '填写或修改下方的姓、名、中间名后，保存时姓名会按它们自动生成')}
+                  >
                     <Input />
                   </Form.Item>
+                  {/* 创建表单是单列窄表单（maxWidth 480），四个拆分字段用两列网格排布以免过长 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 16 }}>{userNamePartItems}</div>
                   <Form.Item label={t('common.status', '状态')} name="isActive" valuePropName="checked" initialValue={true}>
                     <Switch checkedChildren={t('common.active', '启用')} unCheckedChildren={t('common.inactive', '停用')} />
                   </Form.Item>

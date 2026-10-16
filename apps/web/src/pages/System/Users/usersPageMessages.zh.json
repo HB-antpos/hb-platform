@@ -47,7 +47,12 @@
       "loginRecordsTotal": "共 {{count}} 条登录记录",
       "noRoles": "暂无可分配的角色",
       "noStores": "尚未关联分店",
-      "effectivePermissions": "有效权限"
+      "effectivePermissions": "有效权限",
+      "familyName": "姓",
+      "givenName": "名",
+      "middleName": "中间名",
+      "nickname": "昵称",
+      "fullNameAutoHint": "填写或修改下方的姓、名、中间名后，保存时姓名会按它们自动生成"
     },
     "usersBatch": {
       "listSeparator": "、",

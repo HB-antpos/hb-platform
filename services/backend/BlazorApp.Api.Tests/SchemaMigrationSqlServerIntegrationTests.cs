@@ -975,6 +975,82 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 用户姓名拆分四列_依赖原表_可重复执行_不丢存量数据且签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 原表不存在：拒绝执行，提示先跑基线。
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserNamePartsSchema.ApplySql));
+        Assert.Equal(53800, missingTable.Number);
+        var missingVerify = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql));
+        Assert.Equal(53800, missingVerify.Number);
+
+        // 迁移前形态：只含 FullName 的旧 User 表与一行存量账号。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.[User]
+            (
+                UserGUID nvarchar(200) NOT NULL PRIMARY KEY,
+                Username nvarchar(200) NOT NULL,
+                FullName nvarchar(200) NULL
+            );
+            INSERT dbo.[User] (UserGUID, Username, FullName) VALUES (N'u-1', N'alice', N'Alice Smith');
+            """);
+        // 缺列时门禁报 53801。
+        var beforeApply = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql));
+        Assert.Equal(53801, beforeApply.Number);
+
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql);
+        // 写入一行拆分数据后重复执行：不得丢数据；存量账号四列为 NULL（迁移不回填）。
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.[User] SET Nickname = N'Ali' WHERE UserGUID = N'u-1';
+            """);
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            IF (SELECT COUNT(*) FROM dbo.[User] WHERE UserGUID = N'u-1' AND FullName = N'Alice Smith'
+                AND Nickname = N'Ali' AND GivenName IS NULL AND MiddleName IS NULL AND FamilyName IS NULL) <> 1
+                THROW 53810, 'Existing user row should keep its data after re-running the migration.', 1;
+            """);
+
+        // 长度漂移（nvarchar(100)）与不可空漂移都要被门禁识别。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.[User] ALTER COLUMN Nickname nvarchar(100) NULL;");
+        var lengthMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql));
+        Assert.Equal(53801, lengthMismatch.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.[User] ALTER COLUMN Nickname nvarchar(50) NULL;");
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql);
+
+        // 存量行 GivenName 为 NULL，先补一个值才能把列改成 NOT NULL 来模拟可空性漂移。
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.[User] SET GivenName = N'Alice' WHERE UserGUID = N'u-1';");
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.[User] ALTER COLUMN GivenName nvarchar(50) NOT NULL;");
+        var nullabilityMismatch = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql));
+        Assert.Equal(53801, nullabilityMismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 用户姓名拆分四列_实体CodeFirst建出的列与迁移签名一致且迁移空操作()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        var mainDb = databases.CreateMainContext().Db;
+
+        // 关键约束：CheckCoreAsync 只查账本、不比较实体与库列，实体 [SugarColumn(Length = 50)] 必须与迁移 SQL 的
+        // nvarchar(50) NULL 一致。这里让 SqlSugar 按实体直接建出 User 表，再用迁移门禁验证两边没有漂移。
+        mainDb.CodeFirst.InitTables<BlazorApp.Shared.Models.User>();
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql);
+
+        // CodeFirst 抢先建列后，迁移 ApplySql 是空操作且门禁仍然通过。
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, UserNamePartsSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 门店小票资料下发两张表_可重复执行且签名门禁识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

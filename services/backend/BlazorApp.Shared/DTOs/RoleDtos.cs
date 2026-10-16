@@ -129,6 +129,10 @@ namespace BlazorApp.Shared.DTOs
         public string Username { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string? FullName { get; set; }
+        public string? GivenName { get; set; }
+        public string? MiddleName { get; set; }
+        public string? FamilyName { get; set; }
+        public string? Nickname { get; set; }
         public bool IsActive { get; set; }
         public DateTime AssignedAt { get; set; }
     }

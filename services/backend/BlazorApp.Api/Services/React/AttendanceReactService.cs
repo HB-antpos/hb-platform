@@ -1360,6 +1360,10 @@ namespace BlazorApp.Api.Services.React
                     u.UserGUID,
                     u.Username,
                     u.FullName,
+                    u.GivenName,
+                    u.MiddleName,
+                    u.FamilyName,
+                    u.Nickname,
                     profile.EmployeeType,
                     profile.Birthday,
                     r.RoleName,
@@ -1390,6 +1394,10 @@ namespace BlazorApp.Api.Services.React
                         UserGuid = item.UserGUID,
                         Username = item.Username,
                         FullName = item.FullName,
+                        GivenName = item.GivenName,
+                        MiddleName = item.MiddleName,
+                        FamilyName = item.FamilyName,
+                        Nickname = item.Nickname,
                         EmploymentType = item.EmployeeType switch
                         {
                             EmployeeType.FullTime => "fullTime",

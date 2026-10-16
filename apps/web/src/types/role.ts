@@ -23,6 +23,11 @@ export interface RoleUserDto {
   username: string
   email: string
   fullName?: string
+  // 姓名拆分字段（后端可空），与 UserDto 一致；此处内联以避免 role.ts 反向依赖 user.ts。
+  givenName?: string | null
+  middleName?: string | null
+  familyName?: string | null
+  nickname?: string | null
   isActive: boolean
   assignedAt: string
 }

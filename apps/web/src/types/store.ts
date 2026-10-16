@@ -100,6 +100,11 @@ export interface StoreUserDto {
   userGUID: string
   username: string
   fullName?: string
+  // 姓名拆分字段（后端可空），与 UserDto 一致。
+  givenName?: string | null
+  middleName?: string | null
+  familyName?: string | null
+  nickname?: string | null
   realName?: string
   email: string
   roles: string[]

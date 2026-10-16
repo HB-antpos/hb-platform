@@ -62,6 +62,10 @@ namespace BlazorApp.Api.Services
                             user.Username.Contains(keyword)
                             || user.Email.Contains(keyword)
                             || (user.FullName != null && user.FullName.Contains(keyword))
+                            || (user.GivenName != null && user.GivenName.Contains(keyword))
+                            || (user.MiddleName != null && user.MiddleName.Contains(keyword))
+                            || (user.FamilyName != null && user.FamilyName.Contains(keyword))
+                            || (user.Nickname != null && user.Nickname.Contains(keyword))
                             || (profile.Address != null && profile.Address.Contains(keyword))
                             || (profile.IdentityId != null && profile.IdentityId.Contains(keyword))
                     );
