@@ -23,8 +23,14 @@ export interface PriceTaskOverview {
    */
   managedRows: StorePriceUpdateStoreSummary[];
   overdueDays: number;
-  /** 管理分店的未完成合计：工作台角标和「要不要弹提醒」都看它，与弹窗里显示的数字一致。 */
+  /** 管理分店的未完成合计：「要不要弹提醒」看它，与弹窗里显示的数字一致。 */
   totalPending: number;
+  /**
+   * 名下全部可见分店（含只关联的）的未完成合计：工作台「价格和标签」入口的角标看它（用户 10-16 决定）。
+   * 角标只是被动提示、点进去能看到这些分店的任务，所以不像弹窗那样只算管理分店；
+   * 否则只关联分店的账号（仓库管理员等）会整个看不到角标。
+   */
+  visiblePending: number;
   /** 本人「管理分店」里已超期的任务合计（锁报表只看它，不含只能查看的关联分店）。 */
   manageableOverdueCount: number;
   manageableStoreCodes: string[];
@@ -44,6 +50,7 @@ export const EMPTY_PRICE_TASK_OVERVIEW: PriceTaskOverview = {
   managedRows: [],
   overdueDays: DEFAULT_OVERDUE_DAYS,
   totalPending: 0,
+  visiblePending: 0,
   manageableOverdueCount: 0,
   manageableStoreCodes: [],
   reportsLocked: false,
@@ -63,6 +70,12 @@ export interface PriceTaskOverviewInput {
    * 同时和管理员一样**不锁报表**。所以这个标志只用来免锁，不会放宽管理分店范围。
    */
   isWarehouseManager?: boolean;
+  /**
+   * 订货员（只持有 Order 角色）。他们的分店几乎全是「只关联」（isPrimary=false），按店长口径一家管理分店都没有，
+   * 既不弹窗也没有角标。用户 10-16 决定订货员也要弹窗提醒：名下全部分店都算他们的管理分店；
+   * 同样**不锁报表**（只有店长锁）。
+   */
+  isOrderUser?: boolean;
 }
 
 export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTaskOverview {
@@ -78,17 +91,18 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
     ? input.summary.stores
     : input.summary.stores.filter((row) => visibleStoreCodes.has(row.storeCode));
   // 「管理分店」与商品查询、用户管理等页面同一口径：设备 = 绑定分店；管理员 = 全部；其余 = isPrimary 的分店。
-  // 关联但只能查看的分店不算：它们既不进弹窗、不计角标，也不锁这位账号的报表。
+  // 关联但只能查看的分店不算：它们不进弹窗，也不锁这位账号的报表（工作台角标例外，见 visiblePending）。
   // 仓库管理员不在这里放宽：他们和店长一样只算 isPrimary 的分店（用户 10-16 决定，不要弹只关联的店）。
+  // 订货员相反：他们的分店几乎都是只关联，用户 10-16 决定也要弹窗，所以按「名下全部分店」算管理分店。
   const manageableStoreCodes = getManageableStoresForSession({
     stores: [...input.stores],
     isDeviceMode: input.isDeviceMode,
     deviceBoundStore: input.deviceBoundStore,
-    isAdmin: input.isAdmin,
+    isAdmin: input.isAdmin || Boolean(input.isOrderUser),
   }).map((store) => store.storeCode);
-  // 弹窗范围和锁定范围是两件事：管理员、仓库管理员（含两者兼任）都按各自的管理分店被提醒，但都不被锁报表；
-  // 只有店长口径（既不是管理员也不是仓库管理员）才锁。设备由下面 reportsLocked 里的 isDeviceMode 排除。
-  const reportsLockExempt = input.isAdmin || Boolean(input.isWarehouseManager);
+  // 弹窗范围和锁定范围是两件事：管理员、仓库管理员、订货员都按各自的管理分店被提醒，但都不被锁报表；
+  // 只有店长口径（不是管理员、仓库管理员、订货员）才锁。设备由下面 reportsLocked 里的 isDeviceMode 排除。
+  const reportsLockExempt = input.isAdmin || Boolean(input.isWarehouseManager) || Boolean(input.isOrderUser);
   const manageable = new Set(manageableStoreCodes);
 
   const manageableRows = rows.filter((row) => manageable.has(row.storeCode));
@@ -103,6 +117,7 @@ export function buildPriceTaskOverview(input: PriceTaskOverviewInput): PriceTask
     managedRows: manageableRows,
     overdueDays: input.summary.overdueDays > 0 ? input.summary.overdueDays : DEFAULT_OVERDUE_DAYS,
     totalPending: manageableRows.reduce((sum, row) => sum + row.pendingCount, 0),
+    visiblePending: rows.reduce((sum, row) => sum + row.pendingCount, 0),
     manageableOverdueCount,
     manageableStoreCodes,
     reportsLocked: !input.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0,

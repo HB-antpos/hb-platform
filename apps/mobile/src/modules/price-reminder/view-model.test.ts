@@ -193,6 +193,31 @@ for (const isWarehouseManager of [false, true]) {
   assert.equal(adminVm.primaryAction.kind, "default", "不锁：主按钮是「去处理」");
 }
 
+// ---- 订货员：分店全是只关联，也弹窗列出名下全部分店；有超期只标红，不出现锁定框 ----
+const orderUserVm = buildPriceReminderViewModel({
+  overview: buildPriceTaskOverview({
+    summary: {
+      stores: [row("A", { pendingPriceUpdateCount: 5, overdueCount: 2 }), row("B", { pendingLabelOnlyCount: 20, overdueCount: 9 })],
+      overdueDays: 7,
+    },
+    stores: [
+      { storeCode: "A", storeName: "Store A", isPrimary: false },
+      { storeCode: "B", storeName: "Store B", isPrimary: false },
+    ],
+    isDeviceMode: false,
+    deviceBoundStore: null,
+    isAdmin: false,
+    isOrderUser: true,
+  }),
+  currentStoreCode: "A",
+  isDeviceMode: false,
+});
+assert.ok(orderUserVm, "订货员也要弹窗");
+assert.equal(orderUserVm.totalPending, 25);
+assert.deepEqual(orderUserVm.rows.map((item) => item.storeCode), ["B", "A"], "名下全部分店都列出，超期多的排前面");
+assert.equal(orderUserVm.lock, null, "订货员不出现报表锁定框");
+assert.equal(orderUserVm.primaryAction.kind, "default");
+
 // ---- 单分店账号：用单店布局，标题口径按两类数量决定 ----
 function singleAccount(patch: Partial<StorePriceUpdateStoreSummary>) {
   return buildPriceReminderViewModel({
