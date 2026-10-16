@@ -175,6 +175,9 @@ function normalizeRoleUser(value: unknown): IdentityRoleUser {
     ...(optionalString(source, "fullName", "FullName")
       ? { fullName: optionalString(source, "fullName", "FullName") }
       : {}),
+    ...(optionalString(source, "givenName", "GivenName") ? { givenName: optionalString(source, "givenName", "GivenName") } : {}),
+    ...(optionalString(source, "familyName", "FamilyName") ? { familyName: optionalString(source, "familyName", "FamilyName") } : {}),
+    ...(optionalString(source, "nickname", "Nickname") ? { nickname: optionalString(source, "nickname", "Nickname") } : {}),
     isActive: booleanValue(source, false, "isActive", "IsActive"),
     assignedAt: stringValue(source, "assignedAt", "AssignedAt"),
   };
@@ -187,6 +190,10 @@ function normalizeUser(value: unknown): IdentityUser {
     username: requiredString(source, "username", "Username"),
     email: requiredString(source, "email", "Email"),
     ...(optionalString(source, "fullName", "FullName") ? { fullName: optionalString(source, "fullName", "FullName") } : {}),
+    ...(optionalString(source, "givenName", "GivenName") ? { givenName: optionalString(source, "givenName", "GivenName") } : {}),
+    ...(optionalString(source, "middleName", "MiddleName") ? { middleName: optionalString(source, "middleName", "MiddleName") } : {}),
+    ...(optionalString(source, "familyName", "FamilyName") ? { familyName: optionalString(source, "familyName", "FamilyName") } : {}),
+    ...(optionalString(source, "nickname", "Nickname") ? { nickname: optionalString(source, "nickname", "Nickname") } : {}),
     ...(optionalString(source, "phone", "Phone") ? { phone: optionalString(source, "phone", "Phone") } : {}),
     ...(optionalString(source, "lastLoginAt", "LastLoginAt") ? { lastLoginAt: optionalString(source, "lastLoginAt", "LastLoginAt") } : {}),
     ...(optionalString(source, "lastLoginIp", "LastLoginIp") ? { lastLoginIp: optionalString(source, "lastLoginIp", "LastLoginIp") } : {}),

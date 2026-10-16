@@ -4,6 +4,11 @@ export interface StoreUserListItem {
   userGUID: string;
   username: string;
   fullName?: string;
+  /** 姓名拆分字段（后端迁移 20261018 之后才有；旧后端缺省）。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   email?: string;
   phone?: string;
   status: number;

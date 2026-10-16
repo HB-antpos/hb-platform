@@ -49,6 +49,11 @@ export interface IdentityUser {
   username: string;
   email: string;
   fullName?: string;
+  /** 姓名拆分字段（后端迁移 20261018 之后才有；旧后端缺省）。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   phone?: string;
   lastLoginAt?: string;
   lastLoginIp?: string;
@@ -132,6 +137,9 @@ export interface IdentityRoleUser {
   username: string;
   email: string;
   fullName?: string;
+  givenName?: string;
+  familyName?: string;
+  nickname?: string;
   isActive: boolean;
   assignedAt: string;
 }
