@@ -46,6 +46,7 @@ const filteredListRequest = buildInvoiceGridRequest({
     inboundStatus: 1,
     orderDateFrom: "2026-01-02",
     orderDateTo: "2026-01-05",
+    productKeyword: " 9328644 ",
   },
   sort: { colId: "InvoiceNo", direction: "asc" },
 });
@@ -58,6 +59,7 @@ assertDeepEqual(
     storeCode: { filterType: "text", type: "equals", filter: "S01" },
     supplierCode: { filterType: "text", type: "contains", filter: "SUP" },
     invoiceNo: { filterType: "text", type: "contains", filter: "INV" },
+    ProductKeyword: { filterType: "text", type: "contains", filter: "9328644" },
     inboundStatus: { filterType: "number", type: "equals", filter: "1" },
     OrderDate: {
       filterType: "date",
@@ -66,7 +68,7 @@ assertDeepEqual(
       filterTo: "2026-01-05",
     },
   },
-  "list filters trim text fields and send OrderDate range"
+  "list filters trim text fields, send OrderDate range and ProductKeyword"
 );
 
 const blankDateRequest = buildInvoiceGridRequest({
@@ -75,6 +77,7 @@ const blankDateRequest = buildInvoiceGridRequest({
     supplierCode: " LOC ",
     orderDateFrom: "   ",
     orderDateTo: "",
+    productKeyword: "   ",
   },
 });
 assertDeepEqual(
@@ -83,7 +86,7 @@ assertDeepEqual(
     storeCode: { filterType: "text", type: "equals", filter: "STO" },
     supplierCode: { filterType: "text", type: "contains", filter: "LOC" },
   },
-  "blank order date values do not send OrderDate while store and supplier filters remain correct"
+  "blank order date and product keyword values are not sent while store and supplier filters remain correct"
 );
 
 const dateFromOnlyRequest = buildInvoiceGridRequest({

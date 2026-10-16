@@ -10,6 +10,11 @@ export interface StoreOrderListRequestParams {
   pageSize?: number;
   statusList?: number[];
   keyword?: string;
+  /** 商品匹配：货号 / 条码 / 商品名，命中任一订单明细即返回该订单（后端 ProductKeyword，与 keyword 取交集）。 */
+  productKeyword?: string;
+  /** 下单日期区间，YYYY-MM-DD，含首尾；留空表示不限。 */
+  startDate?: string;
+  endDate?: string;
 }
 
 export function buildOrderListRequest(params: StoreOrderListRequestParams = {}) {
@@ -20,6 +25,9 @@ export function buildOrderListRequest(params: StoreOrderListRequestParams = {}) 
     pageSize: params.pageSize ?? DEFAULT_ORDER_LIST_PAGE_SIZE,
     statusList: params.statusList ?? [1, 3, 2],
     keyword: params.keyword,
+    productKeyword: params.productKeyword?.trim() || undefined,
+    startDate: params.startDate?.trim() || undefined,
+    endDate: params.endDate?.trim() || undefined,
   };
 }
 
