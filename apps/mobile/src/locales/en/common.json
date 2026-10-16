@@ -109,7 +109,7 @@
     "shortZh": "中",
     "shortEn": "EN",
     "buttonLabel": "Floating language button, current language {{current}}",
-    "buttonHint": "Tap to switch to {{next}}; hold for 2 seconds for quick navigation; drag to move, drag to the bottom to hide",
+    "buttonHint": "Tap to switch to {{next}}; hold for {{seconds}} seconds for quick navigation; drag to move, drag to the bottom to hide",
     "holdHint": "Keep holding to open quick navigation",
     "dragToHide": "Drop here to hide",
     "quickJumpTitle": "Quick navigation",

@@ -27,7 +27,7 @@ import {
   FLOATING_BUTTON_SIZE,
   FLOATING_CLOSE_ZONE_RADIUS,
   FLOATING_EDGE_TUCK,
-  FLOATING_LONG_PRESS_MS,
+  formatLongPressSeconds,
   hasMovedBeyondThreshold,
   isInCloseZone,
   isTapGesture,
@@ -67,6 +67,7 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
   const hydrated = useFloatingLanguageStore((state) => state.hydrated);
   const setEnabled = useFloatingLanguageStore((state) => state.setEnabled);
   const setPosition = useFloatingLanguageStore((state) => state.setPosition);
+  const longPressMs = useFloatingLanguageStore((state) => state.longPressMs);
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const iosReviewOfflineGuardActive = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   const userGuid = useAuthStore((state) => state.user?.userGUID);
@@ -246,8 +247,8 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
 
   // ───────── 手势：一个 PanResponder 同时管点击、拖动、长按 ─────────
   // PanResponder 只创建一次，回调里通过 ref 读最新的尺寸 / 位置 / 动作，避免闭包拿到旧值。
-  const latest = useRef({ bounds, position, toggleLanguage, hideButton, setPosition });
-  latest.current = { bounds, position, toggleLanguage, hideButton, setPosition };
+  const latest = useRef({ bounds, position, toggleLanguage, hideButton, setPosition, longPressMs });
+  latest.current = { bounds, position, toggleLanguage, hideButton, setPosition, longPressMs };
   const gesture = useRef({
     startPoint: { x: 0, y: 0 },
     startedAt: 0,
@@ -315,7 +316,7 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
         holdProgress.setValue(0);
         Animated.timing(holdProgress, {
           toValue: 1,
-          duration: FLOATING_LONG_PRESS_MS,
+          duration: latest.current.longPressMs,
           easing: Easing.linear,
           // SVG 圆环的 strokeDashoffset 不能用原生驱动。
           useNativeDriver: false,
@@ -327,7 +328,7 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
           holdProgress.setValue(0);
           setHolding(false);
           setPanelOpen(true);
-        }, FLOATING_LONG_PRESS_MS);
+        }, latest.current.longPressMs);
       },
       onPanResponderMove: (_event, state) => {
         const g = gesture.current;
@@ -409,7 +410,10 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
           accessible
           accessibilityRole="button"
           accessibilityLabel={t("floatingLanguage.buttonLabel", { current: t(`language.${currentLanguage}`) })}
-          accessibilityHint={t("floatingLanguage.buttonHint", { next: t(`language.${nextLanguage}`) })}
+          accessibilityHint={t("floatingLanguage.buttonHint", {
+            next: t(`language.${nextLanguage}`),
+            seconds: formatLongPressSeconds(longPressMs),
+          })}
           accessibilityActions={[{ name: "activate" }, { name: "longpress" }]}
           onAccessibilityAction={(event) => {
             // 读屏用户没法做拖动和长按手势：双击 = 切换语言，读屏长按 = 打开快速跳转。

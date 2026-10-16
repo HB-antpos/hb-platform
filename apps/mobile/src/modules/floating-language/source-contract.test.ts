@@ -60,3 +60,20 @@ test("设置页：偏好分组里有开关，读写同一个本机偏好", () =>
   const supportAt = settings.indexOf('testID="settings-group-app-support"');
   assert.ok(preferencesAt > 0 && switchAt > preferencesAt && supportAt > switchAt);
 });
+
+test("按住时长可调：按钮的计时与进度环都读设置值；设置页用滑轨（不加原生滑块依赖）且只在开启时显示", () => {
+  const button = read("src/modules/floating-language/FloatingLanguageButton.tsx");
+  assert.match(button, /latest\.current\.longPressMs/);
+  assert.doesNotMatch(button, /FLOATING_LONG_PRESS_MS/);
+  const settings = read("app/(shell)/settings.tsx");
+  assert.match(settings, /<HoldTimeSlider/);
+  assert.match(settings, /testID="settings-floating-language-hold"/);
+  assert.match(settings, /onCommit=\{setFloatingLongPressMs\}/);
+  const holdAt = settings.indexOf("<HoldTimeSlider");
+  assert.match(settings.slice(Math.max(0, holdAt - 120), holdAt), /floatingLanguageEnabled \? \(/);
+  // 滑块是纯 JS：不引入原生滑块依赖，保证可以走 OTA。
+  const slider = read("src/modules/floating-language/HoldTimeSlider.tsx");
+  assert.doesNotMatch(slider, /@react-native-community\/slider|react-native-gesture-handler|react-native-reanimated/);
+  assert.match(slider, /accessibilityRole="adjustable"/);
+  assert.doesNotMatch(read("package.json"), /@react-native-community\/slider/);
+});

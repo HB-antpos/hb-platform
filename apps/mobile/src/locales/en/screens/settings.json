@@ -32,7 +32,10 @@
   },
   "floatingLanguage": {
     "title": "Floating language button",
-    "description": "A draggable 中 / EN button on every page: tap to switch language, hold 2 seconds for quick navigation."
+    "description": "A draggable 中 / EN button on every page: tap to switch language, hold for quick navigation.",
+    "holdTitle": "Hold time",
+    "holdDescription": "How long to hold the button to open quick navigation",
+    "holdOption": "{{seconds}} s"
   },
   "diagnostics": {
     "title": "About and diagnostics",

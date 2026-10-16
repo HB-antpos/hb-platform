@@ -6,6 +6,13 @@ import {
   FLOATING_BUTTON_SIZE,
   FLOATING_DRAG_EDGE_MARGIN,
   FLOATING_EDGE_TUCK,
+  FLOATING_LONG_PRESS_MS,
+  FLOATING_LONG_PRESS_MAX_MS,
+  FLOATING_LONG_PRESS_MIN_MS,
+  formatLongPressSeconds,
+  longPressFromRatio,
+  normalizeLongPressMs,
+  ratioFromLongPress,
   FLOATING_TAP_MAX_MS,
   hasMovedBeyondThreshold,
   isInCloseZone,
@@ -75,4 +82,44 @@ test("点击判定：没移动、没触发长按、按得够短才切语言", ()
   assert.equal(isTapGesture({ moved: false, longPressFired: false, pressedMs: FLOATING_TAP_MAX_MS + 1 }), false);
   assert.equal(isTapGesture({ moved: true, longPressFired: false, pressedMs: 100 }), false);
   assert.equal(isTapGesture({ moved: false, longPressFired: true, pressedMs: 100 }), false);
+});
+
+test("按住时长：默认 2 秒；范围 1~3 秒；坏值回落默认；越界夹紧、取整到 100ms", () => {
+  assert.equal(FLOATING_LONG_PRESS_MS, 2000);
+  assert.equal(FLOATING_LONG_PRESS_MIN_MS, 1000);
+  assert.equal(FLOATING_LONG_PRESS_MAX_MS, 3000);
+  // 下限必须明显高于「点一下」的判定上限，否则点一下和长按会混在一起。
+  assert.ok(FLOATING_LONG_PRESS_MIN_MS > FLOATING_TAP_MAX_MS * 1.5);
+  assert.equal(normalizeLongPressMs(undefined), 2000);
+  assert.equal(normalizeLongPressMs("3000"), 2000);
+  assert.equal(normalizeLongPressMs(Number.NaN), 2000);
+  assert.equal(normalizeLongPressMs(50), 1000);
+  assert.equal(normalizeLongPressMs(99999), 3000);
+  assert.equal(normalizeLongPressMs(1530), 1500);
+  assert.equal(normalizeLongPressMs(2340), 2300);
+});
+
+test("滑轨换算：两端、中点与步长取整，且与时长互相还原", () => {
+  assert.equal(longPressFromRatio(0), 1000);
+  assert.equal(longPressFromRatio(1), 3000);
+  assert.equal(longPressFromRatio(0.5), 2000);
+  assert.equal(longPressFromRatio(-3), 1000);
+  assert.equal(longPressFromRatio(7), 3000);
+  assert.equal(longPressFromRatio(Number.NaN), 1000);
+  assert.equal(longPressFromRatio(0.123), 1200);
+  assert.equal(ratioFromLongPress(1000), 0);
+  assert.equal(ratioFromLongPress(3000), 1);
+  assert.equal(ratioFromLongPress(2000), 0.5);
+  for (let ms = 1000; ms <= 3000; ms += 100) {
+    assert.equal(longPressFromRatio(ratioFromLongPress(ms)), ms);
+  }
+});
+
+test("按住时长的界面文案：整秒不带小数，半秒带一位", () => {
+  assert.equal(formatLongPressSeconds(2000), "2");
+  assert.equal(formatLongPressSeconds(1500), "1.5");
+  assert.equal(formatLongPressSeconds(1000), "1");
+  assert.equal(formatLongPressSeconds(2300), "2.3");
+  assert.equal(formatLongPressSeconds(3000), "3");
+  assert.equal(formatLongPressSeconds(undefined as unknown as number), "2");
 });
