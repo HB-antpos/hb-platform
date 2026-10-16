@@ -42,6 +42,7 @@ const base = { stores, isDeviceMode: false, deviceBoundStore: null, isAdmin: fal
 assert.equal(buildPriceTaskOverview({ ...base, summary: null }), EMPTY_PRICE_TASK_OVERVIEW);
 assert.equal(EMPTY_PRICE_TASK_OVERVIEW.ready, false);
 assert.equal(EMPTY_PRICE_TASK_OVERVIEW.reportsLocked, false, "接口故障时不能把人挡在报表外");
+assert.equal(EMPTY_PRICE_TASK_OVERVIEW.visiblePending, 0);
 
 // ---- 锁定只看「管理分店」的超期，关联但只能查看的分店不算 ----
 const mixed = buildPriceTaskOverview({
@@ -59,7 +60,8 @@ assert.equal(mixed.reportsLocked, true);
 assert.equal(mixed.firstOverdueStoreCode, "C");
 assert.deepEqual(mixed.rows.map((item) => item.storeCode), ["A", "B", "C"], "rows 仍是名下全部可见分店：价格页分店条要看到 B 的数量");
 assert.deepEqual(mixed.managedRows.map((item) => item.storeCode), ["A", "C"], "managedRows 只含管理分店，弹窗只列它们");
-assert.equal(mixed.totalPending, 5, "角标 / 提醒合计只算管理分店（A 3 + C 2）；只能查看的 B 的 4 项不算");
+assert.equal(mixed.totalPending, 5, "提醒合计只算管理分店（A 3 + C 2）；只能查看的 B 的 4 项不算");
+assert.equal(mixed.visiblePending, 9, "工作台角标按名下全部可见分店合计（A 3 + B 4 + C 2），含只关联的 B");
 
 const onlyViewOnlyOverdue = buildPriceTaskOverview({
   ...base,
@@ -85,7 +87,8 @@ const viewOnly = buildPriceTaskOverview({
 });
 assert.equal(viewOnly.ready, true);
 assert.deepEqual(viewOnly.managedRows, []);
-assert.equal(viewOnly.totalPending, 0, "全是只能查看的分店：没有要这位账号负责的待办");
+assert.equal(viewOnly.totalPending, 0, "全是只能查看的分店：没有要这位账号负责的待办，不弹窗");
+assert.equal(viewOnly.visiblePending, 6, "但工作台角标仍显示这些分店的待办数量（用户 10-16：角标不能整个消失）");
 assert.equal(viewOnly.reportsLocked, false);
 assert.equal(viewOnly.rows.length, 1, "价格页的分店条仍能看到这家分店的数量");
 
@@ -117,7 +120,8 @@ assert.deepEqual(
   "仓库管理员：只算 isPrimary 的分店，只关联的 B 不算管理分店"
 );
 assert.deepEqual(warehouseManager.managedRows.map((item) => item.storeCode), ["A", "C"], "弹窗只列管理分店，B 不出现");
-assert.equal(warehouseManager.totalPending, 5, "角标 / 提醒只算管理分店（A 3 + C 2），B 的 4 项不算");
+assert.equal(warehouseManager.totalPending, 5, "提醒只算管理分店（A 3 + C 2），B 的 4 项不算");
+assert.equal(warehouseManager.visiblePending, 9, "仓库管理员的工作台角标按名下全部可见分店合计，B 的 4 项也算");
 assert.equal(warehouseManager.manageableOverdueCount, 2, "超期数只算管理分店（C 的 2），B 的 5 不算");
 assert.deepEqual(warehouseManager.rows.map((item) => item.storeCode), ["A", "B", "C"], "价格页的分店条仍能看到 B 的数量");
 assert.equal(warehouseManager.reportsLocked, false, "仓库管理员管理分店有超期也不锁报表");
@@ -133,7 +137,8 @@ const warehouseOnlyAsWarehouseManager = buildPriceTaskOverview({
   summary: summary([row("W", { pendingLabelOnlyCount: 3, overdueCount: 3 })]),
 });
 assert.deepEqual(warehouseOnlyAsWarehouseManager.managedRows, []);
-assert.equal(warehouseOnlyAsWarehouseManager.totalPending, 0, "只关联仓库的仓库管理员：这些待办不弹窗、不计角标");
+assert.equal(warehouseOnlyAsWarehouseManager.totalPending, 0, "只关联仓库的仓库管理员：这些待办不弹窗");
+assert.equal(warehouseOnlyAsWarehouseManager.visiblePending, 3, "只关联仓库的仓库管理员：工作台角标仍显示仓库的待办数量");
 assert.equal(warehouseOnlyAsWarehouseManager.rows.length, 1);
 assert.equal(warehouseOnlyAsWarehouseManager.reportsLocked, false);
 
@@ -147,6 +152,29 @@ const adminAndWarehouseManager = buildPriceTaskOverview({
 assert.equal(adminAndWarehouseManager.totalPending, 2, "既是管理员又是仓库管理员：按管理员口径，B 也算管理分店");
 assert.equal(adminAndWarehouseManager.reportsLocked, false, "既是管理员又是仓库管理员：弹提醒但不锁报表");
 
+// ---- 订货员（只持有 Order 角色）：名下分店几乎全是只关联，用户 10-16 决定也要弹窗、有角标，但不锁报表 ----
+// 对照：同样的分店关联，店长口径（isOrderUser 缺省）没有管理分店 → 不弹
+const orderStores: Store[] = [
+  { storeCode: "A", storeName: "Store A", isPrimary: false },
+  { storeCode: "B", storeName: "Store B", isPrimary: false },
+  { storeCode: "C", storeName: "Store C", isPrimary: false },
+];
+const orderSummary = summary([
+  row("A", { pendingPriceUpdateCount: 3, overdueCount: 2 }),
+  row("B", { pendingLabelOnlyCount: 4, overdueCount: 5 }),
+  row("C", { pendingPriceUpdateCount: 2 }),
+]);
+const orderAsStoreRole = buildPriceTaskOverview({ ...base, stores: orderStores, summary: orderSummary });
+assert.equal(orderAsStoreRole.totalPending, 0, "对照：非订货员且分店全是只关联 → 没有管理分店，不弹窗");
+const orderUser = buildPriceTaskOverview({ ...base, stores: orderStores, isOrderUser: true, summary: orderSummary });
+assert.deepEqual(orderUser.manageableStoreCodes, ["A", "B", "C"], "订货员：名下全部分店都算管理分店");
+assert.deepEqual(orderUser.managedRows.map((item) => item.storeCode), ["A", "B", "C"], "弹窗列出名下全部分店");
+assert.equal(orderUser.totalPending, 9, "提醒合计 = 名下全部分店");
+assert.equal(orderUser.visiblePending, 9, "工作台角标 = 名下全部分店");
+assert.equal(orderUser.manageableOverdueCount, 7, "超期数照常统计（红色标签），但不用来锁");
+assert.equal(orderUser.reportsLocked, false, "订货员管理分店超期也不锁报表（只有店长锁）");
+assert.equal(orderUser.firstOverdueStoreCode, "B");
+
 // ---- 设备（PDA）：没有报表入口，永不锁定；管理分店 = 绑定分店 ----
 const bound: Store = { storeCode: "A", storeName: "Store A" };
 const device = buildPriceTaskOverview({
@@ -159,6 +187,7 @@ const device = buildPriceTaskOverview({
 assert.deepEqual(device.manageableStoreCodes, ["A"]);
 assert.equal(device.manageableOverdueCount, 3, "PDA 的超期要统计出来（弹窗里显示红色提示行）");
 assert.equal(device.totalPending, 5, "PDA 绑定分店就是它的管理分店，待办照常计入");
+assert.equal(device.visiblePending, 5);
 assert.deepEqual(device.managedRows.map((item) => item.storeCode), ["A"]);
 assert.equal(device.reportsLocked, false, "设备永不锁定任何功能");
 
@@ -182,7 +211,8 @@ const withStrangers = buildPriceTaskOverview({
   ]),
 });
 assert.deepEqual(withStrangers.rows.map((item) => item.storeCode), ["A"], "只保留名下可见分店");
-assert.equal(withStrangers.totalPending, 2, "角标不能把别家店的待办算进来");
+assert.equal(withStrangers.totalPending, 2, "提醒不能把别家店的待办算进来");
+assert.equal(withStrangers.visiblePending, 2, "角标同样不能把不是名下分店的待办算进来");
 assert.equal(withStrangers.manageableOverdueCount, 0, "别家店的超期更不能锁这位店长的报表");
 assert.equal(withStrangers.reportsLocked, false);
 
