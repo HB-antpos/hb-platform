@@ -494,6 +494,10 @@ namespace BlazorApp.Shared.DTOs
         public string UserGuid { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty;
         public string? FullName { get; set; }
+        public string? GivenName { get; set; }
+        public string? MiddleName { get; set; }
+        public string? FamilyName { get; set; }
+        public string? Nickname { get; set; }
         public string? EmploymentType { get; set; }
         /// <summary>仅未满 18 岁时返回年龄（排班需关注未成年工时），成年员工为空，不下发生日。</summary>
         public int? Age { get; set; }

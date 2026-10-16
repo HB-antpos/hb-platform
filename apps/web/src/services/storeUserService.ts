@@ -11,6 +11,11 @@ export interface StoreUserListDto {
   userGuid: string
   username: string
   fullName?: string
+  // 姓名拆分字段（后端可空）；缺省或 null 统一规范为 undefined。
+  givenName?: string
+  middleName?: string
+  familyName?: string
+  nickname?: string
   email?: string
   phone?: string
   status: number
@@ -24,11 +29,21 @@ export interface StoreUserListDto {
   updatedAt?: string
 }
 
+/** 读取可空字符串字段：同时兼容 camelCase / PascalCase，null 与非字符串都规范为 undefined。 */
+function readOptionalString(raw: Record<string, unknown>, camelKey: string, pascalKey: string): string | undefined {
+  const value = raw[camelKey] ?? raw[pascalKey]
+  return typeof value === 'string' ? value : undefined
+}
+
 function normalizeStoreUser(raw: Record<string, unknown>): StoreUserListDto {
   return {
     userGuid: String(raw.userGuid ?? raw.UserGuid ?? raw.userGUID ?? raw.UserGUID ?? ''),
     username: String(raw.username ?? raw.Username ?? ''),
     fullName: typeof (raw.fullName ?? raw.FullName) === 'string' ? String(raw.fullName ?? raw.FullName) : undefined,
+    givenName: readOptionalString(raw, 'givenName', 'GivenName'),
+    middleName: readOptionalString(raw, 'middleName', 'MiddleName'),
+    familyName: readOptionalString(raw, 'familyName', 'FamilyName'),
+    nickname: readOptionalString(raw, 'nickname', 'Nickname'),
     email: typeof (raw.email ?? raw.Email) === 'string' ? String(raw.email ?? raw.Email) : undefined,
     phone: typeof (raw.phone ?? raw.Phone) === 'string' ? String(raw.phone ?? raw.Phone) : undefined,
     status: Number(raw.status ?? raw.Status ?? 0),

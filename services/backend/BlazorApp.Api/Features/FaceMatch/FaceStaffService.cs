@@ -57,7 +57,13 @@ public sealed class FaceStaffService(
         if (key != null)
         {
             query = query.Where((link, store, user) =>
-                (user.FullName != null && user.FullName.Contains(key)) || user.Username.Contains(key) || user.Email.Contains(key));
+                (user.FullName != null && user.FullName.Contains(key))
+                || (user.GivenName != null && user.GivenName.Contains(key))
+                || (user.MiddleName != null && user.MiddleName.Contains(key))
+                || (user.FamilyName != null && user.FamilyName.Contains(key))
+                || (user.Nickname != null && user.Nickname.Contains(key))
+                || user.Username.Contains(key)
+                || user.Email.Contains(key));
         }
 
         var users = await query

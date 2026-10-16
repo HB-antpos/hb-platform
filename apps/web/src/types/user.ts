@@ -40,7 +40,18 @@ export interface UserStoreDto {
   assignedAt: string
 }
 
-export interface UserDto {
+/**
+ * 账号的姓名拆分字段（后端 GivenName / MiddleName / FamilyName / Nickname，各最长 50 字符，均可空）。
+ * 读取时为 null / 缺省表示未填写；写入时的语义见 usersPageLogic 的 diffUserNameParts。
+ */
+export interface UserNameParts {
+  givenName?: string | null
+  middleName?: string | null
+  familyName?: string | null
+  nickname?: string | null
+}
+
+export interface UserDto extends UserNameParts {
   userGUID: string
   username: string
   email: string
@@ -69,7 +80,7 @@ export interface EmployeeCashierBarcodeDto {
   updatedAt?: string | null
 }
 
-export interface UpdateUserDto {
+export interface UpdateUserDto extends UserNameParts {
   username: string
   email: string
   fullName?: string
@@ -156,7 +167,7 @@ export interface BatchUserStoreOperationResult {
   usersGainingStoreManagerRole: string[]
 }
 
-export interface CreateUserDto {
+export interface CreateUserDto extends UserNameParts {
   username: string
   email: string
   password: string

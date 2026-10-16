@@ -187,6 +187,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStorePriceUpdateSettingAsync(CancellationToken cancellationToken);
 
+    Task ApplyUserNamePartsAsync(CancellationToken cancellationToken);
+
+    Task VerifyUserNamePartsAsync(CancellationToken cancellationToken);
+
     Task ApplyPosmBaselineAsync(CancellationToken cancellationToken);
 
     Task ApplyMobileDeviceActivationAsync(CancellationToken cancellationToken);
@@ -1144,6 +1148,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StorePriceUpdateSettingSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyUserNamePartsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserNamePartsSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 精确签名通过后协调器才登记账本，已有同名但类型/长度不符的列不会被误标为完成。
+        await VerifyUserNamePartsAsync(cancellationToken);
+    }
+
+    public async Task VerifyUserNamePartsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            UserNamePartsSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

@@ -37,6 +37,34 @@ namespace BlazorApp.Shared.Models
         [SugarColumn(IsNullable = true)]
         public string? FullName { get; set; }
 
+        // 姓名拆分字段（迁移 20261018.001-user-name-parts）。FullName 仍是全站显示与搜索的主口径，
+        // 通过 PersonNameFormatter.Compose 由「名 / 中间名 / 姓」合成；这里的长度必须与迁移 ApplySql / VerifySql 一致。
+        // 注意：Hbpos.Api 与主 API 共用本实体且没有 schema 门禁，上线必须先执行 --schema=migrate。
+
+        /// <summary>
+        /// 名（Given name）
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? GivenName { get; set; }
+
+        /// <summary>
+        /// 中间名（Middle name）
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? MiddleName { get; set; }
+
+        /// <summary>
+        /// 姓（Family name）
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? FamilyName { get; set; }
+
+        /// <summary>
+        /// 昵称（Nickname），收银、排班等场景可优先显示
+        /// </summary>
+        [SugarColumn(IsNullable = true, Length = 50)]
+        public string? Nickname { get; set; }
+
         /// <summary>
         /// 最后登录时间
         /// </summary>

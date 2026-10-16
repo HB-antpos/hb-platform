@@ -781,6 +781,10 @@ namespace BlazorApp.Api.Services
                                 Username = u.Username,
                                 Email = u.Email,
                                 FullName = u.FullName,
+                                GivenName = u.GivenName,
+                                MiddleName = u.MiddleName,
+                                FamilyName = u.FamilyName,
+                                Nickname = u.Nickname,
                                 IsActive = u.IsActive,
                                 AssignedAt = ur.CreatedAt,
                             }
@@ -1139,6 +1143,10 @@ namespace BlazorApp.Api.Services
                             u.Username.Contains(query.SearchKeyword)
                             || u.Email.Contains(query.SearchKeyword)
                             || (u.FullName != null && u.FullName.Contains(query.SearchKeyword))
+                            || (u.GivenName != null && u.GivenName.Contains(query.SearchKeyword))
+                            || (u.MiddleName != null && u.MiddleName.Contains(query.SearchKeyword))
+                            || (u.FamilyName != null && u.FamilyName.Contains(query.SearchKeyword))
+                            || (u.Nickname != null && u.Nickname.Contains(query.SearchKeyword))
                     );
                 }
 
@@ -1162,6 +1170,10 @@ namespace BlazorApp.Api.Services
                                 Username = u.Username,
                                 Email = u.Email,
                                 FullName = u.FullName,
+                                GivenName = u.GivenName,
+                                MiddleName = u.MiddleName,
+                                FamilyName = u.FamilyName,
+                                Nickname = u.Nickname,
                                 IsActive = u.IsActive,
                                 AssignedAt = ur.CreatedAt,
                             }
@@ -3283,6 +3295,10 @@ namespace BlazorApp.Api.Services
                         Username = u.Username,
                         Email = u.Email,
                         FullName = u.FullName,
+                        GivenName = u.GivenName,
+                        MiddleName = u.MiddleName,
+                        FamilyName = u.FamilyName,
+                        Nickname = u.Nickname,
                         IsActive = u.IsActive,
                         AssignedAt = up.CreatedAt,
                     })
