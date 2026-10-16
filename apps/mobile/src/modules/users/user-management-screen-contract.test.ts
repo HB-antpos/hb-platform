@@ -153,4 +153,23 @@ assert.match(barcodeDialogSource, /router\.navigate\("\/\(shell\)\/settings"\)/,
 assert.match(barcodeDialogSource, /pendingConfirmation\?\.phase === "printed"/, "已出纸待确认必须显示独立恢复状态");
 assert.match(barcodeDialogSource, /fontScale > 1\.2 \|\| width < 380/, "窄屏或大字号时弹层操作必须改为纵向布局");
 
+
+// 创建员工页「账号归属」里的分店标签：新员工与这家店的关系是「仅查看」（后端 IsPrimary=false），
+// 「可管理」是列表页表示操作者能管这家店的徽标，不能在这里出现（会被误读成新员工是管理者）。
+assert.match(createSource, /currentStore\.viewOnlyBadge/, "创建页的分店标签必须是「仅查看」");
+assert.doesNotMatch(createSource, /currentStore\.manageableBadge/, "创建页不得出现「可管理」徽标");
+
+// 权限管理页：店长是由「管理」分店派生的角色。管理员点它要被引导去「门店」，而不是无反应；非管理员保持锁定。
+{
+  const accessScreen = readFileSync(resolve(currentDirectory, "access-management-screen.tsx"), "utf8");
+  assert.match(accessScreen, /planStoreManagerGrant\(\{/, "点店长行必须走 planStoreManagerGrant");
+  assert.match(accessScreen, /selection\.derived &&\s*eligibility\.canGrantStoreManagement &&\s*eligibility\.storesMode === "editable"/, "只有管理员且门店区可编辑才允许引导");
+  assert.match(accessScreen, /\(selection\.locked && !managerGrantEnabled\)/, "非管理员的店长行仍是锁定");
+  assert.match(accessScreen, /disabled=\{disabled \|\| selection\.derived\}/, "派生角色的复选框本身不可勾选");
+  assert.match(accessScreen, /setUserAccessStoreState\(current, plan\.storeGUID, "manage"\)/, "只有一家分店时在草稿里设为管理");
+  assert.match(accessScreen, /setActiveSection\("stores"\)/, "引导后切到「门店」区，让管理员看到并保存");
+  // 选角色保存时不会把店长角色提交给角色接口（它由后端按管理分店派生）
+  assert.match(accessScreen, /roleGuids: selectedRoleGuids/, "保存角色仍只提交可分配角色（店长由 buildAssignableRoleGuids 剔除）");
+}
+
 console.log("user-management-screen-contract.test.ts: ok");

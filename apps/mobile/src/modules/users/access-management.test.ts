@@ -16,6 +16,7 @@ import {
   isStoreStaffRoleName,
   isStoreManagerRoleName,
   limitUserAccessRolesForActor,
+  planStoreManagerGrant,
   setUserAccessStoreState,
   toggleDirectPermission,
 } from "./access-management";
@@ -492,5 +493,28 @@ assert.equal(
   "普通员工即使误带管理权限码，也不能看到入口或通过深链加载授权数据",
 );
 assert.equal(delegatedStaffAccess.reason, "noPermission");
+
+// ───────── 管理员点「店长」角色行：店长由「管理」分店派生，点它是引导而不是无反应 ─────────
+{
+  const view = (storeGUID: string) => ({ storeGUID, isPrimary: false });
+  const manage = (storeGUID: string) => ({ storeGUID, isPrimary: true });
+  const base = { canGrantStoreManagement: true, storesEditable: true };
+
+  assert.deepEqual(planStoreManagerGrant({ ...base, assignments: [view("s1")] }), { kind: "set", storeGUID: "s1" }, "只有一家分店：直接设为管理");
+  assert.deepEqual(planStoreManagerGrant({ ...base, assignments: [view("s1"), view("s2")] }), { kind: "choose" }, "多家分店：不替管理员选，引导去门店区选");
+  assert.deepEqual(planStoreManagerGrant({ ...base, assignments: [] }), { kind: "noStore" }, "没有分店：提示先分配");
+  assert.deepEqual(planStoreManagerGrant({ ...base, assignments: [manage("s1")] }), { kind: "already" }, "已有管理分店：不动草稿，避免误降级");
+  assert.deepEqual(planStoreManagerGrant({ ...base, assignments: [manage("s1"), view("s2")] }), { kind: "already" });
+  assert.deepEqual(planStoreManagerGrant({ ...base, assignments: [view("s1"), manage("s2")] }), { kind: "already" });
+  // 非管理员（后端只允许管理员授予管理）/ 门店区不可编辑：保持锁定
+  assert.deepEqual(planStoreManagerGrant({ canGrantStoreManagement: false, storesEditable: true, assignments: [view("s1")] }), { kind: "denied" });
+  assert.deepEqual(planStoreManagerGrant({ canGrantStoreManagement: true, storesEditable: false, assignments: [view("s1")] }), { kind: "denied" });
+  assert.deepEqual(planStoreManagerGrant({ canGrantStoreManagement: false, storesEditable: false, assignments: [] }), { kind: "denied" });
+
+  // 与门店状态函数配合：set 之后该分店的状态是「管理」，草稿里就有了管理分店（店长行随之显示选中）
+  const afterSet = setUserAccessStoreState([view("s1")], "s1", "manage");
+  assert.equal(getUserAccessStoreState(afterSet, "s1"), "manage");
+  assert.equal(planStoreManagerGrant({ ...base, assignments: afterSet }).kind, "already", "设置后再点不会重复动草稿");
+}
 
 console.log("user access management pure logic tests passed");

@@ -219,7 +219,14 @@
       "searchPlaceholder": "搜索角色",
       "noSearchResults": "没有匹配的角色。",
       "emptyTitle": "没有可用角色",
-      "emptyDescription": "当前没有可分配给此账号的角色。"
+      "emptyDescription": "当前没有可分配给此账号的角色。",
+      "derivedAdminHint": "店长角色不能直接勾选：它由「管理」分店自动派生。点「店长」会带你去「门店」，把分店设为「管理」并保存即可。",
+      "grantManager": {
+        "set": "已在草稿里把「{{store}}」设为「管理」，请点「保存门店」后生效。",
+        "choose": "该员工有多个分店，请在这里选择要设为「管理」的分店，再点「保存门店」。",
+        "noStore": "还没有给这个员工分配分店，请先分配分店，再把它设为「管理」。",
+        "already": "店长角色由「管理」分店派生。想取消店长，把对应分店改为「查看」并保存即可。"
+      }
     },
     "permissions": {
       "managerLimit": "店长只能授权自己拥有的 POS 收银权限。",

@@ -277,7 +277,8 @@ export default function CreateStaffScreen() {
             <View style={styles.infoRow}>
               <Text variant="bodyMedium" style={styles.rowLabel}>{t("create.store")}</Text>
               <Text variant="bodyMedium" style={styles.flex}>{store?.storeName || requestedStoreCode}</Text>
-              <Chip compact style={styles.storeChip}>{t("currentStore.manageableBadge")}</Chip>
+              {/* 新员工与这家店的关系是「仅查看」（后端 IsPrimary=false）；「可管理」是列表页里表示操作者能管这家店的徽标，不能放在这里误导成新员工是管理者。 */}
+              <Chip compact style={styles.storeChip}>{t("currentStore.viewOnlyBadge")}</Chip>
             </View>
             <View style={[styles.infoRow, styles.rowDivider]}>
               <Text variant="bodyMedium" style={styles.rowLabel}>{t("create.role")}</Text>

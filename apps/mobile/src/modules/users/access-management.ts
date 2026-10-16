@@ -379,3 +379,31 @@ export function classifyUserAccessError(error: unknown): UserAccessErrorKind {
       return "network";
   }
 }
+
+/**
+ * 管理员点「店长」这个派生角色行时该做什么。店长角色不能直接勾选：它由「至少有一家『管理』分店」自动派生，
+ * 所以「升店长」的真实操作是把某家分店设为「管理」并保存门店。这里把这个引导做成纯函数，页面按结果执行：
+ * - denied    ：不是管理员 / 门店区不可编辑——保持锁定，什么都不做；
+ * - already   ：草稿里已经有「管理」分店（店长已由它派生）——提示取消方法，不动草稿，避免误降级；
+ * - noStore   ：还没分配任何分店——提示先去分配；
+ * - set       ：只有一家分店——直接在草稿里把它设为「管理」（仍须点「保存门店」才生效）；
+ * - choose    ：有多家分店——不替管理员选，引导去「门店」自己选。
+ */
+export type StoreManagerGrantPlan =
+  | { kind: "denied" }
+  | { kind: "already" }
+  | { kind: "noStore" }
+  | { kind: "set"; storeGUID: string }
+  | { kind: "choose" };
+
+export function planStoreManagerGrant(input: {
+  canGrantStoreManagement: boolean;
+  storesEditable: boolean;
+  assignments: readonly UserAccessStoreAssignment[];
+}): StoreManagerGrantPlan {
+  if (!input.canGrantStoreManagement || !input.storesEditable) return { kind: "denied" };
+  if (input.assignments.some((item) => item.isPrimary)) return { kind: "already" };
+  if (input.assignments.length === 0) return { kind: "noStore" };
+  if (input.assignments.length === 1) return { kind: "set", storeGUID: input.assignments[0].storeGUID };
+  return { kind: "choose" };
+}

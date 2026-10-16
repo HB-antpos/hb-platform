@@ -219,7 +219,14 @@
       "searchPlaceholder": "Search roles",
       "noSearchResults": "No roles match this search.",
       "emptyTitle": "No roles available",
-      "emptyDescription": "There are no assignable roles for this account."
+      "emptyDescription": "There are no assignable roles for this account.",
+      "derivedAdminHint": "The store manager role cannot be ticked directly: it is derived from \"Manage\" stores. Tap \"Store manager\" to jump to Stores, set a store to \"Manage\" and save.",
+      "grantManager": {
+        "set": "\"{{store}}\" is set to \"Manage\" in the draft. Tap \"Save stores\" to apply.",
+        "choose": "This employee has several stores. Choose the store to set to \"Manage\" here, then tap \"Save stores\".",
+        "noStore": "This employee has no store yet. Assign a store first, then set it to \"Manage\".",
+        "already": "The store manager role is derived from \"Manage\" stores. To remove it, set those stores to \"View\" and save."
+      }
     },
     "permissions": {
       "managerLimit": "Store managers can only grant POS cashier permissions they already hold.",
