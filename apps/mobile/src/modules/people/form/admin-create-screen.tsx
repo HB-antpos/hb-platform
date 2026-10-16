@@ -522,7 +522,9 @@ export function AdminCreateScreen() {
           value={values.password}
           onChangeText={(value) => { patch({ password: value }); setErrors((current) => ({ ...current, password: undefined, confirmPassword: undefined })); }}
           secureTextEntry={!passwordVisible}
-          textContentType="newPassword"
+          // 这是替别人设的初始密码，不能让系统「强密码」建议把它存进管理员自己的钥匙串。
+          textContentType="none"
+          autoComplete="off"
           maxLength={100}
           error={errors.password ? t(`adminCreate.passwordErrors.${errors.password}`) : undefined}
           hint={t("adminCreate.passwordHelper")}
@@ -536,7 +538,8 @@ export function AdminCreateScreen() {
           value={values.confirmPassword}
           onChangeText={(value) => { patch({ confirmPassword: value }); setErrors((current) => ({ ...current, confirmPassword: undefined })); }}
           secureTextEntry={!passwordVisible}
-          textContentType="newPassword"
+          textContentType="none"
+          autoComplete="off"
           maxLength={100}
           error={errors.confirmPassword ? t("adminCreate.passwordErrors.mismatch") : undefined}
           disabled={frozen}

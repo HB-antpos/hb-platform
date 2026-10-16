@@ -79,8 +79,8 @@
     "sectionRolesStores": "Roles and stores",
     "rolesLabel": "Roles",
     "storesLabel": "Stores",
-    "rolesPlaceholder": "None selected (set later in access)",
-    "storesPlaceholder": "None selected (set later in access)",
+    "rolesPlaceholder": "None selected",
+    "storesPlaceholder": "None selected",
     "storesSummary": "{{count}} stores",
     "storeState": {
       "unassigned": "None",

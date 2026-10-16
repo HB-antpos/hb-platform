@@ -135,6 +135,7 @@ export interface FormFieldProps {
   maxLength?: number;
   secureTextEntry?: boolean;
   textContentType?: TextInputProps["textContentType"];
+  autoComplete?: TextInputProps["autoComplete"];
   /** 输入框内右侧的小标签（如「可收信」）。 */
   adornment?: ReactNode;
   /** 输入框右侧的操作（如显示 / 隐藏密码）。 */
@@ -159,6 +160,7 @@ export function FormField({
   maxLength,
   secureTextEntry,
   textContentType,
+  autoComplete,
   adornment,
   trailing,
   mono = false,
@@ -188,6 +190,7 @@ export function FormField({
           maxLength={maxLength}
           secureTextEntry={secureTextEntry}
           textContentType={textContentType}
+          autoComplete={autoComplete}
           accessibilityLabel={label}
           accessibilityState={{ disabled: locked }}
         />
@@ -466,7 +469,7 @@ const styles = StyleSheet.create({
   },
   inputBoxLocked: { backgroundColor: HB_COLORS.surfaceMuted, borderColor: HB_COLORS.outlineMuted },
   inputBoxError: { borderColor: HB_COLORS.danger },
-  input: { color: HB_COLORS.textPrimary, flex: 1, fontSize: 15, minWidth: 0, paddingVertical: 8 },
+  input: { color: HB_COLORS.textPrimary, flex: 1, fontSize: 15, minWidth: 0, paddingVertical: 8, textAlignVertical: "center" },
   inputLocked: { color: HB_COLORS.textSecondary },
   mono: { fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) },
   errorText: { color: HB_COLORS.danger, fontSize: 12, lineHeight: 16 },

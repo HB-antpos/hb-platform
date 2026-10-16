@@ -8,7 +8,7 @@ import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Icon, IconButton, Snackbar, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { InfoCard, KvRow, NoticeBox, StickyActionBar, type PeopleTone } from "../ui";
+import { InfoCard, KvRow, NoticeBox, PEOPLE_TONES, StickyActionBar, type PeopleTone } from "../ui";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 
 export interface CreatedNotice {
@@ -126,7 +126,15 @@ export function CreatedResult(props: CreatedResultProps) {
 
       <StickyActionBar>
         {props.print ? (
-          <Button mode="contained-tonal" icon="qrcode" onPress={props.print.onPress} style={styles.footerButton} contentStyle={styles.footerButtonContent}>
+          <Button
+            mode="contained-tonal"
+            icon="qrcode"
+            buttonColor={PEOPLE_TONES.blue.bg}
+            textColor={HB_COLORS.action}
+            onPress={props.print.onPress}
+            style={styles.footerButton}
+            contentStyle={styles.footerButtonContent}
+          >
             {props.print.label}
           </Button>
         ) : null}

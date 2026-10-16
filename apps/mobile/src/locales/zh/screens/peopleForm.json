@@ -79,8 +79,8 @@
     "sectionRolesStores": "角色与分店",
     "rolesLabel": "角色",
     "storesLabel": "分店",
-    "rolesPlaceholder": "未选择（可稍后在授权里设置）",
-    "storesPlaceholder": "未选择（可稍后在授权里设置）",
+    "rolesPlaceholder": "未选择",
+    "storesPlaceholder": "未选择",
     "storesSummary": "{{count}} 家",
     "storeState": {
       "unassigned": "未分配",
