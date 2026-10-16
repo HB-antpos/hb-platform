@@ -12,8 +12,40 @@ export const FLOATING_TOP_MARGIN = 8;
 export const FLOATING_BOTTOM_MARGIN = 12;
 /** 手指移动超过这个距离才算拖动（也会取消长按计时）。 */
 export const FLOATING_MOVE_THRESHOLD = 8;
-/** 按住多久打开快速跳转。 */
+/** 按住多久打开快速跳转：默认 2 秒，用户可在设置页用滑轨调整（范围 1~3 秒）。 */
 export const FLOATING_LONG_PRESS_MS = 2000;
+/**
+ * 滑轨范围与步长（毫秒）。下限 1 秒：「点一下」的判定上限是 0.5 秒，
+ * 按住时长不能压到它附近，否则点一下和长按会混在一起；上限 3 秒由用户指定。
+ */
+export const FLOATING_LONG_PRESS_MIN_MS = 1000;
+export const FLOATING_LONG_PRESS_MAX_MS = 3000;
+export const FLOATING_LONG_PRESS_STEP_MS = 100;
+
+/** 读回存的按住时长：只收有限数字，夹在 1~3 秒内并取整到 100ms；其余（没存过、存坏了）回落到默认 2 秒。 */
+export function normalizeLongPressMs(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return FLOATING_LONG_PRESS_MS;
+  const clamped = Math.min(Math.max(raw, FLOATING_LONG_PRESS_MIN_MS), FLOATING_LONG_PRESS_MAX_MS);
+  return Math.round(clamped / FLOATING_LONG_PRESS_STEP_MS) * FLOATING_LONG_PRESS_STEP_MS;
+}
+
+/** 滑轨位置（0~1）换算成按住时长（毫秒），按步长取整。 */
+export function longPressFromRatio(ratio: number): number {
+  const safe = Number.isFinite(ratio) ? Math.min(Math.max(ratio, 0), 1) : 0;
+  return normalizeLongPressMs(
+    FLOATING_LONG_PRESS_MIN_MS + safe * (FLOATING_LONG_PRESS_MAX_MS - FLOATING_LONG_PRESS_MIN_MS)
+  );
+}
+
+/** 按住时长（毫秒）换算成滑轨位置（0~1）。 */
+export function ratioFromLongPress(ms: number): number {
+  return (normalizeLongPressMs(ms) - FLOATING_LONG_PRESS_MIN_MS) / (FLOATING_LONG_PRESS_MAX_MS - FLOATING_LONG_PRESS_MIN_MS);
+}
+
+/** 毫秒换成界面显示的秒数文案：2000 → "2"，1500 → "1.5"。 */
+export function formatLongPressSeconds(ms: number): string {
+  return String(normalizeLongPressMs(ms) / 1000);
+}
 /** 按下到松手不超过这个时长、且没移动，才算「点一下」切换语言；按了一会儿又松手什么都不做，避免误切。 */
 export const FLOATING_TAP_MAX_MS = 500;
 /** 拖动时出现的底部「隐藏」区：圆心离容器底部的距离、半径与命中半径。 */

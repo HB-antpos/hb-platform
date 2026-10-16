@@ -66,6 +66,8 @@ import {
   hydrateFloatingLanguagePreference,
   useFloatingLanguageStore,
 } from "@/modules/floating-language/preference";
+import { formatLongPressSeconds } from "@/modules/floating-language/geometry";
+import { HoldTimeSlider } from "@/modules/floating-language/HoldTimeSlider";
 import { isRequiredLocationError } from "@/modules/attendance/required-location";
 import {
   buildAppUpdateInfoRows,
@@ -447,9 +449,11 @@ export default function Settings() {
   const logout = useAuthStore((state) => state.logout);
   const loginDeviceAccount = useAuthStore((state) => state.loginDeviceAccount);
   const sessionKind = useAuthStore((state) => state.sessionKind);
-  // 语言悬浮按钮：本机偏好，默认关闭；iOS 审核会话不提供（按钮本身在审核态也不显示）。
+  // 语言悬浮按钮：本机偏好，默认开启；iOS 审核会话不提供（按钮本身在审核态也不显示）。
   const floatingLanguageEnabled = useFloatingLanguageStore((state) => state.enabled);
   const setFloatingLanguageEnabled = useFloatingLanguageStore((state) => state.setEnabled);
+  const floatingLongPressMs = useFloatingLanguageStore((state) => state.longPressMs);
+  const setFloatingLongPressMs = useFloatingLanguageStore((state) => state.setLongPressMs);
   const showFloatingLanguageSetting = sessionKind !== "iosReview";
   useEffect(() => {
     void hydrateFloatingLanguagePreference();
@@ -1366,6 +1370,18 @@ export default function Settings() {
                   />
                 }
               />
+              {/* 按住时长：滑轨 1~3 秒、默认 2 秒；只在按钮开启时才有意义，关闭时整行隐藏，页面不为它变长。 */}
+              {floatingLanguageEnabled ? (
+                <HoldTimeSlider
+                  testID="settings-floating-language-hold"
+                  value={floatingLongPressMs}
+                  onCommit={setFloatingLongPressMs}
+                  label={t("floatingLanguage.holdTitle")}
+                  formatValue={(ms) => t("floatingLanguage.holdOption", { seconds: formatLongPressSeconds(ms) })}
+                  minLabel={t("floatingLanguage.holdOption", { seconds: "1" })}
+                  maxLabel={t("floatingLanguage.holdOption", { seconds: "3" })}
+                />
+              ) : null}
             </>
           ) : null}
           <View style={styles.sectionDivider} />
