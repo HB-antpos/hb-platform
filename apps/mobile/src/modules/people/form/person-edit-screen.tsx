@@ -183,6 +183,8 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [passwordUser, setPasswordUser] = useState<StoreUserDetail | null>(null);
+  // 发送设置密码邮件失败的原因：底部弹层会盖住页面 Snackbar，所以就地显示在弹层里。
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -305,9 +307,10 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
   const handleSendSetupEmail = async (email?: string) => {
     if (!passwordUser) return;
     if (!canResetPasswords || !isStoreManageable(storeCode, manageableStores)) {
-      setSnackbarMessage(t("userManagement:messages.storeReadOnly"));
+      setPasswordError(t("userManagement:messages.storeReadOnly"));
       return;
     }
+    setPasswordError(null);
     try {
       // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置；老账号没有可用邮箱时 email 为就地补填的邮箱。
       const result = await setupEmailMutation.mutateAsync({ userGuid: passwordUser.userGUID, storeCode, email });
@@ -315,11 +318,12 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
       finishSaved(t("userManagement:messages.passwordSetupEmailSent", { email: result.maskedEmail }));
     } catch (error) {
       console.warn("[store-users] password reset failed", toSafeStoreUserErrorLog(error));
-      setSnackbarMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.passwordResetFailed" }));
+      setPasswordError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "userManagement:messages.passwordResetFailed" }));
     }
   };
 
   const dismissSetupEmail = () => {
+    setPasswordError(null);
     setPasswordUser(null);
     finishSaved(t("edit.saved"));
   };
@@ -467,6 +471,7 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
           loginName={passwordUser?.username ?? ""}
           email={passwordUser?.email}
           pending={setupEmailMutation.isPending}
+          errorMessage={passwordError}
           onDismiss={dismissSetupEmail}
           onSubmit={(email) => void handleSendSetupEmail(email)}
         />
