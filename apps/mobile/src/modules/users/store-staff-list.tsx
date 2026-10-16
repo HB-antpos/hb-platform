@@ -103,6 +103,15 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
       }),
     [access.isAdmin, deviceBoundStoreCode, isDeviceMode, stores]
   );
+  // 候选分店：店长只能看自己「管理分店」里的店员（后端对非管理分店直接拒绝），界面就不要列出「仅查看」的分店；
+  // 管理员不受限。条码打印等仍按完整的 posEnabledStores 判断资格。
+  const pickerStores = useMemo(
+    () =>
+      access.isAdmin
+        ? posEnabledStores
+        : posEnabledStores.filter((store) => isStoreManageable(store.storeCode, manageableStores)),
+    [access.isAdmin, manageableStores, posEnabledStores]
+  );
 
   useEffect(() => {
     if (isHydratingSelection || storesLoading) {
@@ -114,13 +123,13 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
         return deviceBoundStoreCode;
       }
 
-      if (current && posEnabledStores.some((store) => store.storeCode === current)) {
+      if (current && pickerStores.some((store) => store.storeCode === current)) {
         return current;
       }
 
       // 全局自动默认的分店不算用户选择，仍默认全部分店
       const selectedAssignedStore = rememberedStoreCode && !isSelectedStoreAuto
-        ? posEnabledStores.find((store) => store.storeCode === rememberedStoreCode)
+        ? pickerStores.find((store) => store.storeCode === rememberedStoreCode)
         : null;
       if (selectedAssignedStore) {
         return selectedAssignedStore.storeCode;
@@ -128,7 +137,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
 
       return null;
     });
-  }, [deviceBoundStoreCode, isHydratingSelection, isSelectedStoreAuto, rememberedStoreCode, posEnabledStores, storesLoading]);
+  }, [deviceBoundStoreCode, isHydratingSelection, isSelectedStoreAuto, rememberedStoreCode, pickerStores, storesLoading]);
 
   const managedStore = useMemo(
     () => stores.find((store) => store.storeCode === managedStoreCode) ?? null,
@@ -528,7 +537,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
 
       <StoreSwitchSheet
         visible={storePickerVisible}
-        stores={posEnabledStores}
+        stores={pickerStores}
         manageableStores={manageableStores}
         selectedStoreCode={managedStoreCode}
         includeAllOption={!deviceBoundStoreCode}

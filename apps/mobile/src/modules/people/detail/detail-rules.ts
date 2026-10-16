@@ -24,9 +24,14 @@ export function resolveDetailVariant(input: {
   identityAllowed: boolean;
   isDeviceMode: boolean;
   isIosReview: boolean;
+  /** 店长（非管理员、非仓库经理）：即使持有 Users.View 也只能用店长版（与列表同一条规则）。 */
+  isStoreLevelManager?: boolean;
 }): DetailVariant {
   // 管理员接口在设备模式与 iOS 审核模式下一律屏蔽，必须回落到店长版（走 store-users / 审核模拟接口）。
-  return input.identityAllowed && !input.isDeviceMode && !input.isIosReview ? "admin" : "store";
+  // 店长永远是店长版：列表只给他看自己管理分店里的店员，详情也不能走全局用户接口去读别的角色。
+  return input.identityAllowed && !input.isStoreLevelManager && !input.isDeviceMode && !input.isIosReview
+    ? "admin"
+    : "store";
 }
 
 export interface DetailActorFacts {

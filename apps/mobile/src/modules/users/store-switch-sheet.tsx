@@ -45,7 +45,7 @@ export function StoreSwitchSheet({
             first
             icon="store-outline"
             tone={selectedStoreCode ? "gray" : "blue"}
-            title={t("userManagement:currentStore.allRelated")}
+            title={t("people:storeSheet.allManaged")}
             subtitle={
               counts
                 ? t("people:storeSheet.allCaptionWithCount", { count: counts.total })
@@ -84,7 +84,9 @@ export function StoreSwitchSheet({
           );
         })}
       </InfoCard>
-      <NoticeBox tone="blue">{t("people:storeSheet.viewOnlyNotice")}</NoticeBox>
+      {stores.some((store) => !isStoreManageable(store.storeCode, manageableStores)) ? (
+        <NoticeBox tone="blue">{t("people:storeSheet.viewOnlyNotice")}</NoticeBox>
+      ) : null}
     </BusinessSheet>
   );
 }

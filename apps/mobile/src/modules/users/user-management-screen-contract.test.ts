@@ -186,9 +186,18 @@ assert.match(hubSource, /renders\("roles"\)[\s\S]{0,200}<RolesList[\s\S]{0,200}r
 // 切换分店弹层：POS 启用候选 + 设备绑定模式不给「全部」，可管理判断来自原始分店集合。
 assert.match(
   source,
-  /<StoreSwitchSheet[\s\S]{0,260}stores=\{posEnabledStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
-  "切换分店弹层必须使用 POS 启用候选，并在设备绑定模式禁用全部分店选项"
+  /<StoreSwitchSheet[\s\S]{0,260}stores=\{pickerStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
+  "切换分店弹层必须使用候选分店（POS 启用 + 店长只含管理分店），并在设备绑定模式禁用全部分店选项"
 );
+// 店长只能看自己「管理分店」里角色是店员的账号：候选里不能出现「仅查看」的分店（后端对非管理分店直接拒绝）。
+assert.match(
+  source,
+  /const pickerStores = useMemo\([\s\S]{0,260}access\.isAdmin[\s\S]{0,120}\? posEnabledStores[\s\S]{0,160}isStoreManageable\(store\.storeCode, manageableStores\)/,
+  "店长的分店候选只能是管理分店，管理员不受限"
+);
+assert.match(source, /pickerStores\.some\(\(store\) => store\.storeCode === current\)/, "默认 / 记忆的分店也必须落在候选里，不能自动选中非管理分店");
+// 店长（即使持有 Users.View）永远走店员口径：列表 / 详情 / 编辑三处都要带上这个标记。
+assert.match(hubSource, /isStoreLevelManager: access\.isStoreLevelManager/, "Hub 必须把店长标记传给列表模式判断，店长不能进管理员全局列表");
 assert.match(source, /manageableStores=\{manageableStores\}/, "可管理 / 仅查看必须按原始可管理分店集合判断");
 assert.match(storeSheetSource, /isStoreManageable\(store\.storeCode, manageableStores\)/, "每家分店标出可管理 / 仅查看");
 assert.match(storeSheetSource, /currentStore\.manageableBadge/, "弹层必须有「可管理」标记");

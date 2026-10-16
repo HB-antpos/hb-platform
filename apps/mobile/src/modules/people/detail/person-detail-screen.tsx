@@ -27,6 +27,7 @@ export default function PersonDetailScreen() {
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const { stores, isDeviceMode, selectedStoreCode } = useStores();
   const isAdmin = useAuthStore((state) => state.access.isAdmin);
+  const isStoreLevelManager = useAuthStore((state) => state.access.isStoreLevelManager);
 
   const env = useMemo<DetailEnvironment>(() => {
     const deviceBoundStoreCode = getDeviceBoundStoreCode({ isDeviceMode, selectedStoreCode });
@@ -47,6 +48,7 @@ export default function PersonDetailScreen() {
     identityAllowed: identity.allowed,
     isDeviceMode,
     isIosReview: sessionKind === "iosReview",
+    isStoreLevelManager,
   });
 
   // 换账号 / 换目标 / 换版本时整页重建，避免上一个目标的草稿、弹层状态与缓存串到下一个。

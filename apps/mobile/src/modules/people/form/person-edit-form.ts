@@ -180,7 +180,12 @@ export function buildIdentityUpdateInput(input: {
 /** 编辑页的数据源：带 storeCode 走店员接口；否则管理员账号会话走管理员接口。 */
 export type PersonEditSourceKind = "store" | "admin" | "none";
 
-export function resolvePersonEditSource(input: { storeCode: string; adminSessionAllowed: boolean }): PersonEditSourceKind {
+export function resolvePersonEditSource(input: {
+  storeCode: string;
+  adminSessionAllowed: boolean;
+  /** 店长（非管理员、非仓库经理）不走管理员接口；深链没带 storeCode 时直接「无权编辑」，而不是越权读全局用户。 */
+  isStoreLevelManager?: boolean;
+}): PersonEditSourceKind {
   if (input.storeCode.trim()) return "store";
-  return input.adminSessionAllowed ? "admin" : "none";
+  return input.adminSessionAllowed && !input.isStoreLevelManager ? "admin" : "none";
 }

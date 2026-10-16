@@ -58,6 +58,17 @@ assertEqual(isPeopleHubTab(null), false, "null 不是页签");
 // ── 列表模式 ──
 assertEqual(resolvePeopleListMode({ identityUsersAllowed: true }), "admin", "全局用户查看 + account 会话 → 管理员列表");
 assertEqual(resolvePeopleListMode({ identityUsersAllowed: false }), "store", "否则 → 本店店员列表");
+// 回归（截图：店长在列表里看到订货员 / 仓库员工 / 其他店长）：店长即使持有 Users.View 也只能看自己管理分店里的店员。
+assertEqual(
+  resolvePeopleListMode({ identityUsersAllowed: true, isStoreLevelManager: true }),
+  "store",
+  "店长（持有全局用户查看权限）→ 仍是本店店员列表",
+);
+assertEqual(
+  resolvePeopleListMode({ identityUsersAllowed: true, isStoreLevelManager: false }),
+  "admin",
+  "非店长的全局用户查看者 → 管理员列表",
+);
 
 // ── Hub 路由对象 ──
 assertEqual(buildPeopleHubRoute("roles"), { pathname: "/(shell)/users", params: { tab: "roles" } }, "角色页签路由");

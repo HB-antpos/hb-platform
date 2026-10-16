@@ -167,5 +167,8 @@ assert.equal(shouldPromptPasswordSetup({ loginWasEnabled: true, loginNow: false,
 assert.equal(resolvePersonEditSource({ storeCode: "S001", adminSessionAllowed: true }), "store");
 assert.equal(resolvePersonEditSource({ storeCode: "", adminSessionAllowed: true }), "admin");
 assert.equal(resolvePersonEditSource({ storeCode: " ", adminSessionAllowed: false }), "none");
+// 店长深链没带 storeCode：不能落到管理员接口，直接「无权编辑」；带了 storeCode 仍走店员接口。
+assert.equal(resolvePersonEditSource({ storeCode: "", adminSessionAllowed: true, isStoreLevelManager: true }), "none");
+assert.equal(resolvePersonEditSource({ storeCode: "S001", adminSessionAllowed: true, isStoreLevelManager: true }), "store");
 
 console.log("person-edit-form.test.ts: ok");

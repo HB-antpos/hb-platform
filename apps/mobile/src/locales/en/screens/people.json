@@ -53,11 +53,12 @@
   },
   "storeSheet": {
     "title": "Switch store",
-    "subtitle": "Only stores you are linked to and that have POS enabled",
-    "allCaption": "View only, cannot add",
-    "allCaptionWithCount": "{{count}} people · View only, cannot add",
+    "subtitle": "Only stores you manage that have POS enabled",
+    "allCaption": "Cannot add here — pick a store first",
+    "allCaptionWithCount": "{{count}} people · Cannot add here — pick a store first",
     "peopleCount": "{{count}} people",
-    "viewOnlyNotice": "Stores marked \"View only\" let you browse staff, but not add, edit, disable or reset passwords."
+    "viewOnlyNotice": "Stores marked \"View only\" let you browse staff, but not add, edit, disable or reset passwords.",
+    "allManaged": "All managed stores"
   },
   "admin": {
     "noAccess": "This session cannot access the people list",

@@ -55,7 +55,10 @@ function PeopleHubContent() {
     () => resolveHubTabs({ canViewPeople, canViewRolesAndPermissions: rolesGate.allowed }),
     [canViewPeople, rolesGate.allowed]
   );
-  const listMode = resolvePeopleListMode({ identityUsersAllowed: usersGate.allowed });
+  const listMode = resolvePeopleListMode({
+    identityUsersAllowed: usersGate.allowed,
+    isStoreLevelManager: access.isStoreLevelManager,
+  });
 
   const [requestedTab, setRequestedTab] = useState<PeopleHubTab>(() => normalizeHubTab(tab, tabs));
   // 路由参数变化（深链、重定向壳、同一页面被再次指向）时跟着切页签；非法 / 无权限的 tab 回落到人员。

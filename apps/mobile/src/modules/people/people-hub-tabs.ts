@@ -55,8 +55,17 @@ export function shouldShowHubTabBar(tabs: readonly PeopleHubTab[]): boolean {
 /** 人员页签内容：管理员（全局用户查看 + account 会话）看全局用户，其余人看本店店员。 */
 export type PeopleListMode = "admin" | "store";
 
-export function resolvePeopleListMode({ identityUsersAllowed }: { identityUsersAllowed: boolean }): PeopleListMode {
-  return identityUsersAllowed ? "admin" : "store";
+export function resolvePeopleListMode({
+  identityUsersAllowed,
+  isStoreLevelManager = false,
+}: {
+  identityUsersAllowed: boolean;
+  /** 店长（非管理员、非仓库经理）：永远走店员口径——只看自己「管理分店」里角色是店员的账号，其他角色不可见。 */
+  isStoreLevelManager?: boolean;
+}): PeopleListMode {
+  // 关键逻辑：店长可能碰巧持有 Users.View 等全局读权限（测试店长账号就有），但「全局用户列表」会把订货员、
+  // 仓库员工、其他店长一并列出来。可见范围必须由「身份」而不是「恰好有哪个权限码」决定。
+  return identityUsersAllowed && !isStoreLevelManager ? "admin" : "store";
 }
 
 export interface PeopleHubRoute {

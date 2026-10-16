@@ -53,11 +53,12 @@
   },
   "storeSheet": {
     "title": "切换分店",
-    "subtitle": "只列出你关联、且启用了收银的分店",
-    "allCaption": "只能查看，不能新增",
-    "allCaptionWithCount": "{{count}} 人 · 只能查看，不能新增",
+    "subtitle": "只列出你管理、且启用了收银的分店",
+    "allCaption": "不能新增，请先选一家分店",
+    "allCaptionWithCount": "{{count}} 人 · 不能新增，请先选一家分店",
     "peopleCount": "{{count}} 人",
-    "viewOnlyNotice": "「仅查看」的分店只能浏览员工，不能新增、编辑、停用或重置密码。"
+    "viewOnlyNotice": "「仅查看」的分店只能浏览员工，不能新增、编辑、停用或重置密码。",
+    "allManaged": "全部管理分店"
   },
   "admin": {
     "noAccess": "当前会话无权访问人员列表",

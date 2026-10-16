@@ -66,15 +66,21 @@ const selectionEffectEnd = usersSource.indexOf("  const managedStore = useMemo("
 assert.ok(selectionEffectEnd > selectionEffectStart, "必须能够隔离用户页门店选择恢复逻辑");
 const selectionEffectSource = usersSource.slice(selectionEffectStart, selectionEffectEnd);
 
+// 候选 = POS 启用的分店；店长（非管理员）再收窄到「管理分店」：后端对非管理分店直接拒绝，界面不列出来。
+assert.match(
+  usersSource,
+  /const pickerStores = useMemo\([\s\S]{0,300}access\.isAdmin[\s\S]{0,120}\? posEnabledStores[\s\S]{0,160}posEnabledStores\.filter\(/,
+  "分店候选必须以 POS 启用的分店为底；店长再收窄到管理分店",
+);
 assert.match(
   selectionEffectSource,
-  /posEnabledStores\.some\([\s\S]*?posEnabledStores\.find/,
-  "账号模式的当前选择和记忆选择必须由 POS 启用候选重新校验",
+  /pickerStores\.some\([\s\S]*?pickerStores\.find/,
+  "账号模式的当前选择和记忆选择必须由候选分店（POS 启用 + 店长只含管理分店）重新校验",
 );
 assert.match(
   usersSource,
-  /<StoreSwitchSheet[\s\S]{0,260}stores=\{posEnabledStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
-  "用户 Picker 必须使用 POS 启用候选，并在设备绑定模式禁用全部门店选项",
+  /<StoreSwitchSheet[\s\S]{0,260}stores=\{pickerStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
+  "用户 Picker 必须使用候选分店，并在设备绑定模式禁用全部门店选项",
 );
 
 console.log("pos-store-picker-contract.test.ts: ok");

@@ -86,6 +86,11 @@ function permissionsFor(input: Partial<DetailPermissionInput> & Pick<DetailPermi
 assertEqual(resolveDetailVariant({ identityAllowed: true, isDeviceMode: false, isIosReview: false }), "admin", "全局用户权限 + account 会话 = 管理员版");
 assertEqual(resolveDetailVariant({ identityAllowed: false, isDeviceMode: false, isIosReview: false }), "store", "无全局权限 = 店长版");
 assertEqual(resolveDetailVariant({ identityAllowed: true, isDeviceMode: true, isIosReview: false }), "store", "设备模式屏蔽管理员接口");
+assertEqual(
+  resolveDetailVariant({ identityAllowed: true, isDeviceMode: false, isIosReview: false, isStoreLevelManager: true }),
+  "store",
+  "店长即使持有全局用户权限，详情也只用店长版（不走全局用户接口读别的角色）",
+);
 assertEqual(resolveDetailVariant({ identityAllowed: true, isDeviceMode: false, isIosReview: true }), "store", "iOS 审核模式屏蔽管理员接口");
 
 // ───────────── 店长版：有权限的店长 ─────────────

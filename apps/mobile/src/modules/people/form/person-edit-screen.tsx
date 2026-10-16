@@ -134,7 +134,11 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
   const adminSession = useIdentitySession("Users.Edit");
   const { stores, selectedStoreCode, isDeviceMode } = useStores();
 
-  const source = resolvePersonEditSource({ storeCode, adminSessionAllowed: adminSession.allowed });
+  const source = resolvePersonEditSource({
+    storeCode,
+    adminSessionAllowed: adminSession.allowed,
+    isStoreLevelManager: access.isStoreLevelManager,
+  });
   const actorKey = adminSession.actorKey;
 
   const canEditUsers = access.isAdmin
