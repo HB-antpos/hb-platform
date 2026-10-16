@@ -1,45 +1,55 @@
+import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { Button, Icon, Text } from "react-native-paper";
-import {
-  PosPermissionHighRiskPill,
-} from "@/modules/users/pos-permission-group-card";
-import { POS_PERMISSION_COLORS, PosPermissionSheet } from "@/modules/users/pos-permission-sheet";
-import type {
-  PosPermissionChanges,
-  PosPermissionDisplayGroupKey,
-} from "@/modules/users/pos-terminal-permission-presentation";
-import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
-import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { InfoCard, NoticeBox, PEOPLE_TONES, PeopleTag } from "@/modules/people/ui";
+import { usePosPermissionTranslation } from "@/modules/users/pos-permission-i18n";
+import { PosPermissionSheet } from "@/modules/users/pos-permission-sheet";
+import type { PosPermissionChanges } from "@/modules/users/pos-terminal-permission-presentation";
+import { formatPosHighRiskWarning } from "@/modules/users/pos-terminal-permissions-format";
+import {
+  buildPosHighRiskWarning,
+  buildPosPermissionChangeRows,
+} from "@/modules/users/pos-terminal-permissions-view";
+import { HB_COLORS } from "@/shared/theme/tokens";
 
 interface PosPermissionChangesSheetProps {
   changes: PosPermissionChanges;
   userName: string;
-  storeName: string;
+  /** 已拼好的分店展示名（店名 + 编号），副标题写明「只对它生效」。 */
+  storeLabel: string;
   busy: boolean;
-  getGroupLabel: (key: PosPermissionDisplayGroupKey) => string;
   onDismiss: () => void;
   onConfirm: () => void;
 }
 
-/** 保存前确认：逐项列出开启/关闭，新开高风险项时额外警告，并说明只影响当前分店。 */
+/**
+ * 保存前确认（设计稿 A5②）：开启 / 关闭分开列；本次新开了高风险权限时顶部红色警示条，
+ * 写明开启后对收银的实际影响；副标题写明只对当前分店生效。
+ * 仍用 PosPermissionSheet（Paper Portal + Modal），不能改回原生 Modal，
+ * 否则保存失败的 Snackbar 与二次确认 Dialog 会被它压住。
+ */
 export function PosPermissionChangesSheet({
   changes,
   userName,
-  storeName,
+  storeLabel,
   busy,
-  getGroupLabel,
   onDismiss,
   onConfirm,
 }: PosPermissionChangesSheetProps) {
-  const { t } = useAppTranslation(["userManagement", "common"]);
-  const total = changes.ordered.length;
+  const { t, translate, labels } = usePosPermissionTranslation();
+  const rows = useMemo(() => buildPosPermissionChangeRows(changes, labels), [changes, labels]);
+  const warning = useMemo(() => {
+    const raw = buildPosHighRiskWarning(changes, labels);
+    return raw ? formatPosHighRiskWarning(raw, translate) : null;
+  }, [changes, labels, translate]);
+  const total = rows.length;
 
   return (
     <PosPermissionSheet
-      title={t("posPermissions.confirm.title", { value: total })}
-      subtitle={t("posPermissions.confirm.subtitle", { user: userName, store: storeName })}
-      closeLabel={t("posPermissions.actions.close")}
+      title={t("confirm.title", { value: total })}
+      subtitle={t("confirm.subtitle", { user: userName, store: storeLabel })}
+      closeLabel={t("actions.close")}
       onDismiss={onDismiss}
       dismissable={!busy}
       footer={
@@ -51,7 +61,7 @@ export function PosPermissionChangesSheet({
             style={[BUSINESS_UI.button, styles.footerButton]}
             contentStyle={BUSINESS_UI.buttonContent}
           >
-            {t("posPermissions.actions.backToEdit")}
+            {t("actions.backToEdit")}
           </Button>
           <Button
             mode="contained"
@@ -61,116 +71,72 @@ export function PosPermissionChangesSheet({
             style={[BUSINESS_UI.button, styles.footerButton]}
             contentStyle={BUSINESS_UI.buttonContent}
           >
-            {t("posPermissions.actions.confirmSave")}
+            {t("actions.confirmSave")}
           </Button>
         </>
       }
     >
-      {changes.addedHighRiskCount > 0 ? (
-        <View style={[styles.notice, styles.warningNotice]} accessibilityRole="alert">
-          <Icon source="alert-outline" size={18} color={HB_COLORS.warning} />
-          <Text style={[styles.noticeText, { color: HB_COLORS.warning }]}>
-            {t("posPermissions.confirm.highRiskWarning", { value: changes.addedHighRiskCount })}
-          </Text>
-        </View>
+      {warning ? (
+        <NoticeBox tone="red" icon="alert-octagon-outline">
+          <Text style={styles.warningLead}>{warning.summary}</Text>
+          {warning.impact ? ` ${warning.impact}` : ""}
+        </NoticeBox>
       ) : null}
 
-      <View style={styles.list}>
-        {changes.ordered.map(({ item, kind }, index) => {
-          const added = kind === "added";
+      <InfoCard>
+        {rows.map((row, index) => {
+          const added = row.kind === "added";
+          const tone = PEOPLE_TONES[added ? "green" : "red"];
+          const title = t(added ? "confirm.rowAdded" : "confirm.rowRemoved", { name: row.name });
+          // 只有「新开」高风险才打标签；关掉高风险权限是收紧，不需要再红色提醒。
+          const showRisk = added && row.highRisk;
           return (
             <View
-              key={item.code}
+              key={row.code}
               style={[styles.row, index > 0 && styles.rowDivider]}
               accessible
-              accessibilityLabel={[
-                t(added ? "posPermissions.confirm.added" : "posPermissions.confirm.removed"),
-                item.name,
-                getGroupLabel(item.groupKey),
-                item.highRisk ? t("posPermissions.badges.highRisk") : null,
-              ]
+              accessibilityLabel={[title, row.groupLabel, showRisk ? t("badges.highRisk") : null]
                 .filter(Boolean)
                 .join("，")}
             >
-              <View style={[styles.sign, added ? styles.signAdded : styles.signRemoved]}>
+              <View style={[styles.sign, { backgroundColor: tone.bg }]}>
                 <Icon
-                  source={added ? "plus" : "minus"}
-                  size={16}
-                  color={added ? HB_COLORS.success : HB_COLORS.textSecondary}
+                  source={added ? "plus-circle-outline" : "minus-circle-outline"}
+                  size={19}
+                  color={tone.fg}
                 />
               </View>
               <View style={styles.rowText}>
-                <Text
-                  style={[styles.rowName, !added && styles.rowNameRemoved]}
-                  numberOfLines={2}
-                >
-                  {item.name}
+                <Text style={styles.rowTitle} numberOfLines={2}>
+                  {title}
                 </Text>
-                <Text style={styles.rowMeta}>
-                  {t(added ? "posPermissions.confirm.added" : "posPermissions.confirm.removed")}
-                  {" · "}
-                  {getGroupLabel(item.groupKey)}
+                <Text style={styles.rowMeta} numberOfLines={1}>
+                  {row.groupLabel}
                 </Text>
               </View>
-              {item.highRisk ? (
-                <PosPermissionHighRiskPill label={t("posPermissions.badges.highRisk")} />
-              ) : null}
+              {showRisk ? <PeopleTag label={t("badges.highRisk")} tone="red" /> : null}
             </View>
           );
         })}
-      </View>
-
-      <View style={[styles.notice, styles.infoNotice]}>
-        <Icon source="information-outline" size={18} color={HB_COLORS.action} />
-        <Text style={[styles.noticeText, { color: HB_COLORS.action }]}>
-          {t("posPermissions.confirm.scopeNotice", { store: storeName })}
-        </Text>
-      </View>
+      </InfoCard>
     </PosPermissionSheet>
   );
 }
 
 const styles = StyleSheet.create({
   footerButton: { flex: 1 },
-  notice: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: HB_SPACING.xs,
-    padding: HB_SPACING.sm,
-    borderRadius: HB_RADIUS.control,
-    borderWidth: 1,
-  },
-  warningNotice: {
-    backgroundColor: POS_PERMISSION_COLORS.warningSoft,
-    borderColor: POS_PERMISSION_COLORS.warningBorder,
-  },
-  infoNotice: {
-    backgroundColor: POS_PERMISSION_COLORS.infoSoft,
-    borderColor: POS_PERMISSION_COLORS.infoBorder,
-  },
-  noticeText: { flex: 1, fontSize: 13, lineHeight: 19 },
-  list: {
-    borderWidth: 1,
-    borderColor: HB_COLORS.outlineMuted,
-    borderRadius: HB_RADIUS.surface,
-  },
+  warningLead: { fontWeight: "700" },
   row: {
-    minHeight: 52,
+    minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
-    gap: HB_SPACING.sm,
-    paddingHorizontal: HB_SPACING.sm,
-    paddingVertical: HB_SPACING.xs,
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outlineMuted },
-  sign: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  signAdded: { backgroundColor: POS_PERMISSION_COLORS.successSoft },
-  signRemoved: { backgroundColor: HB_COLORS.surfaceMuted },
-  rowText: { flex: 1, minWidth: 0, gap: 2 },
-  rowName: { fontSize: 15, lineHeight: 21, color: HB_COLORS.textPrimary },
-  rowNameRemoved: {
-    color: HB_COLORS.textSecondary,
-    textDecorationLine: "line-through",
-  },
-  rowMeta: { fontSize: 12, lineHeight: 17, color: HB_COLORS.textSecondary },
+  sign: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  rowText: { flex: 1, minWidth: 0 },
+  rowTitle: { fontSize: 14.5, lineHeight: 20, fontWeight: "700", color: HB_COLORS.textPrimary },
+  rowMeta: { fontSize: 12.5, lineHeight: 17, color: HB_COLORS.textSecondary, marginTop: 1 },
 });

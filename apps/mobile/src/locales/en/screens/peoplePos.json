@@ -1,0 +1,178 @@
+{
+  "title": "POS access",
+  "subtitle": "{{user}} · {{store}}",
+  "unknownUser": "Unknown staff member",
+  "unknownStore": "Unknown store",
+  "loading": "Loading POS permissions...",
+  "mode": {
+    "inherited": "Role default",
+    "override": "Store custom"
+  },
+  "actions": {
+    "back": "Back",
+    "search": "Search permissions",
+    "closeSearch": "Hide search",
+    "restore": "Restore role default",
+    "reviewAndSave": "Review and save",
+    "backToEdit": "Keep editing",
+    "confirmSave": "Confirm and save",
+    "close": "Close"
+  },
+  "overview": {
+    "enabledLabel": "On",
+    "ofTotal": "/ {{total}}",
+    "highRiskLabel": "High risk",
+    "a11y": "{{selected}} of {{total}} POS permissions on, {{risk}} of them high risk"
+  },
+  "presets": {
+    "apply": "Apply",
+    "basic": "Basic cashier",
+    "senior": "Senior cashier",
+    "all": "Turn all on",
+    "none": "Turn all off",
+    "copy": "Copy from colleague"
+  },
+  "search": {
+    "placeholder": "Search permissions or groups"
+  },
+  "filters": {
+    "all": "All",
+    "enabled": "On",
+    "highRisk": "High risk",
+    "changed": "Changed"
+  },
+  "groups": {
+    "sales": "Sales",
+    "discount": "Discounts",
+    "payment": "Payment",
+    "returns": "Returns",
+    "history": "Order history",
+    "dailyClose": "Daily close",
+    "installments": "Lay-bys",
+    "drawerReceipt": "Cash drawer & receipt",
+    "other": "Other"
+  },
+  "group": {
+    "notEnabled": "Not enabled",
+    "previewMore": "{{names}} and {{value}} more",
+    "nameJoin": ", ",
+    "toggleAll": "{{group}}: select or clear the whole group",
+    "expand": "Expand {{group}}",
+    "collapse": "Collapse {{group}}"
+  },
+  "entryHint": "\"{{name}}\" is off, so the items below cannot be used on the POS",
+  "badges": {
+    "highRisk": "High risk",
+    "groupHighRisk": "Has high risk",
+    "changed": "Changed"
+  },
+  "discount": {
+    "scopes": {
+      "line": "Line",
+      "order": "Order"
+    },
+    "levels": {
+      "10": "10%",
+      "20": "20%",
+      "30": "30%",
+      "40": "40%",
+      "50": "50%",
+      "manual": "Manual"
+    },
+    "levelsShort": {
+      "10": "10",
+      "20": "20",
+      "30": "30",
+      "40": "40",
+      "50": "50"
+    },
+    "itemName": "{{scope}} {{level}} off",
+    "manualItemName": "{{scope}} manual discount",
+    "summary": {
+      "numeric": "{{scope}} {{levels}}% off",
+      "manual": "{{scope}} manual",
+      "both": "{{scope}} {{levels}}% off / manual",
+      "levelJoin": "/",
+      "partJoin": ", "
+    }
+  },
+  "footer": {
+    "idle": "No changes",
+    "pending": "Changes: {{value}}",
+    "riskNote": " (incl. {{value}} high risk)"
+  },
+  "confirm": {
+    "title": "Confirm changes ({{value}})",
+    "subtitle": "{{user}} · applies to {{store}} only",
+    "rowAdded": "Turn on · {{name}}",
+    "rowRemoved": "Turn off · {{name}}",
+    "highRisk": {
+      "summary": "Includes {{value}} high-risk permission(s): {{names}}.",
+      "nameJoin": ", ",
+      "impact": "Once on, this person can do the following at the register: {{impacts}}.",
+      "impactJoin": "; ",
+      "impacts": {
+        "changePrice": "change item prices directly",
+        "manualDiscountLine": "type in any discount on a single line",
+        "manualDiscountOrder": "type in any discount on the whole order",
+        "quickDiscountLine": "give a single line {{level}} off",
+        "quickDiscountOrder": "give the whole order {{level}} off",
+        "noReceiptReturn": "return items without a receipt",
+        "openCashDrawer": "open the cash drawer without a sale"
+      }
+    }
+  },
+  "copy": {
+    "title": "Copy from colleague",
+    "subtitle": "Colleagues at {{store}}",
+    "searchPlaceholder": "Search colleague name or username",
+    "help": "After applying you stay on the edit page and can keep adjusting. Nothing takes effect until you tap Review and save. Only permissions you are allowed to assign are copied.",
+    "apply": "Apply {{name}}'s permissions ({{value}})",
+    "applyIdle": "Select a colleague first",
+    "loadingColleague": "Loading permissions...",
+    "permissionCount": "Copyable: {{value}}",
+    "loadFailed": "Could not load this colleague's permissions. Try again or choose someone else.",
+    "listFailed": "Could not load colleagues. Try again later.",
+    "empty": "No colleagues at this store can be copied",
+    "noMatch": "No matching colleagues",
+    "unavailable": "The store code is missing, so colleagues cannot be listed. Reopen this page from People."
+  },
+  "unsaved": {
+    "title": "Discard unsaved changes?",
+    "description": "These POS permission changes have not been saved and will be lost if you leave.",
+    "discard": "Discard changes"
+  },
+  "restore": {
+    "title": "Restore role default permissions?",
+    "description": "This removes the custom setting for this store and returns to the role's default POS permissions."
+  },
+  "busy": {
+    "title": "Operation in progress",
+    "description": "Wait for the save or restore to finish before leaving this page."
+  },
+  "messages": {
+    "saved": "POS permissions saved",
+    "restored": "Role default permissions restored",
+    "saveFailed": "POS permissions could not be saved. Your unsaved selection has been kept.",
+    "restoreFailed": "Role defaults could not be restored. Your current selection has been kept.",
+    "presetApplied": "Applied \"{{name}}\". Tap Review and save to make it take effect.",
+    "copyApplied": "Applied {{name}}'s permissions. Tap Review and save to make them take effect."
+  },
+  "noResults": "No permissions match",
+  "noEnabled": "No permissions are on yet",
+  "noChanges": "No changes yet",
+  "errors": {
+    "invalidTitle": "Permission details are incomplete",
+    "invalidDescription": "The staff member or store identifier is missing. Open this page again from People.",
+    "unauthorizedTitle": "Your session has expired",
+    "unauthorizedDescription": "Sign in again before managing POS permissions.",
+    "forbiddenTitle": "You cannot manage this account's POS permissions",
+    "forbiddenDescription": "Your account does not have permission for this action, and you cannot change your own POS permissions. The server still validates privileged targets.",
+    "notFoundTitle": "The staff-store assignment has changed",
+    "notFoundDescription": "This POS permission assignment no longer exists. The staff member may have moved stores, been disabled, or been unassigned. Return to People and refresh.",
+    "networkTitle": "Could not load POS permissions",
+    "networkDescription": "The server cannot be reached right now. Check your connection and try again."
+  },
+  "emptyTitle": "No POS permissions are assignable",
+  "emptyDescription": "The server has no assignable permissions for this staff member and store. If this store has a custom setting, you can still tap Restore role default above."
+}

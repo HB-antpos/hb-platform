@@ -1,0 +1,178 @@
+{
+  "title": "收银权限",
+  "subtitle": "{{user}} · {{store}}",
+  "unknownUser": "未知员工",
+  "unknownStore": "未知分店",
+  "loading": "正在加载收银权限...",
+  "mode": {
+    "inherited": "角色默认",
+    "override": "本店自定义"
+  },
+  "actions": {
+    "back": "返回",
+    "search": "搜索权限",
+    "closeSearch": "收起搜索",
+    "restore": "恢复角色默认",
+    "reviewAndSave": "查看并保存",
+    "backToEdit": "返回修改",
+    "confirmSave": "确认保存",
+    "close": "关闭"
+  },
+  "overview": {
+    "enabledLabel": "已开",
+    "ofTotal": "/ {{total}}",
+    "highRiskLabel": "高风险",
+    "a11y": "已开 {{selected}} / {{total}} 项收银权限，其中高风险 {{risk}} 项"
+  },
+  "presets": {
+    "apply": "套用",
+    "basic": "基础收银",
+    "senior": "资深收银",
+    "all": "全部开启",
+    "none": "全部关闭",
+    "copy": "从同事复制"
+  },
+  "search": {
+    "placeholder": "搜索权限名或分组"
+  },
+  "filters": {
+    "all": "全部",
+    "enabled": "已开",
+    "highRisk": "高风险",
+    "changed": "本次改动"
+  },
+  "groups": {
+    "sales": "销售",
+    "discount": "折扣",
+    "payment": "收款",
+    "returns": "退货",
+    "history": "历史订单",
+    "dailyClose": "日结",
+    "installments": "分期",
+    "drawerReceipt": "钱箱与小票",
+    "other": "其他"
+  },
+  "group": {
+    "notEnabled": "未开放",
+    "previewMore": "{{names}} 等 {{value}} 项",
+    "nameJoin": "、",
+    "toggleAll": "{{group}}：全选或清空本组",
+    "expand": "展开{{group}}",
+    "collapse": "收起{{group}}"
+  },
+  "entryHint": "没开「{{name}}」，下面几项在收银机上用不到",
+  "badges": {
+    "highRisk": "高风险",
+    "groupHighRisk": "含高风险",
+    "changed": "本次改动"
+  },
+  "discount": {
+    "scopes": {
+      "line": "单行",
+      "order": "整单"
+    },
+    "levels": {
+      "10": "九折",
+      "20": "八折",
+      "30": "七折",
+      "40": "六折",
+      "50": "五折",
+      "manual": "手工"
+    },
+    "levelsShort": {
+      "10": "九",
+      "20": "八",
+      "30": "七",
+      "40": "六",
+      "50": "五"
+    },
+    "itemName": "{{scope}}{{level}}",
+    "manualItemName": "{{scope}}手工折扣",
+    "summary": {
+      "numeric": "{{scope}}{{levels}}折",
+      "manual": "{{scope}}手工",
+      "both": "{{scope}}{{levels}}折/手工",
+      "levelJoin": "/",
+      "partJoin": "、"
+    }
+  },
+  "footer": {
+    "idle": "没有改动",
+    "pending": "{{value}} 项改动",
+    "riskNote": "（含 {{value}} 项高风险）"
+  },
+  "confirm": {
+    "title": "确认 {{value}} 项改动",
+    "subtitle": "{{user}} · 只对 {{store}} 生效",
+    "rowAdded": "开启 · {{name}}",
+    "rowRemoved": "关闭 · {{name}}",
+    "highRisk": {
+      "summary": "包含 {{value}} 项高风险权限：{{names}}。",
+      "nameJoin": "、",
+      "impact": "开启后该员工可以在收银机上{{impacts}}。",
+      "impactJoin": "、",
+      "impacts": {
+        "changePrice": "直接修改商品价格",
+        "manualDiscountLine": "对单行商品手工输入折扣",
+        "manualDiscountOrder": "对整单手工输入折扣",
+        "quickDiscountLine": "直接给单行商品打{{level}}",
+        "quickDiscountOrder": "直接给整单打{{level}}",
+        "noReceiptReturn": "不凭小票直接办理退货",
+        "openCashDrawer": "不经销售直接打开钱箱"
+      }
+    }
+  },
+  "copy": {
+    "title": "从同事复制",
+    "subtitle": "{{store}} 的同事",
+    "searchPlaceholder": "搜索同事姓名或账号",
+    "help": "套用后先停在编辑页，可以继续调整，点「查看并保存」才生效。只会复制你有权分配的权限。",
+    "apply": "套用 {{name}} 的 {{value}} 项权限",
+    "applyIdle": "先选择一位同事",
+    "loadingColleague": "正在读取权限...",
+    "permissionCount": "{{value}} 项可复制",
+    "loadFailed": "读取这位同事的权限失败，请重试或换一位同事。",
+    "listFailed": "同事列表加载失败，请稍后重试。",
+    "empty": "本店没有可以复制的同事",
+    "noMatch": "没有匹配的同事",
+    "unavailable": "缺少分店编号，无法列出同事。请从人员管理重新打开本页。"
+  },
+  "unsaved": {
+    "title": "放弃未保存的更改？",
+    "description": "当前收银权限尚未保存。离开后，这些更改将丢失。",
+    "discard": "放弃更改"
+  },
+  "restore": {
+    "title": "恢复角色默认权限？",
+    "description": "这会删除本店的自定义设置，改回按角色默认的收银权限。"
+  },
+  "busy": {
+    "title": "操作处理中",
+    "description": "正在保存或恢复权限，请等待操作完成后再离开。"
+  },
+  "messages": {
+    "saved": "收银权限已保存",
+    "restored": "已恢复角色默认权限",
+    "saveFailed": "保存收银权限失败，未保存的选择已保留",
+    "restoreFailed": "恢复角色默认失败，当前选择已保留",
+    "presetApplied": "已套用「{{name}}」，点「查看并保存」后生效",
+    "copyApplied": "已套用 {{name}} 的权限，点「查看并保存」后生效"
+  },
+  "noResults": "没有符合条件的权限",
+  "noEnabled": "还没有开启任何权限",
+  "noChanges": "本次还没有改动",
+  "errors": {
+    "invalidTitle": "授权参数不完整",
+    "invalidDescription": "缺少员工或分店标识，请从人员管理页面重新打开。",
+    "unauthorizedTitle": "登录已失效",
+    "unauthorizedDescription": "请重新登录后再管理收银权限。",
+    "forbiddenTitle": "无法管理此账号的收银权限",
+    "forbiddenDescription": "当前账号没有此操作权限，且不能修改本人账号的收银权限。高权限目标仍由服务器最终校验。",
+    "notFoundTitle": "员工与分店的关联已变化",
+    "notFoundDescription": "未找到这项收银授权关系。员工可能已调店、停用或解除分店关联，请返回人员管理刷新。",
+    "networkTitle": "收银权限加载失败",
+    "networkDescription": "暂时无法连接服务器，请检查网络后重试。"
+  },
+  "emptyTitle": "没有可分配的收银权限",
+  "emptyDescription": "服务器目前没有为此员工和分店提供可分配权限。如为本店自定义，仍可点上方「恢复角色默认」。"
+}

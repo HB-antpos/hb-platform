@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import {
   Stack,
   useLocalSearchParams,
@@ -13,10 +13,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ActivityIndicator,
-  Avatar,
   Button,
   IconButton,
-  Menu,
   Searchbar,
   Snackbar,
   Surface,
@@ -24,10 +22,13 @@ import {
 } from "react-native-paper";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { FilterChipRow, InfoCard } from "@/modules/people/ui";
+import { resolvePersonName } from "@/modules/people/person-name";
 import { PosPermissionChangesSheet } from "@/modules/users/pos-permission-changes-sheet";
 import { PosPermissionCopySheet } from "@/modules/users/pos-permission-copy-sheet";
 import { PosPermissionGroupCard } from "@/modules/users/pos-permission-group-card";
-import { POS_PERMISSION_COLORS } from "@/modules/users/pos-permission-sheet";
+import { usePosPermissionTranslation } from "@/modules/users/pos-permission-i18n";
+import { PosPermissionSummaryCard } from "@/modules/users/pos-permission-summary-card";
 import {
   useRestoreStoreUserPosTerminalPermissions,
   useStoreUserPosTerminalPermissions,
@@ -46,23 +47,28 @@ import {
 } from "@/modules/users/pos-terminal-permissions";
 import type { PosPermissionErrorKind } from "@/modules/users/pos-terminal-permissions";
 import {
-  POS_PERMISSION_PRESET_ORDER,
   buildPosPermissionDisplayGroups,
   buildPosPermissionPresetCodes,
   computePosPermissionChanges,
   filterPosPermissionGroups,
   getDefaultExpandedPosPermissionGroups,
   getMatchingPosPermissionPresets,
-  getPosPermissionInitials,
-  getPosPermissionStats,
   isPosPermissionFilterActive,
   type PosPermissionDisplayGroup,
   type PosPermissionDisplayGroupKey,
   type PosPermissionListFilter,
   type PosPermissionPresetKey,
 } from "@/modules/users/pos-terminal-permission-presentation";
+import { formatPosFooterSummary } from "@/modules/users/pos-terminal-permissions-format";
+import {
+  buildPosPermissionFilterChips,
+  buildPosPermissionOverview,
+  buildPosStoreLabel,
+  getPosPermissionEmptyKind,
+  normalizePosPermissionMode,
+  resolvePosPermissionStoreTarget,
+} from "@/modules/users/pos-terminal-permissions-view";
 import type { StoreUserPosTerminalPermissions } from "@/modules/users/types";
-import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
@@ -71,37 +77,43 @@ function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function parseRoleNames(value: string | string[] | undefined) {
-  const values = Array.isArray(value) ? value : value ? [value] : [];
-  return values
-    .flatMap((item) => item.split("|"))
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-const LIST_FILTERS: PosPermissionListFilter[] = ["all", "enabled", "highRisk", "changed"];
-
 export default function PosTerminalPermissionsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const { t } = useAppTranslation(["userManagement", "common"]);
+  const { t, translate, labels } = usePosPermissionTranslation();
+  // 路由参数保持原样：userGuid / storeGuid / storeCode / userName / storeName（roleNames 旧入口还会带，不再使用）。
   const params = useLocalSearchParams<{
     userGuid?: string | string[];
     storeGuid?: string | string[];
     storeCode?: string | string[];
     userName?: string | string[];
     storeName?: string | string[];
-    roleNames?: string | string[];
   }>();
   const access = useAuthStore((state) => state.access);
   const currentUser = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const userGuid = firstParam(params.userGuid)?.trim() ?? "";
-  const storeGuid = firstParam(params.storeGuid)?.trim() ?? "";
-  const storeCode = firstParam(params.storeCode)?.trim() ?? "";
-  const userName = firstParam(params.userName)?.trim() || t("posPermissions.unknownUser");
-  const storeName = firstParam(params.storeName)?.trim() || t("posPermissions.unknownStore");
-  const roleNames = useMemo(() => parseRoleNames(params.roleNames), [params.roleNames]);
+  // 入口可能只带 storeGuid 或只带 storeCode，缺的一个用当前会话的分店列表补齐。
+  const sessionStores = currentUser?.stores;
+  const storeTarget = useMemo(
+    () =>
+      resolvePosPermissionStoreTarget(
+        {
+          storeGuid: firstParam(params.storeGuid),
+          storeCode: firstParam(params.storeCode),
+          storeName: firstParam(params.storeName),
+        },
+        sessionStores ?? []
+      ),
+    [params.storeCode, params.storeGuid, params.storeName, sessionStores]
+  );
+  const { storeGuid, storeCode } = storeTarget;
+  const userName = firstParam(params.userName)?.trim() || t("unknownUser");
+  // 副标题里的姓名与人员管理其他页面一致：走 resolvePersonName（路由只传全名，回落到全名）。
+  const personName = useMemo(() => resolvePersonName({ fullName: userName }).primary, [userName]);
+  const storeLabel = storeTarget.storeName
+    ? buildPosStoreLabel(storeTarget.storeName, storeCode)
+    : storeCode || t("unknownStore");
   const hasRequiredParams = Boolean(userGuid && storeGuid);
   const actorUserGuid = currentUser?.userGUID?.trim() ?? "";
   const isCurrentUser = Boolean(
@@ -129,9 +141,9 @@ export default function PosTerminalPermissionsScreen() {
   const [terminalErrorKind, setTerminalErrorKind] = useState<
     Exclude<PosPermissionErrorKind, "network"> | null
   >(null);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [changesVisible, setChangesVisible] = useState(false);
   const [copyVisible, setCopyVisible] = useState(false);
+  const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [listFilter, setListFilter] = useState<PosPermissionListFilter>("all");
   const [expandedGroups, setExpandedGroups] = useState<Set<PosPermissionDisplayGroupKey>>(
@@ -236,20 +248,20 @@ export default function PosTerminalPermissionsScreen() {
 
       if (busy) {
         Alert.alert(
-          t("posPermissions.busy.title"),
-          t("posPermissions.busy.description"),
+          t("busy.title"),
+          t("busy.description"),
           [{ text: t("common:actions.confirm") }]
         );
         return;
       }
 
       Alert.alert(
-        t("posPermissions.unsaved.title"),
-        t("posPermissions.unsaved.description"),
+        t("unsaved.title"),
+        t("unsaved.description"),
         [
           { text: t("common:actions.cancel"), style: "cancel" },
           {
-            text: t("posPermissions.unsaved.discard"),
+            text: t("unsaved.discard"),
             style: "destructive",
             onPress: () => {
               // 保存原始 action，下一次渲染先解除阻止再统一派发，兼容返回键与手势。
@@ -300,18 +312,16 @@ export default function PosTerminalPermissionsScreen() {
     () => computePosPermissionChanges(displayGroups, baselineCodes, selectedCodes),
     [baselineCodes, displayGroups, selectedCodes]
   );
-  const stats = useMemo(
-    () => getPosPermissionStats(displayGroups, selectedCodeSet),
-    [displayGroups, selectedCodeSet]
+  const mode = normalizePosPermissionMode(permissionsQuery.data?.mode);
+  const overview = useMemo(
+    () => buildPosPermissionOverview({ groups: displayGroups, selectedCodeSet, changes, mode }),
+    [changes, displayGroups, mode, selectedCodeSet]
   );
   const matchingPresets = useMemo(
     () => new Set(getMatchingPosPermissionPresets(selectedCodes, assignablePermissions)),
     [assignablePermissions, selectedCodes]
   );
-  const getGroupLabel = useCallback(
-    (key: PosPermissionDisplayGroupKey) => t(`posPermissions.groups.${key}`),
-    [t]
-  );
+  const getGroupLabel = labels.group;
   const filterActive = isPosPermissionFilterActive(searchQuery, listFilter);
   const visibleGroups = useMemo(
     () =>
@@ -328,14 +338,15 @@ export default function PosTerminalPermissionsScreen() {
     () => new Map(displayGroups.map((group) => [group.key, group])),
     [displayGroups]
   );
-  const mode = permissionsQuery.data?.mode?.toLowerCase() === "override"
-    ? "override"
-    : "inherited";
-  const roleLabel = roleNames
-    .map((roleName) =>
-      roleName.toLowerCase() === "storestaff" ? t("posPermissions.roleLabels.storeStaff") : roleName
-    )
-    .join(" / ");
+  const filterChips = useMemo(
+    () =>
+      buildPosPermissionFilterChips(overview).map((chip) => ({
+        key: chip.key,
+        label: t(`filters.${chip.key}`),
+        count: chip.count,
+      })),
+    [overview, t]
+  );
 
   useEffect(() => {
     setFilterCollapsedGroups(new Set());
@@ -358,9 +369,7 @@ export default function PosTerminalPermissionsScreen() {
     (preset: PosPermissionPresetKey) => {
       if (busy) return;
       replaceDraft(buildPosPermissionPresetCodes(preset, assignablePermissions));
-      setSnackbarMessage(
-        t("posPermissions.messages.presetApplied", { name: t(`posPermissions.presets.${preset}`) })
-      );
+      setSnackbarMessage(t("messages.presetApplied", { name: t(`presets.${preset}`) }));
     },
     [assignablePermissions, busy, replaceDraft, t]
   );
@@ -371,7 +380,7 @@ export default function PosTerminalPermissionsScreen() {
       setCopyVisible(false);
       // 再过一次当前白名单，确保复制结果不越过本页可分配范围。
       replaceDraft(buildGrantedPosPermissionCodes(codes, assignablePermissions));
-      setSnackbarMessage(t("posPermissions.messages.copyApplied", { name: colleagueName }));
+      setSnackbarMessage(t("messages.copyApplied", { name: colleagueName }));
     },
     [assignablePermissions, busy, replaceDraft, t]
   );
@@ -420,12 +429,12 @@ export default function PosTerminalPermissionsScreen() {
       setTerminalErrorKind(null);
       setAuthRedirectRequested(false);
       applyServerPermissions(response);
-      setSnackbarMessage(t("posPermissions.messages.saved"));
+      setSnackbarMessage(t("messages.saved"));
     } catch (error) {
       console.warn("[pos-terminal-permissions] 保存失败", error);
       const errorKind = classifyPosPermissionError(error);
       if (errorKind === "network") {
-        setSnackbarMessage(t("posPermissions.messages.saveFailed"));
+        setSnackbarMessage(t("messages.saveFailed"));
       } else {
         setTerminalErrorKind(errorKind);
         if (errorKind === "unauthorized") {
@@ -458,12 +467,12 @@ export default function PosTerminalPermissionsScreen() {
     if (busy || mode !== "override" || operationInFlightRef.current) return;
 
     Alert.alert(
-      t("posPermissions.restore.title"),
-      t("posPermissions.restore.description"),
+      t("restore.title"),
+      t("restore.description"),
       [
         { text: t("common:actions.cancel"), style: "cancel" },
         {
-          text: t("posPermissions.actions.restore"),
+          text: t("actions.restore"),
           style: "destructive",
           onPress: async () => {
             if (
@@ -482,12 +491,12 @@ export default function PosTerminalPermissionsScreen() {
               setTerminalErrorKind(null);
               setAuthRedirectRequested(false);
               applyServerPermissions(response);
-              setSnackbarMessage(t("posPermissions.messages.restored"));
+              setSnackbarMessage(t("messages.restored"));
             } catch (error) {
               console.warn("[pos-terminal-permissions] 恢复继承失败", error);
               const errorKind = classifyPosPermissionError(error);
               if (errorKind === "network") {
-                setSnackbarMessage(t("posPermissions.messages.restoreFailed"));
+                setSnackbarMessage(t("messages.restoreFailed"));
               } else {
                 setTerminalErrorKind(errorKind);
                 if (errorKind === "unauthorized") {
@@ -514,41 +523,42 @@ export default function PosTerminalPermissionsScreen() {
   ]);
 
   const editorReady = Boolean(permissionsQuery.data) && !terminalErrorKind && queryEnabled;
+  const footerSummary = formatPosFooterSummary(
+    overview.changedCount,
+    overview.addedHighRiskCount,
+    translate
+  );
+
+  const handleToggleSearch = () => {
+    // 收起搜索时清掉关键字，避免列表被一个看不见的搜索词过滤。
+    if (searchVisible) setSearchQuery("");
+    setSearchVisible(!searchVisible);
+  };
 
   const renderHeader = () => (
     <Surface style={styles.header} elevation={0}>
       <IconButton
         icon="arrow-left"
-        accessibilityLabel={t("posPermissions.actions.back")}
+        accessibilityLabel={t("actions.back")}
         disabled={busy}
         onPress={handleBack}
       />
-      <Text variant="titleLarge" numberOfLines={1} style={styles.headerTitle}>
-        {t("posPermissions.title")}
-      </Text>
-      {editorReady ? (
-        <Menu
-          visible={menuVisible}
-          onDismiss={() => setMenuVisible(false)}
-          anchorPosition="bottom"
-          anchor={
-            <IconButton
-              icon="dots-vertical"
-              accessibilityLabel={t("posPermissions.actions.more")}
-              onPress={() => setMenuVisible(true)}
-            />
-          }
-        >
-          <Menu.Item
-            leadingIcon="backup-restore"
-            title={t("posPermissions.actions.restore")}
-            disabled={busy || mode !== "override"}
-            onPress={() => {
-              setMenuVisible(false);
-              handleRestore();
-            }}
-          />
-        </Menu>
+      <View style={styles.headerText}>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {t("title")}
+        </Text>
+        {hasRequiredParams ? (
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
+            {t("subtitle", { user: personName, store: storeLabel })}
+          </Text>
+        ) : null}
+      </View>
+      {editorReady && displayGroups.length > 0 ? (
+        <IconButton
+          icon={searchVisible ? "close" : "magnify"}
+          accessibilityLabel={t(searchVisible ? "actions.closeSearch" : "actions.search")}
+          onPress={handleToggleSearch}
+        />
       ) : null}
     </Surface>
   );
@@ -560,11 +570,11 @@ export default function PosTerminalPermissionsScreen() {
 
     return (
       <EmptyState
-        title={t(`posPermissions.errors.${errorKind}Title`)}
-        description={t(`posPermissions.errors.${errorKind}Description`)}
+        title={t(`errors.${errorKind}Title`)}
+        description={t(`errors.${errorKind}Description`)}
         primaryAction={
           canReturn
-            ? { label: t("posPermissions.actions.back"), icon: "arrow-left", onPress: handleBack }
+            ? { label: t("actions.back"), icon: "arrow-left", onPress: handleBack }
             : canRetry
               ? { label: t("common:actions.retry"), icon: "refresh", onPress: () => void permissionsQuery.refetch() }
               : undefined
@@ -573,222 +583,43 @@ export default function PosTerminalPermissionsScreen() {
     );
   };
 
-  const renderSummaryPanel = () => (
-    <View style={styles.panel}>
-      <View style={styles.identityRow}>
-        <Avatar.Text
-          size={44}
-          label={getPosPermissionInitials(userName)}
-          style={styles.avatar}
-          labelStyle={styles.avatarLabel}
-        />
-        <View style={styles.identityText}>
-          <Text style={styles.identityName} numberOfLines={1}>
-            {userName}
-          </Text>
-          <Text style={styles.secondaryText} numberOfLines={1}>
-            {roleLabel ? t("posPermissions.storeRole", { store: storeName, role: roleLabel }) : storeName}
-          </Text>
-        </View>
-        <View style={[styles.modePill, mode === "override" && styles.modePillOverride]}>
-          <Text style={[styles.modePillText, mode === "override" && styles.modePillTextOverride]}>
-            {t(`posPermissions.mode.${mode}`)}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.panelDivider} />
-
-      <Text style={styles.panelLabel}>{t("posPermissions.presets.title")}</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.presetRow}
-        keyboardShouldPersistTaps="handled"
+  // 吸底只有一个按钮「查看并保存」：左侧写「N 项改动（含 M 项高风险）」，没有改动时按钮灰掉。
+  const renderFooter = () => (
+    <View style={styles.footer}>
+      <Text style={styles.footerText} numberOfLines={2}>
+        <Text style={overview.changedCount > 0 ? styles.footerMain : styles.footerIdle}>
+          {footerSummary.main}
+        </Text>
+        {footerSummary.note}
+      </Text>
+      <Button
+        mode="contained"
+        loading={updateMutation.isPending}
+        disabled={!dirty || busy}
+        onPress={() => setChangesVisible(true)}
+        style={[BUSINESS_UI.button, styles.saveButton]}
+        contentStyle={BUSINESS_UI.buttonContent}
       >
-        {POS_PERMISSION_PRESET_ORDER.map((preset) => {
-          const active = matchingPresets.has(preset);
-          return (
-            <Pressable
-              key={preset}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active, disabled: busy }}
-              disabled={busy}
-              hitSlop={4}
-              onPress={() => handleApplyPreset(preset)}
-              style={({ pressed }) => [
-                styles.presetChip,
-                active && styles.presetChipActive,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
-                {t(`posPermissions.presets.${preset}`)}
-              </Text>
-            </Pressable>
-          );
-        })}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-          disabled={busy}
-          hitSlop={4}
-          onPress={() => setCopyVisible(true)}
-          style={({ pressed }) => [styles.presetChip, pressed && styles.pressed]}
-        >
-          <Text style={styles.presetChipText}>{t("posPermissions.presets.copy")}</Text>
-        </Pressable>
-      </ScrollView>
-
-      <View style={styles.panelDivider} />
-
-      <View
-        style={styles.statsRow}
-        accessible
-        accessibilityLabel={t("posPermissions.stats.progressLabel", {
-          selected: stats.enabledCount,
-          total: stats.total,
-        })}
-      >
-        <View style={styles.statsNumberRow}>
-          <Text style={styles.statsLabel}>{t("posPermissions.stats.enabledLabel")}</Text>
-          <Text style={styles.statsNumber}>{stats.enabledCount}</Text>
-          <Text style={styles.statsTotal}>
-            {t("posPermissions.stats.ofTotal", { total: stats.total })}
-          </Text>
-        </View>
-        {stats.highRiskTotal > 0 ? (
-          <View
-            style={[
-              styles.riskSummaryPill,
-              stats.highRiskEnabledCount > 0 && styles.riskSummaryPillOn,
-            ]}
-          >
-            <Text
-              style={[
-                styles.riskSummaryText,
-                stats.highRiskEnabledCount > 0 && styles.riskSummaryTextOn,
-              ]}
-            >
-              {t("posPermissions.stats.highRiskEnabled", { value: stats.highRiskEnabledCount })}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-      <View style={styles.progressTrack} importantForAccessibility="no-hide-descendants">
-        {stats.segments.map((segment) => (
-          <View key={segment.key} style={[styles.progressSegment, { flex: segment.total }]}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${segment.total ? (segment.selected / segment.total) * 100 : 0}%` },
-              ]}
-            />
-          </View>
-        ))}
-      </View>
+        {t("actions.reviewAndSave")}
+      </Button>
     </View>
   );
-
-  const renderFilters = () => {
-    const filterCounts: Record<PosPermissionListFilter, number | null> = {
-      all: null,
-      enabled: stats.enabledCount,
-      highRisk: stats.highRiskTotal,
-      changed: changes.ordered.length,
-    };
-    return (
-      <View style={styles.filterBlock}>
-        <Searchbar
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder={t("posPermissions.search.placeholder")}
-          style={styles.search}
-          inputStyle={styles.searchInput}
-          autoCorrect={false}
-          autoCapitalize="none"
-        />
-        <View style={styles.segmented} accessibilityRole="tablist">
-          {LIST_FILTERS.map((filter) => {
-            const active = listFilter === filter;
-            const count = filterCounts[filter];
-            return (
-              <Pressable
-                key={filter}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                onPress={() => setListFilter(filter)}
-                style={[styles.segment, active && styles.segmentActive]}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[styles.segmentText, active && styles.segmentTextActive]}
-                >
-                  {count === null
-                    ? t(`posPermissions.filters.${filter}`)
-                    : t(`posPermissions.filters.${filter}`, { value: count })}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-    );
-  };
-
-  const renderFooter = () => {
-    const pendingCount = changes.ordered.length;
-    return (
-      <Surface style={styles.footer} elevation={3}>
-        <View style={styles.footerText}>
-          {dirty ? (
-            <>
-              <Text style={styles.footerPending}>
-                {t("posPermissions.footer.pending", { value: pendingCount })}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                disabled={busy}
-                hitSlop={8}
-                onPress={() => setChangesVisible(true)}
-              >
-                <Text style={styles.footerLink}>{t("posPermissions.actions.reviewChanges")}</Text>
-              </Pressable>
-            </>
-          ) : (
-            <Text style={styles.footerIdle}>{t("posPermissions.footer.upToDate")}</Text>
-          )}
-        </View>
-        <Button
-          mode="contained"
-          icon="content-save-outline"
-          loading={updateMutation.isPending}
-          disabled={!dirty || busy}
-          onPress={() => setChangesVisible(true)}
-          style={[BUSINESS_UI.button, styles.saveButton]}
-          contentStyle={BUSINESS_UI.buttonContent}
-        >
-          {t("posPermissions.actions.save")}
-        </Button>
-      </Surface>
-    );
-  };
 
   let content;
   if (!hasRequiredParams) {
     content = (
       <EmptyState
-        title={t("posPermissions.errors.invalidTitle")}
-        description={t("posPermissions.errors.invalidDescription")}
-        primaryAction={{ label: t("posPermissions.actions.back"), icon: "arrow-left", onPress: handleBack }}
+        title={t("errors.invalidTitle")}
+        description={t("errors.invalidDescription")}
+        primaryAction={{ label: t("actions.back"), icon: "arrow-left", onPress: handleBack }}
       />
     );
   } else if (!canManage || isCurrentUser) {
     content = (
       <EmptyState
-        title={t("posPermissions.errors.forbiddenTitle")}
-        description={t("posPermissions.errors.forbiddenDescription")}
-        primaryAction={{ label: t("posPermissions.actions.back"), icon: "arrow-left", onPress: handleBack }}
+        title={t("errors.forbiddenTitle")}
+        description={t("errors.forbiddenDescription")}
+        primaryAction={{ label: t("actions.back"), icon: "arrow-left", onPress: handleBack }}
       />
     );
   } else if (terminalErrorKind) {
@@ -799,7 +630,7 @@ export default function PosTerminalPermissionsScreen() {
       <View style={styles.centerState}>
         <ActivityIndicator />
         <Text variant="bodyMedium" style={styles.secondaryText}>
-          {t("posPermissions.loading")}
+          {t("loading")}
         </Text>
       </View>
     );
@@ -813,39 +644,60 @@ export default function PosTerminalPermissionsScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          {renderSummaryPanel()}
+          <PosPermissionSummaryCard
+            overview={overview}
+            matchingPresets={matchingPresets}
+            busy={busy}
+            onApplyPreset={handleApplyPreset}
+            onOpenCopy={() => setCopyVisible(true)}
+            onRestore={handleRestore}
+          />
           {displayGroups.length === 0 ? (
-            <EmptyState
-              title={t("posPermissions.emptyTitle")}
-              description={t("posPermissions.emptyDescription")}
-            />
+            <EmptyState title={t("emptyTitle")} description={t("emptyDescription")} />
           ) : (
-            <View style={styles.listArea}>
-              {renderFilters()}
+            <>
+              {searchVisible ? (
+                <Searchbar
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder={t("search.placeholder")}
+                  style={styles.search}
+                  inputStyle={styles.searchInput}
+                  autoFocus
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+              ) : null}
+              <FilterChipRow items={filterChips} value={listFilter} onChange={setListFilter} />
               {visibleGroups.length === 0 ? (
-                <Text style={styles.noResults}>{t("posPermissions.noResults")}</Text>
+                <Text style={styles.noResults}>
+                  {t(getPosPermissionEmptyKind(searchQuery, listFilter))}
+                </Text>
               ) : (
-                visibleGroups.map((group) => (
-                  <PosPermissionGroupCard
-                    key={group.key}
-                    group={group}
-                    fullGroup={fullGroupByKey.get(group.key) ?? group}
-                    groupLabel={getGroupLabel(group.key)}
-                    selectedCodeSet={selectedCodeSet}
-                    changedCodeSet={changes.changedCodes}
-                    expanded={
-                      filterActive
-                        ? !filterCollapsedGroups.has(group.key)
-                        : expandedGroups.has(group.key)
-                    }
-                    disabled={busy}
-                    onToggleExpanded={handleToggleExpanded}
-                    onToggleCode={handleToggleCode}
-                    onSetGroupChecked={handleSetGroupChecked}
-                  />
-                ))
+                <InfoCard>
+                  {visibleGroups.map((group, index) => (
+                    <PosPermissionGroupCard
+                      key={group.key}
+                      group={group}
+                      fullGroup={fullGroupByKey.get(group.key) ?? group}
+                      groupLabel={getGroupLabel(group.key)}
+                      selectedCodeSet={selectedCodeSet}
+                      changedCodeSet={changes.changedCodes}
+                      expanded={
+                        filterActive
+                          ? !filterCollapsedGroups.has(group.key)
+                          : expandedGroups.has(group.key)
+                      }
+                      disabled={busy}
+                      first={index === 0}
+                      onToggleExpanded={handleToggleExpanded}
+                      onToggleCode={handleToggleCode}
+                      onSetGroupChecked={handleSetGroupChecked}
+                    />
+                  ))}
+                </InfoCard>
               )}
-            </View>
+            </>
           )}
         </ScrollView>
         {renderFooter()}
@@ -869,10 +721,9 @@ export default function PosTerminalPermissionsScreen() {
       {editorReady && changesVisible ? (
         <PosPermissionChangesSheet
           changes={changes}
-          userName={userName}
-          storeName={storeName}
+          userName={personName}
+          storeLabel={storeLabel}
           busy={busy}
-          getGroupLabel={getGroupLabel}
           onDismiss={() => setChangesVisible(false)}
           onConfirm={handleConfirmSave}
         />
@@ -881,7 +732,7 @@ export default function PosTerminalPermissionsScreen() {
         <PosPermissionCopySheet
           storeCode={storeCode}
           storeGuid={storeGuid}
-          storeName={storeName}
+          storeName={storeLabel}
           targetUserGuid={userGuid}
           actorUserGuid={actorUserGuid}
           assignablePermissions={assignablePermissions}
@@ -897,7 +748,7 @@ const styles = StyleSheet.create({
   safeArea: BUSINESS_UI.screen,
   body: { flex: 1 },
   header: {
-    minHeight: 56,
+    minHeight: 60,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: HB_COLORS.white,
@@ -905,100 +756,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingRight: HB_SPACING.xxs,
   },
-  headerTitle: { ...BUSINESS_UI.sectionTitle, fontSize: 18, flex: 1 },
+  headerText: { flex: 1, minWidth: 0, justifyContent: "center" },
+  headerTitle: { fontSize: 18, lineHeight: 24, fontWeight: "700", color: HB_COLORS.textPrimary },
+  headerSubtitle: { fontSize: 12.5, lineHeight: 17, color: HB_COLORS.textSecondary },
   centerState: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
-  scrollContent: { paddingBottom: HB_SPACING.lg },
-  secondaryText: { fontSize: 13, lineHeight: 18, color: HB_COLORS.textSecondary },
-  pressed: { opacity: 0.7 },
-  // 顶部信息区：整块白底，用分隔线区分身份、快速套用与统计，不做卡片堆叠。
-  panel: {
-    backgroundColor: HB_COLORS.white,
+  scrollContent: {
     paddingHorizontal: HB_SPACING.md,
-    paddingTop: HB_SPACING.md,
-    paddingBottom: HB_SPACING.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: HB_COLORS.outlineMuted,
+    paddingTop: HB_SPACING.sm,
+    paddingBottom: HB_SPACING.lg,
+    gap: HB_SPACING.xs,
   },
-  identityRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm },
-  avatar: { backgroundColor: POS_PERMISSION_COLORS.brandSoft },
-  avatarLabel: { color: HB_COLORS.action, fontSize: 16, fontWeight: "700" },
-  identityText: { flex: 1, minWidth: 0, gap: 2 },
-  identityName: { fontSize: 17, lineHeight: 24, fontWeight: "700", color: HB_COLORS.textPrimary },
-  modePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: HB_COLORS.surfaceMuted,
-  },
-  modePillOverride: { backgroundColor: POS_PERMISSION_COLORS.brandSoft },
-  modePillText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: HB_COLORS.textSecondary },
-  modePillTextOverride: { color: HB_COLORS.action },
-  panelDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: HB_COLORS.outlineMuted,
-    marginVertical: HB_SPACING.sm,
-  },
-  panelLabel: { ...BUSINESS_UI.fieldLabel, marginBottom: HB_SPACING.xs },
-  presetRow: { gap: HB_SPACING.xs, paddingRight: HB_SPACING.md },
-  presetChip: {
-    minHeight: 36,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: HB_COLORS.outline,
-    backgroundColor: HB_COLORS.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  presetChipActive: { backgroundColor: POS_PERMISSION_COLORS.brandSoft, borderColor: HB_COLORS.brand },
-  presetChipText: { fontSize: 14, fontWeight: "600", color: HB_COLORS.textPrimary },
-  presetChipTextActive: { color: HB_COLORS.action },
-  statsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: HB_SPACING.sm,
-  },
-  statsNumberRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  statsLabel: { fontSize: 13, color: HB_COLORS.textSecondary },
-  statsNumber: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: "700",
-    color: HB_COLORS.textPrimary,
-    fontVariant: ["tabular-nums"],
-  },
-  statsTotal: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: HB_COLORS.textSecondary,
-    fontVariant: ["tabular-nums"],
-  },
-  riskSummaryPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: HB_COLORS.surfaceMuted,
-  },
-  riskSummaryPillOn: { backgroundColor: POS_PERMISSION_COLORS.dangerSoft },
-  riskSummaryText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600",
-    color: HB_COLORS.textSecondary,
-    fontVariant: ["tabular-nums"],
-  },
-  riskSummaryTextOn: { color: HB_COLORS.danger },
-  progressTrack: { flexDirection: "row", gap: 3, marginTop: HB_SPACING.xs, height: 6 },
-  progressSegment: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: HB_COLORS.outlineMuted,
-    overflow: "hidden",
-  },
-  progressFill: { height: 6, backgroundColor: HB_COLORS.brand },
-  listArea: { paddingHorizontal: HB_SPACING.md, paddingTop: HB_SPACING.sm, gap: HB_SPACING.sm },
-  filterBlock: { gap: HB_SPACING.xs },
+  secondaryText: { fontSize: 13, lineHeight: 18, color: HB_COLORS.textSecondary },
   search: {
     backgroundColor: HB_COLORS.white,
     borderRadius: HB_RADIUS.control,
@@ -1008,36 +776,6 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   searchInput: { minHeight: 44, fontSize: 15 },
-  segmented: {
-    flexDirection: "row",
-    padding: 3,
-    borderRadius: HB_RADIUS.control + 2,
-    backgroundColor: HB_COLORS.surfaceMuted,
-    gap: 2,
-  },
-  segment: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: HB_RADIUS.control,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 4,
-  },
-  segmentActive: {
-    backgroundColor: HB_COLORS.white,
-    shadowColor: "#101828",
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  segmentText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: HB_COLORS.textSecondary,
-    fontVariant: ["tabular-nums"],
-  },
-  segmentTextActive: { color: HB_COLORS.textPrimary },
   noResults: {
     textAlign: "center",
     color: HB_COLORS.textSecondary,
@@ -1049,15 +787,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: HB_SPACING.sm,
   },
-  footerText: { flex: 1, minWidth: 0, gap: 2 },
-  footerPending: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: HB_COLORS.textPrimary,
+  footerText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 18,
+    color: HB_COLORS.textSecondary,
     fontVariant: ["tabular-nums"],
   },
-  footerLink: { fontSize: 13, fontWeight: "600", color: HB_COLORS.action },
-  footerIdle: { fontSize: 13, color: HB_COLORS.textSecondary },
-  saveButton: { minWidth: 112 },
+  footerMain: { fontWeight: "800", color: HB_COLORS.textPrimary },
+  footerIdle: { color: HB_COLORS.textSecondary },
+  saveButton: { minWidth: 128 },
   snackbar: { bottom: 72 },
 });
