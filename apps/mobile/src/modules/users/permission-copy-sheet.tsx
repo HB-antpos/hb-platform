@@ -1,20 +1,25 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
-import { Avatar, Button, Icon, Searchbar, Text } from "react-native-paper";
+import { Button, Icon, Searchbar, Text } from "react-native-paper";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
+import { FilterChipRow, NoticeBox, PersonAvatar, PeopleTag, SegmentTabs } from "@/modules/people";
+import { resolvePersonName } from "@/modules/people/person-name";
 import { useStoreUsers } from "@/modules/users/hooks";
 import { PosPermissionSheet, POS_PERMISSION_COLORS } from "@/modules/users/pos-permission-sheet";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import {
+  buildCopyConfirmRows,
   buildPermissionCopyInput,
   filterPermissionCopyCandidates,
   isPermissionCopyPreviewCurrent,
+  listCopySkippedPermissionNames,
   normalizeCopyGuid,
   resolveCopyTargetName,
   summarizePermissionCopyPreview,
   togglePermissionCopySelection,
+  type CopyStoreFilter,
 } from "./access-permission-copy";
 import type {
   CopyPermissionDirection,
@@ -22,15 +27,15 @@ import type {
   CopyUserDirectPermissionsInput,
   UserDirectPermissionCopyResult,
 } from "./access-management-types";
-import type { StoreUserListItem } from "./types";
 
 interface PermissionCopySheetProps {
-  direction: CopyPermissionDirection;
-  /** 权限页正在编辑的员工。 */
+  /** 打开时默认的方向；弹层里可以切换。 */
+  initialDirection: CopyPermissionDirection;
+  /** 授权页正在编辑的员工。 */
   currentEmployeeGuid: string;
   currentEmployeeName: string;
-  /** 候选同事所在的分店；为空时无法列出同事。 */
-  storeCode: string;
+  /** 候选同事的分店范围：店长只能选自己管理的分店，管理员可以切分店 / 看全部分店。 */
+  storeFilter: CopyStoreFilter;
   actorUserGuid?: string | null;
   /** 把权限 code 翻译成展示名（找不到时由调用方回退为 code）。 */
   resolvePermissionName: (code: string) => string;
@@ -42,27 +47,17 @@ interface PermissionCopySheetProps {
 
 type Step = "pick" | "confirm";
 
-function getUserName(user: StoreUserListItem) {
-  return user.fullName?.trim() || user.username;
-}
-
-function getInitials(value: string) {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return "?";
-  return words.length === 1
-    ? words[0].slice(0, 2).toUpperCase()
-    : `${words[0][0]}${words[1][0]}`.toUpperCase();
-}
-
 /**
- * 复制直接权限：选人 + 选方式 → 预览每人差异 → 确认写入。
- * 只复制「直接权限」；角色继承的权限不复制。写入由后端原子完成。
+ * 复制直接权限（设计稿 A4④）：两步「选人 → 确认」。
+ * 选人：方向（复制给他人 / 从同事复制）、分店范围、搜索、勾选；
+ * 确认：逐人列出会增加（+3）或移除（−2）的权限、被跳过的项及原因，合并 / 覆盖在确认页切换（默认合并，
+ * 切换会立刻重新向后端预览，旧预览作废）。只复制「直接权限」，写入由后端原子完成。
  */
 export function PermissionCopySheet({
-  direction,
+  initialDirection,
   currentEmployeeGuid,
   currentEmployeeName,
-  storeCode,
+  storeFilter,
   actorUserGuid,
   resolvePermissionName,
   onPreview,
@@ -70,90 +65,141 @@ export function PermissionCopySheet({
   onDismiss,
   onCopied,
 }: PermissionCopySheetProps) {
-  const { t, language } = useAppTranslation(["userManagement", "common"]);
+  const { t, language } = useAppTranslation(["peopleAccess", "common"]);
+  const [direction, setDirection] = useState<CopyPermissionDirection>(initialDirection);
   const [step, setStep] = useState<Step>("pick");
   const [query, setQuery] = useState("");
+  const [storeCode, setStoreCode] = useState(storeFilter.initialStoreCode);
   const [selectedGuids, setSelectedGuids] = useState<string[]>([]);
   const [mode, setMode] = useState<CopyPermissionMode>("merge");
   const [preview, setPreview] = useState<UserDirectPermissionCopyResult | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [errorText, setErrorText] = useState("");
   // 同步锁：避免快速连点在 state 更新前重复提交。
-  const submittingRef = useRef(false);
-  const hasStoreCode = storeCode.trim().length > 0;
-  // storeCode 为 undefined 时 useStoreUsers 不发请求；绝不能传 null（会查全部分店）。
-  const usersQuery = useStoreUsers(hasStoreCode ? storeCode : undefined, "");
+  const busyRef = useRef(false);
+
+  // 无分店且不是「管理员看全部分店」时不发请求；绝不能让店长查全部分店。
+  const queryStoreCode = storeCode.trim()
+    ? storeCode
+    : storeFilter.allowAll
+      ? null
+      : undefined;
+  const hasScope = queryStoreCode !== undefined;
+  const usersQuery = useStoreUsers(queryStoreCode, "");
   const allUsers = useMemo(() => usersQuery.data ?? [], [usersQuery.data]);
   const candidates = useMemo(
     () => filterPermissionCopyCandidates(allUsers, { currentEmployeeGuid, actorUserGuid, query }),
-    [actorUserGuid, allUsers, currentEmployeeGuid, query]
+    [actorUserGuid, allUsers, currentEmployeeGuid, query],
   );
   const candidateTotal = useMemo(
     () => filterPermissionCopyCandidates(allUsers, { currentEmployeeGuid, actorUserGuid }).length,
-    [actorUserGuid, allUsers, currentEmployeeGuid]
+    [actorUserGuid, allUsers, currentEmployeeGuid],
   );
   const nameByGuid = useMemo(() => {
     const map = new Map<string, string>();
-    allUsers.forEach((user) => map.set(normalizeCopyGuid(user.userGUID), getUserName(user)));
+    allUsers.forEach((user) => map.set(normalizeCopyGuid(user.userGUID), resolvePersonName(user).primary));
     map.set(normalizeCopyGuid(currentEmployeeGuid), currentEmployeeName);
     return map;
   }, [allUsers, currentEmployeeGuid, currentEmployeeName]);
 
   const input = useMemo(
     () => buildPermissionCopyInput(direction, currentEmployeeGuid, selectedGuids, mode),
-    [currentEmployeeGuid, direction, mode, selectedGuids]
+    [currentEmployeeGuid, direction, mode, selectedGuids],
   );
   const summary = useMemo(() => (preview ? summarizePermissionCopyPreview(preview) : null), [preview]);
   const previewCurrent = isPermissionCopyPreviewCurrent(preview, input);
   const isToOthers = direction === "toOthers";
+  const selectedStore = storeFilter.options.find(
+    (item) => item.storeCode.toLowerCase() === storeCode.toLowerCase(),
+  );
+  const scopeLabel = storeCode.trim()
+    ? (selectedStore?.storeName || storeCode)
+    : t("copy.allStores");
+
+  const failure = useCallback(
+    (error: unknown, fallbackKey: string) =>
+      resolveLocalizedErrorMessage(error, { t, language, fallbackKey }),
+    [language, t],
+  );
+
+  const switchDirection = (next: CopyPermissionDirection) => {
+    if (busy || next === direction) return;
+    // 方向变了来源与目标整个对调，旧选择与旧预览都不再适用。
+    setDirection(next);
+    setSelectedGuids([]);
+    setPreview(null);
+    setErrorText("");
+  };
+
+  const switchStore = (next: string) => {
+    if (busy || next === storeCode) return;
+    setStoreCode(next);
+    setSelectedGuids([]);
+    setPreview(null);
+    setErrorText("");
+  };
 
   const toggleUser = (userGuid: string) => {
-    if (submitting) return;
+    if (busy) return;
     setErrorText("");
     setSelectedGuids((current) => togglePermissionCopySelection(current, userGuid, direction));
   };
 
-  const goNext = useCallback(async () => {
-    if (!input || submittingRef.current) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    setErrorText("");
-    try {
-      const result = await onPreview(input);
-      setPreview(result);
-      setStep("confirm");
-    } catch (error) {
-      setErrorText(
-        resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "accessManagement.copy.previewFailed" })
-      );
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }, [input, language, onPreview, t]);
+  /** 向后端预览一次；成功后写入预览结果。 */
+  const runPreview = useCallback(
+    async (request: CopyUserDirectPermissionsInput, onSuccess?: () => void) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      setErrorText("");
+      try {
+        const result = await onPreview(request);
+        setPreview(result);
+        onSuccess?.();
+      } catch (error) {
+        setErrorText(failure(error, "copy.previewFailed"));
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    },
+    [failure, onPreview],
+  );
+
+  const goNext = () => {
+    if (!input) return;
+    void runPreview(input, () => setStep("confirm"));
+  };
+
+  const changeMode = (next: CopyPermissionMode) => {
+    // 预览失败后旧预览已作废：再点一次当前方式要能重新计算，所以只在预览仍有效时才忽略重复点击。
+    if (busy || (next === mode && previewCurrent)) return;
+    setMode(next);
+    const request = buildPermissionCopyInput(direction, currentEmployeeGuid, selectedGuids, next);
+    // 方式变了旧预览立刻作废（previewCurrent 会变 false），并重新向后端计算差异。
+    if (request) void runPreview(request);
+  };
 
   const confirmCopy = useCallback(async () => {
     // 预览必须与当前选择一致且确有变化，才允许写入。
-    if (!input || !previewCurrent || !summary?.hasChanges || submittingRef.current) return;
-    submittingRef.current = true;
-    setSubmitting(true);
+    if (!input || !previewCurrent || !summary?.hasChanges || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     setErrorText("");
     try {
       const result = await onCommit(input);
       onCopied(result);
     } catch (error) {
-      setErrorText(
-        resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "accessManagement.copy.copyFailed" })
-      );
+      setErrorText(failure(error, "copy.copyFailed"));
     } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      busyRef.current = false;
+      setBusy(false);
     }
-  }, [input, language, onCommit, onCopied, previewCurrent, summary?.hasChanges, t]);
+  }, [failure, input, onCommit, onCopied, previewCurrent, summary?.hasChanges]);
 
   const renderPickList = () => {
-    if (!hasStoreCode) {
-      return <Text style={styles.stateText}>{t("accessManagement.copy.unavailable")}</Text>;
+    if (!hasScope) {
+      return <Text style={styles.stateText}>{t("copy.unavailable")}</Text>;
     }
     if (usersQuery.isLoading) {
       return (
@@ -165,7 +211,7 @@ export function PermissionCopySheet({
     if (usersQuery.isError) {
       return (
         <View style={styles.stateRow}>
-          <Text style={styles.stateText}>{t("accessManagement.copy.listFailed")}</Text>
+          <Text style={styles.stateText}>{t("copy.listFailed")}</Text>
           <Button compact mode="text" onPress={() => void usersQuery.refetch()}>
             {t("common:actions.retry")}
           </Button>
@@ -175,21 +221,23 @@ export function PermissionCopySheet({
     if (candidates.length === 0) {
       return (
         <Text style={styles.stateText}>
-          {t(candidateTotal === 0 ? "accessManagement.copy.empty" : "accessManagement.copy.noMatch")}
+          {t(candidateTotal === 0 ? "copy.empty" : "copy.noMatch")}
         </Text>
       );
     }
     return (
       <View style={styles.list}>
         {candidates.map((user, index) => {
-          const name = getUserName(user);
-          const selected = selectedGuids.some((guid) => normalizeCopyGuid(guid) === normalizeCopyGuid(user.userGUID));
+          const person = resolvePersonName(user);
+          const selected = selectedGuids.some(
+            (guid) => normalizeCopyGuid(guid) === normalizeCopyGuid(user.userGUID),
+          );
           return (
             <Pressable
               key={user.userGUID}
               accessibilityRole={isToOthers ? "checkbox" : "radio"}
               accessibilityState={{ checked: selected }}
-              accessibilityLabel={[name, user.username !== name ? user.username : null].filter(Boolean).join("，")}
+              accessibilityLabel={[person.primary, person.nickname, `@${user.username}`].filter(Boolean).join("，")}
               onPress={() => toggleUser(user.userGUID)}
               style={({ pressed }) => [
                 styles.row,
@@ -198,16 +246,19 @@ export function PermissionCopySheet({
                 pressed && styles.pressed,
               ]}
             >
-              <Avatar.Text size={36} label={getInitials(name)} style={styles.avatar} labelStyle={styles.avatarLabel} />
+              <PersonAvatar initials={person.initials} seed={user.userGUID} size={36} />
               <View style={styles.rowText}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {name}
-                </Text>
-                {user.username !== name ? (
-                  <Text style={styles.rowMeta} numberOfLines={1}>
-                    @{user.username}
+                <View style={styles.nameLine}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {person.primary}
                   </Text>
-                ) : null}
+                  {person.nickname ? (
+                    <Text style={styles.rowNickname} numberOfLines={1}>{`「${person.nickname}」`}</Text>
+                  ) : null}
+                </View>
+                <Text style={styles.rowMeta} numberOfLines={1}>
+                  @{user.username}
+                </Text>
               </View>
               <Icon
                 source={
@@ -225,48 +276,10 @@ export function PermissionCopySheet({
     );
   };
 
-  const renderModeOption = (value: CopyPermissionMode) => {
-    const selected = mode === value;
-    return (
-      <Pressable
-        key={value}
-        accessibilityRole="radio"
-        accessibilityState={{ checked: selected }}
-        accessibilityLabel={t(`accessManagement.copy.mode.${value}`)}
-        onPress={() => {
-          if (submitting) return;
-          setErrorText("");
-          setMode(value);
-        }}
-        style={({ pressed }) => [
-          styles.row,
-          value === "replace" && styles.rowDivider,
-          selected && styles.rowSelected,
-          pressed && styles.pressed,
-        ]}
-      >
-        <Icon
-          source={selected ? "radiobox-marked" : "radiobox-blank"}
-          size={22}
-          color={selected ? HB_COLORS.brand : HB_COLORS.outline}
-        />
-        <View style={styles.rowText}>
-          <Text style={styles.rowName}>{t(`accessManagement.copy.mode.${value}`)}</Text>
-          <Text style={styles.rowMeta}>{t(`accessManagement.copy.mode.${value}Description`)}</Text>
-        </View>
-      </Pressable>
-    );
-  };
-
   const renderPickStep = () => (
     <>
       {renderPickList()}
-      <Text style={styles.sectionLabel}>{t("accessManagement.copy.modeTitle")}</Text>
-      <View style={styles.list}>
-        {renderModeOption("merge")}
-        {renderModeOption("replace")}
-      </View>
-      <Text style={styles.help}>{t("accessManagement.copy.help")}</Text>
+      <Text style={styles.help}>{t("copy.help")}</Text>
       {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
     </>
   );
@@ -274,100 +287,119 @@ export function PermissionCopySheet({
   const renderConfirmStep = () => {
     if (!preview || !summary) return null;
     const sourceName = resolveCopyTargetName(nameByGuid, preview.sourceUserGuid);
+    const rows = buildCopyConfirmRows(
+      preview,
+      (guid) => resolveCopyTargetName(nameByGuid, guid),
+      resolvePermissionName,
+    );
+    const skippedNames = listCopySkippedPermissionNames(preview, resolvePermissionName);
     return (
       <>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>{t("accessManagement.copy.confirm.source", { name: sourceName })}</Text>
-          <Text style={styles.rowMeta}>
-            {t("accessManagement.copy.confirm.sourceMeta", {
-              count: summary.sourceCount,
-              mode: t(`accessManagement.copy.mode.${preview.mode}Short`),
-            })}
-          </Text>
-        </View>
-
-        <Text style={styles.sectionLabel}>
-          {t("accessManagement.copy.confirm.changesTitle", { count: preview.targets.length })}
-        </Text>
         <View style={styles.list}>
-          {preview.targets.map((target, index) => {
-            const name = resolveCopyTargetName(nameByGuid, target.userGuid);
-            const noChange = target.added.length === 0 && target.removed.length === 0;
-            return (
-              <View key={target.userGuid} style={[styles.targetBlock, index > 0 && styles.rowDivider]}>
-                <View style={styles.targetHeader}>
-                  <Avatar.Text size={32} label={getInitials(name)} style={styles.avatar} labelStyle={styles.avatarLabel} />
-                  <Text style={[styles.rowName, styles.targetName]} numberOfLines={1}>
-                    {name}
-                  </Text>
-                  {target.added.length > 0 ? (
-                    <Text style={styles.addedBadge}>+{target.added.length}</Text>
-                  ) : null}
-                  {target.removed.length > 0 ? (
-                    <Text style={styles.removedBadge}>−{target.removed.length}</Text>
-                  ) : null}
-                </View>
-                {noChange ? (
-                  <Text style={styles.rowMeta}>{t("accessManagement.copy.confirm.noChange")}</Text>
-                ) : null}
-                {target.added.length > 0 ? (
-                  <Text style={styles.changeLine}>
-                    <Text style={styles.addedMark}>＋ </Text>
-                    {target.added.map(resolvePermissionName).join("、")}
-                  </Text>
-                ) : null}
-                {target.removed.length > 0 ? (
-                  <Text style={styles.changeLine}>
-                    <Text style={styles.removedMark}>－ </Text>
-                    {target.removed.map(resolvePermissionName).join("、")}
+          {rows.map((row, index) => (
+            <View
+              key={row.userGuid}
+              style={[styles.confirmRow, index > 0 && styles.rowDivider]}
+              accessibilityLabel={[
+                row.name,
+                row.added.length ? `+${row.added.length}` : null,
+                row.removed.length ? `−${row.removed.length}` : null,
+                row.noChange ? t("copy.confirm.noChange") : null,
+              ].filter(Boolean).join("，")}
+            >
+              <PersonAvatar
+                initials={resolvePersonName({ fullName: row.name }).initials}
+                seed={row.userGuid}
+                size={36}
+              />
+              <View style={styles.rowText}>
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {row.name}
+                </Text>
+                {row.added.length > 0 ? (
+                  <Text style={styles.changeLine} numberOfLines={2}>
+                    {`+ ${row.added.join("、")}`}
                   </Text>
                 ) : null}
-                {target.unchangedCount > 0 ? (
-                  <Text style={styles.rowMeta}>
-                    {t("accessManagement.copy.confirm.unchanged", { count: target.unchangedCount })}
+                {row.removed.length > 0 ? (
+                  <Text style={[styles.changeLine, styles.removedLine]} numberOfLines={2}>
+                    {`− ${row.removed.join("、")}`}
+                  </Text>
+                ) : null}
+                {row.noChange ? (
+                  <Text style={styles.rowMeta} numberOfLines={1}>
+                    {row.unchangedCount > 0
+                      ? t("copy.confirm.unchanged", { count: row.unchangedCount })
+                      : t("copy.confirm.noChange")}
                   </Text>
                 ) : null}
               </View>
-            );
-          })}
+              <View style={styles.badges}>
+                {row.added.length > 0 ? <PeopleTag label={`+${row.added.length}`} tone="green" /> : null}
+                {row.removed.length > 0 ? <PeopleTag label={`−${row.removed.length}`} tone="red" /> : null}
+                {row.noChange ? <PeopleTag label="0" tone="gray" /> : null}
+              </View>
+            </View>
+          ))}
         </View>
 
-        {!summary.hasChanges ? (
-          <View style={styles.infoBox}>
-            <Text style={styles.infoText}>{t("accessManagement.copy.confirm.nothingToCopy")}</Text>
-          </View>
+        {skippedNames.length > 0 ? (
+          <NoticeBox tone="amber" icon="alert-outline">
+            {t("copy.confirm.skipped", {
+              count: skippedNames.length,
+              names: skippedNames.map((name) => `「${name}」`).join("、"),
+            })}
+          </NoticeBox>
         ) : null}
 
-        {preview.skippedPermissionCodes.length > 0 ? (
-          <>
-            <Text style={styles.sectionLabel}>{t("accessManagement.copy.confirm.skippedTitle")}</Text>
-            <View style={styles.warningBox}>
-              <Text style={styles.warningText}>
-                {t("accessManagement.copy.confirm.skipped", {
-                  names: preview.skippedPermissionCodes.map(resolvePermissionName).join("、"),
-                })}
-              </Text>
-            </View>
-          </>
+        <SegmentTabs
+          items={[
+            { key: "merge" as CopyPermissionMode, label: t("copy.mode.merge") },
+            { key: "replace" as CopyPermissionMode, label: t("copy.mode.replace") },
+          ]}
+          value={mode}
+          onChange={changeMode}
+        />
+        <Text style={styles.hint}>
+          {busy && !previewCurrent
+            ? t("copy.confirm.recalculating")
+            : t("copy.confirm.modeHint", { source: sourceName })}
+        </Text>
+
+        {!summary.hasChanges && previewCurrent ? (
+          <NoticeBox tone="blue">{t("copy.confirm.nothingToCopy")}</NoticeBox>
         ) : null}
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
       </>
     );
   };
 
+  const confirmSourceName = preview ? resolveCopyTargetName(nameByGuid, preview.sourceUserGuid) : "";
   const title =
     step === "confirm"
-      ? t("accessManagement.copy.confirm.title")
+      ? t("copy.confirm.title")
       : isToOthers
-        ? t("accessManagement.copy.toOthersTitle", { name: currentEmployeeName })
-        : t("accessManagement.copy.fromColleagueTitle", { name: currentEmployeeName });
+        ? t("copy.toOthersTitle", { name: currentEmployeeName })
+        : t("copy.fromColleagueTitle", { name: currentEmployeeName });
+  const subtitle =
+    step === "confirm"
+      ? preview
+        ? t("copy.confirm.subtitle", {
+            source: confirmSourceName,
+            mode: t(`copy.mode.${mode}Short`),
+          })
+        : undefined
+      : hasScope
+        ? t("copy.storeSubtitle", { store: scopeLabel })
+        : undefined;
 
+  const changedCount = summary?.changedTargets.length ?? 0;
   const footer =
     step === "confirm" ? (
       <>
         <Button
           mode="outlined"
-          disabled={submitting}
+          disabled={busy}
           onPress={() => {
             setErrorText("");
             setStep("pick");
@@ -375,54 +407,76 @@ export function PermissionCopySheet({
           style={BUSINESS_UI.button}
           contentStyle={BUSINESS_UI.buttonContent}
         >
-          {t("accessManagement.copy.confirm.back")}
+          {t("copy.confirm.back")}
         </Button>
         <Button
           mode="contained"
-          loading={submitting}
-          disabled={submitting || !previewCurrent || !summary?.hasChanges}
+          loading={busy}
+          disabled={busy || !previewCurrent || !summary?.hasChanges}
           onPress={() => void confirmCopy()}
           style={[BUSINESS_UI.button, styles.primaryButton]}
           contentStyle={BUSINESS_UI.buttonContent}
         >
-          {t("accessManagement.copy.confirm.submit")}
+          {isToOthers
+            ? t("copy.confirm.submit", { count: changedCount })
+            : t("copy.confirm.submitSelf")}
         </Button>
       </>
     ) : (
       <Button
         mode="contained"
-        loading={submitting}
-        disabled={submitting || !input || !hasStoreCode}
-        onPress={() => void goNext()}
+        loading={busy}
+        disabled={busy || !input || !hasScope}
+        onPress={goNext}
         style={[BUSINESS_UI.button, styles.primaryButton]}
         contentStyle={BUSINESS_UI.buttonContent}
       >
         {input
           ? isToOthers
-            ? t("accessManagement.copy.nextToOthers", { count: input.targetUserGuids.length })
-            : t("accessManagement.copy.nextFromColleague")
-          : t("accessManagement.copy.nextIdle")}
+            ? t("copy.next", { count: input.targetUserGuids.length })
+            : t("copy.nextFromColleague")
+          : t("copy.nextIdle")}
       </Button>
     );
+
+  const storeChips = [
+    ...(storeFilter.allowAll ? [{ key: "", label: t("copy.allStores") }] : []),
+    ...storeFilter.options.map((item) => ({ key: item.storeCode, label: item.storeName || item.storeCode })),
+  ];
 
   return (
     <PosPermissionSheet
       title={title}
-      subtitle={step === "pick" && hasStoreCode ? t("accessManagement.copy.subtitle", { store: storeCode }) : undefined}
-      closeLabel={t("accessManagement.copy.close")}
+      subtitle={subtitle}
+      closeLabel={t("copy.close")}
       onDismiss={onDismiss}
-      dismissable={!submitting}
+      dismissable={!busy}
       header={
-        step === "pick" && hasStoreCode ? (
-          <Searchbar
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t("accessManagement.copy.searchPlaceholder")}
-            style={styles.search}
-            inputStyle={styles.searchInput}
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
+        step === "pick" ? (
+          <View style={styles.headerStack}>
+            <SegmentTabs
+              items={[
+                { key: "toOthers" as CopyPermissionDirection, label: t("copy.direction.toOthers") },
+                { key: "fromColleague" as CopyPermissionDirection, label: t("copy.direction.fromColleague") },
+              ]}
+              value={direction}
+              onChange={switchDirection}
+            />
+            {storeChips.length > 1 ? (
+              <FilterChipRow items={storeChips} value={storeCode} onChange={switchStore} />
+            ) : null}
+            {hasScope ? (
+              <Searchbar
+                value={query}
+                onChangeText={setQuery}
+                placeholder={t("copy.searchPlaceholder")}
+                style={styles.search}
+                inputStyle={styles.searchInput}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+            ) : null}
+          </View>
         ) : undefined
       }
       footer={footer}
@@ -433,6 +487,7 @@ export function PermissionCopySheet({
 }
 
 const styles = StyleSheet.create({
+  headerStack: { gap: HB_SPACING.xs },
   search: {
     backgroundColor: HB_COLORS.surfaceMuted,
     borderRadius: HB_RADIUS.control,
@@ -454,15 +509,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: HB_SPACING.sm,
     paddingVertical: HB_SPACING.xs,
   },
+  confirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.sm,
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: HB_SPACING.sm,
+  },
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outlineMuted },
   rowSelected: { backgroundColor: POS_PERMISSION_COLORS.brandSoft },
   pressed: { backgroundColor: HB_COLORS.surfaceMuted },
-  avatar: { backgroundColor: HB_COLORS.surfaceMuted },
-  avatarLabel: { color: HB_COLORS.textSecondary, fontSize: 14, fontWeight: "700" },
   rowText: { flex: 1, minWidth: 0, gap: 2 },
-  rowName: { fontSize: 15, lineHeight: 21, fontWeight: "600", color: HB_COLORS.textPrimary },
+  nameLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rowName: { flexShrink: 1, fontSize: 15, lineHeight: 21, fontWeight: "700", color: HB_COLORS.textPrimary },
+  rowNickname: { fontSize: 12.5, fontWeight: "600", color: HB_COLORS.textSecondary },
   rowMeta: { fontSize: 12, lineHeight: 17, color: HB_COLORS.textSecondary },
-  sectionLabel: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: HB_COLORS.textSecondary },
+  changeLine: { fontSize: 12.5, lineHeight: 18, color: HB_COLORS.textSecondary },
+  removedLine: { color: HB_COLORS.danger },
+  badges: { alignItems: "flex-end", gap: 4 },
   stateRow: { minHeight: 64, alignItems: "center", justifyContent: "center", gap: HB_SPACING.xs },
   stateText: {
     fontSize: 14,
@@ -479,38 +543,7 @@ const styles = StyleSheet.create({
     borderRadius: HB_RADIUS.control,
     padding: HB_SPACING.sm,
   },
+  hint: { fontSize: 12, lineHeight: 18, color: HB_COLORS.textSecondary },
   errorText: { fontSize: 13, lineHeight: 19, color: HB_COLORS.danger },
   primaryButton: { flex: 1 },
-  card: {
-    borderWidth: 1,
-    borderColor: HB_COLORS.outlineMuted,
-    borderRadius: HB_RADIUS.surface,
-    padding: HB_SPACING.sm,
-    gap: 2,
-  },
-  cardTitle: { fontSize: 15, lineHeight: 21, fontWeight: "700", color: HB_COLORS.textPrimary },
-  targetBlock: { padding: HB_SPACING.sm, gap: HB_SPACING.xxs },
-  targetHeader: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
-  targetName: { flex: 1 },
-  addedBadge: { fontSize: 13, fontWeight: "700", color: HB_COLORS.success },
-  removedBadge: { fontSize: 13, fontWeight: "700", color: HB_COLORS.danger },
-  addedMark: { color: HB_COLORS.success, fontWeight: "700" },
-  removedMark: { color: HB_COLORS.danger, fontWeight: "700" },
-  changeLine: { fontSize: 13, lineHeight: 19, color: HB_COLORS.textPrimary },
-  infoBox: {
-    backgroundColor: POS_PERMISSION_COLORS.infoSoft,
-    borderColor: POS_PERMISSION_COLORS.infoBorder,
-    borderWidth: 1,
-    borderRadius: HB_RADIUS.control,
-    padding: HB_SPACING.sm,
-  },
-  infoText: { fontSize: 13, lineHeight: 19, color: HB_COLORS.textPrimary },
-  warningBox: {
-    backgroundColor: POS_PERMISSION_COLORS.warningSoft,
-    borderColor: POS_PERMISSION_COLORS.warningBorder,
-    borderWidth: 1,
-    borderRadius: HB_RADIUS.control,
-    padding: HB_SPACING.sm,
-  },
-  warningText: { fontSize: 13, lineHeight: 19, color: HB_COLORS.warning },
 });

@@ -65,7 +65,7 @@ import {
   setUserAccessStoreState,
   toggleDirectPermission,
 } from "./access-management";
-import { createPermissionNameResolver } from "./access-permission-copy";
+import { createPermissionNameResolver, resolveCopyStoreFilter } from "./access-permission-copy";
 import { PermissionCopySheet } from "./permission-copy-sheet";
 import {
   localizeAccessPermission,
@@ -709,11 +709,16 @@ export default function AccessManagementScreen() {
   ]);
 
   // 复制权限的候选同事按分店列出：优先路由带入，其次目标员工已分配的分店，最后操作者自己的管理分店。
-  const copyStoreCode =
-    routeStoreCode ||
-    storesQuery.data?.[0]?.storeCode ||
-    managedStoreCodes?.[0] ||
-    "";
+  const copyStoreFilter = useMemo(
+    () =>
+      resolveCopyStoreFilter({
+        isAdmin: access.isAdmin,
+        storeOptions: storeOptions,
+        targetStoreCodes: (storesQuery.data ?? []).map((store) => store.storeCode),
+        routeStoreCode: routeStoreCode || (managedStoreCodes?.[0] ?? ""),
+      }),
+    [access.isAdmin, managedStoreCodes, routeStoreCode, storeOptions, storesQuery.data],
+  );
   const actorUserGuid = currentUser?.userGUID || currentUser?.userGuid || "";
   const permissionNameResolver = useMemo(
     () =>
@@ -1517,10 +1522,10 @@ export default function AccessManagementScreen() {
       <View style={styles.body}>{content}</View>
       {copyDirection ? (
         <PermissionCopySheet
-          direction={copyDirection}
+          initialDirection={copyDirection}
           currentEmployeeGuid={userGuid}
           currentEmployeeName={userName}
-          storeCode={copyStoreCode}
+          storeFilter={copyStoreFilter}
           actorUserGuid={actorUserGuid}
           resolvePermissionName={permissionNameResolver}
           onPreview={handlePreviewCopy}

@@ -130,11 +130,17 @@ assert.match(
 );
 assert.match(accessScreenSource, /previewCopyMutation\.isPending \|\|\s*copyPermissionsMutation\.isPending/, "复制进行中必须计入忙碌状态，阻止离页与重复保存");
 assert.match(accessScreenSource, /\{!implicitAll \? \(\s*<View style=\{styles\.copyActions\}>/, "管理员默认拥有全部权限时不显示复制入口");
-assert.match(copySheetSource, /onPreview\(input\)/, "先预览差异");
+assert.match(copySheetSource, /onPreview\(request\)/, "先预览差异");
 assert.match(copySheetSource, /onCommit\(input\)/, "确认后才写入");
 assert.match(copySheetSource, /!previewCurrent \|\| !summary\?\.hasChanges/, "预览过期或没有变化时不得确认复制");
-assert.match(copySheetSource, /dismissable=\{!submitting\}/, "提交中不得关闭弹层");
-assert.match(copySheetSource, /useStoreUsers\(hasStoreCode \? storeCode : undefined, ""\)/, "无分店时不得查询全部分店");
+assert.match(copySheetSource, /dismissable=\{!busy\}/, "提交 / 预览中不得关闭弹层");
+assert.match(
+  copySheetSource,
+  /const queryStoreCode = storeCode\.trim\(\)\s*\? storeCode\s*:\s*storeFilter\.allowAll\s*\?\s*null\s*:\s*undefined;/,
+  "只有管理员（allowAll）才能查全部分店；店长无分店时不得发请求"
+);
+assert.match(copySheetSource, /useStoreUsers\(queryStoreCode, ""\)/, "候选同事必须经过 queryStoreCode 收窄");
+assert.match(copySheetSource, /next === mode && previewCurrent/, "切换合并 / 覆盖会作废旧预览并重新预览");
 
 const barcodeDialogSource = readFileSync(
   resolve(currentDirectory, "staff-barcode/StaffBarcodeDialogs.tsx"),
