@@ -117,4 +117,80 @@ assert.match(
 );
 assert.match(storeDetail, /isStoreManageable\(storeCode, env\.manageableStores\)/, "店长版详情的操作必须受「可管理分店」范围限制");
 
+// ───────── 管理员版「允许登录」开关（PUT /Users/guid/{guid}/login-enabled）─────────
+const userHooks = read("src/modules/identity-admin/user-hooks.ts");
+const identityApi = read("src/modules/identity-admin/api.ts");
+const personHeader = read("src/modules/people/detail/person-header.tsx");
+const personListItem = read("src/modules/people/person-list-item.ts");
+
+// 只在管理员版出现：店长版（含设备模式 / iOS 审核回落）不得有开关、写接口或相关状态。
+assert.doesNotMatch(
+  storeDetail,
+  /SwitchRow|setIdentityUserLoginEnabled|useSetIdentityUserLoginEnabled|resolveLoginToggle|loginToggle|person-login-/,
+  "店长版没有管理员版的「允许登录」开关",
+);
+assert.match(adminDetail, /resolveLoginToggle\(permissions, \{ loginEnabled: person\?\.loginEnabled, isDeviceMode: env\.isDeviceMode \}\)/, "行的形态由 detail-rules 统一裁决");
+assert.match(adminDetail, /loginToggle === "editable" \|\| loginToggle === "selfLocked" \? \(\s*<SwitchRow/, "可操作与本人置灰才渲染开关");
+assert.match(adminDetail, /disabled=\{loginToggle === "selfLocked" \|\| loginMutation\.isPending\}/, "本人置灰、提交中置灰");
+assert.match(adminDetail, /loginToggle === "readonly" \? \(\s*<KvRow/, "没有权限只读显示，不渲染可点的开关");
+
+// 判断复用管理员版 canEdit（Users.Edit && adminScopeOk），不另写一套更宽松的权限判断。
+{
+  const toggleRule = rules.slice(rules.indexOf("export function resolveLoginToggle"), rules.indexOf("/** 拨动开关后的处理"));
+  assert.ok(toggleRule.length > 0, "找到 resolveLoginToggle");
+  assert.match(toggleRule, /permissions\.canEdit \? "editable" : "readonly"/, "可操作 = 管理员版 canEdit");
+  assert.match(toggleRule, /if \(permissions\.variant !== "admin" \|\| facts\.isDeviceMode\) return "hidden"/, "非管理员版 / 设备模式不出现");
+  assert.match(toggleRule, /if \(facts\.loginEnabled === undefined\) return "hidden"/, "接口没返回 loginEnabled 不出现");
+  assert.doesNotMatch(toggleRule, /hasPermission|isAdmin/, "开关规则不得自带权限判断");
+}
+
+// 写接口：页面走 mutation hook，hook 走 setIdentityUserLoginEnabled，且绑定发起操作的账号。
+assert.match(adminDetail, /useSetIdentityUserLoginEnabled\(actorKey\)/, "页面使用 mutation hook");
+assert.match(adminDetail, /loginMutation\.mutateAsync\(\{ userGuid, loginEnabled: next \}\)/, "提交的是目标 userGuid 与目标值");
+assert.match(userHooks, /setIdentityUserLoginEnabled\(userGuid, loginEnabled, actorKey\)/, "hook 调用 setIdentityUserLoginEnabled，并带操作者");
+assert.match(userHooks, /\["identity-admin", actorKey, "user", userGuid\]/, "成功后刷新该用户详情");
+assert.match(userHooks, /\["identity-admin", actorKey, "users"\]/, "成功后刷新管理员用户列表");
+assert.match(userHooks, /\["storeUsers"\]/, "员工侧列表同步刷新");
+assert.match(identityApi, /path\("Users", userGuid, "login-enabled"\),\s*\{ loginEnabled \},\s*accountBoundRequestConfig\(actorGuid\)/, "PUT /Users/guid/{guid}/login-enabled，请求体 { loginEnabled }，绑定账号");
+assert.match(adminDetail, /if \(loginToggle !== "editable" \|\| !isCurrentSession\("Users\.Edit"\)\)/, "提交前核对界面形态与会话权限");
+
+// 关闭必须先弹居中确认框（红色危险按钮），开启直接提交。
+assert.match(adminDetail, /resolveLoginSwitchIntent\(next\) === "confirmDisable"\) setLoginIntent\("disable"\)/, "关闭先进入确认");
+assert.match(adminDetail, /else void submitLoginEnabled\(true\)/, "开启直接提交");
+assert.match(
+  adminDetail,
+  /loginIntent === "disable" \? \(\s*<ConfirmDialog[\s\S]*?danger\s+pending=\{loginMutation\.isPending\}[\s\S]*?onConfirm=\{\(\) => void submitLoginEnabled\(false\)\}[\s\S]*?testID="person-login-confirm"/,
+  "关闭登录用统一的居中确认框：危险（红色）、确认才提交",
+);
+
+// 失败：日志只记脱敏后的错误元数据；提示只用我们自己的文案，不显示服务端原文。
+{
+  const submit = adminDetail.slice(adminDetail.indexOf("const submitLoginEnabled"), adminDetail.indexOf("const handleLoginSwitch"));
+  assert.ok(submit.length > 0, "找到 submitLoginEnabled");
+  assert.match(
+    submit,
+    /const meta = getIdentityAdminErrorMeta\(error\);(?:\s*\/\/[^\n]*)*\s*console\.warn\("\[people-detail\] login enabled failed", \{ status: meta\.status, code: meta\.code \}\)/,
+    "失败只能记录状态码与错误码，不记录原始错误对象，也不记录可能是服务端原文的 message",
+  );
+  assert.doesNotMatch(submit, /console\.\w+\([^)]*\b(error|userGuid|person)\b[^)]*\)/, "日志不带原始错误、账号 GUID 或人员资料");
+  assert.match(submit, /classifyLoginToggleFailure\(\{ code: meta\.code, status: meta\.status, uncertain: isUncertainIdentityWrite\(error\) \}\)/, "失败按 errorCode 归类");
+  assert.match(submit, /t\(`peopleDetail:loginToggle\.errors\.\$\{failure\}`\)/, "提示用固定的中英文文案");
+  assert.doesNotMatch(submit, /resolveLocalizedErrorMessage|error\.message|meta\.message|getMessage/, "不得把服务端原文显示给用户");
+  assert.match(submit, /setLoginIntent\(null\);\s*if \(!isCurrentSession\("Users\.Edit"\)\) return;\s*const failure/, "先关确认框再提示，Snackbar 不被对话框盖住");
+}
+
+// 开启成功且从没登录过：卡内提示 + 「设置密码」按钮打开页面已有的重置密码弹层。
+assert.match(adminDetail, /setPasswordHint\(next && shouldHintSetPassword\(\{ loginEnabled: true, lastLoginAt: person\?\.lastLoginAt \}\)\)/, "只在开启成功且没登录过时提示");
+assert.match(adminDetail, /passwordHint && shouldHintSetPassword\(\{ loginEnabled: person\.loginEnabled, lastLoginAt: person\.lastLoginAt \}\)/, "提示随真实状态收起");
+assert.match(adminDetail, /permissions\.canResetPassword \? \(\s*<Button[\s\S]*?onPress=\{openPasswordSetup\}[\s\S]*?testID="person-login-set-password"/, "「设置密码」按钮仅在有重置密码权限时出现，打开已有的重置密码弹层");
+assert.match(adminDetail, /const openPasswordSetup = useCallback\(\(\) => \{\s*setPasswordError\(null\);\s*setPasswordVisible\(true\);/, "与「重置密码」行共用同一个弹层入口");
+
+// 头部「不能登录」标签：amber + lock-outline（与红色「已停用」区分）；只在 loginEnabled === false 时出现。
+assert.match(personHeader, /loginDisabled: "amber"/, "不能登录标签是 amber");
+assert.match(personHeader, /loginDisabled: "lock-outline"/, "不能登录标签带锁图标");
+assert.match(rules, /if \(input\.loginEnabled === false\) tags\.push\("loginDisabled"\)/, "只有 loginEnabled === false 才标");
+
+// 管理员列表：只给例外（=== false），店员与管理员两处口径一致，未知（undefined）不标。
+assert.equal((personListItem.match(/user\.loginEnabled === false\) tags\.push\("cannotLogin"\)/g) ?? []).length, 2, "店员与管理员列表都只在 loginEnabled === false 时标「不能登录」");
+
 console.log("detail-screen-contract.test.ts: ok");

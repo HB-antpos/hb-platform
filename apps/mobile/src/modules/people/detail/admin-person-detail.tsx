@@ -1,14 +1,15 @@
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, StyleSheet } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ActivityIndicator, Icon, Text } from "react-native-paper";
+import { ActivityIndicator, Button, Icon, Text } from "react-native-paper";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { fetchIdentityUserDetail, fetchUserAccessStores, getIdentityAdminErrorMeta, updateIdentityUserPassword } from "@/modules/identity-admin/api";
 import { isUncertainIdentityWrite } from "@/modules/identity-admin/user-logic";
-import { useIdentitySession } from "@/modules/identity-admin/user-hooks";
-import { ActionRow, InfoCard, KvRow, PeopleTag, SectionTitle, resolvePersonName } from "@/modules/people";
+import { useIdentitySession, useSetIdentityUserLoginEnabled } from "@/modules/identity-admin/user-hooks";
+import { SwitchRow } from "@/modules/people/form/form-ui";
+import { ActionRow, InfoCard, KvRow, NoticeBox, PeopleTag, SectionTitle, resolvePersonName } from "@/modules/people";
 import { isStoreManageable } from "@/modules/shop/store-scope";
 import { useStoreUserMutations, toSafeStoreUserErrorLog } from "@/modules/users";
 import { isStoreManagerRoleName } from "@/modules/users/access-management";
@@ -19,7 +20,7 @@ import { usePrinterStore } from "@/modules/printer/state";
 import type { StoreUserListItem } from "@/modules/users/types";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
-import { HB_COLORS } from "@/shared/theme/tokens";
+import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { fetchActiveSessionSummary, fetchDirectPermissionSummary, updateIdentityUserStatus } from "./admin-detail-api";
 import {
@@ -31,13 +32,17 @@ import {
 } from "./detail-navigation";
 import {
   buildDetailLayout,
+  classifyLoginToggleFailure,
   formatLocalDate,
   formatLocalDateTime,
   isStoreManagerRoleDerived,
   resolveDetailPermissions,
   resolveEmailStoreCode,
+  resolveLoginSwitchIntent,
+  resolveLoginToggle,
   selectPosStores,
   shortenGuid,
+  shouldHintSetPassword,
   summarizeStoreRelations,
   type MoreItemKey,
   type StatusIntent,
@@ -54,9 +59,11 @@ import { buildPrefillTitle, personFromIdentityUser, type DetailRouteParams } fro
  * 管理员版人员详情（A2②）：走 identity-admin 接口（需要 account 会话 + Users.View，设备模式屏蔽）。
  * 头部同店长版，右上角 ✎ 编辑 + ⋮ 更多；分店与权限 → 账号与安全 → 底部「停用账号」。
  *
- * 「允许登录」：管理员接口（GET /Users/guid/{guid}、PUT .../status）不暴露 UserLoginRestriction，
- * 目前只有店员接口（store-users）有这个字段与开关，所以管理员版不显示这一行（PersonView.loginEnabled 恒为 undefined）。
- * 后端补上字段与切换接口后，只需在 personFromIdentityUser 里映射并在「账号与安全」加一行即可。
+ * 「允许登录」：GET /Users/guid/{guid} 返回 loginEnabled，PUT /Users/guid/{guid}/login-enabled（Users.Edit）开关它，
+ * 这样被设成店长（员工管理看不到）又被限制登录的账号，管理员也能在这里解开。
+ * 行的形态（隐藏 / 只读 / 本人置灰 / 可操作）全部由 detail-rules.resolveLoginToggle 决定；
+ * 接口没返回 loginEnabled（旧后端）时整行不出现。关闭先弹确认框，开启直接提交；
+ * 开启成功且账号从没登录过时，在卡内提示「可能没有可用密码」并带「设置密码」入口。
  */
 export function AdminPersonDetail({
   userGuid,
@@ -102,6 +109,11 @@ export function AdminPersonDetail({
   const [barcodeVisible, setBarcodeVisible] = useState(false);
   const [statusIntent, setStatusIntent] = useState<StatusIntent | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const loginMutation = useSetIdentityUserLoginEnabled(actorKey);
+  // 「允许登录」关闭前的确认框；开启不需要确认。
+  const [loginIntent, setLoginIntent] = useState<"disable" | null>(null);
+  // 开启登录后的「设置密码」提示：只在这一次开启成功且账号没登录过时置位，页面内有效。
+  const [passwordHint, setPasswordHint] = useState(false);
   const [posPickerVisible, setPosPickerVisible] = useState(false);
   const [snackbar, setSnackbar] = useState("");
 
@@ -133,6 +145,11 @@ export function AdminPersonDetail({
     });
   }, [access, actorKey, barcodeStoreCode, currentUser?.roleNames, emailStoreCode, env.isDeviceMode, env.manageableStores, env.posEnabledStores, isAuthenticated, person]);
   const layout = useMemo(() => (permissions && person ? buildDetailLayout(permissions, person.active) : null), [permissions, person]);
+  // 「允许登录」行的形态：复用上面的 canEdit / isSelf，不另起权限判断。
+  const loginToggle = useMemo(
+    () => (permissions ? resolveLoginToggle(permissions, { loginEnabled: person?.loginEnabled, isDeviceMode: env.isDeviceMode }) : "hidden"),
+    [env.isDeviceMode, permissions, person?.loginEnabled],
+  );
 
   const directQuery = useQuery({
     queryKey: ["identity-admin", actorKey, "user-direct-permissions", userGuid],
@@ -234,6 +251,7 @@ export function AdminPersonDetail({
     try {
       const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode: emailStoreCode, email });
       setPasswordVisible(false);
+      setPasswordHint(false);
       setSnackbar(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
       if (email) await invalidateIdentity();
     } catch (error) {
@@ -250,6 +268,7 @@ export function AdminPersonDetail({
       await updateIdentityUserPassword(userGuid, { newPassword: password, passwordFormat: "raw" }, actorKey);
       if (!isCurrentSession("Users.ResetPassword")) return;
       setPasswordVisible(false);
+      setPasswordHint(false);
       setSnackbar(t("messages.passwordReset"));
     } catch (error) {
       if (!isCurrentSession("Users.ResetPassword")) return;
@@ -289,6 +308,45 @@ export function AdminPersonDetail({
       setStatusBusy(false);
     }
   }, [actorKey, invalidateIdentity, isCurrentSession, language, permissions?.canToggleStatus, statusIntent, t, userGuid]);
+
+  const openPasswordSetup = useCallback(() => {
+    setPasswordError(null);
+    setPasswordVisible(true);
+  }, []);
+
+  /**
+   * 提交「允许登录」开关。只在界面形态为 editable 时放行，并核对会话仍是发起账号且仍持有 Users.Edit。
+   * 失败只显示固定的中英文文案（按 errorCode 归类，不展示服务端原文），日志只记脱敏后的错误元数据；
+   * 结果未知（超时 / 5xx）时 mutation 已刷新详情，提示用户核对当前状态再处理。
+   */
+  const submitLoginEnabled = useCallback(async (next: boolean) => {
+    if (loginToggle !== "editable" || !isCurrentSession("Users.Edit")) {
+      setLoginIntent(null);
+      return;
+    }
+    try {
+      await loginMutation.mutateAsync({ userGuid, loginEnabled: next });
+      setLoginIntent(null);
+      if (!isCurrentSession("Users.Edit")) return;
+      setPasswordHint(next && shouldHintSetPassword({ loginEnabled: true, lastLoginAt: person?.lastLoginAt }));
+      setSnackbar(next ? t("peopleDetail:loginToggle.enabledDone") : t("peopleDetail:loginToggle.disabledDone"));
+    } catch (error) {
+      const meta = getIdentityAdminErrorMeta(error);
+      // 日志只留状态码与错误码：错误元数据里的文字说明可能是服务端原文（200 + success=false 的业务信封），不进日志。
+      console.warn("[people-detail] login enabled failed", { status: meta.status, code: meta.code });
+      // 先关确认框再提示，Snackbar 才不会被还没卸载的对话框挡住。
+      setLoginIntent(null);
+      if (!isCurrentSession("Users.Edit")) return;
+      const failure = classifyLoginToggleFailure({ code: meta.code, status: meta.status, uncertain: isUncertainIdentityWrite(error) });
+      setSnackbar(t(`peopleDetail:loginToggle.errors.${failure}`));
+    }
+  }, [isCurrentSession, loginMutation, loginToggle, person?.lastLoginAt, t, userGuid]);
+
+  const handleLoginSwitch = useCallback((next: boolean) => {
+    if (loginToggle !== "editable" || loginMutation.isPending) return;
+    if (resolveLoginSwitchIntent(next) === "confirmDisable") setLoginIntent("disable");
+    else void submitLoginEnabled(true);
+  }, [loginMutation.isPending, loginToggle, submitLoginEnabled]);
 
   const handleCopyId = useCallback(async () => {
     try {
@@ -486,6 +544,19 @@ export function AdminPersonDetail({
               testID="person-status-confirm"
             />
           ) : null}
+          {loginIntent === "disable" ? (
+            <ConfirmDialog
+              title={t("peopleDetail:loginToggle.confirmTitle", { name: name.primary })}
+              message={t("peopleDetail:loginToggle.confirmMessage")}
+              cancelLabel={t("actions.cancel")}
+              confirmLabel={t("peopleDetail:loginToggle.confirmAction")}
+              danger
+              pending={loginMutation.isPending}
+              onCancel={() => setLoginIntent(null)}
+              onConfirm={() => void submitLoginEnabled(false)}
+              testID="person-login-confirm"
+            />
+          ) : null}
         </>
       )}
     >
@@ -555,14 +626,51 @@ export function AdminPersonDetail({
             onPress={() => push(buildLoginRecordsRoute(userGuid))}
           />
         ) : null}
+        {loginToggle === "readonly" ? (
+          <KvRow
+            label={t("peopleDetail:loginToggle.label")}
+            value={(
+              <Text style={detailStyles.rowValueText} numberOfLines={1} testID="person-login-readonly">
+                {person.loginEnabled ? t("peopleDetail:loginToggle.allowedValue") : t("peopleDetail:loginToggle.restrictedValue")}
+              </Text>
+            )}
+          />
+        ) : null}
+        {loginToggle === "editable" || loginToggle === "selfLocked" ? (
+          <SwitchRow
+            title={t("peopleDetail:loginToggle.label")}
+            description={
+              loginToggle === "selfLocked"
+                ? t("peopleDetail:loginToggle.selfHint")
+                : person.loginEnabled ? t("peopleDetail:loginToggle.onHint") : t("peopleDetail:loginToggle.offHint")
+            }
+            value={person.loginEnabled === true}
+            onValueChange={handleLoginSwitch}
+            disabled={loginToggle === "selfLocked" || loginMutation.isPending}
+            testID="person-login-switch"
+          />
+        ) : null}
+        {passwordHint && shouldHintSetPassword({ loginEnabled: person.loginEnabled, lastLoginAt: person.lastLoginAt }) ? (
+          <View style={styles.passwordHint} testID="person-login-password-hint">
+            <NoticeBox tone="amber" icon="information-outline">{t("peopleDetail:loginToggle.noPasswordNotice")}</NoticeBox>
+            {permissions.canResetPassword ? (
+              <Button
+                mode="contained-tonal"
+                compact
+                onPress={openPasswordSetup}
+                style={styles.passwordHintButton}
+                testID="person-login-set-password"
+              >
+                {t("peopleDetail:loginToggle.setPassword")}
+              </Button>
+            ) : null}
+          </View>
+        ) : null}
         {permissions.canResetPassword ? (
           <KvRow
             label={t("peopleDetail:account.resetPassword")}
             value={<Text style={detailStyles.rowValueText} numberOfLines={1}>{t("peopleDetail:account.resetPasswordHint")}</Text>}
-            onPress={() => {
-              setPasswordError(null);
-              setPasswordVisible(true);
-            }}
+            onPress={openPasswordSetup}
           />
         ) : null}
         <KvRow
@@ -599,6 +707,8 @@ export function AdminPersonDetail({
 }
 
 const styles = StyleSheet.create({
+  passwordHint: { borderTopColor: HB_COLORS.outlineMuted, borderTopWidth: StyleSheet.hairlineWidth, gap: HB_SPACING.xs, padding: 12 },
+  passwordHintButton: { alignSelf: "flex-start", borderRadius: HB_RADIUS.control },
   statusButton: { alignItems: "center", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 4, minHeight: 48 },
   statusButtonDanger: { backgroundColor: "#FEF3F2", borderColor: "#FDA29B" },
   statusButtonSafe: { backgroundColor: "#ECFDF3", borderColor: "#ABEFC6" },

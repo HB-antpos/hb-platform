@@ -226,4 +226,18 @@ const formatters: IdentityPersonFormatters = {
 assertEqual(resolveIdentityExceptionTags({ isActive: true, email: "a@b.com" }), [], "有邮箱启用无标签");
 assertEqual(resolveIdentityExceptionTags({ isActive: false, email: "" }), ["disabled"], "停用只给已停用");
 
+// ── 管理员列表「不能登录」例外标签：只有 loginEnabled === false 才标，缺省（未知）和 true 都不标 ──
+assertEqual(resolveIdentityExceptionTags({ isActive: true, email: "a@b.com", loginEnabled: false }), ["cannotLogin"], "不能登录");
+assertEqual(resolveIdentityExceptionTags({ isActive: true, email: "a@b.com", loginEnabled: true }), [], "允许登录不挂标签");
+assertEqual(resolveIdentityExceptionTags({ isActive: true, email: "a@b.com", loginEnabled: undefined }), [], "缺省 = 未知（旧后端），不标");
+assertEqual(resolveIdentityExceptionTags({ isActive: true, email: "", loginEnabled: false }), ["cannotLogin", "noEmail"], "不能登录在无邮箱之前，与店员列表同序");
+assertEqual(resolveIdentityExceptionTags({ isActive: false, email: "", loginEnabled: false }), ["disabled"], "已停用只给已停用，不叠加不能登录");
+{
+  const item = buildIdentityPersonItem(identity({ loginEnabled: false, roleNames: ["StoreManager"] }), formatters, now);
+  assertEqual(item.tags, ["cannotLogin"], "被限制登录的店长账号（kevin 的情形）在管理员列表里标出");
+  assertEqual(item.inactive, false, "不能登录不等于停用：头像不置灰");
+  assertEqual(buildIdentityPersonItem(identity({ loginEnabled: true }), formatters, now).tags, [], "正常账号仍无标签");
+  assertEqual(buildIdentityPersonItem(identity(), formatters, now).tags, [], "接口没返回 loginEnabled 时不标");
+}
+
 console.log("person-list-item.test.ts: ok");

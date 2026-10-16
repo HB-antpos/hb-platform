@@ -18,7 +18,10 @@ export interface PersonView {
   active: boolean;
   roleNames: string[];
   mustChangePassword?: boolean;
-  /** 旧后端 / 管理员接口不返回时为 undefined，界面视为允许登录且不展示该开关。 */
+  /**
+   * 是否允许登录。店长版取自 store-users 资料（缺省按允许）；管理员版取自 GET /Users/guid/{guid} 的 loginEnabled，
+   * 旧后端 / 未查询时为 undefined：界面不标「不能登录」，也不展示管理员版的开关。
+   */
   loginEnabled?: boolean;
   employmentType?: string;
   lastLoginAt?: string;
@@ -63,6 +66,7 @@ export function personFromIdentityUser(user: IdentityUserDetail): PersonView {
     phone: user.phone,
     active: user.isActive,
     roleNames: user.roleNames,
+    loginEnabled: user.loginEnabled,
     lastLoginAt: user.lastLoginAt,
     lastLoginIp: user.lastLoginIp,
     createdAt: user.createdAt,

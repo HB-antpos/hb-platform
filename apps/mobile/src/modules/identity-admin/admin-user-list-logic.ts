@@ -2,7 +2,8 @@
 // 「下拉加载更多」的分页累加与去重。不依赖 React Native，可在 Node 下测试。
 //
 // 服务端只支持这些筛选：search（姓名 / 账号 / 邮箱 / 电话）、roleGuid、storeGuid、isActive、sortBy、sortDirection。
-// 「待首次登录 / 不能登录 / 无邮箱」没有服务端筛选，列表接口也不返回 loginEnabled，所以管理员版不提供这组筛选（见汇报）。
+// 「待首次登录 / 不能登录 / 无邮箱」没有服务端筛选，所以管理员版不提供这组筛选。
+// 列表接口现在会返回每行的 loginEnabled，只用来在行上标出「不能登录」，仍不能据此做服务端筛选。
 import type { IdentityPagedResult, IdentityUser, IdentityUserQuery } from "./types";
 
 /** 每页条数：沿用原分页参数（原默认 20），下拉到底再取下一页并累加。 */

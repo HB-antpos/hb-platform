@@ -83,7 +83,9 @@ const identity: IdentityUserDetail = {
 };
 const fromIdentity = personFromIdentityUser(identity);
 assertEqual(fromIdentity.active, false, "isActive=false 为停用");
-assertEqual(fromIdentity.loginEnabled, undefined, "管理员接口不暴露允许登录：保持 undefined（界面不显示该开关）");
+assertEqual(fromIdentity.loginEnabled, undefined, "接口没返回 loginEnabled（旧后端 / 未查询）：保持 undefined，界面不标也不显示开关");
+assertEqual(personFromIdentityUser({ ...identity, loginEnabled: false }).loginEnabled, false, "管理员详情 loginEnabled=false 透传（界面标「不能登录」）");
+assertEqual(personFromIdentityUser({ ...identity, loginEnabled: true }).loginEnabled, true, "管理员详情 loginEnabled=true 透传");
 assertEqual(fromIdentity.roleNames, ["店长"], "角色透传");
 
 console.log("person-view.test.ts: ok");
