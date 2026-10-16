@@ -46,7 +46,7 @@ assert.match(i18nSource, /ns: \[[^\]]*"priceUpdates"/, "新命名空间必须登
 // 工作台角标链路：layout 按分店汇总（名下全部分店合计）→ access-context → workbench 按路由名查表
 const layoutSource = read("app/(shell)/_layout.tsx");
 assert.match(layoutSource, /usePriceTaskOverview\(/);
-assert.match(layoutSource, /pendingPriceUpdateCount: priceTaskOverview\.totalPending/);
+assert.match(layoutSource, /pendingPriceUpdateCount: priceTaskOverview\.visiblePending/, "工作台角标 = 名下全部可见分店合计（含只关联的）");
 assert.match(read("src/modules/navigation/access-context.tsx"), /pendingPriceUpdateCount: number/);
 const workbenchSource = read("src/modules/workbench/workbench-screen.tsx");
 assert.match(workbenchSource, /"price-updates": pendingPriceUpdateCount/);

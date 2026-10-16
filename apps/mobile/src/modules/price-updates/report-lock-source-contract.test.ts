@@ -29,7 +29,8 @@ assert.match(layout, /priceTasks: priceTaskOverview/);
 assert.match(layout, /refreshPriceTasks/);
 assert.match(layout, /<PriceReminderHost/);
 assert.doesNotMatch(layout, /getPriceUpdatePendingCount/, "角标不再只按当前分店查数量，改用按分店汇总");
-assert.match(layout, /pendingPriceUpdateCount: priceTaskOverview\.totalPending/, "角标 = 名下全部分店合计");
+assert.match(layout, /pendingPriceUpdateCount: priceTaskOverview\.visiblePending/, "角标 = 名下全部可见分店合计（含只关联的）");
+assert.doesNotMatch(layout, /pendingPriceUpdateCount: priceTaskOverview\.totalPending/, "角标不能再只算管理分店");
 
 // ---- 价格和标签页：参数只在页面里解释一次；全选覆盖没加载的；批量不跨店 ----
 const screen = read("src/modules/price-updates/price-updates-screen.tsx");
@@ -89,14 +90,18 @@ assert.doesNotMatch(
 );
 assert.match(
   overviewSource,
-  /getManageableStoresForSession\(\{[^}]*isAdmin: input\.isAdmin,/s,
-  "管理分店范围只看 isAdmin：管理员 = 可见全部，其余（含仓库管理员）= isPrimary"
+  /getManageableStoresForSession\(\{[^}]*isAdmin: input\.isAdmin \|\| Boolean\(input\.isOrderUser\),/s,
+  "管理分店范围只看管理员 / 订货员：管理员、订货员 = 可见全部，其余（含仓库管理员）= isPrimary"
 );
 assert.match(
   overviewSource,
-  /reportsLockExempt = input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\)/,
-  "管理员、仓库管理员（含两者兼任）都不锁报表，只有店长口径才锁"
+  /reportsLockExempt = input\.isAdmin \|\| Boolean\(input\.isWarehouseManager\) \|\| Boolean\(input\.isOrderUser\)/,
+  "管理员、仓库管理员、订货员都不锁报表，只有店长口径才锁"
 );
+// ---- 订货员：布局把 onlyOrder 传给概览；名下全部分店弹窗，角标按可见分店合计 ----
+assert.match(layout, /isOrderUser = useAuthStore\(\(state\) => state\.access\.onlyOrder\)/, "布局读取订货员身份");
+assert.match(layout, /isWarehouseManager,\s*isOrderUser,\s*\}\)/, "布局把订货员身份传给概览");
+assert.match(overviewSource, /visiblePending: rows\.reduce/, "角标合计 = 名下全部可见分店");
 assert.match(
   overviewSource,
   /reportsLocked: !input\.isDeviceMode && !reportsLockExempt && manageableOverdueCount > 0/,
