@@ -30,6 +30,9 @@ import {
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { DateRangePickerModal, type DateRangePickerValue } from "@/components/ui/DateRangePickerModal";
+import { formatInvoiceDateRangeDisplay } from "@/modules/local-supplier-invoices/date-range";
+import { getDefaultListDateRange } from "@/shared/utils/default-list-date-range";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { resolveLocaleTag } from "@/shared/i18n/types";
@@ -538,6 +541,15 @@ export default function Orders() {
   const [snackbar, setSnackbar] = useState("");
   const [orderKeyword, setOrderKeyword] = useState("");
   const [submittedOrderKeyword, setSubmittedOrderKeyword] = useState("");
+  // 商品匹配：按订单明细里的货号 / 条码 / 商品名筛订单，与上面的订单号/分店搜索取交集。
+  const [productKeyword, setProductKeyword] = useState("");
+  const [submittedProductKeyword, setSubmittedProductKeyword] = useState("");
+  // 下单日期区间默认最近 6 个月；弹窗里「清除」= 不限日期。
+  const [dateRange, setDateRange] = useState<DateRangePickerValue>(() => {
+    const range = getDefaultListDateRange();
+    return { from: range.from, to: range.to };
+  });
+  const [dateRangeVisible, setDateRangeVisible] = useState(false);
   const orderStoreScopeKey = useMemo(
     () => [
       isDeviceMode ? "device" : "account",
@@ -565,12 +577,39 @@ export default function Orders() {
     return () => clearTimeout(timeout);
   }, [orderKeyword]);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setPageNumber(1);
+      setSubmittedProductKeyword(productKeyword.trim());
+    }, 350);
+    return () => clearTimeout(timeout);
+  }, [productKeyword]);
+
   const scopedStoreCodes = useMemo(
     () => (allStoresSelected ? stores.map((store) => store.storeCode) : []),
     [allStoresSelected, stores]
   );
   const scopedStoreKey = scopedStoreCodes.join(",");
   const hasOrderScope = Boolean(selectedStoreCode) || scopedStoreCodes.length > 0;
+
+  const dateRangeLabel = useMemo(() => formatInvoiceDateRangeDisplay(
+    dateRange,
+    {
+      allDatesLabel: t("filters.allDates"),
+      formatFrom: (date) => t("filters.dateRangeFrom", { date }),
+      formatTo: (date) => t("filters.dateRangeTo", { date }),
+      rangeSeparator: " ~ ",
+    }
+  ).text, [dateRange, t]);
+  const dateRangeWeekdayLabels = useMemo(() => {
+    // 2026-01-05 是周一：依次取周一到周日的窄星期名，随界面语言变化。
+    const formatter = new Intl.DateTimeFormat(localeTag, { weekday: "narrow" });
+    return Array.from({ length: 7 }, (_, index) => formatter.format(new Date(2026, 0, 5 + index)));
+  }, [localeTag]);
+  const defaultDateRange = useMemo(() => {
+    const range = getDefaultListDateRange();
+    return { from: range.from, to: range.to };
+  }, []);
 
   const statusLabel = useCallback(
     (status?: StoreOrderFlowStatus) => {
@@ -614,10 +653,10 @@ export default function Orders() {
 
   useEffect(() => {
     setPageNumber(1);
-  }, [selectedStatus, selectedStoreCode, scopedStoreKey]);
+  }, [selectedStatus, selectedStoreCode, scopedStoreKey, dateRange.from, dateRange.to]);
 
   const ordersQuery = useQuery({
-    queryKey: ["storeOrders", storesDebugInfo.userGuid, allStoresSelected, selectedStoreCode, scopedStoreKey, statusList.join(","), submittedOrderKeyword, pageNumber],
+    queryKey: ["storeOrders", storesDebugInfo.userGuid, allStoresSelected, selectedStoreCode, scopedStoreKey, statusList.join(","), submittedOrderKeyword, submittedProductKeyword, dateRange.from ?? "", dateRange.to ?? "", pageNumber],
     enabled: isStoreSelectionReady && orderScopeReady && hasOrderScope,
     queryFn: ({ signal }) =>
       fetchOrderList({
@@ -627,6 +666,9 @@ export default function Orders() {
         pageSize: PAGE_SIZE,
         statusList,
         keyword: submittedOrderKeyword || undefined,
+        productKeyword: submittedProductKeyword || undefined,
+        startDate: dateRange.from,
+        endDate: dateRange.to,
       }, signal),
   });
 
@@ -794,6 +836,27 @@ export default function Orders() {
           right={orderKeyword ? <TextInput.Icon icon="close" onPress={() => setOrderKeyword("")} /> : undefined}
           style={styles.searchInput}
         />
+      </View>
+      <View style={styles.searchRow}>
+        <TextInput
+          mode="outlined"
+          dense
+          value={productKeyword}
+          onChangeText={setProductKeyword}
+          placeholder={t("filters.productMatchPlaceholder")}
+          left={<TextInput.Icon icon="barcode" />}
+          right={productKeyword ? <TextInput.Icon icon="close" onPress={() => setProductKeyword("")} /> : undefined}
+          style={styles.searchInput}
+        />
+      </View>
+      <View style={styles.dateChipRow}>
+        <Chip
+          hitSlop={4}
+          icon="calendar-range"
+          mode="outlined"
+          onPress={() => setDateRangeVisible(true)}
+          style={styles.dateChip}
+        >{t("filters.orderDate", { range: dateRangeLabel })}</Chip>
       </View>
       <ScrollView
         horizontal
@@ -1060,6 +1123,22 @@ export default function Orders() {
           />
         </Modal>
       </Portal>
+      <DateRangePickerModal
+        visible={dateRangeVisible}
+        title={t("filters.dateRangeTitle")}
+        value={dateRange}
+        onApply={(next) => {
+          setDateRange(next);
+          setDateRangeVisible(false);
+        }}
+        onCancel={() => setDateRangeVisible(false)}
+        cancelLabel={t("common:actions.cancel")}
+        clearLabel={t("common:actions.clear")}
+        applyLabel={t("filters.applyDateRange")}
+        weekdayLabels={dateRangeWeekdayLabels}
+        localeTag={localeTag}
+        presetRange={{ label: t("filters.recentSixMonths"), value: defaultDateRange }}
+      />
       <Snackbar visible={Boolean(snackbar)} onDismiss={() => setSnackbar("")} duration={3000}>
         {snackbar}
       </Snackbar>
@@ -1115,6 +1194,8 @@ const styles = StyleSheet.create({
   scopeBarChevron: { color: "#1677FF", fontSize: 28, lineHeight: 28 },
   searchRow: { paddingHorizontal: 16, marginBottom: 4 },
   searchInput: { backgroundColor: "#FFFFFF", height: 46 },
+  dateChipRow: { paddingHorizontal: 16, marginBottom: 8, flexDirection: "row" },
+  dateChip: { borderRadius: 10, backgroundColor: "#F3F8FF", borderColor: "#B2CCFF" },
   // 横向 ScrollView 默认会参与纵向 flex 收缩；锁定交叉轴高度，避免 Chip 被压成一条窄缝。
   statusTabsScroll: { flexGrow: 0, flexShrink: 0, minHeight: 48 },
   statusTabsRow: { alignItems: "center", gap: 8, minHeight: 48, paddingHorizontal: 16 },

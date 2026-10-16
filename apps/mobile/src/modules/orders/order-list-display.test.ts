@@ -70,6 +70,19 @@ assertEqual(scopedRequest.storeCode, undefined, "多店范围请求不应携带�
 assertEqual(scopedRequest.storeCodes?.join(","), "BRISBANE,SYDNEY", "多店范围请求保留可管理分店代码");
 assertEqual(buildOrderListRequest({ storeCodes: [] }).storeCodes, undefined, "空多店范围不应发起无范围请求");
 
+const matchRequest = buildOrderListRequest({
+  productKeyword: " 9328644 ",
+  startDate: "2026-04-17",
+  endDate: "2026-10-17",
+});
+assertEqual(matchRequest.productKeyword, "9328644", "商品匹配关键字应去掉首尾空格后发送");
+assertEqual(matchRequest.startDate, "2026-04-17", "下单起始日期原样发送");
+assertEqual(matchRequest.endDate, "2026-10-17", "下单结束日期原样发送");
+const emptyMatchRequest = buildOrderListRequest({ productKeyword: "   ", startDate: "", endDate: " " });
+assertEqual(emptyMatchRequest.productKeyword, undefined, "空白商品匹配关键字不发送");
+assertEqual(emptyMatchRequest.startDate, undefined, "空起始日期不发送");
+assertEqual(emptyMatchRequest.endDate, undefined, "空结束日期不发送");
+
 const lines = [
   makeLine("P001", { itemNumber: "HB-001", barcode: "BAR-001" }),
   makeLine("P002", { itemNumber: "", barcode: "BAR-002" }),

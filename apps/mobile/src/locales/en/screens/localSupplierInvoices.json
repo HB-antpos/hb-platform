@@ -35,7 +35,9 @@
     "priceUp": "Price up",
     "priceDown": "Price down",
     "detailSearch": "Search product / barcode",
-    "detailSearchFull": "Search item / barcode / product name"
+    "detailSearchFull": "Search item / barcode / product name",
+    "productKeywordPlaceholder": "Match products: item no. / barcode / name",
+    "appliedDateRange": "Order date: {{range}} (tap to change)"
   },
   "labels": {
     "orderDate": "Order date",

@@ -134,6 +134,7 @@ export function buildInvoiceGridRequest(query: InvoiceGridQuery): GridRequest {
     : null;
   const supplierFilter = textFilter(query.filters?.supplierCode);
   const invoiceFilter = textFilter(query.filters?.invoiceNo);
+  const productFilter = textFilter(query.filters?.productKeyword);
   const inboundStatus = query.filters?.inboundStatus;
   const orderDateFilter = dateRangeFilter(
     query.filters?.orderDateFrom,
@@ -143,6 +144,8 @@ export function buildInvoiceGridRequest(query: InvoiceGridQuery): GridRequest {
   if (storeFilter) filterModel.storeCode = storeFilter;
   if (supplierFilter) filterModel.supplierCode = supplierFilter;
   if (invoiceFilter) filterModel.invoiceNo = invoiceFilter;
+  // 后端 Grid 把 ProductKeyword 当作「按商品匹配进货单」的特殊列：用相关 EXISTS 在明细里匹配，不是单据头字段。
+  if (productFilter) filterModel.ProductKeyword = productFilter;
   if (inboundStatus === 0 || inboundStatus === 1 || inboundStatus === 2) {
     filterModel.inboundStatus = {
       filterType: "number",

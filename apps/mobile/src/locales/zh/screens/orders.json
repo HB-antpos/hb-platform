@@ -80,7 +80,15 @@
     "allHistory": "全部历史",
     "itemNumber": "货号过滤",
     "itemNumberPlaceholder": "输入货号，货号为空时可输入条码",
-    "clearItemNumber": "清空"
+    "clearItemNumber": "清空",
+    "productMatchPlaceholder": "商品匹配：货号 / 条码 / 商品名",
+    "orderDate": "下单日期 {{range}}",
+    "allDates": "全部日期",
+    "dateRangeFrom": "{{date}} 起",
+    "dateRangeTo": "截至 {{date}}",
+    "dateRangeTitle": "选择下单日期范围",
+    "applyDateRange": "应用",
+    "recentSixMonths": "近 6 个月"
   },
   "pagination": {
     "previous": "上一页",

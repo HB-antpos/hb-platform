@@ -80,7 +80,15 @@
     "allHistory": "All history",
     "itemNumber": "Item number filter",
     "itemNumberPlaceholder": "Enter item number, or barcode when item number is empty",
-    "clearItemNumber": "Clear"
+    "clearItemNumber": "Clear",
+    "productMatchPlaceholder": "Match products: item no. / barcode / name",
+    "orderDate": "Order date {{range}}",
+    "allDates": "All dates",
+    "dateRangeFrom": "From {{date}}",
+    "dateRangeTo": "Until {{date}}",
+    "dateRangeTitle": "Select order date range",
+    "applyDateRange": "Apply",
+    "recentSixMonths": "Last 6 months"
   },
   "pagination": {
     "previous": "Previous",

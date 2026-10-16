@@ -35,6 +35,7 @@ const params = buildLocalSupplierInvoicesReturnParams({
     inboundStatus: 2,
     orderDateFrom: "2026-05-01",
     orderDateTo: "2026-05-18",
+    productKeyword: " 9328644 ",
   },
   sort: {
     colId: "InvoiceNo",
@@ -54,6 +55,7 @@ assertEqual(params.returnDetailPriceChangeFilter, "up", "detail price filter is 
 assertEqual(params.returnDetailSearch, "ITEM-7", "detail search is trimmed when encoded");
 assertEqual(params.returnFilterStoreCode, "S01", "filter values are trimmed when encoded");
 assertEqual(params.returnFilterInboundStatus, "2", "inbound status is encoded");
+assertEqual(params.returnFilterProductKeyword, "9328644", "product keyword is trimmed and encoded");
 assertEqual(params.returnSortColId, "InvoiceNo", "sort column is encoded");
 
 const decoded = decodeLocalSupplierInvoicesReturnParams({
@@ -72,6 +74,7 @@ const decoded = decodeLocalSupplierInvoicesReturnParams({
   returnFilterInboundStatus: "2",
   returnFilterOrderDateFrom: "2026-05-01",
   returnFilterOrderDateTo: "2026-05-18",
+  returnFilterProductKeyword: "9328644",
   returnSortColId: "InvoiceNo",
   returnSortDirection: "asc",
 });
@@ -95,6 +98,7 @@ assertDeepEqual(
       inboundStatus: 2,
       orderDateFrom: "2026-05-01",
       orderDateTo: "2026-05-18",
+      productKeyword: "9328644",
     },
     sort: {
       colId: "InvoiceNo",

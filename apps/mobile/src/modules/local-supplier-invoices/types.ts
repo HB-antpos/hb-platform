@@ -10,6 +10,8 @@ export interface InvoiceGridFilters {
   inboundStatus?: 0 | 1 | 2;
   orderDateFrom?: string;
   orderDateTo?: string;
+  /** 商品匹配：货号 / 条码 / 商品编码 / 商品名，命中任一明细即返回该进货单（后端 ProductKeyword 过滤）。 */
+  productKeyword?: string;
 }
 
 export interface LocalSupplierOption {
