@@ -2,13 +2,13 @@
   "expo": {
     "name": "HB",
     "slug": "hbweb-expo",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hbwebexpo",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "runtimeVersion": "1.0.8",
+    "runtimeVersion": "1.0.9",
     "updates": {
       "url": "https://u.expo.dev/3b37541e-6191-460d-9a57-fe6691e206cf"
     },
