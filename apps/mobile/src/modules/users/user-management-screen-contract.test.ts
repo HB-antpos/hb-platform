@@ -225,7 +225,13 @@ assert.match(barcodeDialogSource, /invalidateStaffBarcodeOperationSession/, "组
 assert.match(barcodeDialogSource, /runStaffBarcodeActionExclusive\(actionGateRef\.current/, "点击动作必须用同步CAS覆盖完整异步链");
 assert.match(barcodeDialogSource, /hasIncompleteStaffBarcodeConfirmation\(batch\)/, "结束批量时不得清理待确认attempt");
 assert.match(barcodeDialogSource, /hydrateSavedPrinter\(\)/, "个人码弹层打开时必须恢复已保存打印机配置");
-assert.match(barcodeDialogSource, /router\.navigate\("\/\(shell\)\/settings"\)/, "个人码弹层必须提供打印机设置入口");
+// 更换打印机改为弹层内就地完成（LabelPrinterSetupSheet），不再关掉弹层跳去设置页；单个与批量弹层都必须有入口。
+assert.match(barcodeDialogSource, /<LabelPrinterSetupSheet visible=\{printerSheetVisible\}/, "个人码弹层必须提供就地更换打印机入口");
+assert.equal(barcodeDialogSource.match(/<LabelPrinterSetupSheet\b/g)?.length, 2, "单个与批量个人码弹层都要接入就地更换打印机");
+assert.doesNotMatch(barcodeDialogSource, /router\.navigate\("\/\(shell\)\/settings"\)/, "个人码弹层不得再跳去设置页丢失上下文");
+assert.match(barcodeDialogSource, /testID="staff-barcode-change-printer"/, "打印机状态行必须带「更换」入口");
+assert.match(barcodeDialogSource, /<PeopleSheet[^>]*testID="staff-barcode-dialog"/, "单个个人码弹层必须是底部弹层");
+assert.match(barcodeDialogSource, /<PeopleSheet[^>]*testID="staff-barcode-batch-dialog"/, "批量个人码弹层必须是底部弹层");
 assert.match(barcodeDialogSource, /pendingConfirmation\?\.phase === "printed"/, "已出纸待确认必须显示独立恢复状态");
 assert.match(barcodeDialogSource, /fontScale > 1\.2 \|\| width < 380/, "窄屏或大字号时弹层操作必须改为纵向布局");
 
