@@ -55,6 +55,12 @@ export interface IdentityUser {
   familyName?: string;
   nickname?: string;
   phone?: string;
+  /**
+   * 是否允许登录 Web / App。只有用户详情（GET /Users/guid/{guid}）与管理员用户列表（GET /Users/optimized）
+   * 会返回；接口省略 null，所以缺省（undefined）= 未知（旧后端 / 未查询），不等于「允许」。
+   * 界面只在 `=== false` 时标「不能登录」，`undefined` 时既不标也不显示开关。
+   */
+  loginEnabled?: boolean;
   lastLoginAt?: string;
   lastLoginIp?: string;
   isActive: boolean;

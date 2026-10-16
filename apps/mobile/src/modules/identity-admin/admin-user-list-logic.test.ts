@@ -96,6 +96,20 @@ assertEqual(
   "跨页重复的用户只留一条，顺序按首次出现",
 );
 assertEqual(flattenUserPages([]), [], "没有页返回空数组");
+{
+  // 累加 / 去重不能丢掉 loginEnabled：列表行靠它标出「不能登录」；缺省（未知）原样保持 undefined。
+  const restricted = { ...user("r"), loginEnabled: false };
+  const allowed = { ...user("a"), loginEnabled: true };
+  const merged = flattenUserPages([{ items: [restricted, user("u")] }, { items: [allowed] }]);
+  assertEqual(merged.map((item) => item.loginEnabled), [false, undefined, true], "loginEnabled 逐行保留，缺省仍是 undefined");
+}
+
+// ── 不新增「不能登录」筛选：接口不支持按 loginEnabled 筛选，查询参数里绝不能出现它 ──
+{
+  const query = buildAdminUserQuery({ search: "kevin", storeGuid: "S1", roleGuid: "R1", status: "active", sort: "lastLoginAt" }, 1);
+  assertEqual(Object.keys(query).some((key) => /login(Enabled)?$/i.test(key) && key !== "lastLoginAt"), false, "列表查询没有 loginEnabled 筛选参数");
+  assertEqual(Object.keys(buildAdminCountQuery(DEFAULT_ADMIN_USER_FILTERS, true)).includes("loginEnabled"), false, "计数查询同样没有");
+}
 
 // ── 下一页 ──
 assertEqual(resolveNextPage({ page: 1, pageSize: 20, total: 45, totalPages: 3, items: [user("a")] }), 2, "还有下一页");

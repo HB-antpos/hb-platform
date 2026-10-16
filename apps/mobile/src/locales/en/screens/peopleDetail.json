@@ -101,6 +101,30 @@
     "noPosStore": "No store available for POS permissions",
     "posPickerTitle": "Choose a store for POS permissions"
   },
+  "loginToggle": {
+    "label": "Allow sign-in",
+    "onHint": "Turn off to block this account from signing in to the app and web",
+    "offHint": "Sign-in is blocked for this account. Turn on to let it sign in to the app and web",
+    "selfHint": "You cannot turn off sign-in for your own account",
+    "allowedValue": "Allowed",
+    "restrictedValue": "Blocked",
+    "confirmTitle": "Block sign-in for {{name}}?",
+    "confirmMessage": "This account will no longer be able to sign in, and sessions that are already signed in will end.",
+    "confirmAction": "Block sign-in",
+    "enabledDone": "Sign-in allowed for this account",
+    "disabledDone": "Sign-in blocked for this account",
+    "noPasswordNotice": "This account has never signed in and may not have a usable password.",
+    "setPassword": "Set password",
+    "errors": {
+      "self": "You cannot turn off sign-in for your own account",
+      "notFound": "This account no longer exists. Go back to the list and refresh.",
+      "scopeDenied": "This account is outside the people you can manage",
+      "highPrivilege": "You cannot change sign-in for administrators or other high-privilege accounts",
+      "forbidden": "You do not have permission to change sign-in for this account",
+      "uncertain": "The result could not be confirmed. The page was refreshed, so check the \"Allow sign-in\" status before trying again.",
+      "generic": "Could not change sign-in. Please try again later."
+    }
+  },
   "more": {
     "titles": {
       "barcode": "Print personal code",

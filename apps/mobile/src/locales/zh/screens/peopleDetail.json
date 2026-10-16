@@ -101,6 +101,30 @@
     "noPosStore": "没有可设置收银权限的分店",
     "posPickerTitle": "选择要设置收银权限的分店"
   },
+  "loginToggle": {
+    "label": "允许登录",
+    "onHint": "关闭后该账号无法登录 App 和 Web",
+    "offHint": "该账号被限制登录，打开后才能登录 App 和 Web",
+    "selfHint": "不能关闭本人账号的登录权限",
+    "allowedValue": "允许",
+    "restrictedValue": "不允许",
+    "confirmTitle": "关闭 {{name}} 的登录权限？",
+    "confirmMessage": "关闭后该账号将无法登录，已登录的会话也会失效。",
+    "confirmAction": "关闭登录",
+    "enabledDone": "已允许该账号登录",
+    "disabledDone": "已关闭该账号的登录权限",
+    "noPasswordNotice": "该账号还没登录过，可能没有可用密码。",
+    "setPassword": "设置密码",
+    "errors": {
+      "self": "不能关闭本人账号的登录权限",
+      "notFound": "这个账号已经不存在，请返回列表刷新",
+      "scopeDenied": "该账号不在你可管理的范围内",
+      "highPrivilege": "没有权限修改管理员或其他高权限账号的登录权限",
+      "forbidden": "没有修改该账号登录权限的权限",
+      "uncertain": "操作结果未能确认，已刷新页面，请核对「允许登录」的状态后再处理",
+      "generic": "修改登录权限失败，请稍后重试"
+    }
+  },
   "more": {
     "titles": {
       "barcode": "打印个人码",

@@ -2,16 +2,20 @@ import {
   buildDetailLayout,
   buildHeaderStatusTags,
   buildNameDisplayParts,
+  classifyLoginToggleFailure,
   formatLocalDate,
   formatLocalDateTime,
   isStoreManagerRoleDerived,
   resolveDetailPermissions,
   resolveDetailVariant,
   resolveEmailStoreCode,
+  resolveLoginSwitchIntent,
+  resolveLoginToggle,
   resolveScheduleEntries,
   resolveStatusAction,
   selectPosStores,
   shortenGuid,
+  shouldHintSetPassword,
   summarizeActiveSessions,
   summarizeRecordCount,
   summarizeStoreRelations,
@@ -280,6 +284,74 @@ assertEqual(buildHeaderStatusTags({ active: true, mustChangePassword: true }), [
 assertEqual(buildHeaderStatusTags({ active: false, mustChangePassword: true }), ["disabled"], "已停用不再显示待首次登录");
 assertEqual(buildHeaderStatusTags({ active: true, loginEnabled: false }), ["active", "loginDisabled"], "不能登录是例外标签");
 assertEqual(buildHeaderStatusTags({ active: true, loginEnabled: undefined }), ["active"], "旧后端缺省视为允许登录");
+
+// ───────────── 管理员版「允许登录」开关 ─────────────
+
+{
+  const toggle = (
+    input: Partial<DetailPermissionInput> & Pick<DetailPermissionInput, "actor">,
+    loginEnabled: boolean | undefined,
+    isDeviceMode = false,
+  ) => resolveLoginToggle(permissionsFor({ variant: "admin", ...input }), { loginEnabled, isDeviceMode });
+
+  // 可操作：管理员（含 Users.Edit）对他人账号，开着或已被限制都能切。
+  assertEqual(toggle({ actor: actor("admin") }, true), "editable", "管理员对他人：可操作（已允许）");
+  assertEqual(toggle({ actor: actor("admin") }, false), "editable", "管理员对他人：可操作（已被限制，要能解开 kevin 这类账号）");
+  // 持有全局 Users.Edit 的店长级管理者对店员：与「编辑 / 停用」同一个判断，可操作（分店范围由后端 USER_SCOPE_DENIED 兜底）。
+  assertEqual(toggle({ actor: actor("manager", [U.View, U.Edit]) }, false), "editable", "店长级持 Users.Edit 对店员：可操作");
+
+  // 接口没返回 loginEnabled（旧后端 / 未查询）：未知不等于允许，整行不出现。
+  assertEqual(toggle({ actor: actor("admin") }, undefined), "hidden", "loginEnabled 缺省：不显示开关");
+
+  // 没有 Users.Edit：只读显示当前值，不是可点的开关（店员码 EditStoreStaff 只对店长版接口有效，不放行）。
+  assertEqual(toggle({ actor: actor("manager") }, true), "readonly", "只有店员编辑码：只读");
+  assertEqual(toggle({ actor: actor("viewer", [U.View]) }, false), "readonly", "只有查看权限：只读");
+  // 受保护目标：店长级管理者不能动管理员账号，只读。
+  assertEqual(toggle({ actor: actor("manager", [U.View, U.Edit]), target: target({ roleNames: ["Admin"] }) }, true), "readonly", "店长级对管理员账号：只读");
+
+  // 本人：开关置灰并说明（后端 SELF_PROFILE_FIELDS_DENIED），不管有没有编辑权限。
+  assertEqual(toggle({ actor: actor("admin"), target: target({ userGuid: "admin-1", roleNames: ["Admin"] }) }, true), "selfLocked", "管理员本人：置灰");
+  assertEqual(toggle({ actor: actor("manager", [U.View, U.Edit]), target: target({ userGuid: "mgr-1", roleNames: ["StoreManager"] }) }, true), "selfLocked", "店长级本人：置灰");
+
+  // 店长版不出现（店长版走 store-users 接口，没有这个写接口）。
+  assertEqual(
+    resolveLoginToggle(permissionsFor({ variant: "store", actor: actor("manager") }), { loginEnabled: false, isDeviceMode: false }),
+    "hidden",
+    "店长版：不出现",
+  );
+  // 设备模式：即使误传了管理员版权限也不出现。
+  assertEqual(toggle({ actor: actor("admin") }, false, true), "hidden", "设备模式：不出现");
+  // 设备模式 / iOS 审核模式在 resolveDetailVariant 里回落到店长版，于是同样不出现。
+  for (const env of [{ isDeviceMode: true, isIosReview: false }, { isDeviceMode: false, isIosReview: true }]) {
+    const variant = resolveDetailVariant({ identityAllowed: true, ...env });
+    assertEqual(
+      resolveLoginToggle(permissionsFor({ variant, actor: actor("admin") }), { loginEnabled: false, isDeviceMode: env.isDeviceMode }),
+      "hidden",
+      `环境 ${JSON.stringify(env)} 下不出现`,
+    );
+  }
+}
+
+assertEqual(resolveLoginSwitchIntent(false), "confirmDisable", "关闭先确认");
+assertEqual(resolveLoginSwitchIntent(true), "enableNow", "开启直接提交");
+
+assertEqual(shouldHintSetPassword({ loginEnabled: true, lastLoginAt: undefined }), true, "从没登录过：提示设置密码");
+assertEqual(shouldHintSetPassword({ loginEnabled: true, lastLoginAt: "  " }), true, "空白登录时间同样视为没登录过");
+assertEqual(shouldHintSetPassword({ loginEnabled: true, lastLoginAt: "2026-10-01T00:00:00Z" }), false, "登录过的账号不提示");
+assertEqual(shouldHintSetPassword({ loginEnabled: false, lastLoginAt: undefined }), false, "仍是限制状态不提示");
+assertEqual(shouldHintSetPassword({ loginEnabled: undefined, lastLoginAt: undefined }), false, "未知状态不提示");
+
+assertEqual(classifyLoginToggleFailure({ code: "SELF_PROFILE_FIELDS_DENIED", status: 403, uncertain: false }), "self", "不能关闭本人");
+assertEqual(classifyLoginToggleFailure({ code: "USER_NOT_FOUND", status: 404, uncertain: false }), "notFound", "账号不存在");
+assertEqual(classifyLoginToggleFailure({ code: "USER_SCOPE_DENIED", status: 403, uncertain: false }), "scopeDenied", "超出管理范围");
+assertEqual(classifyLoginToggleFailure({ code: "HIGH_PRIVILEGE_TARGET_DENIED", status: 403, uncertain: false }), "highPrivilege", "高权限账号");
+assertEqual(classifyLoginToggleFailure({ code: " user_scope_denied ", status: 403, uncertain: false }), "scopeDenied", "错误码忽略大小写与空白");
+assertEqual(classifyLoginToggleFailure({ code: "UPDATE_USER_LOGIN_ENABLED_FAILED", uncertain: false }), "generic", "200 + success=false 的未知错误码：通用失败");
+assertEqual(classifyLoginToggleFailure({ status: 403, uncertain: false }), "forbidden", "403 无错误码：没有权限");
+assertEqual(classifyLoginToggleFailure({ status: 404, uncertain: false }), "notFound", "404 无错误码：不存在");
+assertEqual(classifyLoginToggleFailure({ code: "INTERNAL_SERVER_ERROR", status: 500, uncertain: true }), "uncertain", "5xx：结果未知，先核对");
+assertEqual(classifyLoginToggleFailure({ code: "ERR_NETWORK", uncertain: true }), "uncertain", "无响应：结果未知");
+assertEqual(classifyLoginToggleFailure({ status: 401, uncertain: false }), "generic", "其它：通用失败");
 
 // ───────────── 姓名展示 ─────────────
 

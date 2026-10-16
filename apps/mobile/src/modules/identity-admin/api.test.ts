@@ -162,12 +162,45 @@ async function run() {
               Stores: [{ StoreGUID: "store-1", StoreCode: "S1", StoreName: "Sunnybank", IsPrimary: true }],
               Permissions: ["Users.View"],
               ExactPermissions: ["Users.View"],
+              LoginEnabled: false,
+            }, {
+              userGuid: "user-2",
+              username: "carol",
+              email: "carol@example.test",
+              isActive: true,
+              loginEnabled: true,
+            }, {
+              userGuid: "user-3",
+              username: "dave",
+              email: "dave@example.test",
+              isActive: true,
+            }, {
+              userGuid: "user-4",
+              username: "erin",
+              email: "erin@example.test",
+              isActive: true,
+              loginEnabled: null,
+            }, {
+              userGuid: "user-5",
+              username: "frank",
+              email: "frank@example.test",
+              isActive: true,
+              loginEnabled: "false",
             }],
             TotalCount: 21,
             PageIndex: 2,
             PageSize: 10,
             TotalPages: 3,
           },
+        },
+      };
+    }
+    if (url === "/Users/guid/user%2F1") {
+      // 详情走 ApiResponse 信封，loginEnabled 同样可能是 PascalCase。
+      return {
+        data: {
+          success: true,
+          data: { UserGUID: "user/1", Username: "kevin", Email: "kevin@example.test", IsActive: true, LoginEnabled: false, CreatedAt: "", UpdatedAt: "", RoleNames: ["StoreManager"] },
         },
       };
     }
@@ -249,8 +282,23 @@ async function run() {
     return { data: { success: true, data: true } };
   }) as typeof apiClient.post;
 
-  apiClient.put = (async (url: string, body?: unknown) => {
-    requests.push({ method: "put", url, body });
+  apiClient.put = (async (url: string, body?: unknown, config?: unknown) => {
+    requests.push({ method: "put", url, body, config });
+    if (url === "/Users/guid/self-user/login-enabled") {
+      // 4xx 业务拒绝：axios 抛出，errorCode 在响应体里。
+      throw new AxiosError("Forbidden", "ERR_BAD_REQUEST", undefined, undefined, {
+        status: 403,
+        statusText: "Forbidden",
+        headers: {},
+        config: { headers: {} } as never,
+        data: { success: false, errorCode: "SELF_PROFILE_FIELDS_DENIED", message: "不能关闭本人账号的登录权限" },
+      });
+    }
+    if (url === "/Users/guid/failed-user/login-enabled") {
+      // 服务端内部失败码按 200 + success=false 返回（ToUserAccessActionResult 的兜底分支）。
+      return { data: { success: false, errorCode: "UPDATE_USER_LOGIN_ENABLED_FAILED", message: "更新用户登录权限失败" } };
+    }
+    if (url.endsWith("/login-enabled")) return { data: { success: true, data: true, message: "已关闭该账号的登录权限" } };
     if (url.endsWith("/password")) return { data: true };
     if (url.startsWith("/Users/guid/")) {
       return { data: { userGUID: "user/1", username: "bob", email: "bob@example.test", isActive: false, createdAt: "", updatedAt: "", roleNames: [], storeNames: [] } };
@@ -275,6 +323,9 @@ async function run() {
     assert.equal(users.total, 21);
     assert.equal(users.totalPages, 3);
     assert.equal(users.items[0]?.stores[0]?.isPrimary, true);
+    // loginEnabled：只有布尔值才保留；PascalCase / camelCase 都认；缺省、null、类型异常一律保持 undefined（未知，不等于允许）。
+    assert.deepEqual(users.items.map((item) => item.loginEnabled), [false, true, undefined, undefined, undefined]);
+    assert.equal("loginEnabled" in (users.items[2] ?? {}), false, "缺省时不写入 loginEnabled 键");
     assert.deepEqual((requests[0]?.config as { params: unknown }).params, {
       page: 2,
       pageSize: 10,
@@ -369,6 +420,35 @@ async function run() {
       passwordFormat: "raw",
       forcePasswordChange: true,
     });
+
+    // ---- 允许登录（loginEnabled）读写契约 ----
+    const kevin = await api.fetchIdentityUserDetail("user/1", "actor-1");
+    assert.equal(kevin.loginEnabled, false, "详情读取 PascalCase LoginEnabled=false");
+    assert.equal(api.normalizeIdentityUser({ userGUID: "u", username: "u", email: "u@example.test", loginEnabled: true }).loginEnabled, true);
+    assert.equal(api.normalizeIdentityUser({ userGUID: "u", username: "u", email: "u@example.test" }).loginEnabled, undefined, "旧后端缺省保持 undefined");
+
+    assert.equal(await api.setIdentityUserLoginEnabled(" user/1 ", false, "actor-1"), true);
+    const loginPut = requests.find((item) => item.method === "put" && item.url === "/Users/guid/user%2F1/login-enabled");
+    assert.ok(loginPut, "PUT /Users/guid/{guid}/login-enabled（GUID 去空白并 URL 编码）");
+    assert.deepEqual(loginPut.body, { loginEnabled: false }, "请求体只有 loginEnabled 布尔");
+    assert.deepEqual(loginPut.config, accountBoundRequestConfig("actor-1"), "写请求必须绑定发起操作的账号，账号切换后不得落到新账号上");
+    await api.setIdentityUserLoginEnabled("user/1", true, "actor-1");
+    assert.deepEqual(
+      requests.filter((item) => item.method === "put" && item.url === "/Users/guid/user%2F1/login-enabled").map((item) => item.body),
+      [{ loginEnabled: false }, { loginEnabled: true }],
+      "开启与关闭各发一次",
+    );
+    await assert.rejects(api.setIdentityUserLoginEnabled("   ", true, "actor-1"), /User GUID is required/);
+    await assert.rejects(api.setIdentityUserLoginEnabled("user/1", undefined as never, "actor-1"), /loginEnabled must be a boolean/, "缺值不得发送（缺省被服务端当 false 会误锁账号）");
+    await assert.rejects(api.setIdentityUserLoginEnabled("user/1", true, ""), /ACCOUNT_SESSION_CHANGED/, "没有操作者身份不得发请求");
+    assert.equal(requests.filter((item) => item.url.endsWith("/login-enabled")).length, 2, "校验失败的调用不触达网络");
+    // 4xx：axios 错误，errorCode 在响应体。
+    const selfDenied = await api.setIdentityUserLoginEnabled("self-user", false, "actor-1").then(() => null, (error: unknown) => error);
+    assert.deepEqual(api.getIdentityAdminErrorMeta(selfDenied), { message: "Forbidden", status: 403, code: "SELF_PROFILE_FIELDS_DENIED" });
+    // 200 + success=false：业务错误带 code 与 apiBusinessError，调用方可据此区分确定失败。
+    const failed = await api.setIdentityUserLoginEnabled("failed-user", false, "actor-1").then(() => null, (error: unknown) => error);
+    assert.equal((failed as Error & { code?: string }).code, "UPDATE_USER_LOGIN_ENABLED_FAILED");
+    assert.equal((failed as Error & { apiBusinessError?: boolean }).apiBusinessError, true);
 
     await api.createIdentityRole({ roleName: " Buyer ", permissions: ["Orders.View"] }, "actor-1");
     assert.deepEqual(requests.find((item) => item.method === "post" && item.url === "/Roles")?.body, {
