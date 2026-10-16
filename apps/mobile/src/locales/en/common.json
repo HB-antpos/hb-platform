@@ -119,7 +119,7 @@
     "hide": "Hide floating button",
     "close": "Close quick navigation",
     "menuUnavailable": "The feature list is unavailable right now. You can go back to the Workbench.",
-    "hiddenToast": "Floating language button hidden. Turn it back on in Settings › Preferences and security",
+    "hiddenToast": "Floating language button hidden. Turn it back on in Settings › Preferences",
     "undo": "Undo"
   },
   "labels": {

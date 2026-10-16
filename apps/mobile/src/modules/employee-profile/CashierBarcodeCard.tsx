@@ -4,7 +4,7 @@ import * as Crypto from "expo-crypto";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
-import { ActivityIndicator, Button, HelperText, Surface, Text } from "react-native-paper";
+import { ActivityIndicator, Button, HelperText, Icon, Surface, Text } from "react-native-paper";
 
 import {
   confirmMyCashierBarcodePrintApi,
@@ -38,18 +38,32 @@ import {
 
 type CashierPrintAction = "default" | "confirmUncertain" | "reprintUncertain";
 
+/**
+ * 当前账号个人码的码值（与卡片共用同一份查询缓存，不会多发请求）。
+ * 设置页名片要在二维码旁显示码值：扫码枪扫不上时可以手输。
+ */
+export function usePersonalCodeValue(userIdentity: string, enabled = true) {
+  const queryKey = useMemo(() => getCashierBarcodeQueryKey(userIdentity), [userIdentity]);
+  // 设备授权会话没有个人码：enabled=false 时不发请求。
+  const query = useQuery({ queryKey, queryFn: getMyCashierBarcodeApi, enabled });
+  return query.data?.exists ? (query.data.barcode?.trim() ?? "") : "";
+}
+
 export function CashierBarcodeCard({
   employeeName,
   username,
   userIdentity,
   compact = false,
   expandLabel,
+  variant,
 }: {
   employeeName: string;
   username: string;
   userIdentity: string;
   compact?: boolean;
   expandLabel?: string;
+  /** "tile"：只显示一块 104px 二维码（设置页名片右侧用），点开仍是同一个弹层（放大、刷新、打印）。 */
+  variant?: "tile";
 }) {
   const { t } = useAppTranslation(["employeeProfile", "common", "settings"]);
   const router = useRouter();
@@ -334,29 +348,54 @@ export function CashierBarcodeCard({
   };
   return (
     <>
-      <Pressable
-        ref={compactTriggerRef}
-        testID="settings-personal-code"
-        accessibilityRole="button"
-        accessibilityLabel={expandLabel || t("cashierBarcode.title")}
-        onPress={() => setExpanded(true)}
-        style={styles.compactCard}
-      >
-        <View style={styles.compactHeading}>
-          <Text variant="titleSmall">{t("cashierBarcode.title")}</Text>
-          {barcodeQuery.isError ? <Text style={styles.muted}>{t("cashierBarcode.loadFailed")}</Text> : null}
-          {!barcodeQuery.isLoading && !barcodeQuery.isError && !barcodeValue ? <Text style={styles.muted}>{t("cashierBarcode.empty")}</Text> : null}
-        </View>
-        <View style={styles.compactQr}>
-          {barcodeQuery.isLoading ? <ActivityIndicator /> : barcodeValue && !barcodeQuery.isError ? (
-            <>
-              <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
-              <Text variant="labelSmall" style={styles.compactValue}>{barcodeValue}</Text>
-            </>
-          ) : null}
-        </View>
-        <Text variant="bodySmall" style={styles.compactHint}>{expandLabel}</Text>
-      </Pressable>
+      {variant === "tile" ? (
+        <Pressable
+          ref={compactTriggerRef}
+          testID="settings-personal-code"
+          accessibilityRole="button"
+          accessibilityLabel={`${t("cashierBarcode.title")}${barcodeValue ? `: ${barcodeValue}` : ""}. ${expandLabel || ""}`.trim()}
+          onPress={() => setExpanded(true)}
+          style={styles.tile}
+        >
+          {barcodeQuery.isLoading ? (
+            <ActivityIndicator />
+          ) : barcodeValue && !barcodeQuery.isError ? (
+            <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
+          ) : (
+            // 加载失败 / 还没生成：整块仍可点，进弹层里重试或生成。
+            <Text variant="labelSmall" style={styles.tileMessage}>
+              {barcodeQuery.isError ? t("cashierBarcode.loadFailed") : t("cashierBarcode.empty")}
+            </Text>
+          )}
+          <View style={styles.tileZoom} pointerEvents="none">
+            <Icon source="arrow-expand" size={15} color="#FFFFFF" />
+          </View>
+        </Pressable>
+      ) : (
+        <Pressable
+          ref={compactTriggerRef}
+          testID="settings-personal-code"
+          accessibilityRole="button"
+          accessibilityLabel={expandLabel || t("cashierBarcode.title")}
+          onPress={() => setExpanded(true)}
+          style={styles.compactCard}
+        >
+          <View style={styles.compactHeading}>
+            <Text variant="titleSmall">{t("cashierBarcode.title")}</Text>
+            {barcodeQuery.isError ? <Text style={styles.muted}>{t("cashierBarcode.loadFailed")}</Text> : null}
+            {!barcodeQuery.isLoading && !barcodeQuery.isError && !barcodeValue ? <Text style={styles.muted}>{t("cashierBarcode.empty")}</Text> : null}
+          </View>
+          <View style={styles.compactQr}>
+            {barcodeQuery.isLoading ? <ActivityIndicator /> : barcodeValue && !barcodeQuery.isError ? (
+              <>
+                <QRCode value={barcodeValue} size={104} backgroundColor="#FFFFFF" color="#111111" />
+                <Text variant="labelSmall" style={styles.compactValue}>{barcodeValue}</Text>
+              </>
+            ) : null}
+          </View>
+          <Text variant="bodySmall" style={styles.compactHint}>{expandLabel}</Text>
+        </Pressable>
+      )}
       <Modal visible={expanded} transparent animationType="fade" onRequestClose={dismiss}
         onDismiss={restoreTriggerFocus}
         onShow={() => { InteractionManager.runAfterInteractions(() => { const handle = findNodeHandle(modalHeadingRef.current); if (handle) AccessibilityInfo.setAccessibilityFocus(handle); }); }}>
@@ -377,6 +416,31 @@ const styles = StyleSheet.create({
   compactHeading: { alignSelf: "stretch", gap: 4 },
   compactHint: { color: "#667085", textAlign: "center", fontSize: 11 },
   compactValue: { color: "#667085", fontSize: 10, marginTop: 8, fontVariant: ["tabular-nums"] },
+  tile: {
+    width: 120,
+    height: 120,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E4E7EC",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 8,
+  },
+  tileMessage: { color: "#667085", textAlign: "center" },
+  tileZoom: {
+    position: "absolute",
+    right: -7,
+    bottom: -7,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#1677FF",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   compactQr: { backgroundColor: "#FFFFFF", padding: 12, minWidth: 128, minHeight: 128, alignItems: "center", justifyContent: "center" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.42)", justifyContent: "center", padding: 20 },
   modalSheet: { maxHeight: "88%", borderRadius: 16, backgroundColor: "#FFFFFF", overflow: "hidden", paddingBottom: 12 },
