@@ -43,6 +43,7 @@ import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
 import peoplePosEn from "@/locales/en/screens/peoplePos.json";
 import peopleEn from "@/locales/en/screens/people.json";
+import peopleFormEn from "@/locales/en/screens/peopleForm.json";
 import cashRegisterUsersEn from "@/locales/en/screens/cashRegisterUsers.json";
 import peopleRolesEn from "@/locales/en/screens/peopleRoles.json";
 import warehouseEn from "@/locales/en/screens/warehouse.json";
@@ -86,6 +87,7 @@ import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
 import peoplePosZh from "@/locales/zh/screens/peoplePos.json";
 import peopleZh from "@/locales/zh/screens/people.json";
+import peopleFormZh from "@/locales/zh/screens/peopleForm.json";
 import cashRegisterUsersZh from "@/locales/zh/screens/cashRegisterUsers.json";
 import peopleRolesZh from "@/locales/zh/screens/peopleRoles.json";
 import warehouseZh from "@/locales/zh/screens/warehouse.json";
@@ -140,6 +142,7 @@ const resources = {
     userManagement: userManagementZh,
     peoplePos: peoplePosZh,
     people: peopleZh,
+    peopleForm: peopleFormZh,
     cashRegisterUsers: cashRegisterUsersZh,
     peopleRoles: peopleRolesZh,
     warehouse: warehouseZh,
@@ -187,6 +190,7 @@ const resources = {
     userManagement: userManagementEn,
     peoplePos: peoplePosEn,
     people: peopleEn,
+    peopleForm: peopleFormEn,
     cashRegisterUsers: cashRegisterUsersEn,
     peopleRoles: peopleRolesEn,
     warehouse: warehouseEn,

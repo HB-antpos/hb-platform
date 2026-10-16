@@ -77,6 +77,11 @@ export interface IdentityCreateUserInput {
   password: string;
   passwordFormat?: "raw" | "clientSha256";
   fullName?: string;
+  /** 姓名拆分字段（后端迁移之后才生效；旧后端忽略）。创建时有值才发送。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   isActive?: boolean;
   roleGuids?: string[];
   storeGuids?: string[];
@@ -86,6 +91,11 @@ export interface IdentityUpdateUserInput {
   username: string;
   email: string;
   fullName?: string;
+  /** 姓名拆分字段：不传 / null = 不改，空串 = 清空；只带有变化的段。 */
+  givenName?: string | null;
+  middleName?: string | null;
+  familyName?: string | null;
+  nickname?: string | null;
   isActive?: boolean;
 }
 
