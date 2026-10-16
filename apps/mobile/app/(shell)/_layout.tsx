@@ -31,6 +31,7 @@ import { usePushRegistration } from "@/modules/push/use-push-registration";
 import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
 import { usePriceTaskOverview } from "@/modules/price-updates/use-price-task-overview";
 import { PriceReminderHost } from "@/modules/price-reminder/PriceReminderHost";
+import { FloatingLanguageButton } from "@/modules/floating-language";
 import { canViewContainerNewProducts } from "@/modules/container-new-products/access";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "@/modules/container-new-products/api";
 import { countNewProductKinds } from "@/modules/container-new-products/summary";
@@ -649,6 +650,8 @@ export default function ShellLayout() {
               gestureEnabled: true,
             }}
           />
+          {/* 语言悬浮按钮（设置页开启，默认关闭）：盖在页面上、底部导航栏之上；按住 2 秒打开快速跳转。 */}
+          <FloatingLanguageButton pathname={pathname} currentRouteName={currentRouteName} />
         </View>
         {shouldHidePrimaryTabBar(pathname) ? null : <PrimaryTabBar activeRouteName={currentRouteName} />}
         {/* 每小时提醒：放在导航上下文里，随时读到最新的待办与超期数。iOS 审核态不提醒。 */}

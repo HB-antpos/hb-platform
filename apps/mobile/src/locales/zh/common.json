@@ -105,6 +105,23 @@
     "zh": "中文",
     "en": "English"
   },
+  "floatingLanguage": {
+    "shortZh": "中",
+    "shortEn": "EN",
+    "buttonLabel": "语言悬浮按钮，当前{{current}}",
+    "buttonHint": "点一下切换到{{next}}；按住 2 秒打开快速跳转；拖动可移动位置，拖到底部隐藏",
+    "holdHint": "继续按住，打开快速跳转",
+    "dragToHide": "拖到这里隐藏",
+    "quickJumpTitle": "快速跳转",
+    "recent": "最近访问",
+    "workbench": "工作台",
+    "settings": "设置",
+    "hide": "隐藏悬浮按钮",
+    "close": "关闭快速跳转",
+    "menuUnavailable": "功能列表暂时不可用，可以先回工作台。",
+    "hiddenToast": "已隐藏语言悬浮按钮，可在「设置 › 偏好与安全」重新打开",
+    "undo": "撤销"
+  },
   "labels": {
     "itemNumber": "货号",
     "importPrice": "进货价",

@@ -30,6 +30,10 @@
     "dangerZone": "危险操作",
     "printerDetailsDescription": "分别管理标签打印机和小票打印机，蓝牙操作会自动串行执行。"
   },
+  "floatingLanguage": {
+    "title": "语言悬浮按钮",
+    "description": "每页显示可拖动的 中 / EN 按钮：点一下切换语言，按住 2 秒快速跳转。"
+  },
   "diagnostics": {
     "title": "关于与诊断",
     "description": "只读查看当前版本、配置与设备状态，用于快速排查问题。",
