@@ -3954,6 +3954,10 @@ namespace BlazorApp.Api.Tests
         public async Task GetUserRolesAsync_WhenStoreManagerReadsTarget_ReturnsOnlyActiveEmployeeRoles()
         {
             await SeedUsersRolesAndStoresForScopeTestsAsync();
+            // 这个用例自己精确配置 scoped-user 的角色；先撤掉公共夹具给的店员角色，避免叠加后清单对不上。
+            await _db.Deleteable<UserRole>()
+                .Where(item => item.UserGUID == "scoped-user" && item.RoleGUID == "role-store-staff")
+                .ExecuteCommandAsync();
             await _db.Insertable(new[]
             {
                 new Role
@@ -4006,6 +4010,10 @@ namespace BlazorApp.Api.Tests
         public async Task GetUserRolesAsync_WhenAdminReadsTarget_ReturnsAllActiveRoles()
         {
             await SeedUsersRolesAndStoresForScopeTestsAsync();
+            // 这个用例自己精确配置 scoped-user 的角色；先撤掉公共夹具给的店员角色，避免叠加后清单对不上。
+            await _db.Deleteable<UserRole>()
+                .Where(item => item.UserGUID == "scoped-user" && item.RoleGUID == "role-store-staff")
+                .ExecuteCommandAsync();
             var adminScope = await SeedAdminScopeAsync();
             await _db.Insertable(new[]
             {
@@ -5258,6 +5266,124 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(0, await _db.Queryable<UserLoginRestriction>().CountAsync());
         }
 
+        /// <summary>
+        /// 产品规则：店长只能看到自己管理分店里「角色是店员」的账号（外加本人），订货员、仓库员工、其他店长、
+        /// 没有任何角色的账号都不可见；管理员不受限。与 store-users 店员列表同一口径。
+        /// </summary>
+        private async Task SeedMixedRoleUsersInManagedStoreAsync()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            await _db.Insertable(new[]
+            {
+                new Role { RoleGUID = "role-order", RoleName = "Order", IsActive = true },
+                new Role { RoleGUID = "role-warehouse-staff", RoleName = "WarehouseStaff", IsActive = true },
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUser("order-user", "order@example.test"),
+                CreateUser("warehouse-staff-user", "wh@example.test"),
+                CreateUser("other-manager", "other-manager@example.test"),
+                CreateUser("no-role-user", "norole@example.test"),
+                CreateUser("staff-and-order", "staff-order@example.test"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserRole("order-user", "role-order"),
+                CreateUserRole("warehouse-staff-user", "role-warehouse-staff"),
+                CreateUserRole("other-manager", "role-store-manager"),
+                // 店员 + 订货员：有店员角色且不是高权限账号，仍然可见（与店员列表一致）。
+                CreateUserRole("staff-and-order", "role-store-staff"),
+                CreateUserRole("staff-and-order", "role-order"),
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateUserStore("order-user", "store-1", false),
+                CreateUserStore("warehouse-staff-user", "store-1", false),
+                CreateUserStore("other-manager", "store-1", true),
+                CreateUserStore("no-role-user", "store-1", false),
+                CreateUserStore("staff-and-order", "store-1", false),
+            }).ExecuteCommandAsync();
+        }
+
+        private UserService CreateStoreManagerUserService() =>
+            CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true,
+                IsAuthenticated = true,
+                IsStoreManager = true,
+                UserGuid = "manager-1",
+                StoreGuids = new[] { "store-1" },
+                StoreCodes = new[] { "S001" },
+            }));
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GetUsers_StoreManagerOnlySeesStoreStaffRoleAccountsAndSelf(bool useOptimized)
+        {
+            await SeedMixedRoleUsersInManagedStoreAsync();
+
+            var result = await GetUsersAsync(
+                CreateStoreManagerUserService(),
+                useOptimized,
+                new UserQueryDto { Page = 1, PageSize = 50 }
+            );
+
+            Assert.True(result.Success);
+            Assert.Equal(
+                new[] { "dual-user", "manager-1", "scoped-user", "staff-and-order" },
+                result.Data!.Items!.Select(item => item.UserGUID).OrderBy(item => item).ToArray()
+            );
+            Assert.DoesNotContain(result.Data.Items!, item =>
+                item.UserGUID is "order-user" or "warehouse-staff-user" or "other-manager" or "no-role-user");
+        }
+
+        [Fact]
+        public async Task GetUsers_AdminStillSeesEveryRole()
+        {
+            await SeedMixedRoleUsersInManagedStoreAsync();
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var result = await service.GetUsersOptimizedAsync(new UserQueryDto { Page = 1, PageSize = 100 });
+
+            Assert.True(result.Success);
+            var visible = result.Data!.Items!.Select(item => item.UserGUID).ToHashSet();
+            Assert.Contains("order-user", visible);
+            Assert.Contains("warehouse-staff-user", visible);
+            Assert.Contains("other-manager", visible);
+            Assert.Contains("no-role-user", visible);
+        }
+
+        [Fact]
+        public async Task GetUserByGuidAsync_StoreManagerCanReadStaffButNotOtherRoles()
+        {
+            await SeedMixedRoleUsersInManagedStoreAsync();
+            var service = CreateStoreManagerUserService();
+
+            Assert.True((await service.GetUserByGuidAsync("scoped-user")).Success);
+            Assert.True((await service.GetUserByGuidAsync("staff-and-order")).Success);
+            Assert.True((await service.GetUserByGuidAsync("manager-1")).Success); // 本人
+
+            foreach (var hidden in new[] { "order-user", "warehouse-staff-user", "other-manager", "no-role-user" })
+            {
+                var result = await service.GetUserByGuidAsync(hidden);
+                Assert.False(result.Success);
+                Assert.Equal("FORBIDDEN", result.ErrorCode);
+            }
+        }
+
+        [Fact]
+        public async Task GetUserStatisticsAsync_StoreManagerCountsOnlyVisibleStaffAndSelf()
+        {
+            await SeedMixedRoleUsersInManagedStoreAsync();
+
+            var result = await CreateStoreManagerUserService().GetUserStatisticsAsync();
+
+            Assert.True(result.Success);
+            // dual-user、manager-1、scoped-user、staff-and-order；订货员 / 仓库员工 / 其他店长 / 无角色账号不计入。
+            Assert.Equal(4, result.Data!.TotalUsers);
+        }
+
         private UserService CreateUserService(
             ICurrentUserManageableStoreScopeService? manageableStoreScopeService = null
         )
@@ -5533,6 +5659,13 @@ namespace BlazorApp.Api.Tests
                         RoleName = "Viewer",
                         IsActive = true,
                     },
+                    // 线上店长管理的对象都是「店员」角色；店长只能看到管理分店里角色是店员的账号（其他角色不可见）。
+                    new Role
+                    {
+                        RoleGUID = "role-store-staff",
+                        RoleName = "StoreStaff",
+                        IsActive = true,
+                    },
                 }
             ).ExecuteCommandAsync();
 
@@ -5562,6 +5695,10 @@ namespace BlazorApp.Api.Tests
                     CreateUserRole("manager-1", "role-store-manager"),
                     CreateUserRole("manager-no-store", "role-store-manager"),
                     CreateUserRole("viewer-1", "role-viewer"),
+                    CreateUserRole("scoped-user", "role-store-staff"),
+                    CreateUserRole("soft-deleted-scoped-user", "role-store-staff"),
+                    CreateUserRole("foreign-user", "role-store-staff"),
+                    CreateUserRole("dual-user", "role-store-staff"),
                 }
             ).ExecuteCommandAsync();
 

@@ -268,6 +268,13 @@ namespace BlazorApp.Api.Services
                 return UserAccessReadDecision.Forbidden;
             }
 
+            // 店长只能读「店员」角色的账号；订货员、仓库员工等其他角色即使在自己管理的分店里也不可见。
+            var nonEmployee = await GetNonEmployeeUserGuidsAsync(db, new[] { targetUserGuid });
+            if (nonEmployee.Count > 0)
+            {
+                return UserAccessReadDecision.Forbidden;
+            }
+
             var visibleStoreGuids = actor.StoreGuids
                 .Intersect(normalizedTargetStoreGuids, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -480,6 +487,45 @@ namespace BlazorApp.Api.Services
                 new[] { targetUserGuid }
             );
             return targets.Contains(targetUserGuid);
+        }
+
+        /// <summary>
+        /// 候选账号里「没有任何员工（店员）角色」的那部分。
+        /// 产品规则：店长只能看到自己管理分店里角色是店员的账号（外加本人），订货员、仓库员工、普通 User 等
+        /// 其他角色对店长不可见——与 store-users 店员列表同一口径（有员工角色且不是高权限账号）。
+        /// 员工角色认 <see cref="Permissions.EmployeeRoleNames"/>（含中英文历史别名）；与店员列表一致，不要求角色处于启用状态。
+        /// </summary>
+        internal static async Task<HashSet<string>> GetNonEmployeeUserGuidsAsync(
+            ISqlSugarClient db,
+            IReadOnlyCollection<string> candidateUserGuids
+        )
+        {
+            var candidates = candidateUserGuids
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (candidates.Length == 0)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var employeeRoleNames = Permissions.EmployeeRoleNames.ToArray();
+            var employeeUserGuids = (await db.Queryable<UserRole>()
+                    .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+                    .Where((userRole, role) =>
+                        !userRole.IsDeleted
+                        && !role.IsDeleted
+                        && employeeRoleNames.Contains(role.RoleName)
+                        && candidates.Contains(userRole.UserGUID)
+                    )
+                    .Select((userRole, role) => userRole.UserGUID)
+                    .Distinct()
+                    .ToListAsync())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return candidates
+                .Where(userGuid => !employeeUserGuids.Contains(userGuid))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
     }
 
