@@ -7,18 +7,23 @@
 //    绝不写磁盘、不进 react-query 缓存、不拼进 URL 查询串；图片请求关闭中心日志上报（X-Skip-Center-Log）；
 // 4. 列表缩略图走 POST /results/thumbnails（一批最多 30 项、响应是 base64 JPEG）：同样 no-store、不进中心日志，
 //    编号只放请求体；返回值只交给调用方放内存（use-thumbnails），绝不进 react-query / 磁盘 / 日志；
-// 5. 本文件禁止出现 console.*，由 source-contract 测试静态守住。
+// 5. 新增摄像头 / 重新生成令牌的响应带一次性地址（含 token）：请求关闭中心日志上报，且只经 normalizeFaceCameraSecretResult
+//    取出地址交给调用方放进组件局部 state（不用 useMutation 的结果缓存、不进 react-query / 磁盘 / 日志）；
+// 6. 本文件禁止出现 console.*，由 source-contract 测试静态守住。
 import type { AxiosRequestConfig } from "axios";
 import { fromByteArray } from "base64-js";
 import { unwrapApiEnvelope } from "@/shared/api/api-envelope";
 import { FACE_CAMERAS_API_BASE, FACE_MATCH_API_BASE, FACE_NOTIFICATIONS_API_BASE, THUMBNAIL_BATCH_MAX } from "./constants";
 import type { CreateEntryInput } from "./entry-form";
+import { CAMERA_ID_PATTERN } from "./cameras-logic";
+import { normalizeFaceCameraSecretResult, type FaceCameraSecretResult } from "./camera-secret";
 import { buildCaptureListParams, buildHitListParams, buildHitSummaryParams } from "./capture-logic";
 import { buildListParams } from "./entries-logic";
 import { FACE_HIT_NOTIFICATION_TYPE } from "./hit-unread";
 import { buildCreateEntryMultipart } from "./multipart";
 import {
   normalizeFaceCamera,
+  normalizeFaceCameraCapturePage,
   normalizeFaceCameraList,
   normalizeFaceCaptureResultPage,
   normalizeFaceHitReadAllResult,
@@ -34,7 +39,9 @@ import {
   normalizeFaceUnwelcomeTaskPage,
 } from "./normalize";
 import type {
+  CreateFaceCameraRequest,
   FaceCamera,
+  FaceCameraCapturePage,
   FaceCameraList,
   FaceCaptureResult,
   FaceCaptureResultQuery,
@@ -314,14 +321,43 @@ export function createFaceMatchApi(http: FaceMatchHttp) {
       return ordered;
     },
 
-    // ───────── 摄像头（FaceCapture.Cameras.Manage）：只读列表与启停 ─────────
+    // ───────── 摄像头（FaceCapture.Cameras.Manage）：列表、启停、编辑、新增、重新生成令牌、最近抓拍 ─────────
     async listCameras(signal?: AbortSignal): Promise<FaceCameraList> {
       return normalizeFaceCameraList(data(await http.get(FACE_CAMERAS_API_BASE, json({ signal }))));
     },
 
-    /** PUT 是整体替换：请求体必须由 buildCameraEnabledRequest 构造（只改 enabled，其余原样带回）。 */
+    /** PUT 是整体替换：请求体必须由 buildCameraEnabledRequest（只改 enabled）或 buildEditCameraRequest（编辑表单）构造。 */
     async updateCamera(cameraId: string, request: UpdateFaceCameraRequest): Promise<FaceCamera> {
       return normalizeFaceCamera(data(await http.put(cameraPath(cameraId), request, json())));
+    },
+
+    /** 新增摄像头；响应里的一次性地址只此一次（库里只存哈希），不进中心日志。 */
+    async createCamera(request: CreateFaceCameraRequest): Promise<FaceCameraSecretResult> {
+      return normalizeFaceCameraSecretResult(
+        data(await http.post(FACE_CAMERAS_API_BASE, request, json({ headers: { "X-Skip-Center-Log": "1" } }))),
+      );
+    },
+
+    /** 重新生成令牌：旧令牌最多 30 秒后失效，新地址只此一次，不进中心日志。 */
+    async rotateCameraToken(cameraId: string): Promise<FaceCameraSecretResult> {
+      if (!CAMERA_ID_PATTERN.test(cameraId)) failInvalidId();
+      return normalizeFaceCameraSecretResult(
+        data(await http.post(`${cameraPath(cameraId)}/rotate-token`, undefined, json({ headers: { "X-Skip-Center-Log": "1" } }))),
+      );
+    },
+
+    /** 最近抓拍（元数据）；图片元数据只在调用者持有 FaceCapture.Images.View 时才有。 */
+    async listCameraCaptures(cameraId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<FaceCameraCapturePage> {
+      if (!CAMERA_ID_PATTERN.test(cameraId)) failInvalidId();
+      return normalizeFaceCameraCapturePage(
+        data(await http.get(`${cameraPath(cameraId)}/captures`, json({ params: { page, pageSize }, signal }))),
+      );
+    },
+
+    /** 抓拍图片内容（服务端转发字节，需要 FaceCapture.Images.View，每次读取服务端都写审计）；返回 data URI，只放内存。 */
+    async fetchCameraCaptureImage(cameraId: string, captureId: string, imageId: string, signal?: AbortSignal): Promise<string> {
+      if (!CAMERA_ID_PATTERN.test(cameraId) || !CAPTURE_PATH_ID.test(captureId) || !CAPTURE_PATH_ID.test(imageId)) failImageTarget();
+      return fetchImageDataUri(`${cameraPath(cameraId)}/captures/${captureId}/images/${imageId}/content`, signal);
     },
   };
 }

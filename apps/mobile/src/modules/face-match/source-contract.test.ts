@@ -1,6 +1,6 @@
 // 人脸比对模块的源码契约测试：
 // 1. 隐私：参考照片 / 命中抓拍不写磁盘缓存、不进日志与诊断上报、不进 react-query 缓存、不拼进 URL 查询串；
-// 2. 范围：只调用约定内的接口（不新建摄像头、不碰令牌），接口路径与权限码和后端、Web 保持一致；
+// 2. 范围：只调用约定内的接口，接口路径与权限码和后端、Web 保持一致；摄像头的新增 / 重新生成令牌只在一次性展示里碰令牌（见下）；
 // 3. 文案：页面不硬编码中文，代码里用到的每个文案键中英文都有，且插值参数一致；
 // 4. 路由薄壳只做转发。
 import assert from "node:assert/strict";
@@ -239,14 +239,95 @@ function stripComments(source: string): string {
   assert.equal(/\btoken\b\s*:|cameraUrl\s*:/.test(normalize), false);
 }
 
+// ───────── 2b. 摄像头一次性地址（含 token）与最近抓拍的隐私约束 ─────────
+{
+  const secretDialog = stripComments(sourceOf("CameraSecretDialog.tsx"));
+  const secretLogic = stripComments(sourceOf("camera-secret.ts"));
+  const section = stripComments(sourceOf("CamerasSection.tsx"));
+  const capturesModal = stripComments(sourceOf("CameraCapturesModal.tsx"));
+  const formModal = stripComments(sourceOf("CameraFormModal.tsx"));
+
+  // 地址不写任何存储 / 路由 / 日志
+  for (const [name, code] of [["CameraSecretDialog", secretDialog], ["camera-secret", secretLogic]] as const) {
+    for (const forbidden of ["AsyncStorage", "SecureStore", "MMKV", "writeAsStringAsync", "console.", "reportApplicationLog", "router.", "useLocalSearchParams", "queryClient", "useMutation", "setQueryData"]) {
+      assert.equal(code.includes(forbidden), false, `${name} 不应出现 ${forbidden}`);
+    }
+  }
+  // 新增 / 重新生成令牌的结果不能进 useMutation 的结果缓存，只放局部 state
+  {
+    // 用「useMutation 到下一段代码」的整段切片判断（解构里的花括号会让单行正则漏判）
+    const mutationBlock = section.slice(section.indexOf("useMutation({"), section.indexOf("const list = camerasQuery.data"));
+    assert.ok(mutationBlock.length > 0 && mutationBlock.includes("updateCamera("), "启停走 useMutation（不含令牌）");
+    assert.equal(/createCamera|rotateCameraToken|cameraUrl/.test(mutationBlock), false, "新增 / 重新生成令牌不走 useMutation（结果会留在 mutation 缓存里）");
+  }
+  assert.ok(section.includes("faceMatchApi.createCamera(") && section.includes("faceMatchApi.rotateCameraToken("));
+  assert.ok(section.includes("useState<SecretRevealState>(SECRET_REVEAL_CLOSED)"), "地址只放局部 state，初始为已清空常量");
+  assert.ok(section.includes("setSecret(closeSecretReveal())"), "关闭即换成已清空常量");
+  assert.equal(section.includes("onNotify(") && /onNotify\([^)]*cameraUrl/.test(section), false, "提示文案里不放地址");
+  // 弹窗：离开前台自动关闭；安卓返回键不关闭；默认掩码；剪贴板定时清空
+  assert.ok(secretDialog.includes("AppState.addEventListener") && secretDialog.includes("closeRef.current()"), "离开前台自动关闭并清空");
+  assert.ok(secretDialog.includes("onRequestClose={() => undefined}"), "安卓返回键不关闭（地址只显示一次）");
+  assert.ok(secretDialog.includes("maskCameraUrl(state.cameraUrl)"), "默认掩码显示");
+  assert.ok(secretDialog.includes("scheduleClipboardClear(") && secretDialog.includes("CLIPBOARD_CLEAR_DELAY_MS"), "复制后定时清空剪贴板");
+  assert.equal(/selectable=\{true\}|selectable\b(?!=)/.test(secretDialog), false, "掩码状态下地址不可选中（只在显示时可选）");
+
+  // 表单不接触令牌；抓拍弹框：图片只在查看器 state，离开前台丢弃，读取后清理 iOS 缓存文件
+  assert.equal(/cameraUrl|rotateCameraToken|createCamera/.test(formModal), false, "表单组件不接触地址 / 令牌");
+  assert.ok(capturesModal.includes("createReviewImageScrubber()") && capturesModal.includes("scrubber.wrap("), "抓拍图片读取后清理系统缓存文件");
+  assert.ok(capturesModal.includes("AppState.addEventListener") && capturesModal.includes("controller.abort()"), "离开前台关闭查看器并中止请求");
+  assert.equal(/useQuery\(|useInfiniteQuery\(/.test(capturesModal.slice(capturesModal.indexOf("function CaptureImageViewer"))), false, "图片查看器不用 react-query（图片字节不进缓存）");
+  assert.ok(capturesModal.includes("hasViewableImages(capture)") && capturesModal.includes("canViewImages &&"), "只有服务端 canViewImages 为真且有可看的图才显示入口");
+
+  // 新增成功：一次性地址作为覆盖层叠在表单 Modal 里，不能「先关表单 Modal 再开地址 Modal」（iOS 同刻切换原生 Modal 会丢弹窗，令牌就没了）
+  {
+    const createStart = section.indexOf("faceMatchApi.createCamera(");
+    const createEnd = section.indexOf("} else {", createStart);
+    assert.ok(createStart > 0 && createEnd > createStart);
+    assert.equal(section.slice(createStart, createEnd).includes("setForm(null)"), false, "新增成功后不关表单（地址叠在表单里，关地址时再一起收起）");
+    assert.ok(section.includes("overlay={") && section.includes("<CameraSecretPanel"), "地址作为表单 Modal 的覆盖层");
+    assert.ok(section.includes("<CameraSecretModal") && /secret\.open && !form/.test(section), "重新生成令牌（没有表单可叠）才单独开 Modal");
+    assert.ok(/onRequestClose=\{\(\) => \(busy \|\| overlay \? undefined : onClose\(\)\)\}/.test(formModal), "有地址覆盖层时表单不响应返回键");
+    // 失败路径无条件刷新列表：响应丢了 / 缺地址时服务端可能已建好摄像头
+    assert.ok(/setFormError\(describeError\(error\)\);\s*void refreshList\(\);/.test(section), "新增失败也刷新列表");
+  }
+  // 备注单行（后端拒绝控制字符，换行进不去）
+  assert.equal(formModal.includes("multiline"), false, "摄像头表单不用多行输入");
+  // 抓拍查询：关闭即丢缓存（gcTime: 0），刷新只重取第一页
+  {
+    const hooks = stripComments(sourceOf("use-face-match.ts"));
+    const start = hooks.indexOf("export function useFaceCameraCaptures");
+    const body = hooks.slice(start, hooks.indexOf("export function useFaceCameras(", start));
+    assert.ok(body.includes("gcTime: 0"), "抓拍查询关闭即丢缓存");
+    assert.ok(body.includes("data.pages.slice(0, 1)"), "刷新先截到第一页，避免逐页重发");
+  }
+  // 抓拍弹框的页脚：先判「加载下一页失败」再判「有下一页」（失败后 hasNextPage 仍为真，顺序反了错误提示永远走不到）
+  assert.ok(capturesModal.indexOf("query.isFetchNextPageError") < capturesModal.indexOf("query.hasNextPage"), "页脚先判加载下一页失败");
+  // 图片读不到：区分「已清理」（后端 FACE_IMAGE_* / 404 / 410）与可重试的失败
+  assert.ok(capturesModal.includes("isCameraImageGone(error)") && capturesModal.includes("retry(selectedId)"), "已清理与可重试要区分");
+}
+
 // ───────── 2. 范围与契约 ─────────
 {
   const core = stripComments(sourceOf("api-core.ts"));
-  // 不做：新建摄像头、重置令牌、查看 / 修改令牌
-  for (const forbidden of ["rotate-token", "createCamera", "cameraUrl", "/captures", "mac/", "secret"]) {
-    assert.equal(core.toLowerCase().includes(forbidden.toLowerCase()), false, `api-core 不应出现 ${forbidden}`);
+  // 摄像头新增 / 重新生成令牌：响应带一次性地址（含 token），请求必须 no-store 且不进中心日志，
+  // 响应只经 normalizeFaceCameraSecretResult 取出地址；没有任何「读取 / 修改已有令牌」的接口。
+  {
+    const start = core.indexOf("async createCamera");
+    const end = core.indexOf("async listCameraCaptures");
+    const secretCalls = core.slice(start, end);
+    assert.ok(start > 0 && end > start, "api-core 应包含新增与重新生成令牌的方法");
+    assert.equal((secretCalls.match(/"X-Skip-Center-Log": "1"/g) ?? []).length, 2, "新增与重新生成令牌的请求都不进中心日志");
+    assert.equal((secretCalls.match(/json\(\{ headers:/g) ?? []).length, 2, "两个请求都经 json()（带 no-store）");
+    assert.equal((secretCalls.match(/normalizeFaceCameraSecretResult\(/g) ?? []).length, 2, "响应只经 normalizeFaceCameraSecretResult 取地址");
+    assert.ok(secretCalls.includes("http.post(FACE_CAMERAS_API_BASE, request,"), "新增走 POST 摄像头集合");
+    assert.ok(secretCalls.includes("/rotate-token`"), "重新生成令牌走 rotate-token");
+    // 令牌只出现在这两个响应里：没有 GET 令牌 / 修改令牌的路径
+    assert.equal(/\/token\b(?!s)|\/secret|cameraUrl\s*[:=]/i.test(core.replace(secretCalls, "")), false, "api-core 其余部分不接触令牌 / 地址");
   }
-  assert.equal(/http\.post\(\s*FACE_CAMERAS_API_BASE/.test(core), false, "不新建摄像头");
+  // 抓拍记录与图片：只读，图片地址不带查询串，编号先校验
+  assert.ok(core.includes("`${cameraPath(cameraId)}/captures`"));
+  assert.ok(core.includes("/captures/${captureId}/images/${imageId}/content"));
+  assert.ok(core.includes("CAMERA_ID_PATTERN.test(cameraId)"));
 
   // 移动端用到的每个接口，后端控制器里都有同样的路由
   const faceMatchController = read(join(repoRoot, "services/backend/BlazorApp.Api/Controllers/React/FaceMatchController.cs"));
@@ -279,6 +360,11 @@ function stripComments(source: string): string {
   }
   assert.ok(camerasController.includes("[HttpGet]"));
   assert.ok(camerasController.includes('[HttpPut("{cameraId}")]'));
+  assert.ok(camerasController.includes("[HttpPost]"), "后端有新增摄像头");
+  assert.ok(camerasController.includes('[HttpPost("{cameraId}/rotate-token")]'), "后端有重新生成令牌");
+  assert.ok(camerasController.includes('[HttpGet("{cameraId}/captures")]'), "后端有最近抓拍");
+  assert.ok(camerasController.includes('[HttpGet("{cameraId}/captures/{captureId}/images/{imageId}/content")]'), "后端有抓拍图片内容");
+  assert.ok(camerasController.includes("[Authorize(Policy = Permissions.FaceCapture.Cameras.Manage)]"), "整个摄像头控制器只认 FaceCapture.Cameras.Manage");
   for (const path of [
     "`${FACE_MATCH_API_BASE}/config`",
     "`${FACE_MATCH_API_BASE}/unwelcome/entries`",
