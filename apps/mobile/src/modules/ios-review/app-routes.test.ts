@@ -743,6 +743,45 @@ async function run() {
     "审核模式创建的店员必须可以从列表读回",
   );
 
+  // 员工姓名四段：创建时回显，列表可按昵称 / 姓名各段搜到；更新时 null / 缺省 = 不改、空串 = 清空，fullName 随之重算。
+  const namedReviewUser = await request("POST", "/react/v1/store-users", {
+    username: "review_named_user",
+    fullName: "Emily Rose Chen",
+    givenName: "Emily",
+    middleName: "Rose",
+    familyName: "Chen",
+    nickname: "Emmy",
+    email: "review-named@example.invalid",
+    sendPasswordSetupEmail: true,
+    loginEnabled: true,
+    status: 1,
+    storeCode: "REV001",
+  });
+  assert.equal(namedReviewUser.fullName, "Emily Rose Chen");
+  assert.equal(namedReviewUser.givenName, "Emily");
+  assert.equal(namedReviewUser.middleName, "Rose");
+  assert.equal(namedReviewUser.familyName, "Chen");
+  assert.equal(namedReviewUser.nickname, "Emmy");
+  assert.equal(namedReviewUser.passwordSetupEmail.maskedEmail.includes("@"), true, "审核模式不真发邮件，只回传发送结果");
+  const searchedByNickname = await request("POST", "/react/v1/store-users/grid", { storeCode: "REV001", keyword: "emmy" });
+  assert.deepEqual(searchedByNickname.items.map((user: { userGUID: string }) => user.userGUID), [namedReviewUser.userGUID], "昵称可被搜到");
+  const namedUrl = `/react/v1/store-users/${namedReviewUser.userGUID}`;
+  const renamed = await request("PUT", namedUrl, {
+    storeCode: "REV001",
+    username: "review_named_user",
+    fullName: "Emily Ann Chen",
+    middleName: "Ann",
+    nickname: "",
+    givenName: null,
+    status: 1,
+  });
+  assert.equal(renamed.givenName, "Emily", "null = 不改");
+  assert.equal(renamed.familyName, "Chen", "缺省 = 不改");
+  assert.equal(renamed.middleName, "Ann");
+  assert.equal("nickname" in renamed, false, "空串 = 清空");
+  assert.equal(renamed.fullName, "Emily Ann Chen");
+  assert.equal((await request("GET", namedUrl)).nickname, undefined, "读回同样已清空");
+
   const staffCodeUrl = `/react/v1/store-users/${createdReviewUser.userGUID}/cashier-barcode`;
   assert.equal((await request("GET", staffCodeUrl, null, { storeCode: "REV001" })).exists, false);
   const staffCode = await request("POST", `${staffCodeUrl}/ensure`, { storeCode: "REV001" });

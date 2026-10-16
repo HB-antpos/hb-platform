@@ -41,6 +41,7 @@ import faceMatchEn from "@/locales/en/screens/faceMatch.json";
 import notificationsEn from "@/locales/en/screens/notifications.json";
 import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
+import peopleFormEn from "@/locales/en/screens/peopleForm.json";
 import cashRegisterUsersEn from "@/locales/en/screens/cashRegisterUsers.json";
 import warehouseEn from "@/locales/en/screens/warehouse.json";
 import workbenchEn from "@/locales/en/screens/workbench.json";
@@ -81,6 +82,7 @@ import faceMatchZh from "@/locales/zh/screens/faceMatch.json";
 import notificationsZh from "@/locales/zh/screens/notifications.json";
 import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
+import peopleFormZh from "@/locales/zh/screens/peopleForm.json";
 import cashRegisterUsersZh from "@/locales/zh/screens/cashRegisterUsers.json";
 import warehouseZh from "@/locales/zh/screens/warehouse.json";
 import workbenchZh from "@/locales/zh/screens/workbench.json";
@@ -132,6 +134,7 @@ const resources = {
     preorder: preorderZh,
     supplyNotice: supplyNoticeZh,
     userManagement: userManagementZh,
+    peopleForm: peopleFormZh,
     cashRegisterUsers: cashRegisterUsersZh,
     warehouse: warehouseZh,
     workbench: workbenchZh,
@@ -176,6 +179,7 @@ const resources = {
     preorder: preorderEn,
     supplyNotice: supplyNoticeEn,
     userManagement: userManagementEn,
+    peopleForm: peopleFormEn,
     cashRegisterUsers: cashRegisterUsersEn,
     warehouse: warehouseEn,
     workbench: workbenchEn,

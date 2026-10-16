@@ -252,6 +252,9 @@ async function run() {
   apiClient.put = (async (url: string, body?: unknown) => {
     requests.push({ method: "put", url, body });
     if (url.endsWith("/password")) return { data: true };
+    if (url.startsWith("/Users/guid/")) {
+      return { data: { userGUID: "user/1", username: "bob", email: "bob@example.test", isActive: false, createdAt: "", updatedAt: "", roleNames: [], storeNames: [] } };
+    }
     return { data: { roleGUID: "role/1", roleName: "Supervisor", isActive: false, createdAt: "", updatedAt: "", userCount: 1, users: [], permissions: [] } };
   }) as typeof apiClient.put;
 
@@ -311,6 +314,53 @@ async function run() {
       isActive: true,
       roleGuids: ["role-2"],
       storeGuids: ["store-2"],
+    });
+
+    // 姓名四段：创建时只发有值的段（fullName 仍是合成值）；更新时只发有变化的段，空串 = 清空、null = 不改。
+    await api.createIdentityUser({
+      username: "carol",
+      email: "carol@example.test",
+      password: "secret12",
+      fullName: "Carol Rose Lin",
+      givenName: " Carol ",
+      middleName: "Rose",
+      familyName: "Lin",
+      nickname: "",
+    }, "actor-1");
+    const createBodies = requests.filter((item) => item.method === "post" && item.url === "/Users").map((item) => item.body);
+    assert.deepEqual(createBodies[1], {
+      username: "carol",
+      email: "carol@example.test",
+      password: "secret12",
+      passwordFormat: "raw",
+      fullName: "Carol Rose Lin",
+      givenName: "Carol",
+      middleName: "Rose",
+      familyName: "Lin",
+      isActive: true,
+      roleGuids: [],
+      storeGuids: [],
+    });
+    assert.equal("nickname" in (createBodies[1] as Record<string, unknown>), false, "创建时空昵称不发送");
+    assert.equal("givenName" in (createBodies[0] as Record<string, unknown>), false, "未提供姓名段时请求体与此前一致");
+
+    await api.updateIdentityUser("user/1", {
+      username: "bob",
+      email: "bob@example.test",
+      fullName: "Bob Lin",
+      familyName: "Lin",
+      nickname: "",
+      middleName: null,
+      isActive: false,
+    }, "actor-1");
+    assert.deepEqual(requests.find((item) => item.method === "put" && item.url === "/Users/guid/user%2F1")?.body, {
+      username: "bob",
+      email: "bob@example.test",
+      fullName: "Bob Lin",
+      familyName: "Lin",
+      nickname: "",
+      middleName: null,
+      isActive: false,
     });
 
     await api.updateIdentityUserPassword("user/1", { newPassword: "secret34", forcePasswordChange: true }, "actor-1");

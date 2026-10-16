@@ -8,10 +8,14 @@ const source = readFileSync(
   resolve(currentDirectory, "../../../app/(shell)/users/index.tsx"),
   "utf8"
 );
-const createSource = readFileSync(
+// 新增页已拆成「路由入口 + 店长版屏幕 + 纯逻辑」（见 people/form）；下面对「新建页」的业务保证
+// 针对这三份源码合并后的文本断言，保证和拆分前同样严格。
+const createSource = [
   resolve(currentDirectory, "../../../app/(shell)/users/new.tsx"),
-  "utf8"
-);
+  resolve(currentDirectory, "../people/form/staff-create-screen.tsx"),
+  resolve(currentDirectory, "../people/form/staff-create-form.ts"),
+].map((file) => readFileSync(file, "utf8")).join("\n");
+const editSource = readFileSync(resolve(currentDirectory, "../people/form/person-edit-screen.tsx"), "utf8");
 
 // 店长只持有本店店员专用权限；全局用户权限同样放行，两者任一即可。
 for (const screenSource of [source, createSource]) {
@@ -55,21 +59,22 @@ assert.match(
   "未选择可管理分店时必须禁用新增入口"
 );
 assert.match(source, /t\("actions\.create"\)/, "新增入口必须使用本地化文案");
-assert.match(createSource, /t\("dialogs\.createTitle"\)/, "新建页必须使用创建标题");
+assert.match(createSource, /t\("staff\.title"\)/, "新建页必须使用创建标题");
 assert.doesNotMatch(createSource, /password:/, "新建页不得提交任何密码，员工用邮件验证码自己设置");
 assert.match(createSource, /sendPasswordSetupEmail: true/, "新建后必须给员工邮箱发初始密码，不提交任何密码");
 assert.match(createSource, /initialPassword: true/, "新建页重发必须仍然发初始密码，不能退回验证码");
-assert.match(createSource, /validateNewStaffEmail\(email, t\)/, "新建时邮箱必填");
+assert.match(createSource, /validateNewStaffEmail\(values\.email, t\)/, "新建时邮箱必填");
 assert.match(createSource, /resolveUsernameFromEmail\(value\)/, "用户名默认跟随邮箱");
 assert.match(createSource, /createMutation\.mutateAsync/, "保存创建表单必须调用创建接口");
-assert.match(createSource, /t\("create\.submit"\)/, "新建页主按钮必须显示创建文案");
-assert.match(createSource, /t\("create\.successHeadline"\)/, "创建成功必须给出明确反馈");
-assert.match(createSource, /t\("create\.inviteSent"/, "创建成功页必须显示初始密码邮件的发送状态");
+assert.match(createSource, /t\("staff\.submit"\)/, "新建页主按钮必须显示创建文案");
+assert.match(createSource, /t\("created\.headline"\)/, "创建成功必须给出明确反馈");
+assert.match(createSource, /t\("created\.inviteSent"/, "创建成功页必须显示初始密码邮件的发送状态");
 assert.match(createSource, /resendInvite/, "邮件没发出时店长必须能重发");
 assert.match(source, /setupEmailMutation\.mutateAsync/, "店长重置密码必须改为发送设置密码邮件");
-assert.match(createSource, /validateNewStaffPhone\(phone, t\)/, "新建时必须校验澳洲手机号");
+assert.match(createSource, /validateNewStaffPhone\(values\.phone, t\)/, "新建时必须校验澳洲手机号");
 assert.doesNotMatch(source, /createMutation/, "列表页不再承载创建表单");
-for (const screenSource of [source, createSource]) {
+// 创建在新增页、编辑在编辑整页（列表页不再承载保存表单）。
+for (const screenSource of [createSource, editSource]) {
   assert.match(
     screenSource,
     /console\.warn\("\[store-users\] save failed", toSafeStoreUserErrorLog\(error\)\)/,
@@ -80,6 +85,17 @@ assert.match(
   source,
   /console\.warn\("\[store-users\] password reset failed", toSafeStoreUserErrorLog\(error\)\)/,
   "密码重置失败只能记录脱敏后的错误元数据"
+);
+// 编辑已从列表弹窗搬到整页（people/form/person-edit-screen）：权限写法与脱敏日志要求不变。
+assert.match(
+  editSource,
+  /const canEditUsers = access\.isAdmin\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.Edit\)\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.EditStoreStaff\)/,
+  "编辑店员必须使用 Users.Edit 或 Users.EditStoreStaff 权限门槛"
+);
+assert.match(
+  editSource,
+  /const canResetPasswords = access\.isAdmin\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.ResetPassword\)\s*\|\| access\.hasPermission\(PERMISSIONS\.Users\.ResetStoreStaffPassword\)/,
+  "编辑后提示发送设置密码邮件必须使用 Users.ResetPassword 或 Users.ResetStoreStaffPassword 权限门槛"
 );
 assert.doesNotMatch(
   source,

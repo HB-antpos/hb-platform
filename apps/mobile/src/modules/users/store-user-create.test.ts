@@ -3,7 +3,7 @@ import Module from "node:module";
 
 interface RequestRecord {
   body?: unknown;
-  method: "post";
+  method: "post" | "put";
   url: string;
 }
 
@@ -48,9 +48,10 @@ async function run() {
   });
 
   const { apiClient } = await import("../../shared/api/client");
-  const { createStoreUser, toSafeStoreUserErrorLog } = await import("./api");
+  const { createStoreUser, toSafeStoreUserErrorLog, updateStoreUser } = await import("./api");
   const requests: RequestRecord[] = [];
   const originalPost = apiClient.post;
+  const originalPut = apiClient.put;
 
   apiClient.post = (async (url: string, body?: unknown) => {
     requests.push({ body, method: "post", url });
@@ -115,6 +116,81 @@ async function run() {
     assert.equal("sendPasswordSetupEmail" in (requests[0].body as Record<string, unknown>), false);
     requests.length = 0;
 
+    // 姓名四段：创建时原样透传（调用方只带有值的段），fullName 为合成值，仍然不带密码。
+    await createStoreUser({
+      username: "staff004",
+      fullName: "Emily Rose Chen",
+      givenName: "Emily",
+      middleName: "Rose",
+      familyName: "Chen",
+      nickname: "Em",
+      email: "staff4@example.com",
+      status: 1,
+      storeCode: "S001",
+      loginEnabled: true,
+      sendPasswordSetupEmail: true,
+    });
+    assert.deepEqual(requests, [
+      {
+        method: "post",
+        url: "/react/v1/store-users",
+        body: {
+          username: "staff004",
+          fullName: "Emily Rose Chen",
+          givenName: "Emily",
+          middleName: "Rose",
+          familyName: "Chen",
+          nickname: "Em",
+          email: "staff4@example.com",
+          status: 1,
+          storeCode: "S001",
+          roleNames: ["StoreStaff"],
+          employmentType: "casual",
+          passwordFormat: "raw",
+          loginEnabled: true,
+          sendPasswordSetupEmail: true,
+        },
+      },
+    ]);
+    assert.equal("password" in (requests[0].body as Record<string, unknown>), false);
+    requests.length = 0;
+
+    // 更新：只带有变化的段，空串表示清空；其余字段与此前一致，角色强制为店员。
+    apiClient.put = (async (url: string, body?: unknown) => {
+      requests.push({ body, method: "put", url });
+      return { data: { userGuid: "user-1", username: "staff001", status: 1, roleNames: ["StoreStaff"] } };
+    }) as typeof apiClient.put;
+    await updateStoreUser({
+      userGuid: "user-1",
+      storeCode: " S001 ",
+      username: "staff001",
+      fullName: "Emma Chen",
+      givenName: "Emma",
+      nickname: "",
+      status: 1,
+      roleNames: ["Admin"],
+    });
+    assert.deepEqual(requests, [
+      {
+        method: "put",
+        url: "/react/v1/store-users/user-1",
+        body: {
+          userGuid: "user-1",
+          storeCode: "S001",
+          username: "staff001",
+          fullName: "Emma Chen",
+          givenName: "Emma",
+          nickname: "",
+          status: 1,
+          roleNames: ["StoreStaff"],
+        },
+      },
+    ]);
+    for (const key of ["middleName", "familyName"]) {
+      assert.equal(key in (requests[0].body as Record<string, unknown>), false, `${key} 未变化不得发送`);
+    }
+    requests.length = 0;
+
     const initialPassword = "must-never-enter-logs";
     const safeErrorLog = toSafeStoreUserErrorLog({
       name: "AxiosError",
@@ -156,6 +232,7 @@ async function run() {
     );
   } finally {
     apiClient.post = originalPost;
+    apiClient.put = originalPut;
   }
 }
 

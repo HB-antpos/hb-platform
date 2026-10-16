@@ -399,13 +399,35 @@ export async function fetchIdentityUserDetail(userGuid: string, actorGuid: strin
   return normalizeIdentityUser(response.data);
 }
 
+const NAME_PART_KEYS = ["givenName", "middleName", "familyName", "nickname"] as const;
+
+/**
+ * 姓名拆分字段的请求体：未提供（undefined）的段不发送；字符串去首尾空白后原样发送，
+ * 更新时空串表示「清空」、null 表示「不改」。旧后端不认识这些字段会直接忽略，
+ * 所以调用方仍须同时发送合成后的 fullName。
+ */
+function nameParts(input: Partial<Record<(typeof NAME_PART_KEYS)[number], string | null>>) {
+  const body: Partial<Record<(typeof NAME_PART_KEYS)[number], string | null>> = {};
+  for (const key of NAME_PART_KEYS) {
+    const value = input[key];
+    if (value === undefined) continue;
+    body[key] = value === null ? null : value.trim();
+  }
+  return body;
+}
+
 export async function createIdentityUser(input: IdentityCreateUserInput, actorGuid: string) {
+  // 创建时只发送有值的姓名段（空串没有意义），其余字段与此前一致。
+  const createdParts = Object.fromEntries(
+    Object.entries(nameParts(input)).filter(([, value]) => typeof value === "string" && value !== ""),
+  );
   const response = await apiClient.post(path("Users"), {
     username: input.username.trim(),
     email: input.email.trim(),
     password: input.password,
     passwordFormat: input.passwordFormat ?? "raw",
     fullName: input.fullName?.trim() || null,
+    ...createdParts,
     isActive: input.isActive ?? true,
     roleGuids: input.roleGuids ?? [],
     storeGuids: input.storeGuids ?? [],
@@ -418,6 +440,7 @@ export async function updateIdentityUser(userGuid: string, input: IdentityUpdate
     username: input.username.trim(),
     email: input.email.trim(),
     fullName: input.fullName?.trim() || null,
+    ...nameParts(input),
     isActive: input.isActive ?? true,
   }, accountBoundRequestConfig(actorGuid));
   return normalizeIdentityUser(response.data);
