@@ -9,6 +9,7 @@ import { useStores } from "@/modules/shop/use-stores";
 import { useAuthStore } from "@/store/auth-store";
 import { faceMatchApi } from "./api";
 import { markCaptureResultHitRead, markHitResultRead, mapPagesItems } from "./capture-logic";
+import { CAMERA_CAPTURE_PAGE_SIZE, nextCapturePage } from "./cameras-logic";
 import { PAGE_SIZE } from "./constants";
 import { mergePages, nextPageParam } from "./entries-logic";
 import { extractHttpStatus } from "./errors";
@@ -57,6 +58,7 @@ export const faceMatchKeys = {
     ["face-match", userGuid, "hit-summary", filters.storeCode ?? "all", filters.fromUtc ?? "", filters.toUtc ?? ""] as const,
   profile: (userGuid: string | null, storeCode: string | null) => ["face-match", userGuid, "profile", storeCode] as const,
   cameras: (userGuid: string | null) => ["face-match", userGuid, "cameras"] as const,
+  cameraCaptures: (userGuid: string | null, cameraId: string) => ["face-match", userGuid, "camera-captures", cameraId] as const,
   stores: (userGuid: string | null) => ["face-match", userGuid, "stores"] as const,
 };
 
@@ -235,6 +237,23 @@ export function useFaceProfile(storeCode: string | null, enabled: boolean) {
     queryKey: faceMatchKeys.profile(userGuid, storeCode),
     queryFn: ({ signal }) => faceMatchApi.getProfile(storeCode!, signal),
     enabled: enabled && Boolean(storeCode),
+    staleTime: 0,
+    retry: retryTransientOnly,
+  });
+}
+
+/**
+ * 某台摄像头的最近抓拍（只有元数据，图片字节不经过这里）。按页累加，到页码上限后不再有「加载更多」。
+ * 打开抓拍弹框才启用；关闭（enabled=false）后缓存按默认时间回收。
+ */
+export function useFaceCameraCaptures(cameraId: string | null, enabled: boolean) {
+  const userGuid = useUserGuid();
+  return useInfiniteQuery({
+    queryKey: faceMatchKeys.cameraCaptures(userGuid, cameraId ?? ""),
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) => faceMatchApi.listCameraCaptures(cameraId!, pageParam, CAMERA_CAPTURE_PAGE_SIZE, signal),
+    getNextPageParam: nextCapturePage,
+    enabled: enabled && Boolean(cameraId),
     staleTime: 0,
     retry: retryTransientOnly,
   });

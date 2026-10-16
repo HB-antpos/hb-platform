@@ -447,9 +447,105 @@ async function run() {
     assert.equal(calls[1].url, "/react/v1/face-cameras/c%2F1");
     assert.deepEqual(calls[1].data, { storeCode: "1008", note: "Front", deviceModel: "M1", macAddress: "AA", enabled: false });
     assert.equal(updated.enabled, false);
-    // 不存在新建摄像头 / 重置令牌 / 查看令牌的方法
+    // 没有「查看 / 修改令牌」的方法：令牌只在新增 / 重新生成的那一次响应里出现
     const methods = Object.keys(api);
-    assert.equal(methods.some((name) => /rotate|token|secret|createCamera/i.test(name)), false);
+    assert.equal(methods.some((name) => /^(get|read|view|set|update)(Camera)?(Token|Secret|Url)/i.test(name)), false);
+  }
+
+  // ───────── 摄像头：新增（响应带一次性地址；不进中心日志；响应里的 token 字段不保留） ─────────
+  {
+    const { http, calls } = fakeHttp(() => ({
+      camera: { cameraId: "store1008-door-01", storeCode: "1008", enabled: true },
+      token: "TOKEN-SHOULD-NOT-BE-KEPT",
+      cameraUrl: "https://example.test/api/face-ingest/store1008-door-01/TOKEN-SHOULD-NOT-BE-KEPT",
+    }));
+    const api = createFaceMatchApi(http);
+    const result = await api.createCamera({ cameraId: "store1008-door-01", storeCode: "1008", note: null, deviceModel: "DS-2CD", macAddress: null });
+    assert.equal(calls[0].method, "post");
+    assert.equal(calls[0].url, "/react/v1/face-cameras");
+    assert.deepEqual(calls[0].data, { cameraId: "store1008-door-01", storeCode: "1008", note: null, deviceModel: "DS-2CD", macAddress: null });
+    const headers = calls[0].config?.headers as Record<string, string>;
+    assert.equal(headers["X-Skip-Center-Log"], "1", "含 token 的响应不进中心日志");
+    assert.equal(headers["Cache-Control"], "no-store");
+    assert.deepEqual(Object.keys(result).sort(), ["camera", "cameraUrl"], "只保留摄像头与地址，单独的 token 字段不保留");
+    assert.equal(result.camera.cameraId, "store1008-door-01");
+    assert.ok(result.cameraUrl.endsWith("TOKEN-SHOULD-NOT-BE-KEPT"));
+  }
+  {
+    // 响应缺地址：抛固定错误码（消息里没有任何响应内容），由页面提示「先刷新核对」
+    const { http } = fakeHttp(() => ({ camera: { cameraId: "c1", storeCode: "1008" } }));
+    await assert.rejects(
+      () => createFaceMatchApi(http).createCamera({ cameraId: "c1", storeCode: "1008", note: null, deviceModel: null, macAddress: null }),
+      (error: unknown) => (error as { code?: string }).code === "FACE_CAMERA_SECRET_MISSING" && (error as Error).message === "FACE_CAMERA_SECRET_MISSING",
+    );
+  }
+
+  // ───────── 摄像头：重新生成令牌（POST、无请求体、不进中心日志、编号先校验） ─────────
+  {
+    const { http, calls } = fakeHttp(() => ({ camera: { cameraId: "c-1", storeCode: "1008" }, cameraUrl: "https://example.test/x/NEWTOKEN" }));
+    const api = createFaceMatchApi(http);
+    const result = await api.rotateCameraToken("c-1");
+    assert.equal(calls[0].method, "post");
+    assert.equal(calls[0].url, "/react/v1/face-cameras/c-1/rotate-token");
+    assert.equal(calls[0].data, undefined);
+    assert.equal((calls[0].config?.headers as Record<string, string>)["X-Skip-Center-Log"], "1");
+    assert.equal(result.cameraUrl, "https://example.test/x/NEWTOKEN");
+    await assert.rejects(() => api.rotateCameraToken("../etc"), (error: unknown) => (error as { code?: string }).code === "FACE_MATCH_INVALID_ID");
+    await assert.rejects(() => api.rotateCameraToken("Bad Id"), (error: unknown) => (error as { code?: string }).code === "FACE_MATCH_INVALID_ID");
+    assert.equal(calls.length, 1, "不合法的编号不发请求");
+  }
+
+  // ───────── 摄像头：最近抓拍（元数据，GET + 分页参数 + no-store） ─────────
+  {
+    const { http, calls } = fakeHttp(() => ({
+      items: [
+        { captureId: "cap1", receivedAtUtc: "2026-10-16T01:00:00Z", faceCount: 2, parseStatus: 0, isDuplicate: false, images: [{ imageId: "img1", kind: 0, storage: "cos", byteSize: 10, faceIndex: 0 }] },
+        { captureId: "cap2", receivedAtUtc: "2026-10-16T00:59:00Z", faceCount: 0, parseStatus: 9, isDuplicate: true, images: [] },
+      ],
+      page: 2,
+      pageSize: 20,
+      hasMore: true,
+      canViewImages: true,
+      storeMode: "capture",
+      lastSeenAtUtc: "2026-10-16T01:00:00Z",
+    }));
+    const page = await createFaceMatchApi(http).listCameraCaptures("c-1", 2, 20);
+    assert.equal(calls[0].method, "get");
+    assert.equal(calls[0].url, "/react/v1/face-cameras/c-1/captures");
+    assert.deepEqual(calls[0].config?.params, { page: 2, pageSize: 20 });
+    assert.equal((calls[0].config?.headers as Record<string, string>)["Cache-Control"], "no-store");
+    assert.equal(page.items.length, 2);
+    assert.equal(page.items[0].images.length, 1);
+    assert.equal(page.items[1].parseStatus, null, "不认识的解析状态保留为 null，不假装成某一种");
+    assert.equal(page.hasMore, true);
+    assert.equal(page.storeMode, "capture");
+  }
+  {
+    // canViewImages=false：即使服务端误带 images 也丢弃
+    const { http } = fakeHttp(() => ({
+      items: [{ captureId: "cap1", faceCount: 1, images: [{ imageId: "img1", kind: 0, storage: "cos" }] }],
+      canViewImages: false,
+    }));
+    const page = await createFaceMatchApi(http).listCameraCaptures("c-1", 1, 20);
+    assert.equal(page.canViewImages, false);
+    assert.deepEqual(page.items[0].images, []);
+    await assert.rejects(() => createFaceMatchApi(http).listCameraCaptures("../x", 1, 20), (error: unknown) => (error as { code?: string }).code === "FACE_MATCH_INVALID_ID");
+  }
+
+  // ───────── 摄像头：抓拍图片内容（字节 → data URI；编号先校验；不带查询串；不进中心日志） ─────────
+  {
+    const { http, calls } = fakeHttp(() => JPEG.buffer.slice(JPEG.byteOffset, JPEG.byteOffset + JPEG.byteLength));
+    const api = createFaceMatchApi(http);
+    const uri = await api.fetchCameraCaptureImage("c-1", "cap1", "img1");
+    assert.ok(uri.startsWith("data:image/jpeg;base64,"));
+    assert.equal(calls[0].url, "/react/v1/face-cameras/c-1/captures/cap1/images/img1/content");
+    assert.equal(calls[0].config?.params, undefined, "图片地址不带查询串");
+    assert.equal(calls[0].config?.responseType, "arraybuffer");
+    assert.equal((calls[0].config?.headers as Record<string, string>)["X-Skip-Center-Log"], "1");
+    for (const [camera, capture, image] of [["../c", "cap1", "img1"], ["c-1", "cap/1", "img1"], ["c-1", "cap1", "img1?x=1"], ["c-1", "", "img1"]]) {
+      await assert.rejects(() => api.fetchCameraCaptureImage(camera, capture, image), (error: unknown) => (error as { code?: string }).code === "FACE_MATCH_IMAGE_GONE");
+    }
+    assert.equal(calls.length, 1, "不合法的编号不发请求");
   }
 }
 

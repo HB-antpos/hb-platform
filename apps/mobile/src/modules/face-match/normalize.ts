@@ -3,6 +3,9 @@
 import { AUTO_CONFIRM_SCORE_DEFAULT } from "./constants";
 import type {
   FaceCamera,
+  FaceCameraCapture,
+  FaceCameraCaptureImage,
+  FaceCameraCapturePage,
   FaceCameraList,
   FaceCaptureHit,
   FaceCaptureResult,
@@ -397,5 +400,60 @@ export function normalizeFaceCameraList(value: unknown): FaceCameraList {
     generatedAtUtc: asString(raw.generatedAtUtc),
     onlineWindowMinutes: asNumber(raw.onlineWindowMinutes) || 10,
     statsWindowHours: asNumber(raw.statsWindowHours) || 24,
+  };
+}
+
+const CAMERA_PARSE_STATUSES = [0, 1, 2, 3] as const;
+const CAMERA_IMAGE_KINDS = [0, 1, 2] as const;
+const CAMERA_STORE_MODES = ["off", "capture", "match"] as const;
+
+function normalizeFaceCameraCaptureImage(value: unknown): FaceCameraCaptureImage {
+  const raw = asRecord(value);
+  const kind = CAMERA_IMAGE_KINDS.find((candidate) => candidate === raw.kind);
+  return {
+    imageId: asString(raw.imageId),
+    // 不认识的类别按「其他」，不丢图片。
+    kind: kind ?? 2,
+    storage: asString(raw.storage),
+    width: asNullableNumber(raw.width),
+    height: asNullableNumber(raw.height),
+    byteSize: Math.max(0, asNumber(raw.byteSize)),
+    faceIndex: asNullableNumber(raw.faceIndex),
+  };
+}
+
+function normalizeFaceCameraCapture(value: unknown): FaceCameraCapture {
+  const raw = asRecord(value);
+  return {
+    captureId: asString(raw.captureId),
+    receivedAtUtc: asString(raw.receivedAtUtc),
+    cameraEventTime: asNullableString(raw.cameraEventTime),
+    eventType: asNullableString(raw.eventType),
+    faceCount: Math.max(0, asNumber(raw.faceCount)),
+    // 不认识的解析状态保留为 null，由页面显示「未知」，不假装成某一种。
+    parseStatus: CAMERA_PARSE_STATUSES.find((candidate) => candidate === raw.parseStatus) ?? null,
+    parseNote: asNullableString(raw.parseNote),
+    isDuplicate: raw.isDuplicate === true,
+    images: asArray(raw.images, normalizeFaceCameraCaptureImage).filter((image) => image.imageId),
+  };
+}
+
+/**
+ * 摄像头最近抓拍（GET /face-cameras/{id}/captures）。只有元数据：没有对象键 / 地址 / 哈希；
+ * canViewImages 为 false 时强制丢弃 images（即使服务端误带也不展示图片入口）。
+ */
+export function normalizeFaceCameraCapturePage(value: unknown): FaceCameraCapturePage {
+  const raw = asRecord(value);
+  const canViewImages = raw.canViewImages === true;
+  return {
+    items: asArray(raw.items, normalizeFaceCameraCapture)
+      .filter((capture) => capture.captureId)
+      .map((capture) => (canViewImages ? capture : { ...capture, images: [] })),
+    page: Math.max(1, asNumber(raw.page, 1)),
+    pageSize: Math.max(1, asNumber(raw.pageSize, 20)),
+    hasMore: raw.hasMore === true,
+    canViewImages,
+    storeMode: CAMERA_STORE_MODES.find((candidate) => candidate === raw.storeMode) ?? null,
+    lastSeenAtUtc: asNullableString(raw.lastSeenAtUtc),
   };
 }
