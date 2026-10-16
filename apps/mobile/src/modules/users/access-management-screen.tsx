@@ -61,6 +61,7 @@ import {
   hasPrivilegedAccessRole,
   isStoreManagerRoleName,
   limitUserAccessRolesForActor,
+  planStoreManagerGrant,
   setUserAccessStoreState,
   toggleDirectPermission,
 } from "./access-management";
@@ -1051,7 +1052,11 @@ export default function AccessManagementScreen() {
           <Text variant="bodySmall" style={styles.helperText}>
             {t("accessManagement.roles.managerLimit")}
           </Text>
-        ) : null}
+        ) : (
+          <Text variant="bodySmall" style={styles.helperText}>
+            {t("accessManagement.roles.derivedAdminHint")}
+          </Text>
+        )}
         <Searchbar
           value={roleSearch}
           onChangeText={setRoleSearch}
@@ -1081,12 +1086,54 @@ export default function AccessManagementScreen() {
           });
           const adminOnly =
             !access.isAdmin && hasPrivilegedAccessRole([role.roleName]);
+          // 「店长」是由「管理」分店派生的角色，不能直接勾选；管理员点它时不是无反应，而是引导去「门店」把分店设为「管理」。
+          const managerGrantEnabled =
+            selection.derived &&
+            eligibility.canGrantStoreManagement &&
+            eligibility.storesMode === "editable";
           const disabled =
             busy ||
-            selection.locked ||
+            (selection.locked && !managerGrantEnabled) ||
             adminOnly ||
             eligibility.rolesMode !== "editable";
+          const guideManagerGrant = () => {
+            const plan = planStoreManagerGrant({
+              canGrantStoreManagement: eligibility.canGrantStoreManagement,
+              storesEditable: eligibility.storesMode === "editable",
+              assignments: storeAssignments,
+            });
+            if (plan.kind === "denied") return;
+            if (plan.kind === "already") {
+              setSnackbarMessage(t("accessManagement.roles.grantManager.already"));
+              return;
+            }
+            if (plan.kind === "noStore") {
+              setActiveSection("stores");
+              setSnackbarMessage(t("accessManagement.roles.grantManager.noStore"));
+              return;
+            }
+            if (plan.kind === "choose") {
+              setActiveSection("stores");
+              setSnackbarMessage(t("accessManagement.roles.grantManager.choose"));
+              return;
+            }
+            // 只有一家分店：在草稿里把它设为「管理」，并切到「门店」让管理员看到并点「保存门店」。
+            const target = storeOptions.find((item) => item.storeGUID === plan.storeGUID);
+            setStoreAssignments((current) =>
+              setUserAccessStoreState(current, plan.storeGUID, "manage"),
+            );
+            setActiveSection("stores");
+            setSnackbarMessage(
+              t("accessManagement.roles.grantManager.set", {
+                store: target?.storeName ?? target?.storeCode ?? "",
+              }),
+            );
+          };
           const toggleRole = () => {
+            if (selection.derived) {
+              if (!busy && managerGrantEnabled) guideManagerGrant();
+              return;
+            }
             if (disabled) return;
             setSelectedRoleGuids((current) =>
               selection.selected
@@ -1124,7 +1171,7 @@ export default function AccessManagementScreen() {
                 </View>
                 <Checkbox
                   status={selection.selected ? "checked" : "unchecked"}
-                  disabled={disabled}
+                  disabled={disabled || selection.derived}
                 />
               </View>
             </TouchableRipple>
