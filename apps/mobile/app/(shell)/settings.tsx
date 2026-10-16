@@ -62,6 +62,10 @@ import { useAuthStore } from "@/store/auth-store";
 import { useDeviceStore } from "@/store/device-store";
 import { resolveSettingsAuthMode, shouldShowProfileAction } from "@/modules/device/settings-mode";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
+import {
+  hydrateFloatingLanguagePreference,
+  useFloatingLanguageStore,
+} from "@/modules/floating-language/preference";
 import { isRequiredLocationError } from "@/modules/attendance/required-location";
 import {
   buildAppUpdateInfoRows,
@@ -443,6 +447,13 @@ export default function Settings() {
   const logout = useAuthStore((state) => state.logout);
   const loginDeviceAccount = useAuthStore((state) => state.loginDeviceAccount);
   const sessionKind = useAuthStore((state) => state.sessionKind);
+  // 语言悬浮按钮：本机偏好，默认关闭；iOS 审核会话不提供（按钮本身在审核态也不显示）。
+  const floatingLanguageEnabled = useFloatingLanguageStore((state) => state.enabled);
+  const setFloatingLanguageEnabled = useFloatingLanguageStore((state) => state.setEnabled);
+  const showFloatingLanguageSetting = sessionKind !== "iosReview";
+  useEffect(() => {
+    void hydrateFloatingLanguagePreference();
+  }, []);
   const deviceSession = useDeviceStore((state) => state.session);
   const accountBinding = useDeviceStore((state) => state.accountBinding);
   const refreshAccountBinding = useDeviceStore((state) => state.refreshAccountBinding);
@@ -1339,6 +1350,24 @@ export default function Settings() {
               />
             }
           />
+          {showFloatingLanguageSetting ? (
+            <>
+              <View style={styles.sectionDivider} />
+              <CompactRow
+                icon="gesture-tap-button"
+                label={t("floatingLanguage.title")}
+                value={t("floatingLanguage.description")}
+                testID="settings-floating-language"
+                action={
+                  <Switch
+                    value={floatingLanguageEnabled}
+                    onValueChange={setFloatingLanguageEnabled}
+                    accessibilityLabel={t("floatingLanguage.title")}
+                  />
+                }
+              />
+            </>
+          ) : null}
           <View style={styles.sectionDivider} />
           <CompactRow
             icon="shield-check-outline"

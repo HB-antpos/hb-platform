@@ -30,6 +30,10 @@
     "dangerZone": "Danger zone",
     "printerDetailsDescription": "Manage label and receipt printers separately. Bluetooth operations run one at a time."
   },
+  "floatingLanguage": {
+    "title": "Floating language button",
+    "description": "A draggable 中 / EN button on every page: tap to switch language, hold 2 seconds for quick navigation."
+  },
   "diagnostics": {
     "title": "About and diagnostics",
     "description": "View the current version, configuration, and device state for troubleshooting.",
