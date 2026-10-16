@@ -42,6 +42,7 @@ import notificationsEn from "@/locales/en/screens/notifications.json";
 import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
 import cashRegisterUsersEn from "@/locales/en/screens/cashRegisterUsers.json";
+import peopleRolesEn from "@/locales/en/screens/peopleRoles.json";
 import warehouseEn from "@/locales/en/screens/warehouse.json";
 import workbenchEn from "@/locales/en/screens/workbench.json";
 import commonZh from "@/locales/zh/common.json";
@@ -82,6 +83,7 @@ import notificationsZh from "@/locales/zh/screens/notifications.json";
 import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
 import cashRegisterUsersZh from "@/locales/zh/screens/cashRegisterUsers.json";
+import peopleRolesZh from "@/locales/zh/screens/peopleRoles.json";
 import warehouseZh from "@/locales/zh/screens/warehouse.json";
 import workbenchZh from "@/locales/zh/screens/workbench.json";
 import { getStoredLanguage, setStoredLanguage } from "@/shared/i18n/storage";
@@ -133,6 +135,7 @@ const resources = {
     supplyNotice: supplyNoticeZh,
     userManagement: userManagementZh,
     cashRegisterUsers: cashRegisterUsersZh,
+    peopleRoles: peopleRolesZh,
     warehouse: warehouseZh,
     workbench: workbenchZh,
   },
@@ -177,6 +180,7 @@ const resources = {
     supplyNotice: supplyNoticeEn,
     userManagement: userManagementEn,
     cashRegisterUsers: cashRegisterUsersEn,
+    peopleRoles: peopleRolesEn,
     warehouse: warehouseEn,
     workbench: workbenchEn,
   },
