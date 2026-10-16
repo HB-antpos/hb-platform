@@ -57,8 +57,9 @@ test("设置页：偏好分组里有开关，读写同一个本机偏好", () =>
   assert.match(settings, /onValueChange=\{setFloatingLanguageEnabled\}/);
   const preferencesAt = settings.indexOf('testID="settings-group-preferences-security"');
   const switchAt = settings.indexOf('testID="settings-floating-language"');
-  const supportAt = settings.indexOf('testID="settings-group-app-support"');
-  assert.ok(preferencesAt > 0 && switchAt > preferencesAt && supportAt > switchAt);
+  // 首页顺序：偏好分组（含开关）→「更多设置」入口；低频项已收进「更多设置」视图。
+  const moreEntryAt = settings.indexOf('testID="settings-more-entry"');
+  assert.ok(preferencesAt > 0 && switchAt > preferencesAt && moreEntryAt > switchAt);
 });
 
 test("按住时长可调：按钮的计时与进度环都读设置值；设置页用滑轨（不加原生滑块依赖）且只在开启时显示", () => {
