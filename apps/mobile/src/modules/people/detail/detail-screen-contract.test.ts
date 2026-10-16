@@ -101,4 +101,20 @@ assert.match(passwordDialog, /validatePasswordValue\(draftPassword, t\)/, "直�
 assert.match(passwordDialog, /validateStaffRecoveryEmail\(draftEmail, t\)/, "邮箱缺失时就地补填并沿用邮箱校验");
 assert.match(passwordDialog, /if \(!props\.visible\) return null/, "关闭即卸载：每次打开都从空白开始");
 
+// ───────── 从旧列表页迁入的保证（列表页的同类断言已改成 doesNotMatch，由这里接管）─────────
+for (const [label, detail] of [["店长版", storeDetail], ["管理员版", adminDetail]] as const) {
+  assert.match(detail, /setupEmailMutation\.mutateAsync\(/, `${label}重置密码必须改为发送设置密码邮件，不手动设新密码`);
+  assert.match(
+    detail,
+    /console\.warn\("\[people-detail\] password setup email failed", toSafeStoreUserErrorLog\(error\)\)/,
+    `${label}发送设置密码邮件失败只能记录脱敏后的错误元数据`,
+  );
+}
+assert.match(
+  storeDetail,
+  /console\.warn\("\[people-detail\] status failed", toSafeStoreUserErrorLog\(error\)\)/,
+  "店长版停用 / 启用失败只能记录脱敏后的错误元数据",
+);
+assert.match(storeDetail, /isStoreManageable\(storeCode, env\.manageableStores\)/, "店长版详情的操作必须受「可管理分店」范围限制");
+
 console.log("detail-screen-contract.test.ts: ok");
