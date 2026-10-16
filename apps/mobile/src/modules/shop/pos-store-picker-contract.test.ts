@@ -8,8 +8,9 @@ const attendanceSource = readFileSync(
   resolve(currentDirectory, "../../components/attendance/AttendanceScreen.tsx"),
   "utf8",
 );
+// 「人员管理」合并后，店员列表逻辑迁到 store-staff-list.tsx（原 users/index.tsx 只剩渲染 Hub 的薄路由）。
 const usersSource = readFileSync(
-  resolve(currentDirectory, "../../../app/(shell)/users/index.tsx"),
+  resolve(currentDirectory, "../users/store-staff-list.tsx"),
   "utf8",
 );
 
@@ -72,7 +73,7 @@ assert.match(
 );
 assert.match(
   usersSource,
-  /<StorePickerModal[\s\S]{0,260}stores=\{posEnabledStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
+  /<StoreSwitchSheet[\s\S]{0,260}stores=\{posEnabledStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
   "用户 Picker 必须使用 POS 启用候选，并在设备绑定模式禁用全部门店选项",
 );
 

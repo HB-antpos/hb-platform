@@ -764,7 +764,7 @@ async function run() {
 
   const mobileRoot = resolve(import.meta.dirname, "../../..");
   const accountProvisioningSources = await Promise.all([
-    readFile(resolve(mobileRoot, "app/(shell)/users/index.tsx"), "utf8"),
+    readFile(resolve(mobileRoot, "src/modules/users/store-staff-list.tsx"), "utf8"),
     readFile(resolve(mobileRoot, "src/modules/users/api.ts"), "utf8"),
     readFile(resolve(mobileRoot, "src/modules/users/hooks.ts"), "utf8"),
     readFile(resolve(mobileRoot, "src/modules/users/types.ts"), "utf8"),
