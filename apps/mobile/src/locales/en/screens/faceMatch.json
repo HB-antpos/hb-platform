@@ -21,7 +21,7 @@
       "list": "List",
       "settings": "Settings"
     },
-    "unreadBadge": "{{label}}, {{count}} unread blacklist hits"
+    "unreadBadge": "{{label}}, {{count}} unread unwelcome hits"
   },
   "filters": {
     "allStores": "All stores",
@@ -292,7 +292,7 @@
       "staff": "Staff",
       "newVisitor": "New visitor",
       "repeatVisitor": "Repeat visitor",
-      "blacklist": "Blacklist"
+      "blacklist": "Unwelcome"
     },
     "range": {
       "today": "Today",
@@ -314,7 +314,7 @@
       "visit": "Visitor {{percent}}%"
     },
     "hit": {
-      "tag": "Blacklist hit {{percent}}%"
+      "tag": "Unwelcome hit {{percent}}%"
     },
     "duplicate": "Duplicate capture",
     "notify": {
@@ -334,7 +334,7 @@
         "store": "Store",
         "decision": "Result",
         "scores": "Similarity",
-        "hit": "List hit",
+        "hit": "Unwelcome hit",
         "faceCount": "Faces",
         "reviewStatus": "Review status"
       },
@@ -508,7 +508,7 @@
     },
     "markAll": "Mark all as read",
     "markAllFailed": "Could not mark as read. Try again later.",
-    "empty": "No blacklist hits in this period"
+    "empty": "No unwelcome hits in this period"
   },
   "thumb": {
     "deleted": "Deleted",
