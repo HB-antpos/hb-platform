@@ -43,6 +43,7 @@ import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
 import peoplePosEn from "@/locales/en/screens/peoplePos.json";
 import cashRegisterUsersEn from "@/locales/en/screens/cashRegisterUsers.json";
+import peopleRolesEn from "@/locales/en/screens/peopleRoles.json";
 import warehouseEn from "@/locales/en/screens/warehouse.json";
 import workbenchEn from "@/locales/en/screens/workbench.json";
 import commonZh from "@/locales/zh/common.json";
@@ -84,6 +85,7 @@ import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
 import peoplePosZh from "@/locales/zh/screens/peoplePos.json";
 import cashRegisterUsersZh from "@/locales/zh/screens/cashRegisterUsers.json";
+import peopleRolesZh from "@/locales/zh/screens/peopleRoles.json";
 import warehouseZh from "@/locales/zh/screens/warehouse.json";
 import workbenchZh from "@/locales/zh/screens/workbench.json";
 import { getStoredLanguage, setStoredLanguage } from "@/shared/i18n/storage";
@@ -136,6 +138,7 @@ const resources = {
     userManagement: userManagementZh,
     peoplePos: peoplePosZh,
     cashRegisterUsers: cashRegisterUsersZh,
+    peopleRoles: peopleRolesZh,
     warehouse: warehouseZh,
     workbench: workbenchZh,
   },
@@ -181,6 +184,7 @@ const resources = {
     userManagement: userManagementEn,
     peoplePos: peoplePosEn,
     cashRegisterUsers: cashRegisterUsersEn,
+    peopleRoles: peopleRolesEn,
     warehouse: warehouseEn,
     workbench: workbenchEn,
   },

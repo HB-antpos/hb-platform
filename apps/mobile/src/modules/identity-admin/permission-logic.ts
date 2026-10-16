@@ -326,6 +326,50 @@ export function isImplicitAllRoleName(roleName: string, superAdminRoleNames: Ite
   return Array.from(superAdminRoleNames).some((name) => name.trim().toLocaleLowerCase() === normalized);
 }
 
+export interface AssignableRoleLike {
+  roleGUID: string;
+  roleName: string;
+  description?: string;
+}
+
+/**
+ * 「分配角色」弹层的可见行：
+ * - 「仅看已选」保留已勾选的角色，以及被锁定（隐式拥有全部权限）的角色，因为它们本来就算已选；
+ * - 搜索匹配角色名、本地化后的显示名、说明，大小写不敏感。
+ */
+export function buildAssignRoleRows<T extends AssignableRoleLike>(
+  roles: readonly T[],
+  options: {
+    keyword: string;
+    onlySelected: boolean;
+    selectedGuids: Iterable<string>;
+    isLocked: (role: T) => boolean;
+    localizedName: (role: T) => string;
+  },
+): T[] {
+  const selected = new Set(options.selectedGuids);
+  const keyword = options.keyword.trim().toLocaleLowerCase();
+  return roles.filter((role) => {
+    if (options.onlySelected && !options.isLocked(role) && !selected.has(role.roleGUID)) return false;
+    if (!keyword) return true;
+    return [role.roleName, options.localizedName(role), role.description ?? ""]
+      .some((value) => value.toLocaleLowerCase().includes(keyword));
+  });
+}
+
+/** 「已选 4 / 12」：锁定角色算已选；已选只数列表里真实存在的角色，避免分子大于分母。 */
+export function countAssignedRoles<T extends AssignableRoleLike>(
+  roles: readonly T[],
+  selectedGuids: Iterable<string>,
+  isLocked: (role: T) => boolean,
+) {
+  const selected = new Set(selectedGuids);
+  return {
+    selected: roles.filter((role) => isLocked(role) || selected.has(role.roleGUID)).length,
+    total: roles.length,
+  };
+}
+
 /** 从权限列表项推导「分类候选」供新建权限选择；同时保留原始 key 便于新分类判断。 */
 export function listPermissionCategoryOptions(items: PermissionListItem[]) {
   const seen = new Map<string, string>();
