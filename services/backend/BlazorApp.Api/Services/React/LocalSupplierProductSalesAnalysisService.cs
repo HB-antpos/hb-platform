@@ -1438,6 +1438,7 @@ FROM [ProductGroups]";
             {
                 return await ComputeFastSqlServerSummaryAsync(
                     context,
+                    request.Filter,
                     scopedStoreCodes,
                     startDate,
                     endDate,
@@ -1566,7 +1567,7 @@ FROM [ProductGroups]";
             return _db.CurrentConnectionConfig.DbType == DbType.SqlServer
                 && _useDirectUniqueProductPath
                 && _hasFastSqlServerSchema
-                && IsBroadUnfilteredSelection(request)
+                && IsFastSqlServerSummarySelection(request)
                 && (sortBy == null
                     || string.Equals(
                         sortBy,
@@ -1583,6 +1584,7 @@ FROM [ProductGroups]";
         private async Task<LocalSupplierProductSalesSummaryResponseDto>
             ComputeFastSqlServerSummaryAsync(
                 LocalSupplierProductSalesMasterContext context,
+                LocalSupplierProductSalesAnalysisFilterDto filter,
                 IReadOnlyList<string>? scopedStoreCodes,
                 DateTime startDate,
                 DateTime endDate,
@@ -1590,6 +1592,114 @@ FROM [ProductGroups]";
                 int pageSize
             )
         {
+            // 供应商/仓库分类筛选直接叠加在商品主档覆盖索引的扫描上：
+            // 销量与进货临时表本来就按全商品聚合一次（与筛选无关），筛选只影响商品页、总数与总计。
+            // 比较沿用生产库的 CI 排序规则；通用路径的 Trim().ToUpper() 与之等价（导入数据无首尾空格）。
+            var supplierCodes = LocalSupplierProductSalesAnalysisLogic
+                .ResolveSupplierCodes(filter)
+                .Select(code => code.ToUpperInvariant())
+                .Distinct()
+                .ToList();
+            var categoryGuids = LocalSupplierProductSalesAnalysisLogic
+                .ExpandCategoryGuids(
+                    context.Categories,
+                    LocalSupplierProductSalesAnalysisLogic.ResolveCategoryGuids(filter)
+                )
+                .Select(guid => guid.ToUpperInvariant())
+                .Distinct()
+                .ToList();
+            var supplierParameterNames = supplierCodes
+                .Select((_, index) => $"@__lspsaSupplier{index}")
+                .ToList();
+            var categoryParameterNames = categoryGuids
+                .Select((_, index) => $"@__lspsaCategory{index}")
+                .ToList();
+            // 供应商分类与通用路径 ApplySupplierCategoryToRawProducts 同一语义：
+            // 供应商 200 的分类就是仓库分类（取其子孙分类）；其余供应商按“商品—分类归属”表匹配，
+            // 且归属写入时的供应商必须与商品当前供应商一致（HQ 同步改了供应商即视为未归类）。
+            // 归属表主键是 ProductCode，相关子查询是主键点查，不会拖慢整体扫描。
+            var supplierCategoryGuids = LocalSupplierProductSalesAnalysisLogic
+                .NormalizeCodes(filter.SupplierCategoryGuids);
+            var supplierCategoryWarehouseGuids = supplierCategoryGuids.Count == 0
+                ? new List<string>()
+                : LocalSupplierProductSalesAnalysisLogic
+                    .ExpandCategoryGuids(context.Categories, supplierCategoryGuids)
+                    .ToList();
+            var supplierCategoryParameterNames = supplierCategoryGuids
+                .Select((_, index) => $"@__lspsaSupplierCategory{index}")
+                .ToList();
+            var supplierCategoryWarehouseParameterNames = supplierCategoryWarehouseGuids
+                .Select((_, index) => $"@__lspsaSupplierWarehouse{index}")
+                .ToList();
+            var supplierCategorySql = supplierCategoryGuids.Count == 0
+                ? string.Empty
+                : $@"AND (
+        {(supplierCategoryWarehouseGuids.Count == 0
+            ? string.Empty
+            : $"([product].[LocalSupplierCode] = N'200' AND [product].[WarehouseCategoryGUID] IN ({string.Join(",", supplierCategoryWarehouseParameterNames)})) OR")}
+        ([product].[LocalSupplierCode] <> N'200' AND EXISTS
+            (
+                SELECT 1
+                FROM [dbo].[LocalSupplierCategoryProductAssignment] AS [assignment]
+                WHERE [assignment].[ProductCode] = [product].[ProductCode]
+                  AND [assignment].[LocalSupplierCode] = [product].[LocalSupplierCode]
+                  AND [assignment].[CategoryGUID] IN ({string.Join(",", supplierCategoryParameterNames)})
+            ))
+    )
+";
+            var productFilterSql = string.Concat(
+                supplierParameterNames.Count == 0
+                    ? string.Empty
+                    : $"AND [product].[LocalSupplierCode] IN ({string.Join(",", supplierParameterNames)})\n",
+                categoryParameterNames.Count == 0
+                    ? string.Empty
+                    : $"AND [product].[WarehouseCategoryGUID] IN ({string.Join(",", categoryParameterNames)})\n",
+                supplierCategorySql
+            );
+            var hasProductFilter = productFilterSql.Length > 0;
+            // 有筛选时先把命中的商品一次性物化成临时表，合格商品数、商品页排名与总计都读它：
+            // 供应商分类的相关子查询若在计数、排名、总计里各算一遍，线上实测要多出约 2 秒。
+            // 商品编码在直连路径下已由健康探测保证无重复，聚集索引不要求唯一，避免异常数据让整段失败。
+            // 无筛选沿用启动时缓存的全量数与原有的主档覆盖索引读取，SQL 保持不变。
+            var productFromSql = hasProductFilter
+                ? "[#LSPSA_Filtered] AS [product]"
+                : @"[dbo].[Product] AS [product]
+        WITH (INDEX([IX_LSPSA_Product_ProductCode_UUID]))";
+            var productEligibleSql = hasProductFilter
+                ? "[product].[ProductCode] IS NOT NULL"
+                : @"[product].[IsDeleted] = 0
+      AND [product].[IsActive] = 1
+      AND [product].[ProductCode] IS NOT NULL
+      AND [product].[ProductCode] <> N''
+      AND [product].[LocalSupplierCode] IS NOT NULL
+      AND [product].[LocalSupplierCode] <> N''";
+            var filteredProductSql = hasProductFilter
+                ? $@"SELECT
+    [product].[UUID],
+    [product].[ProductCode],
+    [product].[ItemNumber],
+    [product].[Barcode],
+    [product].[ProductName],
+    [product].[ProductImage],
+    [product].[WarehouseCategoryGUID],
+    [product].[LocalSupplierCode]
+INTO [#LSPSA_Filtered]
+FROM [dbo].[Product] AS [product]
+    WITH (INDEX([IX_LSPSA_Product_ProductCode_UUID]))
+WHERE [product].[IsDeleted] = 0
+  AND [product].[IsActive] = 1
+  AND [product].[ProductCode] IS NOT NULL
+  AND [product].[ProductCode] <> N''
+  AND [product].[LocalSupplierCode] IS NOT NULL
+  AND [product].[LocalSupplierCode] <> N''
+  {productFilterSql};
+
+CREATE CLUSTERED INDEX [IX_LSPSA_TempFiltered_Product]
+    ON [#LSPSA_Filtered] ([ProductCode])
+    WITH (MAXDOP = 1);
+DECLARE @__lspsaEligibleProductCount int = (SELECT COUNT(1) FROM [#LSPSA_Filtered]);
+"
+                : string.Empty;
             var stores = NormalizeStoreScopeForQuery(scopedStoreCodes);
             var storeParameterNames = stores is null
                 ? new List<string>()
@@ -1674,6 +1784,7 @@ CREATE UNIQUE CLUSTERED INDEX [IX_LSPSA_TempPurchase_Product]
     WITH (MAXDOP = 1);
 DECLARE @__lspsaPurchaseIndexedAt datetime2(7) = SYSUTCDATETIME();
 
+{filteredProductSql}
 SELECT TOP (0)
     [product].[UUID],
     [product].[ProductCode],
@@ -1712,15 +1823,9 @@ LEFT JOIN [#LSPSA_Sales] AS [sales]
                 [product].[UUID] ASC
         ) AS [PageOrder]
     FROM [#LSPSA_Sales] AS [sales]
-    INNER JOIN [dbo].[Product] AS [product]
-        WITH (INDEX([IX_LSPSA_Product_ProductCode_UUID]))
+    INNER JOIN {productFromSql}
         ON [sales].[ProductCode] = [product].[ProductCode]
-    WHERE [product].[IsDeleted] = 0
-      AND [product].[IsActive] = 1
-      AND [product].[ProductCode] IS NOT NULL
-      AND [product].[ProductCode] <> N''
-      AND [product].[LocalSupplierCode] IS NOT NULL
-      AND [product].[LocalSupplierCode] <> N''
+    WHERE {productEligibleSql}
       AND [sales].[NetSalesQuantity] > 0
 )
 INSERT INTO [#LSPSA_Page]
@@ -1752,16 +1857,10 @@ BEGIN
                     [product].[ProductCode] ASC,
                     [product].[UUID] ASC
             ) AS [PageOrder]
-        FROM [dbo].[Product] AS [product]
-            WITH (INDEX([IX_LSPSA_Product_ProductCode_UUID]))
+        FROM {productFromSql}
         LEFT JOIN [#LSPSA_Sales] AS [sales]
             ON [sales].[ProductCode] = [product].[ProductCode]
-        WHERE [product].[IsDeleted] = 0
-          AND [product].[IsActive] = 1
-          AND [product].[ProductCode] IS NOT NULL
-          AND [product].[ProductCode] <> N''
-          AND [product].[LocalSupplierCode] IS NOT NULL
-          AND [product].[LocalSupplierCode] <> N''
+        WHERE {productEligibleSql}
     )
     INSERT INTO [#LSPSA_Page]
     SELECT *
@@ -1782,18 +1881,12 @@ SELECT
     @__lspsaPurchaseAmount = ISNULL(SUM([purchase].[PurchaseAmount]), 0),
     @__lspsaNetSalesQuantity = ISNULL(SUM([sales].[NetSalesQuantity]), 0),
     @__lspsaNetSalesAmount = ISNULL(SUM([sales].[NetSalesAmount]), 0)
-FROM [dbo].[Product] AS [product]
-    WITH (INDEX([IX_LSPSA_Product_ProductCode_UUID]))
+FROM {productFromSql}
 LEFT MERGE JOIN [#LSPSA_Sales] AS [sales]
     ON [sales].[ProductCode] = [product].[ProductCode]
 LEFT MERGE JOIN [#LSPSA_Purchase] AS [purchase]
     ON [purchase].[ProductCode] = [product].[ProductCode]
-WHERE [product].[IsDeleted] = 0
-  AND [product].[IsActive] = 1
-  AND [product].[ProductCode] IS NOT NULL
-  AND [product].[ProductCode] <> N''
-  AND [product].[LocalSupplierCode] IS NOT NULL
-  AND [product].[LocalSupplierCode] <> N'';
+WHERE {productEligibleSql};
 
 DECLARE @__lspsaTotalsAggregatedAt datetime2(7) = SYSUTCDATETIME();
 
@@ -1869,11 +1962,46 @@ ORDER BY [page].[PageOrder] ASC;";
                     System.Data.DbType.Int32
                 );
                 AddParameter("@__lspsaPageSize", pageSize, System.Data.DbType.Int32);
-                AddParameter(
-                    "@__lspsaEligibleProductCount",
-                    _directEligibleProductCount,
-                    System.Data.DbType.Int32
-                );
+                if (!hasProductFilter)
+                {
+                    AddParameter(
+                        "@__lspsaEligibleProductCount",
+                        _directEligibleProductCount,
+                        System.Data.DbType.Int32
+                    );
+                }
+                for (var index = 0; index < supplierCodes.Count; index++)
+                {
+                    AddParameter(
+                        supplierParameterNames[index],
+                        supplierCodes[index],
+                        System.Data.DbType.String
+                    );
+                }
+                for (var index = 0; index < categoryGuids.Count; index++)
+                {
+                    AddParameter(
+                        categoryParameterNames[index],
+                        categoryGuids[index],
+                        System.Data.DbType.String
+                    );
+                }
+                for (var index = 0; index < supplierCategoryGuids.Count; index++)
+                {
+                    AddParameter(
+                        supplierCategoryParameterNames[index],
+                        supplierCategoryGuids[index],
+                        System.Data.DbType.String
+                    );
+                }
+                for (var index = 0; index < supplierCategoryWarehouseGuids.Count; index++)
+                {
+                    AddParameter(
+                        supplierCategoryWarehouseParameterNames[index],
+                        supplierCategoryWarehouseGuids[index],
+                        System.Data.DbType.String
+                    );
+                }
                 if (stores is not null)
                 {
                     for (var index = 0; index < stores.Count; index++)
@@ -3812,6 +3940,28 @@ WHERE [product].[IsDeleted] = 0
                     selection.ExcludedProductCodes
                 ).Count == 0
                 && IsProductFilterEmpty(request.Filter);
+        }
+
+        /// <summary>
+        /// SQL Server 快速汇总可承接的选择：全选且无排除，商品筛选只含供应商/仓库分类/供应商分类。
+        /// 关键词与单据关键字仍走通用路径。
+        /// </summary>
+        private static bool IsFastSqlServerSummarySelection(
+            LocalSupplierProductSalesAnalysisRequest request
+        )
+        {
+            var selection = request.Selection;
+            var filter = request.Filter;
+            return string.Equals(
+                    selection.Mode,
+                    "allFiltered",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && LocalSupplierProductSalesAnalysisLogic.NormalizeCodes(
+                    selection.ExcludedProductCodes
+                ).Count == 0
+                && string.IsNullOrWhiteSpace(filter.Keyword)
+                && string.IsNullOrWhiteSpace(filter.DocumentKeyword);
         }
 
         private static bool IsProductFilterEmpty(
