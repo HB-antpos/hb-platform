@@ -1,0 +1,131 @@
+{
+  "hub": {
+    "title": "People",
+    "tabs": {
+      "people": "People",
+      "roles": "Roles",
+      "permissions": "Permissions"
+    },
+    "noAccessTitle": "No access to people management",
+    "noAccessDescription": "This account cannot view people, roles or permissions."
+  },
+  "subtitle": {
+    "storeManageable": "{{name}} {{code}} · You manage this store",
+    "storeViewOnly": "{{name}} {{code}} · View only",
+    "allStores": "All assigned stores · View only",
+    "adminAll": "All stores · {{count}} people",
+    "adminAllNoCount": "All stores",
+    "roles": "Roles · {{count}}",
+    "permissions": "Permissions · {{count}} · {{categories}} categories"
+  },
+  "search": {
+    "staff": "Search name, username or phone",
+    "admin": "Search name, username, email or phone",
+    "roles": "Search roles",
+    "permissions": "Search permission name or code"
+  },
+  "statusChips": {
+    "all": "All",
+    "active": "Active",
+    "disabled": "Disabled",
+    "pendingFirstLogin": "First login pending",
+    "cannotLogin": "Cannot sign in",
+    "noEmail": "No email"
+  },
+  "tags": {
+    "pendingFirstLogin": "First login pending",
+    "cannotLogin": "Cannot sign in",
+    "noEmail": "No email · cannot recover password",
+    "disabled": "Disabled"
+  },
+  "row": {
+    "you": "You"
+  },
+  "storeChip": {
+    "all": "All stores"
+  },
+  "empty": {
+    "filteredTitle": "No matching people",
+    "filteredDescription": "Try a different status filter."
+  },
+  "batch": {
+    "selected": "{{count}} selected"
+  },
+  "storeSheet": {
+    "title": "Switch store",
+    "subtitle": "Only stores you are linked to and that have POS enabled",
+    "allCaption": "View only, cannot add",
+    "allCaptionWithCount": "{{count}} people · View only, cannot add",
+    "peopleCount": "{{count}} people",
+    "viewOnlyNotice": "Stores marked \"View only\" let you browse staff, but not add, edit, disable or reset passwords."
+  },
+  "admin": {
+    "noAccess": "This session cannot access the people list",
+    "empty": "No matching people",
+    "create": "Add account",
+    "filterStore": "Store: {{value}}",
+    "filterRole": "Role: {{value}}",
+    "countSuffix": " people",
+    "endOfList": "All {{count}} people shown",
+    "status": {
+      "all": "All",
+      "active": "Active",
+      "inactive": "Disabled"
+    },
+    "sort": {
+      "lastLoginAt": "Last login",
+      "username": "Username",
+      "fullName": "Name"
+    }
+  },
+  "adminStores": {
+    "all": "All stores",
+    "none": "No stores",
+    "manage": "{{name}} (manages)",
+    "view": "{{name}} (view)"
+  },
+  "login": {
+    "justNow": "Just signed in",
+    "minutes": "{{count}} min ago",
+    "hours": "{{count}} h ago",
+    "yesterday": "Yesterday",
+    "days": "{{count}} days ago",
+    "months": "{{count}} months ago",
+    "years": "{{count}} years ago",
+    "never": "Never signed in"
+  },
+  "sheet": {
+    "title": "Filter and sort",
+    "reset": "Reset",
+    "store": "Store",
+    "role": "Role",
+    "status": "Status",
+    "sort": "Sort",
+    "all": "All",
+    "apply": "Show {{count}} people",
+    "applyUnknown": "Show results",
+    "optionsFailed": "Could not load the filter options. Try again."
+  },
+  "rolesList": {
+    "noAccess": "This session cannot access the role list",
+    "empty": "No roles yet",
+    "add": "Add role",
+    "memberCount": "{{count}} people",
+    "derivedHint": "Derived from stores you manage",
+    "tags": {
+      "system": "System",
+      "derived": "Derived",
+      "disabled": "Disabled"
+    }
+  },
+  "permList": {
+    "noAccess": "This session cannot access the permission list",
+    "empty": "No matching permissions",
+    "add": "Add permission",
+    "all": "All",
+    "system": "System",
+    "custom": "Custom",
+    "roleCount": "{{count}} roles",
+    "roleCountUnavailable": "Role counts unavailable"
+  }
+}

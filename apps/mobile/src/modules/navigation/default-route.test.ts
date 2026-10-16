@@ -2,6 +2,8 @@ import {
   getVisibleTabRouteNames,
   expandAttendanceRouteNames,
   filterAccountTabRouteNames,
+  isLegacyPeopleRouteName,
+  LEGACY_PEOPLE_ROUTE_NAMES,
   resolveDefaultTabRoute,
   resolvePreferredDefaultTabRoute,
   resolveTabRouteCorrection,
@@ -172,6 +174,37 @@ assertEqual(
   "workbench,users,settings",
   "设备模式必须隐藏全局用户与角色管理，但保留既有门店员工流程"
 );
+
+// 「人员管理」合并：旧的三个入口只剩重定向壳，Shell 纠偏不能抢在页面重定向前把深链弹回默认页。
+for (const legacyRoute of LEGACY_PEOPLE_ROUTE_NAMES) {
+  assertEqual(
+    isLegacyPeopleRouteName(legacyRoute),
+    true,
+    `${legacyRoute} 是人员管理合并前的旧入口`
+  );
+  assertEqual(
+    resolveTabRouteCorrection({
+      currentRouteName: legacyRoute,
+      hasAppliedDefaultRoute: true,
+      isDeviceMode: false,
+      routeNames: ["users", "settings"],
+    }),
+    null,
+    `${legacyRoute} 不在可见菜单里时也要让页面先重定向到人员管理`
+  );
+  assertEqual(
+    resolveTabRouteCorrection({
+      currentRouteName: legacyRoute,
+      hasAppliedDefaultRoute: true,
+      isDeviceMode: true,
+      routeNames: ["users", "settings"],
+    }),
+    null,
+    `设备模式下 ${legacyRoute} 同样先重定向，Hub 里没有管理员页签`
+  );
+}
+assertEqual(isLegacyPeopleRouteName("users"), false, "users 是新的合并入口，不是旧入口");
+assertEqual(isLegacyPeopleRouteName(undefined), false, "缺省不是旧入口");
 
 assertEqual(
   resolveTabRouteCorrection({

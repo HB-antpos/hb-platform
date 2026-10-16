@@ -4,8 +4,26 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
+// 「人员管理」合并后，原 users/index.tsx 的店员列表逻辑迁到 store-staff-list.tsx（本测试里的 source 指它），
+// users/index.tsx 只剩渲染 Hub 的薄路由文件。
 const source = readFileSync(
+  resolve(currentDirectory, "store-staff-list.tsx"),
+  "utf8"
+);
+const indexRouteSource = readFileSync(
   resolve(currentDirectory, "../../../app/(shell)/users/index.tsx"),
+  "utf8"
+);
+const hubSource = readFileSync(
+  resolve(currentDirectory, "../people/people-hub-screen.tsx"),
+  "utf8"
+);
+const personRowSource = readFileSync(
+  resolve(currentDirectory, "../people/person-list-row.tsx"),
+  "utf8"
+);
+const storeSheetSource = readFileSync(
+  resolve(currentDirectory, "store-switch-sheet.tsx"),
   "utf8"
 );
 const createSource = readFileSync(
@@ -36,24 +54,27 @@ assert.match(
   /const selectedStoreCanManageUsers =\s*\(canCreateUsers \|\| canEditUsers \|\| canResetPasswords\) &&/,
   "只具备创建或重置权限时，可管理分店不应显示为只读"
 );
-assert.match(
-  source,
-  /const canResetUserPassword = useCallback/,
-  "密码重置必须使用独立的分店权限判断"
-);
-assert.match(
-  source,
-  /disabled=\{!moreUser \|\| !canResetUserPassword\(moreUser\)\}/,
-  "密码重置按钮必须按 Users.ResetPassword 独立禁用"
-);
+// 重置密码 / 编辑 / 停用 已随「更多操作」弹窗迁到详情页（P2）与编辑页（P3）：
+// 列表页不再有 canResetUserPassword、「更多操作」弹窗、编辑弹窗、重置密码弹窗、停用 Alert。
+// 这些保证（Users.ResetPassword 独立判断、setupEmailMutation 发邮件、脱敏日志等）由详情页 / 编辑页的契约接管。
+assert.doesNotMatch(source, /moreUser|setMoreUser|dots-vertical/, "列表页不再有「更多操作」弹窗");
+assert.doesNotMatch(source, /StaffPasswordSetupDialog|resetPasswordVisible/, "重置密码弹窗已迁到详情页");
+assert.doesNotMatch(source, /Alert\.alert|statusMutation/, "停用确认已迁到详情页");
+assert.doesNotMatch(source, /updateMutation|Dialog\.Title|dialogs\.editTitle/, "编辑弹窗已迁到编辑页");
 assert.match(createSource, /createMutation/, "新建页必须接入创建 mutation");
-assert.match(source, /onPress=\{openCreatePage\}/, "标题区必须提供新增店员入口");
+assert.match(source, /onPress=\{openCreatePage\}/, "必须提供悬浮的新增店员入口");
 assert.match(source, /pathname: "\/users\/new"/, "新增入口必须进入整页新建员工");
 assert.match(
   source,
-  /disabled=\{!selectedStoreCanCreate \|\| isBusy\}/,
-  "未选择可管理分店时必须禁用新增入口"
+  /canCreateUsers && selectedStoreCanCreate \?[\s\S]{0,260}<FloatingAction label=\{t\("actions\.create"\)\}/,
+  "只有可管理的明确分店才显示新增入口（全部已分配分店 / 仅查看的分店隐藏）"
 );
+assert.match(
+  source,
+  /if \(!managedStoreCode \|\| !selectedStoreCanCreate\) \{[\s\S]{0,120}messages\.selectManageableStoreFirst/,
+  "新增前仍要二次检查：必须选中且可管理的分店，否则提示"
+);
+assert.match(source, /params: \{ storeCode: managedStoreCode \}/, "新增必须带上当前可管理分店");
 assert.match(source, /t\("actions\.create"\)/, "新增入口必须使用本地化文案");
 assert.match(createSource, /t\("dialogs\.createTitle"\)/, "新建页必须使用创建标题");
 assert.doesNotMatch(createSource, /password:/, "新建页不得提交任何密码，员工用邮件验证码自己设置");
@@ -66,20 +87,12 @@ assert.match(createSource, /t\("create\.submit"\)/, "新建页主按钮必须显
 assert.match(createSource, /t\("create\.successHeadline"\)/, "创建成功必须给出明确反馈");
 assert.match(createSource, /t\("create\.inviteSent"/, "创建成功页必须显示初始密码邮件的发送状态");
 assert.match(createSource, /resendInvite/, "邮件没发出时店长必须能重发");
-assert.match(source, /setupEmailMutation\.mutateAsync/, "店长重置密码必须改为发送设置密码邮件");
 assert.match(createSource, /validateNewStaffPhone\(phone, t\)/, "新建时必须校验澳洲手机号");
 assert.doesNotMatch(source, /createMutation/, "列表页不再承载创建表单");
-for (const screenSource of [source, createSource]) {
-  assert.match(
-    screenSource,
-    /console\.warn\("\[store-users\] save failed", toSafeStoreUserErrorLog\(error\)\)/,
-    "创建或编辑失败只能记录脱敏后的错误元数据"
-  );
-}
 assert.match(
-  source,
-  /console\.warn\("\[store-users\] password reset failed", toSafeStoreUserErrorLog\(error\)\)/,
-  "密码重置失败只能记录脱敏后的错误元数据"
+  createSource,
+  /console\.warn\("\[store-users\] save failed", toSafeStoreUserErrorLog\(error\)\)/,
+  "创建失败只能记录脱敏后的错误元数据"
 );
 assert.doesNotMatch(
   source,
@@ -88,8 +101,16 @@ assert.doesNotMatch(
 );
 assert.match(source, /testID="compact-staff-row"/, "员工列表必须使用紧凑行布局");
 assert.doesNotMatch(source, /lastLoginIpValue/, "低频登录 IP 不应继续占用员工列表首屏");
-assert.match(source, /statusAllCount/, "状态筛选必须显示计数");
-assert.match(source, /statusPendingFirstLoginCount/, "状态筛选必须包含待首次登录");
+assert.match(source, /countStaffStatuses\(users\)/, "状态筛选必须显示计数");
+assert.match(source, /count: statusCounts\[key\]/, "每个状态芯片都要带计数");
+assert.match(source, /statusChips\.pendingFirstLogin/, "状态筛选必须包含待首次登录");
+assert.match(source, /statusChips\.cannotLogin/, "状态筛选必须包含不能登录");
+assert.match(source, /statusChips\.noEmail/, "状态筛选必须保留无邮箱");
+assert.match(
+  source,
+  /useStoreUsers\(\s*canViewUsers \? \(isDeviceMode \? deviceBoundStoreCode : managedStoreCode\) : undefined,\s*""\s*\)/,
+  "搜索在客户端做：服务端永远取该分店全部店员，不再把关键词发给服务端（昵称、姓名各段才搜得到）"
+);
 assert.match(source, /StaffBarcodeDialog/, "员工行必须接入单人个人码弹层");
 assert.match(source, /StaffBarcodeBatchDialog/, "可管理的明确分店必须接入批量打印弹层");
 assert.match(source, /!isDeviceMode && canEditUsers && managedStoreCode/, "纯设备模式或无编辑权限不得显示批量写入口");
@@ -103,7 +124,7 @@ assert.match(
   "员工列表可见性必须是 ViewStoreStaff 或 View"
 );
 const roleMenuCatalogSource = readFileSync(resolve(currentDirectory, "../identity-admin/role-menu-catalog.ts"), "utf8");
-assert.match(roleMenuCatalogSource, /\["users", "Users", "[^"]+", \["Users\.ViewStoreStaff"\]\]/, "users 路由必须认 Users.ViewStoreStaff");
+assert.match(roleMenuCatalogSource, /\["users", "People management", "人员管理", \["Users\.ViewStoreStaff"\]\]/, "users 路由（人员管理）必须认 Users.ViewStoreStaff");
 assert.match(roleMenuCatalogSource, /\["user-admin", "User management", "用户管理", \["Users\.View"\]\]/, "user-admin 仍然是 Users.View");
 const iosReviewMenuSource = readFileSync(resolve(currentDirectory, "../ios-review/menu.ts"), "utf8");
 assert.match(iosReviewMenuSource, /routeName: "users"[^}]*permission: "Users\.ViewStoreStaff"/, "审核模式菜单的 users 必须同步新权限码");
@@ -112,11 +133,42 @@ assert.match(iosReviewMenuSource, /routeName: "users"[^}]*permission: "Users\.Vi
 assert.match(source, /t\("list\.me"\)/, "列表必须有「我」分组");
 assert.match(source, /t\("list\.staffSection"/, "列表必须有「店员」分组标题");
 assert.match(source, /t\("list\.onlyStaffNote"\)/, "列表底部必须说明不显示其他店长");
-assert.match(source, /t\("list\.meBadge"\)/, "本人行必须带「我」标签");
+assert.match(personRowSource, /item\.isSelf \? <PeopleTag label=\{t\("row\.you"\)\}/, "本人行必须带「你」标签");
 assert.match(source, /onPress=\{isSelf \? undefined :/, "本人行不得进入员工详情");
-assert.match(source, /canUseBarcode = !isSelf && canManageUserBarcode\(item\)/, "本人行不得出现个人码入口");
-assert.match(source, /\{isSelf \? null : \(\s*<IconButton/, "本人行不得出现更多操作（编辑/停用/重置密码）");
-assert.match(source, /storeCode: resolveUserStoreCode\(user\) \?\? ""/, "进入权限页必须带上所属分店，供复制权限列出同事");
+assert.match(source, /canUseBarcode = !isSelf && canManageUserBarcode\(user\)/, "本人行不得出现个人码入口");
+assert.match(source, /right=\{\s*isSelf \? undefined : \(/, "本人行右侧不得出现个人码 / 进入详情的箭头");
+assert.match(source, /pathname: "\/users\/\[userGuid\]"/, "点整行必须进入统一详情页");
+assert.match(source, /storeCode: targetStoreCode/, "进入详情必须带上所属分店，供详情页按 userGuid 拉取目标与复制权限列出同事");
+assert.match(
+  source,
+  /userName: resolvePersonName\(user\)\.primary,[\s\S]{0,160}roleNames: user\.roleNames\.join\("\|"\)/,
+  "旧的预填参数（userName / username / targetStatus / roleNames）继续传，只作首屏占位"
+);
+assert.match(source, /toggleSelection\(user\.userGUID\)/, "批量打印多选必须保留");
+assert.match(source, /setBarcodeUser\(user\)/, "右侧二维码图标必须打开单人个人码弹层");
+
+// Hub：页签门禁、URL 驱动页签、审核模式不挂载管理员列表。
+assert.match(indexRouteSource, /PeopleHubScreen/, "users/index.tsx 只渲染 Hub");
+assert.doesNotMatch(indexRouteSource, /useStoreUsers|StaffBarcode/, "users/index.tsx 不再承载列表逻辑");
+assert.match(hubSource, /useIdentitySession\("Roles\.View"\)/, "角色 / 权限页签必须使用 Roles.View 的入口门禁");
+assert.match(hubSource, /useIdentitySession\("Users\.View"\)/, "管理员版人员列表必须使用 Users.View + account 会话门禁");
+assert.match(hubSource, /canViewRolesAndPermissions: rolesGate\.allowed/, "只有通过门禁的账号才显示角色 / 权限页签");
+assert.match(hubSource, /router\.setParams\(\{ tab: next \}\)/, "页签状态必须写进 URL，详情页返回时保持页签");
+assert.match(hubSource, /normalizeHubTab\(tab, tabs\)/, "非法或无权限的 tab 必须回落");
+assert.match(hubSource, /access\.hasPermission\(PERMISSIONS\.Users\.ViewStoreStaff\)/, "人员页签仍认 Users.ViewStoreStaff（与 Users.View 并列，不收敛成单个码）");
+assert.match(hubSource, /listMode === "admin" \?[\s\S]{0,120}<AdminUserList[\s\S]{0,120}<StoreStaffList/, "管理员走全局用户列表，其余走本店店员列表");
+assert.match(hubSource, /renders\("roles"\)[\s\S]{0,200}<RolesList[\s\S]{0,200}renders\("permissions"\)[\s\S]{0,200}<PermissionsList/, "角色 / 权限面板只在页签可见且访问过时才挂载（审核模式不会挂载，也就不发管理员请求）");
+
+// 切换分店弹层：POS 启用候选 + 设备绑定模式不给「全部」，可管理判断来自原始分店集合。
+assert.match(
+  source,
+  /<StoreSwitchSheet[\s\S]{0,260}stores=\{posEnabledStores\}[\s\S]{0,180}includeAllOption=\{!deviceBoundStoreCode\}/,
+  "切换分店弹层必须使用 POS 启用候选，并在设备绑定模式禁用全部分店选项"
+);
+assert.match(source, /manageableStores=\{manageableStores\}/, "可管理 / 仅查看必须按原始可管理分店集合判断");
+assert.match(storeSheetSource, /isStoreManageable\(store\.storeCode, manageableStores\)/, "每家分店标出可管理 / 仅查看");
+assert.match(storeSheetSource, /currentStore\.manageableBadge/, "弹层必须有「可管理」标记");
+assert.match(storeSheetSource, /currentStore\.viewOnlyBadge/, "弹层必须有「仅查看」标记");
 
 // 复制权限：入口、保护与确认流程。
 const accessScreenSource = readFileSync(resolve(currentDirectory, "access-management-screen.tsx"), "utf8");

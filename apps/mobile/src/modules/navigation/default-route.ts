@@ -1,5 +1,15 @@
 import { filterLegacyFaceRouteNames, isLegacyFaceRouteName } from "./face-hub";
 
+/**
+ * 「人员管理」合并前的三个入口：用户管理 / 角色管理 / 权限管理。路由文件保留为重定向壳（旧版 App、推送、书签仍可能指向它们），
+ * 页面自己会重定向到 /users?tab=…；它们不再是工作台入口，也不能因为「不在可见菜单里」被 Shell 纠偏抢先弹回默认页。
+ */
+export const LEGACY_PEOPLE_ROUTE_NAMES = ["user-admin", "roles", "permissions"] as const;
+
+export function isLegacyPeopleRouteName(routeName: string | undefined): boolean {
+  return (LEGACY_PEOPLE_ROUTE_NAMES as readonly string[]).includes(routeName ?? "");
+}
+
 export type AppTabPath =
   | "/(shell)/workbench"
   | "/(shell)/home"
@@ -297,6 +307,12 @@ export function resolveTabRouteCorrection({
   if (isLegacyFaceRouteName(currentRouteName)) {
     // 旧三个人脸比对路由只是跳转壳：页面自己会重定向到 face-hub 对应页签，纠偏交给合并页
     // （没有权限时由合并页的可见性判断退回默认入口）。这里不能按「不在可见集合」直接纠偏，否则会抢在重定向之前把深链弹回默认页。
+    return null;
+  }
+
+  if (isLegacyPeopleRouteName(currentRouteName)) {
+    // 同上：旧的用户 / 角色 / 权限管理路由只是重定向壳，由页面跳到「人员管理」Hub 对应页签；
+    // 没有对应权限的账号在 Hub 里会回落到「人员」页签，而不是被纠偏到默认页。
     return null;
   }
 

@@ -72,11 +72,11 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
     items: [
       { routeName: "attendance-personal", labelKey: "routes.attendancePersonal", icon: "clock-check-outline" },
       { routeName: "attendance-management", labelKey: "routes.attendanceManagement", icon: "calendar-edit" },
+      // 「人员管理」合并入口（路由名 users）：原「员工列表 / 用户管理 / 角色管理 / 权限管理」四个入口合成一个，
+      // 进去后是「人员 / 角色 / 权限」页签（角色、权限只有满足 Roles.View 门禁的账号才有，见 people/people-hub-tabs.ts）。
+      // user-admin / roles / permissions 三个路由名保留为重定向壳（旧版 App、推送、书签仍可能指向它们），不再作为工作台入口。
       { routeName: "users", labelKey: "routes.users", icon: "account-group-outline" },
-      { routeName: "user-admin", labelKey: "routes.userAdmin", icon: "account-cog-outline" },
       { routeName: "cash-register-users", labelKey: "routes.cashRegisterUsers", icon: "barcode" },
-      { routeName: "roles", labelKey: "routes.roles", icon: "shield-account-outline" },
-      { routeName: "permissions", labelKey: "routes.permissions", icon: "key-outline" },
       { routeName: "employee-profile", labelKey: "routes.employeeProfile", icon: "card-account-details-outline" },
       { routeName: "employee-profile-review", labelKey: "routes.employeeProfileReview", icon: "account-check-outline" },
       // 人脸比对：抓拍 / 名单 / 设置三个页签合并成一个入口（持有其中任一权限即显示，页签与区域仍按各自权限，见后端 FullAppMenu）。
