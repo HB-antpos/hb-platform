@@ -539,9 +539,16 @@ namespace BlazorApp.Api.Services
                     .Take(query.PageSize)
                     .ToList();
 
+                // 登录限制只查分页后的这一页（一条 IN 查询），列表里据此标出「不能登录」的账号。
+                var restrictedGuids = await UserLoginRestrictions.GetRestrictedUserGuidsAsync(
+                    _context.Db,
+                    pagedUsers.Select(item => item.UserGUID).ToList()
+                );
+
                 // 为分页后的用户添加角色和分店信息
                 foreach (var user in pagedUsers)
                 {
+                    user.LoginEnabled = !restrictedGuids.Contains(user.UserGUID);
                     user.RoleNames = roleDict
                         .GetValueOrDefault(user.UserGUID, new HashSet<string>())
                         .ToList();
@@ -886,6 +893,7 @@ namespace BlazorApp.Api.Services
                     IsActive = user.IsActive,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt ?? user.CreatedAt,
+                    LoginEnabled = !await UserLoginRestrictions.IsRestrictedAsync(db, user.UserGUID),
                 };
 
                 // 获取用户角色详情
@@ -1759,6 +1767,110 @@ namespace BlazorApp.Api.Services
             {
                 _logger.LogError(ex, "更新用户状态失败，UserGUID: {UserGUID}", userGuid);
                 return ApiResponse<bool>.Error("更新用户状态失败", "UPDATE_USER_STATUS_FAILED");
+            }
+        }
+
+        /// <summary>
+        /// 管理员开关某账号「允许登录 Web / App」（写入 / 删除 UserLoginRestriction）。
+        /// 与「启用 / 停用账号」是两回事：停用 = 账号作废；不允许登录 = 账号保留，但任何人都登不进来。
+        /// 关闭后已持有的会话也会失效（AuthSessionValidator 对被限制账号 fail closed）。
+        /// </summary>
+        public async Task<ApiResponse<bool>> UpdateUserLoginEnabledByGuidAsync(
+            string userGuid,
+            bool loginEnabled
+        )
+        {
+            var db = _context.Db;
+            try
+            {
+                await db.Ado.BeginTranAsync(IsolationLevel.Serializable);
+                try
+                {
+                    var user = await db.Queryable<User>()
+                        .Where(u => u.UserGUID == userGuid && !u.IsDeleted)
+                        .FirstAsync();
+                    if (user == null)
+                    {
+                        await db.Ado.RollbackTranAsync();
+                        return ApiResponse<bool>.Error("用户不存在", "USER_NOT_FOUND");
+                    }
+
+                    // 目标保护沿用「启用 / 停用」同一套口径（店长不能动其他分店 / 高权限账号）。
+                    var targetDecision = await ValidateUserProfileMutationTargetAsync(
+                        db,
+                        userGuid,
+                        allowSelf: false
+                    );
+                    if (!targetDecision.IsAllowed)
+                    {
+                        await db.Ado.RollbackTranAsync();
+                        return ApiResponse<bool>.Error(
+                            targetDecision.Message,
+                            targetDecision.ErrorCode
+                        );
+                    }
+
+                    var actor = await UserAccessMutationSecurity.ResolveActorAsync(
+                        db,
+                        _manageableStoreScopeService
+                    );
+                    // 关键逻辑：上面的校验对超级管理员「不额外收窄」（含本人）。关闭本人登录会把操作者自己锁在
+                    // 系统外且没有任何界面能解开，所以不管谁操作，都不允许关闭本人账号的登录权限。
+                    if (!loginEnabled
+                        && actor.UserGuid.Equals(userGuid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await db.Ado.RollbackTranAsync();
+                        return ApiResponse<bool>.Error(
+                            "不能关闭本人账号的登录权限",
+                            "SELF_PROFILE_FIELDS_DENIED"
+                        );
+                    }
+
+                    var actorName = string.IsNullOrWhiteSpace(actor.UserGuid)
+                        ? null
+                        : await db.Queryable<User>()
+                            .Where(u => u.UserGUID == actor.UserGuid)
+                            .Select(u => u.Username)
+                            .FirstAsync();
+                    var now = DateTime.UtcNow;
+                    if (loginEnabled)
+                    {
+                        await UserLoginRestrictions.AllowAsync(db, userGuid);
+                    }
+                    else
+                    {
+                        await UserLoginRestrictions.RestrictAsync(db, userGuid, actorName, now);
+                    }
+                    await db.Updateable<User>()
+                        .SetColumns(u => new User { UpdatedAt = now })
+                        .Where(u => u.UserGUID == userGuid && !u.IsDeleted)
+                        .ExecuteCommandAsync();
+                    await db.Ado.CommitTranAsync();
+
+                    _logger.LogInformation(
+                        "更新用户登录权限成功，UserGUID: {UserGUID}, LoginEnabled: {LoginEnabled}, Actor: {Actor}",
+                        userGuid,
+                        loginEnabled,
+                        actorName
+                    );
+                    return ApiResponse<bool>.OK(
+                        true,
+                        loginEnabled ? "已允许该账号登录" : "已关闭该账号的登录权限"
+                    );
+                }
+                catch
+                {
+                    await db.Ado.RollbackTranAsync();
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "更新用户登录权限失败，UserGUID: {UserGUID}", userGuid);
+                return ApiResponse<bool>.Error(
+                    "更新用户登录权限失败",
+                    "UPDATE_USER_LOGIN_ENABLED_FAILED"
+                );
             }
         }
 

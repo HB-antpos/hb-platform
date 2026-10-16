@@ -49,6 +49,7 @@ namespace BlazorApp.Api.Tests
             });
 
             _db.CodeFirst.InitTables<User, Store, UserStore, Role, UserRole>();
+            _db.CodeFirst.InitTables<UserLoginRestriction>();
             _db.CodeFirst.InitTables<SysPermission, SysRolePermission, SysUserPermission>();
             _db.CodeFirst.InitTables<SysUserStorePosPermission>();
             _db.CodeFirst.InitTables<RefreshToken>();
@@ -5173,6 +5174,88 @@ namespace BlazorApp.Api.Tests
             {
                 SqliteTempFileCleanup.DeleteIfExists(_dbPath);
             }
+        }
+
+        [Fact]
+        public async Task UpdateUserLoginEnabledByGuidAsync_AdminCanRestrictAndAllowStoreManagerAccount()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            // kevin 的情形：账号已被设成店长（员工管理列表与 store-users 接口都看不到他），管理员必须仍能改开关。
+            await _db.Insertable(CreateUser("kevin-like", "kevin-like@example.test")).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserRole("kevin-like", "role-store-manager")).ExecuteCommandAsync();
+            await _db.Insertable(CreateUserStore("kevin-like", "store-1", true)).ExecuteCommandAsync();
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var before = await service.GetUserByGuidAsync("kevin-like");
+            Assert.True(before.Success);
+            Assert.True(before.Data!.LoginEnabled);
+
+            var restricted = await service.UpdateUserLoginEnabledByGuidAsync("kevin-like", false);
+
+            Assert.True(restricted.Success);
+            var row = await _db.Queryable<UserLoginRestriction>()
+                .Where(item => item.UserGUID == "kevin-like")
+                .FirstAsync();
+            Assert.NotNull(row);
+            Assert.Equal("access-admin", row.RestrictedBy);
+            Assert.False((await service.GetUserByGuidAsync("kevin-like")).Data!.LoginEnabled);
+            var list = await service.GetUsersOptimizedAsync(new UserQueryDto { Page = 1, PageSize = 100 });
+            Assert.False(list.Data!.Items!.Single(item => item.UserGUID == "kevin-like").LoginEnabled);
+            Assert.True(list.Data.Items!.Single(item => item.UserGUID == "manager-1").LoginEnabled);
+
+            // 重复关闭幂等：不会产生第二行，也不改动原记录。
+            var again = await service.UpdateUserLoginEnabledByGuidAsync("kevin-like", false);
+            Assert.True(again.Success);
+            Assert.Equal(1, await _db.Queryable<UserLoginRestriction>().Where(item => item.UserGUID == "kevin-like").CountAsync());
+
+            var allowed = await service.UpdateUserLoginEnabledByGuidAsync("kevin-like", true);
+            Assert.True(allowed.Success);
+            Assert.Equal(0, await _db.Queryable<UserLoginRestriction>().Where(item => item.UserGUID == "kevin-like").CountAsync());
+            Assert.True((await service.GetUserByGuidAsync("kevin-like")).Data!.LoginEnabled);
+            // 本来就允许的账号再「允许」也是空操作。
+            Assert.True((await service.UpdateUserLoginEnabledByGuidAsync("kevin-like", true)).Success);
+        }
+
+        [Fact]
+        public async Task UpdateUserLoginEnabledByGuidAsync_AdminCannotRestrictSelfOrMissingUser()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            // 超级管理员不受目标保护收窄（含本人），所以「不能关闭本人登录」必须单独拦截，否则操作者会把自己锁在系统外。
+            var self = await service.UpdateUserLoginEnabledByGuidAsync("access-admin", false);
+            Assert.False(self.Success);
+            Assert.Equal("SELF_PROFILE_FIELDS_DENIED", self.ErrorCode);
+            Assert.Equal(0, await _db.Queryable<UserLoginRestriction>().CountAsync());
+
+            // 开启本人登录（本来就开着）是允许的空操作。
+            Assert.True((await service.UpdateUserLoginEnabledByGuidAsync("access-admin", true)).Success);
+
+            var missing = await service.UpdateUserLoginEnabledByGuidAsync("no-such-user", false);
+            Assert.False(missing.Success);
+            Assert.Equal("USER_NOT_FOUND", missing.ErrorCode);
+        }
+
+        [Fact]
+        public async Task UpdateUserLoginEnabledByGuidAsync_StoreManagerKeepsSameTargetProtectionAsStatus()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            await _db.Insertable(new Role { RoleGUID = "role-admin", RoleName = "Admin", IsActive = true })
+                .ExecuteCommandAsync();
+            await _db.Insertable(CreateUserRole("scoped-user", "role-admin")).ExecuteCommandAsync();
+            var service = CreateUserService(new FakeManageableStoreScopeService(new CurrentUserManageableStoreScope
+            {
+                IsAllowed = true, IsAuthenticated = true, UserGuid = "manager-1", StoreGuids = new[] { "store-1" },
+            }));
+
+            var crossStore = await service.UpdateUserLoginEnabledByGuidAsync("foreign-user", false);
+            var self = await service.UpdateUserLoginEnabledByGuidAsync("manager-1", false);
+            var privileged = await service.UpdateUserLoginEnabledByGuidAsync("scoped-user", false);
+
+            Assert.Equal("USER_SCOPE_DENIED", crossStore.ErrorCode);
+            Assert.Equal("SELF_PROFILE_FIELDS_DENIED", self.ErrorCode);
+            Assert.Equal("HIGH_PRIVILEGE_TARGET_DENIED", privileged.ErrorCode);
+            Assert.Equal(0, await _db.Queryable<UserLoginRestriction>().CountAsync());
         }
 
         private UserService CreateUserService(
