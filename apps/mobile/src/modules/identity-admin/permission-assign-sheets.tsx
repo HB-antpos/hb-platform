@@ -126,8 +126,8 @@ export function AssignRolesSheet({
   return (
     <AdminBottomSheet
       title={copy.assignRoles}
-      subtitle={`${permissionName} · ${permissionCode}`}
-      subtitleMono
+      subtitle={permissionName}
+      subtitleCode={permissionCode}
       closeLabel={copy.close}
       onDismiss={onDismiss}
       dismissable={!saving}
@@ -249,8 +249,8 @@ export function AssignUsersSheet({
   return (
     <AdminBottomSheet
       title={copy.assignUsers}
-      subtitle={`${permissionName} · ${permissionCode}`}
-      subtitleMono
+      subtitle={permissionName}
+      subtitleCode={permissionCode}
       closeLabel={copy.close}
       onDismiss={onDismiss}
       dismissable={!saving}

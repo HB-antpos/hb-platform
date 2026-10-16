@@ -1,7 +1,7 @@
 {
   "createTitle": "New role",
   "segmentProfile": "Profile",
-  "segmentPermissions": "Permissions",
+  "segmentPermissions": "Perms",
   "segmentMembers": "Members",
   "segmentMenus": "Menus",
   "membersCount": "{{count}} members",
@@ -44,7 +44,7 @@
   "menuSaveHint": "Menu switches edit the same permissions as the Permissions tab. Changes are saved together at the bottom.",
   "noMenus": "No matching menus",
 
-  "membersSearch": "Search member name, account or email",
+  "membersSearch": "Search name, account or email",
   "derivedMembersHint": "Store manager members follow the stores marked \"Manage\". They cannot be added or removed here.",
   "membersImmediateHint": "Adding or removing a member takes effect immediately and does not use the Save bar.",
 

@@ -455,7 +455,7 @@ function PermissionDetailContent({ code }: { code: string }) {
                     icon="shield-crown-outline"
                     tone="violet"
                     title={localizedRoleName(role)}
-                    subtitle={`${copy.implicitRoleHint} · ${interpolate(copy.membersCount, { count: role.userCount })}`}
+                    subtitle={interpolate(copy.membersCount, { count: role.userCount })}
                     right={<PeopleTag label={copy.implicitRole} tone="violet" icon="lock-outline" />}
                     onPress={() => router.push({ pathname: "/(shell)/roles/[roleGuid]", params: { roleGuid: role.roleGUID } })}
                   />
@@ -467,7 +467,7 @@ function PermissionDetailContent({ code }: { code: string }) {
                     icon="shield-account-outline"
                     tone="blue"
                     title={localizedRoleName(role)}
-                    subtitle={`${copy.explicitRoleHint} · ${interpolate(copy.membersCount, { count: role.userCount })}`}
+                    subtitle={interpolate(copy.membersCount, { count: role.userCount })}
                     right={role.isActive ? undefined : <PeopleTag label={copy.disabled} tone="gray" />}
                     onPress={() => router.push({ pathname: "/(shell)/roles/[roleGuid]", params: { roleGuid: role.roleGUID } })}
                   />

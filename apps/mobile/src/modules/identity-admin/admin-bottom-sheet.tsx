@@ -27,8 +27,8 @@ function useIosKeyboardHeight() {
 export interface AdminBottomSheetProps {
   title: string;
   subtitle?: string;
-  /** 副标题是权限码等需要等宽显示的内容 */
-  subtitleMono?: boolean;
+  /** 跟在副标题后面、需要等宽显示的编码（如权限码）：「营业额报表 · Reports.Revenue.View」 */
+  subtitleCode?: string;
   closeLabel: string;
   onDismiss: () => void;
   /** 保存中不允许点遮罩 / 返回键 / 关闭按钮把弹层关掉 */
@@ -54,7 +54,7 @@ export interface AdminBottomSheetProps {
 export function AdminBottomSheet({
   title,
   subtitle,
-  subtitleMono = false,
+  subtitleCode,
   closeLabel,
   onDismiss,
   dismissable = true,
@@ -88,8 +88,12 @@ export function AdminBottomSheet({
         <View style={styles.titleRow}>
           <View style={styles.heading}>
             <Text accessibilityRole="header" style={styles.title} numberOfLines={2}>{title}</Text>
-            {subtitle ? (
-              <Text style={[styles.subtitle, subtitleMono && styles.mono]} numberOfLines={1}>{subtitle}</Text>
+            {subtitle || subtitleCode ? (
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {subtitle}
+                {subtitle && subtitleCode ? " · " : ""}
+                {subtitleCode ? <Text style={styles.mono}>{subtitleCode}</Text> : null}
+              </Text>
             ) : null}
           </View>
           <IconButton
