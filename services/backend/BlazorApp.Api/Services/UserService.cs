@@ -85,7 +85,7 @@ namespace BlazorApp.Api.Services
 
                     userQuery = userQuery.Where(u => scopedUserGuids.Contains(u.UserGUID));
 
-                    var excludedHighPrivilegeGuids = await ResolveScopedHighPrivilegeUserGuidsAsync(
+                    var excludedHighPrivilegeGuids = await ResolveScopedHiddenUserGuidsAsync(
                         db
                     );
                     if (excludedHighPrivilegeGuids.Length > 0)
@@ -386,7 +386,7 @@ namespace BlazorApp.Api.Services
                             !us.IsDeleted && scopedStoreGuids.Contains(us.StoreGUID)
                     );
 
-                    var excludedHighPrivilegeGuids = await ResolveScopedHighPrivilegeUserGuidsAsync(
+                    var excludedHighPrivilegeGuids = await ResolveScopedHiddenUserGuidsAsync(
                         db
                     );
                     if (excludedHighPrivilegeGuids.Length > 0)
@@ -608,7 +608,7 @@ namespace BlazorApp.Api.Services
             );
         }
 
-        private async Task<string[]> ResolveScopedHighPrivilegeUserGuidsAsync(ISqlSugarClient db)
+        private async Task<string[]> ResolveScopedHiddenUserGuidsAsync(ISqlSugarClient db)
         {
             if (_manageableStoreScopeService == null)
             {
@@ -637,10 +637,17 @@ namespace BlazorApp.Api.Services
                     .Select((userStore, user) => userStore.UserGUID)
                     .Distinct()
                     .ToListAsync();
+            // 店长的可见范围 = 自己管理分店里「角色是店员」且不是高权限的账号 + 本人（与 store-users 店员列表同口径）：
+            // 高权限账号（管理员 / 其他店长 / 仓库经理…）和没有店员角色的账号（订货员、仓库员工、普通 User）都对店长隐藏。
             var excluded = await UserAccessMutationSecurity.GetHighPrivilegeUserGuidsAsync(
                 db,
                 candidateUserGuids
             );
+            var nonEmployee = await UserAccessMutationSecurity.GetNonEmployeeUserGuidsAsync(
+                db,
+                candidateUserGuids
+            );
+            excluded.UnionWith(nonEmployee);
 
             // 店长本人沿用原有本人读取规则，即使其账号被额外授予高权限角色也不从列表隐藏。
             return excluded
@@ -3520,7 +3527,7 @@ namespace BlazorApp.Api.Services
                         return ApiResponse<UserStatisticsDto>.OK(new UserStatisticsDto(), "获取用户统计成功");
                     }
 
-                    var excluded = await ResolveScopedHighPrivilegeUserGuidsAsync(db);
+                    var excluded = await ResolveScopedHiddenUserGuidsAsync(db);
                     visibleUserQuery = visibleUserQuery.Where(user =>
                         scopedUserGuids.Contains(user.UserGUID)
                         && !excluded.Contains(user.UserGUID)
