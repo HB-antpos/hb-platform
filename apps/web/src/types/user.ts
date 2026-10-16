@@ -60,6 +60,11 @@ export interface UserDto extends UserNameParts {
   lastLoginAt?: string
   lastLoginIp?: string
   isActive: boolean
+  /**
+   * 是否允许登录 Web / App。只有用户详情与管理员用户列表会返回；接口 JSON 省略 null，
+   * 所以缺省（undefined）表示「未查询 / 旧后端」，不等于「允许」——界面只在 === false 时标「不能登录」。
+   */
+  loginEnabled?: boolean
   createdAt: string
   updatedAt: string
   currentStore?: string

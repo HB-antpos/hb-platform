@@ -429,6 +429,41 @@ namespace BlazorApp.Api.Controllers
         }
 
         /// <summary>
+        /// 开关某账号「允许登录 Web / App」（管理员用；店长改店员的开关走 store-users 接口）
+        /// </summary>
+        [HttpPut("guid/{guid}/login-enabled")]
+        [Authorize(Policy = Permissions.Users.Edit)]
+        public async Task<IActionResult> UpdateUserLoginEnabledByGuid(
+            string guid,
+            [FromBody] UpdateUserLoginEnabledDto dto
+        )
+        {
+            try
+            {
+                if (!ModelState.IsValid || dto?.LoginEnabled is null)
+                {
+                    return BadRequest(
+                        ApiResponse<bool>.Error("请求参数验证失败", "VALIDATION_ERROR", ModelState)
+                    );
+                }
+
+                var result = await _userService.UpdateUserLoginEnabledByGuidAsync(
+                    guid,
+                    dto.LoginEnabled.Value
+                );
+                return ToUserAccessActionResult(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "更新用户登录权限失败，UserGUID: {UserGUID}", guid);
+                return StatusCode(
+                    500,
+                    ApiResponse<bool>.Error("服务器内部错误", "INTERNAL_SERVER_ERROR")
+                );
+            }
+        }
+
+        /// <summary>
         /// 更新用户密码
         /// </summary>
         [HttpPut("guid/{guid}/password")]

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import dayjs from 'dayjs'
 import {
+  LOGIN_TOGGLE_ERROR_MESSAGES,
   STALE_LOGIN_DAYS,
   countBatchStoreChanges,
+  getLoginToggleState,
   getServerErrorMessage,
   describeLastLogin,
   diffAssignmentKeys,
@@ -12,12 +14,16 @@ import {
   getUserInitial,
   getUserSecondaryLine,
   isDerivedStoreManagerRoleName,
+  isLoginRestricted,
   mergeSelectedUsers,
   planBatchRoleChange,
   pickUserNamePartFormValues,
   planBatchStatusChange,
+  planLoginToggleNotice,
+  resolveLoginToggleErrorKind,
   splitVisibleStores,
   toIsActiveQuery,
+  withLoginEnabled,
 } from './usersPageLogic'
 import type { UserDto } from '../../../types/user'
 
@@ -226,3 +232,77 @@ assert.equal(countBatchStoreChanges({
 
 assert.equal(getServerErrorMessage({ payload: { message: 'tommy：无权修改该用户' } }, '失败'), 'tommy：无权修改该用户')
 assert.equal(getServerErrorMessage(new Error('Network Error'), '失败'), '失败', '没有服务端业务消息时用通用文案')
+
+// 「允许登录」开关：只有后端明确返回 false 才标「不能登录」；缺省（旧后端 / 未查询）不显示任何东西。
+{
+  assert.equal(isLoginRestricted({ loginEnabled: false }), true, 'loginEnabled === false 才算被限制')
+  assert.equal(isLoginRestricted({ loginEnabled: true }), false)
+  assert.equal(isLoginRestricted({}), false, '缺省不能当作限制')
+  assert.equal(isLoginRestricted({ loginEnabled: null }), false, 'null 不能当作限制')
+  assert.equal(isLoginRestricted(null), false)
+  assert.equal(isLoginRestricted(undefined), false)
+
+  // 有编辑权且后端返回了值：显示开关；关闭中的账号点一下就是开启，反之亦然。
+  assert.deepEqual(
+    getLoginToggleState({ canEdit: true, loginEnabled: true, isSelf: false }),
+    { visible: true, checked: true, disabled: false, disabledReason: undefined, nextEnabled: false },
+  )
+  assert.deepEqual(
+    getLoginToggleState({ canEdit: true, loginEnabled: false, isSelf: false }),
+    { visible: true, checked: false, disabled: false, disabledReason: undefined, nextEnabled: true },
+  )
+  // 没有 Users.Edit：不显示开关（只剩标签）。
+  assert.equal(getLoginToggleState({ canEdit: false, loginEnabled: false, isSelf: false }).visible, false)
+  // 状态未知（undefined / null）：不知道当前是否允许，不显示开关，避免把「未查询」当成「允许」去点。
+  assert.equal(getLoginToggleState({ canEdit: true, loginEnabled: undefined, isSelf: false }).visible, false)
+  assert.equal(getLoginToggleState({ canEdit: true, loginEnabled: null, isSelf: false }).visible, false)
+  // 本人账号：开关仍显示但置灰，原因为 self。
+  assert.deepEqual(
+    getLoginToggleState({ canEdit: true, loginEnabled: true, isSelf: true }),
+    { visible: true, checked: true, disabled: true, disabledReason: 'self', nextEnabled: false },
+  )
+
+  // 写回新值：只改 guid 匹配的对象，其余（含 null）原样返回；不修改入参。
+  const row = { userGUID: 'u1', loginEnabled: false as boolean | undefined }
+  const patched = withLoginEnabled(row, 'u1', true)
+  assert.deepEqual(patched, { userGUID: 'u1', loginEnabled: true })
+  assert.equal(row.loginEnabled, false, '不能修改原对象')
+  assert.equal(withLoginEnabled(row, 'other', true), row, 'guid 不匹配时原样返回')
+  assert.equal(withLoginEnabled(null, 'u1', true), null)
+  assert.deepEqual(withLoginEnabled({ userGUID: 'u2' }, 'u2', false), { userGUID: 'u2', loginEnabled: false }, '原先缺省的也能写入')
+
+  // 成功提示：开启且从没登录过 → 提示还没有可用密码；开启但登录过、或关闭 → 不提示。
+  assert.deepEqual(planLoginToggleNotice(true, undefined), { result: 'allowed', showPasswordHint: true })
+  assert.deepEqual(planLoginToggleNotice(true, null), { result: 'allowed', showPasswordHint: true })
+  assert.deepEqual(planLoginToggleNotice(true, ''), { result: 'allowed', showPasswordHint: true })
+  assert.deepEqual(planLoginToggleNotice(true, 'not-a-date'), { result: 'allowed', showPasswordHint: true }, '无法解析按从未登录处理')
+  assert.deepEqual(planLoginToggleNotice(true, '2026-10-01T03:04:05'), { result: 'allowed', showPasswordHint: false })
+  assert.deepEqual(planLoginToggleNotice(false, undefined), { result: 'restricted', showPasswordHint: false }, '关闭登录不提示密码')
+  assert.deepEqual(planLoginToggleNotice(false, '2026-10-01T03:04:05Z'), { result: 'restricted', showPasswordHint: false })
+
+  // 错误码映射：后端四个业务码各有中文提示，大小写 / 首尾空白不敏感，code 字段兜底。
+  const failure = (payload: unknown, status = 400) => ({ status, payload })
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'SELF_PROFILE_FIELDS_DENIED' })), 'self')
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'USER_NOT_FOUND' }, 404)), 'notFound')
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'USER_SCOPE_DENIED' }, 403)), 'scopeDenied')
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'HIGH_PRIVILEGE_TARGET_DENIED' }, 403)), 'highPrivilege')
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: ' user_not_found ' })), 'notFound')
+  assert.equal(resolveLoginToggleErrorKind(failure({ code: 'USER_SCOPE_DENIED' })), 'scopeDenied')
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'USER_SCOPE_DENIED', code: 'OTHER' })), 'scopeDenied', 'errorCode 优先于 code')
+  // 业务码优先于 HTTP 状态；没有业务码的 403（Users.Edit 策略拒绝）归为无权限。
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'USER_SCOPE_DENIED' }, 403)), 'scopeDenied')
+  assert.equal(resolveLoginToggleErrorKind(failure(undefined, 403)), 'forbidden')
+  assert.equal(resolveLoginToggleErrorKind(failure({ message: '禁止访问' }, 403)), 'forbidden')
+  // 未知业务码、网络错误、非对象一律通用失败，且不会把原始 message 当文案。
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'UPDATE_USER_LOGIN_ENABLED_FAILED' }, 200)), 'generic')
+  assert.equal(resolveLoginToggleErrorKind(failure({ errorCode: 'constructor' })), 'generic', '原型链上的名字不能命中映射')
+  assert.equal(resolveLoginToggleErrorKind(new Error('Network Error')), 'generic')
+  assert.equal(resolveLoginToggleErrorKind(undefined), 'generic')
+  assert.equal(resolveLoginToggleErrorKind('boom'), 'generic')
+
+  // 每个错误类别都有文案键与中文兜底，且键互不重复。
+  const messages = Object.values(LOGIN_TOGGLE_ERROR_MESSAGES)
+  assert.equal(messages.length, 6)
+  assert.equal(new Set(messages.map((item) => item.key)).size, messages.length, '文案键不能重复')
+  assert.ok(messages.every((item) => item.key.startsWith('system.usersWorkspace.loginToggleError.') && item.fallback.length > 0))
+}

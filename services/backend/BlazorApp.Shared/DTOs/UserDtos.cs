@@ -114,6 +114,12 @@ namespace BlazorApp.Shared.DTOs
         public string? FamilyName { get; set; }
         /// <summary>昵称（Nickname）。</summary>
         public string? Nickname { get; set; }
+
+        /// <summary>
+        /// 是否允许登录 Web / App（false = 账号被限制登录）。只有用户详情与管理员用户列表会填充；
+        /// 其他接口为 null（不输出），表示「未查询」而不是「允许」。
+        /// </summary>
+        public bool? LoginEnabled { get; set; }
         public string? Phone { get; set; } // 兼容性
         public DateTime? LastLoginAt { get; set; }
         public string? LastLoginIp { get; set; }
@@ -157,6 +163,12 @@ namespace BlazorApp.Shared.DTOs
         public string? FamilyName { get; set; }
         /// <summary>昵称（Nickname）。</summary>
         public string? Nickname { get; set; }
+
+        /// <summary>
+        /// 是否允许登录 Web / App（false = 账号被限制登录）。只有用户详情与管理员用户列表会填充；
+        /// 其他接口为 null（不输出），表示「未查询」而不是「允许」。
+        /// </summary>
+        public bool? LoginEnabled { get; set; }
         public string? Phone { get; set; } // 兼容性
         public DateTime? LastLoginAt { get; set; }
         public string? LastLoginIp { get; set; }
@@ -334,6 +346,16 @@ namespace BlazorApp.Shared.DTOs
     public class UpdateUserStatusDto
     {
         public bool IsActive { get; set; }
+    }
+
+    /// <summary>
+    /// 管理员开关某账号「允许登录 Web / App」。字段用 bool? 并要求必填：
+    /// 漏传时按 false 处理会把账号误锁在系统外，所以缺失直接 400。
+    /// </summary>
+    public class UpdateUserLoginEnabledDto
+    {
+        [Required(ErrorMessage = "请指定是否允许登录")]
+        public bool? LoginEnabled { get; set; }
     }
 
     /// <summary>

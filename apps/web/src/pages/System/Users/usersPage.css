@@ -318,6 +318,41 @@
   background: #fffafa;
 }
 
+/* 状态列：启用 / 停用圆点在上，被限制登录时下方再跟一个橙色「不能登录」标签 */
+.users-ws-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.users-ws-login-tag.ant-tag {
+  margin-inline-end: 0;
+  padding-inline: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* 抽屉「登录权限」行：与「账号安全」同形，但中性底色；被限制时换成橙色底以提醒这个账号现在登不进来 */
+.users-ws-login-access {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.users-ws-login-access-restricted {
+  border-color: #ffd591;
+  background: #fff7e6;
+}
+
 .users-ws-tab-toolbar {
   display: flex;
   align-items: center;
