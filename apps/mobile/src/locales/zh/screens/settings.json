@@ -32,7 +32,10 @@
   },
   "floatingLanguage": {
     "title": "语言悬浮按钮",
-    "description": "每页显示可拖动的 中 / EN 按钮：点一下切换语言，按住 2 秒快速跳转。"
+    "description": "每页显示可拖动的 中 / EN 按钮：点一下切换语言，按住快速跳转。",
+    "holdTitle": "按住时长",
+    "holdDescription": "按住按钮多少秒打开快速跳转",
+    "holdOption": "{{seconds}} 秒"
   },
   "diagnostics": {
     "title": "关于与诊断",
