@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import {
+  buildCopyConfirmRows,
   buildPermissionCopyInput,
   createPermissionNameResolver,
   filterPermissionCopyCandidates,
   isPermissionCopyPreviewCurrent,
+  listCopySkippedPermissionNames,
+  resolveCopyStoreFilter,
   resolveCopyTargetName,
   summarizePermissionCopyPreview,
   togglePermissionCopySelection,
@@ -116,5 +119,83 @@ assert.equal(resolveName("Warehouse.View"), "Warehouse.View", "名称为空时�
 const names = new Map([["ben-1", "Ben Wu"]]);
 assert.equal(resolveCopyTargetName(names, "BEN-1"), "Ben Wu");
 assert.equal(resolveCopyTargetName(names, "zzz"), "zzz");
+
+// 搜索：姓 / 名 / 昵称也能命中（走 buildPersonSearchText）。
+const nameUsers: StoreUserListItem[] = [
+  user({ userGUID: "n1", fullName: "Emily Rose Chen", givenName: "Emily", middleName: "Rose", familyName: "Chen", nickname: "Em" }),
+  user({ userGUID: "n2", fullName: "王芳", givenName: "芳", familyName: "王" }),
+];
+assert.deepEqual(
+  filterPermissionCopyCandidates(nameUsers, { currentEmployeeGuid: "x", query: "em" }).map((item) => item.userGUID),
+  ["n1"],
+  "昵称 / 名可搜",
+);
+assert.deepEqual(
+  filterPermissionCopyCandidates(nameUsers, { currentEmployeeGuid: "x", query: "rose" }).map((item) => item.userGUID),
+  ["n1"],
+  "中间名可搜",
+);
+assert.deepEqual(
+  filterPermissionCopyCandidates(nameUsers, { currentEmployeeGuid: "x", query: "王" }).map((item) => item.userGUID),
+  ["n2"],
+);
+
+// 确认页逐人行：有变化的排前面，没变化的沉底；展示名按目录解析。
+const confirmNames = new Map([["ben-1", "Ben Wu"], ["cara-1", "Cara Liu"], ["dan-1", "Dan Lee"]]);
+const permissionName = createPermissionNameResolver([
+  { code: "A", name: "现金管理" },
+  { code: "Z", name: "旧权限" },
+]);
+const rows = buildCopyConfirmRows(
+  { ...preview, targets: [preview.targets[2], preview.targets[0], preview.targets[1]] },
+  (guid) => resolveCopyTargetName(confirmNames, guid),
+  permissionName,
+);
+assert.deepEqual(rows.map((row) => row.userGuid), ["ben-1", "cara-1", "dan-1"], "有变化的排前面，没变化的排最后");
+assert.deepEqual(rows[0].added, ["现金管理", "B", "C", "D"], "增加的权限用展示名，目录里没有的显示 code");
+assert.equal(rows[0].added.length, 4, "+4 的数量来自预览结果");
+assert.deepEqual(rows[1].removed, ["旧权限"], "覆盖方式下会被移除的也列出来");
+assert.equal(rows[2].noChange, true);
+assert.equal(rows[2].unchangedCount, 5, "已有全部 5 项，不变");
+assert.equal(rows[0].name, "Ben Wu");
+assert.deepEqual(listCopySkippedPermissionNames(preview, permissionName), ["F"], "被跳过的项原样列出");
+
+// 候选同事的分店范围：店长只能在自己管理的分店里选；管理员默认目标员工所属分店并可看全部分店。
+const mgrOptions = [
+  { storeCode: "B1", storeName: "Bankstown" },
+  { storeCode: "L1", storeName: "Liverpool" },
+];
+assert.deepEqual(
+  resolveCopyStoreFilter({ isAdmin: false, storeOptions: mgrOptions, targetStoreCodes: ["L1"], routeStoreCode: "" }),
+  { options: mgrOptions, initialStoreCode: "L1", allowAll: false },
+  "店长没带分店时取目标所属且自己管理的分店",
+);
+assert.equal(
+  resolveCopyStoreFilter({ isAdmin: false, storeOptions: mgrOptions, targetStoreCodes: [], routeStoreCode: "b1" }).initialStoreCode,
+  "B1",
+  "路由带入的分店优先（忽略大小写，返回目录里的写法）",
+);
+assert.equal(
+  resolveCopyStoreFilter({ isAdmin: false, storeOptions: mgrOptions, targetStoreCodes: ["ZZ"], routeStoreCode: "ZZ" }).initialStoreCode,
+  "B1",
+  "店长不能选自己不管理的分店，回落到第一个管理分店",
+);
+assert.deepEqual(
+  resolveCopyStoreFilter({ isAdmin: false, storeOptions: [], targetStoreCodes: [], routeStoreCode: "" }),
+  { options: [], initialStoreCode: "", allowAll: false },
+);
+const adminFilter = resolveCopyStoreFilter({ isAdmin: true, storeOptions: mgrOptions, targetStoreCodes: ["L1"], routeStoreCode: "" });
+assert.equal(adminFilter.allowAll, true, "管理员可以看全部分店的同事");
+assert.equal(adminFilter.initialStoreCode, "L1", "管理员没有 storeCode 时默认目标员工所属分店");
+assert.equal(
+  resolveCopyStoreFilter({ isAdmin: true, storeOptions: mgrOptions, targetStoreCodes: [], routeStoreCode: "" }).initialStoreCode,
+  "",
+  "目标没有分店时默认「全部分店」",
+);
+assert.deepEqual(
+  resolveCopyStoreFilter({ isAdmin: true, storeOptions: [], targetStoreCodes: [], routeStoreCode: "X9" }).options,
+  [{ storeCode: "X9", storeName: "X9" }],
+  "管理员的分店目录没加载出来时，路由带入的分店仍可选",
+);
 
 console.log("access-permission-copy.test.ts: ok");

@@ -40,8 +40,8 @@ export interface AuthorizationDrafts {
   baselineMobile: Record<MobileMenuSection, string[]>;
 }
 
-export function splitMobileMenuItems(items: MobileMenuItem[]) {
-  const sections: Record<MobileMenuSection, MobileMenuItem[]> = {
+export function splitMobileMenuItems<T extends MobileMenuItem>(items: T[]) {
+  const sections: Record<MobileMenuSection, T[]> = {
     bottom: [],
     store: [],
     operations: [],

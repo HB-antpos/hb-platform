@@ -1,3 +1,4 @@
+import { buildPersonSearchText } from "@/modules/people/person-name";
 import type { StoreUserListItem } from "./types";
 import { hasPrivilegedAccessRole } from "./access-management";
 import type {
@@ -48,9 +49,10 @@ export function filterPermissionCopyCandidates(
     if (user.isStoreManager === true) return false;
     if (hasPrivilegedAccessRole(user.roleNames ?? [])) return false;
     if (!normalizedQuery) return true;
-    return [user.fullName, user.username, user.email]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => normalizeSearchText(value).includes(normalizedQuery));
+    // 姓名各段、昵称、账号统一走 buildPersonSearchText；邮箱不属于姓名，单独拼进来。
+    return `${buildPersonSearchText(user)} ${normalizeSearchText(user.email ?? "")}`.includes(
+      normalizedQuery,
+    );
   });
 }
 
@@ -163,4 +165,95 @@ export function resolveCopyTargetName(
   userGuid: string,
 ) {
   return nameByGuid.get(normalizeCopyGuid(userGuid)) || userGuid;
+}
+
+// ───────────────────────── 确认页：逐人列出会发生什么 ─────────────────────────
+
+export interface CopyConfirmRow {
+  userGuid: string;
+  name: string;
+  /** 将增加的权限展示名。 */
+  added: string[];
+  /** 「覆盖」方式下将被移除的权限展示名。 */
+  removed: string[];
+  /** 已有且保持不变的数量（用于「已有全部 N 项，不变」）。 */
+  unchangedCount: number;
+  noChange: boolean;
+}
+
+/**
+ * 确认页的逐人行：有变化的排前面（同组保持原顺序），没变化的沉到最后。
+ * 数量标签（+3 / −2）与明细都从预览结果直接算，不另行猜测。
+ */
+export function buildCopyConfirmRows(
+  preview: UserDirectPermissionCopyResult,
+  resolveName: (userGuid: string) => string,
+  resolvePermissionName: (code: string) => string,
+): CopyConfirmRow[] {
+  const rows = preview.targets.map<CopyConfirmRow>((target) => ({
+    userGuid: target.userGuid,
+    name: resolveName(target.userGuid),
+    added: target.added.map(resolvePermissionName),
+    removed: target.removed.map(resolvePermissionName),
+    unchangedCount: target.unchangedCount,
+    noChange: target.added.length === 0 && target.removed.length === 0,
+  }));
+  return [...rows.filter((row) => !row.noChange), ...rows.filter((row) => row.noChange)];
+}
+
+/** 被跳过的权限（操作者本人不能分配）的展示名；是整个操作共用的，不分目标。 */
+export function listCopySkippedPermissionNames(
+  preview: UserDirectPermissionCopyResult,
+  resolvePermissionName: (code: string) => string,
+) {
+  return preview.skippedPermissionCodes.map(resolvePermissionName);
+}
+
+// ───────────────────────── 候选同事的分店范围 ─────────────────────────
+
+export interface CopyStoreOption {
+  storeCode: string;
+  storeName: string;
+}
+
+export interface CopyStoreFilter {
+  options: CopyStoreOption[];
+  /** 打开弹层时默认选中的分店；空串表示「全部分店」（只有管理员可用）。 */
+  initialStoreCode: string;
+  /** 是否允许查看全部分店的同事；只有管理员可以。 */
+  allowAll: boolean;
+}
+
+/**
+ * 复制权限的候选同事按分店列出。
+ * - 店长：只能在自己管理的分店里选，默认取路由带入的分店，没有就取第一个管理分店；
+ * - 管理员：没有 storeCode 时（从详情进入）默认取目标员工所属分店，再不行就是「全部分店」，
+ *   并且可以在弹层里切换分店 / 全部分店。
+ */
+export function resolveCopyStoreFilter(input: {
+  isAdmin: boolean;
+  /** 已按操作者收窄过的分店（店长=自己管理的分店，管理员=全部分店目录）。 */
+  storeOptions: CopyStoreOption[];
+  /** 目标员工已分配的分店编码。 */
+  targetStoreCodes: string[];
+  /** 路由带入的分店编码，可能为空。 */
+  routeStoreCode: string;
+}): CopyStoreFilter {
+  const route = input.routeStoreCode.trim();
+  const options = input.storeOptions.map((item) => ({ ...item }));
+  const find = (code: string) =>
+    options.find((item) => item.storeCode.toLowerCase() === code.toLowerCase());
+
+  // 管理员的分店目录可能还没加载出来：路由带入的分店仍要能选。
+  if (input.isAdmin && route && !find(route)) {
+    options.push({ storeCode: route, storeName: route });
+  }
+
+  const preferred = [route, ...input.targetStoreCodes.map((code) => code.trim())].filter(Boolean);
+  const hit = preferred.map(find).find((item) => Boolean(item));
+  return {
+    options,
+    initialStoreCode: hit?.storeCode ?? (input.isAdmin ? "" : (options[0]?.storeCode ?? "")),
+    allowAll: input.isAdmin,
+  };
 }

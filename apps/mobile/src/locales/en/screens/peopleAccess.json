@@ -1,0 +1,204 @@
+{
+  "title": "Account access",
+  "loading": "Loading account access…",
+  "unknownUser": "Unknown employee",
+  "actions": {
+    "back": "Back",
+    "save": "Save",
+    "openPos": "POS permissions"
+  },
+  "tabs": {
+    "stores": "Stores",
+    "roles": "Roles",
+    "permissions": "Direct permissions",
+    "permissionsShort": "Perms",
+    "menu": "Menu"
+  },
+  "saveBar": {
+    "dirty_one": "{{count}} unsaved change",
+    "dirty_other": "{{count}} unsaved changes",
+    "clean": "No changes",
+    "saving": "Saving…",
+    "hintClean": "Store, role and direct permission changes are saved together",
+    "hintPermissions": "Inherited permissions are changed in Roles",
+    "partSeparator": "; ",
+    "moreChanges": "{{parts}} and more",
+    "managerGain": "Store manager role will be added automatically",
+    "managerLose": "Store manager role will be removed automatically"
+  },
+  "changes": {
+    "store": "{{store}}: {{from}} → {{to}}",
+    "roleAdded": "Role: add \"{{name}}\"",
+    "roleRemoved": "Role: remove \"{{name}}\"",
+    "permissionAdded": "Direct permission: turn on \"{{name}}\"",
+    "permissionRemoved": "Direct permission: turn off \"{{name}}\""
+  },
+  "stores": {
+    "searchPlaceholder": "Search store name or code",
+    "unassigned": "None",
+    "view": "View",
+    "manage": "Manage",
+    "disabledStore": "Inactive",
+    "posEntry": "POS permissions",
+    "posAfterSave": "Save to set POS permissions",
+    "noMatch": "No matching stores.",
+    "emptyTitle": "No stores available",
+    "emptyDescription": "There are no stores available for this account.",
+    "missingStoreGuid": "This store has no access identifier, so POS permissions cannot be opened.",
+    "managerNotice": "An account with a \"Manage\" store automatically gets the store manager role; when no store is \"Manage\" any more, the role is removed.",
+    "scopeNotice": "You can only adjust the stores you manage; only administrators can grant \"Manage\"."
+  },
+  "roles": {
+    "searchPlaceholder": "Search roles",
+    "noMatch": "No matching roles.",
+    "emptyTitle": "No roles available",
+    "emptyDescription": "There are no roles that can be assigned to this account.",
+    "derived": "Derived from managed stores",
+    "derivedHintOff": "Tap to open Stores and set a store to \"Manage\"",
+    "derivedHintOn": "Derived from a \"Manage\" store. To remove it, change that store to \"View\"",
+    "highPrivilege": "High privilege",
+    "managerLimit": "Store managers can only add or remove the Store Staff role for employees in their scope.",
+    "grantManager": {
+      "set": "{{store}} set to \"Manage\", pending save",
+      "choose": "This employee has several stores. Choose the store to set to \"Manage\", then tap Save.",
+      "noStore": "No store is assigned to this employee yet. Assign a store first, then set it to \"Manage\".",
+      "already": "The store manager role is derived from \"Manage\" stores. To remove it, change those stores to \"View\" and save."
+    }
+  },
+  "permissions": {
+    "searchPlaceholder": "Search permissions",
+    "summary": {
+      "effective": "Effective",
+      "inherited": "From roles",
+      "direct": "Direct"
+    },
+    "copyFromColleague": "Copy from colleague",
+    "copyToOthers": "Copy to others",
+    "posNotice": "POS permissions are not listed here. Set them under \"POS permissions\" for each store.",
+    "managerLimit": "Store managers can only grant permissions they have themselves.",
+    "implicitNotice": "This account is an administrator and has all permissions by default.",
+    "source": {
+      "inherited": "Inherited from {{roles}}",
+      "inheritedFallback": "Inherited from a role",
+      "direct": "Direct",
+      "none": "Not granted",
+      "implicit": "Administrator default"
+    },
+    "categoryTitle": "{{name}} · {{enabled}} / {{total}}",
+    "noMatch": "No matching permissions.",
+    "emptyTitle": "No permissions available",
+    "emptyDescription": "There are no permissions that can be assigned to this account."
+  },
+  "menu": {
+    "hint": "Mobile menu visibility follows the account's direct permissions; the switches here change those direct permissions.",
+    "sections": {
+      "bottom": "Bottom entries",
+      "store": "Store",
+      "operations": "Operations",
+      "reports": "Reports"
+    },
+    "adminOnly": "Administrators only",
+    "fixed": "Fixed entry",
+    "inherited": "From roles",
+    "direct": "Direct",
+    "visible": "Shown",
+    "hidden": "Hidden",
+    "emptyTitle": "No configurable menus",
+    "emptyDescription": "There are no mobile menus to configure."
+  },
+  "copy": {
+    "toOthersTitle": "Copy {{name}}'s permissions to…",
+    "fromColleagueTitle": "Copy a colleague's permissions to {{name}}",
+    "direction": {
+      "toOthers": "Copy to others",
+      "fromColleague": "Copy from colleague"
+    },
+    "storeSubtitle": "Store: {{store}}",
+    "allStores": "All stores",
+    "close": "Close",
+    "searchPlaceholder": "Search colleagues",
+    "unavailable": "No store is available, so colleagues cannot be listed.",
+    "listFailed": "Failed to load colleagues",
+    "empty": "No colleagues to choose from here (inactive employees and store managers are not listed).",
+    "noMatch": "No matching colleagues",
+    "help": "Only direct permissions are copied; role permissions are not; permissions you cannot grant yourself are skipped.",
+    "next_one": "Next · copy to {{count}} person",
+    "next_other": "Next · copy to {{count}} people",
+    "nextFromColleague": "Next",
+    "nextIdle": "Choose people to continue",
+    "previewFailed": "Could not work out the permission changes. Please try again.",
+    "copyFailed": "Copy failed. Nobody's permissions were changed.",
+    "dirtyBlocked": "Save or discard your unsaved permission changes before copying permissions",
+    "success_one": "Copied. {{count}} person's permissions were updated",
+    "success_other": "Copied. {{count}} people's permissions were updated",
+    "mode": {
+      "merge": "Merge (recommended)",
+      "mergeShort": "Merge",
+      "replace": "Replace",
+      "replaceShort": "Replace"
+    },
+    "confirm": {
+      "title": "Confirm copy",
+      "subtitle": "Copy direct permissions from {{source}} · Mode: {{mode}}",
+      "modeHint": "Merge only adds permissions and never removes what they already have; Replace makes their direct permissions exactly match {{source}}.",
+      "noChange": "No change",
+      "unchanged": "Already has all {{count}}, no change",
+      "nothingToCopy": "The selected people already match the source. There is nothing to copy.",
+      "skipped": "Skipped {{count}}: {{names}} is beyond your authority and was skipped automatically.",
+      "recalculating": "Recalculating…",
+      "back": "Back to people",
+      "submit_one": "Confirm copy to {{count}} person",
+      "submit_other": "Confirm copy to {{count}} people",
+      "submitSelf": "Confirm copy"
+    }
+  },
+  "save": {
+    "success": "Saved",
+    "partialTitle": "Saving did not finish",
+    "failedTitle": "Save failed",
+    "abortedTitle": "Save stopped",
+    "abortedDescription": "The signed-in account changed, so the remaining changes were not saved.",
+    "savedLine": "Saved: {{sections}}",
+    "failedLine": "Failed: {{section}} ({{reason}})",
+    "notRunLine": "Not attempted: {{sections}}",
+    "retryHint": "Your unsaved changes are kept. Tap Save to try again.",
+    "reasonFallback": "please try again later",
+    "separator": ", ",
+    "section": {
+      "stores": "Stores",
+      "roles": "Roles",
+      "permissions": "Direct permissions"
+    },
+    "sectionForbidden": "You no longer have permission to change this section; the related changes were reverted."
+  },
+  "unsaved": {
+    "title": "Discard unsaved access changes?",
+    "description": "If you leave now, unsaved store, role and permission changes will be lost.",
+    "discard": "Discard changes"
+  },
+  "busy": {
+    "title": "Working",
+    "description": "Wait for the current save to finish before leaving this page."
+  },
+  "errors": {
+    "invalidTitle": "Incomplete account details",
+    "invalidDescription": "The user identifier is missing. Open account access again from People.",
+    "deviceTitle": "Device mode cannot manage account access",
+    "deviceDescription": "Sign in with an administrator or an authorised user account to manage employee access.",
+    "selfTitle": "You cannot manage your own access",
+    "selfDescription": "Ask another authorised administrator to change your account access.",
+    "privilegedTitle": "This high-privilege account cannot be managed",
+    "privilegedDescription": "Only administrators can manage administrator, store manager or warehouse manager accounts.",
+    "noAccessTitle": "No account access permission",
+    "noAccessDescription": "This account cannot manage an employee's stores, roles, permissions or POS permissions.",
+    "unauthorizedTitle": "Session expired",
+    "unauthorizedDescription": "Sign in again to manage account access.",
+    "forbiddenTitle": "This account cannot be managed",
+    "forbiddenDescription": "This account has no permission to manage this target or section.",
+    "notFoundTitle": "This account is no longer available",
+    "notFoundDescription": "The account may have been deleted or moved out of your scope. Go back to People and refresh.",
+    "networkTitle": "Failed to load account access",
+    "networkDescription": "Cannot reach the server for now. Check your connection and try again.",
+    "sectionNoAccess": "This account has no permission to manage this section."
+  }
+}

@@ -5,151 +5,72 @@ import {
   StyleSheet,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
-import {
-  Stack,
-  useLocalSearchParams,
-  useNavigation,
-  useRouter,
-} from "expo-router";
-import {
-  usePreventRemove,
-  type NavigationAction,
-} from "@react-navigation/native";
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { usePreventRemove, type NavigationAction } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  ActivityIndicator,
-  Avatar,
-  Button,
-  Card,
-  Checkbox,
-  Chip,
-  IconButton,
-  Searchbar,
-  SegmentedButtons,
-  Snackbar,
-  Surface,
-  Switch,
-  Text,
-  TouchableRipple,
-} from "react-native-paper";
+import { ActivityIndicator, Button, IconButton, Snackbar, Text } from "react-native-paper";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { NoticeBox, SegmentTabs, StickyActionBar } from "@/modules/people";
+import { getRoleMenuDefinitions } from "@/modules/identity-admin/role-menu-catalog";
+import { isIdentitySessionAllowed } from "@/modules/identity-admin/user-logic";
+import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { useAuthStore } from "@/store/auth-store";
+import { classifyUserAccessError } from "./access-management";
 import {
-  useAccessRoleCatalog,
-  useAccessStoreCatalog,
-  useAssignUserAccessRoles,
-  useAssignUserAccessStores,
-  useAssignUserDirectPermissions,
-  useCopyUserDirectPermissions,
-  usePreviewCopyUserDirectPermissions,
-  useUserAccessPermissionAccess,
-  useUserAccessRoles,
-  useUserAccessStores,
-} from "./access-management-hooks";
-import {
-  applyUserAccessSectionRestrictions,
-  areAccessCodeSetsEqual,
-  buildDirectPermissionDraft,
-  buildUserAccessStoreAssignments,
-  classifyUserAccessError,
-  filterUserAccessRoles,
-  getAccessPermissionSelectionState,
-  getAccessRoleSelectionState,
-  getUserAccessEligibility,
-  getUserAccessStoreState,
-  hasPrivilegedAccessRole,
-  isStoreManagerRoleName,
-  limitUserAccessRolesForActor,
-  planStoreManagerGrant,
-  setUserAccessStoreState,
-  toggleDirectPermission,
-} from "./access-management";
-import { createPermissionNameResolver } from "./access-permission-copy";
+  accessTargetFromIdentityUser,
+  accessTargetFromStoreUser,
+  buildAccessMenuModel,
+  buildAccessSaveReportLines,
+  classifyAccessTargetError,
+  describeAccessChanges,
+  listAccessSections,
+  mergeAccessTarget,
+  parseAccessCopyParam,
+  parseAccessSectionParam,
+  pickAccessSection,
+  type AccessMenuItem,
+  type AccessSectionKey,
+} from "./access-page-logic";
+import { useAccessEditor, type AccessSaveReport } from "./access-editor";
+import { resolveCopyStoreFilter } from "./access-permission-copy";
+import { localizeAccessRoleName } from "./access-permission-presentation";
+import { useAccessIdentityTarget, useAccessStoreUserTarget } from "./access-target-hooks";
+import { AccessMenuSection } from "./access-menu-section";
+import { AccessPermissionsSection } from "./access-permissions-section";
+import { AccessRolesSection } from "./access-roles-section";
+import { AccessStoresSection } from "./access-stores-section";
 import { PermissionCopySheet } from "./permission-copy-sheet";
-import {
-  localizeAccessPermission,
-  localizeAccessPermissionCategory,
-  localizeAccessRoleDescription,
-  localizeAccessRoleName,
-} from "./access-permission-presentation";
 import type {
   AccessStoreOption,
   CopyPermissionDirection,
-  CopyUserDirectPermissionsInput,
-  DirectPermissionDraft,
   UserAccessErrorKind,
-  UserAccessRole,
-  UserAccessStoreAssignment,
-  UserAccessStoreState,
 } from "./access-management-types";
-import { useAppTranslation } from "@/shared/i18n/use-app-translation";
-import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { PERMISSIONS } from "@/shared/utils/access";
-import { useAuthStore } from "@/store/auth-store";
-
-type AccessSection = "stores" | "roles" | "permissions";
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function parseRoleNames(value: string | string[] | undefined) {
-  const values = Array.isArray(value) ? value : value ? [value] : [];
-  return values
-    .flatMap((item) => item.split("|"))
+function parseRoleNames(value: string) {
+  return value
+    .split("|")
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
-function getInitials(value: string) {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return "?";
-  return words.length === 1
-    ? words[0].slice(0, 2).toUpperCase()
-    : `${words[0][0]}${words[1][0]}`.toUpperCase();
-}
+/** 四个分段 + 窄屏时「直接权限」缩成「权限」，避免 4 个分段在 360 宽下被截断。 */
+const NARROW_WIDTH = 400;
 
-function encodeStoreAssignments(assignments: UserAccessStoreAssignment[]) {
-  return assignments.map(
-    (item) => `${item.storeGUID}:${item.isPrimary ? "manage" : "view"}`,
-  );
-}
-
-function mergeStores(
-  catalog: AccessStoreOption[] = [],
-  assigned: AccessStoreOption[] = [],
-) {
-  const byGuid = new Map<string, AccessStoreOption>();
-  [...catalog, ...assigned].forEach((store) => {
-    if (store.storeGUID.trim()) byGuid.set(store.storeGUID, store);
-  });
-  return Array.from(byGuid.values()).sort((left, right) =>
-    (left.storeName || left.storeCode).localeCompare(
-      right.storeName || right.storeCode,
-      "en-AU",
-    ),
-  );
-}
-
-function mergeRoles(
-  catalog: UserAccessRole[] = [],
-  assigned: UserAccessRole[] = [],
-) {
-  const byGuid = new Map<string, UserAccessRole>();
-  [...catalog, ...assigned].forEach((role) => {
-    if (role.roleGUID.trim()) byGuid.set(role.roleGUID, role);
-  });
-  return Array.from(byGuid.values()).sort((left, right) =>
-    left.roleName.localeCompare(right.roleName, "en-AU"),
-  );
-}
-
+/**
+ * 统一账号授权页（路由 /users/[userGuid]/access；旧管理员路由只是重定向壳）。
+ * 一页分段（分店 / 角色 / 直接权限，管理员多一个菜单）+ 一个吸底保存栏。
+ * 目标用户由页面按 userGuid 自己拉取，路由参数只作首屏预填。
+ */
 export default function AccessManagementScreen() {
-  const router = useRouter();
-  const navigation = useNavigation();
-  const { width: windowWidth } = useWindowDimensions();
-  const { t, language } = useAppTranslation(["userManagement", "common"]);
   const params = useLocalSearchParams<{
     userGuid?: string | string[];
     storeCode?: string | string[];
@@ -157,656 +78,303 @@ export default function AccessManagementScreen() {
     username?: string | string[];
     targetStatus?: string | string[];
     roleNames?: string | string[];
+    section?: string | string[];
+    copy?: string | string[];
   }>();
+  const actorKey = useAuthStore((state) => state.user?.userGUID ?? "");
+  const userGuid = firstParam(params.userGuid)?.trim() ?? "";
+  // 切换操作者或目标用户时销毁整份草稿，禁止跨身份复用授权状态。
+  return (
+    <AccessManagementPage
+      key={`${actorKey}:${userGuid}`}
+      userGuid={userGuid}
+      routeStoreCode={firstParam(params.storeCode)?.trim() ?? ""}
+      hintUserName={firstParam(params.userName)?.trim() ?? ""}
+      hintUsername={firstParam(params.username)?.trim() ?? ""}
+      hintStatus={firstParam(params.targetStatus) ?? ""}
+      hintRoleNames={firstParam(params.roleNames) ?? ""}
+      sectionParam={firstParam(params.section) ?? ""}
+      copyParam={firstParam(params.copy) ?? ""}
+    />
+  );
+}
+
+interface AccessManagementPageProps {
+  userGuid: string;
+  routeStoreCode: string;
+  hintUserName: string;
+  hintUsername: string;
+  hintStatus: string;
+  hintRoleNames: string;
+  sectionParam: string;
+  copyParam: string;
+}
+
+function AccessManagementPage({
+  userGuid,
+  routeStoreCode,
+  hintUserName,
+  hintUsername,
+  hintStatus,
+  hintRoleNames,
+  sectionParam,
+  copyParam,
+}: AccessManagementPageProps) {
+  const router = useRouter();
+  const navigation = useNavigation();
+  const { width: windowWidth } = useWindowDimensions();
+  const { t, language } = useAppTranslation(["peopleAccess", "common"]);
   const currentUser = useAuthStore((state) => state.user);
   const access = useAuthStore((state) => state.access);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const sessionKind = useAuthStore((state) => state.sessionKind);
-  const userGuid = firstParam(params.userGuid)?.trim() ?? "";
-  const username = firstParam(params.username)?.trim() ?? "";
-  // 员工列表带入的所属分店，用于「复制权限」列出同店同事；深链进入时为空，下面再回退。
-  const routeStoreCode = firstParam(params.storeCode)?.trim() ?? "";
-  const userName =
-    firstParam(params.userName)?.trim() ||
-    username ||
-    t("accessManagement.unknownUser");
-  const parsedStatus = Number(firstParam(params.targetStatus));
-  const targetStatus = Number.isFinite(parsedStatus) ? parsedStatus : 1;
-  const routeRoleNames = useMemo(
-    () => parseRoleNames(params.roleNames),
-    [params.roleNames],
-  );
-  const isDeviceMode = sessionKind === "device";
-  // 最小支持尺寸使用短标签，完整语义仍由分区标题和无障碍标签提供。
-  const isCompactWidth = windowWidth <= 375;
-  const managedStoreCodes = useMemo(
-    () =>
-      access.isAdmin
-        ? null
-        : (currentUser?.stores ?? [])
-            .filter((store) => store.isPrimary === true)
-            .map((store) => store.storeCode)
-            .filter(Boolean),
-    [access.isAdmin, currentUser?.stores],
-  );
-  const managedStoreCodeSet = useMemo(
-    () => new Set(managedStoreCodes?.map((code) => code.toLowerCase()) ?? []),
-    [managedStoreCodes],
-  );
-  const hasManageableStores =
-    access.isAdmin || Boolean(managedStoreCodes?.length);
-  const canManageStores = access.hasPermission(PERMISSIONS.Users.ManageStores);
-  const canManageRoles = access.hasPermission(PERMISSIONS.Users.ManageRoles);
-  const canManagePos = access.hasPermission(PERMISSIONS.Users.ManagePos);
-  const [activeSection, setActiveSection] = useState<AccessSection>("stores");
-  const [roleSearch, setRoleSearch] = useState("");
-  const [terminalErrorKind, setTerminalErrorKind] = useState<Exclude<
-    UserAccessErrorKind,
-    "network"
-  > | null>(null);
-  const [allowRemove, setAllowRemove] = useState(false);
-  const [authRedirectRequested, setAuthRedirectRequested] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState("");
-  const [copyDirection, setCopyDirection] =
-    useState<CopyPermissionDirection | null>(null);
-  const [roleMutationForbidden, setRoleMutationForbidden] = useState(false);
-  const [permissionMutationForbidden, setPermissionMutationForbidden] =
-    useState(false);
-  const pendingActionRef = useRef<NavigationAction | null>(null);
-  const operationInFlightRef = useRef(false);
+  const iosReviewOfflineGuardActive = useAuthStore((state) => state.iosReviewOfflineGuardActive);
+  const actorKey = currentUser?.userGUID ?? "";
 
-  const routeEligibility = useMemo(
-    () =>
-      getUserAccessEligibility({
-        isDeviceMode,
-        isAdmin: access.isAdmin,
-        isStoreManager: access.isStoreManager,
-        canManageStores,
-        canManageRoles,
-        canManagePos,
-        currentUserGuid: currentUser?.userGUID,
-        targetUserGuid: userGuid,
-        targetStatus,
-        targetRoleNames: routeRoleNames,
-        hasManageableStores,
-      }),
-    [
-      access.isAdmin,
-      access.isStoreManager,
-      canManagePos,
-      canManageRoles,
-      canManageStores,
-      currentUser?.userGUID,
-      hasManageableStores,
-      isDeviceMode,
-      routeRoleNames,
-      targetStatus,
-      userGuid,
-    ],
+  // ───────────── 目标用户：自己拉取，路由参数只作首屏预填 ─────────────
+  // 管理员账号会话走管理员接口（能看到任何账号）；店长 / 设备账号 / iOS 审核会话走店员接口。
+  const useIdentitySource = isIdentitySessionAllowed(
+    { isAuthenticated, sessionKind, iosReviewOfflineGuardActive },
+    access.hasPermission("Users.View"),
   );
-  const queryEnabled = Boolean(
-    userGuid &&
-    isAuthenticated &&
-    routeEligibility.canOpen &&
-    !terminalErrorKind,
-  );
-  const storesEnabled =
-    queryEnabled && routeEligibility.storesMode !== "hidden";
-  // 受限操作者直接使用登录态中的可管理分店，避免 POS-only 账号被全分店目录接口拒绝。
-  const storeCatalogEnabled = storesEnabled && access.isAdmin;
-  const rolesEnabled = queryEnabled && routeEligibility.rolesMode !== "hidden";
-
-  const storesQuery = useUserAccessStores(userGuid, storesEnabled);
-  const storeCatalogQuery = useAccessStoreCatalog(storeCatalogEnabled);
-  const rolesQuery = useUserAccessRoles(userGuid, rolesEnabled);
-  const roleCatalogQuery = useAccessRoleCatalog(rolesEnabled);
-  const targetRoleNames = useMemo(
-    () => rolesQuery.data?.map((role) => role.roleName) ?? routeRoleNames,
-    [rolesQuery.data, routeRoleNames],
-  );
-  const baseEligibility = useMemo(
-    () =>
-      getUserAccessEligibility({
-        isDeviceMode,
-        isAdmin: access.isAdmin,
-        isStoreManager: access.isStoreManager,
-        canManageStores,
-        canManageRoles,
-        canManagePos,
-        currentUserGuid: currentUser?.userGUID,
-        targetUserGuid: userGuid,
-        targetStatus,
-        targetRoleNames,
-        hasManageableStores,
-      }),
-    [
-      access.isAdmin,
-      access.isStoreManager,
-      canManagePos,
-      canManageRoles,
-      canManageStores,
-      currentUser?.userGUID,
-      hasManageableStores,
-      isDeviceMode,
-      targetRoleNames,
-      targetStatus,
-      userGuid,
-    ],
-  );
-  const roleAccessForbidden = Boolean(
-    !access.isAdmin &&
-      (roleMutationForbidden ||
-        [rolesQuery.error, roleCatalogQuery.error].some(
-          (error) => error && classifyUserAccessError(error) === "forbidden",
-        )),
-  );
-  const permissionsEnabled = Boolean(
-    queryEnabled &&
-      !roleAccessForbidden &&
-      baseEligibility.permissionsMode !== "hidden",
-  );
-  const permissionAccessQuery = useUserAccessPermissionAccess(
+  const identityTargetQuery = useAccessIdentityTarget({
     userGuid,
-    permissionsEnabled,
-  );
-  const permissionAccessForbidden = Boolean(
-    !access.isAdmin &&
-      (permissionMutationForbidden ||
-        (permissionAccessQuery.error &&
-          classifyUserAccessError(permissionAccessQuery.error) === "forbidden")),
-  );
-  const eligibility = useMemo(
+    actorKey,
+    enabled: useIdentitySource,
+  });
+  const storeUserTargetQuery = useAccessStoreUserTarget({
+    userGuid,
+    storeCode: routeStoreCode,
+    enabled: !useIdentitySource && isAuthenticated && sessionKind !== "device",
+  });
+  const targetQuery = useIdentitySource ? identityTargetQuery : storeUserTargetQuery;
+  const targetSnapshot = useMemo(() => {
+    if (useIdentitySource) {
+      return identityTargetQuery.data ? accessTargetFromIdentityUser(identityTargetQuery.data) : null;
+    }
+    return storeUserTargetQuery.data ? accessTargetFromStoreUser(storeUserTargetQuery.data) : null;
+  }, [identityTargetQuery.data, storeUserTargetQuery.data, useIdentitySource]);
+  const hintRoles = useMemo(() => parseRoleNames(hintRoleNames), [hintRoleNames]);
+  const target = useMemo(
     () =>
-      applyUserAccessSectionRestrictions(baseEligibility, {
-        rolesForbidden: roleAccessForbidden,
-        permissionsForbidden: permissionAccessForbidden,
+      mergeAccessTarget(
+        userGuid,
+        { userName: hintUserName, username: hintUsername, targetStatus: hintStatus, roleNames: hintRoles },
+        targetSnapshot,
+      ),
+    [hintRoles, hintStatus, hintUserName, hintUsername, targetSnapshot, userGuid],
+  );
+  const targetErrorKind: UserAccessErrorKind | null = targetQuery.error
+    ? classifyAccessTargetError(targetQuery.error)
+    : null;
+
+  const editor = useAccessEditor({ userGuid, target, language });
+  const { eligibility, failTerminal } = editor;
+
+  useEffect(() => {
+    // 目标拉取遇到 401：和其它查询一样优先退出失效的编辑上下文。
+    if (targetErrorKind === "unauthorized") failTerminal("unauthorized");
+  }, [failTerminal, targetErrorKind]);
+
+  // ───────────── 页面状态 ─────────────
+  const [selectedSection, setSelectedSection] = useState<AccessSectionKey | null>(null);
+  const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [copyDirection, setCopyDirection] = useState<CopyPermissionDirection | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string[] | null>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  const pendingActionRef = useRef<NavigationAction | null>(null);
+  const copyRequest = parseAccessCopyParam(copyParam);
+  const copyAutoOpenedRef = useRef(false);
+
+  const sections = useMemo(
+    () =>
+      listAccessSections({
+        storesMode: eligibility.storesMode,
+        rolesMode: eligibility.rolesMode,
+        permissionsMode: eligibility.permissionsMode,
+        isAdmin: editor.isAdmin,
       }),
-    [baseEligibility, permissionAccessForbidden, roleAccessForbidden],
+    [eligibility.permissionsMode, eligibility.rolesMode, eligibility.storesMode, editor.isAdmin],
   );
-  const assignStoresMutation = useAssignUserAccessStores();
-  const assignRolesMutation = useAssignUserAccessRoles();
-  const assignPermissionsMutation = useAssignUserDirectPermissions();
-  const previewCopyMutation = usePreviewCopyUserDirectPermissions();
-  const copyPermissionsMutation = useCopyUserDirectPermissions();
-  const [storeAssignments, setStoreAssignments] = useState<
-    UserAccessStoreAssignment[]
-  >([]);
-  const [baselineStoreAssignments, setBaselineStoreAssignments] = useState<
-    UserAccessStoreAssignment[]
-  >([]);
-  const [selectedRoleGuids, setSelectedRoleGuids] = useState<string[]>([]);
-  const [baselineRoleGuids, setBaselineRoleGuids] = useState<string[]>([]);
-  const [permissionDraft, setPermissionDraft] =
-    useState<DirectPermissionDraft | null>(null);
-  const storeAppliedAtRef = useRef(0);
-  const roleAppliedAtRef = useRef(0);
-  const permissionAppliedAtRef = useRef(0);
-  const initializedScopeRef = useRef<string | null>(null);
-  const busy =
-    assignStoresMutation.isPending ||
-    assignRolesMutation.isPending ||
-    assignPermissionsMutation.isPending ||
-    previewCopyMutation.isPending ||
-    copyPermissionsMutation.isPending;
-  const storesDirty = !areAccessCodeSetsEqual(
-    encodeStoreAssignments(storeAssignments),
-    encodeStoreAssignments(baselineStoreAssignments),
-  );
-  const rolesDirty = !areAccessCodeSetsEqual(
-    selectedRoleGuids,
-    baselineRoleGuids,
-  );
-  const permissionsDirty = Boolean(
-    permissionDraft &&
-    !areAccessCodeSetsEqual(
-      permissionDraft.selectedCodes,
-      permissionDraft.baselineCodes,
-    ),
-  );
-  const dirty = storesDirty || rolesDirty || permissionsDirty;
+  // 想看的分段：用户点过的 > 路由 section > copy=1 时落在直接权限；不可见就落到第一个可见分段。
+  const requestedSection =
+    selectedSection ?? parseAccessSectionParam(sectionParam) ?? (copyRequest ? "permissions" : null);
+  const activeSection = pickAccessSection(sections, requestedSection);
 
-  useEffect(() => {
-    const activeMode =
-      activeSection === "stores"
-        ? eligibility.storesMode
-        : activeSection === "roles"
-          ? eligibility.rolesMode
-          : eligibility.permissionsMode;
-    if (activeMode !== "hidden") return;
-
-    if (eligibility.storesMode !== "hidden") setActiveSection("stores");
-    else if (eligibility.permissionsMode !== "hidden")
-      setActiveSection("permissions");
-    else if (eligibility.rolesMode !== "hidden") setActiveSection("roles");
-  }, [
-    activeSection,
-    eligibility.permissionsMode,
-    eligibility.rolesMode,
-    eligibility.storesMode,
-  ]);
-
-  useEffect(() => {
-    if (initializedScopeRef.current === userGuid) return;
-    initializedScopeRef.current = userGuid;
-    storeAppliedAtRef.current = 0;
-    roleAppliedAtRef.current = 0;
-    permissionAppliedAtRef.current = 0;
-    setStoreAssignments([]);
-    setBaselineStoreAssignments([]);
-    setSelectedRoleGuids([]);
-    setBaselineRoleGuids([]);
-    setPermissionDraft(null);
-    setTerminalErrorKind(null);
-    setRoleMutationForbidden(false);
-    setPermissionMutationForbidden(false);
-    setAllowRemove(false);
-  }, [userGuid]);
-
-  useEffect(() => {
-    if (!storesQuery.data) return;
-    if (
-      storeAppliedAtRef.current > 0 &&
-      (storesDirty ||
-        busy ||
-        storesQuery.dataUpdatedAt <= storeAppliedAtRef.current)
-    )
-      return;
-    const assignments = buildUserAccessStoreAssignments(storesQuery.data);
-    setStoreAssignments(assignments);
-    setBaselineStoreAssignments(assignments);
-    storeAppliedAtRef.current = storesQuery.dataUpdatedAt;
-  }, [busy, storesDirty, storesQuery.data, storesQuery.dataUpdatedAt]);
-
-  useEffect(() => {
-    if (!rolesQuery.data) return;
-    if (
-      roleAppliedAtRef.current > 0 &&
-      (rolesDirty ||
-        busy ||
-        rolesQuery.dataUpdatedAt <= roleAppliedAtRef.current)
-    )
-      return;
-    const roleGuids = rolesQuery.data
-      .filter((role) => !isStoreManagerRoleName(role.roleName))
-      .map((role) => role.roleGUID);
-    setSelectedRoleGuids(roleGuids);
-    setBaselineRoleGuids(roleGuids);
-    roleAppliedAtRef.current = rolesQuery.dataUpdatedAt;
-  }, [busy, rolesDirty, rolesQuery.data, rolesQuery.dataUpdatedAt]);
-
-  useEffect(() => {
-    if (!permissionAccessQuery.data) return;
-    if (
-      permissionAppliedAtRef.current > 0 &&
-      (permissionsDirty ||
-        busy ||
-        permissionAccessQuery.dataUpdatedAt <= permissionAppliedAtRef.current)
-    )
-      return;
-    setPermissionDraft(
-      buildDirectPermissionDraft(permissionAccessQuery.data.state),
-    );
-    permissionAppliedAtRef.current = permissionAccessQuery.dataUpdatedAt;
-  }, [
-    busy,
-    permissionAccessQuery.data,
-    permissionAccessQuery.dataUpdatedAt,
-    permissionsDirty,
-  ]);
-
-  const queryErrors = [
-    storesEnabled ? storesQuery.error : null,
-    storeCatalogEnabled ? storeCatalogQuery.error : null,
-    rolesEnabled && !roleAccessForbidden ? rolesQuery.error : null,
-    rolesEnabled && !roleAccessForbidden ? roleCatalogQuery.error : null,
-    permissionsEnabled && !permissionAccessForbidden
-      ? permissionAccessQuery.error
-      : null,
-  ].filter(Boolean);
-  const firstTerminalQueryError = queryErrors.find(
-    (error) => classifyUserAccessError(error) !== "network",
+  const menuDefinitions = useMemo(() => getRoleMenuDefinitions(language), [language]);
+  const menuModel = useMemo(
+    () =>
+      buildAccessMenuModel({
+        definitions: menuDefinitions,
+        draft: editor.permissionDraft,
+        assignableCodes: editor.assignablePermissionCodes,
+        state: editor.permissionAccessState,
+      }),
+    [
+      editor.assignablePermissionCodes,
+      editor.permissionAccessState,
+      editor.permissionDraft,
+      menuDefinitions,
+    ],
   );
 
-  useEffect(() => {
-    if (!firstTerminalQueryError) return;
-    const errorKind = classifyUserAccessError(firstTerminalQueryError);
-    if (errorKind === "network") return;
-    setTerminalErrorKind(errorKind);
-    if (errorKind === "unauthorized") {
-      // 401 必须优先退出失效编辑上下文，不能被脏草稿离页保护卡住。
-      setAuthRedirectRequested(true);
-      setAllowRemove(true);
-    }
-  }, [firstTerminalQueryError]);
-
-  useEffect(() => {
-    if (!isAuthenticated && !isDeviceMode) {
-      setAuthRedirectRequested(true);
-      setAllowRemove(true);
-    }
-  }, [isAuthenticated, isDeviceMode]);
-
-  usePreventRemove(
-    isAuthenticated &&
-      terminalErrorKind !== "unauthorized" &&
-      (dirty || busy) &&
-      !allowRemove,
-    ({ data }) => {
-      if (
-        !useAuthStore.getState().isAuthenticated ||
-        terminalErrorKind === "unauthorized"
-      ) {
-        pendingActionRef.current = data.action;
-        setAuthRedirectRequested(true);
-        setAllowRemove(true);
-        return;
-      }
-      if (busy) {
-        Alert.alert(
-          t("accessManagement.busy.title"),
-          t("accessManagement.busy.description"),
-          [{ text: t("common:actions.confirm") }],
-        );
-        return;
-      }
-      Alert.alert(
-        t("accessManagement.unsaved.title"),
-        t("accessManagement.unsaved.description"),
-        [
-          { text: t("common:actions.cancel"), style: "cancel" },
-          {
-            text: t("accessManagement.unsaved.discard"),
-            style: "destructive",
-            onPress: () => {
-              pendingActionRef.current = data.action;
-              setAllowRemove(true);
-            },
-          },
-        ],
-      );
-    },
+  const copyStoreFilter = useMemo(
+    () =>
+      resolveCopyStoreFilter({
+        isAdmin: editor.isAdmin,
+        storeOptions: editor.storeOptions,
+        targetStoreCodes: editor.assignedStoreCodes,
+        // 管理员从详情进入时没有 storeCode；店长兜底取自己管理的第一家分店。
+        routeStoreCode: routeStoreCode || (editor.managedStoreCodes?.[0] ?? ""),
+      }),
+    [
+      editor.assignedStoreCodes,
+      editor.isAdmin,
+      editor.managedStoreCodes,
+      editor.storeOptions,
+      routeStoreCode,
+    ],
   );
-
-  useEffect(() => {
-    if (!allowRemove) return;
-    if (pendingActionRef.current) {
-      const action = pendingActionRef.current;
-      pendingActionRef.current = null;
-      navigation.dispatch(action);
-      return;
-    }
-    if (authRedirectRequested) router.replace("/(auth)/login");
-  }, [allowRemove, authRedirectRequested, navigation, router]);
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace("/(shell)/users");
   }, [router]);
 
-  const handleOperationError = useCallback(
-    (
-      error: unknown,
-      fallbackKey: string,
-      section?: Extract<AccessSection, "roles" | "permissions">,
-    ) => {
-      const errorKind = classifyUserAccessError(error);
-      if (errorKind === "network") {
-        setSnackbarMessage(t(fallbackKey));
+  // ───────────── 离页保护（有未保存草稿或保存进行中） ─────────────
+  usePreventRemove(
+    isAuthenticated &&
+      editor.terminalErrorKind !== "unauthorized" &&
+      (editor.dirty || editor.busy) &&
+      !editor.allowRemove,
+    ({ data }) => {
+      if (
+        !useAuthStore.getState().isAuthenticated ||
+        editor.terminalErrorKind === "unauthorized"
+      ) {
+        pendingActionRef.current = data.action;
+        editor.setAllowRemove(true);
         return;
       }
-      if (errorKind === "forbidden" && !access.isAdmin && section) {
-        // 局部授权失效只关闭对应分段，清除已不可提交的草稿并保留分店维护能力。
-        if (section === "roles") {
-          setRoleMutationForbidden(true);
-          setSelectedRoleGuids([...baselineRoleGuids]);
-          setPermissionDraft((current) =>
-            current
-              ? { ...current, selectedCodes: [...current.baselineCodes] }
-              : current,
-          );
-        } else {
-          setPermissionMutationForbidden(true);
-          setPermissionDraft((current) =>
-            current
-              ? { ...current, selectedCodes: [...current.baselineCodes] }
-              : current,
-          );
-        }
-        setSnackbarMessage(t(fallbackKey));
+      if (editor.busy) {
+        Alert.alert(t("busy.title"), t("busy.description"), [
+          { text: t("common:actions.confirm") },
+        ]);
         return;
       }
-      setTerminalErrorKind(errorKind);
-      if (errorKind === "unauthorized") {
-        setAuthRedirectRequested(true);
-        setAllowRemove(true);
+      Alert.alert(t("unsaved.title"), t("unsaved.description"), [
+        { text: t("common:actions.cancel"), style: "cancel" },
+        {
+          text: t("unsaved.discard"),
+          style: "destructive",
+          onPress: () => {
+            pendingActionRef.current = data.action;
+            editor.setAllowRemove(true);
+          },
+        },
+      ]);
+    },
+  );
+
+  useEffect(() => {
+    if (!editor.allowRemove) return;
+    if (pendingActionRef.current) {
+      const action = pendingActionRef.current;
+      pendingActionRef.current = null;
+      navigation.dispatch(action);
+      return;
+    }
+    if (editor.authRedirectRequested) router.replace("/(auth)/login");
+  }, [editor.allowRemove, editor.authRedirectRequested, navigation, router]);
+
+  // 改动全部保存（或被撤回）后，上一次保存失败的提示不再适用。
+  useEffect(() => {
+    if (!editor.dirty) setSaveNotice(null);
+  }, [editor.dirty]);
+
+  // ───────────── 保存 ─────────────
+  const presentSaveReport = useCallback(
+    (report: AccessSaveReport) => {
+      if (report.verdict === "success") {
+        setSaveNotice(null);
+        setSnackbarMessage(t("save.success"));
+        return;
+      }
+      if (report.verdict === "aborted") {
+        Alert.alert(t("save.abortedTitle"), t("save.abortedDescription"), [
+          { text: t("common:actions.confirm") },
+        ]);
+        return;
+      }
+      if (report.verdict === "nothing") return;
+      // 部分成功 / 全部失败：逐项说明哪些已保存、哪一步失败、哪些没执行，草稿仍保留。
+      const lines = buildAccessSaveReportLines(report.outcome, {
+        sectionLabel: (key) => t(`save.section.${key}`),
+        join: (items) => items.join(t("save.separator")),
+        savedLine: (sections) => t("save.savedLine", { sections }),
+        failedLine: (section, reason) => t("save.failedLine", { section, reason }),
+        notRunLine: (sections) => t("save.notRunLine", { sections }),
+        retryHint: t("save.retryHint"),
+        reasonOf: (error) =>
+          resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "save.reasonFallback" }),
+      });
+      if (
+        report.failedKind === "forbidden" &&
+        !editor.isAdmin &&
+        report.outcome.failed &&
+        report.outcome.failed.key !== "stores"
+      ) {
+        // 局部授权失效：对应分段已被关闭，相关草稿已撤回。
+        lines.splice(lines.length - 1, 0, t("save.sectionForbidden"));
+      }
+      setSaveNotice(lines);
+      if (report.failedKind !== "unauthorized") {
+        Alert.alert(
+          t(report.verdict === "partial" ? "save.partialTitle" : "save.failedTitle"),
+          lines.join("\n"),
+          [{ text: t("common:actions.confirm") }],
+        );
       }
     },
-    [access.isAdmin, baselineRoleGuids, t],
+    [editor.isAdmin, language, t],
   );
 
-  const actorManagedStoreOptions = useMemo<AccessStoreOption[]>(
-    () =>
-      access.isAdmin
-        ? []
-        : (currentUser?.stores ?? []).flatMap((store) => {
-            const storeGUID = store.storeGUID?.trim();
-            if (!store.isPrimary || !storeGUID) return [];
-            return [
-              {
-                storeGUID,
-                storeCode: store.storeCode,
-                storeName: store.storeName,
-              },
-            ];
-          }),
-    [access.isAdmin, currentUser?.stores],
-  );
-  const storeOptions = useMemo(() => {
-    const stores = mergeStores(
-      access.isAdmin ? storeCatalogQuery.data : actorManagedStoreOptions,
-      storesQuery.data,
-    );
-    if (access.isAdmin) return stores;
-    // 非管理员只看到自己的管理范围，避免用全分店目录制造越权草稿。
-    return stores.filter((store) =>
-      managedStoreCodeSet.has(store.storeCode.toLowerCase()),
-    );
-  }, [
-    access.isAdmin,
-    actorManagedStoreOptions,
-    managedStoreCodeSet,
-    storeCatalogQuery.data,
-    storesQuery.data,
-  ]);
-  const roleOptions = useMemo(
-    () =>
-      limitUserAccessRolesForActor(
-        mergeRoles(roleCatalogQuery.data, rolesQuery.data),
-        access.isAdmin,
-      ),
-    [access.isAdmin, roleCatalogQuery.data, rolesQuery.data],
-  );
-  const filteredRoleOptions = useMemo(
-    () => filterUserAccessRoles(roleOptions, roleSearch),
-    [roleOptions, roleSearch],
-  );
-  const hasManagedStoreAssignment = storeAssignments.some(
-    (item) => item.isPrimary,
-  );
-  const inheritedSourceMap = useMemo(() => {
-    const result = new Map<string, string[]>();
-    permissionAccessQuery.data?.state.inheritedSources.forEach((source) => {
-      source.permissionCodes.forEach((code) => {
-        result.set(code, [
-          ...(result.get(code) ?? []),
-          localizeAccessRoleName(source.roleName, language),
-        ]);
-      });
-    });
-    return result;
-  }, [language, permissionAccessQuery.data?.state.inheritedSources]);
+  const { save: saveEditor } = editor;
+  const handleSave = useCallback(async () => {
+    const report = await saveEditor();
+    if (report) presentSaveReport(report);
+  }, [presentSaveReport, saveEditor]);
 
-  const handleSaveStores = useCallback(async () => {
-    if (!storesDirty || busy || operationInFlightRef.current) return;
-    operationInFlightRef.current = true;
-    try {
-      await assignStoresMutation.mutateAsync({
-        userGuid,
-        assignments: storeAssignments,
-      });
-      setBaselineStoreAssignments([...storeAssignments]);
-      setSnackbarMessage(t("accessManagement.messages.storesSaved"));
-      void Promise.allSettled([
-        rolesQuery.refetch(),
-        permissionAccessQuery.refetch(),
-      ]);
-    } catch (error) {
-      handleOperationError(error, "accessManagement.messages.storesSaveFailed");
-    } finally {
-      operationInFlightRef.current = false;
-    }
-  }, [
-    assignStoresMutation,
-    busy,
-    handleOperationError,
-    permissionAccessQuery,
-    rolesQuery,
-    storeAssignments,
-    storesDirty,
-    t,
-    userGuid,
-  ]);
-
-  const handleSaveRoles = useCallback(async () => {
-    if (!rolesDirty || busy || operationInFlightRef.current) return;
-    operationInFlightRef.current = true;
-    try {
-      await assignRolesMutation.mutateAsync({
-        userGuid,
-        roleGuids: selectedRoleGuids,
-        roleCatalog: roleOptions,
-      });
-      setBaselineRoleGuids([...selectedRoleGuids]);
-      setSnackbarMessage(t("accessManagement.messages.rolesSaved"));
-    } catch (error) {
-      handleOperationError(
-        error,
-        "accessManagement.messages.rolesSaveFailed",
-        "roles",
-      );
-    } finally {
-      operationInFlightRef.current = false;
-    }
-  }, [
-    assignRolesMutation,
-    busy,
-    handleOperationError,
-    roleOptions,
-    rolesDirty,
-    selectedRoleGuids,
-    t,
-    userGuid,
-  ]);
-
-  // 复制权限的候选同事按分店列出：优先路由带入，其次目标员工已分配的分店，最后操作者自己的管理分店。
-  const copyStoreCode =
-    routeStoreCode ||
-    storesQuery.data?.[0]?.storeCode ||
-    managedStoreCodes?.[0] ||
-    "";
-  const actorUserGuid = currentUser?.userGUID || currentUser?.userGuid || "";
-  const permissionNameResolver = useMemo(
-    () =>
-      createPermissionNameResolver(
-        (permissionAccessQuery.data?.categories ?? []).flatMap((category) =>
-          category.permissions.map((permission) => ({
-            code: permission.name,
-            name: localizeAccessPermission(permission, language).name,
-          })),
-        ),
-      ),
-    [language, permissionAccessQuery.data?.categories],
-  );
-
+  // ───────────── 复制权限 ─────────────
   const openCopySheet = useCallback(
     (direction: CopyPermissionDirection) => {
-      if (busy) return;
-      if (permissionsDirty) {
+      if (editor.busy) return;
+      if (editor.permissionsDirty) {
         // 复制成功后会重新拉取权限覆盖界面，存在未保存草稿时必须先处理，避免被静默覆盖。
-        setSnackbarMessage(t("accessManagement.copy.dirtyBlocked"));
+        setSnackbarMessage(t("copy.dirtyBlocked"));
         return;
       }
       setCopyDirection(direction);
     },
-    [busy, permissionsDirty, t],
+    [editor.busy, editor.permissionsDirty, t],
   );
 
   const handleCopied = useCallback(
     (result: { targets: { added: string[]; removed: string[] }[] }) => {
       const changed = result.targets.filter(
-        (target) => target.added.length > 0 || target.removed.length > 0,
+        (item) => item.added.length > 0 || item.removed.length > 0,
       ).length;
       setCopyDirection(null);
-      setSnackbarMessage(t("accessManagement.copy.success", { count: changed }));
+      setSnackbarMessage(t("copy.success", { count: changed }));
     },
     [t],
   );
-
-  const handlePreviewCopy = useCallback(
-    (input: CopyUserDirectPermissionsInput) =>
-      previewCopyMutation.mutateAsync(input),
-    [previewCopyMutation],
-  );
-  const handleCommitCopy = useCallback(
-    (input: CopyUserDirectPermissionsInput) =>
-      copyPermissionsMutation.mutateAsync(input),
-    [copyPermissionsMutation],
-  );
-
-  const handleSavePermissions = useCallback(async () => {
-    if (
-      !permissionDraft ||
-      !permissionsDirty ||
-      busy ||
-      operationInFlightRef.current
-    )
-      return;
-    operationInFlightRef.current = true;
-    try {
-      await assignPermissionsMutation.mutateAsync({
-        userGuid,
-        permissions: permissionDraft.selectedCodes,
-      });
-      setPermissionDraft((current) =>
-        current
-          ? { ...current, baselineCodes: [...current.selectedCodes] }
-          : current,
-      );
-      setSnackbarMessage(t("accessManagement.messages.permissionsSaved"));
-    } catch (error) {
-      handleOperationError(
-        error,
-        "accessManagement.messages.permissionsSaveFailed",
-        "permissions",
-      );
-    } finally {
-      operationInFlightRef.current = false;
-    }
-  }, [
-    assignPermissionsMutation,
-    busy,
-    handleOperationError,
-    permissionDraft,
-    permissionsDirty,
-    t,
-    userGuid,
-  ]);
 
   const openPosPermissions = useCallback(
     (store: AccessStoreOption) => {
       const storeGuid = store.storeGUID.trim();
       if (!storeGuid) {
-        setSnackbarMessage(t("accessManagement.stores.missingStoreGuid"));
+        setSnackbarMessage(t("stores.missingStoreGuid"));
         return;
       }
       router.push({
@@ -814,76 +382,78 @@ export default function AccessManagementScreen() {
         params: {
           userGuid,
           storeGuid,
-          // storeCode 供「复制同事」按分店列出同事，roleNames 用于顶部「分店 · 角色」展示。
+          // storeCode 必填：收银权限页用它按分店列出同事、复制权限。
           storeCode: store.storeCode,
-          userName,
+          userName: target.name.primary,
           storeName: store.storeName || store.storeCode,
-          roleNames: routeRoleNames.join("|"),
+          roleNames: target.roleNames.join("|"),
         },
       } as unknown as Parameters<typeof router.push>[0]);
     },
-    [routeRoleNames, router, t, userGuid, userName],
+    [router, t, target.name.primary, target.roleNames, userGuid],
   );
 
-  const retryQueries = useCallback(() => {
-    const retries: Promise<unknown>[] = [];
-    if (storesEnabled) retries.push(storesQuery.refetch());
-    if (storeCatalogEnabled) retries.push(storeCatalogQuery.refetch());
-    if (rolesEnabled && !roleAccessForbidden)
-      retries.push(rolesQuery.refetch(), roleCatalogQuery.refetch());
-    if (permissionsEnabled && !permissionAccessForbidden) {
-      retries.push(permissionAccessQuery.refetch());
+  // ───────────── 管理员点「店长」行：引导去分店设为「管理」（PR #840） ─────────────
+  const { guideManagerGrant } = editor;
+  const handleGuideManagerGrant = useCallback(() => {
+    const { plan, storeName } = guideManagerGrant();
+    switch (plan.kind) {
+      case "denied":
+        return;
+      case "already":
+        setSnackbarMessage(t("roles.grantManager.already"));
+        return;
+      case "noStore":
+        setSelectedSection("stores");
+        setSnackbarMessage(t("roles.grantManager.noStore"));
+        return;
+      case "choose":
+        setSelectedSection("stores");
+        setSnackbarMessage(t("roles.grantManager.choose"));
+        return;
+      case "set":
+        // 只有一家分店：已在草稿里设为「管理」，切到分店分段让管理员看到并点「保存」。
+        setSelectedSection("stores");
+        setSnackbarMessage(t("roles.grantManager.set", { store: storeName }));
+        return;
     }
-    void Promise.allSettled(retries);
-  }, [
-    permissionAccessQuery,
-    permissionAccessForbidden,
-    permissionsEnabled,
-    roleCatalogQuery,
-    roleAccessForbidden,
-    rolesEnabled,
-    rolesQuery,
-    storeCatalogQuery,
-    storeCatalogEnabled,
-    storesEnabled,
-    storesQuery,
-  ]);
+  }, [guideManagerGrant, t]);
 
-  const requiredQueries = [
-    ...(storesEnabled ? [storesQuery] : []),
-    ...(storeCatalogEnabled ? [storeCatalogQuery] : []),
-    ...(rolesEnabled && !roleAccessForbidden
-      ? [rolesQuery, roleCatalogQuery]
-      : []),
-    ...(permissionsEnabled && !permissionAccessForbidden
-      ? [permissionAccessQuery]
-      : []),
-  ];
-  const initialLoading = requiredQueries.some(
-    (query) =>
-      query.data === undefined && (query.isLoading || query.isFetching),
-  );
-  const initialError = requiredQueries.find(
-    (query) => query.data === undefined && query.error,
-  )?.error;
+  // ───────────── 页面状态：内容区该显示什么 ─────────────
+  const targetPending = targetQuery.isLoading || (!target.resolved && !targetErrorKind);
+  const ready =
+    Boolean(userGuid) &&
+    eligibility.canOpen &&
+    !editor.terminalErrorKind &&
+    !targetErrorKind &&
+    !targetPending &&
+    !editor.initialLoading &&
+    !editor.initialError;
+
+  // copy=1：数据就绪后直接打开「复制权限」，只开一次。
+  useEffect(() => {
+    if (!copyRequest || copyAutoOpenedRef.current || !ready) return;
+    if (eligibility.permissionsMode === "hidden" || editor.implicitAll || !editor.permissionDraft) return;
+    copyAutoOpenedRef.current = true;
+    setCopyDirection(copyRequest);
+  }, [copyRequest, editor.implicitAll, editor.permissionDraft, eligibility.permissionsMode, ready]);
+
+  const { retryQueries } = editor;
+  const refetchTarget = targetQuery.refetch;
+  const retryAll = useCallback(() => {
+    retryQueries();
+    void refetchTarget();
+  }, [refetchTarget, retryQueries]);
 
   const renderErrorState = (errorKind: UserAccessErrorKind) => (
     <EmptyState
-      title={t(`accessManagement.errors.${errorKind}Title`)}
-      description={t(`accessManagement.errors.${errorKind}Description`)}
+      title={t(`errors.${errorKind}Title`)}
+      description={t(`errors.${errorKind}Description`)}
       primaryAction={
         errorKind === "network"
-          ? {
-              label: t("common:actions.retry"),
-              icon: "refresh",
-              onPress: retryQueries,
-            }
+          ? { label: t("common:actions.retry"), icon: "refresh", onPress: retryAll }
           : errorKind === "forbidden" || errorKind === "notFound"
-            ? {
-                label: t("accessManagement.actions.back"),
-                icon: "arrow-left",
-                onPress: handleBack,
-              }
+            ? { label: t("actions.back"), icon: "arrow-left", onPress: handleBack }
             : undefined
       }
     />
@@ -900,631 +470,243 @@ export default function AccessManagementScreen() {
             : "noAccess";
     return (
       <EmptyState
-        title={t(`accessManagement.errors.${key}Title`)}
-        description={t(`accessManagement.errors.${key}Description`)}
-        primaryAction={{
-          label: t("accessManagement.actions.back"),
-          icon: "arrow-left",
-          onPress: handleBack,
-        }}
+        title={t(`errors.${key}Title`)}
+        description={t(`errors.${key}Description`)}
+        primaryAction={{ label: t("actions.back"), icon: "arrow-left", onPress: handleBack }}
       />
     );
   };
 
-  const renderStoresSection = () => {
-    if (eligibility.storesMode === "hidden") {
-      return (
-        <Text style={styles.sectionNotice}>
-          {t("accessManagement.sections.noAccess")}
-        </Text>
-      );
-    }
-    if (!storeOptions.length) {
-      return (
-        <EmptyState
-          title={t("accessManagement.stores.emptyTitle")}
-          description={t("accessManagement.stores.emptyDescription")}
-        />
-      );
-    }
-    return (
-      <View style={styles.sectionContent}>
-        {!eligibility.canGrantStoreManagement &&
-        eligibility.storesMode === "editable" ? (
-          <Text variant="bodySmall" style={styles.helperText}>
-            {t("accessManagement.stores.adminOnlyManage")}
-          </Text>
-        ) : null}
-        {storeOptions.map((store) => {
-          const state = getUserAccessStoreState(
-            storeAssignments,
-            store.storeGUID,
-          );
-          const editable = eligibility.storesMode === "editable" && !busy;
-          return (
-            <View key={store.storeGUID} style={styles.itemRow}>
-              <View style={styles.itemHeader}>
-                <View style={styles.itemText}>
-                  <Text variant="titleSmall">
-                    {store.storeName || store.storeCode}
-                  </Text>
-                  <Text variant="bodySmall" style={styles.secondaryText}>
-                    {store.storeCode}
-                  </Text>
-                </View>
-                {eligibility.canManagePos && state !== "unassigned" ? (
-                  <Button
-                    compact
-                    mode="text"
-                    icon="cash-register"
-                    disabled={busy || !store.storeGUID.trim()}
-                    accessibilityLabel={`${t("accessManagement.actions.openPos")} ${store.storeName}`}
-                    onPress={() => openPosPermissions(store)}
-                  >
-                    {t("accessManagement.actions.openPos")}
-                  </Button>
-                ) : null}
-              </View>
-              <SegmentedButtons
-                value={state}
-                onValueChange={(value) =>
-                  setStoreAssignments((current) =>
-                    setUserAccessStoreState(
-                      current,
-                      store.storeGUID,
-                      value as UserAccessStoreState,
-                    ),
-                  )
-                }
-                buttons={[
-                  {
-                    value: "unassigned",
-                    label: t(
-                      isCompactWidth
-                        ? "accessManagement.stores.unassignedCompact"
-                        : "accessManagement.stores.unassigned",
-                    ),
-                    labelStyle: isCompactWidth
-                      ? styles.compactSegmentLabel
-                      : undefined,
-                    disabled: !editable,
-                    accessibilityLabel: `${store.storeName} ${t("accessManagement.stores.unassigned")}`,
-                  },
-                  {
-                    value: "view",
-                    label: t("accessManagement.stores.view"),
-                    labelStyle: isCompactWidth
-                      ? styles.compactSegmentLabel
-                      : undefined,
-                    disabled: !editable,
-                    accessibilityLabel: `${store.storeName} ${t("accessManagement.stores.view")}`,
-                  },
-                  {
-                    value: "manage",
-                    label: t("accessManagement.stores.manage"),
-                    labelStyle: isCompactWidth
-                      ? styles.compactSegmentLabel
-                      : undefined,
-                    disabled: !editable || !eligibility.canGrantStoreManagement,
-                    accessibilityLabel: `${store.storeName} ${t("accessManagement.stores.manage")}`,
-                  },
-                ]}
-                style={styles.storeStateButtons}
-              />
-            </View>
-          );
-        })}
-        {eligibility.storesMode === "editable" ? (
-          <Button
-            mode="contained"
-            icon="content-save-outline"
-            loading={assignStoresMutation.isPending}
-            disabled={!storesDirty || busy}
-            onPress={handleSaveStores}
-            style={styles.saveButton}
-          >
-            {t("accessManagement.actions.saveStores")}
-          </Button>
-        ) : null}
-      </View>
-    );
+  const storesEditable = eligibility.storesMode === "editable" && !editor.busy;
+  const tabLabel = (key: AccessSectionKey) => {
+    const narrow = sections.length >= 4 && windowWidth <= NARROW_WIDTH;
+    const label =
+      key === "permissions" && narrow ? t("tabs.permissionsShort") : t(`tabs.${key}`);
+    const count = key === "menu" ? menuModel.openCount : editor.counts[key];
+    return `${label} · ${count}`;
   };
 
-  const renderRolesSection = () => {
-    if (eligibility.rolesMode === "hidden") {
-      return (
-        <Text style={styles.sectionNotice}>
-          {t("accessManagement.sections.noAccess")}
-        </Text>
-      );
-    }
-    if (!roleOptions.length) {
-      return (
-        <EmptyState
-          title={t("accessManagement.roles.emptyTitle")}
-          description={t("accessManagement.roles.emptyDescription")}
-        />
-      );
-    }
-    return (
-      <View style={styles.sectionContent}>
-        {!access.isAdmin ? (
-          <Text variant="bodySmall" style={styles.helperText}>
-            {t("accessManagement.roles.managerLimit")}
-          </Text>
+  const renderSection = () => {
+    switch (activeSection) {
+      case "stores":
+        return (
+          <AccessStoresSection
+            stores={editor.storeOptions}
+            assignments={editor.storeAssignments}
+            baselineAssignments={editor.baselineStoreAssignments}
+            editable={storesEditable}
+            canGrantManage={eligibility.canGrantStoreManagement}
+            canManagePos={eligibility.canManagePos}
+            isAdmin={editor.isAdmin}
+            onChangeState={editor.setStoreState}
+            onOpenPos={openPosPermissions}
+          />
+        );
+      case "roles":
+        return (
+          <AccessRolesSection
+            roles={editor.roleOptions}
+            selectedRoleGuids={editor.selectedRoleGuids}
+            hasManagedStoreAssignment={editor.hasManagedStoreAssignment}
+            isAdmin={editor.isAdmin}
+            rolesEditable={eligibility.rolesMode === "editable"}
+            storesEditable={eligibility.storesMode === "editable"}
+            canGrantStoreManagement={eligibility.canGrantStoreManagement}
+            busy={editor.busy}
+            onToggleRole={editor.toggleRole}
+            onGuideManagerGrant={handleGuideManagerGrant}
+          />
+        );
+      case "permissions":
+        return editor.permissionDraft ? (
+          <AccessPermissionsSection
+            categories={editor.visiblePermissionCategories}
+            draft={editor.permissionDraft}
+            counts={editor.permissionCounts}
+            implicitAll={editor.implicitAll}
+            isAdmin={editor.isAdmin}
+            inheritedSourceMap={editor.inheritedSourceMap}
+            editable={eligibility.permissionsMode === "editable"}
+            busy={editor.busy}
+            onToggle={editor.setPermissionChecked}
+            onCopy={openCopySheet}
+          />
         ) : (
-          <Text variant="bodySmall" style={styles.helperText}>
-            {t("accessManagement.roles.derivedAdminHint")}
-          </Text>
-        )}
-        <Searchbar
-          value={roleSearch}
-          onChangeText={setRoleSearch}
-          placeholder={t("accessManagement.roles.searchPlaceholder")}
-          accessibilityLabel={t("accessManagement.roles.searchPlaceholder")}
-          style={styles.roleSearch}
-        />
-        {!filteredRoleOptions.length ? (
-          <Text style={styles.sectionNotice}>
-            {t("accessManagement.roles.noSearchResults")}
-          </Text>
-        ) : null}
-        {filteredRoleOptions.map((role) => {
-          const localizedRoleName = localizeAccessRoleName(
-            role.roleName,
-            language,
-          );
-          const localizedRoleDescription = localizeAccessRoleDescription(
-            role.roleName,
-            role.description,
-            language,
-          );
-          const selection = getAccessRoleSelectionState({
-            role,
-            selectedRoleGuids,
-            hasManagedStoreAssignment,
-          });
-          const adminOnly =
-            !access.isAdmin && hasPrivilegedAccessRole([role.roleName]);
-          // 「店长」是由「管理」分店派生的角色，不能直接勾选；管理员点它时不是无反应，而是引导去「门店」把分店设为「管理」。
-          const managerGrantEnabled =
-            selection.derived &&
-            eligibility.canGrantStoreManagement &&
-            eligibility.storesMode === "editable";
-          const disabled =
-            busy ||
-            (selection.locked && !managerGrantEnabled) ||
-            adminOnly ||
-            eligibility.rolesMode !== "editable";
-          const guideManagerGrant = () => {
-            const plan = planStoreManagerGrant({
-              canGrantStoreManagement: eligibility.canGrantStoreManagement,
-              storesEditable: eligibility.storesMode === "editable",
-              assignments: storeAssignments,
-            });
-            if (plan.kind === "denied") return;
-            if (plan.kind === "already") {
-              setSnackbarMessage(t("accessManagement.roles.grantManager.already"));
-              return;
+          <ActivityIndicator style={styles.sectionSpinner} />
+        );
+      case "menu":
+        return editor.permissionDraft ? (
+          <AccessMenuSection
+            model={menuModel}
+            readOnly={
+              editor.busy || editor.implicitAll || eligibility.permissionsMode !== "editable"
             }
-            if (plan.kind === "noStore") {
-              setActiveSection("stores");
-              setSnackbarMessage(t("accessManagement.roles.grantManager.noStore"));
-              return;
+            onToggle={(item: AccessMenuItem, visible: boolean) =>
+              editor.setMenuPermissionCodes(item.permissionCodes, visible)
             }
-            if (plan.kind === "choose") {
-              setActiveSection("stores");
-              setSnackbarMessage(t("accessManagement.roles.grantManager.choose"));
-              return;
-            }
-            // 只有一家分店：在草稿里把它设为「管理」，并切到「门店」让管理员看到并点「保存门店」。
-            const target = storeOptions.find((item) => item.storeGUID === plan.storeGUID);
-            setStoreAssignments((current) =>
-              setUserAccessStoreState(current, plan.storeGUID, "manage"),
-            );
-            setActiveSection("stores");
-            setSnackbarMessage(
-              t("accessManagement.roles.grantManager.set", {
-                store: target?.storeName ?? target?.storeCode ?? "",
-              }),
-            );
-          };
-          const toggleRole = () => {
-            if (selection.derived) {
-              if (!busy && managerGrantEnabled) guideManagerGrant();
-              return;
-            }
-            if (disabled) return;
-            setSelectedRoleGuids((current) =>
-              selection.selected
-                ? current.filter((roleGuid) => roleGuid !== role.roleGUID)
-                : [...current, role.roleGUID],
-            );
-          };
-          return (
-            <TouchableRipple
-              key={role.roleGUID}
-              disabled={disabled}
-              onPress={toggleRole}
-              accessibilityRole="checkbox"
-              accessibilityLabel={localizedRoleName}
-              accessibilityHint={localizedRoleDescription}
-              accessibilityState={{ checked: selection.selected, disabled }}
-            >
-              <View style={styles.selectionRow}>
-                <View style={styles.itemText}>
-                  <View style={styles.labelRow}>
-                    <Text variant="bodyLarge">{localizedRoleName}</Text>
-                    {selection.derived ? (
-                      <Chip compact icon="source-branch">
-                        {t("accessManagement.roles.derived")}
-                      </Chip>
-                    ) : adminOnly ? (
-                      <Chip compact icon="shield-lock-outline">
-                        {t("accessManagement.roles.adminOnly")}
-                      </Chip>
-                    ) : null}
-                  </View>
-                  <Text variant="bodySmall" style={styles.secondaryText}>
-                    {localizedRoleDescription}
-                  </Text>
-                </View>
-                <Checkbox
-                  status={selection.selected ? "checked" : "unchecked"}
-                  disabled={disabled || selection.derived}
-                />
-              </View>
-            </TouchableRipple>
-          );
-        })}
-        <Button
-          mode="contained"
-          icon="content-save-outline"
-          loading={assignRolesMutation.isPending}
-          disabled={!rolesDirty || busy}
-          onPress={handleSaveRoles}
-          style={styles.saveButton}
-        >
-          {t("accessManagement.actions.saveRoles")}
-        </Button>
-      </View>
-    );
-  };
-
-  const renderPermissionsSection = () => {
-    if (eligibility.permissionsMode === "hidden") {
-      return (
-        <Text style={styles.sectionNotice}>
-          {t("accessManagement.sections.noAccess")}
-        </Text>
-      );
+          />
+        ) : (
+          <ActivityIndicator style={styles.sectionSpinner} />
+        );
+      default:
+        return <Text style={styles.sectionNotice}>{t("errors.sectionNoAccess")}</Text>;
     }
-    const categories = permissionAccessQuery.data?.categories ?? [];
-    if (!permissionDraft || !categories.length) {
-      return (
-        <EmptyState
-          title={t("accessManagement.permissions.emptyTitle")}
-          description={t("accessManagement.permissions.emptyDescription")}
-        />
-      );
-    }
-    const implicitAll =
-      permissionAccessQuery.data?.state.implicitAllPermissions === true;
-    const effectiveCount = implicitAll
-      ? categories.reduce(
-          (count, category) => count + category.permissions.length,
-          0,
-        )
-      : new Set([
-          ...permissionDraft.inheritedPermissionCodes,
-          ...permissionDraft.selectedCodes,
-        ]).size;
-    return (
-      <View style={styles.sectionContent}>
-        {!access.isAdmin ? (
-          <Text variant="bodySmall" style={styles.helperText}>
-            {t("accessManagement.permissions.managerLimit")}
-          </Text>
-        ) : null}
-        <Text variant="bodySmall" style={styles.helperText}>
-          {t("accessManagement.permissions.summary", {
-            effective: effectiveCount,
-            inherited: permissionDraft.inheritedPermissionCodes.length,
-            direct: permissionDraft.selectedCodes.length,
-          })}
-        </Text>
-        {!implicitAll ? (
-          <View style={styles.copyActions}>
-            <Button
-              mode="outlined"
-              compact
-              icon="account-multiple-plus-outline"
-              disabled={busy}
-              onPress={() => openCopySheet("toOthers")}
-              style={styles.copyButton}
-              accessibilityLabel={t("accessManagement.copy.toOthersAction")}
-            >
-              {t("accessManagement.copy.toOthersAction")}
-            </Button>
-            <Button
-              mode="outlined"
-              compact
-              icon="account-arrow-left-outline"
-              disabled={busy}
-              onPress={() => openCopySheet("fromColleague")}
-              style={styles.copyButton}
-              accessibilityLabel={t("accessManagement.copy.fromColleagueAction")}
-            >
-              {t("accessManagement.copy.fromColleagueAction")}
-            </Button>
-          </View>
-        ) : null}
-        {categories.map((category) => {
-          const localizedCategory = localizeAccessPermissionCategory(
-            category.category || category.displayName,
-            language,
-          );
-          return (
-            <View key={category.category} style={styles.permissionGroup}>
-              <Text variant="titleSmall" accessibilityRole="header">
-                {localizedCategory}
-              </Text>
-              <Text variant="bodySmall" style={styles.secondaryText}>
-                {t("accessManagement.permissions.categoryDescription", {
-                  category: localizedCategory,
-                })}
-              </Text>
-              {category.permissions.map((permission) => {
-                const localizedPermission = localizeAccessPermission(
-                  permission,
-                  language,
-                );
-                const selection = getAccessPermissionSelectionState(
-                  permissionDraft,
-                  permission.name,
-                );
-                const sources = inheritedSourceMap.get(permission.name) ?? [];
-                const isPosAccountDefault =
-                  permission.name.startsWith("Permissions.PosTerminal.") ||
-                  permission.name.startsWith("PosTerminal.");
-                const disabled = busy || implicitAll || selection.locked;
-                return (
-                  <View key={permission.name} style={styles.permissionRow}>
-                    <View style={styles.itemText}>
-                      <View style={styles.labelRow}>
-                        <Text variant="bodyLarge">
-                          {localizedPermission.name}
-                        </Text>
-                        {implicitAll ? (
-                          <Chip compact>
-                            {t("accessManagement.permissions.implicit")}
-                          </Chip>
-                        ) : selection.inherited ? (
-                          <Chip compact>
-                            {t("accessManagement.permissions.inherited")}
-                          </Chip>
-                        ) : selection.direct ? (
-                          <Chip compact>
-                            {t("accessManagement.permissions.direct")}
-                          </Chip>
-                        ) : null}
-                        {isPosAccountDefault ? (
-                          <Chip compact icon="account-outline">
-                            {t("accessManagement.permissions.accountDefault")}
-                          </Chip>
-                        ) : null}
-                      </View>
-                      {localizedPermission.description ? (
-                        <Text variant="bodySmall" style={styles.secondaryText}>
-                          {localizedPermission.description}
-                        </Text>
-                      ) : null}
-                      {sources.length ? (
-                        <Text variant="bodySmall" style={styles.secondaryText}>
-                          {t("accessManagement.permissions.source", {
-                            roles: sources.join(", "),
-                          })}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <Switch
-                      value={implicitAll || selection.checked}
-                      disabled={disabled}
-                      accessibilityLabel={localizedPermission.name}
-                      accessibilityHint={localizedPermission.description}
-                      onValueChange={(checked) =>
-                        setPermissionDraft((current) =>
-                          current
-                            ? toggleDirectPermission(
-                                current,
-                                permission.name,
-                                checked,
-                              )
-                            : current,
-                        )
-                      }
-                    />
-                  </View>
-                );
-              })}
-            </View>
-          );
-        })}
-        {!permissionAccessQuery.data?.state.implicitAllPermissions ? (
-          <Button
-            mode="contained"
-            icon="content-save-outline"
-            loading={assignPermissionsMutation.isPending}
-            disabled={!permissionsDirty || busy}
-            onPress={handleSavePermissions}
-            style={styles.saveButton}
-          >
-            {t("accessManagement.actions.savePermissions")}
-          </Button>
-        ) : null}
-      </View>
-    );
   };
 
   let content;
   if (!userGuid) {
     content = (
       <EmptyState
-        title={t("accessManagement.errors.invalidTitle")}
-        description={t("accessManagement.errors.invalidDescription")}
-        primaryAction={{
-          label: t("accessManagement.actions.back"),
-          icon: "arrow-left",
-          onPress: handleBack,
-        }}
+        title={t("errors.invalidTitle")}
+        description={t("errors.invalidDescription")}
+        primaryAction={{ label: t("actions.back"), icon: "arrow-left", onPress: handleBack }}
       />
     );
   } else if (!eligibility.canOpen) {
     content = renderEligibilityError();
-  } else if (terminalErrorKind) {
-    content = renderErrorState(terminalErrorKind);
-  } else if (initialLoading) {
+  } else if (editor.terminalErrorKind) {
+    content = renderErrorState(editor.terminalErrorKind);
+  } else if (targetErrorKind) {
+    content = renderErrorState(targetErrorKind);
+  } else if (targetPending || editor.initialLoading) {
     content = (
       <View style={styles.centerState}>
         <ActivityIndicator />
-        <Text style={styles.secondaryText}>
-          {t("accessManagement.loading")}
-        </Text>
+        <Text style={styles.secondaryText}>{t("loading")}</Text>
       </View>
     );
-  } else if (initialError) {
-    content = renderErrorState(classifyUserAccessError(initialError));
+  } else if (editor.initialError) {
+    content = renderErrorState(classifyUserAccessError(editor.initialError));
   } else {
-    const sectionTitle = t(`accessManagement.sections.${activeSection}`);
-    const descriptionKey =
-      activeSection === "stores"
-        ? "storesDescription"
-        : activeSection === "roles"
-          ? "rolesDescription"
-          : "permissionsDescription";
     content = (
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Card mode="outlined" style={styles.identityCard}>
-          <Card.Content style={styles.identityContent}>
-            <Avatar.Text
-              size={44}
-              label={getInitials(userName)}
-              style={styles.avatar}
+      <>
+        {sections.length > 0 ? (
+          <View style={styles.tabsWrap}>
+            <SegmentTabs
+              items={sections.map((key) => ({ key, label: tabLabel(key) }))}
+              value={activeSection ?? sections[0]}
+              onChange={setSelectedSection}
             />
-            <View style={styles.identityText}>
-              <Text variant="titleMedium" accessibilityRole="header">
-                {userName}
-              </Text>
-              {username ? (
-                <Text style={styles.secondaryText}>{username}</Text>
-              ) : null}
-              <Text variant="bodySmall" style={styles.secondaryText}>
-                {t("accessManagement.identity.userId", { value: userGuid })}
-              </Text>
-            </View>
-            <Chip compact icon="account-key-outline">
-              {t("accessManagement.identity.roleCount", {
-                count: targetRoleNames.length,
-              })}
-            </Chip>
-          </Card.Content>
-        </Card>
-
-        <SegmentedButtons
-          value={activeSection}
-          onValueChange={(value) => setActiveSection(value as AccessSection)}
-          buttons={[
-            ...(eligibility.storesMode !== "hidden"
-              ? [
-                  {
-                    value: "stores",
-                    icon: isCompactWidth ? undefined : "store-outline",
-                    label: t("accessManagement.sections.storesTab"),
-                    labelStyle: isCompactWidth
-                      ? styles.compactSegmentLabel
-                      : undefined,
-                    accessibilityLabel: t("accessManagement.sections.stores"),
-                  },
-                ]
-              : []),
-            ...(eligibility.rolesMode !== "hidden"
-              ? [
-                  {
-                    value: "roles",
-                    icon: isCompactWidth ? undefined : "account-group-outline",
-                    label: t("accessManagement.sections.rolesTab"),
-                    labelStyle: isCompactWidth
-                      ? styles.compactSegmentLabel
-                      : undefined,
-                    accessibilityLabel: t("accessManagement.sections.roles"),
-                  },
-                ]
-              : []),
-            ...(eligibility.permissionsMode !== "hidden"
-              ? [
-                  {
-                    value: "permissions",
-                    icon: isCompactWidth ? undefined : "shield-key-outline",
-                    label: t("accessManagement.sections.permissionsTab"),
-                    labelStyle: isCompactWidth
-                      ? styles.compactSegmentLabel
-                      : undefined,
-                    accessibilityLabel: t(
-                      "accessManagement.sections.permissions",
-                    ),
-                  },
-                ]
-              : []),
-          ]}
-        />
-
-        <Card mode="outlined" style={styles.sectionCard}>
-          <Card.Content style={styles.cardContent}>
-            <Text variant="titleMedium" accessibilityRole="header">
-              {sectionTitle}
-            </Text>
-            <Text variant="bodySmall" style={styles.secondaryText}>
-              {t(`accessManagement.sections.${descriptionKey}`)}
-            </Text>
-            {activeSection === "stores"
-              ? renderStoresSection()
-              : activeSection === "roles"
-                ? renderRolesSection()
-                : renderPermissionsSection()}
-          </Card.Content>
-        </Card>
-      </ScrollView>
+          </View>
+        ) : null}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {saveNotice ? (
+            <NoticeBox tone="red" icon="alert-circle-outline">
+              {saveNotice.join("\n")}
+            </NoticeBox>
+          ) : null}
+          {renderSection()}
+        </ScrollView>
+      </>
     );
   }
 
+  // ───────────── 吸底保存栏：写明改了什么，没改动时灰掉 ─────────────
+  const summary = editor.changeSummary;
+  const { permissionNameResolver, storeOptions } = editor;
+  const changeLine = useMemo(() => {
+    const storeName = (guid: string) => {
+      const store = storeOptions.find((item) => item.storeGUID === guid);
+      return store?.storeName || store?.storeCode || guid;
+    };
+    const described = describeAccessChanges(
+      summary.items,
+      {
+        store: (item) =>
+          t("changes.store", {
+            store: storeName(item.storeGuid),
+            from: t(`stores.${item.from}`),
+            to: t(`stores.${item.to}`),
+          }),
+        role: (item) =>
+          t(item.change === "added" ? "changes.roleAdded" : "changes.roleRemoved", {
+            name: localizeAccessRoleName(item.roleName, language),
+          }),
+        permission: (item) =>
+          t(item.change === "added" ? "changes.permissionAdded" : "changes.permissionRemoved", {
+            name: permissionNameResolver(item.code),
+          }),
+      },
+      2,
+    );
+    const parts = [...described.parts];
+    if (summary.managerDerived) {
+      parts.push(t(summary.managerDerived === "gain" ? "saveBar.managerGain" : "saveBar.managerLose"));
+    }
+    const line = parts.join(t("saveBar.partSeparator"));
+    return described.hiddenCount > 0 ? t("saveBar.moreChanges", { parts: line }) : line;
+  }, [language, permissionNameResolver, storeOptions, summary, t]);
+
+  const dirty = editor.dirty;
+  const barSummary = editor.saving
+    ? t("saveBar.saving")
+    : dirty
+      ? t("saveBar.dirty", { count: Math.max(summary.total, 1) })
+      : t("saveBar.clean");
+  const barHint = dirty
+    ? changeLine
+    : activeSection === "permissions"
+      ? t("saveBar.hintPermissions")
+      : t("saveBar.hintClean");
+
+  const onBarLayout = (event: LayoutChangeEvent) => setBarHeight(event.nativeEvent.layout.height);
+
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={["top", "left", "right", "bottom"]}
-    >
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right", "bottom"]}>
       <Stack.Screen options={{ headerBackButtonMenuEnabled: false }} />
-      <Surface style={styles.header} elevation={1}>
+      <View style={styles.header}>
         <IconButton
-          icon="arrow-left"
-          accessibilityLabel={t("accessManagement.actions.back")}
-          disabled={busy}
+          icon="chevron-left"
+          size={26}
+          accessibilityLabel={t("actions.back")}
+          disabled={editor.busy}
           onPress={handleBack}
         />
-        <Text variant="titleLarge" numberOfLines={1} style={styles.headerTitle}>
-          {t("accessManagement.title")}
-        </Text>
-      </Surface>
+        <View style={styles.headerText}>
+          <Text accessibilityRole="header" style={styles.title} numberOfLines={1}>
+            {t("title")}
+          </Text>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {target.name.primary || target.username || t("unknownUser")}
+            {target.name.nickname ? (
+              <Text style={styles.subtitleNickname}>{` 「${target.name.nickname}」`}</Text>
+            ) : null}
+            {target.username ? ` · @${target.username}` : ""}
+          </Text>
+        </View>
+      </View>
       <View style={styles.body}>{content}</View>
+      {ready && sections.length > 0 ? (
+        <View onLayout={onBarLayout}>
+          <StickyActionBar summary={barSummary} hint={barHint}>
+            <Button
+              mode="contained"
+              loading={editor.saving}
+              disabled={!dirty || editor.busy}
+              onPress={() => void handleSave()}
+              style={styles.saveButton}
+              contentStyle={BUSINESS_UI.buttonContent}
+              accessibilityLabel={t("actions.save")}
+              testID="access-save-button"
+            >
+              {t("actions.save")}
+            </Button>
+          </StickyActionBar>
+        </View>
+      ) : null}
       {copyDirection ? (
         <PermissionCopySheet
-          direction={copyDirection}
+          initialDirection={copyDirection}
           currentEmployeeGuid={userGuid}
-          currentEmployeeName={userName}
-          storeCode={copyStoreCode}
-          actorUserGuid={actorUserGuid}
-          resolvePermissionName={permissionNameResolver}
-          onPreview={handlePreviewCopy}
-          onCommit={handleCommitCopy}
+          currentEmployeeName={target.name.primary || target.username}
+          storeFilter={copyStoreFilter}
+          actorUserGuid={editor.actorUserGuid}
+          resolvePermissionName={editor.permissionNameResolver}
+          onPreview={editor.previewCopy}
+          onCommit={editor.commitCopy}
           onDismiss={() => setCopyDirection(null)}
           onCopied={handleCopied}
         />
@@ -1532,6 +714,7 @@ export default function AccessManagementScreen() {
       <Snackbar
         visible={Boolean(snackbarMessage)}
         duration={2800}
+        wrapperStyle={{ bottom: ready ? barHeight : 0 }}
         onDismiss={() => setSnackbarMessage("")}
       >
         {snackbarMessage}
@@ -1544,75 +727,32 @@ const styles = StyleSheet.create({
   safeArea: BUSINESS_UI.screen,
   body: { flex: 1 },
   header: {
-    minHeight: 56,
-    flexDirection: "row",
     alignItems: "center",
     backgroundColor: HB_COLORS.white,
     borderBottomColor: HB_COLORS.outlineMuted,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingRight: HB_SPACING.sm,
+    flexDirection: "row",
+    minHeight: 60,
+    paddingRight: HB_SPACING.md,
   },
-  headerTitle: { ...BUSINESS_UI.sectionTitle, flex: 1 },
-  centerState: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    padding: 24,
+  headerText: { flex: 1, minWidth: 0 },
+  title: { color: HB_COLORS.textPrimary, fontSize: 19, fontWeight: "800", lineHeight: 25 },
+  subtitle: { color: HB_COLORS.textSecondary, fontSize: 12.5, lineHeight: 17 },
+  subtitleNickname: { color: HB_COLORS.textSecondary, fontSize: 12, fontWeight: "600" },
+  tabsWrap: { paddingHorizontal: HB_SPACING.md, paddingTop: HB_SPACING.sm, paddingBottom: HB_SPACING.xxs },
+  scrollContent: {
+    gap: 10,
+    paddingBottom: HB_SPACING.lg,
+    paddingHorizontal: HB_SPACING.md,
+    paddingTop: HB_SPACING.xs,
   },
-  scrollContent: { ...BUSINESS_UI.content, paddingBottom: HB_SPACING.xl },
-  identityCard: BUSINESS_UI.section,
-  identityContent: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.sm },
-  avatar: { backgroundColor: HB_COLORS.action },
-  identityText: { flex: 1, gap: 2 },
-  sectionCard: BUSINESS_UI.section,
-  cardContent: { ...BUSINESS_UI.sectionContent, gap: HB_SPACING.xs },
-  sectionContent: { gap: HB_SPACING.xs, paddingTop: HB_SPACING.xxs },
-  roleSearch: { backgroundColor: HB_COLORS.surfaceMuted },
-  sectionNotice: { color: HB_COLORS.textSecondary, paddingVertical: HB_SPACING.lg, textAlign: "center" },
-  helperText: {
+  centerState: { alignItems: "center", flex: 1, gap: 12, justifyContent: "center", padding: 24 },
+  sectionSpinner: { paddingVertical: HB_SPACING.lg },
+  sectionNotice: {
     color: HB_COLORS.textSecondary,
-    backgroundColor: HB_COLORS.surfaceMuted,
-    padding: HB_SPACING.sm,
-    borderRadius: HB_RADIUS.control,
+    paddingVertical: HB_SPACING.lg,
+    textAlign: "center",
   },
-  itemRow: {
-    gap: HB_SPACING.xs,
-    paddingVertical: HB_SPACING.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HB_COLORS.outlineMuted,
-  },
-  itemHeader: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
-  itemText: { flex: 1, gap: 2 },
-  labelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: HB_SPACING.xs,
-  },
-  selectionRow: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: HB_SPACING.sm,
-    paddingVertical: HB_SPACING.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HB_COLORS.outlineMuted,
-  },
-  storeStateButtons: { width: "100%" },
-  compactSegmentLabel: { fontSize: 13 },
-  permissionGroup: { gap: HB_SPACING.xs, paddingTop: HB_SPACING.xs },
-  permissionRow: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: HB_SPACING.sm,
-    paddingVertical: HB_SPACING.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HB_COLORS.outlineMuted,
-  },
-  copyActions: { flexDirection: "row", gap: HB_SPACING.xs },
-  copyButton: { flex: 1, borderRadius: HB_RADIUS.control },
-  saveButton: { ...BUSINESS_UI.button, alignSelf: "stretch", marginTop: HB_SPACING.xxs },
   secondaryText: { color: HB_COLORS.textSecondary },
+  saveButton: { ...BUSINESS_UI.button, minWidth: 104 },
 });
