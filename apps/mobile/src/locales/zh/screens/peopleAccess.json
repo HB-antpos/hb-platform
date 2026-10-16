@@ -21,6 +21,7 @@
     "saving": "正在保存…",
     "hintClean": "分店、角色、直接权限的改动会一起保存",
     "hintPermissions": "继承来的权限要在角色里改",
+    "partSeparator": "；",
     "moreChanges": "{{parts}} 等",
     "managerGain": "店长角色将自动获得",
     "managerLose": "店长角色将自动移除"

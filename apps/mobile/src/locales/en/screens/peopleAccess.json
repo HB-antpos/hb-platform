@@ -21,6 +21,7 @@
     "saving": "Saving…",
     "hintClean": "Store, role and direct permission changes are saved together",
     "hintPermissions": "Inherited permissions are changed in Roles",
+    "partSeparator": "; ",
     "moreChanges": "{{parts}} and more",
     "managerGain": "Store manager role will be added automatically",
     "managerLose": "Store manager role will be removed automatically"

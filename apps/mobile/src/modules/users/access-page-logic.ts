@@ -11,6 +11,13 @@
  * - 目标用户自取：路由参数仅作预填，服务端数据到位后以服务端为准。
  */
 import { resolvePersonName, type ResolvedPersonName } from "@/modules/people/person-name";
+import type { RoleMenuDefinition } from "@/modules/identity-admin/role-logic";
+import {
+  splitMobileMenuItems,
+  userMenuPermissionState,
+  type MobileMenuItem,
+  type MobileMenuSection,
+} from "@/modules/identity-admin/user-authorization-logic";
 import {
   classifyUserAccessError,
   getAccessPermissionSelectionState,
@@ -21,6 +28,7 @@ import {
 } from "./access-management";
 import type {
   AccessStoreOption,
+  CopyPermissionDirection,
   DirectPermissionDraft,
   UserAccessErrorKind,
   UserAccessRole,
@@ -52,10 +60,17 @@ export function parseAccessSectionParam(
     : null;
 }
 
-/** 路由参数 `copy=1`：进入页面后直接打开「复制权限」。 */
-export function parseAccessCopyParam(value: string | null | undefined) {
+/**
+ * 路由参数 `copy`：进入页面后直接打开「复制权限」，返回要打开的方向，没有请求返回 null。
+ * `copy=1`（详情页「复制权限给他人」入口）= 复制给他人；也接受显式的 `toOthers` / `fromColleague`。
+ */
+export function parseAccessCopyParam(
+  value: string | null | undefined,
+): CopyPermissionDirection | null {
   const normalized = (value ?? "").trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  if (normalized === "1" || normalized === "true" || normalized === "toothers") return "toOthers";
+  if (normalized === "fromcolleague") return "fromColleague";
+  return null;
 }
 
 /**
@@ -83,6 +98,28 @@ export function pickAccessSection(
 ): AccessSectionKey | null {
   if (preferred && available.includes(preferred)) return preferred;
   return available[0] ?? null;
+}
+
+/**
+ * 旧管理员授权路由（/user-admin/[userGuid]/access）改成重定向壳时要带到新路由的参数：
+ * 原样透传所有字符串参数（旧版 App、推送、书签都可能带 userGuid / section 等），
+ * 只把旧的 section=mobile 映射成 menu；无法识别的 section 丢掉，让新页面回落到第一个分段。
+ */
+export function buildAccessRedirectParams(
+  params: Record<string, string | string[] | undefined>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(params)) {
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (value === undefined || value === "") continue;
+    result[key] = value;
+  }
+  if (result.section !== undefined) {
+    const section = parseAccessSectionParam(result.section);
+    if (section) result.section = section;
+    else delete result.section;
+  }
+  return result;
 }
 
 // ───────────────────────── 目标用户自取 ─────────────────────────
@@ -419,10 +456,11 @@ export function excludePosPermissionCategories<
 }
 
 /** 按关键词过滤权限；`textOf` 返回该权限可被搜索的文字（名称、说明、权限码、分类名等）。 */
-export function filterPermissionCategories<
-  P extends { name: string },
-  C extends { permissions: P[] },
->(categories: C[], keyword: string, textOf: (permission: P, category: C) => string): C[] {
+export function filterPermissionCategories<C extends { permissions: { name: string }[] }>(
+  categories: C[],
+  keyword: string,
+  textOf: (permission: C["permissions"][number], category: C) => string,
+): C[] {
   const normalized = keyword.trim().toLowerCase();
   if (!normalized) return categories;
   return categories
@@ -712,6 +750,41 @@ export async function runAccessSaveSteps(
   return outcome;
 }
 
+export interface AccessSaveReportText {
+  sectionLabel: (key: AccessSaveStepKey) => string;
+  /** 把多个分段名拼成一句（中文用顿号）。 */
+  join: (items: string[]) => string;
+  savedLine: (sections: string) => string;
+  failedLine: (section: string, reason: string) => string;
+  notRunLine: (sections: string) => string;
+  retryHint: string;
+  /** 把失败原因转成给用户看的一句话。 */
+  reasonOf: (error: unknown) => string;
+}
+
+/**
+ * 部分失败 / 全部失败时告诉用户的几行话：哪些已保存、哪一步失败（含原因）、哪些没执行，
+ * 最后说明未保存的改动仍保留、可重试。全部成功或身份中止时不需要这些行，返回空数组。
+ */
+export function buildAccessSaveReportLines(
+  outcome: AccessSaveOutcome,
+  text: AccessSaveReportText,
+): string[] {
+  if (!outcome.failed) return [];
+  const lines: string[] = [];
+  if (outcome.saved.length > 0) {
+    lines.push(text.savedLine(text.join(outcome.saved.map(text.sectionLabel))));
+  }
+  lines.push(
+    text.failedLine(text.sectionLabel(outcome.failed.key), text.reasonOf(outcome.failed.error)),
+  );
+  if (outcome.notRun.length > 0) {
+    lines.push(text.notRunLine(text.join(outcome.notRun.map(text.sectionLabel))));
+  }
+  lines.push(text.retryHint);
+  return lines;
+}
+
 export type AccessSaveVerdict =
   "nothing" | "success" | "partial" | "failed" | "aborted";
 
@@ -720,4 +793,68 @@ export function classifyAccessSaveOutcome(outcome: AccessSaveOutcome): AccessSav
   if (outcome.aborted) return "aborted";
   if (outcome.failed) return outcome.saved.length > 0 ? "partial" : "failed";
   return outcome.saved.length > 0 ? "success" : "nothing";
+}
+
+// ───────────────────────── 菜单（管理员）─────────────────────────
+
+export interface AccessMenuItem extends MobileMenuItem {
+  /** 固定入口（始终可见，不能改）。 */
+  fixed: boolean;
+  /** 仅管理员可见的入口。 */
+  requireAdmin: boolean;
+  inherited: boolean;
+  direct: boolean;
+}
+
+export interface AccessMenuModel {
+  items: AccessMenuItem[];
+  sections: Record<MobileMenuSection, AccessMenuItem[]>;
+  /** 分段上的计数：已开放的菜单数。 */
+  openCount: number;
+}
+
+/**
+ * 「菜单」分段（原管理员授权页的「移动端菜单」，行为完全保留）：
+ * 只取移动端菜单定义（按 key 去重），可见性 / 是否锁定都由目标当前的直接权限草稿推算，
+ * 开关改的就是同一份直接权限草稿，所以它和「直接权限」共用同一个保存步骤。
+ */
+export function buildAccessMenuModel(input: {
+  definitions: RoleMenuDefinition[];
+  draft: DirectPermissionDraft | null;
+  assignableCodes: string[];
+  state: { isSuperAdmin: boolean; implicitAllPermissions: boolean } | null;
+}): AccessMenuModel {
+  const seen = new Set<string>();
+  const definitions = input.definitions.filter((definition) => {
+    if (definition.platform !== "mobile" || seen.has(definition.key)) return false;
+    seen.add(definition.key);
+    return true;
+  });
+  if (!input.draft || !input.state) {
+    return { items: [], sections: splitMobileMenuItems([]), openCount: 0 };
+  }
+  const items = definitions.map((definition): AccessMenuItem => {
+    const state = userMenuPermissionState(
+      definition,
+      input.draft!,
+      input.assignableCodes,
+      input.state!,
+    );
+    return {
+      key: definition.key,
+      title: definition.title,
+      permissionCodes: definition.permissionCodes,
+      visible: state.visible,
+      locked: state.locked,
+      fixed: definition.fixed === true,
+      requireAdmin: definition.requireAdmin === true,
+      inherited: state.inherited,
+      direct: state.direct,
+    };
+  });
+  return {
+    items,
+    sections: splitMobileMenuItems(items),
+    openCount: items.filter((item) => item.visible).length,
+  };
 }

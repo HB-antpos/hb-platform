@@ -4,6 +4,9 @@ import {
   accessTargetFromIdentityUser,
   accessTargetFromStoreUser,
   buildAccessChangeSummary,
+  buildAccessMenuModel,
+  buildAccessRedirectParams,
+  buildAccessSaveReportLines,
   buildAccessStoreOptions,
   classifyAccessSaveOutcome,
   classifyAccessTargetError,
@@ -45,10 +48,11 @@ assert.equal(parseAccessSectionParam("menu"), "menu");
 assert.equal(parseAccessSectionParam("mobile"), "menu", "旧管理员授权页的 mobile 要映射成 menu");
 assert.equal(parseAccessSectionParam("whatever"), null);
 assert.equal(parseAccessSectionParam(undefined), null);
-assert.equal(parseAccessCopyParam("1"), true);
-assert.equal(parseAccessCopyParam("true"), true);
-assert.equal(parseAccessCopyParam("0"), false);
-assert.equal(parseAccessCopyParam(undefined), false);
+assert.equal(parseAccessCopyParam("1"), "toOthers", "copy=1 来自详情页的「复制权限给他人」");
+assert.equal(parseAccessCopyParam("true"), "toOthers");
+assert.equal(parseAccessCopyParam("fromColleague"), "fromColleague");
+assert.equal(parseAccessCopyParam("0"), null);
+assert.equal(parseAccessCopyParam(undefined), null);
 
 assert.deepEqual(
   listAccessSections({ storesMode: "editable", rolesMode: "editable", permissionsMode: "editable", isAdmin: true }),
@@ -73,6 +77,22 @@ assert.equal(pickAccessSection(["stores", "roles"], "roles"), "roles");
 assert.equal(pickAccessSection(["stores", "roles"], "menu"), "stores", "期望分段不可见时落到第一个可见分段");
 assert.equal(pickAccessSection(["roles"], null), "roles");
 assert.equal(pickAccessSection([], "stores"), null);
+
+// 旧管理员路由的重定向参数：透传，只把 section=mobile 映射成 menu。
+assert.deepEqual(
+  buildAccessRedirectParams({ userGuid: "u1", section: "mobile" }),
+  { userGuid: "u1", section: "menu" },
+);
+assert.deepEqual(
+  buildAccessRedirectParams({ userGuid: ["u1", "u2"], storeCode: "B1", section: "roles", copy: "1", empty: "", skip: undefined }),
+  { userGuid: "u1", storeCode: "B1", section: "roles", copy: "1" },
+  "数组取第一个，空值和 undefined 丢掉，其余原样透传",
+);
+assert.deepEqual(
+  buildAccessRedirectParams({ userGuid: "u1", section: "unknown" }),
+  { userGuid: "u1" },
+  "无法识别的 section 丢掉，新页面回落到第一个分段",
+);
 
 // ───────────── 目标用户自取：预填 + 服务端为准 ─────────────
 assert.equal(parseAccessTargetStatus("0"), 0);
@@ -434,6 +454,41 @@ assert.deepEqual(
   { parts: [], hiddenCount: 0 },
 );
 
+// ───────────── 菜单分段（管理员） ─────────────
+const menuDefinitions = [
+  { key: "settings", title: "我的", platform: "mobile" as const, permissionCodes: [], fixed: true },
+  { key: "reports", title: "报表", platform: "mobile" as const, permissionCodes: ["Reports.View"] },
+  { key: "reports", title: "报表(重复)", platform: "mobile" as const, permissionCodes: ["Reports.View"] },
+  { key: "/system/users", title: "用户管理", platform: "web" as const, permissionCodes: ["Users.View"] },
+  { key: "device-management", title: "设备管理", platform: "mobile" as const, permissionCodes: ["Orders.View"] },
+];
+const menuModel = buildAccessMenuModel({
+  definitions: menuDefinitions,
+  draft: {
+    baselineCodes: ["Orders.View"],
+    selectedCodes: ["Orders.View"],
+    inheritedPermissionCodes: ["Reports.View"],
+  },
+  assignableCodes: ["Orders.View", "Reports.View"],
+  state: { isSuperAdmin: false, implicitAllPermissions: false },
+});
+assert.deepEqual(menuModel.items.map((item) => item.key), ["settings", "reports", "device-management"], "只取移动端菜单并按 key 去重");
+assert.equal(menuModel.items[0].visible, true, "固定入口始终可见");
+assert.equal(menuModel.items[0].locked, true, "固定入口不能改");
+assert.equal(menuModel.items[1].visible, true, "角色继承的菜单可见");
+assert.equal(menuModel.items[1].locked, true, "角色继承的菜单要在角色里改");
+assert.equal(menuModel.items[2].visible, true, "直接授权的菜单可见");
+assert.equal(menuModel.items[2].locked, false, "直接授权且可分配的菜单可以关");
+assert.equal(menuModel.openCount, 3);
+assert.deepEqual(menuModel.sections.bottom.map((item) => item.key), ["settings"]);
+assert.deepEqual(menuModel.sections.reports.map((item) => item.key), ["reports"]);
+assert.deepEqual(menuModel.sections.operations.map((item) => item.key), ["device-management"]);
+assert.deepEqual(
+  buildAccessMenuModel({ definitions: menuDefinitions, draft: null, assignableCodes: [], state: null }).items,
+  [],
+  "权限数据没加载出来时不给菜单",
+);
+
 // ───────────── 保存顺序与部分失败 ─────────────
 assert.deepEqual([...ACCESS_SAVE_ORDER], ["stores", "roles", "permissions"]);
 assert.deepEqual(planAccessSaveSteps({ permissions: true, stores: true }), ["stores", "permissions"], "固定顺序：分店 → 角色 → 直接权限，只挑有改动的");
@@ -499,6 +554,41 @@ async function runSaveSequenceTests() {
     "nothing",
     "没有任何改动时什么都不提交",
   );
+
+  // 部分失败要明确告诉用户：哪些已保存、哪一步失败（含原因）、哪些没执行，以及草稿仍保留可重试。
+  const reportText = {
+    sectionLabel: (key: AccessSaveStep["key"]) => ({ stores: "分店", roles: "角色", permissions: "直接权限" })[key],
+    join: (items: string[]) => items.join("、"),
+    savedLine: (sections: string) => `已保存：${sections}`,
+    failedLine: (section: string, reason: string) => `保存失败：${section}（${reason}）`,
+    notRunLine: (sections: string) => `未执行：${sections}`,
+    retryHint: "未保存的改动仍然保留",
+    reasonOf: (error: unknown) => (error as Error).message,
+  };
+  {
+    const { step } = recorder(["roles"]);
+    const outcome = await runAccessSaveSteps([step("stores"), step("roles"), step("permissions")]);
+    assert.deepEqual(buildAccessSaveReportLines(outcome, reportText), [
+      "已保存：分店",
+      "保存失败：角色（roles failed）",
+      "未执行：直接权限",
+      "未保存的改动仍然保留",
+    ]);
+  }
+  {
+    const { step } = recorder(["stores"]);
+    const outcome = await runAccessSaveSteps([step("stores")]);
+    assert.deepEqual(
+      buildAccessSaveReportLines(outcome, reportText),
+      ["保存失败：分店（stores failed）", "未保存的改动仍然保留"],
+      "第一步失败：没有「已保存」行，也没有「未执行」行",
+    );
+  }
+  {
+    const { step } = recorder();
+    const outcome = await runAccessSaveSteps([step("stores"), step("roles")]);
+    assert.deepEqual(buildAccessSaveReportLines(outcome, reportText), [], "全部成功不需要失败说明");
+  }
 }
 
 runSaveSequenceTests()

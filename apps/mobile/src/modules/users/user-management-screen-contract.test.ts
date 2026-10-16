@@ -119,17 +119,26 @@ assert.match(source, /\{isSelf \? null : \(\s*<IconButton/, "本人行不得出�
 assert.match(source, /storeCode: resolveUserStoreCode\(user\) \?\? ""/, "进入权限页必须带上所属分店，供复制权限列出同事");
 
 // 复制权限：入口、保护与确认流程。
+// 授权页拆成 页面 / 编辑器 / 四个分段，业务保证分别锁在对应文件里。
 const accessScreenSource = readFileSync(resolve(currentDirectory, "access-management-screen.tsx"), "utf8");
+const accessEditorSource = readFileSync(resolve(currentDirectory, "access-editor.ts"), "utf8");
+const accessPermissionsSectionSource = readFileSync(resolve(currentDirectory, "access-permissions-section.tsx"), "utf8");
+const accessRolesSectionSource = readFileSync(resolve(currentDirectory, "access-roles-section.tsx"), "utf8");
+const accessStoresSectionSource = readFileSync(resolve(currentDirectory, "access-stores-section.tsx"), "utf8");
+const accessPageLogicSource = readFileSync(resolve(currentDirectory, "access-page-logic.ts"), "utf8");
 const copySheetSource = readFileSync(resolve(currentDirectory, "permission-copy-sheet.tsx"), "utf8");
-assert.match(accessScreenSource, /openCopySheet\("toOthers"\)/, "权限页必须有「复制给他人」入口");
-assert.match(accessScreenSource, /openCopySheet\("fromColleague"\)/, "权限页必须有「从同事复制」入口");
+assert.match(accessPermissionsSectionSource, /onCopy\("toOthers"\)/, "权限页必须有「复制给他人」入口");
+assert.match(accessPermissionsSectionSource, /onCopy\("fromColleague"\)/, "权限页必须有「从同事复制」入口");
+assert.match(accessScreenSource, /onCopy=\{openCopySheet\}/, "分段的复制入口必须走页面的 openCopySheet（统一做未保存草稿保护）");
 assert.match(
   accessScreenSource,
-  /if \(permissionsDirty\) \{[\s\S]{0,200}accessManagement\.copy\.dirtyBlocked/,
+  /if \(editor\.permissionsDirty\) \{[\s\S]{0,200}copy\.dirtyBlocked/,
   "存在未保存的权限草稿时必须先拦截，避免被复制结果静默覆盖"
 );
-assert.match(accessScreenSource, /previewCopyMutation\.isPending \|\|\s*copyPermissionsMutation\.isPending/, "复制进行中必须计入忙碌状态，阻止离页与重复保存");
-assert.match(accessScreenSource, /\{!implicitAll \? \(\s*<View style=\{styles\.copyActions\}>/, "管理员默认拥有全部权限时不显示复制入口");
+assert.match(accessEditorSource, /previewCopyMutation\.isPending \|\|\s*copyPermissionsMutation\.isPending/, "复制进行中必须计入忙碌状态，阻止离页与重复保存");
+assert.match(accessPermissionsSectionSource, /\{!implicitAll \? \(\s*<View style=\{styles\.copyButtons\}>/, "管理员默认拥有全部权限时不显示复制入口");
+assert.match(accessScreenSource, /copyParam/, "路由 copy=1 必须能直接打开复制权限");
+assert.match(accessScreenSource, /copyAutoOpenedRef/, "copy=1 只自动打开一次");
 assert.match(copySheetSource, /onPreview\(request\)/, "先预览差异");
 assert.match(copySheetSource, /onCommit\(input\)/, "确认后才写入");
 assert.match(copySheetSource, /!previewCurrent \|\| !summary\?\.hasChanges/, "预览过期或没有变化时不得确认复制");
@@ -165,17 +174,57 @@ assert.match(barcodeDialogSource, /fontScale > 1\.2 \|\| width < 380/, "窄屏�
 assert.match(createSource, /currentStore\.viewOnlyBadge/, "创建页的分店标签必须是「仅查看」");
 assert.doesNotMatch(createSource, /currentStore\.manageableBadge/, "创建页不得出现「可管理」徽标");
 
-// 权限管理页：店长是由「管理」分店派生的角色。管理员点它要被引导去「门店」，而不是无反应；非管理员保持锁定。
+// 权限管理页：店长是由「管理」分店派生的角色。管理员点它要被引导去「分店」，而不是无反应；非管理员保持锁定。
 {
-  const accessScreen = readFileSync(resolve(currentDirectory, "access-management-screen.tsx"), "utf8");
-  assert.match(accessScreen, /planStoreManagerGrant\(\{/, "点店长行必须走 planStoreManagerGrant");
-  assert.match(accessScreen, /selection\.derived &&\s*eligibility\.canGrantStoreManagement &&\s*eligibility\.storesMode === "editable"/, "只有管理员且门店区可编辑才允许引导");
-  assert.match(accessScreen, /\(selection\.locked && !managerGrantEnabled\)/, "非管理员的店长行仍是锁定");
-  assert.match(accessScreen, /disabled=\{disabled \|\| selection\.derived\}/, "派生角色的复选框本身不可勾选");
-  assert.match(accessScreen, /setUserAccessStoreState\(current, plan\.storeGUID, "manage"\)/, "只有一家分店时在草稿里设为管理");
-  assert.match(accessScreen, /setActiveSection\("stores"\)/, "引导后切到「门店」区，让管理员看到并保存");
+  assert.match(accessEditorSource, /planStoreManagerGrant\(\{/, "点店长行必须走 planStoreManagerGrant");
+  assert.match(
+    accessPageLogicSource,
+    /selection\.derived && input\.canGrantStoreManagement && input\.storesEditable/,
+    "只有管理员且分店分段可编辑才允许引导"
+  );
+  assert.match(
+    accessRolesSectionSource,
+    /storesEditable=|storesEditable,/,
+    "角色分段必须把「分店分段是否可编辑」传进角色行判定"
+  );
+  assert.match(accessScreenSource, /storesEditable=\{eligibility\.storesMode === "editable"\}/, "页面按分店分段的真实可编辑状态传入");
+  assert.match(accessPageLogicSource, /\(selection\.locked && !canGuideManagerGrant\)/, "非管理员的店长行仍是锁定");
+  assert.match(accessRolesSectionSource, /disabled=\{row\.disabled \|\| row\.derived\}/, "派生角色的复选框本身不可勾选");
+  assert.match(accessEditorSource, /setUserAccessStoreState\(current, plan\.storeGUID, "manage"\)/, "只有一家分店时在草稿里设为管理");
+  assert.match(accessScreenSource, /setSelectedSection\("stores"\)/, "引导后切到「分店」分段，让管理员看到并保存");
   // 选角色保存时不会把店长角色提交给角色接口（它由后端按管理分店派生）
-  assert.match(accessScreen, /roleGuids: selectedRoleGuids/, "保存角色仍只提交可分配角色（店长由 buildAssignableRoleGuids 剔除）");
+  assert.match(accessEditorSource, /roleGuids: submitted,\s*roleCatalog: roleOptions/, "保存角色仍只提交可分配角色（目录经 buildAssignableRoleGuids 剔除店长）");
+  assert.match(
+    readFileSync(resolve(currentDirectory, "access-management-api.ts"), "utf8"),
+    /buildAssignableRoleGuids\(/,
+    "角色接口必须剔除店长这个派生角色"
+  );
+}
+
+// 统一授权页（一页分段 + 一个吸底保存）：分店 / 角色 / 直接权限的改动一起保存，失败不吞错。
+{
+  assert.match(accessEditorSource, /runAccessSaveSteps\(steps/, "保存必须按顺序依次提交各分段");
+  assert.match(accessEditorSource, /planAccessSaveSteps\(\{/, "只提交有改动的分段");
+  assert.match(accessScreenSource, /buildAccessSaveReportLines\(/, "保存失败要逐项说明哪些成功、哪一步失败");
+  assert.match(accessScreenSource, /Alert\.alert\(\s*t\(report\.verdict === "partial"/, "部分失败必须弹出明确提示，不能只靠一闪而过的 Snackbar");
+  assert.match(accessScreenSource, /<StickyActionBar summary=\{barSummary\} hint=\{barHint\}>/, "吸底保存栏常驻，写明改了什么");
+  assert.match(accessScreenSource, /disabled=\{!dirty \|\| editor\.busy\}/, "没有改动时保存灰掉");
+  assert.match(accessScreenSource, /usePreventRemove\(/, "有未保存草稿时离页必须确认");
+  // 目标用户自取：路由参数只作首屏预填，受保护角色 / 本人 / 设备模式校验基于服务端数据。
+  assert.match(accessScreenSource, /useAccessIdentityTarget\(/, "管理员会话按 userGuid 自取目标");
+  assert.match(accessScreenSource, /useAccessStoreUserTarget\(/, "店长 / 设备 / 审核会话按 userGuid 自取目标");
+  assert.match(accessScreenSource, /mergeAccessTarget\(/, "服务端数据到位后以服务端为准");
+  assert.match(accessEditorSource, /targetRoleNames: target\.roleNames|targetRoleNames,/, "资格判断使用目标的真实角色");
+  assert.match(accessEditorSource, /getUserAccessEligibility\(/, "受保护目标授权资格必须用 getUserAccessEligibility");
+  // 收银权限入口：跳收银权限页，storeCode 必填。
+  assert.match(accessScreenSource, /pathname: "\/users\/\[userGuid\]\/pos-terminal-permissions"/, "收银权限入口指向收银权限页");
+  assert.match(accessScreenSource, /storeCode: store\.storeCode/, "收银权限页要求 storeCode 必填");
+  // 店长收窄：只列自己管理的分店、没有「管理」档。
+  assert.match(accessStoresSectionSource, /resolveStoreStateOptions\(\{/, "三档按钮由 resolveStoreStateOptions 收窄（店长没有「管理」档）");
+  assert.match(accessEditorSource, /managedStoreCodes: managedStoreCodeSet/, "店长只列自己管理的分店");
+  // 直接权限：继承来的不可改；收银权限不在这里。
+  assert.match(accessEditorSource, /excludePosPermissionCategories\(permissionCategories\)/, "收银权限统一去收银权限页，不在直接权限里");
+  assert.match(accessPermissionsSectionSource, /const disabled = busy \|\| !editable \|\| row\.locked;/, "继承来的权限开关置灰");
 }
 
 console.log("user-management-screen-contract.test.ts: ok");
