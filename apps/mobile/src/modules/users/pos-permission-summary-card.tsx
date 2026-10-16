@@ -52,7 +52,7 @@ export function PosPermissionSummaryCard({
           >
             {t("overview.enabledLabel")} <Text style={styles.statsNumber}>{overview.enabledCount}</Text>{" "}
             {t("overview.ofTotal", { total: overview.total })}
-            {"  ·  "}
+            {" · "}
             {t("overview.highRiskLabel")}{" "}
             <Text style={[styles.statsNumber, hasRisk && styles.statsNumberRisk]}>
               {overview.highRiskEnabledCount}
@@ -119,7 +119,7 @@ export function PosPermissionSummaryCard({
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
-  topRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  topRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", columnGap: 6, rowGap: 6 },
   stats: { fontSize: 13, color: HB_COLORS.textSecondary, fontVariant: ["tabular-nums"] },
   statsNumber: { fontWeight: "700", color: HB_COLORS.textPrimary },
   statsNumberRisk: { color: HB_COLORS.danger },
