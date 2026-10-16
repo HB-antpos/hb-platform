@@ -124,10 +124,12 @@ export function PermissionCopySheet({
 
   const switchDirection = (next: CopyPermissionDirection) => {
     if (busy || next === direction) return;
-    // 方向变了来源与目标整个对调，旧选择与旧预览都不再适用。
+    // 方向变了来源与目标整个对调，旧选择与旧预览都不再适用；「覆盖」会删除对方已有权限，
+    // 只对用户亲眼看过的那一组人有效，所以每次换人都回到默认的「合并」。
     setDirection(next);
     setSelectedGuids([]);
     setPreview(null);
+    setMode("merge");
     setErrorText("");
   };
 
@@ -136,12 +138,14 @@ export function PermissionCopySheet({
     setStoreCode(next);
     setSelectedGuids([]);
     setPreview(null);
+    setMode("merge");
     setErrorText("");
   };
 
   const toggleUser = (userGuid: string) => {
     if (busy) return;
     setErrorText("");
+    setMode("merge");
     setSelectedGuids((current) => togglePermissionCopySelection(current, userGuid, direction));
   };
 
