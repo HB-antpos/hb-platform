@@ -22,6 +22,7 @@ import {
   mergeAccessRoleOptions,
   mergeAccessStoreOptions,
   mergeAccessTarget,
+  pickPosPermissionCategories,
   parseAccessCopyParam,
   parseAccessSectionParam,
   parseAccessTargetStatus,
@@ -309,6 +310,23 @@ assert.deepEqual(
   excludePosPermissionCategories(categories).map((item) => [item.category, item.permissions.length]),
   [["Reports", 3], ["Staff", 2]],
   "收银权限整类不在授权页显示（统一去收银权限页）",
+);
+// 账号级收银默认值与「排除收银」互补：两者合起来正好是全部权限，授权页底部分组据此展示，旧能力不丢。
+assert.deepEqual(
+  pickPosPermissionCategories(categories).map((item) => [item.category, item.permissions.map((permission) => permission.name)]),
+  [["POS", ["PosTerminal.Sales.AddItem", "Permissions.PosTerminal.Payment.TakeCash"]]],
+  "只留收银权限码",
+);
+assert.equal(
+  excludePosPermissionCategories(categories).flatMap((item) => item.permissions).length
+    + pickPosPermissionCategories(categories).flatMap((item) => item.permissions).length,
+  categories.flatMap((item) => item.permissions).length,
+  "收银 / 非收银两部分互补，不重不漏",
+);
+assert.deepEqual(
+  pickPosPermissionCategories([cat("Mixed", ["Reports.View", "PosTerminal.Payment.TakeCash"])]).map((item) => item.permissions.map((permission) => permission.name)),
+  [["PosTerminal.Payment.TakeCash"]],
+  "同一分类里混有收银码时只留收银码",
 );
 assert.deepEqual(
   filterPermissionCategories(

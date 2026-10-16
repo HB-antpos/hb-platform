@@ -31,6 +31,8 @@ import {
 interface AccessPermissionsSectionProps {
   /** 已去掉收银（POS）权限的分类目录。 */
   categories: AccessPermissionCategory[];
+  /** 只含收银（POS）权限的分类：底部单独成组「收银权限 · 账号默认值」（账号级，对所有分店生效）。 */
+  posCategories?: AccessPermissionCategory[];
   draft: DirectPermissionDraft;
   counts: AccessPermissionCounts;
   /** 目标是管理员：默认拥有全部权限，开关全部锁定，也不提供复制。 */
@@ -74,6 +76,7 @@ function defaultExpandedCategories(
  */
 export function AccessPermissionsSection({
   categories,
+  posCategories = [],
   draft,
   counts,
   implicitAll,
@@ -90,6 +93,18 @@ export function AccessPermissionsSection({
     defaultExpandedCategories(categories, draft),
   );
   const searching = query.trim().length > 0;
+  const posRows = useMemo(
+    () => posCategories.flatMap((category) => category.permissions),
+    [posCategories],
+  );
+  const [posOpen, setPosOpen] = useState(() => {
+    const inherited = new Set(draft.inheritedPermissionCodes);
+    return posCategories.some((category) =>
+      category.permissions.some(
+        (permission) => draft.selectedCodes.includes(permission.name) && !inherited.has(permission.name),
+      ),
+    );
+  });
   const separator = t("save.separator");
 
   const rowOf = useMemo(
@@ -117,7 +132,20 @@ export function AccessPermissionsSection({
     [categories, language, query],
   );
 
-  if (!categories.length) {
+  const filteredPosRows = useMemo(
+    () =>
+      filterPermissionCategories(
+        [{ category: "pos", displayName: "pos", permissions: posRows } as AccessPermissionCategory],
+        query,
+        (permission) => {
+          const text = localizeAccessPermission(permission, language);
+          return `${text.name} ${text.description} ${permission.name}`;
+        },
+      ).flatMap((category) => category.permissions),
+    [language, posRows, query],
+  );
+
+  if (!categories.length && !posCategories.length) {
     return (
       <EmptyState
         title={t("permissions.emptyTitle")}
@@ -182,7 +210,6 @@ export function AccessPermissionsSection({
 
       {!isAdmin ? <NoticeBox tone="blue">{t("permissions.managerLimit")}</NoticeBox> : null}
       {implicitAll ? <NoticeBox tone="violet">{t("permissions.implicitNotice")}</NoticeBox> : null}
-      <NoticeBox tone="gray" icon="cash-register">{t("permissions.posNotice")}</NoticeBox>
 
       <AccessSearchBox
         value={query}
@@ -250,6 +277,64 @@ export function AccessPermissionsSection({
           );
         })
       )}
+
+      {filteredPosRows.length > 0 ? (
+        <View style={styles.group} testID="access-pos-account-defaults">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("permissions.posDefaults.title")}
+            accessibilityState={{ expanded: searching || posOpen }}
+            onPress={() => setPosOpen((current) => !current)}
+            disabled={searching}
+            style={styles.groupHeader}
+          >
+            <Text style={styles.groupTitle}>
+              {t("permissions.posDefaults.titleWithCount", {
+                enabled: countEnabledPermissions(posRows, rowOf).enabled,
+                total: posRows.length,
+              })}
+            </Text>
+            {searching ? null : (
+              <Icon
+                source={posOpen ? "chevron-up" : "chevron-down"}
+                size={20}
+                color={HB_COLORS.textSecondary}
+              />
+            )}
+          </Pressable>
+          {searching || posOpen ? (
+            <>
+              <NoticeBox tone="gray" icon="cash-register">{t("permissions.posDefaults.notice")}</NoticeBox>
+              <InfoCard>
+                {filteredPosRows.map((permission, index) => {
+                  const row = rowOf(permission.name);
+                  const text = localizeAccessPermission(permission, language);
+                  const disabled = busy || !editable || row.locked;
+                  return (
+                    <AccessRowFrame
+                      key={permission.name}
+                      first={index === 0}
+                      testID={`access-permission-row-${permission.name}`}
+                    >
+                      <View style={styles.rowText}>
+                        <Text style={styles.rowName}>{text.name}</Text>
+                        <PeopleTag label={sourceLabel(row)} tone={SOURCE_TONES[row.kind]} />
+                      </View>
+                      <Switch
+                        value={row.checked}
+                        disabled={disabled}
+                        accessibilityLabel={text.name}
+                        accessibilityHint={`${sourceLabel(row)}。${text.description}`}
+                        onValueChange={(checked) => onToggle(permission.name, checked)}
+                      />
+                    </AccessRowFrame>
+                  );
+                })}
+              </InfoCard>
+            </>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }

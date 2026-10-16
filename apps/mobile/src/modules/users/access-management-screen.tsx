@@ -521,6 +521,7 @@ function AccessManagementPage({
         return editor.permissionDraft ? (
           <AccessPermissionsSection
             categories={editor.visiblePermissionCategories}
+            posCategories={editor.posPermissionCategories}
             draft={editor.permissionDraft}
             counts={editor.permissionCounts}
             implicitAll={editor.implicitAll}

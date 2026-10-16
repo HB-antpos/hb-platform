@@ -268,6 +268,14 @@ async function run() {
         permissions: [permission("Staff.ReviewProfile", "员工资料审核", "员工")],
       },
     ];
+    // 收银（POS）权限不在主分类里，单独成「收银权限 · 账号默认值」分组（账号级，对所有分店生效）。
+    const posCategories = [
+      {
+        category: "收银",
+        displayName: "收银",
+        permissions: [permission("PosTerminal.Sales.AddItem", "收银加商品", "收银")],
+      },
+    ];
     const draft = {
       baselineCodes: ["Cash.Manage"],
       selectedCodes: ["Cash.Manage", "Staff.ReviewProfile"],
@@ -277,6 +285,7 @@ async function run() {
       render(
         React.createElement(AccessPermissionsSection, {
           categories,
+          posCategories,
           draft,
           counts: { effective: 3, inherited: 1, direct: 2 },
           implicitAll: false,
@@ -310,7 +319,16 @@ async function run() {
     await act(() => switchOf("员工工时报表").props.onValueChange(true));
     await act(() => switchOf("现金管理").props.onValueChange(false));
     assert.deepEqual(permissionEvents, ["Reports.Hours.View:true", "Cash.Manage:false"]);
-    assert.ok(texts().includes(lookup("permissions.posNotice")), "收银权限不在这里，指向收银权限页");
+    // 收银默认值：默认折叠（没有直接授予的收银码），展开后能开关，说明里指向分店下的「收银权限」页。
+    const posTitle = lookup("permissions.posDefaults.titleWithCount", { enabled: 0, total: 1 });
+    assert.ok(texts().includes(posTitle), "底部有「收银权限 · 账号默认值」分组");
+    assert.ok(!byLabel("Switch", "收银加商品"), "默认折叠，不渲染收银默认值的行");
+    await act(() => byLabel("Pressable", lookup("permissions.posDefaults.title"))!.props.onPress());
+    assert.ok(texts().includes(lookup("permissions.posDefaults.notice")), "展开后说明：账号级默认值，按分店调整去「收银权限」");
+    assert.equal(switchOf("收银加商品").props.value, false);
+    await act(() => switchOf("收银加商品").props.onValueChange(true));
+    assert.deepEqual(permissionEvents.slice(-1), ["PosTerminal.Sales.AddItem:true"], "账号级收银默认值开关可用");
+    permissionEvents.pop();
     // 复制入口。
     await act(() => byLabel("Button", "复制给他人")!.props.onPress());
     await act(() => byLabel("Button", "从同事复制")!.props.onPress());

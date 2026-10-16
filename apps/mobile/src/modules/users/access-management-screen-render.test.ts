@@ -494,7 +494,10 @@ async function run() {
     const page = await mount({ userGuid: "u-emily", copy: "1" });
     await page.settle(() => page.all("Sheet").length > 0, "复制弹层自动打开");
     assert.equal(page.all("Sheet")[0].props.title, lookup("copy.toOthersTitle", { name: "Emily Rose Chen" }));
-    assert.ok(page.texts().includes(lookup("permissions.posNotice")), "copy=1 同时落在直接权限分段");
+    assert.ok(
+      page.texts().some((text) => text.startsWith("收银权限 · 账号默认值")),
+      "copy=1 同时落在直接权限分段（底部有收银权限账号默认值分组）",
+    );
     await page.unmount();
   }
   // 复制前有未保存的权限草稿：必须先拦截。

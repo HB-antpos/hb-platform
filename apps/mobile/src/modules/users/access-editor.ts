@@ -32,6 +32,7 @@ import {
   countAssignedStores,
   countSelectedAccessRoles,
   excludePosPermissionCategories,
+  pickPosPermissionCategories,
   mergeAccessRoleOptions,
   planAccessSaveSteps,
   runAccessSaveSteps,
@@ -425,6 +426,11 @@ export function useAccessEditor({
     () => excludePosPermissionCategories(permissionCategories),
     [permissionCategories],
   );
+  /** 账号级收银默认值（PosTerminal.*）：授权页底部单独成组，开关语义与旧页面一致。 */
+  const posPermissionCategories = useMemo(
+    () => pickPosPermissionCategories(permissionCategories),
+    [permissionCategories],
+  );
   const implicitAll = permissionAccessQuery.data?.state.implicitAllPermissions === true;
   /** 当前操作者能分配的全部权限码（含收银权限，菜单分段按它判断可否开关）。 */
   const assignablePermissionCodes = useMemo(
@@ -742,6 +748,7 @@ export function useAccessEditor({
     roleOptions,
     permissionCategories,
     visiblePermissionCategories,
+    posPermissionCategories,
     permissionAccessState: permissionAccessQuery.data?.state ?? null,
     implicitAll,
     assignablePermissionCodes,

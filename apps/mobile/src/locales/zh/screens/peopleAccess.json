@@ -74,7 +74,6 @@
     },
     "copyFromColleague": "从同事复制",
     "copyToOthers": "复制给他人",
-    "posNotice": "收银（POS）相关权限不在这里，请到分店下的「收银权限」里设置。",
     "managerLimit": "店长只能授予自己拥有的权限。",
     "implicitNotice": "该账号是管理员，默认拥有全部权限，不需要单独授权。",
     "source": {
@@ -87,7 +86,12 @@
     "categoryTitle": "{{name}} · {{enabled}} / {{total}}",
     "noMatch": "没有匹配的权限。",
     "emptyTitle": "没有可用权限",
-    "emptyDescription": "当前没有可分配给此账号的权限。"
+    "emptyDescription": "当前没有可分配给此账号的权限。",
+    "posDefaults": {
+      "title": "收银权限 · 账号默认值",
+      "titleWithCount": "收银权限 · 账号默认值 · {{enabled}} / {{total}}",
+      "notice": "这里是账号级默认值，对所有分店生效。要按分店单独调整，请到分店下的「收银权限」。"
+    }
   },
   "menu": {
     "hint": "移动端菜单的可见性跟随当前直接授权的权限；这里的开关改的就是直接权限。",

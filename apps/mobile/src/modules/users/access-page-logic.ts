@@ -455,6 +455,24 @@ export function excludePosPermissionCategories<
     .filter((category) => category.permissions.length > 0);
 }
 
+/**
+ * 与 excludePosPermissionCategories 互补：只留收银（POS）权限，供授权页底部「收银权限 · 账号默认值」分组使用。
+ * 旧授权页允许直接授予账号级 PosTerminal.* 默认值（对所有分店生效），这个能力不能因为改版丢掉；
+ * 按分店覆盖仍然去「收银权限」页。
+ */
+export function pickPosPermissionCategories<
+  C extends { permissions: { name: string }[] },
+>(categories: C[]): C[] {
+  return categories
+    .map((category) => ({
+      ...category,
+      permissions: category.permissions.filter((permission) =>
+        isPosTerminalPermissionCode(permission.name),
+      ),
+    }))
+    .filter((category) => category.permissions.length > 0);
+}
+
 /** 按关键词过滤权限；`textOf` 返回该权限可被搜索的文字（名称、说明、权限码、分类名等）。 */
 export function filterPermissionCategories<C extends { permissions: { name: string }[] }>(
   categories: C[],
