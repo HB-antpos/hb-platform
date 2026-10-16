@@ -258,6 +258,82 @@ export function buildHeaderStatusTags(input: {
   return tags;
 }
 
+// ───────────────────────── 管理员版「允许登录」开关 ─────────────────────────
+
+/**
+ * 「账号与安全」里「允许登录」这一行的形态：
+ * - hidden：不出现——不是管理员版（店长版 / 设备模式 / iOS 审核模式都回落到店长版，没有这个写接口）、
+ *   设备模式、或接口没返回 loginEnabled（旧后端 / 未查询：未知不等于允许，不能拿来显示开关）；
+ * - selfLocked：本人账号，开关置灰并说明「不能关闭本人账号的登录权限」（后端同样拒绝，也避免把操作者锁在系统外）；
+ * - readonly：只读显示当前值——没有 Users.Edit，或目标是自己无权动的受保护账号 / 店长级管理者越权；
+ * - editable：可操作。
+ *
+ * 能不能改直接复用 resolveDetailPermissions 里管理员版的 canEdit（Users.Edit && adminScopeOk），
+ * 不另写一套更宽松的判断；店长级管理者的分店范围由后端 USER_SCOPE_DENIED 兜底。
+ */
+export type LoginToggleMode = "hidden" | "readonly" | "selfLocked" | "editable";
+
+export function resolveLoginToggle(
+  permissions: Pick<DetailPermissions, "variant" | "isSelf" | "canEdit">,
+  facts: { loginEnabled: boolean | undefined; isDeviceMode: boolean },
+): LoginToggleMode {
+  if (permissions.variant !== "admin" || facts.isDeviceMode) return "hidden";
+  if (facts.loginEnabled === undefined) return "hidden";
+  if (permissions.isSelf) return "selfLocked";
+  return permissions.canEdit ? "editable" : "readonly";
+}
+
+/** 拨动开关后的处理：关闭先弹确认（后果是账号立刻登不进来、已登录会话失效），开启直接提交。 */
+export function resolveLoginSwitchIntent(nextEnabled: boolean): "confirmDisable" | "enableNow" {
+  return nextEnabled ? "enableNow" : "confirmDisable";
+}
+
+/**
+ * 开启成功后是否提示「设置密码」：账号从没登录过（lastLoginAt 为空），多半创建时就没设可用密码，
+ * 光开启登录开关它仍然登不进来。只对确认已允许登录（=== true）的账号提示。
+ */
+export function shouldHintSetPassword(input: { loginEnabled: boolean | undefined; lastLoginAt: string | null | undefined }): boolean {
+  return input.loginEnabled === true && !(input.lastLoginAt ?? "").trim();
+}
+
+export type LoginToggleFailureKey =
+  | "self"
+  | "notFound"
+  | "scopeDenied"
+  | "highPrivilege"
+  | "forbidden"
+  | "uncertain"
+  | "generic";
+
+/**
+ * 把「允许登录」写接口的失败归类成固定文案键——界面只显示我们自己的中英文文案，
+ * 绝不直接展示服务端原文。errorCode 优先（服务端已明确拒绝）；其次是「结果未知」（超时 / 5xx / 无响应，
+ * 请求可能已生效，要提示先核对）；再按 HTTP 状态兜底。
+ */
+export function classifyLoginToggleFailure(input: {
+  code?: string;
+  status?: number;
+  /** isUncertainIdentityWrite(error) 的结果。 */
+  uncertain: boolean;
+}): LoginToggleFailureKey {
+  switch ((input.code ?? "").trim().toUpperCase()) {
+    case "SELF_PROFILE_FIELDS_DENIED":
+      return "self";
+    case "USER_NOT_FOUND":
+      return "notFound";
+    case "USER_SCOPE_DENIED":
+      return "scopeDenied";
+    case "HIGH_PRIVILEGE_TARGET_DENIED":
+      return "highPrivilege";
+    default:
+      break;
+  }
+  if (input.uncertain) return "uncertain";
+  if (input.status === 403) return "forbidden";
+  if (input.status === 404) return "notFound";
+  return "generic";
+}
+
 // ───────────────────────── 姓名展示 ─────────────────────────
 
 export type NamePartKind = "family" | "given" | "middle" | "full";

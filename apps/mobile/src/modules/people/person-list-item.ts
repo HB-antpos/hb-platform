@@ -211,9 +211,17 @@ export interface IdentityPersonFormatters {
   lastLogin: (login: RelativeLogin | null) => string;
 }
 
-export function resolveIdentityExceptionTags(user: Pick<IdentityUser, "isActive" | "email">): PersonTagKey[] {
+/**
+ * 管理员列表的例外标签（只给例外，正常人不挂标签）：
+ * - 已停用：只给「已停用」，不再叠加其它标签（与店员列表同口径）；
+ * - 启用中：不能登录（loginEnabled === false；接口缺省 undefined = 未知，不标）、无邮箱。
+ */
+export function resolveIdentityExceptionTags(user: Pick<IdentityUser, "isActive" | "email" | "loginEnabled">): PersonTagKey[] {
   if (!user.isActive) return ["disabled"];
-  return hasDeliverableEmail(user.email) ? [] : ["noEmail"];
+  const tags: PersonTagKey[] = [];
+  if (user.loginEnabled === false) tags.push("cannotLogin");
+  if (!hasDeliverableEmail(user.email)) tags.push("noEmail");
+  return tags;
 }
 
 export function buildIdentityPersonItem(

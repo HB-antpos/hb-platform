@@ -195,6 +195,10 @@ function normalizeUser(value: unknown): IdentityUser {
     ...(optionalString(source, "familyName", "FamilyName") ? { familyName: optionalString(source, "familyName", "FamilyName") } : {}),
     ...(optionalString(source, "nickname", "Nickname") ? { nickname: optionalString(source, "nickname", "Nickname") } : {}),
     ...(optionalString(source, "phone", "Phone") ? { phone: optionalString(source, "phone", "Phone") } : {}),
+    // 只认布尔值：服务端省略（null）或类型异常都保持 undefined，绝不把「未知」当成「允许」。
+    ...(typeof pick(source, "loginEnabled", "LoginEnabled") === "boolean"
+      ? { loginEnabled: booleanValue(source, true, "loginEnabled", "LoginEnabled") }
+      : {}),
     ...(optionalString(source, "lastLoginAt", "LastLoginAt") ? { lastLoginAt: optionalString(source, "lastLoginAt", "LastLoginAt") } : {}),
     ...(optionalString(source, "lastLoginIp", "LastLoginIp") ? { lastLoginIp: optionalString(source, "lastLoginIp", "LastLoginIp") } : {}),
     isActive: booleanValue(source, false, "isActive", "IsActive"),
@@ -452,6 +456,23 @@ export async function updateIdentityUserPassword(userGuid: string, input: Identi
     passwordFormat: input.passwordFormat ?? "raw",
     forcePasswordChange: input.forcePasswordChange ?? false,
   }, accountBoundRequestConfig(actorGuid));
+  return normalizeBoolean(response.data);
+}
+
+/**
+ * PUT /Users/guid/{guid}/login-enabled（Users.Edit）：开关账号「允许登录 Web / App」，与启用 / 停用账号是两回事。
+ * 服务端失败 errorCode：SELF_PROFILE_FIELDS_DENIED（不能关闭本人）/ USER_NOT_FOUND / USER_SCOPE_DENIED /
+ * HIGH_PRIVILEGE_TARGET_DENIED。4xx 由 axios 抛出（getIdentityAdminErrorMeta 读 errorCode）；
+ * 200 + success=false 的业务信封由 normalizeBoolean 抛出并带 code，两种路径调用方都按 errorCode 处理。
+ * loginEnabled 必须是布尔值再发送，避免误传 undefined 把账号锁在系统外。
+ */
+export async function setIdentityUserLoginEnabled(userGuid: string, loginEnabled: boolean, actorGuid: string) {
+  if (typeof loginEnabled !== "boolean") throw new Error("loginEnabled must be a boolean");
+  const response = await apiClient.put(
+    path("Users", userGuid, "login-enabled"),
+    { loginEnabled },
+    accountBoundRequestConfig(actorGuid),
+  );
   return normalizeBoolean(response.data);
 }
 

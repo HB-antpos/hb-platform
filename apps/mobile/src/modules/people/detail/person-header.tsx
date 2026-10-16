@@ -13,6 +13,11 @@ const TAG_TONES: Record<HeaderTagKey, PeopleTone> = {
   loginDisabled: "amber",
 };
 
+/** 「不能登录」带锁图标，和「已停用」（红色、无图标）一眼分开：账号在用，只是被限制登录。 */
+const TAG_ICONS: Partial<Record<HeaderTagKey, string>> = {
+  loginDisabled: "lock-outline",
+};
+
 /** 头部状态标签文案复用员工管理命名空间里已有的 statuses.*。 */
 export function HeaderStatusTags({ person }: { person: PersonView }) {
   const { t } = useAppTranslation(["userManagement"]);
@@ -23,7 +28,7 @@ export function HeaderStatusTags({ person }: { person: PersonView }) {
         mustChangePassword: person.mustChangePassword,
         loginEnabled: person.loginEnabled,
       }).map((key) => (
-        <PeopleTag key={key} label={t(`statuses.${key}`)} tone={TAG_TONES[key]} />
+        <PeopleTag key={key} label={t(`statuses.${key}`)} tone={TAG_TONES[key]} icon={TAG_ICONS[key]} />
       ))}
     </>
   );
