@@ -16,6 +16,14 @@ namespace BlazorApp.Shared.DTOs
         public string UserGuid { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty;
         public string? FullName { get; set; }
+        /// <summary>名（Given name）。</summary>
+        public string? GivenName { get; set; }
+        /// <summary>中间名（Middle name）。</summary>
+        public string? MiddleName { get; set; }
+        /// <summary>姓（Family name）。</summary>
+        public string? FamilyName { get; set; }
+        /// <summary>昵称（Nickname）。</summary>
+        public string? Nickname { get; set; }
         public string? Email { get; set; }
         public string? Phone { get; set; }
         public int Status { get; set; }
@@ -77,6 +85,22 @@ namespace BlazorApp.Shared.DTOs
         [StringLength(100, ErrorMessage = "姓名长度不能超过100个字符")]
         public string? FullName { get; set; }
 
+        /// <summary>名；与中间名、姓、昵称任一非空时按拆分字段写入，并由「名 / 中间名 / 姓」合成姓名。</summary>
+        [StringLength(50, ErrorMessage = "名长度不能超过50个字符")]
+        public string? GivenName { get; set; }
+
+        /// <summary>中间名。</summary>
+        [StringLength(50, ErrorMessage = "中间名长度不能超过50个字符")]
+        public string? MiddleName { get; set; }
+
+        /// <summary>姓。</summary>
+        [StringLength(50, ErrorMessage = "姓长度不能超过50个字符")]
+        public string? FamilyName { get; set; }
+
+        /// <summary>昵称；不参与姓名合成。</summary>
+        [StringLength(50, ErrorMessage = "昵称长度不能超过50个字符")]
+        public string? Nickname { get; set; }
+
         public string? Phone { get; set; }
 
         [Required(ErrorMessage = "分店代码不能为空")]
@@ -127,6 +151,22 @@ namespace BlazorApp.Shared.DTOs
 
         [StringLength(100, ErrorMessage = "姓名长度不能超过100个字符")]
         public string? FullName { get; set; }
+
+        /// <summary>名；null 表示不修改（旧客户端不传即不动），空白表示清空，非空表示设置。名 / 中间名 / 姓任一非 null 时重算姓名。</summary>
+        [StringLength(50, ErrorMessage = "名长度不能超过50个字符")]
+        public string? GivenName { get; set; }
+
+        /// <summary>中间名；语义同 GivenName。</summary>
+        [StringLength(50, ErrorMessage = "中间名长度不能超过50个字符")]
+        public string? MiddleName { get; set; }
+
+        /// <summary>姓；语义同 GivenName。</summary>
+        [StringLength(50, ErrorMessage = "姓长度不能超过50个字符")]
+        public string? FamilyName { get; set; }
+
+        /// <summary>昵称；null 表示不修改，空白表示清空；仅昵称变化不改动姓名。</summary>
+        [StringLength(50, ErrorMessage = "昵称长度不能超过50个字符")]
+        public string? Nickname { get; set; }
 
         public string? Phone { get; set; }
 

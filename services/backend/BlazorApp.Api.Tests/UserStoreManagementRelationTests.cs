@@ -4897,6 +4897,267 @@ namespace BlazorApp.Api.Tests
             Assert.False((await FindUserStoreAsync("dual-user", "store-2")).IsPrimary);
         }
 
+        // ---------------- 姓名拆分（名 / 中间名 / 姓 / 昵称） ----------------
+
+        private async Task<(UserService Service, string TargetGuid)> SeedNamePartsTargetAsync()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+            var target = CreateUser("name-target", "name-target@example.com");
+            target.FullName = "Mary Jane Smith";
+            target.GivenName = "Mary";
+            target.MiddleName = "Jane";
+            target.FamilyName = "Smith";
+            target.Nickname = "MJ";
+            await _db.Insertable(target).ExecuteCommandAsync();
+            return (service, target.UserGUID);
+        }
+
+        private static UpdateUserDto BuildNamePartsUpdate(
+            string? fullName = null,
+            string? given = null,
+            string? middle = null,
+            string? family = null,
+            string? nickname = null) => new()
+            {
+                Username = "name-target",
+                Email = "name-target@example.com",
+                IsActive = true,
+                FullName = fullName,
+                GivenName = given,
+                MiddleName = middle,
+                FamilyName = family,
+                Nickname = nickname,
+            };
+
+        [Fact]
+        public async Task CreateUserAsync_WithNameParts_ComposesFullNameAndReturnsParts()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var created = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "Name-Parts-User",
+                Email = "name-parts@example.com",
+                Password = "Secret123",
+                PasswordFormat = BlazorApp.Api.Utils.PasswordHasher.PasswordFormatRaw,
+                FullName = "ignored when parts are sent",
+                GivenName = "Mary",
+                MiddleName = "Jane",
+                FamilyName = "Smith",
+                Nickname = "MJ",
+            });
+
+            Assert.True(created.Success, created.Message);
+            Assert.Equal("Mary Jane Smith", created.Data!.FullName);
+            Assert.Equal("Mary", created.Data.GivenName);
+            Assert.Equal("Jane", created.Data.MiddleName);
+            Assert.Equal("Smith", created.Data.FamilyName);
+            Assert.Equal("MJ", created.Data.Nickname);
+            var stored = await _db.Queryable<User>().FirstAsync(item => item.UserGUID == created.Data.UserGUID);
+            Assert.Equal("Mary Jane Smith", stored.FullName);
+            Assert.Equal("MJ", stored.Nickname);
+        }
+
+        [Fact]
+        public async Task CreateUserAsync_WithOnlyFullName_KeepsLegacyValueAndLeavesPartsEmpty()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var created = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "legacy-name-user",
+                Email = "legacy-name@example.com",
+                Password = "Secret123",
+                PasswordFormat = BlazorApp.Api.Utils.PasswordHasher.PasswordFormatRaw,
+                FullName = "Legacy Name",
+            });
+
+            Assert.True(created.Success, created.Message);
+            Assert.Equal("Legacy Name", created.Data!.FullName);
+            Assert.Null(created.Data.GivenName);
+            Assert.Null(created.Data.Nickname);
+        }
+
+        [Fact]
+        public async Task CreateUserAsync_WhenComposedNameTooLong_ReturnsValidationErrorAndCreatesNothing()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+            var forty = new string('a', 40);
+
+            var created = await service.CreateUserAsync(new CreateUserDto
+            {
+                Username = "too-long-name",
+                Email = "too-long@example.com",
+                Password = "Secret123",
+                PasswordFormat = BlazorApp.Api.Utils.PasswordHasher.PasswordFormatRaw,
+                GivenName = forty,
+                MiddleName = forty,
+                FamilyName = forty,
+            });
+
+            Assert.False(created.Success);
+            Assert.Equal("VALIDATION_ERROR", created.ErrorCode);
+            Assert.Contains("100", created.Message);
+            Assert.False(await _db.Queryable<User>().AnyAsync(item => item.Username == "too-long-name"));
+        }
+
+        [Fact]
+        public async Task UpdateUserByGuidAsync_LegacyFullNameOnly_KeepsPartsWhenConsistentAndClearsWhenChanged()
+        {
+            var (service, guid) = await SeedNamePartsTargetAsync();
+
+            // 旧 Web：原样回传 FullName，拆分字段与昵称都保留。
+            var same = await service.UpdateUserByGuidAsync(guid, BuildNamePartsUpdate(fullName: "Mary Jane Smith"));
+            Assert.True(same.Success, same.Message);
+            var afterSame = (await _db.Queryable<User>().InSingleAsync(guid))!;
+            Assert.Equal("Mary", afterSame.GivenName);
+            Assert.Equal("Jane", afterSame.MiddleName);
+            Assert.Equal("Smith", afterSame.FamilyName);
+            Assert.Equal("MJ", afterSame.Nickname);
+            Assert.Equal("Mary", same.Data!.GivenName);
+
+            // 旧 Web 改了 FullName：三段清空（避免漂移），昵称不动。
+            var changed = await service.UpdateUserByGuidAsync(guid, BuildNamePartsUpdate(fullName: "Other Person"));
+            Assert.True(changed.Success, changed.Message);
+            var afterChanged = (await _db.Queryable<User>().InSingleAsync(guid))!;
+            Assert.Equal("Other Person", afterChanged.FullName);
+            Assert.Null(afterChanged.GivenName);
+            Assert.Null(afterChanged.MiddleName);
+            Assert.Null(afterChanged.FamilyName);
+            Assert.Equal("MJ", afterChanged.Nickname);
+        }
+
+        [Fact]
+        public async Task UpdateUserByGuidAsync_NicknameOnlyAndPartialParts_FollowNullMeansUnchangedSemantics()
+        {
+            var (service, guid) = await SeedNamePartsTargetAsync();
+
+            var nickOnly = await service.UpdateUserByGuidAsync(guid, BuildNamePartsUpdate(nickname: "Emmy"));
+            Assert.True(nickOnly.Success, nickOnly.Message);
+            var afterNick = (await _db.Queryable<User>().InSingleAsync(guid))!;
+            Assert.Equal("Emmy", afterNick.Nickname);
+            Assert.Equal("Mary Jane Smith", afterNick.FullName);
+            Assert.Equal("Mary", afterNick.GivenName);
+
+            var partial = await service.UpdateUserByGuidAsync(guid, BuildNamePartsUpdate(given: "Maria", middle: " "));
+            Assert.True(partial.Success, partial.Message);
+            var afterPartial = (await _db.Queryable<User>().InSingleAsync(guid))!;
+            Assert.Equal("Maria Smith", afterPartial.FullName);
+            Assert.Equal("Maria", afterPartial.GivenName);
+            Assert.Null(afterPartial.MiddleName);
+            Assert.Equal("Smith", afterPartial.FamilyName);
+            Assert.Equal("Emmy", afterPartial.Nickname);
+            Assert.Equal("Maria Smith", partial.Data!.FullName);
+        }
+
+        [Fact]
+        public async Task UpdateUserByGuidAsync_WhenComposedNameTooLong_ReturnsValidationErrorAndKeepsStoredValues()
+        {
+            var (service, guid) = await SeedNamePartsTargetAsync();
+            var forty = new string('b', 40);
+
+            var result = await service.UpdateUserByGuidAsync(
+                guid,
+                BuildNamePartsUpdate(given: forty, middle: forty, family: forty, nickname: "NewNick"));
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+            var stored = (await _db.Queryable<User>().InSingleAsync(guid))!;
+            Assert.Equal("Mary Jane Smith", stored.FullName);
+            Assert.Equal("Mary", stored.GivenName);
+            Assert.Equal("MJ", stored.Nickname);
+        }
+
+        [Fact]
+        public async Task ImportUsersAsync_PassesNamePartsThroughSameWriteRule()
+        {
+            var service = CreateUserService(await SeedAdminScopeAsync());
+
+            var result = await service.ImportUsersAsync(new List<ImportUserDto>
+            {
+                new()
+                {
+                    Username = "import-parts",
+                    Email = "import-parts@example.com",
+                    Password = "Secret123",
+                    GivenName = "小明",
+                    FamilyName = "王",
+                    Nickname = "明明",
+                },
+                new()
+                {
+                    Username = "import-legacy",
+                    Email = "import-legacy@example.com",
+                    Password = "Secret123",
+                    FullName = "Import Legacy",
+                },
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(2, result.Data!.SuccessCount);
+            var withParts = await _db.Queryable<User>().FirstAsync(item => item.Username == "import-parts");
+            Assert.Equal("王小明", withParts.FullName);
+            Assert.Equal("小明", withParts.GivenName);
+            Assert.Equal("明明", withParts.Nickname);
+            var legacy = await _db.Queryable<User>().FirstAsync(item => item.Username == "import-legacy");
+            Assert.Equal("Import Legacy", legacy.FullName);
+            Assert.Null(legacy.GivenName);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task UserLists_ReturnNamePartsAndSearchMatchesNicknameGivenMiddleAndFamilyName(bool optimized)
+        {
+            var (service, guid) = await SeedNamePartsTargetAsync();
+            // 让 FullName / 用户名 / 邮箱都不含关键词，确保命中来自拆分字段。
+            var target = (await _db.Queryable<User>().InSingleAsync(guid))!;
+            target.FullName = "Display Only";
+            target.Nickname = "Zebrafish";
+            await _db.Updateable(target).ExecuteCommandAsync();
+
+            foreach (var keyword in new[] { "Zebrafish", "Mary", "Jane", "Smith" })
+            {
+                var found = await GetUsersAsync(service, optimized, new UserQueryDto
+                {
+                    Page = 1,
+                    PageSize = 100,
+                    SearchKeyword = keyword,
+                });
+                var row = Assert.Single(found.Data!.Items!, item => item.UserGUID == guid);
+                Assert.Equal("Mary", row.GivenName);
+                Assert.Equal("Jane", row.MiddleName);
+                Assert.Equal("Smith", row.FamilyName);
+                Assert.Equal("Zebrafish", row.Nickname);
+            }
+
+            var missing = await GetUsersAsync(service, optimized, new UserQueryDto
+            {
+                Page = 1,
+                PageSize = 100,
+                SearchKeyword = "NoSuchNameAnywhere",
+            });
+            Assert.DoesNotContain(missing.Data!.Items!, item => item.UserGUID == guid);
+        }
+
+        [Fact]
+        public async Task SingleUserReads_ReturnNameParts()
+        {
+            var (service, guid) = await SeedNamePartsTargetAsync();
+
+            var byGuid = await service.GetUserByGuidAsync(guid);
+            var byUsername = await service.GetUserByUsernameAsync("name-target");
+            var byEmail = await service.GetUserByEmailAsync("name-target@example.com");
+
+            Assert.True(byGuid.Success, byGuid.Message);
+            Assert.Equal("Mary", byGuid.Data!.GivenName);
+            Assert.Equal("MJ", byGuid.Data.Nickname);
+            Assert.True(byUsername.Success, byUsername.Message);
+            Assert.Equal("Jane", byUsername.Data!.MiddleName);
+            Assert.True(byEmail.Success, byEmail.Message);
+            Assert.Equal("Smith", byEmail.Data!.FamilyName);
+        }
+
         public void Dispose()
         {
             _hqDb.Dispose();

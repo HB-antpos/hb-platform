@@ -93,6 +93,10 @@ namespace BlazorApp.Api.Services.React
                         (u, ur, r, us, s, profile) =>
                             u.Username.Contains(keyword!)
                             || (u.FullName != null && u.FullName.Contains(keyword!))
+                            || (u.GivenName != null && u.GivenName.Contains(keyword!))
+                            || (u.MiddleName != null && u.MiddleName.Contains(keyword!))
+                            || (u.FamilyName != null && u.FamilyName.Contains(keyword!))
+                            || (u.Nickname != null && u.Nickname.Contains(keyword!))
                             || (u.Email != null && u.Email.Contains(keyword!))
                     )
                     .WhereIF(statusFilter == 0, (u, ur, r, us, s, profile) => !u.IsActive)
@@ -104,6 +108,10 @@ namespace BlazorApp.Api.Services.React
                         u.UserGUID,
                         u.Username,
                         u.FullName,
+                        u.GivenName,
+                        u.MiddleName,
+                        u.FamilyName,
+                        u.Nickname,
                         u.Email,
                         profile.Phone,
                         Status = u.IsActive ? 1 : 0,
@@ -155,6 +163,10 @@ namespace BlazorApp.Api.Services.React
                             UserGuid = first.UserGUID,
                             Username = first.Username,
                             FullName = first.FullName,
+                            GivenName = first.GivenName,
+                            MiddleName = first.MiddleName,
+                            FamilyName = first.FamilyName,
+                            Nickname = first.Nickname,
                             Email = first.Email,
                             Phone = first.Phone,
                             Status = first.Status,
@@ -299,13 +311,28 @@ namespace BlazorApp.Api.Services.React
                     PasswordHash = sendSetupEmail || string.IsNullOrWhiteSpace(dto.Password)
                         ? PasswordHasher.HashPassword(Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
                         : PasswordHasher.HashSubmittedPassword(dto.Password!, dto.PasswordFormat),
-                    FullName = dto.FullName?.Trim(),
                     IsActive = dto.Status == 1,
                     CreatedAt = now,
                     UpdatedAt = now,
                     CreatedBy = createdBy,
                     UpdatedBy = createdBy,
                 };
+
+                // 姓名：新拆分字段任一非空则存各段并合成姓名；都没传则沿用 dto.FullName（旧客户端行为不变）。
+                var nameError = UserNameParts.ApplyOnCreate(
+                    user,
+                    new UserNameInput(
+                        dto.FullName?.Trim(),
+                        dto.GivenName,
+                        dto.MiddleName,
+                        dto.FamilyName,
+                        dto.Nickname
+                    )
+                );
+                if (nameError != null)
+                {
+                    return ApiResponse<StoreUserDetailDto>.Error(nameError, "VALIDATION_ERROR");
+                }
 
                 await _db.Ado.BeginTranAsync();
                 try
@@ -483,7 +510,24 @@ namespace BlazorApp.Api.Services.React
                     var emailChanged = !string.Equals(user.Email?.Trim(), nextEmail, StringComparison.OrdinalIgnoreCase);
                     user.Username = nextUsername;
                     user.Email = nextEmail;
-                    user.FullName = dto.FullName?.Trim();
+                    // 关键逻辑：此处是整实体 Updateable，user 必须是刚从库里读出的完整实体，
+                    // 这样老版移动端不带新字段时，四个拆分列会按库里原值写回，不会被刷成 null。
+                    // 新字段 null=不改、空白=清空；旧客户端只发 FullName 时按旧行为设置并清理失配的拆分字段。
+                    var nameError = UserNameParts.ApplyOnUpdate(
+                        user,
+                        new UserNameInput(
+                            dto.FullName?.Trim(),
+                            dto.GivenName,
+                            dto.MiddleName,
+                            dto.FamilyName,
+                            dto.Nickname
+                        )
+                    );
+                    if (nameError != null)
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return ApiResponse<StoreUserDetailDto>.Error(nameError, "VALIDATION_ERROR");
+                    }
                     user.IsActive = dto.Status == 1;
                     user.UpdatedAt = now;
                     user.UpdatedBy = updatedBy;
@@ -684,6 +728,10 @@ namespace BlazorApp.Api.Services.React
                     u.UserGUID,
                     u.Username,
                     u.FullName,
+                    u.GivenName,
+                    u.MiddleName,
+                    u.FamilyName,
+                    u.Nickname,
                     u.Email,
                     profile.Phone,
                     Status = u.IsActive ? 1 : 0,
@@ -719,6 +767,10 @@ namespace BlazorApp.Api.Services.React
                         UserGuid = first.UserGUID,
                         Username = first.Username,
                         FullName = first.FullName,
+                        GivenName = first.GivenName,
+                        MiddleName = first.MiddleName,
+                        FamilyName = first.FamilyName,
+                        Nickname = first.Nickname,
                         Email = first.Email,
                         Phone = first.Phone,
                         Status = first.Status,

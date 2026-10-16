@@ -101,6 +101,10 @@ namespace BlazorApp.Api.Services
                         u.Username.Contains(query.SearchKeyword)
                         || u.Email.Contains(query.SearchKeyword)
                         || (u.FullName != null && u.FullName.Contains(query.SearchKeyword))
+                        || (u.GivenName != null && u.GivenName.Contains(query.SearchKeyword))
+                        || (u.MiddleName != null && u.MiddleName.Contains(query.SearchKeyword))
+                        || (u.FamilyName != null && u.FamilyName.Contains(query.SearchKeyword))
+                        || (u.Nickname != null && u.Nickname.Contains(query.SearchKeyword))
                     );
                 }
 
@@ -268,6 +272,10 @@ namespace BlazorApp.Api.Services
                         Username = user.Username,
                         Email = user.Email,
                         FullName = user.FullName,
+                        GivenName = user.GivenName,
+                        MiddleName = user.MiddleName,
+                        FamilyName = user.FamilyName,
+                        Nickname = user.Nickname,
                         LastLoginAt = user.LastLoginAt,
                         LastLoginIp = user.LastLoginIp,
                         IsActive = user.IsActive,
@@ -397,6 +405,10 @@ namespace BlazorApp.Api.Services
                             u.Username.Contains(query.SearchKeyword)
                             || u.Email.Contains(query.SearchKeyword)
                             || (u.FullName != null && u.FullName.Contains(query.SearchKeyword))
+                            || (u.GivenName != null && u.GivenName.Contains(query.SearchKeyword))
+                            || (u.MiddleName != null && u.MiddleName.Contains(query.SearchKeyword))
+                            || (u.FamilyName != null && u.FamilyName.Contains(query.SearchKeyword))
+                            || (u.Nickname != null && u.Nickname.Contains(query.SearchKeyword))
                     );
                 }
 
@@ -434,6 +446,10 @@ namespace BlazorApp.Api.Services
                                     Username = u.Username,
                                     Email = u.Email,
                                     FullName = u.FullName,
+                                    GivenName = u.GivenName,
+                                    MiddleName = u.MiddleName,
+                                    FamilyName = u.FamilyName,
+                                    Nickname = u.Nickname,
                                     LastLoginAt = u.LastLoginAt,
                                     LastLoginIp = u.LastLoginIp,
                                     IsActive = u.IsActive,
@@ -861,6 +877,10 @@ namespace BlazorApp.Api.Services
                     Username = user.Username,
                     Email = user.Email,
                     FullName = user.FullName,
+                    GivenName = user.GivenName,
+                    MiddleName = user.MiddleName,
+                    FamilyName = user.FamilyName,
+                    Nickname = user.Nickname,
                     LastLoginAt = user.LastLoginAt,
                     LastLoginIp = user.LastLoginIp,
                     IsActive = user.IsActive,
@@ -1061,6 +1081,10 @@ namespace BlazorApp.Api.Services
                         Username = u.Username,
                         Email = u.Email,
                         FullName = u.FullName,
+                        GivenName = u.GivenName,
+                        MiddleName = u.MiddleName,
+                        FamilyName = u.FamilyName,
+                        Nickname = u.Nickname,
                         LastLoginAt = u.LastLoginAt,
                         LastLoginIp = u.LastLoginIp,
                         IsActive = u.IsActive,
@@ -1105,6 +1129,10 @@ namespace BlazorApp.Api.Services
                         Username = u.Username,
                         Email = u.Email,
                         FullName = u.FullName,
+                        GivenName = u.GivenName,
+                        MiddleName = u.MiddleName,
+                        FamilyName = u.FamilyName,
+                        Nickname = u.Nickname,
                         LastLoginAt = u.LastLoginAt,
                         LastLoginIp = u.LastLoginIp,
                         IsActive = u.IsActive,
@@ -1196,11 +1224,20 @@ namespace BlazorApp.Api.Services
                     Username = usernameLower,
                     Email = dto.Email,
                     PasswordHash = PasswordHasher.HashSubmittedPassword(dto.Password, dto.PasswordFormat),
-                    FullName = dto.FullName,
                     IsActive = dto.IsActive,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 };
+
+                // 姓名：新拆分字段任一非空则存各段并合成 FullName；都没传则沿用 dto.FullName（旧客户端行为不变）。
+                var nameError = UserNameParts.ApplyOnCreate(
+                    user,
+                    new UserNameInput(dto.FullName, dto.GivenName, dto.MiddleName, dto.FamilyName, dto.Nickname)
+                );
+                if (nameError != null)
+                {
+                    return ApiResponse<UserDto>.Error(nameError, "VALIDATION_ERROR");
+                }
 
                 // 开启事务
                 await db.Ado.BeginTranAsync();
@@ -1253,6 +1290,10 @@ namespace BlazorApp.Api.Services
                         Username = user.Username,
                         Email = user.Email,
                         FullName = user.FullName,
+                        GivenName = user.GivenName,
+                        MiddleName = user.MiddleName,
+                        FamilyName = user.FamilyName,
+                        Nickname = user.Nickname,
                         LastLoginAt = user.LastLoginAt,
                         LastLoginIp = user.LastLoginIp,
                         IsActive = user.IsActive,
@@ -1484,7 +1525,15 @@ namespace BlazorApp.Api.Services
                     // 更新用户信息（用户名统一写入小写）
                     user.Username = usernameLower;
                     user.Email = dto.Email;
-                    user.FullName = dto.FullName;
+                    // 姓名：新字段 null=不改、空白=清空；旧客户端只发 FullName 时按旧行为设置并清理失配的拆分字段。
+                    var nameError = UserNameParts.ApplyOnUpdate(
+                        user,
+                        new UserNameInput(dto.FullName, dto.GivenName, dto.MiddleName, dto.FamilyName, dto.Nickname)
+                    );
+                    if (nameError != null)
+                    {
+                        return await RollbackUserUpdateAsync<UserDto>(db, nameError, "VALIDATION_ERROR");
+                    }
                     user.IsActive = dto.IsActive;
                     user.UpdatedAt = DateTime.UtcNow;
                     await db.Updateable(user).ExecuteCommandAsync();
@@ -1496,6 +1545,10 @@ namespace BlazorApp.Api.Services
                         Username = user.Username,
                         Email = user.Email,
                         FullName = user.FullName,
+                        GivenName = user.GivenName,
+                        MiddleName = user.MiddleName,
+                        FamilyName = user.FamilyName,
+                        Nickname = user.Nickname,
                         LastLoginAt = user.LastLoginAt,
                         LastLoginIp = user.LastLoginIp,
                         IsActive = user.IsActive,
@@ -3251,6 +3304,10 @@ namespace BlazorApp.Api.Services
                             Username = importUser.Username,
                             Email = importUser.Email,
                             FullName = importUser.FullName,
+                            GivenName = importUser.GivenName,
+                            MiddleName = importUser.MiddleName,
+                            FamilyName = importUser.FamilyName,
+                            Nickname = importUser.Nickname,
                             // 导入密码按原始密码交给后端统一慢哈希，保持与新登录协议一致。
                             Password = importUser.Password,
                             PasswordFormat = PasswordHasher.PasswordFormatRaw,

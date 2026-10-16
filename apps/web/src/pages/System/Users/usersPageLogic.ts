@@ -217,3 +217,45 @@ export function countBatchStoreChanges(result: BatchUserStoreOperationResult | n
   if (!result) return 0
   return result.addedCount + result.upgradedCount + result.removedCount
 }
+
+/** 姓名拆分字段的键；顺序即表单展示顺序（姓、名、中间名、昵称）。 */
+export const USER_NAME_PART_KEYS = ['familyName', 'givenName', 'middleName', 'nickname'] as const
+export type UserNamePartKey = (typeof USER_NAME_PART_KEYS)[number]
+
+/** 后端对每个姓名拆分字段的最大长度限制（字符）。 */
+export const USER_NAME_PART_MAX_LENGTH = 50
+
+type UserNamePartSource = Partial<Record<UserNamePartKey, string | null | undefined>>
+
+/** 把详情里的姓名拆分字段转成表单初始值：null / 缺省统一显示为空串。 */
+export function pickUserNamePartFormValues(user: UserNamePartSource | null | undefined): Record<UserNamePartKey, string> {
+  return {
+    familyName: user?.familyName ?? '',
+    givenName: user?.givenName ?? '',
+    middleName: user?.middleName ?? '',
+    nickname: user?.nickname ?? '',
+  }
+}
+
+/**
+ * 计算姓、名、中间名、昵称里「有变化」的字段，用作创建 / 更新请求体的增量部分。
+ *
+ * 后端约定：字段 null / 不传 = 不修改，空串 = 清空，非空 = 设置；并且只要请求里任何一个
+ * 姓 / 名 / 中间名 非 null，就会用有效三段重算 FullName。所以：
+ * - 与加载时的原值（original）相同的字段一律不返回，避免把旧数据误写回去或无谓触发 FullName 重算；
+ * - 变成空的字段返回 ''（表示清空），而不是 undefined；
+ * - 比较时忽略首尾空白，null / 缺省与空串视为同一种「未填写」；
+ * - 创建用户时 original 传 undefined，结果即「用户实际填写了的字段」。
+ */
+export function diffUserNameParts(
+  original: UserNamePartSource | null | undefined,
+  current: UserNamePartSource | null | undefined,
+): Partial<Record<UserNamePartKey, string>> {
+  const changes: Partial<Record<UserNamePartKey, string>> = {}
+  for (const key of USER_NAME_PART_KEYS) {
+    const before = original?.[key]?.trim() ?? ''
+    const after = current?.[key]?.trim() ?? ''
+    if (before !== after) changes[key] = after
+  }
+  return changes
+}

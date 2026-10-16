@@ -7,12 +7,14 @@ import {
   describeLastLogin,
   diffAssignmentKeys,
   diffStoreAssignment,
+  diffUserNameParts,
   getUserDisplayName,
   getUserInitial,
   getUserSecondaryLine,
   isDerivedStoreManagerRoleName,
   mergeSelectedUsers,
   planBatchRoleChange,
+  pickUserNamePartFormValues,
   planBatchStatusChange,
   splitVisibleStores,
   toIsActiveQuery,
@@ -175,6 +177,52 @@ assert.equal(countBatchStoreChanges({
   usersLosingStoreManagerRole: [],
   usersGainingStoreManagerRole: [],
 }), 6, '已存在与受保护的组合不计入变更数')
+
+// 姓名拆分字段：只发有变化的字段；清空发空串；未变化 / 仅空白差异不发，避免把旧数据误写回去。
+{
+  assert.deepEqual(
+    diffUserNameParts(undefined, { familyName: '张', givenName: '伟', middleName: '', nickname: undefined }),
+    { familyName: '张', givenName: '伟' },
+    '创建用户时只带用户实际填写的字段（空串 / 未填不发）',
+  )
+  const original = { familyName: '张', givenName: '伟', middleName: null, nickname: 'Wei' }
+  assert.deepEqual(
+    diffUserNameParts(original, { familyName: '张', givenName: '伟', middleName: '', nickname: 'Wei' }),
+    {},
+    '原值为 null、表单为空串，以及值完全相同，都不算变化',
+  )
+  assert.deepEqual(
+    diffUserNameParts(original, { familyName: ' 张 ', givenName: '伟', middleName: '', nickname: 'Wei ' }),
+    {},
+    '首尾空白差异不算变化',
+  )
+  assert.deepEqual(
+    diffUserNameParts(original, { familyName: '李', givenName: '伟', middleName: '', nickname: 'Wei' }),
+    { familyName: '李' },
+    '只改了姓时只发姓',
+  )
+  assert.deepEqual(
+    diffUserNameParts(original, { familyName: '张', givenName: '', middleName: 'Ming', nickname: '' }),
+    { givenName: '', middleName: 'Ming', nickname: '' },
+    '清空发空串、新填发新值，未变化的姓不发',
+  )
+  assert.deepEqual(
+    diffUserNameParts(null, { nickname: ' Sam ' }),
+    { nickname: 'Sam' },
+    '原值整体缺失时新填的昵称按去空白后的值发送',
+  )
+  assert.deepEqual(
+    diffUserNameParts(original, undefined),
+    { familyName: '', givenName: '', nickname: '' },
+    '表单值整体缺失视为全部清空（原值为 null 的中间名不变）',
+  )
+  assert.deepEqual(
+    pickUserNamePartFormValues({ familyName: '张', givenName: null }),
+    { familyName: '张', givenName: '', middleName: '', nickname: '' },
+    '回填表单时 null / 缺省显示为空串',
+  )
+  assert.deepEqual(pickUserNamePartFormValues(undefined), { familyName: '', givenName: '', middleName: '', nickname: '' })
+}
 
 assert.equal(getServerErrorMessage({ payload: { message: 'tommy：无权修改该用户' } }, '失败'), 'tommy：无权修改该用户')
 assert.equal(getServerErrorMessage(new Error('Network Error'), '失败'), '失败', '没有服务端业务消息时用通用文案')
