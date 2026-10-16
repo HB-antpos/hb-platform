@@ -46,7 +46,9 @@ const EXISTING_REAL_PAGE_FILES = [
   "app/(shell)/attendance-personal.tsx",
   "app/(shell)/attendance-management.tsx",
   "app/(shell)/users/index.tsx",
-  "app/(shell)/staff/[userGuid].tsx",
+  "app/(shell)/staff/[userGuid].tsx", // 旧员工详情：已改成重定向壳（保留文件，旧入口 / 书签 / 推送仍可用）
+  "app/(shell)/users/[userGuid]/index.tsx", // 统一人员详情（店长版 / 管理员版）
+  "app/(shell)/users/[userGuid]/login-records.tsx", // 登录记录（承接 user-admin 的同名页）
   "app/(shell)/users/[userGuid]/access.tsx",
   "app/(shell)/users/[userGuid]/pos-terminal-permissions.tsx",
   "app/(shell)/device-management.tsx",
@@ -99,8 +101,8 @@ async function assertFileExists(relativePath: string) {
 async function run() {
   assert.equal(
     EXISTING_REAL_PAGE_FILES.length,
-    46,
-    "导航改版前的真实业务页面必须全部保留"
+    48,
+    "导航改版前的真实业务页面必须全部保留（人员详情合并新增 users/[userGuid]/index 与 login-records 两页）"
   );
   await Promise.all(EXISTING_REAL_PAGE_FILES.map(assertFileExists));
   await assertFileExists("app/(shell)/workbench.tsx");
@@ -112,7 +114,7 @@ async function run() {
 
   assert.equal(
     EXISTING_REAL_PAGE_FILES.filter((path) => path.startsWith("app/(shell)/")).length,
-    44,
+    46,
     "除认证和隐私政策外，所有真实业务页面（含详情）都必须位于 Shell Stack"
   );
   await assert.rejects(

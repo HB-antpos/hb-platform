@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
-import { ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import * as Crypto from "expo-crypto";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
-import { ActivityIndicator, Button, Dialog, Divider, Portal, Text } from "react-native-paper";
+import { ActivityIndicator, Button, Icon, Text } from "react-native-paper";
+import { LabelPrinterSetupSheet } from "@/components/printer/LabelPrinterSetupSheet";
+import { InfoCard, NoticeBox, resolvePersonName } from "@/modules/people";
+import { PeopleSheet, SHEET_BUTTON_STYLE, SheetActions } from "@/modules/people/detail/people-sheet";
 import {
   confirmStaffCashierBarcodePrintApi,
   ensureStaffCashierBarcodeApi,
@@ -103,13 +105,14 @@ export function StaffBarcodeDialog({
   visible: boolean;
   onDismiss: () => void;
 }) {
-  const { t } = useAppTranslation(["userManagement", "common"]);
+  const { t } = useAppTranslation(["userManagement", "peopleDetail", "common"]);
   const { fontScale, width } = useWindowDimensions();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const printer = usePrinterStore((state) => state.savedPrinter);
   const printerStatus = usePrinterStore((state) => state.status);
   const printerHydrated = usePrinterStore((state) => state.hydrated);
+  // 更换打印机就在弹层内完成（LabelPrinterSetupSheet），不再关掉弹层跳去设置页丢失上下文。
+  const [printerSheetVisible, setPrinterSheetVisible] = useState(false);
   const [operation, setOperation] = useState<StaffBarcodeBatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -240,10 +243,11 @@ export function StaffBarcodeDialog({
     });
   }, [operation, operationScope, sessionRef, t, user]);
 
-  const openPrinterSettings = useCallback(() => {
-    onDismiss();
-    router.navigate("/(shell)/settings");
-  }, [onDismiss, router]);
+  const openPrinterSetup = useCallback(() => setPrinterSheetVisible(true), []);
+  // 弹层被外部关闭时，内嵌的打印机设置也一并收起，下次打开从干净状态开始。
+  useEffect(() => {
+    if (!visible) setPrinterSheetVisible(false);
+  }, [visible]);
 
   const currentTarget = operation?.targets[0];
   const confirmationOnly = currentTarget?.status === "failed"
@@ -252,57 +256,68 @@ export function StaffBarcodeDialog({
   const data = barcodeQuery.isError ? undefined : barcodeQuery.data;
   const canOperate = Boolean(user && user.status === 1);
 
+  if (!visible) return null;
+
+  const identity = resolvePersonName({
+    fullName: user?.fullName,
+    givenName: user?.givenName,
+    middleName: user?.middleName,
+    familyName: user?.familyName,
+    nickname: user?.nickname,
+    username: user?.username,
+  });
+
   return (
-    <Portal>
-      <Dialog visible={visible} onDismiss={busy ? undefined : onDismiss} testID="staff-barcode-dialog">
-        <Dialog.Title>{t("staffBarcode.title")}</Dialog.Title>
-        <Dialog.ScrollArea>
-          <ScrollView contentContainerStyle={styles.content}>
-            <View style={styles.identity}>
-              <Text variant="titleMedium">{user?.fullName || user?.username}</Text>
-              <Text variant="bodySmall" style={styles.muted}>@{user?.username} · {storeCode}</Text>
-            </View>
-            {!canOperate ? <Text style={styles.error}>{t("staffBarcode.errors.inactive")}</Text> : null}
-            {barcodeQuery.isLoading ? <ActivityIndicator /> : null}
-            {barcodeQuery.isError ? <Text style={styles.error}>{t("staffBarcode.errors.unavailable")}</Text> : null}
-            {!barcodeQuery.isLoading && !barcodeQuery.isError && !data?.exists ? (
-              <Text variant="bodySmall" style={styles.muted}>{t("staffBarcode.emptyDescription")}</Text>
-            ) : null}
-            {data?.exists && data.barcode ? (
-              <View style={styles.codePanel}>
-                <QRCode value={data.barcode} size={176} />
-                <Text variant="titleMedium" selectable>{data.barcode}</Text>
-                <Text variant="bodySmall" style={styles.muted}>{t("staffBarcode.printCount", { count: data.printCount })}</Text>
-              </View>
-            ) : null}
-            <Divider />
-            <Text variant="bodyMedium">{t("staffBarcode.printer", {
-              printer: printer?.name || t("staffBarcode.noPrinter"),
-              status: t(`staffBarcode.printerStatuses.${printerStatus}`, printerStatus),
-            })}</Text>
-            <Button compact mode="text" icon="cog-outline" onPress={openPrinterSettings} disabled={busy}>
-              {t("staffBarcode.actions.printerSettings")}
-            </Button>
-            {currentTarget?.status === "uncertain" ? (
-              <View style={styles.actions}>
-                <Text style={styles.error}>{t("staffBarcode.errors.uncertain")}</Text>
-                <Button mode="contained-tonal" onPress={() => void resolveUncertain("printed")}>{t("staffBarcode.actions.printed")}</Button>
-                <Button mode="outlined" onPress={() => void resolveUncertain("notPrinted")}>{t("staffBarcode.actions.notPrinted")}</Button>
-              </View>
-            ) : null}
-            {confirmationOnly && !error ? <Text style={styles.warning}>{t("staffBarcode.confirmOnlyHint")}</Text> : null}
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-          </ScrollView>
-        </Dialog.ScrollArea>
-        <Dialog.Actions style={[styles.dialogActions, stackActions && styles.dialogActionsStacked]}>
-          <Button style={stackActions ? styles.stackedButton : undefined} onPress={onDismiss} disabled={busy}>{t("actions.cancel")}</Button>
-          {!data?.exists ? <Button style={stackActions ? styles.stackedButton : undefined} onPress={() => void createCode()} disabled={!canOperate || busy || !pendingLoaded || restoreFailed}>{t("staffBarcode.actions.create")}</Button> : null}
-          <Button style={stackActions ? styles.stackedButton : undefined} mode="contained" onPress={() => void printCode()} loading={busy} disabled={!canOperate || busy || !pendingLoaded || restoreFailed || currentTarget?.status === "uncertain"}>
+    <PeopleSheet
+      title={t("staffBarcode.title")}
+      subtitle={`${identity.primary} · @${user?.username ?? ""} · ${storeCode}`}
+      closeLabel={t("common:actions.close")}
+      onDismiss={onDismiss}
+      dismissable={!busy}
+      testID="staff-barcode-dialog"
+      footer={(
+        <SheetActions stacked={stackActions}>
+          <Button mode="outlined" style={SHEET_BUTTON_STYLE} onPress={onDismiss} disabled={busy}>{t("actions.cancel")}</Button>
+          {!data?.exists ? <Button mode="outlined" style={SHEET_BUTTON_STYLE} onPress={() => void createCode()} disabled={!canOperate || busy || !pendingLoaded || restoreFailed}>{t("staffBarcode.actions.create")}</Button> : null}
+          <Button style={SHEET_BUTTON_STYLE} mode="contained" icon="printer-outline" onPress={() => void printCode()} loading={busy} disabled={!canOperate || busy || !pendingLoaded || restoreFailed || currentTarget?.status === "uncertain"}>
             {confirmationOnly ? t("staffBarcode.actions.retryConfirmation") : data?.exists ? t("staffBarcode.actions.print") : t("staffBarcode.actions.createAndPrint")}
           </Button>
-        </Dialog.Actions>
-      </Dialog>
-    </Portal>
+        </SheetActions>
+      )}
+    >
+      {!canOperate ? <NoticeBox tone="red" icon="alert-circle-outline">{t("staffBarcode.errors.inactive")}</NoticeBox> : null}
+      {barcodeQuery.isLoading ? <ActivityIndicator /> : null}
+      {barcodeQuery.isError ? <NoticeBox tone="red" icon="alert-circle-outline">{t("staffBarcode.errors.unavailable")}</NoticeBox> : null}
+      {!barcodeQuery.isLoading && !barcodeQuery.isError && !data?.exists ? (
+        <Text variant="bodySmall" style={styles.muted}>{t("staffBarcode.emptyDescription")}</Text>
+      ) : null}
+      {data?.exists && data.barcode ? (
+        <View style={styles.codePanel}>
+          <View style={styles.qrFrame}>
+            <QRCode value={data.barcode} size={176} />
+          </View>
+          <Text style={styles.codeText} selectable>{data.barcode}</Text>
+          <Text variant="bodySmall" style={styles.muted}>{t("staffBarcode.printCount", { count: data.printCount })}</Text>
+        </View>
+      ) : null}
+      <PrinterRow
+        name={printer?.name || ""}
+        status={printerStatus}
+        busy={busy}
+        onChange={openPrinterSetup}
+      />
+      <Text style={styles.hint}>{t("peopleDetail:barcode.changeHint")}</Text>
+      {currentTarget?.status === "uncertain" ? (
+        <View style={styles.actions}>
+          <NoticeBox tone="red" icon="alert-circle-outline">{t("staffBarcode.errors.uncertain")}</NoticeBox>
+          <Button mode="contained-tonal" onPress={() => void resolveUncertain("printed")}>{t("staffBarcode.actions.printed")}</Button>
+          <Button mode="outlined" onPress={() => void resolveUncertain("notPrinted")}>{t("staffBarcode.actions.notPrinted")}</Button>
+        </View>
+      ) : null}
+      {confirmationOnly && !error ? <NoticeBox tone="amber" icon="alert-outline">{t("staffBarcode.confirmOnlyHint")}</NoticeBox> : null}
+      {error ? <NoticeBox tone="red" icon="alert-circle-outline">{error}</NoticeBox> : null}
+      <LabelPrinterSetupSheet visible={printerSheetVisible} onDismiss={() => setPrinterSheetVisible(false)} />
+    </PeopleSheet>
   );
 }
 
@@ -319,13 +334,13 @@ export function StaffBarcodeBatchDialog({
   visible: boolean;
   onDismiss: () => void;
 }) {
-  const { t } = useAppTranslation(["userManagement", "common"]);
+  const { t } = useAppTranslation(["userManagement", "peopleDetail", "common"]);
   const { fontScale, width } = useWindowDimensions();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const printer = usePrinterStore((state) => state.savedPrinter);
   const printerStatus = usePrinterStore((state) => state.status);
   const printerHydrated = usePrinterStore((state) => state.hydrated);
+  const [printerSheetVisible, setPrinterSheetVisible] = useState(false);
   const [batch, setBatch] = useState<StaffBarcodeBatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingLoaded, setPendingLoaded] = useState(false);
@@ -428,63 +443,107 @@ export function StaffBarcodeBatchDialog({
     });
   }, [actorGuid, batch, onDismiss, pendingLoaded, restoreFailed, sessionRef, storeCode]);
 
-  const openPrinterSettings = useCallback(() => {
-    onDismiss();
-    router.navigate("/(shell)/settings");
-  }, [onDismiss, router]);
+  const openPrinterSetup = useCallback(() => setPrinterSheetVisible(true), []);
+  useEffect(() => {
+    if (!visible) setPrinterSheetVisible(false);
+  }, [visible]);
 
   const done = batch?.targets.filter((target) => target.status === "done").length ?? 0;
   const stackActions = fontScale > 1.2 || width < 380;
+  if (!visible) return null;
+
   return (
-    <Portal>
-      <Dialog visible={visible} onDismiss={busy ? undefined : onDismiss} testID="staff-barcode-batch-dialog">
-        <Dialog.Title>{t("staffBarcode.batch.title", { count: users.length })}</Dialog.Title>
-        <Dialog.ScrollArea>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Text>{t("staffBarcode.batch.summary", { store: storeCode, done, total: batch?.targets.length ?? users.length })}</Text>
-            <Text variant="bodySmall" style={styles.muted}>{t("staffBarcode.printer", { printer: printer?.name || t("staffBarcode.noPrinter"), status: t(`staffBarcode.printerStatuses.${printerStatus}`, printerStatus) })}</Text>
-            <Button compact mode="text" icon="cog-outline" onPress={openPrinterSettings} disabled={busy}>{t("staffBarcode.actions.printerSettings")}</Button>
-            {restoreFailed ? <Text style={styles.error}>{t("staffBarcode.errors.restore")}</Text> : null}
-            {batch?.targets.map((target) => (
-              <View key={target.userGuid} style={styles.queueRow}>
-                <View style={styles.queueIdentity}><Text>{target.employeeName}</Text><Text variant="bodySmall" style={styles.muted}>@{target.username}</Text></View>
-                <Text variant="labelMedium">{target.status === "failed" && target.pendingConfirmation?.phase === "printed"
-                  ? t("staffBarcode.batch.statuses.confirmationPending")
-                  : t(`staffBarcode.batch.statuses.${target.status}`)}</Text>
-              </View>
-            ))}
-            {uncertain ? (
-              <View style={styles.actions}>
-                <Text style={styles.error}>{t("staffBarcode.errors.uncertain")}</Text>
-                <Button mode="contained-tonal" onPress={() => void resolveUncertain("printed")}>{t("staffBarcode.actions.printed")}</Button>
-                <Button mode="outlined" onPress={() => void resolveUncertain("notPrinted")}>{t("staffBarcode.actions.notPrinted")}</Button>
-              </View>
-            ) : null}
-          </ScrollView>
-        </Dialog.ScrollArea>
-        <Dialog.Actions style={[styles.dialogActions, stackActions && styles.dialogActionsStacked]}>
-          <Button style={stackActions ? styles.stackedButton : undefined} onPress={() => void finish()} disabled={busy || !pendingLoaded || restoreFailed}>{t("staffBarcode.actions.end")}</Button>
-          {nextActionable && !uncertain ? <Button style={stackActions ? styles.stackedButton : undefined} onPress={() => void skip()} disabled={busy}>{t("staffBarcode.actions.skip")}</Button> : null}
-          <Button style={stackActions ? styles.stackedButton : undefined} mode="contained" onPress={() => void runNext()} loading={busy} disabled={busy || !pendingLoaded || restoreFailed || Boolean(uncertain) || !nextActionable}>
+    <PeopleSheet
+      title={t("staffBarcode.batch.title", { count: users.length })}
+      subtitle={t("staffBarcode.batch.summary", { store: storeCode, done, total: batch?.targets.length ?? users.length })}
+      closeLabel={t("common:actions.close")}
+      onDismiss={onDismiss}
+      dismissable={!busy}
+      testID="staff-barcode-batch-dialog"
+      footer={(
+        <SheetActions stacked={stackActions}>
+          <Button mode="outlined" style={SHEET_BUTTON_STYLE} onPress={() => void finish()} disabled={busy || !pendingLoaded || restoreFailed}>{t("staffBarcode.actions.end")}</Button>
+          {nextActionable && !uncertain ? <Button mode="outlined" style={SHEET_BUTTON_STYLE} onPress={() => void skip()} disabled={busy}>{t("staffBarcode.actions.skip")}</Button> : null}
+          <Button style={SHEET_BUTTON_STYLE} mode="contained" icon="printer-outline" onPress={() => void runNext()} loading={busy} disabled={busy || !pendingLoaded || restoreFailed || Boolean(uncertain) || !nextActionable}>
             {nextConfirmationOnly ? t("staffBarcode.actions.retryConfirmation") : done ? t("staffBarcode.actions.continue") : t("staffBarcode.actions.start")}
           </Button>
-        </Dialog.Actions>
-      </Dialog>
-    </Portal>
+        </SheetActions>
+      )}
+    >
+      <PrinterRow
+        name={printer?.name || ""}
+        status={printerStatus}
+        busy={busy}
+        onChange={openPrinterSetup}
+      />
+      <Text style={styles.hint}>{t("peopleDetail:barcode.changeHint")}</Text>
+      {restoreFailed ? <NoticeBox tone="red" icon="alert-circle-outline">{t("staffBarcode.errors.restore")}</NoticeBox> : null}
+      {batch?.targets.map((target) => (
+        <View key={target.userGuid} style={styles.queueRow}>
+          <View style={styles.queueIdentity}><Text>{target.employeeName}</Text><Text variant="bodySmall" style={styles.muted}>@{target.username}</Text></View>
+          <Text variant="labelMedium">{target.status === "failed" && target.pendingConfirmation?.phase === "printed"
+            ? t("staffBarcode.batch.statuses.confirmationPending")
+            : t(`staffBarcode.batch.statuses.${target.status}`)}</Text>
+        </View>
+      ))}
+      {uncertain ? (
+        <View style={styles.actions}>
+          <NoticeBox tone="red" icon="alert-circle-outline">{t("staffBarcode.errors.uncertain")}</NoticeBox>
+          <Button mode="contained-tonal" onPress={() => void resolveUncertain("printed")}>{t("staffBarcode.actions.printed")}</Button>
+          <Button mode="outlined" onPress={() => void resolveUncertain("notPrinted")}>{t("staffBarcode.actions.notPrinted")}</Button>
+        </View>
+      ) : null}
+      <LabelPrinterSetupSheet visible={printerSheetVisible} onDismiss={() => setPrinterSheetVisible(false)} />
+    </PeopleSheet>
+  );
+}
+
+/** 打印机状态行：已连接 / 未连接 + 打印机名，右侧「更换」就地打开打印机设置弹层。 */
+function PrinterRow({ name, status, busy, onChange }: { name: string; status: string; busy: boolean; onChange: () => void }) {
+  const { t } = useAppTranslation(["userManagement", "peopleDetail"]);
+  const connected = status === "connected";
+  return (
+    <InfoCard>
+      <View style={styles.printerRow}>
+        <View style={[styles.printerIcon, connected ? styles.printerIconOk : null]}>
+          <Icon source={connected ? "printer-check" : "printer-off"} size={20} color={connected ? HB_COLORS.success : HB_COLORS.textSecondary} />
+        </View>
+        <View style={styles.printerCopy}>
+          <Text style={styles.printerTitle}>
+            {t("peopleDetail:barcode.printerTitle", { status: t(`staffBarcode.printerStatuses.${status}`, status) })}
+          </Text>
+          <Text style={styles.printerSub} numberOfLines={1}>{name || t("staffBarcode.noPrinter")}</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("peopleDetail:barcode.changePrinter")}
+          disabled={busy}
+          hitSlop={8}
+          onPress={onChange}
+          testID="staff-barcode-change-printer"
+        >
+          <Text style={[styles.printerChange, busy && styles.disabledText]}>{t("peopleDetail:barcode.changePrinter")}</Text>
+        </Pressable>
+      </View>
+    </InfoCard>
   );
 }
 
 const styles = StyleSheet.create({
   actions: { gap: HB_SPACING.sm },
-  codePanel: { alignItems: "center", gap: HB_SPACING.sm, paddingVertical: HB_SPACING.sm },
-  content: { gap: HB_SPACING.md, paddingBottom: HB_SPACING.sm },
-  dialogActions: { flexWrap: "wrap" },
-  dialogActionsStacked: { alignItems: "stretch", flexDirection: "column" },
-  error: { color: HB_COLORS.danger },
-  identity: { gap: 2 },
+  codePanel: { alignItems: "center", gap: HB_SPACING.xs, paddingVertical: HB_SPACING.xs },
+  codeText: { color: HB_COLORS.textPrimary, fontFamily: "Menlo", fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
+  disabledText: { opacity: 0.45 },
+  hint: { color: HB_COLORS.textSecondary, fontSize: 12.5, lineHeight: 18 },
   muted: { color: HB_COLORS.textSecondary },
+  printerChange: { color: HB_COLORS.action, fontSize: 13.5, fontWeight: "800" },
+  printerCopy: { flex: 1, minWidth: 0 },
+  printerIcon: { alignItems: "center", backgroundColor: HB_COLORS.surfaceMuted, borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
+  printerIconOk: { backgroundColor: "#ECFDF3" },
+  printerRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 56, paddingHorizontal: 14, paddingVertical: 10 },
+  printerSub: { color: HB_COLORS.textSecondary, fontSize: 12.5, marginTop: 1 },
+  printerTitle: { color: HB_COLORS.textPrimary, fontSize: 14.5, fontWeight: "700" },
+  qrFrame: { backgroundColor: HB_COLORS.white, borderColor: HB_COLORS.outlineMuted, borderRadius: HB_RADIUS.surface, borderWidth: 1, padding: 10 },
   queueIdentity: { flex: 1, minWidth: 0 },
   queueRow: { alignItems: "center", borderColor: HB_COLORS.outlineMuted, borderRadius: HB_RADIUS.control, borderWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: HB_SPACING.sm, padding: HB_SPACING.sm },
-  stackedButton: { alignSelf: "stretch" },
-  warning: { color: HB_COLORS.warning },
 });
