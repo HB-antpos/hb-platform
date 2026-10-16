@@ -14,9 +14,17 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { faceMatchApi } from "./api";
-import { cameraDisplayName, cameraImageLabel, cameraParseStatusLabelKey, cameraParseStatusTone, hasViewableImages, isCameraImageViewable } from "./cameras-logic";
+import {
+  cameraDisplayName,
+  cameraImageLabel,
+  cameraParseStatusLabelKey,
+  cameraParseStatusTone,
+  hasViewableImages,
+  isCameraImageGone,
+  isCameraImageViewable,
+  ordinalsWithinKind,
+} from "./cameras-logic";
 import { formatLocalDateTime } from "./dates";
-import { classifyReviewImageError } from "./errors";
 import { createReviewImageScrubber } from "./http-cache-scrub-runtime";
 import { useFaceErrorMessage } from "./shared";
 import type { FaceCamera, FaceCameraCapture } from "./types";
@@ -33,7 +41,7 @@ export function CameraCapturesModal({ camera, storeLabel, onClose }: Props) {
   const { t } = useAppTranslation(["faceMatch", "common"]);
   const describeError = useFaceErrorMessage();
   const insets = useSafeAreaInsets();
-  const query = useFaceCameraCaptures(camera.cameraId, true);
+  const { query, refresh } = useFaceCameraCaptures(camera.cameraId, true);
   const [viewing, setViewing] = useState<FaceCameraCapture | null>(null);
 
   const pages = query.data?.pages;
@@ -101,16 +109,17 @@ export function CameraCapturesModal({ camera, storeLabel, onClose }: Props) {
   }
 
   let footer = null;
-  if (query.hasNextPage) {
-    footer = (
-      <Button mode="outlined" loading={query.isFetchingNextPage} disabled={query.isFetchingNextPage} onPress={() => void query.fetchNextPage()} style={styles.more}>
-        {query.isFetchingNextPage ? t("settings.cameras.captures.loadingMore") : t("settings.cameras.captures.loadMore")}
-      </Button>
-    );
-  } else if (query.isFetchNextPageError) {
+  // 注意顺序：加载下一页失败后 react-query 的 hasNextPage 仍为真，所以必须先判失败，否则错误提示永远走不到。
+  if (query.isFetchNextPageError) {
     footer = (
       <Button mode="outlined" onPress={() => void query.fetchNextPage()} style={styles.more}>
         {t("states.loadMoreFailed")}
+      </Button>
+    );
+  } else if (query.hasNextPage) {
+    footer = (
+      <Button mode="outlined" loading={query.isFetchingNextPage} disabled={query.isFetchingNextPage} onPress={() => void query.fetchNextPage()} style={styles.more}>
+        {query.isFetchingNextPage ? t("settings.cameras.captures.loadingMore") : t("settings.cameras.captures.loadMore")}
       </Button>
     );
   } else if (items.length > 0) {
@@ -131,7 +140,7 @@ export function CameraCapturesModal({ camera, storeLabel, onClose }: Props) {
           <Text style={styles.headerTitle} numberOfLines={1}>
             {t("settings.cameras.captures.title", { name: cameraDisplayName(camera) })}
           </Text>
-          <IconButton icon="refresh" accessibilityLabel={t("common:actions.retry")} disabled={query.isFetching} onPress={() => void query.refetch()} />
+          <IconButton icon="refresh" accessibilityLabel={t("common:actions.retry")} disabled={query.isFetching} onPress={() => void refresh()} />
         </View>
 
         <FlatList
@@ -184,6 +193,8 @@ function CaptureImageViewer({ cameraId, capture, onClose }: { cameraId: string; 
   const { t } = useAppTranslation(["faceMatch", "common"]);
   const describeError = useFaceErrorMessage();
   const images = useMemo(() => capture.images.filter(isCameraImageViewable), [capture.images]);
+  // 序号按「同一类图」编号：人脸、人脸、背景 → 人脸 1、人脸 2、背景图 1。
+  const ordinals = useMemo(() => ordinalsWithinKind(images), [images]);
   const [selectedId, setSelectedId] = useState<string | null>(images[0]?.imageId ?? null);
   const [states, setStates] = useState<Record<string, ImageState>>({});
   const requestedRef = useRef(new Set<string>());
@@ -228,7 +239,7 @@ function CaptureImageViewer({ cameraId, capture, onClose }: { cameraId: string; 
         })
         .catch((error: unknown) => {
           if (!aliveRef.current || controller.signal.aborted) return;
-          const gone = classifyReviewImageError(error) === "gone";
+          const gone = isCameraImageGone(error);
           setStates((current) => ({ ...current, [imageId]: { status: "error", gone, message: gone ? "" : describeError(error) } }));
         })
         .finally(() => controllersRef.current.delete(imageId));
@@ -239,6 +250,12 @@ function CaptureImageViewer({ cameraId, capture, onClose }: { cameraId: string; 
   useEffect(() => {
     if (selectedId) load(selectedId);
   }, [load, selectedId]);
+
+  // 读取失败（非「已清理」）时允许重试：清掉「已请求」标记再读一次。
+  const retry = (imageId: string) => {
+    requestedRef.current.delete(imageId);
+    load(imageId);
+  };
 
   const selected = selectedId ? states[selectedId] : undefined;
 
@@ -252,8 +269,8 @@ function CaptureImageViewer({ cameraId, capture, onClose }: { cameraId: string; 
         <View style={styles.viewerSpacer} />
       </View>
       <View style={styles.viewerTabs}>
-        {images.map((image, ordinal) => {
-          const label = cameraImageLabel(image, ordinal);
+        {images.map((image, index) => {
+          const label = cameraImageLabel(image, ordinals[index] ?? 0);
           const active = image.imageId === selectedId;
           return (
             <Pressable
@@ -277,7 +294,14 @@ function CaptureImageViewer({ cameraId, capture, onClose }: { cameraId: string; 
         ) : selected.status === "loaded" ? (
           <Image source={{ uri: selected.uri }} resizeMode="contain" style={styles.viewerImage} accessibilityLabel={t("settings.cameras.captures.viewerTitle")} />
         ) : (
-          <Text style={styles.viewerHint}>{selected.gone ? t("settings.cameras.captures.imageGone") : selected.message || t("settings.cameras.captures.imageFailed")}</Text>
+          <>
+            <Text style={styles.viewerHint}>{selected.gone ? t("settings.cameras.captures.imageGone") : selected.message || t("settings.cameras.captures.imageFailed")}</Text>
+            {selected.gone || !selectedId ? null : (
+              <Button mode="outlined" textColor={HB_COLORS.white} onPress={() => retry(selectedId)}>
+                {t("common:actions.retry")}
+              </Button>
+            )}
+          </>
         )}
       </View>
     </View>

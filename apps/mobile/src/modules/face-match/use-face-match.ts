@@ -15,6 +15,7 @@ import { mergePages, nextPageParam } from "./entries-logic";
 import { extractHttpStatus } from "./errors";
 import { writeFaceHitUnreadCount } from "./hit-unread";
 import type {
+  FaceCameraCapturePage,
   FaceCaptureResult,
   FaceCaptureResultQuery,
   FaceHitReadAllResult,
@@ -248,15 +249,29 @@ export function useFaceProfile(storeCode: string | null, enabled: boolean) {
  */
 export function useFaceCameraCaptures(cameraId: string | null, enabled: boolean) {
   const userGuid = useUserGuid();
-  return useInfiniteQuery({
-    queryKey: faceMatchKeys.cameraCaptures(userGuid, cameraId ?? ""),
+  const queryKey = faceMatchKeys.cameraCaptures(userGuid, cameraId ?? "");
+  const query = useInfiniteQuery({
+    queryKey,
     initialPageParam: 1,
     queryFn: ({ pageParam, signal }) => faceMatchApi.listCameraCaptures(cameraId!, pageParam, CAMERA_CAPTURE_PAGE_SIZE, signal),
     getNextPageParam: nextCapturePage,
     enabled: enabled && Boolean(cameraId),
     staleTime: 0,
+    // 抓拍记录是生物识别相关的元数据：弹框关闭（没有观察者）就立刻丢缓存，重新打开从第 1 页开始，不会把缓存里的所有分页逐页重发。
+    gcTime: 0,
     retry: retryTransientOnly,
   });
+  // 刷新只重取第一页：先把缓存截到第一页，避免 refetch 把已滚过的（最多 100 页）逐页重发。
+  const queryClient = useQueryClient();
+  const { refetch } = query;
+  const refresh = useCallback(async () => {
+    queryClient.setQueryData<InfiniteData<FaceCameraCapturePage, number>>(queryKey, (data) =>
+      data ? { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) } : data,
+    );
+    await refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- queryKey 由 userGuid + cameraId 决定，下面两项已覆盖
+  }, [queryClient, refetch, userGuid, cameraId]);
+  return { query, refresh };
 }
 
 export function useFaceCameras(enabled: boolean) {

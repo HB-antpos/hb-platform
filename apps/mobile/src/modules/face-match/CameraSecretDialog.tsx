@@ -4,9 +4,14 @@
 // 1. 地址只存在于父组件的局部 state（SecretRevealState）和本组件的 props 里；这里不写任何存储（AsyncStorage / SecureStore / 文件）、
 //    不进 react-query、不进路由参数、不进日志，也不放进提示 / 通知文案；
 // 2. 关闭（按钮）、应用离开前台（切后台 / 下拉通知栏 / 应用切换器）、组件卸载都会清空——关闭由父组件把状态换成已清空常量；
-// 3. 默认用掩码显示，点「显示」才露出完整地址；复制后 60 秒内若剪贴板还是这条地址，就把剪贴板清空（尽力而为，应用被挂起时不保证）；
-// 4. 用原生 Modal 承载（不用 Paper 的 Portal 弹层）：它出现在新增表单 / 确认弹层关闭的同一刻，Portal 会被正在关闭的原生 Modal 盖住；
+// 3. 默认用掩码显示，点「显示」才露出完整地址；复制后 60 秒内若剪贴板还是这条地址，就把剪贴板清空（尽力而为，应用被挂起时不保证）。
+//    注意：这个定时器的闭包会把地址在内存里多留最多 60 秒（应用被挂起时更久），这是为了比对「剪贴板里还是不是这条」所必需的；
+// 4. 两种承载方式——CameraSecretPanel 是纯内容的覆盖层，CameraSecretModal 给它套一层原生 Modal：
+//    - 新增摄像头：地址直接叠在「新增表单」这个 Modal 里（panel），不「先关表单 Modal、再开地址 Modal」——
+//      iOS 在一个原生 Modal 还在收起时再弹另一个会被忽略，令牌就丢了；
+//    - 重新生成令牌：确认弹层是 Paper 的 Portal 弹层（不是原生 Modal），收起后单独开一个原生 Modal（modal）；
 // 5. 安卓返回键不关闭：地址只显示这一次，误触返回就丢了，只能点「我已保存，关闭」。
+//    已知局限：AppState 清空发生在 JS 侧，系统应用切换器的快照可能先于它拍到弹窗（要根治需要原生层的隐私遮罩，本次不动原生）。
 import { useEffect, useRef, useState } from "react";
 import { AppState, Modal, ScrollView, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -38,7 +43,8 @@ interface Props {
   onClose: () => void;
 }
 
-export function CameraSecretDialog({ state, onClose }: Props) {
+/** 一次性地址的内容覆盖层（不含 Modal）；挂在某个已存在的原生 Modal 里，或由 CameraSecretModal 套一层 Modal。 */
+export function CameraSecretPanel({ state, onClose }: Props) {
   const { t } = useAppTranslation(["faceMatch", "common"]);
   const [shown, setShown] = useState(false);
   const [feedback, setFeedback] = useState<"copied" | "failed" | null>(null);
@@ -72,9 +78,8 @@ export function CameraSecretDialog({ state, onClose }: Props) {
       : t("settings.cameras.secret.rotatedNote", { cameraId: state.cameraId });
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => undefined}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
+    <View style={styles.backdrop}>
+      <View style={styles.card}>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
             <Text style={styles.title}>{title}</Text>
             <Notice tone="warning" text={t("settings.cameras.secret.onceOnly")} icon="shield-lock-outline" />
@@ -100,15 +105,23 @@ export function CameraSecretDialog({ state, onClose }: Props) {
               {t("settings.cameras.secret.close")}
             </Button>
           </ScrollView>
-        </View>
       </View>
+    </View>
+  );
+}
+
+/** 给覆盖层套一层原生 Modal（重新生成令牌用）。安卓返回键不关闭：地址只显示这一次。 */
+export function CameraSecretModal({ state, onClose }: Props) {
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => undefined}>
+      <CameraSecretPanel state={state} onClose={onClose} />
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     padding: HB_SPACING.md,
     backgroundColor: "rgba(0,0,0,0.5)",

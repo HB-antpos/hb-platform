@@ -519,7 +519,8 @@
         "storeCodeInvalid": "门店编码只能包含字母、数字、下划线和横线",
         "noteTooLong": "备注最长 200 字",
         "deviceModelTooLong": "型号最长 64 字",
-        "macAddressTooLong": "MAC 地址最长 32 字"
+        "macAddressTooLong": "MAC 地址最长 32 字",
+        "controlChars": "不能包含换行、制表符等控制字符"
       },
       "secret": {
         "titleCreated": "摄像头已创建",

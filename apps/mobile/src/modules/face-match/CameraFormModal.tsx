@@ -3,7 +3,7 @@
 // - 编辑：编号只读；PUT 是整体替换，启停状态沿用当前值（启停只走列表里的开关）。
 // 提交由父组件执行并回传 busy / errorText；本组件不接触令牌（新增成功后的一次性地址由 CameraSecretDialog 展示）。
 // 用原生 Modal 承载，所以选门店也用原生 Modal 版的门店选择器（Paper 的 Portal 会被这个 Modal 盖住）。
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Button, HelperText, IconButton, Text, TextInput } from "react-native-paper";
@@ -39,9 +39,11 @@ interface Props {
   errorText: string | null;
   onSubmit: (values: CameraFormValues) => void;
   onClose: () => void;
+  /** 叠在表单上的覆盖层（新增成功后的一次性地址）。有覆盖层时表单不响应返回键，也不可操作。 */
+  overlay?: ReactNode;
 }
 
-export function CameraFormModal({ mode, camera, stores, defaultStoreCode, busy, errorText, onSubmit, onClose }: Props) {
+export function CameraFormModal({ mode, camera, stores, defaultStoreCode, busy, errorText, onSubmit, onClose, overlay }: Props) {
   const { t } = useAppTranslation(["faceMatch", "common"]);
   const insets = useSafeAreaInsets();
   const initial = useMemo<CameraFormValues>(
@@ -68,7 +70,7 @@ export function CameraFormModal({ mode, camera, stores, defaultStoreCode, busy, 
   const errorText_ = (key: keyof CameraFormValues) => (showErrors && errors[key] ? t(errors[key] as string) : undefined);
 
   return (
-    <Modal visible animationType="slide" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={() => (busy ? undefined : onClose())}>
+    <Modal visible animationType="slide" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={() => (busy || overlay ? undefined : onClose())}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
         <View style={[styles.root, { paddingTop: insets.top }]}>
           <View style={styles.header}>
@@ -153,8 +155,6 @@ export function CameraFormModal({ mode, camera, stores, defaultStoreCode, busy, 
                 value={values.note}
                 onChangeText={(note) => patch({ note })}
                 maxLength={CAMERA_NOTE_MAX_LENGTH}
-                multiline
-                numberOfLines={3}
                 editable={!busy}
                 error={Boolean(errorText_("note"))}
               />
@@ -167,6 +167,8 @@ export function CameraFormModal({ mode, camera, stores, defaultStoreCode, busy, 
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
+
+      {overlay}
 
       <StorePickerModal
         host="native-modal"

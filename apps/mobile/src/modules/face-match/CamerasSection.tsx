@@ -17,7 +17,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { faceMatchApi } from "./api";
 import { CameraCapturesModal } from "./CameraCapturesModal";
 import { CameraFormModal } from "./CameraFormModal";
-import { CameraSecretDialog } from "./CameraSecretDialog";
+import { CameraSecretModal, CameraSecretPanel } from "./CameraSecretDialog";
 import {
   SECRET_REVEAL_CLOSED,
   closeSecretReveal,
@@ -134,7 +134,8 @@ export function CamerasSection({
     try {
       if (form.mode === "create") {
         const result = await faceMatchApi.createCamera(buildCreateCameraRequest(values));
-        setForm(null);
+        // 不关表单：一次性地址作为覆盖层叠在表单这个原生 Modal 里，关地址时再一起收起。
+        // 若先关表单 Modal 再开地址 Modal，iOS 会因前一个还在收起而忽略后一个，令牌就丢了。
         setSecret(openSecretReveal("created", result));
         void refreshList();
       } else {
@@ -147,6 +148,8 @@ export function CamerasSection({
     } catch (error) {
       // 报错信息只来自服务端错误码映射，不含请求体 / 令牌。
       setFormError(describeError(error));
+      // 响应丢了 / 缺地址（FACE_CAMERA_SECRET_MISSING）时服务端可能已经建好：无条件刷新，让用户能在列表里找到它再重新生成令牌。
+      void refreshList();
     } finally {
       setFormBusy(false);
     }
@@ -278,6 +281,18 @@ export function CamerasSection({
           errorText={formError}
           onSubmit={(values) => void submitForm(values)}
           onClose={() => setForm(null)}
+          overlay={
+            secret.open ? (
+              <CameraSecretPanel
+                state={secret}
+                onClose={() => {
+                  // 地址与表单同时收起：地址状态先换成已清空常量。
+                  setSecret(closeSecretReveal());
+                  setForm(null);
+                }}
+              />
+            ) : null
+          }
         />
       ) : null}
       {capturesTarget ? (
@@ -288,7 +303,8 @@ export function CamerasSection({
           onClose={() => setCapturesTarget(null)}
         />
       ) : null}
-      {secret.open ? <CameraSecretDialog state={secret} onClose={() => setSecret(closeSecretReveal())} /> : null}
+      {/* 重新生成令牌：没有表单 Modal 可叠，单独开一个原生 Modal。 */}
+      {secret.open && !form ? <CameraSecretModal state={secret} onClose={() => setSecret(closeSecretReveal())} /> : null}
     </View>
   );
 }
@@ -336,7 +352,7 @@ function CameraCard({
         <Button compact mode="text" icon="image-multiple-outline" disabled={busy} onPress={onViewCaptures}>
           {t("settings.cameras.viewCaptures")}
         </Button>
-        <Button compact mode="text" icon="key-refresh" textColor={HB_COLORS.danger} disabled={busy} onPress={onRotate}>
+        <Button compact mode="text" icon="key-change" textColor={HB_COLORS.danger} disabled={busy} onPress={onRotate}>
           {t("settings.cameras.rotate")}
         </Button>
       </View>

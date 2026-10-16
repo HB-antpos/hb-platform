@@ -519,7 +519,8 @@
         "storeCodeInvalid": "Store code may only contain letters, digits, underscores and hyphens",
         "noteTooLong": "Note is at most 200 characters",
         "deviceModelTooLong": "Model is at most 64 characters",
-        "macAddressTooLong": "MAC address is at most 32 characters"
+        "macAddressTooLong": "MAC address is at most 32 characters",
+        "controlChars": "Line breaks, tabs and other control characters are not allowed"
       },
       "secret": {
         "titleCreated": "Camera created",

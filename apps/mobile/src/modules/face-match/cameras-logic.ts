@@ -8,6 +8,7 @@ import type {
   FaceCameraParseStatus,
   UpdateFaceCameraRequest,
 } from "./types";
+import { extractFaceMatchErrorCode, extractHttpStatus } from "./errors";
 
 /**
  * 摄像头的「推送状态」。注意不是在线 / 离线：海康摄像机在推送模式下只有检测到人脸才推送，
@@ -104,6 +105,11 @@ export function normalizeOptionalText(value: string | null | undefined): string 
   return trimmed ? trimmed : null;
 }
 
+/** 后端对型号 / MAC / 备注拒绝任何控制字符（换行、制表符等，.NET char.IsControl），否则 400 FACE_CAMERA_FIELD_INVALID 且不指出是哪个字段。 */
+export function hasControlCharacters(value: string): boolean {
+  return /[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
 /** 校验结果的值是文案键（faceMatch 命名空间）；空对象表示通过。 */
 export type CameraFormErrors = Partial<Record<keyof CameraFormValues, string>>;
 
@@ -119,9 +125,15 @@ export function validateCameraForm(values: CameraFormValues, mode: "create" | "e
   if (!storeCode) errors.storeCode = "settings.cameras.validation.storeCodeRequired";
   else if (storeCode.length > CAMERA_STORE_CODE_MAX_LENGTH) errors.storeCode = "settings.cameras.validation.storeCodeTooLong";
   else if (!CAMERA_STORE_CODE_PATTERN.test(storeCode)) errors.storeCode = "settings.cameras.validation.storeCodeInvalid";
-  if (values.note.trim().length > CAMERA_NOTE_MAX_LENGTH) errors.note = "settings.cameras.validation.noteTooLong";
-  if (values.deviceModel.trim().length > CAMERA_DEVICE_MODEL_MAX_LENGTH) errors.deviceModel = "settings.cameras.validation.deviceModelTooLong";
-  if (values.macAddress.trim().length > CAMERA_MAC_ADDRESS_MAX_LENGTH) errors.macAddress = "settings.cameras.validation.macAddressTooLong";
+  const note = values.note.trim();
+  if (note.length > CAMERA_NOTE_MAX_LENGTH) errors.note = "settings.cameras.validation.noteTooLong";
+  else if (hasControlCharacters(note)) errors.note = "settings.cameras.validation.controlChars";
+  const deviceModel = values.deviceModel.trim();
+  if (deviceModel.length > CAMERA_DEVICE_MODEL_MAX_LENGTH) errors.deviceModel = "settings.cameras.validation.deviceModelTooLong";
+  else if (hasControlCharacters(deviceModel)) errors.deviceModel = "settings.cameras.validation.controlChars";
+  const macAddress = values.macAddress.trim();
+  if (macAddress.length > CAMERA_MAC_ADDRESS_MAX_LENGTH) errors.macAddress = "settings.cameras.validation.macAddressTooLong";
+  else if (hasControlCharacters(macAddress)) errors.macAddress = "settings.cameras.validation.controlChars";
   return errors;
 }
 
@@ -205,11 +217,34 @@ export function hasViewableImages(capture: Pick<FaceCameraCapture, "images">): b
   return capture.images.some(isCameraImageViewable);
 }
 
-/** 图片按钮的文案键与参数：人脸图带序号（faceIndex 从 0 起，显示从 1 起），背景图 / 其他各一个。 */
-export function cameraImageLabel(image: Pick<FaceCameraCaptureImage, "kind" | "faceIndex">, ordinal: number): { key: string; values: { index: number } } {
+/** 抓拍图片读不到的「已被清理」类错误：后端图片码（FACE_IMAGE_*）与 404 / 410。读不到不是故障，是保留期过了或还在接收端本地。 */
+const CAMERA_IMAGE_GONE_CODES: readonly string[] = ["FACE_IMAGE_NOT_FOUND", "FACE_IMAGE_NOT_IN_COS", "FACE_IMAGE_OBJECT_MISSING", "FACE_MATCH_IMAGE_GONE"];
+
+export function isCameraImageGone(error: unknown): boolean {
+  const code = extractFaceMatchErrorCode(error);
+  if (code && CAMERA_IMAGE_GONE_CODES.includes(code)) return true;
+  const status = extractHttpStatus(error);
+  return status === 404 || status === 410;
+}
+
+/**
+ * 图片按钮的文案键与参数：人脸图用 faceIndex（从 0 起，显示从 1 起），没有 faceIndex 时用同类图里的序号；
+ * 背景图 / 其他按「同一类图里的第几张」编号（ordinalWithinKind 从 0 起），不是整张图列表里的位置。
+ */
+export function cameraImageLabel(image: Pick<FaceCameraCaptureImage, "kind" | "faceIndex">, ordinalWithinKind: number): { key: string; values: { index: number } } {
   if (image.kind === 0) {
-    return { key: "settings.cameras.captures.imageFace", values: { index: (image.faceIndex ?? ordinal) + 1 } };
+    return { key: "settings.cameras.captures.imageFace", values: { index: (image.faceIndex ?? ordinalWithinKind) + 1 } };
   }
-  if (image.kind === 1) return { key: "settings.cameras.captures.imageBackground", values: { index: ordinal + 1 } };
-  return { key: "settings.cameras.captures.imageOther", values: { index: ordinal + 1 } };
+  if (image.kind === 1) return { key: "settings.cameras.captures.imageBackground", values: { index: ordinalWithinKind + 1 } };
+  return { key: "settings.cameras.captures.imageOther", values: { index: ordinalWithinKind + 1 } };
+}
+
+/** 每张图在「同一类图」里的序号（从 0 起），与 cameraImageLabel 配合：三张图「人脸、人脸、背景」→ 0、1、0。 */
+export function ordinalsWithinKind(images: readonly Pick<FaceCameraCaptureImage, "kind">[]): number[] {
+  const seen = new Map<number, number>();
+  return images.map((image) => {
+    const next = seen.get(image.kind) ?? 0;
+    seen.set(image.kind, next + 1);
+    return next;
+  });
 }

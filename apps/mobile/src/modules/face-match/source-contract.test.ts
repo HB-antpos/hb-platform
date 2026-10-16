@@ -277,6 +277,33 @@ function stripComments(source: string): string {
   assert.ok(capturesModal.includes("AppState.addEventListener") && capturesModal.includes("controller.abort()"), "离开前台关闭查看器并中止请求");
   assert.equal(/useQuery\(|useInfiniteQuery\(/.test(capturesModal.slice(capturesModal.indexOf("function CaptureImageViewer"))), false, "图片查看器不用 react-query（图片字节不进缓存）");
   assert.ok(capturesModal.includes("hasViewableImages(capture)") && capturesModal.includes("canViewImages &&"), "只有服务端 canViewImages 为真且有可看的图才显示入口");
+
+  // 新增成功：一次性地址作为覆盖层叠在表单 Modal 里，不能「先关表单 Modal 再开地址 Modal」（iOS 同刻切换原生 Modal 会丢弹窗，令牌就没了）
+  {
+    const createStart = section.indexOf("faceMatchApi.createCamera(");
+    const createEnd = section.indexOf("} else {", createStart);
+    assert.ok(createStart > 0 && createEnd > createStart);
+    assert.equal(section.slice(createStart, createEnd).includes("setForm(null)"), false, "新增成功后不关表单（地址叠在表单里，关地址时再一起收起）");
+    assert.ok(section.includes("overlay={") && section.includes("<CameraSecretPanel"), "地址作为表单 Modal 的覆盖层");
+    assert.ok(section.includes("<CameraSecretModal") && /secret\.open && !form/.test(section), "重新生成令牌（没有表单可叠）才单独开 Modal");
+    assert.ok(/onRequestClose=\{\(\) => \(busy \|\| overlay \? undefined : onClose\(\)\)\}/.test(formModal), "有地址覆盖层时表单不响应返回键");
+    // 失败路径无条件刷新列表：响应丢了 / 缺地址时服务端可能已建好摄像头
+    assert.ok(/setFormError\(describeError\(error\)\);\s*void refreshList\(\);/.test(section), "新增失败也刷新列表");
+  }
+  // 备注单行（后端拒绝控制字符，换行进不去）
+  assert.equal(formModal.includes("multiline"), false, "摄像头表单不用多行输入");
+  // 抓拍查询：关闭即丢缓存（gcTime: 0），刷新只重取第一页
+  {
+    const hooks = stripComments(sourceOf("use-face-match.ts"));
+    const start = hooks.indexOf("export function useFaceCameraCaptures");
+    const body = hooks.slice(start, hooks.indexOf("export function useFaceCameras(", start));
+    assert.ok(body.includes("gcTime: 0"), "抓拍查询关闭即丢缓存");
+    assert.ok(body.includes("data.pages.slice(0, 1)"), "刷新先截到第一页，避免逐页重发");
+  }
+  // 抓拍弹框的页脚：先判「加载下一页失败」再判「有下一页」（失败后 hasNextPage 仍为真，顺序反了错误提示永远走不到）
+  assert.ok(capturesModal.indexOf("query.isFetchNextPageError") < capturesModal.indexOf("query.hasNextPage"), "页脚先判加载下一页失败");
+  // 图片读不到：区分「已清理」（后端 FACE_IMAGE_* / 404 / 410）与可重试的失败
+  assert.ok(capturesModal.includes("isCameraImageGone(error)") && capturesModal.includes("retry(selectedId)"), "已清理与可重试要区分");
 }
 
 // ───────── 2. 范围与契约 ─────────
