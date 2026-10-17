@@ -32,6 +32,7 @@ import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation
 import { usePriceTaskOverview } from "@/modules/price-updates/use-price-task-overview";
 import { PriceReminderHost } from "@/modules/price-reminder/PriceReminderHost";
 import { FloatingLanguageButton } from "@/modules/floating-language";
+import { AccountSwitchHost } from "@/modules/account-switch";
 import { canViewContainerNewProducts } from "@/modules/container-new-products/access";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "@/modules/container-new-products/api";
 import { countNewProductKinds } from "@/modules/container-new-products/summary";
@@ -659,6 +660,8 @@ export default function ShellLayout() {
           suppressed={isIosReviewSession || iosReviewOfflineGuardActive}
           isDeviceMode={isDeviceMode}
         />
+        {/* 多账号：账号切换器 / 重新登录面板 / 切换中遮罩；放在最后盖住底部导航栏，切换期间挡住所有操作。 */}
+        <AccountSwitchHost />
       </View>
     </AppNavigationAccessProvider>
   );

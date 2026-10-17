@@ -29,6 +29,17 @@ import {
 } from "@/modules/device-activation/device-account-request-policy";
 import { EXPECTED_ACCOUNT_HEADER } from "@/shared/api/account-bound-request-header";
 import { toByteArray } from "base64-js";
+import {
+  getAccountSessionGeneration,
+  isAccountSwitchInProgress,
+  isStaleSessionGeneration,
+  waitForAccountSwitchIdle,
+} from "@/modules/account-switch/account-switch-gate";
+
+/** 账号切换期间被打断 / 属于旧账号的请求统一用这个错误结束：不刷新令牌、不触发登出。 */
+function createAccountSessionChangedError() {
+  return Object.assign(new Error("ACCOUNT_SESSION_CHANGED"), { code: "ACCOUNT_SESSION_CHANGED" });
+}
 
 export const apiClient = axios.create({
   baseURL: DEFAULT_API_BASE_URL,
@@ -44,6 +55,16 @@ async function syncApiBaseUrl() {
 }
 
 let isRefreshing = false;
+// 当前这一轮令牌刷新的完成信号：账号切换要等它收尾，才能读到当前账号最新的刷新令牌。
+let refreshSettled: Promise<void> | null = null;
+let releaseRefreshSettled: (() => void) | null = null;
+
+/** 等正在进行的令牌刷新结束（没有刷新时立即返回）。 */
+export async function waitForTokenRefreshIdle(): Promise<void> {
+  while (refreshSettled) {
+    await refreshSettled;
+  }
+}
 let isRedirectingToLogin = false;
 let refreshQueue: Array<{
   resolve: (t: string) => void;
@@ -183,7 +204,13 @@ apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     const guardedConfig = config as InternalAxiosRequestConfig & {
       _expectedAccountGuid?: string;
+      _sessionGeneration?: number;
     };
+    // 账号切换期间暂停发请求，等新会话就位再发；会话代号在放行后盖章，
+    // 重试沿用首次的代号——这样「旧账号发出的请求」不会被换上新账号的令牌重放。
+    await waitForAccountSwitchIdle();
+    const sessionStamp = guardedConfig._sessionGeneration ?? getAccountSessionGeneration();
+    guardedConfig._sessionGeneration = sessionStamp;
     const rawExpectedAccountGuid = config.headers?.[EXPECTED_ACCOUNT_HEADER];
     const headerExpectedAccountGuid = Array.isArray(rawExpectedAccountGuid)
       ? rawExpectedAccountGuid[0]
@@ -321,7 +348,10 @@ apiClient.interceptors.request.use(
         config.headers.set("Authorization", `Bearer ${token}`);
       }
       if (sessionKind !== "deviceAccount") {
-
+        // 读令牌期间发生了账号切换：这个请求属于旧账号，作废，免得带着新账号的令牌发出去。
+        if (isAccountSwitchInProgress() || isStaleSessionGeneration(sessionStamp)) {
+          throw createAccountSessionChangedError();
+        }
         return config;
       }
     }
@@ -344,6 +374,9 @@ apiClient.interceptors.request.use(
       config.headers.set("X-Auth-Code", deviceSession.authCode);
     }
 
+    if (isAccountSwitchInProgress() || isStaleSessionGeneration(sessionStamp)) {
+      throw createAccountSessionChangedError();
+    }
     return config;
   },
   (error) => Promise.reject(error)
@@ -383,9 +416,19 @@ apiClient.interceptors.response.use(
     const original = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
       _expectedAccountGuid?: string;
+      _sessionGeneration?: number;
     };
     const skipAuthRedirect = shouldSkipAuthRedirect(original);
     const skipAuthRecovery = shouldSkipAuthRecovery(original);
+
+    if (
+      error.response?.status === 401
+      && !isAuthenticationRequest(original)
+      && (isAccountSwitchInProgress() || isStaleSessionGeneration(original?._sessionGeneration))
+    ) {
+      // 旧账号的请求在切换期间/之后才收到 401：既不能用新账号的令牌去刷新，也不能因此把新账号登出。
+      return Promise.reject(createAccountSessionChangedError());
+    }
 
     if (
       error.response?.status === 401
@@ -431,6 +474,10 @@ apiClient.interceptors.response.use(
       }
       original._retry = true;
       isRefreshing = true;
+      refreshSettled = new Promise<void>((resolve) => {
+        releaseRefreshSettled = resolve;
+      });
+      const refreshGeneration = getAccountSessionGeneration();
       try {
         const [persistedSessionKind, accountBinding, currentToken, refreshToken] =
           await Promise.all([
@@ -459,6 +506,10 @@ apiClient.interceptors.response.use(
             refreshToken: rt,
           });
           const refreshed = res.data.data ?? res.data;
+          // 刷新期间账号被切换了：这份令牌属于旧账号，丢弃，绝不能写进新账号的槽位。
+          if (isAccountSwitchInProgress() || isStaleSessionGeneration(refreshGeneration)) {
+            throw createAccountSessionChangedError();
+          }
           accessToken = refreshed.accessToken;
           await SecureStorage.setToken(accessToken);
           await SecureStorage.setRefreshToken(refreshed.refreshToken);
@@ -470,6 +521,10 @@ apiClient.interceptors.response.use(
       } catch (refreshErr) {
         refreshQueue.forEach((cb) => cb.reject(refreshErr as Error));
         refreshQueue = [];
+        if ((refreshErr as { code?: unknown } | null)?.code === "ACCOUNT_SESSION_CHANGED") {
+          // 账号切换打断的刷新不是登录失效：不清会话、不跳登录页。
+          return Promise.reject(refreshErr);
+        }
         if (!skipAuthRedirect) {
           await redirectToLoginAfterUnauthenticated(
             refreshErr instanceof Error ? refreshErr.message : undefined
@@ -482,6 +537,10 @@ apiClient.interceptors.response.use(
         return Promise.reject(refreshErr);
       } finally {
         isRefreshing = false;
+        const release = releaseRefreshSettled;
+        refreshSettled = null;
+        releaseRefreshSettled = null;
+        release?.();
       }
     }
     reportApiErrorLog(error, original, {

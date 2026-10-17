@@ -64,7 +64,7 @@ function normalizeUserStores(payload: unknown): UserStoreDto[] {
     .filter((item) => Boolean(item.storeCode));
 }
 
-function normalizeCurrentUser(payload: unknown): CurrentUser {
+export function normalizeCurrentUser(payload: unknown): CurrentUser {
   const data = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const userGuid =
     (typeof data.userGuid === "string" && data.userGuid) ||

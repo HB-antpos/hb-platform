@@ -174,6 +174,9 @@ interface IdentityCardProps {
   /** 「个人资料 ›」；不给就不显示链接。 */
   profileLabel?: string;
   onPressProfile?: () => void;
+  /** 「切换账号」链接（多账号入口）；不给就不显示。 */
+  switchLabel?: string;
+  onPressSwitch?: () => void;
   /** 右侧：个人码二维码方块。 */
   trailing?: ReactNode;
   testID?: string;
@@ -190,6 +193,8 @@ export function IdentityCard({
   codeLine,
   profileLabel,
   onPressProfile,
+  switchLabel,
+  onPressSwitch,
   trailing,
   testID,
 }: IdentityCardProps) {
@@ -228,17 +233,34 @@ export function IdentityCard({
             {codeLine}
           </Text>
         ) : null}
-        {profileLabel && onPressProfile ? (
-          <Pressable
-            onPress={onPressProfile}
-            accessibilityRole="button"
-            accessibilityLabel={profileLabel}
-            style={styles.profileLink}
-            hitSlop={8}
-          >
-            <Text style={styles.profileLinkText}>{profileLabel}</Text>
-            <Icon source="chevron-right" size={18} color={HB_COLORS.action} />
-          </Pressable>
+        {(profileLabel && onPressProfile) || (switchLabel && onPressSwitch) ? (
+          <View style={styles.linkRow}>
+            {profileLabel && onPressProfile ? (
+              <Pressable
+                onPress={onPressProfile}
+                accessibilityRole="button"
+                accessibilityLabel={profileLabel}
+                style={styles.profileLink}
+                hitSlop={8}
+              >
+                <Text style={styles.profileLinkText}>{profileLabel}</Text>
+                <Icon source="chevron-right" size={18} color={HB_COLORS.action} />
+              </Pressable>
+            ) : null}
+            {switchLabel && onPressSwitch ? (
+              <Pressable
+                onPress={onPressSwitch}
+                accessibilityRole="button"
+                accessibilityLabel={switchLabel}
+                style={styles.profileLink}
+                hitSlop={8}
+                testID="settings-switch-account"
+              >
+                <Icon source="swap-horizontal" size={17} color={HB_COLORS.action} />
+                <Text style={[styles.profileLinkText, styles.switchLinkText]}>{switchLabel}</Text>
+              </Pressable>
+            ) : null}
+          </View>
         ) : null}
       </View>
       {trailing}
@@ -331,6 +353,8 @@ const styles = StyleSheet.create({
   roleExtra: { fontSize: 11.5, fontWeight: "700", color: HB_COLORS.textSecondary },
   identityMeta: { color: HB_COLORS.textSecondary },
   identityCode: { color: HB_COLORS.textSecondary, fontVariant: ["tabular-nums"], letterSpacing: 0.6 },
+  linkRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", columnGap: 14 },
   profileLink: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", minHeight: 28 },
+  switchLinkText: { marginLeft: 3 },
   profileLinkText: { fontSize: 13, fontWeight: "800", color: HB_COLORS.action },
 });
