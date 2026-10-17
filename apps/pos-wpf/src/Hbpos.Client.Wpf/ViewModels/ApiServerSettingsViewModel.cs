@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Client.Wpf.Services.NetworkDiagnostics;
 
 namespace Hbpos.Client.Wpf.ViewModels;
 
@@ -30,13 +31,19 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
         ILocalizationService localization,
         IApiServerSwitchCoordinator? switchCoordinator = null,
         IOperationAuditLogger? operationAuditLogger = null,
-        ICashierSessionContext? cashierSessionContext = null)
+        ICashierSessionContext? cashierSessionContext = null,
+        INetworkDiagnosticsService? networkDiagnostics = null,
+        INetworkFixService? networkFixes = null)
     {
         _settingsService = settingsService;
         _localization = localization;
         _switchCoordinator = switchCoordinator;
         _operationAuditLogger = operationAuditLogger;
         _cashierSessionContext = cashierSessionContext;
+        // 网络检测需要两个服务都在；缺一个（例如部分单元测试）就不显示这一块。
+        Network = networkDiagnostics is not null && networkFixes is not null
+            ? new NetworkDiagnosticsViewModel(networkDiagnostics, networkFixes, localization, () => ServerAddressText)
+            : null;
         TestConnectionCommand = new AsyncRelayCommand(TestConnectionAsync, CanRun);
         SaveCommand = new AsyncRelayCommand(SaveAsync, CanRun);
         UseDevelopmentAddressCommand = new RelayCommand(
@@ -46,6 +53,11 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
             () => ServerAddressText = ApiServerSettingsService.ReleaseApiBaseAddress,
             () => !IsBusy);
     }
+
+    /// <summary>网络检测与一键修复；服务不可用时为 null，面板隐藏对应区域。</summary>
+    public NetworkDiagnosticsViewModel? Network { get; }
+
+    public bool HasNetworkDiagnostics => Network is not null;
 
     public IAsyncRelayCommand TestConnectionCommand { get; }
 

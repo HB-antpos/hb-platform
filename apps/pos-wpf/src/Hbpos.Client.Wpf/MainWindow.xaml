@@ -1130,7 +1130,8 @@
             </Border>
         </Grid>
 
-        <!-- 收银员登录全局遮盖：未登录时盖住主窗口，扫码内容仍走现有登录命令。 -->
+        <!-- 收银员登录全局遮盖：未登录时盖住主窗口，扫码内容仍走现有登录命令。
+             布局：左栏放门店 / 设备 / 连接状态 / 扫码提示 / 服务器地址 / 退出；右栏只管登录。1024×768 下不需要滚动。 -->
         <Grid Grid.RowSpan="3"
               AutomationProperties.AutomationId="CashierLoginOverlay"
               Visibility="{Binding IsCashierLoginOverlayOpen, Converter={StaticResource BoolToVis}}"
@@ -1138,24 +1139,22 @@
               Panel.ZIndex="97"
               IsVisibleChanged="CashierLoginOverlayIsVisibleChanged"
               IsEnabledChanged="CashierLoginOverlayIsEnabledChanged">
-            <Border Width="520"
-                    MaxHeight="680"
-                    Padding="26"
+            <Border MaxWidth="800"
+                    MaxHeight="620"
+                    Margin="24"
                     Background="{DynamicResource PosSurfaceBrush}"
-                    CornerRadius="12"
+                    CornerRadius="16"
+                    ClipToBounds="True"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="24" ShadowDepth="6" Opacity="0.22" />
                 </Border.Effect>
-                <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled">
                 <Grid>
                     <Grid.Resources>
                         <Style x:Key="CashierBarcodeKeyboardButtonStyle" TargetType="Button">
-                            <Setter Property="Height" Value="44" />
-                            <Setter Property="Margin" Value="3" />
+                            <Setter Property="Height" Value="50" />
+                            <Setter Property="Margin" Value="4" />
                             <Setter Property="Padding" Value="4" />
                             <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
                             <Setter Property="BorderBrush" Value="{DynamicResource PosDividerBrush}" />
@@ -1171,7 +1170,7 @@
                                                 Background="{TemplateBinding Background}"
                                                 BorderBrush="{TemplateBinding BorderBrush}"
                                                 BorderThickness="1"
-                                                CornerRadius="10"
+                                                CornerRadius="11"
                                                 RenderTransformOrigin="0.5,0.5">
                                             <Border.RenderTransform>
                                                 <ScaleTransform ScaleX="1" ScaleY="1" />
@@ -1201,181 +1200,406 @@
                                 </Setter.Value>
                             </Setter>
                         </Style>
+
+                        <!-- 服务器地址入口：整行可点的开关，选中后右栏换成服务器设置面板。 -->
+                        <Style x:Key="CashierLoginRailToggleStyle" TargetType="ToggleButton">
+                            <Setter Property="Cursor" Value="Hand" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="RailBorder"
+                                                Padding="12,10"
+                                                Background="{DynamicResource PosSurfaceBrush}"
+                                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="9">
+                                            <ContentPresenter />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="RailBorder" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="RailBorder" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                                <Setter TargetName="RailBorder" Property="BorderBrush" Value="{DynamicResource PosPrimarySoftBorderBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+
+                        <Style x:Key="CashierLoginExitButtonStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
+                            <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                        </Style>
                     </Grid.Resources>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
 
-                    <StackPanel Grid.Row="0"
-                                Orientation="Horizontal"
-                                Margin="0,0,0,18">
-                        <Border Width="46"
-                                Height="46"
-                                Background="{DynamicResource PosPrimarySoftBrush}"
-                                CornerRadius="12"
-                                Margin="0,0,14,0">
-                            <materialDesign:PackIcon Kind="BadgeAccountHorizontalOutline"
-                                                     Width="28"
-                                                     Height="28"
-                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                     HorizontalAlignment="Center"
-                                                     VerticalAlignment="Center" />
-                        </Border>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="{loc:Loc shell.cashierLogin.overlayTitle}"
-                                       FontSize="20"
-                                       FontWeight="Black"
-                                       Foreground="{DynamicResource PosTextBrush}" />
-                            <TextBlock Text="{loc:Loc shell.cashierLogin.overlayMessage}"
-                                       FontSize="13"
-                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,0" />
-                        </StackPanel>
-                    </StackPanel>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="272" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                    <PasswordBox x:Name="CashierLoginOverlayPasswordBox"
-                                 AutomationProperties.AutomationId="CashierLoginInput"
-                                 Grid.Row="1"
-                                 Height="46"
-                                 Padding="12,0"
-                                 FontSize="16"
-                                 VerticalContentAlignment="Center"
-                                 materialDesign:HintAssist.Hint="{loc:Loc shell.cashierLogin.inputHint}"
-                                 ToolTip="{loc:Loc shell.cashierLogin.tooltip}"
-                                 PasswordChanged="CashierLoginOverlayPasswordBoxPasswordChanged"
-                                 KeyDown="CashierLoginOverlayPasswordBoxKeyDown" />
+                    <!-- 左栏：身份、连接状态、扫码提示、服务器地址、退出。 -->
+                    <Border Grid.Column="0"
+                            Padding="20,22"
+                            Background="{DynamicResource PosSurfaceAltBrush}"
+                            BorderBrush="{DynamicResource PosDividerBrush}"
+                            BorderThickness="0,0,1,0">
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Top">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                                    <Border Width="38"
+                                            Height="38"
+                                            Background="{DynamicResource PosPrimarySoftBrush}"
+                                            CornerRadius="10"
+                                            Margin="0,0,10,0">
+                                        <materialDesign:PackIcon Kind="BadgeAccountHorizontalOutline"
+                                                                 Width="24"
+                                                                 Height="24"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="HB POS"
+                                               FontSize="17"
+                                               FontWeight="Black"
+                                               Foreground="{DynamicResource PosTextBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
 
-                    <!-- 关键逻辑：「刚输入的内容短暂明文显示」的只读叠层。
-                         不可聚焦、不参与命中测试，焦点始终留在上面的 PasswordBox（扫码枪焦点判断不受影响）；
-                         显示期间由代码把 PasswordBox 的圆点与光标设为透明，超时/清空/弹窗开关时自动收回。 -->
-                    <TextBlock x:Name="CashierLoginOverlayRevealText"
-                               Grid.Row="1"
-                               Visibility="Collapsed"
-                               Focusable="False"
-                               IsHitTestVisible="False"
-                               Margin="13,0"
-                               FontSize="16"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"
-                               Foreground="{DynamicResource PosTextBrush}" />
+                                <TextBlock Text="{Binding StoreInfo}"
+                                           AutomationProperties.AutomationId="CashierLoginStoreInfo"
+                                           FontSize="18"
+                                           FontWeight="Black"
+                                           Foreground="{DynamicResource PosTextBrush}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding TerminalInfo}"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,3,0,14" />
 
-                    <!-- 关键逻辑：屏幕数字键盘只写入收银员登录弹窗，不复用商品/金额键盘命令。 -->
-                    <UniformGrid Grid.Row="2"
-                                 Columns="3"
-                                 Rows="4"
-                                 Margin="0,14,0,0">
-                        <Button Content="1"
-                                Tag="1"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="2"
-                                Tag="2"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="3"
-                                Tag="3"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="4"
-                                Tag="4"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="5"
-                                Tag="5"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="6"
-                                Tag="6"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="7"
-                                Tag="7"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="8"
-                                Tag="8"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="9"
-                                Tag="9"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="{loc:Loc Clear}"
-                                Tag="Clear"
-                                FontSize="15"
-                                Foreground="{DynamicResource PosDangerTextBrush}"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Content="0"
-                                Tag="0"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick" />
-                        <Button Tag="Back"
-                                Foreground="{DynamicResource PosDangerTextBrush}"
-                                ToolTip="{loc:Loc Backspace}"
-                                Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
-                                Click="CashierLoginOverlayKeyboardButtonClick">
-                            <materialDesign:PackIcon Kind="BackspaceOutline"
-                                                     Width="20"
-                                                     Height="20"
-                                                     Foreground="{DynamicResource PosDangerTextBrush}" />
-                        </Button>
-                    </UniformGrid>
+                                <!-- 连接状态条：在线 / 离线 / 连不上服务器。一眼看出是哪种，而不是藏在底部小字里。 -->
+                                <Border AutomationProperties.AutomationId="CashierLoginConnectionChip"
+                                        Padding="12,10"
+                                        BorderThickness="1"
+                                        CornerRadius="10">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding LoginConnectionState}" Value="online">
+                                                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding LoginConnectionState}" Value="unreachable">
+                                                    <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource PosDangerBorderBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Width="10" Height="10" Margin="0,4,10,0" VerticalAlignment="Top">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{DynamicResource PosWarningBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding LoginConnectionState}" Value="online">
+                                                            <Setter Property="Fill" Value="{DynamicResource PosSuccessBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding LoginConnectionState}" Value="unreachable">
+                                                            <Setter Property="Fill" Value="{DynamicResource PosDangerBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding LoginConnectionTitleText}"
+                                                       FontSize="14"
+                                                       FontWeight="Black"
+                                                       Foreground="{DynamicResource PosTextBrush}"
+                                                       AutomationProperties.LiveSetting="Polite" />
+                                            <TextBlock Text="{Binding LoginConnectionDetailText}"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource PosTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
 
-                    <Button Grid.Row="3"
-                            AutomationProperties.AutomationId="CashierLoginButton"
-                            Command="{Binding LoginCashierCommand}"
-                            Height="46"
-                            Margin="0,14,0,0"
-                            Style="{StaticResource PosPrimaryButtonStyle}"
-                            Click="CashierLoginOverlayButtonClick">
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Center">
-                            <materialDesign:PackIcon Kind="Login"
-                                                     Width="18"
-                                                     Height="18"
-                                                     Margin="0,0,8,0"
-                                                     VerticalAlignment="Center" />
-                            <TextBlock Text="{loc:Loc shell.cashierLogin.overlayAction}"
-                                       Foreground="White"
-                                       FontWeight="Bold" />
-                        </StackPanel>
-                    </Button>
+                                <Border Margin="0,14,0,0"
+                                        Padding="14"
+                                        Background="{DynamicResource PosSurfaceBrush}"
+                                        BorderBrush="{DynamicResource PosDividerBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="BarcodeScan"
+                                                                 Width="30"
+                                                                 Height="30"
+                                                                 Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                 VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc shell.cashierLogin.scanHint}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                   TextWrapping="Wrap"
+                                                   MaxWidth="150"
+                                                   VerticalAlignment="Center"
+                                                   Margin="12,0,0,0" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
 
-                    <TextBlock Grid.Row="4"
-                               Text="{Binding StatusMessage}"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                               TextWrapping="Wrap"
-                               TextAlignment="Center"
-                               Margin="0,14,0,0" />
+                            <StackPanel DockPanel.Dock="Bottom">
+                                <!-- 关键逻辑：未登录时原地复用服务器设置面板，不绕过现有校验与连接测试。 -->
+                                <ToggleButton x:Name="CashierLoginServerToggle"
+                                              Unchecked="CashierLoginServerToggleUnchecked"
+                                              AutomationProperties.AutomationId="CashierLoginServerAddressToggle"
+                                              Style="{StaticResource CashierLoginRailToggleStyle}"
+                                              Margin="0,0,0,10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <materialDesign:PackIcon Kind="ServerNetwork"
+                                                                 Width="18"
+                                                                 Height="18"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                 VerticalAlignment="Center"
+                                                                 Margin="0,0,8,0" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{loc:Loc shell.cashierLogin.serverAddress}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource PosTextBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <materialDesign:PackIcon Grid.Column="2"
+                                                                 Kind="ChevronRight"
+                                                                 Width="18"
+                                                                 Height="18"
+                                                                 Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                 VerticalAlignment="Center" />
+                                    </Grid>
+                                </ToggleButton>
 
-                    <TextBlock Grid.Row="5"
-                               Text="{Binding StoreInfo}"
-                               FontSize="11"
-                               Foreground="{DynamicResource PosMutedForegroundBrush}"
-                               TextAlignment="Center"
-                               TextTrimming="CharacterEllipsis"
-                               Margin="0,12,0,0" />
+                                <Button AutomationProperties.AutomationId="CashierLoginExitButton"
+                                        Command="{Binding ExitApplicationCommand}"
+                                        Style="{StaticResource CashierLoginExitButtonStyle}"
+                                        Height="42">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="Power"
+                                                                 Width="18"
+                                                                 Height="18"
+                                                                 Foreground="{DynamicResource PosDangerTextBrush}"
+                                                                 Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc shell.cashierLogin.exit}"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
+                                                   FontWeight="Bold" />
+                                    </StackPanel>
+                                </Button>
 
-                    <!-- 关键逻辑：未登录时原地复用服务器设置面板，不绕过现有校验与连接测试。 -->
-                    <Expander Grid.Row="6"
-                              Header="{loc:Loc shell.cashierLogin.changeServerAddress}"
-                              IsExpanded="False"
-                              Margin="0,14,0,0">
-                        <controls:ApiServerSettingsPanel DataContext="{Binding ApiServerSettings}"
-                                                         Margin="0,10,0,0" />
-                    </Expander>
+                                <TextBlock FontSize="11"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,10,0,0">
+                                    <Run Text="v" />
+                                    <Run Text="{Binding AppUpdate.CurrentVersion, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- 右栏：登录。选中左栏的「服务器地址」时整栏换成服务器设置面板。 -->
+                    <Grid Grid.Column="1">
+                        <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="28,24,28,22">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=CashierLoginServerToggle}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <TextBlock Text="{loc:Loc shell.cashierLogin.overlayTitle}"
+                                           FontSize="22"
+                                           FontWeight="Black"
+                                           Foreground="{DynamicResource PosTextBrush}" />
+                                <TextBlock Text="{loc:Loc shell.cashierLogin.overlayMessage}"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,14" />
+
+                                <!-- 「刚输入的内容短暂明文显示」的只读叠层与 PasswordBox 叠在同一格：不可聚焦、不参与命中测试，
+                                     焦点始终留在 PasswordBox；显示期间由代码把圆点与光标设为透明，超时 / 清空 / 弹窗开关时自动收回。 -->
+                                <Grid>
+                                    <PasswordBox x:Name="CashierLoginOverlayPasswordBox"
+                                                 AutomationProperties.AutomationId="CashierLoginInput"
+                                                 Height="52"
+                                                 Padding="14,0"
+                                                 FontSize="18"
+                                                 VerticalContentAlignment="Center"
+                                                 materialDesign:HintAssist.Hint="{loc:Loc shell.cashierLogin.inputHint}"
+                                                 ToolTip="{loc:Loc shell.cashierLogin.tooltip}"
+                                                 PasswordChanged="CashierLoginOverlayPasswordBoxPasswordChanged"
+                                                 KeyDown="CashierLoginOverlayPasswordBoxKeyDown" />
+                                    <TextBlock x:Name="CashierLoginOverlayRevealText"
+                                               Visibility="Collapsed"
+                                               Focusable="False"
+                                               IsHitTestVisible="False"
+                                               Margin="15,0"
+                                               FontSize="18"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource PosTextBrush}" />
+                                </Grid>
+
+                                <!-- 错误条：放在输入框正下方，整行着色；连不上服务器时给「重试」和「检测网络」。 -->
+                                <Border AutomationProperties.AutomationId="CashierLoginError"
+                                        Margin="0,10,0,0"
+                                        Padding="12,10"
+                                        Background="{DynamicResource PosDangerSoftBrush}"
+                                        BorderBrush="{DynamicResource PosDangerBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Visibility="{Binding HasLoginError, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding LoginErrorMessage}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
+                                                   TextWrapping="Wrap"
+                                                   AutomationProperties.LiveSetting="Assertive" />
+                                        <StackPanel Orientation="Horizontal"
+                                                    Margin="0,8,0,0"
+                                                    Visibility="{Binding IsLoginServiceUnavailable, Converter={StaticResource BoolToVis}}">
+                                            <Button AutomationProperties.AutomationId="CashierLoginRetryButton"
+                                                    Command="{Binding RetryConnectionCommand}"
+                                                    Style="{StaticResource PosSecondaryButtonStyle}"
+                                                    Height="34"
+                                                    Padding="14,0"
+                                                    Margin="0,0,8,0">
+                                                <TextBlock Text="{loc:Loc shell.cashierLogin.retry}" FontWeight="Bold" />
+                                            </Button>
+                                            <Button AutomationProperties.AutomationId="CashierLoginDiagnoseButton"
+                                                    Style="{StaticResource PosSecondaryButtonStyle}"
+                                                    Height="34"
+                                                    Padding="14,0"
+                                                    Click="CashierLoginOverlayDiagnoseClick">
+                                                <TextBlock Text="{loc:Loc shell.cashierLogin.diagnose}" FontWeight="Bold" />
+                                            </Button>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 关键逻辑：屏幕数字键盘只写入收银员登录弹窗，不复用商品/金额键盘命令。 -->
+                                <UniformGrid Columns="3"
+                                             Rows="4"
+                                             Margin="-4,12,-4,0">
+                                    <Button Content="1" Tag="1" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="2" Tag="2" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="3" Tag="3" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="4" Tag="4" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="5" Tag="5" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="6" Tag="6" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="7" Tag="7" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="8" Tag="8" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="9" Tag="9" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="{loc:Loc Clear}"
+                                            Tag="Clear"
+                                            FontSize="15"
+                                            Foreground="{DynamicResource PosDangerTextBrush}"
+                                            Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
+                                            Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Content="0" Tag="0" Style="{StaticResource CashierBarcodeKeyboardButtonStyle}" Click="CashierLoginOverlayKeyboardButtonClick" />
+                                    <Button Tag="Back"
+                                            Foreground="{DynamicResource PosDangerTextBrush}"
+                                            ToolTip="{loc:Loc Backspace}"
+                                            Style="{StaticResource CashierBarcodeKeyboardButtonStyle}"
+                                            Click="CashierLoginOverlayKeyboardButtonClick">
+                                        <materialDesign:PackIcon Kind="BackspaceOutline"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Foreground="{DynamicResource PosDangerTextBrush}" />
+                                    </Button>
+                                </UniformGrid>
+
+                                <Button AutomationProperties.AutomationId="CashierLoginButton"
+                                        Command="{Binding LoginCashierCommand}"
+                                        Height="54"
+                                        Margin="0,10,0,0"
+                                        Style="{StaticResource PosPrimaryButtonStyle}"
+                                        Click="CashierLoginOverlayButtonClick">
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="Login"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,8,0"
+                                                                 VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc shell.cashierLogin.overlayAction}"
+                                                   FontSize="16"
+                                                   Foreground="White"
+                                                   FontWeight="Bold" />
+                                    </StackPanel>
+                                </Button>
+
+                                <TextBlock Text="{Binding StatusMessage}"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center"
+                                           Margin="0,10,0,0" />
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="28,24,28,22">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=CashierLoginServerToggle}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <Button AutomationProperties.AutomationId="CashierLoginBackToLoginButton"
+                                        Click="CashierLoginOverlayBackToLoginClick"
+                                        Style="{StaticResource PosSecondaryButtonStyle}"
+                                        Height="38"
+                                        Padding="14,0"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,0,0,12">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="ArrowLeft" Width="18" Height="18" Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc shell.cashierLogin.backToLogin}" FontWeight="Bold" />
+                                    </StackPanel>
+                                </Button>
+                                <controls:ApiServerSettingsPanel DataContext="{Binding ApiServerSettings}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
-                </ScrollViewer>
             </Border>
         </Grid>
 

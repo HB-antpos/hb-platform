@@ -485,4 +485,65 @@
   <data name="mobileApp.enlarge.open" xml:space="preserve"><value>放大二维码</value></data>
   <data name="settings.payment.methods.orderList" xml:space="preserve"><value>付款页显示订单列表</value></data>
   <data name="settings.payment.methods.orderList.help" xml:space="preserve"><value>默认开启。关闭后付款页左侧只保留应付金额和小计 / 折扣，不列出商品明细；收银区随之加宽。只影响本机。</value></data>
+  <data name="settings.network.diagnose" xml:space="preserve"><value>检测网络</value></data>
+  <data name="settings.network.diagnose.hint" xml:space="preserve"><value>检测只读取网络信息，并访问本服务器和公共 DNS，不会修改任何设置。</value></data>
+  <data name="settings.network.title" xml:space="preserve"><value>网络检测</value></data>
+  <data name="settings.network.running" xml:space="preserve"><value>正在检测网络...</value></data>
+  <data name="settings.network.finishedIn" xml:space="preserve"><value>用时 {0}</value></data>
+  <data name="settings.network.error" xml:space="preserve"><value>网络检测没能完成，请重试。</value></data>
+  <data name="settings.network.ok" xml:space="preserve"><value>正常</value></data>
+  <data name="settings.network.skipped" xml:space="preserve"><value>已跳过</value></data>
+  <data name="settings.network.step.localNetwork" xml:space="preserve"><value>本机网络</value></data>
+  <data name="settings.network.step.systemDns" xml:space="preserve"><value>系统 DNS</value></data>
+  <data name="settings.network.step.publicDns" xml:space="preserve"><value>公共 DNS（1.1.1.1 / 8.8.8.8）</value></data>
+  <data name="settings.network.step.connectIpv4" xml:space="preserve"><value>IPv4 连接</value></data>
+  <data name="settings.network.step.connectIpv6" xml:space="preserve"><value>IPv6 连接</value></data>
+  <data name="settings.network.step.proxy" xml:space="preserve"><value>代理</value></data>
+  <data name="settings.network.step.secureReply" xml:space="preserve"><value>安全连接与服务器回复</value></data>
+  <data name="settings.network.step.clock" xml:space="preserve"><value>时钟</value></data>
+  <data name="settings.network.finding.none.title" xml:space="preserve"><value>没有发现问题</value></data>
+  <data name="settings.network.finding.none.message" xml:space="preserve"><value>所有检测都正常。如果收银机仍显示 Offline，请等几秒或重启 HB POS。</value></data>
+  <data name="settings.network.finding.noLocalNetwork.title" xml:space="preserve"><value>本机没有联网</value></data>
+  <data name="settings.network.finding.noLocalNetwork.message" xml:space="preserve"><value>这台机器没有可用的网络连接（没有网关）。请检查网线或 Wi-Fi。</value></data>
+  <data name="settings.network.finding.dnsSlow.title" xml:space="preserve"><value>这台机器的 DNS 服务器太慢</value></data>
+  <data name="settings.network.finding.dnsSlow.message" xml:space="preserve"><value>解析服务器名称比公共 DNS 慢很多。收银机每个请求只给几秒，所以一直显示 Offline。</value></data>
+  <data name="settings.network.finding.dnsFailed.title" xml:space="preserve"><value>这台机器的 DNS 找不到服务器</value></data>
+  <data name="settings.network.finding.dnsFailed.message" xml:space="preserve"><value>系统 DNS 解析不了服务器名称，而公共 DNS 可以。</value></data>
+  <data name="settings.network.finding.dnsMismatch.title" xml:space="preserve"><value>这台机器的 DNS 返回了不同的地址</value></data>
+  <data name="settings.network.finding.dnsMismatch.message" xml:space="preserve"><value>系统 DNS 返回的地址和公共 DNS 不同，而且连不上服务器。</value></data>
+  <data name="settings.network.finding.ipv6Slow.title" xml:space="preserve"><value>IPv6 拖慢了连接</value></data>
+  <data name="settings.network.finding.ipv6Slow.message" xml:space="preserve"><value>IPv6 连接又慢又失败，而 IPv4 很快。可以在这块网卡上关闭 IPv6，或联系网络提供商。</value></data>
+  <data name="settings.network.finding.proxyAutoDetectSlow.title" xml:space="preserve"><value>代理自动检测太慢</value></data>
+  <data name="settings.network.finding.proxyAutoDetectSlow.message" xml:space="preserve"><value>直连很快，但自动查找代理会让每个请求多花几秒。</value></data>
+  <data name="settings.network.finding.proxyUnreachable.title" xml:space="preserve"><value>配置的代理不可用</value></data>
+  <data name="settings.network.finding.proxyUnreachable.message" xml:space="preserve"><value>直连能通，但本机设置的代理不可用。代理可能是故意配置的，所以不会自动修改，请联系网络管理员。</value></data>
+  <data name="settings.network.finding.clockSkew.title" xml:space="preserve"><value>这台机器的时间不准</value></data>
+  <data name="settings.network.finding.clockSkew.message" xml:space="preserve"><value>日期或时间与服务器相差超过 5 分钟，会导致安全连接失败。请在 Windows 里校准日期、时间和时区。</value></data>
+  <data name="settings.network.finding.secureConnectionFailed.title" xml:space="preserve"><value>安全连接失败</value></data>
+  <data name="settings.network.finding.secureConnectionFailed.message" xml:space="preserve"><value>与服务器的安全连接建立失败。请检查本机日期时间，以及会检查 HTTPS 的杀毒软件或代理。</value></data>
+  <data name="settings.network.finding.serverError.title" xml:space="preserve"><value>服务器返回了错误</value></data>
+  <data name="settings.network.finding.serverError.message" xml:space="preserve"><value>这不是本机网络的问题。请稍后重试或联系技术支持。</value></data>
+  <data name="settings.network.finding.notPosApi.title" xml:space="preserve"><value>回复不是来自 POS 服务器</value></data>
+  <data name="settings.network.finding.notPosApi.message" xml:space="preserve"><value>如果这个网络需要先登录（访客 Wi-Fi），请先用浏览器登录。也可能是代理改写了回复。</value></data>
+  <data name="settings.network.finding.serverUnreachable.title" xml:space="preserve"><value>连不上服务器</value></data>
+  <data name="settings.network.finding.serverUnreachable.message" xml:space="preserve"><value>到服务器的网络被阻断或太慢。请检查防火墙和网络，或换一个网络试试。</value></data>
+  <data name="settings.network.fix.publicDns" xml:space="preserve"><value>修复 DNS（改用 1.1.1.1 和 8.8.8.8）</value></data>
+  <data name="settings.network.fix.disableProxyAutoDetect" xml:space="preserve"><value>关闭代理自动检测</value></data>
+  <data name="settings.network.fixUnavailable" xml:space="preserve"><value>无法在这里修复：没有找到正在使用的网卡。</value></data>
+  <data name="settings.network.confirm.title" xml:space="preserve"><value>确认修改？</value></data>
+  <data name="settings.network.confirm.now" xml:space="preserve"><value>现在</value></data>
+  <data name="settings.network.confirm.change" xml:space="preserve"><value>改为</value></data>
+  <data name="settings.network.confirm.admin" xml:space="preserve"><value>Windows 会请求管理员授权，批准之前不会修改任何设置。旧设置会先保存，可以在本面板里还原。</value></data>
+  <data name="settings.network.confirm.currentUser" xml:space="preserve"><value>只修改当前 Windows 用户的设置。旧设置会先保存，可以在本面板里还原。</value></data>
+  <data name="settings.network.confirm.apply" xml:space="preserve"><value>确认修改</value></data>
+  <data name="settings.network.fixed.passed" xml:space="preserve"><value>已修改，复测通过：收银机能连上服务器了。如果仍显示 Offline，请等几秒或重启 HB POS。</value></data>
+  <data name="settings.network.fixed.stillFailing" xml:space="preserve"><value>已修改，但复测仍发现问题。请看上面的结果，或复制报告发给技术支持。</value></data>
+  <data name="settings.network.fixed.cancelled" xml:space="preserve"><value>没有修改：未获得授权。</value></data>
+  <data name="settings.network.fixed.failed" xml:space="preserve"><value>修改没能完成。</value></data>
+  <data name="settings.network.undone" xml:space="preserve"><value>已还原修改。</value></data>
+  <data name="settings.network.undo" xml:space="preserve"><value>还原修改</value></data>
+  <data name="settings.network.applied.title" xml:space="preserve"><value>已在本机做的修改</value></data>
+  <data name="settings.network.copy" xml:space="preserve"><value>复制报告</value></data>
+  <data name="settings.network.copied" xml:space="preserve"><value>报告已复制。</value></data>
+  <data name="settings.network.copyFailed" xml:space="preserve"><value>复制失败，请重试。</value></data>
 </root>

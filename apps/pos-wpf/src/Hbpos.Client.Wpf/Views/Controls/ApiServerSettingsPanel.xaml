@@ -3,6 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
              xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
     <Border Background="{DynamicResource PosSurfaceBrush}"
             BorderBrush="{DynamicResource PosDividerBrush}"
             BorderThickness="1"
@@ -111,6 +114,223 @@
                            TextWrapping="Wrap"
                            AutomationProperties.LiveSetting="Polite" />
             </Border>
+
+            <!-- 网络检测与一键修复：检测只读；修复先确认、可还原。服务缺失时整块隐藏。 -->
+            <StackPanel Margin="0,12,0,0"
+                        Visibility="{Binding HasNetworkDiagnostics, Converter={StaticResource BoolToVis}}">
+                <Button Command="{Binding Network.DiagnoseCommand}"
+                        AutomationProperties.AutomationId="NetworkDiagnoseButton"
+                        AutomationProperties.Name="{loc:Loc settings.network.diagnose}"
+                        Style="{StaticResource PosSecondaryButtonStyle}"
+                        Height="42">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <materialDesign:PackIcon Kind="Stethoscope" Width="18" Height="18" Margin="0,0,8,0" />
+                        <TextBlock Text="{loc:Loc settings.network.diagnose}" />
+                    </StackPanel>
+                </Button>
+                <TextBlock Text="{loc:Loc settings.network.diagnose.hint}"
+                           FontSize="11"
+                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                           TextWrapping="Wrap"
+                           Margin="2,6,0,0" />
+
+                <StackPanel DataContext="{Binding Network}">
+                    <TextBlock Text="{Binding SummaryText}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               Margin="2,10,0,0"
+                               AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRunning}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <StackPanel Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Margin="2,10,0,6"
+                                   FontSize="13"
+                                   FontWeight="Black"
+                                   Foreground="{DynamicResource PosTextBrush}">
+                            <Run Text="{loc:Loc settings.network.title}" />
+                            <Run Text=" · " />
+                            <Run Text="{Binding SummaryText, Mode=OneWay}" FontWeight="Normal" />
+                        </TextBlock>
+
+                        <ItemsControl ItemsSource="{Binding Steps}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="8,6" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="22" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse Width="12" Height="12" VerticalAlignment="Top" Margin="0,3,0,0">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Fill" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="ok">
+                                                                <Setter Property="Fill" Value="{DynamicResource PosSuccessBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="slow">
+                                                                <Setter Property="Fill" Value="{DynamicResource PosWarningBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="failed">
+                                                                <Setter Property="Fill" Value="{DynamicResource PosDangerBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding TimeText}" FontSize="12" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Top">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource PosTextBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="ok">
+                                                                <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="slow">
+                                                                <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="failed">
+                                                                <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding StatusKey}" Value="skipped">
+                                                                <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- 结论卡片：找到原因用警告色，没问题用成功色。 -->
+                        <Border Margin="0,10,0,0" Padding="12,10" BorderThickness="1" CornerRadius="8">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding FindingSeverity}" Value="ok">
+                                            <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel>
+                                <TextBlock Text="{Binding FindingTitle}" FontSize="13" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Text="{Binding FindingMessage}" FontSize="12" Foreground="{DynamicResource PosTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                <Button Command="{Binding FixCommand}"
+                                        AutomationProperties.AutomationId="NetworkFixButton"
+                                        Style="{StaticResource PosPrimaryButtonStyle}"
+                                        Height="38"
+                                        Margin="0,10,0,0"
+                                        Visibility="{Binding HasFix, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding FixButtonText}" Foreground="White" FontWeight="Bold" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 修复前确认：写清楚改什么；批准前不会改动任何设置。 -->
+                        <Border Margin="0,10,0,0" Padding="12,10" BorderThickness="1" CornerRadius="8"
+                                Background="{DynamicResource PosSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource PosDividerBrush}"
+                                Visibility="{Binding IsConfirming, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc settings.network.confirm.title}" FontSize="13" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" />
+                                <TextBlock Text="{Binding PlanTarget}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PosTextBrush}" Margin="0,6,0,0" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12" Foreground="{DynamicResource PosTextBrush}" Margin="0,4,0,0" TextWrapping="Wrap">
+                                    <Run Text="{loc:Loc settings.network.confirm.now}" FontWeight="SemiBold" />
+                                    <Run Text=": " />
+                                    <Run Text="{Binding PlanBefore, Mode=OneWay}" Foreground="{DynamicResource PosDangerTextBrush}" />
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource PosTextBrush}" Margin="0,2,0,0" TextWrapping="Wrap">
+                                    <Run Text="{loc:Loc settings.network.confirm.change}" FontWeight="SemiBold" />
+                                    <Run Text=": " />
+                                    <Run Text="{Binding PlanAfter, Mode=OneWay}" Foreground="{DynamicResource PosSuccessTextBrush}" />
+                                </TextBlock>
+                                <TextBlock Text="{Binding PlanNote}" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Grid.Column="0" Command="{Binding CancelFixCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="38">
+                                        <TextBlock Text="{loc:Loc common.cancel}" />
+                                    </Button>
+                                    <Button Grid.Column="2" Command="{Binding ConfirmFixCommand}" AutomationProperties.AutomationId="NetworkFixConfirmButton" Style="{StaticResource PosPrimaryButtonStyle}" Height="38">
+                                        <TextBlock Text="{loc:Loc settings.network.confirm.apply}" Foreground="White" FontWeight="Bold" />
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 修复 / 还原的结果。 -->
+                        <Border Margin="0,10,0,0" Padding="10,8" BorderThickness="1" CornerRadius="6"
+                                Visibility="{Binding HasResultMessage, Converter={StaticResource BoolToVis}}">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBorderBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ResultSeverity}" Value="ok">
+                                            <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PosSuccessBorderBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock Text="{Binding ResultMessage}" FontSize="12" Foreground="{DynamicResource PosTextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 已做的修改：始终可见（即使还没重新检测），随时还原。 -->
+                    <StackPanel Margin="0,10,0,0" Visibility="{Binding HasApplied, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{loc:Loc settings.network.applied.title}" FontSize="12" FontWeight="Black" Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{Binding AppliedSummary}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource PosMutedForegroundBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        <Button Command="{Binding UndoCommand}"
+                                AutomationProperties.AutomationId="NetworkUndoButton"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                Height="36"
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Left"
+                                Padding="14,0">
+                            <TextBlock Text="{loc:Loc settings.network.undo}" Foreground="{DynamicResource PosDangerTextBrush}" FontWeight="Bold" />
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0" Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
+                        <Button Command="{Binding CopyReportCommand}"
+                                AutomationProperties.AutomationId="NetworkCopyReportButton"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                Height="34"
+                                Padding="14,0">
+                            <TextBlock Text="{loc:Loc settings.network.copy}" />
+                        </Button>
+                        <TextBlock Text="{Binding CopyResultMessage}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
         </StackPanel>
     </Border>
 </UserControl>

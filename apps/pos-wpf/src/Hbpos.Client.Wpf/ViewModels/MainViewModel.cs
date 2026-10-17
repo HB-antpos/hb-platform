@@ -205,6 +205,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
+    /// <summary>登录弹窗里"输入框下方的错误条"文案；输入变化或登录成功时清空。</summary>
+    [ObservableProperty]
+    private string _loginErrorMessage = string.Empty;
+
+    /// <summary>最近一次登录失败的稳定错误码；弹窗据此区分"连不上服务器"与"条码无效"。</summary>
+    [ObservableProperty]
+    private string _loginErrorCode = string.Empty;
+
     [ObservableProperty]
     private bool _isApiServerSwitching;
 
@@ -630,6 +638,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ResetScannerBindingCommand = new AsyncRelayCommand(ResetScannerBindingAsync);
         LoginCashierCommand = new AsyncRelayCommand(LoginCashierFromInputAsync, CanLoginCashierFromInput);
         ExitApplicationCommand = new AsyncRelayCommand(ExitApplicationAsync);
+        RetryConnectionCommand = new AsyncRelayCommand(RetryConnectionAsync);
         CloseCardRecoveryResultDialogCommand = _cardRecoveryPresenter.CloseCardRecoveryResultDialogCommand;
         PrintRecoveredReceiptCommand = _cardRecoveryPresenter.PrintRecoveredReceiptCommand;
         RetryActiveSessionRecoveryCommand = _cardRecoveryPresenter.RetryActiveSessionRecoveryCommand;
@@ -1055,6 +1064,34 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand ResetScannerBindingCommand { get; }
 
     public IAsyncRelayCommand LoginCashierCommand { get; }
+
+    /// <summary>登录弹窗里的「Retry」：立即重新探测与服务器的连接，不用等 15 秒的定时探测。</summary>
+    public IAsyncRelayCommand RetryConnectionCommand { get; }
+
+    public bool HasLoginError => !string.IsNullOrEmpty(LoginErrorMessage);
+
+    public bool IsLoginServiceUnavailable =>
+        string.Equals(LoginErrorCode, "CASHIER_LOGIN_API_UNAVAILABLE", StringComparison.Ordinal);
+
+    public bool IsConnectionOnline => Session.IsOnline;
+
+    /// <summary>登录弹窗左栏状态条：online / offline / unreachable（刚刚登录时确认连不上服务器）。</summary>
+    public string LoginConnectionState =>
+        IsLoginServiceUnavailable ? "unreachable" : Session.IsOnline ? "online" : "offline";
+
+    public string LoginConnectionTitleText => LoginConnectionState switch
+    {
+        "unreachable" => _localization.T("shell.cashierLogin.connection.unreachable.title"),
+        "online" => _localization.T("Online"),
+        _ => _localization.T("Offline")
+    };
+
+    public string LoginConnectionDetailText => _localization.T(LoginConnectionState switch
+    {
+        "unreachable" => "shell.cashierLogin.connection.unreachable.detail",
+        "online" => "shell.cashierLogin.connection.online.detail",
+        _ => "shell.cashierLogin.connection.offline.detail"
+    });
 
     public IAsyncRelayCommand ExitApplicationCommand { get; }
 
@@ -1561,11 +1598,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 // 关键逻辑：界面只按稳定错误码本地化，避免直接显示后端语言或内部消息。
                 StatusMessage = ResolveCashierLoginStatusMessage(result.ErrorCode);
+                // 登录弹窗在输入框下方显示同一条文案的错误条，并按错误码区分"连不上服务器"与"条码无效"。
+                LoginErrorCode = result.ErrorCode ?? string.Empty;
+                LoginErrorMessage = StatusMessage;
             }
 
             return false;
         }
 
+        ClearLoginError();
         var sessionApplyStopwatch = Stopwatch.StartNew();
         ApplyCashierSession(result.Session);
         sessionApplyStopwatch.Stop();
@@ -1945,6 +1986,43 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnCashierBarcodeInputChanged(string value)
     {
         LoginCashierCommand?.NotifyCanExecuteChanged();
+        // 再次输入就是重新尝试：旧的错误条不再适用。
+        if (HasLoginError)
+        {
+            ClearLoginError();
+        }
+    }
+
+    partial void OnLoginErrorMessageChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasLoginError));
+    }
+
+    partial void OnLoginErrorCodeChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsLoginServiceUnavailable));
+        RaiseLoginConnectionChanged();
+    }
+
+    private void ClearLoginError()
+    {
+        LoginErrorMessage = string.Empty;
+        LoginErrorCode = string.Empty;
+    }
+
+    private void RaiseLoginConnectionChanged()
+    {
+        OnPropertyChanged(nameof(IsConnectionOnline));
+        OnPropertyChanged(nameof(LoginConnectionState));
+        OnPropertyChanged(nameof(LoginConnectionTitleText));
+        OnPropertyChanged(nameof(LoginConnectionDetailText));
+    }
+
+    private async Task RetryConnectionAsync()
+    {
+        ClearLoginError();
+        await RefreshOnlineStateAsync(CancellationToken.None);
+        RaiseLoginConnectionChanged();
     }
 
     /// <summary>
@@ -2189,6 +2267,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StoreInfo = string.Format(_localization.CurrentCulture, _localization.T("shell.top.storeInfo"), Session.StoreName, Session.StoreCode);
         CashierInfo = string.Format(_localization.CurrentCulture, _localization.T("shell.top.cashierInfo"), Session.CashierName);
         VersionStatusText = _localization.T("shell.footer.versionReady");
+        // 登录弹窗左栏的连接状态条跟着在线状态和语言一起刷新。
+        RaiseLoginConnectionChanged();
         OnPropertyChanged(nameof(ActivePageTitleText));
         if (resetStatus || string.IsNullOrWhiteSpace(StatusMessage))
         {

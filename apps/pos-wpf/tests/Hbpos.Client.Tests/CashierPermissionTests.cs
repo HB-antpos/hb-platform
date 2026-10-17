@@ -1466,6 +1466,124 @@ public sealed class CashierPermissionTests
     }
 
     [Fact]
+    public async Task Login_overlay_shows_an_actionable_error_and_unreachable_state_when_the_server_cannot_be_reached()
+    {
+        var loginService = new RecordingMainViewModelCashierLoginService(
+            CashierLoginResult.Fail("收银员登录服务不可用", "CASHIER_LOGIN_API_UNAVAILABLE"));
+        using var viewModel = CreateMainViewModelForCashierLogin(loginService, new CashierSessionContext());
+
+        await viewModel.LoginCashierByBarcodeAsync("BAR-1");
+
+        Assert.True(viewModel.HasLoginError);
+        Assert.Equal("Can't reach the POS server. Check the network, then try again.", viewModel.LoginErrorMessage);
+        Assert.True(viewModel.IsLoginServiceUnavailable);
+        Assert.Equal("unreachable", viewModel.LoginConnectionState);
+        Assert.Equal("Can't reach server", viewModel.LoginConnectionTitleText);
+        Assert.Equal("Offline · cached cashiers only", viewModel.LoginConnectionDetailText);
+
+        // 再次输入就是重新尝试：错误条和"连不上"状态都撤掉。
+        viewModel.CashierBarcodeInput = "1";
+        Assert.False(viewModel.HasLoginError);
+        Assert.False(viewModel.IsLoginServiceUnavailable);
+        Assert.NotEqual("unreachable", viewModel.LoginConnectionState);
+    }
+
+    [Fact]
+    public async Task Login_overlay_invalid_barcode_error_does_not_mark_the_server_unreachable()
+    {
+        var loginService = new RecordingMainViewModelCashierLoginService(
+            CashierLoginResult.Fail("收银员条码无效或已停用", "CASHIER_LOGIN_FAILED"));
+        using var viewModel = CreateMainViewModelForCashierLogin(loginService, new CashierSessionContext());
+
+        await viewModel.LoginCashierByBarcodeAsync("BAR-X");
+
+        Assert.True(viewModel.HasLoginError);
+        Assert.Equal("Cashier barcode is invalid or disabled.", viewModel.LoginErrorMessage);
+        Assert.False(viewModel.IsLoginServiceUnavailable);
+        Assert.Equal(viewModel.Session.IsOnline ? "online" : "offline", viewModel.LoginConnectionState);
+    }
+
+    [Fact]
+    public async Task Login_overlay_error_is_cleared_after_a_successful_login()
+    {
+        var cashierSession = CreateSession(permissionCodes: [Permissions.PosTerminal.Sales.AddItem]);
+        var loginService = new SequencedMainViewModelCashierLoginService(
+            CashierLoginResult.Fail("x", "CASHIER_LOGIN_FAILED"),
+            CashierLoginResult.Success(cashierSession));
+        using var viewModel = CreateMainViewModelForCashierLogin(loginService, new CashierSessionContext());
+
+        await viewModel.LoginCashierByBarcodeAsync("BAD");
+        Assert.True(viewModel.HasLoginError);
+
+        await viewModel.LoginCashierByBarcodeAsync("GOOD");
+
+        Assert.False(viewModel.HasLoginError);
+        Assert.Equal(string.Empty, viewModel.LoginErrorCode);
+        Assert.Same(cashierSession, viewModel.Session.CashierSession);
+    }
+
+    [Fact]
+    public async Task Login_overlay_retry_clears_the_error_and_rechecks_the_connection()
+    {
+        var loginService = new RecordingMainViewModelCashierLoginService(
+            CashierLoginResult.Fail("x", "CASHIER_LOGIN_API_UNAVAILABLE"));
+        using var viewModel = CreateMainViewModelForCashierLogin(loginService, new CashierSessionContext());
+        await viewModel.LoginCashierByBarcodeAsync("BAR-1");
+        Assert.True(viewModel.IsLoginServiceUnavailable);
+
+        await viewModel.RetryConnectionCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.HasLoginError);
+        Assert.False(viewModel.IsLoginServiceUnavailable);
+        Assert.Equal(viewModel.Session.IsOnline ? "online" : "offline", viewModel.LoginConnectionState);
+    }
+
+    [Fact]
+    public void Login_overlay_has_an_exit_button_wired_to_the_existing_exit_command()
+    {
+        var mainWindowXaml = File.ReadAllText(Path.Combine(
+            FindRepoRootForLoginOverlayTests(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "MainWindow.xaml"));
+        var overlay = System.Xml.Linq.XDocument.Parse(mainWindowXaml)
+            .Descendants()
+            .Single(element => element.Attributes().Any(attribute =>
+                attribute.Name.LocalName == "AutomationProperties.AutomationId" && attribute.Value == "CashierLoginOverlay"));
+
+        var exit = overlay.Descendants().Single(element =>
+            element.Name.LocalName == "Button" &&
+            element.Attributes().Any(attribute =>
+                attribute.Name.LocalName == "AutomationProperties.AutomationId" && attribute.Value == "CashierLoginExitButton"));
+
+        // 复用首页 Exit / 标题栏 X 的同一条命令（带确认框），登录弹窗不另做退出逻辑。
+        Assert.Equal("{Binding ExitApplicationCommand}", exit.Attribute("Command")?.Value);
+        Assert.Contains(
+            exit.Descendants(),
+            element => element.Attribute("Text")?.Value == "{loc:Loc shell.cashierLogin.exit}");
+        // 登录输入、明文闪显层与登录按钮仍在弹窗里。
+        foreach (var name in new[] { "CashierLoginOverlayPasswordBox", "CashierLoginOverlayRevealText" })
+        {
+            Assert.Contains(
+                overlay.Descendants(),
+                element => element.Attributes().Any(attribute => attribute.Name.LocalName == "Name" && attribute.Value == name));
+        }
+    }
+
+    private static string FindRepoRootForLoginOverlayTests()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "apps", "pos-wpf")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Unable to find repository root.");
+    }
+
+    [Fact]
     public async Task Pos_terminal_cashier_login_success_status_follows_current_culture()
     {
         var localization = new FakeLocalizationService();
@@ -1955,6 +2073,24 @@ public sealed class CashierPermissionTests
             bool attemptOnline = true,
             CancellationToken cancellationToken = default)
         {
+            CallCount++;
+            return Task.FromResult(result);
+        }
+    }
+
+    /// <summary>按调用顺序依次返回预设结果（用完后重复最后一个），用于"先失败再成功"这类场景。</summary>
+    private sealed class SequencedMainViewModelCashierLoginService(params CashierLoginResult[] results) : ICashierLoginService
+    {
+        public int CallCount { get; private set; }
+
+        public Task<CashierLoginResult> LoginAsync(
+            string storeCode,
+            string deviceCode,
+            string userBarcode,
+            bool attemptOnline = true,
+            CancellationToken cancellationToken = default)
+        {
+            var result = results[Math.Min(CallCount, results.Length - 1)];
             CallCount++;
             return Task.FromResult(result);
         }

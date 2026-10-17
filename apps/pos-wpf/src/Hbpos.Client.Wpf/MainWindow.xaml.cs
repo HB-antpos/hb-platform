@@ -276,6 +276,24 @@ public partial class MainWindow : Window, IDisplayMovableWindow
         ClearCashierLoginOverlayInputAfterLogin();
     }
 
+    private void CashierLoginOverlayDiagnoseClick(object sender, RoutedEventArgs e)
+    {
+        // 连不上服务器时直接打开服务器设置面板并开始检测，现场不用再找入口。
+        CashierLoginServerToggle.IsChecked = true;
+        _viewModel.ApiServerSettings.Network?.DiagnoseCommand.Execute(null);
+    }
+
+    private void CashierLoginOverlayBackToLoginClick(object sender, RoutedEventArgs e)
+    {
+        CashierLoginServerToggle.IsChecked = false;
+    }
+
+    private void CashierLoginServerToggleUnchecked(object sender, RoutedEventArgs e)
+    {
+        // 回到登录栏后把焦点还给扫码输入框，扫码枪才能继续直接录入。
+        FocusCashierLoginOverlayInput();
+    }
+
     private void ExecuteCashierLoginCommandFromOverlay()
     {
         var command = _viewModel.LoginCashierCommand;
@@ -312,6 +330,8 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 
     private void CashierLoginOverlayIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        // 弹窗开关都回到登录栏：下一位收银员不应该看到上一次打开的服务器设置面板。
+        CashierLoginServerToggle.IsChecked = false;
         // 关键逻辑：弹窗开关都清空输入框，上一次残留的半截条码不能拼进下一次扫码导致「条码无效」。
         CashierLoginOverlayPasswordBox.Clear();
         // 输入框本来就空时 Clear() 不会触发 PasswordChanged，所以这里显式收回，确保明文状态不留给下一位收银员。

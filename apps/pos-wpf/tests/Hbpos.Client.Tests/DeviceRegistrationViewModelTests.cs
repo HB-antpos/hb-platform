@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Models;
 using Hbpos.Client.Wpf.Services;
+using Hbpos.Client.Wpf.Services.NetworkDiagnostics;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Contracts.Common;
 using Hbpos.Contracts.Health;
@@ -96,7 +97,6 @@ public sealed class DeviceRegistrationViewModelTests
         viewModel.ActivationCode = ActivationCode;
 
         await viewModel.PreviewActivationCommand.ExecuteAsync(null);
-
         Assert.Equal(1, workflow.PreviewCallCount);
         Assert.Equal(
             "The server took too long to respond. Check the network and try again.",
@@ -123,6 +123,121 @@ public sealed class DeviceRegistrationViewModelTests
                 .Element("value")?.Value;
             Assert.False(string.IsNullOrWhiteSpace(value), file);
         }
+    }
+
+    [Fact]
+    public async Task A_network_failure_while_checking_the_code_offers_the_network_check_and_a_rejection_does_not()
+    {
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            PreviewException = new TaskCanceledException("timeout")
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+        Assert.True(viewModel.HasNetworkProblem);
+
+        // 改开通码就是重新来：入口收起。
+        viewModel.ActivationCode = ActivationCode + "X";
+        Assert.False(viewModel.HasNetworkProblem);
+
+        // 服务端明确拒绝（开通码无效等）不是网络问题。
+        workflow.PreviewException = new CatalogApiException("rejected", HttpStatusCode.BadRequest, "DEVICE_ACTIVATION_NOT_AVAILABLE");
+        viewModel.ActivationCode = ActivationCode;
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+        Assert.False(viewModel.HasNetworkProblem);
+    }
+
+    [Fact]
+    public async Task The_registration_page_diagnose_button_starts_the_shared_network_check()
+    {
+        var diagnostics = new CountingDiagnostics();
+        var service = new ApiServerSettingsService(
+            new HttpClient(new StubHttpMessageHandler()),
+            () => "https://current.example.com/",
+            _ => { });
+        var apiServerSettings = new ApiServerSettingsViewModel(
+            service,
+            new LocalizationService(),
+            networkDiagnostics: diagnostics,
+            networkFixes: new NoFixes());
+        var viewModel = new DeviceRegistrationViewModel(
+            new StubDeviceRegistrationWorkflowService(),
+            apiServerSettings: apiServerSettings);
+        await viewModel.InitializeAsync(cachedDevice: null);
+
+        Assert.True(viewModel.DiagnoseNetworkCommand.CanExecute(null));
+        await apiServerSettings.Network!.DiagnoseCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, diagnostics.RunCalls);
+        Assert.True(apiServerSettings.Network.HasResult);
+    }
+
+    [Fact]
+    public void Without_network_services_the_diagnose_button_is_unavailable()
+    {
+        var viewModel = new DeviceRegistrationViewModel(
+            new StubDeviceRegistrationWorkflowService(),
+            apiServerSettings: CreateApiServerSettings());
+
+        Assert.False(viewModel.DiagnoseNetworkCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void Registration_view_has_the_network_check_button_next_to_both_status_messages()
+    {
+        var xaml = File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Views", "Screens", "DeviceRegistrationView.xaml"));
+
+        var buttons = XDocument.Parse(xaml)
+            .Descendants()
+            .Where(element =>
+                element.Name.LocalName == "Button" &&
+                element.Attributes().Any(attribute =>
+                    attribute.Name.LocalName == "AutomationProperties.AutomationId" &&
+                    attribute.Value == "RegistrationDiagnoseNetworkButton"))
+            .ToArray();
+
+        Assert.Equal(2, buttons.Length);
+        Assert.All(buttons, button =>
+        {
+            Assert.Equal("{Binding DiagnoseNetworkCommand}", button.Attribute("Command")?.Value);
+            Assert.Contains("HasNetworkProblem", button.Attribute("Visibility")?.Value);
+        });
+    }
+
+    private sealed class CountingDiagnostics : INetworkDiagnosticsService
+    {
+        public int RunCalls { get; private set; }
+
+        public Task<NetworkDiagnosisReport> RunAsync(Uri apiBaseAddress, CancellationToken cancellationToken = default)
+        {
+            RunCalls++;
+            var m = new NetworkMeasurements { Reply = ReplyOutcome.Online, SystemDnsMs = 30, PublicDnsMs = 30, DirectReplyMs = 200 };
+            return Task.FromResult(new NetworkDiagnosisReport(
+                apiBaseAddress.ToString(),
+                DateTimeOffset.UnixEpoch,
+                TimeSpan.FromSeconds(1),
+                NetworkDiagnosisRules.BuildSteps(m),
+                NetworkDiagnosisRules.Evaluate(m),
+                m,
+                "test"));
+        }
+    }
+
+    private sealed class NoFixes : INetworkFixService
+    {
+        public NetworkFixPlan? Plan(NetworkFixKind kind) => null;
+
+        public Task<NetworkFixResult> ApplyAsync(NetworkFixPlan plan, CancellationToken cancellationToken = default) =>
+            Task.FromResult(NetworkFixResult.Done);
+
+        public NetworkFixRecord? GetApplied(NetworkFixKind kind) => null;
+
+        public Task<NetworkFixResult> UndoAsync(NetworkFixKind kind, CancellationToken cancellationToken = default) =>
+            Task.FromResult(NetworkFixResult.Done);
     }
 
     [Fact]
@@ -159,17 +274,24 @@ public sealed class DeviceRegistrationViewModelTests
             .Single(element => element.Attributes().Any(attribute =>
                 attribute.Name.LocalName == "AutomationProperties.AutomationId" &&
                 attribute.Value == "CashierLoginOverlay"));
-        var serverAddressExpander = cashierLoginOverlay
+        // 登录弹窗左栏的「服务器地址」是个开关，选中后右栏换成共享的服务器设置面板；默认收起。
+        Assert.Contains(
+            cashierLoginOverlay.Descendants(),
+            element =>
+                element.Name.LocalName == "ToggleButton" &&
+                element.Attributes().Any(attribute => attribute.Name.LocalName == "Name" && attribute.Value == "CashierLoginServerToggle"));
+        var serverPanel = cashierLoginOverlay
             .Descendants()
             .Single(element =>
-                element.Name.LocalName == "Expander" &&
-                element.Attribute("Header")?.Value == "{loc:Loc shell.cashierLogin.changeServerAddress}");
-        Assert.Equal("False", serverAddressExpander.Attribute("IsExpanded")?.Value);
-        Assert.Contains(
-            serverAddressExpander.Descendants(),
-            element =>
                 element.Name.LocalName == "ApiServerSettingsPanel" &&
                 element.Attribute("DataContext")?.Value == "{Binding ApiServerSettings}");
+        var panelHost = serverPanel.Ancestors().First(element => element.Name.LocalName == "ScrollViewer");
+        Assert.Contains(
+            panelHost.Descendants(),
+            element =>
+                element.Name.LocalName == "Setter" &&
+                element.Attribute("Property")?.Value == "Visibility" &&
+                element.Attribute("Value")?.Value == "Collapsed");
 
         var settingsViewModelSource = File.ReadAllText(Path.Combine(
             FindRepoRoot(),
