@@ -95,11 +95,30 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
             connectTasks.Add(gatewayTask);
         }
 
+        // TLS：与 HTTP 检查同时进行。"不联网校验"那一次只为读取证书链并给出基准耗时；
+        // "默认校验"那一次与 HttpClient 完全一致，卡在联网查证书上的话会在这里超时。只对 https 且非 IP / localhost 做。
+        var probeTls = !isLiteral && string.Equals(apiBaseAddress.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        Task<TlsProbeResult>? tlsOfflineTask = probeTls ? probe.ProbeTlsAsync(host, port, true, StepTimeout, cancellationToken) : null;
+        Task<TlsProbeResult>? tlsDefaultTask = probeTls ? probe.ProbeTlsAsync(host, port, false, ReplyTimeout, cancellationToken) : null;
+        if (tlsOfflineTask is not null)
+        {
+            connectTasks.Add(tlsOfflineTask);
+        }
+
+        if (tlsDefaultTask is not null)
+        {
+            connectTasks.Add(tlsDefaultTask);
+        }
+
         connectTasks.Add(directTask);
         connectTasks.Add(viaSystemTask);
         await Task.WhenAll(connectTasks);
         ipv4Result = ipv4Task is null ? null : await ipv4Task;
         ipv6Result = ipv6Task is null ? null : await ipv6Task;
+        var tlsOffline = tlsOfflineTask is null ? null : await tlsOfflineTask;
+        var tlsDefault = tlsDefaultTask is null ? null : await tlsDefaultTask;
+        // 证书链信息优先用"不联网校验"那次（不会被联网查证书卡住）；它没拿到时退而用默认那次。
+        var chain = tlsOffline is { ChainChecked: true } ? tlsOffline : tlsDefault is { ChainChecked: true } ? tlsDefault : null;
         var gateway = gatewayTask is null ? null : await gatewayTask;
         var reference = referenceTask is null ? null : await referenceTask;
         var direct = await directTask;
@@ -126,6 +145,18 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
             PublicDnsFailed = publicDns?.Failed ?? false,
             Ipv4ConnectMs = ipv4Result?.ElapsedMs,
             Ipv4ConnectFailed = ipv4Result?.Failed ?? (ipv4 is null && !isLiteral && systemDns is { Failed: true } && publicDns is { Failed: true }),
+            TlsOutcome = tlsDefault?.Outcome ?? TlsProbeOutcome.Unknown,
+            TlsHandshakeMs = tlsDefault?.HandshakeMs,
+            TlsProtocol = tlsDefault?.Protocol ?? tlsOffline?.Protocol,
+            TlsError = tlsDefault?.Error,
+            TlsOfflineHandshakeMs = tlsOffline is { Outcome: TlsProbeOutcome.Completed } ? tlsOffline.HandshakeMs : null,
+            ChainChecked = chain is not null,
+            ChainTrusted = chain?.ChainTrusted ?? false,
+            ChainNotTimeValid = chain?.NotTimeValid ?? false,
+            ChainProblems = chain?.ChainProblems ?? [],
+            ChainSubjects = chain?.ChainSubjects ?? [],
+            CertificateIssuer = chain?.Issuer,
+            MissingTrustedRoots = chain is { ChainTrusted: false } ? probe.GetMissingTrustedRoots() : [],
             GatewayPingSent = gateway?.Sent,
             GatewayPingLost = gateway?.Lost,
             GatewayAvgMs = gateway?.AvgMs,

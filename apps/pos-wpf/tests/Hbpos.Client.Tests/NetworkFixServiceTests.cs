@@ -145,6 +145,137 @@ public sealed class NetworkFixServiceTests
     }
 
     [Fact]
+    public void Root_plan_names_the_certificate_and_needs_administrator_permission_and_changes_nothing()
+    {
+        var env = new Env();
+
+        var plan = env.Service.Plan(NetworkFixKind.InstallTrustedRoots);
+
+        Assert.NotNull(plan);
+        Assert.True(plan.NeedsAdministrator);
+        Assert.Equal("Trusted root certificates (this machine)", plan.Target);
+        Assert.Equal("missing: ISRG Root X1", plan.Before);
+        Assert.Contains("install ISRG Root X1", plan.After);
+        Assert.Equal([TrustedRootCertificates.IsrgRootX1.Sha1], plan.RootSha1);
+        Assert.Empty(env.Root_InstallCalls);
+        Assert.Empty(env.Store.Records);
+    }
+
+    [Fact]
+    public void Root_plan_is_unavailable_when_the_root_is_already_trusted()
+    {
+        var env = new Env { MissingRoots = [] };
+
+        Assert.Null(env.Service.Plan(NetworkFixKind.InstallTrustedRoots));
+    }
+
+    [Fact]
+    public async Task Installing_the_root_installs_only_what_is_missing_and_records_the_thumbprint_for_undo()
+    {
+        var env = new Env();
+        var plan = env.Service.Plan(NetworkFixKind.InstallTrustedRoots)!;
+
+        var result = await env.Service.ApplyAsync(plan);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["ISRG Root X1"], env.Root_InstallCalls);
+        var record = Assert.Single(env.Store.Records);
+        Assert.Equal(NetworkFixKind.InstallTrustedRoots, record.Kind);
+        Assert.Equal([TrustedRootCertificates.IsrgRootX1.Sha1], record.InstalledRootSha1);
+    }
+
+    [Fact]
+    public async Task A_root_that_became_trusted_since_the_plan_is_not_installed_again_and_leaves_no_record()
+    {
+        var env = new Env();
+        var plan = env.Service.Plan(NetworkFixKind.InstallTrustedRoots)!;
+        env.MissingRoots.Clear();
+
+        var result = await env.Service.ApplyAsync(plan);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(env.Root_InstallCalls);
+        Assert.Empty(env.Store.Records);
+    }
+
+    [Fact]
+    public async Task Declining_the_permission_prompt_installs_no_certificate_and_records_nothing()
+    {
+        var env = new Env { Elevation = false };
+
+        var result = await env.Service.ApplyAsync(env.Service.Plan(NetworkFixKind.InstallTrustedRoots)!);
+
+        Assert.True(result.Cancelled);
+        Assert.Empty(env.Root_InstallCalls);
+        Assert.Empty(env.Store.Records);
+    }
+
+    [Fact]
+    public async Task Undo_removes_only_the_certificate_this_fix_installed()
+    {
+        var env = new Env();
+        await env.Service.ApplyAsync(env.Service.Plan(NetworkFixKind.InstallTrustedRoots)!);
+
+        var result = await env.Service.UndoAsync(NetworkFixKind.InstallTrustedRoots);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal([TrustedRootCertificates.IsrgRootX1.Sha1], env.Root_RemoveCalls);
+        Assert.Empty(env.Store.Records);
+    }
+
+    [Fact]
+    public async Task Undo_without_a_recorded_certificate_removes_nothing()
+    {
+        var env = new Env();
+        env.Store.Save([new NetworkFixRecord(NetworkFixKind.InstallTrustedRoots, null, null, [], false, null, Now, InstalledRootSha1: null)]);
+
+        var result = await env.Service.UndoAsync(NetworkFixKind.InstallTrustedRoots);
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(env.Root_RemoveCalls);
+    }
+
+    [Fact]
+    public async Task The_real_installer_refuses_anything_that_is_not_a_built_in_pinned_root()
+    {
+        var installer = new PowerShellTrustedRootInstaller();
+        var tampered = TrustedRootCertificates.IsrgRootX1 with { Base64Der = "AAAA" + TrustedRootCertificates.IsrgRootX1.Base64Der[4..] };
+        var foreign = new TrustedRootCertificate("Foreign CA", new string('0', 64), new string('0', 40), TrustedRootCertificates.IsrgRootX1.Base64Der);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => installer.InstallAsync([tampered], CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => installer.InstallAsync([foreign], CancellationToken.None));
+        Assert.Throws<ArgumentException>(() => { _ = installer.RemoveAsync([new string('A', 40)], CancellationToken.None); });
+        Assert.Throws<ArgumentException>(() => { _ = installer.RemoveAsync(["CABD2A79A1076A31F21D253635CB039D4329A5E8'; calc; '"], CancellationToken.None); });
+    }
+
+    [Fact]
+    public void Old_backup_files_without_the_root_field_still_load()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "hbpos-netfix-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "network-fix.json");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(path, "[{\"kind\":0,\"adapterIndex\":12,\"adapterName\":\"Ethernet\",\"previousServers\":[\"192.168.1.1\"],\"previousAutomatic\":true,\"previousAutoDetect\":null,\"appliedAt\":\"2026-10-17T20:31:00+11:00\"}]");
+
+            var loaded = Assert.Single(new JsonNetworkFixStore(path).Load());
+
+            Assert.Equal(NetworkFixKind.PublicDns, loaded.Kind);
+            Assert.Null(loaded.InstalledRootSha1);
+
+            new JsonNetworkFixStore(path).Save([loaded with { Kind = NetworkFixKind.InstallTrustedRoots, InstalledRootSha1 = [TrustedRootCertificates.IsrgRootX1.Sha1] }]);
+            Assert.Equal([TrustedRootCertificates.IsrgRootX1.Sha1], Assert.Single(new JsonNetworkFixStore(path).Load()).InstalledRootSha1);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void Only_ipv4_addresses_are_accepted_as_dns_servers_so_nothing_else_reaches_the_script()
     {
         var configurator = new PowerShellDnsConfigurator();
@@ -193,7 +324,7 @@ public sealed class NetworkFixServiceTests
         public Env()
         {
             Probe = new FixProbe(this);
-            Service = new NetworkFixService(Probe, new FixDns(this), new FixProxy(this), Store, () => Now);
+            Service = new NetworkFixService(Probe, new FixDns(this), new FixProxy(this), Store, new FixRoots(this), () => Now);
         }
 
         public LocalNetworkInfo Local { get; set; } = new(true, "Ethernet", "192.168.1.1", ["192.168.1.1"], 12);
@@ -209,6 +340,12 @@ public sealed class NetworkFixServiceTests
         public List<(int Index, string Servers)> Dns_SetCalls { get; } = [];
 
         public List<int> Dns_ResetCalls { get; } = [];
+
+        public List<TrustedRootCertificate> MissingRoots { get; set; } = [TrustedRootCertificates.IsrgRootX1];
+
+        public List<string> Root_InstallCalls { get; } = [];
+
+        public List<string> Root_RemoveCalls { get; } = [];
 
         public FakeStore Store { get; } = new();
 
@@ -227,6 +364,10 @@ public sealed class NetworkFixServiceTests
             public Task<ConnectProbeResult> ConnectAsync(string address, int port, TimeSpan timeout, CancellationToken cancellationToken) => throw new NotSupportedException();
 
             public Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+            public Task<TlsProbeResult> ProbeTlsAsync(string host, int port, bool offlineChainCheck, TimeSpan timeout, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+            public IReadOnlyList<string> GetMissingTrustedRoots() => throw new NotSupportedException();
 
             public ProxyProbeInfo GetProxyInfo(Uri target) => throw new NotSupportedException();
 
@@ -261,6 +402,39 @@ public sealed class NetworkFixServiceTests
                 }
 
                 env.Dns_ResetCalls.Add(adapterIndex);
+                return Task.FromResult(true);
+            }
+        }
+
+        private sealed class FixRoots(Env env) : ITrustedRootInstaller
+        {
+            public IReadOnlyList<TrustedRootCertificate> GetMissing() => env.MissingRoots.ToArray();
+
+            public Task<bool> InstallAsync(IReadOnlyList<TrustedRootCertificate> roots, CancellationToken cancellationToken)
+            {
+                if (env.SetThrows is not null)
+                {
+                    throw env.SetThrows;
+                }
+
+                if (!env.Elevation)
+                {
+                    return Task.FromResult(false);
+                }
+
+                env.Root_InstallCalls.AddRange(roots.Select(root => root.Name));
+                env.MissingRoots.RemoveAll(root => roots.Contains(root));
+                return Task.FromResult(true);
+            }
+
+            public Task<bool> RemoveAsync(IReadOnlyList<string> sha1Thumbprints, CancellationToken cancellationToken)
+            {
+                if (!env.Elevation)
+                {
+                    return Task.FromResult(false);
+                }
+
+                env.Root_RemoveCalls.AddRange(sha1Thumbprints);
                 return Task.FromResult(true);
             }
         }

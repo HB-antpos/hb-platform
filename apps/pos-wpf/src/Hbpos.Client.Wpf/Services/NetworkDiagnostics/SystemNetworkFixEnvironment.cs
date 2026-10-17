@@ -71,7 +71,8 @@ public sealed class PowerShellDnsConfigurator : IDnsConfigurator
             cancellationToken);
     }
 
-    private static async Task<bool> RunElevatedAsync(string body, CancellationToken cancellationToken)
+    /// <summary>以管理员身份执行一段固定模板脚本（Windows 弹授权窗口）；用户拒绝返回 false。DNS 与根证书修复共用。</summary>
+    internal static async Task<bool> RunElevatedAsync(string body, CancellationToken cancellationToken)
     {
         var directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -121,6 +122,85 @@ public sealed class PowerShellDnsConfigurator : IDnsConfigurator
                 // 临时脚本删不掉不影响结果，下次修复会写新文件。
             }
         }
+    }
+}
+
+/// <summary>
+/// 安装 / 移除 Let's Encrypt 的公共根证书。证书只来自 <see cref="TrustedRootCertificates"/>（写死的内容和指纹），
+/// 安装前再逐个校验指纹，对不上就抛异常，绝不安装任何外部来源的证书。
+/// 脚本是固定模板，只出现我们自己生成的临时文件路径（单引号已转义）和写死证书的指纹。
+/// </summary>
+public sealed class PowerShellTrustedRootInstaller : ITrustedRootInstaller
+{
+    public IReadOnlyList<TrustedRootCertificate> GetMissing()
+    {
+        try
+        {
+            return TrustedRootCertificates.All.Where(root => !TrustedRootCertificates.IsInstalled(root)).ToArray();
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return [];
+        }
+    }
+
+    public async Task<bool> InstallAsync(IReadOnlyList<TrustedRootCertificate> roots, CancellationToken cancellationToken)
+    {
+        foreach (var root in roots)
+        {
+            if (!TrustedRootCertificates.All.Contains(root) || !root.MatchesPinnedFingerprint())
+            {
+                throw new InvalidOperationException($"Refusing to install a certificate that is not one of the built-in roots: {root.Name}.");
+            }
+        }
+
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Hbpos.Client",
+            "netfix");
+        Directory.CreateDirectory(directory);
+        var files = new List<string>();
+        try
+        {
+            var lines = new List<string>();
+            foreach (var root in roots)
+            {
+                var path = Path.Combine(directory, $"root-{Guid.NewGuid():N}.cer");
+                await File.WriteAllBytesAsync(path, root.GetDer(), cancellationToken);
+                files.Add(path);
+                lines.Add($"Import-Certificate -FilePath '{path.Replace("'", "''")}' -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null");
+            }
+
+            return await PowerShellDnsConfigurator.RunElevatedAsync(string.Join("\r\n", lines), cancellationToken);
+        }
+        finally
+        {
+            foreach (var file in files)
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (IOException)
+                {
+                    // 临时证书文件删不掉不影响结果。
+                }
+            }
+        }
+    }
+
+    public Task<bool> RemoveAsync(IReadOnlyList<string> sha1Thumbprints, CancellationToken cancellationToken)
+    {
+        var lines = new List<string>();
+        foreach (var thumbprint in sha1Thumbprints)
+        {
+            // 只允许移除写死的那几张：指纹必须正好等于其中之一，不接受其他任何字符串。
+            var known = TrustedRootCertificates.All.FirstOrDefault(root => string.Equals(root.Sha1, thumbprint, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException("Only the built-in root certificates can be removed.", nameof(sha1Thumbprints));
+            lines.Add($"Remove-Item -LiteralPath 'Cert:\\LocalMachine\\Root\\{known.Sha1.ToUpperInvariant()}' -Force");
+        }
+
+        return PowerShellDnsConfigurator.RunElevatedAsync(string.Join("\r\n", lines), cancellationToken);
     }
 }
 

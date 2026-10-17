@@ -193,7 +193,13 @@ public sealed partial class NetworkDiagnosticsViewModel : ObservableObject
 
         var kind = Camel(report.Finding.Kind.ToString());
         FindingTitle = T($"settings.network.finding.{kind}.title");
-        FindingMessage = T($"settings.network.finding.{kind}.message");
+        FindingMessage = report.Finding.Kind == DiagnosisKind.HttpsIntercepted
+            // 把实际签发者的名字写进说明：一眼看出是哪个杀毒 / 代理，也方便识别误报。
+            ? string.Format(
+                _localization.CurrentCulture,
+                T($"settings.network.finding.{kind}.message"),
+                NetworkDiagnosisRules.ShortName(report.Measurements.CertificateIssuer))
+            : T($"settings.network.finding.{kind}.message");
         FindingSeverity = report.Finding.Kind == DiagnosisKind.None ? "ok" : "warn";
         HasFix = report.HasSuggestedFix;
         FixButtonText = report.Finding.SuggestedFix is { } fix ? T($"settings.network.fix.{Camel(fix.ToString())}") : string.Empty;
@@ -227,6 +233,11 @@ public sealed partial class NetworkDiagnosticsViewModel : ObservableObject
         PlanBefore = plan.Before;
         PlanAfter = plan.After;
         PlanNote = T(plan.NeedsAdministrator ? "settings.network.confirm.admin" : "settings.network.confirm.currentUser");
+        if (plan.Kind == NetworkFixKind.InstallTrustedRoots)
+        {
+            // 往受信任根里装证书影响面比改 DNS 大，单独把"装的是什么、怎么校验、怎么撤销"讲清楚。
+            PlanNote += " " + T("settings.network.confirm.roots");
+        }
         ResultMessage = string.Empty;
         IsConfirming = true;
     }
@@ -368,6 +379,13 @@ public sealed partial class NetworkDiagnosticsViewModel : ObservableObject
                         ? "automatic"
                         : string.Join(", ", record.PreviousServers),
                     string.Join(", ", NetworkFixService.PublicDnsServers),
+                    record.AppliedAt),
+                NetworkFixKind.InstallTrustedRoots => string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Trusted root certificate installed: {0}  ({1:yyyy-MM-dd HH:mm})",
+                    string.Join(", ", TrustedRootCertificates.All
+                        .Where(certificate => record.InstalledRootSha1?.Contains(certificate.Sha1, StringComparer.OrdinalIgnoreCase) == true)
+                        .Select(certificate => certificate.Name)),
                     record.AppliedAt),
                 _ => string.Format(
                     CultureInfo.InvariantCulture,

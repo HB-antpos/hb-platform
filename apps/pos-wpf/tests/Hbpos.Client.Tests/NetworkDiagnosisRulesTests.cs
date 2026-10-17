@@ -29,7 +29,7 @@ public sealed class NetworkDiagnosisRulesTests
 
         Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
         var steps = NetworkDiagnosisRules.BuildSteps(m);
-        Assert.Equal(10, steps.Count);
+        Assert.Equal(12, steps.Count);
         Assert.DoesNotContain(steps, step => step.Status is DiagnosticStepStatus.Failed or DiagnosticStepStatus.Slow);
         Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.ConnectIpv6).Status);
     }
@@ -314,6 +314,204 @@ public sealed class NetworkDiagnosisRulesTests
         Assert.Contains("used for comparison", ok.Detail);
         Assert.Equal(DiagnosticStepStatus.Failed, failed.Status);
         Assert.Equal(DiagnosticStepStatus.Skipped, skipped.Status);
+    }
+
+    private const string LetsEncryptIssuer = "CN=YE2, O=Let's Encrypt, C=US";
+
+    private static NetworkMeasurements TlsHealthy() => Healthy() with
+    {
+        TlsOutcome = TlsProbeOutcome.Completed,
+        TlsHandshakeMs = 650,
+        TlsOfflineHandshakeMs = 600,
+        TlsProtocol = "Tls12",
+        ChainChecked = true,
+        ChainTrusted = true,
+        ChainSubjects = ["CN=hotbargain.vip", LetsEncryptIssuer],
+        CertificateIssuer = LetsEncryptIssuer
+    };
+
+    [Fact]
+    public void A_healthy_tls_handshake_and_trusted_chain_are_ok()
+    {
+        var m = TlsHealthy();
+
+        Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var steps = NetworkDiagnosisRules.BuildSteps(m);
+        var handshake = steps.Single(step => step.Id == DiagnosticStepId.TlsHandshake);
+        var trust = steps.Single(step => step.Id == DiagnosticStepId.CertificateTrust);
+        Assert.Equal(DiagnosticStepStatus.Ok, handshake.Status);
+        Assert.Equal(650, handshake.ElapsedMs);
+        Assert.Contains("Tls12", handshake.Detail);
+        Assert.Equal(DiagnosticStepStatus.Ok, trust.Status);
+        Assert.Contains("2 certificates", trust.Detail);
+        Assert.Contains("Let's Encrypt YE2", trust.Detail);
+    }
+
+    [Fact]
+    public void A_missing_root_certificate_is_diagnosed_and_offers_to_install_it()
+    {
+        // 老系统缺 ISRG Root X1：证书链在本机不受信任，Windows 联网找根证书时 HTTPS 无回复。
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            DirectReplyMs = 12000,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            ChainTrusted = false,
+            ChainProblems = ["UntrustedRoot"],
+            MissingTrustedRoots = ["ISRG Root X1"]
+        };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.CertificateRootMissing, finding.Kind);
+        Assert.Equal(NetworkFixKind.InstallTrustedRoots, finding.SuggestedFix);
+        var steps = NetworkDiagnosisRules.BuildSteps(m);
+        Assert.Equal(DiagnosticStepStatus.Failed, steps.Single(step => step.Id == DiagnosticStepId.TlsHandshake).Status);
+        var trust = steps.Single(step => step.Id == DiagnosticStepId.CertificateTrust);
+        Assert.Equal(DiagnosticStepStatus.Failed, trust.Status);
+        Assert.Contains("does not trust the root: ISRG Root X1", trust.Detail);
+    }
+
+    [Fact]
+    public void An_untrusted_chain_without_a_known_missing_root_is_a_generic_secure_connection_failure()
+    {
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.SecureConnectionFailed,
+            ChainTrusted = false,
+            ChainProblems = ["PartialChain"]
+        };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.SecureConnectionFailed, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+        Assert.Contains("PartialChain", NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.CertificateTrust).Detail);
+    }
+
+    [Fact]
+    public void A_trusted_chain_whose_default_handshake_times_out_means_windows_is_stuck_looking_up_certificates_online()
+    {
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            TlsOfflineHandshakeMs = 500
+        };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.CertificateCheckSlow, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+    }
+
+    [Fact]
+    public void A_default_handshake_that_is_seconds_slower_than_the_offline_one_is_a_slow_certificate_check()
+    {
+        var m = TlsHealthy() with { TlsHandshakeMs = 4200, TlsOfflineHandshakeMs = 420 };
+
+        Assert.Equal(DiagnosisKind.CertificateCheckSlow, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var handshake = NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.TlsHandshake);
+        Assert.Equal(DiagnosticStepStatus.Slow, handshake.Status);
+        Assert.Contains("of it spent checking the certificate online", handshake.Detail);
+    }
+
+    [Fact]
+    public void A_two_second_handshake_on_a_healthy_overseas_path_is_not_flagged()
+    {
+        // 这是在真机上量到的情形：服务器在海外，握手加首次加载花了 2.3 秒，其余全部正常，不能标成"慢"。
+        var m = TlsHealthy() with { TlsHandshakeMs = 2300, TlsOfflineHandshakeMs = 1200 };
+
+        Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var handshake = NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.TlsHandshake);
+        Assert.Equal(DiagnosticStepStatus.Ok, handshake.Status);
+        Assert.Equal(2300, handshake.ElapsedMs);
+    }
+
+    [Fact]
+    public void A_handshake_over_four_seconds_is_flagged_as_slow_even_without_an_offline_baseline()
+    {
+        var m = TlsHealthy() with { TlsHandshakeMs = 4500, TlsOfflineHandshakeMs = null };
+
+        var handshake = NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.TlsHandshake);
+
+        Assert.Equal(DiagnosticStepStatus.Slow, handshake.Status);
+    }
+
+    [Fact]
+    public void A_slow_handshake_that_is_slow_offline_too_is_not_blamed_on_the_certificate_check()
+    {
+        // 距离远 / 链路慢：两种方式一样慢，说明不是联网查证书造成的。
+        var m = TlsHealthy() with { TlsHandshakeMs = 2000, TlsOfflineHandshakeMs = 1900 };
+
+        Assert.NotEqual(DiagnosisKind.CertificateCheckSlow, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void A_certificate_from_an_unexpected_issuer_means_something_is_re_signing_https()
+    {
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            CertificateIssuer = "CN=Kaspersky Anti-Virus Personal Root Certificate"
+        };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.HttpsIntercepted, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+        var trust = NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.CertificateTrust);
+        Assert.Equal(DiagnosticStepStatus.Failed, trust.Status);
+        Assert.Contains("Kaspersky Anti-Virus Personal Root Certificate", trust.Detail);
+        Assert.Contains("re-signing HTTPS", trust.Detail);
+    }
+
+    [Fact]
+    public void An_unexpected_issuer_is_not_flagged_while_everything_works()
+    {
+        // 不能因为签发者不是 Let's Encrypt 就报警：服务器将来换了证书颁发机构，只要一切正常就不该打扰现场。
+        var m = TlsHealthy() with { CertificateIssuer = "CN=Some Other CA" };
+
+        Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void Certificate_dates_that_do_not_match_the_clock_are_reported_as_a_clock_problem()
+    {
+        var m = TlsHealthy() with
+        {
+            Reply = ReplyOutcome.SecureConnectionFailed,
+            ChainTrusted = false,
+            ChainNotTimeValid = true,
+            ChainProblems = ["NotTimeValid"]
+        };
+
+        Assert.Equal(DiagnosisKind.ClockSkew, NetworkDiagnosisRules.Evaluate(m).Kind);
+        Assert.Contains("clock", NetworkDiagnosisRules.BuildSteps(m).Single(step => step.Id == DiagnosticStepId.CertificateTrust).Detail);
+    }
+
+    [Fact]
+    public void Tls_steps_are_skipped_when_nothing_was_probed()
+    {
+        var steps = NetworkDiagnosisRules.BuildSteps(Healthy());
+
+        Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.TlsHandshake).Status);
+        Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.CertificateTrust).Status);
+    }
+
+    [Theory]
+    [InlineData("CN=YE2, O=Let's Encrypt, C=US", "Let's Encrypt YE2")]
+    [InlineData("CN=ISRG Root X1, O=Internet Security Research Group, C=US", "Internet Security Research Group ISRG Root X1")]
+    [InlineData("CN=Kaspersky Anti-Virus Personal Root Certificate", "Kaspersky Anti-Virus Personal Root Certificate")]
+    [InlineData("O=Only Org", "Only Org")]
+    [InlineData("", "unknown")]
+    public void Issuer_names_are_shortened_for_people(string subject, string expected)
+    {
+        Assert.Equal(expected, NetworkDiagnosisRules.ShortName(subject));
     }
 
     [Fact]

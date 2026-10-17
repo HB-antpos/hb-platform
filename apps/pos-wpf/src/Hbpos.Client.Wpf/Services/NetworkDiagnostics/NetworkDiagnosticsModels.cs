@@ -15,6 +15,10 @@ public enum DiagnosticStepId
     /// <summary>到一个公共参照地址 443 端口的连接：区分"整条链路差"与"只有服务器这个地址被挡"。</summary>
     ReferenceConnect,
     Proxy,
+    /// <summary>TLS 握手（与 HttpClient 同样的证书校验方式）：耗时、协议版本、是否卡住。</summary>
+    TlsHandshake,
+    /// <summary>服务器证书链在本机是否被信任、由谁签发；缺少哪张根证书。</summary>
+    CertificateTrust,
     SecureReply,
     Clock
 }
@@ -44,6 +48,12 @@ public enum DiagnosisKind
     SecureConnectionFailed,
     ServerError,
     NotPosApi,
+    /// <summary>服务器证书链的根在本机不受信任（老系统缺少 ISRG Root X1）：Windows 联网查根证书时握手被卡住。</summary>
+    CertificateRootMissing,
+    /// <summary>握手本身很快，但 Windows 联网查证书 / 吊销信息要花好几秒。</summary>
+    CertificateCheckSlow,
+    /// <summary>本机收到的证书不是预期的签发者：杀毒的 HTTPS 扫描、代理或防火墙设备在拦截并重签。</summary>
+    HttpsIntercepted,
     /// <summary>路由器没问题，但连公共参照地址也慢或失败：路由器之后的互联网出口有问题。</summary>
     InternetUnreachable,
     /// <summary>参照地址很快，只有服务器地址连不上或很慢：到服务器的路径被防火墙 / 路由 / 运营商挡了或丢包。</summary>
@@ -55,7 +65,17 @@ public enum DiagnosisKind
 public enum NetworkFixKind
 {
     PublicDns,
-    DisableProxyAutoDetect
+    DisableProxyAutoDetect,
+    /// <summary>安装缺少的 Let's Encrypt 公共根证书（ISRG Root X1）。</summary>
+    InstallTrustedRoots
+}
+
+public enum TlsProbeOutcome
+{
+    Unknown,
+    Completed,
+    Failed,
+    TimedOut
 }
 
 public sealed record DiagnosticStep(
@@ -109,6 +129,37 @@ public sealed record NetworkMeasurements
     public long? GatewayAvgMs { get; init; }
 
     public long? GatewayMaxMs { get; init; }
+
+    /// <summary>TLS 握手（默认校验方式，与 HttpClient 一致）：耗时、结果、协议、错误。</summary>
+    public TlsProbeOutcome TlsOutcome { get; init; } = TlsProbeOutcome.Unknown;
+
+    public long? TlsHandshakeMs { get; init; }
+
+    public string? TlsProtocol { get; init; }
+
+    public string? TlsError { get; init; }
+
+    /// <summary>不联网校验（不下载证书、不查吊销）时的握手耗时；和默认方式对比能看出联网查证书花了多久。</summary>
+    public long? TlsOfflineHandshakeMs { get; init; }
+
+    /// <summary>是否拿到了服务器证书链并在本机做了校验。</summary>
+    public bool ChainChecked { get; init; }
+
+    public bool ChainTrusted { get; init; }
+
+    public bool ChainNotTimeValid { get; init; }
+
+    /// <summary>证书链状态标志（PartialChain、UntrustedRoot 等）。</summary>
+    public IReadOnlyList<string> ChainProblems { get; init; } = [];
+
+    /// <summary>服务器发来的证书链里各证书的主题（叶证书在前）。</summary>
+    public IReadOnlyList<string> ChainSubjects { get; init; } = [];
+
+    /// <summary>叶证书的签发者主题。</summary>
+    public string? CertificateIssuer { get; init; }
+
+    /// <summary>本机缺少的、一键修复可以安装的根证书名称。</summary>
+    public IReadOnlyList<string> MissingTrustedRoots { get; init; } = [];
 
     /// <summary>参照地址（公共服务）443 端口的 TCP 连接耗时与是否失败。</summary>
     public string? ReferenceHost { get; init; }

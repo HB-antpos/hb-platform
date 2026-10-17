@@ -529,7 +529,7 @@
   <data name="settings.network.finding.serverUnreachable.message" xml:space="preserve"><value>The network path to the server is blocked or too slow. Check the firewall and the network, or try another network.</value></data>
   <data name="settings.network.fix.publicDns" xml:space="preserve"><value>Fix DNS (use 1.1.1.1 and 8.8.8.8)</value></data>
   <data name="settings.network.fix.disableProxyAutoDetect" xml:space="preserve"><value>Turn off automatic proxy detection</value></data>
-  <data name="settings.network.fixUnavailable" xml:space="preserve"><value>This fix can't be applied here: no active network adapter was found.</value></data>
+  <data name="settings.network.fixUnavailable" xml:space="preserve"><value>This fix can't be applied here: nothing needs changing, or no suitable network adapter was found.</value></data>
   <data name="settings.network.confirm.title" xml:space="preserve"><value>Apply this change?</value></data>
   <data name="settings.network.confirm.now" xml:space="preserve"><value>Now</value></data>
   <data name="settings.network.confirm.change" xml:space="preserve"><value>Change to</value></data>
@@ -554,4 +554,14 @@
   <data name="settings.network.finding.internetUnreachable.message" xml:space="preserve"><value>The router is fine, but a well-known public server is also slow or unreachable. Check that the router itself has internet (try a phone on the same network), restart the router, or try another network.</value></data>
   <data name="settings.network.finding.serverPathBlocked.title" xml:space="preserve"><value>The route to the POS server is blocked or losing packets</value></data>
   <data name="settings.network.finding.serverPathBlocked.message" xml:space="preserve"><value>The internet works and a reference server answers quickly, but this machine cannot reach the POS server in time. Check firewall and antivirus rules for outbound port 443, any router or provider filtering, and try another network. Other devices on the same network working does not rule out a rule that only affects this machine.</value></data>
+  <data name="settings.network.step.tlsHandshake" xml:space="preserve"><value>Secure handshake (TLS)</value></data>
+  <data name="settings.network.step.certificateTrust" xml:space="preserve"><value>Certificate trust</value></data>
+  <data name="settings.network.finding.certificateRootMissing.title" xml:space="preserve"><value>This machine does not trust the server's certificate authority</value></data>
+  <data name="settings.network.finding.certificateRootMissing.message" xml:space="preserve"><value>The POS server's certificate chains up to Let's Encrypt's ISRG Root X1, which is missing from this machine's trusted roots. Windows then waits on the network to look it up, so the secure connection stalls. You can install that root certificate below. It is Let's Encrypt's own public root, checked against a built-in fingerprint first.</value></data>
+  <data name="settings.network.finding.certificateCheckSlow.title" xml:space="preserve"><value>Windows takes too long to check the server's certificate</value></data>
+  <data name="settings.network.finding.certificateCheckSlow.message" xml:space="preserve"><value>The secure connection itself is quick, but Windows spends seconds looking up certificate or revocation information online. Allow this machine to reach Windows Update and Let's Encrypt (lencr.org), or ask your network administrator.</value></data>
+  <data name="settings.network.finding.httpsIntercepted.title" xml:space="preserve"><value>Something is re-signing the secure connection</value></data>
+  <data name="settings.network.finding.httpsIntercepted.message" xml:space="preserve"><value>The server certificate this machine receives is issued by '{0}', not by Let's Encrypt. An antivirus 'HTTPS scanning' or web-protection feature, a proxy, or a firewall appliance is inspecting HTTPS and slowing or breaking it. Exclude hotbargain.vip and HB POS from HTTPS scanning, or turn that feature off for them.</value></data>
+  <data name="settings.network.fix.installTrustedRoots" xml:space="preserve"><value>Install the missing root certificate (ISRG Root X1)</value></data>
+  <data name="settings.network.confirm.roots" xml:space="preserve"><value>Only Let's Encrypt's own public root certificate is installed. It is checked against a built-in fingerprint first, and Undo removes it again.</value></data>
 </root>

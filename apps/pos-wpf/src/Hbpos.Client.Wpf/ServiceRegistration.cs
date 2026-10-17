@@ -66,6 +66,7 @@ public static class ServiceRegistration
         services.AddSingleton<INetworkDiagnosticsService, NetworkDiagnosticsService>();
         services.AddSingleton<IDnsConfigurator, PowerShellDnsConfigurator>();
         services.AddSingleton<IProxyAutoDetectStore, RegistryProxyAutoDetectStore>();
+        services.AddSingleton<ITrustedRootInstaller, PowerShellTrustedRootInstaller>();
         services.AddSingleton<INetworkFixStore, JsonNetworkFixStore>();
         services.AddSingleton<INetworkFixService, NetworkFixService>();
         var localDataDirectory = startupOptions.PreviewMode

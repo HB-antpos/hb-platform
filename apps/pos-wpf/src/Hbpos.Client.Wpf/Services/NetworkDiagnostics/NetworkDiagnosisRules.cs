@@ -12,8 +12,20 @@ public static class NetworkDiagnosisRules
     /// <summary>到路由器丢包达到这个比例（%）就认为本机链路不稳。</summary>
     public const int GatewayLossPercentThreshold = 10;
 
+    /// <summary>
+    /// TLS 握手本来就要 2 到 3 个往返（服务器在海外时往返约 250 ms），再叠加并发检测和首次加载，健康机器上也会到 2 秒多，
+    /// 所以握手不能和 DNS / 连接共用 1.5 秒的"慢"阈值；绝对值超过它才算慢，或者比不联网校验慢 1.5 秒以上（慢在联网查证书）。
+    /// </summary>
+    public const long TlsSlowThresholdMs = 4000;
+
     /// <summary>到路由器的平均延迟超过它也认为链路不稳（同一个路由器的正常值通常只有几毫秒）。</summary>
     public const long GatewaySlowAvgMs = 300;
+
+    /// <summary>
+    /// 服务器证书预期的签发者关键字。收到的证书签发者不含它们，说明有软件在中间重签（杀毒的 HTTPS 扫描、代理、防火墙设备）。
+    /// 将来服务器换了证书颁发机构时，这里要同步更新；结论里会把实际签发者名字显示出来，所以误报也容易看出来。
+    /// </summary>
+    public static readonly string[] ExpectedIssuerMarkers = ["Let's Encrypt", "ISRG"];
 
     public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(5);
 
@@ -29,6 +41,8 @@ public static class NetworkDiagnosisRules
             ConnectStep(DiagnosticStepId.ConnectIpv6, m.HasIpv6Address, m.Ipv6ConnectMs, m.Ipv6ConnectFailed, "no IPv6 address returned"),
             ReferenceStep(m),
             ProxyStep(m),
+            TlsHandshakeStep(m),
+            CertificateTrustStep(m),
             SecureReplyStep(m),
             ClockStep(m)
         ];
@@ -87,6 +101,28 @@ public static class NetworkDiagnosisRules
             return new DiagnosisFinding(DiagnosisKind.ClockSkew, null);
         }
 
+        if (m.ChainChecked && m.ChainNotTimeValid)
+        {
+            return new DiagnosisFinding(DiagnosisKind.ClockSkew, null);
+        }
+
+        if (m.ChainChecked && IssuerUnexpected(m) && (m.Reply != ReplyOutcome.Online || TlsSlowOrFailed(m)))
+        {
+            return new DiagnosisFinding(DiagnosisKind.HttpsIntercepted, null);
+        }
+
+        if (m.ChainChecked && !m.ChainTrusted && m.Reply != ReplyOutcome.Online)
+        {
+            return m.MissingTrustedRoots.Count > 0
+                ? new DiagnosisFinding(DiagnosisKind.CertificateRootMissing, NetworkFixKind.InstallTrustedRoots)
+                : new DiagnosisFinding(DiagnosisKind.SecureConnectionFailed, null);
+        }
+
+        if (m.ChainChecked && m.ChainTrusted && CertificateLookupSlow(m))
+        {
+            return new DiagnosisFinding(DiagnosisKind.CertificateCheckSlow, null);
+        }
+
         if (m.Reply is ReplyOutcome.Timeout or ReplyOutcome.Unreachable
             && (m.Ipv4ConnectFailed || m.Ipv4ConnectMs is { } serverConnect && serverConnect >= SlowThresholdMs)
             && ReferenceMeasured(m))
@@ -127,6 +163,52 @@ public static class NetworkDiagnosisRules
         return GatewayMeasured(m)
             && !GatewayAllLost(m)
             && (GatewayLossPercent(m) >= GatewayLossPercentThreshold || m.GatewayAvgMs is { } avg && avg >= GatewaySlowAvgMs);
+    }
+
+    private static bool TlsSlowOrFailed(NetworkMeasurements m)
+    {
+        return m.TlsOutcome is TlsProbeOutcome.TimedOut or TlsProbeOutcome.Failed
+            || m.TlsHandshakeMs is { } ms && ms >= TlsSlowThresholdMs
+            || m.TlsHandshakeMs is { } total && m.TlsOfflineHandshakeMs is { } offline && total - offline >= SlowThresholdMs;
+    }
+
+    /// <summary>
+    /// 不联网校验时握手很快，而默认方式（会联网查根证书 / 吊销信息）超时或慢了 1.5 秒以上：慢在 Windows 联网查证书上。
+    /// </summary>
+    private static bool CertificateLookupSlow(NetworkMeasurements m)
+    {
+        if (m.TlsOfflineHandshakeMs is not { } offline)
+        {
+            return false;
+        }
+
+        return m.TlsOutcome == TlsProbeOutcome.TimedOut
+            || m.TlsOutcome == TlsProbeOutcome.Completed && m.TlsHandshakeMs is { } handshake && handshake - offline >= SlowThresholdMs;
+    }
+
+    private static bool IssuerUnexpected(NetworkMeasurements m)
+    {
+        return !string.IsNullOrWhiteSpace(m.CertificateIssuer)
+            && !ExpectedIssuerMarkers.Any(marker => m.CertificateIssuer.Contains(marker, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>把 "CN=YE2, O=Let's Encrypt, C=US" 这类主题缩成人能读的名字。</summary>
+    internal static string ShortName(string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            return "unknown";
+        }
+
+        string? Part(string key) => subject.Split(',')
+            .Select(item => item.Trim())
+            .FirstOrDefault(item => item.StartsWith(key + "=", StringComparison.OrdinalIgnoreCase))?[(key.Length + 1)..];
+
+        var cn = Part("CN");
+        var org = Part("O");
+        return cn is not null && org is not null && !cn.Contains(org, StringComparison.OrdinalIgnoreCase)
+            ? $"{org} {cn}"
+            : cn ?? org ?? subject;
     }
 
     private static bool ReferenceMeasured(NetworkMeasurements m) => m.ReferenceConnectFailed || m.ReferenceConnectMs is not null;
@@ -306,6 +388,69 @@ public static class NetworkDiagnosisRules
         }
 
         return new DiagnosticStep(DiagnosticStepId.Proxy, DiagnosticStepStatus.Ok, null, description);
+    }
+
+    private static DiagnosticStep TlsHandshakeStep(NetworkMeasurements m)
+    {
+        switch (m.TlsOutcome)
+        {
+            case TlsProbeOutcome.Completed:
+            {
+                var detail = string.IsNullOrWhiteSpace(m.TlsProtocol) ? "secure connection set up" : m.TlsProtocol!;
+                if (m.TlsOfflineHandshakeMs is { } offline && m.TlsHandshakeMs is { } total && total - offline >= SlowThresholdMs)
+                {
+                    detail += $" · {NetworkDiagnosisReport.FormatMs(total - offline)} of it spent checking the certificate online";
+                }
+
+                var slow = m.TlsHandshakeMs is { } ms && ms >= TlsSlowThresholdMs
+                    || m.TlsHandshakeMs is { } handshake && m.TlsOfflineHandshakeMs is { } offlineMs && handshake - offlineMs >= SlowThresholdMs;
+                return new DiagnosticStep(
+                    DiagnosticStepId.TlsHandshake,
+                    slow ? DiagnosticStepStatus.Slow : DiagnosticStepStatus.Ok,
+                    m.TlsHandshakeMs,
+                    detail);
+            }
+
+            case TlsProbeOutcome.TimedOut:
+                return new DiagnosticStep(DiagnosticStepId.TlsHandshake, DiagnosticStepStatus.Failed, m.TlsHandshakeMs, "the secure handshake did not finish in time");
+            case TlsProbeOutcome.Failed:
+                return new DiagnosticStep(DiagnosticStepId.TlsHandshake, DiagnosticStepStatus.Failed, m.TlsHandshakeMs, string.IsNullOrWhiteSpace(m.TlsError) ? "the secure handshake failed" : m.TlsError!);
+            default:
+                return new DiagnosticStep(DiagnosticStepId.TlsHandshake, DiagnosticStepStatus.Skipped, null, "not checked");
+        }
+    }
+
+    private static DiagnosticStep CertificateTrustStep(NetworkMeasurements m)
+    {
+        if (!m.ChainChecked)
+        {
+            return new DiagnosticStep(DiagnosticStepId.CertificateTrust, DiagnosticStepStatus.Skipped, null, "could not read the server certificate");
+        }
+
+        var issuer = ShortName(m.CertificateIssuer);
+        if (m.ChainNotTimeValid)
+        {
+            return new DiagnosticStep(DiagnosticStepId.CertificateTrust, DiagnosticStepStatus.Failed, null, "the certificate dates do not match this machine's clock");
+        }
+
+        if (IssuerUnexpected(m))
+        {
+            return new DiagnosticStep(
+                DiagnosticStepId.CertificateTrust,
+                DiagnosticStepStatus.Failed,
+                null,
+                $"issued by {issuer}, not by Let's Encrypt · something on this machine or network is re-signing HTTPS");
+        }
+
+        if (m.ChainTrusted)
+        {
+            return new DiagnosticStep(DiagnosticStepId.CertificateTrust, DiagnosticStepStatus.Ok, null, $"{m.ChainSubjects.Count} certificates · issued by {issuer}");
+        }
+
+        var why = m.MissingTrustedRoots.Count > 0
+            ? $"this machine does not trust the root: {string.Join(", ", m.MissingTrustedRoots)}"
+            : m.ChainProblems.Count > 0 ? $"problem: {string.Join(", ", m.ChainProblems)}" : "the certificate chain is not trusted";
+        return new DiagnosticStep(DiagnosticStepId.CertificateTrust, DiagnosticStepStatus.Failed, null, $"{why} · issued by {issuer}");
     }
 
     private static DiagnosticStep SecureReplyStep(NetworkMeasurements m)

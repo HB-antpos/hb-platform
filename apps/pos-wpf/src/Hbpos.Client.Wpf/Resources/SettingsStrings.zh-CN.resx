@@ -529,7 +529,7 @@
   <data name="settings.network.finding.serverUnreachable.message" xml:space="preserve"><value>到服务器的网络被阻断或太慢。请检查防火墙和网络，或换一个网络试试。</value></data>
   <data name="settings.network.fix.publicDns" xml:space="preserve"><value>修复 DNS（改用 1.1.1.1 和 8.8.8.8）</value></data>
   <data name="settings.network.fix.disableProxyAutoDetect" xml:space="preserve"><value>关闭代理自动检测</value></data>
-  <data name="settings.network.fixUnavailable" xml:space="preserve"><value>无法在这里修复：没有找到正在使用的网卡。</value></data>
+  <data name="settings.network.fixUnavailable" xml:space="preserve"><value>无法在这里修复：没有需要修改的内容，或没有找到合适的网卡。</value></data>
   <data name="settings.network.confirm.title" xml:space="preserve"><value>确认修改？</value></data>
   <data name="settings.network.confirm.now" xml:space="preserve"><value>现在</value></data>
   <data name="settings.network.confirm.change" xml:space="preserve"><value>改为</value></data>
@@ -554,4 +554,14 @@
   <data name="settings.network.finding.internetUnreachable.message" xml:space="preserve"><value>路由器本身正常，但连一个知名的公共服务器也很慢或连不上。请确认路由器自己能上网（用同一网络的手机试），重启路由器，或换一个网络。</value></data>
   <data name="settings.network.finding.serverPathBlocked.title" xml:space="preserve"><value>到 POS 服务器的路径被挡或丢包</value></data>
   <data name="settings.network.finding.serverPathBlocked.message" xml:space="preserve"><value>互联网是通的，参照服务器也很快，但这台机器在时限内连不上 POS 服务器。请检查防火墙和杀毒软件对 443 出站的规则、路由器或运营商是否做了过滤，并试试换一个网络。同一网络下别的设备正常，不能排除只对这台机器生效的规则。</value></data>
+  <data name="settings.network.step.tlsHandshake" xml:space="preserve"><value>安全握手（TLS）</value></data>
+  <data name="settings.network.step.certificateTrust" xml:space="preserve"><value>证书信任</value></data>
+  <data name="settings.network.finding.certificateRootMissing.title" xml:space="preserve"><value>这台机器不信任服务器的证书颁发机构</value></data>
+  <data name="settings.network.finding.certificateRootMissing.message" xml:space="preserve"><value>POS 服务器的证书链最终指向 Let's Encrypt 的 ISRG Root X1，而这台机器的受信任根里没有它。Windows 会联网去找，安全连接就卡在这一步。可以在下面一键安装这张根证书：它是 Let's Encrypt 自己的公共根证书，安装前会先用程序内置的指纹校验。</value></data>
+  <data name="settings.network.finding.certificateCheckSlow.title" xml:space="preserve"><value>Windows 检查服务器证书花的时间太长</value></data>
+  <data name="settings.network.finding.certificateCheckSlow.message" xml:space="preserve"><value>安全连接本身很快，但 Windows 要联网查证书或吊销信息，每次花好几秒。请允许这台机器访问 Windows Update 和 Let's Encrypt（lencr.org），或联系网络管理员。</value></data>
+  <data name="settings.network.finding.httpsIntercepted.title" xml:space="preserve"><value>有软件在重新签发安全连接的证书</value></data>
+  <data name="settings.network.finding.httpsIntercepted.message" xml:space="preserve"><value>这台机器收到的服务器证书是由「{0}」签发的，不是 Let's Encrypt。杀毒软件的「HTTPS 扫描 / 网页防护」、代理或防火墙设备正在检查 HTTPS，把连接拖慢或搞坏了。请在杀毒软件里把 hotbargain.vip 和 HB POS 加入 HTTPS 扫描的排除项，或对它们关闭该功能。</value></data>
+  <data name="settings.network.fix.installTrustedRoots" xml:space="preserve"><value>安装缺少的根证书（ISRG Root X1）</value></data>
+  <data name="settings.network.confirm.roots" xml:space="preserve"><value>只安装 Let's Encrypt 自己的公共根证书；安装前会先用程序内置的指纹校验，之后可以用「还原修改」移除。</value></data>
 </root>
