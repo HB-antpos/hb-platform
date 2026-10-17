@@ -62,7 +62,11 @@ public sealed class PosTerminalSuccessCardRuntimeTests(PaymentViewRuntimeStaTest
             Assert.Equal("$65.44", Find<TextBlock>(view, "CompletedSaleChangeDue").Text);
             Assert.Equal("$1234.56", Find<TextBlock>(view, "CompletedSaleTotalPaid").Text);
             AssertInside(view, Find<Border>(view, "PaymentCompletedWarning"), card);
-            AssertInside(view, Find<Button>(view, "PaymentSuccessCardPrintButton"), card);
+            var printButton = Find<Button>(view, "PaymentSuccessCardPrintButton");
+            AssertInside(view, printButton, card);
+            // 点打印后焦点不能停在按钮上，否则扫码枪尾部的 Enter 没被吃掉时会再次触发打印。
+            Assert.False(printButton.Focusable);
+            Assert.False(printButton.IsTabStop);
             AssertInside(view, Find<Button>(view, "PaymentSuccessCardCloseButton"), card);
 
             SaveScreenshot(view, width, (int)layoutSize.Height, culture);
