@@ -3,6 +3,7 @@
 
 import { useAuthStore } from "@/store/auth-store";
 import { SecureStorage } from "@/shared/storage/secure";
+import { useCartStore } from "@/store/cart-store";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import { runPushLogoutHook } from "@/modules/push/push-logout-hook";
 import { readActiveShiftContext } from "@/modules/attendance/location-tracking-control";
@@ -52,7 +53,9 @@ function buildDeps(): SwitchDeps<CurrentUser> {
     },
     // 班中 = 本机存有进行中的班次上下文（上班打卡写入、下班打卡清除）。
     isOnShift: async () => Boolean(await readActiveShiftContext().catch(() => null)),
-    hasPendingWork,
+    // 页面登记的未完成操作 + 购物车还有在途同步（切换会清购物车，在途写入会丢）。
+    hasPendingWork: () =>
+      hasPendingWork() || Object.keys(useCartStore.getState().cartSyncPendingByStore).length > 0,
     refreshWithToken: (refreshToken) => {
       setStage(0);
       return rawRefresh(refreshToken);
@@ -128,13 +131,18 @@ async function loadMenuQuietly() {
 }
 
 /** 包一层界面状态：遮罩开 → 执行 → 成功则等菜单 → 遮罩关，并刷新列表。 */
-async function withSwitchingOverlay<T extends { ok: boolean }>(label: string | null, run: () => Promise<T>): Promise<T> {
+async function withSwitchingOverlay<T extends { ok: boolean }>(
+  label: string | null,
+  run: () => Promise<T>,
+  // 默认成功就拉菜单；退出当前账号回退成普通退出（已登出）时不能再拉。
+  shouldLoadMenu: (result: T) => boolean = (result) => result.ok
+): Promise<T> {
   apiHostCache = await currentApiHost();
   const ui = useAccountSwitchStore.getState();
   ui.setSwitching(true, label);
   try {
     const result = await run();
-    if (result.ok) {
+    if (shouldLoadMenu(result)) {
       await loadMenuQuietly();
       setStage(3);
     }
@@ -176,7 +184,11 @@ export async function signOutCurrent(): Promise<SignOutResult> {
   const next = pickNextUsableEntry(accounts, currentGuid, Date.now(), apiHostCache);
   // 没有可切的下一个账号时就是普通退出（回登录页），不盖「正在切换」遮罩。
   if (!next) return signOutCurrentAccount(buildDeps());
-  return withSwitchingOverlay(null, () => signOutCurrentAccount(buildDeps()));
+  return withSwitchingOverlay(
+    null,
+    () => signOutCurrentAccount(buildDeps()),
+    (result) => result.ok && Boolean(result.switchedTo)
+  );
 }
 
 /** 退出全部：清空已保存账号，再走原来的完整退出。 */

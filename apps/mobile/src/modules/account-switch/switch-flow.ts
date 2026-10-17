@@ -15,6 +15,7 @@ import {
   findEntry,
   normalizeGuid,
   pickNextUsableEntry,
+  sameApiHost,
   withFreshToken,
   type EntrySourceUser,
   type VaultEntry,
@@ -73,6 +74,7 @@ export type SwitchFailure =
   | "networkError" // 网络或服务端错误：稍后重试，令牌没丢
   | "identityMismatch" // 令牌对应的人和保存的不是同一个
   | "vaultFull"
+  | "storageError" // 本机存储读写出错（会话未变，可重试）
   | "activationFailed"; // 激活到一半失败：已回到登录页
 
 export type SwitchResult = { ok: true } | { ok: false; reason: SwitchFailure };
@@ -125,48 +127,65 @@ async function commit<U extends EntrySourceUser>(
   await deps.notifyLeaving().catch(() => undefined);
 
   deps.gate.begin();
-  // 等在途的令牌刷新收尾：刷新会轮转刷新令牌，必须读到「最新那份」再回写，否则保险库里留下的是已作废的旧令牌。
-  await deps.settleTokenRefresh().catch(() => undefined);
-  const current = (await deps.readCurrent()) ?? null;
-  if (
-    !current ||
-    current.sessionKind !== "account" ||
-    normalizeGuid(userGuidOf(current.user)) !== normalizeGuid(userGuidOf(startedWith.user))
-  ) {
-    // 准备期间当前会话已经变了（被登出 / 换人）：不再往下做，避免把别人的令牌写进保险库。
-    deps.gate.end({ sessionChanged: false });
-    return { ok: false, reason: "notAccountSession" };
-  }
-
-  const now = deps.now();
+  // 闸门不放，整个 App 的请求都会挂死：任何异常路径（含 Keychain 读写抛错）都必须经过 releaseGate。
+  let gateOpen = true;
+  const releaseGate = (sessionChanged: boolean) => {
+    if (!gateOpen) return;
+    gateOpen = false;
+    deps.gate.end({ sessionChanged });
+  };
   let revokeOld = leave.kind === "signOut";
-  if (leave.kind === "keep") {
-    const saved = findEntry(await deps.vault.load(), userGuidOf(current.user));
-    if (saved) {
-      // 已保存：把它最新的刷新令牌写回。
-      await deps.vault.update(saved.userGuid, (entry) =>
-        buildEntryFromUser(current.user, current.refreshToken, apiHost, now, entry)
-      );
-    } else if (leave.saveIfUnsaved) {
-      const status = await deps.vault.upsert(buildEntryFromUser(current.user, current.refreshToken, apiHost, now));
-      if (status === "full") {
-        deps.gate.end({ sessionChanged: false });
-        return { ok: false, reason: "vaultFull" };
-      }
-    } else {
-      // 未保存且用户选择不保存：切走后这个会话就没人用了，需要吊销。
-      revokeOld = true;
-    }
-  }
-
+  let current: CurrentSnapshot<U>;
   try {
-    await deps.activate(next);
+    // 等在途的令牌刷新收尾：刷新会轮转刷新令牌，必须读到「最新那份」再回写，否则保险库里留下的是已作废的旧令牌。
+    await deps.settleTokenRefresh().catch(() => undefined);
+    const latest = (await deps.readCurrent()) ?? null;
+    if (
+      !latest ||
+      latest.sessionKind !== "account" ||
+      normalizeGuid(userGuidOf(latest.user)) !== normalizeGuid(userGuidOf(startedWith.user))
+    ) {
+      // 准备期间当前会话已经变了（被登出 / 换人）：不再往下做，避免把别人的令牌写进保险库。
+      releaseGate(false);
+      return { ok: false, reason: "notAccountSession" };
+    }
+    current = latest;
+
+    const now = deps.now();
+    if (leave.kind === "keep") {
+      const saved = findEntry(await deps.vault.load(), userGuidOf(current.user));
+      if (saved) {
+        // 已保存：把它最新的刷新令牌写回。
+        await deps.vault.update(saved.userGuid, (entry) =>
+          buildEntryFromUser(latest.user, latest.refreshToken, apiHost, now, entry)
+        );
+      } else if (leave.saveIfUnsaved) {
+        const status = await deps.vault.upsert(buildEntryFromUser(latest.user, latest.refreshToken, apiHost, now));
+        if (status === "full") {
+          releaseGate(false);
+          return { ok: false, reason: "vaultFull" };
+        }
+      } else {
+        // 未保存且用户选择不保存：切走后这个会话就没人用了，需要吊销。
+        revokeOld = true;
+      }
+    }
+
+    try {
+      await deps.activate(next);
+    } catch {
+      // activate 失败时已自行清场（回登录页），会话确实变了。
+      releaseGate(true);
+      return { ok: false, reason: "activationFailed" };
+    }
+    releaseGate(true);
   } catch {
-    // activate 失败时已自行清场（回登录页），会话确实变了。
-    deps.gate.end({ sessionChanged: true });
-    return { ok: false, reason: "activationFailed" };
+    // 激活之前的本机存储读写出错（如锁屏时 Keychain 不可读）：会话没变，放闸门，让用户重试。
+    releaseGate(false);
+    return { ok: false, reason: "storageError" };
+  } finally {
+    releaseGate(false);
   }
-  deps.gate.end({ sessionChanged: true });
 
   // 善后（激活已成功，下面任何失败都不影响结果）。
   if (revokeOld) void deps.revokeSession(current.refreshToken).catch(() => undefined);
@@ -344,8 +363,11 @@ export async function forgetSavedAccount<U extends EntrySourceUser>(
   const target = findEntry(entries, userGuid);
   if (!target) return;
   await deps.vault.remove(target.userGuid);
-  // 它保存的会话不会再被使用，顺手让服务器作废（尽力而为）。
-  void deps.revokeSession(target.refreshToken).catch(() => undefined);
+  // 它保存的会话不会再被使用，顺手让服务器作废（尽力而为）；
+  // 只向签发它的服务器发：用户改过服务器地址后，别把令牌发给另一台服务器。
+  if (sameApiHost(target.apiHost, deps.apiHost())) {
+    void deps.revokeSession(target.refreshToken).catch(() => undefined);
+  }
 }
 
 export type SignOutResult = { ok: true; switchedTo: VaultEntry | null } | { ok: false; reason: SwitchFailure };

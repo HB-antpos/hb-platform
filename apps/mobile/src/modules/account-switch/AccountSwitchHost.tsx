@@ -6,7 +6,7 @@ import { ReloginSheet } from "./ReloginSheet";
 import { SwitchingOverlay } from "./SwitchingOverlay";
 import { loadSavedAccounts } from "./account-switch-service";
 import { useAccountSwitchStore } from "./account-switch-store";
-import { useAccountSwitchActions } from "./use-account-switch-actions";
+import { RELOGIN_CANCELLED, useAccountSwitchActions } from "./use-account-switch-actions";
 
 /**
  * 多账号的全局弹层宿主：挂在外壳布局最上层（盖住底部导航栏），统一承载
@@ -76,9 +76,10 @@ export function AccountSwitchHost() {
           apiHost={apiHost}
           onClose={closeRelogin}
           onSubmit={async (input) => {
-            const message = await actions.submitCredentials(input);
-            if (!message) closeRelogin();
-            return message;
+            const result = await actions.submitRelogin(input);
+            if (result === RELOGIN_CANCELLED) return null; // 取消：面板保持打开，不提示
+            if (result === null) closeRelogin();
+            return result;
           }}
         />
       ) : null}

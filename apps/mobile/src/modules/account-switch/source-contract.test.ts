@@ -31,6 +31,12 @@ test("请求层：切换期间暂停请求，旧账号的 401 / 刷新不能登�
   assert.match(client, /isStaleSessionGeneration\(refreshGeneration\)/);
   assert.match(client, /code === "ACCOUNT_SESSION_CHANGED"[\s\S]{0,200}return Promise\.reject\(refreshErr\)/);
   assert.match(client, /export async function waitForTokenRefreshIdle/);
+  // 刷新结果只看会话代号：激活前槽位仍属于旧账号，切换流程会等本次刷新收尾后回写最新令牌
+  const refreshGuard = client.indexOf("isStaleSessionGeneration(refreshGeneration)");
+  assert.ok(refreshGuard > 0);
+  assert.doesNotMatch(client.slice(refreshGuard - 80, refreshGuard), /isAccountSwitchInProgress/);
+  // 200 + 「未登录」信封也要认旧会话：旧账号的迟到响应不能把新账号登出
+  assert.match(client, /const stamp = \(response\.config[\s\S]{0,160}isStaleSessionGeneration\(stamp\)/);
 });
 
 test("auth-store：激活账号会话先清旧账号的内存态与收银条码记录，再写新令牌", () => {

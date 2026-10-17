@@ -121,6 +121,11 @@ export function describeEntry(entry: VaultEntry, now: number, currentApiHost: st
   return "ok";
 }
 
+/** 两个 API 主机是否相同（忽略大小写与结尾斜杠）。 */
+export function sameApiHost(a: string, b: string): boolean {
+  return normalizeHost(a) === normalizeHost(b);
+}
+
 function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/\/+$/, "");
 }

@@ -421,3 +421,34 @@ test("切换：等在途刷新后读到更新的令牌 → 回写的是最新那
   assert.deepEqual(await switchToAccount(h.deps, "B"), { ok: true });
   assert.equal(findEntry(await h.vault.load(), "A")?.refreshToken, "rt-A-after-refresh");
 });
+
+test("切换：激活前本机存储读写抛错 → 闸门必须放开（否则整个 App 请求挂死），会话未变", async () => {
+  const h = makeHarness({ current: "A" });
+  await seed(h, [saved("A"), saved("B")]);
+  // 回写当前账号令牌时 Keychain 抛错（如锁屏）
+  const originalUpdate = h.deps.vault.update;
+  let calls = 0;
+  h.deps.vault.update = async (...args) => {
+    calls += 1;
+    // 第 1 次是「目标新令牌落盘」（放行），第 2 次才是闸门内的「回写当前账号」
+    if (calls === 2) throw new Error("keychain locked");
+    return originalUpdate(...args);
+  };
+  assert.deepEqual(await switchToAccount(h.deps, "B"), { ok: false, reason: "storageError" });
+  assert.deepEqual(h.state.gateEnds, [false]);
+  assert.equal(h.state.activated.length, 0);
+  assert.equal(h.state.current?.user.userGUID, "A");
+});
+
+test("移除已保存账号：只向签发它的服务器吊销（改过服务器地址就不发）", async () => {
+  const same = makeHarness({ current: "A" });
+  await seed(same, [saved("B")]);
+  await forgetSavedAccount(same.deps, "B");
+  assert.deepEqual(same.state.revoked, ["rt-B"]);
+
+  const other = makeHarness({ current: "A" });
+  await seed(other, [saved("B", { apiHost: "http://192.168.1.9:5002/api" })]);
+  await forgetSavedAccount(other.deps, "B");
+  assert.deepEqual(other.state.revoked, []);
+  assert.equal(findEntry(await other.vault.load(), "B"), undefined);
+});

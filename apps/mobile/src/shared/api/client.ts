@@ -388,6 +388,12 @@ apiClient.interceptors.response.use(
       isUnauthenticatedApiPayload(response.data) &&
       !isAuthenticationRequest(response.config as InternalAxiosRequestConfig)
     ) {
+      // 切换前发出的旧账号请求在切换期间 / 之后收到「未登录」信封：不能因此把新账号登出。
+      const stamp = (response.config as InternalAxiosRequestConfig & { _sessionGeneration?: number })
+        ._sessionGeneration;
+      if (isAccountSwitchInProgress() || isStaleSessionGeneration(stamp)) {
+        throw createAccountSessionChangedError();
+      }
       const message = extractApiErrorMessage(response.data, "Unauthorized");
       if (shouldSkipAuthRecovery(response.config as InternalAxiosRequestConfig)) {
         throw new Error(message);
@@ -506,8 +512,10 @@ apiClient.interceptors.response.use(
             refreshToken: rt,
           });
           const refreshed = res.data.data ?? res.data;
-          // 刷新期间账号被切换了：这份令牌属于旧账号，丢弃，绝不能写进新账号的槽位。
-          if (isAccountSwitchInProgress() || isStaleSessionGeneration(refreshGeneration)) {
+          // 刷新期间账号已经切换完成：这份令牌属于旧账号，丢弃，绝不能写进新账号的槽位。
+          // 只看会话代号、不看「切换进行中」：激活新会话之前槽位仍属于这个账号，且账号切换流程会等本次刷新收尾后
+          // 再回写最新令牌——此时丢弃会让保险库里留下已被服务器轮转作废的旧令牌。
+          if (isStaleSessionGeneration(refreshGeneration)) {
             throw createAccountSessionChangedError();
           }
           accessToken = refreshed.accessToken;

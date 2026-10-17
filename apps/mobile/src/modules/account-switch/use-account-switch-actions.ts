@@ -29,6 +29,9 @@ interface Options {
   onNeedsRelogin: (entry: VaultEntry) => void;
 }
 
+/** 重新登录时用户在确认框里点了取消。 */
+export const RELOGIN_CANCELLED = "relogin-cancelled" as const;
+
 export function useAccountSwitchActions({ onNeedsRelogin }: Options) {
   const { t } = useAppTranslation(["accountSwitch", "login"]);
   const router = useRouter();
@@ -194,6 +197,30 @@ export function useAccountSwitchActions({ onNeedsRelogin }: Options) {
     [failureMessage, goToDefaultRoute, showBlocked, t]
   );
 
+  /**
+   * 重新登录（保存的登录失效后输密码）：当前账号没保存时，登录成功会让它退出，所以先确认；
+   * 返回 RELOGIN_CANCELLED 表示用户取消，面板保持打开。
+   */
+  const submitRelogin = useCallback(
+    (input: AddAccountInput): Promise<string | null | typeof RELOGIN_CANCELLED> => {
+      if (currentSaved) return submitCredentials(input);
+      return new Promise((resolve) => {
+        Alert.alert(t("confirmUnsaved.title"), t("confirmUnsaved.message", { name: currentName }), [
+          { text: t("confirmUnsaved.cancel"), style: "cancel", onPress: () => resolve(RELOGIN_CANCELLED) },
+          {
+            text: t("confirmUnsaved.discardAndSwitch"),
+            onPress: () => void submitCredentials({ ...input, saveCurrent: false }).then(resolve),
+          },
+          {
+            text: t("confirmUnsaved.saveAndSwitch"),
+            onPress: () => void submitCredentials({ ...input, saveCurrent: true }).then(resolve),
+          },
+        ], { cancelable: true, onDismiss: () => resolve(RELOGIN_CANCELLED) });
+      });
+    },
+    [currentName, currentSaved, submitCredentials, t]
+  );
+
   const finishSignOut = useCallback(
     (result: Awaited<ReturnType<typeof signOutCurrent>>) => {
       if (!result.ok) {
@@ -237,6 +264,7 @@ export function useAccountSwitchActions({ onNeedsRelogin }: Options) {
     saveCurrent,
     requestRemove,
     submitCredentials,
+    submitRelogin,
     requestSignOutCurrent,
     requestSignOutAll,
     // 设置页「退出登录」在列表里还有别的账号时用：先问退出当前还是全部。
