@@ -44,6 +44,18 @@ public interface IDeviceApiClient
 public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
 {
     internal const string ActivationRecoveryOnlyHeader = "X-HBPOS-Activation-Recovery-Only";
+
+    /// <summary>
+    /// HttpClient 整体超时：注册 / 开通码 / 取门店这类人工触发的一次性操作需要容忍慢线路（DNS、IPv6 回退、代理检测可吃掉数秒）。
+    /// 3 秒会让开通码预检与兑换在慢线路上必然超时，兑换还可能已在服务端被消耗而客户端没收到结果。
+    /// </summary>
+    internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// verify 在启动与注册页 5 秒轮询里调用，失败会回退本地缓存，所以保持较短上限，避免断网（黑洞）时拖慢启动。
+    /// </summary>
+    internal static readonly TimeSpan VerifyTimeout = TimeSpan.FromSeconds(8);
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<StoreSelectionItem>> GetStoresAsync(CancellationToken cancellationToken = default)
@@ -80,7 +92,8 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
             "api/v1/devices/verify",
             HttpMethod.Post,
             token => httpClient.PostAsJsonAsync("api/v1/devices/verify", request, JsonOptions, token),
-            cancellationToken);
+            cancellationToken,
+            timeout: VerifyTimeout);
     }
 
     public async Task<DeviceReregisterResponse> ReregisterAsync(
@@ -161,15 +174,23 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
         HttpMethod method,
         Func<CancellationToken, Task<HttpResponseMessage>> send,
         CancellationToken cancellationToken,
-        string? operation = null)
+        string? operation = null,
+        TimeSpan? timeout = null)
     {
         var stopwatch = Stopwatch.StartNew();
         int? statusCode = null;
+        // 单次请求上限：只用链接令牌收紧发送与读取，下面的"调用方取消"判断仍看原始令牌，超时照旧算联网失败。
+        using var limited = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (timeout is { } limit)
+        {
+            limited.CancelAfter(limit);
+        }
+
         try
         {
-            using var response = await send(cancellationToken);
+            using var response = await send(limited.Token);
             statusCode = (int)response.StatusCode;
-            var result = await ReadApiResultAsync<T>(response, cancellationToken);
+            var result = await ReadApiResultAsync<T>(response, limited.Token);
             LogCompleted(path, method, statusCode.Value, stopwatch.ElapsedMilliseconds, operation, result);
             return result;
         }
@@ -243,7 +264,7 @@ public sealed class DeviceApiClient(HttpClient httpClient) : IDeviceApiClient
                 statusCode ??= unavailable.StatusCode is { } unavailableStatus ? (int)unavailableStatus : (int?)null;
                 break;
             case OperationCanceledException:
-                // 调用方未取消却收到取消：HttpClient 3 秒超时。
+                // 调用方未取消却收到取消：HttpClient 整体超时或 verify 的单次上限。
                 reason = "timeout";
                 break;
             case HttpRequestException:
