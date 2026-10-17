@@ -15,6 +15,12 @@ public sealed class ConnectivityApiClient(HttpClient httpClient) : IConnectivity
 {
     private const string HealthPath = "api/v1/health";
 
+    /// <summary>
+    /// 健康探测超时。3 秒会把"能连上但首个请求要几秒"的机器永久判成 Offline（登录只读本地缓存，新设备无缓存就登不进去）；
+    /// 探测约 15 秒一次、顺序执行，放宽到 8 秒只会让离线判定最多晚几秒。
+    /// </summary>
+    internal static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(8);
+
     public async Task<bool> CheckOnlineAsync(CancellationToken cancellationToken = default)
     {
         int? statusCode = null;

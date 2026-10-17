@@ -1025,6 +1025,12 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
 
     private string ResolveActivationError(Exception exception)
     {
+        if (exception is OperationCanceledException)
+        {
+            // 调用方取消已在上层 catch 过滤；走到这里的是请求超时，原始消息是 HttpClient 英文技术文案，不适合直接给收银员看。
+            return T("deviceActivation.error.timeout", "The server took too long to respond. Check the network and try again.");
+        }
+
         if (exception is not CatalogApiException apiException)
         {
             return exception.Message;

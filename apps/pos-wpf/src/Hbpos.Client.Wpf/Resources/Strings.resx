@@ -847,6 +847,7 @@
   <data name="deviceActivation.error.notAvailable" xml:space="preserve"><value>This activation code is invalid, expired, revoked, or already used.</value></data>
   <data name="deviceActivation.error.platformMismatch" xml:space="preserve"><value>This activation code is not valid for Windows POS.</value></data>
   <data name="deviceActivation.error.failed" xml:space="preserve"><value>Device activation failed. Check the code and connection, then try again.</value></data>
+  <data name="deviceActivation.error.timeout" xml:space="preserve"><value>The server took too long to respond. Check the network and try again.</value></data>
   <data name="returns.status.default" xml:space="preserve"><value>Scan order number to start a receipt return.</value></data>
   <data name="returns.status.noReceiptMode" xml:space="preserve"><value>No-receipt return enabled. Scan a product to add it.</value></data>
   <data name="returns.status.receiptMode" xml:space="preserve"><value>Receipt return mode enabled. Scan an order number.</value></data>

@@ -71,7 +71,7 @@ public sealed class ApiServerSettingsServiceTests
         Assert.Equal(
             "https://api.example.com/store/api/v1/health",
             capturedRequest?.RequestUri?.AbsoluteUri);
-        Assert.Equal(TimeSpan.FromSeconds(5), ApiServerSettingsService.ConnectionTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), ApiServerSettingsService.ConnectionTimeout);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class ApiServerSettingsServiceTests
         var result = await service.TestConnectionAsync(
                 "https://api.example.com",
                 CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(8));
+            .WaitAsync(TimeSpan.FromSeconds(15));
 
         Assert.False(result);
     }
