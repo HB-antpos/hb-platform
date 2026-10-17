@@ -53,6 +53,8 @@ export const P = {
   Warehouse: {
     Manage: 'Warehouse.Manage',
     ManageProducts: 'Warehouse.ManageProducts',
+    // 撤销未完成的价格变更任务（按商品覆盖所有分店）；后端按别名让 Warehouse.ManageProducts / Warehouse.Manage 持有者自动具备，反向不成立。
+    CancelPriceUpdateTasks: 'Warehouse.CancelPriceUpdateTasks',
     ManageCategories: 'Warehouse.ManageCategories',
     ManageLocations: 'Warehouse.ManageLocations',
     ManageOrders: 'Warehouse.ManageOrders',

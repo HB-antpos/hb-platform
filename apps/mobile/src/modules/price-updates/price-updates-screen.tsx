@@ -42,7 +42,9 @@ import { PERMISSIONS } from "@/shared/utils/access";
 import { useAuthStore } from "@/store/auth-store";
 import {
   applyPriceUpdateTasks,
+  cancelPriceUpdateTasksForProduct,
   completePriceUpdateLabels,
+  getPendingStoreCountForProduct,
   getPriceUpdateTasks,
   keepStorePriceForTasks,
 } from "./api";
@@ -54,6 +56,8 @@ import {
   type PriceUpdateRunState,
 } from "./batch-runner";
 import { buildPriceUpdateLabelJob } from "./label-print";
+import { CancelTasksDialog } from "./cancel-tasks-dialog";
+import { canCancelPriceTasks, distinctProductCodes, normalizeCancelNote, runCancelByProduct } from "./cancel";
 import { PriceLabelPrintBusyError, runPriceLabelPrintExclusive } from "./price-label-print-lock";
 import { groupCompletedTasksByDay, mergeUniqueTasks, summarizeSelection } from "./presentation";
 import { parsePriceUpdatesParams } from "./navigation";
@@ -129,6 +133,9 @@ export function PriceUpdatesScreen() {
   const [busy, setBusy] = useState(false);
   // 保持本店价的确认对象：单条卡片与多选批量共用同一个确认弹窗。
   const [keepTargets, setKeepTargets] = useState<StorePriceUpdateTask[]>([]);
+  const [cancelTargets, setCancelTargets] = useState<StorePriceUpdateTask[]>([]);
+  // 单个商品撤销时，确认框里「共 N 家分店」的数量；取不到为 null。
+  const [cancelStoreCount, setCancelStoreCount] = useState<number | null>(null);
   const [printerSheetVisible, setPrinterSheetVisible] = useState(false);
   const [runState, setRunState] = useState<PriceUpdateRunState | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -147,6 +154,15 @@ export function PriceUpdatesScreen() {
   const canOperate =
     sessionStores.some((store) => store.storeCode === storeCode) &&
     (isDeviceMode || access.hasPermission(PERMISSIONS.StoreProducts.PriceUpdates));
+  // 撤销未完成任务：账号会话 + Warehouse.CancelPriceUpdateTasks（旧后端阶段认 Warehouse.ManageProducts），与后端 cancel 接口一致。
+  // 撤销按商品覆盖所有分店、不按分店裁剪，所以不要求该分店在自己的可操作范围内，和 Web 一致。
+  const canCancel =
+    Boolean(storeCode) &&
+    canCancelPriceTasks({
+      isDeviceMode,
+      hasCancelPermission: access.hasPermission(PERMISSIONS.Warehouse.CancelPriceUpdateTasks),
+      hasManageProducts: access.hasPermission(PERMISSIONS.Warehouse.ManageProducts),
+    });
   const canSwitchStore = !isDeviceMode && stores.length > 1;
 
   const clearSelection = useCallback(() => {
@@ -448,6 +464,46 @@ export function PriceUpdatesScreen() {
     });
   }, [assertBatchSucceeded, clearSelection, describeBatchResult, getErrorMessage, keepTargets, refreshAll, runExclusiveAction, storeCode, t]);
 
+  // 撤销未完成任务：按商品覆盖所有分店，只取消提醒、不改价格、不可恢复；
+  // 已被处理 / 不存在的任务后端逐条跳过，按结果分类提示。多个商品分次串行提交（后端每次只收一个商品）。
+  const handleConfirmCancel = useCallback(
+    (note: string) => {
+      const productCodes = distinctProductCodes(cancelTargets);
+      if (productCodes.length === 0) return;
+      void runExclusiveAction(async () => {
+        try {
+          const trimmedNote = normalizeCancelNote(note);
+          const outcome = await runCancelByProduct({
+            productCodes,
+            cancelOne: (productCode) => cancelPriceUpdateTasksForProduct(productCode, trimmedNote),
+          });
+          switch (outcome.kind) {
+            case "success":
+              setSnackbar(t("messages.cancelSuccess", { count: outcome.cancelled }));
+              break;
+            case "partial":
+              setSnackbar(t("messages.cancelPartial", { cancelled: outcome.cancelled, skipped: outcome.skipped }));
+              break;
+            case "interrupted":
+              setSnackbar(t("messages.cancelInterrupted", {
+                cancelled: outcome.cancelled,
+                notSubmitted: outcome.notSubmitted,
+              }));
+              break;
+            default:
+              setSnackbar(t("messages.cancelNothing"));
+          }
+          clearSelection();
+        } catch (error) {
+          setSnackbar(getErrorMessage(error, "messages.cancelFailed"));
+        }
+        setCancelTargets([]);
+        await refreshAll();
+      });
+    },
+    [cancelTargets, clearSelection, getErrorMessage, refreshAll, runExclusiveAction, t]
+  );
+
   // 多选「标记已换」：只对待换标签任务生效（需改价任务必须先改价，后端也会拒绝）。
   const handleBatchMarkReplaced = useCallback(
     (targets: StorePriceUpdateTask[]) =>
@@ -593,6 +649,18 @@ export function PriceUpdatesScreen() {
     [startRun]
   );
   const handleKeepPress = useCallback((task: StorePriceUpdateTask) => setKeepTargets([task]), []);
+  const handleCancelPress = useCallback((task: StorePriceUpdateTask) => {
+    setCancelStoreCount(null);
+    setCancelTargets([task]);
+    // 先弹框再补数量：查询慢或失败都不挡操作，框里先显示不带数量的说明。
+    void getPendingStoreCountForProduct(task.productCode).then((count) => {
+      setCancelStoreCount((current) => (current === null ? count : current));
+    });
+  }, []);
+  const handleCancelSelectedPress = useCallback((tasks: StorePriceUpdateTask[]) => {
+    setCancelStoreCount(null);
+    setCancelTargets(tasks);
+  }, []);
   const handleMarkReplacedPress = useCallback(
     (task: StorePriceUpdateTask) => void handleMarkReplaced(task),
     [handleMarkReplaced]
@@ -620,7 +688,7 @@ export function PriceUpdatesScreen() {
       };
     });
   }, [priceTasks.manageableStoreCodes, priceTasks.rows, sessionStores, storeCode]);
-  const showMultiSelect = canOperate && tab === "pending" && tasks.length > 0;
+  const showMultiSelect = (canOperate || canCancel) && tab === "pending" && tasks.length > 0;
 
   const renderRow = useCallback(
     ({ item }: { item: ListRow }) => {
@@ -645,6 +713,7 @@ export function PriceUpdatesScreen() {
           task={item.task}
           now={now}
           canOperate={canOperate}
+          canCancel={canCancel}
           selecting={selecting}
           selected={selectedIds.has(item.task.id)}
           busy={busy}
@@ -655,13 +724,16 @@ export function PriceUpdatesScreen() {
           onViewProduct={handleViewProduct}
           onMarkReplaced={handleMarkReplacedPress}
           onPrintLabel={handleApplyAndPrint}
+          onCancelTask={handleCancelPress}
         />
       );
     },
     [
       busy,
+      canCancel,
       canOperate,
       handleApplyAndPrint,
+      handleCancelPress,
       handleKeepPress,
       handleApplyOnly,
       handleMarkReplacedPress,
@@ -944,7 +1016,7 @@ export function PriceUpdatesScreen() {
       {lockBanner}
       <View style={styles.flex}>{body}</View>
 
-      {selecting && canOperate ? (
+      {selecting && (canOperate || canCancel) ? (
         <Surface style={styles.footer} elevation={3}>
           <View style={styles.footerSummaryRow}>
             <Text variant="titleSmall" style={styles.footerSummary}>
@@ -957,11 +1029,11 @@ export function PriceUpdatesScreen() {
               })}
             </Text>
           </View>
-          {hqSyncEnabled && selectionSummary.applyCount > 0 ? (
+          {canOperate && hqSyncEnabled && selectionSummary.applyCount > 0 ? (
             <Text variant="bodySmall" style={styles.secondary}>{t("selection.hqSyncHint")}</Text>
           ) : null}
           {/* 按选中任务的类型给按钮：需改价 → 仅更新；待换标签 → 标记已换；不常用的「保持本店价」收进「⋯」防误触。 */}
-          {selectionSummary.applyCount > 0 || selectionSummary.labelOnlyCount > 0 ? (
+          {canOperate && (selectionSummary.applyCount > 0 || selectionSummary.labelOnlyCount > 0) ? (
             <View style={styles.footerSecondaryButtons}>
               {selectionSummary.applyCount > 0 ? (
                 <Button
@@ -1010,16 +1082,30 @@ export function PriceUpdatesScreen() {
               ) : null}
             </View>
           ) : null}
-          <Button
-            mode="contained"
-            icon="printer-outline"
-            disabled={busy || selectionSummary.printCount === 0}
-            onPress={() => void startRun(selectedTasks, "applyAndPrint")}
-          >
-            {selectionSummary.applyCount > 0
-              ? t("selection.applyAndPrint", { count: selectionSummary.printCount })
-              : t("selection.printLabels", { count: selectionSummary.printCount })}
-          </Button>
+          {canOperate ? (
+            <Button
+              mode="contained"
+              icon="printer-outline"
+              disabled={busy || selectionSummary.printCount === 0}
+              onPress={() => void startRun(selectedTasks, "applyAndPrint")}
+            >
+              {selectionSummary.applyCount > 0
+                ? t("selection.applyAndPrint", { count: selectionSummary.printCount })
+                : t("selection.printLabels", { count: selectionSummary.printCount })}
+            </Button>
+          ) : null}
+          {/* 撤销不可恢复：放在主操作下面、用文字按钮 + 警示色，避免和「更新并打印」误触；点了还有确认框。 */}
+          {canCancel ? (
+            <Button
+              mode={canOperate ? "text" : "outlined"}
+              icon="close-circle-outline"
+              textColor={HB_COLORS.danger}
+              disabled={busy || selectedIds.size === 0}
+              onPress={() => handleCancelSelectedPress(selectedTasks)}
+            >
+              {t("selection.cancelSelected", { count: selectedIds.size })}
+            </Button>
+          ) : null}
         </Surface>
       ) : null}
 
@@ -1055,6 +1141,14 @@ export function PriceUpdatesScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      <CancelTasksDialog
+        targets={cancelTargets}
+        storeCount={cancelStoreCount}
+        busy={busy}
+        onConfirm={handleConfirmCancel}
+        onDismiss={() => setCancelTargets([])}
+      />
 
       <StorePickerModal
         visible={storePickerVisible}

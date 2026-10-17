@@ -211,6 +211,49 @@ export function normalizePriceUpdateBatchResult(payload: unknown): PriceUpdateBa
   };
 }
 
+/**
+ * 撤销接口（POST store-price-update-tasks/cancel）的响应：外层是 ApiResponse 信封，结果在 data 里。
+ * 统一折成批量结果形状，复用分块执行器与逐条提示：撤销成功数 = successCount，被跳过的（已处理/不存在）= failedCount。
+ */
+export function normalizeCancelPriceUpdateTasksResult(payload: unknown): PriceUpdateBatchResult {
+  const root = asRecord(payload);
+  const inner = pick(root, "data");
+  const data = inner && typeof inner === "object" ? asRecord(inner) : root;
+  const rawItems = pick(data, "items");
+  const items = Array.isArray(rawItems) ? rawItems.map(normalizeBatchResultItem) : [];
+  return {
+    items,
+    successCount: toCount(pick(data, "cancelledCount")),
+    failedCount: toCount(pick(data, "skippedCount")),
+    hqSyncEnabled: false,
+    hqSyncSubmittedCount: 0,
+  };
+}
+
+/**
+ * 按商品聚合接口（GET store-price-update-tasks/by-product）→ 指定商品当前有未完成任务的分店数。
+ * 行里 stores[].state：LabelOnly / PriceUpdate = 还有未完成任务；Completed / Skipped 不算。
+ * 关键字是模糊匹配，可能带回别的商品，所以必须按商品编码精确挑出那一行；找不到返回 null（不是 0）。
+ */
+export function normalizePendingStoreCount(payload: unknown, productCode: string): number | null {
+  const root = asRecord(payload);
+  const inner = pick(root, "data");
+  const data = inner && typeof inner === "object" ? asRecord(inner) : root;
+  const items = pick(data, "items");
+  if (!Array.isArray(items)) return null;
+  const wanted = productCode.trim().toLowerCase();
+  const row = items
+    .map(asRecord)
+    .find((item) => (toText(pick(item, "productCode")) ?? "").trim().toLowerCase() === wanted);
+  if (!row) return null;
+  const stores = pick(row, "stores");
+  if (!Array.isArray(stores)) return null;
+  return stores.filter((store) => {
+    const state = toText(pick(asRecord(store), "state"));
+    return state === "LabelOnly" || state === "PriceUpdate";
+  }).length;
+}
+
 function normalizeSyncTargetStore(payload: unknown): SyncTargetStore {
   const data = asRecord(payload);
   const storeCode = toText(pick(data, "storeCode")) ?? "";
