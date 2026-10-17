@@ -1,0 +1,107 @@
+{
+  "entry": {
+    "switch": "切换账号",
+    "settingsNote": "切换列表里有 {{count}} 个已保存的账号。切换后会重新加载权限与菜单。"
+  },
+  "sheet": {
+    "title": "切换账号",
+    "subtitle": "列表里只有勾选过「保存」的账号 · 最多 {{max}} 个",
+    "close": "关闭",
+    "current": "当前",
+    "unsaved": "未保存",
+    "save": "保存",
+    "needsRelogin": "需重新登录",
+    "enterPassword": "输入密码",
+    "lastUsed": "上次使用 {{when}}",
+    "expiredMeta": "{{days}} 天未使用，登录已过期",
+    "rejectedMeta": "登录已失效，需重新输入密码",
+    "otherHostMeta": "来自其他服务器，需重新输入密码",
+    "addTitle": "添加账号",
+    "addSubtitle": "用另一个用户名和密码登录；默认不保存",
+    "unsavedHint": "没保存的账号，切走或退出后要重新输入密码。",
+    "signOutCurrent": "退出当前账号",
+    "signOutAll": "退出全部",
+    "rowHint": "点一下切换，长按可从列表移除"
+  },
+  "when": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "daysAgo": "{{days}} 天前"
+  },
+  "remove": {
+    "title": "从列表移除？",
+    "message": "移除后，{{name}} 要重新输入密码才能再次切换。",
+    "action": "移除",
+    "cancel": "取消"
+  },
+  "signOut": {
+    "currentTitle": "退出 {{name}}？",
+    "currentMessage": "会通知服务器作废这个登录，并从切换列表中移除；随后自动切到列表里的下一个账号，没有就回到登录页。",
+    "currentAction": "退出",
+    "allTitle": "退出全部账号？",
+    "allMessage": "会清空切换列表，并退出当前账号，回到登录页。",
+    "allAction": "全部退出",
+    "cancel": "取消",
+    "settingsTitle": "退出登录",
+    "settingsMessage": "这台手机的切换列表里还有 {{count}} 个已保存的账号。"
+  },
+  "blocked": {
+    "onShiftTitle": "班中不能切换账号",
+    "onShiftMessage": "请先下班后再切换。",
+    "busyTitle": "暂时不能切换",
+    "busyMessage": "请先完成当前操作。",
+    "ok": "知道了"
+  },
+  "confirmUnsaved": {
+    "title": "切换账号？",
+    "message": "{{name}}没有保存到切换列表，切换后会退出，之后要重新输入密码才能登录。",
+    "saveAndSwitch": "保存并切换",
+    "discardAndSwitch": "不保存，切换",
+    "cancel": "取消"
+  },
+  "add": {
+    "title": "添加账号",
+    "currentAs": "当前仍登录：{{name}}",
+    "back": "返回",
+    "intro": "登录成功后会切换到新账号。",
+    "username": "用户名",
+    "password": "密码",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
+    "forgot": "忘记密码？登录页的“邮箱验证码重置”照常可用。",
+    "saveTitle": "保存到切换列表",
+    "saveHelper": "勾选后可在「切换账号」里直接切换；不勾选则只登录这一次，切走或退出后要重新输入密码。",
+    "unsavedWarning": "{{name}}没有保存到切换列表，登录新账号后会退出，之后要重新输入密码。",
+    "listFull": "切换列表已满（最多 {{max}} 个），请先移除一个，或取消勾选只登录这一次。",
+    "submit": "登录并切换"
+  },
+  "relogin": {
+    "title": "重新登录 {{name}}",
+    "subtitleExpired": "保存的登录已过期（超过 7 天未使用）",
+    "subtitleRejected": "保存的登录已失效",
+    "username": "用户名",
+    "password": "密码",
+    "submit": "登录并切换",
+    "notice": "连不上服务器时不会删除这个账号，只提示“稍后重试”。只有服务器明确返回「登录无效 / 账号被限制」才标记为需重新登录。"
+  },
+  "overlay": {
+    "title": "正在切换到 {{name}}",
+    "titleGeneric": "正在切换账号",
+    "stepVerify": "校验登录有效",
+    "stepClear": "停止并清理当前账号的本机数据（缓存 / 购物车 / 拣货人）",
+    "stepLoad": "读取权限与菜单",
+    "stepFinish": "重新注册推送，进入工作台",
+    "hint": "切换期间屏蔽所有操作，约 1–3 秒"
+  },
+  "failures": {
+    "needsRelogin": "{{name}}的登录已失效，请重新输入密码。",
+    "networkError": "连不上服务器，请稍后重试。",
+    "identityMismatch": "这个账号保存的登录信息和服务器不一致，请重新登录。",
+    "vaultFull": "切换列表已满（最多 {{max}} 个），请先移除一个再保存。",
+    "activationFailed": "切换没有完成，请重新登录。",
+    "sameAccount": "这已经是当前账号。",
+    "unknownAccount": "列表里没有这个账号，请重新添加。",
+    "notAccountSession": "当前登录方式不支持切换账号。",
+    "generic": "切换失败，请重试。"
+  }
+}

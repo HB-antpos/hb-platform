@@ -76,6 +76,9 @@ import {
 } from "@/modules/settings/settings-summary";
 import { IdentityCard, SectionBlock, SettingsRow, StatusDotLabel, SummaryPill, ValueRow } from "@/modules/settings/ui";
 import { HoldTimeSlider } from "@/modules/floating-language/HoldTimeSlider";
+import { AddAccountView, useAccountSwitchActions, useAccountSwitchStore } from "@/modules/account-switch";
+import { signOutAll, signOutCurrent } from "@/modules/account-switch/account-switch-service";
+import { normalizeGuid } from "@/modules/account-switch/vault";
 import { isRequiredLocationError } from "@/modules/attendance/required-location";
 import {
   buildAppUpdateInfoRows,
@@ -407,15 +410,26 @@ export default function Settings() {
   // 「更多设置」是同一个设置路由的另一种视图（?view=more）：这样诊断、服务器设置等弹层的状态与处理函数都留在本组件里，
   // 手势返回 / 安卓返回键也自然回到设置首页。
   const { view: viewParam } = useLocalSearchParams<{ view?: string | string[] }>();
-  const isMoreView = (Array.isArray(viewParam) ? viewParam[0] : viewParam) === "more";
+  const viewName = Array.isArray(viewParam) ? viewParam[0] : viewParam;
+  const isMoreView = viewName === "more";
+  // 「添加账号」同样是设置路由的另一种视图（?view=add-account），不新增路由。
+  const isAddAccountView = viewName === "add-account";
   const [dataRightsExpanded, setDataRightsExpanded] = useState(false);
-  const { t, language } = useAppTranslation(["settings", "common", "productQuery"]);
+  const { t, language } = useAppTranslation(["settings", "common", "productQuery", "accountSwitch"]);
   const checkMobileOtaUpdate = useMobileOtaManualCheck();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const logout = useAuthStore((state) => state.logout);
   const loginDeviceAccount = useAuthStore((state) => state.loginDeviceAccount);
   const sessionKind = useAuthStore((state) => state.sessionKind);
+  // 多账号：只有个人账号会话开放；弹层（切换器 / 重新登录 / 遮罩）由外壳布局里的 AccountSwitchHost 承载。
+  const accountSwitchEnabled = isAuthenticated && Boolean(user) && sessionKind === "account";
+  const openAccountSwitcher = useAccountSwitchStore((state) => state.openSwitcher);
+  const openAccountRelogin = useAccountSwitchStore((state) => state.openRelogin);
+  const accountSwitch = useAccountSwitchActions({ onNeedsRelogin: openAccountRelogin });
+  const otherSavedAccountCount = accountSwitch.accounts.filter(
+    (entry) => normalizeGuid(entry.userGuid) !== normalizeGuid(user?.userGUID)
+  ).length;
   // 语言悬浮按钮：本机偏好，默认开启；iOS 审核会话不提供（按钮本身在审核态也不显示）。
   const floatingLanguageEnabled = useFloatingLanguageStore((state) => state.enabled);
   const setFloatingLanguageEnabled = useFloatingLanguageStore((state) => state.setEnabled);
@@ -768,6 +782,27 @@ export default function Settings() {
   };
 
   const handleLogout = () => {
+    if (accountSwitchEnabled && otherSavedAccountCount > 0) {
+      // 切换列表里还有别的账号：问清楚退出当前（并切到下一个）还是全部退出。
+      Alert.alert(
+        t("accountSwitch:signOut.settingsTitle"),
+        t("accountSwitch:signOut.settingsMessage", { count: otherSavedAccountCount }),
+        [
+          { text: t("common:actions.cancel"), style: "cancel" },
+          {
+            text: t("accountSwitch:signOut.currentAction"),
+            style: "destructive",
+            onPress: () => void signOutCurrent().then(accountSwitch.finishSignOut),
+          },
+          {
+            text: t("accountSwitch:signOut.allAction"),
+            style: "destructive",
+            onPress: () => void signOutAll().then(() => router.replace("/(auth)/login")),
+          },
+        ]
+      );
+      return;
+    }
     Alert.alert(t("dialogs.logoutTitle"), t("dialogs.logoutMessage"), [
       { text: t("common:actions.cancel"), style: "cancel" },
       {
@@ -776,8 +811,14 @@ export default function Settings() {
         onPress: async () => {
           setIsSubmitting(true);
           try {
-            await logout();
-            router.replace("/(auth)/login");
+            if (accountSwitchEnabled) {
+              // 个人账号：同时把它从切换列表里移除（列表里没有别的账号可切，走完整退出）；
+              // 结果统一交给 finishSignOut：成功回登录页，被拦截 / 失败则提示、不误退出。
+              accountSwitch.finishSignOut(await signOutCurrent());
+            } else {
+              await logout();
+              router.replace("/(auth)/login");
+            }
           } finally {
             setIsSubmitting(false);
           }
@@ -1149,6 +1190,18 @@ export default function Settings() {
     }
   };
 
+  if (isAddAccountView && accountSwitchEnabled) {
+    return (
+      <AddAccountView
+        currentName={accountSwitch.currentName}
+        currentSaved={accountSwitch.currentSaved}
+        savedCount={accountSwitch.accounts.length}
+        onBack={closeMoreSettings}
+        onSubmit={accountSwitch.submitCredentials}
+      />
+    );
+  }
+
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
       {isMoreView ? (
@@ -1299,6 +1352,8 @@ export default function Settings() {
                       }
                     : undefined
                 }
+                switchLabel={accountSwitchEnabled ? t("accountSwitch:entry.switch") : undefined}
+                onPressSwitch={accountSwitchEnabled ? openAccountSwitcher : undefined}
                 trailing={
                   showPersonalCode && user ? (
                     <CashierBarcodeCard
@@ -1326,6 +1381,14 @@ export default function Settings() {
                 }
               />
             )}
+            {accountSwitchEnabled && otherSavedAccountCount > 0 ? (
+              <View style={styles.accountNote} testID="settings-account-switch-note">
+                <Icon source="account-multiple-outline" size={16} color={HB_COLORS.action} />
+                <Text variant="bodySmall" style={styles.accountNoteText}>
+                  {t("accountSwitch:entry.settingsNote", { count: accountSwitch.accounts.length })}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <SectionBlock
@@ -2033,6 +2096,16 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
+  accountNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+  },
+  accountNoteText: { flex: 1, color: HB_COLORS.textSecondary },
   container: {
     flex: 1,
     backgroundColor: HB_COLORS.background,
