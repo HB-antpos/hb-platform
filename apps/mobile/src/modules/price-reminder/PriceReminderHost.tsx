@@ -26,6 +26,8 @@ import { buildPriceReminderViewModel } from "./view-model";
 interface PriceReminderHostProps {
   /** iOS 审核模式等不应出现提醒的场合。 */
   suppressed: boolean;
+  /** 管理员账号：完全不弹提醒（仍可从角标和工作台进入「价格和标签」）。 */
+  isAdmin: boolean;
   isDeviceMode: boolean;
 }
 
@@ -34,10 +36,10 @@ interface PriceReminderHostProps {
  *
  * 什么时候弹：前台期间每分钟检查一次，距上次弹出满 1 小时、且名下分店还有未完成任务才弹；
  * App 回到前台时先刷新汇总再检查。点「稍后」或点遮罩只是关掉，1 小时后再提醒；
- * 全部处理完（待办为 0）就不再弹。正在打印、停在「价格和标签」页时不弹。
+ * 全部处理完（待办为 0）就不再弹。正在打印、停在「价格和标签」页时不弹；管理员账号完全不弹。
  * 「上次弹出时间」存在本机：店长账号按账号，PDA 按设备 + 分店。
  */
-export function PriceReminderHost({ suppressed, isDeviceMode }: PriceReminderHostProps) {
+export function PriceReminderHost({ suppressed, isAdmin, isDeviceMode }: PriceReminderHostProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { priceTasks: overview, refreshPriceTasks } = useAppNavigationAccess();
@@ -65,8 +67,8 @@ export function PriceReminderHost({ suppressed, isDeviceMode }: PriceReminderHos
   }, [deviceSession?.hardwareId, deviceSession?.storeCode, isDeviceMode, userGuid]);
 
   // 定时器和 AppState 回调里要读「最新」的值，不能被闭包锁住旧值。
-  const latest = useRef({ overview, pathname, suppressed, storageKey, open });
-  latest.current = { overview, pathname, suppressed, storageKey, open };
+  const latest = useRef({ overview, pathname, suppressed, isAdmin, storageKey, open });
+  latest.current = { overview, pathname, suppressed, isAdmin, storageKey, open };
   // undefined = 还没从本机读过；null = 读过且从没弹过。
   const lastShownRef = useRef<number | null | undefined>(undefined);
   const lastShownKeyRef = useRef<string | null>(null);
@@ -77,7 +79,14 @@ export function PriceReminderHost({ suppressed, isDeviceMode }: PriceReminderHos
     if (evaluatingRef.current) return;
     evaluatingRef.current = true;
     try {
-      const { overview: current, pathname: path, suppressed: isSuppressed, storageKey: key, open: isOpen } = latest.current;
+      const {
+        overview: current,
+        pathname: path,
+        suppressed: isSuppressed,
+        isAdmin: isAdminAccount,
+        storageKey: key,
+        open: isOpen,
+      } = latest.current;
       if (!key || isOpen) return;
 
       if (lastShownKeyRef.current !== key) {
@@ -105,6 +114,7 @@ export function PriceReminderHost({ suppressed, isDeviceMode }: PriceReminderHos
         appActive: AppState.currentState === "active",
         onPriceUpdatesScreen: isPriceUpdatesPath(path),
         suppressed: isSuppressed,
+        isAdmin: isAdminAccount,
         busy: isPriceLabelPrintBusy(),
       });
       if (!shouldShow) return;
@@ -120,7 +130,7 @@ export function PriceReminderHost({ suppressed, isDeviceMode }: PriceReminderHos
   // 汇总刚就绪 / 待办变化 / 离开价格和标签页时检查一次。
   useEffect(() => {
     void evaluate();
-  }, [evaluate, overview.ready, overview.totalPending, pathname, storageKey, suppressed]);
+  }, [evaluate, overview.ready, overview.totalPending, pathname, storageKey, suppressed, isAdmin]);
 
   // 前台期间每分钟检查一次是否到点。
   useEffect(() => {

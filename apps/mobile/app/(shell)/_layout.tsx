@@ -658,6 +658,7 @@ export default function ShellLayout() {
         {/* 每小时提醒：放在导航上下文里，随时读到最新的待办与超期数。iOS 审核态不提醒。 */}
         <PriceReminderHost
           suppressed={isIosReviewSession || iosReviewOfflineGuardActive}
+          isAdmin={isAdmin}
           isDeviceMode={isDeviceMode}
         />
         {/* 多账号：账号切换器 / 重新登录面板 / 切换中遮罩；放在最后盖住底部导航栏，切换期间挡住所有操作。 */}

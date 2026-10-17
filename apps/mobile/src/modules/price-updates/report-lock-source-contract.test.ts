@@ -28,6 +28,7 @@ assert.match(layout, /usePriceTaskOverview\(/);
 assert.match(layout, /priceTasks: priceTaskOverview/);
 assert.match(layout, /refreshPriceTasks/);
 assert.match(layout, /<PriceReminderHost/);
+assert.match(layout, /<PriceReminderHost[\s\S]*?isAdmin=\{isAdmin\}/, "管理员账号完全不弹提醒：布局要把 isAdmin 传给宿主");
 assert.doesNotMatch(layout, /getPriceUpdatePendingCount/, "角标不再只按当前分店查数量，改用按分店汇总");
 assert.match(layout, /pendingPriceUpdateCount: priceTaskOverview\.visiblePending/, "角标 = 名下全部可见分店合计（含只关联的）");
 assert.doesNotMatch(layout, /pendingPriceUpdateCount: priceTaskOverview\.totalPending/, "角标不能再只算管理分店");
@@ -47,6 +48,7 @@ assert.match(host, /shouldShowPriceReminder\(/);
 assert.match(host, /PRICE_REMINDER_TICK_MS/);
 assert.match(host, /AppState\.addEventListener\("change"/, "回到前台先刷新汇总再检查");
 assert.match(host, /isPriceLabelPrintBusy\(\)/, "打印中不弹");
+assert.match(host, /isAdmin: isAdminAccount/, "判定时带上管理员标志（定时器里读最新值）");
 assert.match(host, /AppAsyncStorage\.setString\(/, "弹出时间记在本机");
 
 // ---- 弹窗只列管理分店；分店条仍用全部可见分店的 rows ----
