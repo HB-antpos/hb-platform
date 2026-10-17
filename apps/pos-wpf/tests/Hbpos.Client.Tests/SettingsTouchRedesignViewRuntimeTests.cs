@@ -31,6 +31,8 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
         var (vm, view, localization) = await CreateAsync(culture, vm => vm.SelectPaymentTerminalCommand);
         try
         {
+            // 支付终端页拆成三个分页，进入时停在「付款方式」；Square 设置在 Square 分页。
+            vm.IsSquareSubTabSelected = true;
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
             var radios = Segment(view, "SquareEnvironmentSegment");
             Assert.Equal(2, radios.Count);
@@ -106,9 +108,9 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
         {
             PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
             Assert.True(vm.IsReceiptPrinterSelected);
+            // 「测试打印」在固定页头，三个分页都能点；整页保存按钮只在没开自动保存时出现（这里未开启）。
             AssertTouchButton(view, vm.TestReceiptPrinterCommand, 56);
             AssertTouchButton(view, vm.SaveReceiptPrinterCommand, 56);
-            AssertTouchButton(view, vm.LoadReceiptProfileCommand, 52);
             var toggle = Assert.IsType<ToggleButton>(view.FindName("PrintBankReceiptTextToggle"));
             Assert.True(toggle.ActualHeight >= 48);
             // 「再次扫码确认」卡片里的两个开关（无交易开钱箱、退货）同样要满足触控高度，且默认关闭。
@@ -119,6 +121,13 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
                 Assert.False(rescanToggle.IsChecked);
             }
             Save(view, $"receipt-{culture}");
+
+            // 「从分店资料载入 / 立即同步」在「门店信息」分页。
+            vm.IsReceiptStoreSubTabSelected = true;
+            PaymentViewRuntimeStaTestHost.Realize(view, Width, FullHeight);
+            AssertTouchButton(view, vm.LoadReceiptProfileCommand, 52);
+            Assert.Equal(Visibility.Collapsed, PrintBankReceiptCardVisibility(toggle));
+            AssertTouchButton(view, vm.TestReceiptPrinterCommand, 56);
         }
         finally
         {
@@ -153,6 +162,20 @@ public sealed class SettingsTouchRedesignViewRuntimeTests(PaymentViewRuntimeStaT
             SecondaryColor = MaterialDesignColors.SecondaryColor.Amber
         });
         return (vm, view, localization);
+    }
+
+    // 切到其它分页后，「打印机与选项」分页的卡片整块折叠（开关本身的 Visibility 不变，看最近的折叠祖先）。
+    private static Visibility PrintBankReceiptCardVisibility(DependencyObject element)
+    {
+        for (var current = VisualTreeHelper.GetParent(element); current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is UIElement { Visibility: Visibility.Collapsed })
+            {
+                return Visibility.Collapsed;
+            }
+        }
+
+        return Visibility.Visible;
     }
 
     private static List<RadioButton> Segment(DependencyObject root, string groupName) =>

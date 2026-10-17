@@ -328,7 +328,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         IReceiptProfileSyncService? receiptProfileSyncService = null,
         IMobileAppDownloadService? mobileAppDownloadService = null,
         ISystemRestartSettingsStore? systemRestartSettingsStore = null,
-        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null)
+        Func<IPostDailyCloseRestartCoordinator?>? restartCoordinatorProvider = null,
+        bool autoSaveSettings = false,
+        Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null)
     {
         _setupService = setupService;
         _systemRestartSettingsStore = systemRestartSettingsStore;
@@ -457,7 +459,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         UseLinklyCloudTerminalCommand = new AsyncRelayCommand<LinklyCloudTerminalManagementItem>(UseLinklyCloudTerminalAsync, CanAssignLinklyCloudTerminal);
         ChangeLinklyCloudTerminalAssignmentCommand = new AsyncRelayCommand<LinklyCloudTerminalManagementItem>(ChangeLinklyCloudTerminalAssignmentAsync, CanAssignLinklyCloudTerminal);
         UnassignLinklyCloudTerminalCommand = new AsyncRelayCommand<LinklyCloudTerminalManagementItem>(UnassignLinklyCloudTerminalAsync, CanUnassignLinklyCloudTerminal);
-        BackCommand = new RelayCommand(ReturnToPos, () => _returnToPos is not null);
+        InitializeAutoSave(autoSaveSettings, autoSaveDelay);
+        // 返回收银前先确认没有保存失败 / 未保存的修改（自动保存关闭时直接返回，与原来一致）。
+        BackCommand = new AsyncRelayCommand(ReturnToPosAsync, () => _returnToPos is not null);
         ResetLinklyModePriority(CardTerminalConfiguration.Default.LinklyConnectionModePriority);
         RefreshLocalizedMessages();
     }
@@ -482,6 +486,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
         ReleaseCatalogSyncStatus();
         ReleaseReceiptProfileSync();
+        ReleaseAutoSave();
     }
 
     public ObservableCollection<SquareLocationOption> SquareLocations { get; } = [];
@@ -810,6 +815,23 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public CardTerminalEnvironment SelectedEnvironment => SelectedLinklyEnvironment;
 
     public async Task LoadAsync()
+    {
+        // 重新加载前先把排着的自动保存写完，避免刚输入、还在防抖中的内容被回显覆盖。
+        await FlushAutoSaveBeforeReloadAsync();
+
+        // 加载回显的赋值不是用户修改，期间不触发自动保存 / 草稿；加载完成后各分区回到「已保存」。
+        using (SuppressAutoSave())
+        {
+            await LoadCoreAsync();
+        }
+
+        ResetPaymentTerminalDraftBaselines();
+        _autoSave.ResetAll();
+        RefreshServerAddressDraftState();
+        ResetCategoryAfterLoad();
+    }
+
+    private async Task LoadCoreAsync()
     {
         // 设置页与设备注册页共享同一个单例；重复进入时由共享 VM 保留等待重启状态。
         _apiServerSettings?.Load();
@@ -2681,6 +2703,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
                 item.ConnectionStatus = FormatPersistedLinklyHealthStatus(item.Terminal.LastHealthStatus);
             }
         }
+        RaisePageHeaderProperties();
+        RaiseAutoSaveProperties();
         RefreshLocalizedMessages();
     }
 
@@ -2704,6 +2728,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsDeviceRegistrationSelected));
         OnPropertyChanged(nameof(IsRemoteMaintenanceSelected));
         OnPropertyChanged(nameof(IsMobileAppDownloadSelected));
+        ResetSubTabsForCategory();
+        RaisePageHeaderProperties();
+        RaiseAutoSaveProperties();
     }
 
     private async Task LoadReceiptPrinterSettingsAsync()
@@ -2713,6 +2740,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
     private void ApplyReceiptPrinterSettings(ReceiptPrinterSettings settings)
     {
+        // 回显存储内容（加载 / 显式保存后）不是用户修改，不触发自动保存。
+        using var suppression = SuppressAutoSave();
         ReceiptPrinterPortText = settings.PrinterPort;
         ReceiptBrandNameText = settings.BrandName;
         ReceiptStoreNameText = settings.StoreName;
@@ -2765,6 +2794,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsSquareDeviceCodesSupported));
         OnPropertyChanged(nameof(IsSquareDeviceCodesUnsupported));
         OnPropertyChanged(nameof(SquareDeviceCodesUnavailableText));
+        RefreshPaymentTerminalDraftStates();
     }
 
     partial void OnIsLinklySandboxChanged(bool value)
@@ -2796,6 +2826,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedLinklyEnvironment));
         OnPropertyChanged(nameof(SelectedEnvironment));
         RaiseLinklyTestPresentationProperties();
+        RefreshPaymentTerminalDraftStates();
     }
 
     partial void OnHasSavedSquareTokenChanged(bool value)
@@ -2833,6 +2864,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         {
             ClearLinklyCloudTerminalDirectory();
         }
+        RefreshPaymentTerminalDraftStates();
     }
 
     private void SelectLinklyPriorityMode(LinklyModePriorityItem? item)
@@ -3009,6 +3041,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
         ResetSquareDeviceCodes();
         RaiseCommandStates();
+        RefreshPaymentTerminalDraftStates();
     }
 
     partial void OnSelectedSquareDeviceChanged(SquareDeviceOption? value)
@@ -3026,6 +3059,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         RaiseCommandStates();
+        RefreshPaymentTerminalDraftStates();
     }
 
     partial void OnSelectedSquareDeviceCodeChanged(SquareDeviceCodeOption? value)
@@ -3046,6 +3080,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         if (_syncingLinkly) return;
         SyncLinklyInputs();
         ResetLinklyConnectionTest();
+        RefreshPaymentTerminalDraftStates();
     }
 
     partial void OnLinklyPortTextChanged(string value)
@@ -3053,6 +3088,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         if (_syncingLinkly) return;
         SyncLinklyInputs();
         ResetLinklyConnectionTest();
+        RefreshPaymentTerminalDraftStates();
     }
 
     /// <summary>本地 IP 模式是否正在使用 Linkly 官方推荐的本机 EFT-Client 地址（127.0.0.1:2011）。</summary>
@@ -3074,6 +3110,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         if (_syncingLinkly) return;
         SyncLinklyInputs();
         ResetLinklyConnectionTest();
+        RefreshPaymentTerminalDraftStates();
     }
 
     partial void OnLinklyConnectionSucceededChanged(bool value)
@@ -3151,6 +3188,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SelectedSquareDeviceCode = _squareState.SelectedDeviceCode;
         _syncingSquare = false;
         RaiseActivePaymentProviderProperties();
+        OnPaymentTerminalStateSynced();
     }
 
     private void SyncSquareInputs()
@@ -3194,6 +3232,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _syncingLinkly = false;
         RaiseActivePaymentProviderProperties();
         RaiseLinklyTestPresentationProperties();
+        OnPaymentTerminalStateSynced();
     }
 
     private void SyncLinklyInputs()

@@ -20,7 +20,7 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
     [InlineData(1366, 688, "zh-CN")]
     [InlineData(1024, 768, "en-US")]
     [InlineData(1024, 768, "zh-CN")]
-    public Task Payment_method_switches_are_visible_touch_sized_and_save_independently(
+    public Task Payment_method_switches_are_visible_touch_sized_and_save_automatically(
         int width, int height, string culture) => host.RunAsync(async _ =>
     {
         var localization = new LocalizationService();
@@ -32,8 +32,10 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
         var apiSettings = new ApiServerSettingsViewModel(
             new ApiServerSettingsService(http, () => "https://example.test/", _ => throw new NotSupportedException()),
             localization);
+        // 与生产装配一致：开启自动保存，开关改了直接保存，不再有「保存付款方式」按钮。
         using var vm = new SettingsViewModel(setup, localization,
-            apiServerSettings: apiSettings, paymentMethodSettingsService: methods);
+            apiServerSettings: apiSettings, paymentMethodSettingsService: methods,
+            autoSaveSettings: true, autoSaveDelay: (_, _) => Task.CompletedTask);
         await vm.LoadAsync();
         var setupCallsAfterLoad = ((UnavailableTerminalSetup)setup).Calls;
         await ((CommunityToolkit.Mvvm.Input.IAsyncRelayCommand)vm.SelectPaymentTerminalCommand).ExecuteAsync(null);
@@ -55,7 +57,7 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
             AssertInBounds(view, manual, width, height);
             AssertInBounds(view, voucher, width, height);
             AssertInBounds(view, orderList, width, height);
-            AssertInBounds(view, save, width, height);
+            Assert.Equal(Visibility.Collapsed, save.Visibility);
             Assert.False(manual.IsChecked);
             Assert.False(voucher.IsChecked);
             // 付款页订单列表默认开启，且不受环境锁影响始终可切换。
@@ -63,10 +65,6 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
             Assert.True(manual.IsEnabled);
             Assert.True(voucher.IsEnabled);
             Assert.True(orderList.IsEnabled);
-            Assert.True(save.IsEnabled);
-            var saveText = Assert.IsType<TextBlock>(save.Content);
-            Assert.Equal(localization.T("settings.payment.methods.save"), saveText.Text);
-            Assert.Equal(Colors.White, Assert.IsType<SolidColorBrush>(saveText.Foreground).Color);
 
             var output = Environment.GetEnvironmentVariable("HBPOS_PAYMENT_SETTINGS_SCREENSHOTS");
             if (!string.IsNullOrWhiteSpace(output))
@@ -87,10 +85,11 @@ public sealed class SettingsPaymentMethodsViewRuntimeTests(PaymentViewRuntimeSta
             Assert.True(vm.UseManualCard);
             Assert.True(vm.VoucherEnabled);
             Assert.False(vm.ShowOrderList);
-            Assert.Equal(new PaymentMethodSettings(), methods.Current);
-            await vm.SavePaymentMethodsCommand.ExecuteAsync(null);
-            Assert.Equal(new PaymentMethodSettings(true, true, false), methods.Current);
-            Assert.Equal(1, methods.SaveCalls);
+            // 每拨一次开关都整份写入一次本机配置，最后一次写入的是三个开关的最终状态。
+            await WaitUntilAsync(
+                () => methods.Current == new PaymentMethodSettings(true, true, false) && vm.PaymentMethodsSaveState == "Saved",
+                diagnostics: () => $"current={methods.Current} state={vm.PaymentMethodsSaveState} calls={methods.SaveCalls}");
+            Assert.InRange(methods.SaveCalls, 1, 3);
             // 修改付款方式只保存本地开关，不追加终端测试或配置写入。
             Assert.Equal(setupCallsAfterLoad, ((UnavailableTerminalSetup)setup).Calls);
         }

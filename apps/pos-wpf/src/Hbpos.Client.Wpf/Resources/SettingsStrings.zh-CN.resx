@@ -570,4 +570,34 @@
   <data name="settings.network.finding.serverPathLossy.message" xml:space="preserve"><value>到 POS 服务器的新连接有时卡住或失败，而同一台机器连参照服务器每次都正常。问题出在通往服务器的路径上（运营商或沿途某一段）。请运行「pathping -n hotbargain.vip」看从哪一跳开始丢包，试试换一个网络，并把丢包位置告诉运营商。连接建好之后 POS 会一直复用，所以卡顿主要出现在需要重新建立连接的时候。</value></data>
   <data name="settings.network.finding.connectionBurstLimited.title" xml:space="preserve"><value>同时建立多个连接会失败</value></data>
   <data name="settings.network.finding.connectionBurstLimited.message" xml:space="preserve"><value>一个一个地连没问题，同时连几个就卡住或失败。路由器或防火墙在限制这台机器同时建立新连接的数量。请检查路由器的连接数限制、「DoS / SYN 洪水防护」设置，以及杀毒软件里的网络攻击防护。</value></data>
+  <data name="settings.autosave.page.saved" xml:space="preserve"><value>修改已自动保存</value></data>
+  <data name="settings.autosave.page.saving" xml:space="preserve"><value>正在保存…</value></data>
+  <data name="settings.autosave.page.unsaved" xml:space="preserve"><value>{0} 项未保存</value></data>
+  <data name="settings.autosave.page.retry" xml:space="preserve"><value>重试</value></data>
+  <data name="settings.autosave.section.saving" xml:space="preserve"><value>正在保存…</value></data>
+  <data name="settings.autosave.section.failed" xml:space="preserve"><value>未保存</value></data>
+  <data name="settings.autosave.section.draft" xml:space="preserve"><value>已修改，尚未生效</value></data>
+  <data name="settings.autosave.section.restartPrompt" xml:space="preserve"><value>日结后提醒重启</value></data>
+  <data name="settings.autosave.section.paymentMethods" xml:space="preserve"><value>付款方式</value></data>
+  <data name="settings.autosave.section.square" xml:space="preserve"><value>Square</value></data>
+  <data name="settings.autosave.section.linkly" xml:space="preserve"><value>ANZ Linkly</value></data>
+  <data name="settings.autosave.section.receiptHardware" xml:space="preserve"><value>打印机与选项</value></data>
+  <data name="settings.autosave.section.receiptStore" xml:space="preserve"><value>门店信息</value></data>
+  <data name="settings.autosave.section.receiptTerms" xml:space="preserve"><value>小票条款</value></data>
+  <data name="settings.autosave.section.serverAddress" xml:space="preserve"><value>API 服务器地址</value></data>
+  <data name="settings.autosave.leave.title" xml:space="preserve"><value>有 {0} 项修改没有保存成功</value></data>
+  <data name="settings.autosave.leave.message" xml:space="preserve"><value>现在离开，下面这些修改不会生效。</value></data>
+  <data name="settings.autosave.leave.failed" xml:space="preserve"><value>保存失败：{0}</value></data>
+  <data name="settings.autosave.leave.failedNoReason" xml:space="preserve"><value>保存失败</value></data>
+  <data name="settings.autosave.leave.draft" xml:space="preserve"><value>已修改但未生效，需要在该页点按钮应用</value></data>
+  <data name="settings.autosave.leave.saving" xml:space="preserve"><value>仍在保存</value></data>
+  <data name="settings.autosave.leave.retry" xml:space="preserve"><value>重试保存</value></data>
+  <data name="settings.autosave.leave.discard" xml:space="preserve"><value>放弃修改并离开</value></data>
+  <data name="settings.autosave.leave.stay" xml:space="preserve"><value>留在本页</value></data>
+  <data name="settings.autosave.hint" xml:space="preserve"><value>修改后自动保存</value></data>
+  <data name="settings.page.deviceRegistration.description" xml:space="preserve"><value>本机注册的门店与设备，以及连接的服务器。</value></data>
+  <data name="settings.subtab.paymentMethods" xml:space="preserve"><value>付款方式</value></data>
+  <data name="settings.subtab.receiptHardware" xml:space="preserve"><value>打印机与选项</value></data>
+  <data name="settings.subtab.receiptStore" xml:space="preserve"><value>门店信息</value></data>
+  <data name="settings.subtab.receiptTerms" xml:space="preserve"><value>小票条款</value></data>
 </root>
