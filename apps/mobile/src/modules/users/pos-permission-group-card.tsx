@@ -1,50 +1,27 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Icon, Text } from "react-native-paper";
+import { PeopleTag } from "@/modules/people/ui";
+import { PosPermissionCheckbox } from "@/modules/users/pos-permission-checkbox";
+import { usePosPermissionTranslation } from "@/modules/users/pos-permission-i18n";
+import { POS_PERMISSION_COLORS } from "@/modules/users/pos-permission-sheet";
 import {
-  buildPosDiscountMatrix,
   getNextPosPermissionGroupChecked,
-  getPosPermissionGroupSummary,
   getPosPermissionSelectionState,
   hasPosPermissionEntryGap,
   type PosPermissionDisplayGroup,
   type PosPermissionDisplayItem,
-  type PosPermissionSelectionState,
 } from "@/modules/users/pos-terminal-permission-presentation";
-import { POS_PERMISSION_COLORS } from "@/modules/users/pos-permission-sheet";
-import { useAppTranslation } from "@/shared/i18n/use-app-translation";
-import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { formatPosGroupSummary } from "@/modules/users/pos-terminal-permissions-format";
+import {
+  buildPosDiscountGrid,
+  buildPosGroupSummary,
+  getPosPermissionItemLabel,
+  groupHasEnabledHighRisk,
+} from "@/modules/users/pos-terminal-permissions-view";
+import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 
-const CHECKBOX_ICONS: Record<PosPermissionSelectionState, string> = {
-  all: "checkbox-marked",
-  partial: "minus-box",
-  none: "checkbox-blank-outline",
-};
-
-/** 纯展示的勾选框图标；交互由外层 Pressable 承担，避免嵌套可点击控件。 */
-function CheckboxGlyph({
-  state,
-  disabled,
-}: {
-  state: PosPermissionSelectionState;
-  disabled?: boolean;
-}) {
-  const color = disabled
-    ? POS_PERMISSION_COLORS.disabledText
-    : state === "none"
-      ? HB_COLORS.outline
-      : HB_COLORS.brand;
-  return <Icon source={CHECKBOX_ICONS[state]} size={24} color={color} />;
-}
-
-export function PosPermissionHighRiskPill({ label }: { label: string }) {
-  return (
-    <View style={styles.riskPill}>
-      <Text style={styles.riskPillText}>{label}</Text>
-    </View>
-  );
-}
-
+/** 「本次改动」蓝点：分组名后、矩阵格与逐项行里都用同一个。 */
 export function PosPermissionChangeDot({ style }: { style?: object }) {
   return <View style={[styles.changeDot, style]} />;
 }
@@ -58,11 +35,18 @@ interface PosPermissionGroupCardProps {
   changedCodeSet: ReadonlySet<string>;
   expanded: boolean;
   disabled: boolean;
+  /** 卡片内第一组不画上分隔线。 */
+  first?: boolean;
   onToggleExpanded: (group: PosPermissionDisplayGroup) => void;
   onToggleCode: (code: string) => void;
   onSetGroupChecked: (codes: string[], checked: boolean) => void;
 }
 
+/**
+ * 收银权限的一个分组：一行（分组勾选框 + 名称 + 摘要 + 已开/总数 + 展开箭头），
+ * 展开后折扣组是「单行 / 整单 × 档位」矩阵，其余组是逐项勾选。
+ * 组内容器（白底圆角）由页面提供，这里只负责行与展开区。
+ */
 function PosPermissionGroupCardComponent({
   group,
   groupLabel,
@@ -71,51 +55,61 @@ function PosPermissionGroupCardComponent({
   changedCodeSet,
   expanded,
   disabled,
+  first = false,
   onToggleExpanded,
   onToggleCode,
   onSetGroupChecked,
 }: PosPermissionGroupCardProps) {
-  const { t } = useAppTranslation(["userManagement", "common"]);
-  const fullCodes = fullGroup.items.map((item) => item.code);
+  const { t, translate, labels } = usePosPermissionTranslation();
+  const fullCodes = useMemo(() => fullGroup.items.map((item) => item.code), [fullGroup]);
   const selectionState = getPosPermissionSelectionState(fullCodes, selectedCodeSet);
-  const summary = getPosPermissionGroupSummary(fullGroup, selectedCodeSet);
+  const selectedCount = fullCodes.filter((code) => selectedCodeSet.has(code)).length;
   const entryGap = hasPosPermissionEntryGap(fullGroup, selectedCodeSet);
   const groupHasChanges = fullCodes.some((code) => changedCodeSet.has(code));
-  const subtitle =
-    summary.selectedCount === 0
-      ? t("posPermissions.group.notEnabled")
-      : summary.remainingCount > 0
-        ? t("posPermissions.group.previewMore", {
-            names: summary.previewNames.join("、"),
-            value: summary.selectedCount,
-          })
-        : summary.previewNames.join("、");
+  const hasHighRisk = groupHasEnabledHighRisk(fullGroup, selectedCodeSet);
+  const summary = useMemo(
+    () => formatPosGroupSummary(buildPosGroupSummary(fullGroup, selectedCodeSet), translate),
+    [fullGroup, selectedCodeSet, translate]
+  );
+  const grid = useMemo(
+    () =>
+      group.key === "discount" && expanded
+        ? buildPosDiscountGrid(group.items, selectedCodeSet, changedCodeSet)
+        : null,
+    [changedCodeSet, expanded, group.items, group.key, selectedCodeSet]
+  );
+
+  const buildAccessibilityLabel = (item: PosPermissionDisplayItem, changed: boolean) =>
+    [
+      getPosPermissionItemLabel(item, labels),
+      item.highRisk ? t("badges.highRisk") : null,
+      changed ? t("badges.changed") : null,
+    ]
+      .filter(Boolean)
+      .join("，");
 
   const renderItemRow = (item: PosPermissionDisplayItem) => {
     const checked = selectedCodeSet.has(item.code);
     const changed = changedCodeSet.has(item.code);
     // 入口没开时，组内其他项在 POS 上用不到：只做视觉提示，不改勾选。
     const dimmed = entryGap && !item.isEntry;
-    const accessibilityLabel = [
-      item.name,
-      item.highRisk ? t("posPermissions.badges.highRisk") : null,
-      changed ? t("posPermissions.badges.changed") : null,
-    ]
-      .filter(Boolean)
-      .join("，");
 
     return (
       <View key={item.code}>
         <Pressable
           accessibilityRole="checkbox"
           accessibilityState={{ checked, disabled }}
-          accessibilityLabel={accessibilityLabel}
+          accessibilityLabel={buildAccessibilityLabel(item, changed)}
           accessibilityHint={item.description || undefined}
           disabled={disabled}
           onPress={() => onToggleCode(item.code)}
           style={({ pressed }) => [styles.itemRow, pressed && styles.pressed]}
         >
-          <View style={styles.dotSlot}>{changed ? <PosPermissionChangeDot /> : null}</View>
+          <PosPermissionCheckbox
+            state={checked ? "all" : "none"}
+            tone={item.highRisk ? "danger" : "default"}
+            disabled={disabled || dimmed}
+          />
           <Text
             style={[
               styles.itemName,
@@ -126,75 +120,79 @@ function PosPermissionGroupCardComponent({
           >
             {item.name}
           </Text>
-          {item.highRisk ? (
-            <PosPermissionHighRiskPill label={t("posPermissions.badges.highRisk")} />
-          ) : null}
-          <CheckboxGlyph state={checked ? "all" : "none"} disabled={disabled || dimmed} />
+          {item.highRisk ? <PeopleTag label={t("badges.highRisk")} tone="red" /> : null}
+          <View style={styles.dotSlot}>{changed ? <PosPermissionChangeDot /> : null}</View>
         </Pressable>
         {item.isEntry && entryGap ? (
           <View style={styles.entryHint} accessibilityRole="alert">
             <Icon source="alert-outline" size={16} color={HB_COLORS.warning} />
-            <Text style={styles.entryHintText}>
-              {t("posPermissions.entryHint", { name: item.name })}
-            </Text>
+            <Text style={styles.entryHintText}>{t("entryHint", { name: item.name })}</Text>
           </View>
         ) : null}
       </View>
     );
   };
 
-  const renderDiscountMatrix = () =>
-    buildPosDiscountMatrix(group.items).map((row) => (
-      <View key={row.scope} style={styles.matrixRow}>
-        <Text style={styles.matrixLabel}>{t(`posPermissions.discount.${row.scope}`)}</Text>
-        <View style={styles.matrixCells}>
-          {row.cells.map(({ level, item }) => {
-            const checked = selectedCodeSet.has(item.code);
-            const changed = changedCodeSet.has(item.code);
-            const levelLabel = t(`posPermissions.discount.levels.${level}`);
-            return (
-              <Pressable
-                key={item.code}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked, disabled }}
-                accessibilityLabel={[
-                  item.name,
-                  item.highRisk ? t("posPermissions.badges.highRisk") : null,
-                  changed ? t("posPermissions.badges.changed") : null,
-                ]
-                  .filter(Boolean)
-                  .join("，")}
-                accessibilityHint={item.description || undefined}
-                disabled={disabled}
-                onPress={() => onToggleCode(item.code)}
-                style={({ pressed }) => [
-                  styles.matrixCell,
-                  item.highRisk && styles.matrixCellRisk,
-                  checked && (item.highRisk ? styles.matrixCellRiskOn : styles.matrixCellOn),
-                  disabled && styles.matrixCellDisabled,
-                  pressed && styles.pressed,
-                ]}
+  const renderDiscountMatrix = () => {
+    if (!grid || grid.rows.length === 0) return null;
+    return (
+      <View style={styles.matrix}>
+        <View style={styles.matrixRow}>
+          <View style={styles.matrixLabelCol} />
+          {grid.columns.map((column) => (
+            <View key={column.level} style={styles.matrixCol}>
+              <Text
+                numberOfLines={1}
+                style={[styles.matrixHeadText, column.highRisk && styles.matrixHeadTextRisk]}
               >
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.matrixCellText,
-                    item.highRisk && styles.matrixCellTextRisk,
-                    checked && styles.matrixCellTextOn,
+                {t(`discount.levels.${column.level}`)}
+              </Text>
+            </View>
+          ))}
+        </View>
+        {grid.rows.map((row) => (
+          <View key={row.scope} style={styles.matrixRow}>
+            <View style={styles.matrixLabelCol}>
+              <Text style={styles.matrixRowLabel} numberOfLines={1}>
+                {t(`discount.scopes.${row.scope}`)}
+              </Text>
+            </View>
+            {row.cells.map((cell, index) =>
+              cell ? (
+                <Pressable
+                  key={cell.item.code}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: cell.checked, disabled }}
+                  accessibilityLabel={buildAccessibilityLabel(cell.item, cell.changed)}
+                  accessibilityHint={cell.item.description || undefined}
+                  disabled={disabled}
+                  onPress={() => onToggleCode(cell.item.code)}
+                  style={({ pressed }) => [
+                    styles.matrixCol,
+                    styles.matrixCell,
+                    pressed && styles.pressed,
                   ]}
                 >
-                  {levelLabel}
-                </Text>
-                {changed ? <PosPermissionChangeDot style={styles.matrixDot} /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
+                  <PosPermissionCheckbox
+                    state={cell.checked ? "all" : "none"}
+                    tone={cell.item.highRisk ? "danger" : "default"}
+                    disabled={disabled}
+                  />
+                  {cell.changed ? <PosPermissionChangeDot style={styles.matrixDot} /> : null}
+                </Pressable>
+              ) : (
+                // 这一格没有对应权限（无权分配或被筛掉）：占位保持列对齐。
+                <View key={grid.columns[index].level} style={styles.matrixCol} />
+              )
+            )}
+          </View>
+        ))}
       </View>
-    ));
+    );
+  };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.section, !first && styles.sectionDivider]}>
       <View style={styles.header}>
         <Pressable
           accessibilityRole="checkbox"
@@ -202,7 +200,7 @@ function PosPermissionGroupCardComponent({
             checked: selectionState === "all" ? true : selectionState === "partial" ? "mixed" : false,
             disabled,
           }}
-          accessibilityLabel={t("posPermissions.group.toggleAll", { group: groupLabel })}
+          accessibilityLabel={t("group.toggleAll", { group: groupLabel })}
           disabled={disabled}
           hitSlop={4}
           onPress={() =>
@@ -210,14 +208,12 @@ function PosPermissionGroupCardComponent({
           }
           style={({ pressed }) => [styles.groupCheckbox, pressed && styles.pressed]}
         >
-          <CheckboxGlyph state={selectionState} disabled={disabled} />
+          <PosPermissionCheckbox state={selectionState} disabled={disabled} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded }}
-          accessibilityLabel={t(expanded ? "posPermissions.group.collapse" : "posPermissions.group.expand", {
-            group: groupLabel,
-          })}
+          accessibilityLabel={t(expanded ? "group.collapse" : "group.expand", { group: groupLabel })}
           onPress={() => onToggleExpanded(group)}
           style={({ pressed }) => [styles.headerMain, pressed && styles.pressed]}
         >
@@ -227,16 +223,14 @@ function PosPermissionGroupCardComponent({
                 {groupLabel}
               </Text>
               {groupHasChanges ? <PosPermissionChangeDot /> : null}
+              {hasHighRisk ? <PeopleTag label={t("badges.groupHighRisk")} tone="red" /> : null}
             </View>
-            <Text
-              style={[styles.groupSubtitle, summary.selectedCount === 0 && styles.groupSubtitleMuted]}
-              numberOfLines={1}
-            >
-              {subtitle}
+            <Text style={[styles.groupSummary, summary.muted && styles.groupSummaryMuted]} numberOfLines={1}>
+              {summary.text}
             </Text>
           </View>
           <Text style={styles.groupCount}>
-            {summary.selectedCount} / {summary.total}
+            {selectedCount}/{fullCodes.length}
           </Text>
           <Icon
             source={expanded ? "chevron-up" : "chevron-down"}
@@ -258,19 +252,15 @@ function PosPermissionGroupCardComponent({
 export const PosPermissionGroupCard = memo(PosPermissionGroupCardComponent);
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: HB_COLORS.white,
-    borderWidth: 1,
-    borderColor: HB_COLORS.outlineMuted,
-    borderRadius: HB_RADIUS.surface,
-    overflow: "hidden",
-  },
+  section: { backgroundColor: HB_COLORS.white },
+  sectionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outlineMuted },
   header: { flexDirection: "row", alignItems: "center", minHeight: 64 },
   groupCheckbox: {
     width: 52,
     alignSelf: "stretch",
-    alignItems: "center",
+    alignItems: "flex-end",
     justifyContent: "center",
+    paddingRight: 4,
   },
   headerMain: {
     flex: 1,
@@ -278,86 +268,67 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: HB_SPACING.xs,
+    paddingLeft: HB_SPACING.xs,
     paddingRight: HB_SPACING.sm,
   },
-  headerText: { flex: 1, minWidth: 0, gap: 2 },
+  headerText: { flex: 1, minWidth: 0, gap: 3 },
   headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  groupTitle: { fontSize: 16, lineHeight: 22, fontWeight: "700", color: HB_COLORS.textPrimary },
-  groupSubtitle: { fontSize: 13, lineHeight: 18, color: HB_COLORS.textSecondary },
-  groupSubtitleMuted: { color: POS_PERMISSION_COLORS.disabledText },
+  groupTitle: {
+    flexShrink: 1,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "700",
+    color: HB_COLORS.textPrimary,
+  },
+  groupSummary: { fontSize: 12.5, lineHeight: 18, color: HB_COLORS.textSecondary },
+  groupSummaryMuted: { color: POS_PERMISSION_COLORS.disabledText },
   groupCount: {
     fontSize: 14,
-    fontWeight: "600",
-    color: HB_COLORS.textSecondary,
+    fontWeight: "700",
+    color: HB_COLORS.textPrimary,
     fontVariant: ["tabular-nums"],
   },
-  body: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HB_COLORS.outlineMuted,
-    paddingVertical: HB_SPACING.xxs,
-  },
+  body: { backgroundColor: HB_COLORS.surface, paddingBottom: HB_SPACING.xs },
   itemRow: {
     minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
-    gap: HB_SPACING.xs,
-    paddingLeft: HB_SPACING.xs,
-    paddingRight: HB_SPACING.md,
+    gap: HB_SPACING.sm,
+    paddingLeft: HB_SPACING.md + 12,
+    paddingRight: HB_SPACING.sm,
     paddingVertical: HB_SPACING.xs,
   },
-  dotSlot: { width: 12, alignItems: "center" },
+  dotSlot: { width: 10, alignItems: "center" },
   itemName: { flex: 1, fontSize: 15, lineHeight: 21, color: HB_COLORS.textPrimary },
   itemNameEntry: { fontWeight: "700" },
   itemNameDimmed: { color: POS_PERMISSION_COLORS.disabledText },
   pressed: { backgroundColor: HB_COLORS.surfaceMuted },
-  riskPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-    backgroundColor: POS_PERMISSION_COLORS.dangerSoft,
-  },
-  riskPillText: { fontSize: 11, lineHeight: 16, fontWeight: "600", color: HB_COLORS.danger },
   changeDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
-    backgroundColor: POS_PERMISSION_COLORS.changeDot,
+    backgroundColor: HB_COLORS.brand,
   },
   entryHint: {
-    marginLeft: HB_SPACING.lg - 4,
+    marginLeft: HB_SPACING.md + 12,
     marginRight: HB_SPACING.md,
     marginBottom: HB_SPACING.xs,
     paddingHorizontal: HB_SPACING.sm,
     paddingVertical: HB_SPACING.xs,
-    borderRadius: HB_RADIUS.control,
+    borderRadius: 10,
     backgroundColor: POS_PERMISSION_COLORS.warningSoft,
-    borderWidth: 1,
-    borderColor: POS_PERMISSION_COLORS.warningBorder,
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 6,
   },
   entryHintText: { flex: 1, fontSize: 13, lineHeight: 18, color: HB_COLORS.warning },
-  matrixRow: { paddingHorizontal: HB_SPACING.md, paddingVertical: HB_SPACING.xs, gap: 6 },
-  matrixLabel: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: HB_COLORS.textSecondary },
-  matrixCells: { flexDirection: "row", gap: 6 },
-  matrixCell: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: HB_RADIUS.control,
-    borderWidth: 1,
-    borderColor: HB_COLORS.outline,
-    backgroundColor: HB_COLORS.white,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 2,
-  },
-  matrixCellOn: { backgroundColor: HB_COLORS.brand, borderColor: HB_COLORS.brand },
-  matrixCellRisk: { borderColor: POS_PERMISSION_COLORS.dangerBorder },
-  matrixCellRiskOn: { backgroundColor: HB_COLORS.danger, borderColor: HB_COLORS.danger },
-  matrixCellDisabled: { opacity: 0.5 },
-  matrixCellText: { fontSize: 14, fontWeight: "600", color: HB_COLORS.textPrimary },
-  matrixCellTextRisk: { color: HB_COLORS.danger },
-  matrixCellTextOn: { color: HB_COLORS.white },
-  matrixDot: { position: "absolute", top: 3, right: 3, borderWidth: 1, borderColor: HB_COLORS.white },
+  matrix: { paddingHorizontal: HB_SPACING.sm, paddingTop: HB_SPACING.xxs },
+  matrixRow: { flexDirection: "row", alignItems: "center" },
+  matrixLabelCol: { width: 44, justifyContent: "center" },
+  matrixCol: { flex: 1, minWidth: 0, alignItems: "center", justifyContent: "center" },
+  matrixCell: { minHeight: 44 },
+  matrixHeadText: { fontSize: 12.5, lineHeight: 28, color: HB_COLORS.textSecondary },
+  matrixHeadTextRisk: { color: HB_COLORS.danger, fontWeight: "600" },
+  matrixRowLabel: { fontSize: 13.5, fontWeight: "700", color: HB_COLORS.textPrimary },
+  matrixDot: { position: "absolute", top: 6, right: 6 },
 });

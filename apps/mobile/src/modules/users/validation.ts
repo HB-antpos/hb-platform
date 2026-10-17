@@ -1,3 +1,4 @@
+import { cleanNamePart, composeFullName } from "@/modules/people/person-name";
 import type { StoreUserFormValues } from "@/modules/users/types";
 
 type Translate = (key: string) => string;
@@ -25,17 +26,27 @@ export function validatePasswordValue(password: string, t: Translate) {
   return null;
 }
 
-export function validateStoreUserForm(
-  values: StoreUserFormValues,
-  t: Translate
-) {
-  const username = values.username.trim();
+/** 账号（用户名）：必填、3–50 个字符。新增整页表单把它作为单字段校验。 */
+export function validateUsername(rawUsername: string, t: Translate) {
+  const username = rawUsername.trim();
   if (!username) {
     return t("messages.usernameRequired");
   }
 
   if (username.length < MIN_USERNAME_LENGTH || username.length > MAX_USERNAME_LENGTH) {
     return t("messages.usernameLength");
+  }
+
+  return null;
+}
+
+export function validateStoreUserForm(
+  values: StoreUserFormValues,
+  t: Translate
+) {
+  const usernameMessage = validateUsername(values.username, t);
+  if (usernameMessage) {
+    return usernameMessage;
   }
 
   const email = values.email.trim();
@@ -79,4 +90,57 @@ export function validateStaffRecoveryEmail(email: string, t: Translate) {
   const formatError = validateNewStaffEmail(email, t);
   if (formatError) return formatError;
   return email.trim().toLowerCase().endsWith(".store.local") ? t("messages.emailNotDeliverable") : null;
+}
+
+// ───────────────────────── 姓名四段（姓 / 名 / 中间名 / 昵称）─────────────────────────
+
+/** 姓、名、中间名、昵称各自的长度上限；合成后的全名另有上限（与后端 FullName 100 字符一致）。 */
+export const PERSON_NAME_PART_MAX_LENGTH = 50;
+export const PERSON_FULL_NAME_MAX_LENGTH = 100;
+
+export type PersonNameField = "familyName" | "givenName" | "middleName" | "nickname";
+/** required：必填段为空；tooLong：单段超过 50；fullNameTooLong：合成后的全名超过 100。 */
+export type PersonNameErrorCode = "required" | "tooLong" | "fullNameTooLong";
+/** 按字段给出错误码；`fullName` 键表示合成全名超长（显示在姓名区下方）。 */
+export type PersonNameErrors = Partial<Record<PersonNameField | "fullName", PersonNameErrorCode>>;
+
+export interface PersonNameInput {
+  familyName: string;
+  givenName: string;
+  middleName: string;
+  nickname: string;
+}
+
+/**
+ * 校验姓名四段。
+ * - requireNames=true 时姓、名必填（新增；编辑时只在用户动过姓名区后才要求，避免存量只有一个词的全名挡住改电话等保存）。
+ * - 长度按去首尾空白、折叠内部空白后的值计算，与实际提交的内容一致。
+ * - 全名超长只在各段都合格时才报，避免同一处出现两条错误。
+ */
+export function validatePersonNameFields(
+  values: PersonNameInput,
+  options: { requireNames: boolean }
+): PersonNameErrors {
+  const errors: PersonNameErrors = {};
+  const fields: PersonNameField[] = ["familyName", "givenName", "middleName", "nickname"];
+  for (const field of fields) {
+    const cleaned = cleanNamePart(values[field]) ?? "";
+    if (cleaned.length > PERSON_NAME_PART_MAX_LENGTH) {
+      errors[field] = "tooLong";
+    } else if (options.requireNames && !cleaned && (field === "familyName" || field === "givenName")) {
+      errors[field] = "required";
+    }
+  }
+
+  if (!errors.familyName && !errors.givenName && !errors.middleName) {
+    const fullName = composeFullName(values) ?? "";
+    if (fullName.length > PERSON_FULL_NAME_MAX_LENGTH) {
+      errors.fullName = "fullNameTooLong";
+    }
+  }
+  return errors;
+}
+
+export function hasPersonNameErrors(errors: PersonNameErrors) {
+  return Object.keys(errors).length > 0;
 }

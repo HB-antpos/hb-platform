@@ -4,6 +4,11 @@ export interface StoreUserListItem {
   userGUID: string;
   username: string;
   fullName?: string;
+  /** 姓名拆分字段（后端迁移 20261018 之后才有；旧后端缺省）。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   email?: string;
   phone?: string;
   status: number;
@@ -60,7 +65,16 @@ export interface StoreUserGridParams {
 
 export interface StoreUserMutationInput {
   username: string;
+  /** 合成后的全名；旧后端只认它，所以姓 / 名 / 中间名有变化时必须同时带上。 */
   fullName?: string;
+  /**
+   * 姓名拆分字段（后端迁移 20261018 之后才生效；旧后端忽略）。
+   * 创建：四段都带（空的不带）；更新：不传 / null = 不改，空串 = 清空，只带有变化的段。
+   */
+  givenName?: string | null;
+  middleName?: string | null;
+  familyName?: string | null;
+  nickname?: string | null;
   email?: string;
   phone?: string;
   password?: string;
@@ -104,6 +118,11 @@ export interface StoreUserPasswordPayload {
 export interface StoreUserFormValues {
   username: string;
   fullName: string;
+  /** 姓名拆分字段；整页新增 / 编辑表单使用，旧弹窗表单可不带。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   email: string;
   phone: string;
   status: boolean;

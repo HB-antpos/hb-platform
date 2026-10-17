@@ -1,0 +1,57 @@
+{
+  "createTitle": "New role",
+  "segmentProfile": "Profile",
+  "segmentPermissions": "Perms",
+  "segmentMembers": "Members",
+  "segmentMenus": "Menus",
+  "membersCount": "{{count}} members",
+  "peopleCount": "{{count}} people",
+  "save": "Save",
+  "saveWithBadge": "Save ({{badge}})",
+  "cancel": "Cancel",
+  "showAll": "Show all",
+  "onlySelected": "Selected only",
+
+  "barChanges": "{{count}} changes",
+  "barNoChanges": "No changes",
+  "barHintProfile": "Profile {{count}}",
+  "barHintPermissions": "Permissions {{badge}}",
+  "barSaving": "Saving…",
+  "barFrozen": "Writes are paused. Tap refresh at the top right to verify.",
+  "barInvalid": "The profile has errors. Fix them first.",
+  "barCreateSummary": "New role",
+  "barCreateHint": "You can set permissions and members after creating it",
+  "unsavedMessage": "Profile or permission changes have not been saved and will be lost if you leave.",
+
+  "savedProfile": "Role profile saved and verified.",
+  "savedPermissions": "Role permissions saved and verified.",
+  "savedBoth": "Role profile and permissions saved and verified.",
+  "failedProfile": "Role profile was not saved. Your changes are kept.",
+  "failedPermissions": "Role permissions were not saved. Your changes are kept.",
+  "profileFailedPermissionsPending": "Role profile was not saved and permissions were not submitted. All your changes are kept.",
+  "profileSavedPermissionsFailed": "Role profile was saved, but role permissions were not. Your permission changes are kept.",
+  "nameExists": "This role name already exists. Choose another name.",
+
+  "systemRoleHint": "System role: it has every permission by default, its name is used for permission checks, and it cannot be renamed.",
+  "derivedRoleHint": "Derived role: members follow the stores marked \"Manage\" and cannot be added or removed by hand. The name is used for the derivation and cannot be changed.",
+
+  "selectedPrefix": "Selected",
+  "permissionSearch": "Search permission name or code",
+  "noSelectedPermissions": "No permissions selected yet",
+  "implicitAllHint": "System roles have every permission by default. The permission set is read-only.",
+  "noPermissionEditHint": "This account cannot edit role permissions. View only.",
+
+  "menuSaveHint": "Menu switches edit the same permissions as the Permissions tab. Changes are saved together at the bottom.",
+  "noMenus": "No matching menus",
+
+  "membersSearch": "Search name, account or email",
+  "derivedMembersHint": "Store manager members follow the stores marked \"Manage\". They cannot be added or removed here.",
+  "membersImmediateHint": "Adding or removing a member takes effect immediately and does not use the Save bar.",
+
+  "assignSelected": "Selected {{selected}} / {{total}}",
+  "assignLockedHint": "System role: has every permission by default",
+
+  "createSummary": "{{count}} permissions will be created",
+  "createSummaryEmpty": "Fill in code, name and category to create",
+  "sectionBasic": "Basics"
+}

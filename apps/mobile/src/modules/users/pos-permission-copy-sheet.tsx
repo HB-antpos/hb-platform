@@ -1,18 +1,19 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
-import { Avatar, Button, Icon, Searchbar, Text } from "react-native-paper";
+import { Button, Icon, Searchbar, Text } from "react-native-paper";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
+import { InfoCard, PEOPLE_TONES, PersonAvatar } from "@/modules/people/ui";
+import { resolvePersonName } from "@/modules/people/person-name";
 import { useStoreUsers } from "@/modules/users/hooks";
-import { POS_PERMISSION_COLORS, PosPermissionSheet } from "@/modules/users/pos-permission-sheet";
+import { usePosPermissionTranslation } from "@/modules/users/pos-permission-i18n";
+import { PosPermissionSheet } from "@/modules/users/pos-permission-sheet";
 import { useStoreUserPosTerminalPermissions } from "@/modules/users/pos-terminal-permissions-hooks";
 import { buildGrantedPosPermissionCodes } from "@/modules/users/pos-terminal-permissions";
 import {
   filterPosPermissionCopyCandidates,
   getPosPermissionCopyCandidateName,
-  getPosPermissionInitials,
 } from "@/modules/users/pos-terminal-permission-presentation";
 import type { PosTerminalPermissionOption } from "@/modules/users/types";
-import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 interface PosPermissionCopySheetProps {
@@ -41,7 +42,7 @@ export function PosPermissionCopySheet({
   onDismiss,
   onApply,
 }: PosPermissionCopySheetProps) {
-  const { t } = useAppTranslation(["userManagement", "common"]);
+  const { t } = usePosPermissionTranslation();
   const [query, setQuery] = useState("");
   const [selectedGuid, setSelectedGuid] = useState<string | null>(null);
   const hasStoreCode = storeCode.trim().length > 0;
@@ -87,7 +88,7 @@ export function PosPermissionCopySheet({
 
   const renderList = () => {
     if (!hasStoreCode) {
-      return <Text style={styles.stateText}>{t("posPermissions.copy.unavailable")}</Text>;
+      return <Text style={styles.stateText}>{t("copy.unavailable")}</Text>;
     }
     if (usersQuery.isLoading) {
       return (
@@ -99,7 +100,7 @@ export function PosPermissionCopySheet({
     if (usersQuery.isError) {
       return (
         <View style={styles.stateRow}>
-          <Text style={styles.stateText}>{t("posPermissions.copy.listFailed")}</Text>
+          <Text style={styles.stateText}>{t("copy.listFailed")}</Text>
           <Button compact mode="text" onPress={() => void usersQuery.refetch()}>
             {t("common:actions.retry")}
           </Button>
@@ -109,21 +110,22 @@ export function PosPermissionCopySheet({
     if (candidates.length === 0) {
       return (
         <Text style={styles.stateText}>
-          {t(allCandidateCount === 0 ? "posPermissions.copy.empty" : "posPermissions.copy.noMatch")}
+          {t(allCandidateCount === 0 ? "copy.empty" : "copy.noMatch")}
         </Text>
       );
     }
 
     return (
-      <View style={styles.list}>
+      <InfoCard>
         {candidates.map((user, index) => {
+          const person = resolvePersonName(user);
           const name = getPosPermissionCopyCandidateName(user);
           const selected = user.userGUID === selectedGuid;
           let detail: string | null = null;
           if (selected) {
-            if (colleagueQuery.isFetching) detail = t("posPermissions.copy.loadingColleague");
-            else if (colleagueQuery.isError) detail = t("posPermissions.copy.loadFailed");
-            else if (copyCodes) detail = t("posPermissions.copy.permissionCount", { value: copyCodes.length });
+            if (colleagueQuery.isFetching) detail = t("copy.loadingColleague");
+            else if (colleagueQuery.isError) detail = t("copy.loadFailed");
+            else if (copyCodes) detail = t("copy.permissionCount", { value: copyCodes.length });
           }
           return (
             <Pressable
@@ -141,16 +143,16 @@ export function PosPermissionCopySheet({
                 pressed && styles.pressed,
               ]}
             >
-              <Avatar.Text
-                size={36}
-                label={getPosPermissionInitials(name)}
-                style={styles.avatar}
-                labelStyle={styles.avatarLabel}
-              />
+              <PersonAvatar initials={person.initials} seed={user.userGUID} size={36} />
               <View style={styles.rowText}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {name}
-                </Text>
+                <View style={styles.rowNameLine}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {name}
+                  </Text>
+                  {person.nickname ? (
+                    <Text style={styles.rowNickname} numberOfLines={1}>{`「${person.nickname}」`}</Text>
+                  ) : null}
+                </View>
                 {detail ? (
                   <Text
                     style={[styles.rowMeta, selected && colleagueQuery.isError && styles.rowMetaError]}
@@ -180,22 +182,22 @@ export function PosPermissionCopySheet({
             </Pressable>
           );
         })}
-      </View>
+      </InfoCard>
     );
   };
 
   return (
     <PosPermissionSheet
-      title={t("posPermissions.copy.title")}
-      subtitle={t("posPermissions.copy.subtitle", { store: storeName })}
-      closeLabel={t("posPermissions.actions.close")}
+      title={t("copy.title")}
+      subtitle={t("copy.subtitle", { store: storeName })}
+      closeLabel={t("actions.close")}
       onDismiss={onDismiss}
       header={
         hasStoreCode ? (
           <Searchbar
             value={query}
             onChangeText={setQuery}
-            placeholder={t("posPermissions.copy.searchPlaceholder")}
+            placeholder={t("copy.searchPlaceholder")}
             style={styles.search}
             inputStyle={styles.searchInput}
             autoCorrect={false}
@@ -214,13 +216,13 @@ export function PosPermissionCopySheet({
           contentStyle={BUSINESS_UI.buttonContent}
         >
           {selectedUser && copyCodes
-            ? t("posPermissions.copy.apply", { name: selectedName, value: copyCodes.length })
-            : t("posPermissions.copy.applyIdle")}
+            ? t("copy.apply", { name: selectedName, value: copyCodes.length })
+            : t("copy.applyIdle")}
         </Button>
       }
     >
       {renderList()}
-      <Text style={styles.help}>{t("posPermissions.copy.help")}</Text>
+      <Text style={styles.help}>{t("copy.help")}</Text>
     </PosPermissionSheet>
   );
 }
@@ -233,12 +235,6 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   searchInput: { minHeight: 44, fontSize: 15 },
-  list: {
-    borderWidth: 1,
-    borderColor: HB_COLORS.outlineMuted,
-    borderRadius: HB_RADIUS.surface,
-    overflow: "hidden",
-  },
   row: {
     minHeight: 56,
     flexDirection: "row",
@@ -248,12 +244,18 @@ const styles = StyleSheet.create({
     paddingVertical: HB_SPACING.xs,
   },
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HB_COLORS.outlineMuted },
-  rowSelected: { backgroundColor: POS_PERMISSION_COLORS.brandSoft },
+  rowSelected: { backgroundColor: PEOPLE_TONES.blue.bg },
   pressed: { backgroundColor: HB_COLORS.surfaceMuted },
-  avatar: { backgroundColor: HB_COLORS.surfaceMuted },
-  avatarLabel: { color: HB_COLORS.textSecondary, fontSize: 14, fontWeight: "700" },
   rowText: { flex: 1, minWidth: 0, gap: 2 },
-  rowName: { fontSize: 15, lineHeight: 21, fontWeight: "600", color: HB_COLORS.textPrimary },
+  rowNameLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rowName: {
+    flexShrink: 1,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "700",
+    color: HB_COLORS.textPrimary,
+  },
+  rowNickname: { fontSize: 12.5, fontWeight: "600", color: HB_COLORS.textSecondary },
   rowMeta: { fontSize: 12, lineHeight: 17, color: HB_COLORS.textSecondary },
   rowMetaError: { color: HB_COLORS.danger },
   stateRow: { minHeight: 64, alignItems: "center", justifyContent: "center", gap: HB_SPACING.xs },

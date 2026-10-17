@@ -1,0 +1,132 @@
+{
+  "hub": {
+    "title": "人员管理",
+    "tabs": {
+      "people": "人员",
+      "roles": "角色",
+      "permissions": "权限"
+    },
+    "noAccessTitle": "暂无人员管理权限",
+    "noAccessDescription": "当前账号没有查看人员、角色或权限的权限。"
+  },
+  "subtitle": {
+    "storeManageable": "{{name}} {{code}} · 你可管理",
+    "storeViewOnly": "{{name}} {{code}} · 仅查看",
+    "allStores": "全部已分配分店 · 只能查看",
+    "adminAll": "全部分店 · {{count}} 人",
+    "adminAllNoCount": "全部分店",
+    "roles": "角色 · {{count}} 个",
+    "permissions": "权限 · {{count}} 个 · {{categories}} 类"
+  },
+  "search": {
+    "staff": "搜索姓名、账号、电话",
+    "admin": "搜索姓名、账号、邮箱、电话",
+    "roles": "搜索角色",
+    "permissions": "搜索权限名称或编码"
+  },
+  "statusChips": {
+    "all": "全部",
+    "active": "启用",
+    "disabled": "停用",
+    "pendingFirstLogin": "待首次登录",
+    "cannotLogin": "不能登录",
+    "noEmail": "无邮箱"
+  },
+  "tags": {
+    "pendingFirstLogin": "待首次登录",
+    "cannotLogin": "不能登录",
+    "noEmail": "无邮箱 · 无法找回密码",
+    "disabled": "已停用"
+  },
+  "row": {
+    "you": "你"
+  },
+  "storeChip": {
+    "all": "全部分店"
+  },
+  "empty": {
+    "filteredTitle": "没有符合条件的人员",
+    "filteredDescription": "换一个状态筛选试试。"
+  },
+  "batch": {
+    "selected": "已选 {{count}} 人"
+  },
+  "storeSheet": {
+    "title": "切换分店",
+    "subtitle": "只列出你管理、且启用了收银的分店",
+    "allCaption": "不能新增，请先选一家分店",
+    "allCaptionWithCount": "{{count}} 人 · 不能新增，请先选一家分店",
+    "peopleCount": "{{count}} 人",
+    "viewOnlyNotice": "「仅查看」的分店只能浏览员工，不能新增、编辑、停用或重置密码。",
+    "allManaged": "全部管理分店"
+  },
+  "admin": {
+    "noAccess": "当前会话无权访问人员列表",
+    "empty": "没有符合条件的人员",
+    "create": "新增账号",
+    "filterStore": "分店：{{value}}",
+    "filterRole": "角色：{{value}}",
+    "countSuffix": " 人",
+    "endOfList": "已显示全部 {{count}} 人",
+    "status": {
+      "all": "全部",
+      "active": "启用",
+      "inactive": "停用"
+    },
+    "sort": {
+      "lastLoginAt": "最近登录",
+      "username": "账号",
+      "fullName": "姓名"
+    }
+  },
+  "adminStores": {
+    "all": "全部分店",
+    "none": "未分配分店",
+    "manage": "{{name}} 管理",
+    "view": "{{name}} 查看"
+  },
+  "login": {
+    "justNow": "刚刚登录",
+    "minutes": "{{count}} 分钟前",
+    "hours": "{{count}} 小时前",
+    "yesterday": "昨天",
+    "days": "{{count}} 天前",
+    "months": "{{count}} 个月前",
+    "years": "{{count}} 年前",
+    "never": "从未登录"
+  },
+  "sheet": {
+    "title": "筛选与排序",
+    "reset": "重置",
+    "store": "分店",
+    "role": "角色",
+    "status": "状态",
+    "sort": "排序",
+    "all": "全部",
+    "apply": "查看 {{count}} 人",
+    "applyUnknown": "查看结果",
+    "optionsFailed": "筛选选项加载失败，请重试。"
+  },
+  "rolesList": {
+    "noAccess": "当前会话无权访问角色列表",
+    "empty": "暂无角色",
+    "add": "新增角色",
+    "memberCount": "{{count}} 人",
+    "derivedHint": "由「管理」分店自动派生",
+    "tags": {
+      "system": "系统",
+      "derived": "派生",
+      "disabled": "停用"
+    }
+  },
+  "permList": {
+    "noAccess": "当前会话无权访问权限列表",
+    "empty": "没有匹配的权限",
+    "add": "新增权限",
+    "all": "全部",
+    "system": "系统",
+    "custom": "自定义",
+    "roleCount": "{{count}} 个角色",
+    "roleCountUnavailable": "角色数暂不可用"
+  }
+}

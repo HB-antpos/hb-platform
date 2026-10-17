@@ -1,3 +1,4 @@
+import { buildPersonSearchText, resolvePersonName } from "../people/person-name";
 import {
   buildGrantedPosPermissionCodes,
   hasPrivilegedPosPermissionRole,
@@ -593,14 +594,14 @@ export function filterPosPermissionCopyCandidates(
     if (user.status !== 1) return false;
     if (hasPrivilegedPosPermissionRole(user.roleNames)) return false;
     if (!normalizedQuery) return true;
-    return [user.fullName, user.username]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => normalizeSearchText(value).includes(normalizedQuery));
+    // 姓 / 名 / 昵称 / 全名 / 账号任一段命中即可（人员姓名拆分后昵称也能搜到）。
+    return buildPersonSearchText(user).includes(normalizedQuery);
   });
 }
 
+/** 同事展示名：有结构化姓名用合成值，否则全名，再否则账号（与人员管理其他页面一致）。 */
 export function getPosPermissionCopyCandidateName(user: StoreUserListItem) {
-  return user.fullName?.trim() || user.username;
+  return resolvePersonName(user).primary;
 }
 
 export function getPosPermissionInitials(value: string) {

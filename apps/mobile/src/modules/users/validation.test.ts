@@ -1,5 +1,5 @@
 import { extractApiErrorMessage } from "../../shared/api/error-message";
-import { validatePasswordValue, validateStoreUserForm } from "./validation";
+import { validatePasswordValue, validateStoreUserForm, validateUsername } from "./validation";
 
 const messages: Record<string, string> = {
   "messages.emailInvalid": "Invalid email",
@@ -82,3 +82,9 @@ assertEqual(
   "用户名已存在",
   "api error extracts envelope message"
 );
+
+// 账号单字段校验（新增整页表单按字段显示错误）：与整表校验口径一致。
+assertEqual(validateUsername("  ", t), "Enter a username", "账号必填");
+assertEqual(validateUsername("ab", t), "Username must be 3 to 50 characters", "账号至少 3 个字符");
+assertEqual(validateUsername("a".repeat(51), t), "Username must be 3 to 50 characters", "账号最多 50 个字符");
+assertEqual(validateUsername(" emily.chen@gmail.com ", t), null, "合法账号（去首尾空白）");

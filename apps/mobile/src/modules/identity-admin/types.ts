@@ -49,7 +49,18 @@ export interface IdentityUser {
   username: string;
   email: string;
   fullName?: string;
+  /** 姓名拆分字段（后端迁移 20261018 之后才有；旧后端缺省）。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   phone?: string;
+  /**
+   * 是否允许登录 Web / App。只有用户详情（GET /Users/guid/{guid}）与管理员用户列表（GET /Users/optimized）
+   * 会返回；接口省略 null，所以缺省（undefined）= 未知（旧后端 / 未查询），不等于「允许」。
+   * 界面只在 `=== false` 时标「不能登录」，`undefined` 时既不标也不显示开关。
+   */
+  loginEnabled?: boolean;
   lastLoginAt?: string;
   lastLoginIp?: string;
   isActive: boolean;
@@ -72,6 +83,11 @@ export interface IdentityCreateUserInput {
   password: string;
   passwordFormat?: "raw" | "clientSha256";
   fullName?: string;
+  /** 姓名拆分字段（后端迁移之后才生效；旧后端忽略）。创建时有值才发送。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   isActive?: boolean;
   roleGuids?: string[];
   storeGuids?: string[];
@@ -81,6 +97,11 @@ export interface IdentityUpdateUserInput {
   username: string;
   email: string;
   fullName?: string;
+  /** 姓名拆分字段：不传 / null = 不改，空串 = 清空；只带有变化的段。 */
+  givenName?: string | null;
+  middleName?: string | null;
+  familyName?: string | null;
+  nickname?: string | null;
   isActive?: boolean;
 }
 
@@ -132,6 +153,9 @@ export interface IdentityRoleUser {
   username: string;
   email: string;
   fullName?: string;
+  givenName?: string;
+  familyName?: string;
+  nickname?: string;
   isActive: boolean;
   assignedAt: string;
 }

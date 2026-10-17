@@ -1,21 +1,35 @@
 import { useMemo, useState } from "react";
-import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, Platform, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { ActivityIndicator, Chip, Icon, IconButton, Text, TouchableRipple } from "react-native-paper";
-import { HB_COLORS as C } from "@/shared/theme/tokens";
-import { filterPermissionListItems, groupPermissionsByCategory, type PermissionCategoryGroup, type PermissionListItem } from "./permission-logic";
-import { interpolatePermissionCopy as interpolate, usePermissionCopy, usePermissionItems, usePermissionRoleCounts, usePermissionSession } from "./permission-hooks";
-import { AdminEmpty, AdminError, AdminScreen, AdminTabs, SearchField, styles } from "./ui";
+import { ActivityIndicator, Icon, Text } from "react-native-paper";
+import { ListCardSegment, PeopleScreenFrame, PeopleSearchBox, type PeopleHubChrome } from "@/modules/people/people-frame";
+import { FilterChipRow, FloatingAction, PEOPLE_TONES, PeopleTag } from "@/modules/people/ui";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { filterPermissionListItems, groupPermissionsByCategory, type PermissionListItem } from "./permission-logic";
+import { usePermissionCopy, usePermissionItems, usePermissionRoleCounts, usePermissionSession } from "./permission-hooks";
+import {
+  buildPermissionCategoryChips,
+  buildPermissionListRows,
+  resolvePermissionRoleCount,
+  type PermissionListRow,
+} from "./role-permission-list-logic";
+import { AdminEmpty, AdminError } from "./ui";
 import { useIdentitySearch } from "./user-hooks";
 
-export default function PermissionsScreen() {
+/**
+ * 「人员管理」里的「权限」页签（设计稿 A6③）：分类芯片（带数量）、按分类分组的权限卡片、
+ * 权限码等宽字体、「被几个角色使用」。点击进入现有权限详情（permissions/[code]）；
+ * 新增仍走现有「新建权限」页，右下角悬浮「新增权限」。
+ */
+export function PermissionsList({ chrome }: { chrome: PeopleHubChrome }) {
   const router = useRouter();
-  const { copy, appLanguage } = usePermissionCopy();
-  const { access, allowed, actorKey, capabilities } = usePermissionSession();
+  const { t } = useAppTranslation(["people", "common"]);
+  const { appLanguage } = usePermissionCopy();
+  const { allowed, actorKey, capabilities } = usePermissionSession();
   const [input, setInput] = useState("");
   const search = useIdentitySearch(input);
   const [categoryKey, setCategoryKey] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const permissions = usePermissionItems({ actorKey, enabled: allowed, appLanguage });
   const roleCountsQuery = usePermissionRoleCounts({ actorKey, enabled: allowed });
@@ -23,156 +37,142 @@ export default function PermissionsScreen() {
   const allGroups = useMemo(() => groupPermissionsByCategory(permissions.items), [permissions.items]);
   const visibleGroups = useMemo(
     () => groupPermissionsByCategory(filterPermissionListItems(permissions.items, { keyword: search, categoryKey })),
-    [categoryKey, permissions.items, search],
+    [categoryKey, permissions.items, search]
   );
-  // 搜索或按分类筛选时自动展开全部，用户无需再逐个点开分组。
-  const forceExpanded = Boolean(search.trim()) || Boolean(categoryKey);
-  const toggleGroup = (key: string) => setExpanded((current) => {
-    const next = new Set(current);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    return next;
-  });
+  const rows = useMemo(() => buildPermissionListRows(visibleGroups), [visibleGroups]);
+  const chips = useMemo(
+    () => buildPermissionCategoryChips(allGroups, permissions.items.length, t("people:permList.all")),
+    [allGroups, permissions.items.length, t]
+  );
+  const refreshAll = () => {
+    void permissions.refetch();
+    void roleCountsQuery.refetch();
+  };
 
-  const canViewUsers = allowed && access.hasPermission("Users.View");
-  const canViewRoles = allowed && access.canReadRole;
-  const tabs = [
-    ...(canViewUsers ? [{ key: "users", label: copy.usersTab }] : []),
-    ...(canViewRoles ? [{ key: "roles", label: copy.rolesTab }] : []),
-    { key: "permissions", label: copy.permissionsTab },
-  ];
+  if (!allowed) {
+    return (
+      <PeopleScreenFrame title={t("people:hub.title")} chrome={chrome}>
+        <AdminEmpty text={t("people:permList.noAccess")} />
+      </PeopleScreenFrame>
+    );
+  }
 
   return (
-    <AdminScreen
-      title={copy.title}
-      action={capabilities.canManage ? (
-        <IconButton icon="plus" accessibilityLabel={copy.add} onPress={() => router.push("/(shell)/permissions/new")} />
-      ) : undefined}
+    <PeopleScreenFrame
+      title={t("people:hub.title")}
+      subtitle={
+        permissions.items.length
+          ? t("people:subtitle.permissions", { count: permissions.items.length, categories: allGroups.length })
+          : null
+      }
+      chrome={chrome}
     >
-      <AdminTabs
-        value="permissions"
-        items={tabs}
-        onChange={(key) => {
-          if (key === "users") router.replace("/(shell)/user-admin");
-          else if (key === "roles") router.replace("/(shell)/roles");
-        }}
-      />
-      {!allowed ? (
-        <View style={localStyles.denied}>
-          <Text variant="titleMedium">{copy.accessDeniedTitle}</Text>
-          <Text style={styles.muted}>{copy.accessDenied}</Text>
-        </View>
+      <View style={styles.filterArea}>
+        <PeopleSearchBox value={input} onChangeText={setInput} placeholder={t("people:search.permissions")} />
+        {allGroups.length > 0 ? (
+          <FilterChipRow items={chips} value={categoryKey} onChange={setCategoryKey} />
+        ) : null}
+      </View>
+
+      {permissions.isPending ? (
+        <ActivityIndicator style={styles.loader} />
       ) : (
-        <>
-          <View style={localStyles.search}><SearchField value={input} onChange={setInput} placeholder={copy.search} /></View>
-          {allGroups.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={localStyles.chipScroll} contentContainerStyle={localStyles.chips} keyboardShouldPersistTaps="handled">
-              <Chip compact selected={!categoryKey} showSelectedCheck={false} mode="outlined" style={[localStyles.chip, !categoryKey && localStyles.chipSelected]} textStyle={!categoryKey ? localStyles.chipTextSelected : undefined} onPress={() => setCategoryKey("")}>
-                {`${copy.allCategories} ${permissions.items.length}`}
-              </Chip>
-              {allGroups.map((group) => {
-                const selected = categoryKey === group.key;
-                return (
-                  <Chip key={group.key} compact selected={selected} showSelectedCheck={false} mode="outlined" style={[localStyles.chip, selected && localStyles.chipSelected]} textStyle={selected ? localStyles.chipTextSelected : undefined} onPress={() => setCategoryKey(selected ? "" : group.key)}>
-                    {`${group.displayName} ${group.items.length}`}
-                  </Chip>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-          {permissions.isPending ? <ActivityIndicator style={localStyles.loader} /> : permissions.error ? (
-            <AdminError error={permissions.error} onRetry={() => void permissions.refetch()} />
-          ) : (
-            <FlatList
-              data={visibleGroups}
-              keyExtractor={(group) => group.key}
-              refreshControl={<RefreshControl refreshing={permissions.isRefetching} onRefresh={() => { void permissions.refetch(); void roleCountsQuery.refetch(); }} />}
-              contentContainerStyle={visibleGroups.length === 0 ? localStyles.emptyList : undefined}
-              ListEmptyComponent={<AdminEmpty text={copy.empty} />}
-              ListHeaderComponent={
-                <View style={localStyles.toolbar}>
-                  <Text style={styles.muted}>
-                    {interpolate(copy.summary, { count: permissions.items.length, categories: allGroups.length })}
-                    {roleCountsQuery.error ? ` · ${copy.roleCountUnavailable}` : ""}
-                  </Text>
-                  <IconButton icon="refresh" size={19} accessibilityLabel={copy.refresh} onPress={() => { void permissions.refetch(); void roleCountsQuery.refetch(); }} />
-                </View>
-              }
-              renderItem={({ item: group }) => (
-                <CategorySection
-                  group={group}
-                  copy={copy}
-                  expanded={forceExpanded || expanded.has(group.key)}
-                  onToggle={() => toggleGroup(group.key)}
-                  roleCounts={roleCountsQuery.data}
-                  onPressItem={(item) => router.push({ pathname: "/(shell)/permissions/[code]", params: { code: item.code } })}
-                />
-              )}
-            />
-          )}
-        </>
+        <FlatList
+          data={rows}
+          keyExtractor={(row) => row.key}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={permissions.isRefetching} onRefresh={refreshAll} />}
+          contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            roleCountsQuery.error ? <Text style={styles.roleCountHint}>{t("people:permList.roleCountUnavailable")}</Text> : null
+          }
+          ListEmptyComponent={
+            permissions.error ? (
+              <AdminError error={permissions.error} onRetry={refreshAll} />
+            ) : (
+              <AdminEmpty text={t("people:permList.empty")} />
+            )
+          }
+          renderItem={({ item: row }) =>
+            row.kind === "header" ? (
+              <Text style={styles.groupTitle}>{`${row.title} · ${row.count}`}</Text>
+            ) : (
+              <PermissionRow
+                row={row}
+                roleCount={resolvePermissionRoleCount(roleCountsQuery.data, row.item.code)}
+                onPress={() => router.push({ pathname: "/(shell)/permissions/[code]", params: { code: row.item.code } })}
+              />
+            )
+          }
+        />
       )}
-    </AdminScreen>
+
+      {capabilities.canManage ? (
+        <FloatingAction label={t("people:permList.add")} icon="plus" onPress={() => router.push("/(shell)/permissions/new")} />
+      ) : null}
+    </PeopleScreenFrame>
   );
 }
 
-function CategorySection({ group, copy, expanded, onToggle, roleCounts, onPressItem }: {
-  group: PermissionCategoryGroup;
-  copy: ReturnType<typeof usePermissionCopy>["copy"];
-  expanded: boolean;
-  onToggle: () => void;
-  roleCounts?: Record<string, number>;
-  onPressItem: (item: PermissionListItem) => void;
+function PermissionRow({
+  row,
+  roleCount,
+  onPress,
+}: {
+  row: Extract<PermissionListRow, { kind: "item" }>;
+  roleCount: number | null;
+  onPress: () => void;
 }) {
+  const { t } = useAppTranslation("people");
+  const item: PermissionListItem = row.item;
+  const tone = PEOPLE_TONES.gray;
   return (
-    <View style={styles.section}>
-      <TouchableRipple onPress={onToggle} accessibilityRole="button" accessibilityState={{ expanded }}>
-        <View style={localStyles.categoryHeader}>
-          <Icon source={expanded ? "chevron-down" : "chevron-right"} size={22} color={C.textSecondary} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.value}>{group.displayName} <Text style={styles.muted}>{group.key !== group.displayName ? group.key : ""}</Text></Text>
-            <Text style={styles.muted}>{interpolate(copy.categoryCount, { count: group.items.length })} · {group.isCustom ? copy.customCategory : copy.systemCategory}</Text>
-          </View>
+    <ListCardSegment position={row.position}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${item.name} ${item.code}`}
+        onPress={onPress}
+        style={[styles.row, row.position !== "first" && row.position !== "only" && styles.rowDivider]}
+      >
+        <View style={[styles.keyIcon, { backgroundColor: tone.bg }]}>
+          <Icon source="key-outline" size={19} color={tone.fg} />
         </View>
-      </TouchableRipple>
-      {expanded ? group.items.map((item) => (
-        <TouchableRipple key={item.code} onPress={() => onPressItem(item)} accessibilityRole="button">
-          <View style={localStyles.permissionRow}>
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={localStyles.permissionName}>{item.name}</Text>
-              <Text style={localStyles.permissionCode}>{item.code}</Text>
-            </View>
-            {item.isSystem ? (
-              <View style={localStyles.systemTag}>
-                <Icon source="lock-outline" size={12} color={C.textSecondary} />
-                <Text style={localStyles.systemTagText}>{copy.systemTag}</Text>
-              </View>
-            ) : null}
-            {roleCounts ? <Text style={styles.muted}>{interpolate(copy.roleCount, { count: roleCounts[item.code] ?? 0 })}</Text> : null}
-            <Icon source="chevron-right" size={20} color={C.textSecondary} />
+        <View style={styles.rowMain}>
+          <View style={styles.nameRow}>
+            <Text style={styles.permissionName} numberOfLines={1}>{item.name}</Text>
+            <PeopleTag
+              label={item.isSystem ? t("permList.system") : t("permList.custom")}
+              tone={item.isSystem ? "gray" : "blue"}
+              icon={item.isSystem ? "lock-outline" : undefined}
+            />
           </View>
-        </TouchableRipple>
-      )) : null}
-    </View>
+          {/* 权限码用等宽字体，方便核对大小写与点号分段。 */}
+          <Text style={styles.permissionCode} numberOfLines={1}>{item.code}</Text>
+        </View>
+        {roleCount !== null ? <Text style={styles.roleCount}>{t("permList.roleCount", { count: roleCount })}</Text> : null}
+        <Icon source="chevron-right" size={20} color="#98A2B3" />
+      </Pressable>
+    </ListCardSegment>
   );
 }
 
-const localStyles = StyleSheet.create({
-  search: { paddingHorizontal: 16, paddingBottom: 8 },
-  // 横向 ScrollView 默认会随 flex 布局被下方列表压扁，必须固定不伸缩才能完整显示 chip。
-  chipScroll: { flexGrow: 0, flexShrink: 0 },
-  chips: { paddingHorizontal: 16, paddingBottom: 10, gap: 6, alignItems: "center" },
-  chip: { backgroundColor: C.white, borderColor: C.outline },
-  chipSelected: { backgroundColor: "#EFF6FF", borderColor: C.brand },
-  chipTextSelected: { color: C.action, fontWeight: "600" },
-  loader: { flex: 1 },
-  denied: { margin: 16, padding: 16, gap: 8, borderRadius: 8, backgroundColor: C.surfaceMuted },
-  emptyList: { flexGrow: 1 },
-  toolbar: { minHeight: 40, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.outlineMuted },
-  categoryHeader: { minHeight: 52, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, gap: 8 },
-  permissionRow: { minHeight: 56, flexDirection: "row", alignItems: "center", paddingLeft: 42, paddingRight: 12, paddingVertical: 8, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.outlineMuted },
-  permissionName: { fontSize: 15, lineHeight: 21, color: C.textPrimary },
-  permissionCode: { fontSize: 12, lineHeight: 16, color: C.textSecondary, fontFamily: "monospace" },
-  systemTag: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5, backgroundColor: C.surfaceMuted },
-  systemTagText: { fontSize: 11, fontWeight: "600", color: C.textSecondary },
+const styles = StyleSheet.create({
+  filterArea: {
+    backgroundColor: HB_COLORS.white,
+    gap: 8,
+    paddingBottom: HB_SPACING.xs,
+    paddingHorizontal: HB_SPACING.md,
+  },
+  groupTitle: { color: "#667085", fontSize: 12.5, fontWeight: "700", paddingBottom: 6, paddingHorizontal: 4, paddingTop: 12 },
+  keyIcon: { alignItems: "center", borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
+  listContent: { padding: HB_SPACING.md, paddingBottom: 112 },
+  loader: { margin: 32 },
+  nameRow: { alignItems: "center", flexDirection: "row", gap: 6 },
+  permissionCode: { color: HB_COLORS.textSecondary, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }), fontSize: 12, marginTop: 2 },
+  permissionName: { color: HB_COLORS.textPrimary, flexShrink: 1, fontSize: 14.5, fontWeight: "700" },
+  roleCount: { color: HB_COLORS.textSecondary, fontSize: 12.5 },
+  roleCountHint: { color: HB_COLORS.textSecondary, fontSize: 12, paddingBottom: 4, paddingHorizontal: 4 },
+  row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 56, paddingHorizontal: 14, paddingVertical: 10 },
+  rowDivider: { borderTopColor: HB_COLORS.outlineMuted, borderTopWidth: StyleSheet.hairlineWidth },
+  rowMain: { flex: 1, minWidth: 0 },
 });

@@ -72,7 +72,7 @@
   "createTitle": "新增权限",
   "codePlaceholder": "如 StoreEvents 或 Users.Create",
   "codeHint": "勾选批量生成时，代码作为前缀使用",
-  "namePlaceholder": "如 门店活动",
+  "namePlaceholder": "如 分店活动",
   "categoryPlaceholder": "选择已有分类或输入新分类",
   "categoryNew": "新分类",
   "categoryChoose": "选择分类",

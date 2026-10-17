@@ -175,6 +175,9 @@ function normalizeRoleUser(value: unknown): IdentityRoleUser {
     ...(optionalString(source, "fullName", "FullName")
       ? { fullName: optionalString(source, "fullName", "FullName") }
       : {}),
+    ...(optionalString(source, "givenName", "GivenName") ? { givenName: optionalString(source, "givenName", "GivenName") } : {}),
+    ...(optionalString(source, "familyName", "FamilyName") ? { familyName: optionalString(source, "familyName", "FamilyName") } : {}),
+    ...(optionalString(source, "nickname", "Nickname") ? { nickname: optionalString(source, "nickname", "Nickname") } : {}),
     isActive: booleanValue(source, false, "isActive", "IsActive"),
     assignedAt: stringValue(source, "assignedAt", "AssignedAt"),
   };
@@ -187,7 +190,15 @@ function normalizeUser(value: unknown): IdentityUser {
     username: requiredString(source, "username", "Username"),
     email: requiredString(source, "email", "Email"),
     ...(optionalString(source, "fullName", "FullName") ? { fullName: optionalString(source, "fullName", "FullName") } : {}),
+    ...(optionalString(source, "givenName", "GivenName") ? { givenName: optionalString(source, "givenName", "GivenName") } : {}),
+    ...(optionalString(source, "middleName", "MiddleName") ? { middleName: optionalString(source, "middleName", "MiddleName") } : {}),
+    ...(optionalString(source, "familyName", "FamilyName") ? { familyName: optionalString(source, "familyName", "FamilyName") } : {}),
+    ...(optionalString(source, "nickname", "Nickname") ? { nickname: optionalString(source, "nickname", "Nickname") } : {}),
     ...(optionalString(source, "phone", "Phone") ? { phone: optionalString(source, "phone", "Phone") } : {}),
+    // 只认布尔值：服务端省略（null）或类型异常都保持 undefined，绝不把「未知」当成「允许」。
+    ...(typeof pick(source, "loginEnabled", "LoginEnabled") === "boolean"
+      ? { loginEnabled: booleanValue(source, true, "loginEnabled", "LoginEnabled") }
+      : {}),
     ...(optionalString(source, "lastLoginAt", "LastLoginAt") ? { lastLoginAt: optionalString(source, "lastLoginAt", "LastLoginAt") } : {}),
     ...(optionalString(source, "lastLoginIp", "LastLoginIp") ? { lastLoginIp: optionalString(source, "lastLoginIp", "LastLoginIp") } : {}),
     isActive: booleanValue(source, false, "isActive", "IsActive"),
@@ -392,13 +403,35 @@ export async function fetchIdentityUserDetail(userGuid: string, actorGuid: strin
   return normalizeIdentityUser(response.data);
 }
 
+const NAME_PART_KEYS = ["givenName", "middleName", "familyName", "nickname"] as const;
+
+/**
+ * 姓名拆分字段的请求体：未提供（undefined）的段不发送；字符串去首尾空白后原样发送，
+ * 更新时空串表示「清空」、null 表示「不改」。旧后端不认识这些字段会直接忽略，
+ * 所以调用方仍须同时发送合成后的 fullName。
+ */
+function nameParts(input: Partial<Record<(typeof NAME_PART_KEYS)[number], string | null>>) {
+  const body: Partial<Record<(typeof NAME_PART_KEYS)[number], string | null>> = {};
+  for (const key of NAME_PART_KEYS) {
+    const value = input[key];
+    if (value === undefined) continue;
+    body[key] = value === null ? null : value.trim();
+  }
+  return body;
+}
+
 export async function createIdentityUser(input: IdentityCreateUserInput, actorGuid: string) {
+  // 创建时只发送有值的姓名段（空串没有意义），其余字段与此前一致。
+  const createdParts = Object.fromEntries(
+    Object.entries(nameParts(input)).filter(([, value]) => typeof value === "string" && value !== ""),
+  );
   const response = await apiClient.post(path("Users"), {
     username: input.username.trim(),
     email: input.email.trim(),
     password: input.password,
     passwordFormat: input.passwordFormat ?? "raw",
     fullName: input.fullName?.trim() || null,
+    ...createdParts,
     isActive: input.isActive ?? true,
     roleGuids: input.roleGuids ?? [],
     storeGuids: input.storeGuids ?? [],
@@ -411,6 +444,7 @@ export async function updateIdentityUser(userGuid: string, input: IdentityUpdate
     username: input.username.trim(),
     email: input.email.trim(),
     fullName: input.fullName?.trim() || null,
+    ...nameParts(input),
     isActive: input.isActive ?? true,
   }, accountBoundRequestConfig(actorGuid));
   return normalizeIdentityUser(response.data);
@@ -422,6 +456,23 @@ export async function updateIdentityUserPassword(userGuid: string, input: Identi
     passwordFormat: input.passwordFormat ?? "raw",
     forcePasswordChange: input.forcePasswordChange ?? false,
   }, accountBoundRequestConfig(actorGuid));
+  return normalizeBoolean(response.data);
+}
+
+/**
+ * PUT /Users/guid/{guid}/login-enabled（Users.Edit）：开关账号「允许登录 Web / App」，与启用 / 停用账号是两回事。
+ * 服务端失败 errorCode：SELF_PROFILE_FIELDS_DENIED（不能关闭本人）/ USER_NOT_FOUND / USER_SCOPE_DENIED /
+ * HIGH_PRIVILEGE_TARGET_DENIED。4xx 由 axios 抛出（getIdentityAdminErrorMeta 读 errorCode）；
+ * 200 + success=false 的业务信封由 normalizeBoolean 抛出并带 code，两种路径调用方都按 errorCode 处理。
+ * loginEnabled 必须是布尔值再发送，避免误传 undefined 把账号锁在系统外。
+ */
+export async function setIdentityUserLoginEnabled(userGuid: string, loginEnabled: boolean, actorGuid: string) {
+  if (typeof loginEnabled !== "boolean") throw new Error("loginEnabled must be a boolean");
+  const response = await apiClient.put(
+    path("Users", userGuid, "login-enabled"),
+    { loginEnabled },
+    accountBoundRequestConfig(actorGuid),
+  );
   return normalizeBoolean(response.data);
 }
 

@@ -112,5 +112,6 @@ test("多账号界面不使用原生 Modal，班中提示不写具体原因", ()
 test("i18n：accountSwitch 命名空间已注册", () => {
   assert.match(i18nSource, /accountSwitch: accountSwitchZh/);
   assert.match(i18nSource, /accountSwitch: accountSwitchEn/);
-  assert.match(i18nSource, /"workbench", "accountSwitch"\]/);
+  // ns 列表里要有 accountSwitch（不依赖顺序：别的功能也会往这个列表里加命名空间）
+  assert.match(i18nSource, /ns: \[[^\]]*"accountSwitch"[^\]]*\]/);
 });

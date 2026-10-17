@@ -408,7 +408,8 @@ assert.deepEqual(
     { key: "product-purchasing", itemRouteNames: ["orders"] },
     { key: "warehouse-purchase", itemRouteNames: ["warehouse"] },
     { key: "operations-reports", itemRouteNames: ["reports"] },
-    { key: "people-management", itemRouteNames: ["users", "user-admin", "roles"] },
+    // 人员管理合并后只有 users 一个入口，user-admin / roles 即使出现在可见路由里也不是工作台砖。
+    { key: "people-management", itemRouteNames: ["users"] },
   ],
   "工作台仅按显式可见路由显示各类业务入口"
 );
@@ -658,7 +659,7 @@ const visibleSectionRoutes = sparseSections.flatMap((section) =>
 );
 assert.deepEqual(
   visibleSectionRoutes,
-  ["orders", "warehouse", "reports", "users", "user-admin", "roles"],
+  ["orders", "warehouse", "reports", "users"],
   "工作台不得从角色或默认配置推断未授权入口"
 );
 assert.deepEqual(

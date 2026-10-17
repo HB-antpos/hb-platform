@@ -41,7 +41,13 @@ import faceMatchEn from "@/locales/en/screens/faceMatch.json";
 import notificationsEn from "@/locales/en/screens/notifications.json";
 import pushEn from "@/locales/en/screens/push.json";
 import userManagementEn from "@/locales/en/screens/userManagement.json";
+import peoplePosEn from "@/locales/en/screens/peoplePos.json";
+import peopleEn from "@/locales/en/screens/people.json";
+import peopleFormEn from "@/locales/en/screens/peopleForm.json";
+import peopleDetailEn from "@/locales/en/screens/peopleDetail.json";
+import peopleAccessEn from "@/locales/en/screens/peopleAccess.json";
 import cashRegisterUsersEn from "@/locales/en/screens/cashRegisterUsers.json";
+import peopleRolesEn from "@/locales/en/screens/peopleRoles.json";
 import warehouseEn from "@/locales/en/screens/warehouse.json";
 import workbenchEn from "@/locales/en/screens/workbench.json";
 import accountSwitchEn from "@/locales/en/screens/accountSwitch.json";
@@ -82,7 +88,13 @@ import faceMatchZh from "@/locales/zh/screens/faceMatch.json";
 import notificationsZh from "@/locales/zh/screens/notifications.json";
 import pushZh from "@/locales/zh/screens/push.json";
 import userManagementZh from "@/locales/zh/screens/userManagement.json";
+import peoplePosZh from "@/locales/zh/screens/peoplePos.json";
+import peopleZh from "@/locales/zh/screens/people.json";
+import peopleFormZh from "@/locales/zh/screens/peopleForm.json";
+import peopleDetailZh from "@/locales/zh/screens/peopleDetail.json";
+import peopleAccessZh from "@/locales/zh/screens/peopleAccess.json";
 import cashRegisterUsersZh from "@/locales/zh/screens/cashRegisterUsers.json";
+import peopleRolesZh from "@/locales/zh/screens/peopleRoles.json";
 import warehouseZh from "@/locales/zh/screens/warehouse.json";
 import workbenchZh from "@/locales/zh/screens/workbench.json";
 import accountSwitchZh from "@/locales/zh/screens/accountSwitch.json";
@@ -134,7 +146,13 @@ const resources = {
     preorder: preorderZh,
     supplyNotice: supplyNoticeZh,
     userManagement: userManagementZh,
+    peoplePos: peoplePosZh,
+    people: peopleZh,
+    peopleForm: peopleFormZh,
+    peopleDetail: peopleDetailZh,
+    peopleAccess: peopleAccessZh,
     cashRegisterUsers: cashRegisterUsersZh,
+    peopleRoles: peopleRolesZh,
     warehouse: warehouseZh,
     workbench: workbenchZh,
     accountSwitch: accountSwitchZh,
@@ -179,7 +197,13 @@ const resources = {
     preorder: preorderEn,
     supplyNotice: supplyNoticeEn,
     userManagement: userManagementEn,
+    peoplePos: peoplePosEn,
+    people: peopleEn,
+    peopleForm: peopleFormEn,
+    peopleDetail: peopleDetailEn,
+    peopleAccess: peopleAccessEn,
     cashRegisterUsers: cashRegisterUsersEn,
+    peopleRoles: peopleRolesEn,
     warehouse: warehouseEn,
     workbench: workbenchEn,
     accountSwitch: accountSwitchEn,
@@ -208,7 +232,7 @@ if (!i18n.isInitialized) {
     lng: DEFAULT_APP_LANGUAGE,
     fallbackLng: DEFAULT_APP_LANGUAGE,
     defaultNS: "common",
-    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "minorEmployment", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "storeCash", "dailyCloses", "faceMatch", "notifications", "push", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "warehousePicking", "seasonalProductInsights", "containerNewProducts", "containerDetail", "appInstall", "salesOrders", "legacyEmployeeLogs", "userManagement", "cashRegisterUsers", "warehouse", "workbench", "accountSwitch"],
+    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "minorEmployment", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "storeCash", "dailyCloses", "faceMatch", "notifications", "push", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "warehousePicking", "seasonalProductInsights", "containerNewProducts", "containerDetail", "appInstall", "salesOrders", "legacyEmployeeLogs", "userManagement", "people", "cashRegisterUsers", "warehouse", "workbench", "peopleDetail", "peopleForm", "peoplePos", "peopleRoles", "peopleAccess", "accountSwitch"],
     interpolation: {
       escapeValue: false,
     },

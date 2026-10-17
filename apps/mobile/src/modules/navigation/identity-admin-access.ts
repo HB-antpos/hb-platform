@@ -10,6 +10,12 @@ interface IdentityAdminNavigationAccess {
   menuReady: boolean;
 }
 
+/**
+ * 合并后的「人员管理」入口路由名（人员 / 角色 / 权限三个页签都在 /users 里）。
+ * 旧的 user-admin / roles / permissions 菜单项只保留为重定向壳，不再单独出现在工作台。
+ */
+export const PEOPLE_ENTRY_ROUTE_NAME = "users";
+
 export function resolveIdentityAdminRouteNames(
   routeNames: Iterable<string>,
   access: IdentityAdminNavigationAccess,
@@ -33,6 +39,14 @@ export function resolveIdentityAdminRouteNames(
     for (const route of identityRoutes) {
       if (route.allowed && !result.includes(route.name)) result.push(route.name);
     }
+  }
+
+  // 合并入口兜底：只持有旧入口权限（用户管理 / 角色 / 权限）的账号，服务端菜单里未必有 users（例如只有 Roles.View），
+  // 升级后仍要能从工作台进到人员管理。只在上面的会话门禁已通过（account 会话、非设备、非审核）的前提下补齐，
+  // 所以设备、审核会话不会因此多出入口；已有 users 时不重复追加。
+  const hasIdentityEntry = identityRoutes.some((route) => route.allowed && result.includes(route.name));
+  if (hasIdentityEntry && !result.includes(PEOPLE_ENTRY_ROUTE_NAME)) {
+    result.push(PEOPLE_ENTRY_ROUTE_NAME);
   }
   return result;
 }

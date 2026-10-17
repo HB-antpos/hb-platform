@@ -1,0 +1,208 @@
+{
+  "title": "账号授权",
+  "loading": "正在加载账号授权…",
+  "unknownUser": "未知员工",
+  "actions": {
+    "back": "返回",
+    "save": "保存",
+    "openPos": "收银权限"
+  },
+  "tabs": {
+    "stores": "分店",
+    "roles": "角色",
+    "permissions": "直接权限",
+    "permissionsShort": "权限",
+    "menu": "菜单"
+  },
+  "saveBar": {
+    "dirty_one": "{{count}} 项改动未保存",
+    "dirty_other": "{{count}} 项改动未保存",
+    "clean": "无改动",
+    "saving": "正在保存…",
+    "hintClean": "分店、角色、直接权限的改动会一起保存",
+    "hintPermissions": "继承来的权限要在角色里改",
+    "partSeparator": "；",
+    "moreChanges": "{{parts}} 等",
+    "managerGain": "店长角色将自动获得",
+    "managerLose": "店长角色将自动移除"
+  },
+  "changes": {
+    "store": "{{store}}：{{from}} → {{to}}",
+    "roleAdded": "角色：添加「{{name}}」",
+    "roleRemoved": "角色：移除「{{name}}」",
+    "permissionAdded": "直接权限：开启「{{name}}」",
+    "permissionRemoved": "直接权限：关闭「{{name}}」"
+  },
+  "stores": {
+    "searchPlaceholder": "搜索分店名称或编码",
+    "unassigned": "未分配",
+    "view": "查看",
+    "manage": "管理",
+    "disabledStore": "已停用",
+    "posEntry": "收银权限",
+    "posAfterSave": "保存后可设置收银权限",
+    "noMatch": "没有匹配的分店。",
+    "emptyTitle": "没有可用分店",
+    "emptyDescription": "当前没有可用于此账号的分店。",
+    "missingStoreGuid": "此分店缺少授权标识，无法进入收银权限。",
+    "managerNotice": "有「管理」分店的账号自动获得店长角色；改成都没有「管理」时，店长角色自动移除。",
+    "scopeNotice": "你只能调整自己管理的分店；「管理」只有管理员能授予。"
+  },
+  "roles": {
+    "searchPlaceholder": "搜索角色",
+    "noMatch": "没有匹配的角色。",
+    "emptyTitle": "没有可用角色",
+    "emptyDescription": "当前没有可分配给此账号的角色。",
+    "derived": "由管理分店派生",
+    "derivedHintOff": "点此去「分店」把某家分店设为「管理」",
+    "derivedHintOn": "已由「管理」分店派生；想取消，把对应分店改为「查看」",
+    "highPrivilege": "高权限",
+    "managerLimit": "店长只能为管理范围内的员工增删「店员」角色。",
+    "grantManager": {
+      "set": "{{store}} 已设为「管理」，待保存",
+      "choose": "该员工有多个分店，请选择要设为「管理」的分店，再点「保存」。",
+      "noStore": "还没有给这个员工分配分店，请先分配分店，再把它设为「管理」。",
+      "already": "店长角色由「管理」分店派生。想取消店长，把对应分店改为「查看」并保存即可。"
+    }
+  },
+  "permissions": {
+    "searchPlaceholder": "搜索权限",
+    "summary": {
+      "effective": "有效",
+      "inherited": "角色继承",
+      "direct": "直接授权"
+    },
+    "copyFromColleague": "从同事复制",
+    "copyToOthers": "复制给他人",
+    "managerLimit": "店长只能授予自己拥有的权限。",
+    "implicitNotice": "该账号是管理员，默认拥有全部权限，不需要单独授权。",
+    "source": {
+      "inherited": "继承自 {{roles}}",
+      "inheritedFallback": "继承自角色",
+      "direct": "直接授权",
+      "none": "未开放",
+      "implicit": "管理员默认拥有"
+    },
+    "categoryTitle": "{{name}} · {{enabled}} / {{total}}",
+    "noMatch": "没有匹配的权限。",
+    "emptyTitle": "没有可用权限",
+    "emptyDescription": "当前没有可分配给此账号的权限。",
+    "posDefaults": {
+      "title": "收银权限 · 账号默认值",
+      "titleWithCount": "收银权限 · 账号默认值 · {{enabled}} / {{total}}",
+      "notice": "这里是账号级默认值，对所有分店生效。要按分店单独调整，请到分店下的「收银权限」。"
+    }
+  },
+  "menu": {
+    "hint": "移动端菜单的可见性跟随当前直接授权的权限；这里的开关改的就是直接权限。",
+    "sections": {
+      "bottom": "底部入口",
+      "store": "门店",
+      "operations": "业务操作",
+      "reports": "报表"
+    },
+    "adminOnly": "仅管理员",
+    "fixed": "固定入口",
+    "inherited": "角色继承",
+    "direct": "直接授权",
+    "visible": "已开放",
+    "hidden": "未开放",
+    "emptyTitle": "没有可配置的菜单",
+    "emptyDescription": "当前没有可配置的移动端菜单。"
+  },
+  "copy": {
+    "toOthersTitle": "把 {{name}} 的权限复制给…",
+    "fromColleagueTitle": "复制同事的权限给 {{name}}",
+    "direction": {
+      "toOthers": "复制给他人",
+      "fromColleague": "从同事复制"
+    },
+    "storeSubtitle": "分店：{{store}}",
+    "allStores": "全部分店",
+    "close": "关闭",
+    "searchPlaceholder": "搜索同事",
+    "unavailable": "没有可选的分店，暂时不能选择同事。",
+    "listFailed": "同事列表加载失败",
+    "empty": "这里没有可选的同事（已停用的员工和店长不在此列）。",
+    "noMatch": "没有匹配的同事",
+    "help": "只复制「直接权限」；角色权限不复制；你本人不能分配的权限会自动跳过。",
+    "next_one": "下一步 · 复制给 {{count}} 人",
+    "next_other": "下一步 · 复制给 {{count}} 人",
+    "nextFromColleague": "下一步",
+    "nextIdle": "选择人员后继续",
+    "previewFailed": "无法计算权限变化，请稍后重试",
+    "copyFailed": "复制失败，所有人的权限都没有被改动",
+    "dirtyBlocked": "请先保存或放弃当前未保存的权限修改，再复制权限",
+    "success_one": "已复制，{{count}} 人的权限已更新",
+    "success_other": "已复制，{{count}} 人的权限已更新",
+    "mode": {
+      "merge": "合并（推荐）",
+      "mergeShort": "合并",
+      "replace": "覆盖",
+      "replaceShort": "覆盖"
+    },
+    "confirm": {
+      "title": "确认复制",
+      "subtitle": "从 {{source}} 复制直接权限 · 方式：{{mode}}",
+      "modeHint": "合并只增加权限，不会删掉对方已有的；覆盖会让对方的直接权限与 {{source}} 完全一致。",
+      "noChange": "无变化",
+      "unchanged": "已有全部 {{count}} 项，不变",
+      "nothingToCopy": "所选人员的直接权限与来源一致，没有需要复制的内容。",
+      "skipped": "跳过 {{count}} 项：{{names}} 超出你的授权范围，已自动跳过。",
+      "recalculating": "正在重新计算…",
+      "back": "返回选人",
+      "submit_one": "确认复制给 {{count}} 人",
+      "submit_other": "确认复制给 {{count}} 人",
+      "submitSelf": "确认复制"
+    }
+  },
+  "save": {
+    "success": "已保存",
+    "partialTitle": "保存没有全部完成",
+    "failedTitle": "保存失败",
+    "abortedTitle": "保存已中止",
+    "abortedDescription": "登录身份已变化，剩余改动没有保存。",
+    "savedLine": "已保存：{{sections}}",
+    "failedLine": "保存失败：{{section}}（{{reason}}）",
+    "notRunLine": "未执行：{{sections}}",
+    "retryHint": "未保存的改动仍然保留，点「保存」可以重试。",
+    "reasonFallback": "请稍后重试",
+    "separator": "、",
+    "section": {
+      "stores": "分店",
+      "roles": "角色",
+      "permissions": "直接权限"
+    },
+    "sectionForbidden": "没有权限修改此分区，相关改动已撤回。"
+  },
+  "unsaved": {
+    "title": "放弃未保存的授权更改？",
+    "description": "离开后，尚未保存的分店、角色或权限更改将会丢失。",
+    "discard": "放弃更改"
+  },
+  "busy": {
+    "title": "操作处理中",
+    "description": "请等待当前保存完成后再离开此页面。"
+  },
+  "errors": {
+    "invalidTitle": "账号参数不完整",
+    "invalidDescription": "缺少用户标识，请从人员管理页面重新进入账号授权。",
+    "deviceTitle": "设备模式不能管理账号授权",
+    "deviceDescription": "请使用管理员或已获授权的用户账号登录后再管理员工授权。",
+    "selfTitle": "不能管理自己的授权",
+    "selfDescription": "请由另一名有权限的管理员调整你的账号授权。",
+    "privilegedTitle": "无法管理此高权限账号",
+    "privilegedDescription": "只有管理员可以管理管理员、店长或仓库经理账号。",
+    "noAccessTitle": "没有账号授权权限",
+    "noAccessDescription": "当前账号不能管理员工的分店、角色、权限或收银授权。",
+    "unauthorizedTitle": "登录已失效",
+    "unauthorizedDescription": "请重新登录后再管理账号授权。",
+    "forbiddenTitle": "无法管理此账号",
+    "forbiddenDescription": "当前账号没有管理此目标或分区的权限。",
+    "notFoundTitle": "此账号已不可用",
+    "notFoundDescription": "账号可能已被删除或移出你的范围，请返回人员管理刷新。",
+    "networkTitle": "账号授权加载失败",
+    "networkDescription": "暂时无法连接服务器，请检查网络后重试。",
+    "sectionNoAccess": "当前账号没有管理此分区的权限。"
+  }
+}

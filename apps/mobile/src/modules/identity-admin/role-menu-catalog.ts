@@ -88,8 +88,10 @@ const MOBILE_MENU: MenuSource[] = ([
     "Attendance.Leave.ReviewManagedStore", "Attendance.Settings.Edit", "Attendance.Admin.View",
   ]],
   ["seasonal-cards", "Seasonal cards", "节庆卡", ["SeasonalCards.Remaining.ViewManagedStore", "SeasonalCards.Remaining.SubmitManagedStore"]],
-  // 「员工管理」(users) 只认 Users.ViewStoreStaff（Users.View 持有者经后端别名自动满足）；「用户管理」(user-admin) 仍是 Users.View。
-  ["users", "Users", "用户", ["Users.ViewStoreStaff"]],
+  // 「人员管理」(users) 是合并后的移动端入口（人员 / 角色 / 权限三个页签），菜单权限仍只认 Users.ViewStoreStaff
+  // （Users.View 持有者经后端别名自动满足）。后端 FullAppMenu 仍下发 user-admin / roles / permissions 三项（旧版 App 在用），
+  // 新版 App 里它们只剩重定向壳、不再是工作台入口，这里与后端保持一一对应，待旧版普及后随后端一起清理。
+  ["users", "People management", "人员管理", ["Users.ViewStoreStaff"]],
   ["user-admin", "User management", "用户管理", ["Users.View"]],
   ["cash-register-users", "Cash register barcodes", "收银用户条码", ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]],
   ["roles", "Role management", "角色管理", ["Roles.View"]],

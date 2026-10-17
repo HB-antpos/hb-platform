@@ -12,6 +12,7 @@ import {
   type ReviewTransportResult,
 } from "./transport";
 import { normalizeAttendanceToday } from "../attendance/attendance-today-normalization";
+import { composeFullName } from "../people/person-name";
 import {
   computeSeasonalCardHolidayWindows,
   findNextSeasonalCardOpening,
@@ -999,6 +1000,26 @@ function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : {};
+}
+
+// 员工姓名四段（名 / 中间名 / 姓 / 昵称），与新后端契约一致：创建时有值才保存；
+// 更新时 null / 缺省 = 不改，空串 = 清空；名 / 中间名 / 姓有变化时 fullName 按四段重算。
+const REVIEW_NAME_PART_KEYS = ["givenName", "middleName", "familyName", "nickname"] as const;
+
+function applyReviewNameParts(user: JsonRecord, payload: JsonRecord) {
+  let fullNamePartChanged = false;
+  for (const key of REVIEW_NAME_PART_KEYS) {
+    const value = payload[key];
+    if (typeof value !== "string") continue;
+    const text = value.replace(/\s+/g, " ").trim();
+    if (text) user[key] = text;
+    else delete user[key];
+    if (key !== "nickname") fullNamePartChanged = true;
+  }
+  if (fullNamePartChanged) {
+    const composed = composeFullName(user);
+    if (composed) user.fullName = composed;
+  }
 }
 
 // 审核模式的货柜明细查询：与真实接口一样支持分页、搜索、筛选和排序，
@@ -4545,7 +4566,8 @@ function registerUserRoutes(
     const keyword = String(payload.keyword ?? "").trim().toLowerCase();
     return { data: page(state().users.filter((user) =>
       (!storeCode || user.storeCode === storeCode)
-      && (!keyword || [user.fullName, user.username, user.phone].some((value) => String(value ?? "").toLowerCase().includes(keyword))))) };
+      && (!keyword || [user.fullName, user.givenName, user.middleName, user.familyName, user.nickname, user.username, user.phone]
+        .some((value) => String(value ?? "").toLowerCase().includes(keyword))))) };
   });
   register(transport, ["POST"], "/react/v1/store-users", ({ body }) => {
     const current = state();
@@ -4597,6 +4619,7 @@ function registerUserRoutes(
       createdAt: current.now,
       updatedAt: current.now,
     };
+    applyReviewNameParts(user, payload);
     current.users.push(user);
     mirrorCreate(
       current,
@@ -4638,10 +4661,15 @@ function registerUserRoutes(
       const user = findByAnyId(state().users, id);
       if (!user) throw new Error(`IOS_REVIEW_USER_NOT_FOUND: ${id}`);
       if (method === "PUT") {
-        Object.assign(user, asRecord(body), {
+        const payload = asRecord(body);
+        // 姓名四段单独处理（null / 缺省 = 不改，空串 = 清空），其余字段沿用整体覆盖。
+        const rest: JsonRecord = { ...payload };
+        for (const key of REVIEW_NAME_PART_KEYS) delete rest[key];
+        Object.assign(user, rest, {
           userGuid: id,
           updatedAt: state().now,
         });
+        applyReviewNameParts(user, payload);
         mirrorUpdate(
           state(),
           dataStore,

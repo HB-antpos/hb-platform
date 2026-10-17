@@ -1,0 +1,174 @@
+{
+  "title": {
+    "store": "Staff details",
+    "admin": "Person details"
+  },
+  "goAuthorize": "Manage access",
+  "roleDerived": "Derived from managed store",
+  "relation": {
+    "manage": "Manage",
+    "view": "View"
+  },
+  "missing": {
+    "title": "No person selected",
+    "description": "Open a person from the People list.",
+    "storeDescription": "The store is missing. Pick a store in the People list, then open the person again."
+  },
+  "loadFailed": {
+    "title": "Could not load this person",
+    "description": "Try again later, or go back to the list and reopen.",
+    "notFound": "This account no longer exists. Go back and refresh the list.",
+    "forbidden": "You do not have permission to view this person."
+  },
+  "quick": {
+    "edit": "Edit",
+    "password": "Password",
+    "barcode": "Personal code"
+  },
+  "sections": {
+    "access": "Stores and access",
+    "account": "Account and security",
+    "profile": "Staff profile",
+    "schedule": "Roster and records"
+  },
+  "rows": {
+    "store": "Store",
+    "role": "Role",
+    "pos": "POS permissions",
+    "direct": "Direct permissions",
+    "noStore": "Not assigned",
+    "storeSummary_one": "{{count}} store · {{name}}",
+    "storeSummary_other": "{{count}} stores · {{name}}",
+    "posCount": "{{enabled}} / {{total}} on",
+    "posCustom": "Custom for this store",
+    "posInherited": "From role",
+    "posOpen": "View",
+    "posByStore": "Set per store",
+    "directCount_one": "{{count}} permission",
+    "directCount_other": "{{count}} permissions",
+    "directWithEffective_one": "{{count}} direct · {{effective}} effective",
+    "directWithEffective_other": "{{count}} direct · {{effective}} effective",
+    "directAll": "Has all permissions",
+    "directOpen": "View"
+  },
+  "profile": {
+    "name": "Name",
+    "nameParts": {
+      "family": "Family",
+      "given": "Given",
+      "middle": "Middle"
+    },
+    "contact": "Contact",
+    "other": "Other details",
+    "age_one": "Age {{count}}",
+    "age_other": "Age {{count}}",
+    "sensitive": "Sensitive data",
+    "sensitiveMasked": "ID, bank and super are hidden",
+    "pending": "Pending review"
+  },
+  "schedule": {
+    "row": "Roster",
+    "recordsRow": "Attendance records",
+    "weekCount_one": "{{count}} shift this week",
+    "weekCount_other": "{{count}} shifts this week",
+    "weekEmpty": "No shifts this week",
+    "next": "next {{weekday}} {{time}}",
+    "recordsCount_one": "{{count}} record in 30 days",
+    "recordsCount_other": "{{count}} records in 30 days",
+    "recordsCountCapped_one": "{{count}}+ record in 30 days",
+    "recordsCountCapped_other": "{{count}}+ records in 30 days",
+    "recordsEmpty": "No records in 30 days",
+    "open": "View"
+  },
+  "account": {
+    "lastLogin": "Last sign-in",
+    "neverLoggedIn": "Never signed in",
+    "loginRecords": "Sign-in records",
+    "sessions_one": "{{count}} active session",
+    "sessions_other": "{{count}} active sessions",
+    "sessionsCapped_one": "{{count}}+ active session",
+    "sessionsCapped_other": "{{count}}+ active sessions",
+    "sessionsOpen": "View",
+    "resetPassword": "Reset password",
+    "resetPasswordHint": "Email a setup link or set a new password",
+    "id": "Account ID",
+    "copyId": "Copy account ID",
+    "idCopied": "Account ID copied",
+    "idCopyFailed": "Could not copy. Try again.",
+    "createdUpdated": "Created / updated",
+    "disableAccount": "Disable account",
+    "enableAccount": "Enable account",
+    "noPosStore": "No store available for POS permissions",
+    "posPickerTitle": "Choose a store for POS permissions"
+  },
+  "loginToggle": {
+    "label": "Allow sign-in",
+    "onHint": "Turn off to block this account from signing in to the app and web",
+    "offHint": "Sign-in is blocked for this account. Turn on to let it sign in to the app and web",
+    "selfHint": "You cannot turn off sign-in for your own account",
+    "allowedValue": "Allowed",
+    "restrictedValue": "Blocked",
+    "confirmTitle": "Block sign-in for {{name}}?",
+    "confirmMessage": "This account will no longer be able to sign in, and sessions that are already signed in will end.",
+    "confirmAction": "Block sign-in",
+    "enabledDone": "Sign-in allowed for this account",
+    "disabledDone": "Sign-in blocked for this account",
+    "noPasswordNotice": "This account has never signed in and may not have a usable password.",
+    "setPassword": "Set password",
+    "errors": {
+      "self": "You cannot turn off sign-in for your own account",
+      "notFound": "This account no longer exists. Go back to the list and refresh.",
+      "scopeDenied": "This account is outside the people you can manage",
+      "highPrivilege": "You cannot change sign-in for administrators or other high-privilege accounts",
+      "forbidden": "You do not have permission to change sign-in for this account",
+      "uncertain": "The result could not be confirmed. The page was refreshed, so check the \"Allow sign-in\" status before trying again.",
+      "generic": "Could not change sign-in. Please try again later."
+    }
+  },
+  "more": {
+    "titles": {
+      "barcode": "Print personal code",
+      "access": "Account access",
+      "pos": "POS permissions",
+      "copyPermissions": "Copy permissions to others",
+      "loginRecords": "Sign-in records"
+    },
+    "barcodeConnected": "Label printer · {{status}}",
+    "barcodeNoPrinter": "No label printer selected yet",
+    "accessSubtitle": "Stores / roles / direct permissions",
+    "posSubtitle": "{{store}} · {{enabled}}/{{total}} on",
+    "posSubtitleFallback": "{{store}} · set per store",
+    "posSubtitleAdmin": "Set per store",
+    "copySubtitle": "Copy their direct permissions to colleagues",
+    "loginRecordsSubtitle": "Latest {{time}}",
+    "disableTitle": "Disable account",
+    "disableSubtitle": "Can be enabled again anytime",
+    "enableTitle": "Enable account",
+    "enableSubtitle": "Restores sign-in; roster and attendance are unaffected",
+    "hint": "Actions you cannot use are not shown"
+  },
+  "confirm": {
+    "disableTitle": "Disable {{name}}?",
+    "disableMessage": "{{name}} will no longer be able to sign in to the app or web. Roster, attendance and history are kept, and you can enable the account again at any time.",
+    "enableTitle": "Enable {{name}}?",
+    "enableMessage": "{{name}} will be able to sign in again. Roster, attendance and history are unaffected.",
+    "uncertain": "The result could not be confirmed. The page was refreshed, so check the account status before trying again."
+  },
+  "password": {
+    "title": "Reset password",
+    "modeEmail": "Email setup link",
+    "modeDirect": "Set new password",
+    "directSubmit": "Set password",
+    "directHelper": "At least 6 characters. The old password stops working immediately; share the new one through a secure channel.",
+    "sendTo": "Send to",
+    "emailHint": "The email carries a 6-digit code. The employee sets their own new password with it; you never see or handle the password. The old password keeps working until then.",
+    "modesFootnote": "\"Email setup link\" lets the employee choose their own password. \"Set new password\" replaces the old one immediately.",
+    "forbidden": "You do not have permission to reset this account's password",
+    "uncertain": "The password reset could not be confirmed. Check first and do not resubmit right away."
+  },
+  "barcode": {
+    "printerTitle": "Label printer · {{status}}",
+    "changePrinter": "Change",
+    "changeHint": "Changing the printer happens in this sheet, so you stay on the current page."
+  }
+}

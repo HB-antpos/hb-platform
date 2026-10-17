@@ -1,0 +1,174 @@
+{
+  "title": {
+    "store": "员工详情",
+    "admin": "人员详情"
+  },
+  "goAuthorize": "去授权",
+  "roleDerived": "由管理分店派生",
+  "relation": {
+    "manage": "管理",
+    "view": "查看"
+  },
+  "missing": {
+    "title": "未选择人员",
+    "description": "请从人员管理列表打开详情。",
+    "storeDescription": "缺少分店信息，请从人员管理列表选择分店后再打开详情。"
+  },
+  "loadFailed": {
+    "title": "人员资料加载失败",
+    "description": "请稍后重试，或返回列表重新进入。",
+    "notFound": "这个账号已经不存在，请返回列表刷新。",
+    "forbidden": "当前账号无权查看该人员。"
+  },
+  "quick": {
+    "edit": "编辑资料",
+    "password": "设置密码",
+    "barcode": "个人码"
+  },
+  "sections": {
+    "access": "分店与权限",
+    "account": "账号与安全",
+    "profile": "员工资料",
+    "schedule": "排班与记录"
+  },
+  "rows": {
+    "store": "分店",
+    "role": "角色",
+    "pos": "收银权限",
+    "direct": "直接权限",
+    "noStore": "未分配",
+    "storeSummary_one": "{{count}} 家 · {{name}}",
+    "storeSummary_other": "{{count}} 家 · {{name}}",
+    "posCount": "{{enabled}} / {{total}} 项",
+    "posCustom": "本店自定义",
+    "posInherited": "继承角色",
+    "posOpen": "查看",
+    "posByStore": "按分店设置",
+    "directCount_one": "{{count}} 项",
+    "directCount_other": "{{count}} 项",
+    "directWithEffective_one": "{{count}} 项 · 有效 {{effective}} 项",
+    "directWithEffective_other": "{{count}} 项 · 有效 {{effective}} 项",
+    "directAll": "拥有全部权限",
+    "directOpen": "查看"
+  },
+  "profile": {
+    "name": "姓名",
+    "nameParts": {
+      "family": "姓",
+      "given": "名",
+      "middle": "中间名"
+    },
+    "contact": "联系",
+    "other": "其他资料",
+    "age_one": "年龄 {{count}}",
+    "age_other": "年龄 {{count}}",
+    "sensitive": "敏感资料",
+    "sensitiveMasked": "证件 / 银行 / 养老金已遮挡",
+    "pending": "待审核"
+  },
+  "schedule": {
+    "row": "排班",
+    "recordsRow": "考勤记录",
+    "weekCount_one": "本周 {{count}} 班",
+    "weekCount_other": "本周 {{count}} 班",
+    "weekEmpty": "本周没有排班",
+    "next": "下次 {{weekday}} {{time}}",
+    "recordsCount_one": "近 30 天 {{count}} 次",
+    "recordsCount_other": "近 30 天 {{count}} 次",
+    "recordsCountCapped_one": "近 30 天 {{count}}+ 次",
+    "recordsCountCapped_other": "近 30 天 {{count}}+ 次",
+    "recordsEmpty": "近 30 天没有记录",
+    "open": "查看"
+  },
+  "account": {
+    "lastLogin": "最近登录",
+    "neverLoggedIn": "从未登录",
+    "loginRecords": "登录记录",
+    "sessions_one": "有效会话 {{count}} 个",
+    "sessions_other": "有效会话 {{count}} 个",
+    "sessionsCapped_one": "有效会话 {{count}}+ 个",
+    "sessionsCapped_other": "有效会话 {{count}}+ 个",
+    "sessionsOpen": "查看",
+    "resetPassword": "重置密码",
+    "resetPasswordHint": "发设置密码邮件或直接设新密码",
+    "id": "账号 ID",
+    "copyId": "复制账号 ID",
+    "idCopied": "账号 ID 已复制",
+    "idCopyFailed": "复制失败，请重试",
+    "createdUpdated": "创建 / 更新",
+    "disableAccount": "停用账号",
+    "enableAccount": "启用账号",
+    "noPosStore": "没有可设置收银权限的分店",
+    "posPickerTitle": "选择要设置收银权限的分店"
+  },
+  "loginToggle": {
+    "label": "允许登录",
+    "onHint": "关闭后该账号无法登录 App 和 Web",
+    "offHint": "该账号被限制登录，打开后才能登录 App 和 Web",
+    "selfHint": "不能关闭本人账号的登录权限",
+    "allowedValue": "允许",
+    "restrictedValue": "不允许",
+    "confirmTitle": "关闭 {{name}} 的登录权限？",
+    "confirmMessage": "关闭后该账号将无法登录，已登录的会话也会失效。",
+    "confirmAction": "关闭登录",
+    "enabledDone": "已允许该账号登录",
+    "disabledDone": "已关闭该账号的登录权限",
+    "noPasswordNotice": "该账号还没登录过，可能没有可用密码。",
+    "setPassword": "设置密码",
+    "errors": {
+      "self": "不能关闭本人账号的登录权限",
+      "notFound": "这个账号已经不存在，请返回列表刷新",
+      "scopeDenied": "该账号不在你可管理的范围内",
+      "highPrivilege": "没有权限修改管理员或其他高权限账号的登录权限",
+      "forbidden": "没有修改该账号登录权限的权限",
+      "uncertain": "操作结果未能确认，已刷新页面，请核对「允许登录」的状态后再处理",
+      "generic": "修改登录权限失败，请稍后重试"
+    }
+  },
+  "more": {
+    "titles": {
+      "barcode": "打印个人码",
+      "access": "账号授权",
+      "pos": "收银权限",
+      "copyPermissions": "复制权限给他人",
+      "loginRecords": "登录记录"
+    },
+    "barcodeConnected": "标签打印机 · {{status}}",
+    "barcodeNoPrinter": "还没有选择标签打印机",
+    "accessSubtitle": "分店 / 角色 / 直接权限",
+    "posSubtitle": "{{store}} · {{enabled}}/{{total}} 项",
+    "posSubtitleFallback": "{{store}} · 按分店设置",
+    "posSubtitleAdmin": "按分店设置",
+    "copySubtitle": "把 TA 的直接权限复制给同事",
+    "loginRecordsSubtitle": "最近 {{time}}",
+    "disableTitle": "停用账号",
+    "disableSubtitle": "可随时重新启用",
+    "enableTitle": "启用账号",
+    "enableSubtitle": "恢复登录，排班与考勤不受影响",
+    "hint": "没有权限的操作不会显示"
+  },
+  "confirm": {
+    "disableTitle": "停用 {{name}}？",
+    "disableMessage": "停用后 {{name}} 不能再登录 App 和 Web。排班、考勤和历史记录都会保留，之后可随时重新启用。",
+    "enableTitle": "启用 {{name}}？",
+    "enableMessage": "启用后 {{name}} 可以重新登录，排班、考勤和历史记录不受影响。",
+    "uncertain": "操作结果未能确认，已刷新页面，请核对账号状态后再处理"
+  },
+  "password": {
+    "title": "重置密码",
+    "modeEmail": "发设置密码邮件",
+    "modeDirect": "直接设置新密码",
+    "directSubmit": "设置新密码",
+    "directHelper": "至少 6 位。设置后旧密码立即失效，请通过安全渠道告知本人。",
+    "sendTo": "发送到",
+    "emailHint": "邮件里有 6 位验证码，员工用它自己设新密码；你看不到也不经手密码。设置之前旧密码仍然可用。",
+    "modesFootnote": "「发设置密码邮件」由员工自己设置新密码；「直接设置新密码」会立即替换旧密码。",
+    "forbidden": "没有重置该账号密码的权限",
+    "uncertain": "密码重置结果未能确认，请先核对再处理，不要立即重复提交"
+  },
+  "barcode": {
+    "printerTitle": "标签打印机 · {{status}}",
+    "changePrinter": "更换",
+    "changeHint": "更换打印机会在弹层内完成，不会离开当前页面。"
+  }
+}
