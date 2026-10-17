@@ -2420,6 +2420,9 @@
   <data name="deviceActivation.error.failed" xml:space="preserve">
     <value>设备开通失败，请检查开通码和网络连接后重试。</value>
   </data>
+  <data name="deviceActivation.error.timeout" xml:space="preserve">
+    <value>服务器响应太慢，请检查网络后重试。</value>
+  </data>
   <data name="returns.status.default" xml:space="preserve">
     <value>请扫描订单号开始小票退货。</value>
   </data>

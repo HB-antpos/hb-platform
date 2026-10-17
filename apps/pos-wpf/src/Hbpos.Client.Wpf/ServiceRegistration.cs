@@ -253,7 +253,7 @@ public static class ServiceRegistration
         services.AddHttpClient<IDeviceApiClient, DeviceApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
-            client.Timeout = TimeSpan.FromSeconds(3);
+            client.Timeout = DeviceApiClient.DefaultRequestTimeout;
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
@@ -284,7 +284,7 @@ public static class ServiceRegistration
         services.AddHttpClient<IConnectivityApiClient, ConnectivityApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
-            client.Timeout = TimeSpan.FromSeconds(3);
+            client.Timeout = ConnectivityApiClient.ProbeTimeout;
         })
         .AddRuntimeApiEndpoint();
         services.AddHttpClient<IAttendanceSigningKeyApiClient, AttendanceSigningKeyApiClient>(client =>
@@ -304,7 +304,7 @@ public static class ServiceRegistration
         services.AddHttpClient<ICashierLoginApiClient, CashierLoginApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
-            client.Timeout = TimeSpan.FromSeconds(5);
+            client.Timeout = CashierLoginApiClient.RequestTimeout;
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();

@@ -10,7 +10,7 @@ public sealed class ApiServerSettingsService
 {
     public const string DevelopmentApiBaseAddress = "http://localhost:5159/";
     public const string ReleaseApiBaseAddress = "https://hotbargain.vip/pos-api/";
-    internal static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(10);
 
     private readonly HttpClient _httpClient;
     private readonly Func<string> _getCurrentAddress;

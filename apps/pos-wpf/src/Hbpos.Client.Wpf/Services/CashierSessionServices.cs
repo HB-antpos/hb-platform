@@ -308,6 +308,10 @@ public interface ICashierLoginApiClient
 public sealed class CashierLoginApiClient(HttpClient httpClient) : ICashierLoginApiClient
 {
     private const string LoginPath = "api/v1/cashiers/barcode-login";
+
+    /// <summary>在线登录请求超时；超时后按服务不可用走离线缓存，慢线路上 5 秒不够首个请求完成。</summary>
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<CashierLoginAttempt> LoginAsync(

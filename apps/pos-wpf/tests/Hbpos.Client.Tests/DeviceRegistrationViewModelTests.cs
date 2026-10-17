@@ -83,6 +83,49 @@ public sealed class DeviceRegistrationViewModelTests
     }
 
     [Fact]
+    public async Task Activation_code_check_timeout_shows_a_readable_message_instead_of_the_raw_http_client_text()
+    {
+        var workflow = new StubDeviceRegistrationWorkflowService
+        {
+            // 调用方未取消却收到取消 = HttpClient 超时；原文是 HttpClient 的英文技术文案。
+            PreviewException = new TaskCanceledException(
+                "The request was canceled due to the configured HttpClient.Timeout of 3 seconds elapsing.")
+        };
+        var viewModel = new DeviceRegistrationViewModel(workflow);
+        await viewModel.InitializeAsync(cachedDevice: null);
+        viewModel.ActivationCode = ActivationCode;
+
+        await viewModel.PreviewActivationCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, workflow.PreviewCallCount);
+        Assert.Equal(
+            "The server took too long to respond. Check the network and try again.",
+            viewModel.StatusMessage);
+        Assert.DoesNotContain("HttpClient", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public void Activation_timeout_message_exists_in_both_languages()
+    {
+        var resources = Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "Resources");
+
+        foreach (var file in new[] { "Strings.resx", "Strings.zh-CN.resx" })
+        {
+            var value = XDocument.Load(Path.Combine(resources, file))
+                .Descendants("data")
+                .Single(element => element.Attribute("name")?.Value == "deviceActivation.error.timeout")
+                .Element("value")?.Value;
+            Assert.False(string.IsNullOrWhiteSpace(value), file);
+        }
+    }
+
+    [Fact]
     public void Registration_and_settings_views_use_the_shared_server_settings_panel()
     {
         var viewsRoot = Path.Combine(
@@ -322,6 +365,8 @@ public sealed class DeviceRegistrationViewModelTests
 
         public int PreviewCallCount { get; private set; }
 
+        public Exception? PreviewException { get; set; }
+
         public string GetHardwareId() => "HW-001";
 
         public Task<DeviceRegistrationLoadResult> LoadStoresAsync(
@@ -370,6 +415,11 @@ public sealed class DeviceRegistrationViewModelTests
             CancellationToken cancellationToken = default)
         {
             PreviewCallCount++;
+            if (PreviewException is not null)
+            {
+                throw PreviewException;
+            }
+
             return Task.FromResult(new DeviceActivationPreviewResult(
                 activationCode,
                 "1002",
