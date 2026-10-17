@@ -564,4 +564,10 @@
   <data name="settings.network.finding.httpsIntercepted.message" xml:space="preserve"><value>这台机器收到的服务器证书是由「{0}」签发的，不是 Let's Encrypt。杀毒软件的「HTTPS 扫描 / 网页防护」、代理或防火墙设备正在检查 HTTPS，把连接拖慢或搞坏了。请在杀毒软件里把 hotbargain.vip 和 HB POS 加入 HTTPS 扫描的排除项，或对它们关闭该功能。</value></data>
   <data name="settings.network.fix.installTrustedRoots" xml:space="preserve"><value>安装缺少的根证书（ISRG Root X1）</value></data>
   <data name="settings.network.confirm.roots" xml:space="preserve"><value>只安装 Let's Encrypt 自己的公共根证书；安装前会先用程序内置的指纹校验，之后可以用「还原修改」移除。</value></data>
+  <data name="settings.network.step.connectStability" xml:space="preserve"><value>到服务器的新连接（逐个）</value></data>
+  <data name="settings.network.step.connectBurst" xml:space="preserve"><value>到服务器的新连接（同时多个）</value></data>
+  <data name="settings.network.finding.serverPathLossy.title" xml:space="preserve"><value>到 POS 服务器的新连接不稳定</value></data>
+  <data name="settings.network.finding.serverPathLossy.message" xml:space="preserve"><value>到 POS 服务器的新连接有时卡住或失败，而同一台机器连参照服务器每次都正常。问题出在通往服务器的路径上（运营商或沿途某一段）。请运行「pathping -n hotbargain.vip」看从哪一跳开始丢包，试试换一个网络，并把丢包位置告诉运营商。连接建好之后 POS 会一直复用，所以卡顿主要出现在需要重新建立连接的时候。</value></data>
+  <data name="settings.network.finding.connectionBurstLimited.title" xml:space="preserve"><value>同时建立多个连接会失败</value></data>
+  <data name="settings.network.finding.connectionBurstLimited.message" xml:space="preserve"><value>一个一个地连没问题，同时连几个就卡住或失败。路由器或防火墙在限制这台机器同时建立新连接的数量。请检查路由器的连接数限制、「DoS / SYN 洪水防护」设置，以及杀毒软件里的网络攻击防护。</value></data>
 </root>

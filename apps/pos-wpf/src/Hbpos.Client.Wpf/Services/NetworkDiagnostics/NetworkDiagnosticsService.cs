@@ -19,6 +19,10 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
     internal const string ReferenceAddress = "1.1.1.1";
 
     private const int GatewayPingCount = 6;
+    private const int StabilityAttempts = 5;
+    private const int BurstAttempts = 6;
+    private static readonly TimeSpan StabilityAttemptTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan StabilityBudget = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan GatewayPingTimeout = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(12);
@@ -115,6 +119,21 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
         await Task.WhenAll(connectTasks);
         ipv4Result = ipv4Task is null ? null : await ipv4Task;
         ipv6Result = ipv6Task is null ? null : await ipv6Task;
+        // 连接稳定性放在主检测之后单独测：逐个连（看是否偶发丢握手包）、同时连（看是否被限制并发新连接）。
+        // 不和其他探测同时进行，否则我们自己的并发会让路由器限制连接，反过来污染结果。
+        ConnectStabilityResult? serverSequential = null;
+        ConnectStabilityResult? referenceSequential = null;
+        ConnectStabilityResult? serverBurst = null;
+        if (!isLiteral && ipv4 is not null)
+        {
+            var serverSequentialTask = probe.ProbeConnectStabilityAsync(ipv4, port, StabilityAttempts, false, StabilityAttemptTimeout, StabilityBudget, cancellationToken);
+            var referenceSequentialTask = probe.ProbeConnectStabilityAsync(ReferenceAddress, 443, StabilityAttempts, false, StabilityAttemptTimeout, StabilityBudget, cancellationToken);
+            await Task.WhenAll(serverSequentialTask, referenceSequentialTask);
+            serverSequential = await serverSequentialTask;
+            referenceSequential = await referenceSequentialTask;
+            serverBurst = await probe.ProbeConnectStabilityAsync(ipv4, port, BurstAttempts, true, StabilityAttemptTimeout, StabilityBudget, cancellationToken);
+        }
+
         var tlsOffline = tlsOfflineTask is null ? null : await tlsOfflineTask;
         var tlsDefault = tlsDefaultTask is null ? null : await tlsDefaultTask;
         // 证书链信息优先用"不联网校验"那次（不会被联网查证书卡住）；它没拿到时退而用默认那次。
@@ -157,6 +176,16 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
             ChainSubjects = chain?.ChainSubjects ?? [],
             CertificateIssuer = chain?.Issuer,
             MissingTrustedRoots = chain is { ChainTrusted: false } ? probe.GetMissingTrustedRoots() : [],
+            StabilityAttempts = serverSequential?.Attempts,
+            StabilitySucceeded = serverSequential?.Succeeded,
+            StabilityAvgMs = serverSequential?.AvgMs,
+            StabilityMaxMs = serverSequential?.MaxMs,
+            ReferenceStabilityAttempts = referenceSequential?.Attempts,
+            ReferenceStabilitySucceeded = referenceSequential?.Succeeded,
+            ReferenceStabilityMaxMs = referenceSequential?.MaxMs,
+            BurstAttempts = serverBurst?.Attempts,
+            BurstSucceeded = serverBurst?.Succeeded,
+            BurstMaxMs = serverBurst?.MaxMs,
             GatewayPingSent = gateway?.Sent,
             GatewayPingLost = gateway?.Lost,
             GatewayAvgMs = gateway?.AvgMs,

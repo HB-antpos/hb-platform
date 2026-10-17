@@ -29,7 +29,7 @@ public sealed class NetworkDiagnosisRulesTests
 
         Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
         var steps = NetworkDiagnosisRules.BuildSteps(m);
-        Assert.Equal(12, steps.Count);
+        Assert.Equal(14, steps.Count);
         Assert.DoesNotContain(steps, step => step.Status is DiagnosticStepStatus.Failed or DiagnosticStepStatus.Slow);
         Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.ConnectIpv6).Status);
     }
@@ -512,6 +512,126 @@ public sealed class NetworkDiagnosisRulesTests
     public void Issuer_names_are_shortened_for_people(string subject, string expected)
     {
         Assert.Equal(expected, NetworkDiagnosisRules.ShortName(subject));
+    }
+
+    private static NetworkMeasurements StabilityHealthy() => Healthy() with
+    {
+        StabilityAttempts = 5,
+        StabilitySucceeded = 5,
+        StabilityAvgMs = 270,
+        StabilityMaxMs = 310,
+        ReferenceStabilityAttempts = 5,
+        ReferenceStabilitySucceeded = 5,
+        ReferenceStabilityMaxMs = 45,
+        BurstAttempts = 6,
+        BurstSucceeded = 6,
+        BurstMaxMs = 420
+    };
+
+    [Fact]
+    public void Clean_connection_runs_to_the_server_are_ok_and_say_so()
+    {
+        var m = StabilityHealthy();
+
+        Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var steps = NetworkDiagnosisRules.BuildSteps(m);
+        var sequential = steps.Single(step => step.Id == DiagnosticStepId.ConnectStability);
+        var burst = steps.Single(step => step.Id == DiagnosticStepId.ConnectBurst);
+        Assert.Equal(DiagnosticStepStatus.Ok, sequential.Status);
+        Assert.Equal("one at a time: 5/5 connected · avg 270 ms · max 310 ms · reference 5/5", sequential.Detail);
+        Assert.Equal(DiagnosticStepStatus.Ok, burst.Status);
+        Assert.Equal("6 at once: 6/6 connected · max 420 ms", burst.Detail);
+    }
+
+    [Fact]
+    public void Connections_that_sometimes_fail_while_the_reference_is_clean_mean_the_route_to_the_server_is_lossy()
+    {
+        var m = StabilityHealthy() with { StabilitySucceeded = 4, StabilityAvgMs = 300, StabilityMaxMs = 310 };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.ServerPathLossy, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+        var step = NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.ConnectStability);
+        Assert.Equal(DiagnosticStepStatus.Failed, step.Status);
+        Assert.Contains("4/5 connected", step.Detail);
+    }
+
+    [Fact]
+    public void Connections_that_all_succeed_but_take_seconds_are_also_lossy_because_the_handshake_had_to_be_resent()
+    {
+        var m = StabilityHealthy() with { StabilityAvgMs = 1200, StabilityMaxMs = 3100 };
+
+        Assert.Equal(DiagnosisKind.ServerPathLossy, NetworkDiagnosisRules.Evaluate(m).Kind);
+        Assert.Equal(DiagnosticStepStatus.Slow, NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.ConnectStability).Status);
+    }
+
+    [Fact]
+    public void Single_connections_working_but_several_at_once_failing_means_something_limits_concurrent_connections()
+    {
+        var m = StabilityHealthy() with { BurstSucceeded = 3, BurstMaxMs = 3000 };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.ConnectionBurstLimited, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+        var burst = NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.ConnectBurst);
+        Assert.Equal(DiagnosticStepStatus.Failed, burst.Status);
+        Assert.Contains("6 at once: 3/6 connected", burst.Detail);
+    }
+
+    [Fact]
+    public void A_failed_connection_in_the_main_batch_with_clean_one_at_a_time_runs_is_a_concurrency_problem_not_a_blocked_route()
+    {
+        // 1012 店第二份报告的形状：主检测里同时开了多个连接，其中到服务器的那个失败；逐个连却全部正常。
+        var m = StabilityHealthy() with
+        {
+            Ipv4ConnectFailed = true,
+            Ipv4ConnectMs = 6000,
+            Reply = ReplyOutcome.Timeout,
+            ReferenceHost = "1.1.1.1",
+            ReferenceConnectMs = 39,
+            BurstAttempts = null,
+            BurstSucceeded = null,
+            BurstMaxMs = null
+        };
+
+        Assert.Equal(DiagnosisKind.ConnectionBurstLimited, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void An_unclean_reference_means_the_stability_numbers_say_nothing_about_the_server_route()
+    {
+        var m = StabilityHealthy() with { StabilitySucceeded = 3, ReferenceStabilitySucceeded = 3 };
+
+        Assert.NotEqual(DiagnosisKind.ServerPathLossy, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void A_server_that_never_accepts_a_connection_is_still_a_blocked_route_not_a_lossy_one()
+    {
+        var m = StabilityHealthy() with
+        {
+            StabilitySucceeded = 0,
+            StabilityAvgMs = null,
+            StabilityMaxMs = null,
+            Ipv4ConnectFailed = true,
+            Ipv4ConnectMs = 6000,
+            Reply = ReplyOutcome.Timeout,
+            ReferenceHost = "1.1.1.1",
+            ReferenceConnectMs = 39
+        };
+
+        Assert.Equal(DiagnosisKind.ServerPathBlocked, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void The_stability_steps_are_skipped_when_they_were_not_measured()
+    {
+        var steps = NetworkDiagnosisRules.BuildSteps(Healthy());
+
+        Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.ConnectStability).Status);
+        Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.ConnectBurst).Status);
     }
 
     [Fact]

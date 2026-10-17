@@ -42,7 +42,7 @@ public sealed class NetworkDiagnosticsViewModelTests
         await h.Vm.DiagnoseCommand.ExecuteAsync(null);
 
         Assert.True(h.Vm.HasResult);
-        Assert.Equal(12, h.Vm.Steps.Count);
+        Assert.Equal(14, h.Vm.Steps.Count);
         Assert.Equal("Link to the router", h.Vm.Steps[1].Label);
         Assert.Equal("skipped", h.Vm.Steps[1].StatusKey);
         Assert.Equal("System DNS", h.Vm.Steps[2].Label);
