@@ -42,12 +42,15 @@ public sealed class NetworkDiagnosticsViewModelTests
         await h.Vm.DiagnoseCommand.ExecuteAsync(null);
 
         Assert.True(h.Vm.HasResult);
-        Assert.Equal(8, h.Vm.Steps.Count);
-        Assert.Equal("System DNS", h.Vm.Steps[1].Label);
-        Assert.Equal("4.2 s", h.Vm.Steps[1].TimeText);
-        Assert.Equal("slow", h.Vm.Steps[1].StatusKey);
-        Assert.Equal("skipped", h.Vm.Steps[4].StatusKey);
-        Assert.Equal("skipped", h.Vm.Steps[4].StatusKey);
+        Assert.Equal(10, h.Vm.Steps.Count);
+        Assert.Equal("Link to the router", h.Vm.Steps[1].Label);
+        Assert.Equal("skipped", h.Vm.Steps[1].StatusKey);
+        Assert.Equal("System DNS", h.Vm.Steps[2].Label);
+        Assert.Equal("4.2 s", h.Vm.Steps[2].TimeText);
+        Assert.Equal("slow", h.Vm.Steps[2].StatusKey);
+        Assert.Equal("Connect over IPv6", h.Vm.Steps[5].Label);
+        Assert.Equal("skipped", h.Vm.Steps[5].StatusKey);
+        Assert.Equal("Connect to a reference server", h.Vm.Steps[6].Label);
         Assert.Equal("This machine's DNS server is slow", h.Vm.FindingTitle);
         Assert.Equal("warn", h.Vm.FindingSeverity);
         Assert.True(h.Vm.HasFix);

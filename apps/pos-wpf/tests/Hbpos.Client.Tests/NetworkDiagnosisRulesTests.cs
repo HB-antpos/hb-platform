@@ -29,7 +29,7 @@ public sealed class NetworkDiagnosisRulesTests
 
         Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
         var steps = NetworkDiagnosisRules.BuildSteps(m);
-        Assert.Equal(8, steps.Count);
+        Assert.Equal(10, steps.Count);
         Assert.DoesNotContain(steps, step => step.Status is DiagnosticStepStatus.Failed or DiagnosticStepStatus.Slow);
         Assert.Equal(DiagnosticStepStatus.Skipped, steps.Single(step => step.Id == DiagnosticStepId.ConnectIpv6).Status);
     }
@@ -163,6 +163,157 @@ public sealed class NetworkDiagnosisRulesTests
         Assert.Equal(DiagnosisKind.NoLocalNetwork, finding.Kind);
         Assert.Null(finding.SuggestedFix);
         Assert.Equal(DiagnosticStepStatus.Failed, NetworkDiagnosisRules.BuildSteps(m)[0].Status);
+    }
+
+    [Fact]
+    public void A_router_that_drops_packets_is_blamed_before_dns_because_it_explains_everything_being_slow()
+    {
+        var m = Healthy() with
+        {
+            GatewayPingSent = 6,
+            GatewayPingLost = 1,
+            GatewayAvgMs = 40,
+            GatewayMaxMs = 900,
+            SystemDnsMs = 4200
+        };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.LocalLinkUnstable, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+        var step = NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.GatewayLink);
+        Assert.Equal(DiagnosticStepStatus.Slow, step.Status);
+        Assert.Contains("17% lost", step.Detail);
+        Assert.Contains("max 900 ms", step.Detail);
+    }
+
+    [Fact]
+    public void A_router_with_a_high_average_delay_is_unstable_even_without_loss()
+    {
+        var m = Healthy() with { GatewayPingSent = 6, GatewayPingLost = 0, GatewayAvgMs = 450, GatewayMaxMs = 800 };
+
+        Assert.Equal(DiagnosisKind.LocalLinkUnstable, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void Heavy_loss_to_the_router_is_a_failed_step()
+    {
+        var m = Healthy() with { GatewayPingSent = 6, GatewayPingLost = 4, GatewayAvgMs = 20, GatewayMaxMs = 60 };
+
+        var step = NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.GatewayLink);
+
+        Assert.Equal(DiagnosticStepStatus.Failed, step.Status);
+    }
+
+    [Fact]
+    public void A_router_that_never_answers_ping_gives_no_verdict_because_many_routers_block_ping()
+    {
+        var m = Healthy() with { GatewayPingSent = 6, GatewayPingLost = 6, GatewayAvgMs = null, GatewayMaxMs = null };
+
+        Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var step = NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.GatewayLink);
+        Assert.Equal(DiagnosticStepStatus.Skipped, step.Status);
+        Assert.Contains("may block ping", step.Detail);
+    }
+
+    [Fact]
+    public void A_clean_router_link_is_ok()
+    {
+        var m = Healthy() with { GatewayPingSent = 6, GatewayPingLost = 0, GatewayAvgMs = 3, GatewayMaxMs = 6 };
+
+        Assert.Equal(DiagnosisKind.None, NetworkDiagnosisRules.Evaluate(m).Kind);
+        var step = NetworkDiagnosisRules.BuildSteps(m).Single(item => item.Id == DiagnosticStepId.GatewayLink);
+        Assert.Equal(DiagnosticStepStatus.Ok, step.Status);
+        Assert.Contains("0% lost", step.Detail);
+    }
+
+    [Fact]
+    public void Server_connect_failing_while_the_reference_server_answers_quickly_means_the_route_to_the_server_is_blocked()
+    {
+        // 这正是 1012 店那份报告的形状：DNS 正常，到服务器 443 连不上，HTTPS 无回复。
+        var m = Healthy() with
+        {
+            Ipv4ConnectFailed = true,
+            Ipv4ConnectMs = 6000,
+            Reply = ReplyOutcome.Timeout,
+            DirectReplyMs = 12000,
+            ReferenceHost = "1.1.1.1",
+            ReferenceConnectMs = 38
+        };
+
+        var finding = NetworkDiagnosisRules.Evaluate(m);
+
+        Assert.Equal(DiagnosisKind.ServerPathBlocked, finding.Kind);
+        Assert.Null(finding.SuggestedFix);
+    }
+
+    [Fact]
+    public void Server_connect_failing_while_the_reference_server_also_fails_means_the_internet_beyond_the_router_is_down()
+    {
+        var m = Healthy() with
+        {
+            Ipv4ConnectFailed = true,
+            Ipv4ConnectMs = 6000,
+            Reply = ReplyOutcome.Timeout,
+            ReferenceHost = "1.1.1.1",
+            ReferenceConnectFailed = true,
+            ReferenceConnectMs = 6000
+        };
+
+        Assert.Equal(DiagnosisKind.InternetUnreachable, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void A_slow_reference_server_also_points_at_the_internet_connection_not_at_our_server()
+    {
+        var m = Healthy() with
+        {
+            Ipv4ConnectMs = 4000,
+            Reply = ReplyOutcome.Timeout,
+            ReferenceHost = "1.1.1.1",
+            ReferenceConnectMs = 3800
+        };
+
+        Assert.Equal(DiagnosisKind.InternetUnreachable, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void An_in_between_reference_time_stays_the_generic_server_unreachable()
+    {
+        var m = Healthy() with
+        {
+            Ipv4ConnectFailed = true,
+            Reply = ReplyOutcome.Timeout,
+            ReferenceHost = "1.1.1.1",
+            ReferenceConnectMs = 900
+        };
+
+        Assert.Equal(DiagnosisKind.ServerUnreachable, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void Without_a_reference_measurement_a_dead_server_stays_the_generic_server_unreachable()
+    {
+        var m = Healthy() with { Ipv4ConnectFailed = true, Reply = ReplyOutcome.Timeout };
+
+        Assert.Equal(DiagnosisKind.ServerUnreachable, NetworkDiagnosisRules.Evaluate(m).Kind);
+    }
+
+    [Fact]
+    public void The_reference_step_shows_it_is_a_different_server_used_for_comparison()
+    {
+        var ok = NetworkDiagnosisRules.BuildSteps(Healthy() with { ReferenceHost = "1.1.1.1", ReferenceConnectMs = 38 })
+            .Single(item => item.Id == DiagnosticStepId.ReferenceConnect);
+        var failed = NetworkDiagnosisRules.BuildSteps(Healthy() with { ReferenceHost = "1.1.1.1", ReferenceConnectFailed = true })
+            .Single(item => item.Id == DiagnosticStepId.ReferenceConnect);
+        var skipped = NetworkDiagnosisRules.BuildSteps(Healthy())
+            .Single(item => item.Id == DiagnosticStepId.ReferenceConnect);
+
+        Assert.Equal(DiagnosticStepStatus.Ok, ok.Status);
+        Assert.Contains("1.1.1.1 port 443", ok.Detail);
+        Assert.Contains("used for comparison", ok.Detail);
+        Assert.Equal(DiagnosticStepStatus.Failed, failed.Status);
+        Assert.Equal(DiagnosticStepStatus.Skipped, skipped.Status);
     }
 
     [Fact]

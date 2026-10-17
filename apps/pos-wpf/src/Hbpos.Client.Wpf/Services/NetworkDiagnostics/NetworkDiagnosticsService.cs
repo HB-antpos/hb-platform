@@ -15,6 +15,11 @@ public interface INetworkDiagnosticsService
 /// </summary>
 public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTimeOffset>? clock = null) : INetworkDiagnosticsService
 {
+    /// <summary>参照地址：Cloudflare 的公共解析服务，443 端口对全球开放，用来对比"链路本身"和"到我们服务器的路径"。</summary>
+    internal const string ReferenceAddress = "1.1.1.1";
+
+    private const int GatewayPingCount = 6;
+    private static readonly TimeSpan GatewayPingTimeout = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(12);
 
@@ -31,6 +36,11 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
 
         var local = probe.GetLocalNetwork();
         var proxy = probe.GetProxyInfo(apiBaseAddress);
+
+        // 网关 ping 与 DNS 查询同时进行；最长约 6 秒，不会拉长总耗时。
+        Task<PingProbeResult>? gatewayTask = local.HasNetwork && !string.IsNullOrWhiteSpace(local.Gateway)
+            ? probe.PingAsync(local.Gateway, GatewayPingCount, GatewayPingTimeout, cancellationToken)
+            : null;
 
         DnsProbeResult? systemDns = null;
         DnsProbeResult? publicDns = null;
@@ -71,11 +81,27 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
         // 两种健康检查同时发，省总时间；各自带独立的新连接。
         var directTask = probe.CheckReplyAsync(healthUri, useSystemProxy: false, ReplyTimeout, cancellationToken);
         var viaSystemTask = probe.CheckReplyAsync(healthUri, useSystemProxy: true, ReplyTimeout, cancellationToken);
+        // 参照连接：本机开发地址（localhost / IP 字面量）不做，没有可比性。
+        Task<ConnectProbeResult>? referenceTask = isLiteral
+            ? null
+            : probe.ConnectAsync(ReferenceAddress, 443, StepTimeout, cancellationToken);
+        if (referenceTask is not null)
+        {
+            connectTasks.Add(referenceTask);
+        }
+
+        if (gatewayTask is not null)
+        {
+            connectTasks.Add(gatewayTask);
+        }
+
         connectTasks.Add(directTask);
         connectTasks.Add(viaSystemTask);
         await Task.WhenAll(connectTasks);
         ipv4Result = ipv4Task is null ? null : await ipv4Task;
         ipv6Result = ipv6Task is null ? null : await ipv6Task;
+        var gateway = gatewayTask is null ? null : await gatewayTask;
+        var reference = referenceTask is null ? null : await referenceTask;
         var direct = await directTask;
         var viaSystem = await viaSystemTask;
 
@@ -100,6 +126,13 @@ public sealed class NetworkDiagnosticsService(INetworkProbe probe, Func<DateTime
             PublicDnsFailed = publicDns?.Failed ?? false,
             Ipv4ConnectMs = ipv4Result?.ElapsedMs,
             Ipv4ConnectFailed = ipv4Result?.Failed ?? (ipv4 is null && !isLiteral && systemDns is { Failed: true } && publicDns is { Failed: true }),
+            GatewayPingSent = gateway?.Sent,
+            GatewayPingLost = gateway?.Lost,
+            GatewayAvgMs = gateway?.AvgMs,
+            GatewayMaxMs = gateway?.MaxMs,
+            ReferenceHost = reference is null ? null : ReferenceAddress,
+            ReferenceConnectMs = reference?.ElapsedMs,
+            ReferenceConnectFailed = reference?.Failed ?? false,
             HasIpv6Address = ipv6 is not null,
             Ipv6ConnectMs = ipv6Result?.ElapsedMs,
             Ipv6ConnectFailed = ipv6Result?.Failed ?? false,

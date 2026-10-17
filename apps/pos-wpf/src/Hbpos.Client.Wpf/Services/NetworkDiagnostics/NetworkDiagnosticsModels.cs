@@ -6,10 +6,14 @@ namespace Hbpos.Client.Wpf.Services.NetworkDiagnostics;
 public enum DiagnosticStepId
 {
     LocalNetwork,
+    /// <summary>到路由器（网关）的丢包与延迟：区分"本机无线 / 网线链路不稳"。</summary>
+    GatewayLink,
     SystemDns,
     PublicDns,
     ConnectIpv4,
     ConnectIpv6,
+    /// <summary>到一个公共参照地址 443 端口的连接：区分"整条链路差"与"只有服务器这个地址被挡"。</summary>
+    ReferenceConnect,
     Proxy,
     SecureReply,
     Clock
@@ -28,6 +32,8 @@ public enum DiagnosisKind
     /// <summary>所有检测项都正常。</summary>
     None,
     NoLocalNetwork,
+    /// <summary>到路由器就丢包或很慢：本机无线 / 网线链路不稳。</summary>
+    LocalLinkUnstable,
     DnsSlow,
     DnsFailed,
     DnsMismatch,
@@ -38,6 +44,10 @@ public enum DiagnosisKind
     SecureConnectionFailed,
     ServerError,
     NotPosApi,
+    /// <summary>路由器没问题，但连公共参照地址也慢或失败：路由器之后的互联网出口有问题。</summary>
+    InternetUnreachable,
+    /// <summary>参照地址很快，只有服务器地址连不上或很慢：到服务器的路径被防火墙 / 路由 / 运营商挡了或丢包。</summary>
+    ServerPathBlocked,
     ServerUnreachable
 }
 
@@ -90,6 +100,22 @@ public sealed record NetworkMeasurements
     public long? Ipv6ConnectMs { get; init; }
 
     public bool Ipv6ConnectFailed { get; init; }
+
+    /// <summary>发给网关的 ping 次数；0 或 null 表示没有测。</summary>
+    public int? GatewayPingSent { get; init; }
+
+    public int? GatewayPingLost { get; init; }
+
+    public long? GatewayAvgMs { get; init; }
+
+    public long? GatewayMaxMs { get; init; }
+
+    /// <summary>参照地址（公共服务）443 端口的 TCP 连接耗时与是否失败。</summary>
+    public string? ReferenceHost { get; init; }
+
+    public long? ReferenceConnectMs { get; init; }
+
+    public bool ReferenceConnectFailed { get; init; }
 
     public bool ProxyConfigured { get; init; }
 
@@ -153,7 +179,7 @@ public sealed record NetworkDiagnosisReport(
         foreach (var step in Steps)
         {
             var elapsed = step.ElapsedMs is { } ms ? FormatMs(ms) : "-";
-            builder.AppendLine($"{step.Id,-14} {step.Status,-8} {elapsed,8}  {step.Detail}");
+            builder.AppendLine($"{step.Id,-17} {step.Status,-8} {elapsed,8}  {step.Detail}");
         }
 
         return builder.ToString().TrimEnd();

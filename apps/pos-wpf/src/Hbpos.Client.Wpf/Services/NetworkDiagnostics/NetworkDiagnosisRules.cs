@@ -9,6 +9,12 @@ public static class NetworkDiagnosisRules
     public const long SlowThresholdMs = 1500;
     public const long FastThresholdMs = 500;
 
+    /// <summary>到路由器丢包达到这个比例（%）就认为本机链路不稳。</summary>
+    public const int GatewayLossPercentThreshold = 10;
+
+    /// <summary>到路由器的平均延迟超过它也认为链路不稳（同一个路由器的正常值通常只有几毫秒）。</summary>
+    public const long GatewaySlowAvgMs = 300;
+
     public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(5);
 
     public static IReadOnlyList<DiagnosticStep> BuildSteps(NetworkMeasurements m)
@@ -16,10 +22,12 @@ public static class NetworkDiagnosisRules
         return
         [
             LocalNetworkStep(m),
+            GatewayStep(m),
             SystemDnsStep(m),
             PublicDnsStep(m),
             ConnectStep(DiagnosticStepId.ConnectIpv4, true, m.Ipv4ConnectMs, m.Ipv4ConnectFailed, "no IPv4 address returned"),
             ConnectStep(DiagnosticStepId.ConnectIpv6, m.HasIpv6Address, m.Ipv6ConnectMs, m.Ipv6ConnectFailed, "no IPv6 address returned"),
+            ReferenceStep(m),
             ProxyStep(m),
             SecureReplyStep(m),
             ClockStep(m)
@@ -31,6 +39,11 @@ public static class NetworkDiagnosisRules
         if (!m.HasLocalNetwork)
         {
             return new DiagnosisFinding(DiagnosisKind.NoLocalNetwork, null);
+        }
+
+        if (GatewayUnstable(m))
+        {
+            return new DiagnosisFinding(DiagnosisKind.LocalLinkUnstable, null);
         }
 
         var publicDnsFast = !m.PublicDnsFailed && m.PublicDnsMs is { } publicMs && publicMs < FastThresholdMs;
@@ -74,6 +87,21 @@ public static class NetworkDiagnosisRules
             return new DiagnosisFinding(DiagnosisKind.ClockSkew, null);
         }
 
+        if (m.Reply is ReplyOutcome.Timeout or ReplyOutcome.Unreachable
+            && (m.Ipv4ConnectFailed || m.Ipv4ConnectMs is { } serverConnect && serverConnect >= SlowThresholdMs)
+            && ReferenceMeasured(m))
+        {
+            if (m.ReferenceConnectFailed || m.ReferenceConnectMs is { } reference && reference >= SlowThresholdMs)
+            {
+                return new DiagnosisFinding(DiagnosisKind.InternetUnreachable, null);
+            }
+
+            if (m.ReferenceConnectMs is { } referenceMs && referenceMs < FastThresholdMs)
+            {
+                return new DiagnosisFinding(DiagnosisKind.ServerPathBlocked, null);
+            }
+        }
+
         return m.Reply switch
         {
             ReplyOutcome.SecureConnectionFailed => new DiagnosisFinding(DiagnosisKind.SecureConnectionFailed, null),
@@ -83,6 +111,25 @@ public static class NetworkDiagnosisRules
             _ => new DiagnosisFinding(DiagnosisKind.None, null)
         };
     }
+
+    private static bool GatewayMeasured(NetworkMeasurements m) => m.GatewayPingSent is > 0 && m.GatewayPingLost is not null;
+
+    private static bool GatewayAllLost(NetworkMeasurements m) => GatewayMeasured(m) && m.GatewayPingLost >= m.GatewayPingSent;
+
+    private static int GatewayLossPercent(NetworkMeasurements m) =>
+        GatewayMeasured(m) ? (int)Math.Round(100d * m.GatewayPingLost!.Value / m.GatewayPingSent!.Value) : 0;
+
+    /// <summary>
+    /// 全部丢失不算"不稳"：很多路由器不回 ping，这种情况只能说没有结论，不能据此怪链路。
+    /// </summary>
+    private static bool GatewayUnstable(NetworkMeasurements m)
+    {
+        return GatewayMeasured(m)
+            && !GatewayAllLost(m)
+            && (GatewayLossPercent(m) >= GatewayLossPercentThreshold || m.GatewayAvgMs is { } avg && avg >= GatewaySlowAvgMs);
+    }
+
+    private static bool ReferenceMeasured(NetworkMeasurements m) => m.ReferenceConnectFailed || m.ReferenceConnectMs is not null;
 
     private static bool AddressesDisjoint(NetworkMeasurements m)
     {
@@ -120,6 +167,55 @@ public static class NetworkDiagnosisRules
             new[] { m.AdapterName, string.IsNullOrWhiteSpace(m.Gateway) ? null : $"gateway {m.Gateway}" }
                 .Where(part => !string.IsNullOrWhiteSpace(part)));
         return new DiagnosticStep(DiagnosticStepId.LocalNetwork, DiagnosticStepStatus.Ok, null, detail);
+    }
+
+    private static DiagnosticStep GatewayStep(NetworkMeasurements m)
+    {
+        if (!GatewayMeasured(m))
+        {
+            return new DiagnosticStep(DiagnosticStepId.GatewayLink, DiagnosticStepStatus.Skipped, null, "not checked");
+        }
+
+        if (GatewayAllLost(m))
+        {
+            return new DiagnosticStep(DiagnosticStepId.GatewayLink, DiagnosticStepStatus.Skipped, null, "the router did not answer ping (it may block ping)");
+        }
+
+        var loss = GatewayLossPercent(m);
+        var detail = string.Join(
+            " · ",
+            new[]
+            {
+                m.Gateway,
+                $"{loss}% lost",
+                m.GatewayAvgMs is { } avg ? $"avg {NetworkDiagnosisReport.FormatMs(avg)}" : null,
+                m.GatewayMaxMs is { } max ? $"max {NetworkDiagnosisReport.FormatMs(max)}" : null
+            }.Where(part => !string.IsNullOrWhiteSpace(part)));
+        var status = loss >= 30
+            ? DiagnosticStepStatus.Failed
+            : GatewayUnstable(m) ? DiagnosticStepStatus.Slow : DiagnosticStepStatus.Ok;
+        return new DiagnosticStep(DiagnosticStepId.GatewayLink, status, m.GatewayAvgMs, detail);
+    }
+
+    private static DiagnosticStep ReferenceStep(NetworkMeasurements m)
+    {
+        if (!ReferenceMeasured(m))
+        {
+            return new DiagnosticStep(DiagnosticStepId.ReferenceConnect, DiagnosticStepStatus.Skipped, null, "not checked");
+        }
+
+        var host = string.IsNullOrWhiteSpace(m.ReferenceHost) ? "reference host" : m.ReferenceHost;
+        if (m.ReferenceConnectFailed)
+        {
+            return new DiagnosticStep(DiagnosticStepId.ReferenceConnect, DiagnosticStepStatus.Failed, m.ReferenceConnectMs, $"{host} port 443 · a different server, used for comparison · could not connect");
+        }
+
+        var slow = m.ReferenceConnectMs is { } ms && ms >= SlowThresholdMs;
+        return new DiagnosticStep(
+            DiagnosticStepId.ReferenceConnect,
+            slow ? DiagnosticStepStatus.Slow : DiagnosticStepStatus.Ok,
+            m.ReferenceConnectMs,
+            $"{host} port 443 · a different server, used for comparison");
     }
 
     private static DiagnosticStep SystemDnsStep(NetworkMeasurements m)

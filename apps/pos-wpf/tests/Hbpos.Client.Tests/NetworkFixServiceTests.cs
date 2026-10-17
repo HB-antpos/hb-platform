@@ -226,6 +226,8 @@ public sealed class NetworkFixServiceTests
 
             public Task<ConnectProbeResult> ConnectAsync(string address, int port, TimeSpan timeout, CancellationToken cancellationToken) => throw new NotSupportedException();
 
+            public Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken) => throw new NotSupportedException();
+
             public ProxyProbeInfo GetProxyInfo(Uri target) => throw new NotSupportedException();
 
             public Task<ReplyProbeResult> CheckReplyAsync(Uri healthUri, bool useSystemProxy, TimeSpan timeout, CancellationToken cancellationToken) => throw new NotSupportedException();
