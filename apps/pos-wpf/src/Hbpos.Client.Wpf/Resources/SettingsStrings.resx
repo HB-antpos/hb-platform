@@ -546,4 +546,12 @@
   <data name="settings.network.copy" xml:space="preserve"><value>Copy report</value></data>
   <data name="settings.network.copied" xml:space="preserve"><value>Report copied.</value></data>
   <data name="settings.network.copyFailed" xml:space="preserve"><value>Could not copy. Try again.</value></data>
+  <data name="settings.network.step.gatewayLink" xml:space="preserve"><value>Link to the router</value></data>
+  <data name="settings.network.step.referenceConnect" xml:space="preserve"><value>Connect to a reference server</value></data>
+  <data name="settings.network.finding.localLinkUnstable.title" xml:space="preserve"><value>The connection to your router is unstable</value></data>
+  <data name="settings.network.finding.localLinkUnstable.message" xml:space="preserve"><value>Packets are being lost or delayed between this machine and the router, so everything is slow. If this machine uses Wi-Fi: use a network cable, move closer to the router, join the 5 GHz network if there is one, and turn off 'Allow the computer to turn off this device to save power' for the Wi-Fi adapter.</value></data>
+  <data name="settings.network.finding.internetUnreachable.title" xml:space="preserve"><value>The internet connection beyond the router is slow or down</value></data>
+  <data name="settings.network.finding.internetUnreachable.message" xml:space="preserve"><value>The router is fine, but a well-known public server is also slow or unreachable. Check that the router itself has internet (try a phone on the same network), restart the router, or try another network.</value></data>
+  <data name="settings.network.finding.serverPathBlocked.title" xml:space="preserve"><value>The route to the POS server is blocked or losing packets</value></data>
+  <data name="settings.network.finding.serverPathBlocked.message" xml:space="preserve"><value>The internet works and a reference server answers quickly, but this machine cannot reach the POS server in time. Check firewall and antivirus rules for outbound port 443, any router or provider filtering, and try another network. Other devices on the same network working does not rule out a rule that only affects this machine.</value></data>
 </root>

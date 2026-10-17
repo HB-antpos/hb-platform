@@ -546,4 +546,12 @@
   <data name="settings.network.copy" xml:space="preserve"><value>复制报告</value></data>
   <data name="settings.network.copied" xml:space="preserve"><value>报告已复制。</value></data>
   <data name="settings.network.copyFailed" xml:space="preserve"><value>复制失败，请重试。</value></data>
+  <data name="settings.network.step.gatewayLink" xml:space="preserve"><value>到路由器的链路</value></data>
+  <data name="settings.network.step.referenceConnect" xml:space="preserve"><value>参照服务器连接</value></data>
+  <data name="settings.network.finding.localLinkUnstable.title" xml:space="preserve"><value>到路由器的连接不稳定</value></data>
+  <data name="settings.network.finding.localLinkUnstable.message" xml:space="preserve"><value>这台机器到路由器之间在丢包或延迟很高，所以一切都慢。如果用的是 Wi-Fi：改用网线、靠近路由器、有 5 GHz 就连 5 GHz，并在 Wi-Fi 网卡属性里关闭「允许计算机关闭此设备以节约电源」。</value></data>
+  <data name="settings.network.finding.internetUnreachable.title" xml:space="preserve"><value>路由器之后的互联网出口很慢或不通</value></data>
+  <data name="settings.network.finding.internetUnreachable.message" xml:space="preserve"><value>路由器本身正常，但连一个知名的公共服务器也很慢或连不上。请确认路由器自己能上网（用同一网络的手机试），重启路由器，或换一个网络。</value></data>
+  <data name="settings.network.finding.serverPathBlocked.title" xml:space="preserve"><value>到 POS 服务器的路径被挡或丢包</value></data>
+  <data name="settings.network.finding.serverPathBlocked.message" xml:space="preserve"><value>互联网是通的，参照服务器也很快，但这台机器在时限内连不上 POS 服务器。请检查防火墙和杀毒软件对 443 出站的规则、路由器或运营商是否做了过滤，并试试换一个网络。同一网络下别的设备正常，不能排除只对这台机器生效的规则。</value></data>
 </root>

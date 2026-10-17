@@ -23,6 +23,9 @@ public sealed record DnsProbeResult(long ElapsedMs, IReadOnlyList<string> Addres
 
 public sealed record ConnectProbeResult(long ElapsedMs, bool Failed);
 
+/// <summary>对网关发 ping 的统计：发了几次、丢了几次、成功的平均 / 最大往返毫秒。</summary>
+public sealed record PingProbeResult(int Sent, int Lost, long? AvgMs, long? MaxMs);
+
 public sealed record ProxyProbeInfo(bool Configured, string? Address, bool AutoDetectEnabled);
 
 public sealed record ReplyProbeResult(
@@ -41,6 +44,9 @@ public interface INetworkProbe
     Task<DnsProbeResult> ResolvePublicDnsAsync(string host, TimeSpan timeout, CancellationToken cancellationToken);
 
     Task<ConnectProbeResult> ConnectAsync(string address, int port, TimeSpan timeout, CancellationToken cancellationToken);
+
+    /// <summary>连续 ping 指定地址（通常是网关）count 次，统计丢包与延迟。</summary>
+    Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken);
 
     ProxyProbeInfo GetProxyInfo(Uri target);
 
@@ -162,6 +168,40 @@ public sealed class SystemNetworkProbe : INetworkProbe
 
             return new ConnectProbeResult(stopwatch.ElapsedMilliseconds, true);
         }
+    }
+
+    public async Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken)
+    {
+        var lost = 0;
+        var replies = new List<long>();
+        using var ping = new Ping();
+        for (var i = 0; i < count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var reply = await ping.SendPingAsync(address, (int)timeoutPerPing.TotalMilliseconds);
+                if (reply.Status == IPStatus.Success)
+                {
+                    replies.Add(reply.RoundtripTime);
+                }
+                else
+                {
+                    lost++;
+                }
+            }
+            catch (Exception ex) when (ex is PingException or InvalidOperationException or ArgumentException)
+            {
+                // 发不出去（没有路由 / 网卡刚掉线）也算这一次丢了。
+                lost++;
+            }
+        }
+
+        return new PingProbeResult(
+            count,
+            lost,
+            replies.Count == 0 ? null : (long)Math.Round(replies.Average()),
+            replies.Count == 0 ? null : replies.Max());
     }
 
     public ProxyProbeInfo GetProxyInfo(Uri target)
