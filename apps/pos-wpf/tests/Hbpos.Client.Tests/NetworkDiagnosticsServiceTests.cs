@@ -115,6 +115,7 @@ public sealed class NetworkDiagnosticsServiceTests
         var probe = new FakeProbe
         {
             ConnectResultFor = address => address == "1.1.1.1" ? new ConnectProbeResult(38, false) : new ConnectProbeResult(6000, true),
+            Stability = (address, _) => address == "1.1.1.1" ? new ConnectStabilityResult(5, 5, 38, 45) : new ConnectStabilityResult(5, 0, null, null),
             DirectReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null),
             ProxyReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null)
         };
@@ -132,6 +133,7 @@ public sealed class NetworkDiagnosticsServiceTests
         var probe = new FakeProbe
         {
             ConnectResult = new ConnectProbeResult(6000, true),
+            Stability = (_, _) => new ConnectStabilityResult(5, 0, null, null),
             DirectReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null),
             ProxyReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null)
         };
@@ -171,6 +173,65 @@ public sealed class NetworkDiagnosticsServiceTests
         Assert.Equal("CN=YE2, O=Let's Encrypt, C=US", report.Measurements.CertificateIssuer);
         Assert.Equal(0, probe.MissingRootsCalls);
         Assert.Equal(DiagnosisKind.None, report.Finding.Kind);
+    }
+
+    [Fact]
+    public async Task Connection_stability_is_measured_one_at_a_time_and_all_at_once_after_the_main_checks()
+    {
+        var probe = new FakeProbe();
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(
+            ["1.1.1.1:443:sequential:5", "203.0.113.20:443:burst:6", "203.0.113.20:443:sequential:5"],
+            probe.StabilityCalls.OrderBy(call => call).ToArray());
+        Assert.Equal(5, report.Measurements.StabilityAttempts);
+        Assert.Equal(5, report.Measurements.StabilitySucceeded);
+        Assert.Equal(5, report.Measurements.ReferenceStabilityAttempts);
+        Assert.Equal(6, report.Measurements.BurstAttempts);
+        Assert.Equal(DiagnosisKind.None, report.Finding.Kind);
+    }
+
+    [Fact]
+    public async Task Stability_is_not_measured_for_localhost()
+    {
+        var probe = new FakeProbe();
+
+        await new NetworkDiagnosticsService(probe).RunAsync(new Uri("http://localhost:5159/"));
+
+        Assert.Empty(probe.StabilityCalls);
+    }
+
+    [Fact]
+    public async Task A_lossy_route_to_the_server_is_diagnosed_when_the_reference_is_clean()
+    {
+        var probe = new FakeProbe
+        {
+            Stability = (address, _) => address == "1.1.1.1"
+                ? new ConnectStabilityResult(5, 5, 38, 45)
+                : new ConnectStabilityResult(5, 4, 300, 3100)
+        };
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(DiagnosisKind.ServerPathLossy, report.Finding.Kind);
+        Assert.Equal(DiagnosticStepStatus.Failed, report.Steps.Single(step => step.Id == DiagnosticStepId.ConnectStability).Status);
+    }
+
+    [Fact]
+    public async Task A_concurrency_limit_is_diagnosed_when_only_the_burst_fails()
+    {
+        var probe = new FakeProbe
+        {
+            Stability = (address, concurrent) => concurrent
+                ? new ConnectStabilityResult(6, 3, 900, 3000)
+                : new ConnectStabilityResult(5, 5, 270, 310)
+        };
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(DiagnosisKind.ConnectionBurstLimited, report.Finding.Kind);
+        Assert.Equal(DiagnosticStepStatus.Failed, report.Steps.Single(step => step.Id == DiagnosticStepId.ConnectBurst).Status);
     }
 
     [Fact]
@@ -272,6 +333,12 @@ public sealed class NetworkDiagnosticsServiceTests
 
         public List<string> TlsCalls { get; } = [];
 
+        public Func<string, bool, ConnectStabilityResult> Stability { get; set; } = (_, concurrent) => concurrent
+            ? new ConnectStabilityResult(6, 6, 400, 420)
+            : new ConnectStabilityResult(5, 5, 270, 310);
+
+        public List<string> StabilityCalls { get; } = [];
+
         public static TlsProbeResult Tls(long ms, bool trusted, TlsProbeOutcome outcome = TlsProbeOutcome.Completed, string issuer = "CN=YE2, O=Let's Encrypt, C=US") => new(
             ms,
             outcome,
@@ -346,6 +413,17 @@ public sealed class NetworkDiagnosticsServiceTests
         {
             MissingRootsCalls++;
             return MissingRoots;
+        }
+
+        public Task<ConnectStabilityResult> ProbeConnectStabilityAsync(string address, int port, int attempts, bool concurrent, TimeSpan timeoutPerAttempt, TimeSpan totalBudget, CancellationToken cancellationToken)
+        {
+            Check(cancellationToken);
+            lock (StabilityCalls)
+            {
+                StabilityCalls.Add($"{address}:{port}:{(concurrent ? "burst" : "sequential")}:{attempts}");
+            }
+
+            return Task.FromResult(Stability(address, concurrent));
         }
 
         public Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken)

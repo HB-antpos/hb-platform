@@ -43,6 +43,9 @@ public sealed record TlsProbeResult(
     IReadOnlyList<string> ChainSubjects,
     string? Issuer);
 
+/// <summary>一组新建 TCP 连接的统计：尝试了几次、成功几次、成功连接的平均 / 最大耗时（毫秒）。</summary>
+public sealed record ConnectStabilityResult(int Attempts, int Succeeded, long? AvgMs, long? MaxMs);
+
 public sealed record ProxyProbeInfo(bool Configured, string? Address, bool AutoDetectEnabled);
 
 public sealed record ReplyProbeResult(
@@ -74,6 +77,20 @@ public interface INetworkProbe
 
     /// <summary>本机缺少的、一键修复可以安装的根证书名称。</summary>
     IReadOnlyList<string> GetMissingTrustedRoots();
+
+    /// <summary>
+    /// 反复新建 TCP 连接并统计成败与耗时（每次都是新 socket，连上就关，不发数据）。
+    /// <paramref name="concurrent"/> 为 false 时一个接一个连（间隔很短，总耗时超过 <paramref name="totalBudget"/> 就停）；
+    /// 为 true 时同时发起全部连接。
+    /// </summary>
+    Task<ConnectStabilityResult> ProbeConnectStabilityAsync(
+        string address,
+        int port,
+        int attempts,
+        bool concurrent,
+        TimeSpan timeoutPerAttempt,
+        TimeSpan totalBudget,
+        CancellationToken cancellationToken);
 
     ProxyProbeInfo GetProxyInfo(Uri target);
 
@@ -323,6 +340,70 @@ public sealed class SystemNetworkProbe : INetworkProbe
         {
             return Snapshot(TlsProbeOutcome.Failed, stopwatch.ElapsedMilliseconds, null, ex.InnerException?.Message ?? ex.Message);
         }
+    }
+
+    public async Task<ConnectStabilityResult> ProbeConnectStabilityAsync(
+        string address,
+        int port,
+        int attempts,
+        bool concurrent,
+        TimeSpan timeoutPerAttempt,
+        TimeSpan totalBudget,
+        CancellationToken cancellationToken)
+    {
+        if (!IPAddress.TryParse(address, out var ip) || attempts <= 0)
+        {
+            return new ConnectStabilityResult(0, 0, null, null);
+        }
+
+        async Task<(bool Ok, long Ms)> ConnectOnceAsync()
+        {
+            var stopwatch = Stopwatch.StartNew();
+            using var socket = new Socket(ip.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            using var limited = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limited.CancelAfter(timeoutPerAttempt);
+            try
+            {
+                await socket.ConnectAsync(new IPEndPoint(ip, port), limited.Token);
+                return (true, stopwatch.ElapsedMilliseconds);
+            }
+            catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                return (false, stopwatch.ElapsedMilliseconds);
+            }
+        }
+
+        var results = new List<(bool Ok, long Ms)>();
+        if (concurrent)
+        {
+            results.AddRange(await Task.WhenAll(Enumerable.Range(0, attempts).Select(_ => ConnectOnceAsync())));
+        }
+        else
+        {
+            var total = Stopwatch.StartNew();
+            for (var i = 0; i < attempts; i++)
+            {
+                if (i > 0 && total.Elapsed > totalBudget)
+                {
+                    break;
+                }
+
+                results.Add(await ConnectOnceAsync());
+                await Task.Delay(150, cancellationToken);
+            }
+        }
+
+        var successes = results.Where(result => result.Ok).Select(result => result.Ms).ToArray();
+        return new ConnectStabilityResult(
+            results.Count,
+            successes.Length,
+            successes.Length == 0 ? null : (long)Math.Round(successes.Average()),
+            successes.Length == 0 ? null : successes.Max());
     }
 
     public IReadOnlyList<string> GetMissingTrustedRoots()

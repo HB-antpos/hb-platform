@@ -369,6 +369,8 @@ public sealed class NetworkFixServiceTests
 
             public IReadOnlyList<string> GetMissingTrustedRoots() => throw new NotSupportedException();
 
+            public Task<ConnectStabilityResult> ProbeConnectStabilityAsync(string address, int port, int attempts, bool concurrent, TimeSpan timeoutPerAttempt, TimeSpan totalBudget, CancellationToken cancellationToken) => throw new NotSupportedException();
+
             public ProxyProbeInfo GetProxyInfo(Uri target) => throw new NotSupportedException();
 
             public Task<ReplyProbeResult> CheckReplyAsync(Uri healthUri, bool useSystemProxy, TimeSpan timeout, CancellationToken cancellationToken) => throw new NotSupportedException();

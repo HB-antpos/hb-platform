@@ -40,6 +40,8 @@ public static class NetworkDiagnosisRules
             ConnectStep(DiagnosticStepId.ConnectIpv4, true, m.Ipv4ConnectMs, m.Ipv4ConnectFailed, "no IPv4 address returned"),
             ConnectStep(DiagnosticStepId.ConnectIpv6, m.HasIpv6Address, m.Ipv6ConnectMs, m.Ipv6ConnectFailed, "no IPv6 address returned"),
             ReferenceStep(m),
+            ConnectStabilityStep(m),
+            ConnectBurstStep(m),
             ProxyStep(m),
             TlsHandshakeStep(m),
             CertificateTrustStep(m),
@@ -121,6 +123,24 @@ public static class NetworkDiagnosisRules
         if (m.ChainChecked && m.ChainTrusted && CertificateLookupSlow(m))
         {
             return new DiagnosisFinding(DiagnosisKind.CertificateCheckSlow, null);
+        }
+
+        if (StabilityMeasured(m) && StabilityClean(m.ReferenceStabilityAttempts, m.ReferenceStabilitySucceeded, m.ReferenceStabilityMaxMs))
+        {
+            var sequentialClean = StabilityClean(m.StabilityAttempts, m.StabilitySucceeded, m.StabilityMaxMs);
+
+            // 逐个连接偶发失败或要好几秒，参照却每次正常：到服务器的路径在丢握手包。一个都连不上的不算（那是被挡，走下面的规则）。
+            if (!sequentialClean && m.StabilitySucceeded > 0)
+            {
+                return new DiagnosisFinding(DiagnosisKind.ServerPathLossy, null);
+            }
+
+            // 逐个都正常，同时连多个才失败（或主检测里并发的那次连接失败了）：有东西在限制并发新连接。
+            if (sequentialClean
+                && (m.Ipv4ConnectFailed || BurstMeasured(m) && !StabilityClean(m.BurstAttempts, m.BurstSucceeded, m.BurstMaxMs)))
+            {
+                return new DiagnosisFinding(DiagnosisKind.ConnectionBurstLimited, null);
+            }
         }
 
         if (m.Reply is ReplyOutcome.Timeout or ReplyOutcome.Unreachable
@@ -209,6 +229,79 @@ public static class NetworkDiagnosisRules
         return cn is not null && org is not null && !cn.Contains(org, StringComparison.OrdinalIgnoreCase)
             ? $"{org} {cn}"
             : cn ?? org ?? subject;
+    }
+
+    private static bool StabilityMeasured(NetworkMeasurements m) => m.StabilityAttempts is > 0;
+
+    private static bool BurstMeasured(NetworkMeasurements m) => m.BurstAttempts is > 0;
+
+    /// <summary>这一组连接全部成功，而且最慢的一次也不到 1.5 秒（没有触发握手包重传）。</summary>
+    private static bool StabilityClean(int? attempts, int? succeeded, long? maxMs)
+    {
+        return attempts is > 0 && succeeded == attempts && (maxMs ?? 0) < SlowThresholdMs;
+    }
+
+    private static DiagnosticStep StabilityRow(
+        DiagnosticStepId id,
+        int? attempts,
+        int? succeeded,
+        long? avgMs,
+        long? maxMs,
+        string prefix,
+        string? suffix)
+    {
+        if (attempts is not > 0)
+        {
+            return new DiagnosticStep(id, DiagnosticStepStatus.Skipped, null, "not checked");
+        }
+
+        var parts = new List<string> { $"{prefix}{succeeded ?? 0}/{attempts} connected" };
+        if (avgMs is { } avg)
+        {
+            parts.Add($"avg {NetworkDiagnosisReport.FormatMs(avg)}");
+        }
+
+        if (maxMs is { } max)
+        {
+            parts.Add($"max {NetworkDiagnosisReport.FormatMs(max)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(suffix))
+        {
+            parts.Add(suffix);
+        }
+
+        var status = succeeded < attempts
+            ? DiagnosticStepStatus.Failed
+            : maxMs is { } slowest && slowest >= SlowThresholdMs ? DiagnosticStepStatus.Slow : DiagnosticStepStatus.Ok;
+        return new DiagnosticStep(id, status, avgMs, string.Join(" · ", parts));
+    }
+
+    private static DiagnosticStep ConnectStabilityStep(NetworkMeasurements m)
+    {
+        var reference = m.ReferenceStabilityAttempts is > 0
+            ? $"reference {m.ReferenceStabilitySucceeded ?? 0}/{m.ReferenceStabilityAttempts}"
+            : null;
+        return StabilityRow(
+            DiagnosticStepId.ConnectStability,
+            m.StabilityAttempts,
+            m.StabilitySucceeded,
+            m.StabilityAvgMs,
+            m.StabilityMaxMs,
+            "one at a time: ",
+            reference);
+    }
+
+    private static DiagnosticStep ConnectBurstStep(NetworkMeasurements m)
+    {
+        return StabilityRow(
+            DiagnosticStepId.ConnectBurst,
+            m.BurstAttempts,
+            m.BurstSucceeded,
+            null,
+            m.BurstMaxMs,
+            $"{m.BurstAttempts} at once: ",
+            null);
     }
 
     private static bool ReferenceMeasured(NetworkMeasurements m) => m.ReferenceConnectFailed || m.ReferenceConnectMs is not null;

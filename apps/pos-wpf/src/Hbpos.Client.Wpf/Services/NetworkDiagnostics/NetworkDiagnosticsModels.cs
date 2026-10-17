@@ -14,6 +14,10 @@ public enum DiagnosticStepId
     ConnectIpv6,
     /// <summary>到一个公共参照地址 443 端口的连接：区分"整条链路差"与"只有服务器这个地址被挡"。</summary>
     ReferenceConnect,
+    /// <summary>逐个新建连接若干次：看到服务器的新连接是否稳定（丢握手包会表现为偶发失败或好几秒的建连）。</summary>
+    ConnectStability,
+    /// <summary>同时新建若干连接：看路由器 / 防火墙是否限制并发新连接。</summary>
+    ConnectBurst,
     Proxy,
     /// <summary>TLS 握手（与 HttpClient 同样的证书校验方式）：耗时、协议版本、是否卡住。</summary>
     TlsHandshake,
@@ -54,6 +58,10 @@ public enum DiagnosisKind
     CertificateCheckSlow,
     /// <summary>本机收到的证书不是预期的签发者：杀毒的 HTTPS 扫描、代理或防火墙设备在拦截并重签。</summary>
     HttpsIntercepted,
+    /// <summary>逐个连接时偶发失败或要好几秒，而参照服务器每次都正常：到服务器的路径在丢握手包。</summary>
+    ServerPathLossy,
+    /// <summary>逐个连接都正常，同时连多个才失败：路由器 / 防火墙在限制并发新连接。</summary>
+    ConnectionBurstLimited,
     /// <summary>路由器没问题，但连公共参照地址也慢或失败：路由器之后的互联网出口有问题。</summary>
     InternetUnreachable,
     /// <summary>参照地址很快，只有服务器地址连不上或很慢：到服务器的路径被防火墙 / 路由 / 运营商挡了或丢包。</summary>
@@ -160,6 +168,29 @@ public sealed record NetworkMeasurements
 
     /// <summary>本机缺少的、一键修复可以安装的根证书名称。</summary>
     public IReadOnlyList<string> MissingTrustedRoots { get; init; } = [];
+
+    /// <summary>到服务器逐个新建连接：尝试次数、成功次数、成功连接的平均 / 最大耗时。</summary>
+    public int? StabilityAttempts { get; init; }
+
+    public int? StabilitySucceeded { get; init; }
+
+    public long? StabilityAvgMs { get; init; }
+
+    public long? StabilityMaxMs { get; init; }
+
+    /// <summary>到参照地址逐个新建连接（对比用）。</summary>
+    public int? ReferenceStabilityAttempts { get; init; }
+
+    public int? ReferenceStabilitySucceeded { get; init; }
+
+    public long? ReferenceStabilityMaxMs { get; init; }
+
+    /// <summary>到服务器同时新建多个连接。</summary>
+    public int? BurstAttempts { get; init; }
+
+    public int? BurstSucceeded { get; init; }
+
+    public long? BurstMaxMs { get; init; }
 
     /// <summary>参照地址（公共服务）443 端口的 TCP 连接耗时与是否失败。</summary>
     public string? ReferenceHost { get; init; }
