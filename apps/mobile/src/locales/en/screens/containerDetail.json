@@ -203,9 +203,9 @@
   },
   "retailSync": {
     "storesLabel": "Sync branch retail prices",
-    "storesHelper": "On: set every active branch's retail price to the new price and notify branches to relabel. Off: branch prices stay unchanged and branches confirm the change themselves.",
+    "storesHelper": "On: set every active branch's retail price to the new price. Off: branch prices stay unchanged. Whether branches are notified or asked to relabel is decided by \"Generate price tasks\" below.",
     "tasksLabel": "Generate price tasks",
-    "tasksHelper": "On: create price update tasks for branches. Off: branches are not notified (when syncing branch prices, HQ is synced immediately)."
+    "tasksHelper": "On: create price update tasks for branches (a \"relabel\" task if \"Sync branch retail prices\" is also on, otherwise a \"change price\" task). Off: branches are not notified and no task is created; synced branch prices are still pushed to HQ immediately, and shelf labels are not changed."
   },
   "bulk": {
     "title": "Bulk actions",

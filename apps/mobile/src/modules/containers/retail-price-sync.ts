@@ -3,8 +3,10 @@ import type { ContainerDetail } from "./types";
 
 /**
  * 货柜明细改仓库零售价时由操作人决定的两个开关，语义与仓库商品页完全一致（请求不传 = 都开）：
- * - syncStoreRetailPrices（同步分店零售价）：开 = 直接把各启用分店零售价改成新价并通知换标签；关 = 不动分店价，分店收到「改价格」任务。
- * - generateTasks（生成价格任务）：开 = 给分店生成价格更新任务；关 = 不通知分店（同步分店价时会立即同步总部 HQ）。
+ * - syncStoreRetailPrices（同步分店零售价）：开 = 直接把各启用分店零售价改成新价；关 = 不动分店价。
+ * - generateTasks（生成价格任务）：开 = 给分店生成价格更新任务（同时开启同步是「待换标签」，否则是「改价格」）；
+ *   关 = 不通知分店、不发任何任务（同步分店价时会立即同步总部 HQ，价签不会换）。
+ *   是否通知分店只由 generateTasks 决定，与 syncStoreRetailPrices 无关。
  */
 export interface RetailPriceSyncChoice {
   syncStoreRetailPrices: boolean;
