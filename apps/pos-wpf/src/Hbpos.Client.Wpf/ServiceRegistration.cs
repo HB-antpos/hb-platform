@@ -4,6 +4,7 @@ using System.Net.Http;
 using Hbpos.Client.Wpf.Localization;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.Services.Facades;
+using Hbpos.Client.Wpf.Services.NetworkDiagnostics;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.RemoteMaintenance.Setup;
 using Microsoft.Extensions.Configuration;
@@ -60,6 +61,13 @@ public static class ServiceRegistration
             client.Timeout = Timeout.InfiniteTimeSpan;
         });
         services.AddSingleton<ApiServerSettingsViewModel>();
+        // 网络检测与一键修复：检测只读；修复经确认、备份、可还原（见 NetworkFixService）。
+        services.AddSingleton<INetworkProbe, SystemNetworkProbe>();
+        services.AddSingleton<INetworkDiagnosticsService, NetworkDiagnosticsService>();
+        services.AddSingleton<IDnsConfigurator, PowerShellDnsConfigurator>();
+        services.AddSingleton<IProxyAutoDetectStore, RegistryProxyAutoDetectStore>();
+        services.AddSingleton<INetworkFixStore, JsonNetworkFixStore>();
+        services.AddSingleton<INetworkFixService, NetworkFixService>();
         var localDataDirectory = startupOptions.PreviewMode
             ? Path.Combine(Path.GetTempPath(), $"hbpos-client-preview-{Environment.ProcessId}")
             : Path.Combine(

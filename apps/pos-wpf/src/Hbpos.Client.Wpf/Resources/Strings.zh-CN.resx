@@ -1219,7 +1219,37 @@
     <value>收银员条码无效或已停用。</value>
   </data>
   <data name="shell.cashierLogin.status.apiUnavailable" xml:space="preserve">
-    <value>收银员登录服务不可用。</value>
+    <value>连不上 POS 服务器，请检查网络后重试。</value>
+  </data>
+  <data name="shell.cashierLogin.connection.unreachable.title" xml:space="preserve">
+    <value>连不上服务器</value>
+  </data>
+  <data name="shell.cashierLogin.connection.unreachable.detail" xml:space="preserve">
+    <value>离线 · 仅限已缓存的收银员</value>
+  </data>
+  <data name="shell.cashierLogin.connection.online.detail" xml:space="preserve">
+    <value>已连接 POS 服务器</value>
+  </data>
+  <data name="shell.cashierLogin.connection.offline.detail" xml:space="preserve">
+    <value>离线模式可用，已缓存的收银员可以登录。</value>
+  </data>
+  <data name="shell.cashierLogin.scanHint" xml:space="preserve">
+    <value>用扫码枪扫描收银员条码</value>
+  </data>
+  <data name="shell.cashierLogin.serverAddress" xml:space="preserve">
+    <value>服务器地址</value>
+  </data>
+  <data name="shell.cashierLogin.backToLogin" xml:space="preserve">
+    <value>返回登录</value>
+  </data>
+  <data name="shell.cashierLogin.exit" xml:space="preserve">
+    <value>退出软件</value>
+  </data>
+  <data name="shell.cashierLogin.retry" xml:space="preserve">
+    <value>重试</value>
+  </data>
+  <data name="shell.cashierLogin.diagnose" xml:space="preserve">
+    <value>检测网络</value>
   </data>
   <data name="shell.cashierLogin.status.success" xml:space="preserve">
     <value>收银员登录成功。</value>

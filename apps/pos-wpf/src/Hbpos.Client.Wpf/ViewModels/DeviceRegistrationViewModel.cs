@@ -86,6 +86,13 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
     [ObservableProperty]
     private bool _isLegacyPendingRegistration;
 
+    /// <summary>
+    /// 最近一次激活请求是因为网络问题（超时 / 连不上）失败的：注册页在错误提示旁给出「检测网络」入口，
+    /// 业务拒绝（开通码无效等）不显示。
+    /// </summary>
+    [ObservableProperty]
+    private bool _hasNetworkProblem;
+
     public DeviceRegistrationViewModel(
         IDeviceApiClient deviceApiClient,
         ILocalDeviceRepository deviceRepository,
@@ -125,6 +132,9 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
             _localization.CultureChanged += OnCultureChanged;
         }
 
+        DiagnoseNetworkCommand = new RelayCommand(
+            () => _apiServerSettings?.Network?.DiagnoseCommand.Execute(null),
+            () => _apiServerSettings?.Network is not null);
         RegisterCommand = new AsyncRelayCommand(RegisterAsync, CanRegister);
         VerifyCommand = new AsyncRelayCommand(VerifyAsync, CanVerify);
         PreviewActivationCommand = new AsyncRelayCommand(PreviewActivationAsync, CanPreviewActivation);
@@ -327,7 +337,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
                 await RefreshActivationRecoveryLockAsync();
             }
 
-            StatusMessage = ResolveActivationError(ex);
+            ShowActivationError(ex);
             return;
         }
         finally
@@ -385,7 +395,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         {
             if (IsCurrentStoreLoad(loadCancellation))
             {
-                StatusMessage = ex.Message;
+                ShowFailure(ex);
             }
         }
         finally
@@ -417,8 +427,26 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         NotifyCommandState();
     }
 
+    /// <summary>显示激活错误，并记下它是不是网络问题（决定是否出现「检测网络」按钮）。</summary>
+    private void ShowActivationError(Exception exception)
+    {
+        StatusMessage = ResolveActivationError(exception);
+        HasNetworkProblem = exception is OperationCanceledException or System.Net.Http.HttpRequestException;
+    }
+
+    /// <summary>门店列表 / 注册 / 验证失败：沿用原消息，同时记下是不是网络问题。</summary>
+    private void ShowFailure(Exception exception)
+    {
+        StatusMessage = exception.Message;
+        HasNetworkProblem = exception is OperationCanceledException or System.Net.Http.HttpRequestException;
+    }
+
+    public IRelayCommand DiagnoseNetworkCommand { get; }
+
     partial void OnActivationCodeChanged(string value)
     {
+        // 改了开通码就是重新来：旧的网络错误入口不再适用。
+        HasNetworkProblem = false;
         if (_previewedActivationCode is not null
             && (!DeviceActivationCodeNormalizer.TryNormalize(value, out var normalized)
                 || !string.Equals(normalized, _previewedActivationCode, StringComparison.Ordinal)))
@@ -493,6 +521,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         ClearActivationPreview(clearCode: false);
         try
         {
+            HasNetworkProblem = false;
             StatusMessage = T("deviceActivation.status.previewing", "Checking activation code...");
             var preview = await _workflowService.PreviewActivationCodeAsync(normalizedCode, actionToken);
             if (!IsCurrentActivationAction(sessionVersion, actionCancellation, normalizedCode))
@@ -522,7 +551,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         {
             if (IsCurrentActivationAction(sessionVersion, actionCancellation, normalizedCode))
             {
-                StatusMessage = ResolveActivationError(ex);
+                ShowActivationError(ex);
             }
         }
         finally
@@ -550,6 +579,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         IsActivationRecoveryPending = true;
         try
         {
+            HasNetworkProblem = false;
             StatusMessage = T(
                 IsReregisterMode
                     ? "deviceActivation.status.rebinding"
@@ -588,7 +618,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
             if (!_isReregisterCancelRequested
                 && IsCurrentActivationAction(sessionVersion, actionCancellation, normalizedCode))
             {
-                StatusMessage = ResolveActivationError(ex);
+                ShowActivationError(ex);
             }
         }
         finally
@@ -652,7 +682,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         {
             if (IsCurrentRegistrationAction(sessionVersion, actionCancellation, selectedStore))
             {
-                StatusMessage = ex.Message;
+                ShowFailure(ex);
             }
         }
         finally
@@ -711,7 +741,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
                 return;
             }
 
-            StatusMessage = ex.Message;
+            ShowFailure(ex);
         }
         finally
         {
@@ -765,7 +795,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
         {
             if (IsCurrentManualVerification(sessionVersion, verificationCancellation, selectedStore, deviceCode))
             {
-                StatusMessage = ex.Message;
+                ShowFailure(ex);
             }
         }
         finally
@@ -1265,7 +1295,7 @@ public sealed partial class DeviceRegistrationViewModel : ObservableObject, ISca
                     }
 
                     // 单次轮询失败只提示错误，保留注册页并继续下一轮重试。
-                    StatusMessage = ex.Message;
+                    ShowFailure(ex);
                 }
             }
         }

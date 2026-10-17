@@ -49,7 +49,7 @@
                     </StackPanel>
                 </StackPanel>
 
-                <controls:ApiServerSettingsPanel DataContext="{Binding ApiServerSettings}"
+                <controls:ApiServerSettingsPanel DataContext="{Binding ApiServerSettings}" x:Name="ApiServerPanel"
                                                  IsEnabled="{Binding CanEditServerSettings}"
                                                  Margin="0,0,0,18" />
 
@@ -151,6 +151,20 @@
                                    Foreground="{DynamicResource PosWarningTextBrush}"
                                    TextWrapping="Wrap" />
                     </Border>
+                    <Button Command="{Binding DiagnoseNetworkCommand}"
+                            Click="DiagnoseNetworkClick"
+                            AutomationProperties.AutomationId="RegistrationDiagnoseNetworkButton"
+                            Style="{StaticResource PosSecondaryButtonStyle}"
+                            Height="40"
+                            Padding="14,0"
+                            HorizontalAlignment="Left"
+                            Margin="0,-6,0,16"
+                            Visibility="{Binding HasNetworkProblem, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Stethoscope" Width="18" Height="18" Margin="0,0,8,0" />
+                            <TextBlock Text="{loc:Loc settings.network.diagnose}" FontWeight="Bold" />
+                        </StackPanel>
+                    </Button>
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -225,6 +239,20 @@
                                    Foreground="{DynamicResource PosWarningTextBrush}"
                                    TextWrapping="Wrap" />
                     </Border>
+                    <Button Command="{Binding DiagnoseNetworkCommand}"
+                            Click="DiagnoseNetworkClick"
+                            AutomationProperties.AutomationId="RegistrationDiagnoseNetworkButton"
+                            Style="{StaticResource PosSecondaryButtonStyle}"
+                            Height="40"
+                            Padding="14,0"
+                            HorizontalAlignment="Left"
+                            Margin="0,-6,0,16"
+                            Visibility="{Binding HasNetworkProblem, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Stethoscope" Width="18" Height="18" Margin="0,0,8,0" />
+                            <TextBlock Text="{loc:Loc settings.network.diagnose}" FontWeight="Bold" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding VerifyCommand}"
                             Height="46"
                             Style="{StaticResource PosPrimaryButtonStyle}">

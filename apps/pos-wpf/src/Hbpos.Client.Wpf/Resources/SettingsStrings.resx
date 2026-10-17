@@ -485,4 +485,65 @@
   <data name="mobileApp.enlarge.open" xml:space="preserve"><value>Enlarge QR code</value></data>
   <data name="settings.payment.methods.orderList" xml:space="preserve"><value>Show order list on payment page</value></data>
   <data name="settings.payment.methods.orderList.help" xml:space="preserve"><value>On by default. When off, the left side of the payment page shows only the amount due and the subtotal / discount, without the item list, and the payment area gets wider. Applies to this device only.</value></data>
+  <data name="settings.network.diagnose" xml:space="preserve"><value>Diagnose network</value></data>
+  <data name="settings.network.diagnose.hint" xml:space="preserve"><value>The check only reads network information and contacts this server and public DNS. It does not change any setting.</value></data>
+  <data name="settings.network.title" xml:space="preserve"><value>Network check</value></data>
+  <data name="settings.network.running" xml:space="preserve"><value>Checking the network...</value></data>
+  <data name="settings.network.finishedIn" xml:space="preserve"><value>Finished in {0}</value></data>
+  <data name="settings.network.error" xml:space="preserve"><value>The network check could not run. Try again.</value></data>
+  <data name="settings.network.ok" xml:space="preserve"><value>OK</value></data>
+  <data name="settings.network.skipped" xml:space="preserve"><value>skipped</value></data>
+  <data name="settings.network.step.localNetwork" xml:space="preserve"><value>Local network</value></data>
+  <data name="settings.network.step.systemDns" xml:space="preserve"><value>System DNS</value></data>
+  <data name="settings.network.step.publicDns" xml:space="preserve"><value>Public DNS (1.1.1.1 / 8.8.8.8)</value></data>
+  <data name="settings.network.step.connectIpv4" xml:space="preserve"><value>Connect over IPv4</value></data>
+  <data name="settings.network.step.connectIpv6" xml:space="preserve"><value>Connect over IPv6</value></data>
+  <data name="settings.network.step.proxy" xml:space="preserve"><value>Proxy</value></data>
+  <data name="settings.network.step.secureReply" xml:space="preserve"><value>Secure connection and server reply</value></data>
+  <data name="settings.network.step.clock" xml:space="preserve"><value>Clock</value></data>
+  <data name="settings.network.finding.none.title" xml:space="preserve"><value>No problem found</value></data>
+  <data name="settings.network.finding.none.message" xml:space="preserve"><value>Every check passed. If the POS still shows Offline, wait a few seconds or restart HB POS.</value></data>
+  <data name="settings.network.finding.noLocalNetwork.title" xml:space="preserve"><value>No network connection</value></data>
+  <data name="settings.network.finding.noLocalNetwork.message" xml:space="preserve"><value>This machine has no active network adapter with a gateway. Check the network cable or Wi-Fi.</value></data>
+  <data name="settings.network.finding.dnsSlow.title" xml:space="preserve"><value>This machine's DNS server is slow</value></data>
+  <data name="settings.network.finding.dnsSlow.message" xml:space="preserve"><value>Looking up the server name is much slower here than on public DNS. The POS gives each request only a few seconds, so it keeps showing Offline.</value></data>
+  <data name="settings.network.finding.dnsFailed.title" xml:space="preserve"><value>This machine's DNS can't find the server</value></data>
+  <data name="settings.network.finding.dnsFailed.message" xml:space="preserve"><value>The system DNS could not resolve the server name, but public DNS can.</value></data>
+  <data name="settings.network.finding.dnsMismatch.title" xml:space="preserve"><value>This machine's DNS gives a different address</value></data>
+  <data name="settings.network.finding.dnsMismatch.message" xml:space="preserve"><value>The system DNS answers with a different address than public DNS, and the server can't be reached.</value></data>
+  <data name="settings.network.finding.ipv6Slow.title" xml:space="preserve"><value>IPv6 is slowing the connection</value></data>
+  <data name="settings.network.finding.ipv6Slow.message" xml:space="preserve"><value>Connecting over IPv6 is slow or fails while IPv4 is fast. Turn IPv6 off for this network adapter, or ask your network provider.</value></data>
+  <data name="settings.network.finding.proxyAutoDetectSlow.title" xml:space="preserve"><value>Automatic proxy detection is slow</value></data>
+  <data name="settings.network.finding.proxyAutoDetectSlow.message" xml:space="preserve"><value>A direct connection is fast, but looking for a proxy automatically adds seconds to every request.</value></data>
+  <data name="settings.network.finding.proxyUnreachable.title" xml:space="preserve"><value>The configured proxy does not work</value></data>
+  <data name="settings.network.finding.proxyUnreachable.message" xml:space="preserve"><value>A direct connection works, but the proxy set on this machine does not. It may be set on purpose, so it is not changed automatically. Ask whoever manages this network.</value></data>
+  <data name="settings.network.finding.clockSkew.title" xml:space="preserve"><value>This machine's clock is wrong</value></data>
+  <data name="settings.network.finding.clockSkew.message" xml:space="preserve"><value>The date or time differs from the server by more than 5 minutes, which breaks secure connections. Set the correct date, time and time zone in Windows.</value></data>
+  <data name="settings.network.finding.secureConnectionFailed.title" xml:space="preserve"><value>The secure connection failed</value></data>
+  <data name="settings.network.finding.secureConnectionFailed.message" xml:space="preserve"><value>The connection to the server could not be made secure. Check the date and time on this machine, and any antivirus or proxy that inspects HTTPS.</value></data>
+  <data name="settings.network.finding.serverError.title" xml:space="preserve"><value>The server answered with an error</value></data>
+  <data name="settings.network.finding.serverError.message" xml:space="preserve"><value>This is not a problem with this machine's network. Try again later or contact support.</value></data>
+  <data name="settings.network.finding.notPosApi.title" xml:space="preserve"><value>The reply did not come from the POS server</value></data>
+  <data name="settings.network.finding.notPosApi.message" xml:space="preserve"><value>If this network asks you to sign in (guest Wi-Fi), sign in with a browser first. A proxy may also be rewriting the reply.</value></data>
+  <data name="settings.network.finding.serverUnreachable.title" xml:space="preserve"><value>Can't reach the server</value></data>
+  <data name="settings.network.finding.serverUnreachable.message" xml:space="preserve"><value>The network path to the server is blocked or too slow. Check the firewall and the network, or try another network.</value></data>
+  <data name="settings.network.fix.publicDns" xml:space="preserve"><value>Fix DNS (use 1.1.1.1 and 8.8.8.8)</value></data>
+  <data name="settings.network.fix.disableProxyAutoDetect" xml:space="preserve"><value>Turn off automatic proxy detection</value></data>
+  <data name="settings.network.fixUnavailable" xml:space="preserve"><value>This fix can't be applied here: no active network adapter was found.</value></data>
+  <data name="settings.network.confirm.title" xml:space="preserve"><value>Apply this change?</value></data>
+  <data name="settings.network.confirm.now" xml:space="preserve"><value>Now</value></data>
+  <data name="settings.network.confirm.change" xml:space="preserve"><value>Change to</value></data>
+  <data name="settings.network.confirm.admin" xml:space="preserve"><value>Windows will ask for permission (administrator). Nothing is changed until you approve it. The old setting is saved first, and you can undo it from this panel.</value></data>
+  <data name="settings.network.confirm.currentUser" xml:space="preserve"><value>This changes a setting for the current Windows user only. The old setting is saved first, and you can undo it from this panel.</value></data>
+  <data name="settings.network.confirm.apply" xml:space="preserve"><value>Apply change</value></data>
+  <data name="settings.network.fixed.passed" xml:space="preserve"><value>Changed. The check passes now: the POS can reach the server. If it still shows Offline, wait a few seconds or restart HB POS.</value></data>
+  <data name="settings.network.fixed.stillFailing" xml:space="preserve"><value>Changed, but the check still finds a problem. See the result above, or copy the report for support.</value></data>
+  <data name="settings.network.fixed.cancelled" xml:space="preserve"><value>Nothing was changed: the permission was not granted.</value></data>
+  <data name="settings.network.fixed.failed" xml:space="preserve"><value>The change could not be applied.</value></data>
+  <data name="settings.network.undone" xml:space="preserve"><value>The changes were undone.</value></data>
+  <data name="settings.network.undo" xml:space="preserve"><value>Undo changes</value></data>
+  <data name="settings.network.applied.title" xml:space="preserve"><value>Changes made on this machine</value></data>
+  <data name="settings.network.copy" xml:space="preserve"><value>Copy report</value></data>
+  <data name="settings.network.copied" xml:space="preserve"><value>Report copied.</value></data>
+  <data name="settings.network.copyFailed" xml:space="preserve"><value>Could not copy. Try again.</value></data>
 </root>
