@@ -486,7 +486,9 @@ internal sealed class MainChildViewModelFactory
             receiptProfileSyncService: _receiptProfileSyncService,
             mobileAppDownloadService: _mobileAppDownloadService,
             systemRestartSettingsStore: SystemRestartSettingsStore,
-            restartCoordinatorProvider: RestartCoordinatorProvider);
+            restartCoordinatorProvider: RestartCoordinatorProvider,
+            // 设置页改了直接保存；离开时有保存失败 / 未生效的修改会提示。
+            autoSaveSettings: true);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()

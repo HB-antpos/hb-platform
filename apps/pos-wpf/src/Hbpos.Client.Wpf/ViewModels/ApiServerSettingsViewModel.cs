@@ -26,6 +26,9 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _restartRequired;
 
+    // 最近一次加载或保存成功的地址：输入框与它不同即「改了还没保存」，设置页离开时据此提示。
+    private string _addressBaseline = string.Empty;
+
     public ApiServerSettingsViewModel(
         ApiServerSettingsService settingsService,
         ILocalizationService localization,
@@ -67,6 +70,18 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
 
     public IRelayCommand UseReleaseAddressCommand { get; }
 
+    /// <summary>地址输入框里有没有尚未保存（或保存未成功）的修改。</summary>
+    public bool HasUnsavedAddress => !AddressesMatch(ServerAddressText, _addressBaseline);
+
+    /// <summary>放弃未保存的地址修改，输入框回到最近一次加载 / 保存成功的地址。</summary>
+    public void DiscardUnsavedAddress()
+    {
+        if (HasUnsavedAddress)
+        {
+            ServerAddressText = _addressBaseline;
+        }
+    }
+
     public void Load()
     {
         // 用户级地址要到重启后才生效；重启前再次进入页面必须保留待生效地址和阻断标记。
@@ -76,6 +91,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
         }
 
         ServerAddressText = _settingsService.GetCurrentAddress();
+        SetAddressBaseline(ServerAddressText);
         RestartRequired = false;
         SetStatus("settings.serverAddress.status.ready");
     }
@@ -83,6 +99,32 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
     partial void OnServerAddressTextChanged(string value)
     {
         RaiseCommandStates();
+        OnPropertyChanged(nameof(HasUnsavedAddress));
+    }
+
+    private void SetAddressBaseline(string address)
+    {
+        _addressBaseline = address;
+        OnPropertyChanged(nameof(HasUnsavedAddress));
+    }
+
+    /// <summary>比较时忽略首尾空白和末尾斜杠这类不改变含义的差别；无法规整时按原文比较。</summary>
+    private static bool AddressesMatch(string? left, string? right)
+    {
+        static string Canonical(string? value)
+        {
+            var trimmed = value?.Trim() ?? string.Empty;
+            try
+            {
+                return ApiServerSettingsService.NormalizeAddress(trimmed);
+            }
+            catch (ArgumentException)
+            {
+                return trimmed;
+            }
+        }
+
+        return string.Equals(Canonical(left), Canonical(right), StringComparison.OrdinalIgnoreCase);
     }
 
     partial void OnIsBusyChanged(bool value)
@@ -166,6 +208,7 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
             }
 
             ServerAddressText = normalized;
+            SetAddressBaseline(normalized);
             RestartRequired = !string.Equals(
                 normalized,
                 currentAddress,
@@ -205,12 +248,14 @@ public sealed partial class ApiServerSettingsViewModel : ObservableObject
         {
             case ApiServerSwitchStatus.Success:
                 ServerAddressText = _settingsService.GetCurrentAddress();
+                SetAddressBaseline(ServerAddressText);
                 // 上传按上传时的服务器与设备身份发送，切换成功后记录的事件会进入新服务器。
                 RecordServerChange("Succeeded", "RUNTIME_SWITCH", actor, previousAddress, ServerAddressText);
                 SetStatus("settings.serverAddress.status.switched");
                 break;
             case ApiServerSwitchStatus.SameAddress:
                 ServerAddressText = _settingsService.GetCurrentAddress();
+                SetAddressBaseline(ServerAddressText);
                 SetStatus("settings.serverAddress.status.sameAddress");
                 break;
             case ApiServerSwitchStatus.Blocked:

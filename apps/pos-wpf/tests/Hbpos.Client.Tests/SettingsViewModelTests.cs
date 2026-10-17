@@ -12,7 +12,7 @@ using Hbpos.RemoteMaintenance.Setup;
 namespace Hbpos.Client.Tests;
 
 [Collection(ShutdownTimingTestCollection.Name)]
-public sealed class SettingsViewModelTests
+public sealed partial class SettingsViewModelTests
 {
     private const string CachedToken = "opaque-settings-square-token";
 
@@ -334,8 +334,10 @@ public sealed class SettingsViewModelTests
         Assert.All(categoryButtons, button => Assert.Same(navigationBorder, button.Ancestors().First(
             element => element.Name.LocalName == "Border")));
         Assert.All(categoryButtons, button => Assert.Contains("Selected", button.Attribute("Tag")?.Value, StringComparison.Ordinal));
+        // 导航按钮里除了分类名，还有「未保存数量」角标的数字（绑定，不是文案键）。
         var deviceRegistrationNavigationText = Assert.Single(categoryButtons[3].Descendants().Where(element =>
-            element.Name.LocalName == "TextBlock"));
+            element.Name.LocalName == "TextBlock" &&
+            element.Attribute("Text")?.Value.StartsWith("{loc:Loc", StringComparison.Ordinal) == true));
         Assert.Equal(
             "{loc:Loc settings.category.deviceRegistrationNav}",
             deviceRegistrationNavigationText.Attribute("Text")?.Value);

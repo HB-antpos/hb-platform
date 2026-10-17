@@ -570,4 +570,34 @@
   <data name="settings.network.finding.serverPathLossy.message" xml:space="preserve"><value>Some new connections to the POS server stall or fail, while the same machine reaches a reference server every time. The problem is on the route to the server (your internet provider or something along the way). Run 'pathping -n hotbargain.vip' to see where packets are lost, try another network, and tell your provider where the loss starts. Once a connection is open the POS keeps using it, so the delays mostly appear when it has to reconnect.</value></data>
   <data name="settings.network.finding.connectionBurstLimited.title" xml:space="preserve"><value>Opening several connections at once fails</value></data>
   <data name="settings.network.finding.connectionBurstLimited.message" xml:space="preserve"><value>Connections made one at a time work, but several at once stall or fail. A router or firewall is limiting how many new connections this machine can open at the same time. Check the router for connection limits or 'DoS / SYN flood protection' settings, and the antivirus for network-attack protection.</value></data>
+  <data name="settings.autosave.page.saved" xml:space="preserve"><value>All changes saved</value></data>
+  <data name="settings.autosave.page.saving" xml:space="preserve"><value>Saving…</value></data>
+  <data name="settings.autosave.page.unsaved" xml:space="preserve"><value>{0} not saved</value></data>
+  <data name="settings.autosave.page.retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="settings.autosave.section.saving" xml:space="preserve"><value>Saving…</value></data>
+  <data name="settings.autosave.section.failed" xml:space="preserve"><value>Not saved</value></data>
+  <data name="settings.autosave.section.draft" xml:space="preserve"><value>Changed — not applied yet</value></data>
+  <data name="settings.autosave.section.restartPrompt" xml:space="preserve"><value>Restart reminder after daily close</value></data>
+  <data name="settings.autosave.section.paymentMethods" xml:space="preserve"><value>Payment methods</value></data>
+  <data name="settings.autosave.section.square" xml:space="preserve"><value>Square</value></data>
+  <data name="settings.autosave.section.linkly" xml:space="preserve"><value>ANZ Linkly</value></data>
+  <data name="settings.autosave.section.receiptHardware" xml:space="preserve"><value>Printer &amp; options</value></data>
+  <data name="settings.autosave.section.receiptStore" xml:space="preserve"><value>Store details</value></data>
+  <data name="settings.autosave.section.receiptTerms" xml:space="preserve"><value>Receipt terms</value></data>
+  <data name="settings.autosave.section.serverAddress" xml:space="preserve"><value>API server address</value></data>
+  <data name="settings.autosave.leave.title" xml:space="preserve"><value>{0} change(s) not saved</value></data>
+  <data name="settings.autosave.leave.message" xml:space="preserve"><value>If you leave now, these changes will not take effect.</value></data>
+  <data name="settings.autosave.leave.failed" xml:space="preserve"><value>Save failed: {0}</value></data>
+  <data name="settings.autosave.leave.failedNoReason" xml:space="preserve"><value>Save failed</value></data>
+  <data name="settings.autosave.leave.draft" xml:space="preserve"><value>Changed but not applied — use the button on that page</value></data>
+  <data name="settings.autosave.leave.saving" xml:space="preserve"><value>Still saving</value></data>
+  <data name="settings.autosave.leave.retry" xml:space="preserve"><value>Retry saving</value></data>
+  <data name="settings.autosave.leave.discard" xml:space="preserve"><value>Discard changes and leave</value></data>
+  <data name="settings.autosave.leave.stay" xml:space="preserve"><value>Stay on this page</value></data>
+  <data name="settings.autosave.hint" xml:space="preserve"><value>Changes save automatically</value></data>
+  <data name="settings.page.deviceRegistration.description" xml:space="preserve"><value>Store and device this till is registered to, and the server it talks to.</value></data>
+  <data name="settings.subtab.paymentMethods" xml:space="preserve"><value>Payment methods</value></data>
+  <data name="settings.subtab.receiptHardware" xml:space="preserve"><value>Printer &amp; options</value></data>
+  <data name="settings.subtab.receiptStore" xml:space="preserve"><value>Store details</value></data>
+  <data name="settings.subtab.receiptTerms" xml:space="preserve"><value>Receipt terms</value></data>
 </root>

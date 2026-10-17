@@ -303,6 +303,85 @@
             <Setter Property="Height" Value="52" />
             <Setter Property="Padding" Value="18,0" />
         </Style>
+        <!-- 页头保存状态：已保存（绿）/ 正在保存（灰）/ 未保存（红）。 -->
+        <Style x:Key="SettingsSaveChipStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="18" />
+            <Setter Property="Padding" Value="14,6" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource PosSurfaceAltBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding PageSaveStatus}" Value="Saved">
+                    <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding PageSaveStatus}" Value="Unsaved">
+                    <Setter Property="Background" Value="{DynamicResource PosDangerSoftBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SettingsSaveChipTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding PageSaveStatus}" Value="Saved">
+                    <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding PageSaveStatus}" Value="Unsaved">
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 分区保存状态小字（放在卡片标题右侧）：Tag 绑定该分区的 SaveState；已保存时文字为空、整行折叠。 -->
+        <Style x:Key="SettingsSectionStateTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="12,0,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource PosMutedForegroundBrush}" />
+            <Style.Triggers>
+                <Trigger Property="Text" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </Trigger>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Failed">
+                    <Setter Property="Foreground" Value="{DynamicResource PosDangerTextBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Draft">
+                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 分页标签上的红点：该分页有保存失败或未生效的修改。 -->
+        <Style x:Key="SettingsUnsavedDotStyle" TargetType="Border">
+            <Setter Property="Width" Value="9" />
+            <Setter Property="Height" Value="9" />
+            <Setter Property="CornerRadius" Value="4.5" />
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource PosDangerBrush}" />
+        </Style>
+
+        <!-- 左侧导航的未保存数量角标。 -->
+        <Style x:Key="SettingsNavBadgeStyle" TargetType="Border">
+            <Setter Property="MinWidth" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="CornerRadius" Value="11" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="Margin" Value="12,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource PosDangerBrush}" />
+        </Style>
+
+        <!-- 页内分页（支付终端、小票打印机）：沿用分段控件外观，每段至少 150px 宽、48px 高。 -->
+        <Style x:Key="SettingsSubTabRadioStyle" TargetType="RadioButton" BasedOn="{StaticResource SettingsSegmentRadioStyle}">
+            <Setter Property="MinWidth" Value="150" />
+            <Setter Property="Padding" Value="12,0" />
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -386,9 +465,14 @@
                 <ColumnDefinition Width="18" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
             <!-- 导航先于内容声明，使键盘 Tab 顺序与左到右的视觉顺序一致。 -->
             <Border Grid.Column="0"
+                    Grid.RowSpan="2"
                     Background="{DynamicResource PosSurfaceBrush}"
                     BorderBrush="{DynamicResource PosDividerBrush}"
                     BorderThickness="1"
@@ -414,6 +498,11 @@
                                        FontWeight="Bold"
                                        VerticalAlignment="Center"
                                        Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
+                                    Visibility="{Binding HasDataMaintenanceUnsaved, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding DataMaintenanceUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
                         </StackPanel>
                     </Button>
 
@@ -430,6 +519,11 @@
                                        FontWeight="Bold"
                                        VerticalAlignment="Center"
                                        Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
+                                    Visibility="{Binding HasPaymentTerminalUnsaved, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding PaymentTerminalUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
                         </StackPanel>
                     </Button>
 
@@ -446,6 +540,11 @@
                                        FontWeight="Bold"
                                        VerticalAlignment="Center"
                                        Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
+                                    Visibility="{Binding HasReceiptPrinterUnsaved, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding ReceiptPrinterUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
                         </StackPanel>
                     </Button>
 
@@ -462,6 +561,11 @@
                                        FontWeight="Bold"
                                        VerticalAlignment="Center"
                                        Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                            <Border Style="{StaticResource SettingsNavBadgeStyle}"
+                                    Visibility="{Binding HasDeviceRegistrationUnsaved, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding DeviceRegistrationUnsavedCount}" Foreground="White" FontSize="12" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
                         </StackPanel>
                     </Button>
 
@@ -499,8 +603,64 @@
                 </StackPanel>
             </Border>
 
+
+            <!-- 固定页头：本页标题与说明、保存状态（未保存可重试）、页级主操作；不随内容滚动，保证操作按钮在首屏。 -->
+            <Border Grid.Row="0"
+                    Grid.Column="2"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="20,10"
+                    Margin="0,0,0,14">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Style="{StaticResource SettingsSaveChipStyle}"
+                                Visibility="{Binding IsPageSaveStatusVisible, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding PageSaveStatusText}"
+                                           Style="{StaticResource SettingsSaveChipTextStyle}" />
+                                <Button Command="{Binding RetryFailedSavesCommand}"
+                                        Visibility="{Binding CanRetryPageSaves, Converter={StaticResource BoolToVis}}"
+                                        Style="{StaticResource PosSecondaryButtonStyle}"
+                                        MinHeight="32"
+                                        Height="32"
+                                        Padding="12,0"
+                                        Margin="10,0,0,0">
+                                    <TextBlock Text="{loc:Loc settings.autosave.page.retry}" FontSize="13" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                        <!-- 测试打印放在页头：三个分页都能直接点；小票设置已自动保存，测试只打印。 -->
+                        <Button Command="{Binding TestReceiptPrinterCommand}"
+                                Visibility="{Binding IsReceiptPrinterSelected, Converter={StaticResource BoolToVis}}"
+                                Style="{StaticResource PosPrimaryButtonStyle}"
+                                Height="56"
+                                MinWidth="150"
+                                Padding="18,0">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="Printer" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
+                                <TextBlock Text="{loc:Loc settings.receiptPrinter.test}" Foreground="White" FontSize="16" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="{Binding PageTitleText}"
+                                   FontSize="21"
+                                   FontWeight="Black"
+                                   Foreground="{DynamicResource PosTextBrush}" />
+                        <TextBlock Text="{Binding PageDescriptionText}"
+                                   FontSize="12.5"
+                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
             <!-- 启用 WPF 原生垂直触摸平移和惯性，保留鼠标滚轮及子控件点击行为。 -->
-            <ScrollViewer Grid.Column="2"
+            <ScrollViewer Grid.Row="1"
+                          Grid.Column="2"
                           Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
@@ -522,13 +682,6 @@
                             <ColumnDefinition Width="16" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-
-                        <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Margin="10,2,0,18">
-                            <TextBlock Text="{Binding DataMaintenanceTitleText}"
-                                       Style="{StaticResource SettingsPageTitleStyle}" />
-                            <TextBlock Text="{loc:Loc settings.page.dataMaintenance.description}"
-                                       Style="{StaticResource SettingsPageDescriptionStyle}" />
-                        </StackPanel>
 
                         <Border Grid.Row="1"
                                 Grid.Column="0"
@@ -814,11 +967,17 @@
                                                TextWrapping="Wrap" FontSize="12.5"
                                                Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                 </StackPanel>
-                                <ToggleButton Grid.Column="2" x:Name="RestartPromptSettingToggle"
-                                              Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                              IsChecked="{Binding IsRestartPromptEnabled, Mode=TwoWay}"
-                                              AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
-                                              MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding RestartPromptSaveStateText}"
+                                               Tag="{Binding RestartPromptSaveState}"
+                                               Style="{StaticResource SettingsSectionStateTextStyle}"
+                                               Margin="0,0,12,0" />
+                                    <ToggleButton x:Name="RestartPromptSettingToggle"
+                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                  IsChecked="{Binding IsRestartPromptEnabled, Mode=TwoWay}"
+                                                  AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
+                                                  MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
+                                </StackPanel>
                             </Grid>
                             <Border Height="1" Background="{DynamicResource PosDividerBrush}" Margin="0,6"
                                     Visibility="{Binding IsRestartComputerTestVisible, Converter={StaticResource BoolToVis}}" />
@@ -869,19 +1028,55 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Margin="10,2,0,18">
-                            <TextBlock Text="{Binding CardTerminalTitleText}"
-                                       Style="{StaticResource SettingsPageTitleStyle}" />
-                            <TextBlock Text="{loc:Loc settings.page.paymentTerminal.description}"
-                                       Style="{StaticResource SettingsPageDescriptionStyle}" />
-                        </StackPanel>
+                        <!-- 分页：付款方式 / Square / ANZ Linkly；有未保存修改的分页带红点。 -->
+                        <Border Grid.Row="0" Grid.ColumnSpan="3"
+                                Style="{StaticResource SettingsSegmentHostStyle}"
+                                HorizontalAlignment="Left"
+                                Margin="0,0,0,16">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton GroupName="PaymentSubTabs"
+                                             Style="{StaticResource SettingsSubTabRadioStyle}"
+                                             IsChecked="{Binding IsPaymentMethodsSubTabSelected, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="TuneVariant" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc settings.subtab.paymentMethods}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasPaymentMethodsUnsaved, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton GroupName="PaymentSubTabs"
+                                             Style="{StaticResource SettingsSubTabRadioStyle}"
+                                             IsChecked="{Binding IsSquareSubTabSelected, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="SquareRoundedOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding SquareTitleText}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasSquareUnsaved, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton GroupName="PaymentSubTabs"
+                                             Style="{StaticResource SettingsSubTabRadioStyle}"
+                                             IsChecked="{Binding IsLinklySubTabSelected, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="CreditCardWirelessOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding LinklyTitleText}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasLinklyUnsaved, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </RadioButton>
+                            </StackPanel>
+                        </Border>
 
                         <!-- 付款方式：三个大开关（手动刷卡 / 代金券 / 付款页订单列表），共用一个保存按钮（不触发终端配置写入）。 -->
                         <Border Grid.Row="1" Grid.Column="0"
                                 Style="{StaticResource SettingsActionCardStyle}"
+                                Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}"
                                 Margin="0,0,0,16">
                             <StackPanel>
-                                <TextBlock Text="{loc:Loc settings.payment.methods.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding PaymentMethodsSaveStateText}"
+                                               Tag="{Binding PaymentMethodsSaveState}"
+                                               Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                    <TextBlock Text="{loc:Loc settings.payment.methods.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                </DockPanel>
                                 <TextBlock Text="{loc:Loc settings.payment.methods.description}"
                                            Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,10" />
                                 <Grid MinHeight="72">
@@ -969,6 +1164,7 @@
                                     </ToggleButton>
                                 </Grid>
                                 <Button Command="{Binding SavePaymentMethodsCommand}"
+                                        Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}"
                                         Style="{StaticResource PosPrimaryButtonStyle}"
                                         HorizontalAlignment="Right" MinHeight="52" MinWidth="168" Margin="0,10,0,0">
                                     <TextBlock Text="{loc:Loc settings.payment.methods.save}" Foreground="White" />
@@ -979,6 +1175,7 @@
                         <!-- 当前生效的服务商摘要。 -->
                         <Border Grid.Row="1" Grid.Column="2"
                                 Style="{StaticResource SettingsActionCardStyle}"
+                                Visibility="{Binding IsPaymentMethodsSubTabSelected, Converter={StaticResource BoolToVis}}"
                                 Margin="0,0,0,16">
                             <StackPanel>
                                 <DockPanel>
@@ -1013,11 +1210,15 @@
                                     Grid.ColumnSpan="3"
                                     AutomationProperties.AutomationId="PaymentProviderTabs"
                                     SelectedIndex="{Binding SelectedProviderTabIndex, Mode=TwoWay}"
+                                    Visibility="{Binding IsProviderSubTabSelected, Converter={StaticResource BoolToVis}}"
                                     Background="Transparent"
                                     BorderThickness="0"
                                     Padding="0">
                             <TabControl.Resources>
-                                <Style TargetType="TabItem" BasedOn="{StaticResource SettingsProviderTabStyle}" />
+                                <!-- 标签头由上方分页条代替；TabControl 只负责按 SelectedProviderTabIndex 显示 Square / Linkly 内容。 -->
+                                <Style TargetType="TabItem" BasedOn="{StaticResource SettingsProviderTabStyle}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </Style>
                             </TabControl.Resources>
                             <TabItem>
                                 <TabItem.Header>
@@ -2533,12 +2734,41 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Margin="10,2,0,18">
-                            <TextBlock Text="{Binding ReceiptPrinterTitleText}"
-                                       Style="{StaticResource SettingsPageTitleStyle}" />
-                            <TextBlock Text="{loc:Loc settings.receiptPrinter.description}"
-                                       Style="{StaticResource SettingsPageDescriptionStyle}" />
-                        </StackPanel>
+                        <!-- 分页：打印机与选项 / 门店信息 / 小票条款；右侧小票预览固定不随分页变化。 -->
+                        <Border Grid.Row="0" Grid.ColumnSpan="3"
+                                Style="{StaticResource SettingsSegmentHostStyle}"
+                                HorizontalAlignment="Left"
+                                Margin="0,0,0,16">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton GroupName="ReceiptSubTabs"
+                                             Style="{StaticResource SettingsSubTabRadioStyle}"
+                                             IsChecked="{Binding IsReceiptHardwareSubTabSelected, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="Printer" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc settings.subtab.receiptHardware}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptHardwareUnsaved, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton GroupName="ReceiptSubTabs"
+                                             Style="{StaticResource SettingsSubTabRadioStyle}"
+                                             IsChecked="{Binding IsReceiptStoreSubTabSelected, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="StorefrontOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc settings.subtab.receiptStore}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptStoreUnsaved, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton GroupName="ReceiptSubTabs"
+                                             Style="{StaticResource SettingsSubTabRadioStyle}"
+                                             IsChecked="{Binding IsReceiptTermsSubTabSelected, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="FileDocumentOutline" Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{loc:Loc settings.subtab.receiptTerms}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SettingsUnsavedDotStyle}" Visibility="{Binding HasReceiptTermsUnsaved, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </RadioButton>
+                            </StackPanel>
+                        </Border>
 
                         <!-- 左栏：连接、打印选项、门店信息、条款、保存，各占一行。 -->
                         <Grid Grid.Row="1" Grid.Column="0">
@@ -2553,9 +2783,16 @@
                             <!-- 打印机连接：默认 USB，端口收进“高级”，测试打印做成主按钮。 -->
                             <Border Grid.Row="0"
                                     Style="{StaticResource SettingsActionCardStyle}"
+                                    Visibility="{Binding IsReceiptHardwareSubTabSelected, Converter={StaticResource BoolToVis}}"
                                     Margin="0,0,0,16">
                                 <StackPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ReceiptHardwareSaveStateText}"
+                                                   Tag="{Binding ReceiptHardwareSaveState}"
+                                                   Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    </DockPanel>
                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.connection.help}"
                                                Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,14" />
                                     <Border Background="{DynamicResource PosSurfaceAltBrush}"
@@ -2590,18 +2827,6 @@
                                                            TextWrapping="Wrap"
                                                            Margin="0,4,0,0" />
                                             </StackPanel>
-                                            <Button Grid.Column="2"
-                                                    Command="{Binding TestReceiptPrinterCommand}"
-                                                    Style="{StaticResource PosPrimaryButtonStyle}"
-                                                    Height="56"
-                                                    MinWidth="150"
-                                                    Padding="18,0"
-                                                    VerticalAlignment="Center">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <materialDesign:PackIcon Kind="Printer" Width="20" Height="20" Margin="0,0,8,0" Foreground="White" />
-                                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.test}" Foreground="White" FontSize="16" />
-                                                </StackPanel>
-                                            </Button>
                                         </Grid>
                                     </Border>
                                     <Expander Margin="0,10,0,0" Background="Transparent" BorderThickness="0">
@@ -2624,7 +2849,7 @@
                             </Border>
 
                             <!-- 第 1 行放两张卡片（打印选项、再次扫码确认）上下排列，后面的卡片不用重新编号。 -->
-                            <StackPanel Grid.Row="1">
+                            <StackPanel Grid.Row="1" Visibility="{Binding IsReceiptHardwareSubTabSelected, Converter={StaticResource BoolToVis}}">
                             <!-- 打印选项：客人小票是否附带银行收据原文；与其他小票字段一样点“保存”后生效。 -->
                             <Border Style="{StaticResource SettingsActionCardStyle}"
                                     Margin="0,0,0,16">
@@ -2757,9 +2982,16 @@
                             <!-- 门店信息：总部下发后只读，提示去 Web 分店管理修改；可随时“立即同步”。 -->
                             <Border Grid.Row="2"
                                     Style="{StaticResource SettingsActionCardStyle}"
+                                    Visibility="{Binding IsReceiptStoreSubTabSelected, Converter={StaticResource BoolToVis}}"
                                     Margin="0,0,0,16">
                                 <StackPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ReceiptStoreSaveStateText}"
+                                                   Tag="{Binding ReceiptStoreSaveState}"
+                                                   Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    </DockPanel>
                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.storeInfo.help}"
                                                Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,12" />
                                     <Border Background="{DynamicResource PosSurfaceAltBrush}"
@@ -2847,9 +3079,16 @@
                             <!-- 小票条款：保留多行编辑，一行一条；留空＝使用内置默认文案。总部下发后只读（请在 Web 分店管理修改）。 -->
                             <Border Grid.Row="3"
                                     Style="{StaticResource SettingsActionCardStyle}"
+                                    Visibility="{Binding IsReceiptTermsSubTabSelected, Converter={StaticResource BoolToVis}}"
                                     Margin="0,0,0,16">
                                 <StackPanel>
-                                    <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ReceiptTermsSaveStateText}"
+                                                   Tag="{Binding ReceiptTermsSaveState}"
+                                                   Style="{StaticResource SettingsSectionStateTextStyle}" />
+                                        <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.title}" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    </DockPanel>
                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.terms.subtitle}"
                                                Style="{StaticResource SettingsPageDescriptionStyle}" Margin="0,4,0,12" />
                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.returnPolicy}" Style="{StaticResource SettingsLabelStyle}" />
@@ -2910,7 +3149,8 @@
                                 </StackPanel>
                             </Border>
 
-                            <DockPanel Grid.Row="4" LastChildFill="False">
+                            <!-- 旧的整页保存按钮：开启自动保存后隐藏。 -->
+                            <DockPanel Grid.Row="4" LastChildFill="False" Visibility="{Binding IsExplicitSaveVisible, Converter={StaticResource BoolToVis}}">
                                 <Button DockPanel.Dock="Right"
                                         Command="{Binding SaveReceiptPrinterCommand}"
                                         Style="{StaticResource PosPrimaryButtonStyle}"
@@ -3290,11 +3530,6 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-
-                            <StackPanel Grid.Row="0" Margin="0,0,0,10">
-                                <TextBlock Text="{loc:Loc settings.category.mobileAppDownload}" Style="{StaticResource SettingsPageTitleStyle}" />
-                                <TextBlock Text="{loc:Loc mobileApp.description}" Style="{StaticResource SettingsPageDescriptionStyle}" />
-                            </StackPanel>
 
                             <Grid Grid.Row="1">
                                 <Grid.ColumnDefinitions>
@@ -3754,6 +3989,89 @@
                     </Grid>
                 </Border>
             </Grid>
+        </Border>
+
+        <!-- 离开设置页时还有保存失败 / 未生效的修改：逐项列出位置与原因，三个选择。 -->
+        <Border Grid.RowSpan="3"
+                Background="#99000000"
+                Visibility="{Binding IsLeaveDialogOpen, Converter={StaticResource BoolToVis}}">
+            <Border HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="560"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14"
+                    Padding="24,20">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <materialDesign:PackIcon Kind="AlertOutline" Width="24" Height="24" Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{DynamicResource PosDangerTextBrush}" />
+                        <TextBlock Text="{Binding LeaveDialogTitleText}"
+                                   FontSize="20"
+                                   FontWeight="Black"
+                                   Foreground="{DynamicResource PosTextBrush}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="{loc:Loc settings.autosave.leave.message}"
+                               FontSize="13"
+                               Foreground="{DynamicResource PosMutedForegroundBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,14" />
+                    <ItemsControl ItemsSource="{Binding LeaveDialogItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource PosDangerSoftBrush}"
+                                        BorderBrush="{DynamicResource PosDangerBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="14,10"
+                                        Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding LocationText}"
+                                                   FontSize="14"
+                                                   FontWeight="Bold"
+                                                   Foreground="{DynamicResource PosTextBrush}" />
+                                        <TextBlock Text="{Binding DetailText}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button Command="{Binding LeaveStayCommand}"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                MinHeight="52"
+                                Padding="18,0"
+                                Margin="0,0,10,0">
+                            <TextBlock Text="{loc:Loc settings.autosave.leave.stay}" />
+                        </Button>
+                        <Button Command="{Binding LeaveDiscardCommand}"
+                                Visibility="{Binding LeaveDialogCanDiscard, Converter={StaticResource BoolToVis}}"
+                                Style="{StaticResource PosSecondaryButtonStyle}"
+                                MinHeight="52"
+                                Padding="18,0"
+                                Margin="0,0,10,0">
+                            <TextBlock Text="{loc:Loc settings.autosave.leave.discard}" Foreground="{DynamicResource PosDangerTextBrush}" />
+                        </Button>
+                        <Button Command="{Binding LeaveRetryCommand}"
+                                Visibility="{Binding LeaveDialogCanRetry, Converter={StaticResource BoolToVis}}"
+                                Style="{StaticResource PosPrimaryButtonStyle}"
+                                MinHeight="52"
+                                Padding="18,0">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="Refresh" Width="18" Height="18" Margin="0,0,8,0" Foreground="White" />
+                                <TextBlock Text="{loc:Loc settings.autosave.leave.retry}" Foreground="White" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </Border>
     </Grid>
 </UserControl>

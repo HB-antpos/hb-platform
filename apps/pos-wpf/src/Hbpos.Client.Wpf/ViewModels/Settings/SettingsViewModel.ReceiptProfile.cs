@@ -123,6 +123,18 @@ public sealed partial class SettingsViewModel
     /// </summary>
     private void ApplyReceiptProfileFields(ReceiptPrinterSettings settings)
     {
+        // 后台同步写入的内容已经在存储里，回显时不触发自动保存；门店信息 / 条款两个分区随之回到「已保存」。
+        using (SuppressAutoSave())
+        {
+            ApplyReceiptProfileFieldValues(settings);
+        }
+
+        _autoSave.MarkSaved(ReceiptStoreSaveKey);
+        _autoSave.MarkSaved(ReceiptTermsSaveKey);
+    }
+
+    private void ApplyReceiptProfileFieldValues(ReceiptPrinterSettings settings)
+    {
         ReceiptBrandNameText = settings.BrandName;
         ReceiptStoreNameText = settings.StoreName;
         ReceiptStoreAddressText = settings.StoreAddress;

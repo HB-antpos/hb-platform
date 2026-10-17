@@ -80,6 +80,13 @@ public sealed partial class SettingsViewModel
             return;
         }
 
+        // 自动保存开启时交给保存跟踪器：失败会显示在卡片上，离开设置页时提示。
+        if (_autoSaveEnabled)
+        {
+            MarkAutoSaveChanged(RestartPromptSaveKey, TimeSpan.Zero);
+            return;
+        }
+
         _ = SaveRestartPromptAsync(value);
     }
 
