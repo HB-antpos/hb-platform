@@ -1697,9 +1697,13 @@
                                        TextWrapping="Wrap"
                                        Foreground="{DynamicResource PosMutedForegroundBrush}" />
                         </StackPanel>
+                        <!-- 不可获得键盘焦点：点过之后焦点若停在按钮上，下一次扫码枪尾部的 Enter 一旦没被扫码逻辑吃掉，
+                             就会再次激活本按钮、重复打印小票。 -->
                         <Button Grid.Column="1"
                                 MinHeight="40"
                                 Padding="14,4"
+                                Focusable="False"
+                                IsTabStop="False"
                                 Command="{Binding PrintReceiptCommand}"
                                 Style="{StaticResource PosSecondaryButtonStyle}"
                                 AutomationProperties.AutomationId="PaymentSuccessCardPrintButton">
