@@ -42,7 +42,7 @@ public sealed class NetworkDiagnosticsViewModelTests
         await h.Vm.DiagnoseCommand.ExecuteAsync(null);
 
         Assert.True(h.Vm.HasResult);
-        Assert.Equal(10, h.Vm.Steps.Count);
+        Assert.Equal(12, h.Vm.Steps.Count);
         Assert.Equal("Link to the router", h.Vm.Steps[1].Label);
         Assert.Equal("skipped", h.Vm.Steps[1].StatusKey);
         Assert.Equal("System DNS", h.Vm.Steps[2].Label);
@@ -57,6 +57,78 @@ public sealed class NetworkDiagnosticsViewModelTests
         Assert.Equal("Fix DNS (use 1.1.1.1 and 8.8.8.8)", h.Vm.FixButtonText);
         Assert.Equal("Finished in 9.4 s", h.Vm.SummaryText);
         Assert.False(h.Vm.IsRunning);
+    }
+
+    [Fact]
+    public async Task A_missing_root_certificate_offers_the_install_fix_and_explains_exactly_what_will_be_installed()
+    {
+        var m = Healthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            DirectReplyMs = 12000,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            ChainChecked = true,
+            ChainTrusted = false,
+            MissingTrustedRoots = ["ISRG Root X1"],
+            CertificateIssuer = "CN=YE2, O=Let's Encrypt, C=US"
+        };
+        var h = new Harness(ReportOf(m));
+        await h.Vm.DiagnoseCommand.ExecuteAsync(null);
+
+        Assert.Equal("This machine does not trust the server's certificate authority", h.Vm.FindingTitle);
+        Assert.True(h.Vm.HasFix);
+        Assert.Equal("Install the missing root certificate (ISRG Root X1)", h.Vm.FixButtonText);
+
+        h.Vm.FixCommand.Execute(null);
+
+        Assert.True(h.Vm.IsConfirming);
+        Assert.Contains("Windows will ask for permission", h.Vm.PlanNote);
+        Assert.Contains("checked against a built-in fingerprint", h.Vm.PlanNote);
+        Assert.Contains("Undo removes it again", h.Vm.PlanNote);
+        Assert.Equal(0, h.Fixes.ApplyCalls);
+    }
+
+    [Fact]
+    public async Task After_the_root_is_installed_the_summary_names_it_and_undo_is_offered()
+    {
+        var m = Healthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            ChainChecked = true,
+            ChainTrusted = false,
+            MissingTrustedRoots = ["ISRG Root X1"]
+        };
+        var h = new Harness(ReportOf(m), ReportOf(Healthy()));
+        await h.Vm.DiagnoseCommand.ExecuteAsync(null);
+        h.Vm.FixCommand.Execute(null);
+
+        await h.Vm.ConfirmFixCommand.ExecuteAsync(null);
+
+        Assert.True(h.Vm.CanUndo);
+        Assert.Contains("Trusted root certificate installed: ISRG Root X1", h.Vm.AppliedSummary);
+    }
+
+    [Fact]
+    public async Task An_intercepted_connection_names_the_software_that_re_signed_the_certificate_and_has_no_fix()
+    {
+        var m = Healthy() with
+        {
+            Reply = ReplyOutcome.Timeout,
+            TlsOutcome = TlsProbeOutcome.TimedOut,
+            TlsHandshakeMs = 12000,
+            ChainChecked = true,
+            ChainTrusted = true,
+            CertificateIssuer = "CN=Kaspersky Anti-Virus Personal Root Certificate"
+        };
+        var h = new Harness(ReportOf(m));
+
+        await h.Vm.DiagnoseCommand.ExecuteAsync(null);
+
+        Assert.Equal("Something is re-signing the secure connection", h.Vm.FindingTitle);
+        Assert.Contains("'Kaspersky Anti-Virus Personal Root Certificate'", h.Vm.FindingMessage);
+        Assert.Contains("HTTPS scanning", h.Vm.FindingMessage);
+        Assert.False(h.Vm.HasFix);
     }
 
     [Fact]
@@ -238,7 +310,7 @@ public sealed class NetworkDiagnosticsViewModelTests
             "settings.network.confirm.apply", "settings.network.fixed.passed", "settings.network.fixed.stillFailing",
             "settings.network.fixed.cancelled", "settings.network.fixed.failed", "settings.network.undone",
             "settings.network.undo", "settings.network.applied.title", "settings.network.copy",
-            "settings.network.copied", "settings.network.copyFailed"
+            "settings.network.copied", "settings.network.copyFailed", "settings.network.confirm.roots"
         ]);
 
         foreach (var file in new[] { "SettingsStrings.resx", "SettingsStrings.zh-CN.resx" })
@@ -356,12 +428,14 @@ public sealed class NetworkDiagnosticsViewModelTests
             kind == NetworkFixKind.PublicDns ? "DNS on Ethernet" : "Proxy: automatic detection",
             kind == NetworkFixKind.PublicDns ? "192.168.1.1 (automatic)" : "on",
             kind == NetworkFixKind.PublicDns ? "1.1.1.1, 8.8.8.8" : "off",
-            kind == NetworkFixKind.PublicDns,
+            kind is NetworkFixKind.PublicDns or NetworkFixKind.InstallTrustedRoots,
             12,
             "Ethernet",
             ["192.168.1.1"],
             true,
-            null);
+            null,
+            kind == NetworkFixKind.InstallTrustedRoots ? ["ISRG Root X1"] : null,
+            kind == NetworkFixKind.InstallTrustedRoots ? [TrustedRootCertificates.IsrgRootX1.Sha1] : null);
 
         public Task<NetworkFixResult> ApplyAsync(NetworkFixPlan plan, CancellationToken cancellationToken = default)
         {
@@ -375,7 +449,8 @@ public sealed class NetworkDiagnosticsViewModelTests
                     plan.PreviousServers,
                     plan.PreviousAutomatic,
                     plan.PreviousAutoDetect,
-                    new DateTimeOffset(2026, 10, 17, 20, 31, 0, TimeSpan.FromHours(11)));
+                    new DateTimeOffset(2026, 10, 17, 20, 31, 0, TimeSpan.FromHours(11)),
+                    plan.RootSha1);
             }
 
             return Task.FromResult(ApplyResult);

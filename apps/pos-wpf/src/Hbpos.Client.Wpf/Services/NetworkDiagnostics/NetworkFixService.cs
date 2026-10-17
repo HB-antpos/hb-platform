@@ -11,7 +11,9 @@ public sealed record NetworkFixPlan(
     string? AdapterName,
     IReadOnlyList<string> PreviousServers,
     bool PreviousAutomatic,
-    int? PreviousAutoDetect);
+    int? PreviousAutoDetect,
+    IReadOnlyList<string>? RootNames = null,
+    IReadOnlyList<string>? RootSha1 = null);
 
 public sealed record NetworkFixResult(bool Succeeded, bool Cancelled, string? Error)
 {
@@ -30,7 +32,8 @@ public sealed record NetworkFixRecord(
     IReadOnlyList<string> PreviousServers,
     bool PreviousAutomatic,
     int? PreviousAutoDetect,
-    DateTimeOffset AppliedAt);
+    DateTimeOffset AppliedAt,
+    IReadOnlyList<string>? InstalledRootSha1 = null);
 
 public sealed record DnsSettings(IReadOnlyList<string> Servers, bool Automatic);
 
@@ -42,6 +45,19 @@ public interface IDnsConfigurator
     Task<bool> SetServersAsync(int adapterIndex, IReadOnlyList<string> servers, CancellationToken cancellationToken);
 
     Task<bool> ResetToAutomaticAsync(int adapterIndex, CancellationToken cancellationToken);
+}
+
+/// <summary>安装 / 移除受信任根证书。只处理程序里写死并校验过指纹的证书。</summary>
+public interface ITrustedRootInstaller
+{
+    /// <summary>本机还没有的那些写死的根证书。</summary>
+    IReadOnlyList<TrustedRootCertificate> GetMissing();
+
+    /// <summary>需要管理员权限；用户在 Windows 授权窗口里拒绝时返回 false，其他失败抛异常。</summary>
+    Task<bool> InstallAsync(IReadOnlyList<TrustedRootCertificate> roots, CancellationToken cancellationToken);
+
+    /// <summary>按 SHA-1 指纹移除；只接受写死的那几张的指纹。</summary>
+    Task<bool> RemoveAsync(IReadOnlyList<string> sha1Thumbprints, CancellationToken cancellationToken);
 }
 
 public interface IProxyAutoDetectStore
@@ -76,6 +92,7 @@ public sealed class NetworkFixService(
     IDnsConfigurator dns,
     IProxyAutoDetectStore proxyStore,
     INetworkFixStore store,
+    ITrustedRootInstaller roots,
     Func<DateTimeOffset>? clock = null) : INetworkFixService
 {
     /// <summary>修复时写入的公共 DNS。固定值，不接受外部输入。</summary>
@@ -131,6 +148,30 @@ public sealed class NetworkFixService(
                     current);
             }
 
+            case NetworkFixKind.InstallTrustedRoots:
+            {
+                var missing = roots.GetMissing();
+                if (missing.Count == 0)
+                {
+                    return null;
+                }
+
+                var names = missing.Select(root => root.Name).ToArray();
+                return new NetworkFixPlan(
+                    kind,
+                    "Trusted root certificates (this machine)",
+                    $"missing: {string.Join(", ", names)}",
+                    $"install {string.Join(", ", names)} (Let's Encrypt's public root certificate)",
+                    NeedsAdministrator: true,
+                    null,
+                    null,
+                    [],
+                    false,
+                    null,
+                    names,
+                    missing.Select(root => root.Sha1).ToArray());
+            }
+
             default:
                 return null;
         }
@@ -138,6 +179,7 @@ public sealed class NetworkFixService(
 
     public async Task<NetworkFixResult> ApplyAsync(NetworkFixPlan plan, CancellationToken cancellationToken = default)
     {
+        IReadOnlyList<string>? installedRoots = null;
         try
         {
             switch (plan.Kind)
@@ -157,6 +199,27 @@ public sealed class NetworkFixService(
                 case NetworkFixKind.DisableProxyAutoDetect:
                     proxyStore.Set(0);
                     break;
+                case NetworkFixKind.InstallTrustedRoots:
+                {
+                    // 只装计划里列出的、而且本机现在仍然缺的那几张；这一刻已经有了就什么都不做。
+                    var planned = plan.RootSha1 ?? [];
+                    var toInstall = roots.GetMissing()
+                        .Where(root => planned.Contains(root.Sha1, StringComparer.OrdinalIgnoreCase))
+                        .ToArray();
+                    if (toInstall.Length == 0)
+                    {
+                        return NetworkFixResult.Done;
+                    }
+
+                    if (!await roots.InstallAsync(toInstall, cancellationToken))
+                    {
+                        return NetworkFixResult.UserCancelled;
+                    }
+
+                    installedRoots = toInstall.Select(root => root.Sha1).ToArray();
+                    break;
+                }
+
                 default:
                     return NetworkFixResult.Failure("Unsupported fix.");
             }
@@ -174,7 +237,8 @@ public sealed class NetworkFixService(
             plan.PreviousServers,
             plan.PreviousAutomatic,
             plan.PreviousAutoDetect,
-            _now()));
+            _now(),
+            installedRoots));
         ConsoleLog.Write("NetworkFix", $"applied kind={plan.Kind} target={plan.Target} before={plan.Before} after={plan.After}");
         return NetworkFixResult.Done;
     }
@@ -216,6 +280,18 @@ public sealed class NetworkFixService(
                     break;
                 case NetworkFixKind.DisableProxyAutoDetect:
                     proxyStore.Set(record.PreviousAutoDetect);
+                    break;
+                case NetworkFixKind.InstallTrustedRoots:
+                    if (record.InstalledRootSha1 is not { Count: > 0 })
+                    {
+                        return NetworkFixResult.Failure("No installed certificate recorded.");
+                    }
+
+                    if (!await roots.RemoveAsync(record.InstalledRootSha1, cancellationToken))
+                    {
+                        return NetworkFixResult.UserCancelled;
+                    }
+
                     break;
                 default:
                     return NetworkFixResult.Failure("Unsupported fix.");

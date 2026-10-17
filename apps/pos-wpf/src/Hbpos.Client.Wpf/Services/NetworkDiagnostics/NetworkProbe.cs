@@ -3,8 +3,10 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Hbpos.Contracts.Common;
 using Hbpos.Contracts.Health;
@@ -25,6 +27,21 @@ public sealed record ConnectProbeResult(long ElapsedMs, bool Failed);
 
 /// <summary>对网关发 ping 的统计：发了几次、丢了几次、成功的平均 / 最大往返毫秒。</summary>
 public sealed record PingProbeResult(int Sent, int Lost, long? AvgMs, long? MaxMs);
+
+/// <summary>
+/// 一次只做 TLS 握手、不发 HTTP 请求的探测结果：握手耗时、协议、错误，以及服务器证书链在本机的校验情况。
+/// </summary>
+public sealed record TlsProbeResult(
+    long HandshakeMs,
+    TlsProbeOutcome Outcome,
+    string? Protocol,
+    string? Error,
+    bool ChainChecked,
+    bool ChainTrusted,
+    bool NotTimeValid,
+    IReadOnlyList<string> ChainProblems,
+    IReadOnlyList<string> ChainSubjects,
+    string? Issuer);
 
 public sealed record ProxyProbeInfo(bool Configured, string? Address, bool AutoDetectEnabled);
 
@@ -47,6 +64,16 @@ public interface INetworkProbe
 
     /// <summary>连续 ping 指定地址（通常是网关）count 次，统计丢包与延迟。</summary>
     Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 只做 TLS 握手。<paramref name="offlineChainCheck"/> 为 true 时不下载证书、不查吊销，且无论校验结果都完成握手以便读取证书链；
+    /// 为 false 时与 HttpClient 的默认校验方式一致（可能联网查根证书 / 吊销信息，这正是要测的"慢"）。
+    /// 握手后立刻关闭，不发送任何数据。
+    /// </summary>
+    Task<TlsProbeResult> ProbeTlsAsync(string host, int port, bool offlineChainCheck, TimeSpan timeout, CancellationToken cancellationToken);
+
+    /// <summary>本机缺少的、一键修复可以安装的根证书名称。</summary>
+    IReadOnlyList<string> GetMissingTrustedRoots();
 
     ProxyProbeInfo GetProxyInfo(Uri target);
 
@@ -202,6 +229,116 @@ public sealed class SystemNetworkProbe : INetworkProbe
             lost,
             replies.Count == 0 ? null : (long)Math.Round(replies.Average()),
             replies.Count == 0 ? null : replies.Max());
+    }
+
+    public async Task<TlsProbeResult> ProbeTlsAsync(string host, int port, bool offlineChainCheck, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var chainSeen = false;
+        var trusted = false;
+        var notTimeValid = false;
+        var problems = new List<string>();
+        var subjects = new List<string>();
+        string? issuer = null;
+        using var limited = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        limited.CancelAfter(timeout);
+
+        TlsProbeResult Snapshot(TlsProbeOutcome outcome, long handshakeMs, string? protocol, string? error) => new(
+            handshakeMs,
+            outcome,
+            protocol,
+            error,
+            chainSeen,
+            chainSeen && trusted,
+            notTimeValid,
+            problems.ToArray(),
+            subjects.ToArray(),
+            issuer);
+
+        try
+        {
+            using var tcp = new TcpClient();
+            await tcp.ConnectAsync(host, port, limited.Token);
+            var handshakeStart = stopwatch.ElapsedMilliseconds;
+            using var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false);
+            var options = new SslClientAuthenticationOptions
+            {
+                TargetHost = host,
+                RemoteCertificateValidationCallback = (_, certificate, chain, errors) =>
+                {
+                    chainSeen = true;
+                    trusted = errors == SslPolicyErrors.None;
+                    if (certificate is not null)
+                    {
+                        using var leaf = new X509Certificate2(certificate);
+                        issuer = leaf.Issuer;
+                    }
+
+                    if (chain is not null)
+                    {
+                        foreach (var element in chain.ChainElements)
+                        {
+                            subjects.Add(element.Certificate.Subject);
+                        }
+
+                        foreach (var status in chain.ChainStatus)
+                        {
+                            foreach (var flag in Enum.GetValues<X509ChainStatusFlags>())
+                            {
+                                if (flag != X509ChainStatusFlags.NoError && (status.Status & flag) == flag && !problems.Contains(flag.ToString()))
+                                {
+                                    problems.Add(flag.ToString());
+                                }
+                            }
+                        }
+
+                        notTimeValid = problems.Contains(nameof(X509ChainStatusFlags.NotTimeValid));
+                    }
+
+                    // 联网校验方式照实返回校验结果（与 HttpClient 一致）；不联网方式只为读取证书链，接受任何证书，握手后立刻关闭、不发数据。
+                    return offlineChainCheck || errors == SslPolicyErrors.None;
+                }
+            };
+            if (offlineChainCheck)
+            {
+                options.CertificateChainPolicy = new X509ChainPolicy
+                {
+                    RevocationMode = X509RevocationMode.NoCheck,
+                    DisableCertificateDownloads = true
+                };
+            }
+
+            await ssl.AuthenticateAsClientAsync(options, limited.Token);
+            return Snapshot(
+                TlsProbeOutcome.Completed,
+                stopwatch.ElapsedMilliseconds - handshakeStart,
+                ssl.SslProtocol.ToString(),
+                null);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Snapshot(TlsProbeOutcome.TimedOut, stopwatch.ElapsedMilliseconds, null, null);
+        }
+        catch (Exception ex) when (ex is AuthenticationException or IOException or SocketException)
+        {
+            return Snapshot(TlsProbeOutcome.Failed, stopwatch.ElapsedMilliseconds, null, ex.InnerException?.Message ?? ex.Message);
+        }
+    }
+
+    public IReadOnlyList<string> GetMissingTrustedRoots()
+    {
+        try
+        {
+            return TrustedRootCertificates.All
+                .Where(root => !TrustedRootCertificates.IsInstalled(root))
+                .Select(root => root.Name)
+                .ToArray();
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            // 读不到证书库时不下结论：当作没有缺失，由其他检测项决定。
+            return [];
+        }
     }
 
     public ProxyProbeInfo GetProxyInfo(Uri target)

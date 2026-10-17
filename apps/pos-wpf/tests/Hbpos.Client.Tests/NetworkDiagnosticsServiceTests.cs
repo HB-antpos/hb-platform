@@ -154,6 +154,92 @@ public sealed class NetworkDiagnosticsServiceTests
     }
 
     [Fact]
+    public async Task Both_tls_probes_run_for_an_https_server_and_fill_the_handshake_and_chain_measurements()
+    {
+        var probe = new FakeProbe();
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(
+            ["hotbargain.vip:443:default", "hotbargain.vip:443:offline"],
+            probe.TlsCalls.OrderBy(call => call).ToArray());
+        Assert.Equal(TlsProbeOutcome.Completed, report.Measurements.TlsOutcome);
+        Assert.Equal(650, report.Measurements.TlsHandshakeMs);
+        Assert.Equal(600, report.Measurements.TlsOfflineHandshakeMs);
+        Assert.True(report.Measurements.ChainChecked);
+        Assert.True(report.Measurements.ChainTrusted);
+        Assert.Equal("CN=YE2, O=Let's Encrypt, C=US", report.Measurements.CertificateIssuer);
+        Assert.Equal(0, probe.MissingRootsCalls);
+        Assert.Equal(DiagnosisKind.None, report.Finding.Kind);
+    }
+
+    [Fact]
+    public async Task Tls_is_not_probed_for_localhost_or_plain_http()
+    {
+        var probe = new FakeProbe();
+        var service = new NetworkDiagnosticsService(probe);
+
+        await service.RunAsync(new Uri("http://localhost:5159/"));
+        await service.RunAsync(new Uri("http://pos.example.test/"));
+
+        Assert.Empty(probe.TlsCalls);
+    }
+
+    [Fact]
+    public async Task A_missing_root_on_an_old_machine_is_diagnosed_end_to_end_and_the_fix_is_offered()
+    {
+        var probe = new FakeProbe
+        {
+            TlsOffline = FakeProbe.Tls(450, trusted: false),
+            TlsDefault = FakeProbe.Tls(12000, trusted: false, TlsProbeOutcome.TimedOut),
+            MissingRoots = ["ISRG Root X1"],
+            DirectReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null),
+            ProxyReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null)
+        };
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(DiagnosisKind.CertificateRootMissing, report.Finding.Kind);
+        Assert.Equal(NetworkFixKind.InstallTrustedRoots, report.Finding.SuggestedFix);
+        Assert.Equal(["ISRG Root X1"], report.Measurements.MissingTrustedRoots);
+        Assert.Equal(1, probe.MissingRootsCalls);
+        Assert.Equal(DiagnosticStepStatus.Failed, report.Steps.Single(step => step.Id == DiagnosticStepId.CertificateTrust).Status);
+    }
+
+    [Fact]
+    public async Task A_trusted_chain_with_a_stuck_default_handshake_is_a_slow_certificate_check()
+    {
+        var probe = new FakeProbe
+        {
+            TlsOffline = FakeProbe.Tls(450, trusted: true),
+            TlsDefault = FakeProbe.Tls(12000, trusted: true, TlsProbeOutcome.TimedOut),
+            DirectReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null),
+            ProxyReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null)
+        };
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(DiagnosisKind.CertificateCheckSlow, report.Finding.Kind);
+    }
+
+    [Fact]
+    public async Task A_certificate_re_signed_by_security_software_is_reported_with_its_issuer()
+    {
+        var probe = new FakeProbe
+        {
+            TlsOffline = FakeProbe.Tls(450, trusted: true, issuer: "CN=ESET SSL Filter CA, O=ESET, spol. s r.o."),
+            TlsDefault = FakeProbe.Tls(12000, trusted: true, TlsProbeOutcome.TimedOut, "CN=ESET SSL Filter CA, O=ESET, spol. s r.o."),
+            DirectReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null),
+            ProxyReply = new ReplyProbeResult(12000, ReplyOutcome.Timeout, null, null)
+        };
+
+        var report = await new NetworkDiagnosticsService(probe).RunAsync(Api);
+
+        Assert.Equal(DiagnosisKind.HttpsIntercepted, report.Finding.Kind);
+        Assert.Contains("ESET SSL Filter CA", report.Measurements.CertificateIssuer);
+    }
+
+    [Fact]
     public async Task Cancelling_the_caller_token_aborts_the_run()
     {
         using var cancellation = new CancellationTokenSource();
@@ -175,6 +261,28 @@ public sealed class NetworkDiagnosticsServiceTests
         public ConnectProbeResult ConnectResult { get; set; } = new(46, false);
 
         public PingProbeResult GatewayPing { get; set; } = new(6, 0, 3, 6);
+
+        public TlsProbeResult TlsOffline { get; set; } = Tls(600, true);
+
+        public TlsProbeResult TlsDefault { get; set; } = Tls(650, true);
+
+        public IReadOnlyList<string> MissingRoots { get; set; } = [];
+
+        public int MissingRootsCalls { get; private set; }
+
+        public List<string> TlsCalls { get; } = [];
+
+        public static TlsProbeResult Tls(long ms, bool trusted, TlsProbeOutcome outcome = TlsProbeOutcome.Completed, string issuer = "CN=YE2, O=Let's Encrypt, C=US") => new(
+            ms,
+            outcome,
+            outcome == TlsProbeOutcome.Completed ? "Tls12" : null,
+            null,
+            ChainChecked: true,
+            ChainTrusted: trusted,
+            NotTimeValid: false,
+            trusted ? [] : ["UntrustedRoot"],
+            ["CN=hotbargain.vip", issuer],
+            issuer);
 
         public List<string> Pings { get; } = [];
 
@@ -221,6 +329,23 @@ public sealed class NetworkDiagnosticsServiceTests
             }
 
             return Task.FromResult(ConnectResultFor?.Invoke(address) ?? ConnectResult);
+        }
+
+        public Task<TlsProbeResult> ProbeTlsAsync(string host, int port, bool offlineChainCheck, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            Check(cancellationToken);
+            lock (TlsCalls)
+            {
+                TlsCalls.Add($"{host}:{port}:{(offlineChainCheck ? "offline" : "default")}");
+            }
+
+            return Task.FromResult(offlineChainCheck ? TlsOffline : TlsDefault);
+        }
+
+        public IReadOnlyList<string> GetMissingTrustedRoots()
+        {
+            MissingRootsCalls++;
+            return MissingRoots;
         }
 
         public Task<PingProbeResult> PingAsync(string address, int count, TimeSpan timeoutPerPing, CancellationToken cancellationToken)
