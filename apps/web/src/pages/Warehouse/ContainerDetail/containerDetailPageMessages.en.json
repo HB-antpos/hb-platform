@@ -94,9 +94,9 @@
       "formulaHint": "Formulas",
       "retailPriceSync": {
         "syncStoreRetailPrices": "Sync store retail prices",
-        "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away and stores are asked to swap labels. When unchecked, store prices stay as they are and each store confirms the price change.",
+        "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away; when unchecked, store prices stay as they are. Whether stores are notified or asked to swap labels is decided by \"Create price tasks\" below.",
         "generateTasks": "Create price tasks",
-        "generateTasksHint": "When checked, price update tasks are created for stores. When unchecked, stores are not notified (store prices that are synced are pushed to HQ immediately)."
+        "generateTasksHint": "When checked, price update tasks are created for stores (a \"swap labels\" task if \"Sync store retail prices\" is also checked, otherwise a \"change price\" task). When unchecked, stores are not notified and no task is created; synced store prices are still pushed to HQ immediately, and shelf labels are not changed."
       }
     }
   }
