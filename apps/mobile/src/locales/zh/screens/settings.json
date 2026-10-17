@@ -3,10 +3,10 @@
   "groups": {
     "app": "应用设置",
     "printers": "打印机",
-    "devices": "设备与连接",
-    "preferences": "偏好与安全",
+    "devices": "设备与打印",
+    "preferences": "偏好",
     "support": "应用与支持",
-    "account": "账户"
+    "account": "账号与安全"
   },
   "overview": {
     "diagnostics": "诊断",
@@ -28,7 +28,17 @@
     "aboutDescription": "版本、运行信息与故障排查",
     "buildFooter": "版本 {{version}} · {{channel}}",
     "dangerZone": "危险操作",
-    "printerDetailsDescription": "分别管理标签打印机和小票打印机，蓝牙操作会自动串行执行。"
+    "printerDetailsDescription": "分别管理标签打印机和小票打印机，蓝牙操作会自动串行执行。",
+    "connectionAllGood": "全部正常",
+    "connectionAttention": "{{count}} 项需处理",
+    "currentDeviceSubtitle": "{{device}} · {{store}}"
+  },
+  "floatingLanguage": {
+    "title": "语言悬浮按钮",
+    "description": "每页显示可拖动的 中 / EN 按钮：点一下切换语言，按住快速跳转。",
+    "holdTitle": "按住时长",
+    "holdDescription": "按住按钮多少秒打开快速跳转",
+    "holdOption": "{{seconds}} 秒"
   },
   "diagnostics": {
     "title": "关于与诊断",
@@ -48,7 +58,11 @@
     "expandPersonalCode": "点击放大 · 查看与打印个人码",
     "personalCodeBusy": "个人码正在打印，请等待当前任务完成。",
     "changePassword": "修改密码",
-    "changePasswordHelper": "改成只有你自己知道的密码"
+    "changePasswordHelper": "改成只有你自己知道的密码",
+    "viewProfile": "个人资料",
+    "personalCodeLine": "个人码 {{code}}",
+    "notLoggedIn": "未登录",
+    "deviceModeShort": "当前使用设备授权进入"
   },
   "language": {
     "description": "切换 App 显示语言，立即生效。"
@@ -335,5 +349,15 @@
   },
   "messages": {
     "profileLoginRequired": "请先使用账号登录，再打开个人信息。"
+  },
+  "more": {
+    "title": "更多设置",
+    "summary": "应用更新 · 服务器 · 隐私 · 关于与诊断",
+    "back": "返回",
+    "connectionGroup": "连接",
+    "privacyGroup": "隐私",
+    "dataRights": "数据权利说明",
+    "dataRightsExpand": "展开数据权利说明",
+    "dataRightsCollapse": "收起数据权利说明"
   }
 }

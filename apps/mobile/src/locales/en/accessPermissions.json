@@ -844,6 +844,10 @@
     "Warehouse.ManageProducts": {
       "name": "Warehouse Manage Products",
       "description": "Allows access to Warehouse Manage Products."
+    },
+    "Warehouse.CancelPriceUpdateTasks": {
+      "name": "Cancel price update tasks",
+      "description": "Web page /warehouse/products/price-update-tasks and the mobile Price & Labels page - cancel pending store price update tasks (per product, across all stores; only removes the reminder, never changes any price, cannot be undone). Accounts with Manage warehouse products have it automatically"
     }
   },
   "roles": {

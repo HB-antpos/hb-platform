@@ -65,11 +65,11 @@ assert.equal(zh.retailSyncStoresLabel, "同步分店零售价");
 assert.equal(zh.retailGenerateTasksLabel, "生成价格任务");
 assert.equal(
   zh.retailSyncStoresHelper,
-  "开启后直接把各分店零售价改成新价并通知换标签；关闭则不动分店价，由分店确认改价"
+  "开启后直接把各分店零售价改成新价；关闭则不动分店价。是否通知分店、是否换标签，由下面的「生成价格任务」决定"
 );
 assert.equal(
   zh.retailGenerateTasksHelper,
-  "开启后给分店生成价格更新任务；关闭则不通知分店（同步分店价时会立即同步总部 HQ）"
+  "开启后给分店生成价格更新任务（同时开启「同步分店零售价」是「待换标签」任务，否则是「改价格」任务）；关闭则不通知分店、不发任何任务，已同步的分店价会立即同步总部 HQ（价签不会换）"
 );
 
 console.log("retail-price-confirm-source.test.ts: ok");

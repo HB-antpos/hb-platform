@@ -1,4 +1,4 @@
-import { CashierBarcodeCard } from "@/modules/employee-profile/CashierBarcodeCard";
+import { CashierBarcodeCard, usePersonalCodeValue } from "@/modules/employee-profile/CashierBarcodeCard";
 import { resolveEmployeeProfileIdentity } from "@/modules/employee-profile/cache-keys";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
@@ -15,14 +15,13 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   Button,
   HelperText,
   Icon,
   IconButton,
   SegmentedButtons,
-  Surface,
   Switch,
   Text,
   TextInput,
@@ -62,6 +61,24 @@ import { useAuthStore } from "@/store/auth-store";
 import { useDeviceStore } from "@/store/device-store";
 import { resolveSettingsAuthMode, shouldShowProfileAction } from "@/modules/device/settings-mode";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
+import {
+  hydrateFloatingLanguagePreference,
+  useFloatingLanguageStore,
+} from "@/modules/floating-language/preference";
+import { formatLongPressSeconds } from "@/modules/floating-language/geometry";
+import {
+  buildIdentityMeta,
+  countAttentionItems,
+  resolveAvatarInitial,
+  resolveIdentityKind,
+  resolveRoleTag,
+  resolveRuntimeVersionLabel,
+} from "@/modules/settings/settings-summary";
+import { IdentityCard, SectionBlock, SettingsRow, StatusDotLabel, SummaryPill, ValueRow } from "@/modules/settings/ui";
+import { HoldTimeSlider } from "@/modules/floating-language/HoldTimeSlider";
+import { AddAccountView, useAccountSwitchActions, useAccountSwitchStore } from "@/modules/account-switch";
+import { signOutAll, signOutCurrent } from "@/modules/account-switch/account-switch-service";
+import { normalizeGuid } from "@/modules/account-switch/vault";
 import { isRequiredLocationError } from "@/modules/attendance/required-location";
 import {
   buildAppUpdateInfoRows,
@@ -115,33 +132,6 @@ function resolveDeviceStatusText(
     default:
       return t("deviceStatus.unregistered");
   }
-}
-
-interface CompactSectionProps {
-  title: string;
-  description?: string;
-  testID?: string;
-  children: ReactNode;
-}
-
-function CompactSection({ title, description, testID, children }: CompactSectionProps) {
-  return (
-    <View style={styles.section} testID={testID}>
-      <View style={styles.sectionHeader}>
-        <Text variant="labelLarge" style={styles.sectionTitle}>
-          {title}
-        </Text>
-        {description ? (
-          <Text variant="bodySmall" style={styles.meta}>
-            {description}
-          </Text>
-        ) : null}
-      </View>
-      <Surface style={styles.card} elevation={0}>
-        {children}
-      </Surface>
-    </View>
-  );
 }
 
 type StatusTone = "success" | "warning" | "danger" | "neutral";
@@ -352,25 +342,6 @@ function CompactRow({
   );
 }
 
-interface UpdateInfoTileProps {
-  label: string;
-  value: string;
-}
-
-// 标签在上、数值在下且不限行数：英文标签更长时数值照样完整显示（原先渠道会被按钮挤掉）。
-function UpdateInfoTile({ label, value }: UpdateInfoTileProps) {
-  return (
-    <View style={styles.updateTile} accessible accessibilityLabel={[label, value].join(". ")}>
-      <Text variant="labelMedium" style={styles.updateTileLabel}>
-        {label}
-      </Text>
-      <Text variant="bodyMedium" style={styles.updateTileValue}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
 interface InfoRowProps {
   label: string;
   value: string;
@@ -436,13 +407,38 @@ function PrinterDeviceList({
 
 export default function Settings() {
   const router = useRouter();
-  const { t, language } = useAppTranslation(["settings", "common", "productQuery"]);
+  // 「更多设置」是同一个设置路由的另一种视图（?view=more）：这样诊断、服务器设置等弹层的状态与处理函数都留在本组件里，
+  // 手势返回 / 安卓返回键也自然回到设置首页。
+  const { view: viewParam } = useLocalSearchParams<{ view?: string | string[] }>();
+  const viewName = Array.isArray(viewParam) ? viewParam[0] : viewParam;
+  const isMoreView = viewName === "more";
+  // 「添加账号」同样是设置路由的另一种视图（?view=add-account），不新增路由。
+  const isAddAccountView = viewName === "add-account";
+  const [dataRightsExpanded, setDataRightsExpanded] = useState(false);
+  const { t, language } = useAppTranslation(["settings", "common", "productQuery", "accountSwitch"]);
   const checkMobileOtaUpdate = useMobileOtaManualCheck();
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const logout = useAuthStore((state) => state.logout);
   const loginDeviceAccount = useAuthStore((state) => state.loginDeviceAccount);
   const sessionKind = useAuthStore((state) => state.sessionKind);
+  // 多账号：只有个人账号会话开放；弹层（切换器 / 重新登录 / 遮罩）由外壳布局里的 AccountSwitchHost 承载。
+  const accountSwitchEnabled = isAuthenticated && Boolean(user) && sessionKind === "account";
+  const openAccountSwitcher = useAccountSwitchStore((state) => state.openSwitcher);
+  const openAccountRelogin = useAccountSwitchStore((state) => state.openRelogin);
+  const accountSwitch = useAccountSwitchActions({ onNeedsRelogin: openAccountRelogin });
+  const otherSavedAccountCount = accountSwitch.accounts.filter(
+    (entry) => normalizeGuid(entry.userGuid) !== normalizeGuid(user?.userGUID)
+  ).length;
+  // 语言悬浮按钮：本机偏好，默认开启；iOS 审核会话不提供（按钮本身在审核态也不显示）。
+  const floatingLanguageEnabled = useFloatingLanguageStore((state) => state.enabled);
+  const setFloatingLanguageEnabled = useFloatingLanguageStore((state) => state.setEnabled);
+  const floatingLongPressMs = useFloatingLanguageStore((state) => state.longPressMs);
+  const setFloatingLongPressMs = useFloatingLanguageStore((state) => state.setLongPressMs);
+  const showFloatingLanguageSetting = sessionKind !== "iosReview";
+  useEffect(() => {
+    void hydrateFloatingLanguagePreference();
+  }, []);
   const deviceSession = useDeviceStore((state) => state.session);
   const accountBinding = useDeviceStore((state) => state.accountBinding);
   const refreshAccountBinding = useDeviceStore((state) => state.refreshAccountBinding);
@@ -478,7 +474,6 @@ export default function Settings() {
   const [activationMode, setActivationMode] = useState<MobileDeviceActivationMode>("redeem");
   const [offlineDataVisible, setOfflineDataVisible] = useState(false);
   const modalReturnFocusHandleRef = useRef<number | null>(null);
-  const diagnosticsHeaderTriggerRef = useRef<View>(null);
   const diagnosticsAboutTriggerRef = useRef<View>(null);
   const deviceTriggerRef = useRef<View>(null);
   const labelPrinterTriggerRef = useRef<View>(null);
@@ -588,6 +583,25 @@ export default function Settings() {
   const appUpdateSourceKey = resolveAppUpdateSourceKey(updateInfo);
   // 用 || 而非 ??：开发包与未配置渠道的安装包里 Updates.channel 是空字符串，?? 会让渠道显示为空白。
   const appUpdateChannelLabel = updateInfo.channel || t("updates.noChannel");
+  const runtimeVersionLabel = resolveRuntimeVersionLabel(updateInfo.runtimeVersion);
+
+  // 首屏名片：账号 / 设备 / 未登录；个人码二维码只给有个人账号的会话（设备授权会话没有）。
+  const identityKind = resolveIdentityKind({
+    hasUser: Boolean(user),
+    hasDeviceSession: Boolean(deviceSession),
+    hasAccountBinding: Boolean(accountBinding),
+  });
+  const identityName = user?.fullName || user?.username || t("common:notLoggedIn");
+  const roleTag = resolveRoleTag(user?.roleNames, language);
+  const showPersonalCode = isAuthenticated && Boolean(user) && sessionKind !== "device";
+  const personalCodeValue = usePersonalCodeValue(
+    user ? resolveEmployeeProfileIdentity(user) : "",
+    showPersonalCode
+  );
+  const identityStoreLabel = accountBinding
+    ? deviceStoreDisplayName
+    : [offlineSelectedStore?.storeName, offlineSelectedStore?.storeCode].filter(Boolean).join(" ");
+  const identityMeta = buildIdentityMeta([user?.username, identityStoreLabel]);
 
   const hasSelectedTransport =
     Platform.OS !== "android" || transportFilters.showClassic || transportFilters.showBle;
@@ -740,6 +754,12 @@ export default function Settings() {
     (canViewDeviceCard && !deviceReady) ||
     printerStatus === "error" ||
     receiptPrinterStatus === "error";
+  const attentionCount = countAttentionItems({
+    canViewDeviceCard,
+    deviceReady,
+    labelPrinterError: printerStatus === "error",
+    receiptPrinterError: receiptPrinterStatus === "error",
+  });
   const currentApiHostPreset = API_HOST_PRESETS.find(
     (preset) => normalizeApiHost(apiHost) === preset.host
   );
@@ -747,7 +767,42 @@ export default function Settings() {
     ? t(`apiHost.presets.${currentApiHostPreset.key}`)
     : apiHost;
 
+  const openMoreSettings = () => {
+    router.push(
+      { pathname: "/(shell)/settings", params: { view: "more" } } as unknown as Parameters<typeof router.push>[0]
+    );
+  };
+  const closeMoreSettings = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    // 从深链直接进入「更多设置」时没有上一页，退回设置首页。
+    router.replace("/(shell)/settings" as unknown as Parameters<typeof router.replace>[0]);
+  };
+
   const handleLogout = () => {
+    if (accountSwitchEnabled && otherSavedAccountCount > 0) {
+      // 切换列表里还有别的账号：问清楚退出当前（并切到下一个）还是全部退出。
+      Alert.alert(
+        t("accountSwitch:signOut.settingsTitle"),
+        t("accountSwitch:signOut.settingsMessage", { count: otherSavedAccountCount }),
+        [
+          { text: t("common:actions.cancel"), style: "cancel" },
+          {
+            text: t("accountSwitch:signOut.currentAction"),
+            style: "destructive",
+            onPress: () => void signOutCurrent().then(accountSwitch.finishSignOut),
+          },
+          {
+            text: t("accountSwitch:signOut.allAction"),
+            style: "destructive",
+            onPress: () => void signOutAll().then(() => router.replace("/(auth)/login")),
+          },
+        ]
+      );
+      return;
+    }
     Alert.alert(t("dialogs.logoutTitle"), t("dialogs.logoutMessage"), [
       { text: t("common:actions.cancel"), style: "cancel" },
       {
@@ -756,8 +811,14 @@ export default function Settings() {
         onPress: async () => {
           setIsSubmitting(true);
           try {
-            await logout();
-            router.replace("/(auth)/login");
+            if (accountSwitchEnabled) {
+              // 个人账号：同时把它从切换列表里移除（列表里没有别的账号可切，走完整退出）；
+              // 结果统一交给 finishSignOut：成功回登录页，被拦截 / 失败则提示、不误退出。
+              accountSwitch.finishSignOut(await signOutCurrent());
+            } else {
+              await logout();
+              router.replace("/(auth)/login");
+            }
           } finally {
             setIsSubmitting(false);
           }
@@ -1129,316 +1190,392 @@ export default function Settings() {
     }
   };
 
+  if (isAddAccountView && accountSwitchEnabled) {
+    return (
+      <AddAccountView
+        currentName={accountSwitch.currentName}
+        currentSaved={accountSwitch.currentSaved}
+        savedCount={accountSwitch.accounts.length}
+        onBack={closeMoreSettings}
+        onSubmit={accountSwitch.submitCredentials}
+      />
+    );
+  }
+
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
-      <ScrollView
-        testID="settings-overview"
-        contentContainerStyle={styles.content}
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text variant="headlineMedium" style={styles.title}>
-            {t("title")}
-          </Text>
-          <Button
-            ref={diagnosticsHeaderTriggerRef}
-            compact
-            mode="text"
-            testID="settings-diagnostics"
-            icon="stethoscope"
-            onPress={() => openDiagnostics(diagnosticsHeaderTriggerRef)}
-            accessibilityLabel={t("overview.diagnostics")}
-            contentStyle={styles.headerActionContent}
-          >
-            {t("overview.diagnostics")}
-          </Button>
-        </View>
-
-        <CompactSection title={t("groups.account")} testID="settings-group-account">
-          <CompactRow
-            icon="account-circle-outline"
-            label={t("account.title")}
-            value={user?.fullName || user?.username || t("common:notLoggedIn")}
-            meta={
-              user?.username ||
-              (showProfileAction ? t("account.guestEmail") : t("account.deviceModeHelper"))
-            }
-            status={t(showProfileAction ? "overview.accountMode" : "overview.deviceMode")}
-            statusTone="neutral"
-            onPress={
-              showProfileAction
-                ? () => {
-                    router.push(
-                      "/(shell)/employee-profile" as unknown as Parameters<typeof router.push>[0]
-                    );
-                  }
-                : undefined
-            }
-            accessibilityLabel={t("account.profileButton")}
-          />
-          {/* 只有个人账号能改自己的密码；设备授权与设备绑定账号没有个人密码可改。 */}
-          {isAuthenticated && user && sessionKind === "account" ? (
-            <CompactRow
-              icon="lock-reset"
-              label={t("account.changePassword")}
-              meta={t("account.changePasswordHelper")}
-              onPress={() => {
-                router.push(
-                  "/(auth)/change-password?mode=voluntary" as unknown as Parameters<typeof router.push>[0]
-                );
-              }}
-              accessibilityLabel={t("account.changePassword")}
-            />
-          ) : null}
-          {isAuthenticated && user && sessionKind !== "device" ? (
-            <CashierBarcodeCard
-              key={resolveEmployeeProfileIdentity(user)}
-              employeeName={user.fullName || user.username || ""}
-              username={user.username || ""}
-              userIdentity={resolveEmployeeProfileIdentity(user)}
-              compact
-              expandLabel={t("account.expandPersonalCode")}
-            />
-          ) : null}
-        </CompactSection>
-
-        <CompactSection
-          title={t("groups.devices")}
-          testID="settings-group-device-connections"
+      {isMoreView ? (
+        <ScrollView
+          testID="settings-more-overview"
+          contentContainerStyle={styles.content}
+          contentInsetAdjustmentBehavior="automatic"
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.connectionSummary}>
-            <View
-              style={[
-                styles.connectionSummaryIcon,
-                connectionNeedsAttention && styles.connectionSummaryIconWarning,
-              ]}
-            >
-              <Icon
-                source={connectionNeedsAttention ? "alert-circle-outline" : "check-circle-outline"}
-                size={24}
-                color={connectionNeedsAttention ? HB_COLORS.warning : HB_COLORS.success}
-              />
-            </View>
-            <View style={styles.connectionSummaryText}>
-              <Text variant="titleSmall" style={styles.compactRowLabel}>
-                {t(
-                  connectionNeedsAttention
-                    ? "overview.deviceServicesAttention"
-                    : "overview.deviceServicesReady"
-                )}
-              </Text>
-              <Text variant="bodySmall" style={styles.meta}>
-                {t("overview.connectionSummary", { store: deviceStoreDisplayName })}
-              </Text>
-            </View>
+          <View style={styles.moreHeader}>
+            <IconButton
+              icon="arrow-left"
+              accessibilityLabel={t("more.back")}
+              onPress={closeMoreSettings}
+              testID="settings-more-back"
+            />
+            <Text variant="headlineSmall" style={styles.title}>
+              {t("more.title")}
+            </Text>
           </View>
 
-          <View style={styles.sectionDivider} />
-          <CompactRow
-            icon="cellphone-cog"
-            label={t("overview.currentDevice")}
-            value={deviceDisplayName}
-            meta={deviceStoreDisplayName}
-            status={accountBinding ? t("deviceStatus.bound") : deviceStatusText}
-            statusTone={deviceStatusTone}
-            actionRef={deviceTriggerRef}
-            onPress={openDeviceSettings}
-            accessibilityLabel={t("overview.manageDevice")}
-          />
+          {/* 只有个人账号能改自己的密码；设备授权与设备绑定账号没有个人密码可改。 */}
+          {isAuthenticated && user && sessionKind === "account" ? (
+            <SectionBlock title={t("groups.account")} testID="settings-group-account">
+              <SettingsRow
+                icon="lock-reset"
+                title={t("account.changePassword")}
+                subtitle={t("account.changePasswordHelper")}
+                onPress={() => {
+                  router.push(
+                    "/(auth)/change-password?mode=voluntary" as unknown as Parameters<typeof router.push>[0]
+                  );
+                }}
+                accessibilityLabel={t("account.changePassword")}
+              />
+            </SectionBlock>
+          ) : null}
 
-          <View style={styles.sectionDivider} />
-          <CompactRow
-            icon="printer-outline"
-            label={t("printer.title")}
-            value={savedPrinter?.name || savedPrinter?.address || t("printer.notSelected")}
-            meta={savedPrinter ? labelPrinterStatusText : undefined}
-            status={t(
-              isPrinterConnected
-                ? "overview.connected"
-                : savedPrinter
-                  ? "overview.configured"
-                  : "overview.notConfigured"
-            )}
-            statusTone={labelPrinterStatusTone}
-            actionRef={labelPrinterTriggerRef}
-            onPress={() => openPrinterSettings(labelPrinterTriggerRef)}
-            accessibilityLabel={t("overview.managePrinters")}
-          />
+          <SectionBlock title={t("more.connectionGroup")}>
+            <SettingsRow
+              icon="server-network"
+              title={t("apiHost.title")}
+              subtitle={apiHostDisplayName === apiHost ? apiHost : `${apiHostDisplayName} · ${apiHost}`}
+              actionRef={apiHostTriggerRef}
+              onPress={openApiHostSettings}
+              accessibilityLabel={t("apiHost.change")}
+            />
+          </SectionBlock>
 
-          <View style={styles.sectionDivider} />
-          <CompactRow
-            icon="receipt-text-outline"
-            label={t("receiptPrinter.title")}
-            value={
-              savedReceiptPrinter?.name ||
-              savedReceiptPrinter?.address ||
-              t("receiptPrinter.notSelected")
-            }
-            meta={savedReceiptPrinter ? receiptPrinterStatusText : undefined}
-            status={t(
-              receiptPrinterStatus === "connected"
-                ? "overview.connected"
-                : savedReceiptPrinter
-                  ? "overview.configured"
-                  : "overview.notConfigured"
-            )}
-            statusTone={receiptPrinterStatusTone}
-            actionRef={receiptPrinterTriggerRef}
-            onPress={() => openPrinterSettings(receiptPrinterTriggerRef)}
-            accessibilityLabel={t("overview.managePrinters")}
-          />
+          <SectionBlock title={t("more.privacyGroup")}>
+            <SettingsRow
+              icon="shield-check-outline"
+              title={t("privacy.title")}
+              subtitle={t("overview.privacySummary")}
+              onPress={() => router.push("/privacy")}
+              accessibilityLabel={t("privacy.openPolicy")}
+            />
+            {/* 数据权利说明默认折叠：英文约 190 字符，原先常驻首页占 3 行；展开后必须完整可读。 */}
+            <SettingsRow
+              divider
+              icon="information-outline"
+              title={t("more.dataRights")}
+              onPress={() => setDataRightsExpanded((expanded) => !expanded)}
+              showChevron={false}
+              accessibilityLabel={t(dataRightsExpanded ? "more.dataRightsCollapse" : "more.dataRightsExpand")}
+              right={<Icon source={dataRightsExpanded ? "chevron-up" : "chevron-down"} size={20} color={HB_COLORS.textSecondary} />}
+              testID="settings-data-rights"
+            />
+            {dataRightsExpanded ? (
+              <View style={styles.inlineNote}>
+                <Text variant="bodySmall" style={styles.inlineNoteText}>
+                  {t(showProfileAction ? "privacy.employeeDescription" : "privacy.deviceDescription")}
+                </Text>
+              </View>
+            ) : null}
+          </SectionBlock>
 
-          {offlineEligible ? (
-            <>
-              <View style={styles.sectionDivider} />
-              <CompactRow
-                icon="database-outline"
-                label={t("offlineData.title")}
-                value={
-                  offlineSelectedStore?.storeName ||
-                  offlineSelectedStoreCode ||
-                  t("offlineData.storeNotSelected")
+          <SectionBlock title={t("groups.support")} testID="settings-group-app-support">
+            {/* 检查按钮放在更新行末尾；版本 / 渠道 / 运行时版本改成三行键值，需要截图报问题时一眼能看全。 */}
+            <View testID="settings-app-update">
+              <SettingsRow
+                icon="cloud-download-outline"
+                title={t("updates.title")}
+                subtitle={t(appUpdateSourceKey)}
+                right={
+                  <Button
+                    mode="contained-tonal"
+                    compact
+                    icon="refresh"
+                    testID="settings-check-updates"
+                    onPress={handleCheckUpdates}
+                    loading={updateBusy}
+                    disabled={updateBusy}
+                  >
+                    {t("updates.check")}
+                  </Button>
                 }
-                meta={offlineSummary.summary}
-                status={t(`offlineData.${offlineSummary.statusKey}`)}
-                statusTone={offlineSummary.tone}
+              />
+            </View>
+            <ValueRow divider label={t("updates.version")} value={appPackageVersion} />
+            <ValueRow divider label={t("updates.channel")} value={appUpdateChannelLabel} />
+            {runtimeVersionLabel ? (
+              <ValueRow divider label={t("updates.runtime")} value={runtimeVersionLabel} />
+            ) : null}
+            <SettingsRow
+              divider
+              icon="information-outline"
+              title={t("overview.aboutDiagnostics")}
+              subtitle={t("overview.aboutDescription")}
+              actionRef={diagnosticsAboutTriggerRef}
+              onPress={() => openDiagnostics(diagnosticsAboutTriggerRef)}
+              accessibilityLabel={t("overview.diagnostics")}
+              testID="settings-diagnostics"
+            />
+          </SectionBlock>
+        </ScrollView>
+      ) : (
+        <ScrollView
+          testID="settings-overview"
+          contentContainerStyle={styles.content}
+          contentInsetAdjustmentBehavior="automatic"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <Text variant="headlineMedium" style={styles.title}>
+              {t("title")}
+            </Text>
+          </View>
+
+          {/* 名片：账号名片（含个人码二维码）/ 设备名片 / 未登录。个人码直接在首屏，点开仍是原来的弹层（放大、刷新、打印）。 */}
+          <View testID="settings-group-account">
+            {identityKind === "account" ? (
+              <IdentityCard
+                testID="settings-identity"
+                initial={resolveAvatarInitial(identityName)}
+                name={identityName}
+                roleLabel={roleTag?.label}
+                roleExtra={roleTag?.extra}
+                meta={identityMeta}
+                codeLine={personalCodeValue ? t("account.personalCodeLine", { code: personalCodeValue }) : undefined}
+                profileLabel={showProfileAction ? t("account.viewProfile") : undefined}
+                onPressProfile={
+                  showProfileAction
+                    ? () => {
+                        router.push(
+                          "/(shell)/employee-profile" as unknown as Parameters<typeof router.push>[0]
+                        );
+                      }
+                    : undefined
+                }
+                switchLabel={accountSwitchEnabled ? t("accountSwitch:entry.switch") : undefined}
+                onPressSwitch={accountSwitchEnabled ? openAccountSwitcher : undefined}
+                trailing={
+                  showPersonalCode && user ? (
+                    <CashierBarcodeCard
+                      key={resolveEmployeeProfileIdentity(user)}
+                      employeeName={user.fullName || user.username || ""}
+                      username={user.username || ""}
+                      userIdentity={resolveEmployeeProfileIdentity(user)}
+                      compact
+                      variant="tile"
+                      expandLabel={t("account.expandPersonalCode")}
+                    />
+                  ) : undefined
+                }
+              />
+            ) : (
+              <IdentityCard
+                testID="settings-identity"
+                avatarIcon={identityKind === "device" ? "cellphone" : "account-off-outline"}
+                name={identityKind === "device" ? deviceDisplayName : t("account.notLoggedIn")}
+                roleLabel={identityKind === "device" ? t("overview.deviceMode") : undefined}
+                meta={
+                  identityKind === "device"
+                    ? buildIdentityMeta([deviceStoreDisplayName, t("account.deviceModeShort")])
+                    : t("account.guestEmail")
+                }
+              />
+            )}
+            {accountSwitchEnabled && otherSavedAccountCount > 0 ? (
+              <View style={styles.accountNote} testID="settings-account-switch-note">
+                <Icon source="account-multiple-outline" size={16} color={HB_COLORS.action} />
+                <Text variant="bodySmall" style={styles.accountNoteText}>
+                  {t("accountSwitch:entry.settingsNote", { count: accountSwitch.accounts.length })}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <SectionBlock
+            title={t("groups.devices")}
+            testID="settings-group-device-connections"
+            right={
+              <SummaryPill
+                tone={attentionCount > 0 ? "warning" : "success"}
+                label={
+                  attentionCount > 0
+                    ? t("overview.connectionAttention", { count: attentionCount })
+                    : t("overview.connectionAllGood")
+                }
+              />
+            }
+          >
+            <SettingsRow
+              icon="cellphone-cog"
+              title={t("overview.currentDevice")}
+              subtitle={t("overview.currentDeviceSubtitle", {
+                device: deviceDisplayName,
+                store: deviceStoreDisplayName,
+              })}
+              right={
+                <StatusDotLabel
+                  label={accountBinding ? t("deviceStatus.bound") : deviceStatusText}
+                  tone={deviceStatusTone}
+                />
+              }
+              actionRef={deviceTriggerRef}
+              onPress={openDeviceSettings}
+              accessibilityLabel={t("overview.manageDevice")}
+            />
+            <SettingsRow
+              divider
+              icon="printer-outline"
+              title={t("printer.title")}
+              subtitle={savedPrinter?.name || savedPrinter?.address || t("printer.notSelected")}
+              right={
+                <StatusDotLabel
+                  label={t(
+                    isPrinterConnected
+                      ? "overview.connected"
+                      : savedPrinter
+                        ? "overview.configured"
+                        : "overview.notConfigured"
+                  )}
+                  tone={labelPrinterStatusTone}
+                />
+              }
+              actionRef={labelPrinterTriggerRef}
+              onPress={() => openPrinterSettings(labelPrinterTriggerRef)}
+              accessibilityLabel={t("overview.managePrinters")}
+            />
+            <SettingsRow
+              divider
+              icon="receipt-text-outline"
+              title={t("receiptPrinter.title")}
+              subtitle={
+                savedReceiptPrinter?.name ||
+                savedReceiptPrinter?.address ||
+                t("receiptPrinter.notSelected")
+              }
+              right={
+                <StatusDotLabel
+                  label={t(
+                    receiptPrinterStatus === "connected"
+                      ? "overview.connected"
+                      : savedReceiptPrinter
+                        ? "overview.configured"
+                        : "overview.notConfigured"
+                  )}
+                  tone={receiptPrinterStatusTone}
+                />
+              }
+              actionRef={receiptPrinterTriggerRef}
+              onPress={() => openPrinterSettings(receiptPrinterTriggerRef)}
+              accessibilityLabel={t("overview.managePrinters")}
+            />
+            {offlineEligible ? (
+              <SettingsRow
+                divider
+                icon="database-outline"
+                title={t("offlineData.title")}
+                subtitle={buildIdentityMeta([
+                  offlineSelectedStore?.storeName ||
+                    offlineSelectedStoreCode ||
+                    t("offlineData.storeNotSelected"),
+                  offlineSummary.summary,
+                ])}
+                right={
+                  <StatusDotLabel
+                    label={t(`offlineData.${offlineSummary.statusKey}`)}
+                    tone={offlineSummary.tone}
+                  />
+                }
                 actionRef={offlineDataTriggerRef}
                 onPress={openOfflineDataSettings}
                 accessibilityLabel={t("offlineData.manage")}
                 testID="settings-offline-data"
               />
-            </>
-          ) : null}
-        </CompactSection>
+            ) : null}
+          </SectionBlock>
 
-        <CompactSection
-          title={t("groups.preferences")}
-          testID="settings-group-preferences-security"
-        >
-          <CompactRow
-            icon="translate"
-            label={t("common:language.title")}
-            action={
-              <SegmentedButtons
-                value={language}
-                onValueChange={(value) => void handleLanguageChange(value as AppLanguage)}
-                buttons={[
-                  {
-                    value: "zh",
-                    label: t("overview.languageZhShort"),
-                    accessibilityLabel: t("common:language.zh"),
-                  },
-                  {
-                    value: "en",
-                    label: t("overview.languageEnShort"),
-                    accessibilityLabel: t("common:language.en"),
-                  },
-                ]}
-                style={styles.languageSelector}
-              />
-            }
-          />
-          <View style={styles.sectionDivider} />
-          <CompactRow
-            icon="shield-check-outline"
-            label={t("privacy.title")}
-            value={t("overview.privacySummary")}
-            onPress={() => router.push("/privacy")}
-            accessibilityLabel={t("privacy.openPolicy")}
-          />
-          {/* 数据权利说明须完整可读：英文约 190 字符，原先塞在两行副标题里后半句被截掉。 */}
-          <View style={styles.inlineNote}>
-            <View style={styles.inlineNoteIcon}>
-              <Icon source="information-outline" size={16} color={HB_COLORS.textSecondary} />
-            </View>
-            <Text variant="bodySmall" style={styles.inlineNoteText}>
-              {t(
-                showProfileAction
-                  ? "privacy.employeeDescription"
-                  : "privacy.deviceDescription"
-              )}
-            </Text>
-          </View>
-        </CompactSection>
+          <SectionBlock title={t("groups.preferences")} testID="settings-group-preferences-security">
+            <SettingsRow
+              icon="translate"
+              title={t("common:language.title")}
+              right={
+                <SegmentedButtons
+                  value={language}
+                  onValueChange={(value) => void handleLanguageChange(value as AppLanguage)}
+                  buttons={[
+                    {
+                      value: "zh",
+                      label: t("overview.languageZhShort"),
+                      accessibilityLabel: t("common:language.zh"),
+                    },
+                    {
+                      value: "en",
+                      label: t("overview.languageEnShort"),
+                      accessibilityLabel: t("common:language.en"),
+                    },
+                  ]}
+                  style={styles.languageSelector}
+                />
+              }
+            />
+            {showFloatingLanguageSetting ? (
+              <>
+                <SettingsRow
+                  divider
+                  icon="gesture-tap-button"
+                  title={t("floatingLanguage.title")}
+                  testID="settings-floating-language"
+                  right={
+                    <Switch
+                      value={floatingLanguageEnabled}
+                      onValueChange={setFloatingLanguageEnabled}
+                      accessibilityLabel={t("floatingLanguage.title")}
+                      accessibilityHint={t("floatingLanguage.description")}
+                    />
+                  }
+                />
+                {/* 按住时长：滑轨 1~3 秒、默认 2 秒；只在按钮开启时才有意义，关闭时整行隐藏，页面不为它变长。 */}
+                {floatingLanguageEnabled ? (
+                  <HoldTimeSlider
+                    testID="settings-floating-language-hold"
+                    value={floatingLongPressMs}
+                    onCommit={setFloatingLongPressMs}
+                    label={t("floatingLanguage.holdTitle")}
+                    formatValue={(ms) => t("floatingLanguage.holdOption", { seconds: formatLongPressSeconds(ms) })}
+                    minLabel={t("floatingLanguage.holdOption", { seconds: "1" })}
+                    maxLabel={t("floatingLanguage.holdOption", { seconds: "3" })}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </SectionBlock>
 
-        <CompactSection
-          title={t("groups.support")}
-          testID="settings-group-app-support"
-        >
-          {/* 检查按钮独占一行：英文 "Check for updates" 约占半行，与文字同行时曾把更新渠道挤到被截断。 */}
-          <View style={styles.updatePanel} testID="settings-app-update">
-            <View style={styles.updatePanelHeader}>
-              <View style={styles.rowIconBox}>
-                <Icon source="cloud-download-outline" size={21} color={HB_COLORS.action} />
-              </View>
-              <View style={[styles.compactRowTitleLine, styles.updatePanelTitleLine]}>
-                <Text variant="bodyMedium" style={styles.compactRowLabel}>
-                  {t("updates.title")}
-                </Text>
-                <StatusPill label={t(appUpdateSourceKey)} />
-              </View>
-            </View>
-            <View style={styles.updateTiles}>
-              <UpdateInfoTile label={t("updates.version")} value={appPackageVersion} />
-              <UpdateInfoTile label={t("updates.channel")} value={appUpdateChannelLabel} />
-            </View>
+          {/* 低频项（应用更新、服务器、隐私、关于与诊断、修改密码）收进「更多设置」。 */}
+          <SectionBlock title="" testID="settings-more-entry">
+            <SettingsRow
+              icon="dots-horizontal-circle-outline"
+              title={t("more.title")}
+              subtitle={t("more.summary")}
+              onPress={openMoreSettings}
+              testID="settings-more"
+            />
+          </SectionBlock>
+
+          {user ? (
             <Button
               mode="outlined"
-              icon="refresh"
-              testID="settings-check-updates"
-              onPress={handleCheckUpdates}
-              loading={updateBusy}
-              disabled={updateBusy}
-              style={styles.updateCheckButton}
-              contentStyle={styles.updateCheckButtonContent}
+              icon="logout"
+              textColor={HB_COLORS.danger}
+              onPress={handleLogout}
+              loading={isSubmitting}
+              disabled={isSubmitting}
+              style={styles.logoutButton}
+              contentStyle={styles.destructiveButtonContent}
             >
-              {t("updates.check")}
+              {t("account.logoutToLogin")}
             </Button>
-          </View>
-          <View style={styles.sectionDivider} />
-          <CompactRow
-            icon="server-network"
-            label={t("apiHost.title")}
-            value={apiHostDisplayName}
-            meta={apiHost}
-            actionRef={apiHostTriggerRef}
-            onPress={openApiHostSettings}
-            accessibilityLabel={t("apiHost.change")}
-          />
-          <View style={styles.sectionDivider} />
-          <CompactRow
-            icon="information-outline"
-            label={t("overview.aboutDiagnostics")}
-            value={t("overview.aboutDescription")}
-            actionRef={diagnosticsAboutTriggerRef}
-            onPress={() => openDiagnostics(diagnosticsAboutTriggerRef)}
-            accessibilityLabel={t("overview.diagnostics")}
-          />
-        </CompactSection>
-
-        {user ? (
-          <Button
-            mode="outlined"
-            icon="logout"
-            textColor={HB_COLORS.danger}
-            onPress={handleLogout}
-            loading={isSubmitting}
-            disabled={isSubmitting}
-            style={styles.logoutButton}
-            contentStyle={styles.destructiveButtonContent}
-          >
-            {t("account.logoutToLogin")}
-          </Button>
-        ) : null}
-
-        <Text variant="bodySmall" style={styles.buildFooter}>
-          {t("overview.buildFooter", {
-            version: appPackageVersion,
-            channel: appUpdateChannelLabel,
-          })}
-        </Text>
-      </ScrollView>
+          ) : null}
+        </ScrollView>
+      )}
       <DeviceActivationDialog
         visible={activationVisible}
         mode={activationMode}
@@ -1959,6 +2096,16 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
+  accountNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+  },
+  accountNoteText: { flex: 1, color: HB_COLORS.textSecondary },
   container: {
     flex: 1,
     backgroundColor: HB_COLORS.background,
@@ -1970,7 +2117,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: HB_SPACING.md,
     paddingTop: HB_SPACING.xs,
     paddingBottom: HB_SPACING.lg,
-    gap: HB_SPACING.lg,
+    gap: HB_SPACING.sm,
+  },
+  moreHeader: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.xxs,
+    marginLeft: -HB_SPACING.xs,
   },
   header: {
     minHeight: 48,
@@ -1984,27 +2138,8 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: -0.4,
   },
-  headerActionContent: {
-    minHeight: 44,
-  },
   section: {
     gap: HB_SPACING.xs,
-  },
-  sectionHeader: {
-    gap: HB_SPACING.xxs,
-    paddingHorizontal: HB_SPACING.xxs,
-  },
-  sectionTitle: {
-    color: HB_COLORS.textSecondary,
-    fontWeight: "700",
-    letterSpacing: 0.2,
-  },
-  card: {
-    overflow: "hidden",
-    borderRadius: HB_RADIUS.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: HB_COLORS.outlineMuted,
-    backgroundColor: HB_COLORS.surface,
   },
   connectionSummary: {
     minHeight: 76,
@@ -2024,11 +2159,6 @@ const styles = StyleSheet.create({
   },
   connectionSummaryIconWarning: {
     backgroundColor: "#FFFAEB",
-  },
-  connectionSummaryText: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
   },
   compactRow: {
     minHeight: 68,
@@ -2165,10 +2295,6 @@ const styles = StyleSheet.create({
   meta: {
     color: HB_COLORS.textSecondary,
   },
-  unbondedMeta: {
-    color: HB_COLORS.warning,
-    fontWeight: "700",
-  },
   inlineNote: {
     flexDirection: "row",
     gap: HB_SPACING.xs,
@@ -2179,57 +2305,10 @@ const styles = StyleSheet.create({
     borderRadius: HB_RADIUS.control,
     backgroundColor: HB_COLORS.surfaceMuted,
   },
-  inlineNoteIcon: {
-    paddingTop: 1,
-  },
   inlineNoteText: {
     flex: 1,
     color: HB_COLORS.textSecondary,
     lineHeight: 18,
-  },
-  updatePanel: {
-    gap: HB_SPACING.sm,
-    paddingHorizontal: HB_SPACING.md,
-    paddingTop: HB_SPACING.sm,
-    paddingBottom: HB_SPACING.md,
-  },
-  updatePanelHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: HB_SPACING.sm,
-  },
-  updatePanelTitleLine: {
-    flex: 1,
-    minWidth: 0,
-  },
-  updateTiles: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: HB_SPACING.xs,
-  },
-  updateTile: {
-    // 两格等分；可用宽度不足 2×128 时自动上下排列。
-    flexGrow: 1,
-    flexBasis: 128,
-    minWidth: 0,
-    gap: 2,
-    borderRadius: HB_RADIUS.control,
-    backgroundColor: HB_COLORS.surfaceMuted,
-    paddingHorizontal: HB_SPACING.sm,
-    paddingVertical: HB_SPACING.xs,
-  },
-  updateTileLabel: {
-    color: HB_COLORS.textSecondary,
-  },
-  updateTileValue: {
-    color: HB_COLORS.textPrimary,
-    fontWeight: "600",
-  },
-  updateCheckButton: {
-    borderRadius: HB_RADIUS.control,
-  },
-  updateCheckButtonContent: {
-    minHeight: 44,
   },
   updateInfoCompactList: {
     gap: HB_SPACING.xs,
@@ -2454,10 +2533,5 @@ const styles = StyleSheet.create({
   },
   destructiveButtonContent: {
     minHeight: 48,
-  },
-  buildFooter: {
-    color: HB_COLORS.textSecondary,
-    textAlign: "center",
-    marginTop: -HB_SPACING.xs,
   },
 });

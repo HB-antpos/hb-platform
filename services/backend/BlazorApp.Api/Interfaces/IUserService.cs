@@ -101,6 +101,14 @@ namespace BlazorApp.Api.Interfaces
         Task<ApiResponse<bool>> UpdateUserStatusByGuidAsync(string userGuid, bool isActive);
 
         /// <summary>
+        /// 开关某账号「允许登录 Web / App」（管理员用；与启用 / 停用账号是两回事）
+        /// </summary>
+        /// <param name="userGuid">用户GUID</param>
+        /// <param name="loginEnabled">true = 允许登录；false = 限制登录</param>
+        /// <returns>更新结果</returns>
+        Task<ApiResponse<bool>> UpdateUserLoginEnabledByGuidAsync(string userGuid, bool loginEnabled);
+
+        /// <summary>
         /// 更新用户密码
         /// </summary>
         /// <param name="userGuid">用户GUID</param>

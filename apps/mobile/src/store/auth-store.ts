@@ -29,6 +29,7 @@ import {
 } from "@/modules/auth/api";
 import { STORE_SELECTION_STORAGE_KEY } from "@/modules/shop/types";
 import { useCartStore } from "@/store/cart-store";
+import { usePickerStore } from "@/modules/warehouse-picking/picker-store";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import { DeviceStorage } from "@/modules/device/storage";
 import { closeOfflineCatalogRuntime } from "@/modules/product-maintenance/offline-catalog/offline-catalog-teardown";
@@ -122,6 +123,14 @@ interface AuthState {
   rearmIosReviewPreAuth: () => void;
   performLocalSessionClear: () => Promise<void>;
   setSessionKind: (kind: AuthSessionKind) => void;
+  /** 多账号切换 / 添加账号：把活动会话整体换成另一个个人账号（令牌已由调用方换好）。 */
+  activateAccountSession: (session: ActivateAccountSessionInput) => Promise<void>;
+}
+
+export interface ActivateAccountSessionInput {
+  accessToken: string;
+  refreshToken: string;
+  user: CurrentUser;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -706,6 +715,51 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           }
         : {}),
     });
+  },
+
+  async activateAccountSession({ accessToken, refreshToken, user }) {
+    await waitForLocalSessionClear();
+    try {
+      // 1) 先同步清掉旧账号的内存态：查询缓存、购物车、拣货人、离线目录、菜单、门店选择。
+      //    顺序与 performLocalSessionClear 一致，但不经过「未认证」状态，界面不会闪回登录页。
+      await queryClient.cancelQueries();
+      clearSensitiveQueryCache(queryClient);
+      useCartStore.getState().reset();
+      usePickerStore.getState().clearPicker();
+      void closeOfflineCatalogRuntime();
+      useAppNavigationStore.getState().reset({ keepMenuCache: true });
+      await AppAsyncStorage.removeItem(STORE_SELECTION_STORAGE_KEY).catch(() => undefined);
+      // 收银条码打印记录属于旧账号凭证：必须在覆盖令牌之前清（清理逻辑靠旧令牌识别归属）。
+      await SecureStorage.clearCashierBarcodePrintSession().catch((error) => {
+        console.warn("[account-switch] 清理收银条码打印记录失败", error);
+      });
+      // 班中已被切换流程拦截；这里仅收掉旧账号可能遗留的后台定位任务。
+      await stopAttendanceLocationTracking().catch((error) => {
+        console.warn("[account-switch] 停止后台定位失败", error);
+      });
+
+      // 2) 写入新账号的活动槽位。令牌 → 用户 → 会话类型标记，任何一步失败都整体清场（见 catch）。
+      await SecureStorage.setToken(accessToken);
+      await SecureStorage.setRefreshToken(refreshToken);
+      await SecureStorage.setUser(user);
+      await setAuthSessionMarker("account");
+
+      set({
+        user,
+        access: buildAccess(user),
+        sessionKind: "account",
+        iosReviewOfflineGuardActive: false,
+        standardAuthIntent: null,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+    } catch (error) {
+      // 写到一半失败：槽位可能是半新半旧，宁可退回登录页也不留混合身份。
+      await get().clearLocalSession().catch(() => undefined);
+      throw error;
+    }
+    // 菜单不在这里拉：本动作运行在账号切换闸门内，闸门放开前 apiClient 发不出请求；
+    // 由切换服务在闸门放开后再拉（见 account-switch-service）。
   },
 }));
 

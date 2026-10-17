@@ -6,6 +6,8 @@ import {
   EyeOutlined,
   HistoryOutlined,
   LockOutlined,
+  LoginOutlined,
+  LogoutOutlined,
   MoreOutlined,
   PlusOutlined,
   QrcodeOutlined,
@@ -68,6 +70,7 @@ import {
   getUserStores,
   getUsers,
   updateUser,
+  updateUserLoginEnabled,
   updateUserPassword,
   updateUserStorePosTerminalPermissions,
 } from '../../../services/userService'
@@ -112,6 +115,7 @@ import type { AssignmentLoadStatus, PosPermissionRequestTarget } from './userPer
 import { getCreateUserErrorFeedback } from './createUserFeedback'
 import { formatUserLocalDateTime, parseUserUtcTimestamp } from './time'
 import {
+  LOGIN_TOGGLE_ERROR_MESSAGES,
   STALE_LOGIN_DAYS,
   USER_BATCH_SELECTION_LIMIT,
   USER_NAME_PART_MAX_LENGTH,
@@ -119,13 +123,18 @@ import {
   diffAssignmentKeys,
   diffStoreAssignment,
   diffUserNameParts,
+  getLoginToggleState,
   getUserDisplayName,
   getUserInitial,
   getUserSecondaryLine,
+  isLoginRestricted,
   mergeSelectedUsers,
   pickUserNamePartFormValues,
+  planLoginToggleNotice,
+  resolveLoginToggleErrorKind,
   splitVisibleStores,
   toIsActiveQuery,
+  withLoginEnabled,
 } from './usersPageLogic'
 import type { UserStatusFilter } from './usersPageLogic'
 import {
@@ -150,7 +159,10 @@ type PermissionPlatform = 'web' | 'pos'
 /** 统一用户抽屉的标签页；登录记录与收银权限也在抽屉内，不再单开弹窗。 */
 type UserDrawerTab = 'info' | 'assignments' | 'permissions' | 'mobile-menu' | 'login-records' | 'pos'
 
-type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'reset-password' | 'toggle-active'
+type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'reset-password' | 'toggle-active' | 'toggle-login'
+
+/** 开关「允许登录」只需要的用户字段；列表行与详情对象都满足。 */
+type LoginToggleTarget = Pick<UserDto, 'userGUID' | 'username' | 'email' | 'fullName' | 'lastLoginAt' | 'roleNames'>
 
 export default function SystemUsersPage() {
   const { t } = useTranslation()
@@ -173,6 +185,9 @@ export default function SystemUsersPage() {
   const permissionRequestGuardRef = useRef(createLatestRequestGuard())
   const permissionSaveGuardRef = useRef(createLatestRequestGuard())
   const editingUserGuidRef = useRef<string | null>(null)
+  // 「允许登录」开关的在途请求：按账号去重，避免没有二次确认的「开启」被连点发出多次请求。
+  const loginToggleInFlightRef = useRef(new Set<string>())
+  const [loginToggleBusyGuid, setLoginToggleBusyGuid] = useState<string | null>(null)
 
   const [selectedStoreGuid, setSelectedStoreGuid] = useState<string | undefined>(undefined)
   const [selectedRoleGuid, setSelectedRoleGuid] = useState<string | undefined>(undefined)
@@ -1284,6 +1299,80 @@ export default function SystemUsersPage() {
     })
   }
 
+  /**
+   * 提交「允许登录」的新值。成功后先在本地写回列表 / 抽屉里该账号的标记（立刻可见），
+   * 再重新加载列表拿服务端真值；失败按 errorCode 给固定中文提示，不透传后端原始 message。
+   */
+  const submitLoginEnabled = async (target: LoginToggleTarget, nextEnabled: boolean) => {
+    const guid = target.userGUID
+    if (loginToggleInFlightRef.current.has(guid)) return
+    loginToggleInFlightRef.current.add(guid)
+    setLoginToggleBusyGuid(guid)
+    try {
+      await updateUserLoginEnabled(guid, nextEnabled)
+    } catch (error) {
+      console.error(error)
+      const kind = resolveLoginToggleErrorKind(error)
+      const { key, fallback } = LOGIN_TOGGLE_ERROR_MESSAGES[kind]
+      message.error(t(key, fallback))
+      // 账号已不存在时列表里这一行是过期的，顺手刷新。
+      if (kind === 'notFound') void loadData(page, pageSize, sortBy, sortOrder)
+      return
+    } finally {
+      loginToggleInFlightRef.current.delete(guid)
+      setLoginToggleBusyGuid((current) => (current === guid ? null : current))
+    }
+
+    setData((rows) => rows.map((row) => withLoginEnabled(row, guid, nextEnabled) ?? row))
+    setEditingUser((current) => withLoginEnabled(current, guid, nextEnabled))
+    setDetailUser((current) => withLoginEnabled(current, guid, nextEnabled))
+    setDrawerUser((current) => withLoginEnabled(current, guid, nextEnabled))
+    void loadData(page, pageSize, sortBy, sortOrder)
+
+    const notice = planLoginToggleNotice(nextEnabled, target.lastLoginAt)
+    message.success(notice.result === 'allowed'
+      ? t('system.usersWorkspace.loginToggleAllowedSuccess', '已允许该账号登录')
+      : t('system.usersWorkspace.loginToggleRestrictedSuccess', '已关闭该账号的登录权限'))
+    if (notice.showPasswordHint) {
+      // 从没登录过的账号多半是创建时没打开「允许登录」，也就没有可用密码；提示停留久一点方便照着操作。
+      message.warning(t(
+        'system.usersWorkspace.loginToggleNoPasswordHint',
+        '该账号可能还没有可用密码，请到「重置密码」设置，或让员工在登录页用邮箱验证码重置。',
+      ), 8)
+    }
+  }
+
+  /** 开关「允许登录」：关闭要二次确认（会让已登录的会话失效），开启直接提交。 */
+  const handleToggleUserLogin = (target: LoginToggleTarget, nextEnabled: boolean) => {
+    if (isCurrentUserScoped && (!data.some((item) => item.userGUID === target.userGUID) || hasForbiddenRoleForScopedManager(target))) {
+      message.error(t('system.users.editOutOfScope', '无权编辑该用户'))
+      return
+    }
+    // 菜单项与开关对本人都已置灰，这里再兜一层；后端同样拒绝，避免操作者把自己锁在系统外。
+    if (!nextEnabled && target.userGUID === currentUser?.userGUID) {
+      message.error(t('system.usersWorkspace.loginToggleSelfDenied', '不能关闭本人账号的登录权限'))
+      return
+    }
+    if (nextEnabled) {
+      void submitLoginEnabled(target, true)
+      return
+    }
+
+    const name = getUserDisplayName(target)
+    Modal.confirm({
+      title: t('system.usersWorkspace.disableLoginTitle', '关闭账号「{{name}}」的登录权限？', { name }),
+      content: t(
+        'system.usersWorkspace.disableLoginContent',
+        '关闭后该账号将无法登录，已登录的会话也会失效。账号、角色与分店保持不变，可随时重新开通。',
+      ),
+      okText: t('system.usersWorkspace.disableLogin', '关闭登录'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel', '取消'),
+      // 返回 Promise：确认按钮在请求期间保持加载态；失败已在 submitLoginEnabled 内提示。
+      onOk: () => submitLoginEnabled(target, false),
+    })
+  }
+
   const handleRowAction = (record: UserDto, action: UserRowAction) => {
     if (action === 'login-records' || action === 'pos') {
       openUserDrawer(record, action)
@@ -1293,6 +1382,13 @@ export default function SystemUsersPage() {
       openResetPassword(record)
     } else if (action === 'toggle-active') {
       handleToggleUserActive(record)
+    } else if (action === 'toggle-login') {
+      const toggle = getLoginToggleState({
+        canEdit: canEditUsers,
+        loginEnabled: record.loginEnabled,
+        isSelf: record.userGUID === currentUser?.userGUID,
+      })
+      if (toggle.visible && !toggle.disabled) handleToggleUserLogin(record, toggle.nextEnabled)
     }
   }
 
@@ -1787,6 +1883,18 @@ export default function SystemUsersPage() {
     )
   }
 
+  /** 被限制登录的账号标「不能登录」：橙色，与灰色的「已停用」区分；账号保留，只是登不进来。 */
+  const renderLoginRestrictedTag = (user: { loginEnabled?: boolean } | null | undefined) => {
+    if (!isLoginRestricted(user)) return null
+    return (
+      <Tooltip title={t('system.usersWorkspace.loginRestrictedTooltip', '账号保留，但无法登录 Web / App')}>
+        <Tag color="orange" className="users-ws-login-tag">
+          {t('system.usersWorkspace.loginRestricted', '不能登录')}
+        </Tag>
+      </Tooltip>
+    )
+  }
+
   const buildRowMenuItems = (record: UserDto): MenuProps['items'] => {
     const items: NonNullable<MenuProps['items']> = [
       { key: 'login-records', icon: <HistoryOutlined />, label: t('system.users.loginRecords', '登录记录') },
@@ -1807,6 +1915,29 @@ export default function SystemUsersPage() {
       accountItems.push(record.isActive
         ? { key: 'toggle-active', icon: <StopOutlined />, danger: true, label: t('system.usersWorkspace.disableUser', '停用账号') }
         : { key: 'toggle-active', icon: <CheckCircleOutlined />, label: t('system.usersWorkspace.enableUser', '启用账号') })
+    }
+    // 「允许登录」与启用 / 停用账号并列：后端没返回 loginEnabled 时不知道当前状态，不显示；
+    // 本人账号显示但置灰（不能关闭本人的登录权限）。
+    const loginToggle = getLoginToggleState({
+      canEdit: canEditUsers,
+      loginEnabled: record.loginEnabled,
+      isSelf: record.userGUID === currentUser?.userGUID,
+    })
+    if (loginToggle.visible) {
+      const loginLabel = loginToggle.checked
+        ? t('system.usersWorkspace.disableLogin', '关闭登录')
+        : t('system.usersWorkspace.enableLogin', '开通登录')
+      accountItems.push({
+        key: 'toggle-login',
+        icon: loginToggle.checked ? <LogoutOutlined /> : <LoginOutlined />,
+        danger: loginToggle.checked && !loginToggle.disabled,
+        disabled: loginToggle.disabled,
+        label: loginToggle.disabledReason === 'self' ? (
+          <Tooltip title={t('system.usersWorkspace.loginToggleSelfDenied', '不能关闭本人账号的登录权限')}>
+            <span>{loginLabel}</span>
+          </Tooltip>
+        ) : loginLabel,
+      })
     }
     if (accountItems.length) {
       items.push({ type: 'divider' }, ...accountItems)
@@ -1862,9 +1993,13 @@ export default function SystemUsersPage() {
     {
       title: t('common.status', '状态'),
       dataIndex: 'isActive',
-      width: 88,
-      render: (value: boolean) => (
-        <StatusDot active={value} label={value ? t('common.active', '启用') : t('common.inactive', '停用')} />
+      width: 104,
+      render: (value: boolean, record) => (
+        // 启用 / 停用圆点在上；被限制登录的账号在下方多一个橙色「不能登录」标签。
+        <div className="users-ws-status-cell">
+          <StatusDot active={value} label={value ? t('common.active', '启用') : t('common.inactive', '停用')} />
+          {renderLoginRestrictedTag(record)}
+        </div>
       ),
     },
     {
@@ -1972,6 +2107,13 @@ export default function SystemUsersPage() {
     </>
   )
 
+  // 抽屉「资料」页的登录权限行：用详情里的 loginEnabled；没有编辑权或后端没返回该字段时整行不显示。
+  const editLoginToggle = getLoginToggleState({
+    canEdit: canEditUsers,
+    loginEnabled: editingUser?.loginEnabled,
+    isSelf: Boolean(editingUser && editingUser.userGUID === currentUser?.userGUID),
+  })
+
   const editTabItems = [
     {
       key: 'info',
@@ -2025,6 +2167,45 @@ export default function SystemUsersPage() {
                 <Descriptions.Item label={t('system.users.createdAt', '创建时间')}>{formatPlainDateTime(editingUser.createdAt)}</Descriptions.Item>
                 <Descriptions.Item label={t('system.users.updatedAt', '更新时间')}>{formatPlainDateTime(editingUser.updatedAt)}</Descriptions.Item>
               </Descriptions>
+            ) : null}
+
+            {editingUser && editLoginToggle.visible ? (
+              // 「允许登录」与上面的「状态（启用 / 停用）」是两回事，且立即生效（不走「保存基本信息」）。
+              <section
+                className={isLoginRestricted(editingUser)
+                  ? 'users-ws-login-access users-ws-login-access-restricted'
+                  : 'users-ws-login-access'}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <Typography.Text strong>{t('system.usersWorkspace.loginAccess', '登录权限')}</Typography.Text>
+                  <div>
+                    <Typography.Text type="secondary">
+                      {t(
+                        'system.usersWorkspace.loginAccessHint',
+                        '允许该账号登录 Web 与 App。关闭后账号、角色与分店保持不变，但无法登录，已登录的会话也会失效。',
+                      )}
+                    </Typography.Text>
+                  </div>
+                </div>
+                <Tooltip
+                  title={editLoginToggle.disabledReason === 'self'
+                    ? t('system.usersWorkspace.loginToggleSelfDenied', '不能关闭本人账号的登录权限')
+                    : undefined}
+                >
+                  {/* 置灰的 Switch 不触发鼠标事件，包一层 span 才能显示 tooltip。 */}
+                  <span>
+                    <Switch
+                      aria-label={t('system.usersWorkspace.loginAccess', '登录权限')}
+                      checked={editLoginToggle.checked}
+                      disabled={editLoginToggle.disabled}
+                      loading={loginToggleBusyGuid === editingUser.userGUID}
+                      checkedChildren={t('system.usersWorkspace.loginAllowed', '允许')}
+                      unCheckedChildren={t('system.usersWorkspace.loginDenied', '禁止')}
+                      onChange={(checked) => handleToggleUserLogin(editingUser, checked)}
+                    />
+                  </span>
+                </Tooltip>
+              </section>
             ) : null}
 
             <HasPermission code={P.Users.ResetPassword}>
@@ -2730,6 +2911,7 @@ export default function SystemUsersPage() {
             <span style={{ fontSize: 13, fontWeight: 400 }}>
               <StatusDot active={user.isActive} label={user.isActive ? t('common.active', '启用') : t('common.inactive', '停用')} />
             </span>
+            {renderLoginRestrictedTag(user)}
           </div>
           <span className="users-ws-subline">{getUserSecondaryLine(user)}</span>
           <div className="users-ws-drawer-facts">
@@ -2847,7 +3029,7 @@ export default function SystemUsersPage() {
           loading={loading}
           columns={columns}
           dataSource={data}
-          scroll={{ x: canBatchSelectUsers ? 1114 : 1070 }}
+          scroll={{ x: canBatchSelectUsers ? 1130 : 1086 }}
           rowSelection={canBatchSelectUsers ? {
             selectedRowKeys: selectedUsers.map((user) => user.userGUID),
             preserveSelectedRowKeys: true,

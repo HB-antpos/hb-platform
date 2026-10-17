@@ -52,6 +52,7 @@ import { i18n, setAppLanguage } from "@/shared/i18n/i18n";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { AppAsyncStorage } from "@/shared/storage/async-storage";
 import { SecureStorage } from "@/shared/storage/secure";
+import { clearAccountVault } from "@/modules/account-switch/account-switch-service";
 import {
   resetLocalKeychainSession,
   type KeychainResetResult,
@@ -348,7 +349,11 @@ export default function Login() {
       // clearLocalSession 自带互斥：已有在途清理时直接复用其结果，异常由 resetLocalKeychainSession 兜住。
       setKeychainResetResult(
         await resetLocalKeychainSession({
-          clearLocalSession: () => useAuthStore.getState().clearLocalSession(),
+          // 多账号保险库里保存的休眠凭据同样属于「本机登录缓存」，一并清空（清不干净的残留是用户要清的东西）。
+          clearLocalSession: async () => {
+            await clearAccountVault();
+            await useAuthStore.getState().clearLocalSession();
+          },
           listResidue: () => SecureStorage.listAccountSessionResidue(),
           probeReadWrite: () => SecureStorage.probeReadWrite(),
         }),

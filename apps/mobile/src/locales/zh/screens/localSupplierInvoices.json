@@ -35,7 +35,9 @@
     "priceUp": "涨价",
     "priceDown": "减价",
     "detailSearch": "搜索商品 / 条码",
-    "detailSearchFull": "搜索货号 / 条码 / 商品名称"
+    "detailSearchFull": "搜索货号 / 条码 / 商品名称",
+    "productKeywordPlaceholder": "商品匹配：货号 / 条码 / 商品名",
+    "appliedDateRange": "订单日期：{{range}}（点此修改）"
   },
   "labels": {
     "orderDate": "订单时间",

@@ -145,6 +145,8 @@ export interface PendingTaskCardProps {
   now: Date;
   /** 只读分店：隐藏所有操作。 */
   canOperate: boolean;
+  /** 账号会话 + Warehouse.ManageProducts：卡片「更多」里显示「撤销未完成」。 */
+  canCancel: boolean;
   selecting: boolean;
   selected: boolean;
   busy: boolean;
@@ -155,12 +157,14 @@ export interface PendingTaskCardProps {
   onViewProduct: (task: StorePriceUpdateTask) => void;
   onMarkReplaced: (task: StorePriceUpdateTask) => void;
   onPrintLabel: (task: StorePriceUpdateTask) => void;
+  onCancelTask: (task: StorePriceUpdateTask) => void;
 }
 
 export const PendingTaskCard = memo(function PendingTaskCard({
   task,
   now,
   canOperate,
+  canCancel,
   selecting,
   selected,
   busy,
@@ -171,6 +175,7 @@ export const PendingTaskCard = memo(function PendingTaskCard({
   onViewProduct,
   onMarkReplaced,
   onPrintLabel,
+  onCancelTask,
 }: PendingTaskCardProps) {
   const { t } = useAppTranslation("priceUpdates");
   const [menuVisible, setMenuVisible] = useState(false);
@@ -225,37 +230,55 @@ export const PendingTaskCard = memo(function PendingTaskCard({
         <ComparisonStrip task={task} />
         <InitiatorRow task={task} now={now} />
 
-        {canOperate && !selecting ? (
+        {(canOperate || canCancel) && !selecting ? (
           <View style={styles.actions}>
-            {isPriceUpdate ? (
+            {/* 「更多」：需改价任务有「保持本店价 / 查看商品」（仅可操作分店）；有撤销权限的账号再加「撤销未完成」。 */}
+            {(canOperate && isPriceUpdate) || canCancel ? (
+              <Menu
+                visible={menuVisible}
+                onDismiss={() => setMenuVisible(false)}
+                anchor={(
+                  <Button compact mode="text" disabled={busy} onPress={() => setMenuVisible(true)}>
+                    {t("actions.more")}
+                  </Button>
+                )}
+              >
+                {canOperate && isPriceUpdate ? (
+                  <>
+                    <Menu.Item
+                      leadingIcon="hand-back-right-outline"
+                      title={t("actions.keepStorePrice")}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onKeepStorePrice(task);
+                      }}
+                    />
+                    <Menu.Item
+                      leadingIcon="open-in-new"
+                      title={t("actions.viewProduct")}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onViewProduct(task);
+                      }}
+                    />
+                  </>
+                ) : null}
+                {canCancel ? (
+                  <Menu.Item
+                    leadingIcon="close-circle-outline"
+                    title={t("actions.cancelTask")}
+                    titleStyle={styles.cancelMenuTitle}
+                    onPress={() => {
+                      setMenuVisible(false);
+                      onCancelTask(task);
+                    }}
+                  />
+                ) : null}
+              </Menu>
+            ) : null}
+            <View style={styles.flex} />
+            {canOperate && isPriceUpdate ? (
               <>
-                <Menu
-                  visible={menuVisible}
-                  onDismiss={() => setMenuVisible(false)}
-                  anchor={(
-                    <Button compact mode="text" disabled={busy} onPress={() => setMenuVisible(true)}>
-                      {t("actions.more")}
-                    </Button>
-                  )}
-                >
-                  <Menu.Item
-                    leadingIcon="hand-back-right-outline"
-                    title={t("actions.keepStorePrice")}
-                    onPress={() => {
-                      setMenuVisible(false);
-                      onKeepStorePrice(task);
-                    }}
-                  />
-                  <Menu.Item
-                    leadingIcon="open-in-new"
-                    title={t("actions.viewProduct")}
-                    onPress={() => {
-                      setMenuVisible(false);
-                      onViewProduct(task);
-                    }}
-                  />
-                </Menu>
-                <View style={styles.flex} />
                 <Button compact mode="outlined" disabled={busy} onPress={() => onApplyOnly(task)}>
                   {t("actions.applyOnly")}
                 </Button>
@@ -269,9 +292,9 @@ export const PendingTaskCard = memo(function PendingTaskCard({
                   {t("actions.applyAndPrint")}
                 </Button>
               </>
-            ) : (
+            ) : null}
+            {canOperate && !isPriceUpdate ? (
               <>
-                <View style={styles.flex} />
                 <Button compact mode="outlined" disabled={busy} onPress={() => onMarkReplaced(task)}>
                   {t("actions.markReplaced")}
                 </Button>
@@ -285,7 +308,7 @@ export const PendingTaskCard = memo(function PendingTaskCard({
                   {t("actions.printLabel")}
                 </Button>
               </>
-            )}
+            ) : null}
           </View>
         ) : null}
       </Card.Content>
@@ -403,6 +426,7 @@ const styles = StyleSheet.create({
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
   secondary: { color: HB_COLORS.textSecondary },
   flex: { flex: 1 },
+  cancelMenuTitle: { color: HB_COLORS.danger },
   compare: { gap: HB_SPACING.xxs, padding: HB_SPACING.xs, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   compareRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
   compareLabel: { color: HB_COLORS.textSecondary },

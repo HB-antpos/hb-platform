@@ -844,6 +844,10 @@
     "Warehouse.ManageProducts": {
       "name": "管理仓库商品",
       "description": "Web 页面 /warehouse/products、/warehouse/products/retail-price-changes、/warehouse/product-grade-management 与移动端「仓库」- 管理仓库商品、零售价变更和等级"
+    },
+    "Warehouse.CancelPriceUpdateTasks": {
+      "name": "撤销价格变更任务",
+      "description": "Web 页面 /warehouse/products/price-update-tasks 与移动端「价格和标签」- 撤销未完成的分店价格变更任务（按商品覆盖所有分店；只取消提醒，不修改任何价格，不可恢复）。持有「管理仓库商品」的账号自动具备"
     }
   },
   "roles": {

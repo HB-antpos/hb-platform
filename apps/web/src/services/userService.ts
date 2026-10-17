@@ -116,6 +116,21 @@ export async function updateUser(guid: string, payload: UpdateUserDto): Promise<
 }
 
 /**
+ * 开关某账号「允许登录 Web / App」（管理员用，需要 Users.Edit）。
+ * 与启用 / 停用账号是两回事：账号保留，但被限制后任何人都登不进来，已登录的会话也会失效。
+ * 失败时抛 RequestError，payload.errorCode 可能是 SELF_PROFILE_FIELDS_DENIED / USER_NOT_FOUND /
+ * USER_SCOPE_DENIED / HIGH_PRIVILEGE_TARGET_DENIED（页面按错误码给中文提示，见 usersPageLogic）。
+ */
+export async function updateUserLoginEnabled(guid: string, loginEnabled: boolean): Promise<boolean> {
+  const response = await request.put<ApiResponse<boolean>>(
+    `/api/Users/guid/${encodeURIComponent(guid)}/login-enabled`,
+    // 与同文件 updateUser / batchSetUsersActive 一致用 camelCase；后端必填，缺字段会 400 而不是按 false 处理。
+    { loginEnabled },
+  )
+  return unwrapApiData(response)
+}
+
+/**
  * 批量启用 / 停用：后端在一个事务里逐个校验目标（不存在、无权编辑、当前账号都会让整批回滚），
  * 所以要么全部生效、要么全部不变。
  */

@@ -53,9 +53,9 @@
     "retailSyncConfirmTitle": "Save retail price",
     "retailSyncConfirmDescription": "The retail price will update the product master and warehouse RRP. Choose how branches are handled:",
     "retailSyncStoresLabel": "Sync branch retail prices",
-    "retailSyncStoresHelper": "On: set every active branch's retail price to the new price and notify branches to relabel. Off: branch prices stay unchanged and branches confirm the change themselves.",
+    "retailSyncStoresHelper": "On: set every active branch's retail price to the new price. Off: branch prices stay unchanged. Whether branches are notified or asked to relabel is decided by \"Generate price tasks\" below.",
     "retailGenerateTasksLabel": "Generate price tasks",
-    "retailGenerateTasksHelper": "On: create price update tasks for branches. Off: branches are not notified (when syncing branch prices, HQ is synced immediately).",
+    "retailGenerateTasksHelper": "On: create price update tasks for branches (a \"relabel\" task if \"Sync branch retail prices\" is also on, otherwise a \"change price\" task). Off: branches are not notified and no task is created; synced branch prices are still pushed to HQ immediately, and shelf labels are not changed.",
     "stockStates": {
       "inStock": "In stock",
       "lowStock": "Low stock",

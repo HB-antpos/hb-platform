@@ -192,6 +192,8 @@ namespace BlazorApp.Shared.Constants
             "Warehouse.ManageLocations",
             "Warehouse.ManageOrders",
             "Warehouse.ManageProducts",
+            // 撤销价格变更任务：Web「价格变更任务」页与移动端「价格和标签」共用。
+            "Warehouse.CancelPriceUpdateTasks",
         };
 
         private static readonly IReadOnlyDictionary<string, PermissionSurface> Registered = BuildRegistry();

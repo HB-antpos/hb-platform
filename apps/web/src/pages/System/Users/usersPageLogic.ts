@@ -259,3 +259,115 @@ export function diffUserNameParts(
   }
   return changes
 }
+
+// ---------------------------------------------------------------------------
+// 「允许登录」开关（管理员可开关任意账号的登录权限；与「启用 / 停用账号」是两回事）
+// ---------------------------------------------------------------------------
+
+/**
+ * 账号是否被限制登录。接口 JSON 会省略 null，所以只有后端明确返回 false 才算「被限制」；
+ * 缺省（旧后端 / 未查询该字段）既不能当作「允许」，也不能当作「限制」，界面不显示任何标记。
+ */
+export function isLoginRestricted(user: { loginEnabled?: boolean | null } | null | undefined): boolean {
+  return user?.loginEnabled === false
+}
+
+export interface LoginToggleState {
+  /** 是否渲染开关：需要编辑权限，且后端返回了 loginEnabled（否则不知道当前状态，不能显示开关）。 */
+  visible: boolean
+  /** 当前是否允许登录；visible 为 false 时无意义。 */
+  checked: boolean
+  /** 是否置灰：本人账号不能关闭自己的登录权限（后端同样拒绝，否则操作者会把自己锁在系统外）。 */
+  disabled: boolean
+  disabledReason?: 'self'
+  /** 点击后要提交的目标值（与当前状态相反）。 */
+  nextEnabled: boolean
+}
+
+export function getLoginToggleState({
+  canEdit,
+  loginEnabled,
+  isSelf,
+}: {
+  canEdit: boolean
+  loginEnabled: boolean | null | undefined
+  isSelf: boolean
+}): LoginToggleState {
+  const known = typeof loginEnabled === 'boolean'
+  const checked = loginEnabled !== false
+  return {
+    visible: canEdit && known,
+    checked,
+    disabled: isSelf,
+    disabledReason: isSelf ? 'self' : undefined,
+    nextEnabled: !checked,
+  }
+}
+
+/**
+ * 把「允许登录」的新值写回某一行 / 详情对象：只改 guid 匹配的那一个，其余原样返回（含 null）。
+ * 用于开关成功后立刻更新列表、抽屉标题与资料页，再由列表重新加载拿服务端真值。
+ */
+export function withLoginEnabled<T extends { userGUID: string; loginEnabled?: boolean }>(
+  user: T | null,
+  userGuid: string,
+  loginEnabled: boolean,
+): T | null {
+  if (!user || user.userGUID !== userGuid) return user
+  return { ...user, loginEnabled }
+}
+
+/**
+ * 开启登录后是否要提示「可能还没有可用密码」：从没登录过（lastLoginAt 为空 / 无法解析）的账号，
+ * 多半是创建时没打开「允许登录」，也就没设过可用密码。关闭登录不需要这个提示。
+ */
+export function planLoginToggleNotice(
+  nextEnabled: boolean,
+  lastLoginAt: string | null | undefined,
+): { result: 'allowed' | 'restricted'; showPasswordHint: boolean } {
+  return {
+    result: nextEnabled ? 'allowed' : 'restricted',
+    showPasswordHint: nextEnabled && !parseUserUtcTimestamp(lastLoginAt),
+  }
+}
+
+export type LoginToggleErrorKind =
+  | 'self'
+  | 'notFound'
+  | 'scopeDenied'
+  | 'highPrivilege'
+  | 'forbidden'
+  | 'generic'
+
+/** 每类错误对应的页面文案键与中文兜底；只展示这里的文案，不透传后端原始 message。 */
+export const LOGIN_TOGGLE_ERROR_MESSAGES: Record<LoginToggleErrorKind, { key: string; fallback: string }> = {
+  self: { key: 'system.usersWorkspace.loginToggleError.self', fallback: '不能关闭本人账号的登录权限' },
+  notFound: { key: 'system.usersWorkspace.loginToggleError.notFound', fallback: '该用户不存在或已被删除，请刷新列表' },
+  scopeDenied: { key: 'system.usersWorkspace.loginToggleError.scopeDenied', fallback: '该用户不在你的管理范围内' },
+  highPrivilege: { key: 'system.usersWorkspace.loginToggleError.highPrivilege', fallback: '无权修改高权限账号的登录权限' },
+  forbidden: { key: 'system.usersWorkspace.loginToggleError.forbidden', fallback: '当前账号没有修改登录权限的权限' },
+  generic: { key: 'system.usersWorkspace.loginToggleError.generic', fallback: '修改登录权限失败，请稍后重试' },
+}
+
+const LOGIN_TOGGLE_ERROR_CODES: Record<string, LoginToggleErrorKind> = {
+  SELF_PROFILE_FIELDS_DENIED: 'self',
+  USER_NOT_FOUND: 'notFound',
+  USER_SCOPE_DENIED: 'scopeDenied',
+  HIGH_PRIVILEGE_TARGET_DENIED: 'highPrivilege',
+}
+
+/**
+ * 把 updateUserLoginEnabled 抛出的错误归类：优先按后端 errorCode（payload.errorCode / code，大小写不敏感），
+ * 没有业务码时 HTTP 403 视为无 Users.Edit 权限，其余一律通用失败。
+ */
+export function resolveLoginToggleErrorKind(error: unknown): LoginToggleErrorKind {
+  const record = error && typeof error === 'object' ? (error as { payload?: unknown; status?: unknown }) : undefined
+  const payload = record?.payload && typeof record.payload === 'object'
+    ? (record.payload as { errorCode?: unknown; code?: unknown })
+    : undefined
+  const rawCode = payload?.errorCode ?? payload?.code
+  const code = typeof rawCode === 'string' ? rawCode.trim().toUpperCase() : ''
+  const byCode = code ? LOGIN_TOGGLE_ERROR_CODES[code] : undefined
+  if (byCode) return byCode
+  return record?.status === 403 ? 'forbidden' : 'generic'
+}

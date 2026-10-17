@@ -3,6 +3,8 @@ import { apiClient } from "@/shared/api/client";
 import { useDeviceStore } from "@/store/device-store";
 import { runBatchInChunks } from "./batch-chunks";
 import {
+  normalizeCancelPriceUpdateTasksResult,
+  normalizePendingStoreCount,
   normalizePriceNotificationPreview,
   normalizePriceUpdateBatchResult,
   normalizePriceUpdatePendingCount,
@@ -112,6 +114,38 @@ export async function keepStorePriceForTasks(
       return normalizePriceUpdateBatchResult(response.data);
     },
   });
+}
+
+/**
+ * 按商品撤销未完成任务（与 Web「价格变更任务」页「按商品」同一接口 / 同一后端策略）。
+ * 不传 storeCodes = 该商品在**所有分店**的未完成任务；只把未完成任务标记为已取消并记录撤销人，
+ * 不改任何价格，已处理或不存在的会被跳过并逐条回报。仅账号会话可用（设备会话没有账号权限）。
+ */
+export async function cancelPriceUpdateTasksForProduct(
+  productCode: string,
+  note?: string
+): Promise<PriceUpdateBatchResult> {
+  const trimmedNote = note?.trim();
+  const response = await apiClient.post(`${MONITOR_BASE_PATH}/cancel`, {
+    productCode,
+    ...(trimmedNote ? { note: trimmedNote } : {}),
+  });
+  return normalizeCancelPriceUpdateTasksResult(response.data);
+}
+
+/**
+ * 某商品目前有未完成任务的分店数，用于确认框写「共 N 家分店」。
+ * 取不到（没有监控查看权限、网络失败、商品不在结果里）一律返回 null，确认框退回不带数量的说明，不阻塞撤销。
+ */
+export async function getPendingStoreCountForProduct(productCode: string): Promise<number | null> {
+  try {
+    const response = await apiClient.get(`${MONITOR_BASE_PATH}/by-product`, {
+      params: { keyword: productCode, onlyIncomplete: true, page: 1, pageSize: 100 },
+    });
+    return normalizePendingStoreCount(response.data, productCode);
+  } catch {
+    return null;
+  }
 }
 
 export async function completePriceUpdateLabels(

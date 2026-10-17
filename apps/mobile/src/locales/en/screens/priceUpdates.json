@@ -73,7 +73,8 @@
     "markReplaced": "Mark replaced",
     "printLabel": "Print label",
     "reprint": "Print another",
-    "retryHqSync": "Retry sync"
+    "retryHqSync": "Retry sync",
+    "cancelTask": "Cancel pending (all stores)"
   },
   "completed": {
     "status": {
@@ -108,7 +109,8 @@
     "loadingAll": "Loading all tasks…",
     "loadAllFailed": "Could not load all tasks. Try again",
     "selectedTitle": "{{count}} selected",
-    "more": "More actions"
+    "more": "More actions",
+    "cancelSelected": "Cancel selected ({{count}}) · all stores"
   },
   "printer": {
     "notConfigured": "No label printer",
@@ -153,7 +155,12 @@
     "storeSwitchFailed": "Could not switch store",
     "batchMarkedReplaced": "Marked {{count}} labels as replaced",
     "batchKeptStorePrice": "Kept store price for {{count}} items",
-    "batchPartial": "{{success}} succeeded, {{failed}} failed"
+    "batchPartial": "{{success}} succeeded, {{failed}} failed",
+    "cancelSuccess": "{{count}} tasks cancelled (all stores)",
+    "cancelPartial": "{{cancelled}} tasks cancelled; {{skipped}} were already handled or no longer exist and were skipped",
+    "cancelNothing": "No pending tasks to cancel; they may already be handled",
+    "cancelInterrupted": "{{cancelled}} tasks cancelled; {{notSubmitted}} products were not processed because of a network or service error. Please retry",
+    "cancelFailed": "Cancel failed. Please retry"
   },
   "keepDialog": {
     "title": "Keep store price?",
@@ -292,5 +299,16 @@
     "lockStrip": "{{count}} tasks over {{days}} days · Reports locked",
     "lockAction": "Handle",
     "lockedTile": "{{title}}, locked. Handle overdue tasks first"
+  },
+  "cancelDialog": {
+    "title": "Cancel pending tasks",
+    "description": "This will cancel the pending tasks for \"{{name}}\" in all stores.",
+    "batchDescription": "This will cancel the pending tasks of the {{count}} selected products in all stores.",
+    "warning": "Cancelling only removes the task reminder; it does not change any store price. A store that already has the new price but has not replaced the label keeps the new price. This cannot be undone; the next warehouse price change creates a new task.",
+    "noteLabel": "Note (optional)",
+    "notePlaceholder": "e.g. test store, no action needed",
+    "confirm": "Cancel tasks",
+    "descriptionWithCount": "This will cancel the pending tasks for \"{{name}}\" in all stores ({{count}} stores still have it pending).",
+    "scopeNote": "The scope is all stores, not just the current store."
   }
 }

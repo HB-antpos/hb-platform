@@ -30,6 +30,7 @@ public sealed class PermissionSurfaceCatalogTests
     [InlineData("Attendance.Schedule.ViewStore", "web,mobile")]
     [InlineData("Users.CreateStoreStaff", "mobile")]
     [InlineData("Users.View", "web,mobile")]
+    [InlineData("Warehouse.CancelPriceUpdateTasks", "web,mobile")]
     [InlineData("SalesDashboard.SalesData.View", "web")]
     public void ResolveNames_KnownCodes_ReturnExpectedSurfaces(string code, string expected)
     {

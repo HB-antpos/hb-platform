@@ -73,7 +73,8 @@
     "markReplaced": "标记已换",
     "printLabel": "打印标签",
     "reprint": "再打一张",
-    "retryHqSync": "重试同步"
+    "retryHqSync": "重试同步",
+    "cancelTask": "撤销未完成（所有分店）"
   },
   "completed": {
     "status": {
@@ -108,7 +109,8 @@
     "loadingAll": "正在加载全部任务…",
     "loadAllFailed": "加载全部任务失败，请重试",
     "selectedTitle": "已选 {{count}} 项",
-    "more": "更多操作"
+    "more": "更多操作",
+    "cancelSelected": "撤销所选（{{count}}）· 所有分店"
   },
   "printer": {
     "notConfigured": "未设置标签机",
@@ -153,7 +155,12 @@
     "storeSwitchFailed": "切换分店失败",
     "batchMarkedReplaced": "已标记 {{count}} 项为已换标签",
     "batchKeptStorePrice": "已保持本店价 {{count}} 项",
-    "batchPartial": "成功 {{success}} 项，失败 {{failed}} 项"
+    "batchPartial": "成功 {{success}} 项，失败 {{failed}} 项",
+    "cancelSuccess": "已撤销 {{count}} 个任务（所有分店）",
+    "cancelPartial": "已撤销 {{cancelled}} 个任务，另有 {{skipped}} 个已被处理或不存在，已跳过",
+    "cancelNothing": "没有可撤销的未完成任务，可能已被处理",
+    "cancelInterrupted": "已撤销 {{cancelled}} 个任务，另有 {{notSubmitted}} 个商品因网络或服务异常未处理，请重试",
+    "cancelFailed": "撤销失败，请重试"
   },
   "keepDialog": {
     "title": "保持本店价？",
@@ -292,5 +299,16 @@
     "lockStrip": "{{count}} 项任务超过 {{days}} 天，报表已锁定",
     "lockAction": "去处理",
     "lockedTile": "{{title}}，已锁定，请先处理超期任务"
+  },
+  "cancelDialog": {
+    "title": "撤销未完成任务",
+    "description": "将撤销「{{name}}」在所有分店的未完成任务。",
+    "batchDescription": "将撤销所选 {{count}} 个商品在所有分店的未完成任务。",
+    "warning": "撤销只会取消任务提醒，不会修改任何分店价格：已改价但还没换标签的分店，价格会保持新价。撤销后无法恢复；仓库再次改价会重新生成任务。",
+    "noteLabel": "备注（可选）",
+    "notePlaceholder": "例如：测试店，无需执行",
+    "confirm": "确认撤销",
+    "descriptionWithCount": "将撤销「{{name}}」在所有分店的未完成任务（目前有 {{count}} 家分店还没完成）。",
+    "scopeNote": "撤销范围是所有分店，不只当前分店。"
   }
 }
