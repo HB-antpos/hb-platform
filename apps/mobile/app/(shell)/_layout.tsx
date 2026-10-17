@@ -657,6 +657,7 @@ export default function ShellLayout() {
         {/* 每小时提醒：放在导航上下文里，随时读到最新的待办与超期数。iOS 审核态不提醒。 */}
         <PriceReminderHost
           suppressed={isIosReviewSession || iosReviewOfflineGuardActive}
+          isAdmin={isAdmin}
           isDeviceMode={isDeviceMode}
         />
       </View>

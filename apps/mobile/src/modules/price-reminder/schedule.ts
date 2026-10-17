@@ -38,6 +38,8 @@ export interface PriceReminderGateInput {
   onPriceUpdatesScreen: boolean;
   /** iOS 审核模式等不应出现提醒的场合。 */
   suppressed: boolean;
+  /** 管理员账号：任何时候都不弹每小时提醒（角标、工作台入口和「价格和标签」页照常可用）。 */
+  isAdmin: boolean;
   /** 正在打印标签或提交批量处理：不能被弹窗打断。 */
   busy: boolean;
 }
@@ -49,6 +51,7 @@ export function shouldShowPriceReminder(input: PriceReminderGateInput): boolean 
     !input.appActive ||
     input.onPriceUpdatesScreen ||
     input.suppressed ||
+    input.isAdmin ||
     input.busy
   ) {
     return false;

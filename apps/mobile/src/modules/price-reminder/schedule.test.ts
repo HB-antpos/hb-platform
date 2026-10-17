@@ -19,6 +19,7 @@ function gate(patch: Partial<PriceReminderGateInput> = {}): PriceReminderGateInp
     appActive: true,
     onPriceUpdatesScreen: false,
     suppressed: false,
+    isAdmin: false,
     busy: false,
     ...patch,
   };
@@ -68,6 +69,16 @@ assert.equal(shouldShowPriceReminder(gate({ totalPending: 0 })), false, "全部�
 assert.equal(shouldShowPriceReminder(gate({ appActive: false })), false, "App 在后台不弹");
 assert.equal(shouldShowPriceReminder(gate({ onPriceUpdatesScreen: true })), false, "人已经停在价格和标签页，不再打扰");
 assert.equal(shouldShowPriceReminder(gate({ suppressed: true })), false, "iOS 审核模式等不弹");
+assert.equal(
+  shouldShowPriceReminder(gate({ isAdmin: true })),
+  false,
+  "管理员完全不弹（即使有待办、从没弹过）"
+);
+assert.equal(
+  shouldShowPriceReminder(gate({ isAdmin: true, lastShownAtMs: NOW - 5 * 60 * MINUTE })),
+  false,
+  "管理员即使距上次已过很久也不弹"
+);
 assert.equal(shouldShowPriceReminder(gate({ busy: true })), false, "正在打印不能被弹窗打断");
 
 console.log("price-reminder/schedule.test.ts: ok");
