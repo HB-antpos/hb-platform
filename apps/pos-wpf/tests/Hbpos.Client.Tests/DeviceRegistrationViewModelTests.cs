@@ -286,8 +286,9 @@ public sealed class DeviceRegistrationViewModelTests
                 element.Name.LocalName == "ApiServerSettingsPanel" &&
                 element.Attribute("DataContext")?.Value == "{Binding ApiServerSettings}");
         var panelHost = serverPanel.Ancestors().First(element => element.Name.LocalName == "ScrollViewer");
+        // 键盘修复把 Visibility 折叠从 StackPanel.Style 移到了外层 Grid.Style，要往上一层找。
         Assert.Contains(
-            panelHost.Descendants(),
+            panelHost.Parent!.Descendants(),
             element =>
                 element.Name.LocalName == "Setter" &&
                 element.Attribute("Property")?.Value == "Visibility" &&
