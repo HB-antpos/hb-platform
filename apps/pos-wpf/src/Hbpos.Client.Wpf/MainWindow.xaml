@@ -1421,21 +1421,23 @@
 
                     <!-- 右栏：登录。选中左栏的「服务器地址」时整栏换成服务器设置面板。 -->
                     <Grid Grid.Column="1">
+                        <!-- 两个 ScrollViewer 叠在同一格：必须折叠 ScrollViewer 本身。只折叠里面的内容时，空的 ScrollViewer 仍留在最上层，
+                             会吃掉下层登录栏的点击（屏幕数字键盘点不动，但物理键盘和扫码枪仍可输入）。 -->
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsChecked, ElementName=CashierLoginServerToggle}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
                         <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Margin="28,24,28,22">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsChecked, ElementName=CashierLoginServerToggle}" Value="True">
-                                                <Setter Property="Visibility" Value="Collapsed" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
-
                                 <TextBlock Text="{loc:Loc shell.cashierLogin.overlayTitle}"
                                            FontSize="22"
                                            FontWeight="Black"
@@ -1568,21 +1570,23 @@
                                            Margin="0,10,0,0" />
                             </StackPanel>
                         </ScrollViewer>
+                        </Grid>
 
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsChecked, ElementName=CashierLoginServerToggle}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
                         <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Margin="28,24,28,22">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsChecked, ElementName=CashierLoginServerToggle}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
                                 <Button AutomationProperties.AutomationId="CashierLoginBackToLoginButton"
                                         Click="CashierLoginOverlayBackToLoginClick"
                                         Style="{StaticResource PosSecondaryButtonStyle}"
@@ -1598,6 +1602,7 @@
                                 <controls:ApiServerSettingsPanel DataContext="{Binding ApiServerSettings}" />
                             </StackPanel>
                         </ScrollViewer>
+                        </Grid>
                     </Grid>
                 </Grid>
             </Border>

@@ -157,6 +157,38 @@ public sealed class MainWindowXamlTests
     }
 
     [Fact]
+    public void Cashier_login_overlay_collapses_the_stacked_scroll_viewers_themselves_so_the_keypad_stays_clickable()
+    {
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        var overlay = Assert.Single(document.Descendants(presentation + "Grid").Where(
+            element => element.Attributes().Any(attribute =>
+                string.Equals(attribute.Name.LocalName, "AutomationProperties.AutomationId", StringComparison.Ordinal) &&
+                string.Equals(attribute.Value, "CashierLoginOverlay", StringComparison.Ordinal))));
+
+        var scrollViewers = overlay.Descendants(presentation + "ScrollViewer").ToArray();
+        Assert.Equal(2, scrollViewers.Length);
+        foreach (var scrollViewer in scrollViewers)
+        {
+            // 登录栏与服务器面板叠在同一格：只折叠内容时，空的 ScrollViewer 仍盖在上层并吃掉点击，
+            // 屏幕数字键盘就点不动（物理键盘和扫码枪仍可输入）。所以必须折叠 ScrollViewer 的外层容器。
+            var parent = Assert.IsType<XElement>(scrollViewer.Parent);
+            Assert.Equal(presentation + "Grid", parent.Name);
+            Assert.NotNull(parent.Element(presentation + "Grid.Style"));
+
+            var content = Assert.Single(scrollViewer.Elements(presentation + "StackPanel"));
+            Assert.Null(content.Element(presentation + "StackPanel.Style"));
+        }
+    }
+
+    [Fact]
     public void Sync_center_order_timestamp_runs_use_one_way_bindings()
     {
         var document = XDocument.Load(Path.Combine(
