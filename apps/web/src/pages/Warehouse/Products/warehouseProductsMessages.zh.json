@@ -26,9 +26,9 @@
       "pushToHq": "发送到 HQ",
       "retailPriceSync": {
         "syncStoreRetailPrices": "同步分店零售价",
-        "syncStoreRetailPricesHint": "勾选后直接把各分店零售价改成新价并通知换标签；不勾选则不动分店价，由分店确认改价",
+        "syncStoreRetailPricesHint": "勾选后直接把各分店零售价改成新价；不勾选则不动分店价。是否通知分店、是否换标签，由下面的「生成价格任务」决定",
         "generateTasks": "生成价格任务",
-        "generateTasksHint": "勾选后给分店生成价格更新任务；不勾选则不通知分店（同步分店价时会立即同步总部 HQ）",
+        "generateTasksHint": "勾选后给分店生成价格更新任务（同时勾选「同步分店零售价」是「待换标签」任务，否则是「改价格」任务）；不勾选则不通知分店、不发任何任务，已同步的分店价会立即同步总部 HQ（价签不会换）",
         "inlineConfirmTitle": "修改零售价"
       }
     }
