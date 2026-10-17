@@ -367,6 +367,12 @@ namespace BlazorApp.Shared.Constants
             /// 持有 Warehouse.Manage 等宽泛权限不会因此自动具备，需显式授予。
             /// </summary>
             public const string StartPicking = "Warehouse.StartPicking";
+            /// <summary>
+            /// 撤销未完成的分店价格变更任务（Web「价格变更任务」页与移动端「价格和标签」）。撤销按商品覆盖所有分店，
+            /// 只取消提醒、不改任何价格、不可恢复，所以单独成码，可以只授予需要的人。
+            /// 持有 Warehouse.ManageProducts / Warehouse.Manage 的账号经别名自动具备，保证 Web 原有撤销能力不丢。
+            /// </summary>
+            public const string CancelPriceUpdateTasks = "Warehouse.CancelPriceUpdateTasks";
         }
 
         public static class DomesticPurchase
@@ -482,6 +488,8 @@ namespace BlazorApp.Shared.Constants
                 [Reports.ProductMovementView] = [Reports.View],
                 // 前端仓库商品页面兼容旧的仓库总管理权限，API 使用同一访问边界。
                 [Warehouse.ManageProducts] = [Warehouse.Manage],
+                // 撤销价格变更任务原先由 ManageProducts 守卫（Web 页面已在用）；拆成独立码后两者都放行，已有账号无需重新授权。
+                [Warehouse.CancelPriceUpdateTasks] = [Warehouse.ManageProducts, Warehouse.Manage],
                 // 现有仓库员工与订货管理者无需重新授权即可拣货；单独授予 Picking 不会反向获得管理权限。
                 [Warehouse.Picking] = [Warehouse.Manage, Warehouse.ManageOrders],
                 // 管理下载权限天然包含查看下载，保证菜单可见性和列表 GET 授权一致。

@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <Compile Include="PermissionSurfaceCatalogTests.cs" />
+    <Compile Include="CancelPriceUpdateTasksPermissionTests.cs" />
     <Compile Include="ClientAbortCancellationTests.cs" />
     <Compile Include="CurrentUserManageableStoreScopeServiceTests.cs" />
     <Compile Include="ClientAbortSqlCancellationTests.cs" />

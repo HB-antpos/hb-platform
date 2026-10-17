@@ -66,7 +66,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 入参二选一：taskIds（至多 200 个）或 productCode（该商品所有未完成任务，storeCodes 可限定分店）。
         /// </summary>
         [HttpPost("cancel")]
-        [Authorize(Policy = Permissions.Warehouse.ManageProducts)]
+        [Authorize(Policy = Permissions.Warehouse.CancelPriceUpdateTasks)]
         public async Task<IActionResult> Cancel([FromBody] CancelStorePriceUpdateTasksRequestDto request)
         {
             var hasIds = request.TaskIds.Count > 0;

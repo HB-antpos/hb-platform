@@ -97,6 +97,12 @@ export const PERMISSIONS = {
     EditName: "StoreProducts.EditName",
     PriceUpdates: "StoreProducts.PriceUpdates",
   },
+  Warehouse: {
+    // 仓库商品管理：Web「价格变更任务」页撤销未完成任务的后端策略就是它，移动端撤销入口沿用同一权限。
+    ManageProducts: "Warehouse.ManageProducts",
+    // 撤销价格变更任务专用码；后端别名让持有 ManageProducts / Warehouse.Manage 的账号自动具备。
+    CancelPriceUpdateTasks: "Warehouse.CancelPriceUpdateTasks",
+  },
   Container: {
     View: "Container.View",
     Create: "Container.Create",

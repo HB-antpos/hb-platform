@@ -298,6 +298,7 @@ namespace BlazorApp.Shared.Constants
                 // Warehouse.Manage 是历史总权限：前端把它当作四项仓库管理权限的并集，后端预订/零售价变更/商品记录接口也直接放行。
                 new(Permissions.Warehouse.Manage, "管理仓库", "仓库管理", "仓库兼容总权限 - 等价于同时拥有仓库商品、订货、分类、标签四项管理权限，并放行预订、零售价变更、商品记录接口"),
                 new(Permissions.Warehouse.ManageProducts, "管理仓库商品", "仓库管理", "Web 页面 /warehouse/products、/warehouse/products/retail-price-changes、/warehouse/products/price-update-tasks、/warehouse/product-grade-management 与移动端「仓库」- 管理仓库商品、零售价变更、建议折扣、分店价格变更任务执行情况和等级"),
+                new(Permissions.Warehouse.CancelPriceUpdateTasks, "撤销价格变更任务", "仓库管理", "Web 页面 /warehouse/products/price-update-tasks 与移动端「价格和标签」- 撤销未完成的分店价格变更任务（按商品覆盖所有分店；只取消提醒，不修改任何价格，不可恢复）。持有「管理仓库商品」的账号自动具备"),
                 new(Permissions.Warehouse.ManageCategories, "管理仓库分类", "仓库管理", "Web 页面 /warehouse/categories - 管理仓库分类"),
                 new(Permissions.Warehouse.ManageLocations, "管理仓库标签", "仓库管理", "Web 页面 /warehouse/locations - 管理仓库标签"),
                 new(Permissions.Warehouse.ManageOrders, "管理仓库订货", "仓库管理", "Web 页面 /warehouse/store-orders、/warehouse/preorders、/warehouse/store-order-import-price-variance 与移动端「订货单」- 管理分店订货、预订、配货单和发票"),
