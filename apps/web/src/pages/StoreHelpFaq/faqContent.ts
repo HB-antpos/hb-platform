@@ -1051,13 +1051,20 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
           zh: [
             '按住多久打开快速跳转，可在同一处的 [d:Hold time|按住时长] 滑轨调节（1–3 秒，默认 2 秒）。',
             '隐藏后要重新打开：[tab:Me|我的] → [d:Preferences|偏好] → 打开 [t:Floating language button|语言悬浮按钮]。',
-            '这个设置保存在本机，退出登录不会重置。设置页找不到这个开关时，先把 App 更新到最新版本。',
+            '这个设置保存在本机，退出登录不会重置。',
+            '当前版本号显示在设置页底部（「版本 x.x.x」）。安卓低于 1.0.12 时，App 会提示安装新版本，按提示安装即可；iOS 的 App Store 版本要等 1.0.9 上架后，在 App Store 里更新。',
           ],
           en: [
             'Change how long to hold with the [d:Hold time|按住时长] slider in the same place (1–3 s, default 2 s).',
             'To show it again after hiding: [tab:Me|我的] → [d:Preferences|偏好] → turn on [t:Floating language button|语言悬浮按钮].',
-            'The setting is saved on the phone and survives sign-out. If you cannot find the switch, update the app first.',
+            'The setting is saved on the phone and survives sign-out.',
+            'Your version is shown at the bottom of Settings (“Version x.x.x”). Below 1.0.12 on Android, the app prompts you to install the new version — follow the prompt. On iOS, App Store users get it once version 1.0.9 is released there.',
           ],
+        },
+        // 依据线上 OTA 源核对：只有安卓 1.0.12 与 iOS 1.0.9 的源包含 floating-language 模块
+        rules: {
+          zh: ['安卓：App 1.0.12 及以上', 'iOS：App 1.0.9 及以上（目前在 TestFlight，App Store 待上架）'],
+          en: ['Android: app 1.0.12 or later', 'iOS: app 1.0.9 or later (TestFlight now; App Store pending)'],
         },
       },
       {
