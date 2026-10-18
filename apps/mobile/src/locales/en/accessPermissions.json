@@ -131,7 +131,7 @@
     },
     "Cash.Deposit.Create": {
       "name": "Record bank deposits",
-      "description": "In the app (Cash), record cash banked with a photo of the deposit slip, choose which daily closes go into the cash pool, and enter opening cash and cash count balances."
+      "description": "In the app (Cash), record cash banked with a photo of the deposit slip, choose which daily closes count towards cash on hand, and enter opening cash and cash count balances."
     },
     "Cash.Expense.Create": {
       "name": "Record cash expenses",
@@ -139,7 +139,7 @@
     },
     "Cash.Overview.View": {
       "name": "View cash",
-      "description": "View and export a store's cash pool balance, daily breakdown, deposits and cash expenses, in the app (Cash) and on the web admin. Store managers only see their own stores."
+      "description": "View and export a store's cash on hand, daily breakdown, deposits and cash expenses, in the app (Cash) and on the web admin. Store managers only see their own stores."
     },
     "Cash.Void": {
       "name": "Void cash records",
