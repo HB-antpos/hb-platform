@@ -1,13 +1,13 @@
 {
-  "title": "China Purchase",
+  "title": "China purchasing",
   "subTabs": {
-    "creation": "Item/Barcode Creation",
-    "products": "Domestic Product List"
+    "creation": "Create item nos.",
+    "products": "China products"
   },
   "summary": "Showing {{shown}} / {{total}} batches",
   "actions": {
     "create": "Create",
-    "detail": "Detail",
+    "detail": "Details",
     "copy": "Copy",
     "export": "Export",
     "loadMore": "Load more",
@@ -16,52 +16,52 @@
     "saveChanges": "Save changes"
   },
   "empty": {
-    "noAccessTitle": "No domestic purchase access",
-    "noAccessDescription": "The current account cannot create domestic purchase batches.",
+    "noAccessTitle": "No China purchasing access",
+    "noAccessDescription": "This account can't create China purchasing batches.",
     "noBatchTitle": "No batches",
-    "noBatchDescription": "Created item/barcode batches will appear here."
+    "noBatchDescription": "Item no. and barcode batches you create will appear here."
   },
   "create": {
-    "title": "Create item/barcode batch",
+    "title": "Create item no. & barcode batch",
     "selectSupplier": "Select supplier",
     "selectPrefix": "Select prefix",
     "noPrefix": "No prefix",
     "count": "Quantity",
-    "privateLabelPrice": "Uniform RRP",
+    "privateLabelPrice": "Retail price (all items)",
     "next": "Next",
     "done": "Done",
-    "privateLabelPriceHelp": "Optional. Leave blank when prices differ, then edit each item in the detail dialog."
+    "privateLabelPriceHelp": "Optional. If prices differ, leave it blank and edit each item in Details after creating."
   },
   "fields": {
     "productName": "Product name",
-    "normalCount": "Normal {{value}}",
+    "normalCount": "Standard {{value}}",
     "setCount": "Set {{value}}",
     "barcode": "Barcode {{value}}",
-    "privateLabelPriceLabel": "RRP",
-    "privateLabelPrice": "RRP {{value}}",
+    "privateLabelPriceLabel": "Retail price",
+    "privateLabelPrice": "Retail {{value}}",
     "parent": "Parent {{value}}",
     "emptyName": "--"
   },
   "types": {
-    "normal": "Normal",
+    "normal": "Standard",
     "set": "Set",
     "setSubItem": "Set item"
   },
   "messages": {
     "loadFailed": "Failed to load batches",
-    "loadDetailFailed": "Failed to load detail",
+    "loadDetailFailed": "Failed to load details",
     "loadSuppliersFailed": "Failed to load suppliers",
     "loadPrefixesFailed": "Failed to load prefixes",
     "selectSupplier": "Select a supplier first",
     "invalidCount": "Quantity must be between 1 and 100",
-    "invalidPrice": "Invalid RRP",
+    "invalidPrice": "Invalid retail price",
     "createSuccess": "Created",
-    "createFailed": "Create failed",
+    "createFailed": "Failed to create",
     "saveSuccess": "Saved",
     "saveFailed": "Save failed",
-    "copySuccess": "Copied",
+    "copySuccess": "Details copied",
     "copyFailed": "Copy failed",
-    "copyEmpty": "No detail available to copy",
+    "copyEmpty": "Nothing to copy",
     "exportSuccess": "Exported",
     "exportFailed": "Export failed"
   },
@@ -69,8 +69,8 @@
     "batchHeader": "Item Barcode RRP"
   },
   "productList": {
-    "title": "Domestic Product List",
-    "headerSubtitle": "View, edit, and copy domestic product information",
+    "title": "China products",
+    "headerSubtitle": "View, edit and copy China product details",
     "summary": "Page {{page}} / {{totalPages}}, {{total}} total",
     "fields": {
       "productCode": "Product code",
@@ -79,20 +79,20 @@
       "supplierName": "Supplier",
       "productName": "Product name",
       "englishProductName": "English name",
-      "itemNumber": "Item number",
-      "hbProductNo": "Item number",
+      "itemNumber": "Item no.",
+      "hbProductNo": "Item no.",
       "barcode": "Barcode",
       "productSpecification": "Specification",
       "productType": "Product type",
-      "domesticPrice": "Domestic price",
-      "oemPrice": "RRP",
+      "domesticPrice": "China price",
+      "oemPrice": "Retail price",
       "importPrice": "Import price",
-      "packingQuantity": "Packing quantity",
+      "packingQuantity": "Carton qty",
       "unitVolume": "Unit volume",
-      "middlePackQuantity": "Middle pack quantity",
+      "middlePackQuantity": "Inner qty",
       "image": "Image",
       "productImage": "Product image",
-      "isActive": "Active"
+      "isActive": "Status"
     },
     "actions": {
       "search": "Search",
@@ -101,33 +101,33 @@
       "copy": "Copy"
     },
     "empty": {
-      "title": "No domestic products",
-      "description": "Try another supplier or item number."
+      "title": "No China products",
+      "description": "Try another supplier or item no."
     },
     "status": {
       "active": "Active",
       "inactive": "Inactive"
     },
     "productTypes": {
-      "normal": "Normal",
+      "normal": "Standard",
       "set": "Set",
       "multi": "Multi-code"
     },
     "messages": {
-      "loadFailed": "Failed to load domestic products",
+      "loadFailed": "Failed to load China products",
       "saveSuccess": "Product updated",
       "saveFailed": "Failed to update product",
       "copySuccess": "Product details copied",
       "copyFailed": "Failed to copy product details",
       "invalidEdit": "Check the price, volume, and quantity values",
-      "empty": "No domestic products found"
+      "empty": "No China products found"
     },
     "filters": {
       "supplierCode": "Supplier code",
-      "productNo": "Product code / HB product no.",
+      "productNo": "Product code / HB item no.",
       "sortBy": "Sort by",
       "sortDirection": "Sort direction",
-      "supplierTitle": "Select domestic supplier",
+      "supplierTitle": "Select China supplier",
       "allSuppliers": "All suppliers",
       "clear": "Clear"
     },
@@ -138,8 +138,8 @@
       "next": "Next"
     },
     "edit": {
-      "title": "Edit domestic product",
-      "readonlyHint": "Item number, barcode, and supplier are generated or linked by the backend and are read-only here.",
+      "title": "Edit China product",
+      "readonlyHint": "Item no., barcode and supplier are set by the system and can't be edited here.",
       "save": "Save",
       "cancel": "Cancel",
       "active": "Active",
@@ -168,9 +168,9 @@
     "noOptions": "No matching options",
     "noTemplates": "No active set templates for this supplier",
     "supplierHint": "Choose the supplier for this batch.",
-    "prefixHint": "The prefix is optional and is used when generating item numbers.",
-    "productHint": "Names and retail prices may be blank. Each set needs at least one child with a name or price.",
-    "addNormal": "Add normal",
+    "prefixHint": "The prefix is optional and is used to generate item nos. for this batch.",
+    "productHint": "Names and retail prices can be left blank. Each set needs at least one set item with a name or price.",
+    "addNormal": "Add standard",
     "addSet": "Add set",
     "batchAdd": "Bulk add",
     "selectTemplate": "Set templates",
@@ -179,21 +179,21 @@
     "createCount": "Sets to create",
     "setQuantity": "Set quantity",
     "setPrice": "Set price",
-    "subItems": "Children ({{count}})",
-    "subItem": "Child {{index}}",
-    "addSubItem": "Add child",
+    "subItems": "Set items ({{count}})",
+    "subItem": "Set item {{index}}",
+    "addSubItem": "Add set item",
     "deleteProduct": "Delete product row {{row}}",
-    "deleteSubItem": "Delete child {{row}}",
-    "batchHint": "Add 1–100 rows at a time. A uniform retail price is optional. Fill in set children after adding.",
-    "append": "Append",
+    "deleteSubItem": "Delete set item {{row}}",
+    "batchHint": "Add 1–100 rows at a time. A retail price for all rows is optional. Fill in set items after adding.",
+    "append": "Add to list",
     "overwrite": "Replace all",
-    "overwriteWarning": "This replaces all {{count}} product rows and their children. Confirm to continue.",
+    "overwriteWarning": "This replaces all {{count}} product rows and their set items. Confirm to continue.",
     "confirmOverwrite": "Confirm replace",
     "add": "Add",
     "back": "Back",
-    "summary": "Normal {{normal}} · Sets {{sets}} · Children {{subItems}}",
-    "total": "{{count}} item numbers and barcodes",
-    "confirmHint": "Item numbers and barcodes are generated after creation. Check the supplier, set count and children.",
+    "summary": "Standard {{normal}} · Sets {{sets}} · Set items {{subItems}}",
+    "total": "{{count}} item nos. and barcodes will be created",
+    "confirmHint": "Item nos. and barcodes are generated once created. Check the supplier, number of sets and set items.",
     "setSummary": "Create {{count}} sets · Quantity {{quantity}} · Set price {{price}}",
     "unnamed": "Unnamed",
     "processing": "Processing, please wait…",
@@ -202,23 +202,23 @@
     "loadTemplatesFailed": "Failed to load set templates",
     "saveTemplateFailed": "Failed to save set template",
     "templateSaved": "Set template saved",
-    "templateHint": "Save the set name, child names and retail prices for this supplier. New item numbers and barcodes are generated on creation.",
+    "templateHint": "Saves the set name, set item names and retail prices for reuse with this supplier. New item nos. and barcodes are generated on creation.",
     "createdWithoutBatch": "Created successfully, but no batch number was returned. Check the batch list before creating again.",
     "errors": {
       "emptyProducts": "Add at least one product row.",
-      "invalidPrice": "Prices must be non-negative numbers. Check row {{row}} and its children.",
+      "invalidPrice": "Prices must be non-negative numbers. Check row {{row}} and its set items.",
       "invalidPriceGeneral": "Prices must be valid non-negative numbers.",
       "invalidSetCount": "The number of sets in row {{row}} must be a positive integer.",
       "invalidSetQuantity": "The set quantity in row {{row}} must be a positive integer.",
-      "missingSubItems": "Each set needs at least one valid child. Check row {{row}}.",
-      "missingSubItemsGeneral": "Each set needs at least one valid child.",
+      "missingSubItems": "Each set needs at least one valid set item. Check row {{row}}.",
+      "missingSubItemsGeneral": "Each set needs at least one valid set item.",
       "invalidBatchCount": "Bulk add count must be an integer from 1 to 100.",
-      "tooManyParentItems": "A batch can contain at most 100 normal products and expanded set parents. Reduce the quantity or split the batch.",
-      "tooManyExpandedItems": "A batch can contain at most 10,000 products and set children. Reduce the children or split the batch.",
+      "tooManyParentItems": "A batch can contain at most 100 standard products and expanded set parents. Reduce the quantity or split the batch.",
+      "tooManyExpandedItems": "A batch can contain at most 10,000 products and set items. Reduce the set items or split the batch.",
       "templateNameRequired": "Enter a template name.",
       "setNameRequired": "Enter the set product name.",
-      "subNameRequired": "Enter the name of child {{subRow}}.",
-      "subPriceRequired": "Enter the retail price of child {{subRow}}. Zero is allowed."
+      "subNameRequired": "Enter the name of set item {{subRow}}.",
+      "subPriceRequired": "Enter the retail price of set item {{subRow}}. 0 is allowed."
     }
   }
 }

@@ -8,6 +8,7 @@ import { AdminCheckBox } from "./admin-visuals";
 import { fillCopy, type PeopleRolesCopy } from "./people-roles-copy";
 import type { IdentityRoleUser, IdentityUser } from "./types";
 import { AdminEmpty, AdminError, SearchField } from "./ui";
+import { quoteName } from "@/shared/i18n/punctuation";
 
 type RoleCopy = typeof zhRoleCopy;
 
@@ -218,7 +219,7 @@ export function RoleAddMembersSheet({
                   <View style={styles.sheetText}>
                     <Text style={styles.sheetName} numberOfLines={1}>
                       {name.primary}
-                      {name.nickname ? <Text style={styles.sheetNickname}>{`  「${name.nickname}」`}</Text> : null}
+                      {name.nickname ? <Text style={styles.sheetNickname}>{`  ${quoteName(name.nickname)}`}</Text> : null}
                     </Text>
                     <Text style={styles.sheetMeta} numberOfLines={1}>{memberMeta(user)}</Text>
                   </View>

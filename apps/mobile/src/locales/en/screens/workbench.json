@@ -1,5 +1,5 @@
 {
-  "title": "Workbench",
+  "title": "Home",
   "subtitle": "Stores and authorised tools in one place",
   "greeting": "Hello, {{name}}",
   "session": {
@@ -27,7 +27,7 @@
     "productSales": "Product sales",
     "warehousePurchase": "Warehouse & purchasing",
     "operationsReports": "Operations & reports",
-    "peopleManagement": "People & management"
+    "peopleManagement": "Staff & admin"
   },
   "routes": {
     "productQuery": "Product lookup",
@@ -37,7 +37,7 @@
     "cart": "Cart",
     "orders": "HB Orders",
     "salesOrders": "Sales Records",
-    "installmentOrders": "Lay-by orders",
+    "installmentOrders": "Lay-bys",
     "storeVouchers": "Vouchers",
     "storeCash": "Cash",
     "seasonalCards": "Seasonal cards",
@@ -47,8 +47,8 @@
     "warehouseProductInsights": "Warehouse activity",
     "seasonalProductInsights": "Seasonal products",
     "containerNewProducts": "HB new arrivals",
-    "domesticPurchase": "Domestic purchasing",
-    "localSupplierInvoices": "Supplier invoices",
+    "domesticPurchase": "China purchasing",
+    "localSupplierInvoices": "Local supplier invoices",
     "advertisements": "Advertisements",
     "promotions": "Promotions",
     "reports": "Reports",
@@ -56,7 +56,7 @@
     "dailyCloses": "Daily closes",
     "attendancePersonal": "My attendance",
     "attendanceManagement": "Attendance management",
-    "users": "People",
+    "users": "Staff",
     "cashRegisterUsers": "Cashier barcodes",
     "employeeProfile": "My profile",
     "employeeProfileReview": "Profile reviews",
@@ -64,8 +64,8 @@
     "notifications": "Notifications",
     "deviceManagement": "Device management",
     "appInstall": "Install app",
-    "appDownloads": "Release Center",
-    "wpfVersions": "WPF Versions"
+    "appDownloads": "Release Centre",
+    "wpfVersions": "WPF versions"
   },
   "allFunctions": {
     "title": "All tools",
@@ -76,11 +76,11 @@
   },
   "states": {
     "loadingTitle": "Loading your access",
-    "loadingDescription": "Your workbench will show only the tools authorised for this account and device.",
+    "loadingDescription": "Home shows only the tools authorised for this account and device.",
     "emptyTitle": "No tools available",
-    "emptyDescription": "This session has no authorised business tools. The workbench stays empty to protect your data.",
-    "errorTitle": "Unable to load the function menu",
-    "errorDescription": "Only the safe empty workbench is shown. Retry to reload your access menu."
+    "emptyDescription": "This session has no authorised tools. Nothing is shown here to protect your data.",
+    "errorTitle": "Couldn't load your tools",
+    "errorDescription": "No tools are shown until your access loads. Tap Retry."
   },
   "actions": {
     "retry": "Retry"

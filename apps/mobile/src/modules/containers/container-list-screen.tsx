@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMonthDate } from "@/components/attendance/MonthDatePicker";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import {
@@ -37,8 +38,11 @@ import {
   CONTAINER_STATUS_OPTIONS,
   DATE_RANGE_FIELDS,
   DEFAULT_CONTAINER_SORT,
+  arrivalInsightText,
   containerStatusLabel,
   countSheetFilters,
+  dateRangeFieldLabel,
+  describeContainerError,
   describeDateRange,
   formatShortDate,
   getArrivalInsight,
@@ -134,12 +138,13 @@ function DateBlock({
   editable: boolean;
   onPress: () => void;
 }) {
+  const { t } = useAppTranslation("containerDetail");
   const shortDate = formatShortDate(value);
   const isWarning = insight?.tone === "warning";
   return (
     <Pressable
       accessibilityRole={editable ? "button" : undefined}
-      accessibilityLabel={editable ? `修改${label}，当前 ${shortDate || emptyText}` : undefined}
+      accessibilityLabel={editable ? t("list.card.editDateA11y", { label, value: shortDate || emptyText }) : undefined}
       disabled={!editable}
       onPress={onPress}
       style={({ pressed }) => [
@@ -158,7 +163,7 @@ function DateBlock({
           <Text style={[styles.dateValue, isWarning ? { color: HB_COLORS.warning } : null]}>{shortDate}</Text>
           {insight ? (
             <Text style={[styles.dateInsight, { color: INSIGHT_COLORS[insight.tone] }]} numberOfLines={1}>
-              {insight.text}
+              {arrivalInsightText(insight, t)}
             </Text>
           ) : null}
         </View>
@@ -196,6 +201,7 @@ function ContainerCard({
   onToggleSelected: () => void;
   onUpdateStatus: (status: number) => void;
 }) {
+  const { t } = useAppTranslation("containerDetail");
   const insight = getArrivalInsight(item, today);
   const tone = STATUS_TONES[item.状态 ?? -1] ?? STATUS_TONES[0];
   const loadingDate = formatShortDate(item.装柜日期);
@@ -205,26 +211,26 @@ function ContainerCard({
       <View style={styles.cardHeader}>
         <Pressable style={styles.cardTitleBlock} onPress={onOpenDetail} accessibilityRole="button">
           <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.货柜编号 || getContainerGuid(item) || "未命名货柜"}
+            {item.货柜编号 || getContainerGuid(item) || t("list.card.untitled")}
           </Text>
           <Text style={styles.cardSubtitle} numberOfLines={1}>
-            {`装柜 ${loadingDate || "--"}`}
-            {item.汇率 != null ? ` · 汇率 ${item.汇率.toFixed(4)}` : ""}
+            {t("list.card.loaded", { date: loadingDate || "--" })}
+            {item.汇率 != null ? ` · ${t("list.card.exchangeRate", { rate: item.汇率.toFixed(4) })}` : ""}
           </Text>
         </Pressable>
         <View style={[styles.statusPill, { backgroundColor: tone.background }]}>
-          <Text style={[styles.statusPillText, { color: tone.color }]}>{containerStatusLabel(item.状态)}</Text>
+          <Text style={[styles.statusPillText, { color: tone.color }]}>{containerStatusLabel(item.状态, t)}</Text>
         </View>
         {canEditContainer ? (
           <Menu
             visible={menuVisible}
             onDismiss={onCloseMenu}
-            anchor={<IconButton icon="dots-vertical" size={20} style={styles.menuButton} onPress={onOpenMenu} accessibilityLabel="更多操作" />}
+            anchor={<IconButton icon="dots-vertical" size={20} style={styles.menuButton} onPress={onOpenMenu} accessibilityLabel={t("list.card.moreActions")} />}
           >
             {CONTAINER_STATUS_OPTIONS.filter((status) => status.value !== item.状态).map((status) => (
               <Menu.Item
                 key={status.value}
-                title={`设为${status.label}`}
+                title={t(`list.card.setStatus.${status.value}`)}
                 onPress={() => {
                   onCloseMenu();
                   onUpdateStatus(status.value);
@@ -234,7 +240,7 @@ function ContainerCard({
             <Divider />
             <Menu.Item
               leadingIcon="send"
-              title="推送 HBSales"
+              title={t("list.pushHbSales")}
               onPress={() => {
                 onCloseMenu();
                 onPushHbSales();
@@ -246,17 +252,17 @@ function ContainerCard({
 
       <View style={styles.dateRow}>
         <DateBlock
-          label="预计到库"
+          label={t("list.card.estimated")}
           value={item.预计到岸日期}
-          emptyText="设置"
+          emptyText={t("list.card.setDate")}
           insight={insight?.target === "estimated" ? insight : null}
           editable={canEditContainer}
           onPress={() => onEditDate("estimated")}
         />
         <DateBlock
-          label="实际到库"
+          label={t("list.card.actual")}
           value={item.实际到货日期}
-          emptyText="登记"
+          emptyText={t("list.card.recordDate")}
           insight={insight?.target === "actual" ? insight : null}
           editable={canEditContainer}
           onPress={() => onEditDate("actual")}
@@ -265,9 +271,9 @@ function ContainerCard({
 
       <View style={styles.metricRow}>
         <Text style={styles.metricText} numberOfLines={1}>
-          <Text style={styles.metricLabel}>件 </Text>{formatInteger(item.合计件数)}
-          <Text style={styles.metricLabel}>  数量 </Text>{formatInteger(item.合计数量)}
-          <Text style={styles.metricLabel}>  体积 </Text>{formatVolume(item.总体积)}
+          <Text style={styles.metricLabel}>{`${t("list.card.pieces")} `}</Text>{formatInteger(item.合计件数)}
+          <Text style={styles.metricLabel}>{`  ${t("list.card.quantity")} `}</Text>{formatInteger(item.合计数量)}
+          <Text style={styles.metricLabel}>{`  ${t("list.card.volume")} `}</Text>{formatVolume(item.总体积)}
         </Text>
         <Text style={styles.amount}>{formatMoney(item.合计金额)}</Text>
       </View>
@@ -277,11 +283,11 @@ function ContainerCard({
         {canEditContainer ? (
           <Pressable style={styles.selectToggle} onPress={onToggleSelected} accessibilityRole="checkbox" accessibilityState={{ checked: selected }}>
             <Checkbox.Android status={selected ? "checked" : "unchecked"} onPress={onToggleSelected} />
-            <Text style={styles.selectText}>选择</Text>
+            <Text style={styles.selectText}>{t("list.card.select")}</Text>
           </Pressable>
         ) : <View />}
         <Button compact icon="chevron-right" contentStyle={styles.detailButtonContent} onPress={onOpenDetail}>
-          明细
+          {t("list.card.details")}
         </Button>
       </View>
     </Surface>
@@ -289,6 +295,7 @@ function ContainerCard({
 }
 
 export function ContainerListScreen() {
+  const { t, language } = useAppTranslation("containerDetail");
   const router = useRouter();
   const queryClient = useQueryClient();
   const access = useAuthStore((state) => state.access);
@@ -320,7 +327,8 @@ export function ContainerListScreen() {
   const canCreateContainer = access.canCreateContainer;
   const canEditContainer = access.canEditContainer;
   const activeStatus = appliedFilters.statuses?.length === 1 ? appliedFilters.statuses[0] : undefined;
-  const sortLabel = CONTAINER_SORT_OPTIONS.find((option) => option.value === appliedFilters.dateType)?.label ?? "预计到库";
+  const sortOption = CONTAINER_SORT_OPTIONS.find((option) => option.value === appliedFilters.dateType) ?? CONTAINER_SORT_OPTIONS[0];
+  const errorMessageOf = (error: unknown, fallback: string) => describeContainerError(error, fallback, language, t);
 
   const handleBack = useCallback(() => {
     // 深链直达时可能没有历史栈，此时回到货柜管理入口所在的工作台（仅有 Container.View 的账号进不了商品和货位管理）。
@@ -345,10 +353,10 @@ export function ContainerListScreen() {
     mutationFn: async () => {
       const payload = buildCreatePayload(createForm);
       if (!payload.货柜编号) {
-        throw new Error("货柜编号不能为空");
+        throw new Error(t("list.messages.containerNumberRequired"));
       }
       if (Number.isNaN(payload.汇率) || Number.isNaN(payload.运费)) {
-        throw new Error("汇率或运费不是有效数字");
+        throw new Error(t("list.messages.invalidNumbers"));
       }
       return createContainer(payload);
     },
@@ -356,12 +364,12 @@ export function ContainerListScreen() {
       setCreateVisible(false);
       setCreateForm(EMPTY_CREATE_FORM);
       void invalidateList();
-      setSnackbar("货柜已创建");
+      setSnackbar(t("list.messages.created"));
       if (containerGuid) {
         router.push(`/containers/${encodeURIComponent(containerGuid)}`);
       }
     },
-    onError: (error) => setSnackbar(error instanceof Error ? error.message : "创建货柜失败"),
+    onError: (error) => setSnackbar(errorMessageOf(error, t("list.messages.createFailed"))),
   });
 
   const statusMutation = useMutation({
@@ -369,9 +377,9 @@ export function ContainerListScreen() {
       updateContainer(containerGuid, { 状态: status }),
     onSuccess: () => {
       void invalidateList();
-      setSnackbar("状态已更新");
+      setSnackbar(t("list.messages.statusUpdated"));
     },
-    onError: (error) => setSnackbar(error instanceof Error ? error.message : "状态更新失败"),
+    onError: (error) => setSnackbar(errorMessageOf(error, t("list.messages.statusFailed"))),
   });
 
   const arrivalDateMutation = useMutation({
@@ -381,9 +389,9 @@ export function ContainerListScreen() {
       // 先关弹层再提示：Snackbar 会被原生 Modal 盖住。
       setDateEditing(null);
       void invalidateList();
-      setSnackbar("到库日期已更新");
+      setSnackbar(t("list.messages.arrivalUpdated"));
     },
-    onError: (error) => setDateError(error instanceof Error ? error.message : "到库日期更新失败"),
+    onError: (error) => setDateError(errorMessageOf(error, t("list.messages.arrivalFailed"))),
   });
 
   // 「同步 HQ」（HQ 货柜 → HBweb）已于 2026-09-29 随全部 HQ → HBweb 同步入口停用（PR #384，后端返回 410）；
@@ -392,9 +400,11 @@ export function ContainerListScreen() {
     mutationFn: (containerGuids: string[]) => pushContainersToHbSales(containerGuids),
     onSuccess: (result) => {
       setSelectedContainerGuids([]);
-      setSnackbar(result.message ?? result.Message ?? "已推送 HBSales");
+      // 后端成功提示多为中文：中文界面照旧优先显示后端原文，英文界面用本地文案。
+      const serverMessage = result.message ?? result.Message;
+      setSnackbar(language.startsWith("zh") ? (serverMessage ?? t("list.messages.pushed")) : t("list.messages.pushed"));
     },
-    onError: (error) => setSnackbar(error instanceof Error ? error.message : "推送 HBSales 失败"),
+    onError: (error) => setSnackbar(errorMessageOf(error, t("list.messages.pushFailed"))),
   });
 
   const submitSearch = () => {
@@ -418,7 +428,7 @@ export function ContainerListScreen() {
     // 批量推送必须只处理用户勾选的货柜，避免误把当前页全部发往 HBSales。
     const guids = selectedContainerGuids.filter(Boolean);
     if (!guids.length) {
-      setSnackbar("请选择要推送的货柜");
+      setSnackbar(t("list.messages.selectToPush"));
       return;
     }
     pushMutation.mutate(guids);
@@ -432,12 +442,12 @@ export function ContainerListScreen() {
   // 页面上可直接看到并逐个移除的已生效条件（弹层里的货号和日期区间）。
   const activeFilterChips = [
     ...(appliedFilters.itemNumberFilter
-      ? [{ key: "item", label: `货号 ${appliedFilters.itemNumberFilter}`, clear: { itemNumberFilter: undefined } }]
+      ? [{ key: "item", label: t("list.itemChip", { value: appliedFilters.itemNumberFilter }), clear: { itemNumberFilter: undefined } }]
       : []),
     ...DATE_RANGE_FIELDS.flatMap((range) => {
-      const text = describeDateRange(appliedFilters[range.start], appliedFilters[range.end]);
+      const text = describeDateRange(t, appliedFilters[range.start], appliedFilters[range.end]);
       return text
-        ? [{ key: range.key, label: `${range.label} ${text}`, clear: { [range.start]: undefined, [range.end]: undefined } }]
+        ? [{ key: range.key, label: t("list.rangeChip", { label: dateRangeFieldLabel(range.key, t), range: text }), clear: { [range.start]: undefined, [range.end]: undefined } }]
         : [];
     }),
   ];
@@ -445,7 +455,7 @@ export function ContainerListScreen() {
   if (!access.canViewContainers) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <EmptyState title="无权访问货柜" description="请联系管理员开通货柜查看权限" />
+        <EmptyState title={t("access.deniedTitle")} description={t("access.deniedDescription")} />
       </SafeAreaView>
     );
   }
@@ -453,10 +463,10 @@ export function ContainerListScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.topBar}>
-        <IconButton icon="arrow-left" onPress={handleBack} accessibilityLabel="返回" style={styles.topBarIcon} />
-        <Text style={styles.topBarTitle}>货柜管理</Text>
+        <IconButton icon="arrow-left" onPress={handleBack} accessibilityLabel={t("actions.back")} style={styles.topBarIcon} />
+        <Text style={styles.topBarTitle}>{t("list.title")}</Text>
         <View>
-          <IconButton icon="tune-variant" onPress={() => setFilterVisible(true)} accessibilityLabel="筛选" style={styles.topBarIcon} />
+          <IconButton icon="tune-variant" onPress={() => setFilterVisible(true)} accessibilityLabel={t("list.filter")} style={styles.topBarIcon} />
           {sheetFilterCount ? <Badge size={16} style={styles.filterBadge}>{sheetFilterCount}</Badge> : null}
         </View>
         {canCreateContainer ? (
@@ -464,7 +474,7 @@ export function ContainerListScreen() {
             icon="plus"
             iconColor={HB_COLORS.action}
             onPress={() => setCreateVisible(true)}
-            accessibilityLabel="新建货柜"
+            accessibilityLabel={t("list.create")}
             style={styles.topBarIcon}
           />
         ) : null}
@@ -478,7 +488,7 @@ export function ContainerListScreen() {
         <TextInput
           mode="outlined"
           dense
-          placeholder="搜索货柜编号"
+          placeholder={t("list.searchPlaceholder")}
           value={searchText}
           onChangeText={setSearchText}
           onSubmitEditing={submitSearch}
@@ -489,7 +499,7 @@ export function ContainerListScreen() {
           right={searchText ? (
             <TextInput.Icon
               icon="close-circle"
-              accessibilityLabel="清除搜索"
+              accessibilityLabel={t("list.clearSearch")}
               onPress={() => {
                 setSearchText("");
                 applyFilters({ ...appliedFilters, containerNumberFilter: undefined });
@@ -501,7 +511,7 @@ export function ContainerListScreen() {
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusRow}>
           <Chip compact selected={activeStatus == null} showSelectedCheck={false} onPress={() => selectStatus(undefined)} style={activeStatus == null ? styles.statusChipOn : styles.statusChip} textStyle={activeStatus == null ? styles.statusChipTextOn : styles.statusChipText}>
-            全部
+            {t("list.allStatuses")}
           </Chip>
           {CONTAINER_STATUS_OPTIONS.map((status) => {
             const selected = activeStatus === status.value;
@@ -515,7 +525,7 @@ export function ContainerListScreen() {
                 style={selected ? styles.statusChipOn : styles.statusChip}
                 textStyle={selected ? styles.statusChipTextOn : styles.statusChipText}
               >
-                {status.label}
+                {containerStatusLabel(status.value, t)}
               </Chip>
             );
           })}
@@ -542,17 +552,17 @@ export function ContainerListScreen() {
 
         <View style={styles.summaryRow}>
           <Text style={styles.summaryText} numberOfLines={1}>
-            共 {listQuery.data?.totalCount ?? 0} 柜 · 按{sortLabel}从新到旧
+            {t("list.total", { count: listQuery.data?.totalCount ?? 0, sort: t(sortOption.summaryKey) })}
           </Text>
           <Text style={styles.summaryText} numberOfLines={1}>
-            本页 {formatInteger(summary.pieces)} 件 · {formatMoney(summary.amount)}
+            {t("list.pageSummary", { pieces: formatInteger(summary.pieces), amount: formatMoney(summary.amount) })}
           </Text>
         </View>
 
         {listQuery.isLoading ? (
           <ActivityIndicator style={styles.loading} />
         ) : listQuery.isError ? (
-          <EmptyState title="货柜加载失败" description="下拉刷新重试" />
+          <EmptyState title={t("list.loadFailed")} description={t("list.loadFailedHint")} />
         ) : containers.length ? (
           containers.map((item) => {
             const containerGuid = getContainerGuid(item);
@@ -575,17 +585,17 @@ export function ContainerListScreen() {
             );
           })
         ) : (
-          <EmptyState title="没有货柜" description="调整筛选条件后再试" />
+          <EmptyState title={t("list.empty")} description={t("list.emptyHint")} />
         )}
 
         {totalPages > 1 ? (
           <View style={styles.pagination}>
             <Button mode="outlined" disabled={page <= 1} onPress={() => setPage((value) => Math.max(1, value - 1))}>
-              上一页
+              {t("list.prevPage")}
             </Button>
             <Text style={styles.pageText}>{page} / {totalPages}</Text>
             <Button mode="outlined" disabled={page >= totalPages} onPress={() => setPage((value) => value + 1)}>
-              下一页
+              {t("list.nextPage")}
             </Button>
           </View>
         ) : null}
@@ -593,8 +603,8 @@ export function ContainerListScreen() {
 
       {canEditContainer && selectedContainerGuids.length ? (
         <SafeAreaView edges={["bottom"]} style={styles.bulkBar}>
-          <Text style={styles.bulkText}>已选 {selectedContainerGuids.length} 柜</Text>
-          <Button onPress={() => setSelectedContainerGuids([])}>取消</Button>
+          <Text style={styles.bulkText}>{t("list.selected", { count: selectedContainerGuids.length })}</Text>
+          <Button onPress={() => setSelectedContainerGuids([])}>{t("actions.cancel")}</Button>
           <Button
             icon="send"
             mode="contained"
@@ -602,7 +612,7 @@ export function ContainerListScreen() {
             disabled={pushMutation.isPending}
             onPress={pushSelectedContainers}
           >
-            推送 HBSales
+            {t("list.pushHbSales")}
           </Button>
         </SafeAreaView>
       ) : null}
@@ -633,23 +643,23 @@ export function ContainerListScreen() {
 
       <Portal>
         <Modal visible={createVisible} onDismiss={() => setCreateVisible(false)} contentContainerStyle={styles.modal}>
-          <Text variant="titleMedium">创建货柜</Text>
+          <Text variant="titleMedium">{t("list.createForm.title")}</Text>
           <TextInput
             mode="outlined"
-            label="货柜编号"
+            label={t("list.createForm.containerNumber")}
             value={createForm.containerNumber}
             onChangeText={(value) => setCreateForm((current) => ({ ...current, containerNumber: value }))}
           />
           <TextInput
             mode="outlined"
-            label="装柜日期"
+            label={t("list.createForm.loadingDate")}
             placeholder="YYYY-MM-DD"
             value={createForm.loadingDate}
             onChangeText={(value) => setCreateForm((current) => ({ ...current, loadingDate: value }))}
           />
           <TextInput
             mode="outlined"
-            label="预计到库日期"
+            label={t("list.createForm.estimatedArrivalDate")}
             placeholder="YYYY-MM-DD"
             value={createForm.estimatedArrivalDate}
             onChangeText={(value) => setCreateForm((current) => ({ ...current, estimatedArrivalDate: value }))}
@@ -657,7 +667,7 @@ export function ContainerListScreen() {
           <View style={styles.inputRow}>
             <TextInput
               mode="outlined"
-              label="汇率"
+              label={t("list.createForm.exchangeRate")}
               keyboardType="decimal-pad"
               value={createForm.exchangeRate}
               onChangeText={(value) => setCreateForm((current) => ({ ...current, exchangeRate: value }))}
@@ -665,7 +675,7 @@ export function ContainerListScreen() {
             />
             <TextInput
               mode="outlined"
-              label="运费"
+              label={t("list.createForm.shippingFee")}
               keyboardType="decimal-pad"
               value={createForm.shippingFee}
               onChangeText={(value) => setCreateForm((current) => ({ ...current, shippingFee: value }))}
@@ -674,14 +684,14 @@ export function ContainerListScreen() {
           </View>
           <TextInput
             mode="outlined"
-            label="备注"
+            label={t("list.createForm.remark")}
             value={createForm.remark}
             onChangeText={(value) => setCreateForm((current) => ({ ...current, remark: value }))}
           />
           <View style={styles.modalActions}>
-            <Button onPress={() => setCreateVisible(false)}>取消</Button>
+            <Button onPress={() => setCreateVisible(false)}>{t("actions.cancel")}</Button>
             <Button mode="contained" loading={createMutation.isPending} onPress={() => createMutation.mutate()}>
-              保存
+              {t("actions.save")}
             </Button>
           </View>
         </Modal>

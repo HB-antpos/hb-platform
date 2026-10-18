@@ -77,6 +77,7 @@ import type {
   WpfReleaseQuery,
   WpfStoreOption,
 } from "./types";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 const PAGE_SIZE = 10;
 const DEVICE_PAGE_SIZE = 30;
@@ -816,7 +817,7 @@ export function WpfReleaseView({
                 <Text style={styles.noticeText}>
                   {t("partialRollout", {
                     scope: scopedLabels.length
-                      ? scopedLabels.join("、")
+                      ? scopedLabels.join(listSeparator())
                       : scopeText(summary),
                     target: summary.targetVersion,
                   })}
@@ -1042,9 +1043,9 @@ export function WpfReleaseView({
     .slice(0, QUICK_VERSION_LIMIT);
   const scopeConfirmLine =
     policy.targetScope === "stores"
-      ? policy.targetStoreGuids.map(storeLabel).join("、")
+      ? policy.targetStoreGuids.map(storeLabel).join(listSeparator())
       : policy.targetScope === "devices"
-        ? selectedDeviceLabels.join("、")
+        ? selectedDeviceLabels.join(listSeparator())
         : "";
 
   const policyEditor = (

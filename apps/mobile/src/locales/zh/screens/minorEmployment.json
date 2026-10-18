@@ -253,8 +253,8 @@
       "school": "学校",
       "schoolContact": "学校联系人",
       "weeklySchedule": "每周上学安排",
-      "day": "星期 {{day}}",
-      "dayAttend": "星期 {{day}}（上学）",
+      "day": "{{day}}",
+      "dayAttend": "{{day}}（上学）",
       "timetable": "课表",
       "termsHeading": "学期、学校假期和无课日",
       "term": "学期：{{range}}",
@@ -307,5 +307,14 @@
       "confirm": "确认退回",
       "validation": "请选择字段并填写退回意见"
     }
+  },
+  "weekdays": {
+    "Sunday": "周日",
+    "Monday": "周一",
+    "Tuesday": "周二",
+    "Wednesday": "周三",
+    "Thursday": "周四",
+    "Friday": "周五",
+    "Saturday": "周六"
   }
 }

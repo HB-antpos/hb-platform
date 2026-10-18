@@ -27,6 +27,7 @@ import type {
   CopyUserDirectPermissionsInput,
   UserDirectPermissionCopyResult,
 } from "./access-management-types";
+import { clauseSeparator, listSeparator, quoteName } from "@/shared/i18n/punctuation";
 
 interface PermissionCopySheetProps {
   /** 打开时默认的方向；弹层里可以切换。 */
@@ -241,7 +242,7 @@ export function PermissionCopySheet({
               key={user.userGUID}
               accessibilityRole={isToOthers ? "checkbox" : "radio"}
               accessibilityState={{ checked: selected }}
-              accessibilityLabel={[person.primary, person.nickname, `@${user.username}`].filter(Boolean).join("，")}
+              accessibilityLabel={[person.primary, person.nickname, `@${user.username}`].filter(Boolean).join(clauseSeparator(language))}
               onPress={() => toggleUser(user.userGUID)}
               style={({ pressed }) => [
                 styles.row,
@@ -257,7 +258,7 @@ export function PermissionCopySheet({
                     {person.primary}
                   </Text>
                   {person.nickname ? (
-                    <Text style={styles.rowNickname} numberOfLines={1}>{`「${person.nickname}」`}</Text>
+                    <Text style={styles.rowNickname} numberOfLines={1}>{quoteName(person.nickname, language)}</Text>
                   ) : null}
                 </View>
                 <Text style={styles.rowMeta} numberOfLines={1}>
@@ -309,7 +310,7 @@ export function PermissionCopySheet({
                 row.added.length ? `+${row.added.length}` : null,
                 row.removed.length ? `−${row.removed.length}` : null,
                 row.noChange ? t("copy.confirm.noChange") : null,
-              ].filter(Boolean).join("，")}
+              ].filter(Boolean).join(clauseSeparator(language))}
             >
               <PersonAvatar
                 initials={resolvePersonName({ fullName: row.name }).initials}
@@ -322,12 +323,12 @@ export function PermissionCopySheet({
                 </Text>
                 {row.added.length > 0 ? (
                   <Text style={styles.changeLine} numberOfLines={2}>
-                    {`+ ${row.added.join("、")}`}
+                    {`+ ${row.added.join(listSeparator(language))}`}
                   </Text>
                 ) : null}
                 {row.removed.length > 0 ? (
                   <Text style={[styles.changeLine, styles.removedLine]} numberOfLines={2}>
-                    {`− ${row.removed.join("、")}`}
+                    {`− ${row.removed.join(listSeparator(language))}`}
                   </Text>
                 ) : null}
                 {row.noChange ? (
@@ -351,7 +352,7 @@ export function PermissionCopySheet({
           <NoticeBox tone="amber" icon="alert-outline">
             {t("copy.confirm.skipped", {
               count: skippedNames.length,
-              names: skippedNames.map((name) => `「${name}」`).join("、"),
+              names: skippedNames.map((name) => quoteName(name, language)).join(listSeparator(language)),
             })}
           </NoticeBox>
         ) : null}

@@ -1,6 +1,6 @@
 {
   "title": "My profile",
-  "subtitle": "Review and maintain your personal details.",
+  "subtitle": "View and update your details.",
   "readonly": {
     "username": "Username",
     "displayName": "Display name",
@@ -12,16 +12,16 @@
     "email": "Email",
     "bankBsb": "BSB",
     "bankAccountNumber": "Bank account number",
-    "superannuationCompanyName": "Super company",
-    "superannuationCompanyCode": "Super company code",
-    "superannuationAccountNumber": "Super account number",
+    "superannuationCompanyName": "Super fund",
+    "superannuationCompanyCode": "Super fund code",
+    "superannuationAccountNumber": "Super member number",
     "birthday": "Birthday",
     "gender": "Gender",
-    "employmentType": "Position type",
+    "employmentType": "Employment type",
     "avatarUrl": "Avatar",
-    "identityId": "Identity ID",
-    "identityType": "Identity type",
-    "identityPhotoUrl": "Identity photo",
+    "identityId": "ID number",
+    "identityType": "ID type",
+    "identityPhotoUrl": "ID photo",
     "address": "Address"
   },
   "placeholders": {
@@ -34,7 +34,7 @@
     "banking": "Banking",
     "superannuation": "Superannuation",
     "personal": "Personal details",
-    "identity": "Identity",
+    "identity": "ID",
     "images": "Images",
     "sensitiveStatus": "Sensitive details review"
   },
@@ -89,8 +89,8 @@
     "saveSuccess": "Your profile has been saved.",
     "saveFailed": "Failed to save your profile.",
     "invalidEmail": "Enter a valid email address.",
-    "positionTypeReadonly": "You do not have permission to change the position type.",
-    "loginRequired": "Please sign in before opening your profile.",
+    "positionTypeReadonly": "You don't have permission to change the employment type.",
+    "loginRequired": "Log in to view your profile.",
     "uploadSuccess": "Image uploaded and saved.",
     "uploadFailed": "Failed to upload image.",
     "uploadNotAvailable": "This server does not support employee profile image uploads yet.",
@@ -99,13 +99,13 @@
     "processingImage": "Processing and saving image...",
     "cameraCaptureFailed": "The camera could not capture this photo. Try again or choose one from your library.",
     "libraryPermissionBlocked": "Photo library access is blocked. Open system settings to allow it.",
-    "permissionRequired": "Camera permission is required to take a photo.",
+    "permissionRequired": "Camera access is required to take a photo.",
     "cameraReady": "Take a clear photo and upload it.",
     "sensitiveLoadFailed": "Failed to load the sensitive details review status.",
     "sensitiveSubmitSuccess": "Sensitive details submitted for review.",
     "sensitiveSubmitFailed": "Failed to submit sensitive details for review.",
-    "identitySubmitSuccess": "Identity photo submitted for review. The confirmed photo changes only after approval.",
-    "identityRemoveSubmitSuccess": "Identity photo removal submitted for review. The confirmed photo remains until approval.",
+    "identitySubmitSuccess": "ID photo submitted for review. Your current photo stays until it's approved.",
+    "identityRemoveSubmitSuccess": "ID photo removal submitted for review. Your current photo stays until it's approved.",
     "identityStatusRefreshFailed": "Submitted, but the review status could not be refreshed. Refresh manually to see the latest status.",
     "versionConflict": "Confirmed details have changed. Refresh and complete the form again."
   },
@@ -124,11 +124,11 @@
     "changedFields": "Changed fields",
     "fieldSeparator": ", ",
     "rejectionReason": "Rejection reason: {{reason}}",
-    "pendingPhotoRemoval": "The pending request removes the identity photo."
+    "pendingPhotoRemoval": "The pending request removes the ID photo."
   },
   "preview": {
     "avatar": "Avatar preview",
-    "identityPhoto": "Identity photo preview",
+    "identityPhoto": "ID photo preview",
     "empty": "No image uploaded yet."
   },
   "camera": {
@@ -152,9 +152,9 @@
     "refreshFailed": "Failed to refresh personal code.",
     "print": "Print label",
     "retryConfirmation": "Retry confirmation",
-    "resolvePrintStatus": "Resolve print status",
+    "resolvePrintStatus": "Confirm print result",
     "confirmationPendingTitle": "Label printed",
-    "confirmationPending": "The label was printed, but confirmation could not be saved. Tap retry confirmation. Do not print another label.",
+    "confirmationPending": "The label was printed, but the confirmation wasn't saved. Tap Retry confirmation. Don't print another label.",
     "uncertainTitle": "Was the label printed?",
     "uncertainDescription": "The app closed or lost connection during printing. Check the printer before choosing. We will not print or count it automatically.",
     "printedConfirmOnly": "Printed — confirm count only",
@@ -182,18 +182,18 @@
     "withAge": "{{date}} · {{age}} years old",
     "confirmed": "Confirmed: {{date}}",
     "changed": "Changed",
-    "requiresReview": "Birthday is sensitive information and changes need review",
+    "requiresReview": "Birthday is a sensitive detail, so changes need approval",
     "goToReview": "Submit change",
     "errors": {
       "format": "Enter a valid date as YYYY-MM-DD",
-      "future": "Birthday cannot be later than today",
-      "tooOld": "Please check the birth year"
+      "future": "Birthday can't be in the future",
+      "tooOld": "Check the birth year"
     }
   },
   "minorEmployment": {
     "title": "Minor employment compliance",
-    "description": "Maintain school days, holidays, parent signature and commute reminders.",
-    "open": "Open minor employment form"
+    "description": "Keep school days, holidays, parent signature and commute details up to date.",
+    "open": "Fill in minor employment details"
   },
   "completeness": {
     "title": "Profile completeness",
@@ -204,7 +204,7 @@
   "security": {
     "title": "Account & security",
     "changePassword": "Change password",
-    "changePasswordHelper": "Update your sign-in password regularly",
+    "changePasswordHelper": "Change your login password regularly",
     "personalCodeHelper": "View, refresh or print your personal code in Settings"
   },
   "birthdayPicker": {
@@ -237,7 +237,7 @@
       "approved": "Approved and in effect",
       "rejected": "Rejected",
       "withdrawn": "Withdrawn",
-      "superseded": "Invalidated"
+      "superseded": "Replaced"
     },
     "changedTitle": "Changes in this request",
     "noChangedFields": "This request has no field changes.",
@@ -245,7 +245,7 @@
     "withdrawTitle": "Withdraw this request?",
     "withdrawDescription": "Your store manager will no longer be able to review it, and your confirmed details stay unchanged. You can submit again at any time.",
     "withdrawSuccess": "Request withdrawn.",
-    "withdrawFailed": "Could not withdraw the request. Please try again.",
+    "withdrawFailed": "Couldn't withdraw the request. Try again.",
     "withdrawConflict": "The request has already been handled. Showing the latest status.",
     "editPending": "Edit request",
     "resubmit": "Edit and resubmit",
@@ -258,13 +258,13 @@
     "title": "Link email",
     "bindEntry": "Link email",
     "changeEntry": "Change email",
-    "bindEntryHelper": "Not set · link one to reset your password from the sign-in screen",
+    "bindEntryHelper": "Not set · link one to reset your password from the login screen",
     "notSet": "Not set",
-    "basicHint": "Your email is used to reset your password. Change it in \"Account & security → Link email\" after verifying it.",
+    "basicHint": "Your email is used to reset your password. To change it, go to Account & security → Link email and verify the new address.",
     "stepEmail": "New email",
     "stepVerify": "Verify",
     "stepLabel": "Step {{step}} of 2",
-    "loginName": "Sign-in name",
+    "loginName": "Username",
     "currentEmail": "Current email",
     "newEmail": "New email",
     "changeEmail": "Edit email",

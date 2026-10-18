@@ -2,28 +2,28 @@
   "title": "Cart",
   "summary": {
     "quantity": "Quantity",
-    "sku": "Cart product types",
+    "sku": "SKUs",
     "orderTotal": "Order total",
     "money": "${{amount}}"
   },
   "filters": {
     "title": "Filters",
     "currentStore": "Store: {{store}}",
-    "searchPlaceholder": "Search this page: name / item / barcode",
+    "searchPlaceholder": "Search this page: name / item no. / barcode",
     "clearSearch": "Clear search",
     "applySearch": "Apply search",
     "items": "Items: {{count}}",
     "totalQuantity": "Quantity: {{count}}",
     "salesAmount": "Sales total: ${{amount}}",
-    "importAmount": "Import total: ${{amount}}",
+    "importAmount": "Cost total: ${{amount}}",
     "volume": "Volume total: {{value}}",
     "pageSize": "Items per page",
     "storeHint": "Store switching is handled on the product page.",
-    "goHome": "Go to products"
+    "goHome": "Switch store on Products"
   },
   "empty": {
     "cartEmptyTitle": "Cart is empty",
-    "cartEmptyDescription": "You can scan products into the cart from this page.",
+    "cartEmptyDescription": "Scan products on this page to add them to the cart.",
     "selectStoreTitle": "Select a store first",
     "selectStoreDescription": "Choose a store on the product page first.",
     "goHome": "Go to products"
@@ -38,7 +38,7 @@
   },
   "remarks": {
     "label": "Order remarks (optional)",
-    "placeholder": "Optional remarks for warehouse",
+    "placeholder": "Optional notes for the warehouse",
     "counter": "{{count}} / {{max}}"
   },
   "quantityEditor": {
@@ -72,21 +72,21 @@
     "grade": "Grade {{grade}}",
     "unitPrice": "${{amount}} / unit",
     "subtotal": "Subtotal ${{amount}}",
-    "import": "Import ${{amount}}",
+    "import": "Cost ${{amount}}",
     "inCart": "In cart"
   },
   "checkout": {
-    "totalItems": "Total Items",
+    "totalItems": "Total items",
     "subtotal": "Subtotal",
-    "totalAmount": "Total Order Amount",
-    "submit": "Submit Order",
-    "clear": "Clear Cart",
+    "totalAmount": "Order total",
+    "submit": "Submit order",
+    "clear": "Clear cart",
     "summaryLine": "Order total · {{sku}} SKUs · {{quantity}} pcs",
     "syncing": "Syncing quantities…",
-    "preorderBlocked": "Finish the preorder before submitting a normal order",
+    "preorderBlocked": "Complete the preorder before submitting a regular order",
     "preorderFirst": "Finish preorder",
     "submitting": "Submitting",
-    "pausedLines": "Some items have paused supply. Remove them before submitting."
+    "pausedLines": "Supply is paused for some items. Remove them before submitting."
   },
   "actions": {
     "submit": "Submit",
@@ -105,7 +105,7 @@
   },
   "submitSheet": {
     "store": "Ordering store",
-    "totalLabel": "Order total (import price)",
+    "totalLabel": "Order total (cost price)",
     "sku": "SKUs",
     "quantity": "Pieces",
     "salesAmount": "Sales total",

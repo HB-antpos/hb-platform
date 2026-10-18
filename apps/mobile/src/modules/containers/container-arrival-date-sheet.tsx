@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { Button, HelperText, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { formatMonthDate, MonthDatePicker } from "@/components/attendance/MonthDatePicker";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import {
   buildArrivalDatePatch,
@@ -14,9 +15,10 @@ import type { ContainerMain, UpdateContainerRequest } from "./types";
 
 export type ArrivalDateField = keyof ArrivalDateDraft;
 
-const FIELD_LABELS: Record<ArrivalDateField, string> = {
-  estimated: "预计到库",
-  actual: "实际到库",
+// 分段标签文案 key（预计到库 / 实际到库），顺序即界面顺序。
+const FIELD_LABEL_KEYS: Record<ArrivalDateField, string> = {
+  estimated: "list.dateFields.estimated",
+  actual: "list.dateFields.actual",
 };
 
 function addDays(date: string, days: number) {
@@ -45,6 +47,7 @@ export function ContainerArrivalDateSheet({
   onDismiss,
   onSave,
 }: ContainerArrivalDateSheetProps) {
+  const { t } = useAppTranslation("containerDetail");
   const original = useMemo<ArrivalDateDraft>(
     () => ({
       estimated: toDateOnly(container?.预计到岸日期),
@@ -70,22 +73,22 @@ export function ContainerArrivalDateSheet({
   const maxDate = field === "actual" ? today : undefined;
   const quickOptions = field === "actual"
     ? [
-        { label: "今天", value: today },
-        { label: "昨天", value: addDays(today, -1) },
+        { label: t("list.dateSheet.today"), value: today },
+        { label: t("list.dateSheet.yesterday"), value: addDays(today, -1) },
       ]
     : [
-        { label: "今天", value: today },
-        { label: "明天", value: addDays(today, 1) },
-        { label: "+7 天", value: addDays(current || today, 7) },
+        { label: t("list.dateSheet.today"), value: today },
+        { label: t("list.dateSheet.tomorrow"), value: addDays(today, 1) },
+        { label: t("list.dateSheet.plus7Days"), value: addDays(current || today, 7) },
       ];
 
-  const containerName = container?.货柜编号 || "未命名货柜";
+  const containerName = container?.货柜编号 || t("list.card.untitled");
 
   return (
     <BusinessSheet
       visible={Boolean(container)}
-      title="修改到库日期"
-      subtitle={`${containerName} · ${containerStatusLabel(container?.状态)}`}
+      title={t("list.dateSheet.title")}
+      subtitle={`${containerName} · ${containerStatusLabel(container?.状态, t)}`}
       onDismiss={onDismiss}
       dismissable={!saving}
       footer={(
@@ -93,7 +96,7 @@ export function ContainerArrivalDateSheet({
           {errorMessage ? <HelperText type="error" visible>{errorMessage}</HelperText> : null}
           <View style={styles.footerRow}>
             <Button mode="outlined" style={styles.footerButton} onPress={onDismiss} disabled={saving}>
-              取消
+              {t("actions.cancel")}
             </Button>
             <Button
               mode="contained"
@@ -102,14 +105,14 @@ export function ContainerArrivalDateSheet({
               disabled={saving || !patch}
               onPress={() => patch && onSave(patch)}
             >
-              保存
+              {t("actions.save")}
             </Button>
           </View>
         </>
       )}
     >
       <View style={styles.segment} accessibilityRole="tablist">
-        {(Object.keys(FIELD_LABELS) as ArrivalDateField[]).map((key) => {
+        {(Object.keys(FIELD_LABEL_KEYS) as ArrivalDateField[]).map((key) => {
           const selected = key === field;
           const value = draft[key];
           const changed = value !== original[key];
@@ -122,11 +125,11 @@ export function ContainerArrivalDateSheet({
               style={[styles.segmentItem, selected ? styles.segmentItemSelected : null]}
             >
               <Text style={[styles.segmentLabel, selected ? styles.segmentLabelSelected : null]}>
-                {FIELD_LABELS[key]}
+                {t(FIELD_LABEL_KEYS[key])}
               </Text>
               <Text style={[styles.segmentValue, changed ? styles.segmentValueChanged : null]}>
-                {value || (key === "actual" ? "未登记" : "未设置")}
-                {changed ? " · 已修改" : ""}
+                {value || t(key === "actual" ? "list.dateSheet.notRecorded" : "list.dateSheet.notSet")}
+                {changed ? ` · ${t("list.dateSheet.changed")}` : ""}
               </Text>
             </Pressable>
           );
@@ -148,12 +151,12 @@ export function ContainerArrivalDateSheet({
         ))}
         {current ? (
           <Button compact icon="calendar-remove-outline" textColor={HB_COLORS.danger} onPress={() => setCurrent("")}>
-            清空
+            {t("list.dateSheet.clear")}
           </Button>
         ) : null}
       </View>
       {field === "actual" ? (
-        <Text style={styles.hint}>登记实际到库不会自动修改货柜状态。</Text>
+        <Text style={styles.hint}>{t("list.dateSheet.actualHint")}</Text>
       ) : null}
     </BusinessSheet>
   );

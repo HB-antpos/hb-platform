@@ -18,6 +18,8 @@
   "expectedMonth": "{{month}} 月",
   "expectedMonthWithYear": "{{year}} 年 {{month}} 月",
   "expectedRange": "{{from}} – {{to}}",
+  "dayFormat": "{{month}}月{{day}}日",
+  "dayFormatWithYear": "{{year}}年{{month}}月{{day}}日",
   "noteLabel": "仓库说明",
   "updatedAt": "最近更新 {{date}}",
   "pausedHeading": "这个商品暂停供货",

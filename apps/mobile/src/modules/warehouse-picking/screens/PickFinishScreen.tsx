@@ -29,6 +29,7 @@ import { Avatar, PickHeader } from "../components/PickHeader";
 import { ProductThumb } from "../components/ProductThumb";
 import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
 import { PICKING_HOME } from "./PickOrderListView";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 /** 5 分钟内还有操作的同事视为“还在拣”，提交前提醒。 */
 const STILL_PICKING_MS = 5 * 60 * 1000;
@@ -294,7 +295,7 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
           <Dialog.Title>{t("finish.confirmTitle")}</Dialog.Title>
           <Dialog.Content>
             <Text>
-              {t("finish.confirmBody", { names: stillPicking.map((teammate) => shortPickerName(teammate.pickerName)).join("、") })}
+              {t("finish.confirmBody", { names: stillPicking.map((teammate) => shortPickerName(teammate.pickerName)).join(listSeparator(language)) })}
             </Text>
           </Dialog.Content>
           <Dialog.Actions>

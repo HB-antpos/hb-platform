@@ -1,24 +1,24 @@
 {
   "title": {
     "store": "Staff details",
-    "admin": "Person details"
+    "admin": "Staff details"
   },
   "goAuthorize": "Manage access",
-  "roleDerived": "Derived from managed store",
+  "roleDerived": "From \"Manage\" store",
   "relation": {
     "manage": "Manage",
     "view": "View"
   },
   "missing": {
-    "title": "No person selected",
-    "description": "Open a person from the People list.",
-    "storeDescription": "The store is missing. Pick a store in the People list, then open the person again."
+    "title": "No staff member selected",
+    "description": "Open a staff member from the Staff list.",
+    "storeDescription": "The store is missing. Pick a store in the Staff list, then open the staff member again."
   },
   "loadFailed": {
-    "title": "Could not load this person",
+    "title": "Couldn't load this staff member",
     "description": "Try again later, or go back to the list and reopen.",
     "notFound": "This account no longer exists. Go back and refresh the list.",
-    "forbidden": "You do not have permission to view this person."
+    "forbidden": "You don't have permission to view this staff member."
   },
   "quick": {
     "edit": "Edit",
@@ -28,7 +28,7 @@
   "sections": {
     "access": "Stores and access",
     "account": "Account and security",
-    "profile": "Staff profile",
+    "profile": "Employee profile",
     "schedule": "Roster and records"
   },
   "rows": {
@@ -54,9 +54,9 @@
   "profile": {
     "name": "Name",
     "nameParts": {
-      "family": "Family",
-      "given": "Given",
-      "middle": "Middle"
+      "family": "Last name",
+      "given": "First name",
+      "middle": "Middle name"
     },
     "contact": "Contact",
     "other": "Other details",
@@ -72,7 +72,7 @@
     "weekCount_one": "{{count}} shift this week",
     "weekCount_other": "{{count}} shifts this week",
     "weekEmpty": "No shifts this week",
-    "next": "next {{weekday}} {{time}}",
+    "next": "Next: {{weekday}} {{time}}",
     "recordsCount_one": "{{count}} record in 30 days",
     "recordsCount_other": "{{count}} records in 30 days",
     "recordsCountCapped_one": "{{count}}+ record in 30 days",
@@ -81,16 +81,16 @@
     "open": "View"
   },
   "account": {
-    "lastLogin": "Last sign-in",
-    "neverLoggedIn": "Never signed in",
-    "loginRecords": "Sign-in records",
+    "lastLogin": "Last login",
+    "neverLoggedIn": "Never logged in",
+    "loginRecords": "Login history",
     "sessions_one": "{{count}} active session",
     "sessions_other": "{{count}} active sessions",
     "sessionsCapped_one": "{{count}}+ active session",
     "sessionsCapped_other": "{{count}}+ active sessions",
     "sessionsOpen": "View",
     "resetPassword": "Reset password",
-    "resetPasswordHint": "Email a setup link or set a new password",
+    "resetPasswordHint": "Email a reset code or set a new password",
     "id": "Account ID",
     "copyId": "Copy account ID",
     "idCopied": "Account ID copied",
@@ -102,27 +102,27 @@
     "posPickerTitle": "Choose a store for POS permissions"
   },
   "loginToggle": {
-    "label": "Allow sign-in",
-    "onHint": "Turn off to block this account from signing in to the app and web",
-    "offHint": "Sign-in is blocked for this account. Turn on to let it sign in to the app and web",
-    "selfHint": "You cannot turn off sign-in for your own account",
+    "label": "Allow login",
+    "onHint": "Turn off to stop this account logging in to the app and web",
+    "offHint": "Login is blocked for this account. Turn on to let it log in to the app and web",
+    "selfHint": "You can't turn off login for your own account",
     "allowedValue": "Allowed",
     "restrictedValue": "Blocked",
-    "confirmTitle": "Block sign-in for {{name}}?",
-    "confirmMessage": "This account will no longer be able to sign in, and sessions that are already signed in will end.",
-    "confirmAction": "Block sign-in",
-    "enabledDone": "Sign-in allowed for this account",
-    "disabledDone": "Sign-in blocked for this account",
-    "noPasswordNotice": "This account has never signed in and may not have a usable password.",
+    "confirmTitle": "Block login for {{name}}?",
+    "confirmMessage": "This account won't be able to log in, and any active sessions will be logged out.",
+    "confirmAction": "Block login",
+    "enabledDone": "Login allowed for this account",
+    "disabledDone": "Login blocked for this account",
+    "noPasswordNotice": "This account has never logged in and may not have a usable password.",
     "setPassword": "Set password",
     "errors": {
-      "self": "You cannot turn off sign-in for your own account",
+      "self": "You can't turn off login for your own account",
       "notFound": "This account no longer exists. Go back to the list and refresh.",
-      "scopeDenied": "This account is outside the people you can manage",
-      "highPrivilege": "You cannot change sign-in for administrators or other high-privilege accounts",
-      "forbidden": "You do not have permission to change sign-in for this account",
-      "uncertain": "The result could not be confirmed. The page was refreshed, so check the \"Allow sign-in\" status before trying again.",
-      "generic": "Could not change sign-in. Please try again later."
+      "scopeDenied": "This account isn't one you can manage",
+      "highPrivilege": "You can't change login for admins or other high-privilege accounts",
+      "forbidden": "You don't have permission to change login for this account",
+      "uncertain": "The result couldn't be confirmed. The page was refreshed, so check the \"Allow login\" status before trying again.",
+      "generic": "Couldn't change login. Try again later."
     }
   },
   "more": {
@@ -131,7 +131,7 @@
       "access": "Account access",
       "pos": "POS permissions",
       "copyPermissions": "Copy permissions to others",
-      "loginRecords": "Sign-in records"
+      "loginRecords": "Login history"
     },
     "barcodeConnected": "Label printer · {{status}}",
     "barcodeNoPrinter": "No label printer selected yet",
@@ -140,29 +140,29 @@
     "posSubtitleFallback": "{{store}} · set per store",
     "posSubtitleAdmin": "Set per store",
     "copySubtitle": "Copy their direct permissions to colleagues",
-    "loginRecordsSubtitle": "Latest {{time}}",
+    "loginRecordsSubtitle": "Last: {{time}}",
     "disableTitle": "Disable account",
     "disableSubtitle": "Can be enabled again anytime",
     "enableTitle": "Enable account",
-    "enableSubtitle": "Restores sign-in; roster and attendance are unaffected",
+    "enableSubtitle": "Restores login. Roster and attendance aren't affected",
     "hint": "Actions you cannot use are not shown"
   },
   "confirm": {
     "disableTitle": "Disable {{name}}?",
-    "disableMessage": "{{name}} will no longer be able to sign in to the app or web. Roster, attendance and history are kept, and you can enable the account again at any time.",
+    "disableMessage": "{{name}} won't be able to log in to the app or web. Roster, attendance and history are kept, and you can re-enable the account at any time.",
     "enableTitle": "Enable {{name}}?",
-    "enableMessage": "{{name}} will be able to sign in again. Roster, attendance and history are unaffected.",
+    "enableMessage": "{{name}} will be able to log in again. Roster, attendance and history aren't affected.",
     "uncertain": "The result could not be confirmed. The page was refreshed, so check the account status before trying again."
   },
   "password": {
     "title": "Reset password",
-    "modeEmail": "Email setup link",
+    "modeEmail": "Email reset code",
     "modeDirect": "Set new password",
     "directSubmit": "Set password",
     "directHelper": "At least 6 characters. The old password stops working immediately; share the new one through a secure channel.",
     "sendTo": "Send to",
-    "emailHint": "The email carries a 6-digit code. The employee sets their own new password with it; you never see or handle the password. The old password keeps working until then.",
-    "modesFootnote": "\"Email setup link\" lets the employee choose their own password. \"Set new password\" replaces the old one immediately.",
+    "emailHint": "They get a 6-digit code by email and use it to set their own password. You never see the password. Their old password keeps working until then.",
+    "modesFootnote": "\"Email reset code\" lets the staff member choose their own password. \"Set new password\" replaces the old one straight away.",
     "forbidden": "You do not have permission to reset this account's password",
     "uncertain": "The password reset could not be confirmed. Check first and do not resubmit right away."
   },

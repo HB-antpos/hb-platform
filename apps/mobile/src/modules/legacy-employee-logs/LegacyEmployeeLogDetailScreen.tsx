@@ -19,6 +19,7 @@ import { LegacyScreenMessage, useLegacyLogsGuard, usePosOperationLabel } from ".
 import { activeReview, clockOf, describeFlagEvidence, formatAmountImpact, productThumbnailUri, storeDisplayName } from "./logic";
 import { notifyLegacyLogReviewed } from "./review-events";
 import type { LegacyLogContext, LegacyLogItem, LogSource } from "./types";
+import { withCode } from "@/shared/i18n/punctuation";
 
 const NOTE_MAX_LENGTH = 500;
 const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value)?.trim() || "";
@@ -151,7 +152,7 @@ function DetailContent({ id, source, onBack }: { id: string; source: LogSource; 
               ) : null}
             </View>
             <Text style={styles.meta}>
-              {[target.employeeName || "-", `${storeDisplayName(target.storeCode, storeNames)}（${target.storeCode ?? "-"}）`, target.deviceCode || "-", clockOf(target.operationTime)].join(" · ")}
+              {[target.employeeName || "-", withCode(storeDisplayName(target.storeCode, storeNames), target.storeCode ?? "-"), target.deviceCode || "-", clockOf(target.operationTime)].join(" · ")}
             </Text>
 
             {target.flags.map((flag) => (
@@ -161,7 +162,7 @@ function DetailContent({ id, source, onBack }: { id: string; source: LogSource; 
                   <Text style={styles.calloutTitle}>{t(`rules.${flag.ruleCode}.label`)}</Text>
                 </View>
                 <Text style={styles.calloutBody}>
-                  {describeFlagEvidence(flag).map((part) => t(`evidence.${part.key}`, part.params)).join("；")}
+                  {describeFlagEvidence(flag).map((part) => t(`evidence.${part.key}`, part.params)).join(language.startsWith("zh") ? "；" : "; ")}
                 </Text>
                 <Text style={styles.calloutRule}>{t(source === "pos" ? `rulesPos.${flag.ruleCode}` : `rules.${flag.ruleCode}.desc`)}</Text>
               </View>
@@ -209,7 +210,7 @@ function DetailContent({ id, source, onBack }: { id: string; source: LogSource; 
 
             {target.pos ? (
               <View style={[LEGACY_UI.card, styles.panel]}>
-                <Info label={t("detail.operationTime")} value={`${target.operationTime.replace("T", " ")}（${t("detail.pos.localTimeNote")}）`} />
+                <Info label={t("detail.operationTime")} value={withCode(target.operationTime.replace("T", " "), t("detail.pos.localTimeNote"))} />
                 <Info label={t("detail.pos.receivedTime")} value={target.lastUploadTime.replace("T", " ").slice(11, 19)} />
                 <Info label={t("detail.store")} value={`${storeDisplayName(target.storeCode, storeNames)} ${target.storeCode ?? ""}`} />
                 <Info label={t("detail.device")} value={[target.deviceCode ?? "-", target.pos.deviceSystem].filter(Boolean).join(" · ")} />

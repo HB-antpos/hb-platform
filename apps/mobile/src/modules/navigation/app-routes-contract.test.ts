@@ -194,7 +194,7 @@ async function run() {
     {
       workbench: "Home",
       scan: "Scan",
-      checkIn: "Check in",
+      checkIn: "Clock in",
       reports: "Reports",
       me: "Me",
     },
