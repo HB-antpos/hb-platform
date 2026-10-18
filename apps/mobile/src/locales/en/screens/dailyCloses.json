@@ -28,7 +28,7 @@
     "all": "All",
     "short": "Short",
     "over": "Over",
-    "even": "Even",
+    "even": "Balanced",
     "none": "No amount"
   },
   "statusLine": {
@@ -42,11 +42,11 @@
     "expected": "Expected",
     "counted": "Counted",
     "noAmounts": "No records with amounts under the current filters",
-    "noAmountNote": "{{count}} more with no amount, not included in the totals"
+    "noAmountNote": "{{count}} more without amounts (not included in totals)"
   },
   "section": {
     "dayHeading": "{{weekday}} {{day}} {{month}}",
-    "count": "Closes {{count}}",
+    "count": "{{count}} close(s)",
     "countPartial": "{{count}} loaded",
     "difference": "Difference"
   },
@@ -83,23 +83,23 @@
     "auditBackfill": "Backfilled from operation logs"
   },
   "mark": {
-    "nth": "No. {{n}}",
+    "nth": "Close #{{n}}",
     "backfill": "Backfilled",
     "inferred": "Inferred"
   },
   "card": {
     "saved": "Saved {{time}}",
     "compare": "Expected {{expected}} → counted {{counted}}",
-    "noAmountHint": "Only a save record, no cash amounts"
+    "noAmountHint": "Save record only, no cash amounts"
   },
   "states": {
     "loading": "Loading daily closes",
     "loadFailed": "Could not load daily closes",
     "emptyTitle": "No daily closes match these filters",
     "emptyDescription": "Closes saved before the rollout only get full details after their POS is upgraded.",
-    "rangeInvalid": "The business date range is not valid, please pick it again",
-    "loadMoreFailed": "Could not load more, tap to retry",
-    "refreshFailed": "Refresh failed, showing the previous results. Tap to retry",
+    "rangeInvalid": "Invalid business date range. Pick the dates again.",
+    "loadMoreFailed": "Couldn't load more. Tap to retry.",
+    "refreshFailed": "Refresh failed. Showing previous results. Tap to retry.",
     "loadedOf": "Loaded {{shown}} of {{total}}",
     "end": "{{total}} in total, all loaded"
   },
@@ -113,7 +113,7 @@
   "filters": {
     "title": "Filters",
     "stores": "Stores",
-    "storesHint": "Multiple allowed, only stores you can view",
+    "storesHint": "Select one or more. Only stores you can access are shown.",
     "storesAll": "All stores",
     "searchStore": "Search stores",
     "range": "Business date",
@@ -138,7 +138,7 @@
     "reset": "Reset",
     "backToFilters": "Back to filters",
     "viewResults": "View results",
-    "viewCount": "View {{count}}"
+    "viewCount": "Show {{count}} results"
   },
   "detail": {
     "title": "Daily close",
@@ -176,13 +176,13 @@
       "noteSubtotal": "Notes subtotal",
       "coinSubtotal": "Coins subtotal",
       "row": "× {{quantity}}",
-      "empty": "No count data for this kind of denomination"
+      "empty": "Nothing counted for these denominations"
     },
     "placeholder": "No data yet · waiting for the terminal to upload",
     "info": {
       "title": "Details",
       "summaryOrders": "{{value}} orders",
-      "summaryReturns": "{{value}} returned",
+      "summaryReturns": "{{value}} items returned",
       "store": "Store",
       "device": "Terminal",
       "cashier": "Cashier",
@@ -199,6 +199,6 @@
       "expand": "Expand details",
       "collapse": "Collapse details"
     },
-    "saveLog": "View save log (employee operation logs)"
+    "saveLog": "View save log (staff activity log)"
   }
 }

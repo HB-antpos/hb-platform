@@ -216,9 +216,10 @@ assert.deepEqual(
       minimumBuild: "Minimum Build",
       notes: "Notes",
       scope: "Scope",
+      colon: ": ",
     },
   )[0],
-  "Enabled：Enabled",
+  "Enabled: Enabled",
 );
 // iOS 原生下载入口：已启用策略优先，其次最新登记版本，无登记返回 null。
 const nativeReleaseFixture = (id: string, version: string): NativeRelease => ({

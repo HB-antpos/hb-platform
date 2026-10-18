@@ -148,7 +148,7 @@ assert.match(
   "员工列表可见性必须是 ViewStoreStaff 或 View"
 );
 const roleMenuCatalogSource = readFileSync(resolve(currentDirectory, "../identity-admin/role-menu-catalog.ts"), "utf8");
-assert.match(roleMenuCatalogSource, /\["users", "People management", "人员管理", \["Users\.ViewStoreStaff"\]\]/, "users 路由（人员管理）必须认 Users.ViewStoreStaff");
+assert.match(roleMenuCatalogSource, /\["users", "Staff management", "人员管理", \["Users\.ViewStoreStaff"\]\]/, "users 路由（人员管理）必须认 Users.ViewStoreStaff");
 assert.match(roleMenuCatalogSource, /\["user-admin", "User management", "用户管理", \["Users\.View"\]\]/, "user-admin 仍然是 Users.View");
 const iosReviewMenuSource = readFileSync(resolve(currentDirectory, "../ios-review/menu.ts"), "utf8");
 assert.match(iosReviewMenuSource, /routeName: "users"[^}]*permission: "Users\.ViewStoreStaff"/, "审核模式菜单的 users 必须同步新权限码");

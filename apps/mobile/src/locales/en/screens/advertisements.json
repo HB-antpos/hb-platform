@@ -43,13 +43,13 @@
     "noFileSelected": "No file selected",
     "noStoreSelected": "No store selected",
     "allStores": "All stores",
-    "noStore": "No store"
+    "noStore": "No stores set"
   },
   "upload": {
     "status": {
       "idleTitle": "Ready to upload",
       "idleDescription": "Pick a media asset, take a photo, or record a video.",
-      "fileSelectedTitle": "Asset details available",
+      "fileSelectedTitle": "Asset attached",
       "fileSelectedDescription": "Save the advertisement, or upload again to replace the current asset.",
       "uploadingTitle": "Uploading asset",
       "libraryDescription": "Reading and uploading the selected media. Keep this page open.",
@@ -58,7 +58,7 @@
       "videoReadyTitle": "Video uploaded",
       "uploadedDescription": "Asset details are filled in. Confirm title, schedule, and stores before saving.",
       "canceledTitle": "No asset selected",
-      "canceledDescription": "Upload was canceled and the advertisement was not changed.",
+      "canceledDescription": "Upload cancelled. The advertisement hasn't changed.",
       "permissionTitle": "Upload permission needed",
       "libraryPermissionDescription": "Allow media library access before picking an asset.",
       "cameraPermissionDescription": "Allow camera access before capturing an asset.",
@@ -90,7 +90,7 @@
   "editor": {
     "createTitle": "Create advertisement",
     "editTitle": "Edit advertisement",
-    "subtitle": "Edit asset metadata, schedule, enable status, and store scope."
+    "subtitle": "Edit the asset details, schedule, status and stores."
   },
   "pagination": {
     "previous": "Previous",
@@ -105,7 +105,7 @@
     "toggleSuccess": "Advertisement status updated.",
     "toggleFailed": "Failed to update advertisement status.",
     "uploadSuccess": "Asset uploaded.",
-    "uploadCanceled": "No asset selected. Upload canceled.",
+    "uploadCanceled": "No asset selected. Upload cancelled.",
     "uploadFailed": "Failed to upload asset.",
     "permissionDenied": "Media library permission is required.",
     "cameraPermissionDenied": "Camera permission is required.",
@@ -113,7 +113,7 @@
   },
   "validation": {
     "title": "Title is required.",
-    "mediaUrl": "Media URL is required.",
+    "mediaUrl": "Upload a file or enter a media URL first.",
     "effectiveStart": "Effective start is required.",
     "effectiveStartInvalid": "Enter a valid effective start time.",
     "effectiveEnd": "Effective end is required.",
@@ -125,7 +125,7 @@
     "noAccessTitle": "No access",
     "noAccessDescription": "This account cannot view or manage mobile advertisements.",
     "loadFailedTitle": "Unable to load advertisements",
-    "loadFailedDescription": "Try again after refreshing.",
+    "loadFailedDescription": "Refresh and try again.",
     "emptyTitle": "No advertisements found",
     "emptyDescription": "Create an advertisement or adjust the filters.",
     "emptyMediaTypes": "No media types",

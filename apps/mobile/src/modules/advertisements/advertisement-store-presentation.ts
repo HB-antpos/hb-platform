@@ -1,4 +1,5 @@
 import type { AdvertisementStoreScope } from "@/modules/advertisements/types";
+import { withCode } from "@/shared/i18n/punctuation";
 
 export interface AdvertisementStorePresentationItem {
   storeCode: string;
@@ -77,7 +78,7 @@ export function formatAdvertisementStoreLabel(
     return storeCode;
   }
 
-  return `${storeName}（${storeCode}）`;
+  return withCode(storeName, storeCode);
 }
 
 export function buildAdvertisementStoreSummary(

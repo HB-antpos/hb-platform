@@ -21,6 +21,7 @@ import { PickHeader, PickerChip } from "../components/PickHeader";
 import { PickCameraSheet } from "../components/PickCameraSheet";
 import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
 import type { PickerIdentity, PickOrderFilter, PickOrderListItem } from "../types";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 const FLOW_PICKING = 3;
 
@@ -271,7 +272,7 @@ function OrderCard({
 }) {
   const { t } = useAppTranslation("warehousePicking");
   const picking = item.flowStatus === FLOW_PICKING;
-  const names = item.pickers.map((entry) => shortPickerName(entry.pickerName)).join("、");
+  const names = item.pickers.map((entry) => shortPickerName(entry.pickerName)).join(listSeparator());
   const progress = item.lineCount > 0 ? Math.min(1, item.pickedLineCount / item.lineCount) : 0;
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.card}>

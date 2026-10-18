@@ -5,6 +5,8 @@ export interface MinorReminder {
   employeeName?: string;
   userGUID: string;
   storeCode: string;
+  /** 后端规则编号（如 QLD_NIGHT_WORK），英文界面据此显示英文提示。 */
+  ruleId?: string;
   message: string;
   ruleCategory: string;
   sourceUrl?: string;

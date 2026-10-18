@@ -1,5 +1,5 @@
 {
-  "title": "Device Management",
+  "title": "Device management",
   "subtitle": "{{count}} devices",
   "searchPlaceholder": "Search device number, hardware ID, or system",
   "actions": {
@@ -17,9 +17,9 @@
     "save": "Save"
   },
   "views": {
-    "registered": "Device Registry",
-    "appUsage": "App Usage",
-    "activation": "Activation Codes"
+    "registered": "Registrations",
+    "appUsage": "App usage",
+    "activation": "Activation codes"
   },
   "appUsage": {
     "subtitle": "{{count}} app devices",
@@ -30,7 +30,7 @@
     "runtimeValue": "Runtime: {{value}}",
     "channelValue": "Channel: {{value}}",
     "updateIdValue": "UpdateId: {{value}}",
-    "lastUserValue": "Recent user: {{value}}",
+    "lastUserValue": "Last user: {{value}}",
     "lastSeenValue": "Last seen: {{value}}",
     "onlineFilters": {
       "all": "All",
@@ -49,12 +49,12 @@
     "allStores": "All stores"
   },
   "dialogs": {
-    "confirmTitle": "Confirm {{action}}",
+    "confirmTitle": "{{action}} device",
     "confirmMessage": "{{action}} \"{{device}}\"?"
   },
   "fields": {
     "audit": "Created by / updated by",
-    "createdAudit": "Creation audit",
+    "createdAudit": "Created by",
     "createdAtValue": "Created: {{value}}",
     "deviceSystemValue": "System: {{value}}",
     "deviceNumber": "Device number",
@@ -69,7 +69,7 @@
     "transactionValue": "Transactions: {{value}}",
     "transactionAllowed": "Allowed",
     "transactionBlocked": "Blocked",
-    "remarkValue": "Remark: {{value}}",
+    "remarkValue": "Note: {{value}}",
     "noStore": "No store assigned",
     "storeValue": "Store: {{value}}",
     "store": "Store",
@@ -118,7 +118,7 @@
     "activateFailed": "Failed to enable device",
     "activateSuccess": "Device enabled",
     "activationCreateFailed": "Failed to create activation code. The list was refreshed; confirm whether it was created.",
-    "activationStoresLoadFailed": "Failed to load manageable stores. Activation records can still be reviewed.",
+    "activationStoresLoadFailed": "Couldn't load the stores you manage. You can still check existing activation codes.",
     "activationLoadFailed": "Failed to load activation codes",
     "activationRevokeFailed": "Failed to revoke activation code",
     "activationRevokeSuccess": "Activation code revoked",
@@ -137,7 +137,7 @@
     "emergencyRevokeFailed": "Failed to revoke emergency login grant",
     "exportFailed": "Failed to export QR code",
     "loading": "Loading…",
-    "loadFailedDescription": "Please try again later.",
+    "loadFailedDescription": "Try again later.",
     "loadFailedTitle": "Failed to load devices",
     "lockFailed": "Failed to lock device",
     "lockSuccess": "Device locked",
@@ -156,7 +156,7 @@
     "transactionApplicable": "Transaction control applies to Android, iOS and iPadOS POS devices.",
     "transactionUnavailable": "Transaction control does not apply to this device.",
     "systemReadOnly": "The device system is read-only in the current status.",
-    "remark": "Remark"
+    "remark": "Note"
   },
   "activation": {
     "pos": "POS codes",
@@ -164,17 +164,17 @@
     "create": "Create device activation code",
     "createdTitle": "Activation code created",
     "oneTimeWarning": "The complete activation code is shown only this time. Copy it or export the QR code now.",
-    "recoveryTitle": "Verify this creation result",
-    "recoveryHint": "First verify the store, account and creation reason in the grant records or Web admin. Confirm the original request has ended. If a grant exists but its credential was lost, revoke that grant first. Only clear the block after confirming no grant is left unresolved. This action does not create anything; a new creation requires another explicit submission.",
-    "recoveryAction": "Clear after verification",
-    "recoveryConfirm": "Verified, clear block",
-    "recoveredHint": "The block is cleared. No grant was created; submit again only if another creation is needed.",
+    "recoveryTitle": "Check what was created",
+    "recoveryHint": "First check the store, account and reason in the grant records or the web admin, and make sure the original request has finished. If a grant was created but its full credential was lost, revoke that grant first. Only clear the block once no grant is left unresolved. Clearing the block doesn't create anything; to create one, submit again.",
+    "recoveryAction": "Check and clear block",
+    "recoveryConfirm": "Checked, clear block",
+    "recoveredHint": "Block cleared. No grant was created. Submit again only if you still need one.",
     "pendingHint": "The original request is still running. Wait and refresh the records before clearing the block.",
-    "unknownOutcomeHint": "The creation result is unconfirmed, so another attempt is blocked. Check the grants first. If a grant exists but its complete credential was not received, revoke that grant. Closing this sheet does not remove the block.",
+    "unknownOutcomeHint": "We couldn't confirm whether it was created, so another attempt is blocked. Check the grants first. If a grant was created but its full credential wasn't received, revoke it. Closing this sheet doesn't clear the block.",
     "store": "Store",
     "system": "Device system",
     "account": "Target account",
-    "accountHint": "A Mobile activation code binds to the selected target account at this store.",
+    "accountHint": "A Mobile activation code can only be linked to an account at the selected store.",
     "validity": "Valid for",
     "minutes30": "30 min",
     "minutes120": "2 hours",
@@ -197,9 +197,9 @@
     "consumedAt": "Used at",
     "consumptionKind": "Use type",
     "notUsed": "Not used",
-    "statuses": { "Available": "Available", "Consumed": "Used", "Revoked": "Revoked", "Expired": "Expired" },
-    "noAccessTitle": "No activation-code permission",
-    "noAccessDescription": "Ask an administrator for POS or Mobile activation-code management permission."
+    "statuses": { "Available": "Valid", "Consumed": "Used", "Revoked": "Revoked", "Expired": "Expired" },
+    "noAccessTitle": "No access to activation codes",
+    "noAccessDescription": "Ask an admin for permission to manage POS or Mobile activation codes."
   },
   "emergency": {
     "title": "Store emergency login grant",
@@ -210,7 +210,7 @@
     "reason": "Grant reason",
     "createdTitle": "Emergency login grant created",
     "revokeTitle": "Revoke emergency login grant",
-    "revokeMessage": "After revocation, POS terminals cannot use this grant.",
+    "revokeMessage": "Once revoked, POS terminals can no longer use this grant.",
     "defaultRevokeReason": "Revoked from mobile device management"
   },
   "statuses": {

@@ -81,7 +81,7 @@ assert.deepEqual(formatPosHighRiskWarning(warning, zh), {
 const warningEn = buildPosHighRiskWarning(changes, createPosPermissionLabels(en))!;
 assert.deepEqual(formatPosHighRiskWarning(warningEn, en), {
   summary: "Includes 1 high-risk permission(s): Order 40% off.",
-  impact: "Once on, this person can do the following at the register: give the whole order 40% off.",
+  impact: "Once on, this staff member can do the following on the POS: give the whole order 40% off.",
 });
 
 const manyWarning = buildPosHighRiskWarning(

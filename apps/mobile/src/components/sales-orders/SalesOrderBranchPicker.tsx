@@ -6,6 +6,7 @@ import { normalizeSelectedBranchCodes } from "@/modules/sales-orders/logic";
 import type { SalesOrderBranch } from "@/modules/sales-orders/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 export interface SalesOrderBranchPickerProps {
   branches: SalesOrderBranch[];
@@ -55,7 +56,7 @@ export function SalesOrderBranchPicker({
     : selected.length === 0
       ? t("filterSheet.allBranches", { count: branches.length })
       : selected.length <= 2
-        ? selectedNames.join("、")
+        ? selectedNames.join(listSeparator())
         : t("filterSheet.branchesSelected", { count: selected.length, first: selectedNames[0] });
 
   const toggle = (code: string) => {

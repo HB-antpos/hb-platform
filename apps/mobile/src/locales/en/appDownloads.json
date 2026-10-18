@@ -1,5 +1,5 @@
 {
-  "title": "Release center",
+  "title": "Release centre",
   "subtitle": "Installers · OTA updates · WPF POS · update policies",
   "openWeb": "Open web console",
   "terminalNav": "Terminals",
@@ -44,7 +44,7 @@
     "hint": "Scan or share with staff",
     "appStore": "App Store",
     "apk": "APK package",
-    "activeRelease": "Policy release",
+    "activeRelease": "Active release",
     "latestRegistered": "Latest registered",
     "verifiedAt": "Verified by Apple {time}",
     "createdAt": "Registered {time}",
@@ -53,9 +53,9 @@
     "mirrorPending": "COS mirror in progress",
     "mirrorFailed": "COS mirror failed",
     "iosEmptyTitle": "No App Store release registered",
-    "iosEmptyBody": "After registering and passing Apple verification, the install link and QR code appear here.",
+    "iosEmptyBody": "Once a release is registered and verified with Apple, the install link and QR code will appear here.",
     "androidEmpty": "No downloadable package in this environment",
-    "storeNote": "The iOS link is the App Store product page and is not version specific; staff always get the version currently on the store."
+    "storeNote": "The iOS link opens the App Store page and isn't version-specific. Staff always get the version currently live on the App Store."
   },
   "actions": {
     "qr": "QR code",
@@ -76,7 +76,7 @@
     "title": "Scan to install",
     "iosHint": "Scan with the camera to open the App Store and install or update.",
     "androidHint": "Scan with an Android device to download. The link always points to the latest build; allow installing unknown apps the first time.",
-    "buildHint": "This link points to the package of this specific build.",
+    "buildHint": "This link downloads the package for this build only.",
     "iosSource": "Current App Store version",
     "androidSource": "{environment} APK"
   },
@@ -112,7 +112,7 @@
     "cancel": "Cancel",
     "enabled": "Enable policy",
     "enabledNativeHint": "When off, clients stop receiving native update prompts",
-    "enabledOtaHint": "When off, clients stop receiving hot updates on this lane",
+    "enabledOtaHint": "When off, clients stop receiving hot updates on this channel",
     "required": "Required update",
     "requiredHint": "When on, clients must install this update before continuing",
     "release": "Target release",
@@ -140,7 +140,7 @@
     "back": "Back to edit",
     "confirm": "Confirm save",
     "fields": {
-      "enabled": "Enabled state",
+      "enabled": "Status",
       "required": "Required update",
       "release": "Target release",
       "minimumVersion": "Minimum version",
@@ -173,7 +173,7 @@
     "content": "Contents",
     "switchTarget": "Change target update",
     "empty": "No hot updates available",
-    "rollback": "Rollback",
+    "rollback": "Roll back",
     "revisions": "Revisions",
     "revisionsLatest": "Latest: version {version} · {time}",
     "noRevisions": "No revisions"
@@ -189,24 +189,25 @@
     "minimumVersion": "Minimum version",
     "minimumBuild": "Minimum Build",
     "notes": "Release notes",
-    "scope": "Scope"
+    "scope": "Scope",
+    "colon": ": "
   },
-  "noUrl": "No usable link",
-  "loadFailed": "Load failed",
+  "noUrl": "No link available",
+  "loadFailed": "Couldn't load",
   "empty": "No records",
-  "registered": "Registered; policy state was not changed",
-  "saved": "Saved and re-read authoritative state",
-  "conflict": "Policy version conflict. Latest state was reloaded; review it before saving again",
-  "error": "Operation failed",
-  "readbackFailed": "Write completed, but authoritative readback failed. Refresh to verify",
+  "registered": "Registered. The policy hasn't changed.",
+  "saved": "Saved. Latest settings reloaded from the server.",
+  "conflict": "This policy was changed by someone else. The latest version has been loaded. Review it and save again.",
+  "error": "Something went wrong",
+  "readbackFailed": "Saved, but the latest settings couldn't be reloaded. Refresh to check.",
   "validation": {
     "releaseRequired": "Select a release before enabling the policy",
     "minimumVersionRequired": "Enter a minimum version before setting a minimum Build",
     "minimumBuildInvalid": "Minimum Build must be an integer from 0 to 2147483647",
-    "storesRequired": "Select at least one store for a store scoped policy",
-    "candidateBlocked": "The selected candidate is not activatable; choose an activatable candidate",
+    "storesRequired": "Select at least one store when rolling out to selected stores",
+    "candidateBlocked": "This release can't be activated. Choose another release.",
     "appStoreIdInvalid": "App Store ID must contain 6 to 20 digits",
     "buildNumberInvalid": "Build does not match the format required by this app",
-    "storefrontInvalid": "Storefront must contain two letters"
+    "storefrontInvalid": "Storefront must be a 2-letter code"
   }
 }

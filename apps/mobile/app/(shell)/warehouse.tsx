@@ -1717,8 +1717,15 @@ export default function WarehouseScreen() {
     if (!product) {
       return "";
     }
+    // 后端 productTypeLabel 写死中文（普通/套装/多码）；非中文界面按类型码取商品查询同款文案。
+    if (!language.startsWith("zh")) {
+      const typeKey = ({ 0: "normal", 1: "set", 2: "multi" } as Record<number, string>)[product.productType ?? -1];
+      if (typeKey) {
+        return t(`productQuery:hero.productType.${typeKey}`);
+      }
+    }
     return product.productTypeLabel || product.productType?.toString() || "";
-  }, [product]);
+  }, [language, product, t]);
 
   const savedProductGrade = product?.grade?.trim().toUpperCase() ?? "";
   const editableProductGrade = productForm.grade.trim().toUpperCase();

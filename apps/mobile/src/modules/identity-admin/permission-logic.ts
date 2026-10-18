@@ -1,3 +1,5 @@
+import { withCode } from "@/shared/i18n/punctuation";
+
 export const PERMISSION_ADMIN_PERMISSIONS = {
   view: "Roles.View",
   manage: "Roles.ManagePermissions",
@@ -317,7 +319,7 @@ export function isPermissionUserDeltaApplied(
 /** 用户展示名：有姓名时「姓名（用户名）」，否则仅用户名。 */
 export function formatPermissionUserName(user: { username: string; fullName?: string }) {
   const fullName = user.fullName?.trim();
-  return fullName && fullName !== user.username ? `${fullName}（${user.username}）` : user.username;
+  return fullName && fullName !== user.username ? withCode(fullName, user.username) : user.username;
 }
 
 /** 超级管理员角色隐式拥有全部权限，服务端分配时会直接跳过，因此在分配弹层中只读展示。 */

@@ -30,7 +30,7 @@
     "deltaUp": "Up {{amount}}",
     "deltaDown": "Down {{amount}}",
     "changeCount": "{{count}} changes",
-    "overdueTag": "{{days}} days late",
+    "overdueTag": "{{days}} days overdue",
     "waiting": "Waiting {{days}} days"
   },
   "discount": {
@@ -42,21 +42,21 @@
   },
   "sources": {
     "warehouseProducts": "Warehouse product edit",
-    "mobileWarehouse": "Mobile warehouse",
+    "mobileWarehouse": "Warehouse app",
     "batchUpdate": "Batch price update",
     "warehouseAutoSync": "Warehouse push",
     "storeSync": "Store sync",
     "storeSyncFrom": "Store sync from {{store}}",
     "localSupplierInvoice": "Supplier invoice",
-    "domesticImport": "Domestic product import",
+    "domesticImport": "China purchasing import",
     "storeOrderImportPriceVariance": "Order price variance",
     "dataSync": "HQ data sync",
     "container": "Container",
-    "domesticProduct": "Domestic purchase product",
+    "domesticProduct": "China purchasing product",
     "nonDomesticImport": "Non-HB product import",
     "storeOrder": "Store order",
     "legacyApi": "Legacy product API",
-    "other": "Other entry"
+    "other": "Other"
   },
   "time": {
     "today": "Today {{time}}",
@@ -82,16 +82,16 @@
       "printed": "Printed",
       "markedReplaced": "Marked replaced (not printed)",
       "keptStorePrice": "Kept store price",
-      "priceAligned": "Price already aligned",
-      "hqSynced": "HQ synced",
-      "hqSyncing": "HQ syncing",
+      "priceAligned": "Price already matches",
+      "hqSynced": "Synced to HQ",
+      "hqSyncing": "Syncing to HQ",
       "hqSyncFailed": "HQ sync failed"
     },
     "initiated": "From {{name}} {{time}}",
     "handled": "By {{name}} {{time}}"
   },
   "selection": {
-    "enter": "Batch",
+    "enter": "Select",
     "selectedCount": "{{count}} selected",
     "selectAll": "Select all",
     "summary": "{{apply}} price changes · {{print}} labels",
@@ -122,8 +122,8 @@
     "openSettingsHint": "Open label printer settings"
   },
   "store": {
-    "lockedToDevice": "This device is bound to one store",
-    "readOnly": "This store is view-only; prices & labels cannot be handled here",
+    "lockedToDevice": "This device is locked to one store",
+    "readOnly": "View only for this store. Prices and labels can't be actioned here",
     "requiredTitle": "Select a store",
     "requiredDescription": "Choose a store to see its prices & labels tasks"
   },
@@ -159,8 +159,8 @@
     "cancelSuccess": "{{count}} tasks cancelled (all stores)",
     "cancelPartial": "{{cancelled}} tasks cancelled; {{skipped}} were already handled or no longer exist and were skipped",
     "cancelNothing": "No pending tasks to cancel; they may already be handled",
-    "cancelInterrupted": "{{cancelled}} tasks cancelled; {{notSubmitted}} products were not processed because of a network or service error. Please retry",
-    "cancelFailed": "Cancel failed. Please retry"
+    "cancelInterrupted": "{{cancelled}} tasks cancelled; {{notSubmitted}} products weren't processed because of a network or server error. Try again",
+    "cancelFailed": "Couldn't cancel. Try again"
   },
   "keepDialog": {
     "title": "Keep store price?",
@@ -197,17 +197,17 @@
   "notification": {
     "needsPriceUpdate": "{{count}} stores need a price change",
     "labelOnly": "{{count}} stores need relabelling",
-    "skippedSpecial": "{{count}} special-product stores skipped",
+    "skippedSpecial": "{{count}} stores skipped (special product)",
     "savedAndSent": "Saved. Stores notified: {{detail}}",
     "cancelledSuffix": "; pending notices withdrawn for {{count}} stores",
     "reverted": "Price reverted. Pending notices withdrawn for {{count}} stores",
-    "savedOnlySkipped": "Saved. {{count}} special-product stores skipped, no notices sent",
+    "savedOnlySkipped": "Saved. {{count}} stores skipped (special product), no notices sent",
     "savedNoNotification": "Saved. Store prices already match, no notices sent",
     "syncedStores": "Synced to {{count}} stores",
     "syncedStoresWithLabels": "Synced to {{count}} stores, {{labelCount}} received a relabel notice",
     "previewAutoSync": "After saving, {{count}} stores update automatically and get a Relabel notice",
     "previewNeedsUpdate": "After saving, {{count}} stores with a different price get a Price change notice",
-    "previewSkippedSuffix": "; {{count}} special-product stores will be skipped"
+    "previewSkippedSuffix": "; {{count}} stores will be skipped (special product)"
   },
   "syncSheet": {
     "entryTitle": "Sync to other stores",
@@ -275,7 +275,7 @@
     "subLabelOnly": "{{store}} · Prices done, old labels on shelf",
     "subPriceOnly": "{{store}} · Warehouse prices changed",
     "tilePriceUpdate": "Price change",
-    "tilePriceUpdateHint": "Update price",
+    "tilePriceUpdateHint": "Use warehouse price",
     "tileLabelOnly": "Relabel",
     "tileLabelOnlyHint": "Replace label",
     "tileLabelOnlyWideHint": "Print, or mark replaced",
@@ -290,15 +290,15 @@
     "printerReady": "Printer connected, ready to print",
     "printerOffline": "Printer offline",
     "printerConnect": "Connect",
-    "primaryDefault": "Handle now",
-    "primaryOverdue": "Handle overdue ({{count}})",
+    "primaryDefault": "Go to tasks",
+    "primaryOverdue": "Clear overdue ({{count}})",
     "later": "Later",
-    "footer": "Every hour · Stops when all done"
+    "footer": "Reminds hourly · Stops when all done"
   },
   "workbench": {
     "lockStrip": "{{count}} tasks over {{days}} days · Reports locked",
-    "lockAction": "Handle",
-    "lockedTile": "{{title}}, locked. Handle overdue tasks first"
+    "lockAction": "Fix now",
+    "lockedTile": "{{title}}, locked. Clear overdue tasks first"
   },
   "cancelDialog": {
     "title": "Cancel pending tasks",
@@ -309,6 +309,6 @@
     "notePlaceholder": "e.g. test store, no action needed",
     "confirm": "Cancel tasks",
     "descriptionWithCount": "This will cancel the pending tasks for \"{{name}}\" in all stores ({{count}} stores still have it pending).",
-    "scopeNote": "The scope is all stores, not just the current store."
+    "scopeNote": "This applies to all stores, not just this one."
   }
 }

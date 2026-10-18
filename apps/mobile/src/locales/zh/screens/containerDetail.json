@@ -334,5 +334,133 @@
     "locateNotOnPage": "该行不在当前页，请清除搜索和筛选后再定位",
     "exported": "已导出 {{name}}",
     "exportFailed": "导出失败"
+  },
+  "list": {
+    "title": "货柜管理",
+    "filter": "筛选",
+    "create": "新建货柜",
+    "searchPlaceholder": "搜索货柜编号",
+    "clearSearch": "清除搜索",
+    "allStatuses": "全部",
+    "total_one": "共 {{count}} 柜 · {{sort}}",
+    "total_other": "共 {{count}} 柜 · {{sort}}",
+    "pageSummary": "本页 {{pieces}} 件 · {{amount}}",
+    "loadFailed": "货柜加载失败",
+    "loadFailedHint": "下拉刷新重试",
+    "empty": "没有货柜",
+    "emptyHint": "调整筛选条件后再试",
+    "prevPage": "上一页",
+    "nextPage": "下一页",
+    "selected_one": "已选 {{count}} 柜",
+    "selected_other": "已选 {{count}} 柜",
+    "pushHbSales": "推送 HBSales",
+    "itemChip": "货号 {{value}}",
+    "rangeChip": "{{label}} {{range}}",
+    "sort": {
+      "estimated": "预计到库",
+      "actual": "实际到库",
+      "loading": "装柜"
+    },
+    "sortSummary": {
+      "estimated": "按预计到库从新到旧",
+      "actual": "按实际到库从新到旧",
+      "loading": "按装柜从新到旧"
+    },
+    "dateFields": {
+      "loading": "装柜日期",
+      "estimated": "预计到库",
+      "actual": "实际到库"
+    },
+    "dateRange": {
+      "between": "{{from}} 至 {{to}}",
+      "from": "{{from}} 起",
+      "until": "截至 {{to}}"
+    },
+    "insight": {
+      "late_one": "晚 {{count}} 天",
+      "late_other": "晚 {{count}} 天",
+      "early_one": "早 {{count}} 天",
+      "early_other": "早 {{count}} 天",
+      "overdue_one": "已逾期 {{count}} 天",
+      "overdue_other": "已逾期 {{count}} 天",
+      "today": "今天到库",
+      "upcoming_one": "{{count}} 天后",
+      "upcoming_other": "{{count}} 天后"
+    },
+    "card": {
+      "untitled": "未命名货柜",
+      "loaded": "装柜 {{date}}",
+      "exchangeRate": "汇率 {{rate}}",
+      "moreActions": "更多操作",
+      "setStatus": {
+        "0": "设为已装柜",
+        "1": "设为在途",
+        "2": "设为已完成",
+        "7": "设为已取消"
+      },
+      "estimated": "预计到库",
+      "actual": "实际到库",
+      "setDate": "设置",
+      "recordDate": "登记",
+      "editDateA11y": "修改{{label}}，当前 {{value}}",
+      "pieces": "件",
+      "quantity": "数量",
+      "volume": "体积",
+      "select": "选择",
+      "details": "明细"
+    },
+    "createForm": {
+      "title": "创建货柜",
+      "containerNumber": "货柜编号",
+      "loadingDate": "装柜日期",
+      "estimatedArrivalDate": "预计到库日期",
+      "exchangeRate": "汇率",
+      "shippingFee": "运费",
+      "remark": "备注"
+    },
+    "filterSheet": {
+      "title": "筛选货柜",
+      "invalidRange": "{{label}}的开始日期不能晚于结束日期",
+      "showResults": "查看结果",
+      "itemNumber": "货号",
+      "itemNumberPlaceholder": "包含该货号的货柜",
+      "start": "开始",
+      "end": "结束",
+      "any": "不限",
+      "startA11y": "{{label}}开始日期",
+      "endA11y": "{{label}}结束日期",
+      "clearStartA11y": "清除{{label}}开始日期",
+      "clearEndA11y": "清除{{label}}结束日期",
+      "sortTitle": "排序（从新到旧）"
+    },
+    "dateSheet": {
+      "title": "修改到库日期",
+      "notRecorded": "未登记",
+      "notSet": "未设置",
+      "changed": "已修改",
+      "today": "今天",
+      "yesterday": "昨天",
+      "tomorrow": "明天",
+      "plus7Days": "+7 天",
+      "clear": "清空",
+      "actualHint": "登记实际到库不会自动修改货柜状态。"
+    },
+    "messages": {
+      "containerNumberRequired": "货柜编号不能为空",
+      "invalidNumbers": "汇率或运费不是有效数字",
+      "created": "货柜已创建",
+      "createFailed": "创建货柜失败",
+      "statusUpdated": "状态已更新",
+      "statusFailed": "状态更新失败",
+      "arrivalUpdated": "到库日期已更新",
+      "arrivalFailed": "到库日期更新失败",
+      "pushed": "已推送 HBSales",
+      "pushFailed": "推送 HBSales 失败",
+      "selectToPush": "请选择要推送的货柜"
+    }
+  },
+  "errors": {
+    "invalidNumber": "编辑字段存在无效数字",
+    "noChanges": "没有需要保存的修改"
   }
 }

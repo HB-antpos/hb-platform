@@ -78,6 +78,7 @@ import {
   reconcileContainerDetailPartialSave,
   type ContainerDetailEditForm,
 } from "./container-detail-edit-state";
+import { describeContainerError } from "./container-list-logic";
 import {
   peekRememberedContainerDetailPageSize,
   readRememberedContainerDetailPageSize,
@@ -176,10 +177,6 @@ function isExpiredBatchPreviewError(error: unknown) {
     || code === "PREVIEW_TOKEN_EXPIRED";
 }
 
-function errorMessageOf(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 function buildForegroundTokenConflicts(
   baseline: ContainerDetail,
   latest: ContainerDetail,
@@ -212,7 +209,9 @@ function buildForegroundTokenConflicts(
 }
 
 export function ContainerDetailScreen({ containerGuid }: { containerGuid: string }) {
-  const { t } = useAppTranslation("containerDetail");
+  const { t, language } = useAppTranslation("containerDetail");
+  // 中文界面照旧显示错误原文；英文界面不显示后端/本地中文原文，改用对应英文提示。
+  const errorMessageOf = (error: unknown, fallback: string) => describeContainerError(error, fallback, language, t);
   const listSeparator = t("common.listSeparator");
   // 前台恢复回调里要用最新的 t，但不能把 t 放进心跳 effect 的依赖，否则换语言会重建订阅并重复上报在线状态
   const tRef = useRef(t);

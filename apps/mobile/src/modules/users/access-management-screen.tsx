@@ -50,6 +50,7 @@ import type {
   CopyPermissionDirection,
   UserAccessErrorKind,
 } from "./access-management-types";
+import { quoteName } from "@/shared/i18n/punctuation";
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -673,7 +674,7 @@ function AccessManagementPage({
           <Text style={styles.subtitle} numberOfLines={1}>
             {target.name.primary || target.username || t("unknownUser")}
             {target.name.nickname ? (
-              <Text style={styles.subtitleNickname}>{` 「${target.name.nickname}」`}</Text>
+              <Text style={styles.subtitleNickname}>{` ${quoteName(target.name.nickname, language)}`}</Text>
             ) : null}
             {target.username ? ` · @${target.username}` : ""}
           </Text>

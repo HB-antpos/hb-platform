@@ -23,7 +23,7 @@
     "android": "Scan with an Android browser or camera to download the APK. Allow \"Install unknown apps\" on first install."
   },
   "messages": {
-    "notAllowed": "You do not have access to app installation. Ask an administrator for access.",
+    "notAllowed": "You don't have access to the app install page. Ask an admin for access.",
     "copied": "Link copied",
     "actionFailed": "Something went wrong. Please try again."
   },

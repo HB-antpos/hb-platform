@@ -40,6 +40,7 @@ import {
 import { interpolatePermissionCopy as interpolate, permissionQueryKeys, usePermissionCopy, usePermissionItems, usePermissionSession } from "./permission-hooks";
 import { AdminEmpty, AdminError } from "./ui";
 import { identityDate, useIdentitySearch } from "./user-hooks";
+import { labelColon } from "@/shared/i18n/punctuation";
 
 type PermissionUserLite = Pick<IdentityRoleUser, "userGUID" | "username" | "email" | "fullName" | "isActive">;
 
@@ -436,8 +437,8 @@ function PermissionDetailContent({ code }: { code: string }) {
             <Text style={item.description ? styles.body : styles.muted}>{item.description || copy.noDescription}</Text>
             {item.createdAt || item.updatedAt ? (
               <View style={styles.metaBlock}>
-                {item.createdAt ? <Text style={styles.muted}>{`${copy.createdAt}：${identityDate(item.createdAt)}${item.createdBy ? ` · ${item.createdBy}` : ""}`}</Text> : null}
-                {item.updatedAt ? <Text style={styles.muted}>{`${copy.updatedAt}：${identityDate(item.updatedAt)}${item.updatedBy ? ` · ${item.updatedBy}` : ""}`}</Text> : null}
+                {item.createdAt ? <Text style={styles.muted}>{`${copy.createdAt}${labelColon()}${identityDate(item.createdAt)}${item.createdBy ? ` · ${item.createdBy}` : ""}`}</Text> : null}
+                {item.updatedAt ? <Text style={styles.muted}>{`${copy.updatedAt}${labelColon()}${identityDate(item.updatedAt)}${item.updatedBy ? ` · ${item.updatedBy}` : ""}`}</Text> : null}
               </View>
             ) : null}
           </InfoCard>

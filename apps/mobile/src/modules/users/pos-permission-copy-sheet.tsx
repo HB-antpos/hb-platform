@@ -15,6 +15,7 @@ import {
 } from "@/modules/users/pos-terminal-permission-presentation";
 import type { PosTerminalPermissionOption } from "@/modules/users/types";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { clauseSeparator, quoteName } from "@/shared/i18n/punctuation";
 
 interface PosPermissionCopySheetProps {
   storeCode: string;
@@ -134,7 +135,7 @@ export function PosPermissionCopySheet({
               accessibilityState={{ checked: selected }}
               accessibilityLabel={[name, user.username !== name ? user.username : null, detail]
                 .filter(Boolean)
-                .join("，")}
+                .join(clauseSeparator())}
               onPress={() => setSelectedGuid(user.userGUID)}
               style={({ pressed }) => [
                 styles.row,
@@ -150,7 +151,7 @@ export function PosPermissionCopySheet({
                     {name}
                   </Text>
                   {person.nickname ? (
-                    <Text style={styles.rowNickname} numberOfLines={1}>{`「${person.nickname}」`}</Text>
+                    <Text style={styles.rowNickname} numberOfLines={1}>{quoteName(person.nickname)}</Text>
                   ) : null}
                 </View>
                 {detail ? (

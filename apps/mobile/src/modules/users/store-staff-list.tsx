@@ -38,6 +38,7 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { PERMISSIONS } from "@/shared/utils/access";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
+import { labelColon } from "@/shared/i18n/punctuation";
 
 const NO_USERS: StoreUserListItem[] = [];
 
@@ -423,7 +424,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
             active
             // 芯片上用短名「全部分店」，给右边的搜索框留位置；弹层与副标题里仍写完整的「全部已分配分店」。
             label={managedStore?.storeName || tp("storeChip.all")}
-            accessibilityLabel={`${t("currentStore.select")}：${managedStore?.storeName || t("currentStore.allRelated")}`}
+            accessibilityLabel={`${t("currentStore.select")}${labelColon()}${managedStore?.storeName || t("currentStore.allRelated")}`}
             onPress={() => setStorePickerVisible(true)}
           />
           <PeopleSearchBox

@@ -53,6 +53,11 @@ export function buildContainerDetailEditForm(detail: ContainerDetail): Container
   };
 }
 
+/** 本地校验错误带 code：英文界面按 code 显示译文，中文界面仍显示 message 原文。 */
+function editPayloadError(code: "CONTAINER_EDIT_INVALID_NUMBER" | "CONTAINER_EDIT_NO_CHANGES", message: string) {
+  return Object.assign(new Error(message), { code });
+}
+
 export function buildContainerDetailEditPayload(
   detail: ContainerDetail,
   form: ContainerDetailEditForm,
@@ -66,7 +71,7 @@ export function buildContainerDetailEditPayload(
     current: number | undefined,
   ) => {
     const value = parseOptionalNumber(input);
-    if (Number.isNaN(value)) throw new Error("编辑字段存在无效数字");
+    if (Number.isNaN(value)) throw editPayloadError("CONTAINER_EDIT_INVALID_NUMBER", "编辑字段存在无效数字");
     if (value !== undefined && value !== current) {
       payload[field] = value;
       changedFields.push(field);
@@ -94,7 +99,7 @@ export function buildContainerDetailEditPayload(
     payload.IsActive = form.isActive;
     changedFields.push("IsActive");
   }
-  if (!changedFields.length) throw new Error("没有需要保存的修改");
+  if (!changedFields.length) throw editPayloadError("CONTAINER_EDIT_NO_CHANGES", "没有需要保存的修改");
   const tokens = getContainerDetailServerFieldTokens(detail);
   payload.expectedServerFieldTokens = Object.fromEntries(
     changedFields.flatMap((field) => typeof tokens[field] === "string" ? [[field, tokens[field]]] : []),
