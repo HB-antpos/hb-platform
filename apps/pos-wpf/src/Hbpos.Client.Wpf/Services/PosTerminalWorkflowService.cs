@@ -259,11 +259,25 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             var allowAutoAdd = exactMatches.Count == 1;
             if (exactMatches.Count == 0)
             {
-                var metadataMatches = _priceIndex.FindMetadataExactMatches(session.StoreCode, submittedScanText);
-                if (metadataMatches.Count > 0)
+                // 关键逻辑：扫码枪常把「0 开头的 EAN-13」当 UPC-A 去掉前导 0（12 位），而库里按价签的 13 位存放（反之亦然）。
+                // 必须「精确优先、无结果才回退」：生产库里 12 位 X 与 13 位 0+X 分属不同商品的情况真实存在，
+                // 所以只有原样精确查不到时才试前导 0 的另一种写法，绝不把两种写法合并去查。
+                var variantMatches = FindLeadingZeroVariantMatches(session.StoreCode, submittedScanText);
+                if (variantMatches.Count > 0)
                 {
-                    matches = metadataMatches;
-                    matchKind = metadataMatches.Count > 1 ? "metadata-duplicate" : "metadata-only";
+                    matches = variantMatches;
+                    // 与精确命中同口径：唯一命中才自动加购，多个商品命中走待选队列让收银员选。
+                    allowAutoAdd = variantMatches.Count == 1;
+                    matchKind = variantMatches.Count > 1 ? "lookup-variant-multiple" : "lookup-variant";
+                }
+                else
+                {
+                    var metadataMatches = _priceIndex.FindMetadataExactMatches(session.StoreCode, submittedScanText);
+                    if (metadataMatches.Count > 0)
+                    {
+                        matches = metadataMatches;
+                        matchKind = metadataMatches.Count > 1 ? "metadata-duplicate" : "metadata-only";
+                    }
                 }
             }
 
@@ -304,6 +318,19 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             $"{FormatTraceId(traceId)}barcodeInfo={BarcodeLogFormatter.FormatBarcodeInfo(submittedScanText)} storeCode={session.StoreCode} source={source} hit={matchKind} matchCount={matchCount} autoAdded={FormatBool(autoAdded)} cartLines={_cart.Lines.Count} exactLookupElapsedMs={exactLookupElapsedMs} searchElapsedMs={searchElapsedMs} totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
 
         return result;
+    }
+
+    /// <summary>
+    /// 用前导 0 的另一种写法再精确查一次本地索引；只在原样精确查找无结果后由调用方调用。
+    /// 非「纯数字 12/13 位」的条码没有变体，直接返回空。
+    /// </summary>
+    private IReadOnlyList<SellableItemDto> FindLeadingZeroVariantMatches(string storeCode, string scanText)
+    {
+        // 索引查找会先 Trim，这里与之对齐，避免带空白的扫码文本因为不是纯数字而错过变体。
+        var variant = BarcodeVariants.GetLeadingZeroVariant(scanText.Trim());
+        return variant is null
+            ? []
+            : _priceIndex.FindExactMatches(storeCode, variant);
     }
 
     public Task<PosTerminalWorkflowResult> ProcessScanAsync(
