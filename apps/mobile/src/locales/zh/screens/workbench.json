@@ -65,7 +65,8 @@
     "deviceManagement": "设备管理",
     "appInstall": "App 安装",
     "appDownloads": "版本发布中心",
-    "wpfVersions": "WPF 版本管理"
+    "wpfVersions": "WPF 版本管理",
+    "supportFaq": "使用帮助"
   },
   "allFunctions": {
     "title": "全部功能",
@@ -80,7 +81,8 @@
     "emptyTitle": "暂无可用功能",
     "emptyDescription": "当前会话未获授权任何业务功能。为保护数据，工作台不会展示未授权入口。",
     "errorTitle": "功能菜单加载失败",
-    "errorDescription": "当前仅显示安全的空工作台。请重试加载权限菜单。"
+    "errorDescription": "当前仅显示安全的空工作台。请重试加载权限菜单。",
+    "supportFaqOpenFailed": "无法打开使用帮助页面，请检查网络后重试。"
   },
   "actions": {
     "retry": "重新加载"

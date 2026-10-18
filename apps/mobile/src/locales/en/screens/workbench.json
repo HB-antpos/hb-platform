@@ -65,7 +65,8 @@
     "deviceManagement": "Device management",
     "appInstall": "Install app",
     "appDownloads": "Release Centre",
-    "wpfVersions": "WPF versions"
+    "wpfVersions": "WPF versions",
+    "supportFaq": "Help"
   },
   "allFunctions": {
     "title": "All tools",
@@ -80,7 +81,8 @@
     "emptyTitle": "No tools available",
     "emptyDescription": "This session has no authorised tools. Nothing is shown here to protect your data.",
     "errorTitle": "Couldn't load your tools",
-    "errorDescription": "No tools are shown until your access loads. Tap Retry."
+    "errorDescription": "No tools are shown until your access loads. Tap Retry.",
+    "supportFaqOpenFailed": "Couldn't open the help page. Check your connection and try again."
   },
   "actions": {
     "retry": "Retry"
