@@ -1,7 +1,7 @@
 {
   "appName": "HB Group",
   "loading": "Loading...",
-  "notLoggedIn": "Not signed in",
+  "notLoggedIn": "Not logged in",
   "none": "None",
   "na": "--",
   "grade": "Grade {{grade}}",
@@ -25,8 +25,8 @@
     "pageSizeHint": "Changing this returns to page 1"
   },
   "actions": {
-    "login": "Login",
-    "logout": "Logout",
+    "login": "Log in",
+    "logout": "Log out",
     "cancel": "Cancel",
     "back": "Back",
     "close": "Close",
@@ -50,14 +50,14 @@
   "tabs": {
     "workbench": "Home",
     "scan": "Scan",
-    "checkIn": "Check in",
+    "checkIn": "Clock in",
     "reports": "Reports",
     "me": "Me",
     "unreadHitsLabel": "{{label}}, {{count}} unread unwelcome hits",
     "home": "Home",
     "store": "Store",
     "orders": "Orders",
-    "salesOrders": "Sales Records",
+    "salesOrders": "Sales records",
     "cart": "Cart",
     "warehouse": "Products & locations",
     "containers": "Containers",
@@ -67,28 +67,28 @@
     "containerNewProducts": "HB new arrivals",
     "legacyEmployeeLogs": "Operation logs",
     "dailyCloses": "Daily closes",
-    "domesticPurchase": "China Purchase",
-    "localSupplierInvoices": "AU Invoices",
+    "domesticPurchase": "China purchasing",
+    "localSupplierInvoices": "Local supplier invoices",
     "installmentOrders": "Lay-bys",
     "advertisements": "Advertisements",
     "promotions": "Promotions",
-    "productReport": "Product Report",
+    "productReport": "Product report",
     "storeVouchers": "Vouchers",
     "storeCash": "Cash",
-    "seasonalCards": "Seasonal Cards",
+    "seasonalCards": "Seasonal cards",
     "attendance": "Attendance",
     "attendancePersonal": "Attendance",
-    "attendanceManagement": "Attendance Admin",
+    "attendanceManagement": "Attendance management",
     "productQuery": "Products",
     "productInsights": "Product activity",
     "priceUpdates": "Prices & labels",
-    "users": "People",
-    "userAdmin": "User administration",
+    "users": "Staff",
+    "userAdmin": "User management",
     "cashRegisterUsers": "Cashier barcodes",
     "roles": "Roles",
     "permissions": "Permissions",
-    "employeeProfile": "Employee",
-    "employeeProfileReview": "Profile Review",
+    "employeeProfile": "My profile",
+    "employeeProfileReview": "Profile reviews",
     "faceHub": "Face matching",
     "faceUnwelcome": "Unwelcome list",
     "faceMatchSettings": "Face match settings",
@@ -97,8 +97,8 @@
     "deviceManagement": "Devices",
     "settings": "Settings",
     "appInstall": "Install app",
-    "appDownloads": "Release Center",
-    "wpfVersions": "WPF Versions"
+    "appDownloads": "Release Centre",
+    "wpfVersions": "WPF versions"
   },
   "language": {
     "title": "Language",
@@ -114,20 +114,20 @@
     "dragToHide": "Drop here to hide",
     "quickJumpTitle": "Quick navigation",
     "recent": "Recent",
-    "workbench": "Workbench",
+    "workbench": "Home",
     "settings": "Settings",
     "hide": "Hide floating button",
     "close": "Close quick navigation",
-    "menuUnavailable": "The feature list is unavailable right now. You can go back to the Workbench.",
+    "menuUnavailable": "The feature list is unavailable right now. You can go back to Home.",
     "hiddenToast": "Floating language button hidden. Turn it back on in Settings › Preferences",
     "undo": "Undo"
   },
   "labels": {
-    "itemNumber": "Item",
-    "importPrice": "Import price",
+    "itemNumber": "Item no.",
+    "importPrice": "Cost price",
     "retailPrice": "Retail price",
     "recentOrder": "Last order",
-    "minOrder": "Min",
+    "minOrder": "MOQ",
     "addToCart": "Add to cart",
     "editCartQuantity": "Edit order quantity {{quantity}}",
     "autoAddShort": "Auto add",
@@ -153,7 +153,7 @@
     "printerPairingUnavailable": "This installed app version cannot start pairing. Install the updated app or pair the printer in Android Bluetooth settings first.",
     "printerConnectTimeout": "The printer is paired, but the connection timed out. Make sure it is on and not connected to another device, then retry.",
     "timeout": "The request timed out. Please try again.",
-    "unauthorized": "Your session has expired or access is not available. Please sign in again.",
+    "unauthorized": "Your session has expired or you don't have access. Log in again.",
     "server": "The server is temporarily unavailable. Please try again later.",
     "requestFailed": "Request failed. Please try again."
   },
@@ -163,10 +163,10 @@
     "cameraModeSingle": "Single scan",
     "cameraModeContinuous": "Continuous scan",
     "cameraModeLabel": "Scan mode",
-    "cameraSingleHint": "Close the camera after one scan.",
-    "cameraContinuousHint": "Keep the camera open after scanning.",
+    "cameraSingleHint": "The camera closes after one scan.",
+    "cameraContinuousHint": "The camera stays open after each scan.",
     "addedByCamera": "Camera scan added to cart",
-    "addedByScanner": "Scanner input added to cart",
+    "addedByScanner": "Scanned item added to cart",
     "selectStoreFirst": "Please select a store before scanning.",
     "lookupInProgress": "Looking up the barcode",
     "notFound": "No matching product found",
@@ -190,12 +190,12 @@
     "branchCount": "{{count}} stores",
     "detailCount": "{{count}} rows",
     "freshness": {
-      "lastUpdated": "Latest statistics: {{time}}",
+      "lastUpdated": "Last updated: {{time}}",
       "running": "Updating",
       "skipped": "Update skipped",
       "failed": "Update failed",
-      "noSuccess": "No successful statistics yet",
-      "unavailable": "Statistics time unavailable"
+      "noSuccess": "Not updated yet",
+      "unavailable": "Last update time unavailable"
     },
     "periods": {
       "day": "Day",
@@ -245,8 +245,8 @@
       "noCashierEnabledStores": "No cashier-enabled stores",
       "refreshingStatistics": "Refreshing statistics automatically...",
       "statisticsIncomplete": "Statistics are still being prepared. Please retry.",
-      "comparePending": "Comparison backfilling",
-      "comparePendingNotice": "Last-year figures are still being backfilled and show as “—”. Refresh later to fill them in.",
+      "comparePending": "LY figures still updating",
+      "comparePendingNotice": "Last-year figures are still updating, so LY and growth show “—” for now. Refresh later to fill them in.",
       "errorTitle": "Failed to load revenue data",
       "showingSnapshot": "Showing complete snapshot from {{time}} while refreshing"
     },
@@ -300,15 +300,15 @@
   "productReport": {
     "title": "Product Report",
     "tabs": {
-      "australia": "Australian Suppliers",
-      "china": "China Suppliers"
+      "australia": "Australian suppliers",
+      "china": "China suppliers"
     },
     "filters": {
       "store": "Store",
       "allStores": "All stores",
       "startDate": "Start date",
       "endDate": "End date",
-      "productSearch": "Item or barcode"
+      "productSearch": "Item no. or barcode"
     },
     "shortcuts": {
       "today": "Today",
@@ -320,14 +320,14 @@
     },
     "sections": {
       "suppliers": "Suppliers",
-      "products": "Product Details",
-      "pageSummary": "Page Product Summary"
+      "products": "Product details",
+      "pageSummary": "Page summary"
     },
     "pageSummaryCaption": "Rows {{start}}-{{end}} of {{total}}",
     "columns": {
-      "itemNumber": "Item",
+      "itemNumber": "Item no.",
       "image": "Image",
-      "product": "Item / Name",
+      "product": "Item no. / Name",
       "name": "Name",
       "quantity": "Qty",
       "amount": "Amount",
@@ -350,7 +350,7 @@
       "compare": "LY"
     },
     "actions": {
-      "branchDetail": "Branches",
+      "branchDetail": "Stores",
       "filterProducts": "Filter",
       "clearSupplier": "Clear supplier",
       "searchProduct": "Search",
@@ -362,7 +362,7 @@
       "invalidDate": "Use YYYY-MM-DD dates and keep the start date before the end date.",
       "emptySuppliers": "No supplier data",
       "emptyProducts": "No product details",
-      "emptySupplierBranches": "No supplier branch data",
+      "emptySupplierBranches": "No store data for this supplier",
       "emptyProductSearch": "No matching product details",
       "costPending": "Cost pending",
       "costNoActivity": "No activity",
@@ -370,8 +370,8 @@
       "error": "Failed to load. Please try again."
     },
     "drilldown": {
-      "supplier": "Supplier Branch Data",
-      "product": "Product Branch Data"
+      "supplier": "Supplier by store",
+      "product": "Product by store"
     },
     "sort": {
       "accessibilityLabel": "Sort by {{column}}, currently {{state}}",
@@ -384,7 +384,7 @@
       "shareOfTotal": "Share of total",
       "grossMarginRate": "China margin",
       "pointsValue": "{{value}} pts",
-      "branchSection": "China Share by Store",
+      "branchSection": "China share by store",
       "branchFormula": "China sales ÷ store revenue",
       "branch": "Store",
       "branchRevenue": "Revenue",
@@ -438,7 +438,7 @@
   },
   "orderRow": {
     "minOrder": "MOQ {{quantity}}",
-    "importPrice": "Import",
+    "importPrice": "Cost",
     "retailPrice": "Retail",
     "unitPrice": "{{amount}} / pc",
     "subtotal": "Subtotal",
@@ -449,7 +449,7 @@
     "increase": "Increase by one MOQ",
     "remove": "Remove from cart",
     "justScanned": "Just scanned",
-    "zeroImportPrice": "Import price 0"
+    "zeroImportPrice": "Cost price $0"
   },
   "orderNotice": {
     "addedNamed": "Added {{name}}",

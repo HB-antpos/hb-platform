@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { Icon, Text } from "react-native-paper";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { quoteName } from "@/shared/i18n/punctuation";
 
 /**
  * 「人员管理」统一 UI 原语（设计稿 A1–A6 的共用部件）。
@@ -277,7 +278,7 @@ export function PersonRow({
       <View style={styles.personMain}>
         <View style={styles.personNameRow}>
           <Text style={styles.personName} numberOfLines={1}>{name}</Text>
-          {nickname ? <Text style={styles.personNickname} numberOfLines={1}>{`「${nickname}」`}</Text> : null}
+          {nickname ? <Text style={styles.personNickname} numberOfLines={1}>{quoteName(nickname)}</Text> : null}
           {nameBadges}
         </View>
         <Text style={styles.personMeta} numberOfLines={1}>{meta}</Text>

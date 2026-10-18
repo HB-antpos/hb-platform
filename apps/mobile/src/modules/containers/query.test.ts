@@ -650,7 +650,7 @@ assert.equal(overview.rowCount, 40);
 assert.equal(overview.etaDate, "2026-10-10");
 assert.equal(overview.actualArrivalDate, undefined);
 assert.equal(overview.statsMissing, false);
-assert.deepEqual(overview.arrivalInsight, { text: "2 天后", tone: "muted", target: "estimated" });
+assert.deepEqual(overview.arrivalInsight, { kind: "upcoming", days: 2, tone: "muted", target: "estimated" });
 const sparseOverview = buildContainerDetailOverview({}, undefined);
 assert.equal(sparseOverview.totalAmount, undefined);
 assert.equal(sparseOverview.loadRatePercent, undefined);

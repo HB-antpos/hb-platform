@@ -474,7 +474,7 @@ export function MinorEmploymentScreen() {
                   buttons={[
                     {
                       value: "yes",
-                      label: t("form.school.dayAttend", { day: d }),
+                      label: t("form.school.dayAttend", { day: t(`weekdays.${d}`) }),
                       disabled: locked,
                     },
                     {
@@ -1161,7 +1161,7 @@ function EmployerCard({
         <TextInput
           key={d}
           mode="outlined"
-          label={t("form.otherEmployer.dayHours", { day: d })}
+          label={t("form.otherEmployer.dayHours", { day: t(`weekdays.${d}`) })}
           value={employer.weeklyHours[d] ?? ""}
           onChangeText={(v) =>
             onChange({

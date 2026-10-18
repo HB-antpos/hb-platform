@@ -12,6 +12,7 @@ import {
   buildPosPermissionChangeRows,
 } from "@/modules/users/pos-terminal-permissions-view";
 import { HB_COLORS } from "@/shared/theme/tokens";
+import { clauseSeparator } from "@/shared/i18n/punctuation";
 
 interface PosPermissionChangesSheetProps {
   changes: PosPermissionChanges;
@@ -97,7 +98,7 @@ export function PosPermissionChangesSheet({
               accessible
               accessibilityLabel={[title, row.groupLabel, showRisk ? t("badges.highRisk") : null]
                 .filter(Boolean)
-                .join("，")}
+                .join(clauseSeparator())}
             >
               <View style={[styles.sign, { backgroundColor: tone.bg }]}>
                 <Icon

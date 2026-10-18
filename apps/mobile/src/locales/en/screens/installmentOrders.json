@@ -1,6 +1,6 @@
 {
-  "title": "Lay-by Orders",
-  "subtitle": "View lay-by orders and payment records by store, status, customer phone, customer name, and date range",
+  "title": "Lay-bys",
+  "subtitle": "View lay-bys and payments by store, status, customer phone, customer name and date range",
   "filters": {
     "storeCode": "Store",
     "status": "Status",
@@ -33,8 +33,8 @@
     "unknown": "Unknown status"
   },
   "cancellationKinds": {
-    "refundCancel": "Refund cancellation",
-    "voidCancel": "Direct void",
+    "refundCancel": "Cancelled with refund",
+    "voidCancel": "Voided",
     "unknown": "Unknown cancellation type"
   },
   "labels": {
@@ -45,8 +45,8 @@
     "customerPhone": "Customer phone",
     "customerName": "Customer name",
     "totalAmount": "Total",
-    "minimumDownPayment": "Minimum down payment",
-    "downPaymentAmount": "Down payment",
+    "minimumDownPayment": "Minimum deposit",
+    "downPaymentAmount": "Deposit",
     "paidAmount": "Paid",
     "balanceAmount": "Balance",
     "paymentRecords": "Payment records",
@@ -56,18 +56,18 @@
     "cashier": "Cashier",
     "deviceCode": "Device",
     "reference": "Reference",
-    "orderLines": "Order lines",
+    "orderLines": "Items",
     "quantity": "Quantity",
     "unitPrice": "Unit price",
     "discountAmount": "Discount",
     "lookupCode": "Lookup code",
-    "itemNumber": "Item number",
+    "itemNumber": "Item no.",
     "note": "Order note",
-    "pickupInfo": "Pickup information",
+    "pickupInfo": "Pickup details",
     "pickedUpAt": "Pickup time",
-    "pickedUpBy": "Picked up by",
+    "pickedUpBy": "Processed by",
     "pickupNote": "Pickup note",
-    "cancellationInfo": "Cancellation information",
+    "cancellationInfo": "Cancellation details",
     "cancellationKind": "Cancellation type",
     "cancelledAt": "Cancellation time",
     "cancelledBy": "Cancelled by",
@@ -82,6 +82,6 @@
     "loadFailed": "Failed to load lay-by orders",
     "detailsLoadFailed": "Failed to load lay-by order details",
     "paymentRecordsEmpty": "No payment records",
-    "orderLinesEmpty": "No order lines"
+    "orderLinesEmpty": "No items"
   }
 }

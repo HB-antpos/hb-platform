@@ -6,7 +6,7 @@
     "authorized": "{{count}} authorised stores · {{selected}} selected"
   },
   "search": {
-    "placeholder": "Order no. / item no. / barcode / product"
+    "placeholder": "Order no. / item no. / barcode / name"
   },
   "actions": {
     "back": "Back",
@@ -14,8 +14,8 @@
     "scan": "Scan",
     "retry": "Retry",
     "close": "Close",
-    "toggleSort": "Toggle time sort",
-    "retryLoadMore": "Load failed, tap to retry"
+    "toggleSort": "Change sort order",
+    "retryLoadMore": "Couldn't load more. Tap to retry."
   },
   "chips": {
     "allBranches": "All stores",
@@ -49,7 +49,7 @@
     "allLoaded": "All {{total}} orders shown"
   },
   "card": {
-    "counts": "{{sku}} SKU · {{items}} items",
+    "counts": "{{sku}} SKUs · {{items}} items",
     "matched": "Matched {{code}} {{name}} ×{{quantity}}",
     "matchedMore": " +{{count}} more"
   },

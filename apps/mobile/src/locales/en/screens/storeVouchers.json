@@ -1,6 +1,6 @@
 {
-  "title": "Store Vouchers",
-  "subtitle": "View vouchers, usage ledger, and related orders by store, status, and date range",
+  "title": "Store vouchers",
+  "subtitle": "View vouchers, usage history and linked orders by store, status and date range",
   "filters": {
     "storeCode": "Store",
     "status": "Status",
@@ -28,21 +28,21 @@
     "voucherQrCode": "Voucher QR code",
     "store": "Store",
     "status": "Status",
-    "amount": "Amount",
+    "amount": "Value",
     "remainingAmount": "Remaining",
     "issuedAt": "Issued at",
     "updatedAt": "Updated at",
     "expiredAt": "Expires at",
     "supplier": "Supplier",
-    "ledger": "Issue / usage ledger",
-    "relatedOrders": "Related orders",
+    "ledger": "Issue & usage history",
+    "relatedOrders": "Linked orders",
     "action": "Action",
     "actionTime": "Action time",
     "orderTime": "Order time",
     "orderNo": "Order no.",
     "orderAmount": "Order amount",
-    "remainingAfter": "Remaining after",
-    "operator": "Operator",
+    "remainingAfter": "Balance after",
+    "operator": "Staff",
     "reference": "Reference",
     "customer": "Customer",
     "remark": "Remark"
@@ -55,7 +55,7 @@
     "empty": "No vouchers found",
     "loadFailed": "Failed to load vouchers",
     "detailsLoadFailed": "Failed to load voucher details",
-    "ledgerEmpty": "No ledger records",
-    "relatedOrdersEmpty": "No related orders"
+    "ledgerEmpty": "No history yet",
+    "relatedOrdersEmpty": "No linked orders"
   }
 }

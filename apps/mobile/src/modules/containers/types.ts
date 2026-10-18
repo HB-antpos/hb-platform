@@ -200,7 +200,12 @@ export interface ContainerDetailOverview {
   etaDate?: string;
   actualArrivalDate?: string;
   /** 传入 today 时才有：逾期/今天/N 天后/晚到/早到 提示 */
-  arrivalInsight: { text: string; tone: "warning" | "muted" | "accent"; target: "estimated" | "actual" } | null;
+  arrivalInsight: {
+    kind: "late" | "early" | "overdue" | "today" | "upcoming";
+    days: number;
+    tone: "warning" | "muted" | "accent";
+    target: "estimated" | "actual";
+  } | null;
   /** 本柜新品数（tagStats.new） */
   newCount?: number;
   /** 已有商品数（tagStats.existing） */

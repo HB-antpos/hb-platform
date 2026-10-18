@@ -36,6 +36,7 @@ export function confirmationLabels(copy: Copy): ConfirmationLabels {
     minimumBuild: copy.summary.minimumBuild,
     notes: copy.summary.notes,
     scope: copy.summary.scope,
+    colon: copy.summary.colon,
   };
 }
 

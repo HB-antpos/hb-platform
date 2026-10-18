@@ -112,7 +112,7 @@ assertDeepEqual(
   getSeasonalCardHistoryCardTypeOptions(),
   [
     { key: "1", label: "Christmas" },
-    { key: "2", label: "Valentines Day" },
+    { key: "2", label: "Valentine's Day" },
     { key: "3", label: "Mother's Day" },
     { key: "4", label: "Easter" },
     { key: "5", label: "Father's Day" },
@@ -124,13 +124,13 @@ assertEqual(
   getSeasonalCardLocalizedTypeLabel(2, "情人节", (key) =>
     ({
       "cardTypes.1": "Christmas",
-      "cardTypes.2": "Valentines Day",
+      "cardTypes.2": "Valentine's Day",
       "cardTypes.3": "Mother's Day",
       "cardTypes.4": "Easter",
       "cardTypes.5": "Father's Day",
     })[key] ?? key
   ),
-  "Valentines Day",
+  "Valentine's Day",
   "recognized card types should prefer the current locale label over backend cardTypeName"
 );
 

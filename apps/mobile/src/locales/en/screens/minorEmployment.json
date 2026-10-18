@@ -36,7 +36,7 @@
     "otherWork": "Other work",
     "commutePlan": "Commute and pickup",
     "formData": "CE1 form",
-    "fallback": "Information to complete",
+    "fallback": "Missing information",
     "heading": "Fields to complete"
   },
   "guardianAmended": {
@@ -87,7 +87,7 @@
       "childPostcode": "Child's postcode",
       "childPhone": "Child's phone",
       "parentName": "Parent name",
-      "parentRelationship": "Parent relationship",
+      "parentRelationship": "Relationship to child",
       "parentPhone": "Parent phone (required before signing)",
       "parentEmail": "Parent email (required before signing)",
       "parentAddress": "Parent address",
@@ -120,7 +120,7 @@
       "addTerm": "Add term",
       "holidayStart": "School holiday start",
       "holidayEnd": "School holiday end",
-      "holidayLabel": "Holiday label",
+      "holidayLabel": "Holiday name",
       "removeHoliday": "Remove holiday",
       "addHoliday": "Add school holiday",
       "pupilFreeDate": "Pupil-free date",
@@ -130,7 +130,7 @@
     "flexible": {
       "confirmed": "Teacher confirmed",
       "notConfirmed": "Not yet confirmed",
-      "note": "Please have the school or flexible-learning teacher check the work and class arrangements."
+      "note": "Ask the school or flexible-learning teacher to check the work and class schedules."
     },
     "employer": {
       "companyName": "Employer legal name",
@@ -151,13 +151,13 @@
       "plannedStart": "Planned start (ISO, with time zone offset)",
       "plannedEnd": "Planned end (ISO, with time zone offset)",
       "plannedHours": "Planned hours",
-      "removePlanned": "Remove planned interval",
-      "addPlanned": "Add planned interval",
+      "removePlanned": "Remove planned period",
+      "addPlanned": "Add planned period",
       "actualStart": "Actual start (ISO, with time zone offset)",
       "actualEnd": "Actual end (ISO, with time zone offset)",
       "actualHours": "Actual hours",
-      "removeActual": "Remove actual interval",
-      "addActual": "Add actual interval",
+      "removeActual": "Remove actual period",
+      "addActual": "Add actual period",
       "source": "Source"
     },
     "commute": {
@@ -185,15 +185,15 @@
       "title": "Waiting for guardian signature",
       "emailSent": "The signing email has been sent to the guardian's email address.",
       "emailFailed": "The signing email could not be sent. Share the link instead or resend it.",
-      "linkGenerated": "A link has been generated. Please send it to the guardian.",
+      "linkGenerated": "Link created. Send it to the guardian.",
       "verified": "The guardian opened the link and verified with the email code. Waiting for their signature.",
       "notVerified": "After opening the link, the guardian must enter the code sent to their email to view and sign.",
-      "expired": "The link has expired. Please resend it."
+      "expired": "The link has expired. Resend it."
     },
     "invite": {
       "emailSent": "The signing email was sent to {{email}}. Ask the guardian to check their inbox (it may be in spam); after opening the link they will receive a second email with a verification code.",
       "guardianEmail": "the guardian's email",
-      "emailFailed": "The email failed to send: {{error}}. You can forward the link below to the guardian.",
+      "emailFailed": "Couldn't send the email: {{error}}. You can forward the link below to the guardian.",
       "linkNote": "The guardian must still enter the code sent to their email after opening it; only the guardian can complete the signature."
     },
     "errors": {
@@ -247,14 +247,14 @@
       "guardianAmended": "Guardian edits at signing",
       "guardianAmendedValue": "{{fields}} (see history for before and after)",
       "backupContact": "Backup contact",
-      "contactCompleteness": "Contact details completeness",
+      "contactCompleteness": "Contact details",
       "complete": "Complete",
       "incomplete": "Needs more information",
       "school": "School",
       "schoolContact": "School contact",
       "weeklySchedule": "Weekly school schedule",
-      "day": "Day {{day}}",
-      "dayAttend": "Day {{day}} (school day)",
+      "day": "{{day}}",
+      "dayAttend": "{{day}} (school day)",
       "timetable": "Timetable",
       "termsHeading": "Terms, school holidays and pupil-free days",
       "term": "Term: {{range}}",
@@ -267,9 +267,9 @@
       "weeklyHours": "Weekly hours",
       "dayHours": "{{day}}: {{hours}} h",
       "dayHoursSeparator": "; ",
-      "planned": "Planned intervals",
+      "planned": "Planned periods",
       "plannedN": "Planned {{n}}",
-      "actual": "Actual intervals",
+      "actual": "Actual periods",
       "actualN": "Actual {{n}}",
       "interval": "{{start}}–{{end}} ({{hours}} h)",
       "afterSchoolToStore": "School to store",
@@ -278,7 +278,7 @@
       "transportMode": "Transport mode",
       "pickupPerson": "Pickup person",
       "latestTransport": "Latest transport",
-      "latestWorkEnd": "Latest work end",
+      "latestWorkEnd": "Latest finish time",
       "submittedAt": "Submitted at",
       "reviewedAt": "Reviewed at",
       "reviewComment": "Review comment"
@@ -287,25 +287,34 @@
     "historyFailed": "Failed to load history. Try refreshing later.",
     "audit": "Audit: {{action}} · {{actor}} · {{at}} · {{comment}}",
     "actions": {
-      "document": "View read-only original",
+      "document": "View original (read-only)",
       "approve": "Approve",
       "returnForCorrection": "Return for correction"
     },
     "alerts": {
-      "approveFailed": "Review failed",
-      "returnFailed": "Return failed",
-      "versionChanged": "The version has changed. Please refresh.",
+      "approveFailed": "Couldn't approve",
+      "returnFailed": "Couldn't return",
+      "versionChanged": "This submission has changed. Refresh and try again.",
       "downloadFailed": "Failed to download file",
-      "tryLater": "Please try again later."
+      "tryLater": "Try again later."
     },
-    "documentDialogTitle": "View minor employment original",
+    "documentDialogTitle": "Original minor employment document",
     "dialog": {
       "title": "Return for correction",
-      "hint": "Select the fields that need completing and enter a required comment.",
+      "hint": "Select the fields that need more information and add a comment (required).",
       "comment": "Return comment (required)",
       "cancel": "Cancel",
       "confirm": "Confirm return",
       "validation": "Select fields and enter a return comment."
     }
+  },
+  "weekdays": {
+    "Sunday": "Sunday",
+    "Monday": "Monday",
+    "Tuesday": "Tuesday",
+    "Wednesday": "Wednesday",
+    "Thursday": "Thursday",
+    "Friday": "Friday",
+    "Saturday": "Saturday"
   }
 }

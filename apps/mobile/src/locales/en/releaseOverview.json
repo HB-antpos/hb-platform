@@ -60,7 +60,7 @@
   "recent": {
     "title": "Recent policy changes",
     "empty": "No policy changes yet",
-    "unknownOperator": "Unknown"
+    "unknownOperator": "Unknown user"
   },
   "errors": {
     "allFailed": "Couldn't load rollout status",

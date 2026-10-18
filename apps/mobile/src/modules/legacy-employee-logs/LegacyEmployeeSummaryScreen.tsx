@@ -29,6 +29,7 @@ import {
   type LegacyRouteParams,
 } from "./logic";
 import type { LegacyEmployeeSummary, LegacyEmployeeSummaryResult, LegacyLogFilters, LogSource } from "./types";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 const SORTS: LegacyEmployeeSort[] = ["abnormal", "rate", "amount"];
 
@@ -167,7 +168,7 @@ function SummaryContent({
         <View style={styles.row}>
           <Text style={styles.name}>{item.employeeName || item.employeeId || "-"}</Text>
           <Text numberOfLines={1} style={styles.where}>
-            {[item.storeCodes.map((code) => storeDisplayName(code, storeNames)).join("、"), item.deviceCodes.join("、")].filter(Boolean).join(" · ")}
+            {[item.storeCodes.map((code) => storeDisplayName(code, storeNames)).join(listSeparator()), item.deviceCodes.join(listSeparator())].filter(Boolean).join(" · ")}
           </Text>
           {item.amountImpact > 0 ? <Text style={[styles.amount, LEGACY_UI.mono]}>−{item.amountImpact.toFixed(2)}</Text> : null}
         </View>

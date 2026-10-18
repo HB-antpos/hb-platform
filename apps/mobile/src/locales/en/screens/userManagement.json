@@ -1,5 +1,5 @@
 {
-  "title": "Staff Management",
+  "title": "Staff management",
   "searchPlaceholder": "Search username, name, email, or phone",
   "currentStore": {
     "label": "Current store",
@@ -7,14 +7,14 @@
     "empty": "No store selected",
     "allRelated": "All assigned stores",
     "select": "Select store",
-    "helper": "Choose an assigned store to view staff. Only manageable stores can create, edit, disable, or reset passwords.",
+    "helper": "Choose an assigned store to view its staff. You can only add, edit, disable or reset passwords at stores you manage.",
     "readOnlyHelper": "This store is view-only. Staff accounts cannot be changed here.",
     "manageableBadge": "Manage",
     "viewOnlyBadge": "View only"
   },
   "actions": {
     "refresh": "Refresh",
-    "create": "Add employee",
+    "create": "Add staff member",
     "edit": "Edit",
     "save": "Save",
     "cancel": "Cancel",
@@ -24,11 +24,11 @@
     "disable": "Disable",
     "resetPassword": "Reset password",
     "confirmReset": "Reset",
-    "sendPasswordSetupEmail": "Send password set-up email",
+    "sendPasswordSetupEmail": "Send password setup email",
     "saveEmailAndSend": "Save email and send"
   },
   "posPermissions": {
-    "title": "POS access",
+    "title": "POS permissions",
     "unknownUser": "Unknown staff member",
     "unknownStore": "Unknown store",
     "loading": "Loading POS permissions...",
@@ -38,7 +38,7 @@
     },
     "mode": {
       "inherited": "Role default",
-      "override": "Store custom"
+      "override": "Store-specific"
     },
     "actions": {
       "back": "Back",
@@ -56,7 +56,7 @@
       "senior": "Senior cashier",
       "all": "All",
       "none": "Clear",
-      "copy": "Copy colleague"
+      "copy": "Copy from colleague"
     },
     "stats": {
       "enabledLabel": "Enabled",
@@ -134,7 +134,7 @@
       "listFailed": "Could not load colleagues. Try again later.",
       "empty": "No colleagues at this store can be copied",
       "noMatch": "No matching colleagues",
-      "unavailable": "The store code is missing, so colleagues cannot be listed. Reopen this page from Staff Management."
+      "unavailable": "The store code is missing, so colleagues can't be listed. Reopen this page from Staff management."
     },
     "unsaved": {
       "title": "Discard unsaved changes?",
@@ -160,13 +160,13 @@
     "noResults": "No permissions match",
     "errors": {
       "invalidTitle": "Permission details are incomplete",
-      "invalidDescription": "The staff member or store identifier is missing. Open this page again from Staff Management.",
+      "invalidDescription": "The staff member or store is missing. Open this page again from Staff management.",
       "unauthorizedTitle": "Your session has expired",
-      "unauthorizedDescription": "Sign in again before managing POS permissions.",
+      "unauthorizedDescription": "Log in again before managing POS permissions.",
       "forbiddenTitle": "You cannot manage this account's POS permissions",
       "forbiddenDescription": "Your account does not have permission for this action, and you cannot change your own POS permissions. The server still validates privileged targets.",
       "notFoundTitle": "The staff-store assignment has changed",
-      "notFoundDescription": "This POS permission assignment no longer exists. The staff member may have moved stores, been disabled, or been unassigned. Return to Staff Management and refresh.",
+      "notFoundDescription": "This POS permission assignment no longer exists. The staff member may have moved stores, been disabled or been removed from the store. Go back to Staff management and refresh.",
       "networkTitle": "Could not load POS permissions",
       "networkDescription": "The server cannot be reached right now. Check your connection and try again."
     },
@@ -174,7 +174,7 @@
     "emptyDescription": "The server has no assignable permissions for this staff member and store. If this store has a custom setting, you can still restore the role default from More."
   },
   "accessManagement": {
-    "title": "Access Management",
+    "title": "Account access",
     "unknownUser": "Unknown staff member",
     "loading": "Loading account access...",
     "identity": {
@@ -188,7 +188,7 @@
       "saveStores": "Save stores",
       "saveRoles": "Save roles",
       "savePermissions": "Save permissions",
-      "openPos": "POS access"
+      "openPos": "POS permissions"
     },
     "sections": {
       "stores": "Store access",
@@ -207,15 +207,15 @@
       "unassignedCompact": "None",
       "view": "View",
       "manage": "Manage",
-      "adminOnlyManage": "Only an administrator can grant store management access.",
-      "missingStoreGuid": "This store has no access identifier, so POS access cannot be opened.",
+      "adminOnlyManage": "Only an admin can grant store management access.",
+      "missingStoreGuid": "This store has no access identifier, so POS permissions can't be opened.",
       "emptyTitle": "No stores available",
       "emptyDescription": "There are no stores available for this account."
     },
     "roles": {
       "derived": "Derived from managed stores",
       "adminOnly": "Admin only",
-      "managerLimit": "Store managers can only add or remove the staff role for employees in their managed stores.",
+      "managerLimit": "Store managers can only add or remove the Store staff role for staff at their stores.",
       "searchPlaceholder": "Search roles",
       "noSearchResults": "No roles match this search.",
       "emptyTitle": "No roles available",
@@ -223,8 +223,8 @@
       "derivedAdminHint": "The store manager role cannot be ticked directly: it is derived from \"Manage\" stores. Tap \"Store manager\" to jump to Stores, set a store to \"Manage\" and save.",
       "grantManager": {
         "set": "\"{{store}}\" is set to \"Manage\" in the draft. Tap \"Save stores\" to apply.",
-        "choose": "This employee has several stores. Choose the store to set to \"Manage\" here, then tap \"Save stores\".",
-        "noStore": "This employee has no store yet. Assign a store first, then set it to \"Manage\".",
+        "choose": "This staff member has more than one store. Choose which one to set to \"Manage\" here, then tap \"Save stores\".",
+        "noStore": "This staff member has no store yet. Assign a store first, then set it to \"Manage\".",
         "already": "The store manager role is derived from \"Manage\" stores. To remove it, set those stores to \"View\" and save."
       }
     },
@@ -233,7 +233,7 @@
       "summary": "{{effective}} effective · {{inherited}} inherited · {{direct}} direct",
       "inherited": "Inherited",
       "direct": "Direct",
-      "implicit": "Administrator default",
+      "implicit": "Admin default",
       "accountDefault": "Account default",
       "outsideScope": "Outside your scope",
       "source": "From {{roles}}",
@@ -260,21 +260,21 @@
     },
     "errors": {
       "invalidTitle": "Account details are incomplete",
-      "invalidDescription": "The user identifier is missing. Open Access Management again from Staff Management.",
-      "deviceTitle": "Access management is unavailable in device mode",
-      "deviceDescription": "Sign in with an administrator or authorised user account to manage staff access.",
+      "invalidDescription": "The user is missing. Open Account access again from Staff management.",
+      "deviceTitle": "Account access isn't available in device mode",
+      "deviceDescription": "Log in with an admin or authorised user account to manage staff access.",
       "selfTitle": "You cannot manage your own access",
-      "selfDescription": "Ask another authorised administrator to update your account access.",
+      "selfDescription": "Ask another authorised admin to update your account access.",
       "privilegedTitle": "This privileged account cannot be managed",
-      "privilegedDescription": "Only an administrator can manage administrator, store manager, or warehouse manager accounts.",
-      "noAccessTitle": "No access management permission",
-      "noAccessDescription": "Your account cannot manage staff stores, roles, permissions, or POS access.",
+      "privilegedDescription": "Only an admin can manage admin, store manager or warehouse manager accounts.",
+      "noAccessTitle": "No account access permission",
+      "noAccessDescription": "Your account can't manage staff stores, roles, permissions or POS permissions.",
       "unauthorizedTitle": "Your session has expired",
-      "unauthorizedDescription": "Sign in again before managing account access.",
+      "unauthorizedDescription": "Log in again before managing account access.",
       "forbiddenTitle": "You cannot manage this account",
       "forbiddenDescription": "Your account does not have permission for this target or section.",
       "notFoundTitle": "This account is no longer available",
-      "notFoundDescription": "The staff account may have been removed or moved outside your scope. Return to Staff Management and refresh.",
+      "notFoundDescription": "The staff account may have been removed or moved outside your scope. Go back to Staff management and refresh.",
       "networkTitle": "Could not load account access",
       "networkDescription": "The server cannot be reached right now. Check your connection and try again."
     },
@@ -300,15 +300,15 @@
         "replaceDescription": "Replace their direct permissions with the source's; any extras are removed"
       },
       "help": "Only direct permissions are copied. Role permissions are not copied. Permissions you cannot grant yourself are skipped automatically.",
-      "nextToOthers_one": "Next · copy to {{count}} person",
-      "nextToOthers_other": "Next · copy to {{count}} people",
+      "nextToOthers_one": "Next · copy to {{count}} staff member",
+      "nextToOthers_other": "Next · copy to {{count}} staff",
       "nextFromColleague": "Next",
-      "nextIdle": "Select people to continue",
+      "nextIdle": "Select staff to continue",
       "previewFailed": "Could not work out the permission changes. Please try again later.",
       "copyFailed": "Copy failed. Nobody's permissions were changed.",
       "dirtyBlocked": "Save or discard your unsaved permission changes before copying permissions.",
-      "success_one": "Copied. Permissions updated for {{count}} person",
-      "success_other": "Copied. Permissions updated for {{count}} people",
+      "success_one": "Copied. Permissions updated for {{count}} staff member",
+      "success_other": "Copied. Permissions updated for {{count}} staff",
       "confirm": {
         "title": "Confirm copy",
         "source": "Source: {{name}}",
@@ -317,7 +317,7 @@
         "changesTitle": "Changes to apply ({{count}})",
         "noChange": "No change",
         "unchanged": "{{count}} more unchanged",
-        "nothingToCopy": "The selected people already match the source's direct permissions. Nothing to copy.",
+        "nothingToCopy": "The selected staff already have the source's direct permissions. Nothing to copy.",
         "skippedTitle": "Skipped",
         "skipped": "\"{{names}}\" is outside what you can grant, so it was skipped and will not be copied to anyone.",
         "back": "Back",
@@ -328,8 +328,8 @@
   "statuses": {
     "active": "Active",
     "disabled": "Disabled",
-    "pendingFirstLogin": "First sign-in pending",
-    "loginDisabled": "Cannot sign in"
+    "pendingFirstLogin": "First login pending",
+    "loginDisabled": "Login blocked"
   },
   "fields": {
     "username": "Username",
@@ -337,12 +337,12 @@
     "email": "Email",
     "phone": "Phone",
     "enabled": "Enabled",
-    "loginEnabled": "Allow web / app sign-in",
-    "loginEnabledHelper": "When off, this employee cannot sign in to the web or app and signed-in devices stop working immediately; attendance and rosters are unaffected",
+    "loginEnabled": "Allow app and web login",
+    "loginEnabledHelper": "When off, they can't log in to the app or web, and any logged-in devices are logged out straight away. Attendance and roster aren't affected",
     "initialPassword": "Initial password",
     "newPassword": "New password",
-    "fixedRoleHint": "Accounts created here are always staff accounts, assigned to the selected managed store, and set as casual staff.",
-    "roleValue": "Role: Staff",
+    "fixedRoleHint": "Accounts created here are always Store staff at the selected store, employed as casual.",
+    "roleValue": "Role: Store staff",
     "positionValue": "Store staff",
     "storeValue": "Store: {{value}}",
     "ageValue": "Age: {{value}}",
@@ -359,8 +359,8 @@
     "meBadge": "Me",
     "staffSection": "Staff ({{count}})",
     "sortedByName": "By name",
-    "peopleCount_one": "{{count}} person",
-    "peopleCount_other": "{{count}} people",
+    "peopleCount_one": "{{count}} staff member",
+    "peopleCount_other": "{{count}} staff",
     "onlyStaffNote": "This page only shows store staff and you. Other store managers are not listed here."
   },
   "filters": {
@@ -371,13 +371,13 @@
     "statusAllCount": "All {{count}}",
     "statusActiveCount": "Active {{count}}",
     "statusDisabledCount": "Disabled {{count}}",
-    "statusPendingFirstLoginCount": "First sign-in pending {{count}}",
+    "statusPendingFirstLoginCount": "First login pending {{count}}",
     "statusNoEmailCount": "No email {{count}}"
   },
   "staffBarcode": {
     "title": "Staff personal code",
     "emptyDescription": "This staff member has no personal code yet. Create one to show the QR code, or create and print one label.",
-    "printCount": "{{count}} confirmed prints",
+    "printCount": "Confirmed prints: {{count}}",
     "printer": "Label printer: {{printer}} · {{status}}",
     "noPrinter": "Not selected",
     "confirmOnlyHint": "The label was printed. Only server confirmation will be retried; no new label will print.",
@@ -392,7 +392,7 @@
       "done": "Done",
       "start": "Start printing",
       "continue": "Continue",
-      "skip": "Skip staff member",
+      "skip": "Skip",
       "end": "End",
       "printerSettings": "Printer settings"
     },
@@ -413,7 +413,7 @@
         "done": "Done",
         "failed": "Failed; paused",
         "confirmationPending": "Printed; confirmation pending",
-        "uncertain": "Confirm paper result",
+        "uncertain": "Check if printed",
         "skipped": "Skipped",
         "obsolete": "Old code invalid"
       }
@@ -429,28 +429,28 @@
     },
     "errors": {
       "inactive": "A disabled account cannot create or print a personal code.",
-      "unavailable": "The staff personal-code service is unavailable. Try again later.",
+      "unavailable": "Personal codes are unavailable right now. Try again later.",
       "restore": "The previous print record could not be safely restored.",
-      "printFailed": "Printing paused. Check the printer before continuing. If paper may have printed, confirm the physical result first.",
-      "uncertain": "The app cannot confirm whether paper printed. Check the printer and choose the result; the app will not print another label automatically.",
+      "printFailed": "Printing paused. Check the printer before continuing. If a label may have printed, check it first.",
+      "uncertain": "Couldn't confirm whether the label printed. Check the printer and choose what happened; the app won't reprint automatically.",
       "obsolete": "The server reports that the old code is invalid. Destroy the old label. The current code has been refreshed; printing it requires another explicit action."
     }
   },
   "detail": {
-    "title": "Staff Details",
-    "missingTitle": "Staff member not selected",
-    "missingDescription": "Open a staff profile from Staff Management.",
-    "loadFailedTitle": "Failed to load staff details",
+    "title": "Staff details",
+    "missingTitle": "No staff member selected",
+    "missingDescription": "Open a staff member from Staff management.",
+    "loadFailedTitle": "Couldn't load staff details",
     "tabs": {
-      "personalInfo": "Personal Info",
-      "schedule": "Schedule",
+      "personalInfo": "Personal info",
+      "schedule": "Roster",
       "records": "Records"
     },
     "sections": {
-      "employeeDetails": "Employee Details",
-      "accountInfo": "Account Info",
+      "employeeDetails": "Employee profile",
+      "accountInfo": "Account info",
       "payroll": "Payroll",
-      "quickActions": "Quick Actions",
+      "quickActions": "Quick actions",
       "profileStatus": "Profile status"
     },
     "fields": {
@@ -458,44 +458,44 @@
       "age": "Age",
       "gender": "Gender",
       "employmentType": "Employment type",
-      "identityId": "Identity ID",
-      "phone": "Phone Number",
+      "identityId": "ID number",
+      "phone": "Phone",
       "email": "Email",
-      "store": "Store Location",
-      "joinDate": "Join Date",
+      "store": "Store",
+      "joinDate": "Joined",
       "birthday": "Birthday",
       "address": "Address",
       "bankBsb": "BSB",
       "bankAccount": "Bank account",
-      "superCompany": "Super company",
-      "superAccount": "Super account"
+      "superCompany": "Super fund",
+      "superAccount": "Super member no."
     },
     "actions": {
-      "viewFullSchedule": "View Full Schedule"
+      "viewFullSchedule": "View full roster"
     },
     "schedule": {
-      "title": "This Week's Schedule",
-      "description": "View this staff member's weekly schedule in the detail page instead of leaving for the shared attendance screen.",
-      "loading": "Loading staff schedule...",
-      "loadFailedTitle": "Failed to load schedule",
-      "loadFailedDescription": "The staff schedule could not be loaded right now. Please try again.",
-      "endpointUnavailable": "The backend employee schedule endpoint is not available yet. Add the endpoint and try again."
+      "title": "This week's roster",
+      "description": "This staff member's shifts for this week.",
+      "loading": "Loading roster…",
+      "loadFailedTitle": "Couldn't load the roster",
+      "loadFailedDescription": "Couldn't load this staff member's roster right now. Try again later.",
+      "endpointUnavailable": "Roster lookup isn't available on the server yet. Try again once it's been added."
     },
     "records": {
-      "title": "Recent Records",
-      "description": "Review this staff member's recent punches, leave requests, and approval records.",
-      "loading": "Loading staff records...",
-      "loadFailedTitle": "Failed to load records",
-      "loadFailedDescription": "The staff records could not be loaded right now. Please try again.",
-      "endpointUnavailable": "The backend employee records endpoint is not available yet. Add the endpoint and try again.",
+      "title": "Recent records",
+      "description": "This staff member's recent clock-ins, leave requests and approvals.",
+      "loading": "Loading records…",
+      "loadFailedTitle": "Couldn't load records",
+      "loadFailedDescription": "Couldn't load this staff member's records right now. Try again later.",
+      "endpointUnavailable": "Records lookup isn't available on the server yet. Try again once it's been added.",
       "emptyTitle": "No records yet",
-      "emptyDescription": "There are no punches, leave requests, or approvals to show yet.",
+      "emptyDescription": "No clock-ins, leave requests or approvals to show yet.",
       "submittedAt": "Submitted",
       "workDate": "Work date",
       "dateRange": "Date range",
       "store": "Store",
       "types": {
-        "punch": "Punch",
+        "punch": "Clock in/out",
         "leave": "Leave",
         "approval": "Approval"
       }
@@ -522,7 +522,7 @@
       "sensitiveFailed": "Could not check",
       "goReview": "Review"
     },
-    "emailNotSetCannotRecover": "Not set · cannot reset password"
+    "emailNotSetCannotRecover": "Not set · can't reset password"
   },
   "dialogs": {
     "createTitle": "Create staff account",
@@ -530,21 +530,21 @@
     "resetPasswordTitle": "Reset staff password",
     "resetPasswordDescription": "Set a new password for {{username}}. Share it with this staff member after saving.",
     "statusConfirmMessage": "Are you sure you want to {{action}} {{username}}?",
-    "resetPasswordEmailDescription": "A password set-up code will be emailed to {{username}} ({{email}}). They can use it via \"Set up / forgot password\" on the sign-in screen. The old password keeps working until then.",
-    "resetPasswordNoEmail": "It only has a store placeholder address, so no code can be sent. Enter the employee's own email to send the code there.",
+    "resetPasswordEmailDescription": "A password setup code will be emailed to {{username}} ({{email}}). They use it under \"Set up / forgot password\" on the login screen. Their old password keeps working until then.",
+    "resetPasswordNoEmail": "This account only has a store placeholder email, so the code can't be sent. Enter the staff member's own email to send it there.",
     "resetPasswordNoEmailTitle": "This account has no usable email",
-    "staffEmailLabel": "Employee email",
-    "staffEmailHelper": "The sign-in name {{username}} stays the same. The employee can also use this email to reset their password from the sign-in screen.",
+    "staffEmailLabel": "Staff email",
+    "staffEmailHelper": "The username {{username}} stays the same. They can also use this email to reset their password from the login screen.",
     "setupStepSave": "Save the email and send a 6-digit code (valid for 72 hours)",
-    "setupStepEmployee": "The employee taps \"Set up / forgot password\" on the sign-in screen and sets a new password with the code"
+    "setupStepEmployee": "The staff member taps \"Set up / forgot password\" on the login screen and sets a new password with the code"
   },
   "messages": {
     "noAccessTitle": "No staff view access",
-    "noAccessDescription": "The current account cannot view store staff.",
-    "selectStoreTitle": "Select a current store first",
+    "noAccessDescription": "This account can't view store staff.",
+    "selectStoreTitle": "Select a store first",
     "selectStoreDescription": "Choose a store before viewing or managing staff accounts for that store.",
-    "selectStoreFirst": "Select a current store first",
-    "selectManageableStoreFirst": "Select a manageable store first",
+    "selectStoreFirst": "Select a store first",
+    "selectManageableStoreFirst": "Select a store you manage first",
     "storeReadOnly": "This store is view-only. Staff accounts cannot be changed.",
     "loadFailedTitle": "Failed to load staff accounts",
     "loadFailedDescription": "Try again later or pull to refresh.",
@@ -566,24 +566,24 @@
     "userUpdated": "Staff account updated",
     "userEnabled": "Staff account enabled",
     "userDisabled": "Staff account disabled",
-    "passwordReset": "Password reset successfully",
+    "passwordReset": "Password reset",
     "phoneInvalid": "Enter an Australian mobile (10 digits starting with 04)",
     "emailRequired": "Enter the staff email",
-    "passwordSetupEmailSent": "Password set-up email sent to {{email}}",
-    "emailNotDeliverable": "Enter an email address the employee can receive mail at"
+    "passwordSetupEmailSent": "Password setup email sent to {{email}}",
+    "emailNotDeliverable": "Enter an email address the staff member can receive mail at"
   },
   "create": {
     "assignmentSection": "Account assignment",
     "store": "Store",
     "role": "Role",
     "roleValue": "Store staff",
-    "employmentType": "Employment",
-    "assignmentHint": "Accounts created by a store manager are always store staff of this store. Contact an administrator for other roles or stores.",
-    "loginSection": "Sign-in details",
+    "employmentType": "Employment type",
+    "assignmentHint": "Accounts created by a store manager are always Store staff at this store. Contact an admin for other roles or stores.",
+    "loginSection": "Login details",
     "contactSection": "Contact details (optional)",
     "phoneHelper": "Australian mobile, 10 digits starting with 04",
     "enableNow": "Enable now",
-    "enableNowHelper": "If off, the account is created but cannot sign in yet",
+    "enableNowHelper": "If off, the account is created but can't log in yet",
     "submit": "Create account",
     "successTitle": "Account created",
     "successHeadline": "Account created",
@@ -591,27 +591,27 @@
     "assignmentValue": "{{store}} · Store staff · Casual",
     "copyUsername": "Copy username",
     "copiedUsername": "Username copied",
-    "nextStepsTitle": "After the first sign-in, the employee will",
-    "nextStepBasic": "Complete phone, address and other basic details",
-    "nextStepSensitive": "Submit birthday, bank, super and ID for your review",
+    "nextStepsTitle": "After their first login, they'll",
+    "nextStepBasic": "Fill in their phone, address and other basic details",
+    "nextStepSensitive": "Submit their birthday, bank, super and ID details for your review",
     "printBarcode": "Print personal code",
     "done": "Done",
     "emailRequired": "Staff email (required)",
-    "emailHelper": "Used to sign in, receive the initial password and reset a forgotten password",
-    "usernameFromEmailHelper": "Same as the email by default; the employee signs in with it. Edit if needed (3–50 characters)",
-    "successDescriptionEmail": "The initial password has been emailed to {{name}}. They sign in to the app with it and choose their own password on first sign-in — you don't need to hand over any password.",
+    "emailHelper": "Used to log in, receive the initial password and reset a forgotten password",
+    "usernameFromEmailHelper": "Same as the email by default and used to log in. Edit if needed (3–50 characters)",
+    "successDescriptionEmail": "The initial password has been emailed to {{name}}. They log in to the app with it and set their own password the first time. You don't need to pass on any password.",
     "inviteSent": "Initial password sent to {{email}}.",
     "inviteFailed": "The account was created, but the initial password email was not sent: {{reason}}. You can resend it later.",
     "inviteFailedFallback": "Email could not be sent",
     "resendInvite": "Resend initial password",
     "inviteResent": "Initial password resent",
-    "nextStepEmail": "Check their email, sign in with the initial password and set their own password",
-    "loginEnabled": "Allow web / app sign-in",
-    "loginEnabledOnHelper": "When on, the initial password is emailed to the employee, who uses it to sign in to the web and the app",
-    "loginEnabledOffHelper": "Off by default: the account still works for attendance, rosters and so on, but cannot sign in to the web or app and no password email is sent. You can turn it on later when editing",
-    "emailHelperNoLogin": "Used for contact and account recovery only; the account cannot sign in yet",
-    "usernameFromEmailHelperNoLogin": "Same as the email by default; used to sign in once sign-in is allowed (3–50 characters)",
-    "successDescriptionNoLogin": "{{name}}'s account was created. They cannot sign in to the web or app yet, and no password email was sent.",
-    "loginDisabledNotice": "This employee cannot sign in yet. When needed, edit them in the staff list and turn on \"Allow web / app sign-in\"; you will be offered to send the initial password."
+    "nextStepEmail": "Check their email, log in with the initial password and set their own password",
+    "loginEnabled": "Allow app and web login",
+    "loginEnabledOnHelper": "When on, an initial password is emailed to them so they can log in to the app and web",
+    "loginEnabledOffHelper": "Off by default: the account still works for attendance, rosters and so on, but can't log in to the app or web, and no password email is sent. You can turn it on later when editing",
+    "emailHelperNoLogin": "Used for contact and account recovery only. The account can't log in yet",
+    "usernameFromEmailHelperNoLogin": "Same as the email by default. Used to log in once login is allowed (3–50 characters)",
+    "successDescriptionNoLogin": "{{name}}'s account was created. They can't log in to the app or web yet, and no password email was sent.",
+    "loginDisabledNotice": "This staff member can't log in yet. When needed, edit them in the staff list and turn on \"Allow app and web login\"; you'll be asked whether to send the initial password."
   }
 }

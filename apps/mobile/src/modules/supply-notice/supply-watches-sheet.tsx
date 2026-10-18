@@ -78,7 +78,7 @@ export function SupplyWatchesSheet({ visible, storeCode, onDismiss, onOrder, onC
           {restocked.length ? (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text variant="titleSmall">{t("restockedSection")}（{restocked.length}）</Text>
+                <Text variant="titleSmall">{t("restockedSection")} ({restocked.length})</Text>
                 <Button compact mode="text" disabled={busyCode !== null} onPress={() => storeCode && void runAction(null, () => acknowledgeStoreSupplyRestocked(storeCode))}>
                   {t("acknowledgeAll")}
                 </Button>
@@ -96,7 +96,7 @@ export function SupplyWatchesSheet({ visible, storeCode, onDismiss, onOrder, onC
           ) : null}
           {waiting.length ? (
             <View style={styles.section}>
-              <Text variant="titleSmall">{t("waitingSection")}（{waiting.length}）</Text>
+              <Text variant="titleSmall">{t("waitingSection")} ({waiting.length})</Text>
               {waiting.map((status) => (
                 <SupplyStatusCard
                   key={status.productCode}

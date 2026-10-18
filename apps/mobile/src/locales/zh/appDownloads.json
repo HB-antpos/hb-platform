@@ -189,7 +189,8 @@
     "minimumVersion": "最低支持版本",
     "minimumBuild": "最低支持 Build",
     "notes": "发布说明",
-    "scope": "范围"
+    "scope": "范围",
+    "colon": "："
   },
   "noUrl": "暂无可用链接",
   "loadFailed": "加载失败",

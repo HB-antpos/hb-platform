@@ -68,6 +68,7 @@ import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 const NO_ERRORS: AdminCreateErrors = { names: {} };
 
@@ -310,7 +311,7 @@ export function AdminCreateScreen() {
           return assignment.isPrimary ? t("adminCreate.storeWithManage", { name }) : name;
         })
         .filter(Boolean)
-        .join("、")
+        .join(listSeparator(language))
       : t("adminCreate.noneSelected");
 
     // 管理员接口不发邮件：不出现「初始密码已发送」，只提示由你把初始密码告知本人。
@@ -359,7 +360,7 @@ export function AdminCreateScreen() {
         accountLabel={t("created.account")}
         username={created.username}
         assignmentRows={[
-          { label: t("adminCreate.rolesLabel"), value: selectedRoleNames.length ? selectedRoleNames.join("、") : t("adminCreate.noneSelected") },
+          { label: t("adminCreate.rolesLabel"), value: selectedRoleNames.length ? selectedRoleNames.join(listSeparator(language)) : t("adminCreate.noneSelected") },
           { label: t("adminCreate.storesLabel"), value: storeText },
         ]}
         copyLabel={t("created.copyAccount")}

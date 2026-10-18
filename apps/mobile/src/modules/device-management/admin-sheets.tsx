@@ -36,6 +36,7 @@ import {
   type ManageableStore,
   type MobileActivationSystem,
 } from "@/modules/device-management/admin-types";
+import { getDeviceStatusKey } from "@/modules/device-management/status";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS } from "@/shared/theme/tokens";
 import { RequestGenerationGate, activationCreateGate, emergencyCreateGate } from "@/modules/device-management/request-generation-gate";
@@ -172,7 +173,7 @@ export function DeviceEditSheet({
           <KeyValue label={t("deviceManagement:fields.deviceNumber")} value={detail.systemDeviceNumber} />
           <KeyValue label={t("deviceManagement:fields.hardwareId")} value={detail.hardwareId} />
           <KeyValue label={t("deviceManagement:fields.store")} value={detail.storeName || detail.storeCode || "–"} />
-          <KeyValue label={t("deviceManagement:fields.status")} value={detail.statusDescription || String(detail.status)} />
+          <KeyValue label={t("deviceManagement:fields.status")} value={t(`deviceManagement:statuses.${getDeviceStatusKey(detail.status)}`)} />
           <KeyValue label={t("deviceManagement:fields.audit")} value={`${detail.createdBy || "–"} / ${detail.lastModifiedBy || "–"}`} />
           <KeyValue label={t("deviceManagement:fields.lastHeartbeat")} value={formatDateTime(detail.lastHeartbeatAt, language)} />
         </View>

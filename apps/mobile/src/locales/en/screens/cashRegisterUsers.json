@@ -1,6 +1,6 @@
 {
   "title": "Cashier barcodes",
-  "subtitle": "Legacy POS staff login barcodes, {{count}} in total",
+  "subtitle": "Legacy POS staff login barcodes · {{count}} total",
   "subtitleLoading": "Legacy POS staff login barcodes",
   "filters": {
     "allStores": "All stores",
@@ -26,7 +26,7 @@
   "card": {
     "noLinkedUser": "No linked user",
     "noStore": "No linked store",
-    "printCount": "Printed {{count}} times"
+    "printCount": "Print count: {{count}}"
   },
   "actions": {
     "create": "New",
@@ -58,7 +58,7 @@
     "enableTitle": "Enable barcode",
     "enableDescription": "Enable the cashier barcode for {{name}}?",
     "disableTitle": "Disable barcode",
-    "disableDescription": "{{name}} will no longer be able to sign in to the legacy POS with this barcode. Disable it?"
+    "disableDescription": "{{name}} won't be able to log in to the legacy POS with this barcode. Disable it?"
   },
   "validation": {
     "storeRequired": "Select a store",
@@ -70,9 +70,9 @@
     "storeNotManageable": "This store is view-only and cannot be saved"
   },
   "messages": {
-    "noManageableStore": "This account has no primary store, so only your own cashier barcode is shown. Creating one requires a primary store.",
+    "noManageableStore": "This account doesn't manage a primary store, so only your own cashier barcode is shown. You need one to create barcodes.",
     "noAccessTitle": "No access",
-    "noAccessDescription": "Requires the mobile cashier barcode manage or print permission",
+    "noAccessDescription": "You need the mobile \"Manage cashier barcodes\" or \"Print cashier barcodes\" permission.",
     "loadFailedTitle": "Failed to load",
     "loadFailedDescription": "Could not load cashier barcodes. Try again later.",
     "emptyTitle": "No cashier barcodes",
@@ -83,8 +83,8 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "saveFailed": "Save failed. Try again later.",
-    "printed": "Printed and counted",
-    "printBusy": "Printing in progress, please wait",
+    "printed": "Printed. Print count updated.",
+    "printBusy": "Printing… please wait",
     "printFailed": "Print failed. Check the label printer and try again.",
     "printCountFailed": "Label printed, but the print count was not recorded: {{reason}}"
   }

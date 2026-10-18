@@ -39,7 +39,7 @@
     "salesUpdatedUnavailable": "Sales stats update time unavailable"
   },
   "flow": {
-    "inbound": "In {{quantity}} · last year",
+    "inbound": "Inbound {{quantity}} · last 12 months",
     "shipped": "Shipped {{quantity}} · {{percent}}%",
     "sold": "Sold {{quantity}} · {{percent}}%",
     "legendSold": "Sold",
@@ -48,7 +48,7 @@
   },
   "cards": {
     "inbound": "Inbound · containers",
-    "inboundHint": "{{count}} containers in the last year",
+    "inboundHint": "{{count}} containers in the last 12 months",
     "ordered": "Ordered · stores",
     "orderedHint": "{{count}} stores ordered",
     "shipped": "Shipped · outbound",
@@ -128,7 +128,7 @@
   "containerSheet": {
     "title": "Container inbound detail",
     "summary": "{{count}} containers arrived · {{quantity}} pcs in total",
-    "arrivalRule": "Container inbound is always measured over the last year, independent of the range above; grouped by actual arrival date, and containers with only an estimated arrival are excluded from the total",
+    "arrivalRule": "Container inbound always covers the last 12 months, regardless of the range above. It uses the actual arrival date; containers with only an estimated arrival are excluded from the total",
     "container": "Container",
     "pieces": "Cartons",
     "status": "Status",
@@ -142,6 +142,6 @@
       "completed": "Completed",
       "unknown": "Unknown"
     },
-    "range": "Inbound range {{startDate}} to {{endDate}} · fixed last year"
+    "range": "Inbound range {{startDate}} to {{endDate}} · fixed to last 12 months"
   }
 }

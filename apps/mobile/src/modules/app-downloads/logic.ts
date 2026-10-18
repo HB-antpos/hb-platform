@@ -202,6 +202,8 @@ export interface ConfirmationLabels {
   minimumBuild: string;
   notes: string;
   scope: string;
+  /** 标签与值之间的冒号，中文「：」英文「: 」；缺省按中文。 */
+  colon?: string;
 }
 
 const INT32_MAX = 2_147_483_647;
@@ -473,20 +475,21 @@ export function buildConfirmationSummary(
   details: { releaseLabel: string; targetLabel?: string },
   labels: ConfirmationLabels,
 ) {
+  const colon = labels.colon ?? "：";
   if ("targetReleaseId" in form) {
     return [
-      `${labels.enabled}：${form.enabled ? labels.enabled : labels.disabled}`,
-      `${labels.release}：${form.enabled ? details.releaseLabel : labels.noRelease}`,
-      `${labels.required}：${form.enabled && form.required ? labels.required : labels.optional}`,
-      `${labels.notes}：${form.releaseMessage.trim() || labels.noRelease}`,
+      `${labels.enabled}${colon}${form.enabled ? labels.enabled : labels.disabled}`,
+      `${labels.release}${colon}${form.enabled ? details.releaseLabel : labels.noRelease}`,
+      `${labels.required}${colon}${form.enabled && form.required ? labels.required : labels.optional}`,
+      `${labels.notes}${colon}${form.releaseMessage.trim() || labels.noRelease}`,
     ];
   }
   return [
-    `${labels.enabled}：${form.enabled ? labels.enabled : labels.disabled}`,
-    `${labels.release}：${form.enabled ? details.releaseLabel : labels.noRelease}`,
-    `${labels.scope}：${details.targetLabel ?? labels.allDevices}`,
-    `${labels.minimumVersion}：${form.minimumSupportedVersion.trim() || labels.noRelease}`,
-    `${labels.minimumBuild}：${form.minimumSupportedBuildNumber.trim() || labels.noRelease}`,
-    `${labels.notes}：${form.releaseMessage.trim() || labels.noRelease}`,
+    `${labels.enabled}${colon}${form.enabled ? labels.enabled : labels.disabled}`,
+    `${labels.release}${colon}${form.enabled ? details.releaseLabel : labels.noRelease}`,
+    `${labels.scope}${colon}${details.targetLabel ?? labels.allDevices}`,
+    `${labels.minimumVersion}${colon}${form.minimumSupportedVersion.trim() || labels.noRelease}`,
+    `${labels.minimumBuild}${colon}${form.minimumSupportedBuildNumber.trim() || labels.noRelease}`,
+    `${labels.notes}${colon}${form.releaseMessage.trim() || labels.noRelease}`,
   ];
 }

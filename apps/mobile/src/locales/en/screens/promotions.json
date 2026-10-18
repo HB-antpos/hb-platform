@@ -4,14 +4,14 @@
   "actions": {
     "create": "New promotion",
     "edit": "Edit",
-    "copyToStore": "Copy to store",
+    "copyToStore": "Copy to this store",
     "addProduct": "Add product"
   },
   "filters": {
     "keyword": "Search promotion name"
   },
   "scope": {
-    "storeOnly": "Store",
+    "storeOnly": "This store",
     "multiStore": "Multi-store",
     "headquarters": "HQ",
     "unknown": "Unknown"
@@ -28,13 +28,13 @@
     "description": "Description",
     "effectiveStart": "Start time",
     "effectiveEnd": "End time",
-    "applyQuantity": "Apply quantity",
-    "fixedPrice": "Fixed price",
+    "applyQuantity": "Quantity",
+    "fixedPrice": "Bundle price",
     "priority": "Priority",
     "enabled": "Enabled",
     "exclusive": "Exclusive",
     "productCode": "Product code",
-    "unitWeight": "Weight",
+    "unitWeight": "Weighting",
     "priorityValue": "Priority {{value}}",
     "ruleValue": "{{count}} items for ${{price}}",
     "productsAndStores": "{{products}} products · {{stores}} stores"
@@ -43,18 +43,18 @@
     "createTitle": "New store promotion",
     "editTitle": "Edit store promotion",
     "storeReadonly": "Applies only to: {{store}}",
-    "priorityHint": "New and copied promotions default to priority 0. Higher priority may affect exclusive promotion conflicts.",
+    "priorityHint": "New and copied promotions start at priority 0. Raising it may cause conflicts when enabling exclusive promotions.",
     "products": "Products"
   },
   "copy": {
-    "title": "Copy to store",
-    "description": "Copy “{{name}}” into a new promotion owned only by the current store."
+    "title": "Copy to this store",
+    "description": "Copy “{{name}}” as a new promotion for this store only, then edit it."
   },
   "empty": {
     "selectStoreTitle": "Select a store",
     "selectStoreDescription": "Choose a store to view store, multi-store, and HQ promotions.",
     "noDataTitle": "No promotions",
-    "noDataDescription": "No related promotions for the current store."
+    "noDataDescription": "This store has no promotions yet."
   },
   "pagination": {
     "previous": "Previous",
@@ -67,14 +67,14 @@
   "messages": {
     "selectStoreFirst": "Please select a store first.",
     "loadFailed": "Failed to load promotions.",
-    "detailFailed": "Failed to load promotion detail.",
-    "detailMissing": "Promotion detail was not found.",
+    "detailFailed": "Failed to load promotion details.",
+    "detailMissing": "Promotion not found.",
     "nameRequired": "Please enter a promotion name.",
     "saveFailed": "Failed to save promotion.",
     "saved": "Promotion saved.",
     "copyFailed": "Failed to copy promotion.",
-    "copied": "Copied as a store promotion.",
+    "copied": "Copied to this store.",
     "copyBeforeEdit": "Copy multi-store or HQ promotions to this store before editing.",
-    "enableFailed": "Failed to update enabled status."
+    "enableFailed": "Failed to update the status."
   }
 }

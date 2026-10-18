@@ -10,7 +10,7 @@
     "POS 客显": "POS customer display",
     "POS 小票": "POS receipts",
     "POS 收款": "POS payments",
-    "POS 日结": "POS end of day",
+    "POS 日结": "POS daily close",
     "POS 特价商品": "POS specials",
     "POS 管理": "POS management",
     "POS 设置": "POS settings",
@@ -21,18 +21,18 @@
     "促销管理": "Promotion management",
     "分店商品管理": "Store product management",
     "分店管理": "Store management",
-    "分店订货": "Store orders",
+    "分店订货": "Store ordering",
     "分店财务": "Store finance",
     "分店运营": "Store operations",
-    "前台订货": "Store ordering",
+    "前台订货": "Ordering portal",
     "后台管理": "Back-office management",
     "商品管理": "Product management",
-    "国内采购": "Domestic purchasing",
+    "国内采购": "China purchasing",
     "定价策略": "Pricing rules",
     "广告管理": "Advertisement management",
     "报表": "Reports",
-    "排班考勤": "Scheduling and attendance",
-    "本地进货管理": "Local purchasing",
+    "排班考勤": "Rosters and attendance",
+    "本地进货管理": "Local supplier invoices",
     "澳洲供应商": "Australian suppliers",
     "用户管理": "User management",
     "系统管理": "System management",
@@ -42,80 +42,80 @@
   },
   "permissions": {
     "Advertisements.Edit": {
-      "name": "Advertisements Edit",
-      "description": "Allows access to Advertisements Edit."
+      "name": "Edit advertisements",
+      "description": "Add, edit, delete, enable and upload advertisements on the web admin."
     },
     "Advertisements.View": {
-      "name": "Advertisements View",
-      "description": "Allows access to Advertisements View."
+      "name": "View advertisements",
+      "description": "View the advertisement list and details on the web admin and in the app."
     },
     "Attendance.Admin.View": {
-      "name": "Attendance Admin View",
-      "description": "Allows access to Attendance Admin View."
+      "name": "View attendance for all stores",
+      "description": "View attendance admin for every store on the web admin and in the app."
     },
     "Attendance.Approval.ReviewManagedStore": {
-      "name": "Attendance Approval Review Managed Store",
-      "description": "Allows access to Attendance Approval Review Managed Store."
+      "name": "Approve attendance for managed stores",
+      "description": "Review and approve attendance for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Approval.ViewManagedStore": {
-      "name": "Attendance Approval View Managed Store",
-      "description": "Allows access to Attendance Approval View Managed Store."
+      "name": "View attendance approvals for managed stores",
+      "description": "View attendance approval history for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Availability.SubmitSelf": {
-      "name": "Attendance Availability Submit Self",
-      "description": "Allows access to Attendance Availability Submit Self."
+      "name": "Submit own availability",
+      "description": "Submit your own availability in the app."
     },
     "Attendance.Availability.ViewManagedStore": {
-      "name": "Attendance Availability View Managed Store",
-      "description": "Allows access to Attendance Availability View Managed Store."
+      "name": "View availability for managed stores",
+      "description": "View staff availability for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Holiday.EditManagedStore": {
-      "name": "Attendance Holiday Edit Managed Store",
-      "description": "Allows access to Attendance Holiday Edit Managed Store."
+      "name": "Edit public holidays for managed stores",
+      "description": "Edit public holidays for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Holiday.ViewStore": {
-      "name": "Attendance Holiday View Store",
-      "description": "Allows access to Attendance Holiday View Store."
+      "name": "View store public holidays",
+      "description": "View public holidays for your stores, on the web admin and in the app."
     },
     "Attendance.Leave.ApplySelf": {
-      "name": "Attendance Leave Apply Self",
-      "description": "Allows access to Attendance Leave Apply Self."
+      "name": "Request own leave",
+      "description": "Submit your own leave requests in the app."
     },
     "Attendance.Leave.ReviewManagedStore": {
-      "name": "Attendance Leave Review Managed Store",
-      "description": "Allows access to Attendance Leave Review Managed Store."
+      "name": "Approve leave for managed stores",
+      "description": "Approve or decline leave requests for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Leave.ViewManagedStore": {
-      "name": "Attendance Leave View Managed Store",
-      "description": "Allows access to Attendance Leave View Managed Store."
+      "name": "View leave for managed stores",
+      "description": "View leave requests for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Punch.AdjustManagedStore": {
-      "name": "Attendance Punch Adjust Managed Store",
-      "description": "Allows access to Attendance Punch Adjust Managed Store."
+      "name": "Adjust clock-ins for managed stores",
+      "description": "In the app, add or correct clock-ins and clock-outs for staff at the stores you manage, taking effect straight away (this week, or last week on Monday and Tuesday). Store managers also need this to fix their own missed clock-ins without approval."
     },
     "Attendance.Punch.Self": {
-      "name": "Attendance Punch Self",
-      "description": "Allows access to Attendance Punch Self."
+      "name": "Clock in and out",
+      "description": "Clock yourself in and out in the app."
     },
     "Attendance.Punch.ViewManagedStore": {
-      "name": "Attendance Punch View Managed Store",
-      "description": "Allows access to Attendance Punch View Managed Store."
+      "name": "View clock-ins for managed stores",
+      "description": "View clock-in and clock-out records for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Schedule.EditManagedStore": {
-      "name": "Attendance Schedule Edit Managed Store",
-      "description": "Allows access to Attendance Schedule Edit Managed Store."
+      "name": "Edit rosters for managed stores",
+      "description": "Create and edit rosters for the stores you manage, on the web admin and in the app."
     },
     "Attendance.Schedule.ViewSelf": {
-      "name": "Attendance Schedule View Self",
-      "description": "Allows access to Attendance Schedule View Self."
+      "name": "View own roster",
+      "description": "View your own roster in the app."
     },
     "Attendance.Schedule.ViewStore": {
-      "name": "Attendance Schedule View Store",
-      "description": "Allows access to Attendance Schedule View Store."
+      "name": "View store rosters",
+      "description": "View rosters for the stores you're linked to, on the web admin and in the app."
     },
     "Attendance.Settings.Edit": {
-      "name": "Attendance Settings Edit",
-      "description": "Allows access to Attendance Settings Edit."
+      "name": "Edit attendance settings",
+      "description": "Edit attendance settings on the web admin and in the app."
     },
     "AustralianSuppliers.Edit": {
       "name": "Edit Australian suppliers",
@@ -126,24 +126,24 @@
       "description": "View the Australian supplier list on the web admin."
     },
     "Cash.AllStores.View": {
-      "name": "View all-store cash and T2",
-      "description": "Cash management - view cash data for every store and the full T2 history, and back-fill without the look-back day limit. Without it, a store manager only sees T2 from the last 14 days for the stores linked to them."
+      "name": "View cash and T2 for all stores",
+      "description": "Cash: view cash data and the full T2 history for every store, and back-fill entries with no look-back limit. Without it, store managers only see the last 14 days of T2 for their own stores."
     },
     "Cash.Deposit.Create": {
       "name": "Record bank deposits",
-      "description": "Mobile Cash - record cash banked with the deposit slip photo, pick the daily closes included in the cash pool, and enter opening cash and stock-take balances."
+      "description": "In the app (Cash), record cash banked with a photo of the deposit slip, choose which daily closes count towards cash on hand, and enter opening cash and cash count balances."
     },
     "Cash.Expense.Create": {
       "name": "Record cash expenses",
-      "description": "Mobile Cash - record cash wages, cash purchases, T2 and other cash expenses; each entry takes effect as soon as it is saved."
+      "description": "In the app (Cash), record cash wages, cash purchases, T2 and other cash expenses. Each entry takes effect as soon as it is saved."
     },
     "Cash.Overview.View": {
-      "name": "View cash management",
-      "description": "Mobile Cash and the web page /pos-admin/store-cash - view and export a store's cash pool balance, daily breakdown, deposits and cash expense records. Store managers are limited to the stores linked to them."
+      "name": "View cash",
+      "description": "View and export a store's cash on hand, daily breakdown, deposits and cash expenses, in the app (Cash) and on the web admin. Store managers only see their own stores."
     },
     "Cash.Void": {
       "name": "Void cash records",
-      "description": "Cash management - void any deposit, cash expense or opening/stock-take record within scope. Without it, a store manager can only void their own entries within 24 hours."
+      "description": "Cash: void any deposit, cash expense or opening balance/cash count record within your scope. Without it, store managers can only void their own entries within 24 hours."
     },
     "Container.Create": {
       "name": "Create containers",
@@ -158,124 +158,124 @@
       "description": "Edit container records."
     },
     "Container.MobileNewProductsView": {
-      "name": "View new arrivals on mobile",
-      "description": "View new products from containers in the last 2 weeks and next 4 weeks, including estimated store arrival dates."
+      "name": "View new arrivals (mobile)",
+      "description": "View new products from containers due in store from 1 week ago to 2 weeks ahead, in the app."
     },
     "Container.View": {
       "name": "View containers",
       "description": "View container lists and details."
     },
     "Dashboard": {
-      "name": "Dashboard",
-      "description": "Allows access to Dashboard."
+      "name": "Access web admin",
+      "description": "Open the web admin home dashboard."
     },
     "DeviceRegistration.ActivationCodes.Manage": {
       "name": "Manage device activation codes",
-      "description": "Create and revoke one-time POS device activation codes for manageable stores."
+      "description": "Create and revoke one-time POS device activation codes for the stores you manage, on the web admin."
     },
     "DeviceRegistration.Manage": {
-      "name": "Device Registration Manage",
-      "description": "Allows access to Device Registration Manage."
+      "name": "Manage device registrations",
+      "description": "Approve, update and manage POS device registrations on the web admin."
     },
     "DeviceRegistration.MobileActivationCodes.Manage": {
       "name": "Manage mobile device activation codes",
-      "description": "Create and revoke one-time Mobile device activation codes for selected accounts."
+      "description": "Create and revoke one-time activation codes for the mobile app, linked to selected user accounts, on the web admin."
     },
     "DeviceRegistration.View": {
-      "name": "Device Registration View",
-      "description": "Allows access to Device Registration View."
+      "name": "View device registrations",
+      "description": "View POS device registrations and their status on the web admin and in the app (Devices)."
     },
     "DomesticPurchase.ManagePrefixCodes": {
-      "name": "Domestic Purchase Manage Prefix Codes",
-      "description": "Allows access to Domestic Purchase Manage Prefix Codes."
+      "name": "Manage prefix codes",
+      "description": "Manage product prefix codes for China purchasing on the web admin."
     },
     "DomesticPurchase.ManageProducts": {
-      "name": "Domestic Purchase Manage Products",
-      "description": "Allows access to Domestic Purchase Manage Products."
+      "name": "Manage China purchasing products",
+      "description": "Create and import China purchasing products on the web admin."
     },
     "DomesticPurchase.ManageSuppliers": {
-      "name": "Domestic Purchase Manage Suppliers",
-      "description": "Allows access to Domestic Purchase Manage Suppliers."
+      "name": "Manage China suppliers",
+      "description": "Add and maintain China suppliers on the web admin."
     },
     "EmployeeProfiles.EditPositionType": {
-      "name": "Edit position type",
-      "description": "Change position type, such as full-time, part-time or casual. Saving also requires permission to edit employee profiles."
+      "name": "Edit employment type",
+      "description": "Change an employee's employment type (full-time, part-time or casual). Saving also needs Edit employee profiles."
     },
     "EmployeeProfiles.Edit": {
       "name": "Edit employee profiles",
-      "description": "Edit your own profile on mobile; editing other employees on the web admin also requires the administrator role."
+      "description": "Edit your own profile in the app, including ID, bank, super and address details. Editing other employees' profiles on the web admin also needs the Admin role."
     },
     "EmployeeProfiles.ReviewSensitiveManagedStore": {
       "name": "Review sensitive employee changes",
-      "description": "Review sensitive profile changes for employees in managed stores."
+      "description": "In the app, review sensitive profile changes submitted by staff at the stores you manage."
     },
     "EmployeeProfiles.View": {
       "name": "View employee profiles",
-      "description": "View employee profile details."
+      "description": "View the employee profile list and details on the web admin and in the app."
     },
     "InstallmentOrders.View": {
-      "name": "Lay-by Orders View",
-      "description": "Allows access to Lay-by Orders View."
+      "name": "View lay-bys",
+      "description": "View store lay-bys and their payments in the app."
     },
     "LocalPurchase.Edit": {
-      "name": "Local Purchase Edit",
-      "description": "Allows access to Local Purchase Edit."
+      "name": "Edit local supplier invoices",
+      "description": "Create, edit, submit and maintain store supplier invoices on the web admin."
     },
     "LocalPurchase.MobileView": {
-      "name": "Mobile local purchases",
-      "description": "View Australian local purchase order lists and details for authorised stores"
+      "name": "View local supplier invoices (mobile)",
+      "description": "View local supplier invoice lists and details for your authorised stores in the app."
     },
     "LocalPurchase.PushToHq": {
-      "name": "Local Purchase Push To Hq",
-      "description": "Allows access to Local Purchase Push To Hq."
+      "name": "Push local supplier invoices to HQ",
+      "description": "Push store supplier invoices to HQ from the web admin."
     },
     "LocalPurchase.View": {
-      "name": "Local Purchase View",
-      "description": "Allows access to Local Purchase View."
+      "name": "View local supplier invoices",
+      "description": "View store supplier invoices on the web admin and in the app."
     },
     "OrderFront": {
-      "name": "Order Front",
-      "description": "Allows access to Order Front."
+      "name": "Access ordering portal",
+      "description": "Open the web ordering portal and the app's order pages. Core permission for the Ordering staff role."
     },
     "OrderFront.BatchProductSales.View": {
-      "name": "View item sales in Order Front",
-      "description": "Web Order Front page /shop/purchase-sales-analysis (Paste Item Numbers tab) - View sales quantity, daily trends and discount sales across all stores for imported item numbers."
+      "name": "View item sales in ordering portal",
+      "description": "Ordering portal (Paste data tab): view sales, daily trends and discounted sales across all stores for pasted item numbers."
     },
     "Orders.Create": {
-      "name": "Orders Create",
-      "description": "Allows access to Orders Create."
+      "name": "Submit store orders",
+      "description": "Submit store orders from the app's Home and Cart pages and the browser extension."
     },
     "Orders.Delete": {
-      "name": "Orders Delete",
-      "description": "Allows access to Orders Delete."
+      "name": "Delete store orders",
+      "description": "Delete store orders through the ordering API."
     },
     "Orders.Edit": {
-      "name": "Orders Edit",
-      "description": "Allows access to Orders Edit."
+      "name": "Edit store orders",
+      "description": "Edit store orders through the ordering API."
     },
     "Orders.View": {
       "name": "View orders",
-      "description": "View cashier records on the web admin and store orders on mobile."
+      "description": "View POS sales records on the web admin, and store orders and incoming delivery notices in the app."
     },
     "SalesOrders.View": {
-      "name": "Sales records view",
-      "description": "Mobile sales records - view sales orders, lines and invoices by store, date and order type."
+      "name": "View sales records",
+      "description": "In the app, view sales orders, lines and invoices by store, date and order type."
     },
     "Permissions.PosTerminal.Audit.View": {
       "name": "View POS audit logs",
-      "description": "View POS operation audit logs for managed stores on the web admin and the mobile workbench."
+      "description": "View POS staff activity logs for the stores you manage, on the web admin and in the app."
     },
     "LegacyEmployeeLogs.View": {
       "name": "View legacy POS operation logs",
-      "description": "View employee operation logs uploaded by the legacy POS for a selected store on the web admin."
+      "description": "View staff activity logs uploaded by the legacy POS for a selected store on the web admin."
     },
     "LegacyEmployeeLogs.Review": {
-      "name": "Review employee operation anomalies",
-      "description": "Mark flagged legacy or new POS operations as normal or needing follow-up, or revoke the review, on the web admin and the mobile employee operation logs page."
+      "name": "Review flagged POS activity",
+      "description": "Mark flagged legacy or new POS activity as OK or needing follow-up, and undo a review, on the web admin and in the app."
     },
     "DailyCloseRecords.View": {
       "name": "View daily close records",
-      "description": "View daily close records and cash count details uploaded by the WPF, handheld and iPad POS for managed stores on the web admin and the mobile app."
+      "description": "View daily close records and cash count details from the WPF, handheld and iPad POS for the stores you manage, on the web admin and in the app."
     },
     "FaceCapture.Cameras.Manage": {
       "name": "Manage face capture cameras",
@@ -294,256 +294,256 @@
       "description": "On the web admin page /system/face-match (Traffic tab): view per-store counts of captures, staff, unique visitors (estimate), repeats and low-quality captures. Counts only, no biometric information."
     },
     "FaceMatch.Unwelcome.Manage": {
-      "name": "Manage unwelcome persons list",
-      "description": "On the web admin page /system/face-match (Unwelcome list tab): submit, view and withdraw unwelcome persons list entries and upload reference photos (sensitive biometric information)."
+      "name": "Manage unwelcome list",
+      "description": "On the web admin page /system/face-match (Unwelcome list tab): submit, view and withdraw unwelcome list entries and upload reference photos (sensitive biometric information)."
     },
     "FaceMatch.Unwelcome.Approve": {
-      "name": "Approve unwelcome persons list entries",
+      "name": "Approve unwelcome list entries",
       "description": "On the web admin page /system/face-match (Unwelcome list tab): approve entries onto the list. The approver must differ from the submitter, and entries in the Other category need two different approvers."
     },
     "FaceMatch.Unwelcome.Review": {
-      "name": "Review unwelcome persons list matches",
+      "name": "Review unwelcome list matches",
       "description": "On the web admin page /system/face-match (Review tasks tab): receive possible-match alerts for assigned stores, compare the live capture and reference photo side by side, and decide whether they are the same person (sensitive biometric information, every view is logged)."
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
-      "name": "Permissions Pos Terminal Cash Drawer Open",
-      "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."
+      "name": "Open cash drawer",
+      "description": "Use the Open cash drawer button on the POS."
     },
     "Permissions.PosTerminal.CustomerDisplay.Manage": {
-      "name": "Permissions Pos Terminal Customer Display Manage",
-      "description": "Allows access to Permissions Pos Terminal Customer Display Manage."
+      "name": "Manage customer display",
+      "description": "Use the Manage customer display button on the POS."
     },
     "Permissions.PosTerminal.DailyClose.Reprint": {
-      "name": "Permissions Pos Terminal Daily Close Reprint",
-      "description": "Allows access to Permissions Pos Terminal Daily Close Reprint."
+      "name": "Reprint daily close receipt",
+      "description": "Use the Reprint daily close receipt button on the POS Daily close screen."
     },
     "Permissions.PosTerminal.DailyClose.Save": {
-      "name": "Permissions Pos Terminal Daily Close Save",
-      "description": "Allows access to Permissions Pos Terminal Daily Close Save."
+      "name": "Save daily close",
+      "description": "Use the Save daily close button on the POS Daily close screen."
     },
     "Permissions.PosTerminal.DailyClose.View": {
-      "name": "Permissions Pos Terminal Daily Close View",
-      "description": "Allows access to Permissions Pos Terminal Daily Close View."
+      "name": "Open daily close screen",
+      "description": "Open the POS Daily close screen."
     },
     "Permissions.PosTerminal.History.Recall": {
-      "name": "Permissions Pos Terminal History Recall",
-      "description": "Allows access to Permissions Pos Terminal History Recall."
+      "name": "Recall past orders",
+      "description": "Use the Recall order button on the POS Order history screen."
     },
     "Permissions.PosTerminal.History.Reprint": {
-      "name": "Permissions Pos Terminal History Reprint",
-      "description": "Allows access to Permissions Pos Terminal History Reprint."
+      "name": "Reprint past receipts",
+      "description": "Use the Reprint receipt button on the POS Order history screen."
     },
     "Permissions.PosTerminal.History.View": {
-      "name": "Permissions Pos Terminal History View",
-      "description": "Allows access to Permissions Pos Terminal History View."
+      "name": "Open order history",
+      "description": "Open the POS Order history screen."
     },
     "Permissions.PosTerminal.Installments.AddRepayment": {
-      "name": "Permissions Pos Terminal Lay-bys Add Repayment",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Add Repayment."
+      "name": "Add lay-by payment",
+      "description": "Use the Add payment button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.AmendLines": {
-      "name": "Permissions Pos Terminal Lay-bys Amend Lines",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Amend Lines."
+      "name": "Edit lay-by items",
+      "description": "Use the Edit items button on a lay-by's details in POS Order history."
     },
     "Permissions.PosTerminal.Installments.Cancel": {
-      "name": "Permissions Pos Terminal Lay-bys Cancel",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Cancel."
+      "name": "Cancel lay-bys",
+      "description": "Use the Cancel lay-by button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.ConfirmPickup": {
-      "name": "Permissions Pos Terminal Lay-bys Confirm Pickup",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Confirm Pickup."
+      "name": "Confirm lay-by pickup",
+      "description": "Use the Confirm pickup button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.Create": {
-      "name": "Permissions Pos Terminal Lay-bys Create",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Create."
+      "name": "Create lay-bys",
+      "description": "Use the Create lay-by button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.View": {
-      "name": "Permissions Pos Terminal Lay-bys View",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys View."
+      "name": "Open lay-by screen",
+      "description": "Open the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Payment.Confirm": {
-      "name": "Permissions Pos Terminal Payment Confirm",
-      "description": "Allows access to Permissions Pos Terminal Payment Confirm."
+      "name": "Confirm payment",
+      "description": "Use the button that completes payment on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.RemoveTender": {
-      "name": "Permissions Pos Terminal Payment Remove Tender",
-      "description": "Allows access to Permissions Pos Terminal Payment Remove Tender."
+      "name": "Remove a payment",
+      "description": "Use the button that removes an entered payment on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.TakeCard": {
-      "name": "Permissions Pos Terminal Payment Take Card",
-      "description": "Allows access to Permissions Pos Terminal Payment Take Card."
+      "name": "Take card payments",
+      "description": "Use the Card button on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.TakeCash": {
-      "name": "Permissions Pos Terminal Payment Take Cash",
-      "description": "Allows access to Permissions Pos Terminal Payment Take Cash."
+      "name": "Take cash payments",
+      "description": "Use the Cash button on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.TakeVoucher": {
-      "name": "Permissions Pos Terminal Payment Take Voucher",
-      "description": "Allows access to Permissions Pos Terminal Payment Take Voucher."
+      "name": "Take voucher payments",
+      "description": "Use the Voucher button on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.View": {
-      "name": "Permissions Pos Terminal Payment View",
-      "description": "Allows access to Permissions Pos Terminal Payment View."
+      "name": "Open payment screen",
+      "description": "Open the POS Payment screen."
     },
     "Permissions.PosTerminal.Receipt.PrintLast": {
-      "name": "Permissions Pos Terminal Receipt Print Last",
-      "description": "Allows access to Permissions Pos Terminal Receipt Print Last."
+      "name": "Print last receipt",
+      "description": "Use the Print last receipt button on the POS."
     },
     "Permissions.PosTerminal.Returns.AddNoReceiptItem": {
-      "name": "Permissions Pos Terminal Returns Add No Receipt Item",
-      "description": "Allows access to Permissions Pos Terminal Returns Add No Receipt Item."
+      "name": "Return items without a receipt",
+      "description": "Use the Add no-receipt item button on the POS Returns screen."
     },
     "Permissions.PosTerminal.Returns.AddReceiptLine": {
-      "name": "Permissions Pos Terminal Returns Add Receipt Line",
-      "description": "Allows access to Permissions Pos Terminal Returns Add Receipt Line."
+      "name": "Return items from a receipt",
+      "description": "Use the Add receipt item button on the POS Returns screen."
     },
     "Permissions.PosTerminal.Returns.Confirm": {
-      "name": "Permissions Pos Terminal Returns Confirm",
-      "description": "Allows access to Permissions Pos Terminal Returns Confirm."
+      "name": "Confirm returns",
+      "description": "Use the Confirm return button on the POS Returns screen."
     },
     "Permissions.PosTerminal.Returns.View": {
-      "name": "Permissions Pos Terminal Returns View",
-      "description": "Allows access to Permissions Pos Terminal Returns View."
+      "name": "Open returns screen",
+      "description": "Open the POS Returns screen."
     },
     "Permissions.PosTerminal.Sales.AddItem": {
-      "name": "Permissions Pos Terminal Sales Add Item",
-      "description": "Allows access to Permissions Pos Terminal Sales Add Item."
+      "name": "Add scanned items",
+      "description": "Use the Add scanned item button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.AddOpenItem": {
-      "name": "Permissions Pos Terminal Sales Add Open Item",
-      "description": "Allows access to Permissions Pos Terminal Sales Add Open Item."
+      "name": "Add open items",
+      "description": "Use the Add open item button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.ChangePrice": {
-      "name": "Permissions Pos Terminal Sales Change Price",
-      "description": "Allows access to Permissions Pos Terminal Sales Change Price."
+      "name": "Change item price",
+      "description": "Use the Change price button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.ChangeQuantity": {
-      "name": "Permissions Pos Terminal Sales Change Quantity",
-      "description": "Allows access to Permissions Pos Terminal Sales Change Quantity."
+      "name": "Change quantity",
+      "description": "Use the Change quantity button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.ClearCart": {
-      "name": "Permissions Pos Terminal Sales Clear Cart",
-      "description": "Allows access to Permissions Pos Terminal Sales Clear Cart."
+      "name": "Clear cart",
+      "description": "Use the Clear cart button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.HoldOrder": {
-      "name": "Permissions Pos Terminal Sales Hold Order",
-      "description": "Allows access to Permissions Pos Terminal Sales Hold Order."
+      "name": "Hold sale",
+      "description": "Use the Hold sale button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineManualDiscount": {
-      "name": "Permissions Pos Terminal Sales Line Manual Discount",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Manual Discount."
+      "name": "Manual line discount",
+      "description": "Apply a manual discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount10Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount10 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount10 Percent."
+      "name": "Quick 10% line discount",
+      "description": "Apply a quick 10% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount20Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount20 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount20 Percent."
+      "name": "Quick 20% line discount",
+      "description": "Apply a quick 20% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount30Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount30 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount30 Percent."
+      "name": "Quick 30% line discount",
+      "description": "Apply a quick 30% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount40Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount40 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount40 Percent."
+      "name": "Quick 40% line discount",
+      "description": "Apply a quick 40% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount50Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount50 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount50 Percent."
+      "name": "Quick 50% line discount",
+      "description": "Apply a quick 50% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderManualDiscount": {
-      "name": "Permissions Pos Terminal Sales Order Manual Discount",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Manual Discount."
+      "name": "Manual sale discount",
+      "description": "Apply a manual discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount10Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount10 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount10 Percent."
+      "name": "Quick 10% sale discount",
+      "description": "Apply a quick 10% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount20Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount20 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount20 Percent."
+      "name": "Quick 20% sale discount",
+      "description": "Apply a quick 20% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount30Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount30 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount30 Percent."
+      "name": "Quick 30% sale discount",
+      "description": "Apply a quick 30% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount40Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount40 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount40 Percent."
+      "name": "Quick 40% sale discount",
+      "description": "Apply a quick 40% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount50Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount50 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount50 Percent."
+      "name": "Quick 50% sale discount",
+      "description": "Apply a quick 50% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.RecallOrder": {
-      "name": "Permissions Pos Terminal Sales Recall Order",
-      "description": "Allows access to Permissions Pos Terminal Sales Recall Order."
+      "name": "Recall held sale",
+      "description": "Use the Recall held sale button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.RemoveLine": {
-      "name": "Permissions Pos Terminal Sales Remove Line",
-      "description": "Allows access to Permissions Pos Terminal Sales Remove Line."
+      "name": "Remove line",
+      "description": "Use the button that removes a line from the cart on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.View": {
-      "name": "Permissions Pos Terminal Sales View",
-      "description": "Allows access to Permissions Pos Terminal Sales View."
+      "name": "Open sales screen",
+      "description": "Open the POS Sales screen."
     },
     "Permissions.PosTerminal.Settings.AppUpdate": {
-      "name": "Permissions Pos Terminal Settings App Update",
-      "description": "Allows access to Permissions Pos Terminal Settings App Update."
+      "name": "App update",
+      "description": "Use the App update button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.CatalogDownload": {
-      "name": "Permissions Pos Terminal Settings Catalog Download",
-      "description": "Allows access to Permissions Pos Terminal Settings Catalog Download."
+      "name": "Download product catalogue",
+      "description": "Use the Download catalogue button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.CatalogReset": {
-      "name": "Permissions Pos Terminal Settings Catalog Reset",
-      "description": "Allows access to Permissions Pos Terminal Settings Catalog Reset."
+      "name": "Reset product catalogue",
+      "description": "Use the Reset catalogue button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.DeviceRegistration": {
-      "name": "Permissions Pos Terminal Settings Device Registration",
-      "description": "Allows access to Permissions Pos Terminal Settings Device Registration."
+      "name": "Device registration",
+      "description": "Use the Device registration button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.PaymentTerminal": {
-      "name": "Permissions Pos Terminal Settings Payment Terminal",
-      "description": "Allows access to Permissions Pos Terminal Settings Payment Terminal."
+      "name": "Set up payment terminal",
+      "description": "Use the Payment terminal settings button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.ReceiptPrinter": {
-      "name": "Permissions Pos Terminal Settings Receipt Printer",
-      "description": "Allows access to Permissions Pos Terminal Settings Receipt Printer."
+      "name": "Set up receipt printer",
+      "description": "Use the Receipt printer settings button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.TestDataReset": {
-      "name": "Permissions Pos Terminal Settings Test Data Reset",
-      "description": "Allows access to Permissions Pos Terminal Settings Test Data Reset."
+      "name": "Reset test data",
+      "description": "Use the Reset test data button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.View": {
-      "name": "Permissions Pos Terminal Settings View",
-      "description": "Allows access to Permissions Pos Terminal Settings View."
+      "name": "Open settings screen",
+      "description": "Open the POS Settings screen."
     },
     "Permissions.PosTerminal.SpecialProducts.AddToCart": {
-      "name": "Permissions Pos Terminal Special Products Add To Cart",
-      "description": "Allows access to Permissions Pos Terminal Special Products Add To Cart."
+      "name": "Add specials to cart",
+      "description": "Use the Add to cart button on the POS Specials screen."
     },
     "Permissions.PosTerminal.SpecialProducts.Manage": {
-      "name": "Permissions Pos Terminal Special Products Manage",
-      "description": "Allows access to Permissions Pos Terminal Special Products Manage."
+      "name": "Manage specials",
+      "description": "Use the Manage specials button on the POS Specials screen."
     },
     "Permissions.PosTerminal.SpecialProducts.View": {
-      "name": "Permissions Pos Terminal Special Products View",
-      "description": "Allows access to Permissions Pos Terminal Special Products View."
+      "name": "Open specials screen",
+      "description": "Open the POS Specials screen."
     },
     "Permissions.PosTerminal.System.Sync": {
-      "name": "Permissions Pos Terminal System Sync",
-      "description": "Allows access to Permissions Pos Terminal System Sync."
+      "name": "Sync POS data",
+      "description": "Use the manual Sync button on the POS."
     },
     "PosProducts.Manage": {
-      "name": "Pos Products Manage",
-      "description": "Allows access to Pos Products Manage."
+      "name": "Manage POS products",
+      "description": "On the web admin, edit POS products, change prices in bulk, sync with HQ and stores, maintain categories and bundle codes, and run integrity fixes."
     },
     "PosProducts.View": {
-      "name": "Pos Products View",
-      "description": "Allows access to Pos Products View."
+      "name": "View POS products",
+      "description": "View POS products, categories, bundle codes, sync and integrity checks on the web admin."
     },
     "PricingStrategy.Edit": {
       "name": "Edit pricing rules",
@@ -554,28 +554,28 @@
       "description": "View and test automatic pricing rules."
     },
     "Products.Create": {
-      "name": "Products Create",
-      "description": "Allows access to Products Create."
+      "name": "Create products",
+      "description": "Add China purchasing products on the web admin."
     },
     "Products.Delete": {
-      "name": "Products Delete",
-      "description": "Allows access to Products Delete."
+      "name": "Delete products",
+      "description": "Delete China purchasing products on the web admin."
     },
     "Products.Edit": {
-      "name": "Products Edit",
-      "description": "Allows access to Products Edit."
+      "name": "Edit products",
+      "description": "Edit China purchasing products on the web admin and match China item numbers in container details."
     },
     "Products.View": {
-      "name": "Products View",
-      "description": "Allows access to Products View."
+      "name": "View products",
+      "description": "View China purchasing products on the web admin."
     },
     "Promotions.Edit": {
       "name": "Edit promotions",
-      "description": "Edit store promotions; global promotions also require the administrator role."
+      "description": "Edit store promotions on the web admin. Creating, editing, deleting, enabling or disabling global promotions also needs the Admin role."
     },
     "Promotions.View": {
-      "name": "Promotions View",
-      "description": "Allows access to Promotions View."
+      "name": "View promotions",
+      "description": "View promotions on the web admin and in the app."
     },
     "Reports.ProductMovement.View": {
       "name": "View supplier and store sales details",
@@ -586,28 +586,28 @@
       "description": "Executive dashboard APIs for hourly traffic, daily and weekly store performance; also treated as an alias of Reports.ProductMovement.View."
     },
     "Roles.Create": {
-      "name": "Roles Create",
-      "description": "Allows access to Roles Create."
+      "name": "Create roles",
+      "description": "Create roles on the web admin."
     },
     "Roles.Delete": {
-      "name": "Roles Delete",
-      "description": "Allows access to Roles Delete."
+      "name": "Delete roles",
+      "description": "Delete roles on the web admin."
     },
     "Roles.Edit": {
-      "name": "Roles Edit",
-      "description": "Allows access to Roles Edit."
+      "name": "Edit roles",
+      "description": "Edit basic role details on the web admin."
     },
     "Roles.ManagePermissions": {
-      "name": "Roles Manage Permissions",
-      "description": "Allows access to Roles Manage Permissions."
+      "name": "Manage role permissions",
+      "description": "Assign or remove role permissions on the web admin."
     },
     "Roles.ManageUsers": {
-      "name": "Roles Manage Users",
-      "description": "Allows access to Roles Manage Users."
+      "name": "Manage role members",
+      "description": "Manage which users have a role on the web admin."
     },
     "Roles.View": {
-      "name": "Roles View",
-      "description": "Allows access to Roles View."
+      "name": "View roles",
+      "description": "View roles and their permissions on the web admin and in the app."
     },
     "SalesDashboard.CompactBoard.View": {
       "name": "View compact sales dashboard",
@@ -630,16 +630,16 @@
       "description": "View product performance and recommended store manager actions."
     },
     "SalesDashboard.LocalSupplierPurchaseSales.View": {
-      "name": "View local purchase sales analysis",
-      "description": "Web page /executive-sales-intelligence/purchase-sales-analysis, Local purchase analysis tab - Review latest purchases, daily sales charts and sell-through by store and supplier."
+      "name": "View store purchase and sales analysis",
+      "description": "Sales dashboard (Store purchase sales tab): review latest purchases, daily sales charts and sell-through by store and supplier."
     },
     "SalesDashboard.KfcRestockSignal.View": {
       "name": "View KFC restock signals",
-      "description": "Report page /reports/kfc-uncle-bills/ - view best sellers, forecasts, stock gaps and sell-through for Uncle Bills (KFC), limited to the user's own stores"
+      "description": "Report page /reports/kfc-uncle-bills/ - view best sellers, forecasts, stock gaps and sell-through for Uncle Bills (KFC), limited to your own stores."
     },
     "SalesDashboard.KfcRestockSignal.AllStores": {
       "name": "View KFC restock signals for all stores",
-      "description": "Report page /reports/kfc-uncle-bills/ - on top of View KFC restock signals, view data for every store and the chain summary"
+      "description": "Report page /reports/kfc-uncle-bills/ - on top of View KFC restock signals, view data for every store and the chain-wide summary."
     },
     "SalesDashboard.PurchaseAmount.View": {
       "name": "View purchase amount dashboard",
@@ -658,108 +658,108 @@
       "description": "View purchasing, dispatch and sales flows for warehouse products."
     },
     "SeasonalCards.Remaining.SubmitManagedStore": {
-      "name": "Seasonal Cards Remaining Submit Managed Store",
-      "description": "Allows access to Seasonal Cards Remaining Submit Managed Store."
+      "name": "Submit seasonal card counts for managed stores",
+      "description": "Submit remaining seasonal card counts for the stores you manage, in the app."
     },
     "SeasonalCards.Remaining.ViewManagedStore": {
-      "name": "Seasonal Cards Remaining View Managed Store",
-      "description": "Allows access to Seasonal Cards Remaining View Managed Store."
+      "name": "View seasonal card counts for managed stores",
+      "description": "View remaining seasonal card submissions for the stores you manage, in the app."
     },
     "SeasonalCards.Remaining.ViewAllStores": {
       "name": "View seasonal card stats for all stores",
       "description": "Web admin seasonal card stats: remaining-card totals, stores not yet submitted and each store's submission history."
     },
     "Store.ManageOperations": {
-      "name": "Store Manage Operations",
-      "description": "Allows access to Store Manage Operations."
+      "name": "Manage store operations",
+      "description": "Manage cashier barcodes on the web admin."
     },
     "CashRegisterUsers.MobileManage": {
       "name": "Manage cashier barcodes (mobile)",
-      "description": "Mobile Cashier barcodes - view, create, update, enable and disable legacy POS staff barcodes for managed stores."
+      "description": "In the app (Cashier barcodes), view, create, update, enable and disable legacy POS staff barcodes for the stores you manage."
     },
     "CashRegisterUsers.MobilePrint": {
       "name": "Print cashier barcodes (mobile)",
-      "description": "Mobile Cashier barcodes - view legacy POS staff barcodes for managed stores, print them on a Bluetooth label printer and count prints."
+      "description": "In the app (Cashier barcodes), view legacy POS staff barcodes for the stores you manage, print them on a Bluetooth label printer and keep a print count."
     },
     "SeasonalProductInsights.View": {
       "name": "View seasonal products",
-      "description": "Mobile Seasonal products - look up by item number or barcode to see cumulative inbound, cumulative sales and theoretical stock for this store and other stores."
+      "description": "In the app, look up an item no. or barcode to see total stock in, total sales and estimated stock on hand for this store and other stores."
     },
     "StoreProducts.Create": {
-      "name": "Store Products Create",
-      "description": "Allows access to Store Products Create."
+      "name": "Create store product prices",
+      "description": "Create store product prices on the web admin."
     },
     "StoreProducts.Edit": {
-      "name": "Store Products Edit",
-      "description": "Allows access to Store Products Edit."
+      "name": "Edit store product prices",
+      "description": "Edit store product prices on the web admin."
     },
     "StoreProducts.EditName": {
-      "name": "Store Products Edit Name",
-      "description": "Allows changing a product's Chinese name in mobile Product query. The name is global: it affects all stores and POS receipts/labels and is synced to HQ. Granted separately from editing store product prices."
+      "name": "Edit product names",
+      "description": "In the app's product lookup, change a product's Chinese name. The name is global: it affects all stores and POS receipts and labels, and syncs to HQ. Granted separately from editing store prices."
     },
     "StoreProducts.PriceUpdates": {
-      "name": "Store Products Price Updates",
-      "description": "Allows viewing this store's price update and label replacement notices, applying warehouse prices, and printing or marking labels in the mobile Price updates screen."
+      "name": "Handle price updates",
+      "description": "In the app, view this store's price update and relabel notices, apply warehouse prices to the store's retail price or discount, and print labels or mark them done."
     },
     "StoreProducts.SyncToOtherStores": {
-      "name": "Store Products Sync To Other Stores",
-      "description": "Allows syncing this store's retail price and discount to other manageable stores from mobile product maintenance."
+      "name": "Sync prices to other stores",
+      "description": "In the app, copy this store's retail price and discount to other stores you manage. Those stores get a relabel notice."
     },
     "StoreProducts.View": {
-      "name": "Store Products View",
-      "description": "Allows access to Store Products View."
+      "name": "View store products",
+      "description": "View store product prices on the web admin and in the app's product pages."
     },
     "Stores.Create": {
-      "name": "Stores Create",
-      "description": "Allows access to Stores Create."
+      "name": "Create stores",
+      "description": "Create stores on the web admin."
     },
     "Stores.Delete": {
-      "name": "Stores Delete",
-      "description": "Allows access to Stores Delete."
+      "name": "Delete stores",
+      "description": "Delete stores on the web admin."
     },
     "Stores.Edit": {
-      "name": "Stores Edit",
-      "description": "Allows access to Stores Edit."
+      "name": "Edit stores",
+      "description": "Edit store details on the web admin."
     },
     "Stores.Sync": {
-      "name": "Stores Sync",
-      "description": "Allows access to Stores Sync."
+      "name": "Sync store data",
+      "description": "Sync store data on the web admin."
     },
     "Stores.View": {
-      "name": "Stores View",
-      "description": "Allows access to Stores View."
+      "name": "View stores",
+      "description": "View the store list and details on the web admin."
     },
     "StoreVouchers.View": {
-      "name": "Store Vouchers View",
-      "description": "Allows access to Store Vouchers View."
+      "name": "View store vouchers",
+      "description": "View store voucher usage and linked orders in the app."
     },
     "System.ManageAppDownloads": {
-      "name": "System Manage App Downloads",
-      "description": "Allows access to System Manage App Downloads."
+      "name": "Manage app releases",
+      "description": "Register OTA updates and generate rollback commands."
     },
     "System.ManagePerformanceBaseline": {
       "name": "Manage performance and quality baseline",
       "description": "Freeze performance and quality baselines that meet the observation and coverage requirements."
     },
     "System.ManageScheduledTasks": {
-      "name": "System Manage Scheduled Tasks",
-      "description": "Allows access to System Manage Scheduled Tasks."
+      "name": "Manage scheduled tasks",
+      "description": "Switch the instance that runs scheduled tasks and turn tasks on or off, on the web admin."
     },
     "System.ManageSettings": {
-      "name": "System Manage Settings",
-      "description": "Allows access to System Manage Settings."
+      "name": "Manage system settings",
+      "description": "Manage invoice email, payment terminal and emergency login key settings on the web admin."
     },
     "System.ViewMobileAppInstallLinks": {
-      "name": "View app install QR codes on mobile",
-      "description": "View the latest iOS and Android releases and their install QR codes on mobile."
+      "name": "View app install QR codes (mobile)",
+      "description": "View the latest iOS and Android releases and their install QR codes in the app."
     },
     "System.ViewAppDownloads": {
-      "name": "System View App Downloads",
-      "description": "Allows access to System View App Downloads."
+      "name": "View app releases",
+      "description": "View app downloads and WPF versions on the web admin. The matching pages in the app also need the Admin role."
     },
     "System.ViewLogs": {
-      "name": "System View Logs",
-      "description": "Allows access to System View Logs."
+      "name": "View system logs",
+      "description": "View the system centre logs on the web admin."
     },
     "System.ViewPerformanceBaseline": {
       "name": "View performance and quality baseline",
@@ -779,7 +779,7 @@
     },
     "Users.ManagePosTerminalPermissions": {
       "name": "Manage store POS access",
-      "description": "Maintain POS terminal access for store staff."
+      "description": "Set cashiers' POS permissions for each store on the web admin."
     },
     "Users.ManageRoles": {
       "name": "Manage user roles",
@@ -795,66 +795,66 @@
     },
     "Users.CreateStoreStaff": {
       "name": "Create store staff",
-      "description": "Mobile staff list - create staff accounts for your primary store (excludes web user management)."
+      "description": "In the app's staff list, create staff accounts for your primary store (not web user management)."
     },
     "Users.EditStoreStaff": {
       "name": "Edit store staff",
-      "description": "Mobile staff list - edit or disable staff of your primary store and manage their personal codes (excludes web user management)."
+      "description": "In the app's staff list, edit or disable staff at your primary store and manage their personal codes (not web user management)."
     },
     "Users.ResetStoreStaffPassword": {
       "name": "Reset store staff passwords",
-      "description": "Mobile staff list - reset passwords for staff of your primary store and require a change on first sign-in (excludes web user management)."
+      "description": "In the app's staff list, reset passwords for staff at your primary store and make them change it at their next login (not web user management)."
     },
     "Users.View": {
       "name": "View users",
-      "description": "View user lists and details in the mobile staff and user management pages."
+      "description": "View user lists and details in the app's Staff and User management pages."
     },
     "Users.ViewStoreStaff": {
       "name": "View store staff",
-      "description": "Mobile staff management - view the store staff list and details (excludes Web global user management)."
+      "description": "In the app's Staff management, view the store staff list and details (not web user management)."
     },
     "Users.ViewWebConsole": {
-      "name": "View Web user management",
-      "description": "Show and open the Web admin user management page."
+      "name": "View web user management",
+      "description": "Show and open the user management page on the web admin."
     },
     "Warehouse.Manage": {
-      "name": "Warehouse Manage",
-      "description": "Allows access to Warehouse Manage."
+      "name": "Manage warehouse",
+      "description": "Legacy all-in-one warehouse permission: the same as having Manage warehouse products, orders, categories and locations, and also allows pre-orders, retail price changes and product record APIs."
     },
     "Warehouse.ManageCategories": {
-      "name": "Warehouse Manage Categories",
-      "description": "Allows access to Warehouse Manage Categories."
+      "name": "Manage warehouse categories",
+      "description": "Manage warehouse categories on the web admin."
     },
     "Warehouse.ManageLocations": {
-      "name": "Warehouse Manage Locations",
-      "description": "Allows access to Warehouse Manage Locations."
+      "name": "Manage warehouse locations",
+      "description": "Manage warehouse locations on the web admin."
     },
     "Warehouse.ManageOrders": {
-      "name": "Warehouse Manage Orders",
-      "description": "Allows access to Warehouse Manage Orders."
+      "name": "Manage warehouse orders",
+      "description": "Manage store orders, pre-orders, picking sheets and invoices on the web admin and in the app."
     },
     "Warehouse.Picking": {
-      "name": "Warehouse Order Picking",
-      "description": "Mobile Order picking - scan to pick, fill in a missing min order qty and submit ship quantities. Included with Warehouse Manage or Warehouse Manage Orders."
+      "name": "Pick store orders",
+      "description": "In the app (Order picking), scan to pick, fill in missing inner qty and submit picked quantities. Included with Manage warehouse or Manage warehouse orders."
     },
     "Warehouse.StartPicking": {
-      "name": "Start Picking on Print",
-      "description": "Web page /warehouse/store-order/picking/:id - printing or downloading the picking sheet moves the order from Submitted to Picking. Granted separately from order editing; not included with Warehouse Manage."
+      "name": "Start picking on print",
+      "description": "Web page /warehouse/store-order/picking/:id - printing or downloading the picking sheet moves the order from Submitted to Picking. Granted separately from order editing; not included with Manage warehouse."
     },
     "Warehouse.ManageProducts": {
-      "name": "Warehouse Manage Products",
-      "description": "Allows access to Warehouse Manage Products."
+      "name": "Manage warehouse products",
+      "description": "Manage warehouse products, retail price changes and product grades on the web admin and in the app."
     },
     "Warehouse.CancelPriceUpdateTasks": {
       "name": "Cancel price update tasks",
-      "description": "Web page /warehouse/products/price-update-tasks and the mobile Price & Labels page - cancel pending store price update tasks (per product, across all stores; only removes the reminder, never changes any price, cannot be undone). Accounts with Manage warehouse products have it automatically"
+      "description": "Web page /warehouse/products/price-update-tasks and the app's Prices & labels page - cancel pending store price update tasks (per product, across all stores; only removes the reminder, never changes any price, cannot be undone). Accounts with Manage warehouse products have it automatically."
     }
   },
   "roles": {
-    "Admin": "Administrator",
-    "管理员": "Administrator",
-    "SuperAdmin": "Super administrator",
-    "超级管理员": "Super administrator",
+    "Admin": "Admin",
+    "管理员": "Admin",
+    "SuperAdmin": "Super admin",
+    "超级管理员": "Super admin",
     "StoreManager": "Store manager",
     "店长": "Store manager",
     "经理": "Store manager",
@@ -870,7 +870,7 @@
     "User": "User",
     "用户": "User",
     "Manager": "Manager",
-    "Order": "Order staff",
-    "订货员": "Order staff"
+    "Order": "Ordering staff",
+    "订货员": "Ordering staff"
   }
 }

@@ -209,7 +209,8 @@ export default function RootLayout() {
           style={styles.splashLogo}
           resizeMode="contain"
         />
-        <Text style={styles.startupErrorText}>启动失败，请重新打开应用</Text>
+        {/* 启动失败时 i18n 可能尚未初始化，固定显示中英双语 */}
+        <Text style={styles.startupErrorText}>{"启动失败，请重新打开应用\nThe app couldn't start. Please close and reopen it."}</Text>
       </View>
     );
   }
@@ -302,5 +303,6 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontSize: 15,
     lineHeight: 22,
+    textAlign: "center",
   },
 });

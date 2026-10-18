@@ -16,13 +16,13 @@ import type { MinorManagerCandidate } from "@/modules/minor-employment/types";
 
 /** 档案状态 → 店长可读的进度说明（后端原始状态码）。 */
 const STATUS_LABELS: Record<string, [string, string]> = {
-  draft: ["员工填写中", "Employee drafting"],
+  draft: ["员工填写中", "Employee filling in"],
   awaiting_guardian_signature: ["等待监护人签署", "Awaiting guardian"],
   signed_pending_employee_submit: [
     "监护人已签，待员工提交",
-    "Signed, not submitted",
+    "Signed, awaiting employee",
   ],
-  pending_hr_review: ["待 HR 审核", "HR review"],
+  pending_hr_review: ["待 HR 审核", "Awaiting HR review"],
   approved: ["已通过", "Approved"],
   returned: ["HR 已退回", "Returned by HR"],
 };
