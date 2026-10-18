@@ -95,6 +95,29 @@ test("扫码解析：订单条码、商品码、套装子码、货位码、同�
   assert.equal(normalizeScanCode("\t abc\n"), "ABC");
 });
 
+test("扫码解析：iOS 相机丢前导 0 时精确无命中才回退变体，且只认商品行", () => {
+  const variantCodes: PickCodeEntry[] = [
+    // 码表里是 13 位 0 开头的条码，相机扫出去掉前导 0 的 12 位。
+    { code: "0810812024527", target: "line", detailGuids: ["d-cup"], matchedBy: PICK_MATCH.barcode, label: null },
+    // 12 位 X 与 13 位 0+X 分属不同商品：精确命中优先，不合并。
+    { code: "661799090520", target: "line", detailGuids: ["d-set"], matchedBy: PICK_MATCH.barcode, label: null },
+    { code: "0661799090520", target: "line", detailGuids: ["d-cup"], matchedBy: PICK_MATCH.barcode, label: null },
+    // 货位条码（13 位）不参与变体，避免 12 位扫码误落到货位。
+    { code: "0123456789012", target: "location", detailGuids: ["d-cup"], matchedBy: null, label: "LOC" },
+  ];
+  const index = buildPickCodeIndex(variantCodes);
+
+  const variant = resolvePickScan("810812024527", index);
+  assert.equal(variant.kind === "line" && variant.detailGuid, "d-cup");
+
+  const exactTwelve = resolvePickScan("661799090520", index);
+  assert.equal(exactTwelve.kind === "line" && exactTwelve.detailGuid, "d-set");
+  const exactThirteen = resolvePickScan("0661799090520", index);
+  assert.equal(exactThirteen.kind === "line" && exactThirteen.detailGuid, "d-cup");
+
+  assert.equal(resolvePickScan("123456789012", index).kind, "none");
+});
+
 test("拣货数量：状态、剩余扫码次数、中包换算与汇总", () => {
   const cup = line({ detailGuid: "d-cup", orderedQuantity: 36, pickedTotal: 24, minOrderQuantity: 12 });
   const over = line({ detailGuid: "d-over", orderedQuantity: 12, pickedTotal: 18 });

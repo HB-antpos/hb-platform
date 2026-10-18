@@ -1,3 +1,4 @@
+import { getLeadingZeroBarcodeVariant } from "@/modules/scanner/barcode-variants";
 import type { PickCodeEntry } from "./types";
 
 /** 配货单二维码前缀：PDA 同一个扫码入口靠它区分“订单码”和“商品条码”。 */
@@ -60,7 +61,14 @@ export function resolvePickScan(
     }
   }
 
-  const entries = index.get(code) ?? [];
+  let entries = index.get(code) ?? [];
+  if (entries.length === 0) {
+    // iOS 相机会把 0 开头的 EAN-13 去成 12 位：精确码表没有命中才回退前导 0 的另一种写法，
+    // 且只认商品行（货位条码是 Code128，不会被相机去 0，不参与变体）。
+    const variant = getLeadingZeroBarcodeVariant(code);
+    const variantEntries = variant ? (index.get(variant) ?? []) : [];
+    entries = variantEntries.filter((entry) => entry.target === "line");
+  }
   const lineEntries = entries.filter((entry) => entry.target === "line");
   const lineGuids = unique(lineEntries.flatMap((entry) => entry.detailGuids));
   if (lineGuids.length > 0) {
