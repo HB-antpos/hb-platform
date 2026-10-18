@@ -4,6 +4,7 @@ const PUBLIC_APP_PATHS = new Set([
   '/privacy/mobile',
   '/minor-employment/sign',
   '/support/hb-supplier-order',
+  '/support/faq',
 ])
 
 export function isPublicAppPath(pathname: string) {

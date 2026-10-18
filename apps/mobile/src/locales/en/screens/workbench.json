@@ -65,7 +65,8 @@
     "deviceManagement": "Device management",
     "appInstall": "Install app",
     "appDownloads": "Release Center",
-    "wpfVersions": "WPF Versions"
+    "wpfVersions": "WPF Versions",
+    "supportFaq": "Help"
   },
   "allFunctions": {
     "title": "All tools",
@@ -80,7 +81,8 @@
     "emptyTitle": "No tools available",
     "emptyDescription": "This session has no authorised business tools. The workbench stays empty to protect your data.",
     "errorTitle": "Unable to load the function menu",
-    "errorDescription": "Only the safe empty workbench is shown. Retry to reload your access menu."
+    "errorDescription": "Only the safe empty workbench is shown. Retry to reload your access menu.",
+    "supportFaqOpenFailed": "Could not open the help page. Check your connection and try again."
   },
   "actions": {
     "retry": "Retry"
