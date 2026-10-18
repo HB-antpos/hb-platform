@@ -25,6 +25,7 @@ import {
   OfflineCatalogSyncService,
   type OfflineCatalogRefreshResult,
 } from "./offline-catalog-sync-service";
+import { getLeadingZeroBarcodeVariant } from "@/modules/scanner/barcode-variants";
 import { normalizeOfflineLookupCode, type ActiveOfflineCatalogMetadata } from "./types";
 
 interface OfflineCatalogRuntime {
@@ -184,7 +185,17 @@ export const useOfflineCatalogStore = create<OfflineCatalogState>((set, get) => 
         return [];
       }
       const normalizedKeyword = normalizeOfflineLookupCode(keyword);
-      const rows = await runtime.repository.lookup(storeCode, normalizedKeyword);
+      let rows = await runtime.repository.lookup(storeCode, normalizedKeyword);
+      if (rows.length === 0) {
+        // 精确匹配没有结果才回退到前导 0 的另一种写法：库里可能同时存在 12 位 X 与 13 位 0+X 两个不同商品，
+        // 精确命中必须优先；回退只认条码来源，避免纯数字货号被变体误命中。
+        const variant = getLeadingZeroBarcodeVariant(normalizedKeyword);
+        if (variant) {
+          rows = (await runtime.repository.lookup(storeCode, variant)).filter(
+            (row) => row.matchSource.endsWith("Barcode"),
+          );
+        }
+      }
       return buildOfflineLookupItems(rows, keyword);
     },
 

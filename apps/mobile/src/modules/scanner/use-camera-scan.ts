@@ -5,6 +5,7 @@ import {
   createCameraScanGateController,
   type CameraScanGateController,
 } from "@/modules/scanner/camera-scan-gate";
+import { restoreCameraBarcodeData } from "@/modules/scanner/camera-barcode-data";
 
 interface UseCameraScanOptions {
   cooldownMs?: number;
@@ -41,12 +42,12 @@ export function useCameraScan({
   scanGateController.setCurrentResetKey(resetKey);
 
   const handleBarcodeScanned = useCallback(
-    async ({ data }: BarcodeScanningResult) => {
+    async ({ data, type }: BarcodeScanningResult) => {
       if (disabled) {
         return;
       }
 
-      const barcode = normalizeBarcode(data);
+      const barcode = restoreCameraBarcodeData(type, normalizeBarcode(data));
       if (!barcode) {
         return;
       }
