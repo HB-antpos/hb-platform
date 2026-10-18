@@ -7,6 +7,7 @@ import {
   localizeAccessPermissionCategory,
   localizeAccessRoleDescription,
   localizeAccessRoleName,
+  localizePosTerminalPermissionOptions,
 } from "./access-permission-presentation";
 
 const currentDir = new URL(".", import.meta.url).pathname;
@@ -222,5 +223,18 @@ assert.equal(
   zhUserManagement.accessManagement.permissions.implicit,
   "管理员默认拥有",
 );
+
+// 收银权限页：后端只给中文名，英文界面按权限码取英文；中文界面原样；未登记的码不露中文。
+const posOptions = [
+  { code: "Permissions.PosTerminal.Returns.View", name: "查看退货页", group: "退货", description: "允许进入退货页" },
+  { code: "Permissions.PosTerminal.Returns.AddNoReceiptItem", name: "添加无小票退货商品", group: "退货", description: "允许无小票退货" },
+  { code: "Permissions.PosTerminal.Future.DoThing", name: "未来权限", group: "其他", description: "后端新加的权限" },
+];
+const enPos = localizePosTerminalPermissionOptions(posOptions, "en");
+assert.equal(enPos[0].name, "Open returns screen");
+assert.equal(enPos[1].name, "Return items without a receipt");
+assert.equal(enPos[0].code, posOptions[0].code, "权限码不能被改写，保存仍按码提交");
+assert.ok(enPos.every((option) => !/[\u3400-\u9fff]/u.test(`${option.name}${option.description}`)), "英文界面不得出现中文权限名或说明");
+assert.deepEqual(localizePosTerminalPermissionOptions(posOptions, "zh"), posOptions, "中文界面保持后端原文");
 
 console.log("access permission presentation tests passed");
