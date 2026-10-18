@@ -464,30 +464,46 @@ assert.deepEqual(
   "App 安装必须在人员与管理分区、紧挨版本管理之前显示"
 );
 
-// 使用帮助：店长本地补入、排在人员与管理末尾，打开 Web 公开 FAQ 页，不进入后端菜单与 TAB_PATHS 契约。
+// 使用帮助：店长与管理员本地补入、排在人员与管理末尾，打开 Web 公开 FAQ 页，不进入后端菜单与 TAB_PATHS 契约。
+const supportFaqViewer = {
+  isStoreManager: false,
+  isAdmin: false,
+  isDeviceMode: false,
+  isIosReviewSession: false,
+};
 assert.deepEqual(
-  withLocalWorkbenchRoutes(["users"], { isStoreManager: true, isDeviceMode: false }),
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isStoreManager: true }),
   ["users", SUPPORT_FAQ_ROUTE],
   "店长账号工作台必须补上使用帮助入口"
 );
 assert.deepEqual(
-  withLocalWorkbenchRoutes(["users"], { isStoreManager: false, isDeviceMode: false }),
-  ["users"],
-  "非店长账号不显示使用帮助"
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isAdmin: true }),
+  ["users", SUPPORT_FAQ_ROUTE],
+  "管理员账号工作台也必须补上使用帮助入口"
 );
 assert.deepEqual(
-  withLocalWorkbenchRoutes(["users"], { isStoreManager: true, isDeviceMode: true }),
+  withLocalWorkbenchRoutes(["users"], supportFaqViewer),
+  ["users"],
+  "非店长、非管理员账号不显示使用帮助"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isStoreManager: true, isDeviceMode: true }),
   ["users"],
   "设备会话没有登录人，不显示使用帮助"
 );
 assert.deepEqual(
-  withLocalWorkbenchRoutes(["users", SUPPORT_FAQ_ROUTE], { isStoreManager: true, isDeviceMode: false }),
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isAdmin: true, isIosReviewSession: true }),
+  ["users"],
+  "iOS 审核会话（审核账号是管理员）不显示跳外部网页的使用帮助"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users", SUPPORT_FAQ_ROUTE], { ...supportFaqViewer, isStoreManager: true }),
   ["users", SUPPORT_FAQ_ROUTE],
   "使用帮助不得重复补入"
 );
 assert.deepEqual(
   buildWorkbenchSections(
-    withLocalWorkbenchRoutes(["app-install", "app-downloads"], { isStoreManager: true, isDeviceMode: false })
+    withLocalWorkbenchRoutes(["app-install", "app-downloads"], { ...supportFaqViewer, isStoreManager: true })
   ).map((section) => ({
     key: section.key,
     itemRouteNames: section.items.map((item) => item.routeName),
