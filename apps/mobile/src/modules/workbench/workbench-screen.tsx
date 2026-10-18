@@ -3,6 +3,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Alert,
+  Linking,
   Platform,
   Pressable,
   RefreshControl,
@@ -19,17 +21,21 @@ import {
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
+import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { useAppNavigationAccess } from "@/modules/navigation/access-context";
 import { TAB_PATHS } from "@/modules/navigation/default-route";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import {
   areAllWorkbenchSectionsCollapsed,
+  buildSupportFaqUrl,
   buildWorkbenchSections,
   formatWorkbenchBadgeCount,
+  SUPPORT_FAQ_ROUTE,
   summarizeWorkbenchSectionBadge,
   toggleAllWorkbenchSections,
   WORKBENCH_BADGE_DEFAULT_MAX,
   toggleWorkbenchSectionCollapsed,
+  withLocalWorkbenchRoutes,
   type WorkbenchNavigationItem,
 } from "@/modules/navigation/workbench";
 import { buildPriceUpdatesRoute } from "@/modules/price-updates/navigation";
@@ -209,7 +215,7 @@ function AccessState({ kind, onRetry }: AccessStateProps) {
 
 export function WorkbenchScreen() {
   const router = useRouter();
-  const { t } = useAppTranslation(["workbench", "common"]);
+  const { t, language } = useAppTranslation(["workbench", "common"]);
   const { t: tPrice } = useAppTranslation("priceUpdates");
   const {
     orderedVisibleRouteNames,
@@ -239,6 +245,8 @@ export function WorkbenchScreen() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const currentUser = useAuthStore((state) => state.user);
+  const isStoreManager = useAuthStore((state) => state.access.isStoreManager);
+  const isAdmin = useAuthStore((state) => state.access.isAdmin);
   const deviceSession = useDeviceStore((state) => state.session);
   const cartSummary = useCartStore((state) => state.cartSummary);
   const {
@@ -261,8 +269,16 @@ export function WorkbenchScreen() {
     () =>
       navigationLoading || navigationErrorMessage
         ? []
-        : buildWorkbenchSections(orderedVisibleRouteNames),
-    [navigationErrorMessage, navigationLoading, orderedVisibleRouteNames]
+        : buildWorkbenchSections(
+            withLocalWorkbenchRoutes(orderedVisibleRouteNames, {
+              isStoreManager,
+              isAdmin,
+              isDeviceMode,
+              // 审核态在登录时确定，登录后工作台会重新渲染，这里直接读取即可。
+              isIosReviewSession: isIosReviewSessionActive(),
+            })
+          ),
+    [isAdmin, isDeviceMode, isStoreManager, navigationErrorMessage, navigationLoading, orderedVisibleRouteNames]
   );
   const allSectionsCollapsed = areAllWorkbenchSectionsCollapsed(
     sections,
@@ -349,6 +365,13 @@ export function WorkbenchScreen() {
 
   const navigateTo = useCallback(
     (routeName: string) => {
+      // 使用帮助是外部网页：交给系统浏览器打开，不进 Shell 路由。
+      if (routeName === SUPPORT_FAQ_ROUTE && itemsByRoute.has(routeName)) {
+        void Linking.openURL(buildSupportFaqUrl(language)).catch(() => {
+          Alert.alert(t("routes.supportFaq"), t("states.supportFaqOpenFailed"));
+        });
+        return;
+      }
       const path = TAB_PATHS[routeName];
       if (
         !path
@@ -373,11 +396,13 @@ export function WorkbenchScreen() {
     },
     [
       itemsByRoute,
+      language,
       navigationErrorMessage,
       navigationLoading,
       priceTasks.firstOverdueStoreCode,
       priceTasks.reportsLocked,
       router,
+      t,
     ]
   );
 

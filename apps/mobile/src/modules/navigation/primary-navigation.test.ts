@@ -14,12 +14,16 @@ import {
 } from "./primary-navigation";
 import {
   areAllWorkbenchSectionsCollapsed,
+  buildSupportFaqUrl,
   buildWorkbenchSections,
   formatWorkbenchBadgeCount,
+  SUPPORT_FAQ_ROUTE,
   summarizeWorkbenchSectionBadge,
   toggleAllWorkbenchSections,
   toggleWorkbenchSectionCollapsed,
+  withLocalWorkbenchRoutes,
 } from "./workbench";
+import { TAB_PATHS } from "./default-route";
 
 const localeRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -458,6 +462,59 @@ assert.deepEqual(
   [{ key: "people-management", itemRouteNames: ["app-install", "app-downloads"] }],
   "App 安装必须在人员与管理分区、紧挨版本管理之前显示"
 );
+
+// 使用帮助：店长与管理员本地补入、排在人员与管理末尾，打开 Web 公开 FAQ 页，不进入后端菜单与 TAB_PATHS 契约。
+const supportFaqViewer = {
+  isStoreManager: false,
+  isAdmin: false,
+  isDeviceMode: false,
+  isIosReviewSession: false,
+};
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isStoreManager: true }),
+  ["users", SUPPORT_FAQ_ROUTE],
+  "店长账号工作台必须补上使用帮助入口"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isAdmin: true }),
+  ["users", SUPPORT_FAQ_ROUTE],
+  "管理员账号工作台也必须补上使用帮助入口"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users"], supportFaqViewer),
+  ["users"],
+  "非店长、非管理员账号不显示使用帮助"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isStoreManager: true, isDeviceMode: true }),
+  ["users"],
+  "设备会话没有登录人，不显示使用帮助"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users"], { ...supportFaqViewer, isAdmin: true, isIosReviewSession: true }),
+  ["users"],
+  "iOS 审核会话（审核账号是管理员）不显示跳外部网页的使用帮助"
+);
+assert.deepEqual(
+  withLocalWorkbenchRoutes(["users", SUPPORT_FAQ_ROUTE], { ...supportFaqViewer, isStoreManager: true }),
+  ["users", SUPPORT_FAQ_ROUTE],
+  "使用帮助不得重复补入"
+);
+assert.deepEqual(
+  buildWorkbenchSections(
+    withLocalWorkbenchRoutes(["app-install", "app-downloads"], { ...supportFaqViewer, isStoreManager: true })
+  ).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [{ key: "people-management", itemRouteNames: ["app-install", "app-downloads", SUPPORT_FAQ_ROUTE] }],
+  "使用帮助必须排在人员与管理分区末尾"
+);
+assert.equal(TAB_PATHS[SUPPORT_FAQ_ROUTE], undefined, "使用帮助是外部网页，不得登记为 App 内路由");
+assert.equal(buildSupportFaqUrl("zh"), "https://hotbargain.vip/support/faq?lang=zh&tab=mobile");
+assert.equal(buildSupportFaqUrl("en"), "https://hotbargain.vip/support/faq?lang=en&tab=mobile");
+assert.equal(zhWorkbench.routes.supportFaq, "使用帮助", "中文工作台必须显示使用帮助");
+assert.equal(enWorkbench.routes.supportFaq, "Help", "英文工作台必须显示 Help");
 assert.deepEqual(
   buildWorkbenchSections(["product-query", "product-insights"]).map((section) => ({
     key: section.key,
