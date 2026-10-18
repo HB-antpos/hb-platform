@@ -38,6 +38,7 @@
     <Compile Include="WarehousePickerTests.cs" />
     <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
     <Compile Include="WarehousePickingControllerTests.cs" />
+    <Compile Include="WarehousePickingCodeLookupVariantTests.cs" />
     <Compile Include="NotificationPlatformTests.cs" />
     <Compile Include="ExpoPushTestSupport.cs" />
     <Compile Include="ExpoPushContentTests.cs" />
