@@ -263,7 +263,7 @@
     },
     "Permissions.PosTerminal.Audit.View": {
       "name": "View POS audit logs",
-      "description": "View POS operation audit logs for managed stores on the web admin and the mobile workbench."
+      "description": "View POS staff activity logs for the stores you manage, on the web admin and in the app."
     },
     "LegacyEmployeeLogs.View": {
       "name": "View legacy POS operation logs",
@@ -306,236 +306,236 @@
       "description": "On the web admin page /system/face-match (Review tasks tab): receive possible-match alerts for assigned stores, compare the live capture and reference photo side by side, and decide whether they are the same person (sensitive biometric information, every view is logged)."
     },
     "Permissions.PosTerminal.CashDrawer.Open": {
-      "name": "Permissions Pos Terminal Cash Drawer Open",
-      "description": "Allows access to Permissions Pos Terminal Cash Drawer Open."
+      "name": "Open cash drawer",
+      "description": "Use the Open cash drawer button on the POS."
     },
     "Permissions.PosTerminal.CustomerDisplay.Manage": {
-      "name": "Permissions Pos Terminal Customer Display Manage",
-      "description": "Allows access to Permissions Pos Terminal Customer Display Manage."
+      "name": "Manage customer display",
+      "description": "Use the Manage customer display button on the POS."
     },
     "Permissions.PosTerminal.DailyClose.Reprint": {
-      "name": "Permissions Pos Terminal Daily Close Reprint",
-      "description": "Allows access to Permissions Pos Terminal Daily Close Reprint."
+      "name": "Reprint daily close receipt",
+      "description": "Use the Reprint daily close receipt button on the POS Daily close screen."
     },
     "Permissions.PosTerminal.DailyClose.Save": {
-      "name": "Permissions Pos Terminal Daily Close Save",
-      "description": "Allows access to Permissions Pos Terminal Daily Close Save."
+      "name": "Save daily close",
+      "description": "Use the Save daily close button on the POS Daily close screen."
     },
     "Permissions.PosTerminal.DailyClose.View": {
-      "name": "Permissions Pos Terminal Daily Close View",
-      "description": "Allows access to Permissions Pos Terminal Daily Close View."
+      "name": "Open daily close screen",
+      "description": "Open the POS Daily close screen."
     },
     "Permissions.PosTerminal.History.Recall": {
-      "name": "Permissions Pos Terminal History Recall",
-      "description": "Allows access to Permissions Pos Terminal History Recall."
+      "name": "Recall past orders",
+      "description": "Use the Recall order button on the POS Order history screen."
     },
     "Permissions.PosTerminal.History.Reprint": {
-      "name": "Permissions Pos Terminal History Reprint",
-      "description": "Allows access to Permissions Pos Terminal History Reprint."
+      "name": "Reprint past receipts",
+      "description": "Use the Reprint receipt button on the POS Order history screen."
     },
     "Permissions.PosTerminal.History.View": {
-      "name": "Permissions Pos Terminal History View",
-      "description": "Allows access to Permissions Pos Terminal History View."
+      "name": "Open order history",
+      "description": "Open the POS Order history screen."
     },
     "Permissions.PosTerminal.Installments.AddRepayment": {
-      "name": "Permissions Pos Terminal Lay-bys Add Repayment",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Add Repayment."
+      "name": "Add lay-by payment",
+      "description": "Use the Add payment button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.AmendLines": {
-      "name": "Permissions Pos Terminal Lay-bys Amend Lines",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Amend Lines."
+      "name": "Edit lay-by items",
+      "description": "Use the Edit items button on a lay-by's details in POS Order history."
     },
     "Permissions.PosTerminal.Installments.Cancel": {
-      "name": "Permissions Pos Terminal Lay-bys Cancel",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Cancel."
+      "name": "Cancel lay-bys",
+      "description": "Use the Cancel lay-by button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.ConfirmPickup": {
-      "name": "Permissions Pos Terminal Lay-bys Confirm Pickup",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Confirm Pickup."
+      "name": "Confirm lay-by pickup",
+      "description": "Use the Confirm pickup button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.Create": {
-      "name": "Permissions Pos Terminal Lay-bys Create",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys Create."
+      "name": "Create lay-bys",
+      "description": "Use the Create lay-by button on the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Installments.View": {
-      "name": "Permissions Pos Terminal Lay-bys View",
-      "description": "Allows access to Permissions Pos Terminal Lay-bys View."
+      "name": "Open lay-by screen",
+      "description": "Open the POS Lay-by screen."
     },
     "Permissions.PosTerminal.Payment.Confirm": {
-      "name": "Permissions Pos Terminal Payment Confirm",
-      "description": "Allows access to Permissions Pos Terminal Payment Confirm."
+      "name": "Confirm payment",
+      "description": "Use the button that completes payment on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.RemoveTender": {
-      "name": "Permissions Pos Terminal Payment Remove Tender",
-      "description": "Allows access to Permissions Pos Terminal Payment Remove Tender."
+      "name": "Remove a payment",
+      "description": "Use the button that removes an entered payment on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.TakeCard": {
-      "name": "Permissions Pos Terminal Payment Take Card",
-      "description": "Allows access to Permissions Pos Terminal Payment Take Card."
+      "name": "Take card payments",
+      "description": "Use the Card button on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.TakeCash": {
-      "name": "Permissions Pos Terminal Payment Take Cash",
-      "description": "Allows access to Permissions Pos Terminal Payment Take Cash."
+      "name": "Take cash payments",
+      "description": "Use the Cash button on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.TakeVoucher": {
-      "name": "Permissions Pos Terminal Payment Take Voucher",
-      "description": "Allows access to Permissions Pos Terminal Payment Take Voucher."
+      "name": "Take voucher payments",
+      "description": "Use the Voucher button on the POS Payment screen."
     },
     "Permissions.PosTerminal.Payment.View": {
-      "name": "Permissions Pos Terminal Payment View",
-      "description": "Allows access to Permissions Pos Terminal Payment View."
+      "name": "Open payment screen",
+      "description": "Open the POS Payment screen."
     },
     "Permissions.PosTerminal.Receipt.PrintLast": {
-      "name": "Permissions Pos Terminal Receipt Print Last",
-      "description": "Allows access to Permissions Pos Terminal Receipt Print Last."
+      "name": "Print last receipt",
+      "description": "Use the Print last receipt button on the POS."
     },
     "Permissions.PosTerminal.Returns.AddNoReceiptItem": {
-      "name": "Permissions Pos Terminal Returns Add No Receipt Item",
-      "description": "Allows access to Permissions Pos Terminal Returns Add No Receipt Item."
+      "name": "Return items without a receipt",
+      "description": "Use the Add no-receipt item button on the POS Returns screen."
     },
     "Permissions.PosTerminal.Returns.AddReceiptLine": {
-      "name": "Permissions Pos Terminal Returns Add Receipt Line",
-      "description": "Allows access to Permissions Pos Terminal Returns Add Receipt Line."
+      "name": "Return items from a receipt",
+      "description": "Use the Add receipt item button on the POS Returns screen."
     },
     "Permissions.PosTerminal.Returns.Confirm": {
-      "name": "Permissions Pos Terminal Returns Confirm",
-      "description": "Allows access to Permissions Pos Terminal Returns Confirm."
+      "name": "Confirm returns",
+      "description": "Use the Confirm return button on the POS Returns screen."
     },
     "Permissions.PosTerminal.Returns.View": {
-      "name": "Permissions Pos Terminal Returns View",
-      "description": "Allows access to Permissions Pos Terminal Returns View."
+      "name": "Open returns screen",
+      "description": "Open the POS Returns screen."
     },
     "Permissions.PosTerminal.Sales.AddItem": {
-      "name": "Permissions Pos Terminal Sales Add Item",
-      "description": "Allows access to Permissions Pos Terminal Sales Add Item."
+      "name": "Add scanned items",
+      "description": "Use the Add scanned item button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.AddOpenItem": {
-      "name": "Permissions Pos Terminal Sales Add Open Item",
-      "description": "Allows access to Permissions Pos Terminal Sales Add Open Item."
+      "name": "Add open items",
+      "description": "Use the Add open item button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.ChangePrice": {
-      "name": "Permissions Pos Terminal Sales Change Price",
-      "description": "Allows access to Permissions Pos Terminal Sales Change Price."
+      "name": "Change item price",
+      "description": "Use the Change price button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.ChangeQuantity": {
-      "name": "Permissions Pos Terminal Sales Change Quantity",
-      "description": "Allows access to Permissions Pos Terminal Sales Change Quantity."
+      "name": "Change quantity",
+      "description": "Use the Change quantity button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.ClearCart": {
-      "name": "Permissions Pos Terminal Sales Clear Cart",
-      "description": "Allows access to Permissions Pos Terminal Sales Clear Cart."
+      "name": "Clear cart",
+      "description": "Use the Clear cart button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.HoldOrder": {
-      "name": "Permissions Pos Terminal Sales Hold Order",
-      "description": "Allows access to Permissions Pos Terminal Sales Hold Order."
+      "name": "Hold sale",
+      "description": "Use the Hold sale button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineManualDiscount": {
-      "name": "Permissions Pos Terminal Sales Line Manual Discount",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Manual Discount."
+      "name": "Manual line discount",
+      "description": "Apply a manual discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount10Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount10 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount10 Percent."
+      "name": "Quick 10% line discount",
+      "description": "Apply a quick 10% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount20Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount20 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount20 Percent."
+      "name": "Quick 20% line discount",
+      "description": "Apply a quick 20% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount30Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount30 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount30 Percent."
+      "name": "Quick 30% line discount",
+      "description": "Apply a quick 30% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount40Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount40 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount40 Percent."
+      "name": "Quick 40% line discount",
+      "description": "Apply a quick 40% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.LineQuickDiscount50Percent": {
-      "name": "Permissions Pos Terminal Sales Line Quick Discount50 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Line Quick Discount50 Percent."
+      "name": "Quick 50% line discount",
+      "description": "Apply a quick 50% discount to a single line on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderManualDiscount": {
-      "name": "Permissions Pos Terminal Sales Order Manual Discount",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Manual Discount."
+      "name": "Manual sale discount",
+      "description": "Apply a manual discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount10Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount10 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount10 Percent."
+      "name": "Quick 10% sale discount",
+      "description": "Apply a quick 10% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount20Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount20 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount20 Percent."
+      "name": "Quick 20% sale discount",
+      "description": "Apply a quick 20% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount30Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount30 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount30 Percent."
+      "name": "Quick 30% sale discount",
+      "description": "Apply a quick 30% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount40Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount40 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount40 Percent."
+      "name": "Quick 40% sale discount",
+      "description": "Apply a quick 40% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.OrderQuickDiscount50Percent": {
-      "name": "Permissions Pos Terminal Sales Order Quick Discount50 Percent",
-      "description": "Allows access to Permissions Pos Terminal Sales Order Quick Discount50 Percent."
+      "name": "Quick 50% sale discount",
+      "description": "Apply a quick 50% discount to the whole sale on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.RecallOrder": {
-      "name": "Permissions Pos Terminal Sales Recall Order",
-      "description": "Allows access to Permissions Pos Terminal Sales Recall Order."
+      "name": "Recall held sale",
+      "description": "Use the Recall held sale button on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.RemoveLine": {
-      "name": "Permissions Pos Terminal Sales Remove Line",
-      "description": "Allows access to Permissions Pos Terminal Sales Remove Line."
+      "name": "Remove line",
+      "description": "Use the button that removes a line from the cart on the POS Sales screen."
     },
     "Permissions.PosTerminal.Sales.View": {
-      "name": "Permissions Pos Terminal Sales View",
-      "description": "Allows access to Permissions Pos Terminal Sales View."
+      "name": "Open sales screen",
+      "description": "Open the POS Sales screen."
     },
     "Permissions.PosTerminal.Settings.AppUpdate": {
-      "name": "Permissions Pos Terminal Settings App Update",
-      "description": "Allows access to Permissions Pos Terminal Settings App Update."
+      "name": "App update",
+      "description": "Use the App update button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.CatalogDownload": {
-      "name": "Permissions Pos Terminal Settings Catalog Download",
-      "description": "Allows access to Permissions Pos Terminal Settings Catalog Download."
+      "name": "Download product catalogue",
+      "description": "Use the Download catalogue button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.CatalogReset": {
-      "name": "Permissions Pos Terminal Settings Catalog Reset",
-      "description": "Allows access to Permissions Pos Terminal Settings Catalog Reset."
+      "name": "Reset product catalogue",
+      "description": "Use the Reset catalogue button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.DeviceRegistration": {
-      "name": "Permissions Pos Terminal Settings Device Registration",
-      "description": "Allows access to Permissions Pos Terminal Settings Device Registration."
+      "name": "Device registration",
+      "description": "Use the Device registration button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.PaymentTerminal": {
-      "name": "Permissions Pos Terminal Settings Payment Terminal",
-      "description": "Allows access to Permissions Pos Terminal Settings Payment Terminal."
+      "name": "Set up payment terminal",
+      "description": "Use the Payment terminal settings button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.ReceiptPrinter": {
-      "name": "Permissions Pos Terminal Settings Receipt Printer",
-      "description": "Allows access to Permissions Pos Terminal Settings Receipt Printer."
+      "name": "Set up receipt printer",
+      "description": "Use the Receipt printer settings button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.TestDataReset": {
-      "name": "Permissions Pos Terminal Settings Test Data Reset",
-      "description": "Allows access to Permissions Pos Terminal Settings Test Data Reset."
+      "name": "Reset test data",
+      "description": "Use the Reset test data button on the POS Settings screen."
     },
     "Permissions.PosTerminal.Settings.View": {
-      "name": "Permissions Pos Terminal Settings View",
-      "description": "Allows access to Permissions Pos Terminal Settings View."
+      "name": "Open settings screen",
+      "description": "Open the POS Settings screen."
     },
     "Permissions.PosTerminal.SpecialProducts.AddToCart": {
-      "name": "Permissions Pos Terminal Special Products Add To Cart",
-      "description": "Allows access to Permissions Pos Terminal Special Products Add To Cart."
+      "name": "Add specials to cart",
+      "description": "Use the Add to cart button on the POS Specials screen."
     },
     "Permissions.PosTerminal.SpecialProducts.Manage": {
-      "name": "Permissions Pos Terminal Special Products Manage",
-      "description": "Allows access to Permissions Pos Terminal Special Products Manage."
+      "name": "Manage specials",
+      "description": "Use the Manage specials button on the POS Specials screen."
     },
     "Permissions.PosTerminal.SpecialProducts.View": {
-      "name": "Permissions Pos Terminal Special Products View",
-      "description": "Allows access to Permissions Pos Terminal Special Products View."
+      "name": "Open specials screen",
+      "description": "Open the POS Specials screen."
     },
     "Permissions.PosTerminal.System.Sync": {
-      "name": "Permissions Pos Terminal System Sync",
-      "description": "Allows access to Permissions Pos Terminal System Sync."
+      "name": "Sync POS data",
+      "description": "Use the manual Sync button on the POS."
     },
     "PosProducts.Manage": {
       "name": "Pos Products Manage",

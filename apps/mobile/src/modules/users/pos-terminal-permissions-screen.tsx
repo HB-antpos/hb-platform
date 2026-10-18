@@ -62,6 +62,7 @@ import {
   type PosPermissionPresetKey,
 } from "@/modules/users/pos-terminal-permission-presentation";
 import type { StoreUserPosTerminalPermissions } from "@/modules/users/types";
+import { localizePosTerminalPermissionOptions } from "@/modules/users/access-permission-presentation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { PERMISSIONS } from "@/shared/utils/access";
@@ -84,7 +85,7 @@ const LIST_FILTERS: PosPermissionListFilter[] = ["all", "enabled", "highRisk", "
 export default function PosTerminalPermissionsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const { t } = useAppTranslation(["userManagement", "common"]);
+  const { t, language } = useAppTranslation(["userManagement", "common"]);
   const params = useLocalSearchParams<{
     userGuid?: string | string[];
     storeGuid?: string | string[];
@@ -287,9 +288,10 @@ export default function PosTerminalPermissionsScreen() {
     router.replace("/(shell)/users");
   }, [router]);
 
+  // 权限名称按界面语言换成语言包文案（后端只返回中文名），下游分组、摘要、复制、确认弹层都用这份。
   const assignablePermissions = useMemo(
-    () => permissionsQuery.data?.assignablePermissions ?? [],
-    [permissionsQuery.data?.assignablePermissions]
+    () => localizePosTerminalPermissionOptions(permissionsQuery.data?.assignablePermissions ?? [], language),
+    [language, permissionsQuery.data?.assignablePermissions]
   );
   const displayGroups = useMemo(
     () => buildPosPermissionDisplayGroups(assignablePermissions),
