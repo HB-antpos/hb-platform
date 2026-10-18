@@ -1,7 +1,7 @@
 {
   "storeCash": {
     "title": "Cash management",
-    "subtitle": "Cash pool = opening + counted cash from daily closes − deposits − expenses. The float is taken out before counting, so the balance should be close to 0 after banking.",
+    "subtitle": "Cash on hand = opening + counted cash from daily closes − deposits − expenses. The float is taken out before counting, so the balance should be close to 0 after banking.",
     "noStores": "This account has no stores with cash data to view",
     "t2Note": "T2 covers the last {{days}} days only",
     "tabs": {
@@ -12,7 +12,7 @@
     },
     "dailyCloseMissing": {
       "title": "Daily close data is not connected yet",
-      "description": "Cash pool balance, daily close cash and close variance can't be calculated yet and show as \"—\". Deposit and expense records are not affected."
+      "description": "Cash on hand, daily close cash and close variance can't be calculated yet and show as \"—\". Deposit and expense records are not affected."
     },
     "filters": {
       "range": "Date range",
@@ -52,7 +52,7 @@
     },
     "kpi": {
       "region": "Cash metrics",
-      "pool": "Cash pool balance",
+      "pool": "Cash on hand",
       "poolSub": "As of each store's today",
       "openingMissing": "Opening cash missing at {{count}} store(s); total unavailable",
       "dailyCloseMissing": "Daily close data not connected",
@@ -70,7 +70,7 @@
     "overview": {
       "openDaily": "Open this store's daily breakdown",
       "openingMissing": "No opening",
-      "openingMissingHint": "No opening cash recorded for this store yet, so the cash pool balance can't be calculated",
+      "openingMissingHint": "No opening cash recorded for this store yet, so cash on hand can't be calculated",
       "allDeposited": "All banked",
       "uncoveredDays": "Not banked: {{count}} day(s)",
       "overdue": "Overdue",
@@ -82,14 +82,14 @@
       "depositCount": "Deposits: {{count}}",
       "tableLabel": "Store cash overview table",
       "tableTitle": "By store",
-      "rangeNote": "Range {{from}} ~ {{to}}; cash pool balance and days not banked are as of each store's today",
+      "rangeNote": "Range {{from}} ~ {{to}}; cash on hand and days not banked are as of each store's today",
       "rowHint": "Click a store to open its daily breakdown",
       "empty": "No data for the selected stores in this range",
       "emptyRegister": "No stores match the POS system filter",
       "totalRow": "Total ({{count}} stores)",
       "columns": {
         "store": "Store",
-        "poolBalance": "Cash pool",
+        "poolBalance": "Cash on hand",
         "uncovered": "Not banked",
         "inflowCash": "Close cash",
         "closeVariance": "Close variance",
@@ -137,7 +137,7 @@
       "tableLabel": "Daily breakdown table",
       "empty": "No daily closes or expenses for this store in the selected range",
       "device": {
-        "included": "Counted in pool",
+        "included": "Counted in cash on hand",
         "selectedBy": "Chosen manually by {{name}} at {{time}}",
         "stale": "A newer daily close was saved after the manual choice; the store manager needs to confirm it again in the app",
         "overlap": "The manually chosen closes have overlapping periods and may be double counted",
@@ -261,14 +261,14 @@
     },
     "void": {
       "success": "Voided",
-      "voidedTitle": "Voided; not counted in the cash pool or totals",
+      "voidedTitle": "Voided; not counted in cash on hand or totals",
       "voidedDetail": "Reason: {{reason}} ({{name}} · {{time}})",
       "depositButton": "Void deposit",
       "depositTitle": "Void this deposit?",
-      "depositDescription": "Once voided, the {{amount}} deposit on {{date}} no longer counts toward the cash pool, and the business days it covered show as not banked again. This can't be undone.",
+      "depositDescription": "Once voided, the {{amount}} deposit on {{date}} no longer counts towards cash on hand, and the business days it covered show as not banked again. This can't be undone.",
       "expenseButton": "Void expense",
       "expenseTitle": "Void this expense?",
-      "expenseDescription": "Once voided, the {{amount}} expense on {{date}} no longer counts toward the cash pool or totals. This can't be undone.",
+      "expenseDescription": "Once voided, the {{amount}} expense on {{date}} no longer counts towards cash on hand or totals. This can't be undone.",
       "reasonLabel": "Reason for voiding",
       "reasonPlaceholder": "e.g. entered twice, wrong amount",
       "confirm": "Void"
@@ -282,7 +282,7 @@
       "reviewedDescription": "Confirm the {{amount}} expense on {{date}} has been checked. Review flags don't change whether the expense counts.",
       "reviewedConfirm": "Mark reviewed",
       "flaggedTitle": "Flag this expense?",
-      "flaggedDescription": "The {{amount}} expense on {{date}} will be flagged and highlighted in the list. Flags don't change whether the expense counts or the cash pool.",
+      "flaggedDescription": "The {{amount}} expense on {{date}} will be flagged and highlighted in the list. Flags don't change whether the expense counts, or affect cash on hand.",
       "flaggedConfirm": "Flag",
       "clearTitle": "Clear the review flag?",
       "clearDescription": "The {{amount}} expense on {{date}} will go back to not reviewed.",
@@ -313,7 +313,7 @@
     "csv": {
       "storeCode": "Store code",
       "storeName": "Store name",
-      "poolBalance": "Cash pool balance",
+      "poolBalance": "Cash on hand",
       "openingMissing": "Opening missing",
       "uncoveredDays": "Days not banked",
       "oldestUncoveredDate": "Oldest day not banked",
