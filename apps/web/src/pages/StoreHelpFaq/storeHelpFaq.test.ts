@@ -78,7 +78,7 @@ for (const tab of tabs) {
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
 assert.equal(countQuestions('pos'), 20)
-assert.equal(countQuestions('mobile'), 12)
+assert.equal(countQuestions('mobile'), 13)
 
 // 编号跨分组连续，过滤后保持原编号
 const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
@@ -89,7 +89,8 @@ assert.equal(posNumbering.get('return-scan'), 17)
 assert.equal(posNumbering.get('app-update'), 20)
 const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
 assert.equal(mobileNumbering.get('supplier-invoices'), 8)
-assert.equal(mobileNumbering.get('app-download'), 12)
+assert.equal(mobileNumbering.get('floating-button'), 12)
+assert.equal(mobileNumbering.get('app-download'), 13)
 
 // 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
 const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))

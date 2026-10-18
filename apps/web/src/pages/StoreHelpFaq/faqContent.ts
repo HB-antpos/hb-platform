@@ -1019,8 +1019,47 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
   },
   {
     id: 'app',
-    title: { en: 'App download', zh: 'App 下载' },
+    title: { en: 'Using the app', zh: 'App 使用' },
     questions: [
+      {
+        id: 'floating-button',
+        title: { zh: '如何开启和使用语言悬浮按钮？', en: 'How do I turn on and use the floating language button?' },
+        where: { zh: '底部 [tab:Me|我的] → [d:Preferences|偏好] → [t:Floating language button|语言悬浮按钮]', en: 'Bottom [tab:Me|我的] tab → [d:Preferences|偏好] → [t:Floating language button|语言悬浮按钮]' },
+        steps: {
+          zh: [
+            '§开启',
+            '点底部 [tab:Me|我的] 进入设置页，在 [d:Preferences|偏好] 里打开 [t:Floating language button|语言悬浮按钮]（新版本默认已开启）。',
+            '开启后每一页都会出现一个「中 / EN」小圆按钮（登录页、键盘弹出时、全屏拣货页不显示）。',
+            '§使用',
+            '点一下：在中文和英文之间切换界面语言。',
+            '按住（默认 2 秒）：打开 [d:Quick navigation|快速跳转]，可直接去 [k:Home|工作台]、[k:Settings|设置]、[d:Recent|最近访问] 的页面或其他有权限的功能。',
+            '拖动：按住拖到屏幕任意位置，松手后自动靠边。',
+            '隐藏：拖到屏幕底部的 [d:Drop here to hide|拖到这里隐藏] 区域松手；底部会出现提示，点 [k:Undo|撤销] 可以马上恢复。',
+          ],
+          en: [
+            '§Turn it on',
+            'Tap the bottom [tab:Me|我的] tab to open Settings, then turn on [t:Floating language button|语言悬浮按钮] under [d:Preferences|偏好] (on by default in newer versions).',
+            'A small 中 / EN button then appears on every page (not on sign-in, while the keyboard is open, or on full-screen picking).',
+            '§Use it',
+            'Tap: switch the app between Chinese and English.',
+            'Hold (2 s by default): open [d:Quick navigation|快速跳转] to jump to [k:Home|工作台], [k:Settings|设置], [d:Recent|最近访问] pages or any tool you can access.',
+            'Drag: move it anywhere; it snaps to the nearest edge when released.',
+            'Hide: drag it onto [d:Drop here to hide|拖到这里隐藏] at the bottom. A message appears; tap [k:Undo|撤销] to bring it back.',
+          ],
+        },
+        tips: {
+          zh: [
+            '按住多久打开快速跳转，可在同一处的 [d:Hold time|按住时长] 滑轨调节（1–3 秒，默认 2 秒）。',
+            '隐藏后要重新打开：[tab:Me|我的] → [d:Preferences|偏好] → 打开 [t:Floating language button|语言悬浮按钮]。',
+            '这个设置保存在本机，退出登录不会重置。设置页找不到这个开关时，先把 App 更新到最新版本。',
+          ],
+          en: [
+            'Change how long to hold with the [d:Hold time|按住时长] slider in the same place (1–3 s, default 2 s).',
+            'To show it again after hiding: [tab:Me|我的] → [d:Preferences|偏好] → turn on [t:Floating language button|语言悬浮按钮].',
+            'The setting is saved on the phone and survives sign-out. If you cannot find the switch, update the app first.',
+          ],
+        },
+      },
       {
         id: 'app-download',
         title: { zh: '如何获取最新 App 下载地址？', en: 'Where do I get the latest app download link?' },
