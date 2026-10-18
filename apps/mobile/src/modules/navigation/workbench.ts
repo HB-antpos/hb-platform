@@ -88,7 +88,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },
       // 版本发布中心：App 安装包 / OTA 与 WPF 收银端合并为一页；wpf-versions 路由仅保留为跳转到其 WPF 终端的旧入口。
       { routeName: "app-downloads", labelKey: "routes.appDownloads", icon: "rocket-launch-outline" },
-      // 使用帮助：不是 App 内页面，也不由后端菜单下发；店长账号在本地补入，点开用系统浏览器打开 Web 公开 FAQ 页。
+      // 使用帮助：不是 App 内页面，也不由后端菜单下发；店长与管理员账号在本地补入，点开用系统浏览器打开 Web 公开 FAQ 页。
       { routeName: SUPPORT_FAQ_ROUTE, labelKey: "routes.supportFaq", icon: "help-circle-outline" },
     ],
   },
@@ -103,17 +103,24 @@ export function buildSupportFaqUrl(language: "zh" | "en"): string {
 
 /**
  * 在后端下发的可见路由之后补上本地入口。
- * 「使用帮助」只给店长（由可管理分店派生的 StoreManager 角色）看；设备会话没有登录人，不显示。
+ * 「使用帮助」给店长（由可管理分店派生的 StoreManager 角色）和管理员看；
+ * 设备会话没有登录人、iOS 审核会话（审核账号是 Admin）不跳外部网页，都不显示。
  * 不登记到 TAB_PATHS / FullAppMenu，避免与后端菜单契约测试冲突。
  */
 export function withLocalWorkbenchRoutes(
   visibleRouteNames: readonly string[],
-  options: { isStoreManager: boolean; isDeviceMode: boolean }
+  options: {
+    isStoreManager: boolean;
+    isAdmin: boolean;
+    isDeviceMode: boolean;
+    isIosReviewSession: boolean;
+  }
 ): string[] {
   const routeNames = [...visibleRouteNames];
   if (
-    options.isStoreManager
+    (options.isStoreManager || options.isAdmin)
     && !options.isDeviceMode
+    && !options.isIosReviewSession
     && !routeNames.includes(SUPPORT_FAQ_ROUTE)
   ) {
     routeNames.push(SUPPORT_FAQ_ROUTE);
