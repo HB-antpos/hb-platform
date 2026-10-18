@@ -57,7 +57,7 @@ export const STORE_HELP_FAQ_COPY = {
     mobileMapBody: 'Five bottom tabs, plus tool tiles grouped on Home.',
     posNote:
       'If you lack a permission, [d:Approval required|需要操作授权] appears. Ask a colleague who has it to scan their staff barcode. Use [k:中 / EN] at the top right to switch language.',
-    mobileNote: 'If a tile or button is missing, your account probably lacks that permission. Ask your store manager to grant it under People.',
+    mobileNote: 'If a tile or button is missing, your account probably lacks that permission. Ask your store manager to grant it under Staff.',
     footer: 'HOT BARGAIN INTERNATIONAL PTY LTD',
   },
   zh: {
@@ -110,16 +110,16 @@ export const STORE_HELP_FAQ_MAPS = {
   mobile: {
     home: { en: 'Home', zh: '工作台' },
     groups: [
-      { title: { en: 'Product purchasing', zh: '商品进货' }, tiles: [{ en: 'HB new arrivals', zh: 'HB新品', hl: true }, { en: 'AU Invoices', zh: '澳洲进货' }, { en: 'China Purchase', zh: '中国采购' }] },
+      { title: { en: 'Product purchasing', zh: '商品进货' }, tiles: [{ en: 'HB new arrivals', zh: 'HB新品', hl: true }, { en: 'Local supplier invoices', zh: '澳洲进货' }, { en: 'China purchasing', zh: '中国采购' }] },
       { title: { en: 'Product sales', zh: '商品销售' }, tiles: [{ en: 'Product activity', zh: '商品进销查询', hl: true }, { en: 'Sales Records', zh: '销售订单', hl: true }, { en: 'Lay-bys', zh: '分期订单' }] },
-      { title: { en: 'Operations & reports', zh: '运营与报表' }, tiles: [{ en: 'Reports', zh: '报表中心', hl: true }, { en: 'Daily closes', zh: '日结记录', hl: true }, { en: 'Operation logs', zh: '员工操作日志', hl: true }] },
-      { title: { en: 'People & management', zh: '人员与管理' }, tiles: [{ en: 'People', zh: '人员管理', hl: true }, { en: 'Install app', zh: 'App 安装', hl: true }, { en: 'Attendance', zh: '考勤' }] },
+      { title: { en: 'Operations & reports', zh: '运营与报表' }, tiles: [{ en: 'Reports', zh: '报表中心', hl: true }, { en: 'Daily closes', zh: '日结记录', hl: true }, { en: 'Employee operation logs', zh: '员工操作日志', hl: true }] },
+      { title: { en: 'Staff & admin', zh: '人员与管理' }, tiles: [{ en: 'Staff', zh: '人员管理', hl: true }, { en: 'Install app', zh: 'App 安装', hl: true }, { en: 'Attendance', zh: '考勤' }] },
     ],
-    bottomTabs: { en: ['Home', 'Scan', 'Check in', 'Reports', 'Me'], zh: ['工作台', '扫码查询', '打卡', '报表', '我的'] },
+    bottomTabs: { en: ['Home', 'Scan', 'Clock in', 'Reports', 'Me'], zh: ['工作台', '扫码查询', '打卡', '报表', '我的'] },
     legend: {
       en: [
-        'Bottom tabs: Home, Scan, Check in, Reports, Me (Check in and Reports depend on permissions)',
-        'Home groups: Product purchasing, Product sales, Warehouse & purchasing, Operations & reports, People & management',
+        'Bottom tabs: Home, Scan, Clock in, Reports, Me (Clock in and Reports depend on permissions)',
+        'Home groups: Product purchasing, Product sales, Warehouse & purchasing, Operations & reports, Staff & admin',
         'Red outlines mark tiles used on this page (illustrative; tiles depend on your permissions)',
       ],
       zh: [
@@ -474,20 +474,20 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
       {
         id: 'create-staff',
         title: { zh: '如何创建员工账号？', en: 'How do I create a staff account?' },
-        where: { zh: '工作台 · 人员与管理 · [k:People|人员管理]', en: 'Home · People & management · [k:People|人员管理]' },
+        where: { zh: '工作台 · 人员与管理 · [k:Staff|人员管理]', en: 'Home · Staff & admin · [k:Staff|人员管理]' },
         steps: {
           zh: [
-            '在 [tab:Home|工作台] 点 [k:People|人员管理]。',
+            '在 [tab:Home|工作台] 点 [k:Staff|人员管理]。',
             '顶部选择你管理的分店（选「全部分店」时不会出现新增按钮）。',
-            '点右下角 [p:Add employee|新增员工]。',
-            '在 [d:Name and contact|姓名与联系] 填姓、名（必填）和电话；在 [d:Sign-in details|登录信息] 填员工邮箱和账号（账号默认等于邮箱）。',
+            '点右下角 [p:Add staff member|新增员工]。',
+            '在 [d:Name and contact|姓名与联系] 填姓、名（必填）和电话；在 [d:Login details|登录信息] 填员工邮箱和账号（账号默认等于邮箱）。',
             '按需打开 [t:Enable now|立即启用]，点 [p:Create account|创建账号]。',
           ],
           en: [
-            'On [tab:Home|工作台], tap [k:People|人员管理].',
+            'On [tab:Home|工作台], tap [k:Staff|人员管理].',
             'Pick a store you manage at the top (Add is hidden when “All stores” is selected).',
-            'Tap [p:Add employee|新增员工] at the bottom right.',
-            'Under [d:Name and contact|姓名与联系], enter first and last name (required) and phone. Under [d:Sign-in details|登录信息], enter the staff email and username (defaults to the email).',
+            'Tap [p:Add staff member|新增员工] at the bottom right.',
+            'Under [d:Name and contact|姓名与联系], enter first and last name (required) and phone. Under [d:Login details|登录信息], enter the staff email and username (defaults to the email).',
             'Turn on [t:Enable now|立即启用] if needed, then tap [p:Create account|创建账号].',
           ],
         },
@@ -500,16 +500,16 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
       {
         id: 'pos-permissions',
         title: { zh: '如何设置员工的 POS 收银权限？', en: 'How do I set a staff member’s POS permissions?' },
-        where: { zh: '[k:People|人员管理] → 员工详情', en: '[k:People|人员管理] → staff details' },
+        where: { zh: '[k:Staff|人员管理] → 员工详情', en: '[k:Staff|人员管理] → staff details' },
         steps: {
           zh: [
-            '在 [k:People|人员管理] 点员工所在行，进入 [d:Staff details|员工详情]。',
+            '在 [k:Staff|人员管理] 点员工所在行，进入 [d:Staff details|员工详情]。',
             '在 [d:Stores and access|分店与权限] 区点 [k:POS permissions|收银权限]（有多家分店时先选分店）。',
             '按分组勾选：销售、折扣、收款、退货、历史订单、日结、分期、钱箱与小票等；或点 [k:Apply|套用]，选 [k:Basic cashier|基础收银]、[k:Senior cashier|资深收银] 或 [k:Copy from colleague|从同事复制]。',
             '点 [k:Review and save|查看并保存] 核对改动，再点 [p:Confirm and save|确认保存]。',
           ],
           en: [
-            'In [k:People|人员管理], tap the staff member to open [d:Staff details|员工详情].',
+            'In [k:Staff|人员管理], tap the staff member to open [d:Staff details|员工详情].',
             'Under [d:Stores and access|分店与权限], tap [k:POS permissions|收银权限] (choose a store first if there are several).',
             'Tick by group: Sales, Discounts, Payment, Returns, Order history, Daily close, Lay-bys, Cash drawer & receipt. Or tap [k:Apply|套用] and pick [k:Basic cashier|基础收银], [k:Senior cashier|资深收银] or [k:Copy from colleague|从同事复制].',
             'Tap [k:Review and save|查看并保存], check the changes, then tap [p:Confirm and save|确认保存].',
@@ -620,14 +620,14 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
             '工作台「运营与报表」分组点 [k:Employee operation logs|员工操作日志]。',
             '顶部选数据来源：[tab:Legacy POS|老收银] 或 [tab:New POS|新收银]。',
             '点 [k:Filters|筛选]，至少选一家分店，时间最长 31 天，还可按员工、设备、关键字筛选。',
-            '切换视图 [tab:All|全部]、[tab:Risky|危险]、[tab:Anomalies|异常]、[tab:To review only|仅待核查]；或切到 [tab:By staff|按员工汇总] 看每人的异常数。',
+            '切换视图 [tab:All|全部]、[tab:Risky|危险]、[tab:Exceptions|异常]、[tab:To review only|仅待核查]；或切到 [tab:By staff|按员工汇总] 看每人的异常数。',
             '点一条看 [d:Operation detail|操作详情] 和前后操作；有核查权限可点 [k:Mark normal|确认正常] 或 [k:Needs follow-up|有问题，需跟进]。',
           ],
           en: [
             'In the Operations & reports group on Home, tap [k:Employee operation logs|员工操作日志].',
             'Choose the source at the top: [tab:Legacy POS|老收银] or [tab:New POS|新收银].',
             'Tap [k:Filters|筛选]. Pick at least one store (up to 31 days), and optionally staff, device or keyword.',
-            'Switch view: [tab:All|全部], [tab:Risky|危险], [tab:Anomalies|异常], [tab:To review only|仅待核查], or open [tab:By staff|按员工汇总] for anomaly counts per person.',
+            'Switch view: [tab:All|全部], [tab:Risky|危险], [tab:Exceptions|异常], [tab:To review only|仅待核查], or open [tab:By staff|按员工汇总] for exception counts per person.',
             'Tap a record for [d:Operation detail|操作详情] and nearby actions. Reviewers can tap [k:Mark normal|确认正常] or [k:Needs follow-up|有问题，需跟进].',
           ],
         },
@@ -638,7 +638,7 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
           ],
           en: [
             'Logged actions include removing items, price changes, discounts, opening the drawer, refunds, voids, reprints, supervisor approvals and daily close.',
-            'There is no filter by action type. Use the Risky / Anomalies views or a keyword.',
+            'There is no filter by action type. Use the Risky / Exceptions views or a keyword.',
           ],
         },
         permissions: ['LegacyEmployeeLogs.View', 'LegacyEmployeeLogs.Review'],
@@ -682,7 +682,7 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
       {
         id: 'app-download',
         title: { zh: '如何获取最新 App 下载地址？', en: 'Where do I get the latest app download link?' },
-        where: { zh: '工作台 · 人员与管理 · [k:Install app|App 安装]', en: 'Home · People & management · [k:Install app|App 安装]' },
+        where: { zh: '工作台 · 人员与管理 · [k:Install app|App 安装]', en: 'Home · Staff & admin · [k:Install app|App 安装]' },
         steps: {
           zh: [
             '工作台「人员与管理」分组点 [k:Install app|App 安装]。',
@@ -691,7 +691,7 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
             '也可以点 [k:Copy link|复制链接] 或 [k:Share|分享] 发给同事，或点 [k:Open on this device|在本机打开]。',
           ],
           en: [
-            'In the People & management group on Home, tap [k:Install app|App 安装].',
+            'In the Staff & admin group on Home, tap [k:Install app|App 安装].',
             'Choose [tab:iOS] or [tab:Android]; your own system is selected by default.',
             'Have your colleague scan the QR code with their phone camera: iOS opens the App Store, Android downloads the installer.',
             'Or tap [k:Copy link|复制链接] or [k:Share|分享] to send it, or [k:Open on this device|在本机打开].',
