@@ -4,6 +4,7 @@ import { ActivityIndicator, Icon, IconButton, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { InfoCard, PEOPLE_TONES, PersonAvatar, type PeopleTone } from "@/modules/people";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { quoteName } from "@/shared/i18n/punctuation";
 
 /** 详情页顶部栏：返回 + 标题（可带副标题）+ 右侧图标操作（✎ / ⋮）。 */
 export function DetailAppBar({
@@ -104,7 +105,7 @@ export function PersonHeaderCard({
         <View style={styles.heroCopy}>
           <View style={styles.heroNameRow}>
             <Text style={styles.heroName} numberOfLines={2}>{name}</Text>
-            {nickname ? <Text style={styles.heroNickname} numberOfLines={1}>{`「${nickname}」`}</Text> : null}
+            {nickname ? <Text style={styles.heroNickname} numberOfLines={1}>{quoteName(nickname)}</Text> : null}
           </View>
           {meta ? <Text style={styles.heroMeta} numberOfLines={2}>{meta}</Text> : null}
           <View style={styles.heroTags}>{tags}</View>

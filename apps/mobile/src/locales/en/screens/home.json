@@ -3,13 +3,13 @@
   "filterTitle": "Choose category",
   "gradeFilterTitle": "Grade filter",
   "scanResultHint": "Scanning again replaces these results. Tap Clear to show all products.",
-  "searchPlaceholder": "Search by item number/barcode",
-  "locationSearchPlaceholder": "Search item/barcode/location",
+  "searchPlaceholder": "Search item no. / barcode",
+  "locationSearchPlaceholder": "Search item no. / barcode / location",
   "searchToggleOpen": "Expand search",
   "searchToggleClose": "Collapse search",
   "cameraQuery": "Camera lookup",
-  "autoAddOn": "Auto add to cart is on",
-  "autoAddOff": "Auto add to cart is off",
+  "autoAddOn": "Auto-add to cart is on",
+  "autoAddOff": "Auto-add to cart is off",
   "resetScanFocus": "Reset scanner focus",
   "clearScanFilter": "Clear scan filter",
   "filters": {
@@ -30,10 +30,10 @@
   "empty": {
     "noProductsTitle": "No products yet",
     "noProductsDescription": "Try another keyword, rescan, or switch the category.",
-    "productsLoadFailedTitle": "Products failed to load",
-    "productsLoadFailedDescription": "The backend is slow or the network is unstable. Please retry.",
+    "productsLoadFailedTitle": "Couldn't load products",
+    "productsLoadFailedDescription": "The server is slow to respond or the connection is unstable. Try again.",
     "noAssignedStoresTitle": "No stores available",
-    "noAssignedStoresDescription": "This account has no assigned stores. Ask an administrator to sync access.",
+    "noAssignedStoresDescription": "This account has no stores assigned. Ask an admin to assign one.",
     "selectStoreTitle": "Select a store first",
     "selectStoreDescription": "Choose a store to view its products."
   },
@@ -44,11 +44,11 @@
     "pageOf": "{{page}} / {{pages}}"
   },
   "camera": {
-    "title": "Camera product lookup",
+    "title": "Scan with camera",
     "currentStore": "Store: {{store}}",
     "needPermissionTitle": "Camera permission required",
     "needPermissionDescription": "Enable camera access to scan products directly from the product page.",
-    "grantPermission": "Enable camera permission"
+    "grantPermission": "Allow camera access"
   },
   "quantityEditor": {
     "title": "Edit order quantity",
@@ -59,25 +59,25 @@
   },
   "messages": {
     "storesLoadFailed": "Failed to load stores. Please try again later.",
-    "productsLoadFailed": "Failed to load products. Please retry.",
+    "productsLoadFailed": "Failed to load products. Try again.",
     "scanAddFailed": "Failed to add the scanned product to the cart.",
     "addFailed": "Failed to add the product to the cart.",
     "updateQtyFailed": "Failed to update the cart quantity.",
-    "addedToCart": "{{name}} was added to the cart."
+    "addedToCart": "{{name}} added to cart."
   },
   "cartSummary": {
     "total": "Total"
   },
   "storeCaption": "Store ordering",
-  "storeSwitchAccessibility": "Switch ordering store, current {{store}}",
+  "storeSwitchAccessibility": "Switch ordering store. Current: {{store}}",
   "resetScanFocusShort": "Refocus",
-  "autoAddOnDetail": "A single match is added to the cart right away",
-  "autoAddOffDetail": "Scanning only finds the product; add it manually",
+  "autoAddOnDetail": "When a scan finds one product, it's added to the cart straight away",
+  "autoAddOffDetail": "Scanning only finds the product; add it to the cart yourself",
   "gradeMenu": {
     "gradeValue": "Grade {{grade}}"
   },
   "scanResult": {
-    "title": "Scan result · {{count}}",
+    "title": "Scan results · {{count}}",
     "clear": "Clear"
   },
   "listMeta": {
@@ -86,7 +86,7 @@
   },
   "actionBar": {
     "summary": "{{sku}} SKUs · {{quantity}} pcs",
-    "importTotal": "Import total {{amount}}",
+    "importTotal": "Cost total {{amount}}",
     "cart": "Cart"
   },
   "storePicker": {

@@ -12,7 +12,7 @@ export interface SeasonalCardCatalogGroup {
 
 const SEASONAL_CARD_TYPE_FALLBACK_LABELS: Record<SeasonalCardType, string> = {
   1: "Christmas",
-  2: "Valentines Day",
+  2: "Valentine's Day",
   3: "Mother's Day",
   4: "Easter",
   5: "Father's Day",

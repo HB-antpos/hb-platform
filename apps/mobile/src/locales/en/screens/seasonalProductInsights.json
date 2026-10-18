@@ -10,8 +10,8 @@
     "selectStore": "Select store"
   },
   "messages": {
-    "reviewUnavailable": "Seasonal products is not available in this mode",
-    "notAllowed": "You don't have access to Seasonal products. Ask an administrator to grant it.",
+    "reviewUnavailable": "Seasonal product lookup isn't available in this mode",
+    "notAllowed": "You don't have access to Seasonal products. Ask an admin to grant it.",
     "storesFailed": "Failed to load stores",
     "storeNotAllowed": "You don't have access to this store",
     "selectStore": "Select a store first",
@@ -59,12 +59,12 @@
       "order": "Start date can't be after end date",
       "tooLong": "Range can't exceed {{days}} days"
     },
-    "mismatchHint": "The ranges differ: inbound uses the inbound range and sales use the sales range, so theoretical stock is indicative only",
+    "mismatchHint": "The ranges differ: inbound uses the inbound range and sales use the sales range, so estimated stock is indicative only",
     "confirmTitle": "Inbound and sales ranges differ",
-    "confirmDescription": "They will be queried separately: inbound quantity by the inbound range, sales by the sales range. Theoretical stock is the difference and indicative only.",
+    "confirmDescription": "They will be queried separately: inbound quantity by the inbound range, sales by the sales range. Estimated stock is the difference and indicative only.",
     "backToEdit": "Edit ranges",
     "confirmQuery": "Search anyway",
-    "mismatchBanner": "Ranges differ: inbound from {{inbound}}, sales from {{sales}}. Theoretical stock is indicative only",
+    "mismatchBanner": "Ranges differ: inbound from {{inbound}}, sales from {{sales}}. Estimated stock is indicative only",
     "align": "Match ranges"
   },
   "kpi": {
@@ -73,7 +73,7 @@
     "sales": "Sold",
     "salesHint": "Sell-through {{percent}}%",
     "salesHintNoInbound": "No inbound in range",
-    "stock": "Theor. stock",
+    "stock": "Est. stock",
     "stockHint": "Inbound − sold"
   },
   "trend": {
@@ -97,7 +97,7 @@
     "dailyPeak": "Best day",
     "weeklyAverage": "Avg full week",
     "weeklyBest": "Best week",
-    "weekOverWeek": "Week over week"
+    "weekOverWeek": "vs last week"
   },
   "records": {
     "title": "Details",
@@ -105,7 +105,7 @@
     "salesTab": "Daily sales {{count}}",
     "date": "Date",
     "invoice": "Invoice no.",
-    "warehouseDocument": "Warehouse order no.",
+    "warehouseDocument": "Warehouse dispatch no.",
     "quantity": "Qty",
     "inboundTotal": "Inbound range total",
     "inboundEmpty": "No inbound in the inbound range",
@@ -116,12 +116,12 @@
   },
   "branches": {
     "title": "Other stores' stock",
-    "subtitle": "Stores with inbound in the inbound range · theoretical stock = inbound − sold",
+    "subtitle": "Stores with inbound in the inbound range · estimated stock = inbound − sold",
     "store": "Store",
     "total": "Total {{count}} stores",
     "empty": "No other store received this product in the inbound range",
     "negativeHint": "Red means negative: sold more than received, check the inbound and sales records",
-    "rowA11y": "{{store}}, inbound {{inbound}}, sold {{sales}}, theoretical stock {{stock}}"
+    "rowA11y": "{{store}}, inbound {{inbound}}, sold {{sales}}, estimated stock {{stock}}"
   },
   "candidates": {
     "title": "{{count}} products found",

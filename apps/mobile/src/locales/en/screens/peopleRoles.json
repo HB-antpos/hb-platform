@@ -4,20 +4,20 @@
   "segmentPermissions": "Perms",
   "segmentMembers": "Members",
   "segmentMenus": "Menus",
-  "membersCount": "{{count}} members",
-  "peopleCount": "{{count}} people",
+  "membersCount": "Members: {{count}}",
+  "peopleCount": "{{count}} staff",
   "save": "Save",
   "saveWithBadge": "Save ({{badge}})",
   "cancel": "Cancel",
   "showAll": "Show all",
   "onlySelected": "Selected only",
 
-  "barChanges": "{{count}} changes",
+  "barChanges": "Changes: {{count}}",
   "barNoChanges": "No changes",
   "barHintProfile": "Profile {{count}}",
   "barHintPermissions": "Permissions {{badge}}",
   "barSaving": "Saving…",
-  "barFrozen": "Writes are paused. Tap refresh at the top right to verify.",
+  "barFrozen": "Saving is paused. Tap refresh (top right) to check the latest.",
   "barInvalid": "The profile has errors. Fix them first.",
   "barCreateSummary": "New role",
   "barCreateHint": "You can set permissions and members after creating it",
@@ -32,26 +32,26 @@
   "profileSavedPermissionsFailed": "Role profile was saved, but role permissions were not. Your permission changes are kept.",
   "nameExists": "This role name already exists. Choose another name.",
 
-  "systemRoleHint": "System role: it has every permission by default, its name is used for permission checks, and it cannot be renamed.",
-  "derivedRoleHint": "Derived role: members follow the stores marked \"Manage\" and cannot be added or removed by hand. The name is used for the derivation and cannot be changed.",
+  "systemRoleHint": "System role: has every permission by default. Its name is used for permission checks, so it can't be renamed.",
+  "derivedRoleHint": "Auto-assigned role: members come from stores set to \"Manage\" and can't be added or removed by hand. The name is used by the system and can't be changed.",
 
   "selectedPrefix": "Selected",
   "permissionSearch": "Search permission name or code",
   "noSelectedPermissions": "No permissions selected yet",
   "implicitAllHint": "System roles have every permission by default. The permission set is read-only.",
-  "noPermissionEditHint": "This account cannot edit role permissions. View only.",
+  "noPermissionEditHint": "You can't edit role permissions. View only.",
 
   "menuSaveHint": "Menu switches edit the same permissions as the Permissions tab. Changes are saved together at the bottom.",
   "noMenus": "No matching menus",
 
-  "membersSearch": "Search name, account or email",
-  "derivedMembersHint": "Store manager members follow the stores marked \"Manage\". They cannot be added or removed here.",
+  "membersSearch": "Search name, username or email",
+  "derivedMembersHint": "Store manager members come from stores set to \"Manage\". You can't add or remove them here.",
   "membersImmediateHint": "Adding or removing a member takes effect immediately and does not use the Save bar.",
 
   "assignSelected": "Selected {{selected}} / {{total}}",
   "assignLockedHint": "System role: has every permission by default",
 
-  "createSummary": "{{count}} permissions will be created",
-  "createSummaryEmpty": "Fill in code, name and category to create",
+  "createSummary": "Permissions to create: {{count}}",
+  "createSummaryEmpty": "Enter a code, name and category to continue",
   "sectionBasic": "Basics"
 }

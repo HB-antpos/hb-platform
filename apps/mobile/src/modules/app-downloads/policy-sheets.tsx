@@ -46,6 +46,7 @@ import {
   TextLink,
   ui,
 } from "./ui";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 // 各原生应用在 EAS 配置中使用的公开 App Store Connect ID；登记时预填，仍允许管理员核对后修改。
 export const defaultAppStoreIds: Record<AppUpdateApp, string> = {
@@ -166,7 +167,7 @@ export function PolicyEditorSheet({
                 ? fmt(copy.editor.changes, { count: changes.length })
                 : copy.editor.noChanges
             }
-            detail={changes.length ? changes.join("、") : copy.editor.saveHint}
+            detail={changes.length ? changes.join(listSeparator()) : copy.editor.saveHint}
             actionLabel={copy.editor.save}
             disabled={changes.length === 0}
             error={error}

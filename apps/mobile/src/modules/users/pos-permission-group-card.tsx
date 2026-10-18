@@ -20,6 +20,7 @@ import {
   groupHasEnabledHighRisk,
 } from "@/modules/users/pos-terminal-permissions-view";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
+import { clauseSeparator } from "@/shared/i18n/punctuation";
 
 /** 「本次改动」蓝点：分组名后、矩阵格与逐项行里都用同一个。 */
 export function PosPermissionChangeDot({ style }: { style?: object }) {
@@ -86,7 +87,7 @@ function PosPermissionGroupCardComponent({
       changed ? t("badges.changed") : null,
     ]
       .filter(Boolean)
-      .join("，");
+      .join(clauseSeparator());
 
   const renderItemRow = (item: PosPermissionDisplayItem) => {
     const checked = selectedCodeSet.has(item.code);

@@ -1,12 +1,12 @@
 {
-  "title": "POS access",
+  "title": "POS permissions",
   "subtitle": "{{user}} · {{store}}",
   "unknownUser": "Unknown staff member",
   "unknownStore": "Unknown store",
   "loading": "Loading POS permissions...",
   "mode": {
     "inherited": "Role default",
-    "override": "Store custom"
+    "override": "Store-specific"
   },
   "actions": {
     "back": "Back",
@@ -109,7 +109,7 @@
     "highRisk": {
       "summary": "Includes {{value}} high-risk permission(s): {{names}}.",
       "nameJoin": ", ",
-      "impact": "Once on, this person can do the following at the register: {{impacts}}.",
+      "impact": "Once on, this staff member can do the following on the POS: {{impacts}}.",
       "impactJoin": "; ",
       "impacts": {
         "changePrice": "change item prices directly",
@@ -130,12 +130,12 @@
     "apply": "Apply {{name}}'s permissions ({{value}})",
     "applyIdle": "Select a colleague first",
     "loadingColleague": "Loading permissions...",
-    "permissionCount": "Copyable: {{value}}",
+    "permissionCount": "{{value}} to copy",
     "loadFailed": "Could not load this colleague's permissions. Try again or choose someone else.",
     "listFailed": "Could not load colleagues. Try again later.",
-    "empty": "No colleagues at this store can be copied",
+    "empty": "No colleagues at this store to copy from",
     "noMatch": "No matching colleagues",
-    "unavailable": "The store code is missing, so colleagues cannot be listed. Reopen this page from People."
+    "unavailable": "The store code is missing, so colleagues can't be listed. Reopen this page from Staff management."
   },
   "unsaved": {
     "title": "Discard unsaved changes?",
@@ -163,13 +163,13 @@
   "noChanges": "No changes yet",
   "errors": {
     "invalidTitle": "Permission details are incomplete",
-    "invalidDescription": "The staff member or store identifier is missing. Open this page again from People.",
+    "invalidDescription": "The staff member or store is missing. Open this page again from Staff management.",
     "unauthorizedTitle": "Your session has expired",
-    "unauthorizedDescription": "Sign in again before managing POS permissions.",
+    "unauthorizedDescription": "Log in again before managing POS permissions.",
     "forbiddenTitle": "You cannot manage this account's POS permissions",
-    "forbiddenDescription": "Your account does not have permission for this action, and you cannot change your own POS permissions. The server still validates privileged targets.",
+    "forbiddenDescription": "Your account doesn't have permission for this, and you can't change your own POS permissions. The server makes the final check for high-privilege accounts.",
     "notFoundTitle": "The staff-store assignment has changed",
-    "notFoundDescription": "This POS permission assignment no longer exists. The staff member may have moved stores, been disabled, or been unassigned. Return to People and refresh.",
+    "notFoundDescription": "This POS permission assignment no longer exists. The staff member may have moved stores, been disabled or been removed from the store. Go back to Staff management and refresh.",
     "networkTitle": "Could not load POS permissions",
     "networkDescription": "The server cannot be reached right now. Check your connection and try again."
   },

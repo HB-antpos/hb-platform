@@ -51,6 +51,7 @@ import {
   ui,
   type Tone,
 } from "./ui";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 type OtaData = Extract<
   SectionData,
@@ -437,7 +438,7 @@ export function OtaChannel({
             }
             detail={
               changes.length
-                ? fieldLabels(copy, changes).join("、")
+                ? fieldLabels(copy, changes).join(listSeparator())
                 : copy.editor.saveHint
             }
             actionLabel={copy.editor.save}

@@ -18,6 +18,7 @@ import type {
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { ATTENDANCE_STATUS_TONES } from "./AdjustmentFormControls";
+import { listSeparator } from "@/shared/i18n/punctuation";
 
 function shiftTime(value: string, deltaMinutes: number) {
   const match = /^(\d{1,2}):(\d{2})/.exec(value);
@@ -355,7 +356,7 @@ export function AvailabilitySheet({
         {saveFailed ? (
           <Text accessibilityRole="alert" style={styles.error}>
             {verification
-              ? t("availability.unconfirmedHint", { dates: verification.uncertainDates.join("、") })
+              ? t("availability.unconfirmedHint", { dates: verification.uncertainDates.join(listSeparator()) })
               : t("availability.saveFailedHint")}
           </Text>
         ) : null}

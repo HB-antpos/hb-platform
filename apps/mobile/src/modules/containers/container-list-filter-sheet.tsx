@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { Button, HelperText, IconButton, SegmentedButtons, Text, TextInput } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { MonthDatePicker } from "@/components/attendance/MonthDatePicker";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import {
   CONTAINER_SORT_OPTIONS,
   DATE_RANGE_FIELDS,
   DEFAULT_CONTAINER_SORT,
+  dateRangeFieldLabel,
   findInvalidDateRange,
   type ContainerListFilters,
 } from "./container-list-logic";
@@ -23,6 +25,7 @@ interface ContainerListFilterSheetProps {
 
 /** 列表的更多筛选：货号、三组日期区间（均为整天闭区间，可只填一边）与排序字段。 */
 export function ContainerListFilterSheet({ visible, filters, onDismiss, onApply }: ContainerListFilterSheetProps) {
+  const { t } = useAppTranslation("containerDetail");
   const [draft, setDraft] = useState<ContainerListFilters>(filters);
   // 同一时间只展开一个日历，避免弹层过长。
   const [activeBound, setActiveBound] = useState<DateBound | null>(null);
@@ -50,20 +53,24 @@ export function ContainerListFilterSheet({ visible, filters, onDismiss, onApply 
   return (
     <BusinessSheet
       visible={visible}
-      title="筛选货柜"
+      title={t("list.filterSheet.title")}
       onDismiss={onDismiss}
       footer={(
         <>
-          {invalidRange ? <HelperText type="error" visible>{invalidRange}的开始日期不能晚于结束日期</HelperText> : null}
+          {invalidRange ? (
+            <HelperText type="error" visible>
+              {t("list.filterSheet.invalidRange", { label: dateRangeFieldLabel(invalidRange, t) })}
+            </HelperText>
+          ) : null}
           <View style={styles.footerRow}>
-            <Button mode="outlined" style={styles.footerButton} onPress={reset}>重置</Button>
+            <Button mode="outlined" style={styles.footerButton} onPress={reset}>{t("actions.reset")}</Button>
             <Button
               mode="contained"
               style={[styles.footerButton, styles.footerPrimary]}
               disabled={Boolean(invalidRange)}
               onPress={() => onApply({ ...draft, itemNumberFilter: draft.itemNumberFilter?.trim() || undefined })}
             >
-              查看结果
+              {t("list.filterSheet.showResults")}
             </Button>
           </View>
         </>
@@ -71,8 +78,8 @@ export function ContainerListFilterSheet({ visible, filters, onDismiss, onApply 
     >
       <TextInput
         mode="outlined"
-        label="货号"
-        placeholder="包含该货号的货柜"
+        label={t("list.filterSheet.itemNumber")}
+        placeholder={t("list.filterSheet.itemNumberPlaceholder")}
         value={draft.itemNumberFilter ?? ""}
         onChangeText={(value) => setDraft((prev) => ({ ...prev, itemNumberFilter: value }))}
         autoCapitalize="characters"
@@ -80,9 +87,11 @@ export function ContainerListFilterSheet({ visible, filters, onDismiss, onApply 
         dense
       />
 
-      {DATE_RANGE_FIELDS.map((range) => (
+      {DATE_RANGE_FIELDS.map((range) => {
+        const rangeLabel = dateRangeFieldLabel(range.key, t);
+        return (
         <View key={range.key} style={styles.rangeBlock}>
-          <Text style={styles.sectionLabel}>{range.label}</Text>
+          <Text style={styles.sectionLabel}>{rangeLabel}</Text>
           <View style={styles.rangeRow}>
             {([range.start, range.end] as const).map((bound, index) => {
               const value = draft[bound] ?? "";
@@ -91,21 +100,21 @@ export function ContainerListFilterSheet({ visible, filters, onDismiss, onApply 
                 <Pressable
                   key={bound}
                   accessibilityRole="button"
-                  accessibilityLabel={`${range.label}${index === 0 ? "开始" : "结束"}日期`}
+                  accessibilityLabel={t(index === 0 ? "list.filterSheet.startA11y" : "list.filterSheet.endA11y", { label: rangeLabel })}
                   accessibilityState={{ expanded: active }}
                   onPress={() => setActiveBound(active ? null : bound)}
                   style={[styles.boundBox, active ? styles.boundBoxActive : null]}
                 >
-                  <Text style={styles.boundCaption}>{index === 0 ? "开始" : "结束"}</Text>
+                  <Text style={styles.boundCaption}>{t(index === 0 ? "list.filterSheet.start" : "list.filterSheet.end")}</Text>
                   <View style={styles.boundValueRow}>
-                    <Text style={value ? styles.boundValue : styles.boundPlaceholder}>{value || "不限"}</Text>
+                    <Text style={value ? styles.boundValue : styles.boundPlaceholder}>{value || t("list.filterSheet.any")}</Text>
                     {value ? (
                       <IconButton
                         icon="close-circle"
                         size={16}
                         style={styles.boundClear}
                         iconColor={HB_COLORS.textSecondary}
-                        accessibilityLabel={`清除${range.label}${index === 0 ? "开始" : "结束"}日期`}
+                        accessibilityLabel={t(index === 0 ? "list.filterSheet.clearStartA11y" : "list.filterSheet.clearEndA11y", { label: rangeLabel })}
                         onPress={() => setBound(bound, "")}
                       />
                     ) : null}
@@ -128,14 +137,15 @@ export function ContainerListFilterSheet({ visible, filters, onDismiss, onApply 
             />
           ) : null}
         </View>
-      ))}
+        );
+      })}
 
       <View style={styles.rangeBlock}>
-        <Text style={styles.sectionLabel}>排序（从新到旧）</Text>
+        <Text style={styles.sectionLabel}>{t("list.filterSheet.sortTitle")}</Text>
         <SegmentedButtons
           value={draft.dateType ?? DEFAULT_CONTAINER_SORT}
           onValueChange={(value) => setDraft((prev) => ({ ...prev, dateType: value }))}
-          buttons={CONTAINER_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+          buttons={CONTAINER_SORT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
         />
       </View>
     </BusinessSheet>

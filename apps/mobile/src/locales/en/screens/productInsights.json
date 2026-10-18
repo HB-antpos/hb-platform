@@ -34,8 +34,8 @@
     "itemNumber": "Item no.",
     "barcode": "Barcode",
     "supplier": "Supplier",
-    "salesQuantity": "Store sales",
-    "salesAmount": "Store sales amount",
+    "salesQuantity": "Store units sold",
+    "salesAmount": "Store sales ($)",
     "purchaseQuantity": "Purchase quantity",
     "purchaseDocuments": "Purchase documents",
     "orderedQuantity": "Ordered quantity",
@@ -51,10 +51,10 @@
     "documents": "docs"
   },
   "range": "{{startDate}} to {{endDate}}",
-  "generatedAt": "Queried: {{value}}",
+  "generatedAt": "As of {{value}}",
   "salesUpdatedAt": "Sales statistics updated: {{value}}",
   "salesUpdatedUnavailable": "Sales statistics update time unavailable",
-  "purchaseScope": "Based on local purchase documents",
+  "purchaseScope": "Based on local supplier invoices",
   "recordCount": "{{count}} records",
   "tabs": {
     "sales": "Sales",
@@ -69,7 +69,7 @@
   "warehouse": {
     "lastAllocation": "Latest allocation: {{date}} · {{quantity}} items",
     "noAllocation": "No allocations in the last 90 days",
-    "dispatchedOn": "{{date}} dispatched",
+    "dispatchedOn": "Dispatched {{date}}",
     "awaitingAllocation": "Awaiting allocation"
   },
   "states": {
@@ -84,7 +84,7 @@
     "noStoreMatch": "No matching store"
   },
   "detail": {
-    "title": "Detail"
+    "title": "Details"
   },
   "branchSheet": {
     "title": "All POS store sales",
@@ -94,10 +94,10 @@
     "appliedRange": "Results period: {{startDate}} to {{endDate}}",
     "pendingRange": "Dates have not been applied. Tap Apply.",
     "total": "{{count}} POS stores included",
-    "authorizedScope": "Only {{count}} of {{total}} authorized POS stores are included",
+    "authorizedScope": "Only {{count}} of {{total}} POS stores you're authorised for are included",
     "searchStore": "Search store name or code",
     "store": "Store",
-    "authorizedTitle": "Authorized POS store sales",
+    "authorizedTitle": "Authorised POS store sales",
     "quantity": "Quantity",
     "amount": "Sales amount",
     "totalQuantity": "Total quantity",

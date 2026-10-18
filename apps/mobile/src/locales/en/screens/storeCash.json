@@ -8,14 +8,14 @@
   "store": {
     "current": "Current store",
     "switch": "Switch",
-    "switchLabel": "Switch store, current {{store}}"
+    "switchLabel": "Switch store (current: {{store}})"
   },
   "states": {
     "loading": "Loading…",
     "loadFailed": "Failed to load. Please try again later.",
     "notAllowed": "Your account is not allowed to view cash.",
-    "noStores": "There is no store you can operate. Ask an administrator to link a store to your account.",
-    "noDepositPermission": "Your account is not allowed to record deposits, choose closes, or enter opening cash and counts.",
+    "noStores": "No stores are linked to your account. Ask an admin to add one.",
+    "noDepositPermission": "Your account is not allowed to record deposits, select daily closes, or enter opening cash and cash counts.",
     "noExpensePermission": "Your account is not allowed to record cash expenses."
   },
   "categories": {
@@ -52,12 +52,12 @@
     "noSuggestion": "The cash pool balance is not positive, so there is no suggested deposit.",
     "suggestionUnavailable": "The cash pool balance cannot be calculated yet. Enter the deposit from your actual count.",
     "overdueChip": "Overdue",
-    "overdue": "The oldest business day not yet banked is more than {{days}} days old. Please deposit the cash soon.",
-    "uncovered": "{{count}} business day(s) of closing cash are not covered by a deposit (earliest {{date}}, total {{amount}}).",
+    "overdue": "Cash from the oldest unbanked day is over {{days}} days old. Bank it as soon as possible.",
+    "uncovered": "Cash from {{count}} business day(s) hasn't been banked yet (earliest {{date}}, total {{amount}}).",
     "lastDeposit": "Last deposit: {{date}}",
     "noDepositYet": "No deposits recorded yet.",
-    "depositAction": "Bank deposit",
-    "missingClose": "{{count}} business day(s) in the last 14 days have no daily close (may be days off): {{dates}}",
+    "depositAction": "Record deposit",
+    "missingClose": "{{count}} business day(s) in the last 14 days have no daily close (the store may have been closed): {{dates}}",
     "expenseTitle": "Cash expenses",
     "noExpense": "No cash expenses yet.",
     "expenseAction": "Record cash expense",
@@ -86,11 +86,11 @@
     "modeManual": "Manual",
     "stale": "A newer close was saved after this selection. Please confirm.",
     "overlap": "The selected closes cover overlapping periods and may be counted twice.",
-    "manualBy": "{{name}} chose manually at {{time}}: {{reason}}",
+    "manualBy": "Selected manually by {{name}} at {{time}}: {{reason}}",
     "noArchives": "No closes.",
     "archiveIncluded": "Included",
     "savedAt": "Saved {{time}}",
-    "period": "Period {{from}} ~ {{to}}",
+    "period": "Period {{from}} – {{to}}",
     "counted": "Counted",
     "expected": "Expected",
     "variance": "Variance",
@@ -99,7 +99,7 @@
     "selectedSum": "{{count}} selected, counted total",
     "overlapLocal": "The selected closes cover overlapping periods and may be counted twice. Please explain in the reason.",
     "reasonLabel": "Reason (required)",
-    "reasonPlaceholder": "e.g. Two shifts each closed once; include both",
+    "reasonPlaceholder": "e.g. AM and PM shifts each did a close; count both",
     "confirmSelection": "Confirm selection",
     "errors": {
       "noneSelected": "Select at least one close.",
@@ -129,7 +129,7 @@
     "voided": "Voided",
     "depositMeta": "{{slips}} slip(s) · {{images}} image(s)",
     "images": "{{count}} image(s)",
-    "covered": "Covers {{from}} ~ {{to}}",
+    "covered": "Covers {{from}} – {{to}}",
     "payee": "Payee: {{name}}",
     "createdBy": "{{name}} · {{time}}",
     "entryTypes": {
@@ -159,8 +159,8 @@
     "baselineUnavailable": "The cash pool balance could not be loaded, so there is no suggested deposit. The server will check the difference on submit.",
     "fields": {
       "date": "Deposit date",
-      "dateHintLimited": "You can back-fill the last {{days}} days (including today).",
-      "dateHintUnlimited": "You can view all stores, so back-filling has no day limit."
+      "dateHintLimited": "You can backdate up to {{days}} days (including today).",
+      "dateHintUnlimited": "You have access to all stores, so there's no backdating limit."
     },
     "covered": {
       "title": "Business days covered (optional)",
@@ -188,7 +188,7 @@
       "title": "Reason for difference",
       "hint": "The deposit total differs from the cash pool balance by more than {{threshold}}. Please explain why.",
       "label": "Reason for difference (required)",
-      "placeholder": "e.g. also banked the float / left part of the cash"
+      "placeholder": "e.g. banked the float too / held back some cash"
     },
     "note": {
       "label": "Note (optional)"
@@ -199,7 +199,7 @@
   },
   "expense": {
     "title": "Record cash expense",
-    "effectiveNotice": "It takes effect immediately with no approval. If you make a mistake, void it in Records and enter it again.",
+    "effectiveNotice": "Saved straight away, no approval needed. If you make a mistake, void it in Records and enter it again.",
     "fields": {
       "date": "Expense date",
       "category": "Category",
@@ -236,10 +236,10 @@
     "differenceUnknown": "Daily close data was not connected or there was no opening at that time, so the expected balance cannot be calculated and there is nothing to compare.",
     "outcome": {
       "balanced": "The count matches the expected balance.",
-      "over": "The count is higher than expected. Check for unrecorded expenses or extra cash taken.",
+      "over": "The count is higher than expected. Check for unrecorded expenses or extra cash received.",
       "short": "The count is lower than expected. Check for unrecorded expenses or deposits."
     },
-    "openingExists": "This store already has an active opening cash entry and it cannot be entered twice.",
+    "openingExists": "This store already has an active opening cash entry. You can't enter another one.",
     "done": "Done"
   },
   "detail": {
@@ -287,14 +287,14 @@
     }
   },
   "camera": {
-    "taken": "Taken {{count}}/{{max}}",
+    "taken": "{{count}}/{{max}} taken",
     "capture": "Take photo",
     "done": "Done",
-    "full": "Limit of {{max}} reached. Tap Done to go back.",
-    "captureFailed": "That photo failed. Please try again.",
+    "full": "{{max}}-photo limit reached. Tap Done to go back.",
+    "captureFailed": "Couldn't take that photo. Please try again.",
     "permissionTitle": "Camera permission needed",
     "permissionDescription": "The camera is needed to photograph deposit slips and receipts.",
-    "grantPermission": "Allow camera",
+    "grantPermission": "Allow camera access",
     "openSettings": "Open settings"
   },
   "viewer": {
@@ -313,21 +313,21 @@
     "busyMessage": "Please wait until the submission finishes before leaving, to avoid recording it twice."
   },
   "errors": {
-    "generic": "The operation failed. Please try again later.",
+    "generic": "Something went wrong. Please try again later.",
     "fixFirst": "Please fix the fields marked in red first.",
     "uploadFailed": "{{count}} photo(s) failed to upload. Tap Retry on the thumbnail or check your connection and submit again. Photos that already uploaded are not uploaded twice.",
     "retryKeepsData": "Your entries and uploaded photos are kept. You can submit again and it will not be recorded twice.",
     "money": {
       "empty": "Enter an amount.",
-      "invalid": "The amount format is not valid.",
+      "invalid": "Enter a valid amount.",
       "tooManyDecimals": "At most two decimal places.",
       "negative": "The amount cannot be negative.",
       "notPositive": "The amount must be greater than 0.",
-      "tooLarge": "The amount is above the limit."
+      "tooLarge": "The amount is too large."
     },
     "deposit": {
       "dateInvalid": "Choose a valid deposit date.",
-      "dateOutOfRange": "The deposit date cannot be after today for the store or before the back-fill limit.",
+      "dateOutOfRange": "The deposit date can't be in the future or earlier than the backdating limit.",
       "coveredIncomplete": "Fill in both the start and end of the covered days, or leave both empty.",
       "coveredInvalid": "The covered days are not valid dates.",
       "coveredReversed": "The covered start cannot be after the end.",
@@ -342,7 +342,7 @@
     },
     "expense": {
       "dateInvalid": "Choose a valid expense date.",
-      "dateOutOfRange": "The expense date cannot be after today for the store or before the back-fill limit.",
+      "dateOutOfRange": "The expense date can't be in the future or earlier than the backdating limit.",
       "categoryMissing": "Choose an expense category.",
       "receiptRequired": "Cash purchases need at least 1 receipt photo.",
       "photosTooMany": "At most {{max}} images.",
@@ -351,15 +351,15 @@
     },
     "balance": {
       "dateInvalid": "Choose a valid date.",
-      "dateOutOfRange": "The date cannot be after today for the store or before the back-fill limit.",
+      "dateOutOfRange": "The date can't be in the future or earlier than the backdating limit.",
       "noteTooLong": "The note is too long (500 characters at most)."
     },
     "codes": {
       "CASH_INVALID_REQUEST": "The submitted data is not valid. Please check and try again.",
       "CASH_STORE_NOT_FOUND": "This store was not found.",
-      "CASH_STORE_FORBIDDEN": "You are not allowed to operate this store.",
+      "CASH_STORE_FORBIDDEN": "You don't have access to this store.",
       "CASH_RECORD_NOT_FOUND": "This record does not exist or you are not allowed to view it.",
-      "CASH_DATE_OUT_OF_RANGE": "The date is outside the allowed back-fill range.",
+      "CASH_DATE_OUT_OF_RANGE": "The date is outside the allowed backdating range.",
       "CASH_ATTACHMENT_INVALID": "An image is invalid or has expired. Submit again and the images will be uploaded again.",
       "CASH_ATTACHMENT_REQUIRED": "A required image is missing.",
       "CASH_OVERRIDE_REASON_REQUIRED": "The deposit total differs a lot from the cash pool balance. Enter the reason for the difference.",

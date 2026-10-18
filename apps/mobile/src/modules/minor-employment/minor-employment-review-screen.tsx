@@ -54,6 +54,10 @@ const range = (value: unknown) =>
   });
 const statusLabel = (status: string) =>
   tr(`statuses.${status}`, { defaultValue: status });
+// 后端 dayOfWeek 为 0（周日）~6（周六），显示为语言包里的星期名。
+const WEEKDAY_KEYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const weekdayName = (dayOfWeek: number) =>
+  tr(`weekdays.${WEEKDAY_KEYS[dayOfWeek] ?? dayOfWeek}`, { defaultValue: String(dayOfWeek) });
 
 export function MinorEmploymentReviewScreen() {
   const { t } = useAppTranslation("minorEmployment");
@@ -509,8 +513,8 @@ function ReviewDetail({
               key={i}
               label={
                 item.mustAttend
-                  ? t("review.lines.dayAttend", { day: item.dayOfWeek })
-                  : t("review.lines.day", { day: item.dayOfWeek })
+                  ? t("review.lines.dayAttend", { day: weekdayName(item.dayOfWeek) })
+                  : t("review.lines.day", { day: weekdayName(item.dayOfWeek) })
               }
               value={`${item.startLocalTime}–${item.endLocalTime}`}
             />
@@ -555,7 +559,7 @@ function ReviewDetail({
               label={t("review.lines.weeklyHours")}
               value={Object.entries(x.weeklyHours)
                 .map(([d, h]) =>
-                  t("review.lines.dayHours", { day: d, hours: h }),
+                  t("review.lines.dayHours", { day: t(`weekdays.${d}`, { defaultValue: d }), hours: h }),
                 )
                 .join(t("review.lines.dayHoursSeparator"))}
             />

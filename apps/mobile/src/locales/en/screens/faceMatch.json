@@ -1,13 +1,13 @@
 {
   "messages": {
-    "notAllowed": "This account is not allowed to use this feature.",
+    "notAllowed": "Your account doesn't have access to this feature.",
     "reviewUnavailable": "This feature is not available in review mode.",
-    "noTabPermission": "This account has no list permission. Contact an administrator."
+    "noTabPermission": "Your account doesn't have access to any list. Contact an admin."
   },
   "states": {
-    "loading": "Loading...",
+    "loading": "Loading…",
     "loadFailed": "Failed to load",
-    "loadMoreFailed": "Failed to load more. Tap to retry",
+    "loadMoreFailed": "Failed to load more. Tap to retry.",
     "end": "That's everything"
   },
   "tabs": {
@@ -38,10 +38,10 @@
     }
   },
   "errors": {
-    "generic": "The operation failed. Please try again later.",
+    "generic": "Something went wrong. Try again later.",
     "fieldSuffix": " (field: {{field}})",
     "status": {
-      "401": "Your session has expired. Please sign in again.",
+      "401": "Your session has expired. Log in again.",
       "403": "You do not have permission to do this.",
       "404": "The record was not found.",
       "409": "The current state does not allow this. Refresh and try again.",
@@ -52,24 +52,24 @@
       "FACE_MATCH_DISABLED": "Face matching is not enabled (Tencent Cloud region or admin credentials are missing).",
       "FACE_MATCH_STORE_NOT_CONFIGURED": "The private photo bucket is not configured, so photos cannot be uploaded or viewed.",
       "FACE_MATCH_FORBIDDEN": "You do not have permission to do this.",
-      "FACE_MATCH_STORE_FORBIDDEN": "This store is outside the stores you can act on.",
+      "FACE_MATCH_STORE_FORBIDDEN": "You don't have access to this store.",
       "FACE_MATCH_STORE_INVALID": "The store code is not valid.",
       "FACE_MATCH_STORE_NOT_FOUND": "The store was not found.",
       "FACE_MATCH_FIELD_INVALID": "The submitted content is not valid (including file type, size or count). Check it and try again.",
-      "FACE_MATCH_NOT_FOUND": "The record was not found, or you cannot act on it.",
+      "FACE_MATCH_NOT_FOUND": "The record was not found, or you don't have access to it.",
       "FACE_MATCH_GATE_NOT_MET": "Enablement prerequisites not met: fill in the missing items listed below, then save (missing compliance records are only warnings and are not listed here).",
       "FACE_MATCH_PHOTO_UNUSABLE": "A photo cannot be used (no clear single front-facing face detected, or quality is too low). Use different photos.",
-      "FACE_MATCH_TENCENT_AUTH": "Tencent Cloud authentication failed. Ask an administrator to check the admin credentials.",
+      "FACE_MATCH_TENCENT_AUTH": "Tencent Cloud authentication failed. Ask an admin to check the admin credentials.",
       "FACE_MATCH_TENCENT_BUSY": "Tencent Cloud is busy. Try again later.",
-      "FACE_MATCH_TENCENT_LIMIT": "The Tencent Cloud person or face limit has been reached. Contact an administrator.",
-      "FACE_MATCH_TENCENT_CONFLICT": "Data conflict at Tencent Cloud. Try again later; contact an administrator if it keeps happening.",
+      "FACE_MATCH_TENCENT_LIMIT": "The Tencent Cloud person or face limit has been reached. Contact an admin.",
+      "FACE_MATCH_TENCENT_CONFLICT": "Data conflict at Tencent Cloud. Try again later, and contact an admin if it keeps happening.",
       "FACE_MATCH_TENCENT_UNAVAILABLE": "Tencent Cloud is unavailable. Try again later.",
-      "FACE_MATCH_TENCENT_ERROR": "Tencent Cloud processing failed. Try again later; contact an administrator if it keeps failing.",
+      "FACE_MATCH_TENCENT_ERROR": "Tencent Cloud processing failed. Try again later, and contact an admin if it keeps failing.",
       "FACE_MATCH_ENTRY_NOT_PENDING": "This entry is not pending approval. Refresh and try again.",
-      "FACE_MATCH_APPROVER_IS_SUBMITTER": "The submitter cannot approve their own entry (administrators excepted).",
+      "FACE_MATCH_APPROVER_IS_SUBMITTER": "You can't approve an entry you submitted (except admins).",
       "FACE_MATCH_ALREADY_APPROVED_BY_YOU": "You have already approved this entry; a different approver is needed.",
       "FACE_MATCH_ENTRY_EXPIRED": "This entry has expired and can no longer be approved.",
-      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "None of the entry's stores has turned on the Unwelcome Persons List yet, so it cannot be approved. Turn it on in the store profile first.",
+      "FACE_MATCH_UNWELCOME_NOT_ENABLED": "None of the entry's stores has turned on the unwelcome list yet, so it can't be approved. Turn it on in the store profile first.",
       "FACE_MATCH_ENTRY_CHANGED": "The entry was just changed by someone else. Refresh and try again.",
       "FACE_MATCH_TASK_CLOSED": "This review task is already finished.",
       "FACE_MATCH_SAME_REVIEWER": "You have already given a decision on this task. Another colleague with review permission needs to handle it.",
@@ -77,19 +77,19 @@
       "FACE_MATCH_IMAGE_GONE": "The image has been cleaned up or does not exist, so this task can no longer be reviewed.",
       "FACE_MATCH_IMAGE_TOO_LARGE": "The image is too large to display.",
       "FACE_MATCH_IMAGE_UNSUPPORTED": "The image format is not supported.",
-      "FACE_MATCH_STORE_DENIED": "The image store denied access. Ask an administrator to check permissions.",
+      "FACE_MATCH_STORE_DENIED": "The image store denied access. Ask an admin to check permissions.",
       "FACE_MATCH_STORE_TIMEOUT": "Loading the image timed out. Try again later.",
       "FACE_MATCH_STORE_ERROR": "Failed to load the image. Try again later.",
       "FACE_MATCH_AUDIT_FAILED": "The audit record could not be written, so the action was not completed (no image is returned). Try again later.",
-      "FACE_MATCH_TIMEZONE_UNAVAILABLE": "The server cannot determine the store time zone. Contact an administrator.",
-      "FACE_CAMERA_ID_INVALID": "The camera ID format is invalid",
-      "FACE_CAMERA_STORE_CODE_INVALID": "The store code format is invalid",
+      "FACE_MATCH_TIMEZONE_UNAVAILABLE": "The server can't determine the store's time zone. Contact an admin.",
+      "FACE_CAMERA_ID_INVALID": "The camera ID format is invalid.",
+      "FACE_CAMERA_STORE_CODE_INVALID": "The store code format is invalid.",
       "FACE_CAMERA_STORE_NOT_FOUND": "The store does not exist. Choose an existing store.",
       "FACE_CAMERA_FIELD_INVALID": "A field is invalid. Check it and try again.",
       "FACE_CAMERA_NOT_FOUND": "The camera does not exist. Refresh the list.",
       "FACE_CAMERA_ID_EXISTS": "This camera ID already exists. Choose another one.",
-      "FACE_CAMERA_TOKEN_CONFLICT": "Token generation conflicted. Please try again.",
-      "FACE_CAMERA_SECRET_MISSING": "The response was incomplete. The camera may already have been created or its token rotated; refresh the list to check and rotate the token again if needed."
+      "FACE_CAMERA_TOKEN_CONFLICT": "Couldn't generate a token because of a conflict. Try again.",
+      "FACE_CAMERA_SECRET_MISSING": "The response was incomplete. The camera may already have been created or its token regenerated. Refresh the list to check, and regenerate the token again if needed."
     }
   },
   "validation": {
@@ -102,8 +102,8 @@
     "expiresRequired": "Select an expiry date",
     "expiresPast": "The expiry date must be after today",
     "expiresTooFar": "The expiry date can be at most {{months}} months from today",
-    "photoCountRange": "Add {{min}}-{{max}} photos",
-    "photoEmpty": "One photo is empty. Pick it again",
+    "photoCountRange": "Add {{min}}–{{max}} photos",
+    "photoEmpty": "One of the photos is empty. Choose it again",
     "photoTooLarge": "A photo cannot exceed {{maxMb}}MB",
     "textRequired": "Enter a reason",
     "textTooLong": "At most {{max}} characters",
@@ -111,13 +111,13 @@
     "autoConfirmScoreInvalid": "The auto-confirm threshold must be 0 (off) or a number from {{min}} to {{max}} with at most 2 decimal places"
   },
   "unwelcome": {
-    "title": "Unwelcome persons list",
+    "title": "Unwelcome list",
     "intro": "The list is for serious incidents only: violence or threats, organised or documented repeat theft, or other cases confirmed by approvers; never for ordinary shoplifting. Every entry needs an evidence reference and an expiry date (at most 12 months) and takes effect only after someone with approval permission approves it.",
     "objectStoreMissing": "The private photo bucket is not configured, so entries with photos cannot be submitted.",
     "writeBlocked": "The feature is not enabled. View only; entries cannot be submitted.",
     "empty": "No list entries",
     "expiringSoon": "Expires in {{days}} days",
-    "cleanupPending": "Cleanup pending",
+    "cleanupPending": "Cleaning up",
     "category": {
       "violence": "Violence or threats (staff or customers)",
       "organisedTheft": "Organised or documented repeat theft",
@@ -147,8 +147,8 @@
     },
     "approve": {
       "title": "Approve this entry?",
-      "content": "Once approved the entry takes effect and cameras in the stores in scope start matching against it.",
-      "contentTwo": "This entry needs {{needed}} different approvers and has {{done}} so far. Your approval counts toward that; it takes effect only when complete, except that one administrator's approval takes effect immediately.",
+      "content": "Once approved, the entry takes effect and cameras at the selected stores start matching against it.",
+      "contentTwo": "This entry needs {{needed}} different approvers and has {{done}} so far. Your approval counts towards that, and the entry takes effect once all are in. An admin's approval on its own takes effect immediately.",
       "ok": "Approve",
       "done": "Approved"
     },
@@ -161,7 +161,7 @@
     },
     "dispute": {
       "title": "Dispute and correction note",
-      "description": "When a person asks about or disputes their record it must be handled within 30 days. Record what was done here, without names or private details.",
+      "description": "When someone asks about or disputes their record, it must be handled within 30 days. Record what was done here, without names or personal details.",
       "label": "Note",
       "ok": "Save note",
       "done": "Note saved"
@@ -169,21 +169,21 @@
   },
   "form": {
     "title": "Submit list entry",
-    "scopeNotice": "Confirm the incident is serious. An entry stores only the incident category, evidence reference and reference photos; do not enter names or private details in any field. It takes effect only after someone with approval permission approves it; an administrator can approve it alone.",
+    "scopeNotice": "Make sure the incident is serious. An entry only stores the incident category, evidence reference and reference photos; do not enter names or personal details in any field. It takes effect only after someone with approval permission approves it; an admin can approve it alone.",
     "category": "Incident category",
-    "otherNeedsApproval": "Entries with the Other category need two different approvers before they take effect unless an administrator approves; one administrator's approval is enough.",
+    "otherNeedsApproval": "Entries in the Other category need two different approvers before they take effect. An admin's approval on its own is enough.",
     "categoryNote": "Description",
     "evidenceRef": "Evidence reference",
     "evidenceRefHint": "Enter the incident record or police report number. Do not enter names or other private details.",
-    "storeScope": "Stores in effect",
-    "storeScopeHint": "Default to the store where the incident happened; select at least one ({{count}} selected).",
+    "storeScope": "Stores covered",
+    "storeScopeHint": "Defaults to the store where the incident happened. Select at least one ({{count}} selected).",
     "noStores": "No stores available",
     "expiresOn": "Expiry date",
     "expiresHint": "Required, at most {{months}} months from today ({{latest}}); the entry is deactivated and deleted when it expires.",
     "expiresPreset": "In {{months}} months",
     "expiresPlaceholder": "Select an expiry date",
     "photos": "Reference photos",
-    "photosHint": "Add 1-5 photos (JPG or PNG, up to 5MB each); used only for side-by-side comparison during review. Do not add photos of people unrelated to the incident.",
+    "photosHint": "Add 1–5 photos (JPG or PNG, up to 5MB each). They are used only for side-by-side comparison during review. Do not add photos of people unrelated to the incident.",
     "submit": "Submit entry",
     "confirmTitle": "Submit this entry?",
     "confirmContent": "You are submitting an entry for {{stores}} store(s) with {{photos}} reference photo(s), expiring {{expiresOn}}. It takes effect only after someone with approval permission approves it. The photos are uploaded to private storage.",
@@ -207,8 +207,8 @@
       "decodeFailed": "This photo could not be read. Pick another.",
       "tooLarge": "This photo is still over 5MB after compression. Pick another.",
       "tooMany": "At most {{max}} photos; extra selections were ignored.",
-      "cameraPermission": "No camera permission, so a photo cannot be taken.",
-      "libraryPermission": "No photo library permission, so photos cannot be selected."
+      "cameraPermission": "Camera access is off, so you can't take a photo.",
+      "libraryPermission": "Photo library access is off, so you can't choose photos."
     }
   },
   "leave": {
@@ -220,13 +220,13 @@
     "busyMessage": "Wait for the submission to finish before leaving."
   },
   "review": {
-    "intro": "A review task comes from a possible match between a camera capture and the list. One colleague with review permission compares the live capture with the reference photos and decides once: same person confirms the task, not the same person dismisses it. The system never refuses service or notifies police automatically.",
+    "intro": "A review task is created when a camera capture possibly matches the list. One colleague with review permission compares the live capture with the reference photos and decides once: \"Same person\" confirms the task, \"Not the same person\" dismisses it. The system never refuses service or notifies police automatically.",
     "sensitiveNotice": "A suspected match that needs manual confirmation. This is sensitive biometric information: viewing is logged, do not screenshot or share it. Names and incident details are not shown, and images are cleared as soon as you leave this screen or switch to the background.",
     "modalTitle": "Review suspected match",
     "similarity": "Similarity {{percent}}% (not the probability of being the same person)",
     "notProbability": "Similarity only says how alike the two faces look; it does not say how likely they are the same person.",
     "band": {
-      "high": "Higher",
+      "high": "High",
       "normal": "Normal"
     },
     "status": {
@@ -250,17 +250,17 @@
     },
     "blocked": {
       "done": "This task is finished.",
-      "imageGone": "The capture was deleted under the retention period, so it can no longer be reviewed.",
+      "imageGone": "The capture was deleted after its retention period, so it can no longer be reviewed.",
       "readOnly": "The feature is not enabled. View only; decisions cannot be submitted.",
       "cannotReview": "You cannot submit a decision right now (no review permission for this store, or the task no longer needs your decision)."
     },
     "captureTitle": "Live capture",
-    "referenceTitle": "List reference photo",
+    "referenceTitle": "Reference photo",
     "referencePrev": "Previous",
     "referenceNext": "Next",
     "noReference": "No reference photos are available (the entry may have been withdrawn or expired).",
-    "imageGone": "The capture was deleted under the retention period, so this task can no longer be reviewed.",
-    "loadingImage": "Loading image...",
+    "imageGone": "The capture was deleted after its retention period, so this task can no longer be reviewed.",
+    "loadingImage": "Loading image…",
     "verdict": {
       "match": "Same person",
       "notMatch": "Not the same person"
@@ -281,7 +281,7 @@
     "imageErrors": {
       "notConfigured": "Image access is not configured",
       "forbidden": "You do not have permission to view this image",
-      "unauthorized": "Your session has expired. Sign in again and retry",
+      "unauthorized": "Your session has expired. Log in again and retry",
       "missing": "The image does not exist",
       "failed": "Failed to load the image. Try again later",
       "gone": "The image has been cleaned up or does not exist"
@@ -326,8 +326,8 @@
       "skipped": "Skipped, no notification sent"
     },
     "detail": {
-      "title": "Capture detail",
-      "sensitiveNotice": "Biometric information · this view is recorded",
+      "title": "Capture details",
+      "sensitiveNotice": "Biometric information · this view is logged",
       "faceImage": "Face",
       "sceneImage": "Scene",
       "noImage": "No image to show",
@@ -344,17 +344,17 @@
       "hitSimilarity": "Similarity {{percent}}%",
       "notifyTitle": "Notification delivery",
       "noHit": "This capture did not match the list.",
-      "goReview": "Go to review (side by side)",
+      "goReview": "Review side by side",
       "reviewHint": {
         "noHit": "No hit, nothing to review.",
         "imageGone": "The hit photo was deleted after its retention period and can no longer be reviewed.",
-        "noPermission": "Your account has no permission for the unwelcome list review."
+        "noPermission": "Your account doesn't have permission to review unwelcome list matches."
       },
       "hitImage": "Hit photo"
     },
     "timeline": {
-      "created": "Hit task created",
-      "notified": "Notified {{count}} reviewers",
+      "created": "Review task created",
+      "notified": "Reviewers notified: {{count}}",
       "read": "Read {{read}} / {{count}}",
       "notifyPending": "Notification queued, waiting to send",
       "notifySkipped": "Skipped, no notification sent",
@@ -368,7 +368,7 @@
     "store": "Store",
     "pickStore": "Select a store",
     "noStores": "No stores to configure",
-    "legalNotice": "Important: before Match, customer de-duplication or the Unwelcome Persons List runs on real customers, the legal sign-off, privacy impact assessment and signage records must be in place. Missing records are shown as red warnings and do not block saving or enabling, but they are still legally required before running on real customers. This page does not replace legal judgement.",
+    "legalNotice": "Important: before Match, customer de-duplication or the unwelcome list runs on real customers, the legal sign-off, privacy impact assessment and signage records must be in place. Missing records are shown as red warnings and do not block saving or enabling, but they are still legally required before running on real customers. This page does not replace legal advice.",
     "profile": {
       "title": "Store profile",
       "loadFailed": "Failed to load the store profile",
@@ -380,7 +380,7 @@
         "capture": "Capture",
         "match": "Match",
         "offHint": "Off: captures from this store's cameras are not processed.",
-        "captureHint": "Capture: keeps everything and lets you view images in admin; only for integration testing with consenting internal staff. Filling in \"Allowed subjects\" is recommended.",
+        "captureHint": "Capture: keeps everything and lets you view images in the web admin. Only for integration testing with consenting internal staff. Filling in \"Allowed subjects\" is recommended.",
         "matchHint": "Match: matches captures and keeps no unmatched images. Missing legal sign-off and related records show as red warnings (they do not block enabling) and must be completed before it runs on real customers."
       },
       "sections": {
@@ -391,14 +391,14 @@
         "evaluateMatch": "Evaluate match",
         "staffExclusionEnabled": "Staff exclusion",
         "trafficDedupEnabled": "Customer de-duplication",
-        "unwelcomeListEnabled": "Enable Unwelcome Persons List",
+        "unwelcomeListEnabled": "Unwelcome list",
         "unwelcomeAutoConfirmScore": "Auto-confirm threshold (%)",
         "allowedSubjects": "Allowed subjects",
         "timeZoneId": "Time zone"
       },
       "hints": {
         "evaluateMatch": "Evaluate only, with no effect on the store; requires Capture mode.",
-        "staffExclusion": "Excludes enrolled staff from traffic counts; needs store members with a valid consent and enrolment.",
+        "staffExclusion": "Excludes enrolled staff from traffic counts. Needs staff at this store with valid consent and enrolment.",
         "trafficDedup": "De-duplicates customers by face per day. High legal risk. A missing de-duplication legal sign-off or other record shows as a red warning and does not block enabling, but it must be completed before running on real customers.",
         "unwelcomeList": "Alerts staff on a list match and creates a review task for manual confirmation. Missing assessment, legal sign-off, signage or training records show as red warnings and do not block enabling, but they must be completed before running on real customers.",
         "unwelcomeAutoConfirmScore": "When a task's similarity reaches or exceeds this value, the system automatically marks the task as Confirmed and no manual review is needed (staff still get the alert; the system never refuses service or notifies police automatically). Enter 0 to turn auto-confirm off; the default is 90. Similarity is not the probability of being the same person.",
@@ -412,7 +412,7 @@
         "Australia/Melbourne": "Melbourne"
       },
       "complianceWarning": "Compliance records incomplete ({{count}} in total): you can save and enable; problems are shown as hints only.",
-      "webOnly": "Compliance records (PIA, signage, legal sign-off, cross-border review, staff training and so on) are not edited on the phone and are kept exactly as saved; complete them in the web admin under Face Matching > Store profiles.",
+      "webOnly": "Compliance records (PIA, signage, legal sign-off, cross-border review, staff training and so on) can't be edited on the phone and are kept exactly as saved. Complete them in the web admin under Face matching > Store profiles.",
       "save": "Save profile",
       "saved": "Store profile saved",
       "savedWithWarnings": "Store profile saved, but {{count}} compliance record(s) are still incomplete: they must be completed before running on real customers",
@@ -425,24 +425,24 @@
       "confirmSwitch": "{{name}}: {{state}}",
       "confirmAutoConfirm": "Auto-confirm threshold: {{from}} → {{to}}",
       "confirmMatchWarning": "After switching to Match, real captures from this store's cameras start being matched. Make sure the compliance records are complete (see the warnings below).",
-      "confirmCaptureWarning": "After switching to Capture, every capture from this store's cameras is kept; it may only be used with informed, consenting internal people.",
+      "confirmCaptureWarning": "After switching to Capture, every capture from this store's cameras is kept. Only use it with consenting internal staff.",
       "confirmKeep": "All other compliance records are kept as they are and will not be changed.",
       "confirmOk": "Save"
     },
     "gate": {
-      "title": "Enablement gates",
-      "nothingRequested": "No feature that needs a gate is currently requested.",
+      "title": "Enablement checks",
+      "nothingRequested": "No features that need these checks are turned on.",
       "facetLine": "{{facet}}: {{status}}",
       "satisfied": "Prerequisites for saving are met",
       "missingTitle": "{{count}} missing",
       "warningTitle": "{{count}} hint(s). They do not block saving or enabling; compliance records must be completed before running on real customers",
-      "savedStateHint": "The gate status above is computed from the saved profile. Unsaved edits do not change it until you save; the server result on save is authoritative.",
+      "savedStateHint": "The check status above is based on the saved profile. Unsaved edits don't change it until you save; after saving, the server's result applies.",
       "facets": {
-        "capture": "Capture mode (informed internal people only)",
+        "capture": "Capture mode (consenting internal staff only)",
         "match": "Match mode",
         "staffExclusion": "Staff exclusion",
         "trafficDedup": "Customer de-duplication (unique visitors)",
-        "unwelcome": "Unwelcome Persons List"
+        "unwelcome": "Unwelcome list"
       },
       "keys": {
         "mode": "Mode",
@@ -464,7 +464,7 @@
         "unwelcomeLegalSignoffAt": "List legal sign-off time",
         "staffTrainingDate": "Staff training date",
         "privacyContact": "Privacy contact",
-        "activeEnrollment": "No store member has a valid consent and enrolment yet",
+        "activeEnrollment": "No staff at this store have valid consent and enrolment yet",
         "regionMismatch": "The cross-border review region differs from the configured region and must be reviewed again",
         "staffNoticeTooRecent": "The NSW staff notice date is less than 14 days ago",
         "modeOff": "The mode cannot be Off",
@@ -495,7 +495,7 @@
       "confirmDisableOk": "Disable",
       "add": "Add camera",
       "edit": "Edit",
-      "rotate": "Rotate token",
+      "rotate": "Regenerate token",
       "viewCaptures": "Recent captures",
       "form": {
         "titleCreate": "Add camera",
@@ -524,10 +524,10 @@
       },
       "secret": {
         "titleCreated": "Camera created",
-        "titleRotated": "Token rotated",
-        "onceOnly": "This address is shown only once. After you close this dialog it cannot be viewed again; if it is lost, the token must be rotated.",
+        "titleRotated": "Token regenerated",
+        "onceOnly": "This address is shown only once. After you close this dialog it can't be viewed again; if it's lost, the token must be regenerated.",
         "createdNote": "Push address for camera {{cameraId}}.",
-        "rotatedNote": "The old token of camera {{cameraId}} stops working within 30 seconds. Configure the new address below on the camera.",
+        "rotatedNote": "The old token for camera {{cameraId}} stops working within 30 seconds. Set the camera up with the new address below.",
         "urlLabel": "Camera address",
         "copy": "Copy address",
         "copied": "Copied to clipboard",
@@ -535,12 +535,12 @@
         "hide": "Hide",
         "show": "Show",
         "usage": "Enter this address as the camera's event push (HTTP listening) address. It works like a password: do not paste it into chats or keep screenshots. It is cleared automatically when you switch apps or close this window.",
-        "close": "I have saved it, close"
+        "close": "I've saved it"
       },
       "confirmRotate": {
-        "title": "Rotate the token of {{name}}?",
+        "title": "Regenerate the token for {{name}}?",
         "content": "The old token stops working within 30 seconds. The camera must be reconfigured with the new address or its pushes will be rejected. The new address is shown only once.",
-        "ok": "Rotate"
+        "ok": "Regenerate"
       },
       "messages": {
         "saved": "Saved"
@@ -565,7 +565,7 @@
         "loadFailed": "Failed to load captures",
         "loadMore": "Load more",
         "loadingMore": "Loading…",
-        "end": "No more",
+        "end": "That's everything",
         "viewImages": "View images",
         "viewerTitle": "Capture images",
         "imageFace": "Face {{index}}",

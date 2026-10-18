@@ -47,7 +47,7 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/pricing-strategies", "Pricing strategies", "定价策略", ["PricingStrategy.View"]],
   ["/pos-admin/promotions", "Promotions", "促销管理", ["Promotions.View"]],
   ["/pos-admin/advertisements", "Advertisements", "广告管理", ["Advertisements.View"]],
-  ["/pos-admin/cash-register-users", "Cash register users", "收银用户", ["Store.ManageOperations"]],
+  ["/pos-admin/cash-register-users", "Cashier barcodes", "收银用户", ["Store.ManageOperations"]],
   ["/pos-admin/operation-logs", "Operation logs", "操作日志", ["Permissions.PosTerminal.Audit.View"]],
   ["/pos-admin/linkly-settlements", "Linkly settlements", "Linkly 结算", [], { requireAdmin: true }],
   // 与后端 FullMenu 一致：日结记录只认独立权限码 DailyCloseRecords.View（紧跟 Linkly 结算）。
@@ -56,7 +56,7 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/store-cash", "Cash management", "现金管理", ["Cash.Overview.View"]],
   // 与后端 FullMenu 一致：节日贺卡分店填报统计只认 SeasonalCards.Remaining.ViewAllStores（店长的填报权限不能打开）。
   ["/pos-admin/seasonal-card-stats", "Seasonal card stats", "节日贺卡填报统计", ["SeasonalCards.Remaining.ViewAllStores"]],
-  ["/pos-admin/schedule-attendance", "Schedule and attendance", "排班考勤", ["Attendance.Schedule.ViewStore"]],
+  ["/pos-admin/schedule-attendance", "Rosters and attendance", "排班考勤", ["Attendance.Schedule.ViewStore"]],
   ["/pos-admin/sales-orders", "Sales orders", "销售订单", ["Orders.View"]],
   ["/pos-admin/local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.View"]],
 ] as MenuRow[]).map(toSource("web"));
@@ -70,7 +70,7 @@ const MOBILE_MENU: MenuSource[] = ([
   ["containers", "Containers", "货柜管理", ["Container.View"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：拣货专用权限，或管理仓库 / 管理仓库订货任一即可见。
   ["warehouse-picking", "Order picking", "订单拣货", ["Warehouse.Picking", "Warehouse.Manage", "Warehouse.ManageOrders"]],
-  ["domestic-purchase", "Domestic purchase", "国内采购", ["DomesticPurchase.ManageProducts"]],
+  ["domestic-purchase", "China purchasing", "国内采购", ["DomesticPurchase.ManageProducts"]],
   ["local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.MobileView", "LocalPurchase.View"]],
   ["advertisements", "Advertisements", "广告", ["Advertisements.View"]],
   ["promotions", "Promotions", "促销", ["Promotions.View"]],
@@ -91,9 +91,9 @@ const MOBILE_MENU: MenuSource[] = ([
   // 「人员管理」(users) 是合并后的移动端入口（人员 / 角色 / 权限三个页签），菜单权限仍只认 Users.ViewStoreStaff
   // （Users.View 持有者经后端别名自动满足）。后端 FullAppMenu 仍下发 user-admin / roles / permissions 三项（旧版 App 在用），
   // 新版 App 里它们只剩重定向壳、不再是工作台入口，这里与后端保持一一对应，待旧版普及后随后端一起清理。
-  ["users", "People management", "人员管理", ["Users.ViewStoreStaff"]],
+  ["users", "Staff management", "人员管理", ["Users.ViewStoreStaff"]],
   ["user-admin", "User management", "用户管理", ["Users.View"]],
-  ["cash-register-users", "Cash register barcodes", "收银用户条码", ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]],
+  ["cash-register-users", "Cashier barcodes", "收银用户条码", ["CashRegisterUsers.MobileManage", "CashRegisterUsers.MobilePrint"]],
   ["roles", "Role management", "角色管理", ["Roles.View"]],
   ["permissions", "Permission management", "权限管理", ["Roles.View"]],
   ["employee-profile", "Employee profile", "员工档案", ["EmployeeProfiles.View"]],
@@ -105,7 +105,7 @@ const MOBILE_MENU: MenuSource[] = ([
   ]],
   // 下面旧三项仅为兼容旧版 App（后端 FullAppMenu 仍下发，新版 App 不显示），待旧版普及更新后与后端一起清理。
   // 与后端 FullAppMenu 的 AnyPermissions 一致：名单管理 / 批准 / 复核任一即可见；不新增权限码。
-  ["face-unwelcome", "Unwelcome persons list", "不受欢迎人员名单", ["FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve", "FaceMatch.Unwelcome.Review"]],
+  ["face-unwelcome", "Unwelcome list", "不受欢迎人员名单", ["FaceMatch.Unwelcome.Manage", "FaceMatch.Unwelcome.Approve", "FaceMatch.Unwelcome.Review"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：门店档案管理或摄像机管理任一即可见。
   // 与后端 FullAppMenu 一致：抓拍与比对结果只认 FaceCapture.Images.View（结果里的照片是生物识别信息）。
   ["face-capture-results", "Captures and matches", "抓拍与比对", ["FaceCapture.Images.View"]],

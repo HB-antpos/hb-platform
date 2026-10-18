@@ -1,8 +1,9 @@
 import { Image, StyleSheet, View } from "react-native";
 import { Button, Chip, Text } from "react-native-paper";
+import { labelColon } from "@/shared/i18n/punctuation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { formatSupplyExpected } from "./format-expected";
+import { formatSupplyDay, formatSupplyExpected } from "./format-expected";
 import type { StoreSupplyStatus } from "./types";
 
 export interface SupplyStatusCardProps {
@@ -14,11 +15,6 @@ export interface SupplyStatusCardProps {
   onAcknowledge?: (status: StoreSupplyStatus) => void;
   /** 已恢复订货时：去订货。 */
   onOrder?: (status: StoreSupplyStatus) => void;
-}
-
-function formatUpdatedAt(value: string | null): string | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
-  return match ? `${Number(match[2])}月${Number(match[3])}日` : null;
 }
 
 /**
@@ -37,7 +33,7 @@ export function SupplyStatusCard({ status, busy, onWatch, onUnwatch, onAcknowled
       : status.supplyPlan === "WillRestock"
         ? styles.chipInfo
         : styles.chipWarn;
-  const updatedAt = formatUpdatedAt(status.noticeUpdatedAtUtc);
+  const updatedAt = formatSupplyDay(status.noticeUpdatedAtUtc, t);
 
   return (
     <View style={styles.card} testID={`supply-status-card-${status.productCode}`}>
@@ -53,13 +49,13 @@ export function SupplyStatusCard({ status, busy, onWatch, onUnwatch, onAcknowled
           <Chip compact style={[styles.chip, chipStyle]} textStyle={styles.chipText}>{title}</Chip>
           {showExpected ? (
             <Text variant="bodySmall" style={styles.line}>
-              <Text style={styles.muted}>{t("expectedLabel")}：</Text>
+              <Text style={styles.muted}>{t("expectedLabel")}{labelColon()}</Text>
               <Text style={status.isOverdue ? styles.overdue : undefined}>{formatSupplyExpected(status, t)}</Text>
             </Text>
           ) : null}
           {!restocked && status.storeFacingNote ? (
             <Text variant="bodySmall" style={styles.line}>
-              <Text style={styles.muted}>{t("noteLabel")}：</Text>
+              <Text style={styles.muted}>{t("noteLabel")}{labelColon()}</Text>
               {status.storeFacingNote}
             </Text>
           ) : null}

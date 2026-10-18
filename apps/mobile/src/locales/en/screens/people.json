@@ -1,19 +1,19 @@
 {
   "hub": {
-    "title": "People",
+    "title": "Staff management",
     "tabs": {
-      "people": "People",
+      "people": "Staff",
       "roles": "Roles",
       "permissions": "Permissions"
     },
-    "noAccessTitle": "No access to people management",
-    "noAccessDescription": "This account cannot view people, roles or permissions."
+    "noAccessTitle": "No access to staff management",
+    "noAccessDescription": "This account can't view staff, roles or permissions."
   },
   "subtitle": {
     "storeManageable": "{{name}} {{code}} · You manage this store",
     "storeViewOnly": "{{name}} {{code}} · View only",
     "allStores": "All assigned stores · View only",
-    "adminAll": "All stores · {{count}} people",
+    "adminAll": "All stores · {{count}} staff",
     "adminAllNoCount": "All stores",
     "roles": "Roles · {{count}}",
     "permissions": "Permissions · {{count}} · {{categories}} categories"
@@ -29,13 +29,13 @@
     "active": "Active",
     "disabled": "Disabled",
     "pendingFirstLogin": "First login pending",
-    "cannotLogin": "Cannot sign in",
+    "cannotLogin": "Login blocked",
     "noEmail": "No email"
   },
   "tags": {
     "pendingFirstLogin": "First login pending",
-    "cannotLogin": "Cannot sign in",
-    "noEmail": "No email · cannot recover password",
+    "cannotLogin": "Login blocked",
+    "noEmail": "No email · can't reset password",
     "disabled": "Disabled"
   },
   "row": {
@@ -45,7 +45,7 @@
     "all": "All stores"
   },
   "empty": {
-    "filteredTitle": "No matching people",
+    "filteredTitle": "No matching staff",
     "filteredDescription": "Try a different status filter."
   },
   "batch": {
@@ -54,20 +54,20 @@
   "storeSheet": {
     "title": "Switch store",
     "subtitle": "Only stores you manage that have POS enabled",
-    "allCaption": "Cannot add here — pick a store first",
-    "allCaptionWithCount": "{{count}} people · Cannot add here — pick a store first",
-    "peopleCount": "{{count}} people",
-    "viewOnlyNotice": "Stores marked \"View only\" let you browse staff, but not add, edit, disable or reset passwords.",
+    "allCaption": "Pick a store to add staff",
+    "allCaptionWithCount": "{{count}} staff · Pick a store to add staff",
+    "peopleCount": "{{count}} staff",
+    "viewOnlyNotice": "At \"View only\" stores you can see staff, but you can't add, edit or disable them, or reset passwords.",
     "allManaged": "All managed stores"
   },
   "admin": {
-    "noAccess": "This session cannot access the people list",
-    "empty": "No matching people",
+    "noAccess": "You don't have access to the staff list",
+    "empty": "No matching staff",
     "create": "Add account",
     "filterStore": "Store: {{value}}",
     "filterRole": "Role: {{value}}",
-    "countSuffix": " people",
-    "endOfList": "All {{count}} people shown",
+    "countSuffix": " staff",
+    "endOfList": "Showing all {{count}}",
     "status": {
       "all": "All",
       "active": "Active",
@@ -82,18 +82,18 @@
   "adminStores": {
     "all": "All stores",
     "none": "No stores",
-    "manage": "{{name}} (manages)",
+    "manage": "{{name}} (manage)",
     "view": "{{name}} (view)"
   },
   "login": {
-    "justNow": "Just signed in",
+    "justNow": "Just now",
     "minutes": "{{count}} min ago",
     "hours": "{{count}} h ago",
     "yesterday": "Yesterday",
     "days": "{{count}} days ago",
     "months": "{{count}} months ago",
-    "years": "{{count}} years ago",
-    "never": "Never signed in"
+    "years": "{{count}} yr ago",
+    "never": "Never logged in"
   },
   "sheet": {
     "title": "Filter and sort",
@@ -103,30 +103,30 @@
     "status": "Status",
     "sort": "Sort",
     "all": "All",
-    "apply": "Show {{count}} people",
+    "apply": "Show {{count}} staff",
     "applyUnknown": "Show results",
     "optionsFailed": "Could not load the filter options. Try again."
   },
   "rolesList": {
-    "noAccess": "This session cannot access the role list",
+    "noAccess": "You don't have access to the role list",
     "empty": "No roles yet",
     "add": "Add role",
-    "memberCount": "{{count}} people",
-    "derivedHint": "Derived from stores you manage",
+    "memberCount": "{{count}} staff",
+    "derivedHint": "Auto-assigned from \"Manage\" stores",
     "tags": {
       "system": "System",
-      "derived": "Derived",
+      "derived": "Auto",
       "disabled": "Disabled"
     }
   },
   "permList": {
-    "noAccess": "This session cannot access the permission list",
+    "noAccess": "You don't have access to the permission list",
     "empty": "No matching permissions",
     "add": "Add permission",
     "all": "All",
     "system": "System",
     "custom": "Custom",
-    "roleCount": "{{count}} roles",
+    "roleCount": "Roles: {{count}}",
     "roleCountUnavailable": "Role counts unavailable"
   }
 }

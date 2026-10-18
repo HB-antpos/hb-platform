@@ -16,7 +16,7 @@
   "scope": {
     "noStore": "Choose a store",
     "oneStore": "{{store}}",
-    "manyStores": "{{store}} + {{count}} stores"
+    "manyStores": "{{count}} stores incl. {{store}}"
   },
   "presets": {
     "today": "Today",
@@ -27,7 +27,7 @@
   "lens": {
     "all": "All",
     "danger": "Risky",
-    "abnormal": "Anomalies",
+    "abnormal": "Exceptions",
     "pending": "{{count}} to review",
     "onlyPending": "To review only"
   },
@@ -49,34 +49,34 @@
   "rules": {
     "noSaleDrawer": {
       "label": "No-sale drawer",
-      "desc": "Manual cash drawer opening with no checkout on the same device within 2 minutes either side."
+      "desc": "Cash drawer opened manually with no checkout on the same device within 2 minutes before or after."
     },
     "deleteAfterCheckout": {
       "label": "Delete after checkout",
-      "desc": "Item deleted within 2 minutes after checkout started, before the next sale, worth at least 10."
+      "desc": "Item worth 10 or more deleted within 2 minutes after checkout, before the next sale started."
     },
     "bigDiscount": {
       "label": "Big discount",
       "desc": "Item or cart discount of 50% or more, or a price cut of 50% or more."
     },
     "burstDelete": {
-      "label": "Burst deletes",
+      "label": "Frequent deletes",
       "desc": "Same staff member deleting items 8 or more times within 10 minutes; one flag per burst."
     },
     "repeatReprint": {
-      "label": "Repeated reprint",
+      "label": "Repeat reprints",
       "desc": "Same order reprinted 3 or more times in a day; the 3rd reprint is flagged."
     },
     "offHours": {
-      "label": "Off-hours",
-      "desc": "Operations outside 07:00–22:00; the first one per device and period is flagged."
+      "label": "After hours",
+      "desc": "Activity outside trading hours (07:00–22:00); only the first per device per period is flagged."
     },
     "emergencyOverride": {
       "label": "Emergency override",
       "desc": "Operations performed under a new-POS emergency override; every one needs review."
     }
   },
-  "caption": "{{lens}} · {{count}} rows",
+  "caption": "{{lens}} · {{count}} records",
   "hour": "{{hour}}:00 – {{hour}}:59",
   "badges": {
     "danger": "Risky",
@@ -97,23 +97,23 @@
     "noSaleWindow": "No checkout on this device within {{seconds}}s",
     "noSalePrevious": "Previous checkout {{at}} ({{minutes}} min before)",
     "noSaleNext": "Next checkout {{at}}",
-    "identityConfirmed": "Identity confirmed at opening",
-    "identityMissing": "No identity confirmation at opening",
+    "identityConfirmed": "Identity confirmed when drawer opened",
+    "identityMissing": "No identity confirmation when drawer opened",
     "deleteAfterCheckout": "Deleted {{seconds}}s after checkout started at {{at}}, amount {{amount}}",
     "product": "Item {{product}} × {{quantity}}",
     "productOnly": "Item {{product}}",
     "discountItem": "Item discount {{percent}}% (was {{previous}}%)",
     "discountCart": "Cart discount {{percent}}%, {{count}} items, original total {{total}}",
-    "discountPrice": "Price {{from}} → {{to}}, cut {{percent}}%",
+    "discountPrice": "Price {{from}} → {{to}} (−{{percent}}%)",
     "burstDelete": "{{count}} deletes {{from}}–{{to}}, total {{amount}} (threshold {{threshold}})",
     "repeatReprint": "Order {{order}} reprinted {{count}} times today, first at {{first}}",
-    "offHoursBeforeOpen": "{{count}} operations before opening ({{from}}–{{to}}); hours {{open}}–{{close}}",
-    "offHoursAfterClose": "{{count}} operations after closing ({{from}}–{{to}}); hours {{open}}–{{close}}",
+    "offHoursBeforeOpen": "{{count}} actions before opening ({{from}}–{{to}}); trading hours {{open}}–{{close}}",
+    "offHoursAfterClose": "{{count}} actions after closing ({{from}}–{{to}}); trading hours {{open}}–{{close}}",
     "deleteAfterTender": "Removed {{seconds}}s after payment started at {{at}}, amount {{amount}}",
-    "discountAmount": "Saving {{amount}}",
+    "discountAmount": "Discount given {{amount}}",
     "repeatReprintDay": "Reprinted {{count}} times on this device today, first at {{first}}",
     "emergencyOverride": "Under emergency override (outcome: {{outcome}})",
-    "reason": "Reason {{reason}}"
+    "reason": "Reason: {{reason}}"
   },
   "states": {
     "loading": "Loading…",
@@ -122,7 +122,7 @@
     "emptyDescription": "Try another time, store or view",
     "selectStore": "Choose a store in filters first",
     "detailNotFound": "This record does not exist",
-    "detailForbidden": "You cannot view records of this store"
+    "detailForbidden": "You don't have access to this store's records"
   },
   "list": {
     "loadingMore": "Loading more…",
@@ -139,17 +139,17 @@
     "title": "Operation detail",
     "operationTime": "Time",
     "uploadTime": "Uploaded",
-    "lag": "{{minutes}} min later",
+    "lag": "{{minutes}} min delay",
     "store": "Store",
     "device": "Device",
     "employee": "Staff",
-    "raw": "Raw detail",
+    "raw": "Raw details",
     "context": "Nearby operations",
     "contextHint": "Same device ±{{minutes}} min",
     "contextEmpty": "No other operations nearby",
     "current": "This record",
     "onlyEmployeeDay": "{{name}}'s day only",
-    "dangerOnly": "Risky operation: changes takings or cash directly; no anomaly rule matched.",
+    "dangerOnly": "Risky operation: changes takings or cash directly; no exception rule matched.",
     "pos": {
       "outcome": "Outcome",
       "reason": "Reason",
@@ -162,8 +162,8 @@
       "offline": "Offline cached login",
       "message": "Failure reason",
       "receivedTime": "Received",
-      "localTimeNote": "Times shown in this device time zone",
-      "dangerOnly": "Danger operation: directly changes the amount due, cash or POS setup; no abnormal rule hit."
+      "localTimeNote": "Times shown in this device's time zone",
+      "dangerOnly": "Risky operation: directly changes the amount due, cash or POS setup; no exception rule matched."
     }
   },
   "review": {
@@ -171,14 +171,14 @@
     "pending": "To review",
     "reviewer": "Reviewer {{name}}",
     "noteLabel": "Note (optional)",
-    "notePlaceholder": "e.g. checked CCTV, change given",
+    "notePlaceholder": "e.g. checked CCTV, normal change given",
     "normal": "Mark normal",
     "followUp": "Needs follow-up",
-    "revoke": "Revoke",
+    "revoke": "Undo",
     "by": "{{name}} · {{at}}",
     "saved": "Review saved",
-    "revoked": "Review revoked",
-    "conflict": "Someone just reviewed or changed this record; refreshed",
+    "revoked": "Review undone",
+    "conflict": "Someone just reviewed or changed this record. Refreshed.",
     "failed": "Failed to save review",
     "readOnly": "You can view the result but cannot review"
   },
@@ -202,7 +202,7 @@
   },
   "employees": {
     "sort": {
-      "abnormal": "Anomalies",
+      "abnormal": "Exceptions",
       "rate": "Risky share",
       "amount": "Takings reduced"
     },
@@ -211,12 +211,12 @@
     "total": "Operations",
     "danger": "Risky",
     "rate": "Risky share",
-    "abnormalLine": "{{count}} anomalies · {{pending}} to review",
-    "noAbnormal": "No anomalies",
+    "abnormalLine": "{{count}} exceptions · {{pending}} to review",
+    "noAbnormal": "No exceptions",
     "amountNote": "The amount is takings reduced by deletes, price changes, cart discounts and no-receipt returns. Tap a staff card to see their records.",
     "empty": "No staff operations in this range",
     "loadFailed": "Failed to load staff summary",
-    "amountNotePos": "Amount = total reduction from removals, cart clears, price changes, discounts and refunds (successful only). Tap a card to see that cashier."
+    "amountNotePos": "Amount = total reduction from removals, cart clears, price changes, discounts and refunds (successful only). Tap a card to see that cashier's records."
   },
   "posOperations": {
     "cashierLogin": "Cashier login",
@@ -236,7 +236,7 @@
     "paymentTenderRemove": "Remove tender",
     "paymentCancel": "Cancel payment",
     "saleComplete": "Complete sale",
-    "returnRefundComplete": "Complete return refund",
+    "returnRefundComplete": "Complete return & refund",
     "saleVoid": "Void sale",
     "receiptReprint": "Reprint receipt",
     "installmentRepaymentComplete": "Complete lay-by repayment",
@@ -246,12 +246,12 @@
     "linklySettlement": "Linkly settlement",
     "linklySettlementReprint": "Reprint Linkly settlement",
     "cardPaymentSupervisorResolution": "Supervisor card payment resolution",
-    "permissionOverride": "Supervisor authorization",
+    "permissionOverride": "Supervisor authorisation",
     "installmentPickupConfirm": "Lay-by pickup confirmed",
-    "catalogReset": "Catalog reset",
+    "catalogReset": "Catalogue reset",
     "testSalesDataReset": "Test sales data reset",
-    "deviceReregister": "Device reregistered",
-    "apiServerChange": "API server changed",
+    "deviceReregister": "Device moved to another store",
+    "apiServerChange": "Server address changed",
     "remoteMaintenanceInstall": "Remote maintenance install"
   },
   "outcomes": {
@@ -275,7 +275,7 @@
   },
   "dangerGroupsPos": {
     "delete": "Remove / clear",
-    "drawer": "Manual drawer",
+    "drawer": "Manual drawer open",
     "price": "Price change",
     "discount": "Discount",
     "refund": "Refund / void",
