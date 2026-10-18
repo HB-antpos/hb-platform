@@ -77,14 +77,19 @@ for (const tab of tabs) {
   }
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
-assert.equal(countQuestions('pos'), 13)
-assert.equal(countQuestions('mobile'), 8)
+assert.equal(countQuestions('pos'), 20)
+assert.equal(countQuestions('mobile'), 12)
 
 // 编号跨分组连续，过滤后保持原编号
 const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
 assert.equal(posNumbering.get('remove'), 1)
-assert.equal(posNumbering.get('voucher'), 4)
-assert.equal(posNumbering.get('return-scan'), 13)
+assert.equal(posNumbering.get('hold-recall'), 4)
+assert.equal(posNumbering.get('voucher'), 7)
+assert.equal(posNumbering.get('return-scan'), 17)
+assert.equal(posNumbering.get('app-update'), 20)
+const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
+assert.equal(mobileNumbering.get('supplier-invoices'), 8)
+assert.equal(mobileNumbering.get('app-download'), 12)
 
 // 搜索：中英按钮名都能命中，多词需全部命中，空词返回全部
 const refundHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '退款', 'zh').flatMap((group) => group.questions.map((question) => question.id))
@@ -92,6 +97,10 @@ assert.ok(refundHits.includes('refund'))
 assert.ok(refundHits.includes('no-receipt-refund'))
 const englishLabelHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'whole order', 'zh').flatMap((group) => group.questions.map((question) => question.id))
 assert.ok(englishLabelHits.includes('order-discount'))
+const holdHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, '挂单', 'zh').flatMap((group) => group.questions.map((question) => question.id))
+assert.ok(holdHits.includes('hold-recall') && holdHits.includes('held-other-till'))
+const squareHits = filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.pos, 'square', 'en').flatMap((group) => group.questions.map((question) => question.id))
+assert.deepEqual(squareHits, ['card-terminal-pairing'])
 assert.deepEqual(filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, 'zzz-no-match', 'en'), [])
 assert.equal(filterStoreHelpFaqGroups(STORE_HELP_FAQ_GROUPS.mobile, '   ', 'en'), STORE_HELP_FAQ_GROUPS.mobile)
 

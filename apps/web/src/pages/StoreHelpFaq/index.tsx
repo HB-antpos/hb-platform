@@ -68,6 +68,11 @@ function PosMap({ language }: { language: StoreHelpFaqLanguage }) {
   const actions = map.actions[language]
   return (
     <div className="store-faq-pos-map" aria-hidden="true">
+      {/* 标题栏横跨三列：界面配色、客显、中英切换都在这里 */}
+      <div className="store-faq-titlebar">
+        <span>{map.titleBar.label[language]}</span>
+        {map.titleBar.items[language].map((item) => <div key={item} className="store-faq-mini is-highlighted">{item}</div>)}
+      </div>
       <div className="store-faq-zone">
         <span className="store-faq-zone-label"><i>1</i>{map.zones[language][0]}</span>
         <div className="store-faq-mini store-faq-mini-search">{map.search[language]}</div>
