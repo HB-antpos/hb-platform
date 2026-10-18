@@ -61,7 +61,11 @@ function extractConsoleCalls(targetSource: string): string[] {
 
 assert.doesNotMatch(source, /console\.(?:log|debug|info|warn|error)/, "扫码 hook 不得输出扫描事件");
 assert.doesNotMatch(source, /prefix|firstPart|summarizeBarcodeForLog/, "扫码 hook 不得保留条码片段摘要");
-assert.match(source, /const barcode = normalizeBarcode\(data\);/, "扫码归一化步骤必须保留");
+assert.match(
+  source,
+  /const barcode = restoreCameraBarcodeData\(type, normalizeBarcode\(data\)\);/,
+  "扫码归一化（trim + 补回相机层丢掉的前导 0）步骤必须保留"
+);
 assert.match(source, /scanGateController\.tryStart/, "扫码 gate 必须保留");
 assert.match(source, /await onBarcode\(barcode\);/, "扫码回调时序必须保留");
 assert.match(source, /finally \{\s*scanGateController\.finish\(lease\);/s, "扫码 lease 必须继续在 finally 中释放");

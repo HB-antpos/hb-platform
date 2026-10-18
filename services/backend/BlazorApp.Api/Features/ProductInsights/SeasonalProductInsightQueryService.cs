@@ -1,6 +1,7 @@
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Features.StoreOrders.ProductHistory.Infrastructure;
 using BlazorApp.Api.Services.React;
+using BlazorApp.Api.Utils;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,6 +46,15 @@ public sealed class SeasonalProductInsightQueryService(
         // 扫码或输入完整条码时只返回条码精确命中的商品，不混入货号碰巧包含该串的商品。
         var codes = await FindBarcodeMatchesAsync(normalized, limit);
         var matchMode = "barcode";
+        if (codes.Count == 0)
+        {
+            // iOS 相机会把 0 开头的 EAN-13 去成 12 位；精确条码没有结果才回退前导 0 的另一种写法。
+            var barcodeVariant = BarcodeVariants.GetLeadingZeroVariant(normalized);
+            if (barcodeVariant != null)
+            {
+                codes = await FindBarcodeMatchesAsync(barcodeVariant, limit);
+            }
+        }
         if (codes.Count == 0)
         {
             matchMode = "itemNumber";

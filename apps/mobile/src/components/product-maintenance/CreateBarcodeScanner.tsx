@@ -3,6 +3,7 @@ import { Linking, StyleSheet, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Button, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
+import { restoreCameraBarcodeData } from "@/modules/scanner/camera-barcode-data";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 
 export function CreateBarcodeScanner({
@@ -43,8 +44,8 @@ export function CreateBarcodeScanner({
               ],
             }}
             onMountError={() => setFailed(true)}
-            onBarcodeScanned={({ data }) => {
-              const barcode = data.trim();
+            onBarcodeScanned={({ data, type }) => {
+              const barcode = restoreCameraBarcodeData(type, data.trim());
               // 原生相机会连续回调；同步锁保证一次会话只回填一次，不进入查询或保存流程。
               if (!barcode || consumed.current) return;
               consumed.current = true;

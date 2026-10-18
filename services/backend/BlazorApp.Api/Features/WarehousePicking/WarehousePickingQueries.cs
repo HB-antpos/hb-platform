@@ -1,3 +1,4 @@
+using BlazorApp.Api.Utils;
 using BlazorApp.Shared.Models;
 using SqlSugar;
 
@@ -523,6 +524,22 @@ internal static class WarehousePickingQueries
 
     /// <summary>扫到不在本单的码时，给界面显示“扫到的是什么”；只取第一个命中的商品，仅用于提示。</summary>
     internal static async Task<WarehousePickingCodeLookupDto?> LookupProductByCodeAsync(
+        ISqlSugarClient db,
+        string code
+    )
+    {
+        var product = await LookupProductByExactCodeAsync(db, code);
+        if (product != null)
+        {
+            return product;
+        }
+
+        // iOS 相机会把 0 开头的 EAN-13 去成 12 位：精确无结果才回退前导 0 的另一种写法。
+        var variant = BarcodeVariants.GetLeadingZeroVariant(code);
+        return variant == null ? null : await LookupProductByExactCodeAsync(db, variant);
+    }
+
+    private static async Task<WarehousePickingCodeLookupDto?> LookupProductByExactCodeAsync(
         ISqlSugarClient db,
         string code
     )

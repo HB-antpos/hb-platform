@@ -133,6 +133,34 @@ public sealed class SeasonalProductInsightQueryServiceTests : IDisposable
         Assert.False(result.Truncated);
     }
 
+    [Theory]
+    [InlineData("0810812024527", "810812024527")]
+    [InlineData("810812024527", "0810812024527")]
+    public async Task 检索_条码前导零写法不同时回退匹配(string stored, string scanned)
+    {
+        await SeedStoresAsync();
+        await SeedProductAsync("P1", "SC20458", stored, "L100");
+
+        var result = await CreateService().LookupAsync("S1", scanned, InboundRange, SalesRange);
+
+        Assert.Equal("barcode", result.MatchMode);
+        Assert.Equal("P1", Assert.Single(result.Items).ProductCode);
+    }
+
+    [Fact]
+    public async Task 检索_条码精确命中优先_不把12位与13位当作等价合并()
+    {
+        await SeedStoresAsync();
+        await SeedProductAsync("P12", "A12", "661799090520", "L100");
+        await SeedProductAsync("P13", "A13", "0661799090520", "L100");
+
+        var twelve = await CreateService().LookupAsync("S1", "661799090520", InboundRange, SalesRange);
+        var thirteen = await CreateService().LookupAsync("S1", "0661799090520", InboundRange, SalesRange);
+
+        Assert.Equal("P12", Assert.Single(twelve.Items).ProductCode);
+        Assert.Equal("P13", Assert.Single(thirteen.Items).ProductCode);
+    }
+
     [Fact]
     public async Task 检索_货号不区分大小写包含匹配且完全相等排最前并排除已删除商品()
     {
