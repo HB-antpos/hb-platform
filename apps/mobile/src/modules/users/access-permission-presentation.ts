@@ -2,6 +2,7 @@ import enResource from "@/locales/en/accessPermissions.json";
 import zhResource from "@/locales/zh/accessPermissions.json";
 import type { AppLanguage } from "@/shared/i18n/types";
 import type { AccessPermission } from "./access-management-types";
+import type { PosTerminalPermissionOption } from "./types";
 
 interface PermissionText {
   name: string;
@@ -102,6 +103,30 @@ export function localizeAccessPermission(
       : backendDescription;
 
   return { name, description };
+}
+
+/**
+ * 收银端权限选项：后端 name / description 只有中文，非中文界面按权限码取语言包里的名称与说明
+ * （与账号授权页同一份 accessPermissions.json）；中文界面保持后端原文不变。
+ */
+export function localizePosTerminalPermissionOptions(
+  options: readonly PosTerminalPermissionOption[],
+  language: AppLanguage,
+): PosTerminalPermissionOption[] {
+  if (language === "zh") return [...options];
+  return options.map((option) => {
+    const text = localizeAccessPermission(
+      {
+        name: option.code,
+        displayName: option.name,
+        description: option.description,
+        category: option.group,
+        isSystemPermission: false,
+      },
+      language,
+    );
+    return { ...option, name: text.name, description: text.description };
+  });
 }
 
 export function localizeAccessRoleName(
