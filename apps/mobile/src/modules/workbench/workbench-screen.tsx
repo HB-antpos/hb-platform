@@ -21,6 +21,7 @@ import {
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
+import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import { useAppNavigationAccess } from "@/modules/navigation/access-context";
 import { TAB_PATHS } from "@/modules/navigation/default-route";
 import { useAppNavigationStore } from "@/modules/navigation/store";
@@ -245,6 +246,7 @@ export function WorkbenchScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const currentUser = useAuthStore((state) => state.user);
   const isStoreManager = useAuthStore((state) => state.access.isStoreManager);
+  const isAdmin = useAuthStore((state) => state.access.isAdmin);
   const deviceSession = useDeviceStore((state) => state.session);
   const cartSummary = useCartStore((state) => state.cartSummary);
   const {
@@ -268,9 +270,15 @@ export function WorkbenchScreen() {
       navigationLoading || navigationErrorMessage
         ? []
         : buildWorkbenchSections(
-            withLocalWorkbenchRoutes(orderedVisibleRouteNames, { isStoreManager, isDeviceMode })
+            withLocalWorkbenchRoutes(orderedVisibleRouteNames, {
+              isStoreManager,
+              isAdmin,
+              isDeviceMode,
+              // 审核态在登录时确定，登录后工作台会重新渲染，这里直接读取即可。
+              isIosReviewSession: isIosReviewSessionActive(),
+            })
           ),
-    [isDeviceMode, isStoreManager, navigationErrorMessage, navigationLoading, orderedVisibleRouteNames]
+    [isAdmin, isDeviceMode, isStoreManager, navigationErrorMessage, navigationLoading, orderedVisibleRouteNames]
   );
   const allSectionsCollapsed = areAllWorkbenchSectionsCollapsed(
     sections,
