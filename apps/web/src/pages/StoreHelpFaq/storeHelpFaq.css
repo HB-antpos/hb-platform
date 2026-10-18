@@ -448,6 +448,29 @@
   background: var(--faq-line-soft);
 }
 
+.store-faq-titlebar {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.store-faq-titlebar > span {
+  margin-right: auto;
+  color: var(--faq-ink-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.store-faq-titlebar .store-faq-mini {
+  min-height: 22px;
+  padding: 1px 10px;
+}
+
 .store-faq-zone {
   position: relative;
   display: flex;

@@ -104,16 +104,21 @@ export const STORE_HELP_FAQ_MAPS = {
       en: ['Special Items', 'Refund', 'Hold Order', 'Recall Order', 'Open Drawer', 'Last Receipt', 'Log Out', 'Daily Close', 'Card recovery', 'Attendance QR', 'Settings', 'Exit'],
       zh: ['特殊商品', '退款', '挂单', '取单', '开钱箱', '上张小票', '登出', '日结', '卡交易异常中心', '打卡', '设置', '退出软件'],
     },
-    // 在 tiles 里需要红框强调的下标：退款、取单、卡交易异常中心、设置
-    highlightedTiles: [1, 3, 8, 10],
+    // 在 tiles 里需要红框强调的下标：退款、挂单、取单、卡交易异常中心、设置
+    highlightedTiles: [1, 2, 3, 8, 10],
+    // 窗口标题栏上的图标按钮：界面配色、客显、中英切换
+    titleBar: {
+      label: { en: 'Title bar', zh: '标题栏' },
+      items: { en: ['Color theme', 'Customer display window', '中 / EN'], zh: ['界面配色', '客显窗口', '中 / EN'] },
+    },
   },
   mobile: {
     home: { en: 'Home', zh: '工作台' },
     groups: [
-      { title: { en: 'Product purchasing', zh: '商品进货' }, tiles: [{ en: 'HB new arrivals', zh: 'HB新品', hl: true }, { en: 'Local supplier invoices', zh: '澳洲进货' }, { en: 'China purchasing', zh: '中国采购' }] },
-      { title: { en: 'Product sales', zh: '商品销售' }, tiles: [{ en: 'Product activity', zh: '商品进销查询', hl: true }, { en: 'Sales Records', zh: '销售订单', hl: true }, { en: 'Lay-bys', zh: '分期订单' }] },
+      { title: { en: 'Product purchasing', zh: '商品进货' }, tiles: [{ en: 'HB new arrivals', zh: 'HB新品', hl: true }, { en: 'Local supplier invoices', zh: '供应商发票', hl: true }, { en: 'HB Orders', zh: 'HB订单', hl: true }] },
+      { title: { en: 'Product sales', zh: '商品销售' }, tiles: [{ en: 'Product activity', zh: '商品进销查询', hl: true }, { en: 'Sales Records', zh: '销售订单', hl: true }, { en: 'Prices & labels', zh: '价格和标签', hl: true }, { en: 'Seasonal cards', zh: '节日卡', hl: true }] },
       { title: { en: 'Operations & reports', zh: '运营与报表' }, tiles: [{ en: 'Reports', zh: '报表中心', hl: true }, { en: 'Daily closes', zh: '日结记录', hl: true }, { en: 'Employee operation logs', zh: '员工操作日志', hl: true }] },
-      { title: { en: 'Staff & admin', zh: '人员与管理' }, tiles: [{ en: 'Staff', zh: '人员管理', hl: true }, { en: 'Install app', zh: 'App 安装', hl: true }, { en: 'Attendance', zh: '考勤' }] },
+      { title: { en: 'Staff & admin', zh: '人员与管理' }, tiles: [{ en: 'Staff', zh: '人员管理', hl: true }, { en: 'Install app', zh: 'App 安装', hl: true }, { en: 'Help', zh: '使用帮助', hl: true }] },
     ],
     bottomTabs: { en: ['Home', 'Scan', 'Clock in', 'Reports', 'Me'], zh: ['工作台', '扫码查询', '打卡', '报表', '我的'] },
     legend: {
@@ -195,6 +200,96 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
           en: ['Whole Order only covers the next discount, then switches off. Turn it on again for another one.'],
         },
         permissions: ['Sales.OrderManualDiscount', 'Sales.OrderQuickDiscount…'],
+      },
+    ],
+  },
+  {
+    id: 'held',
+    title: { en: 'Held sales & orders', zh: '挂单与订单' },
+    questions: [
+      {
+        id: 'hold-recall',
+        title: { zh: '如何挂单和取回挂单？', en: 'How do I hold a sale and recall it?' },
+        where: { zh: '区域 ③ 功能砖 [k:Hold Order|挂单] / [k:Recall Order|取单]', en: 'Area ③ tiles [k:Hold Order|挂单] / [k:Recall Order|取单]' },
+        steps: {
+          zh: [
+            '购物车里有商品时点 [k:Hold Order|挂单]，订单立即保存并清空购物车（不用填名称，状态栏会显示挂单编号）。',
+            '要接着结账时点 [k:Recall Order|取单]，默认打开 [tab:Held|共享挂单] 标签下 [tab:Local|本机] 今天的挂单。',
+            '在要继续的那一行点取回图标 [k:Recall Suspended|取回挂单]，商品回到购物车。',
+            '照常付款即可。',
+          ],
+          en: [
+            'With items in the cart, tap [k:Hold Order|挂单]. The sale is saved and the cart is cleared (no name needed; the status bar shows the held number).',
+            'To finish it, tap [k:Recall Order|取单]. It opens [tab:Held|共享挂单] → [tab:Local|本机] for today.',
+            'Tap the recall icon [k:Recall Suspended|取回挂单] on that line. The items return to the cart.',
+            'Take payment as usual.',
+          ],
+        },
+        tips: {
+          zh: ['「取单」右上角的数字是今天还挂着的单数。', '不要的挂单可在该行「更多操作」里点 [k:Delete|删除]。'],
+          en: ['The number on Recall Order is how many sales are still held today.', 'To discard a held sale, use [k:Delete|删除] in that line’s more-actions menu.'],
+        },
+        permissions: ['Sales.HoldOrder', 'Sales.RecallOrder', 'History.Recall'],
+      },
+      {
+        id: 'held-other-till',
+        title: { zh: '商品太多，如何挂单后到另一台收银机付款？', en: 'How do I hold a big sale and take payment on another till?' },
+        where: { zh: '[k:Recall Order|取单] → [tab:Held|共享挂单]', en: '[k:Recall Order|取单] → [tab:Held|共享挂单]' },
+        steps: {
+          zh: [
+            '§在录商品的收银机（A 机）',
+            '点 [k:Hold Order|挂单]。',
+            '点 [k:Recall Order|取单] → [tab:Held|共享挂单] → [tab:Local|本机]，在刚挂的那一行「更多操作」里点 [k:Share|共享]，等状态变成 [tab:Shared|已共享]。',
+            '§在付款的收银机（B 机）',
+            '点 [k:Recall Order|取单] → [tab:Held|共享挂单] → [tab:Other|非本机]。',
+            '在这一行点 [k:Recall Suspended|取回挂单]，购物车恢复后照常付款。',
+          ],
+          en: [
+            '§On the till where the items were scanned (till A)',
+            'Tap [k:Hold Order|挂单].',
+            'Tap [k:Recall Order|取单] → [tab:Held|共享挂单] → [tab:Local|本机]. In that line’s more-actions menu, tap [k:Share|共享] and wait until it shows [tab:Shared|已共享].',
+            '§On the till that takes payment (till B)',
+            'Tap [k:Recall Order|取单] → [tab:Held|共享挂单] → [tab:Other|非本机].',
+            'Tap [k:Recall Suspended|取回挂单] on that line, then take payment as usual.',
+          ],
+        },
+        tips: {
+          zh: [
+            '挂单默认只保存在本机，必须先点「共享」，其他收银机才看得到。',
+            '只能在同一家分店的收银机之间共享，两台都要联网。',
+            '已被其他收银机取走的挂单会显示「已被其他终端取单」。',
+          ],
+          en: [
+            'Held sales stay on the till by default. Share it first, or other tills cannot see it.',
+            'Sharing only works between tills in the same store, and both must be online.',
+            'A held sale already recalled on another till is marked as taken by another terminal.',
+          ],
+        },
+        permissions: ['Sales.HoldOrder', 'History.Recall'],
+      },
+      {
+        id: 'order-history',
+        title: { zh: '如何查找历史订单、补打小票？', en: 'How do I find a past order or reprint a receipt?' },
+        where: { zh: '[k:Recall Order|取单] → [tab:Local|本地] / [tab:Online|在线]', en: '[k:Recall Order|取单] → [tab:Local|本地] / [tab:Online|在线]' },
+        steps: {
+          zh: [
+            '点 [k:Recall Order|取单]，切到 [tab:Local|本地] 或 [tab:Online|在线] 标签。',
+            '选日期：[k:Today|今天]、[k:Yesterday|昨天] 或 [k:Last 7 days|近 7 天]。',
+            '在 [d:ORDER LOOKUP|订单查询] 搜索框输入订单号、商品货号或条码；也可以直接扫小票或商品条码，会自动搜索。',
+            '在结果行点 [k:View receipt|查看小票] 或 [k:Order details|订单明细]；要补打，在小票预览里点 [k:Reprint|重打]。',
+          ],
+          en: [
+            'Tap [k:Recall Order|取单] and open the [tab:Local|本地] or [tab:Online|在线] tab.',
+            'Pick a date: [k:Today|今天], [k:Yesterday|昨天] or [k:Last 7 days|近 7 天].',
+            'In [d:ORDER LOOKUP|订单查询], type the order number, item number or barcode — or just scan the receipt or item barcode to search.',
+            'On the result, tap [k:View receipt|查看小票] or [k:Order details|订单明细]. To reprint, tap [k:Reprint|重打] in the receipt preview.',
+          ],
+        },
+        tips: {
+          zh: ['历史订单页不能直接退款，退款请用功能砖 [k:Refund|退款]（见「有小票，如何退款？」）。'],
+          en: ['You cannot refund from order history. Use the [k:Refund|退款] tile instead (see “How do I refund with a receipt?”).'],
+        },
+        permissions: ['Sales.RecallOrder'],
       },
     ],
   },
@@ -395,6 +490,28 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
         permissions: ['Stores.Edit', 'Settings.ReceiptPrinter'],
       },
       {
+        id: 'bank-receipt',
+        title: { zh: '是否打印银行小票，在哪里设置？', en: 'How do I turn the bank (EFTPOS) receipt on or off?' },
+        where: { zh: '[k:Settings|设置] → [k:Receipt printer|小票打印机]', en: '[k:Settings|设置] → [k:Receipt printer|小票打印机]' },
+        steps: {
+          zh: [
+            '点 [k:Settings|设置] → [k:Receipt printer|小票打印机] → [tab:Printer & options|打印机与选项]。',
+            '在 [d:Print options|打印选项] 里打开或关闭 [t:Print bank receipt on customer receipt|客人小票附带银行收据]，改动自动保存。',
+            '关闭后，客人小票上只打印卡类型、卡号后四位和金额。',
+          ],
+          en: [
+            'Tap [k:Settings|设置] → [k:Receipt printer|小票打印机] → [tab:Printer & options|打印机与选项].',
+            'Under [d:Print options|打印选项], turn [t:Print bank receipt on customer receipt|客人小票附带银行收据] on or off. It saves automatically.',
+            'When off, the customer receipt shows only the card type, last four digits and amount.',
+          ],
+        },
+        tips: {
+          zh: ['默认开启，只对这台收银机生效，不随总部下发。'],
+          en: ['On by default and set per till; head office publishing does not change it.'],
+        },
+        permissions: ['Settings.ReceiptPrinter'],
+      },
+      {
         id: 'manual-card',
         title: { zh: '如何切换到手动刷卡（独立刷卡机）？', en: 'How do I switch to manual card payments (standalone EFTPOS)?' },
         where: { zh: '[k:Settings|设置] → [k:Payment terminal|支付终端]', en: '[k:Settings|设置] → [k:Payment terminal|支付终端]' },
@@ -461,6 +578,109 @@ const POS_GROUPS: StoreHelpFaqGroup[] = [
           en: ['Off by default and set per till.'],
         },
         permissions: ['Settings.ReceiptPrinter', 'Returns.View'],
+      },
+    ],
+  },
+  {
+    id: 'devices',
+    title: { en: 'Devices & updates', zh: '设备与升级' },
+    questions: [
+      {
+        id: 'card-terminal-pairing',
+        title: { zh: '如何配对 ANZ-Linkly 或 Square 刷卡机？', en: 'How do I pair an ANZ-Linkly or Square card terminal?' },
+        where: { zh: '[k:Settings|设置] → [k:Payment terminal|支付终端]', en: '[k:Settings|设置] → [k:Payment terminal|支付终端]' },
+        steps: {
+          zh: [
+            '§ANZ-Linkly 刷卡机',
+            '点 [k:Settings|设置] → [k:Payment terminal|支付终端]，找到 [d:ANZ Linkly payment terminal|ANZ Linkly 付款终端]。',
+            '在 [d:Connection mode|连接模式] 选一种：[k:Local IP / Port|本地 IP / 端口]、[k:Cloud direct sync|Cloud 直连同步] 或 [k:Cloud backend async|Cloud 后端异步]；刷卡机上怎么操作可点 [k:View setup steps|查看设置说明]。',
+            '本地 IP：点 [k:Use recommended|使用推荐地址] 或手填 IP 和端口 → [k:Test Linkly|测试 Linkly] → [k:Log on to bank|登录银行网络]。',
+            'Cloud 直连：填 [i:Cloud API Username|Cloud API 账号] 和 [i:Cloud API Password|Cloud API 密码] → [k:Save Test Account|保存测试账号] → 填 [i:Pair Code|配对码] → [k:Pair Cloud|配对 Cloud]。',
+            'Cloud 后端异步：在 [d:Lines|线路管理] 对线路点 [k:Re-pair|重新配对]，输入刷卡机上的 6 位配对码 → [k:Next|下一步] → [k:Confirm pairing|确认配对] → [k:Test connection|检测连接] → [k:Use this line|使用此线路]。',
+            '最后点 [p:Enable Linkly|启用 Linkly]。',
+            '§Square 刷卡机',
+            '在 [d:Square payment terminal|Square 付款终端] 点 [k:Load Locations|加载门店位置] 选门店位置，再点 [k:Load Devices|加载设备]。',
+            '在 [d:Device Codes|设备码管理] 填 [i:New Device Code Name|新设备码名称] → [k:Create Code|创建设备码]，把设备码输入到 Square 刷卡机上登录。',
+            '点 [k:Refresh Status|刷新状态]，在 [i:Device|设备] 下拉框选中这台刷卡机 → [p:Save Square|保存 Square]。',
+          ],
+          en: [
+            '§ANZ-Linkly terminal',
+            'Tap [k:Settings|设置] → [k:Payment terminal|支付终端] and find [d:ANZ Linkly payment terminal|ANZ Linkly 付款终端].',
+            'Under [d:Connection mode|连接模式], choose [k:Local IP / Port|本地 IP / 端口], [k:Cloud direct sync|Cloud 直连同步] or [k:Cloud backend async|Cloud 后端异步]. For the terminal-side steps, tap [k:View setup steps|查看设置说明].',
+            'Local IP: tap [k:Use recommended|使用推荐地址] or enter the IP and port → [k:Test Linkly|测试 Linkly] → [k:Log on to bank|登录银行网络].',
+            'Cloud direct: enter [i:Cloud API Username|Cloud API 账号] and [i:Cloud API Password|Cloud API 密码] → [k:Save Test Account|保存测试账号] → enter the [i:Pair Code|配对码] → [k:Pair Cloud|配对 Cloud].',
+            'Cloud backend: under [d:Lines|线路管理], tap [k:Re-pair|重新配对] on a line, enter the 6-digit code from the terminal → [k:Next|下一步] → [k:Confirm pairing|确认配对] → [k:Test connection|检测连接] → [k:Use this line|使用此线路].',
+            'Finally tap [p:Enable Linkly|启用 Linkly].',
+            '§Square terminal',
+            'Under [d:Square payment terminal|Square 付款终端], tap [k:Load Locations|加载门店位置] and pick the location, then [k:Load Devices|加载设备].',
+            'Under [d:Device Codes|设备码管理], enter a [i:New Device Code Name|新设备码名称] → [k:Create Code|创建设备码], then sign in on the Square terminal with that code.',
+            'Tap [k:Refresh Status|刷新状态], choose the terminal in [i:Device|设备] → [p:Save Square|保存 Square].',
+          ],
+        },
+        tips: {
+          zh: ['Cloud 后端异步模式的账号密码由总部在 Web 后台统一管理，门店不用填。', 'Square 设备码只支持正式（Production）环境。'],
+          en: ['In Cloud backend mode, head office manages the account in Web admin; stores do not enter it.', 'Square device codes only work in the Production environment.'],
+        },
+        permissions: ['Settings.PaymentTerminal'],
+      },
+      {
+        id: 'customer-display',
+        title: { zh: '客显（顾客屏）怎么开启、调整大小、主副屏对调？', en: 'How do I open, resize or swap the customer display?' },
+        where: { zh: '窗口顶部标题栏 · 显示器图标 [k:Customer display window|客显窗口]', en: 'Window title bar · monitor icon [k:Customer display window|客显窗口]' },
+        steps: {
+          zh: [
+            '先接好第二块屏幕（顾客屏）。',
+            '点主窗口标题栏的显示器图标 [k:Customer display window|客显窗口]：每点一次按「关闭 → 普通窗口 → 全屏 → 关闭」循环，下次开机会记住上次的模式。',
+            '调整大小：在普通窗口模式下拖动客显窗口边缘，内容会等比缩放，尺寸会被记住；双击客显窗口的标题栏可切换全屏。',
+            '主副屏对调：点客显窗口标题栏的 ⇄ 图标 [k:Swap screens with the customer display|主窗口与客显互换屏幕]（全屏时在右上角）。',
+          ],
+          en: [
+            'Connect the second (customer) screen first.',
+            'Click the monitor icon [k:Customer display window|客显窗口] in the main title bar. Each click cycles off → window → full screen → off, and the last mode is remembered.',
+            'Resize: in window mode, drag the customer display’s edges. Content scales to fit and the size is remembered. Double-click its title bar for full screen.',
+            'Swap screens: click the ⇄ icon [k:Swap screens with the customer display|主窗口与客显互换屏幕] in the customer display title bar (top right in full screen).',
+          ],
+        },
+        tips: {
+          zh: ['没接第二块屏时会提示未检测到第二个屏幕。', '没有单独的字号设置，大小靠拖动窗口调整；设置页里也没有客显选项。'],
+          en: ['Without a second screen you will be told none was detected.', 'There is no font-size setting — resize the window instead. Settings has no customer display section.'],
+        },
+        permissions: ['CustomerDisplay.Manage'],
+      },
+      {
+        id: 'app-update',
+        title: { zh: '收银端如何升级到新版本？', en: 'How do I update the POS to a new version?' },
+        where: { zh: '右下角状态栏 · [d:Update ready|更新已准备好]', en: 'Bottom-right status bar · [d:Update ready|更新已准备好]' },
+        steps: {
+          zh: [
+            '收银端会在启动时和运行中（约每小时）自动检查新版本；下载完成后右下角出现 [d:Update ready|更新已准备好] 或 [d:Update required|必须更新]。',
+            '先结束当前交易：清空购物车，确认没有正在刷卡或已收款未完成的订单。',
+            '点 [p:Install update|安装更新]；可选更新会弹出 [d:Software update|软件更新] 窗口，可看 [d:What\'s new|更新内容]，点 [p:Restart and install|重启并安装]（或 [k:Install later|稍后安装]）。',
+            '收银端自动关闭并安装，完成后自动重新打开，期间不要关机或断电；Windows 弹出授权窗口时选「是」。',
+            '想手动检查：[k:Settings|设置] → [k:Data maintenance|数据维护] → [d:Software update|软件更新] → [k:Check update|检查更新]。',
+          ],
+          en: [
+            'The POS checks for updates at startup and about hourly. When a download is ready, [d:Update ready|更新已准备好] or [d:Update required|必须更新] appears at the bottom right.',
+            'Finish the current sale first: clear the cart and make sure no card payment is in progress.',
+            'Tap [p:Install update|安装更新]. For an optional update, the [d:Software update|软件更新] window shows [d:What\'s new|更新内容]; tap [p:Restart and install|重启并安装] (or [k:Install later|稍后安装]).',
+            'The POS closes, installs and reopens by itself. Do not switch off the PC; if Windows asks for permission, choose Yes.',
+            'To check manually: [k:Settings|设置] → [k:Data maintenance|数据维护] → [d:Software update|软件更新] → [k:Check update|检查更新].',
+          ],
+        },
+        tips: {
+          zh: [
+            '当前版本号显示在右下角状态栏 [d:Current version|当前版本]。',
+            '晚上收银机空闲时，也会自动安装已下载的更新。',
+            '更新失败时版本不变、收银数据不受影响，可在更新窗口里点「重试更新」。',
+            '推送哪个版本、哪些分店或机器先升级，由总部在 Web 后台的版本发布中心控制。',
+          ],
+          en: [
+            'The current version is shown at the bottom right as [d:Current version|当前版本].',
+            'Downloaded updates also install automatically when the till is idle overnight.',
+            'If an update fails, the version and sales data stay as they were; use “Retry update” in the update window.',
+            'Head office controls which version goes to which stores or tills in the Web admin Release Center.',
+          ],
+        },
       },
     ],
   },
@@ -647,7 +867,7 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
   },
   {
     id: 'products',
-    title: { en: 'Products', zh: '商品' },
+    title: { en: 'Products & ordering', zh: '商品与订货' },
     questions: [
       {
         id: 'new-arrivals',
@@ -672,6 +892,128 @@ const MOBILE_GROUPS: StoreHelpFaqGroup[] = [
           en: ['Sorted by warehouse date: actual date once arrived, estimated date while in transit.'],
         },
         permissions: ['Container.MobileNewProductsView'],
+      },
+      {
+        id: 'supplier-invoices',
+        title: { zh: '如何查看澳洲供应商发票，并打印商品标签？', en: 'How do I view Australian supplier invoices and print labels?' },
+        where: { zh: '工作台 · 商品进货 · [k:Local supplier invoices|供应商发票]', en: 'Home · Product purchasing · [k:Local supplier invoices|供应商发票]' },
+        steps: {
+          zh: [
+            '工作台「商品进货」分组点 [k:Local supplier invoices|供应商发票]。',
+            '用 [i:Search invoice no.|搜索发票号] 查找，或按入库状态 [tab:Not received|未入库]、[tab:Partially received|部分入库]、[tab:Received|已入库] 筛选；分店、供应商、日期在 [k:More filters|更多筛选]。',
+            '点一张发票进入 [d:Invoice details|发票明细]，查看每行的上次进货价、进货价、数量和小计；可用 [tab:Price up|涨价]、[tab:Price down|减价] 只看价格变动的商品。',
+            '§打印商品标签',
+            '在明细行点 [k:Edit product|商品编辑]，会跳到商品页并带出这个商品。',
+            '在商品页底部点 [k:Regular|普通]、[k:Discount|折扣] 或 [k:Large|大标签] 打印标签。',
+            '改份数：点打印机状态打开 [d:Print settings|打印设置]，调 [i:Print quantity|打印数量]；连打印机：[k:Printer settings|打印机设置] → [k:Scan for printers|扫描打印机] → [k:Connect|连接]。',
+          ],
+          en: [
+            'In the Product purchasing group on Home, tap [k:Local supplier invoices|供应商发票].',
+            'Search with [i:Search invoice no.|搜索发票号], or filter by [tab:Not received|未入库], [tab:Partially received|部分入库] or [tab:Received|已入库]. Store, supplier and dates are under [k:More filters|更多筛选].',
+            'Tap an invoice to open [d:Invoice details|发票明细]: last cost, cost, quantity and subtotal per line. Use [tab:Price up|涨价] or [tab:Price down|减价] to see only price changes.',
+            '§Print product labels',
+            'Tap [k:Edit product|商品编辑] on a line. The product page opens with that item.',
+            'At the bottom, tap [k:Regular|普通], [k:Discount|折扣] or [k:Large|大标签] to print.',
+            'To change copies, tap the printer status to open [d:Print settings|打印设置] and set [i:Print quantity|打印数量]. To connect a printer: [k:Printer settings|打印机设置] → [k:Scan for printers|扫描打印机] → [k:Connect|连接].',
+          ],
+        },
+        tips: {
+          zh: ['发票页本身不能直接打标签，要通过「商品编辑」跳到商品页打印。'],
+          en: ['Labels cannot be printed from the invoice itself — go through Edit product.'],
+        },
+        permissions: ['LocalPurchase.MobileView', 'StoreProducts.View'],
+      },
+      {
+        id: 'hb-orders',
+        title: { zh: '如何查看仓库订单（HB订单）？', en: 'How do I view warehouse orders (HB Orders)?' },
+        where: { zh: '工作台 · 商品进货 · [k:HB Orders|HB订单]', en: 'Home · Product purchasing · [k:HB Orders|HB订单]' },
+        steps: {
+          zh: [
+            '工作台「商品进货」分组点 [k:HB Orders|HB订单]，选择分店，默认显示近 6 个月的订单。',
+            '按 [k:Status|状态] 筛选：[tab:In cart|购物车]、[tab:Submitted|已提交]、[tab:Picking|配货中]、[tab:Completed|已完成]。',
+            '点 [k:View details|查看明细]，查看每个商品的订货数、发货数、货位、金额和体积。',
+            '需要标签时在明细行点 [k:Print label|打印标签]（每次打一张普通标签）。',
+          ],
+          en: [
+            'In the Product purchasing group on Home, tap [k:HB Orders|HB订单] and choose a store. The last 6 months show by default.',
+            'Filter by [k:Status|状态]: [tab:In cart|购物车], [tab:Submitted|已提交], [tab:Picking|配货中] or [tab:Completed|已完成].',
+            'Tap [k:View details|查看明细] to see ordered and shipped quantities, location, amount and volume per item.',
+            'To print a label, tap [k:Print label|打印标签] on a line (one regular label each time).',
+          ],
+        },
+        tips: {
+          zh: ['仓库拣货员用的是「仓库与采购」分组的 [k:Order picking|订单拣货]：扫员工码 → 选订单 → [k:Start|开始拣货] → [k:Finish picking|完成拣货] → [k:Submit|确认完成]。'],
+          en: ['Warehouse pickers use [k:Order picking|订单拣货] in Warehouse & purchasing: scan staff code → choose order → [k:Start|开始拣货] → [k:Finish picking|完成拣货] → [k:Submit|确认完成].'],
+        },
+        permissions: ['Orders.View'],
+      },
+    ],
+  },
+  {
+    id: 'store-tasks',
+    title: { en: 'Store tasks', zh: '门店任务' },
+    questions: [
+      {
+        id: 'price-updates',
+        title: { zh: '如何处理仓库商品价格更新提醒？', en: 'How do I handle price update reminders?' },
+        where: { zh: '工作台 · 商品销售 · [k:Prices & labels|价格和标签]', en: 'Home · Product sales · [k:Prices & labels|价格和标签]' },
+        steps: {
+          zh: [
+            '提醒来自工作台 [k:Prices & labels|价格和标签] 磁贴上的角标，以及每小时一次的提醒弹窗（点 [k:Go to tasks|去处理] 直接进入，或 [k:Later|稍后]）。',
+            '在 [tab:To do|未完成] 标签下，可筛 [tab:Price change|需改价]、[tab:Relabel|待换标签]、[tab:Overdue|超期]。',
+            '需改价的任务：点 [k:Update only|仅更新] 或 [p:Update & print|更新并打印]；不改价可在 [k:More|更多] 里选 [k:Keep store price|保持本店价]。',
+            '待换标签的任务：换好后点 [k:Mark replaced|标记已换]，或点 [k:Print label|打印标签] 打新价签。',
+            '任务多时点 [k:Select|批量处理]，全选后一次执行。',
+          ],
+          en: [
+            'Reminders come from the badge on the [k:Prices & labels|价格和标签] tile and an hourly pop-up ([k:Go to tasks|去处理] opens the list; [k:Later|稍后] snoozes).',
+            'On [tab:To do|未完成], filter by [tab:Price change|需改价], [tab:Relabel|待换标签] or [tab:Overdue|超期].',
+            'Price change: tap [k:Update only|仅更新] or [p:Update & print|更新并打印]. To keep your price, use [k:More|更多] → [k:Keep store price|保持本店价].',
+            'Relabel: after swapping the label tap [k:Mark replaced|标记已换], or [k:Print label|打印标签] for a new one.',
+            'For many tasks, tap [k:Select|批量处理], select all and apply once.',
+          ],
+        },
+        tips: {
+          zh: [
+            '任务超过 7 天未处理会锁住店长的报表中心，处理完自动解锁。',
+            '有撤销权限的账号可在 [k:More|更多] → [k:Cancel pending (all stores)|撤销未完成（所有分店）] → [k:Cancel tasks|确认撤销]；撤销只取消提醒、不改价格，且无法恢复。',
+            '管理员账号不会弹每小时提醒。',
+          ],
+          en: [
+            'Tasks overdue by 7 days lock the store manager’s Reports until they are done.',
+            'Accounts with cancel access can use [k:More|更多] → [k:Cancel pending (all stores)|撤销未完成（所有分店）] → [k:Cancel tasks|确认撤销]. This only cancels reminders, changes no prices and cannot be undone.',
+            'Admin accounts do not get the hourly pop-up.',
+          ],
+        },
+        permissions: ['StoreProducts.PriceUpdates'],
+      },
+      {
+        id: 'seasonal-cards',
+        title: { zh: '如何统计并提交节日卡片库存？', en: 'How do I count and submit seasonal card stock?' },
+        where: { zh: '工作台 · 商品销售 · [k:Seasonal cards|节日卡]', en: 'Home · Product sales · [k:Seasonal cards|节日卡]' },
+        steps: {
+          zh: [
+            '工作台「商品销售」分组点 [k:Seasonal cards|节日卡]。',
+            '在 [tab:Submit|填报] 标签先选分店，再选 [i:Supplier|供应商]（必选）。',
+            '按价格类型填剩余数量，空着按 0 计；[i:Other price|其他价格] 要填实际单价。',
+            '点 [p:Submit|提交填报]。',
+            '填错了可以再进来改：会带出上次的数量，改完点 [p:Overwrite|覆盖提交] → [k:Overwrite|确认覆盖]。',
+            '在 [tab:History|历史记录] 按年度和节日查看，可切换 [tab:List|列表] 或 [tab:Table|表格]。',
+          ],
+          en: [
+            'In the Product sales group on Home, tap [k:Seasonal cards|节日卡].',
+            'On [tab:Submit|填报], choose the store, then a [i:Supplier|供应商] (required).',
+            'Enter the remaining quantity for each price type; blanks count as 0. [i:Other price|其他价格] needs the actual unit price.',
+            'Tap [p:Submit|提交填报].',
+            'To correct it, come back: last quantities are filled in. Change them, then [p:Overwrite|覆盖提交] → [k:Overwrite|确认覆盖].',
+            'Use [tab:History|历史记录] to view by year and holiday, as a [tab:List|列表] or [tab:Table|表格].',
+          ],
+        },
+        tips: {
+          zh: ['每个节日从当天起 29 天内可以填报，过了只能查看历史。', '覆盖提交后旧记录仍留在历史里，标为「已被更新」。'],
+          en: ['Submissions are open for 29 days from each holiday; after that, history only.', 'Overwritten submissions stay in history, marked as updated.'],
+        },
+        permissions: ['SeasonalCards.Remaining.SubmitManagedStore'],
       },
     ],
   },
