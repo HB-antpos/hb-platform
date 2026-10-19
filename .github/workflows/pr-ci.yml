@@ -118,12 +118,14 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            apps/web/package-lock.json
-            apps/mobile/package-lock.json
-            apps/supplier-order-extension/package-lock.json
+          # 每个组件按自己实际安装的锁文件分 key，与 quality-baseline.yml 同一公式以复用 main 上已有缓存。
+          # 曾共用 4 个锁文件的同一 key：antpos-web 不装依赖、最先结束，把空的 ~/.npm（854 B）抢先存进该 key，
+          # 之后各组件都命中空缓存且不再覆盖，npm ci 每次全量下载。antpos-web 无依赖，不启用缓存。
+          cache: ${{ matrix.component != 'antpos-web' && 'npm' || '' }}
+          cache-dependency-path: >-
+            ${{ startsWith(matrix.component, 'pos-') && 'package-lock.json'
+            || matrix.component == 'supplier-extension' && 'apps/supplier-order-extension/package-lock.json'
+            || format('apps/{0}/package-lock.json', matrix.component) }}
       - name: 记录组件质量计时起点
         if: contains(fromJSON(needs.plan.outputs.quality_lanes), matrix.component)
         run: >-
