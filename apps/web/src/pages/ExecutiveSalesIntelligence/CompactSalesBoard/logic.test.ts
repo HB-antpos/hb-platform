@@ -33,6 +33,7 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
 
 const base: BoardFilterState = {
   dateRange: { startDate: '2026-09-19', endDate: '2026-09-19' },
+  purchaseDateRange: { startDate: '2026-09-19', endDate: '2026-09-19' },
   scopeKey: 'ALL',
   branch: null,
   supplier: null,
@@ -68,6 +69,16 @@ assert(sortKeys.products !== initialKeys.products, '排序、翻页、搜索应�
 assertEqual(buildPanelKeys({ ...base, keyword: ' canvas ' }).products, buildPanelKeys({ ...base, keyword: 'canvas' }).products, '关键词首尾空白不应产生新查询')
 assert(buildPanelKeys({ ...base, scopeKey: '1012|1005' }).stores !== initialKeys.stores, '授权范围变化必须让所有栏过期')
 assert(buildRequestKey({ ...base, product }) !== buildRequestKey(base), '客户端缓存键必须包含全部请求参数')
+// 进货区间只让分店栏过期；客户端缓存键同样要区分进货区间。
+const purchaseKeys = buildPanelKeys({ ...base, purchaseDateRange: { startDate: '2026-09-01', endDate: '2026-09-19' } })
+assert(purchaseKeys.stores !== initialKeys.stores, '改进货区间必须让分店栏过期')
+assertEqual(purchaseKeys.suppliers, initialKeys.suppliers, '改进货区间不应让供应商栏过期')
+assertEqual(purchaseKeys.products, initialKeys.products, '改进货区间不应让商品栏过期')
+assertEqual(purchaseKeys.summary, initialKeys.summary, '改进货区间不应让统计条过期')
+assert(
+  buildRequestKey({ ...base, purchaseDateRange: { startDate: '2026-09-01', endDate: '2026-09-19' } }) !== buildRequestKey(base),
+  '客户端缓存键必须包含进货区间',
+)
 
 // 选中与取消
 assertEqual(toggleSelection(null, branch), branch, '首次点击应选中')

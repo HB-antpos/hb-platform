@@ -1305,6 +1305,73 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
     }
 
     [SalesDetailReportSqlServerFact]
+    public async Task 仓库销售看板分店进货量_数据库端按仓库订单聚合_进货区间独立且随供应商商品联动()
+    {
+        await using var fixture = await SalesDetailSqlServerFixture.CreateAsync();
+        var day = new DateTime(2026, 8, 1);
+        await fixture.SeedFreshStateAsync(day);
+        await fixture.SeedStoreAsync("B1", "Branch One");
+        await fixture.SeedStoreAsync("B2", "Branch Two");
+        await fixture.SeedStoreAsync("B3", "Branch Three");
+        await fixture.SeedChinaSupplierAsync("C1", "Supplier One");
+        await fixture.SeedChinaSupplierAsync("C2", "Supplier Two");
+        await fixture.SeedMappingAsync("P1", "C1");
+        await fixture.SeedMappingAsync("P2", "C2");
+        await fixture.SeedFactAsync(day, "B1", "200", "P1", 4, 40m);
+        await fixture.SeedFactAsync(day, "B2", "200", "P2", 3, 30m);
+
+        // 分店代码带尾随空格、商品编码带前导空格的订单也要对齐。
+        await fixture.SeedWarehouseOrderAsync("O-OUT", "B1 ", 2, day, day.AddDays(-3), day.AddDays(-3));
+        await fixture.SeedWarehouseOrderLineAsync("O-OUT", "P1", 10m);
+        await fixture.SeedWarehouseOrderLineAsync("O-OUT", " P2", 5m);
+        await fixture.SeedWarehouseOrderLineAsync("O-OUT", "P-UNMAPPED", 100m);
+        await fixture.SeedWarehouseOrderLineAsync("O-OUT", "P1", 50m, isDeleted: true);
+        await fixture.SeedWarehouseOrderAsync("O-DRAFT", "B1", 0, null, day, day);
+        await fixture.SeedWarehouseOrderLineAsync("O-DRAFT", "P1", 7m);
+        await fixture.SeedWarehouseOrderAsync("O-NOT-OUT", "B3", 3, null, day, day.AddDays(-1));
+        await fixture.SeedWarehouseOrderLineAsync("O-NOT-OUT", "P1", 6m);
+        // 出库日、订单日都没有时按创建时间。
+        await fixture.SeedWarehouseOrderAsync("O-CREATED", "B3", null, null, null, day.AddHours(9));
+        await fixture.SeedWarehouseOrderLineAsync("O-CREATED", "P2", 2m);
+        await fixture.SeedWarehouseOrderAsync("O-JULY", "B2", 2, new DateTime(2026, 7, 20), new DateTime(2026, 7, 18), new DateTime(2026, 7, 18));
+        await fixture.SeedWarehouseOrderLineAsync("O-JULY", "P2", 9m);
+        await fixture.SeedWarehouseOrderAsync("O-NEXT", "B2", 2, day.AddDays(1), day, day);
+        await fixture.SeedWarehouseOrderLineAsync("O-NEXT", "P2", 11m);
+        await fixture.SeedWarehouseOrderAsync("O-DELETED", "B1", 2, day, day, day, isDeleted: true);
+        await fixture.SeedWarehouseOrderLineAsync("O-DELETED", "P1", 13m);
+
+        var range = new DateRangeDto { StartDate = day, EndDate = day };
+        // 两条销售聚合路径共用同一段进货聚合；各用独立缓存，避免后者命中前者的视图缓存。
+        var server = fixture.CreateService(new MemoryCache(new MemoryCacheOptions()));
+        var memory = fixture.CreateService(new MemoryCache(new MemoryCacheOptions()));
+        memory.ForceCompactBoardInMemory = true;
+        foreach (var service in new[] { server, memory })
+        {
+            string Rows(CompactSalesBoardDto board) =>
+                string.Join(";", board.Stores.Select(row => $"{row.BranchCode}:{row.BranchName}:{row.TotalAmount:0.##}:{row.PurchaseQuantity:0.##}"));
+
+            var all = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range });
+            Assert.Equal("B1:Branch One:40:15;B2:Branch Two:30:0;B3:Branch Three:0:8", Rows(all));
+            Assert.Equal(2, all.Summary.StoreCount);
+
+            var bySupplier = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, SelectedChinaSupplierCode = "C1" });
+            Assert.Equal("B1:Branch One:40:10;B3:Branch Three:0:6", Rows(bySupplier));
+            var byProduct = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, SelectedProductCode = "P2" });
+            Assert.Equal("B2:Branch Two:30:0;B1:Branch One:0:5;B3:Branch Three:0:2", Rows(byProduct));
+
+            var widened = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery
+            {
+                DateRange = range,
+                PurchaseDateRange = new DateRangeDto { StartDate = new DateTime(2026, 7, 15), EndDate = day.AddDays(1) },
+            });
+            Assert.Equal("B1:Branch One:40:15;B2:Branch Two:30:20;B3:Branch Three:0:8", Rows(widened));
+
+            var scoped = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, BranchCodes = new List<string> { "B1", "B2" } });
+            Assert.Equal("B1:Branch One:40:15;B2:Branch Two:30:0", Rows(scoped));
+        }
+    }
+
+    [SalesDetailReportSqlServerFact]
     public async Task 紧凑看板数据库端聚合与内存立方体逐项一致_含月表可用与身份失效()
     {
         await using var fixture = await SalesDetailSqlServerFixture.CreateAsync();
@@ -1896,6 +1963,20 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
             }
         }
 
+        public Task SeedWarehouseOrderAsync(string orderGuid, string storeCode, int? flowStatus, DateTime? outboundDate, DateTime? orderDate,
+            DateTime createdAt, bool isDeleted = false) => ExecuteNonQueryAsync(_databaseConnectionString, """
+                INSERT INTO [dbo].[WareHouseOrder] ([OrderGUID], [StoreCode], [OrderNo], [OrderDate], [OutboundDate], [FlowStatus], [IsDeleted], [CreatedAt])
+                VALUES (@order, @store, @order, @orderDate, @outbound, @flow, @deleted, @created);
+                """, ("@order", orderGuid), ("@store", storeCode), ("@orderDate", (object?)orderDate ?? DBNull.Value),
+                ("@outbound", (object?)outboundDate ?? DBNull.Value), ("@flow", (object?)flowStatus ?? DBNull.Value),
+                ("@deleted", isDeleted), ("@created", createdAt));
+
+        public Task SeedWarehouseOrderLineAsync(string orderGuid, string productCode, decimal allocQuantity, bool isDeleted = false) =>
+            ExecuteNonQueryAsync(_databaseConnectionString, """
+                INSERT INTO [dbo].[WareHouseOrderDetails] ([DetailGUID], [OrderGUID], [ProductCode], [AllocQuantity], [IsDeleted])
+                VALUES (CONVERT(nvarchar(50), NEWID()), @order, @product, @alloc, @deleted);
+                """, ("@order", orderGuid), ("@product", productCode), ("@alloc", allocQuantity), ("@deleted", isDeleted));
+
         public Task SeedMappingAsync(string productCode, string chinaSupplierCode) => ExecuteNonQueryAsync(_databaseConnectionString,
             "INSERT INTO [dbo].[posm_product_supplier_mapping] ([ProductCode], [LocalSupplierCode], [ChinaSupplierCode], [IsDeleted]) VALUES (@product, N'200', @china, 0);",
             ("@product", productCode), ("@china", chinaSupplierCode));
@@ -2011,6 +2092,23 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
                 [JobId] uniqueidentifier NULL,
                 [LastCheckedAtUtc] datetime2(7) NULL,
                 CONSTRAINT [PK_SalesStatisticRefreshState] PRIMARY KEY ([StatisticType], [Date])
+            );
+            CREATE TABLE [dbo].[WareHouseOrder] (
+                [OrderGUID] nvarchar(50) NOT NULL PRIMARY KEY,
+                [StoreCode] nvarchar(50) NULL,
+                [OrderNo] nvarchar(50) NULL,
+                [OrderDate] datetime2(7) NULL,
+                [OutboundDate] datetime2(7) NULL,
+                [FlowStatus] int NULL,
+                [IsDeleted] bit NOT NULL,
+                [CreatedAt] datetime2(7) NOT NULL
+            );
+            CREATE TABLE [dbo].[WareHouseOrderDetails] (
+                [DetailGUID] nvarchar(50) NOT NULL PRIMARY KEY,
+                [OrderGUID] nvarchar(50) NULL,
+                [ProductCode] nvarchar(50) NULL,
+                [AllocQuantity] decimal(18,4) NULL,
+                [IsDeleted] bit NOT NULL
             );
             """;
 
