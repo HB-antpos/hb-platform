@@ -129,6 +129,8 @@ export interface CompactSalesBoardStore {
   australianSupplierName: string
   /** 当前筛选下该分店有销售的商品款数 */
   productCount: number
+  /** 进货区间内该分店从仓库进的货（仓库订单配货数量），同样受选中的国内供应商、商品约束 */
+  purchaseQuantity: number
 }
 
 export interface CompactSalesBoardChinaSupplier {
@@ -193,6 +195,8 @@ export type CompactSalesBoardSortOrder = 'asc' | 'desc'
  */
 export interface CompactSalesBoardRequest {
   dateRange: DateRange
+  /** 分店栏「进货」的日期区间；不传时服务端按销售区间计算 */
+  purchaseDateRange?: DateRange
   branchCodes?: string[]
   selectedBranchCode?: string | null
   selectedChinaSupplierCode?: string | null

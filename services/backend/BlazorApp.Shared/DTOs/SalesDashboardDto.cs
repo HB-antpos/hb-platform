@@ -1635,6 +1635,8 @@ namespace BlazorApp.Shared.DTOs
         public const string SortByItemNumber = "itemNumber";
 
         public DateRangeDto DateRange { get; set; } = new();
+        /// <summary>分店栏「进货」的日期区间，与销售区间相互独立；为空时与 DateRange 相同。</summary>
+        public DateRangeDto? PurchaseDateRange { get; set; }
         public List<string>? BranchCodes { get; set; }
         public string? SelectedBranchCode { get; set; }
         public string? SelectedChinaSupplierCode { get; set; }
@@ -1660,6 +1662,11 @@ namespace BlazorApp.Shared.DTOs
         public string AustralianSupplierName { get; set; } = "200-hotbargain";
         /// <summary>该分店在当前筛选下有销售的商品款数。</summary>
         public int ProductCount { get; set; }
+        /// <summary>
+        /// 该分店在进货日期区间内从仓库进的货（仓库订单配货数量，与进货金额看板同口径），
+        /// 商品范围与销售相同（已映射国内供应商），同样受选中的国内供应商、商品约束。
+        /// </summary>
+        public decimal PurchaseQuantity { get; set; }
     }
 
     public sealed class CompactSalesBoardChinaSupplierDto

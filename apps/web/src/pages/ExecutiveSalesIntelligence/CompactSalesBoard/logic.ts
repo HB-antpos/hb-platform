@@ -21,6 +21,8 @@ export const defaultProductSort: ProductSort = { field: 'amount', order: 'desc' 
 
 export interface BoardFilterState {
   dateRange: DateRange
+  /** 分店栏「进货」的日期区间：默认跟随销售区间，单独选择后与销售区间相互独立。 */
+  purchaseDateRange: DateRange
   scopeKey: string
   branch: BoardSelection | null
   supplier: BoardSelection | null
@@ -44,11 +46,13 @@ export interface PanelKeys {
  */
 export function buildPanelKeys(state: BoardFilterState): PanelKeys {
   const date = `${state.dateRange.startDate}~${state.dateRange.endDate}`
+  // 中文注释：进货区间只影响分店栏的「进货」列，改它不让供应商、商品栏和统计条闪加载。
+  const purchaseDate = `${state.purchaseDateRange.startDate}~${state.purchaseDateRange.endDate}`
   const branch = state.branch?.code ?? ''
   const supplier = state.supplier?.code ?? ''
   const product = state.product?.code ?? ''
   return {
-    stores: JSON.stringify([date, state.scopeKey, supplier, product]),
+    stores: JSON.stringify([date, purchaseDate, state.scopeKey, supplier, product]),
     suppliers: JSON.stringify([date, state.scopeKey, branch, product]),
     products: JSON.stringify([
       date,
@@ -68,7 +72,7 @@ export function buildPanelKeys(state: BoardFilterState): PanelKeys {
 /** 客户端短时缓存的键：包含全部请求参数，确保只复用完全相同的查询。 */
 export function buildRequestKey(state: BoardFilterState): string {
   const keys = buildPanelKeys(state)
-  return JSON.stringify([keys.summary, keys.products])
+  return JSON.stringify([keys.summary, keys.products, keys.stores])
 }
 
 /**

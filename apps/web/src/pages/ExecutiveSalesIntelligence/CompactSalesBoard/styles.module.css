@@ -19,6 +19,11 @@
 .scope b { margin-right: 6px; padding: 1px 6px; border-radius: 4px; background: #f1f4f9; color: var(--ink-2); font-size: 11px; font-weight: 600; }
 .toolbarControls { display: flex; flex: none; align-items: center; gap: 8px; }
 .toolbarFilters { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+/* 销售、进货两个日期框用前缀标签区分；进货跟随销售时日期文字变淡，单独选过后恢复正常色并出现「同销售」 */
+.pickerLabel { margin-right: 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.purchaseRange { display: flex; align-items: center; gap: 2px; }
+.pickerFollowing :global(.ant-picker-input > input) { color: var(--faint); }
+.followButton { padding: 0 4px; font-size: 12px; }
 
 .filterLabel { margin-right: 2px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .kbd { padding: 0 4px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; background: #fff; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -41,7 +46,8 @@
 .loadError { flex: none; }
 
 /* ---------- 三栏 ---------- */
-.grid { display: grid; grid-template-columns: minmax(260px, 26fr) minmax(260px, 26fr) minmax(500px, 48fr); gap: 8px; align-items: stretch; }
+/* 分店栏多一列「进货」，从商品栏匀出宽度给它 */
+.grid { display: grid; grid-template-columns: minmax(240px, 24fr) minmax(300px, 30fr) minmax(500px, 46fr); gap: 8px; align-items: stretch; }
 .panel { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--line-2); border-radius: 8px; background: #fff; }
 .panelBranch { --acc: var(--branch); --acc-bg: var(--branch-bg); --acc-bar: var(--branch-bar); }
 .panelSupplier { --acc: var(--supplier); --acc-bg: var(--supplier-bg); --acc-bar: var(--supplier-bar); }
@@ -104,6 +110,11 @@
 .selectedRow .shareTrack i { background: var(--acc); }
 .share span { width: 38px; color: var(--muted); font-size: 11px; text-align: right; }
 .shareText { color: var(--muted); font-size: 11px; }
+.zeroNum { color: var(--faint); }
+/* 笔记本宽度：分店栏销量单元格上行销量、下行进货 */
+.qtyStack { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; line-height: 1.25; }
+.qtyStack small { color: var(--muted); font-size: 11px; }
+.qtyStack small.zeroNum { color: var(--faint); }
 .headerHint { display: inline-flex; align-items: center; gap: 4px; }
 .headerHint :global(.anticon) { color: var(--faint); font-size: 11px; }
 
@@ -171,7 +182,7 @@
 
 @container compact-board (max-width: 1400px) {
   .scope { display: none; }
-  /* 笔记本宽度：两侧栏多分一些宽度，商品栏保持 500px 下限，名称列不至于只剩几个字 */
+  /* 笔记本宽度：两侧栏多分一些宽度，商品栏保持 500px 下限，名称列不至于只剩几个字（分店栏进货叠在销量下方，不多占列） */
   .grid { grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr) minmax(500px, 1.6fr); }
   .statsMeta .queryInfo { display: none; }
   .kpi { padding: 0 14px; }

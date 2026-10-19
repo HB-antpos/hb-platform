@@ -26,7 +26,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       JSON.stringify({
         success: true,
         data: {
-          Stores: [{ BranchCode: 'S1', BranchName: 'Store 1', TotalAmount: 100, TotalQuantity: 10, DomesticSupplierAmount: 70, BranchTotalAmount: 400, ProductCount: 3 }],
+          Stores: [{ BranchCode: 'S1', BranchName: 'Store 1', TotalAmount: 100, TotalQuantity: 10, DomesticSupplierAmount: 70, BranchTotalAmount: 400, ProductCount: 3, PurchaseQuantity: 24 }],
           ChinaSuppliers: [{ SupplierCode: 'SUP-CN', SupplierName: '国内供应商', TotalAmount: 70, TotalQuantity: 7, ProductCount: 2 }],
           ProductDetails: {
             Data: [{ ProductCode: 'P001', ItemNumber: 'HB001', ProductName: '国内商品', ChinaSupplierCode: 'SUP-CN', TotalQuantity: 7, UnitPrice: 10, TotalAmount: 70 }],
@@ -123,6 +123,7 @@ try {
   const board = await getCompactSalesBoard(
     {
       dateRange: { startDate: '2026-06-17', endDate: '2026-06-17' },
+      purchaseDateRange: { startDate: '2026-06-01', endDate: '2026-06-17' },
       branchCodes: ['S1'],
       selectedBranchCode: 'S1',
       selectedChinaSupplierCode: 'SUP-CN',
@@ -140,6 +141,8 @@ try {
   assertEqual(boardRequestUrl.pathname, '/api/react/v1/dashboard/compact-sales-board', '销售看板应请求独立接口')
   assertEqual(boardRequestUrl.searchParams.get('startDate'), '2026-06-17', '销售看板应传递开始日期')
   assertEqual(boardRequestUrl.searchParams.get('endDate'), '2026-06-17', '销售看板应传递结束日期')
+  assertEqual(boardRequestUrl.searchParams.get('purchaseStartDate'), '2026-06-01', '销售看板应传递独立的进货开始日期')
+  assertEqual(boardRequestUrl.searchParams.get('purchaseEndDate'), '2026-06-17', '销售看板应传递独立的进货结束日期')
   assertEqual(boardRequestUrl.searchParams.getAll('branchCodes').join(','), 'S1', '销售看板应传递授权分店范围')
   assertEqual(boardRequestUrl.searchParams.get('selectedBranchCode'), 'S1', '销售看板应单独传递选中分店')
   assertEqual(boardRequestUrl.searchParams.get('selectedChinaSupplierCode'), 'SUP-CN', '销售看板应传递选中国内供应商')
@@ -158,6 +161,7 @@ try {
   assertEqual(board.productDetails.data[0]?.itemNumber, 'HB001', '销售看板应归一化商品货号')
   assertEqual(board.productDetails.data[0]?.unitPrice, 10, '销售看板应归一化商品单价')
   assertEqual(board.stores[0]?.productCount, 3, '销售看板应归一化分店动销款数')
+  assertEqual(board.stores[0]?.purchaseQuantity, 24, '销售看板应归一化分店进货量')
   assertEqual(board.chinaSuppliers[0]?.productCount, 2, '销售看板应归一化供应商动销款数')
   assertEqual(board.summary.overallAmount, 100, '销售看板应归一化全部范围营业额')
   assertEqual(board.summary.totalAmount, 70, '销售看板应归一化筛选后营业额')

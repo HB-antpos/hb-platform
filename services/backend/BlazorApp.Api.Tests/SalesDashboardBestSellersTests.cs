@@ -68,7 +68,10 @@ public sealed class SalesDashboardBestSellersTests : IDisposable
             typeof(ChinaSupplierStoreSalesDetail),
             typeof(ProductStoreDailySalesStatistic),
             typeof(SalesStatisticRefreshState),
-            typeof(ChinaSupplier)
+            typeof(ChinaSupplier),
+            // 仓库销售看板分店栏的「进货」读仓库订单。
+            typeof(WareHouseOrder),
+            typeof(WareHouseOrderDetails)
         );
         CreateScheduledTaskLogTable(_localDb);
         _posmDb.CodeFirst.InitTables(
@@ -175,6 +178,103 @@ public sealed class SalesDashboardBestSellersTests : IDisposable
         var filteredA = Assert.Single(filtered.Stores, row => row.BranchCode == "S-SHARE-A");
         Assert.Equal(40m, filteredA.TotalAmount);
         Assert.Equal(400m, filteredA.BranchTotalAmount);
+    }
+
+    [Fact]
+    public async Task GetCompactSalesBoardAsync_分店栏带仓库订单进货量_进货区间独立且随供应商商品联动()
+    {
+        var date = new DateTime(2026, 8, 1);
+        await SeedStatisticStateAsync(date, SalesStatisticRefreshStatus.Fresh);
+        await SeedStoreAsync("S-PUR-A", "进货分店A");
+        await SeedStoreAsync("S-PUR-B", "进货分店B");
+        await SeedStoreAsync("S-PUR-C", "进货分店C");
+        await _localDb.Insertable(new[]
+        {
+            new ChinaSupplier { Guid = "cn-pur-a", SupplierCode = "CN-PUR-A", SupplierName = "进货供应商A" },
+            new ChinaSupplier { Guid = "cn-pur-b", SupplierCode = "CN-PUR-B", SupplierName = "进货供应商B" },
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            new ProductStoreDailySalesStatistic { Date = date, BranchCode = "S-PUR-A", SupplierCode = "200", ProductCode = "P-PUR-1", ProductName = "进货商品1", TotalQuantity = 4, TotalAmount = 40m, OrderCount = 1 },
+            new ProductStoreDailySalesStatistic { Date = date, BranchCode = "S-PUR-B", SupplierCode = "200", ProductCode = "P-PUR-2", ProductName = "进货商品2", TotalQuantity = 3, TotalAmount = 30m, OrderCount = 1 },
+        }).ExecuteCommandAsync();
+        await _posmDb.Insertable(new[]
+        {
+            new PosmProductSupplierMapping { ProductCode = "P-PUR-1", LocalSupplierCode = "200", ChinaSupplierCode = "CN-PUR-A" },
+            new PosmProductSupplierMapping { ProductCode = "P-PUR-2", LocalSupplierCode = "200", ChinaSupplierCode = "CN-PUR-B" },
+        }).ExecuteCommandAsync();
+
+        WareHouseOrder Order(string guid, string store, int? flowStatus, DateTime? outbound, DateTime? orderDate, bool deleted = false) => new()
+        {
+            OrderGUID = guid, StoreCode = store, OrderNo = guid, FlowStatus = flowStatus,
+            OutboundDate = outbound, OrderDate = orderDate, IsDeleted = deleted,
+        };
+        WareHouseOrderDetails Line(string order, string product, decimal alloc, bool deleted = false) => new()
+        {
+            DetailGUID = $"{order}-{product}-{alloc}", OrderGUID = order, ProductCode = product,
+            Quantity = alloc, AllocQuantity = alloc, IsDeleted = deleted,
+        };
+        await _localDb.Insertable(new[]
+        {
+            Order("O-OUT", "S-PUR-A", 2, date, date.AddDays(-3)),
+            Order("O-DRAFT", "S-PUR-A", 0, null, date),
+            Order("O-NOT-OUT", "S-PUR-C", 3, null, date),
+            Order("O-JULY", "S-PUR-B", 2, new DateTime(2026, 7, 20), new DateTime(2026, 7, 18)),
+            // 出库日期优先于订单日期：订单日在区间内、出库日在区间外的不计。
+            Order("O-NEXT", "S-PUR-B", 2, date.AddDays(1), date),
+            Order("O-DELETED", "S-PUR-A", 2, date, date, deleted: true),
+        }).ExecuteCommandAsync();
+        await _localDb.Insertable(new[]
+        {
+            Line("O-OUT", "P-PUR-1", 10m),
+            Line("O-OUT", "P-PUR-2", 5m),
+            // 未映射国内供应商的商品、已删除的明细行都不计。
+            Line("O-OUT", "P-PUR-X", 100m),
+            Line("O-OUT", "P-PUR-1", 50m, deleted: true),
+            Line("O-DRAFT", "P-PUR-1", 7m),
+            Line("O-NOT-OUT", "P-PUR-1", 6m),
+            Line("O-JULY", "P-PUR-2", 9m),
+            Line("O-NEXT", "P-PUR-2", 11m),
+            Line("O-DELETED", "P-PUR-1", 13m),
+        }).ExecuteCommandAsync();
+
+        var service = CreateService();
+        var range = new DateRangeDto { StartDate = date, EndDate = date };
+        decimal Purchase(CompactSalesBoardDto board, string code) => Assert.Single(board.Stores, row => row.BranchCode == code).PurchaseQuantity;
+
+        // 进货区间默认与销售区间相同；只有进货的分店追加在后面，金额为 0，不计入「有销售」的分店数。
+        var all = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range });
+        Assert.Equal(new[] { "S-PUR-A", "S-PUR-B", "S-PUR-C" }, all.Stores.Select(row => row.BranchCode));
+        Assert.Equal(15m, Purchase(all, "S-PUR-A"));
+        Assert.Equal(0m, Purchase(all, "S-PUR-B"));
+        var purchaseOnly = Assert.Single(all.Stores, row => row.BranchCode == "S-PUR-C");
+        Assert.Equal((6m, 0m, 0, "进货分店C"), (purchaseOnly.PurchaseQuantity, purchaseOnly.TotalAmount, purchaseOnly.TotalQuantity, purchaseOnly.BranchName));
+        Assert.Equal(2, all.Summary.StoreCount);
+
+        // 选中供应商、商品与销售一样收窄进货。
+        var bySupplier = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, SelectedChinaSupplierCode = "CN-PUR-A" });
+        Assert.Equal(new[] { ("S-PUR-A", 10m), ("S-PUR-C", 6m) }, bySupplier.Stores.Select(row => (row.BranchCode, row.PurchaseQuantity)));
+        var byProduct = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, SelectedProductCode = "P-PUR-2" });
+        Assert.Equal(new[] { ("S-PUR-B", 0m), ("S-PUR-A", 5m) }, byProduct.Stores.Select(row => (row.BranchCode, row.PurchaseQuantity)));
+
+        // 进货区间独立：销售仍是 8-01 当天，进货改为 7-15～8-02。
+        var widened = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery
+        {
+            DateRange = range,
+            PurchaseDateRange = new DateRangeDto { StartDate = new DateTime(2026, 7, 15), EndDate = date.AddDays(1) },
+        });
+        Assert.Equal(70m, widened.Summary.TotalAmount);
+        Assert.Equal((15m, 20m, 6m), (Purchase(widened, "S-PUR-A"), Purchase(widened, "S-PUR-B"), Purchase(widened, "S-PUR-C")));
+
+        // 授权范围外只有进货的分店不出现。
+        var scoped = await service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery { DateRange = range, BranchCodes = new List<string> { "S-PUR-A", "S-PUR-B" } });
+        Assert.Equal(new[] { "S-PUR-A", "S-PUR-B" }, scoped.Stores.Select(row => row.BranchCode));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetCompactSalesBoardAsync(new CompactSalesBoardQuery
+        {
+            DateRange = range,
+            PurchaseDateRange = new DateRangeDto { StartDate = date, EndDate = date.AddDays(731) },
+        }));
     }
 
     [Fact]

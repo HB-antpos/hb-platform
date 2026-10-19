@@ -1081,6 +1081,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 分店范围统一从实时用户关系解析，任何解析失败都拒绝请求，不能退化成全分店查询。
         /// branchCodes 只表示授权范围；页面上选中的分店走 selectedBranchCode，
         /// 服务端只在授权范围内匹配选中分店，越权选中只会得到空结果。
+        /// purchaseStartDate / purchaseEndDate 是分店栏「进货」的独立区间，两者都传才生效，否则与销售区间相同。
         /// </summary>
         [HttpGet("compact-sales-board")]
         [Authorize(Policy = Permissions.SalesDashboard.CompactBoardView)]
@@ -1096,7 +1097,9 @@ namespace BlazorApp.Api.Controllers.React
             [FromQuery] string? sortOrder = null,
             [FromQuery] int pageIndex = 1,
             [FromQuery] int pageSize = 50,
-            [FromQuery] bool forceRefresh = false
+            [FromQuery] bool forceRefresh = false,
+            [FromQuery] DateTime? purchaseStartDate = null,
+            [FromQuery] DateTime? purchaseEndDate = null
         )
         {
             try
@@ -1113,6 +1116,14 @@ namespace BlazorApp.Api.Controllers.React
                         EndDate = endDate,
                         CompareMode = CompareMode.ByDate,
                     },
+                    PurchaseDateRange = purchaseStartDate.HasValue && purchaseEndDate.HasValue
+                        ? new DateRangeDto
+                        {
+                            StartDate = purchaseStartDate.Value,
+                            EndDate = purchaseEndDate.Value,
+                            CompareMode = CompareMode.ByDate,
+                        }
+                        : null,
                     BranchCodes = branchScope.BranchCodes,
                     SelectedBranchCode = selectedBranchCode,
                     SelectedChinaSupplierCode = selectedChinaSupplierCode,

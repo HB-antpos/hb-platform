@@ -14,7 +14,8 @@ assert(source.includes("'/api/react/v1/dashboard/compact-sales-board'" ) === fal
 assert(source.includes('getCompactSalesBoard'), '页面必须使用 Compact Sales Board 服务')
 assert(source.includes('onKeyDown'), '可点击表格行必须支持键盘操作')
 assert(source.includes("aria-label=\"清除筛选\""), '清除筛选按钮必须有可访问标签')
-assert(source.includes("aria-label=\"强制刷新销售看板\""), '刷新图标按钮必须有可访问标签')
+assert(source.includes("aria-label=\"强制刷新仓库销售看板\""), '刷新图标按钮必须有可访问标签')
+assert(source.includes('<h1>仓库销售看板</h1>'), '页面标题为「仓库销售看板」')
 assert(source.includes('maxSalesDateRangeDays'), '日期范围必须有显式上限')
 // 数据口径与销售明细对齐：快捷区间同一套规则（ISO 周、截止今天），上限共用 731 天，不能选未来日期。
 assert(source.includes('quickDateSelection(range)'), '快捷区间必须复用销售明细的 quickDateSelection')
@@ -82,6 +83,13 @@ assert(styles.includes('.numCell { white-space: nowrap; }'), '数字列不得换
 // 分店栏占比：国内商品营业额 ÷ 分店总营业额（服务端给出分母），不再是本栏合计。
 assert(source.includes('total={record.branchTotalAmount}'), '分店栏占比分母必须是分店总营业额')
 assert(!source.includes('storeTotal'), '分店栏不得再用本栏合计作占比分母')
+// 分店进货量：进货区间独立、默认跟随销售区间；只影响分店栏，不回到商品第一页。
+assert(source.includes('purchaseDateRange: filterState.purchaseDateRange'), '进货区间必须随看板请求传给服务端')
+assert(source.includes('const purchaseRange = purchaseRangeOverride ?? dateRange'), '进货区间默认跟随销售区间')
+assert(source.includes('onClick={() => setPurchaseRangeOverride(null)}'), '单独选过进货区间后必须能恢复跟随销售')
+assert(source.includes("dataIndex: 'purchaseQuantity'"), '分店栏必须显示进货量')
+assert(!/setPurchaseRangeOverride\(\[value\[0\], value\[1\]\]\)\s*\n\s*setPageIndex/.test(source), '改进货区间不得重置商品分页')
+assert(source.includes('disabledDate={isDisabledDate}\n                  onChange={handlePurchaseRangeChange}'), '进货日期同样禁用未来日期与超长区间')
 
 assert(styles.includes('.panelLoading .progress'), '局部加载必须有顶部进度条')
 assert(styles.includes(':focus-visible'), '可点击行必须有可见焦点状态')
