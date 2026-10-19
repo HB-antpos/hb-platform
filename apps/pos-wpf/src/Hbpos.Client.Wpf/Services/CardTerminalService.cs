@@ -550,6 +550,11 @@ public sealed class ConfiguredCardTerminalClient :
     private const int MaxSquareTransientQueryRetries = 10;
     private const int MaxSquareInvalidResponseRetries = 2;
 
+    // 创建结账（POST）遇到断网、单次请求超时或 408/429/5xx 时，用同一个 idempotencyKey、同一份请求体重发：
+    // Square 对同键同体只会建一笔 checkout（重复请求原样返回第一笔），服务端会话落库是 MERGE + 同设备绑定，也可重入。
+    // 只给少量次数（首发 + 2 次重试，间隔 1s/2s 加抖动），网络长时间中断时尽快交回收银员；仍受总预算约束。
+    private const int MaxSquareCreateCheckoutAttempts = 3;
+
     private const string SquareTimedOutStatusKey = "payment.card.squareTimedOut";
     private const string SquareTerminalOfflineStatusKey = "payment.card.squareTerminalOffline";
     private const string SquareTerminalNotPickedUpStatusKey = "payment.card.squareTerminalNotPickedUp";
@@ -835,16 +840,14 @@ public sealed class ConfiguredCardTerminalClient :
             // Square 主付款链路统一改走 Hbpos API，终端侧只保留本地 attempt、轮询与校验语义。
             // 中文注释：POST 一旦离开客户端，即使还没有 checkoutId，也不能把超时解释为未发起付款。
             squareCreateSubmitted = true;
-            using var createResponse = await SendSquareApiAsync(
-                HttpMethod.Post,
-                "api/v1/square/checkouts",
+            var createResult = await CreateSquareCheckoutWithTransientRetryAsync(
                 createRequest,
                 timeoutCts.Token);
-            var createBody = await ReadResponseBodyAsync(createResponse, timeoutCts.Token);
-            if (!createResponse.IsSuccessStatusCode)
+            var createBody = createResult.Body;
+            if (!createResult.IsSuccess)
             {
-                LogSquare($"checkout create failed http={(int)createResponse.StatusCode} detail={LogValue(ReadSquareErrorMessage(createBody))}");
-                return FailSquareRequest("checkout", createResponse.StatusCode, createBody);
+                LogSquare($"checkout create failed http={(int)createResult.StatusCode} detail={LogValue(ReadSquareErrorMessage(createBody))}");
+                return FailSquareRequest("checkout", createResult.StatusCode, createBody);
             }
 
             var createdCheckout = ReadSquareCheckoutStatusResponse(createBody);
@@ -1231,6 +1234,84 @@ public sealed class ConfiguredCardTerminalClient :
         T? Value,
         System.Net.HttpStatusCode? FailedStatusCode,
         string? FailedBody);
+
+    private readonly record struct SquareCreateCheckoutResult(
+        System.Net.HttpStatusCode StatusCode,
+        bool IsSuccess,
+        string Body);
+
+    /// <summary>
+    /// 创建 Square 结账，遇到瞬时失败时用同一个请求对象（同一 idempotencyKey、同一请求体）有界重发。
+    /// 拿到任何最终 HTTP 响应（成功、明确客户端错误、或 408/429/5xx 重试用尽）都原样交回调用方，按原有语义处理；
+    /// 网络异常、单次请求超时（令牌均未取消）重试用尽时原样重新抛出，仍由 AuthorizeSquareAsync 的 catch 判为结果未知。
+    /// 每次重发前向付款页报告「网络不稳，正在重试 n/总数」，恢复后再报告一次，界面回到等待刷卡的提示。
+    /// </summary>
+    /// <param name="createRequest">首次构造好的创建请求；重发必须复用同一个对象，不能重新生成幂等键或 referenceId。</param>
+    /// <param name="cancellationToken">总预算令牌（已合并调用方取消）；重试等待也使用它，到期或取消时立即上抛。</param>
+    private async Task<SquareCreateCheckoutResult> CreateSquareCheckoutWithTransientRetryAsync(
+        SquareCreateCheckoutRequest createRequest,
+        CancellationToken cancellationToken)
+    {
+        var attempt = 1;
+        while (true)
+        {
+            string cause;
+            try
+            {
+                using var response = await SendSquareApiAsync(
+                    HttpMethod.Post,
+                    "api/v1/square/checkouts",
+                    createRequest,
+                    cancellationToken);
+                var responseBody = await ReadResponseBodyAsync(response, cancellationToken);
+                if (response.IsSuccessStatusCode ||
+                    !IsAmbiguousSquareHttpStatus(response.StatusCode) ||
+                    attempt >= MaxSquareCreateCheckoutAttempts)
+                {
+                    if (attempt > 1)
+                    {
+                        if (response.IsSuccessStatusCode)
+                        {
+                            LogSquare($"checkout create recovered after {attempt - 1} transient failure(s) attempt={attempt}/{MaxSquareCreateCheckoutAttempts}");
+                            CardTerminalProgressScope.Report(new CardTerminalProgress(CardTerminalProgressKind.NetworkRecovered));
+                        }
+                        else
+                        {
+                            LogSquare($"checkout create retries ended attempt={attempt}/{MaxSquareCreateCheckoutAttempts} http={(int)response.StatusCode}");
+                        }
+                    }
+
+                    return new SquareCreateCheckoutResult(response.StatusCode, response.IsSuccessStatusCode, responseBody);
+                }
+
+                cause = $"http={(int)response.StatusCode}";
+            }
+            catch (Exception ex) when (ex is not JsonException && IsTransientSquareQueryFailure(ex, cancellationToken))
+            {
+                cause = DescribeSquareQueryFailure(ex);
+                if (attempt >= MaxSquareCreateCheckoutAttempts)
+                {
+                    LogSquare($"checkout create transient retries exhausted attempts={attempt} cause={cause}");
+                    throw;
+                }
+            }
+
+            var delay = LinklyCloudTerminalClient.ComputePollRetryDelay(
+                attempt,
+                retryAfter: null,
+                Random.Shared.NextDouble());
+            LogSquare($"checkout create transient failure, retrying attempt={attempt + 1}/{MaxSquareCreateCheckoutAttempts} cause={cause} delayMs={(int)delay.TotalMilliseconds}");
+            CardTerminalProgressScope.Report(new CardTerminalProgress(
+                CardTerminalProgressKind.NetworkRetrying,
+                attempt + 1,
+                MaxSquareCreateCheckoutAttempts));
+
+            // 等待用总预算令牌：收银员取消或预算到期时抛 OperationCanceledException，
+            // 走 AuthorizeSquareAsync 原有的取消/超时分支；此时请求可能已到达 Square，仍按「已提交」收尾。
+            await Task.Delay(delay, TimeProvider, cancellationToken);
+            attempt++;
+        }
+    }
 
     /// <summary>
     /// 带瞬时错误有界重试的幂等 GET 查询。成功返回解析后的 <see cref="SquareQueryResult{T}.Value"/>；

@@ -1659,6 +1659,14 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                 cardPaymentCts = _cardSession.BeginCardPayment();
             }
 
+            // 中文注释：刷卡期间终端客户端的实时提示（如「网络不稳，正在重试 2/3」）经此作用域回到付款页；
+            // Progress<T> 在 UI 线程创建，回调会自动投递回 UI 线程。
+            var progressCardPaymentCts = cardPaymentCts;
+            using var cardTerminalProgressScope = progressCardPaymentCts is null
+                ? null
+                : CardTerminalProgressScope.Begin(new Progress<CardTerminalProgress>(
+                    progress => ApplyCardTerminalProgress(progressCardPaymentCts, progress)));
+
             if (IsRefundMode && isCard)
             {
                 ConsoleLog.Write(
@@ -3840,6 +3848,32 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         _statusKey = key;
         _statusTextOverride = statusText;
         OnPropertyChanged(nameof(StatusMessage));
+    }
+
+    internal void ApplyCardTerminalProgress(CancellationTokenSource cardPaymentCts, CardTerminalProgress progress)
+    {
+        // 中文注释：回调是异步投递的，可能晚于付款结束/取消/下一笔开始才到达；
+        // 只在发起这笔的刷卡仍在进行时更新，避免盖掉最终结果或下一笔的提示。
+        if (!ReferenceEquals(_cardSession.ActiveCardPaymentCts, cardPaymentCts) ||
+            cardPaymentCts.IsCancellationRequested ||
+            !IsCardPaymentInProgress)
+        {
+            return;
+        }
+
+        if (progress.Kind == CardTerminalProgressKind.NetworkRetrying)
+        {
+            SetStatus(
+                "payment.status.cardNetworkRetrying",
+                string.Format(
+                    _localization?.CurrentCulture ?? CultureInfo.CurrentCulture,
+                    T("payment.status.cardNetworkRetrying"),
+                    progress.Attempt,
+                    progress.MaxAttempts));
+            return;
+        }
+
+        SetStatus("payment.status.cardProcessing");
     }
 
     private bool TryRequirePermission(

@@ -678,6 +678,7 @@
   <data name="payment.status.voucherReleased" xml:space="preserve"><value>Voucher payment has been rolled back.</value></data>
   <data name="payment.status.voucherReleaseFailed" xml:space="preserve"><value>Voucher rollback failed. Retry or wait for the lock to expire.</value></data>
   <data name="payment.status.cardProcessing" xml:space="preserve"><value>Waiting for card terminal result...</value></data>
+  <data name="payment.status.cardNetworkRetrying" xml:space="preserve"><value>Network unstable, retrying {0}/{1}...</value></data>
   <data name="payment.status.cardCancelled" xml:space="preserve"><value>Card payment cancelled.</value></data>
   <data name="payment.status.cardTimedOut" xml:space="preserve"><value>Card payment timed out.</value></data>
   <data name="payment.card.resultUnknown" xml:space="preserve"><value>Card payment result is unknown. Recover the previous transaction before taking another payment.</value></data>

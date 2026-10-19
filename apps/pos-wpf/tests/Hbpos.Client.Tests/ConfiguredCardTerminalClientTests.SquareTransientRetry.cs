@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using Hbpos.Client.Wpf.Models;
@@ -512,24 +513,37 @@ public sealed partial class ConfiguredCardTerminalClientTests
     }
 
     /// <summary>
-    /// 按请求类型编排的 Hbpos API 替身：创建结账固定成功；结账状态 / 付款详情各按脚本逐次返回，脚本用完后重复最后一步；
+    /// 按请求类型编排的 Hbpos API 替身：创建结账默认固定成功（给了 CreateSteps 就按脚本返回）；
+    /// 结账状态 / 付款详情各按脚本逐次返回，脚本用完后重复最后一步；
     /// 取消与 dismiss 固定返回 CANCELED（超时 / 取消收尾时能拿到明确的取消结论，不进入 15 秒确认窗口）。
     /// </summary>
     private sealed class SquareRetryScript(string checkoutId)
     {
+        private readonly ConcurrentQueue<string> _createBodies = new();
+        private int _creates;
         private int _checkoutGets;
         private int _paymentGets;
         private int _cancels;
 
+        public IReadOnlyList<Func<HttpResponseMessage>> CreateSteps { get; init; } = [];
+
         public IReadOnlyList<Func<HttpResponseMessage>> CheckoutSteps { get; init; } = [];
 
         public IReadOnlyList<Func<HttpResponseMessage>> PaymentSteps { get; init; } = [];
+
+        public int Creates => Volatile.Read(ref _creates);
+
+        /// <summary>每次创建结账请求的原始请求体，按发送顺序。</summary>
+        public IReadOnlyList<string> CreateBodies => _createBodies.ToArray();
 
         public int CheckoutGets => Volatile.Read(ref _checkoutGets);
 
         public int PaymentGets => Volatile.Read(ref _paymentGets);
 
         public int Cancels => Volatile.Read(ref _cancels);
+
+        public string CreatedCheckoutJson() =>
+            $$"""{ "checkout": { "id": "{{checkoutId}}", "status": "PENDING" } }""";
 
         public HttpMessageHandler CreateHandler() => new StubHttpMessageHandler((request, _) =>
         {
@@ -547,7 +561,14 @@ public sealed partial class ConfiguredCardTerminalClientTests
                     return JsonResponse(CanceledCheckoutJson());
                 }
 
-                return JsonResponse($$"""{ "checkout": { "id": "{{checkoutId}}", "status": "PENDING" } }""");
+                _createBodies.Enqueue(request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? string.Empty);
+                if (CreateSteps.Count == 0)
+                {
+                    Interlocked.Increment(ref _creates);
+                    return JsonResponse(CreatedCheckoutJson());
+                }
+
+                return NextStep(CreateSteps, ref _creates);
             }
 
             if (path.Contains("/api/v1/square/payments/", StringComparison.Ordinal))

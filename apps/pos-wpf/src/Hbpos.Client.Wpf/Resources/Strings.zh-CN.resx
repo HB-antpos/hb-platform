@@ -1943,6 +1943,9 @@
   <data name="payment.status.cardProcessing" xml:space="preserve">
     <value>等待刷卡终端返回结果...</value>
   </data>
+  <data name="payment.status.cardNetworkRetrying" xml:space="preserve">
+    <value>网络不稳，正在重试 {0}/{1}...</value>
+  </data>
   <data name="payment.status.cardCancelled" xml:space="preserve">
     <value>刷卡支付已取消。</value>
   </data>
