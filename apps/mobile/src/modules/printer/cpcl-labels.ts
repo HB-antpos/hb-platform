@@ -11,6 +11,8 @@ const STANDARD_WIDTH = 570;
 const STANDARD_HEIGHT = 400;
 const SMALL_WIDTH = 472;
 const SMALL_HEIGHT = 320;
+// 商品标签 EAN13 条码的横坐标：给左侧外面的首位数字留位置（原 5 会让首位被裁掉）；与 Swift / Kotlin 保持一致。
+const EAN13_BARCODE_X = 30;
 const WAREHOUSE_HEIGHT = 208;
 
 function command(lines: string[]) {
@@ -223,7 +225,9 @@ export function buildProductLabelCommand(payload: ProductLabelPrintPayload, prin
 
   if (barcodeValue) {
     lines.push("BARCODE-TEXT 7 0 5");
-    addBarcode(lines, barcodeKind(barcodeValue), 5, 145, barcodeValue, 30);
+    // EAN13 的首位数字印在条码左侧外面：x=5 会被挤出标签左边界裁掉，必须留出位置；Code128 无此问题。
+    const kind = barcodeKind(barcodeValue);
+    addBarcode(lines, kind, kind === "EAN13" ? EAN13_BARCODE_X : 5, 145, barcodeValue, 30);
   }
 
   if (asNumber(payload.discountRate) > 0) {
