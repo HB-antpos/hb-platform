@@ -9,10 +9,15 @@ import type {
 
 /**
  * 延迟类链路的评级阈值（毫秒 / 失败比例）。
- * 商品图片走上海 COS，从澳洲访问本来就要 1~1.5 秒，单独放宽，避免天天报「差」。
+ * - internet：Cloudflare 全球就近节点，澳洲境内几十毫秒，阈值最严；
+ * - server：主服务器（hotbargain.vip，腾讯云新加坡）与登录态接口。**悉尼到它光 TCP 握手就要 260~300 毫秒**
+ *   （2026-10-19 实测 curl time_connect 0.26~0.30s），一次请求至少一个往返，健康时平均 300~450 毫秒；
+ *   按 300 毫秒判良好会让每个澳洲门店永远显示「偏慢」，所以 good 放到 600、fair 放到 1500；
+ * - image：商品图片走上海 COS，从澳洲访问本来就要 1~1.5 秒，单独放宽。
  */
-const LATENCY_THRESHOLDS: Record<"default" | "image", { goodMs: number; fairMs: number; fairLoss: number }> = {
-  default: { goodMs: 300, fairMs: 1000, fairLoss: 0.1 },
+const LATENCY_THRESHOLDS: Record<"internet" | "server" | "image", { goodMs: number; fairMs: number; fairLoss: number }> = {
+  internet: { goodMs: 300, fairMs: 1000, fairLoss: 0.1 },
+  server: { goodMs: 600, fairMs: 1500, fairLoss: 0.1 },
   image: { goodMs: 1500, fairMs: 3000, fairLoss: 0.34 },
 };
 
@@ -72,7 +77,7 @@ export function rateLink(link: NetworkLinkResult): NetworkRating | null {
 
   const stats = computeLinkStats(link.samples);
   if (stats.success === 0 || stats.avgMs == null) return "bad";
-  const threshold = LATENCY_THRESHOLDS[link.id === "image" ? "image" : "default"];
+  const threshold = LATENCY_THRESHOLDS[link.id === "internet" ? "internet" : link.id === "image" ? "image" : "server"];
   if (stats.avgMs < threshold.goodMs && stats.lossRate === 0) return "good";
   if (stats.avgMs < threshold.fairMs && stats.lossRate <= threshold.fairLoss) return "fair";
   return "bad";
