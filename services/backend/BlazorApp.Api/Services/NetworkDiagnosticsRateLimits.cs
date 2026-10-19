@@ -14,9 +14,9 @@ public static class NetworkDiagnosticsRateLimits
 
     public static void Configure(RateLimiterOptions options)
     {
+        // 分桶键不能直接用 IClientIpResolver：生产里它几乎总是 unknown，全体设备会共用一个桶。
         options.AddPolicy(PolicyName, context => RateLimitPartition.GetFixedWindowLimiter(
-            context.RequestServices.GetService<IClientIpResolver>()?.Resolve(context)
-                ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            NetworkDiagnosticsClientIp.PartitionKey(context, context.RequestServices.GetService<IClientIpResolver>()),
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 30, Window = TimeSpan.FromMinutes(1),

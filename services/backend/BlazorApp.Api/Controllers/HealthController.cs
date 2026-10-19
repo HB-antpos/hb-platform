@@ -60,7 +60,8 @@ namespace BlazorApp.Api.Controllers
         [EnableRateLimiting(NetworkDiagnosticsRateLimits.PolicyName)]
         public async Task<IActionResult> Diagnostics(CancellationToken cancellationToken)
         {
-            var clientIp = _clientIpResolver.Resolve(HttpContext);
+            // 生产的 IClientIpResolver 几乎总是返回 unknown（对端是 docker 网关），所以兜底用 nginx 写入的 X-Real-IP。
+            var clientIp = NetworkDiagnosticsClientIp.TryResolvePublic(HttpContext, _clientIpResolver);
             var databaseLatencyMs = await _diagnosticsProbe.PingDatabaseAsync(cancellationToken);
             Response.Headers.CacheControl = "no-store";
             return Ok(
@@ -69,8 +70,8 @@ namespace BlazorApp.Api.Controllers
                     status = "healthy",
                     serverTimeUtc = DateTime.UtcNow,
                     requestId = HttpContext.TraceIdentifier,
-                    // 解析不出公网 IP 时返回 null，移动端显示「服务器未识别」，不把代理地址当成用户 IP。
-                    clientIp = string.Equals(clientIp, "unknown", StringComparison.OrdinalIgnoreCase) ? null : clientIp,
+                    // 解析不出公网 IP 时为 null（序列化时省略），移动端显示「服务器未识别」，不把代理地址当成用户 IP。
+                    clientIp,
                     database = new
                     {
                         ok = databaseLatencyMs.HasValue,
