@@ -83,6 +83,17 @@ public sealed class BatchProductSalesAnalysisController : ControllerBase
         catch (Exception ex) { return InternalError<BatchProductSalesDiscountOverviewDto>(ex, "折扣总览加载失败"); }
     }
 
+    /// <summary>进货量与销量共用同一权限与门店范围；进货日期区间单独传入，不参与销量统计的版本锁。</summary>
+    [HttpPost("purchases")]
+    public async Task<IActionResult> Purchases([FromBody] BatchProductSalesPurchaseRequestDto request)
+    {
+        try { return Ok(await _service.GetPurchaseQuantitiesAsync(request, await ResolveStoreScopeAsync(), HttpContext.RequestAborted)); }
+        catch (BatchProductSalesAnalysisForbiddenException) { return Forbid(); }
+        catch (BatchProductSalesAnalysisValidationException ex) { return BadRequest(ApiResponse<BatchProductSalesPurchaseResultDto>.Error(ex.Message)); }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested) { return new EmptyResult(); }
+        catch (Exception ex) { return InternalError<BatchProductSalesPurchaseResultDto>(ex, "批量货号进货量查询失败"); }
+    }
+
     [HttpPost("export/detail")]
     public async Task<IActionResult> ExportDetail([FromBody] BatchProductSalesFollowupRequestDto request)
     {

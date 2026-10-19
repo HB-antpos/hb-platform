@@ -17,14 +17,16 @@
     "query": "Query sales",
     "querying": "Querying",
     "pendingQuery": "Filters have changed. The visible results are for the previous query; query again to update them.",
-    "appliedScope": "Current results: {{startDate}} to {{endDate}} · {{stores}}",
+    "appliedScope": "Current results: sales {{startDate}} to {{endDate}} · {{stores}}",
+    "appliedPurchaseScope": " · purchases {{startDate}} to {{endDate}}",
     "coverage": "{{ready}} of {{total}} days have been calculated; the remaining dates are not calculated.",
     "coveragePending": "No selected dates have completed statistics. Matched products remain visible and quantities are unavailable.",
     "coverageDetails": "Dates not calculated ({{count}})",
     "coverageScopeNotice": "Quantity, sales, and store rankings include calculated dates only.",
     "coverageReasons": { "missing": "Statistics missing", "queued": "Queued for calculation", "active": "In the calculation queue", "running": "Being calculated", "queueFailed": "Statistics queue failed", "changed": "Statistics changed; refresh again to include them" },
     "refreshResults": "Refresh results",
-    "dateRange": "Date range",
+    "dateRange": "Sales dates",
+    "purchaseDateRange": "Purchase dates",
     "stores": "Stores",
     "allStores": "All visible stores",
     "allProducts": "All products",
@@ -32,6 +34,10 @@
     "productList": "Products ({{count}})",
     "totalQuantity": "Total {{value}} units",
     "readyDatesTotalQuantity": "Calculated-date total {{value}} units",
+    "purchaseShort": "Purch. {{value}}",
+    "purchaseBreakdown": "Warehouse allocation {{warehouse}} · Supplier invoices {{supplier}}",
+    "purchaseLoadFailed": "Purchase quantities could not be loaded. Sales figures are unaffected.",
+    "purchaseNote": "Purchased = warehouse allocation (allocated quantity on store warehouse orders, drafts excluded; by dispatch date, or order date if not yet dispatched) + store supplier invoice quantity (by received date, or order date if not received). Purchase dates default to the sales dates and can be changed separately; changing only the purchase dates does not re-run the sales query.",
     "total": "Total",
     "noImportedItems": "Paste or import at least one valid item number before querying sales.",
     "noQueryResult": "Sales have not been queried yet",
@@ -76,7 +82,8 @@
       "pendingDates": "Dates not calculated",
       "notComputed": "Not calculated",
       "computed": "Calculated",
-      "readyOnlyNotice": "Only calculated dates are included"
+      "readyOnlyNotice": "Only calculated dates are included",
+      "purchaseScope": "Purchase dates"
     },
     "loading": "Loading…",
     "discountLoadFailed": "Discount details could not be loaded. Quantity and sales amount are retained; refresh results to retry.",
@@ -88,6 +95,7 @@
       "timeout": "The request timed out. Please retry.",
       "forbidden": "You are not permitted to query sales for these stores.",
       "date": "The date range is invalid.",
+      "purchaseDate": "The purchase date range is invalid (up to 366 days, ending no later than today).",
       "statistics": "Statistics changed. Current results are retained; refresh results."
     },
     "metrics": {
@@ -95,7 +103,8 @@
       "regular": "Regular",
       "discount": "Discount",
       "unknown": "Unknown",
-      "amount": "Sales"
+      "amount": "Sales",
+      "purchase": "Purchased"
     },
     "columns": {
       "rank": "Rank",
@@ -111,7 +120,8 @@
       "amount": "Sales",
       "rate": "Discount rate",
       "contributingProducts": "Contributing items",
-      "productShare": "Item share"
+      "productShare": "Item share",
+      "purchase": "Purchased"
     },
     "chart": {
       "legend": "Daily sales legend",

@@ -176,6 +176,30 @@ public sealed class BatchProductSalesBranchOverviewDto : BatchProductSalesScopeD
     public List<BatchProductSalesBranchProductDto> Products { get; set; } = [];
 }
 
+/// <summary>进货量查询；StartDate/EndDate 是进货日期区间，可以与销量日期区间不同。</summary>
+public sealed class BatchProductSalesPurchaseRequestDto : BatchProductSalesScopeDto
+{
+    public List<string>? ProductCodes { get; set; }
+}
+
+/// <summary>
+/// 商品×分店的进货量。总仓配货（仓库订货单配货数量）与供应商进货单数量分开返回，由前端合计展示；
+/// 两者都为 0 的组合不返回。
+/// </summary>
+public sealed class BatchProductSalesPurchaseRowDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string BranchCode { get; set; } = string.Empty;
+    public decimal WarehouseQuantity { get; set; }
+    public decimal SupplierQuantity { get; set; }
+}
+
+public sealed class BatchProductSalesPurchaseResultDto : BatchProductSalesScopeDto
+{
+    public List<string> ProductCodes { get; set; } = [];
+    public List<BatchProductSalesPurchaseRowDto> Rows { get; set; } = [];
+}
+
 public sealed class BatchProductSalesDiscountOverviewDto : BatchProductSalesScopeDto
 {
     public List<string> ProductCodes { get; set; } = [];
