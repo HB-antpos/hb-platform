@@ -234,6 +234,8 @@
     <Compile Include="BatchProductSalesAnalysisLogicTests.cs" />
     <Compile Include="BatchProductSalesMiddleTableTests.cs" />
     <Compile Include="BatchProductSalesAnalysisControllerTests.cs" />
+    <Compile Include="BatchProductSalesPurchaseQuantityTests.cs" />
+    <Compile Include="BatchProductSalesPurchaseSqlServerTests.cs" />
     <Compile Include="BatchProductSalesAnalysisSqlTests.cs" />
     <Compile Include="BatchProductSalesAnalysisSqlServerIntegrationTests.cs" />
     <Compile Include="BatchProductSalesPartialCoverageSqlServerTests.cs" />

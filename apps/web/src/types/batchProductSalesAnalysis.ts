@@ -140,6 +140,25 @@ export interface BatchSalesDetail extends BatchSalesScope {
   coverage: BatchSalesCoverage
 }
 
+/** 进货量查询：startDate/endDate 是进货日期区间，与销量日期区间相互独立。 */
+export interface BatchSalesPurchaseRequest extends BatchSalesScope {
+  productCodes: string[]
+}
+
+/** 商品×分店进货量；总仓配货与供应商进货单分开返回，页面按合计展示。 */
+export interface BatchSalesPurchaseRow {
+  productCode: string
+  branchCode: string
+  warehouseQuantity: number
+  supplierQuantity: number
+}
+
+export interface BatchSalesPurchaseResult extends BatchSalesScope {
+  productCodes: string[]
+  /** 只含非零组合；未出现的商品或分店即进货量为 0。 */
+  rows: BatchSalesPurchaseRow[]
+}
+
 export interface BatchSalesOptions {
   stores: { code: string; name: string }[]
   maxItemNumbers: number
@@ -153,4 +172,5 @@ export interface BatchProductSalesApi {
   getBranchOverview(input: BatchSalesBranchOverviewRequest, signal?: AbortSignal): Promise<BatchSalesBranchOverview>
   getDiscounts(input: BatchSalesLockedScope & { branchCode?: string }, signal?: AbortSignal): Promise<BatchSalesDiscountOverview>
   exportDetail(input: BatchSalesLockedScope, signal?: AbortSignal): Promise<string>
+  getPurchases(input: BatchSalesPurchaseRequest, signal?: AbortSignal): Promise<BatchSalesPurchaseResult>
 }

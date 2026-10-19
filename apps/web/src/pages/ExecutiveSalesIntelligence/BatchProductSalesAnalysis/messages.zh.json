@@ -17,14 +17,16 @@
     "query": "查询销量",
     "querying": "正在查询",
     "pendingQuery": "筛选条件已变更，当前结果仍对应上次查询。请重新查询。",
-    "appliedScope": "当前结果：{{startDate}} 至 {{endDate}} · {{stores}}",
+    "appliedScope": "当前结果：销售 {{startDate}} 至 {{endDate}} · {{stores}}",
+    "appliedPurchaseScope": " · 进货 {{startDate}} 至 {{endDate}}",
     "coverage": "已统计 {{ready}} / {{total}} 天；其余日期未统计。",
     "coveragePending": "所选日期尚无已完成统计；商品保留匹配结果，销量暂不可用。",
     "coverageDetails": "未统计日期（{{count}}）",
     "coverageScopeNotice": "销量、销售额和分店排行仅统计已完成日期。",
     "coverageReasons": { "missing": "缺少统计", "queued": "已加入统计队列", "active": "已在统计队列中", "running": "正在统计", "queueFailed": "统计排队失败", "changed": "统计已更新，等待下次刷新" },
     "refreshResults": "刷新结果",
-    "dateRange": "日期范围",
+    "dateRange": "销售日期",
+    "purchaseDateRange": "进货日期",
     "stores": "分店",
     "allStores": "全部可见分店",
     "allProducts": "全部商品",
@@ -32,6 +34,10 @@
     "productList": "商品列表（{{count}}）",
     "totalQuantity": "总销量 {{value}} 件",
     "readyDatesTotalQuantity": "已统计日期合计 {{value}} 件",
+    "purchaseShort": "进货 {{value}}",
+    "purchaseBreakdown": "总仓配货 {{warehouse}} · 供应商进货单 {{supplier}}",
+    "purchaseLoadFailed": "进货量加载失败，销量不受影响。",
+    "purchaseNote": "进货量 = 总仓配货（仓库订货单的配货数量，不含草稿；按出库日期，未出库按订单日期）+ 分店供应商进货单数量（按入库日期，无则按订单日期）。进货日期默认与销售日期相同，可单独调整；只改进货日期时不会重新查询销量。",
     "total": "合计",
     "noImportedItems": "先粘贴或导入至少一个有效货号，再查询销量。",
     "noQueryResult": "尚未查询销量",
@@ -77,6 +83,7 @@
       ,"notComputed": "未统计"
       ,"computed": "已统计"
       ,"readyOnlyNotice": "仅包含已统计日期"
+      ,"purchaseScope": "进货日期"
     },
     "loading": "正在加载…",
     "discountLoadFailed": "折扣明细加载失败，已保留销量和金额；请刷新结果重试。",
@@ -88,6 +95,7 @@
       "timeout": "请求超时，请重试。",
       "forbidden": "您没有查询这些分店销量的权限。",
       "date": "日期范围无效。",
+      "purchaseDate": "进货日期范围无效（最多 366 天，且不能晚于今天）。",
       "statistics": "统计版本已变化，已保留当前结果，请刷新结果。"
     },
     "metrics": {
@@ -95,7 +103,8 @@
       "regular": "正价",
       "discount": "折扣",
       "unknown": "未知",
-      "amount": "销售额"
+      "amount": "销售额",
+      "purchase": "进货"
     },
     "columns": {
       "rank": "排名",
@@ -111,7 +120,8 @@
       "amount": "销售额",
       "rate": "折扣占比",
       "contributingProducts": "贡献商品",
-      "productShare": "商品占比"
+      "productShare": "商品占比",
+      "purchase": "进货量"
     },
     "chart": {
       "legend": "每日销量图例",

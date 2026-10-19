@@ -131,6 +131,15 @@ try {
         },
       })
     }
+    if (pathname.endsWith('/purchases')) {
+      return jsonResponse({
+        Success: true,
+        Data: {
+          StartDate: '2026-07-01T00:00:00', EndDate: '2026-07-31T00:00:00', StoreCodes: ['S1', 'S2'], ProductCodes: ['P-1'],
+          Rows: [{ ProductCode: 'P-1', BranchCode: 'S1', WarehouseQuantity: 24, SupplierQuantity: 6 }],
+        },
+      })
+    }
     throw new Error(`unexpected request ${url}`)
   }) as typeof fetch
 
@@ -250,6 +259,20 @@ try {
     assert(error instanceof RequestError, '401 必须保留 request 层 RequestError')
     assert.equal(error.status, 401, '401 状态码不得被服务层改写')
   }
+
+  responseMode = 'normal'
+  const purchases = await batchProductSalesApi.getPurchases({ startDate: '2026-07-01', endDate: '2026-07-31', storeCodes: ['S1', 'S2'], productCodes: ['P-1'] })
+  const purchaseCall = captured[captured.length - 1]
+  assert.equal(purchaseCall?.url, '/api/react/v1/dashboard/batch-product-sales-analysis/purchases', '进货量必须请求独立 POST 路径')
+  assert.equal(purchaseCall?.init?.method, 'POST', '进货量必须使用 POST')
+  assert.deepEqual(JSON.parse(String(purchaseCall?.init?.body)), { startDate: '2026-07-01', endDate: '2026-07-31', storeCodes: ['S1', 'S2'], productCodes: ['P-1'] }, '进货日期区间与商品编码必须原样提交')
+  assert.equal(purchases.startDate, '2026-07-01', '进货响应日期应归一化为 yyyy-MM-dd')
+  assert.deepEqual(purchases.rows, [{ productCode: 'P-1', branchCode: 'S1', warehouseQuantity: 24, supplierQuantity: 6 }], 'PascalCase 进货行必须归一化')
+  await assertRejects(
+    () => batchProductSalesApi.getPurchases({ startDate: '2026-07-01', endDate: '2026-07-31', storeCodes: [], productCodes: [] }),
+    '缺少商品编码',
+    '没有商品编码时不得请求进货量',
+  )
 
   responseMode = 'coverageConflict'
   try {

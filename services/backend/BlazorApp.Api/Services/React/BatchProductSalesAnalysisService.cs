@@ -403,6 +403,136 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         finally { try { if (File.Exists(path)) File.Delete(path); } catch (Exception ex) { _logger.LogWarning(ex, "删除批量销量导出临时文件失败"); } }
     }
 
+    /// <summary>
+    /// 进货量按商品×分店汇总，进货日期区间独立于销量日期；不依赖销量统计的日期覆盖版本，因此不做版本锁。
+    /// 口径：总仓配货 = 仓库订货单（不含草稿）的配货数量，按出库日期、未出库按订单日期；
+    /// 供应商进货 = 分店进货单数量，按入库日期、无则订单日期，与「分店进货销量分析」一致。
+    /// </summary>
+    public async Task<ApiResponse<BatchProductSalesPurchaseResultDto>> GetPurchaseQuantitiesAsync(
+        BatchProductSalesPurchaseRequestDto request,
+        IReadOnlyList<string>? scopedStoreCodes,
+        CancellationToken cancellationToken = default)
+    {
+        var range = ValidateRange(request);
+        var productCodes = NormalizeProductCodes(request.ProductCodes);
+        var storeScope = await ResolveEffectiveStoreScopeAsync(request.StoreCodes, scopedStoreCodes, cancellationToken);
+        var result = new BatchProductSalesPurchaseResultDto
+        {
+            StartDate = range.StartDate,
+            EndDate = range.EndDate,
+            StoreCodes = storeScope.Codes,
+            ProductCodes = productCodes,
+        };
+        if (storeScope.Codes.Count == 0) return ApiResponse<BatchProductSalesPurchaseResultDto>.OK(result);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var parameters = new[]
+        {
+            new SugarParameter("@ProductCodes", System.Text.Json.JsonSerializer.Serialize(productCodes)),
+            new SugarParameter("@StoreCodes", System.Text.Json.JsonSerializer.Serialize(storeScope.Codes)),
+            new SugarParameter("@StartDate", range.StartDate),
+            new SugarParameter("@EndDateExclusive", range.EndDate.AddDays(1)),
+        };
+        var previousToken = _db.Ado.CancellationToken;
+        _db.Ado.CancellationToken = cancellationToken;
+        try
+        {
+            result.Rows = await _db.Ado.SqlQueryAsync<BatchProductSalesPurchaseRowDto>(PurchaseQuantitySql, parameters);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (Exception exception) when (cancellationToken.IsCancellationRequested && exception is not OperationCanceledException)
+        {
+            throw new OperationCanceledException("进货量查询已取消。", exception, cancellationToken);
+        }
+        finally
+        {
+            // SqlSugar 的 token 查询会写入 client ADO；请求结束前必须还原原令牌，避免影响同一请求内的后续查询。
+            if (previousToken.HasValue) _db.Ado.CancellationToken = previousToken.Value;
+            else _db.Ado.RemoveCancellationToken();
+        }
+        _logger.LogInformation(
+            "批量货号进货量查询耗时 {ElapsedMs}ms，商品 {ProductCount} 个，分店 {StoreCount} 家，结果 {RowCount} 行",
+            stopwatch.ElapsedMilliseconds, productCodes.Count, storeScope.Codes.Count, result.Rows.Count);
+        return ApiResponse<BatchProductSalesPurchaseResultDto>.OK(result);
+    }
+
+    /// <summary>
+    /// 商品、分店清单各走一个 JSON 参数（3000 个货号会超过 SQL Server 2100 个参数上限），先落带主键的临时表：
+    /// 生产库实测直接用 OPENJSON 派生表关联时优化器按固定 50 行估算，3000 商品×366 天要 8.7 秒，落临时表后不到 1 秒。
+    /// 仓库订货单头只有几千行且没有日期索引，先按日期与分店筛出订单，再按 OrderGUID 索引取明细；
+    /// 分店进货单走 EffectivePurchaseDate 持久化列索引（= COALESCE(InboundDate, OrderDate, CreatedAt)），
+    /// 明细缺商品编码时才按零售价 UUID 回查编码，与「分店进货销量分析」「商品动销报表」同一口径。
+    /// 分店与商品编码一律输出请求里的规范值，前端可直接按请求值匹配。
+    /// </summary>
+    internal const string PurchaseQuantitySql = """
+SET NOCOUNT ON;
+CREATE TABLE #BatchPurchaseProducts ([ProductCode] nvarchar(50) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+INSERT INTO #BatchPurchaseProducts ([ProductCode])
+SELECT DISTINCT CONVERT(nvarchar(50), [value]) FROM OPENJSON(@ProductCodes) WHERE NULLIF(CONVERT(nvarchar(50), [value]), N'') IS NOT NULL;
+
+CREATE TABLE #BatchPurchaseStores ([StoreCode] nvarchar(50) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+INSERT INTO #BatchPurchaseStores ([StoreCode])
+SELECT DISTINCT CONVERT(nvarchar(50), [value]) FROM OPENJSON(@StoreCodes) WHERE NULLIF(CONVERT(nvarchar(50), [value]), N'') IS NOT NULL;
+
+SELECT h.[OrderGUID], s.[StoreCode]
+INTO #BatchPurchaseWarehouseOrders
+FROM [WareHouseOrder] h
+INNER JOIN #BatchPurchaseStores s ON s.[StoreCode] = h.[StoreCode]
+WHERE COALESCE(h.[IsDeleted], 0) = 0
+    -- 草稿（FlowStatus = 0）不算进货；已提交、配货中、已完成都按配货数量计。
+    AND COALESCE(h.[FlowStatus], -1) <> 0
+    AND COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) >= @StartDate
+    AND COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) < @EndDateExclusive;
+
+SELECT
+    r.[ProductCode],
+    r.[BranchCode],
+    SUM(r.[WarehouseQuantity]) AS [WarehouseQuantity],
+    SUM(r.[SupplierQuantity]) AS [SupplierQuantity]
+FROM (
+    SELECT
+        p.[ProductCode],
+        o.[StoreCode] AS [BranchCode],
+        SUM(COALESCE(d.[AllocQuantity], 0)) AS [WarehouseQuantity],
+        CAST(0 AS decimal(18, 4)) AS [SupplierQuantity]
+    FROM #BatchPurchaseWarehouseOrders o
+    INNER JOIN [WareHouseOrderDetails] d
+        ON d.[OrderGUID] = o.[OrderGUID]
+        AND COALESCE(d.[IsDeleted], 0) = 0
+    INNER JOIN #BatchPurchaseProducts p ON p.[ProductCode] = d.[ProductCode]
+    GROUP BY p.[ProductCode], o.[StoreCode]
+    UNION ALL
+    SELECT
+        p.[ProductCode],
+        s.[StoreCode] AS [BranchCode],
+        CAST(0 AS decimal(18, 4)) AS [WarehouseQuantity],
+        SUM(COALESCE(d.[Quantity], 0)) AS [SupplierQuantity]
+    FROM [StoreLocalSupplierInvoice] i
+    INNER JOIN #BatchPurchaseStores s ON s.[StoreCode] = i.[StoreCode]
+    INNER JOIN [StoreLocalSupplierInvoiceDetails] d
+        ON d.[InvoiceGUID] = i.[InvoiceGUID]
+        AND d.[IsDeleted] = 0
+    -- 只有明细缺商品编码时才回查零售价补编码，按主键逐行查找。
+    LEFT JOIN [StoreRetailPrice] srp
+        ON NULLIF(d.[ProductCode], N'') IS NULL
+        AND srp.[UUID] = d.[StoreProductCode]
+        AND srp.[IsDeleted] = 0
+    INNER JOIN #BatchPurchaseProducts p
+        ON p.[ProductCode] = COALESCE(NULLIF(d.[ProductCode], N''), NULLIF(srp.[ProductCode], N''))
+    WHERE i.[IsDeleted] = 0
+        AND i.[EffectivePurchaseDate] >= CAST(@StartDate AS date)
+        AND i.[EffectivePurchaseDate] < CAST(@EndDateExclusive AS date)
+    GROUP BY p.[ProductCode], s.[StoreCode]
+) r
+GROUP BY r.[ProductCode], r.[BranchCode]
+HAVING SUM(r.[WarehouseQuantity]) <> 0 OR SUM(r.[SupplierQuantity]) <> 0
+OPTION (RECOMPILE);
+
+DROP TABLE #BatchPurchaseWarehouseOrders;
+DROP TABLE #BatchPurchaseStores;
+DROP TABLE #BatchPurchaseProducts;
+""";
+
     private async Task<Dictionary<string, BatchProductSalesDiscountSnapshotReadResult>> ReadExportDiscountsWithRetryAsync(
         IReadOnlyList<string> productCodes,
         IReadOnlyList<DateTime> readyDates,

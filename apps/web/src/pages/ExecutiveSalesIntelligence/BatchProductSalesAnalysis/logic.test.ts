@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { BatchSalesBranch, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesMetrics } from '../../../types/batchProductSalesAnalysis'
-import { buildBatchProductSalesAnalysis, buildBatchProductSalesDetailExportScope, escapeCsvCell, formatCsvRow, getBatchProductSalesDiscountStateKey, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, hasBatchProductSalesDiscountStatisticsNotice, hasBatchProductSalesDailyActivity, mergeBatchProductSalesDetailClassifications, runBatchProductSalesPool, shouldRefreshBatchProductSalesDiscountStatistics, sortBatchProductSalesBranchesByQuantity } from './logic'
+import { appendBatchProductSalesPurchaseOnlyBranches, buildBatchProductSalesAnalysis, buildBatchProductSalesDetailExportScope, buildBatchProductSalesPurchaseIndex, getBatchProductSalesPurchase, escapeCsvCell, formatCsvRow, getBatchProductSalesDiscountStateKey, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, hasBatchProductSalesDiscountStatisticsNotice, hasBatchProductSalesDailyActivity, mergeBatchProductSalesDetailClassifications, runBatchProductSalesPool, shouldRefreshBatchProductSalesDiscountStatistics, sortBatchProductSalesBranchesByQuantity } from './logic'
 
 function metrics(overrides: Partial<BatchSalesMetrics> = {}): BatchSalesMetrics {
   return {
@@ -286,5 +286,23 @@ assert.equal(classifiedSingle.metrics.regularQuantity, 4, '分类响应可补齐
 assert.equal(classifiedSingle.daily[0]?.metrics.quantity, 5, '分类迟到不得覆盖单品可靠每日销量')
 assert.equal(classifiedSingle.branches[0]?.metrics.salesAmount, 50, '分类迟到不得覆盖单品可靠分店金额')
 assert.equal(classifiedSingle.discountStatisticStatus, 'Fresh', '分类状态应透传到单品详情')
+
+const purchaseIndex = buildBatchProductSalesPurchaseIndex([
+  { productCode: 'P1', branchCode: 'B1', warehouseQuantity: 24, supplierQuantity: 0 },
+  { productCode: 'P1', branchCode: 'B2', warehouseQuantity: 0, supplierQuantity: 12 },
+  { productCode: 'P2', branchCode: 'B1', warehouseQuantity: 6, supplierQuantity: 4 },
+])
+assert.deepEqual(getBatchProductSalesPurchase(purchaseIndex), { total: 46, warehouse: 30, supplier: 16 }, '全部商品全部分店进货量 = 总仓配货 + 供应商进货')
+assert.equal(getBatchProductSalesPurchase(purchaseIndex, { productCode: 'P1' }).total, 36, '单品进货量跨分店合计')
+assert.equal(getBatchProductSalesPurchase(purchaseIndex, { branchCode: 'B1' }).total, 34, '分店进货量跨商品合计')
+assert.deepEqual(getBatchProductSalesPurchase(purchaseIndex, { productCode: 'P2', branchCode: 'B1' }), { total: 10, warehouse: 6, supplier: 4 }, '商品×分店进货量保留来源拆分')
+assert.equal(getBatchProductSalesPurchase(purchaseIndex, { productCode: 'P2', branchCode: 'B2' }).total, 0, '服务端未返回的组合是真实 0')
+const purchaseNames = new Map([['B2', 'Browns Plains']])
+const withPurchaseOnly = appendBatchProductSalesPurchaseOnlyBranches([branch('B1', 5)], purchaseIndex, 'P1', purchaseNames)
+assert.deepEqual(withPurchaseOnly.map((item) => item.branchCode), ['B1', 'B2'], '单品有进货无销量的分店补在排行末尾')
+assert.equal(withPurchaseOnly[1]?.branchName, 'Browns Plains', '补齐分店使用分店名称')
+assert.equal(withPurchaseOnly[1]?.metrics.quantity, 0, '补齐分店销量记 0')
+assert.deepEqual(appendBatchProductSalesPurchaseOnlyBranches([branch('B1', 5)], purchaseIndex, 'P2', purchaseNames).map((item) => item.branchCode), ['B1'], '已有销量行的分店不重复补齐')
+assert.equal(appendBatchProductSalesPurchaseOnlyBranches([branch('B1', 5)], undefined, 'P1', purchaseNames).length, 1, '进货量未就绪时不改动排行')
 
 console.log('BatchProductSalesAnalysis.logic.test: ok')
