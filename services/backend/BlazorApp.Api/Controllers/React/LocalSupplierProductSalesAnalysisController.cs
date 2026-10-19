@@ -274,6 +274,34 @@ namespace BlazorApp.Api.Controllers.React
             }
         }
 
+        /// <summary>分店排行的「进货」列：当前商品在进货区间内各分店的本地进货量（进货区间独立于销售区间）。</summary>
+        [HttpPost("branch-purchases")]
+        public async Task<IActionResult> BranchPurchases(
+            [FromBody] LocalSupplierProductSalesAnalysisRequest request
+        )
+        {
+            try
+            {
+                var scope = await ResolveStoreScopeAsync();
+                if (scope.Forbidden)
+                {
+                    return Forbid();
+                }
+
+                return ToResult(await _service.GetBranchPurchasesAsync(request, scope.ScopedStoreCodes));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "本地商品分店进货量查询失败");
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    ApiResponse<List<LocalSupplierProductSalesBranchPurchaseDto>>.Error(
+                        "本地商品分店进货量查询失败"
+                    )
+                );
+            }
+        }
+
         private IActionResult ToResult<T>(ApiResponse<T> result)
         {
             if (result.Success)

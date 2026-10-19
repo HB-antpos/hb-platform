@@ -51,6 +51,11 @@ namespace BlazorApp.Api.Interfaces.React
             IReadOnlyList<string>? scopedStoreCodes
         );
 
+        Task<ApiResponse<List<LocalSupplierProductSalesBranchPurchaseDto>>> GetBranchPurchasesAsync(
+            LocalSupplierProductSalesAnalysisRequest request,
+            IReadOnlyList<string>? scopedStoreCodes
+        );
+
         Task<ApiResponse<LocalSupplierProductSalesBootstrapResponseDto>> BootstrapAsync(
             LocalSupplierProductSalesAnalysisRequest request,
             IReadOnlyList<string>? scopedStoreCodes

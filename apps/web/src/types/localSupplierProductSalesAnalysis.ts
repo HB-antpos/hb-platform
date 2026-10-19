@@ -34,6 +34,16 @@ export interface LocalSupplierProductSalesAnalysisRequest {
   pageNumber?: number
   pageSize?: number
   forceRefresh?: boolean
+  /** branch-purchases 专用：进货日期区间（与筛选日期相互独立），两者都传才生效，否则按筛选日期。 */
+  purchaseStartDate?: string
+  purchaseEndDate?: string
+}
+
+/** 当前商品在各分店的本地进货量（本地进货单，口径同顶部「本地进货量」）。 */
+export interface LocalSupplierProductSalesAnalysisBranchPurchase {
+  branchCode: string
+  branchName?: string
+  purchaseQuantity: number
 }
 
 export interface LocalSupplierProductSalesAnalysisCategoryOption { guid: string; name?: string }

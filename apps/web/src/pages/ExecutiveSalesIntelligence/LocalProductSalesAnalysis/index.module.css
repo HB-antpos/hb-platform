@@ -39,7 +39,8 @@
 .chipIdle { background: #eceff4; color: #5b6878; font-weight: 500; }
 
 /* 三栏：商品列表定宽、分析区自适应、分店排行定宽 */
-.layout { display: grid; grid-template-columns: 330px minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
+/* 右栏分店排行多一列「进货」：随视口在 360～420px 之间加宽，长分店名换行，表格最小 352px（扣卡片边框）防止被裁 */
+.layout { display: grid; grid-template-columns: 330px minmax(0, 1fr) clamp(360px, 24vw, 420px); gap: 12px; align-items: start; }
 .column { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
 .panel { min-width: 0; }
 .panel :global(.ant-card-head) { min-height: 44px; padding: 0 14px; }
@@ -106,3 +107,9 @@
   .kpi:nth-child(odd) { border-left: 1px solid #e2e7ee; }
   .kpi:last-child { grid-column: 1 / -1; border-left: 0; }
 }
+/* 分店排行的进货日期：跟随筛选日期时文字变淡，单独选过后恢复正常色并出现「同筛选」 */
+.purchaseRange { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 14px; border-bottom: 1px solid #e2e7ee; }
+.purchaseLabel { color: #6b788a; font-size: 12px; font-weight: 600; }
+.pickerFollowing :global(.ant-picker-input > input) { color: #98a2b3; }
+.followButton { padding: 0 4px; font-size: 12px; }
+.purchaseError { color: #cf1322; font-size: 12px; }

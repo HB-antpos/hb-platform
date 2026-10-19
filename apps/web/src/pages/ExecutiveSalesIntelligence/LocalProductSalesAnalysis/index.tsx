@@ -1,5 +1,5 @@
 import { ClearOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Checkbox, DatePicker, Empty, Input, Pagination, Segmented, Select, Skeleton, Space, Tree, message } from 'antd'
+import { Alert, Button, Card, Checkbox, DatePicker, Empty, Input, Pagination, Segmented, Select, Skeleton, Space, Tooltip, Tree, message } from 'antd'
 import type { DataNode } from 'antd/es/tree'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -13,6 +13,7 @@ import {
   getLocalSupplierProductSalesAnalysisSupplierCategoryOptions,
   queryLocalSupplierProductSalesAnalysisBootstrap,
   queryLocalSupplierProductSalesAnalysisBranchDaily,
+  queryLocalSupplierProductSalesAnalysisBranchPurchases,
   queryLocalSupplierProductSalesAnalysisBranches,
   queryLocalSupplierProductSalesAnalysisCandidates,
   queryLocalSupplierProductSalesAnalysisInvoiceDetails,
@@ -20,7 +21,7 @@ import {
   queryLocalSupplierProductSalesAnalysisSummary,
 } from '../../../services/localSupplierProductSalesAnalysisService'
 import type {
-  LocalSupplierProductSalesAnalysisBranch,
+  LocalSupplierProductSalesAnalysisBranchPurchase,
   LocalSupplierProductSalesAnalysisCandidate,
   LocalSupplierProductSalesAnalysisDaily,
   LocalSupplierProductSalesAnalysisFilter,
@@ -52,10 +53,12 @@ import {
   mergeVisibleSupplierCategorySelection,
   getSellThroughLevel,
   isSelected,
+  mergeBranchPurchases,
   PAGE_BOOTSTRAP_TIMEOUT_SECONDS,
   PAGE_SECTION_TIMEOUT_SECONDS,
   safeDivide,
   setLocalProductSalesAnalysisSectionError,
+  type LocalProductBranchRankingRow,
   type LocalProductSalesAnalysisBootstrapState,
   type LocalProductSalesAnalysisSectionKey,
   type PageRequestTimeout,
@@ -194,6 +197,13 @@ export default function LocalProductSalesAnalysisPage() {
   const [selectedBranchCode, setSelectedBranchCode] = useState<string>()
   const [branchDailyLoading, setBranchDailyLoading] = useState(false)
   const [branchDailyError, setBranchDailyError] = useState<string>()
+  // 中文注释：分店排行的进货区间默认跟随筛选日期（null）；单独选过后独立，「同筛选」恢复跟随。
+  // 进货结果带上请求键，换商品或重新查询时旧商品的进货不会混进新排行。
+  const [purchaseRangeOverride, setPurchaseRangeOverride] = useState<[Dayjs, Dayjs] | null>(null)
+  const [branchPurchases, setBranchPurchases] = useState<{ key: string; data: LocalSupplierProductSalesAnalysisBranchPurchase[] }>({ key: '', data: [] })
+  const [branchPurchasesLoading, setBranchPurchasesLoading] = useState(false)
+  const [branchPurchasesError, setBranchPurchasesError] = useState<string>()
+  const [branchPurchasesNonce, setBranchPurchasesNonce] = useState(0)
   const [chartMode, setChartMode] = useState<TrendChartMode>('daily')
   const analysisRef = useRef(analysis)
   const filterRef = useRef<LocalSupplierProductSalesAnalysisFilter>(requestFilter(defaultRange, ''))
@@ -206,6 +216,8 @@ export default function LocalProductSalesAnalysisPage() {
   const bootstrapGuardRef = useRef(createLatestRequestGuard())
   const paginationGuardRef = useRef(createLatestRequestGuard())
   const branchDailyGuardRef = useRef(createLatestRequestGuard())
+  const branchPurchasesGuardRef = useRef(createLatestRequestGuard())
+  const branchPurchasesAbortRef = useRef<PageRequestTimeout>()
   const bootstrapAbortRef = useRef<PageRequestTimeout>()
   const paginationAbortRef = useRef<PageRequestTimeout>()
   const branchDailyAbortRef = useRef<PageRequestTimeout>()
@@ -597,6 +609,37 @@ export default function LocalProductSalesAnalysisPage() {
     )
   }
 
+  // 分店段（换商品、重新查询）或进货区间变化时单独拉一次进货，合并进分店排行；不跟销售分段一起重算。
+  const purchaseRangeKey = purchaseRangeOverride ? `${purchaseRangeOverride[0].format('YYYY-MM-DD')}~${purchaseRangeOverride[1].format('YYYY-MM-DD')}` : ''
+  const currentProductCode = analysis.currentProduct?.productCode
+  const branchPurchasesKey = currentProductCode ? [currentProductCode, filterRef.current.startDate, filterRef.current.endDate, purchaseRangeKey].join('|') : ''
+  useEffect(() => {
+    if (!currentProductCode) {
+      branchPurchasesAbortRef.current?.abort()
+      branchPurchasesGuardRef.current.invalidate()
+      setBranchPurchases({ key: '', data: [] })
+      setBranchPurchasesLoading(false)
+      return
+    }
+    const key = branchPurchasesKey
+    const [purchaseStartDate, purchaseEndDate] = purchaseRangeKey ? purchaseRangeKey.split('~') : [undefined, undefined]
+    guardedRequest(branchPurchasesGuardRef.current, branchPurchasesAbortRef,
+      () => { setBranchPurchasesError(undefined); setBranchPurchasesLoading(true) },
+      (signal) => queryLocalSupplierProductSalesAnalysisBranchPurchases({ filter: filterRef.current, selection: selectionRef.current, currentProductCode, purchaseStartDate, purchaseEndDate }, signal),
+      (data) => { setBranchPurchasesError(undefined); setBranchPurchases({ key, data }) },
+      (message) => setBranchPurchasesError(message),
+      () => setBranchPurchasesLoading(false),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis.branches, branchPurchasesKey, branchPurchasesNonce])
+
+  const handlePurchaseRangeChange = (value: [Dayjs | null, Dayjs | null] | null) => {
+    if (!value?.[0] || !value[1]) return
+    const rangeError = getDateRangeError(value[0].format('YYYY-MM-DD'), value[1].format('YYYY-MM-DD'), brisbaneYesterday.format('YYYY-MM-DD'))
+    if (rangeError) { message.warning(localErrorDescription(rangeError, t, i18n.resolvedLanguage)); return }
+    setPurchaseRangeOverride([value[0], value[1]])
+  }
+
   // 分店排行默认选中第一名并加载其日趋势，右栏不再出现“点击分店”的空占位；
   // 切换商品/新查询会把 selectedBranchCode 清空，分店分段返回后在此重新选中。
   useEffect(() => {
@@ -613,6 +656,11 @@ export default function LocalProductSalesAnalysisPage() {
   // 汇总分段已带回每个已选商品的指标（每页 50 条），按商品编码索引后直接用于列表行与当前商品头。
   const summaryByCode = useMemo(() => new Map((analysis.summary?.items ?? []).map((item) => [item.productCode, item])), [analysis.summary])
   const currentSummary = current ? summaryByCode.get(current.productCode) : undefined
+  const branchPurchasesReady = !!branchPurchasesKey && branchPurchases.key === branchPurchasesKey
+  const branchRows = useMemo(() => mergeBranchPurchases(analysis.branches, branchPurchasesReady ? branchPurchases.data : []), [analysis.branches, branchPurchases, branchPurchasesReady])
+  const purchaseRange: [Dayjs, Dayjs] = purchaseRangeOverride ?? [dayjs(filterRef.current.startDate), dayjs(filterRef.current.endDate)]
+  const purchaseRangeLabel = `${purchaseRange[0].format('YYYY-MM-DD')} ~ ${purchaseRange[1].format('YYYY-MM-DD')}`
+  const purchaseColumnHint = t('localProductSalesAnalysis.branchPurchase.columnHint', { range: purchaseRangeLabel, suffix: purchaseRangeOverride ? '' : t('localProductSalesAnalysis.branchPurchase.followingSuffix') })
   const branchSalesTotal = useMemo(() => analysis.branches.reduce((sum, item) => sum + item.netSalesQuantity, 0), [analysis.branches])
   const branchSalesMax = useMemo(() => Math.max(1, ...analysis.branches.map((item) => item.netSalesQuantity)), [analysis.branches])
   const priceTiers = useMemo(() => buildBranchPriceTiers(analysis.branches), [analysis.branches])
@@ -630,12 +678,14 @@ export default function LocalProductSalesAnalysisPage() {
     { title: t('localProductSalesAnalysis.columns.supplier'), width: 140, render: (_, row) => row.supplierName || row.supplierCode || '—' }, { title: t('localProductSalesAnalysis.columns.date'), dataIndex: 'purchaseDate', width: 106, render: (value) => value || '—' },
     { title: t('localProductSalesAnalysis.columns.quantity'), dataIndex: 'quantity', align: 'right', width: 88, render: formatQuantity }, { title: t('localProductSalesAnalysis.columns.purchasePrice'), dataIndex: 'purchasePrice', align: 'right', width: 108, render: formatAud }, { title: t('localProductSalesAnalysis.columns.amount'), dataIndex: 'amount', align: 'right', width: 108, render: formatAud },
   ]
-  const branchColumns: ColumnsType<LocalSupplierProductSalesAnalysisBranch> = [
+  const branchColumns: ColumnsType<LocalProductBranchRankingRow> = [
     { title: '#', width: 36, render: (_, __, index) => <span className={styles.rank}>{index + 1}</span> },
     { title: t('localProductSalesAnalysis.columns.authorizedStore'), render: (_, row) => <><button type="button" className={styles.branchButton} onClick={() => { setSelectedBranchCode(row.branchCode); loadBranchDaily(row.branchCode) }}>{row.branchName || row.branchCode}</button><i className={styles.branchBar} style={{ width: `${Math.max(0, row.netSalesQuantity) / branchSalesMax * 100}%` }} /></> },
-    { title: t('localProductSalesAnalysis.columns.netSalesQuantity'), dataIndex: 'netSalesQuantity', align: 'right', width: 72, render: formatQuantity },
-    { title: t('localProductSalesAnalysis.columns.share'), align: 'right', width: 56, render: (_, row) => <span className={styles.rank}>{branchSalesTotal > 0 ? `${Math.round(row.netSalesQuantity / branchSalesTotal * 100)}%` : '—'}</span> },
-    { title: t('localProductSalesAnalysis.columns.averageUnitPrice'), dataIndex: 'averageUnitPrice', align: 'right', width: 72, render: formatAud },
+    { title: t('localProductSalesAnalysis.columns.netSalesQuantity'), dataIndex: 'netSalesQuantity', align: 'right', width: 56, render: formatQuantity },
+    // 中文注释：进货 = 进货区间内该分店的本地进货单数量；进货结果未到时显示「—」，不把 0 当成真实结果。
+    { title: <Tooltip title={purchaseColumnHint}>{t('localProductSalesAnalysis.columns.branchPurchase')}</Tooltip>, dataIndex: 'purchaseQuantity', align: 'right', width: 52, render: (value: number) => !branchPurchasesReady ? <span className={styles.rank}>—</span> : value ? formatQuantity(value) : <span className={styles.rank}>0</span> },
+    { title: t('localProductSalesAnalysis.columns.share'), align: 'right', width: 52, render: (_, row) => <span className={styles.rank}>{branchSalesTotal > 0 ? `${Math.round(row.netSalesQuantity / branchSalesTotal * 100)}%` : '—'}</span> },
+    { title: t('localProductSalesAnalysis.columns.averageUnitPrice'), dataIndex: 'averageUnitPrice', align: 'right', width: 60, render: formatAud },
   ]
   const dailyColumns: ColumnsType<LocalSupplierProductSalesAnalysisDaily> = [
     { title: t('localProductSalesAnalysis.columns.date'), dataIndex: 'date' },
@@ -820,13 +870,23 @@ export default function LocalProductSalesAnalysisPage() {
       </div>
       <div className={`${styles.column} ${styles.rightColumn}`}>
         <Card className={styles.panel} title={t('localProductSalesAnalysis.branchRanking')} extra={analysis.branches.length ? <span className={styles.muted}>{t('localProductSalesAnalysis.branchCount', { count: analysis.branches.length })}</span> : null} bordered={false}>
-          <PanelState loading={analysisLoading || !!sectionLoading.branches} error={analysis.sectionErrors.branches} empty={!analysis.branches.length} emptyText={t('localProductSalesAnalysis.emptyBranches')} retry={() => retrySection('branches')}>
+          {current ? <div className={styles.purchaseRange}>
+            <span className={styles.purchaseLabel}>{t('localProductSalesAnalysis.branchPurchase.label')}</span>
+            {/* 中文注释：跟随筛选日期时文字变淡；单独选过后出现「同筛选」恢复跟随。 */}
+            <Tooltip title={purchaseRangeOverride ? undefined : t('localProductSalesAnalysis.branchPurchase.followHint')}>
+              <RangePicker size="small" aria-label={t('localProductSalesAnalysis.branchPurchase.label')} className={purchaseRangeOverride ? undefined : styles.pickerFollowing} value={purchaseRange} allowClear={false} disabledDate={(date) => date.isAfter(brisbaneYesterday, 'day')} onChange={handlePurchaseRangeChange} />
+            </Tooltip>
+            {purchaseRangeOverride ? <Button type="link" size="small" className={styles.followButton} aria-label={t('localProductSalesAnalysis.branchPurchase.followAria')} onClick={() => setPurchaseRangeOverride(null)}>{t('localProductSalesAnalysis.branchPurchase.follow')}</Button> : null}
+            {branchPurchasesLoading ? <span className={styles.muted}>…</span> : null}
+            {branchPurchasesError ? <span className={styles.purchaseError}>{localErrorDescription(branchPurchasesError, t, i18n.resolvedLanguage)} <Button type="link" size="small" onClick={() => setBranchPurchasesNonce((value) => value + 1)}>{t('common.retry', '重试')}</Button></span> : null}
+          </div> : null}
+          <PanelState loading={analysisLoading || !!sectionLoading.branches} error={analysis.sectionErrors.branches} empty={!branchRows.length} emptyText={t('localProductSalesAnalysis.emptyBranches')} retry={() => retrySection('branches')}>
             {priceTiers.length ? <div className={styles.priceTiers}>
               {priceTiers.length > 1 ? <span className={`${styles.chip} ${styles.chipWarn}`}>{t('localProductSalesAnalysis.priceTiers.multiple', { count: priceTiers.length })}</span> : <span className={`${styles.chip} ${styles.chipGood}`}>{t('localProductSalesAnalysis.priceTiers.single')}</span>}
               {/* 价位过多时只给区间，避免把一长串均价塞进一行 */}
               <span>{priceTiers.length <= 3 ? priceTiers.map((tier) => t('localProductSalesAnalysis.priceTiers.item', { price: formatAud(tier.price), count: tier.branchCount })).join(' · ') : `${formatAud(priceTiers[0].price)} ~ ${formatAud(priceTiers[priceTiers.length - 1].price)}`}</span>
             </div> : null}
-            <MeasuredTable metricId="executive-sales-intelligence.local-product-sales-analysis.table-2" size="small" rowKey="branchCode" columns={branchColumns} dataSource={analysis.branches} pagination={false} onRow={(record) => ({ className: selectedBranchCode === record.branchCode ? styles.currentBranch : '' })} />
+            <MeasuredTable metricId="executive-sales-intelligence.local-product-sales-analysis.table-2" size="small" rowKey="branchCode" columns={branchColumns} dataSource={branchRows} pagination={false} tableLayout="fixed" scroll={{ x: 352 }} onRow={(record) => ({ className: selectedBranchCode === record.branchCode ? styles.currentBranch : '' })} />
           </PanelState>
         </Card>
         {selectedBranchCode ? <Card className={styles.panel} title={t('localProductSalesAnalysis.branchTrendTitle', { branch: selectedBranch?.branchName || selectedBranchCode })} extra={selectedBranch ? <span className={styles.muted}>{formatQuantity(selectedBranch.netSalesQuantity)} · {formatAud(selectedBranch.averageUnitPrice)}</span> : null} bordered={false}>
