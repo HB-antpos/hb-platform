@@ -84,6 +84,7 @@ import {
   upsertClearancePrice,
 } from "@/modules/product-maintenance/api";
 import { resolveExternalQueryStore } from "@/modules/product-maintenance/external-query-store";
+import { describeLookupRequestError } from "@/modules/product-maintenance/lookup-error-feedback";
 import {
   resolveCreateProductServerError,
   validateCreateProductForm,
@@ -330,7 +331,8 @@ type PrintAction =
 type QueryFeedback =
   | { type: "idle" }
   | { type: "empty"; query: string }
-  | { type: "error"; query?: string; message: string };
+  // retryable：网络 / 超时 / 服务器繁忙，错误卡片上给「重试」按钮。
+  | { type: "error"; query?: string; message: string; retryable?: boolean };
 
 type AutoPricingFlowStatus =
   | "no_action"
@@ -2513,27 +2515,16 @@ function ProductQueryContent() {
             }
           }
         }
-        let message: string;
-        if (isAxiosError(error)) {
-          if (!error.response) {
-            message =
-              error.code === "ECONNABORTED"
-                ? t("messages.lookupTimeout")
-                : t("messages.lookupNetworkError");
-          } else {
-            const status = error.response.status;
-            message =
-              status >= 500
-                ? t("messages.lookupServerError", { status })
-                : t("messages.lookupFailed");
-          }
-        } else {
-          message = getErrorMessage(error, "messages.lookupFailed");
-        }
+        const requestFeedback = describeLookupRequestError(error);
+        let message = requestFeedback
+          ? t(requestFeedback.key, requestFeedback.values)
+          : getErrorMessage(error, "messages.lookupFailed");
+        let retryable = requestFeedback?.retryable ?? false;
         if (error instanceof OfflineCatalogUnavailableError) {
           // 只有「本店确实没有快照」才改写成这条；读快照失败、快照损坏等
           // 必须保留真实原因，否则日志和提示都会把人引向错误方向。
           message = t("offline.catalogMissing");
+          retryable = false;
         }
         console.error("[product-query] lookup failed", {
           selectedStoreCode,
@@ -2546,7 +2537,7 @@ function ProductQueryContent() {
         invalidateActivePromotions();
         lookupSelectionOpenRef.current = false;
         setLookupVisible(false);
-        setQueryFeedback({ type: "error", query: nextKeyword, message });
+        setQueryFeedback({ type: "error", query: nextKeyword, message, retryable });
         setSnackbarMessage(message);
         playQueryFeedback("error");
         return DEFAULT_LOOKUP_FLOW_RESULT;
@@ -4797,6 +4788,20 @@ function ProductQueryContent() {
             <Text variant="bodyMedium" style={styles.emptyText}>
               {queryFeedback.message || t("messages.lookupErrorDescription")}
             </Text>
+            {queryFeedback.retryable && queryFeedback.query ? (
+              // 按手动查询重发同一条码：不会触发扫码后的自动打印，避免网络恢复瞬间误打价签。
+              <Button
+                mode="outlined"
+                icon="refresh"
+                style={styles.lookupRetryButton}
+                disabled={loading}
+                onPress={() => {
+                  void handleLookup(queryFeedback.query, "manual");
+                }}
+              >
+                {t("common:actions.retry")}
+              </Button>
+            ) : null}
           </View>
         ) : (
           <View style={styles.emptyBlock}>
@@ -5590,6 +5595,10 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: "#555",
+  },
+  lookupRetryButton: {
+    alignSelf: "flex-start",
+    marginTop: 4,
   },
   discardReturnModal: {
     marginHorizontal: 18,

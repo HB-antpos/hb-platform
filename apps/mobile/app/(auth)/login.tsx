@@ -166,6 +166,8 @@ export default function Login() {
   const [registeredDevice, setRegisteredDevice] = useState<DeviceProfile | null>(null);
   const [detectedHardwareId, setDetectedHardwareId] = useState("");
   const [error, setError] = useState("");
+  // 网络不通 / 超时 / 服务器繁忙时，提示条上给「重试」按钮，记下重试哪种登录；业务失败为 null。
+  const [errorRetry, setErrorRetry] = useState<"user" | "device" | null>(null);
   const [rememberUsername, setRememberUsername] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [rememberReady, setRememberReady] = useState(false);
@@ -338,6 +340,7 @@ export default function Login() {
     setApiHostDraft(host);
     setApiHostModalVisible(false);
     setError(t("apiHost.saved", { host }));
+    setErrorRetry(null);
     setSnackbarVisible(true);
     await identifyRegisteredDevice();
   }
@@ -398,6 +401,7 @@ export default function Login() {
       setDeviceLookupLoading(false);
     }
     setError("");
+    setErrorRetry(null);
     setLoading(true);
     try {
       await waitForLocalSessionClear();
@@ -425,11 +429,11 @@ export default function Login() {
       if (!isReviewLoginAttempt) {
         rearmIosReviewPreAuth();
       }
-      setError(
-        isRequiredLocationError(err)
-          ? t("errors.locationRequired")
-          : translateLoginError(getFriendlyLoginErrorDescriptor(err)),
-      );
+      const descriptor = isRequiredLocationError(err)
+        ? null
+        : getFriendlyLoginErrorDescriptor(err);
+      setError(descriptor ? translateLoginError(descriptor) : t("errors.locationRequired"));
+      setErrorRetry(descriptor?.retryable ? "user" : null);
       setSnackbarVisible(true);
     } finally {
       setLoading(false);
@@ -442,6 +446,7 @@ export default function Login() {
     }
 
     setError("");
+    setErrorRetry(null);
     setDeviceLoginLoading(true);
     try {
       await waitForLocalSessionClear();
@@ -469,11 +474,11 @@ export default function Login() {
       setSnackbarVisible(true);
     } catch (err) {
       rearmIosReviewPreAuth();
-      setError(
-        isRequiredLocationError(err)
-          ? t("errors.locationRequired")
-          : translateLoginError(getFriendlyDeviceLoginErrorDescriptor(err)),
-      );
+      const descriptor = isRequiredLocationError(err)
+        ? null
+        : getFriendlyDeviceLoginErrorDescriptor(err);
+      setError(descriptor ? translateLoginError(descriptor) : t("errors.locationRequired"));
+      setErrorRetry(descriptor?.retryable ? "device" : null);
       setSnackbarVisible(true);
     } finally {
       setDeviceLoginLoading(false);
@@ -971,8 +976,29 @@ export default function Login() {
 
       <Snackbar
         visible={snackbarVisible}
-        onDismiss={() => setSnackbarVisible(false)}
-        duration={3000}
+        onDismiss={() => {
+          setSnackbarVisible(false);
+          setErrorRetry(null);
+        }}
+        // 可重试的网络类失败多留一会儿，给员工看清原因、点「重试」的时间。
+        duration={errorRetry ? 8000 : 3000}
+        action={
+          errorRetry
+            ? {
+                label: t("common:actions.retry"),
+                onPress: () => {
+                  const retry = errorRetry;
+                  setSnackbarVisible(false);
+                  setErrorRetry(null);
+                  if (retry === "device") {
+                    void handleDeviceLogin();
+                  } else {
+                    void handleLogin();
+                  }
+                },
+              }
+            : undefined
+        }
         wrapperStyle={styles.snackbar}
       >
         {error}
