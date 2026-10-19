@@ -30,8 +30,8 @@
     "loginFailed": "Device login failed. Please try again later.",
     "loginUnauthorized": "Device authorisation has expired. Rebind this device, or ask an admin to check it's enabled.",
     "loginUnavailable": "This device is unavailable. Ask an admin to check its status and bound store.",
-    "loginTimeout": "Device login timed out. Check the server address and network connection.\nServer: {{origin}}",
-    "loginNetwork": "Cannot reach the server for device login. Check the server address, network connection, and backend service.\nServer: {{origin}}",
+    "loginTimeout": "The server is responding too slowly, so device login timed out. Check your network, then tap Retry.\nServer: {{origin}}",
+    "loginNetwork": "Cannot reach the server, so device login did not finish. Check your network, then tap Retry.\nServer: {{origin}}",
     "lookupFailed": "Device detection failed. Please use user login.",
     "lookupTimeout": "Device detection timed out. Check the server address and network connection.\nServer: {{origin}}",
     "lookupNetwork": "Cannot reach the server to detect this device. Check the server address, network connection, and backend service.\nServer: {{origin}}",
@@ -111,12 +111,12 @@
   "errors": {
     "invalidCredentials": "The username or password is incorrect.",
     "accountUnavailable": "This account is unavailable. Ask an admin to check the account status.",
-    "timeout": "Login timed out before the backend responded. Check the server address and network connection.\nServer: {{origin}}",
-    "network": "Cannot reach the server. Check the server address, network connection, and backend service.\nServer: {{origin}}",
-    "server": "The server is temporarily unavailable. Please try again later.",
+    "timeout": "The server is responding too slowly, so login timed out. Check your network, then tap Retry.\nServer: {{origin}}",
+    "network": "Cannot reach the server. Check your Wi-Fi or mobile data, then tap Retry.\nServer: {{origin}}",
+    "server": "The server is busy right now. Wait a moment, then tap Retry.",
     "http": "Login failed. Try again later or ask an admin. Error code: {{status}}",
     "locationRequired": "Login requires your current precise location. Allow location access and try again.",
-    "stepTimeout": "Login is taking too long on this device. Please try again; if it keeps happening, fully close and reopen the app.",
+    "stepTimeout": "Login is taking too long on this device. Tap Retry; if it keeps happening, fully close and reopen the app.",
     "default": "Login failed. Please try again later."
   },
   "changePassword": {

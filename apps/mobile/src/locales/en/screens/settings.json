@@ -358,6 +358,7 @@
     "privacyGroup": "Privacy",
     "dataRights": "Data rights",
     "dataRightsExpand": "Show data rights details",
-    "dataRightsCollapse": "Hide data rights details"
+    "dataRightsCollapse": "Hide data rights details",
+    "networkTestSummary": "Test internet, server and download speed, with a copyable report"
   }
 }

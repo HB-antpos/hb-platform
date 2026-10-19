@@ -24,6 +24,10 @@
     "pageSizeTitle": "Items per page",
     "pageSizeHint": "Changing this returns to page 1"
   },
+  "containerNumber": {
+    "showFull": "Show full container number",
+    "hideFull": "Hide full container number"
+  },
   "actions": {
     "login": "Log in",
     "logout": "Log out",

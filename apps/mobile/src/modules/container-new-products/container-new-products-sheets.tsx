@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Button, Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useContainerNumberDisplay } from "@/components/container-number";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
-import { matchesContainerSearch, PRODUCT_TYPE_FILTERS, WAREHOUSE_FILTERS, type ContainerOption, type ProductTypeFilter, type WarehouseFilter } from "./filters";
+import { formatContainerOptionLabel, matchesContainerSearch, PRODUCT_TYPE_FILTERS, WAREHOUSE_FILTERS, type ContainerOption, type ProductTypeFilter, type WarehouseFilter } from "./filters";
 import { getWarehouseDateText } from "./warehouse-date";
 
 function SectionLabel({ children }: { children: string }) {
@@ -96,6 +97,7 @@ export function ContainerFilterSheet({ visible, options, selected, localToday, o
   onDismiss: () => void;
 }) {
   const { t } = useAppTranslation("containerNewProducts");
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   const [draft, setDraft] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
   useEffect(() => {
@@ -160,7 +162,7 @@ export function ContainerFilterSheet({ visible, options, selected, localToday, o
         >
           <MaterialCommunityIcons name={checked ? "checkbox-marked" : "checkbox-blank-outline"} size={24} color={checked ? HB_COLORS.action : HB_COLORS.textSecondary} />
           <View style={styles.optionText}>
-            <Text style={styles.optionTitle} numberOfLines={1}>{option.label}</Text>
+            <Text style={styles.optionTitle} numberOfLines={1}>{formatContainerOptionLabel(option, formatContainerNumber)}</Text>
             {warehouseDate ? <Text style={styles.optionHint} numberOfLines={1}>{t(warehouseDate.key, { date: warehouseDate.date })}</Text> : null}
           </View>
           <View style={styles.containerCounts}>

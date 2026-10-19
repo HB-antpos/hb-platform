@@ -550,6 +550,7 @@ export async function exportContainerDetails(
       query: request.query,
       selectedHguids: request.selectedHguids ?? [],
       columns: request.columns ?? [],
+      showFullContainerNumber: request.showFullContainerNumber === true,
     },
     { responseType: "arraybuffer" },
   );

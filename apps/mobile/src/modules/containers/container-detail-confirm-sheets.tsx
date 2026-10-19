@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useContainerNumberDisplay } from "@/components/container-number";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -196,6 +197,7 @@ export function ContainerDetailSubmitSheet({
   errorMessage: string;
 }) {
   const { t } = useAppTranslation("containerDetail");
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   const footer = phase === "confirm" ? (
     <View style={styles.footerRow}>
       <Button mode="outlined" style={[BUSINESS_UI.button, styles.footerButton]} contentStyle={BUSINESS_UI.buttonContent} onPress={onDismiss}>
@@ -221,7 +223,7 @@ export function ContainerDetailSubmitSheet({
     >
       {phase === "confirm" ? (
         <>
-          <Text style={styles.body}>{t("submitContainer.scope", { container: containerNumber || "--" })}</Text>
+          <Text style={styles.body}>{t("submitContainer.scope", { container: containerNumber ? formatContainerNumber(containerNumber) : "--" })}</Text>
           <Text style={styles.caption}>
             {rowCount === undefined ? t("submitContainer.scopeNote") : t("submitContainer.scopeNoteWithRows", { count: rowCount })}
           </Text>

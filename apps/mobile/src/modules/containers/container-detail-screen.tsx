@@ -4,11 +4,13 @@ import { useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, HelperText, Snackbar, Switch, Text, TextInput } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useContainerNumberDisplay } from "@/components/container-number";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaginationBar } from "@/components/ui/pagination";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { containerNumberFileNamePart } from "@/shared/utils/container-number";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import {
   DEFAULT_RETAIL_PRICE_SYNC_CHOICE,
@@ -222,6 +224,8 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
   const { height: windowHeight } = useWindowDimensions();
   const access = useAuthStore((state) => state.access);
   const userGuid = useAuthStore((state) => state.user?.userGUID ?? "");
+  // 导出文件的货柜编号跟随「显示完整编号」开关：默认遮罩，文件名只留后 4 位。
+  const { format: formatContainerNumber, showFull: showFullContainerNumber } = useContainerNumberDisplay();
 
   // ---- 查询状态 ----
   const [keyword, setKeyword] = useState("");
@@ -801,7 +805,10 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
         columns: format === "pdf"
           ? [...DEFAULT_CONTAINER_DETAIL_PDF_EXPORT_COLUMNS]
           : [...DEFAULT_CONTAINER_DETAIL_EXPORT_COLUMNS],
-        fileNameHint: headerInfo.containerNumber || containerGuid,
+        fileNameHint: headerInfo.containerNumber
+          ? containerNumberFileNamePart(formatContainerNumber(headerInfo.containerNumber))
+          : containerGuid,
+        showFullContainerNumber,
       }),
     onSuccess: (result) => setSnackbar(t("messages.exported", { name: result.fileName })),
     onError: (error) => setSnackbar(errorMessageOf(error, t("messages.exportFailed"))),

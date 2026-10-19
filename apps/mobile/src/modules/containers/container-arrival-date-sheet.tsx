@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Button, HelperText, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
+import { useContainerNumberDisplay } from "@/components/container-number";
 import { formatMonthDate, MonthDatePicker } from "@/components/attendance/MonthDatePicker";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -58,6 +59,7 @@ export function ContainerArrivalDateSheet({
   const [draft, setDraft] = useState<ArrivalDateDraft>(original);
   const [field, setField] = useState<ArrivalDateField>(initialField);
   const today = useMemo(() => formatMonthDate(new Date()), []);
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
 
   // 每次打开新的货柜都从服务端当前值重新开始编辑。
   useEffect(() => {
@@ -82,7 +84,7 @@ export function ContainerArrivalDateSheet({
         { label: t("list.dateSheet.plus7Days"), value: addDays(current || today, 7) },
       ];
 
-  const containerName = container?.货柜编号 || t("list.card.untitled");
+  const containerName = container?.货柜编号 ? formatContainerNumber(container.货柜编号) : t("list.card.untitled");
 
   return (
     <BusinessSheet

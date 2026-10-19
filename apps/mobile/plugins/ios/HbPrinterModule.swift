@@ -722,7 +722,9 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     if !barcode.isEmpty {
       let barcodeType = isValidEan13(barcode) ? "EAN13" : "128"
       commands.append("BARCODE-TEXT 7 0 5")
-      commands.append("BARCODE \(barcodeType) 1 2 30 5 145 \(barcode)")
+      // EAN13 的首位数字印在条码左侧外面：x=5 会被挤出标签左边界裁掉，必须留出位置（与 TS / Kotlin 一致）。
+      let barcodeX = barcodeType == "EAN13" ? 30 : 5
+      commands.append("BARCODE \(barcodeType) 1 2 30 \(barcodeX) 145 \(barcode)")
     }
 
     if let discountBitmap {

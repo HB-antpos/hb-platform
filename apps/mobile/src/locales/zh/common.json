@@ -24,6 +24,10 @@
     "pageSizeTitle": "每页条数",
     "pageSizeHint": "修改后回到第 1 页"
   },
+  "containerNumber": {
+    "showFull": "显示完整货柜编号",
+    "hideFull": "隐藏完整货柜编号"
+  },
   "actions": {
     "login": "登录",
     "logout": "退出登录",

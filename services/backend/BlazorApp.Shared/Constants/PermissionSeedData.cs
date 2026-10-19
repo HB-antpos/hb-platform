@@ -295,6 +295,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Container.Edit, "编辑货柜", "货柜管理", "Web 页面 /warehouse/containers - 编辑货柜"),
                 new(Permissions.Container.Delete, "删除货柜", "货柜管理", "Web 页面 /warehouse/containers - 删除货柜"),
                 new(Permissions.Container.MobileNewProductsView, "移动端查看新品到店", "货柜管理", "移动端「新品到店」- 查看预计过去 1 周至未来 2 周到店的货柜新品"),
+                new(Permissions.Container.ViewFullNumber, "查看完整货柜编号", "货柜管理", "Web 与移动端所有显示货柜编号的页面及导出文件 - 默认只显示后 4 位，有此权限可点按钮查看完整货柜编号"),
                 // Warehouse.Manage 是历史总权限：前端把它当作四项仓库管理权限的并集，后端预订/零售价变更/商品记录接口也直接放行。
                 new(Permissions.Warehouse.Manage, "管理仓库", "仓库管理", "仓库兼容总权限 - 等价于同时拥有仓库商品、订货、分类、标签四项管理权限，并放行预订、零售价变更、商品记录接口"),
                 new(Permissions.Warehouse.ManageProducts, "管理仓库商品", "仓库管理", "Web 页面 /warehouse/products、/warehouse/products/retail-price-changes、/warehouse/products/price-update-tasks、/warehouse/product-grade-management 与移动端「仓库」- 管理仓库商品、零售价变更、建议折扣、分店价格变更任务执行情况和等级"),
@@ -461,6 +462,7 @@ namespace BlazorApp.Shared.Constants
                         Permissions.Container.Create,
                         Permissions.Container.Edit,
                         Permissions.Container.Delete,
+                        Permissions.Container.ViewFullNumber,
                         Permissions.Warehouse.Manage,
                         Permissions.Warehouse.ManageProducts,
                         Permissions.Warehouse.ManageCategories,
