@@ -32,6 +32,7 @@ import dayjs from 'dayjs'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Key, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
 import MoreFiltersButton from '../../../components/listToolbar/MoreFiltersButton'
@@ -323,6 +324,8 @@ export default function ContainersPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const access = useAuthStore((state) => state.access)
+  // 货柜编号默认只显示后 4 位；有权限的账号点眼睛按钮后显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const [loading, setLoading] = useState(false)
   const [containers, setContainers] = useState<ContainerMain[]>([])
   const [total, setTotal] = useState(0)
@@ -645,7 +648,7 @@ export default function ContainersPage() {
   const confirmContainerStatusChange = (record: ContainerMain, nextStatus: number) => {
     Modal.confirm({
       title: t('warehouseUi.containers.changeStatusTitle', {
-        number: record.货柜编号 || record.hguid,
+        number: record.货柜编号 ? formatContainerNumber(record.货柜编号) : record.hguid,
         status: getStatusLabel(nextStatus, t),
       }),
       content: t('warehouseUi.containers.changeStatusContent', { current: getStatusLabel(record.状态, t) }),
@@ -879,7 +882,12 @@ export default function ContainersPage() {
 
   const columns: ColumnsType<ContainerMain> = [
     {
-      title: t('containers.fields.containerNumber'),
+      title: (
+        <span className="wh-containers-number-title">
+          {t('containers.fields.containerNumber')}
+          <ContainerNumberRevealButton />
+        </span>
+      ),
       dataIndex: '货柜编号',
       key: 'containerNumber',
       width: 172,
@@ -889,10 +897,10 @@ export default function ContainersPage() {
           <div className="wh-containers-number-cell">
             {record.hguid ? (
               <Link className="wh-containers-number" to={`/warehouse/container/detail/${record.hguid}`}>
-                {text || record.hguid}
+                {text ? formatContainerNumber(text) : record.hguid}
               </Link>
             ) : (
-              <span className="wh-containers-number">{text || '--'}</span>
+              <span className="wh-containers-number">{text ? formatContainerNumber(text) : '--'}</span>
             )}
             {/* 备注并入货柜编号第二行，原来单独一列常年只显示 -- */}
             {remark ? <div className="wh-containers-sub" title={remark}>{remark}</div> : null}
@@ -1036,7 +1044,9 @@ export default function ContainersPage() {
                   type="text"
                   icon={<MoreOutlined />}
                   loading={statusUpdatingKeys.includes(recordKey)}
-                  aria-label={t('warehouseUi.containers.actionMore', { number: record.货柜编号 || record.hguid })}
+                  aria-label={t('warehouseUi.containers.actionMore', {
+                    number: record.货柜编号 ? formatContainerNumber(record.货柜编号) : record.hguid,
+                  })}
                 />
               </Dropdown>
             ) : null}
@@ -1087,6 +1097,7 @@ export default function ContainersPage() {
                 {t('containers.status.loaded')}
               </span>
             </span>
+            <ContainerNumberRevealButton className="wh-containers-calendar-reveal" />
           </div>
           {calendar ? (
             <div className="wh-containers-calendar-scroll">
@@ -1115,7 +1126,9 @@ export default function ContainersPage() {
                         ) : null}
                       </div>
                       {column.items.map(({ container, eta, volume }) => {
-                        const number = container.货柜编号 || container.hguid
+                        const number = container.货柜编号
+                          ? formatContainerNumber(container.货柜编号)
+                          : container.hguid
                         const content = (
                           <>
                             <span className="wh-containers-chip-number">

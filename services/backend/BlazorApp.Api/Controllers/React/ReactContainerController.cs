@@ -6,6 +6,7 @@ using BlazorApp.Api.Services.Containers;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -69,6 +70,7 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         [HttpPost("{containerGuid}/allocation-sales/query")]
         [Authorize(Policy = Permissions.Container.View)]
+        [MaskContainerNumbers]
         public async Task<IActionResult> QueryAllocationSales(
             string containerGuid,
             [FromBody] ContainerAllocationSalesQueryRequest request
@@ -146,6 +148,10 @@ namespace BlazorApp.Api.Controllers.React
         /// </summary>
         private Task<List<ContainerMainDto>> LoadComingSoonSummariesAsync(DateTime sydneyToday) =>
             _containerReactService.GetComingSoonSummariesAsync(sydneyToday);
+
+        /// <summary>当前账号是否可查看完整货柜编号（管理员自动通过）。</summary>
+        private async Task<bool> CanViewFullContainerNumberAsync() =>
+            (await _authorizationService.AuthorizeAsync(User, null, Permissions.Container.ViewFullNumber)).Succeeded;
 
         private async Task<bool> HasAnyPermissionAsync(IEnumerable<string> permissions)
         {
@@ -252,6 +258,7 @@ namespace BlazorApp.Api.Controllers.React
         /// <returns>货柜列表</returns>
         [HttpPost("list")]
         [Authorize(Policy = Permissions.Container.View)]
+        [MaskContainerNumbers]
         public async Task<IActionResult> GetContainers([FromBody] ContainerQueryRequest request)
         {
             try
@@ -299,6 +306,7 @@ namespace BlazorApp.Api.Controllers.React
         /// <returns>货柜详情</returns>
         [HttpGet("{containerGuid}")]
         [Authorize(Policy = Permissions.Container.View)]
+        [MaskContainerNumbers]
         public async Task<IActionResult> GetContainerDetail(string containerGuid)
         {
             try
@@ -388,6 +396,19 @@ namespace BlazorApp.Api.Controllers.React
                             message = $"输入验证失败: {string.Join(", ", errors)}",
                         }
                     );
+                }
+
+                // 货柜编号只有能查看完整编号的账号才能修改：遮罩值（含 *）不是真实编号，
+                // 无权限账号的编辑表单里只有遮罩值，原样回传会把遮罩值写进数据库，所以一律按「不修改编号」处理。
+                if (
+                    dto.货柜编号 != null
+                    && (
+                        ContainerNumberMasking.IsMasked(dto.货柜编号)
+                        || !await CanViewFullContainerNumberAsync()
+                    )
+                )
+                {
+                    dto.货柜编号 = null;
                 }
 
                 _logger.LogInformation(
@@ -560,6 +581,14 @@ namespace BlazorApp.Api.Controllers.React
 
                 // React 明细复用现有义乌导出引擎，只在入口处做 DTO 形状适配。
                 var exportContainer = MapReactContainerForExport(container, containerGuid);
+                // 导出文件默认遮罩货柜编号；只有调用方明确要求（界面上已点「显示完整编号」）且账号有权限时才写完整编号。
+                var showFullContainerNumber =
+                    request.ShowFullContainerNumber
+                    && await CanViewFullContainerNumberAsync();
+                exportContainer.ContainerNumber = ContainerNumberMasking.Apply(
+                    exportContainer.ContainerNumber,
+                    showFullContainerNumber
+                );
                 var exportDetails = details
                     .Select(detail => MapReactContainerDetailForExport(detail, containerGuid))
                     .ToList();
@@ -739,7 +768,9 @@ namespace BlazorApp.Api.Controllers.React
             string extension
         )
         {
-            var name = string.IsNullOrWhiteSpace(containerNumber) ? containerGuid : containerNumber;
+            // 遮罩编号的 * 在 Windows 文件名里非法，去掉后只留可见的后 4 位（如 货柜明细_8793_...）。
+            var visibleNumber = ContainerNumberMasking.ToFileNamePart(containerNumber);
+            var name = string.IsNullOrWhiteSpace(visibleNumber) ? containerGuid : visibleNumber;
             foreach (var invalidChar in Path.GetInvalidFileNameChars())
             {
                 name = name.Replace(invalidChar, '_');
@@ -863,6 +894,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 按到仓库日期升序；与移动端 HB新品页同一口径。
         /// </summary>
         [HttpGet("coming-soon/summaries")]
+        [MaskContainerNumbers]
         public async Task<IActionResult> GetComingSoonContainerSummaries()
         {
             if (!await HasAnyPermissionAsync(ComingSoonReadPermissions)) return Forbid();
@@ -1683,6 +1715,12 @@ namespace BlazorApp.Api.Controllers.React
                     return BadRequest(new { success = false, message = "货柜编号不能为空" });
                 }
 
+                // * 是遮罩字符，真实货柜编号不会包含；拒绝后列表里不会出现无法区分真假的编号。
+                if (ContainerNumberMasking.IsMasked(dto.货柜编号))
+                {
+                    return BadRequest(new { success = false, message = "货柜编号不能包含 *" });
+                }
+
                 var containerGuid = await _containerReactService.CreateContainerAsync(dto);
 
                 return Ok(
@@ -1824,6 +1862,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 货柜选取口径与 summaries 完全一致（到仓库日期 悉尼今天 -7 天 ~ +21 天）。
         /// </summary>
         [HttpGet("coming-soon")]
+        [MaskContainerNumbers]
         public async Task<IActionResult> GetComingSoonContainers()
         {
             if (!await HasAnyPermissionAsync(ComingSoonReadPermissions)) return Forbid();

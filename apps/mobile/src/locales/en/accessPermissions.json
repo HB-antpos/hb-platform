@@ -165,6 +165,10 @@
       "name": "View containers",
       "description": "View container lists and details."
     },
+    "Container.ViewFullNumber": {
+      "name": "View full container numbers",
+      "description": "Container numbers show only the last 4 characters by default on web, mobile and exports; with this permission, tap the eye button to see the full number."
+    },
     "Dashboard": {
       "name": "Access web admin",
       "description": "Open the web admin home dashboard."

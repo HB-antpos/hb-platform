@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Features.StoreOrders.Common;
 using BlazorApp.Api.Features.StoreOrders.ImportPriceVariance;
 using BlazorApp.Shared.DTOs;
@@ -12,6 +13,7 @@ namespace BlazorApp.Api.Controllers.React.StoreOrders;
 [ApiController]
 [Route(StoreOrderControllerBase.BaseRoute)]
 [Authorize]
+[MaskContainerNumbers]
 public sealed class StoreOrderImportPriceVarianceController(
     IStoreOrderImportPriceVarianceSlice importPriceVarianceSlice,
     IStoreOrderAccessPolicy accessPolicy,

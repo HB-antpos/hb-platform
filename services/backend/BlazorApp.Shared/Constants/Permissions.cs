@@ -351,6 +351,11 @@ namespace BlazorApp.Shared.Constants
             public const string Delete = "Container.Delete";
             /// <summary>移动端查看近期新品到店预告。</summary>
             public const string MobileNewProductsView = "Container.MobileNewProductsView";
+            /// <summary>
+            /// 查看完整货柜编号：没有它的账号在接口返回与导出文件里只看到后 4 位（其余为 *）。
+            /// 有它的账号界面上默认仍遮罩，点「显示完整编号」按钮后才显示全部。管理员角色自动具备。
+            /// </summary>
+            public const string ViewFullNumber = "Container.ViewFullNumber";
         }
 
         public static class Warehouse

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using BlazorApp.Api.Interfaces;
@@ -12,6 +13,8 @@ namespace BlazorApp.Api.Controllers
     [ApiController]
     [Route("api/v1/yiwu-containers")]
     [Authorize]
+    // 旧接口同样返回货柜编号：无「查看完整货柜编号」权限的账号只拿到后 4 位。
+    [MaskContainerNumbers]
     public class YiwuContainerController : ControllerBase
     {
         private readonly IYiwuContainerService _containerService;
@@ -728,6 +731,8 @@ namespace BlazorApp.Api.Controllers
                     return BadRequest(new { success = false, message = "导出请求不能为空" });
                 }
 
+                // 是否写完整货柜编号只看账号权限，不信任客户端。
+                request.ShowFullContainerNumber = await HttpContext.CanViewFullContainerNumberAsync();
                 var result = await _containerService.ExportContainerDetailsToExcelAsync(request);
 
                 if (result.Success && result.Data != null)
@@ -768,6 +773,8 @@ namespace BlazorApp.Api.Controllers
                     return BadRequest(new { success = false, message = "导出请求不能为空" });
                 }
 
+                // 是否写完整货柜编号只看账号权限，不信任客户端。
+                request.ShowFullContainerNumber = await HttpContext.CanViewFullContainerNumberAsync();
                 var result = await _containerService.ExportContainerDetailsToPdfAsync(request);
 
                 if (result.Success && result.Data != null)

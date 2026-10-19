@@ -143,6 +143,7 @@ namespace BlazorApp.Shared.Constants
             "Attendance.Settings.Edit",
             "AustralianSuppliers.View",
             "Container.View",
+            "Container.ViewFullNumber",
             "DailyCloseRecords.View",
             "DeviceRegistration.View",
             "DomesticPurchase.ManagePrefixCodes",

@@ -9,6 +9,7 @@ import {
   Text,
 } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useContainerNumberDisplay } from "@/components/container-number";
 import { buildInsightFlowSegments } from "@/modules/warehouse-product-insights/logic";
 import type {
   WarehouseInsightTab,
@@ -442,11 +443,13 @@ function RecordList({
   tab: WarehouseInsightTab;
   t: Translate;
 }) {
+  // 货柜编号默认只显示后 4 位；无权限账号后端已遮罩，遮罩值可能重复，所以 key 带序号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   const rows =
     tab === "containers"
-      ? data.containers.map((row) => ({
-          key: `${row.containerNumber}:${row.arrivalDate}`,
-          title: row.containerNumber || "—",
+      ? data.containers.map((row, index) => ({
+          key: `${row.containerNumber}:${row.arrivalDate}:${index}`,
+          title: row.containerNumber ? formatContainerNumber(row.containerNumber) : "—",
           meta: row.isEstimatedArrival
             ? t("containerSheet.estimatedArrival", { date: shortDate(row.arrivalDate) })
             : t("containerSheet.actualArrival", { date: shortDate(row.arrivalDate) }),

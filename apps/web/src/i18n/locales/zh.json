@@ -694,6 +694,8 @@
     "noImage": "无图",
     "copySuccess": "复制成功",
     "copyFailed": "复制失败",
+    "showFullContainerNumber": "显示完整货柜编号",
+    "hideFullContainerNumber": "隐藏完整货柜编号",
     "domestic": "国内",
     "warehouseLabel": "仓库",
     "append": "追加",

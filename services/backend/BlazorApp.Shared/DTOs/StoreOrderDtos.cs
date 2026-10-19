@@ -1,3 +1,4 @@
+using BlazorApp.Shared.Helper;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
@@ -403,6 +404,7 @@ namespace BlazorApp.Shared.DTOs
     public decimal VarianceAmountTotal { get; set; }
     public int DetailCount { get; set; }
     public string? FirstContainerCode { get; set; }
+    [JsonConverter(typeof(ContainerNumberJsonConverter))]
     public string? FirstContainerNumber { get; set; }
     public DateTime? FirstContainerDate { get; set; }
   }
@@ -491,6 +493,7 @@ namespace BlazorApp.Shared.DTOs
     public decimal BaselineImportAmount { get; set; }
     public decimal VarianceAmount { get; set; }
     public string? FirstContainerCode { get; set; }
+    [JsonConverter(typeof(ContainerNumberJsonConverter))]
     public string? FirstContainerNumber { get; set; }
     public DateTime? FirstContainerDate { get; set; }
   }

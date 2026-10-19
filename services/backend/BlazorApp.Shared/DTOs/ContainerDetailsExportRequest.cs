@@ -25,6 +25,12 @@ namespace BlazorApp.Shared.DTOs
         public string ExportFormat { get; set; } = "excel";
 
         /// <summary>
+        /// 是否写完整货柜编号：只由控制器按「查看完整货柜编号」权限设置，不接受客户端传入（JsonIgnore）。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool ShowFullContainerNumber { get; set; }
+
+        /// <summary>
         /// 导出列列表
         /// </summary>
         public List<string> ExportColumns { get; set; } = new();
@@ -64,6 +70,12 @@ namespace BlazorApp.Shared.DTOs
         /// 兼容 web 端旧字段名
         /// </summary>
         public List<string>? ExportColumns { get; set; }
+
+        /// <summary>
+        /// 是否在导出文件里写完整货柜编号；默认 false（只露后 4 位）。
+        /// 只有账号具备「查看完整货柜编号」权限时才生效，否则后端仍按遮罩导出。
+        /// </summary>
+        public bool ShowFullContainerNumber { get; set; }
     }
 
     /// <summary>

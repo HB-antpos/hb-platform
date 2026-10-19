@@ -71,6 +71,8 @@ export const P = {
     Delete: 'Container.Delete',
     // 移动端「新品到店」页面专用权限，与后端 Permissions.Container.MobileNewProductsView 一致。
     MobileNewProductsView: 'Container.MobileNewProductsView',
+    // 查看完整货柜编号：没有它时后端只返回后 4 位；有它时界面默认仍遮罩，点眼睛按钮才显示完整编号。
+    ViewFullNumber: 'Container.ViewFullNumber',
   },
   SalesOrders: {
     View: 'SalesOrders.View',

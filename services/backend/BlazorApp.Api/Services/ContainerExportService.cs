@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using BlazorApp.Api.Services.Pdf;
 using System.Net.Http;
@@ -68,6 +69,21 @@ namespace BlazorApp.Api.Services
         /// <summary>
         /// 生成Excel文件
         /// </summary>
+        /// <summary>
+        /// Excel 工作表名不能含 : \ / ? * [ ] 且最长 31 字符；遮罩编号的 * 去掉后只留后 4 位。
+        /// </summary>
+        internal static string BuildWorksheetName(string? containerNumber)
+        {
+            var number = ContainerNumberMasking.ToFileNamePart(containerNumber) ?? string.Empty;
+            foreach (var invalidChar in new[] { ':', '\\', '/', '?', '*', '[', ']' })
+            {
+                number = number.Replace(invalidChar, '_');
+            }
+
+            var name = string.IsNullOrWhiteSpace(number) ? "货柜明细" : $"货柜明细_{number}";
+            return name.Length > 31 ? name[..31] : name;
+        }
+
         public async Task<byte[]> GenerateExcelFileAsync(
             YiwuContainerDto container,
             List<YiwuContainerDetailDto> details,
@@ -78,7 +94,7 @@ namespace BlazorApp.Api.Services
                 var selectedColumns = ResolveExportColumns(exportColumns);
 
                 using var workbook = new XLWorkbook();
-                var worksheet = workbook.Worksheets.Add($"货柜明细_{container.ContainerNumber}");
+                var worksheet = workbook.Worksheets.Add(BuildWorksheetName(container.ContainerNumber));
 
                 // 设置货柜基本信息
                 int row = 1;

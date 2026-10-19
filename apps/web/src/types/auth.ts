@@ -81,6 +81,8 @@ export interface AccessControl {
   canCreateContainer: boolean
   canEditContainer: boolean
   canDeleteContainer: boolean
+  /** 可点按钮查看完整货柜编号（默认只显示后 4 位） */
+  canViewFullContainerNumber: boolean
   canManageStoreProducts: boolean
   canEditStoreProducts: boolean
   canCreateStoreProducts: boolean

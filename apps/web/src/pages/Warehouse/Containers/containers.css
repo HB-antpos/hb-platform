@@ -360,3 +360,14 @@ a.wh-containers-chip:focus-visible {
 .wh-containers-summary-value {
   font-weight: 600;
 }
+
+/* 货柜编号列头：标题与「显示完整编号」眼睛按钮同行 */
+.wh-containers-number-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wh-containers-calendar-reveal {
+  margin-left: 4px;
+}

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -53,6 +54,7 @@ namespace BlazorApp.Api.Controllers.React
 
         [HttpPost("{productCode}/containers/query")]
         [Authorize(Policy = Permissions.Container.View)]
+        [MaskContainerNumbers]
         public async Task<IActionResult> QueryContainers(
             string productCode,
             [FromBody] WarehouseProductRecordContainerQueryRequest request

@@ -827,13 +827,24 @@ export async function syncContainersFromHq(startDate?: string): Promise<SyncResu
   return response.data ?? { isSuccess: response.success, message: response.message }
 }
 
-export async function translateHqProductNamesByContainerNumber(containerNumber: string): Promise<HqTranslationResult> {
+/**
+ * 按货柜翻译 HQ 英文名。优先传本地货柜 GUID，由后端读取真实货柜编号：
+ * 无「查看完整货柜编号」权限的账号拿到的编号是遮罩值（含 *），不能直接拿去匹配 HQ，遮罩值不回传。
+ */
+export async function translateHqProductNamesByContainerNumber(
+  target: string | { containerGuid?: string; containerNumber?: string },
+): Promise<HqTranslationResult> {
+  const { containerGuid, containerNumber } = typeof target === 'string'
+    ? { containerGuid: undefined, containerNumber: target }
+    : target
+  const containerNumbers = containerNumber && !containerNumber.includes('*') ? [containerNumber] : []
   const response = await request<{ success?: boolean; message?: string; data?: RawHqTranslationResult } & RawHqTranslationResult>(
     '/api/react/v1/hq-products/translate-names/by-container-number',
     {
       method: 'POST',
       data: {
-        ContainerNumbers: [containerNumber],
+        ContainerNumbers: containerNumbers,
+        ...(containerGuid ? { ContainerGuids: [containerGuid] } : {}),
         OverwriteExisting: false,
       },
     },

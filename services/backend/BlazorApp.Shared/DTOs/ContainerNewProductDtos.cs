@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
+
 namespace BlazorApp.Shared.DTOs;
 
 public sealed class ContainerNewProductsResponseDto
@@ -25,6 +28,7 @@ public sealed class ContainerNewProductItemDto
     /// </summary>
     public decimal? RetailPrice { get; init; }
     public string ContainerCode { get; init; } = string.Empty;
+    [JsonConverter(typeof(ContainerNumberJsonConverter))]
     public string? ContainerNumber { get; init; }
     /// <summary>预计到店区间起始日（NSW = 货柜日期 + 0 个工作日，QLD = + 3 个工作日）；旧版 App 只读这个字段当单一到店日。</summary>
     public DateOnly EstimatedStoreArrivalDate { get; init; }

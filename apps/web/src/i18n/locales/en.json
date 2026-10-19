@@ -694,6 +694,8 @@
     "noImage": "No Image",
     "copySuccess": "Copied",
     "copyFailed": "Copy failed",
+    "showFullContainerNumber": "Show full container number",
+    "hideFullContainerNumber": "Hide full container number",
     "domestic": "Domestic",
     "warehouseLabel": "Warehouse",
     "append": "Append",

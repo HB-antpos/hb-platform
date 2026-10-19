@@ -5,6 +5,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
@@ -107,7 +108,9 @@ export default function ProductImportPage() {
   const [containers, setContainers] = useState<ContainerMain[]>([])
   const [loadingContainers, setLoadingContainers] = useState(false)
   const [syncProductNamesToHq, setSyncProductNamesToHq] = useState(false)
+  // 选中的是货柜 GUID（hguid）：货柜编号可能是遮罩值且允许重复，不能作为发送货柜的业务键。
   const [selectedContainerId, setSelectedContainerId] = useState('')
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false)
   const [conflictRows, setConflictRows] = useState<ContainerConflictRow[]>([])
   const [pendingSend, setPendingSend] = useState<{ containerId: string; notes: string; products: ProductImportItem[] } | null>(null)
@@ -832,11 +835,16 @@ export default function ProductImportPage() {
     : ''
 
   const containerOptions = useMemo(() => containers
-    .filter((c) => c.货柜编号)
+    .filter((c) => c.货柜编号 && c.hguid)
     .map((c) => ({
-      label: t('productImport.containerOptionLabel', '{{code}} · 装柜 {{date}}', { code: c.货柜编号, date: formatDate(c.装柜日期) }),
-      value: c.货柜编号 as string,
-    })), [containers, t])
+      label: t('productImport.containerOptionLabel', '{{code}} · 装柜 {{date}}', { code: formatContainerNumber(c.货柜编号), date: formatDate(c.装柜日期) }),
+      value: c.hguid,
+    })), [containers, formatContainerNumber, t])
+  const pendingSendContainerLabel = useMemo(() => {
+    if (!pendingSend) return undefined
+    const target = containers.find((c) => c.hguid === pendingSend.containerId)
+    return target?.货柜编号 ? formatContainerNumber(target.货柜编号) : undefined
+  }, [containers, formatContainerNumber, pendingSend])
 
   const supplierOptions = useMemo(() => [...suppliers].sort((a, b) => (a.supplierCode || '').localeCompare(b.supplierCode || '')).map((s) => ({
     label: `${s.supplierCode} - ${s.supplierName}${s.shopNumber ? ` - ${s.shopNumber}` : ''}`,
@@ -1423,7 +1431,7 @@ export default function ProductImportPage() {
       <DuplicateDialog open={duplicateDialogOpen} duplicateGroups={duplicateGroups} onClose={() => setDuplicateDialogOpen(false)} onConfirm={handleMergeDuplicates} />
       <ConflictResolutionDialog
         open={conflictDialogOpen}
-        containerCode={pendingSend?.containerId}
+        containerCode={pendingSendContainerLabel}
         conflicts={conflictRows}
         totalSendCount={pendingSend?.products.length ?? 0}
         confirming={busyAction === 'send'}

@@ -1,3 +1,4 @@
+using BlazorApp.Shared.Helper;
 using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
@@ -1618,6 +1619,12 @@ namespace BlazorApp.Api.Services
                     };
                 }
 
+                // 导出文件默认遮罩货柜编号（只露后 4 位），有「查看完整货柜编号」权限时由控制器放开。
+                container.ContainerNumber = ContainerNumberMasking.Apply(
+                    container.ContainerNumber,
+                    request.ShowFullContainerNumber
+                );
+
                 // 获取明细数据
                 var allDetails = await GetContainerDetailsAsync(request.ContainerCode);
                 var detailsToExport = request.Details.Any()
@@ -1644,7 +1651,7 @@ namespace BlazorApp.Api.Services
                     {
                         FileContent = base64Content,
                         ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        FileName = $"货柜明细_{container.ContainerNumber}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                        FileName = $"货柜明细_{ContainerNumberMasking.ToFileNamePart(container.ContainerNumber)}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
                         FileSize = excelBytes.Length
                     }
                 };
@@ -1678,6 +1685,12 @@ namespace BlazorApp.Api.Services
                     };
                 }
 
+                // 导出文件默认遮罩货柜编号（只露后 4 位），有「查看完整货柜编号」权限时由控制器放开。
+                container.ContainerNumber = ContainerNumberMasking.Apply(
+                    container.ContainerNumber,
+                    request.ShowFullContainerNumber
+                );
+
                 // 获取明细数据
                 var allDetails = await GetContainerDetailsAsync(request.ContainerCode);
                 var detailsToExport = request.Details.Any()
@@ -1704,7 +1717,7 @@ namespace BlazorApp.Api.Services
                     {
                         FileContent = base64Content,
                         ContentType = "application/pdf",
-                        FileName = $"货柜明细_{container.ContainerNumber}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf",
+                        FileName = $"货柜明细_{ContainerNumberMasking.ToFileNamePart(container.ContainerNumber)}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf",
                         FileSize = pdfBytes.Length
                     }
                 };
