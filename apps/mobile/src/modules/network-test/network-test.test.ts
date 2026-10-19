@@ -42,6 +42,14 @@ const link = (id: NetworkLinkResult["id"], samples: NetworkSample[], extra: Part
 // ── 评级 ──
 {
   assert.equal(rateLink(link("server", [ok(80), ok(120)])), "good");
+  // 悉尼到新加坡服务器：TCP 握手就要 260~300 毫秒，生产实测平均 373 / 登录态 439 毫秒都应是良好。
+  assert.equal(rateLink(link("server", [316, 340, 360, 373, 483].map(ok))), "good");
+  assert.equal(rateLink(link("auth", [350, 430, 517].map(ok))), "good");
+  assert.equal(rateLink(link("server", [ok(500), ok(700)])), "fair");
+  assert.equal(rateLink(link("server", [ok(1400), ok(1800)])), "bad");
+  // 外网基线仍用严阈值：到 Cloudflare 平均 700 毫秒说明手机 / 门店网络本身差。
+  assert.equal(rateLink(link("internet", [ok(700), ok(650)])), "fair");
+  assert.equal(rateLink(link("internet", [ok(1300), ok(1200)])), "bad");
   assert.equal(rateLink(link("server", [ok(80), ok(1200)])), "fair");
   assert.equal(rateLink(link("server", Array.from({ length: 9 }, () => ok(100)).concat(fail(8000)))), "fair");
   assert.equal(rateLink(link("server", [ok(100), fail(8000)])), "bad");
