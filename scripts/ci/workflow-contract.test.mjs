@@ -333,6 +333,14 @@ test('POS CI 只消费根 workspace lock，并由各 job 单次安装后调用 w
   for (const jobName of ['linux_node', 'linux_dotnet', 'macos', 'android']) {
     assert.match(workflowJobBlock(source, jobName), /cache-dependency-path:[\s\S]*?package-lock\.json/)
   }
+  // Node 矩阵各组件必须按自己的锁文件分 key；共用 key 时不装依赖的组件会抢先存入空缓存。
+  assert.match(linuxNode, /cache:\s*\$\{\{\s*matrix\.component != 'antpos-web' && 'npm' \|\| ''\s*\}\}/)
+  assert.match(linuxNode, /format\('apps\/\{0\}\/package-lock\.json', matrix\.component\)/)
+  assert.doesNotMatch(
+    linuxNode,
+    /cache-dependency-path: \|\s*\n\s*package-lock\.json\s*\n\s*apps\/web\/package-lock\.json/,
+    'Node 矩阵不得再让全部组件共用同一组锁文件生成的缓存 key',
+  )
 
   for (const runner of [nodeRunner, dotnetRunner, macosRunner, androidRunner]) {
     assert.doesNotMatch(runner, /npm --prefix apps\/pos-(?:ipad|handheld) ci/)
