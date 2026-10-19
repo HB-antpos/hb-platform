@@ -22,6 +22,7 @@ import type { AppLanguage } from "@/shared/i18n/types";
 import { HB_COLORS } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { useDeviceStore } from "@/store/device-store";
+import { NETWORK_TEST_ROUTE } from "@/modules/network-test";
 import {
   clampDragPoint,
   FLOATING_BUTTON_SIZE,
@@ -244,6 +245,11 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
     },
     [currentRouteName, priceTasks.firstOverdueStoreCode, priceTasks.reportsLocked, router]
   );
+
+  const openNetworkTest = useCallback(() => {
+    setPanelOpen(false);
+    router.push(NETWORK_TEST_ROUTE as Parameters<typeof router.push>[0]);
+  }, [router]);
 
   // ───────── 手势：一个 PanResponder 同时管点击、拖动、长按 ─────────
   // PanResponder 只创建一次，回调里通过 ref 读最新的尺寸 / 位置 / 动作，避免闭包拿到旧值。
@@ -493,6 +499,7 @@ export function FloatingLanguageButton({ pathname, currentRouteName }: FloatingL
           onNavigate={navigateTo}
           onChangeLanguage={changeLanguage}
           onHideButton={hideButton}
+          onOpenNetworkTest={openNetworkTest}
         />
       ) : null}
 

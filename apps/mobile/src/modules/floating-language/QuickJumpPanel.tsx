@@ -18,6 +18,8 @@ interface QuickJumpPanelProps {
   onNavigate: (routeName: string) => void;
   onChangeLanguage: (language: AppLanguage) => void;
   onHideButton: () => void;
+  /** 打开网络测试页（不受菜单权限限制，任何账号都能用）。 */
+  onOpenNetworkTest: () => void;
 }
 
 /**
@@ -34,6 +36,7 @@ export function QuickJumpPanel({
   onNavigate,
   onChangeLanguage,
   onHideButton,
+  onOpenNetworkTest,
 }: QuickJumpPanelProps) {
   const { t } = useAppTranslation(["workbench", "common"]);
 
@@ -145,6 +148,7 @@ export function QuickJumpPanel({
             {model.canOpenSettings
               ? renderChip("settings", "cog-outline", t("common:floatingLanguage.settings"), () => onNavigate("settings"))
               : null}
+            {renderChip("network-test", "access-point-network", t("networkTest:entry"), onOpenNetworkTest)}
           </View>
 
           {model.recent.length > 0 ? (

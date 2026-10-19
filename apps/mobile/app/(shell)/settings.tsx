@@ -106,6 +106,7 @@ import {
 } from "@/modules/product-maintenance/offline-eligibility";
 import { useOfflineCatalogStore } from "@/modules/product-maintenance/offline-catalog/offline-catalog-store";
 import { useStores } from "@/modules/shop/use-stores";
+import { NETWORK_TEST_ROUTE, useNetworkTestAvailable } from "@/modules/network-test";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 function resolveDeviceStatusText(
@@ -407,6 +408,7 @@ function PrinterDeviceList({
 
 export default function Settings() {
   const router = useRouter();
+  const networkTestAvailable = useNetworkTestAvailable();
   // 「更多设置」是同一个设置路由的另一种视图（?view=more）：这样诊断、服务器设置等弹层的状态与处理函数都留在本组件里，
   // 手势返回 / 安卓返回键也自然回到设置首页。
   const { view: viewParam } = useLocalSearchParams<{ view?: string | string[] }>();
@@ -1249,6 +1251,18 @@ export default function Settings() {
               onPress={openApiHostSettings}
               accessibilityLabel={t("apiHost.change")}
             />
+            {/* 网络测试：测外网、服务器、数据库、图片与下载速度，生成可复制的报告（登录页也有同一入口）。 */}
+            {networkTestAvailable ? (
+              <SettingsRow
+                divider
+                icon="access-point-network"
+                title={t("networkTest:entry")}
+                subtitle={t("more.networkTestSummary")}
+                onPress={() => router.push(NETWORK_TEST_ROUTE as Parameters<typeof router.push>[0])}
+                accessibilityLabel={t("networkTest:entry")}
+                testID="settings-network-test"
+              />
+            ) : null}
           </SectionBlock>
 
           <SectionBlock title={t("more.privacyGroup")}>

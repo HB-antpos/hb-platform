@@ -440,6 +440,7 @@ builder.Services.AddRateLimiter(BrowserExtensionSessionGrantRateLimits.Configure
 builder.Services.AddRateLimiter(RustDeskLoginRateLimits.Configure);
 builder.Services.AddRateLimiter(MinorGuardianRateLimits.Configure);
 builder.Services.AddRateLimiter(PasswordResetRateLimits.Configure);
+builder.Services.AddRateLimiter(NetworkDiagnosticsRateLimits.Configure);
 builder.Services.AddRateLimiter(BrowserExtensionCaptureRateLimits.Configure);
 
 // --------------------- JWT认证配置 ---------------------
@@ -767,6 +768,7 @@ builder.Services.AddScoped<
 >();
 builder.Services.AddScoped<IMobileDeviceAccountTokenIssuer, MobileDeviceAccountTokenIssuer>();
 builder.Services.AddSingleton<IClientIpResolver, ClientIpResolver>(); // 登录公网 IP 解析
+builder.Services.AddScoped<INetworkDiagnosticsProbe, NetworkDiagnosticsProbe>(); // 移动端网络测试：数据库往返耗时
 builder.Services.AddScoped<IServiceApiTokenService, ServiceApiTokenService>(); // 后台自动化 service API token
 builder.Services.AddScoped<IUserService, UserService>(); // 用户管理服务
 builder.Services.AddScoped<
