@@ -1,0 +1,172 @@
+{
+  "entry": "Network test",
+  "title": "Network test",
+  "back": "Back",
+  "reviewUnavailable": "Network test is not available in review mode.",
+  "context": {
+    "server": "Server",
+    "serverSource": {
+      "settings": "Server settings",
+      "deviceBinding": "Device binding"
+    },
+    "publicIp": "Public IP",
+    "publicIpTag": "Seen by server",
+    "publicIpUnknown": "Not identified by server",
+    "publicIpUnavailable": "Not provided by server (backend not updated)",
+    "publicIpNotFetched": "Not retrieved (diagnostics request failed)",
+    "account": "Account",
+    "notLoggedIn": "Not signed in",
+    "device": "Device",
+    "app": "App",
+    "time": "Time",
+    "timeSuffix": " (Sydney)",
+    "embedded": "Built-in",
+    "ota": "OTA {{id}}"
+  },
+  "progress": {
+    "running": "Testing {{current}} / {{total}}",
+    "remaining": "About {{seconds}} s"
+  },
+  "links": {
+    "internet": {
+      "name": "Internet baseline",
+      "desc": "Public test address · is the phone / store online?"
+    },
+    "server": {
+      "name": "Main server",
+      "desc": "{{host}}"
+    },
+    "auth": {
+      "name": "Signed-in API",
+      "desc": "Server request with your sign-in token"
+    },
+    "database": {
+      "name": "Server → database",
+      "desc": "Time for one query on the server"
+    },
+    "image": {
+      "name": "Product images",
+      "desc": "Tencent Cloud COS"
+    },
+    "download": {
+      "name": "Download speed",
+      "desc": "About {{kb}} KB file"
+    }
+  },
+  "state": {
+    "waiting": "Waiting",
+    "willSkip": "Not signed in, will skip",
+    "skippedNotLoggedIn": "Not signed in, skipped",
+    "unavailable": "Not provided by server (backend not updated)",
+    "notRun": "Not tested",
+    "databaseUnavailable": "Database not responding"
+  },
+  "sampleProgress": "Request {{current}} / {{total}}",
+  "successCount": "{{success}}/{{total}} succeeded",
+  "downloadDetail": "{{kb}} KB in {{seconds}} s",
+  "rating": {
+    "good": "Good",
+    "fair": "Fair",
+    "bad": "Poor",
+    "skip": "Skipped",
+    "unavailable": "N/A"
+  },
+  "stats": {
+    "min": "Fastest",
+    "p95": "P95",
+    "jitter": "Jitter",
+    "loss": "Loss"
+  },
+  "spark": {
+    "legend": "Each bar = 1 request, taller = slower",
+    "failed": "Failed"
+  },
+  "sampleError": {
+    "timeout": "timed out",
+    "network": "no connection",
+    "http": "HTTP {{status}}",
+    "unauthorized": "sign-in expired (401)"
+  },
+  "sampleRow": "Request {{index}}",
+  "expandHint": "Tap an item to see each request's time and status code",
+  "verdict": {
+    "running": {
+      "title": "Testing…",
+      "body": "This takes about 20 seconds. Please stay on this page."
+    },
+    "cancelled": {
+      "title": "Test stopped",
+      "body": "You can still copy the results so far for your manager."
+    },
+    "noInternet": {
+      "title": "Phone is not online",
+      "body": "Neither the internet nor the server can be reached. Check Wi-Fi or mobile data, make sure a web page opens, then try again."
+    },
+    "serverUnreachable": {
+      "title": "Cannot reach the server",
+      "body": "The internet works, but {{host}} cannot be reached. The server address may be wrong, the store network may block it, or the server may be down. Send the report to your manager."
+    },
+    "serverUnstable": {
+      "title": "Server connection is unstable",
+      "body": "The internet works, but requests to {{host}} failed or varied a lot. Most likely a store line or server line issue — send the report to your manager."
+    },
+    "serverSlow": {
+      "title": "Server is responding slowly",
+      "body": "All requests to {{host}} succeeded, but took {{avg}} on average, so the app will feel slow."
+    },
+    "databaseIssue": {
+      "title": "Server is slow internally",
+      "body": "The phone reaches the server fine; the server's database is slow. Send the report to your manager."
+    },
+    "authExpired": {
+      "title": "Sign-in has expired",
+      "body": "The network is fine, but your sign-in token has expired. Sign out and sign in again."
+    },
+    "slowDownload": {
+      "title": "Download speed is slow",
+      "body": "The connection works but bandwidth is low, so images and lists will load slowly."
+    },
+    "imageSlow": {
+      "title": "Product images load slowly",
+      "body": "The main server is fine, but the product image server (Tencent Cloud) is slow, so images will load slowly."
+    },
+    "internetProbeBlocked": {
+      "title": "Server connection is fine",
+      "body": "The public test address is unreachable (the store network may block it). This does not affect the app."
+    },
+    "allGood": {
+      "title": "Network is fine",
+      "body": "Every link is working normally. The app should run smoothly."
+    }
+  },
+  "actions": {
+    "stop": "Stop test",
+    "retest": "Test again",
+    "copy": "Copy report",
+    "share": "Share",
+    "copyAgain": "Copy again",
+    "close": "Close"
+  },
+  "report": {
+    "sheetTitle": "Test report",
+    "copied": "Copied to clipboard — paste it into a message to your manager",
+    "copiedToast": "Report copied",
+    "copyFailed": "Copy failed. Long-press the report text to copy it manually.",
+    "header": "HB network test report  {{time}} (Sydney)",
+    "device": "Device: {{value}}",
+    "app": "App: {{value}}",
+    "account": "Account: {{value}}",
+    "server": "Server: {{host}} ({{source}})",
+    "publicIp": "Public IP: {{value}}",
+    "verdict": "Result: {{value}}",
+    "requestId": "Request ID: {{value}}",
+    "latencyLine": "{{index}} {{name}}  {{success}}/{{total}}  avg {{avg}}  {{icon}}",
+    "statsLine": "   fastest {{min}} · P95 {{p95}} · jitter {{jitter}}",
+    "failuresLine": "   Failed: {{items}}",
+    "failureItem": "#{{index}} {{reason}}",
+    "listSeparator": ", ",
+    "valueLine": "{{index}} {{name}}  {{value}}  {{icon}}",
+    "statusLine": "{{index}} {{name}}  {{value}}",
+    "stoppedNote": "(Test was stopped early)"
+  }
+}

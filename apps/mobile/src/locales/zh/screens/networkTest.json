@@ -1,0 +1,172 @@
+{
+  "entry": "网络测试",
+  "title": "网络测试",
+  "back": "返回",
+  "reviewUnavailable": "审核模式下不提供网络测试。",
+  "context": {
+    "server": "服务器",
+    "serverSource": {
+      "settings": "服务器设置",
+      "deviceBinding": "设备绑定"
+    },
+    "publicIp": "公网 IP",
+    "publicIpTag": "服务器看到的",
+    "publicIpUnknown": "服务器未识别",
+    "publicIpUnavailable": "服务器未提供（后端未升级）",
+    "publicIpNotFetched": "未取到（诊断请求失败）",
+    "account": "账号",
+    "notLoggedIn": "未登录",
+    "device": "设备",
+    "app": "App",
+    "time": "时间",
+    "timeSuffix": "（悉尼）",
+    "embedded": "内置包",
+    "ota": "OTA {{id}}"
+  },
+  "progress": {
+    "running": "正在测试 {{current}} / {{total}}",
+    "remaining": "约 {{seconds}} 秒"
+  },
+  "links": {
+    "internet": {
+      "name": "外网基线",
+      "desc": "公共测速地址 · 判断手机 / 门店有没有网"
+    },
+    "server": {
+      "name": "主服务器",
+      "desc": "{{host}}"
+    },
+    "auth": {
+      "name": "登录态接口",
+      "desc": "带登录令牌访问服务器"
+    },
+    "database": {
+      "name": "服务器 → 数据库",
+      "desc": "服务器端查询一次的耗时"
+    },
+    "image": {
+      "name": "商品图片",
+      "desc": "腾讯云 COS"
+    },
+    "download": {
+      "name": "下载速度",
+      "desc": "约 {{kb}} KB 文件"
+    }
+  },
+  "state": {
+    "waiting": "等待",
+    "willSkip": "未登录，将跳过",
+    "skippedNotLoggedIn": "未登录，已跳过",
+    "unavailable": "服务器未提供（后端未升级）",
+    "notRun": "未测试",
+    "databaseUnavailable": "数据库无响应"
+  },
+  "sampleProgress": "第 {{current}} / {{total}} 次",
+  "successCount": "{{success}}/{{total}} 成功",
+  "downloadDetail": "{{kb}} KB 用时 {{seconds}} 秒",
+  "rating": {
+    "good": "良好",
+    "fair": "一般",
+    "bad": "差",
+    "skip": "跳过",
+    "unavailable": "未提供"
+  },
+  "stats": {
+    "min": "最快",
+    "p95": "P95",
+    "jitter": "抖动",
+    "loss": "丢包"
+  },
+  "spark": {
+    "legend": "每根柱 = 1 次请求，越高越慢",
+    "failed": "失败"
+  },
+  "sampleError": {
+    "timeout": "超时",
+    "network": "连不上",
+    "http": "HTTP {{status}}",
+    "unauthorized": "登录已失效（401）"
+  },
+  "sampleRow": "第 {{index}} 次",
+  "expandHint": "点任意一项可展开每次请求的耗时与状态码",
+  "verdict": {
+    "running": {
+      "title": "正在测试…",
+      "body": "大约需要 20 秒，请保持在本页面。"
+    },
+    "cancelled": {
+      "title": "测试已停止",
+      "body": "已测到的结果仍可复制给管理员。"
+    },
+    "noInternet": {
+      "title": "手机没有连上网络",
+      "body": "外网和服务器都连不上。请检查 Wi-Fi 或移动数据，确认能打开网页后再试。"
+    },
+    "serverUnreachable": {
+      "title": "连不上服务器",
+      "body": "外网正常，但连不上 {{host}}。可能是服务器地址设置错误、门店网络拦截或服务器故障，请把报告发给管理员。"
+    },
+    "serverUnstable": {
+      "title": "服务器连接不稳定",
+      "body": "外网正常，但到 {{host}} 有请求失败或延迟波动大。多半是门店线路或服务器线路问题，可以把报告发给管理员。"
+    },
+    "serverSlow": {
+      "title": "服务器响应偏慢",
+      "body": "到 {{host}} 的请求都成功，但平均要 {{avg}}，使用时会感觉卡顿。"
+    },
+    "databaseIssue": {
+      "title": "服务器内部响应慢",
+      "body": "手机到服务器正常，慢在服务器的数据库，请把报告发给管理员。"
+    },
+    "authExpired": {
+      "title": "登录已失效",
+      "body": "网络正常，但登录令牌已失效，请退出后重新登录。"
+    },
+    "slowDownload": {
+      "title": "下载速度偏慢",
+      "body": "连接正常但带宽不足，打开图片、列表会比较慢。"
+    },
+    "imageSlow": {
+      "title": "商品图片加载慢",
+      "body": "主服务器正常，但商品图片服务器（腾讯云）访问慢，图片会加载得慢。"
+    },
+    "internetProbeBlocked": {
+      "title": "服务器连接正常",
+      "body": "公共测速地址不通（可能被门店网络屏蔽），不影响 App 使用。"
+    },
+    "allGood": {
+      "title": "网络正常",
+      "body": "各条链路都正常，App 可以流畅使用。"
+    }
+  },
+  "actions": {
+    "stop": "停止测试",
+    "retest": "重新测试",
+    "copy": "复制报告",
+    "share": "分享",
+    "copyAgain": "再次复制",
+    "close": "关闭"
+  },
+  "report": {
+    "sheetTitle": "测试报告",
+    "copied": "已复制到剪贴板，可直接粘贴到微信发给管理员",
+    "copiedToast": "报告已复制",
+    "copyFailed": "复制失败，请长按报告文字手动复制",
+    "header": "HB 网络测试报告  {{time}}（悉尼）",
+    "device": "设备：{{value}}",
+    "app": "App：{{value}}",
+    "account": "账号：{{value}}",
+    "server": "服务器：{{host}}（{{source}}）",
+    "publicIp": "公网 IP：{{value}}",
+    "verdict": "结论：{{value}}",
+    "requestId": "请求编号：{{value}}",
+    "latencyLine": "{{index}} {{name}}  {{success}}/{{total}}  平均 {{avg}}  {{icon}}",
+    "statsLine": "   最快 {{min}} · P95 {{p95}} · 抖动 {{jitter}}",
+    "failuresLine": "   失败：{{items}}",
+    "failureItem": "第 {{index}} 次{{reason}}",
+    "listSeparator": "、",
+    "valueLine": "{{index}} {{name}}  {{value}}  {{icon}}",
+    "statusLine": "{{index}} {{name}}  {{value}}",
+    "stoppedNote": "（测试已提前停止）"
+  }
+}

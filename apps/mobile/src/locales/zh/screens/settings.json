@@ -358,6 +358,7 @@
     "privacyGroup": "隐私",
     "dataRights": "数据权利说明",
     "dataRightsExpand": "展开数据权利说明",
-    "dataRightsCollapse": "收起数据权利说明"
+    "dataRightsCollapse": "收起数据权利说明",
+    "networkTestSummary": "测外网、服务器与下载速度，生成可复制的报告"
   }
 }

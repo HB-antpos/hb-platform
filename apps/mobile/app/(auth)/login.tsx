@@ -20,6 +20,7 @@ import {
   Button,
   Text,
   Checkbox,
+  Icon,
   Snackbar,
 } from "react-native-paper";
 import { useState, useEffect, useRef } from "react";
@@ -41,6 +42,7 @@ import {
 } from "@/modules/auth/login-errors";
 import { prepareDeviceLoginSession } from "@/modules/auth/device-login-session";
 import { AppBuildInfoFooter } from "@/modules/updates/AppBuildInfoFooter";
+import { NETWORK_TEST_ROUTE, useNetworkTestAvailable } from "@/modules/network-test";
 import {
   collectLoginDeviceLocation,
   collectOptionalLoginDeviceLocation,
@@ -181,6 +183,9 @@ export default function Login() {
   const [activationVisible, setActivationVisible] = useState(false);
   const [activationMode, setActivationMode] = useState<MobileDeviceActivationMode>("redeem");
   const reviewBuildEnabled = isIosReviewBuildEnabled(getIosReviewBuildContext());
+  // 网络测试未登录也能用；审核构建登录前的离线守卫阶段隐藏（测试会发真实请求）。
+  const networkTestAvailable = useNetworkTestAvailable();
+  const openNetworkTest = () => router.push(NETWORK_TEST_ROUTE as Parameters<typeof router.push>[0]);
   const shouldRunLoginSideEffects = Boolean(
     rememberReady &&
       !iosReviewOfflineGuardActive &&
@@ -434,7 +439,8 @@ export default function Login() {
         : getFriendlyLoginErrorDescriptor(err);
       setError(descriptor ? translateLoginError(descriptor) : t("errors.locationRequired"));
       setErrorRetry(descriptor?.retryable ? "user" : null);
-      setSnackbarVisible(true);
+      // 可重试的失败由登录按钮下方的失败卡片展示，不再弹提示条。
+      setSnackbarVisible(!descriptor?.retryable);
     } finally {
       setLoading(false);
     }
@@ -479,7 +485,8 @@ export default function Login() {
         : getFriendlyDeviceLoginErrorDescriptor(err);
       setError(descriptor ? translateLoginError(descriptor) : t("errors.locationRequired"));
       setErrorRetry(descriptor?.retryable ? "device" : null);
-      setSnackbarVisible(true);
+      // 可重试的失败由登录按钮下方的失败卡片展示，不再弹提示条。
+      setSnackbarVisible(!descriptor?.retryable);
     } finally {
       setDeviceLoginLoading(false);
     }
@@ -584,6 +591,68 @@ export default function Login() {
       void identifyRegisteredDevice();
     });
   };
+  // 「服务器设置」与「网络测试」并排：门店连不上服务器时，这两个是最先要用的排障入口。
+  const renderToolRow = () => (
+    <View style={styles.toolRow}>
+      <Button mode="text" icon="cog-outline" textColor={BRAND_RED} onPress={openApiHostSettings}>
+        {t("apiHost.settingsButton")}
+      </Button>
+      {networkTestAvailable ? (
+        <Button mode="text" icon="access-point-network" textColor={BRAND_RED} onPress={openNetworkTest}>
+          {t("networkTest:entry")}
+        </Button>
+      ) : null}
+    </View>
+  );
+
+  /**
+   * 网络不通 / 超时 / 服务器繁忙这类可重试失败：在登录按钮下方常驻一张失败卡片（不再是 8 秒自动消失的提示条），
+   * 给「重试」和「网络测试」两个按钮；密码错误等业务失败仍走提示条，不出现「网络测试」。
+   */
+  const renderRetryCard = (kind: "user" | "device") => {
+    if (errorRetry !== kind || !error) return null;
+    return (
+      <View style={styles.retryCard} accessibilityLiveRegion="polite">
+        <View style={styles.retryHead}>
+          <Icon source="cloud-off-outline" size={20} color={HB_COLORS.danger} />
+          <Text style={styles.retryText}>{error}</Text>
+        </View>
+        <View style={styles.retryActions}>
+          <Button
+            mode="contained"
+            compact
+            icon="refresh"
+            buttonColor={HB_COLORS.danger}
+            textColor="#FFFFFF"
+            onPress={() => {
+              setErrorRetry(null);
+              setSnackbarVisible(false);
+              if (kind === "device") {
+                void handleDeviceLogin();
+              } else {
+                void handleLogin();
+              }
+            }}
+          >
+            {t("common:actions.retry")}
+          </Button>
+          {networkTestAvailable ? (
+            <Button
+              mode="outlined"
+              compact
+              icon="access-point-network"
+              textColor={HB_COLORS.danger}
+              style={styles.retryOutline}
+              onPress={openNetworkTest}
+            >
+              {t("networkTest:entry")}
+            </Button>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
@@ -706,6 +775,11 @@ export default function Login() {
                 <Button mode="text" textColor={BRAND_RED} onPress={handleSelectUserMode}>
                   {t("device.switchToUser")}
                 </Button>
+                {networkTestAvailable ? (
+                  <Button mode="text" icon="access-point-network" textColor={BRAND_RED} onPress={openNetworkTest}>
+                    {t("networkTest:entry")}
+                  </Button>
+                ) : null}
               </View>
             ) : registeredDevice && loginMode === "device" ? (
               <View style={styles.deviceCard}>
@@ -747,15 +821,14 @@ export default function Login() {
                 >
                   {t("device.login")}
                 </Button>
+                {renderRetryCard("device")}
                 <Button mode="text" textColor={BRAND_RED} onPress={handleSelectUserMode}>
                   {t("device.switchToUser")}
                 </Button>
                 <Button mode="text" icon="qrcode-scan" textColor={BRAND_RED} onPress={() => openActivation("redeem")}>
                   {t("activation.upgrade")}
                 </Button>
-                <Button mode="text" icon="cog-outline" textColor={BRAND_RED} onPress={openApiHostSettings}>
-                  {t("apiHost.settingsButton")}
-                </Button>
+                {renderToolRow()}
               </View>
             ) : (
               <>
@@ -823,6 +896,7 @@ export default function Login() {
                   >
                     {t("common:actions.login")}
                   </Button>
+                  {renderRetryCard("user")}
                   {/* 店长新建账号后员工用邮件验证码设置密码；忘记密码也走同一页面。 */}
                   <Button
                     mode="text"
@@ -851,9 +925,7 @@ export default function Login() {
                   >
                     {accountBinding ? t("activation.rebind") : t("activation.open")}
                   </Button>
-                  <Button mode="text" icon="cog-outline" textColor={BRAND_RED} onPress={openApiHostSettings}>
-                    {t("apiHost.settingsButton")}
-                  </Button>
+                  {renderToolRow()}
                 </Animated.View>
               </>
             )}
@@ -975,30 +1047,9 @@ export default function Login() {
       />
 
       <Snackbar
-        visible={snackbarVisible}
-        onDismiss={() => {
-          setSnackbarVisible(false);
-          setErrorRetry(null);
-        }}
-        // 可重试的网络类失败多留一会儿，给员工看清原因、点「重试」的时间。
-        duration={errorRetry ? 8000 : 3000}
-        action={
-          errorRetry
-            ? {
-                label: t("common:actions.retry"),
-                onPress: () => {
-                  const retry = errorRetry;
-                  setSnackbarVisible(false);
-                  setErrorRetry(null);
-                  if (retry === "device") {
-                    void handleDeviceLogin();
-                  } else {
-                    void handleLogin();
-                  }
-                },
-              }
-            : undefined
-        }
+        visible={snackbarVisible && !errorRetry}
+        onDismiss={() => setSnackbarVisible(false)}
+        duration={3000}
         wrapperStyle={styles.snackbar}
       >
         {error}
@@ -1185,4 +1236,18 @@ const styles = StyleSheet.create({
   buttonContent: { height: 50 },
   buttonLabel: { fontSize: 16, fontWeight: "700" },
   snackbar: { bottom: 40 },
+  toolRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center" },
+  retryCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#FECDCA",
+    backgroundColor: "#FEF3F2",
+    borderRadius: 10,
+    padding: 12,
+    gap: 10,
+  },
+  retryHead: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
+  retryText: { flex: 1, color: "#7A271A", fontSize: 13, lineHeight: 19 },
+  retryActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginLeft: 28 },
+  retryOutline: { borderColor: HB_COLORS.danger },
 });
