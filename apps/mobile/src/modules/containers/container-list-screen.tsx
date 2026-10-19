@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMonthDate } from "@/components/attendance/MonthDatePicker";
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from "@/components/container-number";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
@@ -202,6 +203,8 @@ function ContainerCard({
   onUpdateStatus: (status: number) => void;
 }) {
   const { t } = useAppTranslation("containerDetail");
+  // 货柜编号默认只显示后 4 位；有权限的账号点搜索框旁眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   const insight = getArrivalInsight(item, today);
   const tone = STATUS_TONES[item.状态 ?? -1] ?? STATUS_TONES[0];
   const loadingDate = formatShortDate(item.装柜日期);
@@ -211,7 +214,7 @@ function ContainerCard({
       <View style={styles.cardHeader}>
         <Pressable style={styles.cardTitleBlock} onPress={onOpenDetail} accessibilityRole="button">
           <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.货柜编号 || getContainerGuid(item) || t("list.card.untitled")}
+            {item.货柜编号 ? formatContainerNumber(item.货柜编号) : getContainerGuid(item) || t("list.card.untitled")}
           </Text>
           <Text style={styles.cardSubtitle} numberOfLines={1}>
             {t("list.card.loaded", { date: loadingDate || "--" })}
@@ -485,6 +488,7 @@ export function ContainerListScreen() {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={listQuery.isRefetching} onRefresh={() => listQuery.refetch()} />}
       >
+        <View style={styles.searchRow}>
         <TextInput
           mode="outlined"
           dense
@@ -508,6 +512,8 @@ export function ContainerListScreen() {
           ) : undefined}
           style={styles.search}
         />
+          <ContainerNumberRevealButton size={24} />
+        </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusRow}>
           <Chip compact selected={activeStatus == null} showSelectedCheck={false} onPress={() => selectStatus(undefined)} style={activeStatus == null ? styles.statusChipOn : styles.statusChip} textStyle={activeStatus == null ? styles.statusChipTextOn : styles.statusChipText}>
@@ -733,7 +739,13 @@ const styles = StyleSheet.create({
     // 外层只避让顶部安全区，底部留足空间给 Home 指示条。
     paddingBottom: HB_SPACING.xl,
   },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: HB_SPACING.xs,
+  },
   search: {
+    flex: 1,
     backgroundColor: HB_COLORS.white,
   },
   statusRow: {

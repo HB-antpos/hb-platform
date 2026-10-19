@@ -616,6 +616,8 @@ export interface ContainerExportRequest {
   selectedHguids?: string[];
   columns?: string[];
   fileNameHint?: string;
+  /** 导出文件写完整货柜编号；后端仅在账号有「查看完整货柜编号」权限时生效，默认遮罩。 */
+  showFullContainerNumber?: boolean;
 }
 
 export interface ContainerExportResult {

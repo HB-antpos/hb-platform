@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from "@/components/container-number";
 import { ProductBarcodeImage } from "@/components/product-maintenance/ProductBarcodeImage";
 import { normalizePageSize } from "@/components/ui/pagination/pagination-logic";
 import { PaginationBar } from "@/components/ui/pagination/PaginationBar";
@@ -17,7 +18,7 @@ import { canViewContainerNewProducts } from "./access";
 import { ARRIVAL_RANGE_FILTERS, deviceLocalToday, matchesArrivalRange, type ArrivalRangeFilter } from "./arrival-range";
 import { containerNewProductsQueryKey, getContainerNewProducts } from "./api";
 import { ContainerFilterSheet, ProductFilterSheet } from "./container-new-products-sheets";
-import { countActiveFilters, DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS, matchesFilters, pruneSelectedContainers, summarizeContainers, type ContainerNewProductFilters } from "./filters";
+import { countActiveFilters, DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS, formatContainerOptionLabel, matchesFilters, pruneSelectedContainers, summarizeContainers, type ContainerNewProductFilters } from "./filters";
 import { compareByArrivalThenProductNo } from "./ordering";
 import { CONTAINER_NEW_PRODUCTS_PAGE_SIZE, CONTAINER_NEW_PRODUCTS_PAGE_SIZE_OPTIONS, paginate, type ContainerNewProductsPageSize } from "./pagination";
 import { peekRememberedPageSize, readRememberedPageSize, rememberPageSize } from "./page-size-storage";
@@ -50,6 +51,9 @@ function FilterChip({ icon, label, active, onPress }: { icon: keyof typeof Mater
 
 function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProductItem; imageSize: number; dateWidth: number }) {
   const { t } = useAppTranslation("containerNewProducts");
+  // 货柜编号默认只显示后 4 位（门店账号后端已遮罩）；有权限的账号点筛选条旁眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
+  const containerNumber = item.containerNumber?.trim();
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   const arrived = item.basis === "actual";
   // 右列显示货柜到仓库日期：已到仓 = 「到仓库」+ 实际到货日期，在途 = 「预计到仓库」+ 预计到岸日期；
@@ -61,7 +65,7 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
       <View style={styles.details}>
         <Text variant="titleMedium" style={styles.productCode} numberOfLines={1}>{item.hbProductNo ?? item.productCode}</Text>
         {item.retailPrice !== null ? <Text variant="titleSmall" style={styles.retailPrice} numberOfLines={1}>{t("labels.retailPrice", { value: formatPrice(item.retailPrice) })}</Text> : null}
-        <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: item.containerNumber?.trim() || item.containerCode })}</Text>
+        <Text variant="bodyMedium" style={styles.containerCode} numberOfLines={1}>{t("labels.container", { code: containerNumber ? formatContainerNumber(containerNumber) : item.containerCode })}</Text>
         {/* 不向门店展示到货数量：数量只在接口里保留，卡片上不显示 */}
         {/* 新品/已有 与到仓状态放同一行，不挤占货号；到仓状态即后端 basis：已到仓日期为实际到货日期，在途为预计到岸日期 */}
         <View style={styles.tagRow}>
@@ -85,6 +89,7 @@ function ProductCard({ item, imageSize, dateWidth }: { item: ContainerNewProduct
 
 export function ContainerNewProductsScreen() {
   const { t } = useAppTranslation("containerNewProducts");
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   const { width } = useWindowDimensions();
   const router = useRouter();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -141,7 +146,10 @@ export function ContainerNewProductsScreen() {
   const containerChipLabel = effectiveFilters.containerCodes.length === 0
     ? t("chips.containersAll", { count: containerOptions.length })
     : effectiveFilters.containerCodes.length === 1
-      ? containerOptions.find((option) => option.containerCode.toUpperCase() === effectiveFilters.containerCodes[0].toUpperCase())?.label ?? effectiveFilters.containerCodes[0]
+      ? formatContainerOptionLabel(
+        containerOptions.find((option) => option.containerCode.toUpperCase() === effectiveFilters.containerCodes[0].toUpperCase()),
+        formatContainerNumber,
+      ) ?? effectiveFilters.containerCodes[0]
       : t("chips.containersMany", { count: effectiveFilters.containerCodes.length });
   const imageSize = width < 360 ? 72 : 88;
   const dateWidth = width < 360 ? 88 : 100;
@@ -197,6 +205,7 @@ export function ContainerNewProductsScreen() {
         <FilterChip icon="star-four-points-outline" label={t(`chips.productType.${effectiveFilters.productType}`)} active={effectiveFilters.productType !== DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS.productType} onPress={() => setOpenSheet("product")} />
         <FilterChip icon="warehouse" label={t(`chips.warehouse.${effectiveFilters.warehouse}`)} active={effectiveFilters.warehouse !== "any"} onPress={() => setOpenSheet("product")} />
         <FilterChip icon="train-car-container" label={containerChipLabel} active={effectiveFilters.containerCodes.length > 0} onPress={() => setOpenSheet("containers")} />
+        <ContainerNumberRevealButton />
         {activeFilterCount > 0 ? <Button compact textColor={HB_COLORS.danger} onPress={() => setFilters(DEFAULT_CONTAINER_NEW_PRODUCT_FILTERS)}>{t("chips.clearAll")}</Button> : null}
       </ScrollView> : null}
       {hasData && filteredItems.length > 0 ? pager(false) : null}

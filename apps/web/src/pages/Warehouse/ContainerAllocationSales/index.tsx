@@ -21,6 +21,7 @@ import dayjs from 'dayjs'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import {
@@ -70,6 +71,8 @@ function salesValue(value: number | null) {
 
 export default function ContainerAllocationSalesPage() {
   const navigate = useNavigate()
+  // 货柜编号默认只显示后 4 位；有权限的账号点标题旁眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const route = useStableRouteContext()
   const { active } = useKeepAliveContext()
   const containerGuid = route?.params.containerGuid || ''
@@ -405,8 +408,13 @@ export default function ContainerAllocationSalesPage() {
 
   return (
     <PageContainer
-      title={`货柜配销数据${report?.containerNumber ? ` · ${report.containerNumber}` : ''}`}
-      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/warehouse/containers')}>返回货柜列表</Button>}
+      title={`货柜配销数据${report?.containerNumber ? ` · ${formatContainerNumber(report.containerNumber)}` : ''}`}
+      extra={(
+        <Space size={4}>
+          {report?.containerNumber ? <ContainerNumberRevealButton /> : null}
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/warehouse/containers')}>返回货柜列表</Button>
+        </Space>
+      )}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Card size="small">

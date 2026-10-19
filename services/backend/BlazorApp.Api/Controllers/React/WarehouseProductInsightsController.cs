@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using System.Globalization;
 using System.Security.Claims;
 using BlazorApp.Api.Features.ProductInsights;
@@ -14,6 +15,7 @@ namespace BlazorApp.Api.Controllers.React;
 [ApiController]
 [Route("api/react/v1/warehouse-product-insights")]
 [Authorize(Policy = Permissions.SalesDashboard.WarehouseFlowView)]
+[MaskContainerNumbers]
 public sealed class WarehouseProductInsightsController(
     IWarehouseProductFlowAnalysisService service,
     IUserService userService,

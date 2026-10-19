@@ -165,6 +165,10 @@
       "name": "查看货柜",
       "description": "Web 页面 /warehouse/containers 与移动端「仓库」- 查看货柜列表与明细"
     },
+    "Container.ViewFullNumber": {
+      "name": "查看完整货柜编号",
+      "description": "Web 与移动端所有显示货柜编号的页面及导出文件 - 默认只显示后 4 位，有此权限可点按钮查看完整货柜编号"
+    },
     "Dashboard": {
       "name": "访问后台",
       "description": "Web 页面 /dashboard - 访问后台工作台"

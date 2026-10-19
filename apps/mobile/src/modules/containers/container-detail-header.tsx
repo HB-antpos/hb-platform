@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { ActivityIndicator, Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from "@/components/container-number";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { OptionChip } from "./container-detail-chip";
@@ -45,6 +46,8 @@ interface ContainerDetailHeaderProps {
 /** 顶部：返回 + 柜号 + 状态 + 副标题 + 概览卡横条 + 协作提示。 */
 export function ContainerDetailHeader({ loading, info, fallbackTitle, overview, presence, onBack }: ContainerDetailHeaderProps) {
   const { t } = useAppTranslation("containerDetail");
+  // 货柜编号默认只显示后 4 位；有权限的账号点标题旁眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   const statusKey = getContainerStatusKey(info.status);
   const rowCount = overview.rowCount;
   const dash = t("common.none");
@@ -55,7 +58,10 @@ export function ContainerDetailHeader({ loading, info, fallbackTitle, overview, 
         <Pressable accessibilityRole="button" accessibilityLabel={t("actions.back")} hitSlop={4} onPress={onBack} style={styles.backButton}>
           <MaterialCommunityIcons name="chevron-left" size={28} color={HB_COLORS.action} />
         </Pressable>
-        <Text numberOfLines={1} style={styles.title}>{info.containerNumber || fallbackTitle}</Text>
+        <Text numberOfLines={1} style={styles.title}>
+          {info.containerNumber ? formatContainerNumber(info.containerNumber) : fallbackTitle}
+        </Text>
+        {info.containerNumber ? <ContainerNumberRevealButton /> : null}
         {loading ? <ActivityIndicator size="small" color={HB_COLORS.action} /> : null}
         {info.status !== undefined ? (
           <View style={styles.statusTag}>

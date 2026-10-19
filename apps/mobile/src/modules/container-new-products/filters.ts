@@ -89,6 +89,15 @@ export function summarizeContainers(items: readonly ContainerNewProductItem[]): 
     .sort((a, b) => compareOrdinal(resolveListDate(a), resolveListDate(b)) || compareOrdinal(a.label.toUpperCase(), b.label.toUpperCase()));
 }
 
+/** 货柜选项的显示名：有货柜编号时按遮罩规则显示，没有编号时兜底的 ContainerCode（GUID）原样显示。 */
+export function formatContainerOptionLabel(
+  option: Pick<ContainerOption, "label" | "containerCode"> | undefined,
+  formatContainerNumber: (value: string) => string,
+): string | undefined {
+  if (!option) return undefined;
+  return option.label === option.containerCode ? option.label : formatContainerNumber(option.label);
+}
+
 // 刷新或换店后，已选货柜可能不在新列表里了；只保留仍存在的，避免筛成空列表却看不到选中项
 export function pruneSelectedContainers(containerCodes: readonly string[], options: readonly Pick<ContainerOption, "containerCode">[]): string[] {
   const available = new Set(options.map((option) => option.containerCode.toUpperCase()));

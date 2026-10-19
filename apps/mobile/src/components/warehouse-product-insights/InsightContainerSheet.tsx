@@ -1,5 +1,6 @@
 import { FlatList, StyleSheet, View } from "react-native";
 import { Divider, Icon, Text } from "react-native-paper";
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from "@/components/container-number";
 import type { WarehouseInsightContainer } from "@/modules/warehouse-product-insights/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -31,6 +32,7 @@ export function InsightContainerSheet({
   containerCount,
 }: InsightContainerSheetProps) {
   const { t } = useAppTranslation("warehouseProductInsights");
+  const { format: formatContainerNumber } = useContainerNumberDisplay();
   return (
     <InsightSheet
       visible={visible}
@@ -57,9 +59,10 @@ export function InsightContainerSheet({
         </View>
       </View>
       <View style={styles.tableHeader}>
-        <Text style={[styles.column, styles.numberCell]}>
-          {t("containerSheet.container")}
-        </Text>
+        <View style={[styles.numberCell, styles.numberHeader]}>
+          <Text style={styles.column}>{t("containerSheet.container")}</Text>
+          <ContainerNumberRevealButton size={16} />
+        </View>
         <Text style={[styles.column, styles.piecesColumn]}>
           {t("containerSheet.pieces")}
         </Text>
@@ -84,7 +87,7 @@ export function InsightContainerSheet({
           <View style={[styles.row, item.isEstimatedArrival ? styles.transitRow : null]}>
             <View style={styles.numberCell}>
               <Text numberOfLines={1} style={styles.containerNumber}>
-                {item.containerNumber || "—"}
+                {item.containerNumber ? formatContainerNumber(item.containerNumber) : "—"}
               </Text>
               <Text
                 numberOfLines={1}
@@ -159,6 +162,7 @@ const styles = StyleSheet.create({
   transitRow: { backgroundColor: "#FEF6EE" },
   column: { color: HB_COLORS.textSecondary, fontSize: 12 },
   numberCell: { flex: 1, minWidth: 0, gap: 2 },
+  numberHeader: { flexDirection: "row", alignItems: "center" },
   piecesColumn: { width: 52, textAlign: "right" },
   quantityColumn: { width: 60, textAlign: "right" },
   statusColumn: { width: 56, textAlign: "right" },

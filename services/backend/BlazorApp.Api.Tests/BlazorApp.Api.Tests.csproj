@@ -432,6 +432,7 @@
     <Compile Include="ReactContainerControllerSyncContractTests.cs" />
     <Compile Include="PdfCjkFontProviderConcurrencyTests.cs" />
     <Compile Include="ContainerNewProductsControllerTests.cs" />
+    <Compile Include="ContainerNumberMaskingTests.cs" />
     <Compile Include="MobileAppInstallLinksControllerTests.cs" />
     <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
     <Compile Include="ContainerWarehouseArrivalTests.cs" />

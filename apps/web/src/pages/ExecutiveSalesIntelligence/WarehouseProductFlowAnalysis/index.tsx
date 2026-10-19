@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import {
   getWarehouseProductFlowOptions,
@@ -122,6 +123,8 @@ function QuantityTrend({ data, firstKey, firstLabel, secondKey, secondLabel, ari
 
 export default function WarehouseProductFlowAnalysisPage() {
   const { t } = useTranslation()
+  // 货柜编号默认只显示后 4 位；有权限的账号点列头眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const defaultPeriods = useMemo(() => buildWarehouseProductFlowDefaultPeriods(), [])
   const [periods, setPeriods] = useState<WarehouseProductFlowPeriods>(defaultPeriods)
   const [containerRange, setContainerRange] = useState<[Dayjs, Dayjs]>(() => toRange(defaultPeriods.containerPeriod))
@@ -402,7 +405,16 @@ export default function WarehouseProductFlowAnalysisPage() {
   }
 
   const containerColumns: ColumnsType<Record<string, unknown>> = [
-    { title: t('warehouseProductFlowAnalysis.tables.containerNumber'), dataIndex: 'containerNumber' }, { title: t('warehouseProductFlowAnalysis.tables.arrivalDate'), dataIndex: 'arrivalDate' }, { title: t('warehouseProductFlowAnalysis.tables.quantity'), dataIndex: 'inboundQuantity', align: 'right' }, { title: t('warehouseProductFlowAnalysis.tables.unitPrice'), dataIndex: 'inboundUnitPrice', align: 'right', render: (value) => typeof value === 'number' ? moneyFormatter.format(value) : '—' }, { title: t('warehouseProductFlowAnalysis.tables.supplier'), dataIndex: 'supplierName' },
+    {
+      title: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          {t('warehouseProductFlowAnalysis.tables.containerNumber')}
+          <ContainerNumberRevealButton />
+        </span>
+      ),
+      dataIndex: 'containerNumber',
+      render: (value) => (typeof value === 'string' ? formatContainerNumber(value) : value),
+    }, { title: t('warehouseProductFlowAnalysis.tables.arrivalDate'), dataIndex: 'arrivalDate' }, { title: t('warehouseProductFlowAnalysis.tables.quantity'), dataIndex: 'inboundQuantity', align: 'right' }, { title: t('warehouseProductFlowAnalysis.tables.unitPrice'), dataIndex: 'inboundUnitPrice', align: 'right', render: (value) => typeof value === 'number' ? moneyFormatter.format(value) : '—' }, { title: t('warehouseProductFlowAnalysis.tables.supplier'), dataIndex: 'supplierName' },
   ]
   const orderColumns: ColumnsType<Record<string, unknown>> = [
     { title: t('warehouseProductFlowAnalysis.tables.orderNumber'), dataIndex: 'orderNumber' }, { title: t('warehouseProductFlowAnalysis.tables.branch'), dataIndex: 'branchName' }, { title: t('warehouseProductFlowAnalysis.tables.orderDate'), dataIndex: 'orderDate' }, { title: t('warehouseProductFlowAnalysis.tables.orderedQuantity'), dataIndex: 'orderedQuantity', align: 'right' },

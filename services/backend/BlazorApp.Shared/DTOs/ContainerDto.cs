@@ -1,3 +1,4 @@
+using BlazorApp.Shared.Helper;
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
@@ -23,6 +24,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 货柜编号
         /// </summary>
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string? 货柜编号 { get; set; }
 
         /// <summary>
@@ -1035,6 +1037,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 货柜编号
         /// </summary>
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string? 货柜编号 { get; set; }
 
         /// <summary>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import BarcodePreview from '../../../components/BarcodePreview'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import {
   getComingSoonContainerProducts,
   getComingSoonContainerSummaries,
@@ -69,6 +70,8 @@ function getContainerProductState(
 
 export default function ComingSoonSection() {
   const { t } = useTranslation()
+  // 货柜编号默认只显示后 4 位（订货前台账号后端已遮罩）；有权限的账号点标题旁眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const panelRef = useRef<HTMLElement | null>(null)
   const [containers, setContainers] = useState<ComingSoonHomeContainerSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -355,7 +358,7 @@ export default function ComingSoonSection() {
                   aria-current={active ? 'true' : undefined}
                 >
                   <span className={styles.indexMain}>
-                    <strong>{container.货柜编号 || 'N/A'}</strong>
+                    <strong>{container.货柜编号 ? formatContainerNumber(container.货柜编号) : 'N/A'}</strong>
                     <span>
                       <i className={`${styles.dot} ${styles[`dot_${tone}`]}`} />
                       {t(
@@ -377,12 +380,15 @@ export default function ComingSoonSection() {
             <section
               ref={panelRef}
               className={styles.panel}
-              aria-label={selectedContainer.货柜编号 || 'N/A'}
+              aria-label={selectedContainer.货柜编号 ? formatContainerNumber(selectedContainer.货柜编号) : 'N/A'}
               aria-busy={selectedState?.status === 'loading'}
             >
               <div className={styles.panelHead}>
                 <div className={styles.panelTitle}>
-                  <Title level={3}>{selectedContainer.货柜编号 || 'N/A'}</Title>
+                  <Title level={3}>
+                    {selectedContainer.货柜编号 ? formatContainerNumber(selectedContainer.货柜编号) : 'N/A'}
+                  </Title>
+                  {selectedContainer.货柜编号 ? <ContainerNumberRevealButton /> : null}
                   <Tag color={selectedContainer.实际到货日期 ? 'success' : 'processing'}>
                     {t(
                       selectedContainer.实际到货日期

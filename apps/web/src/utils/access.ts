@@ -86,6 +86,7 @@ function createEmptyAccess(): AccessControl {
     canCreateContainer: false,
     canEditContainer: false,
     canDeleteContainer: false,
+    canViewFullContainerNumber: false,
     canManageStoreProducts: false,
     canEditStoreProducts: false,
     canCreateStoreProducts: false,
@@ -292,6 +293,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canCreateContainer = isAdmin || hasPermission(P.Container.Create)
   const canEditContainer = isAdmin || hasPermission(P.Container.Edit)
   const canDeleteContainer = isAdmin || hasPermission(P.Container.Delete)
+  const canViewFullContainerNumber = isAdmin || hasPermission(P.Container.ViewFullNumber)
 
   // 分店商品
   const canManageStoreProducts = isAdmin || hasPermission(P.StoreProducts.View)
@@ -482,6 +484,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canCreateContainer,
     canEditContainer,
     canDeleteContainer,
+    canViewFullContainerNumber,
     canManageStoreProducts,
     canEditStoreProducts,
     canCreateStoreProducts,

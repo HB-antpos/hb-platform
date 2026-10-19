@@ -4584,7 +4584,15 @@ assertEqual(
   '保存货柜头部应携带可编辑的货柜编号、装柜日期和预计到岸日期',
 )
 assertEqual(
-  pageSource.includes('value={headerForm.货柜编号}') &&
+  pageSource.includes('const canEditContainerNumber = showFullContainerNumber') &&
+    pageSource.includes('!isMaskedContainerNumber(typedContainerNumber)') &&
+    pageSource.includes('disabled={!showFullContainerNumber}'),
+  true,
+  '货柜编号只有显示完整编号时才可编辑并回传，遮罩值不能写回后端',
+)
+assertEqual(
+  // 货柜编号输入框未显示完整编号时展示遮罩值且只读，显示完整后才是可编辑的真实值。
+  pageSource.includes('value={showFullContainerNumber ? headerForm.货柜编号 : formatContainerNumber(headerForm.货柜编号)}') &&
     pageSource.includes('value={headerForm.装柜日期}') &&
     pageSource.includes('value={headerForm.预计到岸日期}') &&
     pageSource.includes('<DatePicker allowClear={false} value={headerForm.装柜日期}') &&

@@ -76,6 +76,12 @@ import containerDetailPageMessagesEn from './containerDetailPageMessages.en.json
 import containerDetailPageMessagesZh from './containerDetailPageMessages.zh.json'
 import { useNavigate } from 'react-router-dom'
 import BarcodePreview from '../../../components/BarcodePreview'
+import {
+  ContainerNumberRevealButton,
+  containerNumberFileNamePart,
+  isMaskedContainerNumber,
+  useContainerNumberDisplay,
+} from '../../../components/ContainerNumber'
 import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
 import SelectionActionBar from '../../../components/listToolbar/SelectionActionBar'
 import StatusPill, { type StatusPillTone } from '../../../components/listToolbar/StatusPill'
@@ -934,6 +940,8 @@ export default function ContainerDetailPage() {
   const containerGuid = route?.params.containerGuid || ''
   const viewport = useContainerDetailViewport()
   const access = useAuthStore((state) => state.access)
+  // 货柜编号默认只显示后 4 位；有「查看完整货柜编号」权限的账号点眼睛按钮后显示完整编号，前端导出同步。
+  const { format: formatContainerNumber, showFull: showFullContainerNumber } = useContainerNumberDisplay()
   const currentUserGuid = useAuthStore((state) => state.currentUser?.userGUID ?? '')
   const updateTabTitle = useTabsStore((state) => state.updateTabTitle)
   // 记录当前货柜已完成首次加载，保活 Tab 恢复时保留旧内容并静默刷新。
@@ -1564,7 +1572,9 @@ export default function ContainerDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserGuid, containerGuid])
 
-  const containerDetailTabTitle = container?.货柜编号 ? t('containers.detailTitleWithNumber', { number: container.货柜编号 }) : undefined
+  const containerDetailTabTitle = container?.货柜编号
+    ? t('containers.detailTitleWithNumber', { number: formatContainerNumber(container.货柜编号) })
+    : undefined
   const containerDetailTabKey = containerGuid ? `/warehouse/container/detail/${containerGuid}` : undefined
 
   useEffect(() => {
@@ -3952,11 +3962,17 @@ export default function ContainerDetailPage() {
     setSavingHeader(true)
     try {
       if (!await drainAutoSavesBeforeAction()) return
-      const nextContainerNumber = headerForm.货柜编号?.trim()
-      if (!nextContainerNumber) {
+      // 只有能看到完整编号时才允许改编号；否则表单里是遮罩值，不回传（后端也会忽略遮罩值）。
+      const canEditContainerNumber = showFullContainerNumber
+      const typedContainerNumber = headerForm.货柜编号?.trim()
+      if (canEditContainerNumber && !typedContainerNumber) {
         message.error(t('containers.placeholders.enterContainerNumber', '请输入货柜编号'))
         return
       }
+      // undefined = 不修改编号；遮罩值（含 *）永远不回传。
+      const nextContainerNumber = canEditContainerNumber && typedContainerNumber && !isMaskedContainerNumber(typedContainerNumber)
+        ? typedContainerNumber
+        : undefined
       let freightComparisonContainer = container
       let nextFreight = container?.运费
       if (freightInputDirty) {
@@ -4954,7 +4970,7 @@ export default function ContainerDetailPage() {
         content: t(
           'containers.modals.translateHqDataContent',
           '将按货柜编号 {{containerNumber}} 找到 HQ 货柜单中的商品，为英文名称为空或含中文的商品机器翻译英文名称，并直接写入 HQ 商品字典（已有有效英文名称的不覆盖）。是否继续？',
-          { containerNumber },
+          { containerNumber: formatContainerNumber(containerNumber) },
         ),
         okText: t('common.confirm', '确认'),
         cancelText: t('common.cancel'),
@@ -4973,7 +4989,8 @@ export default function ContainerDetailPage() {
     })
 
     try {
-      const result = await translateHqProductNamesByContainerNumber(containerNumber)
+      // 传货柜 GUID 由后端读取真实编号：无完整编号权限的账号这里拿到的是遮罩值。
+      const result = await translateHqProductNamesByContainerNumber({ containerGuid, containerNumber })
       message.success({
         content: t('containers.messages.hqTranslationCompleted'),
         key: 'hq-translation',
@@ -5803,9 +5820,11 @@ export default function ContainerDetailPage() {
           missingNumericValue: exportScope === 'wholeContainer' ? '' : 0,
         },
       )
+      // 导出文件里的货柜编号跟随页面的「显示完整编号」开关，默认只有后 4 位。
+      const exportContainerNumber = container?.货柜编号 ? formatContainerNumber(container.货柜编号) : ''
       const baseSummaryRows: NonNullable<ContainerExportOptions['summary']>['rows'] = [
         [
-          { label: t('containers.fields.containerNumber'), value: container?.货柜编号 || '--' },
+          { label: t('containers.fields.containerNumber'), value: exportContainerNumber || '--' },
           { label: t('containers.fields.loadingDate'), value: formatDate(container?.装柜日期) },
           { label: t('containers.fields.estimatedArrival'), value: formatDate(container?.预计到岸日期) },
         ],
@@ -5824,7 +5843,7 @@ export default function ContainerDetailPage() {
       const summaryRows: NonNullable<ContainerExportOptions['summary']>['rows'] = format === 'pdf'
         ? [
             [
-              { label: t('containers.fields.containerNumber'), value: container?.货柜编号 || '--' },
+              { label: t('containers.fields.containerNumber'), value: exportContainerNumber || '--' },
               { label: t('containers.fields.loadingDate'), value: formatDate(container?.装柜日期) },
               { label: t('containers.fields.estimatedArrival'), value: formatDate(container?.预计到岸日期) },
             ],
@@ -5855,7 +5874,7 @@ export default function ContainerDetailPage() {
           title: t('containers.export.summaryTitle', '货柜主表信息'),
           rows: summaryRows,
         },
-        fileName: `${container?.货柜编号 || t('containers.detailTitle')}_${t('containers.export.detailSuffix')}`,
+        fileName: `${containerNumberFileNamePart(exportContainerNumber) || t('containers.detailTitle')}_${t('containers.export.detailSuffix')}`,
         productImageDownloadFailedText: t('containers.export.productImageDownloadFailed', '图片下载失败'),
         productImageMissingText: t('containers.export.productImageMissing', '无图片'),
         onProgress: (progress: number) => {
@@ -7656,7 +7675,10 @@ export default function ContainerDetailPage() {
                   onClick={() => navigate('/warehouse/containers')}
                 />
               </Tooltip>
-              <h1 className="wh-cdetail-title">{container?.货柜编号 || t('menu.containerDetail')}</h1>
+              <h1 className="wh-cdetail-title">
+                {container?.货柜编号 ? formatContainerNumber(container.货柜编号) : t('menu.containerDetail')}
+              </h1>
+              {container?.货柜编号 ? <ContainerNumberRevealButton /> : null}
               {container ? getStatusPill(container.状态, t) : null}
               {container?.备注 ? (
                 <span className="wh-cdetail-remark" title={container.备注}>{container.备注}</span>
@@ -8139,9 +8161,12 @@ export default function ContainerDetailPage() {
         <div className="wh-cdetail-edit-form">
           <div className="wh-cdetail-edit-field">
             <span className="wh-cdetail-edit-label">{t('containers.fields.containerNumber')}</span>
+            {/* 未显示完整编号时只读且遮罩：改编号前须先点眼睛按钮（只有有权限的账号能点）。 */}
             <Input
               aria-label={t('containers.fields.containerNumber')}
-              value={headerForm.货柜编号}
+              value={showFullContainerNumber ? headerForm.货柜编号 : formatContainerNumber(headerForm.货柜编号)}
+              disabled={!showFullContainerNumber}
+              suffix={<ContainerNumberRevealButton />}
               onChange={(event) => setHeaderForm((prev) => ({ ...prev, 货柜编号: event.target.value }))}
             />
           </div>

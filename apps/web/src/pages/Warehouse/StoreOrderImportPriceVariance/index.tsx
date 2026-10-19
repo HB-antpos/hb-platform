@@ -35,6 +35,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type Key } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import ProductListImage from '../../../components/ProductListImage'
 import ActiveFilterBar, { type ActiveFilterItem } from '../../../components/listToolbar/ActiveFilterBar'
@@ -289,6 +290,8 @@ function SignedVariance({ value }: { value?: number }) {
 
 export default function StoreOrderImportPriceVariancePage() {
   const { t, i18n } = useTranslation()
+  // 首次货柜编号默认只显示后 4 位；有权限的账号点列头眼睛按钮显示完整编号。
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const navigate = useNavigate()
   const { message } = AntdApp.useApp()
   const [batchWarehouseImportPriceForm] = Form.useForm<BatchWarehouseImportPriceFormValues>()
@@ -971,7 +974,9 @@ export default function StoreOrderImportPriceVariancePage() {
         width: 152,
         sorter: true,
         render: (value: number | undefined, row) => {
-          const containerText = row.firstContainerNumber || row.firstContainerCode
+          const containerText = row.firstContainerNumber
+            ? formatContainerNumber(row.firstContainerNumber)
+            : row.firstContainerCode
           return (
             <div className="wh-pv-two-line">
               <div className="wh-pv-strong">{formatAmount(value)}</div>
@@ -1083,6 +1088,7 @@ export default function StoreOrderImportPriceVariancePage() {
     )
     return columns
   }, [
+    formatContainerNumber,
     isDefaultSort,
     openContainerDetail,
     openProductDetails,
@@ -1188,12 +1194,19 @@ export default function StoreOrderImportPriceVariancePage() {
         render: (value?: number) => <SignedVariance value={value} />,
       },
       {
-        title: t('storeOrders.importPriceVariance.firstContainerNumber'),
+        title: (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+            {t('storeOrders.importPriceVariance.firstContainerNumber')}
+            <ContainerNumberRevealButton />
+          </span>
+        ),
         dataIndex: 'firstContainerNumber',
         key: 'firstContainerNumber',
         width: 150,
         render: (_value, row) => {
-          const text = row.firstContainerNumber || row.firstContainerCode || '--'
+          const text = row.firstContainerNumber
+            ? formatContainerNumber(row.firstContainerNumber)
+            : row.firstContainerCode || '--'
           if (!row.firstContainerCode) {
             return text
           }
@@ -1214,7 +1227,7 @@ export default function StoreOrderImportPriceVariancePage() {
         render: (value?: string) => formatDate(value, i18n.language),
       },
     ],
-    [i18n.language, openContainerDetail, openOrderDetail, t],
+    [formatContainerNumber, i18n.language, openContainerDetail, openOrderDetail, t],
   )
 
   // 供应商排行：选了国内供应商时用缓存的同条件全量排行，否则直接用本次结果。

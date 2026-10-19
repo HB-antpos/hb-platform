@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -18,6 +20,7 @@ namespace BlazorApp.Shared.DTOs
         /// 货柜编号
         /// </summary>
         [Display(Name = "货柜编号")]
+        [JsonConverter(typeof(ContainerNumberJsonConverter))]
         public string? ContainerNumber { get; set; }
 
         /// <summary>

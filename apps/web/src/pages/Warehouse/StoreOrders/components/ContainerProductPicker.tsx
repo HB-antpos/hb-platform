@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { SortOrder } from 'antd/es/table/interface'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../../components/ContainerNumber'
 import { getContainerList, getContainerProducts } from '../../../../services/containerService'
 import type { ContainerDetail, ContainerMain } from '../../../../types/container'
 import { formatSydneyDate, getSydneyDateTagColor } from '../../../../utils/sydneyDate'
@@ -28,6 +29,7 @@ export default function ContainerProductPicker({
   alreadySelectedCodes = [],
 }: ContainerProductPickerProps) {
   const { t } = useTranslation()
+  const { format: formatContainerNumber } = useContainerNumberDisplay()
   const [step, setStep] = useState(0)
   const [fetching, setFetching] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -198,10 +200,15 @@ export default function ContainerProductPicker({
 
   const containerColumns: ColumnsType<ContainerRow> = [
     {
-      title: t('containers.fields.containerNumber'),
+      title: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          {t('containers.fields.containerNumber')}
+          <ContainerNumberRevealButton />
+        </span>
+      ),
       dataIndex: '货柜编号',
       width: 160,
-      render: (value?: string) => value || '--',
+      render: (value?: string) => (value ? formatContainerNumber(value) : '--'),
     },
     {
       title: t('containers.fields.estimatedArrivalDate'),
@@ -352,7 +359,11 @@ export default function ContainerProductPicker({
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
             <Space wrap>
-              <Tag color="blue">{selectedContainer?.货柜编号 || t('storeOrders.containerNotSelected')}</Tag>
+              <Tag color="blue">
+                {selectedContainer?.货柜编号
+                  ? formatContainerNumber(selectedContainer.货柜编号)
+                  : t('storeOrders.containerNotSelected')}
+              </Tag>
               <Typography.Text type="secondary">{t('storeOrders.containerPickerQuantityHint')}</Typography.Text>
             </Space>
             <Button icon={<ArrowLeftOutlined />} onClick={() => setStep(0)}>

@@ -108,6 +108,8 @@ export const PERMISSIONS = {
     Create: "Container.Create",
     Edit: "Container.Edit",
     Delete: "Container.Delete",
+    // 查看完整货柜编号：没有它时后端只返回后 4 位；有它时界面默认仍遮罩，点眼睛按钮才显示完整编号。
+    ViewFullNumber: "Container.ViewFullNumber",
   },
   SeasonalCards: {
     Remaining: {
@@ -239,6 +241,7 @@ function createEmptyAccess(): AccessControl {
     canCreateContainer: false,
     canEditContainer: false,
     canDeleteContainer: false,
+    canViewFullContainerNumber: false,
     canManageStore: false,
     canViewReports: false,
     canViewDeviceRegistration: false,
@@ -369,6 +372,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canCreateContainer = hasPermission(PERMISSIONS.Container.Create);
   const canEditContainer = hasPermission(PERMISSIONS.Container.Edit);
   const canDeleteContainer = hasPermission(PERMISSIONS.Container.Delete);
+  const canViewFullContainerNumber = hasPermission(PERMISSIONS.Container.ViewFullNumber);
   const canManageStore = hasPermission("Stores.Edit") || hasPermission("Warehouse.Manage");
 
   const canReadOrder = hasPermission("Orders.View");
@@ -479,6 +483,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canCreateContainer,
     canEditContainer,
     canDeleteContainer,
+    canViewFullContainerNumber,
     canManageStore,
     canViewReports,
     canViewDeviceRegistration,
