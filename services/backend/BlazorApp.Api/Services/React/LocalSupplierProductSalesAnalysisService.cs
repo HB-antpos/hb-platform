@@ -1312,6 +1312,126 @@ FROM [ProductGroups]";
             );
         }
 
+        /// <summary>
+        /// 分店排行的「进货」：当前商品在进货日期区间内各分店的本地进货量。进货区间与销售区间相互独立，
+        /// 不传时与筛选日期相同；口径与顶部「本地进货量」一致（见 StorePurchaseQuantityReader）。
+        /// </summary>
+        public async Task<ApiResponse<List<LocalSupplierProductSalesBranchPurchaseDto>>> GetBranchPurchasesAsync(
+            LocalSupplierProductSalesAnalysisRequest request,
+            IReadOnlyList<string>? scopedStoreCodes
+        )
+        {
+            var scopeKey = BuildStoreScopeCachePart(scopedStoreCodes);
+            var generation = GetGeneration(scopeKey, request.ForceRefresh);
+            // 请求签名不含进货区间，放进分段名里，避免不同进货区间共用一份缓存。
+            var purchaseKey = $"{request.PurchaseStartDate:yyyyMMdd}-{request.PurchaseEndDate:yyyyMMdd}";
+            var cacheKey = BuildCacheKey("branch-purchases:" + purchaseKey, request, scopedStoreCodes, generation);
+            return await ComputeWithCacheAsync(
+                cacheKey,
+                scopeKey,
+                generation,
+                request.ForceRefresh,
+                () => ComputeBranchPurchasesCoreAsync(request, scopedStoreCodes)
+            );
+        }
+
+        private async Task<List<LocalSupplierProductSalesBranchPurchaseDto>> ComputeBranchPurchasesCoreAsync(
+            LocalSupplierProductSalesAnalysisRequest request,
+            IReadOnlyList<string>? scopedStoreCodes
+        )
+        {
+            if (IsEmptyScope(scopedStoreCodes))
+            {
+                return new List<LocalSupplierProductSalesBranchPurchaseDto>();
+            }
+
+            await EnsureProductKeyHealthAsync();
+            var currentProductCode = RequireCurrentProductCode(request);
+            // 筛选日期仍要合法：当前商品是否在已选范围内按筛选条件判定。
+            LocalSupplierProductSalesAnalysisLogic.ValidateDateRange(request.Filter.StartDate, request.Filter.EndDate);
+            var (purchaseStart, purchaseEnd) = request.PurchaseStartDate.HasValue && request.PurchaseEndDate.HasValue
+                ? LocalSupplierProductSalesAnalysisLogic.ValidateDateRange(request.PurchaseStartDate.Value, request.PurchaseEndDate.Value)
+                : LocalSupplierProductSalesAnalysisLogic.ValidateDateRange(request.Filter.StartDate, request.Filter.EndDate);
+            var context = await LoadMasterContextAsync(scopedStoreCodes);
+            if (!await IsCurrentProductSelectedAsync(context, request, currentProductCode, scopedStoreCodes))
+            {
+                return new List<LocalSupplierProductSalesBranchPurchaseDto>();
+            }
+
+            var totals = await ReadBranchLocalPurchaseQuantitiesAsync(
+                currentProductCode.Trim().ToUpperInvariant(),
+                purchaseStart,
+                purchaseEnd,
+                NormalizeStoreScopeForQuery(scopedStoreCodes)
+            );
+            return totals
+                .Select(pair => new LocalSupplierProductSalesBranchPurchaseDto
+                {
+                    BranchCode = pair.Key,
+                    BranchName = context.StoreNameByCode.TryGetValue(pair.Key, out var name) ? name : null,
+                    PurchaseQuantity = pair.Value,
+                })
+                .OrderByDescending(row => row.PurchaseQuantity)
+                .ThenBy(row => row.BranchCode, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private sealed class LocalSupplierProductSalesBranchPurchaseRow
+        {
+            public string? StoreCode { get; set; }
+            public string? HeaderStoreCode { get; set; }
+            public decimal? Quantity { get; set; }
+        }
+
+        /// <summary>
+        /// 当前商品在进货区间内各分店的本地进货量，口径同本页其他进货统计：未删除的单据与明细，
+        /// 日期取入库日期 → 订单日期 → 创建时间（EffectivePurchaseDate）；分店取明细行分店，为空回退单据分店。
+        /// 日期回退在过滤里拆成三支，各日期列的索引都能用；明细分店与单据分店分两列分组，回到内存再归属。
+        /// </summary>
+        private async Task<Dictionary<string, decimal>> ReadBranchLocalPurchaseQuantitiesAsync(
+            string productCode,
+            DateTime startDate,
+            DateTime endDate,
+            IReadOnlyCollection<string>? storeScope
+        )
+        {
+            var start = startDate.Date;
+            var endExclusive = endDate.Date.AddDays(1);
+            var rows = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .InnerJoin<StoreLocalSupplierInvoice>((detail, header) => detail.InvoiceGUID == header.InvoiceGUID)
+                .Where((detail, header) =>
+                    detail.IsDeleted == false
+                    && header.IsDeleted == false
+                    && detail.Quantity != null
+                    && detail.ProductCode == productCode
+                    && (
+                        (header.InboundDate >= start && header.InboundDate < endExclusive)
+                        || (header.InboundDate == null && header.OrderDate >= start && header.OrderDate < endExclusive)
+                        || (header.InboundDate == null && header.OrderDate == null && header.CreatedAt >= start && header.CreatedAt < endExclusive)
+                    ))
+                .GroupBy((detail, header) => detail.StoreCode)
+                .GroupBy((detail, header) => header.StoreCode)
+                .Select((detail, header) => new LocalSupplierProductSalesBranchPurchaseRow
+                {
+                    StoreCode = detail.StoreCode,
+                    HeaderStoreCode = header.StoreCode,
+                    Quantity = SqlFunc.AggregateSum(detail.Quantity),
+                })
+                .ToListAsync();
+
+            var totals = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+            {
+                var code = (string.IsNullOrWhiteSpace(row.StoreCode) ? row.HeaderStoreCode : row.StoreCode)?.Trim();
+                if (string.IsNullOrEmpty(code) || row.Quantity is null or 0m)
+                    continue;
+                if (storeScope != null && !storeScope.Contains(code, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                totals[code] = totals.GetValueOrDefault(code) + row.Quantity.Value;
+            }
+            return totals;
+        }
+
         private async Task<List<LocalSupplierProductSalesBranchDto>> ComputeBranchesCoreAsync(
             LocalSupplierProductSalesAnalysisRequest request,
             IReadOnlyList<string>? scopedStoreCodes

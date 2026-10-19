@@ -3,6 +3,7 @@ import {
   applyLocalProductSalesAnalysisBootstrapResult,
   applyLocalProductSalesAnalysisSectionResult,
   buildBranchPriceTiers,
+  mergeBranchPurchases,
   buildTrendChartModel,
   countInclusiveDays,
   getSellThroughLevel,
@@ -199,5 +200,24 @@ const cumulativeModel = buildTrendChartModel(trendDays, 'cumulative')
 deepEqual(cumulativeModel.purchase, [0, 0, 24], '累计模式必须逐日累加进货量')
 deepEqual(cumulativeModel.sales, [3, 2, 7], '累计模式必须逐日累加净销量')
 equal(buildTrendChartModel([], 'daily').priceDomain, null, '无数据时均价值域为空')
+
+// 分店排行合并进货：有销售的分店保持原顺序；只有进货的分店追加在后，按进货量降序；代码去空格、不区分大小写对齐。
+const mergedBranches = mergeBranchPurchases(
+  [
+    { branchCode: '1009', branchName: 'Lake Haven', netSalesQuantity: 409, netSalesAmount: 800, averageUnitPrice: 1.95 },
+    { branchCode: '1005', branchName: 'Charlestown', netSalesQuantity: 71, netSalesAmount: 248, averageUnitPrice: 3.5 },
+  ],
+  [
+    { branchCode: '1005 ', purchaseQuantity: 120 },
+    { branchCode: '1022', branchName: 'Toukley', purchaseQuantity: 36 },
+    { branchCode: '1024', branchName: 'Waratah', purchaseQuantity: 48 },
+    { branchCode: '1030', purchaseQuantity: 0 },
+  ],
+)
+deepEqual(mergedBranches.map((row) => [row.branchCode, row.purchaseQuantity, row.purchaseOnly]), [
+  ['1009', 0, false], ['1005', 120, false], ['1024', 48, true], ['1022', 36, true],
+], '合并进货后有销售的分店在前、只有进货的分店按进货量追加，零进货不追加')
+equal(mergedBranches[2].netSalesQuantity, 0, '只有进货的分店净销量为 0')
+equal(mergedBranches[2].averageUnitPrice, null, '只有进货的分店没有均价')
 
 console.log('LocalProductSalesAnalysis.logic.test: ok')

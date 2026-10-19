@@ -330,6 +330,45 @@ public class LocalSupplierProductSalesAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetBranchPurchasesAsync_按分店汇总当前商品本地进货_进货区间独立()
+    {
+        await InsertStoreAsync("B1", "Branch One");
+        await InsertStoreAsync("B2", "Branch Two");
+        await InsertStoreAsync("B3", "Branch Three");
+        await InsertSupplierAsync("SUP", "Supplier One");
+        await InsertProductAsync("P1", "ITM1", "BC1", "Product One");
+        await InsertProductAsync("P2", "ITM2", "BC2", "Product Two");
+        await InsertInvoiceWithDetailAsync("h1", "B1", "SUP", "P1", EndDate, 10m, 100m);
+        // 筛选区间（30 天）之外、进货区间放宽后才计入。
+        await InsertInvoiceWithDetailAsync("h2", "B2", "SUP", "P1", EndDate.AddDays(-40), 4m, 40m);
+        // 授权范围外的分店、已删除的单据、别的商品都不计。
+        await InsertInvoiceWithDetailAsync("h3", "B3", "SUP", "P1", EndDate, 7m, 70m);
+        await InsertInvoiceWithDetailAsync("h4", "B1", "SUP", "P1", EndDate, 99m, 990m, headerDeleted: true);
+        await InsertInvoiceWithDetailAsync("h5", "B1", "SUP", "P2", EndDate, 50m, 500m);
+        // 明细行没有分店时回退单据分店。
+        await _db.Insertable(new StoreLocalSupplierInvoice { InvoiceGUID = "h6", StoreCode = "B2", SupplierCode = "SUP", InboundDate = EndDate }).ExecuteCommandAsync();
+        await _db.Insertable(new StoreLocalSupplierInvoiceDetails { DetailGUID = "detail-h6", InvoiceGUID = "h6", StoreCode = "", ProductCode = "P1", Quantity = 3m, Amount = 30m }).ExecuteCommandAsync();
+
+        var service = CreateService();
+        var scope = new List<string> { "B1", "B2" };
+        var request = CreateRequest();
+        request.CurrentProductCode = "P1";
+        var byFilter = await service.GetBranchPurchasesAsync(request, scope);
+        Assert.True(byFilter.Success);
+        Assert.Equal(new[] { ("B1", "Branch One", 10m), ("B2", "Branch Two", 3m) }, byFilter.Data!.Select(row => (row.BranchCode, row.BranchName, row.PurchaseQuantity)));
+
+        request.PurchaseStartDate = EndDate.AddDays(-45);
+        request.PurchaseEndDate = EndDate;
+        var widened = await service.GetBranchPurchasesAsync(request, scope);
+        Assert.Equal(new[] { ("B1", 10m), ("B2", 7m) }, widened.Data!.Select(row => (row.BranchCode, row.PurchaseQuantity)));
+
+        // 进货区间与筛选区间同样不能晚于昨天。
+        request.PurchaseEndDate = EndDate.AddDays(1);
+        var invalid = await service.GetBranchPurchasesAsync(request, scope);
+        Assert.False(invalid.Success);
+    }
+
+    [Fact]
     public async Task GetProductDailyAsync_越界商品返回空()
     {
         await InsertStoreAsync("B1", "Branch One");

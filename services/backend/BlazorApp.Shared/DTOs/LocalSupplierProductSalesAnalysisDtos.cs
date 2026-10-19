@@ -20,6 +20,11 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>branch-daily 接口下的分店代码。</summary>
         public string? BranchCode { get; set; }
 
+        /// <summary>branch-purchases 接口下的进货日期区间（与销售区间相互独立）；两者都传才生效，否则与 Filter 的日期相同。</summary>
+        public DateTime? PurchaseStartDate { get; set; }
+
+        public DateTime? PurchaseEndDate { get; set; }
+
         public int PageNumber { get; set; } = 1;
 
         public int PageSize { get; set; } = 50;
@@ -238,6 +243,14 @@ namespace BlazorApp.Shared.DTOs
         public decimal NetSalesQuantity { get; set; }
         public decimal NetSalesAmount { get; set; }
         public decimal? AverageUnitPrice { get; set; }
+    }
+
+    /// <summary>当前商品在各分店的本地进货量（本地进货单，日期取入库 → 订单 → 创建时间，同顶部「本地进货量」）。</summary>
+    public class LocalSupplierProductSalesBranchPurchaseDto
+    {
+        public string BranchCode { get; set; } = string.Empty;
+        public string? BranchName { get; set; }
+        public decimal PurchaseQuantity { get; set; }
     }
 
     /// <summary>分店每日销售趋势。</summary>

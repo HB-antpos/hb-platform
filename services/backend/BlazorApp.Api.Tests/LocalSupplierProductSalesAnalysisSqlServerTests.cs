@@ -140,6 +140,34 @@ public sealed class LocalSupplierProductSalesAnalysisSqlServerTests : IDisposabl
     }
 
     [LocalProductSalesAnalysisSqlServerFact]
+    public async Task 分店进货量在SqlServer上按分店汇总_明细分店为空回退单据分店_进货区间独立()
+    {
+        var db = _db!;
+        await SeedAsync(db);
+        await db.Insertable(new Store { StoreGUID = "guid-B2", StoreCode = "B2", StoreName = "Branch Two", IsDeleted = false, IsActive = true }).ExecuteCommandAsync();
+        // 明细行没有分店：回退单据分店 B2；未入库按订单日期。
+        await db.Insertable(new StoreLocalSupplierInvoice { InvoiceGUID = "h2", StoreCode = "B2", SupplierCode = "SUP", OrderDate = EndDate.AddDays(-1), IsDeleted = false }).ExecuteCommandAsync();
+        await db.Insertable(new StoreLocalSupplierInvoiceDetails { DetailGUID = "d2", InvoiceGUID = "h2", StoreCode = "", ProductCode = "P001", Quantity = 5m, Amount = 5.55m, IsDeleted = false }).ExecuteCommandAsync();
+        // 筛选区间之外、放宽进货区间后才计入。
+        await db.Insertable(new StoreLocalSupplierInvoice { InvoiceGUID = "h3", StoreCode = "B1", SupplierCode = "SUP", InboundDate = StartDate.AddDays(-10), IsDeleted = false }).ExecuteCommandAsync();
+        await db.Insertable(new StoreLocalSupplierInvoiceDetails { DetailGUID = "d3", InvoiceGUID = "h3", StoreCode = "B1", ProductCode = "P001", Quantity = 6m, Amount = 6.66m, IsDeleted = false }).ExecuteCommandAsync();
+        var service = CreateService(db);
+        var request = CreateRequest("napkin");
+        request.CurrentProductCode = "P001";
+        var scope = new List<string> { "B1", "B2" };
+
+        var byFilter = await service.GetBranchPurchasesAsync(request, scope);
+        Assert.True(byFilter.Success, byFilter.Message);
+        Assert.Equal(new[] { ("B1", "Branch One", 24m), ("B2", "Branch Two", 5m) }, byFilter.Data!.Select(row => (row.BranchCode, row.BranchName, row.PurchaseQuantity)));
+
+        request.PurchaseStartDate = StartDate.AddDays(-15);
+        request.PurchaseEndDate = EndDate;
+        var widened = await service.GetBranchPurchasesAsync(request, scope);
+        Assert.True(widened.Success, widened.Message);
+        Assert.Equal(new[] { ("B1", 30m), ("B2", 5m) }, widened.Data!.Select(row => (row.BranchCode, row.PurchaseQuantity)));
+    }
+
+    [LocalProductSalesAnalysisSqlServerFact]
     public async Task 关键词Bootstrap与全选汇总在SqlServer上返回完整分段()
     {
         var db = _db!;

@@ -7018,7 +7018,8 @@
       "authorizedStore": "Authorized store",
       "netSalesQuantity": "Net quantity",
       "averageUnitPrice": "Avg. price",
-      "share": "Share"
+      "share": "Share",
+      "branchPurchase": "Purchased"
     },
     "totalsCaption": "Selected products total",
     "salesNotRealtime": "Daily sales statistics are not real-time",
@@ -7037,6 +7038,15 @@
     "branchCount": "{{count}} stores with sales",
     "branchCount_one": "{{count}} store with sales",
     "branchCount_other": "{{count}} stores with sales",
+    "branchPurchase": {
+      "label": "Purchased",
+      "follow": "Use filter dates",
+      "followAria": "Make purchase dates follow the filter dates again",
+      "followHint": "Purchase dates follow the filter dates by default; picking dates here only changes the Purchased column",
+      "independent": "Purchased {{range}}",
+      "columnHint": "Local supplier invoice quantity (dated by received date, or order date if not received), purchase dates {{range}}{{suffix}}. Stores with purchases but no sales are listed too.",
+      "followingSuffix": " (following the filter dates)"
+    },
     "total": "Total",
     "pageTotal": "Page total",
     "sellThrough": {

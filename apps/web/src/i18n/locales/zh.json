@@ -7018,7 +7018,8 @@
       "authorizedStore": "授权分店",
       "netSalesQuantity": "净销量",
       "averageUnitPrice": "均价",
-      "share": "占比"
+      "share": "占比",
+      "branchPurchase": "进货"
     },
     "totalsCaption": "所选商品合计",
     "salesNotRealtime": "销售日统计非实时",
@@ -7037,6 +7038,15 @@
     "branchCount": "{{count}} 家有销售",
     "branchCount_one": "{{count}} 家有销售",
     "branchCount_other": "{{count}} 家有销售",
+    "branchPurchase": {
+      "label": "进货",
+      "follow": "同筛选",
+      "followAria": "进货日期恢复跟随筛选日期",
+      "followHint": "进货日期默认跟随筛选日期，单独选择后独立，只影响分店排行的进货列",
+      "independent": "进货 {{range}}",
+      "columnHint": "本地进货单数量（日期取入库日期，未入库按订单日期），进货区间 {{range}}{{suffix}}。只有进货、没有销售的分店也会列出。",
+      "followingSuffix": "（跟随筛选日期）"
+    },
     "total": "合计",
     "pageTotal": "本页合计",
     "sellThrough": {
