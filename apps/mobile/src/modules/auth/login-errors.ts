@@ -4,6 +4,9 @@ import { getCurrentApiHost } from "@/shared/api/config";
 export type LoginErrorDescriptor = {
   key: string;
   values?: Record<string, string | number>;
+  /** 网络不通、超时、服务器繁忙这类「再点一次可能就好」的失败：登录页提示里给出「重试」按钮。
+   *  密码错误、账号停用、缺定位等业务失败重试也不会变好，不给按钮。 */
+  retryable?: boolean;
 };
 
 type ApiErrorBody = {
@@ -68,6 +71,7 @@ function withOrigin(key: string): LoginErrorDescriptor {
   return {
     key,
     values: { origin: getCurrentApiHost() },
+    retryable: true,
   };
 }
 
@@ -125,7 +129,7 @@ export function getFriendlyLoginErrorDescriptor(error: unknown): LoginErrorDescr
 
   // 本机步骤（Keychain 读写等）卡住，与网络超时区分：提示重试或重启 App。
   if (code === "LOGIN_STEP_TIMEOUT") {
-    return { key: "errors.stepTimeout" };
+    return { key: "errors.stepTimeout", retryable: true };
   }
 
   if (code === "ECONNABORTED" || code === "ETIMEDOUT" || includesAny(message, ["timeout", "timed out", "超时"])) {
@@ -137,7 +141,7 @@ export function getFriendlyLoginErrorDescriptor(error: unknown): LoginErrorDescr
   }
 
   if (status && status >= 500) {
-    return { key: "errors.server" };
+    return { key: "errors.server", retryable: true };
   }
 
   if (status) {
