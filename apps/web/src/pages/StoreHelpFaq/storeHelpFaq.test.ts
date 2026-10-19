@@ -77,7 +77,7 @@ for (const tab of tabs) {
   }
 }
 const countQuestions = (tab: StoreHelpFaqTab) => STORE_HELP_FAQ_GROUPS[tab].reduce((total, group) => total + group.questions.length, 0)
-assert.equal(countQuestions('pos'), 20)
+assert.equal(countQuestions('pos'), 21)
 assert.equal(countQuestions('mobile'), 13)
 
 // 编号跨分组连续，过滤后保持原编号
@@ -85,8 +85,9 @@ const posNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.pos)
 assert.equal(posNumbering.get('remove'), 1)
 assert.equal(posNumbering.get('hold-recall'), 4)
 assert.equal(posNumbering.get('voucher'), 7)
-assert.equal(posNumbering.get('return-scan'), 17)
-assert.equal(posNumbering.get('app-update'), 20)
+assert.equal(posNumbering.get('card-failure'), 8)
+assert.equal(posNumbering.get('return-scan'), 18)
+assert.equal(posNumbering.get('app-update'), 21)
 const mobileNumbering = buildStoreHelpFaqNumbering(STORE_HELP_FAQ_GROUPS.mobile)
 assert.equal(mobileNumbering.get('supplier-invoices'), 8)
 assert.equal(mobileNumbering.get('floating-button'), 12)
