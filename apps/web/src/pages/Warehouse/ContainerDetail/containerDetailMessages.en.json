@@ -26,13 +26,18 @@
       "createProductsPushHqBusy": "Another Send to HQ job is being submitted, so HQ was not updated automatically. Please use \"Send to HQ\" later",
       "domesticProductMerged": "Merged into existing domestic product {{newCode}}",
       "domesticProductMergedFilled": "Merged into existing domestic product {{newCode}}. Filled: {{fields}}",
-      "alignDomesticProductPreviewFailed": "Failed to load alignment preview"
+      "alignDomesticProductPreviewFailed": "Failed to load alignment preview",
+      "describingFromImages": "Generating English names from photos {{done}}/{{total}}…",
+      "imageNamesPending": "Generated {{count}} English names ({{image}} from photos, {{text}} by text translation). Click Save Details to submit them.",
+      "imageNamesFailed": "{{count}} items got no English name (no photo and no Chinese name, or the request failed)",
+      "imageNamesRequestFailed": "Failed to generate English names from photos"
     },
     "text": {
       "createProductsPushToHqAfterCreate": "Also update the HQ database after creation"
     },
     "actions": {
-      "mergeDomesticProduct": "Merge Code"
+      "mergeDomesticProduct": "Merge Code",
+      "describeFromImages": "English Names from Photos"
     }
   }
 }

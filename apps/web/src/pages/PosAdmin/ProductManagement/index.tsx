@@ -91,7 +91,7 @@ import {
 } from '../../../services/productCategoryService'
 import { checkIntegrity, fixIntegrity } from '../../../services/productIntegrityService'
 import { getActiveStores } from '../../../services/storeService'
-import { batchTranslate } from '../../../services/translationService'
+import { describeProductsFromImages } from '../../../services/productDescriptionService'
 import { getCategoryTree as getWarehouseCategoryTree, type WarehouseCategoryNode } from '../../../services/warehouseCategoryService'
 import { useAuthStore } from '../../../store/auth'
 import PosHqPushModal from '../../../components/posHqPush/PosHqPushModal'
@@ -170,6 +170,13 @@ import SupplierCategoryCascader from './SupplierCategoryCascader'
 import SupplierCategoryCell from './SupplierCategoryCell'
 import SupplierCategoryFormField from './SupplierCategoryFormField'
 import SupplierCategoryManagerModal from './SupplierCategoryManagerModal'
+import ImageEnglishNamePreviewModal from './ImageEnglishNamePreviewModal'
+import {
+  buildImageEnglishNamePreviewRows,
+  buildImageEnglishNameUpdates,
+  buildPosProductImageDescriptionItems,
+  type ImageEnglishNamePreviewRow,
+} from './imageEnglishNamePreview'
 import {
   applySupplierCategoryCascaderChange,
   applySupplierSelectChange,
@@ -261,7 +268,6 @@ const SUPPLIER_IMAGE_BATCH_TIMEOUT_MS = 30 * 60 * 1000
 const PRODUCT_IMAGE_FALLBACK = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iMjAiIHk9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjY2NjIj7ml6DnvKk8L3RleHQ+PC9zdmc+'
 
 const DEFAULT_PRODUCT_IMAGE_BASE_URL = 'https://hotbargain-yw-2023-1300114625.cos.ap-shanghai.myqcloud.com/YW200'
-const CHINESE_TEXT_PATTERN = /[\u4e00-\u9fff]/
 const PRODUCT_TEXT_FILTER_OPERATORS: PosProductTextFilterOperator[] = ['contains', 'equals', 'startsWith', 'endsWith']
 const PRODUCT_NUMBER_FILTER_OPERATORS: PosProductNumberFilterOperator[] = ['equals', 'between', 'gte', 'lte']
 const PRODUCT_DATE_FILTER_OPERATORS: PosProductDateFilterOperator[] = ['equals', 'between', 'gte', 'lte']
@@ -397,29 +403,6 @@ function renderCategoryCell(
       </span>
     </Tooltip>
   )
-}
-
-function containsChineseText(value?: string) {
-  return Boolean(value && CHINESE_TEXT_PATTERN.test(value))
-}
-
-function buildProductNameTranslationUpdates(
-  rows: ProductRow[],
-  translations: Record<string, string>,
-): BatchUpdatePosProductDto[] {
-  return rows.reduce<BatchUpdatePosProductDto[]>((updates, row) => {
-    const originalName = row.productName.trim()
-    const translatedName = translations[originalName]?.trim()
-    // 批量翻译会同时覆盖商品名称和英文名称，提交前过滤空结果、未变化结果和仍包含中文的结果。
-    if (translatedName && translatedName !== originalName && !containsChineseText(translatedName)) {
-      updates.push({
-        productCode: row.productCode,
-        productName: translatedName,
-        englishName: translatedName,
-      })
-    }
-    return updates
-  }, [])
 }
 
 function resolveCascaderLeafValue(value: unknown): string | undefined {
@@ -593,6 +576,9 @@ export default function ProductManagementPage() {
   const [batchEditVisible, setBatchEditVisible] = useState(false)
   const [batchEditForm] = Form.useForm()
   const [translating, setTranslating] = useState(false)
+  // 看图生成英文名的保存前确认：null 表示弹窗关闭。
+  const [imageNamePreview, setImageNamePreview] = useState<ImageEnglishNamePreviewRow[] | null>(null)
+  const [savingImageNames, setSavingImageNames] = useState(false)
   const [imageBatchVisible, setImageBatchVisible] = useState(false)
   const [imageBatchLoading, setImageBatchLoading] = useState(false)
   const [imageBatchForm] = Form.useForm()
@@ -2346,36 +2332,59 @@ export default function ProductManagementPage() {
     }
 
     const selectedRows = data.filter((row) => selectedRowKeys.includes(row.key))
-    // 只翻译当前页选中的中文商品名，去重后减少翻译接口压力。
-    const names = Array.from(new Set(selectedRows.map((row) => row.productName.trim()).filter((name) => name && containsChineseText(name))))
-    if (!names.length) {
+    // 选中商品都按图片重新生成（商品名称作看图参考）；保存前在预览弹窗里逐条确认。
+    const items = buildPosProductImageDescriptionItems(selectedRows)
+    if (!items.length) {
       message.warning(t('posAdmin.products.noNamesToTranslate', '没有可翻译的商品名称'))
       return
     }
 
+    const progressKey = 'pos-products-describe-from-images'
+    const showProgress = (done: number, total: number) => message.loading({
+      key: progressKey,
+      duration: 0,
+      content: t('posAdmin.products.imageNames.progress', '正在看图生成英文名 {{done}}/{{total}}…', { done, total }),
+    })
     try {
       setTranslating(true)
-      const translations = await batchTranslate(names)
-      const updates = buildProductNameTranslationUpdates(selectedRows, translations)
-      if (!updates.length) {
+      showProgress(0, items.length)
+      const summary = await describeProductsFromImages(items, showProgress)
+      message.destroy(progressKey)
+      const previewRows = buildImageEnglishNamePreviewRows(selectedRows, summary)
+      if (summary.failedCount > 0) {
+        message.warning(t('posAdmin.products.imageNames.failed', '{{count}} 个商品没有生成英文名（没有图片也没有名称，或调用失败）', { count: summary.failedCount }))
+      }
+      if (!previewRows.length) {
         message.warning(t('posAdmin.products.noValidTranslatedNames', '没有可保存的英文翻译结果'))
         return
       }
+      setImageNamePreview(previewRows)
+    } catch (error) {
+      message.destroy(progressKey)
+      message.error(error instanceof Error ? error.message : t('posAdmin.products.imageNames.requestFailed', '看图生成英文名失败'))
+    } finally {
+      setTranslating(false)
+    }
+  }
 
+  const handleConfirmImageNames = async (rows: ImageEnglishNamePreviewRow[]) => {
+    if (!ensureCanManagePosProducts()) return
+    const updates = buildImageEnglishNameUpdates(rows)
+    if (!updates.length) return
+    try {
+      setSavingImageNames(true)
       const result = await batchUpdateProducts(updates)
       message.success(t('posAdmin.products.batchTranslateSuccess', '成功翻译 {{count}} 个商品名称', { count: result.successCount }))
       if (result.failedCount > 0) {
         message.warning(t('posAdmin.products.batchUpdatePartialFailed', '{{count}} 个商品更新失败', { count: result.failedCount }))
       }
-      if (updates.length < selectedRows.length) {
-        message.warning(t('posAdmin.products.invalidTranslatedNamesSkipped', '有 {{count}} 条翻译结果仍包含中文或无变化，已跳过', { count: selectedRows.length - updates.length }))
-      }
+      setImageNamePreview(null)
       setSelectedRowKeys([])
       await loadData()
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('posAdmin.products.batchTranslateFailed', '批量翻译失败'))
     } finally {
-      setTranslating(false)
+      setSavingImageNames(false)
     }
   }
 
@@ -3702,7 +3711,7 @@ export default function ProductManagementPage() {
                   disabled={!selectedRowKeys.length || translating}
                   onClick={handleBatchTranslate}
                 >
-                  {t('posAdmin.products.batchTranslate', '批量翻译')}
+                  {t('posAdmin.products.imageNames.action', '看图生成英文名')}
                 </Button>
               </>
             )}
@@ -4828,6 +4837,13 @@ export default function ProductManagementPage() {
           </div>
         </div>
       </Modal>
+
+      <ImageEnglishNamePreviewModal
+        rows={imageNamePreview}
+        saving={savingImageNames}
+        onCancel={() => setImageNamePreview(null)}
+        onConfirm={(rows) => void handleConfirmImageNames(rows)}
+      />
 
       <SupplierCategoryManagerModal
         open={supplierCategoryManagerOpen}

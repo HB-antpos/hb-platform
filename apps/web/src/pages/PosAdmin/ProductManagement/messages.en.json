@@ -55,6 +55,19 @@
         "unmarkPromotional": "Unmark promo",
         "promotionalDone": "Promo flag updated: {{reassigned}} products reassigned, {{cleared}} cleared",
         "promotionalFailed": "Failed to update promo flag"
+      },
+      "imageNames": {
+        "action": "English Names from Photos",
+        "progress": "Generating English names from photos {{done}}/{{total}}…",
+        "failed": "{{count}} products got no English name (no photo and no name, or the request failed)",
+        "requestFailed": "Failed to generate English names from photos",
+        "previewTitle": "Review English names from photos",
+        "previewHint": "Saving replaces both the product name and the English name. Unticked products are left unchanged.",
+        "previewConfirm": "Save {{count}}",
+        "columnImage": "Photo",
+        "columnCurrent": "Current name",
+        "columnNew": "New English name",
+        "sourceText": "No photo, translated from name"
       }
     }
   }

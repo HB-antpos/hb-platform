@@ -847,6 +847,28 @@ builder.Services.AddScoped<IContainerService, ContainerService>(); // 货柜服�
 builder.Services.AddScoped<IYiwuContainerService, YiwuContainerService>();
 builder.Services.AddScoped<ContainerExportService>(); // 义乌货柜服务
 builder.Services.AddScoped<ITranslationService, TranslationService>(); // 翻译服务
+// 看图生成英文商品名（Claude）：密钥走环境变量 ProductVision__Anthropic__ApiKey；未配置时自动退回文字翻译。
+builder.Services.Configure<BlazorApp.Api.Features.ProductDescriptions.ProductImageDescriptionOptions>(
+    builder.Configuration.GetSection(BlazorApp.Api.Features.ProductDescriptions.ProductImageDescriptionOptions.SectionName)
+);
+// 商品图片下载客户端：只连公网地址（每次连接都校验 IP），总时限由服务按配置控制。
+builder.Services.AddHttpClient(
+        BlazorApp.Api.Features.ProductDescriptions.ProductImageFetcher.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(30)
+    )
+    .ConfigurePrimaryHttpMessageHandler(BlazorApp.Api.Features.ProductDescriptions.ProductImageFetcher.CreatePrimaryHandler);
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.ProductDescriptions.IProductImageFetcher,
+    BlazorApp.Api.Features.ProductDescriptions.ProductImageFetcher
+>();
+builder.Services.AddSingleton<
+    BlazorApp.Api.Features.ProductDescriptions.IProductVisionClient,
+    BlazorApp.Api.Features.ProductDescriptions.ClaudeProductVisionClient
+>();
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.ProductDescriptions.IProductImageDescriptionService,
+    BlazorApp.Api.Features.ProductDescriptions.ProductImageDescriptionService
+>();
 builder.Services.AddScoped<IYiwuOrderService, YiwuOrderService>(); // 义乌订单服务
 builder.Services.AddScoped<IPostgreSqlService, PostgreSqlService>(); // PostgreSQL数据库服务
 builder.Services.AddScoped<IProductPrefixCodeService, ProductPrefixCodeService>(); // 商品前缀管理服务

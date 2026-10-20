@@ -26,13 +26,18 @@
       "createProductsPushHqBusy": "已有发送到 HQ 的任务正在提交，本次未自动更新 HQ，请稍后手动「发送到 HQ」",
       "domesticProductMerged": "已合并到已有国内商品 {{newCode}}",
       "domesticProductMergedFilled": "已合并到已有国内商品 {{newCode}}，补齐：{{fields}}",
-      "alignDomesticProductPreviewFailed": "读取对齐预览失败"
+      "alignDomesticProductPreviewFailed": "读取对齐预览失败",
+      "describingFromImages": "正在看图生成英文名 {{done}}/{{total}}…",
+      "imageNamesPending": "已生成 {{count}} 条英文名（看图 {{image}} 条，文字翻译 {{text}} 条），请点击“保存明细”提交",
+      "imageNamesFailed": "{{count}} 条没有生成英文名（没有图片也没有中文名，或调用失败）",
+      "imageNamesRequestFailed": "看图生成英文名失败"
     },
     "text": {
       "createProductsPushToHqAfterCreate": "创建完成后同时更新 HQ 数据库"
     },
     "actions": {
-      "mergeDomesticProduct": "合并编码"
+      "mergeDomesticProduct": "合并编码",
+      "describeFromImages": "看图生成英文名"
     }
   }
 }

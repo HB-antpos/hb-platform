@@ -1,5 +1,6 @@
 import type { ContainerDetail, ContainerDetailQuery, ContainerDetailQueryResult, ContainerMain, UpdateContainerDetailRequest } from '../../../types/container'
 import type { PushProductsToHqItem, PushProductsToHqResult } from '../../../types/posProduct'
+import type { ProductImageDescriptionItem } from '../../../services/productDescriptionService'
 
 export type ContainerDetailProductTypeFilter = 'normal' | 'set' | 'multi' | 'setChild'
 // priceUp / priceDown：本次进口价格相对仓库实时进货价涨价 / 降价，与进口价格列的涨跌箭头同一口径。
@@ -2072,6 +2073,36 @@ export function countContainerDetailInvalidTranslationResults(
     const englishName = name ? translations[name] : undefined
     return Boolean(englishName) && !isValidContainerDetailEnglishTranslation(englishName)
   }).length
+}
+
+/**
+ * 看图生成英文名的请求条目：key 用 hguid，图片按明细优先、商品信息兜底，
+ * 中文名沿用原翻译口径（英文名里有中文就用它，否则用商品名称）作为看图参考和文字翻译兜底。
+ * 既没图也没中文名的行不发给后端。
+ */
+export function buildContainerDetailImageDescriptionItems(rows: ContainerDetail[]): ProductImageDescriptionItem[] {
+  return rows
+    .filter((row) => Boolean(row.hguid))
+    .map((row) => ({
+      key: row.hguid,
+      imageUrl: getContainerDetailImageUrl(row),
+      chineseName: getContainerDetailTranslationSource(row)?.trim() || undefined,
+    }))
+    .filter((item) => Boolean(item.imageUrl || item.chineseName))
+}
+
+/** 把看图结果（按 hguid）转成待保存的英文名更新；空结果、含中文的结果跳过。 */
+export function buildContainerDetailImageDescriptionUpdates(
+  rows: ContainerDetail[],
+  englishNameByHguid: Record<string, string | undefined>,
+): UpdateContainerDetailRequest[] {
+  return rows.reduce<UpdateContainerDetailRequest[]>((updates, row) => {
+    const englishName = row.hguid ? englishNameByHguid[row.hguid]?.trim() : undefined
+    if (row.hguid && isValidContainerDetailEnglishTranslation(englishName)) {
+      updates.push({ hguid: row.hguid, 英文名称: englishName })
+    }
+    return updates
+  }, [])
 }
 
 export function buildContainerDetailEnglishNameUpdates(

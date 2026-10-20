@@ -127,7 +127,7 @@ import {
 import { createHqSyncJobPoller } from '../../../services/productHqSyncPolling'
 import { upsertForActiveStores as upsertMultiCodeForActiveStores, type StoreMultiCodePriceUpsertActiveItem } from '../../../services/storeMultiCodePriceService'
 import { upsertForActiveStores as upsertRetailForActiveStores, type StoreRetailPriceUpsertActiveItem } from '../../../services/storeRetailPriceService'
-import { batchTranslate } from '../../../services/translationService'
+import { describeProductsFromImages, getDescribedEnglishName } from '../../../services/productDescriptionService'
 import {
   getCategoryTree,
   type WarehouseCategoryNode,
@@ -179,9 +179,9 @@ import {
   deriveContainerFreightInput,
   getContainerDetailCostMissingFields,
   getContainerDetailBatchCategoryProductCodes,
-  buildContainerDetailTranslationUpdates,
+  buildContainerDetailImageDescriptionItems,
+  buildContainerDetailImageDescriptionUpdates,
   calculateContainerDetailTableScrollY,
-  countContainerDetailInvalidTranslationResults,
   countSuccessfullySavedContainerDetailRows,
   extractPushToHqErrorResult,
   findContainerDetailRowsMissingCreateProductRetailPrice,
@@ -212,7 +212,6 @@ import {
   isContainerDetailAutoSaveValueUnchanged,
   formatContainerDetailPreviewFields,
   getContainerDetailProductType,
-  getContainerDetailTranslationSource,
   getContainerDetailWarehouseStatusFilterKey,
   getNextUpdateFieldSelection,
   getNextContainerDetailEditableCell,
@@ -4655,30 +4654,47 @@ export default function ContainerDetailPage() {
   }
 
   const translateNames = async () => {
-    const scopedRows = await confirmBatchRows(t('containers.actions.batchTranslate'))
+    const scopedRows = await confirmBatchRows(t('containers.actions.describeFromImages'))
     if (!scopedRows) return
-    const names = Array.from(new Set(scopedRows.map(getContainerDetailTranslationSource).filter((value): value is string => Boolean(value))))
-    if (!names.length) {
+    const items = buildContainerDetailImageDescriptionItems(scopedRows)
+    if (!items.length) {
       message.warning(t('containers.messages.noNamesToTranslate'))
       return
     }
-    const translations = await batchTranslate(names)
-    const updates = buildContainerDetailTranslationUpdates(scopedRows, translations)
-    const skippedInvalidCount = countContainerDetailInvalidTranslationResults(scopedRows, translations)
-    if (updates.length) {
-      queuePendingDetailUpdates(updates)
-      setRows((items) => applyContainerDetailEnglishNameUpdates(items, updates))
-      message.success(t(
-        'containers.messages.namesTranslatedPending',
-        '已生成 {{count}} 条英文名称，请点击“保存明细”提交',
-        { count: updates.length },
-      ))
-    }
-    if (skippedInvalidCount > 0) {
-      message.warning(t('containers.messages.invalidTranslatedNamesSkipped', { count: skippedInvalidCount }))
-    }
-    if (!updates.length && skippedInvalidCount === 0) {
-      message.success(t('containers.messages.namesTranslated', { count: 0 }))
+
+    // 看图比文字翻译慢得多（每批 20 条约十几秒），用常驻 loading 提示显示进度。
+    const progressKey = 'describe-from-images'
+    const showProgress = (done: number, total: number) => message.loading({
+      key: progressKey,
+      duration: 0,
+      content: t('containers.messages.describingFromImages', '正在看图生成英文名 {{done}}/{{total}}…', { done, total }),
+    })
+    showProgress(0, items.length)
+    try {
+      const summary = await describeProductsFromImages(items, showProgress)
+      message.destroy(progressKey)
+      const englishNameByHguid = Object.fromEntries(items.map((item) => [item.key, getDescribedEnglishName(summary, item.key)]))
+      const updates = buildContainerDetailImageDescriptionUpdates(scopedRows, englishNameByHguid)
+      if (updates.length) {
+        // 与原翻译一致：只进保存明细队列，点「保存明细」才落库。
+        queuePendingDetailUpdates(updates)
+        setRows((rowsNow) => applyContainerDetailEnglishNameUpdates(rowsNow, updates))
+        message.success(t(
+          'containers.messages.imageNamesPending',
+          '已生成 {{count}} 条英文名（看图 {{image}} 条，文字翻译 {{text}} 条），请点击“保存明细”提交',
+          { count: updates.length, image: summary.imageCount, text: summary.textCount },
+        ))
+      }
+      if (summary.failedCount > 0) {
+        message.warning(t(
+          'containers.messages.imageNamesFailed',
+          '{{count}} 条没有生成英文名（没有图片也没有中文名，或调用失败）',
+          { count: summary.failedCount },
+        ))
+      }
+    } catch (error) {
+      message.destroy(progressKey)
+      message.error(error instanceof Error ? error.message : t('containers.messages.imageNamesRequestFailed', '看图生成英文名失败'))
     }
   }
 
@@ -7408,7 +7424,7 @@ export default function ContainerDetailPage() {
     { key: 'updateWarehouseImportPrice', label: t('warehouseUi.containerDetail.actionUpdateWarehouseImportPrice'), onClick: () => void updateWarehouseImportPrice() },
   ] : []
   const englishNameSelectionActions: SelectionMenuAction[] = access.canEditContainer ? [
-    { key: 'translate', label: t('containers.actions.batchTranslate'), onClick: () => void translateNames() },
+    { key: 'translate', label: t('containers.actions.describeFromImages'), onClick: () => void translateNames() },
     { key: 'editEnglishName', label: t('containers.actions.batchEditEnglishName'), onClick: () => void openBatchEditEnglishName() },
     { key: 'clearEnglishName', label: t('containers.actions.clearEnglishNames'), onClick: () => void clearEnglishNames() },
   ] : []

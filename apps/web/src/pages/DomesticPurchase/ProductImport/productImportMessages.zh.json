@@ -19,8 +19,6 @@
     "stepSent": "已发送 {{count}} 条",
     "selectSupplierPlaceholder": "选择供应商",
     "addRowsButton": "{{count}} 行",
-    "translateSelected": "翻译选中",
-    "translateAll": "翻译全部",
     "redetect": "重新检测",
     "syncHqNamesLabel": "同步更新总部英文名",
     "syncHqNamesTooltip": "勾选后，「更多操作」里的「更新主表名称」会把英文名同时写入总部（HQ）商品字典；不影响「更新 / 新建」。",
@@ -106,6 +104,12 @@
     "conflictWas": "（原 {{count}}）",
     "conflictFooter": "共发送 {{total}} 个货号，其中 {{conflicts}} 个有冲突",
     "conflictConfirm": "确认发送",
-    "itemNumberCol": "货号"
+    "itemNumberCol": "货号",
+    "describeSelected": "看图生成英文名（选中）",
+    "describeAll": "看图生成英文名（全部）",
+    "imageNamesProgress": "正在看图生成英文名 {{done}}/{{total}}…",
+    "imageNamesApplied": "已生成 {{count}} 条英文名（看图 {{image}} 条，文字翻译 {{text}} 条）",
+    "imageNamesFailed": "{{count}} 行没有生成英文名（没有图片也没有中文名，或调用失败）",
+    "imageNamesRequestFailed": "看图生成英文名失败"
   }
 }

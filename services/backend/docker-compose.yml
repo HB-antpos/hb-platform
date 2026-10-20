@@ -133,6 +133,8 @@ services:
       - Translation__Provider=deepseek
       # 生产翻译密钥只从服务器 .env 注入，避免在 compose 中写入明文或占位值。
       - Translation__DeepSeek__ApiKey=${DEEPSEEK_API_KEY}
+      # 看图生成英文商品名（Claude）。未配置时各页面「看图生成英文名」自动退回上面的文字翻译。
+      - ProductVision__Anthropic__ApiKey=${PRODUCT_VISION_ANTHROPIC_API_KEY:-}
       - TencentCloud__SecretId=${TENCENT_SECRET_ID}
       - TencentCloud__SecretKey=${TENCENT_SECRET_KEY}
       - TencentCloud__BucketName=${TENCENT_BUCKET_NAME}
