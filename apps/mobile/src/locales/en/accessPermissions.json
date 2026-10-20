@@ -262,8 +262,8 @@
       "description": "View POS sales records on the web admin, and store orders and incoming delivery notices in the app."
     },
     "SalesOrders.View": {
-      "name": "View sales records",
-      "description": "In the app, view sales orders, lines and invoices by store, date and order type."
+      "name": "View POS orders",
+      "description": "In the app, view POS orders, lines and invoices by store, date and order type."
     },
     "Permissions.PosTerminal.Audit.View": {
       "name": "View POS audit logs",

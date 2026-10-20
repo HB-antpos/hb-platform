@@ -17,6 +17,7 @@ import {
   countActiveLegacyFilters,
   createDefaultLegacyLogFilters,
   describeFlagEvidence,
+  mergeSummaryDeviceOptions,
   filtersFromRouteParams,
   filtersToRouteParams,
   groupLegacyLogsByHour,
@@ -29,7 +30,15 @@ import {
   summarizeStores,
   switchLens,
 } from "./logic";
-import { normalizeLegacyLogItem, normalizeLegacyLogReview, normalizePosEmployeeSummary, normalizePosLogItem } from "./api-normalization";
+import {
+  normalizeDeviceOptions,
+  normalizeLegacyLogItem,
+  normalizeLegacyLogReview,
+  normalizeLogBadgeSummary,
+  normalizePosEmployeeSummary,
+  normalizePosLogItem,
+} from "./api-normalization";
+import { highestLogBadgeLevel, legacyLogBadgeQueryKey, mergeLogBadgeSummaries, resolveLogBadgeLevel, shouldFetchLogBadge } from "./badge";
 import type { LegacyLogItem } from "./types";
 
 const now = new Date(2026, 8, 30, 15, 30); // 2026-09-30 15:30 设备本地时间
@@ -247,5 +256,87 @@ assert.deepEqual(
 );
 assert.equal(describeFlagEvidence({ ruleCode: "deleteAfterCheckout", evidence: { anchor: "tender" } })[0].key, "deleteAfterTender");
 assert.equal(shortFlagEvidence({ ruleCode: "emergencyOverride", evidence: { outcome: "Denied" } })?.key, "short.emergencyOverride");
+
+// —— 设备过滤：归一化容错、POS 参数与路由参数、员工汇总设备选项 ——
+assert.deepEqual(normalizeDeviceOptions(undefined), [], "响应缺 devices 字段时为空数组，不抛错");
+assert.deepEqual(normalizeDeviceOptions({ deviceCode: "x" }), [], "非数组按空数组");
+assert.deepEqual(
+  normalizeDeviceOptions([{ deviceCode: "POS_1013_0222", count: 7 }, { deviceCode: null }, "POS_1013_0300", "", null, 5]),
+  [{ deviceCode: "POS_1013_0222", count: 7 }, { deviceCode: null, count: 0 }, { deviceCode: "POS_1013_0300", count: 0 }],
+  "元素容错：缺 count 记 0，字符串元素当设备编号，非法元素丢弃",
+);
+const posDeviceFilters = { ...createDefaultLegacyLogFilters(["1013"], "pos"), deviceCode: "POS_1013_0222" };
+assert.equal(buildLegacyLogQuery(posDeviceFilters, 1, now)!.get("deviceCode"), "POS_1013_0222", "新收银列表带设备过滤");
+assert.equal(buildLegacyEmployeeSummaryQuery(posDeviceFilters, now)!.get("deviceCode"), "POS_1013_0222", "新收银员工汇总带设备过滤");
+assert.equal(buildLegacyEmployeeSummaryQuery({ ...posDeviceFilters, deviceCode: null }, now)!.has("deviceCode"), false, "没选设备不传");
+assert.equal(countActiveLegacyFilters(posDeviceFilters), 1, "设备算一项启用的筛选");
+assert.equal(filtersFromRouteParams({ source: "pos", stores: "1013", device: " POS_1013_0222 " }, "pos").deviceCode, "POS_1013_0222", "路由参数 device 对新收银生效");
+assert.equal(filtersFromRouteParams(filtersToRouteParams(posDeviceFilters), "pos").deviceCode, "POS_1013_0222", "device 随路由参数往返");
+
+const summaryEmployees = [
+  { deviceCodes: ["B-2", "A-1"] },
+  { deviceCodes: ["A-1", "A-1"] },
+  { deviceCodes: [] },
+];
+assert.deepEqual(
+  mergeSummaryDeviceOptions(summaryEmployees, null, []),
+  [{ deviceCode: "A-1", count: 2 }, { deviceCode: "B-2", count: 1 }],
+  "员工汇总的设备选项：去重、按编号排序，count = 用过该设备的员工数",
+);
+const fullOptions = mergeSummaryDeviceOptions(summaryEmployees, null, []);
+assert.deepEqual(
+  mergeSummaryDeviceOptions([{ deviceCodes: ["A-1"] }], "A-1", fullOptions),
+  fullOptions,
+  "已按设备过滤时沿用上一次选项，下拉不会收缩成只剩当前设备",
+);
+assert.deepEqual(
+  mergeSummaryDeviceOptions([{ deviceCodes: ["A-1"] }], "A-1", []),
+  [{ deviceCode: "A-1", count: 1 }],
+  "深链带 device 进入、没有上一次选项时用本次结果",
+);
+assert.deepEqual(
+  mergeSummaryDeviceOptions([], "Z-9", []),
+  [{ deviceCode: "Z-9", count: 0 }],
+  "当前设备一定在列",
+);
+
+assert.deepEqual(
+  mergeSummaryDeviceOptions([{ deviceCodes: ["A-1"] }], "A-1", [], [{ deviceCode: "A-1", count: 9 }, { deviceCode: "B-2", count: 3 }, { deviceCode: null, count: 1 }]),
+  [{ deviceCode: "A-1", count: 9 }, { deviceCode: "B-2", count: 3 }],
+  "接口返回 devices 时直接采用（选了设备也是全集），空设备码剔除",
+);
+assert.deepEqual(
+  mergeSummaryDeviceOptions([], "Z-9", [], [{ deviceCode: "A-1", count: 1 }]),
+  [{ deviceCode: "A-1", count: 1 }, { deviceCode: "Z-9", count: 0 }],
+  "接口全集里没有当前设备时补上",
+);
+
+// —— 导航角标圆点：级别判定、摘要归一化、取数条件 ——
+assert.equal(resolveLogBadgeLevel({ dangerPending: 1, abnormalPending: 5 }), "danger", "红优先于橙");
+assert.equal(resolveLogBadgeLevel({ dangerPending: 0, abnormalPending: 2 }), "warning");
+assert.equal(resolveLogBadgeLevel({ dangerPending: 0, abnormalPending: 0 }), null, "都为 0 不显示");
+assert.equal(resolveLogBadgeLevel(undefined), null);
+assert.equal(resolveLogBadgeLevel(null), null);
+assert.equal(resolveLogBadgeLevel({ dangerPending: -3, abnormalPending: Number.NaN }), null, "负数 / NaN 按 0");
+assert.equal(highestLogBadgeLevel([null, "warning", undefined]), "warning");
+assert.equal(highestLogBadgeLevel(["warning", "danger"]), "danger");
+assert.equal(highestLogBadgeLevel([null, undefined]), null);
+assert.deepEqual(normalizeLogBadgeSummary({ dangerPending: 2, abnormalPending: 5.9 }), { dangerPending: 2, abnormalPending: 5 });
+assert.deepEqual(normalizeLogBadgeSummary({ dangerPending: "3", abnormalPending: -1 }), { dangerPending: 0, abnormalPending: 0 }, "非数字、负数按 0");
+assert.deepEqual(normalizeLogBadgeSummary({}), { dangerPending: 0, abnormalPending: 0 }, "缺字段按 0");
+assert.deepEqual(
+  mergeLogBadgeSummaries([{ dangerPending: 0, abnormalPending: 2 }, { dangerPending: 1, abnormalPending: 3 }]),
+  { dangerPending: 1, abnormalPending: 5 },
+  "两个来源相加",
+);
+assert.deepEqual(mergeLogBadgeSummaries([]), { dangerPending: 0, abnormalPending: 0 });
+assert.notDeepEqual(legacyLogBadgeQueryKey("u1"), legacyLogBadgeQueryKey("u2"), "查询键带账号编号，切换账号互相隔离");
+const badgeGate = { isAuthenticated: true, isReviewSession: false, isDeviceMode: false, navigationReady: true, logsRouteVisible: true, canViewLegacy: true, canViewPos: false };
+assert.equal(shouldFetchLogBadge(badgeGate), true);
+assert.equal(shouldFetchLogBadge({ ...badgeGate, canViewLegacy: false, canViewPos: true }), true, "只有新收银权限也要取");
+assert.equal(shouldFetchLogBadge({ ...badgeGate, canViewLegacy: false }), false, "两个来源都没权限不请求");
+for (const patch of [{ isAuthenticated: false }, { isReviewSession: true }, { isDeviceMode: true }, { navigationReady: false }, { logsRouteVisible: false }]) {
+  assert.equal(shouldFetchLogBadge({ ...badgeGate, ...patch }), false, `${JSON.stringify(patch)} 时不请求`);
+}
 
 console.log("legacy employee logs mobile tests passed");

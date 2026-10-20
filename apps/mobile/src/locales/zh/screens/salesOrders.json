@@ -1,5 +1,5 @@
 {
-  "title": "销售订单查询",
+  "title": "POS 订单查询",
   "scope": {
     "loading": "正在确认分店范围",
     "all": "全部分店 · 共 {{count}} 家",
@@ -39,9 +39,9 @@
     "oldestFirst": "最早在前"
   },
   "states": {
-    "loading": "正在查询销售订单",
-    "loadFailed": "销售订单加载失败",
-    "initialTitle": "查询销售订单",
+    "loading": "正在查询 POS 订单",
+    "loadFailed": "POS 订单加载失败",
+    "initialTitle": "查询 POS 订单",
     "initialDescription": "输入订单号、货号、条码或商品名，也可以直接扫码",
     "emptyTitle": "该条件下没有订单",
     "emptyDescription": "试试调整日期区间、分店或订单类型",
@@ -103,9 +103,9 @@
     "paymentMethod": "支付方式 {{value}}"
   },
   "messages": {
-    "reviewUnavailable": "当前模式不提供销售订单查询",
-    "notAllowed": "没有查看销售订单的权限",
-    "loadFailed": "销售订单加载失败",
+    "reviewUnavailable": "当前模式不提供 POS 订单查询",
+    "notAllowed": "没有查看 POS 订单的权限",
+    "loadFailed": "POS 订单加载失败",
     "branchesFailed": "分店清单加载失败",
     "detailFailed": "订单明细加载失败",
     "invoiceFailed": "发票获取失败",

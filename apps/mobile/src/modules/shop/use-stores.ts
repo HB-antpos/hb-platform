@@ -5,7 +5,11 @@ import { useAuthStore } from "@/store/auth-store";
 import { useCartStore } from "@/store/cart-store";
 import { useDeviceStore } from "@/store/device-store";
 import { AppAsyncStorage } from "@/shared/storage/async-storage";
-import { STORE_SELECTION_STORAGE_KEY, type Store } from "@/modules/shop/types";
+import {
+  STORE_SELECTION_STORAGE_KEY,
+  buildStoreSelectionStorageKey,
+  type Store,
+} from "@/modules/shop/types";
 import { normalizeShopStores, sortShopStores } from "@/modules/shop/store-normalization";
 import { getAssignedStoresForSession, resolveScopedStoreSelection } from "@/modules/shop/store-scope";
 import { shouldLoadAllStoresForWarehouseCart } from "@/modules/shop/warehouse-cart-access";
@@ -159,6 +163,8 @@ export function useStores() {
     }
 
     let cancelled = false;
+    // 固定本次同步所属的账号（上面已排除空值），异步过程中不随外层变量变化
+    const syncUserGuid: string = userGuid;
 
     async function syncStores() {
       setIsHydratingSelection(true);
@@ -167,9 +173,12 @@ export function useStores() {
       setUserStores(stores);
 
       const { selectedStore: currentSelectedStore, selectedStoreIsAuto: currentIsAuto } = useCartStore.getState();
-      const persistedStoreCode = await AppAsyncStorage.getString(STORE_SELECTION_STORAGE_KEY);
+      const selectionStorageKey = buildStoreSelectionStorageKey(syncUserGuid);
+      const persistedStoreCode = await AppAsyncStorage.getString(selectionStorageKey);
 
-      if (cancelled) {
+      // 切换账号的窗口里，上一个账号的同步任务可能还没被 cleanup 取消：
+      // 此时当前登录用户已不是本任务的账号，直接放弃，避免把旧账号的分店写进新账号的状态。
+      if (cancelled || useAuthStore.getState().user?.userGUID !== syncUserGuid) {
         return;
       }
 
@@ -184,11 +193,11 @@ export function useStores() {
 
       setSelectedStore(nextSelectedStore ?? null, { auto: isAuto });
 
-      // 自动默认的分店不写入本机记住，避免下次启动被当成用户选择
+      // 自动默认的分店不写入本机记住，避免下次启动被当成用户选择。
+      // 自动回退时也不清除已记住的值：它保存的是「该账号最后一次明确选择」，
+      // 分店列表临时失败（回退到内嵌子集）或该分店暂时不可选时，不能把记忆永久丢掉。
       if (nextSelectedStore?.storeCode && !isAuto) {
-        await AppAsyncStorage.setString(STORE_SELECTION_STORAGE_KEY, nextSelectedStore.storeCode);
-      } else {
-        await AppAsyncStorage.removeItem(STORE_SELECTION_STORAGE_KEY);
+        await AppAsyncStorage.setString(selectionStorageKey, nextSelectedStore.storeCode);
       }
 
       if (!cancelled) {
@@ -259,10 +268,14 @@ export function useStores() {
           return;
         }
 
-        if (store?.storeCode) {
-          await AppAsyncStorage.setString(STORE_SELECTION_STORAGE_KEY, store.storeCode);
-        } else {
-          await AppAsyncStorage.removeItem(STORE_SELECTION_STORAGE_KEY);
+        if (userGuid) {
+          const selectionStorageKey = buildStoreSelectionStorageKey(userGuid);
+          if (store?.storeCode) {
+            await AppAsyncStorage.setString(selectionStorageKey, store.storeCode);
+          } else {
+            // 明确选择「全部」：清掉记忆，下次回到自动默认
+            await AppAsyncStorage.removeItem(selectionStorageKey);
+          }
         }
 
         // 先确保持久化成功，避免写入失败后内存门店与购物车被部分切换。
@@ -270,7 +283,7 @@ export function useStores() {
         setCartSummary(null);
       },
     }),
-    [deviceBoundStore, isDeviceMode, setCartSummary, setSelectedStore]
+    [deviceBoundStore, isDeviceMode, setCartSummary, setSelectedStore, userGuid]
   );
 
   return {

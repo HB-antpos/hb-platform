@@ -4,7 +4,8 @@
   "search": {
     "placeholder": "Barcode / item no. / code",
     "lastHit": "Last found: {{value}}",
-    "scan": "Scan to search"
+    "scan": "Scan to search",
+    "more": "More"
   },
   "actions": {
     "returnToInvoiceDetails": "Back to invoice details",

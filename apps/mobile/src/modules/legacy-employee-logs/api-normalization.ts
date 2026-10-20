@@ -1,5 +1,5 @@
 import { posOperationTone, toLocalWallClock } from "./logic";
-import type { LegacyEmployeeSummary, LegacyLogItem, LegacyLogReview } from "./types";
+import type { LegacyDeviceOption, LegacyEmployeeSummary, LegacyLogItem, LegacyLogReview, LogBadgeSummary } from "./types";
 
 /** 接口响应归一化（纯函数，不依赖 apiClient，便于在 Node 下测试）。 */
 export type Raw = Record<string, unknown>;
@@ -132,5 +132,30 @@ export function normalizePosEmployeeSummary(row: Raw): LegacyEmployeeSummary {
     pendingReview: num(row.pendingReview),
     abnormalByRule: arr(row.abnormalByRule, (rule) => ({ ruleCode: str(rule.ruleCode) ?? "", count: num(rule.count) })),
     amountImpact: num(row.amountImpact),
+  };
+}
+
+/**
+ * 设备下拉选项归一化：老收银列表、新收银汇总接口共用，字段名集中在这里。
+ * 元素为 { deviceCode, count }；兼容直接返回设备编号字符串的写法；缺字段 / 非数组一律按空数组，不抛错。
+ */
+export function normalizeDeviceOptions(value: unknown): LegacyDeviceOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): LegacyDeviceOption[] => {
+    if (typeof item === "string") return item ? [{ deviceCode: item, count: 0 }] : [];
+    if (!item || typeof item !== "object") return [];
+    const row = item as Raw;
+    return [{ deviceCode: str(row.deviceCode), count: num(row.count) }];
+  });
+}
+
+/**
+ * 导航角标摘要归一化：dangerPending = 未核查的高风险（危险）异常数，abnormalPending = 待核查的异常数。
+ * 两个来源（老收银 / 新收银）的 badge-summary 接口共用同一形状；缺字段、负数、非数字按 0。
+ */
+export function normalizeLogBadgeSummary(raw: Raw): LogBadgeSummary {
+  return {
+    dangerPending: Math.max(0, Math.trunc(num(raw.dangerPending))),
+    abnormalPending: Math.max(0, Math.trunc(num(raw.abnormalPending))),
   };
 }

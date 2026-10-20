@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
-import { Keyboard, Platform, StyleSheet, View } from "react-native";
-import { IconButton, Searchbar, Text } from "react-native-paper";
+import { useEffect, useRef, useState } from "react";
+import { Keyboard, Platform, StyleSheet, useWindowDimensions, View } from "react-native";
+import { IconButton, Menu, Searchbar, Text } from "react-native-paper";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { extractVisibleBarcodeInput } from "@/modules/scanner/visible-barcode-input";
@@ -24,7 +24,10 @@ interface SearchPanelProps {
   createProductDisabled?: boolean;
 }
 
-/** 顶部一行：搜索框（左扫码、右清空）+ 搜索 + 刷新 + 打印设置。 */
+/** 窗口宽度低于该值（dp）视为窄屏：刷新 / 打印设置 / 新建商品收进「⋯」菜单，把整行宽度让给搜索框。 */
+const COMPACT_WIDTH = 400;
+
+/** 顶部一行：搜索框（左扫码、右清空）+ 搜索 + 刷新 + 打印设置；窄屏后三者收进「⋯」菜单。 */
 export function SearchPanel({
   value,
   loading = false,
@@ -45,6 +48,9 @@ export function SearchPanel({
   const { t } = useAppTranslation(["productQuery", "common"]);
   const searchbarRef = useRef<React.ElementRef<typeof Searchbar>>(null);
   const inputValueRef = useRef(value);
+  const { width: windowWidth } = useWindowDimensions();
+  const compact = windowWidth < COMPACT_WIDTH;
+  const [moreVisible, setMoreVisible] = useState(false);
   useEffect(() => {
     inputValueRef.current = value;
   }, [value]);
@@ -126,32 +132,80 @@ export function SearchPanel({
           onPress={handleSubmit}
           style={styles.searchButton}
         />
-        <IconButton
-          accessibilityLabel={t("common:actions.refresh")}
-          icon={refreshing ? "loading" : "refresh"}
-          size={20}
-          disabled={refreshing || !onRefreshPress}
-          onPress={onRefreshPress}
-          style={styles.iconButton}
-        />
-        <IconButton
-          accessibilityLabel={t("print.settingsTitle")}
-          icon="cog-outline"
-          size={20}
-          onPress={onOpenPrintSettings}
-          style={styles.iconButton}
-        />
-        {onCreateProduct ? (
-          <IconButton
-            accessibilityLabel={t("createProduct.action")}
-            icon="plus"
-            mode="contained-tonal"
-            size={20}
-            disabled={createProductDisabled}
-            onPress={onCreateProduct}
-            style={styles.iconButton}
-          />
-        ) : null}
+        {compact ? (
+          <Menu
+            visible={moreVisible}
+            onDismiss={() => setMoreVisible(false)}
+            anchorPosition="bottom"
+            anchor={
+              <IconButton
+                accessibilityLabel={t("search.more")}
+                icon="dots-horizontal"
+                size={20}
+                onPress={() => setMoreVisible(true)}
+                style={styles.iconButton}
+              />
+            }
+          >
+            <Menu.Item
+              leadingIcon={refreshing ? "loading" : "refresh"}
+              title={t("common:actions.refresh")}
+              disabled={refreshing || !onRefreshPress}
+              onPress={() => {
+                setMoreVisible(false);
+                onRefreshPress?.();
+              }}
+            />
+            <Menu.Item
+              leadingIcon="cog-outline"
+              title={t("print.settingsTitle")}
+              onPress={() => {
+                setMoreVisible(false);
+                onOpenPrintSettings?.();
+              }}
+            />
+            {onCreateProduct ? (
+              <Menu.Item
+                leadingIcon="plus"
+                title={t("createProduct.action")}
+                disabled={createProductDisabled}
+                onPress={() => {
+                  setMoreVisible(false);
+                  onCreateProduct();
+                }}
+              />
+            ) : null}
+          </Menu>
+        ) : (
+          <>
+            <IconButton
+              accessibilityLabel={t("common:actions.refresh")}
+              icon={refreshing ? "loading" : "refresh"}
+              size={20}
+              disabled={refreshing || !onRefreshPress}
+              onPress={onRefreshPress}
+              style={styles.iconButton}
+            />
+            <IconButton
+              accessibilityLabel={t("print.settingsTitle")}
+              icon="cog-outline"
+              size={20}
+              onPress={onOpenPrintSettings}
+              style={styles.iconButton}
+            />
+            {onCreateProduct ? (
+              <IconButton
+                accessibilityLabel={t("createProduct.action")}
+                icon="plus"
+                mode="contained-tonal"
+                size={20}
+                disabled={createProductDisabled}
+                onPress={onCreateProduct}
+                style={styles.iconButton}
+              />
+            ) : null}
+          </>
+        )}
       </View>
       {lastHitLabel ? (
         <Text variant="labelSmall" style={styles.lastHit} numberOfLines={1}>

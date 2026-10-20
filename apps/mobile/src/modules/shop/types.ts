@@ -9,6 +9,14 @@ import type {
 
 export const STORE_SELECTION_STORAGE_KEY = "shop:selectedStoreCode";
 
+/**
+ * 账号模式下「用户最后一次明确选择的分店」按账号分开存放。
+ * 多账号切换时每个账号各记各的：A→B→A 能回到 A 之前选的分店，B 的选择也不会串给 A。
+ */
+export function buildStoreSelectionStorageKey(userGuid: string) {
+  return `${STORE_SELECTION_STORAGE_KEY}:${userGuid.trim().toLowerCase()}`;
+}
+
 export interface Store extends UserStoreDto {
   storeCode: string;
   storeName: string;

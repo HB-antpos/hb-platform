@@ -668,7 +668,8 @@ builder.Services.AddScoped<OperationAuditQueryService>(sp =>
         sp.GetRequiredService<IHttpContextAccessor>(),
         // 商品图片在 HBweb 主档里。
         sp.GetRequiredService<SqlSugarContext>().Db,
-        sp.GetRequiredService<ILogger<OperationAuditQueryService>>()
+        sp.GetRequiredService<ILogger<OperationAuditQueryService>>(),
+        sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()
     )
 );
 builder.Services.AddScoped<OperationAuditReviewService>(sp =>
@@ -685,7 +686,8 @@ builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmplo
     new BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService(
         sp.GetRequiredService<POSMSqlSugarContext>().Db,
         sp.GetRequiredService<ICurrentUserManageableStoreScopeService>(),
-        sp.GetRequiredService<ILogger<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>>()
+        sp.GetRequiredService<ILogger<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogQueryService>>(),
+        cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()
     )
 );
 builder.Services.AddScoped<BlazorApp.Api.Features.LegacyEmployeeLogs.LegacyEmployeeLogReviewService>(sp =>

@@ -565,6 +565,8 @@ public static class LegacyEmployeeLogSqlServerQuery
         AddParam(parameters, "@From", query.From, DbType.DateTime);
         AddParam(parameters, "@ToExclusive", query.ToExclusive, DbType.DateTime);
         var logScope = $"l.[StoreCode] IN ({stores}) AND l.[OperationTime] >= @From AND l.[OperationTime] < @ToExclusive";
+        // 设备选项只受分店与时间约束，不带设备条件本身，选了某设备后下拉仍能列出全部设备。
+        var deviceOptionScope = $"{logScope} AND l.[DeviceCode] IS NOT NULL AND l.[DeviceCode] <> ''";
         var flagScope = $"f.[StoreCode] IN ({stores}) AND f.[OperationTime] >= @From AND f.[OperationTime] < @ToExclusive AND f.[RetractedAtUtc] IS NULL";
         var impactScope = $"i.[StoreCode] IN ({stores}) AND i.[OperationTime] >= @From AND i.[OperationTime] < @ToExclusive";
         if (query.DeviceCode != null)
@@ -604,11 +606,17 @@ public static class LegacyEmployeeLogSqlServerQuery
             WHERE {impactScope}
             GROUP BY i.[EmployeeId]
             OPTION (RECOMPILE);
+            SELECT l.[DeviceCode], COUNT_BIG(*)
+            FROM {Source}
+            WHERE {deviceOptionScope}
+            GROUP BY l.[DeviceCode]
+            OPTION (RECOMPILE);
             """;
         return new LegacyEmployeeLogSqlCommand(sql, parameters);
     }
 
-    public static async Task<List<LegacyEmployeeLogEmployeeSummaryDto>> ExecuteEmployeeSummaryAsync(
+    /// <summary>读取 <see cref="BuildEmployeeSummary"/> 的六个结果集：员工汇总各项，以及最后一个结果集的设备选项。</summary>
+    public static async Task<(List<LegacyEmployeeLogEmployeeSummaryDto> Employees, List<LegacyEmployeeLogDeviceOptionDto> Devices)> ExecuteEmployeeSummaryAsync(
         DbConnection connection,
         LegacyEmployeeLogSqlCommand command,
         CancellationToken cancellationToken = default
@@ -661,6 +669,16 @@ public static class LegacyEmployeeLogSqlServerQuery
         {
             Row(NullableString(reader, 0)).AmountImpact = reader.GetDecimal(1);
         }
+        await NextResultAsync(reader, cancellationToken);
+        var devices = new List<LegacyEmployeeLogDeviceOptionDto>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            devices.Add(new LegacyEmployeeLogDeviceOptionDto
+            {
+                DeviceCode = NullableString(reader, 0),
+                Count = Convert.ToInt32(reader.GetValue(1)),
+            });
+        }
         foreach (var row in rows.Values)
         {
             row.StoreCodes.Sort(StringComparer.Ordinal);
@@ -668,8 +686,66 @@ public static class LegacyEmployeeLogSqlServerQuery
             row.AbnormalByRule = row.AbnormalByRule.OrderByDescending(rule => rule.Count).ThenBy(rule => rule.RuleCode, StringComparer.Ordinal).ToList();
         }
         // 只在标记表或金额表出现、日志范围内却没有的员工（理论上不会）也保留，避免计数对不上总数。
-        return rows.Values.ToList();
+        return (rows.Values.ToList(), devices);
     }, cancellationToken);
+
+    /// <summary>
+    /// 工作台角标计数：窗口内（OperationTime &gt;= from）、可见分店内、命中有效异常规则且待核查的记录数，
+    /// 以及其中操作类型属于危险清单的记录数。storeCodes 为 null 表示不限分店（管理员）。
+    /// - 只读标记表（分店 + 时间索引覆盖，规则命中本身就是稀疏的），不碰 2,000 万行的 EmployeeLogs；
+    ///   操作类型取标记表自带的 Operation 列（扫描写入时从日志复制），命中行很少，回表代价可忽略。
+    /// - 待核查 = 没有「确认正常 / 需跟进」结论（撤销过的回到待核查），与 BuildRiskSummary 的 PendingReview 同口径。
+    /// - 以日志记录为单位去重：同一条记录命中多条规则只计一次。
+    /// </summary>
+    public static LegacyEmployeeLogSqlCommand BuildBadgeSummary(IReadOnlyList<string>? storeCodes, DateTime from)
+    {
+        var parameters = new List<LegacyEmployeeLogSqlParameter>();
+        AddParam(parameters, "@From", from, DbType.DateTime);
+        var conditions = new List<string>
+        {
+            "f.[OperationTime] >= @From",
+            "f.[RetractedAtUtc] IS NULL",
+            "NOT EXISTS (SELECT 1 FROM [dbo].[LegacyEmployeeLogReviews] AS r WITH (NOLOCK) WHERE r.[LogId] = f.[LogId] AND r.[Result] IN (1, 2))",
+        };
+        if (storeCodes != null)
+        {
+            var stores = string.Join(", ", storeCodes.Select((code, index) => AddParam(parameters, $"@Store{index}", code, DbType.AnsiString, 200)));
+            conditions.Insert(0, $"f.[StoreCode] IN ({stores})");
+        }
+        var danger = string.Join(", ", LegacyEmployeeLogRiskCatalog.DangerOperations.Select((operation, index) =>
+            AddParam(parameters, $"@Danger{index}", operation, DbType.AnsiString, 200)));
+        var sql = $"""
+            SET NOCOUNT ON;
+            SELECT COUNT(DISTINCT p.[LogId]),
+                   COUNT(DISTINCT CASE WHEN LTRIM(RTRIM(p.[Operation])) IN ({danger}) THEN p.[LogId] END)
+            FROM (
+                SELECT f.[LogId], f.[Operation]
+                FROM [dbo].[LegacyEmployeeLogFlags] AS f WITH (NOLOCK)
+                WHERE {string.Join("\n      AND ", conditions)}
+            ) AS p
+            OPTION (RECOMPILE);
+            """;
+        return new LegacyEmployeeLogSqlCommand(sql, parameters);
+    }
+
+    public static async Task<EmployeeLogBadgeSummaryDto> ExecuteBadgeSummaryAsync(
+        DbConnection connection,
+        LegacyEmployeeLogSqlCommand command,
+        CancellationToken cancellationToken = default
+    ) => await WithReaderAsync(connection, command, async reader =>
+    {
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new EmployeeLogBadgeSummaryDto();
+        }
+        var abnormal = Convert.ToInt32(reader.GetValue(0));
+        // 危险是待核查异常的子集，防御性地不让它超过总数。
+        return new EmployeeLogBadgeSummaryDto
+        {
+            AbnormalPending = abnormal,
+            DangerPending = Math.Min(Convert.ToInt32(reader.GetValue(1)), abnormal),
+        };
+    }, cancellationToken, commandTimeoutSeconds: 15);
 
     internal static LegacyEmployeeLogReviewDto ReadReview(DbDataReader reader, int start) => new()
     {

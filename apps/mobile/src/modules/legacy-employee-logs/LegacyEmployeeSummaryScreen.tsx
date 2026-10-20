@@ -22,13 +22,14 @@ import {
   dangerRate,
   filtersFromRouteParams,
   filtersToRouteParams,
+  mergeSummaryDeviceOptions,
   orderLegacyEmployees,
   storeDisplayName,
   summarizeStores,
   type LegacyEmployeeSort,
   type LegacyRouteParams,
 } from "./logic";
-import type { LegacyEmployeeSummary, LegacyEmployeeSummaryResult, LegacyLogFilters, LogSource } from "./types";
+import type { LegacyDeviceOption, LegacyEmployeeSummary, LegacyEmployeeSummaryResult, LegacyLogFilters, LogSource } from "./types";
 import { listSeparator } from "@/shared/i18n/punctuation";
 
 const SORTS: LegacyEmployeeSort[] = ["abnormal", "rate", "amount"];
@@ -70,6 +71,8 @@ function SummaryContent({
   const { stores, selectedStoreCode } = useStores();
   const [filters, setFilters] = useState<LegacyLogFilters>(() => filtersFromRouteParams(routeParams, source));
   const [data, setData] = useState<LegacyEmployeeSummaryResult | null>(null);
+  // 设备下拉选项：优先取汇总接口返回的 devices，没有时由各员工用过的设备推出。
+  const [deviceOptions, setDeviceOptions] = useState<LegacyDeviceOption[]>([]);
   const [sort, setSort] = useState<LegacyEmployeeSort>("abnormal");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -88,7 +91,10 @@ function SummaryContent({
       setError(null);
       try {
         const result = next.source === "pos" ? await fetchPosEmployeeSummary(params, lease.signal) : await fetchLegacyEmployeeSummary(params, lease.signal);
-        if (lease.isCurrent()) setData(result);
+        if (lease.isCurrent()) {
+          setData(result);
+          setDeviceOptions((previous) => mergeSummaryDeviceOptions(result.employees, next.deviceCode, previous, result.devices));
+        }
       } catch (cause) {
         if (!lease.isCurrent()) return;
         setError(resolveLocalizedErrorMessage(cause, { t, language, fallbackKey: "employees.loadFailed", allowRawMessageInChinese: false }));
@@ -253,7 +259,7 @@ function SummaryContent({
         filters={filters}
         stores={stores}
         employees={[]}
-        devices={[]}
+        devices={deviceOptions}
         onClose={() => setFilterVisible(false)}
         onApply={apply}
         onReset={() => apply(createDefaultLegacyLogFilters(filters.storeCodes, source))}

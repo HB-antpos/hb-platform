@@ -215,6 +215,25 @@ public sealed class LegacyEmployeeLogEmployeeSummaryResultDto
     public int Total { get; set; }
 
     public int DangerTotal { get; set; }
+
+    /// <summary>
+    /// 该分店、该时间范围内出现过的设备（不带设备条件本身，选了某设备后仍能列出全部设备），供筛选下拉。
+    /// 空设备码已剔除，按设备编码升序，与列表接口的 Devices 同形状。
+    /// </summary>
+    public List<LegacyEmployeeLogDeviceOptionDto> Devices { get; set; } = new();
+}
+
+/// <summary>
+/// 移动端工作台角标用的待核查异常计数（老收银与新收银共用）。
+/// 单位是「命中异常规则的日志记录」，同一条记录命中多条规则只计一次；DangerPending 是 AbnormalPending 的子集。
+/// </summary>
+public sealed class EmployeeLogBadgeSummaryDto
+{
+    /// <summary>窗口内、可见分店范围内，待核查（无「确认正常 / 需跟进」结论）的异常记录数。</summary>
+    public int AbnormalPending { get; set; }
+
+    /// <summary>其中操作类型属于危险操作的记录数；恒不大于 AbnormalPending。</summary>
+    public int DangerPending { get; set; }
 }
 
 public sealed class LegacyEmployeeLogReviewRequestDto

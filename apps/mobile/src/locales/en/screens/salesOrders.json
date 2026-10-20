@@ -1,5 +1,5 @@
 {
-  "title": "Sales records",
+  "title": "POS orders",
   "scope": {
     "loading": "Checking store scope",
     "all": "All stores · {{count}} total",
@@ -39,9 +39,9 @@
     "oldestFirst": "Oldest first"
   },
   "states": {
-    "loading": "Loading sales records",
-    "loadFailed": "Failed to load sales records",
-    "initialTitle": "Search sales records",
+    "loading": "Loading POS orders",
+    "loadFailed": "Failed to load POS orders",
+    "initialTitle": "Search POS orders",
     "initialDescription": "Enter an order number, item number, barcode or product name, or scan a barcode",
     "emptyTitle": "No orders match",
     "emptyDescription": "Try changing the date range, store or order type",
@@ -103,9 +103,9 @@
     "paymentMethod": "Payment method {{value}}"
   },
   "messages": {
-    "reviewUnavailable": "Sales records are not available in this mode",
-    "notAllowed": "You do not have permission to view sales records",
-    "loadFailed": "Failed to load sales records",
+    "reviewUnavailable": "POS orders are not available in this mode",
+    "notAllowed": "You do not have permission to view POS orders",
+    "loadFailed": "Failed to load POS orders",
     "branchesFailed": "Failed to load stores",
     "detailFailed": "Failed to load order details",
     "invoiceFailed": "Failed to fetch the invoice",

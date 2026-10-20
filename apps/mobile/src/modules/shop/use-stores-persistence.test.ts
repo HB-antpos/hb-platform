@@ -100,7 +100,13 @@ test("门店选择持久化失败时保留原门店与购物车摘要", async ()
         },
       },
     ],
-    ["@/modules/shop/types", { STORE_SELECTION_STORAGE_KEY: "shop:selected-store-code" }],
+    [
+      "@/modules/shop/types",
+      {
+        STORE_SELECTION_STORAGE_KEY: "shop:selected-store-code",
+        buildStoreSelectionStorageKey: (userGuid: string) => `shop:selected-store-code:${userGuid}`,
+      },
+    ],
     [
       "@/modules/shop/store-normalization",
       {
