@@ -94,7 +94,10 @@ public sealed record SquareTerminalCheckoutRecord(
     SquareMoneyDto? AmountMoney = null,
     IReadOnlyList<string>? PaymentIds = null,
     string? CancelReason = null,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    // 直连登记用：服务端向 Square 核实结账归属（reference_id 以设备编号开头、note 带门店号）。
+    string? ReferenceId = null,
+    string? Note = null);
 
 public sealed class SquareTerminalRestException(HttpStatusCode statusCode, string message) : Exception(message)
 {
@@ -655,7 +658,9 @@ public sealed class HttpSquareTerminalRestClient(
             AmountMoney: TryGetMoney(element, "amount_money"),
             PaymentIds: TryGetStringList(element, "payment_ids"),
             CancelReason: TryGetString(element, "cancel_reason"),
-            UpdatedAt: TryGetDateTimeOffset(element, "updated_at"));
+            UpdatedAt: TryGetDateTimeOffset(element, "updated_at"),
+            ReferenceId: TryGetString(element, "reference_id"),
+            Note: TryGetString(element, "note"));
     }
 
     private static SquarePaymentStatusDto MapPayment(JsonElement element)

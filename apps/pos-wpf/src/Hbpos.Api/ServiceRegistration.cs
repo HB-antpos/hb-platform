@@ -267,7 +267,13 @@ public static class ServiceRegistration
         services.AddScoped<ISquareStoreScope, HttpContextSquareStoreScope>();
         services.AddScoped<ISquareTokenService, SquareTokenService>();
         services.AddScoped<ISquareTokenSchemaSqlExecutor, SqlSugarSquareTokenSchemaSqlExecutor>();
-        services.AddScoped<ISquareTokenSchemaInitializer, SqlSugarSquareTokenSchemaInitializer>();
+        // 收银机直连 Square（默认关闭，按门店开关）：开关 / 审计 / 服务端退款台账表与服务。
+        // 建表并入 ISquareTokenSchemaInitializer 这一个启动入口（见 SquareTokenAndDirectSchemaInitializer）。
+        services.AddScoped<SqlSugarSquareTokenSchemaInitializer>();
+        services.AddScoped<SqlSugarSquareDirectSchemaInitializer>();
+        services.AddScoped<ISquareTokenSchemaInitializer, SquareTokenAndDirectSchemaInitializer>();
+        services.AddScoped<ISquareDirectRepository, SqlSugarSquareDirectRepository>();
+        services.AddScoped<ISquareDirectService, SquareDirectService>();
         services.AddScoped<ISquareWebhookVerifier, SquareWebhookVerifier>();
         services.AddScoped<ISquareCheckoutSessionRepository, SqlSugarSquareCheckoutSessionRepository>();
         services.AddScoped<ISquareRefundRepository, SqlSugarSquareRefundRepository>();

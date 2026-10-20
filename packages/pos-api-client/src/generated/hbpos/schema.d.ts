@@ -4956,6 +4956,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/square/direct-credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SquareDirectCredentialRequest"];
+                    "text/json": components["schemas"]["SquareDirectCredentialRequest"];
+                    "application/*+json": components["schemas"]["SquareDirectCredentialRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["SquareDirectCredentialResponseApiResult"];
+                        "application/json": components["schemas"]["SquareDirectCredentialResponseApiResult"];
+                        "text/json": components["schemas"]["SquareDirectCredentialResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/square/checkouts/{checkoutId}/origin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    checkoutId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SquareDirectOriginRequest"];
+                    "text/json": components["schemas"]["SquareDirectOriginRequest"];
+                    "application/*+json": components["schemas"]["SquareDirectOriginRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["SquareDirectOriginResponseApiResult"];
+                        "application/json": components["schemas"]["SquareDirectOriginResponseApiResult"];
+                        "text/json": components["schemas"]["SquareDirectOriginResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/square/checkouts/{checkoutId}": {
         parameters: {
             query?: never;
@@ -8032,6 +8120,38 @@ export interface components {
         SquareDeviceDtoIReadOnlyListApiResult: {
             success?: boolean;
             data?: components["schemas"]["SquareDeviceDto"][] | null;
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        SquareDirectCredentialRequest: {
+            environment?: string | null;
+        };
+        SquareDirectCredentialResponse: {
+            environment?: string | null;
+            accessToken?: string | null;
+            /** Format: int64 */
+            credentialVersion?: number;
+            /** Format: date-time */
+            validUntil?: string;
+        };
+        SquareDirectCredentialResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["SquareDirectCredentialResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        SquareDirectOriginRequest: {
+            environment?: string | null;
+        };
+        SquareDirectOriginResponse: {
+            checkoutId?: string | null;
+            environment?: string | null;
+            storeCode?: string | null;
+            deviceCode?: string | null;
+        };
+        SquareDirectOriginResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["SquareDirectOriginResponse"];
             errorCode?: string | null;
             message?: string | null;
         };
