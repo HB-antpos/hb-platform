@@ -115,6 +115,36 @@ public sealed class ReceiptQueryServiceTests
     }
 
     [Fact]
+    public void Receipt_formatter_prints_refund_status_instead_of_paid_for_negative_net_order()
+    {
+        var order = CreateOrder(Guid.NewGuid(), DateTimeOffset.UtcNow, actualAmount: 8m) with
+        {
+            TotalAmount = -8m,
+            DiscountAmount = 0m,
+            ActualAmount = -8m,
+            Payments = [new LocalPayment(Guid.NewGuid(), PaymentMethodKind.Cash, -8m, null)]
+        };
+
+        var receipt = ReceiptQueryService.CreateReceipt(order);
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+
+        Assert.Contains("*** Refund ***", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Paid", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Receipt_formatter_keeps_paid_status_for_ordinary_sale()
+    {
+        var order = CreateOrder(Guid.NewGuid(), DateTimeOffset.UtcNow, actualAmount: 8m);
+
+        var receipt = ReceiptQueryService.CreateReceipt(order);
+        var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default, receipt.SoldAt);
+
+        Assert.Contains("*** Paid ***", document.PlainText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Refund", document.PlainText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Remote_order_history_does_not_mark_ordinary_receipt_as_refund_voucher()
     {
         var orderGuid = Guid.NewGuid();
