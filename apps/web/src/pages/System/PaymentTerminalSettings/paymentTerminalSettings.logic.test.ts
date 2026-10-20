@@ -17,6 +17,7 @@ import {
   describeElapsedSince,
   getEnvironmentStatus,
   getLinklyTerminalAssignmentOwner,
+  getSquareDirectToggleState,
   getTerminalDeviceCodes,
   getTerminalHealthTone,
   resolvePaymentTerminalSettingsErrorMessage,
@@ -397,6 +398,58 @@ assert(
 assert(
   pageSource.includes('buildLinklyActivationChecklist(linklyManagement)'),
   'activation button state should come from the shared checklist',
+)
+
+// ---------- 收银机直连 Square 开关 ----------
+const directBase = {
+  square: [{ environment: 'Production' as const, configured: true, enabled: true }],
+  storeSquare: [],
+  stores: [{ storeCode: '001', storeName: 'City' }],
+  selectedStoreCode: '001',
+  linkly: [],
+}
+const directOf = (overrides: Record<string, unknown>) => ({
+  ...directBase,
+  squareDirect: { storeCode: '001', available: true, enabled: false, ...overrides },
+})
+
+assertEqual(getSquareDirectToggleState(null).blockReason, 'noStore', 'no settings should block as noStore')
+assertEqual(
+  getSquareDirectToggleState({ ...directBase, selectedStoreCode: null, squareDirect: null }).blockReason,
+  'noStore',
+  'no selected store should block as noStore',
+)
+assertEqual(
+  getSquareDirectToggleState(directOf({ available: false })).blockReason,
+  'notReady',
+  'missing direct table (old POS API) should block turning it on',
+)
+assertEqual(
+  getSquareDirectToggleState({ ...directOf({}), square: [], storeSquare: [] }).blockReason,
+  'noToken',
+  'a store without any active Square token cannot enable direct',
+)
+const allowed = getSquareDirectToggleState(directOf({}))
+assert(allowed.canEnable && allowed.blockReason === null && !allowed.enabled, 'shared token allows enabling')
+assert(
+  getSquareDirectToggleState({
+    ...directOf({}),
+    square: [],
+    storeSquare: [{ environment: 'Sandbox' as const, configured: true, enabled: true }],
+  }).canEnable,
+  'a store-specific token alone also allows enabling',
+)
+// 已开启的店即使 Token 被清掉，开关状态仍要如实显示为开启（便于关闭）。
+const stuckOn = getSquareDirectToggleState({ ...directOf({ enabled: true }), square: [], storeSquare: [] })
+assert(stuckOn.enabled && !stuckOn.canEnable && stuckOn.blockReason === 'noToken', 'enabled state is kept visible so it can be turned off')
+
+assert(
+  pageSource.includes('saveSquareDirect({ storeCode: selectedStoreCode, enabled })'),
+  'direct switch should call the dedicated square-direct endpoint with the selected store',
+)
+assert(
+  pageSource.includes('squareDirect.enabled ? (') && pageSource.includes('onChange={() => void submitSquareDirect(false)}'),
+  'turning direct off must not need a confirmation',
 )
 
 console.log('paymentTerminalSettings.logic.test: ok')

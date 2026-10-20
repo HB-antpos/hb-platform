@@ -61,6 +61,21 @@
     "squareStoreClearConfirmDescription": "清除后，该店回落使用共用 Token（如已设置），其他门店不受影响。",
     "squareStoreCleared": "已清除该店专用 Token，回落使用共用 Token",
     "squareStoreTokenModalTitle": "{{store}} · {{environment}}环境专用 Square Token",
-    "squareStoreTokenModalHint": "Token 只在保存时提交，保存后页面不会再显示明文。保存后仅对 {{store}} 生效，其他门店仍使用各自的专用 Token 或共用 Token。"
+    "squareStoreTokenModalHint": "Token 只在保存时提交，保存后页面不会再显示明文。保存后仅对 {{store}} 生效，其他门店仍使用各自的专用 Token 或共用 Token。",
+    "squareDirectTitle": "收银机直连 Square",
+    "squareDirectScope": "仅所选门店",
+    "squareDirectOn": "已开启",
+    "squareDirectOff": "未开启（默认）",
+    "squareDirectMetaSelectStore": "请先选择门店，再开启或关闭该店的直连。",
+    "squareDirectMetaOff": "未开启：该店收银机仍经 POS 服务器中转，与现在一样。",
+    "squareDirectMetaOn": "已开启：该店收银机可直接连接 Square，服务器会给每台收银机下发短期有效的 Token。",
+    "squareDirectMetaUpdatedBy": "{{time}} 由 {{user}} 更新",
+    "squareDirectBlockedNotReady": "直连开关表还不存在，请先部署新版 POS API。",
+    "squareDirectBlockedNoToken": "该门店还没有生效的 Square Token，请先设置共用或门店专用 Token。",
+    "squareDirectEnableConfirmTitle": "为 {{store}} 开启收银机直连 Square？",
+    "squareDirectEnableConfirmDescription": "该店收银机会领取 Square Token（12 小时有效）并自己连接 Square。在这里关闭后不再下发新 Token，收银机最迟 12 小时内删除已有 Token。",
+    "squareDirectEnabled": "已开启直连 Square",
+    "squareDirectDisabled": "已关闭直连 Square",
+    "squareDirectSaveFailed": "修改直连 Square 失败"
   }
 }

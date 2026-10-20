@@ -10,6 +10,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   ShopOutlined,
+  ThunderboltOutlined,
   WalletOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
@@ -27,6 +28,7 @@ import {
   Segmented,
   Select,
   Space,
+  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -44,6 +46,7 @@ import {
   deleteLinklyDeviceSelection,
   getLinklyTerminals,
   getPaymentTerminalSettings,
+  saveSquareDirect,
   saveSquareToken,
   updateLinklyDeviceSelection,
   updateLinklyTerminal,
@@ -68,6 +71,7 @@ import {
   describeElapsedSince,
   getEnvironmentStatus,
   getLinklyTerminalAssignmentOwner,
+  getSquareDirectToggleState,
   getTerminalDeviceCodes,
   getTerminalHealthTone,
   isConfiguredStatus,
@@ -269,6 +273,7 @@ export default function PaymentTerminalSettingsPage() {
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [linklyLoading, setLinklyLoading] = useState(false)
   const [savingSquare, setSavingSquare] = useState(false)
+  const [savingSquareDirect, setSavingSquareDirect] = useState(false)
   const [savingTerminal, setSavingTerminal] = useState(false)
   const [activating, setActivating] = useState(false)
   const [savingSelectionDevice, setSavingSelectionDevice] = useState<string>()
@@ -401,6 +406,32 @@ export default function PaymentTerminalSettingsPage() {
       message.error(resolvePaymentTerminalSettingsErrorMessage(error, t('paymentTerminalSettings.saveFailed')))
     } finally {
       setSavingSquare(false)
+    }
+  }
+
+  // 直连开关只作用于所选门店；关闭不需要确认（紧急止损），开启走 Popconfirm。
+  const submitSquareDirect = async (enabled: boolean) => {
+    if (!selectedStoreCode) {
+      return
+    }
+
+    const requestSequence = ++settingsRequestSequence.current
+    setSettingsLoading(false)
+    setSavingSquareDirect(true)
+    try {
+      const result = await saveSquareDirect({ storeCode: selectedStoreCode, enabled })
+      if (requestSequence === settingsRequestSequence.current) {
+        setSettings(result)
+        setSelectedStoreCode(result.selectedStoreCode ?? selectedStoreCode)
+      }
+      message.success(enabled
+        ? t('paymentTerminalSettings.squareDirectEnabled')
+        : t('paymentTerminalSettings.squareDirectDisabled'))
+    } catch (error) {
+      console.error(error)
+      message.error(resolvePaymentTerminalSettingsErrorMessage(error, t('paymentTerminalSettings.squareDirectSaveFailed')))
+    } finally {
+      setSavingSquareDirect(false)
     }
   }
 
@@ -778,6 +809,24 @@ export default function PaymentTerminalSettingsPage() {
         ? t('paymentTerminalSettings.squareStoreFallbackShared', { store: selectedStoreLabel })
         : t('paymentTerminalSettings.squareStoreNoToken', { store: selectedStoreLabel, environment: environmentLabel })
 
+  const squareDirect = getSquareDirectToggleState(settings)
+  const squareDirectBlockedText = squareDirect.blockReason === 'notReady'
+    ? t('paymentTerminalSettings.squareDirectBlockedNotReady')
+    : squareDirect.blockReason === 'noToken'
+      ? t('paymentTerminalSettings.squareDirectBlockedNoToken')
+      : null
+  const squareDirectMeta = !selectedStoreCode
+    ? t('paymentTerminalSettings.squareDirectMetaSelectStore')
+    : squareDirectBlockedText
+      ?? (settings?.squareDirect?.enabled
+        ? (settings.squareDirect.updatedBy
+          ? `${t('paymentTerminalSettings.squareDirectMetaOn')} ${t('paymentTerminalSettings.squareDirectMetaUpdatedBy', {
+            time: formatUserLocalDateTime(settings.squareDirect.updatedAtUtc),
+            user: settings.squareDirect.updatedBy,
+          })}`
+          : t('paymentTerminalSettings.squareDirectMetaOn'))
+        : t('paymentTerminalSettings.squareDirectMetaOff'))
+
   const squareMeta = squareConfigured
     ? (squareStatus?.updatedBy
       ? t('paymentTerminalSettings.squareUpdatedBy', {
@@ -919,6 +968,54 @@ export default function PaymentTerminalSettingsPage() {
                   </Button>
                 </Popconfirm>
               ) : null}
+            </Space>
+          </div>
+
+          {/* 收银机直连 Square：默认关闭，按门店开启；关闭随时可用，开启要求该店已有生效的 Token。 */}
+          <div className="pts-square-row pts-square-direct">
+            <div className="pts-square-main">
+              <span className="pts-square-icon" aria-hidden="true"><ThunderboltOutlined /></span>
+              <div>
+                <div className="pts-square-title">
+                  <span>{t('paymentTerminalSettings.squareDirectTitle')}</span>
+                  {selectedStoreCode && squareDirect.blockReason !== 'notReady' ? (
+                    squareDirect.enabled
+                      ? <Tag color="green">{t('paymentTerminalSettings.squareDirectOn')}</Tag>
+                      : <Tag>{t('paymentTerminalSettings.squareDirectOff')}</Tag>
+                  ) : null}
+                  <span className="pts-scope">{t('paymentTerminalSettings.squareDirectScope')}</span>
+                </div>
+                <div className={squareDirectBlockedText ? 'pts-square-meta pts-square-meta-warning' : 'pts-square-meta'}>
+                  {squareDirectMeta}
+                </div>
+              </div>
+            </div>
+            <Space wrap>
+              {squareDirect.enabled ? (
+                <Switch
+                  checked
+                  loading={savingSquareDirect}
+                  disabled={!canManageSettings}
+                  aria-label={t('paymentTerminalSettings.squareDirectTitle')}
+                  onChange={() => void submitSquareDirect(false)}
+                />
+              ) : (
+                <Popconfirm
+                  title={t('paymentTerminalSettings.squareDirectEnableConfirmTitle', { store: selectedStoreLabel })}
+                  description={t('paymentTerminalSettings.squareDirectEnableConfirmDescription')}
+                  onConfirm={() => void submitSquareDirect(true)}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                  disabled={!canManageSettings || !squareDirect.canEnable}
+                >
+                  <Switch
+                    checked={false}
+                    loading={savingSquareDirect}
+                    disabled={!canManageSettings || !squareDirect.canEnable}
+                    aria-label={t('paymentTerminalSettings.squareDirectTitle')}
+                  />
+                </Popconfirm>
+              )}
             </Space>
           </div>
         </Card>

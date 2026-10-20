@@ -1731,6 +1731,7 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
         Assert.Contains("linkly-terminals/{terminalId:guid}", httpRoutes);
         Assert.Contains("linkly-device-selections/{deviceCode}", httpRoutes);
         Assert.Contains("linkly-activation", httpRoutes);
+        Assert.Contains("square-direct", httpRoutes);
     }
 
     [Fact]
@@ -1998,6 +1999,150 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
             """);
     }
 
+    private void CreateSquareDirectTable()
+    {
+        _posmDb.Ado.ExecuteCommand("""
+            CREATE TABLE POSM_SquareDirectStore (
+                StoreCode TEXT PRIMARY KEY,
+                IsEnabled INTEGER NOT NULL DEFAULT 0,
+                UpdatedAt TEXT NOT NULL,
+                UpdatedBy TEXT NULL
+            );
+            """);
+    }
+
+    private async Task<List<(string StoreCode, bool IsEnabled, string? UpdatedBy)>> QuerySquareDirectRowsAsync()
+    {
+        var rows = await _posmDb.Ado.SqlQueryAsync<SquareDirectRowProbe>(
+            "SELECT StoreCode, IsEnabled, UpdatedBy FROM POSM_SquareDirectStore ORDER BY StoreCode");
+        return rows.Select(row => (row.StoreCode, row.IsEnabled != 0, row.UpdatedBy)).ToList();
+    }
+
+    [Fact]
+    public async Task SquareDirect_WithoutTableReportsUnavailableAndRefusesToEnable()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "shared-token" },
+            "admin"
+        );
+
+        var settings = await service.GetSettingsAsync("001");
+        var result = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "001", Enabled = true },
+            "admin"
+        );
+
+        Assert.False(settings.Data!.SquareDirect!.Available);
+        Assert.False(settings.Data.SquareDirect.Enabled);
+        Assert.False(result.Success);
+        Assert.Equal("SQUARE_DIRECT_NOT_READY", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task SquareDirect_RejectsUnknownStore()
+    {
+        var service = CreateService();
+        CreateSquareDirectTable();
+
+        var result = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "999", Enabled = true },
+            "admin"
+        );
+
+        Assert.False(result.Success);
+        Assert.Equal("PAYMENT_STORE_NOT_FOUND", result.ErrorCode);
+        Assert.Empty(await QuerySquareDirectRowsAsync());
+    }
+
+    [Fact]
+    public async Task SquareDirect_RequiresAnActiveSquareTokenBeforeEnabling()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        SeedStore("002", "Beach Store");
+        CreateSquareDirectTable();
+        // 只有 002 店的专用令牌：001 店既没有专用也没有共用令牌，不能开。
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "beach-token", TargetStoreCode = "002" },
+            "admin"
+        );
+
+        var denied = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "001", Enabled = true },
+            "admin"
+        );
+        var allowed = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "002", Enabled = true },
+            "admin"
+        );
+
+        Assert.False(denied.Success);
+        Assert.Equal("SQUARE_TOKEN_NOT_CONFIGURED", denied.ErrorCode);
+        Assert.True(allowed.Success);
+        var rows = await QuerySquareDirectRowsAsync();
+        Assert.Equal(("002", true, "admin"), Assert.Single(rows));
+    }
+
+    [Fact]
+    public async Task SquareDirect_EnableAndDisableToggleOnlyThatStoreAndReturnStatus()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        SeedStore("002", "Beach Store");
+        CreateSquareDirectTable();
+        await service.UpdateSquareTokenAsync(
+            new UpdateSquareTokenDto { Environment = "Production", AccessToken = "shared-token" },
+            "admin"
+        );
+
+        var enabled = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "001", Enabled = true },
+            "admin"
+        );
+        Assert.True(enabled.Data!.SquareDirect!.Available);
+        Assert.True(enabled.Data.SquareDirect.Enabled);
+        Assert.Equal("admin", enabled.Data.SquareDirect.UpdatedBy);
+
+        // 另一家店的状态不受影响。
+        var other = await service.GetSettingsAsync("002");
+        Assert.False(other.Data!.SquareDirect!.Enabled);
+
+        var disabled = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "001", Enabled = false },
+            "manager"
+        );
+        Assert.False(disabled.Data!.SquareDirect!.Enabled);
+        Assert.Equal(("001", false, "manager"), Assert.Single(await QuerySquareDirectRowsAsync()));
+    }
+
+    [Fact]
+    public async Task SquareDirect_DisablingAStoreThatWasNeverEnabledWritesNothing()
+    {
+        var service = CreateService();
+        SeedStore("001", "City Store");
+        CreateSquareDirectTable();
+
+        var result = await service.UpdateSquareDirectAsync(
+            new UpdateSquareDirectDto { StoreCode = "001", Enabled = false },
+            "admin"
+        );
+
+        Assert.True(result.Success);
+        Assert.Empty(await QuerySquareDirectRowsAsync());
+    }
+
+    [Fact]
+    public async Task SquareDirect_TokenStatusStillDoesNotLeakAccessToken()
+    {
+        Assert.DoesNotContain(
+            typeof(PaymentTerminalSquareDirectStatusDto).GetProperties(),
+            property => property.Name.Contains("Token", StringComparison.OrdinalIgnoreCase)
+        );
+        await Task.CompletedTask;
+    }
+
     private void SeedStore(string storeCode, string storeName)
     {
         _mainDb.Insertable(new Store
@@ -2152,6 +2297,13 @@ public sealed class PaymentTerminalSettingsServiceTests : IDisposable
     }
 
     [SugarTable("POSM_LinklyCloudTerminal")]
+    private sealed class SquareDirectRowProbe
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public long IsEnabled { get; set; }
+        public string? UpdatedBy { get; set; }
+    }
+
     private sealed class LinklyTerminalLockProbe
     {
         public Guid TerminalId { get; set; }

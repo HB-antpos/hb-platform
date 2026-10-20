@@ -61,6 +61,21 @@
     "squareStoreClearConfirmDescription": "This store will fall back to the shared token (if set). Other stores are not affected.",
     "squareStoreCleared": "Store token cleared. This store now uses the shared token.",
     "squareStoreTokenModalTitle": "{{store}} · {{environment}} Square token",
-    "squareStoreTokenModalHint": "The token is only sent when you save and is never shown again. It applies to {{store}} only; other stores keep using their own token or the shared token."
+    "squareStoreTokenModalHint": "The token is only sent when you save and is never shown again. It applies to {{store}} only; other stores keep using their own token or the shared token.",
+    "squareDirectTitle": "Register direct to Square",
+    "squareDirectScope": "Selected store only",
+    "squareDirectOn": "On",
+    "squareDirectOff": "Off (default)",
+    "squareDirectMetaSelectStore": "Select a store first to turn direct Square on or off for it.",
+    "squareDirectMetaOff": "Off: this store's registers go through the POS server, as before.",
+    "squareDirectMetaOn": "On: this store's registers may connect to Square directly. A short-lived token is sent to each register.",
+    "squareDirectMetaUpdatedBy": "{{time}} by {{user}}",
+    "squareDirectBlockedNotReady": "The direct-connect table does not exist yet. Deploy the new POS API first.",
+    "squareDirectBlockedNoToken": "This store has no active Square token. Set a shared or store-specific token first.",
+    "squareDirectEnableConfirmTitle": "Turn on direct Square for {{store}}?",
+    "squareDirectEnableConfirmDescription": "The store's registers will get a Square token (valid 12 hours) and connect to Square themselves. Turning it off here stops new tokens; registers drop theirs within 12 hours.",
+    "squareDirectEnabled": "Direct Square turned on",
+    "squareDirectDisabled": "Direct Square turned off",
+    "squareDirectSaveFailed": "Failed to change direct Square"
   }
 }
