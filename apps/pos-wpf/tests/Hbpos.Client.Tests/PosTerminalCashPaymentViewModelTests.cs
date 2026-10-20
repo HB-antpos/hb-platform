@@ -7341,6 +7341,63 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public void Payment_page_installment_toggle_below_minimum_total_opens_notice_and_can_be_closed()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-INST-NOTICE-LOW", "Notice Low Tea", "939011", PriceSourceKind.StoreRetailPrice, 49.99m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new FakeCashPaymentWorkflowService(),
+            Session,
+            installmentOrderService: new FakeInstallmentOrderService());
+
+        Assert.False(viewModel.IsInstallmentMinimumNoticeOpen);
+
+        viewModel.IsInstallmentPaymentEnabled = true;
+
+        // 总额不足 $50：打开 Lay-by 开关时立即弹出起订金额提示。
+        Assert.True(viewModel.IsInstallmentMinimumNoticeOpen);
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.InstallmentMinimumNoticeMessage));
+
+        viewModel.CloseInstallmentMinimumNoticeCommand.Execute(null);
+
+        Assert.False(viewModel.IsInstallmentMinimumNoticeOpen);
+    }
+
+    [Fact]
+    public void Payment_page_installment_toggle_at_or_above_minimum_total_does_not_open_notice()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-INST-NOTICE-OK", "Notice Ok Tea", "939012", PriceSourceKind.StoreRetailPrice, 50m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new FakeCashPaymentWorkflowService(),
+            Session,
+            installmentOrderService: new FakeInstallmentOrderService());
+
+        viewModel.IsInstallmentPaymentEnabled = true;
+
+        Assert.False(viewModel.IsInstallmentMinimumNoticeOpen);
+    }
+
+    [Fact]
+    public void Payment_page_installment_repayment_below_minimum_does_not_open_notice()
+    {
+        var viewModel = new PaymentViewModel(
+            new PosCartService(),
+            new FakeCashPaymentWorkflowService(),
+            Session,
+            installmentOrderService: new FakeInstallmentOrderService());
+
+        // 还款模式是对已有订单继续还款，不适用新建 Lay-by 的起订金额。
+        viewModel.PrepareForInstallmentRepayment(
+            Session,
+            CreateInstallmentOrder("IO-NOTICE-REPAY", "Alice", "0400111222", paidAmount: 30m, outstandingAmount: 10m));
+
+        Assert.False(viewModel.IsInstallmentMinimumNoticeOpen);
+    }
+
+    [Fact]
     public async Task Payment_page_new_installment_creates_order_with_partial_first_payment_without_completing_regular_order()
     {
         var cart = new PosCartService();

@@ -238,6 +238,9 @@
   <data name="payment.installment.status.customerRequired" xml:space="preserve"><value>Customer name and phone are required.</value></data>
   <data name="payment.installment.status.firstPaymentBelowMinimum" xml:space="preserve"><value>First lay-by payment must be at least $20.00.</value></data>
   <data name="payment.installment.status.totalBelowMinimum" xml:space="preserve"><value>Lay-by orders must be at least $50.00.</value></data>
+  <data name="payment.installment.minimumNotice.title" xml:space="preserve"><value>Lay-by minimum not met</value></data>
+  <data name="payment.installment.minimumNotice.message" xml:space="preserve"><value>Lay-by orders must be at least ${0:0.00}. This order is ${1:0.00}. Please use a normal payment, or add more items before choosing Lay-by.</value></data>
+  <data name="payment.installment.minimumNotice.ok" xml:space="preserve"><value>OK</value></data>
   <data name="payment.installment.status.invalidAmount" xml:space="preserve"><value>Lay-by payment amount must be greater than zero and not exceed the outstanding amount.</value></data>
   <data name="payment.installment.status.singleTenderOnly" xml:space="preserve"><value>Lay-by mode accepts one payment at a time.</value></data>
   <data name="payment.installment.status.noRepaymentAllowed" xml:space="preserve"><value>This lay-by order cannot receive more payments.</value></data>
