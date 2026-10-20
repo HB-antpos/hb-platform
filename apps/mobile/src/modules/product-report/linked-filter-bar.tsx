@@ -70,103 +70,106 @@ export function LinkedFilterBar({
 
   return (
     <View style={styles.bar} onLayout={onLayout}>
-      <View style={styles.selectionRow}>
-        {branchName ? (
-          <View style={[styles.chip, styles.branchChip]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("productReport.linked.branchChipA11y", { name: branchName })}
-              disabled={branchPickerDisabled}
-              hitSlop={CHIP_HIT_SLOP}
-              onPress={onOpenBranchPicker}
-              style={styles.chipBody}
-            >
-              <View style={[styles.dot, { backgroundColor: LINKED_COLORS.branch }]} />
-              <Text variant="labelSmall" style={styles.chipLabel}>{t("productReport.linked.branchLabel")}</Text>
-              <Text variant="labelLarge" numberOfLines={1} style={[styles.chipValue, { color: LINKED_COLORS.branchText }]}>
-                {branchName}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("productReport.linked.clearBranch")}
-              hitSlop={CLEAR_HIT_SLOP}
-              onPress={onClearBranch}
-              style={styles.chipClear}
-            >
-              <Icon source="close" size={14} color="#475467" />
-            </Pressable>
-          </View>
-        ) : (
-          <Button mode="outlined" compact icon="store-outline" disabled={branchPickerDisabled} onPress={onOpenBranchPicker}>
-            {t("productReport.filters.allStores")}
-          </Button>
-        )}
-        {supplierName ? (
-          <View style={[styles.chip, styles.supplierChip]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("productReport.linked.supplierChipA11y", { name: supplierName })}
-              hitSlop={CHIP_HIT_SLOP}
-              onPress={onPressSupplier}
-              style={styles.chipBody}
-            >
-              <View style={[styles.dot, { backgroundColor: LINKED_COLORS.supplier }]} />
-              <Text variant="labelSmall" style={styles.chipLabel}>{t("productReport.linked.supplierLabel")}</Text>
-              <Text variant="labelLarge" numberOfLines={1} style={[styles.chipValue, { color: LINKED_COLORS.supplierText }]}>
-                {supplierName}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("productReport.linked.clearSupplier")}
-              hitSlop={CLEAR_HIT_SLOP}
-              onPress={onClearSupplier}
-              style={styles.chipClear}
-            >
-              <Icon source="close" size={14} color="#475467" />
-            </Pressable>
-          </View>
-        ) : null}
-        {hasSelection ? null : (
-          <Text variant="bodySmall" numberOfLines={2} style={styles.hint}>{hint}</Text>
-        )}
-        {branchName && supplierName ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("productReport.linked.clearAllA11y")}
-            hitSlop={CHIP_HIT_SLOP}
-            onPress={onClearAll}
-            style={styles.clearAll}
-          >
-            <Text variant="labelLarge" style={styles.clearAllText}>{t("productReport.linked.clearAll")}</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {hasSelection ? (
-        <View style={styles.anchorRow}>
-          {anchors.map((anchor) => {
-            const section = t(ANCHOR_LABEL_KEYS[anchor.key]);
-            return (
+      {/* 外层铺满页面底色负责吸顶遮挡，内层白卡与日期卡、数据卡片同一视觉层级。 */}
+      <View style={styles.card}>
+        <View style={styles.selectionRow}>
+          {branchName ? (
+            <View style={[styles.chip, styles.branchChip]}>
               <Pressable
-                key={anchor.key}
                 accessibilityRole="button"
-                accessibilityLabel={anchor.updating
-                  ? t("productReport.linked.anchorUpdatingA11y", { section })
-                  : t("productReport.linked.anchorA11y", { section, count: anchor.count })}
-                onPress={() => onPressAnchor(anchor.key)}
-                style={styles.anchor}
+                accessibilityLabel={t("productReport.linked.branchChipA11y", { name: branchName })}
+                disabled={branchPickerDisabled}
+                hitSlop={CHIP_HIT_SLOP}
+                onPress={onOpenBranchPicker}
+                style={styles.chipBody}
               >
-                <View style={[styles.dot, { backgroundColor: ANCHOR_COLORS[anchor.key] }]} />
-                <Text variant="labelMedium" style={styles.anchorLabel}>{section}</Text>
-                <Text variant="labelMedium" style={anchor.updating ? styles.anchorCountUpdating : styles.anchorCount}>
-                  {anchor.updating ? "…" : anchor.count.toLocaleString("en-AU")}
+                <View style={[styles.dot, { backgroundColor: LINKED_COLORS.branch }]} />
+                <Text variant="labelSmall" style={styles.chipLabel}>{t("productReport.linked.branchLabel")}</Text>
+                <Text variant="labelLarge" numberOfLines={1} style={[styles.chipValue, { color: LINKED_COLORS.branchText }]}>
+                  {branchName}
                 </Text>
               </Pressable>
-            );
-          })}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("productReport.linked.clearBranch")}
+                hitSlop={CLEAR_HIT_SLOP}
+                onPress={onClearBranch}
+                style={styles.chipClear}
+              >
+                <Icon source="close" size={14} color="#475467" />
+              </Pressable>
+            </View>
+          ) : (
+            <Button mode="outlined" compact icon="store-outline" disabled={branchPickerDisabled} onPress={onOpenBranchPicker}>
+              {t("productReport.filters.allStores")}
+            </Button>
+          )}
+          {supplierName ? (
+            <View style={[styles.chip, styles.supplierChip]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("productReport.linked.supplierChipA11y", { name: supplierName })}
+                hitSlop={CHIP_HIT_SLOP}
+                onPress={onPressSupplier}
+                style={styles.chipBody}
+              >
+                <View style={[styles.dot, { backgroundColor: LINKED_COLORS.supplier }]} />
+                <Text variant="labelSmall" style={styles.chipLabel}>{t("productReport.linked.supplierLabel")}</Text>
+                <Text variant="labelLarge" numberOfLines={1} style={[styles.chipValue, { color: LINKED_COLORS.supplierText }]}>
+                  {supplierName}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("productReport.linked.clearSupplier")}
+                hitSlop={CLEAR_HIT_SLOP}
+                onPress={onClearSupplier}
+                style={styles.chipClear}
+              >
+                <Icon source="close" size={14} color="#475467" />
+              </Pressable>
+            </View>
+          ) : null}
+          {hasSelection ? null : (
+            <Text variant="bodySmall" numberOfLines={2} style={styles.hint}>{hint}</Text>
+          )}
+          {branchName && supplierName ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("productReport.linked.clearAllA11y")}
+              hitSlop={CHIP_HIT_SLOP}
+              onPress={onClearAll}
+              style={styles.clearAll}
+            >
+              <Text variant="labelLarge" style={styles.clearAllText}>{t("productReport.linked.clearAll")}</Text>
+            </Pressable>
+          ) : null}
         </View>
-      ) : null}
+        {hasSelection ? (
+          <View style={styles.anchorRow}>
+            {anchors.map((anchor) => {
+              const section = t(ANCHOR_LABEL_KEYS[anchor.key]);
+              return (
+                <Pressable
+                  key={anchor.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={anchor.updating
+                    ? t("productReport.linked.anchorUpdatingA11y", { section })
+                    : t("productReport.linked.anchorA11y", { section, count: anchor.count })}
+                  onPress={() => onPressAnchor(anchor.key)}
+                  style={styles.anchor}
+                >
+                  <View style={[styles.dot, { backgroundColor: ANCHOR_COLORS[anchor.key] }]} />
+                  <Text variant="labelMedium" style={styles.anchorLabel}>{section}</Text>
+                  <Text variant="labelMedium" style={anchor.updating ? styles.anchorCountUpdating : styles.anchorCount}>
+                    {anchor.updating ? "…" : anchor.count.toLocaleString("en-AU")}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -177,10 +180,21 @@ const styles = StyleSheet.create({
     marginHorizontal: -16,
     paddingHorizontal: 16,
     paddingVertical: 6,
-    gap: 6,
     backgroundColor: "#F7F8FA",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+  },
+  card: {
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    shadowColor: "#101828",
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   selectionRow: {
     minHeight: 44,
@@ -253,6 +267,9 @@ const styles = StyleSheet.create({
   anchorRow: {
     flexDirection: "row",
     gap: 6,
+    borderTopWidth: 1,
+    borderTopColor: "#EEF0F3",
+    paddingTop: 6,
   },
   anchor: {
     flex: 1,

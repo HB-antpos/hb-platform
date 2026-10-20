@@ -381,7 +381,8 @@
       "accessibilityLabel": "Sort by {{column}}, currently {{state}}",
       "desc": "descending",
       "asc": "ascending",
-      "none": "not sorted"
+      "none": "not sorted",
+      "label": "Sort"
     },
     "chinaGoods": {
       "revenue": "China revenue",
@@ -405,8 +406,8 @@
       "compareShareOfChina": "China %",
       "compareShareOfTotal": "Total %",
       "pageTotal": "Page total",
-      "supplierHint": "Tap supplier to filter stores and products · tap amount for stores · swipe for share, growth and LY",
-      "productHint": "Tap item for stores · swipe for avg, margin and growth",
+      "supplierHint": "Tap supplier to filter stores and products · tap amount for stores",
+      "productHint": "Tap item for stores",
       "supplierBranchSection": "Stores · {{supplier}}",
       "supplierBranchFormula": "{{supplier}} sales ÷ store revenue",
       "supplierAmount": "Supplier sales",

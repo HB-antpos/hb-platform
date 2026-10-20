@@ -41,6 +41,8 @@ interface MonthDatePickerFieldProps extends MonthDatePickerProps {
   label?: string;
   placeholder?: string;
   compact?: boolean;
+  /** 紧凑模式下跟在日期后面的灰色小字（如星期）；未选日期时不显示。 */
+  valueSuffix?: string;
 }
 
 function pad2(value: number) {
@@ -248,6 +250,7 @@ export function MonthDatePickerField({
   label,
   placeholder,
   compact = false,
+  valueSuffix,
   onChange,
   style,
 }: MonthDatePickerFieldProps) {
@@ -305,9 +308,13 @@ export function MonthDatePickerField({
             ) : null}
             <Text
               variant={compact ? "bodyMedium" : "bodyLarge"}
+              numberOfLines={compact ? 1 : undefined}
               style={selectedValue ? styles.fieldValue : styles.fieldPlaceholder}
             >
               {selectedValue || placeholder || t("fields.workDate")}
+              {compact && selectedValue && valueSuffix ? (
+                <Text style={styles.fieldSuffix}>{`  ${valueSuffix}`}</Text>
+              ) : null}
             </Text>
           </View>
           <IconButton
@@ -373,6 +380,10 @@ const styles = StyleSheet.create({
   },
   fieldPlaceholder: {
     color: "#9CA3AF",
+  },
+  fieldSuffix: {
+    color: "#6B7280",
+    fontSize: 12,
   },
   fieldPressed: {
     opacity: 0.9,
