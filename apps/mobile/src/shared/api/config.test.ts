@@ -22,6 +22,11 @@ assertEqual(
   "production API base URL uses HTTPS Nginx proxy and api path"
 );
 assertEqual(
+  buildApiBaseUrl("hotbargain.group"),
+  "https://hotbargain.group/api",
+  "AWS 测速服务器域名同样走 HTTPS 代理且不带端口（iOS 会拦截域名的明文 HTTP）"
+);
+assertEqual(
   buildApiBaseUrl("192.168.31.247"),
   "http://192.168.31.247:5002/api",
   "local API base URL keeps direct backend port"

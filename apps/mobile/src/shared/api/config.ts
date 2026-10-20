@@ -7,6 +7,9 @@ export const API_PROTOCOL = "http";
 export const API_PORT = process.env.EXPO_PUBLIC_API_PORT?.trim() || "5002";
 export const API_PATH = "/api";
 const PRODUCTION_API_HOST = "hotbargain.vip";
+// 同样经 Nginx HTTPS 代理（443，不带端口）的主机：生产域名 + AWS 悉尼测速服务器。
+// 其余主机仍按「明文 HTTP + 5002 端口」拼，用于局域网调试；iOS 的 ATS 会拦截域名的明文 HTTP，所以域名主机必须在这里登记。
+const HTTPS_PROXY_API_HOSTS: ReadonlySet<string> = new Set([PRODUCTION_API_HOST, "hotbargain.group"]);
 export const DEFAULT_API_BASE_URL = buildApiBaseUrl(DEFAULT_API_HOST);
 // 服务器设置弹窗使用的预设地址，线上地址必须放在首位作为发布默认选项。
 export const API_HOST_PRESETS = [
@@ -40,7 +43,7 @@ export function normalizeApiHost(input?: string | null) {
 
 export function buildApiBaseUrl(host: string) {
   // 生产域名通过 Nginx HTTPS 代理进入 5002，移动端不再直连明文端口。
-  if (host === PRODUCTION_API_HOST) {
+  if (HTTPS_PROXY_API_HOSTS.has(host)) {
     return `https://${host}${API_PATH}`;
   }
   return `${API_PROTOCOL}://${host}:${API_PORT}${API_PATH}`;
