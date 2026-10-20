@@ -198,6 +198,52 @@ public sealed class CardTerminalSettingsTests
     }
 
     [Fact]
+    public async Task LoadWithoutTokenStatusAsync_does_not_call_the_token_status_api()
+    {
+        // 付款页只要处理器 / 环境 / Linkly 模式：不能为了「令牌是否已配置」多等一次到新加坡的往返。
+        var repository = new InMemorySettingsRepository(new Dictionary<string, string?>
+        {
+            ["CardTerminal:Processor"] = nameof(CardProcessorKind.Square),
+            ["CardTerminal:Environment"] = nameof(CardTerminalEnvironment.Production),
+            ["CardTerminal:SquareLocationId"] = "LOC-STORED",
+            ["CardTerminal:SquareDeviceId"] = "DEV-STORED"
+        });
+        var apiClient = new FakeSquareTokenApiClient
+        {
+            StatusResponse = new SquareTokenStatusResponse("Production", Configured: true, Enabled: true, DateTimeOffset.UtcNow)
+        };
+        var store = new CardTerminalSettingsStore(repository, new FakeAuthorizationProtector(), apiClient);
+
+        var configuration = await store.LoadWithoutTokenStatusAsync();
+
+        Assert.Equal(CardProcessorKind.Square, configuration.Processor);
+        Assert.Equal(CardTerminalEnvironment.Production, configuration.Environment);
+        Assert.Equal("LOC-STORED", configuration.SquareLocationId);
+        Assert.Equal(0, apiClient.CallCount);
+    }
+
+    [Fact]
+    public async Task LoadAsync_still_reads_the_token_status_for_the_settings_page()
+    {
+        // 设置页仍要显示「后端是否已配置令牌」，原行为不变。
+        var repository = new InMemorySettingsRepository(new Dictionary<string, string?>
+        {
+            ["CardTerminal:Processor"] = nameof(CardProcessorKind.Square),
+            ["CardTerminal:Environment"] = nameof(CardTerminalEnvironment.Production)
+        });
+        var apiClient = new FakeSquareTokenApiClient
+        {
+            StatusResponse = new SquareTokenStatusResponse("Production", Configured: true, Enabled: true, DateTimeOffset.UtcNow)
+        };
+        var store = new CardTerminalSettingsStore(repository, new FakeAuthorizationProtector(), apiClient);
+
+        var configuration = await store.LoadAsync();
+
+        Assert.True(configuration.HasProtectedSquareAccessToken);
+        Assert.Equal(1, apiClient.CallCount);
+    }
+
+    [Fact]
     public async Task GetSettingsAsync_skips_square_token_refresh_when_linkly_cloud_backend_is_active()
     {
         var repository = new InMemorySettingsRepository(new Dictionary<string, string?>

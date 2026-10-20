@@ -17,6 +17,10 @@ public interface ICardTerminalSetupService
 {
     Task<CardTerminalConfiguration> LoadConfigurationAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>读取配置但不联网查 Square 令牌状态；付款页用它，默认回退到 LoadConfigurationAsync，旧实现与测试替身无需改动。</summary>
+    Task<CardTerminalConfiguration> LoadConfigurationWithoutTokenStatusAsync(CancellationToken cancellationToken = default) =>
+        LoadConfigurationAsync(cancellationToken);
+
     Task<string?> GetSquareAccessTokenAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SquareLocationOption>> ListSquareLocationsAsync(
@@ -173,6 +177,11 @@ public sealed class CardTerminalSetupService(
     {
         LogSquareSetup("load configuration requested");
         return settingsStore.LoadAsync(cancellationToken);
+    }
+
+    public Task<CardTerminalConfiguration> LoadConfigurationWithoutTokenStatusAsync(CancellationToken cancellationToken = default)
+    {
+        return settingsStore.LoadWithoutTokenStatusAsync(cancellationToken);
     }
 
     public Task<string?> GetSquareAccessTokenAsync(CancellationToken cancellationToken = default)
