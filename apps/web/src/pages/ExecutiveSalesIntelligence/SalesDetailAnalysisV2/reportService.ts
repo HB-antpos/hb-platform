@@ -120,3 +120,77 @@ export async function fetchSalesDetailReport(query: SalesDetailQuery, signal: Ab
     statisticUpdatedAt: field(raw, 'statisticUpdatedAt') as string | undefined,
     cacheVersion: field(raw, 'cacheVersion') as string | undefined }
 }
+
+/** 商品抽屉：销售曲线与进货明细各自独立请求，窗口 = 销售开始日前 60 天 ~ 销售结束日（后端同一常量）。 */
+export interface ProductTrendDay { date: string; quantity: number }
+export interface ProductTrend { productCode: string; branchCode?: string; windowStart: string; windowEnd: string; daily: ProductTrendDay[] }
+export type PurchaseSource = 'warehouse' | 'supplier'
+export interface ProductPurchaseBatch { branchCode: string; date: string; source: PurchaseSource; documentNo?: string; quantity: number }
+export interface ProductPurchaseStore { code: string; name: string }
+export interface ProductPurchases { productCode: string; windowStart: string; windowEnd: string; stores: ProductPurchaseStore[]; batches: ProductPurchaseBatch[] }
+
+function dateOnly(value: unknown): string { return String(value ?? '').slice(0, 10) }
+function drawerParams(query: SalesDetailQuery, productCode: string): Record<string, unknown> {
+  return { startDate: query.startDate, endDate: query.endDate, productCode, branchCodes: query.branchCodes }
+}
+
+export function normalizeProductTrend(value: unknown): ProductTrend {
+  const raw = record(value)
+  const daily = field(raw, 'daily')
+  return {
+    productCode: String(field(raw, 'productCode') ?? ''),
+    branchCode: field(raw, 'branchCode') ? String(field(raw, 'branchCode')) : undefined,
+    windowStart: dateOnly(field(raw, 'windowStart')),
+    windowEnd: dateOnly(field(raw, 'windowEnd')),
+    daily: Array.isArray(daily) ? daily.map(item => {
+      const row = record(item)
+      return { date: dateOnly(field(row, 'date')), quantity: nullable(field(row, 'quantity')) ?? 0 }
+    }).filter(item => item.date) : [],
+  }
+}
+
+export function normalizeProductPurchases(value: unknown): ProductPurchases {
+  const raw = record(value)
+  const stores = field(raw, 'stores')
+  const batches = field(raw, 'batches')
+  return {
+    productCode: String(field(raw, 'productCode') ?? ''),
+    windowStart: dateOnly(field(raw, 'windowStart')),
+    windowEnd: dateOnly(field(raw, 'windowEnd')),
+    stores: Array.isArray(stores) ? stores.map(item => {
+      const row = record(item)
+      const code = String(field(row, 'code') ?? '')
+      return { code, name: String(field(row, 'name') ?? '') || code }
+    }).filter(item => item.code) : [],
+    batches: Array.isArray(batches) ? batches.map(item => {
+      const row = record(item)
+      const source: PurchaseSource = String(field(row, 'source') ?? '').toLowerCase() === 'supplier' ? 'supplier' : 'warehouse'
+      return { branchCode: String(field(row, 'branchCode') ?? ''), date: dateOnly(field(row, 'date')), source,
+        documentNo: field(row, 'documentNo') ? String(field(row, 'documentNo')) : undefined, quantity: nullable(field(row, 'quantity')) ?? 0 }
+    }).filter(item => item.branchCode && item.date) : [],
+  }
+}
+
+/** 销售曲线（日）：统计未就绪时只带回状态，交给 useReportQuery 重试并提示，不画半截曲线。 */
+export async function fetchProductTrend(query: SalesDetailQuery, productCode: string, signal: AbortSignal,
+  branchCode?: string): Promise<ReportSnapshot<ProductTrend>> {
+  const raw = record(await request<unknown>('/api/react/v1/dashboard/sales-detail-product-trend', {
+    signal, params: { ...drawerParams(query, productCode), selectedBranchCode: branchCode },
+  }))
+  if (field(raw, 'success') === false) throw new Error(String(field(raw, 'message') || '销售曲线加载失败'))
+  return { data: normalizeProductTrend(field(raw, 'data')),
+    statisticStatus: String(field(raw, 'statisticStatus') ?? 'Pending'),
+    statisticMessage: field(raw, 'statisticMessage') as string | undefined,
+    statisticUpdatedAt: field(raw, 'statisticUpdatedAt') as string | undefined,
+    cacheVersion: field(raw, 'cacheVersion') as string | undefined }
+}
+
+/** 进货明细：不依赖销量统计快照，独立请求、独立失败。 */
+export async function fetchProductPurchases(query: SalesDetailQuery, productCode: string,
+  signal: AbortSignal): Promise<ReportSnapshot<ProductPurchases>> {
+  const raw = record(await request<unknown>('/api/react/v1/dashboard/sales-detail-product-purchases', {
+    signal, params: drawerParams(query, productCode),
+  }))
+  if (field(raw, 'success') === false) throw new Error(String(field(raw, 'message') || '进货明细加载失败'))
+  return { data: normalizeProductPurchases(field(raw, 'data')) }
+}
