@@ -11,6 +11,10 @@ test("认证门店响应保留严格布尔 POS 启用状态", async () => {
       {
         UserGUID: "user-1",
         MustChangePassword: true,
+        GivenName: "Emily",
+        FamilyName: "Chen",
+        Nickname: "Em",
+        MiddleName: "  ",
         Stores: [
           { StoreCode: "PASCAL_FALSE", StoreName: "Pascal false", IsActive: false },
           { StoreCode: "CAMEL_FALSE", StoreName: "Camel false", isActive: false },
@@ -47,6 +51,11 @@ test("认证门店响应保留严格布尔 POS 启用状态", async () => {
     const userStores = await getUserStoresApi("user/1");
 
     assert.equal(currentUser.mustChangePassword, true, "须改密标记必须从 PascalCase 响应映射出来");
+    assert.deepEqual(
+      [currentUser.givenName, currentUser.middleName, currentUser.familyName, currentUser.nickname],
+      ["Emily", undefined, "Chen", "Em"],
+      "姓名拆分字段从 PascalCase 映射，空白值视为缺省（个人码标签称呼依赖它们）",
+    );
 
     assert.deepEqual(
       currentUser.stores.map((store) => store.isActive),

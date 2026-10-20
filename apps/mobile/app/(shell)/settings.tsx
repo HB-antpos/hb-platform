@@ -1,4 +1,5 @@
 import { CashierBarcodeCard, usePersonalCodeValue } from "@/modules/employee-profile/CashierBarcodeCard";
+import { resolvePersonalCodeLabelName } from "@/modules/people/person-name";
 import { resolveEmployeeProfileIdentity } from "@/modules/employee-profile/cache-keys";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
@@ -1372,7 +1373,7 @@ export default function Settings() {
                   showPersonalCode && user ? (
                     <CashierBarcodeCard
                       key={resolveEmployeeProfileIdentity(user)}
-                      employeeName={user.fullName || user.username || ""}
+                      employeeName={resolvePersonalCodeLabelName(user)}
                       username={user.username || ""}
                       userIdentity={resolveEmployeeProfileIdentity(user)}
                       compact
