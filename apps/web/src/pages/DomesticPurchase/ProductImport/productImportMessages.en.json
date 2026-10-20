@@ -19,8 +19,6 @@
     "stepSent": "{{count}} sent",
     "selectSupplierPlaceholder": "Select supplier",
     "addRowsButton": "{{count}} rows",
-    "translateSelected": "Translate selected",
-    "translateAll": "Translate all",
     "redetect": "Re-check",
     "syncHqNamesLabel": "Also update HQ English names",
     "syncHqNamesTooltip": "When checked, \"Update master names\" in the More menu also writes the English names to the HQ product dictionary. It does not affect Update / Create.",
@@ -106,6 +104,12 @@
     "conflictWas": " (was {{count}})",
     "conflictFooter": "Sending {{total}} item numbers, {{conflicts}} in conflict",
     "conflictConfirm": "Confirm send",
-    "itemNumberCol": "Item No."
+    "itemNumberCol": "Item No.",
+    "describeSelected": "English Names from Photos (Selected)",
+    "describeAll": "English Names from Photos (All)",
+    "imageNamesProgress": "Generating English names from photos {{done}}/{{total}}…",
+    "imageNamesApplied": "Generated {{count}} English names ({{image}} from photos, {{text}} by text translation)",
+    "imageNamesFailed": "{{count}} rows got no English name (no photo and no Chinese name, or the request failed)",
+    "imageNamesRequestFailed": "Failed to generate English names from photos"
   }
 }

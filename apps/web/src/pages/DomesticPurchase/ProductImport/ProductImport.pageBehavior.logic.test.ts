@@ -53,16 +53,17 @@ assertDeepEqual(
   '粘贴按 id 定位行；筛选状态下禁止整列粘贴与清列',
 )
 
-// 3) 翻译结果按 id 合并进当前行，而不是用点击时的旧数组整体覆盖
+// 3) 看图生成的英文名按 id 合并进当前行，而不是用点击时的旧数组整体覆盖
 const translateSource = sliceBetween(pageSource, 'const handleBatchTranslate = useCallback(', 'const handleUpdateHbwebProductNames')
 assertDeepEqual(
   [
     translateSource.includes('snapshotTranslationTargets(stateRef.current.products, stateRef.current.selectedIds)'),
-    translateSource.includes('mergeTranslationsById(prev.products, targets, translations).products'),
+    translateSource.includes('describeProductsFromImages(items, showProgress)'),
+    translateSource.includes('mergeEnglishNamesById(prev.products, targets, englishNameById).products'),
     !translateSource.includes('applyProductImportNameTranslations'),
   ],
-  [true, true, true],
-  '翻译结果应在 setState 更新函数里按 id 合并到最新的行',
+  [true, true, true, true],
+  '看图生成的英文名应在 setState 更新函数里按 id 合并到最新的行',
 )
 
 // 4) 检测 / 入库 / 发送 / 同步 / 发总部：串行执行 + loading + 表格锁定

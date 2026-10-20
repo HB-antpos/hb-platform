@@ -60,6 +60,8 @@ import {
   buildContainerDetailExportRows,
   buildContainerDetailHqPushSelection,
   buildCreatedProductsHqPushPlan,
+  buildContainerDetailImageDescriptionItems,
+  buildContainerDetailImageDescriptionUpdates,
   buildContainerDetailTranslationUpdates,
   calculateContainerDetailImportPrice,
   calculateContainerFreight,
@@ -1230,6 +1232,34 @@ assertDeepEqual(
     { hguid: 'detail-2', 英文名称: 'TPR Shark Toy' },
   ],
   '批量翻译应跳过仍包含中文的英文名称结果',
+)
+
+assertDeepEqual(
+  buildContainerDetailImageDescriptionItems([
+    ...rows,
+    { id: 4, hguid: 'detail-4', 商品图片: ' https://img.example.com/4.jpg ', 商品名称: '收纳盒' },
+    { id: 5, hguid: 'detail-5', 商品信息: { 商品图片: 'https://img.example.com/5.jpg' } },
+    { id: 6, hguid: 'detail-6' },
+    { id: 7, hguid: '', 商品名称: '没有 hguid' },
+  ]),
+  [
+    { key: 'detail-1', imageUrl: undefined, chineseName: '明细大草莓' },
+    { key: 'detail-2', imageUrl: undefined, chineseName: 'TPR鲨鱼' },
+    { key: 'detail-4', imageUrl: 'https://img.example.com/4.jpg', chineseName: '收纳盒' },
+    { key: 'detail-5', imageUrl: 'https://img.example.com/5.jpg', chineseName: undefined },
+  ],
+  '看图请求按 hguid 组装：图片明细优先、商品信息兜底；没图也没名称、没有 hguid 的行不发请求',
+)
+
+assertDeepEqual(
+  buildContainerDetailImageDescriptionUpdates(rows, {
+    'detail-1': 'Large Red Strawberry Plush',
+    'detail-2': 'TPR 鲨鱼',
+  }),
+  [
+    { hguid: 'detail-1', 英文名称: 'Large Red Strawberry Plush' },
+  ],
+  '看图结果按 hguid 回填，仍含中文的结果跳过',
 )
 
 assertEqual(
@@ -5188,7 +5218,7 @@ assertDeepEqual(
   [
     "const scopedRows = await confirmBatchRows(t('containers.actions.matchDomesticData'))",
     "const scopedRows = await confirmBatchRows(t(isActive ? 'containers.actions.batchActivate' : 'containers.actions.batchDeactivate'))",
-    "const scopedRows = await confirmBatchRows(t('containers.actions.batchTranslate'))",
+    "const scopedRows = await confirmBatchRows(t('containers.actions.describeFromImages'))",
     "const scopedRows = await confirmBatchRows(t('containers.actions.clearEnglishNames'), { danger: true })",
     "const scopedRows = await confirmBatchRows(t('containers.actions.createNewProducts'), {",
     "const confirmed = await confirmBatchRowsWithUpdateFields(",
