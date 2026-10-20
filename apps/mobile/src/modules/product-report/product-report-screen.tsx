@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import {
-  Animated,
   Image,
   InteractionManager,
   Pressable,
@@ -11,19 +10,18 @@ import {
   useWindowDimensions,
   View,
   type LayoutChangeEvent,
-  type StyleProp,
-  type ViewStyle,
 } from "react-native";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
   Button,
+  IconButton,
   Modal,
   Portal,
-  SegmentedButtons,
   Text,
   TextInput,
 } from "react-native-paper";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   buildProductReportDateQuery,
   fetchChinaSupplierBranchTotals,
@@ -67,7 +65,7 @@ import {
   getCashierEnabledStoreCodes,
   getCashierScopedBranchCodes,
 } from "@/modules/reports/cashier-enabled-store-scope";
-import { GROWTH_COLORS, formatGrowthRate, getGrowthTone } from "@/modules/reports/growth-rate";
+import { GrowthPill, RankBadge, REPORT_UI } from "@/modules/reports/report-card-parts";
 import { REPORT_QUERY_OPTIONS } from "@/modules/reports/report-config";
 import {
   ReportLoadPerformanceTimer,
@@ -96,6 +94,15 @@ import {
 import { ChinaBranchShareSection, ChinaGoodsSummaryCard } from "@/modules/product-report/china-goods-sections";
 import { LINKED_COLORS, LINKED_STALE_OPACITY } from "@/modules/product-report/linked-colors";
 import { LinkedFilterBar, type LinkedAnchor, type LinkedAnchorKey } from "@/modules/product-report/linked-filter-bar";
+import {
+  CompactPager,
+  FilterChip,
+  MetricGrid,
+  PRODUCT_CARD_COLORS,
+  SegmentToggle,
+  ShareMeter,
+  SortChips,
+} from "@/modules/product-report/product-report-card-parts";
 import {
   FRESH_LINKED_SECTIONS,
   filterRowsByBranch,
@@ -133,7 +140,8 @@ interface ProductPageSummary {
 
 const MAIN_REPORT_CACHE_VERSION_REFETCH_LIMIT = 2;
 
-// 吸顶联动条在主 ScrollView 直接子元素中的位置：日期行（或标题）→ 页签 → 联动条。
+// 吸顶联动条在主 ScrollView 直接子元素中的位置：（标题 +）澳洲/中国分段 → 日期卡 → 联动条。
+// ScrollView 用 Children.toArray 计数，null 子元素会被丢掉，所以前两个子元素必须始终存在。
 const LINKED_FILTER_BAR_INDEX = 2;
 
 type SupplierMetricSortRow = Pick<
@@ -155,29 +163,20 @@ const PRODUCT_BRANCH_SORT_VALUES: ReportSortValues<ProductBranchBreakdownRow> = 
   unitPrice: (row) => [row.averageUnitPrice, row.compareAverageUnitPrice],
 };
 
-// 表头只有 38pt 高，上下扩大点击区域接近 44pt 触控下限。
-const SORT_HEADER_HIT_SLOP = { top: 10, bottom: 10 };
+// 供应商与供应商分店按金额 / 数量 / 均价排序；商品明细沿用原表头顺序：数量 / 金额 / 均价。
+const SUPPLIER_SORT_FIELDS: readonly ReportSortField[] = ["amount", "quantity", "unitPrice"];
+const PRODUCT_SORT_FIELDS: readonly ReportSortField[] = ["quantity", "amount", "unitPrice"];
+const SORT_FIELD_LABEL_KEYS: Record<ReportSortField, string> = {
+  amount: "productReport.columns.amount",
+  quantity: "productReport.columns.quantity",
+  unitPrice: "productReport.columns.averagePrice",
+};
 
 // 中国供应商页签的商品明细默认按数量降序（用户 2026-09-22 确认）；澳洲页签保持金额降序。
 const CHINA_PRODUCT_DEFAULT_SORT: ReportSort = { field: "quantity", order: "desc" };
 
 function getDefaultProductSort(kind: SupplierReportKind): ReportSort {
   return kind === "china" ? CHINA_PRODUCT_DEFAULT_SORT : DEFAULT_REPORT_SORT;
-}
-
-// 中国页签供应商名称列固定 102pt（用户 2026-09-22 模拟器验收后要求比自适应宽度再窄 40%），
-// 首屏依次露出金额、数量和「占中国货」，其余列左滑查看。
-const CHINA_SUPPLIER_NAME_COLUMN_WIDTH = 102;
-// 商品表的货号/名称列吃掉剩余宽度，让均价及之后的列正好落在首屏外。
-// 视口 = 屏宽 − 内容区左右 16pt − 表格边框 1pt。
-const CHINA_TABLE_VIEWPORT_INSET = 34;
-// 行内左边距 4 + 图片 52 + 固定列分隔 1 + 数量 60 + 金额 84 + 四段间距 3，再留 4pt。
-// 金额列宽必须与 styles.chinaProductAmountColumn 一致，否则金额会被挤出首屏（2026-09-22 模拟器实测）。
-const CHINA_PRODUCT_FIRST_SCREEN_FIXED = 217;
-const CHINA_PRODUCT_IMAGE_COLUMN_WIDTH = 52;
-
-function getChinaLeadingColumnWidth(windowWidth: number, fixedWidth: number, minWidth: number, maxWidth: number) {
-  return Math.round(Math.min(maxWidth, Math.max(minWidth, windowWidth - CHINA_TABLE_VIEWPORT_INSET - fixedWidth)));
 }
 
 type CompleteProductMainReport = {
@@ -249,123 +248,7 @@ function shouldShowSupplierCode(row: SupplierReportRow) {
   return name !== "" && name !== row.supplierCode.trim();
 }
 
-function TableCell({
-  children,
-  style,
-  numeric,
-}: {
-  children: string;
-  style?: object;
-  numeric?: boolean;
-}) {
-  return (
-    <Text
-      variant="bodySmall"
-      // 数值不能省略；超出常规列宽或系统放大字体时允许完整换行。
-      numberOfLines={numeric ? undefined : 1}
-      selectable
-      style={[styles.tableCellText, numeric ? styles.numericText : null, style]}
-    >
-      {children}
-    </Text>
-  );
-}
-
-function SortableHeaderCell({
-  label,
-  field,
-  sort,
-  onSort,
-  style,
-}: {
-  label: string;
-  field: ReportSortField;
-  sort: ReportSort;
-  onSort: (field: ReportSortField) => void;
-  style?: StyleProp<ViewStyle>;
-}) {
-  const { t } = useAppTranslation("common");
-  const active = sort.field === field;
-  const descending = sort.order === "desc";
-  const state = !active
-    ? t("productReport.sort.none")
-    : descending
-      ? t("productReport.sort.desc")
-      : t("productReport.sort.asc");
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      accessibilityLabel={t("productReport.sort.accessibilityLabel", { column: label, state })}
-      hitSlop={SORT_HEADER_HIT_SLOP}
-      onPress={() => onSort(field)}
-      style={[styles.sortableHeader, style]}
-    >
-      <Text
-        variant="bodySmall"
-        numberOfLines={1}
-        style={[styles.tableCellText, styles.headerText, styles.sortableHeaderLabel, active ? styles.sortActiveText : null]}
-      >
-        {label}
-      </Text>
-      {/* 箭头单独成段：标签被列宽截断时，排序状态仍然可见。 */}
-      <Text variant="bodySmall" style={[styles.sortIndicator, active ? styles.sortActiveText : null]}>
-        {active ? (descending ? "▼" : "▲") : "⇅"}
-      </Text>
-    </Pressable>
-  );
-}
-
-function FrozenHorizontalTable({
-  children,
-}: {
-  children: (scrollX: Animated.Value) => ReactNode;
-}) {
-  const scrollX = useRef(new Animated.Value(0)).current;
-  return (
-    <Animated.ScrollView
-      horizontal
-      bounces={false}
-      scrollEventThrottle={16}
-      onScroll={Animated.event(
-        [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-        { useNativeDriver: true },
-      )}
-      showsHorizontalScrollIndicator>
-      {children(scrollX)}
-    </Animated.ScrollView>
-  );
-}
-
-function FrozenLeadingColumns({
-  scrollX,
-  children,
-  style,
-  tone = "body",
-}: {
-  scrollX: Animated.Value;
-  children: ReactNode;
-  style: StyleProp<ViewStyle>;
-  tone?: "body" | "header" | "selected";
-}) {
-  return (
-    <Animated.View
-      style={[
-        styles.frozenLeadingColumns,
-        tone === "header"
-          ? styles.frozenHeaderColumns
-          : tone === "selected"
-            ? styles.frozenSelectedColumns
-            : styles.frozenBodyColumns,
-        style,
-        { transform: [{ translateX: scrollX }] },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-}
-
+/** 澳洲页签顶部「本页商品汇总」：营业额 / 毛利额 / 毛利率 × 本期 / 同期 的小矩阵，字段与原表一致。 */
 function ProductPageSummaryCard({
   summary,
   caption,
@@ -396,33 +279,43 @@ function ProductPageSummaryCard({
       compare: formatGrossMarginRate(summary.compareGrossMarginRate, summary.compareCostStatus, costPendingLabel, noActivityLabel),
     },
   ];
+  const rows = [
+    { key: "current", label: t("reports.metrics.current"), current: true },
+    { key: "compare", label: t("productReport.metrics.compare"), current: false },
+  ];
 
   return (
-    <View style={styles.productSummaryCard}>
-      <View style={styles.productSummaryHeader}>
-        <Text variant="titleMedium" style={styles.sectionTitle}>
-          {t("productReport.sections.pageSummary")}
-        </Text>
-        <Text variant="bodySmall" style={styles.muted} numberOfLines={1}>
-          {caption}
-        </Text>
+    <View style={styles.card}>
+      <View style={styles.cardTitleRow}>
+        <Text style={styles.cardTitle}>{t("productReport.sections.pageSummary")}</Text>
+        <Text style={styles.caption} numberOfLines={1}>{caption}</Text>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.productSummaryScroll}>
-        <View style={styles.productSummaryGrid}>
-          <View style={styles.productSummaryLabelColumn}>
-            <TableCell style={styles.headerText}> </TableCell>
-            <TableCell style={styles.strongText}>{t("reports.metrics.current")}</TableCell>
-            <TableCell style={styles.muted}>{t("productReport.metrics.compare")}</TableCell>
-          </View>
+      <View style={styles.summaryMatrixRow}>
+        <View style={styles.summaryMatrixLabel} />
+        {metrics.map((metric) => (
+          <Text key={metric.key} style={[styles.summaryMatrixCell, styles.summaryMatrixHead]} numberOfLines={1}>
+            {metric.label}
+          </Text>
+        ))}
+      </View>
+      {rows.map((row) => (
+        <View key={row.key} style={styles.summaryMatrixRow}>
+          <Text style={[styles.summaryMatrixLabel, row.current ? styles.summaryMatrixLabelCurrent : null]} numberOfLines={1}>
+            {row.label}
+          </Text>
           {metrics.map((metric) => (
-            <View key={metric.key} style={styles.productSummaryMetric}>
-              <TableCell numeric style={styles.headerText}>{metric.label}</TableCell>
-              <TableCell numeric style={styles.strongText}>{metric.current}</TableCell>
-              <TableCell numeric style={styles.muted}>{metric.compare}</TableCell>
-            </View>
+            <Text
+              key={metric.key}
+              style={[styles.summaryMatrixCell, row.current ? styles.summaryMatrixCurrent : styles.summaryMatrixCompare]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
+              {row.current ? metric.current : metric.compare}
+            </Text>
           ))}
         </View>
-      </ScrollView>
+      ))}
     </View>
   );
 }
@@ -1405,29 +1298,10 @@ export function ProductReportScreen({
     () => supplierRows.reduce((max, row) => Math.max(max, row.revenue), 0),
     [supplierRows],
   );
-  const supplierNameWidth = CHINA_SUPPLIER_NAME_COLUMN_WIDTH;
-  const productInfoWidth = getChinaLeadingColumnWidth(width, CHINA_PRODUCT_FIRST_SCREEN_FIXED, 96, 220);
-  // 宽表可横向滚动，空态若按整表宽度居中会落到屏幕外；限制在首屏可见宽度内居中。
-  const tableViewportWidth = Math.max(0, width - CHINA_TABLE_VIEWPORT_INSET);
   const productPageCount = Math.max(1, Math.ceil(productTotal / productPageSize));
-  // 商品报告的两个数据区块各自接近一屏，分页和搜索栏也计入区块高度。
-  const sectionScreenHeight = Math.max(560, Math.floor(height * 0.76));
-  const supplierTableBodyHeight = Math.max(420, sectionScreenHeight - 112);
-  const productTableBodyHeight = Math.max(380, sectionScreenHeight - 184);
   const growthNewLabel = t("productReport.metrics.newGrowth");
   const costPendingLabel = t("productReport.states.costPending");
   const costNoActivityLabel = t("productReport.states.costNoActivity");
-
-  const renderGrowthCell = (current: number, compare: number, columnStyle?: StyleProp<ViewStyle>) => {
-    const tone = getGrowthTone(current, compare);
-    return (
-      <View style={[styles.growthColumn, columnStyle]}>
-        <TableCell numeric style={[styles.strongText, { color: GROWTH_COLORS[tone] }]}>
-          {formatGrowthRate(current, compare, growthNewLabel)}
-        </TableCell>
-      </View>
-    );
-  };
 
   const supplierBranchQueryKey = useMemo(
     () => [
@@ -1908,226 +1782,193 @@ export function ProductReportScreen({
     setDrilldown(next);
   };
 
-  // 澳洲与中国供应商共用列顺序；澳洲只显示本期，中国把同期列组放在末尾。
+  // 澳洲与中国供应商共用同一张卡：右上金额 + 增长率（点金额看分店），两项占比横条，
+  // 数量 / 均价 / 毛利额 / 毛利率四格。澳洲只显示本期；中国把同期写在金额下方、占比旁和每格下方。
   const renderSupplierRow = ({
     item,
     rowNumber,
-    scrollX,
   }: {
     item: SupplierReportRow;
     rowNumber: number;
-    scrollX: Animated.Value;
   }) => {
     const isSelected = isSameLinkedCode(item.supplierCode, selectedSupplierCode);
     const showComparison = isChinaKind;
-    // 占比分母跟随表里数据所属的分店：中国页签用该范围的中国货合计，澳洲页签用本表小计。
+    // 同期值一律经过 compareText：澳洲页签返回 null，卡片上不出现任何同期数值。
+    const compareText = (value: string) => (showComparison ? value : null);
+    const compareLabel = t("productReport.metrics.compare");
+    // 占比分母跟随卡片数据所属的分店：中国页签用该范围的中国货合计，澳洲页签用本表小计。
     const categoryRevenue = isChinaKind ? supplierScopeChinaGoods.revenue : supplierSubtotal;
     const categoryCompareRevenue = isChinaKind
       ? supplierScopeChinaGoods.compareRevenue
       : supplierCompareSubtotal;
+    // 两条占比横条用同一标尺：满格 = 当前页签金额最大的供应商；总占比条再按「分类合计 ÷ 总营业额」等比缩短。
     const shareBarPercent = topSupplierRevenue > 0
       ? Math.min(100, Math.max(0, (item.revenue / topSupplierRevenue) * 100))
       : 0;
+    const totalShareBarPercent = supplierScopeRevenue.revenue > 0
+      ? shareBarPercent * Math.min(1, categoryRevenue / supplierScopeRevenue.revenue)
+      : 0;
+    const categoryShareLabel = isChinaKind
+      ? t("productReport.chinaGoods.compareShareOfChina")
+      : t("productReport.metrics.supplierShare");
+    const totalShareLabel = isChinaKind
+      ? t("productReport.chinaGoods.compareShareOfTotal")
+      : t("productReport.metrics.totalShare");
+    const compareRevenueText = compareText(`${compareLabel} ${formatWholeMoney(item.compareRevenue)}`);
 
     return (
-      <View style={[styles.tableRow, styles.supplierTableRow, styles.chinaSupplierRow, isSelected ? styles.selectedRow : null]}>
-        <FrozenLeadingColumns
-          scrollX={scrollX}
-          style={styles.frozenSupplierColumns}
-          tone={isSelected ? "selected" : "body"}
-        >
-          {isSelected ? <View style={styles.selectedSupplierAccent} /> : null}
+      <View style={[styles.supplierCard, isSelected ? styles.selectedSupplierCard : null]}>
+        {isSelected ? <View style={styles.selectedSupplierAccent} /> : null}
+        <View style={styles.supplierCardTop}>
           <View style={styles.rowNumberColumn}>
-            <TableCell numeric style={styles.strongText}>{formatRowNumber(rowNumber)}</TableCell>
+            <RankBadge value={formatRowNumber(rowNumber)} />
           </View>
           <Pressable
-            // 供应商列点选联动分店表与商品明细（再点取消），金额列单独查看分店汇总。
+            // 供应商名称点选联动分店表与商品明细（再点取消），金额单独查看分店汇总。
             onPress={() => toggleLinkedSupplier(item.supplierCode)}
             accessibilityRole="button"
             accessibilityLabel={isSelected
               ? t("productReport.linked.selectedSupplierA11y", { supplier: getSupplierTitle(item) })
               : t("productReport.linked.selectSupplierA11y", { supplier: getSupplierTitle(item) })}
             accessibilityState={{ selected: isSelected }}
-            style={[{ width: supplierNameWidth }, styles.fullHeightCell]}
+            style={styles.supplierNameBlock}
           >
-            <TableCell style={isSelected ? [styles.strongText, styles.selectedSupplierName] : styles.strongText}>
+            <Text style={[styles.supplierName, isSelected ? styles.selectedSupplierName : null]} numberOfLines={2}>
               {getSupplierTitle(item)}
-            </TableCell>
-            <TableCell style={styles.muted}>{shouldShowSupplierCode(item) ? item.supplierCode : ""}</TableCell>
+            </Text>
+            <Text style={styles.caption} numberOfLines={1}>{shouldShowSupplierCode(item) ? item.supplierCode : ""}</Text>
           </Pressable>
-        </FrozenLeadingColumns>
-        <Pressable
-          onPress={() => openDrilldown({ type: "supplier", kind, supplier: item })}
-          accessibilityRole="button"
-          accessibilityLabel={[getSupplierTitle(item), t("productReport.drilldown.supplier")].join(" ")}
-          style={[styles.chinaSupplierAmountColumn, styles.fullHeightCell]}
-        >
-          <TableCell numeric style={styles.strongText}>{formatWholeMoney(item.revenue)}</TableCell>
-          <View style={styles.chinaChevronWrap} pointerEvents="none">
-            <Text style={styles.chinaInlineChevron} accessibilityElementsHidden>›</Text>
-          </View>
-        </Pressable>
-        <View style={styles.chinaQuantityColumn}>
-          <TableCell numeric style={styles.strongText}>{formatCount(item.totalQuantity)}</TableCell>
+          <Pressable
+            onPress={() => openDrilldown({ type: "supplier", kind, supplier: item })}
+            accessibilityRole="button"
+            accessibilityLabel={[getSupplierTitle(item), t("productReport.drilldown.supplier")].join(" ")}
+            style={styles.amountLink}
+          >
+            <Text style={styles.cardAmount} numberOfLines={1}>{formatWholeMoney(item.revenue)}</Text>
+            <View style={styles.amountMeta}>
+              <GrowthPill current={item.revenue} compare={item.compareRevenue} newLabel={growthNewLabel} />
+              <Text style={styles.drillLink}>{t("productReport.actions.branchDetail")} ›</Text>
+            </View>
+            {compareRevenueText ? <Text style={styles.caption} numberOfLines={1}>{compareRevenueText}</Text> : null}
+          </Pressable>
         </View>
-        <View style={styles.chinaShareColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatShare(item.revenue, categoryRevenue)}</TableCell>
-          <View style={styles.chinaShareTrack}>
-            <View style={[styles.chinaShareFill, { width: `${shareBarPercent}%` as `${number}%` }]} />
-          </View>
+        <View style={styles.shareRow}>
+          <ShareMeter
+            label={categoryShareLabel}
+            value={formatShare(item.revenue, categoryRevenue)}
+            compareText={compareText(`${compareLabel} ${formatShare(item.compareRevenue, categoryCompareRevenue)}`)}
+            percent={shareBarPercent}
+          />
+          <ShareMeter
+            label={totalShareLabel}
+            value={formatShare(item.revenue, supplierScopeRevenue.revenue)}
+            compareText={compareText(`${compareLabel} ${formatShare(item.compareRevenue, supplierScopeRevenue.compareRevenue)}`)}
+            percent={totalShareBarPercent}
+          />
         </View>
-        <View style={styles.chinaShareColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatShare(item.revenue, supplierScopeRevenue.revenue)}</TableCell>
-        </View>
-        <View style={styles.chinaAverageColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatNullableMoney(item.averagePrice)}</TableCell>
-        </View>
-        <View style={styles.grossProfitColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatNullableWholeMoney(item.grossProfit)}</TableCell>
-        </View>
-        <View style={styles.grossMarginColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>
-            {formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel)}
-          </TableCell>
-        </View>
-        {renderGrowthCell(item.revenue, item.compareRevenue, styles.chinaGrowthColumn)}
-        {showComparison ? (
-          <>
-            <View style={styles.chinaCompareAmountColumn}>
-              <TableCell numeric style={styles.muted}>{formatWholeMoney(item.compareRevenue)}</TableCell>
-            </View>
-            <View style={styles.chinaCompareQuantityColumn}>
-              <TableCell numeric style={styles.muted}>
-                {item.compareTotalQuantity === null ? "—" : formatCount(item.compareTotalQuantity)}
-              </TableCell>
-            </View>
-            <View style={styles.chinaShareColumn}>
-              <TableCell numeric style={styles.muted}>{formatShare(item.compareRevenue, categoryCompareRevenue)}</TableCell>
-            </View>
-            <View style={styles.chinaShareColumn}>
-              <TableCell numeric style={styles.muted}>{formatShare(item.compareRevenue, supplierScopeRevenue.compareRevenue)}</TableCell>
-            </View>
-            <View style={styles.chinaAverageColumn}>
-              <TableCell numeric style={styles.muted}>{formatNullableMoney(item.compareAveragePrice)}</TableCell>
-            </View>
-            <View style={styles.grossProfitColumn}>
-              <TableCell numeric style={styles.muted}>{formatNullableWholeMoney(item.compareGrossProfit)}</TableCell>
-            </View>
-            <View style={styles.grossMarginColumn}>
-              <TableCell numeric style={styles.muted}>
-                {formatGrossMarginRate(item.compareGrossMarginRate, item.compareCostStatus, costPendingLabel, costNoActivityLabel)}
-              </TableCell>
-            </View>
-          </>
-        ) : null}
+        <MetricGrid
+          style={styles.cardGrid}
+          cells={[
+            { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(item.totalQuantity), compare: compareText(item.compareTotalQuantity === null ? "—" : formatCount(item.compareTotalQuantity)) },
+            { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatNullableMoney(item.averagePrice), compare: compareText(formatNullableMoney(item.compareAveragePrice)) },
+            { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(item.grossProfit), compare: compareText(formatNullableWholeMoney(item.compareGrossProfit)) },
+            { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel), pending: item.costStatus === "Missing", compare: compareText(formatGrossMarginRate(item.compareGrossMarginRate, item.compareCostStatus, costPendingLabel, costNoActivityLabel)) },
+          ]}
+        />
       </View>
     );
   };
 
-  // 两个供应商页签的商品明细共用中国页签列布局，并且都只显示本期值。
+  // 两个供应商页签的商品明细共用同一张商品卡，并且都只显示本期值（同期金额只用于算增长率）。
   const renderProductRow = ({
     item,
     rowNumber,
-    scrollX,
   }: {
     item: ProductReportProductRow;
     rowNumber: number;
-    scrollX: Animated.Value;
   }) => (
     <Pressable
-      style={[styles.tableRow, styles.productTableRow, styles.chinaProductRow]}
+      style={styles.productCard}
       onPress={() => openDrilldown({ type: "product", product: item })}
       accessibilityRole="button"
       accessibilityLabel={[item.itemNumber || item.productCode, item.productName || "", t("productReport.drilldown.product")].filter(Boolean).join(" ")}
     >
-      <FrozenLeadingColumns scrollX={scrollX} style={styles.frozenProductColumns}>
-        <View style={styles.productImageColumn}>
-          <View style={styles.chinaImageFrame}>
-            {item.productImage ? (
-              <Image source={{ uri: item.productImage }} style={styles.productImage} resizeMode="cover" />
-            ) : (
-              <View style={styles.productImagePlaceholder}>
-                <Text variant="labelSmall" style={styles.placeholderText}>
-                  {t("productReport.columns.image")}
-                </Text>
-              </View>
-            )}
-            <View style={styles.rankBadge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <Text style={styles.rankBadgeText}>{String(rowNumber)}</Text>
-            </View>
+      {/* 图片 + 货号/名称/金额在上一行；四格指标占满整卡宽度，英文「Gross profit / Gross margin」才不会被截断。 */}
+      <View style={styles.productCardTop}>
+      <View style={styles.productImageColumn}>
+        {item.productImage ? (
+          <Image source={{ uri: item.productImage }} style={styles.productImage} resizeMode="cover" />
+        ) : (
+          <View style={styles.productImagePlaceholder}>
+            <Text style={styles.placeholderText}>{t("productReport.columns.image")}</Text>
           </View>
+        )}
+        <View style={styles.rankBadge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Text style={styles.rankBadgeText}>{String(rowNumber)}</Text>
         </View>
-        <View style={{ width: productInfoWidth, minWidth: 0 }}>
-          <TableCell style={styles.strongText}>{item.itemNumber || "--"}</TableCell>
-          <TableCell style={styles.muted}>{item.productName || "--"}</TableCell>
+      </View>
+      <View style={styles.productCardBody}>
+        <Text style={styles.productCode} numberOfLines={1}>{item.itemNumber || "--"}</Text>
+        <Text style={styles.productName} numberOfLines={1}>{item.productName || "--"}</Text>
+        <View style={styles.amountLine}>
+          <Text style={styles.cardAmount} numberOfLines={1}>{formatWholeMoney(item.salesAmount)}</Text>
+          <GrowthPill current={item.salesAmount} compare={item.compareSalesAmount} newLabel={growthNewLabel} />
         </View>
-      </FrozenLeadingColumns>
-      <View style={styles.chinaQuantityColumn}>
-        <TableCell numeric style={styles.strongText}>{formatCount(item.quantity)}</TableCell>
       </View>
-      <View style={styles.chinaProductAmountColumn}>
-        <TableCell numeric style={styles.strongText}>{formatWholeMoney(item.salesAmount)}</TableCell>
       </View>
-      <View style={styles.chinaAverageColumn}>
-        <TableCell numeric style={styles.chinaMetricText}>{formatMoney(item.averageUnitPrice)}</TableCell>
-      </View>
-      <View style={styles.grossProfitColumn}>
-        <TableCell numeric style={styles.chinaMetricText}>{formatNullableWholeMoney(item.grossProfit)}</TableCell>
-      </View>
-      <View style={styles.grossMarginColumn}>
-        <TableCell numeric style={styles.chinaMetricText}>
-          {formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel)}
-        </TableCell>
-      </View>
-      {renderGrowthCell(item.salesAmount, item.compareSalesAmount, styles.chinaGrowthColumn)}
+      <MetricGrid
+        style={styles.productGrid}
+        cells={[
+          { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(item.quantity) },
+          { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatMoney(item.averageUnitPrice) },
+          { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(item.grossProfit) },
+          { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(item.grossMarginRate, item.costStatus, costPendingLabel, costNoActivityLabel), pending: item.costStatus === "Missing" },
+        ]}
+      />
     </Pressable>
   );
 
-  // 表头下固定的「本页合计」：列与商品行对齐，不随商品列表纵向滚动。
-  const renderChinaProductPageTotalRow = (scrollX: Animated.Value) => {
+  // 中国页签「本页合计」：固定在商品卡片列表上方，字段与商品卡一致，只有本期值。
+  const renderChinaProductPageTotalCard = () => {
     const totals = chinaProductPageTotals;
     return (
-      <View
-        style={[
-          styles.tableRow,
-          styles.productTableRow,
-          styles.chinaPageTotalRow,
-          linkedStaleness.productTable ? styles.staleSection : null,
-        ]}
-      >
-        <FrozenLeadingColumns scrollX={scrollX} style={[styles.frozenProductColumns, styles.chinaPageTotalFrozen]}>
-          <View style={{ width: CHINA_PRODUCT_IMAGE_COLUMN_WIDTH + 3 + productInfoWidth, minWidth: 0 }}>
-            <TableCell style={styles.strongText}>{t("productReport.chinaGoods.pageTotal")}</TableCell>
-            <TableCell style={styles.muted}>
-              {t("productReport.pageSummaryCaption", {
-                start: productTotal === 0 ? 0 : (displayedProductPage - 1) * displayedProductPageSize + 1,
-                end: Math.min(displayedProductPage * displayedProductPageSize, productTotal),
-                total: productTotal,
-              })}
-            </TableCell>
-          </View>
-        </FrozenLeadingColumns>
-        <View style={styles.chinaQuantityColumn}>
-          <TableCell numeric style={styles.strongText}>{formatCount(totals.quantity)}</TableCell>
+      <View style={[styles.pageTotalCard, linkedStaleness.productTable ? styles.staleSection : null]}>
+        <View style={styles.cardTitleRow}>
+          <Text style={styles.pageTotalTitle}>{t("productReport.chinaGoods.pageTotal")}</Text>
+          <Text style={styles.caption} numberOfLines={1}>
+            {t("productReport.pageSummaryCaption", {
+              start: productTotal === 0 ? 0 : (displayedProductPage - 1) * displayedProductPageSize + 1,
+              end: Math.min(displayedProductPage * displayedProductPageSize, productTotal),
+              total: productTotal,
+            })}
+          </Text>
         </View>
-        <View style={styles.chinaProductAmountColumn}>
-          <TableCell numeric style={styles.strongText}>{formatWholeMoney(totals.salesAmount)}</TableCell>
+        <View style={styles.amountLine}>
+          <Text style={styles.pageTotalAmount} numberOfLines={1}>{formatWholeMoney(totals.salesAmount)}</Text>
+          <GrowthPill current={totals.salesAmount} compare={totals.compareSalesAmount} newLabel={growthNewLabel} />
         </View>
-        <View style={styles.chinaAverageColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatNullableMoney(totals.averageUnitPrice)}</TableCell>
-        </View>
-        <View style={styles.grossProfitColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>{formatNullableWholeMoney(totals.grossProfit)}</TableCell>
-        </View>
-        <View style={styles.grossMarginColumn}>
-          <TableCell numeric style={styles.chinaMetricText}>
-            {formatGrossMarginRate(totals.grossMarginRate, totals.costStatus, costPendingLabel, costNoActivityLabel)}
-          </TableCell>
-        </View>
-        {renderGrowthCell(totals.salesAmount, totals.compareSalesAmount, styles.chinaGrowthColumn)}
+        <MetricGrid
+          style={[styles.cardGrid, styles.pageTotalGrid]}
+          cells={[
+            { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(totals.quantity) },
+            { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatNullableMoney(totals.averageUnitPrice) },
+            { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(totals.grossProfit) },
+            { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(totals.grossMarginRate, totals.costStatus, costPendingLabel, costNoActivityLabel), pending: totals.costStatus === "Missing" },
+          ]}
+        />
       </View>
     );
   };
+
+  const drilldownSubtitle = drilldown?.type === "supplier"
+    ? [getSupplierTitle(drilldown.supplier), shouldShowSupplierCode(drilldown.supplier) ? drilldown.supplier.supplierCode : ""]
+        .filter(Boolean)
+        .join(" · ")
+    : drilldown?.type === "product"
+      ? [drilldown.product.itemNumber || drilldown.product.productCode, drilldown.product.productName]
+          .filter(Boolean)
+          .join(" · ")
+      : undefined;
 
   return (
     <View style={styles.container}>
@@ -2140,29 +1981,59 @@ export function ProductReportScreen({
         stickyHeaderIndices={[LINKED_FILTER_BAR_INDEX]}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
       >
-        {!embedded ? (
-          <View style={styles.header}>
+        {/* 第 1 个直接子元素：（独立页面时的标题 +）澳洲 / 中国供应商分段，始终存在。 */}
+        <View style={styles.topBlock}>
+          {!embedded ? (
             <Text variant="headlineSmall" style={styles.title}>
               {t("productReport.title")}
             </Text>
-            <Text variant="bodySmall" style={styles.muted}>
-              {dateRangeValid ? `${draftStartDate} - ${draftEndDate}` : t("productReport.states.invalidDate")}
-            </Text>
-          </View>
-        ) : (
-          <Text variant="bodySmall" style={styles.muted}>
-            {dateRangeValid ? `${draftStartDate} - ${draftEndDate}` : t("productReport.states.invalidDate")}
-          </Text>
-        )}
+          ) : null}
+          <SegmentToggle
+            value={kind}
+            onChange={applyKind}
+            options={[
+              { value: "australia", label: t("productReport.tabs.australia") },
+              { value: "china", label: t("productReport.tabs.china") },
+            ]}
+          />
+        </View>
 
-        <SegmentedButtons
-          value={kind}
-          onValueChange={applyKind}
-          buttons={[
-            { value: "australia", label: t("productReport.tabs.australia") },
-            { value: "china", label: t("productReport.tabs.china") },
-          ]}
-        />
+        {/* 第 2 个直接子元素：日期卡。原「日期区间」文字并入两个日期输入框，格式错误提示写在卡内。 */}
+        <View style={styles.dateCard}>
+          <View style={styles.dateInputs}>
+            <TextInput
+              mode="outlined"
+              dense
+              label={t("productReport.filters.startDate")}
+              value={draftStartDate}
+              onChangeText={updateDraftStartDate}
+              style={styles.dateInput}
+              autoCapitalize="none"
+            />
+            <TextInput
+              mode="outlined"
+              dense
+              label={t("productReport.filters.endDate")}
+              value={draftEndDate}
+              onChangeText={updateDraftEndDate}
+              style={styles.dateInput}
+              autoCapitalize="none"
+            />
+          </View>
+          {!dateRangeValid ? (
+            <Text variant="labelSmall" style={styles.dateError}>{t("productReport.states.invalidDate")}</Text>
+          ) : null}
+          <View style={styles.quickBar}>
+            {(["today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth"] as const).map((key) => (
+              <FilterChip
+                key={key}
+                label={t(`productReport.shortcuts.${key}`)}
+                selected={range.key === key}
+                onPress={() => setQuickRange(key)}
+              />
+            ))}
+          </View>
+        </View>
 
         {/* 吸顶联动条：ScrollView 第 3 个直接子元素（LINKED_FILTER_BAR_INDEX），前面两个子元素不能增删。 */}
         <LinkedFilterBar
@@ -2185,35 +2056,6 @@ export function ProductReportScreen({
             linkedBarHeightRef.current = event.nativeEvent.layout.height;
           }}
         />
-
-        <View style={styles.dateInputs}>
-          <TextInput
-            mode="outlined"
-            dense
-            label={t("productReport.filters.startDate")}
-            value={draftStartDate}
-            onChangeText={updateDraftStartDate}
-            style={styles.dateInput}
-            autoCapitalize="none"
-          />
-          <TextInput
-            mode="outlined"
-            dense
-            label={t("productReport.filters.endDate")}
-            value={draftEndDate}
-            onChangeText={updateDraftEndDate}
-            style={styles.dateInput}
-            autoCapitalize="none"
-          />
-        </View>
-
-        <View style={styles.quickBar}>
-          {(["today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth"] as const).map((key) => (
-            <Button key={key} compact mode={range.key === key ? "contained" : "outlined"} onPress={() => setQuickRange(key)}>
-              {t(`productReport.shortcuts.${key}`)}
-            </Button>
-          ))}
-        </View>
 
         {!dateRangeValid ? (
           <View style={styles.stateBox}>
@@ -2271,7 +2113,7 @@ export function ProductReportScreen({
               </View>
             ) : null}
             {isChinaKind ? (
-              // 中国页签顶部：中国货汇总与分店中国货占比；「本页合计」移到商品明细表头下方。
+              // 中国页签顶部：中国货汇总与分店中国货占比；「本页合计」放在商品明细卡片列表上方。
               <>
                 <ChinaGoodsSummaryCard summary={chinaGoodsSummary} />
                 <ChinaBranchShareSection
@@ -2284,7 +2126,7 @@ export function ProductReportScreen({
                 />
               </>
             ) : productSectionLoading ? (
-              <View style={[styles.productSummaryCard, styles.productSummaryLoading]}>
+              <View style={[styles.card, styles.productSummaryLoading]}>
                 <ActivityIndicator size="small" />
                 <Text variant="bodySmall" style={styles.muted}>
                   {t("productReport.states.loading")}
@@ -2302,15 +2144,17 @@ export function ProductReportScreen({
                 />
               </View>
             )}
-            <View style={[styles.reportSection, { minHeight: sectionScreenHeight }]} onLayout={recordSectionOffset("suppliers")}>
+            <View style={styles.reportSection} onLayout={recordSectionOffset("suppliers")}>
               <SectionHeader
                 title={t("productReport.sections.suppliers")}
                 hint={isChinaKind ? t("productReport.chinaGoods.supplierHint") : undefined}
-                showComparison={false}
                 badges={displayedContext?.branchCode ? (
                   <ScopePill tone="branch" label={t("productReport.linked.branchScope", { branch: getStoreLabel(displayedContext.branchCode) })} />
                 ) : null}
                 updating={linkedStaleness.supplierTable}
+                sortFields={SUPPLIER_SORT_FIELDS}
+                sort={supplierSort}
+                onSort={applySupplierSort}
                 page={supplierPage}
                 pageCount={supplierPageCount}
                 onPrevious={() => setSupplierPage((current) => Math.max(1, current - 1))}
@@ -2337,59 +2181,52 @@ export function ProductReportScreen({
               {supplierQuery.isLoading && !mainReportHasDisplay ? (
                 <LoadingState label={t("productReport.states.loading")} />
               ) : (
-                <FrozenHorizontalTable>
-                  {(scrollX) => (
-                    <View style={styles.table}>
-                      <SupplierTableHeader
-                        kind={kind}
-                        scrollX={scrollX}
-                        sort={supplierSort}
-                        onSort={applySupplierSort}
-                        nameWidth={supplierNameWidth}
-                        showComparison={isChinaKind}
-                      />
-                      <ScrollView
-                        bounces={false}
-                        nestedScrollEnabled
-                        showsVerticalScrollIndicator={false}
-                        style={[
-                          styles.tableBody,
-                          { height: supplierTableBodyHeight },
-                          linkedStaleness.supplierTable ? styles.staleSection : null,
-                        ]}
+                // 供应商卡片直接排在页面 ScrollView 里（单一纵向滚动），不再嵌套固定高度的列表。
+                <View style={[styles.cardList, linkedStaleness.supplierTable ? styles.staleSection : null]}>
+                  {supplierPageRows.length === 0 ? (
+                    <EmptyState label={t("productReport.states.emptySuppliers")} />
+                  ) : (
+                    supplierPageRows.map((item, index) => (
+                      <View
+                        key={item.id}
+                        ref={index === 0 ? firstSupplierReportRowRef : undefined}
+                        collapsable={index === 0 ? false : undefined}
+                        onLayout={index === 0 ? scheduleProductDataVisibilityCheck : undefined}
                       >
-                        {supplierPageRows.length === 0 ? (
-                          <View style={{ width: tableViewportWidth }}>
-                            <EmptyState label={t("productReport.states.emptySuppliers")} />
-                          </View>
-                        ) : (
-                          supplierPageRows.map((item, index) => (
-                            <View
-                              key={item.id}
-                              ref={index === 0 ? firstSupplierReportRowRef : undefined}
-                              collapsable={index === 0 ? false : undefined}
-                              onLayout={index === 0 ? scheduleProductDataVisibilityCheck : undefined}
-                            >
-                              {renderSupplierRow({
-                                item,
-                                rowNumber: (supplierPage - 1) * supplierPageSize + index + 1,
-                                scrollX,
-                              })}
-                            </View>
-                          ))
-                        )}
-                      </ScrollView>
-                    </View>
+                        {renderSupplierRow({
+                          item,
+                          rowNumber: (supplierPage - 1) * supplierPageSize + index + 1,
+                        })}
+                      </View>
+                    ))
                   )}
-                </FrozenHorizontalTable>
+                </View>
               )}
+              {supplierPageCount > 1 ? (
+                // 列表底部同样可以翻页；翻页后回到供应商区块顶部，从新一页第一张卡开始看。
+                <View style={styles.bottomPager}>
+                  <CompactPager
+                    page={supplierPage}
+                    pageCount={supplierPageCount}
+                    onPrevious={() => {
+                      setSupplierPage((current) => Math.max(1, current - 1));
+                      scrollToLinkedSection("suppliers");
+                    }}
+                    onNext={() => {
+                      setSupplierPage((current) => Math.min(supplierPageCount, current + 1));
+                      scrollToLinkedSection("suppliers");
+                    }}
+                    previousLabel={t("productReport.actions.previous")}
+                    nextLabel={t("productReport.actions.next")}
+                  />
+                </View>
+              ) : null}
             </View>
 
-            <View style={[styles.reportSection, { minHeight: sectionScreenHeight }]} onLayout={recordSectionOffset("products")}>
+            <View style={styles.reportSection} onLayout={recordSectionOffset("products")}>
               <SectionHeader
                 title={t("productReport.sections.products")}
                 hint={t("productReport.chinaGoods.productHint")}
-                showComparison={false}
                 badges={displayedContext?.branchCode || displayedContext?.supplierCode ? (
                   <>
                     {displayedContext.branchCode ? (
@@ -2401,6 +2238,32 @@ export function ProductReportScreen({
                   </>
                 ) : null}
                 updating={linkedStaleness.productTable}
+                toolbar={(
+                  <View style={styles.productSearchBar}>
+                    <TextInput
+                      mode="outlined"
+                      dense
+                      label={t("productReport.filters.productSearch")}
+                      value={productSearchDraft}
+                      onChangeText={setProductSearchDraft}
+                      onSubmitEditing={applyProductSearch}
+                      returnKeyType="search"
+                      autoCapitalize="none"
+                      style={styles.productSearchInput}
+                    />
+                    <Button compact mode="contained" onPress={applyProductSearch}>
+                      {t("productReport.actions.searchProduct")}
+                    </Button>
+                    {productSearch ? (
+                      <Button compact mode="outlined" onPress={clearProductSearch}>
+                        {t("productReport.actions.clearProductSearch")}
+                      </Button>
+                    ) : null}
+                  </View>
+                )}
+                sortFields={PRODUCT_SORT_FIELDS}
+                sort={productSort}
+                onSort={applyProductSort}
                 page={productPage}
                 pageCount={productPageCount}
                 onPrevious={() => setProductPage((current) => Math.max(1, current - 1))}
@@ -2412,88 +2275,62 @@ export function ProductReportScreen({
                 previousLabel={t("productReport.actions.previous")}
                 nextLabel={t("productReport.actions.next")}
               />
-              <View style={styles.productSearchBar}>
-                <TextInput
-                  mode="outlined"
-                  dense
-                  label={t("productReport.filters.productSearch")}
-                  value={productSearchDraft}
-                  onChangeText={setProductSearchDraft}
-                  onSubmitEditing={applyProductSearch}
-                  returnKeyType="search"
-                  autoCapitalize="none"
-                  style={styles.productSearchInput}
-                />
-                <View style={styles.productSearchActions}>
-                  <Button compact mode="contained" onPress={applyProductSearch}>
-                    {t("productReport.actions.searchProduct")}
-                  </Button>
-                  {productSearch ? (
-                    <Button compact mode="outlined" onPress={clearProductSearch}>
-                      {t("productReport.actions.clearProductSearch")}
-                    </Button>
-                  ) : null}
-                </View>
-              </View>
               {productSectionLoading ? (
                 <LoadingState label={t("productReport.states.loading")} />
               ) : (
-                <FrozenHorizontalTable>
-                  {(scrollX) => (
-                  <View style={styles.table}>
-                    <ProductTableHeader
-                      scrollX={scrollX}
-                      sort={productSort}
-                      onSort={applyProductSort}
-                      infoWidth={productInfoWidth}
-                    />
-                    {isChinaKind && productRows.length > 0 ? renderChinaProductPageTotalRow(scrollX) : null}
-                    <ScrollView
-                      bounces={false}
-                      nestedScrollEnabled
-                      showsVerticalScrollIndicator={false}
-                      style={[
-                        styles.tableBody,
-                        { height: productTableBodyHeight },
-                        linkedStaleness.productTable ? styles.staleSection : null,
-                      ]}
-                    >
-                      {productRows.length === 0 ? (
-                        <View style={{ width: tableViewportWidth }}>
-                          {displayedContext?.productSearch ? (
-                            <EmptyState label={t("productReport.states.emptyProductSearch")} />
-                          ) : displayedContext?.branchCode || displayedContext?.supplierCode ? (
-                            // 分店与供应商的交集没有销售：说明是筛选组合为空，并给出清除入口。
-                            <EmptyState
-                              label={t("productReport.linked.emptyFiltered")}
-                              actionLabel={t("productReport.linked.clearFilters")}
-                              onAction={clearLinkedSelection}
-                            />
-                          ) : (
-                            <EmptyState label={t("productReport.states.emptyProducts")} />
-                          )}
-                        </View>
+                <>
+                  {/* 中国页签「本页合计」固定在商品卡片列表上方。 */}
+                  {isChinaKind && productRows.length > 0 ? renderChinaProductPageTotalCard() : null}
+                  <View style={[styles.cardList, linkedStaleness.productTable ? styles.staleSection : null]}>
+                    {productRows.length === 0 ? (
+                      displayedContext?.productSearch ? (
+                        <EmptyState label={t("productReport.states.emptyProductSearch")} />
+                      ) : displayedContext?.branchCode || displayedContext?.supplierCode ? (
+                        // 分店与供应商的交集没有销售：说明是筛选组合为空，并给出清除入口。
+                        <EmptyState
+                          label={t("productReport.linked.emptyFiltered")}
+                          actionLabel={t("productReport.linked.clearFilters")}
+                          onAction={clearLinkedSelection}
+                        />
                       ) : (
-                        productRows.map((item, index) => (
-                          <View
-                            key={item.id}
-                            ref={index === 0 ? firstProductReportRowRef : undefined}
-                            collapsable={index === 0 ? false : undefined}
-                            onLayout={index === 0 ? scheduleProductDataVisibilityCheck : undefined}
-                          >
-                            {renderProductRow({
-                              item,
-                              rowNumber: (displayedProductPage - 1) * displayedProductPageSize + index + 1,
-                              scrollX,
-                            })}
-                          </View>
-                        ))
-                      )}
-                    </ScrollView>
+                        <EmptyState label={t("productReport.states.emptyProducts")} />
+                      )
+                    ) : (
+                      productRows.map((item, index) => (
+                        <View
+                          key={item.id}
+                          ref={index === 0 ? firstProductReportRowRef : undefined}
+                          collapsable={index === 0 ? false : undefined}
+                          onLayout={index === 0 ? scheduleProductDataVisibilityCheck : undefined}
+                        >
+                          {renderProductRow({
+                            item,
+                            rowNumber: (displayedProductPage - 1) * displayedProductPageSize + index + 1,
+                          })}
+                        </View>
+                      ))
+                    )}
                   </View>
-                  )}
-                </FrozenHorizontalTable>
+                </>
               )}
+              {productPageCount > 1 ? (
+                <View style={styles.bottomPager}>
+                  <CompactPager
+                    page={productPage}
+                    pageCount={productPageCount}
+                    onPrevious={() => {
+                      setProductPage((current) => Math.max(1, current - 1));
+                      scrollToLinkedSection("products");
+                    }}
+                    onNext={() => {
+                      setProductPage((current) => Math.min(productPageCount, current + 1));
+                      scrollToLinkedSection("products");
+                    }}
+                    previousLabel={t("productReport.actions.previous")}
+                    nextLabel={t("productReport.actions.next")}
+                  />
+                </View>
+              ) : null}
             </View>
           </>
         )}
@@ -2525,6 +2362,7 @@ export function ProductReportScreen({
             ? t("productReport.drilldown.supplier")
             : t("productReport.drilldown.product")
         }
+        subtitle={drilldownSubtitle}
         supplierRows={displayedSupplierBranchRows}
         productRows={displayedProductBranchRows}
         showComparison={drilldown?.type === "supplier" && drilldown.kind === "china"}
@@ -2558,12 +2396,24 @@ export function ProductReportScreen({
   );
 }
 
+function useSortChipFields(fields: readonly ReportSortField[]) {
+  const { t } = useAppTranslation("common");
+  return fields.map((field) => ({ field, label: t(SORT_FIELD_LABEL_KEYS[field]) }));
+}
+
+/**
+ * 区块头：标题 + 范围标签 + 更新中，提示；可选工具行（商品明细的货号查询）；
+ * 排序芯片与「‹ 1/3 ›」翻页同一行，「每页」分段另起一行。
+ */
 function SectionHeader({
   title,
   hint,
-  showComparison = true,
   badges,
   updating = false,
+  toolbar,
+  sortFields,
+  sort,
+  onSort,
   page,
   pageCount,
   onPrevious,
@@ -2576,13 +2426,15 @@ function SectionHeader({
   pageSizeTestID,
 }: {
   title: string;
-  // 单行布局可用提示替代「本期 / 同期」图例；无提示时由 showComparison 控制图例。
   hint?: string;
-  showComparison?: boolean;
-  // 表里数据所属的联动范围（分店、供应商标签），描述的是当前显示的数据而不是刚点选的条件。
+  // 卡片里数据所属的联动范围（分店、供应商标签），描述的是当前显示的数据而不是刚点选的条件。
   badges?: ReactNode;
   // 正在按新的联动条件重取：旧数据变淡，标题旁显示「更新中」。
   updating?: boolean;
+  toolbar?: ReactNode;
+  sortFields: readonly ReportSortField[];
+  sort: ReportSort;
+  onSort: (field: ReportSortField) => void;
   page: number;
   pageCount: number;
   onPrevious: () => void;
@@ -2595,14 +2447,12 @@ function SectionHeader({
   pageSizeTestID: string;
 }) {
   const { t } = useAppTranslation("common");
+  const chipFields = useSortChipFields(sortFields);
   return (
     <View style={styles.sectionHeaderBlock}>
-    <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleBlock}>
         <View style={styles.sectionTitleLine}>
-          <Text variant="titleMedium" style={styles.sectionTitle}>
-            {title}
-          </Text>
+          <Text style={styles.sectionTitle}>{title}</Text>
           {badges}
           {updating ? (
             <View style={styles.updatingIndicator} accessibilityRole="progressbar">
@@ -2611,219 +2461,58 @@ function SectionHeader({
             </View>
           ) : null}
         </View>
-        {hint ? (
-          <Text variant="labelSmall" style={styles.muted} numberOfLines={2}>{hint}</Text>
-        ) : showComparison ? (
-          <View style={styles.valueLegend}>
-            <Text variant="labelSmall" style={styles.strongText}>{t("reports.metrics.current")}</Text>
-            <Text variant="labelSmall" style={styles.muted}>/ {t("productReport.metrics.compare")}</Text>
-          </View>
-        ) : null}
+        {hint ? <Text style={styles.hintText} numberOfLines={2}>{hint}</Text> : null}
       </View>
-      <View style={styles.pager}>
-        <Button compact mode="outlined" disabled={page <= 1} onPress={onPrevious}>
-          {previousLabel}
-        </Button>
-        <Text variant="bodySmall" style={styles.pageText}>
-          {page}/{pageCount}
-        </Text>
-        <Button compact mode="outlined" disabled={page >= pageCount} onPress={onNext}>
-          {nextLabel}
-        </Button>
+      {toolbar}
+      <View style={styles.sectionControls}>
+        <SortChips fields={chipFields} sort={sort} onSort={onSort} />
+        <CompactPager
+          page={page}
+          pageCount={pageCount}
+          onPrevious={onPrevious}
+          onNext={onNext}
+          previousLabel={previousLabel}
+          nextLabel={nextLabel}
+        />
       </View>
-    </View>
-    <View style={styles.pageSizeRow}>
-      <Text variant="labelSmall" style={styles.muted}>{t("pagination.perPage")}</Text>
-      <View style={styles.pageSizeSegment} accessibilityRole="radiogroup">
-        {pageSizeOptions.map((option, index) => {
-          const selected = option === pageSize;
-          return (
-            <Pressable
-              key={option}
-              testID={`${pageSizeTestID}-${option}`}
-              accessibilityRole="radio"
-              accessibilityLabel={t("pagination.perPageOption", { count: option })}
-              accessibilityState={{ checked: selected }}
-              hitSlop={{ top: 6, bottom: 6 }}
-              // 点已选中的档位不触发回调，避免无谓地回到第 1 页
-              onPress={() => { if (!selected) onPageSizeChange(option); }}
-              style={[styles.pageSizeButton, index > 0 && styles.pageSizeDivider, selected && styles.pageSizeSelected]}
-            >
-              <Text style={[styles.pageSizeText, selected && styles.pageSizeTextSelected]}>{option}</Text>
-            </Pressable>
-          );
-        })}
+      <View style={styles.pageSizeRow}>
+        <Text style={styles.pageSizeLabel}>{t("pagination.perPage")}</Text>
+        <View style={styles.pageSizeSegment} accessibilityRole="radiogroup">
+          {pageSizeOptions.map((option) => {
+            const selected = option === pageSize;
+            return (
+              <Pressable
+                key={option}
+                testID={`${pageSizeTestID}-${option}`}
+                accessibilityRole="radio"
+                accessibilityLabel={t("pagination.perPageOption", { count: option })}
+                accessibilityState={{ checked: selected }}
+                hitSlop={{ top: 8, bottom: 8 }}
+                // 点已选中的档位不触发回调，避免无谓地回到第 1 页
+                onPress={() => { if (!selected) onPageSizeChange(option); }}
+                style={[styles.pageSizeButton, selected && styles.pageSizeSelected]}
+              >
+                <Text style={[styles.pageSizeText, selected && styles.pageSizeTextSelected]}>{option}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
-    </View>
     </View>
   );
 }
 
-/** 区块标题旁的联动范围标签：分店蓝、供应商紫，与吸顶联动条和选中行同色。 */
+/** 区块标题旁的联动范围标签：分店蓝、供应商紫，与吸顶联动条和选中卡片同色。 */
 function ScopePill({ tone, label }: { tone: "branch" | "supplier"; label: string }) {
   const branch = tone === "branch";
   return (
     <View style={[styles.scopePill, branch ? styles.branchScopePill : styles.supplierScopePill]}>
       <Text
-        variant="labelSmall"
         numberOfLines={1}
         style={[styles.scopePillText, { color: branch ? LINKED_COLORS.branchText : LINKED_COLORS.supplierText }]}
       >
         {label}
       </Text>
-    </View>
-  );
-}
-
-/** 双层表头的分组：上层是组名，下层子列与数据行使用相同列宽和间距。 */
-function TableHeaderGroup({
-  label,
-  muted,
-  columnGap = 3,
-  children,
-}: {
-  label: string;
-  muted?: boolean;
-  columnGap?: number;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.headerGroup}>
-      <View style={styles.headerGroupTitle}>
-        <Text variant="labelSmall" numberOfLines={1} style={[styles.headerText, muted ? styles.muted : null]}>
-          {label}
-        </Text>
-      </View>
-      <View style={[styles.headerGroupColumns, { gap: columnGap }]}>{children}</View>
-    </View>
-  );
-}
-
-function SupplierTableHeader({
-  kind,
-  scrollX,
-  sort,
-  onSort,
-  nameWidth,
-  showComparison,
-}: {
-  kind: SupplierReportKind;
-  scrollX: Animated.Value;
-  sort: ReportSort;
-  onSort: (field: ReportSortField) => void;
-  nameWidth: number;
-  showComparison: boolean;
-}) {
-  const { t } = useAppTranslation("common");
-  const categoryShareLabel = kind === "china"
-    ? t("productReport.chinaGoods.shareOfChina")
-    : t("productReport.metrics.supplierShare");
-  const totalShareLabel = kind === "china"
-    ? t("productReport.chinaGoods.shareOfTotalShort")
-    : t("productReport.metrics.totalShare");
-  const compareCell = (style: StyleProp<ViewStyle>, label: string) => (
-    <View style={style}>
-      <TableCell numeric style={styles.chinaCompareHeaderText}>{label}</TableCell>
-    </View>
-  );
-
-  return (
-    <View style={[styles.tableRow, styles.tableHeaderRow, styles.supplierTableRow, styles.chinaHeaderRow]}>
-      <FrozenLeadingColumns scrollX={scrollX} style={styles.frozenSupplierColumns} tone="header">
-        <View style={styles.rowNumberColumn}>
-          <TableCell numeric style={styles.headerText}>{t("productReport.columns.rowNumber")}</TableCell>
-        </View>
-        <View style={{ width: nameWidth, minWidth: 0 }}>
-          <TableCell style={styles.headerText}>{t("productReport.sections.suppliers")}</TableCell>
-        </View>
-      </FrozenLeadingColumns>
-      <View style={styles.chinaSupplierAmountColumn}>
-        <SortableHeaderCell
-          label={t("productReport.columns.amount")}
-          field="amount"
-          sort={sort}
-          onSort={onSort}
-          style={styles.supplierMoneyHeaderCell}
-        />
-      </View>
-      <View style={styles.chinaQuantityColumn}>
-        <SortableHeaderCell label={t("productReport.columns.quantity")} field="quantity" sort={sort} onSort={onSort} />
-      </View>
-      <TableHeaderGroup label={t("productReport.chinaGoods.shareGroup")}>
-        <View style={styles.chinaShareColumn}>
-          <TableCell numeric style={styles.headerSubText}>{categoryShareLabel}</TableCell>
-        </View>
-        <View style={styles.chinaShareColumn}>
-          <TableCell numeric style={styles.headerSubText}>{totalShareLabel}</TableCell>
-        </View>
-      </TableHeaderGroup>
-      <View style={styles.chinaAverageColumn}>
-        <SortableHeaderCell label={t("productReport.columns.averagePrice")} field="unitPrice" sort={sort} onSort={onSort} />
-      </View>
-      <View style={styles.grossProfitColumn}>
-        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossProfit")}</TableCell>
-      </View>
-      <View style={styles.grossMarginColumn}>
-        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossMarginRate")}</TableCell>
-      </View>
-      <View style={styles.chinaGrowthColumn}>
-        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.growthRate")}</TableCell>
-      </View>
-      {showComparison ? (
-        <TableHeaderGroup muted label={t("productReport.metrics.compare")}>
-          {compareCell(styles.chinaCompareAmountColumn, t("productReport.columns.amount"))}
-          {compareCell(styles.chinaCompareQuantityColumn, t("productReport.columns.quantity"))}
-          {compareCell(styles.chinaShareColumn, t("productReport.chinaGoods.compareShareOfChina"))}
-          {compareCell(styles.chinaShareColumn, t("productReport.chinaGoods.compareShareOfTotal"))}
-          {compareCell(styles.chinaAverageColumn, t("productReport.columns.averagePrice"))}
-          {compareCell(styles.grossProfitColumn, t("productReport.metrics.grossProfit"))}
-          {compareCell(styles.grossMarginColumn, t("productReport.metrics.grossMarginRate"))}
-        </TableHeaderGroup>
-      ) : null}
-    </View>
-  );
-}
-
-function ProductTableHeader({
-  scrollX,
-  sort,
-  onSort,
-  infoWidth,
-}: {
-  scrollX: Animated.Value;
-  sort: ReportSort;
-  onSort: (field: ReportSortField) => void;
-  infoWidth: number;
-}) {
-  const { t } = useAppTranslation("common");
-  return (
-    <View style={[styles.tableRow, styles.tableHeaderRow, styles.productTableRow, styles.chinaHeaderRow]}>
-      <FrozenLeadingColumns scrollX={scrollX} style={styles.frozenProductColumns} tone="header">
-        <View style={styles.productImageColumn}>
-          <TableCell style={styles.headerText}>{t("productReport.columns.image")}</TableCell>
-        </View>
-        <View style={{ width: infoWidth, minWidth: 0 }}>
-          <TableCell style={styles.headerText}>{t("productReport.columns.product")}</TableCell>
-        </View>
-      </FrozenLeadingColumns>
-      <View style={styles.chinaQuantityColumn}>
-        <SortableHeaderCell label={t("productReport.columns.quantity")} field="quantity" sort={sort} onSort={onSort} />
-      </View>
-      <View style={styles.chinaProductAmountColumn}>
-        <SortableHeaderCell label={t("productReport.columns.amount")} field="amount" sort={sort} onSort={onSort} />
-      </View>
-      <View style={styles.chinaAverageColumn}>
-        <SortableHeaderCell label={t("productReport.columns.averagePrice")} field="unitPrice" sort={sort} onSort={onSort} />
-      </View>
-      <View style={styles.grossProfitColumn}>
-        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossProfit")}</TableCell>
-      </View>
-      <View style={styles.grossMarginColumn}>
-        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossMarginRate")}</TableCell>
-      </View>
-      <View style={styles.chinaGrowthColumn}>
-        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.growthRate")}</TableCell>
-      </View>
     </View>
   );
 }
@@ -2910,9 +2599,14 @@ function StorePickerModal({
   );
 }
 
+/**
+ * 分店下钻底部抽屉：每个分店一张卡片行（名次 + 分店 + 增长率胶囊，下面一行五项指标）。
+ * 供应商分店的同期小字只在中国供应商下钻显示；商品分店保留原有的同期小字。
+ */
 function BranchDrilldownModal({
   visible,
   title,
+  subtitle,
   supplierRows,
   productRows,
   isLoading,
@@ -2935,6 +2629,7 @@ function BranchDrilldownModal({
 }: {
   visible: boolean;
   title: string;
+  subtitle?: string;
   supplierRows: SupplierBranchBreakdownRow[];
   productRows: ProductBranchBreakdownRow[];
   isLoading: boolean;
@@ -2946,7 +2641,7 @@ function BranchDrilldownModal({
   errorLabel: string;
   emptyLabel: string;
   kind: "supplier" | "product" | null;
-  // 两类供应商下钻共用单行列布局；仅中国供应商在末尾显示同期列组。
+  // 两类供应商下钻共用同一卡片行；仅中国供应商在每项下方显示同期。
   showComparison?: boolean;
   sort: ReportSort;
   onSortChange: (field: ReportSortField) => void;
@@ -2958,6 +2653,8 @@ function BranchDrilldownModal({
 }) {
   const { t } = useAppTranslation("common");
   const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const sortChipFields = useSortChipFields(kind === "product" ? PRODUCT_SORT_FIELDS : SUPPLIER_SORT_FIELDS);
   const rows = kind === "supplier" ? supplierRows : productRows;
   // 分店弹窗是全量数据，直接在前端排序；序号即当前排序下的名次，同值按分店编码兜底。
   const sortedSupplierRows = useMemo(
@@ -2999,145 +2696,58 @@ function BranchDrilldownModal({
       visibilityTaskRef.current = null;
     };
   }, [isError, isLoading, kind, rows, scheduleFirstRowVisibilityCheck, visible]);
-  const renderGrowthCell = (current: number, compare: number, columnStyle?: StyleProp<ViewStyle>) => {
-    const tone = getGrowthTone(current, compare);
-    return (
-      <View style={[styles.growthColumn, columnStyle]}>
-        <TableCell numeric style={[styles.strongText, { color: GROWTH_COLORS[tone] }]}>
-          {formatGrowthRate(current, compare, growthNewLabel)}
-        </TableCell>
-      </View>
-    );
-  };
-  const renderGrossProfitCell = (current: number | null, compare: number | null) => (
-    <View style={styles.grossProfitColumn}>
-      <TableCell numeric style={styles.strongText}>{formatNullableWholeMoney(current)}</TableCell>
-      <TableCell numeric style={styles.muted}>{formatNullableWholeMoney(compare)}</TableCell>
-    </View>
-  );
-  const renderGrossMarginCell = (
-    current: number | null,
-    compare: number | null,
-    currentStatus: ProductReportCostStatus,
-    compareStatus: ProductReportCostStatus,
-  ) => (
-    <View style={styles.grossMarginColumn}>
-      <TableCell numeric style={styles.strongText}>{formatGrossMarginRate(current, currentStatus, costPendingLabel, costNoActivityLabel)}</TableCell>
-      <TableCell numeric style={styles.muted}>{formatGrossMarginRate(compare, compareStatus, costPendingLabel, costNoActivityLabel)}</TableCell>
-    </View>
-  );
   return (
     <Portal>
-      <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={[styles.modal, styles.drilldownModal]}>
-        <Text variant="titleMedium" style={styles.modalTitle}>
-          {title}
-        </Text>
-        {snapshotNotice ? <Text variant="labelSmall" style={styles.snapshotNotice}>{snapshotNotice}</Text> : null}
-        {isLoading ? (
-          <LoadingState label={t("productReport.states.loading")} />
-        ) : isError ? (
-          <ErrorState label={errorLabel} retryLabel={retryLabel} onRetry={onRetry} />
-        ) : rows.length === 0 ? (
-          <EmptyState label={emptyLabel} />
-        ) : (
-          <ScrollView
-            bounces={false}
-            nestedScrollEnabled
-            onScroll={scheduleFirstRowVisibilityCheck}
-            scrollEventThrottle={16}
-            style={[styles.modalList, styles.drilldownModalList]}
-          >
-            <FrozenHorizontalTable>
-              {(scrollX) => (
-              <View style={[styles.table, kind === "product" ? styles.productDrilldownTable : null]}>
-                <View style={[styles.tableRow, styles.tableHeaderRow, kind === "product" ? styles.productBranchTableRow : styles.chinaHeaderRow]}>
-                  <FrozenLeadingColumns
-                    scrollX={scrollX}
-                    style={kind === "product" ? styles.frozenProductBranchColumns : styles.frozenBranchColumns}
-                    tone="header"
-                  >
-                    <View style={styles.rowNumberColumn}>
-                      <TableCell numeric style={styles.headerText}>{t("productReport.columns.rowNumber")}</TableCell>
-                    </View>
-                    <View style={kind === "product" ? styles.productBranchNameColumn : styles.branchColumn}>
-                      <TableCell style={styles.headerText}>{t("productReport.filters.store")}</TableCell>
-                    </View>
-                  </FrozenLeadingColumns>
-                  {kind === "product" ? (
-                    <>
-                      <View style={styles.productBranchCountColumn}>
-                        <SortableHeaderCell label={t("productReport.columns.quantity")} field="quantity" sort={sort} onSort={onSortChange} />
-                      </View>
-                      <View style={styles.productBranchMoneyColumn}>
-                        <SortableHeaderCell label={t("productReport.columns.amount")} field="amount" sort={sort} onSort={onSortChange} />
-                      </View>
-                      <View style={styles.productBranchAverageColumn}>
-                        <SortableHeaderCell label={t("productReport.columns.averagePrice")} field="unitPrice" sort={sort} onSort={onSortChange} />
-                      </View>
-                      <View style={styles.productBranchGrowthColumn}>
-                        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.growthRate")}</TableCell>
-                      </View>
-                      <View style={styles.grossProfitColumn}>
-                        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossProfit")}</TableCell>
-                      </View>
-                      <View style={styles.grossMarginColumn}>
-                        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossMarginRate")}</TableCell>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <View style={styles.chinaSupplierAmountColumn}>
-                        <SortableHeaderCell label={t("productReport.columns.amount")} field="amount" sort={sort} onSort={onSortChange} />
-                      </View>
-                      <View style={styles.chinaQuantityColumn}>
-                        <SortableHeaderCell label={t("productReport.columns.quantity")} field="quantity" sort={sort} onSort={onSortChange} />
-                      </View>
-                      <View style={styles.chinaAverageColumn}>
-                        <SortableHeaderCell label={t("productReport.columns.averagePrice")} field="unitPrice" sort={sort} onSort={onSortChange} />
-                      </View>
-                      <View style={styles.grossProfitColumn}>
-                        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossProfit")}</TableCell>
-                      </View>
-                      <View style={styles.grossMarginColumn}>
-                        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.grossMarginRate")}</TableCell>
-                      </View>
-                      <View style={styles.chinaGrowthColumn}>
-                        <TableCell numeric style={styles.headerText}>{t("productReport.metrics.growthRate")}</TableCell>
-                      </View>
-                      {showComparison ? (
-                        <TableHeaderGroup muted columnGap={8} label={t("productReport.metrics.compare")}>
-                          <View style={styles.chinaCompareAmountColumn}>
-                            <TableCell numeric style={styles.chinaCompareHeaderText}>{t("productReport.columns.amount")}</TableCell>
-                          </View>
-                          <View style={styles.chinaCompareQuantityColumn}>
-                            <TableCell numeric style={styles.chinaCompareHeaderText}>{t("productReport.columns.quantity")}</TableCell>
-                          </View>
-                          <View style={styles.chinaAverageColumn}>
-                            <TableCell numeric style={styles.chinaCompareHeaderText}>{t("productReport.columns.averagePrice")}</TableCell>
-                          </View>
-                          <View style={styles.grossProfitColumn}>
-                            <TableCell numeric style={styles.chinaCompareHeaderText}>{t("productReport.metrics.grossProfit")}</TableCell>
-                          </View>
-                          <View style={styles.grossMarginColumn}>
-                            <TableCell numeric style={styles.chinaCompareHeaderText}>{t("productReport.metrics.grossMarginRate")}</TableCell>
-                          </View>
-                        </TableHeaderGroup>
-                      ) : null}
-                    </>
-                  )}
-                </View>
+      <Modal
+        visible={visible}
+        onDismiss={onDismiss}
+        style={styles.sheetWrapper}
+        contentContainerStyle={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}
+      >
+        <View style={styles.sheetHandle} />
+        <View style={styles.sheetHead}>
+          <View style={styles.sheetTitleBlock}>
+            <Text style={styles.sheetTitle} numberOfLines={1}>{title}</Text>
+            {subtitle ? <Text style={styles.sheetSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+          </View>
+          <IconButton
+            icon="close"
+            mode="outlined"
+            size={18}
+            accessibilityLabel={closeLabel}
+            onPress={onDismiss}
+            style={styles.sheetClose}
+          />
+        </View>
+        <View style={styles.sheetBody}>
+          {snapshotNotice ? <Text variant="labelSmall" style={styles.sheetNotice}>{snapshotNotice}</Text> : null}
+          {isLoading ? (
+            <LoadingState label={t("productReport.states.loading")} />
+          ) : isError ? (
+            <ErrorState label={errorLabel} retryLabel={retryLabel} onRetry={onRetry} />
+          ) : rows.length === 0 ? (
+            <EmptyState label={emptyLabel} />
+          ) : (
+            <>
+              <SortChips fields={sortChipFields} sort={sort} onSort={onSortChange} />
+              <ScrollView
+                bounces={false}
+                onScroll={scheduleFirstRowVisibilityCheck}
+                scrollEventThrottle={16}
+                style={styles.sheetList}
+                contentContainerStyle={styles.sheetListContent}
+              >
                 {kind === "supplier"
                   ? sortedSupplierRows.map((row, index) => (
                       <SupplierBranchRow
                         key={row.id}
                         row={row}
                         rowNumber={index + 1}
-                        renderGrowthCell={renderGrowthCell}
+                        growthNewLabel={growthNewLabel}
                         costPendingLabel={costPendingLabel}
                         costNoActivityLabel={costNoActivityLabel}
                         showComparison={showComparison}
                         rowRef={index === 0 ? firstRowRef : undefined}
-                        scrollX={scrollX}
                       />
                     ))
                   : sortedProductRows.map((row, index) => (
@@ -3145,149 +2755,133 @@ function BranchDrilldownModal({
                         key={row.id}
                         row={row}
                         rowNumber={index + 1}
-                        renderGrowthCell={renderGrowthCell}
-                        renderGrossProfitCell={renderGrossProfitCell}
-                        renderGrossMarginCell={renderGrossMarginCell}
+                        growthNewLabel={growthNewLabel}
+                        costPendingLabel={costPendingLabel}
+                        costNoActivityLabel={costNoActivityLabel}
                         rowRef={index === 0 ? firstRowRef : undefined}
-                        scrollX={scrollX}
                       />
                     ))}
-              </View>
-              )}
-            </FrozenHorizontalTable>
-          </ScrollView>
-        )}
-        <Button mode="contained" onPress={onDismiss}>
-          {closeLabel}
-        </Button>
+              </ScrollView>
+            </>
+          )}
+        </View>
       </Modal>
     </Portal>
+  );
+}
+
+function DrilldownRowHead({
+  rowNumber,
+  branchName,
+  branchCode,
+  current,
+  compare,
+  growthNewLabel,
+}: {
+  rowNumber: number;
+  branchName: string;
+  branchCode: string;
+  current: number;
+  compare: number;
+  growthNewLabel: string;
+}) {
+  return (
+    <View style={styles.drillRowHead}>
+      <View style={styles.rowNumberColumn}>
+        <RankBadge value={String(rowNumber)} />
+      </View>
+      <View style={styles.drillBranchName}>
+        <Text style={styles.drillBranchTitle} numberOfLines={1}>{branchName || branchCode}</Text>
+        <Text style={styles.caption} numberOfLines={1}>{branchCode}</Text>
+      </View>
+      <GrowthPill current={current} compare={compare} newLabel={growthNewLabel} />
+    </View>
   );
 }
 
 function SupplierBranchRow({
   row,
   rowNumber,
-  renderGrowthCell,
+  growthNewLabel,
   costPendingLabel,
   costNoActivityLabel,
   showComparison,
   rowRef,
-  scrollX,
 }: {
   row: SupplierBranchBreakdownRow;
   rowNumber: number;
-  renderGrowthCell: (current: number, compare: number, columnStyle?: StyleProp<ViewStyle>) => ReactNode;
+  growthNewLabel: string;
   costPendingLabel: string;
   costNoActivityLabel: string;
   showComparison: boolean;
   rowRef?: RefObject<View | null>;
-  scrollX: Animated.Value;
 }) {
+  const { t } = useAppTranslation("common");
+  // 同期值一律经过 compareText：只有中国供应商下钻（showComparison）才显示同期小字。
+  const compareText = (value: string) => (showComparison ? value : null);
   return (
-    <View ref={rowRef} style={[styles.tableRow, styles.chinaSupplierRow]}>
-      <FrozenLeadingColumns scrollX={scrollX} style={styles.frozenBranchColumns}>
-        <View style={styles.rowNumberColumn}>
-          <TableCell numeric style={styles.strongText}>{formatRowNumber(rowNumber)}</TableCell>
-        </View>
-        <View style={styles.branchColumn}>
-          <TableCell style={styles.strongText}>{row.branchName || row.branchCode}</TableCell>
-          <TableCell style={styles.muted}>{row.branchCode}</TableCell>
-        </View>
-      </FrozenLeadingColumns>
-      <View style={styles.chinaSupplierAmountColumn}>
-        <TableCell numeric style={styles.strongText}>{formatWholeMoney(row.revenue)}</TableCell>
-      </View>
-      <View style={styles.chinaQuantityColumn}>
-        <TableCell numeric style={styles.strongText}>{formatCount(row.totalQuantity)}</TableCell>
-      </View>
-      <View style={styles.chinaAverageColumn}>
-        <TableCell numeric style={styles.chinaMetricText}>{formatNullableMoney(row.averagePrice)}</TableCell>
-      </View>
-      <View style={styles.grossProfitColumn}>
-        <TableCell numeric style={styles.chinaMetricText}>{formatNullableWholeMoney(row.grossProfit)}</TableCell>
-      </View>
-      <View style={styles.grossMarginColumn}>
-        <TableCell numeric style={styles.chinaMetricText}>
-          {formatGrossMarginRate(row.grossMarginRate, row.costStatus, costPendingLabel, costNoActivityLabel)}
-        </TableCell>
-      </View>
-      {renderGrowthCell(row.revenue, row.compareRevenue, styles.chinaGrowthColumn)}
-      {showComparison ? (
-        <>
-          <View style={styles.chinaCompareAmountColumn}>
-            <TableCell numeric style={styles.muted}>{formatWholeMoney(row.compareRevenue)}</TableCell>
-          </View>
-          <View style={styles.chinaCompareQuantityColumn}>
-            <TableCell numeric style={styles.muted}>
-              {row.compareTotalQuantity === null ? "—" : formatCount(row.compareTotalQuantity)}
-            </TableCell>
-          </View>
-          <View style={styles.chinaAverageColumn}>
-            <TableCell numeric style={styles.muted}>{formatNullableMoney(row.compareAveragePrice)}</TableCell>
-          </View>
-          <View style={styles.grossProfitColumn}>
-            <TableCell numeric style={styles.muted}>{formatNullableWholeMoney(row.compareGrossProfit)}</TableCell>
-          </View>
-          <View style={styles.grossMarginColumn}>
-            <TableCell numeric style={styles.muted}>
-              {formatGrossMarginRate(row.compareGrossMarginRate, row.compareCostStatus, costPendingLabel, costNoActivityLabel)}
-            </TableCell>
-          </View>
-        </>
-      ) : null}
+    <View ref={rowRef} style={styles.drillRow}>
+      <DrilldownRowHead
+        rowNumber={rowNumber}
+        branchName={row.branchName}
+        branchCode={row.branchCode}
+        current={row.revenue}
+        compare={row.compareRevenue}
+        growthNewLabel={growthNewLabel}
+      />
+      <MetricGrid
+        variant="plain"
+        style={styles.drillGrid}
+        cells={[
+          { key: "amount", label: t("productReport.columns.amount"), value: formatWholeMoney(row.revenue), compare: compareText(formatWholeMoney(row.compareRevenue)) },
+          { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(row.totalQuantity), compare: compareText(row.compareTotalQuantity === null ? "—" : formatCount(row.compareTotalQuantity)) },
+          { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatNullableMoney(row.averagePrice), compare: compareText(formatNullableMoney(row.compareAveragePrice)) },
+          { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(row.grossProfit), compare: compareText(formatNullableWholeMoney(row.compareGrossProfit)) },
+          { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(row.grossMarginRate, row.costStatus, costPendingLabel, costNoActivityLabel), pending: row.costStatus === "Missing", compare: compareText(formatGrossMarginRate(row.compareGrossMarginRate, row.compareCostStatus, costPendingLabel, costNoActivityLabel)) },
+        ]}
+      />
     </View>
   );
 }
 
+// 商品分店：数量、金额、均价、毛利额、毛利率五项；原表就带同期双行，这里保留为每项下方的小字，不减少数据。
 function ProductBranchRow({
   row,
   rowNumber,
-  renderGrowthCell,
-  renderGrossProfitCell,
-  renderGrossMarginCell,
+  growthNewLabel,
+  costPendingLabel,
+  costNoActivityLabel,
   rowRef,
-  scrollX,
 }: {
   row: ProductBranchBreakdownRow;
   rowNumber: number;
-  renderGrowthCell: (current: number, compare: number, columnStyle?: StyleProp<ViewStyle>) => ReactNode;
-  renderGrossProfitCell: (current: number | null, compare: number | null) => ReactNode;
-  renderGrossMarginCell: (
-    current: number | null,
-    compare: number | null,
-    currentStatus: ProductReportCostStatus,
-    compareStatus: ProductReportCostStatus,
-  ) => ReactNode;
+  growthNewLabel: string;
+  costPendingLabel: string;
+  costNoActivityLabel: string;
   rowRef?: RefObject<View | null>;
-  scrollX: Animated.Value;
 }) {
+  const { t } = useAppTranslation("common");
   return (
-    <View ref={rowRef} style={[styles.tableRow, styles.productBranchTableRow]}>
-      <FrozenLeadingColumns scrollX={scrollX} style={styles.frozenProductBranchColumns}>
-        <View style={styles.rowNumberColumn}>
-          <TableCell numeric style={styles.strongText}>{formatRowNumber(rowNumber)}</TableCell>
-        </View>
-        <View style={styles.productBranchNameColumn}>
-          <TableCell style={styles.strongText}>{row.branchName || row.branchCode}</TableCell>
-          <TableCell style={styles.muted}>{row.branchCode}</TableCell>
-        </View>
-      </FrozenLeadingColumns>
-      <View style={styles.productBranchCountColumn}>
-        <TableCell numeric style={styles.strongText}>{formatCount(row.quantity)}</TableCell>
-        <TableCell numeric style={styles.muted}>{formatCount(row.compareQuantity)}</TableCell>
-      </View>
-      <View style={styles.productBranchMoneyColumn}>
-        <TableCell numeric style={styles.strongText}>{formatWholeMoney(row.salesAmount)}</TableCell>
-        <TableCell numeric style={styles.muted}>{formatWholeMoney(row.compareSalesAmount)}</TableCell>
-      </View>
-      <View style={styles.productBranchAverageColumn}>
-        <TableCell numeric style={styles.strongText}>{formatMoney(row.averageUnitPrice)}</TableCell>
-        <TableCell numeric style={styles.muted}>{formatMoney(row.compareAverageUnitPrice)}</TableCell>
-      </View>
-      {renderGrowthCell(row.salesAmount, row.compareSalesAmount, styles.productBranchGrowthColumn)}
-      {renderGrossProfitCell(row.grossProfit, row.compareGrossProfit)}
-      {renderGrossMarginCell(row.grossMarginRate, row.compareGrossMarginRate, row.costStatus, row.compareCostStatus)}
+    <View ref={rowRef} style={styles.drillRow}>
+      <DrilldownRowHead
+        rowNumber={rowNumber}
+        branchName={row.branchName}
+        branchCode={row.branchCode}
+        current={row.salesAmount}
+        compare={row.compareSalesAmount}
+        growthNewLabel={growthNewLabel}
+      />
+      <MetricGrid
+        variant="plain"
+        style={styles.drillGrid}
+        cells={[
+          { key: "quantity", label: t("productReport.columns.quantity"), value: formatCount(row.quantity), compare: formatCount(row.compareQuantity) },
+          { key: "amount", label: t("productReport.columns.amount"), value: formatWholeMoney(row.salesAmount), compare: formatWholeMoney(row.compareSalesAmount) },
+          { key: "averagePrice", label: t("productReport.columns.averagePrice"), value: formatMoney(row.averageUnitPrice), compare: formatMoney(row.compareAverageUnitPrice) },
+          { key: "grossProfit", label: t("productReport.metrics.grossProfit"), value: formatNullableWholeMoney(row.grossProfit), compare: formatNullableWholeMoney(row.compareGrossProfit) },
+          { key: "grossMargin", label: t("productReport.metrics.grossMarginRate"), value: formatGrossMarginRate(row.grossMarginRate, row.costStatus, costPendingLabel, costNoActivityLabel), pending: row.costStatus === "Missing", compare: formatGrossMarginRate(row.compareGrossMarginRate, row.compareCostStatus, costPendingLabel, costNoActivityLabel) },
+        ]}
+      />
     </View>
   );
 }
@@ -3295,22 +2889,28 @@ function ProductBranchRow({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F7F8FA",
+    backgroundColor: REPORT_UI.background,
   },
   content: {
-    gap: 12,
+    gap: 10,
     padding: 16,
     paddingBottom: 40,
   },
-  header: {
-    gap: 4,
+  topBlock: {
+    gap: 10,
   },
   title: {
-    color: "#111827",
+    color: REPORT_UI.text,
     fontWeight: "700",
   },
   muted: {
-    color: "#6B7280",
+    color: REPORT_UI.muted,
+  },
+  caption: {
+    color: REPORT_UI.muted,
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontVariant: ["tabular-nums"],
   },
   snapshotNotice: {
     color: "#B45309",
@@ -3339,22 +2939,30 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: LINKED_COLORS.supplierBorder,
-    borderRadius: 8,
+    borderRadius: 10,
     backgroundColor: LINKED_COLORS.supplierBackground,
     paddingLeft: 10,
     paddingRight: 4,
     paddingVertical: 4,
   },
   supplierMissingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 2,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
     backgroundColor: LINKED_COLORS.supplier,
   },
   supplierMissingText: {
     flex: 1,
     minWidth: 0,
-    color: "#4C1D95",
+    color: LINKED_COLORS.supplierText,
+  },
+  dateCard: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
+    padding: 10,
   },
   dateInputs: {
     flexDirection: "row",
@@ -3362,42 +2970,50 @@ const styles = StyleSheet.create({
   },
   dateInput: {
     flex: 1,
-    minWidth: 132,
-    backgroundColor: "#FFFFFF",
+    minWidth: 0,
+    backgroundColor: REPORT_UI.card,
+  },
+  dateError: {
+    color: "#B42318",
   },
   quickBar: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   productSearchBar: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   productSearchInput: {
     flex: 1,
-    minWidth: 180,
-    backgroundColor: "#FFFFFF",
-  },
-  productSearchActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    minWidth: 160,
+    backgroundColor: REPORT_UI.card,
   },
   reportSection: {
+    gap: 10,
+    marginTop: 4,
+  },
+  card: {
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
+    padding: 12,
+  },
+  cardTitleRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
     gap: 8,
   },
-  productSummaryCard: {
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 6,
-    backgroundColor: "#FFFFFF",
+  cardTitle: {
+    flexShrink: 0,
+    color: REPORT_UI.text,
+    fontSize: 16,
+    fontWeight: "700",
   },
   productSummaryLoading: {
     minHeight: 88,
@@ -3405,97 +3021,253 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-  productSummaryHeader: {
+  summaryMatrixRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    paddingBottom: 6,
+    borderBottomColor: REPORT_UI.divider,
+    paddingVertical: 5,
   },
-  productSummaryScroll: {
-    flexGrow: 1,
+  summaryMatrixLabel: {
+    width: 62,
+    color: REPORT_UI.muted,
+    fontSize: 11.5,
   },
-  productSummaryGrid: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingTop: 4,
-  },
-  productSummaryLabelColumn: {
-    width: 42,
-    flexShrink: 0,
-    gap: 2,
-  },
-  productSummaryMetric: {
-    flex: 1,
-    minWidth: 112,
-    flexShrink: 0,
-    gap: 2,
-    paddingHorizontal: 3,
-  },
-  // 标题/翻页一行 + 每页条数一行；外层只负责纵向排布，原 sectionHeader 的间距保持不变。
-  sectionHeaderBlock: {
-    gap: 6,
-  },
-  pageSizeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 6,
-  },
-  pageSizeSegment: {
-    flexDirection: "row",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  pageSizeButton: {
-    minWidth: 44,
-    height: 30,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  pageSizeDivider: {
-    borderLeftWidth: 1,
-    borderLeftColor: "#D1D5DB",
-  },
-  pageSizeSelected: {
-    backgroundColor: "#2563EB",
-  },
-  pageSizeText: {
-    color: "#374151",
-    fontSize: 13,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-  },
-  pageSizeTextSelected: {
-    color: "#FFFFFF",
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    marginTop: 4,
-  },
-  sectionTitle: {
-    color: "#111827",
+  summaryMatrixLabelCurrent: {
+    color: REPORT_UI.text,
     fontWeight: "700",
   },
-  sectionTitleBlock: {
+  summaryMatrixCell: {
     flex: 1,
     minWidth: 0,
+    paddingLeft: 4,
+    textAlign: "right",
+    fontVariant: ["tabular-nums"],
+  },
+  summaryMatrixHead: {
+    color: REPORT_UI.muted,
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  summaryMatrixCurrent: {
+    color: REPORT_UI.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  summaryMatrixCompare: {
+    color: REPORT_UI.muted,
+    fontSize: 12.5,
+  },
+  cardList: {
+    gap: 8,
+  },
+  bottomPager: {
+    alignItems: "center",
+  },
+  supplierCard: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  // 供应商选中色用紫色（分店蓝、供应商紫），与吸顶联动条的供应商 chip 同色。
+  selectedSupplierCard: {
+    borderColor: LINKED_COLORS.supplierBorder,
+    backgroundColor: "#FCFBFF",
+  },
+  selectedSupplierAccent: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: LINKED_COLORS.supplier,
+  },
+  supplierCardTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  rowNumberColumn: {
+    width: 24,
+    minWidth: 0,
+    paddingTop: 1,
+  },
+  supplierNameBlock: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+  },
+  supplierName: {
+    color: REPORT_UI.text,
+    fontSize: 14.5,
+    lineHeight: 19,
+    fontWeight: "700",
+  },
+  selectedSupplierName: {
+    color: LINKED_COLORS.supplierText,
+  },
+  amountLink: {
+    flexShrink: 0,
+    maxWidth: "50%",
+    alignItems: "flex-end",
+    gap: 2,
+  },
+  cardAmount: {
+    color: REPORT_UI.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  amountMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  drillLink: {
+    color: PRODUCT_CARD_COLORS.link,
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  shareRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 9,
+  },
+  cardGrid: {
+    marginTop: 9,
+  },
+  productCard: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
+    paddingVertical: 10,
+    paddingLeft: 10,
+    paddingRight: 12,
+  },
+  productCardTop: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  productImageColumn: {
+    width: 62,
+    height: 62,
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 10,
+  },
+  productImage: {
+    width: 62,
+    height: 62,
+    backgroundColor: "#F2F4F7",
+  },
+  productImagePlaceholder: {
+    width: 62,
+    height: 62,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F2F4F7",
+  },
+  placeholderText: {
+    color: REPORT_UI.muted,
+    fontSize: 10,
+  },
+  rankBadge: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    minWidth: 18,
+    alignItems: "center",
+    borderBottomRightRadius: 8,
+    backgroundColor: "rgba(16,24,40,0.78)",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  rankBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  productCardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  productCode: {
+    color: REPORT_UI.text,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  productName: {
+    color: REPORT_UI.muted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  amountLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 3,
+  },
+  productGrid: {
+    marginTop: 0,
+  },
+  pageTotalCard: {
+    borderWidth: 1,
+    borderColor: "#C7D7FE",
+    borderRadius: 12,
+    backgroundColor: "#EEF4FF",
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+  pageTotalTitle: {
+    flexShrink: 0,
+    color: REPORT_UI.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  pageTotalAmount: {
+    color: REPORT_UI.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  pageTotalGrid: {
+    backgroundColor: "rgba(255,255,255,0.7)",
+  },
+  sectionHeaderBlock: {
+    gap: 8,
+  },
+  sectionTitleBlock: {
+    minWidth: 0,
+    gap: 3,
   },
   sectionTitleLine: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
     gap: 6,
+  },
+  sectionTitle: {
+    color: REPORT_UI.text,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  hintText: {
+    color: REPORT_UI.muted,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
   updatingIndicator: {
     flexDirection: "row",
@@ -3507,11 +3279,10 @@ const styles = StyleSheet.create({
   },
   scopePill: {
     maxWidth: 168,
-    height: 22,
-    justifyContent: "center",
     borderWidth: 1,
-    borderRadius: 6,
+    borderRadius: 9,
     paddingHorizontal: 8,
+    paddingVertical: 2,
   },
   branchScopePill: {
     borderColor: LINKED_COLORS.branchBorder,
@@ -3522,526 +3293,59 @@ const styles = StyleSheet.create({
     backgroundColor: LINKED_COLORS.supplierBackground,
   },
   scopePillText: {
-    fontWeight: "600",
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
   },
-  valueLegend: {
+  sectionControls: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
+    justifyContent: "space-between",
+    gap: 6,
   },
-  pager: {
+  pageSizeRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  pageText: {
-    minWidth: 44,
-    textAlign: "center",
-    color: "#4B5563",
+  pageSizeLabel: {
+    color: REPORT_UI.muted,
+    fontSize: 11.5,
   },
-  listContent: {
-    gap: 8,
-  },
-  table: {
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-  },
-  supplierTable: {
-    minWidth: 832,
-  },
-  productTable: {
-    minWidth: 800,
-  },
-  drilldownTable: {
-    minWidth: 868,
-  },
-  productDrilldownTable: {
-    minWidth: 728,
-  },
-  tableBody: {
-    flexGrow: 0,
-  },
-  tableRow: {
-    minHeight: 54,
+  pageSizeSegment: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  tableHeaderRow: {
-    minHeight: 38,
-    backgroundColor: "#F3F4F6",
-  },
-  frozenLeadingColumns: {
-    position: "relative",
-    zIndex: 3,
-    elevation: 1,
-    alignSelf: "stretch",
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: -8,
-    paddingVertical: 8,
-    borderRightWidth: 1,
-    borderRightColor: "#CBD5E1",
-  },
-  frozenBodyColumns: {
-    backgroundColor: "#FFFFFF",
-  },
-  frozenHeaderColumns: {
-    backgroundColor: "#F3F4F6",
-  },
-  // 供应商选中色用紫色（分店蓝、供应商紫），与吸顶联动条的供应商 chip 同色。
-  frozenSelectedColumns: {
-    backgroundColor: LINKED_COLORS.supplierBackground,
-  },
-  selectedSupplierAccent: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    backgroundColor: LINKED_COLORS.supplier,
-  },
-  selectedSupplierName: {
-    color: LINKED_COLORS.supplierText,
-  },
-  frozenSupplierColumns: {
-    gap: 3,
-    marginLeft: -4,
-    paddingLeft: 4,
-  },
-  frozenProductColumns: {
-    gap: 3,
-    marginLeft: -4,
-    paddingLeft: 4,
-  },
-  frozenBranchColumns: {
-    gap: 8,
-    marginLeft: -10,
-    paddingLeft: 10,
-  },
-  frozenProductBranchColumns: {
-    gap: 4,
-    marginLeft: -6,
-    paddingLeft: 6,
-  },
-  productTableRow: {
-    gap: 3,
-    paddingHorizontal: 4,
-  },
-  supplierTableRow: {
-    gap: 3,
-    paddingHorizontal: 4,
-  },
-  supplierNameColumn: {
-    width: 80,
-    minWidth: 0,
-  },
-  supplierMoneyColumn: {
-    // 预留整数大额与下钻箭头空间，横向滚动时保持表头、双期金额对齐。
-    width: 128,
-    flexShrink: 0,
-    paddingRight: 10,
-    position: "relative",
-  },
-  fullHeightCell: {
-    alignSelf: "stretch",
-    justifyContent: "center",
-  },
-  supplierFilterMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  supplierCodeText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  filterProductsHint: {
-    color: "#2563EB",
-    fontWeight: "700",
-  },
-  inlineChevron: {
-    position: "absolute",
-    top: 8,
-    right: 1,
-    color: "#64748B",
-    fontSize: 20,
-    lineHeight: 24,
-  },
-  supplierGrowthColumn: {
-    width: 66,
-    minWidth: 0,
-  },
-  supplierShareColumn: {
-    width: 66,
-    minWidth: 0,
-  },
-  supplierCountColumn: {
-    // 为排序表头和完整商品数量预留空间，横向滚动时列宽保持稳定。
-    width: 80,
-    flexShrink: 0,
-  },
-  productNameColumn: {
-    width: 190,
-    minWidth: 0,
-  },
-  itemColumn: {
-    width: 100,
-    minWidth: 0,
-  },
-  imageColumn: {
-    width: 58,
-    alignItems: "center",
-  },
-  productImageColumn: {
-    width: 52,
-    alignItems: "center",
-  },
-  productInfoColumn: {
-    // 商品明细横向滚动时固定名称列，避免宽屏下把数量列推得太远。
-    width: 80,
-    minWidth: 0,
-  },
-  productCountColumn: {
-    width: 80,
-    flexShrink: 0,
-  },
-  productMoneyColumn: {
-    width: 124,
-    flexShrink: 0,
-  },
-  productAverageColumn: {
-    width: 96,
-    flexShrink: 0,
-  },
-  productGrowthColumn: {
-    width: 64,
-    minWidth: 0,
-  },
-  branchColumn: {
-    width: 130,
-    minWidth: 0,
-  },
-  productBranchTableRow: {
-    gap: 4,
-    paddingHorizontal: 6,
-  },
-  productBranchNameColumn: {
-    width: 68,
-    minWidth: 0,
-  },
-  productBranchCountColumn: {
-    width: 80,
-    flexShrink: 0,
-  },
-  productBranchMoneyColumn: {
-    width: 124,
-    flexShrink: 0,
-  },
-  productBranchAverageColumn: {
-    width: 96,
-    flexShrink: 0,
-  },
-  productBranchGrowthColumn: {
-    width: 64,
-    minWidth: 0,
-  },
-  moneyColumn: {
-    width: 124,
-    flexShrink: 0,
-  },
-  countColumn: {
-    width: 80,
-    flexShrink: 0,
-  },
-  shareColumn: {
-    width: 80,
-    minWidth: 0,
-  },
-  growthColumn: {
-    width: 78,
-    minWidth: 0,
-  },
-  rowNumberColumn: {
-    width: 24,
-    minWidth: 0,
-  },
-  grossProfitColumn: {
-    width: 124,
-    flexShrink: 0,
-  },
-  grossMarginColumn: {
-    width: 84,
-    flexShrink: 0,
-  },
-  // 中国页签宽表：每格单行本期值，行高比双行表格更紧凑；同期列组放在最右侧。
-  chinaHeaderRow: {
-    minHeight: 46,
-  },
-  chinaSupplierRow: {
-    minHeight: 48,
-  },
-  chinaProductRow: {
-    minHeight: 58,
-  },
-  chinaSupplierAmountColumn: {
-    // 右侧 10pt 留给行内 › 下钻箭头；表头排序箭头借用同一段留白（supplierMoneyHeaderCell）。
-    width: 84,
-    minWidth: 0,
-    paddingRight: 10,
-    position: "relative",
-  },
-  chinaChevronWrap: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    right: 1,
-    justifyContent: "center",
-  },
-  chinaInlineChevron: {
-    color: "#64748B",
-    fontSize: 18,
-    lineHeight: 20,
-  },
-  chinaQuantityColumn: {
-    width: 60,
-    minWidth: 0,
-  },
-  chinaProductAmountColumn: {
-    // 单行本期金额，与 CHINA_PRODUCT_FIRST_SCREEN_FIXED 里的金额宽度保持一致，保证首屏能完整露出金额列。
-    width: 84,
-    flexShrink: 0,
-  },
-  chinaShareColumn: {
-    width: 60,
-    minWidth: 0,
-    gap: 3,
-  },
-  chinaAverageColumn: {
-    width: 64,
-    minWidth: 0,
-  },
-  chinaGrowthColumn: {
-    // 同期基数很小时增长率会到四位数（如 +1011.5%），64pt 会截断。
-    width: 74,
-    minWidth: 0,
-  },
-  chinaCompareAmountColumn: {
-    width: 84,
-    flexShrink: 0,
-  },
-  chinaCompareQuantityColumn: {
-    width: 56,
-    minWidth: 0,
-  },
-  chinaMetricText: {
-    fontWeight: "600",
-  },
-  chinaShareTrack: {
-    height: 3,
-    overflow: "hidden",
-    borderRadius: 2,
-    backgroundColor: "#EEF2F7",
-  },
-  chinaShareFill: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "#60A5FA",
-  },
-  headerGroup: {
     gap: 2,
+    borderRadius: 9,
+    backgroundColor: "#F2F4F7",
+    padding: 3,
   },
-  headerGroupTitle: {
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#D1D5DB",
-    paddingBottom: 2,
-  },
-  headerGroupColumns: {
-    // 与 supplierTableRow / productTableRow 的列间距一致，子列才能与数据行对齐。
-    flexDirection: "row",
-    gap: 3,
-  },
-  headerSubText: {
-    color: "#374151",
-    fontWeight: "600",
-  },
-  chinaCompareHeaderText: {
-    color: "#6B7280",
-    fontWeight: "600",
-  },
-  chinaPageTotalRow: {
-    minHeight: 48,
-    backgroundColor: "#F8FAFC",
-  },
-  chinaPageTotalFrozen: {
-    backgroundColor: "#F8FAFC",
-  },
-  chinaImageFrame: {
-    width: 44,
-    height: 44,
-    position: "relative",
-    overflow: "visible",
-  },
-  rankBadge: {
-    position: "absolute",
-    top: -4,
-    left: -4,
-    minWidth: 18,
-    height: 16,
-    paddingHorizontal: 3,
+  pageSizeButton: {
+    minWidth: 40,
+    height: 24,
+    paddingHorizontal: 9,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
+    borderRadius: 7,
   },
-  rankBadgeText: {
-    color: "#374151",
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: "700",
+  pageSizeSelected: {
+    backgroundColor: REPORT_UI.accent,
+  },
+  pageSizeText: {
+    color: "#475467",
+    fontSize: 12,
+    fontWeight: "600",
     fontVariant: ["tabular-nums"],
   },
-  tableCellText: {
-    color: "#111827",
-    fontVariant: ["tabular-nums"],
-  },
-  numericText: {
-    textAlign: "right",
-  },
-  strongText: {
-    fontWeight: "700",
-  },
-  headerText: {
-    color: "#374151",
-    fontWeight: "700",
-  },
-  sortableHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 2,
-    minWidth: 0,
-  },
-  sortableHeaderLabel: {
-    flexShrink: 1,
-  },
-  sortIndicator: {
-    color: "#9CA3AF",
-    fontSize: 10,
-    lineHeight: 14,
-  },
-  sortActiveText: {
-    color: "#2563EB",
-  },
-  supplierMoneyHeaderCell: {
-    // 供应商金额列右侧 10pt 是行内 › 箭头的留白；表头把排序箭头放进这段留白，
-    // 标签与下方数字右对齐，英文 Revenue 不会被箭头挤到截断。
-    marginRight: -10,
-  },
-  row: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-  },
-  selectedRow: {
-    borderColor: LINKED_COLORS.supplier,
-    backgroundColor: LINKED_COLORS.supplierBackground,
-  },
-  rowPressable: {
-    gap: 10,
-    padding: 12,
-  },
-  rowHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  rowTitleWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rowTitle: {
-    color: "#111827",
-    fontWeight: "700",
-  },
-  metricsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  metricBox: {
-    minWidth: 112,
-    flex: 1,
-    borderRadius: 6,
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  metricLabel: {
-    color: "#4B5563",
-  },
-  metricValue: {
-    color: "#111827",
-    fontWeight: "700",
-  },
-  metricCompare: {
-    color: "#6B7280",
-  },
-  productRow: {
-    minHeight: 92,
-    flexDirection: "row",
-    gap: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-    padding: 10,
-  },
-  productImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 6,
-    backgroundColor: "#E5E7EB",
-  },
-  productImagePlaceholder: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 6,
-    backgroundColor: "#E5E7EB",
-  },
-  placeholderText: {
-    color: "#6B7280",
-  },
-  productMain: {
-    flex: 1,
-    minWidth: 0,
-    gap: 4,
-  },
-  productMetrics: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+  pageSizeTextSelected: {
+    color: "#FFFFFF",
   },
   stateBox: {
     minHeight: 72,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
     padding: 12,
   },
   modal: {
@@ -4049,22 +3353,8 @@ const styles = StyleSheet.create({
     margin: 18,
     gap: 10,
     borderRadius: 8,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: REPORT_UI.card,
     padding: 16,
-  },
-  drilldownModal: {
-    flex: 1,
-    height: "100%",
-    maxHeight: "100%",
-    margin: 0,
-    borderRadius: 0,
-    paddingHorizontal: 10,
-    paddingTop: 48,
-    paddingBottom: 24,
-  },
-  modalTitle: {
-    color: "#111827",
-    fontWeight: "700",
   },
   modalOption: {
     alignSelf: "stretch",
@@ -4075,17 +3365,97 @@ const styles = StyleSheet.create({
   storeModalListContent: {
     gap: 10,
   },
-  modalList: {
-    maxHeight: 420,
+  // 底部抽屉：Paper Modal 默认居中，这里改为贴底并去掉底部安全区外边距（由抽屉自己补内边距）。
+  sheetWrapper: {
+    justifyContent: "flex-end",
+    marginBottom: 0,
   },
-  drilldownModalList: {
+  sheet: {
+    height: "88%",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    backgroundColor: REPORT_UI.background,
+    paddingTop: 8,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#D0D5DD",
+    marginBottom: 6,
+  },
+  sheetHead: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingLeft: 14,
+    paddingRight: 6,
+  },
+  sheetTitleBlock: {
     flex: 1,
-    maxHeight: "100%",
+    minWidth: 0,
+    paddingTop: 6,
+  },
+  sheetTitle: {
+    color: REPORT_UI.text,
+    fontSize: 19,
+    fontWeight: "800",
+  },
+  sheetSubtitle: {
+    color: REPORT_UI.muted,
+    fontSize: 13,
+  },
+  sheetClose: {
+    margin: 0,
+  },
+  sheetBody: {
+    flex: 1,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+  },
+  sheetNotice: {
+    borderWidth: 1,
+    borderColor: "#FEDF89",
+    borderRadius: 10,
+    backgroundColor: "#FFFAEB",
+    color: "#B54708",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  sheetList: {
+    flex: 1,
+  },
+  sheetListContent: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
   },
   drillRow: {
-    gap: 3,
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: REPORT_UI.divider,
+    paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  drillRowHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  drillBranchName: {
+    flex: 1,
+    minWidth: 0,
+  },
+  drillBranchTitle: {
+    color: REPORT_UI.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  drillGrid: {
+    marginTop: 7,
   },
 });

@@ -383,7 +383,8 @@
       "accessibilityLabel": "按{{column}}排序，当前{{state}}",
       "desc": "降序",
       "asc": "升序",
-      "none": "未排序"
+      "none": "未排序",
+      "label": "排序"
     },
     "chinaGoods": {
       "revenue": "中国货营业额",
@@ -407,8 +408,8 @@
       "compareShareOfChina": "占中国货",
       "compareShareOfTotal": "占总营业",
       "pageTotal": "本页合计",
-      "supplierHint": "点供应商联动分店与明细 · 点金额看分店 · 左滑看占比、增长率与同期",
-      "productHint": "点商品看分店 · 左滑看均价、毛利与增长率",
+      "supplierHint": "点供应商联动分店与明细 · 点金额看分店",
+      "productHint": "点商品看分店",
       "supplierBranchSection": "分店 · {{supplier}}",
       "supplierBranchFormula": "{{supplier}}金额 ÷ 分店营业额",
       "supplierAmount": "供应商金额",
