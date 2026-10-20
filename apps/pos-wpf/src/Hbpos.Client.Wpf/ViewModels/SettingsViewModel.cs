@@ -190,6 +190,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _hasSavedSquareToken;
 
+    // 直连 Square（默认关闭）的当前状态；只在设置页展示与切换，付款运行时由网关自己读存储。
+    [ObservableProperty]
+    private SquareDirectStatus? _squareDirectStatus;
+
     [ObservableProperty]
     private SquareLocationOption? _selectedSquareLocation;
 
@@ -431,6 +435,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         LoadLocationsCommand = new AsyncRelayCommand(LoadLocationsAsync, CanLoadLocations);
         LoadDevicesCommand = new AsyncRelayCommand(LoadDevicesAsync, CanLoadDevices);
         SaveSquareCommand = new AsyncRelayCommand(SaveSquareAsync, CanSaveSquare);
+        ToggleSquareDirectCommand = new AsyncRelayCommand(ToggleSquareDirectAsync, () => !IsBusy);
+        RefreshSquareDirectCommand = new AsyncRelayCommand(RefreshSquareDirectAsync, () => !IsBusy && IsSquareDirectEnabled);
         LoadDeviceCodesCommand = new AsyncRelayCommand(LoadDeviceCodesAsync, CanLoadDeviceCodes);
         CreateDeviceCodeCommand = new AsyncRelayCommand(CreateDeviceCodeAsync, CanCreateDeviceCode);
         RefreshDeviceCodeStatusCommand = new AsyncRelayCommand(RefreshDeviceCodeStatusAsync, CanRefreshDeviceCodeStatus);
@@ -542,6 +548,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand LoadDevicesCommand { get; }
 
     public IAsyncRelayCommand SaveSquareCommand { get; }
+
+    public IAsyncRelayCommand ToggleSquareDirectCommand { get; }
+
+    public IAsyncRelayCommand RefreshSquareDirectCommand { get; }
 
     public IAsyncRelayCommand LoadDeviceCodesCommand { get; }
 
@@ -724,6 +734,37 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ? T("settings.square.tokenStatus.cached")
         : T("settings.square.tokenStatus.missing");
 
+    public bool IsSquareDirectEnabled => SquareDirectStatus?.LocalEnabled ?? false;
+
+    public string SquareDirectToggleText => IsSquareDirectEnabled
+        ? T("settings.square.direct.turnOff")
+        : T("settings.square.direct.turnOn");
+
+    /// <summary>三行状态：本地开关、服务端门店开关、本机令牌剩余有效期。令牌本身永远不显示。</summary>
+    public string SquareDirectStatusText
+    {
+        get
+        {
+            var status = SquareDirectStatus;
+            var local = status?.LocalEnabled == true
+                ? T("settings.square.direct.local.on")
+                : T("settings.square.direct.local.off");
+            var server = (status?.ServerState ?? SquareDirectServerState.Unknown) switch
+            {
+                SquareDirectServerState.Enabled => T("settings.square.direct.server.on"),
+                SquareDirectServerState.Disabled => T("settings.square.direct.server.off"),
+                _ => T("settings.square.direct.server.unknown")
+            };
+            var token = status?.HasCredential == true && status.Remaining is { } remaining
+                ? Format(
+                    "settings.square.direct.token.remaining",
+                    (int)remaining.TotalHours,
+                    remaining.Minutes)
+                : T("settings.square.direct.token.none");
+            return string.Join(Environment.NewLine, local, server, token);
+        }
+    }
+
     public bool IsSquareDeviceCodesSupported => !IsSquareSandbox;
 
     public bool IsSquareDeviceCodesUnsupported => !IsSquareDeviceCodesSupported;
@@ -863,6 +904,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             LinklyPairCodeText = string.Empty;
             TimeoutSecondsText = _loadedConfiguration.TerminalTimeoutSeconds.ToString();
             HasSavedSquareToken = _loadedConfiguration.HasProtectedSquareAccessToken;
+            SquareDirectStatus = await _setupService.GetSquareDirectStatusAsync(SelectedSquareEnvironment);
             _savedSquareLocationId = _loadedConfiguration.SquareLocationId;
             _savedSquareDeviceId = _loadedConfiguration.SquareDeviceId;
             _devicesLoadedForLocationId = null;
@@ -2690,6 +2732,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ReceiptProfileLoadButtonText));
         OnPropertyChanged(nameof(ReceiptProfileManagedHintText));
         OnPropertyChanged(nameof(SquareTokenStatusText));
+        OnPropertyChanged(nameof(SquareDirectStatusText));
+        OnPropertyChanged(nameof(SquareDirectToggleText));
         OnPropertyChanged(nameof(SquareDeviceCodesUnavailableText));
         foreach (var line in LinklyCloudLines)
         {
@@ -2790,6 +2834,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SelectedSquareDevice = null;
         // Square 和 Linkly 的编辑环境需要隔离，切换 Square 时不要清空 Linkly Cloud 输入。
         RaiseCommandStates();
+        // 直连的服务端开关与令牌按环境分别保存，环境切换后重新读取本机状态（不联网）。
+        _ = ReloadSquareDirectStatusAsync();
         OnPropertyChanged(nameof(SelectedSquareEnvironment));
         OnPropertyChanged(nameof(IsSquareDeviceCodesSupported));
         OnPropertyChanged(nameof(IsSquareDeviceCodesUnsupported));
@@ -2827,6 +2873,62 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedEnvironment));
         RaiseLinklyTestPresentationProperties();
         RefreshPaymentTerminalDraftStates();
+    }
+
+    partial void OnSquareDirectStatusChanged(SquareDirectStatus? value)
+    {
+        OnPropertyChanged(nameof(IsSquareDirectEnabled));
+        OnPropertyChanged(nameof(SquareDirectStatusText));
+        OnPropertyChanged(nameof(SquareDirectToggleText));
+        RefreshSquareDirectCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task ReloadSquareDirectStatusAsync()
+    {
+        try
+        {
+            SquareDirectStatus = await _setupService.GetSquareDirectStatusAsync(SelectedSquareEnvironment);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSquareSettings($"reload square direct status failed environment={SelectedSquareEnvironment} reason={ex.GetType().Name}");
+        }
+    }
+
+    private async Task ToggleSquareDirectAsync()
+    {
+        var enable = !IsSquareDirectEnabled;
+        await RunBusyAsync(async () =>
+        {
+            var status = await _setupService.SetSquareDirectEnabledAsync(enable, SelectedSquareEnvironment);
+            SquareDirectStatus = status;
+            SetStatus(ResolveSquareDirectStatusKey(status, enable));
+        }, "toggle square direct");
+    }
+
+    private async Task RefreshSquareDirectAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            var status = await _setupService.RefreshSquareDirectAsync(SelectedSquareEnvironment);
+            SquareDirectStatus = status;
+            SetStatus(ResolveSquareDirectStatusKey(status, status.LocalEnabled));
+        }, "refresh square direct");
+    }
+
+    private static string ResolveSquareDirectStatusKey(SquareDirectStatus status, bool enabled)
+    {
+        if (!enabled || !status.LocalEnabled)
+        {
+            return "settings.status.squareDirectOff";
+        }
+
+        return status.ServerState switch
+        {
+            SquareDirectServerState.Enabled => "settings.status.squareDirectOn",
+            SquareDirectServerState.Disabled => "settings.status.squareDirectServerOff",
+            _ => "settings.status.squareDirectServerUnknown"
+        };
     }
 
     partial void OnHasSavedSquareTokenChanged(bool value)
@@ -3140,6 +3242,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         LoadLocationsCommand.NotifyCanExecuteChanged();
         LoadDevicesCommand.NotifyCanExecuteChanged();
         SaveSquareCommand.NotifyCanExecuteChanged();
+        ToggleSquareDirectCommand.NotifyCanExecuteChanged();
+        RefreshSquareDirectCommand.NotifyCanExecuteChanged();
         LoadDeviceCodesCommand.NotifyCanExecuteChanged();
         CreateDeviceCodeCommand.NotifyCanExecuteChanged();
         RefreshDeviceCodeStatusCommand.NotifyCanExecuteChanged();

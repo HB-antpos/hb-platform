@@ -23,6 +23,25 @@ public interface ICardTerminalSetupService
 
     Task<string?> GetSquareAccessTokenAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>直连 Square（默认关闭）的当前状态。默认实现表示「不支持」，旧实现与测试替身无需改动。</summary>
+    Task<SquareDirectStatus> GetSquareDirectStatusAsync(
+        CardTerminalEnvironment environment,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new SquareDirectStatus(false, SquareDirectServerState.Unknown, false, null, null));
+
+    /// <summary>切换本机「直连 Square」开关；打开时顺带向服务端领取一次凭据，返回切换后的状态。</summary>
+    Task<SquareDirectStatus> SetSquareDirectEnabledAsync(
+        bool enabled,
+        CardTerminalEnvironment environment,
+        CancellationToken cancellationToken = default) =>
+        GetSquareDirectStatusAsync(environment, cancellationToken);
+
+    /// <summary>手动重新领取直连凭据并返回最新状态。</summary>
+    Task<SquareDirectStatus> RefreshSquareDirectAsync(
+        CardTerminalEnvironment environment,
+        CancellationToken cancellationToken = default) =>
+        GetSquareDirectStatusAsync(environment, cancellationToken);
+
     Task<IReadOnlyList<SquareLocationOption>> ListSquareLocationsAsync(
         string? accessToken,
         CardTerminalEnvironment environment,
@@ -171,8 +190,31 @@ public sealed class CardTerminalSetupService(
     ICardPaymentRecoveryService? cardPaymentRecoveryService = null,
     ILinklyPaymentAttemptContextAccessor? linklyPaymentAttemptContextAccessor = null,
     ILinklyTerminalSelectionTransitionGate? linklyTerminalSelectionTransitionGate = null,
-    ILinklyUnresolvedSettlementReader? linklySettlementRepository = null) : ICardTerminalSetupService
+    ILinklyUnresolvedSettlementReader? linklySettlementRepository = null,
+    ISquareDirectSettingsService? squareDirectSettingsService = null) : ICardTerminalSetupService
 {
+    public Task<SquareDirectStatus> GetSquareDirectStatusAsync(
+        CardTerminalEnvironment environment,
+        CancellationToken cancellationToken = default) =>
+        squareDirectSettingsService is null
+            ? Task.FromResult(new SquareDirectStatus(false, SquareDirectServerState.Unknown, false, null, null))
+            : squareDirectSettingsService.GetStatusAsync(environment, cancellationToken);
+
+    public Task<SquareDirectStatus> SetSquareDirectEnabledAsync(
+        bool enabled,
+        CardTerminalEnvironment environment,
+        CancellationToken cancellationToken = default) =>
+        squareDirectSettingsService is null
+            ? GetSquareDirectStatusAsync(environment, cancellationToken)
+            : squareDirectSettingsService.SetEnabledAsync(enabled, environment, cancellationToken);
+
+    public Task<SquareDirectStatus> RefreshSquareDirectAsync(
+        CardTerminalEnvironment environment,
+        CancellationToken cancellationToken = default) =>
+        squareDirectSettingsService is null
+            ? GetSquareDirectStatusAsync(environment, cancellationToken)
+            : squareDirectSettingsService.RefreshAsync(environment, cancellationToken);
+
     public Task<CardTerminalConfiguration> LoadConfigurationAsync(CancellationToken cancellationToken = default)
     {
         LogSquareSetup("load configuration requested");

@@ -618,7 +618,7 @@ public sealed partial class ConfiguredCardTerminalClientTests
     {
         private readonly DateTimeOffset _startedAt;
 
-        public SquareRetryHarness(SquareRetryScript script, TimeSpan? terminalTimeout = null, TimeSpan? cancelConfirmWindow = null)
+        public SquareRetryHarness(SquareRetryScript script, TimeSpan? terminalTimeout = null, TimeSpan? cancelConfirmWindow = null, ISquareDirectGateway? directGateway = null)
         {
             Script = script;
             Time = new FakeTimeProvider();
@@ -630,7 +630,8 @@ public sealed partial class ConfiguredCardTerminalClientTests
                 new StaticCardTerminalSettingsProvider(CreateSquareSettings(terminalTimeout ?? TimeSpan.FromMinutes(10))),
                 CreateApiClient(script.CreateHandler()),
                 squarePaymentAttemptContextAccessor: Context,
-                squarePaymentAttemptRepository: Repository)
+                squarePaymentAttemptRepository: Repository,
+                squareDirectGateway: directGateway)
             {
                 TimeProvider = Time,
                 // 取消确认窗口走真实时间：需要走到这一步的用例传入很短的窗口，避免真等 15 秒。
