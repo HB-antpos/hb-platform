@@ -146,6 +146,13 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isInstallmentCustomerDialogOpen;
 
+    // Lay-by 订单总额不足起订金额时的页内提示弹窗（比状态栏一行字更醒目）。
+    [ObservableProperty]
+    private bool _isInstallmentMinimumNoticeOpen;
+
+    [ObservableProperty]
+    private string _installmentMinimumNoticeMessage = string.Empty;
+
     [ObservableProperty]
     private string _installmentCustomerDraftName = string.Empty;
 
@@ -274,6 +281,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         InstallmentCustomerKeyCommand = new RelayCommand<string>(ApplyInstallmentCustomerKey, _ => CanUseInstallmentCustomerDialog());
         ConfirmInstallmentCustomerDialogCommand = new RelayCommand(ConfirmInstallmentCustomerDialog, CanUseInstallmentCustomerDialog);
         CancelInstallmentCustomerDialogCommand = new RelayCommand(CancelInstallmentCustomerDialog, () => IsInstallmentCustomerDialogOpen);
+        CloseInstallmentMinimumNoticeCommand = new RelayCommand(() => IsInstallmentMinimumNoticeOpen = false);
         RemoveTenderCommand = new AsyncRelayCommand<PaymentTender?>(RemoveTenderAsync, CanRemoveTender);
         ConfirmPaymentCommand = new AsyncRelayCommand(ConfirmPaymentAsync, CanConfirmPayment);
         CancelCommand = new RelayCommand(CancelPayment, CanCancelPayment);
@@ -637,6 +645,8 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
     public IRelayCommand CancelInstallmentCustomerDialogCommand { get; }
 
+    public IRelayCommand CloseInstallmentMinimumNoticeCommand { get; }
+
     public IAsyncRelayCommand<PaymentTender?> RemoveTenderCommand { get; }
 
     public IAsyncRelayCommand ConfirmPaymentCommand { get; }
@@ -797,6 +807,13 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         OpenInstallmentCustomerDialogCommand.NotifyCanExecuteChanged();
         RecalculateTenderSummary();
         NotifyPaymentCommandStates();
+
+        // 中文注释：收银员切到 Lay-by 时订单总额就不够起订金额，立刻弹窗告知，而不是等到点确认才在状态栏出一行字。
+        // 续付历史 Lay-by 单（有 _installmentRepaymentOrder）与锁定模式不受起订金额限制，不提示。
+        if (value && IsBelowInstallmentMinimumTotal())
+        {
+            ShowInstallmentMinimumNotice();
+        }
     }
 
     partial void OnIsInstallmentSwitchLockedChanged(bool value)
@@ -2767,6 +2784,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         if (ActualAmount < MinimumInstallmentTotalAmount)
         {
             SetStatus("payment.installment.status.totalBelowMinimum");
+            ShowInstallmentMinimumNotice();
             return false;
         }
 
@@ -2784,6 +2802,23 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         }
 
         return true;
+    }
+
+    private bool IsBelowInstallmentMinimumTotal() =>
+        _installmentRepaymentOrder is null &&
+        !IsInstallmentSwitchLocked &&
+        !_cart.IsEmpty &&
+        ActualAmount < MinimumInstallmentTotalAmount;
+
+    private void ShowInstallmentMinimumNotice()
+    {
+        // 中文注释：消息带上起订金额与当前订单金额，收银员一眼知道差多少、该怎么办。
+        InstallmentMinimumNoticeMessage = string.Format(
+            _localization?.CurrentCulture ?? CultureInfo.CurrentCulture,
+            T("payment.installment.minimumNotice.message"),
+            MinimumInstallmentTotalAmount,
+            ActualAmount);
+        IsInstallmentMinimumNoticeOpen = true;
     }
 
     private bool CanConfirmInstallmentPayment()

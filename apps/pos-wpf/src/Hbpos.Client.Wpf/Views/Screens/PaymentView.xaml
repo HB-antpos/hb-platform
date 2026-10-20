@@ -1843,6 +1843,65 @@
             </Border>
         </Grid>
 
+        <!-- Lay-by 订单总额不足起订金额的提示：只有一个「知道了」，盖在分期客户信息弹窗之上（ZIndex 22），不影响其它状态。 -->
+        <Grid Grid.ColumnSpan="3"
+              Panel.ZIndex="22"
+              Background="#99000000"
+              AutomationProperties.AutomationId="InstallmentMinimumNotice"
+              Visibility="{Binding IsInstallmentMinimumNoticeOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Border Width="520"
+                    MaxWidth="520"
+                    Padding="22"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="44" Height="44" Background="{DynamicResource PosPrimarySoftBrush}" CornerRadius="10">
+                            <materialDesign:PackIcon Kind="InformationOutline"
+                                                     Width="26"
+                                                     Height="26"
+                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                     HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Grid.Column="1"
+                                   Text="{loc:Loc payment.installment.minimumNotice.title}"
+                                   Margin="12,0,0,0"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   FontSize="22"
+                                   FontWeight="Black"
+                                   Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                    </Grid>
+                    <TextBlock AutomationProperties.AutomationId="InstallmentMinimumNoticeMessage"
+                               Text="{Binding InstallmentMinimumNoticeMessage}"
+                               Margin="0,16,0,18"
+                               TextWrapping="Wrap"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource PosTextBrush}" />
+                    <Button Command="{Binding CloseInstallmentMinimumNoticeCommand}"
+                            AutomationProperties.AutomationId="InstallmentMinimumNoticeOkButton"
+                            Style="{StaticResource PosPrimaryButtonStyle}"
+                            MinWidth="160"
+                            Height="48"
+                            HorizontalAlignment="Right">
+                        <TextBlock Text="{loc:Loc payment.installment.minimumNotice.ok}"
+                                   Foreground="White"
+                                   FontWeight="Black" />
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <Grid Grid.ColumnSpan="3"
               Panel.ZIndex="21"
               Background="#99000000"

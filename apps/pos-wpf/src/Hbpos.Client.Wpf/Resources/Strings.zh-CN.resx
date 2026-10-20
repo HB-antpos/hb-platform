@@ -636,6 +636,15 @@
   <data name="payment.installment.status.totalBelowMinimum" xml:space="preserve">
     <value>分期订单总额至少 $50.00。</value>
   </data>
+  <data name="payment.installment.minimumNotice.title" xml:space="preserve">
+    <value>未达到 Lay-by 起订金额</value>
+  </data>
+  <data name="payment.installment.minimumNotice.message" xml:space="preserve">
+    <value>Lay-by（分期）订单总额至少 ${0:0.00}，当前订单为 ${1:0.00}。请改用普通付款，或增加商品后再选择 Lay-by。</value>
+  </data>
+  <data name="payment.installment.minimumNotice.ok" xml:space="preserve">
+    <value>知道了</value>
+  </data>
   <data name="payment.installment.status.invalidAmount" xml:space="preserve">
     <value>分期付款金额必须大于 0，且不能超过未付余额。</value>
   </data>
