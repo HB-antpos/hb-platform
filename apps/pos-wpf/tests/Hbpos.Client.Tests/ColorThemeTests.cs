@@ -374,6 +374,9 @@ public sealed class ColorThemeTests(PaymentViewRuntimeStaTestHost host)
             var ink = colors[$"PosMethod{method}InkBrush"];
             if (Contrast(on, fill) < 4.5) failures.Add($"{method} 选中实心上的字 {Contrast(on, fill):F2}");
             if (Contrast(ink, soft) < 4.5) failures.Add($"{method} 浅色块上的字 {Contrast(ink, soft):F2}");
+            // 付款方式方块未选态用加深的 Tile 底色（浅 Soft 底在白卡片上太淡，像失效），字同样要可读。
+            var tile = colors[$"PosMethod{method}TileBrush"];
+            if (Contrast(ink, tile) < 4.5) failures.Add($"{method} 方块底色上的字 {Contrast(ink, tile):F2}");
             if (Contrast(fill, surface) < 3) failures.Add($"{method} 实心块对卡片底色 {Contrast(fill, surface):F2}");
         }
 

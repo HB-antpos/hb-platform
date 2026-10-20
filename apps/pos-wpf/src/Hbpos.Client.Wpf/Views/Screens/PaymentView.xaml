@@ -108,11 +108,13 @@
         </Style>
 
         <!-- ═══ 支付方式方块（现金/刷卡/代金券/手动刷卡）：全主题按方式分色 ═══
-             未选＝Soft 浅底 + Ink 字 + Fill 实心圆盘（On 图标）；选中＝Fill 实心 + On 字 + On 圆盘（Fill 图标）+ 右上 ✓ 角标。
+             未选＝Tile 加深浅底 + Fill 2px 描边 + Ink 字 + Fill 实心圆盘（On 图标）；选中＝Fill 实心 + On 字 + On 圆盘（Fill 图标）+ 右上 ✓ 角标。
              模板自带满宽 ContentPresenter，这样内容 Grid 才能撑满方块，✓ 角标才能贴在方块右上角。 -->
         <Style x:Key="PaymentMethodTileStyle" TargetType="Button" BasedOn="{StaticResource PosSecondaryButtonStyle}">
             <Setter Property="MinHeight" Value="100" />
             <Setter Property="Padding" Value="8" />
+            <!-- 2px 描边：未选＝方式 Fill 色勾边，选中＝同色与底色融为一体，两态尺寸一致不跳动。 -->
+            <Setter Property="BorderThickness" Value="2" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Background" Value="{DynamicResource PosSurfaceBrush}" />
@@ -185,8 +187,8 @@
             </Setter>
         </Style>
         <Style x:Key="CashMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="Background" Value="{DynamicResource PosMethodCashSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodCashSoftBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosMethodCashTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodCashFillBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PosMethodCashInkBrush}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsCashSelected}" Value="True">
@@ -197,8 +199,8 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="CardMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="Background" Value="{DynamicResource PosMethodCardSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodCardSoftBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosMethodCardTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodCardFillBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PosMethodCardInkBrush}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsCardSelected}" Value="True">
@@ -209,8 +211,8 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="VoucherMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="Background" Value="{DynamicResource PosMethodVoucherSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodVoucherSoftBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosMethodVoucherTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodVoucherFillBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PosMethodVoucherInkBrush}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsVoucherSelected}" Value="True">
@@ -222,8 +224,8 @@
         </Style>
         <!-- 手动刷卡入口是「打开确认弹窗」的动作按钮，不会成为已选方式，所以固定显示刷卡色的未选外观。 -->
         <Style x:Key="ManualCardMethodButtonStyle" TargetType="Button" BasedOn="{StaticResource PaymentMethodTileStyle}">
-            <Setter Property="Background" Value="{DynamicResource PosMethodCardSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodCardSoftBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PosMethodCardTileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PosMethodCardFillBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PosMethodCardInkBrush}" />
         </Style>
         <!-- 圆盘与图标：未选＝Fill 圆盘 + On 图标；选中＝On 圆盘 + Fill 图标（与方块底色互换）。 -->

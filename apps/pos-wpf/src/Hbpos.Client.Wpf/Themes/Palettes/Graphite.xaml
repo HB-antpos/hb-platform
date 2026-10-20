@@ -192,14 +192,17 @@
     <SolidColorBrush x:Key="PosMethodCashFillBrush" Color="#FFF0A961" />
     <SolidColorBrush x:Key="PosMethodCashOnBrush" Color="#FF241405" />
     <SolidColorBrush x:Key="PosMethodCashSoftBrush" Color="#FF33261A" />
+    <SolidColorBrush x:Key="PosMethodCashTileBrush" Color="#FF33261A" />
     <SolidColorBrush x:Key="PosMethodCashInkBrush" Color="#FFF2B36B" />
     <SolidColorBrush x:Key="PosMethodCardFillBrush" Color="#FF93B3F2" />
     <SolidColorBrush x:Key="PosMethodCardOnBrush" Color="#FF0E1A33" />
     <SolidColorBrush x:Key="PosMethodCardSoftBrush" Color="#FF1E2A44" />
+    <SolidColorBrush x:Key="PosMethodCardTileBrush" Color="#FF1E2A44" />
     <SolidColorBrush x:Key="PosMethodCardInkBrush" Color="#FFA9C2F5" />
     <SolidColorBrush x:Key="PosMethodVoucherFillBrush" Color="#FFC6A6F4" />
     <SolidColorBrush x:Key="PosMethodVoucherOnBrush" Color="#FF1F1233" />
     <SolidColorBrush x:Key="PosMethodVoucherSoftBrush" Color="#FF2A2140" />
+    <SolidColorBrush x:Key="PosMethodVoucherTileBrush" Color="#FF2A2140" />
     <SolidColorBrush x:Key="PosMethodVoucherInkBrush" Color="#FFCDB0F7" />
     <!-- 快捷现金面额色（澳元面额主色的 UI 自定义色，不取样自纸币）：Fill 底色 / Text 数字色 -->
     <SolidColorBrush x:Key="PosNote100FillBrush" Color="#FF4CC38A" />
