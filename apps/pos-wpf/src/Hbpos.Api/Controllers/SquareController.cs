@@ -20,7 +20,8 @@ public sealed class SquareController(
     ISquareTokenService squareTokenService,
     ISquareTerminalBackendService backendService,
     ILogger<SquareController> logger,
-    ISquareCheckoutSessionRepository? checkoutSessionRepository = null) : ControllerBase
+    ISquareCheckoutSessionRepository? checkoutSessionRepository = null,
+    ISquareDirectService? directService = null) : ControllerBase
 {
     private const string InvalidEnvironmentCode = "SQUARE_ENVIRONMENT_INVALID";
     private const string InvalidEnvironmentMessage = "environment must be Production or Sandbox";
@@ -230,6 +231,78 @@ public sealed class SquareController(
                     cancellationToken);
                 return response;
             });
+    }
+
+    /// <summary>
+    /// 领取直连 Square 的凭据。仅总部为本门店打开「收银机直连 Square」开关后才会下发（默认关闭）；
+    /// 门店范围取自设备令牌声明，不读请求里的门店字段。领取记审计、按设备限流。
+    /// </summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.TakeCard)]
+    [HttpPost("direct-credential")]
+    public async Task<ActionResult<ApiResult<SquareDirectCredentialResponse>>> GetDirectCredential(
+        [FromBody] SquareDirectCredentialRequest request,
+        CancellationToken cancellationToken)
+    {
+        var scope = GetAuthenticatedDeviceScope<SquareDirectCredentialResponse>();
+        if (scope.Result is not null)
+        {
+            return scope.Result;
+        }
+
+        if (directService is null)
+        {
+            return DirectUnavailable<SquareDirectCredentialResponse>();
+        }
+
+        // 令牌属于响应体，只在这里出现：Ok 结果不进日志，失败路径只记错误码。
+        return await ExecuteBackendCoreAsync(
+            "direct-credential",
+            backendService,
+            _ => directService.IssueCredentialAsync(
+                request.Environment,
+                scope.StoreCode!,
+                scope.DeviceCode!,
+                cancellationToken));
+    }
+
+    /// <summary>
+    /// 直连创建结账后登记归属。服务端用自己的令牌向 Square 核实 reference_id 属于调用设备，再绑定「门店 + 设备」，
+    /// 这样恢复中心、退款查询仍能按设备范围校验直连产生的结账。
+    /// </summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.TakeCard)]
+    [HttpPost("checkouts/{checkoutId}/origin")]
+    public async Task<ActionResult<ApiResult<SquareDirectOriginResponse>>> RegisterDirectCheckoutOrigin(
+        string checkoutId,
+        [FromBody] SquareDirectOriginRequest request,
+        CancellationToken cancellationToken)
+    {
+        var scope = GetAuthenticatedDeviceScope<SquareDirectOriginResponse>();
+        if (scope.Result is not null)
+        {
+            return scope.Result;
+        }
+
+        if (directService is null)
+        {
+            return DirectUnavailable<SquareDirectOriginResponse>();
+        }
+
+        return await ExecuteBackendCoreAsync(
+            "direct-origin",
+            backendService,
+            _ => directService.RegisterOriginAsync(
+                request.Environment,
+                checkoutId,
+                scope.StoreCode!,
+                scope.DeviceCode!,
+                cancellationToken));
+    }
+
+    private ActionResult<ApiResult<T>> DirectUnavailable<T>()
+    {
+        return StatusCode(
+            StatusCodes.Status503ServiceUnavailable,
+            ApiResult<T>.Fail(BackendNotImplementedCode, BackendNotImplementedMessage));
     }
 
     [HttpGet("checkouts/{checkoutId}")]

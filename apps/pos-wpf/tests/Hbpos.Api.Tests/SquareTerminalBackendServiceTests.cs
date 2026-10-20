@@ -960,6 +960,138 @@ public sealed class SquareTerminalBackendServiceTests
     }
 
     [Fact]
+    public async Task CreateRefundAsync_RecordsServerCreatedRefundForDirectModeReconciliation()
+    {
+        var direct = new RecordingDirectService();
+        var service = new SquareTerminalBackendService(
+            new RecordingSquareTokenService(new SquareTokenResponse("Production", "token-003", DateTimeOffset.UtcNow)),
+            new FakeSquareTerminalRestClient
+            {
+                CreateRefundAsyncHandler = (environment, _, request, _) => Task.FromResult(new SquareRefundResponse(
+                    "refund-777", environment, Status: "PENDING", PaymentId: request.PaymentId, AmountMoney: request.AmountMoney))
+            },
+            directService: direct);
+
+        await service.CreateRefundAsync(
+            new SquareRefundRequest("Production", "idem-1", "payment-001", new SquareMoneyDto(500, "AUD")),
+            CancellationToken.None);
+
+        var recorded = Assert.Single(direct.RecordedRefunds);
+        Assert.Equal(("Production", "refund-777", "payment-001"), recorded);
+    }
+
+    [Fact]
+    public async Task CreateRefundAsync_StillReturnsTheRefundWhenRecordingFails()
+    {
+        // 退款已在 Square 受理：记账失败只记日志，不能让收银员以为没退成而重复退款。
+        var direct = new RecordingDirectService { RecordException = new InvalidOperationException("db down") };
+        var service = new SquareTerminalBackendService(
+            new RecordingSquareTokenService(new SquareTokenResponse("Production", "token-003", DateTimeOffset.UtcNow)),
+            new FakeSquareTerminalRestClient
+            {
+                CreateRefundAsyncHandler = (environment, _, request, _) => Task.FromResult(new SquareRefundResponse(
+                    "refund-777", environment, Status: "PENDING", PaymentId: request.PaymentId))
+            },
+            directService: direct);
+
+        var response = await service.CreateRefundAsync(
+            new SquareRefundRequest("Production", "idem-1", "payment-001", new SquareMoneyDto(500, "AUD")),
+            CancellationToken.None);
+
+        Assert.Equal("refund-777", response.RefundId);
+    }
+
+    [Fact]
+    public async Task AcceptWebhookAsync_WhenRefundUpdated_ChecksItAgainstServerCreatedRefunds()
+    {
+        var direct = new RecordingDirectService();
+        const string notificationUrl = "https://example.com/api/v1/square/webhooks";
+        var rawBody = CreateRefundUpdatedPayload("COMPLETED");
+        var service = new SquareTerminalBackendService(
+            new RecordingSquareTokenService(response: null),
+            new FakeSquareTerminalRestClient(),
+            new SquareWebhookVerifier(),
+            CreateWebhookOptions("sandbox-webhook-key"),
+            new InMemorySquareCheckoutSessionRepository(),
+            new InMemorySquareRefundRepository(),
+            direct);
+        var signature = CreateSignature("sandbox-webhook-key", notificationUrl, rawBody);
+
+        var response = await service.AcceptWebhookAsync(
+            new SquareWebhookRequest(rawBody, signature, "Sandbox", notificationUrl),
+            CancellationToken.None);
+
+        Assert.Equal("accepted", response.Status);
+        var checkedRefund = Assert.Single(direct.CheckedRefunds);
+        Assert.Equal(("Sandbox", "refund-001", "payment-001"), checkedRefund);
+    }
+
+    [Fact]
+    public async Task AcceptWebhookAsync_WhenRefundCheckFails_StillAcceptsTheWebhook()
+    {
+        // 比对只是告警手段：失败绝不能让 webhook 返回错误（Square 会重试并放大噪音）。
+        var direct = new RecordingDirectService { CheckException = new InvalidOperationException("db down") };
+        const string notificationUrl = "https://example.com/api/v1/square/webhooks";
+        var rawBody = CreateRefundUpdatedPayload("COMPLETED");
+        var refundRepository = new InMemorySquareRefundRepository();
+        var service = new SquareTerminalBackendService(
+            new RecordingSquareTokenService(response: null),
+            new FakeSquareTerminalRestClient(),
+            new SquareWebhookVerifier(),
+            CreateWebhookOptions("sandbox-webhook-key"),
+            new InMemorySquareCheckoutSessionRepository(),
+            refundRepository,
+            direct);
+        var signature = CreateSignature("sandbox-webhook-key", notificationUrl, rawBody);
+
+        var response = await service.AcceptWebhookAsync(
+            new SquareWebhookRequest(rawBody, signature, "Sandbox", notificationUrl),
+            CancellationToken.None);
+
+        Assert.Equal("accepted", response.Status);
+        Assert.NotNull(await refundRepository.GetRefundAsync("Sandbox", "refund-001", CancellationToken.None));
+    }
+
+    private sealed class RecordingDirectService : ISquareDirectService
+    {
+        public List<(string Environment, string RefundId, string? PaymentId)> RecordedRefunds { get; } = [];
+
+        public List<(string Environment, string RefundId, string? PaymentId)> CheckedRefunds { get; } = [];
+
+        public Exception? RecordException { get; init; }
+
+        public Exception? CheckException { get; init; }
+
+        public Task RecordServerRefundAsync(string environment, string refundId, string? paymentId, CancellationToken cancellationToken)
+        {
+            if (RecordException is not null)
+            {
+                throw RecordException;
+            }
+
+            RecordedRefunds.Add((environment, refundId, paymentId));
+            return Task.CompletedTask;
+        }
+
+        public Task CheckRefundNotificationAsync(string environment, string refundId, string? paymentId, CancellationToken cancellationToken)
+        {
+            if (CheckException is not null)
+            {
+                throw CheckException;
+            }
+
+            CheckedRefunds.Add((environment, refundId, paymentId));
+            return Task.CompletedTask;
+        }
+
+        public Task<SquareDirectCredentialResponse> IssueCredentialAsync(string environment, string storeCode, string deviceCode, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<SquareDirectOriginResponse> RegisterOriginAsync(string environment, string checkoutId, string storeCode, string deviceCode, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task AcceptWebhookAsync_WhenRefundPayloadHasNoRefund_ThrowsPayloadInvalid()
     {
         const string notificationUrl = "https://example.com/api/v1/square/webhooks";

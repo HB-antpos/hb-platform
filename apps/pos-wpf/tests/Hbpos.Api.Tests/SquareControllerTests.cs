@@ -999,6 +999,9 @@ public sealed class SquareControllerTests
                 services.RemoveAll<ISquareTokenSchemaInitializer>();
                 services.AddSingleton(schemaInitializer ?? new NoOpSquareTokenSchemaInitializer());
 
+                // 直连 Square 服务会连库；本类测试的控制器 / 后端服务对它都是可选依赖，移除后按「未启用」处理。
+                services.RemoveAll<ISquareDirectService>();
+
                 services.RemoveAll<ILinklyCloudCredentialSchemaInitializer>();
                 services.AddSingleton<ILinklyCloudCredentialSchemaInitializer>(
                     new NoOpLinklyCloudCredentialSchemaInitializer());

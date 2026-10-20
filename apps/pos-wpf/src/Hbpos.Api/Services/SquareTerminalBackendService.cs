@@ -22,7 +22,9 @@ public sealed class SquareTerminalBackendService(
     ISquareWebhookVerifier? webhookVerifier = null,
     IOptions<SquareWebhookOptions>? webhookOptions = null,
     ISquareCheckoutSessionRepository? checkoutSessionRepository = null,
-    ISquareRefundRepository? refundRepository = null) : ISquareTerminalBackendService
+    ISquareRefundRepository? refundRepository = null,
+    ISquareDirectService? directService = null,
+    Microsoft.Extensions.Logging.ILogger<SquareTerminalBackendService>? logger = null) : ISquareTerminalBackendService
 {
     private const string TokenNotConfiguredCode = "SQUARE_TOKEN_NOT_CONFIGURED";
     private const string TokenNotConfiguredMessage = "Square token is not configured for this environment.";
@@ -198,7 +200,28 @@ public sealed class SquareTerminalBackendService(
     {
         ValidateIdempotencyKey(request.IdempotencyKey);
         var context = await GetRequestContextAsync(request.Environment, cancellationToken);
-        return await restClient.CreateRefundAsync(context.Environment, context.AccessToken, request, cancellationToken);
+        var refund = await restClient.CreateRefundAsync(context.Environment, context.AccessToken, request, cancellationToken);
+        await RecordServerRefundAsync(context.Environment, refund, request.PaymentId);
+        return refund;
+    }
+
+    // 记下服务端自己发起的退款号：直连门店的收银机持有令牌，之后 webhook 里「不在这张表」的退款即为非服务端发起，会告警。
+    // 记录失败只记日志、不影响退款本身（退款已在 Square 受理，不能因记账失败让收银员以为没退成）。
+    private async Task RecordServerRefundAsync(string environment, SquareRefundResponse refund, string paymentId)
+    {
+        if (directService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await directService.RecordServerRefundAsync(environment, refund.RefundId, paymentId, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(ex, "Failed to record server-created Square refund {RefundId}.", refund.RefundId);
+        }
     }
 
     public async Task<SquareRefundResponse?> GetRefundAsync(
@@ -417,6 +440,23 @@ public sealed class SquareTerminalBackendService(
                     UpdatedAt = refundUpdatedAt
                 },
                 cancellationToken);
+
+            if (directService is not null)
+            {
+                try
+                {
+                    await directService.CheckRefundNotificationAsync(
+                        environment,
+                        envelope.Refund.RefundId,
+                        envelope.Refund.PaymentId,
+                        cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // 比对只是告警手段，失败绝不能让 webhook 返回错误（Square 会重试并放大噪音）。
+                    logger?.LogWarning(ex, "Square refund notification check failed for {RefundId}.", envelope.Refund.RefundId);
+                }
+            }
         }
 
         if (string.Equals(envelope.EventType, "terminal.checkout.updated", StringComparison.OrdinalIgnoreCase))
