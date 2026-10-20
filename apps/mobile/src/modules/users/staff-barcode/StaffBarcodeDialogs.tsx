@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "react-native-qrcode-svg";
 import { ActivityIndicator, Button, Icon, Text } from "react-native-paper";
 import { LabelPrinterSetupSheet } from "@/components/printer/LabelPrinterSetupSheet";
-import { InfoCard, NoticeBox, resolvePersonName } from "@/modules/people";
+import { InfoCard, NoticeBox, resolvePersonalCodeLabelName, resolvePersonName } from "@/modules/people";
 import { PeopleSheet, SHEET_BUTTON_STYLE, SheetActions } from "@/modules/people/detail/people-sheet";
 import {
   confirmStaffCashierBarcodePrintApi,
@@ -193,7 +193,7 @@ export function StaffBarcodeDialog({
         storeCode,
         targets: [{
           userGuid: user.userGUID,
-          employeeName: user.fullName || user.username,
+          employeeName: resolvePersonalCodeLabelName(user),
           username: user.username,
           active: user.status === 1,
         }],
@@ -364,7 +364,7 @@ export function StaffBarcodeBatchDialog({
         setBatch(saved ?? createStaffBarcodeBatch({
           actorGuid,
           storeCode,
-          targets: users.map((user) => ({ userGuid: user.userGUID, employeeName: user.fullName || user.username, username: user.username, active: user.status === 1 })),
+          targets: users.map((user) => ({ userGuid: user.userGUID, employeeName: resolvePersonalCodeLabelName(user), username: user.username, active: user.status === 1 })),
         }));
         setPendingLoaded(true);
       })

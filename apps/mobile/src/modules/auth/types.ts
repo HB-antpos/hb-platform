@@ -47,6 +47,11 @@ export interface CurrentUser {
   username: string;
   email: string;
   fullName?: string;
+  /** 姓名拆分字段（/auth/current 在迁移 20261018 之后返回；旧后端或旧缓存缺省）。 */
+  givenName?: string;
+  middleName?: string;
+  familyName?: string;
+  nickname?: string;
   phone?: string;
   permissions: string[];
   roleNames: string[];

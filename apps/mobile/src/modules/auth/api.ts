@@ -64,6 +64,10 @@ function normalizeUserStores(payload: unknown): UserStoreDto[] {
     .filter((item) => Boolean(item.storeCode));
 }
 
+function optionalText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 export function normalizeCurrentUser(payload: unknown): CurrentUser {
   const data = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const userGuid =
@@ -89,6 +93,11 @@ export function normalizeCurrentUser(payload: unknown): CurrentUser {
       (typeof data.fullName === "string" && data.fullName) ||
       (typeof data.FullName === "string" && data.FullName) ||
       undefined,
+    // 个人码标签按「昵称 + 姓 / 名 + 姓首字母」打印，需要拆分字段；缺省保持 undefined。
+    givenName: optionalText(data.givenName ?? data.GivenName),
+    middleName: optionalText(data.middleName ?? data.MiddleName),
+    familyName: optionalText(data.familyName ?? data.FamilyName),
+    nickname: optionalText(data.nickname ?? data.Nickname),
     phone:
       (typeof data.phone === "string" && data.phone) ||
       (typeof data.Phone === "string" && data.Phone) ||
