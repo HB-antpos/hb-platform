@@ -51,10 +51,15 @@ async function run() {
       },
     },
     StyleSheet: { create: (styles: object) => styles },
+    // 该测试验证宽屏（非紧凑）布局下的焦点交接；窄屏「⋯」菜单布局不在这里覆盖
+    useWindowDimensions: () => ({ width: 800, height: 600, scale: 1, fontScale: 1 }),
     View: "View",
   });
   mockModule("react-native-paper", {
     Searchbar: FakeSearchbar,
+    Menu: Object.assign((props: Record<string, unknown>) => React.createElement("Menu", props), {
+      Item: (props: Record<string, unknown>) => React.createElement("MenuItem", props),
+    }),
     IconButton: (props: Record<string, unknown>) => React.createElement("IconButton", props),
     Text: (props: Record<string, unknown>) => React.createElement("Text", props),
   });
