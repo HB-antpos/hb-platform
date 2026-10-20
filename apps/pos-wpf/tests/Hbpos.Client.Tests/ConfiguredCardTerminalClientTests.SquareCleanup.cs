@@ -47,7 +47,9 @@ public sealed partial class ConfiguredCardTerminalClientTests
             CancelResponseStatus = "CANCEL_REQUESTED",
             CancelDelay = TimeSpan.FromSeconds(10),
             DismissDelay = TimeSpan.FromSeconds(10)
-        }, cancelConfirmWindow: TimeSpan.FromMilliseconds(200));
+        // 取消确认窗口走真实时间，期间测试循环仍在推进虚拟时间，会把 Elapsed 撑大；窗口设为零让它立即结束，
+        // 这样 Elapsed 才只反映「清理上限」本身。
+        }, cancelConfirmWindow: TimeSpan.Zero);
         using var cancellation = new CancellationTokenSource();
 
         var authorizeTask = harness.AuthorizeAsync(cancellation.Token);
