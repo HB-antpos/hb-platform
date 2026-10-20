@@ -8,9 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   View,
-  type StyleProp,
   type ViewToken,
-  type ViewStyle,
 } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -84,6 +82,7 @@ import {
 } from "@/modules/reports/periods";
 import { formatMoney, formatWholeMoney } from "@/modules/reports/format";
 import { GROWTH_COLORS, formatGrowthRate, getGrowthTone } from "@/modules/reports/growth-rate";
+import { GrowthPill, REPORT_UI, RankBadge } from "@/modules/reports/report-card-parts";
 import { REPORT_QUERY_OPTIONS } from "@/modules/reports/report-config";
 import {
   ReportLoadPerformanceTimer,
@@ -143,9 +142,8 @@ interface RevenueSummary {
   compareAverageTransaction: number | null;
 }
 
-type SummaryListItem =
-  | { type: "table-header" }
-  | { type: "branch"; row: BranchRevenueRow; rank: number };
+// 分店排行改成卡片行后不再有列标题哨兵条目：每条数据自带「同期 / 客单数 / 客单价」标签。
+type SummaryListItem = { type: "branch"; row: BranchRevenueRow; rank: number };
 
 function buildQuery(period: RevenuePeriod, branchCodes: readonly string[]) {
   const compareMode =
@@ -392,6 +390,144 @@ function RevenueSummaryCard({
         </View>
         </View>
       </ScrollView>
+    </View>
+  );
+}
+
+/** 日 / 周 / 月 紧凑分段：约 130pt 宽，给右侧分店选择留出空间（Paper SegmentedButtons 每段最小 76pt）。 */
+function PeriodSegment({
+  value,
+  options,
+  onChange,
+}: {
+  value: RevenuePeriodMode;
+  options: readonly { value: RevenuePeriodMode; label: string }[];
+  onChange: (value: RevenuePeriodMode) => void;
+}) {
+  return (
+    <View style={styles.periodSegment} accessibilityRole="radiogroup">
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: selected }}
+            hitSlop={{ top: 4, bottom: 4 }}
+            onPress={() => onChange(option.value)}
+            style={[styles.periodSegmentItem, selected ? styles.periodSegmentItemOn : null]}
+          >
+            <Text style={[styles.periodSegmentText, selected ? styles.periodSegmentTextOn : null]}>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** 客单数 / 客单价小格：标题行右侧是增长率文字，下方是本期值与同期值；同期未知时一律「—」。 */
+function RevenueKpiTile({
+  label,
+  current,
+  compare,
+  formatValue,
+  growthNewLabel,
+  compareLabel,
+}: {
+  label: string;
+  current: number | undefined;
+  compare: number | null | undefined;
+  formatValue: (value: number) => string;
+  growthNewLabel: string;
+  compareLabel: string;
+}) {
+  const hasGrowth = current != null && compare != null;
+  return (
+    <View style={styles.kpiTile}>
+      <View style={styles.kpiTitleRow}>
+        <Text variant="labelMedium" style={styles.kpiLabel} numberOfLines={1}>{label}</Text>
+        <Text
+          variant="labelMedium"
+          style={[styles.kpiGrowth, { color: hasGrowth ? GROWTH_COLORS[getGrowthTone(current, compare)] : REPORT_UI.muted }]}
+          numberOfLines={1}
+        >
+          {hasGrowth ? formatGrowthRate(current, compare, growthNewLabel) : "—"}
+        </Text>
+      </View>
+      <Text style={styles.kpiValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} selectable>
+        {current == null ? "—" : formatValue(current)}
+      </Text>
+      <Text variant="labelSmall" style={styles.muted} numberOfLines={1}>
+        {compareLabel} {compare == null ? "—" : formatValue(compare)}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * 全店汇总（页面顶部第一眼的数字）：营业额主数字 + 增长率胶囊 + 同期，
+ * 下面并排两个小格：客单数、客单价。字段与旧版汇总表一致（营业额 / 客单数 / 客单价 × 本期 / 同期 / 增长率）。
+ */
+function RevenueHeroCard({
+  title,
+  caption,
+  summary,
+}: {
+  title: string;
+  caption?: string;
+  summary: RevenueSummary | null;
+}) {
+  const { t } = useAppTranslation("common");
+  const growthNewLabel = t("reports.metrics.newGrowth");
+  const compareLabel = t("reports.metrics.compare");
+  return (
+    <View style={styles.heroCard}>
+      <View style={styles.heroTitleRow}>
+        <Text variant="titleMedium" style={styles.sectionTitle}>{title}</Text>
+        {caption ? (
+          <Text variant="bodySmall" style={[styles.muted, styles.heroCaption]} numberOfLines={1}>{caption}</Text>
+        ) : null}
+      </View>
+      <View style={styles.heroMain}>
+        <View style={styles.heroMainText}>
+          <Text variant="labelMedium" style={styles.muted}>
+            {t("reports.metrics.revenue")} · {t("reports.metrics.current")}
+          </Text>
+          <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} selectable>
+            {formatOptionalWholeMoney(summary?.revenue)}
+          </Text>
+          <Text variant="bodySmall" style={styles.muted}>
+            {compareLabel} {formatOptionalWholeMoney(summary?.compareRevenue)}
+          </Text>
+        </View>
+        <GrowthPill
+          size="lg"
+          current={summary?.revenue}
+          compare={summary?.compareRevenue}
+          newLabel={growthNewLabel}
+          style={styles.heroPill}
+        />
+      </View>
+      <View style={styles.kpiRow}>
+        <RevenueKpiTile
+          label={t("reports.metrics.transactions")}
+          current={summary?.transactions}
+          compare={summary?.compareTransactions}
+          formatValue={formatCount}
+          growthNewLabel={growthNewLabel}
+          compareLabel={compareLabel}
+        />
+        <RevenueKpiTile
+          label={t("reports.metrics.averageTransaction")}
+          current={summary?.averageTransaction}
+          compare={summary?.compareAverageTransaction}
+          formatValue={formatMoney}
+          growthNewLabel={growthNewLabel}
+          compareLabel={compareLabel}
+        />
+      </View>
     </View>
   );
 }
@@ -1213,107 +1349,91 @@ export function RevenueReportScreen({
     [drilldown]
   );
   const summaryListItems = useMemo<SummaryListItem[]>(
-    () => [
-      { type: "table-header" },
-      ...visibleRows.map((row) => ({
-        type: "branch" as const,
-        row,
-        rank: rows.findIndex((candidate) => candidate.id === row.id),
-      })),
-    ],
+    () => visibleRows.map((row) => ({
+      type: "branch" as const,
+      row,
+      rank: rows.findIndex((candidate) => candidate.id === row.id),
+    })),
     [rows, visibleRows]
+  );
+  // 排行卡片里的横条 = 该店营业额占榜首的比例，一眼看出与第一名的差距（不是占比，也不参与任何计算）。
+  const maxBranchRevenue = useMemo(
+    () => rows.reduce((max, row) => Math.max(max, row.revenue), 0),
+    [rows],
   );
   const growthNewLabel = t("reports.metrics.newGrowth");
   const getWeekdayLabel = (weekday: number) => t(`reports.weekdaysShort.${weekday}`);
+  // 日模式的日期框后面跟星期（周 / 月模式选的是区间，不显示）。
+  const selectedWeekday = getDetailDateParts(selectedDate).weekday;
 
-  const renderGrowthCell = (current: number, compare: number, columnStyle?: StyleProp<ViewStyle>) => {
-    const tone = getGrowthTone(current, compare);
+  // 分店排行卡片行：名次徽标 + 分店名/编号 + 增长率胶囊与营业额（下方同期）；
+  // 横条是与榜首的差距；底部一行写客单数、客单价的「本期 / 同期」。同期补算中统一显示「—」。
+  const renderSummaryRow = (item: BranchRevenueRow, rowIndex: number, isFirst: boolean, isLast: boolean) => {
+    const barPercent = maxBranchRevenue > 0
+      ? Math.min(100, Math.max(0, (item.revenue / maxBranchRevenue) * 100))
+      : 0;
+    const compareLabel = t("reports.metrics.compare");
     return (
-      <View style={[styles.growthColumn, columnStyle]}>
-        <TableText numeric style={[styles.strongText, { color: GROWTH_COLORS[tone] }]}>
-          {formatGrowthRate(current, compare, growthNewLabel)}
-        </TableText>
-      </View>
+      <Pressable
+        style={({ pressed }) => [
+          styles.rankCard,
+          isFirst ? styles.rankCardFirst : null,
+          isLast ? styles.rankCardLast : null,
+          pressed ? styles.rankCardPressed : null,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={t(
+          mode === "day"
+            ? "reports.accessibility.openHourlyDetail"
+            : "reports.accessibility.openDailyDetail",
+          { branch: `${formatOrdinal(rowIndex)} ${item.branchName || item.branchCode}` }
+        )}
+        onPress={() => setDrilldown({ type: mode === "day" ? "hourly" : "daily", branch: item })}
+      >
+        <View style={styles.rankCardTop}>
+          <RankBadge value={formatOrdinal(rowIndex)} highlight={rowIndex < 3} />
+          <View style={styles.rankCardName}>
+            {/* 最长的分店名（如 Discount General Charlestown）允许折两行，右侧金额区自然等高。 */}
+            <TableText style={styles.rankNameText} lines={2}>{item.branchName || item.branchCode}</TableText>
+            <TableText style={styles.muted}>{item.branchCode}</TableText>
+          </View>
+          <View style={styles.rankCardAmount}>
+            <View style={styles.rankCardAmountLine}>
+              <GrowthPill
+                size="sm"
+                current={item.revenue}
+                compare={item.compareRevenue}
+                newLabel={growthNewLabel}
+                unavailable={Boolean(item.compareUnavailable)}
+              />
+              <TableText numeric style={styles.rankAmountText}>{formatWholeMoney(item.revenue)}</TableText>
+            </View>
+            <TableText numeric style={styles.muted}>
+              {`${compareLabel} ${item.compareUnavailable ? "—" : formatWholeMoney(item.compareRevenue)}`}
+            </TableText>
+          </View>
+        </View>
+        <View style={styles.rankBarTrack} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <View style={[styles.rankBarFill, { width: `${barPercent}%` as `${number}%` }]} />
+        </View>
+        <View style={styles.rankMetricsRow}>
+          <Text style={styles.rankMetric} numberOfLines={1}>
+            <Text style={styles.muted}>{t("reports.metrics.transactions")} </Text>
+            <Text style={styles.strongText}>{formatCount(item.transactions)}</Text>
+            <Text style={styles.muted}> / {item.compareUnavailable ? "—" : formatCount(item.compareTransactions)}</Text>
+          </Text>
+          <Text style={styles.rankMetric} numberOfLines={1}>
+            <Text style={styles.muted}>{t("reports.metrics.averageTransaction")} </Text>
+            <Text style={styles.strongText}>{formatMoney(item.averageTransaction)}</Text>
+            <Text style={styles.muted}> / {item.compareUnavailable ? "—" : formatMoney(item.compareAverageTransaction)}</Text>
+          </Text>
+        </View>
+        <Text style={styles.chevronText} accessibilityElementsHidden>›</Text>
+      </Pressable>
     );
   };
 
-  const renderSummaryRow = (item: BranchRevenueRow, rowIndex: number, isLast: boolean) => (
-    <Pressable
-      style={[
-        styles.tableRow,
-        styles.summaryTableRow,
-        isLast ? styles.lastSummaryTableRow : null,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={t(
-        mode === "day"
-          ? "reports.accessibility.openHourlyDetail"
-          : "reports.accessibility.openDailyDetail",
-        { branch: `${formatOrdinal(rowIndex)} ${item.branchName || item.branchCode}` }
-      )}
-      onPress={() => setDrilldown({ type: mode === "day" ? "hourly" : "daily", branch: item })}
-    >
-      <View style={styles.rankColumn}>
-        <TableText style={styles.rankText}>{formatOrdinal(rowIndex)}</TableText>
-      </View>
-      <View style={styles.branchColumn}>
-        {/* 最长的分店名（如 Discount General Charlestown）允许折两行，与右侧三行数字同高。 */}
-        <TableText style={styles.strongText} lines={2}>{item.branchName || item.branchCode}</TableText>
-        <TableText style={styles.muted}>{item.branchCode}</TableText>
-      </View>
-      <View style={styles.amountColumn}>
-        <TableText numeric style={styles.strongText}>{formatWholeMoney(item.revenue)}</TableText>
-        <TableText numeric style={styles.muted}>
-          {item.compareUnavailable ? "—" : formatWholeMoney(item.compareRevenue)}
-        </TableText>
-        {item.compareUnavailable ? (
-          <TableText numeric style={[styles.compactGrowthText, styles.muted]}>—</TableText>
-        ) : (
-          <TableText
-            numeric
-            style={[styles.compactGrowthText, { color: GROWTH_COLORS[getGrowthTone(item.revenue, item.compareRevenue)] }]}
-          >
-            {formatGrowthRate(item.revenue, item.compareRevenue, growthNewLabel)}
-          </TableText>
-        )}
-      </View>
-      <View style={styles.countColumn}>
-        <TableText numeric style={styles.strongText}>{formatCount(item.transactions)}</TableText>
-        <TableText numeric style={styles.muted}>
-          {item.compareUnavailable ? "—" : formatCount(item.compareTransactions)}
-        </TableText>
-      </View>
-      <View style={styles.averageColumn}>
-        <TableText numeric style={styles.strongText}>{formatMoney(item.averageTransaction)}</TableText>
-        <TableText numeric style={styles.muted}>
-          {item.compareUnavailable ? "—" : formatMoney(item.compareAverageTransaction)}
-        </TableText>
-      </View>
-      <Text style={styles.chevronText} accessibilityElementsHidden>›</Text>
-    </Pressable>
-  );
-
-  const renderSummaryTableHeader = () => (
-    <View style={[styles.tableRow, styles.summaryTableRow, styles.tableHeaderRow, styles.summaryTableHeaderRow]}>
-      <View style={styles.rankColumn}>
-        <TableText style={styles.headerText}>#</TableText>
-      </View>
-      <View style={styles.branchColumn}>
-        <TableText style={styles.headerText}>{t("productReport.filters.store")}</TableText>
-      </View>
-      <View style={styles.amountColumn}>
-        <TableText numeric style={styles.headerText}>{t("reports.metrics.revenue")}</TableText>
-      </View>
-      <View style={styles.countColumn}>
-        <TableText numeric style={styles.headerText}>{t("reports.metrics.transactions")}</TableText>
-      </View>
-      <View style={styles.averageColumn}>
-        <TableText numeric style={styles.headerText}>{t("reports.metrics.averageTransaction")}</TableText>
-      </View>
-      <View style={styles.chevronColumn} />
-    </View>
-  );
-
+  // 明细抽屉卡片行：序号 · 时段 · 营业额（同期在下）· 增长率；第二行是客单数、客单价的「本期 / 同期」。
   const renderDetailRow = (item: DetailRow, index: number) => {
     const hourlyView = isHourlyDetailView(item) ? item : null;
     const upcoming = hourlyView?.status === "upcoming";
@@ -1322,68 +1442,73 @@ export function RevenueReportScreen({
     const compareUnavailable = isDailyRow(item) && Boolean(item.compareUnavailable);
     // 进行中的小时只有半截数据，数值弱化显示且不算增长率；未到的小时只保留去年值。
     const currentStyle = inProgress ? styles.detailLiveValue : styles.strongText;
+    const mutedValue = upcoming ? styles.muted : currentStyle;
+    const compareLabel = t("reports.metrics.compare");
+    const compareText = (formatter: (value: number) => string, value: number) =>
+      compareUnavailable ? "—" : formatter(value);
+    const currentText = (formatter: (value: number) => string, value: number) =>
+      upcoming ? "—" : formatter(value);
     return (
       <View
         style={[
-          styles.tableRow,
-          styles.summaryTableRow,
-          styles.detailTableRow,
+          styles.detailCard,
           // 高亮「截至所选整点」的累计行；逐小时口径下这一行是 11–12 点，易被误读为 12 点，故不高亮。
           hourlyView?.isCutoffRow && hourlyDetailMode === "cumulative" ? styles.detailCutoffRow : null,
           upcoming ? styles.detailUpcomingRow : null,
-          index === detailListRows.length - 1 ? styles.lastSummaryTableRow : null,
+          index === 0 ? styles.detailCardFirst : null,
+          index === detailListRows.length - 1 ? styles.detailCardLast : null,
         ]}
       >
-        <View style={styles.detailRankColumn}>
-          <TableText style={styles.rankText}>{formatOrdinal(index)}</TableText>
-        </View>
-        <View style={styles.detailPeriodColumn}>
-          {hourlyView && hourlyDetailMode === "cumulative" ? (
-            <TableText style={styles.strongText}>{formatHourLabel(hourlyView.boundaryHour)}</TableText>
-          ) : (
-            <DetailPeriodText item={item} getWeekdayLabel={getWeekdayLabel} />
-          )}
-          {inProgress ? (
-            <Text style={styles.detailLiveTag} numberOfLines={1}>
-              {t("reports.cumulative.live", { time: detailLiveTimeLabel ?? "" })}
-            </Text>
-          ) : upcoming ? (
-            <TableText style={styles.muted}>{t("reports.cumulative.upcoming")}</TableText>
-          ) : null}
-        </View>
-        <View style={styles.detailAmountColumn}>
-          <TableText numeric style={upcoming ? styles.muted : currentStyle}>
-            {upcoming ? "—" : formatWholeMoney(item.revenue)}
-          </TableText>
-          <TableText numeric style={styles.muted}>
-            {compareUnavailable ? "—" : formatWholeMoney(item.compareRevenue)}
-          </TableText>
-        </View>
-        {inProgress || upcoming || compareUnavailable ? (
-          <View style={[styles.growthColumn, styles.detailGrowthColumn]}>
-            <TableText numeric style={[styles.compactGrowthText, styles.muted]}>
-              {inProgress && hourlyView
-                ? t("reports.cumulative.comparedAt", { time: formatHourLabel(hourlyView.boundaryHour) })
-                : "—"}
+        <View style={styles.detailCardTop}>
+          <RankBadge value={formatOrdinal(index)} />
+          <View style={styles.detailPeriodColumn}>
+            {hourlyView && hourlyDetailMode === "cumulative" ? (
+              <TableText style={styles.strongText} noTruncate>
+                {`${t("reports.cumulative.upTo")} ${formatHourLabel(hourlyView.boundaryHour)}`}
+              </TableText>
+            ) : (
+              <DetailPeriodText item={item} getWeekdayLabel={getWeekdayLabel} />
+            )}
+            {inProgress ? (
+              <Text style={styles.detailLiveTag} numberOfLines={1}>
+                {t("reports.cumulative.live", { time: detailLiveTimeLabel ?? "" })}
+              </Text>
+            ) : upcoming ? (
+              <TableText style={styles.muted}>{t("reports.cumulative.upcoming")}</TableText>
+            ) : null}
+          </View>
+          <View style={styles.detailAmountColumn}>
+            <TableText numeric style={[mutedValue, styles.detailAmountLeft, styles.detailAmountText]}>
+              {currentText(formatWholeMoney, item.revenue)}
+            </TableText>
+            <TableText numeric style={[styles.muted, styles.detailAmountLeft]}>
+              {`${compareLabel} ${compareText(formatWholeMoney, item.compareRevenue)}`}
             </TableText>
           </View>
-        ) : renderGrowthCell(item.revenue, item.compareRevenue, styles.detailGrowthColumn)}
-        <View style={styles.detailCountColumn}>
-          <TableText numeric style={upcoming ? styles.muted : currentStyle}>
-            {upcoming ? "—" : formatCount(item.transactions)}
-          </TableText>
-          <TableText numeric style={styles.muted}>
-            {compareUnavailable ? "—" : formatCount(item.compareTransactions)}
-          </TableText>
+          <View style={styles.detailGrowthColumn}>
+            {inProgress && hourlyView ? (
+              <TableText numeric style={[styles.compactGrowthText, styles.muted]}>
+                {t("reports.cumulative.comparedAt", { time: formatHourLabel(hourlyView.boundaryHour) })}
+              </TableText>
+            ) : (
+              <GrowthPill
+                size="sm"
+                current={item.revenue}
+                compare={item.compareRevenue}
+                newLabel={growthNewLabel}
+                unavailable={upcoming || compareUnavailable}
+              />
+            )}
+          </View>
         </View>
-        <View style={styles.detailAmountColumn}>
-          <TableText numeric style={upcoming ? styles.muted : currentStyle}>
-            {upcoming ? "—" : formatMoney(item.averageTransaction)}
-          </TableText>
-          <TableText numeric style={styles.muted}>
-            {compareUnavailable ? "—" : formatMoney(item.compareAverageTransaction)}
-          </TableText>
-        </View>
+        <Text style={styles.detailMetricsLine} numberOfLines={1}>
+          <Text style={styles.muted}>{t("reports.metrics.transactions")} </Text>
+          <Text style={mutedValue}>{currentText(formatCount, item.transactions)}</Text>
+          <Text style={styles.muted}> / {compareText(formatCount, item.compareTransactions)}</Text>
+          <Text style={styles.muted}>{"   "}{t("reports.metrics.averageTransaction")} </Text>
+          <Text style={mutedValue}>{currentText(formatMoney, item.averageTransaction)}</Text>
+          <Text style={styles.muted}> / {compareText(formatMoney, item.compareAverageTransaction)}</Text>
+        </Text>
       </View>
     );
   };
@@ -1398,14 +1523,12 @@ export function RevenueReportScreen({
         </View>
       ) : null}
 
-      {/* 过滤、汇总和 28 家分店共用一个虚拟列表；表头吸顶且不对分店分页。 */}
+      {/* 期间卡、全店汇总、累计曲线和 28 家分店卡片共用一个虚拟列表；不对分店分页。 */}
       <FlatList
         data={summaryListItems}
-        keyExtractor={(item) => item.type === "table-header" ? item.type : item.row.id}
+        keyExtractor={(item) => item.row.id}
         renderItem={({ item, index }) =>
-          item.type === "table-header"
-            ? renderSummaryTableHeader()
-            : renderSummaryRow(item.row, item.rank, index === summaryListItems.length - 1)
+          renderSummaryRow(item.row, item.rank, index === 0, index === summaryListItems.length - 1)
         }
         initialNumToRender={12}
         maxToRenderPerBatch={12}
@@ -1417,18 +1540,18 @@ export function RevenueReportScreen({
         contentInsetAdjustmentBehavior="automatic"
         ListHeaderComponent={
           <View style={styles.listHeader}>
+            {/* 期间卡：第一行切日 / 周 / 月并选分店；第二行翻期、选日期、两个快捷键。 */}
             <View style={styles.filtersCard}>
-              <SegmentedButtons
-                value={mode}
-                onValueChange={(value) => setPeriodMode(value as RevenuePeriodMode)}
-                buttons={[
-                  { value: "day", label: t("reports.periods.day") },
-                  { value: "week", label: t("reports.periods.week") },
-                  { value: "month", label: t("reports.periods.month") },
-                ]}
-              />
-
-              <View style={styles.dateNavigationRow}>
+              <View style={styles.periodRow}>
+                <PeriodSegment
+                  value={mode}
+                  onChange={setPeriodMode}
+                  options={[
+                    { value: "day", label: t("reports.periods.day") },
+                    { value: "week", label: t("reports.periods.week") },
+                    { value: "month", label: t("reports.periods.month") },
+                  ]}
+                />
                 <Pressable
                   style={styles.branchFilterButton}
                   accessibilityRole="button"
@@ -1450,54 +1573,78 @@ export function RevenueReportScreen({
                   </View>
                   <Text style={styles.branchFilterChevron}>⌄</Text>
                 </Pressable>
-                <MonthDatePickerField
-                  compact
-                  value={selectedDate}
-                  minDate={dateBounds.minDate}
-                  maxDate={dateBounds.maxDate}
-                  label={t("reports.periods.date")}
-                  onChange={(date) => setActivePeriod(getRevenuePeriodForDate(mode, date), date)}
-                  style={styles.datePicker}
-                />
               </View>
 
+              {/* 日期组与快捷键组放在可换行的工具栏：中文一行放得下，英文（Today / Yesterday、This week…）自动换到下一行。 */}
               <View style={styles.toolbar}>
-                <IconButton
-                  icon="chevron-left"
-                  mode="outlined"
-                  size={20}
-                  disabled={!isRevenuePeriodAvailable(previousPeriod, dateBounds)}
-                  accessibilityLabel={t("reports.actions.previous")}
-                  onPress={() => setActivePeriod(previousPeriod)}
-                  style={styles.dateNavigationButton}
-                />
-                <Button
-                  compact
-                  mode={isCurrentPeriod ? "contained" : "outlined"}
-                  onPress={() => setActivePeriod(currentPeriod, dateBounds.maxDate)}
-                  style={styles.shortcutButton}
-                >
-                  {currentShortcut}
-                </Button>
-                <Button
-                  compact
-                  mode={isPreviousShortcutPeriod ? "contained" : "outlined"}
-                  onPress={() => setActivePeriod(previousShortcutPeriod)}
-                  style={styles.shortcutButton}
-                >
-                  {previousShortcut.label}
-                </Button>
-                <IconButton
-                  icon="chevron-right"
-                  mode="outlined"
-                  size={20}
-                  disabled={!isRevenuePeriodAvailable(nextPeriod, dateBounds)}
-                  accessibilityLabel={t("reports.actions.next")}
-                  onPress={() => setActivePeriod(nextPeriod)}
-                  style={styles.dateNavigationButton}
-                />
+                <View style={styles.dateGroup}>
+                  <IconButton
+                    icon="chevron-left"
+                    mode="outlined"
+                    size={20}
+                    disabled={!isRevenuePeriodAvailable(previousPeriod, dateBounds)}
+                    accessibilityLabel={t("reports.actions.previous")}
+                    onPress={() => setActivePeriod(previousPeriod)}
+                    style={styles.dateNavigationButton}
+                  />
+                  <MonthDatePickerField
+                    compact
+                    value={selectedDate}
+                    minDate={dateBounds.minDate}
+                    maxDate={dateBounds.maxDate}
+                    label={t("reports.periods.date")}
+                    valueSuffix={mode === "day" && selectedWeekday !== null ? getWeekdayLabel(selectedWeekday) : undefined}
+                    onChange={(date) => setActivePeriod(getRevenuePeriodForDate(mode, date), date)}
+                    style={styles.datePicker}
+                  />
+                  <IconButton
+                    icon="chevron-right"
+                    mode="outlined"
+                    size={20}
+                    disabled={!isRevenuePeriodAvailable(nextPeriod, dateBounds)}
+                    accessibilityLabel={t("reports.actions.next")}
+                    onPress={() => setActivePeriod(nextPeriod)}
+                    style={styles.dateNavigationButton}
+                  />
+                </View>
+                <View style={styles.quickGroup}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isCurrentPeriod }}
+                    onPress={() => setActivePeriod(currentPeriod, dateBounds.maxDate)}
+                    style={[styles.shortcutChip, isCurrentPeriod ? styles.shortcutChipOn : null]}
+                  >
+                    <Text style={[styles.shortcutChipText, isCurrentPeriod ? styles.shortcutChipTextOn : null]} numberOfLines={1}>
+                      {currentShortcut}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isPreviousShortcutPeriod }}
+                    onPress={() => setActivePeriod(previousShortcutPeriod)}
+                    style={[styles.shortcutChip, isPreviousShortcutPeriod ? styles.shortcutChipOn : null]}
+                  >
+                    <Text
+                      style={[styles.shortcutChipText, isPreviousShortcutPeriod ? styles.shortcutChipTextOn : null]}
+                      numberOfLines={1}
+                    >
+                      {previousShortcut.label}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
+
+            {/* 全店汇总提到顶部：打开页面第一眼就是总营业额（原先压在 28 家分店列表的最底部）。 */}
+            {scopedRows.length > 0 && !summaryPending ? (
+              <RevenueHeroCard
+                title={t("reports.sections.summary")}
+                caption={`${t("reports.branchCount", { count: scopedRows.length })} · ${getPeriodLabel(period)}${
+                  rankingCutoffLabel ? ` · ${t("reports.cumulative.asOfShort", { time: rankingCutoffLabel })}` : ""
+                }`}
+                summary={summary}
+              />
+            ) : null}
 
             {mode === "day" && summaryQueryEnabled ? (
               <CumulativeRevenueCard
@@ -1596,7 +1743,6 @@ export function RevenueReportScreen({
             ) : null}
           </View>
         }
-        stickyHeaderIndices={[1]}
         refreshControl={<RefreshControl refreshing={summaryRefreshing} onRefresh={refresh} />}
         ListFooterComponent={
           <>
@@ -1625,17 +1771,6 @@ export function RevenueReportScreen({
             ) : visibleRows.length === 0 ? (
               <View style={styles.summaryTableState}>
                 <StateBox label={t("reports.states.empty")} />
-              </View>
-            ) : null}
-            {scopedRows.length > 0 && !summaryPending ? (
-              <View style={styles.summaryFooter}>
-                <RevenueSummaryCard
-                  title={t("reports.sections.summary")}
-                  caption={`${t("reports.branchCount", { count: scopedRows.length })} · ${getPeriodLabel(period)}${
-                    rankingCutoffLabel ? ` · ${t("reports.cumulative.asOfShort", { time: rankingCutoffLabel })}` : ""
-                  }`}
-                  summary={summary}
-                />
               </View>
             ) : null}
           </>
@@ -1671,13 +1806,7 @@ export function RevenueReportScreen({
             {freshnessLabel ? <Text variant="bodySmall" style={styles.positiveText}>{freshnessLabel}</Text> : null}
           </View>
 
-          {/* 汇总、累计曲线、口径切换与表头放进列表头部，整张抽屉一起滚动；业务行仍是列表条目以保留首行可见计时。 */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator
-            style={styles.detailHorizontalScroll}
-            contentContainerStyle={styles.detailHorizontalContent}
-          >
+          {/* 汇总、累计曲线与口径切换放进列表头部，整张抽屉一起滚动；业务行仍是列表条目以保留首行可见计时。 */}
           <FlatList
             data={detailListRows}
             keyExtractor={(item) => item.id}
@@ -1761,36 +1890,6 @@ export function RevenueReportScreen({
                   </Text>
                 ) : null}
 
-                <View
-                  style={[
-                    styles.tableRow,
-                    styles.summaryTableRow,
-                    styles.tableHeaderRow,
-                    styles.summaryTableHeaderRow,
-                    styles.detailTableRow,
-                  ]}
-                >
-                  <View style={styles.detailRankColumn}><TableText style={styles.headerText}>#</TableText></View>
-                  <View style={styles.detailPeriodColumn}>
-                    <TableText style={styles.headerText}>
-                      {drilldown?.type === "hourly" && hourlyDetailMode === "cumulative"
-                        ? t("reports.cumulative.upTo")
-                        : mode === "day" ? t("reports.periods.time") : t("reports.periods.date")}
-                    </TableText>
-                  </View>
-                  <View style={styles.detailAmountColumn}>
-                    <TableText numeric style={styles.headerText}>{t("reports.metrics.revenue")}</TableText>
-                  </View>
-                  <View style={styles.detailGrowthColumn}>
-                    <TableText numeric style={styles.headerText}>{t("reports.metrics.growthRate")}</TableText>
-                  </View>
-                  <View style={styles.detailCountColumn}>
-                    <TableText numeric style={styles.headerText}>{t("reports.metrics.transactions")}</TableText>
-                  </View>
-                  <View style={styles.detailAmountColumn}>
-                    <TableText numeric style={styles.headerText}>{t("reports.metrics.averageTransaction")}</TableText>
-                  </View>
-                </View>
               </View>
             }
             ListEmptyComponent={
@@ -1818,7 +1917,6 @@ export function RevenueReportScreen({
               </Text>
             ) : null}
           />
-          </ScrollView>
         </Modal>
 
         <Modal
@@ -1988,35 +2086,60 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   filtersCard: {
-    gap: 6,
-    padding: 6,
+    gap: 9,
+    padding: 10,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
   },
-  dateNavigationRow: {
+  periodRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
   },
-  dateNavigationButton: {
-    margin: 0,
-    borderColor: "#CBD5E1",
+  periodSegment: {
+    flexDirection: "row",
+    gap: 2,
+    padding: 3,
+    borderRadius: 10,
+    backgroundColor: "#F2F4F7",
+  },
+  periodSegmentItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
   },
+  periodSegmentItemOn: {
+    backgroundColor: REPORT_UI.accent,
+  },
+  periodSegmentText: {
+    color: "#475467",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  periodSegmentTextOn: {
+    color: "#FFFFFF",
+  },
+  dateNavigationButton: {
+    width: 32,
+    height: 32,
+    margin: 0,
+    borderColor: REPORT_UI.border,
+    borderRadius: 10,
+  },
   branchFilterButton: {
-    minHeight: 44,
-    flex: 0.9,
+    minHeight: 40,
+    flex: 1,
     minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#CBD5E1",
-    borderRadius: 8,
+    borderColor: REPORT_UI.border,
+    borderRadius: 10,
     paddingLeft: 10,
     paddingRight: 6,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: REPORT_UI.card,
   },
   branchFilterTextBlock: {
     flex: 1,
@@ -2033,11 +2156,118 @@ const styles = StyleSheet.create({
   },
   toolbar: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: 6,
+    rowGap: 8,
+  },
+  dateGroup: {
+    flexGrow: 1,
+    flexBasis: 240,
+    minWidth: 240,
+    flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  shortcutButton: {
+  quickGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  shortcutChip: {
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 9,
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 17,
+    backgroundColor: REPORT_UI.card,
+  },
+  shortcutChipOn: {
+    borderColor: "#B2CCFF",
+    backgroundColor: REPORT_UI.accentSoft,
+  },
+  shortcutChipText: {
+    color: REPORT_UI.subText,
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  shortcutChipTextOn: {
+    color: REPORT_UI.accent,
+  },
+  heroCard: {
+    gap: 4,
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: REPORT_UI.card,
+  },
+  heroTitleRow: {
+    gap: 2,
+  },
+  heroCaption: {
+    fontVariant: ["tabular-nums"],
+  },
+  heroMain: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 4,
+  },
+  heroMainText: {
     flex: 1,
+    minWidth: 0,
+  },
+  heroValue: {
+    color: REPORT_UI.text,
+    fontSize: 30,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+    letterSpacing: -0.6,
+    lineHeight: 36,
+  },
+  heroPill: {
+    marginBottom: 6,
+  },
+  kpiRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 8,
+  },
+  kpiTile: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+    borderWidth: 1,
+    borderColor: REPORT_UI.divider,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: REPORT_UI.tile,
+  },
+  kpiTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  kpiLabel: {
+    flexShrink: 1,
+    color: REPORT_UI.muted,
+    fontWeight: "600",
+  },
+  kpiGrowth: {
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+  },
+  kpiValue: {
+    color: REPORT_UI.text,
+    fontSize: 18,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
   },
   summaryCard: {
     overflow: "hidden",
@@ -2120,125 +2350,162 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     backgroundColor: "#FFFFFF",
   },
-  tableRow: {
-    minHeight: 54,
+  rankCard: {
+    minHeight: 64,
+    gap: 6,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: REPORT_UI.border,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: REPORT_UI.card,
+  },
+  rankCardFirst: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+  },
+  rankCardLast: {
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+  rankCardPressed: {
+    backgroundColor: "#F5F8FF",
+  },
+  rankCardTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  rankCardName: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rankNameText: {
+    color: REPORT_UI.text,
+    fontSize: 14.5,
+    fontWeight: "700",
+    lineHeight: 19,
+  },
+  rankCardAmount: {
+    flexShrink: 0,
+    alignItems: "flex-end",
+  },
+  rankCardAmountLine: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    gap: 6,
   },
-  tableHeaderRow: {
-    minHeight: 34,
-    backgroundColor: "#F3F4F6",
+  rankAmountText: {
+    color: REPORT_UI.text,
+    fontSize: 16,
+    fontWeight: "800",
   },
-  summaryTableRow: {
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderColor: "#E5E7EB",
-    backgroundColor: "#FFFFFF",
-  },
-  summaryTableHeaderRow: {
+  rankBarTrack: {
+    height: 4,
+    marginLeft: 32,
     overflow: "hidden",
-    borderTopWidth: 1,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    backgroundColor: "#F3F4F6",
+    borderRadius: 2,
+    backgroundColor: "#F2F4F7",
   },
-  lastSummaryTableRow: {
-    overflow: "hidden",
-    borderBottomLeftRadius: 10,
-    borderBottomRightRadius: 10,
-    borderBottomWidth: 1,
+  rankBarFill: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: REPORT_UI.accentBar,
   },
-  summaryTableState: {
-    overflow: "hidden",
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#E5E7EB",
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
-    backgroundColor: "#FFFFFF",
+  rankMetricsRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 16,
+    marginLeft: 32,
+    paddingRight: 14,
   },
-  summaryFooter: {
-    marginTop: 8,
-  },
-  rankColumn: {
-    width: 26,
-    minWidth: 0,
-  },
-  rankText: {
-    color: "#64748B",
+  rankMetric: {
+    flexShrink: 1,
+    color: REPORT_UI.text,
+    fontSize: 12,
     fontVariant: ["tabular-nums"],
   },
-  // 分店列吃掉全部剩余宽度；数字列按内容定宽（月度单店营业额约 $250,000、客单数 5 位以内）。
-  // 原先四列都用 flex 比例 + minWidth，Yoga 会把数字列 minWidth 撑出的差额全部从分店列扣掉，名称只剩两三个字母。
-  branchColumn: {
-    flex: 1,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  amountColumn: {
-    width: 68,
-    flexShrink: 0,
-  },
-  countColumn: {
-    width: 46,
-    flexShrink: 0,
-  },
-  averageColumn: {
-    width: 56,
-    flexShrink: 0,
-  },
-  chevronColumn: {
-    width: 12,
-  },
   chevronText: {
-    width: 12,
-    color: "#64748B",
-    fontSize: 25,
-    lineHeight: 28,
-    textAlign: "center",
+    position: "absolute",
+    right: 5,
+    bottom: 8,
+    color: "#98A2B3",
+    fontSize: 20,
+    lineHeight: 22,
   },
   compactGrowthText: {
     fontSize: 11,
     lineHeight: 14,
     fontWeight: "700",
   },
-  growthColumn: {
-    width: 60,
-    minWidth: 0,
+  detailCard: {
+    gap: 4,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: REPORT_UI.border,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    backgroundColor: REPORT_UI.card,
   },
-  detailTableRow: {
-    minHeight: 54,
-    gap: 2,
-    paddingHorizontal: 4,
-    paddingVertical: 5,
+  detailCardFirst: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+  },
+  detailCardLast: {
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+  detailCardTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  detailPeriodColumn: {
+    // 周/月抽屉保留完整日期（YYYY-MM-DD）和星期，所以定宽 78 不让它被压成省略号。
+    width: 78,
+    flexShrink: 0,
+  },
+  detailAmountColumn: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "flex-start",
+  },
+  detailAmountLeft: {
+    textAlign: "left",
+  },
+  detailAmountText: {
+    fontSize: 14.5,
+    fontWeight: "800",
+  },
+  detailGrowthColumn: {
+    flexShrink: 0,
+    alignItems: "flex-end",
+    paddingTop: 1,
+  },
+  detailMetricsLine: {
+    marginLeft: 32,
+    color: REPORT_UI.text,
+    fontSize: 11.5,
+    fontVariant: ["tabular-nums"],
+  },
+  rankText: {
+    color: "#64748B",
+    fontVariant: ["tabular-nums"],
   },
   detailRankColumn: {
     width: 23,
     minWidth: 0,
   },
-  detailPeriodColumn: {
-    // 周/月弹窗保留完整日期和星期缩写，避免日期被压成省略号。
-    flex: 1.35,
-    minWidth: 0,
-  },
-  detailAmountColumn: {
-    flex: 0.9,
-    minWidth: 96,
-    flexShrink: 0,
-  },
-  detailGrowthColumn: {
-    width: 54,
-    minWidth: 0,
-  },
-  detailCountColumn: {
-    flex: 0.58,
-    minWidth: 0,
+  summaryTableState: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: REPORT_UI.border,
+    borderRadius: 14,
+    backgroundColor: REPORT_UI.card,
   },
   tableCellText: {
     color: "#111827",
@@ -2299,15 +2566,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#CBD5E1",
   },
   modalList: {
-    flex: 1,
-    minHeight: 0,
-    minWidth: 500,
-  },
-  detailHorizontalContent: {
-    minWidth: 500,
-    flexGrow: 1,
-  },
-  detailHorizontalScroll: {
     flex: 1,
     minHeight: 0,
   },
