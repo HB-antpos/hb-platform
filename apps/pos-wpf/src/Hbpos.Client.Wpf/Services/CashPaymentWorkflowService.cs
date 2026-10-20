@@ -12,6 +12,9 @@ namespace Hbpos.Client.Wpf.Services;
 
 public interface ICashPaymentWorkflowService
 {
+    /// <summary>进付款页时提前建好刷卡终端到后端的连接（尽力而为）；默认什么都不做，旧实现与测试替身无需改动。</summary>
+    Task WarmUpCardTerminalAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     bool TryParseTenderedAmount(string? amountTenderedText, out decimal tenderedAmount);
 
     decimal CalculateChange(string? amountTenderedText, decimal actualAmount);
@@ -232,6 +235,9 @@ public sealed class CashPaymentWorkflowService(
                 CardTransactions: [transaction], IdempotencyKey: reference),
             "payment.status.cardTenderAdded"));
     }
+
+    public Task WarmUpCardTerminalAsync(CancellationToken cancellationToken = default) =>
+        _cardTerminalClient.WarmUpAsync(cancellationToken);
 
     public async Task<PaymentTenderAttemptResult> AddTenderAsync(
         PaymentMethodKind method,
@@ -4781,6 +4787,9 @@ public sealed class CashPaymentWorkflowService(
 
 public interface ICardTerminalClient
 {
+    /// <summary>进付款页时提前建好到后端的连接，缩短第一笔刷卡的等待；默认什么都不做，旧实现与测试替身无需改动。</summary>
+    Task WarmUpAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     Task<PaymentAuthorizationResult> AuthorizeAsync(
         decimal amount,
         PosSessionState session,

@@ -180,7 +180,9 @@ public sealed class PaymentTerminalSelectionViewModelTests
         {
             return targetMethod?.Name switch
             {
-                nameof(ICardTerminalSetupService.LoadConfigurationAsync) => Task.FromResult(Configuration),
+                // 付款页改用不联网查令牌状态的读取方式；DispatchProxy 不会走接口默认实现，两个入口都要认。
+                nameof(ICardTerminalSetupService.LoadConfigurationAsync) or
+                nameof(ICardTerminalSetupService.LoadConfigurationWithoutTokenStatusAsync) => Task.FromResult(Configuration),
                 nameof(ICardTerminalSetupService.ListLinklyCloudBackendTerminalsAsync) => List(),
                 nameof(ICardTerminalSetupService.SelectLinklyCloudBackendTerminalAsync) => Select(args),
                 _ => throw new NotSupportedException(targetMethod?.Name)

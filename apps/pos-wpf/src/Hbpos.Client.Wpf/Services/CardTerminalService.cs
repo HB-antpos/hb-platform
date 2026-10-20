@@ -493,6 +493,13 @@ public interface ICardTerminalSettingsStore : ICardTerminalSettingsProvider, ISq
 {
     Task<CardTerminalConfiguration> LoadAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 读取配置但不联网查 Square 令牌状态（<see cref="CardTerminalConfiguration.HasProtectedSquareAccessToken"/> 只反映本机旧缓存）。
+    /// 付款页只需要处理器 / 环境 / Linkly 模式，用它可免掉一次到新加坡的往返；默认回退到 LoadAsync，旧实现与测试替身无需改动。
+    /// </summary>
+    Task<CardTerminalConfiguration> LoadWithoutTokenStatusAsync(CancellationToken cancellationToken = default) =>
+        LoadAsync(cancellationToken);
+
     Task SaveAsync(
         CardTerminalConfiguration configuration,
         string? squareAccessToken,
@@ -517,8 +524,11 @@ public sealed class ConfiguredCardTerminalClient :
     IInstallmentTerminalRecoveryClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly TimeSpan SquarePollInterval = TimeSpan.FromSeconds(2);
+    // 轮询等顾客刷卡的间隔。Hbpos API 在新加坡，门店往返约 0.3 秒；间隔越长，顾客刷完到收银机确认的平均滞后越长（约半个间隔）。
+    // 1 秒对 Square 与 Hbpos API 的请求量都可忽略（每台收银机同时最多一笔在等），比原 2 秒平均快约 0.5 秒。
+    private static readonly TimeSpan SquarePollInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan SquareCleanupTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SquareWarmUpTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan SquareApprovedSettleInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>
@@ -600,6 +610,34 @@ public sealed class ConfiguredCardTerminalClient :
         _squarePaymentAttemptRepository = squarePaymentAttemptRepository;
         _linklyPaymentAttemptContextAccessor = linklyPaymentAttemptContextAccessor;
         _linklyTerminalSelectionTransitionGate = linklyTerminalSelectionTransitionGate;
+    }
+
+    /// <summary>
+    /// 进付款页时提前把到 Hbpos API 的 TCP + TLS 连接建好（Square 处理器才做）。
+    /// 门店到新加坡往返约 0.3 秒，建连要约 3 个往返（约 0.6~0.9 秒）；提前建好后，第一笔创建结账能直接复用连接。
+    /// 用的是和创建结账同一个 HttpClient（同一个连接池），尽力而为：任何失败都吞掉，不影响收款。
+    /// </summary>
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var settings = await _settingsProvider.GetSettingsAsync(cancellationToken);
+            if (settings.Processor != CardProcessorKind.Square)
+            {
+                return;
+            }
+
+            using var warmUpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            warmUpCts.CancelAfter(SquareWarmUpTimeout);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "api/v1/health");
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, warmUpCts.Token);
+            LogSquare($"connection warm-up completed http={(int)response.StatusCode}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or InvalidOperationException)
+        {
+            // 预热只是优化：网络差时本来就会失败，真正收款时会走正常的重试与提示。
+            LogSquare($"connection warm-up skipped reason={ex.GetType().Name}");
+        }
     }
 
     public async Task<PaymentAuthorizationResult> AuthorizeAsync(

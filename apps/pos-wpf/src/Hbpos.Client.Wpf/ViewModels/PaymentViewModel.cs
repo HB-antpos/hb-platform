@@ -338,6 +338,24 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         return cancellationTask;
     }
 
+    /// <summary>
+    /// 后台提前建好刷卡终端到后端的连接，不等待、不影响界面；客户端内部已吞掉网络类失败，这里再兜住其它意外，避免未观察的任务异常。
+    /// </summary>
+    private void StartCardTerminalWarmUp()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _workflowService.WarmUpCardTerminalAsync();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                ConsoleLog.Write("Payment", $"card terminal warm-up skipped error={ex.GetType().Name}");
+            }
+        });
+    }
+
     public async Task RefreshLinklyCloudTerminalsAsync()
     {
         if (!IsIntegratedCardPaymentVisible || !_paymentMethodSettingsReady ||
@@ -352,7 +370,14 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         RaiseLinklyCloudTerminalProperties();
         try
         {
-            var configuration = await _cardTerminalSetupService.LoadConfigurationAsync();
+            // 中文注释：这里只用处理器 / 环境 / Linkly 模式，不读「令牌是否已配置」；
+            // 用不联网的版本，免得每次进付款页都多等一次到新加坡的往返（约 0.9 秒）才放行刷卡。
+            var configuration = await _cardTerminalSetupService.LoadConfigurationWithoutTokenStatusAsync();
+            if (configuration.Processor == CardProcessorKind.Square)
+            {
+                StartCardTerminalWarmUp();
+            }
+
             var isCloudBackendConfigured =
                 CardTerminalSettings.NormalizeLinklyConnectionMode(configuration.LinklyConnectionMode) ==
                 LinklyConnectionMode.CloudBackendAsync;
@@ -460,7 +485,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         IsLinklyCloudTerminalRefreshing = true;
         try
         {
-            var configuration = await _cardTerminalSetupService.LoadConfigurationAsync();
+            var configuration = await _cardTerminalSetupService.LoadConfigurationWithoutTokenStatusAsync();
             var selection = await _cardTerminalSetupService.SelectLinklyCloudBackendTerminalAsync(
                 configuration.Environment,
                 terminal.TerminalId,

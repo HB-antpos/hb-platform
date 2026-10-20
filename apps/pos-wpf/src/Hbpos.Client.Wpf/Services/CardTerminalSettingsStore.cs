@@ -32,6 +32,12 @@ public sealed class CardTerminalSettingsStore(
         return LoadConfigurationAsync(includeSquareTokenStatus: true, cancellationToken);
     }
 
+    // 付款页只要处理器 / 环境 / Linkly 模式，不需要「后端是否已配置令牌」，省掉一次到新加坡的往返（约 0.9 秒）。
+    public Task<CardTerminalConfiguration> LoadWithoutTokenStatusAsync(CancellationToken cancellationToken = default)
+    {
+        return LoadConfigurationAsync(includeSquareTokenStatus: false, cancellationToken);
+    }
+
     private async Task<CardTerminalConfiguration> LoadConfigurationAsync(
         bool includeSquareTokenStatus,
         CancellationToken cancellationToken)
