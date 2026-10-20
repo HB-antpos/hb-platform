@@ -791,8 +791,9 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             ? "===== TAX INVOICE ====="
             : receipt.DocumentTitle.Trim(), ReceiptPrintAlignment.Center);
         builder.Blank();
+        // 中文注释：未显式指定状态时，按净额判断——退款单（净额为负）打印 Refund，其余才是 Paid。
         var statusText = string.IsNullOrWhiteSpace(receipt.StatusText)
-            ? "*** Paid ***"
+            ? (receipt.ActualAmount < 0m ? "*** Refund ***" : "*** Paid ***")
             : receipt.StatusText.Trim();
         if (!string.IsNullOrWhiteSpace(statusText))
         {
